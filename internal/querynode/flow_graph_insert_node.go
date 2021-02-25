@@ -26,7 +26,7 @@ func (iNode *insertNode) Name() string {
 	return "iNode"
 }
 
-func (iNode *insertNode) Operate(in []*Msg) []*Msg {
+func (iNode *insertNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
 	// fmt.Println("Do insertNode operation")
 
 	if len(in) != 1 {
@@ -34,7 +34,7 @@ func (iNode *insertNode) Operate(in []*Msg) []*Msg {
 		// TODO: add error handling
 	}
 
-	iMsg, ok := (*in[0]).(*insertMsg)
+	iMsg, ok := in[0].(*insertMsg)
 	if !ok {
 		log.Println("type assertion failed for insertMsg")
 		// TODO: add error handling
@@ -90,7 +90,7 @@ func (iNode *insertNode) Operate(in []*Msg) []*Msg {
 		gcRecord:  iMsg.gcRecord,
 		timeRange: iMsg.timeRange,
 	}
-	return []*Msg{&res}
+	return []Msg{res}, ctx
 }
 
 func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *sync.WaitGroup) {

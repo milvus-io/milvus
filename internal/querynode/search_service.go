@@ -121,7 +121,7 @@ func (ss *searchService) receiveSearchMsg() {
 		case <-ss.ctx.Done():
 			return
 		default:
-			msgPack := ss.searchMsgStream.Consume()
+			msgPack, _ := ss.searchMsgStream.Consume()
 			if msgPack == nil || len(msgPack.Msgs) <= 0 {
 				continue
 			}

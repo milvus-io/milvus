@@ -1,0 +1,53 @@
+[
+    {
+        "server": "apollo",
+        "suite_params": [
+            {
+                "suite": "cpu_accuracy_ann.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    },
+    {
+        "server": "poseidon",
+        "suite_params": [
+            {
+                "suite": "gpu_search_performance.yaml",
+                "image_type": "gpu"
+            },
+            {
+                "suite": "cpu_search_performance.yaml",
+                "image_type": "cpu"
+            },
+            {
+                "suite": "insert_performance.yaml",
+                "image_type": "gpu"
+            },
+            {
+                "suite": "gpu_accuracy.yaml",
+                "image_type": "gpu"
+            }
+        ]
+    },
+    {
+        "server": "eros",
+        "suite_params": [
+            {
+                "suite": "gpu_accuracy_ann.yaml",
+                "image_type": "gpu"
+            },
+            {
+                "suite": "gpu_search_stability.yaml",
+                "image_type": "gpu"
+            },
+            {
+                "suite": "gpu_build_performance.yaml",
+                "image_type": "gpu"
+            },
+            {
+                "suite": "cpu_build_performance.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+]

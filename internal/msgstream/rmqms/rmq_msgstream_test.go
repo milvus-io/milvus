@@ -239,7 +239,7 @@ func initRmqTtStream(producerChannels []string,
 func receiveMsg(outputStream msgstream.MsgStream, msgCount int) {
 	receiveCount := 0
 	for {
-		result := outputStream.Consume()
+		result, _ := outputStream.Consume()
 		if len(result.Msgs) > 0 {
 			msgs := result.Msgs
 			for _, v := range msgs {

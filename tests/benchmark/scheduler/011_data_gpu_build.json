@@ -1,0 +1,11 @@
+[
+  {
+        "server": "eros",
+        "suite_params": [
+            {
+                "suite": "011_gpu_build_sift10m.yaml",
+                "image_type": "gpu"
+            }
+        ]
+    }
+]

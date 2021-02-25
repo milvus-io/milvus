@@ -1,9 +1,13 @@
 package flowgraph
 
 import (
+	"context"
 	"log"
 
+	"github.com/opentracing/opentracing-go"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
 
 type InputNode struct {
@@ -25,15 +29,19 @@ func (inNode *InputNode) InStream() *msgstream.MsgStream {
 }
 
 // empty input and return one *Msg
-func (inNode *InputNode) Operate([]*Msg) []*Msg {
+func (inNode *InputNode) Operate(ctx context.Context, msgs []Msg) ([]Msg, context.Context) {
 	//fmt.Println("Do InputNode operation")
 
-	msgPack := (*inNode.inStream).Consume()
+	msgPack, ctx := (*inNode.inStream).Consume()
+
+	sp, ctx := trace.StartSpanFromContext(ctx, opentracing.Tag{Key: "NodeName", Value: inNode.Name()})
+	defer sp.Finish()
 
 	// TODO: add status
 	if msgPack == nil {
 		log.Println("null msg pack")
-		return nil
+		trace.LogError(sp, errors.New("null msg pack"))
+		return nil, ctx
 	}
 
 	var msgStreamMsg Msg = &MsgStreamMsg{
@@ -43,7 +51,7 @@ func (inNode *InputNode) Operate([]*Msg) []*Msg {
 		startPositions: msgPack.StartPositions,
 	}
 
-	return []*Msg{&msgStreamMsg}
+	return []Msg{msgStreamMsg}, ctx
 }
 
 func NewInputNode(inStream *msgstream.MsgStream, nodeName string, maxQueueLength int32, maxParallelism int32) *InputNode {

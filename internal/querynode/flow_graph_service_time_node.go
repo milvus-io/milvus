@@ -19,7 +19,7 @@ func (stNode *serviceTimeNode) Name() string {
 	return "stNode"
 }
 
-func (stNode *serviceTimeNode) Operate(in []*Msg) []*Msg {
+func (stNode *serviceTimeNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
 	//fmt.Println("Do serviceTimeNode operation")
 
 	if len(in) != 1 {
@@ -27,7 +27,7 @@ func (stNode *serviceTimeNode) Operate(in []*Msg) []*Msg {
 		// TODO: add error handling
 	}
 
-	serviceTimeMsg, ok := (*in[0]).(*serviceTimeMsg)
+	serviceTimeMsg, ok := in[0].(*serviceTimeMsg)
 	if !ok {
 		log.Println("type assertion failed for serviceTimeMsg")
 		// TODO: add error handling
@@ -45,7 +45,7 @@ func (stNode *serviceTimeNode) Operate(in []*Msg) []*Msg {
 		gcRecord:  serviceTimeMsg.gcRecord,
 		timeRange: serviceTimeMsg.timeRange,
 	}
-	return []*Msg{&res}
+	return []Msg{res}, ctx
 }
 
 func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {

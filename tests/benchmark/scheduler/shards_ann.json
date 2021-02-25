@@ -1,0 +1,10 @@
+[
+    {
+        "suite_params": [
+            {
+                "suite": "shards_ann_debug.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+]

@@ -329,7 +329,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 			return
 		default:
 		}
-		msgPack := statsStream.Consume()
+		msgPack, _ := statsStream.Consume()
 		for _, msg := range msgPack.Msgs {
 			statistics, ok := msg.(*msgstream.SegmentStatisticsMsg)
 			if !ok {
@@ -358,7 +358,7 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 			return
 		default:
 		}
-		msgPack := flushStream.Consume()
+		msgPack, _ := flushStream.Consume()
 		for _, msg := range msgPack.Msgs {
 			if msg.Type() != commonpb.MsgType_kSegmentFlushDone {
 				continue
@@ -393,7 +393,7 @@ func (s *Server) startDDChannel(ctx context.Context) {
 			return
 		default:
 		}
-		msgPack := ddStream.Consume()
+		msgPack, _ := ddStream.Consume()
 		for _, msg := range msgPack.Msgs {
 			if err := s.ddHandler.HandleDDMsg(msg); err != nil {
 				log.Error("handle dd msg error", zap.Error(err))

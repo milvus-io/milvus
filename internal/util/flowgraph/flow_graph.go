@@ -13,11 +13,11 @@ type TimeTickedFlowGraph struct {
 	nodeCtx map[NodeName]*nodeCtx
 }
 
-func (fg *TimeTickedFlowGraph) AddNode(node *Node) {
-	nodeName := (*node).Name()
+func (fg *TimeTickedFlowGraph) AddNode(node Node) {
+	nodeName := node.Name()
 	nodeCtx := nodeCtx{
 		node:                   node,
-		inputChannels:          make([]chan *Msg, 0),
+		inputChannels:          make([]chan *MsgWithCtx, 0),
 		downstreamInputChanIdx: make(map[string]int),
 	}
 	fg.nodeCtx[nodeName] = &nodeCtx
@@ -50,8 +50,8 @@ func (fg *TimeTickedFlowGraph) SetEdges(nodeName string, in []string, out []stri
 			errMsg := "Cannot find out node:" + n
 			return errors.New(errMsg)
 		}
-		maxQueueLength := (*outNode.node).MaxQueueLength()
-		outNode.inputChannels = append(outNode.inputChannels, make(chan *Msg, maxQueueLength))
+		maxQueueLength := outNode.node.MaxQueueLength()
+		outNode.inputChannels = append(outNode.inputChannels, make(chan *MsgWithCtx, maxQueueLength))
 		currentNode.downstream[i] = outNode
 	}
 
@@ -70,8 +70,8 @@ func (fg *TimeTickedFlowGraph) Start() {
 func (fg *TimeTickedFlowGraph) Close() {
 	for _, v := range fg.nodeCtx {
 		// close message stream
-		if (*v.node).IsInputNode() {
-			inStream, ok := (*v.node).(*InputNode)
+		if v.node.IsInputNode() {
+			inStream, ok := v.node.(*InputNode)
 			if !ok {
 				log.Fatal("Invalid inputNode")
 			}

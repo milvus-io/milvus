@@ -219,18 +219,18 @@ func (ms *RmqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) error {
 	return nil
 }
 
-func (ms *RmqMsgStream) Consume() *msgstream.MsgPack {
+func (ms *RmqMsgStream) Consume() (*msgstream.MsgPack, context.Context) {
 	for {
 		select {
 		case cm, ok := <-ms.receiveBuf:
 			if !ok {
 				log.Println("buf chan closed")
-				return nil
+				return nil, nil
 			}
-			return cm
+			return cm, nil
 		case <-ms.ctx.Done():
 			log.Printf("context closed")
-			return nil
+			return nil, nil
 		}
 	}
 }

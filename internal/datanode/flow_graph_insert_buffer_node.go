@@ -85,7 +85,7 @@ func (ibNode *insertBufferNode) Name() string {
 	return "ibNode"
 }
 
-func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
+func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
 	// log.Println("=========== insert buffer Node Operating")
 
 	if len(in) != 1 {
@@ -93,7 +93,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 		// TODO: add error handling
 	}
 
-	iMsg, ok := (*in[0]).(*insertMsg)
+	iMsg, ok := in[0].(*insertMsg)
 	if !ok {
 		log.Println("Error: type assertion failed for insertMsg")
 		// TODO: add error handling
@@ -472,7 +472,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 		timeRange: iMsg.timeRange,
 	}
 
-	return []*Msg{&res}
+	return []Msg{res}, ctx
 }
 
 func (ibNode *insertBufferNode) flushSegment(segID UniqueID, partitionID UniqueID, collID UniqueID) error {

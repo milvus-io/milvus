@@ -16,7 +16,7 @@ import (
 
 func StartSpanFromContext(ctx context.Context, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	if ctx == nil {
-		panic("StartSpanFromContext called with nil context")
+		return noopSpan(), ctx
 	}
 
 	var pcs [1]uintptr
@@ -45,7 +45,7 @@ func StartSpanFromContext(ctx context.Context, opts ...opentracing.StartSpanOpti
 
 func StartSpanFromContextWithOperationName(ctx context.Context, operationName string, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	if ctx == nil {
-		panic("StartSpanFromContextWithOperationName called with nil context")
+		return noopSpan(), ctx
 	}
 
 	var pcs [1]uintptr
@@ -109,9 +109,9 @@ func InjectContextToPulsarMsgProperties(sc opentracing.SpanContext, properties m
 	tracer.Inject(sc, opentracing.TextMap, propertiesReaderWriter{properties})
 }
 
-func ExtractFromPulsarMsgProperties(msg msgstream.TsMsg, properties map[string]string) opentracing.Span {
+func ExtractFromPulsarMsgProperties(msg msgstream.TsMsg, properties map[string]string) (opentracing.Span, bool) {
 	if !allowTrace(msg) {
-		return noopSpan()
+		return noopSpan(), false
 	}
 	tracer := opentracing.GlobalTracer()
 	sc, _ := tracer.Extract(opentracing.TextMap, propertiesReaderWriter{properties})
@@ -124,21 +124,42 @@ func ExtractFromPulsarMsgProperties(msg msgstream.TsMsg, properties map[string]s
 			"HashKeys": msg.HashKeys(),
 			"Position": msg.Position(),
 		}}
-	return opentracing.StartSpan(name, opts...)
+	return opentracing.StartSpan(name, opts...), true
 }
 
 func MsgSpanFromCtx(ctx context.Context, msg msgstream.TsMsg, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
+	if ctx == nil {
+		return noopSpan(), ctx
+	}
 	if !allowTrace(msg) {
 		return noopSpan(), ctx
 	}
-	name := "send pulsar msg"
+	operationName := "send pulsar msg"
 	opts = append(opts, opentracing.Tags{
 		"ID":       msg.ID(),
 		"Type":     msg.Type(),
 		"HashKeys": msg.HashKeys(),
 		"Position": msg.Position(),
 	})
-	return StartSpanFromContextWithOperationName(ctx, name, opts...)
+
+	var pcs [1]uintptr
+	n := runtime.Callers(2, pcs[:])
+	if n < 1 {
+		span, ctx := opentracing.StartSpanFromContext(ctx, operationName, opts...)
+		span.LogFields(log.Error(errors.New("runtime.Callers failed")))
+		return span, ctx
+	}
+	file, line := runtime.FuncForPC(pcs[0]).FileLine(pcs[0])
+
+	if parentSpan := opentracing.SpanFromContext(ctx); parentSpan != nil {
+		opts = append(opts, opentracing.ChildOf(parentSpan.Context()))
+	}
+	span := opentracing.StartSpan(operationName, opts...)
+	ctx = opentracing.ContextWithSpan(ctx, span)
+
+	span.LogFields(log.String("filename", file), log.Int("line", line))
+
+	return span, ctx
 }
 
 type propertiesReaderWriter struct {
