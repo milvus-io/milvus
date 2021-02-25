@@ -1,0 +1,7 @@
+# Each line is a component followed by one or more owners. 
+
+*                        @GuoRentong
+/build/                  @jeffoverflow
+/.jenkins/modules/       @jeffoverflow
+/githooks/               @jeffoverflow
+/deployments/            @jeffoverflow
