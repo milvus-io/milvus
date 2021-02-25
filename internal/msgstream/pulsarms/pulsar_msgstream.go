@@ -128,7 +128,7 @@ func (ms *PulsarMsgStream) AsConsumer(channels []string,
 				Topic:                       channels[i],
 				SubscriptionName:            subName,
 				Type:                        pulsar.KeyShared,
-				SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
+				SubscriptionInitialPosition: pulsar.SubscriptionPositionLatest,
 				MessageChannel:              receiveChannel,
 			})
 			if err != nil {
@@ -521,7 +521,7 @@ func (ms *PulsarTtMsgStream) AsConsumer(channels []string,
 				Topic:                       channels[i],
 				SubscriptionName:            subName,
 				Type:                        pulsar.KeyShared,
-				SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
+				SubscriptionInitialPosition: pulsar.SubscriptionPositionLatest,
 				MessageChannel:              receiveChannel,
 			})
 			if err != nil {

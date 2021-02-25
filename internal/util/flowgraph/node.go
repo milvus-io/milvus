@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strconv"
 	"sync"
-
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"time"
 )
 
 type Node interface {
@@ -115,14 +113,32 @@ func (nodeCtx *nodeCtx) collectInputMessages() {
 
 	// timeTick alignment check
 	if len(nodeCtx.inputMessages) > 1 {
-		time := (*nodeCtx.inputMessages[0]).TimeTick()
+		t := (*nodeCtx.inputMessages[0]).TimeTick()
+		latestTime := t
 		for i := 1; i < len(nodeCtx.inputMessages); i++ {
-			if time != (*nodeCtx.inputMessages[i]).TimeTick() {
-				err := errors.New("Fatal, misaligned time tick," +
-					"t1=" + strconv.FormatUint(time, 10) +
-					", t2=" + strconv.FormatUint((*nodeCtx.inputMessages[i]).TimeTick(), 10) +
-					", please restart pulsar")
-				panic(err)
+			if t < (*nodeCtx.inputMessages[i]).TimeTick() {
+				latestTime = (*nodeCtx.inputMessages[i]).TimeTick()
+				//err := errors.New("Fatal, misaligned time tick," +
+				//	"t1=" + strconv.FormatUint(time, 10) +
+				//	", t2=" + strconv.FormatUint((*nodeCtx.inputMessages[i]).TimeTick(), 10) +
+				//	", please restart pulsar")
+				//panic(err)
+			}
+		}
+		// wait for time tick
+		for i := 0; i < len(nodeCtx.inputMessages); i++ {
+			for (*nodeCtx.inputMessages[i]).TimeTick() != latestTime {
+				channel := nodeCtx.inputChannels[i]
+				select {
+				case <-time.After(10 * time.Second):
+					panic("cannot find time tick in flow graph")
+				case msg, ok := <-channel:
+					if !ok {
+						log.Println("input channel closed")
+						return
+					}
+					nodeCtx.inputMessages[i] = msg
+				}
 			}
 		}
 	}
