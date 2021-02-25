@@ -54,12 +54,14 @@ func newRmqMsgStream(ctx context.Context, receiveBufSize int64, rmqBufSize int64
 	receiveBuf := make(chan *msgstream.MsgPack, receiveBufSize)
 	consumerChannels := make([]string, 0)
 	consumerReflects := make([]reflect.SelectCase, 0)
+	consumers := make([]rocksmq.Consumer, 0)
 	stream := &RmqMsgStream{
 		ctx:              streamCtx,
 		receiveBuf:       receiveBuf,
 		unmarshal:        unmarshal,
 		streamCancel:     streamCancel,
 		rmqBufSize:       rmqBufSize,
+		consumers:        consumers,
 		consumerChannels: consumerChannels,
 		consumerReflects: consumerReflects,
 		consumerLock:     &sync.Mutex{},
