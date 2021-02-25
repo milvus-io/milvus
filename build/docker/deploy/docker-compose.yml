@@ -2,41 +2,47 @@ version: '3.5'
 
 services:
   master:
-    image: ${TARGET_REPO}/master:${TARGET_TAG}
+    image: ${TARGET_REPO}/milvus-distributed:${TARGET_TAG}
     build:
       context: ../../../
-      dockerfile: build/docker/deploy/masterservice/Dockerfile
+      dockerfile: build/docker/deploy/distributed/Dockerfile
       cache_from:
-        - ${SOURCE_REPO}/master:${SOURCE_TAG}
-    environment: 
+        - ${SOURCE_REPO}/milvus-distributed:${SOURCE_TAG}
+    command:
+      - "/milvus-distributed/bin/masterservice"
+    environment:
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       ETCD_ADDRESS: ${ETCD_ADDRESS}
       INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
       DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
       QUERY_SERVICE_ADDRESS: ${QUERY_SERVICE_ADDRESS}
       PROXY_SERVICE_ADDRESS: ${PROXY_SERVICE_ADDRESS}
-    networks: 
+    networks:
       - milvus
 
   proxyservice:
-    image: ${TARGET_REPO}/proxyservice:${TARGET_TAG}
+    image: ${TARGET_REPO}/milvus-distributed:${TARGET_TAG}
     build:
       context: ../../../
-      dockerfile: build/docker/deploy/proxyservice/Dockerfile
+      dockerfile: build/docker/deploy/distributed/Dockerfile
       cache_from:
-        - ${SOURCE_REPO}/proxyservice:${SOURCE_TAG}
+        - ${SOURCE_REPO}/milvus-distributed:${SOURCE_TAG}
+    command: 
+      - "/milvus-distributed/bin/proxyservice"
     environment: 
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
     networks:
       - milvus
 
   proxynode:
-    image: ${TARGET_REPO}/proxynode:${TARGET_TAG}
+    image: ${TARGET_REPO}/milvus-distributed:${TARGET_TAG}
     build:
       context: ../../../
-      dockerfile: build/docker/deploy/proxynode/Dockerfile
+      dockerfile: build/docker/deploy/distributed/Dockerfile
       cache_from:
-        - ${SOURCE_REPO}/proxynode:${SOURCE_TAG}
+        - ${SOURCE_REPO}/milvus-distributed:${SOURCE_TAG}
+    command: 
+      - "/milvus-distributed/bin/proxynode"
     environment: 
       ETCD_ADDRESS: ${ETCD_ADDRESS}
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
@@ -46,30 +52,35 @@ services:
       INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
       DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
       QUERY_SERVICE_ADDRESS: ${QUERY_SERVICE_ADDRESS}
-
+    depends_on:
+      - "proxyservice"
     networks:
       - milvus
 
   queryservice:
-    image: ${TARGET_REPO}/queryservice:${TARGET_TAG}
+    image: ${TARGET_REPO}/milvus-distributed:${TARGET_TAG}
     build:
       context: ../../../
-      dockerfile: build/docker/deploy/queryservice/Dockerfile
+      dockerfile: build/docker/deploy/distributed/Dockerfile
       cache_from:
-        - ${SOURCE_REPO}/queryservice:${SOURCE_TAG}
+        - ${SOURCE_REPO}/milvus-distributed:${SOURCE_TAG}
+    command: 
+      - "/milvus-distributed/bin/queryservice"
     environment:
       MASTER_ADDRESS: ${MASTER_ADDRESS}
       DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
     networks:
       - milvus
 
-  querynode1:
-    image: ${TARGET_REPO}/querynode:${TARGET_TAG}
+  querynode:
+    image: ${TARGET_REPO}/milvus-distributed:${TARGET_TAG}
     build:
       context: ../../../
-      dockerfile: build/docker/deploy/querynode/Dockerfile
+      dockerfile: build/docker/deploy/distributed/Dockerfile
       cache_from:
-        - ${SOURCE_REPO}/querynode:${SOURCE_TAG}
+        - ${SOURCE_REPO}/milvus-distributed:${SOURCE_TAG}
+    command: 
+      -  "/milvus-distributed/bin/querynode"
     environment: 
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       MASTER_ADDRESS: ${MASTER_ADDRESS}
@@ -77,54 +88,20 @@ services:
       DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
       INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
       QUERY_SERVICE_ADDRESS: ${QUERY_SERVICE_ADDRESS}
-#      QUERY_NODE_HOST: ${QUERY_NODE_HOST1}
-    networks:
-      - milvus
-
-  querynode2:
-    image: ${TARGET_REPO}/querynode:${TARGET_TAG}
-    build:
-      context: ../../../
-      dockerfile: build/docker/deploy/querynode/Dockerfile
-      cache_from:
-        - ${SOURCE_REPO}/querynode:${SOURCE_TAG}
-    environment:
-      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
-      MASTER_ADDRESS: ${MASTER_ADDRESS}
-      MINIO_ADDRESS: ${MINIO_ADDRESS}
-      DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
-      INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
-      QUERY_SERVICE_ADDRESS: ${QUERY_SERVICE_ADDRESS}
-#      QUERY_NODE_HOST: ${QUERY_NODE_HOST2}
-    networks:
-      - milvus
-
-  datanode:
-    image: ${TARGET_REPO}/datanode:${TARGET_TAG}
-    build:
-      context: ../../../
-      dockerfile: build/docker/deploy/datanode/Dockerfile
-      cache_from:
-        - ${SOURCE_REPO}/datanode:${SOURCE_TAG}
-    environment: 
-      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
-      ETCD_ADDRESS: ${ETCD_ADDRESS}
-      MASTER_ADDRESS: ${MASTER_ADDRESS}
-      MINIO_ADDRESS: ${MINIO_ADDRESS}
-      DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
-#      DATA_NODE_HOST: ${DATA_NODE_HOST}
     depends_on:
-      - "dataservice"
+      - "queryservice"
     networks:
       - milvus
 
   indexservice:
-    image: ${TARGET_REPO}/indexservice:${TARGET_TAG}
+    image: ${TARGET_REPO}/milvus-distributed:${TARGET_TAG}
     build:
       context: ../../../
-      dockerfile: build/docker/deploy/indexservice/Dockerfile
+      dockerfile: build/docker/deploy/distributed/Dockerfile
       cache_from:
-        - ${SOURCE_REPO}/indexservice:${SOURCE_TAG}
+        - ${SOURCE_REPO}/milvus-distributed:${SOURCE_TAG}
+    command: 
+      - "/milvus-distributed/bin/indexservice"
     environment:
       MASTER_ADDRESS: ${MASTER_ADDRESS}
       ETCD_ADDRESS: ${ETCD_ADDRESS}
@@ -133,12 +110,14 @@ services:
       - milvus
 
   indexnode:
-    image: ${TARGET_REPO}/indexnode:${TARGET_TAG}
+    image: ${TARGET_REPO}/milvus-distributed:${TARGET_TAG}
     build:
       context: ../../../
-      dockerfile: build/docker/deploy/indexnode/Dockerfile
+      dockerfile: build/docker/deploy/distributed/Dockerfile
       cache_from:
-        - ${SOURCE_REPO}/indexnode:${SOURCE_TAG}
+        - ${SOURCE_REPO}/milvus-distributed:${SOURCE_TAG}
+    command: 
+      - "/milvus-distributed/bin/indexnode"
     environment:
       INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
       MINIO_ADDRESS: ${MINIO_ADDRESS}
@@ -149,12 +128,14 @@ services:
       - milvus
 
   dataservice:
-    image: ${TARGET_REPO}/dataservice:${TARGET_TAG}
+    image: ${TARGET_REPO}/milvus-distributed:${TARGET_TAG}
     build:
       context: ../../../
-      dockerfile: build/docker/deploy/dataservice/Dockerfile
+      dockerfile: build/docker/deploy/distributed/Dockerfile
       cache_from:
-        - ${SOURCE_REPO}/dataservice:${SOURCE_TAG}
+        - ${SOURCE_REPO}/milvus-distributed:${SOURCE_TAG}
+    command: 
+      - "/milvus-distributed/bin/dataservice"
     environment:
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       ETCD_ADDRESS: ${ETCD_ADDRESS}
@@ -163,6 +144,25 @@ services:
     networks:
       - milvus
 
+  datanode:
+    image: ${TARGET_REPO}/milvus-distributed:${TARGET_TAG}
+    build:
+      context: ../../../
+      dockerfile: build/docker/deploy/distributed/Dockerfile
+      cache_from:
+        - ${SOURCE_REPO}/milvus-distributed:${SOURCE_TAG}
+    command: 
+      - "/milvus-distributed/bin/datanode"
+    environment: 
+      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
+      ETCD_ADDRESS: ${ETCD_ADDRESS}
+      MASTER_ADDRESS: ${MASTER_ADDRESS}
+      MINIO_ADDRESS: ${MINIO_ADDRESS}
+      DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
+    depends_on:
+      - "dataservice"
+    networks:
+      - milvus
 
 networks:
   milvus:
