@@ -4,6 +4,7 @@ Please mark all change in change log and use the issue from GitHub
 
 # Milvus 1.0.0-beta (TBD)
 ## Bug
+-   \#4739 Fix mishards probe test problem
 
 ## Feature
 -   \#3977 Support logging to stdout
