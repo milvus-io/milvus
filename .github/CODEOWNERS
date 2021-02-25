@@ -1,7 +1,33 @@
 # Each line is a component followed by one or more owners. 
 
-*                        @GuoRentong
-/build/                  @jeffoverflow
+*                        @GuoRentong @neza2017 @csz007
+/.github/workflows/      @jeffoverflow
 /.jenkins/modules/       @jeffoverflow
-/githooks/               @jeffoverflow
+/build/                  @jeffoverflow
+/cmd/                    @csz007 @scsven
 /deployments/            @jeffoverflow
+/docs/                   @GuoRentong
+/githooks/               @jeffoverflow
+/internal/*              @csz007
+/internal/core/          @GuoRentong @shengjun1985
+/internal/datanode/      @sunby
+/internal/dataservice/   @sunby
+/internal/distributed/*  @csz007 @neza2017
+/internal/distributed/datanode/       @sunby
+/internal/distributed/dataservice/    @sunby 
+/internal/distributed/indexnode/      @csz007
+/internal/distributed/indexservice/   @csz007
+/internal/distributed/masterservice/  @neza2017
+/internal/distributed/proxynode/      @csz007
+/internal/distributed/proxyservice/   @csz007
+/internal/distributed/querynode/      @xige-16
+/internal/distributed/queryservice/   @xige-16
+/internal/kv/            @csz007 @scsven
+/internal/log/           @sunby
+/internal/masterservice/ @neza2017
+/internal/msgstream/     @xige-16 @scsven
+/internal/querynode/     @xige-16
+/internal/queryservice/  @xige-16
+/internal/storage/       @neza2017 @sunby
+/internal/util/          @neza2017 @csz007 @xige-16 @scsven
+/tests/                  @test-team
