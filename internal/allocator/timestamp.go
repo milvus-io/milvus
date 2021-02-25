@@ -2,16 +2,15 @@ package allocator
 
 import (
 	"context"
-
-	"github.com/zilliztech/milvus-distributed/internal/util/retry"
-	"google.golang.org/grpc"
-
 	"log"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"google.golang.org/grpc"
 )
 
 type Timestamp = typeutil.Timestamp
@@ -148,7 +147,7 @@ func (ta *TimestampAllocator) Alloc(count uint32) ([]Timestamp, error) {
 	req.Wait()
 
 	if !req.IsValid() {
-		return nil, nil
+		return nil, errors.Errorf("alloc time stamp request failed")
 	}
 
 	start, count := req.timestamp, req.count
