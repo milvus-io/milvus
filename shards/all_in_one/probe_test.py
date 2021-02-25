@@ -6,15 +6,10 @@ ENDC = ''
 
 
 def test(host='127.0.0.1', port=19531):
-    client = Milvus()
     try:
-        status = client.connect(host=host, port=port)
-        if status.OK():
-            print('{}Pass: Connected{}'.format(GREEN, ENDC))
-            return 0
-        else:
-            print('{}Error: {}{}'.format(RED, status, ENDC))
-            return 1
+        client = Milvus(host=host, port=port)
+        print('{}Pass: Connected{}'.format(GREEN, ENDC))
+        return 0
     except Exception as exc:
         print('{}Error: {}{}'.format(RED, exc, ENDC))
         return 1
