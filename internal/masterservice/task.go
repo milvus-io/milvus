@@ -288,10 +288,21 @@ func (t *DescribeCollectionReqTask) IgnoreTimeStamp() bool {
 }
 
 func (t *DescribeCollectionReqTask) Execute() error {
-	coll, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
-	if err != nil {
-		return err
+	var coll *etcdpb.CollectionInfo
+	var err error
+
+	if t.Req.CollectionName != "" {
+		coll, err = t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
+		if err != nil {
+			return err
+		}
+	} else {
+		coll, err = t.core.MetaTable.GetCollectionByID(t.Req.CollectionID)
+		if err != nil {
+			return err
+		}
 	}
+
 	t.Rsp.Schema = proto.Clone(coll.Schema).(*schemapb.CollectionSchema)
 	t.Rsp.CollectionID = coll.ID
 	var newField []*schemapb.FieldSchema
