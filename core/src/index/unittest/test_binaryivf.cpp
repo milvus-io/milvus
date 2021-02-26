@@ -74,6 +74,7 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
     auto result = index_->Query(query_dataset, conf);
     AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
     // PrintResult(result, nq, k);
+    ReleaseQueryResult(result);
 
     faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(nb);
     for (int64_t i = 0; i < nq; ++i) {
@@ -83,6 +84,7 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
 
     auto result2 = index_->Query(query_dataset, conf);
     AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
+    ReleaseQueryResult(result2);
 
 #if 0
     auto result3 = index_->QueryById(id_dataset, conf);
@@ -147,5 +149,6 @@ TEST_P(BinaryIVFTest, binaryivf_serialize) {
         auto result = index_->Query(query_dataset, conf);
         AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
         // PrintResult(result, nq, k);
+        ReleaseQueryResult(result);
     }
 }

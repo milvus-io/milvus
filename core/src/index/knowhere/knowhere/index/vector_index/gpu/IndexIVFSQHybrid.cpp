@@ -51,6 +51,7 @@ IVFSQHybrid::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         gpu_mode_ = 2;
         index_mode_ = IndexMode::MODE_GPU;
     } else {
+        delete build_index;
         KNOWHERE_THROW_MSG("Build IVFSQHybrid can't get gpu resource");
     }
 

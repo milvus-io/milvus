@@ -89,6 +89,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
     index_->BuildAll(base_dataset, train_conf);
     auto result = index_->Query(query_dataset, search_conf);
     AssertAnns(result, nq, k);
+    ReleaseQueryResult(result);
 
     auto binaryset = index_->Serialize();
     {
@@ -103,6 +104,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
     new_index_1->BuildAll(base_dataset, train_conf);
     auto new_result_1 = new_index_1->Query(query_dataset, search_conf);
     AssertAnns(new_result_1, nq, k);
+    ReleaseQueryResult(new_result_1);
 
     /* test NSG index load */
     auto new_index_2 = std::make_shared<milvus::knowhere::NSG>();
@@ -115,6 +117,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
 
     auto new_result_2 = new_index_2->Query(query_dataset, search_conf);
     AssertAnns(new_result_2, nq, k);
+    ReleaseQueryResult(new_result_2);
 
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);
@@ -143,18 +146,16 @@ TEST_F(NSGInterfaceTest, delete_test) {
 
     auto result = index_->Query(query_dataset, search_conf);
     AssertAnns(result, nq, k);
+    auto I_before = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
 
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);
 
+    // search xq with delete
     faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(nb);
     for (int i = 0; i < nq; i++) {
         bitset->set(i);
     }
-
-    auto I_before = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
-
-    // search xq with delete
     index_->SetBlacklist(bitset);
     auto result_after = index_->Query(query_dataset, search_conf);
     AssertAnns(result_after, nq, k, CheckMode::CHECK_NOT_EQUAL);
@@ -164,4 +165,7 @@ TEST_F(NSGInterfaceTest, delete_test) {
     for (int i = 0; i < nq; i++) {
         ASSERT_NE(I_before[i * k], I_after[i * k]);
     }
+
+    ReleaseQueryResult(result);
+    ReleaseQueryResult(result_after);
 }

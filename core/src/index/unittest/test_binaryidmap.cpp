@@ -64,6 +64,7 @@ TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
     auto result = index_->Query(query_dataset, conf);
     AssertAnns(result, nq, k);
     // PrintResult(result, nq, k);
+    ReleaseQueryResult(result);
 
     auto binaryset = index_->Serialize();
     auto new_index = std::make_shared<milvus::knowhere::BinaryIDMAP>();
@@ -71,6 +72,7 @@ TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
     auto result2 = new_index->Query(query_dataset, conf);
     AssertAnns(result2, nq, k);
     // PrintResult(re_result, nq, k);
+    ReleaseQueryResult(result2);
 
     faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(nb);
     for (int64_t i = 0; i < nq; ++i) {
@@ -80,6 +82,7 @@ TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
 
     auto result_bs_1 = index_->Query(query_dataset, conf);
     AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
+    ReleaseQueryResult(result_bs_1);
 
     // auto result4 = index_->SearchById(id_dataset, conf);
     // AssertAneq(result4, nq, k);
@@ -108,6 +111,7 @@ TEST_P(BinaryIDMAPTest, binaryidmap_serialize) {
         auto re_result = index_->Query(query_dataset, conf);
         AssertAnns(re_result, nq, k);
         //        PrintResult(re_result, nq, k);
+        ReleaseQueryResult(re_result);
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dim(), dim);
         auto binaryset = index_->Serialize();
@@ -127,5 +131,6 @@ TEST_P(BinaryIDMAPTest, binaryidmap_serialize) {
         auto result = index_->Query(query_dataset, conf);
         AssertAnns(result, nq, k);
         // PrintResult(result, nq, k);
+        ReleaseQueryResult(result);
     }
 }

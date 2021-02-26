@@ -5,6 +5,7 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 1.0.0-beta (TBD)
 ## Bug
 -   \#4739 Fix mishards probe test problem
+-   \#4749 Fix minor memory leak when building IVF_SQ8 on GPU
 
 ## Feature
 -   \#3977 Support logging to stdout
