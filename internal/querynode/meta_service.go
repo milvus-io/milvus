@@ -13,6 +13,7 @@ import (
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -30,11 +31,23 @@ type metaService struct {
 func newMetaService(ctx context.Context, replica collectionReplica) *metaService {
 	ETCDAddr := Params.ETCDAddress
 	MetaRootPath := Params.MetaRootPath
+	var cli *clientv3.Client
+	var err error
 
-	cli, _ := clientv3.New(clientv3.Config{
-		Endpoints:   []string{ETCDAddr},
-		DialTimeout: 5 * time.Second,
-	})
+	connectEtcdFn := func() error {
+		cli, err = clientv3.New(clientv3.Config{
+			Endpoints:   []string{ETCDAddr},
+			DialTimeout: 5 * time.Second,
+		})
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+	err = retry.Retry(200, time.Millisecond*200, connectEtcdFn)
+	if err != nil {
+		panic(err)
+	}
 
 	return &metaService{
 		ctx:     ctx,

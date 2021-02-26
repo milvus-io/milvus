@@ -16,11 +16,6 @@ func TestParamTable_Address(t *testing.T) {
 	fmt.Println(address)
 }
 
-func TestParamTable_MetaRootPath(t *testing.T) {
-	path := Params.MetaRootPath
-	assert.Equal(t, path, "by-dev/meta")
-}
-
 func TestParamTable_MinIOAddress(t *testing.T) {
 	address := Params.MinIOAddress
 	fmt.Println(address)

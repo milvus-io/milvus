@@ -2,11 +2,13 @@ package datanode
 
 import (
 	"context"
+	"time"
 
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 	"go.etcd.io/etcd/clientv3"
 
 	"go.uber.org/zap"
@@ -57,13 +59,21 @@ func (dsService *dataSyncService) close() {
 func (dsService *dataSyncService) initNodes() {
 	// TODO: add delete pipeline support
 	// New metaTable
-	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
-	if err != nil {
-		panic(err)
-	}
+	var mt *metaTable
+	connectEtcdFn := func() error {
+		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
+		if err != nil {
+			return err
+		}
 
-	etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
-	mt, err := NewMetaTable(etcdKV)
+		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+		mt, err = NewMetaTable(etcdKV)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+	err := retry.Retry(200, time.Millisecond*200, connectEtcdFn)
 	if err != nil {
 		panic(err)
 	}

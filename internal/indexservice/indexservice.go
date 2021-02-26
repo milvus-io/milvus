@@ -84,7 +84,7 @@ func (i *ServiceImpl) Init() error {
 		i.metaTable = metakv
 		return nil
 	}
-	err := retry.Retry(10, time.Millisecond*200, connectEtcdFn)
+	err := retry.Retry(200, time.Millisecond*200, connectEtcdFn)
 	if err != nil {
 		return err
 	}
@@ -101,23 +101,16 @@ func (i *ServiceImpl) Init() error {
 		return err
 	}
 
-	connectMinIOFn := func() error {
-		option := &miniokv.Option{
-			Address:           Params.MinIOAddress,
-			AccessKeyID:       Params.MinIOAccessKeyID,
-			SecretAccessKeyID: Params.MinIOSecretAccessKey,
-			UseSSL:            Params.MinIOUseSSL,
-			BucketName:        Params.MinioBucketName,
-			CreateBucket:      true,
-		}
-
-		i.kv, err = miniokv.NewMinIOKV(i.loopCtx, option)
-		if err != nil {
-			return err
-		}
-		return nil
+	option := &miniokv.Option{
+		Address:           Params.MinIOAddress,
+		AccessKeyID:       Params.MinIOAccessKeyID,
+		SecretAccessKeyID: Params.MinIOSecretAccessKey,
+		UseSSL:            Params.MinIOUseSSL,
+		BucketName:        Params.MinioBucketName,
+		CreateBucket:      true,
 	}
-	err = retry.Retry(10, time.Millisecond*200, connectMinIOFn)
+
+	i.kv, err = miniokv.NewMinIOKV(i.loopCtx, option)
 	if err != nil {
 		return err
 	}
