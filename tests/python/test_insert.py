@@ -831,7 +831,6 @@ class TestInsertMultiCollections:
             count = connect.count_entities(collection_name)
             assert count == default_nb
 
-    @pytest.mark.skip("r0.3-test")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_drop_collection_insert_vector_another(self, connect, collection):
         '''
