@@ -1295,7 +1295,7 @@ func (c *Core) DropIndex(in *milvuspb.DropIndexRequest) (*commonpb.Status, error
 		log.Debug("DropIndex Failed", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.String("index name", in.IndexName))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    "DropIndex failed, error = %s" + err.Error(),
+			Reason:    "DropIndex failed, error = " + err.Error(),
 		}, nil
 	}
 	log.Debug("DropIndex Success", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.String("index name", in.IndexName))
