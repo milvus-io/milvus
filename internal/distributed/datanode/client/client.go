@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	otgrpc "github.com/opentracing-contrib/go-grpc"
+	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
@@ -29,10 +31,14 @@ func NewClient(address string) *Client {
 }
 
 func (c *Client) Init() error {
-
+	tracer := opentracing.GlobalTracer()
 	connectGrpcFunc := func() error {
 		log.Debug("DataNode connect czs::", zap.String("address", c.address))
-		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock())
+		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+			grpc.WithUnaryInterceptor(
+				otgrpc.OpenTracingClientInterceptor(tracer)),
+			grpc.WithStreamInterceptor(
+				otgrpc.OpenTracingStreamClientInterceptor(tracer)))
 		if err != nil {
 			return err
 		}
@@ -56,14 +62,14 @@ func (c *Client) Stop() error {
 	return c.conn.Close()
 }
 
-func (c *Client) GetComponentStates(empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	return c.grpc.GetComponentStates(context.Background(), empty)
+func (c *Client) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
+	return c.grpc.GetComponentStates(ctx, empty)
 }
 
-func (c *Client) WatchDmChannels(in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {
-	return c.grpc.WatchDmChannels(context.Background(), in)
+func (c *Client) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {
+	return c.grpc.WatchDmChannels(ctx, in)
 }
 
-func (c *Client) FlushSegments(in *datapb.FlushSegRequest) (*commonpb.Status, error) {
-	return c.grpc.FlushSegments(context.Background(), in)
+func (c *Client) FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) (*commonpb.Status, error) {
+	return c.grpc.FlushSegments(ctx, in)
 }

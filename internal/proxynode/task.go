@@ -133,24 +133,24 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 
 func (it *InsertTask) Execute(ctx context.Context) error {
 	collectionName := it.BaseInsertTask.CollectionName
-	collSchema, err := globalMetaCache.GetCollectionSchema(collectionName)
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
 	if err != nil {
 		return err
 	}
 	autoID := collSchema.AutoID
-	collID, err := globalMetaCache.GetCollectionID(collectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil {
 		return err
 	}
 	it.CollectionID = collID
 	var partitionID UniqueID
 	if len(it.PartitionName) > 0 {
-		partitionID, err = globalMetaCache.GetPartitionID(collectionName, it.PartitionName)
+		partitionID, err = globalMetaCache.GetPartitionID(ctx, collectionName, it.PartitionName)
 		if err != nil {
 			return err
 		}
 	} else {
-		partitionID, err = globalMetaCache.GetPartitionID(collectionName, Params.DefaultPartitionTag)
+		partitionID, err = globalMetaCache.GetPartitionID(ctx, collectionName, Params.DefaultPartitionTag)
 		if err != nil {
 			return err
 		}
@@ -196,7 +196,7 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 
 	stream, err := globalInsertChannelsMap.getInsertMsgStream(collID)
 	if err != nil {
-		resp, _ := it.dataServiceClient.GetInsertChannels(&datapb.InsertChannelRequest{
+		resp, _ := it.dataServiceClient.GetInsertChannels(ctx, &datapb.InsertChannelRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kInsert, // todo
 				MsgID:     it.Base.MsgID,            // todo
@@ -351,16 +351,16 @@ func (cct *CreateCollectionTask) PreExecute(ctx context.Context) error {
 
 func (cct *CreateCollectionTask) Execute(ctx context.Context) error {
 	var err error
-	cct.result, err = cct.masterClient.CreateCollection(cct.CreateCollectionRequest)
+	cct.result, err = cct.masterClient.CreateCollection(ctx, cct.CreateCollectionRequest)
 	if err != nil {
 		return err
 	}
 	if cct.result.ErrorCode == commonpb.ErrorCode_SUCCESS {
-		collID, err := globalMetaCache.GetCollectionID(cct.CollectionName)
+		collID, err := globalMetaCache.GetCollectionID(ctx, cct.CollectionName)
 		if err != nil {
 			return err
 		}
-		resp, _ := cct.dataServiceClient.GetInsertChannels(&datapb.InsertChannelRequest{
+		resp, _ := cct.dataServiceClient.GetInsertChannels(ctx, &datapb.InsertChannelRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kInsert, // todo
 				MsgID:     cct.Base.MsgID,           // todo
@@ -444,12 +444,12 @@ func (dct *DropCollectionTask) PreExecute(ctx context.Context) error {
 }
 
 func (dct *DropCollectionTask) Execute(ctx context.Context) error {
-	collID, err := globalMetaCache.GetCollectionID(dct.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, dct.CollectionName)
 	if err != nil {
 		return err
 	}
 
-	dct.result, err = dct.masterClient.DropCollection(dct.DropCollectionRequest)
+	dct.result, err = dct.masterClient.DropCollection(ctx, dct.DropCollectionRequest)
 	if err != nil {
 		return err
 	}
@@ -463,7 +463,7 @@ func (dct *DropCollectionTask) Execute(ctx context.Context) error {
 }
 
 func (dct *DropCollectionTask) PostExecute(ctx context.Context) error {
-	globalMetaCache.RemoveCollection(dct.CollectionName)
+	globalMetaCache.RemoveCollection(ctx, dct.CollectionName)
 	return nil
 }
 
@@ -518,7 +518,7 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 	st.Base.SourceID = Params.ProxyID
 
 	collectionName := st.query.CollectionName
-	_, err := globalMetaCache.GetCollectionID(collectionName)
+	_, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
@@ -543,14 +543,14 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 
 	st.ResultChannelID = Params.SearchResultChannelNames[0]
 	st.DbID = 0 // todo
-	collectionID, err := globalMetaCache.GetCollectionID(collectionName)
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
 	st.CollectionID = collectionID
 	st.PartitionIDs = make([]UniqueID, 0)
 	for _, partitionName := range st.query.PartitionNames {
-		partitionID, err := globalMetaCache.GetPartitionID(collectionName, partitionName)
+		partitionID, err := globalMetaCache.GetPartitionID(ctx, collectionName, partitionName)
 		if err != nil {
 			continue
 		}
@@ -795,7 +795,7 @@ func (hct *HasCollectionTask) PreExecute(ctx context.Context) error {
 
 func (hct *HasCollectionTask) Execute(ctx context.Context) error {
 	var err error
-	hct.result, err = hct.masterClient.HasCollection(hct.HasCollectionRequest)
+	hct.result, err = hct.masterClient.HasCollection(ctx, hct.HasCollectionRequest)
 	if hct.result == nil {
 		return errors.New("has collection resp is nil")
 	}
@@ -866,7 +866,7 @@ func (dct *DescribeCollectionTask) PreExecute(ctx context.Context) error {
 
 func (dct *DescribeCollectionTask) Execute(ctx context.Context) error {
 	var err error
-	dct.result, err = dct.masterClient.DescribeCollection(dct.DescribeCollectionRequest)
+	dct.result, err = dct.masterClient.DescribeCollection(ctx, dct.DescribeCollectionRequest)
 	if dct.result == nil {
 		return errors.New("has collection resp is nil")
 	}
@@ -932,7 +932,7 @@ func (g *GetCollectionsStatisticsTask) PreExecute(ctx context.Context) error {
 }
 
 func (g *GetCollectionsStatisticsTask) Execute(ctx context.Context) error {
-	collID, err := globalMetaCache.GetCollectionID(g.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, g.CollectionName)
 	if err != nil {
 		return err
 	}
@@ -946,7 +946,7 @@ func (g *GetCollectionsStatisticsTask) Execute(ctx context.Context) error {
 		CollectionID: collID,
 	}
 
-	result, _ := g.dataServiceClient.GetCollectionStatistics(req)
+	result, _ := g.dataServiceClient.GetCollectionStatistics(ctx, req)
 	if result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -1021,7 +1021,7 @@ func (sct *ShowCollectionsTask) PreExecute(ctx context.Context) error {
 
 func (sct *ShowCollectionsTask) Execute(ctx context.Context) error {
 	var err error
-	sct.result, err = sct.masterClient.ShowCollections(sct.ShowCollectionRequest)
+	sct.result, err = sct.masterClient.ShowCollections(ctx, sct.ShowCollectionRequest)
 	if sct.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -1098,7 +1098,7 @@ func (cpt *CreatePartitionTask) PreExecute(ctx context.Context) error {
 }
 
 func (cpt *CreatePartitionTask) Execute(ctx context.Context) (err error) {
-	cpt.result, err = cpt.masterClient.CreatePartition(cpt.CreatePartitionRequest)
+	cpt.result, err = cpt.masterClient.CreatePartition(ctx, cpt.CreatePartitionRequest)
 	if cpt.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -1175,7 +1175,7 @@ func (dpt *DropPartitionTask) PreExecute(ctx context.Context) error {
 }
 
 func (dpt *DropPartitionTask) Execute(ctx context.Context) (err error) {
-	dpt.result, err = dpt.masterClient.DropPartition(dpt.DropPartitionRequest)
+	dpt.result, err = dpt.masterClient.DropPartition(ctx, dpt.DropPartitionRequest)
 	if dpt.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -1251,7 +1251,7 @@ func (hpt *HasPartitionTask) PreExecute(ctx context.Context) error {
 }
 
 func (hpt *HasPartitionTask) Execute(ctx context.Context) (err error) {
-	hpt.result, err = hpt.masterClient.HasPartition(hpt.HasPartitionRequest)
+	hpt.result, err = hpt.masterClient.HasPartition(ctx, hpt.HasPartitionRequest)
 	if hpt.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -1322,7 +1322,7 @@ func (spt *ShowPartitionsTask) PreExecute(ctx context.Context) error {
 
 func (spt *ShowPartitionsTask) Execute(ctx context.Context) error {
 	var err error
-	spt.result, err = spt.masterClient.ShowPartitions(spt.ShowPartitionRequest)
+	spt.result, err = spt.masterClient.ShowPartitions(ctx, spt.ShowPartitionRequest)
 	if spt.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -1400,7 +1400,7 @@ func (cit *CreateIndexTask) PreExecute(ctx context.Context) error {
 
 func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 	var err error
-	cit.result, err = cit.masterClient.CreateIndex(cit.CreateIndexRequest)
+	cit.result, err = cit.masterClient.CreateIndex(ctx, cit.CreateIndexRequest)
 	if cit.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -1483,7 +1483,7 @@ func (dit *DescribeIndexTask) PreExecute(ctx context.Context) error {
 
 func (dit *DescribeIndexTask) Execute(ctx context.Context) error {
 	var err error
-	dit.result, err = dit.masterClient.DescribeIndex(dit.DescribeIndexRequest)
+	dit.result, err = dit.masterClient.DescribeIndex(ctx, dit.DescribeIndexRequest)
 	log.Println("YYYYY:", dit.result)
 	if dit.result == nil {
 		return errors.New("get collection statistics resp is nil")
@@ -1562,7 +1562,7 @@ func (dit *DropIndexTask) PreExecute(ctx context.Context) error {
 
 func (dit *DropIndexTask) Execute(ctx context.Context) error {
 	var err error
-	dit.result, err = dit.masterClient.DropIndex(dit.DropIndexRequest)
+	dit.result, err = dit.masterClient.DropIndex(ctx, dit.DropIndexRequest)
 	if dit.result == nil {
 		return errors.New("drop index resp is nil")
 	}
@@ -1641,7 +1641,7 @@ func (gist *GetIndexStateTask) PreExecute(ctx context.Context) error {
 
 func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 	collectionName := gist.CollectionName
-	collectionID, err := globalMetaCache.GetCollectionID(collectionName)
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
@@ -1657,7 +1657,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 		CollectionName: collectionName,
 		CollectionID:   collectionID,
 	}
-	partitions, err := gist.masterClient.ShowPartitions(showPartitionRequest)
+	partitions, err := gist.masterClient.ShowPartitions(ctx, showPartitionRequest)
 	if err != nil {
 		return err
 	}
@@ -1679,7 +1679,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 		IndexName:      gist.IndexName,
 	}
 
-	indexDescriptionResp, err2 := gist.masterClient.DescribeIndex(&describeIndexReq)
+	indexDescriptionResp, err2 := gist.masterClient.DescribeIndex(ctx, &describeIndexReq)
 	if err2 != nil {
 		return err2
 	}
@@ -1709,7 +1709,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
 		}
-		segments, err := gist.masterClient.ShowSegments(showSegmentsRequest)
+		segments, err := gist.masterClient.ShowSegments(ctx, showSegmentsRequest)
 		if err != nil {
 			return err
 		}
@@ -1734,7 +1734,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 			CollectionID: collectionID,
 			SegmentID:    segmentID,
 		}
-		segmentDesc, err := gist.masterClient.DescribeSegment(describeSegmentRequest)
+		segmentDesc, err := gist.masterClient.DescribeSegment(ctx, describeSegmentRequest)
 		if err != nil {
 			return err
 		}
@@ -1755,7 +1755,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	states, err := gist.indexServiceClient.GetIndexStates(getIndexStatesRequest)
+	states, err := gist.indexServiceClient.GetIndexStates(ctx, getIndexStatesRequest)
 	if err != nil {
 		return err
 	}
@@ -1848,7 +1848,7 @@ func (ft *FlushTask) PreExecute(ctx context.Context) error {
 
 func (ft *FlushTask) Execute(ctx context.Context) error {
 	for _, collName := range ft.CollectionNames {
-		collID, err := globalMetaCache.GetCollectionID(collName)
+		collID, err := globalMetaCache.GetCollectionID(ctx, collName)
 		if err != nil {
 			return err
 		}
@@ -1863,7 +1863,7 @@ func (ft *FlushTask) Execute(ctx context.Context) error {
 			CollectionID: collID,
 		}
 		var status *commonpb.Status
-		status, _ = ft.dataServiceClient.Flush(flushReq)
+		status, _ = ft.dataServiceClient.Flush(ctx, flushReq)
 		if status == nil {
 			return errors.New("flush resp is nil")
 		}
@@ -1940,11 +1940,11 @@ func (lct *LoadCollectionTask) PreExecute(ctx context.Context) error {
 }
 
 func (lct *LoadCollectionTask) Execute(ctx context.Context) (err error) {
-	collID, err := globalMetaCache.GetCollectionID(lct.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, lct.CollectionName)
 	if err != nil {
 		return err
 	}
-	collSchema, err := globalMetaCache.GetCollectionSchema(lct.CollectionName)
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, lct.CollectionName)
 	if err != nil {
 		return err
 	}
@@ -1960,7 +1960,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 		CollectionID: collID,
 		Schema:       collSchema,
 	}
-	lct.result, err = lct.queryserviceClient.LoadCollection(request)
+	lct.result, err = lct.queryserviceClient.LoadCollection(ctx, request)
 	return err
 }
 
@@ -2027,7 +2027,7 @@ func (rct *ReleaseCollectionTask) PreExecute(ctx context.Context) error {
 }
 
 func (rct *ReleaseCollectionTask) Execute(ctx context.Context) (err error) {
-	collID, err := globalMetaCache.GetCollectionID(rct.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, rct.CollectionName)
 	if err != nil {
 		return err
 	}
@@ -2041,7 +2041,7 @@ func (rct *ReleaseCollectionTask) Execute(ctx context.Context) (err error) {
 		DbID:         0,
 		CollectionID: collID,
 	}
-	rct.result, err = rct.queryserviceClient.ReleaseCollection(request)
+	rct.result, err = rct.queryserviceClient.ReleaseCollection(ctx, request)
 	return err
 }
 
@@ -2105,16 +2105,16 @@ func (lpt *LoadPartitionTask) PreExecute(ctx context.Context) error {
 
 func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 	var partitionIDs []int64
-	collID, err := globalMetaCache.GetCollectionID(lpt.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, lpt.CollectionName)
 	if err != nil {
 		return err
 	}
-	collSchema, err := globalMetaCache.GetCollectionSchema(lpt.CollectionName)
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, lpt.CollectionName)
 	if err != nil {
 		return err
 	}
 	for _, partitionName := range lpt.PartitionNames {
-		partitionID, err := globalMetaCache.GetPartitionID(lpt.CollectionName, partitionName)
+		partitionID, err := globalMetaCache.GetPartitionID(ctx, lpt.CollectionName, partitionName)
 		if err != nil {
 			return err
 		}
@@ -2132,7 +2132,7 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 		PartitionIDs: partitionIDs,
 		Schema:       collSchema,
 	}
-	lpt.result, err = lpt.queryserviceClient.LoadPartitions(request)
+	lpt.result, err = lpt.queryserviceClient.LoadPartitions(ctx, request)
 	return err
 }
 
@@ -2200,12 +2200,12 @@ func (rpt *ReleasePartitionTask) PreExecute(ctx context.Context) error {
 
 func (rpt *ReleasePartitionTask) Execute(ctx context.Context) (err error) {
 	var partitionIDs []int64
-	collID, err := globalMetaCache.GetCollectionID(rpt.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, rpt.CollectionName)
 	if err != nil {
 		return err
 	}
 	for _, partitionName := range rpt.PartitionNames {
-		partitionID, err := globalMetaCache.GetPartitionID(rpt.CollectionName, partitionName)
+		partitionID, err := globalMetaCache.GetPartitionID(ctx, rpt.CollectionName, partitionName)
 		if err != nil {
 			return err
 		}
@@ -2222,7 +2222,7 @@ func (rpt *ReleasePartitionTask) Execute(ctx context.Context) (err error) {
 		CollectionID: collID,
 		PartitionIDs: partitionIDs,
 	}
-	rpt.result, err = rpt.queryserviceClient.ReleasePartitions(request)
+	rpt.result, err = rpt.queryserviceClient.ReleasePartitions(ctx, request)
 	return err
 }
 

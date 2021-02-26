@@ -1,6 +1,8 @@
 package queryservice
 
 import (
+	"context"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
@@ -12,36 +14,36 @@ type queryNodeInfo struct {
 	dmChannelNames []string
 }
 
-func (qn *queryNodeInfo) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	return qn.client.GetComponentStates()
+func (qn *queryNodeInfo) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
+	return qn.client.GetComponentStates(ctx)
 }
 
-func (qn *queryNodeInfo) LoadSegments(in *querypb.LoadSegmentRequest) (*commonpb.Status, error) {
-	return qn.client.LoadSegments(in)
+func (qn *queryNodeInfo) LoadSegments(ctx context.Context, in *querypb.LoadSegmentRequest) (*commonpb.Status, error) {
+	return qn.client.LoadSegments(ctx, in)
 }
 
-func (qn *queryNodeInfo) GetSegmentInfo(in *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error) {
-	return qn.client.GetSegmentInfo(in)
+func (qn *queryNodeInfo) GetSegmentInfo(ctx context.Context, in *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error) {
+	return qn.client.GetSegmentInfo(ctx, in)
 }
 
-func (qn *queryNodeInfo) WatchDmChannels(in *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
-	return qn.client.WatchDmChannels(in)
+func (qn *queryNodeInfo) WatchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
+	return qn.client.WatchDmChannels(ctx, in)
 }
 
 func (qn *queryNodeInfo) AddDmChannels(channels []string) {
 	qn.dmChannelNames = append(qn.dmChannelNames, channels...)
 }
 
-func (qn *queryNodeInfo) AddQueryChannel(in *querypb.AddQueryChannelsRequest) (*commonpb.Status, error) {
-	return qn.client.AddQueryChannel(in)
+func (qn *queryNodeInfo) AddQueryChannel(ctx context.Context, in *querypb.AddQueryChannelsRequest) (*commonpb.Status, error) {
+	return qn.client.AddQueryChannel(ctx, in)
 }
 
-func (qn *queryNodeInfo) ReleaseCollection(in *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	return qn.client.ReleaseCollection(in)
+func (qn *queryNodeInfo) ReleaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+	return qn.client.ReleaseCollection(ctx, in)
 }
 
-func (qn *queryNodeInfo) ReleasePartitions(in *querypb.ReleasePartitionRequest) (*commonpb.Status, error) {
-	return qn.client.ReleasePartitions(in)
+func (qn *queryNodeInfo) ReleasePartitions(ctx context.Context, in *querypb.ReleasePartitionRequest) (*commonpb.Status, error) {
+	return qn.client.ReleasePartitions(ctx, in)
 }
 
 func newQueryNodeInfo(client QueryNodeInterface) *queryNodeInfo {

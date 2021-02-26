@@ -3,7 +3,6 @@ package proxynode
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"math/rand"
 	"sync"
@@ -11,9 +10,6 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
-
-	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go/config"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -56,8 +52,6 @@ type NodeImpl struct {
 	queryMsgStream        msgstream.MsgStream
 	msFactory             msgstream.Factory
 
-	closer io.Closer
-
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
@@ -77,13 +71,13 @@ func NewProxyNodeImpl(ctx context.Context, factory msgstream.Factory) (*NodeImpl
 }
 
 type Component interface {
-	GetComponentStates() (*internalpb2.ComponentStates, error)
+	GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
 }
 
-func (node *NodeImpl) waitForServiceReady(service Component, serviceName string) error {
+func (node *NodeImpl) waitForServiceReady(ctx context.Context, service Component, serviceName string) error {
 
 	checkFunc := func() error {
-		resp, err := service.GetComponentStates()
+		resp, err := service.GetComponentStates(ctx)
 		if err != nil {
 			return err
 		}
@@ -106,8 +100,9 @@ func (node *NodeImpl) waitForServiceReady(service Component, serviceName string)
 
 func (node *NodeImpl) Init() error {
 	// todo wait for proxyservice state changed to Healthy
+	ctx := context.Background()
 
-	err := node.waitForServiceReady(node.proxyServiceClient, "ProxyService")
+	err := node.waitForServiceReady(ctx, node.proxyServiceClient, "ProxyService")
 	if err != nil {
 		return err
 	}
@@ -120,7 +115,7 @@ func (node *NodeImpl) Init() error {
 		},
 	}
 
-	response, err := node.proxyServiceClient.RegisterNode(request)
+	response, err := node.proxyServiceClient.RegisterNode(ctx, request)
 	if err != nil {
 		return err
 	}
@@ -133,24 +128,9 @@ func (node *NodeImpl) Init() error {
 		return err
 	}
 
-	// TODO
-	cfg := &config.Configuration{
-		ServiceName: fmt.Sprintf("proxy_node_%d", Params.ProxyID),
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		},
-	}
-	tracer, closer, err := cfg.NewTracer()
-	if err != nil {
-		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
-	}
-	opentracing.SetGlobalTracer(tracer)
-	node.closer = closer
-
 	// wait for dataservice state changed to Healthy
 	if node.dataServiceClient != nil {
-		err = node.waitForServiceReady(node.dataServiceClient, "DataService")
+		err = node.waitForServiceReady(ctx, node.dataServiceClient, "DataService")
 		if err != nil {
 			return err
 		}
@@ -158,7 +138,7 @@ func (node *NodeImpl) Init() error {
 
 	// wait for queryservice state changed to Healthy
 	if node.queryServiceClient != nil {
-		err = node.waitForServiceReady(node.queryServiceClient, "QueryService")
+		err = node.waitForServiceReady(ctx, node.queryServiceClient, "QueryService")
 		if err != nil {
 			return err
 		}
@@ -166,14 +146,14 @@ func (node *NodeImpl) Init() error {
 
 	// wait for indexservice state changed to Healthy
 	if node.indexServiceClient != nil {
-		err = node.waitForServiceReady(node.indexServiceClient, "IndexService")
+		err = node.waitForServiceReady(ctx, node.indexServiceClient, "IndexService")
 		if err != nil {
 			return err
 		}
 	}
 
 	if node.queryServiceClient != nil {
-		resp, err := node.queryServiceClient.CreateQueryChannel()
+		resp, err := node.queryServiceClient.CreateQueryChannel(ctx)
 		if err != nil {
 			return err
 		}
@@ -288,9 +268,6 @@ func (node *NodeImpl) Start() error {
 }
 
 func (node *NodeImpl) Stop() error {
-	if err := node.closer.Close(); err != nil {
-		return err
-	}
 	node.cancel()
 
 	globalInsertChannelsMap.closeAllMsgStream()
@@ -303,13 +280,6 @@ func (node *NodeImpl) Stop() error {
 	node.tick.Close()
 
 	node.wg.Wait()
-
-	if node.closer != nil {
-		err := node.closer.Close()
-		if err != nil {
-			return err
-		}
-	}
 
 	for _, cb := range node.closeCallbacks {
 		cb()

@@ -2,6 +2,7 @@ package grpcproxynode
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -11,6 +12,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	otgrpc "github.com/opentracing-contrib/go-grpc"
 	grpcdataserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice/client"
 	grpcindexserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/indexservice/client"
 	grpcmasterserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
@@ -18,6 +20,7 @@ import (
 	grpcqueryserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/queryservice/client"
 
 	"github.com/opentracing/opentracing-go"
+	"github.com/uber/jaeger-client-go/config"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -75,7 +78,11 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
 
-	s.grpcServer = grpc.NewServer()
+	tracer := opentracing.GlobalTracer()
+	s.grpcServer = grpc.NewServer(grpc.UnaryInterceptor(
+		otgrpc.OpenTracingServerInterceptor(tracer)),
+		grpc.StreamInterceptor(
+			otgrpc.OpenTracingStreamServerInterceptor(tracer)))
 	proxypb.RegisterProxyNodeServiceServer(s.grpcServer, s)
 	milvuspb.RegisterMilvusServiceServer(s.grpcServer, s)
 
@@ -114,6 +121,21 @@ func (s *Server) init() error {
 	log.Println("proxy host: ", Params.IP)
 	log.Println("proxy port: ", Params.Port)
 	log.Println("proxy address: ", Params.Address)
+
+	// TODO
+	cfg := &config.Configuration{
+		ServiceName: fmt.Sprintf("proxy_node ip: %s, port: %d", Params.IP, Params.Port),
+		Sampler: &config.SamplerConfig{
+			Type:  "const",
+			Param: 1,
+		},
+	}
+	tracer, closer, err := cfg.NewTracer()
+	if err != nil {
+		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
+	}
+	opentracing.SetGlobalTracer(tracer)
+	s.closer = closer
 
 	defer func() {
 		if err != nil {
@@ -233,102 +255,102 @@ func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, request *pro
 }
 
 func (s *Server) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
-	return s.impl.CreateCollection(request)
+	return s.impl.CreateCollection(ctx, request)
 }
 
 func (s *Server) DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
-	return s.impl.DropCollection(request)
+	return s.impl.DropCollection(ctx, request)
 }
 
 func (s *Server) HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
-	return s.impl.HasCollection(request)
+	return s.impl.HasCollection(ctx, request)
 }
 
 func (s *Server) LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
-	return s.impl.LoadCollection(request)
+	return s.impl.LoadCollection(ctx, request)
 }
 
 func (s *Server) ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	return s.impl.ReleaseCollection(request)
+	return s.impl.ReleaseCollection(ctx, request)
 }
 
 func (s *Server) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-	return s.impl.DescribeCollection(request)
+	return s.impl.DescribeCollection(ctx, request)
 }
 
 func (s *Server) GetCollectionStatistics(ctx context.Context, request *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error) {
-	return s.impl.GetCollectionStatistics(request)
+	return s.impl.GetCollectionStatistics(ctx, request)
 }
 
 func (s *Server) ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
-	return s.impl.ShowCollections(request)
+	return s.impl.ShowCollections(ctx, request)
 }
 
 func (s *Server) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
-	return s.impl.CreatePartition(request)
+	return s.impl.CreatePartition(ctx, request)
 }
 
 func (s *Server) DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
-	return s.impl.DropPartition(request)
+	return s.impl.DropPartition(ctx, request)
 }
 
 func (s *Server) HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
-	return s.impl.HasPartition(request)
+	return s.impl.HasPartition(ctx, request)
 }
 
 func (s *Server) LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitonRequest) (*commonpb.Status, error) {
-	return s.impl.LoadPartitions(request)
+	return s.impl.LoadPartitions(ctx, request)
 }
 
 func (s *Server) ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionRequest) (*commonpb.Status, error) {
-	return s.impl.ReleasePartitions(request)
+	return s.impl.ReleasePartitions(ctx, request)
 }
 
 func (s *Server) GetPartitionStatistics(ctx context.Context, request *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error) {
-	return s.impl.GetPartitionStatistics(request)
+	return s.impl.GetPartitionStatistics(ctx, request)
 }
 
 func (s *Server) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
-	return s.impl.ShowPartitions(request)
+	return s.impl.ShowPartitions(ctx, request)
 }
 
 func (s *Server) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
-	return s.impl.CreateIndex(request)
+	return s.impl.CreateIndex(ctx, request)
 }
 
 func (s *Server) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
-	return s.impl.DropIndex(request)
+	return s.impl.DropIndex(ctx, request)
 }
 
 func (s *Server) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
-	return s.impl.DescribeIndex(request)
+	return s.impl.DescribeIndex(ctx, request)
 }
 
 func (s *Server) GetIndexState(ctx context.Context, request *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error) {
-	return s.impl.GetIndexState(request)
+	return s.impl.GetIndexState(ctx, request)
 }
 
 func (s *Server) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.InsertResponse, error) {
-	return s.impl.Insert(request)
+	return s.impl.Insert(ctx, request)
 }
 
 func (s *Server) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-	return s.impl.Search(request)
+	return s.impl.Search(ctx, request)
 }
 
 func (s *Server) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error) {
-	return s.impl.Flush(request)
+	return s.impl.Flush(ctx, request)
 }
 
 func (s *Server) GetDdChannel(ctx context.Context, request *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.impl.GetDdChannel(request)
+	return s.impl.GetDdChannel(ctx, request)
 }
 
 func (s *Server) GetPersistentSegmentInfo(ctx context.Context, request *milvuspb.PersistentSegmentInfoRequest) (*milvuspb.PersistentSegmentInfoResponse, error) {
-	return s.impl.GetPersistentSegmentInfo(request)
+	return s.impl.GetPersistentSegmentInfo(ctx, request)
 }
 
 func (s *Server) GetQuerySegmentInfo(ctx context.Context, request *milvuspb.QuerySegmentInfoRequest) (*milvuspb.QuerySegmentInfoResponse, error) {
-	return s.impl.GetQuerySegmentInfo(request)
+	return s.impl.GetQuerySegmentInfo(ctx, request)
 
 }

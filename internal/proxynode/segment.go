@@ -273,7 +273,7 @@ func (sa *SegIDAssigner) syncSegments() bool {
 		return true
 	}
 	sa.reduceSegReqs()
-	_, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	req := &datapb.AssignSegIDRequest{
 		NodeID:        sa.PeerID,
@@ -282,7 +282,7 @@ func (sa *SegIDAssigner) syncSegments() bool {
 	}
 
 	sa.segReqs = []*datapb.SegIDRequest{}
-	resp, err := sa.serviceClient.AssignSegmentID(req)
+	resp, err := sa.serviceClient.AssignSegmentID(ctx, req)
 
 	if err != nil {
 		log.Println("GRPC AssignSegmentID Failed", resp, err)

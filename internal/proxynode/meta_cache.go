@@ -1,6 +1,7 @@
 package proxynode
 
 import (
+	"context"
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
@@ -11,16 +12,16 @@ import (
 )
 
 type MasterClientInterface interface {
-	DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
-	ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
+	DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+	ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
 }
 
 type Cache interface {
-	GetCollectionID(collectionName string) (typeutil.UniqueID, error)
-	GetPartitionID(collectionName string, partitionName string) (typeutil.UniqueID, error)
-	GetCollectionSchema(collectionName string) (*schemapb.CollectionSchema, error)
-	RemoveCollection(collectionName string)
-	RemovePartition(collectionName string, partitionName string)
+	GetCollectionID(ctx context.Context, collectionName string) (typeutil.UniqueID, error)
+	GetPartitionID(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error)
+	GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error)
+	RemoveCollection(ctx context.Context, collectionName string)
+	RemovePartition(ctx context.Context, collectionName string, partitionName string)
 }
 
 type collectionInfo struct {
@@ -54,7 +55,7 @@ func NewMetaCache(client MasterClientInterface) (*MetaCache, error) {
 	}, nil
 }
 
-func (m *MetaCache) readCollectionID(collectionName string) (typeutil.UniqueID, error) {
+func (m *MetaCache) readCollectionID(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -65,7 +66,7 @@ func (m *MetaCache) readCollectionID(collectionName string) (typeutil.UniqueID, 
 	return collInfo.collID, nil
 }
 
-func (m *MetaCache) readCollectionSchema(collectionName string) (*schemapb.CollectionSchema, error) {
+func (m *MetaCache) readCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -76,7 +77,7 @@ func (m *MetaCache) readCollectionSchema(collectionName string) (*schemapb.Colle
 	return collInfo.schema, nil
 }
 
-func (m *MetaCache) readPartitionID(collectionName string, partitionName string) (typeutil.UniqueID, error) {
+func (m *MetaCache) readPartitionID(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -92,8 +93,8 @@ func (m *MetaCache) readPartitionID(collectionName string, partitionName string)
 	return partitionID, nil
 }
 
-func (m *MetaCache) GetCollectionID(collectionName string) (typeutil.UniqueID, error) {
-	collID, err := m.readCollectionID(collectionName)
+func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
+	collID, err := m.readCollectionID(ctx, collectionName)
 	if err == nil {
 		return collID, nil
 	}
@@ -106,7 +107,7 @@ func (m *MetaCache) GetCollectionID(collectionName string) (typeutil.UniqueID, e
 		},
 		CollectionName: collectionName,
 	}
-	coll, err := m.client.DescribeCollection(req)
+	coll, err := m.client.DescribeCollection(ctx, req)
 	if err != nil {
 		return 0, err
 	}
@@ -123,8 +124,8 @@ func (m *MetaCache) GetCollectionID(collectionName string) (typeutil.UniqueID, e
 
 	return m.collInfo[collectionName].collID, nil
 }
-func (m *MetaCache) GetCollectionSchema(collectionName string) (*schemapb.CollectionSchema, error) {
-	collSchema, err := m.readCollectionSchema(collectionName)
+func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error) {
+	collSchema, err := m.readCollectionSchema(ctx, collectionName)
 	if err == nil {
 		return collSchema, nil
 	}
@@ -137,7 +138,7 @@ func (m *MetaCache) GetCollectionSchema(collectionName string) (*schemapb.Collec
 		},
 		CollectionName: collectionName,
 	}
-	coll, err := m.client.DescribeCollection(req)
+	coll, err := m.client.DescribeCollection(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -155,8 +156,8 @@ func (m *MetaCache) GetCollectionSchema(collectionName string) (*schemapb.Collec
 	return m.collInfo[collectionName].schema, nil
 }
 
-func (m *MetaCache) GetPartitionID(collectionName string, partitionName string) (typeutil.UniqueID, error) {
-	partitionID, err := m.readPartitionID(collectionName, partitionName)
+func (m *MetaCache) GetPartitionID(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error) {
+	partitionID, err := m.readPartitionID(ctx, collectionName, partitionName)
 	if err == nil {
 		return partitionID, nil
 	}
@@ -169,7 +170,7 @@ func (m *MetaCache) GetPartitionID(collectionName string, partitionName string) 
 		},
 		CollectionName: collectionName,
 	}
-	partitions, err := m.client.ShowPartitions(req)
+	partitions, err := m.client.ShowPartitions(ctx, req)
 	if err != nil {
 		return 0, err
 	}
@@ -206,13 +207,13 @@ func (m *MetaCache) GetPartitionID(collectionName string, partitionName string) 
 	return partInfo[partitionName], nil
 }
 
-func (m *MetaCache) RemoveCollection(collectionName string) {
+func (m *MetaCache) RemoveCollection(ctx context.Context, collectionName string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.collInfo, collectionName)
 }
 
-func (m *MetaCache) RemovePartition(collectionName, partitionName string) {
+func (m *MetaCache) RemovePartition(ctx context.Context, collectionName, partitionName string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	_, ok := m.collInfo[collectionName]

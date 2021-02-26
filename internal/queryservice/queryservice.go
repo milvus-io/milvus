@@ -24,26 +24,26 @@ import (
 )
 
 type MasterServiceInterface interface {
-	ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
-	ShowSegments(in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error)
+	ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
+	ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error)
 }
 
 type DataServiceInterface interface {
-	GetSegmentStates(req *datapb.SegmentStatesRequest) (*datapb.SegmentStatesResponse, error)
-	GetInsertChannels(req *datapb.InsertChannelRequest) (*internalpb2.StringList, error)
+	GetSegmentStates(ctx context.Context, req *datapb.SegmentStatesRequest) (*datapb.SegmentStatesResponse, error)
+	GetInsertChannels(ctx context.Context, req *datapb.InsertChannelRequest) (*internalpb2.StringList, error)
 }
 
 type QueryNodeInterface interface {
-	GetComponentStates() (*internalpb2.ComponentStates, error)
+	GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
 
-	AddQueryChannel(in *querypb.AddQueryChannelsRequest) (*commonpb.Status, error)
-	RemoveQueryChannel(in *querypb.RemoveQueryChannelsRequest) (*commonpb.Status, error)
-	WatchDmChannels(in *querypb.WatchDmChannelsRequest) (*commonpb.Status, error)
-	LoadSegments(in *querypb.LoadSegmentRequest) (*commonpb.Status, error)
-	ReleaseCollection(req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)
-	ReleasePartitions(req *querypb.ReleasePartitionRequest) (*commonpb.Status, error)
-	ReleaseSegments(in *querypb.ReleaseSegmentRequest) (*commonpb.Status, error)
-	GetSegmentInfo(req *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error)
+	AddQueryChannel(ctx context.Context, in *querypb.AddQueryChannelsRequest) (*commonpb.Status, error)
+	RemoveQueryChannel(ctx context.Context, in *querypb.RemoveQueryChannelsRequest) (*commonpb.Status, error)
+	WatchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest) (*commonpb.Status, error)
+	LoadSegments(ctx context.Context, in *querypb.LoadSegmentRequest) (*commonpb.Status, error)
+	ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)
+	ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionRequest) (*commonpb.Status, error)
+	ReleaseSegments(ctx context.Context, in *querypb.ReleaseSegmentRequest) (*commonpb.Status, error)
+	GetSegmentInfo(ctx context.Context, req *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error)
 }
 
 type queryChannelInfo struct {
@@ -95,14 +95,14 @@ func (qs *QueryService) UpdateStateCode(code internalpb2.StateCode) {
 	qs.stateCode.Store(code)
 }
 
-func (qs *QueryService) GetComponentStates() (*internalpb2.ComponentStates, error) {
+func (qs *QueryService) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
 	serviceComponentInfo := &internalpb2.ComponentInfo{
 		NodeID:    Params.QueryServiceID,
 		StateCode: qs.stateCode.Load().(internalpb2.StateCode),
 	}
 	subComponentInfos := make([]*internalpb2.ComponentInfo, 0)
 	for nodeID, node := range qs.queryNodes {
-		componentStates, err := node.GetComponentStates()
+		componentStates, err := node.GetComponentStates(ctx)
 		if err != nil {
 			subComponentInfos = append(subComponentInfos, &internalpb2.ComponentInfo{
 				NodeID:    nodeID,
@@ -121,15 +121,27 @@ func (qs *QueryService) GetComponentStates() (*internalpb2.ComponentStates, erro
 	}, nil
 }
 
-func (qs *QueryService) GetTimeTickChannel() (string, error) {
-	return Params.TimeTickChannelName, nil
+func (qs *QueryService) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+		Value: Params.TimeTickChannelName,
+	}, nil
 }
 
-func (qs *QueryService) GetStatisticsChannel() (string, error) {
-	return Params.StatsChannelName, nil
+func (qs *QueryService) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+		Value: Params.StatsChannelName,
+	}, nil
 }
 
-func (qs *QueryService) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
+func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
 	fmt.Println("register query node =", req.Address)
 	// TODO:: add mutex
 	nodeID := req.Base.SourceID
@@ -187,7 +199,7 @@ func (qs *QueryService) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb
 	}, nil
 }
 
-func (qs *QueryService) ShowCollections(req *querypb.ShowCollectionRequest) (*querypb.ShowCollectionResponse, error) {
+func (qs *QueryService) ShowCollections(ctx context.Context, req *querypb.ShowCollectionRequest) (*querypb.ShowCollectionResponse, error) {
 	dbID := req.DbID
 	fmt.Println("show collection start, dbID = ", dbID)
 	collections, err := qs.replica.getCollections(dbID)
@@ -212,7 +224,7 @@ func (qs *QueryService) ShowCollections(req *querypb.ShowCollectionRequest) (*qu
 	}, nil
 }
 
-func (qs *QueryService) LoadCollection(req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
+func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
 	dbID := req.DbID
 	collectionID := req.CollectionID
 	schema := req.Schema
@@ -253,7 +265,7 @@ func (qs *QueryService) LoadCollection(req *querypb.LoadCollectionRequest) (*com
 		CollectionID: collectionID,
 	}
 
-	showPartitionResponse, err := qs.masterServiceClient.ShowPartitions(showPartitionRequest)
+	showPartitionResponse, err := qs.masterServiceClient.ShowPartitions(ctx, showPartitionRequest)
 	if err != nil {
 		return fn(err), err
 	}
@@ -270,13 +282,13 @@ func (qs *QueryService) LoadCollection(req *querypb.LoadCollectionRequest) (*com
 		Schema:       schema,
 	}
 
-	status, err := qs.LoadPartitions(loadPartitionsRequest)
+	status, err := qs.LoadPartitions(ctx, loadPartitionsRequest)
 
 	fmt.Println("load collection end, collectionID = ", collectionID)
 	return status, err
 }
 
-func (qs *QueryService) ReleaseCollection(req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+func (qs *QueryService) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	dbID := req.DbID
 	collectionID := req.CollectionID
 	fmt.Println("release collection start, collectionID = ", collectionID)
@@ -289,7 +301,7 @@ func (qs *QueryService) ReleaseCollection(req *querypb.ReleaseCollectionRequest)
 	}
 
 	for nodeID, node := range qs.queryNodes {
-		status, err := node.ReleaseCollection(req)
+		status, err := node.ReleaseCollection(ctx, req)
 		if err != nil {
 			fmt.Println("release collection end, node ", nodeID, " occur error")
 			return status, err
@@ -298,7 +310,6 @@ func (qs *QueryService) ReleaseCollection(req *querypb.ReleaseCollectionRequest)
 
 	err = qs.replica.releaseCollection(dbID, collectionID)
 	if err != nil {
-		fmt.Println("release collection end, query service release replica error")
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    err.Error(),
@@ -312,7 +323,7 @@ func (qs *QueryService) ReleaseCollection(req *querypb.ReleaseCollectionRequest)
 	}, nil
 }
 
-func (qs *QueryService) ShowPartitions(req *querypb.ShowPartitionRequest) (*querypb.ShowPartitionResponse, error) {
+func (qs *QueryService) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionRequest) (*querypb.ShowPartitionResponse, error) {
 	dbID := req.DbID
 	collectionID := req.CollectionID
 	partitions, err := qs.replica.getPartitions(dbID, collectionID)
@@ -336,7 +347,7 @@ func (qs *QueryService) ShowPartitions(req *querypb.ShowPartitionRequest) (*quer
 	}, nil
 }
 
-func (qs *QueryService) LoadPartitions(req *querypb.LoadPartitionRequest) (*commonpb.Status, error) {
+func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionRequest) (*commonpb.Status, error) {
 	//TODO::suggest different partitions have different dm channel
 	dbID := req.DbID
 	collectionID := req.CollectionID
@@ -390,7 +401,7 @@ func (qs *QueryService) LoadPartitions(req *querypb.LoadPartitionRequest) (*comm
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
 		}
-		showSegmentResponse, err := qs.masterServiceClient.ShowSegments(showSegmentRequest)
+		showSegmentResponse, err := qs.masterServiceClient.ShowSegments(ctx, showSegmentRequest)
 		if err != nil {
 			return fn(err), err
 		}
@@ -402,7 +413,7 @@ func (qs *QueryService) LoadPartitions(req *querypb.LoadPartitionRequest) (*comm
 				Schema:       schema,
 			}
 			for _, node := range qs.queryNodes {
-				_, err := node.LoadSegments(loadSegmentRequest)
+				_, err := node.LoadSegments(ctx, loadSegmentRequest)
 				if err != nil {
 					return fn(err), nil
 				}
@@ -412,7 +423,7 @@ func (qs *QueryService) LoadPartitions(req *querypb.LoadPartitionRequest) (*comm
 
 		segmentStates := make(map[UniqueID]*datapb.SegmentStateInfo)
 		channel2segs := make(map[string][]UniqueID)
-		resp, err := qs.dataServiceClient.GetSegmentStates(&datapb.SegmentStatesRequest{
+		resp, err := qs.dataServiceClient.GetSegmentStates(ctx, &datapb.SegmentStatesRequest{
 			SegmentIDs: segmentIDs,
 		})
 		if err != nil {
@@ -455,7 +466,7 @@ func (qs *QueryService) LoadPartitions(req *querypb.LoadPartitionRequest) (*comm
 			queryNode := qs.queryNodes[nodeID]
 			//TODO:: seek when loadSegment may cause more msgs consumed
 			//TODO:: all query node should load partition's msg
-			status, err := queryNode.LoadSegments(loadSegmentRequest)
+			status, err := queryNode.LoadSegments(ctx, loadSegmentRequest)
 			if err != nil {
 				return status, err
 			}
@@ -470,7 +481,7 @@ func (qs *QueryService) LoadPartitions(req *querypb.LoadPartitionRequest) (*comm
 	}, nil
 }
 
-func (qs *QueryService) ReleasePartitions(req *querypb.ReleasePartitionRequest) (*commonpb.Status, error) {
+func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionRequest) (*commonpb.Status, error) {
 	dbID := req.DbID
 	collectionID := req.CollectionID
 	partitionIDs := req.PartitionIDs
@@ -486,7 +497,7 @@ func (qs *QueryService) ReleasePartitions(req *querypb.ReleasePartitionRequest) 
 	req.PartitionIDs = toReleasedPartitionID
 
 	for _, node := range qs.queryNodes {
-		status, err := node.client.ReleasePartitions(req)
+		status, err := node.client.ReleasePartitions(ctx, req)
 		if err != nil {
 			return status, err
 		}
@@ -509,7 +520,7 @@ func (qs *QueryService) ReleasePartitions(req *querypb.ReleasePartitionRequest) 
 	}, nil
 }
 
-func (qs *QueryService) CreateQueryChannel() (*querypb.CreateQueryChannelResponse, error) {
+func (qs *QueryService) CreateQueryChannel(ctx context.Context) (*querypb.CreateQueryChannelResponse, error) {
 	channelID := len(qs.queryChannels)
 	allocatedQueryChannel := "query-" + strconv.FormatInt(int64(channelID), 10)
 	allocatedQueryResultChannel := "queryResult-" + strconv.FormatInt(int64(channelID), 10)
@@ -528,7 +539,7 @@ func (qs *QueryService) CreateQueryChannel() (*querypb.CreateQueryChannelRespons
 	for nodeID, node := range qs.queryNodes {
 		fmt.Println("node ", nodeID, " watch query channel")
 		fn := func() error {
-			_, err := node.AddQueryChannel(addQueryChannelsRequest)
+			_, err := node.AddQueryChannel(ctx, addQueryChannelsRequest)
 			return err
 		}
 		err := retry.Retry(10, time.Millisecond*200, fn)
@@ -553,7 +564,7 @@ func (qs *QueryService) CreateQueryChannel() (*querypb.CreateQueryChannelRespons
 	}, nil
 }
 
-func (qs *QueryService) GetPartitionStates(req *querypb.PartitionStatesRequest) (*querypb.PartitionStatesResponse, error) {
+func (qs *QueryService) GetPartitionStates(ctx context.Context, req *querypb.PartitionStatesRequest) (*querypb.PartitionStatesResponse, error) {
 	states, err := qs.replica.getPartitionStates(req.DbID, req.CollectionID, req.PartitionIDs)
 	if err != nil {
 		return &querypb.PartitionStatesResponse{
@@ -572,10 +583,10 @@ func (qs *QueryService) GetPartitionStates(req *querypb.PartitionStatesRequest) 
 	}, nil
 }
 
-func (qs *QueryService) GetSegmentInfo(req *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error) {
+func (qs *QueryService) GetSegmentInfo(ctx context.Context, req *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error) {
 	segmentInfos := make([]*querypb.SegmentInfo, 0)
 	for _, node := range qs.queryNodes {
-		segmentInfo, err := node.client.GetSegmentInfo(req)
+		segmentInfo, err := node.client.GetSegmentInfo(ctx, req)
 		if err != nil {
 			return &querypb.SegmentInfoResponse{
 				Status: &commonpb.Status{
@@ -636,6 +647,7 @@ func (qs *QueryService) SetDataService(dataService DataServiceInterface) {
 }
 
 func (qs *QueryService) watchDmChannels(dbID UniqueID, collectionID UniqueID) error {
+	ctx := context.TODO()
 	collection, err := qs.replica.getCollectionByID(0, collectionID)
 	if err != nil {
 		return err
@@ -644,7 +656,7 @@ func (qs *QueryService) watchDmChannels(dbID UniqueID, collectionID UniqueID) er
 		DbID:         dbID,
 		CollectionID: collectionID,
 	}
-	resp, err := qs.dataServiceClient.GetInsertChannels(&channelRequest)
+	resp, err := qs.dataServiceClient.GetInsertChannels(ctx, &channelRequest)
 	if err != nil {
 		return err
 	}
@@ -697,7 +709,7 @@ func (qs *QueryService) watchDmChannels(dbID UniqueID, collectionID UniqueID) er
 		request := &querypb.WatchDmChannelsRequest{
 			ChannelIDs: channels,
 		}
-		_, err := node.WatchDmChannels(request)
+		_, err := node.WatchDmChannels(ctx, request)
 		if err != nil {
 			return err
 		}

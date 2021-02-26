@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"sync"
 
+	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go/config"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -114,7 +115,11 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
 
-	s.grpcServer = grpc.NewServer()
+	tracer := opentracing.GlobalTracer()
+	s.grpcServer = grpc.NewServer(grpc.UnaryInterceptor(
+		otgrpc.OpenTracingServerInterceptor(tracer)),
+		grpc.StreamInterceptor(
+			otgrpc.OpenTracingStreamServerInterceptor(tracer)))
 	proxypb.RegisterProxyServiceServer(s.grpcServer, s)
 	milvuspb.RegisterProxyServiceServer(s.grpcServer, s)
 

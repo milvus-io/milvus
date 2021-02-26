@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go/config"
 	"go.uber.org/zap"
@@ -70,7 +71,11 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	}
 	log.Debug("DataNode address", zap.String("address", addr))
 
-	s.grpcServer = grpc.NewServer()
+	tracer := opentracing.GlobalTracer()
+	s.grpcServer = grpc.NewServer(grpc.UnaryInterceptor(
+		otgrpc.OpenTracingServerInterceptor(tracer)),
+		grpc.StreamInterceptor(
+			otgrpc.OpenTracingStreamServerInterceptor(tracer)))
 	datapb.RegisterDataNodeServer(s.grpcServer, s)
 
 	ctx, cancel := context.WithCancel(s.ctx)
@@ -84,12 +89,12 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 }
 
-func (s *Server) SetMasterServiceInterface(ms dn.MasterServiceInterface) error {
-	return s.impl.SetMasterServiceInterface(ms)
+func (s *Server) SetMasterServiceInterface(ctx context.Context, ms dn.MasterServiceInterface) error {
+	return s.impl.SetMasterServiceInterface(ctx, ms)
 }
 
-func (s *Server) SetDataServiceInterface(ds dn.DataServiceInterface) error {
-	return s.impl.SetDataServiceInterface(ds)
+func (s *Server) SetDataServiceInterface(ctx context.Context, ds dn.DataServiceInterface) error {
+	return s.impl.SetDataServiceInterface(ctx, ds)
 }
 
 func (s *Server) Run() error {
@@ -124,6 +129,7 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) init() error {
+	ctx := context.Background()
 	Params.Init()
 	if !funcutil.CheckPortAvailable(Params.Port) {
 		Params.Port = funcutil.GetAvailablePort()
@@ -132,10 +138,25 @@ func (s *Server) init() error {
 	Params.LoadFromArgs()
 
 	log.Debug("DataNode port", zap.Int("port", Params.Port))
+	// TODO
+	cfg := &config.Configuration{
+		ServiceName: fmt.Sprintf("data_node ip: %s, port: %d", Params.IP, Params.Port),
+		Sampler: &config.SamplerConfig{
+			Type:  "const",
+			Param: 1,
+		},
+	}
+	tracer, closer, err := cfg.NewTracer()
+	if err != nil {
+		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
+	}
+	opentracing.SetGlobalTracer(tracer)
+	s.closer = closer
+
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
-	err := <-s.grpcErrChan
+	err = <-s.grpcErrChan
 	if err != nil {
 		return err
 	}
@@ -155,13 +176,13 @@ func (s *Server) init() error {
 	if err = masterClient.Start(); err != nil {
 		panic(err)
 	}
-	err = funcutil.WaitForComponentHealthy(masterClient, "MasterService", 100, time.Millisecond*200)
+	err = funcutil.WaitForComponentHealthy(ctx, masterClient, "MasterService", 100, time.Millisecond*200)
 
 	if err != nil {
 		panic(err)
 	}
 
-	if err := s.SetMasterServiceInterface(masterClient); err != nil {
+	if err := s.SetMasterServiceInterface(ctx, masterClient); err != nil {
 		panic(err)
 	}
 
@@ -175,11 +196,11 @@ func (s *Server) init() error {
 	if err = dataService.Start(); err != nil {
 		panic(err)
 	}
-	err = funcutil.WaitForComponentInitOrHealthy(dataService, "DataService", 100, time.Millisecond*200)
+	err = funcutil.WaitForComponentInitOrHealthy(ctx, dataService, "DataService", 100, time.Millisecond*200)
 	if err != nil {
 		panic(err)
 	}
-	if err := s.SetDataServiceInterface(dataService); err != nil {
+	if err := s.SetDataServiceInterface(ctx, dataService); err != nil {
 		panic(err)
 	}
 
@@ -189,21 +210,6 @@ func (s *Server) init() error {
 
 	s.impl.NodeID = dn.Params.NodeID
 	s.impl.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
-
-	// TODO
-	cfg := &config.Configuration{
-		ServiceName: fmt.Sprintf("data_node_%d", s.impl.NodeID),
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		},
-	}
-	tracer, closer, err := cfg.NewTracer()
-	if err != nil {
-		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
-	}
-	opentracing.SetGlobalTracer(tracer)
-	s.closer = closer
 
 	if err := s.impl.Init(); err != nil {
 		log.Warn("impl init error: ", zap.Error(err))
@@ -217,11 +223,11 @@ func (s *Server) start() error {
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	return s.impl.GetComponentStates()
+	return s.impl.GetComponentStates(ctx)
 }
 
 func (s *Server) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {
-	return s.impl.WatchDmChannels(in)
+	return s.impl.WatchDmChannels(ctx, in)
 }
 
 func (s *Server) FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) (*commonpb.Status, error) {
@@ -233,5 +239,5 @@ func (s *Server) FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) 
 	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
-	}, s.impl.FlushSegments(in)
+	}, s.impl.FlushSegments(ctx, in)
 }

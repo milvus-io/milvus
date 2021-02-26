@@ -304,6 +304,7 @@ func (loader *indexLoader) checkIndexReady(indexParams indexParam, l *loadIndex)
 }
 
 func (loader *indexLoader) getIndexInfo(collectionID UniqueID, segmentID UniqueID) (UniqueID, UniqueID, error) {
+	ctx := context.TODO()
 	req := &milvuspb.DescribeSegmentRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_kDescribeSegment,
@@ -311,7 +312,7 @@ func (loader *indexLoader) getIndexInfo(collectionID UniqueID, segmentID UniqueI
 		CollectionID: collectionID,
 		SegmentID:    segmentID,
 	}
-	response, err := loader.masterClient.DescribeSegment(req)
+	response, err := loader.masterClient.DescribeSegment(ctx, req)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -322,6 +323,7 @@ func (loader *indexLoader) getIndexInfo(collectionID UniqueID, segmentID UniqueI
 }
 
 func (loader *indexLoader) getIndexPaths(indexBuildID UniqueID) ([]string, error) {
+	ctx := context.TODO()
 	if loader.indexClient == nil {
 		return nil, errors.New("null index service client")
 	}
@@ -329,7 +331,7 @@ func (loader *indexLoader) getIndexPaths(indexBuildID UniqueID) ([]string, error
 	indexFilePathRequest := &indexpb.IndexFilePathsRequest{
 		IndexBuildIDs: []UniqueID{indexBuildID},
 	}
-	pathResponse, err := loader.indexClient.GetIndexFilePaths(indexFilePathRequest)
+	pathResponse, err := loader.indexClient.GetIndexFilePaths(ctx, indexFilePathRequest)
 	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
 		return nil, err
 	}

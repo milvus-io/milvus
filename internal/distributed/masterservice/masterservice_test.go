@@ -37,8 +37,9 @@ func TestGrpcService(t *testing.T) {
 		t.Log("newParams.Address:", Params.Address)
 	}
 
+	ctx := context.Background()
 	msFactory := pulsarms.NewFactory()
-	svr, err := NewServer(context.Background(), msFactory)
+	svr, err := NewServer(ctx, msFactory)
 	assert.Nil(t, err)
 	svr.connectQueryService = false
 	svr.connectProxyService = false
@@ -192,7 +193,7 @@ func TestGrpcService(t *testing.T) {
 			Schema:         sbf,
 		}
 
-		status, err := cli.CreateCollection(req)
+		status, err := cli.CreateCollection(ctx, req)
 		assert.Nil(t, err)
 
 		assert.Equal(t, len(createCollectionArray), 1)
@@ -203,7 +204,7 @@ func TestGrpcService(t *testing.T) {
 		req.Base.MsgID = 101
 		req.Base.Timestamp = 101
 		req.Base.SourceID = 101
-		status, err = cli.CreateCollection(req)
+		status, err = cli.CreateCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UNEXPECTED_ERROR)
 
@@ -211,7 +212,7 @@ func TestGrpcService(t *testing.T) {
 		req.Base.Timestamp = 102
 		req.Base.SourceID = 102
 		req.CollectionName = "testColl-again"
-		status, err = cli.CreateCollection(req)
+		status, err = cli.CreateCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UNEXPECTED_ERROR)
 
@@ -222,7 +223,7 @@ func TestGrpcService(t *testing.T) {
 		req.Base.MsgID = 103
 		req.Base.Timestamp = 103
 		req.Base.SourceID = 103
-		status, err = cli.CreateCollection(req)
+		status, err = cli.CreateCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, len(createCollectionArray), 2)
@@ -238,7 +239,7 @@ func TestGrpcService(t *testing.T) {
 		req.Base.MsgID = 103
 		req.Base.Timestamp = 103
 		req.Base.SourceID = 103
-		status, err = cli.CreateCollection(req)
+		status, err = cli.CreateCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UNEXPECTED_ERROR)
 		matched, err := regexp.MatchString("input timestamp = [0-9]+, last dd time stamp = [0-9]+", status.Reason)
@@ -257,7 +258,7 @@ func TestGrpcService(t *testing.T) {
 			DbName:         "testDb",
 			CollectionName: "testColl",
 		}
-		rsp, err := cli.HasCollection(req)
+		rsp, err := cli.HasCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, rsp.Value, true)
@@ -272,7 +273,7 @@ func TestGrpcService(t *testing.T) {
 			DbName:         "testDb",
 			CollectionName: "testColl2",
 		}
-		rsp, err = cli.HasCollection(req)
+		rsp, err = cli.HasCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, rsp.Value, false)
@@ -288,7 +289,7 @@ func TestGrpcService(t *testing.T) {
 			DbName:         "testDb",
 			CollectionName: "testColl2",
 		}
-		rsp, err = cli.HasCollection(req)
+		rsp, err = cli.HasCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, rsp.Value, false)
@@ -307,7 +308,7 @@ func TestGrpcService(t *testing.T) {
 			DbName:         "testDb",
 			CollectionName: "testColl",
 		}
-		rsp, err := cli.DescribeCollection(req)
+		rsp, err := cli.DescribeCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, rsp.Schema.Name, "testColl")
@@ -324,7 +325,7 @@ func TestGrpcService(t *testing.T) {
 			},
 			DbName: "testDb",
 		}
-		rsp, err := cli.ShowCollections(req)
+		rsp, err := cli.ShowCollections(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.ElementsMatch(t, rsp.CollectionNames, []string{"testColl", "testColl-again"})
@@ -343,7 +344,7 @@ func TestGrpcService(t *testing.T) {
 			CollectionName: "testColl",
 			PartitionName:  "testPartition",
 		}
-		status, err := cli.CreatePartition(req)
+		status, err := cli.CreatePartition(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
@@ -367,7 +368,7 @@ func TestGrpcService(t *testing.T) {
 			CollectionName: "testColl",
 			PartitionName:  "testPartition",
 		}
-		rsp, err := cli.HasPartition(req)
+		rsp, err := cli.HasPartition(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, rsp.Value, true)
@@ -387,7 +388,7 @@ func TestGrpcService(t *testing.T) {
 			CollectionName: "testColl",
 			CollectionID:   coll.ID,
 		}
-		rsp, err := cli.ShowPartitions(req)
+		rsp, err := cli.ShowPartitions(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, len(rsp.PartitionNames), 2)
@@ -422,7 +423,7 @@ func TestGrpcService(t *testing.T) {
 			CollectionID: coll.ID,
 			PartitionID:  partID,
 		}
-		rsp, err := cli.ShowSegments(req)
+		rsp, err := cli.ShowSegments(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, rsp.SegmentIDs[0], int64(1000))
@@ -450,7 +451,7 @@ func TestGrpcService(t *testing.T) {
 		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.FieldIndexes), 0)
-		rsp, err := cli.CreateIndex(req)
+		rsp, err := cli.CreateIndex(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		collMeta, err = core.MetaTable.GetCollectionByName("testColl")
@@ -463,7 +464,7 @@ func TestGrpcService(t *testing.T) {
 		assert.ElementsMatch(t, binlogPathArray, []string{"file1", "file2", "file3"})
 
 		req.FieldName = "no field"
-		rsp, err = cli.CreateIndex(req)
+		rsp, err = cli.CreateIndex(ctx, req)
 		assert.Nil(t, err)
 		assert.NotEqual(t, rsp.ErrorCode, commonpb.ErrorCode_SUCCESS)
 	})
@@ -482,7 +483,7 @@ func TestGrpcService(t *testing.T) {
 			CollectionID: coll.ID,
 			SegmentID:    1000,
 		}
-		rsp, err := cli.DescribeSegment(req)
+		rsp, err := cli.DescribeSegment(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		t.Logf("index id = %d", rsp.IndexID)
@@ -501,7 +502,7 @@ func TestGrpcService(t *testing.T) {
 			FieldName:      "vector",
 			IndexName:      "",
 		}
-		rsp, err := cli.DescribeIndex(req)
+		rsp, err := cli.DescribeIndex(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, len(rsp.IndexDescriptions), 1)
@@ -540,7 +541,7 @@ func TestGrpcService(t *testing.T) {
 			FieldName:      "vector",
 			IndexName:      "",
 		}
-		rsp, err := cli.DescribeIndex(req)
+		rsp, err := cli.DescribeIndex(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, len(rsp.IndexDescriptions), 1)
@@ -564,7 +565,7 @@ func TestGrpcService(t *testing.T) {
 		idx, err := core.MetaTable.GetIndexByName("testColl", "vector", cms.Params.DefaultIndexName)
 		assert.Nil(t, err)
 		assert.Equal(t, len(idx), 1)
-		rsp, err := cli.DropIndex(req)
+		rsp, err := cli.DropIndex(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
@@ -587,7 +588,7 @@ func TestGrpcService(t *testing.T) {
 			CollectionName: "testColl",
 			PartitionName:  "testPartition",
 		}
-		status, err := cli.DropPartition(req)
+		status, err := cli.DropPartition(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
@@ -610,7 +611,7 @@ func TestGrpcService(t *testing.T) {
 			CollectionName: "testColl",
 		}
 
-		status, err := cli.DropCollection(req)
+		status, err := cli.DropCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, len(dropCollectionArray), 1)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
@@ -629,7 +630,7 @@ func TestGrpcService(t *testing.T) {
 			DbName:         "testDb",
 			CollectionName: "testColl",
 		}
-		status, err = cli.DropCollection(req)
+		status, err = cli.DropCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, len(dropCollectionArray), 1)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UNEXPECTED_ERROR)

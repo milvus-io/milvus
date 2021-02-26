@@ -1,6 +1,8 @@
 package dataservice
 
 import (
+	"context"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 )
@@ -21,7 +23,8 @@ func newAllocatorImpl(masterClient MasterClient) *allocatorImpl {
 }
 
 func (allocator *allocatorImpl) allocTimestamp() (Timestamp, error) {
-	resp, err := allocator.masterClient.AllocTimestamp(&masterpb.TsoRequest{
+	ctx := context.TODO()
+	resp, err := allocator.masterClient.AllocTimestamp(ctx, &masterpb.TsoRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_kShowCollections,
 			MsgID:     -1, // todo add msg id
@@ -37,7 +40,8 @@ func (allocator *allocatorImpl) allocTimestamp() (Timestamp, error) {
 }
 
 func (allocator *allocatorImpl) allocID() (UniqueID, error) {
-	resp, err := allocator.masterClient.AllocID(&masterpb.IDRequest{
+	ctx := context.TODO()
+	resp, err := allocator.masterClient.AllocID(ctx, &masterpb.IDRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_kShowCollections,
 			MsgID:     -1, // todo add msg id

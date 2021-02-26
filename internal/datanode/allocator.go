@@ -1,6 +1,8 @@
 package datanode
 
 import (
+	"context"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 )
@@ -22,7 +24,8 @@ func newAllocatorImpl(s MasterServiceInterface) *allocatorImpl {
 }
 
 func (alloc *allocatorImpl) allocID() (UniqueID, error) {
-	resp, err := alloc.masterService.AllocID(&masterpb.IDRequest{
+	ctx := context.TODO()
+	resp, err := alloc.masterService.AllocID(ctx, &masterpb.IDRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_kRequestID,
 			MsgID:     1, // GOOSE TODO

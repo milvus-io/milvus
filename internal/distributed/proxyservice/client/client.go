@@ -6,12 +6,13 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 
-	"google.golang.org/grpc"
-
+	otgrpc "github.com/opentracing-contrib/go-grpc"
+	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
+	"google.golang.org/grpc"
 )
 
 type Client struct {
@@ -21,8 +22,13 @@ type Client struct {
 }
 
 func (c *Client) Init() error {
+	tracer := opentracing.GlobalTracer()
 	connectGrpcFunc := func() error {
-		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock())
+		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+			grpc.WithUnaryInterceptor(
+				otgrpc.OpenTracingClientInterceptor(tracer)),
+			grpc.WithStreamInterceptor(
+				otgrpc.OpenTracingStreamClientInterceptor(tracer)))
 		if err != nil {
 			return err
 		}
@@ -44,23 +50,23 @@ func (c *Client) Stop() error {
 	return nil
 }
 
-func (c *Client) RegisterNode(request *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error) {
-	return c.proxyServiceClient.RegisterNode(c.ctx, request)
+func (c *Client) RegisterNode(ctx context.Context, request *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error) {
+	return c.proxyServiceClient.RegisterNode(ctx, request)
 }
 
-func (c *Client) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	return c.proxyServiceClient.InvalidateCollectionMetaCache(c.ctx, request)
+func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+	return c.proxyServiceClient.InvalidateCollectionMetaCache(ctx, request)
 }
 
-func (c *Client) GetTimeTickChannel() (*milvuspb.StringResponse, error) {
-	return c.proxyServiceClient.GetTimeTickChannel(c.ctx, &commonpb.Empty{})
+func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return c.proxyServiceClient.GetTimeTickChannel(ctx, &commonpb.Empty{})
 }
 
-func (c *Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	return c.proxyServiceClient.GetComponentStates(c.ctx, &commonpb.Empty{})
+func (c *Client) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
+	return c.proxyServiceClient.GetComponentStates(ctx, &commonpb.Empty{})
 }
 
-func (c *Client) GetStatisticsChannel() (*milvuspb.StringResponse, error) {
+func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,

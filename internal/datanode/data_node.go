@@ -25,34 +25,34 @@ const (
 )
 
 type (
-	Inteface interface {
+	Interface interface {
 		// Service
 		Init() error
 		Start() error
 		Stop() error
 
 		// Component
-		GetComponentStates() (*internalpb2.ComponentStates, error)
-		GetTimeTickChannel() (*milvuspb.StringResponse, error)   // This function has no effect
-		GetStatisticsChannel() (*milvuspb.StringResponse, error) // This function has no effect
+		GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
+		GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error)   // This function has no effect
+		GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) // This function has no effect
 
-		WatchDmChannels(in *datapb.WatchDmChannelRequest) (*commonpb.Status, error)
-		FlushSegments(in *datapb.FlushSegRequest) (*commonpb.Status, error)
+		WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelRequest) (*commonpb.Status, error)
+		FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) error
 
-		SetMasterServiceInterface(ms MasterServiceInterface) error
-		SetDataServiceInterface(ds DataServiceInterface) error
+		SetMasterServiceInterface(ctx context.Context, ms MasterServiceInterface) error
+		SetDataServiceInterface(ctx context.Context, ds DataServiceInterface) error
 	}
 
 	DataServiceInterface interface {
-		GetComponentStates() (*internalpb2.ComponentStates, error)
-		RegisterNode(req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error)
+		GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
+		RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error)
 	}
 
 	MasterServiceInterface interface {
-		GetComponentStates() (*internalpb2.ComponentStates, error)
-		AllocID(in *masterpb.IDRequest) (*masterpb.IDResponse, error)
-		ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
-		DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+		GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
+		AllocID(ctx context.Context, in *masterpb.IDRequest) (*masterpb.IDResponse, error)
+		ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
+		DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
 	}
 
 	DataNode struct {
@@ -98,7 +98,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 	return node
 }
 
-func (node *DataNode) SetMasterServiceInterface(ms MasterServiceInterface) error {
+func (node *DataNode) SetMasterServiceInterface(ctx context.Context, ms MasterServiceInterface) error {
 	switch {
 	case ms == nil, node.masterService != nil:
 		return errors.New("Nil parameter or repeatly set")
@@ -108,7 +108,7 @@ func (node *DataNode) SetMasterServiceInterface(ms MasterServiceInterface) error
 	}
 }
 
-func (node *DataNode) SetDataServiceInterface(ds DataServiceInterface) error {
+func (node *DataNode) SetDataServiceInterface(ctx context.Context, ds DataServiceInterface) error {
 	switch {
 	case ds == nil, node.dataService != nil:
 		return errors.New("Nil parameter or repeatly set")
@@ -120,6 +120,7 @@ func (node *DataNode) SetDataServiceInterface(ds DataServiceInterface) error {
 
 // Suppose dataservice is in INITIALIZING
 func (node *DataNode) Init() error {
+	ctx := context.Background()
 
 	req := &datapb.RegisterNodeRequest{
 		Base: &commonpb.MsgBase{
@@ -132,7 +133,7 @@ func (node *DataNode) Init() error {
 		},
 	}
 
-	resp, err := node.dataService.RegisterNode(req)
+	resp, err := node.dataService.RegisterNode(ctx, req)
 	if err != nil {
 		return errors.Errorf("Register node failed: %v", err)
 	}
@@ -187,7 +188,7 @@ func (node *DataNode) UpdateStateCode(code internalpb2.StateCode) {
 	node.State.Store(code)
 }
 
-func (node *DataNode) WatchDmChannels(in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {
+func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 	}
@@ -210,7 +211,7 @@ func (node *DataNode) WatchDmChannels(in *datapb.WatchDmChannelRequest) (*common
 	}
 }
 
-func (node *DataNode) GetComponentStates() (*internalpb2.ComponentStates, error) {
+func (node *DataNode) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
 	log.Debug("DataNode current state", zap.Any("State", node.State.Load()))
 	states := &internalpb2.ComponentStates{
 		State: &internalpb2.ComponentInfo{
@@ -224,7 +225,7 @@ func (node *DataNode) GetComponentStates() (*internalpb2.ComponentStates, error)
 	return states, nil
 }
 
-func (node *DataNode) FlushSegments(in *datapb.FlushSegRequest) error {
+func (node *DataNode) FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) error {
 	ids := make([]UniqueID, 0)
 	ids = append(ids, in.SegmentIDs...)
 
@@ -253,10 +254,22 @@ func (node *DataNode) Stop() error {
 	return nil
 }
 
-func (node *DataNode) GetTimeTickChannel() (string, error) {
-	return "Nothing happened", nil
+func (node *DataNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+		Value: "",
+	}, nil
 }
 
-func (node *DataNode) GetStatisticsChannel() (string, error) {
-	return "Nothing happened", nil
+func (node *DataNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+		Value: "",
+	}, nil
 }

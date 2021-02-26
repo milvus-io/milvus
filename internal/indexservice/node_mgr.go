@@ -1,6 +1,7 @@
 package indexservice
 
 import (
+	"context"
 	"strconv"
 
 	grpcindexnodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/indexnode/client"
@@ -54,7 +55,7 @@ func (i *ServiceImpl) prepareNodeInitParams() []*commonpb.KeyValuePair {
 	return params
 }
 
-func (i *ServiceImpl) RegisterNode(req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
+func (i *ServiceImpl) RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
 	ret := &indexpb.RegisterNodeResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,

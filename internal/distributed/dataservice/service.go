@@ -12,6 +12,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	otgrpc "github.com/opentracing-contrib/go-grpc"
 	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
 
 	"github.com/opentracing/opentracing-go"
@@ -96,7 +97,8 @@ func (s *Server) init() error {
 	}
 	s.impl.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
 
-	err = funcutil.WaitForComponentInitOrHealthy(client, "MasterService", 100, time.Millisecond*200)
+	ctx := context.Background()
+	err = funcutil.WaitForComponentInitOrHealthy(ctx, client, "MasterService", 100, time.Millisecond*200)
 
 	if err != nil {
 		panic(err)
@@ -126,7 +128,11 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
 
-	s.grpcServer = grpc.NewServer()
+	tracer := opentracing.GlobalTracer()
+	s.grpcServer = grpc.NewServer(grpc.UnaryInterceptor(
+		otgrpc.OpenTracingServerInterceptor(tracer)),
+		grpc.StreamInterceptor(
+			otgrpc.OpenTracingStreamServerInterceptor(tracer)))
 	datapb.RegisterDataServiceServer(s.grpcServer, s)
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
@@ -174,61 +180,61 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) GetSegmentInfo(ctx context.Context, request *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error) {
-	return s.impl.GetSegmentInfo(request)
+	return s.impl.GetSegmentInfo(ctx, request)
 }
 
 func (s *Server) RegisterNode(ctx context.Context, request *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
-	return s.impl.RegisterNode(request)
+	return s.impl.RegisterNode(ctx, request)
 }
 
 func (s *Server) Flush(ctx context.Context, request *datapb.FlushRequest) (*commonpb.Status, error) {
-	return s.impl.Flush(request)
+	return s.impl.Flush(ctx, request)
 }
 
 func (s *Server) AssignSegmentID(ctx context.Context, request *datapb.AssignSegIDRequest) (*datapb.AssignSegIDResponse, error) {
-	return s.impl.AssignSegmentID(request)
+	return s.impl.AssignSegmentID(ctx, request)
 }
 
 func (s *Server) ShowSegments(ctx context.Context, request *datapb.ShowSegmentRequest) (*datapb.ShowSegmentResponse, error) {
-	return s.impl.ShowSegments(request)
+	return s.impl.ShowSegments(ctx, request)
 }
 
 func (s *Server) GetSegmentStates(ctx context.Context, request *datapb.SegmentStatesRequest) (*datapb.SegmentStatesResponse, error) {
-	return s.impl.GetSegmentStates(request)
+	return s.impl.GetSegmentStates(ctx, request)
 }
 
 func (s *Server) GetInsertBinlogPaths(ctx context.Context, request *datapb.InsertBinlogPathRequest) (*datapb.InsertBinlogPathsResponse, error) {
-	return s.impl.GetInsertBinlogPaths(request)
+	return s.impl.GetInsertBinlogPaths(ctx, request)
 }
 
 func (s *Server) GetInsertChannels(ctx context.Context, request *datapb.InsertChannelRequest) (*internalpb2.StringList, error) {
-	return s.impl.GetInsertChannels(request)
+	return s.impl.GetInsertChannels(ctx, request)
 }
 
 func (s *Server) GetCollectionStatistics(ctx context.Context, request *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error) {
-	return s.impl.GetCollectionStatistics(request)
+	return s.impl.GetCollectionStatistics(ctx, request)
 }
 
 func (s *Server) GetPartitionStatistics(ctx context.Context, request *datapb.PartitionStatsRequest) (*datapb.PartitionStatsResponse, error) {
-	return s.impl.GetPartitionStatistics(request)
+	return s.impl.GetPartitionStatistics(ctx, request)
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	return s.impl.GetComponentStates()
+	return s.impl.GetComponentStates(ctx)
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.impl.GetTimeTickChannel()
+	return s.impl.GetTimeTickChannel(ctx)
 }
 
 func (s *Server) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.impl.GetStatisticsChannel()
+	return s.impl.GetStatisticsChannel(ctx)
 }
 
 func (s *Server) GetSegmentInfoChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.impl.GetSegmentInfoChannel()
+	return s.impl.GetSegmentInfoChannel(ctx)
 }
 
 func (s *Server) GetCount(ctx context.Context, request *datapb.CollectionCountRequest) (*datapb.CollectionCountResponse, error) {
-	return s.impl.GetCount(request)
+	return s.impl.GetCount(ctx, request)
 }

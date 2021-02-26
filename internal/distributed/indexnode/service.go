@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"sync"
 
+	otgrpc "github.com/opentracing-contrib/go-grpc"
+	"github.com/opentracing/opentracing-go"
 	grpcindexserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/indexservice/client"
 	"github.com/zilliztech/milvus-distributed/internal/indexnode"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -56,7 +58,11 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	ctx, cancel := context.WithCancel(s.loopCtx)
 	defer cancel()
 
-	s.grpcServer = grpc.NewServer()
+	tracer := opentracing.GlobalTracer()
+	s.grpcServer = grpc.NewServer(grpc.UnaryInterceptor(
+		otgrpc.OpenTracingServerInterceptor(tracer)),
+		grpc.StreamInterceptor(
+			otgrpc.OpenTracingStreamServerInterceptor(tracer)))
 	indexpb.RegisterIndexNodeServer(s.grpcServer, s)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {

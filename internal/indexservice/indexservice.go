@@ -19,6 +19,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -150,7 +151,7 @@ func (i *ServiceImpl) UpdateStateCode(code internalpb2.StateCode) {
 	i.stateCode = code
 }
 
-func (i *ServiceImpl) GetComponentStates() (*internalpb2.ComponentStates, error) {
+func (i *ServiceImpl) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
 
 	stateInfo := &internalpb2.ComponentInfo{
 		NodeID:    i.ID,
@@ -168,22 +169,33 @@ func (i *ServiceImpl) GetComponentStates() (*internalpb2.ComponentStates, error)
 	return ret, nil
 }
 
-func (i *ServiceImpl) GetTimeTickChannel() (string, error) {
-	return "", nil
+func (i *ServiceImpl) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+		Value: "",
+	}, nil
 }
 
-func (i *ServiceImpl) GetStatisticsChannel() (string, error) {
-	return "", nil
+func (i *ServiceImpl) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+		Value: "",
+	}, nil
 }
 
-func (i *ServiceImpl) BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
+func (i *ServiceImpl) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
 	fmt.Println("builder building index ..., indexName = ", req.IndexName, "indexID = ", req.IndexID, "dataPath = ", req.DataPaths)
 	ret := &indexpb.BuildIndexResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 		},
 	}
-	ctx := context.Background()
 	t := &IndexAddTask{
 		BaseTask: BaseTask{
 			ctx:   ctx,
@@ -232,7 +244,7 @@ func (i *ServiceImpl) BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.Build
 	return ret, nil
 }
 
-func (i *ServiceImpl) GetIndexStates(req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
+func (i *ServiceImpl) GetIndexStates(ctx context.Context, req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
 	var indexStates []*indexpb.IndexInfo
 	for _, indexID := range req.IndexBuildIDs {
 		indexState, err := i.metaTable.GetIndexState(indexID)
@@ -250,7 +262,7 @@ func (i *ServiceImpl) GetIndexStates(req *indexpb.IndexStatesRequest) (*indexpb.
 	return ret, nil
 }
 
-func (i *ServiceImpl) DropIndex(req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+func (i *ServiceImpl) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	i.sched.IndexAddQueue.tryToRemoveUselessIndexAddTask(req.IndexID)
 
 	err := i.metaTable.MarkIndexAsDeleted(req.IndexID)
@@ -265,7 +277,7 @@ func (i *ServiceImpl) DropIndex(req *indexpb.DropIndexRequest) (*commonpb.Status
 		go func() {
 			allNodeClients := i.nodeClients.PeekAllClients()
 			for _, client := range allNodeClients {
-				client.DropIndex(req)
+				client.DropIndex(ctx, req)
 			}
 		}()
 		go func() {
@@ -279,7 +291,7 @@ func (i *ServiceImpl) DropIndex(req *indexpb.DropIndexRequest) (*commonpb.Status
 	}, nil
 }
 
-func (i *ServiceImpl) GetIndexFilePaths(req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {
+func (i *ServiceImpl) GetIndexFilePaths(ctx context.Context, req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {
 	var indexPaths []*indexpb.IndexFilePathInfo = nil
 
 	for _, indexID := range req.IndexBuildIDs {
@@ -299,7 +311,7 @@ func (i *ServiceImpl) GetIndexFilePaths(req *indexpb.IndexFilePathsRequest) (*in
 	return ret, nil
 }
 
-func (i *ServiceImpl) NotifyBuildIndex(nty *indexpb.BuildIndexNotification) (*commonpb.Status, error) {
+func (i *ServiceImpl) NotifyBuildIndex(ctx context.Context, nty *indexpb.BuildIndexNotification) (*commonpb.Status, error) {
 	ret := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 	}

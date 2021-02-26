@@ -1,6 +1,8 @@
 package proxynode
 
 import (
+	"context"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
@@ -11,57 +13,57 @@ import (
 )
 
 type MasterClient interface {
-	CreateCollection(in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
-	DropCollection(in *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
-	HasCollection(in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
-	DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
-	ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
-	CreatePartition(in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
-	DropPartition(in *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
-	HasPartition(in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
-	ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
-	CreateIndex(in *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
-	DescribeIndex(in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
-	DropIndex(in *milvuspb.DropIndexRequest) (*commonpb.Status, error)
-	ShowSegments(in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error)
-	DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
+	CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
+	DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
+	HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
+	DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+	ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
+	CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
+	DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
+	HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
+	ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
+	CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
+	DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
+	DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*commonpb.Status, error)
+	ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error)
+	DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
 }
 
 type IndexServiceClient interface {
-	GetIndexStates(req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error)
-	GetComponentStates() (*internalpb2.ComponentStates, error)
+	GetIndexStates(ctx context.Context, req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error)
+	GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
 }
 
 type QueryServiceClient interface {
-	ShowCollections(req *querypb.ShowCollectionRequest) (*querypb.ShowCollectionResponse, error)
-	LoadCollection(req *querypb.LoadCollectionRequest) (*commonpb.Status, error)
-	ReleaseCollection(req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)
-	ShowPartitions(req *querypb.ShowPartitionRequest) (*querypb.ShowPartitionResponse, error)
-	LoadPartitions(req *querypb.LoadPartitionRequest) (*commonpb.Status, error)
-	ReleasePartitions(req *querypb.ReleasePartitionRequest) (*commonpb.Status, error)
-	CreateQueryChannel() (*querypb.CreateQueryChannelResponse, error)
-	GetPartitionStates(req *querypb.PartitionStatesRequest) (*querypb.PartitionStatesResponse, error)
+	ShowCollections(ctx context.Context, req *querypb.ShowCollectionRequest) (*querypb.ShowCollectionResponse, error)
+	LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error)
+	ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)
+	ShowPartitions(ctx context.Context, req *querypb.ShowPartitionRequest) (*querypb.ShowPartitionResponse, error)
+	LoadPartitions(ctx context.Context, req *querypb.LoadPartitionRequest) (*commonpb.Status, error)
+	ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionRequest) (*commonpb.Status, error)
+	CreateQueryChannel(ctx context.Context) (*querypb.CreateQueryChannelResponse, error)
+	GetPartitionStates(ctx context.Context, req *querypb.PartitionStatesRequest) (*querypb.PartitionStatesResponse, error)
 
 	//GetSearchChannelNames() ([]string, error)
 	//GetSearchResultChannels() ([]string, error)
-	GetComponentStates() (*internalpb2.ComponentStates, error)
-	GetSegmentInfo(req *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error)
+	GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
+	GetSegmentInfo(ctx context.Context, req *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error)
 }
 
 type DataServiceClient interface {
-	AssignSegmentID(req *datapb.AssignSegIDRequest) (*datapb.AssignSegIDResponse, error)
-	GetInsertChannels(req *datapb.InsertChannelRequest) (*internalpb2.StringList, error)
-	Flush(req *datapb.FlushRequest) (*commonpb.Status, error)
-	GetCollectionStatistics(req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error)
+	AssignSegmentID(ctx context.Context, req *datapb.AssignSegIDRequest) (*datapb.AssignSegIDResponse, error)
+	GetInsertChannels(ctx context.Context, req *datapb.InsertChannelRequest) (*internalpb2.StringList, error)
+	Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error)
+	GetCollectionStatistics(ctx context.Context, req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error)
 
-	GetComponentStates() (*internalpb2.ComponentStates, error)
-	GetSegmentInfo(req *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error)
+	GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
+	GetSegmentInfo(ctx context.Context, req *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error)
 }
 
 type ProxyServiceClient interface {
-	GetTimeTickChannel() (*milvuspb.StringResponse, error)
-	RegisterNode(request *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error)
-	GetComponentStates() (*internalpb2.ComponentStates, error)
+	GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error)
+	RegisterNode(ctx context.Context, request *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error)
+	GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
 }
 
 type ProxyNode interface {
@@ -69,36 +71,36 @@ type ProxyNode interface {
 	Start() error
 	Stop() error
 
-	InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
+	InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
 
-	CreateCollection(request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
-	DropCollection(request *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
-	HasCollection(request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
-	LoadCollection(request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error)
-	ReleaseCollection(request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error)
-	DescribeCollection(request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
-	GetCollectionStatistics(request *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error)
-	ShowCollections(request *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
+	CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
+	DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
+	HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
+	LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error)
+	ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error)
+	DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+	GetCollectionStatistics(ctx context.Context, request *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error)
+	ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
 
-	CreatePartition(request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
-	DropPartition(request *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
-	HasPartition(request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
-	LoadPartitions(request *milvuspb.LoadPartitonRequest) (*commonpb.Status, error)
-	ReleasePartitions(request *milvuspb.ReleasePartitionRequest) (*commonpb.Status, error)
-	GetPartitionStatistics(request *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error)
-	ShowPartitions(request *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
+	CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
+	DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
+	HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
+	LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitonRequest) (*commonpb.Status, error)
+	ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionRequest) (*commonpb.Status, error)
+	GetPartitionStatistics(ctx context.Context, request *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error)
+	ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
 
-	CreateIndex(request *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
-	DescribeIndex(request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
-	GetIndexState(request *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error)
-	DropIndex(request *milvuspb.DropIndexRequest) (*commonpb.Status, error)
+	CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
+	DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
+	GetIndexState(ctx context.Context, request *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error)
+	DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error)
 
-	Insert(request *milvuspb.InsertRequest) (*milvuspb.InsertResponse, error)
-	Search(request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error)
-	Flush(request *milvuspb.FlushRequest) (*commonpb.Status, error)
+	Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.InsertResponse, error)
+	Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error)
+	Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error)
 
-	GetDdChannel(request *commonpb.Empty) (*milvuspb.StringResponse, error)
+	GetDdChannel(ctx context.Context, request *commonpb.Empty) (*milvuspb.StringResponse, error)
 
-	GetQuerySegmentInfo(req *milvuspb.QuerySegmentInfoRequest) (*milvuspb.QuerySegmentInfoResponse, error)
-	GetPersistentSegmentInfo(req *milvuspb.PersistentSegmentInfoRequest) (*milvuspb.PersistentSegmentInfoResponse, error)
+	GetQuerySegmentInfo(ctx context.Context, req *milvuspb.QuerySegmentInfoRequest) (*milvuspb.QuerySegmentInfoResponse, error)
+	GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.PersistentSegmentInfoRequest) (*milvuspb.PersistentSegmentInfoResponse, error)
 }

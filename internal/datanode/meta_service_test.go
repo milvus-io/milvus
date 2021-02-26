@@ -18,7 +18,7 @@ func TestMetaService_All(t *testing.T) {
 	metaService := newMetaService(ctx, replica, mFactory)
 
 	t.Run("Test getCollectionNames", func(t *testing.T) {
-		names, err := metaService.getCollectionNames()
+		names, err := metaService.getCollectionNames(ctx)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(names))
 		assert.Equal(t, "a-collection", names[0])
@@ -28,7 +28,7 @@ func TestMetaService_All(t *testing.T) {
 		hasColletion := metaService.replica.hasCollection(0)
 		assert.False(t, hasColletion)
 
-		err := metaService.createCollection("a-collection")
+		err := metaService.createCollection(ctx, "a-collection")
 		assert.NoError(t, err)
 		hasColletion = metaService.replica.hasCollection(0)
 		assert.True(t, hasColletion)
@@ -40,7 +40,7 @@ func TestMetaService_All(t *testing.T) {
 
 		mFactory.setCollectionID(1)
 		mFactory.setCollectionName("a-collection-1")
-		err := metaService.loadCollections()
+		err := metaService.loadCollections(ctx)
 		assert.NoError(t, err)
 
 		hasColletion = metaService.replica.hasCollection(1)

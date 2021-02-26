@@ -1,6 +1,7 @@
 package dataservice
 
 import (
+	"context"
 	"sync/atomic"
 	"time"
 
@@ -58,16 +59,16 @@ func newMockDataNodeClient() *mockDataNodeClient {
 	return &mockDataNodeClient{}
 }
 
-func (c *mockDataNodeClient) WatchDmChannels(in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {
+func (c *mockDataNodeClient) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}, nil
 }
 
-func (c *mockDataNodeClient) GetComponentStates(empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
+func (c *mockDataNodeClient) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
 	// todo
 	return nil, nil
 }
 
-func (c *mockDataNodeClient) FlushSegments(in *datapb.FlushSegRequest) (*commonpb.Status, error) {
+func (c *mockDataNodeClient) FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) (*commonpb.Status, error) {
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}, nil
 }
 

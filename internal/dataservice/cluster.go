@@ -1,6 +1,7 @@
 package dataservice
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -77,6 +78,7 @@ func (c *dataNodeCluster) GetNodeIDs() []int64 {
 }
 
 func (c *dataNodeCluster) WatchInsertChannels(channels []string) {
+	ctx := context.TODO()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var groups [][]string
@@ -90,7 +92,7 @@ func (c *dataNodeCluster) WatchInsertChannels(channels []string) {
 		groups[i%length] = append(groups[i%length], channel)
 	}
 	for i, group := range groups {
-		resp, err := c.nodes[i].client.WatchDmChannels(&datapb.WatchDmChannelRequest{
+		resp, err := c.nodes[i].client.WatchDmChannels(ctx, &datapb.WatchDmChannelRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kDescribeCollection,
 				MsgID:     -1, // todo
@@ -107,12 +109,12 @@ func (c *dataNodeCluster) WatchInsertChannels(channels []string) {
 	}
 }
 
-func (c *dataNodeCluster) GetDataNodeStates() ([]*internalpb2.ComponentInfo, error) {
+func (c *dataNodeCluster) GetDataNodeStates(ctx context.Context) ([]*internalpb2.ComponentInfo, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	ret := make([]*internalpb2.ComponentInfo, 0)
 	for _, node := range c.nodes {
-		states, err := node.client.GetComponentStates(&commonpb.Empty{})
+		states, err := node.client.GetComponentStates(ctx, &commonpb.Empty{})
 		if err != nil {
 			log.Error("get component states error", zap.Stringer("dataNode", node), zap.Error(err))
 			continue
@@ -123,10 +125,11 @@ func (c *dataNodeCluster) GetDataNodeStates() ([]*internalpb2.ComponentInfo, err
 }
 
 func (c *dataNodeCluster) FlushSegment(request *datapb.FlushSegRequest) {
+	ctx := context.TODO()
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	for _, node := range c.nodes {
-		if _, err := node.client.FlushSegments(request); err != nil {
+		if _, err := node.client.FlushSegments(ctx, request); err != nil {
 			log.Error("flush segment err", zap.Stringer("dataNode", node), zap.Error(err))
 			continue
 		}
