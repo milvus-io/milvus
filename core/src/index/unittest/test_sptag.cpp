@@ -67,6 +67,7 @@ TEST_P(SPTAGTest, sptag_basic) {
     // index_->Add(base_dataset, conf);
     auto result = index_->Query(query_dataset, conf);
     AssertAnns(result, nq, k);
+    ReleaseQueryResult(result);
 
     {
         auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
@@ -100,6 +101,7 @@ TEST_P(SPTAGTest, sptag_serialize) {
     auto result = new_index->Query(query_dataset, conf);
     AssertAnns(result, nq, k);
     PrintResult(result, nq, k);
+    ReleaseQueryResult(result);
     ASSERT_EQ(new_index->Count(), nb);
     ASSERT_EQ(new_index->Dim(), dim);
     //        ASSERT_THROW({ new_index->Clone(); }, milvus::knowhere::KnowhereException);
@@ -136,5 +138,6 @@ TEST_P(SPTAGTest, sptag_serialize) {
         auto result = new_index->Query(query_dataset, conf);
         AssertAnns(result, nq, k);
         PrintResult(result, nq, k);
+        ReleaseQueryResult(result);
     }
 }

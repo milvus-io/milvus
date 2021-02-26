@@ -108,6 +108,7 @@ TEST_P(IVFTest, ivf_basic_cpu) {
     auto result = index_->Query(query_dataset, conf_);
     AssertAnns(result, nq, k);
     // PrintResult(result, nq, k);
+    ReleaseQueryResult(result);
 
     if (index_type_ != milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
 #if 0
@@ -133,6 +134,7 @@ TEST_P(IVFTest, ivf_basic_cpu) {
         auto result_bs_1 = index_->Query(query_dataset, conf_);
         AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
         // PrintResult(result, nq, k);
+        ReleaseQueryResult(result_bs_1);
 
 #if 0
         auto result_bs_2 = index_->QueryById(id_dataset, conf_);
@@ -166,6 +168,7 @@ TEST_P(IVFTest, ivf_basic_gpu) {
     auto result = index_->Query(query_dataset, conf_);
     AssertAnns(result, nq, k);
     // PrintResult(result, nq, k);
+    ReleaseQueryResult(result);
 
     faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(nb);
     for (int64_t i = 0; i < nq; ++i) {
@@ -176,6 +179,7 @@ TEST_P(IVFTest, ivf_basic_gpu) {
     auto result_bs_1 = index_->Query(query_dataset, conf_);
     AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
     // PrintResult(result, nq, k);
+    ReleaseQueryResult(result_bs_1);
 
 #ifdef MILVUS_GPU_VERSION
     milvus::knowhere::FaissGpuResourceMgr::GetInstance().Dump();
@@ -212,6 +216,7 @@ TEST_P(IVFTest, ivf_serialize) {
         EXPECT_EQ(index_->Dim(), dim);
         auto result = index_->Query(query_dataset, conf_);
         AssertAnns(result, nq, conf_[milvus::knowhere::meta::TOPK]);
+        ReleaseQueryResult(result);
     }
 }
 
@@ -270,6 +275,7 @@ TEST_P(IVFTest, clone_test) {
                 auto clone_index = milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
                 auto clone_result = clone_index->Query(query_dataset, conf_);
                 AssertEqual(result, clone_result);
+                ReleaseQueryResult(clone_result);
                 std::cout << "clone G <=> C [" << index_type_ << "] success" << std::endl;
             });
         } else {
@@ -289,11 +295,14 @@ TEST_P(IVFTest, clone_test) {
                 auto clone_index = milvus::knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, milvus::knowhere::Config());
                 auto clone_result = clone_index->Query(query_dataset, conf_);
                 AssertEqual(result, clone_result);
+                ReleaseQueryResult(clone_result);
                 std::cout << "clone C <=> G [" << index_type_ << "] success" << std::endl;
             });
             EXPECT_ANY_THROW(milvus::knowhere::cloner::CopyCpuToGpu(index_, -1, milvus::knowhere::Config()));
         }
     }
+
+    ReleaseQueryResult(result);
 }
 #endif
 
@@ -317,6 +326,7 @@ TEST_P(IVFTest, gpu_seal_test) {
 
     auto result = index_->Query(query_dataset, conf_);
     AssertAnns(result, nq, conf_[milvus::knowhere::meta::TOPK]);
+    ReleaseQueryResult(result);
 
     fiu_init(0);
     fiu_enable("IVF.Search.throw_std_exception", 1, nullptr, 0);
