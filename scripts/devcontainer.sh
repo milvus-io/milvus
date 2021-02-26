@@ -30,6 +30,10 @@ gid=$(id -g)
 [ "$uid" -lt 500 ] && uid=501
 [ "$gid" -lt 500 ] && gid=$uid
 
+if [ "${1-}" = "build" ];then
+   CHECK_BUILDER=1
+fi
+
 if [ "${CHECK_BUILDER:-}" == "1" ];then
     awk 'c&&c--{sub(/^/,"#")} /# Command/{c=3} 1' $ROOT_DIR/docker-compose.yml > $ROOT_DIR/docker-compose-devcontainer.yml
 else
@@ -42,6 +46,11 @@ if [ "${machine}" == "Mac" ];then
     sed -i '' "s/# user: {{ CURRENT_ID }}/user: \"$uid:$gid\"/g" $ROOT_DIR/docker-compose-devcontainer.yml
 else
     sed -i "s/# user: {{ CURRENT_ID }}/user: \"$uid:$gid\"/g" $ROOT_DIR/docker-compose-devcontainer.yml
+fi
+
+if [ "${1-}" = "build" ];then
+   docker-compose -f $ROOT_DIR/docker-compose-devcontainer.yml pull --ignore-pull-failures ubuntu
+   docker-compose -f $ROOT_DIR/docker-compose-devcontainer.yml build ubuntu
 fi
 
 if [ "${1-}" = "up" ]; then
