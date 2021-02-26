@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <faiss/gpu/GpuCloner.h>
-#include <faiss/index_factory.h>
+#include <faiss/gpu/GpuIndexIVFScalarQuantizer.h>
 
 #include <memory>
 #include <string>
@@ -29,18 +29,13 @@ GPUIVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GETTENSOR(dataset_ptr)
     gpu_id_ = config[knowhere::meta::DEVICEID];
 
-    std::stringstream index_type;
-    index_type << "IVF" << config[IndexParams::nlist] << ","
-               << "SQ" << config[IndexParams::nbits];
-    faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-    auto build_index = faiss::index_factory(dim, index_type.str().c_str(), metric_type);
-
     auto gpu_res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
     if (gpu_res != nullptr) {
         ResScope rs(gpu_res, gpu_id_, true);
-        auto device_index = faiss::gpu::index_cpu_to_gpu(gpu_res->faiss_res.get(), gpu_id_, build_index);
+        auto device_index = new faiss::gpu::GpuIndexIVFScalarQuantizer(
+            gpu_res->faiss_res.get(), dim, config[IndexParams::nlist].get<int64_t>(), faiss::QuantizerType::QT_8bit,
+            GetMetricType(config[Metric::TYPE].get<std::string>()));
         device_index->train(rows, (float*)p_data);
-
         index_.reset(device_index);
         res_ = gpu_res;
     } else {
