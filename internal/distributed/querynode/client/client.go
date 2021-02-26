@@ -54,11 +54,7 @@ func (c *Client) Stop() error {
 }
 
 func (c *Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	states, err := c.grpcClient.GetComponentStates(context.TODO(), nil)
-	if err != nil {
-		return nil, err
-	}
-	return states.States, nil
+	return c.grpcClient.GetComponentStates(context.TODO(), nil)
 }
 
 func (c *Client) GetTimeTickChannel() (string, error) {

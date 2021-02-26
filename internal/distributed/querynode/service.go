@@ -283,18 +283,9 @@ func (s *Server) GetStatsChannel(ctx context.Context, in *commonpb.Empty) (*milv
 	}, nil
 }
 
-func (s *Server) GetComponentStates(ctx context.Context, in *commonpb.Empty) (*querypb.ComponentStatesResponse, error) {
+func (s *Server) GetComponentStates(ctx context.Context, in *commonpb.Empty) (*internalpb2.ComponentStates, error) {
 	// ignore ctx and in
-	componentStates, err := s.impl.GetComponentStates()
-	if err != nil {
-		return nil, err
-	}
-	return &querypb.ComponentStatesResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-		},
-		States: componentStates,
-	}, nil
+	return s.impl.GetComponentStates()
 }
 
 func (s *Server) AddQueryChannel(ctx context.Context, in *querypb.AddQueryChannelsRequest) (*commonpb.Status, error) {
