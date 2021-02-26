@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <string.h>
 #include <cstdio>
 
 #include "Log.h"
@@ -26,13 +27,13 @@ KnowhereException::KnowhereException(const std::string& m, const char* funcName,
     msg.resize(size + 1);
     snprintf(&msg[0], msg.size(), "Error in %s at %s:%d: %s", funcName, file, line, m.c_str());
 #else
-    std::string file_path(file);
-    auto const pos = file_path.find_last_of('/');
-    auto filename = file_path.substr(pos + 1).c_str();
-
+    const char* filename = funcName;
+    while (auto tmp = strchr(filename, '/')) {
+        filename = tmp + 1;
+    }
     int size = snprintf(nullptr, 0, "Error in %s at %s:%d: %s", funcName, filename, line, m.c_str());
     msg.resize(size + 1);
-    snprintf(&msg[0], msg.size(), "Error in %s at %s:%d: %s", funcName, filename, line, m.c_str());
+    snprintf(msg.data(), msg.size(), "Error in %s at %s:%d: %s", funcName, filename, line, m.c_str());
 #endif
 }
 
