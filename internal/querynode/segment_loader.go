@@ -109,11 +109,14 @@ func (loader *segmentLoader) checkTargetFields(paths []*internalpb2.StringList, 
 		return false
 	}
 
-	for i, fieldID := range dstFieldIDs {
+	for _, fieldID := range dstFieldIDs {
 		if !containsFunc(srcFieldIDs, fieldID) {
 			return nil, errors.New("uncompleted fields")
 		}
-		targetFields[fieldID] = paths[i]
+	}
+
+	for i := range srcFieldIDs {
+		targetFields[srcFieldIDs[i]] = paths[i]
 	}
 
 	return targetFields, nil
