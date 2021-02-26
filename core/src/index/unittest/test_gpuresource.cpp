@@ -42,14 +42,14 @@ class GPURESTEST : public DataGen, public TestGpuIndexBase {
 
         k = K;
         elems = nq * k;
-        ids = (int64_t*)malloc(sizeof(int64_t) * elems);
-        dis = (float*)malloc(sizeof(float) * elems);
+        ids = new int64_t[elems];
+        dis = new float[elems];
     }
 
     void
     TearDown() override {
-        delete ids;
-        delete dis;
+        delete[] ids;
+        delete[] dis;
         TestGpuIndexBase::TearDown();
     }
 
@@ -76,6 +76,7 @@ TEST_F(GPURESTEST, copyandsearch) {
     index_->AddWithoutIds(base_dataset, conf);
     auto result = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result, nq, k);
+    ReleaseQueryResult(result);
 
     index_->SetIndexSize(nb * dim * sizeof(float));
     auto cpu_idx = milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
@@ -88,7 +89,8 @@ TEST_F(GPURESTEST, copyandsearch) {
     auto search_func = [&] {
         // TimeRecorder tc("search&load");
         for (int i = 0; i < search_count; ++i) {
-            search_idx->Query(query_dataset, conf, nullptr);
+            auto result = search_idx->Query(query_dataset, conf, nullptr);
+            ReleaseQueryResult(result);
             // if (i > search_count - 6 || i == 0)
             //    tc.RecordSection("search once");
         }
@@ -107,7 +109,8 @@ TEST_F(GPURESTEST, copyandsearch) {
     milvus::knowhere::TimeRecorder tc("Basic");
     milvus::knowhere::cloner::CopyCpuToGpu(cpu_idx, DEVICEID, milvus::knowhere::Config());
     tc.RecordSection("Copy to gpu once");
-    search_idx->Query(query_dataset, conf, nullptr);
+    auto result2 = search_idx->Query(query_dataset, conf, nullptr);
+    ReleaseQueryResult(result2);
     tc.RecordSection("Search once");
     search_func();
     tc.RecordSection("Search total cost");
@@ -147,6 +150,7 @@ TEST_F(GPURESTEST, trainandsearch) {
         for (int i = 0; i < search_count; ++i) {
             auto result = search_idx->Query(query_dataset, conf, nullptr);
             AssertAnns(result, nq, k);
+            ReleaseQueryResult(result);
         }
     };
 

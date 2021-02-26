@@ -144,6 +144,17 @@ IVF_NM::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::
 
     GET_TENSOR_DATA(dataset_ptr)
 
+    int64_t* p_id = nullptr;
+    float* p_dist = nullptr;
+    auto release_when_exception = [&]() {
+        if (p_id != nullptr) {
+            free(p_id);
+        }
+        if (p_dist != nullptr) {
+            free(p_dist);
+        }
+    };
+
     try {
         fiu_do_on("IVF_NM.Search.throw_std_exception", throw std::exception());
         fiu_do_on("IVF_NM.Search.throw_faiss_exception", throw faiss::FaissException(""));
@@ -163,8 +174,10 @@ IVF_NM::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::
         ret_ds->Set(meta::DISTANCE, p_dist);
         return ret_ds;
     } catch (faiss::FaissException& e) {
+        release_when_exception();
         KNOWHERE_THROW_MSG(e.what());
     } catch (std::exception& e) {
+        release_when_exception();
         KNOWHERE_THROW_MSG(e.what());
     }
 }

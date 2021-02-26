@@ -127,6 +127,7 @@ NsgIndex::InitNavigationPoint(float* data) {
     //
     // float r1 = distance_->Compare(center, ori_data_ + navigation_point * dimension, dimension);
     // assert(r1 == resset[0].distance);
+    delete[] center;
 }
 
 // Specify Link

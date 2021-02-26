@@ -58,14 +58,25 @@ BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
 
     GET_TENSOR_DATA(dataset_ptr)
 
+    int64_t* p_id = nullptr;
+    float* p_dist = nullptr;
+    auto release_when_exception = [&]() {
+        if (p_id != nullptr) {
+            free(p_id);
+        }
+        if (p_dist != nullptr) {
+            free(p_dist);
+        }
+    };
+
     try {
         auto k = config[meta::TOPK].get<int64_t>();
         auto elems = rows * k;
 
         size_t p_id_size = sizeof(int64_t) * elems;
         size_t p_dist_size = sizeof(float) * elems;
-        auto p_id = static_cast<int64_t*>(malloc(p_id_size));
-        auto p_dist = static_cast<float*>(malloc(p_dist_size));
+        p_id = static_cast<int64_t*>(malloc(p_id_size));
+        p_dist = static_cast<float*>(malloc(p_dist_size));
 
         QueryImpl(rows, reinterpret_cast<const uint8_t*>(p_data), k, p_dist, p_id, config, bitset);
         MapOffsetToUid(p_id, static_cast<size_t>(elems));
@@ -77,8 +88,10 @@ BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
 
         return ret_ds;
     } catch (faiss::FaissException& e) {
+        release_when_exception();
         KNOWHERE_THROW_MSG(e.what());
     } catch (std::exception& e) {
+        release_when_exception();
         KNOWHERE_THROW_MSG(e.what());
     }
 }

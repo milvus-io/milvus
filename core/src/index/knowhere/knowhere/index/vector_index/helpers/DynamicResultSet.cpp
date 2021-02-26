@@ -25,7 +25,7 @@ namespace knowhere {
  ***********************************************************************/
 
 void
-DynamicResultSet::do_alloction() {
+DynamicResultSet::AlloctionImpl() {
     if (count <= 0) {
         KNOWHERE_THROW_MSG("DynamicResultSet::do_alloction failed because of count <= 0");
     }
@@ -36,7 +36,7 @@ DynamicResultSet::do_alloction() {
 }
 
 void
-DynamicResultSet::do_sort(ResultSetPostProcessType postProcessType) {
+DynamicResultSet::SortImpl(ResultSetPostProcessType postProcessType) {
     if (postProcessType == ResultSetPostProcessType::SortAsc) {
         quick_sort<true>(0, count);
     } else if (postProcessType == ResultSetPostProcessType::SortDesc) {
@@ -128,7 +128,7 @@ DynamicResultCollector::Merge(size_t limit, ResultSetPostProcessType postProcess
         //        boundaries[i] += boundaries[i - 1];
     }
     ret.count = boundaries[seg_num] <= limit ? boundaries[seg_num] : limit;
-    ret.do_alloction();
+    ret.AlloctionImpl();
 
     // abandon redundancy answers randomly
     // abandon strategy: keep the top limit sequentially
@@ -142,7 +142,7 @@ DynamicResultCollector::Merge(size_t limit, ResultSetPostProcessType postProcess
     pos--;  // last segment id
     // full copy
 #pragma omp parallel for
-    for (auto i = 0; i < pos - 1; ++i) {
+    for (auto i = 0; i < pos; ++i) {
         for (auto& pseg : seg_results[i]) {
             auto len = pseg->buffers.size() * pseg->buffer_size - pseg->buffer_size + pseg->wp;
             pseg->copy_range(0, len, ret.labels.get() + boundaries[i], ret.distances.get() + boundaries[i]);
@@ -163,20 +163,20 @@ DynamicResultCollector::Merge(size_t limit, ResultSetPostProcessType postProcess
     }
 
     if (postProcessType != ResultSetPostProcessType::None) {
-        ret.do_sort(postProcessType);
+        ret.SortImpl(postProcessType);
     }
     return ret;
 }
 
 void
 DynamicResultCollector::Append(milvus::knowhere::DynamicResultSegment&& seg_result) {
-    seg_results.push_back(std::move(seg_result));
+    seg_results.emplace_back(std::move(seg_result));
 }
 
 void
 ExchangeDataset(DynamicResultSegment& milvus_dataset, std::vector<faiss::RangeSearchPartialResult*>& faiss_dataset) {
     for (auto& prspr : faiss_dataset) {
-        auto mrspr = new DynamicResultFragment(prspr->res->buffer_size);
+        auto mrspr = std::make_shared<DynamicResultFragment>(prspr->res->buffer_size);
         mrspr->wp = prspr->wp;
         mrspr->buffers.resize(prspr->buffers.size());
         for (auto i = 0; i < prspr->buffers.size(); ++i) {
@@ -186,6 +186,7 @@ ExchangeDataset(DynamicResultSegment& milvus_dataset, std::vector<faiss::RangeSe
             prspr->buffers[i].dis = nullptr;
         }
         delete prspr->res;
+        delete prspr;
         milvus_dataset.push_back(mrspr);
     }
 }

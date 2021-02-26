@@ -500,20 +500,14 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
 
         // Reallocate base layer
-        char * data_level0_memory_new = (char *) malloc(new_max_elements * size_data_per_element_);
-        if (data_level0_memory_new == nullptr)
+        data_level0_memory_ = (char *) realloc(data_level0_memory_, new_max_elements * size_data_per_element_);
+        if (data_level0_memory_ == nullptr)
             throw std::runtime_error("Not enough memory: resizeIndex failed to allocate base layer");
-        memcpy(data_level0_memory_new, data_level0_memory_,cur_element_count * size_data_per_element_);
-        free(data_level0_memory_);
-        data_level0_memory_=data_level0_memory_new;
 
         // Reallocate all other layers
-        char ** linkLists_new = (char **) malloc(sizeof(void *) * new_max_elements);
-        if (linkLists_new == nullptr)
+        linkLists_ = (char **) realloc(linkLists_, sizeof(void *) * new_max_elements);
+        if (linkLists_ == nullptr)
             throw std::runtime_error("Not enough memory: resizeIndex failed to allocate other layers");
-        memcpy(linkLists_new, linkLists_,cur_element_count * sizeof(void *));
-        free(linkLists_);
-        linkLists_=linkLists_new;
 
         max_elements_=new_max_elements;
 
@@ -989,8 +983,10 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         ret += element_levels_.size() * sizeof(int);
         ret += max_elements_ * size_data_per_element_;
         ret += max_elements_ * sizeof(void*);
-        for (size_t i = 0; i < max_elements_; ++ i) {
-            ret += linkLists_[i] ? size_links_per_element_ * element_levels_[i] : 0;
+        for (auto i = 0; i < max_elements_; ++ i) {
+            if (element_levels_[i] > 0) {
+                ret += size_links_per_element_ * element_levels_[i];
+            }
         }
         return ret;
      }

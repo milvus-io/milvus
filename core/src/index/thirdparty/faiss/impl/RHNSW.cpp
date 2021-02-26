@@ -56,13 +56,13 @@ RHNSW::~RHNSW() {
 void RHNSW::reset() {
   max_level = -1;
   entry_point = -1;
-  levels.clear();
   free(level0_links);
   for (auto i = 0; i < levels.size(); ++ i) {
     if (levels[i])
       free(linkLists[i]);
   }
   free(linkLists);
+  levels.clear();
   level0_links = nullptr;
   linkLists = nullptr;
   level_constant = 1 / log(1.0 * M);
@@ -104,7 +104,6 @@ int RHNSW::prepare_level_tab(size_t n, bool preset_levels)
   }
   linkLists = linkLists_new;
 
-  int max_level = 0;
   int debug_space = 0;
   for (int i = 0; i < n; i++) {
     int pt_level = levels[i + n0];
