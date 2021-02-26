@@ -2,7 +2,7 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 1.0.0-beta (TBD)
+# Milvus 1.0.0 (TBD)
 ## Bug
 
 ## Feature
