@@ -45,7 +45,8 @@ type Allocator interface {
 
 // GlobalTSOAllocator is the global single point TSO allocator.
 type GlobalTSOAllocator struct {
-	tso *timestampOracle
+	tso           *timestampOracle
+	LimitMaxLogic bool
 }
 
 // NewGlobalTSOAllocator creates a new global TSO allocator.
@@ -58,12 +59,17 @@ func NewGlobalTSOAllocator(key string, kvBase kv.TxnBase) *GlobalTSOAllocator {
 			maxResetTSGap: func() time.Duration { return 3 * time.Second },
 			key:           key,
 		},
+		LimitMaxLogic: true,
 	}
 }
 
 // Initialize will initialize the created global TSO allocator.
 func (gta *GlobalTSOAllocator) Initialize() error {
 	return gta.tso.InitTimestamp()
+}
+
+func (gta *GlobalTSOAllocator) EnableMaxLogic(enable bool) {
+	gta.LimitMaxLogic = enable
 }
 
 // UpdateTSO is used to update the TSO in memory and the time window in etcd.
@@ -97,7 +103,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
 
 		physical = current.physical.UnixNano() / int64(time.Millisecond)
 		logical = atomic.AddInt64(&current.logical, int64(count))
-		if logical >= maxLogical {
+		if logical >= maxLogical && gta.LimitMaxLogic {
 			log.Println("logical part outside of max logical interval, please check ntp time",
 				zap.Int("retry-count", i))
 			time.Sleep(UpdateTimestampStep)
