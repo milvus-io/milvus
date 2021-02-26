@@ -34,7 +34,9 @@ Status::Status() : state_(nullptr) {
 }
 
 Status::~Status() {
-    delete state_;
+    if (state_ != nullptr) {
+        delete[] state_;
+    }
 }
 
 Status::Status(const Status& s) : state_(nullptr) {
