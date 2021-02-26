@@ -2,14 +2,15 @@ package grpcdatanodeclient
 
 import (
 	"context"
-	"log"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
@@ -30,7 +31,7 @@ func NewClient(address string) *Client {
 func (c *Client) Init() error {
 
 	connectGrpcFunc := func() error {
-		log.Println("DataNode connect czs::", c.address)
+		log.Debug("DataNode connect czs::", zap.String("address", c.address))
 		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock())
 		if err != nil {
 			return err

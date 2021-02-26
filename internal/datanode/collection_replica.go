@@ -1,10 +1,12 @@
 package datanode
 
 import (
-	"log"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
@@ -80,7 +82,7 @@ func (replica *ReplicaImpl) addSegment(
 
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
-	log.Println("Add Segment", segmentID)
+	log.Debug("Add Segment", zap.Int64("Segment ID", segmentID))
 
 	position := &internalpb2.MsgPosition{
 		ChannelName: channelName,
@@ -105,7 +107,7 @@ func (replica *ReplicaImpl) removeSegment(segmentID UniqueID) error {
 
 	for index, ele := range replica.segments {
 		if ele.segmentID == segmentID {
-			log.Println("Removing segment:", segmentID)
+			log.Debug("Removing segment", zap.Int64("Segment ID", segmentID))
 			numOfSegs := len(replica.segments)
 			replica.segments[index] = replica.segments[numOfSegs-1]
 			replica.segments = replica.segments[:numOfSegs-1]
@@ -133,7 +135,7 @@ func (replica *ReplicaImpl) updateStatistics(segmentID UniqueID, numRows int64) 
 
 	for _, ele := range replica.segments {
 		if ele.segmentID == segmentID {
-			log.Printf("updating segment(%v) row nums: (%v)", segmentID, numRows)
+			log.Debug("updating segment", zap.Int64("Segment ID", segmentID), zap.Int64("numRows", numRows))
 			ele.memorySize = 0
 			ele.numRows += numRows
 			return nil
@@ -187,7 +189,7 @@ func (replica *ReplicaImpl) addCollection(collectionID UniqueID, schema *schemap
 	}
 
 	replica.collections[collectionID] = newCollection
-	log.Println("Create collection:", newCollection.GetName())
+	log.Debug("Create collection", zap.String("collection name", newCollection.GetName()))
 
 	return nil
 }

@@ -3,10 +3,12 @@ package datanode
 import (
 	"context"
 	"fmt"
-	"log"
 	"reflect"
 
+	"go.uber.org/zap"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -27,10 +29,10 @@ func newMetaService(ctx context.Context, replica Replica, m MasterServiceInterfa
 }
 
 func (mService *metaService) init() {
-	log.Println("Initing meta ...")
+	log.Debug("Initing meta ...")
 	err := mService.loadCollections()
 	if err != nil {
-		log.Fatal("metaService init failed:", err)
+		log.Error("metaService init failed", zap.Error(err))
 	}
 }
 
@@ -68,7 +70,7 @@ func (mService *metaService) getCollectionNames() ([]string, error) {
 }
 
 func (mService *metaService) createCollection(name string) error {
-	log.Println("Describing collections")
+	log.Debug("Describing collections")
 	req := &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_kDescribeCollection,

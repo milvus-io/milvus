@@ -3,14 +3,16 @@ package datanode
 import (
 	"context"
 	"errors"
-	"log"
 	"path"
 	"sort"
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
+
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -67,22 +69,21 @@ func (ddNode *ddNode) Name() string {
 }
 
 func (ddNode *ddNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
-	//fmt.Println("Do filterDdNode operation")
 
 	if len(in) != 1 {
-		log.Println("Invalid operate message input in ddNode, input length = ", len(in))
+		log.Error("Invalid operate message input in ddNode", zap.Int("input length", len(in)))
 		// TODO: add error handling
 	}
 
 	msMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
-		log.Println("type assertion failed for MsgStreamMsg")
+		log.Error("type assertion failed for MsgStreamMsg")
 		// TODO: add error handling
 	}
 
 	ddNode.ddMsg = &ddMsg{
-		collectionRecords: make(map[string][]metaOperateRecord),
-		partitionRecords:  make(map[string][]metaOperateRecord),
+		collectionRecords: make(map[UniqueID][]*metaOperateRecord),
+		partitionRecords:  make(map[UniqueID][]*metaOperateRecord),
 		timeRange: TimeRange{
 			timestampMin: msMsg.TimestampMin(),
 			timestampMax: msMsg.TimestampMax(),
@@ -112,13 +113,13 @@ func (ddNode *ddNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Con
 		case commonpb.MsgType_kDropPartition:
 			ddNode.dropPartition(msg.(*msgstream.DropPartitionMsg))
 		default:
-			log.Println("Not supporting message type:", msg.Type())
+			log.Error("Not supporting message type", zap.Any("Type", msg.Type()))
 		}
 	}
 
 	select {
 	case fmsg := <-ddNode.inFlushCh:
-		log.Println(". receive flush message, flushing ...")
+		log.Debug(". receive flush message, flushing ...")
 		localSegs := make([]UniqueID, 0)
 		for _, segID := range fmsg.segmentIDs {
 			if ddNode.replica.hasSegment(segID) {
@@ -136,7 +137,7 @@ func (ddNode *ddNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Con
 
 	// generate binlog
 	if ddNode.ddBuffer.full() {
-		log.Println(". dd buffer full, auto flushing ...")
+		log.Debug(". dd buffer full, auto flushing ...")
 		ddNode.flush()
 	}
 
@@ -144,6 +145,17 @@ func (ddNode *ddNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Con
 	return []Msg{res}, ctx
 }
 
+/*
+flush() will do the following:
+    generate binlogs for all buffer data in ddNode,
+    store the generated binlogs to minIO/S3,
+    store the keys(paths to minIO/s3) of the binlogs to etcd.
+
+The keys of the binlogs are generated as below:
+	${tenant}/data_definition_log/${collection_id}/ts/${log_idx}
+	${tenant}/data_definition_log/${collection_id}/ddl/${log_idx}
+
+*/
 func (ddNode *ddNode) flush() {
 	// generate binlog
 	ddCodec := &storage.DataDefinitionCodec{}
@@ -151,49 +163,46 @@ func (ddNode *ddNode) flush() {
 		// buffer data to binlog
 		binLogs, err := ddCodec.Serialize(data.timestamps, data.ddRequestString, data.eventTypes)
 		if err != nil {
-			log.Println(err)
+			log.Error("Codec Serialize wrong", zap.Error(err))
 			continue
 		}
 		if len(binLogs) != 2 {
-			log.Println("illegal binLogs")
+			log.Error("illegal binLogs")
 			continue
 		}
 
 		// binLogs -> minIO/S3
 		if len(data.ddRequestString) != len(data.timestamps) ||
 			len(data.timestamps) != len(data.eventTypes) {
-			log.Println("illegal ddBuffer, failed to save binlog")
+			log.Error("illegal ddBuffer, failed to save binlog")
 			continue
 		} else {
-			log.Println(".. dd buffer flushing ...")
-			// Blob key example:
-			// ${tenant}/data_definition_log/${collection_id}/ts/${log_idx}
-			// ${tenant}/data_definition_log/${collection_id}/ddl/${log_idx}
+			log.Debug(".. dd buffer flushing ...")
 			keyCommon := path.Join(Params.DdBinlogRootPath, strconv.FormatInt(collectionID, 10))
 
 			// save ts binlog
 			timestampLogIdx, err := ddNode.idAllocator.allocID()
 			if err != nil {
-				log.Println(err)
+				log.Error("Id allocate wrong", zap.Error(err))
 			}
 			timestampKey := path.Join(keyCommon, binLogs[0].GetKey(), strconv.FormatInt(timestampLogIdx, 10))
 			err = ddNode.kv.Save(timestampKey, string(binLogs[0].GetValue()))
 			if err != nil {
-				log.Println(err)
+				log.Error("Save to minIO/S3 Wrong", zap.Error(err))
 			}
-			log.Println("save ts binlog, key = ", timestampKey)
+			log.Debug("save ts binlog", zap.String("key", timestampKey))
 
 			// save dd binlog
 			ddLogIdx, err := ddNode.idAllocator.allocID()
 			if err != nil {
-				log.Println(err)
+				log.Error("Id allocate wrong", zap.Error(err))
 			}
 			ddKey := path.Join(keyCommon, binLogs[1].GetKey(), strconv.FormatInt(ddLogIdx, 10))
 			err = ddNode.kv.Save(ddKey, string(binLogs[1].GetValue()))
 			if err != nil {
-				log.Println(err)
+				log.Error("Save to minIO/S3 Wrong", zap.Error(err))
 			}
-			log.Println("save dd binlog, key = ", ddKey)
+			log.Debug("save dd binlog", zap.String("key", ddKey))
 
 			ddNode.flushMeta.AppendDDLBinlogPaths(collectionID, []string{timestampKey, ddKey})
 		}
@@ -209,7 +218,7 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 	// add collection
 	if _, ok := ddNode.ddRecords.collectionRecords[collectionID]; ok {
 		err := errors.New("collection " + strconv.FormatInt(collectionID, 10) + " is already exists")
-		log.Println(err)
+		log.Error("String conversion wrong", zap.Error(err))
 		return
 	}
 	ddNode.ddRecords.collectionRecords[collectionID] = nil
@@ -219,20 +228,19 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 	var schema schemapb.CollectionSchema
 	err := proto.Unmarshal(msg.Schema, &schema)
 	if err != nil {
-		log.Println(err)
+		log.Error("proto unmarshal wrong", zap.Error(err))
 		return
 	}
 
 	// add collection
 	err = ddNode.replica.addCollection(collectionID, &schema)
 	if err != nil {
-		log.Println(err)
+		log.Error("replica add collection wrong", zap.Error(err))
 		return
 	}
 
-	collectionName := schema.Name
-	ddNode.ddMsg.collectionRecords[collectionName] = append(ddNode.ddMsg.collectionRecords[collectionName],
-		metaOperateRecord{
+	ddNode.ddMsg.collectionRecords[collectionID] = append(ddNode.ddMsg.collectionRecords[collectionID],
+		&metaOperateRecord{
 			createOrDrop: true,
 			timestamp:    msg.Base.Timestamp,
 		})
@@ -251,25 +259,21 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 	ddNode.ddBuffer.ddData[collectionID].eventTypes = append(ddNode.ddBuffer.ddData[collectionID].eventTypes, storage.CreateCollectionEventType)
 }
 
+/*
+dropCollection will drop collection in ddRecords but won't drop collection in replica
+*/
 func (ddNode *ddNode) dropCollection(msg *msgstream.DropCollectionMsg) {
 	collectionID := msg.CollectionID
 
-	//err := ddNode.replica.removeCollection(collectionID)
-	//if err != nil {
-	//	log.Println(err)
-	//}
-
 	// remove collection
 	if _, ok := ddNode.ddRecords.collectionRecords[collectionID]; !ok {
-		err := errors.New("cannot found collection " + strconv.FormatInt(collectionID, 10))
-		log.Println(err)
+		log.Error("Cannot find collection", zap.Int64("collection ID", collectionID))
 		return
 	}
 	delete(ddNode.ddRecords.collectionRecords, collectionID)
 
-	collectionName := msg.CollectionName
-	ddNode.ddMsg.collectionRecords[collectionName] = append(ddNode.ddMsg.collectionRecords[collectionName],
-		metaOperateRecord{
+	ddNode.ddMsg.collectionRecords[collectionID] = append(ddNode.ddMsg.collectionRecords[collectionID],
+		&metaOperateRecord{
 			createOrDrop: false,
 			timestamp:    msg.Base.Timestamp,
 		})
@@ -296,15 +300,13 @@ func (ddNode *ddNode) createPartition(msg *msgstream.CreatePartitionMsg) {
 
 	// add partition
 	if _, ok := ddNode.ddRecords.partitionRecords[partitionID]; ok {
-		err := errors.New("partition " + strconv.FormatInt(partitionID, 10) + " is already exists")
-		log.Println(err)
+		log.Error("partition is already exists", zap.Int64("partition ID", partitionID))
 		return
 	}
 	ddNode.ddRecords.partitionRecords[partitionID] = nil
 
-	partitionName := msg.PartitionName
-	ddNode.ddMsg.partitionRecords[partitionName] = append(ddNode.ddMsg.partitionRecords[partitionName],
-		metaOperateRecord{
+	ddNode.ddMsg.partitionRecords[partitionID] = append(ddNode.ddMsg.partitionRecords[partitionID],
+		&metaOperateRecord{
 			createOrDrop: true,
 			timestamp:    msg.Base.Timestamp,
 		})
@@ -334,15 +336,15 @@ func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
 
 	// remove partition
 	if _, ok := ddNode.ddRecords.partitionRecords[partitionID]; !ok {
-		err := errors.New("cannot found partition " + strconv.FormatInt(partitionID, 10))
-		log.Println(err)
+		log.Error("cannot found partition", zap.Int64("partition ID", partitionID))
 		return
 	}
 	delete(ddNode.ddRecords.partitionRecords, partitionID)
 
-	partitionName := msg.PartitionName
-	ddNode.ddMsg.partitionRecords[partitionName] = append(ddNode.ddMsg.partitionRecords[partitionName],
-		metaOperateRecord{
+	// partitionName := msg.PartitionName
+	// ddNode.ddMsg.partitionRecords[partitionName] = append(ddNode.ddMsg.partitionRecords[partitionName],
+	ddNode.ddMsg.partitionRecords[partitionID] = append(ddNode.ddMsg.partitionRecords[partitionID],
+		&metaOperateRecord{
 			createOrDrop: false,
 			timestamp:    msg.Base.Timestamp,
 		})

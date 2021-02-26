@@ -2,9 +2,9 @@ package components
 
 import (
 	"context"
-	"log"
 
 	grpcdatanode "github.com/zilliztech/milvus-distributed/internal/distributed/datanode"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
@@ -30,7 +30,7 @@ func (d *DataNode) Run() error {
 	if err := d.svr.Run(); err != nil {
 		panic(err)
 	}
-	log.Println("Data node successfully started ...")
+	log.Debug("Datanode successfully started")
 	return nil
 }
 

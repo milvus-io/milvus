@@ -2,12 +2,14 @@ package datanode
 
 import (
 	"context"
-	"log"
 
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 	"go.etcd.io/etcd/clientv3"
+
+	"go.uber.org/zap"
 )
 
 type dataSyncService struct {
@@ -34,7 +36,7 @@ func newDataSyncService(ctx context.Context, flushChan chan *flushMsg,
 
 func (dsService *dataSyncService) init() {
 	if len(Params.InsertChannelNames) == 0 {
-		log.Println("InsertChannels not readly, init datasync service failed")
+		log.Error("InsertChannels not readly, init datasync service failed")
 		return
 	}
 
@@ -42,7 +44,7 @@ func (dsService *dataSyncService) init() {
 }
 
 func (dsService *dataSyncService) start() {
-	log.Println("Data Sync Service Start Successfully")
+	log.Debug("Data Sync Service Start Successfully")
 	dsService.fg.Start()
 }
 
@@ -100,7 +102,8 @@ func (dsService *dataSyncService) initNodes() {
 		[]string{filterDmNode.Name()},
 	)
 	if err != nil {
-		log.Fatal("set edges failed in node:", dmStreamNode.Name())
+		log.Error("set edges failed in node", zap.String("name", dmStreamNode.Name()), zap.Error(err))
+		panic("set edges faild in the node")
 	}
 
 	// ddStreamNode
@@ -109,7 +112,8 @@ func (dsService *dataSyncService) initNodes() {
 		[]string{ddNode.Name()},
 	)
 	if err != nil {
-		log.Fatal("set edges failed in node:", ddStreamNode.Name())
+		log.Error("set edges failed in node", zap.String("name", ddStreamNode.Name()), zap.Error(err))
+		panic("set edges faild in the node")
 	}
 
 	// filterDmNode
@@ -118,7 +122,8 @@ func (dsService *dataSyncService) initNodes() {
 		[]string{insertBufferNode.Name()},
 	)
 	if err != nil {
-		log.Fatal("set edges failed in node:", filterDmNode.Name())
+		log.Error("set edges failed in node", zap.String("name", filterDmNode.Name()), zap.Error(err))
+		panic("set edges faild in the node")
 	}
 
 	// ddNode
@@ -127,7 +132,8 @@ func (dsService *dataSyncService) initNodes() {
 		[]string{filterDmNode.Name()},
 	)
 	if err != nil {
-		log.Fatal("set edges failed in node:", ddNode.Name())
+		log.Error("set edges failed in node", zap.String("name", ddNode.Name()), zap.Error(err))
+		panic("set edges faild in the node")
 	}
 
 	// insertBufferNode
@@ -136,7 +142,8 @@ func (dsService *dataSyncService) initNodes() {
 		[]string{gcNode.Name()},
 	)
 	if err != nil {
-		log.Fatal("set edges failed in node:", insertBufferNode.Name())
+		log.Error("set edges failed in node", zap.String("name", insertBufferNode.Name()), zap.Error(err))
+		panic("set edges faild in the node")
 	}
 
 	// gcNode
@@ -144,6 +151,7 @@ func (dsService *dataSyncService) initNodes() {
 		[]string{insertBufferNode.Name()},
 		[]string{})
 	if err != nil {
-		log.Fatal("set edges failed in node:", gcNode.Name())
+		log.Error("set edges failed in node", zap.String("name", gcNode.Name()), zap.Error(err))
+		panic("set edges faild in the node")
 	}
 }

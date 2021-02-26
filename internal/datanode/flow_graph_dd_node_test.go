@@ -2,7 +2,6 @@ package datanode
 
 import (
 	"context"
-	"log"
 	"testing"
 	"time"
 
@@ -40,7 +39,6 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	replica := newReplica()
 	allocatorMock := NewAllocatorFactory()
 	ddNode := newDDNode(ctx, newMetaTable(), inFlushCh, replica, allocatorMock)
-	log.Print()
 
 	collID := UniqueID(0)
 	collName := "col-test-0"

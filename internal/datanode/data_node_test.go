@@ -3,7 +3,6 @@ package datanode
 import (
 	"bytes"
 	"encoding/binary"
-	"log"
 	"math"
 	"math/rand"
 	"os"
@@ -11,9 +10,11 @@ import (
 	"testing"
 
 	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
@@ -74,7 +75,7 @@ func clearEtcd(rootPath string) error {
 	if err != nil {
 		return err
 	}
-	log.Println("Clear ETCD with prefix writer/segment ")
+	log.Debug("Clear ETCD with prefix writer/segment ")
 
 	err = etcdKV.RemoveWithPrefix("writer/ddl")
 	if err != nil {
@@ -84,7 +85,7 @@ func clearEtcd(rootPath string) error {
 	if err != nil {
 		return err
 	}
-	log.Println("Clear ETCD with prefix writer/ddl")
+	log.Debug("Clear ETCD with prefix writer/ddl")
 	return nil
 
 }
@@ -324,7 +325,7 @@ func GenRowData() (rawData []byte) {
 		panic(err)
 	}
 	rawData = append(rawData, bfloat64.Bytes()...)
-	log.Println("Rawdata length:", len(rawData))
+	log.Debug("Rawdata length:", zap.Int("Length of rawData", len(rawData)))
 	return
 }
 

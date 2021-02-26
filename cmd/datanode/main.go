@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"go.uber.org/zap"
+
+	dn "github.com/zilliztech/milvus-distributed/internal/datanode"
+
 	distributed "github.com/zilliztech/milvus-distributed/cmd/distributed/components"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 )
 
@@ -17,6 +21,8 @@ func main() {
 	defer cancel()
 
 	msFactory := pulsarms.NewFactory()
+	dn.Params.Init()
+	log.SetupLogger(&dn.Params.Log)
 
 	dn, err := distributed.NewDataNode(ctx, msFactory)
 	if err != nil {
@@ -34,7 +40,7 @@ func main() {
 		syscall.SIGQUIT)
 
 	sig := <-sc
-	log.Println("Got signal to exit signal:", sig.String())
+	log.Debug("Got signal to exit signal", zap.String("signal", sig.String()))
 
 	err = dn.Stop()
 	if err != nil {
