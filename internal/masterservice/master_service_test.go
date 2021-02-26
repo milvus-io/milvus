@@ -606,8 +606,7 @@ func TestMasterService(t *testing.T) {
 		}
 		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
-		assert.Equal(t, len(collMeta.FieldIndexes), 1)
-		assert.Equal(t, len(collMeta.FieldIndexes), 1)
+		assert.Equal(t, len(collMeta.FieldIndexes), 0)
 
 		rsp, err := core.CreateIndex(req)
 		assert.Nil(t, err)
@@ -618,8 +617,8 @@ func TestMasterService(t *testing.T) {
 		assert.ElementsMatch(t, files, []string{"file0-100", "file1-100", "file2-100"})
 		collMeta, err = core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
-		assert.Equal(t, len(collMeta.FieldIndexes), 2)
-		idxMeta, err := core.MetaTable.GetIndexByID(collMeta.FieldIndexes[1].IndexID)
+		assert.Equal(t, len(collMeta.FieldIndexes), 1)
+		idxMeta, err := core.MetaTable.GetIndexByID(collMeta.FieldIndexes[0].IndexID)
 		assert.Nil(t, err)
 		assert.Equal(t, idxMeta.IndexName, Params.DefaultIndexName)
 
@@ -665,9 +664,8 @@ func TestMasterService(t *testing.T) {
 		rsp, err := core.DescribeIndex(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
-		assert.Equal(t, len(rsp.IndexDescriptions), 2)
-		idxNames := []string{rsp.IndexDescriptions[0].IndexName, rsp.IndexDescriptions[1].IndexName}
-		assert.ElementsMatch(t, idxNames, []string{"testColl_index_100", Params.DefaultIndexName})
+		assert.Equal(t, len(rsp.IndexDescriptions), 1)
+		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, Params.DefaultIndexName)
 	})
 
 	t.Run("flush segment", func(t *testing.T) {
@@ -743,17 +741,8 @@ func TestMasterService(t *testing.T) {
 		rsp, err := core.DescribeIndex(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
-
-		assert.Equal(t, len(rsp.IndexDescriptions), 2)
-		indexNames := make([]string, 0)
-		for _, d := range rsp.IndexDescriptions {
-			indexNames = append(indexNames, d.IndexName)
-		}
-
-		assert.ElementsMatch(t, indexNames, []string{
-			"testColl_index_100",
-			Params.DefaultIndexName,
-		})
+		assert.Equal(t, len(rsp.IndexDescriptions), 1)
+		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, Params.DefaultIndexName)
 	})
 
 	t.Run("drop index", func(t *testing.T) {

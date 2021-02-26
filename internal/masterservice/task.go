@@ -117,27 +117,28 @@ func (t *CreateCollectionReqTask) Execute() error {
 		SegmentIDs:    make([]typeutil.UniqueID, 0, 16),
 	}
 	idxInfo := make([]*etcdpb.IndexInfo, 0, 16)
-	for _, field := range schema.Fields {
-		if field.DataType == schemapb.DataType_VECTOR_FLOAT || field.DataType == schemapb.DataType_VECTOR_BINARY {
-			if len(field.IndexParams) > 0 {
-				idxID, err := t.core.idAllocator.AllocOne()
-				if err != nil {
-					return err
-				}
-				filedIdx := &etcdpb.FieldIndexInfo{
-					FiledID: field.FieldID,
-					IndexID: idxID,
-				}
-				idx := &etcdpb.IndexInfo{
-					IndexName:   fmt.Sprintf("%s_index_%d", collMeta.Schema.Name, field.FieldID),
-					IndexID:     idxID,
-					IndexParams: field.IndexParams,
-				}
-				idxInfo = append(idxInfo, idx)
-				collMeta.FieldIndexes = append(collMeta.FieldIndexes, filedIdx)
-			}
-		}
-	}
+	/////////////////////// ignore index param from create_collection /////////////////////////
+	//for _, field := range schema.Fields {
+	//	if field.DataType == schemapb.DataType_VECTOR_FLOAT || field.DataType == schemapb.DataType_VECTOR_BINARY {
+	//		if len(field.IndexParams) > 0 {
+	//			idxID, err := t.core.idAllocator.AllocOne()
+	//			if err != nil {
+	//				return err
+	//			}
+	//			filedIdx := &etcdpb.FieldIndexInfo{
+	//				FiledID: field.FieldID,
+	//				IndexID: idxID,
+	//			}
+	//			idx := &etcdpb.IndexInfo{
+	//				IndexName:   fmt.Sprintf("%s_index_%d", collMeta.Schema.Name, field.FieldID),
+	//				IndexID:     idxID,
+	//				IndexParams: field.IndexParams,
+	//			}
+	//			idxInfo = append(idxInfo, idx)
+	//			collMeta.FieldIndexes = append(collMeta.FieldIndexes, filedIdx)
+	//		}
+	//	}
+	//}
 
 	err = t.core.MetaTable.AddCollection(&collMeta, &partMeta, idxInfo)
 	if err != nil {

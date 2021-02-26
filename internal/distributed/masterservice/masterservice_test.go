@@ -449,7 +449,7 @@ func TestGrpcService(t *testing.T) {
 		}
 		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
-		assert.Equal(t, len(collMeta.FieldIndexes), 1)
+		assert.Equal(t, len(collMeta.FieldIndexes), 0)
 		rsp, err := cli.CreateIndex(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_SUCCESS)
