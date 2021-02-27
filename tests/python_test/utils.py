@@ -6,6 +6,7 @@ import string
 import struct
 import logging
 import threading
+import traceback
 import time
 import copy
 import numpy as np
@@ -994,6 +995,7 @@ class TestThread(threading.Thread):
             super(TestThread, self).run()
         except BaseException as e:
             self.exc = e
+            logging.error(traceback.format_exc())
 
     def join(self):
         super(TestThread, self).join()

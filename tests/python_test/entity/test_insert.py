@@ -876,9 +876,9 @@ class TestInsertMultiCollections:
             connect.insert(collection, default_entities)
         connect.flush([collection])
         connect.load_collection(collection)
-        def release(collection):
+        def release():
             connect.release_collection(collection)
-        t = threading.Thread(target=release, (collection, ))
+        t = threading.Thread(target=release, args=())
         t.start()
         ids = connect.insert(collection, default_entities)
         assert len(ids) == default_nb

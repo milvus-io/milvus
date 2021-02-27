@@ -28,7 +28,7 @@ class TestConnect:
         '''
         res = connect.close()
         with pytest.raises(Exception) as e:
-            res = connect.()
+            res = connect.list_collections()
 
     # TODO: remove
     def _test_disconnect_repeatedly(self, dis_connect, args):
