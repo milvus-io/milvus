@@ -9,9 +9,6 @@
 /core/src/               @yhmo
 /core/src/index/         @shengjun1985
 
-# Test
-/tests/                  @cydrain
-
 # CMake Files
 **/CMakeLists.txt        @scsven
 *.cmake                  @scsven
