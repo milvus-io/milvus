@@ -68,18 +68,30 @@ pipeline {
         }
 
         stage ('Dev Test') {
-            agent {
-                label "performance"
-            }
-            environment {
-                DOCKER_COMPOSE_PROJECT_NAME = "${PROJECT_NAME}-${SEMVER}-${env.BUILD_NUMBER}".replaceAll("\\.", "-").replaceAll("_", "-")
-            }
-            steps {
-                MPLModule('Python Regression')
-            }
-            post {
-                cleanup {
-                    deleteDir() /* clean up our workspace */
+            matrix {
+                axes {
+                    axis {
+                        name 'REGRESSION_SERVICE_NAME'
+                        values 'regression'
+                    }
+                }
+                environment {
+                    DOCKER_COMPOSE_PROJECT_NAME = "${PROJECT_NAME}-${SEMVER}-${env.BUILD_NUMBER}".replaceAll("\\.", "-").replaceAll("_", "-")
+                }
+                agent {
+                    label 'performance'
+                }
+                stages {
+                    stage('Test') {
+                        steps {
+                            MPLModule('Python Regression')
+                        }
+                    }
+                }
+                post {
+                    cleanup {
+                        deleteDir() /* clean up our workspace */
+                    }
                 }
             }
         }

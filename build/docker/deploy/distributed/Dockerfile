@@ -11,6 +11,8 @@
 
 FROM milvusdb/milvus-distributed-dev:amd64-ubuntu18.04-latest AS openblas
 
+FROM hectormolinero/tini:v18 AS tini
+
 #FROM alpine
 FROM ubuntu:bionic-20200921
 
@@ -19,11 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends libtbb-dev gfor
     rm -rf /var/lib/apt/lists/*
 
 # Add Tini
-ENV TINI_VERSION v0.19.0
-
-ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /tini
-
-RUN chmod +x /tini
+COPY --from=tini /usr/bin/tini /tini
 
 COPY --from=openblas /usr/lib/libopenblas-r0.3.9.so /usr/lib/
 
