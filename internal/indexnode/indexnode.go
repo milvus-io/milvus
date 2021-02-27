@@ -163,42 +163,25 @@ func (i *NodeImpl) BuildIndex(request *indexpb.BuildIndexCmd) (*commonpb.Status,
 	t := &IndexBuildTask{
 		BaseTask: BaseTask{
 			ctx:  ctx,
-			done: make(chan error), // intend to do this
+			done: make(chan error),
 		},
 		cmd:           request,
 		kv:            i.kv,
 		serviceClient: i.serviceClient,
 		nodeID:        Params.NodeID,
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
-	defer cancel()
 
-	fn := func() error {
-		select {
-		case <-ctx.Done():
-			return errors.New("Enqueue BuildQueue timeout")
-		default:
-			return i.sched.IndexBuildQueue.Enqueue(t)
-		}
-	}
 	ret := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 	}
 
-	err := fn()
+	err := i.sched.IndexBuildQueue.Enqueue(t)
 	if err != nil {
 		ret.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
 		ret.Reason = err.Error()
 		return ret, nil
 	}
-	log.Println("index scheduler successfully with indexBuildID = ", request.IndexBuildID)
-	err = t.WaitToFinish()
-	log.Println("build index finish ...err = ", err)
-	if err != nil {
-		ret.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
-		ret.Reason = err.Error()
-		return ret, nil
-	}
+	log.Println("indexnode successfully schedule with indexBuildID = ", request.IndexBuildID)
 	return ret, nil
 }
 
