@@ -12,8 +12,11 @@ import (
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go/config"
+	"go.uber.org/zap"
+
 	nodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/querynode/client"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
@@ -142,7 +145,7 @@ func (qs *QueryService) GetStatisticsChannel(ctx context.Context) (*milvuspb.Str
 }
 
 func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
-	fmt.Println("register query node =", req.Address)
+	log.Debug("register query node", zap.String("address", req.Address.String()))
 	// TODO:: add mutex
 	nodeID := req.Base.SourceID
 	if _, ok := qs.queryNodes[nodeID]; ok {
@@ -201,7 +204,7 @@ func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterN
 
 func (qs *QueryService) ShowCollections(ctx context.Context, req *querypb.ShowCollectionRequest) (*querypb.ShowCollectionResponse, error) {
 	dbID := req.DbID
-	fmt.Println("show collection start, dbID = ", dbID)
+	log.Debug("show collection start, dbID = ", zap.String("dbID", strconv.FormatInt(dbID, 10)))
 	collections, err := qs.replica.getCollections(dbID)
 	collectionIDs := make([]UniqueID, 0)
 	for _, collection := range collections {
@@ -215,7 +218,7 @@ func (qs *QueryService) ShowCollections(ctx context.Context, req *querypb.ShowCo
 			},
 		}, err
 	}
-	fmt.Println("show collection end")
+	log.Debug("show collection end")
 	return &querypb.ShowCollectionResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -240,10 +243,10 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 		}
 	}
 
-	fmt.Println("load collection start, collectionID = ", collectionID)
+	log.Debug("load collection start", zap.String("collectionID", fmt.Sprintln(collectionID)))
 	_, err := qs.replica.getCollectionByID(dbID, collectionID)
 	if err == nil {
-		fmt.Println("load collection end, collection already exist, collectionID = ", collectionID)
+		log.Error("load collection end, collection already exist", zap.String("collectionID", fmt.Sprintln(collectionID)))
 		return fn(nil), nil
 	}
 
@@ -284,17 +287,17 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 
 	status, err := qs.LoadPartitions(ctx, loadPartitionsRequest)
 
-	fmt.Println("load collection end, collectionID = ", collectionID)
+	log.Debug("load collection end", zap.String("collectionID", fmt.Sprintln(collectionID)))
 	return status, err
 }
 
 func (qs *QueryService) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	dbID := req.DbID
 	collectionID := req.CollectionID
-	fmt.Println("release collection start, collectionID = ", collectionID)
+	log.Debug("release collection start", zap.String("collectionID", fmt.Sprintln(collectionID)))
 	_, err := qs.replica.getCollectionByID(dbID, collectionID)
 	if err != nil {
-		fmt.Println("release collection end, query service don't have the log of collection ", collectionID)
+		log.Error("release collection end, query service don't have the log of", zap.String("collectionID", fmt.Sprintln(collectionID)))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		}, nil
@@ -303,7 +306,7 @@ func (qs *QueryService) ReleaseCollection(ctx context.Context, req *querypb.Rele
 	for nodeID, node := range qs.queryNodes {
 		status, err := node.ReleaseCollection(ctx, req)
 		if err != nil {
-			fmt.Println("release collection end, node ", nodeID, " occur error")
+			log.Error("release collection end, node occur error", zap.String("nodeID", fmt.Sprintln(nodeID)))
 			return status, err
 		}
 	}
@@ -316,7 +319,7 @@ func (qs *QueryService) ReleaseCollection(ctx context.Context, req *querypb.Rele
 		}, err
 	}
 
-	fmt.Println("release collection end")
+	log.Debug("release collection end")
 	//TODO:: queryNode cancel subscribe dmChannels
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -365,7 +368,7 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		}
 	}
-	fmt.Println("load partitions start, partitionIDs = ", partitionIDs)
+	log.Debug("load partitions start", zap.String("partitionIDs", fmt.Sprintln(partitionIDs)))
 
 	if len(partitionIDs) == 0 {
 		err := errors.New("partitionIDs are empty")
@@ -430,7 +433,7 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 			return fn(err), err
 		}
 		for _, state := range resp.States {
-			fmt.Println("segment ", state.SegmentID, " 's state is ", state.StartPosition)
+			log.Error("segment ", zap.String("state.SegmentID", fmt.Sprintln(state.SegmentID)), zap.String("state", fmt.Sprintln(state.StartPosition)))
 			segmentID := state.SegmentID
 			segmentStates[segmentID] = state
 			channelName := state.StartPosition.ChannelName
@@ -475,7 +478,7 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 		qs.replica.updatePartitionState(dbID, collectionID, partitionID, querypb.PartitionState_InMemory)
 	}
 
-	fmt.Println("load partitions end, partitionIDs = ", partitionIDs)
+	log.Debug("load partitions end", zap.String("partitionIDs", fmt.Sprintln(partitionIDs)))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 	}, nil
@@ -485,7 +488,7 @@ func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.Rele
 	dbID := req.DbID
 	collectionID := req.CollectionID
 	partitionIDs := req.PartitionIDs
-	fmt.Println("start release partitions start, partitionIDs = ", partitionIDs)
+	log.Debug("start release partitions start", zap.String("partitionIDs", fmt.Sprintln(partitionIDs)))
 	toReleasedPartitionID := make([]UniqueID, 0)
 	for _, partitionID := range partitionIDs {
 		_, err := qs.replica.getPartitionByID(dbID, collectionID, partitionID)
@@ -513,7 +516,7 @@ func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.Rele
 		}
 	}
 
-	fmt.Println("start release partitions end")
+	log.Debug("start release partitions end")
 	//TODO:: queryNode cancel subscribe dmChannels
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -535,9 +538,9 @@ func (qs *QueryService) CreateQueryChannel(ctx context.Context) (*querypb.Create
 		RequestChannelID: allocatedQueryChannel,
 		ResultChannelID:  allocatedQueryResultChannel,
 	}
-	fmt.Println("query service create query channel, queryChannelName = ", allocatedQueryChannel)
+	log.Debug("query service create query channel", zap.String("queryChannelName", allocatedQueryChannel))
 	for nodeID, node := range qs.queryNodes {
-		fmt.Println("node ", nodeID, " watch query channel")
+		log.Debug("node watch query channel", zap.String("nodeID", fmt.Sprintln(nodeID)))
 		fn := func() error {
 			_, err := node.AddQueryChannel(ctx, addQueryChannelsRequest)
 			return err
@@ -713,7 +716,7 @@ func (qs *QueryService) watchDmChannels(dbID UniqueID, collectionID UniqueID) er
 		if err != nil {
 			return err
 		}
-		fmt.Println("query node ", nodeID, "watch channels = ", channels)
+		log.Debug("query node ", zap.String("nodeID", strconv.FormatInt(nodeID, 10)), zap.String("watch channels", fmt.Sprintln(channels)))
 		node.AddDmChannels(channels)
 	}
 

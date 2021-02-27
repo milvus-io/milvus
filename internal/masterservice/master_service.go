@@ -8,6 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
+
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
@@ -25,8 +28,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
 )
 
 //  internalpb2 -> internalpb
@@ -266,9 +267,9 @@ func (c *Core) checkInit() error {
 		return errors.Errorf("ReleaseCollection is nil")
 	}
 
-	log.Info("master", zap.Int64("node id", int64(Params.NodeID)))
-	log.Info("master", zap.String("dd channel name", Params.DdChannel))
-	log.Info("master", zap.String("time tick channel name", Params.TimeTickChannel))
+	log.Debug("master", zap.Int64("node id", int64(Params.NodeID)))
+	log.Debug("master", zap.String("dd channel name", Params.DdChannel))
+	log.Debug("master", zap.String("time tick channel name", Params.TimeTickChannel))
 	return nil
 }
 
@@ -276,11 +277,11 @@ func (c *Core) startDdScheduler() {
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Info("close dd scheduler, exit task execution loop")
+			log.Debug("close dd scheduler, exit task execution loop")
 			return
 		case task, ok := <-c.ddReqQueue:
 			if !ok {
-				log.Info("dd chan is closed, exit task execution loop")
+				log.Debug("dd chan is closed, exit task execution loop")
 				return
 			}
 			ts, err := task.Ts()
@@ -305,11 +306,11 @@ func (c *Core) startTimeTickLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Info("close master time tick loop")
+			log.Debug("close master time tick loop")
 			return
 		case tt, ok := <-c.ProxyTimeTickChan:
 			if !ok {
-				log.Info("proxyTimeTickStream is closed, exit time tick loop")
+				log.Warn("proxyTimeTickStream is closed, exit time tick loop")
 				return
 			}
 			if tt <= c.lastTimeTick {
@@ -328,11 +329,11 @@ func (c *Core) startDataServiceSegmentLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Info("close data service segment loop")
+			log.Debug("close data service segment loop")
 			return
 		case seg, ok := <-c.DataServiceSegmentChan:
 			if !ok {
-				log.Info("data service segment is closed, exit loop")
+				log.Debug("data service segment is closed, exit loop")
 				return
 			}
 			if seg == nil {
@@ -352,11 +353,11 @@ func (c *Core) startCreateIndexLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Info("close create index loop")
+			log.Debug("close create index loop")
 			return
 		case t, ok := <-c.indexTaskQueue:
 			if !ok {
-				log.Info("index task chan has closed, exit loop")
+				log.Debug("index task chan has closed, exit loop")
 				return
 			}
 			if err := t.BuildIndex(); err != nil {
@@ -372,11 +373,11 @@ func (c *Core) startSegmentFlushCompletedLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Info("close segment flush completed loop")
+			log.Debug("close segment flush completed loop")
 			return
 		case seg, ok := <-c.DataNodeSegmentFlushCompletedChan:
 			if !ok {
-				log.Info("data node segment flush completed chan has colsed, exit loop")
+				log.Debug("data node segment flush completed chan has colsed, exit loop")
 			}
 			coll, err := c.MetaTable.GetCollectionBySegmentID(seg)
 			if err != nil {
@@ -425,7 +426,7 @@ func (c *Core) tsLoop() {
 			}
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
-			log.Info("tsLoop is closed")
+			log.Debug("tsLoop is closed")
 			return
 		}
 	}
@@ -645,7 +646,7 @@ func (c *Core) SetProxyService(ctx context.Context, s ProxyServiceInterface) err
 		return err
 	}
 	Params.ProxyTimeTickChannel = rsp.Value
-	log.Info("proxy time tick", zap.String("channel name", Params.ProxyTimeTickChannel))
+	log.Debug("proxy time tick", zap.String("channel name", Params.ProxyTimeTickChannel))
 
 	c.InvalidateCollectionMetaCache = func(ts typeutil.Timestamp, dbName string, collectionName string) error {
 		status, _ := s.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
@@ -675,7 +676,7 @@ func (c *Core) SetDataService(ctx context.Context, s DataServiceInterface) error
 		return err
 	}
 	Params.DataServiceSegmentChannel = rsp.Value
-	log.Info("data service segment", zap.String("channel name", Params.DataServiceSegmentChannel))
+	log.Debug("data service segment", zap.String("channel name", Params.DataServiceSegmentChannel))
 
 	c.GetBinlogFilePathsFromDataServiceReq = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
 		ts, err := c.tsoAllocator.Alloc(1)
@@ -797,7 +798,7 @@ func (c *Core) Init() error {
 		initError = c.setMsgStreams()
 	})
 	if initError == nil {
-		log.Info("Master service", zap.String("State Code", internalpb2.StateCode_name[int32(internalpb2.StateCode_INITIALIZING)]))
+		log.Debug("Master service", zap.String("State Code", internalpb2.StateCode_name[int32(internalpb2.StateCode_INITIALIZING)]))
 	}
 	return initError
 }
@@ -815,7 +816,7 @@ func (c *Core) Start() error {
 		go c.tsLoop()
 		c.stateCode.Store(internalpb2.StateCode_HEALTHY)
 	})
-	log.Info("Master service", zap.String("State Code", internalpb2.StateCode_name[int32(internalpb2.StateCode_HEALTHY)]))
+	log.Debug("Master service", zap.String("State Code", internalpb2.StateCode_name[int32(internalpb2.StateCode_HEALTHY)]))
 	return nil
 }
 
@@ -827,7 +828,7 @@ func (c *Core) Stop() error {
 
 func (c *Core) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
-	log.Info("GetComponentStates", zap.String("State Code", internalpb2.StateCode_name[int32(code)]))
+	log.Debug("GetComponentStates", zap.String("State Code", internalpb2.StateCode_name[int32(code)]))
 
 	return &internalpb2.ComponentStates{
 		State: &internalpb2.ComponentInfo{

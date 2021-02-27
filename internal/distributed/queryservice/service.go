@@ -2,7 +2,6 @@ package grpcqueryservice
 
 import (
 	"context"
-	"log"
 	"net"
 	"strconv"
 	"sync"
@@ -10,18 +9,19 @@ import (
 
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
-	dsc "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice/client"
-	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	dsc "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice/client"
+	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	qs "github.com/zilliztech/milvus-distributed/internal/queryservice"
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 )
 
 type Server struct {
@@ -62,7 +62,7 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Println("queryservice init done ...")
+	log.Debug("queryservice init done ...")
 
 	if err := s.start(); err != nil {
 		return err
@@ -82,8 +82,8 @@ func (s *Server) init() error {
 	}
 
 	// --- Master Server Client ---
-	log.Println("Master service address:", Params.MasterAddress)
-	log.Println("Init master service client ...")
+	log.Debug("Master service", zap.String("address", Params.MasterAddress))
+	log.Debug("Init master service client ...")
 
 	masterService, err := msc.NewClient(Params.MasterAddress, 20*time.Second)
 
@@ -109,8 +109,8 @@ func (s *Server) init() error {
 	}
 
 	// --- Data service client ---
-	log.Println("DataService Address:", Params.DataServiceAddress)
-	log.Println("QueryService Init data service client ...")
+	log.Debug("DataService", zap.String("Address", Params.DataServiceAddress))
+	log.Debug("QueryService Init data service client ...")
 
 	dataService := dsc.NewClient(Params.DataServiceAddress)
 	if err = dataService.Init(); err != nil {
@@ -140,10 +140,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.wg.Done()
 
-	log.Println("network port: ", grpcPort)
+	log.Debug("network", zap.String("port", strconv.Itoa(grpcPort)))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
-		log.Printf("GrpcServer:failed to listen: %v", err)
+		log.Debug("GrpcServer:failed to listen:", zap.String("error", err.Error()))
 		s.grpcErrChan <- err
 		return
 	}

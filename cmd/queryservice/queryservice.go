@@ -2,18 +2,29 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"go.uber.org/zap"
+
 	distributed "github.com/zilliztech/milvus-distributed/cmd/distributed/components"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/queryservice"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	queryservice.Params.Init()
+	log.SetupLogger(&queryservice.Params.Log)
+	defer func() {
+		if err := log.Sync(); err != nil {
+			panic(err)
+		}
+	}()
 
 	msFactory := pulsarms.NewFactory()
 
@@ -33,7 +44,7 @@ func main() {
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
 	sig := <-sc
-	log.Printf("Got %s signal to exit", sig.String())
+	log.Debug("Get signal to exit", zap.String("signal", sig.String()))
 
 	if err := svr.Stop(); err != nil {
 		panic(err)

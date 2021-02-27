@@ -2,13 +2,14 @@ package grpcqueryserviceclient
 
 import (
 	"context"
-	"log"
 	"time"
-
-	"google.golang.org/grpc"
 
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -55,7 +56,7 @@ func (c *Client) Init() error {
 	}
 
 	c.grpcClient = querypb.NewQueryServiceClient(c.conn)
-	log.Printf("connected to queryService, queryService=%s", c.addr)
+	log.Debug("connected to queryService", zap.String("queryService", c.addr))
 	return nil
 }
 
