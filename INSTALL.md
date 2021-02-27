@@ -145,7 +145,7 @@ With the following Docker images, you should be able to compile Milvus on any Li
 
 ### Step 1 Pull Milvus Docker images
 
-#### ubuntu18.04
+#### Ubuntu 18.04
 
 Pull CPU-only image:
 
@@ -159,7 +159,7 @@ Pull GPU-enabled image:
 $ docker pull milvusdb/milvus-gpu-build-env:v0.7.0-ubuntu18.04
 ```
 
-#### CentOs7
+#### CentOS 7
 
 Pull CPU-only image:
 
