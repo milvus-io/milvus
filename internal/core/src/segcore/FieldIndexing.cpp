@@ -39,21 +39,26 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const Vec
 
 knowhere::Config
 VectorFieldIndexing::get_build_conf() const {
+    // TODO
+    auto type_opt = field_meta_.get_metric_type();
+    Assert(type_opt.has_value());
+    auto type_name = MetricTypeToName(type_opt.value());
     return knowhere::Config{{knowhere::meta::DIM, field_meta_.get_dim()},
                             {knowhere::IndexParams::nlist, 100},
                             {knowhere::IndexParams::nprobe, 4},
-                            {knowhere::Metric::TYPE, MetricTypeToName(field_meta_.get_metric_type())},
+                            {knowhere::Metric::TYPE, type_name},
                             {knowhere::meta::DEVICEID, 0}};
 }
 
 knowhere::Config
 VectorFieldIndexing::get_search_conf(int top_K) const {
-    return knowhere::Config{{knowhere::meta::DIM, field_meta_.get_dim()},
-                            {knowhere::meta::TOPK, top_K},
-                            {knowhere::IndexParams::nlist, 100},
-                            {knowhere::IndexParams::nprobe, 4},
-                            {knowhere::Metric::TYPE, MetricTypeToName(field_meta_.get_metric_type())},
-                            {knowhere::meta::DEVICEID, 0}};
+    // TODO
+    auto type_opt = field_meta_.get_metric_type();
+    Assert(type_opt.has_value());
+    auto type_name = MetricTypeToName(type_opt.value());
+    return knowhere::Config{{knowhere::meta::DIM, field_meta_.get_dim()}, {knowhere::meta::TOPK, top_K},
+                            {knowhere::IndexParams::nlist, 100},          {knowhere::IndexParams::nprobe, 4},
+                            {knowhere::Metric::TYPE, type_name},          {knowhere::meta::DEVICEID, 0}};
 }
 
 void

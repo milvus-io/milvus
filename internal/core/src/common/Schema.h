@@ -34,7 +34,7 @@ class Schema {
 
     // auto gen field_id for convenience
     FieldId
-    AddDebugField(const std::string& name, DataType data_type, int64_t dim, MetricType metric_type) {
+    AddDebugField(const std::string& name, DataType data_type, int64_t dim, std::optional<MetricType> metric_type) {
         static int64_t debug_id = 2001;
         auto field_id = FieldId(debug_id);
         debug_id += 2;

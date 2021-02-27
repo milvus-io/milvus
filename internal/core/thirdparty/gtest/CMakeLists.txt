@@ -29,17 +29,8 @@ FetchContent_Declare(
         BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/googletest-build
         DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH} )
 
-FetchContent_GetProperties( googletest )
-if ( NOT googletest_POPULATED )
-
-    FetchContent_Populate( googletest )
-
-    # Adding the following targets:
-    # gtest, gtest_main, gmock, gmock_main
-    add_subdirectory( ${googletest_SOURCE_DIR}
-                      ${googletest_BINARY_DIR}
-                      EXCLUDE_FROM_ALL )
-endif()
+FetchContent_MakeAvailable(googletest)
+# include(GoogleTest)
 
 # ****************************************************************
 # Create ALIAS Target
