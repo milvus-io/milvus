@@ -11,6 +11,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#3977 Support logging to stdout
 
 ## Improvement
+-   \#4754 Reduce the package download size of grpc-milvus for C++ SDK
 
 ## Task
 
