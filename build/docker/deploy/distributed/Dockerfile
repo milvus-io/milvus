@@ -14,16 +14,16 @@ FROM milvusdb/milvus-distributed-dev:amd64-ubuntu18.04-latest AS openblas
 #FROM alpine
 FROM ubuntu:bionic-20200921
 
+RUN apt-get update && apt-get install -y --no-install-recommends libtbb-dev gfortran && \
+    apt-get remove --purge -y && \
+    rm -rf /var/lib/apt/lists/*
+
 # Add Tini
 ENV TINI_VERSION v0.19.0
 
 ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /tini
 
 RUN chmod +x /tini
-
-ENTRYPOINT ["/tini", "--"]
-
-RUN apt-get update && apt-get install -y --no-install-recommends libtbb-dev gfortran
 
 COPY --from=openblas /usr/lib/libopenblas-r0.3.9.so /usr/lib/
 
@@ -37,5 +37,7 @@ COPY ./configs/ /milvus-distributed/configs/
 COPY ./lib/ /milvus-distributed/lib/
 
 ENV LD_LIBRARY_PATH=/milvus-distributed/lib:$LD_LIBRARY_PATH:/usr/lib
+
+ENTRYPOINT ["/tini", "--"]
 
 WORKDIR /milvus-distributed/
