@@ -16,6 +16,7 @@ class TestDropCollection:
       The following cases are used to test `drop_collection` function
     ******************************************************************
     """
+    @pytest.mark.tags("0331")
     def test_drop_collection(self, connect, collection):
         '''
         target: test delete collection created with correct params 
@@ -27,6 +28,7 @@ class TestDropCollection:
         time.sleep(2)
         assert not connect.has_collection(collection)
 
+    @pytest.mark.tags("0331")
     def test_drop_collection_without_connection(self, collection, dis_connect):
         '''
         target: test describe collection, without connection
@@ -36,6 +38,7 @@ class TestDropCollection:
         with pytest.raises(Exception) as e:
             dis_connect.drop_collection(collection)
 
+    @pytest.mark.tags("0331")
     def test_drop_collection_not_existed(self, connect):
         '''
         target: test if collection not created
@@ -48,6 +51,7 @@ class TestDropCollection:
             connect.drop_collection(collection_name)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_create_drop_collection_multithread(self, connect):
         '''
         target: test create and drop collection with multithread
@@ -87,16 +91,19 @@ class TestDropCollectionInvalid(object):
         yield request.param
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_drop_collection_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.has_collection(collection_name)
 
+    @pytest.mark.tags("0331")
     def test_drop_collection_with_empty_collection_name(self, connect):
         collection_name = ''
         with pytest.raises(Exception) as e:
             connect.has_collection(collection_name)
 
+    @pytest.mark.tags("0331")
     def test_drop_collection_with_none_collection_name(self, connect):
         collection_name = None
         with pytest.raises(Exception) as e:

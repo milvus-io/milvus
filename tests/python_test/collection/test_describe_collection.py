@@ -38,7 +38,7 @@ class TestDescribeCollection:
       The following cases are used to test `describe_collection` function, no data in collection
     ******************************************************************
     """
-
+    @pytest.mark.tags("0331")
     def test_collection_fields(self, connect, get_filter_field, get_vector_field):
         '''
         target: test create normal collection with different fields, check info returned
@@ -64,17 +64,16 @@ class TestDescribeCollection:
                 assert field["name"] == vector_field["name"]
                 assert field["params"] == vector_field["params"]
 
+    @pytest.mark.tags("0331")
     def test_describe_collection_after_index_created(self, connect, collection, get_simple_index):
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
-        res = connect.describe_collection(collection)
-        logging.getLogger().info(res)
-        for field in res["fields"]:
-            if field["name"] == default_float_vec_field_name:
-                index = field["indexes"][0]
-                assert index["index_type"] == get_simple_index["index_type"]
-                assert index["metric_type"] == get_simple_index["metric_type"]
+        index = connect.describe_index(collection, default_float_vec_field_name)
+        assert index["index_type"] == get_simple_index["index_type"]
+        assert index["metric_type"] == get_simple_index["metric_type"]
+        assert index["params"] == get_simple_index["params"]
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_describe_collection_without_connection(self, collection, dis_connect):
         '''
         target: test get collection info, without connection
@@ -84,6 +83,7 @@ class TestDescribeCollection:
         with pytest.raises(Exception) as e:
             dis_connect.describe_collection(collection)
 
+    @pytest.mark.tags("0331")
     def test_describe_collection_not_existed(self, connect):
         '''
         target: test if collection not created
@@ -99,6 +99,7 @@ class TestDescribeCollection:
             connect.describe_collection(collection_name)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_describe_collection_multithread(self, connect):
         '''
         target: test create collection with multithread
@@ -126,7 +127,7 @@ class TestDescribeCollection:
       The following cases are used to test `describe_collection` function, and insert data in collection
     ******************************************************************
     """
-
+    @pytest.mark.tags("0331")
     def test_describe_collection_fields_after_insert(self, connect, get_filter_field, get_vector_field):
         '''
         target: test create normal collection with different fields, check info returned
@@ -156,7 +157,6 @@ class TestDescribeCollection:
                 assert field["params"] == vector_field["params"]
 
 
-
 class TestDescribeCollectionInvalid(object):
     """
     Test describe collection with invalid params
@@ -169,18 +169,21 @@ class TestDescribeCollectionInvalid(object):
         yield request.param
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_describe_collection_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.describe_collection(collection_name)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_describe_collection_with_empty_collection_name(self, connect):
         collection_name = ''
         with pytest.raises(Exception) as e:
             connect.describe_collection(collection_name)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_describe_collection_with_none_collection_name(self, connect):
         collection_name = None
         with pytest.raises(Exception) as e:
