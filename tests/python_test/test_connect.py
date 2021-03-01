@@ -40,6 +40,7 @@ class TestConnect:
         with pytest.raises(Exception) as e:
             connect.close()
 
+    @pytest.mark.tags("0331")
     def test_connect_correct_ip_port(self, args):
         '''
         target: test connect with correct ip and port value
