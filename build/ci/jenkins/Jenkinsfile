@@ -72,7 +72,7 @@ pipeline {
                 axes {
                     axis {
                         name 'REGRESSION_SERVICE_NAME'
-                        values 'regression, regression_0331'
+                        values 'regression', 'regression_0331'
                     }
                 }
                 environment {
