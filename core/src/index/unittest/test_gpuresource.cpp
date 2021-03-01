@@ -42,14 +42,14 @@ class GPURESTEST : public DataGen, public TestGpuIndexBase {
 
         k = K;
         elems = nq * k;
-        ids = (int64_t*)malloc(sizeof(int64_t) * elems);
-        dis = (float*)malloc(sizeof(float) * elems);
+        ids = new int64_t[elems];
+        dis = new float[elems];
     }
 
     void
     TearDown() override {
-        delete ids;
-        delete dis;
+        delete[] ids;
+        delete[] dis;
         TestGpuIndexBase::TearDown();
     }
 
