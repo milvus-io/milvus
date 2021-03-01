@@ -6,6 +6,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Bug
 -   \#4739 Fix mishards probe test problem
 -   \#4749 Fix minor memory leak when building IVF_SQ8 on GPU
+-   \#4757 Fix minor memory leak when querying by IVF_SQ8H
 
 ## Feature
 -   \#3977 Support logging to stdout
