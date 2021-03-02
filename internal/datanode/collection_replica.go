@@ -151,10 +151,11 @@ func (replica *ReplicaImpl) getSegmentStatisticsUpdates(segmentID UniqueID) (*in
 	for _, ele := range replica.segments {
 		if ele.segmentID == segmentID {
 			updates := &internalpb2.SegmentStatisticsUpdates{
-				SegmentID:    segmentID,
-				MemorySize:   ele.memorySize,
-				NumRows:      ele.numRows,
-				IsNewSegment: ele.isNew,
+				SegmentID:     segmentID,
+				MemorySize:    ele.memorySize,
+				NumRows:       ele.numRows,
+				IsNewSegment:  ele.isNew,
+				StartPosition: new(internalpb2.MsgPosition),
 			}
 
 			if ele.isNew {
