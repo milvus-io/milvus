@@ -38,7 +38,7 @@ class TestConnect:
         expected: raise an error after disconnected
         '''
         with pytest.raises(Exception) as e:
-            connect.close()
+            dis_connect.close()
 
     @pytest.mark.tags("0331")
     def test_connect_correct_ip_port(self, args):

@@ -6,12 +6,12 @@ import time
 import threading
 from multiprocessing import Process
 import sklearn.preprocessing
-
 import pytest
 from utils import *
 from constants import *
 
 uid = "create_collection"
+
 
 class TestCreateCollection:
     """
@@ -19,6 +19,7 @@ class TestCreateCollection:
       The following cases are used to test `create_collection` function
     ******************************************************************
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_single_filter_fields()
@@ -52,8 +53,8 @@ class TestCreateCollection:
         vector_field = get_vector_field
         collection_name = gen_unique_str(uid)
         fields = {
-                "fields": [filter_field, vector_field],
-                # "segment_row_limit": default_segment_row_limit
+            "fields": [filter_field, vector_field],
+            # "segment_row_limit": default_segment_row_limit
         }
         logging.getLogger().info(fields)
         connect.create_collection(collection_name, fields)
@@ -93,7 +94,7 @@ class TestCreateCollection:
         expected: error raised
         '''
         connect.insert(collection, default_entity)
-        connect.flush([collection])
+        # connect.flush([collection])
         with pytest.raises(Exception) as e:
             connect.create_collection(collection, default_fields)
 
@@ -140,7 +141,7 @@ class TestCreateCollection:
         method: create collection using multithread, 
         expected: collections are created
         '''
-        threads_num = 8 
+        threads_num = 8
         threads = []
         collection_names = []
 
@@ -148,6 +149,7 @@ class TestCreateCollection:
             collection_name = gen_unique_str(uid)
             collection_names.append(collection_name)
             connect.create_collection(collection_name, default_fields)
+
         for i in range(threads_num):
             t = TestThread(target=create, args=())
             threads.append(t)
@@ -155,7 +157,7 @@ class TestCreateCollection:
             time.sleep(0.2)
         for t in threads:
             t.join()
-        
+
         for item in collection_names:
             assert item in connect.list_collections()
             connect.drop_collection(item)
@@ -165,6 +167,7 @@ class TestCreateCollectionInvalid(object):
     """
     Test creating collections with invalid params
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_metric_types()
@@ -217,7 +220,7 @@ class TestCreateCollectionInvalid(object):
         fields = copy.deepcopy(default_fields)
         fields["fields"][-1]["params"]["dim"] = dimension
         with pytest.raises(Exception) as e:
-             connect.create_collection(collection_name, fields)
+            connect.create_collection(collection_name, fields)
 
     @pytest.mark.level(2)
     @pytest.mark.tags("0331")
