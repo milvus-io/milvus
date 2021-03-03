@@ -10,6 +10,7 @@ from constants import *
 
 uid = "drop_collection"
 
+
 class TestDropCollection:
     """
     ******************************************************************
@@ -17,7 +18,7 @@ class TestDropCollection:
     ******************************************************************
     """
     @pytest.mark.tags("0331")
-    def test_drop_collection(self, connect, collection):
+    def test_drop_collection_A(self, connect, collection):
         '''
         target: test delete collection created with correct params 
         method: create collection and then delete, 
@@ -47,8 +48,13 @@ class TestDropCollection:
         expected: False
         '''
         collection_name = gen_unique_str(uid)
-        with pytest.raises(Exception) as e:
+        try:
             connect.drop_collection(collection_name)
+        except Exception as e:
+            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            assert code == 1
+            message = getattr(e, 'message', "The exception does not contain the field of message.")
+            assert message == "describe collection failed: can't find collection: %s" % collection_name
 
     @pytest.mark.level(2)
     @pytest.mark.tags("0331")
@@ -98,13 +104,7 @@ class TestDropCollectionInvalid(object):
             connect.has_collection(collection_name)
 
     @pytest.mark.tags("0331")
-    def test_drop_collection_with_empty_collection_name(self, connect):
-        collection_name = ''
-        with pytest.raises(Exception) as e:
-            connect.has_collection(collection_name)
-
-    @pytest.mark.tags("0331")
-    def test_drop_collection_with_none_collection_name(self, connect):
-        collection_name = None
+    @pytest.mark.parametrize("collection_name", ('', None))
+    def test_drop_collection_with_empty_or_None_collection_name(self, connect, collection_name):
         with pytest.raises(Exception) as e:
             connect.has_collection(collection_name)

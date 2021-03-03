@@ -82,8 +82,13 @@ class TestCreateCollection:
         # pdb.set_trace()
         connect.insert(collection, default_entity)
 
-        with pytest.raises(Exception) as e:
+        try:
             connect.create_collection(collection, default_fields)
+        except Exception as e:
+            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            assert code == 1
+            message = getattr(e, 'message', "The exception does not contain the field of message.")
+            assert message == "Create collection failed: collection %s exist" % collection
 
     @pytest.mark.tags("0331")
     def test_create_collection_after_insert_flush(self, connect, collection):
@@ -94,8 +99,13 @@ class TestCreateCollection:
         '''
         connect.insert(collection, default_entity)
         # connect.flush([collection])
-        with pytest.raises(Exception) as e:
+        try:
             connect.create_collection(collection, default_fields)
+        except Exception as e:
+            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            assert code == 1
+            message = getattr(e, 'message', "The exception does not contain the field of message.")
+            assert message == "Create collection failed: collection %s exist" % collection
 
     # TODO: assert exception
     @pytest.mark.tags("0331")
@@ -118,8 +128,13 @@ class TestCreateCollection:
         '''
         collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
-        with pytest.raises(Exception) as e:
+        try:
             connect.create_collection(collection_name, default_fields)
+        except Exception as e:
+            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            assert code == 1
+            message = getattr(e, 'message', "The exception does not contain the field of message.")
+            assert message == "Create collection failed: collection %s exist" % collection_name
 
     @pytest.mark.tags("0331")
     def test_create_after_drop_collection(self, connect, collection):
@@ -229,17 +244,16 @@ class TestCreateCollectionInvalid(object):
 
     @pytest.mark.level(2)
     @pytest.mark.tags("0331")
-    def test_create_collection_with_empty_collection_name(self, connect):
-        collection_name = ''
-        with pytest.raises(Exception) as e:
+    @pytest.mark.parametrize("collection_name", ('', None))
+    def test_create_collection_with_empty_or_None_collection_name(self, connect, collection_name):
+        # collection_name = ''
+        try:
             connect.create_collection(collection_name, default_fields)
-
-    @pytest.mark.level(2)
-    @pytest.mark.tags("0331")
-    def test_create_collection_with_none_collection_name(self, connect):
-        collection_name = None
-        with pytest.raises(Exception) as e:
-            connect.create_collection(collection_name, default_fields)
+        except Exception as e:
+            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            assert code == 1
+            message = getattr(e, 'message', "The exception does not contain the field of message.")
+            assert message == "Collection name should not be empty"
 
     @pytest.mark.tags("0331")
     def test_create_collection_no_dimension(self, connect):
@@ -251,8 +265,13 @@ class TestCreateCollectionInvalid(object):
         collection_name = gen_unique_str(uid)
         fields = copy.deepcopy(default_fields)
         fields["fields"][-1]["params"].pop("dim")
-        with pytest.raises(Exception) as e:
+        try:
             connect.create_collection(collection_name, fields)
+        except Exception as e:
+            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            assert code == 1
+            message = getattr(e, 'message', "The exception does not contain the field of message.")
+            assert message == "dimension is not defined in field type params"
 
     def _test_create_collection_no_segment_row_limit(self, connect):
         '''
@@ -278,8 +297,14 @@ class TestCreateCollectionInvalid(object):
             field_name = gen_unique_str("field_name")
             field = {"name": field_name, "type": DataType.INT64}
             fields["fields"].append(field)
-        with pytest.raises(Exception) as e:
+
+        try:
             connect.create_collection(collection_name, fields)
+        except Exception as e:
+            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            assert code == 1
+            message = getattr(e, 'message', "The exception does not contain the field of message.")
+            assert message == "maximum field's number should be limited to 64"
 
     # TODO: assert exception
     @pytest.mark.level(2)

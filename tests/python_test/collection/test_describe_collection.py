@@ -6,6 +6,7 @@ from constants import *
 
 uid = "describe_collection"
 
+
 class TestDescribeCollection:
 
     @pytest.fixture(
@@ -95,8 +96,13 @@ class TestDescribeCollection:
         connect.create_collection(collection_name, default_fields)
         connect.describe_collection(collection_name)
         connect.drop_collection(collection_name)
-        with pytest.raises(Exception) as e:
+        try:
             connect.describe_collection(collection_name)
+        except Exception as e:
+            code = getattr(e, 'code', "The exception does not contain the field of code.")
+            assert code == 1
+            message = getattr(e, 'message', "The exception does not contain the field of message.")
+            assert message == "describe collection failed: can't find collection: %s" % collection_name
 
     @pytest.mark.level(2)
     @pytest.mark.tags("0331")
@@ -146,7 +152,7 @@ class TestDescribeCollection:
         res_ids = connect.insert(collection_name, entities)
         connect.flush([collection_name])
         res = connect.describe_collection(collection_name)
-        assert res['auto_id'] == True
+        assert res['auto_id'] is True
         # assert res['segment_row_limit'] == default_segment_row_limit
         assert len(res["fields"]) == 2
         for field in res["fields"]:
@@ -177,14 +183,7 @@ class TestDescribeCollectionInvalid(object):
 
     @pytest.mark.level(2)
     @pytest.mark.tags("0331")
-    def test_describe_collection_with_empty_collection_name(self, connect):
-        collection_name = ''
-        with pytest.raises(Exception) as e:
-            connect.describe_collection(collection_name)
-
-    @pytest.mark.level(2)
-    @pytest.mark.tags("0331")
-    def test_describe_collection_with_none_collection_name(self, connect):
-        collection_name = None
+    @pytest.mark.parametrize("collection_name", ('', None))
+    def test_describe_collection_with_empty_or_None_collection_name(self, connect, collection_name):
         with pytest.raises(Exception) as e:
             connect.describe_collection(collection_name)
