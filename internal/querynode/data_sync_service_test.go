@@ -109,7 +109,6 @@ func TestDataSyncService_Start(t *testing.T) {
 	// pulsar produce
 	const receiveBufSize = 1024
 	insertChannels := Params.InsertChannelNames
-	ddChannels := Params.DDChannelNames
 	pulsarURL := Params.PulsarAddress
 
 	msFactory := pulsarms.NewFactory()
@@ -123,21 +122,13 @@ func TestDataSyncService_Start(t *testing.T) {
 	insertStream, _ := msFactory.NewMsgStream(node.queryNodeLoopCtx)
 	insertStream.AsProducer(insertChannels)
 
-	ddStream, _ := msFactory.NewMsgStream(node.queryNodeLoopCtx)
-	ddStream.AsProducer(ddChannels)
-
 	var insertMsgStream msgstream.MsgStream = insertStream
 	insertMsgStream.Start()
-
-	var ddMsgStream msgstream.MsgStream = ddStream
-	ddMsgStream.Start()
 
 	err = insertMsgStream.Produce(ctx, &msgPack)
 	assert.NoError(t, err)
 
 	err = insertMsgStream.Broadcast(ctx, &timeTickMsgPack)
-	assert.NoError(t, err)
-	err = ddMsgStream.Broadcast(ctx, &timeTickMsgPack)
 	assert.NoError(t, err)
 
 	// dataSync

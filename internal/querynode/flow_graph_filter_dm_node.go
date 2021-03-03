@@ -3,7 +3,6 @@ package querynode
 import (
 	"context"
 	"log"
-	"math"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -11,7 +10,6 @@ import (
 
 type filterDmNode struct {
 	baseNode
-	ddMsg   *ddMsg
 	replica collectionReplica
 }
 
@@ -22,7 +20,7 @@ func (fdmNode *filterDmNode) Name() string {
 func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
 	//fmt.Println("Do filterDmNode operation")
 
-	if len(in) != 2 {
+	if len(in) != 1 {
 		log.Println("Invalid operate message input in filterDmNode, input length = ", len(in))
 		// TODO: add error handling
 	}
@@ -32,13 +30,6 @@ func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, cont
 		log.Println("type assertion failed for MsgStreamMsg")
 		// TODO: add error handling
 	}
-
-	ddMsg, ok := in[1].(*ddMsg)
-	if !ok {
-		log.Println("type assertion failed for ddMsg")
-		// TODO: add error handling
-	}
-	fdmNode.ddMsg = ddMsg
 
 	var iMsg = insertMsg{
 		insertMessages: make([]*msgstream.InsertMsg, 0),
@@ -61,7 +52,6 @@ func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, cont
 		}
 	}
 
-	iMsg.gcRecord = ddMsg.gcRecord
 	var res Msg = &iMsg
 
 	return []Msg{res}, ctx
@@ -74,12 +64,6 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	enablePartition := fdmNode.replica.hasPartition(msg.PartitionID)
 	if !enableCollection || !enablePartition {
 		return nil
-	}
-
-	// No dd record, do all insert requests.
-	records, ok := fdmNode.ddMsg.collectionRecords[msg.CollectionID]
-	if !ok {
-		return msg
 	}
 
 	// TODO: If the last record is drop type, all insert requests are invalid.
@@ -98,24 +82,10 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	tmpRowIDs := make([]int64, 0)
 	tmpRowData := make([]*commonpb.Blob, 0)
 
-	// calculate valid time range
-	timeBegin := Timestamp(0)
-	timeEnd := Timestamp(math.MaxUint64)
-	for _, record := range records {
-		if record.createOrDrop && timeBegin < record.timestamp {
-			timeBegin = record.timestamp
-		}
-		if !record.createOrDrop && timeEnd > record.timestamp {
-			timeEnd = record.timestamp
-		}
-	}
-
 	for i, t := range msg.Timestamps {
-		if t >= timeBegin && t <= timeEnd {
-			tmpTimestamps = append(tmpTimestamps, t)
-			tmpRowIDs = append(tmpRowIDs, msg.RowIDs[i])
-			tmpRowData = append(tmpRowData, msg.RowData[i])
-		}
+		tmpTimestamps = append(tmpTimestamps, t)
+		tmpRowIDs = append(tmpRowIDs, msg.RowIDs[i])
+		tmpRowData = append(tmpRowData, msg.RowData[i])
 	}
 
 	if len(tmpRowIDs) <= 0 {
