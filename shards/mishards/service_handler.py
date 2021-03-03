@@ -119,7 +119,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             routing = self.router.routing(collection_id,
                                           partition_tags=partition_tags,
                                           metadata=metadata)
-        logger.info('Routing: {}'.format(routing))
+            logger.info('Routing: {}'.format(routing))
 
         metadata = kwargs.get('metadata', None)
 
@@ -137,25 +137,25 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                     search_file_ids, ud_file_ids = files_tuple
                     if ud_file_ids:
                         logger.debug(f"<{addr}> needed update segment ids {ud_file_ids}")
-                    conn = self.router.query_conn(addr, metadata=metadata)
-                    ud_file_ids and conn.reload_segments(collection_id, ud_file_ids)
-                    span = kwargs.get('span', None)
-                    span = span if span else (None if self.tracer.empty else
-                                              context.get_active_span().context)
+                        conn = self.router.query_conn(addr, metadata=metadata)
+                        ud_file_ids and conn.reload_segments(collection_id, ud_file_ids)
+                        span = kwargs.get('span', None)
+                        span = span if span else (None if self.tracer.empty else
+                                                  context.get_active_span().context)
 
                     with self.tracer.start_span('search_{}'.format(addr),
                                                 child_of=span):
                         future = conn.search_in_segment(collection_name=collection_id,
-                                                              file_ids=search_file_ids,
-                                                              query_records=vectors,
-                                                              top_k=topk,
-                                                              params=search_params, _async=True)
+                                                        file_ids=search_file_ids,
+                                                        query_records=vectors,
+                                                        top_k=topk,
+                                                        params=search_params, _async=True)
                         futures.append(future)
 
                 for f in futures:
                     ret = f.result(raw=True)
                     all_topk_results.append(ret)
-                logger.debug("Search in routing {} cost {} s".format(routing, time.time() - start))
+                    logger.debug("Search in routing {} cost {} s".format(routing, time.time() - start))
 
         reverse = collection_meta.metric_type == Types.MetricType.IP
         with self.tracer.start_span('do_merge', child_of=p_span):
@@ -202,7 +202,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         logger.info('HasCollection {}'.format(_collection_name))
 
         _status, _bool = self._has_collection(_collection_name,
-                                         metadata={'resp_class': milvus_pb2.BoolReply})
+                                              metadata={'resp_class': milvus_pb2.BoolReply})
 
         return milvus_pb2.BoolReply(status=status_pb2.Status(
             error_code=_status.code, reason=_status.message),
@@ -228,7 +228,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         _collection_name, _tag = Parser.parse_proto_PartitionParam(request)
         _status, _ok = self.router.connection().has_partition(_collection_name, _tag)
         return milvus_pb2.BoolReply(status=status_pb2.Status(error_code=_status.code,
-                                 reason=_status.message), bool_reply=_ok)
+                                                             reason=_status.message), bool_reply=_ok)
 
     @mark_grpc_method
     def ShowPartitions(self, request, context):
@@ -450,7 +450,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         logger.info('DescribeCollection {}'.format(_collection_name))
         _status, _collection = self._describe_collection(metadata=metadata,
-                                               collection_name=_collection_name)
+                                                         collection_name=_collection_name)
 
         if _status.OK():
             return milvus_pb2.CollectionSchema(

@@ -1,3 +1,4 @@
+import os
 import logging
 import sys
 import grpc
@@ -13,8 +14,28 @@ from milvus.grpc_gen.milvus_pb2_grpc import add_MilvusServiceServicer_to_server
 from mishards.grpc_utils import is_grpc_method
 from mishards.service_handler import ServiceHandler
 from mishards import settings
-
 logger = logging.getLogger(__name__)
+
+
+def _unary_unary_rpc_terminator(code, details):
+
+    def terminate(ignored_request, context):
+        context.abort(code, details)
+
+    return grpc.unary_unary_rpc_method_handler(terminate)
+
+
+class RequestHeaderValidatorInterceptor(grpc.ServerInterceptor):
+    def __init__(self, header, value, code, details):
+        self._header = header
+        self._value = value
+        self._terminator = _unary_unary_rpc_terminator(code, details)
+
+    def intercept_service(self, continuation, handler_call_details):
+        if (self._header, self._value) in handler_call_details.invocation_metadata:
+            return continuation(handler_call_details)
+        else:
+            return self._terminator
 
 
 class Server:
@@ -40,10 +61,15 @@ class Server:
         self.router = router
         self.discover = discover
 
+        token = os.getenv("MISHARDS_TOKEN")
+        logger.debug(f"Mishards token is: {token}")
         logger.debug('Init grpc server with max_workers: {}'.format(max_workers))
-
+        header_validator = RequestHeaderValidatorInterceptor(
+            'token', token, grpc.StatusCode.UNAUTHENTICATED,
+            'Access denied!')
         self.server_impl = grpc.server(
             thread_pool=futures.ThreadPoolExecutor(max_workers=max_workers),
+            interceptors=(header_validator,),
             options=[(cygrpc.ChannelArgKey.max_send_message_length, -1),
                      (cygrpc.ChannelArgKey.max_receive_message_length, -1)])
 
