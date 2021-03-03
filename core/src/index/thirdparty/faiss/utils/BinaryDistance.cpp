@@ -373,6 +373,7 @@ void binary_distance_knn_hc (
         memcpy(ha->val, value, thread_heap_size * sizeof(T));
         memcpy(ha->ids, labels, thread_heap_size * sizeof(int64_t));
 
+        delete[] hc;
         delete[] value;
         delete[] labels;
 
