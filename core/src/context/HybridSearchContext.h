@@ -17,7 +17,6 @@
 #include <vector>
 
 #include "query/BinaryQuery.h"
-#include "search/Task.h"
 
 namespace milvus {
 namespace search {
