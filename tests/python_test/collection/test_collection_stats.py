@@ -123,8 +123,7 @@ class TestGetCollectionStats:
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == nb
 
-    @pytest.mark.skip("delete_by_id not support yet")
-    def test_get_collection_stats_after_delete(self, connect, collection):
+    def _test_get_collection_stats_after_delete(self, connect, collection):
         '''
         target: get row count with collection_stats
         method: add and delete entities, check count in collection info
@@ -142,8 +141,7 @@ class TestGetCollectionStats:
 
     # TODO: enable
     @pytest.mark.level(2)
-    @pytest.mark.skip("no compact")
-    def test_get_collection_stats_after_compact_parts(self, connect, collection):
+    def _test_get_collection_stats_after_compact_parts(self, connect, collection):
         '''
         target: get row count with collection_stats
         method: add and delete entities, and compact collection, check count in collection info
@@ -165,8 +163,7 @@ class TestGetCollectionStats:
         compact_after = stats["partitions"][0]["segments"][0]["data_size"]
         assert compact_before == compact_after
 
-    @pytest.mark.skip("no compact")
-    def test_get_collection_stats_after_compact_delete_one(self, connect, collection):
+    def _test_get_collection_stats_after_compact_delete_one(self, connect, collection):
         '''
         target: get row count with collection_stats
         method: add and delete one entity, and compact collection, check count in collection info

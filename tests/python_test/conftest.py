@@ -41,8 +41,22 @@ def pytest_runtest_setup(item):
 
 def pytest_runtestloop(session):
     if session.config.getoption('--dry-run'):
+        total_num = 0
+        file_num = 0
+        tags_num = 0
+        res = {"total_num": total_num, "tags_num": tags_num}
         for item in session.items:
             print(item.nodeid)
+            if item.fspath.basename not in res:
+                res.update({item.fspath.basename: {"total": 1, "tags": 0}})
+            else:
+                res[item.fspath.basename]["total"] += 1
+            res["total_num"] += 1
+            for marker in item.own_markers:
+                if "0331" in marker.args:
+                    res["tags_num"] += 1
+                    res[item.fspath.basename]["tags"] += 1
+        print(res)
         return True
 
 

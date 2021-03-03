@@ -650,7 +650,6 @@ class TestIndexBinary:
       The following cases are used to test `describe_index` function
     ***************************************************************
     """
-    @pytest.mark.skip("repeat with test_create_index binary")
     def test_get_index_info(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test describe index interface
@@ -670,7 +669,6 @@ class TestIndexBinary:
                         if "index_type" in file:
                             assert file["index_type"] == get_jaccard_index["index_type"]
 
-    @pytest.mark.skip("repeat with test_create_index_partition binary")
     def test_get_index_info_partition(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test describe index interface

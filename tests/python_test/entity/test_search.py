@@ -187,7 +187,6 @@ class TestSearchBase:
             with pytest.raises(Exception) as e:
                 res = connect.search(collection, query)
 
-    # @pytest.mark.skip("r0.3-test")
     def test_search_field(self, connect, collection, get_top_k, get_nq):
         '''
         target: test basic search function, all the search params is correct, change top-k value
@@ -211,8 +210,7 @@ class TestSearchBase:
             with pytest.raises(Exception):
                 connect.search(collection, query)
 
-    @pytest.mark.skip("delete_entity_by_id not ready")
-    def test_search_after_delete(self, connect, collection, get_top_k, get_nq):
+    def _test_search_after_delete(self, connect, collection, get_top_k, get_nq):
         '''
         target: test basic search function before and after deletion, all the search params is
                 correct, change top-k value.
@@ -287,7 +285,6 @@ class TestSearchBase:
             assert res[0]._distances[0] < epsilon
             assert check_id_result(res[0], ids[0])
 
-    # @pytest.mark.skip("r0.3-test")
     def test_search_after_index_different_metric_type(self, connect, collection, get_simple_index):
         '''
         target: test search with different metric_type
@@ -307,7 +304,6 @@ class TestSearchBase:
         assert len(res[0]) == default_top_k
         assert res[0]._distances[0] > res[0]._distances[default_top_k - 1]
 
-    # @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_index_empty_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
@@ -341,7 +337,6 @@ class TestSearchBase:
             res = connect.search(collection, query, partition_tags=[default_tag])
             assert len(res[0]) == 0
 
-    # @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_index_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
@@ -372,7 +367,6 @@ class TestSearchBase:
                 assert res[0]._distances[0] < epsilon
                 assert check_id_result(res[0], ids[0])
 
-    # @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_index_partition_not_existed(self, connect, collection, get_top_k, get_nq):
         '''
@@ -513,7 +507,6 @@ class TestSearchBase:
         assert check_id_result(res[0], ids[0])
         assert res[0]._distances[0] >= 1 - gen_inaccuracy(res[0]._distances[0])
 
-    # @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_ip_index_empty_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
@@ -957,7 +950,6 @@ class TestSearchBase:
                 assert res[i]._distances[0] < epsilon
                 assert res[i]._distances[1] > epsilon
 
-    # @pytest.mark.skip("r0.3-test")
     def test_query_entities_with_field_less_than_top_k(self, connect, id_collection):
         """
         target: test search with field, and let return entities less than topk
@@ -1064,7 +1056,6 @@ class TestSearchDSL(object):
     ******************************************************************
     """
 
-    # @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_query_term_value_not_in(self, connect, collection):
         '''
@@ -1082,7 +1073,6 @@ class TestSearchDSL(object):
         # TODO:
 
     # TODO:
-    # @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_query_term_value_all_in(self, connect, collection):
         '''
@@ -1099,7 +1089,6 @@ class TestSearchDSL(object):
         # TODO:
 
     # TODO:
-    # @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_query_term_values_not_in(self, connect, collection):
         '''
@@ -1116,7 +1105,6 @@ class TestSearchDSL(object):
         assert len(res[0]) == 0
         # TODO:
 
-    # @pytest.mark.skip("r0.3-test")
     def test_query_term_values_all_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with all term can be filtered
@@ -1136,7 +1124,6 @@ class TestSearchDSL(object):
                 assert result.id in ids[:limit]
         # TODO:
 
-    # @pytest.mark.skip("r0.3-test")
     def test_query_term_values_parts_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with parts of term can be filtered
@@ -1154,7 +1141,6 @@ class TestSearchDSL(object):
         # TODO:
 
     # TODO:
-    # @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_query_term_values_repeat(self, connect, collection):
         '''
@@ -1244,7 +1230,6 @@ class TestSearchDSL(object):
             res = connect.search(collection, query)
 
     # TODO
-    # @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_query_term_field_named_term(self, connect, collection):
         '''
@@ -1343,7 +1328,6 @@ class TestSearchDSL(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    # @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_query_range_invalid_ranges(self, connect, collection):
         '''
@@ -1366,7 +1350,6 @@ class TestSearchDSL(object):
     def get_valid_ranges(self, request):
         return request.param
 
-    # @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_query_range_valid_ranges(self, connect, collection, get_valid_ranges):
         '''
@@ -1404,7 +1387,6 @@ class TestSearchDSL(object):
     """
 
     # TODO
-    # @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_query_multi_term_has_common(self, connect, collection):
         '''
@@ -1422,7 +1404,6 @@ class TestSearchDSL(object):
         assert len(res[0]) == default_top_k
 
     # TODO
-    # @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_query_multi_term_no_common(self, connect, collection):
         '''
@@ -1440,7 +1421,6 @@ class TestSearchDSL(object):
         assert len(res[0]) == 0
 
     # TODO
-    # @pytest.mark.skip("r0.3-test")
     def test_query_multi_term_different_fields(self, connect, collection):
         '''
          method: build query with multi range with same field, and ranges no common
@@ -1475,7 +1455,6 @@ class TestSearchDSL(object):
             res = connect.search(collection, query)
 
     # TODO
-    # @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_query_multi_range_has_common(self, connect, collection):
         '''
@@ -1493,7 +1472,6 @@ class TestSearchDSL(object):
         assert len(res[0]) == default_top_k
 
     # TODO
-    # @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_query_multi_range_no_common(self, connect, collection):
         '''
@@ -1511,7 +1489,6 @@ class TestSearchDSL(object):
         assert len(res[0]) == 0
 
     # TODO
-    # @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_query_multi_range_different_fields(self, connect, collection):
         '''
@@ -1552,7 +1529,6 @@ class TestSearchDSL(object):
     """
 
     # TODO
-    # @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_query_single_term_range_has_common(self, connect, collection):
         '''
@@ -1570,7 +1546,6 @@ class TestSearchDSL(object):
         assert len(res[0]) == default_top_k
 
     # TODO
-    # @pytest.mark.skip("r0.3-test")
     def test_query_single_term_range_no_common(self, connect, collection):
         '''
         method: build query with single term single range

@@ -60,8 +60,7 @@ class TestCreateCollection:
         connect.create_collection(collection_name, fields)
         assert connect.has_collection(collection_name)
 
-    @pytest.mark.skip("no segment_row_limit")
-    def test_create_collection_segment_row_limit(self, connect, get_segment_row_limit):
+    def _test_create_collection_segment_row_limit(self, connect, get_segment_row_limit):
         '''
         target: test create normal collection with different fields
         method: create collection with diff segment_row_limit
@@ -204,8 +203,7 @@ class TestCreateCollectionInvalid(object):
         yield request.param
 
     @pytest.mark.level(2)
-    @pytest.mark.skip("no segment_row_limit")
-    def test_create_collection_with_invalid_segment_row_limit(self, connect, get_segment_row_limit):
+    def _test_create_collection_with_invalid_segment_row_limit(self, connect, get_segment_row_limit):
         collection_name = gen_unique_str()
         fields = copy.deepcopy(default_fields)
         fields["segment_row_limit"] = get_segment_row_limit
@@ -256,8 +254,7 @@ class TestCreateCollectionInvalid(object):
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, fields)
 
-    @pytest.mark.skip("no segment_row_limit")
-    def test_create_collection_no_segment_row_limit(self, connect):
+    def _test_create_collection_no_segment_row_limit(self, connect):
         '''
         target: test create collection with no segment_row_limit params
         method: create collection with correct params
