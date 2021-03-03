@@ -1,0 +1,19 @@
+name: Mishards
+
+on:
+  push:
+    - 'shards'
+jobs:
+  ubuntu:
+    name: build and push to azure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: build docker image
+        run: docker build -t milvuscloud.azurecr.io/mishards-cloud .
+      - name: login and push to azure
+        env:
+          AZUREPASSWD2: ${{ secrets.azure_password_2 }}
+        run: |
+          echo $(AZUREPASSWD2) |docker login milvuscloud.azurecr.io -u milvuscloud --password-stdin
+          docker push milvuscloud.azurecr.io/mishards-cloud
