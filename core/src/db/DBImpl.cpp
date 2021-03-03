@@ -55,8 +55,6 @@
 #include "utils/ValidationUtil.h"
 #include "wal/WalDefinations.h"
 
-#include "search/TaskInst.h"
-
 namespace milvus {
 namespace engine {
 

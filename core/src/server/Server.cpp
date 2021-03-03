@@ -41,8 +41,6 @@
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
 
-#include "search/TaskInst.h"
-
 namespace milvus {
 namespace server {
 

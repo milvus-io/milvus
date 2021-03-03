@@ -61,7 +61,7 @@ Status::operator=(Status&& s) {
 
 void
 Status::CopyFrom(const Status& s) {
-    delete state_;
+    delete[] state_;
     state_ = nullptr;
     if (s.state_ == nullptr) {
         return;
@@ -76,7 +76,7 @@ Status::CopyFrom(const Status& s) {
 
 void
 Status::MoveFrom(Status& s) {
-    delete state_;
+    delete[] state_;
     state_ = s.state_;
     s.state_ = nullptr;
 }
