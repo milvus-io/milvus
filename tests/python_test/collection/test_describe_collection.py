@@ -121,7 +121,7 @@ class TestDescribeCollection:
             connect.describe_collection(collection_name)
 
         for i in range(threads_num):
-            t = TestThread(target=get_info)
+            t = MyThread(target=get_info)
             threads.append(t)
             t.start()
             time.sleep(0.2)

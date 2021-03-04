@@ -170,7 +170,7 @@ class TestIndexBase:
         threads = []
         for i in range(threads_num):
             m = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
-            t = TestThread(target=build, args=(m,))
+            t = MyThread(target=build, args=(m,))
             threads.append(t)
             t.start()
             time.sleep(0.2)
@@ -330,7 +330,7 @@ class TestIndexBase:
         threads = []
         for i in range(threads_num):
             m = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
-            t = TestThread(target=build, args=(m,))
+            t = MyThread(target=build, args=(m,))
             threads.append(t)
             t.start()
             time.sleep(0.2)

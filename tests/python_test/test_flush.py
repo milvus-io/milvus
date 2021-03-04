@@ -269,7 +269,7 @@ class TestFlushBase:
             milvus.flush([collection])
             logging.error("end flush")
 
-        p = TestThread(target=flush, args=())
+        p = MyThread(target=flush, args=())
         p.start()
         time.sleep(0.2)
         logging.error("start count")

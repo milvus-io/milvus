@@ -74,7 +74,7 @@ class TestDropCollection:
             connect.create_collection(collection_name, default_fields)
             connect.drop_collection(collection_name)
         for i in range(threads_num):
-            t = TestThread(target=create, args=())
+            t = MyThread(target=create, args=())
             threads.append(t)
             t.start()
             time.sleep(0.2)
