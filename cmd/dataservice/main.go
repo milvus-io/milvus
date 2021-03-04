@@ -6,6 +6,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/zilliztech/milvus-distributed/internal/logutil"
+
 	"github.com/zilliztech/milvus-distributed/internal/dataservice"
 
 	"github.com/zilliztech/milvus-distributed/cmd/distributed/components"
@@ -15,9 +17,10 @@ import (
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
+	defer logutil.LogPanic()
 
 	dataservice.Params.Init()
-	log.SetupLogger(&dataservice.Params.Log)
+	logutil.SetupLogger(&dataservice.Params.Log)
 	defer log.Sync()
 	msFactory := pulsarms.NewFactory()
 

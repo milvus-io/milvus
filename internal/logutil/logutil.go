@@ -1,8 +1,10 @@
-package log
+package logutil
 
 import (
 	"sync"
 	"sync/atomic"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
 
 	"go.uber.org/zap/zapcore"
 
@@ -77,35 +79,43 @@ func (w *zapWrapper) V(l int) bool {
 	return w.logger.Core().Enabled(zapcore.Level(zapLevel))
 }
 
+// LogPanic logs the panic reason and stack, then exit the process.
+// Commonly used with a `defer`.
+func LogPanic() {
+	if e := recover(); e != nil {
+		log.Fatal("panic", zap.Reflect("recover", e))
+	}
+}
+
 var once sync.Once
 var _globalZapWrapper atomic.Value
 
 const defaultLogLevel = "info"
 
 func init() {
-	conf := &Config{Level: defaultLogLevel, File: FileLogConfig{}}
-	lg, _, _ := InitLogger(conf)
+	conf := &log.Config{Level: defaultLogLevel, File: log.FileLogConfig{}}
+	lg, _, _ := log.InitLogger(conf)
 	_globalZapWrapper.Store(&zapWrapper{
 		logger: lg,
 	})
 }
 
-func SetupLogger(cfg *Config) {
+func SetupLogger(cfg *log.Config) {
 	once.Do(func() {
 		// initialize logger
-		logger, p, err := InitLogger(cfg, zap.AddStacktrace(zap.ErrorLevel))
+		logger, p, err := log.InitLogger(cfg, zap.AddStacktrace(zap.ErrorLevel))
 		if err == nil {
-			ReplaceGlobals(logger, p)
+			log.ReplaceGlobals(logger, p)
 		} else {
-			Fatal("initialize logger error", zap.Error(err))
+			log.Fatal("initialize logger error", zap.Error(err))
 		}
 
 		// initialize grpc and etcd logger
 		c := *cfg
 		c.Level = defaultLogLevel
-		lg, _, err := InitLogger(&c)
+		lg, _, err := log.InitLogger(&c)
 		if err != nil {
-			Fatal("initialize grpc/etcd logger error", zap.Error(err))
+			log.Fatal("initialize grpc/etcd logger error", zap.Error(err))
 		}
 
 		wrapper := &zapWrapper{lg}

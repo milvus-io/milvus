@@ -2,14 +2,18 @@ package timesync
 
 import (
 	"context"
-	"log"
 	"math"
 	"sync"
 	"sync/atomic"
 
+	"github.com/zilliztech/milvus-distributed/internal/logutil"
+
+	"go.uber.org/zap"
+
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
@@ -45,7 +49,7 @@ type (
 
 func NewSoftTimeTickBarrier(ctx context.Context, ttStream ms.MsgStream, peerIds []UniqueID, minTtInterval Timestamp) *softTimeTickBarrier {
 	if len(peerIds) <= 0 {
-		log.Printf("[newSoftTimeTickBarrier] Error: peerIds is empty!\n")
+		log.Debug("[newSoftTimeTickBarrier] Error: peerIds is empty!")
 		return nil
 	}
 
@@ -59,7 +63,7 @@ func NewSoftTimeTickBarrier(ctx context.Context, ttStream ms.MsgStream, peerIds 
 		sttbarrier.peer2LastTt[id] = Timestamp(0)
 	}
 	if len(peerIds) != len(sttbarrier.peer2LastTt) {
-		log.Printf("[newSoftTimeTickBarrier] Warning: there are duplicate peerIds!\n")
+		log.Debug("[newSoftTimeTickBarrier] Warning: there are duplicate peerIds!")
 	}
 
 	return &sttbarrier
@@ -89,7 +93,7 @@ func (ttBarrier *softTimeTickBarrier) Start() {
 	for {
 		select {
 		case <-ttBarrier.ctx.Done():
-			log.Printf("[TtBarrierStart] %s\n", ttBarrier.ctx.Err())
+			log.Debug("[TtBarrierStart] shut down", zap.Error(ttBarrier.ctx.Err()))
 			return
 		default:
 		}
@@ -101,7 +105,7 @@ func (ttBarrier *softTimeTickBarrier) Start() {
 				// log.Printf("[softTimeTickBarrier] peer(%d)=%d\n", ttmsg.PeerID, ttmsg.Timestamp)
 
 				if !ok {
-					log.Printf("[softTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.Base.SourceID)
+					log.Warn("[softTimeTickBarrier] peerID not exist", zap.Int64("peerID", ttmsg.Base.SourceID))
 					continue
 				}
 				if ttmsg.Base.Timestamp > oldT {
@@ -148,17 +152,18 @@ func (ttBarrier *hardTimeTickBarrier) Start() {
 	ttBarrier.loopCtx, ttBarrier.loopCancel = context.WithCancel(ttBarrier.ctx)
 	state := Timestamp(0)
 	go func(ctx context.Context) {
+		defer logutil.LogPanic()
 		defer ttBarrier.wg.Done()
 		for {
 			select {
 			case <-ctx.Done():
-				log.Printf("[TtBarrierStart] %s\n", ttBarrier.ctx.Err())
+				log.Debug("[TtBarrierStart] shut down", zap.Error(ttBarrier.ctx.Err()))
 				return
 			default:
 			}
 			ttmsgs, _ := ttBarrier.ttStream.Consume()
 			if len(ttmsgs.Msgs) > 0 {
-				log.Printf("receive tt msg")
+				log.Debug("receive tt msg")
 				for _, timetickmsg := range ttmsgs.Msgs {
 					// Suppose ttmsg.Timestamp from stream is always larger than the previous one,
 					// that `ttmsg.Timestamp > oldT`
@@ -166,22 +171,20 @@ func (ttBarrier *hardTimeTickBarrier) Start() {
 
 					oldT, ok := ttBarrier.peer2Tt[ttmsg.Base.SourceID]
 					if !ok {
-						log.Printf("[hardTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.Base.SourceID)
+						log.Warn("[hardTimeTickBarrier] peerID not exist", zap.Int64("peerID", ttmsg.Base.SourceID))
 						continue
 					}
 
 					if oldT > state {
-						log.Printf("[hardTimeTickBarrier] Warning: peer(%d) timestamp(%d) ahead\n",
-							ttmsg.Base.SourceID, ttmsg.Base.Timestamp)
+						log.Warn("[hardTimeTickBarrier] peer's timestamp ahead",
+							zap.Int64("peerID", ttmsg.Base.SourceID), zap.Uint64("timestamp", ttmsg.Base.Timestamp))
 					}
 
 					ttBarrier.peer2Tt[ttmsg.Base.SourceID] = ttmsg.Base.Timestamp
 
 					newState := ttBarrier.minTimestamp()
-					log.Printf("new state %d", newState)
 					if newState > state {
 						ttBarrier.outTt <- newState
-						log.Printf("outtttt")
 						state = newState
 					}
 				}
@@ -207,7 +210,7 @@ func (ttBarrier *hardTimeTickBarrier) minTimestamp() Timestamp {
 
 func NewHardTimeTickBarrier(ctx context.Context, ttStream ms.MsgStream, peerIds []UniqueID) *hardTimeTickBarrier {
 	if len(peerIds) <= 0 {
-		log.Printf("[newSoftTimeTickBarrier] Error: peerIds is empty!")
+		log.Error("[newSoftTimeTickBarrier] peerIds is empty!")
 		return nil
 	}
 
@@ -221,7 +224,7 @@ func NewHardTimeTickBarrier(ctx context.Context, ttStream ms.MsgStream, peerIds 
 		sttbarrier.peer2Tt[id] = Timestamp(0)
 	}
 	if len(peerIds) != len(sttbarrier.peer2Tt) {
-		log.Printf("[newSoftTimeTickBarrier] Warning: there are duplicate peerIds!")
+		log.Warn("[newSoftTimeTickBarrier] there are duplicate peerIds!", zap.Int64s("peerIDs", peerIds))
 	}
 
 	return &sttbarrier

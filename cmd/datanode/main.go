@@ -6,6 +6,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/zilliztech/milvus-distributed/internal/logutil"
+
 	"go.uber.org/zap"
 
 	dn "github.com/zilliztech/milvus-distributed/internal/datanode"
@@ -22,7 +24,7 @@ func main() {
 
 	msFactory := pulsarms.NewFactory()
 	dn.Params.Init()
-	log.SetupLogger(&dn.Params.Log)
+	logutil.SetupLogger(&dn.Params.Log)
 
 	dn, err := distributed.NewDataNode(ctx, msFactory)
 	if err != nil {

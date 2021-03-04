@@ -6,6 +6,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/zilliztech/milvus-distributed/internal/logutil"
+
 	distributed "github.com/zilliztech/milvus-distributed/cmd/distributed/components"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/masterservice"
@@ -18,7 +20,7 @@ func main() {
 	defer cancel()
 
 	masterservice.Params.Init()
-	log.SetupLogger(&masterservice.Params.Log)
+	logutil.SetupLogger(&masterservice.Params.Log)
 	defer func() {
 		if err := log.Sync(); err != nil {
 			panic(err)
