@@ -699,14 +699,23 @@ func (t *DropIndexReqTask) IgnoreTimeStamp() bool {
 }
 
 func (t *DropIndexReqTask) Execute() error {
-	dropID, isDropped, err := t.core.MetaTable.DropIndex(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
+	info, err := t.core.MetaTable.GetIndexByName(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
+	if err != nil {
+		log.Warn("GetIndexByName failed,", zap.String("collection name", t.Req.CollectionName), zap.String("field name", t.Req.FieldName), zap.String("index name", t.Req.IndexName), zap.Error(err))
+		return err
+	}
+	if len(info) == 0 {
+		return nil
+	}
+	if len(info) != 1 {
+		return errors.Errorf("len(index) = %d", len(info))
+	}
+	err = t.core.DropIndexReq(info[0].IndexID)
 	if err != nil {
 		return err
 	}
-	if isDropped {
-		return t.core.DropIndexReq(dropID)
-	}
-	return nil
+	_, _, err = t.core.MetaTable.DropIndex(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
+	return err
 }
 
 type CreateIndexTask struct {
