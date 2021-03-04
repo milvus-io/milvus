@@ -13,6 +13,8 @@
 #include <thread>
 #include <knowhere/index/vector_index/IndexIVF.h>
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
+#include <string>
+#include "common/SystemProperty.h"
 
 namespace milvus::segcore {
 void
@@ -24,7 +26,7 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const Vec
     Assert(source);
     auto num_chunk = source->num_chunk();
     assert(ack_end <= num_chunk);
-    auto conf = get_build_conf();
+    auto conf = get_build_params();
     data_.grow_to_at_least(ack_end);
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
         const auto& chunk = source->get_chunk(chunk_id);
@@ -38,27 +40,37 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const Vec
 }
 
 knowhere::Config
-VectorFieldIndexing::get_build_conf() const {
+VectorFieldIndexing::get_build_params() const {
     // TODO
     auto type_opt = field_meta_.get_metric_type();
     Assert(type_opt.has_value());
-    auto type_name = MetricTypeToName(type_opt.value());
-    return knowhere::Config{{knowhere::meta::DIM, field_meta_.get_dim()},
-                            {knowhere::IndexParams::nlist, 100},
-                            {knowhere::IndexParams::nprobe, 4},
-                            {knowhere::Metric::TYPE, type_name},
-                            {knowhere::meta::DEVICEID, 0}};
+    auto metric_type = type_opt.value();
+    auto type_name = MetricTypeToName(metric_type);
+    auto& config = segcore_config_.at(metric_type);
+    auto base_params = config.build_params;
+
+    Assert(base_params.count("nlist"));
+    base_params[knowhere::meta::DIM] = field_meta_.get_dim();
+    base_params[knowhere::Metric::TYPE] = type_name;
+
+    return base_params;
 }
 
 knowhere::Config
-VectorFieldIndexing::get_search_conf(int top_K) const {
+VectorFieldIndexing::get_search_params(int top_K) const {
     // TODO
     auto type_opt = field_meta_.get_metric_type();
     Assert(type_opt.has_value());
-    auto type_name = MetricTypeToName(type_opt.value());
-    return knowhere::Config{{knowhere::meta::DIM, field_meta_.get_dim()}, {knowhere::meta::TOPK, top_K},
-                            {knowhere::IndexParams::nlist, 100},          {knowhere::IndexParams::nprobe, 4},
-                            {knowhere::Metric::TYPE, type_name},          {knowhere::meta::DEVICEID, 0}};
+    auto metric_type = type_opt.value();
+    auto type_name = MetricTypeToName(metric_type);
+    auto& config = segcore_config_.at(metric_type);
+
+    auto base_params = config.search_params;
+    Assert(base_params.count("nprobe"));
+    base_params[knowhere::meta::TOPK] = top_K;
+    base_params[knowhere::Metric::TYPE] = type_name;
+
+    return base_params;
 }
 
 void
@@ -103,10 +115,10 @@ ScalarFieldIndexing<T>::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const 
 }
 
 std::unique_ptr<FieldIndexing>
-CreateIndex(const FieldMeta& field_meta, int64_t size_per_chunk) {
+CreateIndex(const FieldMeta& field_meta, const SegcoreConfig& segcore_config) {
     if (field_meta.is_vector()) {
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-            return std::make_unique<VectorFieldIndexing>(field_meta, size_per_chunk);
+            return std::make_unique<VectorFieldIndexing>(field_meta, segcore_config);
         } else {
             // TODO
             PanicInfo("unsupported");
@@ -114,19 +126,19 @@ CreateIndex(const FieldMeta& field_meta, int64_t size_per_chunk) {
     }
     switch (field_meta.get_data_type()) {
         case DataType::BOOL:
-            return std::make_unique<ScalarFieldIndexing<bool>>(field_meta, size_per_chunk);
+            return std::make_unique<ScalarFieldIndexing<bool>>(field_meta, segcore_config);
         case DataType::INT8:
-            return std::make_unique<ScalarFieldIndexing<int8_t>>(field_meta, size_per_chunk);
+            return std::make_unique<ScalarFieldIndexing<int8_t>>(field_meta, segcore_config);
         case DataType::INT16:
-            return std::make_unique<ScalarFieldIndexing<int16_t>>(field_meta, size_per_chunk);
+            return std::make_unique<ScalarFieldIndexing<int16_t>>(field_meta, segcore_config);
         case DataType::INT32:
-            return std::make_unique<ScalarFieldIndexing<int32_t>>(field_meta, size_per_chunk);
+            return std::make_unique<ScalarFieldIndexing<int32_t>>(field_meta, segcore_config);
         case DataType::INT64:
-            return std::make_unique<ScalarFieldIndexing<int64_t>>(field_meta, size_per_chunk);
+            return std::make_unique<ScalarFieldIndexing<int64_t>>(field_meta, segcore_config);
         case DataType::FLOAT:
-            return std::make_unique<ScalarFieldIndexing<float>>(field_meta, size_per_chunk);
+            return std::make_unique<ScalarFieldIndexing<float>>(field_meta, segcore_config);
         case DataType::DOUBLE:
-            return std::make_unique<ScalarFieldIndexing<double>>(field_meta, size_per_chunk);
+            return std::make_unique<ScalarFieldIndexing<double>>(field_meta, segcore_config);
         default:
             PanicInfo("unsupported");
     }

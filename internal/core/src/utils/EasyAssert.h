@@ -18,19 +18,22 @@
 
 /* Paste this on the file you want to debug. */
 
-namespace milvus::impl {
+namespace milvus {
+namespace impl {
 void
 EasyAssertInfo(
     bool value, std::string_view expr_str, std::string_view filename, int lineno, std::string_view extra_info);
 
-class WrappedRuntimError : public std::runtime_error {
-    using std::runtime_error::runtime_error;
-};
-
 [[noreturn]] void
 ThrowWithTrace(const std::exception& exception);
 
-}  // namespace milvus::impl
+}  // namespace impl
+
+class WrappedRuntimeError : public std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+}  // namespace milvus
 
 #define AssertInfo(expr, info)                                                          \
     do {                                                                                \

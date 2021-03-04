@@ -77,7 +77,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
     if (indexing_record.is_in(vecfield_offset)) {
         auto max_indexed_id = indexing_record.get_finished_ack();
         const auto& field_indexing = indexing_record.get_vec_field_indexing(vecfield_offset);
-        auto search_conf = field_indexing.get_search_conf(topK);
+        auto search_conf = field_indexing.get_search_params(topK);
         Assert(vec_ptr->get_size_per_chunk() == field_indexing.get_size_per_chunk());
 
         for (int chunk_id = current_chunk_id; chunk_id < max_indexed_id; ++chunk_id) {

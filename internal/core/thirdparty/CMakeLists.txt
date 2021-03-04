@@ -46,9 +46,7 @@ endif()
 
 
 # ****************************** Thirdparty yaml ***************************************
-if ( MILVUS_WITH_YAMLCPP )
-    add_subdirectory( yaml-cpp )
-endif()
+add_subdirectory( yaml-cpp )
 
 # ****************************** Thirdparty opentracing ***************************************
 if ( MILVUS_WITH_OPENTRACING )

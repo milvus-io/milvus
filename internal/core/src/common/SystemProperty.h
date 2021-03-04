@@ -11,6 +11,8 @@
 
 #pragma once
 #include "common/Types.h"
+#include "utils/Json.h"
+#include <string>
 
 namespace milvus {
 
@@ -22,8 +24,20 @@ enum class SystemFieldType {
 
 class SystemProperty {
  public:
+    SystemProperty() = default;
+    ~SystemProperty() = default;
+
     static const SystemProperty&
     Instance();
+    SystemProperty(const SystemProperty&) = delete;
+
+    SystemProperty&
+    operator=(const SystemProperty&) = delete;
+
+ protected:
+    SystemProperty(SystemProperty&&) = default;
+    SystemProperty&
+    operator=(SystemProperty&&) = default;
 
  public:
     virtual bool
@@ -41,5 +55,8 @@ class SystemProperty {
     virtual bool
     IsSystem(FieldName field_name) const = 0;
 };
+
+void
+InitalizeSegcore(const std::string& segcore_yaml_path);
 
 }  // namespace milvus

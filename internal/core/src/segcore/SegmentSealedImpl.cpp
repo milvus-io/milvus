@@ -384,7 +384,7 @@ SegmentSealedImpl::HasFieldData(FieldId field_id) const {
 }
 
 SegmentSealedPtr
-CreateSealedSegment(SchemaPtr schema, int64_t size_per_chunk) {
+CreateSealedSegment(SchemaPtr schema) {
     return std::make_unique<SegmentSealedImpl>(schema);
 }
 

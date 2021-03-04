@@ -108,7 +108,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     int64_t
     size_per_chunk() const final {
-        return size_per_chunk_;
+        return segcore_config_.get_size_per_chunk();
     }
 
  public:
@@ -157,13 +157,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
  public:
     friend std::unique_ptr<SegmentGrowing>
-    CreateGrowingSegment(SchemaPtr schema, int64_t size_per_chunk);
+    CreateGrowingSegment(SchemaPtr schema, const SegcoreConfig& segcore_config);
 
-    explicit SegmentGrowingImpl(SchemaPtr schema, int64_t size_per_chunk)
-        : size_per_chunk_(size_per_chunk),
+    explicit SegmentGrowingImpl(SchemaPtr schema, const SegcoreConfig& segcore_config)
+        : segcore_config_(segcore_config),
           schema_(std::move(schema)),
-          record_(*schema_, size_per_chunk),
-          indexing_record_(*schema_, size_per_chunk) {
+          record_(*schema_, segcore_config.get_size_per_chunk()),
+          indexing_record_(*schema_, segcore_config_) {
     }
 
     void
@@ -199,7 +199,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
               const std::vector<aligned_vector<uint8_t>>& columns_data);
 
  private:
-    int64_t size_per_chunk_;
+    SegcoreConfig segcore_config_;
     SchemaPtr schema_;
     std::atomic<SegmentState> state_ = SegmentState::Open;
 

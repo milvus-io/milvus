@@ -26,7 +26,8 @@ TEST(Span, Naive) {
     schema->AddDebugField("floatvec", DataType::VECTOR_FLOAT, 32, MetricType::METRIC_L2);
 
     auto dataset = DataGen(schema, N);
-    auto segment = CreateGrowingSegment(schema, size_per_chunk);
+    auto seg_conf = SegcoreConfig::default_config();
+    auto segment = CreateGrowingSegment(schema, seg_conf);
     segment->PreInsert(N);
     segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
     auto vec_ptr = dataset.get_col<uint8_t>(0);
