@@ -108,6 +108,7 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) init() error {
+	ctx := context.Background()
 	var err error
 	Params.Init()
 	if !funcutil.CheckPortAvailable(Params.Port) {
@@ -173,6 +174,11 @@ func (s *Server) init() error {
 	err = s.masterServiceClient.Init()
 	if err != nil {
 		return err
+	}
+	err = funcutil.WaitForComponentHealthy(ctx, s.masterServiceClient, "MasterService", 100, time.Millisecond*200)
+
+	if err != nil {
+		panic(err)
 	}
 	s.impl.SetMasterClient(s.masterServiceClient)
 	log.Println("set master client ...")
@@ -353,4 +359,8 @@ func (s *Server) GetPersistentSegmentInfo(ctx context.Context, request *milvuspb
 func (s *Server) GetQuerySegmentInfo(ctx context.Context, request *milvuspb.QuerySegmentInfoRequest) (*milvuspb.QuerySegmentInfoResponse, error) {
 	return s.impl.GetQuerySegmentInfo(ctx, request)
 
+}
+
+func (s *Server) RegisterLink(ctx context.Context, empty *commonpb.Empty) (*milvuspb.RegisterLinkResponse, error) {
+	return s.impl.RegisterLink(empty)
 }

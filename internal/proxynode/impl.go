@@ -21,7 +21,7 @@ const (
 )
 
 func (node *NodeImpl) UpdateStateCode(code internalpb2.StateCode) {
-	node.stateCode = code
+	node.stateCode.Store(code)
 }
 
 func (node *NodeImpl) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
@@ -895,4 +895,24 @@ func (node *NodeImpl) getSegmentsOfCollection(ctx context.Context, dbName string
 		ret = append(ret, showSegmentResponse.SegmentIDs...)
 	}
 	return ret, nil
+}
+
+func (node *NodeImpl) RegisterLink(request *commonpb.Empty) (*milvuspb.RegisterLinkResponse, error) {
+	code := node.stateCode.Load().(internalpb2.StateCode)
+	if code != internalpb2.StateCode_HEALTHY {
+		return &milvuspb.RegisterLinkResponse{
+			Address: nil,
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "proxy node not healthy",
+			},
+		}, nil
+	}
+	return &milvuspb.RegisterLinkResponse{
+		Address: nil,
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+	}, nil
 }

@@ -77,6 +77,7 @@ def check_server_connection(request):
 @pytest.fixture(scope="module")
 def connect(request):
     ip = request.config.getoption("--ip")
+    print("[debug] ip: ", ip)
     service_name = request.config.getoption("--service")
     port = request.config.getoption("--port")
     http_port = request.config.getoption("--http-port")
@@ -85,6 +86,7 @@ def connect(request):
         port = http_port
     try:
         milvus = get_milvus(host=ip, port=port, handler=handler)
+        print("[debug] collections: ", milvus.list_collections())
         # reset_build_index_threshold(milvus)
     except Exception as e:
         logging.getLogger().error(str(e))
