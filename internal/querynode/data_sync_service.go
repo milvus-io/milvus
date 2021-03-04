@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
@@ -94,4 +95,12 @@ func (dsService *dataSyncService) initNodes() {
 	if err != nil {
 		log.Fatal("set edges failed in node:", serviceTimeNode.Name())
 	}
+}
+
+func (dsService *dataSyncService) seekSegment(position *internalpb2.MsgPosition) error {
+	err := dsService.dmStream.Seek(position)
+	if err != nil {
+		return err
+	}
+	return nil
 }

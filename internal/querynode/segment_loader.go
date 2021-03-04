@@ -28,17 +28,6 @@ type segmentLoader struct {
 	indexLoader *indexLoader
 }
 
-func (loader *segmentLoader) seekSegment(position *internalpb2.MsgPosition) error {
-	// TODO: open seek
-	//for _, position := range positions {
-	//	err := s.dmStream.Seek(position)
-	//	if err != nil {
-	//		return err
-	//	}
-	//}
-	return nil
-}
-
 func (loader *segmentLoader) getInsertBinlogPaths(segmentID UniqueID) ([]*internalpb2.StringList, []int64, error) {
 	ctx := context.TODO()
 	if loader.dataClient == nil {
