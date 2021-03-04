@@ -339,7 +339,7 @@ class TestSearchBase:
     @pytest.mark.level(2)
     def test_search_index_partition_B(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
-        target: test basic search function, all the search params is corrent, test all index params, and build
+        target: test basic search function, all the search params is correct, test all index params, and build
         method: search with the given vectors, check the result
         expected: the length of the result is top_k
         '''
