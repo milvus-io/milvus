@@ -92,7 +92,7 @@ func (p *ParamTable) initLogCfg() {
 	if err != nil {
 		panic(err)
 	}
-	p.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("masterservice-%d.log", p.NodeID))
+	p.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("queryService-%d.log", p.NodeID))
 }
 
 func (p *ParamTable) initStatsChannelName() {

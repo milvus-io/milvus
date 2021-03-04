@@ -10,46 +10,62 @@
 
 ```go
 type ProxyService interface {
+  Component
   Service
-  RegisterLink() (RegisterLinkResponse, error)
-  RegisterNode(req RegisterNodeRequest) (RegisterNodeResponse, error)
-  InvalidateCollectionMetaCache(req InvalidateCollMetaCacheRequest) (Status, error)
+  RegisterLink(ctx context.Context) (*milvuspb.RegisterLinkResponse, error)
+  RegisterNode(ctx context.Context, request *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error)
+  InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
 }
 ```
-
-
 
 * *MsgBase*
 
 ```go
+
 type MsgBase struct {
-  MsgType MsgType
-  MsgID	UniqueID
-  Timestamp Timestamp
-  SourceID UniqueID
+  MsgType   MsgType
+  MsgID     UniqueID
+  Timestamp uint64
+  SourceID  UniqueID
 }
 ```
 
 * *RegisterLink*
 
 ```go
+type Address struct {
+  Ip   string
+  Port int64
+}
+
 type RegisterLinkResponse struct {
-  Address string
-  Port int32
+  Address *commonpb.Address
+  Status  *commonpb.Status
 }
 ```
 
 * *RegisterNode*
 
 ```go
-type RegisterNodeRequest struct {
-  MsgBase
-  Address string
+type Address struct {
+  Ip   string
   Port int64
 }
 
+type RegisterNodeRequest struct {
+  Base    *commonpb.MsgBase
+  Address string
+  Port    int64
+}
+
+type InitParams struct {
+  NodeID      UniqueID
+  StartParams []*commonpb.KeyValuePair
+}
+
 type RegisterNodeResponse struct {
-  //InitParams
+  InitParams *internalpb2.InitParams
+  Status     *commonpb.Status
 }
 ```
 
@@ -57,8 +73,8 @@ type RegisterNodeResponse struct {
 
 ```go
 type InvalidateCollMetaCacheRequest struct {
-  MsgBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
 }
 ```
@@ -70,41 +86,39 @@ type InvalidateCollMetaCacheRequest struct {
 ```go
 type ProxyNode interface {
   Service
-  //SetTimeTickChannel(channelName string) error
-  //SetStatsChannel(channelName string) error
-
-  InvalidateCollectionMetaCache(request InvalidateCollMetaCacheRequest) (Status, error)
   
-  CreateCollection(req CreateCollectionRequest) error
-  DropCollection(req DropCollectionRequest) error
-  HasCollection(req HasCollectionRequest) (bool, error)
-  LoadCollection(req LoadCollectionRequest) error
-  ReleaseCollection(req ReleaseCollectionRequest) error
-  DescribeCollection(req DescribeCollectionRequest) (DescribeCollectionResponse, error)
-  GetCollectionStatistics(req CollectionStatsRequest) (CollectionStatsResponse, error)
-  ShowCollections(req ShowCollectionRequest) (ShowCollectionResponse, error)
+  InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
   
-  CreatePartition(req CreatePartitionRequest) error
-  DropPartition(req DropPartitionRequest) error
-  HasPartition(req HasPartitionRequest) (bool, error)
-  LoadPartitions(req LoadPartitonRequest) error
-  ReleasePartitions(req ReleasePartitionRequest) error
-  GetPartitionStatistics(req PartitionStatsRequest) (PartitionStatsResponse, error)
-  ShowPartitions(req ShowPartitionRequest) (ShowPartitionResponse)
+  CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
+  DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
+  HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
+  LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error)
+  ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error)
+  DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+  GetCollectionStatistics(ctx context.Context, request *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error)
+  ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
   
-  CreateIndex(req CreateIndexRequest) error
-  DescribeIndex(DescribeIndexRequest) (DescribeIndexResponse, error)
-  GetIndexState(IndexStateRequest) (IndexStateResponse, error)
-  DropIndex(DropIndexRequest) (Status, error)
-
-  Insert(req InsertRequest) (InsertResponse, error)
-  Search(req SearchRequest) (SearchResults, error)
-  Flush(req FlushRequest) error
-
-  GetDdChannel(Empty) (StringResponse, error)
-
-  GetQuerySegmentInfo(QuerySegmentInfoRequest) (QuerySegmentInfoResponse, error)
-  GetPersistentSegmentInfo(PersistentSegmentInfoRequest) (PersistentSegmentInfoResponse, error)
+  CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
+  DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
+  HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
+  LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitonRequest) (*commonpb.Status, error)
+  ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionRequest) (*commonpb.Status, error)
+  GetPartitionStatistics(ctx context.Context, request *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error)
+  ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
+  
+  CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
+  DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
+  GetIndexState(ctx context.Context, request *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error)
+  DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error)
+  
+  Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.InsertResponse, error)
+  Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error)
+  Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error)
+  
+  GetDdChannel(ctx context.Context, request *commonpb.Empty) (*milvuspb.StringResponse, error)
+  
+  GetQuerySegmentInfo(ctx context.Context, req *milvuspb.QuerySegmentInfoRequest) (*milvuspb.QuerySegmentInfoResponse, error)
+  GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.PersistentSegmentInfoRequest) (*milvuspb.PersistentSegmentInfoResponse, error)
 }
 ```
 
@@ -126,8 +140,8 @@ See *Master API* for detailed definitions.
 
 ```go
 type LoadCollectionRequest struct {
-  MsgBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
 }
 ```
@@ -136,8 +150,8 @@ type LoadCollectionRequest struct {
 
 ```go
 type ReleaseCollectionRequest struct {
-  MsgBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
 }
 ```
@@ -169,11 +183,19 @@ See *Master API* for detailed definitions.
 * *LoadPartitions*
 
 ```go
+type CollectionSchema struct {
+  Name        string
+  Description string
+  AutoID      bool
+  Fields      []*FieldSchema
+}
+
 type LoadPartitonRequest struct {
-  MsgBase
-  DbName string
-  CollectionName string
-  PartitionNames []string
+  Base         *commonpb.MsgBase
+  DbID         UniqueID
+  CollectionID UniqueID
+  PartitionIDs []UniqueID
+  Schema       *schemapb.CollectionSchema
 }
 ```
 
@@ -181,8 +203,8 @@ type LoadPartitonRequest struct {
 
 ```go
 type ReleasePartitionRequest struct {
-  MsgBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
   PartitionNames []string
 }
@@ -212,17 +234,18 @@ See *Master API* for detailed definitions.
 
 ```go
 type InsertRequest struct {
-  MsgBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
-  PartitionName string
-  RowData []Blob
-  HashKeys []uint32
+  PartitionName  string
+  RowData        []Blob
+  HashKeys       []uint32
 }
 
 type InsertResponse struct {
-  RowIDBegin UniqueID
-  RowIDEnd UniqueID
+  Status     *commonpb.Status
+  RowIDBegin int64
+  RowIDEnd   int64
 }
 ```
 
@@ -230,12 +253,17 @@ type InsertResponse struct {
 
 ```go
 type SearchRequest struct {
-  MsgBase
-  DbName string
-  CollectionName string
-  PartitionNames []string
-  Dsl string
+  Base             *commonpb.MsgBase
+  DbName           string
+  CollectionName   string
+  PartitionNames   []string
+  Dsl              string
   PlaceholderGroup []byte
+}
+
+type SearchResults struct {
+  Status commonpb.Status
+  Hits   byte
 }
 ```
 
@@ -243,8 +271,8 @@ type SearchRequest struct {
 
 ```go
 type FlushRequest struct {
-  MsgBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
 }
 ```
@@ -254,69 +282,129 @@ type FlushRequest struct {
 
 ```go
 type PersistentSegmentInfoRequest  struct{
-  MsgBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
 }
-```
 
-```go
+type SegmentState int32
+
+const (
+  SegmentState_SegmentNone     SegmentState = 0
+  SegmentState_SegmentNotExist SegmentState = 1
+  SegmentState_SegmentGrowing  SegmentState = 2
+  SegmentState_SegmentSealed   SegmentState = 3
+  SegmentState_SegmentFlushed  SegmentState = 4
+)
+
 type PersistentSegmentInfo struct {
-	SegmentID            UniqueID
-	CollectionID         UniqueID
-	PartitionID          UniqueID
-	OpenTime             Timestamp
-	SealedTime           Timestamp
-	FlushedTime          Timestamp
-	NumRows              int64
-	MemSize              int64
-	State                SegmentState
+  SegmentID    UniqueID
+  CollectionID UniqueID
+  PartitionID  UniqueID
+  OpenTime     Timestamp
+  SealedTime   Timestamp
+  FlushedTime  Timestamp
+  NumRows      int64
+  MemSize      int64
+  State        SegmentState
 }
-```
 
-```go
 type PersistentSegmentInfoResponse  struct{
-  infos []SegmentInfo
+  infos []*milvuspb.SegmentInfo
 }
-```
 
+```
 
 #### 6.1 Proxy Instance
 
 ```go
 type Proxy struct {
-  servicepb.UnimplementedMilvusServiceServer
-  masterClient mpb.MasterClient
+  ctx    context.Context
+  cancel func()
+  wg     sync.WaitGroup
   
-  timeTick *timeTick
-  ttStream *MessageStream
-  scheduler *taskScheduler
-  tsAllocator *TimestampAllocator
-  ReqIdAllocator *IdAllocator
-  RowIdAllocator *IdAllocator
-  SegIdAssigner *segIdAssigner
+  initParams *internalpb2.InitParams
+  ip         string
+  port       int
+  
+  stateCode internalpb2.StateCode
+  
+  masterClient       MasterClient
+  indexServiceClient IndexServiceClient
+  dataServiceClient  DataServiceClient
+  proxyServiceClient ProxyServiceClient
+  queryServiceClient QueryServiceClient
+  
+  sched *TaskScheduler
+  tick  *timeTick
+  
+  idAllocator  *allocator.IDAllocator
+  tsoAllocator *allocator.TimestampAllocator
+  segAssigner  *SegIDAssigner
+  
+  manipulationMsgStream msgstream.MsgStream
+  queryMsgStream        msgstream.MsgStream
+  msFactory             msgstream.Factory
+  
+  // Add callback functions at different stages
+  startCallbacks []func()
+  closeCallbacks []func()
 }
 
-func (proxy *Proxy) Start() error
-func NewProxy(ctx context.Context) *Proxy
+func (node *NodeImpl) Init() error
+func (node *NodeImpl) Start() error
+func (node *NodeImpl) Stop() error
+func (node *NodeImpl) AddStartCallback(callbacks ...func())
+func (node *NodeImpl) waitForServiceReady(ctx context.Context, service Component, serviceName string) error
+func (node *NodeImpl) lastTick() Timestamp
+func (node *NodeImpl) AddCloseCallback(callbacks ...func())
+func (node *NodeImpl) SetMasterClient(cli MasterClient)
+func (node *NodeImpl) SetIndexServiceClient(cli IndexServiceClient)
+func (node *NodeImpl) SetDataServiceClient(cli DataServiceClient)
+func (node *NodeImpl) SetProxyServiceClient(cli ProxyServiceClient)
+func (node *NodeImpl) SetQueryServiceClient(cli QueryServiceClient)
+
+func NewProxyNodeImpl(ctx context.Context, factory msgstream.Factory) (*NodeImpl, error)
 ```
 
 #### Global Parameter Table
 
 ```go
 type GlobalParamsTable struct {
+  paramtable.BaseTable
+  
+  NetworkPort    int
+  IP             string
+  NetworkAddress string
+  
+  MasterAddress string
+  PulsarAddress string
+  
+  QueryNodeNum                       int
+  QueryNodeIDList                    []UniqueID
+  ProxyID                            UniqueID
+  TimeTickInterval                   time.Duration
+  InsertChannelNames                 []string
+  DeleteChannelNames                 []string
+  K2SChannelNames                    []string
+  SearchChannelNames                 []string
+  SearchResultChannelNames           []string
+  ProxySubName                       string
+  ProxyTimeTickChannelNames          []string
+  DataDefinitionChannelNames         []string
+  MsgStreamInsertBufSize             int64
+  MsgStreamSearchBufSize             int64
+  MsgStreamSearchResultBufSize       int64
+  MsgStreamSearchResultPulsarBufSize int64
+  MsgStreamTimeTickBufSize           int64
+  MaxNameLength                      int64
+  MaxFieldNum                        int64
+  MaxDimension                       int64
+  DefaultPartitionTag                string
+  DefaultIndexName                   string
 }
-func (*paramTable GlobalParamsTable) ProxyId() int64
-func (*paramTable GlobalParamsTable) ProxyAddress() string
-func (*paramTable GlobalParamsTable) MasterAddress() string
-func (*paramTable GlobalParamsTable) PulsarAddress() string
-func (*paramTable GlobalParamsTable) TimeTickTopic() string
-func (*paramTable GlobalParamsTable) InsertTopics() []string
-func (*paramTable GlobalParamsTable) QueryTopic() string
-func (*paramTable GlobalParamsTable) QueryResultTopics() []string
-func (*paramTable GlobalParamsTable) Init() error
 
-var ProxyParamTable GlobalParamsTable
+var Params ParamTable
 ```
 
 
@@ -328,67 +416,45 @@ var ProxyParamTable GlobalParamsTable
 ``` go
 type task interface {
   Id() int64	// return ReqId
-  PreExecute() error
-  Execute() error
-  PostExecute() error
+  PreExecute(ctx context.Context) error
+  Execute(ctx context.Context) error
+  PostExecute(ctx context.Context) error
   WaitToFinish() error
   Notify() error
 }
 ```
-
-* Base Task 
-
-```go
-type baseTask struct {
-  Type ReqType
-  ReqId int64
-  Ts Timestamp
-  ProxyId int64
-}
-
-func (task *baseTask) PreExecute() error
-func (task *baseTask) Execute() error
-func (task *baseTask) PostExecute() error
-func (task *baseTask) WaitToFinish() error
-func (task *baseTask) Notify() error
-```
-
-* Insert Task
-
-  Take insertTask as an example:
-
-```go
-type insertTask struct {
-  baseTask
-  SegIdAssigner *segIdAssigner
-  RowIdAllocator *IdAllocator
-  rowBatch *RowBatch
-}
-
-func (task *InsertTask) Execute() error
-func (task *InsertTask) WaitToFinish() error
-func (task *InsertTask) Notify() error
-```
-
-
 
 #### 6.2 Task Scheduler
 
 * Base Task Queue
 
 ```go
-type baseTaskQueue struct {
-  unissuedTasks *List
-  activeTasks map[int64]*task
-  utLock sync.Mutex	// lock for UnissuedTasks
-  atLock sync.Mutex	// lock for ActiveTasks
+type TaskQueue interface {
+  utChan() <-chan int
+  UTEmpty() bool
+  utFull() bool
+  addUnissuedTask(t task) error
+  FrontUnissuedTask() task
+  PopUnissuedTask() task
+  AddActiveTask(t task)
+  PopActiveTask(ts Timestamp) task
+  getTaskByReqID(reqID UniqueID) task
+  TaskDoneTest(ts Timestamp) bool
+  Enqueue(t task) error
 }
-func (queue *baseTaskQueue) AddUnissuedTask(task *task)
-func (queue *baseTaskQueue) FrontUnissuedTask() *task
-func (queue *baseTaskQueue) PopUnissuedTask(id int64) *task
-func (queue *baseTaskQueue) AddActiveTask(task *task)
-func (queue *baseTaskQueue) PopActiveTask(id int64) *task
-func (queue *baseTaskQueue) TaskDoneTest(ts Timestamp) bool
+
+type baseTaskQueue struct {
+  unissuedTasks *list.List
+  activeTasks   map[Timestamp]task
+  utLock        sync.Mutex
+  atLock        sync.Mutex
+  
+  maxTaskNum int64
+  
+  utBufChan chan int
+  
+  sched *TaskScheduler
+}
 ```
 
 *AddUnissuedTask(task \*task)* will put a new task into *unissuedTasks*, while maintaining the list by timestamp order.
@@ -449,22 +515,31 @@ Queries will be put into *DqTaskQueue*.
 
 ``` go
 type taskScheduler struct {
-  DdQueue *ddTaskQueue
-  DmQueue *dmTaskQueue
-  DqQueue *dqTaskQueue
+  DdQueue TaskQueue
+  DmQueue TaskQueue
+  DqQueue TaskQueue
   
-  tsAllocator *TimestampAllocator
-  ReqIdAllocator *IdAllocator
+  idAllocator  *allocator.IDAllocator
+  tsoAllocator *allocator.TimestampAllocator
+  
+  wg     sync.WaitGroup
+  ctx    context.Context
+  cancel context.CancelFunc
+  
+  msFactory msgstream.Factory
 }
 
 func (sched *taskScheduler) scheduleDdTask() *task
 func (sched *taskScheduler) scheduleDmTask() *task
 func (sched *taskScheduler) scheduleDqTask() *task
+func (sched *TaskScheduler) getTaskByReqID(collMeta UniqueID) task
+func (sched *TaskScheduler) processTask(t task, q TaskQueue)
 
 func (sched *taskScheduler) Start() error
 func (sched *taskScheduler) TaskDoneTest(ts Timestamp) bool
 
-func newTaskScheduler(ctx context.Context, tsAllocator *TimestampAllocator, ReqIdAllocator *IdAllocator) *taskScheduler
+func NewTaskScheduler(ctx context.Context, idAllocator *allocator.IDAllocator, tsoAllocator *allocator.TimestampAllocator,
+	factory msgstream.Factory) (*TaskScheduler, error)
 ```
 
 *scheduleDdTask()* selects tasks in a FIFO manner, thus time order is garanteed.
@@ -479,6 +554,7 @@ The policy of *scheduleDqTask()* should target on throughput. It should also tak
 
 * Statistics
 
+// TODO
 ```go
 // ActiveComponent interfaces
 func (sched *taskScheduler) Id() String
@@ -501,6 +577,7 @@ message taskSchedulerHeartbeat {
 
 
 
+// TODO
 #### 6.3 Time Tick
 
 * Time Tick

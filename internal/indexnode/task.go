@@ -132,6 +132,7 @@ func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 		nty.Status.ErrorCode = commonpb.ErrorCode_BUILD_INDEX_ERROR
 	}
 
+	ctx = context.TODO()
 	resp, err := it.serviceClient.NotifyBuildIndex(ctx, nty)
 	if err != nil {
 		log.Println("IndexBuildTask notify err:", err.Error())

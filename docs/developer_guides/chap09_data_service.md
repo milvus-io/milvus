@@ -12,24 +12,21 @@
 
 ```go
 type DataService interface {
-  Service
+  typeutil.Service
+  typeutil.Component
+  RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error)
+  Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error)
   
-  RegisterNode(req RegisterNodeRequest) (RegisterNodeResponse, error)
-  Flush(req FlushRequest) error
-  
-  AssignSegmentID(req AssignSegIDRequest) (AssignSegIDResponse, error)
-  ShowSegments(req ShowSegmentRequest) (ShowSegmentResponse, error)
-  GetSegmentStates(req SegmentStatesRequest) (SegmentStatesResponse, error)
-  GetSegmentInfo(req SegmentInfoRequest) (SegmentInfoResponse, error)
-
-  GetInsertBinlogPaths(req InsertBinlogPathRequest) (InsertBinlogPathsResponse, error)
-
-  GetSegmentInfoChannel(req InsertChannelRequest) (StringResponse, error)
-  GetInsertChannels(req InsertChannelRequest) (StringList, error)
-
-  GetCollectionStatistics(req CollectionStatsRequest) (CollectionStatsResponse, error)
-  GetPartitionStatistics(req PartitionStatsRequest) (PartitionStatsResponse, error)
-  
+  AssignSegmentID(ctx context.Context, req *datapb.AssignSegIDRequest) (*datapb.AssignSegIDResponse, error)
+  ShowSegments(ctx context.Context, req *datapb.ShowSegmentRequest) (*datapb.ShowSegmentResponse, error)
+  GetSegmentStates(ctx context.Context, req *datapb.SegmentStatesRequest) (*datapb.SegmentStatesResponse, error)
+  GetInsertBinlogPaths(ctx context.Context, req *datapb.InsertBinlogPathRequest) (*datapb.InsertBinlogPathsResponse, error)
+  GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error)
+  GetInsertChannels(ctx context.Context, req *datapb.InsertChannelRequest) (*internalpb2.StringList, error)
+  GetCollectionStatistics(ctx context.Context, req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error)
+  GetPartitionStatistics(ctx context.Context, req *datapb.PartitionStatsRequest) (*datapb.PartitionStatsResponse, error)
+  GetCount(ctx context.Context, req *datapb.CollectionCountRequest) (*datapb.CollectionCountResponse, error)
+  GetSegmentInfo(ctx context.Context, req *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error)
 }
 ```
 
@@ -39,10 +36,10 @@ type DataService interface {
 
 ```go
 type MsgBase struct {
-  MsgType MsgType
-  MsgID	UniqueID
+  MsgType   MsgType
+  MsgID	    UniqueID
   Timestamp Timestamp
-  SourceID UniqueID
+  SourceID  UniqueID
 }
 ```
 
@@ -50,13 +47,23 @@ type MsgBase struct {
 
 ```go
 type RegisterNodeRequest struct {
-  MsgBase
-  Address string
-  Port int64
+  Base    *commonpb.MsgBase
+  Address *commonpb.Address
 }
 
 type RegisterNodeResponse struct {
-  //InitParams
+  InitParams *internalpb2.InitParams
+  Status     *commonpb.Status
+}
+```
+
+* *Flush*
+
+```go
+type FlushRequest struct {
+  Base         *commonpb.MsgBase
+  DbID         UniqueID
+  CollectionID UniqueID
 }
 ```
 
@@ -64,56 +71,50 @@ type RegisterNodeResponse struct {
 
 ```go
 type SegIDRequest struct {
-  Count uint32
-  ChannelName string
-	CollectionID UniqueID
-  PartitionID UniqueID
+  Count         uint32
+  ChannelName   string
+  CollectionID  UniqueID
+  PartitionID   UniqueID
+  CollName      string
+  PartitionName string
 }
 
 type AssignSegIDRequest struct {
-  MsgBase
-  PerChannelRequest []SegIDRequest
+  NodeID        int64
+  PeerRole      string
+  SegIDRequests []*SegIDRequest
 }
 
 type SegIDAssignment struct {
-  SegmentID UniqueID
-  ChannelName string
-  Count uint32
-	CollectionID UniqueID
-  PartitionID UniqueID
-  ExpireTime Timestamp
+  SegID         UniqueID
+  ChannelName   string
+  Count         uint32
+  CollectionID  UniqueID
+  PartitionID   UniqueID
+  ExpireTime    uint64
+  Status        *commonpb.Status
+  CollName      string
+  PartitionName string
 }
 
 type AssignSegIDResponse struct {
-  PerChannelResponse []SegIDAssignment
+  SegIDAssignments []*SegIDAssignment
+  Status           *commonpb.Status
 }
 ```
-
-
-
-* *Flush*
-
-```go
-type FlushRequest struct {
-  MsgBase
-  DbID UniqueID
-  CollectionID UniqueID
-}
-```
-
-
 
 * *ShowSegments*
 
 ```go
 type ShowSegmentRequest struct {
-  MsgBase
+  Base         *commonpb.MsgBase
   CollectionID UniqueID
-  PartitionID UniqueID
+  PartitionID  UniqueID
 }
 
 type ShowSegmentResponse struct {
   SegmentIDs []UniqueID
+  Status     *commonpb.Status
 }
 ```
 
@@ -122,56 +123,32 @@ type ShowSegmentResponse struct {
 * *GetSegmentStates*
 
 ```go
-enum SegmentState {
-    NONE = 0;
-    NOT_EXIST = 1;
-    GROWING = 2;
-    SEALED = 3;
-}
-
 type SegmentStatesRequest struct {
-  MsgBase
+  Base      *commonpb.MsgBase
   SegmentID UniqueID
 }
 
+enum SegmentState {
+  NONE      = 0;
+  NOT_EXIST = 1;
+  GROWING   = 2;
+  SEALED    = 3;
+}
+
+type SegmentStateInfo struct {
+  SegmentID     UniqueID 
+  State         commonpb.SegmentState
+  CreateTime    uint64
+  SealedTime    uint64
+  FlushedTime   uint64
+  StartPosition *internalpb2.MsgPosition
+  EndPosition   *internalpb2.MsgPosition
+  Status        *commonpb.Status
+}
+
 type SegmentStatesResponse struct {
-  State SegmentState
-  OpenTime Timestamp
-  SealedTime Timestamp
-  MsgStartPositions []msgstream.MsgPosition
-  MsgEndPositions []msgstream.MsgPosition
-}
-```
-
-* *GetSegmentInfo*
-
-```go
-type SegmentInfoRequest  struct{
-  MsgBase
-  SegmentIDs [] UniqueID
-}
-```
-
-```go
-type SegmentInfo struct {
-	SegmentID            UniqueID
-	CollectionID         UniqueID
-	PartitionID          UniqueID
-	InsertChannel        string
-	OpenTime             Timestamp
-	SealedTime           Timestamp
-	FlushedTime          Timestamp
-	NumRows              int64
-	MemSize              int64
-	State                SegmentState
-	StartPosition        []Msgstream.MsgPosition
-	EndPosition          []Msgstream.MsgPosition
-}
-```
-
-```go
-type SegmentInfoResponse  struct{
-  infos []SegmentInfo
+  Status               *commonpb.Status    `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+  States               []*SegmentStateInfo `protobuf:"bytes,2,rep,name=states,proto3" json:"states,omitempty"`
 }
 ```
 
@@ -179,71 +156,122 @@ type SegmentInfoResponse  struct{
 
 ```go
 type InsertBinlogPathRequest struct {
-  MsgBase
+  Base      *commonpb.MsgBase
   SegmentID UniqueID
 }
 
 type InsertBinlogPathsResponse struct {
-  FieldIDToPaths map[int64][]string
+  FieldIDs             []int64
+  Paths                []*internalpb2.StringList
+  Status               *commonpb.Status
 }
 ```
-
-
 
 * *GetInsertChannels*
 
 ```go
 type InsertChannelRequest struct {
-  MsgBase
-  DbID UniqueID
+  Base         *commonpb.MsgBase
+  DbID         UniqueID
   CollectionID UniqueID
 }
 ```
-
 
 * *GetCollectionStatistics*
 
 ```go
 type CollectionStatsRequest struct {
-  MsgBase
-  DbName string
-  CollectionName string
+  Base         *commonpb.MsgBase
+  DbID         int64
+  CollectionID int64
 }
+
 type CollectionStatsResponse struct {
-  Stats []KeyValuePair
+  Stats  []*commonpb.KeyValuePair
+  Status *commonpb.Status
 }
 ```
-
-
 
 * *GetPartitionStatistics*
 
 ```go
 type PartitionStatsRequest struct {
-  MsgBase
-  DbName string
-  CollectionName string
-  PartitionName string
+  Base         *commonpb.MsgBase
+  DbID         UniqueID 
+  CollectionID UniqueID
+  PartitionID  UniqueID
 }
+
 type PartitionStatsResponse struct {
-  Stats []KeyValuePair
+  Stats  []*commonpb.KeyValuePair
+  Status *commonpb.Status
 }
 ```
+
+* *GetCount*
+
+```go
+type CollectionCountRequest struct {
+  Base         *commonpb.MsgBase
+  DbID         UniqueID
+  CollectionID UniqueID
+}
+
+type CollectionCountResponse struct {
+  Status *commonpb.Status
+  Count  int64
+}
+```
+
+* *GetSegmentInfo*
+
+```go
+type SegmentInfoRequest  struct{
+  Base       *commonpb.MsgBase
+  SegmentIDs []UniqueID
+}
+
+type SegmentInfo struct {
+  SegmentID     UniqueID
+  CollectionID  UniqueID
+  PartitionID   UniqueID
+  InsertChannel string
+  OpenTime      Timestamp
+  SealedTime    Timestamp
+  FlushedTime   Timestamp
+  NumRows       int64
+  MemSize       int64
+  State         SegmentState
+  StartPosition []*internalpb2.MsgPosition
+  EndPosition   []*internalpb2.MsgPosition
+}
+
+type SegmentInfoResponse  struct{
+  Status *commonpb.Status
+  infos  []SegmentInfo
+}
+```
+
+
+
 
 
 #### 8.2 Insert Channel
 
 ```go
 type InsertRequest struct {
-  MsgBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
-  PartitionName string
-  DbID UniqueID
-  CollectionID UniqueID
-  PartitionID UniqueID
-  RowData []Blob
-  HashKeys []uint32
+  PartitionName  string
+  DbID           UniqueID
+  CollectionID   UniqueID
+  PartitionID    UniqueID
+  SegmentID      UniqueID
+  ChannelID      string
+  Timestamps     []uint64
+  RowIDs         []int64
+  RowData        []*commonpb.Blob
 }
 ```
 
@@ -254,45 +282,22 @@ type InsertRequest struct {
 ```go
 type DataNode interface {
   Service
-
-  GetComponentStates() (ComponentStates, error)
-  GetTimeTickChannel() (StringResponse, error)
-  GetStatisticsChannel() (StringResponse, error)
+  Component
   
-  WatchDmChannels(WatchDmChannelRequest) error
-  FlushSegments(FlushSegRequest) (Status, error)
-  //WatchDdChannel(channelName string) error
-  //SetTimeTickChannel(channelName string) error
-  //SetStatisticsChannel(channelName string) error
+  WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelRequest) (*commonpb.Status, error)
+  FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) error
   
-  SetMasterServiceInterface(MasterServiceInterface) error
-  SetDataServiceInterface(DataServiceInterface) error
+  SetMasterServiceInterface(ctx context.Context, ms MasterServiceInterface) error
+  SetDataServiceInterface(ctx context.Context, ds DataServiceInterface) error
 }
 ```
-
-```go
-type DataServiceInterface interface {
-  GetComponentStates() (ComponentStates, error)
-  RegisterNode(RegisterNodeRequest) (RegisterNodeResponse, error)
-}
-```
-```go
-type MasterServiceInterface interface {
-  GetComponentStates() (ComponentStates, error)
-  AllocID(IDRequest) (IDResponse, error)
-  ShowCollections(ShowCollectionRequest) (ShowCollectionResponse, error)
-  DescribeCollection(DescribeCollectionRequest) (DescribeCollectionResponse, error)
-}
-
-```
-
 
 * *WatchDmChannels*
 
 ```go
 type WatchDmChannelRequest struct {
-  MsgBase
-  InsertChannelNames []string
+  Base         *commonpb.MsgBase
+  ChannelNames []string
 }
 ```
 
@@ -300,24 +305,32 @@ type WatchDmChannelRequest struct {
 
 ```go
 type FlushSegRequest struct {
-  MsgBase
-  DbID UniqueID
+  Base         *commonpb.MsgBase
+  DbID         UniqueID
   CollectionID UniqueID
-  SegmentID []UniqueID
+  SegmentIDs   []int64
 }
 ```
+
+
+#### 8.2 SegmentStatistics Update Channel
 
 * *SegmentStatistics*
 
 ```go
 type SegmentStatisticsUpdates struct {
-    SegmentID UniqueID
-    MemorySize int64
-    NumRows int64
+  SegmentID     UniqueID
+  MemorySize    int64
+  NumRows       int64
+  CreateTime    uint64
+  EndTime       uint64
+  StartPosition *internalpb2.MsgPosition
+  EndPosition   *internalpb2.MsgPosition
+  IsNewSegment  bool
 }
 
 type SegmentStatistics struct{
-    MsgBase
+    Base     *commonpb.MsgBase
     SegStats []*SegmentStatisticsUpdates
 }
 ```

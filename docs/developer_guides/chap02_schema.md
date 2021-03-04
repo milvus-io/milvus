@@ -6,10 +6,10 @@
 
 ``` go
 type CollectionSchema struct {
-  Name string
+  Name        string
   Description string
-  AutoId bool
-  Fields []FieldSchema
+  AutoId      bool
+  Fields      []*FieldSchema
 }
 ```
 
@@ -17,11 +17,13 @@ type CollectionSchema struct {
 
 ``` go
 type FieldSchema struct {
-  Name string
-  Description string
-  DataType DataType 
-  TypeParams map[string]string
-  IndexParams map[string]string
+  FieldID      int64
+  Name         string
+  IsPrimaryKey bool
+  Description  string
+  DataType     DataType
+  TypeParams   []*commonpb.KeyValuePair
+  IndexParams  []*commonpb.KeyValuePair
 }
 ```
 
@@ -31,20 +33,20 @@ type FieldSchema struct {
 
 ```protobuf
 enum DataType {
-    NONE = 0;
-    BOOL = 1;
-    INT8 = 2;
+    NONE  = 0;
+    BOOL  = 1;
+    INT8  = 2;
     INT16 = 3;
     INT32 = 4;
     INT64 = 5;
 
-    FLOAT = 10;
+    FLOAT  = 10;
     DOUBLE = 11;
 
     STRING = 20;
 
     VECTOR_BINARY = 100;
-    VECTOR_FLOAT = 101;
+    VECTOR_FLOAT  = 101;
 }
 ```
 

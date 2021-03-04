@@ -156,21 +156,21 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) RegisterLink(ctx context.Context, empty *commonpb.Empty) (*milvuspb.RegisterLinkResponse, error) {
-	return s.impl.RegisterLink()
+	return s.impl.RegisterLink(ctx)
 }
 
 func (s *Server) RegisterNode(ctx context.Context, request *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error) {
-	return s.impl.RegisterNode(request)
+	return s.impl.RegisterNode(ctx, request)
 }
 
 func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	return s.impl.InvalidateCollectionMetaCache(request)
+	return s.impl.InvalidateCollectionMetaCache(ctx, request)
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.impl.GetTimeTickChannel()
+	return s.impl.GetTimeTickChannel(ctx)
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	return s.impl.GetComponentStates()
+	return s.impl.GetComponentStates(ctx)
 }

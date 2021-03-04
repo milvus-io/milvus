@@ -26,15 +26,8 @@ const (
 
 type (
 	Interface interface {
-		// Service
-		Init() error
-		Start() error
-		Stop() error
-
-		// Component
-		GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
-		GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error)   // This function has no effect
-		GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) // This function has no effect
+		typeutil.Service
+		typeutil.Component
 
 		WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelRequest) (*commonpb.Status, error)
 		FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) error

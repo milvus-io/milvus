@@ -112,7 +112,7 @@ type Core struct {
 		Segment States Channel, from DataService, if create new segment, data service should put the segment id into this channel, and let the master add the segment id to the collection meta
 		Segment Flush Watcher, monitor if segment has flushed into disk
 
-		IndexService Interface:
+		IndexService Interface
 		IndexService Sch, tell index service to build index
 	*/
 

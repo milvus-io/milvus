@@ -10,6 +10,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type MasterClient interface {
@@ -67,9 +68,7 @@ type ProxyServiceClient interface {
 }
 
 type ProxyNode interface {
-	Init() error
-	Start() error
-	Stop() error
+	typeutil.Service
 
 	InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
 

@@ -9,29 +9,40 @@
 ```go
 type Master interface {
   Service
+  GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
   
-  CreateCollection(req CreateCollectionRequest) error
-  DropCollection(req DropCollectionRequest) error
-  HasCollection(req HasCollectionRequest) (bool, error)
-  DescribeCollection(req DescribeCollectionRequest) (DescribeCollectionResponse, error)
-  ShowCollections(req ShowCollectionRequest) (ShowCollectionResponse, error)
+  //DDL request
+  CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
+  DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
+  HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
+  DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+  ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
+  CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
+  DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
+  HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
+  ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
   
-  CreatePartition(req CreatePartitionRequest) error
-  DropPartition(req DropPartitionRequest) error
-  HasPartition(req HasPartitionRequest) (bool, error)
-  ShowPartitions(req ShowPartitionRequest) (ShowPartitionResponse, error)
+  //index builder service
+  CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
+  DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
+  DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*commonpb.Status, error)
   
-  DescribeSegment(req DescribeSegmentRequest) (DescribeSegmentResponse, error)
-  ShowSegments(req ShowSegmentRequest) (ShowSegmentResponse, error)
+  //global timestamp allocator
+  AllocTimestamp(ctx context.Context, in *masterpb.TsoRequest) (*masterpb.TsoResponse, error)
+  AllocID(ctx context.Context, in *masterpb.IDRequest) (*masterpb.IDResponse, error)
   
-  CreateIndex(req CreateIndexRequest) error
-  DescribeIndex(DescribeIndexRequest) (DescribeIndexResponse, error)
-  DropIndex(DropIndexRequest) (Status, error)
+  //receiver time tick from proxy service, and put it into this channel
+  GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error)
   
-  AllocTimestamp(req TsoRequest) (TsoResponse, error)
-  AllocID(req IDRequest) (IDResponse, error)
+  //receive ddl from rpc and time tick from proxy service, and put them into this channel
+  GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error)
   
-  GetDdChannel() (string, error)
+  //just define a channel, not used currently
+  GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
+  
+  //segment
+  DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
+  ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error)
 }
 ```
 
@@ -41,10 +52,10 @@ type Master interface {
 
 ```go
 type MsgBase struct {
-  MsgType MsgType
-  MsgID	UniqueID
+  MsgType   MsgType
+  MsgID	    UniqueID
   Timestamp Timestamp
-  SourceID UniqueID
+  SourceID  UniqueID
 }
 ```
 
@@ -52,10 +63,10 @@ type MsgBase struct {
 
 ```go
 type CreateCollectionRequest struct {
-  MsgBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
-  Schema []bytes
+  Schema         []byte
 }
 ```
 
@@ -63,8 +74,8 @@ type CreateCollectionRequest struct {
 
 ```go
 type DropCollectionRequest struct {
-  MsgBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
 }
 ```
@@ -73,8 +84,8 @@ type DropCollectionRequest struct {
 
 ```go
 type HasCollectionRequest struct {
-  MsgBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
 }
 ```
@@ -83,17 +94,23 @@ type HasCollectionRequest struct {
 
 ```go
 type DescribeCollectionRequest struct {
-  MsgBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
+  CollectionID   UniqueID
+}
+
+type CollectionSchema struct {
+  Name        string
+  Description string
+  AutoID      bool
+  Fields      []*FieldSchema
 }
 
 type DescribeCollectionResponse struct {
-  DbID UniqueID
-  CollectionID UniqueID
-  DefaultPartitionName string
-  DefaultPartitionID UniqueID
-  Schema []bytes
+  Status       *commonpb.Status
+  Schema       *schemapb.CollectionSchema
+  CollectionID int64
 }
 ```
 
@@ -101,13 +118,13 @@ type DescribeCollectionResponse struct {
 
 ```go
 type ShowCollectionRequest struct {
-  MsgBase
-	DbName string
+  Base   *commonpb.MsgBase
+  DbName string
 }
 
 type ShowCollectionResponse struct {
+  Status          *commonpb.Status
   CollectionNames []string
-  CollectionIDs []UniqueID
 }
 ```
 
@@ -115,10 +132,10 @@ type ShowCollectionResponse struct {
 
 ```go
 type CreatePartitionRequest struct {
-  MsgBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
-  PartitionName string
+  PartitionName  string
 }
 ```
 
@@ -126,10 +143,10 @@ type CreatePartitionRequest struct {
 
 ```go
 type DropPartitionRequest struct {
-  MsgBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
-  PartitionName string
+  PartitionName  string
 }
 ```
 
@@ -137,10 +154,10 @@ type DropPartitionRequest struct {
 
 ```go
 type HasPartitionRequest struct {
-  MsgBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
-  PartitionName string
+  PartitionName  string
 }
 ```
 
@@ -148,14 +165,16 @@ type HasPartitionRequest struct {
 
 ```go
 type ShowPartitionRequest struct {
-  MsgBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
+  CollectionID   UniqueID
 }
 
 type ShowPartitionResponse struct {
-  PartitionIDs []UniqueID
+  Status         *commonpb.Status
   PartitionNames []string
+  PartitionIDs   []UniqueID
 }
 ```
 
@@ -163,13 +182,15 @@ type ShowPartitionResponse struct {
 
 ```go
 type DescribeSegmentRequest struct {
-  MsgBase
+  Base         *commonpb.MsgBase
   CollectionID UniqueID
-  SegmentID UniqueID
+  SegmentID    UniqueID
 }
 
 type DescribeSegmentResponse struct {
+  Status  *commonpb.Status
   IndexID UniqueID
+  BuildID UniqueID
 }
 ```
 
@@ -177,12 +198,13 @@ type DescribeSegmentResponse struct {
 
 ```go
 type ShowSegmentRequest struct {
-  MsgBase
+  Base         *commonpb.MsgBase
   CollectionID UniqueID
-  PartitionID UniqueID
+  PartitionID  UniqueID
 }
 
 type ShowSegmentResponse struct {
+  Status     *commonpb.Status
   SegmentIDs []UniqueID
 }
 ```
@@ -191,11 +213,11 @@ type ShowSegmentResponse struct {
 
 ```go
 type CreateIndexRequest struct {
-  MsgBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
-  FieldName string
-  Params [] KeyValuePair
+  FieldName      string
+  ExtraParams    []*commonpb.KeyValuePair
 }
 ```
 
@@ -203,19 +225,22 @@ type CreateIndexRequest struct {
 
 ```go
 type DescribeIndexRequest struct {
-  MsgBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
-  FieldName string
+  FieldName      string
+  IndexName      string
 }
 
 type IndexDescription struct {
   IndexName string
-  params []KeyValuePair
+  IndexID   UniqueID
+  params    []*commonpb.KeyValuePair
 }
 
 type DescribeIndexResponse struct {
-  IndexDescriptions []IndexDescription
+  Status            *commonpb.Status
+  IndexDescriptions []*IndexDescription
 }
 ```
 
@@ -223,11 +248,11 @@ type DescribeIndexResponse struct {
 
 ```go
 type DropIndexRequest struct {
-  MsgBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
-  FieldName string
-  IndexName string
+  FieldName      string
+  IndexName      string
 }
 ```
 
@@ -235,13 +260,14 @@ type DropIndexRequest struct {
 
 ```go
 type TsoRequest struct {
-  MsgBase
+  Base  *commonpb.MsgBase
   Count uint32
 }
 
 type TsoResponse struct {
-  StartTime Timestamp
-  Count uint32
+  Status    *commonpb.Status
+  Timestamp uint64
+  Count     uint32
 }
 ```
 
@@ -249,13 +275,14 @@ type TsoResponse struct {
 
 ```go
 type IDRequest struct {
-  MsgBase
+  Base  *commonpb.MsgBase
   Count uint32
 }
 
 type IDResponse struct {
-  StartID UniqueID
-  Count uint32
+  Status *commonpb.Status
+  ID     UniqueID
+  Count  uint32
 }
 ```
 
@@ -267,12 +294,13 @@ type IDResponse struct {
 
 ```go
 type CreateCollectionRequest struct {
-  RequestBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
-  DbID UniqueID
+  
+  DbID         UniqueID
   CollectionID UniqueID
-  Schema []bytes
+  Schema       []byte
 }
 ```
 
@@ -280,11 +308,11 @@ type CreateCollectionRequest struct {
 
 ```go
 type DropCollectionRequest struct {
-  RequestBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
-  DbID UniqueID
-  CollectionID UniqueID
+  DbID           UniqueID
+  CollectionID   UniqueID
 }
 ```
 
@@ -292,13 +320,13 @@ type DropCollectionRequest struct {
 
 ```go
 type CreatePartitionRequest struct {
-  RequestBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
-  PartitionName string
-  DbID UniqueID
-  CollectionID UniqueID
-  PartitionID UniqueID
+  PartitionName  string
+  DbID           UniqueID
+  CollectionID   UniqueID
+  PartitionID    UniqueID
 }
 ```
 
@@ -306,13 +334,13 @@ type CreatePartitionRequest struct {
 
 ```go
 type DropPartitionRequest struct {
-  RequestBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
-  PartitionName string
-  DbID UniqueID
-  CollectionID UniqueID
-  PartitionID UniqueID
+  PartitionName  string
+  DbID           UniqueID
+  CollectionID   UniqueID
+  PartitionID    UniqueID
 }
 ```
 
@@ -320,14 +348,14 @@ type DropPartitionRequest struct {
 
 ```go
 type CreateIndexRequest struct {
-  RequestBase
-  DbName string
+  Base           *commonpb.MsgBase
+  DbName         string
   CollectionName string
-  FieldName string
-  DbID UniqueID
-  CollectionID UniqueID
-  FieldID int64
-  Params [] KeyValuePair
+  FieldName      string
+  DbID           UniqueID
+  CollectionID   UniqueID
+  FieldID        UniqueID
+  ExtraParams    []*commonpb.KeyValuePair
 }
 ```
 
@@ -337,26 +365,77 @@ type CreateIndexRequest struct {
 
 ```go
 type Master interface {
-  tso timestampOracle	// timestamp oracle
-  ddScheduler ddRequestScheduler // data definition request scheduler
-  metaTable metaTable // in-memory system meta
-  collManager collectionManager // collection & partition manager
-  segManager segmentManager // segment manager
+  MetaTable *metaTable
+  //id allocator
+  idAllocator *allocator.GlobalIDAllocator
+  //tso allocator
+  tsoAllocator *tso.GlobalTSOAllocator
+  
+  //inner members
+  ctx     context.Context
+  cancel  context.CancelFunc
+  etcdCli *clientv3.Client
+  kvBase  *etcdkv.EtcdKV
+  metaKV  *etcdkv.EtcdKV
+  
+  //setMsgStreams, receive time tick from proxy service time tick channel
+  ProxyTimeTickChan chan typeutil.Timestamp
+  
+  //setMsgStreams, send time tick into dd channel and time tick channel
+  SendTimeTick func(t typeutil.Timestamp) error
+  
+  //setMsgStreams, send create collection into dd channel
+  DdCreateCollectionReq func(req *internalpb2.CreateCollectionRequest) error
+  
+  //setMsgStreams, send drop collection into dd channel, and notify the proxy to delete this collection
+  DdDropCollectionReq func(req *internalpb2.DropCollectionRequest) error
+  
+  //setMsgStreams, send create partition into dd channel
+  DdCreatePartitionReq func(req *internalpb2.CreatePartitionRequest) error
+  
+  //setMsgStreams, send drop partition into dd channel
+  DdDropPartitionReq func(req *internalpb2.DropPartitionRequest) error
+  
+  //setMsgStreams segment channel, receive segment info from data service, if master create segment
+  DataServiceSegmentChan chan *datapb.SegmentInfo
+  
+  //setMsgStreams ,if segment flush completed, data node would put segment id into msg stream
+  DataNodeSegmentFlushCompletedChan chan typeutil.UniqueID
+  
+  //get binlog file path from data service,
+  GetBinlogFilePathsFromDataServiceReq func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
+  
+  //call index builder's client to build index, return build id
+  BuildIndexReq func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error)
+  DropIndexReq  func(indexID typeutil.UniqueID) error
+  
+  //proxy service interface, notify proxy service to drop collection
+  InvalidateCollectionMetaCache func(ts typeutil.Timestamp, dbName string, collectionName string) error
+  
+  //query service interface, notify query service to release collection
+  ReleaseCollection func(ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error
+  
+  // put create index task into this chan
+  indexTaskQueue chan *CreateIndexTask
+  
+  //dd request scheduler
+  ddReqQueue      chan reqTask //dd request will be push into this chan
+  lastDdTimeStamp typeutil.Timestamp
+  
+  //time tick loop
+  lastTimeTick typeutil.Timestamp
+  
+  //states code
+  stateCode atomic.Value
+  
+  //call once
+  initOnce  sync.Once
+  startOnce sync.Once
+  //isInit    atomic.Value
+  
+  msFactory ms.Factory
 }
 ```
-
-* Timestamp allocation
-
-Master serves as a centrol clock of the whole system. Other components (i.e. Proxy) allocates timestamps from master via RPC *AllocTimestamp*. All the timestamp allocation requests will be handled by the timestampOracle singleton. See section 4.2 for the details about timestampOracle.
-
-* Request Scheduling
-
-* System Meta
-
-* Collection Management
-
-* Segment Management
-
 
 
 #### 10.3 Data definition Request Scheduler
@@ -367,11 +446,12 @@ Master receives data definition requests via grpc. Each request (described by a 
 
 ```go
 type task interface {
-  Type() ReqType
-  Ts() Timestamp
+  Type() commonpb.MsgType
+  Ts() (typeutil.Timestamp, error)
+  IgnoreTimeStamp() bool
   Execute() error
   WaitToFinish() error
-  Notify() error
+  Notify(err error)
 }
 ```
 
@@ -388,6 +468,7 @@ type createCollectionTask struct {
 // Task interfaces
 func (task *createCollectionTask) Type() ReqType
 func (task *createCollectionTask) Ts() Timestamp
+func (task *createCollectionTask) IgnoreTimeStamp() bool
 func (task *createCollectionTask) Execute() error
 func (task *createCollectionTask) Notify() error
 func (task *createCollectionTask) WaitToFinish() error
@@ -395,6 +476,7 @@ func (task *createCollectionTask) WaitToFinish() error
 
 
 
+// TODO
 ###### 10.2.3 Scheduler
 
 ```go
@@ -418,6 +500,7 @@ Master
 
 
 
+//TODO
 #### 10.4 Meta Table
 
 ###### 10.4.1 Meta
@@ -491,39 +574,46 @@ Note that *tenantId*, *proxyId*, *collectionId*, *segmentId* are unique strings 
 
 ```go
 type metaTable struct {
-  kv kv.TxnBase // client of a reliable kv service, i.e. etcd client
-  tenantId2Meta map[UniqueId]TenantMeta // tenant id to tenant meta
-  proxyId2Meta map[UniqueId]ProxyMeta // proxy id to proxy meta
-  collId2Meta map[UniqueId]CollectionMeta // collection id to collection meta
-  collName2Id map[string]UniqueId // collection name to collection id
-  segId2Meta map[UniqueId]SegmentMeta // segment id to segment meta
+  client             kv.TxnBase                                                       // client of a reliable kv service, i.e. etcd client
+  tenantID2Meta      map[typeutil.UniqueID]pb.TenantMeta                              // tenant id to tenant meta
+  proxyID2Meta       map[typeutil.UniqueID]pb.ProxyMeta                               // proxy id to proxy meta
+  collID2Meta        map[typeutil.UniqueID]pb.CollectionInfo                          // collection id to collection meta,
+  collName2ID        map[string]typeutil.UniqueID                                     // collection name to collection id
+  partitionID2Meta   map[typeutil.UniqueID]pb.PartitionInfo                           // partition id -> partition meta
+  segID2IndexMeta    map[typeutil.UniqueID]*map[typeutil.UniqueID]pb.SegmentIndexInfo // segment id -> index id -> segment index meta
+  indexID2Meta       map[typeutil.UniqueID]pb.IndexInfo                               // index id ->index meta
+  segID2CollID       map[typeutil.UniqueID]typeutil.UniqueID                          // segment id -> collection id
+  partitionID2CollID map[typeutil.UniqueID]typeutil.UniqueID                          // partition id -> collection id
   
   tenantLock sync.RWMutex
-  proxyLock sync.RWMutex
-  ddLock sync.RWMutex
+  proxyLock  sync.RWMutex
+  ddLock     sync.RWMutex
 }
 
-func (meta *metaTable) AddTenant(tenant *TenantMeta) error
-func (meta *metaTable) DeleteTenant(tenantId UniqueId) error
+func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo, idx []*pb.IndexInfo) error
+func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID) error
+func (mt *metaTable) HasCollection(collID typeutil.UniqueID) bool
+func (mt *metaTable) GetCollectionByID(collectionID typeutil.UniqueID) (*pb.CollectionInfo, error)
+func (mt *metaTable) GetCollectionByName(collectionName string) (*pb.CollectionInfo, error)
+func (mt *metaTable) GetCollectionBySegmentID(segID typeutil.UniqueID) (*pb.CollectionInfo, error)
+func (mt *metaTable) ListCollections() ([]string, error)
+func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID) error
+func (mt *metaTable) HasPartition(collID typeutil.UniqueID, partitionName string) bool
+func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName string) (typeutil.UniqueID, error)
+func (mt *metaTable) GetPartitionByID(partitionID typeutil.UniqueID) (pb.PartitionInfo, error)
+func (mt *metaTable) AddSegment(seg *datapb.SegmentInfo) error
+func (mt *metaTable) AddIndex(seg *pb.SegmentIndexInfo) error
+func (mt *metaTable) DropIndex(collName, fieldName, indexName string) (typeutil.UniqueID, bool, error)
+func (mt *metaTable) GetSegmentIndexInfoByID(segID typeutil.UniqueID, filedID int64, idxName string) (pb.SegmentIndexInfo, error)
+func (mt *metaTable) GetFieldSchema(collName string, fieldName string) (schemapb.FieldSchema, error)
+func (mt *metaTable) unlockGetFieldSchema(collName string, fieldName string) (schemapb.FieldSchema, error)
+func (mt *metaTable) IsSegmentIndexed(segID typeutil.UniqueID, fieldSchema *schemapb.FieldSchema, indexParams []*commonpb.KeyValuePair) bool
+func (mt *metaTable) unlockIsSegmentIndexed(segID typeutil.UniqueID, fieldSchema *schemapb.FieldSchema, indexParams []*commonpb.KeyValuePair) bool
+func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, idxInfo *pb.IndexInfo) ([]typeutil.UniqueID, schemapb.FieldSchema, error)
+func (mt *metaTable) GetIndexByName(collName string, fieldName string, indexName string) ([]pb.IndexInfo, error)
+func (mt *metaTable) GetIndexByID(indexID typeutil.UniqueID) (*pb.IndexInfo, error)
 
-func (meta *metaTable) AddProxy(proxy *ProxyMeta) error
-func (meta *metaTable) DeleteProxy(proxyId UniqueId) error
-
-func (meta *metaTable) AddCollection(coll *CollectionMeta) error
-func (meta *metaTable) DeleteCollection(collId UniqueId) error
-func (meta *metaTable) HasCollection(collId UniqueId) bool
-func (meta *metaTable) GetCollectionByName(collName string) (*CollectionMeta, error)
-
-func (meta *metaTable) AddPartition(collId UniqueId, tag string) error
-func (meta *metaTable) HasPartition(collId UniqueId, tag string) bool
-func (meta *metaTable) DeletePartition(collId UniqueId, tag string) error
-
-func (meta *metaTable) AddSegment(seg *SegmentMeta) error
-func (meta *metaTable) GetSegmentById(segId UniqueId)(*SegmentMeta, error)
-func (meta *metaTable) DeleteSegment(segId UniqueId) error
-func (meta *metaTable) CloseSegment(segId UniqueId, closeTs Timestamp, num_rows int64) error
-
-func NewMetaTable(kv kv.TxnBase) (*metaTable,error)
+func NewMetaTable(kv kv.TxnBase) (*metaTable, error)
 ```
 
 *metaTable* maintains meta both in memory and *etcdKV*. It keeps meta's consistency in both sides. All its member functions may be called concurrently.
@@ -538,6 +628,7 @@ func NewMetaTable(kv kv.TxnBase) (*metaTable,error)
 
 ###### 10.5.1 Time Tick Barrier
 
+//TODO
 * Soft Time Tick Barrier
 
 
@@ -545,18 +636,19 @@ func NewMetaTable(kv kv.TxnBase) (*metaTable,error)
 
 ```go
 type softTimeTickBarrier struct {
-  peer2LastTt map[UniqueId]Timestamp
+  peer2LastTt   map[UniqueID]Timestamp
   minTtInterval Timestamp
-  lastTt Timestamp
-  outTt chan Timestamp
-  ttStream *MsgStream
-  ctx context.Context
+  lastTt        int64
+  outTt         chan Timestamp
+  ttStream      ms.MsgStream
+  ctx           context.Context
 }
 
 func (ttBarrier *softTimeTickBarrier) GetTimeTick() (Timestamp,error)
-func (ttBarrier *softTimeTickBarrier) Start() error
+func (ttBarrier *softTimeTickBarrier) Start()
+func (ttBarrier *softTimeTickBarrier) Close()
 
-func newSoftTimeTickBarrier(ctx context.Context, ttStream *MsgStream, peerIds []UniqueId, minTtInterval Timestamp) *softTimeTickBarrier
+func NewSoftTimeTickBarrier(ctx context.Context, ttStream ms.MsgStream, peerIds []UniqueID, minTtInterval Timestamp) *softTimeTickBarrier
 ```
 
 
@@ -567,20 +659,25 @@ func newSoftTimeTickBarrier(ctx context.Context, ttStream *MsgStream, peerIds []
 
 ```go
 type hardTimeTickBarrier struct {
-  peer2Tt map[UniqueId]List
-  outTt chan Timestamp
-  ttStream *MsgStream
-  ctx context.Context
+  peer2Tt    map[UniqueID]Timestamp
+  outTt      chan Timestamp
+  ttStream   ms.MsgStream
+  ctx        context.Context
+  wg         sync.WaitGroup
+  loopCtx    context.Context
+  loopCancel context.CancelFunc
 }
 
 func (ttBarrier *hardTimeTickBarrier) GetTimeTick() (Timestamp,error)
-func (ttBarrier *hardTimeTickBarrier) Start() error
+func (ttBarrier *hardTimeTickBarrier) Start()
+func (ttBarrier *hardTimeTickBarrier) Close()
 
-func newHardTimeTickBarrier(ctx context.Context, ttStream *MsgStream, peerIds []UniqueId) *softTimeTickBarrier
+func NewHardTimeTickBarrier(ctx context.Context, ttStream ms.MsgStream, peerIds []UniqueID) *hardTimeTickBarrier
 ```
 
 
 
+// TODO
 ###### 10.5.1 Time Synchronization Message Producer
 
 <img src="./figs/time_sync_msg_producer.png" width=700>
@@ -589,17 +686,16 @@ func newHardTimeTickBarrier(ctx context.Context, ttStream *MsgStream, peerIds []
  ```go
 type TimeTickBarrier interface {
 	GetTimeTick() (Timestamp,error)
-	Start() error
+	Start()
+    Close()
 }
 
 type timeSyncMsgProducer struct {
-  proxyTtBarrier TimeTickBarrier // softTimeTickBarrier
-  WriteNodeTtBarrier TimeTickBarrier //hardTimeTickBarrier
-  
-  dmSyncStream *MsgStream // insert & delete
-  k2sSyncStream *MsgStream
-  
-  ctx context.Context
+  ctx       context.Context
+  cancel    context.CancelFunc
+  wg        sync.WaitGroup
+  ttBarrier TimeTickBarrier
+  watchers  []TimeTickWatcher
 }
 
 func (syncMsgProducer *timeSyncMsgProducer) SetProxyTtStreams(proxyTt *MsgStream, proxyIds []UniqueId)
@@ -641,6 +737,7 @@ message QueryNodeStats {
 
 
 
+//TODO
 ```go
 type assignment struct {
 	MemSize    int64
@@ -665,6 +762,7 @@ func NewSegmentManagement(ctx context.Context) *SegmentManagement
 
 
 
+//TODO
 ###### 10.7.1 Assign Segment ID to Inserted Rows
 
 Master receives *AssignSegIDRequest* which contains a list of *SegIDRequest(count, channelName, collectionName, partitionName)* from Proxy. Segment Manager will assign the opened segments or open a new segment if there is no enough space, and Segment Manager will record the allocated space which can be reallocated after a expire duration.
