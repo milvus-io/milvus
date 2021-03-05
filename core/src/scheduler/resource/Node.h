@@ -51,6 +51,9 @@ class Node : public interface::dumpable {
     std::vector<Neighbour>
     GetNeighbours();
 
+    void
+    RemoveNeighbour(const NeighbourNodePtr& neighbour_node);
+
  public:
     json
     Dump() const override;
