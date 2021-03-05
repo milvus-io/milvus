@@ -39,3 +39,5 @@ coverage:
 	pytest --cov-report html:cov_html --cov=mishards
 test:
 	pytest
+docker-login:
+	echo $(AZUREPASSWD2) |docker login milvuscloud.azurecr.io -u milvuscloud --password-stdin
