@@ -264,7 +264,3 @@ $ make style
 | `ROUTER_CLASS_NAME`      | No       | string | `FileBasedHashRingRouter` | Under the plug-in search path, search the class based on the class name, and instantiate it. Currently, only `FileBasedHashRingRouter` is supported. |
 | `ROUTER_CLASS_TEST_NAME` | No       | string | `FileBasedHashRingRouter` | Under the plug-in search path, search the class based on the class name, and instantiate it. Currently, `FileBasedHashRingRouter` is supported for test environment only. |
 
-
-
-
-
