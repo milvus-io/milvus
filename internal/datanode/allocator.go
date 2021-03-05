@@ -3,21 +3,20 @@ package datanode
 import (
 	"context"
 
+	"github.com/zilliztech/milvus-distributed/internal/types"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 )
 
-type (
-	allocatorInterface interface {
-		allocID() (UniqueID, error)
-	}
+type allocatorInterface interface {
+	allocID() (UniqueID, error)
+}
+type allocator struct {
+	masterService types.MasterService
+}
 
-	allocator struct {
-		masterService MasterServiceInterface
-	}
-)
-
-func newAllocator(s MasterServiceInterface) *allocator {
+func newAllocator(s types.MasterService) *allocator {
 	return &allocator{
 		masterService: s,
 	}

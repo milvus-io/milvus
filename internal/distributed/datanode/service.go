@@ -25,11 +25,12 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 )
 
 type Server struct {
-	impl        *dn.DataNode
+	datanode    *dn.DataNode
 	wg          sync.WaitGroup
 	grpcErrChan chan error
 	grpcServer  *grpc.Server
@@ -38,8 +39,8 @@ type Server struct {
 
 	msFactory msgstream.Factory
 
-	masterService *msc.GrpcClient
-	dataService   *dsc.Client
+	masterService types.MasterService
+	dataService   types.DataService
 
 	closer io.Closer
 }
@@ -53,7 +54,7 @@ func New(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 		grpcErrChan: make(chan error),
 	}
 
-	s.impl = dn.NewDataNode(s.ctx, s.msFactory)
+	s.datanode = dn.NewDataNode(s.ctx, s.msFactory)
 
 	return s, nil
 }
@@ -89,12 +90,12 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 }
 
-func (s *Server) SetMasterServiceInterface(ctx context.Context, ms dn.MasterServiceInterface) error {
-	return s.impl.SetMasterServiceInterface(ctx, ms)
+func (s *Server) SetMasterServiceInterface(ms types.MasterService) error {
+	return s.datanode.SetMasterServiceInterface(ms)
 }
 
-func (s *Server) SetDataServiceInterface(ctx context.Context, ds dn.DataServiceInterface) error {
-	return s.impl.SetDataServiceInterface(ctx, ds)
+func (s *Server) SetDataServiceInterface(ds types.DataService) error {
+	return s.datanode.SetDataServiceInterface(ds)
 }
 
 func (s *Server) Run() error {
@@ -120,7 +121,7 @@ func (s *Server) Stop() error {
 		s.grpcServer.GracefulStop()
 	}
 
-	err := s.impl.Stop()
+	err := s.datanode.Stop()
 	if err != nil {
 		return err
 	}
@@ -182,7 +183,7 @@ func (s *Server) init() error {
 		panic(err)
 	}
 
-	if err := s.SetMasterServiceInterface(ctx, masterClient); err != nil {
+	if err := s.SetMasterServiceInterface(masterClient); err != nil {
 		panic(err)
 	}
 
@@ -200,7 +201,7 @@ func (s *Server) init() error {
 	if err != nil {
 		panic(err)
 	}
-	if err := s.SetDataServiceInterface(ctx, dataService); err != nil {
+	if err := s.SetDataServiceInterface(dataService); err != nil {
 		panic(err)
 	}
 
@@ -208,30 +209,30 @@ func (s *Server) init() error {
 	dn.Params.Port = Params.Port
 	dn.Params.IP = Params.IP
 
-	s.impl.NodeID = dn.Params.NodeID
-	s.impl.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
+	s.datanode.NodeID = dn.Params.NodeID
+	s.datanode.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
 
-	if err := s.impl.Init(); err != nil {
-		log.Warn("impl init error: ", zap.Error(err))
+	if err := s.datanode.Init(); err != nil {
+		log.Warn("datanode init error: ", zap.Error(err))
 		return err
 	}
 	return nil
 }
 
 func (s *Server) start() error {
-	return s.impl.Start()
+	return s.datanode.Start()
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	return s.impl.GetComponentStates(ctx)
+	return s.datanode.GetComponentStates(ctx)
 }
 
 func (s *Server) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {
-	return s.impl.WatchDmChannels(ctx, in)
+	return s.datanode.WatchDmChannels(ctx, in)
 }
 
 func (s *Server) FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) (*commonpb.Status, error) {
-	if s.impl.State.Load().(internalpb2.StateCode) != internalpb2.StateCode_HEALTHY {
+	if s.datanode.State.Load().(internalpb2.StateCode) != internalpb2.StateCode_HEALTHY {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "DataNode isn't healthy.",
@@ -239,5 +240,5 @@ func (s *Server) FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) 
 	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
-	}, s.impl.FlushSegments(ctx, in)
+	}, s.datanode.FlushSegments(ctx, in)
 }

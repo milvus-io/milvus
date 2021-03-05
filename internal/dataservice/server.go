@@ -18,83 +18,49 @@ import (
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/timesync"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 )
 
 const role = "dataservice"
 
-type DataService interface {
-	typeutil.Component
-
-	RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error)
-	Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error)
-
-	AssignSegmentID(ctx context.Context, req *datapb.AssignSegIDRequest) (*datapb.AssignSegIDResponse, error)
-	ShowSegments(ctx context.Context, req *datapb.ShowSegmentRequest) (*datapb.ShowSegmentResponse, error)
-	GetSegmentStates(ctx context.Context, req *datapb.SegmentStatesRequest) (*datapb.SegmentStatesResponse, error)
-	GetInsertBinlogPaths(ctx context.Context, req *datapb.InsertBinlogPathRequest) (*datapb.InsertBinlogPathsResponse, error)
-	GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error)
-	GetInsertChannels(ctx context.Context, req *datapb.InsertChannelRequest) (*internalpb2.StringList, error)
-	GetCollectionStatistics(ctx context.Context, req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error)
-	GetPartitionStatistics(ctx context.Context, req *datapb.PartitionStatsRequest) (*datapb.PartitionStatsResponse, error)
-	GetCount(ctx context.Context, req *datapb.CollectionCountRequest) (*datapb.CollectionCountResponse, error)
-	GetSegmentInfo(ctx context.Context, req *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error)
-}
-
-type MasterClient interface {
-	ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
-	DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
-	ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
-	GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error)
-	AllocTimestamp(ctx context.Context, in *masterpb.TsoRequest) (*masterpb.TsoResponse, error)
-	AllocID(ctx context.Context, in *masterpb.IDRequest) (*masterpb.IDResponse, error)
-	GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
-}
-
-type DataNodeClient interface {
-	WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelRequest) (*commonpb.Status, error)
-	GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error)
-	FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) (*commonpb.Status, error)
-	Stop() error
-}
-
 type (
 	UniqueID  = typeutil.UniqueID
 	Timestamp = typeutil.Timestamp
-	Server    struct {
-		ctx               context.Context
-		serverLoopCtx     context.Context
-		serverLoopCancel  context.CancelFunc
-		serverLoopWg      sync.WaitGroup
-		state             atomic.Value
-		client            *etcdkv.EtcdKV
-		meta              *meta
-		segAllocator      segmentAllocatorInterface
-		statsHandler      *statsHandler
-		ddHandler         *ddHandler
-		allocator         allocatorInterface
-		cluster           *dataNodeCluster
-		msgProducer       *timesync.MsgProducer
-		registerFinishCh  chan struct{}
-		masterClient      MasterClient
-		ttMsgStream       msgstream.MsgStream
-		k2sMsgStream      msgstream.MsgStream
-		ddChannelName     string
-		segmentInfoStream msgstream.MsgStream
-		insertChannels    []string
-		msFactory         msgstream.Factory
-		ttBarrier         timesync.TimeTickBarrier
-	}
 )
+type Server struct {
+	ctx               context.Context
+	serverLoopCtx     context.Context
+	serverLoopCancel  context.CancelFunc
+	serverLoopWg      sync.WaitGroup
+	state             atomic.Value
+	client            *etcdkv.EtcdKV
+	meta              *meta
+	segAllocator      segmentAllocatorInterface
+	statsHandler      *statsHandler
+	ddHandler         *ddHandler
+	allocator         allocatorInterface
+	cluster           *dataNodeCluster
+	msgProducer       *timesync.MsgProducer
+	registerFinishCh  chan struct{}
+	masterClient      types.MasterService
+	ttMsgStream       msgstream.MsgStream
+	k2sMsgStream      msgstream.MsgStream
+	ddChannelName     string
+	segmentInfoStream msgstream.MsgStream
+	insertChannels    []string
+	msFactory         msgstream.Factory
+	ttBarrier         timesync.TimeTickBarrier
+}
 
 func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	ch := make(chan struct{})
@@ -118,7 +84,7 @@ func (s *Server) getInsertChannels() []string {
 	return channels
 }
 
-func (s *Server) SetMasterClient(masterClient MasterClient) {
+func (s *Server) SetMasterClient(masterClient types.MasterService) {
 	s.masterClient = masterClient
 }
 

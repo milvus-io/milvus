@@ -5,36 +5,32 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
-type (
-	errSegmentNotFound struct {
-		segmentID UniqueID
-	}
-	errCollectionNotFound struct {
-		collectionID UniqueID
-	}
-	collectionInfo struct {
-		ID         UniqueID
-		Schema     *schemapb.CollectionSchema
-		Partitions []UniqueID
-	}
-	meta struct {
-		client      kv.TxnBase                       // client of a reliable kv service, i.e. etcd client
-		collID2Info map[UniqueID]*collectionInfo     // collection id to collection info
-		segID2Info  map[UniqueID]*datapb.SegmentInfo // segment id to segment info
-		ddLock      sync.RWMutex
-	}
-)
+type errSegmentNotFound struct {
+	segmentID UniqueID
+}
+type errCollectionNotFound struct {
+	collectionID UniqueID
+}
+type collectionInfo struct {
+	ID         UniqueID
+	Schema     *schemapb.CollectionSchema
+	Partitions []UniqueID
+}
+type meta struct {
+	client      kv.TxnBase                       // client of a reliable kv service, i.e. etcd client
+	collID2Info map[UniqueID]*collectionInfo     // collection id to collection info
+	segID2Info  map[UniqueID]*datapb.SegmentInfo // segment id to segment info
+	ddLock      sync.RWMutex
+}
 
 func newErrSegmentNotFound(segmentID UniqueID) errSegmentNotFound {
 	return errSegmentNotFound{segmentID: segmentID}

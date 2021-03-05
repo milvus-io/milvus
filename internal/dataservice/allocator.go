@@ -3,6 +3,8 @@ package dataservice
 import (
 	"context"
 
+	"github.com/zilliztech/milvus-distributed/internal/types"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 )
@@ -13,10 +15,10 @@ type allocatorInterface interface {
 }
 
 type allocator struct {
-	masterClient MasterClient
+	masterClient types.MasterService
 }
 
-func newAllocator(masterClient MasterClient) *allocator {
+func newAllocator(masterClient types.MasterService) *allocator {
 	return &allocator{
 		masterClient: masterClient,
 	}

@@ -232,7 +232,7 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "\010msg_type\030\001 \001(\0162\034.milvus.proto.common.Ms"
   "gType\022\r\n\005msgID\030\002 \001(\003\022\021\n\ttimestamp\030\003 \001(\004\022"
   "\020\n\010sourceID\030\004 \001(\003\"7\n\tMsgHeader\022*\n\004base\030\001"
-  " \001(\0132\034.milvus.proto.common.MsgBase*\270\004\n\tE"
+  " \001(\0132\034.milvus.proto.common.MsgBase*\315\004\n\tE"
   "rrorCode\022\013\n\007SUCCESS\020\000\022\024\n\020UNEXPECTED_ERRO"
   "R\020\001\022\022\n\016CONNECT_FAILED\020\002\022\025\n\021PERMISSION_DE"
   "NIED\020\003\022\031\n\025COLLECTION_NOT_EXISTS\020\004\022\024\n\020ILL"
@@ -246,34 +246,35 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "_FILE\020\022\022\030\n\024CANNOT_DELETE_FOLDER\020\023\022\026\n\022CAN"
   "NOT_DELETE_FILE\020\024\022\025\n\021BUILD_INDEX_ERROR\020\025"
   "\022\021\n\rILLEGAL_NLIST\020\026\022\027\n\023ILLEGAL_METRIC_TY"
-  "PE\020\027\022\021\n\rOUT_OF_MEMORY\020\030\022\024\n\017DD_REQUEST_RA"
-  "CE\020\350\007*[\n\nIndexState\022\010\n\004NONE\020\000\022\014\n\010UNISSUE"
-  "D\020\001\022\016\n\nINPROGRESS\020\002\022\014\n\010FINISHED\020\003\022\n\n\006FAI"
-  "LED\020\004\022\013\n\007DELETED\020\005*o\n\014SegmentState\022\017\n\013Se"
-  "gmentNone\020\000\022\023\n\017SegmentNotExist\020\001\022\022\n\016Segm"
-  "entGrowing\020\002\022\021\n\rSegmentSealed\020\003\022\022\n\016Segme"
-  "ntFlushed\020\004*\225\006\n\007MsgType\022\t\n\005kNone\020\000\022\025\n\021kC"
-  "reateCollection\020d\022\023\n\017kDropCollection\020e\022\022"
-  "\n\016kHasCollection\020f\022\027\n\023kDescribeCollectio"
-  "n\020g\022\024\n\020kShowCollections\020h\022\022\n\016kGetSysConf"
-  "igs\020i\022\023\n\017kLoadCollection\020j\022\026\n\022kReleaseCo"
-  "llection\020k\022\025\n\020kCreatePartition\020\310\001\022\023\n\016kDr"
-  "opPartition\020\311\001\022\022\n\rkHasPartition\020\312\001\022\027\n\022kD"
-  "escribePartition\020\313\001\022\024\n\017kShowPartitions\020\314"
-  "\001\022\023\n\016kLoadPartition\020\315\001\022\026\n\021kReleasePartit"
-  "ion\020\316\001\022\021\n\014kShowSegment\020\372\001\022\025\n\020kDescribeSe"
-  "gment\020\373\001\022\021\n\014kCreateIndex\020\254\002\022\023\n\016kDescribe"
-  "Index\020\255\002\022\017\n\nkDropIndex\020\256\002\022\014\n\007kInsert\020\220\003\022"
-  "\014\n\007kDelete\020\221\003\022\013\n\006kFlush\020\222\003\022\014\n\007kSearch\020\364\003"
-  "\022\022\n\rkSearchResult\020\365\003\022\023\n\016kGetIndexState\020\366"
-  "\003\022\035\n\030kGetCollectionStatistics\020\367\003\022\034\n\027kGet"
-  "PartitionStatistics\020\370\003\022\021\n\014kSegmentInfo\020\330"
-  "\004\022\016\n\tkTimeTick\020\260\t\022\024\n\017kQueryNodeStats\020\261\t\022"
-  "\017\n\nkLoadIndex\020\262\t\022\017\n\nkRequestID\020\263\t\022\020\n\013kRe"
-  "questTSO\020\264\t\022\025\n\020kAllocateSegment\020\265\t\022\027\n\022kS"
-  "egmentStatistics\020\266\t\022\026\n\021kSegmentFlushDone"
-  "\020\267\tBBZ@github.com/zilliztech/milvus-dist"
-  "ributed/internal/proto/commonpbb\006proto3"
+  "PE\020\027\022\021\n\rOUT_OF_MEMORY\020\030\022\023\n\017INDEX_NOT_EXI"
+  "ST\020\031\022\024\n\017DD_REQUEST_RACE\020\350\007*[\n\nIndexState"
+  "\022\010\n\004NONE\020\000\022\014\n\010UNISSUED\020\001\022\016\n\nINPROGRESS\020\002"
+  "\022\014\n\010FINISHED\020\003\022\n\n\006FAILED\020\004\022\013\n\007DELETED\020\005*"
+  "o\n\014SegmentState\022\017\n\013SegmentNone\020\000\022\023\n\017Segm"
+  "entNotExist\020\001\022\022\n\016SegmentGrowing\020\002\022\021\n\rSeg"
+  "mentSealed\020\003\022\022\n\016SegmentFlushed\020\004*\225\006\n\007Msg"
+  "Type\022\t\n\005kNone\020\000\022\025\n\021kCreateCollection\020d\022\023"
+  "\n\017kDropCollection\020e\022\022\n\016kHasCollection\020f\022"
+  "\027\n\023kDescribeCollection\020g\022\024\n\020kShowCollect"
+  "ions\020h\022\022\n\016kGetSysConfigs\020i\022\023\n\017kLoadColle"
+  "ction\020j\022\026\n\022kReleaseCollection\020k\022\025\n\020kCrea"
+  "tePartition\020\310\001\022\023\n\016kDropPartition\020\311\001\022\022\n\rk"
+  "HasPartition\020\312\001\022\027\n\022kDescribePartition\020\313\001"
+  "\022\024\n\017kShowPartitions\020\314\001\022\023\n\016kLoadPartition"
+  "\020\315\001\022\026\n\021kReleasePartition\020\316\001\022\021\n\014kShowSegm"
+  "ent\020\372\001\022\025\n\020kDescribeSegment\020\373\001\022\021\n\014kCreate"
+  "Index\020\254\002\022\023\n\016kDescribeIndex\020\255\002\022\017\n\nkDropIn"
+  "dex\020\256\002\022\014\n\007kInsert\020\220\003\022\014\n\007kDelete\020\221\003\022\013\n\006kF"
+  "lush\020\222\003\022\014\n\007kSearch\020\364\003\022\022\n\rkSearchResult\020\365"
+  "\003\022\023\n\016kGetIndexState\020\366\003\022\035\n\030kGetCollection"
+  "Statistics\020\367\003\022\034\n\027kGetPartitionStatistics"
+  "\020\370\003\022\021\n\014kSegmentInfo\020\330\004\022\016\n\tkTimeTick\020\260\t\022\024"
+  "\n\017kQueryNodeStats\020\261\t\022\017\n\nkLoadIndex\020\262\t\022\017\n"
+  "\nkRequestID\020\263\t\022\020\n\013kRequestTSO\020\264\t\022\025\n\020kAll"
+  "ocateSegment\020\265\t\022\027\n\022kSegmentStatistics\020\266\t"
+  "\022\026\n\021kSegmentFlushDone\020\267\tBBZ@github.com/z"
+  "illiztech/milvus-distributed/internal/pr"
+  "oto/commonpbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_common_2eproto_deps[1] = {
 };
@@ -289,7 +290,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_com
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_common_2eproto_once;
 static bool descriptor_table_common_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_common_2eproto = {
-  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 2039,
+  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 2060,
   &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 7, 0,
   schemas, file_default_instances, TableStruct_common_2eproto::offsets,
   file_level_metadata_common_2eproto, 7, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,
@@ -330,6 +331,7 @@ bool ErrorCode_IsValid(int value) {
     case 22:
     case 23:
     case 24:
+    case 25:
     case 1000:
       return true;
     default:

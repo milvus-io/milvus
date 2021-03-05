@@ -11,18 +11,16 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
-type (
-	proxyTimeTickWatcher struct {
-		allocator segmentAllocatorInterface
-		msgQueue  chan *msgstream.TimeTickMsg
-	}
-	dataNodeTimeTickWatcher struct {
-		meta      *meta
-		cluster   *dataNodeCluster
-		allocator segmentAllocatorInterface
-		msgQueue  chan *msgstream.TimeTickMsg
-	}
-)
+type proxyTimeTickWatcher struct {
+	allocator segmentAllocatorInterface
+	msgQueue  chan *msgstream.TimeTickMsg
+}
+type dataNodeTimeTickWatcher struct {
+	meta      *meta
+	cluster   *dataNodeCluster
+	allocator segmentAllocatorInterface
+	msgQueue  chan *msgstream.TimeTickMsg
+}
 
 func newProxyTimeTickWatcher(allocator segmentAllocatorInterface) *proxyTimeTickWatcher {
 	return &proxyTimeTickWatcher{

@@ -13,64 +13,40 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/types"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 const (
 	RPCConnectionTimeout = 30 * time.Second
 )
 
-type (
-	Interface interface {
-		typeutil.Service
-		typeutil.Component
+type DataNode struct {
+	ctx     context.Context
+	cancel  context.CancelFunc
+	NodeID  UniqueID
+	Role    string
+	State   atomic.Value // internalpb2.StateCode_INITIALIZING
+	watchDm chan struct{}
 
-		WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelRequest) (*commonpb.Status, error)
-		FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) error
+	dataSyncService *dataSyncService
+	metaService     *metaService
 
-		SetMasterServiceInterface(ctx context.Context, ms MasterServiceInterface) error
-		SetDataServiceInterface(ctx context.Context, ds DataServiceInterface) error
-	}
+	masterService types.MasterService
+	dataService   types.DataService
 
-	DataServiceInterface interface {
-		GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
-		RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error)
-	}
+	flushChan chan *flushMsg
+	replica   Replica
 
-	MasterServiceInterface interface {
-		GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
-		AllocID(ctx context.Context, in *masterpb.IDRequest) (*masterpb.IDResponse, error)
-		ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
-		DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
-	}
+	closer io.Closer
 
-	DataNode struct {
-		ctx     context.Context
-		cancel  context.CancelFunc
-		NodeID  UniqueID
-		Role    string
-		State   atomic.Value // internalpb2.StateCode_INITIALIZING
-		watchDm chan struct{}
-
-		dataSyncService *dataSyncService
-		metaService     *metaService
-
-		masterService MasterServiceInterface
-		dataService   DataServiceInterface
-
-		flushChan chan *flushMsg
-		replica   Replica
-
-		closer io.Closer
-
-		msFactory msgstream.Factory
-	}
-)
+	msFactory msgstream.Factory
+}
 
 func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 
@@ -92,7 +68,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 	return node
 }
 
-func (node *DataNode) SetMasterServiceInterface(ctx context.Context, ms MasterServiceInterface) error {
+func (node *DataNode) SetMasterServiceInterface(ms types.MasterService) error {
 	switch {
 	case ms == nil, node.masterService != nil:
 		return errors.New("Nil parameter or repeatly set")
@@ -102,7 +78,7 @@ func (node *DataNode) SetMasterServiceInterface(ctx context.Context, ms MasterSe
 	}
 }
 
-func (node *DataNode) SetDataServiceInterface(ctx context.Context, ds DataServiceInterface) error {
+func (node *DataNode) SetDataServiceInterface(ds types.DataService) error {
 	switch {
 	case ds == nil, node.dataService != nil:
 		return errors.New("Nil parameter or repeatly set")

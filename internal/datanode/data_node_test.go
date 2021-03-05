@@ -14,9 +14,10 @@ import (
 	"go.uber.org/zap"
 
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
-
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/types"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -91,27 +92,26 @@ func clearEtcd(rootPath string) error {
 
 }
 
-type (
-	Factory interface {
-	}
+type Factory interface {
+}
 
-	MetaFactory struct {
-	}
+type MetaFactory struct {
+}
 
-	DataFactory struct {
-		rawData []byte
-	}
+type DataFactory struct {
+	rawData []byte
+}
 
-	AllocatorFactory struct {
-		ID UniqueID
-	}
+type AllocatorFactory struct {
+	ID UniqueID
+}
 
-	MasterServiceFactory struct {
-		ID             UniqueID
-		collectionName string
-		collectionID   UniqueID
-	}
-)
+type MasterServiceFactory struct {
+	types.MasterService
+	ID             UniqueID
+	collectionName string
+	collectionID   UniqueID
+}
 
 func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionName string) *etcdpb.CollectionMeta {
 	sch := schemapb.CollectionSchema{
