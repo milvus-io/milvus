@@ -30,6 +30,10 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 )
 
+const (
+	GRPCMaxMagSize = 2 << 30
+)
+
 type Server struct {
 	ctx        context.Context
 	wg         sync.WaitGroup
@@ -82,7 +86,8 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	s.grpcServer = grpc.NewServer(grpc.UnaryInterceptor(
 		otgrpc.OpenTracingServerInterceptor(tracer)),
 		grpc.StreamInterceptor(
-			otgrpc.OpenTracingStreamServerInterceptor(tracer)))
+			otgrpc.OpenTracingStreamServerInterceptor(tracer)),
+		grpc.MaxRecvMsgSize(GRPCMaxMagSize))
 	proxypb.RegisterProxyNodeServiceServer(s.grpcServer, s)
 	milvuspb.RegisterMilvusServiceServer(s.grpcServer, s)
 
