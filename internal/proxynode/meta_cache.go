@@ -2,9 +2,10 @@ package proxynode
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -61,7 +62,7 @@ func (m *MetaCache) readCollectionID(ctx context.Context, collectionName string)
 
 	collInfo, ok := m.collInfo[collectionName]
 	if !ok {
-		return 0, errors.Errorf("can't find collection name:%s", collectionName)
+		return 0, fmt.Errorf("can't find collection name:%s", collectionName)
 	}
 	return collInfo.collID, nil
 }
@@ -72,7 +73,7 @@ func (m *MetaCache) readCollectionSchema(ctx context.Context, collectionName str
 
 	collInfo, ok := m.collInfo[collectionName]
 	if !ok {
-		return nil, errors.Errorf("can't find collection name:%s", collectionName)
+		return nil, fmt.Errorf("can't find collection name:%s", collectionName)
 	}
 	return collInfo.schema, nil
 }
@@ -83,12 +84,12 @@ func (m *MetaCache) readPartitionID(ctx context.Context, collectionName string, 
 
 	collInfo, ok := m.collInfo[collectionName]
 	if !ok {
-		return 0, errors.Errorf("can't find collection name:%s", collectionName)
+		return 0, fmt.Errorf("can't find collection name:%s", collectionName)
 	}
 
 	partitionID, ok := collInfo.partInfo[partitionName]
 	if !ok {
-		return 0, errors.Errorf("can't find partition name:%s", partitionName)
+		return 0, fmt.Errorf("can't find partition name:%s", partitionName)
 	}
 	return partitionID, nil
 }
@@ -112,7 +113,7 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) 
 		return 0, err
 	}
 	if coll.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-		return 0, errors.Errorf("%s", coll.Status.Reason)
+		return 0, errors.New(coll.Status.Reason)
 	}
 
 	_, ok := m.collInfo[collectionName]
@@ -143,7 +144,7 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName stri
 		return nil, err
 	}
 	if coll.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-		return nil, errors.Errorf("%s", coll.Status.Reason)
+		return nil, errors.New(coll.Status.Reason)
 	}
 
 	_, ok := m.collInfo[collectionName]
@@ -175,10 +176,10 @@ func (m *MetaCache) GetPartitionID(ctx context.Context, collectionName string, p
 		return 0, err
 	}
 	if partitions.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-		return 0, errors.Errorf("%s", partitions.Status.Reason)
+		return 0, fmt.Errorf("%s", partitions.Status.Reason)
 	}
 	if len(partitions.PartitionIDs) != len(partitions.PartitionNames) {
-		return 0, errors.Errorf("partition ids len: %d doesn't equal Partition name len %d",
+		return 0, fmt.Errorf("partition ids len: %d doesn't equal Partition name len %d",
 			len(partitions.PartitionIDs), len(partitions.PartitionNames))
 	}
 
@@ -201,7 +202,7 @@ func (m *MetaCache) GetPartitionID(ctx context.Context, collectionName string, p
 	}
 	_, ok = partInfo[partitionName]
 	if !ok {
-		return 0, errors.Errorf("partitionID of partitionName:%s can not be find", partitionName)
+		return 0, fmt.Errorf("partitionID of partitionName:%s can not be find", partitionName)
 	}
 
 	return partInfo[partitionName], nil

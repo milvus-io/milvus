@@ -2,13 +2,13 @@ package proxynode
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"reflect"
 	"sort"
-	"strconv"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"errors"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
@@ -120,7 +120,7 @@ func (m *InsertChannelsMap) closeInsertMsgStream(collID UniqueID) error {
 
 	loc, ok := m.collectionID2InsertChannels[collID]
 	if !ok {
-		return errors.New("cannot find collection with id: " + strconv.Itoa(int(collID)))
+		return fmt.Errorf("cannot find collection with id %d", collID)
 	}
 	if m.droppedBitMap[loc] != 0 {
 		return errors.New("insert message stream already closed")
@@ -145,7 +145,7 @@ func (m *InsertChannelsMap) getInsertChannels(collID UniqueID) ([]string, error)
 
 	loc, ok := m.collectionID2InsertChannels[collID]
 	if !ok {
-		return nil, errors.New("cannot find collection with id: " + strconv.Itoa(int(collID)))
+		return nil, fmt.Errorf("cannot find collection with id: %d", collID)
 	}
 
 	if m.droppedBitMap[loc] != 0 {
@@ -161,7 +161,7 @@ func (m *InsertChannelsMap) getInsertMsgStream(collID UniqueID) (msgstream.MsgSt
 
 	loc, ok := m.collectionID2InsertChannels[collID]
 	if !ok {
-		return nil, errors.New("cannot find collection with id: " + strconv.Itoa(int(collID)))
+		return nil, fmt.Errorf("cannot find collection with id: %d", collID)
 	}
 
 	if m.droppedBitMap[loc] != 0 {

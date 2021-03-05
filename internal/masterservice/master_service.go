@@ -11,8 +11,9 @@ import (
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
+	"errors"
+
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -207,64 +208,64 @@ func (c *Core) UpdateStateCode(code internalpb2.StateCode) {
 
 func (c *Core) checkInit() error {
 	if c.MetaTable == nil {
-		return errors.Errorf("MetaTable is nil")
+		return errors.New("MetaTable is nil")
 	}
 	if c.idAllocator == nil {
-		return errors.Errorf("idAllocator is nil")
+		return errors.New("idAllocator is nil")
 	}
 	if c.tsoAllocator == nil {
-		return errors.Errorf("tsoAllocator is nil")
+		return errors.New("tsoAllocator is nil")
 	}
 	if c.etcdCli == nil {
-		return errors.Errorf("etcdCli is nil")
+		return errors.New("etcdCli is nil")
 	}
 	if c.metaKV == nil {
-		return errors.Errorf("metaKV is nil")
+		return errors.New("metaKV is nil")
 	}
 	if c.kvBase == nil {
-		return errors.Errorf("kvBase is nil")
+		return errors.New("kvBase is nil")
 	}
 	if c.ProxyTimeTickChan == nil {
-		return errors.Errorf("ProxyTimeTickChan is nil")
+		return errors.New("ProxyTimeTickChan is nil")
 	}
 	if c.ddReqQueue == nil {
-		return errors.Errorf("ddReqQueue is nil")
+		return errors.New("ddReqQueue is nil")
 	}
 	if c.DdCreateCollectionReq == nil {
-		return errors.Errorf("DdCreateCollectionReq is nil")
+		return errors.New("DdCreateCollectionReq is nil")
 	}
 	if c.DdDropCollectionReq == nil {
-		return errors.Errorf("DdDropCollectionReq is nil")
+		return errors.New("DdDropCollectionReq is nil")
 	}
 	if c.DdCreatePartitionReq == nil {
-		return errors.Errorf("DdCreatePartitionReq is nil")
+		return errors.New("DdCreatePartitionReq is nil")
 	}
 	if c.DdDropPartitionReq == nil {
-		return errors.Errorf("DdDropPartitionReq is nil")
+		return errors.New("DdDropPartitionReq is nil")
 	}
 	if c.DataServiceSegmentChan == nil {
-		return errors.Errorf("DataServiceSegmentChan is nil")
+		return errors.New("DataServiceSegmentChan is nil")
 	}
 	if c.GetBinlogFilePathsFromDataServiceReq == nil {
-		return errors.Errorf("GetBinlogFilePathsFromDataServiceReq is nil")
+		return errors.New("GetBinlogFilePathsFromDataServiceReq is nil")
 	}
 	if c.BuildIndexReq == nil {
-		return errors.Errorf("BuildIndexReq is nil")
+		return errors.New("BuildIndexReq is nil")
 	}
 	if c.DropIndexReq == nil {
-		return errors.Errorf("DropIndexReq is nil")
+		return errors.New("DropIndexReq is nil")
 	}
 	if c.InvalidateCollectionMetaCache == nil {
-		return errors.Errorf("InvalidateCollectionMetaCache is nil")
+		return errors.New("InvalidateCollectionMetaCache is nil")
 	}
 	if c.indexTaskQueue == nil {
-		return errors.Errorf("indexTaskQueue is nil")
+		return errors.New("indexTaskQueue is nil")
 	}
 	if c.DataNodeSegmentFlushCompletedChan == nil {
-		return errors.Errorf("DataNodeSegmentFlushCompletedChan is nil")
+		return errors.New("DataNodeSegmentFlushCompletedChan is nil")
 	}
 	if c.ReleaseCollection == nil {
-		return errors.Errorf("ReleaseCollection is nil")
+		return errors.New("ReleaseCollection is nil")
 	}
 
 	log.Debug("master", zap.Int64("node id", int64(Params.NodeID)))
@@ -290,7 +291,7 @@ func (c *Core) startDdScheduler() {
 				break
 			}
 			if !task.IgnoreTimeStamp() && ts <= c.lastDdTimeStamp {
-				task.Notify(errors.Errorf("input timestamp = %d, last dd time stamp = %d", ts, c.lastDdTimeStamp))
+				task.Notify(fmt.Errorf("input timestamp = %d, last dd time stamp = %d", ts, c.lastDdTimeStamp))
 				break
 			}
 			err = task.Execute()
@@ -433,15 +434,15 @@ func (c *Core) tsLoop() {
 }
 func (c *Core) setMsgStreams() error {
 	if Params.PulsarAddress == "" {
-		return errors.Errorf("PulsarAddress is empty")
+		return errors.New("PulsarAddress is empty")
 	}
 	if Params.MsgChannelSubName == "" {
-		return errors.Errorf("MsgChannelSubName is emptyr")
+		return errors.New("MsgChannelSubName is emptyr")
 	}
 
 	//proxy time tick stream,
 	if Params.ProxyTimeTickChannel == "" {
-		return errors.Errorf("ProxyTimeTickChannel is empty")
+		return errors.New("ProxyTimeTickChannel is empty")
 	}
 
 	var err error
@@ -460,14 +461,14 @@ func (c *Core) setMsgStreams() error {
 
 	// master time tick channel
 	if Params.TimeTickChannel == "" {
-		return errors.Errorf("TimeTickChannel is empty")
+		return errors.New("TimeTickChannel is empty")
 	}
 	timeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
 	timeTickStream.AsProducer([]string{Params.TimeTickChannel})
 
 	// master dd channel
 	if Params.DdChannel == "" {
-		return errors.Errorf("DdChannel is empty")
+		return errors.New("DdChannel is empty")
 	}
 	ddStream, _ := c.msFactory.NewMsgStream(c.ctx)
 	ddStream.AsProducer([]string{Params.DdChannel})
@@ -600,7 +601,7 @@ func (c *Core) setMsgStreams() error {
 
 	//segment channel, data service create segment,or data node flush segment will put msg in this channel
 	if Params.DataServiceSegmentChannel == "" {
-		return errors.Errorf("DataServiceSegmentChannel is empty")
+		return errors.New("DataServiceSegmentChannel is empty")
 	}
 	dataServiceStream, _ := c.msFactory.NewMsgStream(c.ctx)
 	dataServiceStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, Params.MsgChannelSubName)
@@ -696,14 +697,14 @@ func (c *Core) SetDataService(ctx context.Context, s DataServiceInterface) error
 			return nil, err
 		}
 		if binlog.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-			return nil, errors.Errorf("GetInsertBinlogPaths from data service failed, error = %s", binlog.Status.Reason)
+			return nil, fmt.Errorf("GetInsertBinlogPaths from data service failed, error = %s", binlog.Status.Reason)
 		}
 		for i := range binlog.FieldIDs {
 			if binlog.FieldIDs[i] == fieldID {
 				return binlog.Paths[i].Values, nil
 			}
 		}
-		return nil, errors.Errorf("binlog file not exist, segment id = %d, field id = %d", segID, fieldID)
+		return nil, fmt.Errorf("binlog file not exist, segment id = %d, field id = %d", segID, fieldID)
 	}
 	return nil
 }
@@ -721,7 +722,7 @@ func (c *Core) SetIndexService(ctx context.Context, s IndexServiceInterface) err
 			return 0, err
 		}
 		if rsp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-			return 0, errors.Errorf("BuildIndex from index service failed, error = %s", rsp.Status.Reason)
+			return 0, fmt.Errorf("BuildIndex from index service failed, error = %s", rsp.Status.Reason)
 		}
 		return rsp.IndexBuildID, nil
 	}
@@ -734,7 +735,7 @@ func (c *Core) SetIndexService(ctx context.Context, s IndexServiceInterface) err
 			return err
 		}
 		if rsp.ErrorCode != commonpb.ErrorCode_SUCCESS {
-			return errors.Errorf("%s", rsp.Reason)
+			return errors.New(rsp.Reason)
 		}
 		return nil
 	}
@@ -759,7 +760,7 @@ func (c *Core) SetQueryService(ctx context.Context, s QueryServiceInterface) err
 			return err
 		}
 		if rsp.ErrorCode != commonpb.ErrorCode_SUCCESS {
-			return errors.Errorf("ReleaseCollection from query service failed, error = %s", rsp.Reason)
+			return fmt.Errorf("ReleaseCollection from query service failed, error = %s", rsp.Reason)
 		}
 		return nil
 	}

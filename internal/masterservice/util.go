@@ -1,7 +1,8 @@
 package masterservice
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"fmt"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -35,5 +36,5 @@ func GetFieldSchemaByID(coll *etcdpb.CollectionInfo, fieldID typeutil.UniqueID) 
 			return f, nil
 		}
 	}
-	return nil, errors.Errorf("field id = %d not found", fieldID)
+	return nil, fmt.Errorf("field id = %d not found", fieldID)
 }

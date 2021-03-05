@@ -2,7 +2,6 @@ package querynode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -10,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"errors"
 
 	"go.uber.org/zap"
 

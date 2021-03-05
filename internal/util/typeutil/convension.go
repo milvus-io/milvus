@@ -7,14 +7,12 @@ import (
 	"strings"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 )
 
 // BytesToUint64 converts a byte slice to uint64.
 func BytesToInt64(b []byte) (int64, error) {
 	if len(b) != 8 {
-		return 0, errors.Errorf("invalid data, must 8 bytes, but %d", len(b))
+		return 0, fmt.Errorf("invalid data, must 8 bytes, but %d", len(b))
 	}
 
 	return int64(binary.BigEndian.Uint64(b)), nil
@@ -30,7 +28,7 @@ func Int64ToBytes(v int64) []byte {
 // BytesToUint64 converts a byte slice to uint64.
 func BytesToUint64(b []byte) (uint64, error) {
 	if len(b) != 8 {
-		return 0, errors.Errorf("invalid data, must 8 bytes, but %d", len(b))
+		return 0, fmt.Errorf("invalid data, must 8 bytes, but %d", len(b))
 	}
 
 	return binary.BigEndian.Uint64(b), nil

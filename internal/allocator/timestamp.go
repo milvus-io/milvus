@@ -2,10 +2,10 @@ package allocator
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
@@ -147,7 +147,7 @@ func (ta *TimestampAllocator) Alloc(count uint32) ([]Timestamp, error) {
 	req.Wait()
 
 	if !req.IsValid() {
-		return nil, errors.Errorf("alloc time stamp request failed")
+		return nil, errors.New("alloc time stamp request failed")
 	}
 
 	start, count := req.timestamp, req.count

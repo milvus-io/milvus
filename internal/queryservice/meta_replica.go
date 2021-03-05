@@ -3,7 +3,8 @@ package queryservice
 import (
 	"strconv"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"errors"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )

@@ -2,9 +2,10 @@ package trace
 
 import (
 	"context"
-	"errors"
 	"runtime"
 	"strings"
+
+	"errors"
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/opentracing/opentracing-go/ext"

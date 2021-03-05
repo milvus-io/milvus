@@ -2,11 +2,12 @@ package proxynode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"math"
 	"strconv"
+
+	"errors"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
@@ -296,7 +297,7 @@ func (cct *CreateCollectionTask) PreExecute(ctx context.Context) error {
 	}
 
 	if int64(len(cct.schema.Fields)) > Params.MaxFieldNum {
-		return errors.New("maximum field's number should be limited to " + strconv.FormatInt(Params.MaxFieldNum, 10))
+		return fmt.Errorf("maximum field's number should be limited to %d", Params.MaxFieldNum)
 	}
 
 	// validate collection name
@@ -590,7 +591,7 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 		select {
 		case <-st.Ctx().Done():
 			log.Print("SearchTask: wait to finish failed, timeout!, taskID:", st.ID())
-			return errors.New("SearchTask:wait to finish failed, timeout:" + strconv.FormatInt(st.ID(), 10))
+			return fmt.Errorf("SearchTask:wait to finish failed, timeout: %d", st.ID())
 		case searchResults := <-st.resultBuf:
 			// fmt.Println("searchResults: ", searchResults)
 			filterSearchResult := make([]*internalpb2.SearchResults, 0)

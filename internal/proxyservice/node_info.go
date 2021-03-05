@@ -12,7 +12,7 @@ import (
 
 	grpcproxynodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/proxynode/client"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"errors"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 )

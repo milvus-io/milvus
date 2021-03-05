@@ -4,7 +4,8 @@ import (
 	"path"
 	"strconv"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"errors"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"

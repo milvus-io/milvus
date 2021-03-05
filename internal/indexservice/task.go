@@ -9,7 +9,8 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"errors"
+
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 )

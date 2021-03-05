@@ -18,7 +18,6 @@ import (
 	"sync"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
@@ -77,7 +76,7 @@ func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequ
 	defer mt.lock.Unlock()
 	_, ok := mt.indexBuildID2Meta[indexBuildID]
 	if ok {
-		return errors.Errorf("index already exists with ID = " + strconv.FormatInt(indexBuildID, 10))
+		return fmt.Errorf("index already exists with ID = %d", indexBuildID)
 	}
 	meta := &indexpb.IndexMeta{
 		State:        commonpb.IndexState_UNISSUED,
@@ -107,10 +106,10 @@ func (mt *metaTable) NotifyBuildIndex(nty *indexpb.BuildIndexNotification) error
 	indexBuildID := nty.IndexBuildID
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
-		return errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexBuildID, 10))
+		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 	if meta.State == commonpb.IndexState_DELETED {
-		return errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexBuildID, 10))
+		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 
 	if nty.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
@@ -133,10 +132,10 @@ func (mt *metaTable) GetIndexState(indexBuildID UniqueID) (*indexpb.IndexInfo, e
 	}
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
-		return ret, errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexBuildID, 10))
+		return ret, fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 	if meta.State == commonpb.IndexState_DELETED {
-		return ret, errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexBuildID, 10))
+		return ret, fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 	ret.IndexID = meta.Req.IndexID
 	ret.IndexName = meta.Req.IndexName
@@ -153,10 +152,10 @@ func (mt *metaTable) GetIndexFilePathInfo(indexBuildID UniqueID) (*indexpb.Index
 	}
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
-		return nil, errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexBuildID, 10))
+		return nil, fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 	if meta.State == commonpb.IndexState_DELETED {
-		return nil, errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexBuildID, 10))
+		return nil, fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 	ret.IndexFilePaths = meta.IndexFilePaths
 	return ret, nil
@@ -198,7 +197,7 @@ func (mt *metaTable) DeleteIndex(indexBuildID UniqueID) error {
 
 	indexMeta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
-		return errors.Errorf("can't find index. id = " + strconv.FormatInt(indexBuildID, 10))
+		return fmt.Errorf("can't find index. id = %d", indexBuildID)
 	}
 	fmt.Print(indexMeta)
 

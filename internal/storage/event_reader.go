@@ -3,7 +3,7 @@ package storage
 import (
 	"bytes"
 	"errors"
-	"strconv"
+	"fmt"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
@@ -55,7 +55,7 @@ func (reader *EventReader) readData() (eventData, error) {
 	case DropPartitionEventType:
 		data, err = readDropPartitionEventDataFixPart(reader.buffer)
 	default:
-		return nil, errors.New("unknown header type code: " + strconv.Itoa(int(reader.TypeCode)))
+		return nil, fmt.Errorf("unknown header type code: %d", reader.TypeCode)
 	}
 
 	if err != nil {

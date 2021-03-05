@@ -9,10 +9,11 @@ package querynode
 */
 import "C"
 import (
-	"errors"
 	"path/filepath"
 	"strconv"
 	"unsafe"
+
+	"errors"
 
 	"go.uber.org/zap"
 

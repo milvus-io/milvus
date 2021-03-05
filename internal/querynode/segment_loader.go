@@ -2,8 +2,9 @@ package querynode
 
 import (
 	"context"
-	"errors"
 	"strconv"
+
+	"errors"
 
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	minioKV "github.com/zilliztech/milvus-distributed/internal/kv/minio"

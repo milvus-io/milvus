@@ -4,11 +4,12 @@ import (
 	"log"
 	"sort"
 
+	"errors"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
@@ -27,11 +28,11 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 
 	for i, request := range tsMsgs {
 		if request.Type() != commonpb.MsgType_kInsert {
-			return nil, errors.New(string("msg's must be Insert"))
+			return nil, errors.New("msg's must be Insert")
 		}
 		insertRequest, ok := request.(*msgstream.InsertMsg)
 		if !ok {
-			return nil, errors.New(string("msg's must be Insert"))
+			return nil, errors.New("msg's must be Insert")
 		}
 
 		keys := hashKeys[i]
@@ -41,7 +42,7 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 		keysLen := len(keys)
 
 		if keysLen != timestampLen || keysLen != rowIDLen || keysLen != rowDataLen {
-			return nil, errors.New(string("the length of hashValue, timestamps, rowIDs, RowData are not equal"))
+			return nil, errors.New("the length of hashValue, timestamps, rowIDs, RowData are not equal")
 		}
 
 		reqID := insertRequest.Base.MsgID

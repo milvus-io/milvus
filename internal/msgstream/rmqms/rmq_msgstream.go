@@ -2,12 +2,13 @@ package rmqms
 
 import (
 	"context"
-	"errors"
 	"log"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"sync"
+
+	"errors"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"

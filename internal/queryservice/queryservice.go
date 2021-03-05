@@ -14,8 +14,9 @@ import (
 	"github.com/uber/jaeger-client-go/config"
 	"go.uber.org/zap"
 
+	"errors"
+
 	nodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/querynode/client"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"

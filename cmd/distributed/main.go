@@ -8,7 +8,6 @@ import (
 	"syscall"
 
 	"github.com/zilliztech/milvus-distributed/cmd/distributed/roles"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 )
 
 const (
@@ -34,7 +33,7 @@ func run(serverType string) error {
 		_, _ = fd.WriteString(fmt.Sprintf("%d", os.Getpid()))
 
 	} else {
-		return errors.Errorf("service %s is running", serverType)
+		return fmt.Errorf("service %s is running", serverType)
 	}
 
 	role := roles.MilvusRoles{}
@@ -62,7 +61,7 @@ func run(serverType string) error {
 	case "standalone":
 		role.EnableStandalone = true
 	default:
-		return errors.Errorf("unknown server type = %s", serverType)
+		return fmt.Errorf("unknown server type = %s", serverType)
 	}
 	role.Run(false)
 	return nil

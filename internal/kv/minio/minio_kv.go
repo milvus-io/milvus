@@ -11,7 +11,6 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 )
 
@@ -63,7 +62,7 @@ func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
 		}
 	} else {
 		if !bucketExists {
-			return nil, errors.New(fmt.Sprintf("Bucket %s not Existed.", option.BucketName))
+			return nil, fmt.Errorf("bucket %s not Existed", option.BucketName)
 		}
 	}
 

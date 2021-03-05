@@ -17,9 +17,10 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"errors"
+
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
@@ -144,7 +145,7 @@ func (node *QueryNode) Init() error {
 		case "QueryResultChannelName":
 			Params.SearchResultChannelNames = append(Params.SearchResultChannelNames, kv.Value)
 		default:
-			return errors.Errorf("Invalid key: %v", kv.Key)
+			return fmt.Errorf("Invalid key: %v", kv.Key)
 		}
 	}
 

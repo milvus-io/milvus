@@ -6,9 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"errors"
+
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"

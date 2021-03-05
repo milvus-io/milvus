@@ -1,7 +1,8 @@
 package msgstream
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"errors"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
 
@@ -25,7 +26,7 @@ type ProtoUnmarshalDispatcher struct {
 func (p *ProtoUnmarshalDispatcher) Unmarshal(input interface{}, msgType commonpb.MsgType) (TsMsg, error) {
 	unmarshalFunc, ok := p.TempMap[msgType]
 	if !ok {
-		return nil, errors.New(string("Not set unmarshalFunc for this messageType."))
+		return nil, errors.New("not set unmarshalFunc for this messageType")
 	}
 	return unmarshalFunc(input)
 }

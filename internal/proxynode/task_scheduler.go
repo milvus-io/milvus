@@ -3,11 +3,12 @@ package proxynode
 import (
 	"container/list"
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"strconv"
 	"sync"
+
+	"errors"
 
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"

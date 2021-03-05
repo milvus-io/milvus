@@ -2,6 +2,7 @@ package dataservice
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"strconv"
@@ -297,7 +298,7 @@ func (s *Server) checkMasterIsHealthy() error {
 		var err error
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("master is not healthy")
+			return errors.New("master is not healthy")
 		case <-ticker.C:
 			resp, err = s.masterClient.GetComponentStates(ctx)
 			if err = VerifyResponse(resp, err); err != nil {

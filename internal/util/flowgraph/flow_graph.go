@@ -5,7 +5,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"errors"
 )
 
 type TimeTickedFlowGraph struct {

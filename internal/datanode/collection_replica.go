@@ -1,11 +1,11 @@
 package datanode
 
 import (
+	"fmt"
 	"sync"
 
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -71,7 +71,7 @@ func (replica *ReplicaImpl) getSegmentByID(segmentID UniqueID) (*Segment, error)
 			return segment, nil
 		}
 	}
-	return nil, errors.Errorf("Cannot find segment, id = %v", segmentID)
+	return nil, fmt.Errorf("Cannot find segment, id = %v", segmentID)
 }
 
 func (replica *ReplicaImpl) addSegment(
@@ -114,7 +114,7 @@ func (replica *ReplicaImpl) removeSegment(segmentID UniqueID) error {
 			return nil
 		}
 	}
-	return errors.Errorf("Error, there's no segment %v", segmentID)
+	return fmt.Errorf("Error, there's no segment %v", segmentID)
 }
 
 func (replica *ReplicaImpl) hasSegment(segmentID UniqueID) bool {
@@ -141,7 +141,7 @@ func (replica *ReplicaImpl) updateStatistics(segmentID UniqueID, numRows int64) 
 			return nil
 		}
 	}
-	return errors.Errorf("Error, there's no segment %v", segmentID)
+	return fmt.Errorf("Error, there's no segment %v", segmentID)
 }
 
 func (replica *ReplicaImpl) getSegmentStatisticsUpdates(segmentID UniqueID) (*internalpb2.SegmentStatisticsUpdates, error) {
@@ -165,7 +165,7 @@ func (replica *ReplicaImpl) getSegmentStatisticsUpdates(segmentID UniqueID) (*in
 			return updates, nil
 		}
 	}
-	return nil, errors.Errorf("Error, there's no segment %v", segmentID)
+	return nil, fmt.Errorf("Error, there's no segment %v", segmentID)
 }
 
 // --- collection ---
@@ -181,7 +181,7 @@ func (replica *ReplicaImpl) addCollection(collectionID UniqueID, schema *schemap
 	defer replica.mu.Unlock()
 
 	if _, ok := replica.collections[collectionID]; ok {
-		return errors.Errorf("Create an existing collection=%s", schema.GetName())
+		return fmt.Errorf("Create an existing collection=%s", schema.GetName())
 	}
 
 	newCollection, err := newCollection(collectionID, schema)
@@ -210,7 +210,7 @@ func (replica *ReplicaImpl) getCollectionByID(collectionID UniqueID) (*Collectio
 
 	coll, ok := replica.collections[collectionID]
 	if !ok {
-		return nil, errors.Errorf("Cannot get collection %d by ID: not exist", collectionID)
+		return nil, fmt.Errorf("Cannot get collection %d by ID: not exist", collectionID)
 	}
 
 	return coll, nil

@@ -7,7 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"errors"
+
 	ms "github.com/zilliztech/milvus-distributed/internal/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -179,7 +180,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		case schemapb.DataType_VECTOR_FLOAT:
 			err = eventWriter.AddFloatVectorToPayload(singleData.(*FloatVectorFieldData).Data, singleData.(*FloatVectorFieldData).Dim)
 		default:
-			return nil, errors.Errorf("undefined data type %d", field.DataType)
+			return nil, fmt.Errorf("undefined data type %d", field.DataType)
 		}
 		if err != nil {
 			return nil, err
@@ -409,7 +410,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				floatVectorFieldData.NumRows += length
 				resultData.Data[fieldID] = floatVectorFieldData
 			default:
-				return -1, -1, nil, errors.Errorf("undefined data type %d", dataType)
+				return -1, -1, nil, fmt.Errorf("undefined data type %d", dataType)
 			}
 		}
 		insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
@@ -671,7 +672,7 @@ func (indexCodec *IndexCodec) Deserialize(blobs []*Blob) ([]*Blob, map[string]st
 		IndexID   UniqueID
 	}{}
 	if err := json.Unmarshal(file.Value, &info); err != nil {
-		return nil, nil, "", -1, errors.New("json unmarshal error: " + err.Error())
+		return nil, nil, "", -1, fmt.Errorf("json unmarshal error: %s", err.Error())
 	}
 
 	return blobs, info.Params, info.IndexName, info.IndexID, nil

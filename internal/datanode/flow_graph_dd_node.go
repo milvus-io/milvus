@@ -2,7 +2,7 @@ package datanode
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"path"
 	"sort"
 	"strconv"
@@ -217,7 +217,7 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 
 	// add collection
 	if _, ok := ddNode.ddRecords.collectionRecords[collectionID]; ok {
-		err := errors.New("collection " + strconv.FormatInt(collectionID, 10) + " is already exists")
+		err := fmt.Errorf("collection %d is already exists", collectionID)
 		log.Error("String conversion wrong", zap.Error(err))
 		return
 	}

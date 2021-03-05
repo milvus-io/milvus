@@ -2,6 +2,7 @@ package timesync
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
@@ -72,16 +72,16 @@ func NewSoftTimeTickBarrier(ctx context.Context, ttStream ms.MsgStream, peerIds 
 func (ttBarrier *softTimeTickBarrier) GetTimeTick() (Timestamp, error) {
 	select {
 	case <-ttBarrier.ctx.Done():
-		return 0, errors.Errorf("[GetTimeTick] closed.")
+		return 0, errors.New("getTimeTick closed")
 	case ts, ok := <-ttBarrier.outTt:
 		if !ok {
-			return 0, errors.Errorf("[GetTimeTick] closed.")
+			return 0, errors.New("getTimeTick closed")
 		}
 		num := len(ttBarrier.outTt)
 		for i := 0; i < num; i++ {
 			ts, ok = <-ttBarrier.outTt
 			if !ok {
-				return 0, errors.Errorf("[GetTimeTick] closed.")
+				return 0, errors.New("getTimeTick closed")
 			}
 		}
 		atomic.StoreInt64(&(ttBarrier.lastTt), int64(ts))
@@ -137,10 +137,10 @@ func (ttBarrier *softTimeTickBarrier) minTimestamp() Timestamp {
 func (ttBarrier *hardTimeTickBarrier) GetTimeTick() (Timestamp, error) {
 	select {
 	case <-ttBarrier.ctx.Done():
-		return 0, errors.Errorf("[GetTimeTick] closed.")
+		return 0, errors.New("getTimeTick closed")
 	case ts, ok := <-ttBarrier.outTt:
 		if !ok {
-			return 0, errors.Errorf("[GetTimeTick] closed.")
+			return 0, errors.New("getTimeTick closed")
 		}
 		return ts, ttBarrier.ctx.Err()
 	}
