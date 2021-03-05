@@ -164,5 +164,20 @@ services:
     networks:
       - milvus
 
+  standalone:
+    image: ${TARGET_REPO}/milvus-distributed:${TARGET_TAG}
+    build:
+      context: ../../../
+      dockerfile: build/docker/deploy/distributed/Dockerfile
+      cache_from:
+        - ${SOURCE_REPO}/milvus-distributed:${SOURCE_TAG}
+    command:
+      - "/milvus-distributed/bin/singlenode"
+    environment:
+      ETCD_ADDRESS: ${ETCD_ADDRESS}
+      MINIO_ADDRESS: ${MINIO_ADDRESS}
+    networks:
+      - milvus
+
 networks:
   milvus:
