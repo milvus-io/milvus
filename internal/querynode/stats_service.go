@@ -2,6 +2,7 @@ package querynode
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
@@ -42,6 +43,7 @@ func (sService *statsService) start() {
 
 	statsStream, _ := sService.msFactory.NewMsgStream(sService.ctx)
 	statsStream.AsProducer(producerChannels)
+	log.Debug("querynode AsProducer: " + strings.Join(producerChannels, ", "))
 
 	var statsMsgStream msgstream.MsgStream = statsStream
 

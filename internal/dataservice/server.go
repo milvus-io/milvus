@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -190,6 +191,7 @@ func (s *Server) initMeta() error {
 func (s *Server) initSegmentInfoChannel() {
 	segmentInfoStream, _ := s.msFactory.NewMsgStream(s.ctx)
 	segmentInfoStream.AsProducer([]string{Params.SegmentInfoChannelName})
+	log.Debug("dataservice AsProducer: " + Params.SegmentInfoChannelName)
 	s.segmentInfoStream = segmentInfoStream
 	s.segmentInfoStream.Start()
 }
@@ -199,6 +201,7 @@ func (s *Server) initMsgProducer() error {
 		return err
 	}
 	s.ttMsgStream.AsConsumer([]string{Params.TimeTickChannelName}, Params.DataServiceSubscriptionName)
+	log.Debug("dataservice AsConsumer: " + Params.TimeTickChannelName + " : " + Params.DataServiceSubscriptionName)
 	s.ttMsgStream.Start()
 	s.ttBarrier = timesync.NewHardTimeTickBarrier(s.ctx, s.ttMsgStream, s.cluster.GetNodeIDs())
 	s.ttBarrier.Start()
@@ -206,6 +209,7 @@ func (s *Server) initMsgProducer() error {
 		return err
 	}
 	s.k2sMsgStream.AsProducer(Params.K2SChannelNames)
+	log.Debug("dataservice AsProducer: " + strings.Join(Params.K2SChannelNames, ", "))
 	s.k2sMsgStream.Start()
 	dataNodeTTWatcher := newDataNodeTimeTickWatcher(s.meta, s.segAllocator, s.cluster)
 	k2sMsgWatcher := timesync.NewMsgTimeTickWatcher(s.k2sMsgStream)
@@ -324,6 +328,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
 	statsStream, _ := s.msFactory.NewMsgStream(ctx)
 	statsStream.AsConsumer([]string{Params.StatisticsChannelName}, Params.DataServiceSubscriptionName)
+	log.Debug("dataservice AsConsumer: " + Params.StatisticsChannelName + " : " + Params.DataServiceSubscriptionName)
 	statsStream.Start()
 	defer statsStream.Close()
 	for {
@@ -353,6 +358,7 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
 	flushStream, _ := s.msFactory.NewMsgStream(ctx)
 	flushStream.AsConsumer([]string{Params.SegmentInfoChannelName}, Params.DataServiceSubscriptionName)
+	log.Debug("dataservice AsConsumer: " + Params.SegmentInfoChannelName + " : " + Params.DataServiceSubscriptionName)
 	flushStream.Start()
 	defer flushStream.Close()
 	for {
@@ -388,6 +394,7 @@ func (s *Server) startDDChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
 	ddStream, _ := s.msFactory.NewMsgStream(ctx)
 	ddStream.AsConsumer([]string{s.ddChannelName}, Params.DataServiceSubscriptionName)
+	log.Debug("dataservice AsConsumer: " + s.ddChannelName + " : " + Params.DataServiceSubscriptionName)
 	ddStream.Start()
 	defer ddStream.Close()
 	for {

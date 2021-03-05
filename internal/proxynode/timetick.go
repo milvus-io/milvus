@@ -55,6 +55,8 @@ func newTimeTick(ctx context.Context,
 
 	t.tickMsgStream, _ = t.msFactory.NewMsgStream(t.ctx)
 	t.tickMsgStream.AsProducer(Params.ProxyTimeTickChannelNames)
+	// FIXME(wxyu): use log.Debug instead
+	log.Println("proxynode AsProducer: ", Params.ProxyTimeTickChannelNames)
 	return t
 }
 

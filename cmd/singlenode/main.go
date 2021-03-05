@@ -4,6 +4,8 @@ import (
 	"os"
 
 	"github.com/zilliztech/milvus-distributed/cmd/distributed/roles"
+	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/zilliztech/milvus-distributed/internal/logutil"
 )
 
 func initRoles(roles *roles.MilvusRoles) {
@@ -19,9 +21,24 @@ func initRoles(roles *roles.MilvusRoles) {
 	roles.EnableMsgStreamService = true
 }
 
+func initLogCfg() log.Config {
+	logCfg := log.Config{}
+	logCfg.Format = "text"
+	logCfg.Level = "debug"
+	logCfg.Development = true
+	logCfg.File.MaxSize = 300
+	logCfg.File.MaxBackups = 20
+	logCfg.File.MaxDays = 10
+	logCfg.File.Filename = "/tmp/milvus/singlenode.log"
+	return logCfg
+}
+
 func main() {
 	var roles roles.MilvusRoles
 	initRoles(&roles)
 	os.Setenv("QUERY_NODE_ID", "1")
+
+	logCfg := initLogCfg()
+	logutil.SetupLogger(&logCfg)
 	roles.Run(true)
 }

@@ -102,6 +102,8 @@ func (m *InsertChannelsMap) createInsertMsgStream(collID UniqueID, channels []st
 
 	stream, _ := m.msFactory.NewMsgStream(context.Background())
 	stream.AsProducer(channels)
+	// FIXME(wxyu): use log.Debug instead
+	log.Println("proxynode AsProducer: ", channels)
 	repack := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
 		return insertRepackFunc(tsMsgs, hashKeys, m.nodeInstance.segAssigner, true)
 	}

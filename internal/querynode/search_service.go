@@ -6,6 +6,7 @@ import (
 	"errors"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 
 	"go.uber.org/zap"
@@ -48,8 +49,10 @@ func newSearchService(ctx context.Context, replica ReplicaInterface, factory msg
 	consumeChannels := Params.SearchChannelNames
 	consumeSubName := Params.MsgChannelSubName
 	searchStream.AsConsumer(consumeChannels, consumeSubName)
+	log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
 	producerChannels := Params.SearchResultChannelNames
 	searchResultStream.AsProducer(producerChannels)
+	log.Debug("querynode AsProducer: " + strings.Join(producerChannels, ", "))
 
 	searchServiceCtx, searchServiceCancel := context.WithCancel(ctx)
 	msgBuffer := make(chan msgstream.TsMsg, receiveBufSize)
