@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: build docker image
-        run: docker build -t milvuscloud.azurecr.io/mishards-cloud .
+        run: docker build -t milvuscloud.azurecr.io/mishards-cloud -f shards/Dockerfile .
       - name: login and push to azure
         env:
           AZUREPASSWD2: ${{ secrets.azure_password_2 }}
