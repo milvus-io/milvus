@@ -12,15 +12,15 @@ package querynode
 */
 import "C"
 import (
-	"fmt"
-	"log"
 	"strconv"
 	"sync"
 	"unsafe"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
 
@@ -117,16 +117,18 @@ func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, c
 	var segmentPtr C.CSegmentInterface
 	switch segType {
 	case segTypeInvalid:
-		log.Println("illegal segment type when create segment")
+		log.Error("illegal segment type when create segment")
 		return nil
 	case segTypeSealed:
 		segmentPtr = C.NewSegment(collection.collectionPtr, C.ulong(segmentID), C.Sealed)
 	case segTypeGrowing:
 		segmentPtr = C.NewSegment(collection.collectionPtr, C.ulong(segmentID), C.Growing)
 	default:
-		log.Println("illegal segment type when create segment")
+		log.Error("illegal segment type when create segment")
 		return nil
 	}
+
+	log.Debug("create segment", zap.Int64("segmentID", segmentID))
 
 	var newSegment = &Segment{
 		segmentPtr:   segmentPtr,
@@ -148,6 +150,9 @@ func deleteSegment(segment *Segment) {
 	cPtr := segment.segmentPtr
 	C.DeleteSegment(cPtr)
 	segment.segmentPtr = nil
+
+	log.Debug("delete segment", zap.Int64("segmentID", segment.ID()))
+
 	segment = nil
 }
 
@@ -213,7 +218,7 @@ func (s *Segment) segmentSearch(plan *Plan,
 	var cPlaceHolder = (*C.CPlaceholderGroup)(&cPlaceholderGroups[0])
 	var cNumGroups = C.int(len(placeHolderGroups))
 
-	fmt.Println("do search on segment, ", s.segmentID, ", segType = ", s.segmentType)
+	log.Debug("do search on segment", zap.Int64("segmentID", s.segmentID), zap.Int("segType", s.segmentType))
 	var status = C.Search(s.segmentPtr, plan.cPlan, cPlaceHolder, cTimestamp, cNumGroups, &searchResult.cQueryResult)
 	errorCode := status.error_code
 
@@ -499,6 +504,8 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int, data interfa
 		defer C.free(unsafe.Pointer(status.error_msg))
 		return errors.New("LoadFieldData failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}
+
+	log.Debug("load field done", zap.Int64("fieldID", fieldID), zap.Int("row count", rowCount))
 
 	return nil
 }

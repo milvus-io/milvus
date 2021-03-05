@@ -3,11 +3,13 @@ package querynode
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
@@ -47,22 +49,22 @@ func (s *loadService) loadSegmentActively(wg *sync.WaitGroup) {
 		wg.Done()
 		return
 	}
-	fmt.Println("do load segment for growing segments:", segmentIDs)
+	log.Debug("do load segment for growing segments:", zap.String("segmentIDs", fmt.Sprintln(segmentIDs)))
 	for i := range collectionIDs {
 		fieldIDs, err := s.segLoader.replica.getFieldIDsByCollectionID(collectionIDs[i])
 		if err != nil {
-			log.Println(err)
+			log.Error(err.Error())
 			continue
 		}
 		err = s.loadSegmentInternal(collectionIDs[i], partitionIDs[i], segmentIDs[i], fieldIDs)
 		if err != nil {
-			log.Println(err)
+			log.Error(err.Error())
 		}
 	}
 	// sendQueryNodeStats
 	err := s.segLoader.indexLoader.sendQueryNodeStats()
 	if err != nil {
-		log.Println(err)
+		log.Error(err.Error())
 		wg.Done()
 		return
 	}
@@ -83,12 +85,12 @@ func (s *loadService) loadSegment(collectionID UniqueID, partitionID UniqueID, s
 	for _, segmentID := range segmentIDs {
 		err := s.segLoader.replica.addSegment(segmentID, partitionID, collectionID, segTypeGrowing)
 		if err != nil {
-			log.Println(err)
+			log.Warn(err.Error())
 			continue
 		}
 		err = s.loadSegmentInternal(collectionID, partitionID, segmentID, fieldIDs)
 		if err != nil {
-			log.Println(err)
+			log.Warn(err.Error())
 			continue
 		}
 	}
@@ -129,8 +131,8 @@ func (s *loadService) loadSegmentInternal(collectionID UniqueID, partitionID Uni
 		return err
 	}
 
-	//fmt.Println("srcFieldIDs in internal:", srcFieldIDs)
-	//fmt.Println("dstFieldIDs in internal:", fieldIDs)
+	//log.Debug("srcFieldIDs in internal:", srcFieldIDs)
+	//log.Debug("dstFieldIDs in internal:", fieldIDs)
 	targetFields, err := s.segLoader.checkTargetFields(paths, srcFieldIDs, fieldIDs)
 	if err != nil {
 		return err
@@ -145,7 +147,7 @@ func (s *loadService) loadSegmentInternal(collectionID UniqueID, partitionID Uni
 		return err
 	}
 	if errIndex == nil {
-		fmt.Println("loading index...")
+		log.Debug("loading index...")
 		indexPaths, err := s.segLoader.indexLoader.getIndexPaths(buildID)
 		if err != nil {
 			return err

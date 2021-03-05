@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"path"
 	"sort"
 	"strconv"
@@ -12,8 +11,11 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	minioKV "github.com/zilliztech/milvus-distributed/internal/kv/minio"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
@@ -46,28 +48,28 @@ func (loader *indexLoader) doLoadIndex(wg *sync.WaitGroup) {
 		wg.Done()
 		return
 	}
-	fmt.Println("do load index for sealed segments:", segmentIDs)
+	log.Debug("do load index for sealed segments:", zap.String("segmentIDs", fmt.Sprintln(segmentIDs)))
 	for i := range collectionIDs {
 		// we don't need index id yet
 		_, buildID, err := loader.getIndexInfo(collectionIDs[i], segmentIDs[i])
 		if err != nil {
-			log.Println(err)
+			log.Warn(err.Error())
 			continue
 		}
 		indexPaths, err := loader.getIndexPaths(buildID)
 		if err != nil {
-			log.Println(err)
+			log.Warn(err.Error())
 			continue
 		}
 		err = loader.loadIndexDelayed(collectionIDs[i], segmentIDs[i], indexPaths)
 		if err != nil {
-			log.Println(err)
+			log.Warn(err.Error())
 		}
 	}
 	// sendQueryNodeStats
 	err := loader.sendQueryNodeStats()
 	if err != nil {
-		log.Println(err)
+		log.Error(err.Error())
 		wg.Done()
 		return
 	}
@@ -111,14 +113,14 @@ func (loader *indexLoader) execute(l *loadIndex) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("load index done")
+	log.Debug("load index done")
 	return nil
 }
 
 func (loader *indexLoader) printIndexParams(index []*commonpb.KeyValuePair) {
-	fmt.Println("=================================================")
+	log.Debug("=================================================")
 	for i := 0; i < len(index); i++ {
-		fmt.Println(index[i])
+		log.Debug(fmt.Sprintln(index[i]))
 	}
 }
 
@@ -216,7 +218,7 @@ func (loader *indexLoader) loadIndex(indexPath []string) ([][]byte, indexParam, 
 	var indexName string
 	var indexID UniqueID
 	for _, p := range indexPath {
-		fmt.Println("load path = ", indexPath)
+		log.Debug("", zap.String("load path", fmt.Sprintln(indexPath)))
 		indexPiece, err := loader.kv.Load(p)
 		if err != nil {
 			return nil, nil, "", -1, err
@@ -288,7 +290,7 @@ func (loader *indexLoader) sendQueryNodeStats() error {
 	}
 
 	loader.fieldStatsChan <- resultFieldsStats
-	fmt.Println("sent field stats")
+	log.Debug("sent field stats")
 	return nil
 }
 

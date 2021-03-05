@@ -10,10 +10,13 @@ package querynode
 import "C"
 import (
 	"errors"
-	"fmt"
 	"path/filepath"
 	"strconv"
 	"unsafe"
+
+	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
 )
 
 type LoadIndexInfo struct {
@@ -79,7 +82,7 @@ func (li *LoadIndexInfo) appendIndex(bytesIndex [][]byte, indexKeys []string) er
 		indexPtr := unsafe.Pointer(&byteIndex[0])
 		indexLen := C.long(len(byteIndex))
 		binarySetKey := filepath.Base(indexKeys[i])
-		fmt.Println("index key = ", binarySetKey)
+		log.Debug("", zap.String("index key", binarySetKey))
 		indexKey := C.CString(binarySetKey)
 		status = C.AppendBinaryIndex(cBinarySet, indexPtr, indexLen, indexKey)
 		errorCode = status.error_code

@@ -4,29 +4,29 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"strconv"
 	"sync"
 	"time"
 
+	otgrpc "github.com/opentracing-contrib/go-grpc"
+	"github.com/opentracing/opentracing-go"
+	"github.com/uber/jaeger-client-go/config"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	dsc "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice/client"
 	isc "github.com/zilliztech/milvus-distributed/internal/distributed/indexservice/client"
 	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
 	qsc "github.com/zilliztech/milvus-distributed/internal/distributed/queryservice/client"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-
-	otgrpc "github.com/opentracing-contrib/go-grpc"
-	"github.com/opentracing/opentracing-go"
-	"google.golang.org/grpc"
-
-	"github.com/uber/jaeger-client-go/config"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	qn "github.com/zilliztech/milvus-distributed/internal/querynode"
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
@@ -85,7 +85,7 @@ func (s *Server) init() error {
 	opentracing.SetGlobalTracer(tracer)
 	s.closer = closer
 
-	log.Println("QueryNode, port:", Params.QueryNodePort)
+	log.Debug("QueryNode", zap.Int("port", Params.QueryNodePort))
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.QueryNodePort)
 	// wait for grpc server loop start
@@ -94,8 +94,8 @@ func (s *Server) init() error {
 		return err
 	}
 	// --- QueryService ---
-	log.Println("QueryService address:", Params.QueryServiceAddress)
-	log.Println("Init Query service client ...")
+	log.Debug("QueryService", zap.String("address", Params.QueryServiceAddress))
+	log.Debug("Init Query service client ...")
 	queryService, err := qsc.NewClient(Params.QueryServiceAddress, 20*time.Second)
 	if err != nil {
 		panic(err)
@@ -121,8 +121,8 @@ func (s *Server) init() error {
 	// --- Master Server Client ---
 	//ms.Params.Init()
 	addr := Params.MasterAddress
-	log.Println("Master service address:", addr)
-	log.Println("Init master service client ...")
+	log.Debug("Master service", zap.String("address", addr))
+	log.Debug("Init master service client ...")
 
 	masterService, err := msc.NewClient(addr, 20*time.Second)
 	if err != nil {
@@ -147,7 +147,7 @@ func (s *Server) init() error {
 	}
 
 	// --- IndexService ---
-	log.Println("Index service address:", Params.IndexServiceAddress)
+	log.Debug("Index service", zap.String("address", Params.IndexServiceAddress))
 	indexService := isc.NewClient(Params.IndexServiceAddress)
 
 	if err := indexService.Init(); err != nil {
@@ -168,8 +168,8 @@ func (s *Server) init() error {
 	}
 
 	// --- DataService ---
-	log.Printf("Data service address: %s", Params.DataServiceAddress)
-	log.Println("Querynode Init data service client ...")
+	log.Debug("Data service", zap.String("address", Params.DataServiceAddress))
+	log.Debug("QueryNode Init data service client ...")
 
 	dataService := dsc.NewClient(Params.DataServiceAddress)
 	if err = dataService.Init(); err != nil {
@@ -195,7 +195,7 @@ func (s *Server) init() error {
 	s.impl.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
 
 	if err := s.impl.Init(); err != nil {
-		log.Println("impl init error: ", err)
+		log.Error("impl init error: ", zap.Error(err))
 		return err
 	}
 	return nil
@@ -212,11 +212,11 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Printf("QueryNode GrpcServer:failed to listen: %v", err)
+		log.Error("QueryNode GrpcServer:failed to listen", zap.Error(err))
 		s.grpcErrChan <- err
 		return
 	}
-	log.Println("QueryNode:: addr:", addr)
+	log.Debug("QueryNode", zap.String("address", addr))
 
 	tracer := opentracing.GlobalTracer()
 	s.grpcServer = grpc.NewServer(grpc.UnaryInterceptor(
@@ -230,7 +230,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {
-		log.Println("QueryNode Start Grpc Failed!!!!")
+		log.Debug("QueryNode Start Grpc Failed!!!!")
 		s.grpcErrChan <- err
 	}
 
@@ -241,12 +241,12 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Println("querynode init done ...")
+	log.Debug("QueryNode init done ...")
 
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Println("querynode start done ...")
+	log.Debug("QueryNode start done ...")
 	return nil
 }
 

@@ -2,8 +2,10 @@ package querynode
 
 import (
 	"context"
-	"log"
 
+	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
@@ -66,7 +68,7 @@ func (dsService *dataSyncService) initNodes() {
 		[]string{filterDmNode.Name()},
 	)
 	if err != nil {
-		log.Fatal("set edges failed in node:", dmStreamNode.Name())
+		log.Error("set edges failed in node:", zap.String("node name", dmStreamNode.Name()))
 	}
 
 	// filterDmNode
@@ -75,7 +77,7 @@ func (dsService *dataSyncService) initNodes() {
 		[]string{insertNode.Name()},
 	)
 	if err != nil {
-		log.Fatal("set edges failed in node:", filterDmNode.Name())
+		log.Error("set edges failed in node:", zap.String("node name", filterDmNode.Name()))
 	}
 
 	// insertNode
@@ -84,7 +86,7 @@ func (dsService *dataSyncService) initNodes() {
 		[]string{serviceTimeNode.Name()},
 	)
 	if err != nil {
-		log.Fatal("set edges failed in node:", insertNode.Name())
+		log.Error("set edges failed in node:", zap.String("node name", insertNode.Name()))
 	}
 
 	// serviceTimeNode
@@ -93,7 +95,7 @@ func (dsService *dataSyncService) initNodes() {
 		[]string{},
 	)
 	if err != nil {
-		log.Fatal("set edges failed in node:", serviceTimeNode.Name())
+		log.Error("set edges failed in node:", zap.String("node name", serviceTimeNode.Name()))
 	}
 }
 

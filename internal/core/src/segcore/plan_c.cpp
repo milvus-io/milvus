@@ -86,12 +86,12 @@ void
 DeletePlan(CPlan cPlan) {
     auto plan = (milvus::query::Plan*)cPlan;
     delete plan;
-    std::cout << "delete plan" << std::endl;
+    // std::cout << "delete plan" << std::endl;
 }
 
 void
 DeletePlaceholderGroup(CPlaceholderGroup cPlaceholder_group) {
     auto placeHolder_group = (milvus::query::PlaceholderGroup*)cPlaceholder_group;
     delete placeHolder_group;
-    std::cout << "delete placeholder" << std::endl;
+    // std::cout << "delete placeholder" << std::endl;
 }

@@ -2,7 +2,10 @@ package querynode
 
 import (
 	"context"
-	"log"
+
+	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
 )
 
 type gcNode struct {
@@ -15,16 +18,16 @@ func (gcNode *gcNode) Name() string {
 }
 
 func (gcNode *gcNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
-	//fmt.Println("Do gcNode operation")
+	//log.Debug("Do gcNode operation")
 
 	if len(in) != 1 {
-		log.Println("Invalid operate message input in gcNode, input length = ", len(in))
+		log.Error("Invalid operate message input in gcNode", zap.Int("input length", len(in)))
 		// TODO: add error handling
 	}
 
 	_, ok := in[0].(*gcMsg)
 	if !ok {
-		log.Println("type assertion failed for gcMsg")
+		log.Error("type assertion failed for gcMsg")
 		// TODO: add error handling
 	}
 
