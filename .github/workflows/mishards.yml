@@ -3,7 +3,7 @@ name: Mishards
 on:
   push:
     paths:
-      - 'shards'
+      - 'shards/**'
 jobs:
   ubuntu:
     name: build and push to azure
