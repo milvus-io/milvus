@@ -11,6 +11,8 @@
 
 FROM milvusdb/milvus-dev:amd64-centos-7-core AS openblas
 
+FROM hectormolinero/tini:v18 AS tini
+
 FROM centos:centos7
 
 RUN yum install -y wget && \
@@ -25,8 +27,7 @@ COPY --from=openblas /usr/lib/libopenblas-r0.3.9.so /var/lib/milvus/lib/
 RUN ln -s /var/lib/milvus/lib/libopenblas-r0.3.9.so /var/lib/milvus/lib/libopenblas.so.0 && \
     ln -s /var/lib/milvus/lib/libopenblas.so.0 /var/lib/milvus/lib/libopenblas.so
 
-RUN wget -O /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini && \
-    chmod +x /tini
+COPY --from=tini /usr/bin/tini /tini
 
 ENTRYPOINT ["/tini", "--"]
 
