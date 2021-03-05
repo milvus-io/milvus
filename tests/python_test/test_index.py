@@ -46,6 +46,7 @@ class TestIndexBase:
     ******************************************************************
     """
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index(self, connect, collection, get_simple_index):
         '''
@@ -95,6 +96,7 @@ class TestIndexBase:
         index = connect.describe_index(collection, field_name)
         assert index == get_simple_index
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition(self, connect, collection, get_simple_index):
         '''
@@ -104,11 +106,11 @@ class TestIndexBase:
         '''
         connect.create_partition(collection, default_tag)
         ids = connect.insert(collection, default_entities, partition_tag=default_tag)
-        connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
         index = connect.describe_index(collection, field_name)
         assert index == get_simple_index
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition_flush(self, connect, collection, get_simple_index):
         '''
@@ -118,7 +120,7 @@ class TestIndexBase:
         '''
         connect.create_partition(collection, default_tag)
         ids = connect.insert(collection, default_entities, partition_tag=default_tag)
-        connect.flush()
+        connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
         index = connect.describe_index(collection, field_name)
         assert index == get_simple_index
@@ -151,6 +153,7 @@ class TestIndexBase:
         res = connect.search(collection, query)
         assert len(res) == nq
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     @pytest.mark.level(2)
     def test_create_index_multithread(self, connect, collection, args):
@@ -189,6 +192,7 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             connect.create_index(collection_name, field_name, default_index)
 
+    @pytest.mark.tags("0331")
     @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_insert_flush(self, connect, collection, get_simple_index):
@@ -232,9 +236,12 @@ class TestIndexBase:
         indexs = [default_index, {"metric_type":"L2", "index_type": "FLAT", "params":{"nlist": 1024}}]
         for index in indexs:
             connect.create_index(collection, field_name, index)
+            connect.release_collection(collection)
+            connect.load_collection(collection)
         index = connect.describe_index(collection, field_name)
         assert index == indexs[-1]
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_ip(self, connect, collection, get_simple_index):
         '''
@@ -261,6 +268,7 @@ class TestIndexBase:
         index = connect.describe_index(collection, field_name)
         assert index == get_simple_index
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition_ip(self, connect, collection, get_simple_index):
         '''
@@ -270,12 +278,12 @@ class TestIndexBase:
         '''
         connect.create_partition(collection, default_tag)
         ids = connect.insert(collection, default_entities, partition_tag=default_tag)
-        connect.flush([collection])
         get_simple_index["metric_type"] = "IP"
         connect.create_index(collection, field_name, get_simple_index)
         index = connect.describe_index(collection, field_name)
         assert index == get_simple_index
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition_flush_ip(self, connect, collection, get_simple_index):
         '''
@@ -285,7 +293,7 @@ class TestIndexBase:
         '''
         connect.create_partition(collection, default_tag)
         ids = connect.insert(collection, default_entities, partition_tag=default_tag)
-        connect.flush()
+        connect.flush([collection])
         get_simple_index["metric_type"] = "IP"
         connect.create_index(collection, field_name, get_simple_index)
         index = connect.describe_index(collection, field_name)
@@ -302,7 +310,8 @@ class TestIndexBase:
         ids = connect.insert(collection, default_entities)
         get_simple_index["metric_type"] = metric_type
         connect.create_index(collection, field_name, get_simple_index)
-        logging.getLogger().info(connect.describe_index(collection))
+        connect.load_collection(collection)
+        logging.getLogger().info(connect.describe_index(collection, field_name))
         nq = get_nq
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
@@ -310,6 +319,7 @@ class TestIndexBase:
         res = connect.search(collection, query)
         assert len(res) == nq
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     @pytest.mark.level(2)
     def test_create_index_multithread_ip(self, connect, collection, args):
@@ -350,6 +360,7 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             connect.create_index(collection_name, field_name, default_index)
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_no_vectors_insert_ip(self, connect, collection):
         '''
@@ -391,12 +402,15 @@ class TestIndexBase:
         expected: return code 0, and describe index result equals with the second index params
         '''
         ids = connect.insert(collection, default_entities)
+        connect.load_collection(collection)
         stats = connect.get_collection_stats(collection)
         assert stats["row_count"] == default_nb
         default_index["metric_type"] = "IP"
         indexs = [default_index, {"index_type": "FLAT", "params": {"nlist": 1024}, "metric_type": "IP"}]
         for index in indexs:
             connect.create_index(collection, field_name, index)
+            connect.release_collection(collection)
+            connect.load_collection(collection)
         index = connect.describe_index(collection, field_name)
         assert index == indexs[-1]
 
@@ -585,6 +599,7 @@ class TestIndexBinary:
     ******************************************************************
     """
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index(self, connect, binary_collection, get_jaccard_index):
         '''
@@ -597,6 +612,7 @@ class TestIndexBinary:
         binary_index = connect.describe_index(binary_collection, binary_field_name)
         assert binary_index == get_jaccard_index
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition(self, connect, binary_collection, get_jaccard_index):
         '''
@@ -620,10 +636,10 @@ class TestIndexBinary:
         nq = get_nq
         ids = connect.insert(binary_collection, default_binary_entities)
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
+        connect.load_collection(binary_collection)
         query, vecs = gen_query_vectors(binary_field_name, default_binary_entities, default_top_k, nq, metric_type="JACCARD")
         search_param = get_search_param(get_jaccard_index["index_type"], metric_type="JACCARD")
         logging.getLogger().info(search_param)
-        connect.load_collection(binary_collection)
         res = connect.search(binary_collection, query, search_params=search_param)
         assert len(res) == nq
 
@@ -650,6 +666,7 @@ class TestIndexBinary:
       The following cases are used to test `describe_index` function
     ***************************************************************
     """
+    @pytest.mark.skip("repeat with test_create_index binary")
     def test_get_index_info(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test describe index interface
@@ -669,6 +686,7 @@ class TestIndexBinary:
                         if "index_type" in file:
                             assert file["index_type"] == get_jaccard_index["index_type"]
 
+    @pytest.mark.skip("repeat with test_create_index_partition binary")
     def test_get_index_info_partition(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test describe index interface
