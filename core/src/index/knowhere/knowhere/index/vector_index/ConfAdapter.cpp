@@ -194,6 +194,10 @@ IVFPQConfAdapter::CheckGPUPQParams(int64_t dimension, int64_t m, int64_t nbits) 
     static const std::vector<int64_t> support_dim_per_subquantizer{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1};
     static const std::vector<int64_t> support_subquantizer{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1};
 
+    if (!CheckCPUPQParams(dimension, m)) {
+        return false;
+    }
+
     int64_t sub_dim = dimension / m;
     return (std::find(std::begin(support_subquantizer), std::end(support_subquantizer), m) !=
             support_subquantizer.end()) &&

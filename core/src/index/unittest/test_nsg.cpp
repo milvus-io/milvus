@@ -101,16 +101,17 @@ TEST_F(NSGInterfaceTest, basic_test) {
 
     index_->Load(bs);
 
-    auto result = index_->Query(query_dataset, search_conf, nullptr);
-    AssertAnns(result, nq, k);
+    auto result_1 = index_->Query(query_dataset, search_conf, nullptr);
+    AssertAnns(result_1, nq, k);
+    ReleaseQueryResult(result_1);
 
     /* test NSG GPU train */
-    auto new_index_1 = std::make_shared<milvus::knowhere::NSG_NM>(DEVICE_GPU0);
+    auto new_index = std::make_shared<milvus::knowhere::NSG_NM>(DEVICE_GPU0);
     train_conf[milvus::knowhere::meta::DEVICEID] = DEVICE_GPU0;
-    new_index_1->BuildAll(base_dataset, train_conf);
+    new_index->BuildAll(base_dataset, train_conf);
 
     // Serialize and Load before Query
-    bs = new_index_1->Serialize(search_conf);
+    bs = new_index->Serialize(search_conf);
 
     dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
     rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
@@ -120,10 +121,11 @@ TEST_F(NSGInterfaceTest, basic_test) {
     bptr->size = dim * rows * sizeof(float);
     bs.Append(RAW_DATA, bptr);
 
-    new_index_1->Load(bs);
+    new_index->Load(bs);
 
-    auto new_result_1 = new_index_1->Query(query_dataset, search_conf, nullptr);
-    AssertAnns(new_result_1, nq, k);
+    auto result_2 = new_index->Query(query_dataset, search_conf, nullptr);
+    AssertAnns(result_2, nq, k);
+    ReleaseQueryResult(result_2);
 
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);
@@ -165,16 +167,10 @@ TEST_F(NSGInterfaceTest, delete_test) {
 
     auto result = index_->Query(query_dataset, search_conf, nullptr);
     AssertAnns(result, nq, k);
+    auto I_before = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
 
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);
-
-    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(nb);
-    for (int i = 0; i < nq; i++) {
-        bitset->set(i);
-    }
-
-    auto I_before = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
 
     // Serialize and Load before Query
     bs = index_->Serialize(search_conf);
@@ -188,7 +184,14 @@ TEST_F(NSGInterfaceTest, delete_test) {
     bs.Append(RAW_DATA, bptr);
 
     index_->Load(bs);
+
+    // search xq with delete
+    faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(nb);
+    for (int i = 0; i < nq; i++) {
+        bitset->set(i);
+    }
     auto result_after = index_->Query(query_dataset, search_conf, bitset);
+
     AssertAnns(result_after, nq, k, CheckMode::CHECK_NOT_EQUAL);
     auto I_after = result_after->Get<int64_t*>(milvus::knowhere::meta::IDS);
 
@@ -196,6 +199,9 @@ TEST_F(NSGInterfaceTest, delete_test) {
     for (int i = 0; i < nq; i++) {
         ASSERT_NE(I_before[i * k], I_after[i * k]);
     }
+
+    ReleaseQueryResult(result);
+    ReleaseQueryResult(result_after);
 }
 
 TEST_F(NSGInterfaceTest, slice_test) {
@@ -226,6 +232,7 @@ TEST_F(NSGInterfaceTest, slice_test) {
 
     auto result = index_->Query(query_dataset, search_conf, nullptr);
     AssertAnns(result, nq, k);
+    ReleaseQueryResult(result);
 
     /* test NSG GPU train */
     auto new_index_1 = std::make_shared<milvus::knowhere::NSG_NM>(DEVICE_GPU0);
@@ -247,6 +254,7 @@ TEST_F(NSGInterfaceTest, slice_test) {
 
     auto new_result_1 = new_index_1->Query(query_dataset, search_conf, nullptr);
     AssertAnns(new_result_1, nq, k);
+    ReleaseQueryResult(new_result_1);
 
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);

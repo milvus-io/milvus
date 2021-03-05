@@ -93,6 +93,9 @@ AssertBinVec(const milvus::knowhere::DatasetPtr& result, const milvus::knowhere:
 void
 PrintResult(const milvus::knowhere::DatasetPtr& result, const int& nq, const int& k);
 
+void
+ReleaseQueryResult(const milvus::knowhere::DatasetPtr& result);
+
 struct FileIOWriter {
     std::fstream fs;
     std::string name;

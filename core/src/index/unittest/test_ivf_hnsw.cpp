@@ -77,6 +77,7 @@ TEST_P(IVFHNSWTest, ivfhnsw_basic_cpu) {
 
     auto result = index_->Query(query_dataset, conf_, nullptr);
     AssertAnns(result, nq, k);
+    ReleaseQueryResult(result);
 }
 
 TEST_P(IVFHNSWTest, ivfhnsw_slice) {
@@ -92,5 +93,6 @@ TEST_P(IVFHNSWTest, ivfhnsw_slice) {
         EXPECT_EQ(index_->Dim(), dim);
         auto result = index_->Query(query_dataset, conf_, nullptr);
         AssertAnns(result, nq, k);
+        ReleaseQueryResult(result);
     }
 }
