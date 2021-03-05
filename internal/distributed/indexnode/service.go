@@ -20,7 +20,7 @@ import (
 )
 
 type Server struct {
-	impl *indexnode.NodeImpl
+	impl *indexnode.IndexNode
 
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
@@ -164,7 +164,7 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty
 
 func NewServer(ctx context.Context) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
-	node, err := indexnode.NewNodeImpl(ctx1)
+	node, err := indexnode.NewIndexNode(ctx1)
 	if err != nil {
 		defer cancel()
 		return nil, err

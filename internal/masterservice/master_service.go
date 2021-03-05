@@ -60,10 +60,7 @@ type QueryServiceInterface interface {
 
 type Interface interface {
 	//service
-	Init() error
-	Start() error
-	Stop() error
-	GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
+	typeutil.Component
 
 	//DDL request
 	CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)

@@ -14,7 +14,7 @@ import (
 type ddNode struct {
 	baseNode
 	ddMsg   *ddMsg
-	replica collectionReplica
+	replica ReplicaInterface
 }
 
 func (ddNode *ddNode) Name() string {
@@ -160,7 +160,7 @@ func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
 	})
 }
 
-func newDDNode(replica collectionReplica) *ddNode {
+func newDDNode(replica ReplicaInterface) *ddNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 

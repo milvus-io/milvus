@@ -26,7 +26,7 @@ type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
 type Server struct {
-	impl *indexservice.ServiceImpl
+	impl *indexservice.IndexService
 
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
@@ -161,7 +161,7 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty
 func NewServer(ctx context.Context) (*Server, error) {
 
 	ctx1, cancel := context.WithCancel(ctx)
-	serverImp, err := indexservice.NewServiceImpl(ctx)
+	serverImp, err := indexservice.NewIndexService(ctx)
 	if err != nil {
 		defer cancel()
 		return nil, err

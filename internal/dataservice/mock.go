@@ -15,7 +15,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 )
 
-func newMemoryMeta(allocator allocator) (*meta, error) {
+func newMemoryMeta(allocator allocatorInterface) (*meta, error) {
 	memoryKV := memkv.NewMemoryKV()
 	return newMeta(memoryKV)
 }

@@ -6,6 +6,7 @@ timeout(time: 60, unit: 'MINUTES') {
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} up -d etcd'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} up -d minio'
         dir ('build/docker/deploy') {
+            sh 'docker pull ${TARGET_REPO}/milvus-distributed:${TARGET_TAG}'
             if ("${REGRESSION_SERVICE_NAME}" == "regression_distributed") {
                 sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} up -d master'
                 sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} up -d indexservice'

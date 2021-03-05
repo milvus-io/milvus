@@ -12,7 +12,7 @@ import (
 
 type insertNode struct {
 	baseNode
-	replica collectionReplica
+	replica ReplicaInterface
 }
 
 type InsertData struct {
@@ -120,7 +120,7 @@ func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *syn
 	wg.Done()
 }
 
-func newInsertNode(replica collectionReplica) *insertNode {
+func newInsertNode(replica ReplicaInterface) *insertNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 

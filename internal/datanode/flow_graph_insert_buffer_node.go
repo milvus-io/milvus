@@ -41,7 +41,7 @@ type (
 		minIOKV     kv.Base
 		minioPrefix string
 
-		idAllocator allocator
+		idAllocator allocatorInterface
 
 		timeTickStream          msgstream.MsgStream
 		segmentStatisticsStream msgstream.MsgStream
@@ -622,7 +622,7 @@ func (ibNode *insertBufferNode) getCollectionSchemaByID(collectionID UniqueID) (
 }
 
 func newInsertBufferNode(ctx context.Context, flushMeta *metaTable,
-	replica Replica, alloc allocator, factory msgstream.Factory) *insertBufferNode {
+	replica Replica, alloc allocatorInterface, factory msgstream.Factory) *insertBufferNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 

@@ -13,18 +13,18 @@ import (
 
 type (
 	proxyTimeTickWatcher struct {
-		allocator segmentAllocator
+		allocator segmentAllocatorInterface
 		msgQueue  chan *msgstream.TimeTickMsg
 	}
 	dataNodeTimeTickWatcher struct {
 		meta      *meta
 		cluster   *dataNodeCluster
-		allocator segmentAllocator
+		allocator segmentAllocatorInterface
 		msgQueue  chan *msgstream.TimeTickMsg
 	}
 )
 
-func newProxyTimeTickWatcher(allocator segmentAllocator) *proxyTimeTickWatcher {
+func newProxyTimeTickWatcher(allocator segmentAllocatorInterface) *proxyTimeTickWatcher {
 	return &proxyTimeTickWatcher{
 		allocator: allocator,
 		msgQueue:  make(chan *msgstream.TimeTickMsg, 1),
@@ -49,7 +49,7 @@ func (watcher *proxyTimeTickWatcher) Watch(msg *msgstream.TimeTickMsg) {
 	watcher.msgQueue <- msg
 }
 
-func newDataNodeTimeTickWatcher(meta *meta, allocator segmentAllocator, cluster *dataNodeCluster) *dataNodeTimeTickWatcher {
+func newDataNodeTimeTickWatcher(meta *meta, allocator segmentAllocatorInterface, cluster *dataNodeCluster) *dataNodeTimeTickWatcher {
 	return &dataNodeTimeTickWatcher{
 		meta:      meta,
 		allocator: allocator,

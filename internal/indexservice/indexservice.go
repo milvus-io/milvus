@@ -30,7 +30,7 @@ const (
 	reqTimeoutInterval = time.Second * 10
 )
 
-type ServiceImpl struct {
+type IndexService struct {
 	nodeClients *PriorityQueue
 	nodeStates  map[UniqueID]*internalpb2.ComponentStates
 	stateCode   internalpb2.StateCode
@@ -59,9 +59,9 @@ type ServiceImpl struct {
 type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
-func NewServiceImpl(ctx context.Context) (*ServiceImpl, error) {
+func NewIndexService(ctx context.Context) (*IndexService, error) {
 	ctx1, cancel := context.WithCancel(ctx)
-	i := &ServiceImpl{
+	i := &IndexService{
 		loopCtx:     ctx1,
 		loopCancel:  cancel,
 		nodeClients: &PriorityQueue{},
@@ -70,7 +70,7 @@ func NewServiceImpl(ctx context.Context) (*ServiceImpl, error) {
 	return i, nil
 }
 
-func (i *ServiceImpl) Init() error {
+func (i *IndexService) Init() error {
 	etcdAddress := Params.EtcdAddress
 	log.Println("etcd address = ", etcdAddress)
 	connectEtcdFn := func() error {
@@ -125,7 +125,7 @@ func (i *ServiceImpl) Init() error {
 	return nil
 }
 
-func (i *ServiceImpl) Start() error {
+func (i *IndexService) Start() error {
 	i.loopWg.Add(1)
 	go i.tsLoop()
 
@@ -134,12 +134,12 @@ func (i *ServiceImpl) Start() error {
 	for _, cb := range i.startCallbacks {
 		cb()
 	}
-	log.Print("ServiceImpl  start")
+	log.Print("IndexService  start")
 
 	return nil
 }
 
-func (i *ServiceImpl) Stop() error {
+func (i *IndexService) Stop() error {
 	i.loopCancel()
 	i.sched.Close()
 	for _, cb := range i.closeCallbacks {
@@ -148,15 +148,15 @@ func (i *ServiceImpl) Stop() error {
 	return nil
 }
 
-func (i *ServiceImpl) UpdateStateCode(code internalpb2.StateCode) {
+func (i *IndexService) UpdateStateCode(code internalpb2.StateCode) {
 	i.stateCode = code
 }
 
-func (i *ServiceImpl) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
+func (i *IndexService) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
 
 	stateInfo := &internalpb2.ComponentInfo{
 		NodeID:    i.ID,
-		Role:      "ServiceImpl",
+		Role:      "IndexService",
 		StateCode: i.stateCode,
 	}
 
@@ -170,7 +170,7 @@ func (i *ServiceImpl) GetComponentStates(ctx context.Context) (*internalpb2.Comp
 	return ret, nil
 }
 
-func (i *ServiceImpl) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (i *IndexService) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -180,7 +180,7 @@ func (i *ServiceImpl) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringR
 	}, nil
 }
 
-func (i *ServiceImpl) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (i *IndexService) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -190,7 +190,7 @@ func (i *ServiceImpl) GetStatisticsChannel(ctx context.Context) (*milvuspb.Strin
 	}, nil
 }
 
-func (i *ServiceImpl) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
+func (i *IndexService) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
 	fmt.Println("builder building index ..., indexName = ", req.IndexName, "indexID = ", req.IndexID, "dataPath = ", req.DataPaths)
 	ret := &indexpb.BuildIndexResponse{
 		Status: &commonpb.Status{
@@ -245,7 +245,7 @@ func (i *ServiceImpl) BuildIndex(ctx context.Context, req *indexpb.BuildIndexReq
 	return ret, nil
 }
 
-func (i *ServiceImpl) GetIndexStates(ctx context.Context, req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
+func (i *IndexService) GetIndexStates(ctx context.Context, req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
 	var indexStates []*indexpb.IndexInfo
 	for _, indexID := range req.IndexBuildIDs {
 		indexState, err := i.metaTable.GetIndexState(indexID)
@@ -263,7 +263,7 @@ func (i *ServiceImpl) GetIndexStates(ctx context.Context, req *indexpb.IndexStat
 	return ret, nil
 }
 
-func (i *ServiceImpl) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+func (i *IndexService) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	i.sched.IndexAddQueue.tryToRemoveUselessIndexAddTask(req.IndexID)
 
 	err := i.metaTable.MarkIndexAsDeleted(req.IndexID)
@@ -292,7 +292,7 @@ func (i *ServiceImpl) DropIndex(ctx context.Context, req *indexpb.DropIndexReque
 	}, nil
 }
 
-func (i *ServiceImpl) GetIndexFilePaths(ctx context.Context, req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {
+func (i *IndexService) GetIndexFilePaths(ctx context.Context, req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {
 	var indexPaths []*indexpb.IndexFilePathInfo = nil
 
 	for _, indexID := range req.IndexBuildIDs {
@@ -312,7 +312,7 @@ func (i *ServiceImpl) GetIndexFilePaths(ctx context.Context, req *indexpb.IndexF
 	return ret, nil
 }
 
-func (i *ServiceImpl) NotifyBuildIndex(ctx context.Context, nty *indexpb.BuildIndexNotification) (*commonpb.Status, error) {
+func (i *IndexService) NotifyBuildIndex(ctx context.Context, nty *indexpb.BuildIndexNotification) (*commonpb.Status, error) {
 	ret := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 	}
@@ -327,7 +327,7 @@ func (i *ServiceImpl) NotifyBuildIndex(ctx context.Context, nty *indexpb.BuildIn
 	return ret, nil
 }
 
-func (i *ServiceImpl) tsLoop() {
+func (i *IndexService) tsLoop() {
 	tsoTicker := time.NewTicker(tso.UpdateTimestampStep)
 	defer tsoTicker.Stop()
 	ctx, cancel := context.WithCancel(i.loopCtx)

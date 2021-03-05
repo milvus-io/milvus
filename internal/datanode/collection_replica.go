@@ -29,32 +29,30 @@ type Replica interface {
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 }
 
-type (
-	Segment struct {
-		segmentID     UniqueID
-		collectionID  UniqueID
-		partitionID   UniqueID
-		numRows       int64
-		memorySize    int64
-		isNew         bool
-		createTime    Timestamp // not using
-		endTime       Timestamp // not using
-		startPosition *internalpb2.MsgPosition
-		endPosition   *internalpb2.MsgPosition // not using
-	}
+type Segment struct {
+	segmentID     UniqueID
+	collectionID  UniqueID
+	partitionID   UniqueID
+	numRows       int64
+	memorySize    int64
+	isNew         bool
+	createTime    Timestamp // not using
+	endTime       Timestamp // not using
+	startPosition *internalpb2.MsgPosition
+	endPosition   *internalpb2.MsgPosition // not using
+}
 
-	ReplicaImpl struct {
-		mu          sync.RWMutex
-		segments    []*Segment
-		collections map[UniqueID]*Collection
-	}
-)
+type CollectionSegmentReplica struct {
+	mu          sync.RWMutex
+	segments    []*Segment
+	collections map[UniqueID]*Collection
+}
 
 func newReplica() Replica {
 	segments := make([]*Segment, 0)
 	collections := make(map[UniqueID]*Collection)
 
-	var replica Replica = &ReplicaImpl{
+	var replica Replica = &CollectionSegmentReplica{
 		segments:    segments,
 		collections: collections,
 	}
@@ -62,7 +60,7 @@ func newReplica() Replica {
 }
 
 // --- segment ---
-func (replica *ReplicaImpl) getSegmentByID(segmentID UniqueID) (*Segment, error) {
+func (replica *CollectionSegmentReplica) getSegmentByID(segmentID UniqueID) (*Segment, error) {
 	replica.mu.RLock()
 	defer replica.mu.RUnlock()
 
@@ -74,7 +72,7 @@ func (replica *ReplicaImpl) getSegmentByID(segmentID UniqueID) (*Segment, error)
 	return nil, fmt.Errorf("Cannot find segment, id = %v", segmentID)
 }
 
-func (replica *ReplicaImpl) addSegment(
+func (replica *CollectionSegmentReplica) addSegment(
 	segmentID UniqueID,
 	collID UniqueID,
 	partitionID UniqueID,
@@ -101,7 +99,7 @@ func (replica *ReplicaImpl) addSegment(
 	return nil
 }
 
-func (replica *ReplicaImpl) removeSegment(segmentID UniqueID) error {
+func (replica *CollectionSegmentReplica) removeSegment(segmentID UniqueID) error {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
 
@@ -117,7 +115,7 @@ func (replica *ReplicaImpl) removeSegment(segmentID UniqueID) error {
 	return fmt.Errorf("Error, there's no segment %v", segmentID)
 }
 
-func (replica *ReplicaImpl) hasSegment(segmentID UniqueID) bool {
+func (replica *CollectionSegmentReplica) hasSegment(segmentID UniqueID) bool {
 	replica.mu.RLock()
 	defer replica.mu.RUnlock()
 
@@ -129,7 +127,7 @@ func (replica *ReplicaImpl) hasSegment(segmentID UniqueID) bool {
 	return false
 }
 
-func (replica *ReplicaImpl) updateStatistics(segmentID UniqueID, numRows int64) error {
+func (replica *CollectionSegmentReplica) updateStatistics(segmentID UniqueID, numRows int64) error {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
 
@@ -144,7 +142,7 @@ func (replica *ReplicaImpl) updateStatistics(segmentID UniqueID, numRows int64) 
 	return fmt.Errorf("Error, there's no segment %v", segmentID)
 }
 
-func (replica *ReplicaImpl) getSegmentStatisticsUpdates(segmentID UniqueID) (*internalpb2.SegmentStatisticsUpdates, error) {
+func (replica *CollectionSegmentReplica) getSegmentStatisticsUpdates(segmentID UniqueID) (*internalpb2.SegmentStatisticsUpdates, error) {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
 
@@ -169,14 +167,14 @@ func (replica *ReplicaImpl) getSegmentStatisticsUpdates(segmentID UniqueID) (*in
 }
 
 // --- collection ---
-func (replica *ReplicaImpl) getCollectionNum() int {
+func (replica *CollectionSegmentReplica) getCollectionNum() int {
 	replica.mu.RLock()
 	defer replica.mu.RUnlock()
 
 	return len(replica.collections)
 }
 
-func (replica *ReplicaImpl) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error {
+func (replica *CollectionSegmentReplica) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
 
@@ -195,7 +193,7 @@ func (replica *ReplicaImpl) addCollection(collectionID UniqueID, schema *schemap
 	return nil
 }
 
-func (replica *ReplicaImpl) removeCollection(collectionID UniqueID) error {
+func (replica *CollectionSegmentReplica) removeCollection(collectionID UniqueID) error {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
 
@@ -204,7 +202,7 @@ func (replica *ReplicaImpl) removeCollection(collectionID UniqueID) error {
 	return nil
 }
 
-func (replica *ReplicaImpl) getCollectionByID(collectionID UniqueID) (*Collection, error) {
+func (replica *CollectionSegmentReplica) getCollectionByID(collectionID UniqueID) (*Collection, error) {
 	replica.mu.RLock()
 	defer replica.mu.RUnlock()
 
@@ -216,7 +214,7 @@ func (replica *ReplicaImpl) getCollectionByID(collectionID UniqueID) (*Collectio
 	return coll, nil
 }
 
-func (replica *ReplicaImpl) hasCollection(collectionID UniqueID) bool {
+func (replica *CollectionSegmentReplica) hasCollection(collectionID UniqueID) bool {
 	replica.mu.RLock()
 	defer replica.mu.RUnlock()
 

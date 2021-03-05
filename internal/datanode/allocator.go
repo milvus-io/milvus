@@ -8,22 +8,22 @@ import (
 )
 
 type (
-	allocator interface {
+	allocatorInterface interface {
 		allocID() (UniqueID, error)
 	}
 
-	allocatorImpl struct {
+	allocator struct {
 		masterService MasterServiceInterface
 	}
 )
 
-func newAllocatorImpl(s MasterServiceInterface) *allocatorImpl {
-	return &allocatorImpl{
+func newAllocator(s MasterServiceInterface) *allocator {
+	return &allocator{
 		masterService: s,
 	}
 }
 
-func (alloc *allocatorImpl) allocID() (UniqueID, error) {
+func (alloc *allocator) allocID() (UniqueID, error) {
 	ctx := context.TODO()
 	resp, err := alloc.masterService.AllocID(ctx, &masterpb.IDRequest{
 		Base: &commonpb.MsgBase{

@@ -27,10 +27,10 @@ const (
 type metaService struct {
 	ctx     context.Context
 	kvBase  *etcdkv.EtcdKV
-	replica collectionReplica
+	replica ReplicaInterface
 }
 
-func newMetaService(ctx context.Context, replica collectionReplica) *metaService {
+func newMetaService(ctx context.Context, replica ReplicaInterface) *metaService {
 	ETCDAddr := Params.ETCDAddress
 	MetaRootPath := Params.MetaRootPath
 	var cli *clientv3.Client

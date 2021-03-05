@@ -9,7 +9,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
-type metaReplica interface {
+type Replica interface {
 	getCollections(dbID UniqueID) ([]*collection, error)
 	getPartitions(dbID UniqueID, collectionID UniqueID) ([]*partition, error)
 	getSegments(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) ([]*segment, error)
@@ -42,23 +42,23 @@ type collection struct {
 	schema          *schemapb.CollectionSchema
 }
 
-type metaReplicaImpl struct {
+type metaReplica struct {
 	dbID           []UniqueID
 	db2collections map[UniqueID][]*collection
 }
 
-func newMetaReplica() metaReplica {
+func newMetaReplica() Replica {
 	db2collections := make(map[UniqueID][]*collection)
 	db2collections[0] = make([]*collection, 0)
 	dbIDs := make([]UniqueID, 0)
 	dbIDs = append(dbIDs, UniqueID(0))
-	return &metaReplicaImpl{
+	return &metaReplica{
 		dbID:           dbIDs,
 		db2collections: db2collections,
 	}
 }
 
-func (mp *metaReplicaImpl) addCollection(dbID UniqueID, collectionID UniqueID, schema *schemapb.CollectionSchema) error {
+func (mp *metaReplica) addCollection(dbID UniqueID, collectionID UniqueID, schema *schemapb.CollectionSchema) error {
 	//TODO:: assert dbID = 0 exist
 	if _, ok := mp.db2collections[dbID]; ok {
 		partitions := make(map[UniqueID]*partition)
@@ -76,7 +76,7 @@ func (mp *metaReplicaImpl) addCollection(dbID UniqueID, collectionID UniqueID, s
 	return errors.New("addCollection: can't find dbID when add collection")
 }
 
-func (mp *metaReplicaImpl) addPartition(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) error {
+func (mp *metaReplica) addPartition(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) error {
 	if collections, ok := mp.db2collections[dbID]; ok {
 		for _, collection := range collections {
 			if collection.id == collectionID {
@@ -95,7 +95,7 @@ func (mp *metaReplicaImpl) addPartition(dbID UniqueID, collectionID UniqueID, pa
 	return errors.New("addPartition: can't find collection when add partition")
 }
 
-func (mp *metaReplicaImpl) getCollections(dbID UniqueID) ([]*collection, error) {
+func (mp *metaReplica) getCollections(dbID UniqueID) ([]*collection, error) {
 	if collections, ok := mp.db2collections[dbID]; ok {
 		return collections, nil
 	}
@@ -103,7 +103,7 @@ func (mp *metaReplicaImpl) getCollections(dbID UniqueID) ([]*collection, error) 
 	return nil, errors.New("getCollections: can't find collectionID")
 }
 
-func (mp *metaReplicaImpl) getPartitions(dbID UniqueID, collectionID UniqueID) ([]*partition, error) {
+func (mp *metaReplica) getPartitions(dbID UniqueID, collectionID UniqueID) ([]*partition, error) {
 	if collections, ok := mp.db2collections[dbID]; ok {
 		for _, collection := range collections {
 			if collectionID == collection.id {
@@ -119,7 +119,7 @@ func (mp *metaReplicaImpl) getPartitions(dbID UniqueID, collectionID UniqueID) (
 	return nil, errors.New("getPartitions: can't find partitionIDs")
 }
 
-func (mp *metaReplicaImpl) getSegments(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) ([]*segment, error) {
+func (mp *metaReplica) getSegments(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) ([]*segment, error) {
 	if collections, ok := mp.db2collections[dbID]; ok {
 		for _, collection := range collections {
 			if collectionID == collection.id {
@@ -136,7 +136,7 @@ func (mp *metaReplicaImpl) getSegments(dbID UniqueID, collectionID UniqueID, par
 	return nil, errors.New("getSegments: can't find segmentID")
 }
 
-func (mp *metaReplicaImpl) getCollectionByID(dbID UniqueID, collectionID UniqueID) (*collection, error) {
+func (mp *metaReplica) getCollectionByID(dbID UniqueID, collectionID UniqueID) (*collection, error) {
 	if collections, ok := mp.db2collections[dbID]; ok {
 		for _, collection := range collections {
 			if collectionID == collection.id {
@@ -148,7 +148,7 @@ func (mp *metaReplicaImpl) getCollectionByID(dbID UniqueID, collectionID UniqueI
 	return nil, errors.New("getCollectionByID: can't find collectionID")
 }
 
-func (mp *metaReplicaImpl) getPartitionByID(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) (*partition, error) {
+func (mp *metaReplica) getPartitionByID(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) (*partition, error) {
 	if collections, ok := mp.db2collections[dbID]; ok {
 		for _, collection := range collections {
 			if collectionID == collection.id {
@@ -163,7 +163,7 @@ func (mp *metaReplicaImpl) getPartitionByID(dbID UniqueID, collectionID UniqueID
 	return nil, errors.New("getPartitionByID: can't find partitionID")
 }
 
-func (mp *metaReplicaImpl) updatePartitionState(dbID UniqueID,
+func (mp *metaReplica) updatePartitionState(dbID UniqueID,
 	collectionID UniqueID,
 	partitionID UniqueID,
 	state querypb.PartitionState) error {
@@ -178,7 +178,7 @@ func (mp *metaReplicaImpl) updatePartitionState(dbID UniqueID,
 	return errors.New("updatePartitionState: update partition state fail")
 }
 
-func (mp *metaReplicaImpl) getPartitionStates(dbID UniqueID,
+func (mp *metaReplica) getPartitionStates(dbID UniqueID,
 	collectionID UniqueID,
 	partitionIDs []UniqueID) ([]*querypb.PartitionStates, error) {
 	partitionStates := make([]*querypb.PartitionStates, 0)
@@ -202,7 +202,7 @@ func (mp *metaReplicaImpl) getPartitionStates(dbID UniqueID,
 	return partitionStates, nil
 }
 
-func (mp *metaReplicaImpl) releaseCollection(dbID UniqueID, collectionID UniqueID) error {
+func (mp *metaReplica) releaseCollection(dbID UniqueID, collectionID UniqueID) error {
 	if collections, ok := mp.db2collections[dbID]; ok {
 		for i, collection := range collections {
 			if collectionID == collection.id {
@@ -220,7 +220,7 @@ func (mp *metaReplicaImpl) releaseCollection(dbID UniqueID, collectionID UniqueI
 	return errors.New(errorStr)
 }
 
-func (mp *metaReplicaImpl) releasePartition(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) error {
+func (mp *metaReplica) releasePartition(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) error {
 	if collections, ok := mp.db2collections[dbID]; ok {
 		for _, collection := range collections {
 			if collectionID == collection.id {
@@ -236,7 +236,7 @@ func (mp *metaReplicaImpl) releasePartition(dbID UniqueID, collectionID UniqueID
 	return errors.New(errorStr)
 }
 
-func (mp *metaReplicaImpl) addDmChannels(dbID UniqueID, collectionID UniqueID, channels2NodeID map[string]int64) error {
+func (mp *metaReplica) addDmChannels(dbID UniqueID, collectionID UniqueID, channels2NodeID map[string]int64) error {
 	if collections, ok := mp.db2collections[dbID]; ok {
 		for _, collection := range collections {
 			if collectionID == collection.id {
@@ -250,7 +250,7 @@ func (mp *metaReplicaImpl) addDmChannels(dbID UniqueID, collectionID UniqueID, c
 	return errors.New("addDmChannels: can't find dbID or collectionID")
 }
 
-func (mp *metaReplicaImpl) getAssignedNodeIDByChannelName(dbID UniqueID, collectionID UniqueID, channel string) (int64, error) {
+func (mp *metaReplica) getAssignedNodeIDByChannelName(dbID UniqueID, collectionID UniqueID, channel string) (int64, error) {
 	if collections, ok := mp.db2collections[dbID]; ok {
 		for _, collection := range collections {
 			if collectionID == collection.id {

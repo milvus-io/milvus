@@ -164,7 +164,8 @@ func TestMetaTable(t *testing.T) {
 			IndexParams: params,
 		}
 
-		_, field, err := mt.GetNotIndexedSegments("collTest", "field110", idxInfo)
+		ids, _, err := mt.GetNotIndexedSegments("collTest", "field110", idxInfo)
+		assert.Nil(t, ids)
 		assert.NotNil(t, err)
 		seg, field, err := mt.GetNotIndexedSegments("testColl", "field110", idxInfo)
 		assert.Nil(t, err)

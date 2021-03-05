@@ -579,9 +579,9 @@ func (st *SearchTask) Execute(ctx context.Context) error {
 	}
 	msgPack.Msgs[0] = tsMsg
 	err := st.queryMsgStream.Produce(ctx, msgPack)
-	log.Printf("[NodeImpl] length of searchMsg: %v", len(msgPack.Msgs))
+	log.Printf("[ProxyNode] length of searchMsg: %v", len(msgPack.Msgs))
 	if err != nil {
-		log.Printf("[NodeImpl] send search request failed: %v", err)
+		log.Printf("[ProxyNode] send search request failed: %v", err)
 	}
 	return err
 }

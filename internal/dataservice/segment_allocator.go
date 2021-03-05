@@ -26,7 +26,7 @@ func (err errRemainInSufficient) Error() string {
 }
 
 // segmentAllocator is used to allocate rows for segments and record the allocations.
-type segmentAllocator interface {
+type segmentAllocatorInterface interface {
 	// OpenSegment add the segment to allocator and set it allocatable
 	OpenSegment(segmentInfo *datapb.SegmentInfo) error
 	// AllocSegment allocate rows and record the allocation.
@@ -45,34 +45,32 @@ type segmentAllocator interface {
 	IsAllocationsExpired(segmentID UniqueID, ts Timestamp) (bool, error)
 }
 
-type (
-	segmentStatus struct {
-		id             UniqueID
-		collectionID   UniqueID
-		partitionID    UniqueID
-		total          int
-		sealed         bool
-		lastExpireTime Timestamp
-		allocations    []*allocation
-		insertChannel  string
-	}
-	allocation struct {
-		rowNums    int
-		expireTime Timestamp
-	}
-	segmentAllocatorImpl struct {
-		mt                     *meta
-		segments               map[UniqueID]*segmentStatus //segment id -> status
-		segmentExpireDuration  int64
-		segmentThreshold       float64
-		segmentThresholdFactor float64
-		mu                     sync.RWMutex
-		allocator              allocator
-	}
-)
+type segmentStatus struct {
+	id             UniqueID
+	collectionID   UniqueID
+	partitionID    UniqueID
+	total          int
+	sealed         bool
+	lastExpireTime Timestamp
+	allocations    []*allocation
+	insertChannel  string
+}
+type allocation struct {
+	rowNums    int
+	expireTime Timestamp
+}
+type segmentAllocator struct {
+	mt                     *meta
+	segments               map[UniqueID]*segmentStatus //segment id -> status
+	segmentExpireDuration  int64
+	segmentThreshold       float64
+	segmentThresholdFactor float64
+	mu                     sync.RWMutex
+	allocator              allocatorInterface
+}
 
-func newSegmentAllocator(meta *meta, allocator allocator) *segmentAllocatorImpl {
-	segmentAllocator := &segmentAllocatorImpl{
+func newSegmentAllocator(meta *meta, allocator allocatorInterface) *segmentAllocator {
+	segmentAllocator := &segmentAllocator{
 		mt:                     meta,
 		segments:               make(map[UniqueID]*segmentStatus),
 		segmentExpireDuration:  Params.SegIDAssignExpiration,
@@ -83,7 +81,7 @@ func newSegmentAllocator(meta *meta, allocator allocator) *segmentAllocatorImpl 
 	return segmentAllocator
 }
 
-func (allocator *segmentAllocatorImpl) OpenSegment(segmentInfo *datapb.SegmentInfo) error {
+func (allocator *segmentAllocator) OpenSegment(segmentInfo *datapb.SegmentInfo) error {
 	allocator.mu.Lock()
 	defer allocator.mu.Unlock()
 	if _, ok := allocator.segments[segmentInfo.SegmentID]; ok {
@@ -105,7 +103,7 @@ func (allocator *segmentAllocatorImpl) OpenSegment(segmentInfo *datapb.SegmentIn
 	return nil
 }
 
-func (allocator *segmentAllocatorImpl) AllocSegment(collectionID UniqueID,
+func (allocator *segmentAllocator) AllocSegment(collectionID UniqueID,
 	partitionID UniqueID, channelName string, requestRows int) (segID UniqueID, retCount int, expireTime Timestamp, err error) {
 	allocator.mu.Lock()
 	defer allocator.mu.Unlock()
@@ -133,7 +131,7 @@ func (allocator *segmentAllocatorImpl) AllocSegment(collectionID UniqueID,
 	return
 }
 
-func (allocator *segmentAllocatorImpl) alloc(segStatus *segmentStatus, numRows int) (bool, error) {
+func (allocator *segmentAllocator) alloc(segStatus *segmentStatus, numRows int) (bool, error) {
 	totalOfAllocations := 0
 	for _, allocation := range segStatus.allocations {
 		totalOfAllocations += allocation.rowNums
@@ -163,7 +161,7 @@ func (allocator *segmentAllocatorImpl) alloc(segStatus *segmentStatus, numRows i
 	return true, nil
 }
 
-func (allocator *segmentAllocatorImpl) estimateTotalRows(collectionID UniqueID) (int, error) {
+func (allocator *segmentAllocator) estimateTotalRows(collectionID UniqueID) (int, error) {
 	collMeta, err := allocator.mt.GetCollection(collectionID)
 	if err != nil {
 		return -1, err
@@ -175,7 +173,7 @@ func (allocator *segmentAllocatorImpl) estimateTotalRows(collectionID UniqueID) 
 	return int(allocator.segmentThreshold / float64(sizePerRecord)), nil
 }
 
-func (allocator *segmentAllocatorImpl) GetSealedSegments() ([]UniqueID, error) {
+func (allocator *segmentAllocator) GetSealedSegments() ([]UniqueID, error) {
 	allocator.mu.Lock()
 	defer allocator.mu.Unlock()
 	keys := make([]UniqueID, 0)
@@ -194,7 +192,7 @@ func (allocator *segmentAllocatorImpl) GetSealedSegments() ([]UniqueID, error) {
 	return keys, nil
 }
 
-func (allocator *segmentAllocatorImpl) checkSegmentSealed(segStatus *segmentStatus) (bool, error) {
+func (allocator *segmentAllocator) checkSegmentSealed(segStatus *segmentStatus) (bool, error) {
 	segMeta, err := allocator.mt.GetSegment(segStatus.id)
 	if err != nil {
 		return false, err
@@ -202,7 +200,7 @@ func (allocator *segmentAllocatorImpl) checkSegmentSealed(segStatus *segmentStat
 	return float64(segMeta.NumRows) >= allocator.segmentThresholdFactor*float64(segStatus.total), nil
 }
 
-func (allocator *segmentAllocatorImpl) SealSegment(segmentID UniqueID) error {
+func (allocator *segmentAllocator) SealSegment(segmentID UniqueID) error {
 	allocator.mu.Lock()
 	defer allocator.mu.Unlock()
 	status, ok := allocator.segments[segmentID]
@@ -213,13 +211,13 @@ func (allocator *segmentAllocatorImpl) SealSegment(segmentID UniqueID) error {
 	return nil
 }
 
-func (allocator *segmentAllocatorImpl) DropSegment(segmentID UniqueID) {
+func (allocator *segmentAllocator) DropSegment(segmentID UniqueID) {
 	allocator.mu.Lock()
 	defer allocator.mu.Unlock()
 	delete(allocator.segments, segmentID)
 }
 
-func (allocator *segmentAllocatorImpl) ExpireAllocations(timeTick Timestamp) error {
+func (allocator *segmentAllocator) ExpireAllocations(timeTick Timestamp) error {
 	allocator.mu.Lock()
 	defer allocator.mu.Unlock()
 	for _, segStatus := range allocator.segments {
@@ -234,7 +232,7 @@ func (allocator *segmentAllocatorImpl) ExpireAllocations(timeTick Timestamp) err
 	return nil
 }
 
-func (allocator *segmentAllocatorImpl) IsAllocationsExpired(segmentID UniqueID, ts Timestamp) (bool, error) {
+func (allocator *segmentAllocator) IsAllocationsExpired(segmentID UniqueID, ts Timestamp) (bool, error) {
 	allocator.mu.RLock()
 	defer allocator.mu.RUnlock()
 	status, ok := allocator.segments[segmentID]
@@ -244,7 +242,7 @@ func (allocator *segmentAllocatorImpl) IsAllocationsExpired(segmentID UniqueID, 
 	return status.lastExpireTime <= ts, nil
 }
 
-func (allocator *segmentAllocatorImpl) SealAllSegments(collectionID UniqueID) {
+func (allocator *segmentAllocator) SealAllSegments(collectionID UniqueID) {
 	allocator.mu.Lock()
 	defer allocator.mu.Unlock()
 	for _, status := range allocator.segments {

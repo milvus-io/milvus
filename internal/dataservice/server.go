@@ -32,8 +32,8 @@ import (
 const role = "dataservice"
 
 type DataService interface {
-	typeutil.Service
 	typeutil.Component
+
 	RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error)
 	Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error)
 
@@ -77,10 +77,10 @@ type (
 		state             atomic.Value
 		client            *etcdkv.EtcdKV
 		meta              *meta
-		segAllocator      segmentAllocator
+		segAllocator      segmentAllocatorInterface
 		statsHandler      *statsHandler
 		ddHandler         *ddHandler
-		allocator         allocator
+		allocator         allocatorInterface
 		cluster           *dataNodeCluster
 		msgProducer       *timesync.MsgProducer
 		registerFinishCh  chan struct{}
@@ -136,7 +136,7 @@ func (s *Server) Start() error {
 		return err
 	}
 
-	s.allocator = newAllocatorImpl(s.masterClient)
+	s.allocator = newAllocator(s.masterClient)
 	if err = s.initMeta(); err != nil {
 		return err
 	}

@@ -19,12 +19,12 @@ type dataSyncService struct {
 	fg          *flowgraph.TimeTickedFlowGraph
 	flushChan   chan *flushMsg
 	replica     Replica
-	idAllocator allocator
+	idAllocator allocatorInterface
 	msFactory   msgstream.Factory
 }
 
 func newDataSyncService(ctx context.Context, flushChan chan *flushMsg,
-	replica Replica, alloc allocator, factory msgstream.Factory) *dataSyncService {
+	replica Replica, alloc allocatorInterface, factory msgstream.Factory) *dataSyncService {
 	service := &dataSyncService{
 		ctx:         ctx,
 		fg:          nil,

@@ -16,10 +16,10 @@ func TestReplica_Collection(t *testing.T) {
 		replica := newReplica()
 		assert.Zero(t, replica.getCollectionNum())
 
-		replica = new(ReplicaImpl)
+		replica = new(CollectionSegmentReplica)
 		assert.Zero(t, replica.getCollectionNum())
 
-		replica = &ReplicaImpl{
+		replica = &CollectionSegmentReplica{
 			collections: map[UniqueID]*Collection{
 				0: {id: 0},
 				1: {id: 1},

@@ -30,7 +30,7 @@ const (
 	MilvusYamlContent    = "milvus.yaml"
 )
 
-func (s *ServiceImpl) fillNodeInitParams() error {
+func (s *ProxyService) fillNodeInitParams() error {
 	s.nodeStartParams = make([]*commonpb.KeyValuePair, 0)
 
 	getConfigContentByName := func(fileName string) []byte {
@@ -92,7 +92,7 @@ func (s *ServiceImpl) fillNodeInitParams() error {
 	return nil
 }
 
-func (s *ServiceImpl) Init() error {
+func (s *ProxyService) Init() error {
 	err := s.fillNodeInitParams()
 	if err != nil {
 		return err
@@ -134,14 +134,14 @@ func (s *ServiceImpl) Init() error {
 	return nil
 }
 
-func (s *ServiceImpl) Start() error {
+func (s *ProxyService) Start() error {
 	s.stateCode = internalpb2.StateCode_HEALTHY
 	s.sched.Start()
 	log.Println("start scheduler ...")
 	return s.tick.Start()
 }
 
-func (s *ServiceImpl) Stop() error {
+func (s *ProxyService) Stop() error {
 	s.sched.Close()
 	log.Println("close scheduler ...")
 	s.tick.Close()
@@ -158,7 +158,7 @@ func (s *ServiceImpl) Stop() error {
 	return nil
 }
 
-func (s *ServiceImpl) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
+func (s *ProxyService) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
 	stateInfo := &internalpb2.ComponentInfo{
 		NodeID:    UniqueID(0),
 		Role:      "ProxyService",
@@ -175,11 +175,11 @@ func (s *ServiceImpl) GetComponentStates(ctx context.Context) (*internalpb2.Comp
 	return ret, nil
 }
 
-func (s *ServiceImpl) UpdateStateCode(code internalpb2.StateCode) {
+func (s *ProxyService) UpdateStateCode(code internalpb2.StateCode) {
 	s.stateCode = code
 }
 
-func (s *ServiceImpl) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (s *ProxyService) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -188,11 +188,11 @@ func (s *ServiceImpl) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringR
 	}, nil
 }
 
-func (s *ServiceImpl) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (s *ProxyService) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	panic("implement me")
 }
 
-func (s *ServiceImpl) RegisterLink(ctx context.Context) (*milvuspb.RegisterLinkResponse, error) {
+func (s *ProxyService) RegisterLink(ctx context.Context) (*milvuspb.RegisterLinkResponse, error) {
 	log.Println("register link")
 	ctx, cancel := context.WithTimeout(ctx, timeoutInterval)
 	defer cancel()
@@ -230,7 +230,7 @@ func (s *ServiceImpl) RegisterLink(ctx context.Context) (*milvuspb.RegisterLinkR
 	return t.response, nil
 }
 
-func (s *ServiceImpl) RegisterNode(ctx context.Context, request *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error) {
+func (s *ProxyService) RegisterNode(ctx context.Context, request *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error) {
 	log.Println("RegisterNode: ", request)
 	ctx, cancel := context.WithTimeout(ctx, timeoutInterval)
 	defer cancel()
@@ -271,7 +271,7 @@ func (s *ServiceImpl) RegisterNode(ctx context.Context, request *proxypb.Registe
 	return t.response, nil
 }
 
-func (s *ServiceImpl) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+func (s *ProxyService) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	log.Println("InvalidateCollectionMetaCache")
 	ctx, cancel := context.WithTimeout(ctx, timeoutInterval)
 	defer cancel()

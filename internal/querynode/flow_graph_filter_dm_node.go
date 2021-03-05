@@ -12,7 +12,7 @@ import (
 
 type filterDmNode struct {
 	baseNode
-	replica collectionReplica
+	replica ReplicaInterface
 }
 
 func (fdmNode *filterDmNode) Name() string {
@@ -100,7 +100,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	return msg
 }
 
-func newFilteredDmNode(replica collectionReplica) *filterDmNode {
+func newFilteredDmNode(replica ReplicaInterface) *filterDmNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 

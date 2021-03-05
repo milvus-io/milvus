@@ -9,12 +9,10 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
-type Component = typeutil.Component
-type Service = typeutil.Service
+type Service interface {
+	typeutil.Component
+	typeutil.TimeTickHandler
 
-type ProxyService interface {
-	Component
-	Service
 	RegisterLink(ctx context.Context) (*milvuspb.RegisterLinkResponse, error)
 	RegisterNode(ctx context.Context, request *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error)
 	// TODO: i'm sure it's not a best way to keep consistency, fix me

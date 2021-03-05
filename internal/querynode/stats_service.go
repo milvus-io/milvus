@@ -13,14 +13,14 @@ import (
 type statsService struct {
 	ctx context.Context
 
-	replica collectionReplica
+	replica ReplicaInterface
 
 	fieldStatsChan chan []*internalpb2.FieldStats
 	statsStream    msgstream.MsgStream
 	msFactory      msgstream.Factory
 }
 
-func newStatsService(ctx context.Context, replica collectionReplica, fieldStatsChan chan []*internalpb2.FieldStats, factory msgstream.Factory) *statsService {
+func newStatsService(ctx context.Context, replica ReplicaInterface, fieldStatsChan chan []*internalpb2.FieldStats, factory msgstream.Factory) *statsService {
 
 	return &statsService{
 		ctx: ctx,

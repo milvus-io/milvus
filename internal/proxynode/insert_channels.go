@@ -75,7 +75,7 @@ type InsertChannelsMap struct {
 	droppedBitMap               []int                 // 0 -> normal, 1 -> dropped
 	usageHistogram              []int                 // message stream can be closed only when the use count is zero
 	mtx                         sync.RWMutex
-	nodeInstance                *NodeImpl
+	nodeInstance                *ProxyNode
 	msFactory                   msgstream.Factory
 }
 
@@ -188,7 +188,7 @@ func (m *InsertChannelsMap) closeAllMsgStream() {
 	m.usageHistogram = make([]int, 0)
 }
 
-func newInsertChannelsMap(node *NodeImpl) *InsertChannelsMap {
+func newInsertChannelsMap(node *ProxyNode) *InsertChannelsMap {
 	return &InsertChannelsMap{
 		collectionID2InsertChannels: make(map[UniqueID]int),
 		insertChannels:              make([][]string, 0),
@@ -202,6 +202,6 @@ func newInsertChannelsMap(node *NodeImpl) *InsertChannelsMap {
 
 var globalInsertChannelsMap *InsertChannelsMap
 
-func initGlobalInsertChannelsMap(node *NodeImpl) {
+func initGlobalInsertChannelsMap(node *ProxyNode) {
 	globalInsertChannelsMap = newInsertChannelsMap(node)
 }
