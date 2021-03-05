@@ -16,5 +16,5 @@ jobs:
         env:
           AZUREPASSWD2: ${{ secrets.azure_password_2 }}
         run: |
-          echo $(AZUREPASSWD2) |docker login milvuscloud.azurecr.io -u milvuscloud --password-stdin
+          echo $AZUREPASSWD2 |docker login milvuscloud.azurecr.io -u milvuscloud --password-stdin
           docker push milvuscloud.azurecr.io/mishards-cloud
