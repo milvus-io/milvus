@@ -56,5 +56,11 @@ Node::AddNeighbour(const NeighbourNodePtr& neighbour_node, Connection& connectio
     // else do nothing, consider it..
 }
 
+void
+Node::RemoveNeighbour(const NeighbourNodePtr& neighbour_node) {
+    std::lock_guard<std::mutex> lk(mutex_);
+    neighbours_.erase(neighbour_node->id_);
+}
+
 }  // namespace scheduler
 }  // namespace milvus
