@@ -64,7 +64,7 @@ func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 
 func (i *IndexNode) Init() error {
 	ctx := context.Background()
-	err := funcutil.WaitForComponentHealthy(ctx, i.serviceClient, "IndexService", 10, time.Second)
+	err := funcutil.WaitForComponentHealthy(ctx, i.serviceClient, "IndexService", 100, time.Millisecond*200)
 
 	if err != nil {
 		return err
