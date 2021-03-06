@@ -28,6 +28,7 @@ class TestCreateBase:
         connect.create_partition(collection, default_tag)
 
     # TODO: enable
+    @pytest.mark.tags("0331")
     @pytest.mark.level(2)
     @pytest.mark.timeout(600)
     def test_create_partition_limit(self, connect, collection, args):

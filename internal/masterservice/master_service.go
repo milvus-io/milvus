@@ -2,6 +2,7 @@ package masterservice
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -11,12 +12,16 @@ import (
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
-	"errors"
-
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/tso"
+	"github.com/zilliztech/milvus-distributed/internal/types"
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
+	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
@@ -25,10 +30,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
-	"github.com/zilliztech/milvus-distributed/internal/tso"
-	"github.com/zilliztech/milvus-distributed/internal/util/retry"
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 //  internalpb2 -> internalpb
@@ -38,65 +39,6 @@ import (
 //  indexpb(index_service)
 //  milvuspb -> milvuspb
 //  masterpb2 -> masterpb (master_service)
-
-type ProxyServiceInterface interface {
-	GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error)
-	InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
-}
-
-type DataServiceInterface interface {
-	GetInsertBinlogPaths(ctx context.Context, req *datapb.InsertBinlogPathRequest) (*datapb.InsertBinlogPathsResponse, error)
-	GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error)
-}
-
-type IndexServiceInterface interface {
-	BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error)
-	DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
-}
-
-type QueryServiceInterface interface {
-	ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)
-}
-
-type Interface interface {
-	//service
-	typeutil.Component
-
-	//DDL request
-	CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
-	DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
-	HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
-	DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
-	ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
-	CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
-	DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
-	HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
-	ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
-
-	//index builder service
-	CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
-	DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
-	DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*commonpb.Status, error)
-
-	//global timestamp allocator
-	AllocTimestamp(ctx context.Context, in *masterpb.TsoRequest) (*masterpb.TsoResponse, error)
-	AllocID(ctx context.Context, in *masterpb.IDRequest) (*masterpb.IDResponse, error)
-
-	//TODO, master load these channel form config file ?
-
-	//receiver time tick from proxy service, and put it into this channel
-	GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error)
-
-	//receive ddl from rpc and time tick from proxy service, and put them into this channel
-	GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error)
-
-	//just define a channel, not used currently
-	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
-
-	//segment
-	DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
-	ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error)
-}
 
 // ------------------ struct -----------------------
 
@@ -642,7 +584,7 @@ func (c *Core) setMsgStreams() error {
 	return nil
 }
 
-func (c *Core) SetProxyService(ctx context.Context, s ProxyServiceInterface) error {
+func (c *Core) SetProxyService(ctx context.Context, s types.ProxyService) error {
 	rsp, err := s.GetTimeTickChannel(ctx)
 	if err != nil {
 		return err
@@ -672,7 +614,7 @@ func (c *Core) SetProxyService(ctx context.Context, s ProxyServiceInterface) err
 	return nil
 }
 
-func (c *Core) SetDataService(ctx context.Context, s DataServiceInterface) error {
+func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 	rsp, err := s.GetSegmentInfoChannel(ctx)
 	if err != nil {
 		return err
@@ -710,7 +652,7 @@ func (c *Core) SetDataService(ctx context.Context, s DataServiceInterface) error
 	return nil
 }
 
-func (c *Core) SetIndexService(ctx context.Context, s IndexServiceInterface) error {
+func (c *Core) SetIndexService(ctx context.Context, s types.IndexService) error {
 	c.BuildIndexReq = func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error) {
 		rsp, err := s.BuildIndex(ctx, &indexpb.BuildIndexRequest{
 			DataPaths:   binlog,
@@ -744,7 +686,7 @@ func (c *Core) SetIndexService(ctx context.Context, s IndexServiceInterface) err
 	return nil
 }
 
-func (c *Core) SetQueryService(ctx context.Context, s QueryServiceInterface) error {
+func (c *Core) SetQueryService(ctx context.Context, s types.QueryService) error {
 	c.ReleaseCollection = func(ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
 		req := &querypb.ReleaseCollectionRequest{
 			Base: &commonpb.MsgBase{
