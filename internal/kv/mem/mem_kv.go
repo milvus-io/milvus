@@ -128,3 +128,10 @@ func (kv *MemoryKV) LoadWithPrefix(key string) ([]string, []string, error) {
 
 func (kv *MemoryKV) Close() {
 }
+
+func (kv *MemoryKV) MultiRemoveWithPrefix(keys []string) error {
+	panic("not implement")
+}
+func (kv *MemoryKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
+	panic("not implement")
+}
