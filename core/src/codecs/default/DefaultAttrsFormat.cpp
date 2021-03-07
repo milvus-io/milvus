@@ -20,10 +20,11 @@
 #include <fcntl.h>
 #include <fiu-local.h>
 #include <unistd.h>
-#include <algorithm>
-#include <memory>
 
+#include <algorithm>
+#include <boost/algorithm/string.hpp>
 #include <boost/filesystem.hpp>
+#include <memory>
 
 #include "utils/Exception.h"
 #include "utils/Log.h"
@@ -89,22 +90,18 @@ DefaultAttrsFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr, milvus::se
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
-    boost::filesystem::path target_path(dir_path);
-    typedef boost::filesystem::directory_iterator d_it;
-    d_it it_end;
-    d_it uid_it(target_path);
     std::vector<int64_t> uids;
-    for (; uid_it != it_end; ++uid_it) {
-        const auto& path = uid_it->path();
-        if (path.extension().string() == user_id_extension_) {
-            read_uids_internal(fs_ptr, path.string(), uids);
-            break;
-        }
+    std::vector<std::string> file_paths;
+    fs_ptr->operation_ptr_->ListDirectory(file_paths);
+    auto it = std::find_if(file_paths.begin(), file_paths.end(), [this](const std::string& path) {
+        return boost::algorithm::ends_with(path, user_id_extension_);
+    });
+    if (it != file_paths.end()) {
+        read_uids_internal(fs_ptr, *it, uids);
     }
 
-    d_it it(target_path);
-    for (; it != it_end; ++it) {
-        const auto& path = it->path();
+    for (const auto& file_path : file_paths) {
+        boost::filesystem::path path{file_path};
         if (path.extension().string() == raw_attr_extension_) {
             auto file_name = path.filename().string();
             auto field_name = file_name.substr(0, file_name.size() - 3);
@@ -164,30 +161,16 @@ DefaultAttrsFormat::write(const milvus::storage::FSHandlerPtr& fs_ptr, const mil
     for (; it != attrs_ptr->attrs.end(); it++) {
         const std::string ra_file_path = dir_path + "/" + it->second->GetName() + raw_attr_extension_;
 
-        int ra_fd = open(ra_file_path.c_str(), O_WRONLY | O_TRUNC | O_CREAT, 00664);
-        if (ra_fd == -1) {
-            std::string err_msg = "Failed to open file: " + ra_file_path + ", error: " + std::strerror(errno);
+        if (not fs_ptr->writer_ptr_->open(ra_file_path)) {
+            std::string err_msg = "Failed to open file: " + ra_file_path;
             LOG_ENGINE_ERROR_ << err_msg;
             throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
         }
 
         size_t ra_num_bytes = it->second->GetNbytes();
-        if (::write(ra_fd, &ra_num_bytes, sizeof(size_t)) == -1) {
-            std::string err_msg = "Failed to write to file: " + ra_file_path + ", error: " + std::strerror(errno);
-            LOG_ENGINE_ERROR_ << err_msg;
-            throw Exception(SERVER_WRITE_ERROR, err_msg);
-        }
-        if (::write(ra_fd, it->second->GetData().data(), ra_num_bytes) == -1) {
-            std::string err_msg = "Failed to write to file: " + ra_file_path + ", error: " + std::strerror(errno);
-            LOG_ENGINE_ERROR_ << err_msg;
-            throw Exception(SERVER_WRITE_ERROR, err_msg);
-        }
-        if (::close(ra_fd) == -1) {
-            std::string err_msg = "Failed to close file: " + ra_file_path + ", error: " + std::strerror(errno);
-            LOG_ENGINE_ERROR_ << err_msg;
-            throw Exception(SERVER_WRITE_ERROR, err_msg);
-        }
-
+        fs_ptr->writer_ptr_->write(&ra_num_bytes, sizeof(size_t));
+        fs_ptr->writer_ptr_->write((void*)it->second->GetData().data(), ra_num_bytes);
+        fs_ptr->writer_ptr_->close();
         rc.RecordSection("write rv done");
     }
 }
@@ -205,15 +188,11 @@ DefaultAttrsFormat::read_uids(const milvus::storage::FSHandlerPtr& fs_ptr, std::
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
-    boost::filesystem::path target_path(dir_path);
-    typedef boost::filesystem::directory_iterator d_it;
-    d_it it_end;
-    d_it it(target_path);
-    //    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
-    for (; it != it_end; ++it) {
-        const auto& path = it->path();
-        if (path.extension().string() == user_id_extension_) {
-            read_uids_internal(fs_ptr, path.string(), uids);
+    std::vector<std::string> file_paths;
+    fs_ptr->operation_ptr_->ListDirectory(file_paths);
+    for (const auto& path : file_paths) {
+        if (boost::algorithm::ends_with(path, user_id_extension_)) {
+            read_uids_internal(fs_ptr, path, uids);
         }
     }
 }

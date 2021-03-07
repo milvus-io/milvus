@@ -40,6 +40,7 @@ DefaultDeletedDocsFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::Del
 
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
+    fs_ptr->operation_ptr_->CacheGet(del_file_path);
 
     int del_fd = open(del_file_path.c_str(), O_RDONLY, 00664);
     if (del_fd == -1) {
@@ -83,6 +84,7 @@ DefaultDeletedDocsFormat::write(const storage::FSHandlerPtr& fs_ptr, const segme
 
     // Create a temporary file from the existing file
     const std::string temp_path = dir_path + "/" + "temp_del";
+    fs_ptr->operation_ptr_->CacheGet(del_file_path);
     bool exists = boost::filesystem::exists(del_file_path);
     if (exists) {
         boost::filesystem::copy_file(del_file_path, temp_path, boost::filesystem::copy_option::fail_if_exists);
@@ -144,6 +146,7 @@ DefaultDeletedDocsFormat::write(const storage::FSHandlerPtr& fs_ptr, const segme
 
     // Move temp file to delete file
     boost::filesystem::rename(temp_path, del_file_path);
+    fs_ptr->operation_ptr_->CachePut(del_file_path);
 }
 
 void
@@ -152,6 +155,7 @@ DefaultDeletedDocsFormat::readSize(const storage::FSHandlerPtr& fs_ptr, size_t& 
 
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
+    fs_ptr->operation_ptr_->CacheGet(del_file_path);
 
     int del_fd = open(del_file_path.c_str(), O_RDONLY, 00664);
     if (del_fd == -1) {

@@ -15,11 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <boost/filesystem.hpp>
+#include "storage/disk/DiskOperation.h"
 
 #include <fiu-local.h>
 
-#include "storage/disk/DiskOperation.h"
+#include <boost/filesystem.hpp>
+
 #include "utils/Exception.h"
 #include "utils/Log.h"
 
@@ -65,6 +66,16 @@ DiskOperation::ListDirectory(std::vector<std::string>& file_paths) {
 bool
 DiskOperation::DeleteFile(const std::string& file_path) {
     return boost::filesystem::remove(file_path);
+}
+
+bool
+DiskOperation::CacheGet(const std::string& /* unused file_path */) {
+    return true;
+}
+
+bool
+DiskOperation::CachePut(const std::string& /* unused file_path */) {
+    return true;
 }
 
 }  // namespace storage

@@ -18,6 +18,7 @@
 #include "codecs/default/DefaultIdBloomFilterFormat.h"
 
 #include <fiu-local.h>
+
 #include <memory>
 #include <string>
 
@@ -36,8 +37,11 @@ DefaultIdBloomFilterFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::I
 
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;
-    scaling_bloom_t* bloom_filter =
-        new_scaling_bloom_from_file(bloom_filter_capacity, bloom_filter_error_rate, bloom_filter_file_path.c_str());
+    scaling_bloom_t* bloom_filter{nullptr};
+    if (fs_ptr->operation_ptr_->CacheGet(bloom_filter_file_path)) {
+        bloom_filter =
+            new_scaling_bloom_from_file(bloom_filter_capacity, bloom_filter_error_rate, bloom_filter_file_path.c_str());
+    }
     fiu_do_on("bloom_filter_nullptr", (free_scaling_bloom(bloom_filter) || (bloom_filter = nullptr)));
     if (bloom_filter == nullptr) {
         std::string err_msg =
@@ -61,6 +65,7 @@ DefaultIdBloomFilterFormat::write(const storage::FSHandlerPtr& fs_ptr,
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_UNEXPECTED_ERROR, err_msg);
     }
+    fs_ptr->operation_ptr_->CachePut(bloom_filter_file_path);
 }
 
 void
@@ -77,6 +82,7 @@ DefaultIdBloomFilterFormat::create(const storage::FSHandlerPtr& fs_ptr,
         throw Exception(SERVER_UNEXPECTED_ERROR, err_msg);
     }
     id_bloom_filter_ptr = std::make_shared<segment::IdBloomFilter>(bloom_filter);
+    fs_ptr->operation_ptr_->CachePut(bloom_filter_file_path);
 }
 
 }  // namespace codec
