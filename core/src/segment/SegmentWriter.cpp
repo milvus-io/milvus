@@ -25,9 +25,6 @@
 #include "Vectors.h"
 #include "codecs/default/DefaultCodec.h"
 #include "db/Utils.h"
-#include "storage/disk/DiskIOReader.h"
-#include "storage/disk/DiskIOWriter.h"
-#include "storage/disk/DiskOperation.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
@@ -35,10 +32,7 @@ namespace milvus {
 namespace segment {
 
 SegmentWriter::SegmentWriter(const std::string& directory) {
-    storage::IOReaderPtr reader_ptr = std::make_shared<storage::DiskIOReader>();
-    storage::IOWriterPtr writer_ptr = std::make_shared<storage::DiskIOWriter>();
-    storage::OperationPtr operation_ptr = std::make_shared<storage::DiskOperation>(directory);
-    fs_ptr_ = std::make_shared<storage::FSHandler>(reader_ptr, writer_ptr, operation_ptr);
+    fs_ptr_ = milvus::storage::createFsHandler(directory);
     segment_ptr_ = std::make_shared<Segment>();
 }
 

@@ -22,7 +22,6 @@
 
 #include "codecs/IdBloomFilterFormat.h"
 #include "segment/IdBloomFilter.h"
-#include "storage/disk/DiskOperation.h"
 
 namespace milvus {
 namespace codec {

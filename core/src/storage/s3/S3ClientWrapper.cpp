@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include "storage/s3/S3ClientWrapper.h"
+
 #include <aws/core/auth/AWSCredentialsProvider.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
@@ -17,6 +19,7 @@
 #include <aws/s3/model/ListObjectsRequest.h>
 #include <aws/s3/model/PutObjectRequest.h>
 #include <fiu-local.h>
+
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -24,7 +27,6 @@
 
 #include "config/Config.h"
 #include "storage/s3/S3ClientMock.h"
-#include "storage/s3/S3ClientWrapper.h"
 #include "utils/Error.h"
 #include "utils/Log.h"
 
@@ -35,18 +37,18 @@ Status
 S3ClientWrapper::StartService() {
     server::Config& config = server::Config::GetInstance();
     bool s3_enable = false;
-    CONFIG_CHECK(config.GetStorageConfigS3Enable(s3_enable));
+    config.GetStorageConfigS3Enable(s3_enable);
     fiu_do_on("S3ClientWrapper.StartService.s3_disable", s3_enable = false);
     if (!s3_enable) {
         LOG_STORAGE_INFO_ << "S3 not enabled!";
         return Status::OK();
     }
 
-    CONFIG_CHECK(config.GetStorageConfigS3Address(s3_address_));
-    CONFIG_CHECK(config.GetStorageConfigS3Port(s3_port_));
-    CONFIG_CHECK(config.GetStorageConfigS3AccessKey(s3_access_key_));
-    CONFIG_CHECK(config.GetStorageConfigS3SecretKey(s3_secret_key_));
-    CONFIG_CHECK(config.GetStorageConfigS3Bucket(s3_bucket_));
+    config.GetStorageConfigS3Address(s3_address_);
+    config.GetStorageConfigS3Port(s3_port_);
+    config.GetStorageConfigS3AccessKey(s3_access_key_);
+    config.GetStorageConfigS3SecretKey(s3_secret_key_);
+    config.GetStorageConfigS3Bucket(s3_bucket_);
 
     Aws::InitAPI(options_);
 
@@ -212,12 +214,16 @@ S3ClientWrapper::GetObjectStr(const std::string& object_name, std::string& conte
 }
 
 Status
-S3ClientWrapper::ListObjects(std::vector<std::string>& object_list, const std::string& marker) {
+S3ClientWrapper::ListObjects(std::vector<std::string>& object_list, const std::string& prefix) {
     Aws::S3::Model::ListObjectsRequest request;
     request.WithBucket(s3_bucket_);
 
-    if (!marker.empty()) {
-        request.WithMarker(marker);
+    if (!prefix.empty()) {
+        const char* prefix_str = prefix.c_str();
+        if (*prefix_str == '/') {
+            prefix_str++;
+        }
+        request.WithPrefix(prefix_str);
     }
 
     auto outcome = client_ptr_->ListObjects(request);
@@ -235,10 +241,13 @@ S3ClientWrapper::ListObjects(std::vector<std::string>& object_list, const std::s
         object_list.push_back(s3_object.GetKey());
     }
 
-    if (marker.empty()) {
+    if (prefix.empty()) {
         LOG_STORAGE_DEBUG_ << "ListObjects '" << s3_bucket_ << "' successfully!";
     } else {
-        LOG_STORAGE_DEBUG_ << "ListObjects '" << s3_bucket_ << ":" << marker << "' successfully!";
+        LOG_STORAGE_DEBUG_ << "ListObjects '" << s3_bucket_ << ":" << prefix << "' successfully!";
+    }
+    for (const auto& path : object_list) {
+        LOG_STORAGE_DEBUG_ << "  object: '" << path;
     }
     return Status::OK();
 }
@@ -262,20 +271,22 @@ S3ClientWrapper::DeleteObject(const std::string& object_name) {
 }
 
 Status
-S3ClientWrapper::DeleteObjects(const std::string& marker) {
+S3ClientWrapper::DeleteObjects(const std::string& prefix) {
     std::vector<std::string> object_list;
 
-    Status stat = ListObjects(object_list, marker);
+    Status stat = ListObjects(object_list, prefix);
     if (!stat.ok()) {
         return stat;
     }
 
+    LOG_STORAGE_DEBUG_ << "DeleteObjects '" << prefix << "' started.";
     for (std::string& obj_name : object_list) {
         stat = DeleteObject(obj_name);
         if (!stat.ok()) {
             return stat;
         }
     }
+    LOG_STORAGE_DEBUG_ << "DeleteObjects '" << prefix << "' end.";
 
     return Status::OK();
 }

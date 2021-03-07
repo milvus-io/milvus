@@ -19,8 +19,9 @@
 
 #include <fcntl.h>
 #include <unistd.h>
-#include <algorithm>
 
+#include <algorithm>
+#include <boost/algorithm/string.hpp>
 #include <boost/filesystem.hpp>
 
 #include "utils/Exception.h"
@@ -82,13 +83,10 @@ DefaultVectorsFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::Vectors
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
-    boost::filesystem::path target_path(dir_path);
-    typedef boost::filesystem::directory_iterator d_it;
-    d_it it_end;
-    d_it it(target_path);
-    //    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
-    for (; it != it_end; ++it) {
-        const auto& path = it->path();
+    std::vector<std::string> file_paths;
+    fs_ptr->operation_ptr_->ListDirectory(file_paths);
+    for (const auto& file_path : file_paths) {
+        boost::filesystem::path path{file_path};
         if (path.extension().string() == raw_vector_extension_) {
             auto& vector_list = vectors_read->GetMutableData();
             read_vectors_internal(fs_ptr, path.string(), 0, INT64_MAX, vector_list);
@@ -148,16 +146,13 @@ DefaultVectorsFormat::read_uids(const storage::FSHandlerPtr& fs_ptr, std::vector
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
-    boost::filesystem::path target_path(dir_path);
-    typedef boost::filesystem::directory_iterator d_it;
-    d_it it_end;
-    d_it it(target_path);
-    for (; it != it_end; ++it) {
-        const auto& path = it->path();
-        if (path.extension().string() == user_id_extension_) {
-            read_uids_internal(fs_ptr, path.string(), uids);
-            break;
-        }
+    std::vector<std::string> file_paths;
+    fs_ptr->operation_ptr_->ListDirectory(file_paths);
+    auto it = std::find_if(file_paths.begin(), file_paths.end(), [this](const std::string& path) {
+        return boost::algorithm::ends_with(path, user_id_extension_);
+    });
+    if (it != file_paths.end()) {
+        read_uids_internal(fs_ptr, *it, uids);
     }
 }
 
@@ -173,16 +168,13 @@ DefaultVectorsFormat::read_vectors(const storage::FSHandlerPtr& fs_ptr, off_t of
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
-    boost::filesystem::path target_path(dir_path);
-    typedef boost::filesystem::directory_iterator d_it;
-    d_it it_end;
-    d_it it(target_path);
-    for (; it != it_end; ++it) {
-        const auto& path = it->path();
-        if (path.extension().string() == raw_vector_extension_) {
-            read_vectors_internal(fs_ptr, path.string(), offset, num_bytes, raw_vectors);
-            break;
-        }
+    std::vector<std::string> file_paths;
+    fs_ptr->operation_ptr_->ListDirectory(file_paths);
+    auto it = std::find_if(file_paths.begin(), file_paths.end(), [this](const std::string& path) {
+        return boost::algorithm::ends_with(path, raw_vector_extension_);
+    });
+    if (it != file_paths.end()) {
+        read_vectors_internal(fs_ptr, *it, offset, num_bytes, raw_vectors);
     }
 }
 

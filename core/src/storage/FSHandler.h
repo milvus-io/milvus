@@ -18,10 +18,21 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include "storage/IOReader.h"
 #include "storage/IOWriter.h"
 #include "storage/Operation.h"
+#include "storage/disk/DiskIOReader.h"
+#include "storage/disk/DiskIOWriter.h"
+#include "storage/disk/DiskOperation.h"
+#ifdef MILVUS_WITH_AWS
+#include "storage/s3/S3ClientWrapper.h"
+#include "storage/s3/S3IOReader.h"
+#include "storage/s3/S3IOWriter.h"
+#include "storage/s3/S3Operation.h"
+#endif
+#include "config/Config.h"
 
 namespace milvus {
 namespace storage {
@@ -37,6 +48,33 @@ struct FSHandler {
 };
 
 using FSHandlerPtr = std::shared_ptr<FSHandler>;
+
+inline FSHandlerPtr
+createFsHandler(const std::string& directory) {
+    storage::IOReaderPtr reader_ptr{nullptr};
+    storage::IOWriterPtr writer_ptr{nullptr};
+    storage::OperationPtr operation_ptr{nullptr};
+#ifdef MILVUS_WITH_AWS
+    auto& config = milvus::server::Config::GetInstance();
+    bool enableS3 = false;
+    config.GetStorageConfigS3Enable(enableS3);
+    if (enableS3) {
+        S3ClientWrapper::GetInstance();
+        reader_ptr = std::make_shared<storage::S3IOReader>();
+        writer_ptr = std::make_shared<storage::S3IOWriter>();
+        operation_ptr = std::make_shared<storage::S3Operation>(directory);
+    } else {
+        reader_ptr = std::make_shared<storage::DiskIOReader>();
+        writer_ptr = std::make_shared<storage::DiskIOWriter>();
+        operation_ptr = std::make_shared<storage::DiskOperation>(directory);
+    }
+#else
+    reader_ptr = std::make_shared<storage::DiskIOReader>();
+    writer_ptr = std::make_shared<storage::DiskIOWriter>();
+    operation_ptr = std::make_shared<storage::DiskOperation>(directory);
+#endif
+    return std::make_shared<storage::FSHandler>(reader_ptr, writer_ptr, operation_ptr);
+}
 
 }  // namespace storage
 }  // namespace milvus

@@ -15,10 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "codecs/default/DefaultVectorIndexFormat.h"
+
 #include <boost/filesystem.hpp>
 #include <memory>
 
-#include "codecs/default/DefaultVectorIndexFormat.h"
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"

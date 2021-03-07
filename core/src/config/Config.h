@@ -259,6 +259,21 @@ class Config {
     Status
     CheckStorageConfigFileCleanupTimeout(const std::string& value);
 
+#ifdef MILVUS_WITH_AWS
+    Status
+    CheckStorageConfigS3Enable(const std::string& value);
+    Status
+    CheckStorageConfigS3Address(const std::string& value);
+    Status
+    CheckStorageConfigS3Port(const std::string& value);
+    Status
+    CheckStorageConfigS3AccessKey(const std::string& value);
+    Status
+    CheckStorageConfigS3SecretKey(const std::string& value);
+    Status
+    CheckStorageConfigS3Bucket(const std::string& value);
+#endif
+
     /* metric config */
     Status
     CheckMetricConfigEnableMonitor(const std::string& value);
@@ -398,6 +413,26 @@ class Config {
     Status
     GetStorageConfigFileCleanupTimeup(int64_t& value);
 
+#ifdef MILVUS_WITH_AWS
+    Status
+    GetStorageConfigS3Enable(bool& value);
+
+    Status
+    GetStorageConfigS3Address(std::string& value);
+
+    Status
+    GetStorageConfigS3Port(std::string& value);
+
+    Status
+    GetStorageConfigS3AccessKey(std::string& value);
+
+    Status
+    GetStorageConfigS3SecretKey(std::string& value);
+
+    Status
+    GetStorageConfigS3Bucket(std::string& value);
+#endif
+
     /* metric config */
     Status
     GetMetricConfigEnableMonitor(bool& value);
@@ -529,6 +564,21 @@ class Config {
     SetStorageConfigAutoFlushInterval(const std::string& value);
     Status
     SetStorageConfigFileCleanupTimeout(const std::string& value);
+
+#ifdef MILVUS_WITH_AWS
+    Status
+    SetStorageConfigS3Enable(const std::string& value);
+    Status
+    SetStorageConfigS3Address(const std::string& value);
+    Status
+    SetStorageConfigS3Port(const std::string& value);
+    Status
+    SetStorageConfigS3AccessKey(const std::string& value);
+    Status
+    SetStorageConfigS3SecretKey(const std::string& value);
+    Status
+    SetStorageConfigS3Bucket(const std::string& value);
+#endif
 
     /* metric config */
     Status

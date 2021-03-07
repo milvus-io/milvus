@@ -30,6 +30,14 @@ class S3ClientWrapper {
         return wrapper;
     }
 
+    S3ClientWrapper() {
+        StartService();
+    }
+
+    ~S3ClientWrapper() {
+        StopService();
+    }
+
     Status
     StartService();
     void
@@ -48,11 +56,11 @@ class S3ClientWrapper {
     Status
     GetObjectStr(const std::string& object_key, std::string& content);
     Status
-    ListObjects(std::vector<std::string>& object_list, const std::string& marker = "");
+    ListObjects(std::vector<std::string>& object_list, const std::string& prefix = "");
     Status
     DeleteObject(const std::string& object_key);
     Status
-    DeleteObjects(const std::string& marker);
+    DeleteObjects(const std::string& prefix);
 
  private:
     std::shared_ptr<Aws::S3::S3Client> client_ptr_;

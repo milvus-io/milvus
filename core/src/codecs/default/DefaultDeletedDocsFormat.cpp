@@ -41,37 +41,23 @@ DefaultDeletedDocsFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::Del
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
 
-    int del_fd = open(del_file_path.c_str(), O_RDONLY, 00664);
-    if (del_fd == -1) {
-        std::string err_msg = "Failed to open file: " + del_file_path + ", error: " + std::strerror(errno);
+    if (not fs_ptr->reader_ptr_->open(del_file_path)) {
+        std::string err_msg = "Failed to open file: " + del_file_path;
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
-    size_t num_bytes;
-    if (::read(del_fd, &num_bytes, sizeof(size_t)) == -1) {
-        std::string err_msg = "Failed to read from file: " + del_file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    size_t num_bytes{0};
+    fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t));
 
     auto deleted_docs_size = num_bytes / sizeof(segment::offset_t);
     std::vector<segment::offset_t> deleted_docs_list;
     deleted_docs_list.resize(deleted_docs_size);
 
-    if (::read(del_fd, deleted_docs_list.data(), num_bytes) == -1) {
-        std::string err_msg = "Failed to read from file: " + del_file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
-
+    fs_ptr->reader_ptr_->read(deleted_docs_list.data(), num_bytes);
     deleted_docs = std::make_shared<segment::DeletedDocs>(deleted_docs_list);
 
-    if (::close(del_fd) == -1) {
-        std::string err_msg = "Failed to close file: " + del_file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->reader_ptr_->close();
 }
 
 void
@@ -83,6 +69,7 @@ DefaultDeletedDocsFormat::write(const storage::FSHandlerPtr& fs_ptr, const segme
 
     // Create a temporary file from the existing file
     const std::string temp_path = dir_path + "/" + "temp_del";
+    fs_ptr->operation_ptr_->CacheGet(del_file_path);
     bool exists = boost::filesystem::exists(del_file_path);
     if (exists) {
         boost::filesystem::copy_file(del_file_path, temp_path, boost::filesystem::copy_option::fail_if_exists);
@@ -144,6 +131,7 @@ DefaultDeletedDocsFormat::write(const storage::FSHandlerPtr& fs_ptr, const segme
 
     // Move temp file to delete file
     boost::filesystem::rename(temp_path, del_file_path);
+    fs_ptr->operation_ptr_->CachePut(del_file_path);
 }
 
 void
@@ -153,27 +141,16 @@ DefaultDeletedDocsFormat::readSize(const storage::FSHandlerPtr& fs_ptr, size_t& 
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
 
-    int del_fd = open(del_file_path.c_str(), O_RDONLY, 00664);
-    if (del_fd == -1) {
-        std::string err_msg = "Failed to open file: " + del_file_path + ", error: " + std::strerror(errno);
+    if (not fs_ptr->reader_ptr_->open(del_file_path)) {
+        std::string err_msg = "Failed to open file: " + del_file_path;
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
     size_t num_bytes;
-    if (::read(del_fd, &num_bytes, sizeof(size_t)) == -1) {
-        std::string err_msg = "Failed to read from file: " + del_file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
-
+    fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t));
     size = num_bytes / sizeof(segment::offset_t);
-
-    if (::close(del_fd) == -1) {
-        std::string err_msg = "Failed to close file: " + del_file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->reader_ptr_->close();
 }
 
 }  // namespace codec
