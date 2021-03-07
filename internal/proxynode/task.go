@@ -1760,7 +1760,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 				ErrorCode: commonpb.ErrorCode_SUCCESS,
 				Reason:    "",
 			},
-			State: commonpb.IndexState_INPROGRESS,
+			State: commonpb.IndexState_INDEX_STATE_IN_PROGRESS,
 		}
 		return err
 	}
@@ -1778,14 +1778,14 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 	if states.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
 		gist.result = &milvuspb.IndexStateResponse{
 			Status: states.Status,
-			State:  commonpb.IndexState_FAILED,
+			State:  commonpb.IndexState_INDEX_STATE_FAILED,
 		}
 
 		return nil
 	}
 
 	for _, state := range states.States {
-		if state.State != commonpb.IndexState_FINISHED {
+		if state.State != commonpb.IndexState_INDEX_STATE_FINISHED {
 			gist.result = &milvuspb.IndexStateResponse{
 				Status: states.Status,
 				State:  state.State,
@@ -1800,7 +1800,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 			Reason:    "",
 		},
-		State: commonpb.IndexState_FINISHED,
+		State: commonpb.IndexState_INDEX_STATE_FINISHED,
 	}
 
 	return nil

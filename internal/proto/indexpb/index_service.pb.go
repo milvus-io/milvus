@@ -200,7 +200,7 @@ func (m *IndexInfo) GetState() commonpb.IndexState {
 	if m != nil {
 		return m.State
 	}
-	return commonpb.IndexState_NONE
+	return commonpb.IndexState_INDEX_STATE_NONE
 }
 
 func (m *IndexInfo) GetIndexBuildID() int64 {
@@ -694,7 +694,7 @@ func (m *IndexMeta) GetState() commonpb.IndexState {
 	if m != nil {
 		return m.State
 	}
-	return commonpb.IndexState_NONE
+	return commonpb.IndexState_INDEX_STATE_NONE
 }
 
 func (m *IndexMeta) GetFailReason() string {
