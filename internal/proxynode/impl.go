@@ -518,7 +518,7 @@ func (node *ProxyNode) DescribeIndex(ctx context.Context, request *milvuspb.Desc
 	if err != nil {
 		return &milvuspb.DescribeIndexResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				ErrorCode: dit.result.Status.GetErrorCode(),
 				Reason:    err.Error(),
 			},
 		}, nil
