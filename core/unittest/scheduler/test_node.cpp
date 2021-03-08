@@ -35,6 +35,13 @@ class NodeTest : public ::testing::Test {
         node2_->AddNeighbour(node1_, pcie);
     }
 
+    void
+    TearDown() {
+        node1_->RemoveNeighbour(node2_);
+        node1_->RemoveNeighbour(node3_);
+        node2_->RemoveNeighbour(node1_);
+    }
+
     ms::NodePtr node1_;
     ms::NodePtr node2_;
     ms::NodePtr node3_;

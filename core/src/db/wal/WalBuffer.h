@@ -40,13 +40,6 @@ struct MXLogRecordHeader {
 
 const uint32_t SizeOfMXLogRecordHeader = sizeof(MXLogRecordHeader);
 
-struct MXLogAttrRecordHeader {
-    uint32_t attr_num;
-    std::vector<uint64_t> field_name_size;
-    std::vector<uint64_t> attr_size;
-    std::vector<uint64_t> attr_nbytes;
-};
-
 #pragma pack(pop)
 
 struct MXLogBufferHandler {
@@ -75,13 +68,7 @@ class MXLogBuffer {
     Append(MXLogRecord& record);
 
     ErrorCode
-    AppendEntity(MXLogRecord& record);
-
-    ErrorCode
     Next(const uint64_t last_applied_lsn, MXLogRecord& record);
-
-    ErrorCode
-    NextEntity(const uint64_t last_applied_lsn, MXLogRecord& record);
 
     uint64_t
     GetReadLsn();
@@ -104,10 +91,6 @@ class MXLogBuffer {
  private:
     uint32_t
     RecordSize(const MXLogRecord& record);
-
-    uint32_t
-    EntityRecordSize(const milvus::engine::wal::MXLogRecord& record, uint32_t attr_num,
-                     std::vector<uint32_t>& field_name_size);
 
  private:
     uint32_t mxlog_buffer_size_;  // from config

@@ -9,6 +9,8 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
+FROM hectormolinero/tini:v18 AS tini
+
 FROM centos:centos7
 
 RUN yum install -y epel-release && \
@@ -18,8 +20,7 @@ RUN yum install -y epel-release && \
 COPY ./milvus /var/lib/milvus
 ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/var/lib/milvus/lib"
 
-RUN wget -O /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini && \
-    chmod +x /tini
+COPY --from=tini /usr/bin/tini /tini
 
 ENTRYPOINT ["/tini", "--"]
 

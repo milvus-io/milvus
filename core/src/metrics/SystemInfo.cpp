@@ -39,6 +39,7 @@ SystemInfo::Init() {
     initialized_ = true;
 
     // initialize CPU information
+    FILE* file = nullptr;
     try {
         struct tms time_sample;
         char line[128];
@@ -46,7 +47,7 @@ SystemInfo::Init() {
         last_sys_cpu_ = time_sample.tms_stime;
         last_user_cpu_ = time_sample.tms_utime;
         num_processors_ = 0;
-        FILE* file = fopen("/proc/cpuinfo", "r");
+        file = fopen("/proc/cpuinfo", "r");
         if (file) {
             while (fgets(line, 128, file) != nullptr) {
                 if (strncmp(line, "processor", 9) == 0) {
@@ -62,6 +63,9 @@ SystemInfo::Init() {
         }
         total_ram_ = GetPhysicalMemory();
     } catch (std::exception& ex) {
+        if (file != nullptr) {
+            fclose(file);
+        }
         std::string msg = "Failed to read /proc/cpuinfo, reason: " + std::string(ex.what());
         LOG_SERVER_ERROR_ << msg;
     }
@@ -121,9 +125,11 @@ SystemInfo::GetPhysicalMemory() {
 
 int64_t
 SystemInfo::GetProcessUsedMemory() {
+    FILE* file = nullptr;
+
     try {
         // Note: this value is in KB!
-        FILE* file = fopen("/proc/self/status", "r");
+        file = fopen("/proc/self/status", "r");
         int64_t result = 0;
         constexpr int64_t KB = 1024;
         if (file) {
@@ -144,6 +150,9 @@ SystemInfo::GetProcessUsedMemory() {
         // return value in Byte
         return (result * KB);
     } catch (std::exception& ex) {
+        if (file != nullptr) {
+            fclose(file);
+        }
         std::string msg = "Failed to read /proc/self/status, reason: " + std::string(ex.what());
         LOG_SERVER_ERROR_ << msg;
         return 0;
@@ -181,8 +190,9 @@ SystemInfo::CPUCorePercent() {
 std::vector<int64_t>
 SystemInfo::getTotalCpuTime(std::vector<int64_t>& work_time_array) {
     std::vector<int64_t> total_time_array;
+    FILE* file = nullptr;
     try {
-        FILE* file = fopen("/proc/stat", "r");
+        file = fopen("/proc/stat", "r");
         fiu_do_on("SystemInfo.getTotalCpuTime.open_proc", file = NULL);
         if (file == NULL) {
             LOG_SERVER_ERROR_ << "Failed to read /proc/stat";
@@ -198,8 +208,7 @@ SystemInfo::getTotalCpuTime(std::vector<int64_t>& work_time_array) {
             fiu_do_on("SystemInfo.getTotalCpuTime.read_proc", ret = NULL);
             if (ret == NULL) {
                 LOG_SERVER_ERROR_ << "Could not read stat file";
-                fclose(file);
-                return total_time_array;
+                break;
             }
 
             sscanf(buffer, "cpu  %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu", &user, &nice, &system,
@@ -211,6 +220,9 @@ SystemInfo::getTotalCpuTime(std::vector<int64_t>& work_time_array) {
 
         fclose(file);
     } catch (std::exception& ex) {
+        if (file != nullptr) {
+            fclose(file);
+        }
         std::string msg = "Failed to read /proc/stat, reason: " + std::string(ex.what());
         LOG_SERVER_ERROR_ << msg;
     }
@@ -289,9 +301,10 @@ std::vector<float>
 SystemInfo::CPUTemperature() {
     std::vector<float> result;
     std::string path = "/sys/class/hwmon/";
+    DIR* dir = nullptr;
     try {
-        DIR* dir = opendir(path.c_str());
-        fiu_do_on("SystemInfo.CPUTemperature.opendir", dir = NULL);
+        dir = opendir(path.c_str());
+        fiu_do_on("SystemInfo.CPUTemperature.opendir", closedir(dir) || (dir = NULL));
         if (!dir) {
             LOG_SERVER_ERROR_ << "Could not open hwmon directory";
             return result;
@@ -302,28 +315,30 @@ SystemInfo::CPUTemperature() {
             std::string filename(path);
             filename.append(ptr->d_name);
 
-            char buf[100];
-            if (readlink(filename.c_str(), buf, 100) != -1) {
-                std::string m(buf);
+            std::string m(100, '\0');
+            if (readlink(filename.c_str(), m.data(), 100) != -1) {
                 if (m.find("coretemp") != std::string::npos) {
                     std::string object = filename;
                     object += "/temp1_input";
                     FILE* file = fopen(object.c_str(), "r");
-                    fiu_do_on("SystemInfo.CPUTemperature.openfile", file = NULL);
+                    fiu_do_on("SystemInfo.CPUTemperature.openfile", fclose(file) || (file = NULL));
                     if (file == nullptr) {
                         LOG_SERVER_ERROR_ << "Could not open temperature file";
-                        return result;
+                    } else {
+                        float temp;
+                        if (fscanf(file, "%f", &temp) != -1) {
+                            result.push_back(temp / 1000);
+                        }
+                        fclose(file);
                     }
-                    float temp;
-                    if (fscanf(file, "%f", &temp) != -1) {
-                        result.push_back(temp / 1000);
-                    }
-                    fclose(file);
                 }
             }
         }
         closedir(dir);
     } catch (std::exception& ex) {
+        if (dir != nullptr) {
+            closedir(dir);
+        }
         std::string msg = "Failed to get cpu temperature, reason: " + std::string(ex.what());
         LOG_SERVER_ERROR_ << msg;
     }
