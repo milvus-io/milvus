@@ -53,7 +53,7 @@ def pytest_runtestloop(session):
                 res[item.fspath.basename]["total"] += 1
             res["total_num"] += 1
             for marker in item.own_markers:
-                if "0331" in marker.args:
+                if marker.name == "tags" and "0331" in marker.args:
                     res["tags_num"] += 1
                     res[item.fspath.basename]["tags"] += 1
         print(res)
