@@ -153,6 +153,7 @@ class TestCollectionCount:
     #     stats = connect.get_collection_stats(collection)
     #     assert stats[row_count] == insert_count * 2
 
+    @pytest.mark.tags("0331")
     def test_collection_count_after_index_created(self, connect, collection, get_simple_index, insert_count):
         '''
         target: test count_entities, after index have been created

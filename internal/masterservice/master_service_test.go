@@ -83,6 +83,21 @@ func (d *dataMock) GetInsertBinlogPaths(ctx context.Context, req *datapb.InsertB
 	return rst, nil
 }
 
+func (d *dataMock) GetSegmentInfo(ctx context.Context, req *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error) {
+	return &datapb.SegmentInfoResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+		Infos: []*datapb.SegmentInfo{
+			{
+				FlushedTime: 100,
+				NumRows:     Params.MinSegmentSizeToEnableIndex,
+			},
+		},
+	}, nil
+}
+
 type queryMock struct {
 	types.QueryService
 	collID []typeutil.UniqueID

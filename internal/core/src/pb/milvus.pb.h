@@ -4110,6 +4110,7 @@ class DescribeSegmentResponse :
     kStatusFieldNumber = 1,
     kIndexIDFieldNumber = 2,
     kBuildIDFieldNumber = 3,
+    kEnableIndexFieldNumber = 4,
   };
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
@@ -4129,6 +4130,11 @@ class DescribeSegmentResponse :
   ::PROTOBUF_NAMESPACE_ID::int64 buildid() const;
   void set_buildid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
+  // bool enable_index = 4;
+  void clear_enable_index();
+  bool enable_index() const;
+  void set_enable_index(bool value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.DescribeSegmentResponse)
  private:
   class _Internal;
@@ -4137,6 +4143,7 @@ class DescribeSegmentResponse :
   ::milvus::proto::common::Status* status_;
   ::PROTOBUF_NAMESPACE_ID::int64 indexid_;
   ::PROTOBUF_NAMESPACE_ID::int64 buildid_;
+  bool enable_index_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -11559,6 +11566,20 @@ inline void DescribeSegmentResponse::set_buildid(::PROTOBUF_NAMESPACE_ID::int64 
   
   buildid_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeSegmentResponse.buildID)
+}
+
+// bool enable_index = 4;
+inline void DescribeSegmentResponse::clear_enable_index() {
+  enable_index_ = false;
+}
+inline bool DescribeSegmentResponse::enable_index() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.DescribeSegmentResponse.enable_index)
+  return enable_index_;
+}
+inline void DescribeSegmentResponse::set_enable_index(bool value) {
+  
+  enable_index_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeSegmentResponse.enable_index)
 }
 
 // -------------------------------------------------------------------

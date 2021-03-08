@@ -1189,6 +1189,7 @@ class SegmentIndexInfo :
     kFieldIDFieldNumber = 2,
     kIndexIDFieldNumber = 3,
     kBuildIDFieldNumber = 4,
+    kEnableIndexFieldNumber = 5,
   };
   // int64 segmentID = 1;
   void clear_segmentid();
@@ -1210,6 +1211,11 @@ class SegmentIndexInfo :
   ::PROTOBUF_NAMESPACE_ID::int64 buildid() const;
   void set_buildid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
+  // bool enable_index = 5;
+  void clear_enable_index();
+  bool enable_index() const;
+  void set_enable_index(bool value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.etcd.SegmentIndexInfo)
  private:
   class _Internal;
@@ -1219,6 +1225,7 @@ class SegmentIndexInfo :
   ::PROTOBUF_NAMESPACE_ID::int64 fieldid_;
   ::PROTOBUF_NAMESPACE_ID::int64 indexid_;
   ::PROTOBUF_NAMESPACE_ID::int64 buildid_;
+  bool enable_index_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_etcd_5fmeta_2eproto;
 };
@@ -2662,6 +2669,20 @@ inline void SegmentIndexInfo::set_buildid(::PROTOBUF_NAMESPACE_ID::int64 value) 
   
   buildid_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.SegmentIndexInfo.buildID)
+}
+
+// bool enable_index = 5;
+inline void SegmentIndexInfo::clear_enable_index() {
+  enable_index_ = false;
+}
+inline bool SegmentIndexInfo::enable_index() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.SegmentIndexInfo.enable_index)
+  return enable_index_;
+}
+inline void SegmentIndexInfo::set_enable_index(bool value) {
+  
+  enable_index_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.SegmentIndexInfo.enable_index)
 }
 
 // -------------------------------------------------------------------
