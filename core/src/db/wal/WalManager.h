@@ -49,9 +49,10 @@ class WalManager {
     ErrorCode
     GetNextRecovery(MXLogRecord& record);
 
+    /*
     ErrorCode
     GetNextEntityRecovery(MXLogRecord& record);
-
+*/
     /*
      * Get next record
      * @param record[out]: record
@@ -60,8 +61,10 @@ class WalManager {
     ErrorCode
     GetNextRecord(MXLogRecord& record);
 
+    /*
     ErrorCode
     GetNextEntityRecord(MXLogRecord& record);
+    */
 
     /*
      * Create collection
@@ -84,10 +87,10 @@ class WalManager {
      * Create hybrid collection
      * @param collection_id: collection id
      * @retval lsn
-     */
     uint64_t
     CreateHybridCollection(const std::string& collection_id);
 
+     */
     /*
      * Drop collection
      * @param collection_id: collection id
@@ -159,7 +162,6 @@ class WalManager {
      * @param vector_ids: vector ids
      * @param vectors: vectors
      * @param attrs: attributes
-     */
     template <typename T>
     bool
     InsertEntities(const std::string& collection_id, const std::string& partition_tag,
@@ -167,6 +169,7 @@ class WalManager {
                    const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                    const std::unordered_map<std::string, std::vector<uint8_t>>& attrs);
 
+     */
     /*
      * Insert
      * @param collection_id: collection id

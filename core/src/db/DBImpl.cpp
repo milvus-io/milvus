@@ -245,9 +245,6 @@ DBImpl::CreateHybridCollection(meta::CollectionSchema& collection_schema, meta::
 
     meta::CollectionSchema temp_schema = collection_schema;
     temp_schema.index_file_size_ *= MB;
-    if (options_.wal_enable_) {
-        temp_schema.flush_lsn_ = wal_mgr_->CreateHybridCollection(collection_schema.collection_id_);
-    }
 
     return meta_ptr_->CreateHybridCollection(temp_schema, fields_schema);
 }
@@ -921,9 +918,6 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
         record.type = wal::MXLogType::Entity;
         record.data = vector_it->second.float_data_.data();
         record.data_size = vector_it->second.float_data_.size() * sizeof(float);
-        record.attr_data = attr_data;
-        record.attr_nbytes = attr_nbytes;
-        record.attr_data_size = attr_data_size;
     } else {
         //        record.type = wal::MXLogType::InsertBinary;
         //        record.data = entities.vector_data_[0].binary_data_.data();
@@ -2588,23 +2582,6 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
     Status status;
 
     switch (record.type) {
-        case wal::MXLogType::Entity: {
-            std::string target_collection_name;
-            status = GetPartitionByTag(record.collection_id, record.partition_tag, target_collection_name);
-            if (!status.ok()) {
-                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << status.message();
-                return status;
-            }
-
-            status = mem_mgr_->InsertEntities(
-                target_collection_name, record.length, record.ids, (record.data_size / record.length / sizeof(float)),
-                (const float*)record.data, record.attr_nbytes, record.attr_data_size, record.attr_data, record.lsn);
-            force_flush_if_mem_full();
-
-            // metrics
-            milvus::server::CollectInsertMetrics metrics(record.length, status);
-            break;
-        }
         case wal::MXLogType::InsertBinary: {
             std::string target_collection_name;
             status = GetPartitionByTag(record.collection_id, record.partition_tag, target_collection_name);
