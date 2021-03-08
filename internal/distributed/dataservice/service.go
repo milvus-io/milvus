@@ -239,7 +239,3 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty
 func (s *Server) GetSegmentInfoChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
 	return s.dataService.GetSegmentInfoChannel(ctx)
 }
-
-func (s *Server) GetCount(ctx context.Context, request *datapb.CollectionCountRequest) (*datapb.CollectionCountResponse, error) {
-	return s.dataService.GetCount(ctx, request)
-}

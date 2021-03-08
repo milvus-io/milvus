@@ -115,10 +115,6 @@ func (c *Client) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringRes
 	return c.grpcClient.GetSegmentInfoChannel(ctx, &commonpb.Empty{})
 }
 
-func (c *Client) GetCount(ctx context.Context, req *datapb.CollectionCountRequest) (*datapb.CollectionCountResponse, error) {
-	return c.grpcClient.GetCount(ctx, req)
-}
-
 func (c *Client) GetSegmentInfo(ctx context.Context, req *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error) {
 	return c.grpcClient.GetSegmentInfo(ctx, req)
 }
