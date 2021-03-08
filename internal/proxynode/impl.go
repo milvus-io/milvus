@@ -41,8 +41,8 @@ func (node *ProxyNode) CreateCollection(ctx context.Context, request *milvuspb.C
 		ctx:                     ctx,
 		Condition:               NewTaskCondition(ctx),
 		CreateCollectionRequest: request,
-		masterClient:            node.masterClient,
-		dataServiceClient:       node.dataServiceClient,
+		masterService:           node.masterService,
+		dataServiceClient:       node.dataService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(cct)
@@ -71,7 +71,7 @@ func (node *ProxyNode) DropCollection(ctx context.Context, request *milvuspb.Dro
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		DropCollectionRequest: request,
-		masterClient:          node.masterClient,
+		masterService:         node.masterService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(dct)
@@ -100,7 +100,7 @@ func (node *ProxyNode) HasCollection(ctx context.Context, request *milvuspb.HasC
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		HasCollectionRequest: request,
-		masterClient:         node.masterClient,
+		masterService:        node.masterService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(hct)
@@ -135,7 +135,7 @@ func (node *ProxyNode) LoadCollection(ctx context.Context, request *milvuspb.Loa
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		LoadCollectionRequest: request,
-		queryserviceClient:    node.queryServiceClient,
+		queryService:          node.queryService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(lct)
@@ -164,7 +164,7 @@ func (node *ProxyNode) ReleaseCollection(ctx context.Context, request *milvuspb.
 		ctx:                      ctx,
 		Condition:                NewTaskCondition(ctx),
 		ReleaseCollectionRequest: request,
-		queryserviceClient:       node.queryServiceClient,
+		queryService:             node.queryService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(rct)
@@ -193,7 +193,7 @@ func (node *ProxyNode) DescribeCollection(ctx context.Context, request *milvuspb
 		ctx:                       ctx,
 		Condition:                 NewTaskCondition(ctx),
 		DescribeCollectionRequest: request,
-		masterClient:              node.masterClient,
+		masterService:             node.masterService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(dct)
@@ -225,7 +225,7 @@ func (node *ProxyNode) GetCollectionStatistics(ctx context.Context, request *mil
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		CollectionStatsRequest: request,
-		dataServiceClient:      node.dataServiceClient,
+		dataService:            node.dataService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(g)
@@ -257,7 +257,7 @@ func (node *ProxyNode) ShowCollections(ctx context.Context, request *milvuspb.Sh
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		ShowCollectionRequest: request,
-		masterClient:          node.masterClient,
+		masterService:         node.masterService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(sct)
@@ -289,7 +289,7 @@ func (node *ProxyNode) CreatePartition(ctx context.Context, request *milvuspb.Cr
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		CreatePartitionRequest: request,
-		masterClient:           node.masterClient,
+		masterService:          node.masterService,
 		result:                 nil,
 	}
 
@@ -316,7 +316,7 @@ func (node *ProxyNode) DropPartition(ctx context.Context, request *milvuspb.Drop
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		DropPartitionRequest: request,
-		masterClient:         node.masterClient,
+		masterService:        node.masterService,
 		result:               nil,
 	}
 
@@ -344,7 +344,7 @@ func (node *ProxyNode) HasPartition(ctx context.Context, request *milvuspb.HasPa
 		ctx:                 ctx,
 		Condition:           NewTaskCondition(ctx),
 		HasPartitionRequest: request,
-		masterClient:        node.masterClient,
+		masterService:       node.masterService,
 		result:              nil,
 	}
 
@@ -379,7 +379,7 @@ func (node *ProxyNode) LoadPartitions(ctx context.Context, request *milvuspb.Loa
 		ctx:                 ctx,
 		Condition:           NewTaskCondition(ctx),
 		LoadPartitonRequest: request,
-		queryserviceClient:  node.queryServiceClient,
+		queryService:        node.queryService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(lpt)
@@ -408,7 +408,7 @@ func (node *ProxyNode) ReleasePartitions(ctx context.Context, request *milvuspb.
 		ctx:                     ctx,
 		Condition:               NewTaskCondition(ctx),
 		ReleasePartitionRequest: request,
-		queryserviceClient:      node.queryServiceClient,
+		queryService:            node.queryService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(rpt)
@@ -440,7 +440,7 @@ func (node *ProxyNode) ShowPartitions(ctx context.Context, request *milvuspb.Sho
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		ShowPartitionRequest: request,
-		masterClient:         node.masterClient,
+		masterService:        node.masterService,
 		result:               nil,
 	}
 
@@ -473,7 +473,7 @@ func (node *ProxyNode) CreateIndex(ctx context.Context, request *milvuspb.Create
 		ctx:                ctx,
 		Condition:          NewTaskCondition(ctx),
 		CreateIndexRequest: request,
-		masterClient:       node.masterClient,
+		masterService:      node.masterService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(cit)
@@ -501,7 +501,7 @@ func (node *ProxyNode) DescribeIndex(ctx context.Context, request *milvuspb.Desc
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		DescribeIndexRequest: request,
-		masterClient:         node.masterClient,
+		masterService:        node.masterService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(dit)
@@ -533,7 +533,7 @@ func (node *ProxyNode) DropIndex(ctx context.Context, request *milvuspb.DropInde
 		ctx:              ctx,
 		Condition:        NewTaskCondition(ctx),
 		DropIndexRequest: request,
-		masterClient:     node.masterClient,
+		masterService:    node.masterService,
 	}
 	err := node.sched.DdQueue.Enqueue(dit)
 	if err != nil {
@@ -555,11 +555,11 @@ func (node *ProxyNode) DropIndex(ctx context.Context, request *milvuspb.DropInde
 func (node *ProxyNode) GetIndexState(ctx context.Context, request *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error) {
 	// log.Println("Describe index progress for: ", request)
 	dipt := &GetIndexStateTask{
-		ctx:                ctx,
-		Condition:          NewTaskCondition(ctx),
-		IndexStateRequest:  request,
-		indexServiceClient: node.indexServiceClient,
-		masterClient:       node.masterClient,
+		ctx:               ctx,
+		Condition:         NewTaskCondition(ctx),
+		IndexStateRequest: request,
+		indexService:      node.indexService,
+		masterService:     node.masterService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(dipt)
@@ -587,9 +587,9 @@ func (node *ProxyNode) GetIndexState(ctx context.Context, request *milvuspb.Inde
 
 func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.InsertResponse, error) {
 	it := &InsertTask{
-		ctx:               ctx,
-		Condition:         NewTaskCondition(ctx),
-		dataServiceClient: node.dataServiceClient,
+		ctx:         ctx,
+		Condition:   NewTaskCondition(ctx),
+		dataService: node.dataService,
 		BaseInsertTask: BaseInsertTask{
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: request.HashKeys,
@@ -676,10 +676,10 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 func (node *ProxyNode) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error) {
 	log.Println("AA Flush collections: ", request.CollectionNames)
 	ft := &FlushTask{
-		ctx:               ctx,
-		Condition:         NewTaskCondition(ctx),
-		FlushRequest:      request,
-		dataServiceClient: node.dataServiceClient,
+		ctx:          ctx,
+		Condition:    NewTaskCondition(ctx),
+		FlushRequest: request,
+		dataService:  node.dataService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(ft)
@@ -716,7 +716,7 @@ func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvus
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
-	infoResp, err := node.dataServiceClient.GetSegmentInfo(ctx, &datapb.SegmentInfoRequest{
+	infoResp, err := node.dataService.GetSegmentInfo(ctx, &datapb.SegmentInfoRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_kSegmentInfo,
 			MsgID:     0,
@@ -763,7 +763,7 @@ func (node *ProxyNode) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.Qu
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
-	infoResp, err := node.queryServiceClient.GetSegmentInfo(ctx, &querypb.SegmentInfoRequest{
+	infoResp, err := node.queryService.GetSegmentInfo(ctx, &querypb.SegmentInfoRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_kSegmentInfo,
 			MsgID:     0,
@@ -798,7 +798,7 @@ func (node *ProxyNode) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.Qu
 }
 
 func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName string, collectionName string) ([]UniqueID, error) {
-	describeCollectionResponse, err := node.masterClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+	describeCollectionResponse, err := node.masterService.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_kDescribeCollection,
 			MsgID:     0,
@@ -815,7 +815,7 @@ func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName strin
 		return nil, errors.New(describeCollectionResponse.Status.Reason)
 	}
 	collectionID := describeCollectionResponse.CollectionID
-	showPartitionsResp, err := node.masterClient.ShowPartitions(ctx, &milvuspb.ShowPartitionRequest{
+	showPartitionsResp, err := node.masterService.ShowPartitions(ctx, &milvuspb.ShowPartitionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_kShowPartitions,
 			MsgID:     0,
@@ -835,7 +835,7 @@ func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName strin
 
 	ret := make([]UniqueID, 0)
 	for _, partitionID := range showPartitionsResp.PartitionIDs {
-		showSegmentResponse, err := node.masterClient.ShowSegments(ctx, &milvuspb.ShowSegmentRequest{
+		showSegmentResponse, err := node.masterService.ShowSegments(ctx, &milvuspb.ShowSegmentRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kShowSegment,
 				MsgID:     0,

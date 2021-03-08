@@ -2,20 +2,18 @@ package indexnode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
 
-	"errors"
-
+	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/storage"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-
-	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
-	"github.com/zilliztech/milvus-distributed/internal/storage"
 )
 
 const (
@@ -75,7 +73,7 @@ type IndexBuildTask struct {
 	kv            kv.Base
 	savePaths     []string
 	cmd           *indexpb.BuildIndexCmd
-	serviceClient typeutil.IndexServiceInterface
+	serviceClient types.IndexService
 	nodeID        UniqueID
 }
 

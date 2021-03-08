@@ -2,28 +2,26 @@ package indexservice
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
-	"github.com/zilliztech/milvus-distributed/internal/tso"
-
-	"go.etcd.io/etcd/clientv3"
-
-	"errors"
-
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
+	"github.com/zilliztech/milvus-distributed/internal/tso"
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
+	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"go.etcd.io/etcd/clientv3"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-	"github.com/zilliztech/milvus-distributed/internal/util/retry"
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 const (

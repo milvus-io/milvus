@@ -7,6 +7,8 @@ import (
 	"math"
 	"strconv"
 
+	"github.com/zilliztech/milvus-distributed/internal/types"
+
 	"errors"
 
 	"github.com/golang/protobuf/proto"
@@ -68,10 +70,10 @@ type BaseInsertTask = msgstream.InsertMsg
 type InsertTask struct {
 	BaseInsertTask
 	Condition
-	ctx               context.Context
-	dataServiceClient DataServiceClient
-	result            *milvuspb.InsertResponse
-	rowIDAllocator    *allocator.IDAllocator
+	ctx            context.Context
+	dataService    types.DataService
+	result         *milvuspb.InsertResponse
+	rowIDAllocator *allocator.IDAllocator
 }
 
 func (it *InsertTask) Ctx() context.Context {
@@ -197,7 +199,7 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 
 	stream, err := globalInsertChannelsMap.getInsertMsgStream(collID)
 	if err != nil {
-		resp, _ := it.dataServiceClient.GetInsertChannels(ctx, &datapb.InsertChannelRequest{
+		resp, _ := it.dataService.GetInsertChannels(ctx, &datapb.InsertChannelRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kInsert, // todo
 				MsgID:     it.Base.MsgID,            // todo
@@ -243,8 +245,8 @@ type CreateCollectionTask struct {
 	Condition
 	*milvuspb.CreateCollectionRequest
 	ctx               context.Context
-	masterClient      MasterClient
-	dataServiceClient DataServiceClient
+	masterService     types.MasterService
+	dataServiceClient types.DataService
 	result            *commonpb.Status
 	schema            *schemapb.CollectionSchema
 }
@@ -352,7 +354,7 @@ func (cct *CreateCollectionTask) PreExecute(ctx context.Context) error {
 
 func (cct *CreateCollectionTask) Execute(ctx context.Context) error {
 	var err error
-	cct.result, err = cct.masterClient.CreateCollection(ctx, cct.CreateCollectionRequest)
+	cct.result, err = cct.masterService.CreateCollection(ctx, cct.CreateCollectionRequest)
 	if err != nil {
 		return err
 	}
@@ -392,9 +394,9 @@ func (cct *CreateCollectionTask) PostExecute(ctx context.Context) error {
 type DropCollectionTask struct {
 	Condition
 	*milvuspb.DropCollectionRequest
-	ctx          context.Context
-	masterClient MasterClient
-	result       *commonpb.Status
+	ctx           context.Context
+	masterService types.MasterService
+	result        *commonpb.Status
 }
 
 func (dct *DropCollectionTask) Ctx() context.Context {
@@ -450,7 +452,7 @@ func (dct *DropCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	dct.result, err = dct.masterClient.DropCollection(ctx, dct.DropCollectionRequest)
+	dct.result, err = dct.masterService.DropCollection(ctx, dct.DropCollectionRequest)
 	if err != nil {
 		return err
 	}
@@ -742,9 +744,9 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 type HasCollectionTask struct {
 	Condition
 	*milvuspb.HasCollectionRequest
-	ctx          context.Context
-	masterClient MasterClient
-	result       *milvuspb.BoolResponse
+	ctx           context.Context
+	masterService types.MasterService
+	result        *milvuspb.BoolResponse
 }
 
 func (hct *HasCollectionTask) Ctx() context.Context {
@@ -796,7 +798,7 @@ func (hct *HasCollectionTask) PreExecute(ctx context.Context) error {
 
 func (hct *HasCollectionTask) Execute(ctx context.Context) error {
 	var err error
-	hct.result, err = hct.masterClient.HasCollection(ctx, hct.HasCollectionRequest)
+	hct.result, err = hct.masterService.HasCollection(ctx, hct.HasCollectionRequest)
 	if hct.result == nil {
 		return errors.New("has collection resp is nil")
 	}
@@ -813,9 +815,9 @@ func (hct *HasCollectionTask) PostExecute(ctx context.Context) error {
 type DescribeCollectionTask struct {
 	Condition
 	*milvuspb.DescribeCollectionRequest
-	ctx          context.Context
-	masterClient MasterClient
-	result       *milvuspb.DescribeCollectionResponse
+	ctx           context.Context
+	masterService types.MasterService
+	result        *milvuspb.DescribeCollectionResponse
 }
 
 func (dct *DescribeCollectionTask) Ctx() context.Context {
@@ -867,7 +869,7 @@ func (dct *DescribeCollectionTask) PreExecute(ctx context.Context) error {
 
 func (dct *DescribeCollectionTask) Execute(ctx context.Context) error {
 	var err error
-	dct.result, err = dct.masterClient.DescribeCollection(ctx, dct.DescribeCollectionRequest)
+	dct.result, err = dct.masterService.DescribeCollection(ctx, dct.DescribeCollectionRequest)
 	if dct.result == nil {
 		return errors.New("has collection resp is nil")
 	}
@@ -884,9 +886,9 @@ func (dct *DescribeCollectionTask) PostExecute(ctx context.Context) error {
 type GetCollectionsStatisticsTask struct {
 	Condition
 	*milvuspb.CollectionStatsRequest
-	ctx               context.Context
-	dataServiceClient DataServiceClient
-	result            *milvuspb.CollectionStatsResponse
+	ctx         context.Context
+	dataService types.DataService
+	result      *milvuspb.CollectionStatsResponse
 }
 
 func (g *GetCollectionsStatisticsTask) Ctx() context.Context {
@@ -947,7 +949,7 @@ func (g *GetCollectionsStatisticsTask) Execute(ctx context.Context) error {
 		CollectionID: collID,
 	}
 
-	result, _ := g.dataServiceClient.GetCollectionStatistics(ctx, req)
+	result, _ := g.dataService.GetCollectionStatistics(ctx, req)
 	if result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -971,9 +973,9 @@ func (g *GetCollectionsStatisticsTask) PostExecute(ctx context.Context) error {
 type ShowCollectionsTask struct {
 	Condition
 	*milvuspb.ShowCollectionRequest
-	ctx          context.Context
-	masterClient MasterClient
-	result       *milvuspb.ShowCollectionResponse
+	ctx           context.Context
+	masterService types.MasterService
+	result        *milvuspb.ShowCollectionResponse
 }
 
 func (sct *ShowCollectionsTask) Ctx() context.Context {
@@ -1022,7 +1024,7 @@ func (sct *ShowCollectionsTask) PreExecute(ctx context.Context) error {
 
 func (sct *ShowCollectionsTask) Execute(ctx context.Context) error {
 	var err error
-	sct.result, err = sct.masterClient.ShowCollections(ctx, sct.ShowCollectionRequest)
+	sct.result, err = sct.masterService.ShowCollections(ctx, sct.ShowCollectionRequest)
 	if sct.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -1039,9 +1041,9 @@ func (sct *ShowCollectionsTask) PostExecute(ctx context.Context) error {
 type CreatePartitionTask struct {
 	Condition
 	*milvuspb.CreatePartitionRequest
-	ctx          context.Context
-	masterClient MasterClient
-	result       *commonpb.Status
+	ctx           context.Context
+	masterService types.MasterService
+	result        *commonpb.Status
 }
 
 func (cpt *CreatePartitionTask) Ctx() context.Context {
@@ -1099,7 +1101,7 @@ func (cpt *CreatePartitionTask) PreExecute(ctx context.Context) error {
 }
 
 func (cpt *CreatePartitionTask) Execute(ctx context.Context) (err error) {
-	cpt.result, err = cpt.masterClient.CreatePartition(ctx, cpt.CreatePartitionRequest)
+	cpt.result, err = cpt.masterService.CreatePartition(ctx, cpt.CreatePartitionRequest)
 	if cpt.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -1116,9 +1118,9 @@ func (cpt *CreatePartitionTask) PostExecute(ctx context.Context) error {
 type DropPartitionTask struct {
 	Condition
 	*milvuspb.DropPartitionRequest
-	ctx          context.Context
-	masterClient MasterClient
-	result       *commonpb.Status
+	ctx           context.Context
+	masterService types.MasterService
+	result        *commonpb.Status
 }
 
 func (dpt *DropPartitionTask) Ctx() context.Context {
@@ -1176,7 +1178,7 @@ func (dpt *DropPartitionTask) PreExecute(ctx context.Context) error {
 }
 
 func (dpt *DropPartitionTask) Execute(ctx context.Context) (err error) {
-	dpt.result, err = dpt.masterClient.DropPartition(ctx, dpt.DropPartitionRequest)
+	dpt.result, err = dpt.masterService.DropPartition(ctx, dpt.DropPartitionRequest)
 	if dpt.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -1193,9 +1195,9 @@ func (dpt *DropPartitionTask) PostExecute(ctx context.Context) error {
 type HasPartitionTask struct {
 	Condition
 	*milvuspb.HasPartitionRequest
-	ctx          context.Context
-	masterClient MasterClient
-	result       *milvuspb.BoolResponse
+	ctx           context.Context
+	masterService types.MasterService
+	result        *milvuspb.BoolResponse
 }
 
 func (hpt *HasPartitionTask) Ctx() context.Context {
@@ -1252,7 +1254,7 @@ func (hpt *HasPartitionTask) PreExecute(ctx context.Context) error {
 }
 
 func (hpt *HasPartitionTask) Execute(ctx context.Context) (err error) {
-	hpt.result, err = hpt.masterClient.HasPartition(ctx, hpt.HasPartitionRequest)
+	hpt.result, err = hpt.masterService.HasPartition(ctx, hpt.HasPartitionRequest)
 	if hpt.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -1269,9 +1271,9 @@ func (hpt *HasPartitionTask) PostExecute(ctx context.Context) error {
 type ShowPartitionsTask struct {
 	Condition
 	*milvuspb.ShowPartitionRequest
-	ctx          context.Context
-	masterClient MasterClient
-	result       *milvuspb.ShowPartitionResponse
+	ctx           context.Context
+	masterService types.MasterService
+	result        *milvuspb.ShowPartitionResponse
 }
 
 func (spt *ShowPartitionsTask) Ctx() context.Context {
@@ -1323,7 +1325,7 @@ func (spt *ShowPartitionsTask) PreExecute(ctx context.Context) error {
 
 func (spt *ShowPartitionsTask) Execute(ctx context.Context) error {
 	var err error
-	spt.result, err = spt.masterClient.ShowPartitions(ctx, spt.ShowPartitionRequest)
+	spt.result, err = spt.masterService.ShowPartitions(ctx, spt.ShowPartitionRequest)
 	if spt.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -1340,9 +1342,9 @@ func (spt *ShowPartitionsTask) PostExecute(ctx context.Context) error {
 type CreateIndexTask struct {
 	Condition
 	*milvuspb.CreateIndexRequest
-	ctx          context.Context
-	masterClient MasterClient
-	result       *commonpb.Status
+	ctx           context.Context
+	masterService types.MasterService
+	result        *commonpb.Status
 }
 
 func (cit *CreateIndexTask) Ctx() context.Context {
@@ -1401,7 +1403,7 @@ func (cit *CreateIndexTask) PreExecute(ctx context.Context) error {
 
 func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 	var err error
-	cit.result, err = cit.masterClient.CreateIndex(ctx, cit.CreateIndexRequest)
+	cit.result, err = cit.masterService.CreateIndex(ctx, cit.CreateIndexRequest)
 	if cit.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -1418,9 +1420,9 @@ func (cit *CreateIndexTask) PostExecute(ctx context.Context) error {
 type DescribeIndexTask struct {
 	Condition
 	*milvuspb.DescribeIndexRequest
-	ctx          context.Context
-	masterClient MasterClient
-	result       *milvuspb.DescribeIndexResponse
+	ctx           context.Context
+	masterService types.MasterService
+	result        *milvuspb.DescribeIndexResponse
 }
 
 func (dit *DescribeIndexTask) Ctx() context.Context {
@@ -1484,7 +1486,7 @@ func (dit *DescribeIndexTask) PreExecute(ctx context.Context) error {
 
 func (dit *DescribeIndexTask) Execute(ctx context.Context) error {
 	var err error
-	dit.result, err = dit.masterClient.DescribeIndex(ctx, dit.DescribeIndexRequest)
+	dit.result, err = dit.masterService.DescribeIndex(ctx, dit.DescribeIndexRequest)
 	log.Println("YYYYY:", dit.result)
 	if dit.result == nil {
 		return errors.New("get collection statistics resp is nil")
@@ -1503,8 +1505,8 @@ type DropIndexTask struct {
 	Condition
 	ctx context.Context
 	*milvuspb.DropIndexRequest
-	masterClient MasterClient
-	result       *commonpb.Status
+	masterService types.MasterService
+	result        *commonpb.Status
 }
 
 func (dit *DropIndexTask) Ctx() context.Context {
@@ -1563,7 +1565,7 @@ func (dit *DropIndexTask) PreExecute(ctx context.Context) error {
 
 func (dit *DropIndexTask) Execute(ctx context.Context) error {
 	var err error
-	dit.result, err = dit.masterClient.DropIndex(ctx, dit.DropIndexRequest)
+	dit.result, err = dit.masterService.DropIndex(ctx, dit.DropIndexRequest)
 	if dit.result == nil {
 		return errors.New("drop index resp is nil")
 	}
@@ -1580,10 +1582,10 @@ func (dit *DropIndexTask) PostExecute(ctx context.Context) error {
 type GetIndexStateTask struct {
 	Condition
 	*milvuspb.IndexStateRequest
-	ctx                context.Context
-	indexServiceClient IndexServiceClient
-	masterClient       MasterClient
-	result             *milvuspb.IndexStateResponse
+	ctx           context.Context
+	indexService  types.IndexService
+	masterService types.MasterService
+	result        *milvuspb.IndexStateResponse
 }
 
 func (gist *GetIndexStateTask) Ctx() context.Context {
@@ -1658,7 +1660,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 		CollectionName: collectionName,
 		CollectionID:   collectionID,
 	}
-	partitions, err := gist.masterClient.ShowPartitions(ctx, showPartitionRequest)
+	partitions, err := gist.masterService.ShowPartitions(ctx, showPartitionRequest)
 	if err != nil {
 		return err
 	}
@@ -1680,7 +1682,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 		IndexName:      gist.IndexName,
 	}
 
-	indexDescriptionResp, err2 := gist.masterClient.DescribeIndex(ctx, &describeIndexReq)
+	indexDescriptionResp, err2 := gist.masterService.DescribeIndex(ctx, &describeIndexReq)
 	if err2 != nil {
 		return err2
 	}
@@ -1710,7 +1712,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
 		}
-		segments, err := gist.masterClient.ShowSegments(ctx, showSegmentsRequest)
+		segments, err := gist.masterService.ShowSegments(ctx, showSegmentsRequest)
 		if err != nil {
 			return err
 		}
@@ -1735,7 +1737,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 			CollectionID: collectionID,
 			SegmentID:    segmentID,
 		}
-		segmentDesc, err := gist.masterClient.DescribeSegment(ctx, describeSegmentRequest)
+		segmentDesc, err := gist.masterService.DescribeSegment(ctx, describeSegmentRequest)
 		if err != nil {
 			return err
 		}
@@ -1756,7 +1758,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	states, err := gist.indexServiceClient.GetIndexStates(ctx, getIndexStatesRequest)
+	states, err := gist.indexService.GetIndexStates(ctx, getIndexStatesRequest)
 	if err != nil {
 		return err
 	}
@@ -1799,9 +1801,9 @@ func (gist *GetIndexStateTask) PostExecute(ctx context.Context) error {
 type FlushTask struct {
 	Condition
 	*milvuspb.FlushRequest
-	ctx               context.Context
-	dataServiceClient DataServiceClient
-	result            *commonpb.Status
+	ctx         context.Context
+	dataService types.DataService
+	result      *commonpb.Status
 }
 
 func (ft *FlushTask) Ctx() context.Context {
@@ -1864,7 +1866,7 @@ func (ft *FlushTask) Execute(ctx context.Context) error {
 			CollectionID: collID,
 		}
 		var status *commonpb.Status
-		status, _ = ft.dataServiceClient.Flush(ctx, flushReq)
+		status, _ = ft.dataService.Flush(ctx, flushReq)
 		if status == nil {
 			return errors.New("flush resp is nil")
 		}
@@ -1885,9 +1887,9 @@ func (ft *FlushTask) PostExecute(ctx context.Context) error {
 type LoadCollectionTask struct {
 	Condition
 	*milvuspb.LoadCollectionRequest
-	ctx                context.Context
-	queryserviceClient QueryServiceClient
-	result             *commonpb.Status
+	ctx          context.Context
+	queryService types.QueryService
+	result       *commonpb.Status
 }
 
 func (lct *LoadCollectionTask) Ctx() context.Context {
@@ -1961,7 +1963,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 		CollectionID: collID,
 		Schema:       collSchema,
 	}
-	lct.result, err = lct.queryserviceClient.LoadCollection(ctx, request)
+	lct.result, err = lct.queryService.LoadCollection(ctx, request)
 	return err
 }
 
@@ -1972,9 +1974,9 @@ func (lct *LoadCollectionTask) PostExecute(ctx context.Context) error {
 type ReleaseCollectionTask struct {
 	Condition
 	*milvuspb.ReleaseCollectionRequest
-	ctx                context.Context
-	queryserviceClient QueryServiceClient
-	result             *commonpb.Status
+	ctx          context.Context
+	queryService types.QueryService
+	result       *commonpb.Status
 }
 
 func (rct *ReleaseCollectionTask) Ctx() context.Context {
@@ -2042,7 +2044,7 @@ func (rct *ReleaseCollectionTask) Execute(ctx context.Context) (err error) {
 		DbID:         0,
 		CollectionID: collID,
 	}
-	rct.result, err = rct.queryserviceClient.ReleaseCollection(ctx, request)
+	rct.result, err = rct.queryService.ReleaseCollection(ctx, request)
 	return err
 }
 
@@ -2053,9 +2055,9 @@ func (rct *ReleaseCollectionTask) PostExecute(ctx context.Context) error {
 type LoadPartitionTask struct {
 	Condition
 	*milvuspb.LoadPartitonRequest
-	ctx                context.Context
-	queryserviceClient QueryServiceClient
-	result             *commonpb.Status
+	ctx          context.Context
+	queryService types.QueryService
+	result       *commonpb.Status
 }
 
 func (lpt *LoadPartitionTask) ID() UniqueID {
@@ -2133,7 +2135,7 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 		PartitionIDs: partitionIDs,
 		Schema:       collSchema,
 	}
-	lpt.result, err = lpt.queryserviceClient.LoadPartitions(ctx, request)
+	lpt.result, err = lpt.queryService.LoadPartitions(ctx, request)
 	return err
 }
 
@@ -2144,9 +2146,9 @@ func (lpt *LoadPartitionTask) PostExecute(ctx context.Context) error {
 type ReleasePartitionTask struct {
 	Condition
 	*milvuspb.ReleasePartitionRequest
-	ctx                context.Context
-	queryserviceClient QueryServiceClient
-	result             *commonpb.Status
+	ctx          context.Context
+	queryService types.QueryService
+	result       *commonpb.Status
 }
 
 func (rpt *ReleasePartitionTask) Ctx() context.Context {
@@ -2223,7 +2225,7 @@ func (rpt *ReleasePartitionTask) Execute(ctx context.Context) (err error) {
 		CollectionID: collID,
 		PartitionIDs: partitionIDs,
 	}
-	rpt.result, err = rpt.queryserviceClient.ReleasePartitions(ctx, request)
+	rpt.result, err = rpt.queryService.ReleasePartitions(ctx, request)
 	return err
 }
 

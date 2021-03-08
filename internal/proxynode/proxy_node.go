@@ -2,25 +2,22 @@ package proxynode
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log"
 	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
-	"github.com/zilliztech/milvus-distributed/internal/util/retry"
-
-	"errors"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/types"
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 )
 
 type UniqueID = typeutil.UniqueID
@@ -37,11 +34,11 @@ type ProxyNode struct {
 
 	stateCode atomic.Value
 
-	masterClient       MasterClient
-	indexServiceClient IndexServiceClient
-	dataServiceClient  DataServiceClient
-	proxyServiceClient ProxyServiceClient
-	queryServiceClient QueryServiceClient
+	masterService types.MasterService
+	indexService  types.IndexService
+	dataService   types.DataService
+	proxyService  types.ProxyService
+	queryService  types.QueryService
 
 	sched *TaskScheduler
 	tick  *timeTick
@@ -72,39 +69,11 @@ func NewProxyNode(ctx context.Context, factory msgstream.Factory) (*ProxyNode, e
 
 }
 
-type Component interface {
-	GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
-}
-
-func (node *ProxyNode) waitForServiceReady(ctx context.Context, service Component, serviceName string) error {
-
-	checkFunc := func() error {
-		resp, err := service.GetComponentStates(ctx)
-		if err != nil {
-			return err
-		}
-		if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-			return errors.New(resp.Status.Reason)
-		}
-		if resp.State.StateCode != internalpb2.StateCode_HEALTHY {
-			return errors.New("")
-		}
-		return nil
-	}
-	// wait for 10 seconds
-	err := retry.Retry(200, time.Millisecond*200, checkFunc)
-	if err != nil {
-		errMsg := fmt.Sprintf("ProxyNode wait for %s ready failed", serviceName)
-		return errors.New(errMsg)
-	}
-	return nil
-}
-
 func (node *ProxyNode) Init() error {
 	// todo wait for proxyservice state changed to Healthy
 	ctx := context.Background()
 
-	err := node.waitForServiceReady(ctx, node.proxyServiceClient, "ProxyService")
+	err := funcutil.WaitForComponentHealthy(ctx, node.proxyService, "ProxyService", 100, time.Millisecond*200)
 	if err != nil {
 		return err
 	}
@@ -117,7 +86,7 @@ func (node *ProxyNode) Init() error {
 		},
 	}
 
-	response, err := node.proxyServiceClient.RegisterNode(ctx, request)
+	response, err := node.proxyService.RegisterNode(ctx, request)
 	if err != nil {
 		return err
 	}
@@ -131,31 +100,31 @@ func (node *ProxyNode) Init() error {
 	}
 
 	// wait for dataservice state changed to Healthy
-	if node.dataServiceClient != nil {
-		err = node.waitForServiceReady(ctx, node.dataServiceClient, "DataService")
+	if node.dataService != nil {
+		err := funcutil.WaitForComponentHealthy(ctx, node.dataService, "DataService", 100, time.Millisecond*200)
 		if err != nil {
 			return err
 		}
 	}
 
-	// wait for queryservice state changed to Healthy
-	if node.queryServiceClient != nil {
-		err = node.waitForServiceReady(ctx, node.queryServiceClient, "QueryService")
+	// wait for queryService state changed to Healthy
+	if node.queryService != nil {
+		err := funcutil.WaitForComponentHealthy(ctx, node.queryService, "QueryService", 100, time.Millisecond*200)
 		if err != nil {
 			return err
 		}
 	}
 
 	// wait for indexservice state changed to Healthy
-	if node.indexServiceClient != nil {
-		err = node.waitForServiceReady(ctx, node.indexServiceClient, "IndexService")
+	if node.indexService != nil {
+		err := funcutil.WaitForComponentHealthy(ctx, node.indexService, "IndexService", 100, time.Millisecond*200)
 		if err != nil {
 			return err
 		}
 	}
 
-	if node.queryServiceClient != nil {
-		resp, err := node.queryServiceClient.CreateQueryChannel(ctx)
+	if node.queryService != nil {
+		resp, err := node.queryService.CreateQueryChannel(ctx)
 		if err != nil {
 			return err
 		}
@@ -168,7 +137,7 @@ func (node *ProxyNode) Init() error {
 	}
 
 	// todo
-	//Params.InsertChannelNames, err = node.dataServiceClient.GetInsertChannels()
+	//Params.InsertChannelNames, err = node.dataService.GetInsertChannels()
 	//if err != nil {
 	//	return err
 	//}
@@ -204,7 +173,7 @@ func (node *ProxyNode) Init() error {
 	node.tsoAllocator = tsoAllocator
 	node.tsoAllocator.PeerID = Params.ProxyID
 
-	segAssigner, err := NewSegIDAssigner(node.ctx, node.dataServiceClient, node.lastTick)
+	segAssigner, err := NewSegIDAssigner(node.ctx, node.dataService, node.lastTick)
 	if err != nil {
 		panic(err)
 	}
@@ -232,7 +201,7 @@ func (node *ProxyNode) Init() error {
 }
 
 func (node *ProxyNode) Start() error {
-	err := InitMetaCache(node.masterClient)
+	err := InitMetaCache(node.masterService)
 	if err != nil {
 		return err
 	}
@@ -308,22 +277,22 @@ func (node *ProxyNode) AddCloseCallback(callbacks ...func()) {
 	node.closeCallbacks = append(node.closeCallbacks, callbacks...)
 }
 
-func (node *ProxyNode) SetMasterClient(cli MasterClient) {
-	node.masterClient = cli
+func (node *ProxyNode) SetMasterClient(cli types.MasterService) {
+	node.masterService = cli
 }
 
-func (node *ProxyNode) SetIndexServiceClient(cli IndexServiceClient) {
-	node.indexServiceClient = cli
+func (node *ProxyNode) SetIndexServiceClient(cli types.IndexService) {
+	node.indexService = cli
 }
 
-func (node *ProxyNode) SetDataServiceClient(cli DataServiceClient) {
-	node.dataServiceClient = cli
+func (node *ProxyNode) SetDataServiceClient(cli types.DataService) {
+	node.dataService = cli
 }
 
-func (node *ProxyNode) SetProxyServiceClient(cli ProxyServiceClient) {
-	node.proxyServiceClient = cli
+func (node *ProxyNode) SetProxyServiceClient(cli types.ProxyService) {
+	node.proxyService = cli
 }
 
-func (node *ProxyNode) SetQueryServiceClient(cli QueryServiceClient) {
-	node.queryServiceClient = cli
+func (node *ProxyNode) SetQueryServiceClient(cli types.QueryService) {
+	node.queryService = cli
 }

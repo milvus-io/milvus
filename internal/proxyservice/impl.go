@@ -156,7 +156,7 @@ func (s *ProxyService) Stop() error {
 	if err != nil {
 		panic(err)
 	}
-	log.Println("stop all node clients ...")
+	log.Println("stop all node ProxyNodes ...")
 
 	s.cancel()
 

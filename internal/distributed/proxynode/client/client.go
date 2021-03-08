@@ -6,16 +6,29 @@ import (
 
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 	"google.golang.org/grpc"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 )
 
 type Client struct {
 	grpcClient proxypb.ProxyNodeServiceClient
 	address    string
 	ctx        context.Context
+}
+
+func (c *Client) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
+	//TODO
+	panic("implement me")
+}
+
+func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	//TODO
+	panic("implement me")
 }
 
 func (c *Client) Init() error {

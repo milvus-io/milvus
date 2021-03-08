@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/zilliztech/milvus-distributed/internal/types"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -12,6 +14,7 @@ import (
 )
 
 type MockMasterClientInterface struct {
+	types.MasterService
 }
 
 func (m *MockMasterClientInterface) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {

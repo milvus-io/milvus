@@ -2,16 +2,14 @@ package indexservice
 
 import (
 	"context"
+	"errors"
 	"log"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-
-	"errors"
-
-	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 )
 
@@ -67,7 +65,7 @@ type IndexAddTask struct {
 	idAllocator       *allocator.GlobalIDAllocator
 	buildQueue        TaskQueue
 	kv                kv.Base
-	builderClient     typeutil.IndexNodeInterface
+	builderClient     types.IndexNode
 	nodeClients       *PriorityQueue
 	buildClientNodeID UniqueID
 }

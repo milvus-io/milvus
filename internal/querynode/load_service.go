@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/types"
+
 	"errors"
 
 	"go.uber.org/zap"
@@ -161,10 +163,10 @@ func (s *loadService) loadSegmentInternal(collectionID UniqueID, partitionID Uni
 	return nil
 }
 
-func newLoadService(ctx context.Context, masterClient MasterServiceInterface, dataClient DataServiceInterface, indexClient IndexServiceInterface, replica ReplicaInterface, dmStream msgstream.MsgStream) *loadService {
+func newLoadService(ctx context.Context, masterService types.MasterService, dataService types.DataService, indexService types.IndexService, replica ReplicaInterface, dmStream msgstream.MsgStream) *loadService {
 	ctx1, cancel := context.WithCancel(ctx)
 
-	segLoader := newSegmentLoader(ctx1, masterClient, indexClient, dataClient, replica, dmStream)
+	segLoader := newSegmentLoader(ctx1, masterService, indexService, dataService, replica, dmStream)
 
 	return &loadService{
 		ctx:    ctx1,

@@ -10,10 +10,11 @@ import (
 	"errors"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/types"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 const (
@@ -127,21 +128,21 @@ type SegIDAssigner struct {
 	getTickFunc func() Timestamp
 	PeerID      UniqueID
 
-	serviceClient DataServiceClient
-	countPerRPC   uint32
+	dataService types.DataService
+	countPerRPC uint32
 }
 
-func NewSegIDAssigner(ctx context.Context, client DataServiceClient, getTickFunc func() Timestamp) (*SegIDAssigner, error) {
+func NewSegIDAssigner(ctx context.Context, dataService types.DataService, getTickFunc func() Timestamp) (*SegIDAssigner, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	sa := &SegIDAssigner{
 		Allocator: Allocator{
 			Ctx:        ctx1,
 			CancelFunc: cancel,
 		},
-		countPerRPC:   SegCountPerRPC,
-		serviceClient: client,
-		assignInfos:   make(map[UniqueID]*list.List),
-		getTickFunc:   getTickFunc,
+		countPerRPC: SegCountPerRPC,
+		dataService: dataService,
+		assignInfos: make(map[UniqueID]*list.List),
+		getTickFunc: getTickFunc,
 	}
 	sa.TChan = &allocator.Ticker{
 		UpdateInterval: time.Second,
@@ -154,8 +155,8 @@ func NewSegIDAssigner(ctx context.Context, client DataServiceClient, getTickFunc
 	return sa, nil
 }
 
-func (sa *SegIDAssigner) SetServiceClient(client DataServiceClient) {
-	sa.serviceClient = client
+func (sa *SegIDAssigner) SetServiceClient(client types.DataService) {
+	sa.dataService = client
 }
 
 func (sa *SegIDAssigner) collectExpired() {
@@ -288,7 +289,7 @@ func (sa *SegIDAssigner) syncSegments() bool {
 	}
 
 	sa.segReqs = []*datapb.SegIDRequest{}
-	resp, err := sa.serviceClient.AssignSegmentID(ctx, req)
+	resp, err := sa.dataService.AssignSegmentID(ctx, req)
 
 	if err != nil {
 		log.Println("GRPC AssignSegmentID Failed", resp, err)
