@@ -2,6 +2,7 @@ package grpcqueryservice
 
 import (
 	"context"
+	"math"
 	"net"
 	"strconv"
 	"sync"
@@ -152,8 +153,11 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	defer cancel()
 
 	tracer := opentracing.GlobalTracer()
-	s.grpcServer = grpc.NewServer(grpc.UnaryInterceptor(
-		otgrpc.OpenTracingServerInterceptor(tracer)),
+	s.grpcServer = grpc.NewServer(
+		grpc.MaxRecvMsgSize(math.MaxInt32),
+		grpc.MaxSendMsgSize(math.MaxInt32),
+		grpc.UnaryInterceptor(
+			otgrpc.OpenTracingServerInterceptor(tracer)),
 		grpc.StreamInterceptor(
 			otgrpc.OpenTracingStreamServerInterceptor(tracer)))
 	querypb.RegisterQueryServiceServer(s.grpcServer, s)
