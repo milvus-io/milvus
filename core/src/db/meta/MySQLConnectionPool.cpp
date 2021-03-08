@@ -53,7 +53,7 @@ MySQLConnectionPool::release(const mysqlpp::Connection* pc) {
 // Superclass overrides
 mysqlpp::Connection*
 MySQLConnectionPool::create() {
-    mysqlpp::Connection *conn = nullptr;
+    mysqlpp::Connection* conn = nullptr;
     try {
         fiu_do_on("MySQLConnectionPool.create.throw_exception", throw mysqlpp::ConnectionFailed());
 
