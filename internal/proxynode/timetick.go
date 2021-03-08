@@ -2,17 +2,17 @@ package proxynode
 
 import (
 	"context"
-	"log"
 	"sync"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"go.uber.org/zap"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 type tickCheckFunc = func(Timestamp) bool
@@ -55,8 +55,7 @@ func newTimeTick(ctx context.Context,
 
 	t.tickMsgStream, _ = t.msFactory.NewMsgStream(t.ctx)
 	t.tickMsgStream.AsProducer(Params.ProxyTimeTickChannelNames)
-	// FIXME(wxyu): use log.Debug instead
-	log.Println("proxynode AsProducer: ", Params.ProxyTimeTickChannelNames)
+	log.Debug("proxynode", zap.Strings("proxynode AsProducer", Params.ProxyTimeTickChannelNames))
 	return t
 }
 
@@ -89,11 +88,10 @@ func (tt *timeTick) tick() error {
 	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
 	err := tt.tickMsgStream.Produce(tt.ctx, &msgPack)
 	if err != nil {
-		log.Printf("proxynode send time tick error: %v", err)
+		log.Warn("proxynode", zap.String("error", err.Error()))
 	} else {
-		//log.Printf("proxynode send time tick message")
+		log.Warn("proxynode send time tick message")
 	}
-	//log.Println("send current tick: ", tt.currentTick)
 	tt.tickLock.Lock()
 	defer tt.tickLock.Unlock()
 	tt.lastTick = tt.currentTick
@@ -107,7 +105,7 @@ func (tt *timeTick) tickLoop() {
 		select {
 		case <-tt.timer.C:
 			if err := tt.tick(); err != nil {
-				log.Printf("timeTick error")
+				log.Warn("timeTick error")
 			}
 		case <-tt.ctx.Done():
 			return

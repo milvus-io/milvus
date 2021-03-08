@@ -3,12 +3,12 @@ package proxyservice
 import (
 	"context"
 	"errors"
-	"log"
 	"math/rand"
 	"strconv"
 	"sync"
 
 	grpcproxynodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/proxynode/client"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/types"
 )
 
@@ -66,8 +66,6 @@ func (table *GlobalNodeInfoTable) Register(id UniqueID, info *NodeInfo) error {
 }
 
 func (table *GlobalNodeInfoTable) createClients() error {
-	log.Println("infos: ", table.infos)
-	log.Println("ProxyNodes: ", table.ProxyNodes)
 	if len(table.ProxyNodes) == len(table.infos) {
 		return nil
 	}
@@ -75,7 +73,6 @@ func (table *GlobalNodeInfoTable) createClients() error {
 	for nodeID, info := range table.infos {
 		_, ok := table.ProxyNodes[nodeID]
 		if !ok {
-			log.Println(info)
 			table.ProxyNodes[nodeID] = grpcproxynodeclient.NewClient(context.Background(), info.ip+":"+strconv.Itoa(int(info.port)))
 			var err error
 			err = table.ProxyNodes[nodeID].Init()
@@ -94,10 +91,10 @@ func (table *GlobalNodeInfoTable) createClients() error {
 
 func (table *GlobalNodeInfoTable) ReleaseAllClients() error {
 	table.mu.Lock()
-	log.Println("get write lock")
+	log.Debug("get write lock")
 	defer func() {
 		table.mu.Unlock()
-		log.Println("release write lock")
+		log.Debug("release write lock")
 	}()
 
 	var err error

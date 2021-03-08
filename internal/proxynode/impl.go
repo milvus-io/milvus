@@ -2,12 +2,13 @@ package proxynode
 
 import (
 	"context"
-	"log"
+	"errors"
 	"strconv"
 	"time"
 
-	"errors"
+	"go.uber.org/zap"
 
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
@@ -35,7 +36,7 @@ func (node *ProxyNode) InvalidateCollectionMetaCache(ctx context.Context, reques
 }
 
 func (node *ProxyNode) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
-	log.Println("create collection: ", request)
+	log.Debug("create collection...")
 
 	cct := &CreateCollectionTask{
 		ctx:                     ctx,
@@ -65,7 +66,7 @@ func (node *ProxyNode) CreateCollection(ctx context.Context, request *milvuspb.C
 }
 
 func (node *ProxyNode) DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
-	log.Println("drop collection: ", request)
+	log.Debug("drop collection... ")
 
 	dct := &DropCollectionTask{
 		ctx:                   ctx,
@@ -94,7 +95,7 @@ func (node *ProxyNode) DropCollection(ctx context.Context, request *milvuspb.Dro
 }
 
 func (node *ProxyNode) HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
-	log.Println("has collection: ", request)
+	log.Debug("has collection... ")
 
 	hct := &HasCollectionTask{
 		ctx:                  ctx,
@@ -127,7 +128,7 @@ func (node *ProxyNode) HasCollection(ctx context.Context, request *milvuspb.HasC
 }
 
 func (node *ProxyNode) LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
-	log.Println("load collection: ", request)
+	log.Debug("load collection...")
 	//ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	//defer cancel()
 
@@ -158,7 +159,7 @@ func (node *ProxyNode) LoadCollection(ctx context.Context, request *milvuspb.Loa
 }
 
 func (node *ProxyNode) ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	log.Println("release collection: ", request)
+	log.Debug("release collection...")
 
 	rct := &ReleaseCollectionTask{
 		ctx:                      ctx,
@@ -187,7 +188,7 @@ func (node *ProxyNode) ReleaseCollection(ctx context.Context, request *milvuspb.
 }
 
 func (node *ProxyNode) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-	log.Println("describe collection: ", request)
+	log.Debug("describe collection...")
 
 	dct := &DescribeCollectionTask{
 		ctx:                       ctx,
@@ -220,7 +221,7 @@ func (node *ProxyNode) DescribeCollection(ctx context.Context, request *milvuspb
 }
 
 func (node *ProxyNode) GetCollectionStatistics(ctx context.Context, request *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error) {
-	log.Println("get collection statistics")
+	log.Debug("get collection statistics...")
 	g := &GetCollectionsStatisticsTask{
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
@@ -252,7 +253,7 @@ func (node *ProxyNode) GetCollectionStatistics(ctx context.Context, request *mil
 }
 
 func (node *ProxyNode) ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
-	log.Println("show collections")
+	log.Debug("show collections...")
 	sct := &ShowCollectionsTask{
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
@@ -284,7 +285,7 @@ func (node *ProxyNode) ShowCollections(ctx context.Context, request *milvuspb.Sh
 }
 
 func (node *ProxyNode) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
-	log.Println("create partition", request)
+	log.Debug("create partition...")
 	cpt := &CreatePartitionTask{
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
@@ -311,7 +312,7 @@ func (node *ProxyNode) CreatePartition(ctx context.Context, request *milvuspb.Cr
 }
 
 func (node *ProxyNode) DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
-	log.Println("drop partition: ", request)
+	log.Debug("drop partition...")
 	dpt := &DropPartitionTask{
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
@@ -339,7 +340,7 @@ func (node *ProxyNode) DropPartition(ctx context.Context, request *milvuspb.Drop
 }
 
 func (node *ProxyNode) HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
-	log.Println("has partition: ", request)
+	log.Debug("has partition...")
 	hpt := &HasPartitionTask{
 		ctx:                 ctx,
 		Condition:           NewTaskCondition(ctx),
@@ -373,7 +374,7 @@ func (node *ProxyNode) HasPartition(ctx context.Context, request *milvuspb.HasPa
 }
 
 func (node *ProxyNode) LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitonRequest) (*commonpb.Status, error) {
-	log.Println("load partitions: ", request)
+	log.Debug("load partitions...")
 
 	lpt := &LoadPartitionTask{
 		ctx:                 ctx,
@@ -402,7 +403,7 @@ func (node *ProxyNode) LoadPartitions(ctx context.Context, request *milvuspb.Loa
 }
 
 func (node *ProxyNode) ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionRequest) (*commonpb.Status, error) {
-	log.Println("load partitions: ", request)
+	log.Debug("load partitions...")
 
 	rpt := &ReleasePartitionTask{
 		ctx:                     ctx,
@@ -435,7 +436,7 @@ func (node *ProxyNode) GetPartitionStatistics(ctx context.Context, request *milv
 }
 
 func (node *ProxyNode) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
-	log.Println("show partitions: ", request)
+	log.Debug("show partitions...")
 	spt := &ShowPartitionsTask{
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
@@ -468,7 +469,7 @@ func (node *ProxyNode) ShowPartitions(ctx context.Context, request *milvuspb.Sho
 }
 
 func (node *ProxyNode) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
-	log.Println("create index for: ", request)
+	log.Debug("create index for...")
 	cit := &CreateIndexTask{
 		ctx:                ctx,
 		Condition:          NewTaskCondition(ctx),
@@ -496,7 +497,7 @@ func (node *ProxyNode) CreateIndex(ctx context.Context, request *milvuspb.Create
 }
 
 func (node *ProxyNode) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
-	log.Println("Describe index for: ", request)
+	log.Debug("Describe index for...")
 	dit := &DescribeIndexTask{
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
@@ -528,7 +529,7 @@ func (node *ProxyNode) DescribeIndex(ctx context.Context, request *milvuspb.Desc
 }
 
 func (node *ProxyNode) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
-	log.Println("Drop index for: ", request)
+	log.Debug("Drop index for...")
 	dit := &DropIndexTask{
 		ctx:              ctx,
 		Condition:        NewTaskCondition(ctx),
@@ -553,7 +554,6 @@ func (node *ProxyNode) DropIndex(ctx context.Context, request *milvuspb.DropInde
 }
 
 func (node *ProxyNode) GetIndexState(ctx context.Context, request *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error) {
-	// log.Println("Describe index progress for: ", request)
 	dipt := &GetIndexStateTask{
 		ctx:               ctx,
 		Condition:         NewTaskCondition(ctx),
@@ -674,7 +674,7 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 }
 
 func (node *ProxyNode) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error) {
-	log.Println("AA Flush collections: ", request.CollectionNames)
+	log.Debug("proxynode", zap.Strings("Flush collections: ", request.CollectionNames))
 	ft := &FlushTask{
 		ctx:          ctx,
 		Condition:    NewTaskCondition(ctx),

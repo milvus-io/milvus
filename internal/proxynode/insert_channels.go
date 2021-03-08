@@ -2,15 +2,15 @@ package proxynode
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log"
 	"reflect"
 	"sort"
 	"sync"
 
-	"errors"
-
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"go.uber.org/zap"
 )
 
 func SliceContain(s interface{}, item interface{}) bool {
@@ -102,8 +102,7 @@ func (m *InsertChannelsMap) createInsertMsgStream(collID UniqueID, channels []st
 
 	stream, _ := m.msFactory.NewMsgStream(context.Background())
 	stream.AsProducer(channels)
-	// FIXME(wxyu): use log.Debug instead
-	log.Println("proxynode AsProducer: ", channels)
+	log.Debug("proxynode", zap.Strings("proxynode AsProducer: ", channels))
 	repack := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
 		return insertRepackFunc(tsMsgs, hashKeys, m.nodeInstance.segAssigner, true)
 	}
@@ -136,7 +135,7 @@ func (m *InsertChannelsMap) closeInsertMsgStream(collID UniqueID) error {
 		m.insertMsgStreams[loc].Close()
 		m.droppedBitMap[loc] = 1
 		delete(m.collectionID2InsertChannels, collID)
-		log.Print("close insert message stream ...")
+		log.Warn("close insert message stream ...")
 	}
 	return nil
 }

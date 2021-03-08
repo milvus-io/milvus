@@ -2,7 +2,6 @@ package proxynode
 
 import (
 	"context"
-
 	"errors"
 )
 

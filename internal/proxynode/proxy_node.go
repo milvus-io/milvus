@@ -3,21 +3,22 @@ package proxynode
 import (
 	"context"
 	"errors"
-	"log"
 	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/allocator"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/types"
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"go.uber.org/zap"
 
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
+	"github.com/zilliztech/milvus-distributed/internal/types"
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type UniqueID = typeutil.UniqueID
@@ -77,7 +78,7 @@ func (node *ProxyNode) Init() error {
 	if err != nil {
 		return err
 	}
-	log.Println("service was ready ...")
+	log.Debug("service was ready ...")
 
 	request := &proxypb.RegisterNodeRequest{
 		Address: &commonpb.Address{
@@ -154,8 +155,8 @@ func (node *ProxyNode) Init() error {
 	node.queryMsgStream, _ = node.msFactory.NewMsgStream(node.ctx)
 	node.queryMsgStream.AsProducer(Params.SearchChannelNames)
 	// FIXME(wxyu): use log.Debug instead
-	log.Println("proxynode AsProducer: ", Params.SearchChannelNames)
-	log.Println("create query message stream ...")
+	log.Debug("proxynode", zap.Strings("proxynode AsProducer:", Params.SearchChannelNames))
+	log.Debug("create query message stream ...")
 
 	masterAddr := Params.MasterAddress
 	idAllocator, err := allocator.NewIDAllocator(node.ctx, masterAddr)
@@ -182,13 +183,12 @@ func (node *ProxyNode) Init() error {
 
 	node.manipulationMsgStream, _ = node.msFactory.NewMsgStream(node.ctx)
 	node.manipulationMsgStream.AsProducer(Params.InsertChannelNames)
-	// FIXME(wxyu): use log.Debug instead
-	log.Println("proxynode AsProducer: ", Params.InsertChannelNames)
+	log.Debug("proxynode", zap.Strings("proxynode AsProducer", Params.InsertChannelNames))
 	repackFunc := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
 		return insertRepackFunc(tsMsgs, hashKeys, node.segAssigner, true)
 	}
 	node.manipulationMsgStream.SetRepackFunc(repackFunc)
-	log.Println("create manipulation message stream ...")
+	log.Debug("create manipulation message stream ...")
 
 	node.sched, err = NewTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.msFactory)
 	if err != nil {
@@ -205,31 +205,31 @@ func (node *ProxyNode) Start() error {
 	if err != nil {
 		return err
 	}
-	log.Println("init global meta cache ...")
+	log.Debug("init global meta cache ...")
 
 	initGlobalInsertChannelsMap(node)
-	log.Println("init global insert channels map ...")
+	log.Debug("init global insert channels map ...")
 
 	node.manipulationMsgStream.Start()
-	log.Println("start manipulation message stream ...")
+	log.Debug("start manipulation message stream ...")
 
 	node.queryMsgStream.Start()
-	log.Println("start query message stream ...")
+	log.Debug("start query message stream ...")
 
 	node.sched.Start()
-	log.Println("start scheduler ...")
+	log.Debug("start scheduler ...")
 
 	node.idAllocator.Start()
-	log.Println("start id allocator ...")
+	log.Debug("start id allocator ...")
 
 	node.tsoAllocator.Start()
-	log.Println("start tso allocator ...")
+	log.Debug("start tso allocator ...")
 
 	node.segAssigner.Start()
-	log.Println("start seg assigner ...")
+	log.Debug("start seg assigner ...")
 
 	node.tick.Start()
-	log.Println("start time tick ...")
+	log.Debug("start time tick ...")
 
 	// Start callbacks
 	for _, cb := range node.startCallbacks {
@@ -237,7 +237,7 @@ func (node *ProxyNode) Start() error {
 	}
 
 	node.UpdateStateCode(internalpb2.StateCode_HEALTHY)
-	log.Println("proxy node is healthy ...")
+	log.Debug("proxy node is healthy ...")
 
 	return nil
 }

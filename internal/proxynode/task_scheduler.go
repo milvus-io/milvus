@@ -3,16 +3,17 @@ package proxynode
 import (
 	"container/list"
 	"context"
+	"errors"
 	"fmt"
-	"log"
 	"strconv"
 	"sync"
 
-	"errors"
+	"go.uber.org/zap"
 
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/util/trace"
@@ -77,7 +78,7 @@ func (queue *BaseTaskQueue) FrontUnissuedTask() task {
 	defer queue.utLock.Unlock()
 
 	if queue.unissuedTasks.Len() <= 0 {
-		log.Panic("sorry, but the unissued task list is empty!")
+		log.Warn("sorry, but the unissued task list is empty!")
 		return nil
 	}
 
@@ -89,7 +90,7 @@ func (queue *BaseTaskQueue) PopUnissuedTask() task {
 	defer queue.utLock.Unlock()
 
 	if queue.unissuedTasks.Len() <= 0 {
-		log.Fatal("sorry, but the unissued task list is empty!")
+		log.Warn("sorry, but the unissued task list is empty!")
 		return nil
 	}
 
@@ -106,7 +107,7 @@ func (queue *BaseTaskQueue) AddActiveTask(t task) {
 	ts := t.EndTs()
 	_, ok := queue.activeTasks[ts]
 	if ok {
-		log.Fatalf("task with timestamp %v already in active task list!", ts)
+		log.Debug("proxynode", zap.Uint64("task with timestamp ts already in active task list! ts:", ts))
 	}
 
 	queue.activeTasks[ts] = t
@@ -122,7 +123,7 @@ func (queue *BaseTaskQueue) PopActiveTask(ts Timestamp) task {
 		return t
 	}
 
-	log.Fatalf("sorry, but the timestamp %d was not found in the active task list!", ts)
+	log.Debug("proxynode", zap.Uint64("task with timestamp ts already in active task list! ts:", ts))
 	return nil
 }
 
@@ -173,11 +174,9 @@ func (queue *BaseTaskQueue) Enqueue(t task) error {
 	}
 
 	ts, _ := queue.sched.tsoAllocator.AllocOne()
-	// log.Printf("[ProxyNode] allocate timestamp: %v", ts)
 	t.SetTs(ts)
 
 	reqID, _ := queue.sched.idAllocator.AllocOne()
-	// log.Printf("[ProxyNode] allocate reqID: %v", reqID)
 	t.SetID(reqID)
 
 	return queue.addUnissuedTask(t)
@@ -309,7 +308,6 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 
 	defer func() {
 		t.Notify(err)
-		// log.Printf("notify with error: %v", err)
 	}()
 	if err != nil {
 		trace.LogError(span, err)
@@ -319,11 +317,9 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 	span.LogFields(oplog.Int64("scheduler process AddActiveTask", t.ID()))
 	q.AddActiveTask(t)
 
-	// log.Printf("task add to active list ...")
 	defer func() {
 		span.LogFields(oplog.Int64("scheduler process PopActiveTask", t.ID()))
 		q.PopActiveTask(t.EndTs())
-		// log.Printf("pop from active list ...")
 	}()
 	span.LogFields(oplog.Int64("scheduler process Execute", t.ID()))
 	err = t.Execute(ctx)
@@ -331,10 +327,8 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 		trace.LogError(span, err)
 		return
 	}
-	// log.Printf("task execution done ...")
 	span.LogFields(oplog.Int64("scheduler process PostExecute", t.ID()))
 	err = t.PostExecute(ctx)
-	// log.Printf("post execute task done ...")
 }
 
 func (sched *TaskScheduler) definitionLoop() {
@@ -375,12 +369,11 @@ func (sched *TaskScheduler) queryLoop() {
 		case <-sched.ctx.Done():
 			return
 		case <-sched.DqQueue.utChan():
-			// log.Print("scheduler receive query request ...")
 			if !sched.DqQueue.UTEmpty() {
 				t := sched.scheduleDqTask()
 				go sched.processTask(t, sched.DqQueue)
 			} else {
-				log.Print("query queue is empty ...")
+				log.Debug("query queue is empty ...")
 			}
 		}
 	}
@@ -391,7 +384,8 @@ func (sched *TaskScheduler) queryResultLoop() {
 
 	queryResultMsgStream, _ := sched.msFactory.NewMsgStream(sched.ctx)
 	queryResultMsgStream.AsConsumer(Params.SearchResultChannelNames, Params.ProxySubName)
-	log.Println("proxynode AsConsumer: ", Params.SearchResultChannelNames, " : ", Params.ProxySubName)
+	log.Debug("proxynode", zap.Strings("search result channel names", Params.SearchResultChannelNames))
+	log.Debug("proxynode", zap.String("proxySubName", Params.ProxySubName))
 	queryNodeNum := Params.QueryNodeNum
 
 	queryResultMsgStream.Start()
@@ -403,7 +397,7 @@ func (sched *TaskScheduler) queryResultLoop() {
 		select {
 		case msgPack, ok := <-queryResultMsgStream.Chan():
 			if !ok {
-				log.Print("buf chan closed")
+				log.Debug("buf chan closed")
 				return
 			}
 			if msgPack == nil {
@@ -415,7 +409,7 @@ func (sched *TaskScheduler) queryResultLoop() {
 				reqIDStr := strconv.FormatInt(reqID, 10)
 				t := sched.getTaskByReqID(reqID)
 				if t == nil {
-					log.Println(fmt.Sprint("QueryResult:czs:GetTaskByReqID failed, reqID:", reqIDStr))
+					log.Debug("proxynode", zap.String("QueryResult GetTaskByReqID failed, reqID = ", reqIDStr))
 					delete(queryResultBuf, reqID)
 					continue
 				}
@@ -436,7 +430,6 @@ func (sched *TaskScheduler) queryResultLoop() {
 					if t != nil {
 						qt, ok := t.(*SearchTask)
 						if ok {
-							log.Printf("address of query task: %p", qt)
 							qt.resultBuf <- queryResultBuf[reqID]
 							delete(queryResultBuf, reqID)
 						}
@@ -447,7 +440,7 @@ func (sched *TaskScheduler) queryResultLoop() {
 				}
 			}
 		case <-sched.ctx.Done():
-			log.Print("proxynode server is closed ...")
+			log.Debug("proxynode server is closed ...")
 			return
 		}
 	}

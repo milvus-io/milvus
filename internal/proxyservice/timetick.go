@@ -2,9 +2,11 @@ package proxyservice
 
 import (
 	"context"
-	"log"
 	"sync"
 
+	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -19,19 +21,19 @@ type TimeTick struct {
 }
 
 func (tt *TimeTick) Start() error {
-	log.Println("start time tick ...")
+	log.Debug("start time tick ...")
 	tt.wg.Add(1)
 	go func() {
 		defer tt.wg.Done()
 		for {
 			select {
 			case <-tt.ctx.Done():
-				log.Println("time tick loop was canceled by context!")
+				log.Debug("time tick loop was canceled by context!")
 				return
 			default:
 				current, err := tt.ttBarrier.GetTimeTick()
 				if err != nil {
-					log.Println("GetTimeTick error: ", err)
+					log.Error("GetTimeTick error", zap.Error(err))
 					break
 				}
 				msgPack := msgstream.MsgPack{}
@@ -50,12 +52,12 @@ func (tt *TimeTick) Start() error {
 				}
 				msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
 				for _, msg := range msgPack.Msgs {
-					log.Println("msg type xxxxxxxxxxxxxxxxxxxxxxxx", msg.Type())
+					log.Debug("proxyservice", zap.Stringer("msg type", msg.Type()))
 				}
 				for _, channel := range tt.channels {
 					err = channel.Broadcast(tt.ctx, &msgPack)
 					if err != nil {
-						log.Println("send time tick error: ", err)
+						log.Error("proxyservice", zap.String("send time tick error", err.Error()))
 					}
 				}
 			}

@@ -1,17 +1,14 @@
 package proxynode
 
 import (
+	"errors"
 	"log"
 	"sort"
 
-	"errors"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 func insertRepackFunc(tsMsgs []msgstream.TsMsg,

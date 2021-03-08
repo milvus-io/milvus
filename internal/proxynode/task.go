@@ -2,17 +2,16 @@ package proxynode
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log"
 	"math"
 	"strconv"
 
-	"github.com/zilliztech/milvus-distributed/internal/types"
-
-	"errors"
+	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
@@ -21,6 +20,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
@@ -581,9 +581,9 @@ func (st *SearchTask) Execute(ctx context.Context) error {
 	}
 	msgPack.Msgs[0] = tsMsg
 	err := st.queryMsgStream.Produce(ctx, msgPack)
-	log.Printf("[ProxyNode] length of searchMsg: %v", len(msgPack.Msgs))
+	log.Debug("proxynode", zap.Int("length of searchMsg", len(msgPack.Msgs)))
 	if err != nil {
-		log.Printf("[ProxyNode] send search request failed: %v", err)
+		log.Debug("proxynode", zap.String("send search request failed", err.Error()))
 	}
 	return err
 }
@@ -592,7 +592,7 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 	for {
 		select {
 		case <-st.Ctx().Done():
-			log.Print("SearchTask: wait to finish failed, timeout!, taskID:", st.ID())
+			log.Debug("proxynode", zap.Int64("SearchTask: wait to finish failed, timeout!, taskID:", st.ID()))
 			return fmt.Errorf("SearchTask:wait to finish failed, timeout: %d", st.ID())
 		case searchResults := <-st.resultBuf:
 			// fmt.Println("searchResults: ", searchResults)
@@ -638,7 +638,7 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 					partialHit := &milvuspb.Hits{}
 					err := proto.Unmarshal(bs, partialHit)
 					if err != nil {
-						log.Println("unmarshal error")
+						log.Debug("proxynode", zap.String("error", "unmarshal error"))
 						return err
 					}
 					partialHits = append(partialHits, partialHit)
@@ -731,7 +731,7 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 				}
 				reducedHitsBs, err := proto.Marshal(reducedHits)
 				if err != nil {
-					log.Println("marshal error")
+					log.Debug("proxynode", zap.String("error", "marshal error"))
 					return err
 				}
 				st.result.Hits = append(st.result.Hits, reducedHitsBs)
@@ -1487,7 +1487,6 @@ func (dit *DescribeIndexTask) PreExecute(ctx context.Context) error {
 func (dit *DescribeIndexTask) Execute(ctx context.Context) error {
 	var err error
 	dit.result, err = dit.masterService.DescribeIndex(ctx, dit.DescribeIndexRequest)
-	log.Println("YYYYY:", dit.result)
 	if dit.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -1753,7 +1752,8 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	log.Println("GetIndexState:: len of allSegmentIDs:", len(allSegmentIDs), " len of IndexBuildIDs", len(indexBuildIDs))
+	log.Debug("proxynode", zap.Int("GetIndexState:: len of allSegmentIDs", len(allSegmentIDs)))
+	log.Debug("proxynode", zap.Int("GetIndexState:: len of IndexBuildIDs", len(indexBuildIDs)))
 	if len(allSegmentIDs) != len(indexBuildIDs) {
 		gist.result = &milvuspb.IndexStateResponse{
 			Status: &commonpb.Status{

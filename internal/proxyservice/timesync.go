@@ -3,11 +3,13 @@ package proxyservice
 import (
 	"context"
 	"errors"
-	"log"
 	"math"
 	"sync"
 	"sync/atomic"
 
+	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
@@ -42,7 +44,7 @@ func (ttBarrier *softTimeTickBarrier) AddPeer(peerID UniqueID) error {
 
 	_, ok := ttBarrier.peer2LastTt[peerID]
 	if ok {
-		log.Println("no need to add duplicated peer: ", peerID)
+		log.Debug("proxyservice", zap.Int64("no need to add duplicated peer", peerID))
 		return nil
 	}
 
@@ -67,7 +69,6 @@ func (ttBarrier *softTimeTickBarrier) GetTimeTick() (Timestamp, error) {
 			}
 		}
 		atomic.StoreInt64(&(ttBarrier.lastTt), int64(ts))
-		// log.Println("current tick: ", ts)
 		return ts, ttBarrier.ctx.Err()
 	}
 }
@@ -77,26 +78,20 @@ func (ttBarrier *softTimeTickBarrier) Start() error {
 		for {
 			select {
 			case <-ttBarrier.ctx.Done():
-				log.Printf("[TtBarrierStart] %s\n", ttBarrier.ctx.Err())
+				log.Warn("TtBarrierStart", zap.Error(ttBarrier.ctx.Err()))
 				return
 
 			case ttmsgs := <-ttBarrier.ttStream.Chan():
-				//log.Println("ttmsgs: ", ttmsgs)
 				ttBarrier.peerMtx.RLock()
-				//log.Println("peer2LastTt map: ", ttBarrier.peer2LastTt)
-				//log.Println("len(ttmsgs.Msgs): ", len(ttmsgs.Msgs))
 				if len(ttmsgs.Msgs) > 0 {
 					for _, timetickmsg := range ttmsgs.Msgs {
 						ttmsg := timetickmsg.(*ms.TimeTickMsg)
 						oldT, ok := ttBarrier.peer2LastTt[ttmsg.Base.SourceID]
-						// log.Printf("[softTimeTickBarrier] peer(%d)=%d\n", ttmsg.PeerID, ttmsg.Timestamp)
 
 						if !ok {
-							log.Printf("[softTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.Base.SourceID)
+							log.Warn("softTimeTickBarrier", zap.Int64("peerID %d not exist", ttmsg.Base.SourceID))
 							continue
 						}
-						// log.Println("ttmsg.Base.Timestamp: ", ttmsg.Base.Timestamp)
-						// log.Println("oldT: ", oldT)
 						if ttmsg.Base.Timestamp > oldT {
 							ttBarrier.peer2LastTt[ttmsg.Base.SourceID] = ttmsg.Base.Timestamp
 
@@ -126,7 +121,7 @@ func newSoftTimeTickBarrier(ctx context.Context,
 	minTtInterval Timestamp) TimeTickBarrier {
 
 	if len(peerIds) <= 0 {
-		log.Printf("[newSoftTimeTickBarrier] Warning: peerIds is empty!\n")
+		log.Warn("[newSoftTimeTickBarrier] Warning: peerIds is empty!")
 		//return nil
 	}
 
@@ -140,7 +135,7 @@ func newSoftTimeTickBarrier(ctx context.Context,
 		sttbarrier.peer2LastTt[id] = Timestamp(0)
 	}
 	if len(peerIds) != len(sttbarrier.peer2LastTt) {
-		log.Printf("[newSoftTimeTickBarrier] Warning: there are duplicate peerIds!\n")
+		log.Warn("[newSoftTimeTickBarrier] Warning: there are duplicate peerIds!")
 	}
 
 	return &sttbarrier

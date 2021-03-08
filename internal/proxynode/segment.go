@@ -3,18 +3,18 @@ package proxynode
 import (
 	"container/list"
 	"context"
+	"errors"
 	"fmt"
-	"log"
 	"time"
 
-	"errors"
+	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
-	"github.com/zilliztech/milvus-distributed/internal/types"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+	"github.com/zilliztech/milvus-distributed/internal/types"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 const (
@@ -80,7 +80,7 @@ func (info *assignInfo) RemoveExpired(ts Timestamp) {
 	for e := info.segInfos.Front(); e != nil; e = e.Next() {
 		segInfo, ok := e.Value.(*segInfo)
 		if !ok {
-			log.Printf("can not cast to segInfo")
+			log.Warn("can not cast to segInfo")
 			continue
 		}
 		if segInfo.IsExpired(ts) {
@@ -292,7 +292,7 @@ func (sa *SegIDAssigner) syncSegments() bool {
 	resp, err := sa.dataService.AssignSegmentID(ctx, req)
 
 	if err != nil {
-		log.Println("GRPC AssignSegmentID Failed", resp, err)
+		log.Debug("proxynode", zap.String("GRPC AssignSegmentID Failed", err.Error()))
 		return false
 	}
 
@@ -300,7 +300,7 @@ func (sa *SegIDAssigner) syncSegments() bool {
 	success := false
 	for _, info := range resp.SegIDAssignments {
 		if info.Status.GetErrorCode() != commonpb.ErrorCode_SUCCESS {
-			log.Println("SyncSegment Error:", info.Status.Reason)
+			log.Debug("proxynode", zap.String("SyncSegment Error", info.Status.Reason))
 			continue
 		}
 		assign, err := sa.getAssign(info.CollectionID, info.PartitionID, info.ChannelName)
