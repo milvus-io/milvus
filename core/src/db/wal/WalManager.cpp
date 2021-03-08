@@ -179,6 +179,7 @@ WalManager::GetNextRecovery(MXLogRecord& record) {
     return error_code;
 }
 
+/*
 ErrorCode
 WalManager::GetNextEntityRecovery(milvus::engine::wal::MXLogRecord& record) {
     ErrorCode error_code = WAL_SUCCESS;
@@ -217,7 +218,7 @@ WalManager::GetNextEntityRecovery(milvus::engine::wal::MXLogRecord& record) {
 
     return error_code;
 }
-
+*/
 ErrorCode
 WalManager::GetNextRecord(MXLogRecord& record) {
     auto check_flush = [&]() -> bool {
@@ -267,6 +268,7 @@ WalManager::GetNextRecord(MXLogRecord& record) {
     return error_code;
 }
 
+/*
 ErrorCode
 WalManager::GetNextEntityRecord(milvus::engine::wal::MXLogRecord& record) {
     auto check_flush = [&]() -> bool {
@@ -313,7 +315,7 @@ WalManager::GetNextEntityRecord(milvus::engine::wal::MXLogRecord& record) {
                   << record.lsn;
     return error_code;
 }
-
+*/
 uint64_t
 WalManager::CreateCollection(const std::string& collection_id) {
     LOG_WAL_INFO_ << "create collection " << collection_id << " " << last_applied_lsn_;
@@ -332,6 +334,7 @@ WalManager::CreatePartition(const std::string& collection_id, const std::string&
     return applied_lsn;
 }
 
+/*
 uint64_t
 WalManager::CreateHybridCollection(const std::string& collection_id) {
     LOG_WAL_INFO_ << "create hybrid collection " << collection_id << " " << last_applied_lsn_;
@@ -340,6 +343,7 @@ WalManager::CreateHybridCollection(const std::string& collection_id) {
     collections_[collection_id][""] = {applied_lsn, applied_lsn};
     return applied_lsn;
 }
+*/
 
 void
 WalManager::DropCollection(const std::string& collection_id) {
@@ -487,6 +491,7 @@ WalManager::Insert(const std::string& collection_id, const std::string& partitio
     return p_meta_handler_->SetMXLogInternalMeta(new_lsn);
 }
 
+/*
 template <typename T>
 bool
 WalManager::InsertEntities(const std::string& collection_id, const std::string& partition_tag,
@@ -573,7 +578,7 @@ WalManager::InsertEntities(const std::string& collection_id, const std::string& 
 
     return p_meta_handler_->SetMXLogInternalMeta(new_lsn);
 }
-
+*/
 bool
 WalManager::DeleteById(const std::string& collection_id, const IDNumbers& vector_ids) {
     size_t vector_num = vector_ids.size();
@@ -679,6 +684,7 @@ template bool
 WalManager::Insert<uint8_t>(const std::string& collection_id, const std::string& partition_tag,
                             const IDNumbers& vector_ids, const std::vector<uint8_t>& vectors);
 
+/*
 template bool
 WalManager::InsertEntities<float>(const std::string& collection_id, const std::string& partition_tag,
                                   const milvus::engine::IDNumbers& entity_ids, const std::vector<float>& vectors,
@@ -690,7 +696,7 @@ WalManager::InsertEntities<uint8_t>(const std::string& collection_id, const std:
                                     const milvus::engine::IDNumbers& entity_ids, const std::vector<uint8_t>& vectors,
                                     const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                                     const std::unordered_map<std::string, std::vector<uint8_t>>& attrs);
-
+*/
 }  // namespace wal
 }  // namespace engine
 }  // namespace milvus
