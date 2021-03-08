@@ -280,8 +280,10 @@ TEST(WalTest, BUFFER_TEST) {
     record[0].partition_tag = "parti1";
     record[0].length = 50;
     record[0].ids = (milvus::engine::IDNumber*)malloc(record[0].length * sizeof(milvus::engine::IDNumber));
+    memset(const_cast<milvus::engine::IDNumber*>(record[0].ids), 0, record[0].length * sizeof(milvus::engine::IDNumber));
     record[0].data_size = record[0].length * sizeof(float);
     record[0].data = malloc(record[0].data_size);
+    memset(const_cast<void*>(record[0].data), 0, record[0].data_size);
     ASSERT_EQ(buffer.Append(record[0]), milvus::WAL_SUCCESS);
     uint32_t new_file_no = uint32_t(record[0].lsn >> 32);
     ASSERT_EQ(new_file_no, ++file_no);
@@ -292,6 +294,7 @@ TEST(WalTest, BUFFER_TEST) {
     record[1].partition_tag = "parti1";
     record[1].length = 10;
     record[1].ids = (milvus::engine::IDNumber*)malloc(record[0].length * sizeof(milvus::engine::IDNumber));
+    memset(const_cast<milvus::engine::IDNumber*>(record[1].ids), 0, record[1].length * sizeof(milvus::engine::IDNumber));
     record[1].data_size = 0;
     record[1].data = nullptr;
     ASSERT_EQ(buffer.Append(record[1]), milvus::WAL_SUCCESS);
@@ -328,8 +331,10 @@ TEST(WalTest, BUFFER_TEST) {
     record[2].partition_tag = "parti1";
     record[2].length = 50;
     record[2].ids = (milvus::engine::IDNumber*)malloc(record[2].length * sizeof(milvus::engine::IDNumber));
+    memset(const_cast<milvus::engine::IDNumber*>(record[2].ids), 0, record[2].length * sizeof(milvus::engine::IDNumber));
     record[2].data_size = record[2].length * sizeof(float);
     record[2].data = malloc(record[2].data_size);
+    memset(const_cast<void*>(record[2].data), 0, record[2].data_size);
     ASSERT_EQ(buffer.Append(record[2]), milvus::WAL_SUCCESS);
     new_file_no = uint32_t(record[2].lsn >> 32);
     ASSERT_EQ(new_file_no, ++file_no);
@@ -340,8 +345,10 @@ TEST(WalTest, BUFFER_TEST) {
     record[3].partition_tag = "parti1";
     record[3].length = 100;
     record[3].ids = (milvus::engine::IDNumber*)malloc(record[3].length * sizeof(milvus::engine::IDNumber));
+    memset(const_cast<milvus::engine::IDNumber*>(record[3].ids), 0, record[3].length * sizeof(milvus::engine::IDNumber));
     record[3].data_size = record[3].length * sizeof(uint8_t);
     record[3].data = malloc(record[3].data_size);
+    memset(const_cast<void*>(record[3].data), 0, record[3].data_size);
     ASSERT_EQ(buffer.Append(record[3]), milvus::WAL_SUCCESS);
     new_file_no = uint32_t(record[3].lsn >> 32);
     ASSERT_EQ(new_file_no, ++file_no);
@@ -404,13 +411,19 @@ TEST(WalTest, BUFFER_TEST) {
     buffer.mxlog_buffer_writer_.buf_offset = 0;
     ASSERT_FALSE(buffer.ResetWriteLsn(record[1].lsn));
 
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         if (record[i].ids != nullptr) {
             free((void*)record[i].ids);
         }
         if (record[i].data != nullptr) {
             free((void*)record[i].data);
         }
+    }
+    if (read_rst.ids != nullptr) {
+        free((void*)read_rst.ids);
+    }
+    if (read_rst.data != nullptr) {
+        free((void*)read_rst.data);
     }
 }
 
@@ -435,8 +448,10 @@ TEST(WalTest, HYBRID_BUFFFER_TEST) {
     uint64_t length = 50;
     record[0].length = length;
     record[0].ids = (milvus::engine::IDNumber*)malloc(record[0].length * sizeof(milvus::engine::IDNumber));
+    memset(const_cast<milvus::engine::IDNumber*>(record[0].ids), 0, record[0].length * sizeof(milvus::engine::IDNumber));
     record[0].data_size = record[0].length * sizeof(float);
     record[0].data = malloc(record[0].data_size);
+    memset(const_cast<void*>(record[0].data), 0, record[0].data_size);
     record[0].field_names.resize(2);
     record[0].field_names[0] = "field_0";
     record[0].field_names[1] = "field_1";
@@ -476,6 +491,7 @@ TEST(WalTest, HYBRID_BUFFFER_TEST) {
     length = 10;
     record[1].length = length;
     record[1].ids = (milvus::engine::IDNumber*)malloc(record[0].length * sizeof(milvus::engine::IDNumber));
+    memset(const_cast<milvus::engine::IDNumber*>(record[1].ids), 0, record[1].length * sizeof(milvus::engine::IDNumber));
     record[1].data_size = 0;
     record[1].data = nullptr;
     record[1].field_names.resize(2);
@@ -544,8 +560,10 @@ TEST(WalTest, HYBRID_BUFFFER_TEST) {
     length = 50;
     record[2].length = length;
     record[2].ids = (milvus::engine::IDNumber*)malloc(record[2].length * sizeof(milvus::engine::IDNumber));
+    memset(const_cast<milvus::engine::IDNumber*>(record[2].ids), 0, record[2].length * sizeof(milvus::engine::IDNumber));
     record[2].data_size = record[2].length * sizeof(float);
     record[2].data = malloc(record[2].data_size);
+    memset(const_cast<void*>(record[2].data), 0, record[2].data_size);
 
     record[2].field_names.resize(2);
     record[2].field_names[0] = "field_0";
@@ -568,8 +586,10 @@ TEST(WalTest, HYBRID_BUFFFER_TEST) {
     record[3].partition_tag = "parti1";
     record[3].length = 10;
     record[3].ids = (milvus::engine::IDNumber*)malloc(record[3].length * sizeof(milvus::engine::IDNumber));
+    memset(const_cast<milvus::engine::IDNumber*>(record[3].ids), 0, record[3].length * sizeof(milvus::engine::IDNumber));
     record[3].data_size = record[3].length * sizeof(uint8_t);
     record[3].data = malloc(record[3].data_size);
+    memset(const_cast<void*>(record[3].data), 0, record[3].data_size);
 
     record[3].field_names.resize(2);
     record[3].field_names[0] = "field_0";
@@ -652,13 +672,19 @@ TEST(WalTest, HYBRID_BUFFFER_TEST) {
     buffer.mxlog_buffer_writer_.buf_offset = 0;
     ASSERT_FALSE(buffer.ResetWriteLsn(record[1].lsn));
 
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         if (record[i].ids != nullptr) {
             free((void*)record[i].ids);
         }
         if (record[i].data != nullptr) {
             free((void*)record[i].data);
         }
+    }
+    if (read_rst.ids != nullptr) {
+        free((void*)read_rst.ids);
+    }
+    if (read_rst.data != nullptr) {
+        free((void*)read_rst.data);
     }
 }
 
