@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
 	"sort"
 	"strconv"
 	"sync"
@@ -642,6 +643,7 @@ func (qs *QueryService) GetSegmentInfo(ctx context.Context, req *querypb.Segment
 }
 
 func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryService, error) {
+	rand.Seed(time.Now().UnixNano())
 	nodes := make(map[int64]*queryNodeInfo)
 	queryChannels := make([]*queryChannelInfo, 0)
 	ctx1, cancel := context.WithCancel(ctx)

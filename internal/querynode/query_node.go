@@ -15,8 +15,10 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/types"
 
@@ -62,6 +64,7 @@ type QueryNode struct {
 }
 
 func NewQueryNode(ctx context.Context, queryNodeID UniqueID, factory msgstream.Factory) *QueryNode {
+	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	node := &QueryNode{
 		queryNodeLoopCtx:    ctx1,

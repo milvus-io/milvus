@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"strconv"
 	"sync"
-	"time"
 
 	grpcproxynodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/proxynode/client"
 	"github.com/zilliztech/milvus-distributed/internal/types"
@@ -28,7 +27,6 @@ type GlobalNodeInfoTable struct {
 }
 
 func (table *GlobalNodeInfoTable) randomPick() UniqueID {
-	rand.Seed(time.Now().UnixNano())
 	l := len(table.nodeIDs)
 	choice := rand.Intn(l)
 	return table.nodeIDs[choice]
