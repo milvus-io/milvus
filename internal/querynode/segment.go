@@ -26,10 +26,10 @@ import (
 )
 
 const (
-	segTypeInvalid  = 0
-	segTypeGrowing  = 1
-	segTypeSealed   = 2
-	segTypeIndexing = 3
+	segTypeInvalid = iota
+	segTypeGrowing
+	segTypeSealed
+	segTypeIndexing
 )
 
 type segmentType = int

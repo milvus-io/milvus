@@ -56,7 +56,7 @@ func (master *MasterMock) ShowPartitions(ctx context.Context, in *milvuspb.ShowP
 	}
 	response := &milvuspb.ShowPartitionResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 		PartitionIDs: partitionIDs,
 	}
@@ -75,7 +75,7 @@ func (master *MasterMock) ShowSegments(ctx context.Context, in *milvuspb.ShowSeg
 				if partition == partitionID {
 					return &milvuspb.ShowSegmentResponse{
 						Status: &commonpb.Status{
-							ErrorCode: commonpb.ErrorCode_SUCCESS,
+							ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 						},
 						//SegmentIDs: master.Partition2segment[partition],
 					}, nil
@@ -102,7 +102,7 @@ func NewDataMock() *DataMock {
 	fillStates := func(segmentID UniqueID, time uint64, position *internalpb2.MsgPosition) *datapb.SegmentStateInfo {
 		return &datapb.SegmentStateInfo{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_SUCCESS,
+				ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 			},
 			SegmentID:     segmentID,
 			State:         commonpb.SegmentState_SegmentFlushed,
@@ -127,7 +127,7 @@ func NewDataMock() *DataMock {
 func (data *DataMock) GetSegmentStates(ctx context.Context, req *datapb.SegmentStatesRequest) (*datapb.SegmentStatesResponse, error) {
 	ret := &datapb.SegmentStatesResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 	}
 	for _, segID := range req.SegmentIDs {
@@ -147,7 +147,7 @@ func (data *DataMock) GetSegmentStates(ctx context.Context, req *datapb.SegmentS
 func (data *DataMock) GetInsertChannels(ctx context.Context, req *datapb.InsertChannelRequest) (*internalpb2.StringList, error) {
 	return &internalpb2.StringList{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 		Values: []string{"insert-0", "insert-1", "insert-2", "insert-3"},
 	}, nil

@@ -135,7 +135,7 @@ func (qs *QueryService) GetComponentStates(ctx context.Context) (*internalpb2.Co
 	}
 	return &internalpb2.ComponentStates{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 		State:              serviceComponentInfo,
 		SubcomponentStates: subComponentInfos,
@@ -145,7 +145,7 @@ func (qs *QueryService) GetComponentStates(ctx context.Context) (*internalpb2.Co
 func (qs *QueryService) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 			Reason:    "",
 		},
 		Value: Params.TimeTickChannelName,
@@ -155,7 +155,7 @@ func (qs *QueryService) GetTimeTickChannel(ctx context.Context) (*milvuspb.Strin
 func (qs *QueryService) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 			Reason:    "",
 		},
 		Value: Params.StatsChannelName,
@@ -170,7 +170,7 @@ func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterN
 		err := errors.New("nodeID already exists")
 		return &querypb.RegisterNodeResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 				Reason:    err.Error(),
 			},
 		}, err
@@ -181,7 +181,7 @@ func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterN
 	if err := client.Init(); err != nil {
 		return &querypb.RegisterNodeResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 			},
 			InitParams: new(internalpb2.InitParams),
 		}, err
@@ -211,7 +211,7 @@ func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterN
 
 	return &querypb.RegisterNodeResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 		InitParams: &internalpb2.InitParams{
 			NodeID:      nodeID,
@@ -231,7 +231,7 @@ func (qs *QueryService) ShowCollections(ctx context.Context, req *querypb.ShowCo
 	if err != nil {
 		return &querypb.ShowCollectionResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 				Reason:    err.Error(),
 			},
 		}, err
@@ -239,7 +239,7 @@ func (qs *QueryService) ShowCollections(ctx context.Context, req *querypb.ShowCo
 	log.Debug("show collection end")
 	return &querypb.ShowCollectionResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 		CollectionIDs: collectionIDs,
 	}, nil
@@ -252,12 +252,12 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 	fn := func(err error) *commonpb.Status {
 		if err != nil {
 			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 				Reason:    err.Error(),
 			}
 		}
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		}
 	}
 
@@ -288,7 +288,7 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 	if err != nil {
 		return fn(err), err
 	}
-	if showPartitionResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+	if showPartitionResponse.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		return showPartitionResponse.Status, err
 	}
 	partitionIDs := showPartitionResponse.PartitionIDs
@@ -333,7 +333,7 @@ func (qs *QueryService) ReleaseCollection(ctx context.Context, req *querypb.Rele
 	if err != nil {
 		log.Error("release collection end, query service don't have the log of", zap.String("collectionID", fmt.Sprintln(collectionID)))
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		}, nil
 	}
 
@@ -348,7 +348,7 @@ func (qs *QueryService) ReleaseCollection(ctx context.Context, req *querypb.Rele
 	err = qs.replica.releaseCollection(dbID, collectionID)
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 			Reason:    err.Error(),
 		}, err
 	}
@@ -356,7 +356,7 @@ func (qs *QueryService) ReleaseCollection(ctx context.Context, req *querypb.Rele
 	log.Debug("release collection end")
 	//TODO:: queryNode cancel subscribe dmChannels
 	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 	}, nil
 }
 
@@ -371,14 +371,14 @@ func (qs *QueryService) ShowPartitions(ctx context.Context, req *querypb.ShowPar
 	if err != nil {
 		return &querypb.ShowPartitionResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 				Reason:    err.Error(),
 			},
 		}, err
 	}
 	return &querypb.ShowPartitionResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 		PartitionIDs: partitionIDs,
 	}, nil
@@ -394,12 +394,12 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 	fn := func(err error) *commonpb.Status {
 		if err != nil {
 			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 				Reason:    err.Error(),
 			}
 		}
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		}
 	}
 	log.Debug("load partitions start", zap.String("partitionIDs", fmt.Sprintln(partitionIDs)))
@@ -514,7 +514,7 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 
 	log.Debug("load partitions end", zap.String("partitionIDs", fmt.Sprintln(partitionIDs)))
 	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 	}, nil
 }
 
@@ -544,7 +544,7 @@ func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.Rele
 		err := qs.replica.releasePartition(dbID, collectionID, partitionID)
 		if err != nil {
 			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 				Reason:    err.Error(),
 			}, err
 		}
@@ -553,7 +553,7 @@ func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.Rele
 	log.Debug("start release partitions end")
 	//TODO:: queryNode cancel subscribe dmChannels
 	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 	}, nil
 }
 
@@ -584,7 +584,7 @@ func (qs *QueryService) CreateQueryChannel(ctx context.Context) (*querypb.Create
 			qs.qcMutex.Unlock()
 			return &querypb.CreateQueryChannelResponse{
 				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+					ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 					Reason:    err.Error(),
 				},
 			}, err
@@ -594,7 +594,7 @@ func (qs *QueryService) CreateQueryChannel(ctx context.Context) (*querypb.Create
 
 	return &querypb.CreateQueryChannelResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 		RequestChannel: allocatedQueryChannel,
 		ResultChannel:  allocatedQueryResultChannel,
@@ -606,7 +606,7 @@ func (qs *QueryService) GetPartitionStates(ctx context.Context, req *querypb.Par
 	if err != nil {
 		return &querypb.PartitionStatesResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 				Reason:    err.Error(),
 			},
 			PartitionDescriptions: states,
@@ -614,7 +614,7 @@ func (qs *QueryService) GetPartitionStates(ctx context.Context, req *querypb.Par
 	}
 	return &querypb.PartitionStatesResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 		PartitionDescriptions: states,
 	}, nil
@@ -627,7 +627,7 @@ func (qs *QueryService) GetSegmentInfo(ctx context.Context, req *querypb.Segment
 		if err != nil {
 			return &querypb.SegmentInfoResponse{
 				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+					ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 					Reason:    err.Error(),
 				},
 			}, err
@@ -636,7 +636,7 @@ func (qs *QueryService) GetSegmentInfo(ctx context.Context, req *querypb.Segment
 	}
 	return &querypb.SegmentInfoResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 		Infos: segmentInfos,
 	}, nil

@@ -55,7 +55,7 @@ func WaitForComponentStates(ctx context.Context, service StateComponent, service
 			return err
 		}
 
-		if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		if resp.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 			return errors.New(resp.Status.Reason)
 		}
 

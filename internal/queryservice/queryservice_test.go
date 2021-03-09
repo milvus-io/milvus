@@ -61,7 +61,7 @@ func TestQueryService_load(t *testing.T) {
 		}
 		response, err := service.LoadCollection(ctx, loadCollectionRequest)
 		assert.Nil(t, err)
-		assert.Equal(t, response.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, response.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 	})
 
 	t.Run("Test LoadPartition", func(t *testing.T) {
@@ -71,6 +71,6 @@ func TestQueryService_load(t *testing.T) {
 		}
 		response, err := service.LoadPartitions(ctx, loadPartitionRequest)
 		assert.Nil(t, err)
-		assert.Equal(t, response.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, response.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 	})
 }

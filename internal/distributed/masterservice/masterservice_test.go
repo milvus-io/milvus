@@ -200,7 +200,7 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 
 		assert.Equal(t, len(createCollectionArray), 1)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 		assert.Equal(t, createCollectionArray[0].Base.MsgType, commonpb.MsgType_kCreateCollection)
 		assert.Equal(t, createCollectionArray[0].CollectionName, "testColl")
 
@@ -209,7 +209,7 @@ func TestGrpcService(t *testing.T) {
 		req.Base.SourceID = 101
 		status, err = cli.CreateCollection(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UNEXPECTED_ERROR)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR)
 
 		req.Base.MsgID = 102
 		req.Base.Timestamp = 102
@@ -217,7 +217,7 @@ func TestGrpcService(t *testing.T) {
 		req.CollectionName = "testColl-again"
 		status, err = cli.CreateCollection(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UNEXPECTED_ERROR)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR)
 
 		schema.Name = req.CollectionName
 		sbf, err = proto.Marshal(&schema)
@@ -228,7 +228,7 @@ func TestGrpcService(t *testing.T) {
 		req.Base.SourceID = 103
 		status, err = cli.CreateCollection(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 		assert.Equal(t, len(createCollectionArray), 2)
 		assert.Equal(t, createCollectionArray[1].Base.MsgType, commonpb.MsgType_kCreateCollection)
 		assert.Equal(t, createCollectionArray[1].CollectionName, "testColl-again")
@@ -244,7 +244,7 @@ func TestGrpcService(t *testing.T) {
 		req.Base.SourceID = 103
 		status, err = cli.CreateCollection(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UNEXPECTED_ERROR)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR)
 		matched, err := regexp.MatchString("input timestamp = [0-9]+, last dd time stamp = [0-9]+", status.Reason)
 		assert.Nil(t, err)
 		assert.True(t, matched)
@@ -263,7 +263,7 @@ func TestGrpcService(t *testing.T) {
 		}
 		rsp, err := cli.HasCollection(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 		assert.Equal(t, rsp.Value, true)
 
 		req = &milvuspb.HasCollectionRequest{
@@ -278,7 +278,7 @@ func TestGrpcService(t *testing.T) {
 		}
 		rsp, err = cli.HasCollection(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 		assert.Equal(t, rsp.Value, false)
 
 		// test time stamp go back
@@ -294,7 +294,7 @@ func TestGrpcService(t *testing.T) {
 		}
 		rsp, err = cli.HasCollection(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 		assert.Equal(t, rsp.Value, false)
 	})
 
@@ -313,7 +313,7 @@ func TestGrpcService(t *testing.T) {
 		}
 		rsp, err := cli.DescribeCollection(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 		assert.Equal(t, rsp.Schema.Name, "testColl")
 		assert.Equal(t, rsp.CollectionID, collMeta.ID)
 	})
@@ -330,7 +330,7 @@ func TestGrpcService(t *testing.T) {
 		}
 		rsp, err := cli.ShowCollections(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 		assert.ElementsMatch(t, rsp.CollectionNames, []string{"testColl", "testColl-again"})
 		assert.Equal(t, len(rsp.CollectionNames), 2)
 	})
@@ -349,7 +349,7 @@ func TestGrpcService(t *testing.T) {
 		}
 		status, err := cli.CreatePartition(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.PartitionIDs), 2)
@@ -373,7 +373,7 @@ func TestGrpcService(t *testing.T) {
 		}
 		rsp, err := cli.HasPartition(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 		assert.Equal(t, rsp.Value, true)
 	})
 
@@ -393,7 +393,7 @@ func TestGrpcService(t *testing.T) {
 		}
 		rsp, err := cli.ShowPartitions(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 		assert.Equal(t, len(rsp.PartitionNames), 2)
 		assert.Equal(t, len(rsp.PartitionIDs), 2)
 	})
@@ -428,7 +428,7 @@ func TestGrpcService(t *testing.T) {
 		}
 		rsp, err := cli.ShowSegments(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 		assert.Equal(t, rsp.SegmentIDs[0], int64(1000))
 		assert.Equal(t, len(rsp.SegmentIDs), 1)
 	})
@@ -456,7 +456,7 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, len(collMeta.FieldIndexes), 0)
 		rsp, err := cli.CreateIndex(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 		collMeta, err = core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.FieldIndexes), 1)
@@ -469,7 +469,7 @@ func TestGrpcService(t *testing.T) {
 		req.FieldName = "no field"
 		rsp, err = cli.CreateIndex(ctx, req)
 		assert.Nil(t, err)
-		assert.NotEqual(t, rsp.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.NotEqual(t, rsp.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 	})
 
 	t.Run("describe segment", func(t *testing.T) {
@@ -488,7 +488,7 @@ func TestGrpcService(t *testing.T) {
 		}
 		rsp, err := cli.DescribeSegment(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 		t.Logf("index id = %d", rsp.IndexID)
 	})
 
@@ -507,7 +507,7 @@ func TestGrpcService(t *testing.T) {
 		}
 		rsp, err := cli.DescribeIndex(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 		assert.Equal(t, len(rsp.IndexDescriptions), 1)
 		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, cms.Params.DefaultIndexName)
 	})
@@ -546,7 +546,7 @@ func TestGrpcService(t *testing.T) {
 		}
 		rsp, err := cli.DescribeIndex(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 		assert.Equal(t, len(rsp.IndexDescriptions), 1)
 		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, cms.Params.DefaultIndexName)
 
@@ -570,7 +570,7 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, len(idx), 1)
 		rsp, err := cli.DropIndex(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 
 		dropIDLock.Lock()
 		assert.Equal(t, len(dropID), 1)
@@ -593,7 +593,7 @@ func TestGrpcService(t *testing.T) {
 		}
 		status, err := cli.DropPartition(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.PartitionIDs), 1)
@@ -617,7 +617,7 @@ func TestGrpcService(t *testing.T) {
 		status, err := cli.DropCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, len(dropCollectionArray), 1)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 		assert.Equal(t, dropCollectionArray[0].Base.MsgType, commonpb.MsgType_kDropCollection)
 		assert.Equal(t, dropCollectionArray[0].CollectionName, "testColl")
 		assert.Equal(t, len(collectionMetaCache), 1)
@@ -636,7 +636,7 @@ func TestGrpcService(t *testing.T) {
 		status, err = cli.DropCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, len(dropCollectionArray), 1)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UNEXPECTED_ERROR)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR)
 	})
 
 	err = cli.Stop()

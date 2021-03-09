@@ -100,7 +100,7 @@ func (t *RegisterLinkTask) Execute(ctx context.Context) error {
 			Port: info.port,
 		},
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 			Reason:    "",
 		},
 	}
@@ -147,7 +147,7 @@ func (t *RegisterNodeTask) Execute(ctx context.Context) error {
 	// TODO: fill init params
 	t.response = &proxypb.RegisterNodeResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 			Reason:    "",
 		},
 		InitParams: &internalpb2.InitParams{
@@ -197,12 +197,12 @@ func (t *InvalidateCollectionMetaCacheTask) Execute(ctx context.Context) error {
 		if status == nil {
 			return errors.New("invalidate collection meta cache error")
 		}
-		if status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		if status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 			return errors.New(status.Reason)
 		}
 	}
 	t.response = &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 	}
 	return nil
 }
