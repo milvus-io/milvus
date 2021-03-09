@@ -53,12 +53,13 @@ MySQLConnectionPool::release(const mysqlpp::Connection* pc) {
 // Superclass overrides
 mysqlpp::Connection*
 MySQLConnectionPool::create() {
+    mysqlpp::Connection* conn = nullptr;
     try {
         fiu_do_on("MySQLConnectionPool.create.throw_exception", throw mysqlpp::ConnectionFailed());
 
         // Create connection using the parameters we were passed upon
         // creation.
-        auto conn = new mysqlpp::Connection();
+        conn = new mysqlpp::Connection();
         conn->set_option(new mysqlpp::ReconnectOption(true));
         conn->connect(db_name_.empty() ? 0 : db_name_.c_str(), server_.empty() ? 0 : server_.c_str(),
                       user_.empty() ? 0 : user_.c_str(), password_.empty() ? 0 : password_.c_str(), port_);
@@ -66,6 +67,7 @@ MySQLConnectionPool::create() {
     } catch (const mysqlpp::ConnectionFailed& er) {
         LOG_ENGINE_ERROR_ << "Failed to connect to database server"
                           << ": " << er.what();
+        delete conn;
         return nullptr;
     }
 }
