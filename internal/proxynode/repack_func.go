@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"sort"
+	"unsafe"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -170,6 +171,53 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 		return 0
 	}
 
+	factor := 10
+	threshold := Params.PulsarMaxMessageSize / factor
+	log.Println("threshold of message size: ", threshold)
+	// not accurate
+	getSizeOfInsertMsg := func(msg *msgstream.InsertMsg) int {
+		// if real struct, call unsafe.Sizeof directly,
+		// if reference, dereference and then call unsafe.Sizeof,
+		// if slice, todo: a common function to calculate size of slice,
+		// if map, a little complicated
+		size := 0
+		size += int(unsafe.Sizeof(msg.BeginTimestamp))
+		size += int(unsafe.Sizeof(msg.EndTimestamp))
+		size += int(unsafe.Sizeof(msg.HashValues))
+		size += len(msg.HashValues) * 4
+		size += int(unsafe.Sizeof(*msg.MsgPosition))
+		size += int(unsafe.Sizeof(*msg.Base))
+		size += int(unsafe.Sizeof(msg.DbName))
+		size += int(unsafe.Sizeof(msg.CollectionName))
+		size += int(unsafe.Sizeof(msg.PartitionName))
+		size += int(unsafe.Sizeof(msg.DbID))
+		size += int(unsafe.Sizeof(msg.CollectionID))
+		size += int(unsafe.Sizeof(msg.PartitionID))
+		size += int(unsafe.Sizeof(msg.SegmentID))
+		size += int(unsafe.Sizeof(msg.ChannelID))
+		size += int(unsafe.Sizeof(msg.Timestamps))
+		size += int(unsafe.Sizeof(msg.RowIDs))
+		size += len(msg.RowIDs) * 8
+		for _, blob := range msg.RowData {
+			size += int(unsafe.Sizeof(blob.Value))
+			size += len(blob.Value)
+		}
+		log.Println("size of insert message: ", size)
+		return size
+	}
+	// not accurate
+	// getSizeOfMsgPack := func(mp *msgstream.MsgPack) int {
+	// 	size := 0
+	// 	for _, msg := range mp.Msgs {
+	// 		insertMsg, ok := msg.(*msgstream.InsertMsg)
+	// 		if !ok {
+	// 			log.Panic("only insert message is supported!")
+	// 		}
+	// 		size += getSizeOfInsertMsg(insertMsg)
+	// 	}
+	// 	return size
+	// }
+
 	for i, request := range tsMsgs {
 		insertRequest := request.(*msgstream.InsertMsg)
 		keys := hashKeys[i]
@@ -214,10 +262,13 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 				InsertRequest: sliceRequest,
 			}
 			if together { // all rows with same hash value are accumulated to only one message
+				msgNums := len(result[key].Msgs)
 				if len(result[key].Msgs) <= 0 {
 					result[key].Msgs = append(result[key].Msgs, insertMsg)
+				} else if getSizeOfInsertMsg(result[key].Msgs[msgNums-1].(*msgstream.InsertMsg)) >= threshold {
+					result[key].Msgs = append(result[key].Msgs, insertMsg)
 				} else {
-					accMsgs, _ := result[key].Msgs[0].(*msgstream.InsertMsg)
+					accMsgs, _ := result[key].Msgs[msgNums-1].(*msgstream.InsertMsg)
 					accMsgs.Timestamps = append(accMsgs.Timestamps, ts)
 					accMsgs.RowIDs = append(accMsgs.RowIDs, rowID)
 					accMsgs.RowData = append(accMsgs.RowData, row)

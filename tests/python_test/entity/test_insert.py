@@ -702,6 +702,7 @@ class TestInsertAsync:
         assert len(ids) == nb
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_insert_async_long(self, connect, collection):
         '''
         target: test insert vectors with different length of vectors
