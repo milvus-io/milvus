@@ -38,9 +38,9 @@ struct MXLogRecord {
     std::string collection_id;
     std::string partition_tag;
     uint32_t length;
-    const IDNumber* ids;
+    const IDNumber* ids = nullptr;
     uint32_t data_size;
-    const void* data;
+    const void* data = nullptr;
 };
 
 struct MXLogConfiguration {

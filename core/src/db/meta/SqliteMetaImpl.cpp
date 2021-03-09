@@ -165,6 +165,10 @@ SqliteMetaImpl::SqliteMetaImpl(const DBMetaOptions& options) : options_(options)
 }
 
 SqliteMetaImpl::~SqliteMetaImpl() {
+    if (db_ != nullptr) {
+        sqlite3_close(db_);
+        db_ = nullptr;
+    }
 }
 
 Status
