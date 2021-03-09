@@ -15,7 +15,7 @@ var once sync.Once
 type Consumer struct {
 	GroupName   string
 	ChannelName string
-	MsgNum      chan int
+	MsgMutex    chan struct{}
 }
 
 func InitRmq(rocksdbName string, idAllocator allocator.GIDAllocator) error {
