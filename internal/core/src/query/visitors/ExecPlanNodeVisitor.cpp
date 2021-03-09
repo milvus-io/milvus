@@ -80,7 +80,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
 
     if (node.predicate_.has_value()) {
         ExecExprVisitor::RetType expr_ret = ExecExprVisitor(*segment, row_count).call_child(*node.predicate_.value());
-        bitset_holder = AssembleNegBitmap(expr_ret);
+        bitset_holder = AssembleNegBitset(expr_ret);
         view = BitsetView(bitset_holder.data(), bitset_holder.size() * 8);
     }
 

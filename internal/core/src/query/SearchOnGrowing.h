@@ -17,8 +17,8 @@
 #include "query/SubQueryResult.h"
 
 namespace milvus::query {
-using BitmapChunk = boost::dynamic_bitset<>;
-using BitmapSimple = std::deque<BitmapChunk>;
+using BitsetChunk = boost::dynamic_bitset<>;
+using BitsetSimple = std::deque<BitsetChunk>;
 
 void
 SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,

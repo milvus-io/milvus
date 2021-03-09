@@ -18,4 +18,4 @@ set(MILVUS_QUERY_SRCS
         SubQueryResult.cpp
         )
 add_library(milvus_query ${MILVUS_QUERY_SRCS})
-target_link_libraries(milvus_query milvus_proto milvus_utils knowhere)
+target_link_libraries(milvus_query milvus_proto milvus_utils knowhere boost_bitset_ext)
