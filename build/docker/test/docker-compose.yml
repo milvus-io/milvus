@@ -12,7 +12,7 @@ services:
       - ../../..:/milvus-distributed:delegated
     working_dir: "/milvus-distributed/tests/python_test"
     command: >
-      /bin/bash -c "sleep 10s && pytest --tags=0331 --ip proxynode"
+      /bin/bash -c "sleep 10s && pytest --tags=0331 --reruns=1 -n 4 --ip proxynode"
     networks:
       - milvus
 
@@ -27,7 +27,7 @@ services:
       - ../../..:/milvus-distributed:delegated
     working_dir: "/milvus-distributed/tests/python_test"
     command: >
-      /bin/bash -c "sleep 10s && pytest --tags=0331 --ip standalone"
+      /bin/bash -c "sleep 10s && pytest --tags=0331 --reruns=1 -n 4 --ip standalone"
     networks:
       - milvus
 
