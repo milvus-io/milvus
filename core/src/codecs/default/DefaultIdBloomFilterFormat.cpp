@@ -82,7 +82,6 @@ DefaultIdBloomFilterFormat::create(const storage::FSHandlerPtr& fs_ptr,
         throw Exception(SERVER_UNEXPECTED_ERROR, err_msg);
     }
     id_bloom_filter_ptr = std::make_shared<segment::IdBloomFilter>(bloom_filter);
-    fs_ptr->operation_ptr_->CachePut(bloom_filter_file_path);
 }
 
 }  // namespace codec
