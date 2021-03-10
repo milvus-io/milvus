@@ -4,16 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strconv"
 
+	"go.uber.org/zap"
+
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
 	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 )
 
 const (
@@ -95,17 +96,17 @@ func (bt *BaseTask) Name() string {
 
 func (it *IndexBuildTask) OnEnqueue() error {
 	it.SetID(it.cmd.IndexBuildID)
-	log.Printf("[IndexBuilderTask] Enqueue TaskID: %v", it.ID())
+	log.Debug("indexnode", zap.Int64("[IndexBuilderTask] Enqueue TaskID", it.ID()))
 	return nil
 }
 
 func (it *IndexBuildTask) PreExecute(ctx context.Context) error {
-	log.Println("preExecute...")
+	log.Debug("preExecute...")
 	return nil
 }
 
 func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
-	log.Println("PostExecute...")
+	log.Debug("PostExecute...")
 
 	defer func() {
 		if it.err != nil {
@@ -115,7 +116,7 @@ func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 
 	if it.serviceClient == nil {
 		err := errors.New("IndexBuildTask, serviceClient is nil")
-		log.Println("[IndexBuildTask][PostExecute] serviceClient is nil")
+		log.Debug("[IndexBuildTask][PostExecute] serviceClient is nil")
 		return err
 	}
 
@@ -134,23 +135,20 @@ func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 	ctx = context.TODO()
 	resp, err := it.serviceClient.NotifyBuildIndex(ctx, nty)
 	if err != nil {
-		log.Println("IndexBuildTask notify err:", err.Error())
+		log.Warn("indexnode", zap.String("error", err.Error()))
 		return err
 	}
 
 	if resp.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		err = errors.New(resp.Reason)
 	}
-	log.Println("[IndexBuildTask][PostExecute] err", err)
+	log.Debug("indexnode", zap.String("[IndexBuildTask][PostExecute] err", err.Error()))
 	return err
 }
 
 func (it *IndexBuildTask) Execute(ctx context.Context) error {
-	log.Println("start build index ...")
+	log.Debug("start build index ...")
 	var err error
-
-	log.Println("type params: ", it.cmd.Req.GetTypeParams())
-	log.Println("index params: ", it.cmd.Req.GetIndexParams())
 
 	typeParams := make(map[string]string)
 	for _, kvPair := range it.cmd.Req.GetTypeParams() {
@@ -200,7 +198,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	defer func() {
 		err = it.index.Delete()
 		if err != nil {
-			log.Print("CIndexDelete Failed")
+			log.Warn("CIndexDelete Failed")
 		}
 	}()
 
@@ -324,7 +322,7 @@ func (it *IndexBuildTask) Rollback() error {
 
 	err := it.kv.MultiRemove(it.savePaths)
 	if err != nil {
-		log.Println("IndexBuildTask Rollback Failed:", err.Error())
+		log.Warn("indexnode", zap.String("IndexBuildTask Rollback Failed", err.Error()))
 		return err
 	}
 	return nil

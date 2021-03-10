@@ -2,12 +2,16 @@ package indexnode
 
 import (
 	"bytes"
-	"log"
+	"fmt"
+	"path"
 	"strconv"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/spf13/cast"
 	"github.com/spf13/viper"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
@@ -32,6 +36,8 @@ type ParamTable struct {
 	MinIOSecretAccessKey string
 	MinIOUseSSL          bool
 	MinioBucketName      string
+
+	Log log.Config
 }
 
 var Params ParamTable
@@ -50,6 +56,7 @@ func (pt *ParamTable) initParams() {
 	pt.initMinIOSecretAccessKey()
 	pt.initMinIOUseSSL()
 	pt.initMinioBucketName()
+	pt.initLogCfg()
 }
 
 func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb2.InitParams) error {
@@ -77,7 +84,7 @@ func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb2.InitParam
 				for _, v := range val {
 					ss, err := cast.ToStringE(v)
 					if err != nil {
-						log.Panic(err)
+						log.Debug("indexnode", zap.String("error", err.Error()))
 					}
 					if len(str) == 0 {
 						str = ss
@@ -87,7 +94,7 @@ func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb2.InitParam
 				}
 
 			default:
-				log.Panicf("undefine config type, key=%s", key)
+				log.Debug("indexnode", zap.String("undefine config type, key=", key))
 			}
 		}
 		err = pt.Save(key, str)
@@ -142,4 +149,35 @@ func (pt *ParamTable) initMinioBucketName() {
 		panic(err)
 	}
 	pt.MinioBucketName = bucketName
+}
+
+func (pt *ParamTable) initLogCfg() {
+	pt.Log = log.Config{}
+	format, err := pt.Load("log.format")
+	if err != nil {
+		panic(err)
+	}
+	pt.Log.Format = format
+	level, err := pt.Load("log.level")
+	if err != nil {
+		panic(err)
+	}
+	pt.Log.Level = level
+	devStr, err := pt.Load("log.dev")
+	if err != nil {
+		panic(err)
+	}
+	dev, err := strconv.ParseBool(devStr)
+	if err != nil {
+		panic(err)
+	}
+	pt.Log.Development = dev
+	pt.Log.File.MaxSize = pt.ParseInt("log.file.maxSize")
+	pt.Log.File.MaxBackups = pt.ParseInt("log.file.maxBackups")
+	pt.Log.File.MaxDays = pt.ParseInt("log.file.maxAge")
+	rootPath, err := pt.Load("log.file.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	pt.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("indexnode-%d.log", pt.NodeID))
 }

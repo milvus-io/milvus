@@ -13,13 +13,14 @@ package indexservice
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
-
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 )
@@ -170,7 +171,7 @@ func (mt *metaTable) removeIndexFile(indexID UniqueID) {
 		if meta.Req.IndexID == indexID {
 			err := mt.client.MultiRemove(meta.IndexFilePaths)
 			if err != nil {
-				log.Println("remove index file err: ", err)
+				log.Warn("indexservice", zap.String("remove index file err", err.Error()))
 			}
 		}
 	}
