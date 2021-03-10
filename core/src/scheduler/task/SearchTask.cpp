@@ -13,13 +13,13 @@
 
 #include <fiu/fiu-local.h>
 
-#include <src/index/thirdparty/faiss/IndexFlat.h>
 #include <algorithm>
 #include <memory>
 #include <string>
 #include <thread>
 #include <unordered_map>
 #include <utility>
+#include "faiss/IndexFlat.h"
 
 #include "db/Utils.h"
 #include "db/engine/ExecutionEngineImpl.h"
