@@ -32,7 +32,7 @@ type DataNode struct {
 	cancel  context.CancelFunc
 	NodeID  UniqueID
 	Role    string
-	State   atomic.Value // internalpb2.StateCode_INITIALIZING
+	State   atomic.Value // internalpb2.StateCode_Initializing
 	watchDm chan struct{}
 
 	dataSyncService *dataSyncService
@@ -65,7 +65,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 		replica:         nil,
 		msFactory:       factory,
 	}
-	node.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
+	node.UpdateStateCode(internalpb2.StateCode_Abnormal)
 	return node
 }
 
@@ -151,7 +151,7 @@ func (node *DataNode) Init() error {
 func (node *DataNode) Start() error {
 	node.metaService.init()
 	go node.dataSyncService.start()
-	node.UpdateStateCode(internalpb2.StateCode_HEALTHY)
+	node.UpdateStateCode(internalpb2.StateCode_Healthy)
 	return nil
 }
 
@@ -166,7 +166,7 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 
 	switch {
 
-	case node.State.Load() != internalpb2.StateCode_INITIALIZING:
+	case node.State.Load() != internalpb2.StateCode_Initializing:
 		status.Reason = fmt.Sprintf("DataNode %d not initializing!", node.NodeID)
 		return status, errors.New(status.GetReason())
 

@@ -129,7 +129,7 @@ func (s *Server) init() error {
 	}
 
 	qs.Params.Init()
-	s.impl.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
+	s.impl.UpdateStateCode(internalpb2.StateCode_Initializing)
 
 	if err := s.impl.Init(); err != nil {
 		return err

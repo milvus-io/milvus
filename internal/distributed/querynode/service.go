@@ -195,7 +195,7 @@ func (s *Server) init() error {
 	qn.Params.QueryNodePort = int64(Params.QueryNodePort)
 	qn.Params.QueryNodeID = Params.QueryNodeID
 
-	s.impl.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
+	s.impl.UpdateStateCode(internalpb2.StateCode_Initializing)
 
 	if err := s.impl.Init(); err != nil {
 		log.Error("impl init error: ", zap.Error(err))

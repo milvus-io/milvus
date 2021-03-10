@@ -63,7 +63,7 @@ func (s *Server) init() error {
 	if err := <-s.grpcErrChan; err != nil {
 		return err
 	}
-	s.indexservice.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
+	s.indexservice.UpdateStateCode(internalpb2.StateCode_Initializing)
 
 	if err := s.indexservice.Init(); err != nil {
 		return err

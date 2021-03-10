@@ -99,7 +99,7 @@ func (qs *QueryService) Init() error {
 }
 
 func (qs *QueryService) Start() error {
-	qs.UpdateStateCode(internalpb2.StateCode_HEALTHY)
+	qs.UpdateStateCode(internalpb2.StateCode_Healthy)
 	return nil
 }
 
@@ -108,7 +108,7 @@ func (qs *QueryService) Stop() error {
 		return err
 	}
 	qs.loopCancel()
-	qs.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
+	qs.UpdateStateCode(internalpb2.StateCode_Abnormal)
 	return nil
 }
 
@@ -127,7 +127,7 @@ func (qs *QueryService) GetComponentStates(ctx context.Context) (*internalpb2.Co
 		if err != nil {
 			subComponentInfos = append(subComponentInfos, &internalpb2.ComponentInfo{
 				NodeID:    nodeID,
-				StateCode: internalpb2.StateCode_ABNORMAL,
+				StateCode: internalpb2.StateCode_Abnormal,
 			})
 			continue
 		}
@@ -681,7 +681,7 @@ func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryServ
 	opentracing.SetGlobalTracer(tracer)
 	service.closer = closer
 
-	service.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
+	service.UpdateStateCode(internalpb2.StateCode_Abnormal)
 	return service, nil
 }
 

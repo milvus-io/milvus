@@ -119,7 +119,7 @@ func (s *Server) init() error {
 	indexnode.Params.IP = Params.IP
 	indexnode.Params.Address = Params.Address
 
-	s.indexnode.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
+	s.indexnode.UpdateStateCode(internalpb2.StateCode_Initializing)
 
 	err = s.indexnode.Init()
 	if err != nil {

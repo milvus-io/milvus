@@ -80,7 +80,7 @@ func NewQueryNode(ctx context.Context, queryNodeID UniqueID, factory msgstream.F
 	}
 
 	node.replica = newCollectionReplica()
-	node.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
+	node.UpdateStateCode(internalpb2.StateCode_Abnormal)
 	return node
 }
 
@@ -99,7 +99,7 @@ func NewQueryNodeWithoutID(ctx context.Context, factory msgstream.Factory) *Quer
 	}
 
 	node.replica = newCollectionReplica()
-	node.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
+	node.UpdateStateCode(internalpb2.StateCode_Abnormal)
 
 	return node
 }
@@ -182,12 +182,12 @@ func (node *QueryNode) Start() error {
 	//go node.metaService.start()
 	go node.loadService.start()
 	go node.statsService.start()
-	node.UpdateStateCode(internalpb2.StateCode_HEALTHY)
+	node.UpdateStateCode(internalpb2.StateCode_Healthy)
 	return nil
 }
 
 func (node *QueryNode) Stop() error {
-	node.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
+	node.UpdateStateCode(internalpb2.StateCode_Abnormal)
 	node.queryNodeLoopCancel()
 
 	// free collectionReplica

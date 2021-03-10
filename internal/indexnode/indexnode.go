@@ -123,7 +123,7 @@ func (i *IndexNode) Init() error {
 		return err
 	}
 
-	i.UpdateStateCode(internalpb2.StateCode_HEALTHY)
+	i.UpdateStateCode(internalpb2.StateCode_Healthy)
 
 	return nil
 }

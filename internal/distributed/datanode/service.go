@@ -214,7 +214,7 @@ func (s *Server) init() error {
 	dn.Params.IP = Params.IP
 
 	s.datanode.NodeID = dn.Params.NodeID
-	s.datanode.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
+	s.datanode.UpdateStateCode(internalpb2.StateCode_Initializing)
 
 	if err := s.datanode.Init(); err != nil {
 		log.Warn("datanode init error: ", zap.Error(err))
@@ -236,7 +236,7 @@ func (s *Server) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelR
 }
 
 func (s *Server) FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) (*commonpb.Status, error) {
-	if s.datanode.State.Load().(internalpb2.StateCode) != internalpb2.StateCode_HEALTHY {
+	if s.datanode.State.Load().(internalpb2.StateCode) != internalpb2.StateCode_Healthy {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 			Reason:    "DataNode isn't healthy.",

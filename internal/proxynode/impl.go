@@ -858,7 +858,7 @@ func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName strin
 
 func (node *ProxyNode) RegisterLink(request *commonpb.Empty) (*milvuspb.RegisterLinkResponse, error) {
 	code := node.stateCode.Load().(internalpb2.StateCode)
-	if code != internalpb2.StateCode_HEALTHY {
+	if code != internalpb2.StateCode_Healthy {
 		return &milvuspb.RegisterLinkResponse{
 			Address: nil,
 			Status: &commonpb.Status{

@@ -94,7 +94,7 @@ func (s *Server) init() error {
 	if err := <-s.grpcErrChan; err != nil {
 		return err
 	}
-	s.impl.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
+	s.impl.UpdateStateCode(internalpb2.StateCode_Initializing)
 	log.Debug("grpc init done ...")
 
 	if err := s.impl.Init(); err != nil {

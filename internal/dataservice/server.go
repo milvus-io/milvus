@@ -73,7 +73,7 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 		msFactory:        factory,
 	}
 	s.insertChannels = s.getInsertChannels()
-	s.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
+	s.UpdateStateCode(internalpb2.StateCode_Abnormal)
 	return s, nil
 }
 
@@ -122,7 +122,7 @@ func (s *Server) Start() error {
 		return err
 	}
 	s.startServerLoop()
-	s.UpdateStateCode(internalpb2.StateCode_HEALTHY)
+	s.UpdateStateCode(internalpb2.StateCode_Healthy)
 	log.Debug("start success")
 	return nil
 }
@@ -132,7 +132,7 @@ func (s *Server) UpdateStateCode(code internalpb2.StateCode) {
 }
 
 func (s *Server) checkStateIsHealthy() bool {
-	return s.state.Load().(internalpb2.StateCode) == internalpb2.StateCode_HEALTHY
+	return s.state.Load().(internalpb2.StateCode) == internalpb2.StateCode_Healthy
 }
 
 func (s *Server) initMeta() error {
@@ -277,7 +277,7 @@ func (s *Server) checkMasterIsHealthy() error {
 				return err
 			}
 		}
-		if resp.State.StateCode == internalpb2.StateCode_HEALTHY {
+		if resp.State.StateCode == internalpb2.StateCode_Healthy {
 			break
 		}
 	}

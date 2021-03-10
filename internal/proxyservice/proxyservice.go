@@ -39,7 +39,7 @@ func NewProxyService(ctx context.Context, factory msgstream.Factory) (*ProxyServ
 	s.allocator = NewNodeIDAllocator()
 	s.sched = NewTaskScheduler(ctx1)
 	s.nodeInfos = NewGlobalNodeInfoTable()
-	s.stateCode = internalpb2.StateCode_ABNORMAL
+	s.stateCode = internalpb2.StateCode_Abnormal
 
 	return s, nil
 }
