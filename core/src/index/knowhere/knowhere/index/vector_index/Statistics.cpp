@@ -9,7 +9,6 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <src/index/thirdparty/faiss/utils/ConcurrentBitset.h>
 #include <algorithm>
 #include <cstdio>
 #include <functional>
@@ -20,6 +19,7 @@
 #include <vector>
 
 #include "IndexIVF.h"
+#include "faiss/utils/ConcurrentBitset.h"
 #include "knowhere/common/Log.h"
 #include "knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/Statistics.h"

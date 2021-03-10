@@ -15,7 +15,7 @@
 #include <fiu/fiu-local.h>
 #include <iostream>
 #include <thread>
-#include <src/index/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.h>
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/IndexType.h"

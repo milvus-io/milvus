@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
-#include <src/index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h>
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include <iostream>
 #include <sstream>
 
