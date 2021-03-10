@@ -449,7 +449,7 @@ func (m *MasterServiceFactory) GetComponentStates(ctx context.Context) (*interna
 		State:              &internalpb2.ComponentInfo{},
 		SubcomponentStates: make([]*internalpb2.ComponentInfo, 0),
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}, nil
 }

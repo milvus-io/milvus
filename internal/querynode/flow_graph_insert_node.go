@@ -56,7 +56,7 @@ func (iNode *insertNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.
 
 		// check if segment exists, if not, create this segment
 		if !iNode.replica.hasSegment(task.SegmentID) {
-			err := iNode.replica.addSegment(task.SegmentID, task.PartitionID, task.CollectionID, segTypeGrowing)
+			err := iNode.replica.addSegment(task.SegmentID, task.PartitionID, task.CollectionID, segmentTypeGrowing)
 			if err != nil {
 				log.Error(err.Error())
 				continue

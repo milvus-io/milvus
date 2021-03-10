@@ -511,7 +511,7 @@ func (colReplica *collectionReplica) getSegmentsBySegmentType(segType segmentTyp
 
 	for _, segment := range colReplica.segments {
 		if segment.getType() == segType {
-			if segType == segTypeSealed && !segment.getEnableIndex() {
+			if segType == segmentTypeSealed && !segment.getEnableIndex() {
 				continue
 			}
 
@@ -527,12 +527,12 @@ func (colReplica *collectionReplica) getSegmentsBySegmentType(segType segmentTyp
 func (colReplica *collectionReplica) replaceGrowingSegmentBySealedSegment(segment *Segment) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
-	if segment.segmentType != segTypeSealed && segment.segmentType != segTypeIndexing {
+	if segment.segmentType != segmentTypeSealed && segment.segmentType != segTypeIndexing {
 		return errors.New("unexpected segment type")
 	}
 	targetSegment, err := colReplica.getSegmentByIDPrivate(segment.ID())
 	if err == nil && targetSegment != nil {
-		if targetSegment.segmentType != segTypeGrowing {
+		if targetSegment.segmentType != segmentTypeGrowing {
 			// target segment has been a sealed segment
 			return nil
 		}
@@ -548,7 +548,7 @@ func (colReplica *collectionReplica) setSegmentEnableIndex(segmentID UniqueID, e
 	defer colReplica.mu.Unlock()
 
 	targetSegment, err := colReplica.getSegmentByIDPrivate(segmentID)
-	if targetSegment.segmentType != segTypeSealed {
+	if targetSegment.segmentType != segmentTypeSealed {
 		return errors.New("unexpected segment type")
 	}
 	if err == nil && targetSegment != nil {

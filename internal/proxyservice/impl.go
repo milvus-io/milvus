@@ -170,7 +170,7 @@ func (s *ProxyService) GetComponentStates(ctx context.Context) (*internalpb2.Com
 		State:              stateInfo,
 		SubcomponentStates: nil, // todo add subcomponents states
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}
 	return ret, nil
@@ -183,7 +183,7 @@ func (s *ProxyService) UpdateStateCode(code internalpb2.StateCode) {
 func (s *ProxyService) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		Value: Params.ServiceTimeTickChannel,
 	}, nil
@@ -208,7 +208,7 @@ func (s *ProxyService) RegisterLink(ctx context.Context) (*milvuspb.RegisterLink
 	if err != nil {
 		return &milvuspb.RegisterLinkResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 			Address: nil,
@@ -219,7 +219,7 @@ func (s *ProxyService) RegisterLink(ctx context.Context) (*milvuspb.RegisterLink
 	if err != nil {
 		return &milvuspb.RegisterLinkResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 			Address: nil,
@@ -246,7 +246,7 @@ func (s *ProxyService) RegisterNode(ctx context.Context, request *proxypb.Regist
 	if err != nil {
 		return &proxypb.RegisterNodeResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 			InitParams: nil,
@@ -257,7 +257,7 @@ func (s *ProxyService) RegisterNode(ctx context.Context, request *proxypb.Regist
 	if err != nil {
 		return &proxypb.RegisterNodeResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 			InitParams: nil,
@@ -282,7 +282,7 @@ func (s *ProxyService) InvalidateCollectionMetaCache(ctx context.Context, reques
 	err = s.sched.InvalidateCollectionMetaCacheTaskQueue.Enqueue(t)
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -290,7 +290,7 @@ func (s *ProxyService) InvalidateCollectionMetaCache(ctx context.Context, reques
 	err = t.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}

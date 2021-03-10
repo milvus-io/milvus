@@ -306,7 +306,7 @@ func (s *Server) GetTimeTickChannel(ctx context.Context, in *commonpb.Empty) (*m
 	}
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		Value: channel,
 	}, nil
@@ -320,7 +320,7 @@ func (s *Server) GetStatsChannel(ctx context.Context, in *commonpb.Empty) (*milv
 	}
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		Value: channel,
 	}, nil

@@ -122,7 +122,7 @@ func (it *IndexAddTask) Execute(ctx context.Context) error {
 		return err
 	}
 	log.Debug("indexservice", zap.String("build index finish err", err.Error()))
-	if resp.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
+	if resp.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(resp.Reason)
 	}
 	it.nodeClients.IncPriority(it.buildClientNodeID, 1)

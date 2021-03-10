@@ -77,11 +77,11 @@ func newMockDataNodeClient() *mockDataNodeClient {
 }
 
 func (c *mockDataNodeClient) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS}, nil
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
 func (c *mockDataNodeClient) FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS}, nil
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
 func (c *mockDataNodeClient) Stop() error {

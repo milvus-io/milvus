@@ -47,7 +47,7 @@ func (s *loadService) close() {
 }
 
 func (s *loadService) loadSegmentActively(wg *sync.WaitGroup) {
-	collectionIDs, partitionIDs, segmentIDs := s.segLoader.replica.getSegmentsBySegmentType(segTypeGrowing)
+	collectionIDs, partitionIDs, segmentIDs := s.segLoader.replica.getSegmentsBySegmentType(segmentTypeGrowing)
 	if len(collectionIDs) <= 0 {
 		wg.Done()
 		return
@@ -86,7 +86,7 @@ func (s *loadService) loadSegment(collectionID UniqueID, partitionID UniqueID, s
 		}
 	}
 	for _, segmentID := range segmentIDs {
-		err := s.segLoader.replica.addSegment(segmentID, partitionID, collectionID, segTypeGrowing)
+		err := s.segLoader.replica.addSegment(segmentID, partitionID, collectionID, segmentTypeGrowing)
 		if err != nil {
 			log.Warn(err.Error())
 			continue
@@ -118,7 +118,7 @@ func (s *loadService) loadSegmentInternal(collectionID UniqueID, partitionID Uni
 	if err != nil {
 		return err
 	}
-	segment := newSegment(collection, segmentID, partitionID, collectionID, segTypeSealed)
+	segment := newSegment(collection, segmentID, partitionID, collectionID, segmentTypeSealed)
 	// we don't need index id yet
 	_, buildID, errIndex := s.segLoader.indexLoader.getIndexInfo(collectionID, segmentID)
 	if errIndex == nil {

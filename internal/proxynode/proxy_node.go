@@ -91,7 +91,7 @@ func (node *ProxyNode) Init() error {
 	if err != nil {
 		return err
 	}
-	if response.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
+	if response.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(response.Status.Reason)
 	}
 
@@ -129,7 +129,7 @@ func (node *ProxyNode) Init() error {
 		if err != nil {
 			return err
 		}
-		if resp.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
+		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
 			return errors.New(resp.Status.Reason)
 		}
 

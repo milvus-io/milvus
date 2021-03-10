@@ -111,7 +111,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 				Timestamp: 1,
 				SourceID:  reqID,
 			},
-			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS},
+			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 			ResultChannelID: "0",
 		}
 		searchResultMsg := &msgstream.SearchResultMsg{

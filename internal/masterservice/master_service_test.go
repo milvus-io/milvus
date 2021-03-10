@@ -34,7 +34,7 @@ type proxyMock struct {
 func (p *proxyMock) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		Value: fmt.Sprintf("proxy-time-tick-%d", p.randVal),
 	}, nil
@@ -44,7 +44,7 @@ func (p *proxyMock) InvalidateCollectionMetaCache(ctx context.Context, request *
 	defer p.mutex.Unlock()
 	p.collArray = append(p.collArray, request.CollectionName)
 	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
 }
 func (p *proxyMock) GetCollArray() []string {
@@ -65,7 +65,7 @@ func (d *dataMock) GetInsertBinlogPaths(ctx context.Context, req *datapb.InsertB
 		FieldIDs: []int64{},
 		Paths:    []*internalpb2.StringList{},
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
 	}
@@ -74,7 +74,7 @@ func (d *dataMock) GetInsertBinlogPaths(ctx context.Context, req *datapb.InsertB
 		path := &internalpb2.StringList{
 			Values: []string{fmt.Sprintf("file0-%d", i), fmt.Sprintf("file1-%d", i), fmt.Sprintf("file2-%d", i)},
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+				ErrorCode: commonpb.ErrorCode_Success,
 				Reason:    "",
 			},
 		}
@@ -86,7 +86,7 @@ func (d *dataMock) GetInsertBinlogPaths(ctx context.Context, req *datapb.InsertB
 func (d *dataMock) GetSegmentInfo(ctx context.Context, req *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error) {
 	return &datapb.SegmentInfoResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
 		Infos: []*datapb.SegmentInfo{
@@ -109,7 +109,7 @@ func (q *queryMock) ReleaseCollection(ctx context.Context, req *querypb.ReleaseC
 	defer q.mutex.Unlock()
 	q.collID = append(q.collID, req.CollectionID)
 	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
 	}, nil
 }
@@ -117,7 +117,7 @@ func (q *queryMock) ReleaseCollection(ctx context.Context, req *querypb.ReleaseC
 func (d *dataMock) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		Value: fmt.Sprintf("segment-info-channel-%d", d.randVal),
 	}, nil
@@ -140,7 +140,7 @@ func (idx *indexMock) BuildIndex(ctx context.Context, req *indexpb.BuildIndexReq
 	idx.idxID = append(idx.idxID, req.IndexID)
 	return &indexpb.BuildIndexResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
 		IndexBuildID: idx.idxBuildID[len(idx.idxBuildID)-1],
@@ -152,7 +152,7 @@ func (idx *indexMock) DropIndex(ctx context.Context, req *indexpb.DropIndexReque
 	defer idx.mutex.Unlock()
 	idx.idxDropID = append(idx.idxDropID, req.IndexID)
 	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
 	}, nil
 }
@@ -329,7 +329,7 @@ func TestMasterService(t *testing.T) {
 		}
 		status, err := core.CreateCollection(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
 
 		msg, ok := <-ddStream.Chan()
 		assert.True(t, ok)
@@ -361,7 +361,7 @@ func TestMasterService(t *testing.T) {
 		req.Base.SourceID = 101
 		status, err = core.CreateCollection(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
 
 		req.Base.MsgID = 102
 		req.Base.Timestamp = 102
@@ -369,7 +369,7 @@ func TestMasterService(t *testing.T) {
 		req.CollectionName = "testColl-again"
 		status, err = core.CreateCollection(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
 
 		schema.Name = req.CollectionName
 		sbf, err = proto.Marshal(&schema)
@@ -380,7 +380,7 @@ func TestMasterService(t *testing.T) {
 		req.Base.SourceID = 103
 		status, err = core.CreateCollection(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
 
 		msg, ok = <-ddStream.Chan()
 		assert.True(t, ok)
@@ -404,7 +404,7 @@ func TestMasterService(t *testing.T) {
 		}
 		rsp, err := core.HasCollection(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 		assert.Equal(t, rsp.Value, true)
 
 		req = &milvuspb.HasCollectionRequest{
@@ -419,7 +419,7 @@ func TestMasterService(t *testing.T) {
 		}
 		rsp, err = core.HasCollection(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 		assert.Equal(t, rsp.Value, false)
 
 		// test time stamp go back
@@ -435,7 +435,7 @@ func TestMasterService(t *testing.T) {
 		}
 		rsp, err = core.HasCollection(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 		assert.Equal(t, rsp.Value, true)
 	})
 
@@ -454,7 +454,7 @@ func TestMasterService(t *testing.T) {
 		}
 		rsp, err := core.DescribeCollection(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 		assert.Equal(t, rsp.Schema.Name, "testColl")
 		assert.Equal(t, rsp.CollectionID, collMeta.ID)
 
@@ -472,7 +472,7 @@ func TestMasterService(t *testing.T) {
 		}
 		rsp, err := core.ShowCollections(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 		assert.ElementsMatch(t, rsp.CollectionNames, []string{"testColl", "testColl-again"})
 		assert.Equal(t, len(rsp.CollectionNames), 2)
 	})
@@ -492,7 +492,7 @@ func TestMasterService(t *testing.T) {
 		consumeMsgChan(time.Second, ddStream.Chan())
 		status, err := core.CreatePartition(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
 		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.PartitionIDs), 2)
@@ -523,7 +523,7 @@ func TestMasterService(t *testing.T) {
 		}
 		rsp, err := core.HasPartition(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 		assert.Equal(t, rsp.Value, true)
 	})
 
@@ -543,7 +543,7 @@ func TestMasterService(t *testing.T) {
 		}
 		rsp, err := core.ShowPartitions(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 		assert.Equal(t, len(rsp.PartitionNames), 2)
 		assert.Equal(t, len(rsp.PartitionIDs), 2)
 	})
@@ -601,7 +601,7 @@ func TestMasterService(t *testing.T) {
 		}
 		rsp, err := core.ShowSegments(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 		assert.Equal(t, rsp.SegmentIDs[0], int64(1000))
 		assert.Equal(t, len(rsp.SegmentIDs), 1)
 	})
@@ -630,7 +630,7 @@ func TestMasterService(t *testing.T) {
 
 		rsp, err := core.CreateIndex(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_Success)
 		time.Sleep(time.Second)
 		files := im.getFileArray()
 		assert.Equal(t, 3, len(files))
@@ -645,7 +645,7 @@ func TestMasterService(t *testing.T) {
 		req.FieldName = "no field"
 		rsp, err = core.CreateIndex(ctx, req)
 		assert.Nil(t, err)
-		assert.NotEqual(t, rsp.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.NotEqual(t, rsp.ErrorCode, commonpb.ErrorCode_Success)
 	})
 
 	t.Run("describe segment", func(t *testing.T) {
@@ -664,7 +664,7 @@ func TestMasterService(t *testing.T) {
 		}
 		rsp, err := core.DescribeSegment(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 		t.Logf("index id = %d", rsp.IndexID)
 	})
 
@@ -683,7 +683,7 @@ func TestMasterService(t *testing.T) {
 		}
 		rsp, err := core.DescribeIndex(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 		assert.Equal(t, len(rsp.IndexDescriptions), 1)
 		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, Params.DefaultIndexName)
 	})
@@ -703,7 +703,7 @@ func TestMasterService(t *testing.T) {
 		}
 		rsp, err := core.DescribeIndex(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_INDEX_NOT_EXIST)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_IndexNotExist)
 		assert.Equal(t, len(rsp.IndexDescriptions), 0)
 	})
 
@@ -779,7 +779,7 @@ func TestMasterService(t *testing.T) {
 		}
 		rsp, err := core.DescribeIndex(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 		assert.Equal(t, len(rsp.IndexDescriptions), 1)
 		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, Params.DefaultIndexName)
 	})
@@ -810,7 +810,7 @@ func TestMasterService(t *testing.T) {
 
 		rsp, err := core.CreateIndex(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_Success)
 		time.Sleep(time.Second)
 
 		collMeta, err = core.MetaTable.GetCollectionByName("testColl")
@@ -848,7 +848,7 @@ func TestMasterService(t *testing.T) {
 
 		rsp, err := core.DropIndex(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_Success)
 
 		im.mutex.Lock()
 		assert.Equal(t, len(im.idxDropID), 1)
@@ -877,7 +877,7 @@ func TestMasterService(t *testing.T) {
 		dropPartID := collMeta.PartitionIDs[1]
 		status, err := core.DropPartition(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
 		collMeta, err = core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.PartitionIDs), 1)
@@ -909,7 +909,7 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		status, err := core.DropCollection(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
 
 		msg, ok := <-ddStream.Chan()
 		assert.True(t, ok)
@@ -939,7 +939,7 @@ func TestMasterService(t *testing.T) {
 		}
 		status, err = core.DropCollection(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
 		time.Sleep(time.Second)
 		assert.Zero(t, len(ddStream.Chan()))
 		collArray = pm.GetCollArray()

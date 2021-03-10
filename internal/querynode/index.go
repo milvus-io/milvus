@@ -24,13 +24,13 @@ func (s *Segment) buildIndex(collection *Collection) commonpb.Status {
 	*/
 	var status = C.BuildIndex(collection.collectionPtr, s.segmentPtr)
 	if status != 0 {
-		return commonpb.Status{ErrorCode: commonpb.ErrorCode_ERROR_CODE_BUILD_INDEX_ERROR}
+		return commonpb.Status{ErrorCode: commonpb.ErrorCode_BuildIndexError}
 	}
-	return commonpb.Status{ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS}
+	return commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 }
 
 func (s *Segment) dropIndex(fieldID int64) commonpb.Status {
 	// WARN: Not support yet
 
-	return commonpb.Status{ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS}
+	return commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 }

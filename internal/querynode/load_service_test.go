@@ -1136,7 +1136,7 @@ func TestSegmentLoad_Search_Vector(t *testing.T) {
 	err := node.replica.addPartition(collectionID, partitionID)
 	assert.NoError(t, err)
 
-	err = node.replica.addSegment(segmentID, partitionID, collectionID, segTypeSealed)
+	err = node.replica.addSegment(segmentID, partitionID, collectionID, segmentTypeSealed)
 	assert.NoError(t, err)
 
 	paths, srcFieldIDs, err := generateInsertBinLog(collectionID, partitionID, segmentID, keyPrefix)
