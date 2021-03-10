@@ -56,7 +56,7 @@ func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, cont
 
 	for _, msg := range msgStreamMsg.TsMessages() {
 		switch msg.Type() {
-		case commonpb.MsgType_kInsert:
+		case commonpb.MsgType_Insert:
 			resMsg := fdmNode.filterInvalidInsertMessage(msg.(*msgstream.InsertMsg))
 			if resMsg != nil {
 				iMsg.insertMessages = append(iMsg.insertMessages, resMsg)

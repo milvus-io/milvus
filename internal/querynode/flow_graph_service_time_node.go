@@ -60,7 +60,7 @@ func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {
 		},
 		TimeTickMsg: internalpb2.TimeTickMsg{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kTimeTick,
+				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     0,
 				Timestamp: ts,
 				SourceID:  Params.QueryNodeID,

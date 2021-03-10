@@ -25,7 +25,7 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 	channelNamesMap := make(map[UniqueID][]string)            // collectionID --> channelNames
 
 	for i, request := range tsMsgs {
-		if request.Type() != commonpb.MsgType_kInsert {
+		if request.Type() != commonpb.MsgType_Insert {
 			return nil, errors.New("msg's must be Insert")
 		}
 		insertRequest, ok := request.(*msgstream.InsertMsg)
@@ -241,7 +241,7 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 			channelID := channelNames[int(key)%len(channelNames)]
 			sliceRequest := internalpb2.InsertRequest{
 				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_kInsert,
+					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     reqID,
 					Timestamp: ts,
 					SourceID:  proxyID,

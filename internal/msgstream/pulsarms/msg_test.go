@@ -51,7 +51,7 @@ func (tt *InsertTask) Unmarshal(input MarshalType) (msgstream.TsMsg, error) {
 func newRepackFunc(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
 	result := make(map[int32]*msgstream.MsgPack)
 	for i, request := range tsMsgs {
-		if request.Type() != commonpb.MsgType_kInsert {
+		if request.Type() != commonpb.MsgType_Insert {
 			return nil, errors.New("msg's must be Insert")
 		}
 		insertRequest := request.(*InsertTask).InsertRequest
@@ -74,7 +74,7 @@ func newRepackFunc(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msg
 
 			sliceRequest := internalpb2.InsertRequest{
 				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_kInsert,
+					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     insertRequest.Base.MsgID,
 					Timestamp: insertRequest.Timestamps[index],
 					SourceID:  insertRequest.Base.SourceID,
@@ -106,7 +106,7 @@ func getInsertTask(reqID msgstream.UniqueID, hashValue uint32) msgstream.TsMsg {
 	}
 	insertRequest := internalpb2.InsertRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kInsert,
+			MsgType:   commonpb.MsgType_Insert,
 			MsgID:     reqID,
 			Timestamp: 1,
 			SourceID:  1,
@@ -151,7 +151,7 @@ func TestStream_task_Insert(t *testing.T) {
 	dispatcher := factory.NewUnmarshalDispatcher()
 	outputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, dispatcher)
 	testTask := InsertTask{}
-	dispatcher.AddMsgTemplate(commonpb.MsgType_kInsert, testTask.Unmarshal)
+	dispatcher.AddMsgTemplate(commonpb.MsgType_Insert, testTask.Unmarshal)
 	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
 

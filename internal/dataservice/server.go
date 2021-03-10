@@ -204,7 +204,7 @@ func (s *Server) loadMetaFromMaster() error {
 	}
 	collections, err := s.masterClient.ShowCollections(ctx, &milvuspb.ShowCollectionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kShowCollections,
+			MsgType:   commonpb.MsgType_ShowCollections,
 			MsgID:     -1, // todo add msg id
 			Timestamp: 0,  // todo
 			SourceID:  Params.NodeID,
@@ -217,7 +217,7 @@ func (s *Server) loadMetaFromMaster() error {
 	for _, collectionName := range collections.CollectionNames {
 		collection, err := s.masterClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDescribeCollection,
+				MsgType:   commonpb.MsgType_DescribeCollection,
 				MsgID:     -1, // todo
 				Timestamp: 0,  // todo
 				SourceID:  Params.NodeID,
@@ -231,7 +231,7 @@ func (s *Server) loadMetaFromMaster() error {
 		}
 		partitions, err := s.masterClient.ShowPartitions(ctx, &milvuspb.ShowPartitionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kShowPartitions,
+				MsgType:   commonpb.MsgType_ShowPartitions,
 				MsgID:     -1, // todo
 				Timestamp: 0,  // todo
 				SourceID:  Params.NodeID,
@@ -338,7 +338,7 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 		}
 		msgPack, _ := flushStream.Consume()
 		for _, msg := range msgPack.Msgs {
-			if msg.Type() != commonpb.MsgType_kSegmentFlushDone {
+			if msg.Type() != commonpb.MsgType_SegmentFlushDone {
 				continue
 			}
 			realMsg := msg.(*msgstream.FlushCompletedMsg)
@@ -576,7 +576,7 @@ func (s *Server) loadCollectionFromMaster(collectionID int64) error {
 	ctx := context.TODO()
 	resp, err := s.masterClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_kDescribeCollection,
+			MsgType:  commonpb.MsgType_DescribeCollection,
 			SourceID: Params.NodeID,
 		},
 		DbName:       "",
@@ -613,7 +613,7 @@ func (s *Server) openNewSegment(collectionID UniqueID, partitionID UniqueID, cha
 		},
 		SegmentMsg: datapb.SegmentMsg{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kSegmentInfo,
+				MsgType:   commonpb.MsgType_SegmentInfo,
 				MsgID:     0,
 				Timestamp: 0,
 				SourceID:  Params.NodeID,

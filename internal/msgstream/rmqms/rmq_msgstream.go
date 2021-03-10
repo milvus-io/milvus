@@ -140,7 +140,7 @@ func (ms *RmqMsgStream) Produce(ctx context.Context, pack *msgstream.MsgPack) er
 		hashValues := tsMsg.HashKeys()
 		bucketValues := make([]int32, len(hashValues))
 		for index, hashValue := range hashValues {
-			if tsMsg.Type() == commonpb.MsgType_kSearchResult {
+			if tsMsg.Type() == commonpb.MsgType_SearchResult {
 				searchResult := tsMsg.(*msgstream.SearchResultMsg)
 				channelID := searchResult.ResultChannelID
 				channelIDInt, _ := strconv.ParseInt(channelID, 10, 64)
@@ -162,9 +162,9 @@ func (ms *RmqMsgStream) Produce(ctx context.Context, pack *msgstream.MsgPack) er
 	} else {
 		msgType := (tsMsgs[0]).Type()
 		switch msgType {
-		case commonpb.MsgType_kInsert:
+		case commonpb.MsgType_Insert:
 			result, err = util.InsertRepackFunc(tsMsgs, reBucketValues)
-		case commonpb.MsgType_kDelete:
+		case commonpb.MsgType_Delete:
 			result, err = util.DeleteRepackFunc(tsMsgs, reBucketValues)
 		default:
 			result, err = util.DefaultRepackFunc(tsMsgs, reBucketValues)
@@ -389,7 +389,7 @@ func (ms *RmqTtMsgStream) bufMsgPackToChannel() {
 				tempBuffer := make([]TsMsg, 0)
 				var timeTickMsg TsMsg
 				for _, v := range msgs {
-					if v.Type() == commonpb.MsgType_kTimeTick {
+					if v.Type() == commonpb.MsgType_TimeTick {
 						timeTickMsg = v
 						continue
 					}
@@ -475,7 +475,7 @@ func (ms *RmqTtMsgStream) findTimeTick(consumer rocksmq.Consumer,
 				ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
 				ms.unsolvedMutex.Unlock()
 
-				if headerMsg.Base.MsgType == commonpb.MsgType_kTimeTick {
+				if headerMsg.Base.MsgType == commonpb.MsgType_TimeTick {
 					findMapMutex.Lock()
 					eofMsgMap[consumer] = tsMsg.(*TimeTickMsg).Base.Timestamp
 					findMapMutex.Unlock()
@@ -537,7 +537,7 @@ func (ms *RmqTtMsgStream) Seek(mp *msgstream.MsgPosition) error {
 				return err
 			}
 
-			if headerMsg.Base.MsgType == commonpb.MsgType_kTimeTick {
+			if headerMsg.Base.MsgType == commonpb.MsgType_TimeTick {
 				if tsMsg.BeginTs() >= mp.Timestamp {
 					ms.unsolvedMutex.Unlock()
 					return nil

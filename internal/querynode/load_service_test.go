@@ -964,7 +964,7 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, 
 			},
 			InsertRequest: internalpb2.InsertRequest{
 				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_kInsert,
+					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     0,
 					Timestamp: uint64(i + 1000),
 					SourceID:  0,
@@ -998,7 +998,7 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, 
 	}
 	timeTickResult := internalpb2.TimeTickMsg{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kTimeTick,
+			MsgType:   commonpb.MsgType_TimeTick,
 			MsgID:     0,
 			Timestamp: 1000,
 			SourceID:  0,
@@ -1064,7 +1064,7 @@ func sentTimeTick(ctx context.Context) error {
 	}
 	timeTickResult := internalpb2.TimeTickMsg{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kTimeTick,
+			MsgType:   commonpb.MsgType_TimeTick,
 			MsgID:     0,
 			Timestamp: math.MaxUint64,
 			SourceID:  0,

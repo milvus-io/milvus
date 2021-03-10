@@ -84,7 +84,7 @@ func TestDataNodeTTWatcher(t *testing.T) {
 		},
 		TimeTickMsg: internalpb2.TimeTickMsg{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kTimeTick,
+				MsgType:   commonpb.MsgType_TimeTick,
 				Timestamp: ts,
 			},
 		},

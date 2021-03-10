@@ -22,16 +22,16 @@ func newDDHandler(meta *meta, allocator segmentAllocatorInterface) *ddHandler {
 
 func (handler *ddHandler) HandleDDMsg(msg msgstream.TsMsg) error {
 	switch msg.Type() {
-	case commonpb.MsgType_kCreateCollection:
+	case commonpb.MsgType_CreateCollection:
 		realMsg := msg.(*msgstream.CreateCollectionMsg)
 		return handler.handleCreateCollection(realMsg)
-	case commonpb.MsgType_kDropCollection:
+	case commonpb.MsgType_DropCollection:
 		realMsg := msg.(*msgstream.DropCollectionMsg)
 		return handler.handleDropCollection(realMsg)
-	case commonpb.MsgType_kCreatePartition:
+	case commonpb.MsgType_CreatePartition:
 		realMsg := msg.(*msgstream.CreatePartitionMsg)
 		return handler.handleCreatePartition(realMsg)
-	case commonpb.MsgType_kDropPartition:
+	case commonpb.MsgType_DropPartition:
 		realMsg := msg.(*msgstream.DropPartitionMsg)
 		return handler.handleDropPartition(realMsg)
 	default:

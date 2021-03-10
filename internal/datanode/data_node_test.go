@@ -339,7 +339,7 @@ func (df *DataFactory) GetMsgStreamTsInsertMsgs(n int) (inMsgs []msgstream.TsMsg
 			},
 			InsertRequest: internalpb2.InsertRequest{
 				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_kInsert,
+					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     0, // GOOSE TODO
 					Timestamp: Timestamp(i + 1000),
 					SourceID:  0,
@@ -367,7 +367,7 @@ func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (inMsgs []*msgstream.Insert
 			},
 			InsertRequest: internalpb2.InsertRequest{
 				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_kInsert,
+					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     0, // GOOSE TODO
 					Timestamp: Timestamp(i + 1000),
 					SourceID:  0,

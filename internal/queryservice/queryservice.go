@@ -279,7 +279,7 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 	// get partitionIDs
 	showPartitionRequest := &milvuspb.ShowPartitionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_kShowPartitions,
+			MsgType: commonpb.MsgType_ShowPartitions,
 		},
 		CollectionID: collectionID,
 	}
@@ -442,7 +442,7 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 
 		showSegmentRequest := &milvuspb.ShowSegmentRequest{
 			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_kShowSegment,
+				MsgType: commonpb.MsgType_ShowSegments,
 			},
 			CollectionID: collectionID,
 			PartitionID:  partitionID,

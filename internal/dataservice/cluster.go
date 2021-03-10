@@ -92,7 +92,7 @@ func (c *dataNodeCluster) WatchInsertChannels(channels []string) {
 	for i, group := range groups {
 		resp, err := c.nodes[i].client.WatchDmChannels(ctx, &datapb.WatchDmChannelRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDescribeCollection,
+				MsgType:   commonpb.MsgType_DescribeCollection,
 				MsgID:     -1, // todo
 				Timestamp: 0,  // todo
 				SourceID:  Params.NodeID,

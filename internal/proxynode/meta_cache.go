@@ -100,7 +100,7 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) 
 
 	req := &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_kDescribeCollection,
+			MsgType: commonpb.MsgType_DescribeCollection,
 		},
 		CollectionName: collectionName,
 	}
@@ -131,7 +131,7 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName stri
 
 	req := &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_kDescribeCollection,
+			MsgType: commonpb.MsgType_DescribeCollection,
 		},
 		CollectionName: collectionName,
 	}
@@ -163,7 +163,7 @@ func (m *MetaCache) GetPartitionID(ctx context.Context, collectionName string, p
 
 	req := &milvuspb.ShowPartitionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_kShowPartitions,
+			MsgType: commonpb.MsgType_ShowPartitions,
 		},
 		CollectionName: collectionName,
 	}

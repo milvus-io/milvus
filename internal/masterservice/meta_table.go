@@ -42,6 +42,7 @@ type metaTable struct {
 	indexID2Meta       map[typeutil.UniqueID]pb.IndexInfo                               // collection_id/index_id -> meta
 	segID2CollID       map[typeutil.UniqueID]typeutil.UniqueID                          // segment id -> collection id
 	segID2PartitionID  map[typeutil.UniqueID]typeutil.UniqueID                          // segment id -> partition id
+	flushedSegID       map[typeutil.UniqueID]bool                                       // flushed segment id
 	partitionID2CollID map[typeutil.UniqueID]typeutil.UniqueID                          // partition id -> collection id
 
 	tenantLock sync.RWMutex
@@ -75,6 +76,7 @@ func (mt *metaTable) reloadFromKV() error {
 	mt.partitionID2CollID = make(map[typeutil.UniqueID]typeutil.UniqueID)
 	mt.segID2CollID = make(map[typeutil.UniqueID]typeutil.UniqueID)
 	mt.segID2PartitionID = make(map[typeutil.UniqueID]typeutil.UniqueID)
+	mt.flushedSegID = make(map[typeutil.UniqueID]bool)
 
 	_, values, err := mt.client.LoadWithPrefix(TenantMetaPrefix)
 	if err != nil {
@@ -141,6 +143,7 @@ func (mt *metaTable) reloadFromKV() error {
 		for _, segID := range partitionInfo.SegmentIDs {
 			mt.segID2CollID[segID] = collID
 			mt.segID2PartitionID[segID] = partitionInfo.PartitionID
+			mt.flushedSegID[segID] = true
 		}
 	}
 
@@ -246,6 +249,9 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID) error {
 		}
 		delete(mt.partitionID2Meta, partID)
 		for _, segID := range partMeta.SegmentIDs {
+			delete(mt.segID2CollID, segID)
+			delete(mt.segID2PartitionID, segID)
+			delete(mt.flushedSegID, segID)
 			_, ok := mt.segID2IndexMeta[segID]
 			if !ok {
 				log.Warn("segment id not exist", zap.Int64("segment id", segID))
@@ -447,6 +453,10 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	mt.collID2Meta[collID] = collMeta
 
 	for _, segID := range partMeta.SegmentIDs {
+		delete(mt.segID2CollID, segID)
+		delete(mt.segID2PartitionID, segID)
+		delete(mt.flushedSegID, segID)
+
 		_, ok := mt.segID2IndexMeta[segID]
 		if !ok {
 			log.Warn("segment has no index meta", zap.Int64("segment id", segID))
@@ -574,6 +584,11 @@ func (mt *metaTable) AddIndex(seg *pb.SegmentIndexInfo) error {
 		_ = mt.reloadFromKV()
 		return err
 	}
+
+	if _, ok := mt.flushedSegID[seg.SegmentID]; !ok {
+		mt.flushedSegID[seg.SegmentID] = true
+	}
+
 	return nil
 }
 
@@ -658,9 +673,20 @@ func (mt *metaTable) GetSegmentIndexInfoByID(segID typeutil.UniqueID, filedID in
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
+	_, ok := mt.flushedSegID[segID]
+	if !ok {
+		return pb.SegmentIndexInfo{}, fmt.Errorf("segment id %d hasn't flused, there is no index meta", segID)
+	}
+
 	segIdxMap, ok := mt.segID2IndexMeta[segID]
 	if !ok {
-		return pb.SegmentIndexInfo{}, fmt.Errorf("segment id %d not has any index", segID)
+		return pb.SegmentIndexInfo{
+			SegmentID:   segID,
+			FieldID:     filedID,
+			IndexID:     0,
+			BuildID:     0,
+			EnableIndex: false,
+		}, nil
 	}
 	if len(*segIdxMap) == 0 {
 		return pb.SegmentIndexInfo{}, fmt.Errorf("segment id %d not has any index", segID)
@@ -871,4 +897,16 @@ func (mt *metaTable) GetIndexByID(indexID typeutil.UniqueID) (*pb.IndexInfo, err
 		return nil, fmt.Errorf("cannot find index, id = %d", indexID)
 	}
 	return &indexInfo, nil
+}
+
+func (mt *metaTable) AddFlushedSegment(segID typeutil.UniqueID) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	_, ok := mt.flushedSegID[segID]
+	if ok {
+		return fmt.Errorf("segment id = %d exist", segID)
+	}
+	mt.flushedSegID[segID] = true
+	return nil
 }

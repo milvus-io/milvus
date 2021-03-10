@@ -186,7 +186,7 @@ func TestGrpcService(t *testing.T) {
 
 		req := &milvuspb.CreateCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kCreateCollection,
+				MsgType:   commonpb.MsgType_CreateCollection,
 				MsgID:     100,
 				Timestamp: 100,
 				SourceID:  100,
@@ -201,7 +201,7 @@ func TestGrpcService(t *testing.T) {
 
 		assert.Equal(t, len(createCollectionArray), 1)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
-		assert.Equal(t, createCollectionArray[0].Base.MsgType, commonpb.MsgType_kCreateCollection)
+		assert.Equal(t, createCollectionArray[0].Base.MsgType, commonpb.MsgType_CreateCollection)
 		assert.Equal(t, createCollectionArray[0].CollectionName, "testColl")
 
 		req.Base.MsgID = 101
@@ -230,7 +230,7 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
 		assert.Equal(t, len(createCollectionArray), 2)
-		assert.Equal(t, createCollectionArray[1].Base.MsgType, commonpb.MsgType_kCreateCollection)
+		assert.Equal(t, createCollectionArray[1].Base.MsgType, commonpb.MsgType_CreateCollection)
 		assert.Equal(t, createCollectionArray[1].CollectionName, "testColl-again")
 
 		//time stamp go back
@@ -253,7 +253,7 @@ func TestGrpcService(t *testing.T) {
 	t.Run("has collection", func(t *testing.T) {
 		req := &milvuspb.HasCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kHasCollection,
+				MsgType:   commonpb.MsgType_HasCollection,
 				MsgID:     110,
 				Timestamp: 110,
 				SourceID:  110,
@@ -268,7 +268,7 @@ func TestGrpcService(t *testing.T) {
 
 		req = &milvuspb.HasCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kHasCollection,
+				MsgType:   commonpb.MsgType_HasCollection,
 				MsgID:     111,
 				Timestamp: 111,
 				SourceID:  111,
@@ -284,7 +284,7 @@ func TestGrpcService(t *testing.T) {
 		// test time stamp go back
 		req = &milvuspb.HasCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kHasCollection,
+				MsgType:   commonpb.MsgType_HasCollection,
 				MsgID:     111,
 				Timestamp: 111,
 				SourceID:  111,
@@ -303,7 +303,7 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		req := &milvuspb.DescribeCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDescribeCollection,
+				MsgType:   commonpb.MsgType_DescribeCollection,
 				MsgID:     120,
 				Timestamp: 120,
 				SourceID:  120,
@@ -321,7 +321,7 @@ func TestGrpcService(t *testing.T) {
 	t.Run("show collection", func(t *testing.T) {
 		req := &milvuspb.ShowCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kShowCollections,
+				MsgType:   commonpb.MsgType_ShowCollections,
 				MsgID:     130,
 				Timestamp: 130,
 				SourceID:  130,
@@ -338,7 +338,7 @@ func TestGrpcService(t *testing.T) {
 	t.Run("create partition", func(t *testing.T) {
 		req := &milvuspb.CreatePartitionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kCreatePartition,
+				MsgType:   commonpb.MsgType_CreatePartition,
 				MsgID:     140,
 				Timestamp: 140,
 				SourceID:  140,
@@ -362,7 +362,7 @@ func TestGrpcService(t *testing.T) {
 	t.Run("has partition", func(t *testing.T) {
 		req := &milvuspb.HasPartitionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kHasPartition,
+				MsgType:   commonpb.MsgType_HasPartition,
 				MsgID:     150,
 				Timestamp: 150,
 				SourceID:  150,
@@ -382,7 +382,7 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		req := &milvuspb.ShowPartitionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kShowPartitions,
+				MsgType:   commonpb.MsgType_ShowPartitions,
 				MsgID:     160,
 				Timestamp: 160,
 				SourceID:  160,
@@ -418,7 +418,7 @@ func TestGrpcService(t *testing.T) {
 
 		req := &milvuspb.ShowSegmentRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kShowSegment,
+				MsgType:   commonpb.MsgType_ShowSegments,
 				MsgID:     170,
 				Timestamp: 170,
 				SourceID:  170,
@@ -436,7 +436,7 @@ func TestGrpcService(t *testing.T) {
 	t.Run("create index", func(t *testing.T) {
 		req := &milvuspb.CreateIndexRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kCreateIndex,
+				MsgType:   commonpb.MsgType_CreateIndex,
 				MsgID:     180,
 				Timestamp: 180,
 				SourceID:  180,
@@ -478,7 +478,7 @@ func TestGrpcService(t *testing.T) {
 
 		req := &milvuspb.DescribeSegmentRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDescribeSegment,
+				MsgType:   commonpb.MsgType_DescribeSegment,
 				MsgID:     190,
 				Timestamp: 190,
 				SourceID:  190,
@@ -495,7 +495,7 @@ func TestGrpcService(t *testing.T) {
 	t.Run("describe index", func(t *testing.T) {
 		req := &milvuspb.DescribeIndexRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDescribeIndex,
+				MsgType:   commonpb.MsgType_DescribeIndex,
 				MsgID:     200,
 				Timestamp: 200,
 				SourceID:  200,
@@ -534,7 +534,7 @@ func TestGrpcService(t *testing.T) {
 
 		req := &milvuspb.DescribeIndexRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDescribeIndex,
+				MsgType:   commonpb.MsgType_DescribeIndex,
 				MsgID:     210,
 				Timestamp: 210,
 				SourceID:  210,
@@ -555,7 +555,7 @@ func TestGrpcService(t *testing.T) {
 	t.Run("drop index", func(t *testing.T) {
 		req := &milvuspb.DropIndexRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDropIndex,
+				MsgType:   commonpb.MsgType_DropIndex,
 				MsgID:     215,
 				Timestamp: 215,
 				SourceID:  215,
@@ -582,7 +582,7 @@ func TestGrpcService(t *testing.T) {
 	t.Run("drop partition", func(t *testing.T) {
 		req := &milvuspb.DropPartitionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDropPartition,
+				MsgType:   commonpb.MsgType_DropPartition,
 				MsgID:     220,
 				Timestamp: 220,
 				SourceID:  220,
@@ -605,7 +605,7 @@ func TestGrpcService(t *testing.T) {
 	t.Run("drop collection", func(t *testing.T) {
 		req := &milvuspb.DropCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDropCollection,
+				MsgType:   commonpb.MsgType_DropCollection,
 				MsgID:     230,
 				Timestamp: 230,
 				SourceID:  230,
@@ -618,14 +618,14 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, len(dropCollectionArray), 1)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
-		assert.Equal(t, dropCollectionArray[0].Base.MsgType, commonpb.MsgType_kDropCollection)
+		assert.Equal(t, dropCollectionArray[0].Base.MsgType, commonpb.MsgType_DropCollection)
 		assert.Equal(t, dropCollectionArray[0].CollectionName, "testColl")
 		assert.Equal(t, len(collectionMetaCache), 1)
 		assert.Equal(t, collectionMetaCache[0], "testColl")
 
 		req = &milvuspb.DropCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDropCollection,
+				MsgType:   commonpb.MsgType_DropCollection,
 				MsgID:     231,
 				Timestamp: 231,
 				SourceID:  231,

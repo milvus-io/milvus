@@ -104,13 +104,13 @@ func (ddNode *ddNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Con
 	// do dd tasks
 	for _, msg := range tsMessages {
 		switch msg.Type() {
-		case commonpb.MsgType_kCreateCollection:
+		case commonpb.MsgType_CreateCollection:
 			ddNode.createCollection(msg.(*msgstream.CreateCollectionMsg))
-		case commonpb.MsgType_kDropCollection:
+		case commonpb.MsgType_DropCollection:
 			ddNode.dropCollection(msg.(*msgstream.DropCollectionMsg))
-		case commonpb.MsgType_kCreatePartition:
+		case commonpb.MsgType_CreatePartition:
 			ddNode.createPartition(msg.(*msgstream.CreatePartitionMsg))
-		case commonpb.MsgType_kDropPartition:
+		case commonpb.MsgType_DropPartition:
 			ddNode.dropPartition(msg.(*msgstream.DropPartitionMsg))
 		default:
 			log.Error("Not supporting message type", zap.Any("Type", msg.Type()))

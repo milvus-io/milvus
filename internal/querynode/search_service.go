@@ -299,7 +299,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 				BaseMsg: msgstream.BaseMsg{HashValues: []uint32{uint32(resultChannelInt)}},
 				SearchResults: internalpb2.SearchResults{
 					Base: &commonpb.MsgBase{
-						MsgType:   commonpb.MsgType_kSearchResult,
+						MsgType:   commonpb.MsgType_SearchResult,
 						MsgID:     searchMsg.Base.MsgID,
 						Timestamp: searchTimestamp,
 						SourceID:  searchMsg.Base.SourceID,
@@ -361,7 +361,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{uint32(resultChannelInt)}},
 			SearchResults: internalpb2.SearchResults{
 				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_kSearchResult,
+					MsgType:   commonpb.MsgType_SearchResult,
 					MsgID:     searchMsg.Base.MsgID,
 					Timestamp: searchTimestamp,
 					SourceID:  searchMsg.Base.SourceID,
@@ -422,7 +422,7 @@ func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg, errMsg s
 		BaseMsg: msgstream.BaseMsg{HashValues: []uint32{uint32(resultChannelInt)}},
 		SearchResults: internalpb2.SearchResults{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kSearchResult,
+				MsgType:   commonpb.MsgType_SearchResult,
 				MsgID:     searchMsg.Base.MsgID,
 				Timestamp: searchMsg.Base.Timestamp,
 				SourceID:  searchMsg.Base.SourceID,

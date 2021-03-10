@@ -41,10 +41,10 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 		HashValues:     []uint32{hashValue},
 	}
 	switch msgType {
-	case commonpb.MsgType_kInsert:
+	case commonpb.MsgType_Insert:
 		insertRequest := internalpb2.InsertRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kInsert,
+				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     reqID,
 				Timestamp: 11,
 				SourceID:  reqID,
@@ -62,10 +62,10 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 			InsertRequest: insertRequest,
 		}
 		return insertMsg
-	case commonpb.MsgType_kDelete:
+	case commonpb.MsgType_Delete:
 		deleteRequest := internalpb2.DeleteRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDelete,
+				MsgType:   commonpb.MsgType_Delete,
 				MsgID:     reqID,
 				Timestamp: 11,
 				SourceID:  reqID,
@@ -80,10 +80,10 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 			DeleteRequest: deleteRequest,
 		}
 		return deleteMsg
-	case commonpb.MsgType_kSearch:
+	case commonpb.MsgType_Search:
 		searchRequest := internalpb2.SearchRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kSearch,
+				MsgType:   commonpb.MsgType_Search,
 				MsgID:     reqID,
 				Timestamp: 11,
 				SourceID:  reqID,
@@ -96,10 +96,10 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 			SearchRequest: searchRequest,
 		}
 		return searchMsg
-	case commonpb.MsgType_kSearchResult:
+	case commonpb.MsgType_SearchResult:
 		searchResult := internalpb2.SearchResults{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kSearchResult,
+				MsgType:   commonpb.MsgType_SearchResult,
 				MsgID:     reqID,
 				Timestamp: 1,
 				SourceID:  reqID,
@@ -112,10 +112,10 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 			SearchResults: searchResult,
 		}
 		return searchResultMsg
-	case commonpb.MsgType_kTimeTick:
+	case commonpb.MsgType_TimeTick:
 		timeTickResult := internalpb2.TimeTickMsg{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kTimeTick,
+				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     reqID,
 				Timestamp: 1,
 				SourceID:  reqID,
@@ -126,10 +126,10 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 			TimeTickMsg: timeTickResult,
 		}
 		return timeTickMsg
-	case commonpb.MsgType_kQueryNodeStats:
+	case commonpb.MsgType_QueryNodeStats:
 		queryNodeSegStats := internalpb2.QueryNodeStats{
 			Base: &commonpb.MsgBase{
-				MsgType:  commonpb.MsgType_kQueryNodeStats,
+				MsgType:  commonpb.MsgType_QueryNodeStats,
 				SourceID: reqID,
 			},
 		}
@@ -150,7 +150,7 @@ func getTimeTickMsg(reqID UniqueID, hashValue uint32, time uint64) TsMsg {
 	}
 	timeTickResult := internalpb2.TimeTickMsg{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kTimeTick,
+			MsgType:   commonpb.MsgType_TimeTick,
 			MsgID:     reqID,
 			Timestamp: time,
 			SourceID:  reqID,
@@ -260,8 +260,8 @@ func TestStream_RmqMsgStream_Insert(t *testing.T) {
 	consumerGroupName := "InsertGroup"
 
 	msgPack := msgstream.MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kInsert, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kInsert, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 3, 3))
 
 	rocksdbName := "/tmp/rocksmq_insert"
 	etcdKV := initRmq(rocksdbName)
@@ -282,7 +282,7 @@ func TestStream_RmqMsgStream_Delete(t *testing.T) {
 	consumerSubName := "subDelete"
 
 	msgPack := msgstream.MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kDelete, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Delete, 1, 1))
 
 	rocksdbName := "/tmp/rocksmq_delete"
 	etcdKV := initRmq(rocksdbName)
@@ -302,8 +302,8 @@ func TestStream_RmqMsgStream_Search(t *testing.T) {
 	consumerSubName := "subSearch"
 
 	msgPack := msgstream.MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kSearch, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kSearch, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Search, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Search, 3, 3))
 
 	rocksdbName := "/tmp/rocksmq_search"
 	etcdKV := initRmq(rocksdbName)
@@ -324,8 +324,8 @@ func TestStream_RmqMsgStream_SearchResult(t *testing.T) {
 	consumerSubName := "subSearchResult"
 
 	msgPack := msgstream.MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kSearchResult, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kSearchResult, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_SearchResult, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_SearchResult, 3, 3))
 
 	rocksdbName := "/tmp/rocksmq_searchresult"
 	etcdKV := initRmq(rocksdbName)
@@ -345,8 +345,8 @@ func TestStream_RmqMsgStream_TimeTick(t *testing.T) {
 	consumerSubName := "subTimeTick"
 
 	msgPack := msgstream.MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kTimeTick, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kTimeTick, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 3, 3))
 
 	rocksdbName := "/tmp/rocksmq_timetick"
 	etcdKV := initRmq(rocksdbName)
@@ -366,8 +366,8 @@ func TestStream_RmqMsgStream_BroadCast(t *testing.T) {
 	consumerSubName := "subInsert"
 
 	msgPack := msgstream.MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kTimeTick, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kTimeTick, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 3, 3))
 
 	rocksdbName := "/tmp/rocksmq_broadcast"
 	etcdKV := initRmq(rocksdbName)
@@ -388,8 +388,8 @@ func TestStream_RmqMsgStream_RepackFunc(t *testing.T) {
 	consumerSubName := "subInsert"
 
 	msgPack := msgstream.MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kInsert, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kInsert, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 3, 3))
 
 	rocksdbName := "/tmp/rocksmq_repackfunc"
 	etcdKV := initRmq(rocksdbName)
@@ -413,8 +413,8 @@ func TestStream_PulsarTtMsgStream_Insert(t *testing.T) {
 	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0, 0, 0))
 
 	msgPack1 := msgstream.MsgPack{}
-	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_kInsert, 1, 1))
-	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_kInsert, 3, 3))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1, 1))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 3, 3))
 
 	msgPack2 := msgstream.MsgPack{}
 	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5, 5, 5))

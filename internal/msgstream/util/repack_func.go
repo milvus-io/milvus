@@ -16,7 +16,7 @@ type BaseMsg = msgstream.BaseMsg
 func InsertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
 	result := make(map[int32]*MsgPack)
 	for i, request := range tsMsgs {
-		if request.Type() != commonpb.MsgType_kInsert {
+		if request.Type() != commonpb.MsgType_Insert {
 			return nil, errors.New("msg's must be Insert")
 		}
 		insertRequest := request.(*msgstream.InsertMsg)
@@ -39,7 +39,7 @@ func InsertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 
 			sliceRequest := internalpb2.InsertRequest{
 				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_kInsert,
+					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     insertRequest.Base.MsgID,
 					Timestamp: insertRequest.Timestamps[index],
 					SourceID:  insertRequest.Base.SourceID,
@@ -68,7 +68,7 @@ func InsertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 func DeleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
 	result := make(map[int32]*MsgPack)
 	for i, request := range tsMsgs {
-		if request.Type() != commonpb.MsgType_kDelete {
+		if request.Type() != commonpb.MsgType_Delete {
 			return nil, errors.New("msg's must be Delete")
 		}
 		deleteRequest := request.(*msgstream.DeleteMsg)
@@ -91,7 +91,7 @@ func DeleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 
 			sliceRequest := internalpb2.DeleteRequest{
 				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_kDelete,
+					MsgType:   commonpb.MsgType_Delete,
 					MsgID:     deleteRequest.Base.MsgID,
 					Timestamp: deleteRequest.Timestamps[index],
 					SourceID:  deleteRequest.Base.SourceID,

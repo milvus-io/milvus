@@ -323,10 +323,15 @@ func (c *Core) startSegmentFlushCompletedLoop() {
 			if !ok {
 				log.Debug("data node segment flush completed chan has colsed, exit loop")
 			}
+			log.Debug("flush segment", zap.Int64("id", seg))
 			coll, err := c.MetaTable.GetCollectionBySegmentID(seg)
 			if err != nil {
-				log.Warn("GetCollectionBySegmentID", zap.String("error", err.Error()))
+				log.Warn("GetCollectionBySegmentID error", zap.Error(err))
 				break
+			}
+			err = c.MetaTable.AddFlushedSegment(seg)
+			if err != nil {
+				log.Warn("AddFlushedSegment error", zap.Error(err))
 			}
 			for _, f := range coll.FieldIndexes {
 				idxInfo, err := c.MetaTable.GetIndexByID(f.IndexID)
@@ -343,7 +348,7 @@ func (c *Core) startSegmentFlushCompletedLoop() {
 						indexName:   idxInfo.IndexName,
 						indexID:     idxInfo.IndexID,
 						fieldSchema: fieldSch,
-						indexParams: nil,
+						indexParams: idxInfo.IndexParams,
 					}
 					c.indexTaskQueue <- t
 				}
@@ -428,7 +433,7 @@ func (c *Core) setMsgStreams() error {
 		}
 		timeTickResult := internalpb2.TimeTickMsg{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kTimeTick,
+				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     0,
 				Timestamp: t,
 				SourceID:  int64(Params.NodeID),
@@ -725,7 +730,7 @@ func (c *Core) SetQueryService(ctx context.Context, s types.QueryService) error 
 	c.ReleaseCollection = func(ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
 		req := &querypb.ReleaseCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kReleaseCollection,
+				MsgType:   commonpb.MsgType_ReleaseCollection,
 				MsgID:     0, //TODO, msg ID
 				Timestamp: ts,
 				SourceID:  int64(Params.NodeID),
