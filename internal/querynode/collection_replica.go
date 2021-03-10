@@ -63,6 +63,7 @@ type ReplicaInterface interface {
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 	hasSegment(segmentID UniqueID) bool
 	getSegmentNum() int
+	setSegmentEnableIndex(segmentID UniqueID, enable bool) error
 
 	getSegmentStatistics() []*internalpb2.SegmentStats
 	getEnabledSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID)
@@ -510,6 +511,10 @@ func (colReplica *collectionReplica) getSegmentsBySegmentType(segType segmentTyp
 
 	for _, segment := range colReplica.segments {
 		if segment.getType() == segType {
+			if segType == segTypeSealed && !segment.getEnableIndex() {
+				continue
+			}
+
 			targetCollectionIDs = append(targetCollectionIDs, segment.collectionID)
 			targetPartitionIDs = append(targetPartitionIDs, segment.partitionID)
 			targetSegmentIDs = append(targetSegmentIDs, segment.segmentID)
@@ -535,6 +540,20 @@ func (colReplica *collectionReplica) replaceGrowingSegmentBySealedSegment(segmen
 	}
 
 	colReplica.segments[segment.ID()] = segment
+	return nil
+}
+
+func (colReplica *collectionReplica) setSegmentEnableIndex(segmentID UniqueID, enable bool) error {
+	colReplica.mu.Lock()
+	defer colReplica.mu.Unlock()
+
+	targetSegment, err := colReplica.getSegmentByIDPrivate(segmentID)
+	if targetSegment.segmentType != segTypeSealed {
+		return errors.New("unexpected segment type")
+	}
+	if err == nil && targetSegment != nil {
+		targetSegment.setEnableIndex(enable)
+	}
 	return nil
 }
 

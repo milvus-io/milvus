@@ -324,6 +324,11 @@ func (loader *indexLoader) getIndexInfo(collectionID UniqueID, segmentID UniqueI
 	if response.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		return -1, -1, errors.New(response.Status.Reason)
 	}
+
+	loader.replica.setSegmentEnableIndex(segmentID, response.EnableIndex)
+	if !response.EnableIndex {
+		return -1, -1, errors.New("There are no indexes on this segment")
+	}
 	return response.IndexID, response.BuildID, nil
 }
 
