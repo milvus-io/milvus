@@ -81,7 +81,7 @@ func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequ
 		return fmt.Errorf("index already exists with ID = %d", indexBuildID)
 	}
 	meta := &indexpb.IndexMeta{
-		State:        commonpb.IndexState_INDEX_STATE_UNISSUED,
+		State:        commonpb.IndexState_Unissued,
 		IndexBuildID: indexBuildID,
 		Req:          req,
 	}
@@ -94,7 +94,7 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 
 	for indexBuildID, meta := range mt.indexBuildID2Meta {
 		if meta.Req.IndexID == indexID {
-			meta.State = commonpb.IndexState_INDEX_STATE_DELETED
+			meta.State = commonpb.IndexState_Deleted
 			mt.indexBuildID2Meta[indexBuildID] = meta
 		}
 	}
@@ -110,15 +110,15 @@ func (mt *metaTable) NotifyBuildIndex(nty *indexpb.BuildIndexNotification) error
 	if !ok {
 		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
-	if meta.State == commonpb.IndexState_INDEX_STATE_DELETED {
+	if meta.State == commonpb.IndexState_Deleted {
 		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 
 	if nty.Status.ErrorCode != commonpb.ErrorCode_Success {
-		meta.State = commonpb.IndexState_INDEX_STATE_FAILED
+		meta.State = commonpb.IndexState_Failed
 		meta.FailReason = nty.Status.Reason
 	} else {
-		meta.State = commonpb.IndexState_INDEX_STATE_FINISHED
+		meta.State = commonpb.IndexState_Finished
 		meta.IndexFilePaths = nty.IndexFilePaths
 	}
 
@@ -130,13 +130,12 @@ func (mt *metaTable) GetIndexState(indexBuildID UniqueID) (*indexpb.IndexInfo, e
 	defer mt.lock.Unlock()
 	ret := &indexpb.IndexInfo{
 		IndexBuildID: indexBuildID,
-		State:        commonpb.IndexState_INDEX_STATE_NONE,
 	}
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
 		return ret, fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
-	if meta.State == commonpb.IndexState_INDEX_STATE_DELETED {
+	if meta.State == commonpb.IndexState_Deleted {
 		return ret, fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 	ret.IndexID = meta.Req.IndexID
@@ -156,7 +155,7 @@ func (mt *metaTable) GetIndexFilePathInfo(indexBuildID UniqueID) (*indexpb.Index
 	if !ok {
 		return nil, fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
-	if meta.State == commonpb.IndexState_INDEX_STATE_DELETED {
+	if meta.State == commonpb.IndexState_Deleted {
 		return nil, fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 	ret.IndexFilePaths = meta.IndexFilePaths

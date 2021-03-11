@@ -105,7 +105,7 @@ func NewDataMock() *DataMock {
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
 			SegmentID:     segmentID,
-			State:         commonpb.SegmentState_SegmentFlushed,
+			State:         commonpb.SegmentState_Flushed,
 			CreateTime:    time,
 			StartPosition: position,
 		}

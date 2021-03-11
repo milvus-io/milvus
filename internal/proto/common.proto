@@ -35,20 +35,20 @@ enum ErrorCode {
 }
 
 enum IndexState {
-    INDEX_STATE_NONE = 0;
-    INDEX_STATE_UNISSUED = 1;
-    INDEX_STATE_IN_PROGRESS = 2;
-    INDEX_STATE_FINISHED = 3;
-    INDEX_STATE_FAILED = 4;
-    INDEX_STATE_DELETED = 5;
+    IndexStateNone = 0;
+    Unissued = 1;
+    InProgress = 2;
+    Finished = 3;
+    Failed = 4;
+    Deleted = 5;
 }
 
 enum SegmentState {
-    SegmentNone = 0;
-    SegmentNotExist = 1;
-    SegmentGrowing = 2;
-    SegmentSealed = 3;
-    SegmentFlushed = 4;
+    SegmentStateNone = 0;
+    NotExist = 1;
+    Growing = 2;
+    Sealed = 3;
+    Flushed = 4;
 }
 
 message Empty{}
@@ -77,7 +77,7 @@ message Address {
 }
 
 enum MsgType {
-    UnSpecific = 0;
+    Undefined = 0;
     /* DEFINITION REQUESTS: COLLECTION */
     CreateCollection = 100;
     DropCollection = 101;

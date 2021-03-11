@@ -108,7 +108,6 @@ func (node *QueryNode) Init() error {
 	ctx := context.Background()
 	registerReq := &queryPb.RegisterNodeRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_UnSpecific,
 			SourceID: Params.QueryNodeID,
 		},
 		Address: &commonpb.Address{
@@ -445,7 +444,7 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	//var position *internalpb2.MsgPosition = nil
 	for i, state := range in.SegmentStates {
 		//thisPosition := state.StartPosition
-		if state.State <= commonpb.SegmentState_SegmentGrowing {
+		if state.State <= commonpb.SegmentState_Growing {
 			//if position == nil {
 			//	position = &internalpb2.MsgPosition{
 			//		ChannelName: thisPosition.ChannelName,

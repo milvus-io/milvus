@@ -106,7 +106,7 @@ func (s *loadService) loadSegmentInternal(collectionID UniqueID, partitionID Uni
 	if err != nil {
 		return err
 	}
-	if statesResp.States[0].State != commonpb.SegmentState_SegmentFlushed {
+	if statesResp.States[0].State != commonpb.SegmentState_Flushed {
 		return errors.New("segment not flush done")
 	}
 

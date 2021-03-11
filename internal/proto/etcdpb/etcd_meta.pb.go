@@ -745,7 +745,7 @@ func (m *FieldIndexMeta) GetState() commonpb.IndexState {
 	if m != nil {
 		return m.State
 	}
-	return commonpb.IndexState_INDEX_STATE_NONE
+	return commonpb.IndexState_IndexStateNone
 }
 
 func (m *FieldIndexMeta) GetIndexFilePaths() []string {

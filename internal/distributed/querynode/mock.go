@@ -127,10 +127,10 @@ func (data *DataServiceMock) GetInsertBinlogPaths(req *datapb.InsertBinlogPathRe
 
 func (data *DataServiceMock) GetSegmentStates(req *datapb.SegmentStatesRequest) (*datapb.SegmentStatesResponse, error) {
 	segmentGrowingInfo := &datapb.SegmentStateInfo{
-		State: commonpb.SegmentState_SegmentGrowing,
+		State: commonpb.SegmentState_Growing,
 	}
 	segmentFlushedInfo := &datapb.SegmentStateInfo{
-		State: commonpb.SegmentState_SegmentFlushed,
+		State: commonpb.SegmentState_Flushed,
 	}
 
 	if data.Count < 10 {
