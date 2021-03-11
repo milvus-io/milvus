@@ -2,7 +2,6 @@ grpcio==1.26.0
 grpcio-tools==1.26.0
 numpy==1.18.1
 pytest-cov==2.8.1
-pymilvus-distributed==0.0.42
 sklearn==0.0
 pytest==6.2.2
 pytest-timeout==1.3.3
