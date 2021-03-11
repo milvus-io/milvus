@@ -647,6 +647,7 @@ class TestIndexBinary:
         res = connect.search(binary_collection, query, search_params=search_param)
         assert len(res) == nq
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_invalid_metric_type_binary(self, connect, binary_collection, get_l2_index):
         '''
@@ -657,13 +658,8 @@ class TestIndexBinary:
         # insert 6000 vectors
         ids = connect.insert(binary_collection, default_binary_entities)
         connect.flush([binary_collection])
-        if get_l2_index["index_type"] == "BIN_FLAT":
-            connect.create_index(binary_collection, binary_field_name, get_l2_index)
-            binary_index = connect.describe_index(binary_collection, binary_field_name)
-            assert binary_index == get_l2_index
-        else:
-            with pytest.raises(Exception) as e:
-                res = connect.create_index(binary_collection, binary_field_name, get_l2_index)
+        with pytest.raises(Exception) as e:
+            res = connect.create_index(binary_collection, binary_field_name, get_l2_index)
 
     """
     ******************************************************************
