@@ -204,13 +204,13 @@ func (mp *metaReplica) getPartitionStates(dbID UniqueID,
 
 func (mp *metaReplica) releaseCollection(dbID UniqueID, collectionID UniqueID) error {
 	if collections, ok := mp.db2collections[dbID]; ok {
-		for i, collection := range collections {
-			if collectionID == collection.id {
-				if i+1 < len(collections) {
-					collections = append(collections[:i], collections[i+1:]...)
-				} else {
-					collections = collections[:i]
-				}
+		for i, coll := range collections {
+			if collectionID == coll.id {
+				newSize := len(collections) - 1
+				newColls := make([]*collection, 0, newSize)
+				collections[i] = collections[newSize]
+				newColls = append(newColls, collections[:newSize]...)
+				mp.db2collections[dbID] = newColls
 				return nil
 			}
 		}

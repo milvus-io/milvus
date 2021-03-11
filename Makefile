@@ -117,6 +117,10 @@ singlenode: build-cpp
 	@echo "Building singlenode ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/singlenode $(PWD)/cmd/singlenode/main.go 1>/dev/null
 
+queryservice: build-cpp
+	@echo "Building each component's binary to './bin'"
+	@echo "Building distributed queryservice ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/queryservice $(PWD)/cmd/queryservice/queryservice.go 1>/dev/null
 
 # Builds various components locally.
 build-go: build-cpp

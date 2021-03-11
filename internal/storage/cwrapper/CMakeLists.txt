@@ -128,4 +128,6 @@ install(TARGETS wrapper DESTINATION ${CMAKE_INSTALL_PREFIX})
 install(
     FILES ${ARROW_LIB} ${PARQUET_LIB} ${THRIFT_LIB} ${UTF8PROC_LIB} DESTINATION ${CMAKE_INSTALL_PREFIX})
 
-add_subdirectory(test)
+if (BUILD_TESTING)
+    add_subdirectory(test)
+endif()
