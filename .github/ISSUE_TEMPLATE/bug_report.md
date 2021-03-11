@@ -24,7 +24,7 @@ A clear and concise description of what you expected to happen.
 - [ ] Build from source
 
 **Environment details**
-- Hardware/Softwars conditions (OS, CPU, GPU, Memory)
+- Hardware/Software conditions (OS, CPU, GPU, Memory)
 
 
 - Milvus version (master or released version)
