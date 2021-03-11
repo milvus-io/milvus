@@ -2,8 +2,10 @@ package timesync
 
 import (
 	"context"
-	"log"
 
+	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
@@ -33,14 +35,14 @@ func (watcher *MsgTimeTickWatcher) StartBackgroundLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("msg time tick watcher closed")
+			log.Debug("msg time tick watcher closed")
 			return
 		case msg := <-watcher.msgQueue:
 			msgPack := &ms.MsgPack{}
 			msgPack.Msgs = append(msgPack.Msgs, msg)
 			for _, stream := range watcher.streams {
 				if err := stream.Broadcast(ctx, msgPack); err != nil {
-					log.Printf("stream broadcast failed %s", err.Error())
+					log.Warn("stream broadcast failed", zap.Error(err))
 				}
 			}
 		}
