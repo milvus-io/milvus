@@ -7,7 +7,7 @@ pipeline {
         timestamps()
     }
     environment {
-        PROJECT_NAME = "milvus-distributed"
+        PROJECT_NAME = "milvus"
         SEMVER = "${BRANCH_NAME.contains('/') ? BRANCH_NAME.substring(BRANCH_NAME.lastIndexOf('/') + 1) : BRANCH_NAME}"
         BUILD_TYPE = "Release"
         LOWER_BUILD_TYPE = BUILD_TYPE.toLowerCase()
@@ -71,15 +71,22 @@ pipeline {
             matrix {
                 axes {
                     axis {
-                        name 'REGRESSION_SERVICE_NAME'
-                        values 'regression_standalone', 'regression_distributed'
+                        name 'REGRESSION_SERVICE_TYPE'
+                        values 'standalone', 'distributed'
                     }
                 }
                 environment {
-                    DOCKER_COMPOSE_PROJECT_NAME = "${PROJECT_NAME}-${SEMVER}-${env.BUILD_NUMBER}".replaceAll("\\.", "-").replaceAll("_", "-")
+                    HELM_BRANCH = "main"
+                    HELM_RELEASE_NAMESPACE = "dev"
+                    HELM_RELEASE_NAME = "${PROJECT_NAME}-${SEMVER}-${env.BUILD_NUMBER}-${REGRESSION_SERVICE_TYPE}".replaceAll("\\.", "-").replaceAll("_", "-").toLowerCase()
+                    DEV_TEST_ARTIFACTS_PATH = "artifacts"
                 }
                 agent {
-                    label 'performance'
+                    kubernetes {
+                        label "${env.PROJECT_NAME}-${SEMVER}-${env.BUILD_NUMBER}-${REGRESSION_SERVICE_TYPE}-devtest"
+                        defaultContainer 'test-env'
+                        yamlFile "build/ci/jenkins/pod/test-env.yaml"
+                    }
                 }
                 stages {
                     stage('Test') {
@@ -90,7 +97,7 @@ pipeline {
                 }
                 post {
                     cleanup {
-                        deleteDir() /* clean up our workspace */
+                        MPLModule('Cleanup Python Regression')
                     }
                 }
             }
