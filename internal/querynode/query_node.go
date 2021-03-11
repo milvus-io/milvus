@@ -442,29 +442,29 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	}
 
 	// segments are ordered before LoadSegments calling
-	var position *internalpb2.MsgPosition = nil
+	//var position *internalpb2.MsgPosition = nil
 	for i, state := range in.SegmentStates {
-		thisPosition := state.StartPosition
+		//thisPosition := state.StartPosition
 		if state.State <= commonpb.SegmentState_SegmentGrowing {
-			if position == nil {
-				position = &internalpb2.MsgPosition{
-					ChannelName: thisPosition.ChannelName,
-				}
-			}
+			//if position == nil {
+			//	position = &internalpb2.MsgPosition{
+			//		ChannelName: thisPosition.ChannelName,
+			//	}
+			//}
 			segmentIDs = segmentIDs[:i]
 			break
 		}
-		position = state.StartPosition
+		//position = state.StartPosition
 	}
 
-	err = node.dataSyncService.seekSegment(position)
-	if err != nil {
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
-		return status, err
-	}
+	//err = node.dataSyncService.seekSegment(position)
+	//if err != nil {
+	//	status := &commonpb.Status{
+	//		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	//		Reason:    err.Error(),
+	//	}
+	//	return status, err
+	//}
 
 	err = node.loadService.loadSegment(collectionID, partitionID, segmentIDs, fieldIDs)
 	if err != nil {
