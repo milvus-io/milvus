@@ -115,9 +115,17 @@ message RemoveQueryChannelsRequest {
   string result_channelID = 4;
 }
 
+message WatchDmChannelInfo {
+  string channelID = 1;
+  internal.MsgPosition pos = 2;
+  repeated int64 excluded_segments = 3;
+}
+
 message WatchDmChannelsRequest  {
   common.MsgBase base = 1;
-  repeated string channelIDs = 2;
+  int64 collectionID = 2;
+  repeated string channelIDs = 3;
+  repeated WatchDmChannelInfo infos = 4;
 }
 
 message LoadSegmentRequest {
