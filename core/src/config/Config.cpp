@@ -9,6 +9,9 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include "config/Config.h"
+
+#include <fiu-local.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -24,9 +27,6 @@
 #include <unordered_set>
 #include <vector>
 
-#include <fiu-local.h>
-
-#include "config/Config.h"
 #include "config/Utils.h"
 #include "config/YamlConfigMgr.h"
 #include "server/DBWrapper.h"
@@ -82,6 +82,21 @@ const char* CONFIG_STORAGE_AUTO_FLUSH_INTERVAL = "auto_flush_interval";
 const char* CONFIG_STORAGE_AUTO_FLUSH_INTERVAL_DEFAULT = "1";
 const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT = "file_cleanup_timeout";
 const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_DEFAULT = "10";
+#ifdef MILVUS_WITH_AWS
+const char* CONFIG_STORAGE_S3_ENABLE = "s3_enabled";
+const char* CONFIG_STORAGE_S3_ENABLE_DEFAULT = "false";
+const char* CONFIG_STORAGE_S3_ADDRESS = "s3_address";
+const char* CONFIG_STORAGE_S3_ADDRESS_DEFAULT = "127.0.0.1";
+const char* CONFIG_STORAGE_S3_PORT = "s3_port";
+const char* CONFIG_STORAGE_S3_PORT_DEFAULT = "80";
+const char* CONFIG_STORAGE_S3_ACCESS_KEY = "s3_access_key";
+const char* CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT = "";
+const char* CONFIG_STORAGE_S3_SECRET_KEY = "s3_secret_key";
+const char* CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT = "";
+const char* CONFIG_STORAGE_S3_BUCKET = "s3_bucket";
+const char* CONFIG_STORAGE_S3_BUCKET_DEFAULT = "";
+#endif
+
 const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN = 0;
 const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MAX = 3600;
 
@@ -347,24 +362,26 @@ Config::ValidateConfig() {
     int64_t auto_flush_interval;
     STATUS_CHECK(GetStorageConfigAutoFlushInterval(auto_flush_interval));
 
-    // bool storage_s3_enable;
-    // STATUS_CHECK(GetStorageConfigS3Enable(storage_s3_enable));
-    // // std::cout << "S3 " << (storage_s3_enable ? "ENABLED !" : "DISABLED !") << std::endl;
-    //
-    // std::string storage_s3_address;
-    // STATUS_CHECK(GetStorageConfigS3Address(storage_s3_address));
-    //
-    // std::string storage_s3_port;
-    // STATUS_CHECK(GetStorageConfigS3Port(storage_s3_port));
-    //
-    // std::string storage_s3_access_key;
-    // STATUS_CHECK(GetStorageConfigS3AccessKey(storage_s3_access_key));
-    //
-    // std::string storage_s3_secret_key;
-    // STATUS_CHECK(GetStorageConfigS3SecretKey(storage_s3_secret_key));
-    //
-    // std::string storage_s3_bucket;
-    // STATUS_CHECK(GetStorageConfigS3Bucket(storage_s3_bucket));
+#ifdef MILVUS_WITH_AWS
+    bool storage_s3_enable;
+    STATUS_CHECK(GetStorageConfigS3Enable(storage_s3_enable));
+    // std::cout << "S3 " << (storage_s3_enable ? "ENABLED !" : "DISABLED !") << std::endl;
+
+    std::string storage_s3_address;
+    STATUS_CHECK(GetStorageConfigS3Address(storage_s3_address));
+
+    std::string storage_s3_port;
+    STATUS_CHECK(GetStorageConfigS3Port(storage_s3_port));
+
+    std::string storage_s3_access_key;
+    STATUS_CHECK(GetStorageConfigS3AccessKey(storage_s3_access_key));
+
+    std::string storage_s3_secret_key;
+    STATUS_CHECK(GetStorageConfigS3SecretKey(storage_s3_secret_key));
+
+    std::string storage_s3_bucket;
+    STATUS_CHECK(GetStorageConfigS3Bucket(storage_s3_bucket));
+#endif
 
     /* metric config */
     bool metric_enable_monitor;
@@ -507,12 +524,14 @@ Config::ResetDefaultConfig() {
     STATUS_CHECK(SetStorageConfigPath(CONFIG_STORAGE_PATH_DEFAULT));
     STATUS_CHECK(SetStorageConfigAutoFlushInterval(CONFIG_STORAGE_AUTO_FLUSH_INTERVAL_DEFAULT));
     STATUS_CHECK(SetStorageConfigFileCleanupTimeout(CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_DEFAULT));
-    // STATUS_CHECK(SetStorageConfigS3Enable(CONFIG_STORAGE_S3_ENABLE_DEFAULT));
-    // STATUS_CHECK(SetStorageConfigS3Address(CONFIG_STORAGE_S3_ADDRESS_DEFAULT));
-    // STATUS_CHECK(SetStorageConfigS3Port(CONFIG_STORAGE_S3_PORT_DEFAULT));
-    // STATUS_CHECK(SetStorageConfigS3AccessKey(CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT));
-    // STATUS_CHECK(SetStorageConfigS3SecretKey(CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT));
-    // STATUS_CHECK(SetStorageConfigS3Bucket(CONFIG_STORAGE_S3_BUCKET_DEFAULT));
+#ifdef MILVUS_WITH_AWS
+    STATUS_CHECK(SetStorageConfigS3Enable(CONFIG_STORAGE_S3_ENABLE_DEFAULT));
+    STATUS_CHECK(SetStorageConfigS3Address(CONFIG_STORAGE_S3_ADDRESS_DEFAULT));
+    STATUS_CHECK(SetStorageConfigS3Port(CONFIG_STORAGE_S3_PORT_DEFAULT));
+    STATUS_CHECK(SetStorageConfigS3AccessKey(CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT));
+    STATUS_CHECK(SetStorageConfigS3SecretKey(CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT));
+    STATUS_CHECK(SetStorageConfigS3Bucket(CONFIG_STORAGE_S3_BUCKET_DEFAULT));
+#endif
 
     /* metric config */
     STATUS_CHECK(SetMetricConfigEnableMonitor(CONFIG_METRIC_ENABLE_MONITOR_DEFAULT));
@@ -1269,68 +1288,73 @@ Config::CheckStorageConfigFileCleanupTimeout(const std::string& value) {
     return Status::OK();
 }
 
-// Status
-// Config::CheckStorageConfigS3Enable(const std::string& value) {
-//    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
-//        std::string msg =
-//            "Invalid storage config: " + value + ". Possible reason: storage_config.s3_enable is not a boolean.";
-//        return Status(SERVER_INVALID_ARGUMENT, msg);
-//    }
-//    return Status::OK();
-// }
-//
-// Status
-// Config::CheckStorageConfigS3Address(const std::string& value) {
-//    if (!ValidationUtil::ValidateIpAddress(value).ok()) {
-//        std::string msg = "Invalid s3 address: " + value + ". Possible reason: storage_config.s3_address is invalid.";
-//        return Status(SERVER_INVALID_ARGUMENT, msg);
-//    }
-//    return Status::OK();
-// }
-//
-// Status
-// Config::CheckStorageConfigS3Port(const std::string& value) {
-//    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-//        std::string msg = "Invalid s3 port: " + value + ". Possible reason: storage_config.s3_port is not a number.";
-//        return Status(SERVER_INVALID_ARGUMENT, msg);
-//    } else {
-//        try {
-//            int32_t port = std::stoi(value);
-//            if (!(port > PORT_NUMBER_MIN && port < PORT_NUMBER_MAX)) {
-//                std::string msg = "Invalid s3 port: " + value +
-//                                  ". Possible reason: storage_config.s3_port is not in range (1024, 65535).";
-//                return Status(SERVER_INVALID_ARGUMENT, msg);
-//            }
-//        } catch (...) {
-//            return Status(SERVER_INVALID_ARGUMENT, "Invalid storage_config.s3_port: " + value);
-//        }
-//    }
-//    return Status::OK();
-// }
-//
-// Status
-// Config::CheckStorageConfigS3AccessKey(const std::string& value) {
-//    if (value.empty()) {
-//        return Status(SERVER_INVALID_ARGUMENT, "storage_config.s3_access_key is empty.");
-//    }
-//    return Status::OK();
-// }
-//
-// Status
-// Config::CheckStorageConfigS3SecretKey(const std::string& value) {
-//    if (value.empty()) {
-//        return Status(SERVER_INVALID_ARGUMENT, "storage_config.s3_secret_key is empty.");
-//    }
-//    return Status::OK();
-// }
-//
-// Status
-// Config::CheckStorageConfigS3Bucket(const std::string& value) {
-//    if (value.empty()) {
-//        return Status(SERVER_INVALID_ARGUMENT, "storage_config.s3_bucket is empty.");
-//    }
-//    return Status::OK();
-// }
+#ifdef MILVUS_WITH_AWS
+
+Status
+Config::CheckStorageConfigS3Enable(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
+        std::string msg =
+            "Invalid storage config: " + value + ". Possible reason: storage_config.s3_enable is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckStorageConfigS3Address(const std::string& value) {
+    if (!ValidationUtil::ValidateIpAddress(value).ok()) {
+        std::string msg = "Invalid s3 address: " + value + ". Possible reason: storage_config.s3_address is invalid.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckStorageConfigS3Port(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+        std::string msg = "Invalid s3 port: " + value + ". Possible reason: storage_config.s3_port is not a number.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    } else {
+        try {
+            int32_t port = std::stoi(value);
+            if (!(port > 0 && port < PORT_NUMBER_MAX)) {
+                std::string msg = "Invalid s3 port: " + value +
+                                  ". Possible reason: storage_config.s3_port is not in range (0, " +
+                                  std::to_string(PORT_NUMBER_MAX) + ").";
+                return Status(SERVER_INVALID_ARGUMENT, msg);
+            }
+        } catch (...) {
+            return Status(SERVER_INVALID_ARGUMENT, "Invalid storage_config.s3_port: " + value);
+        }
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckStorageConfigS3AccessKey(const std::string& value) {
+    if (value.empty()) {
+        return Status(SERVER_INVALID_ARGUMENT, "storage_config.s3_access_key is empty.");
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckStorageConfigS3SecretKey(const std::string& value) {
+    if (value.empty()) {
+        return Status(SERVER_INVALID_ARGUMENT, "storage_config.s3_secret_key is empty.");
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckStorageConfigS3Bucket(const std::string& value) {
+    if (value.empty()) {
+        return Status(SERVER_INVALID_ARGUMENT, "storage_config.s3_bucket is empty.");
+    }
+    return Status::OK();
+}
+
+#endif
 
 /* metric config */
 Status
@@ -2329,43 +2353,45 @@ Config::GetStorageConfigFileCleanupTimeup(int64_t& value) {
     return Status::OK();
 }
 
-// Status
-// Config::GetStorageConfigS3Enable(bool& value) {
-//    std::string str = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_ENABLE, CONFIG_STORAGE_S3_ENABLE_DEFAULT);
-//    STATUS_CHECK(CheckStorageConfigS3Enable(str));
-//    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
-//    return Status::OK();
-// }
-//
-// Status
-// Config::GetStorageConfigS3Address(std::string& value) {
-//    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_ADDRESS, CONFIG_STORAGE_S3_ADDRESS_DEFAULT);
-//    return CheckStorageConfigS3Address(value);
-// }
-//
-// Status
-// Config::GetStorageConfigS3Port(std::string& value) {
-//    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_PORT, CONFIG_STORAGE_S3_PORT_DEFAULT);
-//    return CheckStorageConfigS3Port(value);
-// }
-//
-// Status
-// Config::GetStorageConfigS3AccessKey(std::string& value) {
-//    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_ACCESS_KEY, CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT);
-//    return Status::OK();
-// }
-//
-// Status
-// Config::GetStorageConfigS3SecretKey(std::string& value) {
-//    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_SECRET_KEY, CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT);
-//    return Status::OK();
-// }
-//
-// Status
-// Config::GetStorageConfigS3Bucket(std::string& value) {
-//    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_BUCKET, CONFIG_STORAGE_S3_BUCKET_DEFAULT);
-//    return Status::OK();
-// }
+#ifdef MILVUS_WITH_AWS
+Status
+Config::GetStorageConfigS3Enable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_ENABLE, CONFIG_STORAGE_S3_ENABLE_DEFAULT);
+    STATUS_CHECK(CheckStorageConfigS3Enable(str));
+    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+
+Status
+Config::GetStorageConfigS3Address(std::string& value) {
+    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_ADDRESS, CONFIG_STORAGE_S3_ADDRESS_DEFAULT);
+    return CheckStorageConfigS3Address(value);
+}
+
+Status
+Config::GetStorageConfigS3Port(std::string& value) {
+    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_PORT, CONFIG_STORAGE_S3_PORT_DEFAULT);
+    return CheckStorageConfigS3Port(value);
+}
+
+Status
+Config::GetStorageConfigS3AccessKey(std::string& value) {
+    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_ACCESS_KEY, CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT);
+    return Status::OK();
+}
+
+Status
+Config::GetStorageConfigS3SecretKey(std::string& value) {
+    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_SECRET_KEY, CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT);
+    return Status::OK();
+}
+
+Status
+Config::GetStorageConfigS3Bucket(std::string& value) {
+    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_BUCKET, CONFIG_STORAGE_S3_BUCKET_DEFAULT);
+    return Status::OK();
+}
+#endif
 
 /* metric config */
 Status
@@ -2844,41 +2870,44 @@ Config::SetStorageConfigFileCleanupTimeout(const std::string& value) {
     return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT, value);
 }
 
-// Status
-// Config::SetStorageConfigS3Enable(const std::string& value) {
-//    STATUS_CHECK(CheckStorageConfigS3Enable(value));
-//    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_ENABLE, value);
-// }
-//
-// Status
-// Config::SetStorageConfigS3Address(const std::string& value) {
-//    STATUS_CHECK(CheckStorageConfigS3Address(value));
-//    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_ADDRESS, value);
-// }
-//
-// Status
-// Config::SetStorageConfigS3Port(const std::string& value) {
-//    STATUS_CHECK(CheckStorageConfigS3Port(value));
-//    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_PORT, value);
-// }
-//
-// Status
-// Config::SetStorageConfigS3AccessKey(const std::string& value) {
-//    STATUS_CHECK(CheckStorageConfigS3AccessKey(value));
-//    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_ACCESS_KEY, value);
-// }
-//
-// Status
-// Config::SetStorageConfigS3SecretKey(const std::string& value) {
-//    STATUS_CHECK(CheckStorageConfigS3SecretKey(value));
-//    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_SECRET_KEY, value);
-// }
-//
-// Status
-// Config::SetStorageConfigS3Bucket(const std::string& value) {
-//    STATUS_CHECK(CheckStorageConfigS3Bucket(value));
-//    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_BUCKET, value);
-// }
+#ifdef MILVUS_WITH_AWS
+Status
+Config::SetStorageConfigS3Enable(const std::string& value) {
+    STATUS_CHECK(CheckStorageConfigS3Enable(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_ENABLE, value);
+}
+
+Status
+Config::SetStorageConfigS3Address(const std::string& value) {
+    STATUS_CHECK(CheckStorageConfigS3Address(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_ADDRESS, value);
+}
+
+Status
+Config::SetStorageConfigS3Port(const std::string& value) {
+    STATUS_CHECK(CheckStorageConfigS3Port(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_PORT, value);
+}
+
+Status
+Config::SetStorageConfigS3AccessKey(const std::string& value) {
+    STATUS_CHECK(CheckStorageConfigS3AccessKey(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_ACCESS_KEY, value);
+}
+
+Status
+Config::SetStorageConfigS3SecretKey(const std::string& value) {
+    STATUS_CHECK(CheckStorageConfigS3SecretKey(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_SECRET_KEY, value);
+}
+
+Status
+Config::SetStorageConfigS3Bucket(const std::string& value) {
+    STATUS_CHECK(CheckStorageConfigS3Bucket(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_BUCKET, value);
+}
+
+#endif
 
 /* metric config */
 Status
