@@ -254,7 +254,7 @@ struct IVFScanner: InvertedListScanner {
     }
 
     float distance_to_code (const uint8_t *code) const final {
-        return hc.hamming (code);
+        return hc.compute (code);
     }
 
     size_t scan_codes (size_t list_size,
@@ -262,12 +262,12 @@ struct IVFScanner: InvertedListScanner {
                        const idx_t *ids,
                        float *simi, idx_t *idxi,
                        size_t k,
-                       const BitsetView& bitset) const override
+                       const BitsetView bitset) const override
     {
         size_t nup = 0;
         for (size_t j = 0; j < list_size; j++) {
             if (!bitset || !bitset.test(ids[j])) {
-                float dis = hc.hamming (codes);
+                float dis = hc.compute (codes);
 
                 if (dis < simi [0]) {
                     int64_t id = store_pairs ? (list_no << 32 | j) : ids[j];
@@ -285,10 +285,10 @@ struct IVFScanner: InvertedListScanner {
                            const idx_t *ids,
                            float radius,
                            RangeQueryResult & res,
-                           const BitsetView& bitset = nullptr) const override
+                           const BitsetView bitset = nullptr) const override
     {
         for (size_t j = 0; j < list_size; j++) {
-            float dis = hc.hamming (codes);
+            float dis = hc.compute (codes);
             if (dis < radius) {
                 int64_t id = store_pairs ? lo_build (list_no, j) : ids[j];
                 res.add (dis, id);
@@ -317,10 +317,8 @@ InvertedListScanner* IndexIVFSpectralHash::get_InvertedListScanner
         HANDLE_CODE_SIZE(64);
 #undef HANDLE_CODE_SIZE
         default:
-            if (code_size % 8 == 0) {
-                return new IVFScanner<HammingComputerM8>(this, store_pairs);
-            } else if (code_size % 4 == 0) {
-                return new IVFScanner<HammingComputerM4>(this, store_pairs);
+            if (code_size % 4 == 0) {
+                return new IVFScanner<HammingComputerDefault>(this, store_pairs);
             } else {
                 FAISS_THROW_MSG("not supported");
             }

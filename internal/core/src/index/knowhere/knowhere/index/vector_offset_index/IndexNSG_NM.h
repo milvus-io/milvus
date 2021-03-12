@@ -54,7 +54,7 @@ class NSG_NM : public VecIndex {
     }
 
     DatasetPtr
-    Query(const DatasetPtr&, const Config&, const faiss::BitsetView& bitset) override;
+    Query(const DatasetPtr&, const Config&, const faiss::BitsetView bitset) override;
 
     int64_t
     Count() override;

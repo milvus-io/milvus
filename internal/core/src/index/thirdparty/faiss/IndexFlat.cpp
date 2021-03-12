@@ -41,7 +41,7 @@ void IndexFlat::reset() {
 
 void IndexFlat::search (idx_t n, const float *x, idx_t k,
                         float *distances, idx_t *labels,
-                        const BitsetView& bitset) const
+                        const BitsetView bitset) const
 {
     // we see the distances and labels as heaps
 
@@ -91,21 +91,30 @@ void IndexFlat::assign(idx_t n, const float * x, idx_t * labels, float* distance
 
 void IndexFlat::range_search (idx_t n, const float *x, float radius,
                               RangeSearchResult *result,
-                              const BitsetView& bitset) const
+                              const BitsetView bitset) const
 {
-    switch (metric_type) {
-    case METRIC_INNER_PRODUCT:
-        range_search_inner_product (x, xb.data(), d, n, ntotal,
-                                    radius, result);
-        break;
-    case METRIC_L2:
-        range_search_L2sqr (x, xb.data(), d, n, ntotal, radius, result);
-        break;
-    default:
-        FAISS_THROW_MSG("metric type not supported");
-    }
+    FAISS_THROW_MSG("This interface is abandoned yet.");
 }
 
+void IndexFlat::range_search(faiss::Index::idx_t n,
+                             const float* x,
+                             float radius,
+                             std::vector<faiss::RangeSearchPartialResult*>& result,
+                             size_t buffer_size,
+                             const faiss::BitsetView bitset) {
+
+    switch (metric_type) {
+        case METRIC_INNER_PRODUCT:
+            range_search_inner_product (x, xb.data(), d, n, ntotal,
+                                        radius, result, buffer_size, bitset);
+            break;
+        case METRIC_L2:
+            range_search_L2sqr (x, xb.data(), d, n, ntotal, radius, result, buffer_size, bitset);
+            break;
+        default:
+            FAISS_THROW_MSG("metric type not supported");
+    }
+}
 
 void IndexFlat::compute_distance_subset (
             idx_t n,
@@ -271,7 +280,7 @@ void IndexFlatL2BaseShift::search (
             idx_t k,
             float *distances,
             idx_t *labels,
-            const BitsetView& bitset) const
+            const BitsetView bitset) const
 {
     FAISS_THROW_IF_NOT (shift.size() == ntotal);
 
@@ -355,7 +364,7 @@ static void reorder_2_heaps (
 void IndexRefineFlat::search (
               idx_t n, const float *x, idx_t k,
               float *distances, idx_t *labels,
-              const BitsetView& bitset) const
+              const BitsetView bitset) const
 {
     FAISS_THROW_IF_NOT (is_trained);
     idx_t k_base = idx_t (k * k_factor);
@@ -449,7 +458,7 @@ void IndexFlat1D::search (
             idx_t k,
             float *distances,
             idx_t *labels,
-            const BitsetView& bitset) const
+            const BitsetView bitset) const
 {
     FAISS_THROW_IF_NOT_MSG (perm.size() == ntotal,
                     "Call update_permutation before search");

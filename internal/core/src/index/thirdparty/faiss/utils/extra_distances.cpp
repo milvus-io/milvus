@@ -181,7 +181,7 @@ void knn_extra_metrics_template (
         const float * y,
         size_t nx, size_t ny,
         float_maxheap_array_t * res,
-        const BitsetView& bitset = nullptr)
+        const BitsetView bitset = nullptr)
 {
     size_t k = res->k;
     size_t d = vd.d;
@@ -302,7 +302,7 @@ void knn_extra_metrics (
         size_t d, size_t nx, size_t ny,
         MetricType mt, float metric_arg,
         float_maxheap_array_t * res,
-        const BitsetView& bitset)
+        const BitsetView bitset)
 {
 
     switch(mt) {

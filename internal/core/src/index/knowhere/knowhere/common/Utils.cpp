@@ -40,10 +40,9 @@ Slice(const std::string& prefix,
     for (int64_t i = 0; i < data_src->size; ++slice_num) {
         int64_t ri = std::min(i + slice_len, data_src->size);
         auto size = static_cast<size_t>(ri - i);
-        auto slice_i = reinterpret_cast<uint8_t*>(malloc(size));
-        memcpy(slice_i, data_src->data.get() + i, size);
-        std::shared_ptr<uint8_t[]> slice_i_sp(slice_i, std::default_delete<uint8_t[]>());
-        binarySet.Append(prefix + "_" + std::to_string(slice_num), slice_i_sp, ri - i);
+        auto slice_i = std::shared_ptr<uint8_t[]>(new uint8_t[size]);
+        memcpy(slice_i.get(), data_src->data.get() + i, size);
+        binarySet.Append(prefix + "_" + std::to_string(slice_num), slice_i, ri - i);
         i = ri;
     }
     ret[NAME] = prefix;
@@ -65,15 +64,14 @@ Assemble(BinarySet& binarySet) {
         std::string prefix = item[NAME];
         int slice_num = item[SLICE_NUM];
         auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
-        auto p_data = reinterpret_cast<uint8_t*>(malloc(total_len));
+        auto p_data = std::shared_ptr<uint8_t[]>(new uint8_t[total_len]);
         int64_t pos = 0;
         for (auto i = 0; i < slice_num; ++i) {
             auto slice_i_sp = binarySet.Erase(prefix + "_" + std::to_string(i));
-            memcpy(p_data + pos, slice_i_sp->data.get(), static_cast<size_t>(slice_i_sp->size));
+            memcpy(p_data.get() + pos, slice_i_sp->data.get(), static_cast<size_t>(slice_i_sp->size));
             pos += slice_i_sp->size;
         }
-        std::shared_ptr<uint8_t[]> integral_data(p_data, std::default_delete<uint8_t[]>());
-        binarySet.Append(prefix, integral_data, total_len);
+        binarySet.Append(prefix, p_data, total_len);
     }
 }
 

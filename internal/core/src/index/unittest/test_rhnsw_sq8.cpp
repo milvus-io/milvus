@@ -10,12 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
+#include <knowhere/index/vector_index/IndexRHNSWSQ.h>
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include <iostream>
 #include <random>
-
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/IndexRHNSWSQ.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "unittest/utils.h"
 
 using ::testing::Combine;
@@ -62,6 +61,7 @@ TEST_P(RHNSWSQ8Test, HNSW_basic) {
     milvus::knowhere::BinarySet bs = index_->Serialize(conf);
     auto result1 = index_->Query(query_dataset, conf, nullptr);
     //    AssertAnns(result1, nq, k);
+    ReleaseQueryResult(result1);
 
     auto tmp_index = std::make_shared<milvus::knowhere::IndexRHNSWSQ>();
 
@@ -69,6 +69,7 @@ TEST_P(RHNSWSQ8Test, HNSW_basic) {
 
     auto result2 = tmp_index->Query(query_dataset, conf, nullptr);
     //    AssertAnns(result2, nq, k);
+    ReleaseQueryResult(result2);
 }
 
 TEST_P(RHNSWSQ8Test, HNSW_delete) {
@@ -86,9 +87,11 @@ TEST_P(RHNSWSQ8Test, HNSW_delete) {
 
     auto result1 = index_->Query(query_dataset, conf, nullptr);
     //    AssertAnns(result1, nq, k);
+    ReleaseQueryResult(result1);
 
     auto result2 = index_->Query(query_dataset, conf, bitset);
     //    AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
+    ReleaseQueryResult(result2);
 
     /*
      * delete result checked by eyes
@@ -149,6 +152,7 @@ TEST_P(RHNSWSQ8Test, HNSW_serialize) {
         EXPECT_EQ(new_idx->Dim(), dim);
         auto result = new_idx->Query(query_dataset, conf, nullptr);
         //        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
+        ReleaseQueryResult(result);
     }
 }
 
@@ -163,5 +167,6 @@ TEST_P(RHNSWSQ8Test, HNSW_slice) {
         EXPECT_EQ(new_idx->Dim(), dim);
         auto result = new_idx->Query(query_dataset, conf, nullptr);
         //        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
+        ReleaseQueryResult(result);
     }
 }

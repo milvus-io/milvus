@@ -28,6 +28,10 @@ constexpr const char* DEVICEID = "gpu_id";
 };  // namespace meta
 
 namespace IndexParams {
+// Range Search Params
+constexpr const char* range_search_radius = "range_search_radius";
+constexpr const char* range_search_buffer_size = "range_search_buffer_size";
+
 // IVF Params
 constexpr const char* nprobe = "nprobe";
 constexpr const char* nlist = "nlist";

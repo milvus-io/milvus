@@ -19,7 +19,6 @@
 #include <faiss/IndexFlat.h>
 #include <faiss/IndexScalarQuantizer.h>
 #include <faiss/clone_index.h>
-#include <faiss/index_factory.h>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"

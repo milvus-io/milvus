@@ -17,8 +17,49 @@
 #include "SubQueryResult.h"
 
 #include <faiss/utils/distances.h>
+#include <faiss/utils/BinaryDistance.h>
 
 namespace milvus::query {
+
+// copy from knowhere
+// disable lint to make further migration easier
+static void
+raw_search(MetricType metric_type,
+           const uint8_t* xb,  //
+           int64_t ntotal,     //
+           int code_size,      //
+           idx_t n,            // num_queries
+           const uint8_t* x,   //
+           idx_t k,            // topk
+           float* D,
+           idx_t* labels,
+           const BitsetView bitset) {
+    using namespace faiss;  // NOLINT
+    if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
+        float_maxheap_array_t res = {size_t(n), size_t(k), labels, D};
+        binary_distance_knn_hc(METRIC_Jaccard, &res, x, xb, ntotal, code_size, bitset);
+
+        if (metric_type == METRIC_Tanimoto) {
+            for (int i = 0; i < k * n; i++) {
+                D[i] = Jaccard_2_Tanimoto(D[i]);
+            }
+        }
+
+    } else if (metric_type == METRIC_Hamming) {
+        std::vector<int32_t> int_distances(n * k);
+        int_maxheap_array_t res = {size_t(n), size_t(k), labels, int_distances.data()};
+        binary_distance_knn_hc(METRIC_Hamming, &res, x, xb, ntotal, code_size, bitset);
+        for (int i = 0; i < n * k; ++i) {
+            D[i] = int_distances[i];
+        }
+
+    } else if (metric_type == METRIC_Substructure || metric_type == METRIC_Superstructure) {
+        // only matched ids will be chosen, not to use heap
+        binary_distance_knn_mc(metric_type, x, xb, n, ntotal, k, code_size, D, labels, bitset);
+    } else {
+        PanicInfo("unsupported");
+    }
+}
 
 SubQueryResult
 BinarySearchBruteForceFast(MetricType metric_type,
@@ -35,66 +76,10 @@ BinarySearchBruteForceFast(MetricType metric_type,
 
     int64_t code_size = dim / 8;
     const idx_t block_size = size_per_chunk;
-    bool use_heap = true;
 
-    if (metric_type == faiss::METRIC_Jaccard || metric_type == faiss::METRIC_Tanimoto) {
-        float* D = result_distances;
-        for (idx_t query_base_index = 0; query_base_index < num_queries; query_base_index += block_size) {
-            idx_t query_size = block_size;
-            if (query_base_index + block_size > num_queries) {
-                query_size = num_queries - query_base_index;
-            }
+    raw_search(metric_type, binary_chunk, size_per_chunk, code_size, num_queries, query_data, topk, result_distances,
+               result_labels, bitset);
 
-            // We see the distances and labels as heaps.
-            faiss::float_maxheap_array_t res = {size_t(query_size), size_t(topk),
-                                                result_labels + query_base_index * topk, D + query_base_index * topk};
-
-            binary_distence_knn_hc(metric_type, &res, query_data + query_base_index * code_size, binary_chunk,
-                                   size_per_chunk, code_size,
-                                   /* ordered = */ true, bitset);
-        }
-        if (metric_type == faiss::METRIC_Tanimoto) {
-            for (int i = 0; i < topk * num_queries; i++) {
-                D[i] = -log2(1 - D[i]);
-            }
-        }
-    } else if (metric_type == faiss::METRIC_Substructure || metric_type == faiss::METRIC_Superstructure) {
-        float* D = result_distances;
-        for (idx_t s = 0; s < num_queries; s += block_size) {
-            idx_t nn = block_size;
-            if (s + block_size > num_queries) {
-                nn = num_queries - s;
-            }
-
-            // only match ids will be chosed, not to use heap
-            binary_distence_knn_mc(metric_type, query_data + s * code_size, binary_chunk, nn, size_per_chunk, topk,
-                                   code_size, D + s * topk, result_labels + s * topk, bitset);
-        }
-    } else if (metric_type == faiss::METRIC_Hamming) {
-        std::vector<int> int_distances(topk * num_queries);
-        for (idx_t s = 0; s < num_queries; s += block_size) {
-            idx_t nn = block_size;
-            if (s + block_size > num_queries) {
-                nn = num_queries - s;
-            }
-            if (use_heap) {
-                // We see the distances and labels as heaps.
-                faiss::int_maxheap_array_t res = {size_t(nn), size_t(topk), result_labels + s * topk,
-                                                  int_distances.data() + s * topk};
-
-                hammings_knn_hc(&res, query_data + s * code_size, binary_chunk, size_per_chunk, code_size,
-                                /* ordered = */ true, bitset);
-            } else {
-                hammings_knn_mc(query_data + s * code_size, binary_chunk, nn, size_per_chunk, topk, code_size,
-                                int_distances.data() + s * topk, result_labels + s * topk, bitset);
-            }
-        }
-        for (int i = 0; i < num_queries; ++i) {
-            result_distances[i] = static_cast<float>(int_distances[i]);
-        }
-    } else {
-        PanicInfo("Unsupported metric type");
-    }
     return sub_result;
 }
 

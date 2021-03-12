@@ -140,7 +140,7 @@ GPUIVF::QueryImpl(int64_t n,
                   float* distances,
                   int64_t* labels,
                   const Config& config,
-                  const faiss::BitsetView& bitset) {
+                  const faiss::BitsetView bitset) {
     auto device_index = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_);
     fiu_do_on("GPUIVF.search_impl.invald_index", device_index = nullptr);
     if (device_index) {

@@ -20,6 +20,7 @@
 
 #include <faiss/utils/BinaryDistance.h>
 #include <faiss/utils/hamming.h>
+#include <faiss/utils/jaccard-inl.h>
 #include <faiss/utils/utils.h>
 #include <faiss/utils/Heap.h>
 #include <faiss/impl/AuxIndexStructures.h>
@@ -147,7 +148,7 @@ void IndexBinaryIVF::set_direct_map_type (DirectMap::Type type)
 
 void IndexBinaryIVF::search(idx_t n, const uint8_t *x, idx_t k,
                             int32_t *distances, idx_t *labels,
-                            const BitsetView& bitset) const {
+                            const BitsetView bitset) const {
   std::unique_ptr<idx_t[]> idx(new idx_t[n * nprobe]);
   std::unique_ptr<int32_t[]> coarse_dis(new int32_t[n * nprobe]);
 
@@ -172,7 +173,7 @@ void IndexBinaryIVF::search(idx_t n, const uint8_t *x, idx_t k,
 }
 
 #if 0
-void IndexBinaryIVF::get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x, const BitsetView& bitset) {
+void IndexBinaryIVF::get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x, const BitsetView bitset) {
     make_direct_map(true);
 
     /* only get vector by 1 id */
@@ -185,7 +186,7 @@ void IndexBinaryIVF::get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x, con
 }
 
 void IndexBinaryIVF::search_by_id (idx_t n, const idx_t *xid, idx_t k, int32_t *distances, idx_t *labels,
-                                   const BitsetView& bitset) {
+                                   const BitsetView bitset) {
     make_direct_map(true);
 
     auto x = new uint8_t[n * d];
@@ -376,7 +377,7 @@ struct IVFBinaryScannerL2: BinaryInvertedListScanner {
     }
 
     uint32_t distance_to_code (const uint8_t *code) const override {
-        return hc.hamming (code);
+        return hc.compute (code);
     }
 
     size_t scan_codes (size_t n,
@@ -384,14 +385,14 @@ struct IVFBinaryScannerL2: BinaryInvertedListScanner {
                        const idx_t *ids,
                        int32_t *simi, idx_t *idxi,
                        size_t k,
-                       const BitsetView& bitset) const override
+                       const BitsetView bitset) const override
     {
         using C = CMax<int32_t, idx_t>;
 
         size_t nup = 0;
         for (size_t j = 0; j < n; j++) {
             if (!bitset || !bitset.test(ids[j])) {
-                uint32_t dis = hc.hamming (codes);
+                uint32_t dis = hc.compute (codes);
                 if (dis < simi[0]) {
                     idx_t id = store_pairs ? (list_no << 32 | j) : ids[j];
                     heap_swap_top<C> (k, simi, idxi, dis, id);
@@ -411,7 +412,7 @@ struct IVFBinaryScannerL2: BinaryInvertedListScanner {
     {
         size_t nup = 0;
         for (size_t j = 0; j < n; j++) {
-            uint32_t dis = hc.hamming (codes);
+            uint32_t dis = hc.compute (codes);
             if (dis < radius) {
                 int64_t id = store_pairs ? lo_build (list_no, j) : ids[j];
                 result.add (dis, id);
@@ -447,7 +448,7 @@ struct IVFBinaryScannerJaccard: BinaryInvertedListScanner {
                        const idx_t *ids,
                        int32_t *simi, idx_t *idxi,
                        size_t k,
-                       const BitsetView& bitset = nullptr) const override
+                       const BitsetView bitset = nullptr) const override
     {
         using C = CMax<float, idx_t>;
         float* psimi = (float*)simi;
@@ -486,14 +487,7 @@ BinaryInvertedListScanner *select_IVFBinaryScannerL2 (size_t code_size) {
         case 20: HC(HammingComputer20);
         case 32: HC(HammingComputer32);
         case 64: HC(HammingComputer64);
-        default:
-            if (code_size % 8 == 0) {
-                HC(HammingComputerM8);
-            } else if (code_size % 4 == 0) {
-                HC(HammingComputerM4);
-            } else {
-                HC(HammingComputerDefault);
-            }
+        default: HC(HammingComputerDefault);
     }
 #undef HC
 }
@@ -527,7 +521,7 @@ void search_knn_hamming_heap(const IndexBinaryIVF& ivf,
                              bool store_pairs,
                              const IVFSearchParameters *params,
                              IndexIVFStats &index_ivf_stats,
-                             const BitsetView& bitset = nullptr)
+                             const BitsetView bitset = nullptr)
 {
     long nprobe = params ? params->nprobe : ivf.nprobe;
     long max_codes = params ? params->max_codes : ivf.max_codes;
@@ -624,7 +618,7 @@ void search_knn_binary_dis_heap(const IndexBinaryIVF& ivf,
                                 bool store_pairs,
                                 const IVFSearchParameters *params,
                                 IndexIVFStats &index_ivf_stats,
-                                const BitsetView& bitset = nullptr)
+                                const BitsetView bitset = nullptr)
 {
     long nprobe = params ? params->nprobe : ivf.nprobe;
     long max_codes = params ? params->max_codes : ivf.max_codes;
@@ -711,7 +705,7 @@ void search_knn_hamming_count(const IndexBinaryIVF& ivf,
                               idx_t *labels,
                               const IVFSearchParameters *params,
                               IndexIVFStats &index_ivf_stats,
-                              const BitsetView& bitset = nullptr) {
+                              const BitsetView bitset = nullptr) {
   const int nBuckets = ivf.d + 1;
   std::vector<int> all_counters(nx * nBuckets, 0);
   std::unique_ptr<idx_t[]> all_ids_per_dis(new idx_t[nx * nBuckets * k]);
@@ -809,7 +803,7 @@ void search_knn_hamming_count_1 (
                         idx_t *labels,
                         const IVFSearchParameters *params,
                         IndexIVFStats &index_ivf_stats,
-                        const BitsetView& bitset = nullptr) {
+                        const BitsetView bitset = nullptr) {
     switch (ivf.code_size) {
 #define HANDLE_CS(cs)                                                                  \
     case cs:                                                                           \
@@ -824,16 +818,8 @@ void search_knn_hamming_count_1 (
       HANDLE_CS(64);
 #undef HANDLE_CS
     default:
-        if (ivf.code_size % 8 == 0) {
-            search_knn_hamming_count<HammingComputerM8, store_pairs>
-                (ivf, nx, x, keys, k, distances, labels, params, index_ivf_stats, bitset);
-        } else if (ivf.code_size % 4 == 0) {
-            search_knn_hamming_count<HammingComputerM4, store_pairs>
-                (ivf, nx, x, keys, k, distances, labels, params, index_ivf_stats, bitset);
-        } else {
-            search_knn_hamming_count<HammingComputerDefault, store_pairs>
-                (ivf, nx, x, keys, k, distances, labels, params, index_ivf_stats, bitset);
-        }
+        search_knn_hamming_count<HammingComputerDefault, store_pairs>
+            (ivf, nx, x, keys, k, distances, labels, params, index_ivf_stats, bitset);
         break;
     }
 }
@@ -870,7 +856,7 @@ void IndexBinaryIVF::search_preassigned(idx_t n, const uint8_t *x, idx_t k,
                                         int32_t *distances, idx_t *labels,
                                         bool store_pairs,
                                         const IVFSearchParameters *params,
-                                        const BitsetView& bitset
+                                        const BitsetView bitset
                                         ) const {
     if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
         if (use_heap) {
@@ -882,7 +868,7 @@ void IndexBinaryIVF::search_preassigned(idx_t n, const uint8_t *x, idx_t k,
                                        params, index_ivf_stats, bitset);
             if (metric_type == METRIC_Tanimoto) {
                 for (int i = 0; i < k * n; i++) {
-                    D[i] = -log2(1-D[i]);
+                    D[i] = Jaccard_2_Tanimoto(D[i]);
                 }
             }
             memcpy(distances, D, sizeof(float) * n * k);
@@ -913,7 +899,7 @@ void IndexBinaryIVF::search_preassigned(idx_t n, const uint8_t *x, idx_t k,
 void IndexBinaryIVF::range_search(
         idx_t n, const uint8_t *x, int radius,
         RangeSearchResult *res,
-        const BitsetView& bitset) const
+        const BitsetView bitset) const
 {
     std::unique_ptr<idx_t[]> idx(new idx_t[n * nprobe]);
     std::unique_ptr<int32_t[]> coarse_dis(new int32_t[n * nprobe]);

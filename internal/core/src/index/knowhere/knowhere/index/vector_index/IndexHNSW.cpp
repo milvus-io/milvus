@@ -138,7 +138,7 @@ IndexHNSW::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) {
+IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }

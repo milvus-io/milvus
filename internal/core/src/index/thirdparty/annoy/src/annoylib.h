@@ -120,8 +120,8 @@ inline void set_error_from_string(char **error, const char* msg) {
 #include <intrin.h>
 #elif defined(__GNUC__)
 #include <x86intrin.h>
-#include <faiss/utils/ConcurrentBitset.h>
-#include <faiss/utils/BitsetView.h>
+#include "faiss/utils/ConcurrentBitset.h"
+#include "faiss/utils/BitsetView.h"
 
 #endif
 #endif
@@ -839,9 +839,9 @@ class AnnoyIndexInterface {
   virtual bool load_index(void* index_data, const int64_t& index_size, char** error = nullptr) = 0;
   virtual T get_distance(S i, S j) const = 0;
   virtual void get_nns_by_item(S item, size_t n, int64_t search_k, vector<S>* result, vector<T>* distances,
-                               const faiss::BitsetView& bitset = nullptr) const = 0;
+                               const faiss::BitsetView bitset = nullptr) const = 0;
   virtual void get_nns_by_vector(const T* w, size_t n, int64_t search_k, vector<S>* result, vector<T>* distances,
-                               const faiss::BitsetView& bitset = nullptr) const = 0;
+                               const faiss::BitsetView bitset = nullptr) const = 0;
   virtual S get_n_items() const = 0;
   virtual S get_dim() const = 0;
   virtual S get_n_trees() const = 0;
@@ -1178,14 +1178,14 @@ public:
   }
 
   void get_nns_by_item(S item, size_t n, int64_t search_k, vector<S>* result, vector<T>* distances,
-                       const faiss::BitsetView& bitset) const {
+                       const faiss::BitsetView bitset) const {
     // TODO: handle OOB
     const Node* m = _get(item);
     _get_all_nns(m->v, n, search_k, result, distances, bitset);
   }
 
   void get_nns_by_vector(const T* w, size_t n, int64_t search_k, vector<S>* result, vector<T>* distances,
-                         const faiss::BitsetView& bitset) const {
+                         const faiss::BitsetView bitset) const {
     _get_all_nns(w, n, search_k, result, distances, bitset);
   }
 
@@ -1335,7 +1335,7 @@ protected:
   }
 
   void _get_all_nns(const T* v, size_t n, int64_t search_k, vector<S>* result, vector<T>* distances,
-                    const faiss::BitsetView& bitset) const {
+                    const faiss::BitsetView bitset) const {
     Node* v_node = (Node *)alloca(_s);
     D::template zero_value<Node>(v_node);
     memcpy(v_node->v, v, sizeof(T) * _f);

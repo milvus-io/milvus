@@ -41,6 +41,8 @@ class DataGen {
     int nq = 10;
     int dim = 64;
     int k = 10;
+    int buffer_size = 16384;
+    float radius = 2.8;
     std::vector<float> xb;
     std::vector<float> xq;
     std::vector<uint8_t> xb_bin;
@@ -114,6 +116,9 @@ AssertBinVec(const milvus::knowhere::DatasetPtr& result,
 
 void
 PrintResult(const milvus::knowhere::DatasetPtr& result, const int& nq, const int& k);
+
+void
+ReleaseQueryResult(const milvus::knowhere::DatasetPtr& result);
 
 struct FileIOWriter {
     std::fstream fs;

@@ -76,7 +76,7 @@ IDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) {
+IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -96,6 +96,42 @@ IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::B
     ret_ds->Set(meta::IDS, p_id);
     ret_ds->Set(meta::DISTANCE, p_dist);
     return ret_ds;
+}
+
+DynamicResultSegment
+IDMAP::QueryByDistance(const milvus::knowhere::DatasetPtr& dataset,
+                       const milvus::knowhere::Config& config,
+                       const faiss::BitsetView bitset) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    GET_TENSOR_DATA(dataset)
+    if (rows != 1) {
+        KNOWHERE_THROW_MSG("QueryByDistance only accept nq = 1!");
+    }
+
+    auto default_type = index_->metric_type;
+    if (config.contains(Metric::TYPE)) {
+        index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    }
+    std::vector<faiss::RangeSearchPartialResult*> res;
+    DynamicResultSegment result;
+    auto radius = config[IndexParams::range_search_radius].get<float>();
+    auto buffer_size = config.contains(IndexParams::range_search_buffer_size)
+                           ? config[IndexParams::range_search_buffer_size].get<size_t>()
+                           : 16384;
+    auto real_idx = dynamic_cast<faiss::IndexFlat*>(index_.get());
+    if (real_idx == nullptr) {
+        KNOWHERE_THROW_MSG("Cannot dynamic_cast the index to faiss::IndexFlat type!");
+    }
+    if (index_->metric_type == faiss::MetricType::METRIC_L2) {
+        radius *= radius;
+    }
+    real_idx->range_search(rows, reinterpret_cast<const float*>(p_data), radius, res, buffer_size, bitset);
+    ExchangeDataset(result, res);
+    MapUids(result);
+    index_->metric_type = default_type;
+    return result;
 }
 
 int64_t
@@ -149,7 +185,7 @@ IDMAP::QueryImpl(int64_t n,
                  float* distances,
                  int64_t* labels,
                  const Config& config,
-                 const faiss::BitsetView& bitset) {
+                 const faiss::BitsetView bitset) {
     // assign the metric type
     index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     index_->search(n, data, k, distances, labels, bitset);

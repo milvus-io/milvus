@@ -14,6 +14,7 @@
 set(KNOWHERE_THIRDPARTY_DEPENDENCIES
         Arrow
         FAISS
+        GTest
         OpenBLAS
         MKL
         )

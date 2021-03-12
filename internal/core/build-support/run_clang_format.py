@@ -130,7 +130,7 @@ if __name__ == "__main__":
                     print(file=sys.stderr)
                     diff_out = []
                     for diff_str in diff:
-                        diff_out.append(diff_str.encode('raw_unicode_escape'))
+                        diff_out.append(diff_str.encode('raw_unicode_escape').decode('ascii'))
                     sys.stderr.writelines(diff_out)
         except Exception:
             error = True

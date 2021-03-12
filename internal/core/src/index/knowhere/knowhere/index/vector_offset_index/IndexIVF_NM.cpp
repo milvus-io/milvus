@@ -16,7 +16,6 @@
 #include <faiss/IndexIVFFlat.h>
 #include <faiss/IndexIVFPQ.h>
 #include <faiss/clone_index.h>
-#include <faiss/index_factory.h>
 #include <faiss/index_io.h>
 #ifdef MILVUS_GPU_VERSION
 #include <faiss/gpu/GpuAutoTune.h>
@@ -138,12 +137,23 @@ IVF_NM::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IVF_NM::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) {
+IVF_NM::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView bitset) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
     GET_TENSOR_DATA(dataset_ptr)
+
+    int64_t* p_id = nullptr;
+    float* p_dist = nullptr;
+    auto release_when_exception = [&]() {
+        if (p_id != nullptr) {
+            free(p_id);
+        }
+        if (p_dist != nullptr) {
+            free(p_dist);
+        }
+    };
 
     try {
         fiu_do_on("IVF_NM.Search.throw_std_exception", throw std::exception());
@@ -164,8 +174,10 @@ IVF_NM::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::
         ret_ds->Set(meta::DISTANCE, p_dist);
         return ret_ds;
     } catch (faiss::FaissException& e) {
+        release_when_exception();
         KNOWHERE_THROW_MSG(e.what());
     } catch (std::exception& e) {
+        release_when_exception();
         KNOWHERE_THROW_MSG(e.what());
     }
 }
@@ -312,7 +324,7 @@ IVF_NM::QueryImpl(int64_t n,
                   float* distances,
                   int64_t* labels,
                   const Config& config,
-                  const faiss::BitsetView& bitset) {
+                  const faiss::BitsetView bitset) {
     auto params = GenParams(config);
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     ivf_index->nprobe = params->nprobe;

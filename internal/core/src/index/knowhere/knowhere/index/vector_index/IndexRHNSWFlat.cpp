@@ -87,9 +87,10 @@ IndexRHNSWFlat::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     try {
         GET_TENSOR_DATA_DIM(dataset_ptr)
         faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+        int32_t efConstruction = config[IndexParams::efConstruction];
 
         auto idx = new faiss::IndexRHNSWFlat(int(dim), config[IndexParams::M], metric_type);
-        idx->hnsw.efConstruction = config[IndexParams::efConstruction];
+        idx->hnsw.efConstruction = efConstruction;
         index_ = std::shared_ptr<faiss::Index>(idx);
         index_->train(rows, reinterpret_cast<const float*>(p_data));
     } catch (std::exception& e) {

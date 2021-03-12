@@ -61,6 +61,15 @@ class IVFPQConfAdapter : public IVFConfAdapter {
     CheckCPUPQParams(int64_t dimension, int64_t m);
 };
 
+class IVFHNSWConfAdapter : public ConfAdapter {
+ public:
+    bool
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
+
+    bool
+    CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
+};
+
 class NSGConfAdapter : public IVFConfAdapter {
  public:
     bool

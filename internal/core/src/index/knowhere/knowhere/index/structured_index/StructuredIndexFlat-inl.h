@@ -12,7 +12,7 @@
 #include <algorithm>
 #include <memory>
 #include <utility>
-#include "knowhere/knowhere/common/Log.h"
+#include "knowhere/common/Log.h"
 #include "knowhere/index/structured_index/StructuredIndexFlat.h"
 
 namespace milvus {
@@ -34,6 +34,8 @@ StructuredIndexFlat<T>::~StructuredIndexFlat() {
 template <typename T>
 BinarySet
 StructuredIndexFlat<T>::Serialize(const milvus::knowhere::Config& config) {
+    // TODO
+    return BinarySet();
 }
 
 template <typename T>

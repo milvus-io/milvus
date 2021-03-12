@@ -54,6 +54,7 @@ extern const char* INDEX_FAISS_IVFFLAT;
 extern const char* INDEX_FAISS_IVFPQ;
 extern const char* INDEX_FAISS_IVFSQ8;
 extern const char* INDEX_FAISS_IVFSQ8H;
+extern const char* INDEX_FAISS_IVFHNSW;
 extern const char* INDEX_FAISS_BIN_IDMAP;
 extern const char* INDEX_FAISS_BIN_IVFFLAT;
 extern const char* INDEX_NSG;

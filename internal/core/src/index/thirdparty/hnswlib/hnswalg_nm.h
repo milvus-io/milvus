@@ -270,7 +270,7 @@ namespace hnswlib_nm {
 
         template <bool has_deletions>
         std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>
-        searchBaseLayerST(tableint ep_id, const void *data_point, size_t ef, const faiss::BitsetView& bitset, void *pdata) const {
+        searchBaseLayerST(tableint ep_id, const void *data_point, size_t ef, const faiss::BitsetView bitset, void *pdata) const {
             VisitedList *vl = visited_list_pool_->getFreeVisitedList();
             vl_type *visited_array = vl->mass;
             vl_type visited_array_tag = vl->curV;
@@ -1114,7 +1114,7 @@ namespace hnswlib_nm {
         };
 
         std::priority_queue<std::pair<dist_t, labeltype >>
-        searchKnn_NM(const void *query_data, size_t k, const faiss::BitsetView& bitset, dist_t *pdata) const {
+        searchKnn_NM(const void *query_data, size_t k, const faiss::BitsetView bitset, dist_t *pdata) const {
             std::priority_queue<std::pair<dist_t, labeltype >> result;
             if (cur_element_count == 0) return result;
 
@@ -1192,7 +1192,7 @@ namespace hnswlib_nm {
 
         template <typename Comp>
         std::vector<std::pair<dist_t, labeltype>>
-        searchKnn_NM(const void* query_data, size_t k, Comp comp, const faiss::BitsetView& bitset, dist_t *pdata) {
+        searchKnn_NM(const void* query_data, size_t k, Comp comp, const faiss::BitsetView bitset, dist_t *pdata) {
             std::vector<std::pair<dist_t, labeltype>> result;
             if (cur_element_count == 0) return result;
 

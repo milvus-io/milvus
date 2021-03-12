@@ -17,6 +17,7 @@
 
 #include "knowhere/index/vector_index/FaissBaseBinaryIndex.h"
 #include "knowhere/index/vector_index/VecIndex.h"
+#include "knowhere/index/vector_index/helpers/DynamicResultSet.h"
 
 namespace milvus {
 namespace knowhere {
@@ -44,7 +45,10 @@ class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
     AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
-    Query(const DatasetPtr&, const Config&, const faiss::BitsetView& bitset) override;
+    Query(const DatasetPtr&, const Config&, const faiss::BitsetView bitset) override;
+
+    DynamicResultSegment
+    QueryByDistance(const DatasetPtr& dataset, const Config& config, const faiss::BitsetView bitset);
 
     int64_t
     Count() override;
@@ -68,7 +72,7 @@ class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
               float* distances,
               int64_t* labels,
               const Config& config,
-              const faiss::BitsetView& bitset);
+              const faiss::BitsetView bitset);
 };
 
 using BinaryIDMAPPtr = std::shared_ptr<BinaryIDMAP>;
