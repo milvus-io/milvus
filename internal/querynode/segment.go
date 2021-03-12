@@ -45,8 +45,9 @@ type Segment struct {
 	lastMemSize  int64
 	lastRowCount int64
 
-	once        sync.Once // guards enableIndex
-	enableIndex bool
+	once             sync.Once // guards enableIndex
+	enableIndex      bool
+	enableLoadBinLog bool
 
 	rmMutex          sync.Mutex // guards recentlyModified
 	recentlyModified bool
@@ -148,12 +149,13 @@ func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, c
 	log.Debug("create segment", zap.Int64("segmentID", segmentID))
 
 	var newSegment = &Segment{
-		segmentPtr:   segmentPtr,
-		segmentType:  segType,
-		segmentID:    segmentID,
-		partitionID:  partitionID,
-		collectionID: collectionID,
-		indexParam:   initIndexParam,
+		segmentPtr:       segmentPtr,
+		segmentType:      segType,
+		segmentID:        segmentID,
+		partitionID:      partitionID,
+		collectionID:     collectionID,
+		indexParam:       initIndexParam,
+		enableLoadBinLog: false,
 	}
 
 	return newSegment
@@ -331,14 +333,26 @@ func (s *Segment) matchIndexParam(fieldID int64, indexParams indexParam) bool {
 }
 
 //-------------------------------------------------------------------------------------- interfaces for growing segment
-func (s *Segment) segmentPreInsert(numOfRecords int) int64 {
+func (s *Segment) segmentPreInsert(numOfRecords int) (int64, error) {
 	/*
 		long int
 		PreInsert(CSegmentInterface c_segment, long int size);
 	*/
-	var offset = C.PreInsert(s.segmentPtr, C.long(int64(numOfRecords)))
+	if s.segmentType != segmentTypeGrowing || s.enableLoadBinLog {
+		return 0, nil
+	}
+	var offset int64
+	cOffset := C.long(offset)
+	status := C.PreInsert(s.segmentPtr, C.long(int64(numOfRecords)), &cOffset)
 
-	return int64(offset)
+	errorCode := status.error_code
+
+	if errorCode != 0 {
+		errorMsg := C.GoString(status.error_msg)
+		defer C.free(unsafe.Pointer(status.error_msg))
+		return 0, errors.New("PreInsert failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	}
+	return offset, nil
 }
 
 func (s *Segment) segmentPreDelete(numOfRecords int) int64 {
@@ -525,4 +539,8 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int, data interfa
 	log.Debug("load field done", zap.Int64("fieldID", fieldID), zap.Int("row count", rowCount))
 
 	return nil
+}
+
+func (s *Segment) setLoadBinLogEnable(enable bool) {
+	s.enableLoadBinLog = enable
 }

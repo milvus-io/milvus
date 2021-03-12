@@ -67,8 +67,8 @@ Insert(CSegmentInterface c_segment,
        int sizeof_per_row,
        int64_t count);
 
-int64_t
-PreInsert(CSegmentInterface c_segment, int64_t size);
+CStatus
+PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset);
 
 CStatus
 Delete(CSegmentInterface c_segment,

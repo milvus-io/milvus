@@ -1,4 +1,4 @@
-timeout(time: 60, unit: 'MINUTES') {
+timeout(time: 120, unit: 'MINUTES') {
     container('deploy-env') {
         dir ('milvus-helm-chart') {
             sh " helm version && \

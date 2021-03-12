@@ -78,10 +78,11 @@ func TestSegment_getRowCount(t *testing.T) {
 		records = append(records, blob)
 	}
 
-	var offset = segment.segmentPreInsert(N)
+	offset, err := segment.segmentPreInsert(N)
+	assert.Nil(t, err)
 	assert.GreaterOrEqual(t, offset, int64(0))
 
-	err := segment.segmentInsert(offset, &ids, &timestamps, &records)
+	err = segment.segmentInsert(offset, &ids, &timestamps, &records)
 	assert.NoError(t, err)
 
 	rowCount := segment.getRowCount()
@@ -125,10 +126,11 @@ func TestSegment_getDeletedCount(t *testing.T) {
 		records = append(records, blob)
 	}
 
-	var offsetInsert = segment.segmentPreInsert(N)
+	offsetInsert, err := segment.segmentPreInsert(N)
+	assert.Nil(t, err)
 	assert.GreaterOrEqual(t, offsetInsert, int64(0))
 
-	var err = segment.segmentInsert(offsetInsert, &ids, &timestamps, &records)
+	err = segment.segmentInsert(offsetInsert, &ids, &timestamps, &records)
 	assert.NoError(t, err)
 
 	var offsetDelete = segment.segmentPreDelete(10)
@@ -178,10 +180,11 @@ func TestSegment_getMemSize(t *testing.T) {
 		records = append(records, blob)
 	}
 
-	var offset = segment.segmentPreInsert(N)
+	offset, err := segment.segmentPreInsert(N)
+	assert.Nil(t, err)
 	assert.GreaterOrEqual(t, offset, int64(0))
 
-	err := segment.segmentInsert(offset, &ids, &timestamps, &records)
+	err = segment.segmentInsert(offset, &ids, &timestamps, &records)
 	assert.NoError(t, err)
 
 	var memSize = segment.getMemSize()
@@ -225,10 +228,11 @@ func TestSegment_segmentInsert(t *testing.T) {
 		records = append(records, blob)
 	}
 
-	var offset = segment.segmentPreInsert(N)
+	offset, err := segment.segmentPreInsert(N)
+	assert.Nil(t, err)
 	assert.GreaterOrEqual(t, offset, int64(0))
 
-	err := segment.segmentInsert(offset, &ids, &timestamps, &records)
+	err = segment.segmentInsert(offset, &ids, &timestamps, &records)
 	assert.NoError(t, err)
 	deleteSegment(segment)
 	deleteCollection(collection)
@@ -268,10 +272,11 @@ func TestSegment_segmentDelete(t *testing.T) {
 		records = append(records, blob)
 	}
 
-	var offsetInsert = segment.segmentPreInsert(N)
+	offsetInsert, err := segment.segmentPreInsert(N)
+	assert.Nil(t, err)
 	assert.GreaterOrEqual(t, offsetInsert, int64(0))
 
-	var err = segment.segmentInsert(offsetInsert, &ids, &timestamps, &records)
+	err = segment.segmentInsert(offsetInsert, &ids, &timestamps, &records)
 	assert.NoError(t, err)
 
 	var offsetDelete = segment.segmentPreDelete(10)
@@ -317,10 +322,11 @@ func TestSegment_segmentSearch(t *testing.T) {
 		records = append(records, blob)
 	}
 
-	var offset = segment.segmentPreInsert(N)
+	offset, err := segment.segmentPreInsert(N)
+	assert.Nil(t, err)
 	assert.GreaterOrEqual(t, offset, int64(0))
 
-	err := segment.segmentInsert(offset, &ids, &timestamps, &records)
+	err = segment.segmentInsert(offset, &ids, &timestamps, &records)
 	assert.NoError(t, err)
 
 	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
@@ -428,7 +434,8 @@ func TestSegment_segmentPreInsert(t *testing.T) {
 		records = append(records, blob)
 	}
 
-	var offset = segment.segmentPreInsert(N)
+	offset, err := segment.segmentPreInsert(N)
+	assert.Nil(t, err)
 	assert.GreaterOrEqual(t, offset, int64(0))
 
 	deleteSegment(segment)
@@ -469,10 +476,11 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 		records = append(records, blob)
 	}
 
-	var offsetInsert = segment.segmentPreInsert(N)
+	offsetInsert, err := segment.segmentPreInsert(N)
+	assert.Nil(t, err)
 	assert.GreaterOrEqual(t, offsetInsert, int64(0))
 
-	var err = segment.segmentInsert(offsetInsert, &ids, &timestamps, &records)
+	err = segment.segmentInsert(offsetInsert, &ids, &timestamps, &records)
 	assert.NoError(t, err)
 
 	var offsetDelete = segment.segmentPreDelete(10)
