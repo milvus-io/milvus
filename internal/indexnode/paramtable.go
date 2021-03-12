@@ -46,6 +46,7 @@ var once sync.Once
 func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
+		pt.initLogCfg()
 		pt.initParams()
 	})
 }
@@ -56,7 +57,6 @@ func (pt *ParamTable) initParams() {
 	pt.initMinIOSecretAccessKey()
 	pt.initMinIOUseSSL()
 	pt.initMinioBucketName()
-	pt.initLogCfg()
 }
 
 func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb.InitParams) error {
@@ -179,5 +179,9 @@ func (pt *ParamTable) initLogCfg() {
 	if err != nil {
 		panic(err)
 	}
-	pt.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("indexnode-%d.log", pt.NodeID))
+	if len(rootPath) != 0 {
+		pt.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("indexnode-%d.log", pt.NodeID))
+	} else {
+		pt.Log.File.Filename = ""
+	}
 }

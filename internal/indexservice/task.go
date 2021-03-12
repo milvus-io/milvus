@@ -116,9 +116,9 @@ func (it *IndexAddTask) Execute(ctx context.Context) error {
 	log.Debug("before index ...")
 	resp, err := it.builderClient.BuildIndex(ctx, it.req)
 	if err != nil {
+		log.Debug("indexservice", zap.String("build index finish err", err.Error()))
 		return err
 	}
-	log.Debug("indexservice", zap.String("build index finish err", err.Error()))
 	if resp.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(resp.Reason)
 	}

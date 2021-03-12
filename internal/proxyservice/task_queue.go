@@ -57,7 +57,7 @@ func (queue *BaseTaskQueue) FrontTask() task {
 	defer queue.mtx.Unlock()
 
 	if queue.tasks.Len() <= 0 {
-		log.Panic("sorry, but the task list is empty!")
+		log.Warn("sorry, but the task list is empty!")
 		return nil
 	}
 
@@ -69,7 +69,7 @@ func (queue *BaseTaskQueue) PopTask() task {
 	defer queue.mtx.Unlock()
 
 	if queue.tasks.Len() <= 0 {
-		log.Panic("sorry, but the task list is empty!")
+		log.Warn("sorry, but the task list is empty!")
 		return nil
 	}
 

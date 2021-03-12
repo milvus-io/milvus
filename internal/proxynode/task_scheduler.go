@@ -4,7 +4,6 @@ import (
 	"container/list"
 	"context"
 	"errors"
-	"fmt"
 	"strconv"
 	"sync"
 
@@ -423,7 +422,7 @@ func (sched *TaskScheduler) queryResultLoop() {
 				//t := sched.getTaskByReqID(reqID)
 				{
 					colName := t.(*SearchTask).query.CollectionName
-					fmt.Println("ljq getCollection: ", colName, " reqID: ", reqIDStr, " answer cnt:", len(queryResultBuf[reqID]))
+					log.Debug("Getcollection", zap.String("collection name", colName), zap.String("reqID", reqIDStr), zap.Int("answer cnt", len(queryResultBuf[reqID])))
 				}
 				if len(queryResultBuf[reqID]) == queryNodeNum {
 					t := sched.getTaskByReqID(reqID)

@@ -4,7 +4,6 @@ import (
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
-
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 

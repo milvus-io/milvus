@@ -3,7 +3,6 @@ package indexnode
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strconv"
 
 	"go.uber.org/zap"
@@ -141,8 +140,8 @@ func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 
 	if resp.ErrorCode != commonpb.ErrorCode_Success {
 		err = errors.New(resp.Reason)
+		log.Debug("indexnode", zap.String("[IndexBuildTask][PostExecute] err", err.Error()))
 	}
-	log.Debug("indexnode", zap.String("[IndexBuildTask][PostExecute] err", err.Error()))
 	return err
 }
 
@@ -192,7 +191,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 
 	it.index, err = NewCIndex(typeParams, indexParams)
 	if err != nil {
-		fmt.Println("NewCIndex err:", err.Error())
+		log.Error("indexnode", zap.String("NewCIndex err:", err.Error()))
 		return err
 	}
 	defer func() {
@@ -244,7 +243,6 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	var insertCodec storage.InsertCodec
 	defer insertCodec.Close()
 	partitionID, segmentID, insertData, err2 := insertCodec.Deserialize(storageBlobs)
-	//fmt.Println("IndexBuilder for segmentID,", segmentID)
 	if err2 != nil {
 		return err2
 	}
@@ -258,7 +256,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 		if fOk {
 			err = it.index.BuildFloatVecIndexWithoutIds(floatVectorFieldData.Data)
 			if err != nil {
-				fmt.Println("BuildFloatVecIndexWithoutIds, error:", err.Error())
+				log.Error("indexnode", zap.String("BuildFloatVecIndexWithoutIds error", err.Error()))
 				return err
 			}
 		}
@@ -267,7 +265,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 		if bOk {
 			err = it.index.BuildBinaryVecIndexWithoutIds(binaryVectorFieldData.Data)
 			if err != nil {
-				fmt.Println("BuildBinaryVecIndexWithoutIds, err:", err.Error())
+				log.Error("indexnode", zap.String("BuildBinaryVecIndexWithoutIds err", err.Error()))
 				return err
 			}
 		}
@@ -278,7 +276,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 
 		indexBlobs, err := it.index.Serialize()
 		if err != nil {
-			fmt.Println("serialize ... err:", err.Error())
+			log.Error("indexnode", zap.String("serialize err", err.Error()))
 
 			return err
 		}

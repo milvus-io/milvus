@@ -3,10 +3,12 @@ package proxynode
 import (
 	"encoding/json"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 )
 
@@ -15,7 +17,7 @@ func GetPulsarConfig(protocol, ip, port, url string) (map[string]interface{}, er
 	var err error
 
 	getResp := func() error {
-		log.Println("GET: ", protocol+"://"+ip+":"+port+url)
+		log.Debug("proxynode util", zap.String("url", protocol+"://"+ip+":"+port+url))
 		resp, err = http.Get(protocol + "://" + ip + ":" + port + url)
 		return err
 	}
