@@ -10,7 +10,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
@@ -396,12 +396,12 @@ func BuildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueI
 		NumRows:       0,
 		MemSize:       0,
 		State:         commonpb.SegmentState_Growing,
-		StartPosition: &internalpb2.MsgPosition{
+		StartPosition: &internalpb.MsgPosition{
 			ChannelName: channelName,
 			MsgID:       "0",
 			Timestamp:   0,
 		},
-		EndPosition: &internalpb2.MsgPosition{
+		EndPosition: &internalpb.MsgPosition{
 			ChannelName: channelName,
 			MsgID:       "0",
 			Timestamp:   0,

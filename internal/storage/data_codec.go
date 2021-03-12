@@ -154,30 +154,30 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		eventWriter.SetStartTimestamp(typeutil.Timestamp(ts[0]))
 		eventWriter.SetEndTimestamp(typeutil.Timestamp(ts[len(ts)-1]))
 		switch field.DataType {
-		case schemapb.DataType_BOOL:
+		case schemapb.DataType_Bool:
 			err = eventWriter.AddBoolToPayload(singleData.(*BoolFieldData).Data)
-		case schemapb.DataType_INT8:
+		case schemapb.DataType_Int8:
 			err = eventWriter.AddInt8ToPayload(singleData.(*Int8FieldData).Data)
-		case schemapb.DataType_INT16:
+		case schemapb.DataType_Int16:
 			err = eventWriter.AddInt16ToPayload(singleData.(*Int16FieldData).Data)
-		case schemapb.DataType_INT32:
+		case schemapb.DataType_Int32:
 			err = eventWriter.AddInt32ToPayload(singleData.(*Int32FieldData).Data)
-		case schemapb.DataType_INT64:
+		case schemapb.DataType_Int64:
 			err = eventWriter.AddInt64ToPayload(singleData.(*Int64FieldData).Data)
-		case schemapb.DataType_FLOAT:
+		case schemapb.DataType_Float:
 			err = eventWriter.AddFloatToPayload(singleData.(*FloatFieldData).Data)
-		case schemapb.DataType_DOUBLE:
+		case schemapb.DataType_Double:
 			err = eventWriter.AddDoubleToPayload(singleData.(*DoubleFieldData).Data)
-		case schemapb.DataType_STRING:
+		case schemapb.DataType_String:
 			for _, singleString := range singleData.(*StringFieldData).Data {
 				err = eventWriter.AddOneStringToPayload(singleString)
 				if err != nil {
 					return nil, err
 				}
 			}
-		case schemapb.DataType_VECTOR_BINARY:
+		case schemapb.DataType_BinaryVector:
 			err = eventWriter.AddBinaryVectorToPayload(singleData.(*BinaryVectorFieldData).Data, singleData.(*BinaryVectorFieldData).Dim)
-		case schemapb.DataType_VECTOR_FLOAT:
+		case schemapb.DataType_FloatVector:
 			err = eventWriter.AddFloatVectorToPayload(singleData.(*FloatVectorFieldData).Data, singleData.(*FloatVectorFieldData).Dim)
 		default:
 			return nil, fmt.Errorf("undefined data type %d", field.DataType)
@@ -245,7 +245,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				break
 			}
 			switch dataType {
-			case schemapb.DataType_BOOL:
+			case schemapb.DataType_Bool:
 				if resultData.Data[fieldID] == nil {
 					resultData.Data[fieldID] = &BoolFieldData{}
 				}
@@ -261,7 +261,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				}
 				boolFieldData.NumRows += length
 				resultData.Data[fieldID] = boolFieldData
-			case schemapb.DataType_INT8:
+			case schemapb.DataType_Int8:
 				if resultData.Data[fieldID] == nil {
 					resultData.Data[fieldID] = &Int8FieldData{}
 				}
@@ -277,7 +277,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				}
 				int8FieldData.NumRows += length
 				resultData.Data[fieldID] = int8FieldData
-			case schemapb.DataType_INT16:
+			case schemapb.DataType_Int16:
 				if resultData.Data[fieldID] == nil {
 					resultData.Data[fieldID] = &Int16FieldData{}
 				}
@@ -293,7 +293,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				}
 				int16FieldData.NumRows += length
 				resultData.Data[fieldID] = int16FieldData
-			case schemapb.DataType_INT32:
+			case schemapb.DataType_Int32:
 				if resultData.Data[fieldID] == nil {
 					resultData.Data[fieldID] = &Int32FieldData{}
 				}
@@ -309,7 +309,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				}
 				int32FieldData.NumRows += length
 				resultData.Data[fieldID] = int32FieldData
-			case schemapb.DataType_INT64:
+			case schemapb.DataType_Int64:
 				if resultData.Data[fieldID] == nil {
 					resultData.Data[fieldID] = &Int64FieldData{}
 				}
@@ -325,7 +325,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				}
 				int64FieldData.NumRows += length
 				resultData.Data[fieldID] = int64FieldData
-			case schemapb.DataType_FLOAT:
+			case schemapb.DataType_Float:
 				if resultData.Data[fieldID] == nil {
 					resultData.Data[fieldID] = &FloatFieldData{}
 				}
@@ -341,7 +341,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				}
 				floatFieldData.NumRows += length
 				resultData.Data[fieldID] = floatFieldData
-			case schemapb.DataType_DOUBLE:
+			case schemapb.DataType_Double:
 				if resultData.Data[fieldID] == nil {
 					resultData.Data[fieldID] = &DoubleFieldData{}
 				}
@@ -357,7 +357,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				}
 				doubleFieldData.NumRows += length
 				resultData.Data[fieldID] = doubleFieldData
-			case schemapb.DataType_STRING:
+			case schemapb.DataType_String:
 				if resultData.Data[fieldID] == nil {
 					resultData.Data[fieldID] = &StringFieldData{}
 				}
@@ -375,7 +375,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 					stringFieldData.Data = append(stringFieldData.Data, singleString)
 				}
 				resultData.Data[fieldID] = stringFieldData
-			case schemapb.DataType_VECTOR_BINARY:
+			case schemapb.DataType_BinaryVector:
 				if resultData.Data[fieldID] == nil {
 					resultData.Data[fieldID] = &BinaryVectorFieldData{}
 				}
@@ -392,7 +392,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				}
 				binaryVectorFieldData.NumRows += length
 				resultData.Data[fieldID] = binaryVectorFieldData
-			case schemapb.DataType_VECTOR_FLOAT:
+			case schemapb.DataType_FloatVector:
 				if resultData.Data[fieldID] == nil {
 					resultData.Data[fieldID] = &FloatVectorFieldData{}
 				}
@@ -442,7 +442,7 @@ func NewDataDefinitionCodec(collectionID int64) *DataDefinitionCodec {
 }
 
 func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequests []string, eventTypes []EventTypeCode) ([]*Blob, error) {
-	writer, err := NewDDLBinlogWriter(schemapb.DataType_INT64, dataDefinitionCodec.collectionID)
+	writer, err := NewDDLBinlogWriter(schemapb.DataType_Int64, dataDefinitionCodec.collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -478,7 +478,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 		Value: buffer,
 	})
 
-	writer, err = NewDDLBinlogWriter(schemapb.DataType_STRING, dataDefinitionCodec.collectionID)
+	writer, err = NewDDLBinlogWriter(schemapb.DataType_String, dataDefinitionCodec.collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -579,7 +579,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Deserialize(blobs []*Blob) (ts [
 				break
 			}
 			switch dataType {
-			case schemapb.DataType_INT64:
+			case schemapb.DataType_Int64:
 				int64Ts, err := eventReader.GetInt64FromPayload()
 				if err != nil {
 					return nil, nil, err
@@ -587,7 +587,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Deserialize(blobs []*Blob) (ts [
 				for _, singleTs := range int64Ts {
 					resultTs = append(resultTs, Timestamp(singleTs))
 				}
-			case schemapb.DataType_STRING:
+			case schemapb.DataType_String:
 				length, err := eventReader.GetPayloadLengthFromReader()
 				if err != nil {
 					return nil, nil, err

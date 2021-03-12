@@ -102,7 +102,7 @@ func (ta *TimestampAllocator) pickCanDoFunc() {
 
 func (ta *TimestampAllocator) syncTs() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	req := &masterpb.TsoRequest{
+	req := &masterpb.AllocTimestampRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestTSO,
 			MsgID:     0,

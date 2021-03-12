@@ -17,7 +17,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.uber.org/zap"
@@ -468,7 +468,7 @@ func (ms *PulsarMsgStream) Chan() <-chan *MsgPack {
 	return ms.receiveBuf
 }
 
-func (ms *PulsarMsgStream) Seek(mp *internalpb2.MsgPosition) error {
+func (ms *PulsarMsgStream) Seek(mp *internalpb.MsgPosition) error {
 	for index, channel := range ms.consumerChannels {
 		if channel == mp.ChannelName {
 			messageID, err := typeutil.StringToPulsarMsgID(mp.MsgID)
@@ -612,7 +612,7 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 				continue
 			}
 			timeTickBuf := make([]TsMsg, 0)
-			msgPositions := make([]*internalpb2.MsgPosition, 0)
+			msgPositions := make([]*internalpb.MsgPosition, 0)
 			ms.unsolvedMutex.Lock()
 			for consumer, msgs := range ms.unsolvedBuf {
 				if len(msgs) == 0 {
@@ -634,13 +634,13 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 				ms.unsolvedBuf[consumer] = tempBuffer
 
 				if len(tempBuffer) > 0 {
-					msgPositions = append(msgPositions, &internalpb2.MsgPosition{
+					msgPositions = append(msgPositions, &internalpb.MsgPosition{
 						ChannelName: tempBuffer[0].Position().ChannelName,
 						MsgID:       tempBuffer[0].Position().MsgID,
 						Timestamp:   timeStamp,
 					})
 				} else {
-					msgPositions = append(msgPositions, &internalpb2.MsgPosition{
+					msgPositions = append(msgPositions, &internalpb.MsgPosition{
 						ChannelName: timeTickMsg.Position().ChannelName,
 						MsgID:       timeTickMsg.Position().MsgID,
 						Timestamp:   timeStamp,
@@ -717,7 +717,7 @@ func (ms *PulsarTtMsgStream) findTimeTick(consumer Consumer,
 	}
 }
 
-func (ms *PulsarTtMsgStream) Seek(mp *internalpb2.MsgPosition) error {
+func (ms *PulsarTtMsgStream) Seek(mp *internalpb.MsgPosition) error {
 	var consumer Consumer
 	var messageID MessageID
 	for index, channel := range ms.consumerChannels {

@@ -20,7 +20,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -123,7 +123,7 @@ func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionNa
 				FieldID:     0,
 				Name:        "RowID",
 				Description: "RowID field",
-				DataType:    schemapb.DataType_INT64,
+				DataType:    schemapb.DataType_Int64,
 				TypeParams: []*commonpb.KeyValuePair{
 					{
 						Key:   "f0_tk1",
@@ -135,7 +135,7 @@ func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionNa
 				FieldID:     1,
 				Name:        "Timestamp",
 				Description: "Timestamp field",
-				DataType:    schemapb.DataType_INT64,
+				DataType:    schemapb.DataType_Int64,
 				TypeParams: []*commonpb.KeyValuePair{
 					{
 						Key:   "f1_tk1",
@@ -147,7 +147,7 @@ func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionNa
 				FieldID:     100,
 				Name:        "float_vector_field",
 				Description: "field 100",
-				DataType:    schemapb.DataType_VECTOR_FLOAT,
+				DataType:    schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{
 						Key:   "dim",
@@ -165,7 +165,7 @@ func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionNa
 				FieldID:     101,
 				Name:        "binary_vector_field",
 				Description: "field 101",
-				DataType:    schemapb.DataType_VECTOR_BINARY,
+				DataType:    schemapb.DataType_BinaryVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{
 						Key:   "dim",
@@ -183,7 +183,7 @@ func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionNa
 				FieldID:     102,
 				Name:        "bool_field",
 				Description: "field 102",
-				DataType:    schemapb.DataType_BOOL,
+				DataType:    schemapb.DataType_Bool,
 				TypeParams:  []*commonpb.KeyValuePair{},
 				IndexParams: []*commonpb.KeyValuePair{},
 			},
@@ -191,7 +191,7 @@ func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionNa
 				FieldID:     103,
 				Name:        "int8_field",
 				Description: "field 103",
-				DataType:    schemapb.DataType_INT8,
+				DataType:    schemapb.DataType_Int8,
 				TypeParams:  []*commonpb.KeyValuePair{},
 				IndexParams: []*commonpb.KeyValuePair{},
 			},
@@ -199,7 +199,7 @@ func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionNa
 				FieldID:     104,
 				Name:        "int16_field",
 				Description: "field 104",
-				DataType:    schemapb.DataType_INT16,
+				DataType:    schemapb.DataType_Int16,
 				TypeParams:  []*commonpb.KeyValuePair{},
 				IndexParams: []*commonpb.KeyValuePair{},
 			},
@@ -207,7 +207,7 @@ func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionNa
 				FieldID:     105,
 				Name:        "int32_field",
 				Description: "field 105",
-				DataType:    schemapb.DataType_INT32,
+				DataType:    schemapb.DataType_Int32,
 				TypeParams:  []*commonpb.KeyValuePair{},
 				IndexParams: []*commonpb.KeyValuePair{},
 			},
@@ -215,7 +215,7 @@ func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionNa
 				FieldID:     106,
 				Name:        "int64_field",
 				Description: "field 106",
-				DataType:    schemapb.DataType_INT64,
+				DataType:    schemapb.DataType_Int64,
 				TypeParams:  []*commonpb.KeyValuePair{},
 				IndexParams: []*commonpb.KeyValuePair{},
 			},
@@ -223,7 +223,7 @@ func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionNa
 				FieldID:     107,
 				Name:        "float32_field",
 				Description: "field 107",
-				DataType:    schemapb.DataType_FLOAT,
+				DataType:    schemapb.DataType_Float,
 				TypeParams:  []*commonpb.KeyValuePair{},
 				IndexParams: []*commonpb.KeyValuePair{},
 			},
@@ -231,7 +231,7 @@ func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionNa
 				FieldID:     108,
 				Name:        "float64_field",
 				Description: "field 108",
-				DataType:    schemapb.DataType_DOUBLE,
+				DataType:    schemapb.DataType_Double,
 				TypeParams:  []*commonpb.KeyValuePair{},
 				IndexParams: []*commonpb.KeyValuePair{},
 			},
@@ -337,7 +337,7 @@ func (df *DataFactory) GetMsgStreamTsInsertMsgs(n int) (inMsgs []msgstream.TsMsg
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: []uint32{uint32(i)},
 			},
-			InsertRequest: internalpb2.InsertRequest{
+			InsertRequest: internalpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     0, // GOOSE TODO
@@ -365,7 +365,7 @@ func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (inMsgs []*msgstream.Insert
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: []uint32{uint32(i)},
 			},
-			InsertRequest: internalpb2.InsertRequest{
+			InsertRequest: internalpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     0, // GOOSE TODO
@@ -417,16 +417,16 @@ func (m *MasterServiceFactory) setCollectionName(name string) {
 	m.collectionName = name
 }
 
-func (m *MasterServiceFactory) AllocID(ctx context.Context, in *masterpb.IDRequest) (*masterpb.IDResponse, error) {
-	resp := &masterpb.IDResponse{
+func (m *MasterServiceFactory) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
+	resp := &masterpb.AllocIDResponse{
 		Status: &commonpb.Status{},
 		ID:     m.ID,
 	}
 	return resp, nil
 }
 
-func (m *MasterServiceFactory) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
-	resp := &milvuspb.ShowCollectionResponse{
+func (m *MasterServiceFactory) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
+	resp := &milvuspb.ShowCollectionsResponse{
 		Status:          &commonpb.Status{},
 		CollectionNames: []string{m.collectionName},
 	}
@@ -444,10 +444,10 @@ func (m *MasterServiceFactory) DescribeCollection(ctx context.Context, in *milvu
 	return resp, nil
 }
 
-func (m *MasterServiceFactory) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
-	return &internalpb2.ComponentStates{
-		State:              &internalpb2.ComponentInfo{},
-		SubcomponentStates: make([]*internalpb2.ComponentInfo, 0),
+func (m *MasterServiceFactory) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	return &internalpb.ComponentStates{
+		State:              &internalpb.ComponentInfo{},
+		SubcomponentStates: make([]*internalpb.ComponentInfo, 0),
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},

@@ -102,7 +102,7 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 	return nil
 }
 
-func (mt *metaTable) NotifyBuildIndex(nty *indexpb.BuildIndexNotification) error {
+func (mt *metaTable) NotifyBuildIndex(nty *indexpb.NotifyBuildIndexRequest) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 	indexBuildID := nty.IndexBuildID

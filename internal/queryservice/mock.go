@@ -2,13 +2,14 @@ package queryservice
 
 import (
 	"context"
+	"errors"
 	"strconv"
 
-	"errors"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 )
 
@@ -17,6 +18,7 @@ const (
 )
 
 type MasterMock struct {
+	types.MasterService
 	CollectionIDs     []UniqueID
 	Col2partition     map[UniqueID][]UniqueID
 	Partition2segment map[UniqueID][]UniqueID
@@ -45,7 +47,7 @@ func NewMasterMock() *MasterMock {
 	}
 }
 
-func (master *MasterMock) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
+func (master *MasterMock) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	collectionID := in.CollectionID
 	partitionIDs := make([]UniqueID, 0)
 	for _, id := range master.CollectionIDs {
@@ -54,7 +56,7 @@ func (master *MasterMock) ShowPartitions(ctx context.Context, in *milvuspb.ShowP
 			partitionIDs = append(partitionIDs, partitions...)
 		}
 	}
-	response := &milvuspb.ShowPartitionResponse{
+	response := &milvuspb.ShowPartitionsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
@@ -64,7 +66,7 @@ func (master *MasterMock) ShowPartitions(ctx context.Context, in *milvuspb.ShowP
 	return response, nil
 }
 
-func (master *MasterMock) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error) {
+func (master *MasterMock) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
 	collectionID := in.CollectionID
 	partitionID := in.PartitionID
 
@@ -73,7 +75,7 @@ func (master *MasterMock) ShowSegments(ctx context.Context, in *milvuspb.ShowSeg
 			partitions := master.Col2partition[collectionID]
 			for _, partition := range partitions {
 				if partition == partitionID {
-					return &milvuspb.ShowSegmentResponse{
+					return &milvuspb.ShowSegmentsResponse{
 						Status: &commonpb.Status{
 							ErrorCode: commonpb.ErrorCode_Success,
 						},
@@ -88,18 +90,19 @@ func (master *MasterMock) ShowSegments(ctx context.Context, in *milvuspb.ShowSeg
 }
 
 type DataMock struct {
+	types.DataService
 	SegmentIDs    []UniqueID
 	SegmentStates map[UniqueID]*datapb.SegmentStateInfo
 }
 
 func NewDataMock() *DataMock {
-	positions := make([]*internalpb2.MsgPosition, 0)
-	positions = append(positions, &internalpb2.MsgPosition{ChannelName: "insert-" + strconv.FormatInt(0, 10)})
-	positions = append(positions, &internalpb2.MsgPosition{ChannelName: "insert-" + strconv.FormatInt(1, 10)})
-	positions = append(positions, &internalpb2.MsgPosition{ChannelName: "insert-" + strconv.FormatInt(2, 10)})
-	positions = append(positions, &internalpb2.MsgPosition{ChannelName: "insert-" + strconv.FormatInt(3, 10)})
+	positions := make([]*internalpb.MsgPosition, 0)
+	positions = append(positions, &internalpb.MsgPosition{ChannelName: "insert-" + strconv.FormatInt(0, 10)})
+	positions = append(positions, &internalpb.MsgPosition{ChannelName: "insert-" + strconv.FormatInt(1, 10)})
+	positions = append(positions, &internalpb.MsgPosition{ChannelName: "insert-" + strconv.FormatInt(2, 10)})
+	positions = append(positions, &internalpb.MsgPosition{ChannelName: "insert-" + strconv.FormatInt(3, 10)})
 
-	fillStates := func(segmentID UniqueID, time uint64, position *internalpb2.MsgPosition) *datapb.SegmentStateInfo {
+	fillStates := func(segmentID UniqueID, time uint64, position *internalpb.MsgPosition) *datapb.SegmentStateInfo {
 		return &datapb.SegmentStateInfo{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
@@ -124,8 +127,8 @@ func NewDataMock() *DataMock {
 	}
 }
 
-func (data *DataMock) GetSegmentStates(ctx context.Context, req *datapb.SegmentStatesRequest) (*datapb.SegmentStatesResponse, error) {
-	ret := &datapb.SegmentStatesResponse{
+func (data *DataMock) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
+	ret := &datapb.GetSegmentStatesResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
@@ -144,8 +147,8 @@ func (data *DataMock) GetSegmentStates(ctx context.Context, req *datapb.SegmentS
 
 	return ret, nil
 }
-func (data *DataMock) GetInsertChannels(ctx context.Context, req *datapb.InsertChannelRequest) (*internalpb2.StringList, error) {
-	return &internalpb2.StringList{
+func (data *DataMock) GetInsertChannels(ctx context.Context, req *datapb.GetInsertChannelsRequest) (*internalpb.StringList, error) {
+	return &internalpb.StringList{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},

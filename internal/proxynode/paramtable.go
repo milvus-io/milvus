@@ -14,7 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
 
@@ -64,7 +64,7 @@ type ParamTable struct {
 var Params ParamTable
 var once sync.Once
 
-func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb2.InitParams) error {
+func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb.InitParams) error {
 	pt.ProxyID = initParams.NodeID
 
 	config := viper.New()

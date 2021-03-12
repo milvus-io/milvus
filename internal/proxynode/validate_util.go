@@ -131,7 +131,7 @@ func ValidateDimension(dim int64, isBinary bool) error {
 }
 
 func ValidateVectorFieldMetricType(field *schemapb.FieldSchema) error {
-	if (field.DataType != schemapb.DataType_VECTOR_FLOAT) && (field.DataType != schemapb.DataType_VECTOR_BINARY) {
+	if (field.DataType != schemapb.DataType_FloatVector) && (field.DataType != schemapb.DataType_BinaryVector) {
 		return nil
 	}
 	for _, params := range field.IndexParams {
@@ -170,7 +170,7 @@ func ValidatePrimaryKey(coll *schemapb.CollectionSchema) error {
 			if idx != -1 {
 				return fmt.Errorf("there are more than one primary key, field name = %s, %s", coll.Fields[idx].Name, field.Name)
 			}
-			if field.DataType != schemapb.DataType_INT64 {
+			if field.DataType != schemapb.DataType_Int64 {
 				return errors.New("the data type of primary key should be int64")
 			}
 			idx = i
@@ -196,13 +196,13 @@ func RepeatedKeyValToMap(kvPairs []*commonpb.KeyValuePair) (map[string]string, e
 
 func isVector(dataType schemapb.DataType) (bool, error) {
 	switch dataType {
-	case schemapb.DataType_BOOL, schemapb.DataType_INT8,
-		schemapb.DataType_INT16, schemapb.DataType_INT32,
-		schemapb.DataType_INT64,
-		schemapb.DataType_FLOAT, schemapb.DataType_DOUBLE:
+	case schemapb.DataType_Bool, schemapb.DataType_Int8,
+		schemapb.DataType_Int16, schemapb.DataType_Int32,
+		schemapb.DataType_Int64,
+		schemapb.DataType_Float, schemapb.DataType_Double:
 		return false, nil
 
-	case schemapb.DataType_VECTOR_FLOAT, schemapb.DataType_VECTOR_BINARY:
+	case schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector:
 		return true, nil
 	}
 
@@ -213,11 +213,11 @@ func ValidateMetricType(dataType schemapb.DataType, metricTypeStrRaw string) err
 	metricTypeStr := strings.ToUpper(metricTypeStrRaw)
 	switch metricTypeStr {
 	case "L2", "IP":
-		if dataType == schemapb.DataType_VECTOR_FLOAT {
+		if dataType == schemapb.DataType_FloatVector {
 			return nil
 		}
 	case "JACCARD", "HAMMING", "TANIMOTO", "SUBSTRUCTURE", "SUBPERSTURCTURE":
-		if dataType == schemapb.DataType_VECTOR_BINARY {
+		if dataType == schemapb.DataType_BinaryVector {
 			return nil
 		}
 	}
@@ -243,7 +243,7 @@ func ValidateSchema(coll *schemapb.CollectionSchema) error {
 			} else if primaryIdx != -1 {
 				return fmt.Errorf("there are more than one primary key, field name = %s, %s", coll.Fields[primaryIdx].Name, field.Name)
 			}
-			if field.DataType != schemapb.DataType_INT64 {
+			if field.DataType != schemapb.DataType_Int64 {
 				return fmt.Errorf("type of primary key shoule be int64")
 			}
 			primaryIdx = idx

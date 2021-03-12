@@ -3,6 +3,7 @@ syntax = "proto3";
 package milvus.proto.common;
 option go_package="github.com/zilliztech/milvus-distributed/internal/proto/commonpb";
 
+
 enum ErrorCode {
     Success = 0;
     UnexpectedError = 1;
@@ -51,25 +52,19 @@ enum SegmentState {
     Flushed = 4;
 }
 
-message Empty{}
-
-
 message Status {
     ErrorCode error_code = 1;
     string reason = 2;
 }
-
 
 message KeyValuePair {
     string key = 1;
     string value = 2;
 }
 
-
 message Blob {
     bytes value = 1;
 }
-
 
 message Address {
   string ip = 1;

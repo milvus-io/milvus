@@ -8,6 +8,25 @@ import "common.proto";
 import "internal.proto";
 import "milvus.proto";
 
+service IndexService {
+  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
+  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
+  rpc BuildIndex(BuildIndexRequest) returns (BuildIndexResponse){}
+  rpc GetIndexStates(GetIndexStatesRequest) returns (GetIndexStatesResponse) {}
+  rpc GetIndexFilePaths(GetIndexFilePathsRequest) returns (GetIndexFilePathsResponse){}
+  rpc NotifyBuildIndex(NotifyBuildIndexRequest) returns (common.Status) {}
+  rpc DropIndex(DropIndexRequest) returns (common.Status) {}
+}
+
+service IndexNode {
+  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
+  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
+  rpc BuildIndex(BuildIndexRequest) returns (common.Status){}
+  rpc DropIndex(DropIndexRequest) returns (common.Status) {}
+}
 
 message RegisterNodeRequest {
   common.MsgBase base = 1;
@@ -19,7 +38,7 @@ message RegisterNodeResponse {
   internal.InitParams init_params = 2;
 }
 
-message IndexStatesRequest {
+message GetIndexStatesRequest {
   repeated int64 indexBuildIDs = 1;
 }
 
@@ -28,20 +47,21 @@ message IndexInfo {
   int64 indexBuildID = 2;
   int64 indexID = 3;
   string index_name = 4;
-  string Reason = 5;
+  string reason = 5;
 }
 
-message IndexStatesResponse {
+message GetIndexStatesResponse {
   common.Status status = 1;
   repeated IndexInfo states = 2;
 }
 
 message BuildIndexRequest {
-   string index_name = 1;
-   int64 indexID = 2;
-  repeated string data_paths = 3;
-  repeated common.KeyValuePair type_params = 4;
-  repeated common.KeyValuePair index_params = 5;
+  int64 indexBuildID = 1;
+  string index_name = 2;
+  int64 indexID = 3;
+  repeated string data_paths = 4;
+  repeated common.KeyValuePair type_params = 5;
+  repeated common.KeyValuePair index_params = 6;
 }
 
 message BuildIndexResponse {
@@ -49,19 +69,14 @@ message BuildIndexResponse {
   int64 indexBuildID = 2;
 }
 
-message BuildIndexCmd {
-  int64 indexBuildID = 1;
-  BuildIndexRequest req = 2;
-}
-
-message BuildIndexNotification {
+message NotifyBuildIndexRequest {
   common.Status status = 1;
   int64 indexBuildID = 2;
   repeated string index_file_paths = 3;
   int64 nodeID = 4;
 }
 
-message IndexFilePathsRequest {
+message GetIndexFilePathsRequest {
   repeated int64 indexBuildIDs = 1;
 }
 
@@ -71,13 +86,13 @@ message IndexFilePathInfo {
   repeated string index_file_paths = 3;
 }
 
-message IndexFilePathsResponse {
+message GetIndexFilePathsResponse {
   common.Status status = 1;
   repeated IndexFilePathInfo file_paths = 2;
 }
 
 message IndexMeta {
-  int64   indexBuildID = 1;
+  int64 indexBuildID = 1;
   common.IndexState state = 2;
   string fail_reason = 3;
   BuildIndexRequest req = 4;
@@ -86,42 +101,4 @@ message IndexMeta {
 
 message DropIndexRequest {
   int64 indexID = 1;
-}
-
-/****************IndexService************************/
-service IndexService {
-  /**
-   * @brief This method is used to create collection
-   *
-   * @param CollectionSchema, use to provide collection information to be created.
-   *
-   * @return Status
-   */
-  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
-  rpc BuildIndex(BuildIndexRequest) returns (BuildIndexResponse){}
-  rpc GetIndexStates(IndexStatesRequest) returns (IndexStatesResponse) {}
-  rpc GetIndexFilePaths(IndexFilePathsRequest) returns (IndexFilePathsResponse){}
-  rpc NotifyBuildIndex(BuildIndexNotification) returns (common.Status) {}
-  rpc DropIndex(DropIndexRequest) returns (common.Status) {}
-
-  rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
-  rpc GetTimeTickChannel(common.Empty) returns(milvus.StringResponse) {}
-  rpc GetStatisticsChannel(common.Empty) returns(milvus.StringResponse){}
-}
-
-
-service IndexNode {
-  /**
-   * @brief This method is used to create collection
-   *
-   * @param CollectionSchema, use to provide collection information to be created.
-   *
-   * @return Status
-   */
-  rpc BuildIndex(BuildIndexCmd) returns (common.Status){}
-  rpc DropIndex(DropIndexRequest) returns (common.Status) {}
-
-  rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
-  rpc GetTimeTickChannel(common.Empty) returns(milvus.StringResponse) {}
-  rpc GetStatisticsChannel(common.Empty) returns(milvus.StringResponse){}
 }

@@ -15,7 +15,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
@@ -48,7 +48,7 @@ func genTestCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.Collect
 			FieldID:      UniqueID(100),
 			Name:         "vec",
 			IsPrimaryKey: false,
-			DataType:     schemapb.DataType_VECTOR_BINARY,
+			DataType:     schemapb.DataType_BinaryVector,
 			TypeParams: []*commonpb.KeyValuePair{
 				{
 					Key:   "dim",
@@ -67,7 +67,7 @@ func genTestCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.Collect
 			FieldID:      UniqueID(100),
 			Name:         "vec",
 			IsPrimaryKey: false,
-			DataType:     schemapb.DataType_VECTOR_FLOAT,
+			DataType:     schemapb.DataType_FloatVector,
 			TypeParams: []*commonpb.KeyValuePair{
 				{
 					Key:   "dim",
@@ -87,7 +87,7 @@ func genTestCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.Collect
 		FieldID:      UniqueID(101),
 		Name:         "age",
 		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_INT32,
+		DataType:     schemapb.DataType_Int32,
 	}
 
 	schema := schemapb.CollectionSchema{
@@ -129,22 +129,22 @@ func initTestMeta(t *testing.T, node *QueryNode, collectionID UniqueID, segmentI
 	assert.NoError(t, err)
 }
 
-func initDmChannel(insertChannels []string, node *QueryNode) {
+func initDmChannel(ctx context.Context, insertChannels []string, node *QueryNode) {
 	watchReq := &querypb.WatchDmChannelsRequest{
 		ChannelIDs: insertChannels,
 	}
-	_, err := node.WatchDmChannels(watchReq)
+	_, err := node.WatchDmChannels(ctx, watchReq)
 	if err != nil {
 		panic(err)
 	}
 }
 
-func initSearchChannel(searchChan string, resultChan string, node *QueryNode) {
-	searchReq := &querypb.AddQueryChannelsRequest{
+func initSearchChannel(ctx context.Context, searchChan string, resultChan string, node *QueryNode) {
+	searchReq := &querypb.AddQueryChannelRequest{
 		RequestChannelID: searchChan,
 		ResultChannelID:  resultChan,
 	}
-	_, err := node.AddQueryChannel(searchReq)
+	_, err := node.AddQueryChannel(ctx, searchReq)
 	if err != nil {
 		panic(err)
 	}
@@ -198,7 +198,7 @@ func (q *queryServiceMock) RegisterNode(ctx context.Context, req *querypb.Regist
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		InitParams: &internalpb2.InitParams{
+		InitParams: &internalpb.InitParams{
 			NodeID: int64(1),
 		},
 	}, nil

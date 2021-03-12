@@ -77,23 +77,23 @@ namespace proto {
 namespace schema {
 
 enum DataType : int {
-  NONE = 0,
-  BOOL = 1,
-  INT8 = 2,
-  INT16 = 3,
-  INT32 = 4,
-  INT64 = 5,
-  FLOAT = 10,
-  DOUBLE = 11,
-  STRING = 20,
-  VECTOR_BINARY = 100,
-  VECTOR_FLOAT = 101,
+  None = 0,
+  Bool = 1,
+  Int8 = 2,
+  Int16 = 3,
+  Int32 = 4,
+  Int64 = 5,
+  Float = 10,
+  Double = 11,
+  String = 20,
+  BinaryVector = 100,
+  FloatVector = 101,
   DataType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   DataType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool DataType_IsValid(int value);
-constexpr DataType DataType_MIN = NONE;
-constexpr DataType DataType_MAX = VECTOR_FLOAT;
+constexpr DataType DataType_MIN = None;
+constexpr DataType DataType_MAX = FloatVector;
 constexpr int DataType_ARRAYSIZE = DataType_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* DataType_descriptor();

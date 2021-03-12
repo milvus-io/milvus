@@ -15,7 +15,7 @@ package grpcqueryserviceclient
 //	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 //	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 //	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-//	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+//	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 //	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 //	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 //	qs "github.com/zilliztech/milvus-distributed/internal/queryservice"
@@ -61,7 +61,7 @@ package grpcqueryserviceclient
 //	ddStream.Start()
 //
 //	// showCollection
-//	showCollectionRequest := &querypb.ShowCollectionRequest{
+//	showCollectionRequest := &querypb.ShowCollectionsRequest{
 //		DbID: 0,
 //	}
 //	showCollectionRes, err := client.ShowCollections(showCollectionRequest)
@@ -150,7 +150,7 @@ package grpcqueryserviceclient
 //	err = client.Start()
 //	assert.Nil(t, err)
 //
-//	loadPartitionRequest := &querypb.LoadPartitionRequest{
+//	loadPartitionRequest := &querypb.LoadPartitionsRequest{
 //		CollectionID: 1,
 //		Schema: genSchema(1),
 //	}
@@ -235,7 +235,7 @@ package grpcqueryserviceclient
 //		BaseMsg: msgstream.BaseMsg{
 //			HashValues: []uint32{0},
 //		},
-//		SearchRequest: internalpb2.SearchRequest{
+//		SearchRequest: internalpb.SearchRequest{
 //			Base: &commonpb.MsgBase{
 //				MsgType:   commonpb.MsgType_kSearch,
 //				MsgID:     1,

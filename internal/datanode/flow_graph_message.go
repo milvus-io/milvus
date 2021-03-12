@@ -2,7 +2,7 @@ package datanode
 
 import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
@@ -35,7 +35,7 @@ type (
 		flushMessages  []*flushMsg
 		gcRecord       *gcRecord
 		timeRange      TimeRange
-		startPositions []*internalpb2.MsgPosition
+		startPositions []*internalpb.MsgPosition
 	}
 
 	deleteMsg struct {

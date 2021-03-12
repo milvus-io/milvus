@@ -39,7 +39,7 @@ func TestReduce_AllFunc(t *testing.T) {
 	}
 	placeholderValue := milvuspb.PlaceholderValue{
 		Tag:    "$0",
-		Type:   milvuspb.PlaceholderType_VECTOR_FLOAT,
+		Type:   milvuspb.PlaceholderType_FloatVector,
 		Values: [][]byte{searchRawData1, searchRawData2},
 	}
 

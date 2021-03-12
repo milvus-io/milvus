@@ -15,6 +15,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"math/rand"
 	"strings"
 	"sync/atomic"
@@ -31,14 +32,12 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/rmqms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	queryPb "github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type QueryNode struct {
-	typeutil.Service
-
 	queryNodeLoopCtx    context.Context
 	queryNodeLoopCancel context.CancelFunc
 
@@ -80,7 +79,7 @@ func NewQueryNode(ctx context.Context, queryNodeID UniqueID, factory msgstream.F
 	}
 
 	node.replica = newCollectionReplica()
-	node.UpdateStateCode(internalpb2.StateCode_Abnormal)
+	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return node
 }
 
@@ -99,7 +98,7 @@ func NewQueryNodeWithoutID(ctx context.Context, factory msgstream.Factory) *Quer
 	}
 
 	node.replica = newCollectionReplica()
-	node.UpdateStateCode(internalpb2.StateCode_Abnormal)
+	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 
 	return node
 }
@@ -181,12 +180,12 @@ func (node *QueryNode) Start() error {
 	//go node.metaService.start()
 	go node.loadService.start()
 	go node.statsService.start()
-	node.UpdateStateCode(internalpb2.StateCode_Healthy)
+	node.UpdateStateCode(internalpb.StateCode_Healthy)
 	return nil
 }
 
 func (node *QueryNode) Stop() error {
-	node.UpdateStateCode(internalpb2.StateCode_Abnormal)
+	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	node.queryNodeLoopCancel()
 
 	// free collectionReplica
@@ -208,7 +207,7 @@ func (node *QueryNode) Stop() error {
 	return nil
 }
 
-func (node *QueryNode) UpdateStateCode(code internalpb2.StateCode) {
+func (node *QueryNode) UpdateStateCode(code internalpb.StateCode) {
 	node.stateCode.Store(code)
 }
 
@@ -244,13 +243,13 @@ func (node *QueryNode) SetDataService(data types.DataService) error {
 	return nil
 }
 
-func (node *QueryNode) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	stats := &internalpb2.ComponentStates{
+func (node *QueryNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	stats := &internalpb.ComponentStates{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}
-	code, ok := node.stateCode.Load().(internalpb2.StateCode)
+	code, ok := node.stateCode.Load().(internalpb.StateCode)
 	if !ok {
 		errMsg := "unexpected error in type assertion"
 		stats.Status = &commonpb.Status{
@@ -259,7 +258,7 @@ func (node *QueryNode) GetComponentStates() (*internalpb2.ComponentStates, error
 		}
 		return stats, errors.New(errMsg)
 	}
-	info := &internalpb2.ComponentInfo{
+	info := &internalpb.ComponentInfo{
 		NodeID:    Params.QueryNodeID,
 		Role:      typeutil.QueryNodeRole,
 		StateCode: code,
@@ -268,15 +267,27 @@ func (node *QueryNode) GetComponentStates() (*internalpb2.ComponentStates, error
 	return stats, nil
 }
 
-func (node *QueryNode) GetTimeTickChannel() (string, error) {
-	return Params.QueryTimeTickChannelName, nil
+func (node *QueryNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		Value: Params.QueryTimeTickChannelName,
+	}, nil
 }
 
-func (node *QueryNode) GetStatisticsChannel() (string, error) {
-	return Params.StatsChannelName, nil
+func (node *QueryNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		Value: Params.StatsChannelName,
+	}, nil
 }
 
-func (node *QueryNode) AddQueryChannel(in *queryPb.AddQueryChannelsRequest) (*commonpb.Status, error) {
+func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQueryChannelRequest) (*commonpb.Status, error) {
 	if node.searchService == nil || node.searchService.searchMsgStream == nil {
 		errMsg := "null search service or null search message stream"
 		status := &commonpb.Status{
@@ -304,7 +315,7 @@ func (node *QueryNode) AddQueryChannel(in *queryPb.AddQueryChannelsRequest) (*co
 	return status, nil
 }
 
-func (node *QueryNode) RemoveQueryChannel(in *queryPb.RemoveQueryChannelsRequest) (*commonpb.Status, error) {
+func (node *QueryNode) RemoveQueryChannel(ctx context.Context, in *queryPb.RemoveQueryChannelRequest) (*commonpb.Status, error) {
 	if node.searchService == nil || node.searchService.searchMsgStream == nil {
 		errMsg := "null search service or null search result message stream"
 		status := &commonpb.Status{
@@ -354,7 +365,7 @@ func (node *QueryNode) RemoveQueryChannel(in *queryPb.RemoveQueryChannelsRequest
 	return status, nil
 }
 
-func (node *QueryNode) WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error) {
+func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	if node.dataSyncService == nil || node.dataSyncService.dmStream == nil {
 		errMsg := "null data sync service or null data manipulation stream"
 		status := &commonpb.Status{
@@ -391,7 +402,7 @@ func (node *QueryNode) WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*com
 	return status, nil
 }
 
-func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.Status, error) {
+func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	// TODO: support db
 	collectionID := in.CollectionID
 	partitionID := in.PartitionID
@@ -441,7 +452,7 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	}
 
 	// segments are ordered before LoadSegments calling
-	//var position *internalpb2.MsgPosition = nil
+	//var position *internalpb.MsgPosition = nil
 	for i, state := range in.SegmentStates {
 		//thisPosition := state.StartPosition
 		if state.State <= commonpb.SegmentState_Growing {
@@ -474,7 +485,7 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	return status, nil
 }
 
-func (node *QueryNode) ReleaseCollection(in *queryPb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	err := node.replica.removeCollection(in.CollectionID)
 	if err != nil {
 		status := &commonpb.Status{
@@ -489,7 +500,7 @@ func (node *QueryNode) ReleaseCollection(in *queryPb.ReleaseCollectionRequest) (
 	}, nil
 }
 
-func (node *QueryNode) ReleasePartitions(in *queryPb.ReleasePartitionRequest) (*commonpb.Status, error) {
+func (node *QueryNode) ReleasePartitions(ctx context.Context, in *queryPb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
@@ -504,7 +515,7 @@ func (node *QueryNode) ReleasePartitions(in *queryPb.ReleasePartitionRequest) (*
 	return status, nil
 }
 
-func (node *QueryNode) ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error) {
+func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
@@ -519,7 +530,7 @@ func (node *QueryNode) ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*comm
 	return status, nil
 }
 
-func (node *QueryNode) GetSegmentInfo(in *queryPb.SegmentInfoRequest) (*queryPb.SegmentInfoResponse, error) {
+func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmentInfoRequest) (*queryPb.GetSegmentInfoResponse, error) {
 	infos := make([]*queryPb.SegmentInfo, 0)
 	for _, id := range in.SegmentIDs {
 		segment, err := node.replica.getSegmentByID(id)
@@ -537,7 +548,7 @@ func (node *QueryNode) GetSegmentInfo(in *queryPb.SegmentInfoRequest) (*queryPb.
 		}
 		infos = append(infos, info)
 	}
-	return &queryPb.SegmentInfoResponse{
+	return &queryPb.GetSegmentInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},

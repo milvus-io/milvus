@@ -19,7 +19,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 )
 
@@ -32,7 +32,7 @@ type DataNode struct {
 	cancel  context.CancelFunc
 	NodeID  UniqueID
 	Role    string
-	State   atomic.Value // internalpb2.StateCode_Initializing
+	State   atomic.Value // internalpb.StateCode_Initializing
 	watchDm chan struct{}
 
 	dataSyncService *dataSyncService
@@ -65,7 +65,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 		replica:         nil,
 		msFactory:       factory,
 	}
-	node.UpdateStateCode(internalpb2.StateCode_Abnormal)
+	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return node
 }
 
@@ -150,22 +150,22 @@ func (node *DataNode) Init() error {
 func (node *DataNode) Start() error {
 	node.metaService.init()
 	go node.dataSyncService.start()
-	node.UpdateStateCode(internalpb2.StateCode_Healthy)
+	node.UpdateStateCode(internalpb.StateCode_Healthy)
 	return nil
 }
 
-func (node *DataNode) UpdateStateCode(code internalpb2.StateCode) {
+func (node *DataNode) UpdateStateCode(code internalpb.StateCode) {
 	node.State.Store(code)
 }
 
-func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {
+func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
 
 	switch {
 
-	case node.State.Load() != internalpb2.StateCode_Initializing:
+	case node.State.Load() != internalpb.StateCode_Initializing:
 		status.Reason = fmt.Sprintf("DataNode %d not initializing!", node.NodeID)
 		return status, errors.New(status.GetReason())
 
@@ -181,33 +181,36 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 	}
 }
 
-func (node *DataNode) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
+func (node *DataNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	log.Debug("DataNode current state", zap.Any("State", node.State.Load()))
-	states := &internalpb2.ComponentStates{
-		State: &internalpb2.ComponentInfo{
+	states := &internalpb.ComponentStates{
+		State: &internalpb.ComponentInfo{
 			NodeID:    Params.NodeID,
 			Role:      node.Role,
-			StateCode: node.State.Load().(internalpb2.StateCode),
+			StateCode: node.State.Load().(internalpb.StateCode),
 		},
-		SubcomponentStates: make([]*internalpb2.ComponentInfo, 0),
+		SubcomponentStates: make([]*internalpb.ComponentInfo, 0),
 		Status:             &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 	}
 	return states, nil
 }
 
-func (node *DataNode) FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) error {
+func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
 	ids := make([]UniqueID, 0)
-	ids = append(ids, in.SegmentIDs...)
+	ids = append(ids, req.SegmentIDs...)
 
 	flushmsg := &flushMsg{
-		msgID:        in.Base.MsgID,
-		timestamp:    in.Base.Timestamp,
+		msgID:        req.Base.MsgID,
+		timestamp:    req.Base.Timestamp,
 		segmentIDs:   ids,
-		collectionID: in.CollectionID,
+		collectionID: req.CollectionID,
 	}
 
 	node.flushChan <- flushmsg
-	return nil
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
 }
 
 func (node *DataNode) Stop() error {

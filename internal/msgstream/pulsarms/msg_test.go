@@ -12,7 +12,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 type MarshalType = msgstream.MarshalType
@@ -33,7 +33,7 @@ func (tt *InsertTask) Marshal(input msgstream.TsMsg) (MarshalType, error) {
 }
 
 func (tt *InsertTask) Unmarshal(input MarshalType) (msgstream.TsMsg, error) {
-	insertRequest := internalpb2.InsertRequest{}
+	insertRequest := internalpb.InsertRequest{}
 	in, err := msgstream.ConvertToByteArray(input)
 	if err != nil {
 		return nil, err
@@ -72,7 +72,7 @@ func newRepackFunc(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msg
 				result[key] = &msgPack
 			}
 
-			sliceRequest := internalpb2.InsertRequest{
+			sliceRequest := internalpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     insertRequest.Base.MsgID,
@@ -104,7 +104,7 @@ func getInsertTask(reqID msgstream.UniqueID, hashValue uint32) msgstream.TsMsg {
 		EndTimestamp:   0,
 		HashValues:     []uint32{hashValue},
 	}
-	insertRequest := internalpb2.InsertRequest{
+	insertRequest := internalpb.InsertRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Insert,
 			MsgID:     reqID,

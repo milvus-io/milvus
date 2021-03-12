@@ -48,7 +48,7 @@ struct TableStruct_common_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[7]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[6]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -64,9 +64,6 @@ extern AddressDefaultTypeInternal _Address_default_instance_;
 class Blob;
 class BlobDefaultTypeInternal;
 extern BlobDefaultTypeInternal _Blob_default_instance_;
-class Empty;
-class EmptyDefaultTypeInternal;
-extern EmptyDefaultTypeInternal _Empty_default_instance_;
 class KeyValuePair;
 class KeyValuePairDefaultTypeInternal;
 extern KeyValuePairDefaultTypeInternal _KeyValuePair_default_instance_;
@@ -85,7 +82,6 @@ extern StatusDefaultTypeInternal _Status_default_instance_;
 PROTOBUF_NAMESPACE_OPEN
 template<> ::milvus::proto::common::Address* Arena::CreateMaybeMessage<::milvus::proto::common::Address>(Arena*);
 template<> ::milvus::proto::common::Blob* Arena::CreateMaybeMessage<::milvus::proto::common::Blob>(Arena*);
-template<> ::milvus::proto::common::Empty* Arena::CreateMaybeMessage<::milvus::proto::common::Empty>(Arena*);
 template<> ::milvus::proto::common::KeyValuePair* Arena::CreateMaybeMessage<::milvus::proto::common::KeyValuePair>(Arena*);
 template<> ::milvus::proto::common::MsgBase* Arena::CreateMaybeMessage<::milvus::proto::common::MsgBase>(Arena*);
 template<> ::milvus::proto::common::MsgHeader* Arena::CreateMaybeMessage<::milvus::proto::common::MsgHeader>(Arena*);
@@ -264,128 +260,6 @@ inline bool MsgType_Parse(
 }
 // ===================================================================
 
-class Empty :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.common.Empty) */ {
- public:
-  Empty();
-  virtual ~Empty();
-
-  Empty(const Empty& from);
-  Empty(Empty&& from) noexcept
-    : Empty() {
-    *this = ::std::move(from);
-  }
-
-  inline Empty& operator=(const Empty& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline Empty& operator=(Empty&& from) noexcept {
-    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
-      if (this != &from) InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return GetMetadataStatic().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return GetMetadataStatic().reflection;
-  }
-  static const Empty& default_instance();
-
-  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
-  static inline const Empty* internal_default_instance() {
-    return reinterpret_cast<const Empty*>(
-               &_Empty_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    0;
-
-  friend void swap(Empty& a, Empty& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(Empty* other) {
-    if (other == this) return;
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  inline Empty* New() const final {
-    return CreateMaybeMessage<Empty>(nullptr);
-  }
-
-  Empty* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
-    return CreateMaybeMessage<Empty>(arena);
-  }
-  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
-  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
-  void CopyFrom(const Empty& from);
-  void MergeFrom(const Empty& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  #else
-  bool MergePartialFromCodedStream(
-      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
-  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
-  void SerializeWithCachedSizes(
-      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
-  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
-      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
-  int GetCachedSize() const final { return _cached_size_.Get(); }
-
-  private:
-  inline void SharedCtor();
-  inline void SharedDtor();
-  void SetCachedSize(int size) const final;
-  void InternalSwap(Empty* other);
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "milvus.proto.common.Empty";
-  }
-  private:
-  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
-    return nullptr;
-  }
-  inline void* MaybeArenaPtr() const {
-    return nullptr;
-  }
-  public:
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
-  private:
-  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
-    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_common_2eproto);
-    return ::descriptor_table_common_2eproto.file_level_metadata[kIndexInFileMessages];
-  }
-
-  public:
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  // @@protoc_insertion_point(class_scope:milvus.proto.common.Empty)
- private:
-  class _Internal;
-
-  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  friend struct ::TableStruct_common_2eproto;
-};
-// -------------------------------------------------------------------
-
 class Status :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.common.Status) */ {
  public:
@@ -428,7 +302,7 @@ class Status :
                &_Status_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    1;
+    0;
 
   friend void swap(Status& a, Status& b) {
     a.Swap(&b);
@@ -572,7 +446,7 @@ class KeyValuePair :
                &_KeyValuePair_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    2;
+    1;
 
   friend void swap(KeyValuePair& a, KeyValuePair& b) {
     a.Swap(&b);
@@ -722,7 +596,7 @@ class Blob :
                &_Blob_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    3;
+    2;
 
   friend void swap(Blob& a, Blob& b) {
     a.Swap(&b);
@@ -859,7 +733,7 @@ class Address :
                &_Address_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    4;
+    3;
 
   friend void swap(Address& a, Address& b) {
     a.Swap(&b);
@@ -1003,7 +877,7 @@ class MsgBase :
                &_MsgBase_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    5;
+    4;
 
   friend void swap(MsgBase& a, MsgBase& b) {
     a.Swap(&b);
@@ -1155,7 +1029,7 @@ class MsgHeader :
                &_MsgHeader_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    6;
+    5;
 
   friend void swap(MsgHeader& a, MsgHeader& b) {
     a.Swap(&b);
@@ -1254,10 +1128,6 @@ class MsgHeader :
   #pragma GCC diagnostic push
   #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #endif  // __GNUC__
-// Empty
-
-// -------------------------------------------------------------------
-
 // Status
 
 // .milvus.proto.common.ErrorCode error_code = 1;
@@ -1673,8 +1543,6 @@ inline void MsgHeader::set_allocated_base(::milvus::proto::common::MsgBase* base
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
-// -------------------------------------------------------------------
-
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

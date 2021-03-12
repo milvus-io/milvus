@@ -19,7 +19,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -64,7 +64,7 @@ func TestGrpcService(t *testing.T) {
 
 	err = svr.startGrpc()
 	assert.Nil(t, err)
-	svr.masterService.UpdateStateCode(internalpb2.StateCode_Initializing)
+	svr.masterService.UpdateStateCode(internalpb.StateCode_Initializing)
 
 	core := svr.masterService
 	err = core.Init()
@@ -79,29 +79,29 @@ func TestGrpcService(t *testing.T) {
 		timeTickArray = append(timeTickArray, ts)
 		return nil
 	}
-	createCollectionArray := make([]*internalpb2.CreateCollectionRequest, 0, 16)
-	core.DdCreateCollectionReq = func(req *internalpb2.CreateCollectionRequest) error {
+	createCollectionArray := make([]*internalpb.CreateCollectionRequest, 0, 16)
+	core.DdCreateCollectionReq = func(req *internalpb.CreateCollectionRequest) error {
 		t.Logf("Create Colllection %s", req.CollectionName)
 		createCollectionArray = append(createCollectionArray, req)
 		return nil
 	}
 
-	dropCollectionArray := make([]*internalpb2.DropCollectionRequest, 0, 16)
-	core.DdDropCollectionReq = func(req *internalpb2.DropCollectionRequest) error {
+	dropCollectionArray := make([]*internalpb.DropCollectionRequest, 0, 16)
+	core.DdDropCollectionReq = func(req *internalpb.DropCollectionRequest) error {
 		t.Logf("Drop Collection %s", req.CollectionName)
 		dropCollectionArray = append(dropCollectionArray, req)
 		return nil
 	}
 
-	createPartitionArray := make([]*internalpb2.CreatePartitionRequest, 0, 16)
-	core.DdCreatePartitionReq = func(req *internalpb2.CreatePartitionRequest) error {
+	createPartitionArray := make([]*internalpb.CreatePartitionRequest, 0, 16)
+	core.DdCreatePartitionReq = func(req *internalpb.CreatePartitionRequest) error {
 		t.Logf("Create Partition %s", req.PartitionName)
 		createPartitionArray = append(createPartitionArray, req)
 		return nil
 	}
 
-	dropPartitionArray := make([]*internalpb2.DropPartitionRequest, 0, 16)
-	core.DdDropPartitionReq = func(req *internalpb2.DropPartitionRequest) error {
+	dropPartitionArray := make([]*internalpb.DropPartitionRequest, 0, 16)
+	core.DdDropPartitionReq = func(req *internalpb.DropPartitionRequest) error {
 		t.Logf("Drop Partition %s", req.PartitionName)
 		dropPartitionArray = append(dropPartitionArray, req)
 		return nil
@@ -147,7 +147,7 @@ func TestGrpcService(t *testing.T) {
 	err = svr.start()
 	assert.Nil(t, err)
 
-	svr.masterService.UpdateStateCode(internalpb2.StateCode_Healthy)
+	svr.masterService.UpdateStateCode(internalpb.StateCode_Healthy)
 
 	cli, err := grpcmasterserviceclient.NewClient(Params.Address, 3*time.Second)
 	assert.Nil(t, err)
@@ -169,7 +169,7 @@ func TestGrpcService(t *testing.T) {
 					Name:         "vector",
 					IsPrimaryKey: false,
 					Description:  "vector",
-					DataType:     schemapb.DataType_VECTOR_FLOAT,
+					DataType:     schemapb.DataType_FloatVector,
 					TypeParams:   nil,
 					IndexParams: []*commonpb.KeyValuePair{
 						{
@@ -319,7 +319,7 @@ func TestGrpcService(t *testing.T) {
 	})
 
 	t.Run("show collection", func(t *testing.T) {
-		req := &milvuspb.ShowCollectionRequest{
+		req := &milvuspb.ShowCollectionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ShowCollections,
 				MsgID:     130,
@@ -380,7 +380,7 @@ func TestGrpcService(t *testing.T) {
 	t.Run("show partition", func(t *testing.T) {
 		coll, err := core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
-		req := &milvuspb.ShowPartitionRequest{
+		req := &milvuspb.ShowPartitionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ShowPartitions,
 				MsgID:     160,
@@ -416,7 +416,7 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, len(part.SegmentIDs), 1)
 
-		req := &milvuspb.ShowSegmentRequest{
+		req := &milvuspb.ShowSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ShowSegments,
 				MsgID:     170,

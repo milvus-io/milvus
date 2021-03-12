@@ -112,12 +112,9 @@ func (it *IndexAddTask) PreExecute(ctx context.Context) error {
 }
 
 func (it *IndexAddTask) Execute(ctx context.Context) error {
-	cmd := &indexpb.BuildIndexCmd{
-		IndexBuildID: it.indexBuildID,
-		Req:          it.req,
-	}
+	it.req.IndexBuildID = it.indexBuildID
 	log.Debug("before index ...")
-	resp, err := it.builderClient.BuildIndex(ctx, cmd)
+	resp, err := it.builderClient.BuildIndex(ctx, it.req)
 	if err != nil {
 		return err
 	}

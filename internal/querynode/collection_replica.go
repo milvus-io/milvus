@@ -21,7 +21,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
@@ -65,7 +65,7 @@ type ReplicaInterface interface {
 	getSegmentNum() int
 	setSegmentEnableIndex(segmentID UniqueID, enable bool) error
 
-	getSegmentStatistics() []*internalpb2.SegmentStats
+	getSegmentStatistics() []*internalpb.SegmentStats
 	getEnabledSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID)
 	getSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID)
 	replaceGrowingSegmentBySealedSegment(segment *Segment) error
@@ -187,7 +187,7 @@ func (colReplica *collectionReplica) getVecFieldIDsByCollectionID(collectionID U
 
 	vecFields := make([]int64, 0)
 	for _, field := range fields {
-		if field.DataType == schemapb.DataType_VECTOR_BINARY || field.DataType == schemapb.DataType_VECTOR_FLOAT {
+		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
 			vecFields = append(vecFields, field.FieldID)
 		}
 	}
@@ -447,18 +447,18 @@ func (colReplica *collectionReplica) getSegmentNum() int {
 	return len(colReplica.segments)
 }
 
-func (colReplica *collectionReplica) getSegmentStatistics() []*internalpb2.SegmentStats {
+func (colReplica *collectionReplica) getSegmentStatistics() []*internalpb.SegmentStats {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 
-	var statisticData = make([]*internalpb2.SegmentStats, 0)
+	var statisticData = make([]*internalpb.SegmentStats, 0)
 
 	for segmentID, segment := range colReplica.segments {
 		currentMemSize := segment.getMemSize()
 		segment.lastMemSize = currentMemSize
 		segmentNumOfRows := segment.getRowCount()
 
-		stat := internalpb2.SegmentStats{
+		stat := internalpb.SegmentStats{
 			SegmentID:        segmentID,
 			MemorySize:       currentMemSize,
 			NumRows:          segmentNumOfRows,

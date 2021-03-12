@@ -17,7 +17,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/tso"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
@@ -32,8 +32,8 @@ const (
 
 type IndexService struct {
 	nodeClients *PriorityQueue
-	nodeStates  map[UniqueID]*internalpb2.ComponentStates
-	stateCode   internalpb2.StateCode
+	nodeStates  map[UniqueID]*internalpb.ComponentStates
+	stateCode   internalpb.StateCode
 
 	ID UniqueID
 
@@ -122,7 +122,7 @@ func (i *IndexService) Init() error {
 	if err != nil {
 		return err
 	}
-	i.UpdateStateCode(internalpb2.StateCode_Healthy)
+	i.UpdateStateCode(internalpb.StateCode_Healthy)
 	return nil
 }
 
@@ -149,19 +149,18 @@ func (i *IndexService) Stop() error {
 	return nil
 }
 
-func (i *IndexService) UpdateStateCode(code internalpb2.StateCode) {
+func (i *IndexService) UpdateStateCode(code internalpb.StateCode) {
 	i.stateCode = code
 }
 
-func (i *IndexService) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
-
-	stateInfo := &internalpb2.ComponentInfo{
+func (i *IndexService) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	stateInfo := &internalpb.ComponentInfo{
 		NodeID:    i.ID,
 		Role:      "IndexService",
 		StateCode: i.stateCode,
 	}
 
-	ret := &internalpb2.ComponentStates{
+	ret := &internalpb.ComponentStates{
 		State:              stateInfo,
 		SubcomponentStates: nil, // todo add subcomponents states
 		Status: &commonpb.Status{
@@ -246,7 +245,7 @@ func (i *IndexService) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRe
 	return ret, nil
 }
 
-func (i *IndexService) GetIndexStates(ctx context.Context, req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
+func (i *IndexService) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
 	var indexStates []*indexpb.IndexInfo
 	for _, indexID := range req.IndexBuildIDs {
 		indexState, err := i.metaTable.GetIndexState(indexID)
@@ -255,7 +254,7 @@ func (i *IndexService) GetIndexStates(ctx context.Context, req *indexpb.IndexSta
 		}
 		indexStates = append(indexStates, indexState)
 	}
-	ret := &indexpb.IndexStatesResponse{
+	ret := &indexpb.GetIndexStatesResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
@@ -293,7 +292,7 @@ func (i *IndexService) DropIndex(ctx context.Context, req *indexpb.DropIndexRequ
 	}, nil
 }
 
-func (i *IndexService) GetIndexFilePaths(ctx context.Context, req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {
+func (i *IndexService) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
 	var indexPaths []*indexpb.IndexFilePathInfo = nil
 
 	for _, indexID := range req.IndexBuildIDs {
@@ -304,7 +303,7 @@ func (i *IndexService) GetIndexFilePaths(ctx context.Context, req *indexpb.Index
 		indexPaths = append(indexPaths, indexPathInfo)
 	}
 
-	ret := &indexpb.IndexFilePathsResponse{
+	ret := &indexpb.GetIndexFilePathsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
@@ -313,7 +312,7 @@ func (i *IndexService) GetIndexFilePaths(ctx context.Context, req *indexpb.Index
 	return ret, nil
 }
 
-func (i *IndexService) NotifyBuildIndex(ctx context.Context, nty *indexpb.BuildIndexNotification) (*commonpb.Status, error) {
+func (i *IndexService) NotifyBuildIndex(ctx context.Context, nty *indexpb.NotifyBuildIndexRequest) (*commonpb.Status, error) {
 	ret := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}

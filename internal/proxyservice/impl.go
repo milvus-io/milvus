@@ -13,7 +13,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 )
@@ -136,7 +136,7 @@ func (s *ProxyService) Init() error {
 }
 
 func (s *ProxyService) Start() error {
-	s.stateCode = internalpb2.StateCode_Healthy
+	s.stateCode = internalpb.StateCode_Healthy
 	s.sched.Start()
 	log.Debug("start scheduler ...")
 	return s.tick.Start()
@@ -159,14 +159,14 @@ func (s *ProxyService) Stop() error {
 	return nil
 }
 
-func (s *ProxyService) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
-	stateInfo := &internalpb2.ComponentInfo{
+func (s *ProxyService) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	stateInfo := &internalpb.ComponentInfo{
 		NodeID:    UniqueID(0),
 		Role:      "ProxyService",
 		StateCode: s.stateCode,
 	}
 
-	ret := &internalpb2.ComponentStates{
+	ret := &internalpb.ComponentStates{
 		State:              stateInfo,
 		SubcomponentStates: nil, // todo add subcomponents states
 		Status: &commonpb.Status{
@@ -176,7 +176,7 @@ func (s *ProxyService) GetComponentStates(ctx context.Context) (*internalpb2.Com
 	return ret, nil
 }
 
-func (s *ProxyService) UpdateStateCode(code internalpb2.StateCode) {
+func (s *ProxyService) UpdateStateCode(code internalpb.StateCode) {
 	s.stateCode = code
 }
 

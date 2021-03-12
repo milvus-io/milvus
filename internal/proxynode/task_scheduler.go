@@ -15,7 +15,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
 
@@ -391,7 +391,7 @@ func (sched *TaskScheduler) queryResultLoop() {
 	queryResultMsgStream.Start()
 	defer queryResultMsgStream.Close()
 
-	queryResultBuf := make(map[UniqueID][]*internalpb2.SearchResults)
+	queryResultBuf := make(map[UniqueID][]*internalpb.SearchResults)
 
 	for {
 		select {
@@ -416,7 +416,7 @@ func (sched *TaskScheduler) queryResultLoop() {
 
 				_, ok = queryResultBuf[reqID]
 				if !ok {
-					queryResultBuf[reqID] = make([]*internalpb2.SearchResults, 0)
+					queryResultBuf[reqID] = make([]*internalpb.SearchResults, 0)
 				}
 				queryResultBuf[reqID] = append(queryResultBuf[reqID], &searchResultMsg.SearchResults)
 

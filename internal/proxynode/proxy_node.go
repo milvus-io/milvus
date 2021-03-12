@@ -14,7 +14,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
@@ -29,7 +29,7 @@ type ProxyNode struct {
 	cancel func()
 	wg     sync.WaitGroup
 
-	initParams *internalpb2.InitParams
+	initParams *internalpb.InitParams
 	ip         string
 	port       int
 
@@ -65,7 +65,7 @@ func NewProxyNode(ctx context.Context, factory msgstream.Factory) (*ProxyNode, e
 		cancel:    cancel,
 		msFactory: factory,
 	}
-	node.UpdateStateCode(internalpb2.StateCode_Abnormal)
+	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return node, nil
 
 }
@@ -236,7 +236,7 @@ func (node *ProxyNode) Start() error {
 		cb()
 	}
 
-	node.UpdateStateCode(internalpb2.StateCode_Healthy)
+	node.UpdateStateCode(internalpb.StateCode_Healthy)
 	log.Debug("proxy node is healthy ...")
 
 	return nil

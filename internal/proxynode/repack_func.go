@@ -8,7 +8,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
@@ -239,7 +239,7 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 			}
 			segmentID := getSegmentID(reqID, key)
 			channelID := channelNames[int(key)%len(channelNames)]
-			sliceRequest := internalpb2.InsertRequest{
+			sliceRequest := internalpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     reqID,

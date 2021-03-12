@@ -11,7 +11,7 @@ import (
 )
 
 func TestPrintBinlogFilesInt64(t *testing.T) {
-	w, err := NewInsertBinlogWriter(schemapb.DataType_INT64, 10, 20, 30, 40)
+	w, err := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
 	assert.Nil(t, err)
 
 	curTS := time.Now().UnixNano() / int64(time.Millisecond)

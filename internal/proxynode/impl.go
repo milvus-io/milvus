@@ -12,18 +12,53 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 const (
 	reqTimeoutInterval = time.Second * 10
 )
 
-func (node *ProxyNode) UpdateStateCode(code internalpb2.StateCode) {
+func (node *ProxyNode) UpdateStateCode(code internalpb.StateCode) {
 	node.stateCode.Store(code)
+}
+
+func (node *ProxyNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	stats := &internalpb.ComponentStates{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}
+	code, ok := node.stateCode.Load().(internalpb.StateCode)
+	if !ok {
+		errMsg := "unexpected error in type assertion"
+		stats.Status = &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    errMsg,
+		}
+		return stats, errors.New(errMsg)
+	}
+	info := &internalpb.ComponentInfo{
+		NodeID:    Params.ProxyID,
+		Role:      typeutil.ProxyNodeRole,
+		StateCode: code,
+	}
+	stats.State = info
+	return stats, nil
+}
+
+func (node *ProxyNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		Value: "",
+	}, nil
 }
 
 func (node *ProxyNode) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
@@ -220,18 +255,18 @@ func (node *ProxyNode) DescribeCollection(ctx context.Context, request *milvuspb
 	return dct.result, nil
 }
 
-func (node *ProxyNode) GetCollectionStatistics(ctx context.Context, request *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error) {
+func (node *ProxyNode) GetCollectionStatistics(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
 	log.Debug("get collection statistics...")
 	g := &GetCollectionsStatisticsTask{
-		ctx:                    ctx,
-		Condition:              NewTaskCondition(ctx),
-		CollectionStatsRequest: request,
-		dataService:            node.dataService,
+		ctx:                            ctx,
+		Condition:                      NewTaskCondition(ctx),
+		GetCollectionStatisticsRequest: request,
+		dataService:                    node.dataService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(g)
 	if err != nil {
-		return &milvuspb.CollectionStatsResponse{
+		return &milvuspb.GetCollectionStatisticsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
@@ -241,7 +276,7 @@ func (node *ProxyNode) GetCollectionStatistics(ctx context.Context, request *mil
 
 	err = g.WaitToFinish()
 	if err != nil {
-		return &milvuspb.CollectionStatsResponse{
+		return &milvuspb.GetCollectionStatisticsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
@@ -252,18 +287,18 @@ func (node *ProxyNode) GetCollectionStatistics(ctx context.Context, request *mil
 	return g.result, nil
 }
 
-func (node *ProxyNode) ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
+func (node *ProxyNode) ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	log.Debug("show collections...")
 	sct := &ShowCollectionsTask{
-		ctx:                   ctx,
-		Condition:             NewTaskCondition(ctx),
-		ShowCollectionRequest: request,
-		masterService:         node.masterService,
+		ctx:                    ctx,
+		Condition:              NewTaskCondition(ctx),
+		ShowCollectionsRequest: request,
+		masterService:          node.masterService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(sct)
 	if err != nil {
-		return &milvuspb.ShowCollectionResponse{
+		return &milvuspb.ShowCollectionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
@@ -273,7 +308,7 @@ func (node *ProxyNode) ShowCollections(ctx context.Context, request *milvuspb.Sh
 
 	err = sct.WaitToFinish()
 	if err != nil {
-		return &milvuspb.ShowCollectionResponse{
+		return &milvuspb.ShowCollectionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
@@ -373,14 +408,14 @@ func (node *ProxyNode) HasPartition(ctx context.Context, request *milvuspb.HasPa
 	return hpt.result, nil
 }
 
-func (node *ProxyNode) LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitonRequest) (*commonpb.Status, error) {
+func (node *ProxyNode) LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitionsRequest) (*commonpb.Status, error) {
 	log.Debug("load partitions...")
 
 	lpt := &LoadPartitionTask{
-		ctx:                 ctx,
-		Condition:           NewTaskCondition(ctx),
-		LoadPartitonRequest: request,
-		queryService:        node.queryService,
+		ctx:                   ctx,
+		Condition:             NewTaskCondition(ctx),
+		LoadPartitionsRequest: request,
+		queryService:          node.queryService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(lpt)
@@ -402,14 +437,14 @@ func (node *ProxyNode) LoadPartitions(ctx context.Context, request *milvuspb.Loa
 	return lpt.result, nil
 }
 
-func (node *ProxyNode) ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionRequest) (*commonpb.Status, error) {
+func (node *ProxyNode) ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	log.Debug("load partitions...")
 
 	rpt := &ReleasePartitionTask{
-		ctx:                     ctx,
-		Condition:               NewTaskCondition(ctx),
-		ReleasePartitionRequest: request,
-		queryService:            node.queryService,
+		ctx:                      ctx,
+		Condition:                NewTaskCondition(ctx),
+		ReleasePartitionsRequest: request,
+		queryService:             node.queryService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(rpt)
@@ -431,24 +466,24 @@ func (node *ProxyNode) ReleasePartitions(ctx context.Context, request *milvuspb.
 	return rpt.result, nil
 }
 
-func (node *ProxyNode) GetPartitionStatistics(ctx context.Context, request *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error) {
+func (node *ProxyNode) GetPartitionStatistics(ctx context.Context, request *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error) {
 	panic("implement me")
 }
 
-func (node *ProxyNode) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
+func (node *ProxyNode) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	log.Debug("show partitions...")
 	spt := &ShowPartitionsTask{
-		ctx:                  ctx,
-		Condition:            NewTaskCondition(ctx),
-		ShowPartitionRequest: request,
-		masterService:        node.masterService,
-		result:               nil,
+		ctx:                   ctx,
+		Condition:             NewTaskCondition(ctx),
+		ShowPartitionsRequest: request,
+		masterService:         node.masterService,
+		result:                nil,
 	}
 
 	err := node.sched.DdQueue.Enqueue(spt)
 
 	if err != nil {
-		return &milvuspb.ShowPartitionResponse{
+		return &milvuspb.ShowPartitionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
@@ -458,7 +493,7 @@ func (node *ProxyNode) ShowPartitions(ctx context.Context, request *milvuspb.Sho
 
 	err = spt.WaitToFinish()
 	if err != nil {
-		return &milvuspb.ShowPartitionResponse{
+		return &milvuspb.ShowPartitionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
@@ -553,18 +588,18 @@ func (node *ProxyNode) DropIndex(ctx context.Context, request *milvuspb.DropInde
 	return dit.result, nil
 }
 
-func (node *ProxyNode) GetIndexState(ctx context.Context, request *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error) {
+func (node *ProxyNode) GetIndexState(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error) {
 	dipt := &GetIndexStateTask{
-		ctx:               ctx,
-		Condition:         NewTaskCondition(ctx),
-		IndexStateRequest: request,
-		indexService:      node.indexService,
-		masterService:     node.masterService,
+		ctx:                  ctx,
+		Condition:            NewTaskCondition(ctx),
+		GetIndexStateRequest: request,
+		indexService:         node.indexService,
+		masterService:        node.masterService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(dipt)
 	if err != nil {
-		return &milvuspb.IndexStateResponse{
+		return &milvuspb.GetIndexStateResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
@@ -574,7 +609,7 @@ func (node *ProxyNode) GetIndexState(ctx context.Context, request *milvuspb.Inde
 
 	err = dipt.WaitToFinish()
 	if err != nil {
-		return &milvuspb.IndexStateResponse{
+		return &milvuspb.GetIndexStateResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
@@ -594,7 +629,7 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: request.HashKeys,
 			},
-			InsertRequest: internalpb2.InsertRequest{
+			InsertRequest: internalpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
 					MsgID:   0,
@@ -638,7 +673,7 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 	qt := &SearchTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
-		SearchRequest: &internalpb2.SearchRequest{
+		SearchRequest: &internalpb.SearchRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_Search,
 				SourceID: Params.ProxyID,
@@ -646,7 +681,7 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 			ResultChannelID: strconv.FormatInt(Params.ProxyID, 10),
 		},
 		queryMsgStream: node.queryMsgStream,
-		resultBuf:      make(chan []*internalpb2.SearchResults),
+		resultBuf:      make(chan []*internalpb.SearchResults),
 		query:          request,
 	}
 
@@ -701,12 +736,12 @@ func (node *ProxyNode) Flush(ctx context.Context, request *milvuspb.FlushRequest
 	return ft.result, nil
 }
 
-func (node *ProxyNode) GetDdChannel(ctx context.Context, request *commonpb.Empty) (*milvuspb.StringResponse, error) {
+func (node *ProxyNode) GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
 	panic("implement me")
 }
 
-func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.PersistentSegmentInfoRequest) (*milvuspb.PersistentSegmentInfoResponse, error) {
-	resp := &milvuspb.PersistentSegmentInfoResponse{
+func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
+	resp := &milvuspb.GetPersistentSegmentInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
@@ -716,7 +751,7 @@ func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvus
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
-	infoResp, err := node.dataService.GetSegmentInfo(ctx, &datapb.SegmentInfoRequest{
+	infoResp, err := node.dataService.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_SegmentInfo,
 			MsgID:     0,
@@ -752,8 +787,8 @@ func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvus
 	return resp, nil
 }
 
-func (node *ProxyNode) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.QuerySegmentInfoRequest) (*milvuspb.QuerySegmentInfoResponse, error) {
-	resp := &milvuspb.QuerySegmentInfoResponse{
+func (node *ProxyNode) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error) {
+	resp := &milvuspb.GetQuerySegmentInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
@@ -763,7 +798,7 @@ func (node *ProxyNode) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.Qu
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
-	infoResp, err := node.queryService.GetSegmentInfo(ctx, &querypb.SegmentInfoRequest{
+	infoResp, err := node.queryService.GetSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_SegmentInfo,
 			MsgID:     0,
@@ -815,7 +850,7 @@ func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName strin
 		return nil, errors.New(describeCollectionResponse.Status.Reason)
 	}
 	collectionID := describeCollectionResponse.CollectionID
-	showPartitionsResp, err := node.masterService.ShowPartitions(ctx, &milvuspb.ShowPartitionRequest{
+	showPartitionsResp, err := node.masterService.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_ShowPartitions,
 			MsgID:     0,
@@ -835,7 +870,7 @@ func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName strin
 
 	ret := make([]UniqueID, 0)
 	for _, partitionID := range showPartitionsResp.PartitionIDs {
-		showSegmentResponse, err := node.masterService.ShowSegments(ctx, &milvuspb.ShowSegmentRequest{
+		showSegmentResponse, err := node.masterService.ShowSegments(ctx, &milvuspb.ShowSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ShowSegments,
 				MsgID:     0,
@@ -856,9 +891,9 @@ func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName strin
 	return ret, nil
 }
 
-func (node *ProxyNode) RegisterLink(request *commonpb.Empty) (*milvuspb.RegisterLinkResponse, error) {
-	code := node.stateCode.Load().(internalpb2.StateCode)
-	if code != internalpb2.StateCode_Healthy {
+func (node *ProxyNode) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {
+	code := node.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
 		return &milvuspb.RegisterLinkResponse{
 			Address: nil,
 			Status: &commonpb.Status{

@@ -9,7 +9,7 @@ import (
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 )
@@ -61,46 +61,46 @@ func (c *Client) Stop() error {
 	return c.conn.Close()
 }
 
-func (c *Client) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
-	return c.grpcClient.GetComponentStates(ctx, nil)
+func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	return c.grpcClient.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
 }
 
 func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return c.grpcClient.GetTimeTickChannel(ctx, nil)
+	return c.grpcClient.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 }
 
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return c.grpcClient.GetStatsChannel(ctx, nil)
+	return c.grpcClient.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 }
 
-func (c *Client) AddQueryChannel(ctx context.Context, in *querypb.AddQueryChannelsRequest) (*commonpb.Status, error) {
-	return c.grpcClient.AddQueryChannel(ctx, in)
+func (c *Client) AddQueryChannel(ctx context.Context, req *querypb.AddQueryChannelRequest) (*commonpb.Status, error) {
+	return c.grpcClient.AddQueryChannel(ctx, req)
 }
 
-func (c *Client) RemoveQueryChannel(ctx context.Context, in *querypb.RemoveQueryChannelsRequest) (*commonpb.Status, error) {
-	return c.grpcClient.RemoveQueryChannel(ctx, in)
+func (c *Client) RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQueryChannelRequest) (*commonpb.Status, error) {
+	return c.grpcClient.RemoveQueryChannel(ctx, req)
 }
 
-func (c *Client) WatchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
-	return c.grpcClient.WatchDmChannels(ctx, in)
+func (c *Client) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
+	return c.grpcClient.WatchDmChannels(ctx, req)
 }
 
-func (c *Client) LoadSegments(ctx context.Context, in *querypb.LoadSegmentRequest) (*commonpb.Status, error) {
-	return c.grpcClient.LoadSegments(ctx, in)
+func (c *Client) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
+	return c.grpcClient.LoadSegments(ctx, req)
 }
 
-func (c *Client) ReleaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	return c.grpcClient.ReleaseCollection(ctx, in)
+func (c *Client) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+	return c.grpcClient.ReleaseCollection(ctx, req)
 }
 
-func (c *Client) ReleasePartitions(ctx context.Context, in *querypb.ReleasePartitionRequest) (*commonpb.Status, error) {
-	return c.grpcClient.ReleasePartitions(ctx, in)
+func (c *Client) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
+	return c.grpcClient.ReleasePartitions(ctx, req)
 }
 
-func (c *Client) ReleaseSegments(ctx context.Context, in *querypb.ReleaseSegmentRequest) (*commonpb.Status, error) {
-	return c.grpcClient.ReleaseSegments(ctx, in)
+func (c *Client) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
+	return c.grpcClient.ReleaseSegments(ctx, req)
 }
 
-func (c *Client) GetSegmentInfo(ctx context.Context, in *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error) {
-	return c.grpcClient.GetSegmentInfo(ctx, in)
+func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
+	return c.grpcClient.GetSegmentInfo(ctx, req)
 }

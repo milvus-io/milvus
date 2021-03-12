@@ -54,7 +54,7 @@ func (mService *metaService) loadCollections(ctx context.Context) error {
 }
 
 func (mService *metaService) getCollectionNames(ctx context.Context) ([]string, error) {
-	req := &milvuspb.ShowCollectionRequest{
+	req := &milvuspb.ShowCollectionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_ShowCollections,
 			MsgID:     0, //GOOSE TODO

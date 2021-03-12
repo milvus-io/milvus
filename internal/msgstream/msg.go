@@ -6,7 +6,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 type MsgType = commonpb.MsgType
@@ -63,7 +63,7 @@ func ConvertToByteArray(input interface{}) ([]byte, error) {
 /////////////////////////////////////////Insert//////////////////////////////////////////
 type InsertMsg struct {
 	BaseMsg
-	internalpb2.InsertRequest
+	internalpb.InsertRequest
 }
 
 func (it *InsertMsg) ID() UniqueID {
@@ -85,7 +85,7 @@ func (it *InsertMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (it *InsertMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	insertRequest := internalpb2.InsertRequest{}
+	insertRequest := internalpb.InsertRequest{}
 	in, err := ConvertToByteArray(input)
 	if err != nil {
 		return nil, err
@@ -115,7 +115,7 @@ func (it *InsertMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 /////////////////////////////////////////FlushCompletedMsg//////////////////////////////////////////
 type FlushCompletedMsg struct {
 	BaseMsg
-	internalpb2.SegmentFlushCompletedMsg
+	internalpb.SegmentFlushCompletedMsg
 }
 
 func (fl *FlushCompletedMsg) ID() UniqueID {
@@ -137,7 +137,7 @@ func (fl *FlushCompletedMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (fl *FlushCompletedMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	flushCompletedMsg := internalpb2.SegmentFlushCompletedMsg{}
+	flushCompletedMsg := internalpb.SegmentFlushCompletedMsg{}
 	in, err := ConvertToByteArray(input)
 	if err != nil {
 		return nil, err
@@ -157,7 +157,7 @@ func (fl *FlushCompletedMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 // GOOSE TODO remove this
 type FlushMsg struct {
 	BaseMsg
-	internalpb2.FlushMsg
+	internalpb.FlushMsg
 }
 
 func (fl *FlushMsg) ID() UniqueID {
@@ -179,7 +179,7 @@ func (fl *FlushMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (fl *FlushMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	flushMsg := internalpb2.FlushMsg{}
+	flushMsg := internalpb.FlushMsg{}
 	in, err := ConvertToByteArray(input)
 	if err != nil {
 		return nil, err
@@ -198,7 +198,7 @@ func (fl *FlushMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 /////////////////////////////////////////Delete//////////////////////////////////////////
 type DeleteMsg struct {
 	BaseMsg
-	internalpb2.DeleteRequest
+	internalpb.DeleteRequest
 }
 
 func (dt *DeleteMsg) ID() UniqueID {
@@ -221,7 +221,7 @@ func (dt *DeleteMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (dt *DeleteMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	deleteRequest := internalpb2.DeleteRequest{}
+	deleteRequest := internalpb.DeleteRequest{}
 	in, err := ConvertToByteArray(input)
 	if err != nil {
 		return nil, err
@@ -251,7 +251,7 @@ func (dt *DeleteMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 /////////////////////////////////////////Search//////////////////////////////////////////
 type SearchMsg struct {
 	BaseMsg
-	internalpb2.SearchRequest
+	internalpb.SearchRequest
 }
 
 func (st *SearchMsg) ID() UniqueID {
@@ -273,7 +273,7 @@ func (st *SearchMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (st *SearchMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	searchRequest := internalpb2.SearchRequest{}
+	searchRequest := internalpb.SearchRequest{}
 	in, err := ConvertToByteArray(input)
 	if err != nil {
 		return nil, err
@@ -292,7 +292,7 @@ func (st *SearchMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 /////////////////////////////////////////SearchResult//////////////////////////////////////////
 type SearchResultMsg struct {
 	BaseMsg
-	internalpb2.SearchResults
+	internalpb.SearchResults
 }
 
 func (srt *SearchResultMsg) ID() UniqueID {
@@ -314,7 +314,7 @@ func (srt *SearchResultMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (srt *SearchResultMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	searchResultRequest := internalpb2.SearchResults{}
+	searchResultRequest := internalpb.SearchResults{}
 	in, err := ConvertToByteArray(input)
 	if err != nil {
 		return nil, err
@@ -333,7 +333,7 @@ func (srt *SearchResultMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 /////////////////////////////////////////TimeTick//////////////////////////////////////////
 type TimeTickMsg struct {
 	BaseMsg
-	internalpb2.TimeTickMsg
+	internalpb.TimeTickMsg
 }
 
 func (tst *TimeTickMsg) ID() UniqueID {
@@ -355,7 +355,7 @@ func (tst *TimeTickMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (tst *TimeTickMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	timeTickMsg := internalpb2.TimeTickMsg{}
+	timeTickMsg := internalpb.TimeTickMsg{}
 	in, err := ConvertToByteArray(input)
 	if err != nil {
 		return nil, err
@@ -375,7 +375,7 @@ func (tst *TimeTickMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 // GOOSE TODO: remove QueryNodeStats
 type QueryNodeStatsMsg struct {
 	BaseMsg
-	internalpb2.QueryNodeStats
+	internalpb.QueryNodeStats
 }
 
 func (qs *QueryNodeStatsMsg) ID() UniqueID {
@@ -397,7 +397,7 @@ func (qs *QueryNodeStatsMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (qs *QueryNodeStatsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	queryNodeSegStats := internalpb2.QueryNodeStats{}
+	queryNodeSegStats := internalpb.QueryNodeStats{}
 	in, err := ConvertToByteArray(input)
 	if err != nil {
 		return nil, err
@@ -414,7 +414,7 @@ func (qs *QueryNodeStatsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 /////////////////////////////////////////SegmentStatisticsMsg//////////////////////////////////////////
 type SegmentStatisticsMsg struct {
 	BaseMsg
-	internalpb2.SegmentStatistics
+	internalpb.SegmentStatistics
 }
 
 func (ss *SegmentStatisticsMsg) ID() UniqueID {
@@ -436,7 +436,7 @@ func (ss *SegmentStatisticsMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (ss *SegmentStatisticsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	segStats := internalpb2.SegmentStatistics{}
+	segStats := internalpb.SegmentStatistics{}
 	in, err := ConvertToByteArray(input)
 	if err != nil {
 		return nil, err
@@ -453,7 +453,7 @@ func (ss *SegmentStatisticsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 ///////////////////////////////////////////Key2Seg//////////////////////////////////////////
 //type Key2SegMsg struct {
 //	BaseMsg
-//	internalpb2.Key2SegMsg
+//	internalpb.Key2SegMsg
 //}
 //
 //func (k2st *Key2SegMsg) Type() MsgType {
@@ -463,7 +463,7 @@ func (ss *SegmentStatisticsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 /////////////////////////////////////////CreateCollection//////////////////////////////////////////
 type CreateCollectionMsg struct {
 	BaseMsg
-	internalpb2.CreateCollectionRequest
+	internalpb.CreateCollectionRequest
 }
 
 func (cc *CreateCollectionMsg) ID() UniqueID {
@@ -485,7 +485,7 @@ func (cc *CreateCollectionMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (cc *CreateCollectionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	createCollectionRequest := internalpb2.CreateCollectionRequest{}
+	createCollectionRequest := internalpb.CreateCollectionRequest{}
 	in, err := ConvertToByteArray(input)
 	if err != nil {
 		return nil, err
@@ -504,7 +504,7 @@ func (cc *CreateCollectionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 /////////////////////////////////////////DropCollection//////////////////////////////////////////
 type DropCollectionMsg struct {
 	BaseMsg
-	internalpb2.DropCollectionRequest
+	internalpb.DropCollectionRequest
 }
 
 func (dc *DropCollectionMsg) ID() UniqueID {
@@ -526,7 +526,7 @@ func (dc *DropCollectionMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (dc *DropCollectionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	dropCollectionRequest := internalpb2.DropCollectionRequest{}
+	dropCollectionRequest := internalpb.DropCollectionRequest{}
 	in, err := ConvertToByteArray(input)
 	if err != nil {
 		return nil, err
@@ -545,7 +545,7 @@ func (dc *DropCollectionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 /////////////////////////////////////////CreatePartition//////////////////////////////////////////
 type CreatePartitionMsg struct {
 	BaseMsg
-	internalpb2.CreatePartitionRequest
+	internalpb.CreatePartitionRequest
 }
 
 func (cc *CreatePartitionMsg) ID() UniqueID {
@@ -567,7 +567,7 @@ func (cc *CreatePartitionMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (cc *CreatePartitionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	createPartitionRequest := internalpb2.CreatePartitionRequest{}
+	createPartitionRequest := internalpb.CreatePartitionRequest{}
 	in, err := ConvertToByteArray(input)
 	if err != nil {
 		return nil, err
@@ -586,7 +586,7 @@ func (cc *CreatePartitionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 /////////////////////////////////////////DropPartition//////////////////////////////////////////
 type DropPartitionMsg struct {
 	BaseMsg
-	internalpb2.DropPartitionRequest
+	internalpb.DropPartitionRequest
 }
 
 func (dc *DropPartitionMsg) ID() UniqueID {
@@ -608,7 +608,7 @@ func (dc *DropPartitionMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (dc *DropPartitionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	dropPartitionRequest := internalpb2.DropPartitionRequest{}
+	dropPartitionRequest := internalpb.DropPartitionRequest{}
 	in, err := ConvertToByteArray(input)
 	if err != nil {
 		return nil, err
@@ -627,7 +627,7 @@ func (dc *DropPartitionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 /////////////////////////////////////////LoadIndex//////////////////////////////////////////
 type LoadIndexMsg struct {
 	BaseMsg
-	internalpb2.LoadIndex
+	internalpb.LoadIndex
 }
 
 func (lim *LoadIndexMsg) ID() UniqueID {
@@ -649,7 +649,7 @@ func (lim *LoadIndexMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (lim *LoadIndexMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	loadIndexRequest := internalpb2.LoadIndex{}
+	loadIndexRequest := internalpb.LoadIndex{}
 	in, err := ConvertToByteArray(input)
 	if err != nil {
 		return nil, err

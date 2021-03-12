@@ -7,29 +7,10 @@ import "common.proto";
 import "milvus.proto";
 import "internal.proto";
 
-message IDRequest {
-    common.MsgBase base = 1;
-    uint32 count = 2;
-}
-
-message IDResponse {
-    common.Status status = 1;
-    int64 ID = 2;
-    uint32 count = 3;
-}
-
-message TsoRequest {
-    common.MsgBase base = 1;
-    uint32 count = 3;
-}
-
-message TsoResponse {
-    common.Status status = 1;
-    uint64 timestamp = 2;
-    uint32 count = 3;
-}
-
 service MasterService {
+  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
+  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
     /**
      * @brief This method is used to create collection
      *
@@ -38,7 +19,7 @@ service MasterService {
      * @return Status
      */
     rpc CreateCollection(milvus.CreateCollectionRequest) returns (common.Status){}
-    
+
     /**
      * @brief This method is used to delete collection.
      *
@@ -71,7 +52,7 @@ service MasterService {
      *
      * @return StringListResponse, collection name list
      */
-    rpc ShowCollections(milvus.ShowCollectionRequest) returns (milvus.ShowCollectionResponse) {}
+    rpc ShowCollections(milvus.ShowCollectionsRequest) returns (milvus.ShowCollectionsResponse) {}
 
     /**
      * @brief This method is used to create partition
@@ -101,24 +82,39 @@ service MasterService {
      *
      * @return StringListResponse
      */
-    rpc ShowPartitions(milvus.ShowPartitionRequest) returns (milvus.ShowPartitionResponse) {}
+    rpc ShowPartitions(milvus.ShowPartitionsRequest) returns (milvus.ShowPartitionsResponse) {}
 
     rpc DescribeSegment(milvus.DescribeSegmentRequest) returns (milvus.DescribeSegmentResponse) {}
-    rpc ShowSegments(milvus.ShowSegmentRequest) returns (milvus.ShowSegmentResponse) {}
+    rpc ShowSegments(milvus.ShowSegmentsRequest) returns (milvus.ShowSegmentsResponse) {}
 
     rpc CreateIndex(milvus.CreateIndexRequest) returns (common.Status) {}
     rpc DescribeIndex(milvus.DescribeIndexRequest) returns (milvus.DescribeIndexResponse) {}
     rpc DropIndex(milvus.DropIndexRequest) returns (common.Status) {}
 
-    rpc AllocTimestamp(TsoRequest) returns (TsoResponse) {}
-    rpc AllocID(IDRequest) returns (IDResponse) {}
+    rpc AllocTimestamp(AllocTimestampRequest) returns (AllocTimestampResponse) {}
+    rpc AllocID(AllocIDRequest) returns (AllocIDResponse) {}
 
-    rpc GetComponentStatesRPC(common.Empty) returns (internal.ComponentStates) {}
+    rpc GetDdChannel(internal.GetDdChannelRequest) returns (milvus.StringResponse) {}
+}
 
-    rpc GetTimeTickChannelRPC(common.Empty) returns (milvus.StringResponse) {}
+message AllocTimestampRequest {
+  common.MsgBase base = 1;
+  uint32 count = 3;
+}
 
-    rpc GetDdChannelRPC(common.Empty) returns (milvus.StringResponse) {}
+message AllocTimestampResponse {
+    common.Status status = 1;
+    uint64 timestamp = 2;
+    uint32 count = 3;
+}
 
-    rpc GetStatisticsChannelRPC(common.Empty) returns (milvus.StringResponse) {}
+message AllocIDRequest {
+  common.MsgBase base = 1;
+  uint32 count = 2;
+}
 
+message AllocIDResponse {
+  common.Status status = 1;
+  int64 ID = 2;
+  uint32 count = 3;
 }

@@ -10,6 +10,41 @@ import "internal.proto";
 import "data_service.proto";
 import "schema.proto";
 
+service QueryService {
+  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
+  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
+
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
+
+  rpc ShowCollections(ShowCollectionsRequest) returns (ShowCollectionsResponse) {}
+  rpc ShowPartitions(ShowPartitionsRequest) returns (ShowPartitionsResponse) {}
+
+  rpc LoadPartitions(LoadPartitionsRequest) returns (common.Status) {}
+  rpc ReleasePartitions(ReleasePartitionsRequest) returns (common.Status) {}
+  rpc LoadCollection(LoadCollectionRequest) returns (common.Status) {}
+  rpc ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {}
+
+  rpc CreateQueryChannel(CreateQueryChannelRequest) returns (CreateQueryChannelResponse) {}
+  rpc GetPartitionStates(GetPartitionStatesRequest) returns (GetPartitionStatesResponse) {}
+  rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
+}
+
+service QueryNode {
+  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
+  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
+
+  rpc AddQueryChannel(AddQueryChannelRequest) returns (common.Status) {}
+  rpc RemoveQueryChannel(RemoveQueryChannelRequest) returns (common.Status) {}
+  rpc WatchDmChannels(WatchDmChannelsRequest) returns (common.Status) {}
+  rpc LoadSegments(LoadSegmentsRequest) returns (common.Status) {}
+  rpc ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {}
+  rpc ReleasePartitions(ReleasePartitionsRequest) returns (common.Status) {}
+  rpc ReleaseSegments(ReleaseSegmentsRequest) returns (common.Status) {}
+  rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
+}
+
 message RegisterNodeRequest {
   common.MsgBase base = 1;
   common.Address address = 2;
@@ -20,12 +55,12 @@ message RegisterNodeResponse {
   internal.InitParams init_params = 2;
 }
 
-message ShowCollectionRequest {
+message ShowCollectionsRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
 }
 
-message ShowCollectionResponse {
+message ShowCollectionsResponse {
   common.Status status = 1;
   repeated int64 collectionIDs = 2;
 }
@@ -43,13 +78,13 @@ message ReleaseCollectionRequest {
   int64 collectionID = 3;
 }
 
-message ShowPartitionRequest {
+message ShowPartitionsRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
 }
 
-message ShowPartitionResponse  {
+message ShowPartitionsResponse {
   common.Status status = 1;
   repeated int64 partitionIDs = 2;
 }
@@ -69,19 +104,19 @@ message PartitionStates {
   PartitionState state = 2;
 }
 
-message PartitionStatesRequest {
+message GetPartitionStatesRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
-  repeated int64  partitionIDs = 4;
+  repeated int64 partitionIDs = 4;
 }
 
-message PartitionStatesResponse {
+message GetPartitionStatesResponse {
   common.Status status = 1;
   repeated PartitionStates partition_descriptions = 2;
 }
 
-message LoadPartitionRequest {
+message LoadPartitionsRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
@@ -89,7 +124,7 @@ message LoadPartitionRequest {
   schema.CollectionSchema schema = 5;
 }
 
-message ReleasePartitionRequest {
+message ReleasePartitionsRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
@@ -102,13 +137,13 @@ message CreateQueryChannelResponse {
   string result_channel = 3;
 }
 
-message AddQueryChannelsRequest {
+message AddQueryChannelRequest {
   common.MsgBase base = 1;
   string request_channelID = 2;
   string result_channelID = 3;
 }
 
-message RemoveQueryChannelsRequest {
+message RemoveQueryChannelRequest {
   common.Status status = 1;
   common.MsgBase base = 2;
   string request_channelID = 3;
@@ -121,14 +156,14 @@ message WatchDmChannelInfo {
   repeated int64 excluded_segments = 3;
 }
 
-message WatchDmChannelsRequest  {
+message WatchDmChannelsRequest {
   common.MsgBase base = 1;
   int64 collectionID = 2;
   repeated string channelIDs = 3;
   repeated WatchDmChannelInfo infos = 4;
 }
 
-message LoadSegmentRequest {
+message LoadSegmentsRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
@@ -139,7 +174,7 @@ message LoadSegmentRequest {
   schema.CollectionSchema schema = 8;
 }
 
-message ReleaseSegmentRequest {
+message ReleaseSegmentsRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
@@ -157,46 +192,15 @@ message SegmentInfo {
   int64 indexID = 7;
 }
 
-message SegmentInfoRequest {
+message GetSegmentInfoRequest {
   common.MsgBase base = 1;
   repeated int64 segmentIDs = 2;
 }
 
-message SegmentInfoResponse {
+message GetSegmentInfoResponse {
   common.Status status = 1;
   repeated SegmentInfo infos = 2;
 }
-
-service QueryService {
-  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
-
-  rpc ShowCollections(ShowCollectionRequest) returns (ShowCollectionResponse) {}
-  rpc ShowPartitions(ShowPartitionRequest) returns (ShowPartitionResponse) {}
-
-  rpc LoadPartitions(LoadPartitionRequest) returns (common.Status) {}
-  rpc ReleasePartitions(ReleasePartitionRequest) returns (common.Status) {}
-  rpc LoadCollection(LoadCollectionRequest) returns (common.Status) {}
-  rpc ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {}
-
-  rpc CreateQueryChannel(common.Empty) returns (CreateQueryChannelResponse) {}
-  rpc GetTimeTickChannel(common.Empty) returns (milvus.StringResponse) {}
-  rpc GetStatisticsChannel(common.Empty) returns (milvus.StringResponse) {}
-  rpc GetPartitionStates(PartitionStatesRequest) returns (PartitionStatesResponse) {}
-  rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
-  rpc GetSegmentInfo(SegmentInfoRequest) returns (SegmentInfoResponse) {}
+message CreateQueryChannelRequest {
 }
 
-service QueryNode {
-  rpc GetTimeTickChannel(common.Empty) returns (milvus.StringResponse) {}
-  rpc GetStatsChannel(common.Empty) returns (milvus.StringResponse) {}
-  rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
-
-  rpc AddQueryChannel(AddQueryChannelsRequest) returns (common.Status) {}
-  rpc RemoveQueryChannel(RemoveQueryChannelsRequest) returns (common.Status) {}
-  rpc WatchDmChannels(WatchDmChannelsRequest) returns (common.Status) {}
-  rpc LoadSegments(LoadSegmentRequest) returns (common.Status) {}
-  rpc ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {}
-  rpc ReleasePartitions(ReleasePartitionRequest) returns (common.Status) {}
-  rpc ReleaseSegments(ReleaseSegmentRequest) returns (common.Status) {}
-  rpc GetSegmentInfo(SegmentInfoRequest) returns (SegmentInfoResponse) {}
-}

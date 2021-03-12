@@ -5,7 +5,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 type MsgStream = msgstream.MsgStream
@@ -37,7 +37,7 @@ func InsertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 				result[key] = &msgPack
 			}
 
-			sliceRequest := internalpb2.InsertRequest{
+			sliceRequest := internalpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     insertRequest.Base.MsgID,
@@ -89,7 +89,7 @@ func DeleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 				result[key] = &msgPack
 			}
 
-			sliceRequest := internalpb2.DeleteRequest{
+			sliceRequest := internalpb.DeleteRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_Delete,
 					MsgID:     deleteRequest.Base.MsgID,

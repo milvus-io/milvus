@@ -17,7 +17,7 @@ package grpcqueryserviceclient
 //	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 //	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 //	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-//	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+//	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 //	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 //	"github.com/zilliztech/milvus-distributed/internal/storage"
 //	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -63,7 +63,7 @@ package grpcqueryserviceclient
 //			BaseMsg: msgstream.BaseMsg{
 //				HashValues: []uint32{uint32((n - 1) % numDmChannels)},
 //			},
-//			InsertRequest: internalpb2.InsertRequest{
+//			InsertRequest: internalpb.InsertRequest{
 //				Base: &commonpb.MsgBase{
 //					MsgType:   commonpb.MsgType_kInsert,
 //					MsgID:     0,
@@ -96,7 +96,7 @@ package grpcqueryserviceclient
 //			EndTimestamp:   0,
 //			HashValues:     []uint32{0},
 //		},
-//		TimeTickMsg: internalpb2.TimeTickMsg{
+//		TimeTickMsg: internalpb.TimeTickMsg{
 //			Base: &commonpb.MsgBase{
 //				MsgType:   commonpb.MsgType_kTimeTick,
 //				MsgID:     0,

@@ -9,7 +9,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
@@ -43,7 +43,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	collID := UniqueID(0)
 	collName := "col-test-0"
 	// create collection
-	createCollReq := internalpb2.CreateCollectionRequest{
+	createCollReq := internalpb.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_CreateCollection,
 			MsgID:     1,
@@ -66,7 +66,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	}
 
 	// drop collection
-	dropCollReq := internalpb2.DropCollectionRequest{
+	dropCollReq := internalpb.DropCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DropCollection,
 			MsgID:     2,
@@ -90,7 +90,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	partitionID := UniqueID(100)
 	partitionName := "partition-test-0"
 	// create partition
-	createPartitionReq := internalpb2.CreatePartitionRequest{
+	createPartitionReq := internalpb.CreatePartitionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_CreatePartition,
 			MsgID:     3,
@@ -114,7 +114,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	}
 
 	// drop partition
-	dropPartitionReq := internalpb2.DropPartitionRequest{
+	dropPartitionReq := internalpb.DropPartitionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DropPartition,
 			MsgID:     4,
@@ -150,7 +150,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	tsMessages = append(tsMessages, msgstream.TsMsg(&dropCollMsg))
 	tsMessages = append(tsMessages, msgstream.TsMsg(&createPartitionMsg))
 	tsMessages = append(tsMessages, msgstream.TsMsg(&dropPartitionMsg))
-	msgStream := flowgraph.GenerateMsgStreamMsg(tsMessages, Timestamp(0), Timestamp(3), make([]*internalpb2.MsgPosition, 0))
+	msgStream := flowgraph.GenerateMsgStreamMsg(tsMessages, Timestamp(0), Timestamp(3), make([]*internalpb.MsgPosition, 0))
 	var inMsg Msg = msgStream
 	ddNode.Operate(ctx, []Msg{inMsg})
 }

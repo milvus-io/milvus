@@ -8,6 +8,35 @@ import "common.proto";
 import "internal.proto";
 import "milvus.proto";
 
+service DataService {
+  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
+  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
+
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
+  rpc Flush(FlushRequest) returns (common.Status) {}
+
+  rpc AssignSegmentID(AssignSegmentIDRequest) returns (AssignSegmentIDResponse) {}
+  rpc ShowSegments(ShowSegmentsRequest) returns (ShowSegmentsResponse) {}
+
+  rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
+  rpc GetSegmentStates(GetSegmentStatesRequest) returns (GetSegmentStatesResponse) {}
+  rpc GetInsertBinlogPaths(GetInsertBinlogPathsRequest) returns (GetInsertBinlogPathsResponse) {}
+
+  rpc GetInsertChannels(GetInsertChannelsRequest) returns (internal.StringList) {}
+  rpc GetCollectionStatistics(GetCollectionStatisticsRequest) returns (GetCollectionStatisticsResponse) {}
+  rpc GetPartitionStatistics(GetPartitionStatisticsRequest) returns (GetPartitionStatisticsResponse) {}
+
+  rpc GetSegmentInfoChannel(GetSegmentInfoChannelRequest) returns (milvus.StringResponse){}
+}
+
+service DataNode {
+  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
+
+  rpc WatchDmChannels(WatchDmChannelsRequest) returns (common.Status) {}
+  rpc FlushSegments(FlushSegmentsRequest) returns(common.Status) {}
+}
 
 message RegisterNodeRequest {
   common.MsgBase base = 1;
@@ -19,61 +48,55 @@ message RegisterNodeResponse {
   common.Status status = 2;
 }
 
-
-message SegIDRequest {
-  uint32 count = 1;
-  string channelName = 2;
-  int64  collectionID = 3;
-  int64 partitionID = 4;
-  string coll_name = 5;// todo remove
-  string partition_name = 6; // todo remove
-}
-
-message AssignSegIDRequest {
-  int64 nodeID = 1;
-  string peer_role = 2;
-  repeated SegIDRequest segIDRequests = 3;
-}
-
-
-message SegIDAssignment {
-  int64 segID = 1;
-  string channelName = 2;
-  uint32 count = 3;
-  int64 collectionID = 4;
-  int64 partitionID = 5;
-  uint64 expire_time = 6;
-  common.Status status = 7;
-  string coll_name = 8;// todo remove
-  string partition_name = 9;// todo remove
-}
-
-message AssignSegIDResponse {
-  repeated SegIDAssignment segIDAssignments = 1;
-  common.Status status = 2;
-}
-
 message FlushRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 4;
 }
 
-message ShowSegmentRequest {
-  common.MsgBase base = 1;
-  int64  collectionID = 2;
-  int64  partitionID = 3;
-  int64  dbID = 4;
+message SegmentIDRequest {
+  uint32 count = 1;
+  string channel_name = 2;
+  int64 collectionID = 3;
+  int64 partitionID = 4;
 }
 
-message ShowSegmentResponse {
+message AssignSegmentIDRequest {
+  int64 nodeID = 1;
+  string peer_role = 2;
+  repeated SegmentIDRequest segmentIDRequests = 3;
+}
+
+message SegmentIDAssignment {
+  int64 segID = 1;
+  string channel_name = 2;
+  uint32 count = 3;
+  int64 collectionID = 4;
+  int64 partitionID = 5;
+  uint64 expire_time = 6;
+  common.Status status = 7;
+}
+
+message AssignSegmentIDResponse {
+  repeated SegmentIDAssignment segIDAssignments = 1;
+  common.Status status = 2;
+}
+
+message ShowSegmentsRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+  int64 dbID = 4;
+}
+
+message ShowSegmentsResponse {
   repeated int64 segmentIDs = 1;
   common.Status status = 2;
 }
 
-message SegmentStatesRequest {
+message GetSegmentStatesRequest {
   common.MsgBase base = 1;
-  repeated int64  segmentIDs = 2;
+  repeated int64 segmentIDs = 2;
 }
 
 message SegmentStateInfo {
@@ -87,51 +110,14 @@ message SegmentStateInfo {
   common.Status status = 8;
 }
 
-message SegmentInfoRequest {
-  common.MsgBase base = 1;
-  repeated int64  segmentIDs = 2;
-}
-
-message SegmentInfoResponse {
-  common.Status status = 1;
-  repeated SegmentInfo infos = 2;
-}
-
-message SegmentStatesResponse {
+message GetSegmentStatesResponse {
   common.Status status = 1;
   repeated SegmentStateInfo states = 2;
 }
 
-message InsertBinlogPathRequest {
+message GetSegmentInfoRequest {
   common.MsgBase base = 1;
-  int64 segmentID = 2;
-}
-
-message InsertBinlogPathsResponse {
-  repeated int64 fieldIDs = 1;
-  repeated internal.StringList paths = 2;
-  common.Status status = 3;
-}
-
-
-message InsertChannelRequest  {
-  common.MsgBase base = 1;
-  int64  dbID = 2;
-  int64  collectionID = 3;
-}
-
-
-message WatchDmChannelRequest {
-  common.MsgBase base = 1;
-  repeated string channelNames = 2;
-}
-
-
-message FlushSegRequest {
-  common.MsgBase base = 1;
-  int64  dbID = 2;
-  int64 collectionID = 3;
-  repeated int64 segmentIDs = 4;
+  repeated int64 segmentIDs = 2;
 }
 
 message SegmentInfo {
@@ -149,75 +135,83 @@ message SegmentInfo {
   internal.MsgPosition end_position = 12;
 }
 
-message SegmentMsg{
-  common.MsgBase base = 1;
-  SegmentInfo segment = 2;
+message GetSegmentInfoResponse {
+  common.Status status = 1;
+  repeated SegmentInfo infos = 2;
 }
 
-message CollectionStatsRequest{
+message GetInsertBinlogPathsRequest {
+  common.MsgBase base = 1;
+  int64 segmentID = 2;
+}
+
+message GetInsertBinlogPathsResponse {
+  repeated int64 fieldIDs = 1;
+  repeated internal.StringList paths = 2;
+  common.Status status = 3;
+}
+
+message GetInsertChannelsRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
 }
 
-message CollectionStatsResponse {
+message GetCollectionStatisticsRequest {
+  common.MsgBase base = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+}
+
+message GetCollectionStatisticsResponse {
   repeated common.KeyValuePair stats = 1;
   common.Status status = 2;
 }
 
-message PartitionStatsRequest{
+message GetPartitionStatisticsRequest{
   common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
   int64 partitionID = 4;
 }
 
-message PartitionStatsResponse {
+message GetPartitionStatisticsResponse {
   repeated common.KeyValuePair stats = 1;
   common.Status status = 2;
 }
 
+message GetSegmentInfoChannelRequest {
+}
+
+message WatchDmChannelsRequest {
+  common.MsgBase base = 1;
+  repeated string channel_names = 2;
+}
+
+message FlushSegmentsRequest {
+  common.MsgBase base = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+  repeated int64 segmentIDs = 4;
+}
+
+message SegmentMsg{
+  common.MsgBase base = 1;
+  SegmentInfo segment = 2;
+}
+
 message FieldFlushMeta {
-  int64 fieldID = 1;
-  repeated string binlog_paths = 2;
+    int64 fieldID = 1;
+    repeated string binlog_paths = 2;
 }
 
 message SegmentFlushMeta{
-  int64 segmentID = 1;
-  bool is_flushed = 2;
-  repeated FieldFlushMeta fields = 5;
+    int64 segmentID = 1;
+    bool is_flushed = 2;
+    repeated FieldFlushMeta fields = 5;
 }
 
 message DDLFlushMeta {
-  int64 collectionID = 1;
-  repeated string binlog_paths = 2;
-}
-
-service DataService {
-
-  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
-  rpc Flush(FlushRequest) returns (common.Status) {}
-
-  rpc AssignSegmentID(AssignSegIDRequest) returns (AssignSegIDResponse) {}
-  rpc ShowSegments(ShowSegmentRequest) returns (ShowSegmentResponse) {}
-
-  rpc GetSegmentInfo(SegmentInfoRequest) returns (SegmentInfoResponse) {}
-  rpc GetSegmentStates(SegmentStatesRequest) returns (SegmentStatesResponse) {}
-  rpc GetInsertBinlogPaths(InsertBinlogPathRequest) returns (InsertBinlogPathsResponse) {}
-
-  rpc GetInsertChannels(InsertChannelRequest) returns (internal.StringList) {}
-  rpc GetCollectionStatistics(CollectionStatsRequest) returns (CollectionStatsResponse) {}
-  rpc GetPartitionStatistics(PartitionStatsRequest) returns (PartitionStatsResponse) {}
-
-  rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
-  rpc GetTimeTickChannel(common.Empty) returns(milvus.StringResponse) {}
-  rpc GetStatisticsChannel(common.Empty) returns(milvus.StringResponse){}
-
-  rpc GetSegmentInfoChannel(common.Empty) returns (milvus.StringResponse){}
-}
-
-service DataNode {
-  rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
-  rpc WatchDmChannels(WatchDmChannelRequest) returns (common.Status) {}
-  rpc FlushSegments(FlushSegRequest) returns(common.Status) {}
+    int64 collectionID = 1;
+    repeated string binlog_paths = 2;
 }

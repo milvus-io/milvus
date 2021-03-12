@@ -10,7 +10,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -82,14 +82,14 @@ func (t *CreateCollectionReqTask) Execute() error {
 		Name:         RowIDFieldName,
 		IsPrimaryKey: false,
 		Description:  "row id",
-		DataType:     schemapb.DataType_INT64,
+		DataType:     schemapb.DataType_Int64,
 	}
 	timeStampField := &schemapb.FieldSchema{
 		FieldID:      int64(TimeStampField),
 		Name:         TimeStampFieldName,
 		IsPrimaryKey: false,
 		Description:  "time stamp",
-		DataType:     schemapb.DataType_INT64,
+		DataType:     schemapb.DataType_Int64,
 	}
 	schema.Fields = append(schema.Fields, rowIDField, timeStampField)
 
@@ -120,7 +120,7 @@ func (t *CreateCollectionReqTask) Execute() error {
 	idxInfo := make([]*etcdpb.IndexInfo, 0, 16)
 	/////////////////////// ignore index param from create_collection /////////////////////////
 	//for _, field := range schema.Fields {
-	//	if field.DataType == schemapb.DataType_VECTOR_FLOAT || field.DataType == schemapb.DataType_VECTOR_BINARY {
+	//	if field.DataType == schemapb.DataType_VectorFloat || field.DataType == schemapb.DataType_VectorBinary {
 	//		if len(field.IndexParams) > 0 {
 	//			idxID, err := t.core.idAllocator.AllocOne()
 	//			if err != nil {
@@ -150,7 +150,7 @@ func (t *CreateCollectionReqTask) Execute() error {
 		return err
 	}
 
-	ddReq := internalpb2.CreateCollectionRequest{
+	ddReq := internalpb.CreateCollectionRequest{
 		Base:           t.Req.Base,
 		DbName:         t.Req.DbName,
 		CollectionName: t.Req.CollectionName,
@@ -164,7 +164,7 @@ func (t *CreateCollectionReqTask) Execute() error {
 		return err
 	}
 
-	ddPart := internalpb2.CreatePartitionRequest{
+	ddPart := internalpb.CreatePartitionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_CreatePartition,
 			MsgID:     t.Req.Base.MsgID, //TODO, msg id
@@ -220,7 +220,7 @@ func (t *DropCollectionReqTask) Execute() error {
 
 	//data service should drop segments , which belong to this collection, from the segment manager
 
-	ddReq := internalpb2.DropCollectionRequest{
+	ddReq := internalpb.DropCollectionRequest{
 		Base:           t.Req.Base,
 		DbName:         t.Req.DbName,
 		CollectionName: t.Req.CollectionName,
@@ -319,8 +319,8 @@ func (t *DescribeCollectionReqTask) Execute() error {
 
 type ShowCollectionReqTask struct {
 	baseReqTask
-	Req *milvuspb.ShowCollectionRequest
-	Rsp *milvuspb.ShowCollectionResponse
+	Req *milvuspb.ShowCollectionsRequest
+	Rsp *milvuspb.ShowCollectionsResponse
 }
 
 func (t *ShowCollectionReqTask) Type() commonpb.MsgType {
@@ -375,7 +375,7 @@ func (t *CreatePartitionReqTask) Execute() error {
 		return err
 	}
 
-	ddReq := internalpb2.CreatePartitionRequest{
+	ddReq := internalpb.CreatePartitionRequest{
 		Base:           t.Req.Base,
 		DbName:         t.Req.DbName,
 		CollectionName: t.Req.CollectionName,
@@ -420,7 +420,7 @@ func (t *DropPartitionReqTask) Execute() error {
 		return err
 	}
 
-	ddReq := internalpb2.DropPartitionRequest{
+	ddReq := internalpb.DropPartitionRequest{
 		Base:           t.Req.Base,
 		DbName:         t.Req.DbName,
 		CollectionName: t.Req.CollectionName,
@@ -466,8 +466,8 @@ func (t *HasPartitionReqTask) Execute() error {
 
 type ShowPartitionReqTask struct {
 	baseReqTask
-	Req *milvuspb.ShowPartitionRequest
-	Rsp *milvuspb.ShowPartitionResponse
+	Req *milvuspb.ShowPartitionsRequest
+	Rsp *milvuspb.ShowPartitionsResponse
 }
 
 func (t *ShowPartitionReqTask) Type() commonpb.MsgType {
@@ -559,8 +559,8 @@ func (t *DescribeSegmentReqTask) Execute() error {
 
 type ShowSegmentReqTask struct {
 	baseReqTask
-	Req *milvuspb.ShowSegmentRequest
-	Rsp *milvuspb.ShowSegmentResponse
+	Req *milvuspb.ShowSegmentsRequest
+	Rsp *milvuspb.ShowSegmentsResponse
 }
 
 func (t *ShowSegmentReqTask) Type() commonpb.MsgType {
@@ -630,7 +630,7 @@ func (t *CreateIndexReqTask) Execute() error {
 	if err != nil {
 		return err
 	}
-	if field.DataType != schemapb.DataType_VECTOR_FLOAT && field.DataType != schemapb.DataType_VECTOR_BINARY {
+	if field.DataType != schemapb.DataType_FloatVector && field.DataType != schemapb.DataType_BinaryVector {
 		return fmt.Errorf("field name = %s, data type = %s", t.Req.FieldName, schemapb.DataType_name[int32(field.DataType)])
 	}
 	for _, seg := range segIDs {

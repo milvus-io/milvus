@@ -3,17 +3,18 @@ package funcutil
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
 	"time"
 
-	"errors"
-
 	"github.com/go-basic/ipv4"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 func CheckGrpcReady(ctx context.Context, targetCh chan error) {
@@ -48,7 +49,7 @@ func GetLocalIP() string {
 	return ipv4.LocalIP()
 }
 
-func WaitForComponentStates(ctx context.Context, service StateComponent, serviceName string, states []internalpb2.StateCode, attempts int, sleep time.Duration) error {
+func WaitForComponentStates(ctx context.Context, service types.Component, serviceName string, states []internalpb.StateCode, attempts int, sleep time.Duration) error {
 	checkFunc := func() error {
 		resp, err := service.GetComponentStates(ctx)
 		if err != nil {
@@ -75,16 +76,16 @@ func WaitForComponentStates(ctx context.Context, service StateComponent, service
 	return retry.Retry(attempts, sleep, checkFunc)
 }
 
-func WaitForComponentInitOrHealthy(ctx context.Context, service StateComponent, serviceName string, attempts int, sleep time.Duration) error {
-	return WaitForComponentStates(ctx, service, serviceName, []internalpb2.StateCode{internalpb2.StateCode_Initializing, internalpb2.StateCode_Healthy}, attempts, sleep)
+func WaitForComponentInitOrHealthy(ctx context.Context, service types.Component, serviceName string, attempts int, sleep time.Duration) error {
+	return WaitForComponentStates(ctx, service, serviceName, []internalpb.StateCode{internalpb.StateCode_Initializing, internalpb.StateCode_Healthy}, attempts, sleep)
 }
 
-func WaitForComponentInit(ctx context.Context, service StateComponent, serviceName string, attempts int, sleep time.Duration) error {
-	return WaitForComponentStates(ctx, service, serviceName, []internalpb2.StateCode{internalpb2.StateCode_Initializing}, attempts, sleep)
+func WaitForComponentInit(ctx context.Context, service types.Component, serviceName string, attempts int, sleep time.Duration) error {
+	return WaitForComponentStates(ctx, service, serviceName, []internalpb.StateCode{internalpb.StateCode_Initializing}, attempts, sleep)
 }
 
-func WaitForComponentHealthy(ctx context.Context, service StateComponent, serviceName string, attempts int, sleep time.Duration) error {
-	return WaitForComponentStates(ctx, service, serviceName, []internalpb2.StateCode{internalpb2.StateCode_Healthy}, attempts, sleep)
+func WaitForComponentHealthy(ctx context.Context, service types.Component, serviceName string, attempts int, sleep time.Duration) error {
+	return WaitForComponentStates(ctx, service, serviceName, []internalpb.StateCode{internalpb.StateCode_Healthy}, attempts, sleep)
 }
 
 func ParseIndexParamsMap(mStr string) (map[string]string, error) {

@@ -9,7 +9,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 type MsgProducer struct {
@@ -46,7 +46,7 @@ func (producer *MsgProducer) broadcastMsg() {
 			EndTimestamp:   tt,
 			HashValues:     []uint32{0},
 		}
-		timeTickResult := internalpb2.TimeTickMsg{
+		timeTickResult := internalpb.TimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     0,

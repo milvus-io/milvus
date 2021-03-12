@@ -8,7 +8,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 type serviceTimeNode struct {
@@ -58,7 +58,7 @@ func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {
 			EndTimestamp:   ts,
 			HashValues:     []uint32{0},
 		},
-		TimeTickMsg: internalpb2.TimeTickMsg{
+		TimeTickMsg: internalpb.TimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     0,

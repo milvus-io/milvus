@@ -65,7 +65,7 @@ func TestQueryService_load(t *testing.T) {
 	})
 
 	t.Run("Test LoadPartition", func(t *testing.T) {
-		loadPartitionRequest := &querypb.LoadPartitionRequest{
+		loadPartitionRequest := &querypb.LoadPartitionsRequest{
 			CollectionID: 1,
 			PartitionIDs: []UniqueID{1},
 		}

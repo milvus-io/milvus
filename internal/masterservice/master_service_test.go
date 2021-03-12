@@ -15,7 +15,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
@@ -60,10 +60,10 @@ type dataMock struct {
 	randVal int
 }
 
-func (d *dataMock) GetInsertBinlogPaths(ctx context.Context, req *datapb.InsertBinlogPathRequest) (*datapb.InsertBinlogPathsResponse, error) {
-	rst := &datapb.InsertBinlogPathsResponse{
+func (d *dataMock) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
+	rst := &datapb.GetInsertBinlogPathsResponse{
 		FieldIDs: []int64{},
-		Paths:    []*internalpb2.StringList{},
+		Paths:    []*internalpb.StringList{},
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
@@ -71,7 +71,7 @@ func (d *dataMock) GetInsertBinlogPaths(ctx context.Context, req *datapb.InsertB
 	}
 	for i := 0; i < 200; i++ {
 		rst.FieldIDs = append(rst.FieldIDs, int64(i))
-		path := &internalpb2.StringList{
+		path := &internalpb.StringList{
 			Values: []string{fmt.Sprintf("file0-%d", i), fmt.Sprintf("file1-%d", i), fmt.Sprintf("file2-%d", i)},
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
@@ -83,8 +83,8 @@ func (d *dataMock) GetInsertBinlogPaths(ctx context.Context, req *datapb.InsertB
 	return rst, nil
 }
 
-func (d *dataMock) GetSegmentInfo(ctx context.Context, req *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error) {
-	return &datapb.SegmentInfoResponse{
+func (d *dataMock) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+	return &datapb.GetSegmentInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
@@ -260,7 +260,7 @@ func TestMasterService(t *testing.T) {
 			EndTimestamp:   timeTick,
 			HashValues:     []uint32{0},
 		}
-		timeTickResult := internalpb2.TimeTickMsg{
+		timeTickResult := internalpb.TimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     0,
@@ -302,7 +302,7 @@ func TestMasterService(t *testing.T) {
 					Name:         "vector",
 					IsPrimaryKey: false,
 					Description:  "vector",
-					DataType:     schemapb.DataType_VECTOR_FLOAT,
+					DataType:     schemapb.DataType_FloatVector,
 					TypeParams:   nil,
 					IndexParams: []*commonpb.KeyValuePair{
 						{
@@ -461,7 +461,7 @@ func TestMasterService(t *testing.T) {
 	})
 
 	t.Run("show collection", func(t *testing.T) {
-		req := &milvuspb.ShowCollectionRequest{
+		req := &milvuspb.ShowCollectionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ShowCollections,
 				MsgID:     130,
@@ -530,7 +530,7 @@ func TestMasterService(t *testing.T) {
 	t.Run("show partition", func(t *testing.T) {
 		coll, err := core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
-		req := &milvuspb.ShowPartitionRequest{
+		req := &milvuspb.ShowPartitionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ShowCollections,
 				MsgID:     160,
@@ -589,7 +589,7 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, len(part.SegmentIDs), 1)
 
-		req := &milvuspb.ShowSegmentRequest{
+		req := &milvuspb.ShowSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ShowSegments,
 				MsgID:     170,
@@ -750,7 +750,7 @@ func TestMasterService(t *testing.T) {
 
 		flushMsg := &ms.FlushCompletedMsg{
 			BaseMsg: baseMsg,
-			SegmentFlushCompletedMsg: internalpb2.SegmentFlushCompletedMsg{
+			SegmentFlushCompletedMsg: internalpb.SegmentFlushCompletedMsg{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_SegmentFlushDone,
 					MsgID:     0,

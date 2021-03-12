@@ -10,17 +10,17 @@ func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 	res := 0
 	for _, fs := range schema.Fields {
 		switch fs.DataType {
-		case schemapb.DataType_BOOL, schemapb.DataType_INT8:
+		case schemapb.DataType_Bool, schemapb.DataType_Int8:
 			res++
-		case schemapb.DataType_INT16:
+		case schemapb.DataType_Int16:
 			res += 2
-		case schemapb.DataType_INT32, schemapb.DataType_FLOAT:
+		case schemapb.DataType_Int32, schemapb.DataType_Float:
 			res += 4
-		case schemapb.DataType_INT64, schemapb.DataType_DOUBLE:
+		case schemapb.DataType_Int64, schemapb.DataType_Double:
 			res += 8
-		case schemapb.DataType_STRING:
+		case schemapb.DataType_String:
 			res += 125 // todo find a better way to estimate string type
-		case schemapb.DataType_VECTOR_BINARY, schemapb.DataType_VECTOR_FLOAT:
+		case schemapb.DataType_BinaryVector, schemapb.DataType_FloatVector:
 			for _, kv := range fs.TypeParams {
 				if kv.Key == "dim" {
 					v, err := strconv.Atoi(kv.Value)

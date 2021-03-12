@@ -16,7 +16,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -199,7 +199,7 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 
 	stream, err := globalInsertChannelsMap.getInsertMsgStream(collID)
 	if err != nil {
-		resp, _ := it.dataService.GetInsertChannels(ctx, &datapb.InsertChannelRequest{
+		resp, _ := it.dataService.GetInsertChannels(ctx, &datapb.GetInsertChannelsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert, // todo
 				MsgID:     it.Base.MsgID,           // todo
@@ -320,7 +320,7 @@ func (cct *CreateCollectionTask) PreExecute(ctx context.Context) error {
 		if err := ValidateFieldName(field.Name); err != nil {
 			return err
 		}
-		if field.DataType == schemapb.DataType_VECTOR_FLOAT || field.DataType == schemapb.DataType_VECTOR_BINARY {
+		if field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector {
 			exist := false
 			var dim int64 = 0
 			for _, param := range field.TypeParams {
@@ -337,7 +337,7 @@ func (cct *CreateCollectionTask) PreExecute(ctx context.Context) error {
 			if !exist {
 				return errors.New("dimension is not defined in field type params")
 			}
-			if field.DataType == schemapb.DataType_VECTOR_FLOAT {
+			if field.DataType == schemapb.DataType_FloatVector {
 				if err := ValidateDimension(dim, false); err != nil {
 					return err
 				}
@@ -363,7 +363,7 @@ func (cct *CreateCollectionTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		resp, _ := cct.dataServiceClient.GetInsertChannels(ctx, &datapb.InsertChannelRequest{
+		resp, _ := cct.dataServiceClient.GetInsertChannels(ctx, &datapb.GetInsertChannelsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert, // todo
 				MsgID:     cct.Base.MsgID,          // todo
@@ -472,10 +472,10 @@ func (dct *DropCollectionTask) PostExecute(ctx context.Context) error {
 
 type SearchTask struct {
 	Condition
-	*internalpb2.SearchRequest
+	*internalpb.SearchRequest
 	ctx            context.Context
 	queryMsgStream msgstream.MsgStream
-	resultBuf      chan []*internalpb2.SearchResults
+	resultBuf      chan []*internalpb.SearchResults
 	result         *milvuspb.SearchResults
 	query          *milvuspb.SearchRequest
 }
@@ -596,7 +596,7 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 			return fmt.Errorf("SearchTask:wait to finish failed, timeout: %d", st.ID())
 		case searchResults := <-st.resultBuf:
 			// fmt.Println("searchResults: ", searchResults)
-			filterSearchResult := make([]*internalpb2.SearchResults, 0)
+			filterSearchResult := make([]*internalpb.SearchResults, 0)
 			var filterReason string
 			for _, partialSearchResult := range searchResults {
 				if partialSearchResult.Status.ErrorCode == commonpb.ErrorCode_Success {
@@ -885,10 +885,10 @@ func (dct *DescribeCollectionTask) PostExecute(ctx context.Context) error {
 
 type GetCollectionsStatisticsTask struct {
 	Condition
-	*milvuspb.CollectionStatsRequest
+	*milvuspb.GetCollectionStatisticsRequest
 	ctx         context.Context
 	dataService types.DataService
-	result      *milvuspb.CollectionStatsResponse
+	result      *milvuspb.GetCollectionStatisticsResponse
 }
 
 func (g *GetCollectionsStatisticsTask) Ctx() context.Context {
@@ -939,7 +939,7 @@ func (g *GetCollectionsStatisticsTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	req := &datapb.CollectionStatsRequest{
+	req := &datapb.GetCollectionStatisticsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_GetCollectionStatistics,
 			MsgID:     g.Base.MsgID,
@@ -956,7 +956,7 @@ func (g *GetCollectionsStatisticsTask) Execute(ctx context.Context) error {
 	if result.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(result.Status.Reason)
 	}
-	g.result = &milvuspb.CollectionStatsResponse{
+	g.result = &milvuspb.GetCollectionStatisticsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
@@ -972,10 +972,10 @@ func (g *GetCollectionsStatisticsTask) PostExecute(ctx context.Context) error {
 
 type ShowCollectionsTask struct {
 	Condition
-	*milvuspb.ShowCollectionRequest
+	*milvuspb.ShowCollectionsRequest
 	ctx           context.Context
 	masterService types.MasterService
-	result        *milvuspb.ShowCollectionResponse
+	result        *milvuspb.ShowCollectionsResponse
 }
 
 func (sct *ShowCollectionsTask) Ctx() context.Context {
@@ -1024,7 +1024,7 @@ func (sct *ShowCollectionsTask) PreExecute(ctx context.Context) error {
 
 func (sct *ShowCollectionsTask) Execute(ctx context.Context) error {
 	var err error
-	sct.result, err = sct.masterService.ShowCollections(ctx, sct.ShowCollectionRequest)
+	sct.result, err = sct.masterService.ShowCollections(ctx, sct.ShowCollectionsRequest)
 	if sct.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -1270,10 +1270,10 @@ func (hpt *HasPartitionTask) PostExecute(ctx context.Context) error {
 
 type ShowPartitionsTask struct {
 	Condition
-	*milvuspb.ShowPartitionRequest
+	*milvuspb.ShowPartitionsRequest
 	ctx           context.Context
 	masterService types.MasterService
-	result        *milvuspb.ShowPartitionResponse
+	result        *milvuspb.ShowPartitionsResponse
 }
 
 func (spt *ShowPartitionsTask) Ctx() context.Context {
@@ -1325,7 +1325,7 @@ func (spt *ShowPartitionsTask) PreExecute(ctx context.Context) error {
 
 func (spt *ShowPartitionsTask) Execute(ctx context.Context) error {
 	var err error
-	spt.result, err = spt.masterService.ShowPartitions(ctx, spt.ShowPartitionRequest)
+	spt.result, err = spt.masterService.ShowPartitions(ctx, spt.ShowPartitionsRequest)
 	if spt.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -1580,11 +1580,11 @@ func (dit *DropIndexTask) PostExecute(ctx context.Context) error {
 
 type GetIndexStateTask struct {
 	Condition
-	*milvuspb.IndexStateRequest
+	*milvuspb.GetIndexStateRequest
 	ctx           context.Context
 	indexService  types.IndexService
 	masterService types.MasterService
-	result        *milvuspb.IndexStateResponse
+	result        *milvuspb.GetIndexStateResponse
 }
 
 func (gist *GetIndexStateTask) Ctx() context.Context {
@@ -1648,7 +1648,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	showPartitionRequest := &milvuspb.ShowPartitionRequest{
+	showPartitionRequest := &milvuspb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_ShowPartitions,
 			MsgID:     gist.Base.MsgID,
@@ -1701,7 +1701,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 
 	var allSegmentIDs []UniqueID
 	for _, partitionID := range partitions.PartitionIDs {
-		showSegmentsRequest := &milvuspb.ShowSegmentRequest{
+		showSegmentsRequest := &milvuspb.ShowSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ShowSegments,
 				MsgID:     gist.Base.MsgID,
@@ -1721,7 +1721,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 		allSegmentIDs = append(allSegmentIDs, segments.SegmentIDs...)
 	}
 
-	getIndexStatesRequest := &indexpb.IndexStatesRequest{
+	getIndexStatesRequest := &indexpb.GetIndexStatesRequest{
 		IndexBuildIDs: make([]UniqueID, 0),
 	}
 	enableIndexBitMap := make([]bool, 0)
@@ -1755,7 +1755,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 	log.Debug("proxynode", zap.Int("GetIndexState:: len of allSegmentIDs", len(allSegmentIDs)))
 	log.Debug("proxynode", zap.Int("GetIndexState:: len of IndexBuildIDs", len(indexBuildIDs)))
 	if len(allSegmentIDs) != len(indexBuildIDs) {
-		gist.result = &milvuspb.IndexStateResponse{
+		gist.result = &milvuspb.GetIndexStateResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 				Reason:    "",
@@ -1776,7 +1776,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 	}
 
 	if states.Status.ErrorCode != commonpb.ErrorCode_Success {
-		gist.result = &milvuspb.IndexStateResponse{
+		gist.result = &milvuspb.GetIndexStateResponse{
 			Status: states.Status,
 			State:  commonpb.IndexState_Failed,
 		}
@@ -1786,7 +1786,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 
 	for _, state := range states.States {
 		if state.State != commonpb.IndexState_Finished {
-			gist.result = &milvuspb.IndexStateResponse{
+			gist.result = &milvuspb.GetIndexStateResponse{
 				Status: states.Status,
 				State:  state.State,
 			}
@@ -1795,7 +1795,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	gist.result = &milvuspb.IndexStateResponse{
+	gist.result = &milvuspb.GetIndexStateResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
@@ -2066,7 +2066,7 @@ func (rct *ReleaseCollectionTask) PostExecute(ctx context.Context) error {
 
 type LoadPartitionTask struct {
 	Condition
-	*milvuspb.LoadPartitonRequest
+	*milvuspb.LoadPartitionsRequest
 	ctx          context.Context
 	queryService types.QueryService
 	result       *commonpb.Status
@@ -2135,7 +2135,7 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 		}
 		partitionIDs = append(partitionIDs, partitionID)
 	}
-	request := &querypb.LoadPartitionRequest{
+	request := &querypb.LoadPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_LoadPartitions,
 			MsgID:     lpt.Base.MsgID,
@@ -2157,7 +2157,7 @@ func (lpt *LoadPartitionTask) PostExecute(ctx context.Context) error {
 
 type ReleasePartitionTask struct {
 	Condition
-	*milvuspb.ReleasePartitionRequest
+	*milvuspb.ReleasePartitionsRequest
 	ctx          context.Context
 	queryService types.QueryService
 	result       *commonpb.Status
@@ -2226,7 +2226,7 @@ func (rpt *ReleasePartitionTask) Execute(ctx context.Context) (err error) {
 		}
 		partitionIDs = append(partitionIDs, partitionID)
 	}
-	request := &querypb.ReleasePartitionRequest{
+	request := &querypb.ReleasePartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_ReleasePartitions,
 			MsgID:     rpt.Base.MsgID,

@@ -11,7 +11,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 )
@@ -68,23 +68,23 @@ func (c *Client) Stop() error {
 	return c.conn.Close()
 }
 
-func (c *Client) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
-	return c.grpcClient.GetComponentStates(ctx, &commonpb.Empty{})
+func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	return c.grpcClient.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
 }
 
 func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return c.grpcClient.GetTimeTickChannel(ctx, &commonpb.Empty{})
+	return c.grpcClient.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 }
 
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return c.grpcClient.GetStatisticsChannel(ctx, &commonpb.Empty{})
+	return c.grpcClient.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 }
 
 func (c *Client) RegisterNode(ctx context.Context, req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
 	return c.grpcClient.RegisterNode(ctx, req)
 }
 
-func (c *Client) ShowCollections(ctx context.Context, req *querypb.ShowCollectionRequest) (*querypb.ShowCollectionResponse, error) {
+func (c *Client) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
 	return c.grpcClient.ShowCollections(ctx, req)
 }
 
@@ -96,26 +96,26 @@ func (c *Client) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 	return c.grpcClient.ReleaseCollection(ctx, req)
 }
 
-func (c *Client) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionRequest) (*querypb.ShowPartitionResponse, error) {
+func (c *Client) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 	return c.grpcClient.ShowPartitions(ctx, req)
 }
 
-func (c *Client) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionRequest) (*commonpb.Status, error) {
+func (c *Client) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
 	return c.grpcClient.LoadPartitions(ctx, req)
 }
 
-func (c *Client) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionRequest) (*commonpb.Status, error) {
+func (c *Client) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	return c.grpcClient.ReleasePartitions(ctx, req)
 }
 
 func (c *Client) CreateQueryChannel(ctx context.Context) (*querypb.CreateQueryChannelResponse, error) {
-	return c.grpcClient.CreateQueryChannel(ctx, &commonpb.Empty{})
+	return c.grpcClient.CreateQueryChannel(ctx, &querypb.CreateQueryChannelRequest{})
 }
 
-func (c *Client) GetPartitionStates(ctx context.Context, req *querypb.PartitionStatesRequest) (*querypb.PartitionStatesResponse, error) {
+func (c *Client) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
 	return c.grpcClient.GetPartitionStates(ctx, req)
 }
 
-func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error) {
+func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	return c.grpcClient.GetSegmentInfo(ctx, req)
 }

@@ -1,7 +1,7 @@
 package dataservice
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 type statsHandler struct {
@@ -14,7 +14,7 @@ func newStatsHandler(meta *meta) *statsHandler {
 	}
 }
 
-func (handler *statsHandler) HandleSegmentStat(segStats *internalpb2.SegmentStatisticsUpdates) error {
+func (handler *statsHandler) HandleSegmentStat(segStats *internalpb.SegmentStatisticsUpdates) error {
 	segMeta, err := handler.meta.GetSegment(segStats.SegmentID)
 	if err != nil {
 		return err

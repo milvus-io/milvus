@@ -29,21 +29,21 @@ const _ = proto.ProtoPackageIsVersion3 // please upgrade the proto package
 type PlaceholderType int32
 
 const (
-	PlaceholderType_NONE          PlaceholderType = 0
-	PlaceholderType_VECTOR_BINARY PlaceholderType = 100
-	PlaceholderType_VECTOR_FLOAT  PlaceholderType = 101
+	PlaceholderType_None         PlaceholderType = 0
+	PlaceholderType_BinaryVector PlaceholderType = 100
+	PlaceholderType_FloatVector  PlaceholderType = 101
 )
 
 var PlaceholderType_name = map[int32]string{
-	0:   "NONE",
-	100: "VECTOR_BINARY",
-	101: "VECTOR_FLOAT",
+	0:   "None",
+	100: "BinaryVector",
+	101: "FloatVector",
 }
 
 var PlaceholderType_value = map[string]int32{
-	"NONE":          0,
-	"VECTOR_BINARY": 100,
-	"VECTOR_FLOAT":  101,
+	"None":         0,
+	"BinaryVector": 100,
+	"FloatVector":  101,
 }
 
 func (x PlaceholderType) String() string {
@@ -550,7 +550,7 @@ func (m *ReleaseCollectionRequest) GetCollectionName() string {
 	return ""
 }
 
-type CollectionStatsRequest struct {
+type GetCollectionStatisticsRequest struct {
 	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
 	CollectionName       string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
@@ -559,53 +559,53 @@ type CollectionStatsRequest struct {
 	XXX_sizecache        int32             `json:"-"`
 }
 
-func (m *CollectionStatsRequest) Reset()         { *m = CollectionStatsRequest{} }
-func (m *CollectionStatsRequest) String() string { return proto.CompactTextString(m) }
-func (*CollectionStatsRequest) ProtoMessage()    {}
-func (*CollectionStatsRequest) Descriptor() ([]byte, []int) {
+func (m *GetCollectionStatisticsRequest) Reset()         { *m = GetCollectionStatisticsRequest{} }
+func (m *GetCollectionStatisticsRequest) String() string { return proto.CompactTextString(m) }
+func (*GetCollectionStatisticsRequest) ProtoMessage()    {}
+func (*GetCollectionStatisticsRequest) Descriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{9}
 }
 
-func (m *CollectionStatsRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_CollectionStatsRequest.Unmarshal(m, b)
+func (m *GetCollectionStatisticsRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetCollectionStatisticsRequest.Unmarshal(m, b)
 }
-func (m *CollectionStatsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_CollectionStatsRequest.Marshal(b, m, deterministic)
+func (m *GetCollectionStatisticsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetCollectionStatisticsRequest.Marshal(b, m, deterministic)
 }
-func (m *CollectionStatsRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_CollectionStatsRequest.Merge(m, src)
+func (m *GetCollectionStatisticsRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetCollectionStatisticsRequest.Merge(m, src)
 }
-func (m *CollectionStatsRequest) XXX_Size() int {
-	return xxx_messageInfo_CollectionStatsRequest.Size(m)
+func (m *GetCollectionStatisticsRequest) XXX_Size() int {
+	return xxx_messageInfo_GetCollectionStatisticsRequest.Size(m)
 }
-func (m *CollectionStatsRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_CollectionStatsRequest.DiscardUnknown(m)
+func (m *GetCollectionStatisticsRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetCollectionStatisticsRequest.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_CollectionStatsRequest proto.InternalMessageInfo
+var xxx_messageInfo_GetCollectionStatisticsRequest proto.InternalMessageInfo
 
-func (m *CollectionStatsRequest) GetBase() *commonpb.MsgBase {
+func (m *GetCollectionStatisticsRequest) GetBase() *commonpb.MsgBase {
 	if m != nil {
 		return m.Base
 	}
 	return nil
 }
 
-func (m *CollectionStatsRequest) GetDbName() string {
+func (m *GetCollectionStatisticsRequest) GetDbName() string {
 	if m != nil {
 		return m.DbName
 	}
 	return ""
 }
 
-func (m *CollectionStatsRequest) GetCollectionName() string {
+func (m *GetCollectionStatisticsRequest) GetCollectionName() string {
 	if m != nil {
 		return m.CollectionName
 	}
 	return ""
 }
 
-type CollectionStatsResponse struct {
+type GetCollectionStatisticsResponse struct {
 	Status               *commonpb.Status         `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 	Stats                []*commonpb.KeyValuePair `protobuf:"bytes,2,rep,name=stats,proto3" json:"stats,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}                 `json:"-"`
@@ -613,46 +613,46 @@ type CollectionStatsResponse struct {
 	XXX_sizecache        int32                    `json:"-"`
 }
 
-func (m *CollectionStatsResponse) Reset()         { *m = CollectionStatsResponse{} }
-func (m *CollectionStatsResponse) String() string { return proto.CompactTextString(m) }
-func (*CollectionStatsResponse) ProtoMessage()    {}
-func (*CollectionStatsResponse) Descriptor() ([]byte, []int) {
+func (m *GetCollectionStatisticsResponse) Reset()         { *m = GetCollectionStatisticsResponse{} }
+func (m *GetCollectionStatisticsResponse) String() string { return proto.CompactTextString(m) }
+func (*GetCollectionStatisticsResponse) ProtoMessage()    {}
+func (*GetCollectionStatisticsResponse) Descriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{10}
 }
 
-func (m *CollectionStatsResponse) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_CollectionStatsResponse.Unmarshal(m, b)
+func (m *GetCollectionStatisticsResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetCollectionStatisticsResponse.Unmarshal(m, b)
 }
-func (m *CollectionStatsResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_CollectionStatsResponse.Marshal(b, m, deterministic)
+func (m *GetCollectionStatisticsResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetCollectionStatisticsResponse.Marshal(b, m, deterministic)
 }
-func (m *CollectionStatsResponse) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_CollectionStatsResponse.Merge(m, src)
+func (m *GetCollectionStatisticsResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetCollectionStatisticsResponse.Merge(m, src)
 }
-func (m *CollectionStatsResponse) XXX_Size() int {
-	return xxx_messageInfo_CollectionStatsResponse.Size(m)
+func (m *GetCollectionStatisticsResponse) XXX_Size() int {
+	return xxx_messageInfo_GetCollectionStatisticsResponse.Size(m)
 }
-func (m *CollectionStatsResponse) XXX_DiscardUnknown() {
-	xxx_messageInfo_CollectionStatsResponse.DiscardUnknown(m)
+func (m *GetCollectionStatisticsResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetCollectionStatisticsResponse.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_CollectionStatsResponse proto.InternalMessageInfo
+var xxx_messageInfo_GetCollectionStatisticsResponse proto.InternalMessageInfo
 
-func (m *CollectionStatsResponse) GetStatus() *commonpb.Status {
+func (m *GetCollectionStatisticsResponse) GetStatus() *commonpb.Status {
 	if m != nil {
 		return m.Status
 	}
 	return nil
 }
 
-func (m *CollectionStatsResponse) GetStats() []*commonpb.KeyValuePair {
+func (m *GetCollectionStatisticsResponse) GetStats() []*commonpb.KeyValuePair {
 	if m != nil {
 		return m.Stats
 	}
 	return nil
 }
 
-type ShowCollectionRequest struct {
+type ShowCollectionsRequest struct {
 	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
@@ -660,46 +660,46 @@ type ShowCollectionRequest struct {
 	XXX_sizecache        int32             `json:"-"`
 }
 
-func (m *ShowCollectionRequest) Reset()         { *m = ShowCollectionRequest{} }
-func (m *ShowCollectionRequest) String() string { return proto.CompactTextString(m) }
-func (*ShowCollectionRequest) ProtoMessage()    {}
-func (*ShowCollectionRequest) Descriptor() ([]byte, []int) {
+func (m *ShowCollectionsRequest) Reset()         { *m = ShowCollectionsRequest{} }
+func (m *ShowCollectionsRequest) String() string { return proto.CompactTextString(m) }
+func (*ShowCollectionsRequest) ProtoMessage()    {}
+func (*ShowCollectionsRequest) Descriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{11}
 }
 
-func (m *ShowCollectionRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_ShowCollectionRequest.Unmarshal(m, b)
+func (m *ShowCollectionsRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_ShowCollectionsRequest.Unmarshal(m, b)
 }
-func (m *ShowCollectionRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_ShowCollectionRequest.Marshal(b, m, deterministic)
+func (m *ShowCollectionsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_ShowCollectionsRequest.Marshal(b, m, deterministic)
 }
-func (m *ShowCollectionRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_ShowCollectionRequest.Merge(m, src)
+func (m *ShowCollectionsRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ShowCollectionsRequest.Merge(m, src)
 }
-func (m *ShowCollectionRequest) XXX_Size() int {
-	return xxx_messageInfo_ShowCollectionRequest.Size(m)
+func (m *ShowCollectionsRequest) XXX_Size() int {
+	return xxx_messageInfo_ShowCollectionsRequest.Size(m)
 }
-func (m *ShowCollectionRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_ShowCollectionRequest.DiscardUnknown(m)
+func (m *ShowCollectionsRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_ShowCollectionsRequest.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_ShowCollectionRequest proto.InternalMessageInfo
+var xxx_messageInfo_ShowCollectionsRequest proto.InternalMessageInfo
 
-func (m *ShowCollectionRequest) GetBase() *commonpb.MsgBase {
+func (m *ShowCollectionsRequest) GetBase() *commonpb.MsgBase {
 	if m != nil {
 		return m.Base
 	}
 	return nil
 }
 
-func (m *ShowCollectionRequest) GetDbName() string {
+func (m *ShowCollectionsRequest) GetDbName() string {
 	if m != nil {
 		return m.DbName
 	}
 	return ""
 }
 
-type ShowCollectionResponse struct {
+type ShowCollectionsResponse struct {
 	Status               *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 	CollectionNames      []string         `protobuf:"bytes,2,rep,name=collection_names,json=collectionNames,proto3" json:"collection_names,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
@@ -707,39 +707,39 @@ type ShowCollectionResponse struct {
 	XXX_sizecache        int32            `json:"-"`
 }
 
-func (m *ShowCollectionResponse) Reset()         { *m = ShowCollectionResponse{} }
-func (m *ShowCollectionResponse) String() string { return proto.CompactTextString(m) }
-func (*ShowCollectionResponse) ProtoMessage()    {}
-func (*ShowCollectionResponse) Descriptor() ([]byte, []int) {
+func (m *ShowCollectionsResponse) Reset()         { *m = ShowCollectionsResponse{} }
+func (m *ShowCollectionsResponse) String() string { return proto.CompactTextString(m) }
+func (*ShowCollectionsResponse) ProtoMessage()    {}
+func (*ShowCollectionsResponse) Descriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{12}
 }
 
-func (m *ShowCollectionResponse) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_ShowCollectionResponse.Unmarshal(m, b)
+func (m *ShowCollectionsResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_ShowCollectionsResponse.Unmarshal(m, b)
 }
-func (m *ShowCollectionResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_ShowCollectionResponse.Marshal(b, m, deterministic)
+func (m *ShowCollectionsResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_ShowCollectionsResponse.Marshal(b, m, deterministic)
 }
-func (m *ShowCollectionResponse) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_ShowCollectionResponse.Merge(m, src)
+func (m *ShowCollectionsResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ShowCollectionsResponse.Merge(m, src)
 }
-func (m *ShowCollectionResponse) XXX_Size() int {
-	return xxx_messageInfo_ShowCollectionResponse.Size(m)
+func (m *ShowCollectionsResponse) XXX_Size() int {
+	return xxx_messageInfo_ShowCollectionsResponse.Size(m)
 }
-func (m *ShowCollectionResponse) XXX_DiscardUnknown() {
-	xxx_messageInfo_ShowCollectionResponse.DiscardUnknown(m)
+func (m *ShowCollectionsResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_ShowCollectionsResponse.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_ShowCollectionResponse proto.InternalMessageInfo
+var xxx_messageInfo_ShowCollectionsResponse proto.InternalMessageInfo
 
-func (m *ShowCollectionResponse) GetStatus() *commonpb.Status {
+func (m *ShowCollectionsResponse) GetStatus() *commonpb.Status {
 	if m != nil {
 		return m.Status
 	}
 	return nil
 }
 
-func (m *ShowCollectionResponse) GetCollectionNames() []string {
+func (m *ShowCollectionsResponse) GetCollectionNames() []string {
 	if m != nil {
 		return m.CollectionNames
 	}
@@ -935,7 +935,7 @@ func (m *HasPartitionRequest) GetPartitionName() string {
 	return ""
 }
 
-type LoadPartitonRequest struct {
+type LoadPartitionsRequest struct {
 	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
 	CollectionName       string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
@@ -945,60 +945,60 @@ type LoadPartitonRequest struct {
 	XXX_sizecache        int32             `json:"-"`
 }
 
-func (m *LoadPartitonRequest) Reset()         { *m = LoadPartitonRequest{} }
-func (m *LoadPartitonRequest) String() string { return proto.CompactTextString(m) }
-func (*LoadPartitonRequest) ProtoMessage()    {}
-func (*LoadPartitonRequest) Descriptor() ([]byte, []int) {
+func (m *LoadPartitionsRequest) Reset()         { *m = LoadPartitionsRequest{} }
+func (m *LoadPartitionsRequest) String() string { return proto.CompactTextString(m) }
+func (*LoadPartitionsRequest) ProtoMessage()    {}
+func (*LoadPartitionsRequest) Descriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{16}
 }
 
-func (m *LoadPartitonRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_LoadPartitonRequest.Unmarshal(m, b)
+func (m *LoadPartitionsRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_LoadPartitionsRequest.Unmarshal(m, b)
 }
-func (m *LoadPartitonRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_LoadPartitonRequest.Marshal(b, m, deterministic)
+func (m *LoadPartitionsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_LoadPartitionsRequest.Marshal(b, m, deterministic)
 }
-func (m *LoadPartitonRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_LoadPartitonRequest.Merge(m, src)
+func (m *LoadPartitionsRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_LoadPartitionsRequest.Merge(m, src)
 }
-func (m *LoadPartitonRequest) XXX_Size() int {
-	return xxx_messageInfo_LoadPartitonRequest.Size(m)
+func (m *LoadPartitionsRequest) XXX_Size() int {
+	return xxx_messageInfo_LoadPartitionsRequest.Size(m)
 }
-func (m *LoadPartitonRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_LoadPartitonRequest.DiscardUnknown(m)
+func (m *LoadPartitionsRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_LoadPartitionsRequest.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_LoadPartitonRequest proto.InternalMessageInfo
+var xxx_messageInfo_LoadPartitionsRequest proto.InternalMessageInfo
 
-func (m *LoadPartitonRequest) GetBase() *commonpb.MsgBase {
+func (m *LoadPartitionsRequest) GetBase() *commonpb.MsgBase {
 	if m != nil {
 		return m.Base
 	}
 	return nil
 }
 
-func (m *LoadPartitonRequest) GetDbName() string {
+func (m *LoadPartitionsRequest) GetDbName() string {
 	if m != nil {
 		return m.DbName
 	}
 	return ""
 }
 
-func (m *LoadPartitonRequest) GetCollectionName() string {
+func (m *LoadPartitionsRequest) GetCollectionName() string {
 	if m != nil {
 		return m.CollectionName
 	}
 	return ""
 }
 
-func (m *LoadPartitonRequest) GetPartitionNames() []string {
+func (m *LoadPartitionsRequest) GetPartitionNames() []string {
 	if m != nil {
 		return m.PartitionNames
 	}
 	return nil
 }
 
-type ReleasePartitionRequest struct {
+type ReleasePartitionsRequest struct {
 	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
 	CollectionName       string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
@@ -1008,60 +1008,60 @@ type ReleasePartitionRequest struct {
 	XXX_sizecache        int32             `json:"-"`
 }
 
-func (m *ReleasePartitionRequest) Reset()         { *m = ReleasePartitionRequest{} }
-func (m *ReleasePartitionRequest) String() string { return proto.CompactTextString(m) }
-func (*ReleasePartitionRequest) ProtoMessage()    {}
-func (*ReleasePartitionRequest) Descriptor() ([]byte, []int) {
+func (m *ReleasePartitionsRequest) Reset()         { *m = ReleasePartitionsRequest{} }
+func (m *ReleasePartitionsRequest) String() string { return proto.CompactTextString(m) }
+func (*ReleasePartitionsRequest) ProtoMessage()    {}
+func (*ReleasePartitionsRequest) Descriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{17}
 }
 
-func (m *ReleasePartitionRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_ReleasePartitionRequest.Unmarshal(m, b)
+func (m *ReleasePartitionsRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_ReleasePartitionsRequest.Unmarshal(m, b)
 }
-func (m *ReleasePartitionRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_ReleasePartitionRequest.Marshal(b, m, deterministic)
+func (m *ReleasePartitionsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_ReleasePartitionsRequest.Marshal(b, m, deterministic)
 }
-func (m *ReleasePartitionRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_ReleasePartitionRequest.Merge(m, src)
+func (m *ReleasePartitionsRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ReleasePartitionsRequest.Merge(m, src)
 }
-func (m *ReleasePartitionRequest) XXX_Size() int {
-	return xxx_messageInfo_ReleasePartitionRequest.Size(m)
+func (m *ReleasePartitionsRequest) XXX_Size() int {
+	return xxx_messageInfo_ReleasePartitionsRequest.Size(m)
 }
-func (m *ReleasePartitionRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_ReleasePartitionRequest.DiscardUnknown(m)
+func (m *ReleasePartitionsRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_ReleasePartitionsRequest.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_ReleasePartitionRequest proto.InternalMessageInfo
+var xxx_messageInfo_ReleasePartitionsRequest proto.InternalMessageInfo
 
-func (m *ReleasePartitionRequest) GetBase() *commonpb.MsgBase {
+func (m *ReleasePartitionsRequest) GetBase() *commonpb.MsgBase {
 	if m != nil {
 		return m.Base
 	}
 	return nil
 }
 
-func (m *ReleasePartitionRequest) GetDbName() string {
+func (m *ReleasePartitionsRequest) GetDbName() string {
 	if m != nil {
 		return m.DbName
 	}
 	return ""
 }
 
-func (m *ReleasePartitionRequest) GetCollectionName() string {
+func (m *ReleasePartitionsRequest) GetCollectionName() string {
 	if m != nil {
 		return m.CollectionName
 	}
 	return ""
 }
 
-func (m *ReleasePartitionRequest) GetPartitionNames() []string {
+func (m *ReleasePartitionsRequest) GetPartitionNames() []string {
 	if m != nil {
 		return m.PartitionNames
 	}
 	return nil
 }
 
-type PartitionStatsRequest struct {
+type GetPartitionStatisticsRequest struct {
 	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
 	CollectionName       string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
@@ -1071,60 +1071,60 @@ type PartitionStatsRequest struct {
 	XXX_sizecache        int32             `json:"-"`
 }
 
-func (m *PartitionStatsRequest) Reset()         { *m = PartitionStatsRequest{} }
-func (m *PartitionStatsRequest) String() string { return proto.CompactTextString(m) }
-func (*PartitionStatsRequest) ProtoMessage()    {}
-func (*PartitionStatsRequest) Descriptor() ([]byte, []int) {
+func (m *GetPartitionStatisticsRequest) Reset()         { *m = GetPartitionStatisticsRequest{} }
+func (m *GetPartitionStatisticsRequest) String() string { return proto.CompactTextString(m) }
+func (*GetPartitionStatisticsRequest) ProtoMessage()    {}
+func (*GetPartitionStatisticsRequest) Descriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{18}
 }
 
-func (m *PartitionStatsRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_PartitionStatsRequest.Unmarshal(m, b)
+func (m *GetPartitionStatisticsRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetPartitionStatisticsRequest.Unmarshal(m, b)
 }
-func (m *PartitionStatsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_PartitionStatsRequest.Marshal(b, m, deterministic)
+func (m *GetPartitionStatisticsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetPartitionStatisticsRequest.Marshal(b, m, deterministic)
 }
-func (m *PartitionStatsRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_PartitionStatsRequest.Merge(m, src)
+func (m *GetPartitionStatisticsRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetPartitionStatisticsRequest.Merge(m, src)
 }
-func (m *PartitionStatsRequest) XXX_Size() int {
-	return xxx_messageInfo_PartitionStatsRequest.Size(m)
+func (m *GetPartitionStatisticsRequest) XXX_Size() int {
+	return xxx_messageInfo_GetPartitionStatisticsRequest.Size(m)
 }
-func (m *PartitionStatsRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_PartitionStatsRequest.DiscardUnknown(m)
+func (m *GetPartitionStatisticsRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetPartitionStatisticsRequest.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_PartitionStatsRequest proto.InternalMessageInfo
+var xxx_messageInfo_GetPartitionStatisticsRequest proto.InternalMessageInfo
 
-func (m *PartitionStatsRequest) GetBase() *commonpb.MsgBase {
+func (m *GetPartitionStatisticsRequest) GetBase() *commonpb.MsgBase {
 	if m != nil {
 		return m.Base
 	}
 	return nil
 }
 
-func (m *PartitionStatsRequest) GetDbName() string {
+func (m *GetPartitionStatisticsRequest) GetDbName() string {
 	if m != nil {
 		return m.DbName
 	}
 	return ""
 }
 
-func (m *PartitionStatsRequest) GetCollectionName() string {
+func (m *GetPartitionStatisticsRequest) GetCollectionName() string {
 	if m != nil {
 		return m.CollectionName
 	}
 	return ""
 }
 
-func (m *PartitionStatsRequest) GetPartitionName() string {
+func (m *GetPartitionStatisticsRequest) GetPartitionName() string {
 	if m != nil {
 		return m.PartitionName
 	}
 	return ""
 }
 
-type PartitionStatsResponse struct {
+type GetPartitionStatisticsResponse struct {
 	Status               *commonpb.Status         `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 	Stats                []*commonpb.KeyValuePair `protobuf:"bytes,2,rep,name=stats,proto3" json:"stats,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}                 `json:"-"`
@@ -1132,46 +1132,46 @@ type PartitionStatsResponse struct {
 	XXX_sizecache        int32                    `json:"-"`
 }
 
-func (m *PartitionStatsResponse) Reset()         { *m = PartitionStatsResponse{} }
-func (m *PartitionStatsResponse) String() string { return proto.CompactTextString(m) }
-func (*PartitionStatsResponse) ProtoMessage()    {}
-func (*PartitionStatsResponse) Descriptor() ([]byte, []int) {
+func (m *GetPartitionStatisticsResponse) Reset()         { *m = GetPartitionStatisticsResponse{} }
+func (m *GetPartitionStatisticsResponse) String() string { return proto.CompactTextString(m) }
+func (*GetPartitionStatisticsResponse) ProtoMessage()    {}
+func (*GetPartitionStatisticsResponse) Descriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{19}
 }
 
-func (m *PartitionStatsResponse) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_PartitionStatsResponse.Unmarshal(m, b)
+func (m *GetPartitionStatisticsResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetPartitionStatisticsResponse.Unmarshal(m, b)
 }
-func (m *PartitionStatsResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_PartitionStatsResponse.Marshal(b, m, deterministic)
+func (m *GetPartitionStatisticsResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetPartitionStatisticsResponse.Marshal(b, m, deterministic)
 }
-func (m *PartitionStatsResponse) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_PartitionStatsResponse.Merge(m, src)
+func (m *GetPartitionStatisticsResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetPartitionStatisticsResponse.Merge(m, src)
 }
-func (m *PartitionStatsResponse) XXX_Size() int {
-	return xxx_messageInfo_PartitionStatsResponse.Size(m)
+func (m *GetPartitionStatisticsResponse) XXX_Size() int {
+	return xxx_messageInfo_GetPartitionStatisticsResponse.Size(m)
 }
-func (m *PartitionStatsResponse) XXX_DiscardUnknown() {
-	xxx_messageInfo_PartitionStatsResponse.DiscardUnknown(m)
+func (m *GetPartitionStatisticsResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetPartitionStatisticsResponse.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_PartitionStatsResponse proto.InternalMessageInfo
+var xxx_messageInfo_GetPartitionStatisticsResponse proto.InternalMessageInfo
 
-func (m *PartitionStatsResponse) GetStatus() *commonpb.Status {
+func (m *GetPartitionStatisticsResponse) GetStatus() *commonpb.Status {
 	if m != nil {
 		return m.Status
 	}
 	return nil
 }
 
-func (m *PartitionStatsResponse) GetStats() []*commonpb.KeyValuePair {
+func (m *GetPartitionStatisticsResponse) GetStats() []*commonpb.KeyValuePair {
 	if m != nil {
 		return m.Stats
 	}
 	return nil
 }
 
-type ShowPartitionRequest struct {
+type ShowPartitionsRequest struct {
 	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
 	CollectionName       string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
@@ -1181,60 +1181,60 @@ type ShowPartitionRequest struct {
 	XXX_sizecache        int32             `json:"-"`
 }
 
-func (m *ShowPartitionRequest) Reset()         { *m = ShowPartitionRequest{} }
-func (m *ShowPartitionRequest) String() string { return proto.CompactTextString(m) }
-func (*ShowPartitionRequest) ProtoMessage()    {}
-func (*ShowPartitionRequest) Descriptor() ([]byte, []int) {
+func (m *ShowPartitionsRequest) Reset()         { *m = ShowPartitionsRequest{} }
+func (m *ShowPartitionsRequest) String() string { return proto.CompactTextString(m) }
+func (*ShowPartitionsRequest) ProtoMessage()    {}
+func (*ShowPartitionsRequest) Descriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{20}
 }
 
-func (m *ShowPartitionRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_ShowPartitionRequest.Unmarshal(m, b)
+func (m *ShowPartitionsRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_ShowPartitionsRequest.Unmarshal(m, b)
 }
-func (m *ShowPartitionRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_ShowPartitionRequest.Marshal(b, m, deterministic)
+func (m *ShowPartitionsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_ShowPartitionsRequest.Marshal(b, m, deterministic)
 }
-func (m *ShowPartitionRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_ShowPartitionRequest.Merge(m, src)
+func (m *ShowPartitionsRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ShowPartitionsRequest.Merge(m, src)
 }
-func (m *ShowPartitionRequest) XXX_Size() int {
-	return xxx_messageInfo_ShowPartitionRequest.Size(m)
+func (m *ShowPartitionsRequest) XXX_Size() int {
+	return xxx_messageInfo_ShowPartitionsRequest.Size(m)
 }
-func (m *ShowPartitionRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_ShowPartitionRequest.DiscardUnknown(m)
+func (m *ShowPartitionsRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_ShowPartitionsRequest.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_ShowPartitionRequest proto.InternalMessageInfo
+var xxx_messageInfo_ShowPartitionsRequest proto.InternalMessageInfo
 
-func (m *ShowPartitionRequest) GetBase() *commonpb.MsgBase {
+func (m *ShowPartitionsRequest) GetBase() *commonpb.MsgBase {
 	if m != nil {
 		return m.Base
 	}
 	return nil
 }
 
-func (m *ShowPartitionRequest) GetDbName() string {
+func (m *ShowPartitionsRequest) GetDbName() string {
 	if m != nil {
 		return m.DbName
 	}
 	return ""
 }
 
-func (m *ShowPartitionRequest) GetCollectionName() string {
+func (m *ShowPartitionsRequest) GetCollectionName() string {
 	if m != nil {
 		return m.CollectionName
 	}
 	return ""
 }
 
-func (m *ShowPartitionRequest) GetCollectionID() int64 {
+func (m *ShowPartitionsRequest) GetCollectionID() int64 {
 	if m != nil {
 		return m.CollectionID
 	}
 	return 0
 }
 
-type ShowPartitionResponse struct {
+type ShowPartitionsResponse struct {
 	Status               *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 	PartitionNames       []string         `protobuf:"bytes,2,rep,name=partition_names,json=partitionNames,proto3" json:"partition_names,omitempty"`
 	PartitionIDs         []int64          `protobuf:"varint,3,rep,packed,name=partitionIDs,proto3" json:"partitionIDs,omitempty"`
@@ -1243,46 +1243,46 @@ type ShowPartitionResponse struct {
 	XXX_sizecache        int32            `json:"-"`
 }
 
-func (m *ShowPartitionResponse) Reset()         { *m = ShowPartitionResponse{} }
-func (m *ShowPartitionResponse) String() string { return proto.CompactTextString(m) }
-func (*ShowPartitionResponse) ProtoMessage()    {}
-func (*ShowPartitionResponse) Descriptor() ([]byte, []int) {
+func (m *ShowPartitionsResponse) Reset()         { *m = ShowPartitionsResponse{} }
+func (m *ShowPartitionsResponse) String() string { return proto.CompactTextString(m) }
+func (*ShowPartitionsResponse) ProtoMessage()    {}
+func (*ShowPartitionsResponse) Descriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{21}
 }
 
-func (m *ShowPartitionResponse) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_ShowPartitionResponse.Unmarshal(m, b)
+func (m *ShowPartitionsResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_ShowPartitionsResponse.Unmarshal(m, b)
 }
-func (m *ShowPartitionResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_ShowPartitionResponse.Marshal(b, m, deterministic)
+func (m *ShowPartitionsResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_ShowPartitionsResponse.Marshal(b, m, deterministic)
 }
-func (m *ShowPartitionResponse) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_ShowPartitionResponse.Merge(m, src)
+func (m *ShowPartitionsResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ShowPartitionsResponse.Merge(m, src)
 }
-func (m *ShowPartitionResponse) XXX_Size() int {
-	return xxx_messageInfo_ShowPartitionResponse.Size(m)
+func (m *ShowPartitionsResponse) XXX_Size() int {
+	return xxx_messageInfo_ShowPartitionsResponse.Size(m)
 }
-func (m *ShowPartitionResponse) XXX_DiscardUnknown() {
-	xxx_messageInfo_ShowPartitionResponse.DiscardUnknown(m)
+func (m *ShowPartitionsResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_ShowPartitionsResponse.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_ShowPartitionResponse proto.InternalMessageInfo
+var xxx_messageInfo_ShowPartitionsResponse proto.InternalMessageInfo
 
-func (m *ShowPartitionResponse) GetStatus() *commonpb.Status {
+func (m *ShowPartitionsResponse) GetStatus() *commonpb.Status {
 	if m != nil {
 		return m.Status
 	}
 	return nil
 }
 
-func (m *ShowPartitionResponse) GetPartitionNames() []string {
+func (m *ShowPartitionsResponse) GetPartitionNames() []string {
 	if m != nil {
 		return m.PartitionNames
 	}
 	return nil
 }
 
-func (m *ShowPartitionResponse) GetPartitionIDs() []int64 {
+func (m *ShowPartitionsResponse) GetPartitionIDs() []int64 {
 	if m != nil {
 		return m.PartitionIDs
 	}
@@ -1407,7 +1407,7 @@ func (m *DescribeSegmentResponse) GetEnableIndex() bool {
 	return false
 }
 
-type ShowSegmentRequest struct {
+type ShowSegmentsRequest struct {
 	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	CollectionID         int64             `protobuf:"varint,2,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
 	PartitionID          int64             `protobuf:"varint,3,opt,name=partitionID,proto3" json:"partitionID,omitempty"`
@@ -1416,53 +1416,53 @@ type ShowSegmentRequest struct {
 	XXX_sizecache        int32             `json:"-"`
 }
 
-func (m *ShowSegmentRequest) Reset()         { *m = ShowSegmentRequest{} }
-func (m *ShowSegmentRequest) String() string { return proto.CompactTextString(m) }
-func (*ShowSegmentRequest) ProtoMessage()    {}
-func (*ShowSegmentRequest) Descriptor() ([]byte, []int) {
+func (m *ShowSegmentsRequest) Reset()         { *m = ShowSegmentsRequest{} }
+func (m *ShowSegmentsRequest) String() string { return proto.CompactTextString(m) }
+func (*ShowSegmentsRequest) ProtoMessage()    {}
+func (*ShowSegmentsRequest) Descriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{24}
 }
 
-func (m *ShowSegmentRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_ShowSegmentRequest.Unmarshal(m, b)
+func (m *ShowSegmentsRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_ShowSegmentsRequest.Unmarshal(m, b)
 }
-func (m *ShowSegmentRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_ShowSegmentRequest.Marshal(b, m, deterministic)
+func (m *ShowSegmentsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_ShowSegmentsRequest.Marshal(b, m, deterministic)
 }
-func (m *ShowSegmentRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_ShowSegmentRequest.Merge(m, src)
+func (m *ShowSegmentsRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ShowSegmentsRequest.Merge(m, src)
 }
-func (m *ShowSegmentRequest) XXX_Size() int {
-	return xxx_messageInfo_ShowSegmentRequest.Size(m)
+func (m *ShowSegmentsRequest) XXX_Size() int {
+	return xxx_messageInfo_ShowSegmentsRequest.Size(m)
 }
-func (m *ShowSegmentRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_ShowSegmentRequest.DiscardUnknown(m)
+func (m *ShowSegmentsRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_ShowSegmentsRequest.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_ShowSegmentRequest proto.InternalMessageInfo
+var xxx_messageInfo_ShowSegmentsRequest proto.InternalMessageInfo
 
-func (m *ShowSegmentRequest) GetBase() *commonpb.MsgBase {
+func (m *ShowSegmentsRequest) GetBase() *commonpb.MsgBase {
 	if m != nil {
 		return m.Base
 	}
 	return nil
 }
 
-func (m *ShowSegmentRequest) GetCollectionID() int64 {
+func (m *ShowSegmentsRequest) GetCollectionID() int64 {
 	if m != nil {
 		return m.CollectionID
 	}
 	return 0
 }
 
-func (m *ShowSegmentRequest) GetPartitionID() int64 {
+func (m *ShowSegmentsRequest) GetPartitionID() int64 {
 	if m != nil {
 		return m.PartitionID
 	}
 	return 0
 }
 
-type ShowSegmentResponse struct {
+type ShowSegmentsResponse struct {
 	Status               *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 	SegmentIDs           []int64          `protobuf:"varint,2,rep,packed,name=segmentIDs,proto3" json:"segmentIDs,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
@@ -1470,39 +1470,39 @@ type ShowSegmentResponse struct {
 	XXX_sizecache        int32            `json:"-"`
 }
 
-func (m *ShowSegmentResponse) Reset()         { *m = ShowSegmentResponse{} }
-func (m *ShowSegmentResponse) String() string { return proto.CompactTextString(m) }
-func (*ShowSegmentResponse) ProtoMessage()    {}
-func (*ShowSegmentResponse) Descriptor() ([]byte, []int) {
+func (m *ShowSegmentsResponse) Reset()         { *m = ShowSegmentsResponse{} }
+func (m *ShowSegmentsResponse) String() string { return proto.CompactTextString(m) }
+func (*ShowSegmentsResponse) ProtoMessage()    {}
+func (*ShowSegmentsResponse) Descriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{25}
 }
 
-func (m *ShowSegmentResponse) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_ShowSegmentResponse.Unmarshal(m, b)
+func (m *ShowSegmentsResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_ShowSegmentsResponse.Unmarshal(m, b)
 }
-func (m *ShowSegmentResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_ShowSegmentResponse.Marshal(b, m, deterministic)
+func (m *ShowSegmentsResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_ShowSegmentsResponse.Marshal(b, m, deterministic)
 }
-func (m *ShowSegmentResponse) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_ShowSegmentResponse.Merge(m, src)
+func (m *ShowSegmentsResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ShowSegmentsResponse.Merge(m, src)
 }
-func (m *ShowSegmentResponse) XXX_Size() int {
-	return xxx_messageInfo_ShowSegmentResponse.Size(m)
+func (m *ShowSegmentsResponse) XXX_Size() int {
+	return xxx_messageInfo_ShowSegmentsResponse.Size(m)
 }
-func (m *ShowSegmentResponse) XXX_DiscardUnknown() {
-	xxx_messageInfo_ShowSegmentResponse.DiscardUnknown(m)
+func (m *ShowSegmentsResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_ShowSegmentsResponse.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_ShowSegmentResponse proto.InternalMessageInfo
+var xxx_messageInfo_ShowSegmentsResponse proto.InternalMessageInfo
 
-func (m *ShowSegmentResponse) GetStatus() *commonpb.Status {
+func (m *ShowSegmentsResponse) GetStatus() *commonpb.Status {
 	if m != nil {
 		return m.Status
 	}
 	return nil
 }
 
-func (m *ShowSegmentResponse) GetSegmentIDs() []int64 {
+func (m *ShowSegmentsResponse) GetSegmentIDs() []int64 {
 	if m != nil {
 		return m.SegmentIDs
 	}
@@ -1753,7 +1753,7 @@ func (m *DescribeIndexResponse) GetIndexDescriptions() []*IndexDescription {
 	return nil
 }
 
-type IndexStateRequest struct {
+type GetIndexStateRequest struct {
 	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
 	CollectionName       string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
@@ -1764,67 +1764,67 @@ type IndexStateRequest struct {
 	XXX_sizecache        int32             `json:"-"`
 }
 
-func (m *IndexStateRequest) Reset()         { *m = IndexStateRequest{} }
-func (m *IndexStateRequest) String() string { return proto.CompactTextString(m) }
-func (*IndexStateRequest) ProtoMessage()    {}
-func (*IndexStateRequest) Descriptor() ([]byte, []int) {
+func (m *GetIndexStateRequest) Reset()         { *m = GetIndexStateRequest{} }
+func (m *GetIndexStateRequest) String() string { return proto.CompactTextString(m) }
+func (*GetIndexStateRequest) ProtoMessage()    {}
+func (*GetIndexStateRequest) Descriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{30}
 }
 
-func (m *IndexStateRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_IndexStateRequest.Unmarshal(m, b)
+func (m *GetIndexStateRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetIndexStateRequest.Unmarshal(m, b)
 }
-func (m *IndexStateRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_IndexStateRequest.Marshal(b, m, deterministic)
+func (m *GetIndexStateRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetIndexStateRequest.Marshal(b, m, deterministic)
 }
-func (m *IndexStateRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_IndexStateRequest.Merge(m, src)
+func (m *GetIndexStateRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetIndexStateRequest.Merge(m, src)
 }
-func (m *IndexStateRequest) XXX_Size() int {
-	return xxx_messageInfo_IndexStateRequest.Size(m)
+func (m *GetIndexStateRequest) XXX_Size() int {
+	return xxx_messageInfo_GetIndexStateRequest.Size(m)
 }
-func (m *IndexStateRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_IndexStateRequest.DiscardUnknown(m)
+func (m *GetIndexStateRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetIndexStateRequest.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_IndexStateRequest proto.InternalMessageInfo
+var xxx_messageInfo_GetIndexStateRequest proto.InternalMessageInfo
 
-func (m *IndexStateRequest) GetBase() *commonpb.MsgBase {
+func (m *GetIndexStateRequest) GetBase() *commonpb.MsgBase {
 	if m != nil {
 		return m.Base
 	}
 	return nil
 }
 
-func (m *IndexStateRequest) GetDbName() string {
+func (m *GetIndexStateRequest) GetDbName() string {
 	if m != nil {
 		return m.DbName
 	}
 	return ""
 }
 
-func (m *IndexStateRequest) GetCollectionName() string {
+func (m *GetIndexStateRequest) GetCollectionName() string {
 	if m != nil {
 		return m.CollectionName
 	}
 	return ""
 }
 
-func (m *IndexStateRequest) GetFieldName() string {
+func (m *GetIndexStateRequest) GetFieldName() string {
 	if m != nil {
 		return m.FieldName
 	}
 	return ""
 }
 
-func (m *IndexStateRequest) GetIndexName() string {
+func (m *GetIndexStateRequest) GetIndexName() string {
 	if m != nil {
 		return m.IndexName
 	}
 	return ""
 }
 
-type IndexStateResponse struct {
+type GetIndexStateResponse struct {
 	Status               *commonpb.Status    `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 	State                commonpb.IndexState `protobuf:"varint,2,opt,name=state,proto3,enum=milvus.proto.common.IndexState" json:"state,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}            `json:"-"`
@@ -1832,39 +1832,39 @@ type IndexStateResponse struct {
 	XXX_sizecache        int32               `json:"-"`
 }
 
-func (m *IndexStateResponse) Reset()         { *m = IndexStateResponse{} }
-func (m *IndexStateResponse) String() string { return proto.CompactTextString(m) }
-func (*IndexStateResponse) ProtoMessage()    {}
-func (*IndexStateResponse) Descriptor() ([]byte, []int) {
+func (m *GetIndexStateResponse) Reset()         { *m = GetIndexStateResponse{} }
+func (m *GetIndexStateResponse) String() string { return proto.CompactTextString(m) }
+func (*GetIndexStateResponse) ProtoMessage()    {}
+func (*GetIndexStateResponse) Descriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{31}
 }
 
-func (m *IndexStateResponse) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_IndexStateResponse.Unmarshal(m, b)
+func (m *GetIndexStateResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetIndexStateResponse.Unmarshal(m, b)
 }
-func (m *IndexStateResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_IndexStateResponse.Marshal(b, m, deterministic)
+func (m *GetIndexStateResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetIndexStateResponse.Marshal(b, m, deterministic)
 }
-func (m *IndexStateResponse) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_IndexStateResponse.Merge(m, src)
+func (m *GetIndexStateResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetIndexStateResponse.Merge(m, src)
 }
-func (m *IndexStateResponse) XXX_Size() int {
-	return xxx_messageInfo_IndexStateResponse.Size(m)
+func (m *GetIndexStateResponse) XXX_Size() int {
+	return xxx_messageInfo_GetIndexStateResponse.Size(m)
 }
-func (m *IndexStateResponse) XXX_DiscardUnknown() {
-	xxx_messageInfo_IndexStateResponse.DiscardUnknown(m)
+func (m *GetIndexStateResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetIndexStateResponse.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_IndexStateResponse proto.InternalMessageInfo
+var xxx_messageInfo_GetIndexStateResponse proto.InternalMessageInfo
 
-func (m *IndexStateResponse) GetStatus() *commonpb.Status {
+func (m *GetIndexStateResponse) GetStatus() *commonpb.Status {
 	if m != nil {
 		return m.Status
 	}
 	return nil
 }
 
-func (m *IndexStateResponse) GetState() commonpb.IndexState {
+func (m *GetIndexStateResponse) GetState() commonpb.IndexState {
 	if m != nil {
 		return m.State
 	}
@@ -2122,7 +2122,7 @@ func (m *PlaceholderValue) GetType() PlaceholderType {
 	if m != nil {
 		return m.Type
 	}
-	return PlaceholderType_NONE
+	return PlaceholderType_None
 }
 
 func (m *PlaceholderValue) GetValues() [][]byte {
@@ -2511,7 +2511,7 @@ func (m *PersistentSegmentInfo) GetState() commonpb.SegmentState {
 	return commonpb.SegmentState_SegmentStateNone
 }
 
-type PersistentSegmentInfoRequest struct {
+type GetPersistentSegmentInfoRequest struct {
 	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	DbName               string            `protobuf:"bytes,2,opt,name=dbName,proto3" json:"dbName,omitempty"`
 	CollectionName       string            `protobuf:"bytes,3,opt,name=collectionName,proto3" json:"collectionName,omitempty"`
@@ -2520,53 +2520,53 @@ type PersistentSegmentInfoRequest struct {
 	XXX_sizecache        int32             `json:"-"`
 }
 
-func (m *PersistentSegmentInfoRequest) Reset()         { *m = PersistentSegmentInfoRequest{} }
-func (m *PersistentSegmentInfoRequest) String() string { return proto.CompactTextString(m) }
-func (*PersistentSegmentInfoRequest) ProtoMessage()    {}
-func (*PersistentSegmentInfoRequest) Descriptor() ([]byte, []int) {
+func (m *GetPersistentSegmentInfoRequest) Reset()         { *m = GetPersistentSegmentInfoRequest{} }
+func (m *GetPersistentSegmentInfoRequest) String() string { return proto.CompactTextString(m) }
+func (*GetPersistentSegmentInfoRequest) ProtoMessage()    {}
+func (*GetPersistentSegmentInfoRequest) Descriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{42}
 }
 
-func (m *PersistentSegmentInfoRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_PersistentSegmentInfoRequest.Unmarshal(m, b)
+func (m *GetPersistentSegmentInfoRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetPersistentSegmentInfoRequest.Unmarshal(m, b)
 }
-func (m *PersistentSegmentInfoRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_PersistentSegmentInfoRequest.Marshal(b, m, deterministic)
+func (m *GetPersistentSegmentInfoRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetPersistentSegmentInfoRequest.Marshal(b, m, deterministic)
 }
-func (m *PersistentSegmentInfoRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_PersistentSegmentInfoRequest.Merge(m, src)
+func (m *GetPersistentSegmentInfoRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetPersistentSegmentInfoRequest.Merge(m, src)
 }
-func (m *PersistentSegmentInfoRequest) XXX_Size() int {
-	return xxx_messageInfo_PersistentSegmentInfoRequest.Size(m)
+func (m *GetPersistentSegmentInfoRequest) XXX_Size() int {
+	return xxx_messageInfo_GetPersistentSegmentInfoRequest.Size(m)
 }
-func (m *PersistentSegmentInfoRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_PersistentSegmentInfoRequest.DiscardUnknown(m)
+func (m *GetPersistentSegmentInfoRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetPersistentSegmentInfoRequest.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_PersistentSegmentInfoRequest proto.InternalMessageInfo
+var xxx_messageInfo_GetPersistentSegmentInfoRequest proto.InternalMessageInfo
 
-func (m *PersistentSegmentInfoRequest) GetBase() *commonpb.MsgBase {
+func (m *GetPersistentSegmentInfoRequest) GetBase() *commonpb.MsgBase {
 	if m != nil {
 		return m.Base
 	}
 	return nil
 }
 
-func (m *PersistentSegmentInfoRequest) GetDbName() string {
+func (m *GetPersistentSegmentInfoRequest) GetDbName() string {
 	if m != nil {
 		return m.DbName
 	}
 	return ""
 }
 
-func (m *PersistentSegmentInfoRequest) GetCollectionName() string {
+func (m *GetPersistentSegmentInfoRequest) GetCollectionName() string {
 	if m != nil {
 		return m.CollectionName
 	}
 	return ""
 }
 
-type PersistentSegmentInfoResponse struct {
+type GetPersistentSegmentInfoResponse struct {
 	Status               *commonpb.Status         `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 	Infos                []*PersistentSegmentInfo `protobuf:"bytes,2,rep,name=infos,proto3" json:"infos,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}                 `json:"-"`
@@ -2574,39 +2574,39 @@ type PersistentSegmentInfoResponse struct {
 	XXX_sizecache        int32                    `json:"-"`
 }
 
-func (m *PersistentSegmentInfoResponse) Reset()         { *m = PersistentSegmentInfoResponse{} }
-func (m *PersistentSegmentInfoResponse) String() string { return proto.CompactTextString(m) }
-func (*PersistentSegmentInfoResponse) ProtoMessage()    {}
-func (*PersistentSegmentInfoResponse) Descriptor() ([]byte, []int) {
+func (m *GetPersistentSegmentInfoResponse) Reset()         { *m = GetPersistentSegmentInfoResponse{} }
+func (m *GetPersistentSegmentInfoResponse) String() string { return proto.CompactTextString(m) }
+func (*GetPersistentSegmentInfoResponse) ProtoMessage()    {}
+func (*GetPersistentSegmentInfoResponse) Descriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{43}
 }
 
-func (m *PersistentSegmentInfoResponse) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_PersistentSegmentInfoResponse.Unmarshal(m, b)
+func (m *GetPersistentSegmentInfoResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetPersistentSegmentInfoResponse.Unmarshal(m, b)
 }
-func (m *PersistentSegmentInfoResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_PersistentSegmentInfoResponse.Marshal(b, m, deterministic)
+func (m *GetPersistentSegmentInfoResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetPersistentSegmentInfoResponse.Marshal(b, m, deterministic)
 }
-func (m *PersistentSegmentInfoResponse) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_PersistentSegmentInfoResponse.Merge(m, src)
+func (m *GetPersistentSegmentInfoResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetPersistentSegmentInfoResponse.Merge(m, src)
 }
-func (m *PersistentSegmentInfoResponse) XXX_Size() int {
-	return xxx_messageInfo_PersistentSegmentInfoResponse.Size(m)
+func (m *GetPersistentSegmentInfoResponse) XXX_Size() int {
+	return xxx_messageInfo_GetPersistentSegmentInfoResponse.Size(m)
 }
-func (m *PersistentSegmentInfoResponse) XXX_DiscardUnknown() {
-	xxx_messageInfo_PersistentSegmentInfoResponse.DiscardUnknown(m)
+func (m *GetPersistentSegmentInfoResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetPersistentSegmentInfoResponse.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_PersistentSegmentInfoResponse proto.InternalMessageInfo
+var xxx_messageInfo_GetPersistentSegmentInfoResponse proto.InternalMessageInfo
 
-func (m *PersistentSegmentInfoResponse) GetStatus() *commonpb.Status {
+func (m *GetPersistentSegmentInfoResponse) GetStatus() *commonpb.Status {
 	if m != nil {
 		return m.Status
 	}
 	return nil
 }
 
-func (m *PersistentSegmentInfoResponse) GetInfos() []*PersistentSegmentInfo {
+func (m *GetPersistentSegmentInfoResponse) GetInfos() []*PersistentSegmentInfo {
 	if m != nil {
 		return m.Infos
 	}
@@ -2700,7 +2700,7 @@ func (m *QuerySegmentInfo) GetIndexID() int64 {
 	return 0
 }
 
-type QuerySegmentInfoRequest struct {
+type GetQuerySegmentInfoRequest struct {
 	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	DbName               string            `protobuf:"bytes,2,opt,name=dbName,proto3" json:"dbName,omitempty"`
 	CollectionName       string            `protobuf:"bytes,3,opt,name=collectionName,proto3" json:"collectionName,omitempty"`
@@ -2709,53 +2709,53 @@ type QuerySegmentInfoRequest struct {
 	XXX_sizecache        int32             `json:"-"`
 }
 
-func (m *QuerySegmentInfoRequest) Reset()         { *m = QuerySegmentInfoRequest{} }
-func (m *QuerySegmentInfoRequest) String() string { return proto.CompactTextString(m) }
-func (*QuerySegmentInfoRequest) ProtoMessage()    {}
-func (*QuerySegmentInfoRequest) Descriptor() ([]byte, []int) {
+func (m *GetQuerySegmentInfoRequest) Reset()         { *m = GetQuerySegmentInfoRequest{} }
+func (m *GetQuerySegmentInfoRequest) String() string { return proto.CompactTextString(m) }
+func (*GetQuerySegmentInfoRequest) ProtoMessage()    {}
+func (*GetQuerySegmentInfoRequest) Descriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{45}
 }
 
-func (m *QuerySegmentInfoRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_QuerySegmentInfoRequest.Unmarshal(m, b)
+func (m *GetQuerySegmentInfoRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetQuerySegmentInfoRequest.Unmarshal(m, b)
 }
-func (m *QuerySegmentInfoRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_QuerySegmentInfoRequest.Marshal(b, m, deterministic)
+func (m *GetQuerySegmentInfoRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetQuerySegmentInfoRequest.Marshal(b, m, deterministic)
 }
-func (m *QuerySegmentInfoRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_QuerySegmentInfoRequest.Merge(m, src)
+func (m *GetQuerySegmentInfoRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetQuerySegmentInfoRequest.Merge(m, src)
 }
-func (m *QuerySegmentInfoRequest) XXX_Size() int {
-	return xxx_messageInfo_QuerySegmentInfoRequest.Size(m)
+func (m *GetQuerySegmentInfoRequest) XXX_Size() int {
+	return xxx_messageInfo_GetQuerySegmentInfoRequest.Size(m)
 }
-func (m *QuerySegmentInfoRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_QuerySegmentInfoRequest.DiscardUnknown(m)
+func (m *GetQuerySegmentInfoRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetQuerySegmentInfoRequest.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_QuerySegmentInfoRequest proto.InternalMessageInfo
+var xxx_messageInfo_GetQuerySegmentInfoRequest proto.InternalMessageInfo
 
-func (m *QuerySegmentInfoRequest) GetBase() *commonpb.MsgBase {
+func (m *GetQuerySegmentInfoRequest) GetBase() *commonpb.MsgBase {
 	if m != nil {
 		return m.Base
 	}
 	return nil
 }
 
-func (m *QuerySegmentInfoRequest) GetDbName() string {
+func (m *GetQuerySegmentInfoRequest) GetDbName() string {
 	if m != nil {
 		return m.DbName
 	}
 	return ""
 }
 
-func (m *QuerySegmentInfoRequest) GetCollectionName() string {
+func (m *GetQuerySegmentInfoRequest) GetCollectionName() string {
 	if m != nil {
 		return m.CollectionName
 	}
 	return ""
 }
 
-type QuerySegmentInfoResponse struct {
+type GetQuerySegmentInfoResponse struct {
 	Status               *commonpb.Status    `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 	Infos                []*QuerySegmentInfo `protobuf:"bytes,2,rep,name=infos,proto3" json:"infos,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}            `json:"-"`
@@ -2763,44 +2763,75 @@ type QuerySegmentInfoResponse struct {
 	XXX_sizecache        int32               `json:"-"`
 }
 
-func (m *QuerySegmentInfoResponse) Reset()         { *m = QuerySegmentInfoResponse{} }
-func (m *QuerySegmentInfoResponse) String() string { return proto.CompactTextString(m) }
-func (*QuerySegmentInfoResponse) ProtoMessage()    {}
-func (*QuerySegmentInfoResponse) Descriptor() ([]byte, []int) {
+func (m *GetQuerySegmentInfoResponse) Reset()         { *m = GetQuerySegmentInfoResponse{} }
+func (m *GetQuerySegmentInfoResponse) String() string { return proto.CompactTextString(m) }
+func (*GetQuerySegmentInfoResponse) ProtoMessage()    {}
+func (*GetQuerySegmentInfoResponse) Descriptor() ([]byte, []int) {
 	return fileDescriptor_02345ba45cc0e303, []int{46}
 }
 
-func (m *QuerySegmentInfoResponse) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_QuerySegmentInfoResponse.Unmarshal(m, b)
+func (m *GetQuerySegmentInfoResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetQuerySegmentInfoResponse.Unmarshal(m, b)
 }
-func (m *QuerySegmentInfoResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_QuerySegmentInfoResponse.Marshal(b, m, deterministic)
+func (m *GetQuerySegmentInfoResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetQuerySegmentInfoResponse.Marshal(b, m, deterministic)
 }
-func (m *QuerySegmentInfoResponse) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_QuerySegmentInfoResponse.Merge(m, src)
+func (m *GetQuerySegmentInfoResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetQuerySegmentInfoResponse.Merge(m, src)
 }
-func (m *QuerySegmentInfoResponse) XXX_Size() int {
-	return xxx_messageInfo_QuerySegmentInfoResponse.Size(m)
+func (m *GetQuerySegmentInfoResponse) XXX_Size() int {
+	return xxx_messageInfo_GetQuerySegmentInfoResponse.Size(m)
 }
-func (m *QuerySegmentInfoResponse) XXX_DiscardUnknown() {
-	xxx_messageInfo_QuerySegmentInfoResponse.DiscardUnknown(m)
+func (m *GetQuerySegmentInfoResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetQuerySegmentInfoResponse.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_QuerySegmentInfoResponse proto.InternalMessageInfo
+var xxx_messageInfo_GetQuerySegmentInfoResponse proto.InternalMessageInfo
 
-func (m *QuerySegmentInfoResponse) GetStatus() *commonpb.Status {
+func (m *GetQuerySegmentInfoResponse) GetStatus() *commonpb.Status {
 	if m != nil {
 		return m.Status
 	}
 	return nil
 }
 
-func (m *QuerySegmentInfoResponse) GetInfos() []*QuerySegmentInfo {
+func (m *GetQuerySegmentInfoResponse) GetInfos() []*QuerySegmentInfo {
 	if m != nil {
 		return m.Infos
 	}
 	return nil
 }
+
+type RegisterLinkRequest struct {
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *RegisterLinkRequest) Reset()         { *m = RegisterLinkRequest{} }
+func (m *RegisterLinkRequest) String() string { return proto.CompactTextString(m) }
+func (*RegisterLinkRequest) ProtoMessage()    {}
+func (*RegisterLinkRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_02345ba45cc0e303, []int{47}
+}
+
+func (m *RegisterLinkRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_RegisterLinkRequest.Unmarshal(m, b)
+}
+func (m *RegisterLinkRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_RegisterLinkRequest.Marshal(b, m, deterministic)
+}
+func (m *RegisterLinkRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_RegisterLinkRequest.Merge(m, src)
+}
+func (m *RegisterLinkRequest) XXX_Size() int {
+	return xxx_messageInfo_RegisterLinkRequest.Size(m)
+}
+func (m *RegisterLinkRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_RegisterLinkRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_RegisterLinkRequest proto.InternalMessageInfo
 
 type RegisterLinkResponse struct {
 	Address              *commonpb.Address `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
@@ -2814,7 +2845,7 @@ func (m *RegisterLinkResponse) Reset()         { *m = RegisterLinkResponse{} }
 func (m *RegisterLinkResponse) String() string { return proto.CompactTextString(m) }
 func (*RegisterLinkResponse) ProtoMessage()    {}
 func (*RegisterLinkResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{47}
+	return fileDescriptor_02345ba45cc0e303, []int{48}
 }
 
 func (m *RegisterLinkResponse) XXX_Unmarshal(b []byte) error {
@@ -2860,29 +2891,29 @@ func init() {
 	proto.RegisterType((*DescribeCollectionResponse)(nil), "milvus.proto.milvus.DescribeCollectionResponse")
 	proto.RegisterType((*LoadCollectionRequest)(nil), "milvus.proto.milvus.LoadCollectionRequest")
 	proto.RegisterType((*ReleaseCollectionRequest)(nil), "milvus.proto.milvus.ReleaseCollectionRequest")
-	proto.RegisterType((*CollectionStatsRequest)(nil), "milvus.proto.milvus.CollectionStatsRequest")
-	proto.RegisterType((*CollectionStatsResponse)(nil), "milvus.proto.milvus.CollectionStatsResponse")
-	proto.RegisterType((*ShowCollectionRequest)(nil), "milvus.proto.milvus.ShowCollectionRequest")
-	proto.RegisterType((*ShowCollectionResponse)(nil), "milvus.proto.milvus.ShowCollectionResponse")
+	proto.RegisterType((*GetCollectionStatisticsRequest)(nil), "milvus.proto.milvus.GetCollectionStatisticsRequest")
+	proto.RegisterType((*GetCollectionStatisticsResponse)(nil), "milvus.proto.milvus.GetCollectionStatisticsResponse")
+	proto.RegisterType((*ShowCollectionsRequest)(nil), "milvus.proto.milvus.ShowCollectionsRequest")
+	proto.RegisterType((*ShowCollectionsResponse)(nil), "milvus.proto.milvus.ShowCollectionsResponse")
 	proto.RegisterType((*CreatePartitionRequest)(nil), "milvus.proto.milvus.CreatePartitionRequest")
 	proto.RegisterType((*DropPartitionRequest)(nil), "milvus.proto.milvus.DropPartitionRequest")
 	proto.RegisterType((*HasPartitionRequest)(nil), "milvus.proto.milvus.HasPartitionRequest")
-	proto.RegisterType((*LoadPartitonRequest)(nil), "milvus.proto.milvus.LoadPartitonRequest")
-	proto.RegisterType((*ReleasePartitionRequest)(nil), "milvus.proto.milvus.ReleasePartitionRequest")
-	proto.RegisterType((*PartitionStatsRequest)(nil), "milvus.proto.milvus.PartitionStatsRequest")
-	proto.RegisterType((*PartitionStatsResponse)(nil), "milvus.proto.milvus.PartitionStatsResponse")
-	proto.RegisterType((*ShowPartitionRequest)(nil), "milvus.proto.milvus.ShowPartitionRequest")
-	proto.RegisterType((*ShowPartitionResponse)(nil), "milvus.proto.milvus.ShowPartitionResponse")
+	proto.RegisterType((*LoadPartitionsRequest)(nil), "milvus.proto.milvus.LoadPartitionsRequest")
+	proto.RegisterType((*ReleasePartitionsRequest)(nil), "milvus.proto.milvus.ReleasePartitionsRequest")
+	proto.RegisterType((*GetPartitionStatisticsRequest)(nil), "milvus.proto.milvus.GetPartitionStatisticsRequest")
+	proto.RegisterType((*GetPartitionStatisticsResponse)(nil), "milvus.proto.milvus.GetPartitionStatisticsResponse")
+	proto.RegisterType((*ShowPartitionsRequest)(nil), "milvus.proto.milvus.ShowPartitionsRequest")
+	proto.RegisterType((*ShowPartitionsResponse)(nil), "milvus.proto.milvus.ShowPartitionsResponse")
 	proto.RegisterType((*DescribeSegmentRequest)(nil), "milvus.proto.milvus.DescribeSegmentRequest")
 	proto.RegisterType((*DescribeSegmentResponse)(nil), "milvus.proto.milvus.DescribeSegmentResponse")
-	proto.RegisterType((*ShowSegmentRequest)(nil), "milvus.proto.milvus.ShowSegmentRequest")
-	proto.RegisterType((*ShowSegmentResponse)(nil), "milvus.proto.milvus.ShowSegmentResponse")
+	proto.RegisterType((*ShowSegmentsRequest)(nil), "milvus.proto.milvus.ShowSegmentsRequest")
+	proto.RegisterType((*ShowSegmentsResponse)(nil), "milvus.proto.milvus.ShowSegmentsResponse")
 	proto.RegisterType((*CreateIndexRequest)(nil), "milvus.proto.milvus.CreateIndexRequest")
 	proto.RegisterType((*DescribeIndexRequest)(nil), "milvus.proto.milvus.DescribeIndexRequest")
 	proto.RegisterType((*IndexDescription)(nil), "milvus.proto.milvus.IndexDescription")
 	proto.RegisterType((*DescribeIndexResponse)(nil), "milvus.proto.milvus.DescribeIndexResponse")
-	proto.RegisterType((*IndexStateRequest)(nil), "milvus.proto.milvus.IndexStateRequest")
-	proto.RegisterType((*IndexStateResponse)(nil), "milvus.proto.milvus.IndexStateResponse")
+	proto.RegisterType((*GetIndexStateRequest)(nil), "milvus.proto.milvus.GetIndexStateRequest")
+	proto.RegisterType((*GetIndexStateResponse)(nil), "milvus.proto.milvus.GetIndexStateResponse")
 	proto.RegisterType((*DropIndexRequest)(nil), "milvus.proto.milvus.DropIndexRequest")
 	proto.RegisterType((*InsertRequest)(nil), "milvus.proto.milvus.InsertRequest")
 	proto.RegisterType((*InsertResponse)(nil), "milvus.proto.milvus.InsertResponse")
@@ -2893,144 +2924,143 @@ func init() {
 	proto.RegisterType((*SearchResults)(nil), "milvus.proto.milvus.SearchResults")
 	proto.RegisterType((*FlushRequest)(nil), "milvus.proto.milvus.FlushRequest")
 	proto.RegisterType((*PersistentSegmentInfo)(nil), "milvus.proto.milvus.PersistentSegmentInfo")
-	proto.RegisterType((*PersistentSegmentInfoRequest)(nil), "milvus.proto.milvus.PersistentSegmentInfoRequest")
-	proto.RegisterType((*PersistentSegmentInfoResponse)(nil), "milvus.proto.milvus.PersistentSegmentInfoResponse")
+	proto.RegisterType((*GetPersistentSegmentInfoRequest)(nil), "milvus.proto.milvus.GetPersistentSegmentInfoRequest")
+	proto.RegisterType((*GetPersistentSegmentInfoResponse)(nil), "milvus.proto.milvus.GetPersistentSegmentInfoResponse")
 	proto.RegisterType((*QuerySegmentInfo)(nil), "milvus.proto.milvus.QuerySegmentInfo")
-	proto.RegisterType((*QuerySegmentInfoRequest)(nil), "milvus.proto.milvus.QuerySegmentInfoRequest")
-	proto.RegisterType((*QuerySegmentInfoResponse)(nil), "milvus.proto.milvus.QuerySegmentInfoResponse")
+	proto.RegisterType((*GetQuerySegmentInfoRequest)(nil), "milvus.proto.milvus.GetQuerySegmentInfoRequest")
+	proto.RegisterType((*GetQuerySegmentInfoResponse)(nil), "milvus.proto.milvus.GetQuerySegmentInfoResponse")
+	proto.RegisterType((*RegisterLinkRequest)(nil), "milvus.proto.milvus.RegisterLinkRequest")
 	proto.RegisterType((*RegisterLinkResponse)(nil), "milvus.proto.milvus.RegisterLinkResponse")
 }
 
 func init() { proto.RegisterFile("milvus.proto", fileDescriptor_02345ba45cc0e303) }
 
 var fileDescriptor_02345ba45cc0e303 = []byte{
-	// 2008 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xd4, 0x5a, 0xed, 0x6f, 0x1b, 0x49,
-	0x19, 0xcf, 0xc4, 0x8e, 0xe3, 0x3c, 0x59, 0x27, 0xce, 0xe4, 0xcd, 0xf5, 0xb5, 0x5c, 0xba, 0xd0,
-	0x6b, 0xfa, 0x1a, 0xc8, 0xf1, 0x2a, 0x84, 0xd4, 0xa6, 0xe9, 0xa5, 0x56, 0x7b, 0x6d, 0xba, 0x0e,
-	0x07, 0xe5, 0x54, 0x99, 0xb5, 0x77, 0x6a, 0x2f, 0xb7, 0xde, 0x35, 0x3b, 0xe3, 0xa4, 0xe9, 0x27,
-	0xa4, 0x22, 0x90, 0xb8, 0x13, 0xe2, 0x13, 0x88, 0xaf, 0x48, 0x7c, 0x45, 0x70, 0x20, 0xfe, 0x02,
-	0x90, 0x90, 0xf8, 0x3b, 0xf8, 0x84, 0xf8, 0x13, 0x90, 0x4e, 0x33, 0xb3, 0xde, 0xec, 0xae, 0x67,
-	0x6d, 0xb7, 0xbe, 0x5e, 0x9c, 0x6f, 0x9e, 0x67, 0x9f, 0x99, 0xf9, 0xcd, 0xf3, 0x36, 0xcf, 0x3c,
-	0x8f, 0x41, 0x6b, 0xdb, 0xce, 0x61, 0x97, 0xde, 0xec, 0xf8, 0x1e, 0xf3, 0xf0, 0x72, 0x74, 0x74,
-	0x53, 0x0e, 0xca, 0x5a, 0xc3, 0x6b, 0xb7, 0x3d, 0x57, 0x12, 0xcb, 0x1a, 0x6d, 0xb4, 0x48, 0xdb,
-	0x94, 0x23, 0xfd, 0x8f, 0x08, 0xd6, 0xef, 0xf8, 0xc4, 0x64, 0xe4, 0x8e, 0xe7, 0x38, 0xa4, 0xc1,
-	0x6c, 0xcf, 0x35, 0xc8, 0x4f, 0xbb, 0x84, 0x32, 0xfc, 0x55, 0xc8, 0xd6, 0x4d, 0x4a, 0x4a, 0x68,
-	0x03, 0x6d, 0xce, 0x6f, 0x9f, 0xbf, 0x19, 0x5b, 0x3b, 0x58, 0xf3, 0x7d, 0xda, 0xdc, 0x31, 0x29,
-	0x31, 0x04, 0x27, 0x5e, 0x87, 0x59, 0xab, 0x5e, 0x73, 0xcd, 0x36, 0x29, 0x4d, 0x6f, 0xa0, 0xcd,
-	0x39, 0x23, 0x67, 0xd5, 0x1f, 0x9a, 0x6d, 0x82, 0x2f, 0xc3, 0x62, 0x23, 0x5c, 0x5f, 0x32, 0x64,
-	0x04, 0xc3, 0xc2, 0x09, 0x59, 0x30, 0xae, 0x41, 0x4e, 0xe2, 0x2b, 0x65, 0x37, 0xd0, 0xa6, 0x66,
-	0x04, 0x23, 0xfd, 0x63, 0x04, 0xab, 0xbb, 0xbe, 0xd7, 0x99, 0x08, 0x94, 0xfa, 0xaf, 0x10, 0xac,
-	0xdc, 0x33, 0xe9, 0x64, 0x80, 0x79, 0x02, 0xda, 0x8e, 0xe7, 0x39, 0x06, 0xa1, 0x1d, 0xcf, 0xa5,
-	0x04, 0xbf, 0x0b, 0x39, 0xca, 0x4c, 0xd6, 0xa5, 0x01, 0x8a, 0xb7, 0x94, 0x28, 0xaa, 0x82, 0xc5,
-	0x08, 0x58, 0xf1, 0x0a, 0xcc, 0x1c, 0x9a, 0x4e, 0x57, 0x82, 0xc8, 0x1b, 0x72, 0xa0, 0x7f, 0x08,
-	0x0b, 0x55, 0xe6, 0xdb, 0x6e, 0xf3, 0x73, 0x5c, 0x7c, 0xae, 0xb7, 0xf8, 0x5f, 0x11, 0x9c, 0xdb,
-	0x25, 0xb4, 0xe1, 0xdb, 0xf5, 0x09, 0x31, 0x3e, 0x1d, 0xb4, 0x13, 0x4a, 0x65, 0x57, 0x98, 0x60,
-	0xc6, 0x88, 0xd1, 0xf4, 0xbf, 0x21, 0x28, 0xab, 0x50, 0x8f, 0x23, 0x9f, 0xef, 0x85, 0x46, 0x3f,
-	0x2d, 0x26, 0x5d, 0x8a, 0x4f, 0x0a, 0x1c, 0xf6, 0x64, 0xb7, 0xaa, 0x20, 0xf4, 0x7c, 0xa3, 0x0f,
-	0x76, 0x46, 0x01, 0x9b, 0xfb, 0xcf, 0x03, 0xcf, 0xb4, 0x26, 0xc3, 0x64, 0x7f, 0x8d, 0xa0, 0x64,
-	0x10, 0x87, 0x98, 0x74, 0x32, 0x34, 0xaf, 0x7f, 0x82, 0x60, 0x2d, 0x22, 0x5f, 0x66, 0x32, 0x7a,
-	0x9a, 0x70, 0x7e, 0xc9, 0xa3, 0x72, 0x12, 0xce, 0x38, 0x16, 0xf6, 0x2d, 0x98, 0xe1, 0xbf, 0x68,
-	0x69, 0x7a, 0x23, 0xb3, 0x39, 0xbf, 0x7d, 0x51, 0x39, 0xe7, 0x3e, 0x39, 0xfe, 0x80, 0x7b, 0xe6,
-	0xbe, 0x69, 0xfb, 0x86, 0xe4, 0xd7, 0xeb, 0xb0, 0x5a, 0x6d, 0x79, 0x47, 0x6f, 0x52, 0x4b, 0xfa,
-	0x73, 0x58, 0x4b, 0xee, 0x31, 0xce, 0x59, 0xaf, 0x40, 0x31, 0x21, 0x65, 0x79, 0xec, 0x39, 0x63,
-	0x31, 0x2e, 0x66, 0xca, 0x43, 0xd0, 0x9a, 0xbc, 0xfd, 0xf6, 0x4d, 0x9f, 0xd9, 0xa7, 0x1d, 0x7f,
-	0x2e, 0xc1, 0x42, 0xa7, 0x87, 0x43, 0xf2, 0x65, 0x05, 0x5f, 0x21, 0xa4, 0x0a, 0x79, 0xfd, 0x05,
-	0xc1, 0x0a, 0xbf, 0x0b, 0xcf, 0x12, 0xe6, 0x3f, 0x23, 0x58, 0xbe, 0x67, 0xd2, 0xb3, 0x04, 0xf9,
-	0x53, 0x04, 0xcb, 0x3c, 0x64, 0x4a, 0xcc, 0xa7, 0x0b, 0xf9, 0x32, 0x2c, 0xc6, 0x21, 0xd3, 0x52,
-	0x56, 0x98, 0xf4, 0x42, 0x0c, 0x33, 0xd5, 0xff, 0x8e, 0x60, 0x3d, 0x88, 0xac, 0x13, 0x21, 0xeb,
-	0x91, 0x81, 0x7f, 0x8a, 0x60, 0x35, 0x44, 0x7c, 0xda, 0x01, 0x78, 0x54, 0x13, 0xf9, 0x05, 0x82,
-	0xb5, 0x24, 0xe8, 0x53, 0x09, 0xd3, 0x7f, 0x42, 0xb0, 0xc2, 0x63, 0xe8, 0x44, 0xe8, 0x7c, 0x94,
-	0x34, 0xea, 0xf7, 0x48, 0x5e, 0x2c, 0x11, 0xc0, 0xe3, 0x08, 0x4e, 0x61, 0x66, 0xd3, 0x2a, 0x33,
-	0xe3, 0xd8, 0x42, 0x4a, 0x65, 0x97, 0x96, 0x32, 0x1b, 0x19, 0x8e, 0x2d, 0x4a, 0x13, 0xc9, 0x40,
-	0x2f, 0xc5, 0xab, 0x92, 0x66, 0x9b, 0xb8, 0xec, 0xf5, 0xc5, 0x99, 0x14, 0xc6, 0x74, 0xbf, 0x30,
-	0xf0, 0x79, 0x98, 0xa3, 0x72, 0x9f, 0x30, 0x7b, 0x3b, 0x21, 0x88, 0x27, 0x5a, 0x1f, 0x9c, 0x71,
-	0x84, 0x55, 0x82, 0x59, 0xdb, 0xb5, 0xc8, 0xf3, 0x10, 0x4d, 0x6f, 0xc8, 0xbf, 0xd4, 0xbb, 0xb6,
-	0x63, 0x85, 0x30, 0x7a, 0x43, 0x7c, 0x11, 0x34, 0xe2, 0x9a, 0x75, 0x87, 0xd4, 0x04, 0xaf, 0xd0,
-	0x69, 0xde, 0x98, 0x97, 0xb4, 0x0a, 0x27, 0x71, 0xb1, 0x61, 0xae, 0xd2, 0x2f, 0x44, 0x64, 0x1b,
-	0x30, 0x1f, 0xd1, 0x59, 0x80, 0x36, 0x4a, 0xd2, 0x7f, 0x02, 0xcb, 0x31, 0x34, 0xe3, 0x48, 0xec,
-	0x4b, 0x00, 0xa1, 0x3e, 0xa4, 0x65, 0x65, 0x8c, 0x08, 0x45, 0xff, 0x1f, 0x02, 0x2c, 0xf3, 0x08,
-	0x21, 0x8a, 0xd3, 0x74, 0xbe, 0x0b, 0x00, 0xcf, 0x6c, 0xe2, 0x58, 0xd1, 0xa8, 0x35, 0x27, 0x28,
-	0xe2, 0xf3, 0x2e, 0x68, 0xe4, 0x39, 0xf3, 0xcd, 0x5a, 0xc7, 0xf4, 0xcd, 0x36, 0x2d, 0xcd, 0x8c,
-	0x1a, 0x68, 0xe6, 0xc5, 0xb4, 0x7d, 0x31, 0x4b, 0xff, 0x17, 0xcf, 0x40, 0x02, 0x93, 0x9c, 0xf4,
-	0x13, 0x5f, 0x00, 0x10, 0x26, 0x2b, 0x3f, 0xcf, 0xc8, 0xcf, 0x82, 0xd2, 0x0b, 0xe1, 0x45, 0x71,
-	0x04, 0x79, 0x9e, 0x0e, 0x5f, 0x36, 0x31, 0x07, 0x25, 0xe6, 0x0c, 0x70, 0xa0, 0xef, 0x40, 0x2e,
-	0x10, 0x6c, 0x66, 0x54, 0xc1, 0x06, 0x13, 0xf4, 0x3f, 0x20, 0x58, 0x4d, 0xc8, 0x74, 0x1c, 0x93,
-	0x3d, 0x00, 0x2c, 0x8f, 0x60, 0x9d, 0x9c, 0xab, 0x77, 0xaf, 0x24, 0xde, 0x97, 0xc1, 0x20, 0x29,
-	0x05, 0x63, 0xc9, 0x4e, 0x50, 0xa8, 0xfe, 0x4f, 0x04, 0x4b, 0x82, 0x8f, 0xef, 0x46, 0xce, 0xae,
-	0xd6, 0x7f, 0x86, 0x00, 0x47, 0xcf, 0x31, 0x8e, 0xa4, 0xbf, 0x21, 0x2f, 0x6d, 0x79, 0x92, 0x85,
-	0xed, 0xb7, 0x95, 0x73, 0x22, 0x9b, 0x49, 0x6e, 0xfd, 0x1f, 0x08, 0x8a, 0x3c, 0x8b, 0x3f, 0xe3,
-	0xfe, 0xf3, 0x7f, 0x04, 0x85, 0x8a, 0x4b, 0x89, 0xcf, 0x26, 0x3f, 0x5f, 0xc3, 0x5f, 0x87, 0xbc,
-	0xef, 0x1d, 0xd5, 0x2c, 0x93, 0x99, 0x41, 0xe4, 0x3b, 0xa7, 0x84, 0xb7, 0xe3, 0x78, 0x75, 0x63,
-	0xd6, 0xf7, 0x8e, 0x76, 0x4d, 0x66, 0xe2, 0xb7, 0x60, 0xae, 0x65, 0xd2, 0x56, 0xed, 0x23, 0x72,
-	0x4c, 0x4b, 0xb9, 0x8d, 0xcc, 0x66, 0xc1, 0xc8, 0x73, 0xc2, 0x7d, 0x72, 0x4c, 0xf5, 0x97, 0x08,
-	0x16, 0x7a, 0xe7, 0x1f, 0xc7, 0x8a, 0xde, 0x86, 0x79, 0xdf, 0x3b, 0xaa, 0xec, 0xd6, 0xea, 0xa4,
-	0x69, 0xbb, 0x41, 0x5c, 0x01, 0x41, 0xda, 0xe1, 0x14, 0x8e, 0x42, 0x32, 0x10, 0xd7, 0x0a, 0xee,
-	0xbb, 0xbc, 0x20, 0xdc, 0x75, 0x2d, 0xfd, 0x10, 0x8a, 0xfb, 0x8e, 0xd9, 0x20, 0x2d, 0xcf, 0xb1,
-	0x88, 0x2f, 0x82, 0x0b, 0x2e, 0x42, 0x86, 0x99, 0xcd, 0x20, 0x7a, 0xf1, 0x9f, 0xf8, 0xdb, 0x90,
-	0x65, 0xc7, 0x9d, 0x9e, 0xa1, 0x7e, 0x45, 0x19, 0x05, 0x22, 0xcb, 0x1c, 0x1c, 0x77, 0x88, 0x21,
-	0x66, 0xe0, 0x35, 0xc8, 0x89, 0xa2, 0x9d, 0x8c, 0x6b, 0x9a, 0x11, 0x8c, 0xf4, 0xa7, 0xb1, 0x7d,
-	0xf7, 0x7c, 0xaf, 0xdb, 0xc1, 0x15, 0xd0, 0x3a, 0x27, 0x34, 0x2e, 0x84, 0xf4, 0x98, 0x93, 0x04,
-	0x6d, 0xc4, 0xa6, 0xea, 0xff, 0x45, 0x50, 0xa8, 0x12, 0xd3, 0x6f, 0xb4, 0xce, 0xc2, 0x1b, 0x86,
-	0x4b, 0xdc, 0xa2, 0x4e, 0xe0, 0x23, 0xfc, 0x27, 0xbe, 0x06, 0x4b, 0x91, 0x03, 0xd5, 0x9a, 0x5c,
-	0x40, 0xa5, 0x9c, 0xa8, 0x6c, 0x17, 0x3b, 0x09, 0xc1, 0xe9, 0xf7, 0x21, 0x7b, 0xcf, 0x66, 0x62,
-	0x19, 0x9e, 0x66, 0x20, 0x91, 0x66, 0xf0, 0x9f, 0xf8, 0x5c, 0xc4, 0x6e, 0xa7, 0x85, 0x02, 0x42,
-	0xe3, 0x14, 0x05, 0x73, 0xcf, 0x0f, 0x34, 0x33, 0x6d, 0x04, 0x23, 0xfd, 0x87, 0x27, 0x92, 0xa3,
-	0x5d, 0x87, 0xd1, 0xd7, 0xb3, 0x4a, 0x0c, 0xd9, 0x96, 0x1d, 0xbc, 0x47, 0x34, 0x43, 0xfc, 0xd6,
-	0x7f, 0x8e, 0x40, 0x7b, 0xcf, 0xe9, 0xd2, 0x37, 0xa1, 0x13, 0x55, 0xed, 0x26, 0xa3, 0xae, 0xdd,
-	0xfc, 0x7b, 0x1a, 0x56, 0xf7, 0x89, 0x4f, 0x6d, 0xca, 0x88, 0xcb, 0x82, 0x34, 0xaf, 0xe2, 0x3e,
-	0xf3, 0xe2, 0xe9, 0x34, 0x4a, 0xa4, 0xd3, 0x9f, 0x4f, 0x76, 0xc9, 0xbd, 0xd1, 0xeb, 0x10, 0xb7,
-	0xc6, 0xec, 0x20, 0xd6, 0x64, 0x8d, 0x3c, 0x27, 0x1c, 0xd8, 0x6d, 0xc2, 0x7d, 0x99, 0x12, 0xd3,
-	0x21, 0x96, 0xfc, 0x3c, 0x23, 0x3e, 0x83, 0x24, 0x09, 0x86, 0x8b, 0xa0, 0x3d, 0xe3, 0x12, 0xec,
-	0x71, 0xe4, 0x04, 0xc7, 0x7c, 0x40, 0x13, 0x2c, 0xe7, 0x20, 0xef, 0x76, 0xdb, 0x35, 0xdf, 0x3b,
-	0xa2, 0xa5, 0x59, 0x99, 0x64, 0xb8, 0xdd, 0xb6, 0xe1, 0x1d, 0x09, 0x6b, 0x68, 0x93, 0x76, 0x8d,
-	0xda, 0x2f, 0x48, 0x29, 0x2f, 0x3f, 0xb5, 0x49, 0xbb, 0x6a, 0xbf, 0x20, 0xbd, 0x07, 0x24, 0x29,
-	0xcd, 0x09, 0x17, 0x57, 0xa7, 0x1f, 0x81, 0xac, 0x62, 0xb7, 0xd1, 0x6f, 0x10, 0x9c, 0x57, 0x4a,
-	0xf3, 0xf5, 0x95, 0xbc, 0x06, 0x81, 0x56, 0x13, 0x3a, 0x7e, 0x07, 0x12, 0x0e, 0x96, 0x52, 0x04,
-	0xfd, 0x2d, 0x82, 0x0b, 0x29, 0x90, 0xc6, 0x09, 0xb4, 0xb7, 0x60, 0xc6, 0x76, 0x9f, 0x79, 0xbd,
-	0x5c, 0xe8, 0xaa, 0x3a, 0x2e, 0x29, 0xf7, 0x95, 0x13, 0xf5, 0xff, 0x20, 0x28, 0x3e, 0xee, 0x12,
-	0xff, 0xf8, 0x8b, 0x36, 0xba, 0xa8, 0xe2, 0xb3, 0x71, 0xc5, 0x47, 0xcd, 0x65, 0x26, 0x6e, 0x2e,
-	0xf1, 0x0b, 0x3c, 0x37, 0x20, 0x99, 0x9d, 0x8d, 0x25, 0xb3, 0xfa, 0xc7, 0x08, 0xd6, 0x93, 0xe7,
-	0x3c, 0x3d, 0x73, 0xf8, 0x04, 0x41, 0xa9, 0x1f, 0xcd, 0x38, 0x96, 0xf0, 0xdd, 0xb8, 0x25, 0xa8,
-	0x6f, 0xa8, 0xbe, 0x2d, 0x03, 0x23, 0x78, 0x89, 0x60, 0xc5, 0x20, 0x4d, 0x6e, 0x24, 0xfe, 0x03,
-	0xdb, 0xfd, 0x28, 0x84, 0xf2, 0x4d, 0x98, 0x35, 0x2d, 0xcb, 0x27, 0x94, 0x0e, 0x14, 0xce, 0x6d,
-	0xc9, 0x63, 0xf4, 0x98, 0x23, 0x47, 0x98, 0x1e, 0xf9, 0x08, 0x57, 0x6f, 0xc1, 0x62, 0xe2, 0xc2,
-	0xc6, 0x79, 0xc8, 0x3e, 0x7c, 0xf4, 0xf0, 0x6e, 0x71, 0x0a, 0x2f, 0x41, 0xe1, 0x83, 0xbb, 0x77,
-	0x0e, 0x1e, 0x19, 0xb5, 0x9d, 0xca, 0xc3, 0xdb, 0xc6, 0x93, 0xa2, 0x85, 0x8b, 0xa0, 0x05, 0xa4,
-	0xf7, 0x1e, 0x3c, 0xba, 0x7d, 0x50, 0x24, 0xdb, 0xbf, 0x5b, 0x81, 0xc2, 0xfb, 0x62, 0xa3, 0x2a,
-	0xf1, 0x0f, 0xed, 0x06, 0xc1, 0x35, 0x28, 0x26, 0x3b, 0xc2, 0xf8, 0xba, 0x52, 0x36, 0x29, 0x8d,
-	0xe3, 0xf2, 0x20, 0xe8, 0xfa, 0x14, 0xfe, 0x10, 0x16, 0xe2, 0xad, 0x5c, 0xac, 0x76, 0x42, 0x65,
-	0xbf, 0x77, 0xd8, 0xe2, 0x35, 0x28, 0xc4, 0x3a, 0xb3, 0xf8, 0x8a, 0x72, 0x6d, 0x55, 0xf7, 0xb6,
-	0x7c, 0x51, 0xc9, 0x1a, 0x6d, 0xae, 0x4a, 0xf4, 0xf1, 0x46, 0x5a, 0x0a, 0x7a, 0x65, 0xb7, 0x6d,
-	0x18, 0x7a, 0x13, 0x96, 0xfa, 0xfa, 0x62, 0xf8, 0x86, 0x72, 0xfd, 0xb4, 0xfe, 0xd9, 0xb0, 0x2d,
-	0x8e, 0x00, 0xf7, 0xf7, 0x2f, 0xf1, 0x4d, 0xb5, 0x06, 0xd2, 0xda, 0xb3, 0xe5, 0xad, 0x91, 0xf9,
-	0x43, 0xc1, 0x1d, 0xc2, 0xfa, 0x1e, 0x61, 0xf1, 0xb6, 0x96, 0x4d, 0x99, 0xdd, 0xa0, 0xf8, 0x9a,
-	0xda, 0xbc, 0x94, 0x0d, 0xb9, 0xf2, 0xf5, 0xd1, 0x98, 0xc3, 0x7d, 0x1d, 0x58, 0x8c, 0xb7, 0x97,
-	0x68, 0x8a, 0xc6, 0x94, 0x8d, 0xae, 0xf2, 0xb5, 0x91, 0x78, 0xc3, 0xdd, 0x9e, 0xc2, 0x62, 0xa2,
-	0xa3, 0x94, 0x76, 0x3a, 0x65, 0xdf, 0x69, 0x98, 0xf6, 0x9e, 0x40, 0x21, 0xd6, 0xfa, 0x49, 0x31,
-	0x6f, 0x55, 0x7b, 0x68, 0xd8, 0xd2, 0x4f, 0x41, 0x8b, 0x76, 0x68, 0xf0, 0x66, 0x9a, 0xe3, 0xf4,
-	0x2d, 0x3c, 0x92, 0xdf, 0x3c, 0x91, 0x7e, 0x13, 0x4e, 0xa6, 0x29, 0x1b, 0x28, 0x5a, 0x2e, 0xc3,
-	0x90, 0xff, 0x38, 0xf4, 0x9a, 0xc8, 0xea, 0xd7, 0x07, 0x79, 0xcd, 0xab, 0xca, 0x86, 0xc2, 0xda,
-	0x1e, 0x61, 0xb1, 0x52, 0x7f, 0x60, 0xba, 0x29, 0xf9, 0x83, 0xaa, 0x93, 0x91, 0x62, 0x4a, 0xea,
-	0x06, 0x82, 0x3e, 0x85, 0x6d, 0x58, 0x88, 0x95, 0xc8, 0x69, 0x8a, 0xb2, 0x55, 0x85, 0xff, 0xf2,
-	0xd5, 0x51, 0x58, 0xc3, 0xad, 0xbe, 0x0f, 0xf3, 0x91, 0xfa, 0x25, 0xbe, 0x3c, 0xc0, 0x62, 0xa3,
-	0xf5, 0x8a, 0x61, 0x62, 0x6b, 0x41, 0x21, 0x56, 0xd2, 0x4a, 0xb3, 0x56, 0x45, 0x29, 0x31, 0xe5,
-	0x00, 0xca, 0x0a, 0x99, 0x3e, 0x85, 0xeb, 0x50, 0xd8, 0x23, 0xec, 0xa4, 0xca, 0x82, 0xdf, 0x49,
-	0xaf, 0x71, 0x45, 0x6b, 0x57, 0xe5, 0xcb, 0x43, 0xf9, 0xc2, 0x3d, 0x1e, 0xc3, 0x5c, 0x58, 0xb0,
-	0xc1, 0x97, 0x52, 0xfd, 0xee, 0x55, 0x04, 0x54, 0x85, 0x9c, 0x2c, 0x1e, 0x60, 0x3d, 0x05, 0x47,
-	0xa4, 0xb2, 0x52, 0xfe, 0xf2, 0x40, 0x9e, 0x10, 0xa7, 0x01, 0x39, 0xf9, 0xf4, 0x4b, 0x59, 0x34,
-	0xf6, 0xa2, 0x2e, 0x0f, 0xe6, 0x11, 0x6f, 0x47, 0x7d, 0x0a, 0x57, 0x60, 0x46, 0xbc, 0xf9, 0xb0,
-	0xda, 0xd7, 0xa3, 0xef, 0xc1, 0x61, 0x67, 0x7e, 0x0c, 0xda, 0x1e, 0x61, 0xbb, 0xd6, 0x9d, 0x96,
-	0xe9, 0xba, 0xc4, 0xc1, 0x65, 0x25, 0xfb, 0xdd, 0x76, 0x87, 0x1d, 0xa7, 0x9c, 0x38, 0xfe, 0x9f,
-	0x24, 0x7d, 0x0a, 0xbf, 0x44, 0x50, 0xe2, 0xfe, 0xa9, 0x7c, 0x0e, 0x7e, 0xed, 0x15, 0x32, 0xfc,
-	0xe0, 0x04, 0xdb, 0xaf, 0x32, 0x25, 0x44, 0xc1, 0x60, 0x79, 0x8f, 0xb0, 0xbe, 0x97, 0xc1, 0xf5,
-	0xd1, 0xf2, 0xca, 0x60, 0xeb, 0x1b, 0x23, 0x72, 0x87, 0xbb, 0xfe, 0x00, 0xb4, 0x68, 0x1e, 0x3a,
-	0x50, 0x9c, 0x57, 0x52, 0x62, 0x62, 0x7f, 0x1a, 0xab, 0x4f, 0x6d, 0x37, 0x41, 0xdb, 0xf7, 0xbd,
-	0xe7, 0xc7, 0xbd, 0xbc, 0xf0, 0x4d, 0x6d, 0xb4, 0xb3, 0xf3, 0xa3, 0x5b, 0x4d, 0x9b, 0xb5, 0xba,
-	0x75, 0xbe, 0xc6, 0xd6, 0x0b, 0xdb, 0x71, 0xec, 0x17, 0x8c, 0x34, 0x5a, 0x5b, 0x72, 0xda, 0x0d,
-	0xcb, 0xa6, 0xcc, 0xb7, 0xeb, 0x5d, 0x46, 0xac, 0x2d, 0xdb, 0x65, 0xc4, 0x77, 0x4d, 0x67, 0x4b,
-	0x2c, 0x1c, 0x70, 0x74, 0xea, 0xf5, 0x9c, 0x18, 0xbf, 0xfb, 0x59, 0x00, 0x00, 0x00, 0xff, 0xff,
-	0xa3, 0x14, 0x76, 0x48, 0x0f, 0x29, 0x00, 0x00,
+	// 1974 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xd4, 0x59, 0xdd, 0x6f, 0x1b, 0xc7,
+	0x11, 0xf7, 0x92, 0x14, 0x45, 0x0d, 0x8f, 0x12, 0xbd, 0xfa, 0x30, 0x7d, 0x8e, 0x63, 0xf9, 0x5a,
+	0x37, 0xb2, 0x9d, 0x58, 0x81, 0x9c, 0xf4, 0x03, 0x45, 0x8b, 0x54, 0x51, 0x23, 0x0b, 0x4e, 0x02,
+	0xe5, 0xe8, 0x06, 0x4d, 0x03, 0x83, 0x38, 0xf2, 0xd6, 0xe4, 0xc1, 0xc7, 0x3b, 0xf6, 0x76, 0x69,
+	0x99, 0x7a, 0x4d, 0x11, 0xa0, 0x1f, 0x71, 0x1e, 0xda, 0x97, 0xf6, 0xb1, 0x40, 0x9f, 0xdb, 0xa2,
+	0x01, 0x0a, 0xf4, 0xb9, 0x0f, 0x05, 0xfa, 0x77, 0xf4, 0xa9, 0xe8, 0x9f, 0x50, 0x20, 0xd8, 0xdd,
+	0xe3, 0xf1, 0xee, 0xb8, 0x47, 0x51, 0x66, 0x1c, 0x51, 0x6f, 0xb7, 0x73, 0xb3, 0x3b, 0xbf, 0x9d,
+	0x9d, 0x99, 0x9d, 0x9d, 0x01, 0xad, 0xeb, 0xb8, 0x4f, 0xfa, 0xf4, 0x4e, 0x2f, 0xf0, 0x99, 0x8f,
+	0x57, 0xe3, 0xa3, 0x3b, 0x72, 0xa0, 0x6b, 0x2d, 0xbf, 0xdb, 0xf5, 0x3d, 0x49, 0xd4, 0x35, 0xda,
+	0xea, 0x90, 0xae, 0x25, 0x47, 0xc6, 0x9f, 0x10, 0x5c, 0x7a, 0x3b, 0x20, 0x16, 0x23, 0x6f, 0xfb,
+	0xae, 0x4b, 0x5a, 0xcc, 0xf1, 0x3d, 0x93, 0xfc, 0xbc, 0x4f, 0x28, 0xc3, 0xaf, 0x43, 0xa1, 0x69,
+	0x51, 0x52, 0x43, 0x9b, 0x68, 0xab, 0xbc, 0xf3, 0xd2, 0x9d, 0xc4, 0xda, 0xe1, 0x9a, 0xef, 0xd1,
+	0xf6, 0xae, 0x45, 0x89, 0x29, 0x38, 0xf1, 0x25, 0x58, 0xb4, 0x9b, 0x0d, 0xcf, 0xea, 0x92, 0x5a,
+	0x6e, 0x13, 0x6d, 0x2d, 0x99, 0x45, 0xbb, 0xf9, 0xbe, 0xd5, 0x25, 0xf8, 0x15, 0x58, 0x69, 0x45,
+	0xeb, 0x4b, 0x86, 0xbc, 0x60, 0x58, 0x1e, 0x91, 0x05, 0xe3, 0x06, 0x14, 0x25, 0xbe, 0x5a, 0x61,
+	0x13, 0x6d, 0x69, 0x66, 0x38, 0x32, 0x7e, 0x8d, 0x60, 0x7d, 0x2f, 0xf0, 0x7b, 0x73, 0x81, 0xd2,
+	0xf8, 0x15, 0x82, 0xb5, 0x7b, 0x16, 0x9d, 0x0f, 0x30, 0x1f, 0x81, 0xb6, 0xeb, 0xfb, 0xae, 0x49,
+	0x68, 0xcf, 0xf7, 0x28, 0xc1, 0x77, 0xa1, 0x48, 0x99, 0xc5, 0xfa, 0x34, 0x44, 0x71, 0x45, 0x89,
+	0xa2, 0x2e, 0x58, 0xcc, 0x90, 0x15, 0xaf, 0xc1, 0xc2, 0x13, 0xcb, 0xed, 0x4b, 0x10, 0x25, 0x53,
+	0x0e, 0x8c, 0x8f, 0x61, 0xb9, 0xce, 0x02, 0xc7, 0x6b, 0x7f, 0x85, 0x8b, 0x2f, 0x0d, 0x17, 0xff,
+	0x1b, 0x82, 0xcb, 0x7b, 0x84, 0xb6, 0x02, 0xa7, 0x39, 0x27, 0xc6, 0x67, 0x80, 0x36, 0xa2, 0x1c,
+	0xec, 0x09, 0x13, 0xcc, 0x9b, 0x09, 0x9a, 0xf1, 0x05, 0x02, 0x5d, 0x85, 0x7a, 0x16, 0xfd, 0xfc,
+	0x20, 0x32, 0xfa, 0x9c, 0x98, 0x74, 0x23, 0x39, 0x29, 0x74, 0xd8, 0x91, 0xb4, 0xba, 0x20, 0x0c,
+	0x7d, 0x63, 0x0c, 0x76, 0x5e, 0x01, 0x9b, 0xfb, 0xcf, 0xbb, 0xbe, 0x65, 0xcf, 0x87, 0xc9, 0x3e,
+	0x43, 0x50, 0x33, 0x89, 0x4b, 0x2c, 0x3a, 0x1f, 0x27, 0x6f, 0xfc, 0x0e, 0xc1, 0xcb, 0xfb, 0x84,
+	0xc5, 0x54, 0xcc, 0x2c, 0xe6, 0x50, 0xe6, 0xb4, 0xe8, 0x59, 0xc2, 0xfa, 0x1c, 0xc1, 0xb5, 0x4c,
+	0x58, 0xb3, 0x58, 0xdc, 0x77, 0x60, 0x81, 0x7f, 0xd1, 0x5a, 0x6e, 0x33, 0xbf, 0x55, 0xde, 0xb9,
+	0xae, 0x9c, 0x73, 0x9f, 0x0c, 0x3e, 0xe4, 0x9e, 0x7a, 0x68, 0x39, 0x81, 0x29, 0xf9, 0x8d, 0x16,
+	0x6c, 0xd4, 0x3b, 0xfe, 0xd1, 0x08, 0xd1, 0x0b, 0xd0, 0x8f, 0x31, 0x80, 0x4b, 0x63, 0x42, 0x66,
+	0xd9, 0xed, 0x4d, 0xa8, 0xa6, 0xf4, 0x2d, 0x37, 0xbe, 0x64, 0xae, 0x24, 0x15, 0x4e, 0x79, 0x50,
+	0xda, 0x90, 0xf7, 0xe1, 0xa1, 0x15, 0x30, 0xe7, 0xac, 0x23, 0xd2, 0x0d, 0x58, 0xee, 0x0d, 0x71,
+	0x48, 0xbe, 0x82, 0xe0, 0xab, 0x44, 0x54, 0xa1, 0xb0, 0xbf, 0x22, 0x58, 0xe3, 0xb7, 0xe3, 0x79,
+	0xc2, 0xfc, 0x17, 0x04, 0xab, 0xf7, 0x2c, 0x7a, 0x9e, 0x20, 0x7f, 0x11, 0x06, 0xd1, 0x08, 0xf3,
+	0x59, 0x06, 0x07, 0xce, 0x98, 0x04, 0x4d, 0x6b, 0x05, 0x61, 0xd4, 0xcb, 0x09, 0xd4, 0xd4, 0xf8,
+	0xfb, 0x28, 0xda, 0x9e, 0x33, 0xe4, 0xff, 0x40, 0x70, 0x75, 0x9f, 0xb0, 0x08, 0xf5, 0x5c, 0x44,
+	0xe5, 0x69, 0xad, 0xe5, 0x99, 0xbc, 0x53, 0x94, 0xe0, 0xcf, 0x24, 0x76, 0xff, 0x19, 0xc1, 0x3a,
+	0x8f, 0xab, 0xf3, 0x61, 0x04, 0xd3, 0x24, 0x5b, 0x7f, 0x40, 0xf2, 0xba, 0x89, 0x23, 0x9e, 0x45,
+	0x75, 0x0a, 0xc3, 0xcb, 0xa9, 0x0c, 0x8f, 0x83, 0x8b, 0x28, 0x07, 0x7b, 0xb4, 0x96, 0xdf, 0xcc,
+	0x73, 0x70, 0x71, 0x9a, 0xf1, 0x1b, 0x04, 0x1b, 0xc3, 0x4c, 0xb0, 0x4e, 0xda, 0x5d, 0xe2, 0xb1,
+	0xe7, 0xd7, 0x67, 0x5a, 0x1b, 0xb9, 0x71, 0x6d, 0xe0, 0x97, 0x60, 0x89, 0x4a, 0x39, 0x51, 0x92,
+	0x37, 0x22, 0x88, 0x97, 0xdc, 0x18, 0x9c, 0x59, 0x94, 0x55, 0x83, 0x45, 0xc7, 0xb3, 0xc9, 0xd3,
+	0x08, 0xcd, 0x70, 0xc8, 0xff, 0x34, 0xfb, 0x8e, 0x6b, 0x47, 0x30, 0x86, 0x43, 0x7c, 0x1d, 0x34,
+	0xe2, 0x59, 0x4d, 0x97, 0x34, 0x04, 0xaf, 0x38, 0xd4, 0x92, 0x59, 0x96, 0xb4, 0x03, 0x4e, 0x32,
+	0x3e, 0x43, 0xb0, 0xca, 0xcf, 0x34, 0xc4, 0x48, 0x5f, 0xac, 0xce, 0x36, 0xa1, 0x1c, 0x3b, 0xb4,
+	0x10, 0x6e, 0x9c, 0x64, 0x3c, 0x86, 0xb5, 0x24, 0x9c, 0x59, 0x74, 0xf6, 0x32, 0x40, 0x74, 0x22,
+	0xd2, 0xb6, 0xf2, 0x66, 0x8c, 0x62, 0xfc, 0x0f, 0x01, 0x96, 0xe9, 0x85, 0x50, 0xc6, 0x59, 0xfa,
+	0xdf, 0x55, 0x80, 0x47, 0x0e, 0x71, 0xed, 0x78, 0x04, 0x5b, 0x12, 0x14, 0xf1, 0x7b, 0x0f, 0x34,
+	0xf2, 0x94, 0x05, 0x56, 0xa3, 0x67, 0x05, 0x56, 0x97, 0xd6, 0x16, 0xa6, 0x0d, 0x36, 0x65, 0x31,
+	0xed, 0x50, 0xcc, 0x32, 0xfe, 0xc5, 0x13, 0x93, 0xd0, 0x28, 0xe7, 0x7d, 0xc7, 0x57, 0x01, 0x84,
+	0xd1, 0xca, 0xdf, 0x0b, 0xf2, 0xb7, 0xa0, 0x88, 0x70, 0xfe, 0x29, 0x82, 0xaa, 0xd8, 0x82, 0xdc,
+	0x4f, 0x8f, 0x2f, 0x9b, 0x9a, 0x83, 0x52, 0x73, 0x26, 0xb8, 0xd0, 0xf7, 0xa0, 0x18, 0x2a, 0x36,
+	0x3f, 0xad, 0x62, 0xc3, 0x09, 0xc6, 0x1f, 0x11, 0xac, 0xa7, 0x74, 0x3a, 0x8b, 0xc9, 0x3e, 0x00,
+	0x2c, 0xb7, 0x60, 0x8f, 0xf6, 0x35, 0xbc, 0x5b, 0x52, 0x0f, 0xd1, 0x70, 0x90, 0xd6, 0x82, 0x79,
+	0xd1, 0x49, 0x51, 0xe4, 0xc1, 0xef, 0x13, 0x26, 0x58, 0xb9, 0x40, 0x72, 0x7e, 0x0f, 0xfe, 0x13,
+	0x04, 0xeb, 0xa9, 0xad, 0xcc, 0xa2, 0xef, 0x37, 0xe5, 0xf5, 0x2d, 0x37, 0xb3, 0xbc, 0x73, 0x4d,
+	0x39, 0x27, 0x26, 0x4c, 0x72, 0x1b, 0xff, 0x44, 0x50, 0xe5, 0x29, 0xfe, 0x39, 0xf7, 0xa2, 0xff,
+	0x23, 0xa8, 0x1c, 0x78, 0x94, 0x04, 0x6c, 0xfe, 0x33, 0x38, 0xfc, 0x06, 0x94, 0x02, 0xff, 0xa8,
+	0x61, 0x5b, 0xcc, 0x0a, 0xe3, 0xdf, 0x65, 0x25, 0xbc, 0x5d, 0xd7, 0x6f, 0x9a, 0x8b, 0x81, 0x7f,
+	0xb4, 0x67, 0x31, 0x0b, 0x5f, 0x81, 0xa5, 0x8e, 0x45, 0x3b, 0x8d, 0xc7, 0x64, 0x40, 0x6b, 0xc5,
+	0xcd, 0xfc, 0x56, 0xc5, 0x2c, 0x71, 0xc2, 0x7d, 0x32, 0xa0, 0xdc, 0x98, 0x96, 0x87, 0xfb, 0x9f,
+	0xc5, 0x8a, 0xae, 0x41, 0x39, 0xf0, 0x8f, 0x0e, 0xf6, 0x1a, 0x4d, 0xd2, 0x76, 0xbc, 0x30, 0xba,
+	0x80, 0x20, 0xed, 0x72, 0x0a, 0x47, 0x21, 0x19, 0x88, 0x67, 0x87, 0xd7, 0x5e, 0x49, 0x10, 0x7e,
+	0xec, 0xd9, 0xc6, 0x13, 0xa8, 0x1e, 0xba, 0x56, 0x8b, 0x74, 0x7c, 0xd7, 0x26, 0x81, 0x08, 0x31,
+	0xb8, 0x0a, 0x79, 0x66, 0xb5, 0xc3, 0x18, 0xc6, 0x3f, 0xf1, 0x77, 0xa1, 0xc0, 0x06, 0xbd, 0xa1,
+	0xa1, 0x7e, 0x53, 0x19, 0x0b, 0x62, 0xcb, 0x3c, 0x18, 0xf4, 0x88, 0x29, 0x66, 0xe0, 0x0d, 0x28,
+	0x8a, 0x1a, 0x9f, 0x8c, 0x6e, 0x9a, 0x19, 0x8e, 0x8c, 0x87, 0x09, 0xb9, 0xfb, 0x81, 0xdf, 0xef,
+	0xe1, 0x03, 0xd0, 0x7a, 0x23, 0x1a, 0x57, 0x42, 0x76, 0xe4, 0x49, 0x83, 0x36, 0x13, 0x53, 0x8d,
+	0xff, 0x22, 0xa8, 0xd4, 0x89, 0x15, 0xb4, 0x3a, 0xe7, 0xe1, 0x75, 0xc3, 0x35, 0x6e, 0x53, 0x37,
+	0xf4, 0x11, 0xfe, 0x89, 0x6f, 0xc3, 0xc5, 0xd8, 0x86, 0x1a, 0x6d, 0xae, 0xa0, 0x5a, 0x51, 0x14,
+	0xc2, 0xab, 0xbd, 0x94, 0xe2, 0x8c, 0xfb, 0x50, 0xb8, 0xe7, 0x30, 0xb1, 0x0c, 0x4f, 0x36, 0x90,
+	0x48, 0x36, 0xf8, 0x27, 0xbe, 0x1c, 0xb3, 0xdb, 0x9c, 0x38, 0x80, 0xc8, 0x38, 0x45, 0x7d, 0xdd,
+	0x0f, 0xc2, 0x93, 0xc9, 0x99, 0xe1, 0xc8, 0xf8, 0xe9, 0x48, 0x73, 0xb4, 0xef, 0x32, 0xfa, 0x7c,
+	0x56, 0x89, 0xa1, 0xd0, 0x71, 0xc2, 0x97, 0x89, 0x66, 0x8a, 0x6f, 0xe3, 0x17, 0x08, 0xb4, 0x77,
+	0xdc, 0x3e, 0x7d, 0x11, 0x67, 0xa2, 0x2a, 0xec, 0xe4, 0xd5, 0x85, 0x9d, 0x7f, 0xe7, 0x60, 0xfd,
+	0x90, 0x04, 0xd4, 0xa1, 0x8c, 0x78, 0x2c, 0xcc, 0xf6, 0x0e, 0xbc, 0x47, 0x7e, 0x32, 0xad, 0x46,
+	0xa9, 0xb4, 0xfa, 0xab, 0x49, 0x32, 0xb9, 0x37, 0xfa, 0x3d, 0xe2, 0x35, 0x98, 0x13, 0xc6, 0x9a,
+	0x82, 0x59, 0xe2, 0x84, 0x07, 0x4e, 0x97, 0x70, 0x5f, 0xa6, 0xc4, 0x72, 0x89, 0x2d, 0x7f, 0x2f,
+	0x88, 0xdf, 0x20, 0x49, 0x82, 0xe1, 0x3a, 0x68, 0x8f, 0xb8, 0x06, 0x87, 0x1c, 0x45, 0xc1, 0x51,
+	0x0e, 0x69, 0x82, 0xe5, 0x32, 0x94, 0xbc, 0x7e, 0xb7, 0x11, 0xf8, 0x47, 0xb4, 0xb6, 0x28, 0x53,
+	0x0d, 0xaf, 0xdf, 0x35, 0xfd, 0x23, 0x61, 0x0d, 0x5d, 0xd2, 0x6d, 0x50, 0xe7, 0x98, 0xd4, 0x4a,
+	0xf2, 0x57, 0x97, 0x74, 0xeb, 0xce, 0x31, 0x19, 0x3e, 0x25, 0x49, 0x6d, 0x49, 0xb8, 0xb8, 0x3a,
+	0x09, 0x09, 0x75, 0x95, 0xb8, 0x8d, 0x7e, 0x2b, 0x0b, 0x93, 0x4a, 0x85, 0x3e, 0xff, 0x39, 0x6f,
+	0x40, 0x78, 0xb0, 0xa9, 0x63, 0xfe, 0x16, 0xa4, 0x7c, 0x2c, 0xa3, 0x5c, 0xfa, 0x7b, 0x04, 0x9b,
+	0xd9, 0xa8, 0x66, 0x09, 0xb7, 0x6f, 0xc1, 0x82, 0xe3, 0x3d, 0xf2, 0x87, 0x79, 0xd1, 0x2d, 0x75,
+	0x74, 0x52, 0xca, 0x95, 0x13, 0x8d, 0xff, 0x20, 0xa8, 0x7e, 0xd0, 0x27, 0xc1, 0xe0, 0xeb, 0x36,
+	0xbd, 0xf8, 0xf1, 0x17, 0x92, 0xc7, 0x1f, 0x37, 0x9a, 0x85, 0xa4, 0xd1, 0x24, 0xaf, 0xf1, 0xe2,
+	0x84, 0xc4, 0x76, 0x31, 0x91, 0xd8, 0x1a, 0xcf, 0x10, 0xe8, 0xfb, 0x84, 0xa5, 0xb7, 0x7a, 0x76,
+	0x46, 0xf1, 0x39, 0x82, 0x2b, 0x4a, 0x40, 0xb3, 0xd8, 0xc3, 0xf7, 0x93, 0xf6, 0xa0, 0xbe, 0xad,
+	0xc6, 0x44, 0x86, 0xa6, 0xb0, 0x0e, 0xab, 0x26, 0x69, 0x73, 0x4b, 0x09, 0xde, 0x75, 0xbc, 0xc7,
+	0xa1, 0x6a, 0x78, 0x6a, 0xb0, 0x96, 0xa4, 0x87, 0x08, 0xbf, 0x0d, 0x8b, 0x96, 0x6d, 0x07, 0x84,
+	0xd2, 0x89, 0x6a, 0xfb, 0x91, 0xe4, 0x31, 0x87, 0xcc, 0xb1, 0x9d, 0xe5, 0xa6, 0xde, 0xd9, 0xad,
+	0x1f, 0xc2, 0x4a, 0xea, 0x4e, 0xc7, 0x25, 0x28, 0xbc, 0xef, 0x7b, 0xa4, 0x7a, 0x01, 0x57, 0x41,
+	0xdb, 0x75, 0x3c, 0x2b, 0x18, 0x7c, 0x48, 0x5a, 0xcc, 0x0f, 0xaa, 0x36, 0x5e, 0x81, 0xf2, 0x3b,
+	0xae, 0x6f, 0xb1, 0x90, 0x40, 0x76, 0x3e, 0x5b, 0x83, 0xca, 0x7b, 0x42, 0x4c, 0x9d, 0x04, 0x4f,
+	0x9c, 0x16, 0xc1, 0x0d, 0xa8, 0xa6, 0x3b, 0xcc, 0xf8, 0x55, 0xa5, 0xc2, 0x32, 0x1a, 0xd1, 0xfa,
+	0x24, 0xe0, 0xc6, 0x05, 0xfc, 0x31, 0x2c, 0x27, 0x5b, 0xc3, 0x58, 0xed, 0x9f, 0xca, 0xfe, 0xf1,
+	0x49, 0x8b, 0x37, 0xa0, 0x92, 0xe8, 0xf4, 0xe2, 0x9b, 0xca, 0xb5, 0x55, 0xdd, 0x60, 0xfd, 0xba,
+	0x92, 0x35, 0xde, 0xac, 0x95, 0xe8, 0x93, 0x8d, 0xb9, 0x0c, 0xf4, 0xca, 0xee, 0xdd, 0x49, 0xe8,
+	0x2d, 0xb8, 0x38, 0xd6, 0x67, 0xc3, 0xaf, 0x29, 0xd7, 0xcf, 0xea, 0xc7, 0x9d, 0x24, 0xe2, 0x08,
+	0xf0, 0x78, 0x3f, 0x14, 0xdf, 0x51, 0x9f, 0x40, 0x56, 0xbb, 0x57, 0xdf, 0x9e, 0x9a, 0x3f, 0x52,
+	0xdc, 0xa7, 0x08, 0x2e, 0x65, 0x34, 0xc7, 0xf0, 0x5d, 0xe5, 0x72, 0x93, 0x3b, 0x7c, 0xfa, 0x1b,
+	0xa7, 0x9b, 0x14, 0x01, 0xf1, 0x60, 0x25, 0xd5, 0xae, 0xc2, 0xb7, 0x95, 0x4b, 0xa9, 0x3b, 0x67,
+	0xfa, 0xab, 0xd3, 0x31, 0x47, 0xf2, 0x1e, 0xc2, 0x4a, 0xaa, 0x45, 0x95, 0x21, 0x4f, 0xdd, 0xc8,
+	0x3a, 0xe9, 0x40, 0x3f, 0x82, 0x4a, 0xa2, 0x97, 0x94, 0x61, 0xf1, 0xaa, 0x7e, 0xd3, 0x49, 0x4b,
+	0x3f, 0x04, 0x2d, 0xde, 0xf2, 0xc1, 0x5b, 0x59, 0xbe, 0x34, 0xb6, 0xf0, 0x69, 0x5c, 0x69, 0x54,
+	0x2d, 0x9e, 0xe0, 0x4a, 0x63, 0x45, 0xf0, 0xe9, 0x5d, 0x29, 0xb6, 0xfe, 0x44, 0x57, 0x3a, 0xb5,
+	0x88, 0x4f, 0x10, 0x6c, 0xa8, 0x3b, 0x06, 0x78, 0x27, 0xcb, 0x36, 0xb3, 0x7b, 0x23, 0xfa, 0xdd,
+	0x53, 0xcd, 0x89, 0xb4, 0xf8, 0x18, 0x96, 0x93, 0x35, 0xf7, 0x0c, 0x2d, 0x2a, 0x5b, 0x09, 0xfa,
+	0xed, 0xa9, 0x78, 0x23, 0x61, 0x3f, 0x81, 0x72, 0xac, 0x1e, 0x8a, 0x5f, 0x99, 0x60, 0xc7, 0xf1,
+	0xca, 0xc7, 0x49, 0x9a, 0xec, 0x40, 0x25, 0x51, 0x22, 0xcb, 0xb2, 0x61, 0x45, 0x69, 0x52, 0xbf,
+	0x35, 0x0d, 0x6b, 0xb4, 0x81, 0x0e, 0x54, 0x12, 0xc5, 0xa1, 0x0c, 0x49, 0xaa, 0x5a, 0x58, 0x86,
+	0x24, 0x65, 0xad, 0xc9, 0xb8, 0x80, 0x3f, 0x80, 0xa5, 0xa8, 0x00, 0x84, 0x6f, 0x64, 0xfa, 0xe4,
+	0x69, 0xd4, 0x54, 0x87, 0xa2, 0x2c, 0x46, 0x60, 0x23, 0xa3, 0xd2, 0x17, 0xab, 0xd4, 0xe8, 0xdf,
+	0x98, 0xc8, 0x13, 0xe1, 0x34, 0xa1, 0x28, 0x9f, 0x92, 0x19, 0x8b, 0x26, 0x5e, 0xe8, 0xfa, 0x64,
+	0x1e, 0xf1, 0x16, 0x35, 0x2e, 0xe0, 0x03, 0x58, 0x10, 0x6f, 0x48, 0xac, 0x8e, 0x03, 0xf1, 0xf7,
+	0xe5, 0x49, 0x7b, 0xfe, 0x25, 0x82, 0x5a, 0xd6, 0x23, 0x01, 0x67, 0x5e, 0x01, 0x93, 0x5e, 0x3a,
+	0xfa, 0x9b, 0xa7, 0x9c, 0x15, 0xa9, 0xea, 0x18, 0x56, 0x15, 0xa9, 0x29, 0xde, 0xce, 0x5a, 0x2f,
+	0x23, 0xab, 0xd6, 0x5f, 0x9f, 0x7e, 0x42, 0x24, 0x9b, 0x80, 0x16, 0xcf, 0x36, 0x33, 0x62, 0xb1,
+	0x22, 0x51, 0xd5, 0x6f, 0x4e, 0xc1, 0x39, 0x14, 0xb3, 0xd3, 0x07, 0xed, 0x30, 0xf0, 0x9f, 0x0e,
+	0x86, 0xd9, 0xe0, 0xd7, 0x23, 0x76, 0x77, 0xf7, 0x67, 0x6f, 0xb5, 0x1d, 0xd6, 0xe9, 0x37, 0xf9,
+	0xf9, 0x6f, 0x1f, 0x3b, 0xae, 0xeb, 0x1c, 0x33, 0xd2, 0xea, 0x6c, 0xcb, 0x69, 0xaf, 0xd9, 0x0e,
+	0x65, 0x81, 0xd3, 0xec, 0x33, 0x62, 0x6f, 0x3b, 0x1e, 0x23, 0x81, 0x67, 0xb9, 0xdb, 0x62, 0xe1,
+	0x90, 0xa3, 0xd7, 0x6c, 0x16, 0xc5, 0xf8, 0xee, 0x97, 0x01, 0x00, 0x00, 0xff, 0xff, 0x11, 0xc5,
+	0x0f, 0x16, 0x63, 0x29, 0x00, 0x00,
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -3051,26 +3081,26 @@ type MilvusServiceClient interface {
 	LoadCollection(ctx context.Context, in *LoadCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ReleaseCollection(ctx context.Context, in *ReleaseCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	DescribeCollection(ctx context.Context, in *DescribeCollectionRequest, opts ...grpc.CallOption) (*DescribeCollectionResponse, error)
-	GetCollectionStatistics(ctx context.Context, in *CollectionStatsRequest, opts ...grpc.CallOption) (*CollectionStatsResponse, error)
-	ShowCollections(ctx context.Context, in *ShowCollectionRequest, opts ...grpc.CallOption) (*ShowCollectionResponse, error)
+	GetCollectionStatistics(ctx context.Context, in *GetCollectionStatisticsRequest, opts ...grpc.CallOption) (*GetCollectionStatisticsResponse, error)
+	ShowCollections(ctx context.Context, in *ShowCollectionsRequest, opts ...grpc.CallOption) (*ShowCollectionsResponse, error)
 	CreatePartition(ctx context.Context, in *CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	DropPartition(ctx context.Context, in *DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	HasPartition(ctx context.Context, in *HasPartitionRequest, opts ...grpc.CallOption) (*BoolResponse, error)
-	LoadPartitions(ctx context.Context, in *LoadPartitonRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	ReleasePartitions(ctx context.Context, in *ReleasePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	GetPartitionStatistics(ctx context.Context, in *PartitionStatsRequest, opts ...grpc.CallOption) (*PartitionStatsResponse, error)
-	ShowPartitions(ctx context.Context, in *ShowPartitionRequest, opts ...grpc.CallOption) (*ShowPartitionResponse, error)
+	LoadPartitions(ctx context.Context, in *LoadPartitionsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	ReleasePartitions(ctx context.Context, in *ReleasePartitionsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	GetPartitionStatistics(ctx context.Context, in *GetPartitionStatisticsRequest, opts ...grpc.CallOption) (*GetPartitionStatisticsResponse, error)
+	ShowPartitions(ctx context.Context, in *ShowPartitionsRequest, opts ...grpc.CallOption) (*ShowPartitionsResponse, error)
 	CreateIndex(ctx context.Context, in *CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	DescribeIndex(ctx context.Context, in *DescribeIndexRequest, opts ...grpc.CallOption) (*DescribeIndexResponse, error)
-	GetIndexState(ctx context.Context, in *IndexStateRequest, opts ...grpc.CallOption) (*IndexStateResponse, error)
+	GetIndexState(ctx context.Context, in *GetIndexStateRequest, opts ...grpc.CallOption) (*GetIndexStateResponse, error)
 	DropIndex(ctx context.Context, in *DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	Insert(ctx context.Context, in *InsertRequest, opts ...grpc.CallOption) (*InsertResponse, error)
 	Search(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*SearchResults, error)
 	Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	GetDdChannel(ctx context.Context, in *commonpb.Empty, opts ...grpc.CallOption) (*StringResponse, error)
-	GetPersistentSegmentInfo(ctx context.Context, in *PersistentSegmentInfoRequest, opts ...grpc.CallOption) (*PersistentSegmentInfoResponse, error)
-	GetQuerySegmentInfo(ctx context.Context, in *QuerySegmentInfoRequest, opts ...grpc.CallOption) (*QuerySegmentInfoResponse, error)
-	RegisterLink(ctx context.Context, in *commonpb.Empty, opts ...grpc.CallOption) (*RegisterLinkResponse, error)
+	GetPersistentSegmentInfo(ctx context.Context, in *GetPersistentSegmentInfoRequest, opts ...grpc.CallOption) (*GetPersistentSegmentInfoResponse, error)
+	GetQuerySegmentInfo(ctx context.Context, in *GetQuerySegmentInfoRequest, opts ...grpc.CallOption) (*GetQuerySegmentInfoResponse, error)
+	// TODO: remove
+	RegisterLink(ctx context.Context, in *RegisterLinkRequest, opts ...grpc.CallOption) (*RegisterLinkResponse, error)
 }
 
 type milvusServiceClient struct {
@@ -3135,8 +3165,8 @@ func (c *milvusServiceClient) DescribeCollection(ctx context.Context, in *Descri
 	return out, nil
 }
 
-func (c *milvusServiceClient) GetCollectionStatistics(ctx context.Context, in *CollectionStatsRequest, opts ...grpc.CallOption) (*CollectionStatsResponse, error) {
-	out := new(CollectionStatsResponse)
+func (c *milvusServiceClient) GetCollectionStatistics(ctx context.Context, in *GetCollectionStatisticsRequest, opts ...grpc.CallOption) (*GetCollectionStatisticsResponse, error) {
+	out := new(GetCollectionStatisticsResponse)
 	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/GetCollectionStatistics", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -3144,8 +3174,8 @@ func (c *milvusServiceClient) GetCollectionStatistics(ctx context.Context, in *C
 	return out, nil
 }
 
-func (c *milvusServiceClient) ShowCollections(ctx context.Context, in *ShowCollectionRequest, opts ...grpc.CallOption) (*ShowCollectionResponse, error) {
-	out := new(ShowCollectionResponse)
+func (c *milvusServiceClient) ShowCollections(ctx context.Context, in *ShowCollectionsRequest, opts ...grpc.CallOption) (*ShowCollectionsResponse, error) {
+	out := new(ShowCollectionsResponse)
 	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/ShowCollections", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -3180,7 +3210,7 @@ func (c *milvusServiceClient) HasPartition(ctx context.Context, in *HasPartition
 	return out, nil
 }
 
-func (c *milvusServiceClient) LoadPartitions(ctx context.Context, in *LoadPartitonRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *milvusServiceClient) LoadPartitions(ctx context.Context, in *LoadPartitionsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/LoadPartitions", in, out, opts...)
 	if err != nil {
@@ -3189,7 +3219,7 @@ func (c *milvusServiceClient) LoadPartitions(ctx context.Context, in *LoadPartit
 	return out, nil
 }
 
-func (c *milvusServiceClient) ReleasePartitions(ctx context.Context, in *ReleasePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *milvusServiceClient) ReleasePartitions(ctx context.Context, in *ReleasePartitionsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/ReleasePartitions", in, out, opts...)
 	if err != nil {
@@ -3198,8 +3228,8 @@ func (c *milvusServiceClient) ReleasePartitions(ctx context.Context, in *Release
 	return out, nil
 }
 
-func (c *milvusServiceClient) GetPartitionStatistics(ctx context.Context, in *PartitionStatsRequest, opts ...grpc.CallOption) (*PartitionStatsResponse, error) {
-	out := new(PartitionStatsResponse)
+func (c *milvusServiceClient) GetPartitionStatistics(ctx context.Context, in *GetPartitionStatisticsRequest, opts ...grpc.CallOption) (*GetPartitionStatisticsResponse, error) {
+	out := new(GetPartitionStatisticsResponse)
 	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/GetPartitionStatistics", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -3207,8 +3237,8 @@ func (c *milvusServiceClient) GetPartitionStatistics(ctx context.Context, in *Pa
 	return out, nil
 }
 
-func (c *milvusServiceClient) ShowPartitions(ctx context.Context, in *ShowPartitionRequest, opts ...grpc.CallOption) (*ShowPartitionResponse, error) {
-	out := new(ShowPartitionResponse)
+func (c *milvusServiceClient) ShowPartitions(ctx context.Context, in *ShowPartitionsRequest, opts ...grpc.CallOption) (*ShowPartitionsResponse, error) {
+	out := new(ShowPartitionsResponse)
 	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/ShowPartitions", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -3234,8 +3264,8 @@ func (c *milvusServiceClient) DescribeIndex(ctx context.Context, in *DescribeInd
 	return out, nil
 }
 
-func (c *milvusServiceClient) GetIndexState(ctx context.Context, in *IndexStateRequest, opts ...grpc.CallOption) (*IndexStateResponse, error) {
-	out := new(IndexStateResponse)
+func (c *milvusServiceClient) GetIndexState(ctx context.Context, in *GetIndexStateRequest, opts ...grpc.CallOption) (*GetIndexStateResponse, error) {
+	out := new(GetIndexStateResponse)
 	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/GetIndexState", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -3279,17 +3309,8 @@ func (c *milvusServiceClient) Flush(ctx context.Context, in *FlushRequest, opts 
 	return out, nil
 }
 
-func (c *milvusServiceClient) GetDdChannel(ctx context.Context, in *commonpb.Empty, opts ...grpc.CallOption) (*StringResponse, error) {
-	out := new(StringResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/GetDdChannel", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) GetPersistentSegmentInfo(ctx context.Context, in *PersistentSegmentInfoRequest, opts ...grpc.CallOption) (*PersistentSegmentInfoResponse, error) {
-	out := new(PersistentSegmentInfoResponse)
+func (c *milvusServiceClient) GetPersistentSegmentInfo(ctx context.Context, in *GetPersistentSegmentInfoRequest, opts ...grpc.CallOption) (*GetPersistentSegmentInfoResponse, error) {
+	out := new(GetPersistentSegmentInfoResponse)
 	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/GetPersistentSegmentInfo", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -3297,8 +3318,8 @@ func (c *milvusServiceClient) GetPersistentSegmentInfo(ctx context.Context, in *
 	return out, nil
 }
 
-func (c *milvusServiceClient) GetQuerySegmentInfo(ctx context.Context, in *QuerySegmentInfoRequest, opts ...grpc.CallOption) (*QuerySegmentInfoResponse, error) {
-	out := new(QuerySegmentInfoResponse)
+func (c *milvusServiceClient) GetQuerySegmentInfo(ctx context.Context, in *GetQuerySegmentInfoRequest, opts ...grpc.CallOption) (*GetQuerySegmentInfoResponse, error) {
+	out := new(GetQuerySegmentInfoResponse)
 	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/GetQuerySegmentInfo", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -3306,7 +3327,7 @@ func (c *milvusServiceClient) GetQuerySegmentInfo(ctx context.Context, in *Query
 	return out, nil
 }
 
-func (c *milvusServiceClient) RegisterLink(ctx context.Context, in *commonpb.Empty, opts ...grpc.CallOption) (*RegisterLinkResponse, error) {
+func (c *milvusServiceClient) RegisterLink(ctx context.Context, in *RegisterLinkRequest, opts ...grpc.CallOption) (*RegisterLinkResponse, error) {
 	out := new(RegisterLinkResponse)
 	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/RegisterLink", in, out, opts...)
 	if err != nil {
@@ -3323,26 +3344,26 @@ type MilvusServiceServer interface {
 	LoadCollection(context.Context, *LoadCollectionRequest) (*commonpb.Status, error)
 	ReleaseCollection(context.Context, *ReleaseCollectionRequest) (*commonpb.Status, error)
 	DescribeCollection(context.Context, *DescribeCollectionRequest) (*DescribeCollectionResponse, error)
-	GetCollectionStatistics(context.Context, *CollectionStatsRequest) (*CollectionStatsResponse, error)
-	ShowCollections(context.Context, *ShowCollectionRequest) (*ShowCollectionResponse, error)
+	GetCollectionStatistics(context.Context, *GetCollectionStatisticsRequest) (*GetCollectionStatisticsResponse, error)
+	ShowCollections(context.Context, *ShowCollectionsRequest) (*ShowCollectionsResponse, error)
 	CreatePartition(context.Context, *CreatePartitionRequest) (*commonpb.Status, error)
 	DropPartition(context.Context, *DropPartitionRequest) (*commonpb.Status, error)
 	HasPartition(context.Context, *HasPartitionRequest) (*BoolResponse, error)
-	LoadPartitions(context.Context, *LoadPartitonRequest) (*commonpb.Status, error)
-	ReleasePartitions(context.Context, *ReleasePartitionRequest) (*commonpb.Status, error)
-	GetPartitionStatistics(context.Context, *PartitionStatsRequest) (*PartitionStatsResponse, error)
-	ShowPartitions(context.Context, *ShowPartitionRequest) (*ShowPartitionResponse, error)
+	LoadPartitions(context.Context, *LoadPartitionsRequest) (*commonpb.Status, error)
+	ReleasePartitions(context.Context, *ReleasePartitionsRequest) (*commonpb.Status, error)
+	GetPartitionStatistics(context.Context, *GetPartitionStatisticsRequest) (*GetPartitionStatisticsResponse, error)
+	ShowPartitions(context.Context, *ShowPartitionsRequest) (*ShowPartitionsResponse, error)
 	CreateIndex(context.Context, *CreateIndexRequest) (*commonpb.Status, error)
 	DescribeIndex(context.Context, *DescribeIndexRequest) (*DescribeIndexResponse, error)
-	GetIndexState(context.Context, *IndexStateRequest) (*IndexStateResponse, error)
+	GetIndexState(context.Context, *GetIndexStateRequest) (*GetIndexStateResponse, error)
 	DropIndex(context.Context, *DropIndexRequest) (*commonpb.Status, error)
 	Insert(context.Context, *InsertRequest) (*InsertResponse, error)
 	Search(context.Context, *SearchRequest) (*SearchResults, error)
 	Flush(context.Context, *FlushRequest) (*commonpb.Status, error)
-	GetDdChannel(context.Context, *commonpb.Empty) (*StringResponse, error)
-	GetPersistentSegmentInfo(context.Context, *PersistentSegmentInfoRequest) (*PersistentSegmentInfoResponse, error)
-	GetQuerySegmentInfo(context.Context, *QuerySegmentInfoRequest) (*QuerySegmentInfoResponse, error)
-	RegisterLink(context.Context, *commonpb.Empty) (*RegisterLinkResponse, error)
+	GetPersistentSegmentInfo(context.Context, *GetPersistentSegmentInfoRequest) (*GetPersistentSegmentInfoResponse, error)
+	GetQuerySegmentInfo(context.Context, *GetQuerySegmentInfoRequest) (*GetQuerySegmentInfoResponse, error)
+	// TODO: remove
+	RegisterLink(context.Context, *RegisterLinkRequest) (*RegisterLinkResponse, error)
 }
 
 // UnimplementedMilvusServiceServer can be embedded to have forward compatible implementations.
@@ -3367,10 +3388,10 @@ func (*UnimplementedMilvusServiceServer) ReleaseCollection(ctx context.Context, 
 func (*UnimplementedMilvusServiceServer) DescribeCollection(ctx context.Context, req *DescribeCollectionRequest) (*DescribeCollectionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DescribeCollection not implemented")
 }
-func (*UnimplementedMilvusServiceServer) GetCollectionStatistics(ctx context.Context, req *CollectionStatsRequest) (*CollectionStatsResponse, error) {
+func (*UnimplementedMilvusServiceServer) GetCollectionStatistics(ctx context.Context, req *GetCollectionStatisticsRequest) (*GetCollectionStatisticsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetCollectionStatistics not implemented")
 }
-func (*UnimplementedMilvusServiceServer) ShowCollections(ctx context.Context, req *ShowCollectionRequest) (*ShowCollectionResponse, error) {
+func (*UnimplementedMilvusServiceServer) ShowCollections(ctx context.Context, req *ShowCollectionsRequest) (*ShowCollectionsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ShowCollections not implemented")
 }
 func (*UnimplementedMilvusServiceServer) CreatePartition(ctx context.Context, req *CreatePartitionRequest) (*commonpb.Status, error) {
@@ -3382,16 +3403,16 @@ func (*UnimplementedMilvusServiceServer) DropPartition(ctx context.Context, req 
 func (*UnimplementedMilvusServiceServer) HasPartition(ctx context.Context, req *HasPartitionRequest) (*BoolResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HasPartition not implemented")
 }
-func (*UnimplementedMilvusServiceServer) LoadPartitions(ctx context.Context, req *LoadPartitonRequest) (*commonpb.Status, error) {
+func (*UnimplementedMilvusServiceServer) LoadPartitions(ctx context.Context, req *LoadPartitionsRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LoadPartitions not implemented")
 }
-func (*UnimplementedMilvusServiceServer) ReleasePartitions(ctx context.Context, req *ReleasePartitionRequest) (*commonpb.Status, error) {
+func (*UnimplementedMilvusServiceServer) ReleasePartitions(ctx context.Context, req *ReleasePartitionsRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReleasePartitions not implemented")
 }
-func (*UnimplementedMilvusServiceServer) GetPartitionStatistics(ctx context.Context, req *PartitionStatsRequest) (*PartitionStatsResponse, error) {
+func (*UnimplementedMilvusServiceServer) GetPartitionStatistics(ctx context.Context, req *GetPartitionStatisticsRequest) (*GetPartitionStatisticsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetPartitionStatistics not implemented")
 }
-func (*UnimplementedMilvusServiceServer) ShowPartitions(ctx context.Context, req *ShowPartitionRequest) (*ShowPartitionResponse, error) {
+func (*UnimplementedMilvusServiceServer) ShowPartitions(ctx context.Context, req *ShowPartitionsRequest) (*ShowPartitionsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ShowPartitions not implemented")
 }
 func (*UnimplementedMilvusServiceServer) CreateIndex(ctx context.Context, req *CreateIndexRequest) (*commonpb.Status, error) {
@@ -3400,7 +3421,7 @@ func (*UnimplementedMilvusServiceServer) CreateIndex(ctx context.Context, req *C
 func (*UnimplementedMilvusServiceServer) DescribeIndex(ctx context.Context, req *DescribeIndexRequest) (*DescribeIndexResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DescribeIndex not implemented")
 }
-func (*UnimplementedMilvusServiceServer) GetIndexState(ctx context.Context, req *IndexStateRequest) (*IndexStateResponse, error) {
+func (*UnimplementedMilvusServiceServer) GetIndexState(ctx context.Context, req *GetIndexStateRequest) (*GetIndexStateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetIndexState not implemented")
 }
 func (*UnimplementedMilvusServiceServer) DropIndex(ctx context.Context, req *DropIndexRequest) (*commonpb.Status, error) {
@@ -3415,16 +3436,13 @@ func (*UnimplementedMilvusServiceServer) Search(ctx context.Context, req *Search
 func (*UnimplementedMilvusServiceServer) Flush(ctx context.Context, req *FlushRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Flush not implemented")
 }
-func (*UnimplementedMilvusServiceServer) GetDdChannel(ctx context.Context, req *commonpb.Empty) (*StringResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetDdChannel not implemented")
-}
-func (*UnimplementedMilvusServiceServer) GetPersistentSegmentInfo(ctx context.Context, req *PersistentSegmentInfoRequest) (*PersistentSegmentInfoResponse, error) {
+func (*UnimplementedMilvusServiceServer) GetPersistentSegmentInfo(ctx context.Context, req *GetPersistentSegmentInfoRequest) (*GetPersistentSegmentInfoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetPersistentSegmentInfo not implemented")
 }
-func (*UnimplementedMilvusServiceServer) GetQuerySegmentInfo(ctx context.Context, req *QuerySegmentInfoRequest) (*QuerySegmentInfoResponse, error) {
+func (*UnimplementedMilvusServiceServer) GetQuerySegmentInfo(ctx context.Context, req *GetQuerySegmentInfoRequest) (*GetQuerySegmentInfoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetQuerySegmentInfo not implemented")
 }
-func (*UnimplementedMilvusServiceServer) RegisterLink(ctx context.Context, req *commonpb.Empty) (*RegisterLinkResponse, error) {
+func (*UnimplementedMilvusServiceServer) RegisterLink(ctx context.Context, req *RegisterLinkRequest) (*RegisterLinkResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RegisterLink not implemented")
 }
 
@@ -3541,7 +3559,7 @@ func _MilvusService_DescribeCollection_Handler(srv interface{}, ctx context.Cont
 }
 
 func _MilvusService_GetCollectionStatistics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CollectionStatsRequest)
+	in := new(GetCollectionStatisticsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -3553,13 +3571,13 @@ func _MilvusService_GetCollectionStatistics_Handler(srv interface{}, ctx context
 		FullMethod: "/milvus.proto.milvus.MilvusService/GetCollectionStatistics",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).GetCollectionStatistics(ctx, req.(*CollectionStatsRequest))
+		return srv.(MilvusServiceServer).GetCollectionStatistics(ctx, req.(*GetCollectionStatisticsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _MilvusService_ShowCollections_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ShowCollectionRequest)
+	in := new(ShowCollectionsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -3571,7 +3589,7 @@ func _MilvusService_ShowCollections_Handler(srv interface{}, ctx context.Context
 		FullMethod: "/milvus.proto.milvus.MilvusService/ShowCollections",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).ShowCollections(ctx, req.(*ShowCollectionRequest))
+		return srv.(MilvusServiceServer).ShowCollections(ctx, req.(*ShowCollectionsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3631,7 +3649,7 @@ func _MilvusService_HasPartition_Handler(srv interface{}, ctx context.Context, d
 }
 
 func _MilvusService_LoadPartitions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(LoadPartitonRequest)
+	in := new(LoadPartitionsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -3643,13 +3661,13 @@ func _MilvusService_LoadPartitions_Handler(srv interface{}, ctx context.Context,
 		FullMethod: "/milvus.proto.milvus.MilvusService/LoadPartitions",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).LoadPartitions(ctx, req.(*LoadPartitonRequest))
+		return srv.(MilvusServiceServer).LoadPartitions(ctx, req.(*LoadPartitionsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _MilvusService_ReleasePartitions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ReleasePartitionRequest)
+	in := new(ReleasePartitionsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -3661,13 +3679,13 @@ func _MilvusService_ReleasePartitions_Handler(srv interface{}, ctx context.Conte
 		FullMethod: "/milvus.proto.milvus.MilvusService/ReleasePartitions",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).ReleasePartitions(ctx, req.(*ReleasePartitionRequest))
+		return srv.(MilvusServiceServer).ReleasePartitions(ctx, req.(*ReleasePartitionsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _MilvusService_GetPartitionStatistics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PartitionStatsRequest)
+	in := new(GetPartitionStatisticsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -3679,13 +3697,13 @@ func _MilvusService_GetPartitionStatistics_Handler(srv interface{}, ctx context.
 		FullMethod: "/milvus.proto.milvus.MilvusService/GetPartitionStatistics",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).GetPartitionStatistics(ctx, req.(*PartitionStatsRequest))
+		return srv.(MilvusServiceServer).GetPartitionStatistics(ctx, req.(*GetPartitionStatisticsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _MilvusService_ShowPartitions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ShowPartitionRequest)
+	in := new(ShowPartitionsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -3697,7 +3715,7 @@ func _MilvusService_ShowPartitions_Handler(srv interface{}, ctx context.Context,
 		FullMethod: "/milvus.proto.milvus.MilvusService/ShowPartitions",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).ShowPartitions(ctx, req.(*ShowPartitionRequest))
+		return srv.(MilvusServiceServer).ShowPartitions(ctx, req.(*ShowPartitionsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3739,7 +3757,7 @@ func _MilvusService_DescribeIndex_Handler(srv interface{}, ctx context.Context, 
 }
 
 func _MilvusService_GetIndexState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(IndexStateRequest)
+	in := new(GetIndexStateRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -3751,7 +3769,7 @@ func _MilvusService_GetIndexState_Handler(srv interface{}, ctx context.Context, 
 		FullMethod: "/milvus.proto.milvus.MilvusService/GetIndexState",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).GetIndexState(ctx, req.(*IndexStateRequest))
+		return srv.(MilvusServiceServer).GetIndexState(ctx, req.(*GetIndexStateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3828,26 +3846,8 @@ func _MilvusService_Flush_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
-func _MilvusService_GetDdChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(commonpb.Empty)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).GetDdChannel(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/GetDdChannel",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).GetDdChannel(ctx, req.(*commonpb.Empty))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _MilvusService_GetPersistentSegmentInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PersistentSegmentInfoRequest)
+	in := new(GetPersistentSegmentInfoRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -3859,13 +3859,13 @@ func _MilvusService_GetPersistentSegmentInfo_Handler(srv interface{}, ctx contex
 		FullMethod: "/milvus.proto.milvus.MilvusService/GetPersistentSegmentInfo",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).GetPersistentSegmentInfo(ctx, req.(*PersistentSegmentInfoRequest))
+		return srv.(MilvusServiceServer).GetPersistentSegmentInfo(ctx, req.(*GetPersistentSegmentInfoRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _MilvusService_GetQuerySegmentInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(QuerySegmentInfoRequest)
+	in := new(GetQuerySegmentInfoRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -3877,13 +3877,13 @@ func _MilvusService_GetQuerySegmentInfo_Handler(srv interface{}, ctx context.Con
 		FullMethod: "/milvus.proto.milvus.MilvusService/GetQuerySegmentInfo",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).GetQuerySegmentInfo(ctx, req.(*QuerySegmentInfoRequest))
+		return srv.(MilvusServiceServer).GetQuerySegmentInfo(ctx, req.(*GetQuerySegmentInfoRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _MilvusService_RegisterLink_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(commonpb.Empty)
+	in := new(RegisterLinkRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -3895,7 +3895,7 @@ func _MilvusService_RegisterLink_Handler(srv interface{}, ctx context.Context, d
 		FullMethod: "/milvus.proto.milvus.MilvusService/RegisterLink",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).RegisterLink(ctx, req.(*commonpb.Empty))
+		return srv.(MilvusServiceServer).RegisterLink(ctx, req.(*RegisterLinkRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3993,10 +3993,6 @@ var _MilvusService_serviceDesc = grpc.ServiceDesc{
 			Handler:    _MilvusService_Flush_Handler,
 		},
 		{
-			MethodName: "GetDdChannel",
-			Handler:    _MilvusService_GetDdChannel_Handler,
-		},
-		{
 			MethodName: "GetPersistentSegmentInfo",
 			Handler:    _MilvusService_GetPersistentSegmentInfo_Handler,
 		},
@@ -4017,7 +4013,7 @@ var _MilvusService_serviceDesc = grpc.ServiceDesc{
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
 type ProxyServiceClient interface {
-	RegisterLink(ctx context.Context, in *commonpb.Empty, opts ...grpc.CallOption) (*RegisterLinkResponse, error)
+	RegisterLink(ctx context.Context, in *RegisterLinkRequest, opts ...grpc.CallOption) (*RegisterLinkResponse, error)
 }
 
 type proxyServiceClient struct {
@@ -4028,7 +4024,7 @@ func NewProxyServiceClient(cc *grpc.ClientConn) ProxyServiceClient {
 	return &proxyServiceClient{cc}
 }
 
-func (c *proxyServiceClient) RegisterLink(ctx context.Context, in *commonpb.Empty, opts ...grpc.CallOption) (*RegisterLinkResponse, error) {
+func (c *proxyServiceClient) RegisterLink(ctx context.Context, in *RegisterLinkRequest, opts ...grpc.CallOption) (*RegisterLinkResponse, error) {
 	out := new(RegisterLinkResponse)
 	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.ProxyService/RegisterLink", in, out, opts...)
 	if err != nil {
@@ -4039,14 +4035,14 @@ func (c *proxyServiceClient) RegisterLink(ctx context.Context, in *commonpb.Empt
 
 // ProxyServiceServer is the server API for ProxyService service.
 type ProxyServiceServer interface {
-	RegisterLink(context.Context, *commonpb.Empty) (*RegisterLinkResponse, error)
+	RegisterLink(context.Context, *RegisterLinkRequest) (*RegisterLinkResponse, error)
 }
 
 // UnimplementedProxyServiceServer can be embedded to have forward compatible implementations.
 type UnimplementedProxyServiceServer struct {
 }
 
-func (*UnimplementedProxyServiceServer) RegisterLink(ctx context.Context, req *commonpb.Empty) (*RegisterLinkResponse, error) {
+func (*UnimplementedProxyServiceServer) RegisterLink(ctx context.Context, req *RegisterLinkRequest) (*RegisterLinkResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RegisterLink not implemented")
 }
 
@@ -4055,7 +4051,7 @@ func RegisterProxyServiceServer(s *grpc.Server, srv ProxyServiceServer) {
 }
 
 func _ProxyService_RegisterLink_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(commonpb.Empty)
+	in := new(RegisterLinkRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -4067,7 +4063,7 @@ func _ProxyService_RegisterLink_Handler(srv interface{}, ctx context.Context, de
 		FullMethod: "/milvus.proto.milvus.ProxyService/RegisterLink",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ProxyServiceServer).RegisterLink(ctx, req.(*commonpb.Empty))
+		return srv.(ProxyServiceServer).RegisterLink(ctx, req.(*RegisterLinkRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
