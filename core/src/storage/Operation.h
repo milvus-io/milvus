@@ -38,6 +38,12 @@ class Operation {
     virtual bool
     DeleteFile(const std::string& file_path) = 0;
 
+    virtual bool
+    CacheGet(const std::string& file_path) = 0;
+
+    virtual bool
+    CachePut(const std::string& file_path) = 0;
+
     // TODO(zhiru):
     //  open(), sync(), close()
     //  function that opens a stream for reading file

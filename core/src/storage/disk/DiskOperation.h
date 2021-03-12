@@ -31,17 +31,22 @@ class DiskOperation : public Operation {
     explicit DiskOperation(const std::string& dir_path);
 
     void
-    CreateDirectory();
+    CreateDirectory() final;
 
     const std::string&
-    GetDirectory() const;
+    GetDirectory() const final;
 
     void
-    ListDirectory(std::vector<std::string>& file_paths);
+    ListDirectory(std::vector<std::string>& file_paths) final;
 
     bool
-    DeleteFile(const std::string& file_path);
+    DeleteFile(const std::string& file_path) final;
 
+    bool
+    CacheGet(const std::string& file_path) final;
+
+    bool
+    CachePut(const std::string& file_path) final;
     // TODO(zhiru):
     //  open(), sync(), close()
     //  function that opens a stream for reading file
