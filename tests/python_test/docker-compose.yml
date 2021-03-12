@@ -1,0 +1,15 @@
+version: '3.5'
+
+services:
+  regression:
+    image: milvusdb/pytest:latest
+    build:
+      dockerfile: Dockerfile
+    volumes:
+      - ../..:/milvus-distributed:delegated
+    working_dir: "/milvus-distributed/tests/python_test"
+    networks:
+      - milvus
+
+networks:
+  milvus:
