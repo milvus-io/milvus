@@ -686,13 +686,14 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	}
 	for _, seg := range segIDs {
 		task := CreateIndexTask{
-			ctx:         ctx,
-			core:        t.core,
-			segmentID:   seg,
-			indexName:   idxInfo.IndexName,
-			indexID:     idxInfo.IndexID,
-			fieldSchema: &field,
-			indexParams: t.Req.ExtraParams,
+			ctx:               t.core.ctx,
+			core:              t.core,
+			segmentID:         seg,
+			indexName:         idxInfo.IndexName,
+			indexID:           idxInfo.IndexID,
+			fieldSchema:       &field,
+			indexParams:       t.Req.ExtraParams,
+			isFromFlushedChan: false,
 		}
 		t.core.indexTaskQueue <- &task
 		fmt.Println("create index task enqueue, segID = ", seg)
@@ -780,20 +781,21 @@ func (t *DropIndexReqTask) Execute(ctx context.Context) error {
 }
 
 type CreateIndexTask struct {
-	ctx         context.Context
-	core        *Core
-	segmentID   typeutil.UniqueID
-	indexName   string
-	indexID     typeutil.UniqueID
-	fieldSchema *schemapb.FieldSchema
-	indexParams []*commonpb.KeyValuePair
+	ctx               context.Context
+	core              *Core
+	segmentID         typeutil.UniqueID
+	indexName         string
+	indexID           typeutil.UniqueID
+	fieldSchema       *schemapb.FieldSchema
+	indexParams       []*commonpb.KeyValuePair
+	isFromFlushedChan bool
 }
 
 func (t *CreateIndexTask) BuildIndex() error {
 	if t.core.MetaTable.IsSegmentIndexed(t.segmentID, t.fieldSchema, t.indexParams) {
 		return nil
 	}
-	rows, err := t.core.GetNumRowsReq(t.segmentID)
+	rows, err := t.core.GetNumRowsReq(t.segmentID, t.isFromFlushedChan)
 	if err != nil {
 		return err
 	}
