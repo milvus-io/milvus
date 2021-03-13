@@ -151,7 +151,7 @@ class TestInsertBase:
         assert index == get_simple_index
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    # #1235
+    @pytest.mark.tags("0331")
     def test_insert_search(self, connect, collection):
         '''
         target: test search entity after insert entity after a while
@@ -185,6 +185,7 @@ class TestInsertBase:
         yield request.param
 
     @pytest.mark.timeout(ADD_TIMEOUT)
+    @pytest.mark.tags("0331")
     def test_insert_ids(self, connect, id_collection, insert_count):
         '''
         target: test insert entities in collection, use customize ids
@@ -218,8 +219,7 @@ class TestInsertBase:
         assert stats[row_count] == nb
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    # @pytest.mark.tags("0331")
-    # TODO failed in ci
+    @pytest.mark.tags("0331")
     def test_insert_ids_fields(self, connect, get_filter_field, get_vector_field):
         '''
         target: test create normal collection with different fields, insert entities into id with ids
@@ -365,6 +365,7 @@ class TestInsertBase:
             connect.insert(collection, default_entities, partition_tag=tag)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
+    @pytest.mark.tags("0331")
     def test_insert_partition_repeatedly(self, connect, collection):
         '''
         target: test insert entities in collection created before
@@ -634,6 +635,7 @@ class TestInsertBinary:
         index = connect.describe_index(binary_collection, binary_field_name)
         assert index == get_binary_index
 
+    @pytest.mark.tags("0331")
     def test_insert_binary_search(self, connect, binary_collection):
         '''
         target: test search vector after insert vector after a while
@@ -732,7 +734,7 @@ class TestInsertAsync:
         assert stats[row_count] == nb
 
     @pytest.mark.level(2)
-    # @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331")
     def test_insert_async_callback_timeout(self, connect, collection):
         '''
         target: test insert vectors with different length of vectors
@@ -838,6 +840,7 @@ class TestInsertMultiCollections:
         # connect.drop_collection(collection_name)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
+    @pytest.mark.tags("0331")
     def test_insert_entity_create_index_another(self, connect, collection, get_simple_index):
         '''
         target: test insert vector to collection_2 after build index for collection_1
@@ -854,6 +857,7 @@ class TestInsertMultiCollections:
         assert stats[row_count] == 1
 
     @pytest.mark.timeout(ADD_TIMEOUT)
+    @pytest.mark.tags("0331")
     def test_insert_entity_sleep_create_index_another(self, connect, collection, get_simple_index):
         '''
         target: test insert vector to collection_2 after build index for collection_1 for a while
