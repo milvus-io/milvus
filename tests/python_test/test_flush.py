@@ -173,6 +173,7 @@ class TestFlushBase:
         res = connect.get_collection_stats(collection_new)
         assert res["row_count"] == nb_new
 
+    # TODO ci failed
     @pytest.mark.tags("fail")
     def test_add_flush_multiable_times(self, connect, collection):
         '''
