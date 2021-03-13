@@ -15,7 +15,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/rmqms"
-	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq"
+	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
 )
 
 func newMsgFactory(localMsg bool) msgstream.Factory {

@@ -6,7 +6,7 @@ import (
 	"github.com/mitchellh/mapstructure"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq"
+	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
 )
 
 type Factory struct {

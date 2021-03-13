@@ -10,7 +10,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
-	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq"
+	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
 	"go.etcd.io/etcd/clientv3"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"

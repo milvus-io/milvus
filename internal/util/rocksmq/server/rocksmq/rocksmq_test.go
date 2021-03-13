@@ -47,15 +47,15 @@ func TestRocksMQ(t *testing.T) {
 
 	msgA := "a_message"
 	pMsgs := make([]ProducerMessage, 1)
-	pMsgA := ProducerMessage{payload: []byte(msgA)}
+	pMsgA := ProducerMessage{Payload: []byte(msgA)}
 	pMsgs[0] = pMsgA
 
 	_ = idAllocator.UpdateID()
 	err = rmq.Produce(channelName, pMsgs)
 	assert.Nil(t, err)
 
-	pMsgB := ProducerMessage{payload: []byte("b_message")}
-	pMsgC := ProducerMessage{payload: []byte("c_message")}
+	pMsgB := ProducerMessage{Payload: []byte("b_message")}
+	pMsgC := ProducerMessage{Payload: []byte("c_message")}
 
 	pMsgs[0] = pMsgB
 	pMsgs = append(pMsgs, pMsgC)
@@ -106,7 +106,7 @@ func TestRocksMQ_Loop(t *testing.T) {
 	// Produce one message once
 	for i := 0; i < loopNum; i++ {
 		msg := "message_" + strconv.Itoa(i)
-		pMsg := ProducerMessage{payload: []byte(msg)}
+		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs := make([]ProducerMessage, 1)
 		pMsgs[0] = pMsg
 		err := rmq.Produce(channelName, pMsgs)
@@ -117,7 +117,7 @@ func TestRocksMQ_Loop(t *testing.T) {
 	pMsgs := make([]ProducerMessage, loopNum)
 	for i := 0; i < loopNum; i++ {
 		msg := "message_" + strconv.Itoa(i+loopNum)
-		pMsg := ProducerMessage{payload: []byte(msg)}
+		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs[i] = pMsg
 	}
 	err = rmq.Produce(channelName, pMsgs)
@@ -178,8 +178,8 @@ func TestRocksMQ_Goroutines(t *testing.T) {
 			group.Add(2)
 			msg0 := "message_" + strconv.Itoa(i)
 			msg1 := "message_" + strconv.Itoa(i+1)
-			pMsg0 := ProducerMessage{payload: []byte(msg0)}
-			pMsg1 := ProducerMessage{payload: []byte(msg1)}
+			pMsg0 := ProducerMessage{Payload: []byte(msg0)}
+			pMsg1 := ProducerMessage{Payload: []byte(msg1)}
 			pMsgs := make([]ProducerMessage, 2)
 			pMsgs[0] = pMsg0
 			pMsgs[1] = pMsg1
@@ -245,7 +245,7 @@ func TestRocksMQ_Throughout(t *testing.T) {
 	pt0 := time.Now().UnixNano() / int64(time.Millisecond)
 	for i := 0; i < entityNum; i++ {
 		msg := "message_" + strconv.Itoa(i)
-		pMsg := ProducerMessage{payload: []byte(msg)}
+		pMsg := ProducerMessage{Payload: []byte(msg)}
 		assert.Nil(t, idAllocator.UpdateID())
 		err := rmq.Produce(channelName, []ProducerMessage{pMsg})
 		assert.Nil(t, err)
@@ -303,8 +303,8 @@ func TestRocksMQ_MultiChan(t *testing.T) {
 	for i := 0; i < loopNum; i++ {
 		msg0 := "for_chann0_" + strconv.Itoa(i)
 		msg1 := "for_chann1_" + strconv.Itoa(i)
-		pMsg0 := ProducerMessage{payload: []byte(msg0)}
-		pMsg1 := ProducerMessage{payload: []byte(msg1)}
+		pMsg0 := ProducerMessage{Payload: []byte(msg0)}
+		pMsg1 := ProducerMessage{Payload: []byte(msg1)}
 		err = rmq.Produce(channelName0, []ProducerMessage{pMsg0})
 		assert.Nil(t, err)
 		err = rmq.Produce(channelName1, []ProducerMessage{pMsg1})
