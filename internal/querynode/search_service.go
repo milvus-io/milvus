@@ -113,8 +113,9 @@ func (ss *searchService) getServiceableTime() Timestamp {
 
 func (ss *searchService) setServiceableTime(t Timestamp) {
 	ss.serviceableTimeMutex.Lock()
-	// TODO:: add gracefulTime
-	ss.serviceableTime = t
+	// hard code gracefultime to 1 second
+	// TODO: use config to set gracefultime
+	ss.serviceableTime = t + 1000*1000*1000
 	ss.serviceableTimeMutex.Unlock()
 }
 
