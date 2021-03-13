@@ -50,8 +50,8 @@ class TestLoadCollection:
         connect.load_collection(collection)
         connect.release_collection(collection)
 
+    @pytest.mark.tags("0331")
     @pytest.mark.level(2)
-    # todo can't load repeat
     def test_load_collection_after_index_binary(self, connect, binary_collection, get_binary_index):
         '''
         target: test load binary_collection, after index created
