@@ -59,6 +59,7 @@ type ParamTable struct {
 
 	PulsarMaxMessageSize int
 	Log                  log.Config
+	RoleName             string
 }
 
 var Params ParamTable
@@ -158,6 +159,7 @@ func (pt *ParamTable) initParams() {
 	pt.initDefaultIndexName()
 
 	pt.initPulsarMaxMessageSize()
+	pt.initRoleName()
 }
 
 func (pt *ParamTable) initPulsarAddress() {
@@ -477,4 +479,8 @@ func (pt *ParamTable) initLogCfg() {
 	} else {
 		pt.Log.File.Filename = ""
 	}
+}
+
+func (pt *ParamTable) initRoleName() {
+	pt.RoleName = fmt.Sprintf("%s-%d", "ProxyNode", pt.ProxyID)
 }

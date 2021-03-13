@@ -207,6 +207,8 @@ func (qs *QueryService) ShowCollections(ctx context.Context, req *querypb.ShowCo
 }
 
 func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
+	log.Debug("LoadCollectionRequest received", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", req.CollectionID),
+		zap.Stringer("schema", req.Schema))
 	dbID := req.DbID
 	collectionID := req.CollectionID
 	schema := req.Schema
@@ -222,7 +224,7 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 		}
 	}
 
-	log.Debug("load collection start", zap.String("collectionID", fmt.Sprintln(collectionID)))
+	log.Debug("load collection start", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID))
 
 	_, err := qs.replica.getCollectionByID(dbID, collectionID)
 	if err != nil {
@@ -241,14 +243,16 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 	showPartitionRequest := &milvuspb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_ShowPartitions,
+			MsgID:   req.Base.MsgID,
 		},
 		CollectionID: collectionID,
 	}
 
 	showPartitionResponse, err := qs.masterServiceClient.ShowPartitions(ctx, showPartitionRequest)
 	if err != nil {
-		return fn(err), err
+		return fn(err), fmt.Errorf("call master ShowPartitions: %s", err)
 	}
+	log.Debug("ShowPartitions returned from Master", zap.String("role", Params.RoleName), zap.Int64("msgID", showPartitionRequest.Base.MsgID))
 	if showPartitionResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return showPartitionResponse.Status, err
 	}
@@ -273,8 +277,7 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 	}
 
 	if len(partitionIDsToLoad) == 0 {
-		log.Debug("load collection end", zap.String("collectionID", fmt.Sprintln(collectionID)))
-
+		log.Debug("LoadCollectionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.String("collectionID", fmt.Sprintln(collectionID)))
 		return &commonpb.Status{
 			Reason:    "Partitions has been already loaded!",
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -290,9 +293,13 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 	}
 
 	status, err := qs.LoadPartitions(ctx, loadPartitionsRequest)
+	if err != nil {
+		log.Error("LoadCollectionRequest failed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Error(err))
+		return status, fmt.Errorf("load partitions: %s", err)
+	}
+	log.Debug("LoadCollectionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID))
+	return status, nil
 
-	log.Debug("load collection end", zap.String("collectionID", fmt.Sprintln(collectionID)))
-	return status, err
 }
 
 func (qs *QueryService) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
@@ -356,6 +363,8 @@ func (qs *QueryService) ShowPartitions(ctx context.Context, req *querypb.ShowPar
 
 func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
 	//TODO::suggest different partitions have different dm channel
+	log.Debug("LoadPartitionRequest received", zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", req.CollectionID),
+		zap.Stringer("schema", req.Schema))
 	dbID := req.DbID
 	collectionID := req.CollectionID
 	partitionIDs := req.PartitionIDs
@@ -482,7 +491,7 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 		qs.replica.updatePartitionState(dbID, collectionID, partitionID, querypb.PartitionState_InMemory)
 	}
 
-	log.Debug("load partitions end", zap.String("partitionIDs", fmt.Sprintln(partitionIDs)))
+	log.Debug("LoadPartitionRequest completed", zap.Int64("msgID", req.Base.MsgID), zap.Int64s("partitionIDs", partitionIDs))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil

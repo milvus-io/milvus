@@ -1162,18 +1162,21 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 }
 
 func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	log.Debug("ShowPartitionRequest received", zap.String("role", Params.RoleName), zap.Int64("msgID", in.Base.MsgID),
+		zap.String("collection", in.CollectionName))
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
+		log.Error("ShowPartitionRequest failed: master is not healthy", zap.String("role", Params.RoleName),
+			zap.Int64("msgID", in.Base.MsgID), zap.String("state", internalpb.StateCode_name[int32(code)]))
 		return &milvuspb.ShowPartitionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+				Reason:    fmt.Sprintf("master is not healthy, state code = %s", internalpb.StateCode_name[int32(code)]),
 			},
 			PartitionNames: nil,
 			PartitionIDs:   nil,
 		}, nil
 	}
-	log.Debug("ShowPartitions", zap.String("collection name", in.CollectionName))
 	t := &ShowPartitionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -1188,15 +1191,18 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
+		log.Error("ShowPartitionsRequest failed", zap.String("role", Params.RoleName), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &milvuspb.ShowPartitionsResponse{
 			PartitionNames: nil,
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "ShowPartitions failed: " + err.Error(),
+				Reason:    err.Error(),
 			},
 		}, nil
 	}
-	log.Debug("ShowPartitions Success", zap.String("collection name", in.CollectionName), zap.Strings("partition names", t.Rsp.PartitionNames), zap.Int64s("partition ids", t.Rsp.PartitionIDs))
+	log.Debug("ShowPartitions succeed", zap.String("role", Params.RoleName), zap.Int64("msgID", t.Req.Base.MsgID),
+		zap.String("collection name", in.CollectionName), zap.Strings("partition names", t.Rsp.PartitionNames),
+		zap.Int64s("partition ids", t.Rsp.PartitionIDs))
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
