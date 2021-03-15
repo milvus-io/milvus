@@ -174,7 +174,8 @@ class TestFlushBase:
         assert res["row_count"] == nb_new
 
     # TODO ci failed
-    @pytest.mark.tags("fail")
+    # @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_add_flush_multiable_times(self, connect, collection):
         '''
         method: add entities, flush serveral times
