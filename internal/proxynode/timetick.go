@@ -89,8 +89,6 @@ func (tt *timeTick) tick() error {
 	err := tt.tickMsgStream.Produce(tt.ctx, &msgPack)
 	if err != nil {
 		log.Warn("proxynode", zap.String("error", err.Error()))
-	} else {
-		log.Debug("proxynode send time tick message")
 	}
 	tt.tickLock.Lock()
 	defer tt.tickLock.Unlock()
