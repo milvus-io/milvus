@@ -4,7 +4,6 @@ import "C"
 import (
 	"context"
 	"errors"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -250,15 +249,21 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	var searchPartitionIDs []UniqueID
 	partitionIDsInQuery := searchMsg.PartitionIDs
 	if len(partitionIDsInQuery) == 0 {
+		if len(partitionIDsInCol) == 0 {
+			return errors.New("can't find any partition in this collection on query node")
+		}
 		searchPartitionIDs = partitionIDsInCol
 	} else {
-		for _, id := range partitionIDsInCol {
-			for _, toMatchID := range partitionIDsInQuery {
-				re := regexp.MustCompile("^" + strconv.FormatInt(toMatchID, 10) + "$")
-				if re.MatchString(strconv.FormatInt(id, 10)) {
-					searchPartitionIDs = append(searchPartitionIDs, id)
-				}
+		findPartition := false
+		for _, id := range partitionIDsInQuery {
+			_, err := ss.replica.getPartitionByID(id)
+			if err == nil {
+				searchPartitionIDs = append(searchPartitionIDs, id)
+				findPartition = true
 			}
+		}
+		if !findPartition {
+			return errors.New("partition to be searched not exist in query node")
 		}
 	}
 
