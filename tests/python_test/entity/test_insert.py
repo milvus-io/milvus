@@ -379,7 +379,6 @@ class TestInsertBase:
         res = connect.get_collection_stats(collection)
         assert res[row_count] == 2 * default_nb
 
-    # issue
     @pytest.mark.tags("0331")
     def test_insert_dim_not_matched(self, connect, collection):
         '''
@@ -390,7 +389,6 @@ class TestInsertBase:
         vectors = gen_vectors(default_nb, int(default_dim) // 2)
         insert_entities = copy.deepcopy(default_entities)
         insert_entities[-1]["values"] = vectors
-        # logging.getLogger().info(len(insert_entities[-1][default_float_vec_field_name][0]))
         with pytest.raises(Exception) as e:
             connect.insert(collection, insert_entities)
 
@@ -511,7 +509,7 @@ class TestInsertBase:
 
     @pytest.mark.level(2)
     @pytest.mark.timeout(30)
-    # @pytest.mark.tags("0331") TODO failed in ci
+    @pytest.mark.tags("0331")
     def test_collection_insert_rows_count_multi_threading(self, args, collection):
         '''
         target: test collection rows_count is correct or not with multi threading
@@ -676,7 +674,7 @@ class TestInsertAsync:
         logging.getLogger().info("In callback check results")
         assert result
 
-    # @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331")
     def test_insert_async(self, connect, collection, insert_count):
         '''
         target: test insert vectors with different length of vectors
@@ -690,7 +688,7 @@ class TestInsertAsync:
         assert len(ids) == nb
 
     @pytest.mark.level(2)
-    # @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331")
     def test_insert_async_false(self, connect, collection, insert_count):
         '''
         target: test insert vectors with different length of vectors
@@ -703,7 +701,7 @@ class TestInsertAsync:
         connect.flush([collection])
         assert len(ids) == nb
 
-    # @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331")
     def test_insert_async_callback(self, connect, collection, insert_count):
         '''
         target: test insert vectors with different length of vectors
@@ -711,7 +709,7 @@ class TestInsertAsync:
         expected: length of ids is equal to the length of vectors
         '''
         nb = insert_count
-        future = connect.insert(collection, gen_entities(nb), _async=True, _callback=self.check_status)
+        future = connect.insert(collection, gen_entities(nb), _async=True, _callback=self.check_result)
         future.done()
         ids = future.result()
         assert len(ids) == nb
@@ -748,6 +746,8 @@ class TestInsertAsync:
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == 0
 
+    # #1339
+    @pytest.mark.tags("fail")
     def test_insert_async_invalid_params(self, connect):
         '''
         target: test insert vectors with different length of vectors
@@ -760,6 +760,8 @@ class TestInsertAsync:
         with pytest.raises(Exception) as e:
             ids = future.result()
 
+    # #1339
+    @pytest.mark.tags("fail")
     def test_insert_async_invalid_params_raise_exception(self, connect, collection):
         '''
         target: test insert vectors with different length of vectors
@@ -825,7 +827,7 @@ class TestInsertMultiCollections:
         assert len(ids) == 1
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    # #1250
+    @pytest.mark.tags("0331")
     def test_create_index_insert_entity_another(self, connect, collection, get_simple_index):
         '''
         target: test insert vector to collection_2 after build index for collection_1
@@ -837,7 +839,9 @@ class TestInsertMultiCollections:
         connect.create_index(collection, field_name, get_simple_index)
         ids = connect.insert(collection_name, default_entity)
         assert len(ids) == 1
-        # connect.drop_collection(collection_name)
+        index = connect.describe_index(collection, field_name)
+        assert index == get_simple_index
+        connect.drop_collection(collection_name)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags("0331")
@@ -873,6 +877,7 @@ class TestInsertMultiCollections:
         assert stats[row_count] == 1
 
     @pytest.mark.timeout(ADD_TIMEOUT)
+    @pytest.mark.tags("0331")
     def test_search_entity_insert_entity_another(self, connect, collection):
         '''
         target: test insert entity to collection_1 after search collection_2
@@ -883,12 +888,14 @@ class TestInsertMultiCollections:
         connect.create_collection(collection_name, default_fields)
         connect.load_collection(collection)
         res = connect.search(collection, default_single_query)
-        ids = connect.insert(collection_name, default_entity)
+        assert len(res[0]) == 0
+        connect.insert(collection_name, default_entity)
         connect.flush([collection_name])
         stats = connect.get_collection_stats(collection_name)
         assert stats[row_count] == 1
 
     @pytest.mark.timeout(ADD_TIMEOUT)
+    @pytest.mark.tags("0331")
     def test_insert_entity_search_entity_another(self, connect, collection):
         '''
         target: test insert entity to collection_1 after search collection_2
@@ -905,6 +912,7 @@ class TestInsertMultiCollections:
         assert stats[row_count] == 1
 
     @pytest.mark.timeout(ADD_TIMEOUT)
+    @pytest.mark.tags("0331")
     def test_insert_entity_sleep_search_entity_another(self, connect, collection):
         '''
         target: test insert entity to collection_1 after search collection_2 a while
@@ -1119,14 +1127,14 @@ class TestInsertInvalidBinary(object):
         with pytest.raises(Exception):
             connect.insert(binary_collection, tmp_entity)
 
-    # TODO 'bytes' object does not support item assignment
     @pytest.mark.level(2)
+    # #1352
+    @pytest.mark.tags("fail")
     def test_insert_with_invalid_field_entity_value(self, connect, binary_collection, get_field_vectors_value):
         tmp_entity = copy.deepcopy(default_binary_entity)
         src_vectors = tmp_entity[-1]["values"]
         src_vectors[0][1] = get_field_vectors_value
         with pytest.raises(Exception):
-            pdb.set_trace()
             connect.insert(binary_collection, tmp_entity)
 
     @pytest.mark.level(2)
@@ -1151,7 +1159,8 @@ class TestInsertInvalidBinary(object):
             connect.insert(binary_collection, tmp_entity)
 
     @pytest.mark.level(2)
-    # TODO 'bytes' object does not support item assignment
+    # #1352
+    @pytest.mark.tags("fail")
     def test_insert_with_invalid_field_entities_value(self, connect, binary_collection, get_field_vectors_value):
         tmp_entities = copy.deepcopy(default_binary_entities)
         src_vector = tmp_entities[-1]["values"]
