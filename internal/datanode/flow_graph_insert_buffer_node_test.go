@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
@@ -63,6 +64,14 @@ func genInsertMsg() insertMsg {
 		timestampMax: math.MaxUint64,
 	}
 
+	startPos := []*internalpb.MsgPosition{
+		{
+			ChannelName: "aaa",
+			MsgID:       "000",
+			Timestamp:   0,
+		},
+	}
+
 	var iMsg = &insertMsg{
 		insertMessages: make([]*msgstream.InsertMsg, 0),
 		flushMessages:  make([]*flushMsg, 0),
@@ -70,6 +79,8 @@ func genInsertMsg() insertMsg {
 			timestampMin: timeRange.timestampMin,
 			timestampMax: timeRange.timestampMax,
 		},
+		startPositions: startPos,
+		endPositions:   startPos,
 	}
 
 	dataFactory := NewDataFactory()

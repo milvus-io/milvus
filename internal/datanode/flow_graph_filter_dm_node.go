@@ -50,6 +50,7 @@ func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, cont
 			timestampMax: msgStreamMsg.TimestampMax(),
 		},
 		startPositions: make([]*internalpb.MsgPosition, 0),
+		endPositions:   make([]*internalpb.MsgPosition, 0),
 	}
 
 	iMsg.flushMessages = append(iMsg.flushMessages, ddMsg.flushMessages...)
@@ -69,6 +70,7 @@ func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, cont
 	}
 
 	iMsg.startPositions = append(iMsg.startPositions, msgStreamMsg.StartPositions()...)
+	iMsg.endPositions = append(iMsg.endPositions, msgStreamMsg.EndPositions()...)
 	iMsg.gcRecord = ddMsg.gcRecord
 	var res Msg = &iMsg
 	return []Msg{res}, ctx

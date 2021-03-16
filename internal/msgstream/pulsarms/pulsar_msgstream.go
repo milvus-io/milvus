@@ -489,6 +489,7 @@ func (ms *PulsarMsgStream) Seek(mp *internalpb.MsgPosition) error {
 type PulsarTtMsgStream struct {
 	PulsarMsgStream
 	unsolvedBuf   map[Consumer][]TsMsg
+	msgPositions  map[Consumer]*internalpb.MsgPosition
 	unsolvedMutex *sync.Mutex
 	lastTimeStamp Timestamp
 	syncConsumer  chan int
@@ -504,11 +505,13 @@ func newPulsarTtMsgStream(ctx context.Context,
 		return nil, err
 	}
 	unsolvedBuf := make(map[Consumer][]TsMsg)
+	msgPositions := make(map[Consumer]*internalpb.MsgPosition)
 	syncConsumer := make(chan int, 1)
 
 	return &PulsarTtMsgStream{
 		PulsarMsgStream: *pulsarMsgStream,
 		unsolvedBuf:     unsolvedBuf,
+		msgPositions:    msgPositions,
 		unsolvedMutex:   &sync.Mutex{},
 		syncConsumer:    syncConsumer,
 	}, nil
@@ -539,6 +542,11 @@ func (ms *PulsarTtMsgStream) AsConsumer(channels []string,
 			}
 			ms.consumers = append(ms.consumers, pc)
 			ms.unsolvedBuf[pc] = make([]TsMsg, 0)
+			ms.msgPositions[pc] = &internalpb.MsgPosition{
+				ChannelName: channels[i],
+				MsgID:       "",
+				Timestamp:   ms.lastTimeStamp,
+			}
 			ms.consumerChannels = append(ms.consumerChannels, channels[i])
 			ms.consumerLock.Unlock()
 			return nil
@@ -612,7 +620,8 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 				continue
 			}
 			timeTickBuf := make([]TsMsg, 0)
-			msgPositions := make([]*internalpb.MsgPosition, 0)
+			startMsgPosition := make([]*internalpb.MsgPosition, 0)
+			endMsgPositions := make([]*internalpb.MsgPosition, 0)
 			ms.unsolvedMutex.Lock()
 			for consumer, msgs := range ms.unsolvedBuf {
 				if len(msgs) == 0 {
@@ -633,19 +642,24 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 				}
 				ms.unsolvedBuf[consumer] = tempBuffer
 
+				startMsgPosition = append(startMsgPosition, ms.msgPositions[consumer])
+				var newPos *internalpb.MsgPosition
 				if len(tempBuffer) > 0 {
-					msgPositions = append(msgPositions, &internalpb.MsgPosition{
+					newPos = &internalpb.MsgPosition{
 						ChannelName: tempBuffer[0].Position().ChannelName,
 						MsgID:       tempBuffer[0].Position().MsgID,
 						Timestamp:   timeStamp,
-					})
+					}
+					endMsgPositions = append(endMsgPositions, newPos)
 				} else {
-					msgPositions = append(msgPositions, &internalpb.MsgPosition{
+					newPos = &internalpb.MsgPosition{
 						ChannelName: timeTickMsg.Position().ChannelName,
 						MsgID:       timeTickMsg.Position().MsgID,
 						Timestamp:   timeStamp,
-					})
+					}
+					endMsgPositions = append(endMsgPositions, newPos)
 				}
+				ms.msgPositions[consumer] = newPos
 			}
 			ms.unsolvedMutex.Unlock()
 
@@ -653,7 +667,8 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 				BeginTs:        ms.lastTimeStamp,
 				EndTs:          timeStamp,
 				Msgs:           timeTickBuf,
-				StartPositions: msgPositions,
+				StartPositions: startMsgPosition,
+				EndPositions:   endMsgPositions,
 			}
 
 			ms.receiveBuf <- &msgPack

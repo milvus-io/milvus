@@ -11,14 +11,16 @@ type MsgStreamMsg struct {
 	timestampMin   Timestamp
 	timestampMax   Timestamp
 	startPositions []*MsgPosition
+	endPositions   []*MsgPosition
 }
 
-func GenerateMsgStreamMsg(tsMessages []msgstream.TsMsg, timestampMin, timestampMax Timestamp, positions []*MsgPosition) *MsgStreamMsg {
+func GenerateMsgStreamMsg(tsMessages []msgstream.TsMsg, timestampMin, timestampMax Timestamp, startPos []*MsgPosition, endPos []*MsgPosition) *MsgStreamMsg {
 	return &MsgStreamMsg{
 		tsMessages:     tsMessages,
 		timestampMin:   timestampMin,
 		timestampMax:   timestampMax,
-		startPositions: positions,
+		startPositions: startPos,
+		endPositions:   endPos,
 	}
 }
 
@@ -44,4 +46,8 @@ func (msMsg *MsgStreamMsg) TimestampMax() Timestamp {
 
 func (msMsg *MsgStreamMsg) StartPositions() []*MsgPosition {
 	return msMsg.startPositions
+}
+
+func (msMsg *MsgStreamMsg) EndPositions() []*MsgPosition {
+	return msMsg.endPositions
 }

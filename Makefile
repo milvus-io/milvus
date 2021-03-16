@@ -122,6 +122,10 @@ queryservice: build-cpp
 	@echo "Building distributed queryservice ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/queryservice $(PWD)/cmd/queryservice/queryservice.go 1>/dev/null
 
+dataservice: build-cpp
+	@echo "Building dataservice ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/dataservice $(PWD)/cmd/dataservice/main.go 1>/dev/null
+
 # Builds various components locally.
 build-go: build-cpp
 	@echo "Building each component's binary to './bin'"
