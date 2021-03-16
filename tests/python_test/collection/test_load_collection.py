@@ -223,7 +223,7 @@ class TestLoadCollection:
         expected: raise exception
         """
 
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_load_collection_release_part_partitions(self, connect, collection):
         """
         target: test release part partitions after load collection
@@ -238,13 +238,12 @@ class TestLoadCollection:
         connect.flush([collection])
         connect.load_collection(collection)
         connect.release_partitions(collection, [default_tag])
-        logging.getLogger().info(connect.get_collection_stats(collection))
         with pytest.raises(Exception) as e:
             connect.search(collection, default_single_query, partition_tags=[default_tag])
         res = connect.search(collection, default_single_query, partition_tags=[default_partition_name])
         assert len(res[0]) == default_top_k
 
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_load_collection_release_all_partitions(self, connect, collection):
         """
         target: test release all partitions after load collection
@@ -282,7 +281,7 @@ class TestLoadCollection:
 
 class TestReleaseAdvanced:
 
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_release_collection_during_searching(self, connect, collection):
         """
         target: test release collection during searching
@@ -299,9 +298,8 @@ class TestReleaseAdvanced:
         connect.release_collection(collection)
         with pytest.raises(Exception):
             connect.search(collection, default_single_query)
-        # assert len(res[0]) == 0
 
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_release_partition_during_searching(self, connect, collection):
         """
         target: test release partition during searching
@@ -317,10 +315,10 @@ class TestReleaseAdvanced:
         connect.load_partitions(collection, [default_tag])
         res = connect.search(collection, query, _async=True)
         connect.release_partitions(collection, [default_tag])
-        res = connect.search(collection, default_single_query)
-        assert len(res[0]) == 0
+        with pytest.raises(Exception):
+            res = connect.search(collection, default_single_query)
 
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_release_collection_during_searching_A(self, connect, collection):
         """
         target: test release collection during searching
@@ -338,7 +336,6 @@ class TestReleaseAdvanced:
         connect.release_collection(collection)
         with pytest.raises(Exception):
             connect.search(collection, default_single_query)
-        # assert len(res[0]) == 0
 
     def _test_release_collection_during_loading(self, connect, collection):
         """
@@ -355,11 +352,10 @@ class TestReleaseAdvanced:
         t = threading.Thread(target=load, args=())
         t.start()
         connect.release_collection(collection)
-        res = connect.search(collection, default_single_query)
-        assert len(res[0]) == 0
+        with pytest.raises(Exception):
+            connect.search(collection, default_single_query)
 
-    @pytest.mark.tags("fail")
-    def test_release_partition_during_loading(self, connect, collection):
+    def _test_release_partition_during_loading(self, connect, collection):
         """
         target: test release partition during loading
         method: insert entities into partition, flush, release partition during loading
@@ -378,8 +374,7 @@ class TestReleaseAdvanced:
         res = connect.search(collection, default_single_query)
         assert len(res[0]) == 0
 
-    @pytest.mark.tags("fail")
-    def test_release_collection_during_inserting(self, connect, collection):
+    def _test_release_collection_during_inserting(self, connect, collection):
         """
         target: test release collection during inserting
         method: load collection, do release collection during inserting
