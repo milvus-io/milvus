@@ -120,7 +120,7 @@ TEST(Indexing, SmartBruteForce) {
     }
 }
 
-TEST(Indexing, DISABLED_Naive) {
+TEST(Indexing, Naive) {
     constexpr int N = 10000;
     constexpr int DIM = 16;
     constexpr int TOPK = 10;

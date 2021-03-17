@@ -89,6 +89,7 @@ func TestMetaService_processCollectionCreate(t *testing.T) {
 	id := "0"
 	value := `schema: <
 				name: "test"
+				autoID: true
 				fields: <
 				fieldID:100
 				name: "vec"
@@ -151,6 +152,7 @@ func TestMetaService_processCreate(t *testing.T) {
 	key1 := Params.MetaRootPath + "/collection/0"
 	msg1 := `schema: <
 				name: "test"
+				autoID: true
 				fields: <
 				fieldID:100
 				name: "vec"
