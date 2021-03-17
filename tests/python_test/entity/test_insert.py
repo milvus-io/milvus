@@ -746,7 +746,6 @@ class TestInsertAsync:
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == 0
 
-    # #1339
     @pytest.mark.tags("0331")
     def test_insert_async_invalid_params(self, connect):
         '''
@@ -770,6 +769,7 @@ class TestInsertAsync:
         '''
         entities = []
         future = connect.insert(collection, entities, _async=True)
+        future.done()
         with pytest.raises(Exception) as e:
             future.result()
 
@@ -1128,12 +1128,11 @@ class TestInsertInvalidBinary(object):
             connect.insert(binary_collection, tmp_entity)
 
     @pytest.mark.level(2)
-    # #1352
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_insert_with_invalid_field_entity_value(self, connect, binary_collection, get_field_vectors_value):
         tmp_entity = copy.deepcopy(default_binary_entity)
         src_vectors = tmp_entity[-1]["values"]
-        src_vectors[0][1] = get_field_vectors_value
+        src_vectors[0] = get_field_vectors_value
         with pytest.raises(Exception):
             connect.insert(binary_collection, tmp_entity)
 
@@ -1160,7 +1159,6 @@ class TestInsertInvalidBinary(object):
 
     @pytest.mark.level(2)
     @pytest.mark.tags("0331")
-    # TODO 'bytes' object does not support item assignment
     def test_insert_with_invalid_field_entities_value(self, connect, binary_collection, get_field_vectors_value):
         tmp_entities = copy.deepcopy(default_binary_entities)
         src_vector = tmp_entities[-1]["values"]
