@@ -27,6 +27,7 @@ services:
       - .:/go/src/github.com/zilliztech/milvus-distributed:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-ccache:/ccache:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-go-mod:/go/pkg/mod:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-vscode-extensions:/home/milvus/.vscode-server/extensions:delegated
     working_dir: "/go/src/github.com/zilliztech/milvus-distributed"
     # Command
     command: &ubuntu-command >
