@@ -12,4 +12,4 @@ pytest-level==0.1.1
 pytest-xdist==2.2.1
 pymilvus-distributed==0.0.48
 pytest-rerunfailures==9.1.1
-git+https://gitee.com/quicksilver/pytest-tags.git
+git+https://github.com/Projectplace/pytest-tags

@@ -46,6 +46,7 @@ RUN mkdir -p /usr/local/go && wget -qO- "https://golang.org/dl/go1.15.2.linux-am
     go get -v github.com/uudashr/gopkgs/v2/cmd/gopkgs && \
     go get -v github.com/go-delve/delve/cmd/dlv && \
     go get -v honnef.co/go/tools/cmd/staticcheck && \
+    go clean --modcache && \
     chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
