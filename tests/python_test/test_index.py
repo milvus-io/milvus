@@ -144,6 +144,7 @@ class TestIndexBase:
         expected: return search success
         '''
         ids = connect.insert(collection, default_entities)
+        connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
         logging.getLogger().info(connect.describe_index(collection, field_name))
         nq = get_nq
@@ -234,6 +235,7 @@ class TestIndexBase:
         expected: return code 0, and describe index result equals with the second index params
         '''
         ids = connect.insert(collection, default_entities)
+        connect.flush([collection])
         indexs = [default_index, {"metric_type":"L2", "index_type": "FLAT", "params":{"nlist": 1024}}]
         for index in indexs:
             connect.create_index(collection, field_name, index)
@@ -310,6 +312,7 @@ class TestIndexBase:
         '''
         metric_type = "IP"
         ids = connect.insert(collection, default_entities)
+        connect.flush([collection])
         get_simple_index["metric_type"] = metric_type
         connect.create_index(collection, field_name, get_simple_index)
         connect.load_collection(collection)
@@ -404,6 +407,7 @@ class TestIndexBase:
         expected: return code 0, and describe index result equals with the second index params
         '''
         ids = connect.insert(collection, default_entities)
+        connect.flush([collection])
         connect.load_collection(collection)
         stats = connect.get_collection_stats(collection)
         assert stats["row_count"] == default_nb
@@ -649,6 +653,7 @@ class TestIndexBinary:
         '''
         nq = get_nq
         ids = connect.insert(binary_collection, default_binary_entities)
+        connect.flush([binary_collection])
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
         connect.load_collection(binary_collection)
         query, vecs = gen_query_vectors(binary_field_name, default_binary_entities, default_top_k, nq, metric_type="JACCARD")
