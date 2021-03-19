@@ -6,6 +6,7 @@ import (
 	"github.com/mitchellh/mapstructure"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/memms"
 	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
 )
 
@@ -30,6 +31,11 @@ func (f *Factory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error)
 
 func (f *Factory) NewTtMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 	return newRmqTtMsgStream(ctx, f.ReceiveBufSize, f.RmqBufSize, f.dispatcherFactory.NewUnmarshalDispatcher())
+}
+
+func (f *Factory) NewQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	memms.InitMmq()
+	return memms.NewMemMsgStream(ctx, f.ReceiveBufSize)
 }
 
 func NewFactory() msgstream.Factory {

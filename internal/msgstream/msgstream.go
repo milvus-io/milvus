@@ -40,4 +40,5 @@ type Factory interface {
 	SetParams(params map[string]interface{}) error
 	NewMsgStream(ctx context.Context) (MsgStream, error)
 	NewTtMsgStream(ctx context.Context) (MsgStream, error)
+	NewQueryMsgStream(ctx context.Context) (MsgStream, error)
 }

@@ -31,6 +31,10 @@ func (f *Factory) NewTtMsgStream(ctx context.Context) (msgstream.MsgStream, erro
 	return newPulsarTtMsgStream(ctx, f.PulsarAddress, f.ReceiveBufSize, f.PulsarBufSize, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
+func (f *Factory) NewQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	return f.NewMsgStream(ctx)
+}
+
 func NewFactory() msgstream.Factory {
 	f := &Factory{
 		dispatcherFactory: msgstream.ProtoUDFactory{},
