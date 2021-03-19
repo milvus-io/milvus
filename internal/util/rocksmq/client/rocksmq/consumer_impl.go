@@ -1,15 +1,12 @@
 package rocksmq
 
-import (
-	"context"
-)
-
 type consumer struct {
 	topic        string
 	client       *client
 	consumerName string
 	options      ConsumerOptions
 
+	msgMutex  chan struct{}
 	messageCh chan ConsumerMessage
 }
 
@@ -28,7 +25,7 @@ func newConsumer(c *client, options ConsumerOptions) (*consumer, error) {
 
 	messageCh := options.MessageChannel
 	if options.MessageChannel == nil {
-		messageCh = make(chan ConsumerMessage, 10)
+		messageCh = make(chan ConsumerMessage, 1)
 	}
 
 	return &consumer{
@@ -36,6 +33,7 @@ func newConsumer(c *client, options ConsumerOptions) (*consumer, error) {
 		client:       c,
 		consumerName: options.SubscriptionName,
 		options:      options,
+		msgMutex:     make(chan struct{}, 1),
 		messageCh:    messageCh,
 	}, nil
 }
@@ -44,17 +42,18 @@ func (c *consumer) Subscription() string {
 	return c.consumerName
 }
 
-func (c *consumer) Receive(ctx context.Context) (ConsumerMessage, error) {
-	msgs, err := c.client.server.Consume(c.consumerName, c.topic, 1)
-	if err != nil {
-		return ConsumerMessage{}, err
-	}
+func (c *consumer) Topic() string {
+	return c.topic
+}
 
-	if len(msgs) == 0 {
-		return ConsumerMessage{}, nil
-	}
+func (c *consumer) MsgMutex() chan struct{} {
+	return c.msgMutex
+}
 
-	return ConsumerMessage{
-		Payload: msgs[0].Payload,
-	}, nil
+func (c *consumer) Chan() <-chan ConsumerMessage {
+	return c.messageCh
+}
+
+func (c *consumer) Seek(id UniqueID) error { //nolint:govet
+	return c.client.server.Seek(c.topic, c.consumerName, id)
 }

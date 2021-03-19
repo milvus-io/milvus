@@ -1,10 +1,9 @@
 package rocksmq
 
-import (
-	"context"
-)
+import server "github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
 
 type SubscriptionInitialPosition int
+type UniqueID = server.UniqueID
 
 const (
 	SubscriptionPositionLatest SubscriptionInitialPosition = iota
@@ -28,16 +27,23 @@ type ConsumerOptions struct {
 }
 
 type ConsumerMessage struct {
+	MsgID   UniqueID
 	Payload []byte
 }
 
 type Consumer interface {
-	// returns the substription for the consumer
+	// returns the subscription for the consumer
 	Subscription() string
 
-	// Receive a single message
-	Receive(ctx context.Context) (ConsumerMessage, error)
+	// returns the topic for the consumer
+	Topic() string
 
-	// TODO: Chan returns a channel to consume messages from
-	// Chan() <-chan ConsumerMessage
+	// Signal channel
+	MsgMutex() chan struct{}
+
+	// Message channel
+	Chan() <-chan ConsumerMessage
+
+	// Seek to the uniqueID position
+	Seek(UniqueID) error //nolint:govet
 }
