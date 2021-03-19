@@ -37,7 +37,7 @@ func (tc *TaskCondition) Ctx() context.Context {
 
 func NewTaskCondition(ctx context.Context) *TaskCondition {
 	return &TaskCondition{
-		done: make(chan error),
+		done: make(chan error, 1),
 		ctx:  ctx,
 	}
 }
