@@ -1,6 +1,7 @@
 import logging
 import time
 import pdb
+import copy
 import threading
 from multiprocessing import Pool, Process
 import numpy
@@ -27,7 +28,7 @@ class TestIndexBase:
         # if str(connect._cmd("mode")) == "CPU":
         #     if request.param["index_type"] in index_cpu_not_support():
         #         pytest.skip("sq8h not support in CPU mode")
-        return request.param
+        return copy.deepcopy(request.param)
 
     @pytest.fixture(
         scope="function",
@@ -578,7 +579,7 @@ class TestIndexBinary:
         # if str(connect._cmd("mode")) == "CPU":
         #     if request.param["index_type"] in index_cpu_not_support():
         #         pytest.skip("sq8h not support in CPU mode")
-        return request.param
+        return copy.deepcopy(request.param)
 
     @pytest.fixture(
         scope="function",
@@ -820,7 +821,7 @@ class TestIndexAsync:
         # if str(connect._cmd("mode")) == "CPU":
         #     if request.param["index_type"] in index_cpu_not_support():
         #         pytest.skip("sq8h not support in CPU mode")
-        return request.param
+        return copy.deepcopy(request.param)
 
     def check_result(self, res):
         logging.getLogger().info("In callback check search result")
