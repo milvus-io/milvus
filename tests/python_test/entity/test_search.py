@@ -1709,12 +1709,14 @@ class TestSearchInvalid(object):
         return request.param
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_search_with_invalid_collection(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             res = connect.search(collection_name, default_query)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_search_with_invalid_partition(self, connect, collection, get_invalid_partition):
         # tag = " "
         tag = get_invalid_partition
@@ -1722,12 +1724,14 @@ class TestSearchInvalid(object):
             res = connect.search(collection, default_query, partition_tags=tag)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_search_with_invalid_field_name(self, connect, collection, get_invalid_field):
         fields = [get_invalid_field]
         with pytest.raises(Exception) as e:
             res = connect.search(collection, default_query, fields=fields)
 
     @pytest.mark.level(1)
+    @pytest.mark.tags("0331")
     def test_search_with_not_existed_field(self, connect, collection):
         fields = [gen_unique_str("field_name")]
         with pytest.raises(Exception) as e:
@@ -1745,6 +1749,7 @@ class TestSearchInvalid(object):
         yield request.param
 
     @pytest.mark.level(1)
+    @pytest.mark.tags("0331")
     def test_search_with_invalid_top_k(self, connect, collection, get_top_k):
         '''
         target: test search function, with the wrong top_k
@@ -1768,6 +1773,7 @@ class TestSearchInvalid(object):
         yield request.param
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_search_with_invalid_params(self, connect, collection, get_simple_index, get_search_params):
         '''
         target: test search function, with the wrong nprobe
@@ -1788,6 +1794,7 @@ class TestSearchInvalid(object):
             res = connect.search(collection, query)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_search_with_invalid_params_binary(self, connect, binary_collection):
         '''
         target: test search function, with the wrong nprobe
@@ -1806,6 +1813,7 @@ class TestSearchInvalid(object):
             res = connect.search(binary_collection, query)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_search_with_empty_params(self, connect, collection, args, get_simple_index):
         '''
         target: test search function, with empty search params
