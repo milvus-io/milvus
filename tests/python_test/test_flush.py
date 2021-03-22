@@ -49,7 +49,7 @@ class TestFlushBase:
     def get_vector_field(self, request):
         yield request.param
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_flush_collection_not_existed(self, connect, collection):
         '''
         target: test flush, params collection_name not existed
@@ -65,7 +65,7 @@ class TestFlushBase:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "describe collection failed: can't find collection: %s" % collection_new
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_flush_empty_collection(self, connect, collection):
         '''
         method: flush collection with no vectors
@@ -101,7 +101,7 @@ class TestFlushBase:
         res_count = connect.get_collection_stats(id_collection)
         assert res_count["row_count"] == default_nb * 2
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_add_partitions_flush(self, connect, id_collection):
         '''
         method: add entities into partitions in collection, flush one
@@ -118,7 +118,7 @@ class TestFlushBase:
         res = connect.get_collection_stats(id_collection)
         assert res["row_count"] == 2 * default_nb
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_add_collections_flush(self, connect, id_collection):
         '''
         method: add entities into collections, flush one
@@ -174,7 +174,7 @@ class TestFlushBase:
         assert res["row_count"] == nb_new
 
     # TODO ci failed
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_add_flush_multiable_times(self, connect, collection):
         '''
         method: add entities, flush serveral times
@@ -223,7 +223,7 @@ class TestFlushBase:
     def same_ids(self, request):
         yield request.param
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_add_flush_same_ids(self, connect, id_collection, same_ids):
         '''
         method: add entities, with same ids, count(same ids) < 15, > 15
@@ -238,7 +238,7 @@ class TestFlushBase:
         res = connect.get_collection_stats(id_collection)
         assert res["row_count"] == default_nb
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_delete_flush_multiable_times(self, connect, collection):
         '''
         method: delete entities, flush serveral times
@@ -347,7 +347,7 @@ class TestFlushAsync:
         status = future.result()
         assert status is None
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_flush_async_long_drop_collection(self, connect, collection):
         for i in range(5):
             ids = connect.insert(collection, default_entities)
@@ -358,7 +358,7 @@ class TestFlushAsync:
         res = connect.drop_collection(collection)
         assert res is None
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_flush_async(self, connect, collection):
         connect.insert(collection, default_entities)
         logging.getLogger().info("before")
@@ -391,7 +391,7 @@ class TestCollectionNameInvalid(object):
         with pytest.raises(Exception) as e:
             connect.flush(collection_name)
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_flush_empty(self, connect, collection):
         ids = connect.insert(collection, default_entities)
         assert len(ids) == default_nb

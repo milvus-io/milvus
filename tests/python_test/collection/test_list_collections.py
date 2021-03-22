@@ -12,7 +12,7 @@ class TestListCollections:
       The following cases are used to test `list_collections` function
     ******************************************************************
     """
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_list_collections(self, connect, collection):
         '''
         target: test list collections
@@ -21,7 +21,7 @@ class TestListCollections:
         '''
         assert collection in connect.list_collections()
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_list_collections_multi_collections(self, connect):
         '''
         target: test list collections

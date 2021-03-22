@@ -41,7 +41,7 @@ class TestCreateCollection:
     def get_segment_row_limit(self, request):
         yield request.param
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_create_collection_fields(self, connect, get_filter_field, get_vector_field):
         '''
         target: test create normal collection with different fields
@@ -72,7 +72,7 @@ class TestCreateCollection:
         connect.create_collection(collection_name, fields)
         assert connect.has_collection(collection_name)
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_create_collection_after_insert(self, connect, collection):
         '''
         target: test insert vector, then create collection again
@@ -90,7 +90,7 @@ class TestCreateCollection:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "Create collection failed: collection %s exist" % collection
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_create_collection_after_insert_flush(self, connect, collection):
         '''
         target: test insert vector, then create collection again
@@ -119,7 +119,7 @@ class TestCreateCollection:
         with pytest.raises(Exception) as e:
             dis_connect.create_collection(collection_name, default_fields)
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_create_collection_existed(self, connect):
         '''
         target: test create collection but the collection name have already existed
@@ -136,7 +136,7 @@ class TestCreateCollection:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "Create collection failed: collection %s exist" % collection_name
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_create_after_drop_collection(self, connect, collection):
         '''
         target: create with the same collection name after collection dropped 
@@ -236,7 +236,7 @@ class TestCreateCollectionInvalid(object):
             connect.create_collection(collection_name, fields)
 
     @pytest.mark.level(2)
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_create_collection_with_invalid_collection_name(self, connect, get_invalid_string):
         collection_name = get_invalid_string
         with pytest.raises(Exception) as e:

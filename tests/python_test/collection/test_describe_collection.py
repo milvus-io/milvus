@@ -39,7 +39,7 @@ class TestDescribeCollection:
       The following cases are used to test `describe_collection` function, no data in collection
     ******************************************************************
     """
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_collection_fields(self, connect, get_filter_field, get_vector_field):
         '''
         target: test create normal collection with different fields, check info returned
@@ -65,7 +65,7 @@ class TestDescribeCollection:
                 assert field["name"] == vector_field["name"]
                 assert field["params"] == vector_field["params"]
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_describe_collection_after_index_created(self, connect, collection, get_simple_index):
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         index = connect.describe_index(collection, default_float_vec_field_name)
@@ -84,7 +84,7 @@ class TestDescribeCollection:
         with pytest.raises(Exception) as e:
             dis_connect.describe_collection(collection)
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_describe_collection_not_existed(self, connect):
         '''
         target: test if collection not created
@@ -133,7 +133,7 @@ class TestDescribeCollection:
       The following cases are used to test `describe_collection` function, and insert data in collection
     ******************************************************************
     """
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_describe_collection_fields_after_insert(self, connect, get_filter_field, get_vector_field):
         '''
         target: test create normal collection with different fields, check info returned
