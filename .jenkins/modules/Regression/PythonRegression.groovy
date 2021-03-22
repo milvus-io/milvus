@@ -1,4 +1,5 @@
 timeout(time: 150, unit: 'MINUTES') {
+    def isTimeTriggeredBuild = currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0
     container('deploy-env') {
         dir ('milvus-helm-chart') {
             sh " helm version && \
@@ -49,7 +50,12 @@ timeout(time: 150, unit: 'MINUTES') {
         try {
             dir ('tests/python_test') {
                 sh "python3 -m pip install --no-cache-dir -r requirements.txt"
-                sh "pytest --tags=0331 --ip ${env.HELM_RELEASE_NAME}-milvus-ha.${env.HELM_RELEASE_NAMESPACE}.svc.cluster.local"
+                if (isTimeTriggeredBuild) {
+                    echo "This is Cron Job!"
+                    sh "pytest --tags=0331 --ip ${env.HELM_RELEASE_NAME}-milvus-ha.${env.HELM_RELEASE_NAMESPACE}.svc.cluster.local"
+                } else {
+                    sh "pytest --tags=0331 --ip ${env.HELM_RELEASE_NAME}-milvus-ha.${env.HELM_RELEASE_NAMESPACE}.svc.cluster.local"
+                }
             }
         } catch (exc) {
             echo 'PyTest Regression Failed !'
