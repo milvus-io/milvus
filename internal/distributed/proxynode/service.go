@@ -235,6 +235,8 @@ func (s *Server) init() error {
 	proxynode.Params.MasterAddress = Params.MasterAddress
 
 	s.proxynode.UpdateStateCode(internalpb.StateCode_Initializing)
+	log.Debug("proxynode",
+		zap.Any("state of proxynode", internalpb.StateCode_Initializing))
 
 	if err := s.proxynode.Init(); err != nil {
 		log.Debug("proxynode", zap.String("proxynode init error", err.Error()))

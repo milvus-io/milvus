@@ -62,8 +62,19 @@ func (node *ProxyNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 }
 
 func (node *ProxyNode) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+	log.Debug("InvalidateCollectionMetaCache",
+		zap.String("role", Params.RoleName),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+
 	collectionName := request.CollectionName
 	globalMetaCache.RemoveCollection(ctx, collectionName) // no need to return error, though collection may be not cached
+
+	log.Debug("InvalidateCollectionMetaCache Done",
+		zap.String("role", Params.RoleName),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -71,8 +82,6 @@ func (node *ProxyNode) InvalidateCollectionMetaCache(ctx context.Context, reques
 }
 
 func (node *ProxyNode) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
-	log.Debug("create collection...")
-
 	cct := &CreateCollectionTask{
 		ctx:                     ctx,
 		Condition:               NewTaskCondition(ctx),
@@ -89,6 +98,24 @@ func (node *ProxyNode) CreateCollection(ctx context.Context, request *milvuspb.C
 		}, nil
 	}
 
+	log.Debug("CreateCollection",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.Any("schema", request.Schema))
+	defer func() {
+		log.Debug("CreateCollection Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.Any("schema", request.Schema))
+	}()
+
 	err = cct.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
@@ -101,8 +128,6 @@ func (node *ProxyNode) CreateCollection(ctx context.Context, request *milvuspb.C
 }
 
 func (node *ProxyNode) DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
-	log.Debug("drop collection... ")
-
 	dct := &DropCollectionTask{
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
@@ -118,6 +143,22 @@ func (node *ProxyNode) DropCollection(ctx context.Context, request *milvuspb.Dro
 		}, nil
 	}
 
+	log.Debug("DropCollection",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+	defer func() {
+		log.Debug("DropCollection Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName))
+	}()
+
 	err = dct.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
@@ -130,8 +171,6 @@ func (node *ProxyNode) DropCollection(ctx context.Context, request *milvuspb.Dro
 }
 
 func (node *ProxyNode) HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
-	log.Debug("has collection... ")
-
 	hct := &HasCollectionTask{
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
@@ -149,6 +188,22 @@ func (node *ProxyNode) HasCollection(ctx context.Context, request *milvuspb.HasC
 		}, nil
 	}
 
+	log.Debug("HasCollection",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+	defer func() {
+		log.Debug("HasCollection Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName))
+	}()
+
 	err = hct.WaitToFinish()
 	if err != nil {
 		return &milvuspb.BoolResponse{
@@ -163,7 +218,6 @@ func (node *ProxyNode) HasCollection(ctx context.Context, request *milvuspb.HasC
 }
 
 func (node *ProxyNode) LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
-	log.Debug("load collection...")
 	//ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	//defer cancel()
 
@@ -181,23 +235,35 @@ func (node *ProxyNode) LoadCollection(ctx context.Context, request *milvuspb.Loa
 			Reason:    err.Error(),
 		}, nil
 	}
-	log.Debug("LoadCollectionRequest received", zap.String("role", Params.RoleName), zap.Int64("msgID", lct.Base.MsgID), zap.String("collection", request.CollectionName))
+
+	log.Debug("LoadCollection",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+	defer func() {
+		log.Debug("LoadCollection Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName))
+	}()
+
 	err = lct.WaitToFinish()
 	if err != nil {
-		log.Error("LoadCollectionTask failed", zap.String("role", Params.RoleName), zap.Int64("msgID", lct.Base.MsgID), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
 
-	log.Debug("LoadCollectionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", lct.Base.MsgID))
 	return lct.result, nil
 }
 
 func (node *ProxyNode) ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	log.Debug("release collection...")
-
 	rct := &ReleaseCollectionTask{
 		ctx:                      ctx,
 		Condition:                NewTaskCondition(ctx),
@@ -213,6 +279,22 @@ func (node *ProxyNode) ReleaseCollection(ctx context.Context, request *milvuspb.
 		}, nil
 	}
 
+	log.Debug("ReleaseCollection",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+	defer func() {
+		log.Debug("ReleaseCollection Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName))
+	}()
+
 	err = rct.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
@@ -225,8 +307,6 @@ func (node *ProxyNode) ReleaseCollection(ctx context.Context, request *milvuspb.
 }
 
 func (node *ProxyNode) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-	log.Debug("describe collection...")
-
 	dct := &DescribeCollectionTask{
 		ctx:                       ctx,
 		Condition:                 NewTaskCondition(ctx),
@@ -244,6 +324,22 @@ func (node *ProxyNode) DescribeCollection(ctx context.Context, request *milvuspb
 		}, nil
 	}
 
+	log.Debug("DescribeCollection",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+	defer func() {
+		log.Debug("DescribeCollection Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName))
+	}()
+
 	err = dct.WaitToFinish()
 	if err != nil {
 		return &milvuspb.DescribeCollectionResponse{
@@ -258,7 +354,6 @@ func (node *ProxyNode) DescribeCollection(ctx context.Context, request *milvuspb
 }
 
 func (node *ProxyNode) GetCollectionStatistics(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
-	log.Debug("get collection statistics...")
 	g := &GetCollectionsStatisticsTask{
 		ctx:                            ctx,
 		Condition:                      NewTaskCondition(ctx),
@@ -276,6 +371,22 @@ func (node *ProxyNode) GetCollectionStatistics(ctx context.Context, request *mil
 		}, nil
 	}
 
+	log.Debug("GetCollectionStatistics",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+	defer func() {
+		log.Debug("GetCollectionStatistics Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName))
+	}()
+
 	err = g.WaitToFinish()
 	if err != nil {
 		return &milvuspb.GetCollectionStatisticsResponse{
@@ -290,7 +401,6 @@ func (node *ProxyNode) GetCollectionStatistics(ctx context.Context, request *mil
 }
 
 func (node *ProxyNode) ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
-	log.Debug("show collections...")
 	sct := &ShowCollectionsTask{
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
@@ -308,6 +418,20 @@ func (node *ProxyNode) ShowCollections(ctx context.Context, request *milvuspb.Sh
 		}, nil
 	}
 
+	log.Debug("ShowCollections",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName))
+	defer func() {
+		log.Debug("ShowCollections Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName))
+	}()
+
 	err = sct.WaitToFinish()
 	if err != nil {
 		return &milvuspb.ShowCollectionsResponse{
@@ -322,7 +446,6 @@ func (node *ProxyNode) ShowCollections(ctx context.Context, request *milvuspb.Sh
 }
 
 func (node *ProxyNode) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
-	log.Debug("create partition...")
 	cpt := &CreatePartitionTask{
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
@@ -338,6 +461,25 @@ func (node *ProxyNode) CreatePartition(ctx context.Context, request *milvuspb.Cr
 			Reason:    err.Error(),
 		}, nil
 	}
+
+	log.Debug("CreatePartition",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("partition", request.PartitionName))
+	defer func() {
+		log.Debug("CreatePartition Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.String("partition", request.PartitionName))
+	}()
+
 	err = cpt.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
@@ -349,7 +491,6 @@ func (node *ProxyNode) CreatePartition(ctx context.Context, request *milvuspb.Cr
 }
 
 func (node *ProxyNode) DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
-	log.Debug("drop partition...")
 	dpt := &DropPartitionTask{
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
@@ -366,6 +507,25 @@ func (node *ProxyNode) DropPartition(ctx context.Context, request *milvuspb.Drop
 			Reason:    err.Error(),
 		}, nil
 	}
+
+	log.Debug("DropPartition",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("partition", request.PartitionName))
+	defer func() {
+		log.Debug("DropPartition Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.String("partition", request.PartitionName))
+	}()
+
 	err = dpt.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
@@ -377,7 +537,6 @@ func (node *ProxyNode) DropPartition(ctx context.Context, request *milvuspb.Drop
 }
 
 func (node *ProxyNode) HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
-	log.Debug("has partition...")
 	hpt := &HasPartitionTask{
 		ctx:                 ctx,
 		Condition:           NewTaskCondition(ctx),
@@ -397,6 +556,25 @@ func (node *ProxyNode) HasPartition(ctx context.Context, request *milvuspb.HasPa
 			Value: false,
 		}, nil
 	}
+
+	log.Debug("HasPartition",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("partition", request.PartitionName))
+	defer func() {
+		log.Debug("HasPartition Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.String("partition", request.PartitionName))
+	}()
+
 	err = hpt.WaitToFinish()
 	if err != nil {
 		return &milvuspb.BoolResponse{
@@ -411,8 +589,6 @@ func (node *ProxyNode) HasPartition(ctx context.Context, request *milvuspb.HasPa
 }
 
 func (node *ProxyNode) LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitionsRequest) (*commonpb.Status, error) {
-	log.Debug("load partitions...")
-
 	lpt := &LoadPartitionTask{
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
@@ -428,6 +604,24 @@ func (node *ProxyNode) LoadPartitions(ctx context.Context, request *milvuspb.Loa
 		}, nil
 	}
 
+	log.Debug("LoadPartitions",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.Any("partitions", request.PartitionNames))
+	defer func() {
+		log.Debug("LoadPartitions Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.Any("partitions", request.PartitionNames))
+	}()
+
 	err = lpt.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
@@ -440,8 +634,6 @@ func (node *ProxyNode) LoadPartitions(ctx context.Context, request *milvuspb.Loa
 }
 
 func (node *ProxyNode) ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error) {
-	log.Debug("load partitions...")
-
 	rpt := &ReleasePartitionTask{
 		ctx:                      ctx,
 		Condition:                NewTaskCondition(ctx),
@@ -456,6 +648,24 @@ func (node *ProxyNode) ReleasePartitions(ctx context.Context, request *milvuspb.
 			Reason:    err.Error(),
 		}, nil
 	}
+
+	log.Debug("ReleasePartitions",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.Any("partitions", request.PartitionNames))
+	defer func() {
+		log.Debug("ReleasePartitions Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.Any("partitions", request.PartitionNames))
+	}()
 
 	err = rpt.WaitToFinish()
 	if err != nil {
@@ -473,7 +683,6 @@ func (node *ProxyNode) GetPartitionStatistics(ctx context.Context, request *milv
 }
 
 func (node *ProxyNode) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
-	log.Debug("show partitions...")
 	spt := &ShowPartitionsTask{
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
@@ -493,6 +702,22 @@ func (node *ProxyNode) ShowPartitions(ctx context.Context, request *milvuspb.Sho
 		}, nil
 	}
 
+	log.Debug("ShowPartitions",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+	defer func() {
+		log.Debug("ShowPartitions Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName))
+	}()
+
 	err = spt.WaitToFinish()
 	if err != nil {
 		return &milvuspb.ShowPartitionsResponse{
@@ -506,7 +731,6 @@ func (node *ProxyNode) ShowPartitions(ctx context.Context, request *milvuspb.Sho
 }
 
 func (node *ProxyNode) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
-	log.Debug("create index for...")
 	cit := &CreateIndexTask{
 		ctx:                ctx,
 		Condition:          NewTaskCondition(ctx),
@@ -522,6 +746,26 @@ func (node *ProxyNode) CreateIndex(ctx context.Context, request *milvuspb.Create
 		}, nil
 	}
 
+	log.Debug("CreateIndex",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("field", request.FieldName),
+		zap.Any("extra_params", request.ExtraParams))
+	defer func() {
+		log.Debug("CreateIndex Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.String("field", request.FieldName),
+			zap.Any("extra_params", request.ExtraParams))
+	}()
+
 	err = cit.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
@@ -534,7 +778,6 @@ func (node *ProxyNode) CreateIndex(ctx context.Context, request *milvuspb.Create
 }
 
 func (node *ProxyNode) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
-	log.Debug("Describe index for...")
 	dit := &DescribeIndexTask{
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
@@ -552,6 +795,26 @@ func (node *ProxyNode) DescribeIndex(ctx context.Context, request *milvuspb.Desc
 		}, nil
 	}
 
+	log.Debug("DescribeIndex",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("field", request.FieldName),
+		zap.String("index name", request.IndexName))
+	defer func() {
+		log.Debug("DescribeIndex Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.String("field", request.FieldName),
+			zap.String("index name", request.IndexName))
+	}()
+
 	err = dit.WaitToFinish()
 	if err != nil {
 		return &milvuspb.DescribeIndexResponse{
@@ -566,7 +829,6 @@ func (node *ProxyNode) DescribeIndex(ctx context.Context, request *milvuspb.Desc
 }
 
 func (node *ProxyNode) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
-	log.Debug("Drop index for...")
 	dit := &DropIndexTask{
 		ctx:              ctx,
 		Condition:        NewTaskCondition(ctx),
@@ -580,6 +842,27 @@ func (node *ProxyNode) DropIndex(ctx context.Context, request *milvuspb.DropInde
 			Reason:    err.Error(),
 		}, nil
 	}
+
+	log.Debug("DropIndex",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("field", request.FieldName),
+		zap.String("index name", request.IndexName))
+	defer func() {
+		log.Debug("DropIndex Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.String("field", request.FieldName),
+			zap.String("index name", request.IndexName))
+	}()
+
 	err = dit.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
@@ -608,6 +891,26 @@ func (node *ProxyNode) GetIndexState(ctx context.Context, request *milvuspb.GetI
 			},
 		}, nil
 	}
+
+	log.Debug("GetIndexState",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("field", request.FieldName),
+		zap.String("index name", request.IndexName))
+	defer func() {
+		log.Debug("GetIndexState Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.String("field", request.FieldName),
+			zap.String("index name", request.IndexName))
+	}()
 
 	err = dipt.WaitToFinish()
 	if err != nil {
@@ -658,6 +961,28 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 		}, nil
 	}
 
+	log.Debug("Insert",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", it.BaseInsertTask.InsertRequest.Base.MsgID),
+		zap.Uint64("timestamp", it.BaseInsertTask.InsertRequest.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("partition", request.PartitionName),
+		zap.Any("row data", "too many and too big, ignored"),
+		zap.Any("hash keys", "too many, ignored"))
+	defer func() {
+		log.Debug("Insert Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", it.BaseInsertTask.InsertRequest.Base.MsgID),
+			zap.Uint64("timestamp", it.BaseInsertTask.InsertRequest.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.String("partition", request.PartitionName),
+			zap.Any("row data", "too many and too big, ignored"),
+			zap.Any("hash keys", "too many, ignored"))
+	}()
+
 	err = it.WaitToFinish()
 	if err != nil {
 		return &milvuspb.InsertResponse{
@@ -697,6 +1022,28 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 		}, nil
 	}
 
+	log.Debug("Search",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", qt.Base.MsgID),
+		zap.Uint64("timestamp", qt.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.Any("partitions", request.PartitionNames),
+		zap.Any("dsl", request.Dsl),
+		zap.Any("placeholder group", "too many and too big, ignored"))
+	defer func() {
+		log.Debug("Search Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", qt.Base.MsgID),
+			zap.Uint64("timestamp", qt.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.Any("partitions", request.PartitionNames),
+			zap.Any("dsl", request.Dsl),
+			zap.Any("placeholder group", "too many and too big, ignored"))
+	}()
+
 	err = qt.WaitToFinish()
 	if err != nil {
 		return &milvuspb.SearchResults{
@@ -711,7 +1058,6 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 }
 
 func (node *ProxyNode) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error) {
-	log.Debug("proxynode", zap.Strings("Flush collections: ", request.CollectionNames))
 	ft := &FlushTask{
 		ctx:          ctx,
 		Condition:    NewTaskCondition(ctx),
@@ -726,6 +1072,22 @@ func (node *ProxyNode) Flush(ctx context.Context, request *milvuspb.FlushRequest
 			Reason:    err.Error(),
 		}, nil
 	}
+
+	log.Debug("Flush",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.Any("collections", request.CollectionNames))
+	defer func() {
+		log.Debug("Flush Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.Any("collections", request.CollectionNames))
+	}()
 
 	err = ft.WaitToFinish()
 	if err != nil {
@@ -743,6 +1105,11 @@ func (node *ProxyNode) GetDdChannel(ctx context.Context, request *internalpb.Get
 }
 
 func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
+	log.Debug("GetPersistentSegmentInfo",
+		zap.String("role", Params.RoleName),
+		zap.String("db", req.DbName),
+		zap.Any("collection", req.CollectionName))
+
 	resp := &milvuspb.GetPersistentSegmentInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -790,6 +1157,11 @@ func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvus
 }
 
 func (node *ProxyNode) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error) {
+	log.Debug("GetQuerySegmentInfo",
+		zap.String("role", Params.RoleName),
+		zap.String("db", req.DbName),
+		zap.Any("collection", req.CollectionName))
+
 	resp := &milvuspb.GetQuerySegmentInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -895,6 +1267,10 @@ func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName strin
 
 func (node *ProxyNode) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
+	log.Debug("RegisterLink",
+		zap.String("role", Params.RoleName),
+		zap.Any("state code of proxynode", code))
+
 	if code != internalpb.StateCode_Healthy {
 		return &milvuspb.RegisterLinkResponse{
 			Address: nil,
