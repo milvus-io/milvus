@@ -188,7 +188,7 @@ class TestSearchBase:
                 res = connect.search(collection, query)
 
     @pytest.mark.skip("r0.3-test")
-    def test_search_field(self, connect, collection, get_top_k, get_nq):
+    def _test_search_field(self, connect, collection, get_top_k, get_nq):
         '''
         target: test basic search function, all the search params is correct, change top-k value
         method: search with the given vectors, check the result
@@ -956,7 +956,7 @@ class TestSearchBase:
                 assert res[i]._distances[1] > epsilon
 
     @pytest.mark.skip("r0.3-test")
-    def test_query_entities_with_field_less_than_top_k(self, connect, id_collection):
+    def _test_query_entities_with_field_less_than_top_k(self, connect, id_collection):
         """
         target: test search with field, and let return entities less than topk
         method: insert entities and build ivf_ index, and search with field, n_probe=1
