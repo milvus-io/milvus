@@ -1,5 +1,6 @@
-timeout(time: 150, unit: 'MINUTES') {
-    def isTimeTriggeredBuild = currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0
+def isTimeTriggeredBuild = currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0
+def regressionTimeout = isTimeTriggeredBuild ? "300" : "60"
+timeout(time: "${regressionTimeout}", unit: 'MINUTES') {
     container('deploy-env') {
         dir ('milvus-helm-chart') {
             sh " helm version && \
