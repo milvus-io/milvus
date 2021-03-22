@@ -1,9 +1,6 @@
 package grpcindexnode
 
 import (
-	"net"
-	"os"
-	"strconv"
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
@@ -35,11 +32,6 @@ func (pt *ParamTable) LoadFromArgs() {
 }
 
 func (pt *ParamTable) LoadFromEnv() {
-	indexServiceAddress := os.Getenv("INDEX_SERVICE_ADDRESS")
-	if indexServiceAddress != "" {
-		pt.IndexServerAddress = indexServiceAddress
-	}
-
 	Params.IP = funcutil.GetLocalIP()
 }
 
@@ -50,28 +42,11 @@ func (pt *ParamTable) initParams() {
 
 // todo remove and use load from env
 func (pt *ParamTable) initIndexServerAddress() {
-	addr, err := pt.Load("indexService.address")
+	ret, err := pt.Load("IndexServiceAddress")
 	if err != nil {
 		panic(err)
 	}
-
-	hostName, _ := net.LookupHost(addr)
-	if len(hostName) <= 0 {
-		if ip := net.ParseIP(addr); ip == nil {
-			panic("invalid ip indexServer.address")
-		}
-	}
-
-	port, err := pt.Load("indexService.port")
-	if err != nil {
-		panic(err)
-	}
-	_, err = strconv.Atoi(port)
-	if err != nil {
-		panic(err)
-	}
-
-	pt.IndexServerAddress = addr + ":" + port
+	pt.IndexServerAddress = ret
 }
 
 func (pt *ParamTable) initPort() {

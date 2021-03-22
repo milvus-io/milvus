@@ -74,7 +74,7 @@ func (node *ProxyNode) Init() error {
 	// todo wait for proxyservice state changed to Healthy
 	ctx := context.Background()
 
-	err := funcutil.WaitForComponentHealthy(ctx, node.proxyService, "ProxyService", 100, time.Millisecond*200)
+	err := funcutil.WaitForComponentHealthy(ctx, node.proxyService, "ProxyService", 1000000, time.Millisecond*200)
 	if err != nil {
 		return err
 	}
@@ -102,7 +102,7 @@ func (node *ProxyNode) Init() error {
 
 	// wait for dataservice state changed to Healthy
 	if node.dataService != nil {
-		err := funcutil.WaitForComponentHealthy(ctx, node.dataService, "DataService", 100, time.Millisecond*200)
+		err := funcutil.WaitForComponentHealthy(ctx, node.dataService, "DataService", 1000000, time.Millisecond*200)
 		if err != nil {
 			return err
 		}
@@ -110,7 +110,7 @@ func (node *ProxyNode) Init() error {
 
 	// wait for queryService state changed to Healthy
 	if node.queryService != nil {
-		err := funcutil.WaitForComponentHealthy(ctx, node.queryService, "QueryService", 100, time.Millisecond*200)
+		err := funcutil.WaitForComponentHealthy(ctx, node.queryService, "QueryService", 1000000, time.Millisecond*200)
 		if err != nil {
 			return err
 		}
@@ -118,7 +118,7 @@ func (node *ProxyNode) Init() error {
 
 	// wait for indexservice state changed to Healthy
 	if node.indexService != nil {
-		err := funcutil.WaitForComponentHealthy(ctx, node.indexService, "IndexService", 100, time.Millisecond*200)
+		err := funcutil.WaitForComponentHealthy(ctx, node.indexService, "IndexService", 1000000, time.Millisecond*200)
 		if err != nil {
 			return err
 		}

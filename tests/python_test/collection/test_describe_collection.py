@@ -68,10 +68,11 @@ class TestDescribeCollection:
     @pytest.mark.tags("0331", "l1")
     def test_describe_collection_after_index_created(self, connect, collection, get_simple_index):
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
-        index = connect.describe_index(collection, default_float_vec_field_name)
-        assert index["index_type"] == get_simple_index["index_type"]
-        assert index["metric_type"] == get_simple_index["metric_type"]
-        assert index["params"] == get_simple_index["params"]
+        if get_simple_index["index_type"] != "FLAT":
+            index = connect.describe_index(collection, default_float_vec_field_name)
+            assert index["index_type"] == get_simple_index["index_type"]
+            assert index["metric_type"] == get_simple_index["metric_type"]
+            assert index["params"] == get_simple_index["params"]
 
     @pytest.mark.level(2)
     @pytest.mark.tags("0331")

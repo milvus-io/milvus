@@ -28,6 +28,7 @@ type tSafer interface {
 	get() Timestamp
 	set(t Timestamp)
 	registerTSafeWatcher(t *tSafeWatcher)
+	close()
 }
 
 type tSafe struct {
@@ -62,5 +63,14 @@ func (ts *tSafe) set(t Timestamp) {
 	ts.tSafe = t
 	for _, watcher := range ts.watcherList {
 		watcher.notify()
+	}
+}
+
+func (ts *tSafe) close() {
+	ts.tSafeMu.Lock()
+	defer ts.tSafeMu.Unlock()
+
+	for _, watcher := range ts.watcherList {
+		close(watcher.notifyChan)
 	}
 }

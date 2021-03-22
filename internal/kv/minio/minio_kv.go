@@ -43,7 +43,7 @@ func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
 		return nil
 	}
 
-	err := retry.Retry(200, time.Millisecond*200, connectMinIOFn)
+	err := retry.Retry(100000, time.Millisecond*200, connectMinIOFn)
 	if err != nil {
 		return nil, err
 	}

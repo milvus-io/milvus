@@ -13,6 +13,7 @@ import (
 
 type serviceTimeNode struct {
 	baseNode
+	collectionID      UniqueID
 	replica           ReplicaInterface
 	timeTickMsgStream msgstream.MsgStream
 }
@@ -35,9 +36,18 @@ func (stNode *serviceTimeNode) Operate(ctx context.Context, in []Msg) ([]Msg, co
 		// TODO: add error handling
 	}
 
+	if serviceTimeMsg == nil {
+		return []Msg{}, ctx
+	}
+
 	// update service time
-	stNode.replica.getTSafe().set(serviceTimeMsg.timeRange.timestampMax)
-	//log.Debug("update tSafe to:", getPhysicalTime(serviceTimeMsg.timeRange.timestampMax))
+	ts := stNode.replica.getTSafe(stNode.collectionID)
+	if ts != nil {
+		ts.set(serviceTimeMsg.timeRange.timestampMax)
+		log.Debug("update tSafe:",
+			zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
+			zap.Int64("collectionID", stNode.collectionID))
+	}
 
 	if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {
 		log.Error("Error: send time tick into pulsar channel failed", zap.Error(err))
@@ -71,7 +81,7 @@ func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {
 	return stNode.timeTickMsgStream.Produce(context.TODO(), &msgPack)
 }
 
-func newServiceTimeNode(ctx context.Context, replica ReplicaInterface, factory msgstream.Factory) *serviceTimeNode {
+func newServiceTimeNode(ctx context.Context, replica ReplicaInterface, factory msgstream.Factory, collectionID UniqueID) *serviceTimeNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -85,6 +95,7 @@ func newServiceTimeNode(ctx context.Context, replica ReplicaInterface, factory m
 
 	return &serviceTimeNode{
 		baseNode:          baseNode,
+		collectionID:      collectionID,
 		replica:           replica,
 		timeTickMsgStream: timeTimeMsgStream,
 	}

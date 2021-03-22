@@ -1,10 +1,9 @@
 package queryservice
 
 import (
-	"strconv"
-
 	"errors"
 
+	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
@@ -21,8 +20,9 @@ type Replica interface {
 	getPartitionStates(dbID UniqueID, collectionID UniqueID, partitionIDs []UniqueID) ([]*querypb.PartitionStates, error)
 	releaseCollection(dbID UniqueID, collectionID UniqueID) error
 	releasePartition(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) error
-	addDmChannels(dbID UniqueID, collectionID UniqueID, channels2NodeID map[string]int64) error
-	getAssignedNodeIDByChannelName(dbID UniqueID, collectionID UniqueID, channel string) (int64, error)
+	addDmChannel(dbID UniqueID, collectionID UniqueID, channel string, watchedStartPos *internalPb.MsgPosition) error
+	addExcludeSegmentIDs(dbID UniqueID, collectionID UniqueID, excludeSegments []UniqueID) error
+	//getAssignedNodeIDByChannelName(dbID UniqueID, collectionID UniqueID, channel string) (int64, error)
 }
 
 type segment struct {
@@ -36,10 +36,12 @@ type partition struct {
 }
 
 type collection struct {
-	id              UniqueID
-	partitions      map[UniqueID]*partition
-	dmChannels2Node map[string]int64
-	schema          *schemapb.CollectionSchema
+	id                UniqueID
+	partitions        map[UniqueID]*partition
+	dmChannels        []string
+	dmChannels2Pos    map[string]*internalPb.MsgPosition
+	excludeSegmentIds []UniqueID
+	schema            *schemapb.CollectionSchema
 }
 
 type metaReplica struct {
@@ -62,12 +64,16 @@ func (mp *metaReplica) addCollection(dbID UniqueID, collectionID UniqueID, schem
 	//TODO:: assert dbID = 0 exist
 	if _, ok := mp.db2collections[dbID]; ok {
 		partitions := make(map[UniqueID]*partition)
-		channels := make(map[string]int64)
+		channels := make([]string, 0)
+		startPos := make(map[string]*internalPb.MsgPosition)
+		excludeSegmentIDs := make([]UniqueID, 0)
 		newCollection := &collection{
-			id:              collectionID,
-			partitions:      partitions,
-			schema:          schema,
-			dmChannels2Node: channels,
+			id:                collectionID,
+			partitions:        partitions,
+			schema:            schema,
+			dmChannels:        channels,
+			dmChannels2Pos:    startPos,
+			excludeSegmentIds: excludeSegmentIDs,
 		}
 		mp.db2collections[dbID] = append(mp.db2collections[dbID], newCollection)
 		return nil
@@ -216,8 +222,7 @@ func (mp *metaReplica) releaseCollection(dbID UniqueID, collectionID UniqueID) e
 		}
 	}
 
-	errorStr := "releaseCollection: can't find dbID or collectionID " + strconv.FormatInt(collectionID, 10)
-	return errors.New(errorStr)
+	return nil
 }
 
 func (mp *metaReplica) releasePartition(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) error {
@@ -232,17 +237,15 @@ func (mp *metaReplica) releasePartition(dbID UniqueID, collectionID UniqueID, pa
 		}
 	}
 
-	errorStr := "releasePartition: can't find dbID or collectionID or partitionID " + strconv.FormatInt(partitionID, 10)
-	return errors.New(errorStr)
+	return nil
 }
 
-func (mp *metaReplica) addDmChannels(dbID UniqueID, collectionID UniqueID, channels2NodeID map[string]int64) error {
+func (mp *metaReplica) addDmChannel(dbID UniqueID, collectionID UniqueID, channel string, watchedStartPos *internalPb.MsgPosition) error {
 	if collections, ok := mp.db2collections[dbID]; ok {
 		for _, collection := range collections {
 			if collectionID == collection.id {
-				for channel, id := range channels2NodeID {
-					collection.dmChannels2Node[channel] = id
-				}
+				collection.dmChannels = append(collection.dmChannels, channel)
+				collection.dmChannels2Pos[channel] = watchedStartPos
 				return nil
 			}
 		}
@@ -250,16 +253,14 @@ func (mp *metaReplica) addDmChannels(dbID UniqueID, collectionID UniqueID, chann
 	return errors.New("addDmChannels: can't find dbID or collectionID")
 }
 
-func (mp *metaReplica) getAssignedNodeIDByChannelName(dbID UniqueID, collectionID UniqueID, channel string) (int64, error) {
+func (mp *metaReplica) addExcludeSegmentIDs(dbID UniqueID, collectionID UniqueID, excludeSegments []UniqueID) error {
 	if collections, ok := mp.db2collections[dbID]; ok {
 		for _, collection := range collections {
 			if collectionID == collection.id {
-				if id, ok := collection.dmChannels2Node[channel]; ok {
-					return id, nil
-				}
+				collection.excludeSegmentIds = append(collection.excludeSegmentIds, excludeSegments...)
+				return nil
 			}
 		}
 	}
-
-	return 0, errors.New("getAssignedNodeIDByChannelName: can't find dbID or collectionID")
+	return errors.New("addExcludeSegmentIDs: can't find dbID or collectionID")
 }

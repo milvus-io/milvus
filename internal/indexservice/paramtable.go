@@ -1,7 +1,6 @@
 package indexservice
 
 import (
-	"net"
 	"path"
 	"strconv"
 	"sync"
@@ -38,8 +37,6 @@ func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
 		pt.initLogCfg()
-		pt.initAddress()
-		pt.initPort()
 		pt.initEtcdAddress()
 		pt.initMasterAddress()
 		pt.initMetaRootPath()
@@ -50,35 +47,6 @@ func (pt *ParamTable) Init() {
 		pt.initMinIOUseSSL()
 		pt.initMinioBucketName()
 	})
-}
-
-func (pt *ParamTable) initAddress() {
-	addr, err := pt.Load("indexService.address")
-	if err != nil {
-		panic(err)
-	}
-
-	hostName, _ := net.LookupHost(addr)
-	if len(hostName) <= 0 {
-		if ip := net.ParseIP(addr); ip == nil {
-			panic("invalid ip indexServer.address")
-		}
-	}
-
-	port, err := pt.Load("indexService.port")
-	if err != nil {
-		panic(err)
-	}
-	_, err = strconv.Atoi(port)
-	if err != nil {
-		panic(err)
-	}
-
-	pt.Address = addr + ":" + port
-}
-
-func (pt *ParamTable) initPort() {
-	pt.Port = pt.ParseInt("indexService.port")
 }
 
 func (pt *ParamTable) initEtcdAddress() {

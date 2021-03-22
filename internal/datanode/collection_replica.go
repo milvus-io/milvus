@@ -46,6 +46,7 @@ type Segment struct {
 	endTime       Timestamp // not using
 	startPosition *internalpb.MsgPosition
 	endPosition   *internalpb.MsgPosition // not using
+	channelName   string
 }
 
 type CollectionSegmentReplica struct {
@@ -99,6 +100,7 @@ func (replica *CollectionSegmentReplica) addSegment(
 		createTime:    0,
 		startPosition: position,
 		endPosition:   new(internalpb.MsgPosition),
+		channelName:   channelName,
 	}
 
 	seg.isNew.Store(true)

@@ -12,7 +12,8 @@ import (
 
 type insertNode struct {
 	baseNode
-	replica ReplicaInterface
+	collectionID UniqueID
+	replica      ReplicaInterface
 }
 
 type InsertData struct {
@@ -46,6 +47,10 @@ func (iNode *insertNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.
 		insertTimestamps: make(map[int64][]uint64),
 		insertRecords:    make(map[int64][]*commonpb.Blob),
 		insertOffset:     make(map[int64]int64),
+	}
+
+	if iMsg == nil {
+		return []Msg{}, ctx
 	}
 
 	// 1. hash insertMessages to insertData
@@ -119,6 +124,11 @@ func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *syn
 		return
 	}
 
+	if targetSegment.segmentType != segmentTypeGrowing {
+		wg.Done()
+		return
+	}
+
 	ids := insertData.insertIDs[segmentID]
 	timestamps := insertData.insertTimestamps[segmentID]
 	records := insertData.insertRecords[segmentID]
@@ -132,11 +142,13 @@ func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *syn
 		return
 	}
 
-	log.Debug("Do insert done", zap.Int("len", len(insertData.insertIDs[segmentID])))
+	log.Debug("Do insert done", zap.Int("len", len(insertData.insertIDs[segmentID])),
+		zap.Int64("segmentID", segmentID),
+		zap.Int64("collectionID", iNode.collectionID))
 	wg.Done()
 }
 
-func newInsertNode(replica ReplicaInterface) *insertNode {
+func newInsertNode(replica ReplicaInterface, collectionID UniqueID) *insertNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -145,7 +157,8 @@ func newInsertNode(replica ReplicaInterface) *insertNode {
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &insertNode{
-		baseNode: baseNode,
-		replica:  replica,
+		baseNode:     baseNode,
+		collectionID: collectionID,
+		replica:      replica,
 	}
 }

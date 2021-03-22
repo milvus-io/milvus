@@ -10,9 +10,9 @@ import (
 )
 
 type queryNodeInfo struct {
-	client         types.QueryNode
-	segments       []UniqueID
-	dmChannelNames []string
+	client       types.QueryNode
+	segments     map[UniqueID][]UniqueID
+	channels2Col map[UniqueID][]string
 }
 
 func (qn *queryNodeInfo) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
@@ -31,8 +31,20 @@ func (qn *queryNodeInfo) WatchDmChannels(ctx context.Context, in *querypb.WatchD
 	return qn.client.WatchDmChannels(ctx, in)
 }
 
-func (qn *queryNodeInfo) AddDmChannels(channels []string) {
-	qn.dmChannelNames = append(qn.dmChannelNames, channels...)
+func (qn *queryNodeInfo) AddDmChannels(channels []string, collectionID UniqueID) {
+	if _, ok := qn.channels2Col[collectionID]; !ok {
+		chs := make([]string, 0)
+		qn.channels2Col[collectionID] = chs
+	}
+	qn.channels2Col[collectionID] = append(qn.channels2Col[collectionID], channels...)
+}
+
+func (qn *queryNodeInfo) AddSegments(segmentIDs []UniqueID, collectionID UniqueID) {
+	if _, ok := qn.segments[collectionID]; !ok {
+		seg := make([]UniqueID, 0)
+		qn.segments[collectionID] = seg
+	}
+	qn.segments[collectionID] = append(qn.segments[collectionID], segmentIDs...)
 }
 
 func (qn *queryNodeInfo) AddQueryChannel(ctx context.Context, in *querypb.AddQueryChannelRequest) (*commonpb.Status, error) {
@@ -40,7 +52,13 @@ func (qn *queryNodeInfo) AddQueryChannel(ctx context.Context, in *querypb.AddQue
 }
 
 func (qn *queryNodeInfo) ReleaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	return qn.client.ReleaseCollection(ctx, in)
+	status, err := qn.client.ReleaseCollection(ctx, in)
+	if err != nil {
+		return status, err
+	}
+	delete(qn.segments, in.CollectionID)
+	delete(qn.channels2Col, in.CollectionID)
+	return status, nil
 }
 
 func (qn *queryNodeInfo) ReleasePartitions(ctx context.Context, in *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
@@ -48,11 +66,11 @@ func (qn *queryNodeInfo) ReleasePartitions(ctx context.Context, in *querypb.Rele
 }
 
 func newQueryNodeInfo(client types.QueryNode) *queryNodeInfo {
-	segments := make([]UniqueID, 0)
-	dmChannelNames := make([]string, 0)
+	segments := make(map[UniqueID][]UniqueID)
+	channels := make(map[UniqueID][]string)
 	return &queryNodeInfo{
-		client:         client,
-		segments:       segments,
-		dmChannelNames: dmChannelNames,
+		client:       client,
+		segments:     segments,
+		channels2Col: channels,
 	}
 }

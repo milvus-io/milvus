@@ -101,7 +101,7 @@ func (s *Server) init() error {
 		panic(err)
 	}
 	// wait for master init or healthy
-	err = funcutil.WaitForComponentInitOrHealthy(ctx, masterService, "MasterService", 100, time.Millisecond*200)
+	err = funcutil.WaitForComponentInitOrHealthy(ctx, masterService, "MasterService", 1000000, time.Millisecond*200)
 	if err != nil {
 		panic(err)
 	}
@@ -121,7 +121,7 @@ func (s *Server) init() error {
 	if err = dataService.Start(); err != nil {
 		panic(err)
 	}
-	err = funcutil.WaitForComponentInitOrHealthy(ctx, dataService, "DataService", 100, time.Millisecond*200)
+	err = funcutil.WaitForComponentInitOrHealthy(ctx, dataService, "DataService", 1000000, time.Millisecond*200)
 	if err != nil {
 		panic(err)
 	}

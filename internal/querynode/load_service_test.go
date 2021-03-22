@@ -1129,7 +1129,7 @@ func TestSegmentLoad_Search_Vector(t *testing.T) {
 	defer node.Stop()
 
 	ctx := node.queryNodeLoopCtx
-	node.loadService = newLoadService(ctx, nil, nil, nil, node.replica, nil)
+	node.loadService = newLoadService(ctx, nil, nil, nil, node.replica)
 
 	initTestMeta(t, node, collectionID, 0)
 

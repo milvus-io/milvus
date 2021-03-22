@@ -54,7 +54,7 @@ timeout(time: 150, unit: 'MINUTES') {
                     echo "This is Cron Job!"
                     sh "pytest --tags=0331 --ip ${env.HELM_RELEASE_NAME}-milvus-ha.${env.HELM_RELEASE_NAMESPACE}.svc.cluster.local"
                 } else {
-                    sh "pytest --tags=0331+l1 --ip ${env.HELM_RELEASE_NAME}-milvus-ha.${env.HELM_RELEASE_NAMESPACE}.svc.cluster.local"
+                    sh "pytest --tags=0331+l1 -n 2 --ip ${env.HELM_RELEASE_NAME}-milvus-ha.${env.HELM_RELEASE_NAMESPACE}.svc.cluster.local"
                 }
             }
         } catch (exc) {

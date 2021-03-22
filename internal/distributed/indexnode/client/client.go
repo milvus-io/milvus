@@ -45,7 +45,7 @@ func (c *Client) Init() error {
 		c.grpcClient = indexpb.NewIndexNodeClient(conn)
 		return nil
 	}
-	err := retry.Retry(10, time.Millisecond*200, connectGrpcFunc)
+	err := retry.Retry(100000, time.Millisecond*200, connectGrpcFunc)
 	if err != nil {
 		return err
 	}

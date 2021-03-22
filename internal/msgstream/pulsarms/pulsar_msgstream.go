@@ -2,17 +2,18 @@ package pulsarms
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"sync"
 	"time"
 
-	"errors"
-
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
 	"github.com/opentracing/opentracing-go"
+	"go.uber.org/zap"
+
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
@@ -20,7 +21,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 type TsMsg = msgstream.TsMsg
@@ -41,8 +41,9 @@ type UnmarshalDispatcher = msgstream.UnmarshalDispatcher
 type PulsarMsgStream struct {
 	ctx              context.Context
 	client           pulsar.Client
-	producers        []Producer
-	consumers        []Consumer
+	producers        map[string]Producer
+	producerChannels []string
+	consumers        map[string]Consumer
 	consumerChannels []string
 	repackFunc       RepackFunc
 	unmarshal        UnmarshalDispatcher
@@ -50,6 +51,7 @@ type PulsarMsgStream struct {
 	wait             *sync.WaitGroup
 	streamCancel     func()
 	pulsarBufSize    int64
+	producerLock     *sync.Mutex
 	consumerLock     *sync.Mutex
 	consumerReflects []reflect.SelectCase
 
@@ -63,8 +65,9 @@ func newPulsarMsgStream(ctx context.Context,
 	unmarshal UnmarshalDispatcher) (*PulsarMsgStream, error) {
 
 	streamCtx, streamCancel := context.WithCancel(ctx)
-	producers := make([]Producer, 0)
-	consumers := make([]Consumer, 0)
+	producers := make(map[string]Producer)
+	consumers := make(map[string]Consumer)
+	producerChannels := make([]string, 0)
 	consumerChannels := make([]string, 0)
 	consumerReflects := make([]reflect.SelectCase, 0)
 	receiveBuf := make(chan *MsgPack, receiveBufSize)
@@ -85,6 +88,7 @@ func newPulsarMsgStream(ctx context.Context,
 		ctx:              streamCtx,
 		client:           client,
 		producers:        producers,
+		producerChannels: producerChannels,
 		consumers:        consumers,
 		consumerChannels: consumerChannels,
 		unmarshal:        unmarshal,
@@ -92,6 +96,7 @@ func newPulsarMsgStream(ctx context.Context,
 		receiveBuf:       receiveBuf,
 		streamCancel:     streamCancel,
 		consumerReflects: consumerReflects,
+		producerLock:     &sync.Mutex{},
 		consumerLock:     &sync.Mutex{},
 		wait:             &sync.WaitGroup{},
 		scMap:            &sync.Map{},
@@ -101,22 +106,24 @@ func newPulsarMsgStream(ctx context.Context,
 }
 
 func (ms *PulsarMsgStream) AsProducer(channels []string) {
-	for i := 0; i < len(channels); i++ {
+	for _, channel := range channels {
 		fn := func() error {
-			pp, err := ms.client.CreateProducer(pulsar.ProducerOptions{Topic: channels[i]})
+			pp, err := ms.client.CreateProducer(pulsar.ProducerOptions{Topic: channel})
 			if err != nil {
 				return err
 			}
 			if pp == nil {
 				return errors.New("pulsar is not ready, producer is nil")
 			}
-
-			ms.producers = append(ms.producers, pp)
+			ms.producerLock.Lock()
+			ms.producers[channel] = pp
+			ms.producerChannels = append(ms.producerChannels, channel)
+			ms.producerLock.Unlock()
 			return nil
 		}
 		err := util.Retry(20, time.Millisecond*200, fn)
 		if err != nil {
-			errMsg := "Failed to create producer " + channels[i] + ", error = " + err.Error()
+			errMsg := "Failed to create producer " + channel + ", error = " + err.Error()
 			panic(errMsg)
 		}
 	}
@@ -124,14 +131,17 @@ func (ms *PulsarMsgStream) AsProducer(channels []string) {
 
 func (ms *PulsarMsgStream) AsConsumer(channels []string,
 	subName string) {
-	for i := 0; i < len(channels); i++ {
+	for _, channel := range channels {
+		if _, ok := ms.consumers[channel]; ok {
+			continue
+		}
 		fn := func() error {
 			receiveChannel := make(chan pulsar.ConsumerMessage, ms.pulsarBufSize)
 			pc, err := ms.client.Subscribe(pulsar.ConsumerOptions{
-				Topic:                       channels[i],
+				Topic:                       channel,
 				SubscriptionName:            subName,
 				Type:                        pulsar.KeyShared,
-				SubscriptionInitialPosition: pulsar.SubscriptionPositionLatest,
+				SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
 				MessageChannel:              receiveChannel,
 			})
 			if err != nil {
@@ -141,8 +151,8 @@ func (ms *PulsarMsgStream) AsConsumer(channels []string,
 				return errors.New("pulsar is not ready, consumer is nil")
 			}
 
-			ms.consumers = append(ms.consumers, pc)
-			ms.consumerChannels = append(ms.consumerChannels, channels[i])
+			ms.consumers[channel] = pc
+			ms.consumerChannels = append(ms.consumerChannels, channel)
 			ms.consumerReflects = append(ms.consumerReflects, reflect.SelectCase{
 				Dir:  reflect.SelectRecv,
 				Chan: reflect.ValueOf(pc.Chan()),
@@ -153,7 +163,7 @@ func (ms *PulsarMsgStream) AsConsumer(channels []string,
 		}
 		err := util.Retry(20, time.Millisecond*200, fn)
 		if err != nil {
-			errMsg := "Failed to create consumer " + channels[i] + ", error = " + err.Error()
+			errMsg := "Failed to create consumer " + channel + ", error = " + err.Error()
 			panic(errMsg)
 		}
 	}
@@ -233,6 +243,7 @@ func (ms *PulsarMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error 
 		return err
 	}
 	for k, v := range result {
+		channel := ms.producerChannels[k]
 		for i := 0; i < len(v.Msgs); i++ {
 			mb, err := v.Msgs[i].Marshal(v.Msgs[i])
 			if err != nil {
@@ -249,7 +260,7 @@ func (ms *PulsarMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error 
 			sp, spanCtx := trace.MsgSpanFromCtx(ctx, v.Msgs[i])
 			trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
 
-			if _, err := ms.producers[k].Send(
+			if _, err := ms.producers[channel].Send(
 				spanCtx,
 				msg,
 			); err != nil {
@@ -264,7 +275,6 @@ func (ms *PulsarMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error 
 }
 
 func (ms *PulsarMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) error {
-	producerLen := len(ms.producers)
 	for _, v := range msgPack.Msgs {
 		mb, err := v.Marshal(v)
 		if err != nil {
@@ -281,8 +291,9 @@ func (ms *PulsarMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) erro
 		sp, spanCtx := trace.MsgSpanFromCtx(ctx, v)
 		trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
 
-		for i := 0; i < producerLen; i++ {
-			if _, err := ms.producers[i].Send(
+		ms.producerLock.Lock()
+		for _, producer := range ms.producers {
+			if _, err := producer.Send(
 				spanCtx,
 				msg,
 			); err != nil {
@@ -291,6 +302,7 @@ func (ms *PulsarMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) erro
 				return err
 			}
 		}
+		ms.producerLock.Unlock()
 		sp.Finish()
 	}
 	return nil
@@ -319,7 +331,7 @@ func (ms *PulsarMsgStream) Consume() (*MsgPack, context.Context) {
 			sp.Finish()
 			return cm, ctx
 		case <-ms.ctx.Done():
-			log.Debug("context closed")
+			//log.Debug("context closed")
 			return nil, nil
 		}
 	}
@@ -469,18 +481,17 @@ func (ms *PulsarMsgStream) Chan() <-chan *MsgPack {
 }
 
 func (ms *PulsarMsgStream) Seek(mp *internalpb.MsgPosition) error {
-	for index, channel := range ms.consumerChannels {
-		if channel == mp.ChannelName {
-			messageID, err := typeutil.StringToPulsarMsgID(mp.MsgID)
-			if err != nil {
-				return err
-			}
-			err = ms.consumers[index].Seek(messageID)
-			if err != nil {
-				return err
-			}
-			return nil
+	if _, ok := ms.consumers[mp.ChannelName]; ok {
+		consumer := ms.consumers[mp.ChannelName]
+		messageID, err := typeutil.StringToPulsarMsgID(mp.MsgID)
+		if err != nil {
+			return err
 		}
+		err = consumer.Seek(messageID)
+		if err != nil {
+			return err
+		}
+		return nil
 	}
 
 	return errors.New("msgStream seek fail")
@@ -488,11 +499,12 @@ func (ms *PulsarMsgStream) Seek(mp *internalpb.MsgPosition) error {
 
 type PulsarTtMsgStream struct {
 	PulsarMsgStream
-	unsolvedBuf   map[Consumer][]TsMsg
-	msgPositions  map[Consumer]*internalpb.MsgPosition
-	unsolvedMutex *sync.Mutex
-	lastTimeStamp Timestamp
-	syncConsumer  chan int
+	unsolvedBuf     map[Consumer][]TsMsg
+	msgPositions    map[Consumer]*internalpb.MsgPosition
+	unsolvedMutex   *sync.Mutex
+	lastTimeStamp   Timestamp
+	syncConsumer    chan int
+	stopConsumeChan map[Consumer]chan bool
 }
 
 func newPulsarTtMsgStream(ctx context.Context,
@@ -505,6 +517,7 @@ func newPulsarTtMsgStream(ctx context.Context,
 		return nil, err
 	}
 	unsolvedBuf := make(map[Consumer][]TsMsg)
+	stopChannel := make(map[Consumer]chan bool)
 	msgPositions := make(map[Consumer]*internalpb.MsgPosition)
 	syncConsumer := make(chan int, 1)
 
@@ -514,19 +527,39 @@ func newPulsarTtMsgStream(ctx context.Context,
 		msgPositions:    msgPositions,
 		unsolvedMutex:   &sync.Mutex{},
 		syncConsumer:    syncConsumer,
+		stopConsumeChan: stopChannel,
 	}, nil
+}
+
+func (ms *PulsarTtMsgStream) addConsumer(consumer Consumer, channel string) {
+	if len(ms.consumers) == 0 {
+		ms.syncConsumer <- 1
+	}
+	ms.consumers[channel] = consumer
+	ms.unsolvedBuf[consumer] = make([]TsMsg, 0)
+	ms.consumerChannels = append(ms.consumerChannels, channel)
+	ms.msgPositions[consumer] = &internalpb.MsgPosition{
+		ChannelName: channel,
+		MsgID:       "",
+		Timestamp:   ms.lastTimeStamp,
+	}
+	stopConsumeChan := make(chan bool)
+	ms.stopConsumeChan[consumer] = stopConsumeChan
 }
 
 func (ms *PulsarTtMsgStream) AsConsumer(channels []string,
 	subName string) {
-	for i := 0; i < len(channels); i++ {
+	for _, channel := range channels {
+		if _, ok := ms.consumers[channel]; ok {
+			continue
+		}
 		fn := func() error {
 			receiveChannel := make(chan pulsar.ConsumerMessage, ms.pulsarBufSize)
 			pc, err := ms.client.Subscribe(pulsar.ConsumerOptions{
-				Topic:                       channels[i],
+				Topic:                       channel,
 				SubscriptionName:            subName,
 				Type:                        pulsar.KeyShared,
-				SubscriptionInitialPosition: pulsar.SubscriptionPositionLatest,
+				SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
 				MessageChannel:              receiveChannel,
 			})
 			if err != nil {
@@ -537,23 +570,13 @@ func (ms *PulsarTtMsgStream) AsConsumer(channels []string,
 			}
 
 			ms.consumerLock.Lock()
-			if len(ms.consumers) == 0 {
-				ms.syncConsumer <- 1
-			}
-			ms.consumers = append(ms.consumers, pc)
-			ms.unsolvedBuf[pc] = make([]TsMsg, 0)
-			ms.msgPositions[pc] = &internalpb.MsgPosition{
-				ChannelName: channels[i],
-				MsgID:       "",
-				Timestamp:   ms.lastTimeStamp,
-			}
-			ms.consumerChannels = append(ms.consumerChannels, channels[i])
+			ms.addConsumer(pc, channel)
 			ms.consumerLock.Unlock()
 			return nil
 		}
 		err := util.Retry(10, time.Millisecond*200, fn)
 		if err != nil {
-			errMsg := "Failed to create consumer " + channels[i] + ", error = " + err.Error()
+			errMsg := "Failed to create consumer " + channel + ", error = " + err.Error()
 			panic(errMsg)
 		}
 	}
@@ -728,79 +751,87 @@ func (ms *PulsarTtMsgStream) findTimeTick(consumer Consumer,
 				return
 			}
 			sp.Finish()
+		case <-ms.stopConsumeChan[consumer]:
+			return
 		}
 	}
 }
 
 func (ms *PulsarTtMsgStream) Seek(mp *internalpb.MsgPosition) error {
+	if len(mp.MsgID) == 0 {
+		return errors.New("when msgID's length equal to 0, please use AsConsumer interface")
+	}
 	var consumer Consumer
-	var messageID MessageID
-	for index, channel := range ms.consumerChannels {
-		if filepath.Base(channel) == filepath.Base(mp.ChannelName) {
-			consumer = ms.consumers[index]
-			if len(mp.MsgID) == 0 {
-				// TODO:: collection should has separate channels; otherwise will consume redundant msg
-				messageID = pulsar.EarliestMessageID()
-				break
-			}
-			seekMsgID, err := typeutil.StringToPulsarMsgID(mp.MsgID)
-			if err != nil {
-				return err
-			}
-			messageID = seekMsgID
-			break
-		}
+	var err error
+	var hasWatched bool
+	seekChannel := mp.ChannelName
+	subName := mp.MsgGroup
+	ms.consumerLock.Lock()
+	defer ms.consumerLock.Unlock()
+	consumer, hasWatched = ms.consumers[seekChannel]
+
+	if hasWatched {
+		return errors.New("the channel should has been subscribed")
 	}
 
-	if consumer != nil {
-		err := (consumer).Seek(messageID)
-		if err != nil {
-			return err
-		}
-		if messageID == nil {
+	receiveChannel := make(chan pulsar.ConsumerMessage, ms.pulsarBufSize)
+	consumer, err = ms.client.Subscribe(pulsar.ConsumerOptions{
+		Topic:                       seekChannel,
+		SubscriptionName:            subName,
+		Type:                        pulsar.KeyShared,
+		SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
+		MessageChannel:              receiveChannel,
+	})
+	if err != nil {
+		return err
+	}
+	if consumer == nil {
+		return errors.New("pulsar is not ready, consumer is nil")
+	}
+	seekMsgID, err := typeutil.StringToPulsarMsgID(mp.MsgID)
+	if err != nil {
+		return err
+	}
+	consumer.Seek(seekMsgID)
+	ms.addConsumer(consumer, seekChannel)
+
+	if len(consumer.Chan()) == 0 {
+		return nil
+	}
+	for {
+		select {
+		case <-ms.ctx.Done():
 			return nil
-		}
+		case pulsarMsg, ok := <-consumer.Chan():
+			if !ok {
+				return errors.New("consumer closed")
+			}
+			consumer.Ack(pulsarMsg)
 
-		ms.unsolvedMutex.Lock()
-		ms.unsolvedBuf[consumer] = make([]TsMsg, 0)
-		for {
-			select {
-			case <-ms.ctx.Done():
-				return nil
-			case pulsarMsg, ok := <-consumer.Chan():
-				if !ok {
-					return errors.New("consumer closed")
+			headerMsg := commonpb.MsgHeader{}
+			err := proto.Unmarshal(pulsarMsg.Payload(), &headerMsg)
+			if err != nil {
+				log.Error("Failed to unmarshal message header", zap.Error(err))
+			}
+			tsMsg, err := ms.unmarshal.Unmarshal(pulsarMsg.Payload(), headerMsg.Base.MsgType)
+			if err != nil {
+				log.Error("Failed to unmarshal tsMsg", zap.Error(err))
+			}
+			if tsMsg.Type() == commonpb.MsgType_TimeTick {
+				if tsMsg.BeginTs() >= mp.Timestamp {
+					return nil
 				}
-				consumer.Ack(pulsarMsg)
-
-				headerMsg := commonpb.MsgHeader{}
-				err := proto.Unmarshal(pulsarMsg.Payload(), &headerMsg)
-				if err != nil {
-					log.Error("Failed to unmarshal message header", zap.Error(err))
-				}
-				tsMsg, err := ms.unmarshal.Unmarshal(pulsarMsg.Payload(), headerMsg.Base.MsgType)
-				if err != nil {
-					log.Error("Failed to unmarshal tsMsg", zap.Error(err))
-				}
-				if tsMsg.Type() == commonpb.MsgType_TimeTick {
-					if tsMsg.BeginTs() >= mp.Timestamp {
-						ms.unsolvedMutex.Unlock()
-						return nil
-					}
-					continue
-				}
-				if tsMsg.BeginTs() > mp.Timestamp {
-					tsMsg.SetPosition(&msgstream.MsgPosition{
-						ChannelName: filepath.Base(pulsarMsg.Topic()),
-						MsgID:       typeutil.PulsarMsgIDToString(pulsarMsg.ID()),
-					})
-					ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
-				}
+				continue
+			}
+			if tsMsg.BeginTs() > mp.Timestamp {
+				tsMsg.SetPosition(&msgstream.MsgPosition{
+					ChannelName: filepath.Base(pulsarMsg.Topic()),
+					MsgID:       typeutil.PulsarMsgIDToString(pulsarMsg.ID()),
+				})
+				ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
 			}
 		}
 	}
-
-	return errors.New("msgStream seek fail")
 }
 
 func checkTimeTickMsg(msg map[Consumer]Timestamp,
@@ -839,10 +870,8 @@ func checkTimeTickMsg(msg map[Consumer]Timestamp,
 type InMemMsgStream struct {
 	buffer chan *MsgPack
 }
-
 func (ms *InMemMsgStream) Start() {}
 func (ms *InMemMsgStream) Close() {}
-
 func (ms *InMemMsgStream) ProduceOne(msg TsMsg) error {
 	msgPack := MsgPack{}
 	msgPack.BeginTs = msg.BeginTs()
@@ -851,23 +880,19 @@ func (ms *InMemMsgStream) ProduceOne(msg TsMsg) error {
 	buffer <- &msgPack
 	return nil
 }
-
 func (ms *InMemMsgStream) Produce(msgPack *MsgPack) error {
 	buffer <- msgPack
 	return nil
 }
-
 func (ms *InMemMsgStream) Broadcast(msgPack *MsgPack) error {
 	return ms.Produce(msgPack)
 }
-
 func (ms *InMemMsgStream) Consume() *MsgPack {
 	select {
 	case msgPack := <-ms.buffer:
 		return msgPack
 	}
 }
-
 func (ms *InMemMsgStream) Chan() <- chan *MsgPack {
 	return buffer
 }

@@ -21,6 +21,8 @@ import (
 func TestSearch_Search(t *testing.T) {
 	ctx := context.Background()
 
+	collectionID := UniqueID(0)
+
 	node := newQueryNodeMock()
 	initTestMeta(t, node, 0, 0)
 
@@ -111,6 +113,8 @@ func TestSearch_Search(t *testing.T) {
 
 	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica, msFactory)
 	go node.searchService.start()
+	node.replica.addTSafe(collectionID)
+	node.searchService.register(collectionID)
 
 	// start insert
 	timeRange := TimeRange{
@@ -143,7 +147,7 @@ func TestSearch_Search(t *testing.T) {
 					Timestamp: uint64(10 + 1000),
 					SourceID:  0,
 				},
-				CollectionID: UniqueID(0),
+				CollectionID: collectionID,
 				PartitionID:  defaultPartitionID,
 				SegmentID:    int64(0),
 				ChannelID:    "0",
@@ -209,8 +213,8 @@ func TestSearch_Search(t *testing.T) {
 	assert.NoError(t, err)
 
 	// dataSync
-	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica, msFactory)
-	go node.dataSyncService.start()
+	node.dataSyncServices[collectionID] = newDataSyncService(node.queryNodeLoopCtx, node.replica, msFactory, collectionID)
+	go node.dataSyncServices[collectionID].start()
 
 	time.Sleep(1 * time.Second)
 
@@ -219,6 +223,9 @@ func TestSearch_Search(t *testing.T) {
 
 func TestSearch_SearchMultiSegments(t *testing.T) {
 	ctx := context.Background()
+
+	collectionID := UniqueID(0)
+
 	pulsarURL := Params.PulsarAddress
 	const receiveBufSize = 1024
 
@@ -309,6 +316,8 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 
 	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica, msFactory)
 	go node.searchService.start()
+	node.replica.addTSafe(collectionID)
+	node.searchService.register(collectionID)
 
 	// start insert
 	timeRange := TimeRange{
@@ -345,7 +354,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 					Timestamp: uint64(i + 1000),
 					SourceID:  0,
 				},
-				CollectionID: UniqueID(0),
+				CollectionID: collectionID,
 				PartitionID:  defaultPartitionID,
 				SegmentID:    int64(segmentID),
 				ChannelID:    "0",
@@ -411,8 +420,8 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	assert.NoError(t, err)
 
 	// dataSync
-	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica, msFactory)
-	go node.dataSyncService.start()
+	node.dataSyncServices[collectionID] = newDataSyncService(node.queryNodeLoopCtx, node.replica, msFactory, collectionID)
+	go node.dataSyncServices[collectionID].start()
 
 	time.Sleep(1 * time.Second)
 

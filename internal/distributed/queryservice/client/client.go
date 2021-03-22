@@ -32,7 +32,7 @@ func NewClient(address string, timeout time.Duration) (*Client, error) {
 		conn:       nil,
 		addr:       address,
 		timeout:    timeout,
-		retry:      3,
+		retry:      300,
 	}, nil
 }
 

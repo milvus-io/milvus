@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/zilliztech/milvus-distributed/internal/log"
+	"go.uber.org/zap"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -16,6 +19,7 @@ import (
 type Cache interface {
 	GetCollectionID(ctx context.Context, collectionName string) (typeutil.UniqueID, error)
 	GetPartitionID(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error)
+	GetPartitions(ctx context.Context, collectionName string) (map[string]typeutil.UniqueID, error)
 	GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error)
 	RemoveCollection(ctx context.Context, collectionName string)
 	RemovePartition(ctx context.Context, collectionName string, partitionName string)
@@ -52,83 +56,143 @@ func NewMetaCache(client types.MasterService) (*MetaCache, error) {
 	}, nil
 }
 
-func (m *MetaCache) readCollectionID(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
+func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
 	m.mu.RLock()
+	collInfo, ok := m.collInfo[collectionName]
+
+	if !ok {
+		m.mu.RUnlock()
+		coll, err := m.describeCollection(ctx, collectionName)
+		if err != nil {
+			return 0, err
+		}
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		m.updateCollection(coll, collectionName)
+		collInfo = m.collInfo[collectionName]
+		return collInfo.collID, nil
+	}
 	defer m.mu.RUnlock()
 
-	collInfo, ok := m.collInfo[collectionName]
-	if !ok {
-		return 0, fmt.Errorf("can't find collection name:%s", collectionName)
-	}
 	return collInfo.collID, nil
 }
 
-func (m *MetaCache) readCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error) {
+func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error) {
 	m.mu.RLock()
+	collInfo, ok := m.collInfo[collectionName]
+
+	if !ok {
+		m.mu.RUnlock()
+		coll, err := m.describeCollection(ctx, collectionName)
+		if err != nil {
+			return nil, err
+		}
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		m.updateCollection(coll, collectionName)
+		collInfo = m.collInfo[collectionName]
+		return collInfo.schema, nil
+	}
 	defer m.mu.RUnlock()
 
-	collInfo, ok := m.collInfo[collectionName]
-	if !ok {
-		return nil, fmt.Errorf("can't find collection name:%s", collectionName)
-	}
 	return collInfo.schema, nil
 }
 
-func (m *MetaCache) readPartitionID(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	collInfo, ok := m.collInfo[collectionName]
-	if !ok {
-		return 0, fmt.Errorf("can't find collection name:%s", collectionName)
-	}
-
-	partitionID, ok := collInfo.partInfo[partitionName]
-	if !ok {
-		return 0, fmt.Errorf("can't find partition name:%s", partitionName)
-	}
-	return partitionID, nil
-}
-
-func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
-	collID, err := m.readCollectionID(ctx, collectionName)
-	if err == nil {
-		return collID, nil
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	req := &milvuspb.DescribeCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_DescribeCollection,
-		},
-		CollectionName: collectionName,
-	}
-	coll, err := m.client.DescribeCollection(ctx, req)
-	if err != nil {
-		return 0, err
-	}
-	if coll.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return 0, errors.New(coll.Status.Reason)
-	}
-
+func (m *MetaCache) updateCollection(coll *milvuspb.DescribeCollectionResponse, collectionName string) {
 	_, ok := m.collInfo[collectionName]
 	if !ok {
 		m.collInfo[collectionName] = &collectionInfo{}
 	}
 	m.collInfo[collectionName].schema = coll.Schema
 	m.collInfo[collectionName].collID = coll.CollectionID
-
-	return m.collInfo[collectionName].collID, nil
 }
-func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error) {
-	collSchema, err := m.readCollectionSchema(ctx, collectionName)
-	if err == nil {
-		return collSchema, nil
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
 
+func (m *MetaCache) GetPartitionID(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error) {
+	_, err := m.GetCollectionID(ctx, collectionName)
+	if err != nil {
+		return 0, err
+	}
+
+	m.mu.RLock()
+
+	collInfo, ok := m.collInfo[collectionName]
+	if !ok {
+		m.mu.RUnlock()
+		return 0, fmt.Errorf("can't find collection name:%s", collectionName)
+	}
+
+	partitionID, ok := collInfo.partInfo[partitionName]
+	m.mu.RUnlock()
+
+	if !ok {
+		partitions, err := m.showPartitions(ctx, collectionName)
+		if err != nil {
+			return 0, err
+		}
+
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		log.Debug("proxynode", zap.Any("GetPartitionID:partitions before update", partitions), zap.Any("collectionName", collectionName))
+		m.updatePartitions(partitions, collectionName)
+		log.Debug("proxynode", zap.Any("GetPartitionID:partitions after update", partitions), zap.Any("collectionName", collectionName))
+
+		partInfo := m.collInfo[collectionName].partInfo
+		_, ok := partInfo[partitionName]
+		if !ok {
+			return 0, fmt.Errorf("partitionID of partitionName:%s can not be find", partitionName)
+		}
+		return partInfo[partitionName], nil
+	}
+	return partitionID, nil
+}
+
+func (m *MetaCache) GetPartitions(ctx context.Context, collectionName string) (map[string]typeutil.UniqueID, error) {
+	_, err := m.GetCollectionID(ctx, collectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	m.mu.RLock()
+
+	collInfo, ok := m.collInfo[collectionName]
+	if !ok {
+		m.mu.RUnlock()
+		return nil, fmt.Errorf("can't find collection name:%s", collectionName)
+	}
+
+	if collInfo.partInfo == nil || len(collInfo.partInfo) == 0 {
+		m.mu.RUnlock()
+
+		partitions, err := m.showPartitions(ctx, collectionName)
+		if err != nil {
+			return nil, err
+		}
+
+		m.mu.Lock()
+		defer m.mu.Unlock()
+
+		m.updatePartitions(partitions, collectionName)
+
+		ret := make(map[string]typeutil.UniqueID)
+		partInfo := m.collInfo[collectionName].partInfo
+		for k, v := range partInfo {
+			ret[k] = v
+		}
+		return ret, nil
+
+	}
+	defer m.mu.RUnlock()
+
+	ret := make(map[string]typeutil.UniqueID)
+	partInfo := m.collInfo[collectionName].partInfo
+	for k, v := range partInfo {
+		ret[k] = v
+	}
+
+	return ret, nil
+}
+
+func (m *MetaCache) describeCollection(ctx context.Context, collectionName string) (*milvuspb.DescribeCollectionResponse, error) {
 	req := &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_DescribeCollection,
@@ -142,45 +206,34 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName stri
 	if coll.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return nil, errors.New(coll.Status.Reason)
 	}
-
-	_, ok := m.collInfo[collectionName]
-	if !ok {
-		m.collInfo[collectionName] = &collectionInfo{}
-	}
-	m.collInfo[collectionName].schema = coll.Schema
-	m.collInfo[collectionName].collID = coll.CollectionID
-
-	return m.collInfo[collectionName].schema, nil
+	return coll, nil
 }
 
-func (m *MetaCache) GetPartitionID(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error) {
-	partitionID, err := m.readPartitionID(ctx, collectionName, partitionName)
-	if err == nil {
-		return partitionID, nil
-	}
-
+func (m *MetaCache) showPartitions(ctx context.Context, collectionName string) (*milvuspb.ShowPartitionsResponse, error) {
 	req := &milvuspb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_ShowPartitions,
 		},
 		CollectionName: collectionName,
 	}
+
 	partitions, err := m.client.ShowPartitions(ctx, req)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	if partitions.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return 0, fmt.Errorf("%s", partitions.Status.Reason)
+		return nil, fmt.Errorf("%s", partitions.Status.Reason)
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if len(partitions.PartitionIDs) != len(partitions.PartitionNames) {
-		return 0, fmt.Errorf("partition ids len: %d doesn't equal Partition name len %d",
+		return nil, fmt.Errorf("partition ids len: %d doesn't equal Partition name len %d",
 			len(partitions.PartitionIDs), len(partitions.PartitionNames))
 	}
 
+	return partitions, nil
+}
+
+func (m *MetaCache) updatePartitions(partitions *milvuspb.ShowPartitionsResponse, collectionName string) {
 	_, ok := m.collInfo[collectionName]
 	if !ok {
 		m.collInfo[collectionName] = &collectionInfo{
@@ -198,12 +251,7 @@ func (m *MetaCache) GetPartitionID(ctx context.Context, collectionName string, p
 			partInfo[partitions.PartitionNames[i]] = partitions.PartitionIDs[i]
 		}
 	}
-	_, ok = partInfo[partitionName]
-	if !ok {
-		return 0, fmt.Errorf("partitionID of partitionName:%s can not be find", partitionName)
-	}
-
-	return partInfo[partitionName], nil
+	m.collInfo[collectionName].partInfo = partInfo
 }
 
 func (m *MetaCache) RemoveCollection(ctx context.Context, collectionName string) {

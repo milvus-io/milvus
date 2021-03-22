@@ -2,11 +2,9 @@ package flowgraph
 
 import (
 	"context"
-	"log"
-
-	"errors"
 
 	"github.com/opentracing/opentracing-go"
+
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
@@ -40,8 +38,6 @@ func (inNode *InputNode) Operate(ctx context.Context, msgs []Msg) ([]Msg, contex
 
 	// TODO: add status
 	if msgPack == nil {
-		log.Println("null msg pack")
-		trace.LogError(sp, errors.New("null msg pack"))
 		return nil, ctx
 	}
 

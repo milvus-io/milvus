@@ -1,7 +1,9 @@
 package dataservice
 
 import (
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"go.uber.org/zap"
 )
 
 type statsHandler struct {
@@ -32,6 +34,6 @@ func (handler *statsHandler) HandleSegmentStat(segStats *internalpb.SegmentStati
 	segMeta.SealedTime = segStats.EndTime
 	segMeta.NumRows = segStats.NumRows
 	segMeta.MemSize = segStats.MemorySize
-
+	log.Debug("stats_handler update segment", zap.Any("segmentID", segMeta.SegmentID), zap.Any("State", segMeta.State))
 	return handler.meta.UpdateSegment(segMeta)
 }

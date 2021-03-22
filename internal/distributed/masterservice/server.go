@@ -123,7 +123,7 @@ func (s *Server) init() error {
 			panic(err)
 		}
 
-		err := funcutil.WaitForComponentInitOrHealthy(ctx, proxyService, "ProxyService", 100, 200*time.Millisecond)
+		err := funcutil.WaitForComponentInitOrHealthy(ctx, proxyService, "ProxyService", 1000000, 200*time.Millisecond)
 		if err != nil {
 			panic(err)
 		}
@@ -141,7 +141,7 @@ func (s *Server) init() error {
 		if err := dataService.Start(); err != nil {
 			panic(err)
 		}
-		err := funcutil.WaitForComponentInitOrHealthy(ctx, dataService, "DataService", 100, 200*time.Millisecond)
+		err := funcutil.WaitForComponentInitOrHealthy(ctx, dataService, "DataService", 1000000, 200*time.Millisecond)
 		if err != nil {
 			panic(err)
 		}

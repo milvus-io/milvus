@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 
 	"go.uber.org/zap"
@@ -552,13 +553,35 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 	}
 	st.CollectionID = collectionID
 	st.PartitionIDs = make([]UniqueID, 0)
-	for _, partitionName := range st.query.PartitionNames {
-		partitionID, err := globalMetaCache.GetPartitionID(ctx, collectionName, partitionName)
-		if err != nil {
-			continue
-		}
-		st.PartitionIDs = append(st.PartitionIDs, partitionID)
+
+	partitionsMap, err := globalMetaCache.GetPartitions(ctx, collectionName)
+	if err != nil {
+		return err
 	}
+
+	partitionsRecord := make(map[UniqueID]bool)
+	for _, partitionName := range st.query.PartitionNames {
+		pattern := fmt.Sprintf("^%s$", partitionName)
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return errors.New("invalid partition names")
+		}
+		found := false
+		for name, pID := range partitionsMap {
+			if re.MatchString(name) {
+				if _, exist := partitionsRecord[pID]; !exist {
+					st.PartitionIDs = append(st.PartitionIDs, pID)
+					partitionsRecord[pID] = true
+				}
+				found = true
+			}
+		}
+		if !found {
+			errMsg := fmt.Sprintf("PartitonName: %s not found", partitionName)
+			return errors.New(errMsg)
+		}
+	}
+
 	st.Dsl = st.query.Dsl
 	st.PlaceholderGroup = st.query.PlaceholderGroup
 

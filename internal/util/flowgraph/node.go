@@ -77,7 +77,7 @@ func (nodeCtx *nodeCtx) Start(ctx context.Context, wg *sync.WaitGroup) {
 				log.Println("nodeCtx.downstream length = ", len(nodeCtx.downstream))
 			}
 			if len(res) < downstreamLength {
-				log.Println("node result length = ", len(res))
+				// log.Println("node result length = ", len(res))
 				break
 			}
 

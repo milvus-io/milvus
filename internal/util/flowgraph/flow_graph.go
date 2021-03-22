@@ -77,6 +77,7 @@ func (fg *TimeTickedFlowGraph) Close() {
 			}
 			(*inStream.inStream).Close()
 		}
+		// v.Close()
 	}
 }
 

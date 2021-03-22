@@ -1,9 +1,6 @@
 package grpcproxynode
 
 import (
-	"net"
-	"os"
-	"strconv"
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
@@ -42,32 +39,6 @@ func (pt *ParamTable) LoadFromArgs() {
 }
 
 func (pt *ParamTable) LoadFromEnv() {
-
-	masterAddress := os.Getenv("MASTER_ADDRESS")
-	if masterAddress != "" {
-		pt.MasterAddress = masterAddress
-	}
-
-	proxyServiceAddress := os.Getenv("PROXY_SERVICE_ADDRESS")
-	if proxyServiceAddress != "" {
-		pt.ProxyServiceAddress = proxyServiceAddress
-	}
-
-	indexServiceAddress := os.Getenv("INDEX_SERVICE_ADDRESS")
-	if indexServiceAddress != "" {
-		pt.IndexServerAddress = indexServiceAddress
-	}
-
-	queryServiceAddress := os.Getenv("QUERY_SERVICE_ADDRESS")
-	if queryServiceAddress != "" {
-		pt.QueryServiceAddress = queryServiceAddress
-	}
-
-	dataServiceAddress := os.Getenv("DATA_SERVICE_ADDRESS")
-	if dataServiceAddress != "" {
-		pt.DataServiceAddress = dataServiceAddress
-	}
-
 	Params.IP = funcutil.GetLocalIP()
 }
 
@@ -86,96 +57,47 @@ func (pt *ParamTable) initPoxyServicePort() {
 }
 
 func (pt *ParamTable) initProxyServiceAddress() {
-	addr, err := pt.Load("proxyService.address")
+	ret, err := pt.Load("_PROXY_SERVICE_ADDRESS")
 	if err != nil {
 		panic(err)
 	}
-
-	hostName, _ := net.LookupHost(addr)
-	if len(hostName) <= 0 {
-		if ip := net.ParseIP(addr); ip == nil {
-			panic("invalid ip proxyService.address")
-		}
-	}
-
-	port, err := pt.Load("proxyService.port")
-	if err != nil {
-		panic(err)
-	}
-	_, err = strconv.Atoi(port)
-	if err != nil {
-		panic(err)
-	}
-	pt.ProxyServiceAddress = addr + ":" + port
+	pt.ProxyServiceAddress = ret
 }
 
 // todo remove and use load from env
 func (pt *ParamTable) initIndexServerAddress() {
-	addr, err := pt.Load("indexService.address")
+	ret, err := pt.Load("IndexServiceAddress")
 	if err != nil {
 		panic(err)
 	}
-
-	hostName, _ := net.LookupHost(addr)
-	if len(hostName) <= 0 {
-		if ip := net.ParseIP(addr); ip == nil {
-			panic("invalid ip indexService.address")
-		}
-	}
-
-	port, err := pt.Load("indexService.port")
-	if err != nil {
-		panic(err)
-	}
-	_, err = strconv.Atoi(port)
-	if err != nil {
-		panic(err)
-	}
-
-	pt.IndexServerAddress = addr + ":" + port
+	pt.IndexServerAddress = ret
 }
 
 // todo remove and use load from env
 func (pt *ParamTable) initMasterAddress() {
-
-	masterHost, err := pt.Load("master.address")
+	ret, err := pt.Load("_MasterAddress")
 	if err != nil {
 		panic(err)
 	}
-	port, err := pt.Load("master.port")
-	if err != nil {
-		panic(err)
-	}
-	pt.MasterAddress = masterHost + ":" + port
-
+	pt.MasterAddress = ret
 }
 
 // todo remove and use load from env
 func (pt *ParamTable) initDataServiceAddress() {
-	addr, err := pt.Load("dataService.address")
+	ret, err := pt.Load("_DataServiceAddress")
 	if err != nil {
 		panic(err)
 	}
-
-	port, err := pt.Load("dataService.port")
-	if err != nil {
-		panic(err)
-	}
-	pt.DataServiceAddress = addr + ":" + port
+	pt.DataServiceAddress = ret
 }
 
 // todo remove and use load from env
 func (pt *ParamTable) initQueryServiceAddress() {
-	addr, err := pt.Load("queryService.address")
+	ret, err := pt.Load("_QueryServiceAddress")
 	if err != nil {
 		panic(err)
 	}
-
-	port, err := pt.Load("queryService.port")
-	if err != nil {
-		panic(err)
-	}
-	pt.QueryServiceAddress = addr + ":" + port
+	pt.QueryServiceAddress = ret
 }
 
 func (pt *ParamTable) initPort() {

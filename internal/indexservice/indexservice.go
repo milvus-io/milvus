@@ -86,7 +86,7 @@ func (i *IndexService) Init() error {
 		i.metaTable = metakv
 		return nil
 	}
-	err := retry.Retry(200, time.Millisecond*200, connectEtcdFn)
+	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
 	if err != nil {
 		return err
 	}

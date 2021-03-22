@@ -32,7 +32,7 @@ func NewClient(addr string, timeout time.Duration) (*GrpcClient, error) {
 		addr:        addr,
 		timeout:     timeout,
 		grpcTimeout: time.Second * 5,
-		retry:       3,
+		retry:       300,
 	}, nil
 }
 

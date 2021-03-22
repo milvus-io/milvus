@@ -260,6 +260,43 @@ UpdateSealedSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_inde
     }
 }
 
+CStatus
+DropFieldData(CSegmentInterface c_segment, int64_t field_id) {
+    try {
+        auto segment_interface = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto segment = dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
+        AssertInfo(segment != nullptr, "segment conversion failed");
+        segment->DropFieldData(milvus::FieldId(field_id));
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedException;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}
+
+CStatus
+DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id) {
+    auto status = CStatus();
+    try {
+        auto segment_interface = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto segment = dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
+        AssertInfo(segment != nullptr, "segment conversion failed");
+        segment->DropIndex(milvus::FieldId(field_id));
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedException;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}
+
 //////////////////////////////    deprecated interfaces    //////////////////////////////
 CStatus
 UpdateSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info) {

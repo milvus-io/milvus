@@ -14,16 +14,13 @@ import "C"
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"math/rand"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
-
-	"github.com/zilliztech/milvus-distributed/internal/types"
-
-	"errors"
 
 	"go.uber.org/zap"
 
@@ -33,7 +30,9 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/rmqms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	queryPb "github.com/zilliztech/milvus-distributed/internal/proto/querypb"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
@@ -47,11 +46,11 @@ type QueryNode struct {
 	replica ReplicaInterface
 
 	// internal services
-	dataSyncService *dataSyncService
-	metaService     *metaService
-	searchService   *searchService
-	loadService     *loadService
-	statsService    *statsService
+	dataSyncServices map[UniqueID]*dataSyncService
+	metaService      *metaService
+	searchService    *searchService
+	loadService      *loadService
+	statsService     *statsService
 
 	// clients
 	masterService types.MasterService
@@ -70,10 +69,10 @@ func NewQueryNode(ctx context.Context, queryNodeID UniqueID, factory msgstream.F
 		queryNodeLoopCancel: cancel,
 		QueryNodeID:         queryNodeID,
 
-		dataSyncService: nil,
-		metaService:     nil,
-		searchService:   nil,
-		statsService:    nil,
+		dataSyncServices: make(map[UniqueID]*dataSyncService),
+		metaService:      nil,
+		searchService:    nil,
+		statsService:     nil,
 
 		msFactory: factory,
 	}
@@ -89,10 +88,10 @@ func NewQueryNodeWithoutID(ctx context.Context, factory msgstream.Factory) *Quer
 		queryNodeLoopCtx:    ctx1,
 		queryNodeLoopCancel: cancel,
 
-		dataSyncService: nil,
-		metaService:     nil,
-		searchService:   nil,
-		statsService:    nil,
+		dataSyncServices: make(map[UniqueID]*dataSyncService),
+		metaService:      nil,
+		searchService:    nil,
+		statsService:     nil,
 
 		msFactory: factory,
 	}
@@ -167,15 +166,13 @@ func (node *QueryNode) Start() error {
 	}
 
 	// init services and manager
-	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica, node.msFactory)
 	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica, node.msFactory)
 	//node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
-	node.loadService = newLoadService(node.queryNodeLoopCtx, node.masterService, node.dataService, node.indexService, node.replica, node.dataSyncService.dmStream)
+	node.loadService = newLoadService(node.queryNodeLoopCtx, node.masterService, node.dataService, node.indexService, node.replica)
 	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, node.loadService.segLoader.indexLoader.fieldStatsChan, node.msFactory)
 
 	// start services
-	go node.dataSyncService.start()
 	go node.searchService.start()
 	//go node.metaService.start()
 	go node.loadService.start()
@@ -192,8 +189,10 @@ func (node *QueryNode) Stop() error {
 	node.replica.freeAll()
 
 	// close services
-	if node.dataSyncService != nil {
-		node.dataSyncService.close()
+	for _, dsService := range node.dataSyncServices {
+		if dsService != nil {
+			dsService.close()
+		}
 	}
 	if node.searchService != nil {
 		node.searchService.close()
@@ -366,17 +365,20 @@ func (node *QueryNode) RemoveQueryChannel(ctx context.Context, in *queryPb.Remov
 }
 
 func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error) {
-	if node.dataSyncService == nil || node.dataSyncService.dmStream == nil {
-		errMsg := "null data sync service or null data manipulation stream"
+	log.Debug("starting WatchDmChannels ...", zap.String("ChannelIDs", fmt.Sprintln(in.ChannelIDs)))
+	collectionID := in.CollectionID
+	service, ok := node.dataSyncServices[collectionID]
+	if !ok || service.dmStream == nil {
+		errMsg := "null data sync service or null data manipulation stream, collectionID = " + fmt.Sprintln(collectionID)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    errMsg,
 		}
-
+		log.Error(errMsg)
 		return status, errors.New(errMsg)
 	}
 
-	switch t := node.dataSyncService.dmStream.(type) {
+	switch t := service.dmStream.(type) {
 	case *pulsarms.PulsarTtMsgStream:
 	case *rmqms.RmqTtMsgStream:
 	default:
@@ -386,19 +388,61 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    errMsg,
 		}
-
+		log.Error(errMsg)
 		return status, errors.New(errMsg)
+	}
+
+	getUniqueSubName := func() string {
+		prefixName := Params.MsgChannelSubName
+		return prefixName + "-" + strconv.FormatInt(collectionID, 10)
 	}
 
 	// add request channel
 	consumeChannels := in.ChannelIDs
-	consumeSubName := Params.MsgChannelSubName
-	node.dataSyncService.dmStream.AsConsumer(consumeChannels, consumeSubName)
+	toSeekInfo := make([]*internalpb.MsgPosition, 0)
+	toDirSubChannels := make([]string, 0)
+
+	consumeSubName := getUniqueSubName()
+
+	for _, info := range in.Infos {
+		if len(info.Pos.MsgID) == 0 {
+			toDirSubChannels = append(toDirSubChannels, info.ChannelID)
+			continue
+		}
+		info.Pos.MsgGroup = consumeSubName
+		toSeekInfo = append(toSeekInfo, info.Pos)
+
+		log.Debug("prevent inserting segments", zap.String("segmentIDs", fmt.Sprintln(info.ExcludedSegments)))
+		err := node.replica.addExcludedSegments(collectionID, info.ExcludedSegments)
+		if err != nil {
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			}
+			log.Error(err.Error())
+			return status, err
+		}
+	}
+
+	service.dmStream.AsConsumer(toDirSubChannels, consumeSubName)
+	for _, pos := range toSeekInfo {
+		err := service.dmStream.Seek(pos)
+		if err != nil {
+			errMsg := "msgStream seek error :" + err.Error()
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    errMsg,
+			}
+			log.Error(errMsg)
+			return status, errors.New(errMsg)
+		}
+	}
 	log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
+	log.Debug("WatchDmChannels done", zap.String("ChannelIDs", fmt.Sprintln(in.ChannelIDs)))
 	return status, nil
 }
 
@@ -418,12 +462,18 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 	hasCollection := node.replica.hasCollection(collectionID)
 	hasPartition := node.replica.hasPartition(partitionID)
 	if !hasCollection {
+		// loading init
 		err := node.replica.addCollection(collectionID, schema)
 		if err != nil {
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			status.Reason = err.Error()
 			return status, err
 		}
+		node.replica.initExcludedSegments(collectionID)
+		node.dataSyncServices[collectionID] = newDataSyncService(node.queryNodeLoopCtx, node.replica, node.msFactory, collectionID)
+		go node.dataSyncServices[collectionID].start()
+		node.replica.addTSafe(collectionID)
+		node.searchService.register(collectionID)
 	}
 	if !hasPartition {
 		err := node.replica.addPartition(collectionID, partitionID)
@@ -444,48 +494,28 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 		return status, nil
 	}
 
-	if len(in.SegmentIDs) != len(in.SegmentStates) {
-		err := errors.New("len(segmentIDs) should equal to len(segmentStates)")
-		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		status.Reason = err.Error()
-		return status, err
-	}
-
-	// segments are ordered before LoadSegments calling
-	//var position *internalpb.MsgPosition = nil
-	for i, state := range in.SegmentStates {
-		//thisPosition := state.StartPosition
-		if state.State <= commonpb.SegmentState_Growing {
-			//if position == nil {
-			//	position = &internalpb2.MsgPosition{
-			//		ChannelName: thisPosition.ChannelName,
-			//	}
-			//}
-			segmentIDs = segmentIDs[:i]
-			break
-		}
-		//position = state.StartPosition
-	}
-
-	//err = node.dataSyncService.seekSegment(position)
-	//if err != nil {
-	//	status := &commonpb.Status{
-	//		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-	//		Reason:    err.Error(),
-	//	}
-	//	return status, err
-	//}
-
-	err = node.loadService.loadSegment(collectionID, partitionID, segmentIDs, fieldIDs)
+	err = node.loadService.loadSegmentPassively(collectionID, partitionID, segmentIDs, fieldIDs)
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
 		return status, err
 	}
+
+	log.Debug("LoadSegments done", zap.String("segmentIDs", fmt.Sprintln(in.SegmentIDs)))
 	return status, nil
 }
 
 func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+	if _, ok := node.dataSyncServices[in.CollectionID]; ok {
+		node.dataSyncServices[in.CollectionID].close()
+		delete(node.dataSyncServices, in.CollectionID)
+		node.searchService.tSafeMutex.Lock()
+		delete(node.searchService.tSafeWatcher, in.CollectionID)
+		node.searchService.tSafeMutex.Unlock()
+		node.replica.removeTSafe(in.CollectionID)
+		node.replica.removeExcludedSegments(in.CollectionID)
+	}
+
 	err := node.replica.removeCollection(in.CollectionID)
 	if err != nil {
 		status := &commonpb.Status{
@@ -495,6 +525,7 @@ func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.Releas
 		return status, err
 	}
 
+	log.Debug("ReleaseCollection done", zap.Int64("collectionID", in.CollectionID))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
