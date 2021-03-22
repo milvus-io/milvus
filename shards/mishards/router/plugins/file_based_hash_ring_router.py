@@ -47,7 +47,12 @@ class Factory(RouterMixin):
     def _route(self, collection_name, range_array, partition_tags=None, metadata=None, **kwargs):
         # PXU TODO: Implement Thread-local Context
         # PXU TODO: Session life mgt
+        """Router filter segment files which status are not suitable to be search. So the ro nodes
+        do not filter files. Cause the writable node may update segment file status. In mishards
+        cluster, the metadata is used to keep consistent segment file status.
+        """
 
+        # Select all available partitions from metadata.
         if not partition_tags:
             cond = and_(
                 or_(Tables.table_id == collection_name, Tables.owner_table == collection_name),
@@ -58,6 +63,8 @@ class Factory(RouterMixin):
                         Tables.owner_table == collection_name)
                         # Tables.partition_tag.in_(partition_tags))
             if '_default' in partition_tags:
+                # There is not a partition entity in meta table, the default partition correspond
+                # to collection entity in meta.
                 default_par_cond = and_(Tables.table_id == collection_name, Tables.state != Tables.TO_DELETE)
                 cond = or_(cond, default_par_cond)
         try:
@@ -80,6 +87,7 @@ class Factory(RouterMixin):
                     collection_list.append(collection_name)
                     continue
 
+                # Here to support regex match.
                 for tag in partition_tags:
                     if re.match(tag, collection.partition_tag):
                         collection_list.append(collection.table_id)
@@ -104,6 +112,8 @@ class Factory(RouterMixin):
 
         db.remove_session()
 
+        # Use consistency hash to router segment files. The nodes are readonly nodes,
+        # and items are segment files.
         servers = self.readonly_topo.group_names
         logger.info('Available servers: {}'.format(list(servers)))
 
@@ -120,6 +130,7 @@ class Factory(RouterMixin):
             # routing[target_host].append({"id": str(f.id), "update_time": int(f.updated_time)})
             routing[target_host].append((str(f.id), int(f.updated_time)))
 
+        # Here to check files need to be updated.
         filter_routing = {}
         for host, filess in routing.items():
             ud_files = filter_file_to_update(host, filess)

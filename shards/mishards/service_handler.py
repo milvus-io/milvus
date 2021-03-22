@@ -116,6 +116,11 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         p_span = None if self.tracer.empty else context.get_active_span(
         ).context
         with self.tracer.start_span('get_routing', child_of=p_span):
+            # Here mishards query metadata to find available segment files
+            # and hash them to available ro nodes.
+            # Meanwhile, router check which segment files are updated by comparing
+            # `updated_time`. If updated, mishards try to invoke `reload_segments`
+            # to keep consistency.
             routing = self.router.routing(collection_id,
                                           partition_tags=partition_tags,
                                           metadata=metadata)
@@ -127,6 +132,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         with self.tracer.start_span('do_search', child_of=p_span) as span:
             if len(routing) == 0:
+                # Here routing size is zero means that no segment files are selected to
+                # search, we choose writable node to execute search request to keep
+                # consistent behavior between single milvus server and mishards cluster.
                 ft = self.router.connection().search(collection_id, topk, vectors, list(partition_tags), search_params, _async=True)
                 ret = ft.result(raw=True)
                 all_topk_results.append(ret)
@@ -135,6 +143,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 start = time.time()
                 for addr, files_tuple in routing.items():
                     search_file_ids, ud_file_ids = files_tuple
+                    # `ud_file_ids` is a list contains segment file ids to be updated.
                     if ud_file_ids:
                         logger.debug(f"<{addr}> needed update segment ids {ud_file_ids}")
                     conn = self.router.query_conn(addr, metadata=metadata)

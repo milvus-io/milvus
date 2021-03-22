@@ -261,6 +261,9 @@ class ConnectionGroup(topology.TopoGroup):
         return True
 
     def create(self, name, **kwargs):
+        """Create a new topo object and add in if not exist.
+        Here the topo object is a Pymilvus client instance.
+        """
         uri = kwargs.get('uri', None)
         if not uri:
             raise RuntimeError('\"uri\" is required to create connection pool')
@@ -285,8 +288,11 @@ class ConnectionTopology(topology.Topology):
         return out
 
     def create(self, name):
+        """Create a new connection group if not exist.
+        """
         group = ConnectionGroup(name)
         status = self.add_group(group)
         if status == topology.StatusType.DUPLICATED:
+            # The group has been created, return None
             group = None
         return status, group
