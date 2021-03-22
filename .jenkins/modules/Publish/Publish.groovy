@@ -14,7 +14,7 @@ dir ('build/docker/deploy') {
             sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${DOKCER_REGISTRY_URL}'
 
             sh 'docker pull registry.zilliz.com/milvus-distributed/milvus-distributed-dev:latest || true'
-            sh 'docker pull ${SOURCE_REPO}/master:${SOURCE_TAG} || true'
+            sh 'docker pull ${SOURCE_REPO}/milvus-distributed:${SOURCE_TAG} || true'
             sh 'docker-compose build --force-rm master'
             sh 'docker-compose push master'
         }
