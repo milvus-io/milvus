@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"math/rand"
 	"sort"
 	"strconv"
@@ -12,8 +11,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go/config"
 	"go.uber.org/zap"
 
 	nodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/querynode/client"
@@ -51,8 +48,6 @@ type QueryService struct {
 	enableGrpc bool
 
 	msFactory msgstream.Factory
-
-	closer io.Closer
 }
 
 func (qs *QueryService) Init() error {
@@ -65,9 +60,6 @@ func (qs *QueryService) Start() error {
 }
 
 func (qs *QueryService) Stop() error {
-	if err := qs.closer.Close(); err != nil {
-		return err
-	}
 	qs.loopCancel()
 	qs.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return nil
@@ -676,20 +668,6 @@ func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryServ
 		qcMutex:       &sync.Mutex{},
 		msFactory:     factory,
 	}
-
-	cfg := &config.Configuration{
-		ServiceName: "query_service",
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		},
-	}
-	tracer, closer, err := cfg.NewTracer()
-	if err != nil {
-		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
-	}
-	opentracing.SetGlobalTracer(tracer)
-	service.closer = closer
 
 	service.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return service, nil

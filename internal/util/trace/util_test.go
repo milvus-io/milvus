@@ -3,31 +3,13 @@ package trace
 import (
 	"context"
 	"fmt"
-	"io"
 	"testing"
 
 	"errors"
 
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
-	"github.com/uber/jaeger-client-go/config"
 )
-
-func InitTracing() io.Closer {
-	cfg := &config.Configuration{
-		ServiceName: "test",
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		},
-	}
-	tracer, closer, err := cfg.NewTracer()
-	if err != nil {
-		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
-	}
-	opentracing.SetGlobalTracer(tracer)
-	return closer
-}
 
 type simpleStruct struct {
 	name  string
@@ -36,7 +18,8 @@ type simpleStruct struct {
 
 func TestTracing(t *testing.T) {
 	//Already Init in each framework, this can be ignored in debug
-	closer := InitTracing()
+	tracer, closer, _ := InitTracing("test")
+	opentracing.SetGlobalTracer(tracer)
 	defer closer.Close()
 
 	// context normally can be propagated through func params

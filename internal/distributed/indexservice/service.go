@@ -2,7 +2,6 @@ package grpcindexservice
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"math"
 	"net"
@@ -13,7 +12,6 @@ import (
 
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go/config"
 	"github.com/zilliztech/milvus-distributed/internal/indexservice"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -21,6 +19,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"google.golang.org/grpc"
 )
@@ -56,6 +55,13 @@ func (s *Server) Run() error {
 func (s *Server) init() error {
 	Params.Init()
 	indexservice.Params.Init()
+
+	tracer, closer, err := trace.InitTracing("index_service")
+	if err != nil {
+		log.Error("index_service", zap.String("init trace err", err.Error()))
+	}
+	opentracing.SetGlobalTracer(tracer)
+	s.closer = closer
 
 	s.loopWg.Add(1)
 	go s.startGrpcLoop(Params.ServicePort)
@@ -131,7 +137,6 @@ func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFil
 func (s *Server) NotifyBuildIndex(ctx context.Context, nty *indexpb.NotifyBuildIndexRequest) (*commonpb.Status, error) {
 	return s.indexservice.NotifyBuildIndex(ctx, nty)
 }
-
 func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.loopWg.Done()
@@ -177,20 +182,6 @@ func NewServer(ctx context.Context) (*Server, error) {
 		indexservice: serverImp,
 		grpcErrChan:  make(chan error),
 	}
-
-	cfg := &config.Configuration{
-		ServiceName: "index_service",
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		},
-	}
-	tracer, closer, err := cfg.NewTracer()
-	if err != nil {
-		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
-	}
-	opentracing.SetGlobalTracer(tracer)
-	s.closer = closer
 
 	return s, nil
 }

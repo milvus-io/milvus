@@ -30,6 +30,10 @@ func (gcNode *gcNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Con
 		// TODO: add error handling
 	}
 
+	if gcMsg == nil {
+		return []Msg{}, ctx
+	}
+
 	// drop collections
 	for _, collectionID := range gcMsg.gcRecord.collections {
 		err := gcNode.replica.removeCollection(collectionID)

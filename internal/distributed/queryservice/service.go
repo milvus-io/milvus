@@ -2,6 +2,7 @@ package grpcqueryservice
 
 import (
 	"context"
+	"io"
 	"math"
 	"net"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 	qs "github.com/zilliztech/milvus-distributed/internal/queryservice"
 	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -40,6 +42,8 @@ type Server struct {
 
 	dataService   *dsc.Client
 	masterService *msc.GrpcClient
+
+	closer io.Closer
 }
 
 func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
@@ -75,6 +79,14 @@ func (s *Server) Run() error {
 func (s *Server) init() error {
 	ctx := context.Background()
 	Params.Init()
+	qs.Params.Init()
+
+	tracer, closer, err := trace.InitTracing("query_service")
+	if err != nil {
+		log.Error("query_service", zap.String("init trace err", err.Error()))
+	}
+	opentracing.SetGlobalTracer(tracer)
+	s.closer = closer
 
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
@@ -129,7 +141,6 @@ func (s *Server) init() error {
 		panic(err)
 	}
 
-	qs.Params.Init()
 	s.queryservice.UpdateStateCode(internalpb.StateCode_Initializing)
 
 	if err := s.queryservice.Init(); err != nil {
@@ -174,7 +185,11 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() error {
-	err := s.queryservice.Stop()
+	err := s.closer.Close()
+	if err != nil {
+		return err
+	}
+	err = s.queryservice.Stop()
 	s.loopCancel()
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()

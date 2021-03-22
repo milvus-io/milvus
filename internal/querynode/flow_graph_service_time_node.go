@@ -44,9 +44,9 @@ func (stNode *serviceTimeNode) Operate(ctx context.Context, in []Msg) ([]Msg, co
 	ts := stNode.replica.getTSafe(stNode.collectionID)
 	if ts != nil {
 		ts.set(serviceTimeMsg.timeRange.timestampMax)
-		log.Debug("update tSafe:",
-			zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
-			zap.Int64("collectionID", stNode.collectionID))
+		//log.Debug("update tSafe:",
+		//	zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
+		//	zap.Int64("collectionID", stNode.collectionID))
 	}
 
 	if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {

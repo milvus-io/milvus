@@ -2,7 +2,6 @@ package grpcproxyservice
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"math"
 	"net"
@@ -13,7 +12,6 @@ import (
 
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go/config"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -22,6 +20,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/proxyservice"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 	"google.golang.org/grpc"
 )
 
@@ -49,20 +48,6 @@ func NewServer(ctx1 context.Context, factory msgstream.Factory) (*Server, error)
 		grpcErrChan: make(chan error),
 	}
 
-	// TODO
-	cfg := &config.Configuration{
-		ServiceName: "proxy_service",
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		},
-	}
-	server.tracer, server.closer, err = cfg.NewTracer()
-	if err != nil {
-		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
-	}
-	opentracing.SetGlobalTracer(server.tracer)
-
 	server.proxyservice, err = proxyservice.NewProxyService(server.ctx, factory)
 	if err != nil {
 		return nil, err
@@ -87,6 +72,13 @@ func (s *Server) init() error {
 	Params.Init()
 	proxyservice.Params.Init()
 	log.Debug("init params done")
+
+	tracer, closer, err := trace.InitTracing("proxy_service")
+	if err != nil {
+		log.Error("proxy_service", zap.String("init trace err", err.Error()))
+	}
+	opentracing.SetGlobalTracer(tracer)
+	s.closer = closer
 
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.ServicePort)

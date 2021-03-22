@@ -21,7 +21,6 @@ import (
 	grpcqueryserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/queryservice/client"
 
 	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go/config"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -30,6 +29,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/proxynode"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
 
 const (
@@ -126,27 +126,26 @@ func (s *Server) init() error {
 	}
 	Params.LoadFromEnv()
 	Params.LoadFromArgs()
-
 	Params.Address = Params.IP + ":" + strconv.FormatInt(int64(Params.Port), 10)
+
+	proxynode.Params.Init()
+	log.Debug("init params done ...")
+	proxynode.Params.NetworkPort = Params.Port
+	proxynode.Params.IP = Params.IP
+	proxynode.Params.NetworkAddress = Params.Address
+	// for purpose of ID Allocator
+	proxynode.Params.MasterAddress = Params.MasterAddress
+
+	tracer, closer, err := trace.InitTracing(fmt.Sprintf("proxy_node ip: %s, port: %d", Params.IP, Params.Port))
+	if err != nil {
+		log.Error("proxy_node", zap.String("init trace err", err.Error()))
+	}
+	opentracing.SetGlobalTracer(tracer)
+	s.closer = closer
 
 	log.Debug("proxynode", zap.String("proxy host", Params.IP))
 	log.Debug("proxynode", zap.Int("proxy port", Params.Port))
 	log.Debug("proxynode", zap.String("proxy address", Params.Address))
-
-	// TODO
-	cfg := &config.Configuration{
-		ServiceName: fmt.Sprintf("proxy_node ip: %s, port: %d", Params.IP, Params.Port),
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		},
-	}
-	tracer, closer, err := cfg.NewTracer()
-	if err != nil {
-		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
-	}
-	opentracing.SetGlobalTracer(tracer)
-	s.closer = closer
 
 	defer func() {
 		if err != nil {
@@ -225,14 +224,6 @@ func (s *Server) init() error {
 	}
 	s.proxynode.SetQueryServiceClient(s.queryServiceClient)
 	log.Debug("set query service client ...")
-
-	proxynode.Params.Init()
-	log.Debug("init params done ...")
-	proxynode.Params.NetworkPort = Params.Port
-	proxynode.Params.IP = Params.IP
-	proxynode.Params.NetworkAddress = Params.Address
-	// for purpose of ID Allocator
-	proxynode.Params.MasterAddress = Params.MasterAddress
 
 	s.proxynode.UpdateStateCode(internalpb.StateCode_Initializing)
 	log.Debug("proxynode",

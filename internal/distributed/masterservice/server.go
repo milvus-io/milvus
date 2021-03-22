@@ -2,7 +2,6 @@ package grpcmasterservice
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"math"
 	"net"
@@ -12,7 +11,6 @@ import (
 
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go/config"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -24,6 +22,7 @@ import (
 	cms "github.com/zilliztech/milvus-distributed/internal/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/types"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -70,21 +69,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		connectQueryService: true,
 	}
 
-	//TODO
-	cfg := &config.Configuration{
-		ServiceName: "master_service",
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		},
-	}
-	tracer, closer, err := cfg.NewTracer()
-	if err != nil {
-		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
-	}
-	opentracing.SetGlobalTracer(tracer)
-	s.closer = closer
-
+	var err error
 	s.masterService, err = cms.NewCore(s.ctx, factory)
 	if err != nil {
 		return nil, err
@@ -105,11 +90,22 @@ func (s *Server) Run() error {
 
 func (s *Server) init() error {
 	Params.Init()
+
+	cms.Params.Init()
+	log.Debug("grpc init done ...")
+
 	ctx := context.Background()
+
+	tracer, closer, err := trace.InitTracing("master_service")
+	if err != nil {
+		log.Error("master_service", zap.String("init trace err", err.Error()))
+	}
+	opentracing.SetGlobalTracer(tracer)
+	s.closer = closer
 
 	log.Debug("init params done")
 
-	err := s.startGrpc()
+	err = s.startGrpc()
 	if err != nil {
 		return err
 	}
@@ -177,9 +173,6 @@ func (s *Server) init() error {
 			panic(err)
 		}
 	}
-	cms.Params.Init()
-	log.Debug("grpc init done ...")
-
 	if err := s.masterService.Init(); err != nil {
 		return err
 	}
@@ -235,8 +228,10 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() error {
-	if err := s.closer.Close(); err != nil {
-		return err
+	if s.closer != nil {
+		if err := s.closer.Close(); err != nil {
+			return err
+		}
 	}
 	if s.proxyService != nil {
 		_ = s.proxyService.Stop()

@@ -2,6 +2,8 @@ package grpcindexnode
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"math"
 	"net"
 	"strconv"
@@ -20,6 +22,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 	"google.golang.org/grpc"
 )
 
@@ -33,6 +36,8 @@ type Server struct {
 	loopCtx            context.Context
 	loopCancel         func()
 	loopWg             sync.WaitGroup
+
+	closer io.Closer
 }
 
 func (s *Server) Run() error {
@@ -87,6 +92,18 @@ func (s *Server) init() error {
 	Params.LoadFromEnv()
 	Params.LoadFromArgs()
 
+	indexnode.Params.Init()
+	indexnode.Params.Port = Params.Port
+	indexnode.Params.IP = Params.IP
+	indexnode.Params.Address = Params.Address
+
+	tracer, closer, err := trace.InitTracing(fmt.Sprintf("index_node_%d", indexnode.Params.NodeID))
+	if err != nil {
+		log.Error("index_node", zap.String("init trace err", err.Error()))
+	}
+	opentracing.SetGlobalTracer(tracer)
+	s.closer = closer
+
 	Params.Address = Params.IP + ":" + strconv.FormatInt(int64(Params.Port), 10)
 
 	defer func() {
@@ -114,11 +131,6 @@ func (s *Server) init() error {
 	}
 	s.indexnode.SetIndexServiceClient(s.indexServiceClient)
 
-	indexnode.Params.Init()
-	indexnode.Params.Port = Params.Port
-	indexnode.Params.IP = Params.IP
-	indexnode.Params.Address = Params.Address
-
 	s.indexnode.UpdateStateCode(internalpb.StateCode_Initializing)
 
 	err = s.indexnode.Init()
@@ -137,6 +149,9 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() error {
+	if err := s.closer.Close(); err != nil {
+		return err
+	}
 	s.loopCancel()
 	if s.indexnode != nil {
 		s.indexnode.Stop()
