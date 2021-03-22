@@ -113,8 +113,7 @@ func TestSearch_Search(t *testing.T) {
 
 	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica, msFactory)
 	go node.searchService.start()
-	node.replica.addTSafe(collectionID)
-	node.searchService.register(collectionID)
+	node.searchService.startSearchCollection(collectionID)
 
 	// start insert
 	timeRange := TimeRange{
@@ -316,8 +315,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 
 	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica, msFactory)
 	go node.searchService.start()
-	node.replica.addTSafe(collectionID)
-	node.searchService.register(collectionID)
+	node.searchService.startSearchCollection(collectionID)
 
 	// start insert
 	timeRange := TimeRange{
