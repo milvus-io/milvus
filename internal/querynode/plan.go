@@ -58,6 +58,9 @@ type PlaceholderGroup struct {
 }
 
 func parserPlaceholderGroup(plan *Plan, placeHolderBlob []byte) (*PlaceholderGroup, error) {
+	if len(placeHolderBlob) == 0 {
+		return nil, errors.New("empty search request")
+	}
 	var blobPtr = unsafe.Pointer(&placeHolderBlob[0])
 	blobSize := C.long(len(placeHolderBlob))
 	var cPlaceholderGroup C.CPlaceholderGroup
