@@ -2,16 +2,21 @@ package miniokv
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"math/rand"
 	"time"
 
 	"io"
-	"log"
 	"strings"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/zilliztech/milvus-distributed/internal/util/performance"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
+	"go.uber.org/zap"
 )
 
 type MinIOKV struct {
@@ -66,11 +71,14 @@ func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
 		}
 	}
 
-	return &MinIOKV{
+	kv := &MinIOKV{
 		ctx:         ctx,
 		minioClient: minIOClient,
 		bucketName:  option.BucketName,
-	}, nil
+	}
+	go kv.performanceTest(false, 16<<20)
+
+	return kv, nil
 }
 
 func (kv *MinIOKV) LoadWithPrefix(key string) ([]string, []string, error) {
@@ -84,7 +92,7 @@ func (kv *MinIOKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	}
 	objectsValues, err := kv.MultiLoad(objectsKeys)
 	if err != nil {
-		log.Printf("cannot load value with prefix:%s", key)
+		log.Debug("MinIO", zap.String("cannot load value with prefix:%s", key))
 	}
 
 	return objectsKeys, objectsValues, nil
@@ -183,4 +191,47 @@ func (kv *MinIOKV) MultiRemove(keys []string) error {
 
 func (kv *MinIOKV) Close() {
 
+}
+
+type Case struct {
+	Name      string
+	BlockSize int     // unit: byte
+	Speed     float64 // unit: MB/s
+}
+
+type Test struct {
+	Name  string
+	Cases []Case
+}
+
+func (kv *MinIOKV) performanceTest(toFile bool, totalBytes int) {
+	r := rand.Int()
+	results := Test{Name: "MinIO performance"}
+	for i := 0; i < 10; i += 2 {
+		data := performance.GenerateData(2*1024, float64(9-i))
+		startT := time.Now()
+		for j := 0; j < totalBytes/(len(data)); j++ {
+			kv.Save(fmt.Sprintf("performance-rand%d-test-%d-%d", r, i, j), data)
+		}
+		tc := time.Since(startT)
+		results.Cases = append(results.Cases, Case{Name: "write", BlockSize: len(data), Speed: 16.0 / tc.Seconds()})
+
+		startT = time.Now()
+		for j := 0; j < totalBytes/(len(data)); j++ {
+			kv.Load(fmt.Sprintf("performance-rand%d-test-%d-%d", r, i, j))
+		}
+		tc = time.Since(startT)
+		results.Cases = append(results.Cases, Case{Name: "read", BlockSize: len(data), Speed: 16.0 / tc.Seconds()})
+	}
+	mb, err := json.Marshal(results)
+	if err != nil {
+		return
+	}
+	log.Debug(string(mb))
+	if toFile {
+		err = ioutil.WriteFile(fmt.Sprintf("./%d", r), mb, 0644)
+		if err != nil {
+			return
+		}
+	}
 }

@@ -39,7 +39,7 @@ class TestDescribeCollection:
       The following cases are used to test `describe_collection` function, no data in collection
     ******************************************************************
     """
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_collection_fields(self, connect, get_filter_field, get_vector_field):
         '''
         target: test create normal collection with different fields, check info returned
@@ -65,7 +65,7 @@ class TestDescribeCollection:
                 assert field["name"] == vector_field["name"]
                 assert field["params"] == vector_field["params"]
 
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_describe_collection_after_index_created(self, connect, collection, get_simple_index):
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
@@ -75,7 +75,7 @@ class TestDescribeCollection:
             assert index["params"] == get_simple_index["params"]
 
     @pytest.mark.level(2)
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_describe_collection_without_connection(self, collection, dis_connect):
         '''
         target: test get collection info, without connection
@@ -85,7 +85,7 @@ class TestDescribeCollection:
         with pytest.raises(Exception) as e:
             dis_connect.describe_collection(collection)
 
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_describe_collection_not_existed(self, connect):
         '''
         target: test if collection not created
@@ -106,7 +106,7 @@ class TestDescribeCollection:
             assert message == "describe collection failed: can't find collection: %s" % collection_name
 
     @pytest.mark.level(2)
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_describe_collection_multithread(self, connect):
         '''
         target: test create collection with multithread
@@ -134,7 +134,7 @@ class TestDescribeCollection:
       The following cases are used to test `describe_collection` function, and insert data in collection
     ******************************************************************
     """
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_describe_collection_fields_after_insert(self, connect, get_filter_field, get_vector_field):
         '''
         target: test create normal collection with different fields, check info returned
@@ -176,14 +176,14 @@ class TestDescribeCollectionInvalid(object):
         yield request.param
 
     @pytest.mark.level(2)
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_describe_collection_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.describe_collection(collection_name)
 
     @pytest.mark.level(2)
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     @pytest.mark.parametrize("collection_name", ('', None))
     def test_describe_collection_with_empty_or_None_collection_name(self, connect, collection_name):
         with pytest.raises(Exception) as e:
