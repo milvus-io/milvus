@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strconv"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -17,10 +16,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-)
-
-const (
-	reqTimeoutInterval = time.Second * 10
 )
 
 func (node *ProxyNode) UpdateStateCode(code internalpb.StateCode) {
@@ -218,8 +213,6 @@ func (node *ProxyNode) HasCollection(ctx context.Context, request *milvuspb.HasC
 }
 
 func (node *ProxyNode) LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
-	//ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
-	//defer cancel()
 
 	lct := &LoadCollectionTask{
 		ctx:                   ctx,
@@ -817,9 +810,13 @@ func (node *ProxyNode) DescribeIndex(ctx context.Context, request *milvuspb.Desc
 
 	err = dit.WaitToFinish()
 	if err != nil {
+		errCode := commonpb.ErrorCode_UnexpectedError
+		if dit.result != nil {
+			errCode = dit.result.Status.GetErrorCode()
+		}
 		return &milvuspb.DescribeIndexResponse{
 			Status: &commonpb.Status{
-				ErrorCode: dit.result.Status.GetErrorCode(),
+				ErrorCode: errCode,
 				Reason:    err.Error(),
 			},
 		}, nil
