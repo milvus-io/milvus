@@ -1,6 +1,7 @@
 package dataservice
 
 import (
+	"context"
 	"strconv"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 )
 
 func TestDataNodeTTWatcher(t *testing.T) {
+	ctx := context.Background()
 	Params.Init()
 	c := make(chan struct{})
 	cluster := newDataNodeCluster(c)
@@ -56,10 +58,10 @@ func TestDataNodeTTWatcher(t *testing.T) {
 		assert.Nil(t, err)
 		err = meta.AddSegment(segmentInfo)
 		assert.Nil(t, err)
-		err = segAllocator.OpenSegment(segmentInfo)
+		err = segAllocator.OpenSegment(ctx, segmentInfo)
 		assert.Nil(t, err)
 		if c.allocation && c.expired {
-			_, _, _, err := segAllocator.AllocSegment(id, 100, "channel"+strconv.Itoa(i), 100)
+			_, _, _, err := segAllocator.AllocSegment(ctx, id, 100, "channel"+strconv.Itoa(i), 100)
 			assert.Nil(t, err)
 		}
 	}
@@ -67,11 +69,11 @@ func TestDataNodeTTWatcher(t *testing.T) {
 	time.Sleep(time.Duration(Params.SegIDAssignExpiration+1000) * time.Millisecond)
 	for i, c := range cases {
 		if c.allocation && !c.expired {
-			_, _, _, err := segAllocator.AllocSegment(id, 100, "channel"+strconv.Itoa(i), 100)
+			_, _, _, err := segAllocator.AllocSegment(ctx, id, 100, "channel"+strconv.Itoa(i), 100)
 			assert.Nil(t, err)
 		}
 		if c.sealed {
-			err := segAllocator.SealSegment(segmentIDs[i])
+			err := segAllocator.SealSegment(ctx, segmentIDs[i])
 			assert.Nil(t, err)
 		}
 	}

@@ -22,6 +22,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/timesync"
 	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -367,9 +368,9 @@ func (s *Server) startDDChannel(ctx context.Context) {
 			return
 		default:
 		}
-		msgPack, _ := ddStream.Consume()
+		msgPack, ctx := ddStream.Consume()
 		for _, msg := range msgPack.Msgs {
-			if err := s.ddHandler.HandleDDMsg(msg); err != nil {
+			if err := s.ddHandler.HandleDDMsg(ctx, msg); err != nil {
 				log.Error("handle dd msg error", zap.Error(err))
 				continue
 			}
@@ -502,7 +503,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb
 			Reason:    "server is initializing",
 		}, nil
 	}
-	s.segAllocator.SealAllSegments(req.CollectionID)
+	s.segAllocator.SealAllSegments(ctx, req.CollectionID)
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
@@ -524,7 +525,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 	}
 	for _, r := range req.SegmentIDRequests {
 		if !s.meta.HasCollection(r.CollectionID) {
-			if err := s.loadCollectionFromMaster(r.CollectionID); err != nil {
+			if err := s.loadCollectionFromMaster(ctx, r.CollectionID); err != nil {
 				log.Error("load collection from master error", zap.Int64("collectionID", r.CollectionID), zap.Error(err))
 				continue
 			}
@@ -534,7 +535,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			},
 		}
-		segmentID, retCount, expireTs, err := s.segAllocator.AllocSegment(r.CollectionID, r.PartitionID, r.ChannelName, int(r.Count))
+		segmentID, retCount, expireTs, err := s.segAllocator.AllocSegment(ctx, r.CollectionID, r.PartitionID, r.ChannelName, int(r.Count))
 		if err != nil {
 			if _, ok := err.(errRemainInSufficient); !ok {
 				result.Status.Reason = fmt.Sprintf("allocation of Collection %d, Partition %d, Channel %s, Count %d error:  %s",
@@ -543,14 +544,14 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 				continue
 			}
 
-			if err = s.openNewSegment(r.CollectionID, r.PartitionID, r.ChannelName); err != nil {
+			if err = s.openNewSegment(ctx, r.CollectionID, r.PartitionID, r.ChannelName); err != nil {
 				result.Status.Reason = fmt.Sprintf("open new segment of Collection %d, Partition %d, Channel %s, Count %d error:  %s",
 					r.CollectionID, r.PartitionID, r.ChannelName, r.Count, err.Error())
 				resp.SegIDAssignments = append(resp.SegIDAssignments, result)
 				continue
 			}
 
-			segmentID, retCount, expireTs, err = s.segAllocator.AllocSegment(r.CollectionID, r.PartitionID, r.ChannelName, int(r.Count))
+			segmentID, retCount, expireTs, err = s.segAllocator.AllocSegment(ctx, r.CollectionID, r.PartitionID, r.ChannelName, int(r.Count))
 			if err != nil {
 				result.Status.Reason = fmt.Sprintf("retry allocation of Collection %d, Partition %d, Channel %s, Count %d error:  %s",
 					r.CollectionID, r.PartitionID, r.ChannelName, r.Count, err.Error())
@@ -571,8 +572,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 	return resp, nil
 }
 
-func (s *Server) loadCollectionFromMaster(collectionID int64) error {
-	ctx := context.TODO()
+func (s *Server) loadCollectionFromMaster(ctx context.Context, collectionID int64) error {
 	resp, err := s.masterClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_DescribeCollection,
@@ -591,7 +591,9 @@ func (s *Server) loadCollectionFromMaster(collectionID int64) error {
 	return s.meta.AddCollection(collInfo)
 }
 
-func (s *Server) openNewSegment(collectionID UniqueID, partitionID UniqueID, channelName string) error {
+func (s *Server) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string) error {
+	sp, _ := trace.StartSpanFromContext(ctx)
+	defer sp.Finish()
 	id, err := s.allocator.allocID()
 	if err != nil {
 		return err
@@ -603,7 +605,7 @@ func (s *Server) openNewSegment(collectionID UniqueID, partitionID UniqueID, cha
 	if err = s.meta.AddSegment(segmentInfo); err != nil {
 		return err
 	}
-	if err = s.segAllocator.OpenSegment(segmentInfo); err != nil {
+	if err = s.segAllocator.OpenSegment(ctx, segmentInfo); err != nil {
 		return err
 	}
 	infoMsg := &msgstream.SegmentInfoMsg{
@@ -623,7 +625,7 @@ func (s *Server) openNewSegment(collectionID UniqueID, partitionID UniqueID, cha
 	msgPack := &msgstream.MsgPack{
 		Msgs: []msgstream.TsMsg{infoMsg},
 	}
-	if err = s.segmentInfoStream.Produce(s.ctx, msgPack); err != nil {
+	if err = s.segmentInfoStream.Produce(ctx, msgPack); err != nil {
 		return err
 	}
 	return nil

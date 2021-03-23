@@ -1,8 +1,9 @@
 package dataservice
 
 import (
-	"github.com/golang/protobuf/proto"
+	"context"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -20,20 +21,20 @@ func newDDHandler(meta *meta, allocator segmentAllocatorInterface) *ddHandler {
 	}
 }
 
-func (handler *ddHandler) HandleDDMsg(msg msgstream.TsMsg) error {
+func (handler *ddHandler) HandleDDMsg(ctx context.Context, msg msgstream.TsMsg) error {
 	switch msg.Type() {
 	case commonpb.MsgType_CreateCollection:
 		realMsg := msg.(*msgstream.CreateCollectionMsg)
 		return handler.handleCreateCollection(realMsg)
 	case commonpb.MsgType_DropCollection:
 		realMsg := msg.(*msgstream.DropCollectionMsg)
-		return handler.handleDropCollection(realMsg)
+		return handler.handleDropCollection(ctx, realMsg)
 	case commonpb.MsgType_CreatePartition:
 		realMsg := msg.(*msgstream.CreatePartitionMsg)
 		return handler.handleCreatePartition(realMsg)
 	case commonpb.MsgType_DropPartition:
 		realMsg := msg.(*msgstream.DropPartitionMsg)
-		return handler.handleDropPartition(realMsg)
+		return handler.handleDropPartition(ctx, realMsg)
 	default:
 		return nil
 	}
@@ -54,10 +55,10 @@ func (handler *ddHandler) handleCreateCollection(msg *msgstream.CreateCollection
 	return nil
 }
 
-func (handler *ddHandler) handleDropCollection(msg *msgstream.DropCollectionMsg) error {
+func (handler *ddHandler) handleDropCollection(ctx context.Context, msg *msgstream.DropCollectionMsg) error {
 	segmentsOfCollection := handler.meta.GetSegmentsOfCollection(msg.CollectionID)
 	for _, id := range segmentsOfCollection {
-		handler.segmentAllocator.DropSegment(id)
+		handler.segmentAllocator.DropSegment(ctx, id)
 	}
 	if err := handler.meta.DropCollection(msg.CollectionID); err != nil {
 		return err
@@ -65,10 +66,10 @@ func (handler *ddHandler) handleDropCollection(msg *msgstream.DropCollectionMsg)
 	return nil
 }
 
-func (handler *ddHandler) handleDropPartition(msg *msgstream.DropPartitionMsg) error {
+func (handler *ddHandler) handleDropPartition(ctx context.Context, msg *msgstream.DropPartitionMsg) error {
 	segmentsOfPartition := handler.meta.GetSegmentsOfPartition(msg.CollectionID, msg.PartitionID)
 	for _, id := range segmentsOfPartition {
-		handler.segmentAllocator.DropSegment(id)
+		handler.segmentAllocator.DropSegment(ctx, id)
 	}
 	if err := handler.meta.DropPartition(msg.CollectionID, msg.PartitionID); err != nil {
 		return err

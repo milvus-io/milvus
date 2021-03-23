@@ -1,6 +1,7 @@
 package dataservice
 
 import (
+	"context"
 	"log"
 	"math"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 )
 
 func TestAllocSegment(t *testing.T) {
+	ctx := context.Background()
 	Params.Init()
 	mockAllocator := newMockAllocator()
 	meta, err := newMemoryMeta(mockAllocator)
@@ -33,7 +35,7 @@ func TestAllocSegment(t *testing.T) {
 	assert.Nil(t, err)
 	err = meta.AddSegment(segmentInfo)
 	assert.Nil(t, err)
-	err = segAllocator.OpenSegment(segmentInfo)
+	err = segAllocator.OpenSegment(ctx, segmentInfo)
 	assert.Nil(t, err)
 
 	cases := []struct {
@@ -50,7 +52,7 @@ func TestAllocSegment(t *testing.T) {
 		{collID, 100, "c1", math.MaxInt64, false},
 	}
 	for _, c := range cases {
-		id, count, expireTime, err := segAllocator.AllocSegment(c.collectionID, c.partitionID, c.channelName, c.requestRows)
+		id, count, expireTime, err := segAllocator.AllocSegment(ctx, c.collectionID, c.partitionID, c.channelName, c.requestRows)
 		if c.expectResult {
 			assert.Nil(t, err)
 			assert.EqualValues(t, c.requestRows, count)
@@ -63,6 +65,7 @@ func TestAllocSegment(t *testing.T) {
 }
 
 func TestSealSegment(t *testing.T) {
+	ctx := context.Background()
 	Params.Init()
 	mockAllocator := newMockAllocator()
 	meta, err := newMemoryMeta(mockAllocator)
@@ -85,20 +88,21 @@ func TestSealSegment(t *testing.T) {
 		assert.Nil(t, err)
 		err = meta.AddSegment(segmentInfo)
 		assert.Nil(t, err)
-		err = segAllocator.OpenSegment(segmentInfo)
+		err = segAllocator.OpenSegment(ctx, segmentInfo)
 		assert.Nil(t, err)
 		lastSegID = segmentInfo.SegmentID
 	}
 
-	err = segAllocator.SealSegment(lastSegID)
+	err = segAllocator.SealSegment(ctx, lastSegID)
 	assert.Nil(t, err)
-	segAllocator.SealAllSegments(collID)
-	sealedSegments, err := segAllocator.GetSealedSegments()
+	segAllocator.SealAllSegments(ctx, collID)
+	sealedSegments, err := segAllocator.GetSealedSegments(ctx)
 	assert.Nil(t, err)
 	assert.EqualValues(t, 10, len(sealedSegments))
 }
 
 func TestExpireSegment(t *testing.T) {
+	ctx := context.Background()
 	Params.Init()
 	mockAllocator := newMockAllocator()
 	meta, err := newMemoryMeta(mockAllocator)
@@ -119,10 +123,10 @@ func TestExpireSegment(t *testing.T) {
 	assert.Nil(t, err)
 	err = meta.AddSegment(segmentInfo)
 	assert.Nil(t, err)
-	err = segAllocator.OpenSegment(segmentInfo)
+	err = segAllocator.OpenSegment(ctx, segmentInfo)
 	assert.Nil(t, err)
 
-	id1, _, et, err := segAllocator.AllocSegment(collID, 100, "c1", 10)
+	id1, _, et, err := segAllocator.AllocSegment(ctx, collID, 100, "c1", 10)
 	ts2, _ := tsoutil.ParseTS(et)
 	log.Printf("physical ts: %s", ts2.String())
 	assert.Nil(t, err)
@@ -134,9 +138,9 @@ func TestExpireSegment(t *testing.T) {
 	time.Sleep(time.Duration(Params.SegIDAssignExpiration+1000) * time.Millisecond)
 	ts, err = mockAllocator.allocTimestamp()
 	assert.Nil(t, err)
-	err = segAllocator.ExpireAllocations(ts)
+	err = segAllocator.ExpireAllocations(ctx, ts)
 	assert.Nil(t, err)
-	expired, err := segAllocator.IsAllocationsExpired(id1, ts)
+	expired, err := segAllocator.IsAllocationsExpired(ctx, id1, ts)
 	if et > ts {
 		tsPhy, _ := tsoutil.ParseTS(ts)
 		log.Printf("ts %s", tsPhy.String())

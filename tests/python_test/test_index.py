@@ -253,6 +253,26 @@ class TestIndexBase:
         # assert index == indexs[-1]
         assert not index    # FLAT is the last index_type, drop all indexes in server
 
+    @pytest.mark.tags(CaseLabel.tags_0331)
+    @pytest.mark.level(2)
+    @pytest.mark.timeout(BUILD_TIMEOUT)
+    def test_create_different_index_repeatedly_B(self, connect, collection):
+        '''
+        target: check if index can be created repeatedly, with the different create_index params
+        method: create another index with different index_params after index have been built
+        expected: return code 0, and describe index result equals with the second index params
+        '''
+        ids = connect.insert(collection, default_entities)
+        connect.flush([collection])
+        indexs = [default_index, {"metric_type": "L2", "index_type": "IVF_SQ8", "params": {"nlist": 1024}}]
+        for index in indexs:
+            connect.create_index(collection, field_name, index)
+            connect.release_collection(collection)
+            connect.load_collection(collection)
+        index = connect.describe_index(collection, field_name)
+        assert index == indexs[-1]
+        # assert not index  # FLAT is the last index_type, drop all indexes in server
+
     @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_ip(self, connect, collection, get_simple_index):

@@ -4,6 +4,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 	"go.uber.org/zap"
 
 	"golang.org/x/net/context"
@@ -36,7 +37,8 @@ func (watcher *proxyTimeTickWatcher) StartBackgroundLoop(ctx context.Context) {
 			log.Debug("proxy time tick watcher closed")
 			return
 		case msg := <-watcher.msgQueue:
-			if err := watcher.allocator.ExpireAllocations(msg.Base.Timestamp); err != nil {
+			traceCtx := context.TODO()
+			if err := watcher.allocator.ExpireAllocations(traceCtx, msg.Base.Timestamp); err != nil {
 				log.Error("expire allocations error", zap.Error(err))
 			}
 		}
@@ -76,12 +78,15 @@ func (watcher *dataNodeTimeTickWatcher) StartBackgroundLoop(ctx context.Context)
 }
 
 func (watcher *dataNodeTimeTickWatcher) handleTimeTickMsg(msg *msgstream.TimeTickMsg) error {
-	segments, err := watcher.allocator.GetSealedSegments()
+	ctx := context.TODO()
+	sp, _ := trace.StartSpanFromContext(ctx)
+	defer sp.Finish()
+	segments, err := watcher.allocator.GetSealedSegments(ctx)
 	if err != nil {
 		return err
 	}
 	for _, id := range segments {
-		expired, err := watcher.allocator.IsAllocationsExpired(id, msg.Base.Timestamp)
+		expired, err := watcher.allocator.IsAllocationsExpired(ctx, id, msg.Base.Timestamp)
 		if err != nil {
 			log.Error("check allocations expired error", zap.Int64("segmentID", id), zap.Error(err))
 			continue
@@ -106,7 +111,7 @@ func (watcher *dataNodeTimeTickWatcher) handleTimeTickMsg(msg *msgstream.TimeTic
 				CollectionID: segmentInfo.CollectionID,
 				SegmentIDs:   []int64{segmentInfo.SegmentID},
 			})
-			watcher.allocator.DropSegment(id)
+			watcher.allocator.DropSegment(ctx, id)
 		}
 	}
 	return nil
