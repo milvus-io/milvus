@@ -17,9 +17,18 @@ def create_app(testing_config=None):
 
     from mishards.connections import ConnectionTopology
 
+    # Declare and initialise readonly connection topology. At default, each ro node is
+    # added into separate group.
     readonly_topo = ConnectionTopology()
+    # Declare and initialise writable connection topology. At default, here is only one
+    # writable node.
     writable_topo = ConnectionTopology()
 
+    # Load discovery plugin. The default discovery is placed under `discovery/plugins`, where
+    # provide two discovery plugins 'static' and 'kubernetes'.
+    # In static plugin, the readonly node is added during initialization stage; in kubernetes
+    # plugin, provider check readonly nodes health and listen change of nodes status to update
+    # available readonly nodes in `readonly_topo`.
     from discovery.factory import DiscoveryFactory
     discover = DiscoveryFactory(config.DISCOVERY_PLUGIN_PATH).create(config.DISCOVERY_CLASS_NAME,
                                                                      readonly_topo=readonly_topo)
@@ -30,11 +39,16 @@ def create_app(testing_config=None):
                                                              plugin_config=settings.TracingConfig,
                                                              span_decorator=GrpcSpanDecorator())
 
+    # Load router plugin. The default is placed under `mishards/router/plugins`, where
+    # provide two router plugins 'FileBasedHashRingRouter'.
+    # Router selects available readonly nodes from `readonly_topo`.
     from mishards.router.factory import RouterFactory
     router = RouterFactory(config.ROUTER_PLUGIN_PATH).create(config.ROUTER_CLASS_NAME,
                                                              readonly_topo=readonly_topo,
                                                              writable_topo=writable_topo)
 
+    # Server split search request into multiple sub request to readonly nodes, and rout the
+    # other request to writable node.
     grpc_server.init_app(writable_topo=writable_topo,
                          readonly_topo=readonly_topo,
                          tracer=tracer,

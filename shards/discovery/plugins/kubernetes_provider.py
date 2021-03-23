@@ -114,6 +114,8 @@ class K8SEventListener(threading.Thread, K8SMixin):
         self._stop_event.set()
 
     def run(self):
+        """Watch k8s pod status and add event to queue
+        """
         resource_version = ''
         w = watch.Watch()
         for event in w.stream(self.v1.list_namespaced_event,

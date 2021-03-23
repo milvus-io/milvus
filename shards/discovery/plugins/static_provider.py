@@ -48,6 +48,11 @@ class StaticDiscovery(object):
             self.delete_pod(host)
 
     def add_pod(self, name, addr):
+        """Add a readonly node to readonly connection group.
+        Note that here we create a group which name is the same as
+        that of the adding topo(client) instance. That is, there is
+        only one client instance in a group.
+        """
         ok = True
         status = StatusType.OK
         try:

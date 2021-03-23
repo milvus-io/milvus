@@ -52,6 +52,8 @@ class Server:
         self.register_pre_run_handler(self.pre_run_handler)
 
     def pre_run_handler(self):
+        """Before run gRPC handler, mishards try to create writable topo
+        """
         woserver = settings.WOSERVER
         url = urlparse(woserver)
         ip = socket.gethostbyname(url.hostname)
@@ -92,6 +94,9 @@ class Server:
         return self.discover.start()
 
     def start(self, port=None):
+        # Here RPC methods in gRPC handler `ServiceHandler` are decorated
+        # with a wrapper to handler exception. the exceptions are defined
+        # in `exceptions.py` and exception handlers are defined in `exception_handlers.py`
         handler_class = self.decorate_handler(ServiceHandler)
         add_MilvusServiceServicer_to_server(
             handler_class(tracer=self.tracer,
