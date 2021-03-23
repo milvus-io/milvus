@@ -20,6 +20,7 @@
 #include "IndexWrapper.h"
 #include "indexbuilder/utils.h"
 #include "index/knowhere/knowhere/index/vector_index/ConfAdapterMgr.h"
+#include "index/knowhere/knowhere/common/Timer.h"
 
 namespace milvus {
 namespace indexbuilder {
@@ -169,6 +170,7 @@ IndexWrapper::BuildWithoutIds(const knowhere::DatasetPtr& dataset) {
     if (is_in_need_id_list(index_type)) {
         PanicInfo(std::string(index_type) + " doesn't support build without ids yet!");
     }
+    knowhere::TimeRecorder rc("BuildWithoutIds", 1);
     // if (is_in_need_build_all_list(index_type)) {
     //     index_->BuildAll(dataset, config_);
     // } else {
@@ -176,10 +178,13 @@ IndexWrapper::BuildWithoutIds(const knowhere::DatasetPtr& dataset) {
     //     index_->AddWithoutIds(dataset, config_);
     // }
     index_->BuildAll(dataset, config_);
+    rc.RecordSection("TrainAndAdd");
 
     if (is_in_nm_list(index_type)) {
         StoreRawData(dataset);
+        rc.RecordSection("StoreRawData");
     }
+    rc.ElapseFromBegin("Done");
 }
 
 void
