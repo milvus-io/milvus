@@ -25,7 +25,7 @@ type ParamTable struct {
 	FlushInsertBufferSize   int32
 	FlushDdBufferSize       int32
 	InsertBinlogRootPath    string
-	DdBinlogRootPath        string
+	DdlBinlogRootPath       string
 	Log                     log.Config
 
 	// === DataNode External Components Configs ===
@@ -82,7 +82,7 @@ func (p *ParamTable) Init() {
 		p.initFlushInsertBufferSize()
 		p.initFlushDdBufferSize()
 		p.initInsertBinlogRootPath()
-		p.initDdBinlogRootPath()
+		p.initDdlBinlogRootPath()
 		p.initLogCfg()
 
 		// === DataNode External Components Configs ===
@@ -159,13 +159,13 @@ func (p *ParamTable) initInsertBinlogRootPath() {
 	p.InsertBinlogRootPath = path.Join(rootPath, "insert_log")
 }
 
-func (p *ParamTable) initDdBinlogRootPath() {
+func (p *ParamTable) initDdlBinlogRootPath() {
 	// GOOSE TODO: rootPath change to  TenentID
 	rootPath, err := p.Load("etcd.rootPath")
 	if err != nil {
 		panic(err)
 	}
-	p.DdBinlogRootPath = path.Join(rootPath, "data_definition_log")
+	p.DdlBinlogRootPath = path.Join(rootPath, "data_definition_log")
 }
 
 // ---- Pulsar ----

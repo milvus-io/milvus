@@ -41,8 +41,6 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	err = replica.addCollection(collMeta.ID, collMeta.Schema)
 	require.NoError(t, err)
 
-	idFactory := AllocatorFactory{}
-
 	msFactory := pulsarms.NewFactory()
 	m := map[string]interface{}{
 		"receiveBufSize": 1024,
@@ -51,7 +49,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	iBNode := newInsertBufferNode(ctx, newMetaTable(), replica, idFactory, msFactory)
+	iBNode := newInsertBufferNode(ctx, newBinlogMeta(), replica, msFactory)
 	inMsg := genInsertMsg()
 	var iMsg flowgraph.Msg = &inMsg
 	iBNode.Operate(ctx, []flowgraph.Msg{iMsg})

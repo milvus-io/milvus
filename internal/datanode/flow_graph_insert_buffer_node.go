@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
 	"path"
 	"strconv"
+	"sync"
 	"unsafe"
 
 	"go.uber.org/zap"
@@ -36,12 +36,10 @@ type (
 		BaseNode
 		insertBuffer *insertBuffer
 		replica      Replica
-		flushMeta    *metaTable
+		flushMeta    *binlogMeta
+		flushMap     sync.Map
 
-		minIOKV     kv.Base
-		minioPrefix string
-
-		idAllocator allocatorInterface
+		minIOKV kv.Base
 
 		timeTickStream          msgstream.MsgStream
 		segmentStatisticsStream msgstream.MsgStream
@@ -136,13 +134,6 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 				} else {
 					ibNode.replica.setStartPosition(currentSegID, startPosition)
 				}
-			}
-		}
-
-		if !ibNode.flushMeta.hasSegmentFlush(currentSegID) {
-			err := ibNode.flushMeta.addSegmentFlush(currentSegID)
-			if err != nil {
-				log.Error("add segment flush meta wrong", zap.Error(err))
 			}
 		}
 
@@ -452,15 +443,35 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 			ibNode.replica.setEndPosition(currentSegID, endPosition)
 		}
 
-		// 1.4 if full
-		//   1.4.1 generate binlogs
+		// 1.4 if full, auto flush
 		if ibNode.insertBuffer.full(currentSegID) {
-			log.Debug(". Insert Buffer full, auto flushing ", zap.Int32("num of rows", ibNode.insertBuffer.size(currentSegID)))
-
-			err = ibNode.flushSegment(currentSegID, msg.GetPartitionID(), collection.GetID())
+			log.Debug(". Insert Buffer full, auto flushing ",
+				zap.Int32("num of rows", ibNode.insertBuffer.size(currentSegID)))
+			collSch, err := ibNode.getCollectionSchemaByID(collection.GetID())
 			if err != nil {
-				log.Error("flush segment fail", zap.Int64("segmentID", currentSegID), zap.Error(err))
+				log.Error("Auto flush failed .. cannot get collection schema ..", zap.Error(err))
+				continue
 			}
+			collMeta := &etcdpb.CollectionMeta{
+				Schema: collSch,
+				ID:     collection.GetID(),
+			}
+
+			ibNode.flushMap.Store(currentSegID, ibNode.insertBuffer.insertData[currentSegID])
+			delete(ibNode.insertBuffer.insertData, currentSegID)
+
+			finishCh := make(chan bool)
+			go flushSegmentTxn(collMeta, currentSegID, msg.GetPartitionID(), collection.GetID(),
+				&ibNode.flushMap, ibNode.flushMeta, ibNode.minIOKV,
+				finishCh)
+
+			go func(finishCh <-chan bool) {
+				if finished := <-finishCh; !finished {
+					log.Debug(".. Auto Flush failed ..")
+					return
+				}
+				log.Debug(".. Auto Flush completed ..")
+			}(finishCh)
 		}
 	}
 
@@ -482,25 +493,39 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 	for _, msg := range iMsg.flushMessages {
 		for _, currentSegID := range msg.segmentIDs {
 			log.Debug(". Receiving flush message", zap.Int64("segmentID", currentSegID))
-			if ibNode.insertBuffer.size(currentSegID) > 0 {
-				log.Debug(".. Buffer not empty, flushing ...")
-				seg, err := ibNode.replica.getSegmentByID(currentSegID)
-				if err != nil {
-					log.Error("flush segment fail", zap.Error(err))
-					continue
-				}
 
-				err = ibNode.flushSegment(currentSegID, seg.partitionID, seg.collectionID)
-				if err != nil {
-					log.Error("flush segment fail", zap.Int64("segmentID", currentSegID), zap.Error(err))
-					continue
-				}
+			finishCh := make(chan bool)
+			go ibNode.completeFlush(currentSegID, finishCh)
+
+			if ibNode.insertBuffer.size(currentSegID) <= 0 {
+				log.Debug(".. Buffer empty ...")
+				finishCh <- true
+				continue
 			}
-			err := ibNode.completeFlush(currentSegID)
+
+			log.Debug(".. Buffer not empty, flushing ..")
+			ibNode.flushMap.Store(currentSegID, ibNode.insertBuffer.insertData[currentSegID])
+			delete(ibNode.insertBuffer.insertData, currentSegID)
+
+			seg, err := ibNode.replica.getSegmentByID(currentSegID)
 			if err != nil {
-				log.Error("complete flush wrong", zap.Error(err))
+				log.Error("Flush failed .. cannot get segment ..", zap.Error(err))
+				continue
 			}
-			log.Debug("Flush completed")
+
+			collSch, err := ibNode.getCollectionSchemaByID(seg.collectionID)
+			if err != nil {
+				log.Error("Flush failed .. cannot get collection schema ..", zap.Error(err))
+				continue
+			}
+
+			collMeta := &etcdpb.CollectionMeta{
+				Schema: collSch,
+				ID:     seg.collectionID,
+			}
+
+			go flushSegmentTxn(collMeta, currentSegID, seg.partitionID, seg.collectionID,
+				&ibNode.flushMap, ibNode.flushMeta, ibNode.minIOKV, finishCh)
 		}
 	}
 
@@ -516,63 +541,83 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 	return []Msg{res}, ctx
 }
 
-func (ibNode *insertBufferNode) flushSegment(segID UniqueID, partitionID UniqueID, collID UniqueID) error {
+func flushSegmentTxn(collMeta *etcdpb.CollectionMeta, segID UniqueID, partitionID UniqueID, collID UniqueID,
+	insertData *sync.Map, meta *binlogMeta, kv kv.Base, finishCh chan<- bool) {
 
-	collSch, err := ibNode.getCollectionSchemaByID(collID)
-	if err != nil {
-		return fmt.Errorf("Get collection by ID wrong, %v", err)
-	}
-
-	collMeta := &etcdpb.CollectionMeta{
-		Schema: collSch,
-		ID:     collID,
-	}
+	defer func() {
+		log.Debug(".. Clearing flush Buffer ..")
+		insertData.Delete(segID)
+	}()
 
 	inCodec := storage.NewInsertCodec(collMeta)
 
 	// buffer data to binlogs
-	binLogs, err := inCodec.Serialize(partitionID,
-		segID, ibNode.insertBuffer.insertData[segID])
+	data, ok := insertData.Load(segID)
+	if !ok {
+		log.Error("Flush failed ... cannot load insertData ..")
+		finishCh <- false
+		return
+	}
 
+	binLogs, err := inCodec.Serialize(partitionID, segID, data.(*InsertData))
 	if err != nil {
-		return fmt.Errorf("generate binlog wrong: %v", err)
+		log.Error("Flush failed ... cannot generate binlog ..", zap.Error(err))
+		finishCh <- false
+		return
 	}
 
-	// clear buffer
-	delete(ibNode.insertBuffer.insertData, segID)
-	log.Debug(".. Clearing buffer")
-
-	//   1.5.2 binLogs -> minIO/S3
-	collIDStr := strconv.FormatInt(collID, 10)
-	partitionIDStr := strconv.FormatInt(partitionID, 10)
-	segIDStr := strconv.FormatInt(segID, 10)
-	keyPrefix := path.Join(ibNode.minioPrefix, collIDStr, partitionIDStr, segIDStr)
-
-	log.Debug(".. Saving binlogs to MinIO ...", zap.Int("number", len(binLogs)))
-	for index, blob := range binLogs {
-		uid, err := ibNode.idAllocator.allocID()
+	log.Debug(".. Saving binlogs to MinIO ..", zap.Int("number", len(binLogs)))
+	field2Path := make(map[UniqueID]string, len(binLogs))
+	kvs := make(map[string]string, len(binLogs))
+	paths := make([]string, 0, len(binLogs))
+	for _, blob := range binLogs {
+		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
 		if err != nil {
-			return fmt.Errorf("Allocate Id failed, %v", err)
+			log.Error("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
+			finishCh <- false
+			return
 		}
 
-		key := path.Join(keyPrefix, blob.Key, strconv.FormatInt(uid, 10))
-		err = ibNode.minIOKV.Save(key, string(blob.Value[:]))
+		k, err := meta.genKey(true, collID, partitionID, segID, fieldID)
 		if err != nil {
-			return fmt.Errorf("Save to MinIO failed, %v", err)
+			log.Error("Flush failed ... cannot alloc ID ..", zap.Error(err))
+			finishCh <- false
+			return
 		}
 
-		fieldID, err := strconv.ParseInt(blob.Key, 10, 32)
-		if err != nil {
-			return fmt.Errorf("string to fieldID wrong, %v", err)
-		}
-
-		log.Debug("... Appending binlog paths ...", zap.Int("number", index))
-		ibNode.flushMeta.AppendSegBinlogPaths(segID, fieldID, []string{key})
+		key := path.Join(Params.InsertBinlogRootPath, k)
+		paths = append(paths, key)
+		kvs[key] = string(blob.Value[:])
+		field2Path[fieldID] = key
 	}
-	return nil
+
+	err = kv.MultiSave(kvs)
+	if err != nil {
+		log.Error("Flush failed ... cannot save to MinIO ..", zap.Error(err))
+		_ = kv.MultiRemove(paths)
+		finishCh <- false
+		return
+	}
+
+	log.Debug(".. Saving binlog paths to etcd ..", zap.Int("number", len(binLogs)))
+	err = meta.SaveSegmentBinlogMetaTxn(segID, field2Path)
+	if err != nil {
+		log.Error("Flush failed ... cannot save binlog paths ..", zap.Error(err))
+		_ = kv.MultiRemove(paths)
+		finishCh <- false
+		return
+	}
+
+	finishCh <- true
+
 }
 
-func (ibNode *insertBufferNode) completeFlush(segID UniqueID) error {
+func (ibNode *insertBufferNode) completeFlush(segID UniqueID, finishCh <-chan bool) {
+	if finished := <-finishCh; !finished {
+		return
+	}
+
+	log.Debug(".. Segment flush completed ..")
 	ibNode.replica.setIsFlushed(segID)
 	ibNode.updateSegStatistics([]UniqueID{segID})
 
@@ -594,7 +639,10 @@ func (ibNode *insertBufferNode) completeFlush(segID UniqueID) error {
 	}
 
 	msgPack.Msgs = append(msgPack.Msgs, msg)
-	return ibNode.completeFlushStream.Produce(context.TODO(), &msgPack)
+	err := ibNode.completeFlushStream.Produce(context.TODO(), &msgPack)
+	if err != nil {
+		log.Error(".. Produce complete flush msg failed ..", zap.Error(err))
+	}
 }
 
 func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
@@ -661,8 +709,8 @@ func (ibNode *insertBufferNode) getCollectionSchemaByID(collectionID UniqueID) (
 	return ret.schema, nil
 }
 
-func newInsertBufferNode(ctx context.Context, flushMeta *metaTable,
-	replica Replica, alloc allocatorInterface, factory msgstream.Factory) *insertBufferNode {
+func newInsertBufferNode(ctx context.Context, flushMeta *binlogMeta,
+	replica Replica, factory msgstream.Factory) *insertBufferNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -690,7 +738,6 @@ func newInsertBufferNode(ctx context.Context, flushMeta *metaTable,
 	if err != nil {
 		panic(err)
 	}
-	minioPrefix := Params.InsertBinlogRootPath
 
 	//input stream, data node time tick
 	wTt, _ := factory.NewMsgStream(ctx)
@@ -717,12 +764,11 @@ func newInsertBufferNode(ctx context.Context, flushMeta *metaTable,
 		BaseNode:                baseNode,
 		insertBuffer:            iBuffer,
 		minIOKV:                 minIOKV,
-		minioPrefix:             minioPrefix,
-		idAllocator:             alloc,
 		timeTickStream:          wTtMsgStream,
 		segmentStatisticsStream: segStatisticsMsgStream,
 		completeFlushStream:     completeFlushStream,
 		replica:                 replica,
 		flushMeta:               flushMeta,
+		flushMap:                sync.Map{},
 	}
 }

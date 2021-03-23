@@ -2,6 +2,7 @@ package datanode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -9,8 +10,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-
-	"errors"
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -196,6 +195,7 @@ func (node *DataNode) GetComponentStates(ctx context.Context) (*internalpb.Compo
 }
 
 func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
+	log.Debug("FlushSegments ...", zap.Int("num", len(req.SegmentIDs)))
 	ids := make([]UniqueID, 0)
 	ids = append(ids, req.SegmentIDs...)
 
