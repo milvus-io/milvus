@@ -76,7 +76,7 @@ func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
 		minioClient: minIOClient,
 		bucketName:  option.BucketName,
 	}
-	go kv.performanceTest(false, 16<<20)
+	//go kv.performanceTest(false, 16<<20)
 
 	return kv, nil
 }
@@ -223,6 +223,7 @@ func (kv *MinIOKV) performanceTest(toFile bool, totalBytes int) {
 		tc = time.Since(startT)
 		results.Cases = append(results.Cases, Case{Name: "read", BlockSize: len(data), Speed: 16.0 / tc.Seconds()})
 	}
+	kv.RemoveWithPrefix(fmt.Sprintf("performance-rand%d", r))
 	mb, err := json.Marshal(results)
 	if err != nil {
 		return
