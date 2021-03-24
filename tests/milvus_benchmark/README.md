@@ -26,7 +26,7 @@ The following are the searching performance test suite：
 1. search_performance: the test type，also we have`build_performance`,`insert_performance`,`accuracy`,`stability`,`search_stability`
 2. tables: list of test cases
 3. The following fields are in the `table` field：
-   - server: milvus的server_config
+   - server: milvus' server_config
    - table_name: currently support one table
    - run_count: search count
    - search_params: params of search_vectors
