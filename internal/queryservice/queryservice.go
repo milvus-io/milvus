@@ -757,7 +757,7 @@ func (qs *QueryService) shuffleChannelsToQueryNode(dmChannels []string) map[int6
 	maxNumChannels := 0
 	for _, node := range qs.queryNodes {
 		numChannels := 0
-		for _, chs := range node.channels2Col {
+		for _, chs := range node.getChannels2Col() {
 			numChannels += len(chs)
 		}
 		if numChannels > maxNumChannels {

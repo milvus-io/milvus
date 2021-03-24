@@ -25,8 +25,9 @@ type searchCollection struct {
 	collectionID UniqueID
 	replica      ReplicaInterface
 
-	msgBuffer   chan *msgstream.SearchMsg
-	unsolvedMsg []*msgstream.SearchMsg
+	msgBuffer     chan *msgstream.SearchMsg
+	unsolvedMSgMu sync.Mutex // guards unsolvedMsg
+	unsolvedMsg   []*msgstream.SearchMsg
 
 	tSafeMutex   sync.Mutex
 	tSafeWatcher *tSafeWatcher
@@ -73,6 +74,20 @@ func (s *searchCollection) register(collectionID UniqueID) {
 	s.tSafeWatcher = newTSafeWatcher()
 	s.tSafeMutex.Unlock()
 	tSafe.registerTSafeWatcher(s.tSafeWatcher)
+}
+
+func (s *searchCollection) addToUnsolvedMsg(msg *msgstream.SearchMsg) {
+	s.unsolvedMSgMu.Lock()
+	defer s.unsolvedMSgMu.Unlock()
+	s.unsolvedMsg = append(s.unsolvedMsg, msg)
+}
+
+func (s *searchCollection) popAllUnsolvedMsg() []*msgstream.SearchMsg {
+	s.unsolvedMSgMu.Lock()
+	defer s.unsolvedMSgMu.Unlock()
+	tmp := s.unsolvedMsg
+	s.unsolvedMsg = s.unsolvedMsg[:0]
+	return tmp
 }
 
 func (s *searchCollection) waitNewTSafe() (Timestamp, error) {
@@ -122,7 +137,7 @@ func (s *searchCollection) receiveSearchMsg() {
 		case sm := <-s.msgBuffer:
 			serviceTime := s.getServiceableTime()
 			if sm.BeginTs() > serviceTime {
-				s.unsolvedMsg = append(s.unsolvedMsg, sm)
+				s.addToUnsolvedMsg(sm)
 				continue
 			}
 			err := s.search(sm)
@@ -153,15 +168,14 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 			}
 
 			searchMsg := make([]*msgstream.SearchMsg, 0)
-			tempMsg := s.unsolvedMsg
-			s.unsolvedMsg = s.unsolvedMsg[:0]
+			tempMsg := s.popAllUnsolvedMsg()
 
 			for _, sm := range tempMsg {
 				if sm.EndTs() <= serviceTime {
 					searchMsg = append(searchMsg, sm)
 					continue
 				}
-				s.unsolvedMsg = append(s.unsolvedMsg, sm)
+				s.addToUnsolvedMsg(sm)
 			}
 
 			if len(searchMsg) <= 0 {
