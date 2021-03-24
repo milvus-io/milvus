@@ -1773,8 +1773,9 @@ class TestSearchInvalid(object):
     def get_search_params(self, request):
         yield request.param
 
+    # #1463
     @pytest.mark.level(2)
-    @pytest.mark.tags(CaseLabel.tags_0331)
+    @pytest.mark.tags("fail")
     def test_search_with_invalid_params(self, connect, collection, get_simple_index, get_search_params):
         '''
         target: test search function, with the wrong nprobe
@@ -1789,8 +1790,9 @@ class TestSearchInvalid(object):
         if index_type != search_params["index_type"]:
             # pytest.skip("skip if index_type not matched")
             pass
-        entities, ids = init_data(connect, collection)
+        entities, ids = init_data(connect, collection, nb=1200)
         connect.create_index(collection, field_name, get_simple_index)
+        connect.load_collection(collection)
         query, vecs = gen_query_vectors(field_name, entities, default_top_k, 1,
                                         search_params=search_params["search_params"])
         with pytest.raises(Exception) as e:
@@ -1810,13 +1812,15 @@ class TestSearchInvalid(object):
         query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, binary_collection, nb=1, insert=False)
         connect.create_index(binary_collection, binary_field_name,
                              {"index_type": index_type, "metric_type": "JACCARD", "params": {"nlist": 128}})
+        connect.load_collection(binary_collection)
         query, vecs = gen_query_vectors(binary_field_name, query_entities, default_top_k, nq,
                                         search_params={"nprobe": 0}, metric_type="JACCARD")
         with pytest.raises(Exception) as e:
             res = connect.search(binary_collection, query)
 
+    # #1464
     @pytest.mark.level(2)
-    @pytest.mark.tags(CaseLabel.tags_0331)
+    @pytest.mark.tags("fail")
     def test_search_with_empty_params(self, connect, collection, args, get_simple_index):
         '''
         target: test search function, with empty search params
@@ -1831,7 +1835,23 @@ class TestSearchInvalid(object):
             pass
         entities, ids = init_data(connect, collection)
         connect.create_index(collection, field_name, get_simple_index)
+        connect.load_collection(collection)
         query, vecs = gen_query_vectors(field_name, entities, default_top_k, 1, search_params={})
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+    # #1439
+    @pytest.mark.tags("fail")
+    def test_search_with_empty_vectors(self, connect, collection):
+        """
+        target: test search function, with empty search vectors
+        method: search
+        expected: raise an exception
+        """
+        entities, ids = init_data(connect, collection)
+        assert len(ids) == default_nb
+        connect.load_collection(collection)
+        query, vecs = gen_query_vectors(field_name, entities, default_top_k, nq=0)
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
