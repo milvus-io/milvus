@@ -44,10 +44,14 @@ func (qn *queryNodeInfo) AddDmChannels(channels []string, collectionID UniqueID)
 	qn.channels2Col[collectionID] = append(qn.channels2Col[collectionID], channels...)
 }
 
-func (qn *queryNodeInfo) getChannels2Col() map[UniqueID][]string {
+func (qn *queryNodeInfo) getNumChannels() int {
 	qn.mu.Lock()
 	defer qn.mu.Unlock()
-	return qn.channels2Col
+	numChannels := 0
+	for _, chs := range qn.channels2Col {
+		numChannels += len(chs)
+	}
+	return numChannels
 }
 
 func (qn *queryNodeInfo) AddSegments(segmentIDs []UniqueID, collectionID UniqueID) {
@@ -58,6 +62,22 @@ func (qn *queryNodeInfo) AddSegments(segmentIDs []UniqueID, collectionID UniqueI
 		qn.segments[collectionID] = seg
 	}
 	qn.segments[collectionID] = append(qn.segments[collectionID], segmentIDs...)
+}
+
+func (qn *queryNodeInfo) getSegmentsLength() int {
+	qn.mu.Lock()
+	defer qn.mu.Unlock()
+	return len(qn.segments)
+}
+
+func (qn *queryNodeInfo) getNumSegments() int {
+	qn.mu.Lock()
+	defer qn.mu.Unlock()
+	numSegments := 0
+	for _, ids := range qn.segments {
+		numSegments += len(ids)
+	}
+	return numSegments
 }
 
 func (qn *queryNodeInfo) AddQueryChannel(ctx context.Context, in *querypb.AddQueryChannelRequest) (*commonpb.Status, error) {
