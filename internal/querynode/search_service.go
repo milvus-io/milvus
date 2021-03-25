@@ -82,8 +82,8 @@ func (s *searchService) consumeSearch() {
 			if msgPack == nil || len(msgPack.Msgs) <= 0 {
 				continue
 			}
-			emptySearchNum := 0
 			for _, msg := range msgPack.Msgs {
+				log.Debug("consume search message", zap.Int64("msgID", msg.ID()))
 				sm, ok := msg.(*msgstream.SearchMsg)
 				if !ok {
 					continue
@@ -93,17 +93,20 @@ func (s *searchService) consumeSearch() {
 				err := s.collectionCheck(sm.CollectionID)
 				if err != nil {
 					s.emptySearchCollection.emptySearch(sm)
-					emptySearchNum++
+					log.Debug("cannot found collection, do empty search done",
+						zap.Int64("msgID", sm.ID()),
+						zap.Int64("collectionID", sm.CollectionID))
 					continue
 				}
 				sc, ok := s.searchCollections[sm.CollectionID]
 				if !ok {
 					s.startSearchCollection(sm.CollectionID)
+					log.Debug("new search collection, start search collection service",
+						zap.Int64("collectionID", sm.CollectionID))
 				}
 				sc.msgBuffer <- sm
 				sp.Finish()
 			}
-			log.Debug("do empty search done", zap.Int("num of searchMsg", emptySearchNum))
 		}
 	}
 }
