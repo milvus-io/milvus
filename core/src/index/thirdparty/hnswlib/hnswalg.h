@@ -335,49 +335,53 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         return top_candidates;
     }
 
-    void getNeighborsByHeuristic2(
+    std::vector<tableint>
+    getNeighborsByHeuristic2 (
             std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> &top_candidates,
             const size_t M) {
-        if (top_candidates.size() < M) {
-            return;
-        }
-        std::priority_queue<std::pair<dist_t, tableint>> queue_closest;
-        std::vector<std::pair<dist_t, tableint>> return_list;
-        while (top_candidates.size() > 0) {
-            queue_closest.emplace(-top_candidates.top().first, top_candidates.top().second);
-            top_candidates.pop();
-        }
+        std::vector<tableint> return_list;
 
-        while (queue_closest.size()) {
-            if (return_list.size() >= M)
-                break;
-            std::pair<dist_t, tableint> curent_pair = queue_closest.top();
-            dist_t dist_to_query = -curent_pair.first;
-            queue_closest.pop();
-            bool good = true;
-            for (std::pair<dist_t, tableint> second_pair : return_list) {
-                dist_t curdist =
-                        fstdistfunc_(getDataByInternalId(second_pair.second),
-                                     getDataByInternalId(curent_pair.second),
-                                     dist_func_param_);;
-                if (curdist < dist_to_query) {
-                    good = false;
-                    break;
+        if (top_candidates.size() < M) {
+            return_list.resize(top_candidates.size());
+
+            for (int i = static_cast<int>(top_candidates.size() - 1); i >= 0; i--) {
+                return_list[i] = top_candidates.top().second;
+                top_candidates.pop();
+            }
+
+        } else if (M > 0) {
+            return_list.reserve(M);
+
+            std::vector<std::pair<dist_t, tableint>> queue_closest;
+            queue_closest.resize(top_candidates.size());
+            for (int i = static_cast<int>(top_candidates.size() - 1); i >= 0; i--) {
+                queue_closest[i] = top_candidates.top();
+                top_candidates.pop();
+            }
+
+            for (std::pair<dist_t, tableint> &current_pair: queue_closest) {
+                bool good = true;
+                for (tableint id : return_list) {
+                    dist_t curdist =
+                            fstdistfunc_(getDataByInternalId(id),
+                                         getDataByInternalId(current_pair.second),
+                                         dist_func_param_);
+                    if (curdist < current_pair.first) {
+                        good = false;
+                        break;
+                    }
+                }
+                if (good) {
+                    return_list.push_back(current_pair.second);
+                    if (return_list.size() >= M) {
+                        break;
+                    }
                 }
             }
-            if (good) {
-                return_list.push_back(curent_pair);
-            }
-
-
         }
 
-        for (std::pair<dist_t, tableint> curent_pair : return_list) {
-
-            top_candidates.emplace(-curent_pair.first, curent_pair.second);
-        }
+        return return_list;
     }
-
 
     linklistsizeint *get_linklist0(tableint internal_id) const {
         return (linklistsizeint *) (data_level0_memory_ + internal_id * size_data_per_element_ + offsetLevel0_);
@@ -391,21 +395,17 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         return (linklistsizeint *) (linkLists_[internal_id] + (level - 1) * size_links_per_element_);
     };
 
-    void mutuallyConnectNewElement(const void *data_point, tableint cur_c,
-                                   std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> top_candidates,
-                                   int level) {
+    tableint mutuallyConnectNewElement(const void *data_point, tableint cur_c,
+            std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> &top_candidates,
+            int level) {
 
         size_t Mcurmax = level ? maxM_ : maxM0_;
-        getNeighborsByHeuristic2(top_candidates, M_);
-        if (top_candidates.size() > M_)
+
+        std::vector<tableint> selectedNeighbors(getNeighborsByHeuristic2(top_candidates, M_));
+        if (selectedNeighbors.size() > M_)
             throw std::runtime_error("Should be not be more than M_ candidates returned by the heuristic");
 
-        std::vector<tableint> selectedNeighbors;
-        selectedNeighbors.reserve(M_);
-        while (top_candidates.size() > 0) {
-            selectedNeighbors.push_back(top_candidates.top().second);
-            top_candidates.pop();
-        }
+        tableint next_closest_entry_point = selectedNeighbors.front();
 
         {
             linklistsizeint *ll_cur;
@@ -469,15 +469,11 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                                          dist_func_param_), data[j]);
                 }
 
-                getNeighborsByHeuristic2(candidates, Mcurmax);
-
-                int indx = 0;
-                while (candidates.size() > 0) {
-                    data[indx] = candidates.top().second;
-                    candidates.pop();
-                    indx++;
+                std::vector<tableint> selected(getNeighborsByHeuristic2(candidates, Mcurmax));
+                setListCount(ll_other, static_cast<unsigned short int>(selected.size()));
+                for (size_t idx = 0; idx < selected.size(); idx++) {
+                    data[idx] = selected[idx];
                 }
-                setListCount(ll_other, indx);
                 // Nearest K:
                 /*int indx = -1;
                 for (int j = 0; j < sz_link_list_other; j++) {
@@ -493,6 +489,8 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             }
 
         }
+
+        return next_closest_entry_point;
     }
 
     std::mutex global;
@@ -563,21 +561,18 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
         std::vector<std::mutex>(new_max_elements).swap(link_list_locks_);
 
-
-        // Reallocate base layer
-        char * data_level0_memory_new = (char *) malloc(new_max_elements * size_data_per_element_);
+        char * data_level0_memory_new = (char *) realloc(data_level0_memory_, new_max_elements * size_data_per_element_);
         if (data_level0_memory_new == nullptr)
             throw std::runtime_error("Not enough memory: resizeIndex failed to allocate base layer");
-        memcpy(data_level0_memory_new, data_level0_memory_,cur_element_count * size_data_per_element_);
-        free(data_level0_memory_);
-        data_level0_memory_=data_level0_memory_new;
+        data_level0_memory_ = data_level0_memory_new;
 
         // Reallocate all other layers
-        linkLists_ = (char **) realloc(linkLists_, sizeof(void *) * new_max_elements);
-        if (linkLists_ == nullptr)
+        char ** linkLists_new = (char **) realloc(linkLists_, sizeof(void *) * new_max_elements);
+        if (linkLists_new == nullptr)
             throw std::runtime_error("Not enough memory: resizeIndex failed to allocate other layers");
+        linkLists_ = linkLists_new;
 
-        max_elements_=new_max_elements;
+        max_elements_ = new_max_elements;
 
     }
 
@@ -967,9 +962,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         }
 
         std::unique_lock <std::mutex> lock_el(link_list_locks_[cur_c]);
-        int curlevel = getRandomLevel(mult_);
-        if (level > 0)
-            curlevel = level;
+        int curlevel = (level > 0) ? level : getRandomLevel(mult_);
 
         element_levels_[cur_c] = curlevel;
 
@@ -1035,9 +1028,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                     if (top_candidates.size() > ef_construction_)
                         top_candidates.pop();
                 }
-                mutuallyConnectNewElement(data_point, cur_c, top_candidates, level);
-
-                currObj = top_candidates.top().second;
+                currObj = mutuallyConnectNewElement(data_point, cur_c, top_candidates, level);
             }
         } else {
             // Do nothing for the first element
@@ -1052,7 +1043,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         }
         return cur_c;
     };
-
+    
     std::priority_queue<std::pair<dist_t, labeltype >>
     searchKnn(const void *query_data, size_t k, faiss::ConcurrentBitsetPtr bitset) const {
         std::priority_queue<std::pair<dist_t, labeltype >> result;
@@ -1106,24 +1097,6 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         }
         return result;
     };
-
-    template <typename Comp>
-    std::vector<std::pair<dist_t, labeltype>>
-    searchKnn(const void* query_data, size_t k, Comp comp, faiss::ConcurrentBitsetPtr bitset) {
-        std::vector<std::pair<dist_t, labeltype>> result;
-        if (cur_element_count == 0) return result;
-
-        auto ret = searchKnn(query_data, k, bitset);
-
-        while (!ret.empty()) {
-            result.push_back(ret.top());
-            ret.pop();
-        }
-
-		std::sort(result.begin(), result.end(), comp);
-
-        return result;
-    }
 
     int64_t cal_size() {
         int64_t ret = 0;

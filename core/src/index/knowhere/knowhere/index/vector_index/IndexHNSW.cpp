@@ -68,8 +68,6 @@ IndexHNSW::Load(const BinarySet& index_binary) {
         hnswlib::SpaceInterface<float>* space;
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space);
         index_->loadIndex(reader);
-
-        normalize = index_->metric_type_ == 1;  // 1 == InnerProduct
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
@@ -85,7 +83,6 @@ IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
             space = new hnswlib::L2Space(dim);
         } else if (config[Metric::TYPE] == Metric::IP) {
             space = new hnswlib::InnerProductSpace(dim);
-            normalize = true;
         }
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(),
                                                                    config[IndexParams::efConstruction].get<int64_t>());
@@ -125,36 +122,31 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 
     index_->setEf(config[IndexParams::ef]);
 
-    using P = std::pair<float, int64_t>;
-    auto compare = [](const P& v1, const P& v2) { return v1.first < v2.first; };
-
     faiss::ConcurrentBitsetPtr blacklist = GetBlacklist();
+    bool transform = (index_->metric_type_ == 1);  // InnerProduct: 1
+
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
-        std::vector<P> ret;
-        const float* single_query = (float*)p_data + i * Dim();
+        auto single_query = (float*)p_data + i * Dim();
+        auto rst = index_->searchKnn(single_query, k, blacklist);
+        size_t rst_size = rst.size();
 
-        ret = index_->searchKnn((float*)single_query, k, compare, blacklist);
-
-        while (ret.size() < k) {
-            ret.emplace_back(std::make_pair(-1, -1));
+        auto p_single_dis = p_dist + i * k;
+        auto p_single_id = p_id + i * k;
+        size_t idx = rst_size - 1;
+        while (!rst.empty()) {
+            auto& it = rst.top();
+            p_single_dis[idx] = transform ? (1 - it.first) : it.first;
+            p_single_id[idx] = it.second;
+            rst.pop();
+            idx--;
         }
-        std::vector<float> dist;
-        std::vector<int64_t> ids;
+        MapOffsetToUid(p_single_id, rst_size);
 
-        if (normalize) {
-            std::transform(ret.begin(), ret.end(), std::back_inserter(dist),
-                           [](const std::pair<float, int64_t>& e) { return float(1 - e.first); });
-        } else {
-            std::transform(ret.begin(), ret.end(), std::back_inserter(dist),
-                           [](const std::pair<float, int64_t>& e) { return e.first; });
+        for (idx = rst_size; idx < k; idx++) {
+            p_single_dis[idx] = float(1.0 / 0.0);
+            p_single_id[idx] = -1;
         }
-        std::transform(ret.begin(), ret.end(), std::back_inserter(ids),
-                       [](const std::pair<float, int64_t>& e) { return e.second; });
-
-        MapOffsetToUid(ids.data(), ids.size());
-        memcpy(p_dist + i * k, dist.data(), dist_size);
-        memcpy(p_id + i * k, ids.data(), id_size);
     }
 
     auto ret_ds = std::make_shared<Dataset>();
