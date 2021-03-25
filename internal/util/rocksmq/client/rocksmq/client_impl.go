@@ -1,8 +1,6 @@
 package rocksmq
 
 import (
-	"strconv"
-
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	server "github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
 )
@@ -44,6 +42,22 @@ func (c *client) CreateProducer(options ProducerOptions) (Producer, error) {
 
 func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 	// Create a consumer
+	//for _, con := range c.consumers {
+	//	log.Debug(con.Topic() + "---------------" + con.Subscription())
+	//	if con.Topic() == options.Topic && con.Subscription() == options.SubscriptionName {
+	//		log.Debug("consumer existed")
+	//		return con, nil
+	//	}
+	//}
+	if exist, con := c.server.ExistConsumerGroup(options.Topic, options.SubscriptionName); exist {
+		log.Debug("EXISTED")
+		consumer, err := newConsumer1(c, options, con.MsgMutex)
+		if err != nil {
+			return nil, err
+		}
+		go consume(consumer)
+		return consumer, nil
+	}
 	consumer, err := newConsumer(c, options)
 	if err != nil {
 		return nil, err
@@ -65,42 +79,58 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 
 	// Take messages from RocksDB and put it into consumer.Chan(),
 	// trigger by consumer.MsgMutex which trigger by producer
-	go func() {
-		for { //nolint:gosimple
-			select {
-			case _, ok := <-consumer.MsgMutex():
-				if !ok {
-					// consumer MsgMutex closed, goroutine exit
-					return
-				}
-
-				for {
-					msg, err := consumer.client.server.Consume(consumer.topic, consumer.consumerName, 1)
-					if err != nil {
-						log.Debug("Consumer's goroutine cannot consume from (" + consumer.topic +
-							"," + consumer.consumerName + "): " + err.Error())
-						break
-					}
-
-					if len(msg) != 1 {
-						log.Debug("Consumer's goroutine cannot consume from (" + consumer.topic +
-							"," + consumer.consumerName + "): message len(" + strconv.Itoa(len(msg)) +
-							") is not 1")
-						break
-					}
-
-					consumer.messageCh <- ConsumerMessage{
-						MsgID:   msg[0].MsgID,
-						Payload: msg[0].Payload,
-					}
-				}
-			}
-		}
-	}()
+	go consume(consumer)
+	c.consumerOptions = append(c.consumerOptions, options)
 
 	return consumer, nil
 }
 
+func consume(consumer *consumer) {
+	for { //nolint:gosimple
+		log.Debug(consumer.topic + "+" + consumer.consumerName)
+		//if consumer.msgMutex == nil {
+		//	break
+		//}
+		select { //nolint:gosimple
+		case _, ok := <-consumer.MsgMutex():
+			if !ok {
+				// consumer MsgMutex closed, goroutine exit
+				log.Debug("consumer MsgMutex closed")
+				return
+			}
+			log.Debug("Before consume")
+
+			for {
+				msg, err := consumer.client.server.Consume(consumer.topic, consumer.consumerName, 1)
+				if err != nil {
+					log.Debug("Consumer's goroutine cannot consume from (" + consumer.topic +
+						"," + consumer.consumerName + "): " + err.Error())
+					break
+				}
+
+				if len(msg) != 1 {
+					//log.Debug("Consumer's goroutine cannot consume from (" + consumer.topic +
+					//	"," + consumer.consumerName + "): message len(" + strconv.Itoa(len(msg)) +
+					//	") is not 1")
+					break
+				}
+
+				consumer.messageCh <- ConsumerMessage{
+					MsgID:   msg[0].MsgID,
+					Payload: msg[0].Payload,
+				}
+			}
+			//default:
+			//	log.Debug("In default")
+		}
+	}
+}
+
 func (c *client) Close() {
 	// TODO: free resources
+	for _, opt := range c.consumerOptions {
+		log.Debug("Close" + opt.Topic + "+" + opt.SubscriptionName)
+		_ = c.server.DestroyConsumerGroup(opt.Topic, opt.SubscriptionName)
+		//_ = c.server.DestroyTopic(opt.Topic)
+	}
 }

@@ -597,6 +597,7 @@ func (rtms *RmqTtMsgStream) Seek(mp *msgstream.MsgPosition) error {
 	rtms.addConsumer(consumer, seekChannel)
 
 	if len(consumer.Chan()) == 0 {
+		log.Debug("len(consumer.Chan()) = 0")
 		return nil
 	}
 
