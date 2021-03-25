@@ -86,7 +86,7 @@ func (tt *timeTick) tick() error {
 		},
 	}
 	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
-	err := tt.tickMsgStream.Produce(tt.ctx, &msgPack)
+	err := tt.tickMsgStream.Produce(&msgPack)
 	if err != nil {
 		log.Warn("proxynode", zap.String("error", err.Error()))
 	}

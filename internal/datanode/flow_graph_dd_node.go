@@ -11,6 +11,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
+	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/log"
@@ -18,6 +19,8 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
+	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
 
 type ddNode struct {
@@ -69,7 +72,7 @@ func (ddNode *ddNode) Name() string {
 	return "ddNode"
 }
 
-func (ddNode *ddNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
+func (ddNode *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	if len(in) != 1 {
 		log.Error("Invalid operate message input in ddNode", zap.Int("input length", len(in)))
@@ -83,7 +86,13 @@ func (ddNode *ddNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Con
 	}
 
 	if msMsg == nil {
-		return []Msg{}, ctx
+		return []Msg{}
+	}
+	var spans []opentracing.Span
+	for _, msg := range msMsg.TsMessages() {
+		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		spans = append(spans, sp)
+		msg.SetTraceCtx(ctx)
 	}
 
 	ddNode.ddMsg = &ddMsg{
@@ -165,8 +174,12 @@ func (ddNode *ddNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Con
 	default:
 	}
 
+	for _, span := range spans {
+		span.Finish()
+	}
+
 	var res Msg = ddNode.ddMsg
-	return []Msg{res}, ctx
+	return []Msg{res}
 }
 
 /*
@@ -245,6 +258,10 @@ func flushTxn(ddlData *sync.Map,
 }
 
 func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
+	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+	msg.SetTraceCtx(ctx)
+	defer sp.Finish()
+
 	collectionID := msg.CollectionID
 
 	// add collection
@@ -295,6 +312,10 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 dropCollection will drop collection in ddRecords but won't drop collection in replica
 */
 func (ddNode *ddNode) dropCollection(msg *msgstream.DropCollectionMsg) {
+	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+	msg.SetTraceCtx(ctx)
+	defer sp.Finish()
+
 	collectionID := msg.CollectionID
 
 	// remove collection
@@ -327,6 +348,10 @@ func (ddNode *ddNode) dropCollection(msg *msgstream.DropCollectionMsg) {
 }
 
 func (ddNode *ddNode) createPartition(msg *msgstream.CreatePartitionMsg) {
+	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+	msg.SetTraceCtx(ctx)
+	defer sp.Finish()
+
 	partitionID := msg.PartitionID
 	collectionID := msg.CollectionID
 
@@ -363,6 +388,9 @@ func (ddNode *ddNode) createPartition(msg *msgstream.CreatePartitionMsg) {
 }
 
 func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
+	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+	msg.SetTraceCtx(ctx)
+	defer sp.Finish()
 	partitionID := msg.PartitionID
 	collectionID := msg.CollectionID
 

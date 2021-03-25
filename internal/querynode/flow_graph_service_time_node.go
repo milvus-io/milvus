@@ -3,12 +3,12 @@ package querynode
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
+	"go.uber.org/zap"
 )
 
 type serviceTimeNode struct {
@@ -22,7 +22,7 @@ func (stNode *serviceTimeNode) Name() string {
 	return "stNode"
 }
 
-func (stNode *serviceTimeNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
+func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//log.Debug("Do serviceTimeNode operation")
 
 	if len(in) != 1 {
@@ -37,7 +37,7 @@ func (stNode *serviceTimeNode) Operate(ctx context.Context, in []Msg) ([]Msg, co
 	}
 
 	if serviceTimeMsg == nil {
-		return []Msg{}, ctx
+		return []Msg{}
 	}
 
 	// update service time
@@ -57,7 +57,7 @@ func (stNode *serviceTimeNode) Operate(ctx context.Context, in []Msg) ([]Msg, co
 		gcRecord:  serviceTimeMsg.gcRecord,
 		timeRange: serviceTimeMsg.timeRange,
 	}
-	return []Msg{res}, ctx
+	return []Msg{res}
 }
 
 func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {
@@ -78,7 +78,7 @@ func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {
 		},
 	}
 	msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
-	return stNode.timeTickMsgStream.Produce(context.TODO(), &msgPack)
+	return stNode.timeTickMsgStream.Produce(&msgPack)
 }
 
 func newServiceTimeNode(ctx context.Context, replica ReplicaInterface, factory msgstream.Factory, collectionID UniqueID) *serviceTimeNode {

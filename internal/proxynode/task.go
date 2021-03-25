@@ -52,7 +52,7 @@ const (
 )
 
 type task interface {
-	Ctx() context.Context
+	TraceCtx() context.Context
 	ID() UniqueID       // return ReqID
 	SetID(uid UniqueID) // set ReqID
 	Name() string
@@ -79,7 +79,7 @@ type InsertTask struct {
 	rowIDAllocator *allocator.IDAllocator
 }
 
-func (it *InsertTask) Ctx() context.Context {
+func (it *InsertTask) TraceCtx() context.Context {
 	return it.ctx
 }
 
@@ -185,7 +185,8 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 	}
 
 	var tsMsg msgstream.TsMsg = &it.BaseInsertTask
-	msgPack := &msgstream.MsgPack{
+	it.BaseMsg.Ctx = ctx
+	msgPack := msgstream.MsgPack{
 		BeginTs: it.BeginTs(),
 		EndTs:   it.EndTs(),
 		Msgs:    make([]msgstream.TsMsg, 1),
@@ -231,7 +232,7 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	err = stream.Produce(ctx, msgPack)
+	err = stream.Produce(&msgPack)
 	if err != nil {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
@@ -255,7 +256,7 @@ type CreateCollectionTask struct {
 	schema            *schemapb.CollectionSchema
 }
 
-func (cct *CreateCollectionTask) Ctx() context.Context {
+func (cct *CreateCollectionTask) TraceCtx() context.Context {
 	return cct.ctx
 }
 
@@ -403,7 +404,7 @@ type DropCollectionTask struct {
 	result        *commonpb.Status
 }
 
-func (dct *DropCollectionTask) Ctx() context.Context {
+func (dct *DropCollectionTask) TraceCtx() context.Context {
 	return dct.ctx
 }
 
@@ -484,7 +485,7 @@ type SearchTask struct {
 	query          *milvuspb.SearchRequest
 }
 
-func (st *SearchTask) Ctx() context.Context {
+func (st *SearchTask) TraceCtx() context.Context {
 	return st.ctx
 }
 
@@ -596,18 +597,19 @@ func (st *SearchTask) Execute(ctx context.Context) error {
 	var tsMsg msgstream.TsMsg = &msgstream.SearchMsg{
 		SearchRequest: *st.SearchRequest,
 		BaseMsg: msgstream.BaseMsg{
+			Ctx:            ctx,
 			HashValues:     []uint32{uint32(Params.ProxyID)},
 			BeginTimestamp: st.Base.Timestamp,
 			EndTimestamp:   st.Base.Timestamp,
 		},
 	}
-	msgPack := &msgstream.MsgPack{
+	msgPack := msgstream.MsgPack{
 		BeginTs: st.Base.Timestamp,
 		EndTs:   st.Base.Timestamp,
 		Msgs:    make([]msgstream.TsMsg, 1),
 	}
 	msgPack.Msgs[0] = tsMsg
-	err := st.queryMsgStream.Produce(ctx, msgPack)
+	err := st.queryMsgStream.Produce(&msgPack)
 	log.Debug("proxynode", zap.Int("length of searchMsg", len(msgPack.Msgs)))
 	if err != nil {
 		log.Debug("proxynode", zap.String("send search request failed", err.Error()))
@@ -990,7 +992,7 @@ func printSearchResult(partialSearchResult *internalpb.SearchResults) {
 func (st *SearchTask) PostExecute(ctx context.Context) error {
 	for {
 		select {
-		case <-st.Ctx().Done():
+		case <-st.TraceCtx().Done():
 			log.Debug("proxynode", zap.Int64("SearchTask: wait to finish failed, timeout!, taskID:", st.ID()))
 			return fmt.Errorf("SearchTask:wait to finish failed, timeout: %d", st.ID())
 		case searchResults := <-st.resultBuf:
@@ -1073,7 +1075,7 @@ type HasCollectionTask struct {
 	result        *milvuspb.BoolResponse
 }
 
-func (hct *HasCollectionTask) Ctx() context.Context {
+func (hct *HasCollectionTask) TraceCtx() context.Context {
 	return hct.ctx
 }
 
@@ -1144,7 +1146,7 @@ type DescribeCollectionTask struct {
 	result        *milvuspb.DescribeCollectionResponse
 }
 
-func (dct *DescribeCollectionTask) Ctx() context.Context {
+func (dct *DescribeCollectionTask) TraceCtx() context.Context {
 	return dct.ctx
 }
 
@@ -1215,7 +1217,7 @@ type GetCollectionsStatisticsTask struct {
 	result      *milvuspb.GetCollectionStatisticsResponse
 }
 
-func (g *GetCollectionsStatisticsTask) Ctx() context.Context {
+func (g *GetCollectionsStatisticsTask) TraceCtx() context.Context {
 	return g.ctx
 }
 
@@ -1302,7 +1304,7 @@ type ShowCollectionsTask struct {
 	result        *milvuspb.ShowCollectionsResponse
 }
 
-func (sct *ShowCollectionsTask) Ctx() context.Context {
+func (sct *ShowCollectionsTask) TraceCtx() context.Context {
 	return sct.ctx
 }
 
@@ -1370,7 +1372,7 @@ type CreatePartitionTask struct {
 	result        *commonpb.Status
 }
 
-func (cpt *CreatePartitionTask) Ctx() context.Context {
+func (cpt *CreatePartitionTask) TraceCtx() context.Context {
 	return cpt.ctx
 }
 
@@ -1447,7 +1449,7 @@ type DropPartitionTask struct {
 	result        *commonpb.Status
 }
 
-func (dpt *DropPartitionTask) Ctx() context.Context {
+func (dpt *DropPartitionTask) TraceCtx() context.Context {
 	return dpt.ctx
 }
 
@@ -1524,7 +1526,7 @@ type HasPartitionTask struct {
 	result        *milvuspb.BoolResponse
 }
 
-func (hpt *HasPartitionTask) Ctx() context.Context {
+func (hpt *HasPartitionTask) TraceCtx() context.Context {
 	return hpt.ctx
 }
 
@@ -1600,7 +1602,7 @@ type ShowPartitionsTask struct {
 	result        *milvuspb.ShowPartitionsResponse
 }
 
-func (spt *ShowPartitionsTask) Ctx() context.Context {
+func (spt *ShowPartitionsTask) TraceCtx() context.Context {
 	return spt.ctx
 }
 
@@ -1671,7 +1673,7 @@ type CreateIndexTask struct {
 	result        *commonpb.Status
 }
 
-func (cit *CreateIndexTask) Ctx() context.Context {
+func (cit *CreateIndexTask) TraceCtx() context.Context {
 	return cit.ctx
 }
 
@@ -1749,7 +1751,7 @@ type DescribeIndexTask struct {
 	result        *milvuspb.DescribeIndexResponse
 }
 
-func (dit *DescribeIndexTask) Ctx() context.Context {
+func (dit *DescribeIndexTask) TraceCtx() context.Context {
 	return dit.ctx
 }
 
@@ -1832,7 +1834,7 @@ type DropIndexTask struct {
 	result        *commonpb.Status
 }
 
-func (dit *DropIndexTask) Ctx() context.Context {
+func (dit *DropIndexTask) TraceCtx() context.Context {
 	return dit.ctx
 }
 
@@ -1911,7 +1913,7 @@ type GetIndexStateTask struct {
 	result        *milvuspb.GetIndexStateResponse
 }
 
-func (gist *GetIndexStateTask) Ctx() context.Context {
+func (gist *GetIndexStateTask) TraceCtx() context.Context {
 	return gist.ctx
 }
 
@@ -2142,7 +2144,7 @@ type FlushTask struct {
 	result      *commonpb.Status
 }
 
-func (ft *FlushTask) Ctx() context.Context {
+func (ft *FlushTask) TraceCtx() context.Context {
 	return ft.ctx
 }
 
@@ -2228,7 +2230,7 @@ type LoadCollectionTask struct {
 	result       *commonpb.Status
 }
 
-func (lct *LoadCollectionTask) Ctx() context.Context {
+func (lct *LoadCollectionTask) TraceCtx() context.Context {
 	return lct.ctx
 }
 
@@ -2323,7 +2325,7 @@ type ReleaseCollectionTask struct {
 	result       *commonpb.Status
 }
 
-func (rct *ReleaseCollectionTask) Ctx() context.Context {
+func (rct *ReleaseCollectionTask) TraceCtx() context.Context {
 	return rct.ctx
 }
 
@@ -2402,6 +2404,10 @@ type LoadPartitionTask struct {
 	ctx          context.Context
 	queryService types.QueryService
 	result       *commonpb.Status
+}
+
+func (lpt *LoadPartitionTask) TraceCtx() context.Context {
+	return lpt.ctx
 }
 
 func (lpt *LoadPartitionTask) ID() UniqueID {
@@ -2495,7 +2501,7 @@ type ReleasePartitionTask struct {
 	result       *commonpb.Status
 }
 
-func (rpt *ReleasePartitionTask) Ctx() context.Context {
+func (rpt *ReleasePartitionTask) TraceCtx() context.Context {
 	return rpt.ctx
 }
 

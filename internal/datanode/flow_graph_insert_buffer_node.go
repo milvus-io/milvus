@@ -11,11 +11,14 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
+	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
@@ -31,26 +34,25 @@ const (
 type (
 	InsertData = storage.InsertData
 	Blob       = storage.Blob
-
-	insertBufferNode struct {
-		BaseNode
-		insertBuffer *insertBuffer
-		replica      Replica
-		flushMeta    *binlogMeta
-		flushMap     sync.Map
-
-		minIOKV kv.Base
-
-		timeTickStream          msgstream.MsgStream
-		segmentStatisticsStream msgstream.MsgStream
-		completeFlushStream     msgstream.MsgStream
-	}
-
-	insertBuffer struct {
-		insertData map[UniqueID]*InsertData // SegmentID to InsertData
-		maxSize    int32
-	}
 )
+type insertBufferNode struct {
+	BaseNode
+	insertBuffer *insertBuffer
+	replica      Replica
+	flushMeta    *binlogMeta
+	flushMap     sync.Map
+
+	minIOKV kv.Base
+
+	timeTickStream          msgstream.MsgStream
+	segmentStatisticsStream msgstream.MsgStream
+	completeFlushStream     msgstream.MsgStream
+}
+
+type insertBuffer struct {
+	insertData map[UniqueID]*InsertData // SegmentID to InsertData
+	maxSize    int32
+}
 
 func (ib *insertBuffer) size(segmentID UniqueID) int32 {
 	if ib.insertData == nil || len(ib.insertData) <= 0 {
@@ -85,7 +87,7 @@ func (ibNode *insertBufferNode) Name() string {
 	return "ibNode"
 }
 
-func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
+func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	if len(in) != 1 {
 		log.Error("Invalid operate message input in insertBufferNode", zap.Int("input length", len(in)))
@@ -99,12 +101,20 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 	}
 
 	if iMsg == nil {
-		return []Msg{}, ctx
+		return []Msg{}
+	}
+
+	var spans []opentracing.Span
+	for _, msg := range iMsg.insertMessages {
+		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		spans = append(spans, sp)
+		msg.SetTraceCtx(ctx)
 	}
 
 	// Updating segment statistics
 	uniqueSeg := make(map[UniqueID]int64)
 	for _, msg := range iMsg.insertMessages {
+
 		currentSegID := msg.GetSegmentID()
 		collID := msg.GetCollectionID()
 		partitionID := msg.GetPartitionID()
@@ -537,8 +547,11 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 		gcRecord:  iMsg.gcRecord,
 		timeRange: iMsg.timeRange,
 	}
+	for _, sp := range spans {
+		sp.Finish()
+	}
 
-	return []Msg{res}, ctx
+	return []Msg{res}
 }
 
 func flushSegmentTxn(collMeta *etcdpb.CollectionMeta, segID UniqueID, partitionID UniqueID, collID UniqueID,
@@ -639,7 +652,7 @@ func (ibNode *insertBufferNode) completeFlush(segID UniqueID, finishCh <-chan bo
 	}
 
 	msgPack.Msgs = append(msgPack.Msgs, msg)
-	err := ibNode.completeFlushStream.Produce(context.TODO(), &msgPack)
+	err := ibNode.completeFlushStream.Produce(&msgPack)
 	if err != nil {
 		log.Error(".. Produce complete flush msg failed ..", zap.Error(err))
 	}
@@ -663,7 +676,7 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 		},
 	}
 	msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
-	return ibNode.timeTickStream.Produce(context.TODO(), &msgPack)
+	return ibNode.timeTickStream.Produce(&msgPack)
 }
 
 func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID) error {
@@ -698,7 +711,7 @@ func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID) error {
 	var msgPack = msgstream.MsgPack{
 		Msgs: []msgstream.TsMsg{msg},
 	}
-	return ibNode.segmentStatisticsStream.Produce(context.TODO(), &msgPack)
+	return ibNode.segmentStatisticsStream.Produce(&msgPack)
 }
 
 func (ibNode *insertBufferNode) getCollectionSchemaByID(collectionID UniqueID) (*schemapb.CollectionSchema, error) {

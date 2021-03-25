@@ -183,6 +183,7 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 		// if slice, todo: a common function to calculate size of slice,
 		// if map, a little complicated
 		size := 0
+		size += int(unsafe.Sizeof(msg.Ctx))
 		size += int(unsafe.Sizeof(msg.BeginTimestamp))
 		size += int(unsafe.Sizeof(msg.EndTimestamp))
 		size += int(unsafe.Sizeof(msg.HashValues))
@@ -262,6 +263,9 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 				RowData:    []*commonpb.Blob{row},
 			}
 			insertMsg := &msgstream.InsertMsg{
+				BaseMsg: msgstream.BaseMsg{
+					Ctx: request.TraceCtx(),
+				},
 				InsertRequest: sliceRequest,
 			}
 			if together { // all rows with same hash value are accumulated to only one message

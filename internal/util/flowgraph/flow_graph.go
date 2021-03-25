@@ -17,7 +17,7 @@ func (fg *TimeTickedFlowGraph) AddNode(node Node) {
 	nodeName := node.Name()
 	nodeCtx := nodeCtx{
 		node:                   node,
-		inputChannels:          make([]chan *MsgWithCtx, 0),
+		inputChannels:          make([]chan Msg, 0),
 		downstreamInputChanIdx: make(map[string]int),
 	}
 	fg.nodeCtx[nodeName] = &nodeCtx
@@ -51,7 +51,7 @@ func (fg *TimeTickedFlowGraph) SetEdges(nodeName string, in []string, out []stri
 			return errors.New(errMsg)
 		}
 		maxQueueLength := outNode.node.MaxQueueLength()
-		outNode.inputChannels = append(outNode.inputChannels, make(chan *MsgWithCtx, maxQueueLength))
+		outNode.inputChannels = append(outNode.inputChannels, make(chan Msg, maxQueueLength))
 		currentNode.downstream[i] = outNode
 	}
 

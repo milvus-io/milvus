@@ -1,14 +1,15 @@
 package querynode
 
 import (
-	"context"
-
 	"github.com/golang/protobuf/proto"
+	"github.com/opentracing/opentracing-go"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
 type ddNode struct {
@@ -21,7 +22,7 @@ func (ddNode *ddNode) Name() string {
 	return "ddNode"
 }
 
-func (ddNode *ddNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
+func (ddNode *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//log.Debug("Do filterDmNode operation")
 
 	if len(in) != 1 {
@@ -33,6 +34,13 @@ func (ddNode *ddNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Con
 	if !ok {
 		log.Error("type assertion failed for MsgStreamMsg")
 		// TODO: add error handling
+	}
+
+	var spans []opentracing.Span
+	for _, msg := range msMsg.TsMessages() {
+		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		spans = append(spans, sp)
+		msg.SetTraceCtx(ctx)
 	}
 
 	var ddMsg = ddMsg{
@@ -74,7 +82,10 @@ func (ddNode *ddNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Con
 	//}
 
 	var res Msg = ddNode.ddMsg
-	return []Msg{res}, ctx
+	for _, span := range spans {
+		span.Finish()
+	}
+	return []Msg{res}
 }
 
 func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {

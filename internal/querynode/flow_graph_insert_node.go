@@ -4,10 +4,12 @@ import (
 	"context"
 	"sync"
 
-	"go.uber.org/zap"
-
+	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
+	"go.uber.org/zap"
 )
 
 type insertNode struct {
@@ -28,7 +30,7 @@ func (iNode *insertNode) Name() string {
 	return "iNode"
 }
 
-func (iNode *insertNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
+func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//log.Debug("Do insertNode operation")
 
 	if len(in) != 1 {
@@ -50,7 +52,14 @@ func (iNode *insertNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.
 	}
 
 	if iMsg == nil {
-		return []Msg{}, ctx
+		return []Msg{}
+	}
+
+	var spans []opentracing.Span
+	for _, msg := range iMsg.insertMessages {
+		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		spans = append(spans, sp)
+		msg.SetTraceCtx(ctx)
 	}
 
 	// 1. hash insertMessages to insertData
@@ -108,7 +117,10 @@ func (iNode *insertNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.
 		gcRecord:  iMsg.gcRecord,
 		timeRange: iMsg.timeRange,
 	}
-	return []Msg{res}, ctx
+	for _, sp := range spans {
+		sp.Finish()
+	}
+	return []Msg{res}
 }
 
 func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *sync.WaitGroup) {

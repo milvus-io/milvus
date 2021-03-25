@@ -160,5 +160,5 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	msgStream := flowgraph.GenerateMsgStreamMsg(tsMessages, Timestamp(0), Timestamp(3),
 		startPos, startPos)
 	var inMsg Msg = msgStream
-	ddNode.Operate(ctx, []Msg{inMsg})
+	ddNode.Operate([]Msg{inMsg})
 }

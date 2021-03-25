@@ -15,6 +15,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
 
 type searchCollection struct {
@@ -99,6 +100,9 @@ func (s *searchCollection) setServiceableTime(t Timestamp) {
 }
 
 func (s *searchCollection) emptySearch(searchMsg *msgstream.SearchMsg) {
+	sp, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
+	defer sp.Finish()
+	searchMsg.SetTraceCtx(ctx)
 	err := s.search(searchMsg)
 	if err != nil {
 		log.Error(err.Error())
@@ -164,6 +168,8 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 				continue
 			}
 			for _, sm := range searchMsg {
+				sp, ctx := trace.StartSpanFromContext(sm.TraceCtx())
+				sm.SetTraceCtx(ctx)
 				err := s.search(sm)
 				if err != nil {
 					log.Error(err.Error())
@@ -172,6 +178,7 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 						log.Error("publish FailedSearchResult failed", zap.Error(err2))
 					}
 				}
+				sp.Finish()
 			}
 			log.Debug("doUnsolvedMsgSearch, do search done", zap.Int("num of searchMsg", len(searchMsg)))
 		}
@@ -181,6 +188,9 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 // TODO:: cache map[dsl]plan
 // TODO: reBatched search requests
 func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
+	sp, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
+	defer sp.Finish()
+	searchMsg.SetTraceCtx(ctx)
 	searchTimestamp := searchMsg.Base.Timestamp
 	var queryBlob = searchMsg.Query.Value
 	query := milvuspb.SearchRequest{}
@@ -266,7 +276,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 			}
 			resultChannelInt, _ := strconv.ParseInt(searchMsg.ResultChannelID, 10, 64)
 			searchResultMsg := &msgstream.SearchResultMsg{
-				BaseMsg: msgstream.BaseMsg{HashValues: []uint32{uint32(resultChannelInt)}},
+				BaseMsg: msgstream.BaseMsg{Ctx: searchMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
 				SearchResults: internalpb.SearchResults{
 					Base: &commonpb.MsgBase{
 						MsgType:   commonpb.MsgType_SearchResult,
@@ -328,7 +338,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 		}
 		resultChannelInt, _ := strconv.ParseInt(searchMsg.ResultChannelID, 10, 64)
 		searchResultMsg := &msgstream.SearchResultMsg{
-			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{uint32(resultChannelInt)}},
+			BaseMsg: msgstream.BaseMsg{Ctx: searchMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
 			SearchResults: internalpb.SearchResults{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_SearchResult,
@@ -368,19 +378,19 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 }
 
 func (s *searchCollection) publishSearchResult(msg msgstream.TsMsg) error {
-	// span, ctx := opentracing.StartSpanFromContext(msg.GetMsgContext(), "publish search result")
-	// defer span.Finish()
-	// msg.SetMsgContext(ctx)
+	span, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+	defer span.Finish()
+	msg.SetTraceCtx(ctx)
 	msgPack := msgstream.MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, msg)
-	err := s.searchResultMsgStream.Produce(context.TODO(), &msgPack)
+	err := s.searchResultMsgStream.Produce(&msgPack)
 	return err
 }
 
 func (s *searchCollection) publishFailedSearchResult(searchMsg *msgstream.SearchMsg, errMsg string) error {
-	// span, ctx := opentracing.StartSpanFromContext(msg.GetMsgContext(), "receive search msg")
-	// defer span.Finish()
-	// msg.SetMsgContext(ctx)
+	span, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
+	defer span.Finish()
+	searchMsg.SetTraceCtx(ctx)
 	//log.Debug("Public fail SearchResult!")
 	msgPack := msgstream.MsgPack{}
 
@@ -401,7 +411,7 @@ func (s *searchCollection) publishFailedSearchResult(searchMsg *msgstream.Search
 	}
 
 	msgPack.Msgs = append(msgPack.Msgs, searchResultMsg)
-	err := s.searchResultMsgStream.Produce(context.TODO(), &msgPack)
+	err := s.searchResultMsgStream.Produce(&msgPack)
 	if err != nil {
 		return err
 	}

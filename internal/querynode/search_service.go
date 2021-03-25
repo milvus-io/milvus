@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 	"go.uber.org/zap"
 	"strconv"
 	"strings"
@@ -77,7 +78,7 @@ func (s *searchService) consumeSearch() {
 		case <-s.ctx.Done():
 			return
 		default:
-			msgPack, _ := s.searchMsgStream.Consume()
+			msgPack := s.searchMsgStream.Consume()
 			if msgPack == nil || len(msgPack.Msgs) <= 0 {
 				continue
 			}
@@ -87,6 +88,8 @@ func (s *searchService) consumeSearch() {
 				if !ok {
 					continue
 				}
+				sp, ctx := trace.StartSpanFromContext(sm.BaseMsg.Ctx)
+				sm.BaseMsg.Ctx = ctx
 				err := s.collectionCheck(sm.CollectionID)
 				if err != nil {
 					s.emptySearchCollection.emptySearch(sm)
@@ -98,6 +101,7 @@ func (s *searchService) consumeSearch() {
 					s.startSearchCollection(sm.CollectionID)
 				}
 				sc.msgBuffer <- sm
+				sp.Finish()
 			}
 			log.Debug("do empty search done", zap.Int("num of searchMsg", emptySearchNum))
 		}

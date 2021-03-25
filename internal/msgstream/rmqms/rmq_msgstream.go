@@ -161,7 +161,7 @@ func (rms *RmqMsgStream) AsConsumer(channels []string, groupName string) {
 	}
 }
 
-func (rms *RmqMsgStream) Produce(ctx context.Context, pack *msgstream.MsgPack) error {
+func (rms *RmqMsgStream) Produce(pack *msgstream.MsgPack) error {
 	tsMsgs := pack.Msgs
 	if len(tsMsgs) <= 0 {
 		log.Debug("Warning: Receive empty msgPack")
@@ -228,7 +228,7 @@ func (rms *RmqMsgStream) Produce(ctx context.Context, pack *msgstream.MsgPack) e
 	return nil
 }
 
-func (rms *RmqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) error {
+func (rms *RmqMsgStream) Broadcast(msgPack *msgstream.MsgPack) error {
 	for _, v := range msgPack.Msgs {
 		mb, err := v.Marshal(v)
 		if err != nil {
@@ -255,18 +255,18 @@ func (rms *RmqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) error 
 	return nil
 }
 
-func (rms *RmqMsgStream) Consume() (*msgstream.MsgPack, context.Context) {
+func (rms *RmqMsgStream) Consume() *msgstream.MsgPack {
 	for {
 		select {
 		case cm, ok := <-rms.receiveBuf:
 			if !ok {
 				log.Debug("buf chan closed")
-				return nil, nil
+				return nil
 			}
-			return cm, nil
+			return cm
 		case <-rms.ctx.Done():
 			//log.Debug("context closed")
-			return nil, nil
+			return nil
 		}
 	}
 }

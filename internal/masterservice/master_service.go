@@ -445,10 +445,10 @@ func (c *Core) setMsgStreams() error {
 			TimeTickMsg: timeTickResult,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
-		if err := timeTickStream.Broadcast(c.ctx, &msgPack); err != nil {
+		if err := timeTickStream.Broadcast(&msgPack); err != nil {
 			return err
 		}
-		if err := ddStream.Broadcast(c.ctx, &msgPack); err != nil {
+		if err := ddStream.Broadcast(&msgPack); err != nil {
 			return err
 		}
 		return nil
@@ -457,6 +457,7 @@ func (c *Core) setMsgStreams() error {
 	c.DdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
+			Ctx:            ctx,
 			BeginTimestamp: req.Base.Timestamp,
 			EndTimestamp:   req.Base.Timestamp,
 			HashValues:     []uint32{0},
@@ -466,7 +467,7 @@ func (c *Core) setMsgStreams() error {
 			CreateCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(ctx, &msgPack); err != nil {
+		if err := ddStream.Broadcast(&msgPack); err != nil {
 			return err
 		}
 		return nil
@@ -475,6 +476,7 @@ func (c *Core) setMsgStreams() error {
 	c.DdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
+			Ctx:            ctx,
 			BeginTimestamp: req.Base.Timestamp,
 			EndTimestamp:   req.Base.Timestamp,
 			HashValues:     []uint32{0},
@@ -484,7 +486,7 @@ func (c *Core) setMsgStreams() error {
 			DropCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(ctx, &msgPack); err != nil {
+		if err := ddStream.Broadcast(&msgPack); err != nil {
 			return err
 		}
 		return nil
@@ -493,6 +495,7 @@ func (c *Core) setMsgStreams() error {
 	c.DdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
+			Ctx:            ctx,
 			BeginTimestamp: req.Base.Timestamp,
 			EndTimestamp:   req.Base.Timestamp,
 			HashValues:     []uint32{0},
@@ -502,7 +505,7 @@ func (c *Core) setMsgStreams() error {
 			CreatePartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(ctx, &msgPack); err != nil {
+		if err := ddStream.Broadcast(&msgPack); err != nil {
 			return err
 		}
 		return nil
@@ -511,6 +514,7 @@ func (c *Core) setMsgStreams() error {
 	c.DdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
+			Ctx:            ctx,
 			BeginTimestamp: req.Base.Timestamp,
 			EndTimestamp:   req.Base.Timestamp,
 			HashValues:     []uint32{0},
@@ -520,7 +524,7 @@ func (c *Core) setMsgStreams() error {
 			DropPartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(ctx, &msgPack); err != nil {
+		if err := ddStream.Broadcast(&msgPack); err != nil {
 			return err
 		}
 		return nil

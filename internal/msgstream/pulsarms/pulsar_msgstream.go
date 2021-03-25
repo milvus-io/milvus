@@ -11,9 +11,9 @@ import (
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
-	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
+	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
@@ -54,8 +54,6 @@ type PulsarMsgStream struct {
 	producerLock     *sync.Mutex
 	consumerLock     *sync.Mutex
 	consumerReflects []reflect.SelectCase
-
-	scMap *sync.Map
 }
 
 func newPulsarMsgStream(ctx context.Context,
@@ -99,7 +97,6 @@ func newPulsarMsgStream(ctx context.Context,
 		producerLock:     &sync.Mutex{},
 		consumerLock:     &sync.Mutex{},
 		wait:             &sync.WaitGroup{},
-		scMap:            &sync.Map{},
 	}
 
 	return stream, nil
@@ -195,7 +192,7 @@ func (ms *PulsarMsgStream) Close() {
 	}
 }
 
-func (ms *PulsarMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
+func (ms *PulsarMsgStream) Produce(msgPack *msgstream.MsgPack) error {
 	tsMsgs := msgPack.Msgs
 	if len(tsMsgs) <= 0 {
 		log.Debug("Warning: Receive empty msgPack")
@@ -257,7 +254,7 @@ func (ms *PulsarMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error 
 
 			msg := &pulsar.ProducerMessage{Payload: m, Properties: map[string]string{}}
 
-			sp, spanCtx := trace.MsgSpanFromCtx(ctx, v.Msgs[i])
+			sp, spanCtx := trace.MsgSpanFromCtx(v.Msgs[i].TraceCtx(), v.Msgs[i])
 			trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
 
 			if _, err := ms.producers[channel].Send(
@@ -274,7 +271,7 @@ func (ms *PulsarMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error 
 	return nil
 }
 
-func (ms *PulsarMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) error {
+func (ms *PulsarMsgStream) Broadcast(msgPack *msgstream.MsgPack) error {
 	for _, v := range msgPack.Msgs {
 		mb, err := v.Marshal(v)
 		if err != nil {
@@ -288,7 +285,7 @@ func (ms *PulsarMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) erro
 
 		msg := &pulsar.ProducerMessage{Payload: m, Properties: map[string]string{}}
 
-		sp, spanCtx := trace.MsgSpanFromCtx(ctx, v)
+		sp, spanCtx := trace.MsgSpanFromCtx(v.TraceCtx(), v)
 		trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
 
 		ms.producerLock.Lock()
@@ -308,31 +305,18 @@ func (ms *PulsarMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) erro
 	return nil
 }
 
-func (ms *PulsarMsgStream) Consume() (*MsgPack, context.Context) {
+func (ms *PulsarMsgStream) Consume() *msgstream.MsgPack {
 	for {
 		select {
 		case cm, ok := <-ms.receiveBuf:
 			if !ok {
 				log.Debug("buf chan closed")
-				return nil, nil
+				return nil
 			}
-			var ctx context.Context
-			var opts []opentracing.StartSpanOption
-			for _, msg := range cm.Msgs {
-				sc, loaded := ms.scMap.LoadAndDelete(msg.ID())
-				if loaded {
-					opts = append(opts, opentracing.ChildOf(sc.(opentracing.SpanContext)))
-				}
-			}
-			if len(opts) != 0 {
-				ctx = context.Background()
-			}
-			sp, ctx := trace.StartSpanFromContext(ctx, opts...)
-			sp.Finish()
-			return cm, ctx
+			return cm
 		case <-ms.ctx.Done():
 			//log.Debug("context closed")
-			return nil, nil
+			return nil
 		}
 	}
 }
@@ -368,7 +352,7 @@ func (ms *PulsarMsgStream) receiveMsg(consumer Consumer) {
 
 			sp, ok := trace.ExtractFromPulsarMsgProperties(tsMsg, pulsarMsg.Properties())
 			if ok {
-				ms.scMap.Store(tsMsg.ID(), sp.Context())
+				tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
 			}
 
 			msgPack := MsgPack{Msgs: []TsMsg{tsMsg}}
@@ -459,6 +443,10 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 				if err != nil {
 					log.Error("Failed to unmarshal tsMsg", zap.Error(err))
 					continue
+				}
+				sp, ok := trace.ExtractFromPulsarMsgProperties(tsMsg, pulsarMsg.Properties())
+				if ok {
+					tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
 				}
 
 				tsMsg.SetPosition(&msgstream.MsgPosition{
@@ -736,7 +724,7 @@ func (ms *PulsarTtMsgStream) findTimeTick(consumer Consumer,
 
 			sp, ok := trace.ExtractFromPulsarMsgProperties(tsMsg, pulsarMsg.Properties())
 			if ok {
-				ms.scMap.Store(tsMsg.ID(), sp.Context())
+				tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
 			}
 
 			ms.unsolvedMutex.Lock()
