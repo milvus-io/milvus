@@ -350,6 +350,10 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 		           int sizeof_per_row,
 		           signed long int count);
 	*/
+	if s.segmentType != segmentTypeGrowing || s.enableLoadBinLog {
+		return nil
+	}
+
 	if s.segmentPtr == nil {
 		return errors.New("null seg core pointer")
 	}
