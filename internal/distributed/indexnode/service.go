@@ -97,11 +97,7 @@ func (s *Server) init() error {
 	indexnode.Params.IP = Params.IP
 	indexnode.Params.Address = Params.Address
 
-	tracer, closer, err := trace.InitTracing(fmt.Sprintf("index_node_%d", indexnode.Params.NodeID))
-	if err != nil {
-		log.Error("index_node", zap.String("init trace err", err.Error()))
-	}
-	opentracing.SetGlobalTracer(tracer)
+	closer := trace.InitTracing(fmt.Sprintf("index_node_%d", indexnode.Params.NodeID))
 	s.closer = closer
 
 	Params.Address = Params.IP + ":" + strconv.FormatInt(int64(Params.Port), 10)

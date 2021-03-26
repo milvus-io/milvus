@@ -96,16 +96,12 @@ func (s *Server) init() error {
 
 	ctx := context.Background()
 
-	tracer, closer, err := trace.InitTracing("master_service")
-	if err != nil {
-		log.Error("master_service", zap.String("init trace err", err.Error()))
-	}
-	opentracing.SetGlobalTracer(tracer)
+	closer := trace.InitTracing("master_service")
 	s.closer = closer
 
 	log.Debug("init params done")
 
-	err = s.startGrpc()
+	err := s.startGrpc()
 	if err != nil {
 		return err
 	}

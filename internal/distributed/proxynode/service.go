@@ -136,11 +136,7 @@ func (s *Server) init() error {
 	// for purpose of ID Allocator
 	proxynode.Params.MasterAddress = Params.MasterAddress
 
-	tracer, closer, err := trace.InitTracing(fmt.Sprintf("proxy_node ip: %s, port: %d", Params.IP, Params.Port))
-	if err != nil {
-		log.Error("proxy_node", zap.String("init trace err", err.Error()))
-	}
-	opentracing.SetGlobalTracer(tracer)
+	closer := trace.InitTracing(fmt.Sprintf("proxy_node ip: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer
 
 	log.Debug("proxynode", zap.String("proxy host", Params.IP))
@@ -243,7 +239,11 @@ func (s *Server) start() error {
 
 func (s *Server) Stop() error {
 	var err error
-	s.closer.Close()
+	if s.closer != nil {
+		if err = s.closer.Close(); err != nil {
+			return err
+		}
+	}
 
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()

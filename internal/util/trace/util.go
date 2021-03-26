@@ -17,23 +17,35 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
 
-func InitTracing(serviceName string) (opentracing.Tracer, io.Closer, error) {
+func InitTracing(serviceName string) io.Closer {
+	if opentracing.IsGlobalTracerRegistered() {
+		return nil
+	}
+	var cfg *config.Configuration
+	var err error
 	if true {
-		cfg, err := config.FromEnv()
+		cfg, err = config.FromEnv()
 		if err != nil {
-			return nil, nil, errors.New("trace from env error")
+			log.Error(err)
+			return nil
 		}
 		cfg.ServiceName = serviceName
-		return cfg.NewTracer()
+	} else {
+		cfg = &config.Configuration{
+			ServiceName: serviceName,
+			Sampler: &config.SamplerConfig{
+				Type:  "const",
+				Param: 1,
+			},
+		}
 	}
-	cfg := &config.Configuration{
-		ServiceName: serviceName,
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		},
+	tracer, closer, err := cfg.NewTracer()
+	if err != nil {
+		log.Error(err)
+		return nil
 	}
-	return cfg.NewTracer()
+	opentracing.SetGlobalTracer(tracer)
+	return closer
 }
 
 func StartSpanFromContext(ctx context.Context, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {

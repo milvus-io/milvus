@@ -88,8 +88,8 @@ func (s *searchService) consumeSearch() {
 				if !ok {
 					continue
 				}
-				sp, ctx := trace.StartSpanFromContext(sm.BaseMsg.Ctx)
-				sm.BaseMsg.Ctx = ctx
+				sp, ctx := trace.StartSpanFromContext(sm.TraceCtx())
+				sm.SetTraceCtx(ctx)
 				err := s.collectionCheck(sm.CollectionID)
 				if err != nil {
 					s.emptySearchCollection.emptySearch(sm)

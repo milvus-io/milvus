@@ -7,7 +7,6 @@ import (
 
 	"errors"
 
-	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
 )
 
@@ -18,8 +17,7 @@ type simpleStruct struct {
 
 func TestTracing(t *testing.T) {
 	//Already Init in each framework, this can be ignored in debug
-	tracer, closer, _ := InitTracing("test")
-	opentracing.SetGlobalTracer(tracer)
+	closer := InitTracing("test")
 	defer closer.Close()
 
 	// context normally can be propagated through func params

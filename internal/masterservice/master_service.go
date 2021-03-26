@@ -879,7 +879,7 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
 		}, nil
 	}
-	log.Debug("CreateCollection ", zap.String("name", in.CollectionName))
+	log.Debug("CreateCollection ", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 	t := &CreateCollectionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
@@ -891,13 +891,13 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
-		log.Debug("CreateCollection failed", zap.String("name", in.CollectionName))
+		log.Debug("CreateCollection failed", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "Create collection failed: " + err.Error(),
 		}, nil
 	}
-	log.Debug("CreateCollection Success", zap.String("name", in.CollectionName))
+	log.Debug("CreateCollection Success", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -912,7 +912,7 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
 		}, nil
 	}
-	log.Debug("DropCollection", zap.String("name", in.CollectionName))
+	log.Debug("DropCollection", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 	t := &DropCollectionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
@@ -924,13 +924,13 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
-		log.Debug("DropCollection Failed", zap.String("name", in.CollectionName))
+		log.Debug("DropCollection Failed", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "Drop collection failed: " + err.Error(),
 		}, nil
 	}
-	log.Debug("DropCollection Success", zap.String("name", in.CollectionName))
+	log.Debug("DropCollection Success", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -948,7 +948,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 			Value: false,
 		}, nil
 	}
-	log.Debug("HasCollection", zap.String("name", in.CollectionName))
+	log.Debug("HasCollection", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 	t := &HasCollectionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
@@ -961,7 +961,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
-		log.Debug("HasCollection Failed", zap.String("name", in.CollectionName))
+		log.Debug("HasCollection Failed", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 		return &milvuspb.BoolResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -970,7 +970,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 			Value: false,
 		}, nil
 	}
-	log.Debug("HasCollection Success", zap.String("name", in.CollectionName))
+	log.Debug("HasCollection Success", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 	return &milvuspb.BoolResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -992,7 +992,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 			CollectionID: 0,
 		}, nil
 	}
-	log.Debug("DescribeCollection", zap.String("name", in.CollectionName))
+	log.Debug("DescribeCollection", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 	t := &DescribeCollectionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
@@ -1005,7 +1005,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
-		log.Debug("DescribeCollection Failed", zap.String("name", in.CollectionName), zap.Error(err))
+		log.Debug("DescribeCollection Failed", zap.String("name", in.CollectionName), zap.Error(err), zap.Int64("msgID", in.Base.MsgID))
 		return &milvuspb.DescribeCollectionResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1014,7 +1014,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 			Schema: nil,
 		}, nil
 	}
-	log.Debug("DescribeCollection Success", zap.String("name", in.CollectionName))
+	log.Debug("DescribeCollection Success", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -1033,7 +1033,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 			CollectionNames: nil,
 		}, nil
 	}
-	log.Debug("ShowCollections", zap.String("dbname", in.DbName))
+	log.Debug("ShowCollections", zap.String("dbname", in.DbName), zap.Int64("msgID", in.Base.MsgID))
 	t := &ShowCollectionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
@@ -1048,7 +1048,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
-		log.Debug("ShowCollections failed", zap.String("dbname", in.DbName))
+		log.Debug("ShowCollections failed", zap.String("dbname", in.DbName), zap.Int64("msgID", in.Base.MsgID))
 		return &milvuspb.ShowCollectionsResponse{
 			CollectionNames: nil,
 			Status: &commonpb.Status{
@@ -1057,7 +1057,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 			},
 		}, nil
 	}
-	log.Debug("ShowCollections Success", zap.String("dbname", in.DbName), zap.Strings("collection names", t.Rsp.CollectionNames))
+	log.Debug("ShowCollections Success", zap.String("dbname", in.DbName), zap.Strings("collection names", t.Rsp.CollectionNames), zap.Int64("msgID", in.Base.MsgID))
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -1073,7 +1073,7 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
 		}, nil
 	}
-	log.Debug("CreatePartition", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
+	log.Debug("CreatePartition", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
 	t := &CreatePartitionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
@@ -1085,13 +1085,13 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
-		log.Debug("CreatePartition Failed", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
+		log.Debug("CreatePartition Failed", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "create partition failed: " + err.Error(),
 		}, nil
 	}
-	log.Debug("CreatePartition Success", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
+	log.Debug("CreatePartition Success", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -1106,7 +1106,7 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
 		}, nil
 	}
-	log.Debug("DropPartition", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
+	log.Debug("DropPartition", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
 	t := &DropPartitionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
@@ -1118,13 +1118,13 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
-		log.Debug("DropPartition Failed", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
+		log.Debug("DropPartition Failed", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "DropPartition failed: " + err.Error(),
 		}, nil
 	}
-	log.Debug("DropPartition Success", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
+	log.Debug("DropPartition Success", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -1142,7 +1142,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 			Value: false,
 		}, nil
 	}
-	log.Debug("HasPartition", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
+	log.Debug("HasPartition", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
 	t := &HasPartitionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
@@ -1155,7 +1155,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
-		log.Debug("HasPartition Failed", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
+		log.Debug("HasPartition Failed", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
 		return &milvuspb.BoolResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1164,7 +1164,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 			Value: false,
 		}, nil
 	}
-	log.Debug("HasPartition Success", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
+	log.Debug("HasPartition Success", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
 	return &milvuspb.BoolResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -1232,7 +1232,7 @@ func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest)
 			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
 		}, nil
 	}
-	log.Debug("CreateIndex", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName))
+	log.Debug("CreateIndex", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.Int64("msgID", in.Base.MsgID))
 	t := &CreateIndexReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
@@ -1244,13 +1244,13 @@ func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest)
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
-		log.Debug("CreateIndex Failed", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName))
+		log.Debug("CreateIndex Failed", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.Int64("msgID", in.Base.MsgID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "CreateIndex failed, error = " + err.Error(),
 		}, nil
 	}
-	log.Debug("CreateIndex Success", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName))
+	log.Debug("CreateIndex Success", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.Int64("msgID", in.Base.MsgID))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -1268,7 +1268,7 @@ func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequ
 			IndexDescriptions: nil,
 		}, nil
 	}
-	log.Debug("DescribeIndex", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName))
+	log.Debug("DescribeIndex", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.Int64("msgID", in.Base.MsgID))
 	t := &DescribeIndexReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
@@ -1284,6 +1284,7 @@ func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequ
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
+		log.Debug("DescribeIndex Failed", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.Int64("msgID", in.Base.MsgID))
 		return &milvuspb.DescribeIndexResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1296,7 +1297,7 @@ func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequ
 	for _, i := range t.Rsp.IndexDescriptions {
 		idxNames = append(idxNames, i.IndexName)
 	}
-	log.Debug("DescribeIndex Success", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.Strings("index names", idxNames))
+	log.Debug("DescribeIndex Success", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.Strings("index names", idxNames), zap.Int64("msgID", in.Base.MsgID))
 	if len(t.Rsp.IndexDescriptions) == 0 {
 		t.Rsp.Status = &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_IndexNotExist,
@@ -1319,7 +1320,7 @@ func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*c
 			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
 		}, nil
 	}
-	log.Debug("DropIndex", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.String("index name", in.IndexName))
+	log.Debug("DropIndex", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.String("index name", in.IndexName), zap.Int64("msgID", in.Base.MsgID))
 	t := &DropIndexReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
@@ -1331,13 +1332,13 @@ func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*c
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
-		log.Debug("DropIndex Failed", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.String("index name", in.IndexName))
+		log.Debug("DropIndex Failed", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.String("index name", in.IndexName), zap.Int64("msgID", in.Base.MsgID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "DropIndex failed, error = " + err.Error(),
 		}, nil
 	}
-	log.Debug("DropIndex Success", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.String("index name", in.IndexName))
+	log.Debug("DropIndex Success", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.String("index name", in.IndexName), zap.Int64("msgID", in.Base.MsgID))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -1355,7 +1356,7 @@ func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegment
 			IndexID: 0,
 		}, nil
 	}
-	log.Debug("DescribeSegment", zap.Int64("collection id", in.CollectionID), zap.Int64("segment id", in.SegmentID))
+	log.Debug("DescribeSegment", zap.Int64("collection id", in.CollectionID), zap.Int64("segment id", in.SegmentID), zap.Int64("msgID", in.Base.MsgID))
 	t := &DescribeSegmentReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
@@ -1371,7 +1372,7 @@ func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegment
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
-		log.Debug("DescribeSegment Failed", zap.Int64("collection id", in.CollectionID), zap.Int64("segment id", in.SegmentID))
+		log.Debug("DescribeSegment Failed", zap.Int64("collection id", in.CollectionID), zap.Int64("segment id", in.SegmentID), zap.Int64("msgID", in.Base.MsgID))
 		return &milvuspb.DescribeSegmentResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1380,7 +1381,7 @@ func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegment
 			IndexID: 0,
 		}, nil
 	}
-	log.Debug("DescribeSegment Success", zap.Int64("collection id", in.CollectionID), zap.Int64("segment id", in.SegmentID))
+	log.Debug("DescribeSegment Success", zap.Int64("collection id", in.CollectionID), zap.Int64("segment id", in.SegmentID), zap.Int64("msgID", in.Base.MsgID))
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -1399,7 +1400,7 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 			SegmentIDs: nil,
 		}, nil
 	}
-	log.Debug("ShowSegments", zap.Int64("collection id", in.CollectionID), zap.Int64("partition id", in.PartitionID))
+	log.Debug("ShowSegments", zap.Int64("collection id", in.CollectionID), zap.Int64("partition id", in.PartitionID), zap.Int64("msgID", in.Base.MsgID))
 	t := &ShowSegmentReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
@@ -1415,6 +1416,7 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
+		log.Debug("ShowSegments Failed", zap.Int64("collection id", in.CollectionID), zap.Int64("partition id", in.PartitionID), zap.Int64("msgID", in.Base.MsgID))
 		return &milvuspb.ShowSegmentsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1423,7 +1425,7 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 			SegmentIDs: nil,
 		}, nil
 	}
-	log.Debug("ShowSegments Success", zap.Int64("collection id", in.CollectionID), zap.Int64("partition id", in.PartitionID), zap.Int64s("segments ids", t.Rsp.SegmentIDs))
+	log.Debug("ShowSegments Success", zap.Int64("collection id", in.CollectionID), zap.Int64("partition id", in.PartitionID), zap.Int64s("segments ids", t.Rsp.SegmentIDs), zap.Int64("msgID", in.Base.MsgID))
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
