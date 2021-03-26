@@ -68,28 +68,19 @@ TEST_P(AnnoyTest, annoy_basic) {
     AssertAnns(result, nq, k);
     ReleaseQueryResult(result);
 
-    /*
-     * output result to check by eyes
-    {
-        auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
-        auto dist = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
-
-        std::stringstream ss_id;
-        std::stringstream ss_dist;
-        for (auto i = 0; i < nq; i++) {
-            for (auto j = 0; j < k; ++j) {
-                // ss_id << *ids->data()->GetValues<int64_t>(1, i * k + j) << " ";
-                // ss_dist << *dists->data()->GetValues<float>(1, i * k + j) << " ";
-                ss_id << *((int64_t*)(ids) + i * k + j) << " ";
-                ss_dist << *((float*)(dist) + i * k + j) << " ";
-            }
-            ss_id << std::endl;
-            ss_dist << std::endl;
+    // case: k > nb
+    const int64_t rows = 6;
+    base_dataset->Set(milvus::knowhere::meta::ROWS, rows);
+    index_ = std::make_shared<milvus::knowhere::IndexAnnoy>();
+    index_->BuildAll(base_dataset, conf);
+    auto result2 = index_->Query(query_dataset, conf);
+    auto res_ids = result2->Get<int64_t*>(milvus::knowhere::meta::IDS);
+    for (int64_t i = 0; i < nq; i++) {
+        for (int64_t j = rows; j < k; j++) {
+            ASSERT_EQ(res_ids[i * k + j], -1);
         }
-        std::cout << "id\n" << ss_id.str() << std::endl;
-        std::cout << "dist\n" << ss_dist.str() << std::endl;
     }
-    */
+    ReleaseQueryResult(result2);
 }
 
 TEST_P(AnnoyTest, annoy_delete) {
