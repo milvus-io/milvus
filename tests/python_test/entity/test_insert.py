@@ -746,8 +746,6 @@ class TestInsertAsync:
         future = connect.insert(collection, gen_entities(nb), _async=True, _callback=self.check_status, timeout=1)
         with pytest.raises(Exception) as e:
             result = future.result()
-        stats = connect.get_collection_stats(collection)
-        assert stats[row_count] == 0
 
     @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_insert_async_invalid_params(self, connect):
