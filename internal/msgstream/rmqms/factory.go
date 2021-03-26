@@ -3,6 +3,10 @@ package rmqms
 import (
 	"context"
 
+	rocksmq2 "github.com/zilliztech/milvus-distributed/internal/msgstream/client/rocksmq"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/ms"
+	client "github.com/zilliztech/milvus-distributed/internal/util/rocksmq/client/rocksmq"
+
 	"github.com/mitchellh/mapstructure"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -26,11 +30,19 @@ func (f *Factory) SetParams(params map[string]interface{}) error {
 }
 
 func (f *Factory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
-	return newRmqMsgStream(ctx, f.ReceiveBufSize, f.RmqBufSize, f.dispatcherFactory.NewUnmarshalDispatcher())
+	rmqClient, err := rocksmq2.NewRmqClient(client.ClientOptions{Server: rocksmq.Rmq})
+	if err != nil {
+		return nil, err
+	}
+	return ms.NewMsgStream(ctx, f.ReceiveBufSize, f.RmqBufSize, rmqClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
 func (f *Factory) NewTtMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
-	return newRmqTtMsgStream(ctx, f.ReceiveBufSize, f.RmqBufSize, f.dispatcherFactory.NewUnmarshalDispatcher())
+	rmqClient, err := rocksmq2.NewRmqClient(client.ClientOptions{Server: rocksmq.Rmq})
+	if err != nil {
+		return nil, err
+	}
+	return ms.NewTtMsgStream(ctx, f.ReceiveBufSize, f.RmqBufSize, rmqClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
 func (f *Factory) NewQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
