@@ -14,6 +14,7 @@ type Node interface {
 	MaxParallelism() int32
 	Operate(in []Msg) []Msg
 	IsInputNode() bool
+	Close()
 }
 
 type BaseNode struct {
@@ -84,13 +85,19 @@ func (nodeCtx *nodeCtx) Close() {
 		close(channel)
 		fmt.Println("close inputChannel")
 	}
+	nodeCtx.node.Close()
 }
 
 func (nodeCtx *nodeCtx) ReceiveMsg(wg *sync.WaitGroup, msg Msg, inputChanIdx int) {
+	defer wg.Done()
+	defer func() {
+		err := recover()
+		if err != nil {
+			log.Println(err)
+		}
+	}()
 	nodeCtx.inputChannels[inputChanIdx] <- msg
 	//fmt.Println((*nodeCtx.node).Name(), "receive to input channel ", inputChanIdx)
-
-	wg.Done()
 }
 
 func (nodeCtx *nodeCtx) collectInputMessages(exitCtx context.Context) {
@@ -174,4 +181,8 @@ func (node *BaseNode) SetMaxParallelism(n int32) {
 
 func (node *BaseNode) IsInputNode() bool {
 	return false
+}
+
+func (node *BaseNode) Close() {
+	//TODO
 }

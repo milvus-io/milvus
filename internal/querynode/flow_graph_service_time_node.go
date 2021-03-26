@@ -22,6 +22,10 @@ func (stNode *serviceTimeNode) Name() string {
 	return "stNode"
 }
 
+func (stNode *serviceTimeNode) Close() {
+	stNode.timeTickMsgStream.Close()
+}
+
 func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//log.Debug("Do serviceTimeNode operation")
 

@@ -43,7 +43,9 @@ func deleteLoadIndexInfo(info *LoadIndexInfo) {
 
 func (li *LoadIndexInfo) appendIndexParam(indexKey string, indexValue string) error {
 	cIndexKey := C.CString(indexKey)
+	defer C.free(unsafe.Pointer(cIndexKey))
 	cIndexValue := C.CString(indexValue)
+	defer C.free(unsafe.Pointer(cIndexValue))
 	status := C.AppendIndexParam(li.cLoadIndexInfo, cIndexKey, cIndexValue)
 	errorCode := status.error_code
 
@@ -86,6 +88,7 @@ func (li *LoadIndexInfo) appendIndex(bytesIndex [][]byte, indexKeys []string) er
 		log.Debug("", zap.String("index key", binarySetKey))
 		indexKey := C.CString(binarySetKey)
 		status = C.AppendBinaryIndex(cBinarySet, indexPtr, indexLen, indexKey)
+		C.free(unsafe.Pointer(indexKey))
 		errorCode = status.error_code
 		if errorCode != 0 {
 			break

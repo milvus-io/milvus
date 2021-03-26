@@ -2,7 +2,6 @@ package flowgraph
 
 import (
 	"context"
-	"log"
 	"sync"
 
 	"errors"
@@ -70,14 +69,14 @@ func (fg *TimeTickedFlowGraph) Start() {
 func (fg *TimeTickedFlowGraph) Close() {
 	for _, v := range fg.nodeCtx {
 		// close message stream
-		if v.node.IsInputNode() {
-			inStream, ok := v.node.(*InputNode)
-			if !ok {
-				log.Fatal("Invalid inputNode")
-			}
-			(*inStream.inStream).Close()
-		}
-		// v.Close()
+		// if v.node.IsInputNode() {
+		// 	inStream, ok := v.node.(*InputNode)
+		// 	if !ok {
+		// 		log.Fatal("Invalid inputNode")
+		// 	}
+		// 	(*inStream.inStream).Close()
+		// }
+		v.Close()
 	}
 }
 

@@ -16,6 +16,10 @@ func (inNode *InputNode) IsInputNode() bool {
 	return true
 }
 
+func (inNode *InputNode) Close() {
+	(*inNode.inStream).Close()
+}
+
 func (inNode *InputNode) Name() string {
 	return inNode.name
 }

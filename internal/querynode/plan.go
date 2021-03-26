@@ -21,6 +21,7 @@ type Plan struct {
 
 func createPlan(col Collection, dsl string) (*Plan, error) {
 	cDsl := C.CString(dsl)
+	defer C.free(unsafe.Pointer(cDsl))
 	var cPlan C.CPlan
 	status := C.CreatePlan(col.collectionPtr, cDsl, &cPlan)
 
