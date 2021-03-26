@@ -19,6 +19,7 @@ timeout(time: "${regressionTimeout}", unit: 'MINUTES') {
                 if ("${REGRESSION_SERVICE_TYPE}" == "distributed") {
                     helmCMD = "helm install --wait --timeout 300s \
                                    --set standalone.enabled=false \
+                                   --set pulsar.enabled=true \
                                    --set image.all.repository=${env.TARGET_REPO}/milvus-distributed \
                                    --set image.all.tag=${env.TARGET_TAG} \
                                    --set image.all.pullPolicy=Always \
