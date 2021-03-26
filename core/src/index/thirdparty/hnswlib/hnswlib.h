@@ -82,14 +82,37 @@ namespace hnswlib {
     class AlgorithmInterface {
     public:
         virtual void addPoint(const void *datapoint, labeltype label)=0;
-        virtual std::priority_queue<std::pair<dist_t, labeltype >> searchKnn(const void *, size_t, faiss::ConcurrentBitsetPtr bitset) const = 0;
-        template <typename Comp>
-        std::vector<std::pair<dist_t, labeltype>> searchKnn(const void*, size_t, Comp, faiss::ConcurrentBitsetPtr bitset) {
-        }
+        virtual std::priority_queue<std::pair<dist_t, labeltype >>
+        searchKnn(const void *, size_t, faiss::ConcurrentBitsetPtr bitset) const = 0;
+
+        // Return k nearest neighbor in the order of closer fist
+        virtual std::vector<std::pair<dist_t, labeltype>>
+        searchKnnCloserFirst(const void* query_data, size_t k, faiss::ConcurrentBitsetPtr bitset) const;
+
         virtual void saveIndex(const std::string &location)=0;
         virtual ~AlgorithmInterface(){
         }
     };
+
+    template<typename dist_t>
+    std::vector<std::pair<dist_t, labeltype>>
+    AlgorithmInterface<dist_t>::searchKnnCloserFirst(const void* query_data, size_t k, faiss::ConcurrentBitsetPtr bitset) const {
+        std::vector<std::pair<dist_t, labeltype>> result;
+
+        // here searchKnn returns the result in the order of further first
+        auto ret = searchKnn(query_data, k, bitset);
+        {
+            size_t sz = ret.size();
+            result.resize(sz);
+            while (!ret.empty()) {
+                result[--sz] = ret.top();
+                ret.pop();
+            }
+        }
+
+        return result;
+    }
+
 }
 
 #include "space_l2.h"
