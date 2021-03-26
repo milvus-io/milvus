@@ -153,6 +153,7 @@ func (i *IndexService) UpdateStateCode(code internalpb.StateCode) {
 }
 
 func (i *IndexService) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	log.Debug("get indexservice component states ...")
 	stateInfo := &internalpb.ComponentInfo{
 		NodeID:    i.ID,
 		Role:      "IndexService",
@@ -170,6 +171,7 @@ func (i *IndexService) GetComponentStates(ctx context.Context) (*internalpb.Comp
 }
 
 func (i *IndexService) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	log.Debug("get indexservice time tick channel ...")
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -180,6 +182,7 @@ func (i *IndexService) GetTimeTickChannel(ctx context.Context) (*milvuspb.String
 }
 
 func (i *IndexService) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	log.Debug("get indexservice statistics channel ...")
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -190,7 +193,13 @@ func (i *IndexService) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 }
 
 func (i *IndexService) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
-	log.Debug("builder building index", zap.String("indexName = ", req.IndexName), zap.Int64("indexID = ", req.IndexID), zap.Strings("dataPath = ", req.DataPaths))
+	log.Debug("indexservice building index ...",
+		zap.Int64("IndexBuildID", req.IndexBuildID),
+		zap.String("IndexName = ", req.IndexName),
+		zap.Int64("IndexID = ", req.IndexID),
+		zap.Strings("DataPath = ", req.DataPaths),
+		zap.Any("TypeParams", req.TypeParams),
+		zap.Any("IndexParams", req.IndexParams))
 	ret := &indexpb.BuildIndexResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -245,6 +254,7 @@ func (i *IndexService) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRe
 }
 
 func (i *IndexService) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
+	log.Debug("get index states ...", zap.Int64s("IndexBuildIDs", req.IndexBuildIDs))
 	var indexStates []*indexpb.IndexInfo
 	for _, indexID := range req.IndexBuildIDs {
 		indexState, err := i.metaTable.GetIndexState(indexID)
@@ -259,10 +269,16 @@ func (i *IndexService) GetIndexStates(ctx context.Context, req *indexpb.GetIndex
 		},
 		States: indexStates,
 	}
+	log.Debug("get index states success")
+	log.Debug("get index states",
+		zap.Any("index status", ret.Status),
+		zap.Any("index states", ret.States))
+
 	return ret, nil
 }
 
 func (i *IndexService) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+	log.Debug("indexservice dropping index ...", zap.Int64("indexID", req.IndexID))
 	i.sched.IndexAddQueue.tryToRemoveUselessIndexAddTask(req.IndexID)
 
 	err := i.metaTable.MarkIndexAsDeleted(req.IndexID)
@@ -286,12 +302,14 @@ func (i *IndexService) DropIndex(ctx context.Context, req *indexpb.DropIndexRequ
 		}()
 	}()
 
+	log.Debug("indexservice drop index success")
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
 }
 
 func (i *IndexService) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
+	log.Debug("indexservice", zap.Int64s("get index file paths", req.IndexBuildIDs))
 	var indexPaths []*indexpb.IndexFilePathInfo = nil
 
 	for _, indexID := range req.IndexBuildIDs {
@@ -301,6 +319,7 @@ func (i *IndexService) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIn
 		}
 		indexPaths = append(indexPaths, indexPathInfo)
 	}
+	log.Debug("indexservice, get index file paths success")
 
 	ret := &indexpb.GetIndexFilePathsResponse{
 		Status: &commonpb.Status{
@@ -308,10 +327,16 @@ func (i *IndexService) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIn
 		},
 		FilePaths: indexPaths,
 	}
+	log.Debug("indexservice", zap.Any("index file paths", ret.FilePaths))
+
 	return ret, nil
 }
 
 func (i *IndexService) NotifyBuildIndex(ctx context.Context, nty *indexpb.NotifyBuildIndexRequest) (*commonpb.Status, error) {
+	log.Debug("indexservice",
+		zap.Int64("notify build index", nty.IndexBuildID),
+		zap.Strings("index file paths", nty.IndexFilePaths),
+		zap.Int64("node ID", nty.NodeID))
 	ret := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}

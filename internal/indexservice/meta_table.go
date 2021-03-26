@@ -76,6 +76,7 @@ func (mt *metaTable) saveIndexMeta(meta *indexpb.IndexMeta) error {
 func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequest) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
+	log.Debug("indexservice add index ...")
 	_, ok := mt.indexBuildID2Meta[indexBuildID]
 	if ok {
 		return fmt.Errorf("index already exists with ID = %d", indexBuildID)
@@ -92,6 +93,8 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 
+	log.Debug("indexservice", zap.Int64("mark index is deleted", indexID))
+
 	for indexBuildID, meta := range mt.indexBuildID2Meta {
 		if meta.Req.IndexID == indexID {
 			meta.State = commonpb.IndexState_Deleted
@@ -105,6 +108,8 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 func (mt *metaTable) NotifyBuildIndex(nty *indexpb.NotifyBuildIndexRequest) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
+
+	log.Debug("indexservice", zap.Int64("notify build index", nty.IndexBuildID))
 	indexBuildID := nty.IndexBuildID
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
