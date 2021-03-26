@@ -8,7 +8,9 @@ import (
 	"regexp"
 	"runtime"
 	"strconv"
-	"sync"
+	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 
 	"go.uber.org/zap"
 
@@ -617,83 +619,10 @@ func (st *SearchTask) Execute(ctx context.Context) error {
 	return err
 }
 
-func decodeSearchResultsSerial(searchResults []*internalpb.SearchResults) ([][]*milvuspb.Hits, error) {
-	hits := make([][]*milvuspb.Hits, 0)
-	for _, partialSearchResult := range searchResults {
-		if partialSearchResult.Hits == nil || len(partialSearchResult.Hits) <= 0 {
-			continue
-		}
-
-		partialHits := make([]*milvuspb.Hits, len(partialSearchResult.Hits))
-
-		var err error
-		for i := range partialSearchResult.Hits {
-			j := i
-
-			func(idx int) {
-				partialHit := &milvuspb.Hits{}
-				err = proto.Unmarshal(partialSearchResult.Hits[idx], partialHit)
-				if err != nil {
-					log.Debug("proxynode", zap.Any("unmarshal search result error", err))
-				}
-				partialHits[idx] = partialHit
-			}(j)
-		}
-
-		if err != nil {
-			return nil, err
-		}
-
-		hits = append(hits, partialHits)
-	}
-
-	return hits, nil
-}
-
 // TODO: add benchmark to compare with serial implementation
-func decodeSearchResultsParallel(searchResults []*internalpb.SearchResults) ([][]*milvuspb.Hits, error) {
-	hits := make([][]*milvuspb.Hits, 0)
-	// necessary to parallel this?
-	for _, partialSearchResult := range searchResults {
-		if partialSearchResult.Hits == nil || len(partialSearchResult.Hits) <= 0 {
-			continue
-		}
+func decodeSearchResultsParallel(searchResults []*internalpb.SearchResults, maxParallel int) ([][]*milvuspb.Hits, error) {
+	log.Debug("decodeSearchResultsParallel", zap.Any("NumOfGoRoutines", maxParallel))
 
-		// necessary to check nq (len(partialSearchResult.Hits) here)?
-		partialHits := make([]*milvuspb.Hits, len(partialSearchResult.Hits))
-
-		var wg sync.WaitGroup
-		var err error
-		for i := range partialSearchResult.Hits {
-			j := i
-			wg.Add(1)
-
-			go func(idx int) {
-				defer wg.Done()
-				partialHit := &milvuspb.Hits{}
-				err = proto.Unmarshal(partialSearchResult.Hits[idx], partialHit)
-				if err != nil {
-					log.Debug("proxynode", zap.Any("unmarshal search result error", err))
-				}
-				partialHits[idx] = partialHit
-			}(j)
-		}
-
-		if err != nil {
-			return nil, err
-		}
-
-		wg.Wait()
-
-		hits = append(hits, partialHits)
-	}
-
-	return hits, nil
-}
-
-// TODO: add benchmark to compare with serial implementation
-func decodeSearchResultsParallelByCPU(searchResults []*internalpb.SearchResults) ([][]*milvuspb.Hits, error) {
-	log.Debug("ProcessSearchResultParallel", zap.Any("runtime.NumCPU", runtime.NumCPU()))
 	hits := make([][]*milvuspb.Hits, 0)
 	// necessary to parallel this?
 	for _, partialSearchResult := range searchResults {
@@ -702,35 +631,26 @@ func decodeSearchResultsParallelByCPU(searchResults []*internalpb.SearchResults)
 		}
 
 		nq := len(partialSearchResult.Hits)
-		maxParallel := runtime.NumCPU()
-		nqPerBatch := (nq + maxParallel - 1) / maxParallel
 		partialHits := make([]*milvuspb.Hits, nq)
 
-		var wg sync.WaitGroup
-		var err error
-		for i := 0; i < nq; i = i + nqPerBatch {
-			j := i
-			wg.Add(1)
+		f := func(idx int) error {
+			partialHit := &milvuspb.Hits{}
 
-			go func(begin int) {
-				defer wg.Done()
-				end := getMin(nq, begin+nqPerBatch)
-				for idx := begin; idx < end; idx++ {
-					partialHit := &milvuspb.Hits{}
-					err = proto.Unmarshal(partialSearchResult.Hits[idx], partialHit)
-					if err != nil {
-						log.Debug("proxynode", zap.Any("unmarshal search result error", err))
-					}
-					partialHits[idx] = partialHit
-				}
-			}(j)
+			err := proto.Unmarshal(partialSearchResult.Hits[idx], partialHit)
+			if err != nil {
+				return err
+			}
+
+			partialHits[idx] = partialHit
+
+			return nil
 		}
+
+		err := funcutil.ProcessFuncParallel(nq, maxParallel, f, "decodePartialSearchResult")
 
 		if err != nil {
 			return nil, err
 		}
-
-		wg.Wait()
 
 		hits = append(hits, partialHits)
 	}
@@ -738,243 +658,127 @@ func decodeSearchResultsParallelByCPU(searchResults []*internalpb.SearchResults)
 	return hits, nil
 }
 
+func decodeSearchResultsSerial(searchResults []*internalpb.SearchResults) ([][]*milvuspb.Hits, error) {
+	return decodeSearchResultsParallel(searchResults, 1)
+}
+
+// TODO: add benchmark to compare with serial implementation
+func decodeSearchResultsParallelByNq(searchResults []*internalpb.SearchResults) ([][]*milvuspb.Hits, error) {
+	if len(searchResults) <= 0 {
+		return nil, errors.New("no need to decode empty search results")
+	}
+	nq := len(searchResults[0].Hits)
+	return decodeSearchResultsParallel(searchResults, nq)
+}
+
+// TODO: add benchmark to compare with serial implementation
+func decodeSearchResultsParallelByCPU(searchResults []*internalpb.SearchResults) ([][]*milvuspb.Hits, error) {
+	return decodeSearchResultsParallel(searchResults, runtime.NumCPU())
+}
+
 func decodeSearchResults(searchResults []*internalpb.SearchResults) ([][]*milvuspb.Hits, error) {
-	return decodeSearchResultsParallel(searchResults)
+	t := time.Now()
+	defer func() {
+		log.Debug("decodeSearchResults", zap.Any("time cost", time.Since(t)))
+	}()
+	return decodeSearchResultsParallelByCPU(searchResults)
+}
+
+func reduceSearchResultsParallel(hits [][]*milvuspb.Hits, nq, availableQueryNodeNum, topk int, metricType string, maxParallel int) *milvuspb.SearchResults {
+	log.Debug("reduceSearchResultsParallel", zap.Any("NumOfGoRoutines", maxParallel))
+
+	ret := &milvuspb.SearchResults{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+		},
+		Hits: make([][]byte, nq),
+	}
+
+	const minFloat32 = -1 * float32(math.MaxFloat32)
+
+	f := func(idx int) error {
+		locs := make([]int, availableQueryNodeNum)
+		reducedHits := &milvuspb.Hits{
+			IDs:     make([]int64, 0),
+			RowData: make([][]byte, 0),
+			Scores:  make([]float32, 0),
+		}
+
+		for j := 0; j < topk; j++ {
+			valid := false
+			choice, maxDistance := 0, minFloat32
+			for q, loc := range locs { // query num, the number of ways to merge
+				if loc >= len(hits[q][idx].IDs) {
+					continue
+				}
+				distance := hits[q][idx].Scores[loc]
+				if distance > maxDistance || (math.Abs(float64(distance-maxDistance)) < math.SmallestNonzeroFloat32 && choice != q) {
+					choice = q
+					maxDistance = distance
+					valid = true
+				}
+			}
+			if !valid {
+				break
+			}
+			choiceOffset := locs[choice]
+			// check if distance is valid, `invalid` here means very very big,
+			// in this process, distance here is the smallest, so the rest of distance are all invalid
+			if hits[choice][idx].Scores[choiceOffset] <= minFloat32 {
+				break
+			}
+			reducedHits.IDs = append(reducedHits.IDs, hits[choice][idx].IDs[choiceOffset])
+			if hits[choice][idx].RowData != nil && len(hits[choice][idx].RowData) > 0 {
+				reducedHits.RowData = append(reducedHits.RowData, hits[choice][idx].RowData[choiceOffset])
+			}
+			reducedHits.Scores = append(reducedHits.Scores, hits[choice][idx].Scores[choiceOffset])
+			locs[choice]++
+		}
+
+		if metricType != "IP" {
+			for k := range reducedHits.Scores {
+				reducedHits.Scores[k] *= -1
+			}
+		}
+
+		reducedHitsBs, err := proto.Marshal(reducedHits)
+		if err != nil {
+			return err
+		}
+
+		ret.Hits[idx] = reducedHitsBs
+
+		return nil
+	}
+
+	err := funcutil.ProcessFuncParallel(nq, maxParallel, f, "reduceSearchResults")
+	if err != nil {
+		return nil
+	}
+
+	return ret
 }
 
 func reduceSearchResultsSerial(hits [][]*milvuspb.Hits, nq, availableQueryNodeNum, topk int, metricType string) *milvuspb.SearchResults {
-	ret := &milvuspb.SearchResults{
-		Status: &commonpb.Status{
-			ErrorCode: 0,
-		},
-		Hits: make([][]byte, nq),
-	}
-
-	const minFloat32 = -1 * float32(math.MaxFloat32)
-
-	for i := 0; i < nq; i++ {
-		j := i
-		func(idx int) {
-			locs := make([]int, availableQueryNodeNum)
-			reducedHits := &milvuspb.Hits{
-				IDs:     make([]int64, 0),
-				RowData: make([][]byte, 0),
-				Scores:  make([]float32, 0),
-			}
-
-			for j := 0; j < topk; j++ {
-				valid := false
-				choice, maxDistance := 0, minFloat32
-				for q, loc := range locs { // query num, the number of ways to merge
-					if loc >= len(hits[q][idx].IDs) {
-						continue
-					}
-					distance := hits[q][idx].Scores[loc]
-					if distance > maxDistance || (math.Abs(float64(distance-maxDistance)) < math.SmallestNonzeroFloat32 && choice != q) {
-						choice = q
-						maxDistance = distance
-						valid = true
-					}
-				}
-				if !valid {
-					break
-				}
-				choiceOffset := locs[choice]
-				// check if distance is valid, `invalid` here means very very big,
-				// in this process, distance here is the smallest, so the rest of distance are all invalid
-				if hits[choice][idx].Scores[choiceOffset] <= minFloat32 {
-					break
-				}
-				reducedHits.IDs = append(reducedHits.IDs, hits[choice][idx].IDs[choiceOffset])
-				if hits[choice][idx].RowData != nil && len(hits[choice][idx].RowData) > 0 {
-					reducedHits.RowData = append(reducedHits.RowData, hits[choice][idx].RowData[choiceOffset])
-				}
-				reducedHits.Scores = append(reducedHits.Scores, hits[choice][idx].Scores[choiceOffset])
-				locs[choice]++
-			}
-
-			if metricType != "IP" {
-				for k := range reducedHits.Scores {
-					reducedHits.Scores[k] *= -1
-				}
-			}
-
-			reducedHitsBs, err := proto.Marshal(reducedHits)
-			if err != nil {
-				log.Debug("proxynode", zap.String("error", "marshal error"))
-			}
-
-			ret.Hits[idx] = reducedHitsBs
-		}(j)
-	}
-
-	return ret
+	return reduceSearchResultsParallel(hits, nq, availableQueryNodeNum, topk, metricType, 1)
 }
 
-// TODO: add benchmark to compare with simple serial implementation
-func reduceSearchResultsParallel(hits [][]*milvuspb.Hits, nq, availableQueryNodeNum, topk int, metricType string) *milvuspb.SearchResults {
-	ret := &milvuspb.SearchResults{
-		Status: &commonpb.Status{
-			ErrorCode: 0,
-		},
-		Hits: make([][]byte, nq),
-	}
-
-	const minFloat32 = -1 * float32(math.MaxFloat32)
-
-	var wg sync.WaitGroup
-	for i := 0; i < nq; i++ {
-		j := i
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-
-			locs := make([]int, availableQueryNodeNum)
-			reducedHits := &milvuspb.Hits{
-				IDs:     make([]int64, 0),
-				RowData: make([][]byte, 0),
-				Scores:  make([]float32, 0),
-			}
-
-			for j := 0; j < topk; j++ {
-				valid := false
-				choice, maxDistance := 0, minFloat32
-				for q, loc := range locs { // query num, the number of ways to merge
-					if loc >= len(hits[q][idx].IDs) {
-						continue
-					}
-					distance := hits[q][idx].Scores[loc]
-					if distance > maxDistance || (math.Abs(float64(distance-maxDistance)) < math.SmallestNonzeroFloat32 && choice != q) {
-						choice = q
-						maxDistance = distance
-						valid = true
-					}
-				}
-				if !valid {
-					break
-				}
-				choiceOffset := locs[choice]
-				// check if distance is valid, `invalid` here means very very big,
-				// in this process, distance here is the smallest, so the rest of distance are all invalid
-				if hits[choice][idx].Scores[choiceOffset] <= minFloat32 {
-					break
-				}
-				reducedHits.IDs = append(reducedHits.IDs, hits[choice][idx].IDs[choiceOffset])
-				if hits[choice][idx].RowData != nil && len(hits[choice][idx].RowData) > 0 {
-					reducedHits.RowData = append(reducedHits.RowData, hits[choice][idx].RowData[choiceOffset])
-				}
-				reducedHits.Scores = append(reducedHits.Scores, hits[choice][idx].Scores[choiceOffset])
-				locs[choice]++
-			}
-
-			if metricType != "IP" {
-				for k := range reducedHits.Scores {
-					reducedHits.Scores[k] *= -1
-				}
-			}
-
-			reducedHitsBs, err := proto.Marshal(reducedHits)
-			if err != nil {
-				log.Debug("proxynode", zap.String("error", "marshal error"))
-			}
-
-			ret.Hits[idx] = reducedHitsBs
-		}(j)
-
-	}
-
-	wg.Wait()
-
-	return ret
+// TODO: add benchmark to compare with serial implementation
+func reduceSearchResultsParallelByNq(hits [][]*milvuspb.Hits, nq, availableQueryNodeNum, topk int, metricType string) *milvuspb.SearchResults {
+	return reduceSearchResultsParallel(hits, nq, availableQueryNodeNum, topk, metricType, nq)
 }
 
-// TODO: add benchmark to compare with simple serial implementation
+// TODO: add benchmark to compare with serial implementation
 func reduceSearchResultsParallelByCPU(hits [][]*milvuspb.Hits, nq, availableQueryNodeNum, topk int, metricType string) *milvuspb.SearchResults {
-	maxParallel := runtime.NumCPU()
-	nqPerBatch := (nq + maxParallel - 1) / maxParallel
-
-	ret := &milvuspb.SearchResults{
-		Status: &commonpb.Status{
-			ErrorCode: 0,
-		},
-		Hits: make([][]byte, nq),
-	}
-
-	const minFloat32 = -1 * float32(math.MaxFloat32)
-
-	var wg sync.WaitGroup
-	for begin := 0; begin < nq; begin = begin + nqPerBatch {
-		j := begin
-
-		wg.Add(1)
-		go func(begin int) {
-			defer wg.Done()
-
-			end := getMin(nq, begin+nqPerBatch)
-
-			for idx := begin; idx < end; idx++ {
-				locs := make([]int, availableQueryNodeNum)
-				reducedHits := &milvuspb.Hits{
-					IDs:     make([]int64, 0),
-					RowData: make([][]byte, 0),
-					Scores:  make([]float32, 0),
-				}
-
-				for j := 0; j < topk; j++ {
-					valid := false
-					choice, maxDistance := 0, minFloat32
-					for q, loc := range locs { // query num, the number of ways to merge
-						if loc >= len(hits[q][idx].IDs) {
-							continue
-						}
-						distance := hits[q][idx].Scores[loc]
-						if distance > maxDistance || (math.Abs(float64(distance-maxDistance)) < math.SmallestNonzeroFloat32 && choice != q) {
-							choice = q
-							maxDistance = distance
-							valid = true
-						}
-					}
-					if !valid {
-						break
-					}
-					choiceOffset := locs[choice]
-					// check if distance is valid, `invalid` here means very very big,
-					// in this process, distance here is the smallest, so the rest of distance are all invalid
-					if hits[choice][idx].Scores[choiceOffset] <= minFloat32 {
-						break
-					}
-					reducedHits.IDs = append(reducedHits.IDs, hits[choice][idx].IDs[choiceOffset])
-					if hits[choice][idx].RowData != nil && len(hits[choice][idx].RowData) > 0 {
-						reducedHits.RowData = append(reducedHits.RowData, hits[choice][idx].RowData[choiceOffset])
-					}
-					reducedHits.Scores = append(reducedHits.Scores, hits[choice][idx].Scores[choiceOffset])
-					locs[choice]++
-				}
-
-				if metricType != "IP" {
-					for k := range reducedHits.Scores {
-						reducedHits.Scores[k] *= -1
-					}
-				}
-
-				reducedHitsBs, err := proto.Marshal(reducedHits)
-				if err != nil {
-					log.Debug("proxynode", zap.String("error", "marshal error"))
-				}
-
-				ret.Hits[idx] = reducedHitsBs
-			}
-		}(j)
-
-	}
-
-	wg.Wait()
-
-	return ret
+	return reduceSearchResultsParallel(hits, nq, availableQueryNodeNum, topk, metricType, runtime.NumCPU())
 }
 
 func reduceSearchResults(hits [][]*milvuspb.Hits, nq, availableQueryNodeNum, topk int, metricType string) *milvuspb.SearchResults {
-	return reduceSearchResultsParallel(hits, nq, availableQueryNodeNum, topk, metricType)
+	t := time.Now()
+	defer func() {
+		log.Debug("reduceSearchResults", zap.Any("time cost", time.Since(t)))
+	}()
+	return reduceSearchResultsParallelByCPU(hits, nq, availableQueryNodeNum, topk, metricType)
 }
 
 func printSearchResult(partialSearchResult *internalpb.SearchResults) {
@@ -990,6 +794,10 @@ func printSearchResult(partialSearchResult *internalpb.SearchResults) {
 }
 
 func (st *SearchTask) PostExecute(ctx context.Context) error {
+	t0 := time.Now()
+	defer func() {
+		log.Debug("WaitAndPostExecute", zap.Any("time cost", time.Since(t0)))
+	}()
 	for {
 		select {
 		case <-st.TraceCtx().Done():

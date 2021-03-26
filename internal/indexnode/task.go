@@ -3,6 +3,7 @@ package indexnode
 import (
 	"context"
 	"errors"
+	"runtime"
 	"strconv"
 
 	"go.uber.org/zap"
@@ -228,15 +229,23 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	}
 
 	toLoadDataPaths := it.req.GetDataPaths()
-	keys := make([]string, 0)
-	blobs := make([]*Blob, 0)
-	for _, path := range toLoadDataPaths {
-		keys = append(keys, getKeyByPathNaive(path))
-		blob, err := getBlobByPath(path)
+	keys := make([]string, len(toLoadDataPaths))
+	blobs := make([]*Blob, len(toLoadDataPaths))
+
+	loadKey := func(idx int) error {
+		keys[idx] = getKeyByPathNaive(toLoadDataPaths[idx])
+		blob, err := getBlobByPath(toLoadDataPaths[idx])
 		if err != nil {
 			return err
 		}
-		blobs = append(blobs, blob)
+
+		blobs[idx] = blob
+
+		return nil
+	}
+	err = funcutil.ProcessFuncParallel(len(toLoadDataPaths), runtime.NumCPU(), loadKey, "loadKey")
+	if err != nil {
+		return err
 	}
 
 	storageBlobs := getStorageBlobs(blobs)
@@ -295,15 +304,25 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 			return it.kv.Save(path, string(value))
 		}
 
-		it.savePaths = make([]string, 0)
-		for _, blob := range serializedIndexBlobs {
+		it.savePaths = make([]string, len(serializedIndexBlobs))
+		saveIndexFile := func(idx int) error {
+			blob := serializedIndexBlobs[idx]
 			key, value := blob.Key, blob.Value
+
 			savePath := getSavePathByKey(key)
+
 			err := saveBlob(savePath, value)
 			if err != nil {
 				return err
 			}
-			it.savePaths = append(it.savePaths, savePath)
+
+			it.savePaths[idx] = savePath
+
+			return nil
+		}
+		err = funcutil.ProcessFuncParallel(len(serializedIndexBlobs), runtime.NumCPU(), saveIndexFile, "saveIndexFile")
+		if err != nil {
+			return err
 		}
 	}
 	// err = it.index.Delete()

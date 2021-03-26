@@ -965,8 +965,8 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName),
-		zap.Any("row data", "too many and too big, ignored"),
-		zap.Any("hash keys", "too many, ignored"))
+		zap.Any("len(RowData)", len(it.RowData)),
+		zap.Any("len(RowIDs)", len(it.RowIDs)))
 	defer func() {
 		log.Debug("Insert Done",
 			zap.Error(err),
@@ -976,8 +976,8 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
 			zap.String("partition", request.PartitionName),
-			zap.Any("row data", "too many and too big, ignored"),
-			zap.Any("hash keys", "too many, ignored"))
+			zap.Any("len(RowData)", len(it.RowData)),
+			zap.Any("len(RowIDs)", len(it.RowIDs)))
 	}()
 
 	err = it.WaitToFinish()
@@ -1027,7 +1027,7 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 		zap.String("collection", request.CollectionName),
 		zap.Any("partitions", request.PartitionNames),
 		zap.Any("dsl", request.Dsl),
-		zap.Any("placeholder group", "too many and too big, ignored"))
+		zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)))
 	defer func() {
 		log.Debug("Search Done",
 			zap.Error(err),
@@ -1038,7 +1038,7 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 			zap.String("collection", request.CollectionName),
 			zap.Any("partitions", request.PartitionNames),
 			zap.Any("dsl", request.Dsl),
-			zap.Any("placeholder group", "too many and too big, ignored"))
+			zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)))
 	}()
 
 	err = qt.WaitToFinish()
