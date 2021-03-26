@@ -96,10 +96,10 @@ SegcoreConfig::parse_from(const std::string& config_path) {
                 result.table_[metric_type] = conf;
             }
         }
-    } catch (const WrappedRuntimeError& e) {
+    } catch (const SegcoreError& e) {
         // re-throw
         throw e;
-    } catch (std::exception& e) {
+    } catch (const std::exception& e) {
         PanicInfo(std::string("Invalid Yaml:\n") + e.what());
     }
 }

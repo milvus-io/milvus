@@ -64,7 +64,7 @@ IndexBuilder_build(benchmark::State& state) {
 
     for (auto _ : state) {
         auto index =
-                std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+            std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
         index->BuildWithoutIds(xb_dataset);
     }
 }
@@ -93,7 +93,7 @@ IndexBuilder_build_and_codec(benchmark::State& state) {
 
     for (auto _ : state) {
         auto index =
-                std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+            std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
 
         index->BuildWithoutIds(xb_dataset);
         index->Serialize();

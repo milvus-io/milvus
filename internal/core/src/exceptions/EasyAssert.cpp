@@ -30,8 +30,13 @@ EasyStackTrace() {
 }
 
 void
-EasyAssertInfo(
-    bool value, std::string_view expr_str, std::string_view filename, int lineno, std::string_view extra_info) {
+EasyAssertInfo(bool value,
+               std::string_view expr_str,
+               std::string_view filename,
+               int lineno,
+               std::string_view extra_info,
+               ErrorCodeEnum error_code) {
+    // enable error code
     if (!value) {
         std::string info;
         info += "Assert \"" + std::string(expr_str) + "\"";
@@ -40,17 +45,17 @@ EasyAssertInfo(
             info += " => " + std::string(extra_info);
         }
 
-        throw std::runtime_error(info + "\n" + EasyStackTrace());
+        throw SegcoreError(error_code, info + "\n" + EasyStackTrace());
     }
 }
 
 [[noreturn]] void
 ThrowWithTrace(const std::exception& exception) {
-    if (typeid(exception) == typeid(WrappedRuntimeError)) {
+    if (typeid(exception) == typeid(SegcoreError)) {
         throw exception;
     }
     auto err_msg = exception.what() + std::string("\n") + EasyStackTrace();
-    throw WrappedRuntimeError(err_msg);
+    throw SegcoreError(ErrorCodeEnum::UnexpectedError, err_msg);
 }
 
 }  // namespace milvus::impl

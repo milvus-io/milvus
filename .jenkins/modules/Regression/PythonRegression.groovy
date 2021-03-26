@@ -76,11 +76,11 @@ timeout(time: "${regressionTimeout}", unit: 'MINUTES') {
 
                 sh "mkdir -p ${env.DEV_TEST_ARTIFACTS_PATH}"
                 sh "kubectl cp -n ${env.HELM_RELEASE_NAMESPACE} \$(kubectl get pod -n ${env.HELM_RELEASE_NAMESPACE} -l ${milvusLabels} -o jsonpath='{range.items[0]}{.metadata.name}'):logs ${env.DEV_TEST_ARTIFACTS_PATH}"
-                sh "kubectl logs -n ${env.HELM_RELEASE_NAMESPACE} \$(kubectl get pod -n ${env.HELM_RELEASE_NAMESPACE} -l ${etcdLabels} -o jsonpath='{range.items[*]}{.metadata.name} ') > ${env.DEV_TEST_ARTIFACTS_PATH}/etcd-${REGRESSION_SERVICE_TYPE}.log"
-                sh "kubectl logs -n ${env.HELM_RELEASE_NAMESPACE} \$(kubectl get pod -n ${env.HELM_RELEASE_NAMESPACE} -l ${minioLables} -o jsonpath='{range.items[*]}{.metadata.name} ') > ${env.DEV_TEST_ARTIFACTS_PATH}/minio-${REGRESSION_SERVICE_TYPE}.log"
-                // if ("${REGRESSION_SERVICE_TYPE}" == "distributed") {
-                //     sh "kubectl logs -n ${env.HELM_RELEASE_NAMESPACE} \$(kubectl get pod -n ${env.HELM_RELEASE_NAMESPACE} -l ${pulsarLabels} -o jsonpath='{range.items[*]}{.metadata.name} ') > ${env.DEV_TEST_ARTIFACTS_PATH}/pulsar-${REGRESSION_SERVICE_TYPE}.log"
-                // }
+                sh "kubectl logs --all-containers=true -n ${env.HELM_RELEASE_NAMESPACE} -l ${etcdLabels} > ${env.DEV_TEST_ARTIFACTS_PATH}/etcd-${REGRESSION_SERVICE_TYPE}.log"
+                sh "kubectl logs --all-containers=true -n ${env.HELM_RELEASE_NAMESPACE} -l ${minioLables} > ${env.DEV_TEST_ARTIFACTS_PATH}/minio-${REGRESSION_SERVICE_TYPE}.log"
+                if ("${REGRESSION_SERVICE_TYPE}" == "distributed") {
+                    sh "kubectl logs --all-containers=true -n ${env.HELM_RELEASE_NAMESPACE} -l ${pulsarLabels} > ${env.DEV_TEST_ARTIFACTS_PATH}/pulsar-${REGRESSION_SERVICE_TYPE}.log"
+                }
                 archiveArtifacts artifacts: "${env.DEV_TEST_ARTIFACTS_PATH}/**", allowEmptyArchive: true
             }
         }

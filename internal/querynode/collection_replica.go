@@ -415,8 +415,8 @@ func (colReplica *collectionReplica) removeSegmentPrivate(segmentID UniqueID) er
 		return err
 	}
 
-	partition, err := colReplica.getPartitionByIDPrivate(segment.partitionID)
-	if err != nil {
+	partition, err2 := colReplica.getPartitionByIDPrivate(segment.partitionID)
+	if err2 != nil {
 		return err
 	}
 

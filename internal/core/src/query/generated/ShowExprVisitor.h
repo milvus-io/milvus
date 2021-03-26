@@ -13,7 +13,7 @@
 // Generated File
 // DO NOT EDIT
 #include "query/Plan.h"
-#include "utils/EasyAssert.h"
+#include "exceptions/EasyAssert.h"
 #include "utils/Json.h"
 #include <utility>
 #include "ExprVisitor.h"

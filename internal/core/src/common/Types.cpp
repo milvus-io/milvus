@@ -14,7 +14,7 @@
 //
 #include "common/Types.h"
 #include <knowhere/index/vector_index/helpers/IndexParameter.h>
-#include "utils/EasyAssert.h"
+#include "exceptions/EasyAssert.h"
 #include <boost/bimap.hpp>
 #include <boost/algorithm/string/case_conv.hpp>
 

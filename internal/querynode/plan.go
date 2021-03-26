@@ -10,7 +10,6 @@ package querynode
 */
 import "C"
 import (
-	"strconv"
 	"unsafe"
 
 	"errors"
@@ -25,12 +24,8 @@ func createPlan(col Collection, dsl string) (*Plan, error) {
 	var cPlan C.CPlan
 	status := C.CreatePlan(col.collectionPtr, cDsl, &cPlan)
 
-	errorCode := status.error_code
-
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return nil, errors.New("Create plan failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	if err := HandleCStatus(&status, "Create Plan failed"); err != nil {
+		return nil, err
 	}
 
 	var newPlan = &Plan{cPlan: cPlan}
@@ -66,12 +61,8 @@ func parserPlaceholderGroup(plan *Plan, placeHolderBlob []byte) (*PlaceholderGro
 	var cPlaceholderGroup C.CPlaceholderGroup
 	status := C.ParsePlaceholderGroup(plan.cPlan, blobPtr, blobSize, &cPlaceholderGroup)
 
-	errorCode := status.error_code
-
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return nil, errors.New("Parser placeholder group failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	if err := HandleCStatus(&status, "parser placeholder group failed"); err != nil {
+		return nil, err
 	}
 
 	var newPlaceholderGroup = &PlaceholderGroup{cPlaceholderGroup: cPlaceholderGroup}

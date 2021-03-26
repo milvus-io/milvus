@@ -15,22 +15,39 @@
 #include <exception>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string>
+#include "pb/common.pb.h"
 
 /* Paste this on the file you want to debug. */
-
 namespace milvus {
+using ErrorCodeEnum = proto::common::ErrorCode;
 namespace impl {
 void
-EasyAssertInfo(
-    bool value, std::string_view expr_str, std::string_view filename, int lineno, std::string_view extra_info);
+EasyAssertInfo(bool value,
+               std::string_view expr_str,
+               std::string_view filename,
+               int lineno,
+               std::string_view extra_info,
+               ErrorCodeEnum error_code = ErrorCodeEnum::UnexpectedError);
 
 [[noreturn]] void
 ThrowWithTrace(const std::exception& exception);
 
 }  // namespace impl
 
-class WrappedRuntimeError : public std::runtime_error {
-    using std::runtime_error::runtime_error;
+class SegcoreError : public std::runtime_error {
+ public:
+    SegcoreError(ErrorCodeEnum error_code, const std::string& error_msg)
+        : error_code_(error_code), std::runtime_error(error_msg) {
+    }
+
+    ErrorCodeEnum
+    get_error_code() {
+        return error_code_;
+    }
+
+ private:
+    ErrorCodeEnum error_code_;
 };
 
 }  // namespace milvus
@@ -49,4 +66,10 @@ class WrappedRuntimeError : public std::runtime_error {
     do {                                                                     \
         milvus::impl::EasyAssertInfo(false, (info), __FILE__, __LINE__, ""); \
         __builtin_unreachable();                                             \
+    } while (0)
+
+#define PanicCodeInfo(errcode, info)                                                  \
+    do {                                                                              \
+        milvus::impl::EasyAssertInfo(false, (info), __FILE__, __LINE__, "", errcode); \
+        __builtin_unreachable();                                                      \
     } while (0)

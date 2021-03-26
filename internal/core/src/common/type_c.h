@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,7 +27,8 @@ typedef enum SegmentType SegmentType;
 
 enum ErrorCode {
     Success = 0,
-    UnexpectedException = 1,
+    UnexpectedError = 1,
+    IllegalArgument = 5,
 };
 
 typedef struct CStatus {

@@ -16,7 +16,7 @@
 #include "pb/index_cgo_msg.pb.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "utils/EasyAssert.h"
+#include "exceptions/EasyAssert.h"
 #include "IndexWrapper.h"
 #include "indexbuilder/utils.h"
 #include "index/knowhere/knowhere/index/vector_index/ConfAdapterMgr.h"

@@ -11,7 +11,7 @@
 
 #pragma once
 #include <cstdint>
-#include "EasyAssert.h"
+#include "exceptions/EasyAssert.h"
 namespace milvus {
 inline int64_t
 upper_align(int64_t value, int64_t align) {

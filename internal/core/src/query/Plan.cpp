@@ -14,7 +14,7 @@
 #include "query/PlanNode.h"
 #include "query/ExprImpl.h"
 #include "utils/Json.h"
-#include "utils/EasyAssert.h"
+#include "exceptions/EasyAssert.h"
 #include "pb/milvus.pb.h"
 #include <vector>
 #include <memory>
