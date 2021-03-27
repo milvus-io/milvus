@@ -42,6 +42,7 @@ func main() {
 	var roles roles.MilvusRoles
 	initRoles(&roles)
 	os.Setenv("QUERY_NODE_ID", "1")
+	os.Setenv("DEPLOY_MODE", "SINGLE_NODE")
 
 	logCfg := initLogCfg()
 	logutil.SetupLogger(&logCfg)

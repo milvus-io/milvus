@@ -16,6 +16,7 @@ import (
 )
 
 func main() {
+	os.Setenv("DEPLOY_MODE", "DISTRIBUTED")
 	ctx, cancel := context.WithCancel(context.Background())
 	msFactory := pulsarms.NewFactory()
 	proxynode.Params.Init()
