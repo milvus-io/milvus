@@ -730,7 +730,6 @@ func (ms *TtMsgStream) Seek(mp *internalpb.MsgPosition) error {
 			}
 			if tsMsg.Type() == commonpb.MsgType_TimeTick {
 				if tsMsg.BeginTs() >= mp.Timestamp {
-					ms.unsolvedMutex.Unlock()
 					return nil
 				}
 				continue
