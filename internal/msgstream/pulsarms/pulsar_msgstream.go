@@ -347,7 +347,7 @@ func (ms *PulsarMsgStream) receiveMsg(consumer Consumer) {
 
 			tsMsg.SetPosition(&msgstream.MsgPosition{
 				ChannelName: filepath.Base(pulsarMsg.Topic()),
-				MsgID:       typeutil.PulsarMsgIDToString(pulsarMsg.ID()),
+				MsgID:       pulsarMsg.ID().Serialize(),
 			})
 
 			sp, ok := trace.ExtractFromPulsarMsgProperties(tsMsg, pulsarMsg.Properties())
@@ -451,7 +451,7 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 
 				tsMsg.SetPosition(&msgstream.MsgPosition{
 					ChannelName: filepath.Base(pulsarMsg.Topic()),
-					MsgID:       typeutil.PulsarMsgIDToString(pulsarMsg.ID()),
+					MsgID:       pulsarMsg.ID().Serialize(),
 				})
 				tsMsgList = append(tsMsgList, tsMsg)
 			}
@@ -471,7 +471,7 @@ func (ms *PulsarMsgStream) Chan() <-chan *MsgPack {
 func (ms *PulsarMsgStream) Seek(mp *internalpb.MsgPosition) error {
 	if _, ok := ms.consumers[mp.ChannelName]; ok {
 		consumer := ms.consumers[mp.ChannelName]
-		messageID, err := typeutil.StringToPulsarMsgID(mp.MsgID)
+		messageID, err := typeutil.DeserializePulsarMsgID(mp.MsgID)
 		if err != nil {
 			return err
 		}
@@ -528,7 +528,7 @@ func (ms *PulsarTtMsgStream) addConsumer(consumer Consumer, channel string) {
 	ms.consumerChannels = append(ms.consumerChannels, channel)
 	ms.msgPositions[consumer] = &internalpb.MsgPosition{
 		ChannelName: channel,
-		MsgID:       "",
+		MsgID:       make([]byte, 0),
 		Timestamp:   ms.lastTimeStamp,
 	}
 	stopConsumeChan := make(chan bool)
@@ -719,7 +719,7 @@ func (ms *PulsarTtMsgStream) findTimeTick(consumer Consumer,
 			// set pulsar info to tsMsg
 			tsMsg.SetPosition(&msgstream.MsgPosition{
 				ChannelName: filepath.Base(pulsarMsg.Topic()),
-				MsgID:       typeutil.PulsarMsgIDToString(pulsarMsg.ID()),
+				MsgID:       pulsarMsg.ID().Serialize(),
 			})
 
 			sp, ok := trace.ExtractFromPulsarMsgProperties(tsMsg, pulsarMsg.Properties())
@@ -776,7 +776,7 @@ func (ms *PulsarTtMsgStream) Seek(mp *internalpb.MsgPosition) error {
 	if consumer == nil {
 		return errors.New("pulsar is not ready, consumer is nil")
 	}
-	seekMsgID, err := typeutil.StringToPulsarMsgID(mp.MsgID)
+	seekMsgID, err := typeutil.DeserializePulsarMsgID(mp.MsgID)
 	if err != nil {
 		return err
 	}
@@ -814,7 +814,7 @@ func (ms *PulsarTtMsgStream) Seek(mp *internalpb.MsgPosition) error {
 			if tsMsg.BeginTs() > mp.Timestamp {
 				tsMsg.SetPosition(&msgstream.MsgPosition{
 					ChannelName: filepath.Base(pulsarMsg.Topic()),
-					MsgID:       typeutil.PulsarMsgIDToString(pulsarMsg.ID()),
+					MsgID:       pulsarMsg.ID().Serialize(),
 				})
 				ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
 			}

@@ -11,13 +11,14 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/gogo/protobuf/proto"
+	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	client "github.com/zilliztech/milvus-distributed/internal/util/rocksmq/client/rocksmq"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type TsMsg = msgstream.TsMsg
@@ -300,7 +301,7 @@ func (rms *RmqMsgStream) receiveMsg(consumer Consumer) {
 
 			tsMsg.SetPosition(&msgstream.MsgPosition{
 				ChannelName: filepath.Base(consumer.Topic()),
-				MsgID:       strconv.Itoa(int(rmqMsg.MsgID)),
+				MsgID:       typeutil.SerializeRmqID(rmqMsg.MsgID),
 			})
 
 			msgPack := MsgPack{Msgs: []TsMsg{tsMsg}}
@@ -316,7 +317,7 @@ func (rms *RmqMsgStream) Chan() <-chan *msgstream.MsgPack {
 func (rms *RmqMsgStream) Seek(mp *msgstream.MsgPosition) error {
 	if _, ok := rms.consumers[mp.ChannelName]; ok {
 		consumer := rms.consumers[mp.ChannelName]
-		msgID, err := strconv.ParseInt(mp.MsgID, 10, 64)
+		msgID, err := typeutil.DeserializeRmqID(mp.MsgID)
 		if err != nil {
 			return err
 		}
@@ -367,7 +368,7 @@ func (rtms *RmqTtMsgStream) addConsumer(consumer Consumer, channel string) {
 	rtms.unsolvedBuf[consumer] = make([]TsMsg, 0)
 	rtms.msgPositions[consumer] = &internalpb.MsgPosition{
 		ChannelName: channel,
-		MsgID:       "",
+		MsgID:       make([]byte, 0),
 		Timestamp:   rtms.lastTimeStamp,
 	}
 	rtms.consumerChannels = append(rtms.consumerChannels, channel)
@@ -543,7 +544,7 @@ func (rtms *RmqTtMsgStream) findTimeTick(consumer Consumer,
 
 			tsMsg.SetPosition(&msgstream.MsgPosition{
 				ChannelName: filepath.Base(consumer.Topic()),
-				MsgID:       strconv.Itoa(int(rmqMsg.MsgID)),
+				MsgID:       typeutil.SerializeRmqID(rmqMsg.MsgID),
 			})
 
 			rtms.unsolvedMutex.Lock()
@@ -589,7 +590,7 @@ func (rtms *RmqTtMsgStream) Seek(mp *msgstream.MsgPosition) error {
 	if consumer == nil {
 		return errors.New("RocksMQ is not ready, consumer is nil")
 	}
-	seekMsgID, err := strconv.ParseInt(mp.MsgID, 10, 64)
+	seekMsgID, err := typeutil.DeserializeRmqID(mp.MsgID)
 	if err != nil {
 		return err
 	}
@@ -628,7 +629,7 @@ func (rtms *RmqTtMsgStream) Seek(mp *msgstream.MsgPosition) error {
 			if tsMsg.BeginTs() > mp.Timestamp {
 				tsMsg.SetPosition(&msgstream.MsgPosition{
 					ChannelName: filepath.Base(consumer.Topic()),
-					MsgID:       strconv.Itoa(int(rmqMsg.MsgID)),
+					MsgID:       typeutil.SerializeRmqID(rmqMsg.MsgID),
 				})
 				rtms.unsolvedBuf[consumer] = append(rtms.unsolvedBuf[consumer], tsMsg)
 			}

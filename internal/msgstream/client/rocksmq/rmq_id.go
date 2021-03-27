@@ -1,9 +1,8 @@
 package rocksmq
 
 import (
-	"strconv"
-
 	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type rmqID struct {
@@ -11,5 +10,5 @@ type rmqID struct {
 }
 
 func (rid *rmqID) Serialize() []byte {
-	return []byte(strconv.Itoa((int(rid.messageID))))
+	return typeutil.SerializeRmqID(rid.messageID)
 }

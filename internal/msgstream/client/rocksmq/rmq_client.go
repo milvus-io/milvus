@@ -3,10 +3,12 @@ package rocksmq
 import (
 	"strconv"
 
+	"go.uber.org/zap"
+
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/client"
 	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq/client/rocksmq"
-	"go.uber.org/zap"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type rmqClient struct {
@@ -69,6 +71,14 @@ func (rc *rmqClient) EarliestMessageID() client.MessageID {
 
 func (rc *rmqClient) StringToMsgID(id string) (client.MessageID, error) {
 	rID, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	return &rmqID{messageID: rID}, nil
+}
+
+func (rc *rmqClient) BytesToMsgID(id []byte) (client.MessageID, error) {
+	rID, err := typeutil.DeserializeRmqID(id)
 	if err != nil {
 		return nil, err
 	}

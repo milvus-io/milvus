@@ -81,6 +81,14 @@ func (pc *pulsarClient) StringToMsgID(id string) (client.MessageID, error) {
 	return &pulsarID{messageID: pID}, nil
 }
 
+func (pc *pulsarClient) BytesToMsgID(id []byte) (client.MessageID, error) {
+	pID, err := typeutil.DeserializePulsarMsgID(id)
+	if err != nil {
+		return nil, err
+	}
+	return &pulsarID{messageID: pID}, nil
+}
+
 func (pc *pulsarClient) Close() {
 	pc.client.Close()
 }

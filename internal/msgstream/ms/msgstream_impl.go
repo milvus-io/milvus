@@ -16,7 +16,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/trace"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -338,7 +337,7 @@ func (ms *msgStream) receiveMsg(consumer Consumer) {
 			tsMsg.SetPosition(&msgstream.MsgPosition{
 				ChannelName: filepath.Base(msg.Topic()),
 				//FIXME
-				MsgID: typeutil.MsgIDToString(msg.ID()),
+				MsgID: msg.ID().Serialize(),
 			})
 
 			sp, ok := trace.ExtractFromPulsarMsgProperties(tsMsg, msg.Properties())
@@ -361,7 +360,7 @@ func (ms *msgStream) Chan() <-chan *MsgPack {
 func (ms *msgStream) Seek(mp *internalpb.MsgPosition) error {
 	if _, ok := ms.consumers[mp.ChannelName]; ok {
 		consumer := ms.consumers[mp.ChannelName]
-		messageID, err := ms.client.StringToMsgID(mp.MsgID)
+		messageID, err := ms.client.BytesToMsgID(mp.MsgID)
 		if err != nil {
 			return err
 		}
@@ -418,7 +417,7 @@ func (ms *TtMsgStream) addConsumer(consumer Consumer, channel string) {
 	ms.consumerChannels = append(ms.consumerChannels, channel)
 	ms.msgPositions[consumer] = &internalpb.MsgPosition{
 		ChannelName: channel,
-		MsgID:       "",
+		MsgID:       make([]byte, 0),
 		Timestamp:   ms.lastTimeStamp,
 	}
 	stopConsumeChan := make(chan bool)
@@ -609,7 +608,7 @@ func (ms *TtMsgStream) findTimeTick(consumer Consumer,
 			// set msg info to tsMsg
 			tsMsg.SetPosition(&msgstream.MsgPosition{
 				ChannelName: filepath.Base(msg.Topic()),
-				MsgID:       typeutil.MsgIDToString(msg.ID()),
+				MsgID:       msg.ID().Serialize(),
 			})
 
 			sp, ok := trace.ExtractFromPulsarMsgProperties(tsMsg, msg.Properties())
@@ -698,7 +697,7 @@ func (ms *TtMsgStream) Seek(mp *internalpb.MsgPosition) error {
 		return errors.New("Consumer is nil")
 	}
 
-	seekMsgID, err := ms.client.StringToMsgID(mp.MsgID)
+	seekMsgID, err := ms.client.BytesToMsgID(mp.MsgID)
 	if err != nil {
 		return err
 	}
@@ -739,7 +738,7 @@ func (ms *TtMsgStream) Seek(mp *internalpb.MsgPosition) error {
 			if tsMsg.BeginTs() > mp.Timestamp {
 				tsMsg.SetPosition(&msgstream.MsgPosition{
 					ChannelName: filepath.Base(msg.Topic()),
-					MsgID:       typeutil.MsgIDToString(msg.ID()),
+					MsgID:       msg.ID().Serialize(),
 				})
 				ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
 			}
