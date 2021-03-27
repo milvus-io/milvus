@@ -47,6 +47,8 @@ require (
 )
 
 replace (
+
+	github.com/apache/pulsar-client-go => github.com/apache/pulsar-client-go v0.4.0
 	github.com/coreos/etcd => github.com/ozonru/etcd v3.3.20-grpc1.27-origmodule+incompatible
 	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
 
