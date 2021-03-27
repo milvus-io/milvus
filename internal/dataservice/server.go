@@ -288,9 +288,10 @@ func (s *Server) checkMasterIsHealthy() error {
 
 func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
-	s.serverLoopWg.Add(2)
+	s.serverLoopWg.Add(3)
 	go s.startStatsChannel(s.serverLoopCtx)
 	go s.startSegmentFlushChannel(s.serverLoopCtx)
+	go s.startProxyServiceTimeTickLoop(s.serverLoopCtx)
 }
 
 func (s *Server) startStatsChannel(ctx context.Context) {
@@ -351,6 +352,36 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 				continue
 			}
 		}
+	}
+}
+
+func (s *Server) startProxyServiceTimeTickLoop(ctx context.Context) {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+	flushStream, _ := s.msFactory.NewMsgStream(ctx)
+	flushStream.AsConsumer([]string{Params.ProxyTimeTickChannelName}, Params.DataServiceSubscriptionName)
+	flushStream.Start()
+	defer flushStream.Close()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Debug("Proxy service timetick loop shut down")
+		default:
+		}
+		msgPack := flushStream.Consume()
+		s.allocMu.Lock()
+		for _, msg := range msgPack.Msgs {
+			if msg.Type() != commonpb.MsgType_TimeTick {
+				log.Warn("receive unknown msg from proxy service timetick", zap.Stringer("msgType", msg.Type()))
+				continue
+			}
+			tMsg := msg.(*msgstream.TimeTickMsg)
+			traceCtx := context.TODO()
+			if err := s.segAllocator.ExpireAllocations(traceCtx, tMsg.Base.Timestamp); err != nil {
+				log.Error("expire allocations error", zap.Error(err))
+			}
+		}
+		s.allocMu.Unlock()
 	}
 }
 
