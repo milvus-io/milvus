@@ -57,6 +57,7 @@ func (rc *rmqClient) Subscribe(options client.ConsumerOptions) (client.Consumer,
 					close(msgChannel)
 					return
 				}
+				msg.Topic = options.Topic
 				msgChannel <- &rmqMessage{msg: msg}
 			}
 		}

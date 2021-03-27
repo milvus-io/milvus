@@ -134,6 +134,8 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 		log.Debug("RocksMQ: remove " + endKey + " failed.")
 		return err
 	}
+
+	delete(rmq.consumers, topicName)
 	log.Debug("DestroyTopic: " + topicName)
 
 	return nil
@@ -185,6 +187,7 @@ func (rmq *rocksmq) DestroyConsumerGroup(topicName, groupName string) error {
 	}
 	for index, con := range rmq.consumers[topicName] {
 		if con.GroupName == groupName {
+			close(con.MsgMutex)
 			rmq.consumers[topicName] = append(rmq.consumers[topicName][:index],
 				rmq.consumers[topicName][index+1:]...)
 		}
