@@ -87,7 +87,7 @@ pipeline {
                     HELM_BRANCH = "main"
                     HELM_RELEASE_NAMESPACE = "dev"
                     HELM_RELEASE_NAME = "${PROJECT_NAME}-${SEMVER}-${env.BUILD_NUMBER}-${REGRESSION_SERVICE_TYPE}".replaceAll("\\.", "-").replaceAll("_", "-").toLowerCase()
-                    DEV_TEST_ARTIFACTS_PATH = "artifacts-${env.BUILD_NUMBER}"
+                    DEV_TEST_ARTIFACTS_PATH = "artifacts"
                 }
                 agent {
                     kubernetes {
