@@ -7,6 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -94,6 +97,10 @@ func (allocator *segmentAllocator) OpenSegment(ctx context.Context, segmentInfo 
 	if err != nil {
 		return err
 	}
+	log.Debug("dataservice: estimateTotalRows: ",
+		zap.Int64("CollectionID", segmentInfo.CollectionID),
+		zap.Int64("SegmentID", segmentInfo.SegmentID),
+		zap.Int("Rows", totalRows))
 	allocator.segments[segmentInfo.SegmentID] = &segmentStatus{
 		id:             segmentInfo.SegmentID,
 		collectionID:   segmentInfo.CollectionID,
@@ -146,6 +153,9 @@ func (allocator *segmentAllocator) alloc(segStatus *segmentStatus, numRows int) 
 		return false, err
 	}
 	free := segStatus.total - int(segMeta.NumRows) - totalOfAllocations
+	log.Debug("dataservice::alloc: ",
+		zap.Any("segMeta.NumRows", int(segMeta.NumRows)),
+		zap.Any("totalOfAllocations", totalOfAllocations))
 	if numRows > free {
 		return false, nil
 	}
@@ -238,6 +248,9 @@ func (allocator *segmentAllocator) ExpireAllocations(ctx context.Context, timeTi
 			if timeTick < segStatus.allocations[i].expireTime {
 				continue
 			}
+			log.Debug("dataservice::ExpireAllocations: ",
+				zap.Any("segStatus.id", segStatus.id),
+				zap.Any("segStatus.allocations.rowNums", segStatus.allocations[i].rowNums))
 			segStatus.allocations = append(segStatus.allocations[:i], segStatus.allocations[i+1:]...)
 			i--
 		}
