@@ -13,9 +13,8 @@ const (
 )
 
 type Request interface {
-	Wait()
+	Wait() error
 	Notify(error)
-	IsValid() bool
 }
 
 type BaseRequest struct {
@@ -23,13 +22,9 @@ type BaseRequest struct {
 	Valid bool
 }
 
-func (req *BaseRequest) Wait() {
+func (req *BaseRequest) Wait() error {
 	err := <-req.Done
-	req.Valid = err == nil
-}
-
-func (req *BaseRequest) IsValid() bool {
-	return req.Valid
+	return err
 }
 
 func (req *BaseRequest) Notify(err error) {
@@ -252,5 +247,5 @@ func (ta *Allocator) Close() {
 func (ta *Allocator) CleanCache() {
 	req := &SyncRequest{BaseRequest: BaseRequest{Done: make(chan error), Valid: false}}
 	ta.ForceSyncChan <- req
-	req.Wait()
+	_ = req.Wait()
 }

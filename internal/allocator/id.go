@@ -144,11 +144,10 @@ func (ia *IDAllocator) Alloc(count uint32) (UniqueID, UniqueID, error) {
 
 	req.count = count
 	ia.Reqs <- req
-	req.Wait()
-
-	if !req.IsValid() {
-		return 0, 0, nil
+	if err := req.Wait(); err != nil {
+		return 0, 0, err
 	}
+
 	start, count := req.id, req.count
 	return start, start + int64(count), nil
 }
