@@ -509,10 +509,10 @@ class TestInsertBase:
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
-# todo fix timeout
-#     @pytest.mark.level(2)
-#     @pytest.mark.timeout(30)
-#     @pytest.mark.tags(CaseLabel.tags_0331)
+    # todo fix timeout
+    @pytest.mark.level(2)
+    @pytest.mark.timeout(30)
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_collection_insert_rows_count_multi_threading(self, args, collection):
         '''
         target: test collection rows_count is correct or not with multi threading
