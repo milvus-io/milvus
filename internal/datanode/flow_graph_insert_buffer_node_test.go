@@ -40,6 +40,8 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	replica := newReplica()
 	err = replica.addCollection(collMeta.ID, collMeta.Schema)
 	require.NoError(t, err)
+	err = replica.addSegment(1, collMeta.ID, 0, Params.InsertChannelNames[0])
+	require.NoError(t, err)
 
 	msFactory := pulsarms.NewFactory()
 	m := map[string]interface{}{
@@ -64,7 +66,7 @@ func genInsertMsg() insertMsg {
 
 	startPos := []*internalpb.MsgPosition{
 		{
-			ChannelName: "aaa",
+			ChannelName: Params.InsertChannelNames[0],
 			MsgID:       make([]byte, 0),
 			Timestamp:   0,
 		},

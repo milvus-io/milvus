@@ -17,13 +17,13 @@ import (
 type dataSyncService struct {
 	ctx         context.Context
 	fg          *flowgraph.TimeTickedFlowGraph
-	flushChan   chan *flushMsg
+	flushChan   <-chan *flushMsg
 	replica     Replica
 	idAllocator allocatorInterface
 	msFactory   msgstream.Factory
 }
 
-func newDataSyncService(ctx context.Context, flushChan chan *flushMsg,
+func newDataSyncService(ctx context.Context, flushChan <-chan *flushMsg,
 	replica Replica, alloc allocatorInterface, factory msgstream.Factory) *dataSyncService {
 	service := &dataSyncService{
 		ctx:         ctx,

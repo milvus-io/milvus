@@ -237,11 +237,11 @@ func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionNa
 	}
 
 	collection := etcdpb.CollectionMeta{
-		ID:            collectionID,
-		Schema:        &sch,
-		CreateTime:    Timestamp(1),
-		SegmentIDs:    make([]UniqueID, 0),
-		PartitionTags: make([]string, 0),
+		ID:           collectionID,
+		Schema:       &sch,
+		CreateTime:   Timestamp(1),
+		SegmentIDs:   make([]UniqueID, 0),
+		PartitionIDs: []UniqueID{0},
 	}
 	return &collection
 }
