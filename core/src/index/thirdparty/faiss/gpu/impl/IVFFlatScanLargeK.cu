@@ -476,7 +476,7 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
       else slice_size = k - slice_start;
 
       //printf("k:%d, i: %ld, slice_size: %ld, minDist: %f\n", k, slice_start, slice_size, minDist);
-      printf("k:%d, i: %ld, slice_size: %ld\n", k, slice_start, slice_size);
+      //printf("k:%d, i: %ld, slice_size: %ld\n", k, slice_start, slice_size);
 
       auto outDistancesView = outDistances.narrow(1, slice_start, slice_size);
       auto outIndicesView = outIndices.narrow(1, slice_start, slice_size);
@@ -536,7 +536,7 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
 //      break;
   }
 
-  printf("runIVFFlatScanTile finish\n");
+  // printf("runIVFFlatScanTile finish\n");
 
 //  // auto min_dist = 2.58573;
 //  auto min_dist = 0.0; 
@@ -663,7 +663,7 @@ runIVFFlatScanLargeK(Tensor<float, 2, true>& queries,
   // This is the size of the first-level heap passes
   constexpr int kNProbeSplit = 8;
   int pass2Chunks = std::min(nprobe, kNProbeSplit);
-  printf("pass2Chunks: %d\n", pass2Chunks);
+  // printf("pass2Chunks: %d\n", pass2Chunks);
 
   size_t sizeForFirstSelectPass =
     pass2Chunks * k * (sizeof(float) + sizeof(int));

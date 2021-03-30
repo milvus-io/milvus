@@ -61,8 +61,8 @@ FaissFlatPass::Run(const TaskPtr& task) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissFlatPass: nq < gpu_search_threshold, specify cpu to search!",
                                     "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-    } else if (search_job->topk() > milvus::server::GPU_QUERY_MAX_TOPK) {
-        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissFlatPass: topk > gpu_topk_threshold, specify cpu to search!",
+    } else if (search_job->topk() > milvus::server::GPU_QUERY_MAX_NPROBE) {
+        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissFlatPass: topk > gpu_nprobe_threshold, specify cpu to search!",
                                     "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {

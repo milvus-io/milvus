@@ -2,7 +2,17 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 1.0.0 (TBD)
+# Milvus 1.1.0 (TBD)
+## Bug
+-   \#4858 Fix the crash when query for a large topk on GPU Flat
+
+## Feature
+-   \#1434 Storage: enabling s3 storage support (implemented by Unisinsight)
+
+## Improvement
+-   \#4856 Upgrade hnswlib to v0.5.0
+
+# Milvus 1.0.0 (2021-03-09)
 ## Bug
 -   \#4739 Fix mishards probe test problem
 -   \#4749 Fix minor memory leak when building IVF_SQ8 on GPU
