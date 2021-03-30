@@ -137,11 +137,11 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                     search_file_ids, ud_file_ids = files_tuple
                     if ud_file_ids:
                         logger.debug(f"<{addr}> needed update segment ids {ud_file_ids}")
-                        conn = self.router.query_conn(addr, metadata=metadata)
-                        ud_file_ids and conn.reload_segments(collection_id, ud_file_ids)
-                        span = kwargs.get('span', None)
-                        span = span if span else (None if self.tracer.empty else
-                                                  context.get_active_span().context)
+                    conn = self.router.query_conn(addr, metadata=metadata)
+                    ud_file_ids and conn.reload_segments(collection_id, ud_file_ids)
+                    span = kwargs.get('span', None)
+                    span = span if span else (None if self.tracer.empty else
+                                              context.get_active_span().context)
 
                     with self.tracer.start_span('search_{}'.format(addr),
                                                 child_of=span):
