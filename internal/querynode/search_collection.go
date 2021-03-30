@@ -140,6 +140,12 @@ func (s *searchCollection) receiveSearchMsg() {
 				zap.Int64("collectionID", sm.CollectionID))
 			serviceTime := s.getServiceableTime()
 			if sm.BeginTs() > serviceTime {
+				log.Debug("querynode::receiveSearchMsg: add to unsolvedMsgs",
+					zap.Any("sm.BeginTs", sm.BeginTs()),
+					zap.Any("serviceTime", serviceTime),
+					zap.Any("delta seconds", (sm.BeginTs()-serviceTime)/(1000*1000*1000)),
+					zap.Any("collectionID", s.collectionID),
+				)
 				s.addToUnsolvedMsg(sm)
 				continue
 			}
@@ -173,6 +179,9 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 		default:
 			serviceTime, err := s.waitNewTSafe()
 			s.setServiceableTime(serviceTime)
+			log.Debug("querynode::doUnsolvedMsgSearch: setServiceableTime",
+				zap.Any("serviceTime", serviceTime),
+			)
 			if err != nil {
 				// TODO: emptySearch or continue, note: collection has been released
 				continue
