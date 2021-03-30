@@ -206,7 +206,7 @@ func (mService *metaService) collectionUnmarshal(value string) *etcdpb.Collectio
 	col := etcdpb.CollectionInfo{}
 	err := proto.UnmarshalText(value, &col)
 	if err != nil {
-		log.Error(err.Error())
+		log.Error(fmt.Errorf("QueryNode metaService UnmarshalText etcdpb.CollectionInfo err:%w", err).Error())
 		return nil
 	}
 	return &col
@@ -225,7 +225,7 @@ func (mService *metaService) segmentUnmarshal(value string) *datapb.SegmentInfo 
 	seg := datapb.SegmentInfo{}
 	err := proto.UnmarshalText(value, &seg)
 	if err != nil {
-		log.Error(err.Error())
+		log.Error(fmt.Errorf("QueryNode metaService UnmarshalText datapb.SegmentInfo err:%w", err).Error())
 		return nil
 	}
 	return &seg

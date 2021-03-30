@@ -14,6 +14,7 @@
 package log
 
 import (
+	"fmt"
 	"os"
 	"sync/atomic"
 
@@ -59,7 +60,7 @@ func InitLoggerWithWriteSyncer(cfg *Config, output zapcore.WriteSyncer, opts ...
 	level := zap.NewAtomicLevel()
 	err := level.UnmarshalText([]byte(cfg.Level))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("InitLoggerWithWriteSyncer UnmarshalText cfg.Level err:%w", err)
 	}
 	core := NewTextCore(newZapTextEncoder(cfg), output, level)
 	opts = append(cfg.buildOptions(output), opts...)

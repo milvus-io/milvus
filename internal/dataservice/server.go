@@ -730,7 +730,7 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 	tMeta := &datapb.SegmentFieldBinlogMeta{}
 	for _, v := range values {
 		if err := proto.UnmarshalText(v, tMeta); err != nil {
-			resp.Status.Reason = err.Error()
+			resp.Status.Reason = fmt.Errorf("DataService GetInsertBinlogPaths UnmarshalText datapb.SegmentFieldBinlogMeta err:%w", err).Error()
 			return resp, nil
 		}
 		m[tMeta.FieldID] = append(m[tMeta.FieldID], tMeta.BinlogPath)

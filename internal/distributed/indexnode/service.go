@@ -88,6 +88,7 @@ func (s *Server) init() error {
 	Params.Init()
 	if !funcutil.CheckPortAvailable(Params.Port) {
 		Params.Port = funcutil.GetAvailablePort()
+		log.Warn("IndexNode init", zap.Any("Port", Params.Port))
 	}
 	Params.LoadFromEnv()
 	Params.LoadFromArgs()

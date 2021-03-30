@@ -87,7 +87,7 @@ func (mt *metaTable) reloadFromKV() error {
 		tenantMeta := pb.TenantMeta{}
 		err := proto.UnmarshalText(value, &tenantMeta)
 		if err != nil {
-			return err
+			return fmt.Errorf("MasterService UnmarshalText pb.TenantMeta err:%w", err)
 		}
 		mt.tenantID2Meta[tenantMeta.ID] = tenantMeta
 	}
@@ -101,7 +101,7 @@ func (mt *metaTable) reloadFromKV() error {
 		proxyMeta := pb.ProxyMeta{}
 		err = proto.UnmarshalText(value, &proxyMeta)
 		if err != nil {
-			return err
+			return fmt.Errorf("MasterService UnmarshalText pb.ProxyMeta err:%w", err)
 		}
 		mt.proxyID2Meta[proxyMeta.ID] = proxyMeta
 	}
@@ -115,7 +115,7 @@ func (mt *metaTable) reloadFromKV() error {
 		collectionInfo := pb.CollectionInfo{}
 		err = proto.UnmarshalText(value, &collectionInfo)
 		if err != nil {
-			return err
+			return fmt.Errorf("MasterService UnmarshalText pb.CollectionInfo err:%w", err)
 		}
 		mt.collID2Meta[collectionInfo.ID] = collectionInfo
 		mt.collName2ID[collectionInfo.Schema.Name] = collectionInfo.ID
@@ -132,7 +132,7 @@ func (mt *metaTable) reloadFromKV() error {
 		partitionInfo := pb.PartitionInfo{}
 		err = proto.UnmarshalText(value, &partitionInfo)
 		if err != nil {
-			return err
+			return fmt.Errorf("MasterService UnmarshalText PartitionInfo err:%w", err)
 		}
 		collID, ok := mt.partitionID2CollID[partitionInfo.PartitionID]
 		if !ok {
@@ -155,7 +155,7 @@ func (mt *metaTable) reloadFromKV() error {
 		segmentIndexInfo := pb.SegmentIndexInfo{}
 		err = proto.UnmarshalText(value, &segmentIndexInfo)
 		if err != nil {
-			return err
+			return fmt.Errorf("MasterService UnmarshalText pb.SegmentIndexInfo err:%w", err)
 		}
 		idx, ok := mt.segID2IndexMeta[segmentIndexInfo.SegmentID]
 		if ok {
@@ -175,7 +175,7 @@ func (mt *metaTable) reloadFromKV() error {
 		meta := pb.IndexInfo{}
 		err = proto.UnmarshalText(value, &meta)
 		if err != nil {
-			return err
+			return fmt.Errorf("MasterService UnmarshalText pb.IndexInfo err:%w", err)
 		}
 		mt.indexID2Meta[meta.IndexID] = meta
 	}
