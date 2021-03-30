@@ -68,7 +68,7 @@ func TestPlan_PlaceholderGroup(t *testing.T) {
 
 	placeGroupByte, err := proto.Marshal(&placeholderGroup)
 	assert.Nil(t, err)
-	holder, err := parserPlaceholderGroup(plan, placeGroupByte)
+	holder, err := parseSearchRequest(plan, placeGroupByte)
 	assert.NoError(t, err)
 	assert.NotNil(t, holder)
 	numQueries := holder.getNumOfQuery()

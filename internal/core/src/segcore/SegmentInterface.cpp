@@ -20,7 +20,7 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan, QueryResult& 
     AssertInfo(plan, "empty plan");
     auto size = results.result_distances_.size();
     Assert(results.internal_seg_offsets_.size() == size);
-    Assert(results.result_offsets_.size() == size);
+    // Assert(results.result_offsets_.size() == size);
     Assert(results.row_data_.size() == 0);
 
     // std::vector<int64_t> row_ids(size);

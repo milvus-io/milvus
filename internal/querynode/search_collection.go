@@ -271,13 +271,13 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	if err != nil {
 		return err
 	}
-	placeHolderGroupBlob := query.PlaceholderGroup
-	placeholderGroup, err := parserPlaceholderGroup(plan, placeHolderGroupBlob)
+	searchRequestBlob := query.PlaceholderGroup
+	searchReq, err := parseSearchRequest(plan, searchRequestBlob)
 	if err != nil {
 		return err
 	}
-	placeholderGroups := make([]*PlaceholderGroup, 0)
-	placeholderGroups = append(placeholderGroups, placeholderGroup)
+	searchRequests := make([]*searchRequest, 0)
+	searchRequests = append(searchRequests, searchReq)
 
 	searchResults := make([]*SearchResult, 0)
 	matchedSegments := make([]*Segment, 0)
@@ -315,7 +315,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 			if err != nil {
 				return err
 			}
-			searchResult, err := segment.segmentSearch(plan, placeholderGroups, []Timestamp{searchTimestamp})
+			searchResult, err := segment.segmentSearch(plan, searchRequests, []Timestamp{searchTimestamp})
 
 			if err != nil {
 				return err
@@ -326,7 +326,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	}
 
 	if len(searchResults) <= 0 {
-		for _, group := range placeholderGroups {
+		for _, group := range searchRequests {
 			nq := group.getNumOfQuery()
 			nilHits := make([][]byte, nq)
 			hit := &milvuspb.Hits{}
@@ -363,17 +363,30 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 
 	inReduced := make([]bool, len(searchResults))
 	numSegment := int64(len(searchResults))
-	err2 := reduceSearchResults(searchResults, numSegment, inReduced)
-	if err2 != nil {
-		return err2
-	}
-	err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
-	if err != nil {
-		return err
-	}
-	marshaledHits, err := reorganizeQueryResults(plan, placeholderGroups, searchResults, numSegment, inReduced)
-	if err != nil {
-		return err
+	var marshaledHits *MarshaledHits = nil
+	if numSegment == 1 {
+		inReduced[0] = true
+		err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
+		if err != nil {
+			return err
+		}
+		marshaledHits, err = reorganizeSingleQueryResult(plan, searchRequests, searchResults[0])
+		if err != nil {
+			return err
+		}
+	} else {
+		err = reduceSearchResults(searchResults, numSegment, inReduced)
+		if err != nil {
+			return err
+		}
+		err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
+		if err != nil {
+			return err
+		}
+		marshaledHits, err = reorganizeQueryResults(plan, searchRequests, searchResults, numSegment, inReduced)
+		if err != nil {
+			return err
+		}
 	}
 	hitsBlob, err := marshaledHits.getHitsBlob()
 	if err != nil {
@@ -381,14 +394,14 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	}
 
 	var offset int64 = 0
-	for index := range placeholderGroups {
+	for index := range searchRequests {
 		hitBlobSizePeerQuery, err := marshaledHits.hitBlobSizeInGroup(int64(index))
 		if err != nil {
 			return err
 		}
-		hits := make([][]byte, 0)
-		for _, len := range hitBlobSizePeerQuery {
-			hits = append(hits, hitsBlob[offset:offset+len])
+		hits := make([][]byte, len(hitBlobSizePeerQuery))
+		for i, len := range hitBlobSizePeerQuery {
+			hits[i] = hitsBlob[offset : offset+len]
 			//test code to checkout marshaled hits
 			//marshaledHit := hitsBlob[offset:offset+len]
 			//unMarshaledHit := milvuspb.Hits{}
@@ -436,7 +449,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	deleteSearchResults(searchResults)
 	deleteMarshaledHits(marshaledHits)
 	plan.delete()
-	placeholderGroup.delete()
+	searchReq.delete()
 	return nil
 }
 

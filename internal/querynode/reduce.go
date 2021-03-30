@@ -10,10 +10,13 @@ package querynode
 */
 import "C"
 import (
+	"errors"
+	"fmt"
 	"strconv"
+	"sync"
 	"unsafe"
 
-	"errors"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 )
 
 type SearchResult struct {
@@ -46,24 +49,31 @@ func reduceSearchResults(searchResults []*SearchResult, numSegments int64, inRed
 }
 
 func fillTargetEntry(plan *Plan, searchResults []*SearchResult, matchedSegments []*Segment, inReduced []bool) error {
-	for i, value := range inReduced {
-		if value {
-			err := matchedSegments[i].fillTargetEntry(plan, searchResults[i])
-			if err != nil {
-				return err
-			}
+	wg := &sync.WaitGroup{}
+	fmt.Println(inReduced)
+	for i := range inReduced {
+		if inReduced[i] {
+			wg.Add(1)
+			go func(i int) {
+				err := matchedSegments[i].fillTargetEntry(plan, searchResults[i])
+				if err != nil {
+					log.Error(err.Error())
+				}
+				wg.Done()
+			}(i)
 		}
 	}
+	wg.Wait()
 	return nil
 }
 
-func reorganizeQueryResults(plan *Plan, placeholderGroups []*PlaceholderGroup, searchResults []*SearchResult, numSegments int64, inReduced []bool) (*MarshaledHits, error) {
+func reorganizeQueryResults(plan *Plan, searchRequests []*searchRequest, searchResults []*SearchResult, numSegments int64, inReduced []bool) (*MarshaledHits, error) {
 	cPlaceholderGroups := make([]C.CPlaceholderGroup, 0)
-	for _, pg := range placeholderGroups {
+	for _, pg := range searchRequests {
 		cPlaceholderGroups = append(cPlaceholderGroups, (*pg).cPlaceholderGroup)
 	}
 	var cPlaceHolderGroupPtr = (*C.CPlaceholderGroup)(&cPlaceholderGroups[0])
-	var cNumGroup = (C.long)(len(placeholderGroups))
+	var cNumGroup = (C.long)(len(searchRequests))
 
 	cSearchResults := make([]C.CQueryResult, 0)
 	for _, res := range searchResults {
@@ -76,6 +86,28 @@ func reorganizeQueryResults(plan *Plan, placeholderGroups []*PlaceholderGroup, s
 	var cMarshaledHits C.CMarshaledHits
 
 	status := C.ReorganizeQueryResults(&cMarshaledHits, cPlaceHolderGroupPtr, cNumGroup, cSearchResultPtr, cInReduced, cNumSegments, plan.cPlan)
+	errorCode := status.error_code
+
+	if errorCode != 0 {
+		errorMsg := C.GoString(status.error_msg)
+		defer C.free(unsafe.Pointer(status.error_msg))
+		return nil, errors.New("reorganizeQueryResults failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	}
+	return &MarshaledHits{cMarshaledHits: cMarshaledHits}, nil
+}
+
+func reorganizeSingleQueryResult(plan *Plan, placeholderGroups []*searchRequest, searchResult *SearchResult) (*MarshaledHits, error) {
+	cPlaceholderGroups := make([]C.CPlaceholderGroup, 0)
+	for _, pg := range placeholderGroups {
+		cPlaceholderGroups = append(cPlaceholderGroups, (*pg).cPlaceholderGroup)
+	}
+	var cPlaceHolderGroupPtr = (*C.CPlaceholderGroup)(&cPlaceholderGroups[0])
+	var cNumGroup = (C.long)(len(placeholderGroups))
+
+	cSearchResult := searchResult.cQueryResult
+	var cMarshaledHits C.CMarshaledHits
+
+	status := C.ReorganizeSingleQueryResult(&cMarshaledHits, cPlaceHolderGroupPtr, cNumGroup, cSearchResult, plan.cPlan)
 	errorCode := status.error_code
 
 	if errorCode != 0 {
