@@ -226,7 +226,7 @@ func (s *Server) start() error {
 func (s *Server) Stop() error {
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
-			return err
+			log.Error("close opentracing", zap.Error(err))
 		}
 	}
 	if s.proxyService != nil {

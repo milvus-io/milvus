@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/client"
@@ -50,8 +51,6 @@ type msgStream struct {
 	bufSize          int64
 	producerLock     *sync.Mutex
 	consumerLock     *sync.Mutex
-
-	scMap *sync.Map
 }
 
 func NewMsgStream(ctx context.Context,
@@ -67,13 +66,6 @@ func NewMsgStream(ctx context.Context,
 	consumerChannels := make([]string, 0)
 	receiveBuf := make(chan *MsgPack, receiveBufSize)
 
-	var err error
-	if err != nil {
-		defer streamCancel()
-		log.Error("Set client failed, error", zap.Error(err))
-		return nil, err
-	}
-
 	stream := &msgStream{
 		ctx:              streamCtx,
 		client:           client,
@@ -88,7 +80,6 @@ func NewMsgStream(ctx context.Context,
 		producerLock:     &sync.Mutex{},
 		consumerLock:     &sync.Mutex{},
 		wait:             &sync.WaitGroup{},
-		scMap:            &sync.Map{},
 	}
 
 	return stream, nil
@@ -231,6 +222,8 @@ func (ms *msgStream) Produce(msgPack *MsgPack) error {
 	for k, v := range result {
 		channel := ms.producerChannels[k]
 		for i := 0; i < len(v.Msgs); i++ {
+			sp, spanCtx := trace.MsgSpanFromCtx(v.Msgs[i].TraceCtx(), v.Msgs[i])
+
 			mb, err := v.Msgs[i].Marshal(v.Msgs[i])
 			if err != nil {
 				return err
@@ -243,7 +236,6 @@ func (ms *msgStream) Produce(msgPack *MsgPack) error {
 
 			msg := &client.ProducerMessage{Payload: m, Properties: map[string]string{}}
 
-			sp, spanCtx := trace.MsgSpanFromCtx(v.Msgs[i].TraceCtx(), v.Msgs[i])
 			trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
 
 			if err := ms.producers[channel].Send(
@@ -262,6 +254,8 @@ func (ms *msgStream) Produce(msgPack *MsgPack) error {
 
 func (ms *msgStream) Broadcast(msgPack *MsgPack) error {
 	for _, v := range msgPack.Msgs {
+		sp, spanCtx := trace.MsgSpanFromCtx(v.TraceCtx(), v)
+
 		mb, err := v.Marshal(v)
 		if err != nil {
 			return err
@@ -274,7 +268,6 @@ func (ms *msgStream) Broadcast(msgPack *MsgPack) error {
 
 		msg := &client.ProducerMessage{Payload: m, Properties: map[string]string{}}
 
-		sp, spanCtx := trace.MsgSpanFromCtx(v.TraceCtx(), v)
 		trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
 
 		ms.producerLock.Lock()
@@ -334,16 +327,16 @@ func (ms *msgStream) receiveMsg(consumer Consumer) {
 				continue
 			}
 
+			sp, ok := trace.ExtractFromPulsarMsgProperties(tsMsg, msg.Properties())
+			if ok {
+				tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
+			}
+
 			tsMsg.SetPosition(&msgstream.MsgPosition{
 				ChannelName: filepath.Base(msg.Topic()),
 				//FIXME
 				MsgID: msg.ID().Serialize(),
 			})
-
-			sp, ok := trace.ExtractFromPulsarMsgProperties(tsMsg, msg.Properties())
-			if ok {
-				ms.scMap.Store(tsMsg.ID(), sp.Context())
-			}
 
 			msgPack := MsgPack{Msgs: []TsMsg{tsMsg}}
 			ms.receiveBuf <- &msgPack
@@ -614,7 +607,7 @@ func (ms *TtMsgStream) findTimeTick(consumer Consumer,
 
 			sp, ok := trace.ExtractFromPulsarMsgProperties(tsMsg, msg.Properties())
 			if ok {
-				ms.scMap.Store(tsMsg.ID(), sp.Context())
+				tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
 			}
 
 			ms.unsolvedMutex.Lock()
