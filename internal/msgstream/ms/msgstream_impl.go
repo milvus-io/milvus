@@ -599,7 +599,6 @@ func (ms *TtMsgStream) findTimeTick(consumer Consumer,
 			}
 
 			// set msg info to tsMsg
-			log.Debug(msg.Topic() + "--------" + string(msg.ID().Serialize()))
 			tsMsg.SetPosition(&msgstream.MsgPosition{
 				ChannelName: filepath.Base(msg.Topic()),
 				MsgID:       msg.ID().Serialize(),
