@@ -1128,6 +1128,7 @@ func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvus
 		},
 		SegmentIDs: segments,
 	})
+	log.Debug("GetPersistentSegmentInfo ", zap.Any("infos", infoResp.Infos), zap.Any("status", infoResp.Status))
 	if err != nil {
 		resp.Status.Reason = fmt.Errorf("dataService:GetSegmentInfo, err:%w", err).Error()
 		return resp, nil
@@ -1180,6 +1181,7 @@ func (node *ProxyNode) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.Ge
 		},
 		SegmentIDs: segments,
 	})
+	log.Debug("GetQuerySegmentInfo ", zap.Any("infos", infoResp.Infos), zap.Any("status", infoResp.Status))
 	if err != nil {
 		resp.Status.Reason = err.Error()
 		return resp, nil

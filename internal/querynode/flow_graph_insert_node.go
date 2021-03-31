@@ -102,6 +102,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				log.Error(err.Error())
 			}
 			insertData.insertOffset[segmentID] = offset
+			log.Debug("insertNode operator", zap.Int("insert size", numOfRecords), zap.Int64("insert offset", offset), zap.Int64("segment id", segmentID))
 		}
 	}
 
