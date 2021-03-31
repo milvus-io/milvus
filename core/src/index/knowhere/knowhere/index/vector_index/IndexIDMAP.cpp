@@ -63,7 +63,7 @@ IDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
 
-    GETTENSOR(dataset_ptr)
+    GETTENSOR_ROWS_DATA(dataset_ptr)
     index_->add(rows, (float*)p_data);
 }
 
@@ -72,7 +72,7 @@ IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    GETTENSOR(dataset_ptr)
+    GETTENSOR_ROWS_DATA(dataset_ptr)
 
     int64_t k = config[meta::TOPK].get<int64_t>();
     auto elems = rows * k;

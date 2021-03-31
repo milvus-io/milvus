@@ -46,7 +46,7 @@ BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    GETTENSOR(dataset_ptr)
+    GETTENSOR_ROWS_DATA(dataset_ptr)
 
     try {
         int64_t k = config[meta::TOPK].get<int64_t>();
@@ -121,7 +121,7 @@ BinaryIVF::AddWithoutIds(const milvus::knowhere::DatasetPtr& dataset_ptr, const 
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    GETTENSOR(dataset_ptr)
+    GETTENSOR_ROWS_DATA(dataset_ptr)
     index_->add(rows, static_cast<const uint8_t*>(p_data));
 }
 

@@ -23,6 +23,14 @@ namespace knowhere {
     int64_t rows = dataset_ptr->Get<int64_t>(meta::ROWS); \
     const void* p_data = dataset_ptr->Get<const void*>(meta::TENSOR);
 
+#define GETTENSOR_DIM_ROWS(dataset_ptr)                 \
+    int64_t dim = dataset_ptr->Get<int64_t>(meta::DIM); \
+    int64_t rows = dataset_ptr->Get<int64_t>(meta::ROWS);
+
+#define GETTENSOR_ROWS_DATA(dataset_ptr)                  \
+    int64_t rows = dataset_ptr->Get<int64_t>(meta::ROWS); \
+    const void* p_data = dataset_ptr->Get<const void*>(meta::TENSOR);
+
 extern DatasetPtr
 GenDataset(const int64_t nb, const int64_t dim, const void* xb);
 
