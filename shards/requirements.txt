@@ -13,7 +13,7 @@ protobuf==3.9.1
 py==1.8.0
 pyasn1==0.4.7
 pyasn1-modules==0.2.6
-pylint==2.5.0
+pylint==2.7.0
 pymilvus==1.0.0
 #pymilvus-test==0.3.37
 pyparsing==2.4.0
