@@ -1,5 +1,5 @@
 def isTimeTriggeredBuild = currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0
-def regressionTimeout = isTimeTriggeredBuild ? "180" : "60"
+def regressionTimeout = isTimeTriggeredBuild ? "120" : "60"
 timeout(time: "${regressionTimeout}", unit: 'MINUTES') {
     container('deploy-env') {
         dir ('milvus-helm-chart') {
@@ -50,7 +50,7 @@ timeout(time: "${regressionTimeout}", unit: 'MINUTES') {
                 sh "python3 -m pip install --no-cache-dir -r requirements.txt"
                 if (isTimeTriggeredBuild) {
                     echo "This is Cron Job!"
-                    sh "pytest --tags=0331 -n 4 --ip ${env.HELM_RELEASE_NAME}-milvus-ha.${env.HELM_RELEASE_NAMESPACE}.svc.cluster.local"
+                    sh "pytest -n 4 --ip ${env.HELM_RELEASE_NAME}-milvus-ha.${env.HELM_RELEASE_NAMESPACE}.svc.cluster.local"
                 } else {
                     sh "pytest --tags=smoke -n 4 --ip ${env.HELM_RELEASE_NAME}-milvus-ha.${env.HELM_RELEASE_NAMESPACE}.svc.cluster.local"
                 }
