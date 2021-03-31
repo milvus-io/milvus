@@ -295,6 +295,7 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	}
 
 	readOpts := gorocksdb.NewDefaultReadOptions()
+	defer readOpts.Destroy()
 	readOpts.SetPrefixSameAsStart(true)
 	iter := rmq.store.NewIterator(readOpts)
 	defer iter.Close()
