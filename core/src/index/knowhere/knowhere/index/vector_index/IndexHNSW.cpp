@@ -76,7 +76,7 @@ IndexHNSW::Load(const BinarySet& index_binary) {
 void
 IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     try {
-        GETTENSOR(dataset_ptr)
+        GETTENSOR_DIM_ROWS(dataset_ptr)
 
         hnswlib::SpaceInterface<float>* space;
         if (config[Metric::TYPE] == Metric::L2) {
@@ -99,11 +99,13 @@ IndexHNSW::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 
     GETTENSOR(dataset_ptr)
 
-    index_->addPoint(p_data, 0);
+    if (rows > 0) {
+        index_->addPoint(p_data, 0);
 #pragma omp parallel for
-    for (int i = 1; i < rows; ++i) {
-        faiss::BuilderSuspend::check_wait();
-        index_->addPoint(((float*)p_data + Dim() * i), i);
+        for (int i = 1; i < rows; ++i) {
+            faiss::BuilderSuspend::check_wait();
+            index_->addPoint(((float*)p_data + dim * i), i);
+        }
     }
 }
 
@@ -127,7 +129,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
-        auto single_query = (float*)p_data + i * Dim();
+        auto single_query = (float*)p_data + i * dim;
         auto rst = index_->searchKnn(single_query, k, blacklist);
         size_t rst_size = rst.size();
 

@@ -58,7 +58,7 @@ class IVFPQConfAdapter : public IVFConfAdapter {
     IsValidForCPU(int64_t dimension, int64_t m);
 };
 
-class NSGConfAdapter : public IVFConfAdapter {
+class NSGConfAdapter : public ConfAdapter {
  public:
     bool
     CheckTrain(Config& oricfg, IndexMode& mode) override;
@@ -73,7 +73,7 @@ class BinIDMAPConfAdapter : public ConfAdapter {
     CheckTrain(Config& oricfg, IndexMode& mode) override;
 };
 
-class BinIVFConfAdapter : public IVFConfAdapter {
+class BinIVFConfAdapter : public ConfAdapter {
  public:
     bool
     CheckTrain(Config& oricfg, IndexMode& mode) override;

@@ -80,7 +80,7 @@ IVF::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    GETTENSOR(dataset_ptr)
+    GETTENSOR_ROWS_DATA(dataset_ptr)
     index_->add(rows, (float*)p_data);
 }
 
@@ -90,7 +90,7 @@ IVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    GETTENSOR(dataset_ptr)
+    GETTENSOR_ROWS_DATA(dataset_ptr)
 
     try {
         fiu_do_on("IVF.Search.throw_std_exception", throw std::exception());
