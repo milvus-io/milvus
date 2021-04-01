@@ -29,10 +29,14 @@ class TestListCollections:
         expected: True
         '''
         collection_num = 50
+        collection_names = []
         for i in range(collection_num):
             collection_name = gen_unique_str(uid)
+            collection_names.append(collection_name)
             connect.create_collection(collection_name, default_fields)
             assert collection_name in connect.list_collections()
+        for i in range(collection_num):
+            connect.drop_collection(collection_names[i])
 
     @pytest.mark.level(2)
     def test_list_collections_without_connection(self, dis_connect):

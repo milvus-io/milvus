@@ -447,6 +447,7 @@ class TestCollectionMultiCollections:
         for i in range(collection_num):
             stats = connect.get_collection_stats(collection_list[i])
             assert stats[row_count] == insert_count
+            connect.drop_collection(collection_list[i])
 
     @pytest.mark.level(2)
     def test_collection_count_multi_collections_binary(self, connect, binary_collection, insert_count):
@@ -469,6 +470,7 @@ class TestCollectionMultiCollections:
         for i in range(collection_num):
             stats = connect.get_collection_stats(collection_list[i])
             assert stats[row_count] == insert_count
+            connect.drop_collection(collection_list[i])
 
     @pytest.mark.level(2)
     @pytest.mark.tags(CaseLabel.tags_smoke)
@@ -495,3 +497,4 @@ class TestCollectionMultiCollections:
         for i in range(collection_num):
             stats = connect.get_collection_stats(collection_list[i])
             assert stats[row_count] == default_nb
+            connect.drop_collection(collection_list[i])
