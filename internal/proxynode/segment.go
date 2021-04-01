@@ -138,6 +138,7 @@ func NewSegIDAssigner(ctx context.Context, dataService types.DataService, getTic
 		Allocator: Allocator{
 			Ctx:        ctx1,
 			CancelFunc: cancel,
+			Role:       "SegmentIDAllocator",
 		},
 		countPerRPC: SegCountPerRPC,
 		dataService: dataService,
@@ -275,9 +276,9 @@ func (sa *SegIDAssigner) reduceSegReqs() {
 	sa.segReqs = newSegReqs
 }
 
-func (sa *SegIDAssigner) syncSegments() bool {
+func (sa *SegIDAssigner) syncSegments() (bool, error) {
 	if len(sa.segReqs) == 0 {
-		return true
+		return true, nil
 	}
 	sa.reduceSegReqs()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -292,8 +293,7 @@ func (sa *SegIDAssigner) syncSegments() bool {
 	resp, err := sa.dataService.AssignSegmentID(ctx, req)
 
 	if err != nil {
-		log.Debug("proxynode", zap.String("GRPC AssignSegmentID Failed", err.Error()))
-		return false
+		return false, fmt.Errorf("syncSegmentID Failed:%w", err)
 	}
 
 	now := time.Now()
@@ -331,7 +331,7 @@ func (sa *SegIDAssigner) syncSegments() bool {
 		assign.lastInsertTime = now
 		success = true
 	}
-	return success
+	return success, nil
 }
 
 func (sa *SegIDAssigner) processFunc(req allocator.Request) error {
