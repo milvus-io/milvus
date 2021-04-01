@@ -8,8 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/types"
-
 	"github.com/stretchr/testify/assert"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -18,6 +16,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 )
 
 const ctxTimeInMillisecond = 5000
@@ -202,6 +201,19 @@ func (q *queryServiceMock) RegisterNode(ctx context.Context, req *querypb.Regist
 			NodeID: int64(1),
 		},
 	}, nil
+}
+
+func newMessageStreamFactory() (msgstream.Factory, error) {
+	const receiveBufSize = 1024
+
+	pulsarURL := Params.PulsarAddress
+	msFactory := msgstream.NewPmsFactory()
+	m := map[string]interface{}{
+		"receiveBufSize": receiveBufSize,
+		"pulsarAddress":  pulsarURL,
+		"pulsarBufSize":  1024}
+	err := msFactory.SetParams(m)
+	return msFactory, err
 }
 
 func TestMain(m *testing.M) {
