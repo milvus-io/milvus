@@ -18,6 +18,8 @@ cmake-build-debug
 cmake-build-release
 cmake_build
 
+*.code-workspace
+
 # Docker generated cache file
 .docker/
 
