@@ -22,6 +22,8 @@ timeout(time: "${regressionTimeout}", unit: 'MINUTES') {
                                    --set image.all.repository=${env.TARGET_REPO}/milvus-distributed \
                                    --set image.all.tag=${env.TARGET_TAG} \
                                    --set image.all.pullPolicy=Always \
+                                   --set logsPersistence.enabled=true \
+                                   --set logsPersistence.mountPath=/milvus-distributed/logs \
                                    --namespace ${env.HELM_RELEASE_NAMESPACE} ${env.HELM_RELEASE_NAME} ."
                 } else {
                     helmCMD = "helm install --wait --timeout 300s \
@@ -29,6 +31,8 @@ timeout(time: "${regressionTimeout}", unit: 'MINUTES') {
                                    --set image.all.repository=${env.TARGET_REPO}/milvus-distributed \
                                    --set image.all.tag=${env.TARGET_TAG} \
                                    --set image.all.pullPolicy=Always \
+                                   --set logsPersistence.enabled=true \
+                                   --set logsPersistence.mountPath=/milvus-distributed/logs \
                                    --namespace ${env.HELM_RELEASE_NAMESPACE} ${env.HELM_RELEASE_NAME} ."
                 }
 
@@ -60,13 +64,20 @@ timeout(time: "${regressionTimeout}", unit: 'MINUTES') {
             throw exc
         } finally {
             container('deploy-env') {
-                def milvusLabels = "app.kubernetes.io/instance=${env.HELM_RELEASE_NAME}"
+                def milvusLabels = ""
+                if ("${REGRESSION_SERVICE_TYPE}" == "distributed") {
+                    milvusLabels = "app.kubernetes.io/instance=${env.HELM_RELEASE_NAME},component=proxyservice"
+                } else {
+                    milvusLabels = "app.kubernetes.io/instance=${env.HELM_RELEASE_NAME},component=standalone"
+                }
+                def etcdLabels = "app.kubernetes.io/instance=${env.HELM_RELEASE_NAME},app.kubernetes.io/name=etcd"
                 def componentLabels = "release=${env.HELM_RELEASE_NAME}"
                 def namespace = "${env.HELM_RELEASE_NAMESPACE}"
                 def artifactsPath = "${env.DEV_TEST_ARTIFACTS_PATH}"
 
                 sh "mkdir -p $artifactsPath"
-                sh "for pod in \$(kubectl get pod -n $namespace -l ${milvusLabels} -o jsonpath='{range.items[*]}{.metadata.name} '); do kubectl logs --all-containers -n $namespace \$pod > $artifactsPath/\$pod.log; done"
+                sh "kubectl cp -n ${env.HELM_RELEASE_NAMESPACE} \$(kubectl get pod -n ${env.HELM_RELEASE_NAMESPACE} -l ${milvusLabels} -o jsonpath='{range.items[0]}{.metadata.name}'):logs $artifactsPath"
+                sh "for pod in \$(kubectl get pod -n $namespace -l ${etcdLabels} -o jsonpath='{range.items[*]}{.metadata.name} '); do kubectl logs --all-containers -n $namespace \$pod > $artifactsPath/\$pod.log; done"
                 sh "for pod in \$(kubectl get pod -n $namespace -l ${componentLabels} -o jsonpath='{range.items[*]}{.metadata.name} '); do kubectl logs --all-containers -n $namespace \$pod > $artifactsPath/\$pod.log; done"
                 archiveArtifacts artifacts: "$artifactsPath/**", allowEmptyArchive: true
             }
