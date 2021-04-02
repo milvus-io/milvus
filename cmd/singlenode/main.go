@@ -31,13 +31,13 @@ func initLogCfg() log.Config {
 	logCfg.File.MaxDays = 10
 
 	// FIXME(wxyu): Load from config files
-	logCfg.File.Filename = ""
-	//ciFileDir := "/milvus-distributed/logs/"
-	//if _, err := os.Stat(ciFileDir); err == nil {
-	//	logCfg.File.Filename = ciFileDir + "singlenode.log"
-	//} else {
-	//	logCfg.File.Filename = "/tmp/milvus/singlenode.log"
-	//}
+	//logCfg.File.Filename = ""
+	ciFileDir := "/milvus-distributed/logs/"
+	if _, err := os.Stat(ciFileDir); err == nil {
+		logCfg.File.Filename = ciFileDir + "singlenode.log"
+	} else {
+		logCfg.File.Filename = "/tmp/milvus/singlenode.log"
+	}
 	return logCfg
 }
 
