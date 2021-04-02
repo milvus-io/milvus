@@ -1,9 +1,8 @@
-package rocksmq
+package mqclient
 
 import (
 	"context"
 
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/client"
 	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq/client/rocksmq"
 )
 
@@ -15,7 +14,7 @@ func (rp *rmqProducer) Topic() string {
 	return rp.p.Topic()
 }
 
-func (rp *rmqProducer) Send(ctx context.Context, message *client.ProducerMessage) error {
+func (rp *rmqProducer) Send(ctx context.Context, message *ProducerMessage) error {
 	pm := &rocksmq.ProducerMessage{Payload: message.Payload}
 	return rp.p.Send(pm)
 }

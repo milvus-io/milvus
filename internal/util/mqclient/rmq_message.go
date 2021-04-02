@@ -1,7 +1,6 @@
-package rocksmq
+package mqclient
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/client"
 	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq/client/rocksmq"
 )
 
@@ -21,6 +20,6 @@ func (rm *rmqMessage) Payload() []byte {
 	return rm.msg.Payload
 }
 
-func (rm *rmqMessage) ID() client.MessageID {
+func (rm *rmqMessage) ID() MessageID {
 	return &rmqID{messageID: rm.msg.MsgID}
 }

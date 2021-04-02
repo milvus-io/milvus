@@ -1,8 +1,7 @@
-package pulsar
+package mqclient
 
 import (
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/client"
 )
 
 type pulsarMessage struct {
@@ -21,7 +20,7 @@ func (pm *pulsarMessage) Payload() []byte {
 	return pm.msg.Payload()
 }
 
-func (pm *pulsarMessage) ID() client.MessageID {
+func (pm *pulsarMessage) ID() MessageID {
 	id := pm.msg.ID()
 	pid := &pulsarID{messageID: id}
 	return pid

@@ -1,4 +1,4 @@
-package client
+package mqclient
 
 type ConsumerMessage interface {
 	// Topic get the topic from which this message originated from

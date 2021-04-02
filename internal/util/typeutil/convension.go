@@ -4,11 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"reflect"
-	"strings"
-
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/client"
-
-	"github.com/apache/pulsar-client-go/pulsar"
 )
 
 // BytesToUint64 converts a byte slice to uint64.
@@ -41,36 +36,6 @@ func Uint64ToBytes(v uint64) []byte {
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, v)
 	return b
-}
-
-func PulsarMsgIDToString(messageID pulsar.MessageID) string {
-	return strings.ToValidUTF8(string(messageID.Serialize()), "")
-}
-
-func MsgIDToString(messageID client.MessageID) string {
-	return strings.ToValidUTF8(string(messageID.Serialize()), "")
-}
-
-func StringToPulsarMsgID(msgString string) (pulsar.MessageID, error) {
-	return pulsar.DeserializeMessageID([]byte(msgString))
-}
-
-func SerializePulsarMsgID(messageID pulsar.MessageID) []byte {
-	return messageID.Serialize()
-}
-
-func DeserializePulsarMsgID(messageID []byte) (pulsar.MessageID, error) {
-	return pulsar.DeserializeMessageID(messageID)
-}
-
-func SerializeRmqID(messageID int64) []byte {
-	b := make([]byte, 8)
-	binary.LittleEndian.PutUint64(b, uint64(messageID))
-	return b
-}
-
-func DeserializeRmqID(messageID []byte) (int64, error) {
-	return int64(binary.LittleEndian.Uint64(messageID)), nil
 }
 
 func SliceRemoveDuplicate(a interface{}) (ret []interface{}) {

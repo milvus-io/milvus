@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	pulsar2 "github.com/zilliztech/milvus-distributed/internal/msgstream/client/pulsar"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/ms"
+	pulsar2 "github.com/zilliztech/milvus-distributed/internal/util/mqclient"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"

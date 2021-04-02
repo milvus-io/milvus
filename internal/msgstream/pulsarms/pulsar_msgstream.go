@@ -19,8 +19,8 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/mqclient"
 	"github.com/zilliztech/milvus-distributed/internal/util/trace"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type TsMsg = msgstream.TsMsg
@@ -471,7 +471,7 @@ func (ms *PulsarMsgStream) Chan() <-chan *MsgPack {
 func (ms *PulsarMsgStream) Seek(mp *internalpb.MsgPosition) error {
 	if _, ok := ms.consumers[mp.ChannelName]; ok {
 		consumer := ms.consumers[mp.ChannelName]
-		messageID, err := typeutil.DeserializePulsarMsgID(mp.MsgID)
+		messageID, err := mqclient.DeserializePulsarMsgID(mp.MsgID)
 		if err != nil {
 			return err
 		}
@@ -776,7 +776,7 @@ func (ms *PulsarTtMsgStream) Seek(mp *internalpb.MsgPosition) error {
 	if consumer == nil {
 		return errors.New("pulsar is not ready, consumer is nil")
 	}
-	seekMsgID, err := typeutil.DeserializePulsarMsgID(mp.MsgID)
+	seekMsgID, err := mqclient.DeserializePulsarMsgID(mp.MsgID)
 	if err != nil {
 		return err
 	}
