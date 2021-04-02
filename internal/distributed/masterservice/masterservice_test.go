@@ -16,7 +16,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	cms "github.com/zilliztech/milvus-distributed/internal/masterservice"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -38,7 +38,7 @@ func TestGrpcService(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	msFactory := pulsarms.NewFactory()
+	msFactory := msgstream.NewPmsFactory()
 	svr, err := NewServer(ctx, msFactory)
 	assert.Nil(t, err)
 	svr.connectQueryService = false

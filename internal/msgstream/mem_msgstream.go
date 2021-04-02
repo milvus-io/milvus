@@ -1,4 +1,4 @@
-package memms
+package msgstream
 
 import (
 	"context"
@@ -7,41 +7,28 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
-
-type TsMsg = msgstream.TsMsg
-type MsgPack = msgstream.MsgPack
-type MsgType = msgstream.MsgType
-type UniqueID = msgstream.UniqueID
-type BaseMsg = msgstream.BaseMsg
-type Timestamp = msgstream.Timestamp
-type IntPrimaryKey = msgstream.IntPrimaryKey
-type TimeTickMsg = msgstream.TimeTickMsg
-type QueryNodeStatsMsg = msgstream.QueryNodeStatsMsg
-type RepackFunc = msgstream.RepackFunc
 
 type MemMsgStream struct {
 	ctx          context.Context
 	streamCancel func()
 
-	repackFunc msgstream.RepackFunc
+	repackFunc RepackFunc
 
-	consumers []*Consumer
+	consumers []*MemConsumer
 	producers []string
 
-	receiveBuf chan *msgstream.MsgPack
+	receiveBuf chan *MsgPack
 
 	wait sync.WaitGroup
 }
 
 func NewMemMsgStream(ctx context.Context, receiveBufSize int64) (*MemMsgStream, error) {
 	streamCtx, streamCancel := context.WithCancel(ctx)
-	receiveBuf := make(chan *msgstream.MsgPack, receiveBufSize)
+	receiveBuf := make(chan *MsgPack, receiveBufSize)
 	channels := make([]string, 0)
-	consumers := make([]*Consumer, 0)
+	consumers := make([]*MemConsumer, 0)
 
 	stream := &MemMsgStream{
 		ctx:          streamCtx,
@@ -94,7 +81,7 @@ func (mms *MemMsgStream) AsConsumer(channels []string, groupName string) {
 	}
 }
 
-func (mms *MemMsgStream) Produce(pack *msgstream.MsgPack) error {
+func (mms *MemMsgStream) Produce(pack *MsgPack) error {
 	tsMsgs := pack.Msgs
 	if len(tsMsgs) <= 0 {
 		log.Printf("Warning: Receive empty msgPack")
@@ -109,7 +96,7 @@ func (mms *MemMsgStream) Produce(pack *msgstream.MsgPack) error {
 		bucketValues := make([]int32, len(hashValues))
 		for index, hashValue := range hashValues {
 			if tsMsg.Type() == commonpb.MsgType_SearchResult {
-				searchResult := tsMsg.(*msgstream.SearchResultMsg)
+				searchResult := tsMsg.(*SearchResultMsg)
 				channelID := searchResult.ResultChannelID
 				channelIDInt, _ := strconv.ParseInt(channelID, 10, 64)
 				if channelIDInt >= int64(len(mms.producers)) {
@@ -123,7 +110,7 @@ func (mms *MemMsgStream) Produce(pack *msgstream.MsgPack) error {
 		reBucketValues[channelID] = bucketValues
 	}
 
-	var result map[int32]*msgstream.MsgPack
+	var result map[int32]*MsgPack
 	var err error
 	if mms.repackFunc != nil {
 		result, err = mms.repackFunc(tsMsgs, reBucketValues)
@@ -131,11 +118,11 @@ func (mms *MemMsgStream) Produce(pack *msgstream.MsgPack) error {
 		msgType := (tsMsgs[0]).Type()
 		switch msgType {
 		case commonpb.MsgType_Insert:
-			result, err = util.InsertRepackFunc(tsMsgs, reBucketValues)
+			result, err = InsertRepackFunc(tsMsgs, reBucketValues)
 		case commonpb.MsgType_Delete:
-			result, err = util.DeleteRepackFunc(tsMsgs, reBucketValues)
+			result, err = DeleteRepackFunc(tsMsgs, reBucketValues)
 		default:
-			result, err = util.DefaultRepackFunc(tsMsgs, reBucketValues)
+			result, err = DefaultRepackFunc(tsMsgs, reBucketValues)
 		}
 	}
 	if err != nil {
@@ -150,7 +137,7 @@ func (mms *MemMsgStream) Produce(pack *msgstream.MsgPack) error {
 	return nil
 }
 
-func (mms *MemMsgStream) Broadcast(msgPack *msgstream.MsgPack) error {
+func (mms *MemMsgStream) Broadcast(msgPack *MsgPack) error {
 	for _, channelName := range mms.producers {
 		err := Mmq.Produce(channelName, msgPack)
 		if err != nil {
@@ -161,7 +148,7 @@ func (mms *MemMsgStream) Broadcast(msgPack *msgstream.MsgPack) error {
 	return nil
 }
 
-func (mms *MemMsgStream) Consume() *msgstream.MsgPack {
+func (mms *MemMsgStream) Consume() *MsgPack {
 	for {
 		select {
 		case cm, ok := <-mms.receiveBuf:
@@ -181,7 +168,7 @@ func (mms *MemMsgStream) Consume() *msgstream.MsgPack {
 receiveMsg func is used to solve search timeout problem
 which is caused by selectcase
 */
-func (mms *MemMsgStream) receiveMsg(consumer Consumer) {
+func (mms *MemMsgStream) receiveMsg(consumer MemConsumer) {
 	defer mms.wait.Done()
 	for {
 		select {
@@ -197,10 +184,10 @@ func (mms *MemMsgStream) receiveMsg(consumer Consumer) {
 	}
 }
 
-func (mms *MemMsgStream) Chan() <-chan *msgstream.MsgPack {
+func (mms *MemMsgStream) Chan() <-chan *MsgPack {
 	return mms.receiveBuf
 }
 
-func (mms *MemMsgStream) Seek(offset *msgstream.MsgPosition) error {
+func (mms *MemMsgStream) Seek(offset *MsgPosition) error {
 	return errors.New("MemMsgStream seek not implemented")
 }

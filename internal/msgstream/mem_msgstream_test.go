@@ -1,4 +1,4 @@
-package memms
+package msgstream
 
 import (
 	"context"
@@ -6,12 +6,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
-func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
+func mGetTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 	baseMsg := BaseMsg{
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
@@ -29,7 +28,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 			Query:           nil,
 			ResultChannelID: "0",
 		}
-		searchMsg := &msgstream.SearchMsg{
+		searchMsg := &SearchMsg{
 			BaseMsg:       baseMsg,
 			SearchRequest: searchRequest,
 		}
@@ -45,7 +44,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 			ResultChannelID: "0",
 		}
-		searchResultMsg := &msgstream.SearchResultMsg{
+		searchResultMsg := &SearchResultMsg{
 			BaseMsg:       baseMsg,
 			SearchResults: searchResult,
 		}
@@ -96,7 +95,7 @@ func TestStream_GlobalMmq_Func(t *testing.T) {
 	}
 
 	// validate msg produce/consume
-	msg := msgstream.MsgPack{}
+	msg := MsgPack{}
 	err := Mmq.Produce(channels[0], &msg)
 	if err != nil {
 		log.Fatalf("global mmq produce error = %v", err)
@@ -139,9 +138,9 @@ func TestStream_MemMsgStream_Produce(t *testing.T) {
 		defer cs.Close()
 	}
 
-	msgPack := msgstream.MsgPack{}
+	msgPack := MsgPack{}
 	var hashValue uint32 = 2
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Search, 1, hashValue))
+	msgPack.Msgs = append(msgPack.Msgs, mGetTsMsg(commonpb.MsgType_Search, 1, hashValue))
 	err := produceStream.Produce(&msgPack)
 	if err != nil {
 		log.Fatalf("new msgstream error = %v", err)
@@ -165,8 +164,8 @@ func TestStream_MemMsgStream_BroadCast(t *testing.T) {
 		defer cs.Close()
 	}
 
-	msgPack := msgstream.MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Search, 1, 100))
+	msgPack := MsgPack{}
+	msgPack.Msgs = append(msgPack.Msgs, mGetTsMsg(commonpb.MsgType_Search, 1, 100))
 	err := produceStream.Broadcast(&msgPack)
 	if err != nil {
 		log.Fatalf("new msgstream error = %v", err)

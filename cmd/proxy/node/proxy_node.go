@@ -11,14 +11,14 @@ import (
 	"github.com/zilliztech/milvus-distributed/cmd/distributed/components"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/logutil"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proxynode"
 )
 
 func main() {
 	os.Setenv("DEPLOY_MODE", "DISTRIBUTED")
 	ctx, cancel := context.WithCancel(context.Background())
-	msFactory := pulsarms.NewFactory()
+	msFactory := msgstream.NewPmsFactory()
 	proxynode.Params.Init()
 	logutil.SetupLogger(&proxynode.Params.Log)
 	n, err := components.NewProxyNode(ctx, msFactory)

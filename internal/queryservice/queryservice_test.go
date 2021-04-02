@@ -6,14 +6,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 )
 
 func TestQueryService_Init(t *testing.T) {
 	ctx := context.Background()
-	msFactory := pulsarms.NewFactory()
+	msFactory := msgstream.NewPmsFactory()
 	service, err := NewQueryService(context.Background(), msFactory)
 	assert.Nil(t, err)
 	service.Init()
@@ -43,7 +43,7 @@ func TestQueryService_Init(t *testing.T) {
 
 func TestQueryService_load(t *testing.T) {
 	ctx := context.Background()
-	msFactory := pulsarms.NewFactory()
+	msFactory := msgstream.NewPmsFactory()
 	service, err := NewQueryService(context.Background(), msFactory)
 	assert.Nil(t, err)
 	service.Init()

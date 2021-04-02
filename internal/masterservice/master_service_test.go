@@ -10,8 +10,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
-	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
@@ -167,7 +166,7 @@ func (idx *indexMock) getFileArray() []string {
 	return ret
 }
 
-func consumeMsgChan(timeout time.Duration, targetChan <-chan *ms.MsgPack) {
+func consumeMsgChan(timeout time.Duration, targetChan <-chan *msgstream.MsgPack) {
 	for {
 		select {
 		case <-time.After(timeout):
@@ -182,7 +181,7 @@ func TestMasterService(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	msFactory := pulsarms.NewFactory()
+	msFactory := msgstream.NewPmsFactory()
 	Params.Init()
 	core, err := NewCore(ctx, msFactory)
 	assert.Nil(t, err)
@@ -255,8 +254,8 @@ func TestMasterService(t *testing.T) {
 
 	t.Run("time tick", func(t *testing.T) {
 		var timeTick typeutil.Timestamp = 100
-		msgPack := ms.MsgPack{}
-		baseMsg := ms.BaseMsg{
+		msgPack := msgstream.MsgPack{}
+		baseMsg := msgstream.BaseMsg{
 			BeginTimestamp: timeTick,
 			EndTimestamp:   timeTick,
 			HashValues:     []uint32{0},
@@ -269,7 +268,7 @@ func TestMasterService(t *testing.T) {
 				SourceID:  0,
 			},
 		}
-		timeTickMsg := &ms.TimeTickMsg{
+		timeTickMsg := &msgstream.TimeTickMsg{
 			BaseMsg:     baseMsg,
 			TimeTickMsg: timeTickResult,
 		}
@@ -280,14 +279,14 @@ func TestMasterService(t *testing.T) {
 		ttmsg, ok := <-timeTickStream.Chan()
 		assert.True(t, ok)
 		assert.Equal(t, len(ttmsg.Msgs), 1)
-		ttm, ok := (ttmsg.Msgs[0]).(*ms.TimeTickMsg)
+		ttm, ok := (ttmsg.Msgs[0]).(*msgstream.TimeTickMsg)
 		assert.True(t, ok)
 		assert.Equal(t, ttm.Base.Timestamp, timeTick)
 
 		ddmsg, ok := <-ddStream.Chan()
 		assert.True(t, ok)
 		assert.Equal(t, len(ddmsg.Msgs), 1)
-		ddm, ok := (ddmsg.Msgs[0]).(*ms.TimeTickMsg)
+		ddm, ok := (ddmsg.Msgs[0]).(*msgstream.TimeTickMsg)
 		assert.True(t, ok)
 		assert.Equal(t, ddm.Base.Timestamp, timeTick)
 	})
@@ -336,7 +335,7 @@ func TestMasterService(t *testing.T) {
 		assert.True(t, ok)
 		assert.True(t, len(msg.Msgs) == 2 || len(msg.Msgs) == 1)
 
-		createMsg, ok := (msg.Msgs[0]).(*ms.CreateCollectionMsg)
+		createMsg, ok := (msg.Msgs[0]).(*msgstream.CreateCollectionMsg)
 		assert.True(t, ok)
 		createMeta, err := core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
@@ -344,14 +343,14 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, len(createMeta.PartitionIDs), 1)
 
 		if len(msg.Msgs) == 2 {
-			createPart, ok := (msg.Msgs[1]).(*ms.CreatePartitionMsg)
+			createPart, ok := (msg.Msgs[1]).(*msgstream.CreatePartitionMsg)
 			assert.True(t, ok)
 			assert.Equal(t, createPart.CollectionName, "testColl")
 			assert.Equal(t, createPart.PartitionID, createMeta.PartitionIDs[0])
 		} else {
 			msg, ok = <-ddStream.Chan()
 			assert.True(t, ok)
-			createPart, ok := (msg.Msgs[0]).(*ms.CreatePartitionMsg)
+			createPart, ok := (msg.Msgs[0]).(*msgstream.CreatePartitionMsg)
 			assert.True(t, ok)
 			assert.Equal(t, createPart.CollectionName, "testColl")
 			assert.Equal(t, createPart.PartitionID, createMeta.PartitionIDs[0])
@@ -385,7 +384,7 @@ func TestMasterService(t *testing.T) {
 
 		msg, ok = <-ddStream.Chan()
 		assert.True(t, ok)
-		createMsg, ok = (msg.Msgs[0]).(*ms.CreateCollectionMsg)
+		createMsg, ok = (msg.Msgs[0]).(*msgstream.CreateCollectionMsg)
 		assert.True(t, ok)
 		createMeta, err = core.MetaTable.GetCollectionByName("testColl-again")
 		assert.Nil(t, err)
@@ -504,7 +503,7 @@ func TestMasterService(t *testing.T) {
 		msg, ok := <-ddStream.Chan()
 		assert.True(t, ok)
 		assert.Equal(t, len(msg.Msgs), 1)
-		partMsg, ok := (msg.Msgs[0]).(*ms.CreatePartitionMsg)
+		partMsg, ok := (msg.Msgs[0]).(*msgstream.CreatePartitionMsg)
 		assert.True(t, ok)
 		assert.Equal(t, partMsg.CollectionID, collMeta.ID)
 		assert.Equal(t, partMsg.PartitionID, partMeta.PartitionID)
@@ -566,13 +565,13 @@ func TestMasterService(t *testing.T) {
 			PartitionID:  part.PartitionID,
 		}
 
-		msgPack := ms.MsgPack{}
-		baseMsg := ms.BaseMsg{
+		msgPack := msgstream.MsgPack{}
+		baseMsg := msgstream.BaseMsg{
 			BeginTimestamp: 0,
 			EndTimestamp:   0,
 			HashValues:     []uint32{0},
 		}
-		segMsg := &ms.SegmentInfoMsg{
+		segMsg := &msgstream.SegmentInfoMsg{
 			BaseMsg: baseMsg,
 			SegmentMsg: datapb.SegmentMsg{
 				Base: &commonpb.MsgBase{
@@ -725,13 +724,13 @@ func TestMasterService(t *testing.T) {
 			PartitionID:  part.PartitionID,
 		}
 
-		msgPack := ms.MsgPack{}
-		baseMsg := ms.BaseMsg{
+		msgPack := msgstream.MsgPack{}
+		baseMsg := msgstream.BaseMsg{
 			BeginTimestamp: 0,
 			EndTimestamp:   0,
 			HashValues:     []uint32{0},
 		}
-		segMsg := &ms.SegmentInfoMsg{
+		segMsg := &msgstream.SegmentInfoMsg{
 			BaseMsg: baseMsg,
 			SegmentMsg: datapb.SegmentMsg{
 				Base: &commonpb.MsgBase{
@@ -752,7 +751,7 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, len(part.SegmentIDs), 2)
 
-		flushMsg := &ms.FlushCompletedMsg{
+		flushMsg := &msgstream.FlushCompletedMsg{
 			BaseMsg: baseMsg,
 			SegmentFlushCompletedMsg: internalpb.SegmentFlushCompletedMsg{
 				Base: &commonpb.MsgBase{
@@ -764,7 +763,7 @@ func TestMasterService(t *testing.T) {
 				SegmentID: 1001,
 			},
 		}
-		msgPack.Msgs = []ms.TsMsg{flushMsg}
+		msgPack.Msgs = []msgstream.TsMsg{flushMsg}
 		err = dataServiceSegmentStream.Broadcast(&msgPack)
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
@@ -892,7 +891,7 @@ func TestMasterService(t *testing.T) {
 		msg, ok := <-ddStream.Chan()
 		assert.True(t, ok)
 		assert.Equal(t, len(msg.Msgs), 1)
-		dmsg, ok := (msg.Msgs[0]).(*ms.DropPartitionMsg)
+		dmsg, ok := (msg.Msgs[0]).(*msgstream.DropPartitionMsg)
 		assert.True(t, ok)
 		assert.Equal(t, dmsg.CollectionID, collMeta.ID)
 		assert.Equal(t, dmsg.PartitionID, dropPartID)
@@ -921,7 +920,7 @@ func TestMasterService(t *testing.T) {
 		msg, ok := <-ddStream.Chan()
 		assert.True(t, ok)
 		assert.Equal(t, len(msg.Msgs), 1)
-		dmsg, ok := (msg.Msgs[0]).(*ms.DropCollectionMsg)
+		dmsg, ok := (msg.Msgs[0]).(*msgstream.DropCollectionMsg)
 		assert.True(t, ok)
 		assert.Equal(t, dmsg.CollectionID, collMeta.ID)
 		collArray := pm.GetCollArray()

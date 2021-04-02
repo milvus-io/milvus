@@ -1,4 +1,4 @@
-package pulsarms
+package msgstream
 
 import (
 	"context"
@@ -7,14 +7,19 @@ import (
 	"os"
 	"testing"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-
+	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/stretchr/testify/assert"
+	"go.etcd.io/etcd/clientv3"
 
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"github.com/zilliztech/milvus-distributed/internal/util/mqclient"
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
+	client "github.com/zilliztech/milvus-distributed/internal/util/rocksmq/client/rocksmq"
+	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
 )
 
 var Params paramtable.BaseTable
@@ -64,7 +69,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 			RowIDs:         []int64{1},
 			RowData:        []*commonpb.Blob{{}},
 		}
-		insertMsg := &msgstream.InsertMsg{
+		insertMsg := &InsertMsg{
 			BaseMsg:       baseMsg,
 			InsertRequest: insertRequest,
 		}
@@ -82,7 +87,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 			Timestamps:     []Timestamp{1},
 			PrimaryKeys:    []IntPrimaryKey{1},
 		}
-		deleteMsg := &msgstream.DeleteMsg{
+		deleteMsg := &DeleteMsg{
 			BaseMsg:       baseMsg,
 			DeleteRequest: deleteRequest,
 		}
@@ -98,7 +103,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 			Query:           nil,
 			ResultChannelID: "0",
 		}
-		searchMsg := &msgstream.SearchMsg{
+		searchMsg := &SearchMsg{
 			BaseMsg:       baseMsg,
 			SearchRequest: searchRequest,
 		}
@@ -114,7 +119,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 			ResultChannelID: "0",
 		}
-		searchResultMsg := &msgstream.SearchResultMsg{
+		searchResultMsg := &SearchResultMsg{
 			BaseMsg:       baseMsg,
 			SearchResults: searchResult,
 		}
@@ -174,23 +179,25 @@ func initPulsarStream(pulsarAddress string,
 	producerChannels []string,
 	consumerChannels []string,
 	consumerSubName string,
-	opts ...RepackFunc) (msgstream.MsgStream, msgstream.MsgStream) {
-	factory := msgstream.ProtoUDFactory{}
+	opts ...RepackFunc) (MsgStream, MsgStream) {
+	factory := ProtoUDFactory{}
 
 	// set input stream
-	inputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	inputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	inputStream.AsProducer(producerChannels)
 	for _, opt := range opts {
 		inputStream.SetRepackFunc(opt)
 	}
 	inputStream.Start()
-	var input msgstream.MsgStream = inputStream
+	var input MsgStream = inputStream
 
 	// set output stream
-	outputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	pulsarClient2, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	outputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient2, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
-	var output msgstream.MsgStream = outputStream
+	var output MsgStream = outputStream
 
 	return input, output
 }
@@ -199,28 +206,30 @@ func initPulsarTtStream(pulsarAddress string,
 	producerChannels []string,
 	consumerChannels []string,
 	consumerSubName string,
-	opts ...RepackFunc) (msgstream.MsgStream, msgstream.MsgStream) {
-	factory := msgstream.ProtoUDFactory{}
+	opts ...RepackFunc) (MsgStream, MsgStream) {
+	factory := ProtoUDFactory{}
 
 	// set input stream
-	inputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	inputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	inputStream.AsProducer(producerChannels)
 	for _, opt := range opts {
 		inputStream.SetRepackFunc(opt)
 	}
 	inputStream.Start()
-	var input msgstream.MsgStream = inputStream
+	var input MsgStream = inputStream
 
 	// set output stream
-	outputStream, _ := newPulsarTtMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	pulsarClient2, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	outputStream, _ := NewMqTtMsgStream(context.Background(), 100, 100, pulsarClient2, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
-	var output msgstream.MsgStream = outputStream
+	var output MsgStream = outputStream
 
 	return input, output
 }
 
-func receiveMsg(outputStream msgstream.MsgStream, msgCount int) {
+func receiveMsg(outputStream MsgStream, msgCount int) {
 	receiveCount := 0
 	for {
 		result := outputStream.Consume()
@@ -244,7 +253,7 @@ func TestStream_PulsarMsgStream_Insert(t *testing.T) {
 	consumerChannels := []string{c1, c2}
 	consumerSubName := funcutil.RandomString(8)
 
-	msgPack := msgstream.MsgPack{}
+	msgPack := MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 1, 1))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 3, 3))
 
@@ -266,7 +275,7 @@ func TestStream_PulsarMsgStream_Delete(t *testing.T) {
 	producerChannels := []string{c}
 	consumerChannels := []string{c}
 	consumerSubName := funcutil.RandomString(8)
-	msgPack := msgstream.MsgPack{}
+	msgPack := MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Delete, 1, 1))
 	//msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Delete, 3, 3))
 
@@ -287,7 +296,7 @@ func TestStream_PulsarMsgStream_Search(t *testing.T) {
 	consumerChannels := []string{c}
 	consumerSubName := funcutil.RandomString(8)
 
-	msgPack := msgstream.MsgPack{}
+	msgPack := MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Search, 1, 1))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Search, 3, 3))
 
@@ -307,7 +316,7 @@ func TestStream_PulsarMsgStream_SearchResult(t *testing.T) {
 	producerChannels := []string{c}
 	consumerChannels := []string{c}
 	consumerSubName := funcutil.RandomString(8)
-	msgPack := msgstream.MsgPack{}
+	msgPack := MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_SearchResult, 1, 1))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_SearchResult, 3, 3))
 
@@ -327,7 +336,7 @@ func TestStream_PulsarMsgStream_TimeTick(t *testing.T) {
 	producerChannels := []string{c}
 	consumerChannels := []string{c}
 	consumerSubName := funcutil.RandomString(8)
-	msgPack := msgstream.MsgPack{}
+	msgPack := MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 1, 1))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 3, 3))
 
@@ -348,7 +357,7 @@ func TestStream_PulsarMsgStream_BroadCast(t *testing.T) {
 	consumerChannels := []string{c1, c2}
 	consumerSubName := funcutil.RandomString(8)
 
-	msgPack := msgstream.MsgPack{}
+	msgPack := MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 1, 1))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 3, 3))
 
@@ -369,7 +378,7 @@ func TestStream_PulsarMsgStream_RepackFunc(t *testing.T) {
 	consumerChannels := []string{c1, c2}
 	consumerSubName := funcutil.RandomString(8)
 
-	msgPack := msgstream.MsgPack{}
+	msgPack := MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 1, 1))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 3, 3))
 
@@ -389,7 +398,7 @@ func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
 	producerChannels := []string{c1, c2}
 	consumerChannels := []string{c1, c2}
 	consumerSubName := funcutil.RandomString(8)
-	baseMsg := msgstream.BaseMsg{
+	baseMsg := BaseMsg{
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
 		HashValues:     []uint32{1, 3},
@@ -406,27 +415,30 @@ func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
 		PartitionName:  "Partition",
 		SegmentID:      1,
 		ChannelID:      "1",
-		Timestamps:     []msgstream.Timestamp{1, 1},
+		Timestamps:     []Timestamp{1, 1},
 		RowIDs:         []int64{1, 3},
 		RowData:        []*commonpb.Blob{{}, {}},
 	}
-	insertMsg := &msgstream.InsertMsg{
+	insertMsg := &InsertMsg{
 		BaseMsg:       baseMsg,
 		InsertRequest: insertRequest,
 	}
 
-	msgPack := msgstream.MsgPack{}
+	msgPack := MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 
-	factory := msgstream.ProtoUDFactory{}
-	inputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	factory := ProtoUDFactory{}
+
+	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	inputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	inputStream.AsProducer(producerChannels)
 	inputStream.Start()
 
-	outputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	pulsarClient2, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	outputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient2, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
-	var output msgstream.MsgStream = outputStream
+	var output MsgStream = outputStream
 
 	err := (*inputStream).Produce(&msgPack)
 	if err != nil {
@@ -444,7 +456,7 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 	consumerChannels := []string{c1, c2}
 	consumerSubName := funcutil.RandomString(8)
 
-	baseMsg := msgstream.BaseMsg{
+	baseMsg := BaseMsg{
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
 		HashValues:     []uint32{1, 3},
@@ -459,26 +471,28 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 		},
 		CollectionName: "Collection",
 		ChannelID:      "1",
-		Timestamps:     []msgstream.Timestamp{1, 1},
+		Timestamps:     []Timestamp{1, 1},
 		PrimaryKeys:    []int64{1, 3},
 	}
-	deleteMsg := &msgstream.DeleteMsg{
+	deleteMsg := &DeleteMsg{
 		BaseMsg:       baseMsg,
 		DeleteRequest: deleteRequest,
 	}
 
-	msgPack := msgstream.MsgPack{}
+	msgPack := MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, deleteMsg)
 
-	factory := msgstream.ProtoUDFactory{}
-	inputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	factory := ProtoUDFactory{}
+	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	inputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	inputStream.AsProducer(producerChannels)
 	inputStream.Start()
 
-	outputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	pulsarClient2, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	outputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient2, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
-	var output msgstream.MsgStream = outputStream
+	var output MsgStream = outputStream
 
 	err := (*inputStream).Produce(&msgPack)
 	if err != nil {
@@ -496,21 +510,23 @@ func TestStream_PulsarMsgStream_DefaultRepackFunc(t *testing.T) {
 	consumerChannels := []string{c1, c2}
 	consumerSubName := funcutil.RandomString(8)
 
-	msgPack := msgstream.MsgPack{}
+	msgPack := MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 1, 1))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Search, 2, 2))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_SearchResult, 3, 3))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_QueryNodeStats, 4, 4))
 
-	factory := msgstream.ProtoUDFactory{}
-	inputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	factory := ProtoUDFactory{}
+	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	inputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	inputStream.AsProducer(producerChannels)
 	inputStream.Start()
 
-	outputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	pulsarClient2, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	outputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient2, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
-	var output msgstream.MsgStream = outputStream
+	var output MsgStream = outputStream
 
 	err := (*inputStream).Produce(&msgPack)
 	if err != nil {
@@ -527,14 +543,14 @@ func TestStream_PulsarTtMsgStream_Insert(t *testing.T) {
 	producerChannels := []string{c1, c2}
 	consumerChannels := []string{c1, c2}
 	consumerSubName := funcutil.RandomString(8)
-	msgPack0 := msgstream.MsgPack{}
+	msgPack0 := MsgPack{}
 	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0, 0, 0))
 
-	msgPack1 := msgstream.MsgPack{}
+	msgPack1 := MsgPack{}
 	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1, 1))
 	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 3, 3))
 
-	msgPack2 := msgstream.MsgPack{}
+	msgPack2 := MsgPack{}
 	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5, 5, 5))
 
 	inputStream, outputStream := initPulsarTtStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
@@ -616,14 +632,14 @@ func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
 	consumerChannels := []string{c1, c2}
 	consumerSubName := funcutil.RandomString(8)
 
-	msgPack0 := msgstream.MsgPack{}
+	msgPack0 := MsgPack{}
 	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0, 0, 0))
 
-	msgPack1 := msgstream.MsgPack{}
+	msgPack1 := MsgPack{}
 	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1, 1))
 	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 3, 3))
 
-	msgPack2 := msgstream.MsgPack{}
+	msgPack2 := MsgPack{}
 	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5, 5, 5))
 
 	inputStream, outputStream := initPulsarTtStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
@@ -642,4 +658,140 @@ func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
 	receiveMsg(outputStream, len(msgPack1.Msgs))
 	inputStream.Close()
 	outputStream.Close()
+}
+
+/****************************************Rmq test******************************************/
+
+func initRmq(name string) *etcdkv.EtcdKV {
+	etcdAddr := os.Getenv("ETCD_ADDRESS")
+	if etcdAddr == "" {
+		etcdAddr = "localhost:2379"
+	}
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	if err != nil {
+		log.Fatalf("New clientv3 error = %v", err)
+	}
+	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
+	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
+	_ = idAllocator.Initialize()
+
+	err = rocksmq.InitRmq(name, idAllocator)
+
+	if err != nil {
+		log.Fatalf("InitRmq error = %v", err)
+	}
+	return etcdKV
+}
+
+func Close(rocksdbName string, intputStream, outputStream MsgStream, etcdKV *etcdkv.EtcdKV) {
+	intputStream.Close()
+	outputStream.Close()
+	etcdKV.Close()
+	err := os.RemoveAll(rocksdbName)
+	fmt.Println(err)
+}
+
+func initRmqStream(producerChannels []string,
+	consumerChannels []string,
+	consumerGroupName string,
+	opts ...RepackFunc) (MsgStream, MsgStream) {
+	factory := ProtoUDFactory{}
+
+	rmqClient, _ := mqclient.NewRmqClient(client.ClientOptions{Server: rocksmq.Rmq})
+	inputStream, _ := NewMqMsgStream(context.Background(), 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
+	inputStream.AsProducer(producerChannels)
+	for _, opt := range opts {
+		inputStream.SetRepackFunc(opt)
+	}
+	inputStream.Start()
+	var input MsgStream = inputStream
+
+	rmqClient2, _ := mqclient.NewRmqClient(client.ClientOptions{Server: rocksmq.Rmq})
+	outputStream, _ := NewMqMsgStream(context.Background(), 100, 100, rmqClient2, factory.NewUnmarshalDispatcher())
+	outputStream.AsConsumer(consumerChannels, consumerGroupName)
+	outputStream.Start()
+	var output MsgStream = outputStream
+
+	return input, output
+}
+
+func initRmqTtStream(producerChannels []string,
+	consumerChannels []string,
+	consumerGroupName string,
+	opts ...RepackFunc) (MsgStream, MsgStream) {
+	factory := ProtoUDFactory{}
+
+	rmqClient, _ := mqclient.NewRmqClient(client.ClientOptions{Server: rocksmq.Rmq})
+	inputStream, _ := NewMqMsgStream(context.Background(), 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
+	inputStream.AsProducer(producerChannels)
+	for _, opt := range opts {
+		inputStream.SetRepackFunc(opt)
+	}
+	inputStream.Start()
+	var input MsgStream = inputStream
+
+	rmqClient2, _ := mqclient.NewRmqClient(client.ClientOptions{Server: rocksmq.Rmq})
+	outputStream, _ := NewMqTtMsgStream(context.Background(), 100, 100, rmqClient2, factory.NewUnmarshalDispatcher())
+	outputStream.AsConsumer(consumerChannels, consumerGroupName)
+	outputStream.Start()
+	var output MsgStream = outputStream
+
+	return input, output
+}
+
+func TestStream_RmqMsgStream_Insert(t *testing.T) {
+	producerChannels := []string{"insert1", "insert2"}
+	consumerChannels := []string{"insert1", "insert2"}
+	consumerGroupName := "InsertGroup"
+
+	msgPack := MsgPack{}
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 3, 3))
+
+	rocksdbName := "/tmp/rocksmq_insert"
+	etcdKV := initRmq(rocksdbName)
+	inputStream, outputStream := initRmqStream(producerChannels, consumerChannels, consumerGroupName)
+	err := inputStream.Produce(&msgPack)
+	if err != nil {
+		log.Fatalf("produce error = %v", err)
+	}
+
+	receiveMsg(outputStream, len(msgPack.Msgs))
+	Close(rocksdbName, inputStream, outputStream, etcdKV)
+}
+
+func TestStream_RmqTtMsgStream_Insert(t *testing.T) {
+	producerChannels := []string{"insert1", "insert2"}
+	consumerChannels := []string{"insert1", "insert2"}
+	consumerSubName := "subInsert"
+
+	msgPack0 := MsgPack{}
+	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0, 0, 0))
+
+	msgPack1 := MsgPack{}
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1, 1))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 3, 3))
+
+	msgPack2 := MsgPack{}
+	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5, 5, 5))
+
+	rocksdbName := "/tmp/rocksmq_insert_tt"
+	etcdKV := initRmq(rocksdbName)
+	inputStream, outputStream := initRmqTtStream(producerChannels, consumerChannels, consumerSubName)
+
+	err := inputStream.Broadcast(&msgPack0)
+	if err != nil {
+		log.Fatalf("broadcast error = %v", err)
+	}
+	err = inputStream.Produce(&msgPack1)
+	if err != nil {
+		log.Fatalf("produce error = %v", err)
+	}
+	err = inputStream.Broadcast(&msgPack2)
+	if err != nil {
+		log.Fatalf("broadcast error = %v", err)
+	}
+
+	receiveMsg(outputStream, len(msgPack1.Msgs))
+	Close(rocksdbName, inputStream, outputStream, etcdKV)
 }
