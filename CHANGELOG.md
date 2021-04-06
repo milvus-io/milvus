@@ -5,6 +5,7 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 1.1.0 (TBD)
 ## Bug
 -   \#4858 Fix the crash when query for a large topk on GPU Flat
+-   \#4862 The inserted data number increase automatically without any operations
 
 ## Feature
 -   \#1434 Storage: enabling s3 storage support (implemented by Unisinsight)
