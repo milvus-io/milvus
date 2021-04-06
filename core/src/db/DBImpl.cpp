@@ -114,15 +114,18 @@ DBImpl::Start() {
     // LOG_ENGINE_TRACE_ << "DB service start";
     initialized_.store(true, std::memory_order_release);
 
-    // server may be closed unexpected, these un-merge files need to be merged when server restart
-    // and soft-delete files need to be deleted when server restart
-    std::set<std::string> merge_collection_ids;
-    std::vector<meta::CollectionSchema> collection_schema_array;
-    meta_ptr_->AllCollections(collection_schema_array);
-    for (auto& schema : collection_schema_array) {
-        merge_collection_ids.insert(schema.collection_id_);
+    if (options_.mode_ == DBOptions::MODE::SINGLE || options_.mode_ == DBOptions::MODE::CLUSTER_WRITABLE) {
+        // server may be closed unexpected, these un-merge files need to be merged when server restart
+        // and soft-delete files need to be deleted when server restart
+        // warnning: read-only node is not allow to do merge
+        std::set<std::string> merge_collection_ids;
+        std::vector<meta::CollectionSchema> collection_schema_array;
+        meta_ptr_->AllCollections(collection_schema_array);
+        for (auto& schema : collection_schema_array) {
+            merge_collection_ids.insert(schema.collection_id_);
+        }
+        StartMergeTask(merge_collection_ids, true);
     }
-    StartMergeTask(merge_collection_ids, true);
 
     // wal
     if (options_.wal_enable_) {
