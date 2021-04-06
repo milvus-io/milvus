@@ -199,9 +199,9 @@ func (s *ProxyService) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 func (s *ProxyService) RegisterLink(ctx context.Context) (*milvuspb.RegisterLinkResponse, error) {
 	log.Debug("register link")
 
-	t := &RegisterLinkTask{
+	t := &registerLinkTask{
 		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
+		Condition: newTaskCondition(ctx),
 		nodeInfos: s.nodeInfos,
 	}
 
@@ -237,11 +237,11 @@ func (s *ProxyService) RegisterNode(ctx context.Context, request *proxypb.Regist
 		zap.String("ip", request.Address.Ip),
 		zap.Int64("port", request.Address.Port))
 
-	t := &RegisterNodeTask{
+	t := &registerNodeTask{
 		ctx:         ctx,
 		request:     request,
 		startParams: s.nodeStartParams,
-		Condition:   NewTaskCondition(ctx),
+		Condition:   newTaskCondition(ctx),
 		allocator:   s.allocator,
 		nodeInfos:   s.nodeInfos,
 	}
@@ -278,10 +278,10 @@ func (s *ProxyService) InvalidateCollectionMetaCache(ctx context.Context, reques
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
-	t := &InvalidateCollectionMetaCacheTask{
+	t := &invalidateCollectionMetaCacheTask{
 		ctx:       ctx,
 		request:   request,
-		Condition: NewTaskCondition(ctx),
+		Condition: newTaskCondition(ctx),
 		nodeInfos: s.nodeInfos,
 	}
 

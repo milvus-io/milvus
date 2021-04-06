@@ -7,31 +7,33 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+
 	grpcproxynodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/proxynode/client"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/types"
 )
 
-type NodeInfo struct {
+type nodeInfo struct {
 	ip   string
 	port int64
 }
 
-type GlobalNodeInfoTable struct {
+type globalNodeInfoTable struct {
 	mu      sync.RWMutex
-	infos   map[UniqueID]*NodeInfo
+	infos   map[UniqueID]*nodeInfo
 	nodeIDs []UniqueID
 	// lazy creating, so len(clients) <= len(infos)
 	ProxyNodes map[UniqueID]types.ProxyNode
 }
 
-func (table *GlobalNodeInfoTable) randomPick() UniqueID {
+func (table *globalNodeInfoTable) randomPick() UniqueID {
 	l := len(table.nodeIDs)
 	choice := rand.Intn(l)
 	return table.nodeIDs[choice]
 }
 
-func (table *GlobalNodeInfoTable) Pick() (*NodeInfo, error) {
+func (table *globalNodeInfoTable) Pick() (*nodeInfo, error) {
 	table.mu.RLock()
 	defer table.mu.RUnlock()
 
@@ -49,7 +51,7 @@ func (table *GlobalNodeInfoTable) Pick() (*NodeInfo, error) {
 	return info, nil
 }
 
-func (table *GlobalNodeInfoTable) Register(id UniqueID, info *NodeInfo) error {
+func (table *globalNodeInfoTable) Register(id UniqueID, info *nodeInfo) error {
 	table.mu.Lock()
 	defer table.mu.Unlock()
 
@@ -58,14 +60,14 @@ func (table *GlobalNodeInfoTable) Register(id UniqueID, info *NodeInfo) error {
 		table.infos[id] = info
 	}
 
-	if !SliceContain(table.nodeIDs, id) {
+	if !funcutil.SliceContain(table.nodeIDs, id) {
 		table.nodeIDs = append(table.nodeIDs, id)
 	}
 
 	return nil
 }
 
-func (table *GlobalNodeInfoTable) createClients() error {
+func (table *globalNodeInfoTable) createClients() error {
 	if len(table.ProxyNodes) == len(table.infos) {
 		return nil
 	}
@@ -89,7 +91,7 @@ func (table *GlobalNodeInfoTable) createClients() error {
 	return nil
 }
 
-func (table *GlobalNodeInfoTable) ReleaseAllClients() error {
+func (table *globalNodeInfoTable) ReleaseAllClients() error {
 	table.mu.Lock()
 	log.Debug("get write lock")
 	defer func() {
@@ -109,7 +111,7 @@ func (table *GlobalNodeInfoTable) ReleaseAllClients() error {
 	return nil
 }
 
-func (table *GlobalNodeInfoTable) ObtainAllClients() (map[UniqueID]types.ProxyNode, error) {
+func (table *globalNodeInfoTable) ObtainAllClients() (map[UniqueID]types.ProxyNode, error) {
 	table.mu.RLock()
 	defer table.mu.RUnlock()
 
@@ -118,10 +120,10 @@ func (table *GlobalNodeInfoTable) ObtainAllClients() (map[UniqueID]types.ProxyNo
 	return table.ProxyNodes, err
 }
 
-func NewGlobalNodeInfoTable() *GlobalNodeInfoTable {
-	return &GlobalNodeInfoTable{
+func newGlobalNodeInfoTable() *globalNodeInfoTable {
+	return &globalNodeInfoTable{
 		nodeIDs:    make([]UniqueID, 0),
-		infos:      make(map[UniqueID]*NodeInfo),
+		infos:      make(map[UniqueID]*nodeInfo),
 		ProxyNodes: make(map[UniqueID]types.ProxyNode),
 	}
 }

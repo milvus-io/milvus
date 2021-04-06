@@ -2,6 +2,8 @@ package proxynode
 
 import (
 	"strconv"
+
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 )
 
 const (
@@ -103,7 +105,7 @@ func CheckStrByValues(params map[string]string, key string, container []string) 
 		return false
 	}
 
-	return SliceContain(container, value)
+	return funcutil.SliceContain(container, value)
 }
 
 type BaseConfAdapter struct {
@@ -187,7 +189,7 @@ func (adapter *IVFPQConfAdapter) checkGPUPQParams(dimension, m, nbits int) bool 
 	 */
 
 	subDim := dimension / m
-	return SliceContain(supportSubQuantizer, m) && SliceContain(supportDimPerSubQuantizer, subDim) && nbits == 8
+	return funcutil.SliceContain(supportSubQuantizer, m) && funcutil.SliceContain(supportDimPerSubQuantizer, subDim) && nbits == 8
 }
 
 func (adapter *IVFPQConfAdapter) checkCPUPQParams(dimension, m int) bool {
