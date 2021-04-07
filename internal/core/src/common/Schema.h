@@ -52,7 +52,11 @@ class Schema {
 
     // vector type
     void
-    AddField(const FieldName& name, const FieldId id, DataType data_type, int64_t dim, MetricType metric_type) {
+    AddField(const FieldName& name,
+             const FieldId id,
+             DataType data_type,
+             int64_t dim,
+             std::optional<MetricType> metric_type) {
         auto field_meta = FieldMeta(name, id, data_type, dim, metric_type);
         this->AddField(std::move(field_meta));
     }
