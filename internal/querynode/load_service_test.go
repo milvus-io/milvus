@@ -1153,7 +1153,14 @@ func TestSegmentLoad_Search_Vector(t *testing.T) {
 	indexPaths, err := generateIndex(segmentID)
 	assert.NoError(t, err)
 
-	err = node.loadService.segLoader.indexLoader.loadIndexImmediate(segment, indexPaths)
+	indexInfo := &indexInfo{
+		indexPaths: indexPaths,
+		readyLoad:  true,
+	}
+	err = segment.setIndexInfo(100, indexInfo)
+	assert.NoError(t, err)
+
+	err = node.loadService.segLoader.indexLoader.loadIndex(segment, 100)
 	assert.NoError(t, err)
 
 	// do search

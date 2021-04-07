@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"time"
 
+	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
-	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-	"google.golang.org/grpc"
 )
 
 type Timestamp = typeutil.Timestamp
@@ -25,8 +25,7 @@ type TimestampAllocator struct {
 	Allocator
 
 	masterAddress string
-	masterConn    *grpc.ClientConn
-	masterClient  masterpb.MasterServiceClient
+	masterClient  types.MasterService
 
 	countPerRPC uint32
 	lastTsBegin Timestamp
@@ -57,29 +56,20 @@ func NewTimestampAllocator(ctx context.Context, masterAddr string) (*TimestampAl
 }
 
 func (ta *TimestampAllocator) Start() error {
-	connectMasterFn := func() error {
-		return ta.connectMaster()
-	}
-	err := retry.Retry(1000, time.Millisecond*200, connectMasterFn)
+	var err error
+	ta.masterClient, err = msc.NewClient(ta.masterAddress, 20*time.Second)
 	if err != nil {
-		panic("Timestamp local allocator connect to master failed")
+		panic(err)
 	}
-	ta.Allocator.Start()
-	return nil
-}
 
-func (ta *TimestampAllocator) connectMaster() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	conn, err := grpc.DialContext(ctx, ta.masterAddress, grpc.WithInsecure(), grpc.WithBlock())
-	if err != nil {
-		log.Error("TimestampAllocator Connect to master failed", zap.Error(err))
-		return err
+	if err = ta.masterClient.Init(); err != nil {
+		panic(err)
 	}
-	log.Debug("TimestampAllocator connected to master", zap.Any("masterAddress", ta.masterAddress))
-	ta.masterConn = conn
-	ta.masterClient = masterpb.NewMasterServiceClient(conn)
-	return nil
+
+	if err = ta.masterClient.Start(); err != nil {
+		panic(err)
+	}
+	return ta.Allocator.Start()
 }
 
 func (ta *TimestampAllocator) checkSyncFunc(timeout bool) bool {

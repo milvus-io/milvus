@@ -6,12 +6,12 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 
+	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
-	"github.com/zilliztech/milvus-distributed/internal/util/retry"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
@@ -25,8 +25,7 @@ type IDAllocator struct {
 	Allocator
 
 	masterAddress string
-	masterConn    *grpc.ClientConn
-	masterClient  masterpb.MasterServiceClient
+	masterClient  types.MasterService
 
 	countPerRPC uint32
 
@@ -58,28 +57,20 @@ func NewIDAllocator(ctx context.Context, masterAddr string) (*IDAllocator, error
 }
 
 func (ia *IDAllocator) Start() error {
-	connectMasterFn := func() error {
-		return ia.connectMaster()
-	}
-	err := retry.Retry(1000, time.Millisecond*200, connectMasterFn)
+	var err error
+	ia.masterClient, err = msc.NewClient(ia.masterAddress, 20*time.Second)
 	if err != nil {
-		panic("connect to master failed")
+		panic(err)
+	}
+
+	if err = ia.masterClient.Init(); err != nil {
+		panic(err)
+	}
+
+	if err = ia.masterClient.Start(); err != nil {
+		panic(err)
 	}
 	return ia.Allocator.Start()
-}
-
-func (ia *IDAllocator) connectMaster() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	conn, err := grpc.DialContext(ctx, ia.masterAddress, grpc.WithInsecure(), grpc.WithBlock())
-	if err != nil {
-		log.Error("Connect to master failed", zap.Any("Role", ia.Role), zap.Error(err))
-		return err
-	}
-	log.Debug("Connected to master", zap.Any("Role", ia.Role), zap.Any("masterAddress", ia.masterAddress))
-	ia.masterConn = conn
-	ia.masterClient = masterpb.NewMasterServiceClient(conn)
-	return nil
 }
 
 func (ia *IDAllocator) gatherReqIDCount() uint32 {

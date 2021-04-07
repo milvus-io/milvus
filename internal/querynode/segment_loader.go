@@ -3,10 +3,14 @@ package querynode
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
+
+	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	minioKV "github.com/zilliztech/milvus-distributed/internal/kv/minio"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -121,6 +125,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, targetField
 
 		paths := p.Values
 		blobs := make([]*storage.Blob, 0)
+		log.Debug("loadSegmentFieldsData", zap.Int64("segmentID", segment.segmentID), zap.String("path", fmt.Sprintln(paths)))
 		for _, path := range paths {
 			binLog, err := loader.kv.Load(path)
 			if err != nil {

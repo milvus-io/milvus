@@ -2,6 +2,7 @@ package querynode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -9,10 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/zilliztech/milvus-distributed/internal/types"
-
-	"errors"
 
 	"go.uber.org/zap"
 
@@ -25,7 +22,10 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 )
+
+type indexParam = map[string]string
 
 type indexLoader struct {
 	replica ReplicaInterface
@@ -39,12 +39,6 @@ type indexLoader struct {
 	kv kv.Base // minio kv
 }
 
-type loadIndex struct {
-	segmentID  UniqueID
-	fieldID    int64
-	indexPaths []string
-}
-
 func (loader *indexLoader) doLoadIndex(wg *sync.WaitGroup) {
 	collectionIDs, _, segmentIDs := loader.replica.getSegmentsBySegmentType(segmentTypeSealed)
 	if len(collectionIDs) <= 0 {
@@ -54,19 +48,28 @@ func (loader *indexLoader) doLoadIndex(wg *sync.WaitGroup) {
 	log.Debug("do load index for sealed segments:", zap.String("segmentIDs", fmt.Sprintln(segmentIDs)))
 	for i := range collectionIDs {
 		// we don't need index id yet
-		_, buildID, err := loader.getIndexInfo(collectionIDs[i], segmentIDs[i])
+		segment, err := loader.replica.getSegmentByID(segmentIDs[i])
 		if err != nil {
 			log.Warn(err.Error())
 			continue
 		}
-		indexPaths, err := loader.getIndexPaths(buildID)
+		vecFieldIDs, err := loader.replica.getVecFieldIDsByCollectionID(collectionIDs[i])
 		if err != nil {
 			log.Warn(err.Error())
 			continue
 		}
-		err = loader.loadIndexDelayed(collectionIDs[i], segmentIDs[i], indexPaths)
-		if err != nil {
-			log.Warn(err.Error())
+		for _, fieldID := range vecFieldIDs {
+			err = loader.setIndexInfo(collectionIDs[i], segment, fieldID)
+			if err != nil {
+				log.Warn(err.Error())
+				continue
+			}
+
+			err = loader.loadIndex(segment, fieldID)
+			if err != nil {
+				log.Warn(err.Error())
+				continue
+			}
 		}
 	}
 	// sendQueryNodeStats
@@ -80,15 +83,15 @@ func (loader *indexLoader) doLoadIndex(wg *sync.WaitGroup) {
 	wg.Done()
 }
 
-func (loader *indexLoader) execute(l *loadIndex) error {
+func (loader *indexLoader) loadIndex(segment *Segment, fieldID int64) error {
 	// 1. use msg's index paths to get index bytes
 	var err error
 	var indexBuffer [][]byte
 	var indexParams indexParam
 	var indexName string
-	var indexID UniqueID
 	fn := func() error {
-		indexBuffer, indexParams, indexName, indexID, err = loader.loadIndex(l.indexPaths)
+		indexPaths := segment.getIndexPaths(fieldID)
+		indexBuffer, indexParams, indexName, err = loader.getIndexBinlog(indexPaths)
 		if err != nil {
 			return err
 		}
@@ -98,26 +101,31 @@ func (loader *indexLoader) execute(l *loadIndex) error {
 	if err != nil {
 		return err
 	}
-	ok, err := loader.checkIndexReady(indexParams, l)
+	err = segment.setIndexName(fieldID, indexName)
 	if err != nil {
 		return err
 	}
-	if ok {
+	err = segment.setIndexParam(fieldID, indexParams)
+	if err != nil {
+		return err
+	}
+	ok := segment.checkIndexReady(fieldID)
+	if !ok {
 		// no error
-		return errors.New("")
+		return errors.New("index info is not set correctly")
 	}
 	// 2. use index bytes and index path to update segment
-	err = loader.updateSegmentIndex(indexParams, indexBuffer, l)
+	err = segment.updateSegmentIndex(indexBuffer, fieldID)
 	if err != nil {
 		return err
 	}
 	// 3. drop vector field data if index loaded successfully
-	err = loader.dropVectorFieldData(l.segmentID, l.fieldID)
+	err = segment.dropFieldData(fieldID)
 	if err != nil {
 		return err
 	}
 	// 4. update segment index stats
-	err = loader.updateSegmentIndexStats(indexParams, indexName, indexID, l)
+	err = loader.updateSegmentIndexStats(segment)
 	if err != nil {
 		return err
 	}
@@ -168,80 +176,71 @@ func (loader *indexLoader) fieldsStatsKey2IDs(key string) (UniqueID, UniqueID, e
 	return collectionID, fieldID, nil
 }
 
-func (loader *indexLoader) updateSegmentIndexStats(indexParams indexParam, indexName string, indexID UniqueID, l *loadIndex) error {
-	targetSegment, err := loader.replica.getSegmentByID(l.segmentID)
-	if err != nil {
-		return err
-	}
-
-	fieldStatsKey := loader.fieldsStatsIDs2Key(targetSegment.collectionID, l.fieldID)
-	_, ok := loader.fieldIndexes[fieldStatsKey]
-	newIndexParams := make([]*commonpb.KeyValuePair, 0)
-	for k, v := range indexParams {
-		newIndexParams = append(newIndexParams, &commonpb.KeyValuePair{
-			Key:   k,
-			Value: v,
-		})
-	}
-
-	// sort index params by key
-	sort.Slice(newIndexParams, func(i, j int) bool { return newIndexParams[i].Key < newIndexParams[j].Key })
-	if !ok {
-		loader.fieldIndexes[fieldStatsKey] = make([]*internalpb.IndexStats, 0)
-		loader.fieldIndexes[fieldStatsKey] = append(loader.fieldIndexes[fieldStatsKey],
-			&internalpb.IndexStats{
-				IndexParams:        newIndexParams,
-				NumRelatedSegments: 1,
+func (loader *indexLoader) updateSegmentIndexStats(segment *Segment) error {
+	for fieldID := range segment.indexInfos {
+		fieldStatsKey := loader.fieldsStatsIDs2Key(segment.collectionID, fieldID)
+		_, ok := loader.fieldIndexes[fieldStatsKey]
+		newIndexParams := make([]*commonpb.KeyValuePair, 0)
+		indexParams := segment.getIndexParams(fieldID)
+		for k, v := range indexParams {
+			newIndexParams = append(newIndexParams, &commonpb.KeyValuePair{
+				Key:   k,
+				Value: v,
 			})
-	} else {
-		isNewIndex := true
-		for _, index := range loader.fieldIndexes[fieldStatsKey] {
-			if loader.indexParamsEqual(newIndexParams, index.IndexParams) {
-				index.NumRelatedSegments++
-				isNewIndex = false
-			}
 		}
-		if isNewIndex {
+
+		// sort index params by key
+		sort.Slice(newIndexParams, func(i, j int) bool { return newIndexParams[i].Key < newIndexParams[j].Key })
+		if !ok {
+			loader.fieldIndexes[fieldStatsKey] = make([]*internalpb.IndexStats, 0)
 			loader.fieldIndexes[fieldStatsKey] = append(loader.fieldIndexes[fieldStatsKey],
 				&internalpb.IndexStats{
 					IndexParams:        newIndexParams,
 					NumRelatedSegments: 1,
 				})
+		} else {
+			isNewIndex := true
+			for _, index := range loader.fieldIndexes[fieldStatsKey] {
+				if loader.indexParamsEqual(newIndexParams, index.IndexParams) {
+					index.NumRelatedSegments++
+					isNewIndex = false
+				}
+			}
+			if isNewIndex {
+				loader.fieldIndexes[fieldStatsKey] = append(loader.fieldIndexes[fieldStatsKey],
+					&internalpb.IndexStats{
+						IndexParams:        newIndexParams,
+						NumRelatedSegments: 1,
+					})
+			}
 		}
 	}
-	err = targetSegment.setIndexParam(l.fieldID, newIndexParams)
-	if err != nil {
-		return err
-	}
-	targetSegment.setIndexName(indexName)
-	targetSegment.setIndexID(indexID)
 
 	return nil
 }
 
-func (loader *indexLoader) loadIndex(indexPath []string) ([][]byte, indexParam, string, UniqueID, error) {
+func (loader *indexLoader) getIndexBinlog(indexPath []string) ([][]byte, indexParam, string, error) {
 	index := make([][]byte, 0)
 
 	var indexParams indexParam
 	var indexName string
-	var indexID UniqueID
 	for _, p := range indexPath {
 		log.Debug("", zap.String("load path", fmt.Sprintln(indexPath)))
 		indexPiece, err := loader.kv.Load(p)
 		if err != nil {
-			return nil, nil, "", -1, err
+			return nil, nil, "", err
 		}
 		// get index params when detecting indexParamPrefix
 		if path.Base(p) == storage.IndexParamsFile {
 			indexCodec := storage.NewIndexCodec()
-			_, indexParams, indexName, indexID, err = indexCodec.Deserialize([]*storage.Blob{
+			_, indexParams, indexName, _, err = indexCodec.Deserialize([]*storage.Blob{
 				{
 					Key:   storage.IndexParamsFile,
 					Value: []byte(indexPiece),
 				},
 			})
 			if err != nil {
-				return nil, nil, "", -1, err
+				return nil, nil, "", err
 			}
 		} else {
 			index = append(index, []byte(indexPiece))
@@ -249,45 +248,9 @@ func (loader *indexLoader) loadIndex(indexPath []string) ([][]byte, indexParam, 
 	}
 
 	if len(indexParams) <= 0 {
-		return nil, nil, "", -1, errors.New("cannot find index param")
+		return nil, nil, "", errors.New("cannot find index param")
 	}
-	return index, indexParams, indexName, indexID, nil
-}
-
-func (loader *indexLoader) updateSegmentIndex(indexParams indexParam, bytesIndex [][]byte, l *loadIndex) error {
-	segment, err := loader.replica.getSegmentByID(l.segmentID)
-	if err != nil {
-		return err
-	}
-
-	loadIndexInfo, err := newLoadIndexInfo()
-	defer deleteLoadIndexInfo(loadIndexInfo)
-	if err != nil {
-		return err
-	}
-	err = loadIndexInfo.appendFieldInfo(l.fieldID)
-	if err != nil {
-		return err
-	}
-	for k, v := range indexParams {
-		err = loadIndexInfo.appendIndexParam(k, v)
-		if err != nil {
-			return err
-		}
-	}
-	err = loadIndexInfo.appendIndex(bytesIndex, l.indexPaths)
-	if err != nil {
-		return err
-	}
-	return segment.updateSegmentIndex(loadIndexInfo)
-}
-
-func (loader *indexLoader) dropVectorFieldData(segmentID UniqueID, vecFieldID int64) error {
-	segment, err := loader.replica.getSegmentByID(segmentID)
-	if err != nil {
-		return err
-	}
-	return segment.dropFieldData(vecFieldID)
+	return index, indexParams, indexName, nil
 }
 
 func (loader *indexLoader) sendQueryNodeStats() error {
@@ -310,39 +273,56 @@ func (loader *indexLoader) sendQueryNodeStats() error {
 	return nil
 }
 
-func (loader *indexLoader) checkIndexReady(indexParams indexParam, l *loadIndex) (bool, error) {
-	segment, err := loader.replica.getSegmentByID(l.segmentID)
-	if err != nil {
-		return false, err
-	}
-	if !segment.matchIndexParam(l.fieldID, indexParams) {
-		return false, nil
-	}
-	return true, nil
-}
-
-func (loader *indexLoader) getIndexInfo(collectionID UniqueID, segmentID UniqueID) (UniqueID, UniqueID, error) {
+func (loader *indexLoader) setIndexInfo(collectionID UniqueID, segment *Segment, fieldID UniqueID) error {
 	ctx := context.TODO()
 	req := &milvuspb.DescribeSegmentRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_DescribeSegment,
 		},
 		CollectionID: collectionID,
-		SegmentID:    segmentID,
+		SegmentID:    segment.segmentID,
 	}
 	response, err := loader.masterService.DescribeSegment(ctx, req)
 	if err != nil {
-		return 0, 0, err
+		return err
 	}
 	if response.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return -1, -1, errors.New(response.Status.Reason)
+		return errors.New(response.Status.Reason)
 	}
 
-	loader.replica.setSegmentEnableIndex(segmentID, response.EnableIndex)
 	if !response.EnableIndex {
-		return -1, -1, errors.New("There are no indexes on this segment")
+		return errors.New("there are no indexes on this segment")
 	}
-	return response.IndexID, response.BuildID, nil
+
+	if loader.indexService == nil {
+		return errors.New("null index service client")
+	}
+
+	indexFilePathRequest := &indexpb.GetIndexFilePathsRequest{
+		IndexBuildIDs: []UniqueID{response.BuildID},
+	}
+	pathResponse, err := loader.indexService.GetIndexFilePaths(ctx, indexFilePathRequest)
+	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return err
+	}
+
+	if len(pathResponse.FilePaths) <= 0 {
+		return errors.New("illegal index file paths")
+	}
+
+	info := &indexInfo{
+		indexID:    response.IndexID,
+		buildID:    response.BuildID,
+		indexPaths: pathResponse.FilePaths[0].IndexFilePaths,
+		readyLoad:  true,
+	}
+	segment.setEnableIndex(response.EnableIndex)
+	err = segment.setIndexInfo(fieldID, info)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (loader *indexLoader) getIndexPaths(indexBuildID UniqueID) ([]string, error) {
@@ -364,49 +344,6 @@ func (loader *indexLoader) getIndexPaths(indexBuildID UniqueID) ([]string, error
 	}
 
 	return pathResponse.FilePaths[0].IndexFilePaths, nil
-}
-
-func (loader *indexLoader) loadIndexImmediate(segment *Segment, indexPaths []string) error {
-	// get vector field ids from schema to load index
-	vecFieldIDs, err := loader.replica.getVecFieldIDsByCollectionID(segment.collectionID)
-	if err != nil {
-		return err
-	}
-	for _, id := range vecFieldIDs {
-		l := &loadIndex{
-			segmentID:  segment.ID(),
-			fieldID:    id,
-			indexPaths: indexPaths,
-		}
-
-		err = loader.execute(l)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (loader *indexLoader) loadIndexDelayed(collectionID, segmentID UniqueID, indexPaths []string) error {
-	// get vector field ids from schema to load index
-	vecFieldIDs, err := loader.replica.getVecFieldIDsByCollectionID(collectionID)
-	if err != nil {
-		return err
-	}
-	for _, id := range vecFieldIDs {
-		l := &loadIndex{
-			segmentID:  segmentID,
-			fieldID:    id,
-			indexPaths: indexPaths,
-		}
-
-		err = loader.execute(l)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 func newIndexLoader(ctx context.Context, masterService types.MasterService, indexService types.IndexService, replica ReplicaInterface) *indexLoader {
