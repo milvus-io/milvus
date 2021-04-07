@@ -180,11 +180,11 @@ SegmentWriter::WriteBloomFilter() {
 
         TimeRecorder recorder("SegmentWriter::WriteBloomFilter");
 
-        default_codec.GetIdBloomFilterFormat()->create(fs_ptr_, segment_ptr_->id_bloom_filter_ptr_);
+        auto& uids = segment_ptr_->vectors_ptr_->GetUids();
+        default_codec.GetIdBloomFilterFormat()->create(uids.size(), segment_ptr_->id_bloom_filter_ptr_);
 
         recorder.RecordSection("Initializing bloom filter");
 
-        auto& uids = segment_ptr_->vectors_ptr_->GetUids();
         for (auto& uid : uids) {
             segment_ptr_->id_bloom_filter_ptr_->Add(uid);
         }
