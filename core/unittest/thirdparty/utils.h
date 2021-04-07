@@ -22,8 +22,6 @@
 #define CAPACITY 1000000
 #define ERROR_RATE .05
 
-static const char* bloom_file = "/tmp/bloom_file.bin";
-
 struct stats {
     int true_positives;
     int true_negatives;
