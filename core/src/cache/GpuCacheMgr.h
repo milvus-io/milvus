@@ -23,6 +23,10 @@ namespace milvus {
 namespace cache {
 
 #ifdef MILVUS_GPU_VERSION
+
+// Define cache key suffix
+extern const char* Quantizer_Suffix;
+
 class GpuCacheMgr;
 using GpuCacheMgrPtr = std::shared_ptr<GpuCacheMgr>;
 using MutexPtr = std::shared_ptr<std::mutex>;

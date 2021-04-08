@@ -260,7 +260,7 @@ ExecutionEngineImpl::HybridLoad() const {
         return;
     }
 
-    const std::string key = location_ + ".quantizer";
+    const std::string key = location_ + cache::Quantizer_Suffix;
 
     server::Config& config = server::Config::GetInstance();
     std::vector<int64_t> gpus;

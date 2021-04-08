@@ -21,6 +21,8 @@ namespace milvus {
 namespace cache {
 
 #ifdef MILVUS_GPU_VERSION
+const char* Quantizer_Suffix = ".quantizer";
+
 std::mutex GpuCacheMgr::global_mutex_;
 std::unordered_map<int64_t, GpuCacheMgrPtr> GpuCacheMgr::instance_;
 
