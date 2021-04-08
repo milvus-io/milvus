@@ -71,7 +71,7 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 
 		collID := insertRequest.CollectionID
 		if _, ok := channelNamesMap[collID]; !ok {
-			channelNames, err := globalInsertChannelsMap.getInsertChannels(collID)
+			channelNames, err := globalInsertChannelsMap.GetInsertChannels(collID)
 			if err != nil {
 				return nil, err
 			}
