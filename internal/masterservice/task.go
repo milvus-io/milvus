@@ -2,7 +2,6 @@ package masterservice
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/golang/protobuf/proto"
@@ -39,12 +38,12 @@ func (bt *baseReqTask) Notify(err error) {
 func (bt *baseReqTask) WaitToFinish() error {
 	select {
 	case <-bt.core.ctx.Done():
-		return errors.New("context done")
+		return fmt.Errorf("core context done, %s", bt.core.ctx.Err().Error())
 	case <-bt.ctx.Done():
-		return errors.New("grpc context done")
+		return fmt.Errorf("request context done, %s", bt.ctx.Err().Error())
 	case err, ok := <-bt.cv:
 		if !ok {
-			return errors.New("notify chan closed")
+			return fmt.Errorf("notify chan closed")
 		}
 		return err
 	}
@@ -72,6 +71,9 @@ func (t *CreateCollectionReqTask) IgnoreTimeStamp() bool {
 }
 
 func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_CreateCollection {
+		return fmt.Errorf("create collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
 	var schema schemapb.CollectionSchema
 	err := proto.Unmarshal(t.Req.Schema, &schema)
 	if err != nil {
@@ -217,6 +219,10 @@ func (t *DropCollectionReqTask) IgnoreTimeStamp() bool {
 }
 
 func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_DropCollection {
+		return fmt.Errorf("drop collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
+
 	collMeta, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
 	if err != nil {
 		return err
@@ -277,7 +283,10 @@ func (t *HasCollectionReqTask) IgnoreTimeStamp() bool {
 	return true
 }
 
-func (t *HasCollectionReqTask) Execute(context.Context) error {
+func (t *HasCollectionReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_HasCollection {
+		return fmt.Errorf("has collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
 	_, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
 	if err == nil {
 		t.HasCollection = true
@@ -310,6 +319,9 @@ func (t *DescribeCollectionReqTask) IgnoreTimeStamp() bool {
 }
 
 func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_DescribeCollection {
+		return fmt.Errorf("describe collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
 	var coll *etcdpb.CollectionInfo
 	var err error
 
@@ -359,7 +371,10 @@ func (t *ShowCollectionReqTask) IgnoreTimeStamp() bool {
 	return true
 }
 
-func (t *ShowCollectionReqTask) Execute(context.Context) error {
+func (t *ShowCollectionReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_ShowCollections {
+		return fmt.Errorf("show collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
 	coll, err := t.core.MetaTable.ListCollections()
 	if err != nil {
 		return err
@@ -390,6 +405,9 @@ func (t *CreatePartitionReqTask) IgnoreTimeStamp() bool {
 }
 
 func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_CreatePartition {
+		return fmt.Errorf("create partition, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
 	collMeta, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
 	if err != nil {
 		return err
@@ -446,6 +464,9 @@ func (t *DropPartitionReqTask) IgnoreTimeStamp() bool {
 }
 
 func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_DropPartition {
+		return fmt.Errorf("drop partition, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
 	coll, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
 	if err != nil {
 		return err
@@ -497,7 +518,10 @@ func (t *HasPartitionReqTask) IgnoreTimeStamp() bool {
 	return true
 }
 
-func (t *HasPartitionReqTask) Execute(context.Context) error {
+func (t *HasPartitionReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_HasPartition {
+		return fmt.Errorf("has partition, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
 	coll, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
 	if err != nil {
 		return err
@@ -528,7 +552,10 @@ func (t *ShowPartitionReqTask) IgnoreTimeStamp() bool {
 	return true
 }
 
-func (t *ShowPartitionReqTask) Execute(context.Context) error {
+func (t *ShowPartitionReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_ShowPartitions {
+		return fmt.Errorf("show partition, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
 	var coll *etcdpb.CollectionInfo
 	var err error
 	if t.Req.CollectionName == "" {
@@ -572,7 +599,10 @@ func (t *DescribeSegmentReqTask) IgnoreTimeStamp() bool {
 	return true
 }
 
-func (t *DescribeSegmentReqTask) Execute(context.Context) error {
+func (t *DescribeSegmentReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_DescribeSegment {
+		return fmt.Errorf("describe segment, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
 	coll, err := t.core.MetaTable.GetCollectionByID(t.Req.CollectionID)
 	if err != nil {
 		return err
@@ -629,7 +659,10 @@ func (t *ShowSegmentReqTask) IgnoreTimeStamp() bool {
 	return true
 }
 
-func (t *ShowSegmentReqTask) Execute(context.Context) error {
+func (t *ShowSegmentReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_ShowSegments {
+		return fmt.Errorf("show segments, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
 	coll, err := t.core.MetaTable.GetCollectionByID(t.Req.CollectionID)
 	if err != nil {
 		return err
@@ -674,6 +707,9 @@ func (t *CreateIndexReqTask) IgnoreTimeStamp() bool {
 }
 
 func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_CreateIndex {
+		return fmt.Errorf("create index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
 	indexName := Params.DefaultIndexName //TODO, get name from request
 	indexID, err := t.core.idAllocator.AllocOne()
 	if err != nil {
@@ -730,7 +766,10 @@ func (t *DescribeIndexReqTask) IgnoreTimeStamp() bool {
 	return true
 }
 
-func (t *DescribeIndexReqTask) Execute(context.Context) error {
+func (t *DescribeIndexReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_DescribeIndex {
+		return fmt.Errorf("describe index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
 	idx, err := t.core.MetaTable.GetIndexByName(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
 	if err != nil {
 		return err
@@ -768,6 +807,9 @@ func (t *DropIndexReqTask) IgnoreTimeStamp() bool {
 }
 
 func (t *DropIndexReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_DropIndex {
+		return fmt.Errorf("drop index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
 	info, err := t.core.MetaTable.GetIndexByName(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
 	if err != nil {
 		log.Warn("GetIndexByName failed,", zap.String("collection name", t.Req.CollectionName), zap.String("field name", t.Req.FieldName), zap.String("index name", t.Req.IndexName), zap.Error(err))
@@ -814,16 +856,6 @@ func (t *CreateIndexTask) BuildIndex() error {
 		binlogs, err := t.core.GetBinlogFilePathsFromDataServiceReq(t.segmentID, t.fieldSchema.FieldID)
 		if err != nil {
 			return err
-		}
-
-		if len(t.indexParams) == 0 {
-			t.indexParams = make([]*commonpb.KeyValuePair, 0, len(t.fieldSchema.IndexParams))
-			for _, p := range t.fieldSchema.IndexParams {
-				t.indexParams = append(t.indexParams, &commonpb.KeyValuePair{
-					Key:   p.Key,
-					Value: p.Value,
-				})
-			}
 		}
 		bldID, err = t.core.BuildIndexReq(t.ctx, binlogs, t.fieldSchema.TypeParams, t.indexParams, t.indexID, t.indexName)
 		if err != nil {

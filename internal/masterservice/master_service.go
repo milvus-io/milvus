@@ -2,7 +2,6 @@ package masterservice
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -147,67 +146,67 @@ func (c *Core) UpdateStateCode(code internalpb.StateCode) {
 
 func (c *Core) checkInit() error {
 	if c.MetaTable == nil {
-		return errors.New("MetaTable is nil")
+		return fmt.Errorf("MetaTable is nil")
 	}
 	if c.idAllocator == nil {
-		return errors.New("idAllocator is nil")
+		return fmt.Errorf("idAllocator is nil")
 	}
 	if c.tsoAllocator == nil {
-		return errors.New("tsoAllocator is nil")
+		return fmt.Errorf("tsoAllocator is nil")
 	}
 	if c.etcdCli == nil {
-		return errors.New("etcdCli is nil")
+		return fmt.Errorf("etcdCli is nil")
 	}
 	if c.metaKV == nil {
-		return errors.New("metaKV is nil")
+		return fmt.Errorf("metaKV is nil")
 	}
 	if c.kvBase == nil {
-		return errors.New("kvBase is nil")
+		return fmt.Errorf("kvBase is nil")
 	}
 	if c.ProxyTimeTickChan == nil {
-		return errors.New("ProxyTimeTickChan is nil")
+		return fmt.Errorf("ProxyTimeTickChan is nil")
 	}
 	if c.ddReqQueue == nil {
-		return errors.New("ddReqQueue is nil")
+		return fmt.Errorf("ddReqQueue is nil")
 	}
 	if c.DdCreateCollectionReq == nil {
-		return errors.New("DdCreateCollectionReq is nil")
+		return fmt.Errorf("DdCreateCollectionReq is nil")
 	}
 	if c.DdDropCollectionReq == nil {
-		return errors.New("DdDropCollectionReq is nil")
+		return fmt.Errorf("DdDropCollectionReq is nil")
 	}
 	if c.DdCreatePartitionReq == nil {
-		return errors.New("DdCreatePartitionReq is nil")
+		return fmt.Errorf("DdCreatePartitionReq is nil")
 	}
 	if c.DdDropPartitionReq == nil {
-		return errors.New("DdDropPartitionReq is nil")
+		return fmt.Errorf("DdDropPartitionReq is nil")
 	}
 	if c.DataServiceSegmentChan == nil {
-		return errors.New("DataServiceSegmentChan is nil")
+		return fmt.Errorf("DataServiceSegmentChan is nil")
 	}
 	if c.GetBinlogFilePathsFromDataServiceReq == nil {
-		return errors.New("GetBinlogFilePathsFromDataServiceReq is nil")
+		return fmt.Errorf("GetBinlogFilePathsFromDataServiceReq is nil")
 	}
 	if c.GetNumRowsReq == nil {
-		return errors.New("GetNumRowsReq is nil")
+		return fmt.Errorf("GetNumRowsReq is nil")
 	}
 	if c.BuildIndexReq == nil {
-		return errors.New("BuildIndexReq is nil")
+		return fmt.Errorf("BuildIndexReq is nil")
 	}
 	if c.DropIndexReq == nil {
-		return errors.New("DropIndexReq is nil")
+		return fmt.Errorf("DropIndexReq is nil")
 	}
 	if c.InvalidateCollectionMetaCache == nil {
-		return errors.New("InvalidateCollectionMetaCache is nil")
+		return fmt.Errorf("InvalidateCollectionMetaCache is nil")
 	}
 	if c.indexTaskQueue == nil {
-		return errors.New("indexTaskQueue is nil")
+		return fmt.Errorf("indexTaskQueue is nil")
 	}
 	if c.DataNodeSegmentFlushCompletedChan == nil {
-		return errors.New("DataNodeSegmentFlushCompletedChan is nil")
+		return fmt.Errorf("DataNodeSegmentFlushCompletedChan is nil")
 	}
 	if c.ReleaseCollection == nil {
-		return errors.New("ReleaseCollection is nil")
+		return fmt.Errorf("ReleaseCollection is nil")
 	}
 
 	log.Debug("master", zap.Int64("node id", int64(Params.NodeID)))
@@ -383,15 +382,15 @@ func (c *Core) tsLoop() {
 }
 func (c *Core) setMsgStreams() error {
 	if Params.PulsarAddress == "" {
-		return errors.New("PulsarAddress is empty")
+		return fmt.Errorf("PulsarAddress is empty")
 	}
 	if Params.MsgChannelSubName == "" {
-		return errors.New("MsgChannelSubName is emptyr")
+		return fmt.Errorf("MsgChannelSubName is emptyr")
 	}
 
 	//proxy time tick stream,
 	if Params.ProxyTimeTickChannel == "" {
-		return errors.New("ProxyTimeTickChannel is empty")
+		return fmt.Errorf("ProxyTimeTickChannel is empty")
 	}
 
 	var err error
@@ -411,7 +410,7 @@ func (c *Core) setMsgStreams() error {
 
 	// master time tick channel
 	if Params.TimeTickChannel == "" {
-		return errors.New("TimeTickChannel is empty")
+		return fmt.Errorf("TimeTickChannel is empty")
 	}
 	timeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
 	timeTickStream.AsProducer([]string{Params.TimeTickChannel})
@@ -419,7 +418,7 @@ func (c *Core) setMsgStreams() error {
 
 	// master dd channel
 	if Params.DdChannel == "" {
-		return errors.New("DdChannel is empty")
+		return fmt.Errorf("DdChannel is empty")
 	}
 	ddStream, _ := c.msFactory.NewMsgStream(c.ctx)
 	ddStream.AsProducer([]string{Params.DdChannel})
@@ -557,7 +556,7 @@ func (c *Core) setMsgStreams() error {
 
 	//segment channel, data service create segment,or data node flush segment will put msg in this channel
 	if Params.DataServiceSegmentChannel == "" {
-		return errors.New("DataServiceSegmentChannel is empty")
+		return fmt.Errorf("DataServiceSegmentChannel is empty")
 	}
 	dataServiceStream, _ := c.msFactory.NewMsgStream(c.ctx)
 	dataServiceStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, Params.MsgChannelSubName)
@@ -618,10 +617,10 @@ func (c *Core) SetProxyService(ctx context.Context, s types.ProxyService) error 
 			CollectionName: collectionName,
 		})
 		if status == nil {
-			return errors.New("invalidate collection metacache resp is nil")
+			return fmt.Errorf("invalidate collection metacache resp is nil")
 		}
 		if status.ErrorCode != commonpb.ErrorCode_Success {
-			return errors.New(status.Reason)
+			return fmt.Errorf(status.Reason)
 		}
 		return nil
 	}
@@ -723,7 +722,7 @@ func (c *Core) SetIndexService(s types.IndexService) error {
 			return err
 		}
 		if rsp.ErrorCode != commonpb.ErrorCode_Success {
-			return errors.New(rsp.Reason)
+			return fmt.Errorf(rsp.Reason)
 		}
 		return nil
 	}
@@ -883,7 +882,7 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 	t := &CreateCollectionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error),
+			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
@@ -916,7 +915,7 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 	t := &DropCollectionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error),
+			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
@@ -952,7 +951,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	t := &HasCollectionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error),
+			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req:           in,
@@ -996,7 +995,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 	t := &DescribeCollectionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error),
+			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
@@ -1037,7 +1036,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	t := &ShowCollectionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error),
+			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
@@ -1077,7 +1076,7 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 	t := &CreatePartitionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error),
+			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
@@ -1110,7 +1109,7 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 	t := &DropPartitionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error),
+			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
@@ -1146,7 +1145,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 	t := &HasPartitionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error),
+			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req:          in,
@@ -1193,7 +1192,7 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 	t := &ShowPartitionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error),
+			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
@@ -1236,7 +1235,7 @@ func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest)
 	t := &CreateIndexReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error),
+			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
@@ -1272,7 +1271,7 @@ func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequ
 	t := &DescribeIndexReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error),
+			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
@@ -1324,7 +1323,7 @@ func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*c
 	t := &DropIndexReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error),
+			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
@@ -1360,7 +1359,7 @@ func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegment
 	t := &DescribeSegmentReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error),
+			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
@@ -1404,7 +1403,7 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 	t := &ShowSegmentReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error),
+			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
