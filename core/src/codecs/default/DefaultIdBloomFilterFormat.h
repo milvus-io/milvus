@@ -37,7 +37,7 @@ class DefaultIdBloomFilterFormat : public IdBloomFilterFormat {
     write(const storage::FSHandlerPtr& fs_ptr, const segment::IdBloomFilterPtr& id_bloom_filter_ptr) override;
 
     void
-    create(const storage::FSHandlerPtr& fs_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) override;
+    create(int64_t capacity, segment::IdBloomFilterPtr& id_bloom_filter_ptr) override;
 
     // No copy and move
     DefaultIdBloomFilterFormat(const DefaultIdBloomFilterFormat&) = delete;

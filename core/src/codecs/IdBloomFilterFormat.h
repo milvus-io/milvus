@@ -34,7 +34,7 @@ class IdBloomFilterFormat {
     write(const storage::FSHandlerPtr& fs_ptr, const segment::IdBloomFilterPtr& id_bloom_filter_ptr) = 0;
 
     virtual void
-    create(const storage::FSHandlerPtr& fs_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) = 0;
+    create(int64_t capacity, segment::IdBloomFilterPtr& id_bloom_filter_ptr) = 0;
 };
 
 using IdBloomFilterFormatPtr = std::shared_ptr<IdBloomFilterFormat>;

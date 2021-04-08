@@ -54,7 +54,6 @@ IdBloomFilter::Add(doc_id_t uid) {
     if (scaling_bloom_add(bloom_filter_, s.c_str(), s.size(), uid) == -1) {
         // Counter overflow does not affect bloom filter's normal functionality
         LOG_ENGINE_WARNING_ << "Warning adding id=" << s << " to bloom filter: 4 bit counter Overflow";
-        // return Status(DB_BLOOM_FILTER_ERROR, "Bloom filter error: 4 bit counter Overflow");
     }
     return Status::OK();
 }
@@ -66,7 +65,6 @@ IdBloomFilter::Remove(doc_id_t uid) {
     if (scaling_bloom_remove(bloom_filter_, s.c_str(), s.size(), uid) == -1) {
         // Should never go in here, but just to be safe
         LOG_ENGINE_WARNING_ << "Warning removing id=" << s << " in bloom filter: Decrementing zero in counter";
-        // return Status(DB_BLOOM_FILTER_ERROR, "Error removing in bloom filter: Decrementing zero in counter");
     }
     return Status::OK();
 }
