@@ -67,6 +67,8 @@ cwrapper_build
 **/.lint
 typescript
 **/.pytest_cache/
+.root
+gtags.conf
 
 # Delve generated file
 **/__debug_bin
