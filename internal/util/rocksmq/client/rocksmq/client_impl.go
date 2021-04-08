@@ -2,6 +2,7 @@ package rocksmq
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	server "github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
@@ -37,6 +38,9 @@ func (c *client) CreateProducer(options ProducerOptions) (Producer, error) {
 		return nil, err
 	}
 
+	if reflect.ValueOf(c.server).IsNil() {
+		return nil, newError(0, "rmq server is nil")
+	}
 	// Create a topic in rocksmq, ignore if topic exists
 	err = c.server.CreateTopic(options.Topic)
 	if err != nil {
@@ -49,13 +53,9 @@ func (c *client) CreateProducer(options ProducerOptions) (Producer, error) {
 
 func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 	// Create a consumer
-	//for _, con := range c.consumers {
-	//	log.Debug(con.Topic() + "---------------" + con.Subscription())
-	//	if con.Topic() == options.Topic && con.Subscription() == options.SubscriptionName {
-	//		log.Debug("consumer existed")
-	//		return con, nil
-	//	}
-	//}
+	if reflect.ValueOf(c.server).IsNil() {
+		return nil, newError(0, "rmq server is nil")
+	}
 	if exist, con := c.server.ExistConsumerGroup(options.Topic, options.SubscriptionName); exist {
 		log.Debug("EXISTED")
 		consumer, err := newConsumer1(c, options, con.MsgMutex)

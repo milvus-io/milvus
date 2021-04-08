@@ -12,33 +12,33 @@ func TestClient(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-//func TestCreateProducer(t *testing.T) {
-//	client, err := NewClient(ClientOptions{
-//		Server: newMockRocksMQ(),
-//	})
-//	assert.NoError(t, err)
-//
-//	producer, err := client.CreateProducer(ProducerOptions{
-//		Topic: newTopicName(),
-//	})
-//	assert.NoError(t, err)
-//	assert.NotNil(t, producer)
-//
-//	client.Close()
-//}
-//
-//func TestSubscribe(t *testing.T) {
-//	client, err := NewClient(ClientOptions{
-//		Server: newMockRocksMQ(),
-//	})
-//	assert.NoError(t, err)
-//
-//	consumer, err := client.Subscribe(ConsumerOptions{
-//		Topic:            newTopicName(),
-//		SubscriptionName: newConsumerName(),
-//	})
-//	assert.NoError(t, err)
-//	assert.NotNil(t, consumer)
-//
-//	client.Close()
-//}
+func TestCreateProducer(t *testing.T) {
+	client, err := NewClient(ClientOptions{
+		Server: newMockRocksMQ(),
+	})
+	assert.NoError(t, err)
+
+	producer, err := client.CreateProducer(ProducerOptions{
+		Topic: newTopicName(),
+	})
+	assert.Error(t, err)
+	assert.Nil(t, producer)
+
+	client.Close()
+}
+
+func TestSubscribe(t *testing.T) {
+	client, err := NewClient(ClientOptions{
+		Server: newMockRocksMQ(),
+	})
+	assert.NoError(t, err)
+
+	consumer, err := client.Subscribe(ConsumerOptions{
+		Topic:            newTopicName(),
+		SubscriptionName: newConsumerName(),
+	})
+	assert.Error(t, err)
+	assert.Nil(t, consumer)
+
+	client.Close()
+}
