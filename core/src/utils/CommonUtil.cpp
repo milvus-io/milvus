@@ -271,7 +271,9 @@ CommonUtil::EraseFromCache(const std::string& item_key) {
     std::vector<int64_t> gpus;
     config.GetGpuResourceConfigSearchResources(gpus);
     for (auto& gpu : gpus) {
-        cache::GpuCacheMgr::GetInstance(gpu)->EraseItem(item_key);
+        // Only quantizer is cached in GPU now.
+        std::string key = item_key + cache::Quantizer_Suffix;
+        cache::GpuCacheMgr::GetInstance(gpu)->EraseItem(key);
     }
 #endif
 }

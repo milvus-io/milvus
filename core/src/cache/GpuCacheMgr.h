@@ -23,6 +23,10 @@ namespace milvus {
 namespace cache {
 
 #ifdef MILVUS_GPU_VERSION
+
+// Define cache key suffix
+extern const char* Quantizer_Suffix;
+
 class GpuCacheMgr;
 using GpuCacheMgrPtr = std::shared_ptr<GpuCacheMgr>;
 using MutexPtr = std::shared_ptr<std::mutex>;
@@ -32,9 +36,6 @@ class GpuCacheMgr : public CacheMgr<DataObjPtr>, public server::GpuResourceConfi
     explicit GpuCacheMgr(int64_t gpu_id);
 
     ~GpuCacheMgr();
-
-    DataObjPtr
-    GetIndex(const std::string& key);
 
     void
     InsertItem(const std::string& key, const DataObjPtr& data);

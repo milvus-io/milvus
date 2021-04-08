@@ -274,7 +274,7 @@ MemTable::ApplyDeletes() {
         std::vector<faiss::ConcurrentBitsetPtr> blacklists;
         milvus::engine::meta::SegmentsSchema& segment_files = segment_holder.HoldFiles();
         for (auto& segment_file : segment_files) {
-            auto data_obj_ptr = cache::CpuCacheMgr::GetInstance()->GetIndex(segment_file.location_);
+            auto data_obj_ptr = cache::CpuCacheMgr::GetInstance()->GetItem(segment_file.location_);
             auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
             if (index != nullptr) {
                 faiss::ConcurrentBitsetPtr blacklist = index->GetBlacklist();

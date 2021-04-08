@@ -562,7 +562,7 @@ DBImpl::ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::v
         std::string segment_dir;
         utils::GetParentPath(file.location_, segment_dir);
 
-        auto data_obj_ptr = cache::CpuCacheMgr::GetInstance()->GetIndex(file.location_);
+        auto data_obj_ptr = cache::CpuCacheMgr::GetInstance()->GetItem(file.location_);
         auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
         if (nullptr == index) {
             LOG_ENGINE_WARNING_ << "Index " << file.location_ << " not found";

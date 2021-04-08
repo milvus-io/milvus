@@ -46,12 +46,6 @@ CpuCacheMgr::GetInstance() {
     return &s_mgr;
 }
 
-DataObjPtr
-CpuCacheMgr::GetIndex(const std::string& key) {
-    DataObjPtr obj = GetItem(key);
-    return obj;
-}
-
 void
 CpuCacheMgr::OnCpuCacheCapacityChanged(int64_t value) {
     SetCapacity(value);

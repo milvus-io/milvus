@@ -30,9 +30,6 @@ class CpuCacheMgr : public CacheMgr<DataObjPtr>, public server::CacheConfigHandl
     static CpuCacheMgr*
     GetInstance();
 
-    DataObjPtr
-    GetIndex(const std::string& key);
-
  protected:
     void
     OnCpuCacheCapacityChanged(int64_t value) override;

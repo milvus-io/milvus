@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#ifdef MILVUS_FPGA_VERSION
 #pragma once
 
 #include <memory>
@@ -30,9 +31,6 @@ class FpgaCacheMgr : public CacheMgr<DataObjPtr>, public server::CacheConfigHand
     static FpgaCacheMgr*
     GetInstance();
 
-    DataObjPtr
-    GetIndex(const std::string& key);
-
  protected:
     void
     OnCpuCacheCapacityChanged(int64_t value) override;
@@ -40,3 +38,4 @@ class FpgaCacheMgr : public CacheMgr<DataObjPtr>, public server::CacheConfigHand
 
 }  // namespace cache
 }  // namespace milvus
+#endif

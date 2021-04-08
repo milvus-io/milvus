@@ -6,6 +6,8 @@ Please mark all change in change log and use the issue from GitHub
 ## Bug
 -   \#4858 Fix the crash when query for a large topk on GPU Flat
 -   \#4862 The inserted data number increase automatically without any operations
+-   \#4894 The capacity of bloom filter should be determined by the row count of its segment
+-   \#4908 GPU cache will not be cleaned up in time after the collection is dropped
 
 ## Feature
 -   \#1434 Storage: enabling s3 storage support (implemented by Unisinsight)
