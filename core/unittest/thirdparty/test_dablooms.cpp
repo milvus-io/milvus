@@ -139,7 +139,10 @@ TEST_F(DabloomsTest, FILE_OPT_TEST) {
 
     free_scaling_bloom(bloom_copy);
 
-    print_results(&results2);
+    ASSERT_EQ(results1.false_negatives, results2.false_negatives);
+    ASSERT_EQ(results1.false_positives, results2.false_positives);
+    ASSERT_EQ(results1.true_negatives, results2.true_negatives);
+    ASSERT_EQ(results1.true_positives, results2.true_positives);
 }
 
 TEST_F(DabloomsTest, CNT_LARGER_THAN_CAP) {
@@ -204,5 +207,8 @@ TEST_F(DabloomsTest, CNT_LARGER_THAN_CAP) {
 
     free_scaling_bloom(bloom_copy);
 
-    print_results(&results2);
+    ASSERT_EQ(results1.false_negatives, results2.false_negatives);
+    ASSERT_EQ(results1.false_positives, results2.false_positives);
+    ASSERT_EQ(results1.true_negatives, results2.true_negatives);
+    ASSERT_EQ(results1.true_positives, results2.true_positives);
 }
