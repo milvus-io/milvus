@@ -85,29 +85,6 @@ type ConfAdapter interface {
 	CheckTrain(map[string]string) bool
 }
 
-func CheckIntByRange(params map[string]string, key string, min, max int) bool {
-	valueStr, ok := params[key]
-	if !ok {
-		return false
-	}
-
-	value, err := strconv.Atoi(valueStr)
-	if err != nil {
-		return false
-	}
-
-	return value >= min && value <= max
-}
-
-func CheckStrByValues(params map[string]string, key string, container []string) bool {
-	value, ok := params[key]
-	if !ok {
-		return false
-	}
-
-	return funcutil.SliceContain(container, value)
-}
-
 type BaseConfAdapter struct {
 }
 
@@ -352,7 +329,11 @@ func (adapter *RHNSWPQConfAdapter) CheckTrain(params map[string]string) bool {
 		return false
 	}
 
-	if !CheckIntByRange(params, EFConstruction, HNSWMinM, HNSWMaxM) {
+	if !CheckIntByRange(params, EFConstruction, HNSWMinEfConstruction, HNSWMaxEfConstruction) {
+		return false
+	}
+
+	if !CheckIntByRange(params, HNSWM, HNSWMinM, HNSWMaxM) {
 		return false
 	}
 

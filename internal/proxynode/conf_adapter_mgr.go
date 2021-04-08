@@ -11,7 +11,7 @@ type ConfAdapterMgr interface {
 
 type ConfAdapterMgrImpl struct {
 	init     bool
-	adapters map[string]ConfAdapter
+	adapters map[IndexType]ConfAdapter
 }
 
 func (mgr *ConfAdapterMgrImpl) GetAdapter(indexType string) (ConfAdapter, error) {
@@ -29,25 +29,28 @@ func (mgr *ConfAdapterMgrImpl) GetAdapter(indexType string) (ConfAdapter, error)
 func (mgr *ConfAdapterMgrImpl) registerConfAdapter() {
 	mgr.init = true
 
-	mgr.adapters[IndexFaissIdmap] = newBaseConfAdapter()
-	mgr.adapters[IndexFaissIvfflat] = newIVFConfAdapter()
-	mgr.adapters[IndexFaissIvfpq] = newIVFPQConfAdapter()
-	mgr.adapters[IndexFaissIvfsq8] = newIVFSQConfAdapter()
-	mgr.adapters[IndexFaissIvfsq8h] = newIVFSQConfAdapter()
-	mgr.adapters[IndexFaissBinIdmap] = newBinIDMAPConfAdapter()
-	mgr.adapters[IndexFaissBinIvfflat] = newBinIVFConfAdapter()
-	mgr.adapters[IndexNsg] = newNSGConfAdapter()
-	mgr.adapters[IndexHnsw] = newHNSWConfAdapter()
-	mgr.adapters[IndexAnnoy] = newANNOYConfAdapter()
-	mgr.adapters[IndexRhnswflat] = newRHNSWFlatConfAdapter()
-	mgr.adapters[IndexRhnswpq] = newRHNSWPQConfAdapter()
-	mgr.adapters[IndexRhnswsq] = newRHNSWSQConfAdapter()
-	mgr.adapters[IndexNgtpanng] = newNGTPANNGConfAdapter()
-	mgr.adapters[IndexNgtonng] = newNGTONNGConfAdapter()
+	mgr.adapters[IndexFaissIDMap] = newBaseConfAdapter()
+	mgr.adapters[IndexFaissIvfFlat] = newIVFConfAdapter()
+	mgr.adapters[IndexFaissIvfPQ] = newIVFPQConfAdapter()
+	mgr.adapters[IndexFaissIvfSQ8] = newIVFSQConfAdapter()
+	mgr.adapters[IndexFaissIvfSQ8H] = newIVFSQConfAdapter()
+	mgr.adapters[IndexFaissBinIDMap] = newBinIDMAPConfAdapter()
+	mgr.adapters[IndexFaissBinIvfFlat] = newBinIVFConfAdapter()
+	mgr.adapters[IndexNSG] = newNSGConfAdapter()
+	mgr.adapters[IndexHNSW] = newHNSWConfAdapter()
+	mgr.adapters[IndexANNOY] = newANNOYConfAdapter()
+	mgr.adapters[IndexRHNSWFlat] = newRHNSWFlatConfAdapter()
+	mgr.adapters[IndexRHNSWPQ] = newRHNSWPQConfAdapter()
+	mgr.adapters[IndexRHNSWSQ] = newRHNSWSQConfAdapter()
+	mgr.adapters[IndexNGTPANNG] = newNGTPANNGConfAdapter()
+	mgr.adapters[IndexNGTONNG] = newNGTONNGConfAdapter()
 }
 
 func newConfAdapterMgrImpl() *ConfAdapterMgrImpl {
-	return &ConfAdapterMgrImpl{}
+	return &ConfAdapterMgrImpl{
+		init:     false,
+		adapters: make(map[IndexType]ConfAdapter),
+	}
 }
 
 var confAdapterMgr ConfAdapterMgr

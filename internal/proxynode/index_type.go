@@ -1,19 +1,21 @@
 package proxynode
 
+type IndexType = string
+
 const (
-	IndexFaissIdmap      = "FLAT"
-	IndexFaissIvfflat    = "IVF_FLAT"
-	IndexFaissIvfpq      = "IVF_PQ"
-	IndexFaissIvfsq8     = "IVF_SQ8"
-	IndexFaissIvfsq8h    = "IVF_SQ8_HYBRID"
-	IndexFaissBinIdmap   = "BIN_FLAT"
-	IndexFaissBinIvfflat = "BIN_IVF_FLAT"
-	IndexNsg             = "NSG"
-	IndexHnsw            = "HNSW"
-	IndexRhnswflat       = "RHNSW_FLAT"
-	IndexRhnswpq         = "RHNSW_PQ"
-	IndexRhnswsq         = "RHNSW_SQ"
-	IndexAnnoy           = "ANNOY"
-	IndexNgtpanng        = "NGT_PANNG"
-	IndexNgtonng         = "NGT_ONNG"
+	IndexFaissIDMap      = "FLAT"
+	IndexFaissIvfFlat    = "IVF_FLAT"
+	IndexFaissIvfPQ      = "IVF_PQ"
+	IndexFaissIvfSQ8     = "IVF_SQ8"
+	IndexFaissIvfSQ8H    = "IVF_SQ8_HYBRID"
+	IndexFaissBinIDMap   = "BIN_FLAT"
+	IndexFaissBinIvfFlat = "BIN_IVF_FLAT"
+	IndexNSG             = "NSG"
+	IndexHNSW            = "HNSW"
+	IndexRHNSWFlat       = "RHNSW_FLAT"
+	IndexRHNSWPQ         = "RHNSW_PQ"
+	IndexRHNSWSQ         = "RHNSW_SQ"
+	IndexANNOY           = "ANNOY"
+	IndexNGTPANNG        = "NGT_PANNG"
+	IndexNGTONNG         = "NGT_ONNG"
 )
