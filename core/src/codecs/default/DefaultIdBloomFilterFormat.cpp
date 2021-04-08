@@ -61,8 +61,8 @@ DefaultIdBloomFilterFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::I
         if (magic_num != BLOOM_FILTER_MAGIC_NUM) {
             capacity = BLOOM_FILTER_CAPACITY;
             error_rate = BLOOM_FILTER_ERROR_RATE;
-            bitmap_bytes = fs_ptr->reader_ptr_->length() - sizeof(int64_t);
-            fs_ptr->reader_ptr_->seekg(sizeof(int64_t));
+            bitmap_bytes = static_cast<size_t>(fs_ptr->reader_ptr_->length());
+            fs_ptr->reader_ptr_->seekg(0);
         } else {
             fs_ptr->reader_ptr_->read(&capacity, sizeof(capacity));
             fs_ptr->reader_ptr_->read(&error_rate, sizeof(error_rate));
