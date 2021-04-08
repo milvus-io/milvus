@@ -37,9 +37,6 @@ class GpuCacheMgr : public CacheMgr<DataObjPtr>, public server::GpuResourceConfi
 
     ~GpuCacheMgr();
 
-    DataObjPtr
-    GetIndex(const std::string& key);
-
     void
     InsertItem(const std::string& key, const DataObjPtr& data);
 

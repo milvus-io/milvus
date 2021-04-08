@@ -278,7 +278,7 @@ ExecutionEngineImpl::HybridLoad() const {
 
         for (auto& gpu : gpus) {
             auto cache = cache::GpuCacheMgr::GetInstance(gpu);
-            if (auto cached_quantizer = cache->GetIndex(key)) {
+            if (auto cached_quantizer = cache->GetItem(key)) {
                 device_id = gpu;
                 quantizer = std::static_pointer_cast<CachedQuantizer>(cached_quantizer)->Data();
                 break;
@@ -382,7 +382,7 @@ ExecutionEngineImpl::Serialize() {
 
 Status
 ExecutionEngineImpl::Load(bool to_cache) {
-    index_ = std::static_pointer_cast<knowhere::VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
+    index_ = std::static_pointer_cast<knowhere::VecIndex>(cache::CpuCacheMgr::GetInstance()->GetItem(location_));
     if (!index_) {
         // not in the cache
         std::string segment_dir;
@@ -513,7 +513,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
 Status
 ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
 #ifdef MILVUS_GPU_VERSION
-    auto data_obj_ptr = cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
+    auto data_obj_ptr = cache::GpuCacheMgr::GetInstance(device_id)->GetItem(location_);
     auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
@@ -579,7 +579,7 @@ ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
 Status
 ExecutionEngineImpl::CopyToCpu() {
 #ifdef MILVUS_GPU_VERSION
-    auto index = std::static_pointer_cast<knowhere::VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
+    auto index = std::static_pointer_cast<knowhere::VecIndex>(cache::CpuCacheMgr::GetInstance()->GetItem(location_));
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
         index_ = index;
@@ -612,7 +612,7 @@ Status
 ExecutionEngineImpl::CopyToFpga() {
 #ifdef MILVUS_FPGA_VERSION
     auto cache_index_ =
-        std::static_pointer_cast<knowhere::VecIndex>(cache::FpgaCacheMgr::GetInstance()->GetIndex(location_));
+        std::static_pointer_cast<knowhere::VecIndex>(cache::FpgaCacheMgr::GetInstance()->GetItem(location_));
     bool already_in_cache = (cache_index_ != nullptr);
     if (!already_in_cache) {
         int64_t indexsize = index_->IndexSize();

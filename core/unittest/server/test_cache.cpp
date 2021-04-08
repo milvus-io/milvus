@@ -132,10 +132,10 @@ TEST(CacheTest, CPU_CACHE_TEST) {
     std::shared_ptr<milvus::cache::DataObj> null_data_obj = nullptr;
     cpu_mgr->InsertItem("index_null", null_data_obj);
 
-    auto obj = cpu_mgr->GetIndex("index_0");
+    auto obj = cpu_mgr->GetItem("index_0");
     ASSERT_TRUE(obj == nullptr);
 
-    obj = cpu_mgr->GetIndex("index_" + std::to_string(item_count - 1));
+    obj = cpu_mgr->GetItem("index_" + std::to_string(item_count - 1));
     ASSERT_TRUE(obj != nullptr);
 
     {

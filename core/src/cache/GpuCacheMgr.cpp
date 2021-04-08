@@ -50,12 +50,6 @@ GpuCacheMgr::~GpuCacheMgr() {
     config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_);
 }
 
-DataObjPtr
-GpuCacheMgr::GetIndex(const std::string& key) {
-    DataObjPtr obj = GetItem(key);
-    return obj;
-}
-
 void
 GpuCacheMgr::InsertItem(const std::string& key, const milvus::cache::DataObjPtr& data) {
     if (gpu_enable_) {
