@@ -17,7 +17,7 @@ require (
 	github.com/google/btree v1.0.0
 	github.com/jarcoal/httpmock v1.0.8
 	github.com/klauspost/compress v1.10.11 // indirect
-	github.com/minio/minio-go/v7 v7.0.5
+	github.com/minio/minio-go/v7 v7.0.10
 	github.com/mitchellh/mapstructure v1.1.2
 	github.com/opentracing-contrib/go-grpc v0.0.0-20200813121455-4a6760c71486
 	github.com/opentracing/opentracing-go v1.2.0
@@ -47,7 +47,6 @@ require (
 )
 
 replace (
-
 	github.com/apache/pulsar-client-go => github.com/apache/pulsar-client-go v0.4.0
 	github.com/coreos/etcd => github.com/ozonru/etcd v3.3.20-grpc1.27-origmodule+incompatible
 	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
