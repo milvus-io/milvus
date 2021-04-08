@@ -183,6 +183,34 @@ func (mt *metaTable) reloadFromKV() error {
 	return nil
 }
 
+func (mt *metaTable) AddTenant(te *pb.TenantMeta) error {
+	mt.tenantLock.Lock()
+	defer mt.tenantLock.Unlock()
+
+	k := fmt.Sprintf("%s/%d", TenantMetaPrefix, te.ID)
+	v := proto.MarshalTextString(te)
+
+	if err := mt.client.Save(k, v); err != nil {
+		return err
+	}
+	mt.tenantID2Meta[te.ID] = *te
+	return nil
+}
+
+func (mt *metaTable) AddProxy(po *pb.ProxyMeta) error {
+	mt.proxyLock.Lock()
+	defer mt.proxyLock.Unlock()
+
+	k := fmt.Sprintf("%s/%d", ProxyMetaPrefix, po.ID)
+	v := proto.MarshalTextString(po)
+
+	if err := mt.client.Save(k, v); err != nil {
+		return err
+	}
+	mt.proxyID2Meta[po.ID] = *po
+	return nil
+}
+
 func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo, idx []*pb.IndexInfo) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()

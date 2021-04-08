@@ -56,9 +56,12 @@ type Core struct {
 
 	MetaTable *metaTable
 	//id allocator
-	idAllocator *allocator.GlobalIDAllocator
+	idAllocator       func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error)
+	idAllocatorUpdate func() error
+
 	//tso allocator
-	tsoAllocator *tso.GlobalTSOAllocator
+	tsoAllocator       func(count uint32) (typeutil.Timestamp, error)
+	tsoAllocatorUpdate func() error
 
 	//inner members
 	ctx     context.Context
@@ -151,8 +154,14 @@ func (c *Core) checkInit() error {
 	if c.idAllocator == nil {
 		return fmt.Errorf("idAllocator is nil")
 	}
+	if c.idAllocatorUpdate == nil {
+		return fmt.Errorf("idAllocatorUpdate is nil")
+	}
 	if c.tsoAllocator == nil {
 		return fmt.Errorf("tsoAllocator is nil")
+	}
+	if c.tsoAllocatorUpdate == nil {
+		return fmt.Errorf("tsoAllocatorUpdate is nil")
 	}
 	if c.etcdCli == nil {
 		return fmt.Errorf("etcdCli is nil")
@@ -208,10 +217,6 @@ func (c *Core) checkInit() error {
 	if c.ReleaseCollection == nil {
 		return fmt.Errorf("ReleaseCollection is nil")
 	}
-
-	log.Debug("master", zap.Int64("node id", int64(Params.NodeID)))
-	log.Debug("master", zap.String("dd channel name", Params.DdChannel))
-	log.Debug("master", zap.String("time tick channel name", Params.TimeTickChannel))
 	return nil
 }
 
@@ -365,11 +370,11 @@ func (c *Core) tsLoop() {
 	for {
 		select {
 		case <-tsoTicker.C:
-			if err := c.tsoAllocator.UpdateTSO(); err != nil {
+			if err := c.tsoAllocatorUpdate(); err != nil {
 				log.Warn("failed to update timestamp: ", zap.Error(err))
 				continue
 			}
-			if err := c.idAllocator.UpdateID(); err != nil {
+			if err := c.idAllocatorUpdate(); err != nil {
 				log.Warn("failed to update id: ", zap.Error(err))
 				continue
 			}
@@ -636,7 +641,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 	log.Debug("data service segment", zap.String("channel name", Params.DataServiceSegmentChannel))
 
 	c.GetBinlogFilePathsFromDataServiceReq = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
-		ts, err := c.tsoAllocator.Alloc(1)
+		ts, err := c.tsoAllocator(1)
 		if err != nil {
 			return nil, err
 		}
@@ -664,7 +669,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 	}
 
 	c.GetNumRowsReq = func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
-		ts, err := c.tsoAllocator.Alloc(1)
+		ts, err := c.tsoAllocator(1)
 		if err != nil {
 			return 0, err
 		}
@@ -773,14 +778,28 @@ func (c *Core) Init() error {
 			return
 		}
 
-		c.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{Params.EtcdAddress}, Params.KvRootPath, "gid"))
-		if initError = c.idAllocator.Initialize(); initError != nil {
+		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{Params.EtcdAddress}, Params.KvRootPath, "gid"))
+		if initError = idAllocator.Initialize(); initError != nil {
 			return
 		}
-		c.tsoAllocator = tso.NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase([]string{Params.EtcdAddress}, Params.KvRootPath, "tso"))
-		if initError = c.tsoAllocator.Initialize(); initError != nil {
+		c.idAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+			return idAllocator.Alloc(count)
+		}
+		c.idAllocatorUpdate = func() error {
+			return idAllocator.UpdateID()
+		}
+
+		tsoAllocator := tso.NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase([]string{Params.EtcdAddress}, Params.KvRootPath, "tso"))
+		if initError = tsoAllocator.Initialize(); initError != nil {
 			return
 		}
+		c.tsoAllocator = func(count uint32) (typeutil.Timestamp, error) {
+			return tsoAllocator.Alloc(count)
+		}
+		c.tsoAllocatorUpdate = func() error {
+			return tsoAllocator.UpdateTSO()
+		}
+
 		c.ddReqQueue = make(chan reqTask, 1024)
 		c.indexTaskQueue = make(chan *CreateIndexTask, 1024)
 		initError = c.setMsgStreams()
@@ -795,6 +814,11 @@ func (c *Core) Start() error {
 	if err := c.checkInit(); err != nil {
 		return err
 	}
+
+	log.Debug("master", zap.Int64("node id", int64(Params.NodeID)))
+	log.Debug("master", zap.String("dd channel name", Params.DdChannel))
+	log.Debug("master", zap.String("time tick channel name", Params.TimeTickChannel))
+
 	c.startOnce.Do(func() {
 		go c.startDdScheduler()
 		go c.startTimeTickLoop()
@@ -1433,7 +1457,7 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 }
 
 func (c *Core) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
-	ts, err := c.tsoAllocator.Alloc(in.Count)
+	ts, err := c.tsoAllocator(in.Count)
 	if err != nil {
 		log.Debug("AllocTimestamp failed", zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &masterpb.AllocTimestampResponse{
@@ -1457,7 +1481,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRe
 }
 
 func (c *Core) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
-	start, _, err := c.idAllocator.Alloc(in.Count)
+	start, _, err := c.idAllocator(in.Count)
 	if err != nil {
 		log.Debug("AllocID failed", zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &masterpb.AllocIDResponse{
