@@ -324,7 +324,7 @@ func (c *Core) startSegmentFlushCompletedLoop() {
 			return
 		case seg, ok := <-c.DataNodeSegmentFlushCompletedChan:
 			if !ok {
-				log.Debug("data node segment flush completed chan has colsed, exit loop")
+				log.Debug("data node segment flush completed chan has closed, exit loop")
 			}
 			log.Debug("flush segment", zap.Int64("id", seg))
 			coll, err := c.MetaTable.GetCollectionBySegmentID(seg)
