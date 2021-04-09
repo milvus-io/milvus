@@ -81,7 +81,7 @@ void IndexIVFFlat::add_core (idx_t n, const float * x, const int64_t *xids,
             idx_t list_no = idx[i];
             if (list_no % nt == rank && list_no >= 0) {
                 idx_t id = xids ? xids[i] : ntotal + i;
-                invlists->add_entry_without_resize(list_no, id, (const uint8_t*)x + i * d, hist[list_no] ++);
+                invlists->add_entry_without_resize(list_no, id, (const uint8_t*)(x + i * d), hist[list_no] ++);
                 n_add ++;
             }
         }
