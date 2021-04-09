@@ -1924,6 +1924,13 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, meta::FilesH
     LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, index file count: %ld", files.size());
     scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(tracer.Context(), k, extra_params, vectors);
     for (auto& file : files) {
+        // no need to process shadow files
+        if (file.file_type_ == milvus::engine::meta::SegmentSchema::FILE_TYPE::NEW ||
+            file.file_type_ == milvus::engine::meta::SegmentSchema::FILE_TYPE::NEW_MERGE ||
+            file.file_type_ == milvus::engine::meta::SegmentSchema::FILE_TYPE::NEW_INDEX) {
+            continue;
+        }
+
         scheduler::SegmentSchemaPtr file_ptr = std::make_shared<meta::SegmentSchema>(file);
         job->AddIndexFile(file_ptr);
     }

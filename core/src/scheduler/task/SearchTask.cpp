@@ -111,14 +111,14 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, Segmen
             ascending_reduce = false;
         }
 
-        EngineType engine_type;
-        if (file->file_type_ == SegmentSchema::FILE_TYPE::RAW ||
-            file->file_type_ == SegmentSchema::FILE_TYPE::TO_INDEX ||
-            file->file_type_ == SegmentSchema::FILE_TYPE::BACKUP) {
+        // The file may be a raw file, or an index file.
+        // Deduce the file's engine_type by this rule:
+        //     If the file is a raw file, its file_id is equal to segment id, engine_type is IDMAP
+        //     else if the file is an index file, its file_id is different to segment id, engine_type is index_type
+        EngineType engine_type = (EngineType)file->engine_type_;
+        if (file->segment_id_ == file->file_id_) {
             engine_type = engine::utils::IsBinaryMetricType(file->metric_type_) ? EngineType::FAISS_BIN_IDMAP
                                                                                 : EngineType::FAISS_IDMAP;
-        } else {
-            engine_type = (EngineType)file->engine_type_;
         }
 
         milvus::json json_params;
