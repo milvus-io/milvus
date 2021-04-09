@@ -3,6 +3,8 @@ package dataservice
 import (
 	"context"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -45,7 +47,7 @@ func (handler *ddHandler) handleCreateCollection(msg *msgstream.CreateCollection
 	if err := proto.Unmarshal(msg.Schema, schema); err != nil {
 		return err
 	}
-	err := handler.meta.AddCollection(&collectionInfo{
+	err := handler.meta.AddCollection(&datapb.CollectionInfo{
 		ID:     msg.CollectionID,
 		Schema: schema,
 	})

@@ -126,13 +126,13 @@ func TestMetaTable(t *testing.T) {
 
 	t.Run("add segment", func(t *testing.T) {
 		seg := &datapb.SegmentInfo{
-			SegmentID:    100,
+			ID:           100,
 			CollectionID: 1,
 			PartitionID:  10,
 		}
 		assert.Nil(t, mt.AddSegment(seg))
 		assert.NotNil(t, mt.AddSegment(seg))
-		seg.SegmentID = 101
+		seg.ID = 101
 		seg.CollectionID = 2
 		assert.NotNil(t, mt.AddSegment(seg))
 		seg.CollectionID = 1

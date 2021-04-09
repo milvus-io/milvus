@@ -1140,7 +1140,7 @@ func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvus
 	persistentInfos := make([]*milvuspb.PersistentSegmentInfo, len(infoResp.Infos))
 	for i, info := range infoResp.Infos {
 		persistentInfos[i] = &milvuspb.PersistentSegmentInfo{
-			SegmentID:    info.SegmentID,
+			SegmentID:    info.ID,
 			CollectionID: info.CollectionID,
 			PartitionID:  info.PartitionID,
 			OpenTime:     info.OpenTime,

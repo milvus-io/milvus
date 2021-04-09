@@ -7,6 +7,7 @@ option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/dat
 import "common.proto";
 import "internal.proto";
 import "milvus.proto";
+import "schema.proto";
 
 service DataService {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
@@ -120,21 +121,6 @@ message GetSegmentInfoRequest {
   repeated int64 segmentIDs = 2;
 }
 
-message SegmentInfo {
-  int64 segmentID = 1;
-  int64 collectionID = 2;
-  int64 partitionID = 3;
-  string insert_channel = 4;
-  uint64 open_time = 5;
-  uint64 sealed_time = 6;
-  uint64 flushed_time = 7;
-  int64 num_rows = 8;
-  int64 mem_size = 9;
-  common.SegmentState state = 10;
-  internal.MsgPosition start_position = 11;
-  internal.MsgPosition end_position = 12;
-}
-
 message GetSegmentInfoResponse {
   common.Status status = 1;
   repeated SegmentInfo infos = 2;
@@ -226,4 +212,24 @@ message SegmentFlushMeta{
 message DDLFlushMeta {
     int64 collectionID = 1;
     repeated string binlog_paths = 2;
+}
+
+message CollectionInfo {
+  int64 ID = 1;
+  schema.CollectionSchema schema = 2;
+  repeated int64 partitions = 3;
+}
+message SegmentInfo {
+  int64 ID = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+  string insert_channel = 4;
+  uint64 open_time = 5;
+  uint64 sealed_time = 6;
+  uint64 flushed_time = 7;
+  int64 num_rows = 8;
+  int64 mem_size = 9;
+  common.SegmentState state = 10;
+  internal.MsgPosition start_position = 11;
+  internal.MsgPosition end_position = 12;
 }

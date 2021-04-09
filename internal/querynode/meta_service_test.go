@@ -72,7 +72,7 @@ func TestMetaService_printCollectionStruct(t *testing.T) {
 
 func TestMetaService_printSegmentStruct(t *testing.T) {
 	var s = datapb.SegmentInfo{
-		SegmentID:    UniqueID(0),
+		ID:           UniqueID(0),
 		CollectionID: UniqueID(0),
 		PartitionID:  defaultPartitionID,
 		OpenTime:     Timestamp(0),

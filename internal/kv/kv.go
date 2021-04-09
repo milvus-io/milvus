@@ -8,6 +8,7 @@ type Base interface {
 	MultiSave(kvs map[string]string) error
 	Remove(key string) error
 	MultiRemove(keys []string) error
+	RemoveWithPrefix(key string) error
 
 	Close()
 }

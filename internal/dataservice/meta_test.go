@@ -3,6 +3,10 @@ package dataservice
 import (
 	"testing"
 
+	"github.com/golang/protobuf/proto"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -13,13 +17,13 @@ func TestCollection(t *testing.T) {
 	testSchema := newTestSchema()
 	id, err := mockAllocator.allocID()
 	assert.Nil(t, err)
-	err = meta.AddCollection(&collectionInfo{
+	err = meta.AddCollection(&datapb.CollectionInfo{
 		ID:         id,
 		Schema:     testSchema,
 		Partitions: []UniqueID{100},
 	})
 	assert.Nil(t, err)
-	err = meta.AddCollection(&collectionInfo{
+	err = meta.AddCollection(&datapb.CollectionInfo{
 		ID:     id,
 		Schema: testSchema,
 	})
@@ -52,20 +56,20 @@ func TestSegment(t *testing.T) {
 	assert.Nil(t, err)
 	err = meta.AddSegment(segmentInfo)
 	assert.Nil(t, err)
-	info, err := meta.GetSegment(segmentInfo.SegmentID)
+	info, err := meta.GetSegment(segmentInfo.ID)
 	assert.Nil(t, err)
-	assert.EqualValues(t, segmentInfo, info)
+	assert.True(t, proto.Equal(info, segmentInfo))
 	ids := meta.GetSegmentsOfCollection(id)
 	assert.EqualValues(t, 1, len(ids))
-	assert.EqualValues(t, segmentInfo.SegmentID, ids[0])
+	assert.EqualValues(t, segmentInfo.ID, ids[0])
 	ids = meta.GetSegmentsOfPartition(id, 100)
 	assert.EqualValues(t, 1, len(ids))
-	assert.EqualValues(t, segmentInfo.SegmentID, ids[0])
-	err = meta.SealSegment(segmentInfo.SegmentID, 100)
+	assert.EqualValues(t, segmentInfo.ID, ids[0])
+	err = meta.SealSegment(segmentInfo.ID, 100)
 	assert.Nil(t, err)
-	err = meta.FlushSegment(segmentInfo.SegmentID, 200)
+	err = meta.FlushSegment(segmentInfo.ID, 200)
 	assert.Nil(t, err)
-	info, err = meta.GetSegment(segmentInfo.SegmentID)
+	info, err = meta.GetSegment(segmentInfo.ID)
 	assert.Nil(t, err)
 	assert.NotZero(t, info.SealedTime)
 	assert.NotZero(t, info.FlushedTime)
@@ -81,7 +85,7 @@ func TestPartition(t *testing.T) {
 
 	err = meta.AddPartition(id, 10)
 	assert.NotNil(t, err)
-	err = meta.AddCollection(&collectionInfo{
+	err = meta.AddCollection(&datapb.CollectionInfo{
 		ID:         id,
 		Schema:     testSchema,
 		Partitions: []UniqueID{},
