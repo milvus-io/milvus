@@ -21,6 +21,7 @@
 #include <memory>
 #include <utility>
 
+#include "cache/CpuCacheMgr.h"
 #include "SegmentReader.h"
 #include "Vectors.h"
 #include "codecs/default/DefaultCodec.h"
@@ -192,6 +193,10 @@ SegmentWriter::WriteBloomFilter() {
         default_codec.GetIdBloomFilterFormat()->write(fs_ptr_, segment_ptr_->id_bloom_filter_ptr_);
 
         recorder.RecordSection("Writing bloom filter");
+
+        // add id_bloom_filter into cache
+        std::string cache_key = fs_ptr_->operation_ptr_->GetDirectory() + cache::BloomFilter_Suffix;
+        cache::CpuCacheMgr::GetInstance()->InsertItem(cache_key, segment_ptr_->id_bloom_filter_ptr_);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;

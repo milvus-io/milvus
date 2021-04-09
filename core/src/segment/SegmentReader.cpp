@@ -19,6 +19,7 @@
 
 #include <memory>
 
+#include "cache/CpuCacheMgr.h"
 #include "Vectors.h"
 #include "codecs/default/DefaultCodec.h"
 #include "config/Config.h"
@@ -106,8 +107,17 @@ Status
 SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     codec::DefaultCodec default_codec;
     try {
-        fs_ptr_->operation_ptr_->CreateDirectory();
-        default_codec.GetIdBloomFilterFormat()->read(fs_ptr_, id_bloom_filter_ptr);
+        // load id_bloom_filter from cache
+        std::string cache_key = fs_ptr_->operation_ptr_->GetDirectory() + cache::BloomFilter_Suffix;
+        id_bloom_filter_ptr = std::static_pointer_cast<segment::IdBloomFilter>(cache::CpuCacheMgr::GetInstance()->GetItem(cache_key));
+
+        if (id_bloom_filter_ptr == nullptr) {
+            fs_ptr_->operation_ptr_->CreateDirectory();
+            default_codec.GetIdBloomFilterFormat()->read(fs_ptr_, id_bloom_filter_ptr);
+
+            // add id_bloom_filter into cache
+            cache::CpuCacheMgr::GetInstance()->InsertItem(cache_key, id_bloom_filter_ptr);
+        }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load bloom filter: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
