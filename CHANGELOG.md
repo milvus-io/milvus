@@ -4,6 +4,7 @@ Please mark all change in change log and use the issue from GitHub
 
 # Milvus 1.1.0 (TBD)
 ## Bug
+-   \#4778 Fail to open vector index
 -   \#4858 Fix the crash when query for a large topk on GPU Flat
 -   \#4862 The inserted data number increase automatically without any operations
 -   \#4894 The capacity of bloom filter should be determined by the row count of its segment
