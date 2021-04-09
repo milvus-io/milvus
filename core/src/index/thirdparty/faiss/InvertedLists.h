@@ -111,6 +111,14 @@ struct InvertedLists {
            size_t list_no, size_t n_entry,
            const idx_t* ids, const uint8_t *code) = 0;
 
+    /// add one entry without resize
+    virtual void add_entry_without_resize(size_t list_no, idx_t theid,
+                                            const uint8_t *code, size_t ofs);
+
+    virtual void add_entries_without_resize(
+            size_t list_no, size_t n_entry,
+            const idx_t* ids, const uint8_t *code, size_t ofs) = 0;
+
     virtual void update_entry (size_t list_no, size_t offset,
                                idx_t id, const uint8_t *code);
 
@@ -223,6 +231,10 @@ struct ArrayInvertedLists: InvertedLists {
            size_t list_no, size_t n_entry,
            const idx_t* ids, const uint8_t *code) override;
 
+    void add_entries_without_resize (
+        size_t list_no, size_t n_entry,
+        const idx_t* ids, const uint8_t *code, size_t ofs) override;
+
     void update_entries (size_t list_no, size_t offset, size_t n_entry,
                          const idx_t *ids, const uint8_t *code) override;
 
@@ -266,6 +278,10 @@ struct ReadOnlyArrayInvertedLists: InvertedLists {
             size_t list_no, size_t n_entry,
             const idx_t* ids, const uint8_t *code) override;
 
+    void add_entries_without_resize (
+        size_t list_no, size_t n_entry,
+        const idx_t* ids, const uint8_t *code, size_t ofs) override;
+
     void update_entries (size_t list_no, size_t offset, size_t n_entry,
                          const idx_t *ids, const uint8_t *code) override;
 
@@ -291,6 +307,10 @@ struct ReadOnlyInvertedLists: InvertedLists {
     size_t add_entries (
            size_t list_no, size_t n_entry,
            const idx_t* ids, const uint8_t *code) override;
+
+    void add_entries_without_resize (
+        size_t list_no, size_t n_entry,
+        const idx_t* ids, const uint8_t *code, size_t ofs) override;
 
     void update_entries (size_t list_no, size_t offset, size_t n_entry,
                          const idx_t *ids, const uint8_t *code) override;
