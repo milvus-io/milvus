@@ -21,9 +21,9 @@
 #include <memory>
 #include <utility>
 
-#include "cache/CpuCacheMgr.h"
 #include "SegmentReader.h"
 #include "Vectors.h"
+#include "cache/CpuCacheMgr.h"
 #include "codecs/default/DefaultCodec.h"
 #include "db/Utils.h"
 #include "utils/Log.h"

@@ -1404,7 +1404,7 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
     bool is_binary = false;
     size_t single_vector_bytes = 0;
     if (!files.empty()) {
-        auto &file = files[0];
+        auto& file = files[0];
         is_binary = utils::IsBinaryMetricType(file.metric_type_);
         single_vector_bytes = is_binary ? (file.dimension_ / 8) : (file.dimension_ * sizeof(float));
     }

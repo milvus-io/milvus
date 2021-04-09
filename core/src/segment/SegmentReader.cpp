@@ -19,8 +19,8 @@
 
 #include <memory>
 
-#include "cache/CpuCacheMgr.h"
 #include "Vectors.h"
+#include "cache/CpuCacheMgr.h"
 #include "codecs/default/DefaultCodec.h"
 #include "config/Config.h"
 #include "utils/Log.h"
@@ -109,7 +109,8 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     try {
         // load id_bloom_filter from cache
         std::string cache_key = fs_ptr_->operation_ptr_->GetDirectory() + cache::BloomFilter_Suffix;
-        id_bloom_filter_ptr = std::static_pointer_cast<segment::IdBloomFilter>(cache::CpuCacheMgr::GetInstance()->GetItem(cache_key));
+        id_bloom_filter_ptr =
+            std::static_pointer_cast<segment::IdBloomFilter>(cache::CpuCacheMgr::GetInstance()->GetItem(cache_key));
 
         if (id_bloom_filter_ptr == nullptr) {
             fs_ptr_->operation_ptr_->CreateDirectory();
