@@ -427,3 +427,16 @@ scaling_bloom_t *new_scaling_bloom_from_bitmap(unsigned int capacity, double err
 
     return bloom;
 }
+
+size_t bloom_size(scaling_bloom_t *bloom) {
+    size_t rst = 0;
+    if (bloom != nullptr) {
+        rst = sizeof(scaling_bloom_t);
+        rst += bloom->num_bytes;
+        rst += bloom->num_blooms * (sizeof(counting_bloom_t) + sizeof(void*));
+        for (unsigned int i = 0; i < bloom->num_blooms; i++) {
+            rst += bloom->blooms[i]->nfuncs * sizeof(uint32_t);
+        }
+    }
+    return rst;
+}

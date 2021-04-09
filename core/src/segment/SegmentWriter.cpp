@@ -185,9 +185,7 @@ SegmentWriter::WriteBloomFilter() {
 
         recorder.RecordSection("Initializing bloom filter");
 
-        for (auto& uid : uids) {
-            segment_ptr_->id_bloom_filter_ptr_->Add(uid);
-        }
+        segment_ptr_->id_bloom_filter_ptr_->Add(uids);
 
         recorder.RecordSection("Adding " + std::to_string(uids.size()) + " ids to bloom filter");
 

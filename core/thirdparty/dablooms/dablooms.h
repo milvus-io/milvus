@@ -67,4 +67,5 @@ int free_scaling_bloom(scaling_bloom_t *bloom);
 int scaling_bloom_add(scaling_bloom_t *bloom, const char *s, size_t len, uint64_t id);
 int scaling_bloom_remove(scaling_bloom_t *bloom, const char *s, size_t len, uint64_t id);
 int scaling_bloom_check(scaling_bloom_t *bloom, const char *s, size_t len);
+size_t bloom_size(scaling_bloom_t *bloom);
 #endif
