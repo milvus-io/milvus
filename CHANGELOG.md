@@ -14,6 +14,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Improvement
 -   \#4856 Upgrade hnswlib to v0.5.0
+-   \#4912 Improve the performance during training of index ivfflat
 
 # Milvus 1.0.0 (2021-03-09)
 ## Bug

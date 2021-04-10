@@ -442,33 +442,6 @@ void IndexIVFPQ::add_core_o2 (idx_t n, const float * x, const idx_t *xids,
         }
     }
 
-    /*
-    for (size_t i = 0; i < n; i++) {
-        idx_t key = idx[i];
-        idx_t id = xids ? xids[i] : ntotal + i;
-        if (key < 0) {
-            direct_map.add_single_id (id, -1, 0);
-            n_ignore ++;
-            if (residuals_2)
-                memset (residuals_2, 0, sizeof(*residuals_2) * d);
-            continue;
-        }
-
-        uint8_t *code = xcodes + i * code_size;
-        size_t offset = invlists->add_entry (key, id, code);
-
-        if (residuals_2) {
-            float *res2 = residuals_2 + i * d;
-            const float *xi = to_encode + i * d;
-            pq.decode (code, res2);
-            for (int j = 0; j < d; j++)
-                res2[j] = xi[j] - res2[j];
-        }
-
-        direct_map.add_single_id (id, key, offset);
-    }
-    */
-
     double t3 = getmillisecs ();
     if(verbose) {
         char comment[100] = {0};
