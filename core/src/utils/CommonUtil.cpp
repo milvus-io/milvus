@@ -265,15 +265,17 @@ CommonUtil::EraseFromCache(const std::string& item_key) {
     }
 
     cache::CpuCacheMgr::GetInstance()->EraseItem(item_key);
+    cache::CpuCacheMgr::GetInstance()->EraseItem(item_key + cache::BloomFilter_Suffix);
 
 #ifdef MILVUS_GPU_VERSION
     server::Config& config = server::Config::GetInstance();
     std::vector<int64_t> gpus;
     config.GetGpuResourceConfigSearchResources(gpus);
+
+    // Only quantizer is cached in GPU now.
+    std::string quantizer_key = item_key + cache::Quantizer_Suffix;
     for (auto& gpu : gpus) {
-        // Only quantizer is cached in GPU now.
-        std::string key = item_key + cache::Quantizer_Suffix;
-        cache::GpuCacheMgr::GetInstance(gpu)->EraseItem(key);
+        cache::GpuCacheMgr::GetInstance(gpu)->EraseItem(quantizer_key);
     }
 #endif
 }

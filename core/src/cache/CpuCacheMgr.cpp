@@ -21,6 +21,8 @@
 namespace milvus {
 namespace cache {
 
+const char* BloomFilter_Suffix = ".bloomfilter";
+
 CpuCacheMgr::CpuCacheMgr() {
     // All config values have been checked in Config::ValidateConfig()
     server::Config& config = server::Config::GetInstance();

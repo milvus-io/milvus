@@ -28,7 +28,6 @@ IdBloomFilter::IdBloomFilter(scaling_bloom_t* bloom_filter) : bloom_filter_(bloo
 }
 
 IdBloomFilter::~IdBloomFilter() {
-    const std::lock_guard<std::mutex> lock(mutex_);
     if (bloom_filter_) {
         free_scaling_bloom(bloom_filter_);
     }
@@ -36,30 +35,43 @@ IdBloomFilter::~IdBloomFilter() {
 
 scaling_bloom_t*
 IdBloomFilter::GetBloomFilter() {
-    const std::lock_guard<std::mutex> lock(mutex_);
     return bloom_filter_;
 }
 
 bool
 IdBloomFilter::Check(doc_id_t uid) {
+    if (bloom_filter_ == nullptr) {
+        return true;
+    }
+
     std::string s = std::to_string(uid);
     const std::lock_guard<std::mutex> lock(mutex_);
-    return scaling_bloom_check(bloom_filter_, s.c_str(), s.size());
+    return static_cast<bool>(scaling_bloom_check(bloom_filter_, s.c_str(), s.size()));
 }
 
 Status
-IdBloomFilter::Add(doc_id_t uid) {
-    std::string s = std::to_string(uid);
+IdBloomFilter::Add(const std::vector<doc_id_t>& uids) {
+    if (bloom_filter_ == nullptr) {
+        return Status(DB_ERROR, "bloom filter is null pointer");  // bloom filter doesn't work
+    }
+
     const std::lock_guard<std::mutex> lock(mutex_);
-    if (scaling_bloom_add(bloom_filter_, s.c_str(), s.size(), uid) == -1) {
-        // Counter overflow does not affect bloom filter's normal functionality
-        LOG_ENGINE_WARNING_ << "Warning adding id=" << s << " to bloom filter: 4 bit counter Overflow";
+    for (auto uid : uids) {
+        std::string s = std::to_string(uid);
+        if (scaling_bloom_add(bloom_filter_, s.c_str(), s.size(), uid) == -1) {
+            // Counter overflow does not affect bloom filter's normal functionality
+            LOG_ENGINE_WARNING_ << "Warning adding id=" << s << " to bloom filter: 4 bit counter Overflow";
+        }
     }
     return Status::OK();
 }
 
 Status
 IdBloomFilter::Remove(doc_id_t uid) {
+    if (bloom_filter_ == nullptr) {
+        return Status(DB_ERROR, "bloom filter is null pointer");  // bloom filter doesn't work
+    }
+
     std::string s = std::to_string(uid);
     const std::lock_guard<std::mutex> lock(mutex_);
     if (scaling_bloom_remove(bloom_filter_, s.c_str(), s.size(), uid) == -1) {
@@ -69,14 +81,10 @@ IdBloomFilter::Remove(doc_id_t uid) {
     return Status::OK();
 }
 
-// const std::string&
-// IdBloomFilter::GetName() const {
-//    return name_;
-//}
-
-size_t
+int64_t
 IdBloomFilter::Size() {
-    return bloom_filter_->num_bytes;
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return bloom_size(bloom_filter_);
 }
 
 }  // namespace segment

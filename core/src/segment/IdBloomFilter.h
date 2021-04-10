@@ -19,7 +19,9 @@
 
 #include <memory>
 #include <mutex>
+#include <vector>
 
+#include "cache/DataObj.h"
 #include "dablooms/dablooms.h"
 #include "utils/Status.h"
 
@@ -28,7 +30,7 @@ namespace segment {
 
 using doc_id_t = int64_t;
 
-class IdBloomFilter {
+class IdBloomFilter : public cache::DataObj {
  public:
     explicit IdBloomFilter(scaling_bloom_t* bloom_filter);
 
@@ -41,16 +43,13 @@ class IdBloomFilter {
     Check(doc_id_t uid);
 
     Status
-    Add(doc_id_t uid);
+    Add(const std::vector<doc_id_t>& uids);
 
     Status
     Remove(doc_id_t uid);
 
-    size_t
-    Size();
-
-    //    const std::string&
-    //    GetName() const;
+    int64_t
+    Size() override;
 
     // No copy and move
     IdBloomFilter(const IdBloomFilter&) = delete;
@@ -63,7 +62,6 @@ class IdBloomFilter {
 
  private:
     scaling_bloom_t* bloom_filter_;
-    //    const std::string name_ = "bloom_filter";
     std::mutex mutex_;
 };
 

@@ -1273,6 +1273,7 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_INVALID_TEST) {
 
     db_->Flush(collection_info.collection_id_);
 
+    milvus::cache::CpuCacheMgr::GetInstance()->ClearCache();
     fiu_enable("bloom_filter_nullptr", 1, NULL, 0);
     stat = db_->GetVectorsByID(collection_info, qxb.id_array_, vectors);
     ASSERT_FALSE(stat.ok());
