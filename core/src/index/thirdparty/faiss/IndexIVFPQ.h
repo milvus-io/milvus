@@ -79,6 +79,10 @@ struct IndexIVFPQ: IndexIVF {
                      const idx_t *xids, float *residuals_2,
                      const idx_t *precomputed_idx = nullptr);
 
+    void add_core_o2 (idx_t n, const float *x,
+                     const idx_t *xids, float *residuals_2,
+                     const idx_t *precomputed_idx = nullptr);
+
     /// trains the product quantizer
     void train_residual(idx_t n, const float* x) override;
 

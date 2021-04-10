@@ -183,7 +183,7 @@ void IndexIVFPQ::decode_multiple (size_t n, const idx_t *keys,
 
 void IndexIVFPQ::add_with_ids (idx_t n, const float * x, const idx_t *xids)
 {
-    add_core_o (n, x, xids, nullptr);
+    add_core_o2 (n, x, xids, nullptr);
 }
 
 
@@ -349,6 +349,136 @@ void IndexIVFPQ::add_core_o (idx_t n, const float * x, const idx_t *xids,
     ntotal += n;
 }
 
+void IndexIVFPQ::add_core_o2 (idx_t n, const float * x, const idx_t *xids,
+                             float *residuals_2, const idx_t *precomputed_idx)
+{
+
+    InterruptCallback::check();
+
+    direct_map.check_can_add (xids);
+
+    FAISS_THROW_IF_NOT (is_trained);
+    double t0 = getmillisecs ();
+    const idx_t * idx;
+    ScopeDeleter<idx_t> del_idx;
+
+    if (precomputed_idx) {
+        idx = precomputed_idx;
+    } else {
+        idx_t * idx0 = new idx_t [n];
+        del_idx.set (idx0);
+        quantizer->assign (n, x, idx0);
+        idx = idx0;
+    }
+
+    double t1 = getmillisecs ();
+    uint8_t * xcodes = new uint8_t [n * code_size];
+    ScopeDeleter<uint8_t> del_xcodes (xcodes);
+
+    const float *to_encode = nullptr;
+    ScopeDeleter<float> del_to_encode;
+
+    if (by_residual) {
+        to_encode = compute_residuals (quantizer, n, x, idx);
+        del_to_encode.set (to_encode);
+    } else {
+        to_encode = x;
+    }
+    pq.compute_codes (to_encode, xcodes, n);
+
+    double t2 = getmillisecs ();
+    // TODO: parallelize?
+    size_t n_ignore = 0;
+    std::vector<int> hist(nlist, 0);
+#pragma omp parallel
+    {
+        int nt = omp_get_num_threads();
+        int rank = omp_get_thread_num();
+        for (size_t i = 0; i < n; i ++) {
+            idx_t key = idx[i];
+            if (key % nt == rank && key >= 0 && key < nlist)
+                hist[key] ++;
+        }
+    }
+    for (auto i = 0; i < nlist; i ++) {
+        invlists->resize(i, hist[i]);
+        hist[i] = 0;
+    }
+
+#pragma omp parallel reduction(+: n_ignore)
+    {
+        int nt = omp_get_num_threads();
+        int rank = omp_get_thread_num();
+        for (size_t i = 0; i < n; i ++) {
+            idx_t key = idx[i];
+            if (key % nt != rank || key < 0 || key >= nlist) {
+                if (key < 0) {
+                    n_ignore ++;
+                    if (residuals_2)
+                        memset(residuals_2, 0, sizeof(*residuals_2) * d);
+                }
+                continue;
+            }
+            idx_t id = xids ? xids[i] : ntotal + i;
+            uint8_t *code = xcodes + i * code_size;
+            invlists->add_entry_without_resize(key, id, code, hist[key] ++);
+
+            if (residuals_2) {
+                float *res2 = residuals_2 + i * d;
+                const float *xi = to_encode + i * d;
+                pq.decode (code, res2);
+                for (int j = 0; j < d; j++)
+                    res2[j] = xi[j] - res2[j];
+            }
+        }
+    }
+
+    if (DirectMap::Type::NoMap != direct_map.type) {
+        for (auto i = 0; i < nlist; i ++) {
+            auto idsi = invlists->get_ids(i);
+            auto sizei = invlists->list_size(i);
+            for (auto j = 0; j < sizei; j ++)
+                direct_map.add_single_id(idsi[j], i, j);
+        }
+    }
+
+    /*
+    for (size_t i = 0; i < n; i++) {
+        idx_t key = idx[i];
+        idx_t id = xids ? xids[i] : ntotal + i;
+        if (key < 0) {
+            direct_map.add_single_id (id, -1, 0);
+            n_ignore ++;
+            if (residuals_2)
+                memset (residuals_2, 0, sizeof(*residuals_2) * d);
+            continue;
+        }
+
+        uint8_t *code = xcodes + i * code_size;
+        size_t offset = invlists->add_entry (key, id, code);
+
+        if (residuals_2) {
+            float *res2 = residuals_2 + i * d;
+            const float *xi = to_encode + i * d;
+            pq.decode (code, res2);
+            for (int j = 0; j < d; j++)
+                res2[j] = xi[j] - res2[j];
+        }
+
+        direct_map.add_single_id (id, key, offset);
+    }
+    */
+
+    double t3 = getmillisecs ();
+    if(verbose) {
+        char comment[100] = {0};
+        if (n_ignore > 0)
+            snprintf (comment, 100, "(%ld vectors ignored)", n_ignore);
+        printf(" add_core times: %.3f %.3f %.3f %s\n",
+               t1 - t0, t2 - t1, t3 - t2, comment);
+    }
+    ntotal += n;
+}
 
 void IndexIVFPQ::reconstruct_from_offset (int64_t list_no, int64_t offset,
                                           float* recons) const
