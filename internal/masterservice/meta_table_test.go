@@ -19,7 +19,7 @@ import (
 )
 
 type mockTestKV struct {
-	kv.TxnBase
+	kv.TxnKV
 
 	loadWithPrefix               func(key string) ([]string, []string, error)
 	save                         func(key, value string) error

@@ -31,7 +31,7 @@ type ddNode struct {
 	flushMap  *sync.Map
 	inFlushCh <-chan *flushMsg
 
-	kv         kv.Base
+	kv         kv.BaseKV
 	replica    Replica
 	binlogMeta *binlogMeta
 }
@@ -194,7 +194,7 @@ The keys of the binlogs are generated as below:
 
 */
 func flushTxn(ddlData *sync.Map,
-	kv kv.Base,
+	kv kv.BaseKV,
 	meta *binlogMeta) {
 	// generate binlog
 	ddCodec := &storage.DataDefinitionCodec{}

@@ -71,7 +71,7 @@ func (bt *BaseTask) Notify(err error) {
 type IndexBuildTask struct {
 	BaseTask
 	index         Index
-	kv            kv.Base
+	kv            kv.BaseKV
 	savePaths     []string
 	req           *indexpb.BuildIndexRequest
 	serviceClient types.IndexService

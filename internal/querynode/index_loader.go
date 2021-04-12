@@ -36,7 +36,7 @@ type indexLoader struct {
 	masterService types.MasterService
 	indexService  types.IndexService
 
-	kv kv.Base // minio kv
+	kv kv.BaseKV // minio kv
 }
 
 func (loader *indexLoader) doLoadIndex(wg *sync.WaitGroup) {

@@ -42,7 +42,7 @@ type insertBufferNode struct {
 	flushMeta    *binlogMeta
 	flushMap     sync.Map
 
-	minIOKV kv.Base
+	minIOKV kv.BaseKV
 
 	timeTickStream          msgstream.MsgStream
 	segmentStatisticsStream msgstream.MsgStream
@@ -564,7 +564,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 }
 
 func flushSegmentTxn(collMeta *etcdpb.CollectionMeta, segID UniqueID, partitionID UniqueID, collID UniqueID,
-	insertData *sync.Map, meta *binlogMeta, kv kv.Base, finishCh chan<- bool) {
+	insertData *sync.Map, meta *binlogMeta, kv kv.BaseKV, finishCh chan<- bool) {
 
 	clearFn := func(isSuccess bool) {
 		finishCh <- isSuccess

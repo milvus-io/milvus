@@ -44,7 +44,7 @@ type IndexService struct {
 
 	idAllocator *allocator.GlobalIDAllocator
 
-	kv kv.Base
+	kv kv.BaseKV
 
 	metaTable *metaTable
 

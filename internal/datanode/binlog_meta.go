@@ -14,11 +14,11 @@ import (
 // segment binlog meta key:
 //   ${prefix}/${segmentID}/${fieldID}/${idx}
 type binlogMeta struct {
-	client      kv.TxnBase // etcd kv
+	client      kv.TxnKV // etcd kv
 	idAllocator allocatorInterface
 }
 
-func NewBinlogMeta(kv kv.TxnBase, idAllocator allocatorInterface) (*binlogMeta, error) {
+func NewBinlogMeta(kv kv.TxnKV, idAllocator allocatorInterface) (*binlogMeta, error) {
 	mt := &binlogMeta{
 		client:      kv,
 		idAllocator: idAllocator,

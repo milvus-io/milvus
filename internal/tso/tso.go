@@ -46,8 +46,8 @@ type atomicObject struct {
 
 // timestampOracle is used to maintain the logic of tso.
 type timestampOracle struct {
-	key    string
-	kvBase kv.TxnBase
+	key   string
+	txnKV kv.TxnKV
 
 	// TODO: remove saveInterval
 	saveInterval  time.Duration
@@ -58,7 +58,7 @@ type timestampOracle struct {
 }
 
 func (t *timestampOracle) loadTimestamp() (time.Time, error) {
-	strData, err := t.kvBase.Load(t.key)
+	strData, err := t.txnKV.Load(t.key)
 
 	var binData []byte = []byte(strData)
 
@@ -75,7 +75,7 @@ func (t *timestampOracle) loadTimestamp() (time.Time, error) {
 // otherwise, update it.
 func (t *timestampOracle) saveTimestamp(ts time.Time) error {
 	data := typeutil.Uint64ToBytes(uint64(ts.UnixNano()))
-	err := t.kvBase.Save(t.key, string(data))
+	err := t.txnKV.Save(t.key, string(data))
 	if err != nil {
 		return errors.WithStack(err)
 	}

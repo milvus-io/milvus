@@ -177,7 +177,7 @@ type TaskScheduler struct {
 
 	idAllocator *allocator.GlobalIDAllocator
 	metaTable   *metaTable
-	kv          kv.Base
+	kv          kv.BaseKV
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -186,7 +186,7 @@ type TaskScheduler struct {
 
 func NewTaskScheduler(ctx context.Context,
 	idAllocator *allocator.GlobalIDAllocator,
-	kv kv.Base,
+	kv kv.BaseKV,
 	table *metaTable) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &TaskScheduler{

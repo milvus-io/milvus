@@ -1,6 +1,6 @@
 package kv
 
-type Base interface {
+type BaseKV interface {
 	Load(key string) (string, error)
 	MultiLoad(keys []string) ([]string, error)
 	LoadWithPrefix(key string) ([]string, []string, error)
@@ -13,8 +13,8 @@ type Base interface {
 	Close()
 }
 
-type TxnBase interface {
-	Base
+type TxnKV interface {
+	BaseKV
 	MultiSaveAndRemove(saves map[string]string, removals []string) error
 	MultiRemoveWithPrefix(keys []string) error
 	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error

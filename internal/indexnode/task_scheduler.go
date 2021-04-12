@@ -164,14 +164,14 @@ type TaskScheduler struct {
 	IndexBuildQueue TaskQueue
 
 	buildParallel int
-	kv            kv.Base
+	kv            kv.BaseKV
 	wg            sync.WaitGroup
 	ctx           context.Context
 	cancel        context.CancelFunc
 }
 
 func NewTaskScheduler(ctx context.Context,
-	kv kv.Base) (*TaskScheduler, error) {
+	kv kv.BaseKV) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &TaskScheduler{
 		kv:            kv,

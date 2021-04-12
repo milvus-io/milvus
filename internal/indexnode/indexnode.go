@@ -36,7 +36,7 @@ type IndexNode struct {
 
 	sched *TaskScheduler
 
-	kv kv.Base
+	kv kv.BaseKV
 
 	serviceClient types.IndexService // method factory
 
