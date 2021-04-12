@@ -498,6 +498,10 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 			segment2Node := qs.shuffleSegmentsToQueryNode(toLoadSegmentIDs)
 			for nodeID, assignedSegmentIDs := range segment2Node {
 				loadSegmentRequest := &querypb.LoadSegmentsRequest{
+					// TODO: use unique id allocator to assign reqID
+					Base: &commonpb.MsgBase{
+						MsgID: rand.Int63n(10000000000),
+					},
 					CollectionID: collectionID,
 					PartitionID:  partitionID,
 					SegmentIDs:   assignedSegmentIDs,
