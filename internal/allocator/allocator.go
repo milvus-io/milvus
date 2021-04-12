@@ -76,7 +76,7 @@ func (t *EmptyTicker) Close() {
 
 type Ticker struct {
 	ticker         *time.Ticker
-	UpdateInterval time.Duration //
+	UpdateInterval time.Duration
 }
 
 func (t *Ticker) Init() {
@@ -138,7 +138,6 @@ func (ta *Allocator) mainLoop() {
 
 	for {
 		select {
-
 		case first := <-ta.ForceSyncChan:
 			ta.SyncReqs = append(ta.SyncReqs, first)
 			pending := len(ta.ForceSyncChan)
@@ -174,7 +173,6 @@ func (ta *Allocator) mainLoop() {
 		case <-loopCtx.Done():
 			return
 		}
-
 	}
 }
 

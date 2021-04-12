@@ -42,7 +42,7 @@ func TestGlobalTSOAllocator_All(t *testing.T) {
 		}
 	})
 
-	gTestTsoAllocator.EnableMaxLogic(false)
+	gTestTsoAllocator.SetLimitMaxLogic(false)
 	t.Run("GenerateTSO2", func(t *testing.T) {
 		count := 1000
 		maxL := 1 << 18
@@ -59,7 +59,8 @@ func TestGlobalTSOAllocator_All(t *testing.T) {
 			lastPhysical = physical
 		}
 	})
-	gTestTsoAllocator.EnableMaxLogic(true)
+
+	gTestTsoAllocator.SetLimitMaxLogic(true)
 	t.Run("SetTSO", func(t *testing.T) {
 		curTime := time.Now()
 		nextTime := curTime.Add(2 * time.Second)
