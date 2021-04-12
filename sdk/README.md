@@ -10,10 +10,19 @@ CMake 3.14 or higher
 
 ### Build C++ SDK
 
-You must build the C++ SDK before using it:
-
+Install dependencies(CentOS)
 ```shell
- # build C++ SDK
+sudo yum install libcurl-devel openssl-devel
+```
+
+Install dependencies(Ubuntu)
+```shell
+sudo apt-get -y update
+sudo apt-get install libcurl4-openssl-dev libssl-dev
+```
+
+Build C++ SDK
+```shell
  $ cd [Milvus root path]/sdk
  $ ./build.sh
 ```
