@@ -77,8 +77,6 @@ DefaultDeletedDocsFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::Del
 
 void
 DefaultDeletedDocsFormat::write(const storage::FSHandlerPtr& fs_ptr, const segment::DeletedDocsPtr& deleted_docs) {
-    const std::lock_guard<std::mutex> lock(mutex_);
-
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
 
@@ -145,6 +143,7 @@ DefaultDeletedDocsFormat::write(const storage::FSHandlerPtr& fs_ptr, const segme
     }
 
     // Move temp file to delete file
+    const std::lock_guard<std::mutex> lock(mutex_);
     boost::filesystem::rename(temp_path, del_file_path);
     fs_ptr->operation_ptr_->CachePut(del_file_path);
 }
