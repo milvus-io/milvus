@@ -12,7 +12,7 @@
 
 ## What is Milvus
 
-As an open source vector similarity search engine, Milvus is easy-to-use, highly reliable, scalable, robust, and blazing fast. Adopted by over 100 organizations and institutions worldwide, Milvus empowers applications in a variety of fields, including image processing, computer vision, natural language processing, voice recognition, recommender systems, drug discovery, and more. 
+As an open source vector database, Milvus is easy-to-use, highly reliable, robust, and blazing fast. Adopted by over 600 organizations and institutions worldwide, Milvus empowers applications in a variety of fields, including image processing, computer vision, natural language processing, voice recognition, recommender systems, drug discovery, and more. 
 
 The following is Milvus architecture:
 
@@ -57,13 +57,13 @@ It is a Work in Progress, and is subject to reasonable adjustments when necessar
 
 ## Contribution guidelines
 
-Contributions are welcomed and greatly appreciated. Please read our [contribution guidelines](CONTRIBUTING.md) for detailed contribution workflow. This project adheres to the [code of conduct](CODE_OF_CONDUCT.md) of Milvus. You must abide by this code in order to participate.
+Contributions are welcomed and greatly appreciated. Please read our [contribution guidelines](CONTRIBUTING.md) for detailed contribution workflow. This project adheres to the [code of conduct](CODE_OF_CONDUCT.md) of Milvus. You must abide by this code to participate.
 
 We use [GitHub issues](https://github.com/milvus-io/milvus/issues) to track issues and bugs. For general questions and public discussions, please join our community.
 
 ## Join our community
 
-:heart:  To connect with other users and contributors, welcome to join our [Slack channel](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ).
+:heart:  To connect with other users and contributors, you can join our [Slack channel](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ).
 
 See our [community](https://github.com/milvus-io/community) repository to learn more about our governance and access more community resources.
 
