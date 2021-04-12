@@ -447,7 +447,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	defer mt.ddLock.Unlock()
 
 	if partitionName == Params.DefaultPartitionName {
-		return 0, errors.New("default partition cannot be deleted")
+		return 0, fmt.Errorf("default partition cannot be deleted")
 	}
 
 	collMeta, ok := mt.collID2Meta[collID]
@@ -570,16 +570,6 @@ func (mt *metaTable) AddIndex(seg *pb.SegmentIndexInfo) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	segIdxMap, ok := mt.segID2IndexMeta[seg.SegmentID]
-	if !ok {
-		idxMap := map[typeutil.UniqueID]pb.SegmentIndexInfo{seg.IndexID: *seg}
-		mt.segID2IndexMeta[seg.SegmentID] = &idxMap
-	} else {
-		_, ok := (*segIdxMap)[seg.IndexID]
-		if ok {
-			return fmt.Errorf("index id = %d exist", seg.IndexID)
-		}
-	}
 	collID, ok := mt.segID2CollID[seg.SegmentID]
 	if !ok {
 		return fmt.Errorf("segment id = %d not belong to any collection", seg.SegmentID)
@@ -601,6 +591,17 @@ func (mt *metaTable) AddIndex(seg *pb.SegmentIndexInfo) error {
 	}
 	if !exist {
 		return fmt.Errorf("index id = %d not found", seg.IndexID)
+	}
+
+	segIdxMap, ok := mt.segID2IndexMeta[seg.SegmentID]
+	if !ok {
+		idxMap := map[typeutil.UniqueID]pb.SegmentIndexInfo{seg.IndexID: *seg}
+		mt.segID2IndexMeta[seg.SegmentID] = &idxMap
+	} else {
+		_, ok := (*segIdxMap)[seg.IndexID]
+		if ok {
+			return fmt.Errorf("index id = %d exist", seg.IndexID)
+		}
 	}
 
 	(*(mt.segID2IndexMeta[seg.SegmentID]))[seg.IndexID] = *seg
