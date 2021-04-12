@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -14,12 +16,14 @@ import (
 type ddHandler struct {
 	meta             *meta
 	segmentAllocator segmentAllocatorInterface
+	masterClient     types.MasterService
 }
 
-func newDDHandler(meta *meta, allocator segmentAllocatorInterface) *ddHandler {
+func newDDHandler(meta *meta, allocator segmentAllocatorInterface, client types.MasterService) *ddHandler {
 	return &ddHandler{
 		meta:             meta,
 		segmentAllocator: allocator,
+		masterClient:     client,
 	}
 }
 
@@ -47,9 +51,24 @@ func (handler *ddHandler) handleCreateCollection(msg *msgstream.CreateCollection
 	if err := proto.Unmarshal(msg.Schema, schema); err != nil {
 		return err
 	}
-	err := handler.meta.AddCollection(&datapb.CollectionInfo{
-		ID:     msg.CollectionID,
-		Schema: schema,
+	presp, err := handler.masterClient.ShowPartitions(context.TODO(), &milvuspb.ShowPartitionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_ShowPartitions,
+			MsgID:     -1, // todo
+			Timestamp: 0,  // todo
+			SourceID:  Params.NodeID,
+		},
+		DbName:         "",
+		CollectionName: schema.Name,
+		CollectionID:   msg.CollectionID,
+	})
+	if err = VerifyResponse(presp, err); err != nil {
+		return err
+	}
+	err = handler.meta.AddCollection(&datapb.CollectionInfo{
+		ID:         msg.CollectionID,
+		Schema:     schema,
+		Partitions: presp.PartitionIDs,
 	})
 	if err != nil {
 		return err

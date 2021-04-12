@@ -347,6 +347,21 @@ func (meta *meta) DropPartition(collID UniqueID, partitionID UniqueID) error {
 	return nil
 }
 
+func (meta *meta) HasPartition(collID UniqueID, partID UniqueID) bool {
+	meta.RLock()
+	defer meta.RUnlock()
+	coll, ok := meta.collections[collID]
+	if !ok {
+		return false
+	}
+	for _, id := range coll.Partitions {
+		if partID == id {
+			return true
+		}
+	}
+	return false
+}
+
 func (meta *meta) GetNumRowsOfPartition(collectionID UniqueID, partitionID UniqueID) (int64, error) {
 	meta.RLock()
 	defer meta.RUnlock()

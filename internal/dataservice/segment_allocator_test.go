@@ -48,9 +48,6 @@ func TestAllocSegment(t *testing.T) {
 		expectResult bool
 	}{
 		{collID, 100, "c1", 100, true},
-		{collID + 1, 100, "c1", 100, false},
-		{collID, 101, "c1", 100, false},
-		{collID, 100, "c3", 100, false},
 		{collID, 100, "c1", math.MaxInt64, false},
 	}
 	for _, c := range cases {
