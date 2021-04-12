@@ -12,19 +12,19 @@
 
 ```go
 type QueryService interface {
-  Service
-  Component
-  
-  RegisterNode(ctx context.Context, req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error)
-  ShowCollections(ctx context.Context, req *querypb.ShowCollectionRequest) (*querypb.ShowCollectionResponse, error)
-  LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error)
-  ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)
-  ShowPartitions(ctx context.Context, req *querypb.ShowPartitionRequest) (*querypb.ShowPartitionResponse, error)
-  LoadPartitions(ctx context.Context, req *querypb.LoadPartitionRequest) (*commonpb.Status, error)
-  ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionRequest) (*commonpb.Status, error)
-  CreateQueryChannel(ctx context.Context) (*querypb.CreateQueryChannelResponse, error)
-  GetPartitionStates(ctx context.Context, req *querypb.PartitionStatesRequest) (*querypb.PartitionStatesResponse, error)
-  GetSegmentInfo(ctx context.Context, req *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error)
+	Component
+	TimeTickProvider
+
+	RegisterNode(ctx context.Context, req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error)
+	ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error)
+	LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error)
+	ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)
+	ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error)
+	LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error)
+	ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error)
+	CreateQueryChannel(ctx context.Context) (*querypb.CreateQueryChannelResponse, error)
+	GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error)
+	GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
 }
 ```
 
@@ -34,29 +34,29 @@ type QueryService interface {
 
 ```go
 type MsgBase struct {
-  MsgType MsgType
-  MsgID	UniqueID
-  Timestamp Timestamp
-  SourceID UniqueID
+	MsgType MsgType
+	MsgID	UniqueID
+	Timestamp Timestamp
+	SourceID UniqueID
 }
 ```
 
 * *RegisterNode*
 
 ```go
-tyoe Address struct {
-  Ip   string
-  port int64
+type Address struct {
+	Ip   string
+	port int64
 }
 
 type RegisterNodeRequest struct {
-  Base    *commonpb.MsgBase
-  Address *commonpb.Address
+	Base    *commonpb.MsgBase
+	Address *commonpb.Address
 }
 
 type RegisterNodeResponse struct {
-  Status     *commonpb.Status
-  InitParams *internalpb2.InitParams
+	Status     *commonpb.Status
+	InitParams *internalpb.InitParams
 }
 ```
 
@@ -64,13 +64,13 @@ type RegisterNodeResponse struct {
 
 ```go
 type ShowCollectionRequest struct {
-  Base *commonpb.MsgBase
-  DbID UniqueID
+	Base *commonpb.MsgBase
+	DbID UniqueID
 }
 
 type ShowCollectionResponse struct {
-  Status        *commonpb.Status
-  CollectionIDs []UniqueID
+	Status        *commonpb.Status
+	CollectionIDs []UniqueID
 }
 ```
 
@@ -78,10 +78,10 @@ type ShowCollectionResponse struct {
 
 ```go
 type LoadCollectionRequest struct {
-  Base         *commonpb.MsgBase
-  DbID         UniqueID
-  CollectionID UniqueID
-  schema       *schemapb.CollectionSchema
+	Base         *commonpb.MsgBase
+	DbID         UniqueID
+	CollectionID UniqueID
+	schema       *schemapb.CollectionSchema
 }
 ```
 
@@ -89,9 +89,9 @@ type LoadCollectionRequest struct {
 
 ```go
 type ReleaseCollectionRequest struct {
-  Base         *commonpb.MsgBase
-  DbID         UniqueID
-  CollectionID UniqueID
+	Base         *commonpb.MsgBase
+	DbID         UniqueID
+	CollectionID UniqueID
 }
 ```
 
@@ -99,14 +99,14 @@ type ReleaseCollectionRequest struct {
 
 ```go
 type ShowPartitionRequest struct {
-  Base         *commonpb.MsgBase
-  DbID         UniqueID
-  CollectionID UniqueID
+	Base         *commonpb.MsgBase
+	DbID         UniqueID
+	CollectionID UniqueID
 }
 
 type ShowPartitionResponse struct {
-  Status       *commonpb.Status
-  PartitionIDs []UniqueID
+	Status       *commonpb.Status
+	PartitionIDs []UniqueID
 }
 ```
 
@@ -116,30 +116,30 @@ type ShowPartitionResponse struct {
 type PartitionState = int
 
 const (
-  PartitionState_NotExist        PartitionState = 0
-  PartitionState_NotPresent      PartitionState = 1
-  PartitionState_OnDisk          PartitionState = 2
-  PartitionState_PartialInMemory PartitionState = 3
-  PartitionState_InMemory        PartitionState = 4
-  PartitionState_PartialInGPU    PartitionState = 5
-  PartitionState_InGPU           PartitionState = 6
+	PartitionState_NotExist        PartitionState = 0
+	PartitionState_NotPresent      PartitionState = 1
+	PartitionState_OnDisk          PartitionState = 2
+	PartitionState_PartialInMemory PartitionState = 3
+	PartitionState_InMemory        PartitionState = 4
+	PartitionState_PartialInGPU    PartitionState = 5
+	PartitionState_InGPU           PartitionState = 6
 )
 
 type PartitionStatesRequest struct {
-  Base         *commonpb.MsgBase
-  DbID         UniqueID
-  CollectionID UniqueID
-  PartitionIDs []UniqueID
+	Base         *commonpb.MsgBase
+	DbID         UniqueID
+	CollectionID UniqueID
+	PartitionIDs []UniqueID
 }
 
 type PartitionStates struct {
-  PartitionID UniqueID
-  State       PartitionState
+	PartitionID UniqueID
+	State       PartitionState
 }
 
 type PartitionStatesResponse struct {
-  Status                *commonpb.Status
-  PartitionDescriptions []*PartitionStates
+	Status                *commonpb.Status
+	PartitionDescriptions []*PartitionStates
 }
 ```
 
@@ -147,11 +147,11 @@ type PartitionStatesResponse struct {
 
 ```go
 type LoadPartitonRequest struct {
-  Base         *commonpb.MsgBase
-  DbID         UniqueID
-  CollectionID UniqueID
-  PartitionIDs []UniqueID
-  Schema       *schemapb.CollectionSchema
+	Base         *commonpb.MsgBase
+	DbID         UniqueID
+	CollectionID UniqueID
+	PartitionIDs []UniqueID
+	Schema       *schemapb.CollectionSchema
 }
 ```
 
@@ -159,10 +159,10 @@ type LoadPartitonRequest struct {
 
 ```go
 type ReleasePartitionRequest struct {
-  Base         *commonpb.MsgBase
-  DbID         UniqueID
-  CollectionID UniqueID
-  PartitionIDs []UniqueID
+	Base         *commonpb.MsgBase
+	DbID         UniqueID
+	CollectionID UniqueID
+	PartitionIDs []UniqueID
 }
 ```
 
@@ -170,50 +170,56 @@ type ReleasePartitionRequest struct {
 
 ```go
 type CreateQueryChannelResponse struct {
-  Status             *commonpb.Status
-  RequestChannelName string
-  ResultChannelName  string
+	Status             *commonpb.Status
+	RequestChannelName string
+	ResultChannelName  string
 }
 ```
 
 * *GetSegmentInfo* *
 
 ```go
-type SegmentInfoRequest struct {
-  Base       *commonpb.MsgBase
-  SegmentIDs []UniqueID
+type GetSegmentInfoRequest struct {
+	Base       *commonpb.MsgBase
+	SegmentIDs []UniqueID
 }
 
 type SegmentInfo struct {
-  SegmentID    UniqueID
-  CollectionID UniqueID
-  PartitionID  UniqueID
-  MemSize      UniqueID
-  NumRows      UniqueID
-  IndexName    string
-  IndexID      UniqueID
+	SegmentID    UniqueID
+	CollectionID UniqueID
+	PartitionID  UniqueID
+	MemSize      UniqueID
+	NumRows      UniqueID
+	IndexName    string
+	IndexID      UniqueID
 }
 
-type SegmentInfoResponse struct {
-  Status *commonpb.Status
-  Infos  []*SegmentInfo
+type GetSegmentInfoResponse struct {
+	Status *commonpb.Status
+	Infos  []*SegmentInfo
 }
 ```
 
-//TODO
 #### 8.2 Query Channel
+
+* *SearchMsg*
 
 ```go
 type SearchRequest struct {
-  RequestBase
-  DbName string
-  CollectionName string
-  PartitionNames []string
-  DbID UniqueID
-  CollectionID UniqueID
-  PartitionIDs []UniqueID
-  Dsl string
-  PlaceholderGroup []byte
+	Base            *commonpb.MsgBase
+	ResultChannelID string
+	DbID            int64
+	CollectionID    int64
+	PartitionIDs    []int64
+	Dsl             string
+	// serialized `PlaceholderGroup`
+	PlaceholderGroup []byte
+	Query            *commonpb.Blob
+}
+
+type SearchMsg struct {
+	BaseMsg
+	SearchRequest
 }
 ```
 
@@ -223,16 +229,17 @@ type SearchRequest struct {
 
 ```go
 type QueryNode interface {
-  typeutil.Component
-  
-  AddQueryChannel(ctx context.Context, in *queryPb.AddQueryChannelsRequest) (*commonpb.Status, error)
-  RemoveQueryChannel(ctx context.Context, in *queryPb.RemoveQueryChannelsRequest) (*commonpb.Status, error)
-  WatchDmChannels(ctx context.Context, in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error)
-  LoadSegments(ctx context.Context, in *queryPb.LoadSegmentRequest) (*commonpb.Status, error)
-  ReleaseCollection(ctx context.Context, in *queryPb.ReleaseCollectionRequest) (*commonpb.Status, error)
-  ReleasePartitions(ctx context.Context, in *queryPb.ReleasePartitionRequest) (*commonpb.Status, error)
-  ReleaseSegments(ctx context.Context, in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error)
-  GetSegmentInfo(ctx context.Context, in *queryPb.SegmentInfoRequest) (*queryPb.SegmentInfoResponse, error)
+	Component
+	TimeTickProvider
+
+	AddQueryChannel(ctx context.Context, req *querypb.AddQueryChannelRequest) (*commonpb.Status, error)
+	RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQueryChannelRequest) (*commonpb.Status, error)
+	WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error)
+	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error)
+	ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)
+	ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error)
+	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error)
+	GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
 }
 ```
 
@@ -242,9 +249,9 @@ type QueryNode interface {
 
 ```go
 type AddQueryChannelRequest struct {
-  Base             *commonpb.MsgBase
-  RequestChannelID string
-  ResultChannelID  string
+	Base             *commonpb.MsgBase
+	RequestChannelID string
+	ResultChannelID  string
 }
 ```
 
@@ -252,10 +259,10 @@ type AddQueryChannelRequest struct {
 
 ```go
 type RemoveQueryChannelRequest struct {
-  Status           *commonpb.Status
-  Base             *commonpb.MsgBase
-  RequestChannelID string
-  ResultChannelID  string
+	Status           *commonpb.Status
+	Base             *commonpb.MsgBase
+	RequestChannelID string
+	ResultChannelID  string
 }
 ```
 
@@ -263,77 +270,77 @@ type RemoveQueryChannelRequest struct {
 
 ```go
 type WatchDmChannelInfo struct {
-  ChannelID            string
-  Pos                  *internalpb2.MsgPosition
-  ExcludedSegments     []int64
+	ChannelID        string
+	Pos              *internalpb.MsgPosition
+	ExcludedSegments []int64
 }
 
 type WatchDmChannelsRequest struct {
-  Base                 *commonpb.MsgBase 
-  CollectionID         int64 
-  ChannelIDs           []string
-  Infos                []*WatchDmChannelsInfo
+	Base         *commonpb.MsgBase
+	CollectionID int64
+	ChannelIDs   []string
+	Infos        []*WatchDmChannelsInfo
 }
 ```
 
 * *LoadSegments*
 
 ```go
-type LoadSegmentRequest struct {
-  Base          *commonpb.MsgBase
-  DbID          UniqueID
-  CollectionID  UniqueID
-  PartitionID   UniqueID
-  SegmentIDs    []UniqueID
-  FieldIDs      []UniqueID
-  SegmentStates []*datapb.SegmentStateInfo
-  Schema        *schemapb.CollectionSchema
+type LoadSegmentsRequest struct {
+	Base          *commonpb.MsgBase
+	DbID          UniqueID
+	CollectionID  UniqueID
+	PartitionID   UniqueID
+	SegmentIDs    []UniqueID
+	FieldIDs      []UniqueID
+	SegmentStates []*datapb.SegmentStateInfo
+	Schema        *schemapb.CollectionSchema
 }
 ```
 * *ReleaseCollection*
 
 ```go
 type ReleaseCollectionRequest struct {
-  Base         *commonpb.MsgBase
-  DbID         UniqueID
-  CollectionID UniqueID
+	Base         *commonpb.MsgBase
+	DbID         UniqueID
+	CollectionID UniqueID
 }
 ```
 
 * *ReleasePartitions*
 
 ```go
-type ReleasePartitionRequest struct {
-  Base         *commonpb.MsgBase
-  DbID         UniqueID
-  CollectionID UniqueID
-  PartitionIDs []UniqueID
+type ReleasePartitionsRequest struct {
+	Base         *commonpb.MsgBase
+	DbID         UniqueID
+	CollectionID UniqueID
+	PartitionIDs []UniqueID
 }
 ```
 
 * *ReleaseSegments*
 
 ```go
-type ReleaseSegmentRequest struct {
-  Base         *commonpb.MsgBas
-  DbID         UniqueID
-  CollectionID UniqueID
-  PartitionIDs []UniqueID
-  SegmentIDs   []UniqueID
+type ReleaseSegmentsRequest struct {
+	Base         *commonpb.MsgBase
+	DbID         UniqueID
+	CollectionID UniqueID
+	PartitionIDs []UniqueID
+	SegmentIDs   []UniqueID
 }
 ```
 
 * *GetSegmentInfo*
 
 ```go
-type SegmentInfoRequest struct {
-  Base       *commonpb.MsgBase
-  SegmentIDs []Unique
+type GetSegmentInfoRequest struct {
+	Base       *commonpb.MsgBase
+	SegmentIDs []Unique
 }
 
-type SegmentInfoResponse struct {
-  Status *commonpb.Status
-  Infos  []*SegmentInfo
+type GetSegmentInfoResponse struct {
+	Status *commonpb.Status
+	Infos  []*SegmentInfo
 
 }
 ```
@@ -348,27 +355,56 @@ Every replica tracks a value called tSafe which is the maximum timestamp that th
 ###### 8.1.1 Collection
 
 ``` go
-type Collection struct {
-  Name string
-  Id uint64
-  Fields map[string]FieldMeta
-  SegmentsId []uint64
-  
-  cCollectionSchema C.CCollectionSchema
+type collectionReplica struct {
+	tSafes map[UniqueID]tSafer // map[collectionID]tSafer
+
+	mu          sync.RWMutex // guards all
+	collections map[UniqueID]*Collection
+	partitions  map[UniqueID]*Partition
+	segments    map[UniqueID]*Segment
+
+	excludedSegments map[UniqueID][]UniqueID // map[collectionID]segmentIDs
 }
 ```
 
 
 
-###### 8.1.2 Field Meta
+###### 8.1.2 Collection
 
 ```go
-type FieldMeta struct {
-  Name string
-  Id uint64
-  IsPrimaryKey bool
-  TypeParams map[string]string
-  IndexParams map[string]string
+type FieldSchema struct {
+	FieldID      int64
+	Name         string
+	IsPrimaryKey bool
+	Description  string
+	DataType     DataType
+	TypeParams   []*commonpb.KeyValuePair
+	IndexParams  []*commonpb.KeyValuePair
+}
+
+type CollectionSchema struct {
+	Name        string
+	Description string
+	AutoID      bool
+	Fields      []*FieldSchema
+}
+
+type Collection struct {
+	collectionPtr C.CCollection
+	id            UniqueID
+	partitionIDs  []UniqueID
+	schema        *schemapb.CollectionSchema
+}
+```
+
+###### 8.1.3 Partition
+
+```go
+type Partition struct {
+	collectionID UniqueID
+	partitionID  UniqueID
+	segmentIDs   []UniqueID
+	enable       bool
 }
 ```
 
@@ -377,15 +413,39 @@ type FieldMeta struct {
 ###### 8.1.3 Segment
 
 ``` go
+type segmentType int32
+
+const (
+	segmentTypeInvalid segmentType = iota
+	segmentTypeGrowing
+	segmentTypeSealed
+	segmentTypeIndexing
+)
+type indexParam = map[string]string
+
 type Segment struct {
-  Id uint64
-  ParitionName string
-  CollectionId uint64
-  OpenTime Timestamp
-  CloseTime Timestamp
-  NumRows uint64
-  
-  cSegment C.CSegmentBase
+	segmentPtr C.CSegmentInterface
+
+	segmentID    UniqueID
+	partitionID  UniqueID
+	collectionID UniqueID
+	lastMemSize  int64
+	lastRowCount int64
+
+	once             sync.Once // guards enableIndex
+	enableIndex      bool
+	enableLoadBinLog bool
+
+	rmMutex          sync.Mutex // guards recentlyModified
+	recentlyModified bool
+
+	typeMu      sync.Mutex // guards builtIndex
+	segmentType segmentType
+
+	paramMutex sync.RWMutex // guards index
+	indexParam map[int64]indexParam
+	indexName  string
+	indexID    UniqueID
 }
 ```
 
@@ -395,11 +455,16 @@ type Segment struct {
 
 ```go
 type dataSyncService struct {
-	ctx context.Context
-	pulsarURL string
-	fg *flowgraph.TimeTickedFlowGraph
-	msgStream *msgstream.PulsarMsgStream
-	dataReplica Replica
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	collectionID UniqueID
+	fg           *flowgraph.TimeTickedFlowGraph
+
+	dmStream  msgstream.MsgStream
+	msFactory msgstream.Factory
+
+	replica ReplicaInterface
 }
 ```
 

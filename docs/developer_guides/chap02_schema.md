@@ -6,10 +6,10 @@
 
 ``` go
 type CollectionSchema struct {
-  Name        string
-  Description string
-  AutoId      bool
-  Fields      []*FieldSchema
+	Name        string
+	Description string
+	AutoId      bool
+	Fields      []*FieldSchema
 }
 ```
 
@@ -17,13 +17,13 @@ type CollectionSchema struct {
 
 ``` go
 type FieldSchema struct {
-  FieldID      int64
-  Name         string
-  IsPrimaryKey bool
-  Description  string
-  DataType     DataType
-  TypeParams   []*commonpb.KeyValuePair
-  IndexParams  []*commonpb.KeyValuePair
+	FieldID      int64
+	Name         string
+	IsPrimaryKey bool
+	Description  string
+	DataType     DataType
+	TypeParams   []*commonpb.KeyValuePair
+	IndexParams  []*commonpb.KeyValuePair
 }
 ```
 
@@ -33,20 +33,20 @@ type FieldSchema struct {
 
 ```protobuf
 enum DataType {
-    NONE  = 0;
-    BOOL  = 1;
-    INT8  = 2;
-    INT16 = 3;
-    INT32 = 4;
-    INT64 = 5;
+  NONE  = 0;
+  BOOL  = 1;
+  INT8  = 2;
+  INT16 = 3;
+  INT32 = 4;
+  INT64 = 5;
 
-    FLOAT  = 10;
-    DOUBLE = 11;
+  FLOAT  = 10;
+  DOUBLE = 11;
 
-    STRING = 20;
+  STRING = 20;
 
-    VECTOR_BINARY = 100;
-    VECTOR_FLOAT  = 101;
+  VECTOR_BINARY = 100;
+  VECTOR_FLOAT  = 101;
 }
 ```
 
@@ -83,10 +83,7 @@ Different index types use different index params in construction and query. All 
 
 ## IVF_FLAT
 
-**IVF** (*Inverted File*) is an index type based on quantization. It divides the points in space into `nlist`
-units by clustering method. During searching vectors, it compares the distances between the target vector
-and the center of all the units, and then select the `nprobe` nearest unit. Then, it compares all the vectors
-in these selected cells to get the final result.
+**IVF** (*Inverted File*) is an index type based on quantization. It divides the points in space into `nlist` units by clustering method. During searching vectors, it compares the distances between the target vector and the center of all the units, and then select the `nprobe` nearest unit. Then, it compares all the vectors in these selected cells to get the final result.
 
 IVF_FLAT is the most basic IVF index, and the encoded data stored in each unit is consistent with the original data.
 
@@ -101,7 +98,7 @@ IVF_FLAT is the most basic IVF index, and the encoded data stored in each unit i
 {
     "index_type": "IVF_FLAT",
     "metric_type": "L2",  # one of L2, IP
-  
+
     #Special for IVF_FLAT
     "nlist": 100     # int. 1~65536
 }
@@ -117,7 +114,7 @@ IVF_FLAT is the most basic IVF index, and the encoded data stored in each unit i
     "topk": top_k,
     "query": queries,
     "metric_type": "L2",  # one of L2, IP
-  
+
     #Special for IVF_FLAT
     "nprobe": 8       # int. 1~nlist(cpu), 1~min[2048, nlist](gpu)
 }
@@ -136,7 +133,7 @@ IVF_FLAT is the most basic IVF index, and the encoded data stored in each unit i
 {
     "index_type": "BIN_IVF_FLAT",
     "metric_type": "jaccard",  # one of jaccard, hamming, tanimoto
-  
+
     #Special for BIN_IVF_FLAT
     "nlist": 100           # int. 1~65536
 }
@@ -152,7 +149,7 @@ IVF_FLAT is the most basic IVF index, and the encoded data stored in each unit i
 {
     "topk": top_k,
     "query": queries,
-  
+
   	#Special for BIN_IVF_FLAT
     "metric_type": "jaccard",  # one of jaccard, hamming, tanimoto
     "nprobe": 8            # int. 1~nlist(cpu), 1~min[2048, nlist](gpu)
@@ -163,14 +160,9 @@ IVF_FLAT is the most basic IVF index, and the encoded data stored in each unit i
 
 ## IVF_PQ
 
-**PQ** (*Product Quantization*) uniformly decomposes the original high-dimensional vector space into
-Cartesian products of `m` low-dimensional vector spaces, and then quantizes the decomposed low-dimensional
-vector spaces. Instead of calculating the distances between the target vector and the center of all the units,
-product quantization enables the calculation of distances between the target vector and the clustering center
-of each low-dimensional space and greatly reduces the time complexity and space complexity of the algorithm.
+**PQ** (*Product Quantization*) uniformly decomposes the original high-dimensional vector space into Cartesian products of `m` low-dimensional vector spaces, and then quantizes the decomposed low-dimensional vector spaces. Instead of calculating the distances between the target vector and the center of all the units, product quantization enables the calculation of distances between the target vector and the clustering center of each low-dimensional space and greatly reduces the time complexity and space complexity of the algorithm.
 
-IVF_PQ performs IVF index clustering, and then quantizes the product of vectors. Its index file is even
-smaller than IVF_SQ8, but it also causes a loss of accuracy during searching.
+IVF_PQ performs IVF index clustering, and then quantizes the product of vectors. Its index file is even smaller than IVF_SQ8, but it also causes a loss of accuracy during searching.
 
 - building parameters:
 
@@ -183,7 +175,7 @@ smaller than IVF_SQ8, but it also causes a loss of accuracy during searching.
 {
     "index_type": "IVF_PQ",
     "metric_type": "L2",  # one of L2, IP
-  
+
 		#Special for IVF_PQ
     "nlist": 100,     # int. 1~65536
     "m": 8
@@ -200,7 +192,7 @@ smaller than IVF_SQ8, but it also causes a loss of accuracy during searching.
     "topk": top_k,
     "query": queries,
     "metric_type": "L2",  # one of L2, IP
-  
+
     #Special for IVF_PQ
     "nprobe": 8       # int. 1~nlist(cpu), 1~min[2048, nlist](gpu)
 }
@@ -208,13 +200,10 @@ smaller than IVF_SQ8, but it also causes a loss of accuracy during searching.
 
 ## IVF_SQ8
 
-**IVF_SQ8** does scalar quantization for each vector placed in the unit based on IVF. Scalar quantization
-converts each dimension of the original vector from a 4-byte floating-point number to a 1-byte unsigned integer,
-so the IVF_SQ8 index file occupies much less space than the IVF_FLAT index file.
-However, scalar quantization results in a loss of accuracy during searching vectors.
+**IVF_SQ8** does scalar quantization for each vector placed in the unit based on IVF. Scalar quantization converts each dimension of the original vector from a 4-byte floating-point number to a 1-byte unsigned integer, so the IVF_SQ8 index file occupies much less space than the IVF_FLAT index file. However, scalar quantization results in a loss of accuracy during searching vectors.
 
 - building parameters:
-  
+
   **nlist**: Number of cluster units.
 
 ```python
@@ -222,7 +211,7 @@ However, scalar quantization results in a loss of accuracy during searching vect
 {
     "index_type": "IVF_SQ8",
     "metric_type": "L2",  # one of L2, IP
-  
+
   	#Special for IVF_SQ8
     "nlist": 100      # int. 1~65536
 }
@@ -238,7 +227,7 @@ However, scalar quantization results in a loss of accuracy during searching vect
     "topk": top_k,
     "query": queries,
     "metric_type": "L2",  # one of L2, IP
-            
+
     #Special for IVF_SQ8
     "nprobe": 8       # int. 1~nlist(cpu), 1~min[2048, nlist](gpu)
 }
@@ -246,16 +235,14 @@ However, scalar quantization results in a loss of accuracy during searching vect
 
 ## IVF_SQ8_HYBRID
 
-Optimized version of IVF_SQ8 that requires both CPU and GPU to work. Unlike IVF_SQ8, IVF_SQ8H uses a GPU-based
-coarse quantizer, which greatly reduces time to quantize.
+Optimized version of IVF_SQ8 that requires both CPU and GPU to work. Unlike IVF_SQ8, IVF_SQ8H uses a GPU-based coarse quantizer, which greatly reduces time to quantize.
 
 IVF_SQ8H is an IVF_SQ8 index that optimizes query execution.
 
 The query method is as follows:
 
 - If `nq` ≥ `gpu_search_threshold`, GPU handles the entire query task.
-- If `nq` < `gpu_search_threshold`, GPU handles the task of retrieving the `nprobe` nearest unit in the IVF
-index file, and CPU handles the rest.
+- If `nq` < `gpu_search_threshold`, GPU handles the task of retrieving the `nprobe` nearest unit in the IVF index file, and CPU handles the rest.
 
 - building parameters:
 
@@ -266,7 +253,7 @@ index file, and CPU handles the rest.
 {
     "index_type": "IVF_SQ8_HYBRID",
     "metric_type": "L2",  # one of L2, IP
-    
+
   	#Special for IVF_SQ8_HYBRID
     "nlist": 100      # int. 1~65536
 }
@@ -282,7 +269,7 @@ index file, and CPU handles the rest.
     "topk": top_k,
     "query": queries,
     "metric_type": "L2",  # one of L2, IP
-  
+
     #Special for IVF_SQ8_HYBRID
     "nprobe": 8       # int. 1~nlist(cpu), 1~min[2048, nlist](gpu)
 }
@@ -290,15 +277,9 @@ index file, and CPU handles the rest.
 
 ## ANNOY
 
-**ANNOY** (*Approximate Nearest Neighbors Oh Yeah*) is an index that uses a hyperplane to divide a
-high-dimensional space into multiple subspaces, and then stores them in a tree structure.
+**ANNOY** (*Approximate Nearest Neighbors Oh Yeah*) is an index that uses a hyperplane to divide a high-dimensional space into multiple subspaces, and then stores them in a tree structure.
 
-When searching for vectors, ANNOY follows the tree structure to find subspaces closer to the target vector,
-and then compares all the vectors in these subspaces (The number of vectors being compared should not be
-less than `search_k`) to obtain the final result. Obviously, when the target vector is close to the edge of
-a certain subspace, sometimes it is necessary to greatly increase the number of searched subspaces to obtain
-a high recall rate. Therefore, ANNOY uses `n_trees` different methods to divide the whole space, and searches
-all the dividing methods simultaneously to reduce the probability that the target vector is always at the edge of the subspace.
+When searching for vectors, ANNOY follows the tree structure to find subspaces closer to the target vector, and then compares all the vectors in these subspaces (The number of vectors being compared should not be less than `search_k`) to obtain the final result. Obviously, when the target vector is close to the edge of a certain subspace, sometimes it is necessary to greatly increase the number of searched subspaces to obtain a high recall rate. Therefore, ANNOY uses `n_trees` different methods to divide the whole space, and searches all the dividing methods simultaneously to reduce the probability that the target vector is always at the edge of the subspace.
 
 - building parameters:
 
@@ -309,7 +290,7 @@ all the dividing methods simultaneously to reduce the probability that the targe
 {
     "index_type": "ANNOY",
     "metric_type": "L2",  # one of L2, IP
-  
+
     #Special for ANNOY
     "n_trees": 8      # int. 1~1024
 }
@@ -325,7 +306,7 @@ all the dividing methods simultaneously to reduce the probability that the targe
     "topk": top_k,
     "query": queries,
     "metric_type": "L2",  # one of L2, IP
-    
+
   	#Special for ANNOY
     "search_k": -1    # int. {-1} U [top_k, n*n_trees], n represents vectors count.
 }
@@ -333,12 +314,7 @@ all the dividing methods simultaneously to reduce the probability that the targe
 
 ## HNSW
 
-**HNSW** (*Hierarchical Navigable Small World Graph*) is a graph-based indexing algorithm. It builds a
-multi-layer navigation structure for an image according to certain rules. In this structure, the upper
-layers are more sparse and the distances between nodes are farther; the lower layers are denser and 
-he distances between nodes are closer. The search starts from the uppermost layer, finds the node closest
-to the target in this layer, and then enters the next layer to begin another search. After multiple iterations,
-it can quickly approach the target position.
+**HNSW** (*Hierarchical Navigable Small World Graph*) is a graph-based indexing algorithm. It builds a multi-layer navigation structure for an image according to certain rules. In this structure, the upper layers are more sparse and the distances between nodes are farther; the lower layers are denser and the distances between nodes are closer. The search starts from the uppermost layer, finds the node closest to the target in this layer, and then enters the next layer to begin another search. After multiple iterations, it can quickly approach the target position.
 
 In order to improve performance, HNSW limits the maximum degree of nodes on each layer of the graph to `M`.
 In addition, you can use `efConstruction` (when building index) or `ef` (when searching targets) to specify a search range.
@@ -354,7 +330,7 @@ In addition, you can use `efConstruction` (when building index) or `ef` (when se
 {
     "index_type": "HNSW",
     "metric_type": "L2",      # one of L2, IP
-  
+
     #Special for HNSW
     "M": 16,              # int. 4~64
     "efConstruction": 40  # int. 8~512
@@ -369,19 +345,18 @@ In addition, you can use `efConstruction` (when building index) or `ef` (when se
 # HNSW
 
 {
-        "topk": top_k,
-        "query": queries,
-        "metric_type": "L2",  # one of L2, IP
-        
-  			#Special for HNSW
-        "ef": 64          # int. top_k~32768
+    "topk": top_k,
+    "query": queries,
+    "metric_type": "L2",  # one of L2, IP
+
+    #Special for HNSW
+    "ef": 64          # int. top_k~32768
 }
 ```
 
 ## RHNSW_PQ
 
-**RHNSW_PQ** is a variant index type combining PQ and HNSW. It first uses PQ to quantize the vector,
-then uses HNSW to quantize the PQ quantization result to get the index.
+**RHNSW_PQ** is a variant index type combining PQ and HNSW. It first uses PQ to quantize the vector, then uses HNSW to quantize the PQ quantization result to get the index.
 
 - building parameters:
 
@@ -396,7 +371,7 @@ then uses HNSW to quantize the PQ quantization result to get the index.
 {
     "index_type": "RHNSW_PQ",
     "metric_type": "L2",
-  
+
     #Special for RHNSW_PQ
     "M": 16,               # int. 4~64
     "efConstruction": 40,  # int. 8~512
@@ -414,9 +389,9 @@ then uses HNSW to quantize the PQ quantization result to get the index.
     "topk": top_k,
     "query": queries,
     "metric_type": "L2",  # one of L2, IP
-        
-      
-  	#Special for RHNSW_PQ
+
+
+    #Special for RHNSW_PQ
     "ef": 64          # int. top_k~32768
 }
 ```
@@ -436,7 +411,7 @@ then uses HNSW to quantize the PQ quantization result to get the index.
 {
     "index_type": "RHNSW_SQ",
     "metric_type": "L2",      # one of L2, IP
-  
+
     #Special for RHNSW_SQ
     "M": 16,              # int. 4~64
     "efConstruction": 40  # int. 8~512
@@ -453,7 +428,7 @@ then uses HNSW to quantize the PQ quantization result to get the index.
     "topk": top_k,
     "query": queries,
     "metric_type": "L2",  # one of L2, IP
-  
+
     #Special for RHNSW_SQ
     "ef": 64          # int. top_k~32768
 }
@@ -461,10 +436,7 @@ then uses HNSW to quantize the PQ quantization result to get the index.
 
 ## NSG
 
-**NSG** (*Refined Navigating Spreading-out Graph*) is a graph-based indexing algorithm. It sets the center
-position of the whole image as a navigation point, and then uses a specific edge selection strategy to control
-the out-degree of each point (less than or equal to `out_degree`). Therefore, it can reduce memory usage and
-quickly locate the target position nearby during searching vectors.
+**NSG** (*Refined Navigating Spreading-out Graph*) is a graph-based indexing algorithm. It sets the center position of the whole image as a navigation point, and then uses a specific edge selection strategy to control the out-degree of each point (less than or equal to `out_degree`). Therefore, it can reduce memory usage and quickly locate the target position nearby during searching vectors.
 
 The graph construction process of NSG is as follows:
 
@@ -489,7 +461,7 @@ The query process is similar to the graph building process. It starts from the n
 {
     "index_type": "NSG",
     "metric_type": "L2",
-  
+
     #Special for RHNSW_SQ
     "search_length": 60,         # int. 10~300
     "out_degree": 30,            # int. 5~300
@@ -508,7 +480,7 @@ The query process is similar to the graph building process. It starts from the n
     "topk": top_k,
     "query": queries,
     "metric_type": "L2",      # one of L2, IP
-        
+
     #Special for RHNSW_SQ
     "search_length": 100  # int. 10~300
 }

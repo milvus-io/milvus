@@ -2,54 +2,82 @@
 
 ## Appendix A. Basic Components
 
-// TODO
-#### A.1 Watchdog
+#### A.1 System Component
 
-``` go
-type ActiveComponent interface {
-  Id() string
-  Status() Status
-  Clean() Status
-  Restart() Status
+Milvus has 9 different components, and can be abstracted into basic Component.
+
+```go
+type Component interface {
+	Init() error
+	Start() error
+	Stop() error
+	GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error)
+	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 }
-
-type ComponentHeartbeat interface {
-  Id() string
-  Status() Status
-  Serialize() string
-}
-
-type Watchdog struct {
-  targets [] *ActiveComponent
-  heartbeats ComponentHeartbeat chan
-}
-
-// register ActiveComponent
-func (dog *Watchdog) Register(target *ActiveComponent)
-
-// called by ActiveComponents
-func (dog *Watchdog) PutHeartbeat(heartbeat *ComponentHeartbeat)
-
-// dump heatbeats as log stream
-func (dog *Watchdog) dumpHeartbeat(heartbeat *ComponentHeartbeat)
 ```
+
+* *GetComponentStates*
+
+```go
+
+type StateCode = int
+
+const (
+	INITIALIZING StateCode = 0
+	HEALTHY      StateCode = 1
+	ABNORMAL     StateCode = 2
+)
+
+type ComponentInfo struct {
+	NodeID    UniqueID
+	Role      string
+	StateCode StateCode
+	ExtraInfo []*commonpb.KeyValuePair
+}
+
+type ComponentStates struct {
+	State                *ComponentInfo
+	SubcomponentStates   []*ComponentInfo
+	Status               *commonpb.Status
+}
+
+```
+
+If a component needs to process timetick message to align timetick, it needs to implement TimeTickProvider interface.
+
+
+```go
+type TimeTickProvider interface {
+	GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error)
+}
+```
+
 
 
 
 #### A.2 Global Parameter Table
 
 ``` go
-type GlobalParamsTable struct {
-  params memoryKV
+type BaseTable struct {
+	params *memkv.MemoryKV
 }
 
-func (gparams *GlobalParamsTable) Save(key, value string) error
-func (gparams *GlobalParamsTable) Load(key string) (string, error)
-func (gparams *GlobalParamsTable) LoadRange(key, endKey string, limit int) ([]string, []string, error)
-func (gparams *GlobalParamsTable) Remove(key string) error
-func (gparams *GlobalParamsTable) LoadYaml(filePath string) error
+func (gp *BaseTable) Init()
+func (gp *BaseTable) LoadFromKVPair(kvPairs []*commonpb.KeyValuePair) error
+func (gp *BaseTable) Load(key string) (string, error)
+func (gp *BaseTable) LoadRange(key, endKey string, limit int) ([]string, []string, error)
+func (gp *BaseTable) LoadYaml(fileName string) error
+func (gp *BaseTable) LoadYaml(fileName string) error
+func (gp *BaseTable) LoadYaml(fileName string) error
+func (gp *BaseTable) ParseFloat(key string) float64
+func (gp *BaseTable) ParseInt64(key string) int64
+func (gp *BaseTable) ParseInt32(key string) int32
+func (gp *BaseTable) ParseInt(key string) int
+func (gp *BaseTable) WriteNodeIDList() []UniqueID
+func (gp *BaseTable) DataNodeIDList() []UniqueID
+func (gp *BaseTable) ProxyIDList() []UniqueID
+func (gp *BaseTable) QueryNodeIDList() []UniqueID
 ```
-
 
 
 * *LoadYaml(filePath string)* turns a YAML file into multiple key-value pairs. For example, given the following YAML
@@ -57,30 +85,30 @@ func (gparams *GlobalParamsTable) LoadYaml(filePath string) error
 ```yaml
 etcd:
   address: localhost
-  port: 12379
+  port: 2379
   rootpath: milvus/etcd
 ```
 
-*GlobalParamsTable.LoadYaml* will insert three key-value pairs into *params*
+*BaseTable.LoadYaml* will insert three key-value pairs into *params*
 
 ```go
-"etcd.address" -> "localhost"
-"etcd.port" -> "12379"
-"etcd.rootpath" -> "milvus/etcd"
+	"etcd.address" -> "localhost"
+	"etcd.port" -> "2379"
+	"etcd.rootpath" -> "milvus/etcd"
 ```
 
 
 
 #### A.4 Time Ticked Flow Graph
 
-//TODO
+//TODO remove?
 ###### A.4.1 Flow Graph States
 
 ```go
 type flowGraphStates struct {
-  startTick Timestamp
-  numActiveTasks map[string]int32
-  numCompletedTasks map[string]int64
+	startTick         Timestamp
+	numActiveTasks    map[string]int32
+	numCompletedTasks map[string]int64
 }
 ```
 
@@ -88,7 +116,7 @@ type flowGraphStates struct {
 
 ```go
 type Msg interface {
-  TimeTick() Timestamp
+	TimeTick() Timestamp
 }
 ```
 
@@ -96,40 +124,34 @@ type Msg interface {
 
 ```go
 type Node interface {
-  Name() string
-  MaxQueueLength() int32
-  MaxParallelism() int32
-  Operate(ctx context.Context, in []Msg) ([]Msg, context.Context)
-  IsInputNode() bool
+	Name() string
+	MaxQueueLength() int32
+	MaxParallelism() int32
+	Operate(ctx context.Context, in []Msg) ([]Msg, context.Context)
+	IsInputNode() bool
+	Close()
 }
 ```
 
-
-
 ```go
-type baseNode struct {
-  maxQueueLength int32
-  maxParallelism int32
+type BaseNode struct {
+	maxQueueLength int32
+	maxParallelism int32
 }
-func (node *baseNode) MaxQueueLength() int32
-func (node *baseNode) MaxParallelism() int32
-func (node *baseNode) SetMaxQueueLength(n int32)
-func (node *baseNode) SetMaxParallelism(n int32)
-func (node *BaseNode) IsInputNode() bool
 ```
 
 ###### A.4.4 Flow Graph
 
 ```go
 type nodeCtx struct {
-  node                   Node
-  inputChannels          []chan *MsgWithCtx
-  inputMessages          []Msg
-  downstream             []*nodeCtx
-  downstreamInputChanIdx map[string]int
-  
-  NumActiveTasks    int64
-  NumCompletedTasks int64
+	node                   Node
+	inputChannels          []chan Msg
+	inputMessages          []Msg
+	downstream             []*nodeCtx
+	downstreamInputChanIdx map[string]int
+
+	NumActiveTasks    int64
+	NumCompletedTasks int64
 }
 
 func (nodeCtx *nodeCtx) Start(ctx context.Context) error
@@ -139,8 +161,8 @@ func (nodeCtx *nodeCtx) Start(ctx context.Context) error
 
 ```go
 type TimeTickedFlowGraph struct {
-  ctx     context.Context
-  nodeCtx map[NodeName]*nodeCtx
+	ctx     context.Context
+	nodeCtx map[NodeName]*nodeCtx
 }
 
 func (*pipeline TimeTickedFlowGraph) AddNode(node Node)
@@ -151,24 +173,52 @@ func (*pipeline TimeTickedFlowGraph) Close() error
 func NewTimeTickedFlowGraph(ctx context.Context) *TimeTickedFlowGraph
 ```
 
+#### A.5 Allocator
+
+```go
+type Allocator struct {
+	Ctx        context.Context
+	CancelFunc context.CancelFunc
+
+	wg sync.WaitGroup
+
+	Reqs      chan Request
+	ToDoReqs  []Request
+	CanDoReqs []Request
+	SyncReqs  []Request
+
+	TChan         TickerChan
+	ForceSyncChan chan Request
+
+	SyncFunc    func() bool
+	ProcessFunc func(req Request) error
+
+	CheckSyncFunc func(timeout bool) bool
+	PickCanDoFunc func()
+}
+func (ta *Allocator) Start() error
+func (ta *Allocator) Init() error
+func (ta *Allocator) Close() error
+func (ta *Allocator) CleanCache() error
+
+```
 
 
-#### A.5 ID Allocator
+#### A.6 ID Allocator
 
 ```go
 type IDAllocator struct {
-  Allocator
-  
-  masterAddress string
-  masterConn    *grpc.ClientConn
-  masterClient  masterpb.MasterServiceClient
-  
-  countPerRPC uint32
-  
-  idStart UniqueID
-  idEnd   UniqueID
-  
-  PeerID UniqueID
+	Allocator
+
+	masterAddress string
+	master types.MasterService
+
+	countPerRPC uint32
+
+	idStart UniqueID
+	idEnd   UniqueID
+
+	PeerID UniqueID
 }
 
 func (ia *IDAllocator) Start() error
@@ -195,7 +245,7 @@ Let's take a brief review of Hybrid Logical Clock (HLC). HLC uses 64bits timesta
 
 <img src="./figs/hlc.png" width=400>
 
-HLC's logical part is advanced on each request. The phsical part can be increased in two cases: 
+HLC's logical part is advanced on each request. The phsical part can be increased in two cases:
 
 A. when the local wall time is greater than HLC's physical part,
 
@@ -210,14 +260,14 @@ Milvus does not support transaction, but it should gurantee the deterministic ex
 - have its physical part close to wall time (has an acceptable bounded error, a.k.a. uncertainty interval in transaction senarios),
 - and be globally unique.
 
-HLC leverages on physical clocks at nodes that are synchronized using the NTP. NTP usually maintain time to within tens of milliseconds over local networks in datacenter. Asymmetric routes and network congestion occasionally cause errors of hundreds of milliseconds. Both the normal time error and the spike are acceptable for Milvus use cases. 
+HLC leverages on physical clocks at nodes that are synchronized using the NTP. NTP usually maintain time to within tens of milliseconds over local networks in datacenter. Asymmetric routes and network congestion occasionally cause errors of hundreds of milliseconds. Both the normal time error and the spike are acceptable for Milvus use cases.
 
 The interface of Timestamp is as follows.
 
 ```
 type timestamp struct {
-  physical uint64 // 18-63 bits
-  logical uint64  // 0-17 bits
+	physical uint64 // 18-63 bits
+	logical uint64  // 0-17 bits
 }
 
 type Timestamp uint64
@@ -229,20 +279,18 @@ type Timestamp uint64
 
 ```go
 type timestampOracle struct {
-  key    string
-  kvBase kv.TxnBase
-  
-  saveInterval  time.Duration
-  maxResetTSGap func() time.Duration
-  
-  TSO           unsafe.Pointer
-  lastSavedTime atomic.Value
+	key   string
+	txnkv kv.TxnBase
+
+	saveInterval  time.Duration
+	maxResetTSGap func() time.Duration
+
+	TSO           unsafe.Pointer
+	lastSavedTime atomic.Value
 }
 
 func (t *timestampOracle) InitTimestamp() error
 func (t *timestampOracle) ResetUserTimestamp(tso uint64) error
-func (t *timestampOracle) saveTimestamp(ts time.time) error
-func (t *timestampOracle) loadTimestamp() (time.time, error)
 func (t *timestampOracle) UpdateTimestamp() error
 func (t *timestampOracle) ResetTimestamp()
 ```
@@ -253,24 +301,18 @@ func (t *timestampOracle) ResetTimestamp()
 
 ```go
 type TimestampAllocator struct {
-  Allocator
-  
-  masterAddress string
-  masterConn    *grpc.ClientConn
-  masterClient  masterpb.MasterServiceClient
-  
-  countPerRPC uint32
-  lastTsBegin Timestamp
-  lastTsEnd   Timestamp
-  PeerID      UniqueID
+	Allocator
+
+	masterAddress string
+	masterClient  types.MasterService
+
+	countPerRPC uint32
+	lastTsBegin Timestamp
+	lastTsEnd   Timestamp
+	PeerID      UniqueID
 }
 
 func (ta *TimestampAllocator) Start() error
-func (ta *TimestampAllocator) connectMaster() error
-func (ta *TimestampAllocator) syncID() bool
-func (ta *TimestampAllocator) checkSyncFunc(timeout bool) bool
-func (ta *TimestampAllocator) pickCanDoFunc()
-func (ta *TimestampAllocator) processFunc(req Request) error
 func (ta *TimestampAllocator) AllocOne() (UniqueID, error)
 func (ta *TimestampAllocator) Alloc(count uint32) (UniqueID, UniqueID, error)
 func (ta *TimestampAllocator) ClearCache()
@@ -293,25 +335,28 @@ func NewTimestampAllocator(ctx context.Context, masterAddr string) (*TimestampAl
 ###### A.7.1 KV Base
 
 ```go
-type Base interface {
-  Load(key string) (string, error)
-  MultiLoad(keys []string) ([]string, error)
-  LoadWithPrefix(key string) ([]string, []string, error)
-  Save(key, value string) error
-  MultiSave(kvs map[string]string) error
-  Remove(key string) error
-  MultiRemove(keys []string) error
-  
-  Close()
+type BaseKV interface {
+	Load(key string) (string, error)
+	MultiLoad(keys []string) ([]string, error)
+	LoadWithPrefix(key string) ([]string, []string, error)
+	Save(key, value string) error
+	MultiSave(kvs map[string]string) error
+	Remove(key string) error
+	MultiRemove(keys []string) error
+
+	Close()
 }
 ```
 
 ###### A.7.2 Txn Base
 
 ```go
-type TxnBase interface {
-  Base
-  MultiSaveAndRemove(saves map[string]string, removals []string) error
+type TxnKV interface {
+	BaseKV
+	
+	MultiSaveAndRemove(saves map[string]string, removals []string) error
+	MultiRemoveWithPrefix(keys []string) error
+	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error
 }
 ```
 
@@ -343,5 +388,80 @@ func (kv *EtcdKV) WatchWithPrefix(key string) clientv3.WatchChan
 func NewEtcdKV(etcdAddr string, rootPath string) *EtcdKV
 ```
 
-EtcdKV implements all *TxnBase* interfaces.
+EtcdKV implements all *TxnKV* interfaces.
+
+###### A.7.4 Memory KV
+
+```go
+type MemoryKV struct {
+	sync.RWMutex
+	tree *btree.BTree
+}
+
+func (s memoryKVItem) Less(than btree.Item) bool
+func (kv *MemoryKV) Load(key string) (string, error)
+func (kv *MemoryKV) LoadRange(key, endKey string, limit int) ([]string, []string, error)
+func (kv *MemoryKV) Save(key, value string) error
+func (kv *MemoryKV) Remove(key string) error
+func (kv *MemoryKV) MultiLoad(keys []string) ([]string, error)
+func (kv *MemoryKV) MultiSave(kvs map[string]string) error
+func (kv *MemoryKV) MultiRemove(keys []string) error
+func (kv *MemoryKV) MultiSaveAndRemove(saves map[string]string, removals []string) error
+func (kv *MemoryKV) LoadWithPrefix(key string) ([]string, []string, error)
+func (kv *MemoryKV) Close()
+func (kv *MemoryKV) MultiRemoveWithPrefix(keys []string) error
+func (kv *MemoryKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error
+```
+
+MemoryKV implements all *TxnKV* interfaces.
+
+###### A.7.5 MinIO KV
+
+```go
+type MinIOKV struct {
+	ctx         context.Context
+	minioClient *minio.Client
+	bucketName  string
+}
+
+func (kv *MinIOKV) LoadWithPrefix(key string) ([]string, []string, error)
+func (kv *MinIOKV) Load(key string) (string, error)
+func (kv *MinIOKV) MultiLoad(keys []string) ([]string, error)
+func (kv *MinIOKV) Save(key, value string) error
+func (kv *MinIOKV) MultiSave(kvs map[string]string) error
+func (kv *MinIOKV) RemoveWithPrefix(key string) error
+func (kv *MinIOKV) Remove(key string) error
+func (kv *MinIOKV) MultiRemove(keys []string) error
+func (kv *MinIOKV) Close()
+```
+
+MinIOKV implements all *KV* interfaces.
+
+###### A.7.6 RocksdbKV KV
+
+```go
+type RocksdbKV struct {
+	opts         *gorocksdb.Options
+	db           *gorocksdb.DB
+	writeOptions *gorocksdb.WriteOptions
+	readOptions  *gorocksdb.ReadOptions
+	name         string
+}
+
+func (kv *RocksdbKV) Close()
+func (kv *RocksdbKV) GetName() string
+func (kv *RocksdbKV) Load(key string) (string, error)
+func (kv *RocksdbKV) LoadWithPrefix(key string) ([]string, []string, error)
+func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error)
+func (kv *RocksdbKV) Save(key, value string) error
+func (kv *RocksdbKV) MultiSave(kvs map[string]string) error
+func (kv *RocksdbKV) RemoveWithPrefix(key string) error
+func (kv *RocksdbKV) Remove(key string) error
+func (kv *RocksdbKV) MultiRemove(keys []string) error
+func (kv *RocksdbKV) MultiSaveAndRemove(saves map[string]string, removals []string) error
+func (kv *RocksdbKV) MultiRemoveWithPrefix(keys []string) error
+func (kv *RocksdbKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error
+```
+
+RocksdbKV implements all *TxnKV* interfaces.h
 

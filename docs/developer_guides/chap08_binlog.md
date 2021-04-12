@@ -8,7 +8,7 @@ Binlog is stored in a columnar storage format, every column in schema should be 
 
 ## Event format
 
-Binlog file consists of 4 bytes magic number and a series of events. The first event must be descriptor event. 
+Binlog file consists of 4 bytes magic number and a series of events. The first event must be descriptor event.
 
 ### Event format
 
@@ -16,7 +16,7 @@ Binlog file consists of 4 bytes magic number and a series of events. The first e
 +=====================================+
 | event  | timestamp         0 : 8    | create timestamp
 | header +----------------------------+
-|        | type_code         8 : 1    | event type code 
+|        | type_code         8 : 1    | event type code
 |        +----------------------------+
 |        | server_id         9 : 4    | write node id
 |        +----------------------------+
@@ -26,7 +26,7 @@ Binlog file consists of 4 bytes magic number and a series of events. The first e
 |        +----------------------------+
 |        | extra_headers    21 : x-21 | reserved part
 +=====================================+
-| event  | fixed part        x : y    | 
+| event  | fixed part        x : y    |
 | data   +----------------------------+
 |        | variable part              |
 +=====================================+
@@ -40,7 +40,7 @@ Binlog file consists of 4 bytes magic number and a series of events. The first e
 +=====================================+
 | event  | timestamp         0 : 8    | create timestamp
 | header +----------------------------+
-|        | type_code         8 : 1    | event type code 
+|        | type_code         8 : 1    | event type code
 |        +----------------------------+
 |        | server_id         9 : 4    | write node id
 |        +----------------------------+
@@ -48,7 +48,7 @@ Binlog file consists of 4 bytes magic number and a series of events. The first e
 |        +----------------------------+
 |        | next_position    17 : 4    | offset of next event from the start of file
 +=====================================+
-| event  | binlog_version   21 : 2    | binlog version 
+| event  | binlog_version   21 : 2    | binlog version
 | data   +----------------------------+
 |        | server_version   23 : 8    | write node version
 |        +----------------------------+
@@ -67,7 +67,7 @@ Binlog file consists of 4 bytes magic number and a series of events. The first e
 |        | end_timestamp    65 : 1    | maximum timestamp allocated by master of all events in this file
 |        +----------------------------+
 |        | post-header      66 : n    | array of n bytes, one byte per event type that the server knows about
-|        | lengths for all            | 
+|        | lengths for all            |
 |        | event types                |
 +=====================================+
 ```
@@ -132,7 +132,7 @@ Schema
 
 
 
-Request: 
+Request:
 
 ​	InsertRequest  rows(1W)
 
@@ -142,7 +142,7 @@ Request:
 
 
 
-insert binlogs: 
+insert binlogs:
 
 ​	rowid, pk, ts, string, int, float, vector 6 files
 
@@ -177,7 +177,7 @@ typedef struct CStatus {
   const char* error_msg;
 } CStatus
 
-  
+
 // C++ interface
 // writer
 CPayloadWriter NewPayloadWriter(int columnType);
