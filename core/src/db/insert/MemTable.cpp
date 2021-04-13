@@ -233,7 +233,7 @@ MemTable::ApplyDeletes() {
         auto& file = files[file_i];
         auto& id_bloom_filter_ptr = ids_check_pair[file_i].first;
         auto& ids_to_check = ids_check_pair[file_i].second;
-        ids_to_check.reserve(doc_ids_to_delete_.size() * 2);
+        ids_to_check.reserve(doc_ids_to_delete_.size());
 
         std::string segment_dir;
         utils::GetParentPath(file.location_, segment_dir);

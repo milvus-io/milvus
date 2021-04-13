@@ -4,9 +4,10 @@ Please mark all change in change log and use the issue from GitHub
 
 # Milvus 1.1.0 (TBD)
 ## Bug
--   \#4778 Fail to open vector index
+-   \#4778 Fix failure to open vector index in mishards
+-   \#4797 Fix wrong results of merged different 'topk' queries
 -   \#4858 Fix the crash when query for a large topk on GPU Flat
--   \#4862 The inserted data number increase automatically without any operations
+-   \#4862 Read-only nodes not to merge segments
 -   \#4894 The capacity of bloom filter should be determined by the row count of its segment
 -   \#4908 GPU cache will not be cleaned up in time after the collection is dropped
 

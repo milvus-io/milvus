@@ -396,25 +396,24 @@ SearchCombineRequest::OnExecute() {
 
         // step 5: construct result array
         // engine ensure each target vector has same count of id/distance pairs
-        size_t pair_each_vector = result_ids.size() / vectors_data_.vector_count_;
         offset = 0;
         for (auto& request : request_list_) {
             uint64_t count = request->VectorsData().vector_count_;
             int64_t topk = request->TopK();
-            uint64_t pair_cnt = (pair_each_vector > topk) ? topk : pair_each_vector;
             TopKQueryResult& result = request->QueryResult();
             result.row_num_ = count;
-            result.id_list_.resize(count * pair_cnt);
-            result.distance_list_.resize(count * pair_cnt);
+            result.id_list_.resize(count * topk);
+            result.distance_list_.resize(count * topk);
 
             for (uint64_t i = 0; i < count; i++) {
-                uint64_t poz = i * pair_cnt;
-                memcpy(result.id_list_.data() + poz, result_ids.data() + offset + poz, pair_cnt * sizeof(int64_t));
-                memcpy(result.distance_list_.data() + poz, result_distances.data() + offset + poz,
-                       pair_cnt * sizeof(float));
+                uint64_t pos_out = i * topk;
+                uint64_t pos_search = (offset + i) * search_topk_;
+                memcpy(result.id_list_.data() + pos_out, result_ids.data() + pos_search, topk * sizeof(int64_t));
+                memcpy(result.distance_list_.data() + pos_out, result_distances.data() + pos_search,
+                       topk * sizeof(float));
             }
 
-            offset += count * pair_cnt;
+            offset += count;
 
             // let request return
             FreeRequest(request, Status::OK());
