@@ -6,6 +6,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Bug
 -   \#4778 Fix failure to open vector index in mishards
 -   \#4797 Fix wrong results of merged different 'topk' queries
+-   \#4838 When an index created on the empty collection, the server will respond immediately
 -   \#4858 Fix the crash when query for a large topk on GPU Flat
 -   \#4862 Read-only nodes not to merge segments
 -   \#4894 The capacity of bloom filter should be determined by the row count of its segment
