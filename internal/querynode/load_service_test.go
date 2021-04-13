@@ -1122,7 +1122,6 @@ func TestSegmentLoad_Search_Vector(t *testing.T) {
 
 	// mock write insert bin log
 	keyPrefix := path.Join("query-node-seg-manager-test-minio-prefix", strconv.FormatInt(collectionID, 10), strconv.FormatInt(partitionID, 10))
-	Params.WriteNodeSegKvSubPath = keyPrefix
 
 	node := newQueryNodeMock()
 	defer node.Stop()

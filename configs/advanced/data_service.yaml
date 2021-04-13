@@ -3,11 +3,9 @@ dataservice:
   address: "127.0.0.1"
   port: 13333
   segment:
-    # old name: segmentThreshold: 536870912
     size: 512 # MB
     sizeFactor: 0.75
     defaultSizePerRecord: 1024
-    # old name: segmentExpireDuration: 2000
     IDAssignExpiration: 2000 # ms
   insertChannelNum: 2
   dataNodeNum: 1
