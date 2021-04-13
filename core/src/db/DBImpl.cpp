@@ -2410,7 +2410,8 @@ DBImpl::GetPartitionsByTags(const std::string& collection_id, const std::vector<
 }
 
 Status
-DBImpl::UpdateCollectionIndexRecursively(const std::string& collection_id, const CollectionIndex& index, bool meta_only) {
+DBImpl::UpdateCollectionIndexRecursively(const std::string& collection_id, const CollectionIndex& index,
+                                         bool meta_only) {
     if (!meta_only) {
         DropIndex(collection_id);
         WaitMergeFileFinish();  // DropIndex called StartMergeTask, need to wait merge thread finish
