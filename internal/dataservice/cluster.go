@@ -2,6 +2,7 @@ package dataservice
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -26,30 +27,27 @@ type dataNode struct {
 }
 type dataNodeCluster struct {
 	sync.RWMutex
-	finishCh chan struct{}
-	nodes    []*dataNode
+	nodes []*dataNode
 }
 
 func (node *dataNode) String() string {
 	return fmt.Sprintf("id: %d, address: %s:%d", node.id, node.address.ip, node.address.port)
 }
 
-func newDataNodeCluster(finishCh chan struct{}) *dataNodeCluster {
+func newDataNodeCluster() *dataNodeCluster {
 	return &dataNodeCluster{
-		finishCh: finishCh,
-		nodes:    make([]*dataNode, 0),
+		nodes: make([]*dataNode, 0),
 	}
 }
 
-func (c *dataNodeCluster) Register(dataNode *dataNode) {
+func (c *dataNodeCluster) Register(dataNode *dataNode) error {
 	c.Lock()
 	defer c.Unlock()
 	if c.checkDataNodeNotExist(dataNode.address.ip, dataNode.address.port) {
 		c.nodes = append(c.nodes, dataNode)
-		if len(c.nodes) == Params.DataNodeNum {
-			close(c.finishCh)
-		}
+		return nil
 	}
+	return errors.New("datanode already exist")
 }
 
 func (c *dataNodeCluster) checkDataNodeNotExist(ip string, port int64) bool {
@@ -151,6 +149,5 @@ func (c *dataNodeCluster) ShutDownClients() {
 func (c *dataNodeCluster) Clear() {
 	c.Lock()
 	defer c.Unlock()
-	c.finishCh = make(chan struct{})
 	c.nodes = make([]*dataNode, 0)
 }

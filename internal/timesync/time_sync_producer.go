@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/logutil"
+	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -39,7 +40,8 @@ func (producer *MsgProducer) broadcastMsg() {
 		}
 		tt, err := producer.ttBarrier.GetTimeTick()
 		if err != nil {
-			log.Debug("broadcast get time tick error")
+			log.Debug("broadcast get time tick error", zap.Error(err))
+			return
 		}
 		baseMsg := ms.BaseMsg{
 			BeginTimestamp: tt,

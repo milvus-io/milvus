@@ -55,7 +55,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 		ctx:     ctx2,
 		cancel:  cancel2,
 		Role:    typeutil.DataNodeRole,
-		watchDm: make(chan struct{}),
+		watchDm: make(chan struct{}, 1),
 
 		dataSyncService: nil,
 		metaService:     nil,
@@ -105,6 +105,9 @@ func (node *DataNode) Init() error {
 	resp, err := node.dataService.RegisterNode(ctx, req)
 	if err != nil {
 		return fmt.Errorf("Register node failed: %v", err)
+	}
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return fmt.Errorf("Receive error when registering data node, msg: %s", resp.Status.Reason)
 	}
 
 	select {
