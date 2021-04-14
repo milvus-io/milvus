@@ -925,8 +925,8 @@ MySQLMetaImpl::UpdateCollectionIndex(const std::string& collection_id, const Col
                 statement << "UPDATE " << META_TABLES << " SET id = " << id << " ,state = " << state
                           << " ,dimension = " << dimension << " ,created_on = " << created_on
                           << " ,engine_type = " << index.engine_type_ << " ,index_params = " << mysqlpp::quote
-                          << index.extra_params_.dump() << " ,metric_type = " << index.metric_type_
-                          << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
+                          << index.extra_params_.dump() << " WHERE table_id = " << mysqlpp::quote << collection_id
+                          << ";";
 
                 LOG_ENGINE_DEBUG_ << "UpdateCollectionIndex: " << statement.str();
 

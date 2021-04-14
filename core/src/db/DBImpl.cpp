@@ -1542,10 +1542,8 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
         }
 
         // step 3: update index info
-        CollectionIndex new_index = index;
-        new_index.metric_type_ = old_index.metric_type_;  // dont change metric type, it was defined by CreateCollection
-        if (!utils::IsSameIndex(old_index, new_index)) {
-            status = UpdateCollectionIndexRecursively(collection_id, new_index, false);
+        if (!utils::IsSameIndex(old_index, index)) {
+            status = UpdateCollectionIndexRecursively(collection_id, index, false);
             if (!status.ok()) {
                 return status;
             }

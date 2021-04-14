@@ -1078,8 +1078,7 @@ SqliteMetaImpl::UpdateCollectionIndex(const std::string& collection_id, const Co
             statement = "UPDATE " + std::string(META_TABLES) + " SET id = " + id + " ,state = " + state
                         + " ,dimension = " + dimension + " ,created_on = " + created_on
                         + " ,engine_type = " + std::to_string(index.engine_type_) + " ,index_params = "
-                        + Quote(index.extra_params_.dump()) + " ,metric_type = " + std::to_string(index.metric_type_)
-                        + " WHERE table_id = " + Quote(collection_id) + ";";
+                        + Quote(index.extra_params_.dump()) + " WHERE table_id = " + Quote(collection_id) + ";";
 
             auto status = SqlTransaction({statement});
             if (!status.ok()) {
