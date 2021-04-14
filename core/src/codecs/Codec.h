@@ -17,8 +17,6 @@
 
 #pragma once
 
-#include "AttrsFormat.h"
-#include "AttrsIndexFormat.h"
 #include "DeletedDocsFormat.h"
 #include "IdBloomFilterFormat.h"
 #include "IdIndexFormat.h"
@@ -33,9 +31,6 @@ class Codec {
     virtual VectorsFormatPtr
     GetVectorsFormat() = 0;
 
-    virtual AttrsFormatPtr
-    GetAttrsFormat() = 0;
-
     virtual VectorIndexFormatPtr
     GetVectorIndexFormat() = 0;
 
@@ -44,19 +39,6 @@ class Codec {
 
     virtual IdBloomFilterFormatPtr
     GetIdBloomFilterFormat() = 0;
-
-    // TODO(zhiru)
-    /*
-    virtual AttrsFormat
-    GetAttrsFormat() = 0;
-
-    virtual AttrsIndexFormat
-    GetAttrsIndexFormat() = 0;
-
-    virtual IdIndexFormat
-    GetIdIndexFormat() = 0;
-
-    */
 };
 
 }  // namespace codec

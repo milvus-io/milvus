@@ -34,12 +34,6 @@ class MemManager {
                   const uint8_t* vectors, uint64_t lsn) = 0;
 
     virtual Status
-    InsertEntities(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                   const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
-                   const std::unordered_map<std::string, uint64_t>& attr_size,
-                   const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) = 0;
-
-    virtual Status
     DeleteVector(const std::string& collection_id, IDNumber vector_id, uint64_t lsn) = 0;
 
     virtual Status
