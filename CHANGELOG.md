@@ -11,6 +11,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#4862 Read-only nodes not to merge segments
 -   \#4894 The capacity of bloom filter should be determined by the row count of its segment
 -   \#4908 GPU cache will not be cleaned up in time after the collection is dropped
+-   \#4933 Milvus waste time during building index for small segment
 
 ## Feature
 -   \#1434 Storage: enabling s3 storage support (implemented by Unisinsight)
