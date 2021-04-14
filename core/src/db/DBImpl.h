@@ -265,7 +265,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                         std::set<std::string>& partition_name_array);
 
     Status
-    UpdateCollectionIndexRecursively(const std::string& collection_id, const CollectionIndex& index);
+    UpdateCollectionIndexRecursively(const std::string& collection_id, const CollectionIndex& index, bool meta_only);
 
     Status
     WaitCollectionIndexRecursively(const std::shared_ptr<server::Context>& context, const std::string& collection_id,

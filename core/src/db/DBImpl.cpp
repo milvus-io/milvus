@@ -1522,22 +1522,32 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
     StartMergeTask(merge_collection_ids, true);  // start force-merge task
     WaitMergeFileFinish();                       // let force-merge file thread finish
 
+    // step 2: get old index
+    CollectionIndex old_index;
+    status = DescribeIndex(collection_id, old_index);
+    if (!status.ok()) {
+        LOG_ENGINE_ERROR_ << "Failed to get collection index info for collection: " << collection_id;
+        return status;
+    }
+
+    // fix issue #4838 create a new index need waiting a long time when other index is creating
+    // if the collection is empty, set its index and return
+    uint64_t row_count = 0;
+    status = GetCollectionRowCountRecursively(collection_id, row_count);
+    if (status.ok() && row_count == 0) {
+        CollectionIndex new_index = index;
+        new_index.metric_type_ = old_index.metric_type_;  // dont change metric type, it was defined by CreateCollection
+        return UpdateCollectionIndexRecursively(collection_id, new_index, true);
+    }
+
     {
         std::unique_lock<std::mutex> lock(build_index_mutex_);
-
-        // step 2: check index difference
-        CollectionIndex old_index;
-        status = DescribeIndex(collection_id, old_index);
-        if (!status.ok()) {
-            LOG_ENGINE_ERROR_ << "Failed to get collection index info for collection: " << collection_id;
-            return status;
-        }
 
         // step 3: update index info
         CollectionIndex new_index = index;
         new_index.metric_type_ = old_index.metric_type_;  // dont change metric type, it was defined by CreateCollection
         if (!utils::IsSameIndex(old_index, new_index)) {
-            status = UpdateCollectionIndexRecursively(collection_id, new_index);
+            status = UpdateCollectionIndexRecursively(collection_id, new_index, false);
             if (!status.ok()) {
                 return status;
             }
@@ -2402,9 +2412,13 @@ DBImpl::GetPartitionsByTags(const std::string& collection_id, const std::vector<
 }
 
 Status
-DBImpl::UpdateCollectionIndexRecursively(const std::string& collection_id, const CollectionIndex& index) {
-    DropIndex(collection_id);
-    WaitMergeFileFinish();  // DropIndex called StartMergeTask, need to wait merge thread finish
+DBImpl::UpdateCollectionIndexRecursively(const std::string& collection_id, const CollectionIndex& index,
+                                         bool meta_only) {
+    if (!meta_only) {
+        DropIndex(collection_id);
+        WaitMergeFileFinish();  // DropIndex called StartMergeTask, need to wait merge thread finish
+    }
+
     auto status = meta_ptr_->UpdateCollectionIndex(collection_id, index);
     fiu_do_on("DBImpl.UpdateCollectionIndexRecursively.fail_update_collection_index",
               status = Status(DB_META_TRANSACTION_FAILED, ""));
@@ -2419,7 +2433,7 @@ DBImpl::UpdateCollectionIndexRecursively(const std::string& collection_id, const
         return status;
     }
     for (auto& schema : partition_array) {
-        status = UpdateCollectionIndexRecursively(schema.collection_id_, index);
+        status = UpdateCollectionIndexRecursively(schema.collection_id_, index, meta_only);
         if (!status.ok()) {
             return status;
         }
