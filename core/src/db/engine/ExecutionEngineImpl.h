@@ -131,10 +131,6 @@ class ExecutionEngineImpl : public ExecutionEngine {
     EngineType index_type_;
     MetricType metric_type_;
 
-    std::unordered_map<std::string, DataType> attr_types_;
-    std::unordered_map<std::string, std::vector<uint8_t>> attr_data_;
-    std::unordered_map<std::string, size_t> attr_size_;
-    query::BinaryQueryPtr binary_query_;
     int64_t vector_count_;
 
     milvus::json index_params_;
