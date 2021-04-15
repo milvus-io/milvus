@@ -1320,7 +1320,8 @@ DBImpl::GetVectorsByID(const engine::meta::CollectionSchema& collection, const s
         std::vector<std::string> partition_tags = {partition_tag};
         std::set<std::string> partition_name_array;
         std::vector<meta::CollectionSchema> partition_array;
-        auto status = GetPartitionsByTags(collection.collection_id_, partition_tags, partition_name_array, partition_array);
+        auto status =
+            GetPartitionsByTags(collection.collection_id_, partition_tags, partition_name_array, partition_array);
         if (!status.ok()) {
             return status;  // didn't match any partition.
         }

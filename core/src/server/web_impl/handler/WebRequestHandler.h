@@ -130,15 +130,6 @@ class WebRequestHandler {
     Search(const std::string& collection_name, const nlohmann::json& json, std::string& result_str);
 
     Status
-    ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& boolean_query);
-
-    Status
-    ProcessBoolQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query);
-
-    Status
-    HybridSearch(const std::string& collection_name, const nlohmann::json& json, std::string& result_str);
-
-    Status
     DeleteByIDs(const std::string& collection_name, const nlohmann::json& json, std::string& result_str);
 
     Status
@@ -173,9 +164,6 @@ class WebRequestHandler {
     CreateCollection(const CollectionRequestDto::ObjectWrapper& table_schema);
     StatusDto::ObjectWrapper
     ShowCollections(const OQueryParams& query_params, OString& result);
-
-    StatusDto::ObjectWrapper
-    CreateHybridCollection(const OString& body);
 
     StatusDto::ObjectWrapper
     GetCollection(const OString& collection_name, const OQueryParams& query_params, OString& result);
@@ -219,9 +207,6 @@ class WebRequestHandler {
      */
     StatusDto::ObjectWrapper
     Insert(const OString& collection_name, const OString& body, VectorIdsDto::ObjectWrapper& ids_dto);
-
-    StatusDto::ObjectWrapper
-    InsertEntity(const OString& collection_name, const OString& body, VectorIdsDto::ObjectWrapper& ids_dto);
 
     StatusDto::ObjectWrapper
     GetVector(const OString& collection_name, const OQueryParams& query_params, OString& response);
