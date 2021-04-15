@@ -29,7 +29,7 @@ UriCheck(const std::string& uri) {
     return (index != std::string::npos);
 }
 
-template<typename T>
+template <typename T>
 void
 ConstructSearchParam(const std::string& collection_name, const std::vector<std::string>& partition_tag_array,
                      int64_t topk, const std::string& extra_params, T& search_param) {
@@ -276,13 +276,14 @@ ClientProxy::Insert(const std::string& collection_name, const std::string& parti
 }
 
 Status
-ClientProxy::GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
-                           std::vector<Entity>& entities_data) {
+ClientProxy::GetEntityByID(const std::string& collection_name, const std::string& partition_tag,
+                           const std::vector<int64_t>& id_array, std::vector<Entity>& entities_data) {
     try {
         entities_data.clear();
 
         ::milvus::grpc::VectorsIdentity vectors_identity;
         vectors_identity.set_collection_name(collection_name);
+        vectors_identity.set_partition_tag(partition_tag);
         for (auto id : id_array) {
             vectors_identity.add_id_array(id);
         }
@@ -436,10 +437,12 @@ ClientProxy::GetCollectionStats(const std::string& collection_name, std::string&
 }
 
 Status
-ClientProxy::DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) {
+ClientProxy::DeleteEntityByID(const std::string& collection_name, const std::string& partition_tag,
+                              const std::vector<int64_t>& id_array) {
     try {
         ::milvus::grpc::DeleteByIDParam delete_by_id_param;
         delete_by_id_param.set_collection_name(collection_name);
+        delete_by_id_param.set_partition_tag(partition_tag);
         for (auto id : id_array) {
             delete_by_id_param.add_id_array(id);
         }
@@ -459,6 +462,21 @@ ClientProxy::LoadCollection(const std::string& collection_name, PartitionTagList
             param.add_partition_tag_array(tag);
         }
         Status status = client_ptr_->LoadCollection(param);
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to preload collection: " + std::string(ex.what()));
+    }
+}
+
+Status
+ClientProxy::ReleaseCollection(const std::string& collection_name, PartitionTagList& partition_tag_array) const {
+    try {
+        ::milvus::grpc::PreloadCollectionParam param;
+        param.set_collection_name(collection_name);
+        for (auto& tag : partition_tag_array) {
+            param.add_partition_tag_array(tag);
+        }
+        Status status = client_ptr_->ReleaseCollection(param);
         return status;
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to preload collection: " + std::string(ex.what()));

@@ -81,6 +81,9 @@ class GrpcClient {
     LoadCollection(grpc::PreloadCollectionParam& param);
 
     Status
+    ReleaseCollection(grpc::PreloadCollectionParam& param);
+
+    Status
     GetIndexInfo(grpc::CollectionName& collection_name, grpc::IndexParam& index_param);
 
     Status

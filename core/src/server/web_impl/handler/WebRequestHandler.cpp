@@ -814,7 +814,12 @@ WebRequestHandler::DeleteByIDs(const std::string& collection_name, const nlohman
         vector_ids.emplace_back(std::stol(id_str));
     }
 
-    auto status = request_handler_.DeleteByID(context_ptr_, collection_name, "", vector_ids);
+    std::string partition_tag = "";
+    if (json.contains("partition_tag")) {
+        partition_tag = json["partition_tag"];
+    }
+
+    auto status = request_handler_.DeleteByID(context_ptr_, collection_name, partition_tag, vector_ids);
 
     nlohmann::json result_json;
     AddStatusToJson(result_json, status.code(), status.message());
@@ -1718,6 +1723,8 @@ WebRequestHandler::GetVector(const OString& collection_name, const OQueryParams&
             RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param ids is required.");
         }
 
+        auto partition_tag = query_params.get("partition_tag")->c_str();
+
         std::vector<std::string> ids;
         StringHelpFunctions::SplitStringByDelimeter(query_ids->c_str(), ",", ids);
 
@@ -1727,7 +1734,7 @@ WebRequestHandler::GetVector(const OString& collection_name, const OQueryParams&
         }
         engine::VectorsData vectors;
         nlohmann::json vectors_json;
-        status = GetVectorsByIDs(collection_name->std_str(), "", vector_ids, vectors_json);
+        status = GetVectorsByIDs(collection_name->std_str(), partition_tag, vector_ids, vectors_json);
         if (!status.ok()) {
             response = "NULL";
             ASSIGN_RETURN_STATUS_DTO(status)
@@ -1832,9 +1839,10 @@ WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString&
                 status = PreLoadCollection(j["load"], result_str);
             } else if (j.contains("flush")) {
                 status = Flush(j["flush"], result_str);
-            }
-            if (j.contains("compact")) {
+            } else if (j.contains("compact")) {
                 status = Compact(j["compact"], result_str);
+            } else if (j.contains("release")) {
+                status = ReleaseCollection(j["release"], result_str);
             }
         } else if (op->equals("config")) {
             status = SetConfig(j, result_str);

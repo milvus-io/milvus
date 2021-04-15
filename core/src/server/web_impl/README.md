@@ -1184,7 +1184,8 @@ $ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/vectors" -H "a
 <tr><td>Body</td><td><pre><code>
 {
   "delete": {
-     "ids": [$string]
+     "ids": [$string],
+     "partition_tag": $string
   }
 }
 </code></pre> </td></tr>
@@ -1193,9 +1194,10 @@ $ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/vectors" -H "a
 
 ##### Body Parameters
 
-| Parameter | Description     | Required? |
-| --------- | --------------- | --------- |
-| ids       | IDs of vectors. | Yes       |
+| Parameter     | Description          | Required? |
+| ------------- | -------------------- | --------- |
+| ids           | IDs of vectors.      | Yes       |
+| partition_tag | partition of vectors | Yes       |
 
 ##### Query Parameters
 
@@ -1292,7 +1294,7 @@ $ curl -X POST "http://127.0.0.1:19121/collections/test_collection/vectors" -H "
 }
 ```
 
-### `/collections/{collection_name}/vectors?ids={vector_id_list}` (GET)
+### `/collections/{collection_name}/vectors?ids={vector_id_list}&partition_tag=$string` (GET)
 
 Obtain vectors by ID.
 
@@ -1311,6 +1313,7 @@ Obtain vectors by ID.
 | ----------------- | ------------------------------------- | --------- |
 | `collection_name` | Name of the collection.               | Yes       |
 | `vector_id_list`  | Vector id list, separated by commas.  | Yes       |
+| `partition_tag`   | Partition tag.                        | Yes       |
 
 #### Response
 
@@ -1518,6 +1521,46 @@ $ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json"
 
 ```shell
 $ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json" -d "{\"load\": {\"collection_name\": \"test_collection\", \"partition_tags\": [\"part_1\", \"part_2\"]}}"
+```
+
+###### Response
+
+```json
+{ "code": 0, "message": "success" }
+```
+
+#### Release a collection from memory
+
+##### Request
+
+<table>
+<tr><th>Request Component</th><th>Value</th></tr>
+<tr><td> Name</td><td><pre><code>/system/task</code></pre></td></tr>
+<tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
+<tr><td>Body</td><td><pre><code>
+{
+  "release": {
+     "collection_name": $string,
+     "partition_tags": [$string, $string]
+  }
+}
+</code></pre> </td></tr>
+<tr><td>Method</td><td>PUT</td></tr>
+</table>
+
+##### Response
+
+| Status code | Description                                                       |
+| ----------- | ----------------------------------------------------------------- |
+| 200         | The request is successful.                                        |
+| 400         | The request is incorrect. Refer to the error message for details. |
+
+##### Example
+
+###### Request
+
+```shell
+$ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json" -d "{\"release\": {\"collection_name\": \"test_collection\", \"partition_tags\": [\"part_1\", \"part_2\"]}}"
 ```
 
 ###### Response
