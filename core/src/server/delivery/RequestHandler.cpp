@@ -35,6 +35,7 @@
 #include "server/delivery/request/InsertRequest.h"
 #include "server/delivery/request/PreloadCollectionRequest.h"
 #include "server/delivery/request/ReLoadSegmentsRequest.h"
+#include "server/delivery/request/ReleaseCollectionRequest.h"
 #include "server/delivery/request/SearchByIDRequest.h"
 #include "server/delivery/request/SearchRequest.h"
 #include "server/delivery/request/ShowCollectionInfoRequest.h"
@@ -96,8 +97,9 @@ RequestHandler::Insert(const std::shared_ptr<Context>& context, const std::strin
 
 Status
 RequestHandler::GetVectorsByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                               const std::vector<int64_t>& ids, std::vector<engine::VectorsData>& vectors) {
-    BaseRequestPtr request_ptr = GetVectorsByIDRequest::Create(context, collection_name, ids, vectors);
+                               const std::string& partition_tag, const std::vector<int64_t>& ids,
+                               std::vector<engine::VectorsData>& vectors) {
+    BaseRequestPtr request_ptr = GetVectorsByIDRequest::Create(context, collection_name, partition_tag, ids, vectors);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -180,8 +182,8 @@ RequestHandler::Cmd(const std::shared_ptr<Context>& context, const std::string& 
 
 Status
 RequestHandler::DeleteByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                           const std::vector<int64_t>& vector_ids) {
-    BaseRequestPtr request_ptr = DeleteByIDRequest::Create(context, collection_name, vector_ids);
+                           const std::string& partition_tag, const std::vector<int64_t>& vector_ids) {
+    BaseRequestPtr request_ptr = DeleteByIDRequest::Create(context, collection_name, partition_tag, vector_ids);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -191,6 +193,15 @@ Status
 RequestHandler::PreloadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
                                   const std::vector<std::string>& partition_tags) {
     BaseRequestPtr request_ptr = PreloadCollectionRequest::Create(context, collection_name, partition_tags);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::ReleaseCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                                  const std::vector<std::string>& partition_tags) {
+    BaseRequestPtr request_ptr = ReleaseCollectionRequest::Create(context, collection_name, partition_tags);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

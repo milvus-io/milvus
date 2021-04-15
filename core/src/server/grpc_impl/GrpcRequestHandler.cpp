@@ -443,8 +443,8 @@ GrpcRequestHandler::GetVectorsByID(::grpc::ServerContext* context, const ::milvu
     }
 
     std::vector<engine::VectorsData> vectors;
-    Status status =
-        request_handler_.GetVectorsByID(GetContext(context), request->collection_name(), vector_ids, vectors);
+    Status status = request_handler_.GetVectorsByID(GetContext(context), request->collection_name(),
+                                                    request->partition_tag(), vector_ids, vectors);
 
     for (auto& vector : vectors) {
         auto grpc_data = response->add_vectors_data();
@@ -738,7 +738,8 @@ GrpcRequestHandler::DeleteByID(::grpc::ServerContext* context, const ::milvus::g
     }
 
     // step 2: delete vector
-    Status status = request_handler_.DeleteByID(GetContext(context), request->collection_name(), vector_ids);
+    Status status = request_handler_.DeleteByID(GetContext(context), request->collection_name(),
+                                                request->partition_tag(), vector_ids);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response, status, context);
@@ -759,6 +760,26 @@ GrpcRequestHandler::PreloadCollection(::grpc::ServerContext* context,
     }
 
     Status status = request_handler_.PreloadCollection(GetContext(context), request->collection_name(), partition_tags);
+
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    SET_RESPONSE(response, status, context);
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
+GrpcRequestHandler::ReleaseCollection(::grpc::ServerContext* context,
+                                      const ::milvus::grpc::PreloadCollectionParam* request,
+                                      ::milvus::grpc::Status* response) {
+    CHECK_NULLPTR_RETURN(request);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+
+    std::vector<std::string> partition_tags;
+    for (int i = 0; i < request->partition_tag_array_size(); i++) {
+        partition_tags.push_back(request->partition_tag_array(i));
+    }
+
+    Status status = request_handler_.ReleaseCollection(GetContext(context), request->collection_name(), partition_tags);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response, status, context);

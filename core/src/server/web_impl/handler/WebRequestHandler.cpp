@@ -195,7 +195,7 @@ WebRequestHandler::GetSegmentVectors(const std::string& collection_name, const s
 
     auto ids = std::vector<int64_t>(vector_ids.begin() + ids_begin, vector_ids.begin() + ids_end);
     nlohmann::json vectors_json;
-    status = GetVectorsByIDs(collection_name, ids, vectors_json);
+    status = GetVectorsByIDs(collection_name, "", ids, vectors_json);
 
     nlohmann::json result_json;
     if (vectors_json.empty()) {
@@ -272,6 +272,35 @@ WebRequestHandler::PreLoadCollection(const nlohmann::json& json, std::string& re
     }
 
     auto status = request_handler_.PreloadCollection(context_ptr_, collection_name.get<std::string>(), partition_tags);
+    if (status.ok()) {
+        nlohmann::json result;
+        AddStatusToJson(result, status.code(), status.message());
+        result_str = result.dump();
+    }
+
+    return status;
+}
+
+Status
+WebRequestHandler::ReleaseCollection(const nlohmann::json& json, std::string& result_str) {
+    if (!json.contains("collection_name")) {
+        return Status(BODY_FIELD_LOSS, "Field \"load\" must contains collection_name");
+    }
+
+    auto collection_name = json["collection_name"];
+    std::vector<std::string> partition_tags;
+    if (json.contains("partition_tags")) {
+        auto tags = json["partition_tags"];
+        if (!tags.is_null() && !tags.is_array()) {
+            return Status(BODY_PARSE_FAIL, "Field \"partition_tags\" must be an array");
+        }
+
+        for (auto& tag : tags) {
+            partition_tags.emplace_back(tag.get<std::string>());
+        }
+    }
+
+    auto status = request_handler_.ReleaseCollection(context_ptr_, collection_name.get<std::string>(), partition_tags);
     if (status.ok()) {
         nlohmann::json result;
         AddStatusToJson(result, status.code(), status.message());
@@ -785,7 +814,7 @@ WebRequestHandler::DeleteByIDs(const std::string& collection_name, const nlohman
         vector_ids.emplace_back(std::stol(id_str));
     }
 
-    auto status = request_handler_.DeleteByID(context_ptr_, collection_name, vector_ids);
+    auto status = request_handler_.DeleteByID(context_ptr_, collection_name, "", vector_ids);
 
     nlohmann::json result_json;
     AddStatusToJson(result_json, status.code(), status.message());
@@ -795,10 +824,10 @@ WebRequestHandler::DeleteByIDs(const std::string& collection_name, const nlohman
 }
 
 Status
-WebRequestHandler::GetVectorsByIDs(const std::string& collection_name, const std::vector<int64_t>& ids,
-                                   nlohmann::json& json_out) {
+WebRequestHandler::GetVectorsByIDs(const std::string& collection_name, const std::string& partition_tag,
+                                   const std::vector<int64_t>& ids, nlohmann::json& json_out) {
     std::vector<engine::VectorsData> vector_batch;
-    auto status = request_handler_.GetVectorsByID(context_ptr_, collection_name, ids, vector_batch);
+    auto status = request_handler_.GetVectorsByID(context_ptr_, collection_name, partition_tag, ids, vector_batch);
     if (!status.ok()) {
         return status;
     }
@@ -1698,7 +1727,7 @@ WebRequestHandler::GetVector(const OString& collection_name, const OQueryParams&
         }
         engine::VectorsData vectors;
         nlohmann::json vectors_json;
-        status = GetVectorsByIDs(collection_name->std_str(), vector_ids, vectors_json);
+        status = GetVectorsByIDs(collection_name->std_str(), "", vector_ids, vectors_json);
         if (!status.ok()) {
             response = "NULL";
             ASSIGN_RETURN_STATUS_DTO(status)

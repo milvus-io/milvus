@@ -49,7 +49,8 @@ class RequestHandler {
 
     Status
     GetVectorsByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                   const std::vector<int64_t>& ids, std::vector<engine::VectorsData>& vectors);
+                   const std::string& partition_tag, const std::vector<int64_t>& ids,
+                   std::vector<engine::VectorsData>& vectors);
 
     Status
     GetVectorIDs(const std::shared_ptr<Context>& context, const std::string& collection_name,
@@ -85,12 +86,15 @@ class RequestHandler {
 
     Status
     DeleteByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-               const std::vector<int64_t>& vector_ids);
+               const std::string& partition_tag, const std::vector<int64_t>& vector_ids);
 
     Status
     PreloadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
                       const std::vector<std::string>& partition_tags);
 
+    Status
+    ReleaseCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                      const std::vector<std::string>& partition_tags);
     Status
     ReLoadSegments(const std::shared_ptr<Context>& context, const std::string& collection_name,
                    const std::vector<std::string>& segment_ids);

@@ -112,6 +112,9 @@ class WebRequestHandler {
     PreLoadCollection(const nlohmann::json& json, std::string& result_str);
 
     Status
+    ReleaseCollection(const nlohmann::json& json, std::string& result_str);
+
+    Status
     Flush(const nlohmann::json& json, std::string& result_str);
 
     Status
@@ -139,7 +142,8 @@ class WebRequestHandler {
     DeleteByIDs(const std::string& collection_name, const nlohmann::json& json, std::string& result_str);
 
     Status
-    GetVectorsByIDs(const std::string& collection_name, const std::vector<int64_t>& ids, nlohmann::json& json_out);
+    GetVectorsByIDs(const std::string& collection_name, const std::string& partition_tag,
+                    const std::vector<int64_t>& ids, nlohmann::json& json_out);
 
  public:
     WebRequestHandler() {

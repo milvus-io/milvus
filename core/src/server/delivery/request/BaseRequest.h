@@ -132,6 +132,7 @@ class BaseRequest {
         kHasHybridCollection,
         kDescribeHybridCollection,
         kReloadSegments,
+        kReleaseCollection,
 
         // partition operations
         kCreatePartition = 400,

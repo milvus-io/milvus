@@ -193,7 +193,8 @@ message FlushParam {
  */
 message DeleteByIDParam {
     string collection_name = 1;
-    repeated int64 id_array = 2;
+    string partition_tag = 2;
+    repeated int64 id_array = 3;
 }
 
 /**
@@ -209,7 +210,8 @@ message CollectionInfo {
  */
 message VectorsIdentity {
     string collection_name = 1;
-    repeated int64 id_array = 2;
+    string partition_tag = 2;
+    repeated int64 id_array = 3;
 }
 
 /**
@@ -639,6 +641,15 @@ service MilvusService {
      * @return Status
      */
     rpc PreloadCollection(PreloadCollectionParam) returns (Status) {}
+
+    /**
+     * @brief This method is used to release collection/partitions
+     *
+     * @param PreloadCollectionParam, target collection/partitions.
+     *
+     * @return Status
+     */
+     rpc ReleaseCollection(PreloadCollectionParam) returns (Status) {}
 
     /**
      * @brief This method is used to reload collection segments

@@ -30,17 +30,18 @@ class DeleteByIDRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           const std::vector<int64_t>& vector_ids);
+           const std::string& partition_tag, const std::vector<int64_t>& vector_ids);
 
  protected:
     DeleteByIDRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                      const std::vector<int64_t>& vector_ids);
+                      const std::string& partition_tag, const std::vector<int64_t>& vector_ids);
 
     Status
     OnExecute() override;
 
  private:
     const std::string collection_name_;
+    const std::string partition_tag_;
     const std::vector<int64_t>& vector_ids_;
 };
 

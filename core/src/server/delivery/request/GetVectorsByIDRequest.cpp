@@ -30,19 +30,21 @@ namespace server {
 constexpr uint64_t MAX_COUNT_RETURNED = 1000;
 
 GetVectorsByIDRequest::GetVectorsByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                             const std::string& collection_name, const std::vector<int64_t>& ids,
-                                             std::vector<engine::VectorsData>& vectors)
+                                             const std::string& collection_name, const std::string& partition_tag,
+                                             const std::vector<int64_t>& ids, std::vector<engine::VectorsData>& vectors)
     : BaseRequest(context, BaseRequest::kGetVectorByID),
       collection_name_(collection_name),
+      partition_tag_(partition_tag),
       ids_(ids),
       vectors_(vectors) {
 }
 
 BaseRequestPtr
 GetVectorsByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                              const std::string& collection_name, const std::vector<int64_t>& ids,
-                              std::vector<engine::VectorsData>& vectors) {
-    return std::shared_ptr<BaseRequest>(new GetVectorsByIDRequest(context, collection_name, ids, vectors));
+                              const std::string& collection_name, const std::string& partition_tag,
+                              const std::vector<int64_t>& ids, std::vector<engine::VectorsData>& vectors) {
+    return std::shared_ptr<BaseRequest>(
+        new GetVectorsByIDRequest(context, collection_name, partition_tag, ids, vectors));
 }
 
 Status
@@ -83,7 +85,7 @@ GetVectorsByIDRequest::OnExecute() {
         }
 
         // step 2: get vector data, now only support get one id
-        return DBWrapper::DB()->GetVectorsByID(collection_schema, ids_, vectors_);
+        return DBWrapper::DB()->GetVectorsByID(collection_schema, partition_tag_, ids_, vectors_);
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

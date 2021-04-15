@@ -538,6 +538,16 @@ DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const
 }
 
 Status
+DBImpl::ReleaseCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                          const std::vector<std::string>& partition_tags) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    return Status::OK();
+}
+
+Status
 DBImpl::ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::vector<int64_t>& segment_ids) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
@@ -981,11 +991,11 @@ Status
 DBImpl::DeleteVector(const std::string& collection_id, IDNumber vector_id) {
     IDNumbers ids;
     ids.push_back(vector_id);
-    return DeleteVectors(collection_id, ids);
+    return DeleteVectors(collection_id, "", ids);
 }
 
 Status
-DBImpl::DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) {
+DBImpl::DeleteVectors(const std::string& collection_id, const std::string& partition_tag, IDNumbers vector_ids) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -1284,8 +1294,8 @@ DBImpl::CompactFile(const meta::SegmentSchema& file, double threshold, meta::Seg
 }
 
 Status
-DBImpl::GetVectorsByID(const engine::meta::CollectionSchema& collection, const IDNumbers& id_array,
-                       std::vector<engine::VectorsData>& vectors) {
+DBImpl::GetVectorsByID(const engine::meta::CollectionSchema& collection, const std::string& partition_tag,
+                       const IDNumbers& id_array, std::vector<engine::VectorsData>& vectors) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -1621,7 +1631,7 @@ DBImpl::QueryByIDs(const std::shared_ptr<server::Context>& context, const std::s
 
     // get target vectors data
     std::vector<milvus::engine::VectorsData> vectors;
-    status = GetVectorsByID(collection_schema, id_array, vectors);
+    status = GetVectorsByID(collection_schema, "", id_array, vectors);
     if (!status.ok()) {
         std::string msg = "Failed to get vector data for collection: " + collection_id;
         LOG_ENGINE_ERROR_ << msg;

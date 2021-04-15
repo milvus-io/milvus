@@ -298,6 +298,21 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
                       ::milvus::grpc::Status* response) override;
 
     // *
+    // @brief This method is used to release collection/partitions
+    //
+    // @param PreloadCollectionParam, target collection/partitions.
+    //
+    // @return Status
+    ::grpc::Status
+    ReleaseCollection(::grpc::ServerContext* context, const ::milvus::grpc::PreloadCollectionParam* request,
+                      ::milvus::grpc::Status* response);
+
+    // *
+    // @brief This method is used to reload collection segments
+    //
+    // @param ReLoadSegmentsParam, target segments information.
+    //
+    // @return Status
     ::grpc::Status
     ReloadSegments(::grpc::ServerContext* context, const ::milvus::grpc::ReLoadSegmentsParam* request,
                    ::milvus::grpc::Status* response) override;

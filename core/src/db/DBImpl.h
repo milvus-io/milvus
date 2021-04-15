@@ -82,6 +82,10 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                       const std::vector<std::string>& partition_tags, bool force = false) override;
 
     Status
+    ReleaseCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                      const std::vector<std::string>& partition_tags) override;
+
+    Status
     ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::vector<int64_t>& segment_ids) override;
 
     Status
@@ -117,7 +121,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     DeleteVector(const std::string& collection_id, IDNumber vector_id) override;
 
     Status
-    DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) override;
+    DeleteVectors(const std::string& collection_id, const std::string& partition_tag, IDNumbers vector_ids) override;
 
     Status
     Flush(const std::string& collection_id) override;
@@ -130,8 +134,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
             double threshold = 0.0) override;
 
     Status
-    GetVectorsByID(const engine::meta::CollectionSchema& collection, const IDNumbers& id_array,
-                   std::vector<engine::VectorsData>& vectors) override;
+    GetVectorsByID(const engine::meta::CollectionSchema& collection, const std::string& partition_tag,
+                   const IDNumbers& id_array, std::vector<engine::VectorsData>& vectors) override;
 
     Status
     GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) override;
