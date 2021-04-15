@@ -84,46 +84,50 @@ binlog:
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/binlog $(PWD)/cmd/binlog/main.go 1>/dev/null
 
 master:
-	@echo "Building master service ..."
+	@echo "Building master ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/masterservice $(PWD)/cmd/masterservice/main.go 1>/dev/null
 
 proxyservice:
-	@echo "Building proxy service ..."
+	@echo "Building proxyservice ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/proxyservice $(PWD)/cmd/proxy/service/proxy_service.go 1>/dev/null
 
 proxynode:
-	@echo "Building proxy node ..."
+	@echo "Building proxynode ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/proxynode $(PWD)/cmd/proxy/node/proxy_node.go 1>/dev/null
 
 queryservice:
-	@echo "Building query service ..."
+	@echo "Building queryservice ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/queryservice $(PWD)/cmd/queryservice/queryservice.go 1>/dev/null
 
 querynode:
-	@echo "Building query node ..."
+	@echo "Building querynode ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/querynode $(PWD)/cmd/querynode/querynode.go 1>/dev/null
 
 dataservice:
-	@echo "Building data service ..."
+	@echo "Building dataservice ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/dataservice $(PWD)/cmd/dataservice/main.go 1>/dev/null
 
 datanode:
-	@echo "Building data node ..."
+	@echo "Building datanode ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/datanode $(PWD)/cmd/datanode/main.go 1>/dev/null
 
 indexservice: build-cpp
-	@echo "Building index service ..."
+	@echo "Building indexservice ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/indexservice $(PWD)/cmd/indexservice/main.go 1>/dev/null
 
 indexnode: build-cpp
-	@echo "Building index node ..."
+	@echo "Building indexnode ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/indexnode $(PWD)/cmd/indexnode/main.go 1>/dev/null
 
 singlenode: build-cpp
-	@echo "Building single node ..."
+	@echo "Building Milvus singlenode ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/singlenode $(PWD)/cmd/singlenode/main.go 1>/dev/null
 
-build-go: binlog master proxyservice proxynode queryservice querynode indexservice indexnode dataservice datanode singlenode
+milvus: build-cpp
+	@echo "Building Milvus distributed ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/milvus $(PWD)/cmd/distributed/main.go 1>/dev/null
+
+build-go: singlenode milvus
 
 build-cpp:
 	@(env bash $(PWD)/scripts/core_build.sh -f "$(CUSTOM_THIRDPARTY_PATH)")
@@ -156,16 +160,8 @@ docker: verifiers
 # Builds each component and installs it to $GOPATH/bin.
 install: all
 	@echo "Installing binary to './bin'"
-	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/masterservice $(GOPATH)/bin/masterservice
-	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/queryservice $(GOPATH)/bin/queryservice
-	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/querynode $(GOPATH)/bin/querynode
-	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/proxynode $(GOPATH)/bin/proxynode
-	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/proxyservice $(GOPATH)/bin/proxyservice
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/singlenode $(GOPATH)/bin/singlenode
-	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/indexservice $(GOPATH)/bin/indexservice
-	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/indexnode $(GOPATH)/bin/indexnode
-	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/dataservice $(GOPATH)/bin/dataservice
-	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/datanode $(GOPATH)/bin/datanode
+	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/milvus $(GOPATH)/bin/milvus
 	@mkdir -p $(LIBRARY_PATH) && cp -f $(PWD)/internal/core/output/lib/* $(LIBRARY_PATH)
 	@echo "Installation successful."
 
@@ -175,13 +171,4 @@ clean:
 	@find . -name '*~' | xargs rm -fv
 	@rm -rf bin/
 	@rm -rf lib/
-	@rm -rf $(GOPATH)/bin/masterservice
-	@rm -rf $(GOPATH)/bin/proxynode
-	@rm -rf $(GOPATH)/bin/proxyservice
-	@rm -rf $(GOPATH)/bin/queryservice
-	@rm -rf $(GOPATH)/bin/querynode
-	@rm -rf $(GOPATH)/bin/singlenode
-	@rm -rf $(GOPATH)/bin/indexservice
-	@rm -rf $(GOPATH)/bin/indexnode
-	@rm -rf $(GOPATH)/bin/dataservice
-	@rm -rf $(GOPATH)/bin/datanode
+	@rm -rf $(GOPATH)/bin/*

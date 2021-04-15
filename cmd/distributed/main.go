@@ -65,8 +65,6 @@ func run(serverType, runtTimeDir string) error {
 		role.EnableIndexService = true
 	case "indexnode":
 		role.EnableIndexNode = true
-	case "standalone":
-		role.EnableStandalone = true
 	default:
 		return fmt.Errorf("unknown server type = %s", serverType)
 	}

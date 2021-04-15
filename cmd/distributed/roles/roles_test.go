@@ -9,7 +9,6 @@ import (
 
 func TestRoles(t *testing.T) {
 	r := MilvusRoles{}
-	assert.False(t, r.HasAnyRole())
 
 	assert.True(t, r.EnvValue("1"))
 	assert.True(t, r.EnvValue(" 1 "))
@@ -26,64 +25,4 @@ func TestRoles(t *testing.T) {
 	assert.Equal(t, len(ss), 1)
 	ss = strings.SplitN("adb=def", "=", 2)
 	assert.Equal(t, len(ss), 2)
-
-	{
-		var roles MilvusRoles
-		roles.EnableMaster = true
-		assert.True(t, roles.HasAnyRole())
-	}
-
-	{
-		var roles MilvusRoles
-		roles.EnableProxyService = true
-		assert.True(t, roles.HasAnyRole())
-	}
-
-	{
-		var roles MilvusRoles
-		roles.EnableProxyNode = true
-		assert.True(t, roles.HasAnyRole())
-	}
-
-	{
-		var roles MilvusRoles
-		roles.EnableQueryService = true
-		assert.True(t, roles.HasAnyRole())
-	}
-
-	{
-		var roles MilvusRoles
-		roles.EnableQueryNode = true
-		assert.True(t, roles.HasAnyRole())
-	}
-
-	{
-		var roles MilvusRoles
-		roles.EnableDataService = true
-		assert.True(t, roles.HasAnyRole())
-	}
-
-	{
-		var roles MilvusRoles
-		roles.EnableDataNode = true
-		assert.True(t, roles.HasAnyRole())
-	}
-
-	{
-		var roles MilvusRoles
-		roles.EnableIndexService = true
-		assert.True(t, roles.HasAnyRole())
-	}
-
-	{
-		var roles MilvusRoles
-		roles.EnableIndexNode = true
-		assert.True(t, roles.HasAnyRole())
-	}
-
-	{
-		var roles MilvusRoles
-		roles.EnableMsgStreamService = true
-		assert.True(t, roles.HasAnyRole())
-	}
 }
