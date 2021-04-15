@@ -27,7 +27,7 @@ services:
     image: ${REPO}:${ARCH}-ubuntu-${UBUNTU}-core
     build:
       context: .
-      dockerfile: ci/docker/ubuntu-${UBUNTU}-core.dockerfile
+      dockerfile: ../ci/docker/ubuntu-${UBUNTU}-core.dockerfile
       cache_from:
         - ${REPO}:${ARCH}-ubuntu-${UBUNTU}-core
     shm_size: 2G
@@ -47,7 +47,7 @@ services:
     image: ${REPO}:${ARCH}-centos-${CENTOS}-core
     build:
       context: .
-      dockerfile: ci/docker/centos-${CENTOS}-core.dockerfile
+      dockerfile: ../ci/docker/centos-${CENTOS}-core.dockerfile
       cache_from:
         - ${REPO}:${ARCH}-centos-${CENTOS}-core
     shm_size: 2G
