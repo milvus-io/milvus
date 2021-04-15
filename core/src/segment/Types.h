@@ -18,6 +18,7 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "segment/DeletedDocs.h"
 #include "segment/IdBloomFilter.h"
@@ -35,6 +36,7 @@ struct Segment {
 };
 
 using SegmentPtr = std::shared_ptr<Segment>;
+using UidsPtr = std::shared_ptr<std::vector<doc_id_t>>;
 
 }  // namespace segment
 }  // namespace milvus

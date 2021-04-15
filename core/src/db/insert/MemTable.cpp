@@ -249,6 +249,8 @@ MemTable::ApplyDeletes() {
             break;
         }
 
+        segment::UidsPtr uids_ptr = nullptr;
+
         // Get all index that contains blacklist in cache
         std::vector<knowhere::VecIndexPtr> indexes;
         std::vector<faiss::ConcurrentBitsetPtr> blacklists;
@@ -268,17 +270,21 @@ MemTable::ApplyDeletes() {
                     indexes.emplace_back(nullptr);
                     blacklists.emplace_back(blacklist);
                 }
+
+                // load uids from cache
+                uids_ptr = index->GetUids();
             }
         }
 
         std::string segment_dir;
         utils::GetParentPath(file.location_, segment_dir);
-        segment::SegmentReader segment_reader(segment_dir);
-
-        std::vector<segment::doc_id_t> uids;
-        status = segment_reader.LoadUids(uids);
-        if (!status.ok()) {
-            break;
+        if (uids_ptr == nullptr) {
+            // load uids from disk
+            segment::SegmentReader segment_reader(segment_dir);
+            status = segment_reader.LoadUids(uids_ptr);
+            if (!status.ok()) {
+                return status;
+            }
         }
 
         segment::DeletedDocsPtr deleted_docs = std::make_shared<segment::DeletedDocs>();
@@ -292,10 +298,10 @@ MemTable::ApplyDeletes() {
         auto find_diff = std::chrono::duration<double>::zero();
         auto set_diff = std::chrono::duration<double>::zero();
 
-        for (size_t i = 0; i < uids.size(); ++i) {
+        for (size_t i = 0; i < uids_ptr->size(); ++i) {
             auto find_start = std::chrono::high_resolution_clock::now();
 
-            auto found = std::binary_search(ids_to_check.begin(), ids_to_check.end(), uids[i]);
+            auto found = std::binary_search(ids_to_check.begin(), ids_to_check.end(), (*uids_ptr)[i]);
 
             auto find_end = std::chrono::high_resolution_clock::now();
             find_diff += (find_end - find_start);
@@ -304,7 +310,7 @@ MemTable::ApplyDeletes() {
                 auto set_start = std::chrono::high_resolution_clock::now();
 
                 deleted_docs->AddDeletedDoc(i);
-                id_bloom_filter_ptr->Remove(uids[i]);
+                id_bloom_filter_ptr->Remove((*uids_ptr)[i]);
 
                 for (auto& blacklist : blacklists) {
                     blacklist->set(i);
@@ -314,7 +320,7 @@ MemTable::ApplyDeletes() {
             }
         }
 
-        LOG_ENGINE_DEBUG_ << "Finding " << ids_to_check.size() << " uids in " << uids.size() << " uids took "
+        LOG_ENGINE_DEBUG_ << "Finding " << ids_to_check.size() << " uids in " << uids_ptr->size() << " uids took "
                           << find_diff.count() << " s in total";
         LOG_ENGINE_DEBUG_ << "Setting deleted docs and bloom filter took " << set_diff.count() << " s in total";
 
