@@ -654,7 +654,7 @@ func (ms *MqTtMsgStream) Seek(mp *internalpb.MsgPosition) error {
 	consumer, hasWatched = ms.consumers[seekChannel]
 
 	if hasWatched {
-		return errors.New("the channel should has been subscribed")
+		return errors.New("the channel should has not been subscribed")
 	}
 
 	fn := func() error {
