@@ -432,41 +432,9 @@ DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const
         return SHUTDOWN_ERROR;
     }
 
-    // step 1: get all collection files from parent collection
-    Status status;
-    std::set<std::string> partition_ids;
+    // step 1: get all collection files from collection
     meta::FilesHolder files_holder;
-    if (partition_tags.empty()) {
-        // no partition tag specified, means load whole collection
-        // get files from root collection
-        auto status = meta_ptr_->FilesToSearch(collection_id, files_holder);
-        if (!status.ok()) {
-            return status;
-        }
-
-        // count all partitions
-        std::vector<meta::CollectionSchema> partition_array;
-        status = meta_ptr_->ShowPartitions(collection_id, partition_array);
-
-        for (auto& schema : partition_array) {
-            partition_ids.insert(schema.collection_id_);
-        }
-    } else {
-        // get specified partitions
-        std::set<std::string> partition_name_array;
-        std::vector<meta::CollectionSchema> partition_array;
-        status = GetPartitionsByTags(collection_id, partition_tags, partition_name_array, partition_array);
-        if (!status.ok()) {
-            return status;  // didn't match any partition.
-        }
-
-        for (auto& partition_name : partition_name_array) {
-            partition_ids.insert(partition_name);
-        }
-    }
-
-    // get files from partitions
-    status = meta_ptr_->FilesToSearchEx(collection_id, partition_ids, files_holder);
+    Status status = CollectFilesToSearch(collection_id, partition_tags, files_holder);
     if (!status.ok()) {
         return status;
     }
@@ -543,6 +511,52 @@ DBImpl::ReleaseCollection(const std::shared_ptr<server::Context>& context, const
                           const std::vector<std::string>& partition_tags) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
+    }
+
+    // step 1: get all collection files from collection
+    meta::FilesHolder files_holder;
+    Status status = CollectFilesToSearch(collection_id, partition_tags, files_holder);
+    if (!status.ok()) {
+        return status;
+    }
+
+    if (files_holder.HoldFiles().empty()) {
+        return Status::OK();  // no files to search
+    }
+
+    // step 2: release file one by one
+    milvus::engine::meta::SegmentsSchema& files_array = files_holder.HoldFiles();
+    TimeRecorderAuto rc("Release collection:" + collection_id);
+    for (auto& file : files_array) {
+        // client break the connection, no need to continue
+        if (context && context->IsConnectionBroken()) {
+            LOG_ENGINE_DEBUG_ << "Client connection broken, stop release collection";
+            break;
+        }
+
+        EngineType engine_type;
+        if (file.file_type_ == meta::SegmentSchema::FILE_TYPE::RAW ||
+            file.file_type_ == meta::SegmentSchema::FILE_TYPE::TO_INDEX ||
+            file.file_type_ == meta::SegmentSchema::FILE_TYPE::BACKUP) {
+            engine_type =
+                utils::IsBinaryMetricType(file.metric_type_) ? EngineType::FAISS_BIN_IDMAP : EngineType::FAISS_IDMAP;
+        } else {
+            engine_type = (EngineType)file.engine_type_;
+        }
+
+        auto json = milvus::json::parse(file.index_params_);
+        ExecutionEnginePtr engine =
+            EngineFactory::Build(file.dimension_, file.location_, engine_type, (MetricType)file.metric_type_, json);
+
+        if (engine == nullptr) {
+            LOG_ENGINE_ERROR_ << "Invalid engine type";
+            continue;
+        }
+
+        status = engine->ReleaseCache();
+        if (!status.ok()) {
+            return status;
+        }
     }
 
     return Status::OK();
@@ -1744,37 +1758,9 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
         return SHUTDOWN_ERROR;
     }
 
-    Status status;
+    // step 1: get all collection files from collection
     meta::FilesHolder files_holder;
-    std::set<std::string> partition_ids;
-    if (partition_tags.empty()) {
-        // no partition tag specified, means search in whole collection
-        // get files from root collection
-        status = meta_ptr_->FilesToSearch(collection_id, files_holder);
-        if (!status.ok()) {
-            return status;
-        }
-
-        std::vector<meta::CollectionSchema> partition_array;
-        status = meta_ptr_->ShowPartitions(collection_id, partition_array);
-        for (auto& id : partition_array) {
-            partition_ids.insert(id.collection_id_);
-        }
-    } else {
-        std::set<std::string> partition_name_array;
-        std::vector<meta::CollectionSchema> partition_array;
-        status = GetPartitionsByTags(collection_id, partition_tags, partition_name_array, partition_array);
-        if (!status.ok()) {
-            return status;  // didn't match any partition.
-        }
-
-        for (auto& partition_name : partition_name_array) {
-            partition_ids.insert(partition_name);
-        }
-    }
-
-    // get files from partitions
-    status = meta_ptr_->FilesToSearchEx(collection_id, partition_ids, files_holder);
+    Status status = CollectFilesToSearch(collection_id, partition_tags, files_holder);
     if (!status.ok()) {
         return status;
     }
@@ -1783,6 +1769,7 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
         return Status::OK();  // no files to search
     }
 
+    // step 2: do query
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
     status = QueryAsync(tracer.Context(), files_holder, k, extra_params, vectors, result_ids, result_distances);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
@@ -2716,6 +2703,48 @@ DBImpl::ResumeIfLast() {
         LOG_ENGINE_TRACE_ << "live_search_num_: " << live_search_num_;
         knowhere::BuildResume();
     }
+}
+
+Status
+DBImpl::CollectFilesToSearch(const std::string& collection_id, const std::vector<std::string>& partition_tags,
+                             meta::FilesHolder& files_holder) {
+    Status status;
+    std::set<std::string> partition_ids;
+    if (partition_tags.empty()) {
+        // no partition tag specified, means search in whole collection
+        // get files from root collection
+        status = meta_ptr_->FilesToSearch(collection_id, files_holder);
+        if (!status.ok()) {
+            return status;
+        }
+
+        // count all partitions
+        std::vector<meta::CollectionSchema> partition_array;
+        status = meta_ptr_->ShowPartitions(collection_id, partition_array);
+        for (auto& schema : partition_array) {
+            partition_ids.insert(schema.collection_id_);
+        }
+    } else {
+        // get specified partitions
+        std::set<std::string> partition_name_array;
+        std::vector<meta::CollectionSchema> partition_array;
+        status = GetPartitionsByTags(collection_id, partition_tags, partition_name_array, partition_array);
+        if (!status.ok()) {
+            return status;  // didn't match any partition.
+        }
+
+        for (auto& partition_name : partition_name_array) {
+            partition_ids.insert(partition_name);
+        }
+    }
+
+    // get files from partitions
+    status = meta_ptr_->FilesToSearchEx(collection_id, partition_ids, files_holder);
+    if (!status.ok()) {
+        return status;
+    }
+
+    return status;
 }
 
 }  // namespace engine

@@ -277,6 +277,10 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     void
     ResumeIfLast();
 
+    Status
+    CollectFilesToSearch(const std::string& collection_id, const std::vector<std::string>& partition_tags,
+                         meta::FilesHolder& files_holder);
+
  private:
     DBOptions options_;
 

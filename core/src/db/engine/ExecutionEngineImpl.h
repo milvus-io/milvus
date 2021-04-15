@@ -91,6 +91,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
     FpgaCache() override;
 
     Status
+    ReleaseCache() override;
+
+    Status
     Init() override;
 
     EngineType
