@@ -1553,12 +1553,12 @@ const char descriptor_table_protodef_milvus_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "arams\030\004 \003(\0132\031.milvus.grpc.KeyValuePair\"+"
   "\n\nFlushParam\022\035\n\025collection_name_array\030\001 "
   "\003(\t\"S\n\017DeleteByIDParam\022\027\n\017collection_nam"
-  "e\030\001 \001(\t\022\025\n\rpartition_tag\030\002 \001(\t\022\020\n\010id_arr"
-  "ay\030\003 \003(\003\"H\n\016CollectionInfo\022#\n\006status\030\001 \001"
+  "e\030\001 \001(\t\022\025\n\rpartition_tag\030\003 \001(\t\022\020\n\010id_arr"
+  "ay\030\002 \003(\003\"H\n\016CollectionInfo\022#\n\006status\030\001 \001"
   "(\0132\023.milvus.grpc.Status\022\021\n\tjson_info\030\002 \001"
   "(\t\"S\n\017VectorsIdentity\022\027\n\017collection_name"
-  "\030\001 \001(\t\022\025\n\rpartition_tag\030\002 \001(\t\022\020\n\010id_arra"
-  "y\030\003 \003(\003\"`\n\013VectorsData\022#\n\006status\030\001 \001(\0132\023"
+  "\030\001 \001(\t\022\025\n\rpartition_tag\030\003 \001(\t\022\020\n\010id_arra"
+  "y\030\002 \003(\003\"`\n\013VectorsData\022#\n\006status\030\001 \001(\0132\023"
   ".milvus.grpc.Status\022,\n\014vectors_data\030\002 \003("
   "\0132\026.milvus.grpc.RowRecord\"B\n\021GetVectorID"
   "sParam\022\027\n\017collection_name\030\001 \001(\t\022\024\n\014segme"
@@ -9572,20 +9572,20 @@ const char* DeleteByIDParam::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPAC
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // string partition_tag = 2;
+      // repeated int64 id_array = 2;
       case 2:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 18)) {
-          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_partition_tag(), ptr, ctx, "milvus.grpc.DeleteByIDParam.partition_tag");
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::PackedInt64Parser(mutable_id_array(), ptr, ctx);
+          CHK_(ptr);
+        } else if (static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16) {
+          add_id_array(::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr));
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // repeated int64 id_array = 3;
+      // string partition_tag = 3;
       case 3:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 26)) {
-          ptr = ::PROTOBUF_NAMESPACE_ID::internal::PackedInt64Parser(mutable_id_array(), ptr, ctx);
-          CHK_(ptr);
-        } else if (static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 24) {
-          add_id_array(::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr));
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_partition_tag(), ptr, ctx, "milvus.grpc.DeleteByIDParam.partition_tag");
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
@@ -9634,31 +9634,31 @@ bool DeleteByIDParam::MergePartialFromCodedStream(
         break;
       }
 
-      // string partition_tag = 2;
+      // repeated int64 id_array = 2;
       case 2: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (18 & 0xFF)) {
-          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
-                input, this->mutable_partition_tag()));
-          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-            this->partition_tag().data(), static_cast<int>(this->partition_tag().length()),
-            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
-            "milvus.grpc.DeleteByIDParam.partition_tag"));
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPackedPrimitive<
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                 input, this->mutable_id_array())));
+        } else if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (16 & 0xFF)) {
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadRepeatedPrimitiveNoInline<
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                 1, 18u, input, this->mutable_id_array())));
         } else {
           goto handle_unusual;
         }
         break;
       }
 
-      // repeated int64 id_array = 3;
+      // string partition_tag = 3;
       case 3: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (26 & 0xFF)) {
-          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPackedPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
-                 input, this->mutable_id_array())));
-        } else if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (24 & 0xFF)) {
-          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadRepeatedPrimitiveNoInline<
-                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
-                 1, 26u, input, this->mutable_id_array())));
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
+                input, this->mutable_partition_tag()));
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+            this->partition_tag().data(), static_cast<int>(this->partition_tag().length()),
+            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
+            "milvus.grpc.DeleteByIDParam.partition_tag"));
         } else {
           goto handle_unusual;
         }
@@ -9702,25 +9702,25 @@ void DeleteByIDParam::SerializeWithCachedSizes(
       1, this->collection_name(), output);
   }
 
-  // string partition_tag = 2;
-  if (this->partition_tag().size() > 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->partition_tag().data(), static_cast<int>(this->partition_tag().length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "milvus.grpc.DeleteByIDParam.partition_tag");
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
-      2, this->partition_tag(), output);
-  }
-
-  // repeated int64 id_array = 3;
+  // repeated int64 id_array = 2;
   if (this->id_array_size() > 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTag(3, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED, output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTag(2, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED, output);
     output->WriteVarint32(_id_array_cached_byte_size_.load(
         std::memory_order_relaxed));
   }
   for (int i = 0, n = this->id_array_size(); i < n; i++) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64NoTag(
       this->id_array(i), output);
+  }
+
+  // string partition_tag = 3;
+  if (this->partition_tag().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->partition_tag().data(), static_cast<int>(this->partition_tag().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.grpc.DeleteByIDParam.partition_tag");
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
+      3, this->partition_tag(), output);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -9747,21 +9747,10 @@ void DeleteByIDParam::SerializeWithCachedSizes(
         1, this->collection_name(), target);
   }
 
-  // string partition_tag = 2;
-  if (this->partition_tag().size() > 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->partition_tag().data(), static_cast<int>(this->partition_tag().length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "milvus.grpc.DeleteByIDParam.partition_tag");
-    target =
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
-        2, this->partition_tag(), target);
-  }
-
-  // repeated int64 id_array = 3;
+  // repeated int64 id_array = 2;
   if (this->id_array_size() > 0) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTagToArray(
-      3,
+      2,
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED,
       target);
     target = ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream::WriteVarint32ToArray(
@@ -9769,6 +9758,17 @@ void DeleteByIDParam::SerializeWithCachedSizes(
          target);
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       WriteInt64NoTagToArray(this->id_array_, target);
+  }
+
+  // string partition_tag = 3;
+  if (this->partition_tag().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->partition_tag().data(), static_cast<int>(this->partition_tag().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.grpc.DeleteByIDParam.partition_tag");
+    target =
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
+        3, this->partition_tag(), target);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -9792,7 +9792,7 @@ size_t DeleteByIDParam::ByteSizeLong() const {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // repeated int64 id_array = 3;
+  // repeated int64 id_array = 2;
   {
     size_t data_size = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       Int64Size(this->id_array_);
@@ -9814,7 +9814,7 @@ size_t DeleteByIDParam::ByteSizeLong() const {
         this->collection_name());
   }
 
-  // string partition_tag = 2;
+  // string partition_tag = 3;
   if (this->partition_tag().size() > 0) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
@@ -10308,20 +10308,20 @@ const char* VectorsIdentity::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPAC
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // string partition_tag = 2;
+      // repeated int64 id_array = 2;
       case 2:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 18)) {
-          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_partition_tag(), ptr, ctx, "milvus.grpc.VectorsIdentity.partition_tag");
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::PackedInt64Parser(mutable_id_array(), ptr, ctx);
+          CHK_(ptr);
+        } else if (static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16) {
+          add_id_array(::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr));
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // repeated int64 id_array = 3;
+      // string partition_tag = 3;
       case 3:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 26)) {
-          ptr = ::PROTOBUF_NAMESPACE_ID::internal::PackedInt64Parser(mutable_id_array(), ptr, ctx);
-          CHK_(ptr);
-        } else if (static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 24) {
-          add_id_array(::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr));
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_partition_tag(), ptr, ctx, "milvus.grpc.VectorsIdentity.partition_tag");
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
@@ -10370,31 +10370,31 @@ bool VectorsIdentity::MergePartialFromCodedStream(
         break;
       }
 
-      // string partition_tag = 2;
+      // repeated int64 id_array = 2;
       case 2: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (18 & 0xFF)) {
-          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
-                input, this->mutable_partition_tag()));
-          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-            this->partition_tag().data(), static_cast<int>(this->partition_tag().length()),
-            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
-            "milvus.grpc.VectorsIdentity.partition_tag"));
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPackedPrimitive<
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                 input, this->mutable_id_array())));
+        } else if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (16 & 0xFF)) {
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadRepeatedPrimitiveNoInline<
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                 1, 18u, input, this->mutable_id_array())));
         } else {
           goto handle_unusual;
         }
         break;
       }
 
-      // repeated int64 id_array = 3;
+      // string partition_tag = 3;
       case 3: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (26 & 0xFF)) {
-          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPackedPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
-                 input, this->mutable_id_array())));
-        } else if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (24 & 0xFF)) {
-          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadRepeatedPrimitiveNoInline<
-                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
-                 1, 26u, input, this->mutable_id_array())));
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
+                input, this->mutable_partition_tag()));
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+            this->partition_tag().data(), static_cast<int>(this->partition_tag().length()),
+            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
+            "milvus.grpc.VectorsIdentity.partition_tag"));
         } else {
           goto handle_unusual;
         }
@@ -10438,25 +10438,25 @@ void VectorsIdentity::SerializeWithCachedSizes(
       1, this->collection_name(), output);
   }
 
-  // string partition_tag = 2;
-  if (this->partition_tag().size() > 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->partition_tag().data(), static_cast<int>(this->partition_tag().length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "milvus.grpc.VectorsIdentity.partition_tag");
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
-      2, this->partition_tag(), output);
-  }
-
-  // repeated int64 id_array = 3;
+  // repeated int64 id_array = 2;
   if (this->id_array_size() > 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTag(3, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED, output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTag(2, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED, output);
     output->WriteVarint32(_id_array_cached_byte_size_.load(
         std::memory_order_relaxed));
   }
   for (int i = 0, n = this->id_array_size(); i < n; i++) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64NoTag(
       this->id_array(i), output);
+  }
+
+  // string partition_tag = 3;
+  if (this->partition_tag().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->partition_tag().data(), static_cast<int>(this->partition_tag().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.grpc.VectorsIdentity.partition_tag");
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
+      3, this->partition_tag(), output);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -10483,21 +10483,10 @@ void VectorsIdentity::SerializeWithCachedSizes(
         1, this->collection_name(), target);
   }
 
-  // string partition_tag = 2;
-  if (this->partition_tag().size() > 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->partition_tag().data(), static_cast<int>(this->partition_tag().length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "milvus.grpc.VectorsIdentity.partition_tag");
-    target =
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
-        2, this->partition_tag(), target);
-  }
-
-  // repeated int64 id_array = 3;
+  // repeated int64 id_array = 2;
   if (this->id_array_size() > 0) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTagToArray(
-      3,
+      2,
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED,
       target);
     target = ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream::WriteVarint32ToArray(
@@ -10505,6 +10494,17 @@ void VectorsIdentity::SerializeWithCachedSizes(
          target);
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       WriteInt64NoTagToArray(this->id_array_, target);
+  }
+
+  // string partition_tag = 3;
+  if (this->partition_tag().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->partition_tag().data(), static_cast<int>(this->partition_tag().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.grpc.VectorsIdentity.partition_tag");
+    target =
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
+        3, this->partition_tag(), target);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -10528,7 +10528,7 @@ size_t VectorsIdentity::ByteSizeLong() const {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // repeated int64 id_array = 3;
+  // repeated int64 id_array = 2;
   {
     size_t data_size = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       Int64Size(this->id_array_);
@@ -10550,7 +10550,7 @@ size_t VectorsIdentity::ByteSizeLong() const {
         this->collection_name());
   }
 
-  // string partition_tag = 2;
+  // string partition_tag = 3;
   if (this->partition_tag().size() > 0) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(

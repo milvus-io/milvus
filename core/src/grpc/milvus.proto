@@ -193,8 +193,8 @@ message FlushParam {
  */
 message DeleteByIDParam {
     string collection_name = 1;
-    string partition_tag = 2;
-    repeated int64 id_array = 3;
+    string partition_tag = 3;
+    repeated int64 id_array = 2;
 }
 
 /**
@@ -210,8 +210,8 @@ message CollectionInfo {
  */
 message VectorsIdentity {
     string collection_name = 1;
-    string partition_tag = 2;
-    repeated int64 id_array = 3;
+    string partition_tag = 3;
+    repeated int64 id_array = 2;
 }
 
 /**

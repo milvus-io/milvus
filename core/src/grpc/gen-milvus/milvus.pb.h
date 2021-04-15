@@ -3772,11 +3772,11 @@ class DeleteByIDParam :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kIdArrayFieldNumber = 3,
+    kIdArrayFieldNumber = 2,
     kCollectionNameFieldNumber = 1,
-    kPartitionTagFieldNumber = 2,
+    kPartitionTagFieldNumber = 3,
   };
-  // repeated int64 id_array = 3;
+  // repeated int64 id_array = 2;
   int id_array_size() const;
   void clear_id_array();
   ::PROTOBUF_NAMESPACE_ID::int64 id_array(int index) const;
@@ -3798,7 +3798,7 @@ class DeleteByIDParam :
   std::string* release_collection_name();
   void set_allocated_collection_name(std::string* collection_name);
 
-  // string partition_tag = 2;
+  // string partition_tag = 3;
   void clear_partition_tag();
   const std::string& partition_tag() const;
   void set_partition_tag(const std::string& value);
@@ -4083,11 +4083,11 @@ class VectorsIdentity :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kIdArrayFieldNumber = 3,
+    kIdArrayFieldNumber = 2,
     kCollectionNameFieldNumber = 1,
-    kPartitionTagFieldNumber = 2,
+    kPartitionTagFieldNumber = 3,
   };
-  // repeated int64 id_array = 3;
+  // repeated int64 id_array = 2;
   int id_array_size() const;
   void clear_id_array();
   ::PROTOBUF_NAMESPACE_ID::int64 id_array(int index) const;
@@ -4109,7 +4109,7 @@ class VectorsIdentity :
   std::string* release_collection_name();
   void set_allocated_collection_name(std::string* collection_name);
 
-  // string partition_tag = 2;
+  // string partition_tag = 3;
   void clear_partition_tag();
   const std::string& partition_tag() const;
   void set_partition_tag(const std::string& value);
@@ -10817,7 +10817,7 @@ inline void DeleteByIDParam::set_allocated_collection_name(std::string* collecti
   // @@protoc_insertion_point(field_set_allocated:milvus.grpc.DeleteByIDParam.collection_name)
 }
 
-// string partition_tag = 2;
+// string partition_tag = 3;
 inline void DeleteByIDParam::clear_partition_tag() {
   partition_tag_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
@@ -10868,7 +10868,7 @@ inline void DeleteByIDParam::set_allocated_partition_tag(std::string* partition_
   // @@protoc_insertion_point(field_set_allocated:milvus.grpc.DeleteByIDParam.partition_tag)
 }
 
-// repeated int64 id_array = 3;
+// repeated int64 id_array = 2;
 inline int DeleteByIDParam::id_array_size() const {
   return id_array_.size();
 }
@@ -11053,7 +11053,7 @@ inline void VectorsIdentity::set_allocated_collection_name(std::string* collecti
   // @@protoc_insertion_point(field_set_allocated:milvus.grpc.VectorsIdentity.collection_name)
 }
 
-// string partition_tag = 2;
+// string partition_tag = 3;
 inline void VectorsIdentity::clear_partition_tag() {
   partition_tag_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
@@ -11104,7 +11104,7 @@ inline void VectorsIdentity::set_allocated_partition_tag(std::string* partition_
   // @@protoc_insertion_point(field_set_allocated:milvus.grpc.VectorsIdentity.partition_tag)
 }
 
-// repeated int64 id_array = 3;
+// repeated int64 id_array = 2;
 inline int VectorsIdentity::id_array_size() const {
   return id_array_.size();
 }
