@@ -98,8 +98,8 @@ jobs:
           docker rmi $(docker images | grep '<none>' | awk '{print $3}') || exit 0
       - name: Docker Run
         run: |
-          docker-compose run --use-aliases -d db
-          docker-compose run centos-core
+          docker-compose -f ./docker/docker-compose.yml run --use-aliases -d db
+          docker-compose -f ./docker/docker-compose.yml run centos-core
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
@@ -107,7 +107,7 @@ jobs:
         run: |
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
-          docker-compose push centos-core
+          docker-compose -f ./docker/docker-compose.yml push centos-core
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v1
         with:
