@@ -173,13 +173,6 @@ class DB {
     InsertEntities(const std::string& collection_id, const std::string& partition_tag,
                    const std::vector<std::string>& field_names, Entity& entity,
                    std::unordered_map<std::string, meta::hybrid::DataType>& field_types) = 0;
-
-    virtual Status
-    HybridQuery(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                const std::vector<std::string>& partition_tags, context::HybridSearchContextPtr hybrid_search_context,
-                query::GeneralQueryPtr general_query,
-                std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
-                engine::ResultIds& result_ids, engine::ResultDistances& result_distances) = 0;
 };  // DB
 
 using DBPtr = std::shared_ptr<DB>;

@@ -454,7 +454,8 @@ DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const
     } else {
         // get specified partitions
         std::set<std::string> partition_name_array;
-        status = GetPartitionsByTags(collection_id, partition_tags, partition_name_array);
+        std::vector<meta::CollectionSchema> partition_array;
+        status = GetPartitionsByTags(collection_id, partition_tags, partition_name_array, partition_array);
         if (!status.ok()) {
             return status;  // didn't match any partition.
         }
@@ -1304,24 +1305,36 @@ DBImpl::GetVectorsByID(const engine::meta::CollectionSchema& collection, const s
     std::vector<int> file_types{meta::SegmentSchema::FILE_TYPE::RAW, meta::SegmentSchema::FILE_TYPE::TO_INDEX,
                                 meta::SegmentSchema::FILE_TYPE::BACKUP};
 
-    std::vector<meta::CollectionSchema> collection_array;
-    auto status = meta_ptr_->ShowPartitions(collection.collection_id_, collection_array);
+    if (partition_tag.empty()) {
+        std::vector<meta::CollectionSchema> collection_array;
+        auto status = meta_ptr_->ShowPartitions(collection.collection_id_, collection_array);
 
-    collection_array.push_back(collection);
-    status = meta_ptr_->FilesByTypeEx(collection_array, file_types, files_holder);
-    if (!status.ok()) {
-        std::string err_msg = "Failed to get files for GetVectorByID: " + status.message();
-        LOG_ENGINE_ERROR_ << err_msg;
-        return status;
+        collection_array.push_back(collection);
+        status = meta_ptr_->FilesByTypeEx(collection_array, file_types, files_holder);
+        if (!status.ok()) {
+            std::string err_msg = "Failed to get files for GetVectorByID: " + status.message();
+            LOG_ENGINE_ERROR_ << err_msg;
+            return status;
+        }
+    } else {
+        std::vector<std::string> partition_tags = {partition_tag};
+        std::set<std::string> partition_name_array;
+        std::vector<meta::CollectionSchema> partition_array;
+        auto status = GetPartitionsByTags(collection.collection_id_, partition_tags, partition_name_array, partition_array);
+        if (!status.ok()) {
+            return status;  // didn't match any partition.
+        }
+
+        status = meta_ptr_->FilesByTypeEx(partition_array, file_types, files_holder);
     }
 
     if (files_holder.HoldFiles().empty()) {
         LOG_ENGINE_DEBUG_ << "No files to get vector by id from";
-        return Status(DB_NOT_FOUND, "Collection is empty");
+        return Status(DB_NOT_FOUND, "Collection or partition is empty");
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();
-    status = GetVectorsByIdHelper(id_array, vectors, files_holder);
+    auto status = GetVectorsByIdHelper(id_array, vectors, files_holder);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();
 
     if (vectors.empty()) {
@@ -1721,73 +1734,6 @@ DBImpl::QueryByIDs(const std::shared_ptr<server::Context>& context, const std::s
 }
 
 Status
-DBImpl::HybridQuery(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                    const std::vector<std::string>& partition_tags,
-                    context::HybridSearchContextPtr hybrid_search_context, query::GeneralQueryPtr general_query,
-                    std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
-                    ResultIds& result_ids, ResultDistances& result_distances) {
-    auto query_ctx = context->Child("Query");
-
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
-
-    Status status;
-    meta::FilesHolder files_holder;
-    if (partition_tags.empty()) {
-        // no partition tag specified, means search in whole table
-        // get all table files from parent table
-        status = meta_ptr_->FilesToSearch(collection_id, files_holder);
-        if (!status.ok()) {
-            return status;
-        }
-
-        std::vector<meta::CollectionSchema> partition_array;
-        status = meta_ptr_->ShowPartitions(collection_id, partition_array);
-        if (!status.ok()) {
-            return status;
-        }
-        for (auto& schema : partition_array) {
-            status = meta_ptr_->FilesToSearch(schema.collection_id_, files_holder);
-            if (!status.ok()) {
-                return Status(DB_ERROR, "get files to search failed in HybridQuery");
-            }
-        }
-
-        if (files_holder.HoldFiles().empty()) {
-            return Status::OK();  // no files to search
-        }
-    } else {
-        // get files from specified partitions
-        std::set<std::string> partition_name_array;
-        GetPartitionsByTags(collection_id, partition_tags, partition_name_array);
-
-        for (auto& partition_name : partition_name_array) {
-            status = meta_ptr_->FilesToSearch(partition_name, files_holder);
-            if (!status.ok()) {
-                return Status(DB_ERROR, "get files to search failed in HybridQuery");
-            }
-        }
-
-        if (files_holder.HoldFiles().empty()) {
-            return Status::OK();
-        }
-    }
-
-    cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = HybridQueryAsync(query_ctx, collection_id, files_holder, hybrid_search_context, general_query, attr_type,
-                              nq, result_ids, result_distances);
-    if (!status.ok()) {
-        return status;
-    }
-    cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
-
-    query_ctx->GetTraceContext()->GetSpan()->Finish();
-
-    return status;
-}
-
-Status
 DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
               const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
               const VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) {
@@ -1799,21 +1745,8 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
 
     Status status;
     meta::FilesHolder files_holder;
+    std::set<std::string> partition_ids;
     if (partition_tags.empty()) {
-#if 0
-        // no partition tag specified, means search in whole collection
-        // get all collection files from parent collection
-        status = meta_ptr_->FilesToSearch(collection_id, files_holder);
-        if (!status.ok()) {
-            return status;
-        }
-
-        std::vector<meta::CollectionSchema> partition_array;
-        status = meta_ptr_->ShowPartitions(collection_id, partition_array);
-        for (auto& schema : partition_array) {
-            status = meta_ptr_->FilesToSearch(schema.collection_id_, files_holder);
-        }
-#else
         // no partition tag specified, means search in whole collection
         // get files from root collection
         status = meta_ptr_->FilesToSearch(collection_id, files_holder);
@@ -1821,52 +1754,32 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
             return status;
         }
 
-        // get files from partitions
-        std::set<std::string> partition_ids;
         std::vector<meta::CollectionSchema> partition_array;
         status = meta_ptr_->ShowPartitions(collection_id, partition_array);
         for (auto& id : partition_array) {
             partition_ids.insert(id.collection_id_);
         }
-
-        status = meta_ptr_->FilesToSearchEx(collection_id, partition_ids, files_holder);
-        if (!status.ok()) {
-            return status;
-        }
-#endif
-
-        if (files_holder.HoldFiles().empty()) {
-            return Status::OK();  // no files to search
-        }
     } else {
-#if 0
-        // get files from specified partitions
         std::set<std::string> partition_name_array;
-        status = GetPartitionsByTags(collection_id, partition_tags, partition_name_array);
+        std::vector<meta::CollectionSchema> partition_array;
+        status = GetPartitionsByTags(collection_id, partition_tags, partition_name_array, partition_array);
         if (!status.ok()) {
             return status;  // didn't match any partition.
         }
 
-        for (auto& partition_name : partition_name_array) {
-            status = meta_ptr_->FilesToSearch(partition_name, files_holder);
-        }
-#else
-        std::set<std::string> partition_name_array;
-        status = GetPartitionsByTags(collection_id, partition_tags, partition_name_array);
-        if (!status.ok()) {
-            return status;  // didn't match any partition.
-        }
-
-        std::set<std::string> partition_ids;
         for (auto& partition_name : partition_name_array) {
             partition_ids.insert(partition_name);
         }
+    }
 
-        status = meta_ptr_->FilesToSearchEx(collection_id, partition_ids, files_holder);
-#endif
-        if (files_holder.HoldFiles().empty()) {
-            return Status::OK();  // no files to search
-        }
+    // get files from partitions
+    status = meta_ptr_->FilesToSearchEx(collection_id, partition_ids, files_holder);
+    if (!status.ok()) {
+        return status;
+    }
+
+    if (files_holder.HoldFiles().empty()) {
+        return Status::OK();  // no files to search
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
@@ -1974,68 +1887,6 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, meta::FilesH
     result_ids = job->GetResultIds();
     result_distances = job->GetResultDistances();
     rc.ElapseFromBegin("Engine query totally cost");
-
-    return Status::OK();
-}
-
-Status
-DBImpl::HybridQueryAsync(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                         meta::FilesHolder& files_holder, context::HybridSearchContextPtr hybrid_search_context,
-                         query::GeneralQueryPtr general_query,
-                         std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
-                         ResultIds& result_ids, ResultDistances& result_distances) {
-    auto query_async_ctx = context->Child("Query Async");
-
-#if 0
-    // Construct tasks
-    for (auto file : files) {
-        std::unordered_map<std::string, engine::DataType> types;
-        auto it = attr_type.begin();
-        for (; it != attr_type.end(); it++) {
-            types.insert(std::make_pair(it->first, (engine::DataType)it->second));
-        }
-
-        auto file_ptr = std::make_shared<meta::TableFileSchema>(file);
-        search::TaskPtr
-            task = std::make_shared<search::Task>(context, file_ptr, general_query, types, hybrid_search_context);
-        search::TaskInst::GetInstance().load_queue().push(task);
-        search::TaskInst::GetInstance().load_cv().notify_one();
-        hybrid_search_context->tasks_.emplace_back(task);
-    }
-
-#endif
-
-    //#if 0
-    TimeRecorder rc("");
-
-    // step 1: construct search job
-    VectorsData vectors;
-    milvus::engine::meta::SegmentsSchema& files = files_holder.HoldFiles();
-    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, index file count: %ld", files_holder.HoldFiles().size());
-    scheduler::SearchJobPtr job =
-        std::make_shared<scheduler::SearchJob>(query_async_ctx, general_query, attr_type, vectors);
-    for (auto& file : files) {
-        scheduler::SegmentSchemaPtr file_ptr = std::make_shared<meta::SegmentSchema>(file);
-        job->AddIndexFile(file_ptr);
-    }
-
-    // step 2: put search job to scheduler and wait result
-    scheduler::JobMgrInst::GetInstance()->Put(job);
-    job->WaitResult();
-
-    files_holder.ReleaseFiles();
-    if (!job->GetStatus().ok()) {
-        return job->GetStatus();
-    }
-
-    // step 3: construct results
-    nq = job->vector_count();
-    result_ids = job->GetResultIds();
-    result_distances = job->GetResultDistances();
-    rc.ElapseFromBegin("Engine query totally cost");
-
-    query_async_ctx->GetTraceContext()->GetSpan()->Finish();
-    //#endif
 
     return Status::OK();
 }
@@ -2392,9 +2243,10 @@ DBImpl::GetPartitionByTag(const std::string& collection_id, const std::string& p
 
 Status
 DBImpl::GetPartitionsByTags(const std::string& collection_id, const std::vector<std::string>& partition_tags,
-                            std::set<std::string>& partition_name_array) {
-    std::vector<meta::CollectionSchema> partition_array;
-    auto status = meta_ptr_->ShowPartitions(collection_id, partition_array);
+                            std::set<std::string>& partition_name_array,
+                            std::vector<meta::CollectionSchema>& partition_array) {
+    std::vector<meta::CollectionSchema> all_partitions;
+    auto status = meta_ptr_->ShowPartitions(collection_id, all_partitions);
 
     for (auto& tag : partition_tags) {
         // trim side-blank of tag, only compare valid characters
@@ -2407,9 +2259,12 @@ DBImpl::GetPartitionsByTags(const std::string& collection_id, const std::vector<
             continue;
         }
 
-        for (auto& schema : partition_array) {
+        for (auto& schema : all_partitions) {
             if (server::StringHelpFunctions::IsRegexMatch(schema.partition_tag_, valid_tag)) {
-                partition_name_array.insert(schema.collection_id_);
+                if (partition_name_array.find(schema.collection_id_) == partition_name_array.end()) {
+                    partition_name_array.insert(schema.collection_id_);
+                    partition_array.push_back(schema);
+                }
             }
         }
     }

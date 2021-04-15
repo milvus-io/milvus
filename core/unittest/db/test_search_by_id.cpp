@@ -276,7 +276,7 @@ TEST_F(SearchByIdTest, WITH_DELETE_TEST) {
     for (auto& id : ids_to_search) {
         ids_to_delete.emplace_back(id);
     }
-    stat = db_->DeleteVectors(collection_info.collection_id_, ids_to_delete);
+    stat = db_->DeleteVectors(collection_info.collection_id_, "", ids_to_delete);
 
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
@@ -349,7 +349,7 @@ TEST_F(GetVectorByIdTest, BASIC_TEST) {
     milvus::engine::ResultDistances result_distances;
 
     std::vector<milvus::engine::VectorsData> vectors;
-    stat = db_->GetVectorsByID(collection_info, ids_to_search, vectors);
+    stat = db_->GetVectorsByID(collection_info, "", ids_to_search, vectors);
     ASSERT_TRUE(stat.ok());
 
     stat = db_->Query(dummy_context_, collection_info.collection_id_, tags, topk, json_params, vectors[0], result_ids,
@@ -409,7 +409,7 @@ TEST_F(GetVectorByIdTest, WITH_INDEX_TEST) {
     milvus::engine::ResultDistances result_distances;
 
     std::vector<milvus::engine::VectorsData> vectors;
-    stat = db_->GetVectorsByID(collection_info, ids_to_search, vectors);
+    stat = db_->GetVectorsByID(collection_info, "", ids_to_search, vectors);
     ASSERT_TRUE(stat.ok());
 
     stat = db_->Query(dummy_context_, collection_info.collection_id_, tags, topk, json_params, vectors[0], result_ids,
@@ -459,7 +459,7 @@ TEST_F(GetVectorByIdTest, WITH_DELETE_TEST) {
     for (auto& id : ids_to_search) {
         ids_to_delete.emplace_back(id);
     }
-    stat = db_->DeleteVectors(collection_info.collection_id_, ids_to_delete);
+    stat = db_->DeleteVectors(collection_info.collection_id_, "", ids_to_delete);
 
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
@@ -469,7 +469,7 @@ TEST_F(GetVectorByIdTest, WITH_DELETE_TEST) {
     milvus::engine::ResultDistances result_distances;
 
     std::vector<milvus::engine::VectorsData> vectors;
-    stat = db_->GetVectorsByID(collection_info, ids_to_search, vectors);
+    stat = db_->GetVectorsByID(collection_info, "", ids_to_search, vectors);
     ASSERT_TRUE(stat.ok());
     for (auto& vector : vectors) {
         ASSERT_EQ(vector.vector_count_, 0);
@@ -541,7 +541,7 @@ TEST_F(SearchByIdTest, BINARY_TEST) {
     milvus::engine::ResultDistances result_distances;
 
     std::vector<milvus::engine::VectorsData> vectors;
-    stat = db_->GetVectorsByID(collection_info, ids_to_search, vectors);
+    stat = db_->GetVectorsByID(collection_info, "", ids_to_search, vectors);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(vectors.size(), ids_to_search.size());
 

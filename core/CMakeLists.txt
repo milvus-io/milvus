@@ -197,6 +197,7 @@ config_summary()
 add_subdirectory(src)
 
 if (BUILD_UNIT_TEST STREQUAL "ON")
+    add_compile_definitions("FIU_ENABLE")
     if (BUILD_COVERAGE STREQUAL "ON")
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
     endif ()
