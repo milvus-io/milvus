@@ -14,7 +14,7 @@
 //
 #include "test_utils/DataGen.h"
 #include <gtest/gtest.h>
-#include "segcore/SegcoreInit.h"
+#include "segcore/segcore_init_c.h"
 
 TEST(Init, Naive) {
     using namespace milvus;

@@ -8,6 +8,7 @@ package querynode
 
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
+#include "segcore/segcore_init_c.h"
 
 */
 import "C"
@@ -103,6 +104,7 @@ func NewQueryNodeWithoutID(ctx context.Context, factory msgstream.Factory) *Quer
 
 func (node *QueryNode) Init() error {
 	ctx := context.Background()
+	C.SegcoreInit()
 	registerReq := &queryPb.RegisterNodeRequest{
 		Base: &commonpb.MsgBase{
 			SourceID: Params.QueryNodeID,

@@ -14,7 +14,6 @@ set(indexbuilder_bench_srcs
 add_executable(all_bench ${bench_srcs})
 target_link_libraries(all_bench
         milvus_segcore
-        milvus_indexbuilder
         log
         pthread
         )
