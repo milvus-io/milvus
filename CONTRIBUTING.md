@@ -1,46 +1,39 @@
 # Contributing to Milvus
 
-First of all, thanks for taking the time to contribute to Milvus! It's people like you that help Milvus come to fruition. :tada:
+Contributions to Milvus are welcome from everyone. We strive to make the contribution process simple and straightforward. Up-to-date information can be found at [milvus.io](https://milvus.io/).
 
-The following are a set of guidelines for contributing to Milvus. Following these guidelines helps contributing to this project easy and transparent. These are mostly guideline, not rules. Use your best judgment, and feel free to propose changes to this document in a pull request.
+The following are a set of guidelines for contributing to Milvus. Following these guidelines makes contributing to this project easy and transparent. These are mostly guidelines, not rules. Use your best judgment, and feel free to propose changes to this document in a pull request.
 
 As for everything else in the project, the contributions to Milvus are governed by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## Contribution Checklist
-
-Before you make any contributions, make sure you follow this list.
-
--   Read [Contributing to Milvus](CONTRIBUTING.md).
--   Check if the changes are consistent with the [coding style](CONTRIBUTING.md#coding-style), and format your code accordingly.
--   Run [unit tests](CONTRIBUTING.md#run-unit-test-with-code-coverage) and check your code coverage rate.
 
 ## What contributions can I make?
 
 Contributions to Milvus fall into the following categories.
 
-1.  To report a bug or a problem with documentation, please file an [issue](https://github.com/milvus-io/milvus/issues/new/choose) providing the details of the problem. If you believe the issue needs priority attention, please comment on the issue to notify the team.
-2.  To propose a new feature, please file a new feature request [issue](https://github.com/milvus-io/milvus/issues/new/choose). Describe the intended feature and discuss the design and implementation with the team and community. Once the team agrees that the plan looks good, go ahead and implement it, following the [Contributing code](CONTRIBUTING.md#contributing-code).
+1.  To report a bug or a problem with documentation, please file an [issue](https://github.com/milvus-io/milvus/issues/new/choose) providing the details of the problem. If you believe that the issue needs priority attention, please comment on the issue to notify the team.
+2.  To propose a new feature, please file a new feature request [issue](https://github.com/milvus-io/milvus/issues/new/choose). Describe the intended feature and discuss the design and implementation with the team and community. Once the team agrees on the plan, you can follow the [Contributing code](CONTRIBUTING.md#contributing-code) to implement it.
 3.  To implement a feature or bug-fix for an existing outstanding issue, follow the [Contributing code](CONTRIBUTING.md#contributing-code). If you need more context on a particular issue, comment on the issue to let people know.
 
 ## How can I contribute?
 
 ### Contributing code
 
-If you have improvements to Milvus, send us your pull requests! For those just getting started, see [GitHub workflow](#github-workflow). Make sure to refer to the related issue in your pull request's comment and update [CHANGELOG.md](CHANGELOG.md).
+If you have improvements to Milvus, send us your pull requests! For those just getting started, see [GitHub workflow](#github-workflow). Make sure to refer to the related issue in the ccomment of your pull request and update [CHANGELOG.md](CHANGELOG.md).
 
-The Milvus team members will review your pull requests, and once it is accepted, the status of the projects to which it is associated will be changed to **Reviewer approved**. This means we are working on submitting your pull request to the internal repository. After the change has been submitted internally, your pull request will be merged automatically on GitHub.
+All submissions will be reviewed as quickly as possible. Once it is accepted, the status of the project to which it is associated will be changed to **Reviewer approved**. This means we are working on submitting your pull request to the internal repository. After the change has been submitted internally, your pull request will be merged automatically on GitHub.
 
 ### GitHub workflow
 
-Please create a new branch from an up-to-date master on your fork.
+Generally, we follow the "fork-and-pull" Git workflow.
 
-1.  Fork the repository on GitHub.
+1.  [Fork](https://docs.github.com/en/github/getting-started-with-github/fork-a-repo) the repository on GitHub.
 2.  Clone your fork to your local machine with `git clone git@github.com:<yourname>/milvus.git`.
 3.  Create a branch with `git checkout -b my-topic-branch`.
-4.  Make your changes, commit, then push to to GitHub with `git push --set-upstream origin my-topic-branch`. You must record your changes in [CHANGELOG.md](CHANGELOG.md) with issue numbers and descriptions.
-5.  Visit GitHub and make your pull request.
+4.  [Commit](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/committing-changes-to-a-pull-request-branch-created-from-a-fork) changes to your own branch, then push to to GitHub with `git push --set-upstream origin my-topic-branch`. You must record your changes in [CHANGELOG.md](CHANGELOG.md) with issue numbers and descriptions.
+5.  Submit a [pull request](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/about-pull-requests) so that we can review your changes.
 
-If you have an existing local repository, please update it before you start, to minimize the chance of merge conflicts.
+Remember to [sync your forked repository](https://docs.github.com/en/github/getting-started-with-github/fork-a-repo#keep-your-fork-synced) *before* submitting proposed changes upstream. If you have an existing local repository, please update it before you start, to minimize the chance of merge conflicts.
 
 ```shell
 git remote add upstream git@github.com:milvus-io/milvus.git
@@ -51,7 +44,7 @@ git checkout -b my-topic-branch
 
 ### General guidelines
 
-Before sending your pull requests for review, make sure your changes are consistent with the guidelines and follow the Milvus coding style.
+Before submitting your pull requests for review, make sure that your changes are consistent with the [coding style](CONTRIBUTING.md#coding-style), and run [unit tests](CONTRIBUTING.md#run-unit-test-with-code-coverage) to check your code coverage rate.
 
 -   Include unit tests when you contribute new features, as they help to prove that your code works correctly, and also guard against future breaking changes to lower the maintenance cost.
 -   Bug fixes also require unit tests, because the presence of bugs usually indicates insufficient test coverage.
@@ -104,7 +97,7 @@ $ make clang-format
 
 ## Run unit test with code coverage
 
-Before submitting your PR, make sure you have run unit test, and your code coverage rate is >= 90%.
+Before submitting your Pull Request, make sure you have run unit test, and your code coverage rate is >= 90%.
 
 Install lcov
 ```shell
