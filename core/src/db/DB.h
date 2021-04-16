@@ -75,6 +75,10 @@ class DB {
                       const std::vector<std::string>& partition_tags, bool force = false) = 0;
 
     virtual Status
+    ReleaseCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                      const std::vector<std::string>& partition_tags) = 0;
+
+    virtual Status
     ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::vector<int64_t>& segment_ids) = 0;
 
     virtual Status
@@ -106,7 +110,7 @@ class DB {
     DeleteVector(const std::string& collection_id, IDNumber vector_id) = 0;
 
     virtual Status
-    DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) = 0;
+    DeleteVectors(const std::string& collection_id, const std::string& partition_tag, IDNumbers vector_ids) = 0;
 
     virtual Status
     Flush(const std::string& collection_id) = 0;
@@ -119,8 +123,8 @@ class DB {
             double threshold = 0.0) = 0;
 
     virtual Status
-    GetVectorsByID(const engine::meta::CollectionSchema& collection, const IDNumbers& id_array,
-                   std::vector<engine::VectorsData>& vectors) = 0;
+    GetVectorsByID(const engine::meta::CollectionSchema& collection, const std::string& partition_tag,
+                   const IDNumbers& id_array, std::vector<engine::VectorsData>& vectors) = 0;
 
     virtual Status
     GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) = 0;
@@ -169,13 +173,6 @@ class DB {
     InsertEntities(const std::string& collection_id, const std::string& partition_tag,
                    const std::vector<std::string>& field_names, Entity& entity,
                    std::unordered_map<std::string, meta::hybrid::DataType>& field_types) = 0;
-
-    virtual Status
-    HybridQuery(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                const std::vector<std::string>& partition_tags, context::HybridSearchContextPtr hybrid_search_context,
-                query::GeneralQueryPtr general_query,
-                std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
-                engine::ResultIds& result_ids, engine::ResultDistances& result_distances) = 0;
 };  // DB
 
 using DBPtr = std::shared_ptr<DB>;

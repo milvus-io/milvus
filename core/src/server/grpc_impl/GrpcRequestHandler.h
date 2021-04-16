@@ -298,6 +298,21 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
                       ::milvus::grpc::Status* response) override;
 
     // *
+    // @brief This method is used to release collection/partitions
+    //
+    // @param PreloadCollectionParam, target collection/partitions.
+    //
+    // @return Status
+    ::grpc::Status
+    ReleaseCollection(::grpc::ServerContext* context, const ::milvus::grpc::PreloadCollectionParam* request,
+                      ::milvus::grpc::Status* response);
+
+    // *
+    // @brief This method is used to reload collection segments
+    //
+    // @param ReLoadSegmentsParam, target segments information.
+    //
+    // @return Status
     ::grpc::Status
     ReloadSegments(::grpc::ServerContext* context, const ::milvus::grpc::ReLoadSegmentsParam* request,
                    ::milvus::grpc::Status* response) override;
@@ -320,75 +335,6 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     ::grpc::Status
     Compact(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
             ::milvus::grpc::Status* response);
-
-    /*******************************************New Interface*********************************************/
-
-    ::grpc::Status
-    CreateHybridCollection(::grpc::ServerContext* context, const ::milvus::grpc::Mapping* request,
-                           ::milvus::grpc::Status* response) override;
-
-    //    ::grpc::Status
-    //    HasCollection(::grpc::ServerContext* context,
-    //                  const ::milvus::grpc::CollectionName* request,
-    //                  ::milvus::grpc::BoolReply* response) override;
-    //
-    //    ::grpc::Status
-    //    DropCollection(::grpc::ServerContext* context,
-    //                   const ::milvus::grpc::CollectionName* request,
-    //                   ::milvus::grpc::Status* response) override;
-    //
-    ::grpc::Status
-    DescribeHybridCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
-                             ::milvus::grpc::Mapping* response) override;
-    //
-    //    ::grpc::Status
-    //    CountCollection(::grpc::ServerContext* context,
-    //                    const ::milvus::grpc::CollectionName* request,
-    //                    ::milvus::grpc::CollectionRowCount* response) override;
-    //
-    //    ::grpc::Status
-    //    ShowCollections(::grpc::ServerContext* context,
-    //                    const ::milvus::grpc::Command* request,
-    //                    ::milvus::grpc::MappingList* response) override;
-    //
-    //    ::grpc::Status
-    //    ShowCollectionInfo(::grpc::ServerContext* context,
-    //                       const ::milvus::grpc::CollectionName* request,
-    //                       ::milvus::grpc::CollectionInfo* response) override;
-    //
-    //    ::grpc::Status
-    //    PreloadCollection(::grpc::ServerContext* context,
-    //                      const ::milvus::grpc::CollectionName* request,
-    //                      ::milvus::grpc::Status* response) override;
-    //
-    ::grpc::Status
-    InsertEntity(::grpc::ServerContext* context, const ::milvus::grpc::HInsertParam* request,
-                 ::milvus::grpc::HEntityIDs* response) override;
-
-    ::grpc::Status
-    HybridSearch(::grpc::ServerContext* context, const ::milvus::grpc::HSearchParam* request,
-                 ::milvus::grpc::TopKQueryResult* response) override;
-    //
-    //    ::grpc::Status
-    //    HybridSearchInSegments(::grpc::ServerContext* context,
-    //                           const ::milvus::
-    //                           grpc::HSearchInSegmentsParam* request,
-    //                           ::milvus::grpc::HQueryResult* response) override;
-    //
-    //    ::grpc::Status
-    //    GetEntityByID(::grpc::ServerContext* context,
-    //                  const ::milvus::grpc::HEntityIdentity* request,
-    //                  ::milvus::grpc::HEntity* response) override;
-    //
-    //    ::grpc::Status
-    //    GetEntityIDs(::grpc::ServerContext* context,
-    //                 const ::milvus::grpc::HGetEntityIDsParam* request,
-    //                 ::milvus::grpc::HEntityIDs* response) override;
-    //
-    //    ::grpc::Status
-    //    DeleteEntitiesByID(::grpc::ServerContext* context,
-    //                       const ::milvus::grpc::HDeleteByIDParam* request,
-    //                       ::milvus::grpc::Status* response) override;
 
     void
     RegisterRequestHandler(const RequestHandler& handler) {

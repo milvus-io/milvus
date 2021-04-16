@@ -30,17 +30,20 @@ class GetVectorsByIDRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           const std::vector<int64_t>& ids, std::vector<engine::VectorsData>& vectors);
+           const std::string& partition_tag, const std::vector<int64_t>& ids,
+           std::vector<engine::VectorsData>& vectors);
 
  protected:
     GetVectorsByIDRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                          const std::vector<int64_t>& ids, std::vector<engine::VectorsData>& vectors);
+                          const std::string& partition_tag, const std::vector<int64_t>& ids,
+                          std::vector<engine::VectorsData>& vectors);
 
     Status
     OnExecute() override;
 
  private:
-    std::string collection_name_;
+    const std::string collection_name_;
+    const std::string partition_tag_;
     std::vector<int64_t> ids_;
     std::vector<engine::VectorsData>& vectors_;
 };

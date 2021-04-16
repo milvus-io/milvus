@@ -105,7 +105,7 @@ TEST_F(DeleteTest, delete_in_mem) {
         ids_to_delete.emplace_back(kv.first);
     }
 
-    stat = db_->DeleteVectors(collection_info.collection_id_, ids_to_delete);
+    stat = db_->DeleteVectors(collection_info.collection_id_, "", ids_to_delete);
     ASSERT_TRUE(stat.ok());
 
     //    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
@@ -251,7 +251,7 @@ TEST_F(DeleteTest, delete_multiple_times) {
     int topk = 10, nprobe = 10;
     for (auto& pair : search_vectors) {
         std::vector<int64_t> to_delete{pair.first};
-        stat = db_->DeleteVectors(collection_info.collection_id_, to_delete);
+        stat = db_->DeleteVectors(collection_info.collection_id_, "", to_delete);
         ASSERT_TRUE(stat.ok());
 
         stat = db_->Flush();
@@ -321,7 +321,7 @@ TEST_F(DeleteTest, delete_before_create_index) {
     for (auto& kv : search_vectors) {
         ids_to_delete.emplace_back(kv.first);
     }
-    stat = db_->DeleteVectors(collection_info.collection_id_, ids_to_delete);
+    stat = db_->DeleteVectors(collection_info.collection_id_, "", ids_to_delete);
 
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
@@ -410,7 +410,7 @@ TEST_F(DeleteTest, delete_with_index) {
     for (auto& kv : search_vectors) {
         ids_to_delete.emplace_back(kv.first);
     }
-    stat = db_->DeleteVectors(collection_info.collection_id_, ids_to_delete);
+    stat = db_->DeleteVectors(collection_info.collection_id_, "", ids_to_delete);
 
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
@@ -492,7 +492,7 @@ TEST_F(DeleteTest, delete_multiple_times_with_index) {
     int deleted = 0;
     for (auto& pair : search_vectors) {
         std::vector<int64_t> to_delete{pair.first};
-        stat = db_->DeleteVectors(collection_info.collection_id_, to_delete);
+        stat = db_->DeleteVectors(collection_info.collection_id_, "", to_delete);
         ASSERT_TRUE(stat.ok());
 
         stat = db_->Flush();
@@ -546,7 +546,7 @@ TEST_F(DeleteTest, delete_single_vector) {
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
-    stat = db_->DeleteVectors(collection_info.collection_id_, xb.id_array_);
+    stat = db_->DeleteVectors(collection_info.collection_id_, "", xb.id_array_);
     ASSERT_TRUE(stat.ok());
 
     stat = db_->Flush();
@@ -595,7 +595,7 @@ TEST_F(DeleteTest, delete_add_create_index) {
 
     std::vector<milvus::engine::IDNumber> ids_to_delete;
     ids_to_delete.emplace_back(xb.id_array_.front());
-    stat = db_->DeleteVectors(collection_info.collection_id_, ids_to_delete);
+    stat = db_->DeleteVectors(collection_info.collection_id_, "", ids_to_delete);
     ASSERT_TRUE(stat.ok());
 
     milvus::engine::VectorsData xb2 = xb;
@@ -666,7 +666,7 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
 
     std::vector<milvus::engine::IDNumber> ids_to_delete;
     ids_to_delete.emplace_back(xb.id_array_.front());
-    stat = db_->DeleteVectors(collection_info.collection_id_, ids_to_delete);
+    stat = db_->DeleteVectors(collection_info.collection_id_, "", ids_to_delete);
     ASSERT_TRUE(stat.ok());
 
     milvus::engine::VectorsData xb2 = xb;
@@ -734,7 +734,7 @@ TEST_F(CompactTest, compact_basic) {
     std::vector<milvus::engine::IDNumber> ids_to_delete;
     ids_to_delete.emplace_back(xb.id_array_.front());
     ids_to_delete.emplace_back(xb.id_array_.back());
-    stat = db_->DeleteVectors(collection_info.collection_id_, ids_to_delete);
+    stat = db_->DeleteVectors(collection_info.collection_id_, "", ids_to_delete);
     ASSERT_TRUE(stat.ok());
 
     stat = db_->Flush();
@@ -820,7 +820,7 @@ TEST_F(CompactTest, compact_with_index) {
     for (auto& kv : search_vectors) {
         ids_to_delete.emplace_back(kv.first);
     }
-    stat = db_->DeleteVectors(collection_info.collection_id_, ids_to_delete);
+    stat = db_->DeleteVectors(collection_info.collection_id_, "", ids_to_delete);
 
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());

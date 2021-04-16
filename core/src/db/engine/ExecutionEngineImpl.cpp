@@ -793,6 +793,13 @@ ExecutionEngineImpl::FpgaCache() {
     return Status::OK();
 }
 
+Status
+ExecutionEngineImpl::ReleaseCache() {
+    LOG_ENGINE_DEBUG_ << "Release cache for file " << location_;
+    server::CommonUtil::EraseFromCache(location_);
+    return Status::OK();
+}
+
 // TODO(linxj): remove.
 Status
 ExecutionEngineImpl::Init() {

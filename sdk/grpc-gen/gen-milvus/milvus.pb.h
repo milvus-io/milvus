@@ -3774,6 +3774,7 @@ class DeleteByIDParam :
   enum : int {
     kIdArrayFieldNumber = 2,
     kCollectionNameFieldNumber = 1,
+    kPartitionTagFieldNumber = 3,
   };
   // repeated int64 id_array = 2;
   int id_array_size() const;
@@ -3797,6 +3798,17 @@ class DeleteByIDParam :
   std::string* release_collection_name();
   void set_allocated_collection_name(std::string* collection_name);
 
+  // string partition_tag = 3;
+  void clear_partition_tag();
+  const std::string& partition_tag() const;
+  void set_partition_tag(const std::string& value);
+  void set_partition_tag(std::string&& value);
+  void set_partition_tag(const char* value);
+  void set_partition_tag(const char* value, size_t size);
+  std::string* mutable_partition_tag();
+  std::string* release_partition_tag();
+  void set_allocated_partition_tag(std::string* partition_tag);
+
   // @@protoc_insertion_point(class_scope:milvus.grpc.DeleteByIDParam)
  private:
   class _Internal;
@@ -3805,6 +3817,7 @@ class DeleteByIDParam :
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > id_array_;
   mutable std::atomic<int> _id_array_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr partition_tag_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -4072,6 +4085,7 @@ class VectorsIdentity :
   enum : int {
     kIdArrayFieldNumber = 2,
     kCollectionNameFieldNumber = 1,
+    kPartitionTagFieldNumber = 3,
   };
   // repeated int64 id_array = 2;
   int id_array_size() const;
@@ -4095,6 +4109,17 @@ class VectorsIdentity :
   std::string* release_collection_name();
   void set_allocated_collection_name(std::string* collection_name);
 
+  // string partition_tag = 3;
+  void clear_partition_tag();
+  const std::string& partition_tag() const;
+  void set_partition_tag(const std::string& value);
+  void set_partition_tag(std::string&& value);
+  void set_partition_tag(const char* value);
+  void set_partition_tag(const char* value, size_t size);
+  std::string* mutable_partition_tag();
+  std::string* release_partition_tag();
+  void set_allocated_partition_tag(std::string* partition_tag);
+
   // @@protoc_insertion_point(class_scope:milvus.grpc.VectorsIdentity)
  private:
   class _Internal;
@@ -4103,6 +4128,7 @@ class VectorsIdentity :
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > id_array_;
   mutable std::atomic<int> _id_array_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr partition_tag_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -10791,6 +10817,57 @@ inline void DeleteByIDParam::set_allocated_collection_name(std::string* collecti
   // @@protoc_insertion_point(field_set_allocated:milvus.grpc.DeleteByIDParam.collection_name)
 }
 
+// string partition_tag = 3;
+inline void DeleteByIDParam::clear_partition_tag() {
+  partition_tag_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& DeleteByIDParam::partition_tag() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.DeleteByIDParam.partition_tag)
+  return partition_tag_.GetNoArena();
+}
+inline void DeleteByIDParam::set_partition_tag(const std::string& value) {
+  
+  partition_tag_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.grpc.DeleteByIDParam.partition_tag)
+}
+inline void DeleteByIDParam::set_partition_tag(std::string&& value) {
+  
+  partition_tag_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.grpc.DeleteByIDParam.partition_tag)
+}
+inline void DeleteByIDParam::set_partition_tag(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  partition_tag_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.grpc.DeleteByIDParam.partition_tag)
+}
+inline void DeleteByIDParam::set_partition_tag(const char* value, size_t size) {
+  
+  partition_tag_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.grpc.DeleteByIDParam.partition_tag)
+}
+inline std::string* DeleteByIDParam::mutable_partition_tag() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.DeleteByIDParam.partition_tag)
+  return partition_tag_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* DeleteByIDParam::release_partition_tag() {
+  // @@protoc_insertion_point(field_release:milvus.grpc.DeleteByIDParam.partition_tag)
+  
+  return partition_tag_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void DeleteByIDParam::set_allocated_partition_tag(std::string* partition_tag) {
+  if (partition_tag != nullptr) {
+    
+  } else {
+    
+  }
+  partition_tag_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), partition_tag);
+  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.DeleteByIDParam.partition_tag)
+}
+
 // repeated int64 id_array = 2;
 inline int DeleteByIDParam::id_array_size() const {
   return id_array_.size();
@@ -10974,6 +11051,57 @@ inline void VectorsIdentity::set_allocated_collection_name(std::string* collecti
   }
   collection_name_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), collection_name);
   // @@protoc_insertion_point(field_set_allocated:milvus.grpc.VectorsIdentity.collection_name)
+}
+
+// string partition_tag = 3;
+inline void VectorsIdentity::clear_partition_tag() {
+  partition_tag_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& VectorsIdentity::partition_tag() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.VectorsIdentity.partition_tag)
+  return partition_tag_.GetNoArena();
+}
+inline void VectorsIdentity::set_partition_tag(const std::string& value) {
+  
+  partition_tag_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.grpc.VectorsIdentity.partition_tag)
+}
+inline void VectorsIdentity::set_partition_tag(std::string&& value) {
+  
+  partition_tag_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.grpc.VectorsIdentity.partition_tag)
+}
+inline void VectorsIdentity::set_partition_tag(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  partition_tag_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.grpc.VectorsIdentity.partition_tag)
+}
+inline void VectorsIdentity::set_partition_tag(const char* value, size_t size) {
+  
+  partition_tag_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.grpc.VectorsIdentity.partition_tag)
+}
+inline std::string* VectorsIdentity::mutable_partition_tag() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.VectorsIdentity.partition_tag)
+  return partition_tag_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* VectorsIdentity::release_partition_tag() {
+  // @@protoc_insertion_point(field_release:milvus.grpc.VectorsIdentity.partition_tag)
+  
+  return partition_tag_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void VectorsIdentity::set_allocated_partition_tag(std::string* partition_tag) {
+  if (partition_tag != nullptr) {
+    
+  } else {
+    
+  }
+  partition_tag_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), partition_tag);
+  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.VectorsIdentity.partition_tag)
 }
 
 // repeated int64 id_array = 2;

@@ -165,7 +165,7 @@ ClientTest::GetEntityByID(const std::string& collection_name, const std::vector<
     std::vector<milvus::Entity> entities;
     {
         milvus_sdk::TimeRecorder rc("GetEntityByID");
-        milvus::Status stat = conn_->GetEntityByID(collection_name, id_array, entities);
+        milvus::Status stat = conn_->GetEntityByID(collection_name, "", id_array, entities);
         std::cout << "GetEntityByID function call status: " << stat.message() << std::endl;
     }
 
@@ -196,7 +196,7 @@ ClientTest::SearchEntitiesByID(const std::string& collection_name, int64_t topk,
     }
 
     std::vector<milvus::Entity> entities;
-    milvus::Status stat = conn_->GetEntityByID(collection_name, id_array, entities);
+    milvus::Status stat = conn_->GetEntityByID(collection_name, "", id_array, entities);
     std::cout << "GetEntityByID function call status: " << stat.message() << std::endl;
 
     JSON json_params = {{"nprobe", nprobe}};
@@ -262,7 +262,7 @@ ClientTest::DeleteByIds(const std::string& collection_name, const std::vector<in
     }
     std::cout << std::endl;
 
-    milvus::Status stat = conn_->DeleteEntityByID(collection_name, id_array);
+    milvus::Status stat = conn_->DeleteEntityByID(collection_name, "", id_array);
     std::cout << "DeleteByID function call status: " << stat.message() << std::endl;
 
     Flush(collection_name);

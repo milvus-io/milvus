@@ -278,6 +278,11 @@ CommonUtil::EraseFromCache(const std::string& item_key) {
         cache::GpuCacheMgr::GetInstance(gpu)->EraseItem(quantizer_key);
     }
 #endif
+
+#ifdef MILVUS_FPGA_VERSION
+    cache::FpgaCacheMgr::GetInstance()->EraseItem(item_key);
+    cache::FpgaCacheMgr::GetInstance()->EraseItem(item_key + cache::BloomFilter_Suffix);
+#endif
 }
 
 }  // namespace server

@@ -82,6 +82,10 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                       const std::vector<std::string>& partition_tags, bool force = false) override;
 
     Status
+    ReleaseCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                      const std::vector<std::string>& partition_tags) override;
+
+    Status
     ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::vector<int64_t>& segment_ids) override;
 
     Status
@@ -117,7 +121,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     DeleteVector(const std::string& collection_id, IDNumber vector_id) override;
 
     Status
-    DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) override;
+    DeleteVectors(const std::string& collection_id, const std::string& partition_tag, IDNumbers vector_ids) override;
 
     Status
     Flush(const std::string& collection_id) override;
@@ -130,8 +134,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
             double threshold = 0.0) override;
 
     Status
-    GetVectorsByID(const engine::meta::CollectionSchema& collection, const IDNumbers& id_array,
-                   std::vector<engine::VectorsData>& vectors) override;
+    GetVectorsByID(const engine::meta::CollectionSchema& collection, const std::string& partition_tag,
+                   const IDNumbers& id_array, std::vector<engine::VectorsData>& vectors) override;
 
     Status
     GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) override;
@@ -163,13 +167,6 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                    std::unordered_map<std::string, meta::hybrid::DataType>& field_types) override;
 
     Status
-    HybridQuery(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                const std::vector<std::string>& partition_tags, context::HybridSearchContextPtr hybrid_search_context,
-                query::GeneralQueryPtr general_query,
-                std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
-                ResultIds& result_ids, ResultDistances& result_distances) override;
-
-    Status
     QueryByIDs(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
                const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
                const IDNumbers& id_array, ResultIds& result_ids, ResultDistances& result_distances) override;
@@ -199,13 +196,6 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     QueryAsync(const std::shared_ptr<server::Context>& context, meta::FilesHolder& files_holder, uint64_t k,
                const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
                ResultDistances& result_distances);
-
-    Status
-    HybridQueryAsync(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                     meta::FilesHolder& files_holder, context::HybridSearchContextPtr hybrid_search_context,
-                     query::GeneralQueryPtr general_query,
-                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
-                     ResultIds& result_ids, ResultDistances& result_distances);
 
     Status
     GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::VectorsData>& vectors,
@@ -262,7 +252,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     Status
     GetPartitionsByTags(const std::string& collection_id, const std::vector<std::string>& partition_tags,
-                        std::set<std::string>& partition_name_array);
+                        std::set<std::string>& partition_name_array,
+                        std::vector<meta::CollectionSchema>& partition_array);
 
     Status
     UpdateCollectionIndexRecursively(const std::string& collection_id, const CollectionIndex& index, bool meta_only);
@@ -285,6 +276,10 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     void
     ResumeIfLast();
+
+    Status
+    CollectFilesToSearch(const std::string& collection_id, const std::vector<std::string>& partition_tags,
+                         meta::FilesHolder& files_holder);
 
  private:
     DBOptions options_;

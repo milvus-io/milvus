@@ -137,6 +137,9 @@ class ExecutionEngine {
     FpgaCache() = 0;
 
     virtual Status
+    ReleaseCache() = 0;
+
+    virtual Status
     Init() = 0;
 
     virtual EngineType
