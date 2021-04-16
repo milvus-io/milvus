@@ -69,11 +69,12 @@ SegmentReader::LoadVectors(off_t offset, size_t num_bytes, std::vector<uint8_t>&
 }
 
 Status
-SegmentReader::LoadUids(std::vector<doc_id_t>& uids) {
+SegmentReader::LoadUids(UidsPtr& uids_ptr) {
     codec::DefaultCodec default_codec;
     try {
         fs_ptr_->operation_ptr_->CreateDirectory();
-        default_codec.GetVectorsFormat()->read_uids(fs_ptr_, uids);
+        uids_ptr = std::make_shared<std::vector<doc_id_t>>();
+        default_codec.GetVectorsFormat()->read_uids(fs_ptr_, *uids_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load uids: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;

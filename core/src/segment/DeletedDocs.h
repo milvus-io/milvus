@@ -27,7 +27,7 @@ using offset_t = int32_t;
 
 class DeletedDocs {
  public:
-    explicit DeletedDocs(const std::vector<offset_t>& deleted_doc_offsets);
+    explicit DeletedDocs(std::vector<offset_t>&& deleted_doc_offsets);
 
     DeletedDocs() = default;
 
@@ -37,15 +37,11 @@ class DeletedDocs {
     const std::vector<offset_t>&
     GetDeletedDocs() const;
 
-    //    // TODO
-    //    const std::string&
-    //    GetName() const;
+    std::vector<offset_t>&
+    GetMutableDeletedDocs();
 
     size_t
     GetSize() const;
-
-    //    void
-    //    GetBitset(faiss::ConcurrentBitsetPtr& bitset);
 
     // No copy and move
     DeletedDocs(const DeletedDocs&) = delete;
@@ -58,8 +54,6 @@ class DeletedDocs {
 
  private:
     std::vector<offset_t> deleted_doc_offsets_;
-    //    faiss::ConcurrentBitsetPtr bitset_;
-    //    const std::string name_ = "deleted_docs";
 };
 
 using DeletedDocsPtr = std::shared_ptr<DeletedDocs>;

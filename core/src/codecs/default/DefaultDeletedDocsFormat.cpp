@@ -25,6 +25,7 @@
 #undef BOOST_NO_CXX11_SCOPED_ENUMS
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "segment/Types.h"
@@ -66,7 +67,7 @@ DefaultDeletedDocsFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::Del
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 
-    deleted_docs = std::make_shared<segment::DeletedDocs>(deleted_docs_list);
+    deleted_docs = std::make_shared<segment::DeletedDocs>(std::move(deleted_docs_list));
 
     if (::close(del_fd) == -1) {
         std::string err_msg = "Failed to close file: " + del_file_path + ", error: " + std::strerror(errno);

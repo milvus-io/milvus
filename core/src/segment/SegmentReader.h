@@ -43,7 +43,7 @@ class SegmentReader {
     LoadVectors(off_t offset, size_t num_bytes, std::vector<uint8_t>& raw_vectors);
 
     Status
-    LoadUids(std::vector<doc_id_t>& uids);
+    LoadUids(UidsPtr& uids);
 
     Status
     LoadVectorIndex(const std::string& location, segment::VectorIndexPtr& vector_index_ptr);

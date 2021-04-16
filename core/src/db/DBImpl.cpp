@@ -1367,10 +1367,20 @@ DBImpl::GetVectorIDs(const std::string& collection_id, const std::string& segmen
     engine::utils::GetParentPath(collection_files[0].location_, segment_dir);
     segment::SegmentReader segment_reader(segment_dir);
 
-    std::vector<segment::doc_id_t> uids;
-    status = segment_reader.LoadUids(uids);
-    if (!status.ok()) {
-        return status;
+    bool uids_from_cache;
+    segment::UidsPtr uids_ptr;
+    {
+        auto index = cache::CpuCacheMgr::GetInstance()->GetItem(collection_files[0].location_);
+        if (index != nullptr) {
+            uids_ptr = std::static_pointer_cast<knowhere::VecIndex>(index)->GetUids();
+            uids_from_cache = true;
+        } else {
+            status = segment_reader.LoadUids(uids_ptr);
+            if (!status.ok()) {
+                return status;
+            }
+            uids_from_cache = false;
+        }
     }
 
     segment::DeletedDocsPtr deleted_docs_ptr;
@@ -1378,18 +1388,34 @@ DBImpl::GetVectorIDs(const std::string& collection_id, const std::string& segmen
     if (!status.ok()) {
         return status;
     }
+    auto& deleted_offset = deleted_docs_ptr->GetMutableDeletedDocs();
 
     // step 4: construct id array
-    // avoid duplicate offset and erase from max offset to min offset
-    auto& deleted_offset = deleted_docs_ptr->GetDeletedDocs();
-    std::set<segment::offset_t, std::greater<segment::offset_t>> ordered_offset;
-    for (segment::offset_t offset : deleted_offset) {
-        ordered_offset.insert(offset);
+    if (deleted_offset.empty()) {
+        if (!uids_from_cache) {
+            vector_ids.swap(*uids_ptr);
+        } else {
+            vector_ids = *uids_ptr;
+        }
+    } else {
+        std::sort(deleted_offset.begin(), deleted_offset.end());
+
+        vector_ids.clear();
+        vector_ids.reserve(uids_ptr->size());
+
+        auto id_begin_iter = uids_ptr->begin();
+        auto id_end_iter = uids_ptr->end();
+        int offset = 0;
+        for (size_t i = 0; i < deleted_offset.size(); i++) {
+            if (offset < deleted_offset[i]) {
+                vector_ids.insert(vector_ids.end(), id_begin_iter + offset, id_begin_iter + deleted_offset[i]);
+            }
+            offset = deleted_offset[i] + 1;
+        }
+        if (offset < uids_ptr->size()) {
+            vector_ids.insert(vector_ids.end(), id_begin_iter + offset, id_end_iter);
+        }
     }
-    for (segment::offset_t offset : ordered_offset) {
-        uids.erase(uids.begin() + offset);
-    }
-    vector_ids.swap(uids);
 
     return status;
 }
@@ -1437,7 +1463,7 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
             return status;
         }
 
-        std::vector<segment::doc_id_t> uids;
+        std::shared_ptr<std::vector<segment::doc_id_t>> uids_ptr = nullptr;
         segment::DeletedDocsPtr deleted_docs_ptr = nullptr;
 
         for (size_t i = 0; i < temp_ids.size();) {
@@ -1449,13 +1475,21 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
             // Check if the id is present in bloom filter.
             if (id_bloom_filter_ptr->Check(vector_id)) {
                 // Load uids and check if the id is indeed present. If yes, find its offset.
-                if (uids.empty() && !(status = segment_reader.LoadUids(uids)).ok()) {
-                    return status;
+                if (uids_ptr == nullptr) {
+                    auto index = cache::CpuCacheMgr::GetInstance()->GetItem(file.location_);
+                    if (index != nullptr) {
+                        uids_ptr = std::static_pointer_cast<knowhere::VecIndex>(index)->GetUids();
+                    } else {
+                        status = segment_reader.LoadUids(uids_ptr);
+                        if (!status.ok()) {
+                            return status;
+                        }
+                    }
                 }
 
-                auto found = std::find(uids.begin(), uids.end(), vector_id);
-                if (found != uids.end()) {
-                    auto offset = std::distance(uids.begin(), found);
+                auto found = std::find(uids_ptr->begin(), uids_ptr->end(), vector_id);
+                if (found != uids_ptr->end()) {
+                    auto offset = std::distance(uids_ptr->begin(), found);
 
                     // Check whether the id has been deleted
                     if (!deleted_docs_ptr && !(status = segment_reader.LoadDeletedDocs(deleted_docs_ptr)).ok()) {
