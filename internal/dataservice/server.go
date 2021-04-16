@@ -48,7 +48,6 @@ type Server struct {
 	meta             *meta
 	segAllocator     segmentAllocatorInterface
 	statsHandler     *statsHandler
-	ddHandler        *ddHandler
 	allocator        allocatorInterface
 	cluster          *dataNodeCluster
 	msgProducer      *timesync.MsgProducer
@@ -82,10 +81,10 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 }
 
 func (s *Server) getInsertChannels() []string {
-	channels := make([]string, Params.InsertChannelNum)
+	channels := make([]string, 0, Params.InsertChannelNum)
 	var i int64 = 0
 	for ; i < Params.InsertChannelNum; i++ {
-		channels[i] = Params.InsertChannelPrefixName + strconv.FormatInt(i, 10)
+		channels = append(channels, Params.InsertChannelPrefixName+strconv.FormatInt(i, 10))
 	}
 	return channels
 }
@@ -116,7 +115,6 @@ func (s *Server) Start() error {
 	s.allocator = newAllocator(s.masterClient)
 
 	s.statsHandler = newStatsHandler(s.meta)
-	s.ddHandler = newDDHandler(s.meta, s.segAllocator, s.masterClient)
 	s.initSegmentInfoChannel()
 	s.segAllocator = newSegmentAllocator(s.meta, s.allocator, WithSegmentStream(s.segmentInfoStream))
 	if err = s.loadMetaFromMaster(); err != nil {
@@ -317,6 +315,9 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 		default:
 		}
 		msgPack := statsStream.Consume()
+		if msgPack == nil {
+			continue
+		}
 		for _, msg := range msgPack.Msgs {
 			statistics, ok := msg.(*msgstream.SegmentStatisticsMsg)
 			if !ok {
@@ -348,6 +349,9 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 		default:
 		}
 		msgPack := flushStream.Consume()
+		if msgPack == nil {
+			continue
+		}
 		for _, msg := range msgPack.Msgs {
 			if msg.Type() != commonpb.MsgType_SegmentFlushDone {
 				continue
@@ -395,30 +399,6 @@ func (s *Server) startProxyServiceTimeTickLoop(ctx context.Context) {
 	}
 }
 
-func (s *Server) startDDChannel(ctx context.Context) {
-	defer s.serverLoopWg.Done()
-	ddStream, _ := s.msFactory.NewMsgStream(ctx)
-	ddStream.AsConsumer([]string{s.ddChannelMu.name}, Params.DataServiceSubscriptionName)
-	log.Debug("dataservice AsConsumer: " + s.ddChannelMu.name + " : " + Params.DataServiceSubscriptionName)
-	ddStream.Start()
-	defer ddStream.Close()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Debug("dd channel shut down")
-			return
-		default:
-		}
-		msgPack := ddStream.Consume()
-		for _, msg := range msgPack.Msgs {
-			if err := s.ddHandler.HandleDDMsg(ctx, msg); err != nil {
-				log.Error("handle dd msg error", zap.Error(err))
-				continue
-			}
-		}
-	}
-}
-
 func (s *Server) Stop() error {
 	s.cluster.ShutDownClients()
 	s.ttMsgStream.Close()
@@ -428,6 +408,11 @@ func (s *Server) Stop() error {
 	s.segmentInfoStream.Close()
 	s.stopServerLoop()
 	return nil
+}
+
+// CleanMeta only for test
+func (s *Server) CleanMeta() error {
+	return s.client.RemoveWithPrefix("")
 }
 
 func (s *Server) stopServerLoop() {
@@ -566,31 +551,33 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb
 }
 
 func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
-	resp := &datapb.AssignSegmentIDResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
-	}
 	if !s.checkStateIsHealthy() {
-		resp.Status.Reason = "server is initializing"
-		return resp, nil
+		return &datapb.AssignSegmentIDResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			},
+		}, nil
 	}
 
 	assigns := make([]*datapb.SegmentIDAssignment, 0, len(req.SegmentIDRequests))
 
+	var appendFailedAssignment = func(err string) {
+		assigns = append(assigns, &datapb.SegmentIDAssignment{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err,
+			},
+		})
+	}
+
 	for _, r := range req.SegmentIDRequests {
 		if !s.meta.HasCollection(r.CollectionID) {
 			if err := s.loadCollectionFromMaster(ctx, r.CollectionID); err != nil {
+				appendFailedAssignment(fmt.Sprintf("can not load collection %d", r.CollectionID))
 				log.Error("load collection from master error", zap.Int64("collectionID", r.CollectionID), zap.Error(err))
 				continue
 			}
 		}
-		result := &datapb.SegmentIDAssignment{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			},
-		}
-
 		//if err := s.validateAllocRequest(r.CollectionID, r.PartitionID, r.ChannelName); err != nil {
 		//result.Status.Reason = err.Error()
 		//assigns = append(assigns, result)
@@ -599,24 +586,31 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 
 		segmentID, retCount, expireTs, err := s.segAllocator.AllocSegment(ctx, r.CollectionID, r.PartitionID, r.ChannelName, int(r.Count))
 		if err != nil {
-			result.Status.Reason = fmt.Sprintf("allocation of collection %d, partition %d, channel %s, count %d error:  %s",
-				r.CollectionID, r.PartitionID, r.ChannelName, r.Count, err.Error())
-			assigns = append(assigns, result)
+			appendFailedAssignment(fmt.Sprintf("allocation of collection %d, partition %d, channel %s, count %d error:  %s",
+				r.CollectionID, r.PartitionID, r.ChannelName, r.Count, err.Error()))
 			continue
 		}
 
-		result.Status.ErrorCode = commonpb.ErrorCode_Success
-		result.CollectionID = r.CollectionID
-		result.SegID = segmentID
-		result.PartitionID = r.PartitionID
-		result.Count = uint32(retCount)
-		result.ExpireTime = expireTs
-		result.ChannelName = r.ChannelName
+		result := &datapb.SegmentIDAssignment{
+			SegID:        segmentID,
+			ChannelName:  r.ChannelName,
+			Count:        uint32(retCount),
+			CollectionID: r.CollectionID,
+			PartitionID:  r.PartitionID,
+			ExpireTime:   expireTs,
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+				Reason:    "",
+			},
+		}
 		assigns = append(assigns, result)
 	}
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
-	resp.SegIDAssignments = assigns
-	return resp, nil
+	return &datapb.AssignSegmentIDResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		SegIDAssignments: assigns,
+	}, nil
 }
 
 func (s *Server) validateAllocRequest(collID UniqueID, partID UniqueID, channelName string) error {
