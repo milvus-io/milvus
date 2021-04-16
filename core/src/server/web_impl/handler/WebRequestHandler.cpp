@@ -1332,7 +1332,11 @@ WebRequestHandler::GetVector(const OString& collection_name, const OQueryParams&
             RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param ids is required.");
         }
 
-        auto partition_tag = query_params.get("partition_tag")->c_str();
+        std::string str_tag;
+        auto partition_tag = query_params.get("partition_tag");
+        if (partition_tag != nullptr) {
+            str_tag = partition_tag->c_str();
+        }
 
         std::vector<std::string> ids;
         StringHelpFunctions::SplitStringByDelimeter(query_ids->c_str(), ",", ids);
@@ -1343,7 +1347,7 @@ WebRequestHandler::GetVector(const OString& collection_name, const OQueryParams&
         }
         engine::VectorsData vectors;
         nlohmann::json vectors_json;
-        status = GetVectorsByIDs(collection_name->std_str(), partition_tag, vector_ids, vectors_json);
+        status = GetVectorsByIDs(collection_name->std_str(), str_tag, vector_ids, vectors_json);
         if (!status.ok()) {
             response = "NULL";
             ASSIGN_RETURN_STATUS_DTO(status)
