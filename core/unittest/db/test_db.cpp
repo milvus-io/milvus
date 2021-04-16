@@ -26,6 +26,8 @@
 #include "db/IDGenerator.h"
 #include "db/meta/MetaConsts.h"
 #include "db/utils.h"
+#include <faiss/IndexFlat.h>
+#include "index/knowhere/knowhere/index/vector_index/IndexIDMAP.h"
 #include "utils/CommonUtil.h"
 
 namespace {
@@ -1312,6 +1314,17 @@ TEST_F(DBTest2, GET_VECTOR_IDS_TEST) {
     std::string default_segment = json["partitions"].at(0)["segments"].at(0)["name"];
     std::string partition_segment = json["partitions"].at(1)["segments"].at(0)["name"];
 
+    // add uids to cache
+    std::string cache_key = std::string(CONFIG_PATH) + "/tables/" + COLLECTION_NAME + "/" + default_segment + "/" +
+        default_segment;
+    milvus::knowhere::IDMAPPtr index = std::make_shared<milvus::knowhere::IDMAP>();
+    std::shared_ptr<milvus::engine::IDNumbers> uids = std::make_shared<milvus::engine::IDNumbers>(vector_1.id_array_);
+    index->SetUids(uids);
+    index->SetIndexSize(uids->size() * sizeof(milvus::engine::IDNumber));
+    index->index_ = std::make_shared<faiss::IndexFlat>(128);
+    index->index_->ntotal = 1000;
+    milvus::cache::CpuCacheMgr::GetInstance()->InsertItem(cache_key, index);
+
     milvus::engine::IDNumbers vector_ids;
     stat = db_->GetVectorIDs(COLLECTION_NAME, default_segment, vector_ids);
     ASSERT_TRUE(stat.ok());
@@ -1321,7 +1334,7 @@ TEST_F(DBTest2, GET_VECTOR_IDS_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(vector_ids.size(), BATCH_COUNT);
 
-    milvus::engine::IDNumbers ids_to_delete{0, 100, 999, 1000, 1500, 1888, 1999};
+    milvus::engine::IDNumbers ids_to_delete{0, 100, 998, 1001, 1500, 1501, 1999};
     stat = db_->DeleteVectors(COLLECTION_NAME, "", ids_to_delete);
     ASSERT_TRUE(stat.ok());
 
@@ -1330,10 +1343,17 @@ TEST_F(DBTest2, GET_VECTOR_IDS_TEST) {
     stat = db_->GetVectorIDs(COLLECTION_NAME, default_segment, vector_ids);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(vector_ids.size(), BATCH_COUNT - 3);
+    ASSERT_EQ(vector_ids.front(), 1);
+    ASSERT_EQ(vector_ids.back(), 999);
 
     stat = db_->GetVectorIDs(COLLECTION_NAME, partition_segment, vector_ids);
     ASSERT_TRUE(stat.ok());
-    //    ASSERT_EQ(vector_ids.size(), BATCH_COUNT - 4);
+    ASSERT_EQ(vector_ids.size(), BATCH_COUNT - 4);
+    ASSERT_EQ(vector_ids.front(), 1000);
+    ASSERT_EQ(vector_ids.back(), 1998);
+
+    // clear uids from cache
+    milvus::cache::CpuCacheMgr::GetInstance()->EraseItem(cache_key);
 }
 
 TEST_F(DBTest2, INSERT_DUPLICATE_ID) {
