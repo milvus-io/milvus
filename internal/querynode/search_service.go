@@ -98,13 +98,13 @@ func (s *searchService) consumeSearch() {
 						zap.Int64("collectionID", sm.CollectionID))
 					continue
 				}
-				sc, ok := s.searchCollections[sm.CollectionID]
+				_, ok = s.searchCollections[sm.CollectionID]
 				if !ok {
 					s.startSearchCollection(sm.CollectionID)
 					log.Debug("new search collection, start search collection service",
 						zap.Int64("collectionID", sm.CollectionID))
 				}
-				sc.msgBuffer <- sm
+				s.searchCollections[sm.CollectionID].msgBuffer <- sm
 				sp.Finish()
 			}
 		}

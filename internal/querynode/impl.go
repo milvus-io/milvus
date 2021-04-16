@@ -3,14 +3,11 @@ package querynode
 import (
 	"context"
 	"errors"
-	"fmt"
-	"strconv"
 	"strings"
 
 	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -141,83 +138,38 @@ func (node *QueryNode) RemoveQueryChannel(ctx context.Context, in *queryPb.Remov
 }
 
 func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error) {
-	log.Debug("starting WatchDmChannels ...", zap.String("ChannelIDs", fmt.Sprintln(in.ChannelIDs)))
-	collectionID := in.CollectionID
-	ds, err := node.getDataSyncService(collectionID)
-	if err != nil || ds.dmStream == nil {
-		errMsg := "null data sync service or null data manipulation stream, collectionID = " + fmt.Sprintln(collectionID)
+	dct := &watchDmChannelsTask{
+		baseTask: baseTask{
+			ctx:  ctx,
+			done: make(chan error),
+		},
+		req:  in,
+		node: node,
+	}
+
+	err := node.scheduler.queue.Enqueue(dct)
+	if err != nil {
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    errMsg,
+			Reason:    err.Error(),
 		}
-		log.Error(errMsg)
-		return status, errors.New(errMsg)
+		log.Error(err.Error())
+		return status, err
 	}
+	log.Debug("watchDmChannelsTask Enqueue done", zap.Any("collectionID", in.CollectionID))
 
-	switch t := ds.dmStream.(type) {
-	case *msgstream.MqTtMsgStream:
-	default:
-		_ = t
-		errMsg := "type assertion failed for dm message stream"
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    errMsg,
-		}
-		log.Error(errMsg)
-		return status, errors.New(errMsg)
-	}
-
-	getUniqueSubName := func() string {
-		prefixName := Params.MsgChannelSubName
-		return prefixName + "-" + strconv.FormatInt(collectionID, 10)
-	}
-
-	// add request channel
-	consumeChannels := in.ChannelIDs
-	toSeekInfo := make([]*internalpb.MsgPosition, 0)
-	toDirSubChannels := make([]string, 0)
-
-	consumeSubName := getUniqueSubName()
-
-	for _, info := range in.Infos {
-		if len(info.Pos.MsgID) == 0 {
-			toDirSubChannels = append(toDirSubChannels, info.ChannelID)
-			continue
-		}
-		info.Pos.MsgGroup = consumeSubName
-		toSeekInfo = append(toSeekInfo, info.Pos)
-
-		log.Debug("prevent inserting segments", zap.String("segmentIDs", fmt.Sprintln(info.ExcludedSegments)))
-		err := node.replica.addExcludedSegments(collectionID, info.ExcludedSegments)
+	go func() {
+		err = dct.WaitToFinish()
 		if err != nil {
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			}
 			log.Error(err.Error())
-			return status, err
+			return
 		}
-	}
-
-	ds.dmStream.AsConsumer(toDirSubChannels, consumeSubName)
-	for _, pos := range toSeekInfo {
-		err := ds.dmStream.Seek(pos)
-		if err != nil {
-			errMsg := "msgStream seek error :" + err.Error()
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    errMsg,
-			}
-			log.Error(errMsg)
-			return status, errors.New(errMsg)
-		}
-	}
-	log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
+		log.Debug("watchDmChannelsTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
+	}()
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
-	log.Debug("WatchDmChannels done", zap.String("ChannelIDs", fmt.Sprintln(in.ChannelIDs)))
 	return status, nil
 }
 
@@ -242,16 +194,14 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 	}
 	log.Debug("loadSegmentsTask Enqueue done", zap.Any("collectionID", in.CollectionID))
 
-	err = dct.WaitToFinish()
-	if err != nil {
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
+	go func() {
+		err = dct.WaitToFinish()
+		if err != nil {
+			log.Error(err.Error())
+			return
 		}
-		log.Error(err.Error())
-		return status, err
-	}
-	log.Debug("loadSegmentsTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
+		log.Debug("loadSegmentsTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
+	}()
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -280,16 +230,14 @@ func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.Releas
 	}
 	log.Debug("releaseCollectionTask Enqueue done", zap.Any("collectionID", in.CollectionID))
 
-	err = dct.WaitToFinish()
-	if err != nil {
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
+	go func() {
+		err = dct.WaitToFinish()
+		if err != nil {
+			log.Error(err.Error())
+			return
 		}
-		log.Error(err.Error())
-		return status, err
-	}
-	log.Debug("releaseCollectionTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
+		log.Debug("releaseCollectionTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
+	}()
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -318,16 +266,14 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, in *queryPb.Releas
 	}
 	log.Debug("releasePartitionsTask Enqueue done", zap.Any("collectionID", in.CollectionID))
 
-	err = dct.WaitToFinish()
-	if err != nil {
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
+	go func() {
+		err = dct.WaitToFinish()
+		if err != nil {
+			log.Error(err.Error())
+			return
 		}
-		log.Error(err.Error())
-		return status, err
-	}
-	log.Debug("releasePartitionsTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
+		log.Debug("releasePartitionsTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
+	}()
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,

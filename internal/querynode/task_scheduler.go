@@ -59,7 +59,7 @@ func (s *taskScheduler) loadAndReleaseLoop() {
 		case <-s.queue.utChan():
 			if !s.queue.utEmpty() {
 				t := s.queue.PopUnissuedTask()
-				go s.processTask(t, s.queue)
+				s.processTask(t, s.queue)
 			}
 		}
 	}
