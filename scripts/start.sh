@@ -22,9 +22,6 @@ echo "starting querynode1"
 export QUERY_NODE_ID=1
 nohup ./bin/querynode > ~/querynode1.out 2>&1 &
 
-echo "starting querynode2"
-export QUERY_NODE_ID=2
-nohup ./bin/querynode > ~/querynode2.out 2>&1 &
 
 echo "starting indexservice"
 nohup ./bin/indexservice > ~/indexservice.out 2>&1 &

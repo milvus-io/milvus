@@ -26,7 +26,7 @@ type TaskQueue interface {
 	AddActiveTask(t task)
 	PopActiveTask(tID UniqueID) task
 	Enqueue(t task) error
-	tryToRemoveUselessIndexAddTask(indexID UniqueID)
+	tryToRemoveUselessIndexAddTask(indexID UniqueID) []UniqueID
 }
 
 type BaseTaskQueue struct {
@@ -143,10 +143,11 @@ func (queue *IndexAddTaskQueue) Enqueue(t task) error {
 }
 
 // Note: tryToRemoveUselessIndexAddTask must be called by DropIndex
-func (queue *IndexAddTaskQueue) tryToRemoveUselessIndexAddTask(indexID UniqueID) {
+func (queue *IndexAddTaskQueue) tryToRemoveUselessIndexAddTask(indexID UniqueID) []UniqueID {
 	queue.lock.Lock()
 	defer queue.lock.Unlock()
 
+	var indexBuildIDs []UniqueID
 	var next *list.Element
 	for e := queue.unissuedTasks.Front(); e != nil; e = next {
 		next = e.Next()
@@ -156,8 +157,12 @@ func (queue *IndexAddTaskQueue) tryToRemoveUselessIndexAddTask(indexID UniqueID)
 		}
 		if indexAddTask.req.IndexID == indexID {
 			queue.unissuedTasks.Remove(e)
+			indexAddTask.Notify(nil)
+			indexBuildIDs = append(indexBuildIDs, indexAddTask.req.IndexBuildID)
 		}
 	}
+
+	return indexBuildIDs
 }
 
 func NewIndexAddTaskQueue(sched *TaskScheduler) *IndexAddTaskQueue {

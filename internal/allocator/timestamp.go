@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"time"
 
-	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
-	"github.com/zilliztech/milvus-distributed/internal/types"
 	"go.uber.org/zap"
 
+	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 

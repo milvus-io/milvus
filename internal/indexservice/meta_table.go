@@ -89,6 +89,23 @@ func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequ
 	return mt.saveIndexMeta(meta)
 }
 
+func (mt *metaTable) BuildIndex(indexBuildID UniqueID) error {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+	log.Debug("IndexService update index state")
+
+	meta, ok := mt.indexBuildID2Meta[indexBuildID]
+	if !ok {
+		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
+	}
+
+	if meta.State != commonpb.IndexState_Unissued {
+		return fmt.Errorf("can not update index state, index with ID = %d state is %d", indexBuildID, meta.State)
+	}
+	meta.State = commonpb.IndexState_InProgress
+	return mt.saveIndexMeta(&meta)
+}
+
 func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
@@ -97,7 +114,7 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 
 	for indexBuildID, meta := range mt.indexBuildID2Meta {
 		if meta.Req.IndexID == indexID {
-			meta.State = commonpb.IndexState_Deleted
+			meta.MarkDeleted = true
 			mt.indexBuildID2Meta[indexBuildID] = meta
 		}
 	}
@@ -113,9 +130,6 @@ func (mt *metaTable) NotifyBuildIndex(nty *indexpb.NotifyBuildIndexRequest) erro
 	indexBuildID := nty.IndexBuildID
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
-		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
-	}
-	if meta.State == commonpb.IndexState_Deleted {
 		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 
@@ -140,7 +154,7 @@ func (mt *metaTable) GetIndexState(indexBuildID UniqueID) (*indexpb.IndexInfo, e
 	if !ok {
 		return ret, fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
-	if meta.State == commonpb.IndexState_Deleted {
+	if meta.MarkDeleted {
 		return ret, fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 	ret.IndexID = meta.Req.IndexID
@@ -160,52 +174,35 @@ func (mt *metaTable) GetIndexFilePathInfo(indexBuildID UniqueID) (*indexpb.Index
 	if !ok {
 		return nil, fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
-	if meta.State == commonpb.IndexState_Deleted {
+	if meta.MarkDeleted {
 		return nil, fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 	ret.IndexFilePaths = meta.IndexFilePaths
 	return ret, nil
 }
 
-func (mt *metaTable) removeIndexFile(indexID UniqueID) {
+func (mt *metaTable) DeleteIndex(indexBuildID UniqueID) {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 
+	delete(mt.indexBuildID2Meta, indexBuildID)
+}
+
+func (mt *metaTable) getMarkDeleted(limit int) []indexpb.IndexMeta {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+
+	log.Debug("IndexService get mark deleted meta")
+
+	var indexMetas []indexpb.IndexMeta
 	for _, meta := range mt.indexBuildID2Meta {
-		if meta.Req.IndexID == indexID {
-			err := mt.client.MultiRemove(meta.IndexFilePaths)
-			if err != nil {
-				log.Warn("indexservice", zap.String("remove index file err", err.Error()))
-			}
+		if meta.MarkDeleted && meta.State == commonpb.IndexState_Finished {
+			indexMetas = append(indexMetas, meta)
 		}
-	}
-}
-
-func (mt *metaTable) removeMeta(indexID UniqueID) {
-	mt.lock.Lock()
-	defer mt.lock.Unlock()
-
-	indexBuildIDToRemove := make([]UniqueID, 0)
-	for indexBuildID, meta := range mt.indexBuildID2Meta {
-		if meta.Req.IndexID == indexID {
-			indexBuildIDToRemove = append(indexBuildIDToRemove, indexBuildID)
+		if len(indexMetas) >= limit {
+			return indexMetas
 		}
 	}
 
-	for _, indexBuildID := range indexBuildIDToRemove {
-		delete(mt.indexBuildID2Meta, indexBuildID)
-	}
-}
-
-func (mt *metaTable) DeleteIndex(indexBuildID UniqueID) error {
-	mt.lock.Lock()
-	defer mt.lock.Unlock()
-
-	indexMeta, ok := mt.indexBuildID2Meta[indexBuildID]
-	if !ok {
-		return fmt.Errorf("can't find index. id = %d", indexBuildID)
-	}
-	log.Debug("indexservice", zap.Stringer("indexMeta", &indexMeta))
-
-	return nil
+	return indexMetas
 }

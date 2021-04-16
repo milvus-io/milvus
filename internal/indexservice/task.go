@@ -122,6 +122,10 @@ func (it *IndexAddTask) Execute(ctx context.Context) error {
 	if resp.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(resp.Reason)
 	}
+	err = it.table.BuildIndex(it.indexBuildID)
+	if err != nil {
+		return err
+	}
 	it.nodeClients.IncPriority(it.buildClientNodeID, 1)
 	return nil
 }
