@@ -87,7 +87,7 @@ func (mc *MessageClient) creatProducer(topicName string) pulsar.Producer {
 func (mc *MessageClient) createConsumer(topicName string) pulsar.Consumer {
 	consumer, err := mc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:            topicName,
-		SubscriptionName: "writer",
+		SubscriptionName: "writer" + strconv.Itoa(mc.MessageClientID),
 	})
 
 	if err != nil {
