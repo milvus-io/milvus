@@ -34,6 +34,9 @@ IndexWrapper::IndexWrapper(const char* serialized_type_params, const char* seria
     auto mode = get_config_by_name<std::string>("index_mode");
     auto index_mode = mode.has_value() ? mode_map[mode.value()] : knowhere::IndexMode::MODE_CPU;
 
+    auto index_type = get_index_type();
+    auto metric_type = get_metric_type();
+    AssertInfo(!is_unsupported(index_type, metric_type), index_type + " doesn't support metric: " + metric_type);
     index_ = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(get_index_type(), index_mode);
     Assert(index_ != nullptr);
 }
@@ -261,6 +264,21 @@ IndexWrapper::get_index_type() {
     // the index_type of all ivf-based index will change to ivf flat after loaded
     auto type = get_config_by_name<std::string>("index_type");
     return type.has_value() ? type.value() : knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
+}
+
+std::string
+IndexWrapper::get_metric_type() {
+    auto type = get_config_by_name<std::string>(knowhere::Metric::TYPE);
+    if (type.has_value()) {
+        return type.value();
+    } else {
+        auto index_type = get_index_type();
+        if (is_in_bin_list(index_type)) {
+            return knowhere::Metric::JACCARD;
+        } else {
+            return knowhere::Metric::L2;
+        }
+    }
 }
 
 std::unique_ptr<IndexWrapper::QueryResult>
