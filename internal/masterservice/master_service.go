@@ -76,16 +76,16 @@ type Core struct {
 	SendTimeTick func(t typeutil.Timestamp) error
 
 	//setMsgStreams, send create collection into dd channel
-	DdCreateCollectionReq func(req *internalpb.CreateCollectionRequest) error
+	DdCreateCollectionReq func(ctx context.Context, req *internalpb.CreateCollectionRequest) error
 
 	//setMsgStreams, send drop collection into dd channel, and notify the proxy to delete this collection
-	DdDropCollectionReq func(req *internalpb.DropCollectionRequest) error
+	DdDropCollectionReq func(ctx context.Context, req *internalpb.DropCollectionRequest) error
 
 	//setMsgStreams, send create partition into dd channel
-	DdCreatePartitionReq func(req *internalpb.CreatePartitionRequest) error
+	DdCreatePartitionReq func(ctx context.Context, req *internalpb.CreatePartitionRequest) error
 
 	//setMsgStreams, send drop partition into dd channel
-	DdDropPartitionReq func(req *internalpb.DropPartitionRequest) error
+	DdDropPartitionReq func(ctx context.Context, req *internalpb.DropPartitionRequest) error
 
 	//setMsgStreams segment channel, receive segment info from data service, if master create segment
 	DataServiceSegmentChan chan *datapb.SegmentInfo
@@ -98,14 +98,14 @@ type Core struct {
 	GetNumRowsReq                        func(segID typeutil.UniqueID) (int64, error)
 
 	//call index builder's client to build index, return build id
-	BuildIndexReq func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error)
-	DropIndexReq  func(indexID typeutil.UniqueID) error
+	BuildIndexReq func(ctx context.Context, binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error)
+	DropIndexReq  func(ctx context.Context, indexID typeutil.UniqueID) error
 
 	//proxy service interface, notify proxy service to drop collection
-	InvalidateCollectionMetaCache func(ts typeutil.Timestamp, dbName string, collectionName string) error
+	InvalidateCollectionMetaCache func(ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error
 
 	//query service interface, notify query service to release collection
-	ReleaseCollection func(ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error
+	ReleaseCollection func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error
 
 	// put create index task into this chan
 	indexTaskQueue chan *CreateIndexTask
@@ -237,7 +237,7 @@ func (c *Core) startDdScheduler() {
 				task.Notify(fmt.Errorf("input timestamp = %d, last dd time stamp = %d", ts, c.lastDdTimeStamp))
 				break
 			}
-			err = task.Execute()
+			err = task.Execute(task.Ctx())
 			task.Notify(err)
 			if ts > c.lastDdTimeStamp {
 				c.lastDdTimeStamp = ts
@@ -453,7 +453,7 @@ func (c *Core) setMsgStreams() error {
 		return nil
 	}
 
-	c.DdCreateCollectionReq = func(req *internalpb.CreateCollectionRequest) error {
+	c.DdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
 			BeginTimestamp: req.Base.Timestamp,
@@ -465,13 +465,13 @@ func (c *Core) setMsgStreams() error {
 			CreateCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(c.ctx, &msgPack); err != nil {
+		if err := ddStream.Broadcast(ctx, &msgPack); err != nil {
 			return err
 		}
 		return nil
 	}
 
-	c.DdDropCollectionReq = func(req *internalpb.DropCollectionRequest) error {
+	c.DdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
 			BeginTimestamp: req.Base.Timestamp,
@@ -483,13 +483,13 @@ func (c *Core) setMsgStreams() error {
 			DropCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(c.ctx, &msgPack); err != nil {
+		if err := ddStream.Broadcast(ctx, &msgPack); err != nil {
 			return err
 		}
 		return nil
 	}
 
-	c.DdCreatePartitionReq = func(req *internalpb.CreatePartitionRequest) error {
+	c.DdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
 			BeginTimestamp: req.Base.Timestamp,
@@ -501,13 +501,13 @@ func (c *Core) setMsgStreams() error {
 			CreatePartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(c.ctx, &msgPack); err != nil {
+		if err := ddStream.Broadcast(ctx, &msgPack); err != nil {
 			return err
 		}
 		return nil
 	}
 
-	c.DdDropPartitionReq = func(req *internalpb.DropPartitionRequest) error {
+	c.DdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
 			BeginTimestamp: req.Base.Timestamp,
@@ -519,7 +519,7 @@ func (c *Core) setMsgStreams() error {
 			DropPartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(c.ctx, &msgPack); err != nil {
+		if err := ddStream.Broadcast(ctx, &msgPack); err != nil {
 			return err
 		}
 		return nil
@@ -601,7 +601,7 @@ func (c *Core) SetProxyService(ctx context.Context, s types.ProxyService) error 
 	Params.ProxyTimeTickChannel = rsp.Value
 	log.Debug("proxy time tick", zap.String("channel name", Params.ProxyTimeTickChannel))
 
-	c.InvalidateCollectionMetaCache = func(ts typeutil.Timestamp, dbName string, collectionName string) error {
+	c.InvalidateCollectionMetaCache = func(ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error {
 		status, _ := s.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   0, //TODO,MsgType
@@ -692,8 +692,8 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 	return nil
 }
 
-func (c *Core) SetIndexService(ctx context.Context, s types.IndexService) error {
-	c.BuildIndexReq = func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error) {
+func (c *Core) SetIndexService(s types.IndexService) error {
+	c.BuildIndexReq = func(ctx context.Context, binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error) {
 		rsp, err := s.BuildIndex(ctx, &indexpb.BuildIndexRequest{
 			DataPaths:   binlog,
 			TypeParams:  typeParams,
@@ -710,7 +710,7 @@ func (c *Core) SetIndexService(ctx context.Context, s types.IndexService) error 
 		return rsp.IndexBuildID, nil
 	}
 
-	c.DropIndexReq = func(indexID typeutil.UniqueID) error {
+	c.DropIndexReq = func(ctx context.Context, indexID typeutil.UniqueID) error {
 		rsp, err := s.DropIndex(ctx, &indexpb.DropIndexRequest{
 			IndexID: indexID,
 		})
@@ -726,8 +726,8 @@ func (c *Core) SetIndexService(ctx context.Context, s types.IndexService) error 
 	return nil
 }
 
-func (c *Core) SetQueryService(ctx context.Context, s types.QueryService) error {
-	c.ReleaseCollection = func(ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
+func (c *Core) SetQueryService(s types.QueryService) error {
+	c.ReleaseCollection = func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
 		req := &querypb.ReleaseCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ReleaseCollection,
@@ -877,6 +877,7 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 	log.Debug("CreateCollection ", zap.String("name", in.CollectionName))
 	t := &CreateCollectionReqTask{
 		baseReqTask: baseReqTask{
+			ctx:  ctx,
 			cv:   make(chan error),
 			core: c,
 		},
@@ -909,6 +910,7 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 	log.Debug("DropCollection", zap.String("name", in.CollectionName))
 	t := &DropCollectionReqTask{
 		baseReqTask: baseReqTask{
+			ctx:  ctx,
 			cv:   make(chan error),
 			core: c,
 		},
@@ -944,6 +946,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	log.Debug("HasCollection", zap.String("name", in.CollectionName))
 	t := &HasCollectionReqTask{
 		baseReqTask: baseReqTask{
+			ctx:  ctx,
 			cv:   make(chan error),
 			core: c,
 		},
@@ -987,6 +990,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 	log.Debug("DescribeCollection", zap.String("name", in.CollectionName))
 	t := &DescribeCollectionReqTask{
 		baseReqTask: baseReqTask{
+			ctx:  ctx,
 			cv:   make(chan error),
 			core: c,
 		},
@@ -1027,6 +1031,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	log.Debug("ShowCollections", zap.String("dbname", in.DbName))
 	t := &ShowCollectionReqTask{
 		baseReqTask: baseReqTask{
+			ctx:  ctx,
 			cv:   make(chan error),
 			core: c,
 		},
@@ -1066,6 +1071,7 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 	log.Debug("CreatePartition", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
 	t := &CreatePartitionReqTask{
 		baseReqTask: baseReqTask{
+			ctx:  ctx,
 			cv:   make(chan error),
 			core: c,
 		},
@@ -1098,6 +1104,7 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 	log.Debug("DropPartition", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
 	t := &DropPartitionReqTask{
 		baseReqTask: baseReqTask{
+			ctx:  ctx,
 			cv:   make(chan error),
 			core: c,
 		},
@@ -1133,6 +1140,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 	log.Debug("HasPartition", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
 	t := &HasPartitionReqTask{
 		baseReqTask: baseReqTask{
+			ctx:  ctx,
 			cv:   make(chan error),
 			core: c,
 		},
@@ -1179,6 +1187,7 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 	}
 	t := &ShowPartitionReqTask{
 		baseReqTask: baseReqTask{
+			ctx:  ctx,
 			cv:   make(chan error),
 			core: c,
 		},
@@ -1221,6 +1230,7 @@ func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest)
 	log.Debug("CreateIndex", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName))
 	t := &CreateIndexReqTask{
 		baseReqTask: baseReqTask{
+			ctx:  ctx,
 			cv:   make(chan error),
 			core: c,
 		},
@@ -1256,6 +1266,7 @@ func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequ
 	log.Debug("DescribeIndex", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName))
 	t := &DescribeIndexReqTask{
 		baseReqTask: baseReqTask{
+			ctx:  ctx,
 			cv:   make(chan error),
 			core: c,
 		},
@@ -1306,6 +1317,7 @@ func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*c
 	log.Debug("DropIndex", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.String("index name", in.IndexName))
 	t := &DropIndexReqTask{
 		baseReqTask: baseReqTask{
+			ctx:  ctx,
 			cv:   make(chan error),
 			core: c,
 		},
@@ -1341,6 +1353,7 @@ func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegment
 	log.Debug("DescribeSegment", zap.Int64("collection id", in.CollectionID), zap.Int64("segment id", in.SegmentID))
 	t := &DescribeSegmentReqTask{
 		baseReqTask: baseReqTask{
+			ctx:  ctx,
 			cv:   make(chan error),
 			core: c,
 		},
@@ -1384,6 +1397,7 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 	log.Debug("ShowSegments", zap.Int64("collection id", in.CollectionID), zap.Int64("partition id", in.PartitionID))
 	t := &ShowSegmentReqTask{
 		baseReqTask: baseReqTask{
+			ctx:  ctx,
 			cv:   make(chan error),
 			core: c,
 		},

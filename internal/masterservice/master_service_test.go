@@ -213,14 +213,14 @@ func TestMasterService(t *testing.T) {
 		idxDropID:  []int64{},
 		mutex:      sync.Mutex{},
 	}
-	err = core.SetIndexService(ctx, im)
+	err = core.SetIndexService(im)
 	assert.Nil(t, err)
 
 	qm := &queryMock{
 		collID: nil,
 		mutex:  sync.Mutex{},
 	}
-	err = core.SetQueryService(ctx, qm)
+	err = core.SetQueryService(qm)
 	assert.Nil(t, err)
 
 	err = core.Init()

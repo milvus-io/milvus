@@ -157,7 +157,7 @@ func (s *Server) init() error {
 			panic(err)
 		}
 
-		if err := s.masterService.SetIndexService(ctx, indexService); err != nil {
+		if err := s.masterService.SetIndexService(indexService); err != nil {
 			panic(err)
 
 		}
@@ -173,7 +173,7 @@ func (s *Server) init() error {
 		if err = queryService.Start(); err != nil {
 			panic(err)
 		}
-		if err = s.masterService.SetQueryService(ctx, queryService); err != nil {
+		if err = s.masterService.SetQueryService(queryService); err != nil {
 			panic(err)
 		}
 	}
