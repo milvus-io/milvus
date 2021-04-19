@@ -231,12 +231,13 @@ func startupMaster() {
 	if err != nil {
 		panic(err)
 	}
+	pulsarAddress := Params.PulsarAddress()
 
 	opt := &Option{
 		KVRootPath:            "/test/root/kv",
 		MetaRootPath:          "/test/root/meta",
 		EtcdAddr:              []string{etcdAddress},
-		PulsarAddr:            "pulsar://localhost:6650",
+		PulsarAddr:            pulsarAddress,
 		ProxyIDs:              []typeutil.UniqueID{1, 2},
 		PulsarProxyChannels:   []string{"proxy1", "proxy2"},
 		PulsarProxySubName:    "proxyTopics",
@@ -326,8 +327,9 @@ func TestSegmentManager_RPC(t *testing.T) {
 
 	// test stats
 	segID := assignments[0].SegID
+	pulsarAddress := Params.PulsarAddress()
 	ms := msgstream.NewPulsarMsgStream(ctx, 1024)
-	ms.SetPulsarClient("pulsar://localhost:6650")
+	ms.SetPulsarClient(pulsarAddress)
 	ms.CreatePulsarProducers([]string{"statistic"})
 	ms.Start()
 	defer ms.Close()
