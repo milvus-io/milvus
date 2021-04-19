@@ -91,6 +91,9 @@ public:
         return Status::OK();
     }
 
+    int64_t
+    GetMemoryUsageInBytes() override;
+
 public:
     ssize_t
     get_row_count() const override {

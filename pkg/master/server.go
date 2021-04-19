@@ -97,15 +97,8 @@ type GRPCMasterServer struct {
 }
 
 func (ms GRPCMasterServer) CreateCollection(ctx context.Context, in *messagepb.Mapping) (*messagepb.Status, error) {
-	//	ms.CreateRequest <- in
+	ms.CreateRequest <- in
 	fmt.Println("Handle a new create collection request")
-	err := WriteCollection2Datastore(in)
-	if err != nil {
-		return &messagepb.Status{
-			ErrorCode: 100,
-			Reason:    "",
-		}, err
-	}
 	return &messagepb.Status{
 		ErrorCode: 0,
 		Reason:    "",
@@ -151,42 +144,4 @@ func CollectionController(ch chan *messagepb.Mapping) {
 			log.Fatal(err)
 		}
 	}
-}
-
-func WriteCollection2Datastore(collection *messagepb.Mapping) error {
-	cli, _ := clientv3.New(clientv3.Config{
-		Endpoints:   []string{"127.0.0.1:12379"},
-		DialTimeout: 5 * time.Second,
-	})
-	defer cli.Close()
-	kvbase := kv.NewEtcdKVBase(cli, common.ETCD_ROOT_PATH)
-	sID := uuid.New()
-	cID := uuid.New()
-	fieldMetas := []*messagepb.FieldMeta{}
-	if collection.Schema != nil {
-		fieldMetas = collection.Schema.FieldMetas
-	}
-	c := mock.NewCollection(cID, collection.CollectionName,
-		time.Now(), fieldMetas, []uuid.UUID{sID},
-		[]string{"default"})
-	cm := mock.GrpcMarshal(&c)
-	s := mock.NewSegment(sID, cID, collection.CollectionName, "default", 0, 100, time.Now(), time.Unix(1<<36-1, 0))
-	collectionData, _ := mock.Collection2JSON(*cm)
-	segmentData, err := mock.Segment2JSON(s)
-	if err != nil {
-		log.Fatal(err)
-		return err
-	}
-	err = kvbase.Save("collection/"+cID.String(), collectionData)
-	if err != nil {
-		log.Fatal(err)
-		return err
-	}
-	err = kvbase.Save("segment/"+sID.String(), segmentData)
-	if err != nil {
-		log.Fatal(err)
-		return err
-	}
-	return nil
-
 }

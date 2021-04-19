@@ -72,6 +72,9 @@ class SegmentBase {
     virtual Status
     BuildIndex() = 0;
 
+    virtual int64_t
+    GetMemoryUsageInBytes() = 0;
+
  public:
     virtual ssize_t
     get_row_count() const = 0;

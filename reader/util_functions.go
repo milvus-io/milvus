@@ -13,16 +13,10 @@ func (node *QueryNode) GetKey2Segments() (*[]int64, *[]uint64, *[]int64) {
 
 	var key2SegMsg = node.messageClient.Key2SegMsg
 	for _, msg := range key2SegMsg {
-		if msg.SegmentId == nil {
-			segmentIDs = append(segmentIDs, -1)
+		for _, segmentID := range msg.SegmentId {
 			entityIDs = append(entityIDs, msg.Uid)
 			timestamps = append(timestamps, msg.Timestamp)
-		} else {
-			for _, segmentID := range msg.SegmentId {
-				segmentIDs = append(segmentIDs, segmentID)
-				entityIDs = append(entityIDs, msg.Uid)
-				timestamps = append(timestamps, msg.Timestamp)
-			}
+			segmentIDs = append(segmentIDs, segmentID)
 		}
 	}
 
