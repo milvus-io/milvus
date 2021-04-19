@@ -3,22 +3,12 @@ package querynode
 import (
 	"context"
 	"math"
-	"os"
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
-
-func TestMain(m *testing.M) {
-	Params.Init()
-	exitCode := m.Run()
-	os.Exit(exitCode)
-}
 
 func TestMetaService_start(t *testing.T) {
 	var ctx context.Context
@@ -37,6 +27,7 @@ func TestMetaService_start(t *testing.T) {
 	node.metaService = newMetaService(ctx, node.replica)
 
 	(*node.metaService).start()
+	node.Close()
 }
 
 func TestMetaService_getCollectionObjId(t *testing.T) {
@@ -119,47 +110,9 @@ func TestMetaService_isSegmentChannelRangeInQueryNodeChannelRange(t *testing.T) 
 
 func TestMetaService_printCollectionStruct(t *testing.T) {
 	collectionName := "collection0"
-	fieldVec := schemapb.FieldSchema{
-		Name:         "vec",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_VECTOR_FLOAT,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "16",
-			},
-		},
-	}
-
-	fieldInt := schemapb.FieldSchema{
-		Name:         "age",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_INT32,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "1",
-			},
-		},
-	}
-
-	schema := schemapb.CollectionSchema{
-		Name:   collectionName,
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{
-			&fieldVec, &fieldInt,
-		},
-	}
-
-	collectionMeta := etcdpb.CollectionMeta{
-		ID:            UniqueID(0),
-		Schema:        &schema,
-		CreateTime:    Timestamp(0),
-		SegmentIDs:    []UniqueID{0},
-		PartitionTags: []string{"default"},
-	}
-
-	printCollectionStruct(&collectionMeta)
+	collectionID := UniqueID(0)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	printCollectionStruct(collectionMeta)
 }
 
 func TestMetaService_printSegmentStruct(t *testing.T) {
@@ -178,13 +131,8 @@ func TestMetaService_printSegmentStruct(t *testing.T) {
 }
 
 func TestMetaService_processCollectionCreate(t *testing.T) {
-	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), d)
-	defer cancel()
-
-	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	node := newQueryNode()
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	id := "0"
 	value := `schema: <
@@ -195,6 +143,10 @@ func TestMetaService_processCollectionCreate(t *testing.T) {
 				type_params: <
 				  key: "dim"
 				  value: "16"
+				>
+				index_params: <
+				  key: "metric_type"
+				  value: "L2"
 				>
 				>
 				fields: <
@@ -212,71 +164,21 @@ func TestMetaService_processCollectionCreate(t *testing.T) {
 
 	node.metaService.processCollectionCreate(id, value)
 
-	collectionNum := (*node.replica).getCollectionNum()
+	collectionNum := node.replica.getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := (*node.replica).getCollectionByName("test")
+	collection, err := node.replica.getCollectionByName("test")
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
+	node.Close()
 }
 
 func TestMetaService_processSegmentCreate(t *testing.T) {
-	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), d)
-	defer cancel()
-
-	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
-
+	node := newQueryNode()
 	collectionName := "collection0"
-	fieldVec := schemapb.FieldSchema{
-		Name:         "vec",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_VECTOR_FLOAT,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "16",
-			},
-		},
-	}
-
-	fieldInt := schemapb.FieldSchema{
-		Name:         "age",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_INT32,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "1",
-			},
-		},
-	}
-
-	schema := schemapb.CollectionSchema{
-		Name:   collectionName,
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{
-			&fieldVec, &fieldInt,
-		},
-	}
-
-	collectionMeta := etcdpb.CollectionMeta{
-		ID:            UniqueID(0),
-		Schema:        &schema,
-		CreateTime:    Timestamp(0),
-		SegmentIDs:    []UniqueID{0},
-		PartitionTags: []string{"default"},
-	}
-
-	colMetaBlob := proto.MarshalTextString(&collectionMeta)
-
-	err := (*node.replica).addCollection(&collectionMeta, string(colMetaBlob))
-	assert.NoError(t, err)
-
-	err = (*node.replica).addPartition(UniqueID(0), "default")
-	assert.NoError(t, err)
+	collectionID := UniqueID(0)
+	initTestMeta(t, node, collectionName, collectionID, 0)
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	id := "0"
 	value := `partition_tag: "default"
@@ -287,19 +189,15 @@ func TestMetaService_processSegmentCreate(t *testing.T) {
 
 	(*node.metaService).processSegmentCreate(id, value)
 
-	s, err := (*node.replica).getSegmentByID(UniqueID(0))
+	s, err := node.replica.getSegmentByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, s.segmentID, UniqueID(0))
+	node.Close()
 }
 
 func TestMetaService_processCreate(t *testing.T) {
-	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), d)
-	defer cancel()
-
-	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	node := newQueryNode()
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	key1 := "by-dev/meta/collection/0"
 	msg1 := `schema: <
@@ -310,6 +208,10 @@ func TestMetaService_processCreate(t *testing.T) {
 				type_params: <
 				  key: "dim"
 				  value: "16"
+				>
+				index_params: <
+				  key: "metric_type"
+				  value: "L2"
 				>
 				>
 				fields: <
@@ -326,10 +228,10 @@ func TestMetaService_processCreate(t *testing.T) {
 				`
 
 	(*node.metaService).processCreate(key1, msg1)
-	collectionNum := (*node.replica).getCollectionNum()
+	collectionNum := node.replica.getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := (*node.replica).getCollectionByName("test")
+	collection, err := node.replica.getCollectionByName("test")
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
@@ -341,68 +243,19 @@ func TestMetaService_processCreate(t *testing.T) {
 				`
 
 	(*node.metaService).processCreate(key2, msg2)
-	s, err := (*node.replica).getSegmentByID(UniqueID(0))
+	s, err := node.replica.getSegmentByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, s.segmentID, UniqueID(0))
+	node.Close()
 }
 
 func TestMetaService_processSegmentModify(t *testing.T) {
-	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), d)
-	defer cancel()
-
-	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
-
+	node := newQueryNode()
 	collectionName := "collection0"
-	fieldVec := schemapb.FieldSchema{
-		Name:         "vec",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_VECTOR_FLOAT,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "16",
-			},
-		},
-	}
-
-	fieldInt := schemapb.FieldSchema{
-		Name:         "age",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_INT32,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "1",
-			},
-		},
-	}
-
-	schema := schemapb.CollectionSchema{
-		Name:   collectionName,
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{
-			&fieldVec, &fieldInt,
-		},
-	}
-
-	collectionMeta := etcdpb.CollectionMeta{
-		ID:            UniqueID(0),
-		Schema:        &schema,
-		CreateTime:    Timestamp(0),
-		SegmentIDs:    []UniqueID{0},
-		PartitionTags: []string{"default"},
-	}
-
-	colMetaBlob := proto.MarshalTextString(&collectionMeta)
-
-	err := (*node.replica).addCollection(&collectionMeta, string(colMetaBlob))
-	assert.NoError(t, err)
-
-	err = (*node.replica).addPartition(UniqueID(0), "default")
-	assert.NoError(t, err)
+	collectionID := UniqueID(0)
+	segmentID := UniqueID(0)
+	initTestMeta(t, node, collectionName, collectionID, segmentID)
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	id := "0"
 	value := `partition_tag: "default"
@@ -412,9 +265,9 @@ func TestMetaService_processSegmentModify(t *testing.T) {
 				`
 
 	(*node.metaService).processSegmentCreate(id, value)
-	s, err := (*node.replica).getSegmentByID(UniqueID(0))
+	s, err := node.replica.getSegmentByID(segmentID)
 	assert.NoError(t, err)
-	assert.Equal(t, s.segmentID, UniqueID(0))
+	assert.Equal(t, s.segmentID, segmentID)
 
 	newValue := `partition_tag: "default"
 				channel_start: 0
@@ -424,19 +277,15 @@ func TestMetaService_processSegmentModify(t *testing.T) {
 
 	// TODO: modify segment for testing processCollectionModify
 	(*node.metaService).processSegmentModify(id, newValue)
-	seg, err := (*node.replica).getSegmentByID(UniqueID(0))
+	seg, err := node.replica.getSegmentByID(segmentID)
 	assert.NoError(t, err)
-	assert.Equal(t, seg.segmentID, UniqueID(0))
+	assert.Equal(t, seg.segmentID, segmentID)
+	node.Close()
 }
 
 func TestMetaService_processCollectionModify(t *testing.T) {
-	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), d)
-	defer cancel()
-
-	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	node := newQueryNode()
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	id := "0"
 	value := `schema: <
@@ -447,6 +296,10 @@ func TestMetaService_processCollectionModify(t *testing.T) {
 				type_params: <
 				  key: "dim"
 				  value: "16"
+				>
+				index_params: <
+				  key: "metric_type"
+				  value: "L2"
 				>
 				>
 				fields: <
@@ -465,24 +318,24 @@ func TestMetaService_processCollectionModify(t *testing.T) {
 				`
 
 	(*node.metaService).processCollectionCreate(id, value)
-	collectionNum := (*node.replica).getCollectionNum()
+	collectionNum := node.replica.getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := (*node.replica).getCollectionByName("test")
+	collection, err := node.replica.getCollectionByName("test")
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
-	partitionNum, err := (*node.replica).getPartitionNum(UniqueID(0))
+	partitionNum, err := node.replica.getPartitionNum(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, partitionNum, 3)
 
-	hasPartition := (*node.replica).hasPartition(UniqueID(0), "p0")
+	hasPartition := node.replica.hasPartition(UniqueID(0), "p0")
 	assert.Equal(t, hasPartition, true)
-	hasPartition = (*node.replica).hasPartition(UniqueID(0), "p1")
+	hasPartition = node.replica.hasPartition(UniqueID(0), "p1")
 	assert.Equal(t, hasPartition, true)
-	hasPartition = (*node.replica).hasPartition(UniqueID(0), "p2")
+	hasPartition = node.replica.hasPartition(UniqueID(0), "p2")
 	assert.Equal(t, hasPartition, true)
-	hasPartition = (*node.replica).hasPartition(UniqueID(0), "p3")
+	hasPartition = node.replica.hasPartition(UniqueID(0), "p3")
 	assert.Equal(t, hasPartition, false)
 
 	newValue := `schema: <
@@ -493,6 +346,10 @@ func TestMetaService_processCollectionModify(t *testing.T) {
 				type_params: <
 				  key: "dim"
 				  value: "16"
+				>
+				index_params: <
+				  key: "metric_type"
+				  value: "L2"
 				>
 				>
 				fields: <
@@ -511,32 +368,28 @@ func TestMetaService_processCollectionModify(t *testing.T) {
 				`
 
 	(*node.metaService).processCollectionModify(id, newValue)
-	collection, err = (*node.replica).getCollectionByName("test")
+	collection, err = node.replica.getCollectionByName("test")
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
-	partitionNum, err = (*node.replica).getPartitionNum(UniqueID(0))
+	partitionNum, err = node.replica.getPartitionNum(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, partitionNum, 3)
 
-	hasPartition = (*node.replica).hasPartition(UniqueID(0), "p0")
+	hasPartition = node.replica.hasPartition(UniqueID(0), "p0")
 	assert.Equal(t, hasPartition, false)
-	hasPartition = (*node.replica).hasPartition(UniqueID(0), "p1")
+	hasPartition = node.replica.hasPartition(UniqueID(0), "p1")
 	assert.Equal(t, hasPartition, true)
-	hasPartition = (*node.replica).hasPartition(UniqueID(0), "p2")
+	hasPartition = node.replica.hasPartition(UniqueID(0), "p2")
 	assert.Equal(t, hasPartition, true)
-	hasPartition = (*node.replica).hasPartition(UniqueID(0), "p3")
+	hasPartition = node.replica.hasPartition(UniqueID(0), "p3")
 	assert.Equal(t, hasPartition, true)
+	node.Close()
 }
 
 func TestMetaService_processModify(t *testing.T) {
-	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), d)
-	defer cancel()
-
-	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	node := newQueryNode()
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	key1 := "by-dev/meta/collection/0"
 	msg1 := `schema: <
@@ -547,6 +400,10 @@ func TestMetaService_processModify(t *testing.T) {
 				type_params: <
 				  key: "dim"
 				  value: "16"
+				>
+				index_params: <
+				  key: "metric_type"
+				  value: "L2"
 				>
 				>
 				fields: <
@@ -565,24 +422,24 @@ func TestMetaService_processModify(t *testing.T) {
 				`
 
 	(*node.metaService).processCreate(key1, msg1)
-	collectionNum := (*node.replica).getCollectionNum()
+	collectionNum := node.replica.getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := (*node.replica).getCollectionByName("test")
+	collection, err := node.replica.getCollectionByName("test")
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
-	partitionNum, err := (*node.replica).getPartitionNum(UniqueID(0))
+	partitionNum, err := node.replica.getPartitionNum(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, partitionNum, 3)
 
-	hasPartition := (*node.replica).hasPartition(UniqueID(0), "p0")
+	hasPartition := node.replica.hasPartition(UniqueID(0), "p0")
 	assert.Equal(t, hasPartition, true)
-	hasPartition = (*node.replica).hasPartition(UniqueID(0), "p1")
+	hasPartition = node.replica.hasPartition(UniqueID(0), "p1")
 	assert.Equal(t, hasPartition, true)
-	hasPartition = (*node.replica).hasPartition(UniqueID(0), "p2")
+	hasPartition = node.replica.hasPartition(UniqueID(0), "p2")
 	assert.Equal(t, hasPartition, true)
-	hasPartition = (*node.replica).hasPartition(UniqueID(0), "p3")
+	hasPartition = node.replica.hasPartition(UniqueID(0), "p3")
 	assert.Equal(t, hasPartition, false)
 
 	key2 := "by-dev/meta/segment/0"
@@ -593,7 +450,7 @@ func TestMetaService_processModify(t *testing.T) {
 				`
 
 	(*node.metaService).processCreate(key2, msg2)
-	s, err := (*node.replica).getSegmentByID(UniqueID(0))
+	s, err := node.replica.getSegmentByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, s.segmentID, UniqueID(0))
 
@@ -607,6 +464,10 @@ func TestMetaService_processModify(t *testing.T) {
 				type_params: <
 				  key: "dim"
 				  value: "16"
+				>
+				index_params: <
+				  key: "metric_type"
+				  value: "L2"
 				>
 				>
 				fields: <
@@ -625,21 +486,21 @@ func TestMetaService_processModify(t *testing.T) {
 				`
 
 	(*node.metaService).processModify(key1, msg3)
-	collection, err = (*node.replica).getCollectionByName("test")
+	collection, err = node.replica.getCollectionByName("test")
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
-	partitionNum, err = (*node.replica).getPartitionNum(UniqueID(0))
+	partitionNum, err = node.replica.getPartitionNum(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, partitionNum, 3)
 
-	hasPartition = (*node.replica).hasPartition(UniqueID(0), "p0")
+	hasPartition = node.replica.hasPartition(UniqueID(0), "p0")
 	assert.Equal(t, hasPartition, false)
-	hasPartition = (*node.replica).hasPartition(UniqueID(0), "p1")
+	hasPartition = node.replica.hasPartition(UniqueID(0), "p1")
 	assert.Equal(t, hasPartition, true)
-	hasPartition = (*node.replica).hasPartition(UniqueID(0), "p2")
+	hasPartition = node.replica.hasPartition(UniqueID(0), "p2")
 	assert.Equal(t, hasPartition, true)
-	hasPartition = (*node.replica).hasPartition(UniqueID(0), "p3")
+	hasPartition = node.replica.hasPartition(UniqueID(0), "p3")
 	assert.Equal(t, hasPartition, true)
 
 	msg4 := `partition_tag: "p1"
@@ -649,68 +510,18 @@ func TestMetaService_processModify(t *testing.T) {
 				`
 
 	(*node.metaService).processModify(key2, msg4)
-	seg, err := (*node.replica).getSegmentByID(UniqueID(0))
+	seg, err := node.replica.getSegmentByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, seg.segmentID, UniqueID(0))
+	node.Close()
 }
 
 func TestMetaService_processSegmentDelete(t *testing.T) {
-	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), d)
-	defer cancel()
-
-	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
-
+	node := newQueryNode()
 	collectionName := "collection0"
-	fieldVec := schemapb.FieldSchema{
-		Name:         "vec",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_VECTOR_FLOAT,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "16",
-			},
-		},
-	}
-
-	fieldInt := schemapb.FieldSchema{
-		Name:         "age",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_INT32,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "1",
-			},
-		},
-	}
-
-	schema := schemapb.CollectionSchema{
-		Name:   collectionName,
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{
-			&fieldVec, &fieldInt,
-		},
-	}
-
-	collectionMeta := etcdpb.CollectionMeta{
-		ID:            UniqueID(0),
-		Schema:        &schema,
-		CreateTime:    Timestamp(0),
-		SegmentIDs:    []UniqueID{0},
-		PartitionTags: []string{"default"},
-	}
-
-	colMetaBlob := proto.MarshalTextString(&collectionMeta)
-
-	err := (*node.replica).addCollection(&collectionMeta, string(colMetaBlob))
-	assert.NoError(t, err)
-
-	err = (*node.replica).addPartition(UniqueID(0), "default")
-	assert.NoError(t, err)
+	collectionID := UniqueID(0)
+	initTestMeta(t, node, collectionName, collectionID, 0)
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	id := "0"
 	value := `partition_tag: "default"
@@ -720,23 +531,19 @@ func TestMetaService_processSegmentDelete(t *testing.T) {
 				`
 
 	(*node.metaService).processSegmentCreate(id, value)
-	seg, err := (*node.replica).getSegmentByID(UniqueID(0))
+	seg, err := node.replica.getSegmentByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, seg.segmentID, UniqueID(0))
 
 	(*node.metaService).processSegmentDelete("0")
-	mapSize := (*node.replica).getSegmentNum()
+	mapSize := node.replica.getSegmentNum()
 	assert.Equal(t, mapSize, 0)
+	node.Close()
 }
 
 func TestMetaService_processCollectionDelete(t *testing.T) {
-	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), d)
-	defer cancel()
-
-	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	node := newQueryNode()
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	id := "0"
 	value := `schema: <
@@ -747,6 +554,10 @@ func TestMetaService_processCollectionDelete(t *testing.T) {
 				type_params: <
 				  key: "dim"
 				  value: "16"
+				>
+				index_params: <
+				  key: "metric_type"
+				  value: "L2"
 				>
 				>
 				fields: <
@@ -763,26 +574,22 @@ func TestMetaService_processCollectionDelete(t *testing.T) {
 				`
 
 	(*node.metaService).processCollectionCreate(id, value)
-	collectionNum := (*node.replica).getCollectionNum()
+	collectionNum := node.replica.getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := (*node.replica).getCollectionByName("test")
+	collection, err := node.replica.getCollectionByName("test")
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
 	(*node.metaService).processCollectionDelete(id)
-	collectionNum = (*node.replica).getCollectionNum()
+	collectionNum = node.replica.getCollectionNum()
 	assert.Equal(t, collectionNum, 0)
+	node.Close()
 }
 
 func TestMetaService_processDelete(t *testing.T) {
-	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), d)
-	defer cancel()
-
-	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	node := newQueryNode()
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	key1 := "by-dev/meta/collection/0"
 	msg1 := `schema: <
@@ -793,6 +600,10 @@ func TestMetaService_processDelete(t *testing.T) {
 				type_params: <
 				  key: "dim"
 				  value: "16"
+				>
+				index_params: <
+				  key: "metric_type"
+				  value: "L2"
 				>
 				>
 				fields: <
@@ -809,10 +620,10 @@ func TestMetaService_processDelete(t *testing.T) {
 				`
 
 	(*node.metaService).processCreate(key1, msg1)
-	collectionNum := (*node.replica).getCollectionNum()
+	collectionNum := node.replica.getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := (*node.replica).getCollectionByName("test")
+	collection, err := node.replica.getCollectionByName("test")
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
@@ -824,77 +635,48 @@ func TestMetaService_processDelete(t *testing.T) {
 				`
 
 	(*node.metaService).processCreate(key2, msg2)
-	seg, err := (*node.replica).getSegmentByID(UniqueID(0))
+	seg, err := node.replica.getSegmentByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, seg.segmentID, UniqueID(0))
 
 	(*node.metaService).processDelete(key1)
-	collectionsSize := (*node.replica).getCollectionNum()
+	collectionsSize := node.replica.getCollectionNum()
 	assert.Equal(t, collectionsSize, 0)
 
-	mapSize := (*node.replica).getSegmentNum()
+	mapSize := node.replica.getSegmentNum()
 	assert.Equal(t, mapSize, 0)
+	node.Close()
 }
 
 func TestMetaService_processResp(t *testing.T) {
-	var ctx context.Context
-	if closeWithDeadline {
-		var cancel context.CancelFunc
-		d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-		ctx, cancel = context.WithDeadline(context.Background(), d)
-		defer cancel()
-	} else {
-		ctx = context.Background()
-	}
-
-	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	node := newQueryNode()
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	metaChan := (*node.metaService).kvBase.WatchWithPrefix("")
 
 	select {
-	case <-node.ctx.Done():
+	case <-node.queryNodeLoopCtx.Done():
 		return
 	case resp := <-metaChan:
 		_ = (*node.metaService).processResp(resp)
 	}
+	node.Close()
 }
 
 func TestMetaService_loadCollections(t *testing.T) {
-	var ctx context.Context
-	if closeWithDeadline {
-		var cancel context.CancelFunc
-		d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-		ctx, cancel = context.WithDeadline(context.Background(), d)
-		defer cancel()
-	} else {
-		ctx = context.Background()
-	}
-
-	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	node := newQueryNode()
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	err2 := (*node.metaService).loadCollections()
 	assert.Nil(t, err2)
+	node.Close()
 }
 
 func TestMetaService_loadSegments(t *testing.T) {
-	var ctx context.Context
-	if closeWithDeadline {
-		var cancel context.CancelFunc
-		d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-		ctx, cancel = context.WithDeadline(context.Background(), d)
-		defer cancel()
-	} else {
-		ctx = context.Background()
-	}
-
-	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	node := newQueryNode()
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	err2 := (*node.metaService).loadSegments()
 	assert.Nil(t, err2)
+	node.Close()
 }
