@@ -845,19 +845,19 @@ func TestMaster(t *testing.T) {
 		//	ReqID:         1,
 		//	Timestamp:     uint64(time.Now().Unix()),
 		//	ProxyID:       1,
-		//	PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition1"},
+		//	PartitionName: &milvuspb.PartitionName{CollectionName: "col1", Tag: "partition1"},
 		//}
 		//
 		//describePartition, err := cli.DescribePartition(ctx, &describePartitionReq)
 		//assert.Nil(t, err)
-		//assert.Equal(t, &servicepb.PartitionName{CollectionName: "col1", Tag: "partition1"}, describePartition.Name)
+		//assert.Equal(t, &milvuspb.PartitionName{CollectionName: "col1", Tag: "partition1"}, describePartition.Name)
 		//
 		//describePartitionReq = internalpb.DescribePartitionRequest{
 		//	MsgType:       commonpb.MsgType_kDescribePartition,
 		//	ReqID:         1,
 		//	Timestamp:     0,
 		//	ProxyID:       1,
-		//	PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition1"},
+		//	PartitionName: &milvuspb.PartitionName{CollectionName: "col1", Tag: "partition1"},
 		//}
 		//
 		//describePartition, _ = cli.DescribePartition(ctx, &describePartitionReq)

@@ -185,7 +185,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
 
 inline auto
 CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
-    namespace ser = milvus::proto::service;
+    namespace ser = milvus::proto::milvus;
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
@@ -205,7 +205,7 @@ CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
 
 inline auto
 CreatePlaceholderGroupFromBlob(int64_t num_queries, int dim, const float* src) {
-    namespace ser = milvus::proto::service;
+    namespace ser = milvus::proto::milvus;
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
@@ -226,7 +226,7 @@ CreatePlaceholderGroupFromBlob(int64_t num_queries, int dim, const float* src) {
 inline auto
 CreateBinaryPlaceholderGroup(int64_t num_queries, int64_t dim, int64_t seed = 42) {
     assert(dim % 8 == 0);
-    namespace ser = milvus::proto::service;
+    namespace ser = milvus::proto::milvus;
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
@@ -246,7 +246,7 @@ CreateBinaryPlaceholderGroup(int64_t num_queries, int64_t dim, int64_t seed = 42
 inline auto
 CreateBinaryPlaceholderGroupFromBlob(int64_t num_queries, int64_t dim, const uint8_t* ptr) {
     assert(dim % 8 == 0);
-    namespace ser = milvus::proto::service;
+    namespace ser = milvus::proto::milvus;
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");

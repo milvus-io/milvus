@@ -15,7 +15,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 )
 
 func TestSearch_Search(t *testing.T) {
@@ -45,14 +45,14 @@ func TestSearch_Search(t *testing.T) {
 		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele+float32(i*4)))
 		searchRawData2 = append(searchRawData2, buf...)
 	}
-	placeholderValue := servicepb.PlaceholderValue{
+	placeholderValue := milvuspb.PlaceholderValue{
 		Tag:    "$0",
-		Type:   servicepb.PlaceholderType_VECTOR_FLOAT,
+		Type:   milvuspb.PlaceholderType_VECTOR_FLOAT,
 		Values: [][]byte{searchRawData1, searchRawData2},
 	}
 
-	placeholderGroup := servicepb.PlaceholderGroup{
-		Placeholders: []*servicepb.PlaceholderValue{&placeholderValue},
+	placeholderGroup := milvuspb.PlaceholderGroup{
+		Placeholders: []*milvuspb.PlaceholderValue{&placeholderValue},
 	}
 
 	placeGroupByte, err := proto.Marshal(&placeholderGroup)
@@ -60,9 +60,9 @@ func TestSearch_Search(t *testing.T) {
 		log.Print("marshal placeholderGroup failed")
 	}
 
-	query := servicepb.Query{
+	query := milvuspb.SearchRequest{
 		CollectionName:   "collection0",
-		PartitionTags:    []string{"default"},
+		PartitionNames:   []string{"default"},
 		Dsl:              dslString,
 		PlaceholderGroup: placeGroupByte,
 	}
@@ -239,14 +239,14 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele+float32(i*4)))
 		searchRawData2 = append(searchRawData2, buf...)
 	}
-	placeholderValue := servicepb.PlaceholderValue{
+	placeholderValue := milvuspb.PlaceholderValue{
 		Tag:    "$0",
-		Type:   servicepb.PlaceholderType_VECTOR_FLOAT,
+		Type:   milvuspb.PlaceholderType_VECTOR_FLOAT,
 		Values: [][]byte{searchRawData1, searchRawData2},
 	}
 
-	placeholderGroup := servicepb.PlaceholderGroup{
-		Placeholders: []*servicepb.PlaceholderValue{&placeholderValue},
+	placeholderGroup := milvuspb.PlaceholderGroup{
+		Placeholders: []*milvuspb.PlaceholderValue{&placeholderValue},
 	}
 
 	placeGroupByte, err := proto.Marshal(&placeholderGroup)
@@ -254,9 +254,9 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 		log.Print("marshal placeholderGroup failed")
 	}
 
-	query := servicepb.Query{
+	query := milvuspb.SearchRequest{
 		CollectionName:   "collection0",
-		PartitionTags:    []string{"default"},
+		PartitionNames:   []string{"default"},
 		Dsl:              dslString,
 		PlaceholderGroup: placeGroupByte,
 	}

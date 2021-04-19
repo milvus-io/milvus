@@ -164,12 +164,17 @@ func (queue *BaseTaskQueue) TaskDoneTest(ts Timestamp) bool {
 }
 
 func (queue *BaseTaskQueue) Enqueue(t task) error {
+	err := t.OnEnqueue()
+	if err != nil {
+		return err
+	}
+
 	ts, _ := queue.sched.tsoAllocator.AllocOne()
-	log.Printf("[Proxy] allocate timestamp: %v", ts)
+	log.Printf("[NodeImpl] allocate timestamp: %v", ts)
 	t.SetTs(ts)
 
 	reqID, _ := queue.sched.idAllocator.AllocOne()
-	log.Printf("[Proxy] allocate reqID: %v", reqID)
+	log.Printf("[NodeImpl] allocate reqID: %v", reqID)
 	t.SetID(reqID)
 
 	return queue.addUnissuedTask(t)

@@ -16,7 +16,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/indexnode"
 	"github.com/zilliztech/milvus-distributed/internal/master"
-	"github.com/zilliztech/milvus-distributed/internal/proxynode"
+	proxynodeimpl "github.com/zilliztech/milvus-distributed/internal/proxynode"
 	"github.com/zilliztech/milvus-distributed/internal/querynode"
 	"github.com/zilliztech/milvus-distributed/internal/writenode"
 )
@@ -62,10 +62,10 @@ func InitMaster(cpuprofile *string, wg *sync.WaitGroup) {
 
 func InitProxy(wg *sync.WaitGroup) {
 	defer wg.Done()
-	proxynode.Init()
-	fmt.Println("ProxyID is", proxynode.Params.ProxyID())
+	//proxynodeimpl.Init()
+	//fmt.Println("ProxyID is", proxynodeimpl.Params.ProxyID())
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := proxynode.CreateProxy(ctx)
+	svr, err := proxynodeimpl.CreateProxyNodeImpl(ctx)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}
@@ -83,6 +83,10 @@ func InitProxy(wg *sync.WaitGroup) {
 		cancel()
 	}()
 
+	if err := svr.Init(); err != nil {
+		log.Fatal("init server failed", zap.Error(err))
+	}
+
 	if err := svr.Start(); err != nil {
 		log.Fatal("run server failed", zap.Error(err))
 	}
@@ -90,7 +94,7 @@ func InitProxy(wg *sync.WaitGroup) {
 	<-ctx.Done()
 	log.Print("Got signal to exit", zap.String("signal", sig.String()))
 
-	svr.Close()
+	svr.Stop()
 	switch sig {
 	case syscall.SIGTERM:
 		exit(0)

@@ -7,14 +7,13 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
 
 type Cache interface {
 	Hit(collectionName string) bool
-	Get(collectionName string) (*servicepb.CollectionDescription, error)
+	Get(collectionName string) (*milvuspb.DescribeCollectionResponse, error)
 	Sync(collectionName string) error
-	Update(collectionName string, desc *servicepb.CollectionDescription) error
+	Update(collectionName string, desc *milvuspb.DescribeCollectionResponse) error
 	Remove(collectionName string) error
 }
 
@@ -22,9 +21,9 @@ var globalMetaCache Cache
 
 type SimpleMetaCache struct {
 	mu            sync.RWMutex
-	metas         map[string]*servicepb.CollectionDescription // collection name to schema
+	metas         map[string]*milvuspb.DescribeCollectionResponse // collection name to schema
 	ctx           context.Context
-	proxyInstance *Proxy
+	proxyInstance *NodeImpl
 }
 
 func (metaCache *SimpleMetaCache) Hit(collectionName string) bool {
@@ -34,7 +33,7 @@ func (metaCache *SimpleMetaCache) Hit(collectionName string) bool {
 	return ok
 }
 
-func (metaCache *SimpleMetaCache) Get(collectionName string) (*servicepb.CollectionDescription, error) {
+func (metaCache *SimpleMetaCache) Get(collectionName string) (*milvuspb.DescribeCollectionResponse, error) {
 	metaCache.mu.RLock()
 	defer metaCache.mu.RUnlock()
 	schema, ok := metaCache.metas[collectionName]
@@ -47,7 +46,7 @@ func (metaCache *SimpleMetaCache) Get(collectionName string) (*servicepb.Collect
 func (metaCache *SimpleMetaCache) Sync(collectionName string) error {
 	dct := &DescribeCollectionTask{
 		Condition: NewTaskCondition(metaCache.ctx),
-		DescribeCollectionRequest: milvuspb.DescribeCollectionRequest{
+		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_kDescribeCollection,
 			},
@@ -67,7 +66,7 @@ func (metaCache *SimpleMetaCache) Sync(collectionName string) error {
 	return dct.WaitToFinish()
 }
 
-func (metaCache *SimpleMetaCache) Update(collectionName string, desc *servicepb.CollectionDescription) error {
+func (metaCache *SimpleMetaCache) Update(collectionName string, desc *milvuspb.DescribeCollectionResponse) error {
 	metaCache.mu.Lock()
 	defer metaCache.mu.Unlock()
 
@@ -88,14 +87,14 @@ func (metaCache *SimpleMetaCache) Remove(collectionName string) error {
 	return nil
 }
 
-func newSimpleMetaCache(ctx context.Context, proxyInstance *Proxy) *SimpleMetaCache {
+func newSimpleMetaCache(ctx context.Context, proxyInstance *NodeImpl) *SimpleMetaCache {
 	return &SimpleMetaCache{
-		metas:         make(map[string]*servicepb.CollectionDescription),
+		metas:         make(map[string]*milvuspb.DescribeCollectionResponse),
 		proxyInstance: proxyInstance,
 		ctx:           ctx,
 	}
 }
 
-func initGlobalMetaCache(ctx context.Context, proxyInstance *Proxy) {
+func initGlobalMetaCache(ctx context.Context, proxyInstance *NodeImpl) {
 	globalMetaCache = newSimpleMetaCache(ctx, proxyInstance)
 }

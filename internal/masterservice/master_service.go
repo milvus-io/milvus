@@ -28,7 +28,7 @@ import (
 //  querypb(query_service)
 //  datapb(data_service)
 //  indexpb(index_service)
-//  milvuspb -> servicepb
+//  milvuspb -> milvuspb
 //  masterpb2 -> masterpb (master_service)
 
 type InitParams struct {

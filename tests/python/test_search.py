@@ -981,7 +981,7 @@ class TestSearchDSL(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    # PASS  
+    # PASS
     def test_query_no_vector_term_only(self, connect, collection):
         '''
         method: build query without vector only term
@@ -1634,7 +1634,7 @@ class TestSearchDSLBools(object):
 
 """
 ******************************************************************
-#  The following cases are used to test `search` function 
+#  The following cases are used to test `search` function
 #  with invalid collection_name, or invalid query expr
 ******************************************************************
 """

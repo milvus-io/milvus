@@ -15,13 +15,13 @@ services:
     networks: 
       - milvus
 
-  proxy:
-    image: ${TARGET_REPO}/proxy:${TARGET_TAG}
+  proxynode:
+    image: ${TARGET_REPO}/proxynode:${TARGET_TAG}
     build:
       context: ../../../
-      dockerfile: build/docker/deploy/proxy/DockerFile
+      dockerfile: build/docker/deploy/proxynode/DockerFile
       cache_from:
-        - ${SOURCE_REPO}/proxy:${SOURCE_TAG}
+        - ${SOURCE_REPO}/proxynode:${SOURCE_TAG}
     environment: 
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       MASTER_ADDRESS: ${MASTER_ADDRESS}

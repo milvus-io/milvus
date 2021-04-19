@@ -51,6 +51,11 @@ proxyNode:
   address: localhost
   port: 19530
 
+# not used now
+proxyService:
+  address: localhost
+  port: 19530
+
 queryNode:
   gracefulTime: 5000 #ms
 

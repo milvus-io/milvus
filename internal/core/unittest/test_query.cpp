@@ -102,7 +102,7 @@ TEST(Query, DSL) {
 }
 
 TEST(Query, ParsePlaceholderGroup) {
-    namespace ser = milvus::proto::service;
+    namespace ser = milvus::proto::milvus;
     std::string dsl_string = R"(
 {
     "bool": {
