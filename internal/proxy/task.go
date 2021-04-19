@@ -289,40 +289,21 @@ func (qt *QueryTask) Execute() error {
 }
 
 func (qt *QueryTask) PostExecute() error {
-	return nil
-}
-
-func (qt *QueryTask) WaitToFinish() error {
 	for {
 		select {
-		case err := <-qt.done:
-			return err
 		case <-qt.ctx.Done():
 			log.Print("wait to finish failed, timeout!")
 			return errors.New("wait to finish failed, timeout")
-		}
-	}
-}
-
-func (qt *QueryTask) Notify(err error) {
-	defer func() {
-		qt.done <- err
-	}()
-	for {
-		select {
-		case <-qt.ctx.Done():
-			log.Print("wait to finish failed, timeout!")
-			return
 		case searchResults := <-qt.resultBuf:
 			rlen := len(searchResults) // query num
 			if rlen <= 0 {
 				qt.result = &servicepb.QueryResult{}
-				return
+				return nil
 			}
 			n := len(searchResults[0].Hits) // n
 			if n <= 0 {
 				qt.result = &servicepb.QueryResult{}
-				return
+				return nil
 			}
 			k := len(searchResults[0].Hits[0].IDs) // k
 			queryResult := &servicepb.QueryResult{
@@ -361,6 +342,23 @@ func (qt *QueryTask) Notify(err error) {
 			qt.result = queryResult
 		}
 	}
+	//return nil
+}
+
+func (qt *QueryTask) WaitToFinish() error {
+	for {
+		select {
+		case err := <-qt.done:
+			return err
+		case <-qt.ctx.Done():
+			log.Print("wait to finish failed, timeout!")
+			return errors.New("wait to finish failed, timeout")
+		}
+	}
+}
+
+func (qt *QueryTask) Notify(err error) {
+	qt.done <- err
 }
 
 type HasCollectionTask struct {

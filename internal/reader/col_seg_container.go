@@ -23,7 +23,7 @@ import (
 type container interface {
 	// collection
 	getCollectionNum() int
-	addCollection(collMeta *etcdpb.CollectionMeta, collMetaBlob string) error
+	addCollection(collMeta *etcdpb.CollectionMeta, colMetaBlob string) error
 	removeCollection(collectionID UniqueID) error
 	getCollectionByID(collectionID UniqueID) (*Collection, error)
 	getCollectionByName(collectionName string) (*Collection, error)
@@ -59,11 +59,11 @@ func (container *colSegContainer) getCollectionNum() int {
 	return len(container.collections)
 }
 
-func (container *colSegContainer) addCollection(collMeta *etcdpb.CollectionMeta, collMetaBlob string) error {
+func (container *colSegContainer) addCollection(collMeta *etcdpb.CollectionMeta, colMetaBlob string) error {
 	container.mu.Lock()
 	defer container.mu.Unlock()
 
-	var newCollection = newCollection(collMeta, collMetaBlob)
+	var newCollection = newCollection(collMeta, colMetaBlob)
 	container.collections = append(container.collections, newCollection)
 
 	return nil
@@ -206,6 +206,7 @@ func (container *colSegContainer) getSegmentStatistics() *internalpb.QueryNodeSe
 		}
 
 		statisticData = append(statisticData, &stat)
+		segment.recentlyModified = false
 	}
 
 	return &internalpb.QueryNodeSegStats{

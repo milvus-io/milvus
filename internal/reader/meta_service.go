@@ -363,7 +363,7 @@ func (mService *metaService) loadSegments() error {
 //----------------------------------------------------------------------- Unmarshal and Marshal
 func (mService *metaService) collectionUnmarshal(value string) *etcdpb.CollectionMeta {
 	col := etcdpb.CollectionMeta{}
-	err := proto.Unmarshal([]byte(value), &col)
+	err := proto.UnmarshalText(value, &col)
 	if err != nil {
 		log.Println(err)
 		return nil
@@ -372,17 +372,17 @@ func (mService *metaService) collectionUnmarshal(value string) *etcdpb.Collectio
 }
 
 func (mService *metaService) collectionMarshal(col *etcdpb.CollectionMeta) string {
-	value, err := proto.Marshal(col)
-	if err != nil {
-		log.Println(err)
+	value := proto.MarshalTextString(col)
+	if value == "" {
+		log.Println("marshal collection failed")
 		return ""
 	}
-	return string(value)
+	return value
 }
 
 func (mService *metaService) segmentUnmarshal(value string) *etcdpb.SegmentMeta {
 	seg := etcdpb.SegmentMeta{}
-	err := proto.Unmarshal([]byte(value), &seg)
+	err := proto.UnmarshalText(value, &seg)
 	if err != nil {
 		log.Println(err)
 		return nil
@@ -391,10 +391,10 @@ func (mService *metaService) segmentUnmarshal(value string) *etcdpb.SegmentMeta 
 }
 
 func (mService *metaService) segmentMarshal(seg *etcdpb.SegmentMeta) string {
-	value, err := proto.Marshal(seg)
-	if err != nil {
-		log.Println(err)
+	value := proto.MarshalTextString(seg)
+	if value == "" {
+		log.Println("marshal segment failed")
 		return ""
 	}
-	return string(value)
+	return value
 }

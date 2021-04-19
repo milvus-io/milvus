@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,13 +14,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var yamlFile string
-	flag.StringVar(&yamlFile, "yaml", "", "yaml file")
-	flag.Parse()
-	// flag.Usage()
-	fmt.Println("yaml file: ", yamlFile)
-
-	err := gparams.GParams.LoadYaml(yamlFile)
+	err := gparams.GParams.LoadYaml("config.yaml")
 	if err != nil {
 		panic(err)
 	}

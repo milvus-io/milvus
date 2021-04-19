@@ -1,85 +1,37 @@
 package reader
 
-//import (
-//	"context"
-//	"testing"
-//
-//	"github.com/stretchr/testify/assert"
-//	"github.com/zilliztech/milvus-distributed/internal/conf"
-//)
-//
-//func TestQueryNode_CreateQueryNode(t *testing.T) {
-//	conf.LoadConfig("config.yaml")
-//	ctx, cancel := context.WithCancel(context.Background())
-//	defer cancel()
-//
-//	node := CreateQueryNode(ctx, 0, 0, nil)
-//	assert.NotNil(t, node)
-//}
-//
-//func TestQueryNode_NewQueryNode(t *testing.T) {
-//	conf.LoadConfig("config.yaml")
-//	ctx, cancel := context.WithCancel(context.Background())
-//	defer cancel()
-//
-//	node := NewQueryNode(ctx, 0, 0)
-//	assert.NotNil(t, node)
-//}
-//
-//func TestQueryNode_Close(t *testing.T) {
-//	conf.LoadConfig("config.yaml")
-//	ctx, cancel := context.WithCancel(context.Background())
-//	defer cancel()
-//
-//	node := CreateQueryNode(ctx, 0, 0, nil)
-//	assert.NotNil(t, node)
-//
-//	node.Close()
-//}
-//
-//func TestQueryNode_QueryNodeDataInit(t *testing.T) {
-//	conf.LoadConfig("config.yaml")
-//	ctx, cancel := context.WithCancel(context.Background())
-//	defer cancel()
-//
-//	node := CreateQueryNode(ctx, 0, 0, nil)
-//	assert.NotNil(t, node)
-//
-//	node.QueryNodeDataInit()
-//
-//	assert.NotNil(t, node.deletePreprocessData)
-//	assert.NotNil(t, node.insertData)
-//	assert.NotNil(t, node.deleteData)
-//}
-//
-//func TestQueryNode_NewCollection(t *testing.T) {
-//	conf.LoadConfig("config.yaml")
-//	ctx, cancel := context.WithCancel(context.Background())
-//	defer cancel()
-//
-//	node := CreateQueryNode(ctx, 0, 0, nil)
-//	assert.NotNil(t, node)
-//
-//	var collection = node.newCollection(0, "collection0", "")
-//
-//	assert.Equal(t, collection.CollectionName, "collection0")
-//	assert.Equal(t, len(node.Collections), 1)
-//}
-//
-//func TestQueryNode_DeleteCollection(t *testing.T) {
-//	conf.LoadConfig("config.yaml")
-//	ctx, cancel := context.WithCancel(context.Background())
-//	defer cancel()
-//
-//	node := CreateQueryNode(ctx, 0, 0, nil)
-//	assert.NotNil(t, node)
-//
-//	var collection = node.newCollection(0, "collection0", "")
-//
-//	assert.Equal(t, collection.CollectionName, "collection0")
-//	assert.Equal(t, len(node.Collections), 1)
-//
-//	node.deleteCollection(collection)
-//
-//	assert.Equal(t, len(node.Collections), 0)
-//}
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	gParams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
+)
+
+const ctxTimeInMillisecond = 2000
+const closeWithDeadline = true
+
+// NOTE: start pulsar and etcd before test
+func TestQueryNode_start(t *testing.T) {
+	err := gParams.GParams.LoadYaml("config.yaml")
+	assert.NoError(t, err)
+
+	var ctx context.Context
+	if closeWithDeadline {
+		var cancel context.CancelFunc
+		d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
+		ctx, cancel = context.WithDeadline(context.Background(), d)
+		defer cancel()
+	} else {
+		ctx = context.Background()
+	}
+
+	pulsarAddr, _ := gParams.GParams.Load("pulsar.address")
+	pulsarPort, _ := gParams.GParams.Load("pulsar.port")
+	pulsarAddr += ":" + pulsarPort
+	pulsarAddr = "pulsar://" + pulsarAddr
+
+	node := NewQueryNode(ctx, 0, pulsarAddr)
+	node.Start()
+}

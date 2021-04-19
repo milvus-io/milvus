@@ -16,7 +16,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/master"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
@@ -41,9 +43,8 @@ func startMaster(ctx context.Context) {
 	rootPath := conf.Config.Etcd.Rootpath
 	kvRootPath := path.Join(rootPath, "kv")
 	metaRootPath := path.Join(rootPath, "meta")
-	tsoRootPath := path.Join(rootPath, "timestamp")
 
-	svr, err := master.CreateServer(ctx, kvRootPath, metaRootPath, tsoRootPath, []string{etcdAddr})
+	svr, err := master.CreateServer(ctx, kvRootPath, metaRootPath, []string{etcdAddr})
 	masterServer = svr
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
@@ -131,6 +132,7 @@ func TestProxy_CreateCollection(t *testing.T) {
 				if err != nil {
 					t.Error(err)
 				}
+				t.Logf("create collection response: %v", resp)
 				msg := "Create Collection " + strconv.Itoa(i) + " should succeed!"
 				assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_SUCCESS, msg)
 			}
@@ -155,7 +157,7 @@ func TestProxy_HasCollection(t *testing.T) {
 			}
 			msg := "Has Collection " + strconv.Itoa(i) + " should succeed!"
 			assert.Equal(t, bool.Status.ErrorCode, commonpb.ErrorCode_SUCCESS, msg)
-			t.Logf("Has Collection %v: %v", i, bool.Value)
+			t.Logf("Has Collection %v: %v", i, bool)
 		}(&wg)
 	}
 	wg.Wait()
@@ -259,15 +261,14 @@ func TestProxy_Insert(t *testing.T) {
 	wg.Wait()
 }
 
-/*
 func TestProxy_Search(t *testing.T) {
-	var wg sync.WaitGroup
-	//buf := make(chan int, testNum)
-	buf := make(chan int, 1)
+	var sendWg sync.WaitGroup
+	var queryWg sync.WaitGroup
+	queryDone := make(chan int)
 
-	wg.Add(1)
-	func(group *sync.WaitGroup) {
-		defer wg.Done()
+	sendWg.Add(1)
+	go func(group *sync.WaitGroup) {
+		defer group.Done()
 		queryResultChannels := []string{"QueryResult"}
 		bufSize := 1024
 		queryResultMsgStream := msgstream.NewPulsarMsgStream(ctx, int64(bufSize))
@@ -276,13 +277,16 @@ func TestProxy_Search(t *testing.T) {
 		assert.NotEqual(t, queryResultMsgStream, nil, "query result message stream should not be nil!")
 		queryResultMsgStream.CreatePulsarProducers(queryResultChannels)
 
+		i := 0
 		for {
 			select {
 			case <-ctx.Done():
 				t.Logf("query result message stream is closed ...")
 				queryResultMsgStream.Close()
-			case i := <- buf:
-				log.Printf("receive query request, reqID: %v", i)
+				return
+			case <-queryDone:
+				return
+			default:
 				for j := 0; j < 4; j++ {
 					searchResultMsg := &msgstream.SearchResultMsg{
 						BaseMsg: msgstream.BaseMsg{
@@ -290,7 +294,7 @@ func TestProxy_Search(t *testing.T) {
 						},
 						SearchResult: internalpb.SearchResult{
 							MsgType: internalpb.MsgType_kSearchResult,
-							ReqID: int64(i),
+							ReqID:   int64(i % testNum),
 						},
 					}
 					msgPack := &msgstream.MsgPack{
@@ -298,12 +302,12 @@ func TestProxy_Search(t *testing.T) {
 					}
 					var tsMsg msgstream.TsMsg = searchResultMsg
 					msgPack.Msgs[0] = &tsMsg
-					log.Printf("proxy_test, produce message...")
 					queryResultMsgStream.Produce(msgPack)
 				}
+				i++
 			}
 		}
-	}(&wg)
+	}(&sendWg)
 
 	for i := 0; i < testNum; i++ {
 		i := i
@@ -313,7 +317,7 @@ func TestProxy_Search(t *testing.T) {
 			CollectionName: collectionName,
 		}
 
-		wg.Add(1)
+		queryWg.Add(1)
 		go func(group *sync.WaitGroup) {
 			defer group.Done()
 			bool, err := proxyClient.HasCollection(ctx, &servicepb.CollectionName{CollectionName: collectionName})
@@ -323,26 +327,46 @@ func TestProxy_Search(t *testing.T) {
 			msg := "Has Collection " + strconv.Itoa(i) + " should succeed!"
 			assert.Equal(t, bool.Status.ErrorCode, commonpb.ErrorCode_SUCCESS, msg)
 
-			if bool.Value {
-				log.Printf("Search: %v", collectionName)
-				fn := func() error {
-					buf <- i
-					resp, err := proxyClient.Search(ctx, req)
-					t.Logf("response of search collection %v: %v", i, resp)
-					return err
+			if !bool.Value {
+				req := &schemapb.CollectionSchema{
+					Name:        collectionName,
+					Description: "no description",
+					AutoID:      true,
+					Fields:      make([]*schemapb.FieldSchema, 1),
 				}
-				err := Retry(10, time.Millisecond, fn)
+				fieldName := "Field" + strconv.FormatInt(int64(i), 10)
+				req.Fields[0] = &schemapb.FieldSchema{
+					Name:        fieldName,
+					Description: "no description",
+					DataType:    schemapb.DataType_INT32,
+				}
+				resp, err := proxyClient.CreateCollection(ctx, req)
 				if err != nil {
 					t.Error(err)
 				}
+				t.Logf("create collection response: %v", resp)
+				msg := "Create Collection " + strconv.Itoa(i) + " should succeed!"
+				assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_SUCCESS, msg)
 			}
-		}(&wg)
+			fn := func() error {
+				log.Printf("Search: %v", collectionName)
+				resp, err := proxyClient.Search(ctx, req)
+				t.Logf("response of search collection %v: %v", i, resp)
+				return err
+			}
+			err = fn()
+			if err != nil {
+				t.Error(err)
+			}
+		}(&queryWg)
 	}
 
-	wg.Wait()
+	t.Log("wait query to finish...")
+	queryWg.Wait()
+	t.Log("query finish ...")
+	queryDone <- 1
+	sendWg.Wait()
 }
-
-*/
 
 func TestProxy_DropCollection(t *testing.T) {
 	var wg sync.WaitGroup

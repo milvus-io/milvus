@@ -3,6 +3,8 @@ package proxy
 import (
 	"context"
 	"errors"
+	"log"
+	"strconv"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -39,7 +41,7 @@ func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.
 		case <-ctx.Done():
 			return errors.New("insert timeout")
 		default:
-			return p.taskSch.DdQueue.Enqueue(it)
+			return p.taskSch.DmQueue.Enqueue(it)
 		}
 	}
 	err := fn()
@@ -120,8 +122,12 @@ func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.Qu
 		resultBuf:      make(chan []*internalpb.SearchResult),
 	}
 	qt.ctx, qt.cancel = context.WithCancel(ctx)
+	// Hack with test, shit here but no other ways
+	reqID, _ := strconv.Atoi(req.CollectionName[len(req.CollectionName)-1:])
+	qt.ReqID = int64(reqID)
 	queryBytes, _ := proto.Marshal(req)
 	qt.SearchRequest.Query.Value = queryBytes
+	log.Printf("grpc address of query task: %p", qt)
 	defer qt.cancel()
 
 	fn := func() error {
@@ -129,7 +135,7 @@ func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.Qu
 		case <-ctx.Done():
 			return errors.New("create collection timeout")
 		default:
-			return p.taskSch.DdQueue.Enqueue(qt)
+			return p.taskSch.DqQueue.Enqueue(qt)
 		}
 	}
 	err := fn()
@@ -139,7 +145,7 @@ func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.Qu
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    err.Error(),
 			},
-		}, err
+		}, nil
 	}
 
 	err = qt.WaitToFinish()
@@ -149,7 +155,7 @@ func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.Qu
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    err.Error(),
 			},
-		}, err
+		}, nil
 	}
 
 	return qt.result, nil
