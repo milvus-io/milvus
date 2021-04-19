@@ -73,6 +73,9 @@ ConfigMgr::ConfigMgr() {
         {"timezone",
          CreateStringConfig("timezone", false, &config.timezone.value, "UTC+8", nullptr, nullptr)},
 
+        {"query_node_num", CreateIntegerConfig("query_node_num", false, 0, 1023, &config.query_node_num.value,
+                                            1, nullptr, nullptr)},
+
         /* network */
         {"network.address", CreateStringConfig("network.address", false, &config.network.address.value,
                                                     "0.0.0.0", nullptr, nullptr)},

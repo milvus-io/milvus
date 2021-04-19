@@ -2,6 +2,7 @@
 #include "pulsar/Result.h"
 #include "PartitionPolicy.h"
 #include "utils/CommonUtil.h"
+#include "config/ServerConfig.h"
 #include <omp.h>
 #include <numeric>
 #include <algorithm>
@@ -47,7 +48,7 @@ Status MsgClientV2::Init(const std::string &insert_delete,
 }
 
 int64_t GetQueryNodeNum() {
-    return 1;
+    return config.query_node_num();
 }
 
 Status
