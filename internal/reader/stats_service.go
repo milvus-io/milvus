@@ -59,6 +59,10 @@ func (sService *statsService) start() {
 	}
 }
 
+func (sService *statsService) close() {
+	(*sService.statsStream).Close()
+}
+
 func (sService *statsService) sendSegmentStatistic() {
 	statisticData := (*sService.replica).getSegmentStatistics()
 
