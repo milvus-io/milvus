@@ -91,7 +91,7 @@ class NsgIndex {
            float* dist,
            int64_t* ids,
            SearchParams& params,
-           faiss::ConcurrentBitsetPtr bitset = nullptr);
+           const faiss::BitsetView& bitset = nullptr);
 
     int64_t
     GetSize();

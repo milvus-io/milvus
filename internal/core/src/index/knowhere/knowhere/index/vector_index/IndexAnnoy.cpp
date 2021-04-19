@@ -48,11 +48,15 @@ IndexAnnoy::Serialize(const Config& config) {
     res_set.Append("annoy_metric_type", metric_type, metric_type_length);
     res_set.Append("annoy_dim", dim_data, sizeof(uint64_t));
     res_set.Append("annoy_index_data", index_data, index_length);
+    if (config.contains(INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
+        Disassemble(config[INDEX_FILE_SLICE_SIZE_IN_MEGABYTE].get<int64_t>() * 1024 * 1024, res_set);
+    }
     return res_set;
 }
 
 void
 IndexAnnoy::Load(const BinarySet& index_binary) {
+    Assemble(const_cast<BinarySet&>(index_binary));
     auto metric_type = index_binary.GetByName("annoy_metric_type");
     metric_type_.resize(static_cast<size_t>(metric_type->size));
     memcpy(metric_type_.data(), metric_type->data.get(), static_cast<size_t>(metric_type->size));
@@ -105,7 +109,7 @@ IndexAnnoy::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
+IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }

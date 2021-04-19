@@ -19,6 +19,7 @@
 #include	"NGT/Index.h"
 #include	"NGT/ArrayFile.h"
 #include	"NGT/Clustering.h"
+#include "NGT/defines.h"
 
 
 

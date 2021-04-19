@@ -79,6 +79,11 @@ class BinarySet {
         binary_map_.clear();
     }
 
+    bool
+    Contains(const std::string& key) const {
+        return binary_map_.find(key) != binary_map_.end();
+    }
+
  public:
     std::map<std::string, BinaryPtr> binary_map_;
 };

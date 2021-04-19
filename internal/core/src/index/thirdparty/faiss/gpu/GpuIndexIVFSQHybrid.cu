@@ -330,7 +330,7 @@ GpuIndexIVFSQHybrid::searchImpl_(int n,
                                         int k,
                                         float* distances,
                                         Index::idx_t* labels,
-                                        ConcurrentBitsetPtr bitset) const {
+                                        const BitsetView& bitset) const {
   // Device is already set in GpuIndex::search
   FAISS_ASSERT(index_);
   FAISS_ASSERT(n > 0);
@@ -349,7 +349,7 @@ GpuIndexIVFSQHybrid::searchImpl_(int n,
     index_->query(queries, bitsetDevice, nprobe, k, outDistances, outLabels);
   } else {
     auto bitsetDevice = toDevice<uint8_t, 1>(resources_, device_,
-            const_cast<uint8_t*>(bitset->data()), stream,{(int) bitset->size()});
+            const_cast<uint8_t*>(bitset.data()), stream,{(int) bitset.u8size()});
     index_->query(queries, bitsetDevice, nprobe, k, outDistances, outLabels);
   }
 }

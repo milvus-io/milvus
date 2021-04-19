@@ -30,10 +30,12 @@ class IndexRHNSW : public VecIndex, public FaissBaseIndex {
  public:
     IndexRHNSW() : FaissBaseIndex(nullptr) {
         index_type_ = IndexEnum::INVALID;
+        stats = std::make_shared<milvus::knowhere::RHNSWStatistics>(index_type_);
     }
 
     explicit IndexRHNSW(std::shared_ptr<faiss::Index> index) : FaissBaseIndex(std::move(index)) {
         index_type_ = IndexEnum::INVALID;
+        stats = std::make_shared<milvus::knowhere::RHNSWStatistics>(index_type_);
     }
 
     BinarySet
@@ -52,7 +54,7 @@ class IndexRHNSW : public VecIndex, public FaissBaseIndex {
     AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
-    Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) override;
+    Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) override;
 
     int64_t
     Count() override;
@@ -62,6 +64,12 @@ class IndexRHNSW : public VecIndex, public FaissBaseIndex {
 
     void
     UpdateIndexSize() override;
+
+    StatisticsPtr
+    GetStatistics() override;
+
+    void
+    ClearStatistics() override;
 };
 }  // namespace knowhere
 }  // namespace milvus

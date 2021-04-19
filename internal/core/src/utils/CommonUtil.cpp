@@ -12,10 +12,8 @@
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 
-#include <random>
-#include <limits>
-
 #include <dirent.h>
+#include <fiu/fiu-local.h>
 #include <pwd.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -53,6 +51,7 @@ CommonUtil::CreateDirectory(const std::string& path) {
     fs::path fs_path(path);
     fs::path parent_path = fs_path.parent_path();
     Status err_status = CreateDirectory(parent_path.string());
+    fiu_do_on("CommonUtil.CreateDirectory.create_parent_fail", err_status = Status(SERVER_INVALID_ARGUMENT, ""));
     if (!err_status.ok()) {
         return err_status;
     }
@@ -63,6 +62,7 @@ CommonUtil::CreateDirectory(const std::string& path) {
     }
 
     int makeOK = mkdir(path.c_str(), S_IRWXU | S_IRGRP | S_IROTH);
+    fiu_do_on("CommonUtil.CreateDirectory.create_dir_fail", makeOK = 1);
     if (makeOK != 0) {
         return Status(SERVER_UNEXPECTED_ERROR, "failed to create directory: " + path);
     }
@@ -84,7 +84,7 @@ RemoveDirectory(const std::string& path) {
             if (strcmp(dmsg->d_name, ".") != 0 && strcmp(dmsg->d_name, "..") != 0) {
                 snprintf(file_name, buf_size, folder_name.c_str(), dmsg->d_name);
                 std::string tmp = file_name;
-                if (tmp.find(".") == std::string::npos) {
+                if (tmp.find('.') == std::string::npos) {
                     RemoveDirectory(file_name);
                 }
                 remove(file_name);
@@ -141,6 +141,7 @@ CommonUtil::GetExePath() {
     const int64_t buf_len = 1024;
     char buf[buf_len];
     int64_t cnt = readlink("/proc/self/exe", buf, buf_len);
+    fiu_do_on("CommonUtil.GetExePath.readlink_fail", cnt = -1);
     if (cnt < 0 || cnt >= buf_len) {
         return "";
     }
@@ -148,6 +149,7 @@ CommonUtil::GetExePath() {
     buf[cnt] = '\0';
 
     std::string exe_path = buf;
+    fiu_do_on("CommonUtil.GetExePath.exe_path_error", exe_path = "/");
     if (exe_path.rfind('/') != exe_path.length() - 1) {
         std::string sub_str = exe_path.substr(0, exe_path.rfind('/'));
         return sub_str + "/";
@@ -177,6 +179,26 @@ CommonUtil::TimeStrToTime(const std::string& time_str,
 }
 
 void
+CommonUtil::GetCurrentTimeStr(std::string& time_str) {
+    auto t = std::time(nullptr);
+    struct tm ltm;
+    localtime_r(&t, &ltm);
+
+    time_str = "";
+    time_str += std::to_string(ltm.tm_year + 1900);
+    time_str += "-";
+    time_str += std::to_string(ltm.tm_mon + 1);
+    time_str += "-";
+    time_str += std::to_string(ltm.tm_mday);
+    time_str += "_";
+    time_str += std::to_string(ltm.tm_hour);
+    time_str += ":";
+    time_str += std::to_string(ltm.tm_min);
+    time_str += ":";
+    time_str += std::to_string(ltm.tm_sec);
+}
+
+void
 CommonUtil::ConvertTime(time_t time_integer, tm& time_struct) {
     localtime_r(&time_integer, &time_struct);
 }
@@ -186,15 +208,20 @@ CommonUtil::ConvertTime(tm time_struct, time_t& time_integer) {
     time_integer = mktime(&time_struct);
 }
 
-uint64_t
-CommonUtil::RandomUINT64() {
-    std::random_device rd;      // Get a random seed from the OS entropy device, or whatever
-    std::mt19937_64 eng(rd());  // Use the 64-bit Mersenne Twister 19937 generator
-                                // and seed it with entropy.
-    // Define the distribution, by default it goes from 0 to MAX(unsigned long long)
-    // or what have you.
-    std::uniform_int_distribution<uint64_t> distr;
-    return distr(eng);
+std::string
+CommonUtil::ConvertSize(int64_t size) {
+    const int64_t gb = 1024ll * 1024 * 1024;
+    const int64_t mb = 1024ll * 1024;
+    const int64_t kb = 1024ll;
+    if (size % gb == 0) {
+        return std::to_string(size / gb) + "GB";
+    } else if (size % mb == 0) {
+        return std::to_string(size / mb) + "MB";
+    } else if (size % kb == 0) {
+        return std::to_string(size / kb) + "KB";
+    } else {
+        return std::to_string(size);
+    }
 }
 
 #ifdef ENABLE_CPU_PROFILING

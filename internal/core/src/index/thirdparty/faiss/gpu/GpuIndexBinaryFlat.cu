@@ -146,7 +146,7 @@ GpuIndexBinaryFlat::search(faiss::IndexBinary::idx_t n,
                            faiss::IndexBinary::idx_t k,
                            int32_t* distances,
                            faiss::IndexBinary::idx_t* labels,
-                           ConcurrentBitsetPtr bitset) const {
+                           const BitsetView& bitset) const {
   if (n == 0) {
     return;
   }

@@ -118,7 +118,7 @@ class GpuIndexIVFPQ : public GpuIndexIVF {
                    int k,
                    float* distances,
                    Index::idx_t* labels,
-                   ConcurrentBitsetPtr bitset = nullptr) const override;
+                   const BitsetView& bitset = nullptr) const override;
 
  private:
   void verifySettings_() const;

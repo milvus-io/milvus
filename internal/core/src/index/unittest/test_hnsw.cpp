@@ -10,12 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
-
-#include <iostream>
-#include <random>
 #include "knowhere/common/Config.h"
 #include "knowhere/index/vector_index/IndexHNSW.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include <iostream>
+#include <random>
 #include "knowhere/common/Exception.h"
 #include "unittest/utils.h"
 
@@ -272,8 +271,7 @@ main() {
 
     printf("----------------search xq with delete------------\n");
     {  // search xq with delete
-        index.SetBlacklist(bitset);
-        auto res = index.Query(query_dataset, query_conf);
+        auto res = index.Query(query_dataset, query_conf, bitset);
         auto I = res->Get<int64_t*>(milvus::knowhere::meta::IDS);
 
         printf("I=\n");

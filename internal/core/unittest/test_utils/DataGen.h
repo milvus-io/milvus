@@ -209,7 +209,7 @@ CreateBinaryPlaceholderGroupFromBlob(int64_t num_queries, int64_t dim, const uin
     return raw_group;
 }
 
-inline Json
+inline json
 QueryResultToJson(const QueryResult& qr) {
     int64_t num_queries = qr.num_queries_;
     int64_t topk = qr.topK_;
@@ -223,7 +223,7 @@ QueryResultToJson(const QueryResult& qr) {
         }
         results.emplace_back(std::move(result));
     }
-    return Json{results};
+    return json{results};
 };
 
 }  // namespace milvus::segcore

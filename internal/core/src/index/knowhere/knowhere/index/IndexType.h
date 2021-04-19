@@ -38,6 +38,8 @@ enum class OldIndexType {
     RHNSW_FLAT,
     RHNSW_PQ,
     RHNSW_SQ,
+    NGTPANNG,
+    NGTONNG,
     FAISS_BIN_IDMAP = 100,
     FAISS_BIN_IVFLAT_CPU = 101,
 };

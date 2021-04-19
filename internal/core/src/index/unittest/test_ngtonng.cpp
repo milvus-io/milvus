@@ -10,12 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include <iostream>
 #include <sstream>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexNGTONNG.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 #include "unittest/utils.h"
 
@@ -35,8 +35,11 @@ class NGTONNGTest : public DataGen, public TestWithParam<std::string> {
             {milvus::knowhere::meta::TOPK, 10},
             {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
             {milvus::knowhere::IndexParams::edge_size, 20},
+            {milvus::knowhere::IndexParams::epsilon, 0.1},
+            {milvus::knowhere::IndexParams::max_search_edges, 50},
             {milvus::knowhere::IndexParams::outgoing_edge_size, 5},
             {milvus::knowhere::IndexParams::incoming_edge_size, 40},
+            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
         };
     }
 
@@ -138,6 +141,20 @@ TEST_P(NGTONNGTest, ngtonng_serialize) {
 
         std::shared_ptr<uint8_t[]> tre_data(load_data4);
         binaryset.Append("ngt_tre_data", tre_data, bin_tre_data->size);
+
+        index_->Load(binaryset);
+        ASSERT_EQ(index_->Count(), nb);
+        ASSERT_EQ(index_->Dim(), dim);
+        auto result = index_->Query(query_dataset, conf, nullptr);
+        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
+    }
+}
+
+TEST_P(NGTONNGTest, ngtonng_slice) {
+    {
+        // serialize index
+        index_->BuildAll(base_dataset, conf);
+        auto binaryset = index_->Serialize(milvus::knowhere::Config());
 
         index_->Load(binaryset);
         ASSERT_EQ(index_->Count(), nb);

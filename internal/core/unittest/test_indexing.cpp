@@ -267,7 +267,7 @@ TEST(Indexing, BinaryBruteForce) {
     qr.result_distances_ = distances;
 
     auto json = QueryResultToJson(qr);
-    auto ref = Json::parse(R"(
+    auto ref = json::parse(R"(
 [
   [
     [

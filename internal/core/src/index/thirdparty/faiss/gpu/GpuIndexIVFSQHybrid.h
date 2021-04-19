@@ -80,7 +80,7 @@ class GpuIndexIVFSQHybrid : public GpuIndexIVF {
                    int k,
                    float* distances,
                    Index::idx_t* labels,
-                   ConcurrentBitsetPtr bitset = nullptr) const override;
+                   const BitsetView& bitset = nullptr) const override;
 
   /// Called from train to handle SQ residual training
   void trainResiduals_(Index::idx_t n, const float* x);

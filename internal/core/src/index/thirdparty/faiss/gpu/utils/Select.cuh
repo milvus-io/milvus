@@ -124,8 +124,16 @@ struct BlockSelect {
 
   __device__ inline void addThreadQ(K k, V v) {
     if (Dir ? Comp::gt(k, warpKTop) : Comp::lt(k, warpKTop)) {
-        threadK[numVals] = k;
-        threadV[numVals ++] = v;
+      // Rotate right
+#pragma unroll
+      for (int i = NumThreadQ - 1; i > 0; --i) {
+        threadK[i] = threadK[i - 1];
+        threadV[i] = threadV[i - 1];
+      }
+
+      threadK[0] = k;
+      threadV[0] = v;
+      ++numVals;
     }
   }
 

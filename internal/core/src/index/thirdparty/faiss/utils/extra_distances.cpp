@@ -181,7 +181,7 @@ void knn_extra_metrics_template (
         const float * y,
         size_t nx, size_t ny,
         float_maxheap_array_t * res,
-        ConcurrentBitsetPtr bitset = nullptr)
+        const BitsetView& bitset = nullptr)
 {
     size_t k = res->k;
     size_t d = vd.d;
@@ -201,7 +201,7 @@ void knn_extra_metrics_template (
 
             maxheap_heapify (k, simi, idxi);
             for (j = 0; j < ny; j++) {
-                if (!bitset || !bitset->test(j)) {
+                if (!bitset || !bitset.test(j)) {
                     float disij = vd (x_i, y_j);
                     if (disij < simi[0]) {
                         maxheap_pop (k, simi, idxi);
@@ -302,7 +302,7 @@ void knn_extra_metrics (
         size_t d, size_t nx, size_t ny,
         MetricType mt, float metric_arg,
         float_maxheap_array_t * res,
-        ConcurrentBitsetPtr bitset)
+        const BitsetView& bitset)
 {
 
     switch(mt) {

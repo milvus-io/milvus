@@ -58,7 +58,7 @@ struct IndexLSH:Index {
         idx_t k,
         float* distances,
         idx_t* labels,
-        ConcurrentBitsetPtr bitset = nullptr) const override;
+        const BitsetView& bitset = nullptr) const override;
 
     void reset() override;
 

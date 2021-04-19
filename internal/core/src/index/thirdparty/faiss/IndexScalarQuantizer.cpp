@@ -66,7 +66,7 @@ void IndexScalarQuantizer::search(
         idx_t k,
         float* distances,
         idx_t* labels,
-        ConcurrentBitsetPtr bitset) const
+        const BitsetView& bitset) const
 {
     FAISS_THROW_IF_NOT (is_trained);
     FAISS_THROW_IF_NOT (metric_type == METRIC_L2 ||

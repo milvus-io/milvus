@@ -131,3 +131,32 @@ TEST_P(BinaryIDMAPTest, binaryidmap_serialize) {
         // PrintResult(result, nq, k);
     }
 }
+
+TEST_P(BinaryIDMAPTest, binaryidmap_slice) {
+    std::string MetricType = GetParam();
+    milvus::knowhere::Config conf{
+        {milvus::knowhere::meta::DIM, dim},
+        {milvus::knowhere::meta::TOPK, k},
+        {milvus::knowhere::Metric::TYPE, MetricType},
+        {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
+    };
+
+    {
+        // serialize index
+        index_->Train(base_dataset, conf);
+        index_->AddWithoutIds(base_dataset, milvus::knowhere::Config());
+        auto re_result = index_->Query(query_dataset, conf, nullptr);
+        AssertAnns(re_result, nq, k);
+        //        PrintResult(re_result, nq, k);
+        EXPECT_EQ(index_->Count(), nb);
+        EXPECT_EQ(index_->Dim(), dim);
+        auto binaryset = index_->Serialize(conf);
+
+        index_->Load(binaryset);
+        EXPECT_EQ(index_->Count(), nb);
+        EXPECT_EQ(index_->Dim(), dim);
+        auto result = index_->Query(query_dataset, conf, nullptr);
+        AssertAnns(result, nq, k);
+        // PrintResult(result, nq, k);
+    }
+}

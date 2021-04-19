@@ -13,8 +13,8 @@
 #include <iostream>
 #include <sstream>
 
-#include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexAnnoy.h"
 
 #include "unittest/utils.h"
@@ -36,6 +36,7 @@ class AnnoyTest : public DataGen, public TestWithParam<std::string> {
             {milvus::knowhere::IndexParams::n_trees, 4},
             {milvus::knowhere::IndexParams::search_k, 100},
             {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
         };
     }
 
@@ -204,6 +205,19 @@ TEST_P(AnnoyTest, annoy_serialize) {
     }
 }
 
+TEST_P(AnnoyTest, annoy_slice) {
+    {
+        // serialize index
+        index_->BuildAll(base_dataset, conf);
+        auto binaryset = index_->Serialize(milvus::knowhere::Config());
+        index_->Load(binaryset);
+        ASSERT_EQ(index_->Count(), nb);
+        ASSERT_EQ(index_->Dim(), dim);
+        auto result = index_->Query(query_dataset, conf, nullptr);
+        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
+    }
+}
+
 /*
  * faiss style test
  * keep it
@@ -294,8 +308,7 @@ main() {
 
     printf("----------------search xq with delete------------\n");
     {  // search xq with delete
-        index.SetBlacklist(bitset);
-        auto res = index.Query(query_dataset, query_conf);
+        auto res = index.Query(query_dataset, query_conf, bitset);
         auto I = res->Get<int64_t*>(milvus::knowhere::meta::IDS);
 
         printf("I=\n");

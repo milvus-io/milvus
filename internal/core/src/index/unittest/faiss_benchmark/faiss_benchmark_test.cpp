@@ -459,8 +459,6 @@ test_with_nprobes(const std::string& ann_test_name,
             int32_t t_k = K[j];
             for (size_t i = 0; i < NQ.size(); i++) {
                 int32_t t_nq = NQ[i];
-                faiss::indexIVF_stats.quantization_time = 0.0;
-                faiss::indexIVF_stats.search_time = 0.0;
 
                 double t_start = elapsed(), t_end;
                 for (int s = 0; s < search_loops; s++) {
@@ -479,9 +477,7 @@ test_with_nprobes(const std::string& ann_test_name,
                 // k = 100 for ground truth
                 int32_t hit = GetResultHitCount(gt, I, GK, t_k, t_nq, index_add_loops);
 
-                printf("nq = %4d, k = %4d, elapse = %.4fs (quant = %.4fs, search = %.4fs), R@ = %.4f\n", t_nq, t_k,
-                       (t_end - t_start) / search_loops, faiss::indexIVF_stats.quantization_time / 1000 / search_loops,
-                       faiss::indexIVF_stats.search_time / 1000 / search_loops,
+                printf("nq = %4d, k = %4d, elapse = %.4fs, R@ = %.4f\n", t_nq, t_k, (t_end - t_start) / search_loops,
                        (hit / float(t_nq * std::min(GK, t_k) / index_add_loops)));
             }
         }

@@ -10,7 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "utils/StringHelpFunctions.h"
+#include "utils/Log.h"
 
+#include <fiu/fiu-local.h>
 #include <algorithm>
 #include <regex>
 #include <string>
@@ -102,6 +104,7 @@ StringHelpFunctions::SplitStringByQuote(const std::string& str,
         last = index + 1;
         std::string postfix = process_str.substr(last);
         index = postfix.find_first_of(quote, 0);
+        fiu_do_on("StringHelpFunctions.SplitStringByQuote.invalid_index", index = std::string::npos);
 
         if (index == std::string::npos) {
             return Status(SERVER_UNEXPECTED_ERROR, "");
@@ -111,6 +114,8 @@ StringHelpFunctions::SplitStringByQuote(const std::string& str,
 
         last = index + 1;
         index = postfix.find_first_of(delimeter, last);
+        fiu_do_on("StringHelpFunctions.SplitStringByQuote.index_gt_last", last = 0);
+        fiu_do_on("StringHelpFunctions.SplitStringByQuote.invalid_index2", index = std::string::npos);
 
         if (index != std::string::npos) {
             if (index > last) {
@@ -120,6 +125,7 @@ StringHelpFunctions::SplitStringByQuote(const std::string& str,
             append_prefix += postfix.substr(last);
         }
         result.emplace_back(append_prefix);
+        fiu_do_on("StringHelpFunctions.SplitStringByQuote.last_is_end", last = postfix.length());
 
         if (last == postfix.length()) {
             return Status::OK();
@@ -145,9 +151,16 @@ StringHelpFunctions::IsRegexMatch(const std::string& target_str, const std::stri
     }
 
     // regex match
-    std::regex pattern(pattern_str);
-    std::smatch results;
-    return std::regex_match(target_str, results, pattern);
+    // for illegal regex expression, the std::regex will throw exception, regard as unmatch
+    try {
+        std::regex pattern(pattern_str);
+        std::smatch results;
+        return std::regex_match(target_str, results, pattern);
+    } catch (std::exception& e) {
+        LOG_SERVER_ERROR_ << "Regex exception: " << e.what();
+    }
+
+    return false;
 }
 
 Status

@@ -58,6 +58,7 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
         search_conf = milvus::knowhere::Config{
             {milvus::knowhere::meta::TOPK, k},
             {milvus::knowhere::IndexParams::search_length, 30},
+            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
         };
     }
 
@@ -196,4 +197,59 @@ TEST_F(NSGInterfaceTest, delete_test) {
     for (int i = 0; i < nq; i++) {
         ASSERT_NE(I_before[i * k], I_after[i * k]);
     }
+}
+
+TEST_F(NSGInterfaceTest, slice_test) {
+    assert(!xb.empty());
+    fiu_init(0);
+    // untrained index
+    {
+        ASSERT_ANY_THROW(index_->Serialize(search_conf));
+        ASSERT_ANY_THROW(index_->Query(query_dataset, search_conf, nullptr));
+        ASSERT_ANY_THROW(index_->Add(base_dataset, search_conf));
+        ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, search_conf));
+    }
+
+    train_conf[milvus::knowhere::meta::DEVICEID] = -1;
+    index_->BuildAll(base_dataset, train_conf);
+
+    // Serialize and Load before Query
+    milvus::knowhere::BinarySet bs = index_->Serialize(search_conf);
+
+    int64_t dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
+    int64_t rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
+    auto raw_data = base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
+    milvus::knowhere::BinaryPtr bptr = std::make_shared<milvus::knowhere::Binary>();
+    bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
+    bptr->size = dim * rows * sizeof(float);
+    bs.Append(RAW_DATA, bptr);
+
+    index_->Load(bs);
+
+    auto result = index_->Query(query_dataset, search_conf, nullptr);
+    AssertAnns(result, nq, k);
+
+    /* test NSG GPU train */
+    auto new_index_1 = std::make_shared<milvus::knowhere::NSG_NM>(DEVICE_GPU0);
+    train_conf[milvus::knowhere::meta::DEVICEID] = DEVICE_GPU0;
+    new_index_1->BuildAll(base_dataset, train_conf);
+
+    // Serialize and Load before Query
+    bs = new_index_1->Serialize(search_conf);
+
+    dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
+    rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
+    raw_data = base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
+    bptr = std::make_shared<milvus::knowhere::Binary>();
+    bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
+    bptr->size = dim * rows * sizeof(float);
+    bs.Append(RAW_DATA, bptr);
+
+    new_index_1->Load(bs);
+
+    auto new_result_1 = new_index_1->Query(query_dataset, search_conf, nullptr);
+    AssertAnns(new_result_1, nq, k);
+
+    ASSERT_EQ(index_->Count(), nb);
+    ASSERT_EQ(index_->Dim(), dim);
 }

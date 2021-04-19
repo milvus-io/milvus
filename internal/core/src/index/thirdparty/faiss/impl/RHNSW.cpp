@@ -33,6 +33,7 @@ RHNSW::RHNSW(int M) : M(M), rng(12345) {
   linkLists = nullptr;
   level_constant = 1 / log(1.0 * M);
   visited_list_pool = nullptr;
+  target_level = 1;
 }
 
 void RHNSW::init(int ntotal) {
@@ -143,6 +144,12 @@ void RHNSW::addPoint(DistanceComputer& ptdis, int pt_level, int pt_id) {
 
   std::unique_lock<std::mutex> lock_el(link_list_locks[pt_id]);
   std::unique_lock<std::mutex> temp_lock(global);
+  if (STATISTICS_LEVEL == 3) {
+    if (pt_level >= level_stats.size()) {
+      level_stats.resize(pt_level + 1, 0);
+    }
+    level_stats[pt_level] ++;
+  }
   int maxlevel_copy = max_level;
   if (pt_level <= maxlevel_copy)
     temp_lock.unlock();
@@ -246,7 +253,7 @@ RHNSW::search_base_layer(DistanceComputer& ptdis,
                          storage_idx_t nearest,
                          storage_idx_t ef,
                          float d_nearest,
-                         ConcurrentBitsetPtr bitset) const {
+                         const BitsetView& bitset) const {
   VisitedList *vl = visited_list_pool->getFreeVisitedList();
   vl_type *visited_array = vl->mass;
   vl_type visited_array_tag = vl->curV;
@@ -255,7 +262,7 @@ RHNSW::search_base_layer(DistanceComputer& ptdis,
   std::priority_queue<Node, std::vector<Node>, CompareByFirst> candidate_set;
 
   float lb;
-  if (bitset == nullptr || !bitset->test((faiss::ConcurrentBitset::id_type_t)(nearest))) {
+  if (bitset.empty() || !bitset.test((faiss::ConcurrentBitset::id_type_t)(nearest))) {
     lb = d_nearest;
     top_candidates.emplace(d_nearest, nearest);
     candidate_set.emplace(-d_nearest, nearest);
@@ -280,7 +287,7 @@ RHNSW::search_base_layer(DistanceComputer& ptdis,
         float dcand = ptdis(candidate_id);
         if (top_candidates.size() < ef || lb > dcand) {
           candidate_set.emplace(-dcand, candidate_id);
-          if (bitset == nullptr || !bitset->test((faiss::ConcurrentBitset::id_type_t)(candidate_id)))
+          if (bitset.empty() || !bitset.test((faiss::ConcurrentBitset::id_type_t)(candidate_id)))
             top_candidates.emplace(dcand, candidate_id);
           if (top_candidates.size() > ef)
             top_candidates.pop();
@@ -386,8 +393,8 @@ void RHNSW::prune_neighbors(DistanceComputer& ptdis,
 }
 
 void RHNSW::searchKnn(DistanceComputer& qdis, int k,
-            idx_t *I, float *D,
-            ConcurrentBitsetPtr bitset) const {
+            idx_t *I, float *D, RHNSWStatInfo &rsi,
+            const BitsetView& bitset) const {
   if (levels.size() == 0)
     return;
   int ep = entry_point;
@@ -403,6 +410,9 @@ void RHNSW::searchKnn(DistanceComputer& qdis, int k,
         int cand = ep_link[j];
         if (cand < 0 || cand > levels.size())
           throw std::runtime_error("cand error");
+        if (STATISTICS_LEVEL == 3 && i == target_level) {
+          rsi.access_points.push_back(cand);
+        }
         float d = qdis(cand);
         if (d < dist) {
           dist = d;

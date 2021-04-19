@@ -37,18 +37,13 @@ void
 IVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR_DATA_DIM(dataset_ptr)
 
-    // std::stringstream index_type;
-    // index_type << "IVF" << config[IndexParams::nlist] << ","
-    //           << "SQ" << config[IndexParams::nbits];
-    // index_ = std::shared_ptr<faiss::Index>(
-    //    faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(config[Metric::TYPE].get<std::string>())));
-
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
-    index_ = std::shared_ptr<faiss::Index>(new faiss::IndexIVFScalarQuantizer(
-        coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(), faiss::QuantizerType::QT_8bit, metric_type));
-
-    index_->train(rows, reinterpret_cast<const float*>(p_data));
+    auto index = std::make_shared<faiss::IndexIVFScalarQuantizer>(
+        coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(), faiss::QuantizerType::QT_8bit, metric_type);
+    index->own_fields = true;
+    index->train(rows, reinterpret_cast<const float*>(p_data));
+    index_ = index;
 }
 
 VecIndexPtr

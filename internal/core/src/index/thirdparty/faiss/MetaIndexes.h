@@ -40,13 +40,13 @@ struct IndexIDMapTemplate : IndexT {
     void search(
         idx_t n, const component_t* x, idx_t k,
         distance_t* distances, idx_t* labels,
-        ConcurrentBitsetPtr bitset = nullptr) const override;
+        const BitsetView& bitset = nullptr) const override;
 
 #if 0
-    void get_vector_by_id(idx_t n, const idx_t *xid, component_t *x, ConcurrentBitsetPtr bitset = nullptr) override;
+    void get_vector_by_id(idx_t n, const idx_t *xid, component_t *x, const BitsetView& bitset = nullptr) override;
 
     void search_by_id (idx_t n, const idx_t *xid, idx_t k, distance_t *distances, idx_t *labels,
-                       ConcurrentBitsetPtr bitset = nullptr) override;
+                       const BitsetView& bitset = nullptr) override;
 #endif
 
     void train(idx_t n, const component_t* x) override;
@@ -58,7 +58,7 @@ struct IndexIDMapTemplate : IndexT {
 
     void range_search (idx_t n, const component_t *x, distance_t radius,
                        RangeSearchResult *result,
-                       ConcurrentBitsetPtr bitset = nullptr) const override;
+                       const BitsetView& bitset = nullptr) const override;
 
     ~IndexIDMapTemplate () override;
     IndexIDMapTemplate () {own_fields=false; index=nullptr; }
@@ -119,7 +119,7 @@ struct IndexSplitVectors: Index {
         idx_t k,
         float* distances,
         idx_t* labels,
-        ConcurrentBitsetPtr bitset = nullptr) const override;
+        const BitsetView& bitset = nullptr) const override;
 
     void train(idx_t n, const float* x) override;
 

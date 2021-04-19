@@ -9,49 +9,71 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <fiu/fiu-local.h>
 #include <libgen.h>
 #include <cctype>
 #include <string>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include <boost/filesystem.hpp>
 
-#include "config/ServerConfig.h"
 #include "log/LogMgr.h"
 #include "utils/Status.h"
+#include "value/config/ServerConfig.h"
 
 namespace milvus {
 
-namespace {
-static int global_idx = 0;
-static int debug_idx = 0;
-static int warning_idx = 0;
-static int trace_idx = 0;
-static int error_idx = 0;
-static int fatal_idx = 0;
-static int64_t logs_delete_exceeds = 1;
-static bool enable_log_delete = false;
+int LogMgr::trace_idx = 0;
+int LogMgr::global_idx = 0;
+int LogMgr::debug_idx = 0;
+int LogMgr::info_idx = 0;
+int LogMgr::warning_idx = 0;
+int LogMgr::error_idx = 0;
+int LogMgr::fatal_idx = 0;
+int64_t LogMgr::logs_delete_exceeds = 1;
+bool LogMgr::enable_log_delete = false;
 
-/* module constant */
-const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN = 536870912;  /* 512 MB */
-const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX = 4294967296; /* 4 GB */
-const int64_t CONFIG_LOGS_LOG_ROTATE_NUM_MIN = 0;
-const int64_t CONFIG_LOGS_LOG_ROTATE_NUM_MAX = 1024;
-}  // namespace
+Status
+LogMgr::InitLog(bool trace_enable,
+                const std::string& level,
+                const std::string& logs_path,
+                const std::string& filename,
+                int64_t max_log_file_size,
+                int64_t log_rotate_num,
+                bool log_to_stdout,
+                bool log_to_file) {
+    try {
+        auto enables = parse_level(level);
+        enables["trace"] = trace_enable;
+        LogMgr log_mgr(logs_path);
+        log_mgr.Default()
+            .Filename(filename)
+            .Level(enables)
+            .To(log_to_stdout, log_to_file)
+            .Rotate(max_log_file_size, log_rotate_num)
+            .Setup();
+    } catch (std::exception& ex) {
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
+    }
+
+    return Status::OK();
+}
 
 // TODO(yzb) : change the easylogging library to get the log level from parameter rather than filename
 void
-RolloutHandler(const char* filename, std::size_t size, el::Level level) {
+LogMgr::RolloutHandler(const char* filename, std::size_t size, el::Level level) {
     char* dirc = strdup(filename);
     char* basec = strdup(filename);
     char* dir = dirname(dirc);
     char* base = basename(basec);
 
     std::string s(base);
-    std::string list[] = {"\\", " ", "\'", "\"", "*", "\?", "{", "}", ";", "<",
-                          ">",  "|", "^",  "&",  "$", "#",  "!", "`", "~"};
+    std::vector<std::string> list = {"\\", " ", "\'", "\"", "*", "\?", "{", "}", ";", "<",
+                                     ">",  "|", "^",  "&",  "$", "#",  "!", "`", "~"};
     std::string::size_type position;
-    for (auto substr : list) {
+    for (auto& substr : list) {
         position = 0;
         while ((position = s.find_first_of(substr, position)) != std::string::npos) {
             s.insert(position, "\\");
@@ -59,62 +81,37 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level) {
         }
     }
     std::string m(std::string(dir) + "/" + s);
-    s = m;
     try {
         switch (level) {
+            case el::Level::Trace: {
+                rename_and_delete(m, ++trace_idx);
+                break;
+            }
+            case el::Level::Global: {
+                rename_and_delete(m, ++global_idx);
+                break;
+            }
             case el::Level::Debug: {
-                s.append("." + std::to_string(++debug_idx));
-                rename(m.c_str(), s.c_str());
-                if (enable_log_delete && debug_idx - logs_delete_exceeds > 0) {
-                    std::string to_delete = m + "." + std::to_string(debug_idx - logs_delete_exceeds);
-                    // std::cout << "remote " << to_delete << std::endl;
-                    boost::filesystem::remove(to_delete);
-                }
+                rename_and_delete(m, ++debug_idx);
+                break;
+            }
+            case el::Level::Info: {
+                rename_and_delete(m, ++info_idx);
                 break;
             }
             case el::Level::Warning: {
-                s.append("." + std::to_string(++warning_idx));
-                rename(m.c_str(), s.c_str());
-                if (enable_log_delete && warning_idx - logs_delete_exceeds > 0) {
-                    std::string to_delete = m + "." + std::to_string(warning_idx - logs_delete_exceeds);
-                    boost::filesystem::remove(to_delete);
-                }
-                break;
-            }
-            case el::Level::Trace: {
-                s.append("." + std::to_string(++trace_idx));
-                rename(m.c_str(), s.c_str());
-                if (enable_log_delete && trace_idx - logs_delete_exceeds > 0) {
-                    std::string to_delete = m + "." + std::to_string(trace_idx - logs_delete_exceeds);
-                    boost::filesystem::remove(to_delete);
-                }
+                rename_and_delete(m, ++warning_idx);
                 break;
             }
             case el::Level::Error: {
-                s.append("." + std::to_string(++error_idx));
-                rename(m.c_str(), s.c_str());
-                if (enable_log_delete && error_idx - logs_delete_exceeds > 0) {
-                    std::string to_delete = m + "." + std::to_string(error_idx - logs_delete_exceeds);
-                    boost::filesystem::remove(to_delete);
-                }
+                rename_and_delete(m, ++error_idx);
                 break;
             }
             case el::Level::Fatal: {
-                s.append("." + std::to_string(++fatal_idx));
-                rename(m.c_str(), s.c_str());
-                if (enable_log_delete && fatal_idx - logs_delete_exceeds > 0) {
-                    std::string to_delete = m + "." + std::to_string(fatal_idx - logs_delete_exceeds);
-                    boost::filesystem::remove(to_delete);
-                }
+                rename_and_delete(m, ++fatal_idx);
                 break;
             }
             default: {
-                s.append("." + std::to_string(++global_idx));
-                rename(m.c_str(), s.c_str());
-                if (enable_log_delete && global_idx - logs_delete_exceeds > 0) {
-                    std::string to_delete = m + "." + std::to_string(global_idx - logs_delete_exceeds);
-                    boost::filesystem::remove(to_delete);
-                }
                 break;
             }
         }
@@ -123,126 +120,143 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level) {
     }
 }
 
-Status
-LogMgr::InitLog(bool trace_enable,
-                const std::string& level,
-                const std::string& logs_path,
-                int64_t max_log_file_size,
-                int64_t delete_exceeds) {
+LogMgr::LogMgr(std::string log_path) : logs_path_(std::move(log_path)) {
+}
+
+LogMgr&
+LogMgr::Default() {
+    el_config_.setToDefault();
+    el_config_.setGlobally(el::ConfigurationType::Format, "[%datetime][%level]%msg");
+    el_config_.setGlobally(el::ConfigurationType::SubsecondPrecision, "3");
+    el_config_.setGlobally(el::ConfigurationType::PerformanceTracking, "false");
+
+    return *this;
+}
+
+LogMgr&
+LogMgr::Filename(const std::string& filename) {
+    std::string logs_reg_path = logs_path_.rfind('/') == logs_path_.length() - 1 ? logs_path_ : logs_path_ + "/";
+
+    std::string log_file = logs_reg_path + filename;
+
+    /* Set set log file at Global level to make all level log output to the same log file*/
+    el_config_.set(el::Level::Global, el::ConfigurationType::Filename, log_file.c_str());
+
+    return *this;
+}
+
+LogMgr&
+LogMgr::Level(std::unordered_map<std::string, bool>& enables) {
+    fiu_do_on("LogMgr.Level.trace_enable_to_false", enables["trace"] = false);
+    enable(el_config_, el::Level::Trace, enables["trace"]);
+
+    fiu_do_on("LogMgr.Level.info_enable_to_false", enables["info"] = false);
+    enable(el_config_, el::Level::Info, enables["info"]);
+
+    fiu_do_on("LogMgr.Level.debug_enable_to_false", enables["debug"] = false);
+    enable(el_config_, el::Level::Debug, enables["debug"]);
+
+    fiu_do_on("LogMgr.Level.warning_enable_to_false", enables["warning"] = false);
+    enable(el_config_, el::Level::Warning, enables["warning"]);
+
+    fiu_do_on("LogMgr.Level.error_enable_to_false", enables["error"] = false);
+    enable(el_config_, el::Level::Error, enables["error"]);
+
+    fiu_do_on("LogMgr.Level.fatal_enable_to_false", enables["fatal"] = false);
+    enable(el_config_, el::Level::Fatal, enables["fatal"]);
+
+    return *this;
+}
+
+LogMgr&
+LogMgr::To(bool log_to_stdout, bool log_to_file) {
+    el_config_.setGlobally(el::ConfigurationType::ToStandardOutput, (log_to_stdout ? "true" : "false"));
+    el_config_.setGlobally(el::ConfigurationType::ToFile, (log_to_file ? "true" : "false"));
+
+    return *this;
+}
+
+LogMgr&
+LogMgr::Rotate(int64_t max_log_file_size, int64_t log_rotate_num) {
+    fiu_do_on("LogMgr.Rotate.set_max_log_size_small_than_min", max_log_file_size = MAX_LOG_FILE_SIZE_MIN - 1);
+    if (max_log_file_size < MAX_LOG_FILE_SIZE_MIN || max_log_file_size > MAX_LOG_FILE_SIZE_MAX) {
+        std::string msg = "max_log_file_size must in range[" + std::to_string(MAX_LOG_FILE_SIZE_MIN) + ", " +
+                          std::to_string(MAX_LOG_FILE_SIZE_MAX) + "], now is " + std::to_string(max_log_file_size);
+        throw std::runtime_error(msg);
+    }
+
+    el_config_.setGlobally(el::ConfigurationType::MaxLogFileSize, std::to_string(max_log_file_size));
+    el::Loggers::addFlag(el::LoggingFlag::StrictLogFileSizeCheck);
+    el::Helpers::installPreRollOutCallback(LogMgr::RolloutHandler);
+    el::Loggers::addFlag(el::LoggingFlag::DisableApplicationAbortOnFatalLog);
+
+    // set delete_exceeds = 0 means disable throw away log file even they reach certain limit.
+    if (log_rotate_num != 0) {
+        fiu_do_on("LogMgr.Rotate.delete_exceeds_small_than_min", log_rotate_num = LOG_ROTATE_NUM_MIN - 1);
+        if (log_rotate_num < LOG_ROTATE_NUM_MIN || log_rotate_num > LOG_ROTATE_NUM_MAX) {
+            std::string msg = "log_rotate_num must in range[" + std::to_string(LOG_ROTATE_NUM_MIN) + ", " +
+                              std::to_string(LOG_ROTATE_NUM_MAX) + "], now is " + std::to_string(log_rotate_num);
+            throw std::runtime_error(msg);
+        }
+
+        /* global variable */
+        enable_log_delete = true;
+        logs_delete_exceeds = log_rotate_num;
+    }
+
+    return *this;
+}
+
+void
+LogMgr::Setup() {
+    el::Loggers::reconfigureLogger("default", el_config_);
+}
+
+void
+LogMgr::rename_and_delete(const std::string& filename, int64_t idx) {
+    std::string target_filename = filename + "." + std::to_string(idx);
+    rename(filename.c_str(), target_filename.c_str());
+    if (enable_log_delete && idx - logs_delete_exceeds > 0) {
+        std::string to_delete = filename + "." + std::to_string(trace_idx - logs_delete_exceeds);
+        boost::filesystem::remove(to_delete);
+    }
+}
+
+std::unordered_map<std::string, bool>
+LogMgr::parse_level(const std::string& level) {
+    std::unordered_map<std::string, bool> enables{
+        {"debug", false}, {"info", false}, {"warning", false}, {"error", false}, {"fatal", false},
+    };
+
     std::unordered_map<std::string, int64_t> level_to_int{
         {"debug", 5}, {"info", 4}, {"warning", 3}, {"error", 2}, {"fatal", 1},
     };
 
-    bool debug_enable = false;
-    bool info_enable = false;
-    bool warning_enable = false;
-    bool error_enable = false;
-    bool fatal_enable = false;
-
     switch (level_to_int[level]) {
         case 5:
-            debug_enable = true;
+            enables["debug"] = true;
         case 4:
-            info_enable = true;
+            enables["info"] = true;
         case 3:
-            warning_enable = true;
+            enables["warning"] = true;
         case 2:
-            error_enable = true;
+            enables["error"] = true;
         case 1:
-            fatal_enable = true;
+            enables["fatal"] = true;
             break;
-        default:
-            return Status(SERVER_UNEXPECTED_ERROR, "invalid log level");
-    }
-
-    el::Configurations defaultConf;
-    defaultConf.setToDefault();
-    defaultConf.setGlobally(el::ConfigurationType::Format, "[%datetime][%level]%msg");
-    defaultConf.setGlobally(el::ConfigurationType::ToFile, "true");
-    defaultConf.setGlobally(el::ConfigurationType::ToStandardOutput, "false");
-    defaultConf.setGlobally(el::ConfigurationType::SubsecondPrecision, "3");
-    defaultConf.setGlobally(el::ConfigurationType::PerformanceTracking, "false");
-
-    std::string logs_reg_path = logs_path.rfind('/') == logs_path.length() - 1 ? logs_path : logs_path + "/";
-    std::string global_log_path = logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-global.log";
-    defaultConf.set(el::Level::Global, el::ConfigurationType::Filename, global_log_path.c_str());
-    defaultConf.set(el::Level::Global, el::ConfigurationType::Enabled, "true");
-
-    std::string info_log_path = logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-info.log";
-    defaultConf.set(el::Level::Info, el::ConfigurationType::Filename, info_log_path.c_str());
-    if (info_enable) {
-        defaultConf.set(el::Level::Info, el::ConfigurationType::Enabled, "true");
-    } else {
-        defaultConf.set(el::Level::Info, el::ConfigurationType::Enabled, "false");
-    }
-
-    std::string debug_log_path = logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-debug.log";
-    defaultConf.set(el::Level::Debug, el::ConfigurationType::Filename, debug_log_path.c_str());
-    if (debug_enable) {
-        defaultConf.set(el::Level::Debug, el::ConfigurationType::Enabled, "true");
-    } else {
-        defaultConf.set(el::Level::Debug, el::ConfigurationType::Enabled, "false");
-    }
-
-    std::string warning_log_path = logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-warning.log";
-    defaultConf.set(el::Level::Warning, el::ConfigurationType::Filename, warning_log_path.c_str());
-    if (warning_enable) {
-        defaultConf.set(el::Level::Warning, el::ConfigurationType::Enabled, "true");
-    } else {
-        defaultConf.set(el::Level::Warning, el::ConfigurationType::Enabled, "false");
-    }
-
-    std::string trace_log_path = logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-trace.log";
-    defaultConf.set(el::Level::Trace, el::ConfigurationType::Filename, trace_log_path.c_str());
-    if (trace_enable) {
-        defaultConf.set(el::Level::Trace, el::ConfigurationType::Enabled, "true");
-    } else {
-        defaultConf.set(el::Level::Trace, el::ConfigurationType::Enabled, "false");
-    }
-
-    std::string error_log_path = logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-error.log";
-    defaultConf.set(el::Level::Error, el::ConfigurationType::Filename, error_log_path.c_str());
-    if (error_enable) {
-        defaultConf.set(el::Level::Error, el::ConfigurationType::Enabled, "true");
-    } else {
-        defaultConf.set(el::Level::Error, el::ConfigurationType::Enabled, "false");
-    }
-
-    std::string fatal_log_path = logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-fatal.log";
-    defaultConf.set(el::Level::Fatal, el::ConfigurationType::Filename, fatal_log_path.c_str());
-    if (fatal_enable) {
-        defaultConf.set(el::Level::Fatal, el::ConfigurationType::Enabled, "true");
-    } else {
-        defaultConf.set(el::Level::Fatal, el::ConfigurationType::Enabled, "false");
-    }
-
-    if (max_log_file_size < CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN ||
-        max_log_file_size > CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) {
-        return Status(SERVER_UNEXPECTED_ERROR, "max_log_file_size must in range[" +
-                                                   std::to_string(CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN) + ", " +
-                                                   std::to_string(CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) + "], now is " +
-                                                   std::to_string(max_log_file_size));
-    }
-    defaultConf.setGlobally(el::ConfigurationType::MaxLogFileSize, std::to_string(max_log_file_size));
-    el::Loggers::addFlag(el::LoggingFlag::StrictLogFileSizeCheck);
-    el::Helpers::installPreRollOutCallback(RolloutHandler);
-    el::Loggers::addFlag(el::LoggingFlag::DisableApplicationAbortOnFatalLog);
-
-    // set delete_exceeds = 0 means disable throw away log file even they reach certain limit.
-    if (delete_exceeds != 0) {
-        if (delete_exceeds < CONFIG_LOGS_LOG_ROTATE_NUM_MIN || delete_exceeds > CONFIG_LOGS_LOG_ROTATE_NUM_MAX) {
-            return Status(SERVER_UNEXPECTED_ERROR, "delete_exceeds must in range[" +
-                                                       std::to_string(CONFIG_LOGS_LOG_ROTATE_NUM_MIN) + ", " +
-                                                       std::to_string(CONFIG_LOGS_LOG_ROTATE_NUM_MAX) + "], now is " +
-                                                       std::to_string(delete_exceeds));
+        default: {
+            std::string msg = "Cannot parse level " + level +
+                              ": invalid log level, must be one of debug, info, warning, error, fatal.";
+            throw std::runtime_error(msg);
         }
-        enable_log_delete = true;
-        logs_delete_exceeds = delete_exceeds;
     }
+    return enables;
+}
 
-    el::Loggers::reconfigureLogger("default", defaultConf);
-
-    return Status::OK();
+void
+LogMgr::enable(el::Configurations& default_conf, el::Level level, bool enable) {
+    std::string enable_str = enable ? "true" : "false";
+    default_conf.set(level, el::ConfigurationType::Enabled, enable_str);
 }
 
 }  // namespace milvus

@@ -100,7 +100,7 @@ TEST(STRUCTUREDINDEXSORT_TEST, test_serialize_and_load) {
     binaryset.Append("index_length", length_data, bin_length->size);
 
     structuredIndexSort.Load(binaryset);
-    EXPECT_EQ(n, (int)structuredIndexSort.Size());
+    EXPECT_EQ(n * sizeof(milvus::knowhere::IndexStructure<int>), (int)structuredIndexSort.Size());
     EXPECT_EQ(true, structuredIndexSort.IsBuilt());
     std::sort(p, p + n);
     const std::vector<milvus::knowhere::IndexStructure<int>> const_index_data = structuredIndexSort.GetData();

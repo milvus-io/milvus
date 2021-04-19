@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <faiss/utils/BitsetView.h>
 #include <faiss/utils/ConcurrentBitset.h>
 #include <memory>
 #include <utility>
@@ -19,8 +20,10 @@
 #include "knowhere/common/Dataset.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Typedef.h"
+#include "knowhere/common/Utils.h"
 #include "knowhere/index/Index.h"
 #include "knowhere/index/IndexType.h"
+#include "knowhere/index/vector_index/Statistics.h"
 
 namespace milvus {
 namespace knowhere {
@@ -46,7 +49,7 @@ class VecIndex : public Index {
     AddWithoutIds(const DatasetPtr& dataset, const Config& config) = 0;
 
     virtual DatasetPtr
-    Query(const DatasetPtr& dataset, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) = 0;
+    Query(const DatasetPtr& dataset, const Config& config, const faiss::BitsetView& bitset) = 0;
 
 #if 0
     virtual DatasetPtr
@@ -67,6 +70,15 @@ class VecIndex : public Index {
     virtual int64_t
     Count() = 0;
 
+    virtual StatisticsPtr
+    GetStatistics() {
+        return stats;
+    }
+
+    virtual void
+    ClearStatistics() {
+    }
+
     virtual IndexType
     index_type() const {
         return index_type_;
@@ -84,39 +96,19 @@ class VecIndex : public Index {
     }
 #endif
 
-    faiss::ConcurrentBitsetPtr
-    GetBlacklist() {
-        return bitset_;
-    }
-
-    void
-    SetBlacklist(faiss::ConcurrentBitsetPtr bitset_ptr) {
-        bitset_ = std::move(bitset_ptr);
-    }
-
-    const std::vector<IDType>&
+    std::shared_ptr<std::vector<IDType>>
     GetUids() const {
         return uids_;
     }
 
     void
-    SetUids(std::vector<IDType>& uids) {
-        uids_.clear();
-        uids_.swap(uids);
-    }
-
-    size_t
-    BlacklistSize() {
-        if (bitset_) {
-            return bitset_->u8size() * sizeof(uint8_t);
-        } else {
-            return 0;
-        }
+    SetUids(std::shared_ptr<std::vector<IDType>> uids) {
+        uids_ = uids;
     }
 
     size_t
     UidsSize() {
-        return uids_.size() * sizeof(IDType);
+        return uids_ ? uids_->size() * sizeof(IDType) : 0;
     }
 
     virtual int64_t
@@ -138,17 +130,15 @@ class VecIndex : public Index {
 
     int64_t
     Size() override {
-        return BlacklistSize() + UidsSize() + IndexSize();
+        return UidsSize() + IndexSize();
     }
 
  protected:
     IndexType index_type_ = "";
     IndexMode index_mode_ = IndexMode::MODE_CPU;
-    std::vector<IDType> uids_;
+    std::shared_ptr<std::vector<IDType>> uids_ = nullptr;
     int64_t index_size_ = -1;
-
- private:
-    faiss::ConcurrentBitsetPtr bitset_ = nullptr;
+    StatisticsPtr stats = nullptr;
 };
 
 using VecIndexPtr = std::shared_ptr<VecIndex>;

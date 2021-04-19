@@ -217,7 +217,7 @@ TEST(Query, ExecWithPredicate) {
     int topk = 5;
 
     Json json = QueryResultToJson(qr);
-    auto ref = Json::parse(R"(
+    auto ref = json::parse(R"(
 [
   [
     [
@@ -353,7 +353,7 @@ TEST(Query, ExecWithoutPredicate) {
     std::vector<std::vector<std::string>> results;
     int topk = 5;
     auto json = QueryResultToJson(qr);
-    auto ref = Json::parse(R"(
+    auto ref = json::parse(R"(
 [
   [
     [

@@ -49,7 +49,7 @@ struct QueryColumn {
 };
 
 struct TermQuery {
-    milvus::Json json_obj;
+    milvus::json json_obj;
     //    std::string field_name;
     //    std::vector<uint8_t> field_value;
     //    float boost;
@@ -62,7 +62,7 @@ struct CompareExpr {
 };
 
 struct RangeQuery {
-    milvus::Json json_obj;
+    milvus::json json_obj;
     //    std::string field_name;
     //    std::vector<CompareExpr> compare_expr;
     //    float boost;
@@ -77,7 +77,7 @@ struct VectorRecord {
 
 struct VectorQuery {
     std::string field_name;
-    milvus::Json extra_params = {};
+    milvus::json extra_params = {};
     int64_t topk;
     int64_t nq;
     std::string metric_type = "";

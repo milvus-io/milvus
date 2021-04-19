@@ -43,11 +43,16 @@ IDMAP::Serialize(const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    return SerializeImpl(index_type_);
+    auto ret = SerializeImpl(index_type_);
+    if (config.contains(INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
+        Disassemble(config[INDEX_FILE_SLICE_SIZE_IN_MEGABYTE].get<int64_t>() * 1024 * 1024, ret);
+    }
+    return ret;
 }
 
 void
 IDMAP::Load(const BinarySet& binary_set) {
+    Assemble(const_cast<BinarySet&>(binary_set));
     std::lock_guard<std::mutex> lk(mutex_);
     LoadImpl(binary_set, index_type_);
 }
@@ -95,7 +100,7 @@ IDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
+IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -229,7 +234,7 @@ IDMAP::QueryImpl(int64_t n,
                  float* distances,
                  int64_t* labels,
                  const Config& config,
-                 const faiss::ConcurrentBitsetPtr& bitset) {
+                 const faiss::BitsetView& bitset) {
     // assign the metric type
     auto flat_index = dynamic_cast<faiss::IndexIDMap*>(index_.get())->index;
     flat_index->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());

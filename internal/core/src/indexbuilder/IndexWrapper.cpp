@@ -30,8 +30,8 @@ IndexWrapper::IndexWrapper(const char* type_params_str, const char* index_params
 
 void
 IndexWrapper::parse() {
-    type_config_ = milvus::Json::parse(type_params_);
-    index_config_ = milvus::Json::parse(index_params_);
+    type_config_ = milvus::json::parse(type_params_);
+    index_config_ = milvus::json::parse(index_params_);
 
     // TODO: parse from type_params & index_params
     auto dim = 128;

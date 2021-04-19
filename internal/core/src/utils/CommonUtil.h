@@ -43,12 +43,15 @@ class CommonUtil {
                   const std::string& format = "%d-%d-%d %d:%d:%d");
 
     static void
+    GetCurrentTimeStr(std::string& time_str);
+
+    static void
     ConvertTime(time_t time_integer, tm& time_struct);
     static void
     ConvertTime(tm time_struct, time_t& time_integer);
 
-    static uint64_t
-    RandomUINT64();
+    static std::string
+    ConvertSize(int64_t size);
 
 #ifdef ENABLE_CPU_PROFILING
     static std::string

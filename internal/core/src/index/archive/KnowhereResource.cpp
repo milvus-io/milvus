@@ -16,12 +16,19 @@
 #include <faiss/Clustering.h>
 #include <faiss/utils/distances.h>
 
-#include "config/ServerConfig.h"
+#include "NGT/lib/NGT/defines.h"
 #include "faiss/FaissHook.h"
+#include "faiss/common.h"
+#include "faiss/utils/utils.h"
+#include "knowhere/common/Log.h"
+#include "knowhere/index/IndexType.h"
+#include "knowhere/index/vector_index/IndexHNSW.h"
+#include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "scheduler/Utils.h"
 #include "utils/ConfigUtils.h"
 #include "utils/Error.h"
 #include "utils/Log.h"
+#include "value/config/ServerConfig.h"
 
 #include <fiu/fiu-local.h>
 #include <map>
@@ -63,20 +70,6 @@ KnowhereResource::Initialize() {
         return Status(KNOWHERE_UNEXPECTED_ERROR, "FAISS hook fail, CPU not supported!");
     }
 
-    // engine config
-    int64_t omp_thread = config.engine.omp_thread_num();
-
-    if (omp_thread > 0) {
-        omp_set_num_threads(omp_thread);
-        LOG_SERVER_DEBUG_ << "Specify openmp thread number: " << omp_thread;
-    } else {
-        int64_t sys_thread_cnt = 8;
-        if (milvus::server::GetSystemAvailableThreads(sys_thread_cnt)) {
-            omp_thread = static_cast<int32_t>(ceil(sys_thread_cnt * 0.5));
-            omp_set_num_threads(omp_thread);
-        }
-    }
-
     // init faiss global variable
     int64_t use_blas_threshold = config.engine.use_blas_threshold();
     faiss::distance_compute_blas_threshold = use_blas_threshold;
@@ -95,39 +88,48 @@ KnowhereResource::Initialize() {
 #ifdef MILVUS_GPU_VERSION
     bool enable_gpu = config.gpu.enable();
     fiu_do_on("KnowhereResource.Initialize.disable_gpu", enable_gpu = false);
-    if (!enable_gpu) {
-        return Status::OK();
-    }
+    if (enable_gpu) {
+        struct GpuResourceSetting {
+            int64_t pinned_memory = 256 * M_BYTE;
+            int64_t temp_memory = 256 * M_BYTE;
+            int64_t resource_num = 2;
+        };
+        using GpuResourcesArray = std::map<int64_t, GpuResourceSetting>;
+        GpuResourcesArray gpu_resources;
 
-    struct GpuResourceSetting {
-        int64_t pinned_memory = 256 * M_BYTE;
-        int64_t temp_memory = 256 * M_BYTE;
-        int64_t resource_num = 2;
-    };
-    using GpuResourcesArray = std::map<int64_t, GpuResourceSetting>;
-    GpuResourcesArray gpu_resources;
+        // get build index gpu resource
+        std::vector<int64_t> build_index_gpus = ParseGPUDevices(config.gpu.build_index_devices());
 
-    // get build index gpu resource
-    std::vector<int64_t> build_index_gpus = ParseGPUDevices(config.gpu.build_index_devices());
+        for (auto gpu_id : build_index_gpus) {
+            gpu_resources.insert(std::make_pair(gpu_id, GpuResourceSetting()));
+        }
 
-    for (auto gpu_id : build_index_gpus) {
-        gpu_resources.insert(std::make_pair(gpu_id, GpuResourceSetting()));
-    }
+        // get search gpu resource
+        std::vector<int64_t> search_gpus = ParseGPUDevices(config.gpu.search_devices());
 
-    // get search gpu resource
-    std::vector<int64_t> search_gpus = ParseGPUDevices(config.gpu.search_devices());
+        for (auto& gpu_id : search_gpus) {
+            gpu_resources.insert(std::make_pair(gpu_id, GpuResourceSetting()));
+        }
 
-    for (auto& gpu_id : search_gpus) {
-        gpu_resources.insert(std::make_pair(gpu_id, GpuResourceSetting()));
-    }
-
-    // init gpu resources
-    for (auto& gpu_resource : gpu_resources) {
-        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(gpu_resource.first, gpu_resource.second.pinned_memory,
-                                                                gpu_resource.second.temp_memory,
-                                                                gpu_resource.second.resource_num);
+        // init gpu resources
+        for (auto& gpu_resource : gpu_resources) {
+            knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(
+                gpu_resource.first, gpu_resource.second.pinned_memory, gpu_resource.second.temp_memory,
+                gpu_resource.second.resource_num);
+        }
     }
 #endif
+
+    faiss::LOG_ERROR_ = &knowhere::log_error_;
+    faiss::LOG_WARNING_ = &knowhere::log_warning_;
+    // faiss::LOG_DEBUG_ = &knowhere::log_debug_;
+    NGT_LOG_ERROR_ = &knowhere::log_error_;
+    NGT_LOG_WARNING_ = &knowhere::log_warning_;
+    // NGT_LOG_DEBUG_ = &knowhere::log_debug_;
+
+    auto stat_level = config.engine.statistics_level();
+    milvus::knowhere::STATISTICS_LEVEL = stat_level;
+    faiss::STATISTICS_LEVEL = stat_level;
 
     return Status::OK();
 }

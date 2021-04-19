@@ -11,18 +11,11 @@
 
 #pragma once
 
-#include "utils/EasyAssert.h"
-
-#define JSON_ASSERT(expr) Assert((expr))
-// TODO: dispatch error by type
-
-#define JSON_THROW_USER(e) milvus::impl::ThrowWithTrace((e))
-
 #include "nlohmann/json.hpp"
 
 namespace milvus {
 
-using Json = nlohmann::json;
+using json = nlohmann::json;
 
 #define JSON_NULL_CHECK(json)                                       \
     do {                                                            \

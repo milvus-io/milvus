@@ -39,8 +39,8 @@ class IndexWrapper {
     knowhere::VecIndexPtr index_ = nullptr;
     std::string type_params_;
     std::string index_params_;
-    milvus::Json type_config_;
-    milvus::Json index_config_;
+    milvus::json type_config_;
+    milvus::json index_config_;
     knowhere::Config config_;
 };
 

@@ -9,22 +9,19 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <fiu/fiu-local.h>
+
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <unordered_set>
 #include <vector>
 
-#include "config/ServerConfig.h"
+#include "value/config/ServerConfig.h"
 
 namespace milvus {
 
 std::mutex config_mutex;
-
-std::mutex&
-GetConfigMutex() {
-    return config_mutex;
-}
 
 ServerConfig config;
 
@@ -48,6 +45,7 @@ ParseGPUDevices(const std::string& str) {
     std::string device;
 
     while (std::getline(ss, device, ',')) {
+        fiu_do_on("ParseGPUDevices.invalid_format", device = "");
         if (device.length() < 4) {
             /* Invalid format string */
             return {};
@@ -55,7 +53,10 @@ ParseGPUDevices(const std::string& str) {
         device_set.insert(std::stoll(device.substr(3)));
     }
 
-    for (auto dev : device_set) devices.push_back(dev);
+    devices.reserve(device_set.size());
+    for (auto dev : device_set) {
+        devices.push_back(dev);
+    }
     return devices;
 }
 

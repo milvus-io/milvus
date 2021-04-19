@@ -97,7 +97,7 @@ struct IndexBinary {
    */
   virtual void search(idx_t n, const uint8_t *x, idx_t k,
                       int32_t *distances, idx_t *labels,
-                      ConcurrentBitsetPtr bitset = nullptr) const = 0;
+                      const BitsetView& bitset = nullptr) const = 0;
 
 #if 0
   /** Query n raw vectors from the index by ids.
@@ -109,7 +109,7 @@ struct IndexBinary {
    * @param x           output raw vectors, size n * d
    * @param bitset      flags to check the validity of vectors
    */
-  virtual void get_vector_by_id (idx_t n, const idx_t *xid, uint8_t *x, ConcurrentBitsetPtr bitset = nullptr);
+  virtual void get_vector_by_id (idx_t n, const idx_t *xid, uint8_t *x, const BitsetView& bitset = nullptr);
 
   /** query n vectors of dimension d to the index by ids.
    *
@@ -122,7 +122,7 @@ struct IndexBinary {
    * @param bitset      flags to check the validity of vectors
    */
   virtual void search_by_id (idx_t n, const idx_t *xid, idx_t k, int32_t *distances, idx_t *labels,
-                             ConcurrentBitsetPtr bitset = nullptr);
+                             const BitsetView& bitset = nullptr);
 #endif
 
   /** Query n vectors of dimension d to the index.
@@ -141,7 +141,7 @@ struct IndexBinary {
    */
   virtual void range_search(idx_t n, const uint8_t *x, int radius,
                             RangeSearchResult *result,
-                            ConcurrentBitsetPtr bitset = nullptr) const;
+                            const BitsetView& bitset = nullptr) const;
 
   /** Return the indexes of the k vectors closest to the query x.
    *

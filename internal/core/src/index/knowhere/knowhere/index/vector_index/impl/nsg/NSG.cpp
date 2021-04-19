@@ -864,7 +864,7 @@ NsgIndex::Search(const float* query,
                  float* dist,
                  int64_t* ids,
                  SearchParams& params,
-                 faiss::ConcurrentBitsetPtr bitset) {
+                 const faiss::BitsetView& bitset) {
     std::vector<std::vector<Neighbor>> resset(nq);
 
     TimeRecorder rc("NsgIndex::search", 1);
@@ -886,7 +886,7 @@ NsgIndex::Search(const float* query,
             if (pos >= k) {
                 break;  // already top k
             }
-            if (!bitset || !bitset->test(node.id)) {
+            if (!bitset || !bitset.test(node.id)) {
                 ids[i * k + pos] = ids_[node.id];
                 dist[i * k + pos] = is_ip ? -node.distance : node.distance;
                 ++pos;

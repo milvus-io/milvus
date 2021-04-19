@@ -15,6 +15,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "knowhere/common/Log.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 #ifdef MILVUS_GPU_VERSION
@@ -24,14 +25,14 @@
 namespace milvus {
 namespace knowhere {
 
+static const int64_t MIN_NBITS = 1;
+static const int64_t MAX_NBITS = 16;
 static const int64_t MIN_NLIST = 1;
 static const int64_t MAX_NLIST = 65536;
 static const int64_t MIN_NPROBE = 1;
 static const int64_t MAX_NPROBE = MAX_NLIST;
 static const int64_t DEFAULT_MIN_DIM = 1;
 static const int64_t DEFAULT_MAX_DIM = 32768;
-static const int64_t DEFAULT_MIN_ROWS = 1;  // minimum size for build index
-static const int64_t DEFAULT_MAX_ROWS = 50000000;
 static const int64_t NGT_MIN_EDGE_SIZE = 1;
 static const int64_t NGT_MAX_EDGE_SIZE = 200;
 static const int64_t HNSW_MIN_EFCONSTRUCTION = 8;
@@ -45,6 +46,12 @@ static const std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Me
     if (!oricfg.contains(key) || !oricfg[key].is_number_integer() || oricfg[key].get<int64_t>() > max || \
         oricfg[key].get<int64_t>() < min) {                                                              \
         return false;                                                                                    \
+    }
+
+#define CheckFloatByRange(key, min, max)                                                             \
+    if (!oricfg.contains(key) || !oricfg[key].is_number_float() || oricfg[key].get<float>() > max || \
+        oricfg[key].get<float>() < min) {                                                            \
+        return false;                                                                                \
     }
 
 #define CheckIntByValues(key, container)                                                                 \
@@ -84,33 +91,42 @@ ConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode m
 
 int64_t
 MatchNlist(int64_t size, int64_t nlist) {
-    const int64_t TYPICAL_COUNT = 1000000;
-    const int64_t PER_NLIST = 16384;
+    const int64_t MIN_POINTS_PER_CENTROID = 40;
 
-    if (nlist * TYPICAL_COUNT > size * PER_NLIST) {
+    if (nlist * MIN_POINTS_PER_CENTROID > size) {
         // nlist is too large, adjust to a proper value
-        nlist = std::max(1L, size * PER_NLIST / TYPICAL_COUNT);
+        nlist = std::max(1L, size / MIN_POINTS_PER_CENTROID);
+        LOG_KNOWHERE_WARNING_ << "Row num " << size << " match nlist " << nlist;
     }
     return nlist;
+}
+
+int64_t
+MatchNbits(int64_t size, int64_t nbits) {
+    if (size < (1 << nbits)) {
+        // nbits is too large, adjust to a proper value
+        if (size >= (1 << 8)) {
+            nbits = 8;
+        } else if (size >= (1 << 4)) {
+            nbits = 4;
+        } else if (size >= (1 << 2)) {
+            nbits = 2;
+        } else {
+            nbits = 1;
+        }
+        LOG_KNOWHERE_WARNING_ << "Row num " << size << " match nbits " << nbits;
+    }
+    return nbits;
 }
 
 bool
 IVFConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     CheckIntByRange(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);
-    CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
-
-    // int64_t nlist = oricfg[knowhere::IndexParams::nlist];
-    // CheckIntByRange(knowhere::meta::ROWS, nlist, DEFAULT_MAX_ROWS);
 
     // auto tune params
-    auto nq = oricfg[knowhere::meta::ROWS].get<int64_t>();
+    auto rows = oricfg[knowhere::meta::ROWS].get<int64_t>();
     auto nlist = oricfg[knowhere::IndexParams::nlist].get<int64_t>();
-    oricfg[knowhere::IndexParams::nlist] = MatchNlist(nq, nlist);
-
-    // Best Practice
-    // static int64_t MIN_POINTS_PER_CENTROID = 40;
-    // static int64_t MAX_POINTS_PER_CENTROID = 256;
-    // CheckIntByRange(knowhere::meta::ROWS, MIN_POINTS_PER_CENTROID * nlist, MAX_POINTS_PER_CENTROID * nlist);
+    oricfg[knowhere::IndexParams::nlist] = MatchNlist(rows, nlist);
 
     return ConfAdapter::CheckTrain(oricfg, mode);
 }
@@ -138,49 +154,38 @@ IVFSQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
 bool
 IVFPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    const int64_t DEFAULT_NBITS = 8;
+    if (!IVFConfAdapter::CheckTrain(oricfg, mode)) {
+        return false;
+    }
 
-    oricfg[knowhere::IndexParams::nbits] = DEFAULT_NBITS;
+    CheckIntByRange(knowhere::IndexParams::nbits, MIN_NBITS, MAX_NBITS);
 
-    CheckStrByValues(knowhere::Metric::TYPE, METRICS);
-    CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
-    CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
-    CheckIntByRange(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);
+    auto rows = oricfg[knowhere::meta::ROWS].get<int64_t>();
+    auto nbits = oricfg[knowhere::IndexParams::nbits].get<int64_t>();
+    oricfg[knowhere::IndexParams::nbits] = MatchNbits(rows, nbits);
 
-    // int64_t nlist = oricfg[knowhere::IndexParams::nlist];
-    // CheckIntByRange(knowhere::meta::ROWS, nlist, DEFAULT_MAX_ROWS);
-
-    // auto tune params
-    oricfg[knowhere::IndexParams::nlist] =
-        MatchNlist(oricfg[knowhere::meta::ROWS].get<int64_t>(), oricfg[knowhere::IndexParams::nlist].get<int64_t>());
     auto m = oricfg[knowhere::IndexParams::m].get<int64_t>();
     auto dimension = oricfg[knowhere::meta::DIM].get<int64_t>();
-    // Best Practice
-    // static int64_t MIN_POINTS_PER_CENTROID = 40;
-    // static int64_t MAX_POINTS_PER_CENTROID = 256;
-    // CheckIntByRange(knowhere::meta::ROWS, MIN_POINTS_PER_CENTROID * nlist, MAX_POINTS_PER_CENTROID * nlist);
 
-    /*std::vector<int64_t> resset;
-    IVFPQConfAdapter::GetValidCPUM(dimension, resset);*/
     IndexMode ivfpq_mode = mode;
-    return GetValidM(dimension, m, ivfpq_mode);
+    return CheckPQParams(dimension, m, nbits, ivfpq_mode);
 }
 
 bool
-IVFPQConfAdapter::GetValidM(int64_t dimension, int64_t m, IndexMode& mode) {
+IVFPQConfAdapter::CheckPQParams(int64_t dimension, int64_t m, int64_t nbits, IndexMode& mode) {
 #ifdef MILVUS_GPU_VERSION
-    if (mode == knowhere::IndexMode::MODE_GPU && !IVFPQConfAdapter::GetValidGPUM(dimension, m)) {
+    if (mode == knowhere::IndexMode::MODE_GPU && !IVFPQConfAdapter::CheckGPUPQParams(dimension, m, nbits)) {
         mode = knowhere::IndexMode::MODE_CPU;
     }
 #endif
-    if (mode == knowhere::IndexMode::MODE_CPU && !IVFPQConfAdapter::GetValidCPUM(dimension, m)) {
+    if (mode == knowhere::IndexMode::MODE_CPU && !IVFPQConfAdapter::CheckCPUPQParams(dimension, m)) {
         return false;
     }
     return true;
 }
 
 bool
-IVFPQConfAdapter::GetValidGPUM(int64_t dimension, int64_t m) {
+IVFPQConfAdapter::CheckGPUPQParams(int64_t dimension, int64_t m, int64_t nbits) {
     /*
      * Faiss 1.6
      * Only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims per sub-quantizer are currently supported with
@@ -193,22 +198,12 @@ IVFPQConfAdapter::GetValidGPUM(int64_t dimension, int64_t m) {
     return (std::find(std::begin(support_subquantizer), std::end(support_subquantizer), m) !=
             support_subquantizer.end()) &&
            (std::find(std::begin(support_dim_per_subquantizer), std::end(support_dim_per_subquantizer), sub_dim) !=
-            support_dim_per_subquantizer.end());
-
-    /*resset.clear();
-      for (const auto& dimperquantizer : support_dim_per_subquantizer) {
-        if (!(dimension % dimperquantizer)) {
-            auto subquantzier_num = dimension / dimperquantizer;
-            auto finder = std::find(support_subquantizer.begin(), support_subquantizer.end(), subquantzier_num);
-            if (finder != support_subquantizer.end()) {
-                resset.push_back(subquantzier_num);
-            }
-        }
-    }*/
+            support_dim_per_subquantizer.end()) &&
+           (nbits == 8);
 }
 
 bool
-IVFPQConfAdapter::GetValidCPUM(int64_t dimension, int64_t m) {
+IVFPQConfAdapter::CheckCPUPQParams(int64_t dimension, int64_t m) {
     return (dimension % m == 0);
 }
 
@@ -224,7 +219,6 @@ NSGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     const int64_t MAX_CANDIDATE_POOL_SIZE = 1000;
 
     CheckStrByValues(knowhere::Metric::TYPE, METRICS);
-    CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(knowhere::IndexParams::knng, MIN_KNNG, MAX_KNNG);
     CheckIntByRange(knowhere::IndexParams::search_length, MIN_SEARCH_LENGTH, MAX_SEARCH_LENGTH);
     CheckIntByRange(knowhere::IndexParams::out_degree, MIN_OUT_DEGREE, MAX_OUT_DEGREE);
@@ -251,7 +245,6 @@ NSGConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMod
 
 bool
 HNSWConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(knowhere::IndexParams::efConstruction, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
     CheckIntByRange(knowhere::IndexParams::M, HNSW_MIN_M, HNSW_MAX_M);
 
@@ -267,7 +260,6 @@ HNSWConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMo
 
 bool
 RHNSWFlatConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(knowhere::IndexParams::efConstruction, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
     CheckIntByRange(knowhere::IndexParams::M, HNSW_MIN_M, HNSW_MAX_M);
 
@@ -283,13 +275,12 @@ RHNSWFlatConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const In
 
 bool
 RHNSWPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(knowhere::IndexParams::efConstruction, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
     CheckIntByRange(knowhere::IndexParams::M, HNSW_MIN_M, HNSW_MAX_M);
 
     auto dimension = oricfg[knowhere::meta::DIM].get<int64_t>();
 
-    IVFPQConfAdapter::GetValidCPUM(dimension, oricfg[knowhere::IndexParams::PQM].get<int64_t>());
+    IVFPQConfAdapter::CheckCPUPQParams(dimension, oricfg[knowhere::IndexParams::PQM].get<int64_t>());
 
     return ConfAdapter::CheckTrain(oricfg, mode);
 }
@@ -303,7 +294,6 @@ RHNSWPQConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const Inde
 
 bool
 RHNSWSQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(knowhere::IndexParams::efConstruction, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
     CheckIntByRange(knowhere::IndexParams::M, HNSW_MIN_M, HNSW_MAX_M);
 
@@ -334,18 +324,14 @@ BinIVFConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     static const std::vector<std::string> METRICS{knowhere::Metric::HAMMING, knowhere::Metric::JACCARD,
                                                   knowhere::Metric::TANIMOTO};
 
-    CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
     CheckIntByRange(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);
     CheckStrByValues(knowhere::Metric::TYPE, METRICS);
 
-    int64_t nlist = oricfg[knowhere::IndexParams::nlist];
-    CheckIntByRange(knowhere::meta::ROWS, nlist, DEFAULT_MAX_ROWS);
-
-    // Best Practice
-    // static int64_t MIN_POINTS_PER_CENTROID = 40;
-    // static int64_t MAX_POINTS_PER_CENTROID = 256;
-    // CheckIntByRange(knowhere::meta::ROWS, MIN_POINTS_PER_CENTROID * nlist, MAX_POINTS_PER_CENTROID * nlist);
+    // auto tune params
+    auto rows = oricfg[knowhere::meta::ROWS].get<int64_t>();
+    auto nlist = oricfg[knowhere::IndexParams::nlist].get<int64_t>();
+    oricfg[knowhere::IndexParams::nlist] = MatchNlist(rows, nlist);
 
     return true;
 }
@@ -370,35 +356,37 @@ ANNOYConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexM
 
 bool
 NGTPANNGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::HAMMING, knowhere::Metric::JACCARD};
-
-    CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
-    CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
-    CheckStrByValues(knowhere::Metric::TYPE, METRICS);
     CheckIntByRange(knowhere::IndexParams::edge_size, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
+    CheckIntByRange(knowhere::IndexParams::forcedly_pruned_edge_size, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
+    CheckIntByRange(knowhere::IndexParams::selectively_pruned_edge_size, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
+    if (oricfg[knowhere::IndexParams::selectively_pruned_edge_size].get<int64_t>() >=
+        oricfg[knowhere::IndexParams::forcedly_pruned_edge_size].get<int64_t>()) {
+        return false;
+    }
 
-    return true;
+    return ConfAdapter::CheckTrain(oricfg, mode);
 }
 
 bool
 NGTPANNGConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
+    CheckIntByRange(knowhere::IndexParams::max_search_edges, -1, NGT_MAX_EDGE_SIZE);
+    CheckFloatByRange(knowhere::IndexParams::epsilon, -1.0, 1.0);
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }
 
 bool
 NGTONNGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::HAMMING, knowhere::Metric::JACCARD};
-
-    CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
-    CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
-    CheckStrByValues(knowhere::Metric::TYPE, METRICS);
     CheckIntByRange(knowhere::IndexParams::edge_size, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
+    CheckIntByRange(knowhere::IndexParams::outgoing_edge_size, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
+    CheckIntByRange(knowhere::IndexParams::incoming_edge_size, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
 
-    return true;
+    return ConfAdapter::CheckTrain(oricfg, mode);
 }
 
 bool
 NGTONNGConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
+    CheckIntByRange(knowhere::IndexParams::max_search_edges, -1, NGT_MAX_EDGE_SIZE);
+    CheckFloatByRange(knowhere::IndexParams::epsilon, -1.0, 1.0);
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }
 

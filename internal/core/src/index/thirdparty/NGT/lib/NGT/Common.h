@@ -120,7 +120,9 @@ namespace NGT {
 	}
 	auto status = insert(std::make_pair(key,value));
 	if (!status.second) {
-	  std::cerr << "Args: Duplicated options. [" << opt << "]" << std::endl;
+	    if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("Args: Duplicated options. [" + opt + "]");
+//	  std::cerr << "Args: Duplicated options. [" << opt << "]" << std::endl;
 	}
       }
     }
@@ -305,7 +307,9 @@ namespace NGT {
 	logFD = open(logFilePath.c_str(), O_CREAT|O_WRONLY|O_APPEND, mode);
       }
       if (logFD < 0) {
-	std::cerr << "Logger: Cannot begin logging." << std::endl;
+          if (NGT_LOG_DEBUG_)
+              (*NGT_LOG_DEBUG_)("Logger: Cannot begin logging.");
+//	std::cerr << "Logger: Cannot begin logging." << std::endl;
 	logFD = -1;
 	return;
       }
@@ -322,6 +326,8 @@ namespace NGT {
       dup2(savedFdNo, fdNo);
       savedFdNo = -1;
     }
+
+    int64_t memSize() { return sizeof(*this); }
 
     std::string	logFilePath;
     mode_t	mode;
@@ -479,13 +485,17 @@ namespace NGT {
 	  uint64_t size = vectorSize;
 	  size <<= 1;
 	  if (size > 0xffff) {
-	    std::cerr << "CompactVector is too big. " << size << std::endl;
+	      if (NGT_LOG_DEBUG_)
+              (*NGT_LOG_DEBUG_)("CompactVector is too big. " + std::to_string(size));
+//	    std::cerr << "CompactVector is too big. " << size << std::endl;
 	    abort();
 	  }
 	  reserve(size);
 	}
       }
     }
+
+    virtual int64_t memSize() { return vector->memSize() * vectorSize + sizeof(vectorSize) * 2; }
 
     TYPE *vector;
     uint16_t vectorSize;
@@ -540,6 +550,8 @@ namespace NGT {
       }
     }
 
+    virtual int64_t memSize() { return size(); }
+
     char *vector;
   };
 
@@ -563,6 +575,7 @@ namespace NGT {
     inline void reset(size_t i) {
       getEntry(i) &= ~getBitString(i);
     }
+    inline int64_t memSize() { return size * sizeof(uint64_t); }
     std::vector<uint64_t>	bitvec;
     uint64_t		size;
   };
@@ -602,7 +615,9 @@ namespace NGT {
 	char *e = 0;
 	float val = strtof(it->second.c_str(), &e);
 	if (*e != 0) {
-	  std::cerr << "Warning: Illegal property. " << key << ":" << it->second << " (" << e << ")" << std::endl;
+	    if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("Warning: Illegal property. " + key + ":" + it->second + " (" + e + ")");
+//	  std::cerr << "Warning: Illegal property. " << key << ":" << it->second << " (" << e << ")" << std::endl;
 	  return defvalue;
 	}
 	return val;
@@ -620,7 +635,9 @@ namespace NGT {
 	char *e = 0;
 	float val = strtol(it->second.c_str(), &e, 10);
 	if (*e != 0) {
-	  std::cerr << "Warning: Illegal property. " << key << ":" << it->second << " (" << e << ")" << std::endl;
+	    if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("Warning: Illegal property. " + key + ":" + it->second + " (" + e + ")");
+//	  std::cerr << "Warning: Illegal property. " << key << ":" << it->second << " (" << e << ")" << std::endl;
 	}
 	return val;
       }
@@ -668,7 +685,9 @@ namespace NGT {
             NGT::Common::tokenize(line, tokens, "\t");
             if (tokens.size() != 2)
             {
-                std::cerr << "Property file is illegal. " << line << std::endl;
+                if (NGT_LOG_DEBUG_)
+                    (*NGT_LOG_DEBUG_)("Property file is illegal. " + line);
+//                std::cerr << "Property file is illegal. " << line << std::endl;
                 continue;
             }
             set(tokens[0], tokens[1]);
@@ -681,7 +700,9 @@ namespace NGT {
 	std::vector<std::string> tokens;
 	NGT::Common::tokenize(line, tokens, "\t");
 	if (tokens.size() != 2) {
-	  std::cerr << "Property file is illegal. " << line << std::endl;
+	    if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("Property file is illegal. " + line);
+//	  std::cerr << "Property file is illegal. " << line << std::endl;
 	  continue;
 	}
 	set(tokens[0], tokens[1]);
@@ -719,7 +740,9 @@ namespace NGT {
 	unsigned int tmp;
 	is >> tmp;
 	if (tmp > 255) {
-	  std::cerr << "Error! Invalid. " << tmp << std::endl;
+	    if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("Error! Invalid. " + std::to_string(tmp));
+//	  std::cerr << "Error! Invalid. " << tmp << std::endl;
 	}
 	v = (TYPE)tmp;
       } else {
@@ -819,7 +842,9 @@ namespace NGT {
       unsigned int size;
       is >> size;
       if (s != size) {
-	std::cerr << "readAsText: something wrong. " << size << ":" << s << std::endl;
+          if (NGT_LOG_DEBUG_)
+              (*NGT_LOG_DEBUG_)("readAsText: something wrong. " + std::to_string(size) + ":" + std::to_string(s));
+//	std::cerr << "readAsText: something wrong. " << size << ":" << s << std::endl;
 	return;
       }
       for (unsigned int i = 0; i < s; i++) {
@@ -1010,7 +1035,9 @@ namespace NGT {
 	    size <<= 1;
 	  } while (size <= idx);
 	  if (size > 0xffffffff) {
-	    std::cerr << "Vector is too big. " << size << std::endl;
+          if (NGT_LOG_DEBUG_)
+              (*NGT_LOG_DEBUG_)("Vector is too big. " + std::to_string(size));
+//	    std::cerr << "Vector is too big. " << size << std::endl;
 	    abort();
 	  }
 	  reserve(size, allocator);
@@ -1092,7 +1119,9 @@ namespace NGT {
       Vector<size_t>::iterator rmi
 	= std::lower_bound(removedList->begin(allocator), removedList->end(allocator), id, std::greater<size_t>());
       if ((rmi != removedList->end(allocator)) && ((*rmi) == id)) {
-	std::cerr << "removedListPush: already existed! continue... ID=" << id << std::endl;
+          if (NGT_LOG_DEBUG_)
+              (*NGT_LOG_DEBUG_)("removedListPush: already existed! continue... ID=" + std::to_string(id));
+//	std::cerr << "removedListPush: already existed! continue... ID=" << id << std::endl;
 	return;
       }
       removedList->insert(rmi, id, allocator);
@@ -1271,7 +1300,9 @@ namespace NGT {
 	size_t idx;
 	NGT::Serializer::readAsText(is, idx);
 	if (i != idx) {
-	  std::cerr << "PersistentRepository: Error. index of a specified import file is invalid. " << idx << ":" << i << std::endl;
+          if (NGT_LOG_DEBUG_)
+              (*NGT_LOG_DEBUG_)("PersistentRepository: Error. index of a specified import file is invalid. " + std::to_string(idx) + ":" + std::to_string(i));
+//	  std::cerr << "PersistentRepository: Error. index of a specified import file is invalid. " << idx << ":" << i << std::endl;
 	}
 	char type;
 	NGT::Serializer::readAsText(is, type);
@@ -1599,7 +1630,9 @@ namespace NGT {
 	size_t idx;
 	NGT::Serializer::readAsText(is, idx);
 	if (i != idx) {
-	  std::cerr << "Repository: Error. index of a specified import file is invalid. " << idx << ":" << i << std::endl;
+	    if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("Repository: Error. index of a specified import file is invalid. " + std::to_string(idx) + ":" + std::to_string(i));
+//	  std::cerr << "Repository: Error. index of a specified import file is invalid. " << idx << ":" << i << std::endl;
 	}
 	char type;
 	NGT::Serializer::readAsText(is, type);
@@ -1655,6 +1688,7 @@ namespace NGT {
 
 #ifdef ADVANCED_USE_REMOVED_LIST
     size_t count() { return std::vector<TYPE*>::size() == 0 ? 0 : std::vector<TYPE*>::size() - removedList.size() - 1; }
+    virtual int64_t memSize() { return  std::vector<TYPE*>::size() == 0 ? 0 : (*this)[1]->memSize() * std::vector<TYPE*>::size() + removedList.size() * sizeof(size_t); }
   protected:
     std::priority_queue<size_t, std::vector<size_t>, std::greater<size_t> >	removedList;
 #endif
@@ -1724,6 +1758,7 @@ namespace NGT {
       is >> o.distance;
       return is;
     }
+    int64_t memSize() const { return sizeof(id) + sizeof(distance); }
     uint32_t            id;
     float         distance;
   };
@@ -1737,6 +1772,7 @@ namespace NGT {
   public:
     Container(Object &o, ObjectID i):object(o), id(i) {}
     Container(Container &c):object(c.object), id(c.id) {}
+    virtual int64_t memSize() { return sizeof(ObjectID); }
     Object		&object;
     ObjectID		id;
   };
@@ -1791,6 +1827,11 @@ namespace NGT {
 
     ResultPriorityQueue &getWorkingResult() { return workingResult; }
 
+    virtual int64_t memSize();
+//    virtual int64_t memSize() {
+//        auto workres_size = workingResult.size() == 0 ? 0 : workingResult.size() * workingResult.top().memSize();
+//        return sizeof(size_t) * 3 + sizeof(float) * 3 + result->memSize() + 1 + workres_size + Container::memSize();
+//    }
 
     size_t		size;
     Distance		radius;
@@ -1828,6 +1869,7 @@ namespace NGT {
     }
     void	*getQuery() { return query; }
     const std::type_info &getQueryType() { return *queryType; }
+    virtual int64_t memSize() { return std::strlen((char*)getQuery()) + sizeof(getQueryType()) + SearchContainer::memSize(); }
   private:
     void deleteQuery() {
       if (query == 0) {

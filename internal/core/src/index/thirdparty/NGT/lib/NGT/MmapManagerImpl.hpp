@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "defines.h"
 #include "MmapManagerDefs.h"
 #include "MmapManagerException.h"
 
@@ -132,7 +133,9 @@ namespace MemoryManager{
     const off_t old_file_size = mmapCntlHead->base_size * mmapCntlHead->unit_num;
 
     if(new_unit_num >= MMAP_MAX_UNIT_NUM){
-      std::cerr << "over max unit num" << std::endl;
+        if (NGT_LOG_DEBUG_)
+          (*NGT_LOG_DEBUG_)("over max unit num");
+//      std::cerr << "over max unit num" << std::endl;
       return false;
     }
 
@@ -151,10 +154,14 @@ namespace MemoryManager{
         throw MmapManagerException("truncate error" + err_str);
       }
       
-      if(close(fd) == -1) std::cerr << filePath << "[WARN] : filedescript cannot close" << std::endl;
+      if(close(fd) == -1 && NGT_LOG_DEBUG_)
+        (*NGT_LOG_DEBUG_)(filePath + "[WARN] : filedescript cannot close");
+//        std::cerr << filePath << "[WARN] : filedescript cannot close" << std::endl;
       throw MmapManagerException("mmap error" + err_str);
     }
-    if(close(fd) == -1) std::cerr << filePath << "[WARN] : filedescript cannot close" << std::endl;
+    if(close(fd) == -1 && NGT_LOG_DEBUG_)
+      (*NGT_LOG_DEBUG_)(filePath + "[WARN] : filedescript cannot close");
+//      std::cerr << filePath << "[WARN] : filedescript cannot close" << std::endl;
     
     mmapDataAddr[mmapCntlHead->unit_num] = new_area;
     
@@ -179,14 +186,18 @@ namespace MemoryManager{
     if(lseek(fd, (off_t)size-1, SEEK_SET) < 0){
       std::stringstream ss;
       ss << "[ERR] Cannot seek the file. " << targetFile << " " << getErrorStr(errno);
-      if(close(fd) == -1) std::cerr << targetFile << "[WARN] : filedescript cannot close" << std::endl;
+      if(close(fd) == -1 && NGT_LOG_DEBUG_)
+        (*NGT_LOG_DEBUG_)(targetFile + "[WARN] : filedescript cannot close");
+//        std::cerr << targetFile << "[WARN] : filedescript cannot close" << std::endl;
       throw MmapManagerException(ss.str());
     }
     errno = 0;
     if(write(fd, &c, sizeof(char)) == -1){
       std::stringstream ss;
       ss << "[ERR] Cannot write the file. Check the disk space. " << targetFile << " " << getErrorStr(errno);
-      if(close(fd) == -1) std::cerr << targetFile << "[WARN] : filedescript cannot close" << std::endl;
+      if(close(fd) == -1 && NGT_LOG_DEBUG_)
+        (*NGT_LOG_DEBUG_)(targetFile + "[WARN] : filedescript cannot close");
+//        std::cerr << targetFile << "[WARN] : filedescript cannot close" << std::endl;
       throw MmapManagerException(ss.str());
     }
     

@@ -10,11 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
-#include <knowhere/index/vector_index/IndexRHNSWSQ.h>
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include <iostream>
 #include <random>
+
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/IndexRHNSWSQ.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "unittest/utils.h"
 
 using ::testing::Combine;
@@ -31,9 +32,13 @@ class RHNSWSQ8Test : public DataGen, public TestWithParam<std::string> {
                                   //        Generate(2, 10, 2);  // dim = 64, nb = 10000, nq = 10
         index_ = std::make_shared<milvus::knowhere::IndexRHNSWSQ>();
         conf = milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, 64},        {milvus::knowhere::meta::TOPK, 10},
-            {milvus::knowhere::IndexParams::M, 16},   {milvus::knowhere::IndexParams::efConstruction, 200},
-            {milvus::knowhere::IndexParams::ef, 200}, {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+            {milvus::knowhere::meta::DIM, 64},
+            {milvus::knowhere::meta::TOPK, 10},
+            {milvus::knowhere::IndexParams::M, 16},
+            {milvus::knowhere::IndexParams::efConstruction, 200},
+            {milvus::knowhere::IndexParams::ef, 200},
+            {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
         };
     }
 
@@ -139,6 +144,20 @@ TEST_P(RHNSWSQ8Test, HNSW_serialize) {
         binaryset.Append(new_idx->index_type() + "_Index", idx, bin_idx->size);
         binaryset.Append(QUANTIZATION_DATA, dat, bin_dat->size);
 
+        new_idx->Load(binaryset);
+        EXPECT_EQ(new_idx->Count(), nb);
+        EXPECT_EQ(new_idx->Dim(), dim);
+        auto result = new_idx->Query(query_dataset, conf, nullptr);
+        //        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
+    }
+}
+
+TEST_P(RHNSWSQ8Test, HNSW_slice) {
+    {
+        index_->Train(base_dataset, conf);
+        index_->Add(base_dataset, conf);
+        auto binaryset = index_->Serialize(conf);
+        auto new_idx = std::make_shared<milvus::knowhere::IndexRHNSWSQ>();
         new_idx->Load(binaryset);
         EXPECT_EQ(new_idx->Count(), nb);
         EXPECT_EQ(new_idx->Dim(), dim);

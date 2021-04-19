@@ -24,6 +24,7 @@
 #include	"NGT/ObjectSpaceRepository.h"
 
 #include "faiss/utils/ConcurrentBitset.h"
+#include "faiss/utils/BitsetView.h"
 
 #include	"NGT/HashBasedBooleanSet.h"
 
@@ -187,6 +188,14 @@ namespace NGT {
       }
     }
 
+    virtual int64_t memSize() {
+		int64_t ret = prevsize->size() * sizeof(unsigned short);
+		for (size_t i = 1; i < this->size(); ++ i) {
+		    ret += (*this)[i]->memSize();
+		}
+		return ret;
+	}
+
     public:
 #ifdef NGT_SHARED_MEMORY_ALLOCATOR
     Vector<unsigned short>	*prevsize;
@@ -211,6 +220,7 @@ namespace NGT {
 	usedSize++;
       }
       size_t size() { return usedSize; }
+      virtual int64_t memSize() { return reservedSize * (sizeof(uint64_t) + (*this)[0].second->memSize()); }
       size_t reservedSize;
       size_t usedSize;
     };
@@ -219,6 +229,13 @@ namespace NGT {
     public:
       SearchGraphRepository() {}
       bool isEmpty(size_t idx) { return (*this)[idx].empty(); }
+      virtual int64_t memSize() {
+      	int64_t ret = 0;
+      	for (size_t i = 1; i < this->size(); ++ i) {
+      	    ret += (*this)[i].memSize();
+      	}
+      	return ret;
+      }
 
       void deserialize(std::ifstream &is, ObjectRepository &objectRepository) {
 	if (!is.is_open()) {
@@ -496,6 +513,8 @@ namespace NGT {
 	  return os;
 	}
 
+	int64_t memSize() { return sizeof(*this); }
+
 	int16_t		truncationThreshold;
 	int16_t		edgeSizeForCreation;
 	int16_t		edgeSizeForSearch;
@@ -679,7 +698,7 @@ namespace NGT {
 
       void search(NGT::SearchContainer &sc, ObjectDistances &seeds);
       // for milvus
-      void search(NGT::SearchContainer & sc, ObjectDistances & seeds, const faiss::ConcurrentBitsetPtr & bitset);
+      void search(NGT::SearchContainer & sc, ObjectDistances & seeds, const faiss::BitsetView&bitset);
 
 #ifdef NGT_GRAPH_READ_ONLY_GRAPH
       template <typename COMPARATOR, typename CHECK_LIST> void searchReadOnlyGraph(NGT::SearchContainer &sc, ObjectDistances &seeds);
@@ -933,6 +952,7 @@ namespace NGT {
 
     public:
 
+		virtual int64_t memSize() { return repository.memSize() + searchRepository.memSize() + property.memSize() + objectSpace->memSize(); }
       GraphRepository	repository;
       ObjectSpace	*objectSpace;
 

@@ -15,6 +15,7 @@
 //
 
 #pragma once
+#include <string>
 
 // Begin of cmake defines
 #if 0
@@ -57,4 +58,16 @@
 #define NGT_NO_AVX
 #endif
 #endif
+
+extern void (*NGT_LOG_TRACE_)(const std::string&);
+
+extern void (*NGT_LOG_DEBUG_)(const std::string&);
+
+extern void (*NGT_LOG_INFO_)(const std::string&);
+
+extern void (*NGT_LOG_WARNING_)(const std::string&);
+
+extern void (*NGT_LOG_FATAL_)(const std::string&);
+
+extern void (*NGT_LOG_ERROR_)(const std::string&);
 

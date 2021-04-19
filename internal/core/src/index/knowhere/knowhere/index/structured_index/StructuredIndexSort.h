@@ -59,7 +59,7 @@ class StructuredIndexSort : public StructuredIndex<T> {
 
     int64_t
     Size() override {
-        return (int64_t)data_.size();
+        return (int64_t)data_.size() * sizeof(IndexStructure<T>);
     }
 
     bool

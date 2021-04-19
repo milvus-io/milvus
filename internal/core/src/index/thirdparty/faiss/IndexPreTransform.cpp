@@ -181,7 +181,7 @@ void IndexPreTransform::add_with_ids (idx_t n, const float * x,
 
 void IndexPreTransform::search (idx_t n, const float *x, idx_t k,
                                float *distances, idx_t *labels,
-                               ConcurrentBitsetPtr bitset) const
+                               const BitsetView& bitset) const
 {
     FAISS_THROW_IF_NOT (is_trained);
     const float *xt = apply_chain (n, x);
@@ -191,7 +191,7 @@ void IndexPreTransform::search (idx_t n, const float *x, idx_t k,
 
 void IndexPreTransform::range_search (idx_t n, const float* x, float radius,
                                       RangeSearchResult* result,
-                                      ConcurrentBitsetPtr bitset) const
+                                      const BitsetView& bitset) const
 {
     FAISS_THROW_IF_NOT (is_trained);
     const float *xt = apply_chain (n, x);

@@ -19,6 +19,7 @@
 #ifdef MILVUS_GPU_VERSION
 #include <cuda_runtime.h>
 #endif
+#include <fiu/fiu-local.h>
 #include <sys/stat.h>
 #include <sys/sysinfo.h>
 #include <unistd.h>
@@ -65,16 +66,20 @@ int64_t
 parse_bytes(const std::string& str, std::string& err) {
     try {
         std::string s = str;
-        if (is_number(s))
+        if (is_number(s)) {
             return std::stoll(s);
-        if (s.length() == 0)
+        }
+        if (s.length() == 0) {
             return 0;
+        }
 
         auto last_two = s.substr(s.length() - 2, 2);
         auto last_one = s.substr(s.length() - 1);
-        if (is_alpha(last_two) && is_alpha(last_one))
-            if (last_one == "b" or last_one == "B")
+        if (is_alpha(last_two) && is_alpha(last_one)) {
+            if (last_one == "b" or last_one == "B") {
                 s = s.substr(0, s.length() - 1);
+            }
+        }
         auto& units = BYTE_UNITS;
         auto suffix = str_tolower(s.substr(s.length() - 1));
 
@@ -116,6 +121,7 @@ GetSystemAvailableThreads(int64_t& thread_count) {
     // threadCnt = std::thread::hardware_concurrency();
     thread_count = sysconf(_SC_NPROCESSORS_CONF);
     thread_count *= THREAD_MULTIPLY_CPU;
+    fiu_do_on("GetSystemAvailableThreads.zero_thread", thread_count = 0);
 
     if (thread_count == 0) {
         thread_count = 8;
@@ -129,6 +135,7 @@ ValidateGpuIndex(int32_t gpu_index) {
 #ifdef MILVUS_GPU_VERSION
     int num_devices = 0;
     auto cuda_err = cudaGetDeviceCount(&num_devices);
+    fiu_do_on("config.ValidateGpuIndex.get_device_count_fail", cuda_err = cudaError::cudaErrorUnknown);
 
     if (cuda_err != cudaSuccess) {
         std::string msg = "Failed to get gpu card number, cuda error:" + std::to_string(cuda_err);
@@ -149,6 +156,8 @@ ValidateGpuIndex(int32_t gpu_index) {
 #ifdef MILVUS_GPU_VERSION
 Status
 GetGpuMemory(int32_t gpu_index, int64_t& memory) {
+    fiu_return_on("config.GetGpuMemory.return_error", Status(SERVER_UNEXPECTED_ERROR, ""));
+
     cudaDeviceProp deviceProp;
     auto cuda_err = cudaGetDeviceProperties(&deviceProp, gpu_index);
     if (cuda_err) {
@@ -168,6 +177,7 @@ ValidateIpAddress(const std::string& ip_address) {
     struct in_addr address;
 
     int result = inet_pton(AF_INET, ip_address.c_str(), &address);
+    fiu_do_on("config.ValidateIpAddress.error_ip_result", result = 2);
 
     switch (result) {
         case 1:
@@ -192,6 +202,7 @@ ValidateStringIsNumber(const std::string& str) {
     }
     try {
         int64_t value = std::stol(str);
+        fiu_do_on("config.ValidateStringIsNumber.throw_exception", throw std::exception());
         if (value < 0) {
             return Status(SERVER_INVALID_ARGUMENT, "Negative number");
         }
@@ -203,6 +214,7 @@ ValidateStringIsNumber(const std::string& str) {
 
 Status
 ValidateStringIsBool(const std::string& str) {
+    fiu_return_on("ValidateStringNotBool", Status(SERVER_INVALID_ARGUMENT, "Invalid boolean: " + str));
     std::string s = str;
     std::transform(s.begin(), s.end(), s.begin(), ::tolower);
     if (s == "true" || s == "on" || s == "yes" || s == "1" || s == "false" || s == "off" || s == "no" || s == "0" ||
@@ -233,8 +245,8 @@ ValidateDbURI(const std::string& uri) {
     std::string hostRegex = "(.*)";
     std::string portRegex = "(.*)";
     std::string dbNameRegex = "(.*)";
-    std::string uriRegexStr = dialectRegex + "\\:\\/\\/" + usernameRegex + "\\:" + passwordRegex + "\\@" + hostRegex +
-                              "\\:" + portRegex + "\\/" + dbNameRegex;
+    std::string uriRegexStr = dialectRegex + R"(\:\/\/)" + usernameRegex + R"(\:)" + passwordRegex + R"(\@)" +
+                              hostRegex + R"(\:)" + portRegex + R"(\/)" + dbNameRegex;
     std::regex uriRegex(uriRegexStr);
     std::smatch pieces_match;
 
@@ -284,7 +296,7 @@ ValidateStoragePath(const std::string& path) {
     // and path must start with '/'.
     // examples below are invalid
     // '/a//a', '/a--/a', '/-a/a', '/a@#/a', 'aaa/sfs'
-    std::string path_pattern = "^\\/(\\w+-?\\/?)+$";
+    std::string path_pattern = R"(^\/(\w+-?\/?)+$)";
     std::regex regex(path_pattern);
 
     return std::regex_match(path, regex) ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Invalid file path");

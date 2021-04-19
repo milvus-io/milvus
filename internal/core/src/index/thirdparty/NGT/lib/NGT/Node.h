@@ -61,6 +61,7 @@ namespace NGT {
       void deserialize(std::stringstream & is) { NGT::Serializer::read(is, id); }
       void serializeAsText(std::ofstream &os) { NGT::Serializer::writeAsText(os, id);	}
       void deserializeAsText(std::ifstream &is) { NGT::Serializer::readAsText(is, id); }
+      virtual int64_t memSize() { return sizeof(id); }
     protected:
       NodeID id;
     };
@@ -69,6 +70,7 @@ namespace NGT {
     public:
       Object():object(0) {}
       bool operator<(const Object &o) const { return distance < o.distance; }
+      virtual int64_t memSize() { return sizeof(*this) + object->memSize(); } // size of object cannot be decided accurately
       static const double	Pivot;
       ObjectID		id;
       PersistentObject	*object;
@@ -125,6 +127,8 @@ namespace NGT {
       id.deserializeAsText(is);
       parent.deserializeAsText(is);
     }
+
+    virtual int64_t memSize() { return id.memSize() * 2 + pivot->memSize(); }
 
 #ifdef NGT_SHARED_MEMORY_ALLOCATOR
     void setPivot(PersistentObject &f, ObjectSpace &os, SharedMemoryAllocator &allocator) {
@@ -434,6 +438,8 @@ namespace NGT {
 #endif
       }
     }
+
+    virtual int64_t memSize() { return sizeof(childrenSize) + children->memSize() + childrenSize * sizeof(Distance) + Node::memSize(); }
 
     void show() {
       std::cout << "Show internal node " << childrenSize << ":";
@@ -747,6 +753,7 @@ namespace NGT {
     bool verify(size_t nobjs, std::vector<uint8_t> &status);
 #endif
 
+    virtual int64_t memSize() { return sizeof(objectSize) + objectIDs->memSize() * objectSize + Node::memSize(); }
 
 #ifdef NGT_NODE_USE_VECTOR
     size_t getObjectSize() { return objectIDs.size(); }

@@ -197,7 +197,7 @@ void IndexBinaryHNSW::train(idx_t n, const uint8_t *x)
 
 void IndexBinaryHNSW::search(idx_t n, const uint8_t *x, idx_t k,
                              int32_t *distances, idx_t *labels,
-                             ConcurrentBitsetPtr bitset) const
+                             const BitsetView& bitset) const
 {
 #pragma omp parallel
   {

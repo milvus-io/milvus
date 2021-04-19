@@ -31,7 +31,7 @@ void Index::train(idx_t /*n*/, const float* /*x*/) {
 
 void Index::range_search (idx_t , const float *, float,
                           RangeSearchResult *,
-                          ConcurrentBitsetPtr) const
+                          const BitsetView&) const
 {
   FAISS_THROW_MSG ("range search not implemented");
 }
@@ -62,12 +62,12 @@ void Index::add_with_ids_without_codes(idx_t n, const float* x, const idx_t* xid
 }
 
 #if 0
-void Index::get_vector_by_id (idx_t n, const idx_t *xid, float *x, ConcurrentBitsetPtr bitset) {
+void Index::get_vector_by_id (idx_t n, const idx_t *xid, float *x, const BitsetView& bitset) {
   FAISS_THROW_MSG ("get_vector_by_id not implemented for this type of index");
 }
 
 void Index::search_by_id (idx_t n, const idx_t *xid, idx_t k, float *distances, idx_t *labels,
-                          ConcurrentBitsetPtr bitset) {
+                          const BitsetView& bitset) {
   FAISS_THROW_MSG ("search_by_id not implemented for this type of index");
 }
 #endif
