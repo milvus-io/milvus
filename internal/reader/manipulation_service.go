@@ -2,7 +2,6 @@ package reader
 
 import (
 	"context"
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"log"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -36,10 +35,12 @@ func (dmService *manipulationService) start() {
 	consumerChannels := []string{"insert"}
 	consumerSubName := "subInsert"
 
-	outputStream := msgstream.NewOutputStream(dmService.pulsarURL, pulsarBufSize, consumerChannelSize, consumerChannels, consumerSubName, true)
-
-	(*outputStream).SetMsgMarshaler(nil, msgstream.GetMarshaler(internalPb.MsgType_kInsert))
-	go (*outputStream).Start()
+	// TODO:: load receiveBufSize from config file
+	outputStream := msgstream.NewPulsarTtMsgStream(dmService.ctx, 100)
+	outputStream.SetPulsarCient(dmService.pulsarURL)
+	unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
+	outputStream.CreatePulsarConsumers(consumerChannels, consumerSubName, unmarshalDispatcher, pulsarBufSize)
+	(*outputStream).Start()
 
 	dmService.initNodes()
 	go dmService.fg.Start()

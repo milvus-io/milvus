@@ -1,6 +1,7 @@
 package msgstream
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -27,7 +28,9 @@ func repackFunc(msgs []*TsMsg, hashKeys [][]int32) map[int32]*MsgPack {
 func getTsMsg(msgType MsgType, reqId UniqueID, hashValue int32) *TsMsg {
 	var tsMsg TsMsg
 	baseMsg := BaseMsg{
-		HashValues: []int32{hashValue},
+		BeginTimestamp: 0,
+		EndTimestamp:   0,
+		HashValues:     []int32{hashValue},
 	}
 	switch msgType {
 	case internalPb.MsgType_kInsert:
@@ -104,42 +107,82 @@ func getTsMsg(msgType MsgType, reqId UniqueID, hashValue int32) *TsMsg {
 	return &tsMsg
 }
 
-func initStream(pulsarAddress string,
+func getTimeTickMsg(msgType MsgType, reqId UniqueID, hashValue int32, time uint64) *TsMsg {
+	var tsMsg TsMsg
+	baseMsg := BaseMsg{
+		BeginTimestamp: 0,
+		EndTimestamp:   0,
+		HashValues:     []int32{hashValue},
+	}
+	timeTickResult := internalPb.TimeTickMsg{
+		MsgType:   internalPb.MsgType_kTimeTick,
+		PeerId:    reqId,
+		Timestamp: time,
+	}
+	timeTickMsg := &TimeTickMsg{
+		BaseMsg:     baseMsg,
+		TimeTickMsg: timeTickResult,
+	}
+	tsMsg = timeTickMsg
+	return &tsMsg
+}
+
+func initPulsarStream(pulsarAddress string,
 	producerChannels []string,
 	consumerChannels []string,
 	consumerSubName string,
-	msgPack *MsgPack,
-	inputMsgType MsgType,
-	outputMsgType MsgType,
-	broadCast bool) {
+	opts ...RepackFunc) (*MsgStream, *MsgStream) {
 
 	// set input stream
-	inputStream := PulsarMsgStream{}
+	inputStream := NewPulsarMsgStream(context.Background(), 100)
 	inputStream.SetPulsarCient(pulsarAddress)
-	inputStream.SetMsgMarshaler(GetMarshaler(inputMsgType), nil)
-	inputStream.SetProducers(producerChannels)
-	inputStream.SetRepackFunc(repackFunc)
+	inputStream.CreatePulsarProducers(producerChannels)
+	for _, opt := range opts {
+		inputStream.SetRepackFunc(opt)
+	}
+	var input MsgStream = inputStream
 
 	// set output stream
-	outputStream := PulsarMsgStream{}
+	outputStream := NewPulsarMsgStream(context.Background(), 100)
 	outputStream.SetPulsarCient(pulsarAddress)
-	outputStream.SetMsgMarshaler(nil, GetMarshaler(outputMsgType))
-	outputStream.SetConsumers(consumerChannels, consumerSubName, 100)
-	outputStream.InitMsgPackBuf(100)
+	unmarshalDispatcher := NewUnmarshalDispatcher()
+	outputStream.CreatePulsarConsumers(consumerChannels, consumerSubName, unmarshalDispatcher, 100)
 	outputStream.Start()
+	var output MsgStream = outputStream
 
-	//send msgPack
-	if broadCast {
-		inputStream.BroadCast(msgPack)
-	} else {
-		inputStream.Produce(msgPack)
-		//outputStream.Start()
+	return &input, &output
+}
+
+func initPulsarTtStream(pulsarAddress string,
+	producerChannels []string,
+	consumerChannels []string,
+	consumerSubName string,
+	opts ...RepackFunc) (*MsgStream, *MsgStream) {
+
+	// set input stream
+	inputStream := NewPulsarMsgStream(context.Background(), 100)
+	inputStream.SetPulsarCient(pulsarAddress)
+	inputStream.CreatePulsarProducers(producerChannels)
+	for _, opt := range opts {
+		inputStream.SetRepackFunc(opt)
 	}
+	var input MsgStream = inputStream
 
-	// receive msg
+	// set output stream
+	outputStream := NewPulsarTtMsgStream(context.Background(), 100)
+	outputStream.SetPulsarCient(pulsarAddress)
+	unmarshalDispatcher := NewUnmarshalDispatcher()
+	outputStream.CreatePulsarConsumers(consumerChannels, consumerSubName, unmarshalDispatcher, 100)
+	outputStream.Start()
+	var output MsgStream = outputStream
+
+	return &input, &output
+}
+
+func receiveMsg(outputStream *MsgStream, msgCount int) {
 	receiveCount := 0
 	for {
-		result := outputStream.Consume()
+		result := (*outputStream).Consume()
 		if len(result.Msgs) > 0 {
 			msgs := result.Msgs
 			for _, v := range msgs {
@@ -147,19 +190,13 @@ func initStream(pulsarAddress string,
 				fmt.Println("msg type: ", (*v).Type(), ", msg value: ", *v)
 			}
 		}
-		if broadCast {
-			if receiveCount >= len(msgPack.Msgs)*len(producerChannels) {
-				break
-			}
-		} else {
-			if receiveCount >= len(msgPack.Msgs) {
-				break
-			}
+		if receiveCount >= msgCount {
+			break
 		}
 	}
 }
 
-func TestStream_Insert(t *testing.T) {
+func TestStream_PulsarMsgStream_Insert(t *testing.T) {
 	pulsarAddress := "pulsar://localhost:6650"
 	producerChannels := []string{"insert1", "insert2"}
 	consumerChannels := []string{"insert1", "insert2"}
@@ -169,11 +206,12 @@ func TestStream_Insert(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 1, 1))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 3, 3))
 
-	//run stream
-	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, internalPb.MsgType_kInsert, internalPb.MsgType_kInsert, false)
+	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
+	(*inputStream).Produce(&msgPack)
+	receiveMsg(outputStream, len(msgPack.Msgs))
 }
 
-func TestStream_Delete(t *testing.T) {
+func TestStream_PulsarMsgStream_Delete(t *testing.T) {
 	pulsarAddress := "pulsar://localhost:6650"
 	producerChannels := []string{"delete"}
 	consumerChannels := []string{"delete"}
@@ -183,11 +221,12 @@ func TestStream_Delete(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kDelete, 1, 1))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kDelete, 3, 3))
 
-	//run stream
-	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, internalPb.MsgType_kDelete, internalPb.MsgType_kDelete, false)
+	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
+	(*inputStream).Produce(&msgPack)
+	receiveMsg(outputStream, len(msgPack.Msgs))
 }
 
-func TestStream_Search(t *testing.T) {
+func TestStream_PulsarMsgStream_Search(t *testing.T) {
 	pulsarAddress := "pulsar://localhost:6650"
 	producerChannels := []string{"search"}
 	consumerChannels := []string{"search"}
@@ -197,11 +236,12 @@ func TestStream_Search(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearch, 1, 1))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearch, 3, 3))
 
-	//run stream
-	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, internalPb.MsgType_kSearch, internalPb.MsgType_kSearch, false)
+	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
+	(*inputStream).Produce(&msgPack)
+	receiveMsg(outputStream, len(msgPack.Msgs))
 }
 
-func TestStream_SearchResult(t *testing.T) {
+func TestStream_PulsarMsgStream_SearchResult(t *testing.T) {
 	pulsarAddress := "pulsar://localhost:6650"
 	producerChannels := []string{"search"}
 	consumerChannels := []string{"search"}
@@ -211,11 +251,12 @@ func TestStream_SearchResult(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearchResult, 1, 1))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearchResult, 3, 3))
 
-	//run stream
-	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, internalPb.MsgType_kSearchResult, internalPb.MsgType_kSearchResult, false)
+	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
+	(*inputStream).Produce(&msgPack)
+	receiveMsg(outputStream, len(msgPack.Msgs))
 }
 
-func TestStream_TimeTick(t *testing.T) {
+func TestStream_PulsarMsgStream_TimeTick(t *testing.T) {
 	pulsarAddress := "pulsar://localhost:6650"
 	producerChannels := []string{"search"}
 	consumerChannels := []string{"search"}
@@ -225,11 +266,12 @@ func TestStream_TimeTick(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kTimeTick, 1, 1))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kTimeTick, 3, 3))
 
-	//run stream
-	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, internalPb.MsgType_kTimeTick, internalPb.MsgType_kTimeTick, false)
+	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
+	(*inputStream).Produce(&msgPack)
+	receiveMsg(outputStream, len(msgPack.Msgs))
 }
 
-func TestStream_BroadCast(t *testing.T) {
+func TestStream_PulsarMsgStream_BroadCast(t *testing.T) {
 	pulsarAddress := "pulsar://localhost:6650"
 	producerChannels := []string{"insert1", "insert2"}
 	consumerChannels := []string{"insert1", "insert2"}
@@ -239,6 +281,47 @@ func TestStream_BroadCast(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kTimeTick, 1, 1))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kTimeTick, 3, 3))
 
-	//run stream
-	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, internalPb.MsgType_kTimeTick, internalPb.MsgType_kTimeTick, true)
+	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
+	(*inputStream).Broadcast(&msgPack)
+	receiveMsg(outputStream, len(consumerChannels)*len(msgPack.Msgs))
+}
+
+func TestStream_PulsarMsgStream_RepackFunc(t *testing.T) {
+	pulsarAddress := "pulsar://localhost:6650"
+	producerChannels := []string{"insert1", "insert2"}
+	consumerChannels := []string{"insert1", "insert2"}
+	consumerSubName := "subInsert"
+
+	msgPack := MsgPack{}
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 3, 3))
+
+	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, repackFunc)
+	(*inputStream).Produce(&msgPack)
+	receiveMsg(outputStream, len(msgPack.Msgs))
+}
+
+func TestStream_PulsarTtMsgStream_Insert(t *testing.T) {
+	pulsarAddress := "pulsar://localhost:6650"
+	producerChannels := []string{"insert1", "insert2"}
+	consumerChannels := []string{"insert1", "insert2"}
+	consumerSubName := "subInsert"
+
+	msgPack0 := MsgPack{}
+	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(internalPb.MsgType_kTimeTick, 0, 0, 0))
+
+	msgPack1 := MsgPack{}
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(internalPb.MsgType_kInsert, 1, 1))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(internalPb.MsgType_kInsert, 3, 3))
+
+	msgPack2 := MsgPack{}
+	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(internalPb.MsgType_kTimeTick, 5, 5, 5))
+
+	inputStream, outputStream := initPulsarTtStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
+	(*inputStream).Broadcast(&msgPack0)
+	(*inputStream).Produce(&msgPack1)
+	(*inputStream).Broadcast(&msgPack2)
+	receiveMsg(outputStream, len(msgPack1.Msgs))
+	outputTtStream := (*outputStream).(*PulsarTtMsgStream)
+	fmt.Printf("timestamp = %v", outputTtStream.lastTimeStamp)
 }

@@ -1173,7 +1173,7 @@ type softTimeTickBarrier struct {
   ctx context.Context
 }
 
-func (ttBarrier *softTimeTickBarrier) GetTimeTick() Timestamp
+func (ttBarrier *softTimeTickBarrier) GetTimeTick() (Timestamp,error)
 func (ttBarrier *softTimeTickBarrier) Start() error
 
 func newSoftTimeTickBarrier(ctx context.Context, ttStream *MsgStream, peerIds []UniqueId, minTtInterval Timestamp) *softTimeTickBarrier
@@ -1193,7 +1193,7 @@ type hardTimeTickBarrier struct {
   ctx context.Context
 }
 
-func (ttBarrier *hardTimeTickBarrier) GetTimeTick() Timestamp
+func (ttBarrier *hardTimeTickBarrier) GetTimeTick() (Timestamp,error)
 func (ttBarrier *hardTimeTickBarrier) Start() error
 
 func newHardTimeTickBarrier(ctx context.Context, ttStream *MsgStream, peerIds []UniqueId) *softTimeTickBarrier
