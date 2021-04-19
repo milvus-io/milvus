@@ -34,11 +34,7 @@
 #### Generate the go files from proto file
 
 ```shell script
-    cd milvus-distributed
-    pwd_dir=`pwd`
-    export PATH=$PATH:$(go env GOPATH)/bin
-    export protoc=${pwd_dir}/cmake_build/thirdparty/protobuf/protobuf-build/protoc
-    ./scripts/proto_gen_go.sh
+    make check-proto-product
 ```
 
 #### Check code specifications
@@ -51,6 +47,16 @@
 
 ```shell script
     make all
+```
+
+#### Install docker-compose
+
+refer: https://docs.docker.com/compose/install/
+```shell script
+    sudo curl -L "https://github.com/docker/compose/releases/download/1.27.4/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    sudo chmod +x /usr/local/bin/docker-compose
+    sudo ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose
+    docker-compose --version
 ```
 
 #### Start service
