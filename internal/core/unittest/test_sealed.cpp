@@ -214,32 +214,6 @@ TEST(Sealed, with_predicate) {
     }
 }
 
-void
-SealedLoader(const GeneratedData& dataset, SegmentSealed& seg) {
-    // TODO
-    auto row_count = dataset.row_ids_.size();
-    {
-        LoadFieldDataInfo info;
-        info.blob = dataset.row_ids_.data();
-        info.row_count = dataset.row_ids_.size();
-        info.field_id = 0;  // field id for RowId
-        seg.LoadFieldData(info);
-    }
-    int field_offset = 0;
-    for (auto& meta : seg.get_schema().get_fields()) {
-        if (meta.is_vector()) {
-            ++field_offset;
-            continue;
-        }
-        LoadFieldDataInfo info;
-        info.field_id = meta.get_id().get();
-        info.row_count = row_count;
-        info.blob = dataset.cols_[field_offset].data();
-        seg.LoadFieldData(info);
-        ++field_offset;
-    }
-}
-
 TEST(Sealed, LoadFieldData) {
     auto dim = 16;
     auto topK = 5;
@@ -255,16 +229,7 @@ TEST(Sealed, LoadFieldData) {
 
     auto fakevec = dataset.get_col<float>(0);
 
-    auto conf = knowhere::Config{{knowhere::meta::DIM, dim},
-                                 {knowhere::meta::TOPK, topK},
-                                 {knowhere::IndexParams::nlist, 100},
-                                 {knowhere::IndexParams::nprobe, 10},
-                                 {knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
-                                 {knowhere::meta::DEVICEID, 0}};
-    auto database = knowhere::GenDataset(N, dim, fakevec.data());
-    auto indexing = std::make_shared<knowhere::IVF>();
-    indexing->Train(database, conf);
-    indexing->AddWithoutIds(database, conf);
+    auto indexing = GenIndexing(N, dim, fakevec.data());
 
     auto segment = CreateSealedSegment(schema);
     std::string dsl = R"({
@@ -305,7 +270,9 @@ TEST(Sealed, LoadFieldData) {
 
     SealedLoader(dataset, *segment);
     segment->DropFieldData(nothing_id);
+    segment->Search(plan.get(), ph_group_arr.data(), &time, 1);
 
+    segment->DropFieldData(fakevec_id);
     ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group_arr.data(), &time, 1));
 
     LoadIndexInfo vec_info;
@@ -336,4 +303,46 @@ TEST(Sealed, LoadFieldData) {
     ASSERT_EQ(json.dump(-2), json2.dump(-2));
     segment->DropFieldData(double_id);
     ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group_arr.data(), &time, 1));
+    auto std_json = Json::parse(R"(
+[
+ [
+  [
+   "980486->3.149221",
+   "579754->3.634295",
+   "318367->3.661235",
+   "265835->4.333358",
+   "302798->4.553688"
+  ],
+  [
+   "233390->7.931535",
+   "238958->8.109344",
+   "230645->8.439169",
+   "901939->8.658772",
+   "380328->8.731251"
+  ],
+  [
+   "897246->3.749835",
+   "750683->3.897577",
+   "857598->4.230977",
+   "299009->4.379639",
+   "440010->4.454046"
+  ],
+  [
+   "37641->3.783446",
+   "22628->4.719435",
+   "840855->4.782170",
+   "709627->5.063170",
+   "635836->5.156095"
+  ],
+  [
+   "810401->3.926393",
+   "46575->4.054171",
+   "201740->4.274491",
+   "669040->4.399628",
+   "231500->4.831223"
+  ]
+ ]
+]
+    )");
+    ASSERT_EQ(std_json.dump(-2), json.dump(-2));
 }

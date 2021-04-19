@@ -99,8 +99,8 @@ BinarySearchBruteForceFast(MetricType metric_type,
 }
 
 SubQueryResult
-FloatSearchBruteForce(const dataset::FloatQueryDataset& query_dataset,
-                      const float* chunk_data,
+FloatSearchBruteForce(const dataset::QueryDataset& query_dataset,
+                      const void* chunk_data_raw,
                       int64_t size_per_chunk,
                       const faiss::BitsetView& bitset) {
     auto metric_type = query_dataset.metric_type;
@@ -108,25 +108,29 @@ FloatSearchBruteForce(const dataset::FloatQueryDataset& query_dataset,
     auto topk = query_dataset.topk;
     auto dim = query_dataset.dim;
     SubQueryResult sub_qr(num_queries, topk, metric_type);
+    auto query_data = reinterpret_cast<const float*>(query_dataset.query_data);
+    auto chunk_data = reinterpret_cast<const float*>(chunk_data_raw);
 
     if (metric_type == MetricType::METRIC_L2) {
         faiss::float_maxheap_array_t buf{(size_t)num_queries, (size_t)topk, sub_qr.get_labels(), sub_qr.get_values()};
-        faiss::knn_L2sqr(query_dataset.query_data, chunk_data, dim, num_queries, size_per_chunk, &buf, bitset);
+        faiss::knn_L2sqr(query_data, chunk_data, dim, num_queries, size_per_chunk, &buf, bitset);
         return sub_qr;
     } else {
         faiss::float_minheap_array_t buf{(size_t)num_queries, (size_t)topk, sub_qr.get_labels(), sub_qr.get_values()};
-        faiss::knn_inner_product(query_dataset.query_data, chunk_data, dim, num_queries, size_per_chunk, &buf, bitset);
+        faiss::knn_inner_product(query_data, chunk_data, dim, num_queries, size_per_chunk, &buf, bitset);
         return sub_qr;
     }
 }
 
 SubQueryResult
-BinarySearchBruteForce(const dataset::BinaryQueryDataset& query_dataset,
-                       const uint8_t* binary_chunk,
+BinarySearchBruteForce(const dataset::QueryDataset& query_dataset,
+                       const void* chunk_data_raw,
                        int64_t size_per_chunk,
                        const faiss::BitsetView& bitset) {
     // TODO: refactor the internal function
-    return BinarySearchBruteForceFast(query_dataset.metric_type, query_dataset.dim, binary_chunk, size_per_chunk,
-                                      query_dataset.topk, query_dataset.num_queries, query_dataset.query_data, bitset);
+    auto query_data = reinterpret_cast<const uint8_t*>(query_dataset.query_data);
+    auto chunk_data = reinterpret_cast<const uint8_t*>(chunk_data_raw);
+    return BinarySearchBruteForceFast(query_dataset.metric_type, query_dataset.dim, chunk_data, size_per_chunk,
+                                      query_dataset.topk, query_dataset.num_queries, query_data, bitset);
 }
 }  // namespace milvus::query

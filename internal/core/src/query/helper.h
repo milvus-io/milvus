@@ -15,20 +15,12 @@
 namespace milvus::query {
 namespace dataset {
 
-struct FloatQueryDataset {
+struct QueryDataset {
     MetricType metric_type;
     int64_t num_queries;
     int64_t topk;
     int64_t dim;
-    const float* query_data;
-};
-
-struct BinaryQueryDataset {
-    MetricType metric_type;
-    int64_t num_queries;
-    int64_t topk;
-    int64_t dim;
-    const uint8_t* query_data;
+    const void* query_data;
 };
 
 }  // namespace dataset

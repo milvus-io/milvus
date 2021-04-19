@@ -590,8 +590,30 @@ func (qs *QueryService) watchDmChannels(dbID UniqueID, collectionID UniqueID) er
 	}
 
 	dmChannels := resp.Values
-	channels2NodeID := qs.shuffleChannelsToQueryNode(dmChannels)
+	watchedChannels2NodeID := make(map[string]UniqueID)
+	unWatchedChannels := make([]string, 0)
+	for _, channel := range dmChannels {
+		findChannel := false
+		for nodeID, node := range qs.queryNodes {
+			watchedChannels := node.dmChannelNames
+			for _, watchedChannel := range watchedChannels {
+				if channel == watchedChannel {
+					findChannel = true
+					watchedChannels2NodeID[channel] = nodeID
+					break
+				}
+			}
+		}
+		if !findChannel {
+			unWatchedChannels = append(unWatchedChannels, channel)
+		}
+	}
+	channels2NodeID := qs.shuffleChannelsToQueryNode(unWatchedChannels)
 	err = qs.replica.addDmChannels(dbID, collection.id, channels2NodeID)
+	if err != nil {
+		return err
+	}
+	err = qs.replica.addDmChannels(dbID, collection.id, watchedChannels2NodeID)
 	if err != nil {
 		return err
 	}
@@ -625,6 +647,9 @@ func (qs *QueryService) watchDmChannels(dbID UniqueID, collectionID UniqueID) er
 func (qs *QueryService) shuffleChannelsToQueryNode(dmChannels []string) map[string]UniqueID {
 	maxNumDMChannel := 0
 	res := make(map[string]UniqueID)
+	if len(dmChannels) == 0 {
+		return res
+	}
 	node2lens := make(map[UniqueID]int)
 	for id, node := range qs.queryNodes {
 		node2lens[id] = len(node.dmChannelNames)

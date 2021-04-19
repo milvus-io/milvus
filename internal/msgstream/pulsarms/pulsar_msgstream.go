@@ -490,9 +490,9 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 				wg.Add(1)
 				go ms.findTimeTick(consumer, eofMsgTimeStamp, &wg, &findMapMutex)
 			}
+			ms.consumerLock.Unlock()
 			wg.Wait()
 			timeStamp, ok := checkTimeTickMsg(eofMsgTimeStamp, isChannelReady, &findMapMutex)
-			ms.consumerLock.Unlock()
 			if !ok || timeStamp <= ms.lastTimeStamp {
 				//log.Printf("All timeTick's timestamps are inconsistent")
 				continue
@@ -501,6 +501,9 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 			msgPositions := make([]*internalpb2.MsgPosition, 0)
 			ms.unsolvedMutex.Lock()
 			for consumer, msgs := range ms.unsolvedBuf {
+				if len(msgs) == 0 {
+					continue
+				}
 				tempBuffer := make([]TsMsg, 0)
 				var timeTickMsg TsMsg
 				for _, v := range msgs {

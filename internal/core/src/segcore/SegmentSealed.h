@@ -8,7 +8,7 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
-
+#pragma once
 #include <memory>
 
 #include "SegmentInterface.h"
@@ -26,6 +26,10 @@ class SegmentSealed : public SegmentInternalInterface {
     DropIndex(const FieldId field_id) = 0;
     virtual void
     DropFieldData(const FieldId field_id) = 0;
+    virtual bool
+    HasIndex(FieldId field_id) const = 0;
+    virtual bool
+    HasFieldData(FieldId field_id) const = 0;
 };
 
 using SegmentSealedPtr = std::unique_ptr<SegmentSealed>;

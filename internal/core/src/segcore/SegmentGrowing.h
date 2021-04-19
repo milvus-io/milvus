@@ -32,6 +32,11 @@ struct RowBasedRawData {
     int64_t count;
 };
 
+struct ColumnBasedRawData {
+    std::vector<aligned_vector<uint8_t>> columns_;
+    int64_t count;
+};
+
 int
 TestABI();
 
@@ -54,6 +59,13 @@ class SegmentGrowing : public SegmentInternalInterface {
            const int64_t* row_ids,
            const Timestamp* timestamps,
            const RowBasedRawData& values) = 0;
+
+    virtual void
+    Insert(int64_t reserved_offset,
+           int64_t size,
+           const int64_t* row_ids,
+           const Timestamp* timestamps,
+           const ColumnBasedRawData& values) = 0;
 
     virtual int64_t
     PreDelete(int64_t size) = 0;
