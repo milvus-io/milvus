@@ -2,8 +2,8 @@ package test
 
 import (
 	"context"
-	msgpb "github.com/czs007/suvlim/internal/proto/message"
-	"github.com/czs007/suvlim/internal/writer"
+	msgpb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/writer"
 	"sync"
 	"testing"
 )

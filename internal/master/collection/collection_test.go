@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	messagepb "github.com/czs007/suvlim/internal/proto/message"
+	messagepb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/stretchr/testify/assert"
 )
 

@@ -3,10 +3,10 @@ package storage
 import (
 	"context"
 	"errors"
-	S3Driver "github.com/czs007/suvlim/internal/storage/internal/S3"
-	minIODriver "github.com/czs007/suvlim/internal/storage/internal/minio"
-	tikvDriver "github.com/czs007/suvlim/internal/storage/internal/tikv"
-	"github.com/czs007/suvlim/internal/storage/type"
+	S3Driver "github.com/zilliztech/milvus-distributed/internal/storage/internal/S3"
+	minIODriver "github.com/zilliztech/milvus-distributed/internal/storage/internal/minio"
+	tikvDriver "github.com/zilliztech/milvus-distributed/internal/storage/internal/tikv"
+	"github.com/zilliztech/milvus-distributed/internal/storage/type"
 )
 
 func NewStore(ctx context.Context, driver storagetype.DriverType) (storagetype.Store, error) {

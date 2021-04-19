@@ -2,7 +2,7 @@ package S3_driver_test
 
 import (
 	"context"
-	s3_driver "github.com/czs007/suvlim/internal/storage/internal/S3"
+	s3_driver "github.com/zilliztech/milvus-distributed/internal/storage/internal/S3"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )

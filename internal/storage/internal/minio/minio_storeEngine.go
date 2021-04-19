@@ -3,8 +3,8 @@ package minio_driver
 import (
 	"bytes"
 	"context"
-	"github.com/czs007/suvlim/internal/conf"
-	. "github.com/czs007/suvlim/internal/storage/type"
+	"github.com/zilliztech/milvus-distributed/internal/conf"
+	. "github.com/zilliztech/milvus-distributed/internal/storage/type"
 	"github.com/minio/minio-go/v7"
 	"io"
 )

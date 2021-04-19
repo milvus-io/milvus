@@ -5,8 +5,8 @@ import (
 	"path"
 	"time"
 
-	"github.com/czs007/suvlim/internal/errors"
-	"github.com/czs007/suvlim/internal/util/etcdutil"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/util/etcdutil"
 	"github.com/pingcap/log"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"

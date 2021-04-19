@@ -14,8 +14,8 @@ package reader
 import "C"
 import (
 	"fmt"
-	"github.com/czs007/suvlim/internal/errors"
-	msgPb "github.com/czs007/suvlim/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
+	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/stretchr/testify/assert"
 	"strconv"
 	"unsafe"
