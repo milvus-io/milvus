@@ -116,21 +116,18 @@ QueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
         segcore::merge_into(num_queries, topK, final_dis.data(), final_uids.data(), buf_dis.data(), buf_uids.data());
     }
 
-    results.result_distances_ = std::move(final_dis);
-    results.internal_seg_offsets_ = std::move(final_uids);
-    results.topK_ = topK;
-    results.num_queries_ = num_queries;
-
-    // TODO: deprecated code begin
-    final_uids = results.internal_seg_offsets_;
+    // step 5: convert offset to uids
     for (auto& id : final_uids) {
         if (id == -1) {
             continue;
         }
         id = record.uids_[id];
     }
+
     results.result_ids_ = std::move(final_uids);
-    // TODO: deprecated code end
+    results.result_distances_ = std::move(final_dis);
+    results.topK_ = topK;
+    results.num_queries_ = num_queries;
 
     return Status::OK();
 }

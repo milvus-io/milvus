@@ -141,11 +141,8 @@ struct QueryResult {
     QueryResult() = default;
     QueryResult(uint64_t num_queries, uint64_t topK) : topK_(topK), num_queries_(num_queries) {
         auto count = get_row_count();
-        result_distances_.resize(count);
-        internal_seg_offsets_.resize(count);
-
-        // TODO: deprecated
         result_ids_.resize(count);
+        result_distances_.resize(count);
     }
 
     [[nodiscard]] uint64_t
@@ -156,24 +153,10 @@ struct QueryResult {
     uint64_t num_queries_;
     uint64_t topK_;
     //    uint64_t total_row_count_;  // total_row_count_ = topK * num_queries_
-
-    // vector<tuple<Score, SegId, Offset>> data_reduced;
-
-    // vector<tuple<Score, SegId, Offset, RawData>>
-
-    // map<SegId, vector<tuple<DataOffset, ResLoc>>>
-    uint64_t seg_id_;
-    std::vector<float> result_distances_;
-
-    // TODO(gexi): utilize these field
-    std::vector<int64_t> internal_seg_offsets_;
-    std::vector<int64_t> result_offsets_;
-    std::vector<std::vector<char>> row_data_;
-
-    // TODO: deprecated, use row_data directly
-    std::vector<idx_t> result_ids_;
+    engine::ResultIds result_ids_;  // top1, top2, ..;
+    engine::ResultDistances result_distances_;
+    // engine::DataChunkPtr data_chunk_;
 };
-
 using QueryResultPtr = std::shared_ptr<QueryResult>;
 
 }  // namespace engine

@@ -72,7 +72,6 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_schema_2eproto::offsets[] PROT
   ~0u,  // no _oneof_case_
   ~0u,  // no _weak_field_map_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::FieldSchema, name_),
-  PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::FieldSchema, is_primary_key_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::FieldSchema, description_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::FieldSchema, data_type_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::FieldSchema, type_params_),
@@ -89,7 +88,7 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_schema_2eproto::offsets[] PROT
 };
 static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
   { 0, -1, sizeof(::milvus::proto::schema::FieldSchema)},
-  { 11, -1, sizeof(::milvus::proto::schema::CollectionSchema)},
+  { 10, -1, sizeof(::milvus::proto::schema::CollectionSchema)},
 };
 
 static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
@@ -99,21 +98,21 @@ static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] =
 
 const char descriptor_table_protodef_schema_2eproto[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) =
   "\n\014schema.proto\022\023milvus.proto.schema\032\014com"
-  "mon.proto\"\353\001\n\013FieldSchema\022\014\n\004name\030\001 \001(\t\022"
-  "\026\n\016is_primary_key\030\002 \001(\010\022\023\n\013description\030\003"
-  " \001(\t\0220\n\tdata_type\030\004 \001(\0162\035.milvus.proto.s"
-  "chema.DataType\0226\n\013type_params\030\005 \003(\0132!.mi"
-  "lvus.proto.common.KeyValuePair\0227\n\014index_"
-  "params\030\006 \003(\0132!.milvus.proto.common.KeyVa"
-  "luePair\"w\n\020CollectionSchema\022\014\n\004name\030\001 \001("
-  "\t\022\023\n\013description\030\002 \001(\t\022\016\n\006autoID\030\003 \001(\010\0220"
-  "\n\006fields\030\004 \003(\0132 .milvus.proto.schema.Fie"
-  "ldSchema*\221\001\n\010DataType\022\010\n\004NONE\020\000\022\010\n\004BOOL\020"
-  "\001\022\010\n\004INT8\020\002\022\t\n\005INT16\020\003\022\t\n\005INT32\020\004\022\t\n\005INT"
-  "64\020\005\022\t\n\005FLOAT\020\n\022\n\n\006DOUBLE\020\013\022\n\n\006STRING\020\024\022"
-  "\021\n\rVECTOR_BINARY\020d\022\020\n\014VECTOR_FLOAT\020eBBZ@"
-  "github.com/zilliztech/milvus-distributed"
-  "/internal/proto/schemapbb\006proto3"
+  "mon.proto\"\323\001\n\013FieldSchema\022\014\n\004name\030\001 \001(\t\022"
+  "\023\n\013description\030\002 \001(\t\0220\n\tdata_type\030\003 \001(\0162"
+  "\035.milvus.proto.schema.DataType\0226\n\013type_p"
+  "arams\030\004 \003(\0132!.milvus.proto.common.KeyVal"
+  "uePair\0227\n\014index_params\030\005 \003(\0132!.milvus.pr"
+  "oto.common.KeyValuePair\"w\n\020CollectionSch"
+  "ema\022\014\n\004name\030\001 \001(\t\022\023\n\013description\030\002 \001(\t\022\016"
+  "\n\006autoID\030\003 \001(\010\0220\n\006fields\030\004 \003(\0132 .milvus."
+  "proto.schema.FieldSchema*\221\001\n\010DataType\022\010\n"
+  "\004NONE\020\000\022\010\n\004BOOL\020\001\022\010\n\004INT8\020\002\022\t\n\005INT16\020\003\022\t"
+  "\n\005INT32\020\004\022\t\n\005INT64\020\005\022\t\n\005FLOAT\020\n\022\n\n\006DOUBL"
+  "E\020\013\022\n\n\006STRING\020\024\022\021\n\rVECTOR_BINARY\020d\022\020\n\014VE"
+  "CTOR_FLOAT\020eBBZ@github.com/zilliztech/mi"
+  "lvus-distributed/internal/proto/schemapb"
+  "b\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_schema_2eproto_deps[1] = {
   &::descriptor_table_common_2eproto,
@@ -125,7 +124,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_sch
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_schema_2eproto_once;
 static bool descriptor_table_schema_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_schema_2eproto = {
-  &descriptor_table_schema_2eproto_initialized, descriptor_table_protodef_schema_2eproto, "schema.proto", 632,
+  &descriptor_table_schema_2eproto_initialized, descriptor_table_protodef_schema_2eproto, "schema.proto", 608,
   &descriptor_table_schema_2eproto_once, descriptor_table_schema_2eproto_sccs, descriptor_table_schema_2eproto_deps, 2, 1,
   schemas, file_default_instances, TableStruct_schema_2eproto::offsets,
   file_level_metadata_schema_2eproto, 2, file_level_enum_descriptors_schema_2eproto, file_level_service_descriptors_schema_2eproto,
@@ -193,9 +192,7 @@ FieldSchema::FieldSchema(const FieldSchema& from)
   if (!from.description().empty()) {
     description_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.description_);
   }
-  ::memcpy(&is_primary_key_, &from.is_primary_key_,
-    static_cast<size_t>(reinterpret_cast<char*>(&data_type_) -
-    reinterpret_cast<char*>(&is_primary_key_)) + sizeof(data_type_));
+  data_type_ = from.data_type_;
   // @@protoc_insertion_point(copy_constructor:milvus.proto.schema.FieldSchema)
 }
 
@@ -203,9 +200,7 @@ void FieldSchema::SharedCtor() {
   ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_FieldSchema_schema_2eproto.base);
   name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   description_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-  ::memset(&is_primary_key_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&data_type_) -
-      reinterpret_cast<char*>(&is_primary_key_)) + sizeof(data_type_));
+  data_type_ = 0;
 }
 
 FieldSchema::~FieldSchema() {
@@ -237,9 +232,7 @@ void FieldSchema::Clear() {
   index_params_.Clear();
   name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   description_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-  ::memset(&is_primary_key_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&data_type_) -
-      reinterpret_cast<char*>(&is_primary_key_)) + sizeof(data_type_));
+  data_type_ = 0;
   _internal_metadata_.Clear();
 }
 
@@ -258,50 +251,43 @@ const char* FieldSchema::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // bool is_primary_key = 2;
+      // string description = 2;
       case 2:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16)) {
-          is_primary_key_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
-          CHK_(ptr);
-        } else goto handle_unusual;
-        continue;
-      // string description = 3;
-      case 3:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 26)) {
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 18)) {
           ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_description(), ptr, ctx, "milvus.proto.schema.FieldSchema.description");
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // .milvus.proto.schema.DataType data_type = 4;
-      case 4:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 32)) {
+      // .milvus.proto.schema.DataType data_type = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 24)) {
           ::PROTOBUF_NAMESPACE_ID::uint64 val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
           CHK_(ptr);
           set_data_type(static_cast<::milvus::proto::schema::DataType>(val));
         } else goto handle_unusual;
         continue;
-      // repeated .milvus.proto.common.KeyValuePair type_params = 5;
-      case 5:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 42)) {
+      // repeated .milvus.proto.common.KeyValuePair type_params = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 34)) {
           ptr -= 1;
           do {
             ptr += 1;
             ptr = ctx->ParseMessage(add_type_params(), ptr);
             CHK_(ptr);
             if (!ctx->DataAvailable(ptr)) break;
-          } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 42);
+          } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 34);
         } else goto handle_unusual;
         continue;
-      // repeated .milvus.proto.common.KeyValuePair index_params = 6;
-      case 6:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 50)) {
+      // repeated .milvus.proto.common.KeyValuePair index_params = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 42)) {
           ptr -= 1;
           do {
             ptr += 1;
             ptr = ctx->ParseMessage(add_index_params(), ptr);
             CHK_(ptr);
             if (!ctx->DataAvailable(ptr)) break;
-          } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 50);
+          } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 42);
         } else goto handle_unusual;
         continue;
       default: {
@@ -349,22 +335,9 @@ bool FieldSchema::MergePartialFromCodedStream(
         break;
       }
 
-      // bool is_primary_key = 2;
+      // string description = 2;
       case 2: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (16 & 0xFF)) {
-
-          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   bool, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_BOOL>(
-                 input, &is_primary_key_)));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      // string description = 3;
-      case 3: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (26 & 0xFF)) {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (18 & 0xFF)) {
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
                 input, this->mutable_description()));
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
@@ -377,9 +350,9 @@ bool FieldSchema::MergePartialFromCodedStream(
         break;
       }
 
-      // .milvus.proto.schema.DataType data_type = 4;
-      case 4: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (32 & 0xFF)) {
+      // .milvus.proto.schema.DataType data_type = 3;
+      case 3: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (24 & 0xFF)) {
           int value = 0;
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
                    int, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_ENUM>(
@@ -391,9 +364,9 @@ bool FieldSchema::MergePartialFromCodedStream(
         break;
       }
 
-      // repeated .milvus.proto.common.KeyValuePair type_params = 5;
-      case 5: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (42 & 0xFF)) {
+      // repeated .milvus.proto.common.KeyValuePair type_params = 4;
+      case 4: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (34 & 0xFF)) {
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadMessage(
                 input, add_type_params()));
         } else {
@@ -402,9 +375,9 @@ bool FieldSchema::MergePartialFromCodedStream(
         break;
       }
 
-      // repeated .milvus.proto.common.KeyValuePair index_params = 6;
-      case 6: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (50 & 0xFF)) {
+      // repeated .milvus.proto.common.KeyValuePair index_params = 5;
+      case 5: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (42 & 0xFF)) {
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadMessage(
                 input, add_index_params()));
         } else {
@@ -450,41 +423,36 @@ void FieldSchema::SerializeWithCachedSizes(
       1, this->name(), output);
   }
 
-  // bool is_primary_key = 2;
-  if (this->is_primary_key() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBool(2, this->is_primary_key(), output);
-  }
-
-  // string description = 3;
+  // string description = 2;
   if (this->description().size() > 0) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
       this->description().data(), static_cast<int>(this->description().length()),
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
       "milvus.proto.schema.FieldSchema.description");
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
-      3, this->description(), output);
+      2, this->description(), output);
   }
 
-  // .milvus.proto.schema.DataType data_type = 4;
+  // .milvus.proto.schema.DataType data_type = 3;
   if (this->data_type() != 0) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnum(
-      4, this->data_type(), output);
+      3, this->data_type(), output);
   }
 
-  // repeated .milvus.proto.common.KeyValuePair type_params = 5;
+  // repeated .milvus.proto.common.KeyValuePair type_params = 4;
   for (unsigned int i = 0,
       n = static_cast<unsigned int>(this->type_params_size()); i < n; i++) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteMessageMaybeToArray(
-      5,
+      4,
       this->type_params(static_cast<int>(i)),
       output);
   }
 
-  // repeated .milvus.proto.common.KeyValuePair index_params = 6;
+  // repeated .milvus.proto.common.KeyValuePair index_params = 5;
   for (unsigned int i = 0,
       n = static_cast<unsigned int>(this->index_params_size()); i < n; i++) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteMessageMaybeToArray(
-      6,
+      5,
       this->index_params(static_cast<int>(i)),
       output);
   }
@@ -513,12 +481,7 @@ void FieldSchema::SerializeWithCachedSizes(
         1, this->name(), target);
   }
 
-  // bool is_primary_key = 2;
-  if (this->is_primary_key() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBoolToArray(2, this->is_primary_key(), target);
-  }
-
-  // string description = 3;
+  // string description = 2;
   if (this->description().size() > 0) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
       this->description().data(), static_cast<int>(this->description().length()),
@@ -526,29 +489,29 @@ void FieldSchema::SerializeWithCachedSizes(
       "milvus.proto.schema.FieldSchema.description");
     target =
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
-        3, this->description(), target);
+        2, this->description(), target);
   }
 
-  // .milvus.proto.schema.DataType data_type = 4;
+  // .milvus.proto.schema.DataType data_type = 3;
   if (this->data_type() != 0) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
-      4, this->data_type(), target);
+      3, this->data_type(), target);
   }
 
-  // repeated .milvus.proto.common.KeyValuePair type_params = 5;
+  // repeated .milvus.proto.common.KeyValuePair type_params = 4;
   for (unsigned int i = 0,
       n = static_cast<unsigned int>(this->type_params_size()); i < n; i++) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessageToArray(
-        5, this->type_params(static_cast<int>(i)), target);
+        4, this->type_params(static_cast<int>(i)), target);
   }
 
-  // repeated .milvus.proto.common.KeyValuePair index_params = 6;
+  // repeated .milvus.proto.common.KeyValuePair index_params = 5;
   for (unsigned int i = 0,
       n = static_cast<unsigned int>(this->index_params_size()); i < n; i++) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessageToArray(
-        6, this->index_params(static_cast<int>(i)), target);
+        5, this->index_params(static_cast<int>(i)), target);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -572,7 +535,7 @@ size_t FieldSchema::ByteSizeLong() const {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // repeated .milvus.proto.common.KeyValuePair type_params = 5;
+  // repeated .milvus.proto.common.KeyValuePair type_params = 4;
   {
     unsigned int count = static_cast<unsigned int>(this->type_params_size());
     total_size += 1UL * count;
@@ -583,7 +546,7 @@ size_t FieldSchema::ByteSizeLong() const {
     }
   }
 
-  // repeated .milvus.proto.common.KeyValuePair index_params = 6;
+  // repeated .milvus.proto.common.KeyValuePair index_params = 5;
   {
     unsigned int count = static_cast<unsigned int>(this->index_params_size());
     total_size += 1UL * count;
@@ -601,19 +564,14 @@ size_t FieldSchema::ByteSizeLong() const {
         this->name());
   }
 
-  // string description = 3;
+  // string description = 2;
   if (this->description().size() > 0) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
         this->description());
   }
 
-  // bool is_primary_key = 2;
-  if (this->is_primary_key() != 0) {
-    total_size += 1 + 1;
-  }
-
-  // .milvus.proto.schema.DataType data_type = 4;
+  // .milvus.proto.schema.DataType data_type = 3;
   if (this->data_type() != 0) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->data_type());
@@ -656,9 +614,6 @@ void FieldSchema::MergeFrom(const FieldSchema& from) {
 
     description_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.description_);
   }
-  if (from.is_primary_key() != 0) {
-    set_is_primary_key(from.is_primary_key());
-  }
   if (from.data_type() != 0) {
     set_data_type(from.data_type());
   }
@@ -691,7 +646,6 @@ void FieldSchema::InternalSwap(FieldSchema* other) {
     GetArenaNoVirtual());
   description_.Swap(&other->description_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
-  swap(is_primary_key_, other->is_primary_key_);
   swap(data_type_, other->data_type_);
 }
 

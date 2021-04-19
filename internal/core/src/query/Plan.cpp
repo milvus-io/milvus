@@ -133,12 +133,6 @@ CreatePlanImplNaive(const Schema& schema, const std::string& dsl_str) {
         PanicInfo("Unsupported DSL");
     }
     plan->plan_node_->predicate_ = std::move(predicate);
-    // TODO: target_entry parser
-    // if schema autoid is true,
-    //     prepend target_entries_ with row_id
-    // else
-    //     with primary_key
-    //
     return plan;
 }
 

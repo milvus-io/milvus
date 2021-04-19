@@ -72,9 +72,6 @@ class SegmentBase {
            int num_groups,
            QueryResult& results) = 0;
 
-    virtual Status
-    FillTargetEntry(const query::Plan* Plan, QueryResult& results) = 0;
-
     // stop receive insert requests
     virtual Status
     Close() = 0;

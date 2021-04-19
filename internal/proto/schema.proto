@@ -30,11 +30,10 @@ enum DataType {
  */
 message FieldSchema {
     string name = 1;
-    bool is_primary_key = 2;
-    string description = 3;
-    DataType data_type = 4;
-    repeated common.KeyValuePair type_params = 5;
-    repeated common.KeyValuePair index_params = 6;
+    string description = 2;
+    DataType data_type = 3;
+    repeated common.KeyValuePair type_params = 4;
+    repeated common.KeyValuePair index_params = 5;
 }
 
 /**

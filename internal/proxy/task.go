@@ -383,13 +383,11 @@ func (qt *QueryTask) PostExecute() error {
 				qt.result = &servicepb.QueryResult{}
 				return nil
 			}
-
 			n := len(searchResults[0].Hits) // n
 			if n <= 0 {
 				qt.result = &servicepb.QueryResult{}
 				return nil
 			}
-
 			hits := make([][]*servicepb.Hits, rlen)
 			for i, searchResult := range searchResults {
 				hits[i] = make([]*servicepb.Hits, n)
@@ -401,15 +399,18 @@ func (qt *QueryTask) PostExecute() error {
 					}
 				}
 			}
-
 			k := len(hits[0][0].IDs)
-			qt.result = &servicepb.QueryResult{
+			queryResult := &servicepb.QueryResult{
 				Status: &commonpb.Status{
 					ErrorCode: 0,
 				},
 				Hits: make([][]byte, 0),
 			}
-
+			// reduce by score, TODO: use better algorithm
+			// use merge-sort here, the number of ways to merge is `rlen`
+			// in this process, we must make sure:
+			//		len(queryResult.Hits) == n
+			//		len(queryResult.Hits[i].Ids) == k for i in range(n)
 			for i := 0; i < n; i++ { // n
 				locs := make([]int, rlen)
 				reducedHits := &servicepb.Hits{
@@ -417,7 +418,6 @@ func (qt *QueryTask) PostExecute() error {
 					RowData: make([][]byte, 0),
 					Scores:  make([]float32, 0),
 				}
-
 				for j := 0; j < k; j++ { // k
 					choice, minDistance := 0, float32(math.MaxFloat32)
 					for q, loc := range locs { // query num, the number of ways to merge
@@ -439,11 +439,12 @@ func (qt *QueryTask) PostExecute() error {
 				if err != nil {
 					return err
 				}
-				qt.result.Hits = append(qt.result.Hits, reducedHitsBs)
+				queryResult.Hits = append(queryResult.Hits, reducedHitsBs)
 			}
-			return nil
+			qt.result = queryResult
 		}
 	}
+	//return nil
 }
 
 type HasCollectionTask struct {

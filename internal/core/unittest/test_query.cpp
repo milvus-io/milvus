@@ -20,7 +20,6 @@
 #include "query/generated/ExecPlanNodeVisitor.h"
 #include "query/PlanImpl.h"
 #include "segcore/SegmentSmallIndex.h"
-#include "pb/schema.pb.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -322,82 +321,4 @@ TEST(Query, ExecWihtoutPredicate) {
 
     Json json{results};
     std::cout << json.dump(2);
-}
-
-TEST(Query, FillSegment) {
-    namespace pb = milvus::proto;
-    pb::schema::CollectionSchema proto;
-    proto.set_name("col");
-    proto.set_description("asdfhsalkgfhsadg");
-    proto.set_autoid(true);
-
-    {
-        auto field = proto.add_fields();
-        field->set_name("fakevec");
-        field->set_is_primary_key(false);
-        field->set_description("asdgfsagf");
-        field->set_data_type(pb::schema::DataType::VECTOR_FLOAT);
-        auto param = field->add_type_params();
-        param->set_key("dim");
-        param->set_value("16");
-    }
-
-    {
-        auto field = proto.add_fields();
-        field->set_name("the_key");
-        field->set_is_primary_key(true);
-        field->set_description("asdgfsagf");
-        field->set_data_type(pb::schema::DataType::INT32);
-    }
-
-    auto schema = Schema::ParseFrom(proto);
-    auto segment = CreateSegment(schema);
-    int N = 100000;
-    auto dataset = DataGen(schema, N);
-    segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
-    std::string dsl = R"({
-        "bool": {
-            "must": [
-            {
-                "vector": {
-                    "fakevec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 5
-                    }
-                }
-            }
-            ]
-        }
-    })";
-    auto plan = CreatePlan(*schema, dsl);
-    auto ph_proto = CreatePlaceholderGroup(10, 16, 443);
-    auto ph = ParsePlaceholderGroup(plan.get(), ph_proto.SerializeAsString());
-    std::vector<const PlaceholderGroup*> groups = {ph.get()};
-    std::vector<Timestamp> timestamps = {N * 2UL};
-    QueryResult result;
-    segment->Search(plan.get(), groups.data(), timestamps.data(), 1, result);
-
-    // TODO: deprecated result_ids_
-    ASSERT_EQ(result.result_ids_, result.internal_seg_offsets_);
-    auto topk = 5;
-    auto num_queries = 10;
-
-    result.result_offsets_.resize(topk * num_queries);
-    segment->FillTargetEntry(plan.get(), result);
-    auto ans = result.row_data_;
-    ASSERT_EQ(ans.size(), topk * num_queries);
-    int64_t std_index = 0;
-    for (auto& vec : ans) {
-        ASSERT_EQ(vec.size(), sizeof(int64_t));
-        int64_t val;
-        memcpy(&val, vec.data(), sizeof(int64_t));
-        auto std_val = result.result_ids_[std_index];
-        ASSERT_EQ(val, std_val);
-        ++std_index;
-    }
 }

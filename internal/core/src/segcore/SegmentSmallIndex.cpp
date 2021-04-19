@@ -344,39 +344,5 @@ SegmentSmallIndex::Search(const query::Plan* plan,
     results = visitor.get_moved_result(*plan->plan_node_);
     return Status::OK();
 }
-Status
-SegmentSmallIndex::FillTargetEntry(const query::Plan* plan, QueryResult& results) {
-    AssertInfo(plan, "empty plan");
-    auto size = results.result_distances_.size();
-    Assert(results.internal_seg_offsets_.size() == size);
-    Assert(results.result_offsets_.size() == size);
-    Assert(results.row_data_.size() == 0);
-
-    if (plan->schema_.get_is_auto_id()) {
-        auto& uids = record_.uids_;
-        for (int64_t i = 0; i < size; ++i) {
-            auto seg_offset = results.internal_seg_offsets_[i];
-            auto row_id = uids[seg_offset];
-            std::vector<char> blob(sizeof(row_id));
-            memcpy(blob.data(), &row_id, sizeof(row_id));
-            results.row_data_.emplace_back(std::move(blob));
-        }
-    } else {
-        auto key_offset_opt = schema_->get_primary_key_offset();
-        Assert(key_offset_opt.has_value());
-        auto key_offset = key_offset_opt.value();
-        auto field_meta = schema_->operator[](key_offset);
-        Assert(field_meta.get_data_type() == DataType::INT64);
-        auto uids = record_.get_scalar_entity<int64_t>(key_offset);
-        for (int64_t i = 0; i < size; ++i) {
-            auto seg_offset = results.internal_seg_offsets_[i];
-            auto row_id = uids->operator[](seg_offset);
-            std::vector<char> blob(sizeof(row_id));
-            memcpy(blob.data(), &row_id, sizeof(row_id));
-            results.row_data_.emplace_back(std::move(blob));
-        }
-    }
-    return Status::OK();
-}
 
 }  // namespace milvus::segcore

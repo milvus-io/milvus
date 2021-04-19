@@ -225,14 +225,13 @@ class FieldSchema :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kTypeParamsFieldNumber = 5,
-    kIndexParamsFieldNumber = 6,
+    kTypeParamsFieldNumber = 4,
+    kIndexParamsFieldNumber = 5,
     kNameFieldNumber = 1,
-    kDescriptionFieldNumber = 3,
-    kIsPrimaryKeyFieldNumber = 2,
-    kDataTypeFieldNumber = 4,
+    kDescriptionFieldNumber = 2,
+    kDataTypeFieldNumber = 3,
   };
-  // repeated .milvus.proto.common.KeyValuePair type_params = 5;
+  // repeated .milvus.proto.common.KeyValuePair type_params = 4;
   int type_params_size() const;
   void clear_type_params();
   ::milvus::proto::common::KeyValuePair* mutable_type_params(int index);
@@ -243,7 +242,7 @@ class FieldSchema :
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >&
       type_params() const;
 
-  // repeated .milvus.proto.common.KeyValuePair index_params = 6;
+  // repeated .milvus.proto.common.KeyValuePair index_params = 5;
   int index_params_size() const;
   void clear_index_params();
   ::milvus::proto::common::KeyValuePair* mutable_index_params(int index);
@@ -265,7 +264,7 @@ class FieldSchema :
   std::string* release_name();
   void set_allocated_name(std::string* name);
 
-  // string description = 3;
+  // string description = 2;
   void clear_description();
   const std::string& description() const;
   void set_description(const std::string& value);
@@ -276,12 +275,7 @@ class FieldSchema :
   std::string* release_description();
   void set_allocated_description(std::string* description);
 
-  // bool is_primary_key = 2;
-  void clear_is_primary_key();
-  bool is_primary_key() const;
-  void set_is_primary_key(bool value);
-
-  // .milvus.proto.schema.DataType data_type = 4;
+  // .milvus.proto.schema.DataType data_type = 3;
   void clear_data_type();
   ::milvus::proto::schema::DataType data_type() const;
   void set_data_type(::milvus::proto::schema::DataType value);
@@ -295,7 +289,6 @@ class FieldSchema :
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair > index_params_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr description_;
-  bool is_primary_key_;
   int data_type_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_schema_2eproto;
@@ -532,21 +525,7 @@ inline void FieldSchema::set_allocated_name(std::string* name) {
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.schema.FieldSchema.name)
 }
 
-// bool is_primary_key = 2;
-inline void FieldSchema::clear_is_primary_key() {
-  is_primary_key_ = false;
-}
-inline bool FieldSchema::is_primary_key() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.schema.FieldSchema.is_primary_key)
-  return is_primary_key_;
-}
-inline void FieldSchema::set_is_primary_key(bool value) {
-  
-  is_primary_key_ = value;
-  // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldSchema.is_primary_key)
-}
-
-// string description = 3;
+// string description = 2;
 inline void FieldSchema::clear_description() {
   description_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
@@ -597,7 +576,7 @@ inline void FieldSchema::set_allocated_description(std::string* description) {
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.schema.FieldSchema.description)
 }
 
-// .milvus.proto.schema.DataType data_type = 4;
+// .milvus.proto.schema.DataType data_type = 3;
 inline void FieldSchema::clear_data_type() {
   data_type_ = 0;
 }
@@ -611,7 +590,7 @@ inline void FieldSchema::set_data_type(::milvus::proto::schema::DataType value) 
   // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldSchema.data_type)
 }
 
-// repeated .milvus.proto.common.KeyValuePair type_params = 5;
+// repeated .milvus.proto.common.KeyValuePair type_params = 4;
 inline int FieldSchema::type_params_size() const {
   return type_params_.size();
 }
@@ -638,7 +617,7 @@ FieldSchema::type_params() const {
   return type_params_;
 }
 
-// repeated .milvus.proto.common.KeyValuePair index_params = 6;
+// repeated .milvus.proto.common.KeyValuePair index_params = 5;
 inline int FieldSchema::index_params_size() const {
   return index_params_.size();
 }

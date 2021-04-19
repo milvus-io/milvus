@@ -35,7 +35,6 @@ struct Plan {
     const Schema& schema_;
     std::unique_ptr<VectorPlanNode> plan_node_;
     std::map<std::string, FieldId> tag2field_;  // PlaceholderName -> FieldId
-    std::vector<std::string> target_entries_;
     // TODO: add move extra info
 };
 

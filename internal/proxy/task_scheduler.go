@@ -293,7 +293,7 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 	}
 
 	q.AddActiveTask(t)
-	log.Printf("task add to active list ...")
+	log.Printf("query task add to active list ...")
 	defer func() {
 		q.PopActiveTask(t.EndTs())
 		log.Printf("pop from active list ...")
@@ -304,9 +304,8 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 		log.Printf("execute definition task failed, error = %v", err)
 		return
 	}
-	log.Printf("task execution done ...")
+	log.Printf("scheduler task done ...")
 	err = t.PostExecute()
-	log.Printf("post execute task done ...")
 }
 
 func (sched *TaskScheduler) definitionLoop() {
