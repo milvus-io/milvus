@@ -88,7 +88,6 @@ func (s *Segment) CloseSegment(collection* Collection) error {
 	// Change segment status to indexed
 	s.SegmentStatus = SegmentIndexed
 
-	s.SegmentStatus = SegmentClosed
 	return nil
 }
 

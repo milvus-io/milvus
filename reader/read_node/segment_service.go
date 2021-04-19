@@ -21,7 +21,7 @@ func (node *QueryNode) SegmentsManagement() {
 				// TODO: check segment status
 				if timeNow >= oldSegment.SegmentCloseTime {
 					// close old segment and move it into partition.ClosedSegments
-					if oldSegment.SegmentStatus == SegmentClosed {
+					if oldSegment.SegmentStatus != SegmentOpened {
 						log.Println("Never reach here, Opened segment cannot be closed")
 						continue
 					}
@@ -66,14 +66,16 @@ func (node *QueryNode) SegmentStatistic(sleepMillisecondTime int) {
 		memIncreaseRate := float32((int64(currentMemSize))-(int64(segment.LastMemSize))) / (float32(sleepMillisecondTime) / 1000)
 		segment.LastMemSize = currentMemSize
 
-		//segmentStatus := segment.SegmentStatus
-		//segmentNumOfRows := segment.GetRowCount()
+		segmentStatus := segment.SegmentStatus
+		segmentNumOfRows := segment.GetRowCount()
 
 		stat := masterPb.SegmentStat{
 			// TODO: set master pb's segment id type from uint64 to int64
-			SegmentId: uint64(segmentID),
+			SegmentId:  uint64(segmentID),
 			MemorySize: currentMemSize,
 			MemoryRate: memIncreaseRate,
+			Status:     masterPb.SegmentStatus(segmentStatus),
+			Rows:       segmentNumOfRows,
 		}
 
 		statisticData = append(statisticData, stat)
