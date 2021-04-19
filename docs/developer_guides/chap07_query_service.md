@@ -262,9 +262,17 @@ type RemoveQueryChannelRequest struct {
 * *WatchDmChannels*
 
 ```go
-type WatchDmChannelRequest struct {
-  Base       *commonpb.MsgBase
-  ChannelIDs []string
+type WatchDmChannelInfo struct {
+  ChannelID            string
+  Pos                  *internalpb2.MsgPosition
+  ExcludedSegments     []int64
+}
+
+type WatchDmChannelsRequest struct {
+  Base                 *commonpb.MsgBase 
+  CollectionID         int64 
+  ChannelIDs           []string
+  Infos                []*WatchDmChannelsInfo
 }
 ```
 
