@@ -47,9 +47,7 @@ func newLoadIndexService(ctx context.Context, replica collectionReplica) *loadIn
 		panic(err)
 	}
 
-	// TODO: load bucketName from config
-	bucketName := "query-node-load-index-service-minio"
-	MinioKV, err := minioKV.NewMinIOKV(ctx1, minioClient, bucketName)
+	MinioKV, err := minioKV.NewMinIOKV(ctx1, minioClient, Params.MinioBucketName)
 	if err != nil {
 		panic(err)
 	}

@@ -23,6 +23,7 @@ type ParamTable struct {
 	MinIOAccessKeyID     string
 	MinIOSecretAccessKey string
 	MinIOUseSSL          bool
+	MinioBucketName      string
 }
 
 var Params ParamTable
@@ -38,6 +39,7 @@ func (pt *ParamTable) Init() {
 	pt.initMinIOAccessKeyID()
 	pt.initMinIOSecretAccessKey()
 	pt.initMinIOUseSSL()
+	pt.initMinioBucketName()
 }
 
 func (pt *ParamTable) initAddress() {
@@ -141,4 +143,12 @@ func (pt *ParamTable) initMinIOUseSSL() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func (pt *ParamTable) initMinioBucketName() {
+	bucketName, err := pt.Load("minio.bucketName")
+	if err != nil {
+		panic(err)
+	}
+	pt.MinioBucketName = bucketName
 }

@@ -74,8 +74,7 @@ func TestLoadIndexService(t *testing.T) {
 		Secure: Params.MinioUseSSLStr,
 	})
 	assert.Equal(t, err, nil)
-	bucketName := "query-node-load-index-service-minio"
-	minioKV, err := minioKV.NewMinIOKV(node.queryNodeLoopCtx, minioClient, bucketName)
+	minioKV, err := minioKV.NewMinIOKV(node.queryNodeLoopCtx, minioClient, Params.MinioBucketName)
 	assert.Equal(t, err, nil)
 	indexPaths := make([]string, 0)
 	for _, index := range binarySet {

@@ -26,6 +26,7 @@ type ParamTable struct {
 	MinioAccessKeyID     string
 	MinioSecretAccessKey string
 	MinioUseSSLStr       bool
+	MinioBucketName      string
 
 	// dm
 	InsertChannelNames   []string
@@ -98,6 +99,7 @@ func (p *ParamTable) Init() {
 	p.initMinioAccessKeyID()
 	p.initMinioSecretAccessKey()
 	p.initMinioUseSSLStr()
+	p.initMinioBucketName()
 
 	p.initPulsarAddress()
 	p.initETCDAddress()
@@ -172,6 +174,14 @@ func (p *ParamTable) initMinioUseSSLStr() {
 		panic(err)
 	}
 	p.MinioUseSSLStr = sslBoolean
+}
+
+func (p *ParamTable) initMinioBucketName() {
+	bucketName, err := p.Load("minio.bucketName")
+	if err != nil {
+		panic(err)
+	}
+	p.MinioBucketName = bucketName
 }
 
 func (p *ParamTable) initPulsarAddress() {
