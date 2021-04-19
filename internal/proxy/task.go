@@ -99,9 +99,11 @@ func (it *InsertTask) Execute() error {
 		return err
 	}
 	autoID := description.Schema.AutoID
+	var rowIDBegin UniqueID
+	var rowIDEnd UniqueID
 	if autoID || true {
 		rowNums := len(it.BaseInsertTask.RowData)
-		rowIDBegin, rowIDEnd, _ := it.rowIDAllocator.Alloc(uint32(rowNums))
+		rowIDBegin, rowIDEnd, _ = it.rowIDAllocator.Alloc(uint32(rowNums))
 		it.BaseInsertTask.RowIDs = make([]UniqueID, rowNums)
 		for i := rowIDBegin; i < rowIDEnd; i++ {
 			offset := i - rowIDBegin
@@ -121,6 +123,8 @@ func (it *InsertTask) Execute() error {
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		},
+		Begin: rowIDBegin,
+		End:   rowIDEnd,
 	}
 	if err != nil {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
