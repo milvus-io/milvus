@@ -78,17 +78,4 @@ endif()
 
 
 set( PROTOC_EXCUTABLE           $<TARGET_FILE:protoc> )
-set( PROTO_PATH          "${MILVUS_SOURCE_DIR}/../proto/" )
-set( PROTO_OUTPUT_PATH          "${MILVUS_SOURCE_DIR}/src/pb/")
-
-add_custom_target(generate_milvus_pb_grpc ALL DEPENDS protoc)
-
-add_custom_command(TARGET generate_milvus_pb_grpc
-	POST_BUILD
-
-	COMMAND ${PROTOC_EXCUTABLE} -I "${PROTO_PATH}" --cpp_out "${PROTO_OUTPUT_PATH}"
-		"common.proto" "schema.proto" "etcd_meta.proto"
-		DEPENDS "${PROTO_PATH}/*.proto"
-	)
-
 set_property( GLOBAL PROPERTY PROTOC_EXCUTABLE ${PROTOC_EXCUTABLE})

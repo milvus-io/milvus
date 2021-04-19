@@ -11,11 +11,10 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-include_directories(${MILVUS_SOURCE_DIR})
 include_directories(${MILVUS_ENGINE_SRC})
 include_directories(${MILVUS_THIRDPARTY_SRC})
 
-#include_directories(${MILVUS_ENGINE_SRC}/grpc)
+
 set(FOUND_OPENBLAS "unknown")
 add_subdirectory(index)
 set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
@@ -25,7 +24,8 @@ endforeach ()
 
 
 add_subdirectory( utils )
-add_subdirectory( log)
-add_subdirectory( dog_segment)
+add_subdirectory( log )
+add_subdirectory( pb )
+add_subdirectory( dog_segment )
 add_subdirectory( cache )
 add_subdirectory( query )

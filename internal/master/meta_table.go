@@ -11,7 +11,7 @@ type metaTable struct {
 	rootPath   string                           // this metaTable's working root path on the reliable kv service
 	tenantMeta map[int64]etcdpb.TenantMeta      // tenant id to tenant meta
 	proxyMeta  map[int64]etcdpb.ProxyMeta       // proxy id to proxy meta
-	collMeta   map[uint64]etcdpb.CollectionMeta // collection id to collection meta
+	collMeta   map[int64]etcdpb.CollectionMeta // collection id to collection meta
 	segMeta    map[int64]etcdpb.SegmentMeta     // segment id to segment meta
 }
 

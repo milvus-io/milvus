@@ -207,7 +207,7 @@ func (node *QueryNode) QueryNodeDataInit() {
 	node.insertData = insertData
 }
 
-func (node *QueryNode) NewCollection(collectionID uint64, collectionName string, schemaConfig string) *Collection {
+func (node *QueryNode) NewCollection(collectionID int64, collectionName string, schemaConfig string) *Collection {
 	/*
 		void
 		UpdateIndexes(CCollection c_collection, const char *index_string);

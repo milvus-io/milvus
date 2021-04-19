@@ -120,7 +120,7 @@ inline void set_error_from_string(char **error, const char* msg) {
 #include <intrin.h>
 #elif defined(__GNUC__)
 #include <x86intrin.h>
-#include <src/index/thirdparty/faiss/utils/ConcurrentBitset.h>
+#include <faiss/utils/ConcurrentBitset.h>
 
 #endif
 #endif

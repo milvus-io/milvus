@@ -9,8 +9,8 @@ import (
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 type Segment struct {
-	SegmentID      uint64                 `json:"segment_id"`
-	CollectionID   uint64                 `json:"collection_id"`
+	SegmentID      int64                 `json:"segment_id"`
+	CollectionID   int64                 `json:"collection_id"`
 	PartitionTag   string                 `json:"partition_tag"`
 	ChannelStart   int                    `json:"channel_start"`
 	ChannelEnd     int                    `json:"channel_end"`
@@ -20,7 +20,7 @@ type Segment struct {
 	Rows           int64                  `json:"rows"`
 }
 
-func NewSegment(id uint64, collectioID uint64, cName string, ptag string, chStart int, chEnd int, openTime time.Time, closeTime time.Time) Segment {
+func NewSegment(id int64, collectioID int64, cName string, ptag string, chStart int, chEnd int, openTime time.Time, closeTime time.Time) Segment {
 	return Segment{
 		SegmentID:      id,
 		CollectionID:   collectioID,

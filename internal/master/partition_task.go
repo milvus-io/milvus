@@ -79,7 +79,7 @@ func (t *createPartitionTask) Execute() error {
 	}
 
 	collectionId := collectionMeta.Id
-	err = (*t.kvBase).Save(partitionMetaPrefix+strconv.FormatUint(collectionId, 10), string(collectionJson))
+	err = (*t.kvBase).Save(partitionMetaPrefix+strconv.FormatInt(collectionId, 10), string(collectionJson))
 	if err != nil {
 		_ = t.Notify()
 		return errors.New("save collection failed")
@@ -131,7 +131,7 @@ func (t *dropPartitionTask) Execute() error {
 	}
 
 	collectionId := collectionMeta.Id
-	err = (*t.kvBase).Save(partitionMetaPrefix+strconv.FormatUint(collectionId, 10), string(collectionJson))
+	err = (*t.kvBase).Save(partitionMetaPrefix+strconv.FormatInt(collectionId, 10), string(collectionJson))
 	if err != nil {
 		_ = t.Notify()
 		return errors.New("save collection failed")

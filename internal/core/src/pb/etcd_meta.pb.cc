@@ -160,16 +160,16 @@ static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] =
 const char descriptor_table_protodef_etcd_5fmeta_2eproto[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) =
   "\n\017etcd_meta.proto\022\021milvus.proto.etcd\032\014co"
   "mmon.proto\032\014schema.proto\"g\n\nTenantMeta\022\n"
-  "\n\002id\030\001 \001(\004\022\027\n\017num_query_nodes\030\002 \001(\004\022\032\n\022i"
+  "\n\002id\030\001 \001(\003\022\027\n\017num_query_nodes\030\002 \001(\003\022\032\n\022i"
   "nsert_channel_ids\030\003 \003(\t\022\030\n\020query_channel"
-  "_id\030\004 \001(\t\"b\n\tProxyMeta\022\n\n\002id\030\001 \001(\004\022-\n\007ad"
+  "_id\030\004 \001(\t\"b\n\tProxyMeta\022\n\n\002id\030\001 \001(\003\022-\n\007ad"
   "dress\030\002 \001(\0132\034.milvus.proto.common.Addres"
   "s\022\032\n\022result_channel_ids\030\003 \003(\t\"\225\001\n\016Collec"
-  "tionMeta\022\n\n\002id\030\001 \001(\004\0225\n\006schema\030\002 \001(\0132%.m"
+  "tionMeta\022\n\n\002id\030\001 \001(\003\0225\n\006schema\030\002 \001(\0132%.m"
   "ilvus.proto.schema.CollectionSchema\022\023\n\013c"
-  "reate_time\030\003 \001(\004\022\023\n\013segment_ids\030\004 \003(\004\022\026\n"
+  "reate_time\030\003 \001(\004\022\023\n\013segment_ids\030\004 \003(\003\022\026\n"
   "\016partition_tags\030\005 \003(\t\"\264\001\n\013SegmentMeta\022\022\n"
-  "\nsegment_id\030\001 \001(\004\022\025\n\rcollection_id\030\002 \001(\004"
+  "\nsegment_id\030\001 \001(\003\022\025\n\rcollection_id\030\002 \001(\003"
   "\022\025\n\rpartition_tag\030\003 \001(\t\022\025\n\rchannel_start"
   "\030\004 \001(\005\022\023\n\013channel_end\030\005 \001(\005\022\021\n\topen_time"
   "\030\006 \001(\004\022\022\n\nclose_time\030\007 \001(\004\022\020\n\010num_rows\030\010"
@@ -277,14 +277,14 @@ const char* TenantMeta::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID:
     ptr = ::PROTOBUF_NAMESPACE_ID::internal::ReadTag(ptr, &tag);
     CHK_(ptr);
     switch (tag >> 3) {
-      // uint64 id = 1;
+      // int64 id = 1;
       case 1:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 8)) {
           id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // uint64 num_query_nodes = 2;
+      // int64 num_query_nodes = 2;
       case 2:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16)) {
           num_query_nodes_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
@@ -340,12 +340,12 @@ bool TenantMeta::MergePartialFromCodedStream(
     tag = p.first;
     if (!p.second) goto handle_unusual;
     switch (::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::GetTagFieldNumber(tag)) {
-      // uint64 id = 1;
+      // int64 id = 1;
       case 1: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (8 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
                  input, &id_)));
         } else {
           goto handle_unusual;
@@ -353,12 +353,12 @@ bool TenantMeta::MergePartialFromCodedStream(
         break;
       }
 
-      // uint64 num_query_nodes = 2;
+      // int64 num_query_nodes = 2;
       case 2: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (16 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
                  input, &num_query_nodes_)));
         } else {
           goto handle_unusual;
@@ -424,14 +424,14 @@ void TenantMeta::SerializeWithCachedSizes(
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // uint64 id = 1;
+  // int64 id = 1;
   if (this->id() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(1, this->id(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(1, this->id(), output);
   }
 
-  // uint64 num_query_nodes = 2;
+  // int64 num_query_nodes = 2;
   if (this->num_query_nodes() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(2, this->num_query_nodes(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(2, this->num_query_nodes(), output);
   }
 
   // repeated string insert_channel_ids = 3;
@@ -467,14 +467,14 @@ void TenantMeta::SerializeWithCachedSizes(
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // uint64 id = 1;
+  // int64 id = 1;
   if (this->id() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(1, this->id(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(1, this->id(), target);
   }
 
-  // uint64 num_query_nodes = 2;
+  // int64 num_query_nodes = 2;
   if (this->num_query_nodes() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(2, this->num_query_nodes(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(2, this->num_query_nodes(), target);
   }
 
   // repeated string insert_channel_ids = 3;
@@ -534,17 +534,17 @@ size_t TenantMeta::ByteSizeLong() const {
         this->query_channel_id());
   }
 
-  // uint64 id = 1;
+  // int64 id = 1;
   if (this->id() != 0) {
     total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::UInt64Size(
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
         this->id());
   }
 
-  // uint64 num_query_nodes = 2;
+  // int64 num_query_nodes = 2;
   if (this->num_query_nodes() != 0) {
     total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::UInt64Size(
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
         this->num_query_nodes());
   }
 
@@ -697,7 +697,7 @@ void ProxyMeta::Clear() {
     delete address_;
   }
   address_ = nullptr;
-  id_ = PROTOBUF_ULONGLONG(0);
+  id_ = PROTOBUF_LONGLONG(0);
   _internal_metadata_.Clear();
 }
 
@@ -709,7 +709,7 @@ const char* ProxyMeta::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::
     ptr = ::PROTOBUF_NAMESPACE_ID::internal::ReadTag(ptr, &tag);
     CHK_(ptr);
     switch (tag >> 3) {
-      // uint64 id = 1;
+      // int64 id = 1;
       case 1:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 8)) {
           id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
@@ -765,12 +765,12 @@ bool ProxyMeta::MergePartialFromCodedStream(
     tag = p.first;
     if (!p.second) goto handle_unusual;
     switch (::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::GetTagFieldNumber(tag)) {
-      // uint64 id = 1;
+      // int64 id = 1;
       case 1: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (8 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
                  input, &id_)));
         } else {
           goto handle_unusual;
@@ -832,9 +832,9 @@ void ProxyMeta::SerializeWithCachedSizes(
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // uint64 id = 1;
+  // int64 id = 1;
   if (this->id() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(1, this->id(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(1, this->id(), output);
   }
 
   // .milvus.proto.common.Address address = 2;
@@ -866,9 +866,9 @@ void ProxyMeta::SerializeWithCachedSizes(
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // uint64 id = 1;
+  // int64 id = 1;
   if (this->id() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(1, this->id(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(1, this->id(), target);
   }
 
   // .milvus.proto.common.Address address = 2;
@@ -924,10 +924,10 @@ size_t ProxyMeta::ByteSizeLong() const {
         *address_);
   }
 
-  // uint64 id = 1;
+  // int64 id = 1;
   if (this->id() != 0) {
     total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::UInt64Size(
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
         this->id());
   }
 
@@ -1092,7 +1092,7 @@ const char* CollectionMeta::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE
     ptr = ::PROTOBUF_NAMESPACE_ID::internal::ReadTag(ptr, &tag);
     CHK_(ptr);
     switch (tag >> 3) {
-      // uint64 id = 1;
+      // int64 id = 1;
       case 1:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 8)) {
           id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
@@ -1113,10 +1113,10 @@ const char* CollectionMeta::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // repeated uint64 segment_ids = 4;
+      // repeated int64 segment_ids = 4;
       case 4:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 34)) {
-          ptr = ::PROTOBUF_NAMESPACE_ID::internal::PackedUInt64Parser(mutable_segment_ids(), ptr, ctx);
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::PackedInt64Parser(mutable_segment_ids(), ptr, ctx);
           CHK_(ptr);
         } else if (static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 32) {
           add_segment_ids(::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr));
@@ -1165,12 +1165,12 @@ bool CollectionMeta::MergePartialFromCodedStream(
     tag = p.first;
     if (!p.second) goto handle_unusual;
     switch (::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::GetTagFieldNumber(tag)) {
-      // uint64 id = 1;
+      // int64 id = 1;
       case 1: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (8 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
                  input, &id_)));
         } else {
           goto handle_unusual;
@@ -1202,15 +1202,15 @@ bool CollectionMeta::MergePartialFromCodedStream(
         break;
       }
 
-      // repeated uint64 segment_ids = 4;
+      // repeated int64 segment_ids = 4;
       case 4: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (34 & 0xFF)) {
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPackedPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
                  input, this->mutable_segment_ids())));
         } else if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (32 & 0xFF)) {
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadRepeatedPrimitiveNoInline<
-                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
                  1, 34u, input, this->mutable_segment_ids())));
         } else {
           goto handle_unusual;
@@ -1261,9 +1261,9 @@ void CollectionMeta::SerializeWithCachedSizes(
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // uint64 id = 1;
+  // int64 id = 1;
   if (this->id() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(1, this->id(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(1, this->id(), output);
   }
 
   // .milvus.proto.schema.CollectionSchema schema = 2;
@@ -1277,14 +1277,14 @@ void CollectionMeta::SerializeWithCachedSizes(
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(3, this->create_time(), output);
   }
 
-  // repeated uint64 segment_ids = 4;
+  // repeated int64 segment_ids = 4;
   if (this->segment_ids_size() > 0) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTag(4, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED, output);
     output->WriteVarint32(_segment_ids_cached_byte_size_.load(
         std::memory_order_relaxed));
   }
   for (int i = 0, n = this->segment_ids_size(); i < n; i++) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64NoTag(
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64NoTag(
       this->segment_ids(i), output);
   }
 
@@ -1311,9 +1311,9 @@ void CollectionMeta::SerializeWithCachedSizes(
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // uint64 id = 1;
+  // int64 id = 1;
   if (this->id() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(1, this->id(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(1, this->id(), target);
   }
 
   // .milvus.proto.schema.CollectionSchema schema = 2;
@@ -1328,7 +1328,7 @@ void CollectionMeta::SerializeWithCachedSizes(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(3, this->create_time(), target);
   }
 
-  // repeated uint64 segment_ids = 4;
+  // repeated int64 segment_ids = 4;
   if (this->segment_ids_size() > 0) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTagToArray(
       4,
@@ -1338,7 +1338,7 @@ void CollectionMeta::SerializeWithCachedSizes(
         _segment_ids_cached_byte_size_.load(std::memory_order_relaxed),
          target);
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      WriteUInt64NoTagToArray(this->segment_ids_, target);
+      WriteInt64NoTagToArray(this->segment_ids_, target);
   }
 
   // repeated string partition_tags = 5;
@@ -1372,10 +1372,10 @@ size_t CollectionMeta::ByteSizeLong() const {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // repeated uint64 segment_ids = 4;
+  // repeated int64 segment_ids = 4;
   {
     size_t data_size = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      UInt64Size(this->segment_ids_);
+      Int64Size(this->segment_ids_);
     if (data_size > 0) {
       total_size += 1 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32Size(
@@ -1402,10 +1402,10 @@ size_t CollectionMeta::ByteSizeLong() const {
         *schema_);
   }
 
-  // uint64 id = 1;
+  // int64 id = 1;
   if (this->id() != 0) {
     total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::UInt64Size(
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
         this->id());
   }
 
@@ -1563,14 +1563,14 @@ const char* SegmentMeta::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID
     ptr = ::PROTOBUF_NAMESPACE_ID::internal::ReadTag(ptr, &tag);
     CHK_(ptr);
     switch (tag >> 3) {
-      // uint64 segment_id = 1;
+      // int64 segment_id = 1;
       case 1:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 8)) {
           segment_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // uint64 collection_id = 2;
+      // int64 collection_id = 2;
       case 2:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16)) {
           collection_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
@@ -1649,12 +1649,12 @@ bool SegmentMeta::MergePartialFromCodedStream(
     tag = p.first;
     if (!p.second) goto handle_unusual;
     switch (::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::GetTagFieldNumber(tag)) {
-      // uint64 segment_id = 1;
+      // int64 segment_id = 1;
       case 1: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (8 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
                  input, &segment_id_)));
         } else {
           goto handle_unusual;
@@ -1662,12 +1662,12 @@ bool SegmentMeta::MergePartialFromCodedStream(
         break;
       }
 
-      // uint64 collection_id = 2;
+      // int64 collection_id = 2;
       case 2: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (16 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
                  input, &collection_id_)));
         } else {
           goto handle_unusual;
@@ -1782,14 +1782,14 @@ void SegmentMeta::SerializeWithCachedSizes(
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // uint64 segment_id = 1;
+  // int64 segment_id = 1;
   if (this->segment_id() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(1, this->segment_id(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(1, this->segment_id(), output);
   }
 
-  // uint64 collection_id = 2;
+  // int64 collection_id = 2;
   if (this->collection_id() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(2, this->collection_id(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(2, this->collection_id(), output);
   }
 
   // string partition_tag = 3;
@@ -1840,14 +1840,14 @@ void SegmentMeta::SerializeWithCachedSizes(
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // uint64 segment_id = 1;
+  // int64 segment_id = 1;
   if (this->segment_id() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(1, this->segment_id(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(1, this->segment_id(), target);
   }
 
-  // uint64 collection_id = 2;
+  // int64 collection_id = 2;
   if (this->collection_id() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(2, this->collection_id(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(2, this->collection_id(), target);
   }
 
   // string partition_tag = 3;
@@ -1914,17 +1914,17 @@ size_t SegmentMeta::ByteSizeLong() const {
         this->partition_tag());
   }
 
-  // uint64 segment_id = 1;
+  // int64 segment_id = 1;
   if (this->segment_id() != 0) {
     total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::UInt64Size(
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
         this->segment_id());
   }
 
-  // uint64 collection_id = 2;
+  // int64 collection_id = 2;
   if (this->collection_id() != 0) {
     total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::UInt64Size(
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
         this->collection_id());
   }
 

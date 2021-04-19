@@ -96,7 +96,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 			},
 			Entities:  &entities,
 			Distances: make([]float32, 0),
-			QueryId:   uint64(msg.Uid),
+			QueryId:   msg.Uid,
 			ProxyId:   clientId,
 		}
 		for _, rTmp := range resultsTmp {

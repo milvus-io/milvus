@@ -12,12 +12,12 @@ type ID struct {
 	xid.ID
 }
 
-func BytesToUint64(b []byte) (uint64, error) {
+func BytesToInt64(b []byte) (int64, error) {
 	if len(b) != 12 {
 		return 0, errors.Errorf("invalid data, must 12 bytes, but %d", len(b))
 	}
 
-	return binary.BigEndian.Uint64(b), nil
+	return int64(binary.BigEndian.Uint64(b)), nil
 }
 
 // Uint64ToBytes converts uint64 to a byte slice.
@@ -33,11 +33,10 @@ func New() ID {
 	}
 }
 
-func (id ID) Uint64() uint64 {
+func (id ID) Int64() int64 {
 	b := id.Bytes()
 	if len(b) != 12 {
 		return 0
 	}
-	return binary.BigEndian.Uint64(b)
-
+	return int64(binary.BigEndian.Uint64(b))
 }

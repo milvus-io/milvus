@@ -53,11 +53,11 @@ type proxyServer struct {
 	grpcServer   *grpc.Server
 	reqSch       *requestScheduler
 	///////////////////////////////////////////////////////////////
-	collectionList   map[uint64]*etcdpb.CollectionMeta
-	nameCollectionId map[string]uint64
-	segmentList      map[uint64]*etcdpb.SegmentMeta
+	collectionList   map[int64]*etcdpb.CollectionMeta
+	nameCollectionId map[string]int64
+	segmentList      map[int64]*etcdpb.SegmentMeta
 	collectionMux    sync.Mutex
-	queryId          atomic.Uint64
+	queryId          atomic.Int64
 }
 
 func (s *proxyServer) CreateCollection(ctx context.Context, req *schemapb.CollectionSchema) (*commonpb.Status, error) {
@@ -152,7 +152,7 @@ func (s *proxyServer) DeleteByID(ctx context.Context, req *pb.DeleteByIDParam) (
 		ProxyId:        s.proxyId,
 	}
 	for _, id := range req.IdArray {
-		mReqMsg.PrimaryKeys = append(mReqMsg.PrimaryKeys, uint64(id))
+		mReqMsg.PrimaryKeys = append(mReqMsg.PrimaryKeys, id)
 	}
 	if len(mReqMsg.PrimaryKeys) > 1 {
 		mReq := &manipulationReq{
@@ -194,8 +194,8 @@ func (s *proxyServer) Insert(ctx context.Context, req *servicepb.RowBatch) (*ser
 	}
 
 	for i := 0; i < len(req.HashValues); i++ {
-		key := uint64(req.HashValues[i])
-		hash, err := Hash32_Uint64(key)
+		key := int64(req.HashValues[i])
+		hash, err := Hash32_Int64(key)
 		if err != nil {
 			return nil, status.Errorf(codes.Unknown, "hash failed on %d", key)
 		}
@@ -210,7 +210,7 @@ func (s *proxyServer) Insert(ctx context.Context, req *servicepb.RowBatch) (*ser
 				CollectionName: req.CollectionName,
 				PartitionTag:   req.PartitionTag,
 				SegmentId:      segId,
-				ChannelId:      uint64(hash),
+				ChannelId:      int64(hash),
 				ReqType:        pb.ReqType_kInsert,
 				ProxyId:        s.proxyId,
 				//ExtraParams:    req.ExtraParams,
@@ -341,7 +341,7 @@ func (s *proxyServer) check() error {
 	return nil
 }
 
-func (s *proxyServer) getSegmentId(channelId int32, colName string) (uint64, error) {
+func (s *proxyServer) getSegmentId(channelId int32, colName string) (int64, error) {
 	s.collectionMux.Lock()
 	defer s.collectionMux.Unlock()
 	colId, ok := s.nameCollectionId[colName]
@@ -491,9 +491,9 @@ func startProxyServer(srv *proxyServer) error {
 		return err
 	}
 
-	srv.nameCollectionId = make(map[string]uint64)
-	srv.collectionList = make(map[uint64]*etcdpb.CollectionMeta)
-	srv.segmentList = make(map[uint64]*etcdpb.SegmentMeta)
+	srv.nameCollectionId = make(map[string]int64)
+	srv.collectionList = make(map[int64]*etcdpb.CollectionMeta)
+	srv.segmentList = make(map[int64]*etcdpb.SegmentMeta)
 
 	if err := srv.connectMaster(); err != nil {
 		return err
@@ -502,7 +502,7 @@ func startProxyServer(srv *proxyServer) error {
 		return err
 	}
 
-	srv.queryId.Store(uint64(time.Now().UnixNano()))
+	srv.queryId.Store(time.Now().UnixNano())
 
 	return srv.StartGrpcServer()
 }

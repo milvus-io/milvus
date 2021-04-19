@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	masterPb "github.com/zilliztech/milvus-distributed/internal/proto/master"
+	//masterPb "github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 )
 
@@ -104,15 +105,13 @@ func TestResult_PublicStatistic(t *testing.T) {
 	var segment = partition.NewSegment(0)
 	node.SegmentsMap[0] = segment
 
-	var statisticData = make([]masterPb.SegmentStat, 0)
+	var statisticData = make([]internalpb.SegmentStatistics, 0)
 
 	for segmentID, segment := range node.SegmentsMap {
 		currentMemSize := segment.GetMemSize()
-		memIncreaseRate := float32(0)
-		stat := masterPb.SegmentStat{
-			SegmentId:  uint64(segmentID),
+		stat := internalpb.SegmentStatistics{
+			SegmentId:  segmentID,
 			MemorySize: currentMemSize,
-			MemoryRate: memIncreaseRate,
 		}
 		statisticData = append(statisticData, stat)
 	}

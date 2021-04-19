@@ -40,7 +40,7 @@ func ComputeCloseTime(ss internalpb.SegmentStatistics, kvbase kv.Base) error {
 		}
 		kvbase.Save("segment/"+strconv.Itoa(int(ss.SegmentId)), updateData)
 		//create new segment
-		newSegID := id.New().Uint64()
+		newSegID := id.New().Int64()
 		newSeg := segment.NewSegment(newSegID, seg.CollectionID, seg.CollectionName, "default", seg.ChannelStart, seg.ChannelEnd, currentTime, time.Unix(1<<36-1, 0))
 		newSegData, err := segment.Segment2JSON(*&newSeg)
 		if err != nil {

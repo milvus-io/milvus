@@ -28,8 +28,8 @@ func TestComputeClosetTime(t *testing.T) {
 	var news internalpb.SegmentStatistics
 	for i := 0; i < 10; i++ {
 		news = internalpb.SegmentStatistics{
-			SegmentId: uint64(6875940398055133887),
-			MemorySize: uint64(i * 1000),
+			SegmentId: int64(6875940398055133887),
+			MemorySize: int64(i * 1000),
 		}
 		ComputeCloseTime(news, kvbase)
 	}

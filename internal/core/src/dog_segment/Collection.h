@@ -1,6 +1,6 @@
 #pragma once
 
-#include <src/pb/message.pb.h>
+#include <pb/message.pb.h>
 #include "dog_segment/Partition.h"
 #include "SegmentDefs.h"
 

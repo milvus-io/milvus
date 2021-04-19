@@ -62,7 +62,7 @@ func (s *proxyServer) restartQueryRoutine(buf_size int) error {
 		return err
 	}
 
-	resultMap := make(map[uint64]*queryReq)
+	resultMap := make(map[int64]*queryReq)
 
 	go func() {
 		defer result.Close()
