@@ -1,7 +1,20 @@
-#include "segcore/SegmentSmallIndex.h"
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License
+
 #include <optional>
+#include <boost/dynamic_bitset.hpp>
+#include <utility>
+#include <deque>
+#include "segcore/SegmentSmallIndex.h"
 #include "query/ExprImpl.h"
-#include "boost/dynamic_bitset.hpp"
 #include "query/generated/ExecExprVisitor.h"
 
 namespace milvus::query {
@@ -25,9 +38,9 @@ class ExecExprVisitor : ExprVisitor {
     }
 
  public:
-    template <typename Tp, typename Func>
+    template <typename T, typename IndexFunc, typename ElementFunc>
     auto
-    ExecRangeVisitorImpl(RangeExprImpl<Tp>& expr_scp, Func func) -> RetType;
+    ExecRangeVisitorImpl(RangeExprImpl<T>& expr, IndexFunc func, ElementFunc element_func) -> RetType;
 
     template <typename T>
     auto
