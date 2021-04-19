@@ -11,6 +11,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
+add_subdirectory(simple)
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/utils UTIL_SRC_FILES)
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/common COMMON_SRC_FILES)
 
