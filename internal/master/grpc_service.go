@@ -29,7 +29,7 @@ func (s *Master) CreateCollection(ctx context.Context, in *internalpb.CreateColl
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "Enqueue failed",
-		}, err
+		}, nil
 	}
 
 	err = t.WaitToFinish(ctx)
@@ -37,7 +37,7 @@ func (s *Master) CreateCollection(ctx context.Context, in *internalpb.CreateColl
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "create collection failed",
-		}, err
+		}, nil
 	}
 
 	return &commonpb.Status{

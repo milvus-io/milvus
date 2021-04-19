@@ -2,6 +2,8 @@ package master
 
 import (
 	"context"
+	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"strconv"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
@@ -15,15 +17,19 @@ import (
 )
 
 func TestMaster_CreateCollection(t *testing.T) {
+	conf.LoadConfig("config.yaml")
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:2379"}})
+	etcd_port := strconv.Itoa(int(conf.Config.Etcd.Port))
+	etcd_addr := "127.0.0.1:" + etcd_port
+
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcd_addr}})
 	assert.Nil(t, err)
 	_, err = etcdCli.Delete(ctx, "/test/root", clientv3.WithPrefix())
 	assert.Nil(t, err)
 
-	svr, err := CreateServer(ctx, "/test/root/kv", "/test/root/meta", "/test/root/meta/tso", []string{"127.0.0.1:2379"})
+	svr, err := CreateServer(ctx, "/test/root/kv", "/test/root/meta", "/test/root/meta/tso", []string{etcd_addr})
 	assert.Nil(t, err)
 	err = svr.Run(10001)
 	assert.Nil(t, err)
@@ -136,6 +142,11 @@ func TestMaster_CreateCollection(t *testing.T) {
 	assert.Equal(t, coll_meta.Schema.Fields[1].IndexParams[1].Key, "col1_f2_ik2")
 	assert.Equal(t, coll_meta.Schema.Fields[1].IndexParams[0].Value, "col1_f2_iv1")
 	assert.Equal(t, coll_meta.Schema.Fields[1].IndexParams[1].Value, "col1_f2_iv2")
+
+	req.Timestamp = Timestamp(10)
+	st, err = cli.CreateCollection(ctx, &req)
+	assert.Nil(t, err)
+	assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
 	svr.Close()
 }

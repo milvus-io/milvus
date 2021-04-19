@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -14,7 +15,7 @@ func newKvBase() *kv.EtcdKV {
 	//etcdAddr := conf.Config.Etcd.Address
 	//etcdAddr += ":"
 	//etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)
-	etcdAddr := "127.0.0.1:2379"
+	etcdAddr := "127.0.0.1:" + strconv.Itoa(int(conf.Config.Etcd.Port))
 	cli, _ := clientv3.New(clientv3.Config{
 		Endpoints:   []string{etcdAddr},
 		DialTimeout: 5 * time.Second,
