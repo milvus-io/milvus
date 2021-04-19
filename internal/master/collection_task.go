@@ -67,6 +67,10 @@ func (t *createCollectionTask) Execute() error {
 		return err
 	}
 
+	for index, singleFiled := range schema.Fields {
+		singleFiled.FieldID = int64(index + 100)
+	}
+
 	collectionID, err := t.sch.globalIDAllocator()
 	if err != nil {
 		return err
@@ -97,6 +101,10 @@ func (t *createCollectionTask) Execute() error {
 	}
 
 	t.req.CollectionID = collectionID
+	t.req.Schema.Value, err = proto.Marshal(&schema)
+	if err != nil {
+		return err
+	}
 	timeTickMsg := &ms.CreateCollectionMsg{
 		BaseMsg:                 baseMsg,
 		CreateCollectionRequest: *t.req,
