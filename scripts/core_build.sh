@@ -138,7 +138,7 @@ ${CMAKE_CMD}
 
 if [[ ${RUN_CPPLINT} == "ON" ]]; then
   # cpplint check
-  make lint || true
+  make lint
   if [ $? -ne 0 ]; then
     echo "ERROR! cpplint check failed"
     exit 1

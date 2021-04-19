@@ -120,7 +120,8 @@ StructuredIndexSort<T>::NotIn(const size_t n, const T* values) {
     if (!is_built_) {
         build();
     }
-    TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(data_.size(), true);
+    TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(data_.size());
+    bitset->set();
     for (size_t i = 0; i < n; ++i) {
         auto lb = std::lower_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
         auto ub = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));

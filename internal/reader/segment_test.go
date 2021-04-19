@@ -3,7 +3,6 @@ package reader
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 	"log"
 	"math"
 	"testing"
@@ -463,8 +462,7 @@ func TestSegment_segmentInsert(t *testing.T) {
 	assert.GreaterOrEqual(t, offset, int64(0))
 
 	err := segment.segmentInsert(offset, &ids, &timestamps, &records)
-	//assert.NoError(t, err)
-	fmt.Println(err)
+	assert.NoError(t, err)
 	deleteSegment(segment)
 	deleteCollection(collection)
 }

@@ -130,13 +130,7 @@ ExecExprVisitor::ExecRangeVisitorDispatcher(RangeExpr& expr_raw) -> RetType {
             }
 
             case OpType::NotEqual: {
-                auto index_func = [val](Index* index) {
-                    // Note: index->NotIn() is buggy, investigating
-                    // this is a workaround
-                    auto res = index->In(1, &val);
-                    *res = ~std::move(*res);
-                    return res;
-                };
+                auto index_func = [val](Index* index) { return index->NotIn(1, &val); };
                 return ExecRangeVisitorImpl(expr, index_func, [val](T x) { return !(x != val); });
             }
 
