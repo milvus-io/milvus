@@ -55,3 +55,4 @@ target_link_libraries(all_tests
         )
 
 install (TARGETS all_tests DESTINATION unittest)
+install (TARGETS index_builder_test DESTINATION unittest)

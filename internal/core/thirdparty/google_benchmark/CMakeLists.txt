@@ -1,4 +1,3 @@
-include(FetchContent)
 FetchContent_Declare(google_benchmark
     URL             https://github.com/google/benchmark/archive/v1.5.2.tar.gz
     URL_MD5         084b34aceaeac11a6607d35220ca2efa
