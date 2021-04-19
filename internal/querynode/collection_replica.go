@@ -513,7 +513,7 @@ func (colReplica *collectionReplicaImpl) replaceGrowingSegmentBySealedSegment(se
 		return errors.New("unexpected segment type")
 	}
 	targetSegment, err := colReplica.getSegmentByIDPrivate(segment.ID())
-	if err == nil && targetSegment != nil {
+	if err != nil && targetSegment != nil {
 		if targetSegment.segmentType != segTypeGrowing {
 			// target segment has been a sealed segment
 			return nil
@@ -521,7 +521,7 @@ func (colReplica *collectionReplicaImpl) replaceGrowingSegmentBySealedSegment(se
 		deleteSegment(targetSegment)
 	}
 
-	colReplica.segments[segment.ID()] = segment
+	targetSegment = segment
 	return nil
 }
 

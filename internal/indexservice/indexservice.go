@@ -128,6 +128,9 @@ func (i *ServiceImpl) Init() error {
 }
 
 func (i *ServiceImpl) Start() error {
+	i.loopWg.Add(1)
+	go i.tsLoop()
+
 	i.sched.Start()
 	// Start callbacks
 	for _, cb := range i.startCallbacks {
@@ -275,4 +278,25 @@ func (i *ServiceImpl) NotifyBuildIndex(nty *indexpb.BuildIndexNotification) (*co
 	}
 	i.nodeClients.IncPriority(nty.NodeID, -1)
 	return ret, nil
+}
+
+func (i *ServiceImpl) tsLoop() {
+	tsoTicker := time.NewTicker(UpdateTimestampStep)
+	defer tsoTicker.Stop()
+	ctx, cancel := context.WithCancel(i.loopCtx)
+	defer cancel()
+	defer i.loopWg.Done()
+	for {
+		select {
+		case <-tsoTicker.C:
+			if err := i.idAllocator.UpdateID(); err != nil {
+				log.Println("failed to update id", err)
+				return
+			}
+		case <-ctx.Done():
+			// Server is closed and it should return nil.
+			log.Println("tsLoop is closed")
+			return
+		}
+	}
 }
