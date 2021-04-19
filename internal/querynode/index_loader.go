@@ -315,6 +315,9 @@ func (loader *indexLoader) getIndexInfo(collectionID UniqueID, segmentID UniqueI
 	if err != nil {
 		return 0, 0, err
 	}
+	if response.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return -1, -1, errors.New(response.Status.Reason)
+	}
 	return response.IndexID, response.BuildID, nil
 }
 
