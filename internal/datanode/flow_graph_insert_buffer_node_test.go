@@ -65,7 +65,7 @@ func genInsertMsg() insertMsg {
 	startPos := []*internalpb.MsgPosition{
 		{
 			ChannelName: "aaa",
-			MsgID:       "000",
+			MsgID:       make([]byte, 0),
 			Timestamp:   0,
 		},
 	}

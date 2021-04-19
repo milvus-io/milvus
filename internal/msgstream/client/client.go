@@ -13,6 +13,9 @@ type Client interface {
 	// String to msg ID
 	StringToMsgID(string) (MessageID, error)
 
+	// Bytes to msg ID
+	BytesToMsgID([]byte) (MessageID, error)
+
 	// Close the client and free associated resources
 	Close()
 }
