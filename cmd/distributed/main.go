@@ -10,21 +10,17 @@ import (
 	"github.com/zilliztech/milvus-distributed/cmd/distributed/roles"
 )
 
-const (
-	fileDir = "/run/milvus-distributed"
-)
-
-func run(serverType string) error {
+func run(serverType, runtTimeDir string) error {
 	fileName := serverType + ".pid"
-	_, err := os.Stat(path.Join(fileDir, fileName))
+	_, err := os.Stat(path.Join(runtTimeDir, fileName))
 	var fd *os.File
 	if os.IsNotExist(err) {
-		if fd, err = os.OpenFile(path.Join(fileDir, fileName), os.O_CREATE|os.O_WRONLY, 0664); err != nil {
+		if fd, err = os.OpenFile(path.Join(runtTimeDir, fileName), os.O_CREATE|os.O_WRONLY, 0664); err != nil {
 			return err
 		}
 		defer func() {
 			_ = syscall.Close(int(fd.Fd()))
-			_ = os.Remove(path.Join(fileDir, fileName))
+			_ = os.Remove(path.Join(runtTimeDir, fileName))
 		}()
 
 		if err := syscall.Flock(int(fd.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
@@ -33,7 +29,18 @@ func run(serverType string) error {
 		_, _ = fd.WriteString(fmt.Sprintf("%d", os.Getpid()))
 
 	} else {
-		return fmt.Errorf("service %s is running", serverType)
+		if fd, err = os.OpenFile(path.Join(runtTimeDir, fileName), os.O_WRONLY, 0664); err != nil {
+			return fmt.Errorf("service %s is running, error  = %w", serverType, err)
+		}
+		if err := syscall.Flock(int(fd.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+			return fmt.Errorf("service %s is running, error = %w", serverType, err)
+		}
+		defer func() {
+			_ = syscall.Close(int(fd.Fd()))
+			_ = os.Remove(path.Join(runtTimeDir, fileName))
+		}()
+		fd.Truncate(0)
+		_, _ = fd.WriteString(fmt.Sprintf("%d", os.Getpid()))
 	}
 
 	role := roles.MilvusRoles{}
@@ -67,11 +74,11 @@ func run(serverType string) error {
 	return nil
 }
 
-func stop(serverType string) error {
+func stop(serverType, runtimeDir string) error {
 	fileName := serverType + ".pid"
 	var err error
 	var fd *os.File
-	if fd, err = os.OpenFile(path.Join(fileDir, fileName), os.O_RDONLY, 0664); err != nil {
+	if fd, err = os.OpenFile(path.Join(runtimeDir, fileName), os.O_RDONLY, 0664); err != nil {
 		return err
 	}
 	defer func() {
@@ -93,6 +100,30 @@ func stop(serverType string) error {
 	return nil
 }
 
+func makeRuntimeDir(dir string) error {
+	st, err := os.Stat(dir)
+	if os.IsNotExist(err) {
+		err = os.Mkdir(dir, 0755)
+		if err != nil {
+			return fmt.Errorf("create runtime dir %s failed", dir)
+		}
+		return nil
+	}
+	if !st.IsDir() {
+		return fmt.Errorf("%s is exist, but is not directory", dir)
+	}
+	tmpFile := path.Join(dir, "testTmp")
+
+	var fd *os.File
+
+	if fd, err = os.OpenFile(tmpFile, os.O_CREATE|os.O_WRONLY, 0664); err != nil {
+		return err
+	}
+	syscall.Close(int(fd.Fd()))
+	os.Remove(tmpFile)
+	return nil
+}
+
 func main() {
 	if len(os.Args) < 3 {
 		_, _ = fmt.Fprint(os.Stderr, "usage: milvus-distributed [command] [server type] [flags]\n")
@@ -107,17 +138,23 @@ func main() {
 		os.Exit(-1)
 	}
 
-	if _, err := os.Stat(fileDir); os.IsNotExist(err) {
-		_, _ = fmt.Fprintf(os.Stderr, "please create dirctory /run/milvus-distributed, and set owner to current user")
-		os.Exit(-1)
+	runtimeDir := "/run/milvus-distributed"
+	if err := makeRuntimeDir(runtimeDir); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "set runtime dir at : %s failed, set it to /tmp/milvus-distributed directory\n", runtimeDir)
+		runtimeDir = "/tmp/milvus-distributed"
+		if err = makeRuntimeDir(runtimeDir); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "create runtime director at : %s failed\n", runtimeDir)
+			os.Exit(-1)
+		}
 	}
+
 	switch command {
 	case "run":
-		if err := run(serverType); err != nil {
+		if err := run(serverType, runtimeDir); err != nil {
 			panic(err)
 		}
 	case "stop":
-		if err := stop(serverType); err != nil {
+		if err := stop(serverType, runtimeDir); err != nil {
 			panic(err)
 		}
 	default:
