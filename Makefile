@@ -123,7 +123,7 @@ singlenode: build-cpp
 	@echo "Building single node ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/singlenode $(PWD)/cmd/singlenode/main.go 1>/dev/null
 
-build-go: binlog master proxyservice proxynode queryservice querynode indexservice indexnode datanode dataservice singlenode
+build-go: binlog master proxyservice proxynode queryservice querynode indexservice indexnode dataservice datanode singlenode
 
 build-cpp:
 	@(env bash $(PWD)/scripts/core_build.sh -f "$(CUSTOM_THIRDPARTY_PATH)")

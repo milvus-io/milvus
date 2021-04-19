@@ -19,7 +19,7 @@ type GlobalIDAllocator struct {
 
 func NewGlobalIDAllocator(key string, base kv.TxnBase) *GlobalIDAllocator {
 	allocator := tso.NewGlobalTSOAllocator(key, base)
-	allocator.EnableMaxLogic(false)
+	allocator.SetLimitMaxLogic(false)
 	return &GlobalIDAllocator{
 		allocator: allocator,
 	}

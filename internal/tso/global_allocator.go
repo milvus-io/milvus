@@ -52,11 +52,10 @@ type GlobalTSOAllocator struct {
 
 // NewGlobalTSOAllocator creates a new global TSO allocator.
 func NewGlobalTSOAllocator(key string, kvBase kv.TxnBase) *GlobalTSOAllocator {
-	var saveInterval = 3 * time.Second
 	return &GlobalTSOAllocator{
 		tso: &timestampOracle{
 			kvBase:        kvBase,
-			saveInterval:  saveInterval,
+			saveInterval:  3 * time.Second,
 			maxResetTSGap: func() time.Duration { return 3 * time.Second },
 			key:           key,
 		},
@@ -69,8 +68,8 @@ func (gta *GlobalTSOAllocator) Initialize() error {
 	return gta.tso.InitTimestamp()
 }
 
-func (gta *GlobalTSOAllocator) EnableMaxLogic(enable bool) {
-	gta.LimitMaxLogic = enable
+func (gta *GlobalTSOAllocator) SetLimitMaxLogic(flag bool) {
+	gta.LimitMaxLogic = flag
 }
 
 // UpdateTSO is used to update the TSO in memory and the time window in etcd.
