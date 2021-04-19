@@ -53,12 +53,14 @@ type tsoRequest struct {
 
 type segRequest struct {
 	baseRequest
-	count     uint32
-	colName   string
-	partition string
-	segInfo   map[UniqueID]uint32
-	channelID int32
-	timestamp Timestamp
+	count         uint32
+	colName       string
+	partitionName string
+	collID        UniqueID
+	partitionID   UniqueID
+	segInfo       map[UniqueID]uint32
+	channelID     int32
+	timestamp     Timestamp
 }
 
 type syncRequest struct {
@@ -119,7 +121,7 @@ type Allocator struct {
 
 	masterAddress string
 	masterConn    *grpc.ClientConn
-	masterClient  masterpb.MasterClient
+	masterClient  masterpb.MasterServiceClient
 	countPerRPC   uint32
 
 	toDoReqs  []request
@@ -160,7 +162,7 @@ func (ta *Allocator) connectMaster() error {
 	}
 	log.Printf("Connected to master, master_addr=%s", ta.masterAddress)
 	ta.masterConn = conn
-	ta.masterClient = masterpb.NewMasterClient(conn)
+	ta.masterClient = masterpb.NewMasterServiceClient(conn)
 	return nil
 }
 

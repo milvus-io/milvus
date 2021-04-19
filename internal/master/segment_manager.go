@@ -2,19 +2,18 @@ package master
 
 import (
 	"context"
+
 	"log"
 	"strconv"
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
@@ -35,7 +34,7 @@ type channelRange struct {
 type SegmentManager interface {
 	Start()
 	Close()
-	AssignSegment(segIDReq []*internalpb.SegIDRequest) ([]*internalpb.SegIDAssignment, error)
+	AssignSegment(segIDReq []*datapb.SegIDRequest) ([]*datapb.SegIDAssignment, error)
 	ForceClose(collID UniqueID) error
 	DropCollection(collID UniqueID) error
 }
@@ -63,20 +62,20 @@ type SegmentManagerImpl struct {
 	waitGroup sync.WaitGroup
 }
 
-func (manager *SegmentManagerImpl) AssignSegment(segIDReq []*internalpb.SegIDRequest) ([]*internalpb.SegIDAssignment, error) {
+func (manager *SegmentManagerImpl) AssignSegment(segIDReq []*datapb.SegIDRequest) ([]*datapb.SegIDAssignment, error) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 
-	res := make([]*internalpb.SegIDAssignment, 0)
+	res := make([]*datapb.SegIDAssignment, 0)
 
 	for _, req := range segIDReq {
-		result := &internalpb.SegIDAssignment{
+		result := &datapb.SegIDAssignment{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			},
 		}
 		collName := req.CollName
-		partitionTag := req.PartitionTag
+		paritionName := req.PartitionName
 		count := req.Count
 		channelID := req.ChannelID
 
@@ -88,13 +87,13 @@ func (manager *SegmentManagerImpl) AssignSegment(segIDReq []*internalpb.SegIDReq
 		}
 
 		collID := collMeta.GetID()
-		if !manager.metaTable.HasPartition(collID, partitionTag) {
-			result.Status.Reason = "partition tag " + partitionTag + " can not find in coll " + strconv.FormatInt(collID, 10)
+		if !manager.metaTable.HasPartition(collID, paritionName) {
+			result.Status.Reason = "partition tag " + paritionName + " can not find in coll " + strconv.FormatInt(collID, 10)
 			res = append(res, result)
 			continue
 		}
-
-		assignInfo, err := manager.assignSegment(collName, collID, partitionTag, count, channelID)
+		channelIDInt, _ := strconv.ParseInt(channelID, 10, 64)
+		assignInfo, err := manager.assignSegment(collName, collID, paritionName, count, int32(channelIDInt))
 		if err != nil {
 			result.Status.Reason = err.Error()
 			res = append(res, result)
@@ -109,9 +108,9 @@ func (manager *SegmentManagerImpl) AssignSegment(segIDReq []*internalpb.SegIDReq
 func (manager *SegmentManagerImpl) assignSegment(
 	collName string,
 	collID UniqueID,
-	partitionTag string,
+	paritionName string,
 	count uint32,
-	channelID int32) (*internalpb.SegIDAssignment, error) {
+	channelID int32) (*datapb.SegIDAssignment, error) {
 
 	collStatus, ok := manager.collStatus[collID]
 	if !ok {
@@ -124,7 +123,7 @@ func (manager *SegmentManagerImpl) assignSegment(
 		if segStatus.closable {
 			continue
 		}
-		match, err := manager.isMatch(segStatus.segmentID, partitionTag, channelID)
+		match, err := manager.isMatch(segStatus.segmentID, paritionName, channelID)
 		if err != nil {
 			return nil, err
 		}
@@ -140,13 +139,13 @@ func (manager *SegmentManagerImpl) assignSegment(
 			continue
 		}
 
-		return &internalpb.SegIDAssignment{
-			SegID:        segStatus.segmentID,
-			ChannelID:    channelID,
-			Count:        count,
-			CollName:     collName,
-			PartitionTag: partitionTag,
-			ExpireTime:   result.expireTime,
+		return &datapb.SegIDAssignment{
+			SegID:         segStatus.segmentID,
+			ChannelID:     channelID,
+			Count:         count,
+			CollName:      collName,
+			PartitionName: paritionName,
+			ExpireTime:    result.expireTime,
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_SUCCESS,
 				Reason:    "",
@@ -163,7 +162,7 @@ func (manager *SegmentManagerImpl) assignSegment(
 		return nil, errors.Errorf("request count %d is larger than total rows %d", count, total)
 	}
 
-	id, err := manager.openNewSegment(channelID, collID, partitionTag, total)
+	id, err := manager.openNewSegment(channelID, collID, paritionName, total)
 	if err != nil {
 		return nil, err
 	}
@@ -175,13 +174,13 @@ func (manager *SegmentManagerImpl) assignSegment(
 	if !result.isSuccess {
 		return nil, errors.Errorf("assign failed for segment %d", id)
 	}
-	return &internalpb.SegIDAssignment{
-		SegID:        id,
-		ChannelID:    channelID,
-		Count:        count,
-		CollName:     collName,
-		PartitionTag: partitionTag,
-		ExpireTime:   result.expireTime,
+	return &datapb.SegIDAssignment{
+		SegID:         id,
+		ChannelID:     channelID,
+		Count:         count,
+		CollName:      collName,
+		PartitionName: paritionName,
+		ExpireTime:    result.expireTime,
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 			Reason:    "",
@@ -189,14 +188,14 @@ func (manager *SegmentManagerImpl) assignSegment(
 	}, nil
 }
 
-func (manager *SegmentManagerImpl) isMatch(segmentID UniqueID, partitionTag string, channelID int32) (bool, error) {
+func (manager *SegmentManagerImpl) isMatch(segmentID UniqueID, paritionName string, channelID int32) (bool, error) {
 	segMeta, err := manager.metaTable.GetSegmentByID(segmentID)
 	if err != nil {
 		return false, err
 	}
 
 	if channelID < segMeta.GetChannelStart() ||
-		channelID > segMeta.GetChannelEnd() || segMeta.PartitionTag != partitionTag {
+		channelID > segMeta.GetChannelEnd() || segMeta.PartitionTag != paritionName {
 		return false, nil
 	}
 	return true, nil
@@ -214,7 +213,7 @@ func (manager *SegmentManagerImpl) estimateTotalRows(collName string) (int, erro
 	return int(manager.segmentThreshold / float64(sizePerRecord)), nil
 }
 
-func (manager *SegmentManagerImpl) openNewSegment(channelID int32, collID UniqueID, partitionTag string, numRows int) (UniqueID, error) {
+func (manager *SegmentManagerImpl) openNewSegment(channelID int32, collID UniqueID, paritionName string, numRows int) (UniqueID, error) {
 	// find the channel range
 	channelStart, channelEnd := int32(-1), int32(-1)
 	for _, r := range manager.channelRanges {
@@ -240,7 +239,7 @@ func (manager *SegmentManagerImpl) openNewSegment(channelID int32, collID Unique
 	err = manager.metaTable.AddSegment(&etcdpb.SegmentMeta{
 		SegmentID:    newID,
 		CollectionID: collID,
-		PartitionTag: partitionTag,
+		PartitionTag: paritionName,
 		ChannelStart: channelStart,
 		ChannelEnd:   channelEnd,
 		OpenTime:     openTime,
@@ -286,7 +285,7 @@ func (manager *SegmentManagerImpl) startWriteNodeTimeSync() {
 			log.Println("write node time sync stopped")
 			return
 		case msg := <-manager.writeNodeTimeSyncChan:
-			if err := manager.syncWriteNodeTimestamp(msg.TimeTickMsg.Timestamp); err != nil {
+			if err := manager.syncWriteNodeTimestamp(msg.TimeTickMsg.Base.Timestamp); err != nil {
 				log.Println("write node time sync error: " + err.Error())
 			}
 		}
@@ -454,7 +453,7 @@ func (manager *mockSegmentManager) Start() {
 func (manager *mockSegmentManager) Close() {
 }
 
-func (manager *mockSegmentManager) AssignSegment(segIDReq []*internalpb.SegIDRequest) ([]*internalpb.SegIDAssignment, error) {
+func (manager *mockSegmentManager) AssignSegment(segIDReq []*datapb.SegIDRequest) ([]*datapb.SegIDAssignment, error) {
 	return nil, nil
 }
 

@@ -2,7 +2,6 @@ syntax = "proto3";
 package milvus.proto.etcd;
 option go_package="github.com/zilliztech/milvus-distributed/internal/proto/etcdpb";
 
-import "index_builder.proto";
 import "common.proto";
 import "schema.proto";
 
@@ -13,13 +12,11 @@ message TenantMeta {
   string query_channelID = 4;
 }
 
-
 message ProxyMeta {
   int64 ID = 1;
   common.Address address = 2;
   repeated string result_channelIDs = 3;
 }
-
 
 message CollectionMeta {
   int64 ID=1;
@@ -53,6 +50,6 @@ message FieldIndexMeta {
   int64 fieldID = 2;
   int64 indexID = 3;
   repeated common.KeyValuePair index_params = 4;
-  service.IndexStatus status = 5;
+  common.IndexState state = 5;
   repeated string index_file_paths = 6;
 }

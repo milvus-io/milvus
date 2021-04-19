@@ -7,7 +7,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 )
@@ -309,25 +309,25 @@ func printDDLPayloadValues(eventType EventTypeCode, colType schemapb.DataType, r
 			}
 			switch eventType {
 			case CreateCollectionEventType:
-				var req internalpb.CreateCollectionRequest
+				var req milvuspb.CreateCollectionRequest
 				if err := proto.UnmarshalText(val, &req); err != nil {
 					return err
 				}
 				fmt.Printf("\t\t%d : create collection: %v\n", i, req)
 			case DropCollectionEventType:
-				var req internalpb.DropCollectionRequest
+				var req milvuspb.DropCollectionRequest
 				if err := proto.UnmarshalText(val, &req); err != nil {
 					return err
 				}
 				fmt.Printf("\t\t%d : drop collection: %v\n", i, req)
 			case CreatePartitionEventType:
-				var req internalpb.CreatePartitionRequest
+				var req milvuspb.CreatePartitionRequest
 				if err := proto.UnmarshalText(val, &req); err != nil {
 					return err
 				}
 				fmt.Printf("\t\t%d : create partition: %v\n", i, req)
 			case DropPartitionEventType:
-				var req internalpb.DropPartitionRequest
+				var req milvuspb.DropPartitionRequest
 				if err := proto.UnmarshalText(val, &req); err != nil {
 					return err
 				}

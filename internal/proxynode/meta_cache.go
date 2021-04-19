@@ -4,10 +4,9 @@ import (
 	"context"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
 
@@ -48,11 +47,11 @@ func (metaCache *SimpleMetaCache) Get(collectionName string) (*servicepb.Collect
 func (metaCache *SimpleMetaCache) Sync(collectionName string) error {
 	dct := &DescribeCollectionTask{
 		Condition: NewTaskCondition(metaCache.ctx),
-		DescribeCollectionRequest: internalpb.DescribeCollectionRequest{
-			MsgType: commonpb.MsgType_kDescribeCollection,
-			CollectionName: &servicepb.CollectionName{
-				CollectionName: collectionName,
+		DescribeCollectionRequest: milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_kDescribeCollection,
 			},
+			CollectionName: collectionName,
 		},
 		masterClient: metaCache.proxyInstance.masterClient,
 	}

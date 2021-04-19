@@ -10,7 +10,8 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
-	"github.com/zilliztech/milvus-distributed/internal/proto/indexbuilderpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
 )
 
@@ -55,7 +56,7 @@ func (bt *BaseTask) Notify(err error) {
 
 type IndexAddTask struct {
 	BaseTask
-	req         *indexbuilderpb.BuildIndexRequest
+	req         *indexpb.BuildIndexRequest
 	indexID     UniqueID
 	idAllocator *allocator.IDAllocator
 	buildQueue  TaskQueue
@@ -123,7 +124,7 @@ type IndexBuildTask struct {
 	indexID   UniqueID
 	kv        kv.Base
 	savePaths []string
-	req       *indexbuilderpb.BuildIndexRequest
+	req       *indexpb.BuildIndexRequest
 }
 
 func newIndexBuildTask() *IndexBuildTask {
@@ -147,7 +148,7 @@ func (it *IndexBuildTask) PreExecute() error {
 }
 
 func (it *IndexBuildTask) Execute() error {
-	err := it.table.UpdateIndexStatus(it.indexID, indexbuilderpb.IndexStatus_INPROGRESS)
+	err := it.table.UpdateIndexState(it.indexID, commonpb.IndexState_INPROGRESS)
 	if err != nil {
 		return err
 	}

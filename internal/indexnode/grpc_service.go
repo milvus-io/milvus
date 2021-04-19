@@ -6,14 +6,14 @@ import (
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/indexbuilderpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 )
 
 const (
 	reqTimeoutInterval = time.Second * 10
 )
 
-func (b *Builder) BuildIndex(ctx context.Context, request *indexbuilderpb.BuildIndexRequest) (*indexbuilderpb.BuildIndexResponse, error) {
+func (b *Builder) BuildIndex(ctx context.Context, request *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
 	t := NewIndexAddTask()
 	t.req = request
 	t.idAllocator = b.idAllocator
@@ -32,7 +32,7 @@ func (b *Builder) BuildIndex(ctx context.Context, request *indexbuilderpb.BuildI
 			return b.sched.IndexAddQueue.Enqueue(t)
 		}
 	}
-	ret := &indexbuilderpb.BuildIndexResponse{
+	ret := &indexpb.BuildIndexResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		},
@@ -55,9 +55,9 @@ func (b *Builder) BuildIndex(ctx context.Context, request *indexbuilderpb.BuildI
 	return ret, nil
 }
 
-func (b *Builder) DescribeIndex(ctx context.Context, request *indexbuilderpb.DescribleIndexRequest) (*indexbuilderpb.DescribleIndexResponse, error) {
+func (b *Builder) GetIndexStates(ctx context.Context, request *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
 	indexID := request.IndexID
-	ret, err := b.metaTable.GetIndexDescription(indexID)
+	ret, err := b.metaTable.GetIndexStates(indexID)
 	ret.Status = &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 	ret.IndexID = indexID
 	if err != nil {
@@ -67,8 +67,8 @@ func (b *Builder) DescribeIndex(ctx context.Context, request *indexbuilderpb.Des
 	return ret, nil
 }
 
-func (b *Builder) GetIndexFilePaths(ctx context.Context, request *indexbuilderpb.GetIndexFilePathsRequest) (*indexbuilderpb.GetIndexFilePathsResponse, error) {
-	ret := &indexbuilderpb.GetIndexFilePathsResponse{
+func (b *Builder) GetIndexFilePaths(ctx context.Context, request *indexpb.IndexFilePathRequest) (*indexpb.IndexFilePathsResponse, error) {
+	ret := &indexpb.IndexFilePathsResponse{
 		Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
 		IndexID: request.IndexID,
 	}

@@ -227,7 +227,7 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 	// TODO: add default partition?
 
 	var schema schemapb.CollectionSchema
-	err := proto.Unmarshal((*msg.Schema).Value, &schema)
+	err := proto.Unmarshal(msg.Schema, &schema)
 	if err != nil {
 		log.Println(err)
 		return
@@ -245,7 +245,7 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 	ddNode.ddMsg.collectionRecords[collectionName] = append(ddNode.ddMsg.collectionRecords[collectionName],
 		metaOperateRecord{
 			createOrDrop: true,
-			timestamp:    msg.Timestamp,
+			timestamp:    msg.Base.Timestamp,
 		})
 
 	_, ok := ddNode.ddBuffer.ddData[collectionID]
@@ -258,7 +258,7 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 	}
 
 	ddNode.ddBuffer.ddData[collectionID].ddRequestString = append(ddNode.ddBuffer.ddData[collectionID].ddRequestString, msg.CreateCollectionRequest.String())
-	ddNode.ddBuffer.ddData[collectionID].timestamps = append(ddNode.ddBuffer.ddData[collectionID].timestamps, msg.Timestamp)
+	ddNode.ddBuffer.ddData[collectionID].timestamps = append(ddNode.ddBuffer.ddData[collectionID].timestamps, msg.Base.Timestamp)
 	ddNode.ddBuffer.ddData[collectionID].eventTypes = append(ddNode.ddBuffer.ddData[collectionID].eventTypes, storage.CreateCollectionEventType)
 }
 
@@ -278,11 +278,11 @@ func (ddNode *ddNode) dropCollection(msg *msgstream.DropCollectionMsg) {
 	}
 	delete(ddNode.ddRecords.collectionRecords, collectionID)
 
-	collectionName := msg.CollectionName.CollectionName
+	collectionName := msg.CollectionName
 	ddNode.ddMsg.collectionRecords[collectionName] = append(ddNode.ddMsg.collectionRecords[collectionName],
 		metaOperateRecord{
 			createOrDrop: false,
-			timestamp:    msg.Timestamp,
+			timestamp:    msg.Base.Timestamp,
 		})
 
 	_, ok := ddNode.ddBuffer.ddData[collectionID]
@@ -295,7 +295,7 @@ func (ddNode *ddNode) dropCollection(msg *msgstream.DropCollectionMsg) {
 	}
 
 	ddNode.ddBuffer.ddData[collectionID].ddRequestString = append(ddNode.ddBuffer.ddData[collectionID].ddRequestString, msg.DropCollectionRequest.String())
-	ddNode.ddBuffer.ddData[collectionID].timestamps = append(ddNode.ddBuffer.ddData[collectionID].timestamps, msg.Timestamp)
+	ddNode.ddBuffer.ddData[collectionID].timestamps = append(ddNode.ddBuffer.ddData[collectionID].timestamps, msg.Base.Timestamp)
 	ddNode.ddBuffer.ddData[collectionID].eventTypes = append(ddNode.ddBuffer.ddData[collectionID].eventTypes, storage.DropCollectionEventType)
 
 	ddNode.ddMsg.gcRecord.collections = append(ddNode.ddMsg.gcRecord.collections, collectionID)
@@ -313,11 +313,11 @@ func (ddNode *ddNode) createPartition(msg *msgstream.CreatePartitionMsg) {
 	}
 	ddNode.ddRecords.partitionRecords[partitionID] = nil
 
-	partitionTag := msg.PartitionName.Tag
+	partitionTag := msg.PartitionName
 	ddNode.ddMsg.partitionRecords[partitionTag] = append(ddNode.ddMsg.partitionRecords[partitionTag],
 		metaOperateRecord{
 			createOrDrop: true,
-			timestamp:    msg.Timestamp,
+			timestamp:    msg.Base.Timestamp,
 		})
 
 	_, ok := ddNode.ddBuffer.ddData[collectionID]
@@ -330,7 +330,7 @@ func (ddNode *ddNode) createPartition(msg *msgstream.CreatePartitionMsg) {
 	}
 
 	ddNode.ddBuffer.ddData[collectionID].ddRequestString = append(ddNode.ddBuffer.ddData[collectionID].ddRequestString, msg.CreatePartitionRequest.String())
-	ddNode.ddBuffer.ddData[collectionID].timestamps = append(ddNode.ddBuffer.ddData[collectionID].timestamps, msg.Timestamp)
+	ddNode.ddBuffer.ddData[collectionID].timestamps = append(ddNode.ddBuffer.ddData[collectionID].timestamps, msg.Base.Timestamp)
 	ddNode.ddBuffer.ddData[collectionID].eventTypes = append(ddNode.ddBuffer.ddData[collectionID].eventTypes, storage.CreatePartitionEventType)
 }
 
@@ -346,11 +346,11 @@ func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
 	}
 	delete(ddNode.ddRecords.partitionRecords, partitionID)
 
-	partitionTag := msg.PartitionName.Tag
+	partitionTag := msg.PartitionName
 	ddNode.ddMsg.partitionRecords[partitionTag] = append(ddNode.ddMsg.partitionRecords[partitionTag],
 		metaOperateRecord{
 			createOrDrop: false,
-			timestamp:    msg.Timestamp,
+			timestamp:    msg.Base.Timestamp,
 		})
 
 	_, ok := ddNode.ddBuffer.ddData[collectionID]
@@ -363,7 +363,7 @@ func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
 	}
 
 	ddNode.ddBuffer.ddData[collectionID].ddRequestString = append(ddNode.ddBuffer.ddData[collectionID].ddRequestString, msg.DropPartitionRequest.String())
-	ddNode.ddBuffer.ddData[collectionID].timestamps = append(ddNode.ddBuffer.ddData[collectionID].timestamps, msg.Timestamp)
+	ddNode.ddBuffer.ddData[collectionID].timestamps = append(ddNode.ddBuffer.ddData[collectionID].timestamps, msg.Base.Timestamp)
 	ddNode.ddBuffer.ddData[collectionID].eventTypes = append(ddNode.ddBuffer.ddData[collectionID].eventTypes, storage.DropPartitionEventType)
 }
 

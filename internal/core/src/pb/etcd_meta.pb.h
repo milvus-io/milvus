@@ -32,7 +32,6 @@
 #include <google/protobuf/repeated_field.h>  // IWYU pragma: export
 #include <google/protobuf/extension_set.h>  // IWYU pragma: export
 #include <google/protobuf/unknown_field_set.h>
-#include "index_builder.pb.h"
 #include "common.pb.h"
 #include "schema.pb.h"
 // @@protoc_insertion_point(includes)
@@ -1094,7 +1093,7 @@ class FieldIndexMeta :
     kSegmentIDFieldNumber = 1,
     kFieldIDFieldNumber = 2,
     kIndexIDFieldNumber = 3,
-    kStatusFieldNumber = 5,
+    kStateFieldNumber = 5,
   };
   // repeated .milvus.proto.common.KeyValuePair index_params = 4;
   int index_params_size() const;
@@ -1139,10 +1138,10 @@ class FieldIndexMeta :
   ::PROTOBUF_NAMESPACE_ID::int64 indexid() const;
   void set_indexid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // .milvus.proto.service.IndexStatus status = 5;
-  void clear_status();
-  ::milvus::proto::service::IndexStatus status() const;
-  void set_status(::milvus::proto::service::IndexStatus value);
+  // .milvus.proto.common.IndexState state = 5;
+  void clear_state();
+  ::milvus::proto::common::IndexState state() const;
+  void set_state(::milvus::proto::common::IndexState value);
 
   // @@protoc_insertion_point(class_scope:milvus.proto.etcd.FieldIndexMeta)
  private:
@@ -1154,7 +1153,7 @@ class FieldIndexMeta :
   ::PROTOBUF_NAMESPACE_ID::int64 segmentid_;
   ::PROTOBUF_NAMESPACE_ID::int64 fieldid_;
   ::PROTOBUF_NAMESPACE_ID::int64 indexid_;
-  int status_;
+  int state_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_etcd_5fmeta_2eproto;
 };
@@ -1996,18 +1995,18 @@ FieldIndexMeta::index_params() const {
   return index_params_;
 }
 
-// .milvus.proto.service.IndexStatus status = 5;
-inline void FieldIndexMeta::clear_status() {
-  status_ = 0;
+// .milvus.proto.common.IndexState state = 5;
+inline void FieldIndexMeta::clear_state() {
+  state_ = 0;
 }
-inline ::milvus::proto::service::IndexStatus FieldIndexMeta::status() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.etcd.FieldIndexMeta.status)
-  return static_cast< ::milvus::proto::service::IndexStatus >(status_);
+inline ::milvus::proto::common::IndexState FieldIndexMeta::state() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.FieldIndexMeta.state)
+  return static_cast< ::milvus::proto::common::IndexState >(state_);
 }
-inline void FieldIndexMeta::set_status(::milvus::proto::service::IndexStatus value) {
+inline void FieldIndexMeta::set_state(::milvus::proto::common::IndexState value) {
   
-  status_ = value;
-  // @@protoc_insertion_point(field_set:milvus.proto.etcd.FieldIndexMeta.status)
+  state_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.FieldIndexMeta.state)
 }
 
 // repeated string index_file_paths = 6;

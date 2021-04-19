@@ -20,7 +20,7 @@ import (
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -382,7 +382,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 		if ibNode.insertBuffer.full(currentSegID) {
 			log.Printf(". Insert Buffer full, auto flushing (%v) rows of data...", ibNode.insertBuffer.size(currentSegID))
 			// partitionTag -> partitionID
-			partitionTag := msg.GetPartitionTag()
+			partitionTag := msg.GetPartitionName()
 			partitionID, err := typeutil.Hash32String(partitionTag)
 			if err != nil {
 				log.Println("partitionTag to partitionID wrong")
@@ -466,7 +466,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 	//   1. insertBuffer(not empty) -> binLogs -> minIO/S3
 	for _, msg := range iMsg.flushMessages {
 		currentSegID := msg.GetSegmentID()
-		flushTs := msg.GetTimestamp()
+		flushTs := msg.Base.Timestamp
 		partitionTag := msg.GetPartitionTag()
 		collectionID := msg.GetCollectionID()
 		log.Printf(". Receiving flush message segID(%v)...", currentSegID)
@@ -590,10 +590,13 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 			EndTimestamp:   ts,
 			HashValues:     []uint32{0},
 		},
-		TimeTickMsg: internalpb.TimeTickMsg{
-			MsgType:   commonpb.MsgType_kTimeTick,
-			PeerID:    Params.WriteNodeID,
-			Timestamp: ts,
+		TimeTickMsg: internalpb2.TimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kTimeTick,
+				MsgID:     0,
+				Timestamp: ts,
+				SourceID:  Params.WriteNodeID,
+			},
 		},
 	}
 	msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)

@@ -4,43 +4,43 @@ import (
 	"errors"
 	"log"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
 	"github.com/golang/protobuf/proto"
+
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
 
 type createCollectionTask struct {
 	baseTask
-	req *internalpb.CreateCollectionRequest
+	req *milvuspb.CreateCollectionRequest
 }
 
 type dropCollectionTask struct {
 	baseTask
-	req        *internalpb.DropCollectionRequest
+	req        *milvuspb.DropCollectionRequest
 	segManager SegmentManager
 }
 
 type hasCollectionTask struct {
 	baseTask
 	hasCollection bool
-	req           *internalpb.HasCollectionRequest
+	req           *milvuspb.HasCollectionRequest
 }
 
 type describeCollectionTask struct {
 	baseTask
-	description *servicepb.CollectionDescription
-	req         *internalpb.DescribeCollectionRequest
+	description *milvuspb.DescribeCollectionResponse
+	req         *milvuspb.DescribeCollectionRequest
 }
 
 type showCollectionsTask struct {
 	baseTask
-	stringListResponse *servicepb.StringListResponse
-	req                *internalpb.ShowCollectionRequest
+	stringListResponse *milvuspb.ShowCollectionResponse
+	req                *milvuspb.ShowCollectionRequest
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -49,14 +49,14 @@ func (t *createCollectionTask) Type() commonpb.MsgType {
 		log.Printf("null request")
 		return 0
 	}
-	return t.req.MsgType
+	return t.req.Base.MsgType
 }
 
 func (t *createCollectionTask) Ts() (Timestamp, error) {
 	if t.req == nil {
 		return 0, errors.New("null request")
 	}
-	return t.req.Timestamp, nil
+	return t.req.Base.Timestamp, nil
 }
 
 func (t *createCollectionTask) Execute() error {
@@ -65,7 +65,7 @@ func (t *createCollectionTask) Execute() error {
 	}
 
 	var schema schemapb.CollectionSchema
-	err := proto.UnmarshalMerge(t.req.Schema.Value, &schema)
+	err := proto.UnmarshalMerge(t.req.Schema, &schema)
 	if err != nil {
 		return err
 	}
@@ -114,19 +114,26 @@ func (t *createCollectionTask) Execute() error {
 
 	msgPack := ms.MsgPack{}
 	baseMsg := ms.BaseMsg{
-		BeginTimestamp: t.req.Timestamp,
-		EndTimestamp:   t.req.Timestamp,
+		BeginTimestamp: t.req.Base.Timestamp,
+		EndTimestamp:   t.req.Base.Timestamp,
 		HashValues:     []uint32{0},
 	}
 
-	t.req.CollectionID = collectionID
-	t.req.Schema.Value, err = proto.Marshal(&schema)
+	createCollectionMsg := &internalpb2.CreateCollectionRequest{
+		Base:           t.req.Base,
+		DbName:         "",
+		CollectionName: t.req.CollectionName,
+		DbID:           0,
+		CollectionID:   collectionID,
+	}
+
+	createCollectionMsg.Schema, err = proto.Marshal(&schema)
 	if err != nil {
 		return err
 	}
 	timeTickMsg := &ms.CreateCollectionMsg{
 		BaseMsg:                 baseMsg,
-		CreateCollectionRequest: *t.req,
+		CreateCollectionRequest: *createCollectionMsg,
 	}
 	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
 	return t.sch.ddMsgStream.Broadcast(&msgPack)
@@ -138,14 +145,14 @@ func (t *dropCollectionTask) Type() commonpb.MsgType {
 		log.Printf("null request")
 		return 0
 	}
-	return t.req.MsgType
+	return t.req.Base.MsgType
 }
 
 func (t *dropCollectionTask) Ts() (Timestamp, error) {
 	if t.req == nil {
 		return 0, errors.New("null request")
 	}
-	return t.req.Timestamp, nil
+	return t.req.Base.Timestamp, nil
 }
 
 func (t *dropCollectionTask) Execute() error {
@@ -153,7 +160,7 @@ func (t *dropCollectionTask) Execute() error {
 		return errors.New("null request")
 	}
 
-	collectionName := t.req.CollectionName.CollectionName
+	collectionName := t.req.CollectionName
 	collectionMeta, err := t.mt.GetCollectionByName(collectionName)
 	if err != nil {
 		return err
@@ -183,10 +190,16 @@ func (t *dropCollectionTask) Execute() error {
 		HashValues:     []uint32{0},
 	}
 
-	t.req.CollectionID = collectionID
+	dropReq := internalpb2.DropCollectionRequest{
+		Base:           t.req.Base,
+		DbName:         "",
+		CollectionName: t.req.CollectionName,
+		DbID:           0,
+		CollectionID:   collectionID,
+	}
 	timeTickMsg := &ms.DropCollectionMsg{
 		BaseMsg:               baseMsg,
-		DropCollectionRequest: *t.req,
+		DropCollectionRequest: dropReq,
 	}
 	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
 	return t.sch.ddMsgStream.Broadcast(&msgPack)
@@ -199,14 +212,14 @@ func (t *hasCollectionTask) Type() commonpb.MsgType {
 		log.Printf("null request")
 		return 0
 	}
-	return t.req.MsgType
+	return t.req.Base.MsgType
 }
 
 func (t *hasCollectionTask) Ts() (Timestamp, error) {
 	if t.req == nil {
 		return 0, errors.New("null request")
 	}
-	return t.req.Timestamp, nil
+	return t.req.Base.Timestamp, nil
 }
 
 func (t *hasCollectionTask) Execute() error {
@@ -214,7 +227,7 @@ func (t *hasCollectionTask) Execute() error {
 		return errors.New("null request")
 	}
 
-	collectionName := t.req.CollectionName.CollectionName
+	collectionName := t.req.CollectionName
 	_, err := t.mt.GetCollectionByName(collectionName)
 	if err == nil {
 		t.hasCollection = true
@@ -229,14 +242,14 @@ func (t *describeCollectionTask) Type() commonpb.MsgType {
 		log.Printf("null request")
 		return 0
 	}
-	return t.req.MsgType
+	return t.req.Base.MsgType
 }
 
 func (t *describeCollectionTask) Ts() (Timestamp, error) {
 	if t.req == nil {
 		return 0, errors.New("null request")
 	}
-	return t.req.Timestamp, nil
+	return t.req.Base.Timestamp, nil
 }
 
 func (t *describeCollectionTask) filterSchema() error {
@@ -260,7 +273,7 @@ func (t *describeCollectionTask) Execute() error {
 	}
 
 	collectionName := t.req.CollectionName
-	collection, err := t.mt.GetCollectionByName(collectionName.CollectionName)
+	collection, err := t.mt.GetCollectionByName(collectionName)
 	if err != nil {
 		return err
 	}
@@ -276,14 +289,14 @@ func (t *showCollectionsTask) Type() commonpb.MsgType {
 		log.Printf("null request")
 		return 0
 	}
-	return t.req.MsgType
+	return t.req.Base.MsgType
 }
 
 func (t *showCollectionsTask) Ts() (Timestamp, error) {
 	if t.req == nil {
 		return 0, errors.New("null request")
 	}
-	return t.req.Timestamp, nil
+	return t.req.Base.Timestamp, nil
 }
 
 func (t *showCollectionsTask) Execute() error {
@@ -296,7 +309,7 @@ func (t *showCollectionsTask) Execute() error {
 		return err
 	}
 
-	t.stringListResponse.Values = colls
+	t.stringListResponse.CollectionNames = colls
 
 	return nil
 }

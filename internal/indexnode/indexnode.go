@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/indexservice"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -21,7 +22,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
-	"github.com/zilliztech/milvus-distributed/internal/proto/indexbuilderpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"google.golang.org/grpc"
 )
@@ -82,6 +82,14 @@ type Builder struct {
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
+}
+
+func (b *Builder) RegisterNode(ctx context.Context, request *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
+	panic("implement me")
+}
+
+func (b *Builder) NotifyBuildIndex(ctx context.Context, notification *indexpb.BuildIndexNotification) (*commonpb.Status, error) {
+	panic("implement me")
 }
 
 func Init() {
@@ -183,7 +191,7 @@ func (b *Builder) grpcLoop() {
 	}
 
 	b.grpcServer = grpc.NewServer()
-	indexbuilderpb.RegisterIndexBuildServiceServer(b.grpcServer, b)
+	indexpb.RegisterIndexServiceServer(b.grpcServer, b)
 	if err = b.grpcServer.Serve(lis); err != nil {
 		log.Fatalf("Builder grpc server fatal error=%v", err)
 	}

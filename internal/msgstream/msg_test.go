@@ -10,7 +10,7 @@ import (
 	"github.com/golang/protobuf/proto"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 type InsertTask struct {
@@ -29,10 +29,10 @@ func (tt *InsertTask) Marshal(input TsMsg) ([]byte, error) {
 }
 
 func (tt *InsertTask) Unmarshal(input []byte) (TsMsg, error) {
-	insertRequest := internalPb.InsertRequest{}
+	insertRequest := internalpb2.InsertRequest{}
 	err := proto.Unmarshal(input, &insertRequest)
 	testMsg := &InsertTask{InsertMsg: InsertMsg{InsertRequest: insertRequest}}
-	testMsg.Tag = testMsg.PartitionTag
+	testMsg.Tag = testMsg.InsertRequest.PartitionName
 	if err != nil {
 		return nil, err
 	}
@@ -64,15 +64,18 @@ func newRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, erro
 				result[key] = &msgPack
 			}
 
-			sliceRequest := internalPb.InsertRequest{
-				MsgType:        commonpb.MsgType_kInsert,
-				ReqID:          insertRequest.ReqID,
+			sliceRequest := internalpb2.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_kInsert,
+					MsgID:     insertRequest.Base.MsgID,
+					Timestamp: insertRequest.Timestamps[index],
+					SourceID:  insertRequest.Base.SourceID,
+				},
 				CollectionName: insertRequest.CollectionName,
-				PartitionTag:   insertRequest.PartitionTag,
+				PartitionName:  insertRequest.PartitionName,
 				SegmentID:      insertRequest.SegmentID,
 				ChannelID:      insertRequest.ChannelID,
-				ProxyID:        insertRequest.ProxyID,
-				Timestamps:     []uint64{insertRequest.Timestamps[index]},
+				Timestamps:     []Timestamp{insertRequest.Timestamps[index]},
 				RowIDs:         []int64{insertRequest.RowIDs[index]},
 				RowData:        []*commonpb.Blob{insertRequest.RowData[index]},
 			}
@@ -93,14 +96,17 @@ func getInsertTask(reqID UniqueID, hashValue uint32) TsMsg {
 		EndTimestamp:   0,
 		HashValues:     []uint32{hashValue},
 	}
-	insertRequest := internalPb.InsertRequest{
-		MsgType:        commonpb.MsgType_kInsert,
-		ReqID:          reqID,
+	insertRequest := internalpb2.InsertRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kInsert,
+			MsgID:     reqID,
+			Timestamp: 1,
+			SourceID:  1,
+		},
 		CollectionName: "Collection",
-		PartitionTag:   "Partition",
+		PartitionName:  "Partition",
 		SegmentID:      1,
-		ChannelID:      1,
-		ProxyID:        1,
+		ChannelID:      "1",
 		Timestamps:     []Timestamp{1},
 		RowIDs:         []int64{1},
 		RowData:        []*commonpb.Blob{{}},

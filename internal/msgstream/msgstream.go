@@ -2,8 +2,10 @@ package msgstream
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,7 +17,7 @@ import (
 	oplog "github.com/opentracing/opentracing-go/log"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
@@ -193,11 +195,12 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 		for index, hashValue := range hashValues {
 			if tsMsg.Type() == commonpb.MsgType_kSearchResult {
 				searchResult := tsMsg.(*SearchResultMsg)
-				channelID := int32(searchResult.ResultChannelID)
-				if channelID >= int32(len(ms.producers)) {
+				channelID := searchResult.ResultChannelID
+				channelIDInt, _ := strconv.ParseInt(channelID, 10, 64)
+				if channelIDInt >= int64(len(ms.producers)) {
 					return errors.New("Failed to produce pulsar msg to unKnow channel")
 				}
-				bucketValues[index] = channelID
+				bucketValues[index] = int32(channelIDInt)
 				continue
 			}
 			bucketValues[index] = int32(hashValue % uint32(len(ms.producers)))
@@ -231,6 +234,15 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 			}
 
 			msg := &pulsar.ProducerMessage{Payload: mb}
+			if v.Msgs[i].Type() == commonpb.MsgType_kDelete {
+				headerMsg := commonpb.MsgHeader{}
+				err := proto.Unmarshal(mb, &headerMsg)
+				if err != nil {
+					fmt.Println(err.Error())
+				}
+
+			}
+
 			var child opentracing.Span
 			if v.Msgs[i].Type() == commonpb.MsgType_kInsert ||
 				v.Msgs[i].Type() == commonpb.MsgType_kSearch ||
@@ -382,13 +394,16 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 				}
 				(*ms.consumers[chosen]).AckID(pulsarMsg.ID())
 
-				headerMsg := internalPb.MsgHeader{}
-				err := proto.Unmarshal(pulsarMsg.Payload(), &headerMsg)
+				headerMsg := commonpb.MsgHeader{}
+				payload := pulsarMsg.Payload()
+				err := proto.Unmarshal(payload, &headerMsg)
+				//delete2, _ := ms.unmarshal.Unmarshal(payload, commonpb.MsgType_kDelete)
+				//fmt.Println(delete2)
 				if err != nil {
 					log.Printf("Failed to unmarshal message header, error = %v", err)
 					continue
 				}
-				tsMsg, err := ms.unmarshal.Unmarshal(pulsarMsg.Payload(), headerMsg.MsgType)
+				tsMsg, err := ms.unmarshal.Unmarshal(pulsarMsg.Payload(), headerMsg.Base.MsgType)
 				if tsMsg.Type() == commonpb.MsgType_kSearch ||
 					tsMsg.Type() == commonpb.MsgType_kSearchResult {
 					tracer := opentracing.GlobalTracer()
@@ -548,14 +563,14 @@ func (ms *PulsarTtMsgStream) findTimeTick(channelIndex int,
 			}
 			(*ms.consumers[channelIndex]).Ack(pulsarMsg)
 
-			headerMsg := internalPb.MsgHeader{}
+			headerMsg := commonpb.MsgHeader{}
 			err := proto.Unmarshal(pulsarMsg.Payload(), &headerMsg)
 			if err != nil {
 				log.Printf("Failed to unmarshal, error = %v", err)
 			}
-			unMarshalFunc := (*ms.unmarshal).tempMap[headerMsg.MsgType]
+			unMarshalFunc := (*ms.unmarshal).tempMap[headerMsg.Base.MsgType]
 			if unMarshalFunc == nil {
-				panic("null unMarshalFunc for " + headerMsg.MsgType.String() + " msg type")
+				panic("null unMarshalFunc for " + headerMsg.Base.MsgType.String() + " msg type")
 			}
 			tsMsg, err := unMarshalFunc(pulsarMsg.Payload())
 			if err != nil {
@@ -579,9 +594,9 @@ func (ms *PulsarTtMsgStream) findTimeTick(channelIndex int,
 				span.Finish()
 			}
 
-			if headerMsg.MsgType == commonpb.MsgType_kTimeTick {
+			if headerMsg.Base.MsgType == commonpb.MsgType_kTimeTick {
 				findMapMutex.Lock()
-				eofMsgMap[channelIndex] = tsMsg.(*TimeTickMsg).Timestamp
+				eofMsgMap[channelIndex] = tsMsg.(*TimeTickMsg).Base.Timestamp
 				findMapMutex.Unlock()
 				return
 			}
@@ -684,14 +699,17 @@ func insertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 				result[key] = &msgPack
 			}
 
-			sliceRequest := internalPb.InsertRequest{
-				MsgType:        commonpb.MsgType_kInsert,
-				ReqID:          insertRequest.ReqID,
+			sliceRequest := internalpb2.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_kInsert,
+					MsgID:     insertRequest.Base.MsgID,
+					Timestamp: insertRequest.Timestamps[index],
+					SourceID:  insertRequest.Base.SourceID,
+				},
 				CollectionName: insertRequest.CollectionName,
-				PartitionTag:   insertRequest.PartitionTag,
+				PartitionName:  insertRequest.PartitionName,
 				SegmentID:      insertRequest.SegmentID,
 				ChannelID:      insertRequest.ChannelID,
-				ProxyID:        insertRequest.ProxyID,
 				Timestamps:     []uint64{insertRequest.Timestamps[index]},
 				RowIDs:         []int64{insertRequest.RowIDs[index]},
 				RowData:        []*commonpb.Blob{insertRequest.RowData[index]},
@@ -733,17 +751,23 @@ func deleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 				result[key] = &msgPack
 			}
 
-			sliceRequest := internalPb.DeleteRequest{
-				MsgType:        commonpb.MsgType_kDelete,
-				ReqID:          deleteRequest.ReqID,
+			sliceRequest := internalpb2.DeleteRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_kDelete,
+					MsgID:     deleteRequest.Base.MsgID,
+					Timestamp: deleteRequest.Timestamps[index],
+					SourceID:  deleteRequest.Base.SourceID,
+				},
 				CollectionName: deleteRequest.CollectionName,
 				ChannelID:      deleteRequest.ChannelID,
-				ProxyID:        deleteRequest.ProxyID,
 				Timestamps:     []uint64{deleteRequest.Timestamps[index]},
 				PrimaryKeys:    []int64{deleteRequest.PrimaryKeys[index]},
 			}
 
 			deleteMsg := &DeleteMsg{
+				BaseMsg: BaseMsg{
+					MsgCtx: request.GetMsgContext(),
+				},
 				DeleteRequest: sliceRequest,
 			}
 			result[key].Msgs = append(result[key].Msgs, deleteMsg)

@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	indexnodeclient "github.com/zilliztech/milvus-distributed/internal/indexnode/client"
 	"github.com/zilliztech/milvus-distributed/internal/master"
-	"github.com/zilliztech/milvus-distributed/internal/proto/indexbuilderpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
 
 var ctx context.Context
@@ -114,15 +114,15 @@ func TestBuilder_GRPC(t *testing.T) {
 	indexParams := make(map[string]string)
 	indexParams["b"] = "2"
 	columnDataPaths := []string{"dataA", "dataB"}
-	indexID, err := buildClient.BuildIndexWithoutID(columnDataPaths, typeParams, indexParams)
+	indexID, err := buildClient.BuildIndex(columnDataPaths, typeParams, indexParams)
 	assert.Nil(t, err)
 
 	time.Sleep(time.Second * 3)
 
-	description, err := buildClient.DescribeIndex(indexID)
+	description, err := buildClient.GetIndexStates(indexID)
 	assert.Nil(t, err)
-	assert.Equal(t, indexbuilderpb.IndexStatus_INPROGRESS, description.Status)
-	assert.Equal(t, indexID, description.ID)
+	assert.Equal(t, commonpb.IndexState_INPROGRESS, description.State)
+	assert.Equal(t, indexID, description.IndexID)
 
 	indexDataPaths, err := buildClient.GetIndexFilePaths(indexID)
 	assert.Nil(t, err)

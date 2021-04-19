@@ -5,7 +5,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 type Client struct {
@@ -45,8 +45,10 @@ func (c *Client) LoadIndex(indexPaths []string,
 		})
 	}
 
-	loadIndexRequest := internalPb.LoadIndex{
-		MsgType:     commonpb.MsgType_kLoadIndex,
+	loadIndexRequest := internalpb2.LoadIndex{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_kLoadIndex,
+		},
 		SegmentID:   segmentID,
 		FieldName:   fieldName,
 		FieldID:     fieldID,

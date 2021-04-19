@@ -5,12 +5,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/proto/indexbuilderpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 )
 
 type IndexBuildInfo struct {
@@ -75,7 +72,7 @@ func (scheduler *IndexBuildScheduler) schedule(info interface{}) error {
 		indexParamsMap[kv.Key] = kv.Value
 	}
 
-	indexID, err := scheduler.client.BuildIndexWithoutID(indexBuildInfo.binlogFilePath, typeParamsMap, indexParamsMap)
+	indexID, err := scheduler.client.BuildIndex(indexBuildInfo.binlogFilePath, typeParamsMap, indexParamsMap)
 	log.Printf("build index for segment %d field %d", indexBuildInfo.segmentID, indexBuildInfo.fieldID)
 	if err != nil {
 		return err
@@ -86,7 +83,7 @@ func (scheduler *IndexBuildScheduler) schedule(info interface{}) error {
 		FieldID:     indexBuildInfo.fieldID,
 		IndexID:     indexID,
 		IndexParams: indexParams,
-		Status:      indexbuilderpb.IndexStatus_NONE,
+		State:       commonpb.IndexState_NONE,
 	})
 	if err != nil {
 		log.Printf("WARNING: " + err.Error())
@@ -113,11 +110,11 @@ func (scheduler *IndexBuildScheduler) describe() error {
 			indexID := channelInfo.id
 			indexBuildInfo := channelInfo.info
 			for {
-				description, err := scheduler.client.DescribeIndex(channelInfo.id)
+				description, err := scheduler.client.GetIndexStates(channelInfo.id)
 				if err != nil {
 					return err
 				}
-				if description.Status == indexbuilderpb.IndexStatus_FINISHED {
+				if description.State == commonpb.IndexState_FINISHED {
 					log.Printf("build index for segment %d field %d is finished", indexBuildInfo.segmentID, indexBuildInfo.fieldID)
 					filePaths, err := scheduler.client.GetIndexFilePaths(indexID)
 					if err != nil {
@@ -149,7 +146,7 @@ func (scheduler *IndexBuildScheduler) describe() error {
 						FieldID:        indexBuildInfo.fieldID,
 						IndexID:        indexID,
 						IndexParams:    channelInfo.indexParams,
-						Status:         indexbuilderpb.IndexStatus_FINISHED,
+						State:          commonpb.IndexState_FINISHED,
 						IndexFilePaths: filePaths,
 					})
 					if err != nil {
@@ -170,7 +167,7 @@ func (scheduler *IndexBuildScheduler) describe() error {
 						FieldID:     indexBuildInfo.fieldID,
 						IndexID:     indexID,
 						IndexParams: channelInfo.indexParams,
-						Status:      description.Status,
+						State:       description.State,
 					})
 					if err != nil {
 						return err

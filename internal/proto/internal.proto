@@ -4,7 +4,6 @@ option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/int
 
 import "common.proto";
 
-
 enum StateCode {
   INITIALIZING = 0;
   HEALTHY = 1;
@@ -43,3 +42,154 @@ message TimeTickMsg {
   common.MsgBase base = 1;
 }
 
+
+message CreateCollectionRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collectionName = 3;
+  // `schema` is the serialized `schema.CollectionSchema`
+  int64 dbID = 4;
+  int64 collectionID = 5;
+  bytes schema = 6;
+}
+
+
+message DropCollectionRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collectionName = 3;
+  int64 dbID = 4;
+  int64 collectionID = 5;
+}
+
+message CreatePartitionRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  string partition_name = 4;
+  int64  dbID = 5;
+  int64 collectionID = 6;
+  int64 partitionID = 7;
+}
+
+
+message DropPartitionRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  string partition_name = 4;
+  int64  dbID = 5;
+  int64 collectionID = 6;
+  int64 partitionID = 7;
+}
+
+
+message CreateIndexRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  string field_name = 4;
+  int64 dbID = 5;
+  int64 collectionID = 6;
+  int64 fieldID = 7;
+  repeated common.KeyValuePair extra_params = 8;
+
+}
+
+
+message InsertRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  string partition_name = 4;
+  int64 segmentID = 5;
+  string channelID = 6;
+  repeated uint64 timestamps = 7;
+  repeated int64 rowIDs = 8;
+  repeated common.Blob row_data = 9;
+}
+
+
+message SearchRequest {
+  common.MsgBase base = 1;
+  string result_channelID = 2;
+  common.Blob query = 3;
+
+}
+message SearchResults {
+  common.MsgBase base = 1;
+  common.Status status = 2;
+  string result_channelID = 3;
+  string metric_type = 4;
+  repeated bytes hits = 5;
+}
+
+
+message DeleteRequest {
+  common.MsgBase base = 1;
+  string collection_name = 2;
+  string channelID = 3;
+  repeated uint64 timestamps = 4;
+  repeated int64 primary_keys = 5;
+}
+
+message FlushMsg {
+  common.MsgBase base = 1;
+  int64 segmentID = 2;
+  int64 collectionID = 3;
+  string partitionTag = 4;
+}
+
+//message Key2Seg {
+//  int64 rowID = 1;
+//  int64 primary_key = 2;
+//  uint64 timestamp = 3;
+//  bool is_valid = 4;
+//  repeated int64 segmentIDs = 5;
+//}
+//
+//
+//message Key2SegMsg {
+//  int64 reqID = 1;
+//  repeated Key2Seg key2seg = 2;
+//}
+
+message LoadIndex {
+  common.MsgBase base = 1;
+  int64 segmentID = 2;
+  string fieldName = 3;
+  int64 fieldID = 4;
+  repeated string index_paths = 5;
+  repeated common.KeyValuePair index_params = 6;
+}
+
+
+message IndexStats {
+  repeated common.KeyValuePair index_params = 1;
+  int64 num_related_segments = 2;
+}
+
+message FieldStats {
+  int64 collectionID = 1;
+  int64 fieldID = 2;
+  repeated IndexStats index_stats = 3;
+}
+
+message SegmentStats {
+  int64 segmentID = 1;
+  int64 memory_size = 2;
+  int64 num_rows = 3;
+  bool recently_modified = 4;
+}
+
+message QueryNodeStats {
+  common.MsgBase base = 1;
+  repeated SegmentStats seg_stats = 2;
+  repeated FieldStats field_stats = 3;
+}
+
+message MsgPosition {
+  string channel_name = 1;
+  string msgID = 2;
+  uint64 timestamp = 3;
+}

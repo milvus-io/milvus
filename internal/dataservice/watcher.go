@@ -51,7 +51,7 @@ func (watcher *proxyTimeTickWatcher) handleProxyTimeTickMsg() {
 		case <-watcher.ctx.Done():
 			return
 		case msg := <-watcher.msgQueue:
-			if err := watcher.allocator.ExpireAllocations(msg.Timestamp); err != nil {
+			if err := watcher.allocator.ExpireAllocations(msg.Base.Timestamp); err != nil {
 				log.Printf("expire allocations error : %s", err.Error())
 			}
 		}
@@ -92,7 +92,7 @@ func (watcher *dataNodeTimeTickWatcher) handleDataNodeTimeTickMsg() {
 				continue
 			}
 			for _, id := range segments {
-				expired, err := watcher.allocator.IsAllocationsExpired(id, msg.Timestamp)
+				expired, err := watcher.allocator.IsAllocationsExpired(id, msg.Base.Timestamp)
 				if err != nil {
 					log.Printf("check allocations expired error %s", err.Error())
 					continue

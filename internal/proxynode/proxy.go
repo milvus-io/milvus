@@ -33,7 +33,7 @@ type Proxy struct {
 
 	grpcServer   *grpc.Server
 	masterConn   *grpc.ClientConn
-	masterClient masterpb.MasterClient
+	masterClient masterpb.MasterServiceClient
 	sched        *TaskScheduler
 	tick         *timeTick
 
@@ -191,7 +191,7 @@ func (p *Proxy) connectMaster() error {
 	}
 	log.Printf("Proxy connected to master, master_addr=%s", masterAddr)
 	p.masterConn = conn
-	p.masterClient = masterpb.NewMasterClient(conn)
+	p.masterClient = masterpb.NewMasterServiceClient(conn)
 	return nil
 }
 

@@ -6,10 +6,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
-	pb "github.com/zilliztech/milvus-distributed/internal/proto/indexbuilderpb"
+	pb "github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 )
 
 type metaTable struct {
@@ -67,7 +69,7 @@ func (mt *metaTable) AddIndex(indexID UniqueID, req *pb.BuildIndexRequest) error
 		return errors.Errorf("index already exists with ID = " + strconv.FormatInt(indexID, 10))
 	}
 	meta := &pb.IndexMeta{
-		Status:  pb.IndexStatus_UNISSUED,
+		State:   commonpb.IndexState_UNISSUED,
 		IndexID: indexID,
 		Req:     req,
 	}
@@ -75,14 +77,14 @@ func (mt *metaTable) AddIndex(indexID UniqueID, req *pb.BuildIndexRequest) error
 	return nil
 }
 
-func (mt *metaTable) UpdateIndexStatus(indexID UniqueID, status pb.IndexStatus) error {
+func (mt *metaTable) UpdateIndexState(indexID UniqueID, state commonpb.IndexState) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 	meta, ok := mt.indexID2Meta[indexID]
 	if !ok {
 		return errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexID, 10))
 	}
-	meta.Status = status
+	meta.State = state
 	mt.saveIndexMeta(&meta)
 	return nil
 }
@@ -118,25 +120,22 @@ func (mt *metaTable) CompleteIndex(indexID UniqueID, dataPaths []string) error {
 	if !ok {
 		return errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexID, 10))
 	}
-	meta.Status = pb.IndexStatus_FINISHED
+	meta.State = commonpb.IndexState_FINISHED
 	meta.IndexFilePaths = dataPaths
 	meta.BuildCompleteTime = time.Now().UnixNano()
 	mt.saveIndexMeta(&meta)
 	return nil
 }
 
-func (mt *metaTable) GetIndexDescription(indexID UniqueID) (*pb.DescribleIndexResponse, error) {
+func (mt *metaTable) GetIndexStates(indexID UniqueID) (*pb.IndexStatesResponse, error) {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
-	ret := &pb.DescribleIndexResponse{}
+	ret := &pb.IndexStatesResponse{}
 	meta, ok := mt.indexID2Meta[indexID]
 	if !ok {
 		return ret, errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexID, 10))
 	}
-	ret.IndexStatus = meta.Status
-	ret.EnqueTime = meta.EnqueTime
-	ret.BuildCompleteTime = meta.BuildCompleteTime
-	ret.ScheduleTime = meta.ScheduleTime
+	ret.State = meta.State
 	return ret, nil
 }
 

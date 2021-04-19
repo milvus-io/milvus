@@ -19,7 +19,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
@@ -55,7 +55,7 @@ type collectionReplica interface {
 
 	// segment
 	getSegmentNum() int
-	getSegmentStatistics() []*internalpb.SegmentStats
+	getSegmentStatistics() []*internalpb2.SegmentStats
 	addSegment(segmentID UniqueID, partitionTag string, collectionID UniqueID) error
 	removeSegment(segmentID UniqueID) error
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
@@ -330,18 +330,18 @@ func (colReplica *collectionReplicaImpl) getSegmentNum() int {
 	return len(colReplica.segments)
 }
 
-func (colReplica *collectionReplicaImpl) getSegmentStatistics() []*internalpb.SegmentStats {
+func (colReplica *collectionReplicaImpl) getSegmentStatistics() []*internalpb2.SegmentStats {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 
-	var statisticData = make([]*internalpb.SegmentStats, 0)
+	var statisticData = make([]*internalpb2.SegmentStats, 0)
 
 	for segmentID, segment := range colReplica.segments {
 		currentMemSize := segment.getMemSize()
 		segment.lastMemSize = currentMemSize
 		segmentNumOfRows := segment.getRowCount()
 
-		stat := internalpb.SegmentStats{
+		stat := internalpb2.SegmentStats{
 			SegmentID:        segmentID,
 			MemorySize:       currentMemSize,
 			NumRows:          segmentNumOfRows,
@@ -438,9 +438,9 @@ func (colReplica *collectionReplicaImpl) getVecFieldIDsBySegmentID(segmentID Uni
 	if err != nil {
 		return nil, err
 	}
-	col, err := colReplica.getCollectionByIDPrivate(seg.collectionID)
-	if err != nil {
-		return nil, err
+	col, err2 := colReplica.getCollectionByIDPrivate(seg.collectionID)
+	if err2 != nil {
+		return nil, err2
 	}
 
 	vecFields := make([]int64, 0)

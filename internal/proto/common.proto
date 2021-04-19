@@ -33,6 +33,13 @@ enum ErrorCode {
     DD_REQUEST_RACE = 1000;
 }
 
+enum IndexState {
+    NONE = 0;
+    UNISSUED = 1;
+    INPROGRESS = 2;
+    FINISHED = 3;
+    FAILED = 4;
+}
 
 message Empty{}
 
@@ -94,6 +101,8 @@ enum MsgType {
     kTimeTick = 1200;
     kQueryNodeStats = 1201;
     kLoadIndex = 1202;
+    kRequestID = 1203;
+    kRequestTSO = 1204;
 
 }
 
@@ -104,3 +113,8 @@ message MsgBase {
     int64 sourceID = 4;
 }
 
+
+// Don't Modify This. @czs
+message MsgHeader {
+    common.MsgBase base = 1;
+}

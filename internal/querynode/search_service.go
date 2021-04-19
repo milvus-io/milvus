@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"strconv"
 	"sync"
 
 	"github.com/opentracing/opentracing-go"
@@ -16,7 +17,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
 
@@ -228,7 +229,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 		return errors.New("invalid request type = " + string(msg.Type()))
 	}
 
-	searchTimestamp := searchMsg.Timestamp
+	searchTimestamp := searchMsg.Base.Timestamp
 	var queryBlob = searchMsg.Query.Value
 	query := servicepb.Query{}
 	err := proto.Unmarshal(queryBlob, &query)
@@ -312,19 +313,21 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 				}
 				nilHits[i] = bs
 			}
-			var results = internalpb.SearchResult{
-				MsgType:         commonpb.MsgType_kSearchResult,
-				Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
-				ReqID:           searchMsg.ReqID,
-				ProxyID:         searchMsg.ProxyID,
-				QueryNodeID:     ss.queryNodeID,
-				Timestamp:       searchTimestamp,
-				ResultChannelID: searchMsg.ResultChannelID,
-				Hits:            nilHits,
-			}
+			resultChannelInt, _ := strconv.ParseInt(searchMsg.ResultChannelID, 10, 64)
 			searchResultMsg := &msgstream.SearchResultMsg{
-				BaseMsg:      msgstream.BaseMsg{HashValues: []uint32{uint32(searchMsg.ResultChannelID)}},
-				SearchResult: results,
+				BaseMsg: msgstream.BaseMsg{HashValues: []uint32{uint32(resultChannelInt)}},
+				SearchResults: internalpb2.SearchResults{
+					Base: &commonpb.MsgBase{
+						MsgType:   commonpb.MsgType_kSearchResult,
+						MsgID:     searchMsg.Base.MsgID,
+						Timestamp: searchTimestamp,
+						SourceID:  searchMsg.Base.SourceID,
+					},
+					Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
+					ResultChannelID: searchMsg.ResultChannelID,
+					Hits:            nilHits,
+					MetricType:      plan.getMetricType(),
+				},
 			}
 			err = ss.publishSearchResult(searchResultMsg)
 			if err != nil {
@@ -377,23 +380,34 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 			//fmt.Println("hits msg  = ", unMarshaledHit)
 			offset += len
 		}
-		var results = internalpb.SearchResult{
-			MsgType:         commonpb.MsgType_kSearchResult,
-			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
-			ReqID:           searchMsg.ReqID,
-			ProxyID:         searchMsg.ProxyID,
-			QueryNodeID:     searchMsg.ProxyID,
-			Timestamp:       searchTimestamp,
-			ResultChannelID: searchMsg.ResultChannelID,
-			Hits:            hits,
-			MetricType:      plan.getMetricType(),
-		}
+		resultChannelInt, _ := strconv.ParseInt(searchMsg.ResultChannelID, 10, 64)
 		searchResultMsg := &msgstream.SearchResultMsg{
-			BaseMsg: msgstream.BaseMsg{
-				MsgCtx:     searchMsg.MsgCtx,
-				HashValues: []uint32{uint32(searchMsg.ResultChannelID)}},
-			SearchResult: results,
+			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{uint32(resultChannelInt)}},
+			SearchResults: internalpb2.SearchResults{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_kSearchResult,
+					MsgID:     searchMsg.Base.MsgID,
+					Timestamp: searchTimestamp,
+					SourceID:  searchMsg.Base.SourceID,
+				},
+				Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
+				ResultChannelID: searchMsg.ResultChannelID,
+				Hits:            hits,
+				MetricType:      plan.getMetricType(),
+			},
 		}
+
+		// For debugging, please don't delete.
+		//for i := 0; i < len(hits); i++ {
+		//	testHits := milvuspb.Hits{}
+		//	err := proto.Unmarshal(hits[i], &testHits)
+		//	if err != nil {
+		//		panic(err)
+		//	}
+		//	fmt.Println(testHits.IDs)
+		//	fmt.Println(testHits.Scores)
+		//}
+
 		err = ss.publishSearchResult(searchResultMsg)
 		if err != nil {
 			span.LogFields(oplog.Error(err))
@@ -423,28 +437,30 @@ func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg, errMsg s
 	// span, ctx := opentracing.StartSpanFromContext(msg.GetMsgContext(), "receive search msg")
 	// defer span.Finish()
 	// msg.SetMsgContext(ctx)
-	fmt.Println("Public fail SearchResult!")
+	//fmt.Println("Public fail SearchResult!")
 	msgPack := msgstream.MsgPack{}
 	searchMsg, ok := msg.(*msgstream.SearchMsg)
 	if !ok {
 		return errors.New("invalid request type = " + string(msg.Type()))
 	}
-	var results = internalpb.SearchResult{
-		MsgType:         commonpb.MsgType_kSearchResult,
-		Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR, Reason: errMsg},
-		ReqID:           searchMsg.ReqID,
-		ProxyID:         searchMsg.ProxyID,
-		QueryNodeID:     searchMsg.ProxyID,
-		Timestamp:       searchMsg.Timestamp,
-		ResultChannelID: searchMsg.ResultChannelID,
-		Hits:            [][]byte{},
+
+	resultChannelInt, _ := strconv.ParseInt(searchMsg.ResultChannelID, 10, 64)
+	searchResultMsg := &msgstream.SearchResultMsg{
+		BaseMsg: msgstream.BaseMsg{HashValues: []uint32{uint32(resultChannelInt)}},
+		SearchResults: internalpb2.SearchResults{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kSearchResult,
+				MsgID:     searchMsg.Base.MsgID,
+				Timestamp: searchMsg.Base.Timestamp,
+				SourceID:  searchMsg.Base.SourceID,
+			},
+			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR, Reason: errMsg},
+			ResultChannelID: searchMsg.ResultChannelID,
+			Hits:            [][]byte{},
+		},
 	}
 
-	tsMsg := &msgstream.SearchResultMsg{
-		BaseMsg:      msgstream.BaseMsg{HashValues: []uint32{uint32(searchMsg.ResultChannelID)}},
-		SearchResult: results,
-	}
-	msgPack.Msgs = append(msgPack.Msgs, tsMsg)
+	msgPack.Msgs = append(msgPack.Msgs, searchResultMsg)
 	err := ss.searchResultMsgStream.Produce(&msgPack)
 	if err != nil {
 		return err

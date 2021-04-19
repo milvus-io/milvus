@@ -9,7 +9,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 // NOTE: start pulsar before test
@@ -53,14 +53,17 @@ func TestDataSyncService_Start(t *testing.T) {
 					uint32(i), uint32(i),
 				},
 			},
-			InsertRequest: internalPb.InsertRequest{
-				MsgType:        commonpb.MsgType_kInsert,
-				ReqID:          int64(0),
+			InsertRequest: internalpb2.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_kInsert,
+					MsgID:     0,
+					Timestamp: uint64(i + 1000),
+					SourceID:  0,
+				},
 				CollectionName: "collection0",
-				PartitionTag:   "default",
+				PartitionName:  "default",
 				SegmentID:      int64(0),
-				ChannelID:      int64(0),
-				ProxyID:        int64(0),
+				ChannelID:      "0",
 				Timestamps:     []uint64{uint64(i + 1000), uint64(i + 1000)},
 				RowIDs:         []int64{int64(i), int64(i)},
 				RowData: []*commonpb.Blob{
@@ -85,10 +88,13 @@ func TestDataSyncService_Start(t *testing.T) {
 		EndTimestamp:   0,
 		HashValues:     []uint32{0},
 	}
-	timeTickResult := internalPb.TimeTickMsg{
-		MsgType:   commonpb.MsgType_kTimeTick,
-		PeerID:    UniqueID(0),
-		Timestamp: math.MaxUint64,
+	timeTickResult := internalpb2.TimeTickMsg{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kTimeTick,
+			MsgID:     0,
+			Timestamp: math.MaxUint64,
+			SourceID:  0,
+		},
 	}
 	timeTickMsg := &msgstream.TimeTickMsg{
 		BaseMsg:     baseMsg,

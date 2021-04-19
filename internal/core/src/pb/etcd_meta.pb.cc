@@ -201,7 +201,7 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_etcd_5fmeta_2eproto::offsets[]
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::FieldIndexMeta, fieldid_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::FieldIndexMeta, indexid_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::FieldIndexMeta, index_params_),
-  PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::FieldIndexMeta, status_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::FieldIndexMeta, state_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::FieldIndexMeta, index_file_paths_),
 };
 static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
@@ -223,37 +223,35 @@ static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] =
 };
 
 const char descriptor_table_protodef_etcd_5fmeta_2eproto[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) =
-  "\n\017etcd_meta.proto\022\021milvus.proto.etcd\032\023in"
-  "dex_builder.proto\032\014common.proto\032\014schema."
-  "proto\"e\n\nTenantMeta\022\n\n\002ID\030\001 \001(\003\022\027\n\017num_q"
-  "uery_nodes\030\002 \001(\003\022\031\n\021insert_channelIDs\030\003 "
-  "\003(\t\022\027\n\017query_channelID\030\004 \001(\t\"a\n\tProxyMet"
-  "a\022\n\n\002ID\030\001 \001(\003\022-\n\007address\030\002 \001(\0132\034.milvus."
-  "proto.common.Address\022\031\n\021result_channelID"
-  "s\030\003 \003(\t\"\252\001\n\016CollectionMeta\022\n\n\002ID\030\001 \001(\003\0225"
-  "\n\006schema\030\002 \001(\0132%.milvus.proto.schema.Col"
-  "lectionSchema\022\023\n\013create_time\030\003 \001(\004\022\022\n\nse"
-  "gmentIDs\030\004 \003(\003\022\026\n\016partition_tags\030\005 \003(\t\022\024"
-  "\n\014partitionIDs\030\006 \003(\003\"9\n\020FieldBinlogFiles"
-  "\022\017\n\007fieldID\030\001 \001(\003\022\024\n\014binlog_files\030\002 \003(\t\""
-  "\204\002\n\013SegmentMeta\022\021\n\tsegmentID\030\001 \001(\003\022\024\n\014co"
-  "llectionID\030\002 \001(\003\022\025\n\rpartition_tag\030\003 \001(\t\022"
-  "\025\n\rchannel_start\030\004 \001(\005\022\023\n\013channel_end\030\005 "
-  "\001(\005\022\021\n\topen_time\030\006 \001(\004\022\022\n\nclose_time\030\007 \001"
-  "(\004\022\020\n\010num_rows\030\010 \001(\003\022\020\n\010mem_size\030\t \001(\003\022>"
-  "\n\021binlog_file_paths\030\n \003(\0132#.milvus.proto"
-  ".etcd.FieldBinlogFiles\"\313\001\n\016FieldIndexMet"
-  "a\022\021\n\tsegmentID\030\001 \001(\003\022\017\n\007fieldID\030\002 \001(\003\022\017\n"
-  "\007indexID\030\003 \001(\003\0227\n\014index_params\030\004 \003(\0132!.m"
-  "ilvus.proto.common.KeyValuePair\0221\n\006statu"
-  "s\030\005 \001(\0162!.milvus.proto.service.IndexStat"
-  "us\022\030\n\020index_file_paths\030\006 \003(\tB@Z>github.c"
-  "om/zilliztech/milvus-distributed/interna"
-  "l/proto/etcdpbb\006proto3"
+  "\n\017etcd_meta.proto\022\021milvus.proto.etcd\032\014co"
+  "mmon.proto\032\014schema.proto\"e\n\nTenantMeta\022\n"
+  "\n\002ID\030\001 \001(\003\022\027\n\017num_query_nodes\030\002 \001(\003\022\031\n\021i"
+  "nsert_channelIDs\030\003 \003(\t\022\027\n\017query_channelI"
+  "D\030\004 \001(\t\"a\n\tProxyMeta\022\n\n\002ID\030\001 \001(\003\022-\n\007addr"
+  "ess\030\002 \001(\0132\034.milvus.proto.common.Address\022"
+  "\031\n\021result_channelIDs\030\003 \003(\t\"\252\001\n\016Collectio"
+  "nMeta\022\n\n\002ID\030\001 \001(\003\0225\n\006schema\030\002 \001(\0132%.milv"
+  "us.proto.schema.CollectionSchema\022\023\n\013crea"
+  "te_time\030\003 \001(\004\022\022\n\nsegmentIDs\030\004 \003(\003\022\026\n\016par"
+  "tition_tags\030\005 \003(\t\022\024\n\014partitionIDs\030\006 \003(\003\""
+  "9\n\020FieldBinlogFiles\022\017\n\007fieldID\030\001 \001(\003\022\024\n\014"
+  "binlog_files\030\002 \003(\t\"\204\002\n\013SegmentMeta\022\021\n\tse"
+  "gmentID\030\001 \001(\003\022\024\n\014collectionID\030\002 \001(\003\022\025\n\rp"
+  "artition_tag\030\003 \001(\t\022\025\n\rchannel_start\030\004 \001("
+  "\005\022\023\n\013channel_end\030\005 \001(\005\022\021\n\topen_time\030\006 \001("
+  "\004\022\022\n\nclose_time\030\007 \001(\004\022\020\n\010num_rows\030\010 \001(\003\022"
+  "\020\n\010mem_size\030\t \001(\003\022>\n\021binlog_file_paths\030\n"
+  " \003(\0132#.milvus.proto.etcd.FieldBinlogFile"
+  "s\"\310\001\n\016FieldIndexMeta\022\021\n\tsegmentID\030\001 \001(\003\022"
+  "\017\n\007fieldID\030\002 \001(\003\022\017\n\007indexID\030\003 \001(\003\0227\n\014ind"
+  "ex_params\030\004 \003(\0132!.milvus.proto.common.Ke"
+  "yValuePair\022.\n\005state\030\005 \001(\0162\037.milvus.proto"
+  ".common.IndexState\022\030\n\020index_file_paths\030\006"
+  " \003(\tB@Z>github.com/zilliztech/milvus-dis"
+  "tributed/internal/proto/etcdpbb\006proto3"
   ;
-static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_etcd_5fmeta_2eproto_deps[3] = {
+static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_etcd_5fmeta_2eproto_deps[2] = {
   &::descriptor_table_common_2eproto,
-  &::descriptor_table_index_5fbuilder_2eproto,
   &::descriptor_table_schema_2eproto,
 };
 static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_etcd_5fmeta_2eproto_sccs[6] = {
@@ -267,8 +265,8 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_etc
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_etcd_5fmeta_2eproto_once;
 static bool descriptor_table_etcd_5fmeta_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_etcd_5fmeta_2eproto = {
-  &descriptor_table_etcd_5fmeta_2eproto_initialized, descriptor_table_protodef_etcd_5fmeta_2eproto, "etcd_meta.proto", 1062,
-  &descriptor_table_etcd_5fmeta_2eproto_once, descriptor_table_etcd_5fmeta_2eproto_sccs, descriptor_table_etcd_5fmeta_2eproto_deps, 6, 3,
+  &descriptor_table_etcd_5fmeta_2eproto_initialized, descriptor_table_protodef_etcd_5fmeta_2eproto, "etcd_meta.proto", 1038,
+  &descriptor_table_etcd_5fmeta_2eproto_once, descriptor_table_etcd_5fmeta_2eproto_sccs, descriptor_table_etcd_5fmeta_2eproto_deps, 6, 2,
   schemas, file_default_instances, TableStruct_etcd_5fmeta_2eproto::offsets,
   file_level_metadata_etcd_5fmeta_2eproto, 6, file_level_enum_descriptors_etcd_5fmeta_2eproto, file_level_service_descriptors_etcd_5fmeta_2eproto,
 };
@@ -2630,16 +2628,16 @@ FieldIndexMeta::FieldIndexMeta(const FieldIndexMeta& from)
       index_file_paths_(from.index_file_paths_) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
   ::memcpy(&segmentid_, &from.segmentid_,
-    static_cast<size_t>(reinterpret_cast<char*>(&status_) -
-    reinterpret_cast<char*>(&segmentid_)) + sizeof(status_));
+    static_cast<size_t>(reinterpret_cast<char*>(&state_) -
+    reinterpret_cast<char*>(&segmentid_)) + sizeof(state_));
   // @@protoc_insertion_point(copy_constructor:milvus.proto.etcd.FieldIndexMeta)
 }
 
 void FieldIndexMeta::SharedCtor() {
   ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_FieldIndexMeta_etcd_5fmeta_2eproto.base);
   ::memset(&segmentid_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&status_) -
-      reinterpret_cast<char*>(&segmentid_)) + sizeof(status_));
+      reinterpret_cast<char*>(&state_) -
+      reinterpret_cast<char*>(&segmentid_)) + sizeof(state_));
 }
 
 FieldIndexMeta::~FieldIndexMeta() {
@@ -2668,8 +2666,8 @@ void FieldIndexMeta::Clear() {
   index_params_.Clear();
   index_file_paths_.Clear();
   ::memset(&segmentid_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&status_) -
-      reinterpret_cast<char*>(&segmentid_)) + sizeof(status_));
+      reinterpret_cast<char*>(&state_) -
+      reinterpret_cast<char*>(&segmentid_)) + sizeof(state_));
   _internal_metadata_.Clear();
 }
 
@@ -2714,12 +2712,12 @@ const char* FieldIndexMeta::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE
           } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 34);
         } else goto handle_unusual;
         continue;
-      // .milvus.proto.service.IndexStatus status = 5;
+      // .milvus.proto.common.IndexState state = 5;
       case 5:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 40)) {
           ::PROTOBUF_NAMESPACE_ID::uint64 val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
           CHK_(ptr);
-          set_status(static_cast<::milvus::proto::service::IndexStatus>(val));
+          set_state(static_cast<::milvus::proto::common::IndexState>(val));
         } else goto handle_unusual;
         continue;
       // repeated string index_file_paths = 6;
@@ -2814,14 +2812,14 @@ bool FieldIndexMeta::MergePartialFromCodedStream(
         break;
       }
 
-      // .milvus.proto.service.IndexStatus status = 5;
+      // .milvus.proto.common.IndexState state = 5;
       case 5: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (40 & 0xFF)) {
           int value = 0;
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
                    int, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_ENUM>(
                  input, &value)));
-          set_status(static_cast< ::milvus::proto::service::IndexStatus >(value));
+          set_state(static_cast< ::milvus::proto::common::IndexState >(value));
         } else {
           goto handle_unusual;
         }
@@ -2895,10 +2893,10 @@ void FieldIndexMeta::SerializeWithCachedSizes(
       output);
   }
 
-  // .milvus.proto.service.IndexStatus status = 5;
-  if (this->status() != 0) {
+  // .milvus.proto.common.IndexState state = 5;
+  if (this->state() != 0) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnum(
-      5, this->status(), output);
+      5, this->state(), output);
   }
 
   // repeated string index_file_paths = 6;
@@ -2947,10 +2945,10 @@ void FieldIndexMeta::SerializeWithCachedSizes(
         4, this->index_params(static_cast<int>(i)), target);
   }
 
-  // .milvus.proto.service.IndexStatus status = 5;
-  if (this->status() != 0) {
+  // .milvus.proto.common.IndexState state = 5;
+  if (this->state() != 0) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
-      5, this->status(), target);
+      5, this->state(), target);
   }
 
   // repeated string index_file_paths = 6;
@@ -3024,10 +3022,10 @@ size_t FieldIndexMeta::ByteSizeLong() const {
         this->indexid());
   }
 
-  // .milvus.proto.service.IndexStatus status = 5;
-  if (this->status() != 0) {
+  // .milvus.proto.common.IndexState state = 5;
+  if (this->state() != 0) {
     total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->status());
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->state());
   }
 
   int cached_size = ::PROTOBUF_NAMESPACE_ID::internal::ToCachedSize(total_size);
@@ -3068,8 +3066,8 @@ void FieldIndexMeta::MergeFrom(const FieldIndexMeta& from) {
   if (from.indexid() != 0) {
     set_indexid(from.indexid());
   }
-  if (from.status() != 0) {
-    set_status(from.status());
+  if (from.state() != 0) {
+    set_state(from.state());
   }
 }
 
@@ -3099,7 +3097,7 @@ void FieldIndexMeta::InternalSwap(FieldIndexMeta* other) {
   swap(segmentid_, other->segmentid_);
   swap(fieldid_, other->fieldid_);
   swap(indexid_, other->indexid_);
-  swap(status_, other->status_);
+  swap(state_, other->state_);
 }
 
 ::PROTOBUF_NAMESPACE_ID::Metadata FieldIndexMeta::GetMetadata() const {

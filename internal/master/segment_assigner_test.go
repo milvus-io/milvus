@@ -6,12 +6,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"go.etcd.io/etcd/clientv3"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -102,8 +103,13 @@ func TestSegmentManager_AssignSegmentID(t *testing.T) {
 		BaseMsg: msgstream.BaseMsg{
 			BeginTimestamp: timestamp, EndTimestamp: timestamp, HashValues: []uint32{},
 		},
-		TimeTickMsg: internalpb.TimeTickMsg{
-			MsgType: commonpb.MsgType_kTimeTick, PeerID: 1, Timestamp: timestamp,
+		TimeTickMsg: internalpb2.TimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kTimeTick,
+				MsgID:     0,
+				Timestamp: timestamp,
+				SourceID:  1,
+			},
 		},
 	}
 

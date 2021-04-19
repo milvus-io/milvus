@@ -5,9 +5,12 @@ import (
 	"log"
 	"math/rand"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 
 	"github.com/stretchr/testify/require"
 
@@ -17,10 +20,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -115,92 +116,92 @@ func TestMaster(t *testing.T) {
 	conn, err := grpc.DialContext(ctx, Params.Address, grpc.WithInsecure(), grpc.WithBlock())
 	require.Nil(t, err)
 
-	cli := masterpb.NewMasterClient(conn)
+	cli := masterpb.NewMasterServiceClient(conn)
 
-	t.Run("TestConfigTask", func(t *testing.T) {
-		testKeys := []string{
-			"/etcd/address",
-			"/master/port",
-			"/master/proxyidlist",
-			"/master/segmentthresholdfactor",
-			"/pulsar/token",
-			"/reader/stopflag",
-			"/proxy/timezone",
-			"/proxy/network/address",
-			"/proxy/storage/path",
-			"/storage/accesskey",
-		}
-
-		testVals := []string{
-			"localhost",
-			"53100",
-			"[1 2]",
-			"0.75",
-			"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJKb2UifQ.ipevRNuRP6HflG8cFKnmUPtypruRC4fb1DWtoLL62SY",
-			"-1",
-			"UTC+8",
-			"0.0.0.0",
-			"/var/lib/milvus",
-			"",
-		}
-
-		sc := SysConfig{kv: svr.kvBase}
-		sc.InitFromFile(".")
-
-		configRequest := &internalpb.SysConfigRequest{
-			MsgType:     commonpb.MsgType_kGetSysConfigs,
-			ReqID:       1,
-			Timestamp:   uint64(time.Now().Unix()),
-			ProxyID:     1,
-			Keys:        testKeys,
-			KeyPrefixes: []string{},
-		}
-
-		response, err := cli.GetSysConfigs(ctx, configRequest)
-		assert.Nil(t, err)
-		assert.ElementsMatch(t, testKeys, response.Keys)
-		assert.ElementsMatch(t, testVals, response.Values)
-		assert.Equal(t, len(response.GetKeys()), len(response.GetValues()))
-
-		configRequest = &internalpb.SysConfigRequest{
-			MsgType:     commonpb.MsgType_kGetSysConfigs,
-			ReqID:       1,
-			Timestamp:   uint64(time.Now().Unix()),
-			ProxyID:     1,
-			Keys:        []string{},
-			KeyPrefixes: []string{"/master"},
-		}
-
-		response, err = cli.GetSysConfigs(ctx, configRequest)
-		assert.Nil(t, err)
-		for i := range response.GetKeys() {
-			assert.True(t, strings.HasPrefix(response.GetKeys()[i], "/master"))
-		}
-		assert.Equal(t, len(response.GetKeys()), len(response.GetValues()))
-
-	})
-
-	t.Run("TestConfigDuplicateKeysAndKeyPrefix", func(t *testing.T) {
-		configRequest := &internalpb.SysConfigRequest{}
-		configRequest.Keys = []string{}
-		configRequest.KeyPrefixes = []string{"/master"}
-
-		configRequest.Timestamp = uint64(time.Now().Unix())
-		resp, err := cli.GetSysConfigs(ctx, configRequest)
-		require.Nil(t, err)
-		assert.Equal(t, len(resp.GetKeys()), len(resp.GetValues()))
-		assert.NotEqual(t, 0, len(resp.GetKeys()))
-
-		configRequest.Keys = []string{"/master/port"}
-		configRequest.KeyPrefixes = []string{"/master"}
-
-		configRequest.Timestamp = uint64(time.Now().Unix())
-		respDup, err := cli.GetSysConfigs(ctx, configRequest)
-		require.Nil(t, err)
-		assert.Equal(t, len(respDup.GetKeys()), len(respDup.GetValues()))
-		assert.NotEqual(t, 0, len(respDup.GetKeys()))
-		assert.Equal(t, len(respDup.GetKeys()), len(resp.GetKeys()))
-	})
+	//t.Run("TestConfigTask", func(t *testing.T) {
+	//	testKeys := []string{
+	//		"/etcd/address",
+	//		"/master/port",
+	//		"/master/proxyidlist",
+	//		"/master/segmentthresholdfactor",
+	//		"/pulsar/token",
+	//		"/reader/stopflag",
+	//		"/proxy/timezone",
+	//		"/proxy/network/address",
+	//		"/proxy/storage/path",
+	//		"/storage/accesskey",
+	//	}
+	//
+	//	testVals := []string{
+	//		"localhost",
+	//		"53100",
+	//		"[1 2]",
+	//		"0.75",
+	//		"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJKb2UifQ.ipevRNuRP6HflG8cFKnmUPtypruRC4fb1DWtoLL62SY",
+	//		"-1",
+	//		"UTC+8",
+	//		"0.0.0.0",
+	//		"/var/lib/milvus",
+	//		"",
+	//	}
+	//
+	//	sc := SysConfig{kv: svr.kvBase}
+	//	sc.InitFromFile(".")
+	//
+	//	configRequest := &internalpb.SysConfigRequest{
+	//		MsgType:     commonpb.MsgType_kGetSysConfigs,
+	//		ReqID:       1,
+	//		Timestamp:   uint64(time.Now().Unix()),
+	//		ProxyID:     1,
+	//		Keys:        testKeys,
+	//		KeyPrefixes: []string{},
+	//	}
+	//
+	//	response, err := cli.GetSysConfigs(ctx, configRequest)
+	//	assert.Nil(t, err)
+	//	assert.ElementsMatch(t, testKeys, response.Keys)
+	//	assert.ElementsMatch(t, testVals, response.Values)
+	//	assert.Equal(t, len(response.GetKeys()), len(response.GetValues()))
+	//
+	//	configRequest = &internalpb.SysConfigRequest{
+	//		MsgType:     commonpb.MsgType_kGetSysConfigs,
+	//		ReqID:       1,
+	//		Timestamp:   uint64(time.Now().Unix()),
+	//		ProxyID:     1,
+	//		Keys:        []string{},
+	//		KeyPrefixes: []string{"/master"},
+	//	}
+	//
+	//	response, err = cli.GetSysConfigs(ctx, configRequest)
+	//	assert.Nil(t, err)
+	//	for i := range response.GetKeys() {
+	//		assert.True(t, strings.HasPrefix(response.GetKeys()[i], "/master"))
+	//	}
+	//	assert.Equal(t, len(response.GetKeys()), len(response.GetValues()))
+	//
+	//})
+	//
+	//t.Run("TestConfigDuplicateKeysAndKeyPrefix", func(t *testing.T) {
+	//	configRequest := &internalpb.SysConfigRequest{}
+	//	configRequest.Keys = []string{}
+	//	configRequest.KeyPrefixes = []string{"/master"}
+	//
+	//	configRequest.Timestamp = uint64(time.Now().Unix())
+	//	resp, err := cli.GetSysConfigs(ctx, configRequest)
+	//	require.Nil(t, err)
+	//	assert.Equal(t, len(resp.GetKeys()), len(resp.GetValues()))
+	//	assert.NotEqual(t, 0, len(resp.GetKeys()))
+	//
+	//	configRequest.Keys = []string{"/master/port"}
+	//	configRequest.KeyPrefixes = []string{"/master"}
+	//
+	//	configRequest.Timestamp = uint64(time.Now().Unix())
+	//	respDup, err := cli.GetSysConfigs(ctx, configRequest)
+	//	require.Nil(t, err)
+	//	assert.Equal(t, len(respDup.GetKeys()), len(respDup.GetValues()))
+	//	assert.NotEqual(t, 0, len(respDup.GetKeys()))
+	//	assert.Equal(t, len(respDup.GetKeys()), len(resp.GetKeys()))
+	//})
 
 	t.Run("TestCollectionTask", func(t *testing.T) {
 		sch := schemapb.CollectionSchema{
@@ -263,12 +264,14 @@ func TestMaster(t *testing.T) {
 		schemaBytes, err := proto.Marshal(&sch)
 		assert.Nil(t, err)
 
-		createCollectionReq := internalpb.CreateCollectionRequest{
-			MsgType:   commonpb.MsgType_kCreateCollection,
-			ReqID:     1,
-			Timestamp: uint64(time.Now().Unix()),
-			ProxyID:   1,
-			Schema:    &commonpb.Blob{Value: schemaBytes},
+		createCollectionReq := milvuspb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kCreateCollection,
+				MsgID:     1,
+				Timestamp: uint64(time.Now().Unix()),
+				SourceID:  1,
+			},
+			Schema: schemaBytes,
 		}
 		log.Printf("... [Create] collection col1\n")
 		st, err := cli.CreateCollection(ctx, &createCollectionReq)
@@ -276,14 +279,14 @@ func TestMaster(t *testing.T) {
 		assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
 		// HasCollection
-		reqHasCollection := internalpb.HasCollectionRequest{
-			MsgType:   commonpb.MsgType_kHasCollection,
-			ReqID:     1,
-			Timestamp: uint64(time.Now().Unix()),
-			ProxyID:   1,
-			CollectionName: &servicepb.CollectionName{
-				CollectionName: "col1",
+		reqHasCollection := milvuspb.HasCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kHasCollection,
+				MsgID:     1,
+				Timestamp: uint64(time.Now().Unix()),
+				SourceID:  1,
 			},
+			CollectionName: "col1",
 		}
 
 		// "col1" is true
@@ -294,34 +297,36 @@ func TestMaster(t *testing.T) {
 		assert.Equal(t, boolResp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
 		// "colNotExist" is false
-		reqHasCollection.CollectionName.CollectionName = "colNotExist"
+		reqHasCollection.CollectionName = "colNotExist"
 		boolResp, err = cli.HasCollection(ctx, &reqHasCollection)
 		assert.Nil(t, err)
 		assert.Equal(t, boolResp.Value, false)
 		assert.Equal(t, boolResp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
 		// error
-		reqHasCollection.Timestamp = Timestamp(0)
-		reqHasCollection.CollectionName.CollectionName = "col1"
+		reqHasCollection.Base.Timestamp = Timestamp(0)
+		reqHasCollection.CollectionName = "col1"
 		boolResp, err = cli.HasCollection(ctx, &reqHasCollection)
 		assert.Nil(t, err)
 		assert.NotEqual(t, boolResp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
 		// ShowCollection
-		reqShowCollection := internalpb.ShowCollectionRequest{
-			MsgType:   commonpb.MsgType_kShowCollections,
-			ReqID:     1,
-			Timestamp: uint64(time.Now().Unix()),
-			ProxyID:   1,
+		reqShowCollection := milvuspb.ShowCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kShowCollections,
+				MsgID:     1,
+				Timestamp: uint64(time.Now().Unix()),
+				SourceID:  1,
+			},
 		}
 
 		listResp, err := cli.ShowCollections(ctx, &reqShowCollection)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_SUCCESS, listResp.Status.ErrorCode)
-		assert.Equal(t, 1, len(listResp.Values))
-		assert.Equal(t, "col1", listResp.Values[0])
+		assert.Equal(t, 1, len(listResp.CollectionNames))
+		assert.Equal(t, "col1", listResp.CollectionNames[0])
 
-		reqShowCollection.Timestamp = Timestamp(0)
+		reqShowCollection.Base.Timestamp = Timestamp(0)
 		listResp, err = cli.ShowCollections(ctx, &reqShowCollection)
 		assert.Nil(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_SUCCESS, listResp.Status.ErrorCode)
@@ -368,20 +373,20 @@ func TestMaster(t *testing.T) {
 		assert.Equal(t, collMeta.Schema.Fields[1].IndexParams[0].Value, "col1_f2_iv1")
 		assert.Equal(t, collMeta.Schema.Fields[1].IndexParams[1].Value, "col1_f2_iv2")
 
-		createCollectionReq.Timestamp = Timestamp(0)
+		createCollectionReq.Base.Timestamp = Timestamp(0)
 		st, err = cli.CreateCollection(ctx, &createCollectionReq)
 		assert.Nil(t, err)
 		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
 		// DescribeCollection Test
-		reqDescribe := &internalpb.DescribeCollectionRequest{
-			MsgType:   commonpb.MsgType_kDescribeCollection,
-			ReqID:     1,
-			Timestamp: uint64(time.Now().Unix()),
-			ProxyID:   1,
-			CollectionName: &servicepb.CollectionName{
-				CollectionName: "col1",
+		reqDescribe := &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kDescribeCollection,
+				MsgID:     1,
+				Timestamp: uint64(time.Now().Unix()),
+				SourceID:  1,
 			},
+			CollectionName: "col1",
 		}
 		des, err := cli.DescribeCollection(ctx, reqDescribe)
 		assert.Nil(t, err)
@@ -418,14 +423,14 @@ func TestMaster(t *testing.T) {
 		assert.Equal(t, "col1_f2_ik2", des.Schema.Fields[1].IndexParams[1].Key)
 		assert.Equal(t, "col1_f2_iv2", des.Schema.Fields[1].IndexParams[1].Value)
 
-		reqDescribe.CollectionName.CollectionName = "colNotExist"
+		reqDescribe.CollectionName = "colNotExist"
 		des, err = cli.DescribeCollection(ctx, reqDescribe)
 		assert.Nil(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_SUCCESS, des.Status.ErrorCode)
 		log.Printf(des.Status.Reason)
 
-		reqDescribe.CollectionName.CollectionName = "col1"
-		reqDescribe.Timestamp = Timestamp(0)
+		reqDescribe.CollectionName = "col1"
+		reqDescribe.Base.Timestamp = Timestamp(0)
 		des, err = cli.DescribeCollection(ctx, reqDescribe)
 		assert.Nil(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_SUCCESS, des.Status.ErrorCode)
@@ -433,14 +438,15 @@ func TestMaster(t *testing.T) {
 
 		// ------------------------------DropCollectionTask---------------------------
 		log.Printf("... [Drop] collection col1\n")
-		ser := servicepb.CollectionName{CollectionName: "col1"}
 
-		reqDrop := internalpb.DropCollectionRequest{
-			MsgType:        commonpb.MsgType_kDropCollection,
-			ReqID:          1,
-			Timestamp:      uint64(time.Now().Unix()),
-			ProxyID:        1,
-			CollectionName: &ser,
+		reqDrop := milvuspb.DropCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kDropCollection,
+				MsgID:     1,
+				Timestamp: uint64(time.Now().Unix()),
+				SourceID:  1,
+			},
+			CollectionName: "col1",
 		}
 
 		// DropCollection
@@ -452,19 +458,19 @@ func TestMaster(t *testing.T) {
 		assert.NotNil(t, err)
 
 		// HasCollection "col1" is false
-		reqHasCollection.Timestamp = uint64(time.Now().Unix())
-		reqHasCollection.CollectionName.CollectionName = "col1"
+		reqHasCollection.Base.Timestamp = uint64(time.Now().Unix())
+		reqHasCollection.CollectionName = "col1"
 		boolResp, err = cli.HasCollection(ctx, &reqHasCollection)
 		assert.Nil(t, err)
 		assert.Equal(t, false, boolResp.Value)
 		assert.Equal(t, commonpb.ErrorCode_SUCCESS, boolResp.Status.ErrorCode)
 
 		// ShowCollections
-		reqShowCollection.Timestamp = uint64(time.Now().Unix())
+		reqShowCollection.Base.Timestamp = uint64(time.Now().Unix())
 		listResp, err = cli.ShowCollections(ctx, &reqShowCollection)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_SUCCESS, listResp.Status.ErrorCode)
-		assert.Equal(t, 0, len(listResp.Values))
+		assert.Equal(t, 0, len(listResp.CollectionNames))
 
 		// Drop again
 		st, err = cli.DropCollection(ctx, &reqDrop)
@@ -472,13 +478,13 @@ func TestMaster(t *testing.T) {
 		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
 		// Create "col1"
-		createCollectionReq.Timestamp = uint64(time.Now().Unix())
+		createCollectionReq.Base.Timestamp = uint64(time.Now().Unix())
 
 		st, err = cli.CreateCollection(ctx, &createCollectionReq)
 		assert.Nil(t, err)
 		assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
-		reqHasCollection.Timestamp = uint64(time.Now().Unix())
+		reqHasCollection.Base.Timestamp = uint64(time.Now().Unix())
 		boolResp, err = cli.HasCollection(ctx, &reqHasCollection)
 		assert.Nil(t, err)
 		assert.Equal(t, true, boolResp.Value)
@@ -489,34 +495,37 @@ func TestMaster(t *testing.T) {
 		schemaBytes, err = proto.Marshal(&sch)
 		assert.Nil(t, err)
 
-		createCollectionReq = internalpb.CreateCollectionRequest{
-			MsgType:   commonpb.MsgType_kCreateCollection,
-			ReqID:     1,
-			Timestamp: uint64(time.Now().Unix()),
-			ProxyID:   1,
-			Schema:    &commonpb.Blob{Value: schemaBytes},
+		createCollectionReq = milvuspb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kCreateCollection,
+				MsgID:     1,
+				Timestamp: uint64(time.Now().Unix()),
+				SourceID:  1,
+			},
+			Schema: schemaBytes,
 		}
 		st, err = cli.CreateCollection(ctx, &createCollectionReq)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_SUCCESS, st.ErrorCode)
 
 		// Show Collections
-		reqShowCollection.Timestamp = uint64(time.Now().Unix())
+		reqShowCollection.Base.Timestamp = uint64(time.Now().Unix())
 		listResp, err = cli.ShowCollections(ctx, &reqShowCollection)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_SUCCESS, listResp.Status.ErrorCode)
-		assert.Equal(t, 2, len(listResp.Values))
-		assert.ElementsMatch(t, []string{"col1", "col2"}, listResp.Values)
+		assert.Equal(t, 2, len(listResp.CollectionNames))
+		assert.ElementsMatch(t, []string{"col1", "col2"}, listResp.CollectionNames)
 
 		// Drop Collection
-		ser = servicepb.CollectionName{CollectionName: "col1"}
 
-		reqDrop = internalpb.DropCollectionRequest{
-			MsgType:        commonpb.MsgType_kDropCollection,
-			ReqID:          1,
-			Timestamp:      uint64(time.Now().Unix()),
-			ProxyID:        1,
-			CollectionName: &ser,
+		reqDrop = milvuspb.DropCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kDropCollection,
+				MsgID:     1,
+				Timestamp: uint64(time.Now().Unix()),
+				SourceID:  1,
+			},
+			CollectionName: "col1",
 		}
 
 		// DropCollection
@@ -524,13 +533,14 @@ func TestMaster(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
-		ser = servicepb.CollectionName{CollectionName: "col2"}
-		reqDrop = internalpb.DropCollectionRequest{
-			MsgType:        commonpb.MsgType_kDropCollection,
-			ReqID:          1,
-			Timestamp:      uint64(time.Now().Unix()),
-			ProxyID:        1,
-			CollectionName: &ser,
+		reqDrop = milvuspb.DropCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kDropCollection,
+				MsgID:     1,
+				Timestamp: uint64(time.Now().Unix()),
+				SourceID:  1,
+			},
+			CollectionName: "col2",
 		}
 
 		// DropCollection
@@ -620,45 +630,56 @@ func TestMaster(t *testing.T) {
 		schemaBytes, err := proto.Marshal(&sch)
 		assert.Nil(t, err)
 
-		createCollectionReq := internalpb.CreateCollectionRequest{
-			MsgType:   commonpb.MsgType_kCreatePartition,
-			ReqID:     1,
-			Timestamp: uint64(time.Now().Unix()),
-			ProxyID:   1,
-			Schema:    &commonpb.Blob{Value: schemaBytes},
+		createCollectionReq := milvuspb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kCreatePartition,
+				MsgID:     1,
+				Timestamp: uint64(time.Now().Unix()),
+				SourceID:  1,
+			},
+			Schema: schemaBytes,
 		}
 		st, _ := cli.CreateCollection(ctx, &createCollectionReq)
 		assert.NotNil(t, st)
 		assert.Equal(t, commonpb.ErrorCode_SUCCESS, st.ErrorCode)
 
-		createPartitionReq := internalpb.CreatePartitionRequest{
-			MsgType:       commonpb.MsgType_kCreatePartition,
-			ReqID:         1,
-			Timestamp:     uint64(time.Now().Unix()),
-			ProxyID:       1,
-			PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition1"},
+		createPartitionReq := milvuspb.CreatePartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kCreatePartition,
+				MsgID:     1,
+				Timestamp: uint64(time.Now().Unix()),
+				SourceID:  1,
+			},
+			CollectionName: "col1",
+			PartitionName:  "partition1",
 		}
 		st, _ = cli.CreatePartition(ctx, &createPartitionReq)
 		assert.NotNil(t, st)
 		assert.Equal(t, commonpb.ErrorCode_SUCCESS, st.ErrorCode)
 
-		createPartitionReq = internalpb.CreatePartitionRequest{
-			MsgType:       commonpb.MsgType_kCreatePartition,
-			ReqID:         1,
-			Timestamp:     uint64(time.Now().Unix()),
-			ProxyID:       1,
-			PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition1"},
+		createPartitionReq = milvuspb.CreatePartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kCreatePartition,
+				MsgID:     1,
+				Timestamp: uint64(time.Now().Unix()),
+				SourceID:  1,
+			},
+			CollectionName: "col1",
+			PartitionName:  "partition1",
 		}
 		st, _ = cli.CreatePartition(ctx, &createPartitionReq)
 		assert.NotNil(t, st)
 		assert.Equal(t, commonpb.ErrorCode_UNEXPECTED_ERROR, st.ErrorCode)
 
-		createPartitionReq = internalpb.CreatePartitionRequest{
-			MsgType:       commonpb.MsgType_kCreatePartition,
-			ReqID:         1,
-			Timestamp:     uint64(time.Now().Unix()),
-			ProxyID:       1,
-			PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition2"},
+		createPartitionReq = milvuspb.CreatePartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kCreatePartition,
+				MsgID:     1,
+				Timestamp: uint64(time.Now().Unix()),
+				SourceID:  1,
+			},
+			CollectionName: "col1",
+			PartitionName:  "partition2",
 		}
 		st, _ = cli.CreatePartition(ctx, &createPartitionReq)
 		assert.NotNil(t, st)
@@ -699,133 +720,156 @@ func TestMaster(t *testing.T) {
 		assert.Equal(t, collMeta.Schema.Fields[1].IndexParams[1].Value, "col1_f2_iv2")
 		assert.ElementsMatch(t, []string{"_default", "partition1", "partition2"}, collMeta.PartitionTags)
 
-		showPartitionReq := internalpb.ShowPartitionRequest{
-			MsgType:        commonpb.MsgType_kShowPartitions,
-			ReqID:          1,
-			Timestamp:      uint64(time.Now().Unix()),
-			ProxyID:        1,
-			CollectionName: &servicepb.CollectionName{CollectionName: "col1"},
+		showPartitionReq := milvuspb.ShowPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kShowPartitions,
+				MsgID:     1,
+				Timestamp: uint64(time.Now().Unix()),
+				SourceID:  1,
+			},
+			CollectionName: "col1",
 		}
 
 		stringList, err := cli.ShowPartitions(ctx, &showPartitionReq)
 		assert.Nil(t, err)
-		assert.ElementsMatch(t, []string{"_default", "partition1", "partition2"}, stringList.Values)
+		assert.ElementsMatch(t, []string{"_default", "partition1", "partition2"}, stringList.PartitionNames)
 
-		showPartitionReq = internalpb.ShowPartitionRequest{
-			MsgType:        commonpb.MsgType_kShowPartitions,
-			ReqID:          1,
-			Timestamp:      0,
-			ProxyID:        1,
-			CollectionName: &servicepb.CollectionName{CollectionName: "col1"},
+		showPartitionReq = milvuspb.ShowPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kShowPartitions,
+				MsgID:     1,
+				Timestamp: 0,
+				SourceID:  1,
+			},
+			CollectionName: "col1",
 		}
 
 		stringList, _ = cli.ShowPartitions(ctx, &showPartitionReq)
 		assert.NotNil(t, stringList)
 		assert.Equal(t, commonpb.ErrorCode_UNEXPECTED_ERROR, stringList.Status.ErrorCode)
 
-		hasPartitionReq := internalpb.HasPartitionRequest{
-			MsgType:       commonpb.MsgType_kHasPartition,
-			ReqID:         1,
-			Timestamp:     uint64(time.Now().Unix()),
-			ProxyID:       1,
-			PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition1"},
+		hasPartitionReq := milvuspb.HasPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kHasPartition,
+				MsgID:     1,
+				Timestamp: uint64(time.Now().Unix()),
+				SourceID:  1,
+			},
+			CollectionName: "col1",
+			PartitionName:  "partition1",
 		}
 
 		hasPartition, err := cli.HasPartition(ctx, &hasPartitionReq)
 		assert.Nil(t, err)
 		assert.True(t, hasPartition.Value)
 
-		hasPartitionReq = internalpb.HasPartitionRequest{
-			MsgType:       commonpb.MsgType_kHasPartition,
-			ReqID:         1,
-			Timestamp:     0,
-			ProxyID:       1,
-			PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition1"},
+		hasPartitionReq = milvuspb.HasPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kHasPartition,
+				MsgID:     1,
+				Timestamp: 0,
+				SourceID:  1,
+			},
+			CollectionName: "col1",
+			PartitionName:  "partition1",
 		}
 
 		hasPartition, _ = cli.HasPartition(ctx, &hasPartitionReq)
 		assert.NotNil(t, hasPartition)
 		assert.Equal(t, commonpb.ErrorCode_UNEXPECTED_ERROR, stringList.Status.ErrorCode)
 
-		hasPartitionReq = internalpb.HasPartitionRequest{
-			MsgType:       commonpb.MsgType_kHasPartition,
-			ReqID:         1,
-			Timestamp:     uint64(time.Now().Unix()),
-			ProxyID:       1,
-			PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition3"},
+		hasPartitionReq = milvuspb.HasPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kHasPartition,
+				MsgID:     1,
+				Timestamp: uint64(time.Now().Unix()),
+				SourceID:  1,
+			},
+			CollectionName: "col1",
+			PartitionName:  "partition3",
 		}
 
 		hasPartition, err = cli.HasPartition(ctx, &hasPartitionReq)
 		assert.Nil(t, err)
 		assert.False(t, hasPartition.Value)
 
-		deletePartitionReq := internalpb.DropPartitionRequest{
-			MsgType:       commonpb.MsgType_kDropPartition,
-			ReqID:         1,
-			Timestamp:     uint64(time.Now().Unix()),
-			ProxyID:       1,
-			PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition2"},
+		deletePartitionReq := milvuspb.DropPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kDropPartition,
+				MsgID:     1,
+				Timestamp: uint64(time.Now().Unix()),
+				SourceID:  1,
+			},
+			CollectionName: "col1",
+			PartitionName:  "partition2",
 		}
 
 		st, err = cli.DropPartition(ctx, &deletePartitionReq)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_SUCCESS, st.ErrorCode)
 
-		deletePartitionReq = internalpb.DropPartitionRequest{
-			MsgType:       commonpb.MsgType_kDropPartition,
-			ReqID:         1,
-			Timestamp:     uint64(time.Now().Unix()),
-			ProxyID:       1,
-			PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition2"},
+		deletePartitionReq = milvuspb.DropPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kDropPartition,
+				MsgID:     1,
+				Timestamp: uint64(time.Now().Unix()),
+				SourceID:  1,
+			},
+			CollectionName: "col1",
+			PartitionName:  "partition2",
 		}
 
 		st, _ = cli.DropPartition(ctx, &deletePartitionReq)
 		assert.NotNil(t, st)
 		assert.Equal(t, commonpb.ErrorCode_UNEXPECTED_ERROR, st.ErrorCode)
 
-		hasPartitionReq = internalpb.HasPartitionRequest{
-			MsgType:       commonpb.MsgType_kHasPartition,
-			ReqID:         1,
-			Timestamp:     uint64(time.Now().Unix()),
-			ProxyID:       1,
-			PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition2"},
+		hasPartitionReq = milvuspb.HasPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kHasPartition,
+				MsgID:     1,
+				Timestamp: uint64(time.Now().Unix()),
+				SourceID:  1,
+			},
+			CollectionName: "col1",
+			PartitionName:  "partition2",
 		}
 
 		hasPartition, err = cli.HasPartition(ctx, &hasPartitionReq)
 		assert.Nil(t, err)
 		assert.False(t, hasPartition.Value)
 
-		describePartitionReq := internalpb.DescribePartitionRequest{
-			MsgType:       commonpb.MsgType_kDescribePartition,
-			ReqID:         1,
-			Timestamp:     uint64(time.Now().Unix()),
-			ProxyID:       1,
-			PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition1"},
-		}
-
-		describePartition, err := cli.DescribePartition(ctx, &describePartitionReq)
-		assert.Nil(t, err)
-		assert.Equal(t, &servicepb.PartitionName{CollectionName: "col1", Tag: "partition1"}, describePartition.Name)
-
-		describePartitionReq = internalpb.DescribePartitionRequest{
-			MsgType:       commonpb.MsgType_kDescribePartition,
-			ReqID:         1,
-			Timestamp:     0,
-			ProxyID:       1,
-			PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition1"},
-		}
-
-		describePartition, _ = cli.DescribePartition(ctx, &describePartitionReq)
-		assert.Equal(t, commonpb.ErrorCode_UNEXPECTED_ERROR, describePartition.Status.ErrorCode)
+		//describePartitionReq := internalpb.DescribePartitionRequest{
+		//	MsgType:       commonpb.MsgType_kDescribePartition,
+		//	ReqID:         1,
+		//	Timestamp:     uint64(time.Now().Unix()),
+		//	ProxyID:       1,
+		//	PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition1"},
+		//}
+		//
+		//describePartition, err := cli.DescribePartition(ctx, &describePartitionReq)
+		//assert.Nil(t, err)
+		//assert.Equal(t, &servicepb.PartitionName{CollectionName: "col1", Tag: "partition1"}, describePartition.Name)
+		//
+		//describePartitionReq = internalpb.DescribePartitionRequest{
+		//	MsgType:       commonpb.MsgType_kDescribePartition,
+		//	ReqID:         1,
+		//	Timestamp:     0,
+		//	ProxyID:       1,
+		//	PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition1"},
+		//}
+		//
+		//describePartition, _ = cli.DescribePartition(ctx, &describePartitionReq)
+		//assert.Equal(t, commonpb.ErrorCode_UNEXPECTED_ERROR, describePartition.Status.ErrorCode)
 
 		// DropCollection
-		ser := servicepb.CollectionName{CollectionName: "col1"}
-		reqDrop := internalpb.DropCollectionRequest{
-			MsgType:        commonpb.MsgType_kDropCollection,
-			ReqID:          1,
-			Timestamp:      uint64(time.Now().Unix()),
-			ProxyID:        1,
-			CollectionName: &ser,
+		reqDrop := milvuspb.DropCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kDropCollection,
+				MsgID:     1,
+				Timestamp: uint64(time.Now().Unix()),
+				SourceID:  1,
+			},
+			CollectionName: "col1",
 		}
 		st, err = cli.DropCollection(ctx, &reqDrop)
 		assert.Nil(t, err)
@@ -912,12 +956,14 @@ func TestMaster(t *testing.T) {
 		assert.Nil(t, err)
 
 		////////////////////////////CreateCollection////////////////////////
-		createCollectionReq := internalpb.CreateCollectionRequest{
-			MsgType:   commonpb.MsgType_kCreateCollection,
-			ReqID:     1,
-			Timestamp: Timestamp(time.Now().Unix()),
-			ProxyID:   1,
-			Schema:    &commonpb.Blob{Value: schemaBytes},
+		createCollectionReq := milvuspb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kCreateCollection,
+				MsgID:     1,
+				Timestamp: Timestamp(time.Now().Unix()),
+				SourceID:  1,
+			},
+			Schema: schemaBytes,
 		}
 		st, err := cli.CreateCollection(ctx, &createCollectionReq)
 		assert.Nil(t, err)
@@ -940,22 +986,22 @@ func TestMaster(t *testing.T) {
 				break
 			}
 		}
-		assert.Equal(t, createCollectionReq.MsgType, createCollectionMsg.CreateCollectionRequest.MsgType)
-		assert.Equal(t, createCollectionReq.ReqID, createCollectionMsg.CreateCollectionRequest.ReqID)
-		assert.Equal(t, createCollectionReq.Timestamp, createCollectionMsg.CreateCollectionRequest.Timestamp)
-		assert.Equal(t, createCollectionReq.ProxyID, createCollectionMsg.CreateCollectionRequest.ProxyID)
+		assert.Equal(t, createCollectionReq.Base.MsgType, createCollectionMsg.CreateCollectionRequest.Base.MsgType)
+		assert.Equal(t, createCollectionReq.Base.MsgID, createCollectionMsg.CreateCollectionRequest.Base.MsgID)
+		assert.Equal(t, createCollectionReq.Base.Timestamp, createCollectionMsg.CreateCollectionRequest.Base.Timestamp)
+		assert.Equal(t, createCollectionReq.Base.SourceID, createCollectionMsg.CreateCollectionRequest.Base.SourceID)
 
 		////////////////////////////CreatePartition////////////////////////
 		partitionName := "partitionName" + strconv.FormatUint(rand.Uint64(), 10)
-		createPartitionReq := internalpb.CreatePartitionRequest{
-			MsgType:   commonpb.MsgType_kCreatePartition,
-			ReqID:     1,
-			Timestamp: uint64(time.Now().Unix()),
-			ProxyID:   1,
-			PartitionName: &servicepb.PartitionName{
-				CollectionName: sch.Name,
-				Tag:            partitionName,
+		createPartitionReq := milvuspb.CreatePartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kCreatePartition,
+				MsgID:     1,
+				Timestamp: Timestamp(time.Now().Unix()),
+				SourceID:  1,
 			},
+			CollectionName: sch.Name,
+			PartitionName:  partitionName,
 		}
 
 		st, err = cli.CreatePartition(ctx, &createPartitionReq)
@@ -978,23 +1024,23 @@ func TestMaster(t *testing.T) {
 				break
 			}
 		}
-		assert.Equal(t, createPartitionReq.MsgType, createPartitionMsg.CreatePartitionRequest.MsgType)
-		assert.Equal(t, createPartitionReq.ReqID, createPartitionMsg.CreatePartitionRequest.ReqID)
-		assert.Equal(t, createPartitionReq.Timestamp, createPartitionMsg.CreatePartitionRequest.Timestamp)
-		assert.Equal(t, createPartitionReq.ProxyID, createPartitionMsg.CreatePartitionRequest.ProxyID)
-		assert.Equal(t, createPartitionReq.PartitionName.CollectionName, createPartitionMsg.CreatePartitionRequest.PartitionName.CollectionName)
-		assert.Equal(t, createPartitionReq.PartitionName.Tag, createPartitionMsg.CreatePartitionRequest.PartitionName.Tag)
+		assert.Equal(t, createPartitionReq.Base.MsgType, createPartitionMsg.CreatePartitionRequest.Base.MsgType)
+		assert.Equal(t, createPartitionReq.Base.MsgID, createPartitionMsg.CreatePartitionRequest.Base.MsgID)
+		assert.Equal(t, createPartitionReq.Base.Timestamp, createPartitionMsg.CreatePartitionRequest.Base.Timestamp)
+		assert.Equal(t, createPartitionReq.Base.SourceID, createPartitionMsg.CreatePartitionRequest.Base.SourceID)
+		assert.Equal(t, createPartitionReq.CollectionName, createPartitionMsg.CreatePartitionRequest.CollectionName)
+		assert.Equal(t, createPartitionReq.PartitionName, createPartitionMsg.CreatePartitionRequest.PartitionName)
 
 		////////////////////////////DropPartition////////////////////////
-		dropPartitionReq := internalpb.DropPartitionRequest{
-			MsgType:   commonpb.MsgType_kDropPartition,
-			ReqID:     1,
-			Timestamp: uint64(time.Now().Unix()),
-			ProxyID:   1,
-			PartitionName: &servicepb.PartitionName{
-				CollectionName: sch.Name,
-				Tag:            partitionName,
+		dropPartitionReq := milvuspb.DropPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kDropPartition,
+				MsgID:     1,
+				Timestamp: Timestamp(time.Now().Unix()),
+				SourceID:  1,
 			},
+			CollectionName: sch.Name,
+			PartitionName:  partitionName,
 		}
 
 		st, err = cli.DropPartition(ctx, &dropPartitionReq)
@@ -1017,19 +1063,21 @@ func TestMaster(t *testing.T) {
 				break
 			}
 		}
-		assert.Equal(t, dropPartitionReq.MsgType, dropPartitionMsg.DropPartitionRequest.MsgType)
-		assert.Equal(t, dropPartitionReq.ReqID, dropPartitionMsg.DropPartitionRequest.ReqID)
-		assert.Equal(t, dropPartitionReq.Timestamp, dropPartitionMsg.DropPartitionRequest.Timestamp)
-		assert.Equal(t, dropPartitionReq.ProxyID, dropPartitionMsg.DropPartitionRequest.ProxyID)
-		assert.Equal(t, dropPartitionReq.PartitionName.CollectionName, dropPartitionMsg.DropPartitionRequest.PartitionName.CollectionName)
+		assert.Equal(t, dropPartitionReq.Base.MsgType, dropPartitionMsg.DropPartitionRequest.Base.MsgType)
+		assert.Equal(t, dropPartitionReq.Base.MsgID, dropPartitionMsg.DropPartitionRequest.Base.MsgID)
+		assert.Equal(t, dropPartitionReq.Base.Timestamp, dropPartitionMsg.DropPartitionRequest.Base.Timestamp)
+		assert.Equal(t, dropPartitionReq.Base.SourceID, dropPartitionMsg.DropPartitionRequest.Base.SourceID)
+		assert.Equal(t, dropPartitionReq.CollectionName, dropPartitionMsg.DropPartitionRequest.CollectionName)
 
 		////////////////////////////DropCollection////////////////////////
-		dropCollectionReq := internalpb.DropCollectionRequest{
-			MsgType:        commonpb.MsgType_kDropCollection,
-			ReqID:          1,
-			Timestamp:      uint64(time.Now().Unix()),
-			ProxyID:        1,
-			CollectionName: &servicepb.CollectionName{CollectionName: sch.Name},
+		dropCollectionReq := milvuspb.DropCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kDropCollection,
+				MsgID:     1,
+				Timestamp: Timestamp(time.Now().Unix()),
+				SourceID:  1,
+			},
+			CollectionName: sch.Name,
 		}
 
 		st, err = cli.DropCollection(ctx, &dropCollectionReq)
@@ -1052,16 +1100,16 @@ func TestMaster(t *testing.T) {
 				break
 			}
 		}
-		assert.Equal(t, dropCollectionReq.MsgType, dropCollectionMsg.DropCollectionRequest.MsgType)
-		assert.Equal(t, dropCollectionReq.ReqID, dropCollectionMsg.DropCollectionRequest.ReqID)
-		assert.Equal(t, dropCollectionReq.Timestamp, dropCollectionMsg.DropCollectionRequest.Timestamp)
-		assert.Equal(t, dropCollectionReq.ProxyID, dropCollectionMsg.DropCollectionRequest.ProxyID)
-		assert.Equal(t, dropCollectionReq.CollectionName.CollectionName, dropCollectionMsg.DropCollectionRequest.CollectionName.CollectionName)
+		assert.Equal(t, dropCollectionReq.Base.MsgType, dropCollectionMsg.DropCollectionRequest.Base.MsgType)
+		assert.Equal(t, dropCollectionReq.Base.MsgID, dropCollectionMsg.DropCollectionRequest.Base.MsgID)
+		assert.Equal(t, dropCollectionReq.Base.Timestamp, dropCollectionMsg.DropCollectionRequest.Base.Timestamp)
+		assert.Equal(t, dropCollectionReq.Base.SourceID, dropCollectionMsg.DropCollectionRequest.Base.SourceID)
+		assert.Equal(t, dropCollectionReq.CollectionName, dropCollectionMsg.DropCollectionRequest.CollectionName)
 	})
 
 	t.Run("TestSegmentManager_RPC", func(t *testing.T) {
 		collName := "test_coll"
-		partitionTag := "test_part"
+		partitionName := "test_part"
 		schema := &schemapb.CollectionSchema{
 			Name:        collName,
 			Description: "test coll",
@@ -1073,39 +1121,41 @@ func TestMaster(t *testing.T) {
 		}
 		schemaBytes, err := proto.Marshal(schema)
 		assert.Nil(t, err)
-		_, err = cli.CreateCollection(ctx, &internalpb.CreateCollectionRequest{
-			MsgType:   commonpb.MsgType_kCreateCollection,
-			ReqID:     1,
-			Timestamp: uint64(time.Now().Unix()),
-			ProxyID:   1,
-			Schema:    &commonpb.Blob{Value: schemaBytes},
+		_, err = cli.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kCreateCollection,
+				MsgID:     1,
+				Timestamp: Timestamp(time.Now().Unix()),
+				SourceID:  1,
+			},
+			Schema: schemaBytes,
 		})
 		assert.Nil(t, err)
-		_, err = cli.CreatePartition(ctx, &internalpb.CreatePartitionRequest{
-			MsgType:   commonpb.MsgType_kCreatePartition,
-			ReqID:     2,
-			Timestamp: uint64(time.Now().Unix()),
-			ProxyID:   1,
-			PartitionName: &servicepb.PartitionName{
-				CollectionName: collName,
-				Tag:            partitionTag,
+		_, err = cli.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kCreatePartition,
+				MsgID:     2,
+				Timestamp: Timestamp(time.Now().Unix()),
+				SourceID:  1,
 			},
+			CollectionName: collName,
+			PartitionName:  partitionName,
 		})
 		assert.Nil(t, err)
 
-		resp, err := cli.AssignSegmentID(ctx, &internalpb.AssignSegIDRequest{
-			PeerID: 1,
-			Role:   internalpb.PeerRole_Proxy,
-			PerChannelReq: []*internalpb.SegIDRequest{
-				{Count: 10000, ChannelID: 0, CollName: collName, PartitionTag: partitionTag},
+		resp, err := cli.AssignSegmentID(ctx, &datapb.AssignSegIDRequest{
+			NodeID:   1,
+			PeerRole: "ProxyNode",
+			SegIDRequests: []*datapb.SegIDRequest{
+				{Count: 10000, ChannelID: "0", CollName: collName, PartitionName: partitionName},
 			},
 		})
 		assert.Nil(t, err)
-		assignments := resp.GetPerChannelAssignment()
+		assignments := resp.GetSegIDAssignments()
 		assert.EqualValues(t, 1, len(assignments))
 		assert.EqualValues(t, commonpb.ErrorCode_SUCCESS, assignments[0].Status.ErrorCode)
 		assert.EqualValues(t, collName, assignments[0].CollName)
-		assert.EqualValues(t, partitionTag, assignments[0].PartitionTag)
+		assert.EqualValues(t, partitionName, assignments[0].PartitionName)
 		assert.EqualValues(t, int32(0), assignments[0].ChannelID)
 		assert.EqualValues(t, uint32(10000), assignments[0].Count)
 
@@ -1123,10 +1173,12 @@ func TestMaster(t *testing.T) {
 			EndTs:   104,
 			Msgs: []ms.TsMsg{
 				&ms.QueryNodeStatsMsg{
-					QueryNodeStats: internalpb.QueryNodeStats{
-						MsgType: commonpb.MsgType_kQueryNodeStats,
-						PeerID:  1,
-						SegStats: []*internalpb.SegmentStats{
+					QueryNodeStats: internalpb2.QueryNodeStats{
+						Base: &commonpb.MsgBase{
+							MsgType:  commonpb.MsgType_kQueryNodeStats,
+							SourceID: 1,
+						},
+						SegStats: []*internalpb2.SegmentStats{
 							{SegmentID: segID, MemorySize: 600000000, NumRows: 1000000, RecentlyModified: true},
 						},
 					},
@@ -1144,13 +1196,14 @@ func TestMaster(t *testing.T) {
 		assert.EqualValues(t, 1000000, segMeta.GetNumRows())
 		assert.EqualValues(t, int64(600000000), segMeta.GetMemSize())
 
-		ser := servicepb.CollectionName{CollectionName: collName}
-		reqDrop := internalpb.DropCollectionRequest{
-			MsgType:        commonpb.MsgType_kDropCollection,
-			ReqID:          1,
-			Timestamp:      uint64(time.Now().Unix()),
-			ProxyID:        1,
-			CollectionName: &ser,
+		reqDrop := milvuspb.DropCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kDropCollection,
+				MsgID:     1,
+				Timestamp: Timestamp(time.Now().Unix()),
+				SourceID:  1,
+			},
+			CollectionName: collName,
 		}
 
 		// DropCollection

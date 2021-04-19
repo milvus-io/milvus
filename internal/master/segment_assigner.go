@@ -144,7 +144,7 @@ func (assigner *SegmentAssigner) startProxyTimeSync() {
 			log.Println("proxy time sync stopped")
 			return
 		case msg := <-assigner.proxyTimeSyncChan:
-			if err := assigner.syncProxyTimeStamp(msg.TimeTickMsg.Timestamp); err != nil {
+			if err := assigner.syncProxyTimeStamp(msg.TimeTickMsg.Base.Timestamp); err != nil {
 				log.Println("proxy time sync error: " + err.Error())
 			}
 		}

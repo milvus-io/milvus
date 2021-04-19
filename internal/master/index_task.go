@@ -4,14 +4,12 @@ import (
 	"fmt"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 )
 
 type createIndexTask struct {
 	baseTask
-	req                 *internalpb.CreateIndexRequest
+	req                 *milvuspb.CreateIndexRequest
 	indexBuildScheduler *IndexBuildScheduler
 	indexLoadScheduler  *IndexLoadScheduler
 	segManager          SegmentManager
@@ -22,7 +20,7 @@ func (task *createIndexTask) Type() commonpb.MsgType {
 }
 
 func (task *createIndexTask) Ts() (Timestamp, error) {
-	return task.req.Timestamp, nil
+	return task.req.Base.Timestamp, nil
 }
 
 func (task *createIndexTask) Execute() error {
@@ -109,8 +107,8 @@ func (task *createIndexTask) Execute() error {
 
 type describeIndexTask struct {
 	baseTask
-	req  *internalpb.DescribeIndexRequest
-	resp *servicepb.DescribeIndexResponse
+	req  *milvuspb.DescribeIndexRequest
+	resp *milvuspb.DescribeIndexResponse
 }
 
 func (task *describeIndexTask) Type() commonpb.MsgType {
@@ -118,7 +116,7 @@ func (task *describeIndexTask) Type() commonpb.MsgType {
 }
 
 func (task *describeIndexTask) Ts() (Timestamp, error) {
-	return task.req.Timestamp, nil
+	return task.req.Base.Timestamp, nil
 }
 
 func (task *describeIndexTask) Execute() error {
@@ -141,26 +139,30 @@ func (task *describeIndexTask) Execute() error {
 	if err != nil {
 		return err
 	}
-	task.resp.ExtraParams = indexParams
+	description := &milvuspb.IndexDescription{
+		IndexName: "", // todo add IndexName to master meta_table
+		Params:    indexParams,
+	}
+	task.resp.IndexDescriptions = []*milvuspb.IndexDescription{description}
 	return nil
 }
 
-type describeIndexProgressTask struct {
+type getIndexStateTask struct {
 	baseTask
-	req          *internalpb.DescribeIndexProgressRequest
+	req          *milvuspb.IndexStateRequest
 	runtimeStats *RuntimeStats
-	resp         *servicepb.BoolResponse
+	resp         *milvuspb.IndexStateResponse
 }
 
-func (task *describeIndexProgressTask) Type() commonpb.MsgType {
+func (task *getIndexStateTask) Type() commonpb.MsgType {
 	return commonpb.MsgType_kDescribeIndexProgress
 }
 
-func (task *describeIndexProgressTask) Ts() (Timestamp, error) {
-	return task.req.Timestamp, nil
+func (task *getIndexStateTask) Ts() (Timestamp, error) {
+	return task.req.Base.Timestamp, nil
 }
 
-func (task *describeIndexProgressTask) Execute() error {
+func (task *getIndexStateTask) Execute() error {
 	// get field id, collection id
 	collMeta, err := task.mt.GetCollectionByName(task.req.CollectionName)
 	if err != nil {
@@ -188,7 +190,15 @@ func (task *describeIndexProgressTask) Execute() error {
 
 	// get completed segment nums from querynode's runtime stats
 	relatedSegments := task.runtimeStats.GetTotalNumOfRelatedSegments(collMeta.ID, fieldID, indexParams)
-
-	task.resp.Value = int64(totalSegmentNums) == relatedSegments
+	task.resp = &milvuspb.IndexStateResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+	}
+	if int64(totalSegmentNums) == relatedSegments {
+		task.resp.State = commonpb.IndexState_FINISHED
+	} else {
+		task.resp.State = commonpb.IndexState_INPROGRESS
+	}
 	return nil
 }
