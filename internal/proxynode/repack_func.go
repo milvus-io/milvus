@@ -202,7 +202,7 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 			size += int(unsafe.Sizeof(blob.Value))
 			size += len(blob.Value)
 		}
-		log.Println("size of insert message: ", size)
+		// log.Println("size of insert message: ", size)
 		return size
 	}
 	// not accurate
