@@ -591,8 +591,8 @@ func TestMasterService(t *testing.T) {
 		}
 		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
-		assert.Equal(t, len(collMeta.IndexParams), 1)
-		assert.Equal(t, len(collMeta.IndexNames), 1)
+		assert.Equal(t, len(collMeta.FieldIndexes), 1)
+		assert.Equal(t, len(collMeta.FieldIndexes), 1)
 
 		rsp, err := core.CreateIndex(req)
 		assert.Nil(t, err)
@@ -603,9 +603,9 @@ func TestMasterService(t *testing.T) {
 		assert.ElementsMatch(t, files, []string{"file0-100", "file1-100", "file2-100"})
 		collMeta, err = core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
-		assert.Equal(t, len(collMeta.IndexParams), 2)
-		assert.Equal(t, len(collMeta.IndexNames), 2)
-		assert.Equal(t, collMeta.IndexNames[1], Params.DefaultIndexName)
+		assert.Equal(t, len(collMeta.FieldIndexes), 2)
+		assert.Equal(t, len(collMeta.FieldIndexes), 2)
+		assert.Equal(t, collMeta.FieldIndexes[1].IndexInfo.IndexName, Params.DefaultIndexName)
 
 		req.FieldName = "no field"
 		rsp, err = core.CreateIndex(req)

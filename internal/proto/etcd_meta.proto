@@ -24,9 +24,15 @@ message PartitionInfo {
   repeated int64 segmentIDs = 3;
 }
 
-message IndexParamsInfo{
+message IndexInfo {
+  string index_name = 1;
+  int64 indexID = 2;
+  repeated common.KeyValuePair index_params = 3;
+}
+
+message FieldIndexInfo{
   int64 filedID = 1;
-  repeated common.KeyValuePair index_params = 2;
+  IndexInfo index_info = 2;
 }
 
 message CollectionInfo {
@@ -34,15 +40,10 @@ message CollectionInfo {
   schema.CollectionSchema schema = 2;
   uint64 create_time = 3;
   repeated int64 partitionIDs = 4;
-  repeated IndexParamsInfo index_params = 5;
-  repeated string index_names = 6;
+  repeated FieldIndexInfo field_indexes = 5;
 }
 
-message IndexInfo {
-  string index_name = 1;
-  int64 indexID = 2;
-  repeated common.KeyValuePair index_params = 3;
-}
+
 
 message SegmentIndexInfo {
   int64 segmentID = 1;
