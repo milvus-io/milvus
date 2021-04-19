@@ -49,6 +49,8 @@ type Master struct {
 	// chans
 	ssChan chan internalpb.SegmentStats
 
+	grpcErr chan error
+
 	kvBase    *kv.EtcdKV
 	scheduler *ddRequestScheduler
 	mt        *metaTable
@@ -94,6 +96,7 @@ func CreateServer(ctx context.Context, kvRootPath string, metaRootPath, tsoRootP
 		scheduler:      NewDDRequestScheduler(),
 		mt:             metakv,
 		ssChan:         make(chan internalpb.SegmentStats, 10),
+		grpcErr:        make(chan error),
 		pc:             informer.NewPulsarClient(),
 	}
 	m.grpcServer = grpc.NewServer()
@@ -104,18 +107,6 @@ func CreateServer(ctx context.Context, kvRootPath string, metaRootPath, tsoRootP
 // AddStartCallback adds a callback in the startServer phase.
 func (s *Master) AddStartCallback(callbacks ...func()) {
 	s.startCallbacks = append(s.startCallbacks, callbacks...)
-}
-
-func (s *Master) startServer(ctx context.Context) error {
-
-	// Run callbacks
-	for _, cb := range s.startCallbacks {
-		cb()
-	}
-
-	// Server has started.
-	atomic.StoreInt64(&s.isServing, 1)
-	return nil
 }
 
 // AddCloseCallback adds a callback in the Close phase.
@@ -154,11 +145,15 @@ func (s *Master) IsClosed() bool {
 // Run runs the pd server.
 func (s *Master) Run(grpcPort int64) error {
 
-	if err := s.startServer(s.ctx); err != nil {
+	if err := s.startServerLoop(s.ctx, grpcPort); err != nil {
 		return err
 	}
+	atomic.StoreInt64(&s.isServing, 1)
 
-	s.startServerLoop(s.ctx, grpcPort)
+	// Run callbacks
+	for _, cb := range s.startCallbacks {
+		cb()
+	}
 
 	return nil
 }
@@ -173,22 +168,23 @@ func (s *Master) LoopContext() context.Context {
 	return s.serverLoopCtx
 }
 
-func (s *Master) startServerLoop(ctx context.Context, grpcPort int64) {
+func (s *Master) startServerLoop(ctx context.Context, grpcPort int64) error {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
 	//go s.Se
 
 	s.serverLoopWg.Add(1)
 	go s.grpcLoop(grpcPort)
 
-	//s.serverLoopWg.Add(1)
-	//go s.pulsarLoop()
+	if err := <-s.grpcErr; err != nil {
+		return err
+	}
 
 	s.serverLoopWg.Add(1)
 	go s.tasksExecutionLoop()
 
 	s.serverLoopWg.Add(1)
 	go s.segmentStatisticsLoop()
-
+	return nil
 }
 
 func (s *Master) stopServerLoop() {
@@ -205,6 +201,15 @@ func (s *Master) StartTimestamp() int64 {
 	return s.startTimestamp
 }
 
+func (s *Master) checkGrpcReady(ctx context.Context, targetCh chan error) {
+	select {
+	case <-time.After(100 * time.Millisecond):
+		targetCh <- nil
+	case <-ctx.Done():
+		return
+	}
+}
+
 func (s *Master) grpcLoop(grpcPort int64) {
 	defer s.serverLoopWg.Done()
 
@@ -213,11 +218,14 @@ func (s *Master) grpcLoop(grpcPort int64) {
 	lis, err := net.Listen("tcp", defaultGRPCPort)
 	if err != nil {
 		log.Printf("failed to listen: %v", err)
+		s.grpcErr <- err
 		return
 	}
-
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+	go s.checkGrpcReady(ctx, s.grpcErr)
 	if err := s.grpcServer.Serve(lis); err != nil {
-		panic("grpcServer Start Failed!!")
+		s.grpcErr <- err
 	}
 
 }

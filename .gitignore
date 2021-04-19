@@ -51,6 +51,7 @@ cmake_build/
 *.log
 .coverage
 *.pyc
+*.log
 
 .DS_Store
 *.swp

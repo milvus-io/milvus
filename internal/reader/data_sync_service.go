@@ -51,7 +51,7 @@ func (dsService *dataSyncService) initNodes() {
 
 	var dmStreamNode Node = newDmInputNode(dsService.ctx, dsService.pulsarURL)
 	var filterDmNode Node = newFilteredDmNode()
-	var insertNode Node = newInsertNode(dsService.node.container)
+	var insertNode Node = newInsertNode(&dsService.node.container.segments)
 	var serviceTimeNode Node = newServiceTimeNode(dsService.node)
 
 	dsService.fg.AddNode(&dmStreamNode)

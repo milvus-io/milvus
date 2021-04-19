@@ -6,24 +6,20 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"google.golang.org/grpc"
-
+	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/kv/mockkv"
 	"github.com/zilliztech/milvus-distributed/internal/master/id"
-	"github.com/zilliztech/milvus-distributed/internal/master/tso"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
-)
+	"google.golang.org/grpc"
 
-const (
-	MOCKGRPCPORT = ":0"
+	"github.com/zilliztech/milvus-distributed/internal/master/tso"
 )
-
-var GrpcServerAddr net.Addr
 
 // Server is the pd server.
 type Master struct {
@@ -42,6 +38,9 @@ type Master struct {
 
 	kvBase kv.Base
 
+	// error chans
+	grpcErr chan error
+
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
@@ -49,15 +48,19 @@ type Master struct {
 	grpcAddr net.Addr
 }
 
+func Init() {
+	rand.Seed(time.Now().UnixNano())
+	id.Init()
+	tso.Init()
+}
+
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context) (*Master, error) {
-	rand.Seed(time.Now().UnixNano())
-	id.InitGlobalIDAllocator("idTimestamp", mockkv.NewEtcdKV())
-
+	Init()
 	m := &Master{
-		ctx:          ctx,
-		kvBase:       mockkv.NewEtcdKV(),
-		tsoAllocator: tso.NewGlobalTSOAllocator("timestamp", mockkv.NewEtcdKV()),
+		ctx:     ctx,
+		kvBase:  mockkv.NewEtcdKV(),
+		grpcErr: make(chan error),
 	}
 
 	m.grpcServer = grpc.NewServer()
@@ -81,9 +84,6 @@ func (s *Master) startServer(ctx context.Context) error {
 	for _, cb := range s.startCallbacks {
 		cb()
 	}
-
-	// Server has started.
-	atomic.StoreInt64(&s.isServing, 1)
 	return nil
 }
 
@@ -116,6 +116,11 @@ func (s *Master) Close() {
 }
 
 // IsClosed checks whether server is closed or not.
+func (s *Master) IsServing() bool {
+	return !s.IsClosed()
+}
+
+// IsClosed checks whether server is closed or not.
 func (s *Master) IsClosed() bool {
 	return atomic.LoadInt64(&s.isServing) == 0
 }
@@ -128,7 +133,14 @@ func (s *Master) Run() error {
 	}
 
 	s.startServerLoop(s.ctx)
+	// Server has started.
 
+	if err := <-s.grpcErr; err != nil {
+		s.Close()
+		return err
+	}
+
+	atomic.StoreInt64(&s.isServing, 1)
 	return nil
 }
 
@@ -144,9 +156,11 @@ func (s *Master) LoopContext() context.Context {
 
 func (s *Master) startServerLoop(ctx context.Context) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
-	s.serverLoopWg.Add(3)
+	s.serverLoopWg.Add(1)
 	go s.grpcLoop()
+	s.serverLoopWg.Add(1)
 	go s.pulsarLoop()
+	s.serverLoopWg.Add(1)
 	go s.segmentStatisticsLoop()
 }
 
@@ -158,20 +172,34 @@ func (s *Master) stopServerLoop() {
 	s.serverLoopWg.Wait()
 }
 
-func (s *Master) grpcLoop() {
-	defer s.serverLoopWg.Done()
-	lis, err := net.Listen("tcp", MOCKGRPCPORT)
-	if err != nil {
-		log.Printf("failed to listen: %v", err)
+func (s *Master) checkReady(ctx context.Context, targetCh chan error) {
+	select {
+	case <-time.After(100 * time.Millisecond):
+		targetCh <- nil
+	case <-ctx.Done():
 		return
 	}
+}
 
+func (s *Master) grpcLoop() {
+	defer s.serverLoopWg.Done()
+	masterAddr := conf.Config.Etcd.Address
+	masterAddr += ":"
+	masterAddr += strconv.FormatInt(int64(conf.Config.Master.Port), 10)
+	lis, err := net.Listen("tcp", masterAddr)
+	if err != nil {
+		log.Printf("failed to listen: %v", err)
+		s.grpcErr <- err
+		return
+	}
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+	go s.checkReady(ctx, s.grpcErr)
 	s.grpcAddr = lis.Addr()
-
 	fmt.Printf("Start MockMaster grpc server , addr:%v\n", s.grpcAddr)
-
 	if err := s.grpcServer.Serve(lis); err != nil {
-		panic("grpcServer Startup Failed!")
+		fmt.Println(err)
+		s.grpcErr <- err
 	}
 }
 
