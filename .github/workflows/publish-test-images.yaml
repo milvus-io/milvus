@@ -6,12 +6,14 @@ on:
   push:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
-      - 'build/docker/test/**'
+      - 'build/docker/test/Dockerfile'
+      - 'tests/python_test/requirements.txt'
       - '.github/workflows/publish-test-images.yaml'
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
-      - 'build/docker/test/**'
+      - 'build/docker/test/Dockerfile'
+      - 'tests/python_test/requirements.txt'
       - '.github/workflows/publish-test-images.yaml'
 
 jobs:
@@ -33,24 +35,19 @@ jobs:
         run: |
           echo "::set-output name=version::$(date +%Y%m%d)"
           echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
-      - name: Docker Pull
-        shell: bash
-        working-directory: build/docker/test
-        run: |
-          docker-compose pull --ignore-pull-failures regression_standalone
       - name: Docker Build
         shell: bash
-        working-directory: build/docker/test
+        working-directory: tests/python_test
         run: |
-          TARGET_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} docker-compose build regression_standalone
-          TARGET_TAG=latest docker-compose build regression_standalone
+          docker build -t milvusdb/pytest:${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} .
+          docker tag milvusdb/pytest:${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} milvusdb/pytest:latest
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'zilliztech/milvus-distributed'
         continue-on-error: true
         shell: bash
-        working-directory: build/docker/test
         run: |
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
-          TARGET_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} docker-compose push regression_standalone
-          TARGET_TAG=latest docker-compose push regression_standalone
+          docker push milvusdb/pytest:${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}
+          docker push milvusdb/pytest:latest
+          echo "Push milvusdb/pytest:${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} Succeeded"

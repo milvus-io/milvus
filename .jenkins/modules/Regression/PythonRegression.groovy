@@ -48,6 +48,7 @@ timeout(time: 60, unit: 'MINUTES') {
     container('test-env') {
         try {
             dir ('tests/python_test') {
+                sh "python3 -m pip install --no-cache-dir pymilvus-distributed==${env.PYMILVUS_VERSION}"
                 sh "pytest --tags=0331 --ip ${env.HELM_RELEASE_NAME}-milvus-ha.${env.HELM_RELEASE_NAMESPACE}.svc.cluster.local"
             }
         } catch (exc) {
