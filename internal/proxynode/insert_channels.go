@@ -134,12 +134,10 @@ func (m *InsertChannelsMap) closeInsertMsgStream(collID UniqueID) error {
 	m.usageHistogram[loc]--
 	if m.usageHistogram[loc] <= 0 {
 		m.insertMsgStreams[loc].Close()
+		m.droppedBitMap[loc] = 1
+		delete(m.collectionID2InsertChannels, collID)
+		log.Print("close insert message stream ...")
 	}
-	log.Print("close insert message stream ...")
-
-	m.droppedBitMap[loc] = 1
-	delete(m.collectionID2InsertChannels, collID)
-
 	return nil
 }
 

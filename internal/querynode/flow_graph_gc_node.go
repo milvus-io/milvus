@@ -41,7 +41,7 @@ func (gcNode *gcNode) Operate(in []*Msg) []*Msg {
 	//
 	//// drop partitions
 	//for _, partition := range gcMsg.gcRecord.partitions {
-	//	err := gcNode.replica.removePartition(partition.collectionID, partition.partitionID)
+	//	err := gcNode.replica.removePartition(partition.partitionID)
 	//	if err != nil {
 	//		log.Println(err)
 	//	}

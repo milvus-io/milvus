@@ -12,13 +12,10 @@ package querynode
 */
 import "C"
 import (
-	"fmt"
-	"log"
 	"strconv"
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
@@ -32,69 +29,63 @@ import (
  * is up-to-date.
  */
 type collectionReplica interface {
-	getTSafe() tSafe
-
 	// collection
-	getCollectionNum() int
 	addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error
 	removeCollection(collectionID UniqueID) error
 	getCollectionByID(collectionID UniqueID) (*Collection, error)
 	hasCollection(collectionID UniqueID) bool
+	getCollectionNum() int
+	getPartitionIDs(collectionID UniqueID) ([]UniqueID, error)
+
 	getVecFieldsByCollectionID(collectionID UniqueID) ([]int64, error)
 
 	// partition
-	// TODO: remove collection ID, add a `map[partitionID]partition` to replica implement
-	getPartitionNum(collectionID UniqueID) (int, error)
 	addPartition(collectionID UniqueID, partitionID UniqueID) error
-	removePartition(collectionID UniqueID, partitionID UniqueID) error
-	addPartitionsByCollectionMeta(colMeta *etcdpb.CollectionInfo) error
-	removePartitionsByCollectionMeta(colMeta *etcdpb.CollectionInfo) error
-	getPartitionByID(collectionID UniqueID, partitionID UniqueID) (*Partition, error)
-	hasPartition(collectionID UniqueID, partitionID UniqueID) bool
-	enablePartitionDM(collectionID UniqueID, partitionID UniqueID) error
-	disablePartitionDM(collectionID UniqueID, partitionID UniqueID) error
-	getEnablePartitionDM(collectionID UniqueID, partitionID UniqueID) (bool, error)
+	removePartition(partitionID UniqueID) error
+	getPartitionByID(partitionID UniqueID) (*Partition, error)
+	hasPartition(partitionID UniqueID) bool
+	getPartitionNum() int
+	getSegmentIDs(partitionID UniqueID) ([]UniqueID, error)
+
+	enablePartitionDM(partitionID UniqueID) error
+	disablePartitionDM(partitionID UniqueID) error
+	getEnablePartitionDM(partitionID UniqueID) (bool, error)
 
 	// segment
-	getSegmentNum() int
-	getSegmentStatistics() []*internalpb2.SegmentStats
 	addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, segType segmentType) error
 	removeSegment(segmentID UniqueID) error
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 	hasSegment(segmentID UniqueID) bool
+	getSegmentNum() int
+
+	getSegmentStatistics() []*internalpb2.SegmentStats
 	getSealedSegments() ([]UniqueID, []UniqueID)
 	replaceGrowingSegmentBySealedSegment(segment *Segment) error
 
+	getTSafe() tSafe
 	freeAll()
 }
 
 type collectionReplicaImpl struct {
 	tSafe tSafe
 
-	mu          sync.RWMutex // guards collections and segments
-	collections []*Collection
+	mu          sync.RWMutex // guards all
+	collections map[UniqueID]*Collection
+	partitions  map[UniqueID]*Partition
 	segments    map[UniqueID]*Segment
 }
 
-//----------------------------------------------------------------------------------------------------- tSafe
-func (colReplica *collectionReplicaImpl) getTSafe() tSafe {
-	return colReplica.tSafe
-}
-
 //----------------------------------------------------------------------------------------------------- collection
-func (colReplica *collectionReplicaImpl) getCollectionNum() int {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-
-	return len(colReplica.collections)
-}
-
 func (colReplica *collectionReplicaImpl) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
+	if ok := colReplica.hasCollectionPrivate(collectionID); ok {
+		return errors.New("collection has been existed, id = " + strconv.FormatInt(collectionID, 10))
+	}
+
 	var newCollection = newCollection(collectionID, schema)
-	colReplica.collections = append(colReplica.collections, newCollection)
+	colReplica.collections[collectionID] = newCollection
 
 	return nil
 }
@@ -102,72 +93,82 @@ func (colReplica *collectionReplicaImpl) addCollection(collectionID UniqueID, sc
 func (colReplica *collectionReplicaImpl) removeCollection(collectionID UniqueID) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
+	return colReplica.removeCollectionPrivate(collectionID)
+}
 
+func (colReplica *collectionReplicaImpl) removeCollectionPrivate(collectionID UniqueID) error {
 	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		return err
 	}
 
 	deleteCollection(collection)
+	delete(colReplica.collections, collectionID)
 
-	tmpCollections := make([]*Collection, 0)
-	for _, col := range colReplica.collections {
-		if col.ID() == collectionID {
-			for _, p := range *col.Partitions() {
-				for _, s := range *p.Segments() {
-					deleteSegment(colReplica.segments[s.ID()])
-					delete(colReplica.segments, s.ID())
-				}
-			}
-		} else {
-			tmpCollections = append(tmpCollections, col)
-		}
+	// delete partitions
+	for _, partitionID := range collection.partitionIDs {
+		// ignore error, try to delete
+		_ = colReplica.removePartitionPrivate(partitionID)
 	}
 
-	colReplica.collections = tmpCollections
 	return nil
 }
 
 func (colReplica *collectionReplicaImpl) getCollectionByID(collectionID UniqueID) (*Collection, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
-
 	return colReplica.getCollectionByIDPrivate(collectionID)
 }
 
 func (colReplica *collectionReplicaImpl) getCollectionByIDPrivate(collectionID UniqueID) (*Collection, error) {
-	for _, collection := range colReplica.collections {
-		if collection.ID() == collectionID {
-			return collection, nil
-		}
+	collection, ok := colReplica.collections[collectionID]
+	if !ok {
+		return nil, errors.New("cannot find collection, id = " + strconv.FormatInt(collectionID, 10))
 	}
 
-	return nil, errors.New("cannot find collection, id = " + strconv.FormatInt(collectionID, 10))
+	return collection, nil
 }
 
 func (colReplica *collectionReplicaImpl) hasCollection(collectionID UniqueID) bool {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
+	return colReplica.hasCollectionPrivate(collectionID)
+}
 
-	for _, col := range colReplica.collections {
-		if col.ID() == collectionID {
-			return true
-		}
+func (colReplica *collectionReplicaImpl) hasCollectionPrivate(collectionID UniqueID) bool {
+	_, ok := colReplica.collections[collectionID]
+	return ok
+}
+
+func (colReplica *collectionReplicaImpl) getCollectionNum() int {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+	return len(colReplica.collections)
+}
+
+func (colReplica *collectionReplicaImpl) getPartitionIDs(collectionID UniqueID) ([]UniqueID, error) {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
+	if err != nil {
+		return nil, err
 	}
-	return false
+
+	return collection.partitionIDs, nil
 }
 
 func (colReplica *collectionReplicaImpl) getVecFieldsByCollectionID(collectionID UniqueID) ([]int64, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 
-	col, err := colReplica.getCollectionByIDPrivate(collectionID)
+	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		return nil, err
 	}
 
 	vecFields := make([]int64, 0)
-	for _, field := range col.Schema().Fields {
+	for _, field := range collection.Schema().Fields {
 		if field.DataType == schemapb.DataType_VECTOR_BINARY || field.DataType == schemapb.DataType_VECTOR_FLOAT {
 			vecFields = append(vecFields, field.FieldID)
 		}
@@ -181,165 +182,100 @@ func (colReplica *collectionReplicaImpl) getVecFieldsByCollectionID(collectionID
 }
 
 //----------------------------------------------------------------------------------------------------- partition
-func (colReplica *collectionReplicaImpl) getPartitionNum(collectionID UniqueID) (int, error) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-
-	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
-	if err != nil {
-		return -1, err
-	}
-
-	return len(collection.partitions), nil
-}
-
 func (colReplica *collectionReplicaImpl) addPartition(collectionID UniqueID, partitionID UniqueID) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
+	return colReplica.addPartitionPrivate(collectionID, partitionID)
+}
 
+func (colReplica *collectionReplicaImpl) addPartitionPrivate(collectionID UniqueID, partitionID UniqueID) error {
 	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		return err
 	}
 
-	var newPartition = newPartition(partitionID)
-
-	*collection.Partitions() = append(*collection.Partitions(), newPartition)
+	collection.addPartitionID(partitionID)
+	var newPartition = newPartition(collectionID, partitionID)
+	colReplica.partitions[partitionID] = newPartition
 	return nil
 }
 
-func (colReplica *collectionReplicaImpl) removePartition(collectionID UniqueID, partitionID UniqueID) error {
+func (colReplica *collectionReplicaImpl) removePartition(partitionID UniqueID) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
-
-	return colReplica.removePartitionPrivate(collectionID, partitionID)
+	return colReplica.removePartitionPrivate(partitionID)
 }
 
-func (colReplica *collectionReplicaImpl) removePartitionPrivate(collectionID UniqueID, partitionID UniqueID) error {
-	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
+func (colReplica *collectionReplicaImpl) removePartitionPrivate(partitionID UniqueID) error {
+	partition, err := colReplica.getPartitionByIDPrivate(partitionID)
 	if err != nil {
 		return err
 	}
 
-	var tmpPartitions = make([]*Partition, 0)
-	for _, p := range *collection.Partitions() {
-		if p.ID() == partitionID {
-			for _, s := range *p.Segments() {
-				deleteSegment(colReplica.segments[s.ID()])
-				delete(colReplica.segments, s.ID())
-			}
-		} else {
-			tmpPartitions = append(tmpPartitions, p)
-		}
-	}
-
-	*collection.Partitions() = tmpPartitions
-	return nil
-}
-
-// deprecated
-func (colReplica *collectionReplicaImpl) addPartitionsByCollectionMeta(colMeta *etcdpb.CollectionInfo) error {
-	if !colReplica.hasCollection(colMeta.ID) {
-		err := errors.New("Cannot find collection, id = " + strconv.FormatInt(colMeta.ID, 10))
-		return err
-	}
-	pToAdd := make([]UniqueID, 0)
-	for _, partitionID := range colMeta.PartitionIDs {
-		if !colReplica.hasPartition(colMeta.ID, partitionID) {
-			pToAdd = append(pToAdd, partitionID)
-		}
-	}
-
-	for _, id := range pToAdd {
-		err := colReplica.addPartition(colMeta.ID, id)
-		if err != nil {
-			log.Println(err)
-		}
-		fmt.Println("add partition: ", id)
-	}
-
-	return nil
-}
-
-func (colReplica *collectionReplicaImpl) removePartitionsByCollectionMeta(colMeta *etcdpb.CollectionInfo) error {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-
-	col, err := colReplica.getCollectionByIDPrivate(colMeta.ID)
+	collection, err := colReplica.getCollectionByIDPrivate(partition.collectionID)
 	if err != nil {
 		return err
 	}
 
-	pToDel := make([]UniqueID, 0)
-	for _, partition := range col.partitions {
-		hasPartition := false
-		for _, id := range colMeta.PartitionIDs {
-			if partition.ID() == id {
-				hasPartition = true
-			}
-		}
-		if !hasPartition {
-			pToDel = append(pToDel, partition.ID())
-		}
-	}
+	collection.removePartitionID(partitionID)
+	delete(colReplica.partitions, partitionID)
 
-	for _, id := range pToDel {
-		err := colReplica.removePartitionPrivate(col.ID(), id)
-		if err != nil {
-			log.Println(err)
-		}
-		fmt.Println("delete partition: ", id)
+	// delete segments
+	for _, segmentID := range partition.segmentIDs {
+		// try to delete, ignore error
+		_ = colReplica.removeSegmentPrivate(segmentID)
 	}
-
 	return nil
 }
 
-func (colReplica *collectionReplicaImpl) getPartitionByID(collectionID UniqueID, partitionID UniqueID) (*Partition, error) {
+func (colReplica *collectionReplicaImpl) getPartitionByID(partitionID UniqueID) (*Partition, error) {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+	return colReplica.getPartitionByIDPrivate(partitionID)
+}
+
+func (colReplica *collectionReplicaImpl) getPartitionByIDPrivate(partitionID UniqueID) (*Partition, error) {
+	partition, ok := colReplica.partitions[partitionID]
+	if !ok {
+		return nil, errors.New("cannot find partition, id = " + strconv.FormatInt(partitionID, 10))
+	}
+
+	return partition, nil
+}
+
+func (colReplica *collectionReplicaImpl) hasPartition(partitionID UniqueID) bool {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+	return colReplica.hasPartitionPrivate(partitionID)
+}
+
+func (colReplica *collectionReplicaImpl) hasPartitionPrivate(partitionID UniqueID) bool {
+	_, ok := colReplica.partitions[partitionID]
+	return ok
+}
+
+func (colReplica *collectionReplicaImpl) getPartitionNum() int {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+	return len(colReplica.partitions)
+}
+
+func (colReplica *collectionReplicaImpl) getSegmentIDs(partitionID UniqueID) ([]UniqueID, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 
-	return colReplica.getPartitionByIDPrivate(collectionID, partitionID)
+	partition, err2 := colReplica.getPartitionByIDPrivate(partitionID)
+	if err2 != nil {
+		return nil, err2
+	}
+	return partition.segmentIDs, nil
 }
 
-func (colReplica *collectionReplicaImpl) getPartitionByIDPrivate(collectionID UniqueID, partitionID UniqueID) (*Partition, error) {
-	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, p := range *collection.Partitions() {
-		if p.ID() == partitionID {
-			return p, nil
-		}
-	}
-
-	return nil, errors.New("cannot find partition, id = " + strconv.FormatInt(partitionID, 10))
-}
-
-func (colReplica *collectionReplicaImpl) hasPartition(collectionID UniqueID, partitionID UniqueID) bool {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-
-	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
-	if err != nil {
-		log.Println(err)
-		return false
-	}
-
-	for _, p := range *collection.Partitions() {
-		if p.ID() == partitionID {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (colReplica *collectionReplicaImpl) enablePartitionDM(collectionID UniqueID, partitionID UniqueID) error {
+func (colReplica *collectionReplicaImpl) enablePartitionDM(partitionID UniqueID) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
-	partition, err := colReplica.getPartitionByIDPrivate(collectionID, partitionID)
+	partition, err := colReplica.getPartitionByIDPrivate(partitionID)
 	if err != nil {
 		return err
 	}
@@ -348,11 +284,11 @@ func (colReplica *collectionReplicaImpl) enablePartitionDM(collectionID UniqueID
 	return nil
 }
 
-func (colReplica *collectionReplicaImpl) disablePartitionDM(collectionID UniqueID, partitionID UniqueID) error {
+func (colReplica *collectionReplicaImpl) disablePartitionDM(partitionID UniqueID) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
-	partition, err := colReplica.getPartitionByIDPrivate(collectionID, partitionID)
+	partition, err := colReplica.getPartitionByIDPrivate(partitionID)
 	if err != nil {
 		return err
 	}
@@ -361,11 +297,11 @@ func (colReplica *collectionReplicaImpl) disablePartitionDM(collectionID UniqueI
 	return nil
 }
 
-func (colReplica *collectionReplicaImpl) getEnablePartitionDM(collectionID UniqueID, partitionID UniqueID) (bool, error) {
+func (colReplica *collectionReplicaImpl) getEnablePartitionDM(partitionID UniqueID) (bool, error) {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
-	partition, err := colReplica.getPartitionByIDPrivate(collectionID, partitionID)
+	partition, err := colReplica.getPartitionByIDPrivate(partitionID)
 	if err != nil {
 		return false, err
 	}
@@ -373,10 +309,83 @@ func (colReplica *collectionReplicaImpl) getEnablePartitionDM(collectionID Uniqu
 }
 
 //----------------------------------------------------------------------------------------------------- segment
+func (colReplica *collectionReplicaImpl) addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, segType segmentType) error {
+	colReplica.mu.Lock()
+	defer colReplica.mu.Unlock()
+	return colReplica.addSegmentPrivate(segmentID, partitionID, collectionID, segType)
+}
+
+func (colReplica *collectionReplicaImpl) addSegmentPrivate(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, segType segmentType) error {
+	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
+	if err != nil {
+		return err
+	}
+
+	partition, err := colReplica.getPartitionByIDPrivate(partitionID)
+	if err != nil {
+		return err
+	}
+
+	partition.addSegmentID(segmentID)
+	var newSegment = newSegment(collection, segmentID, partitionID, collectionID, segType)
+	colReplica.segments[segmentID] = newSegment
+
+	return nil
+}
+
+func (colReplica *collectionReplicaImpl) removeSegment(segmentID UniqueID) error {
+	colReplica.mu.Lock()
+	defer colReplica.mu.Unlock()
+	return colReplica.removeSegmentPrivate(segmentID)
+}
+
+func (colReplica *collectionReplicaImpl) removeSegmentPrivate(segmentID UniqueID) error {
+	segment, err := colReplica.getSegmentByIDPrivate(segmentID)
+	if err != nil {
+		return err
+	}
+
+	partition, err := colReplica.getPartitionByIDPrivate(segment.partitionID)
+	if err != nil {
+		return err
+	}
+
+	partition.removeSegmentID(segmentID)
+	delete(colReplica.segments, segmentID)
+	deleteSegment(segment)
+
+	return nil
+}
+
+func (colReplica *collectionReplicaImpl) getSegmentByID(segmentID UniqueID) (*Segment, error) {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+	return colReplica.getSegmentByIDPrivate(segmentID)
+}
+
+func (colReplica *collectionReplicaImpl) getSegmentByIDPrivate(segmentID UniqueID) (*Segment, error) {
+	segment, ok := colReplica.segments[segmentID]
+	if !ok {
+		return nil, errors.New("cannot find segment, id = " + strconv.FormatInt(segmentID, 10))
+	}
+
+	return segment, nil
+}
+
+func (colReplica *collectionReplicaImpl) hasSegment(segmentID UniqueID) bool {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+	return colReplica.hasSegmentPrivate(segmentID)
+}
+
+func (colReplica *collectionReplicaImpl) hasSegmentPrivate(segmentID UniqueID) bool {
+	_, ok := colReplica.segments[segmentID]
+	return ok
+}
+
 func (colReplica *collectionReplicaImpl) getSegmentNum() int {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
-
 	return len(colReplica.segments)
 }
 
@@ -405,86 +414,6 @@ func (colReplica *collectionReplicaImpl) getSegmentStatistics() []*internalpb2.S
 	return statisticData
 }
 
-func (colReplica *collectionReplicaImpl) addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, segType segmentType) error {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-
-	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
-	if err != nil {
-		return err
-	}
-
-	partition, err2 := colReplica.getPartitionByIDPrivate(collectionID, partitionID)
-	if err2 != nil {
-		return err2
-	}
-
-	var newSegment = newSegment(collection, segmentID, partitionID, collectionID, segType)
-
-	colReplica.segments[segmentID] = newSegment
-	*partition.Segments() = append(*partition.Segments(), newSegment)
-
-	return nil
-}
-
-func (colReplica *collectionReplicaImpl) removeSegment(segmentID UniqueID) error {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-
-	return colReplica.removeSegmentPrivate(segmentID)
-}
-
-func (colReplica *collectionReplicaImpl) removeSegmentPrivate(segmentID UniqueID) error {
-	var targetPartition *Partition
-	var segmentIndex = -1
-
-	for _, col := range colReplica.collections {
-		for _, p := range *col.Partitions() {
-			for i, s := range *p.Segments() {
-				if s.ID() == segmentID {
-					targetPartition = p
-					segmentIndex = i
-					deleteSegment(colReplica.segments[s.ID()])
-				}
-			}
-		}
-	}
-
-	delete(colReplica.segments, segmentID)
-
-	if targetPartition != nil && segmentIndex > 0 {
-		targetPartition.segments = append(targetPartition.segments[:segmentIndex], targetPartition.segments[segmentIndex+1:]...)
-	}
-
-	return nil
-}
-
-func (colReplica *collectionReplicaImpl) getSegmentByID(segmentID UniqueID) (*Segment, error) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-
-	return colReplica.getSegmentByIDPrivate(segmentID)
-}
-
-func (colReplica *collectionReplicaImpl) getSegmentByIDPrivate(segmentID UniqueID) (*Segment, error) {
-	targetSegment, ok := colReplica.segments[segmentID]
-
-	if !ok {
-		return nil, errors.New("cannot found segment with id = " + strconv.FormatInt(segmentID, 10))
-	}
-
-	return targetSegment, nil
-}
-
-func (colReplica *collectionReplicaImpl) hasSegment(segmentID UniqueID) bool {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-
-	_, ok := colReplica.segments[segmentID]
-
-	return ok
-}
-
 func (colReplica *collectionReplicaImpl) getSealedSegments() ([]UniqueID, []UniqueID) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
@@ -504,37 +433,54 @@ func (colReplica *collectionReplicaImpl) getSealedSegments() ([]UniqueID, []Uniq
 func (colReplica *collectionReplicaImpl) replaceGrowingSegmentBySealedSegment(segment *Segment) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
-	targetSegment, ok := colReplica.segments[segment.ID()]
-	if ok {
+	if segment.segmentType != segTypeSealed && segment.segmentType != segTypeIndexing {
+		return errors.New("unexpected segment type")
+	}
+	targetSegment, err := colReplica.getSegmentByIDPrivate(segment.ID())
+	if err != nil && targetSegment != nil {
 		if targetSegment.segmentType != segTypeGrowing {
+			// target segment has been a sealed segment
 			return nil
 		}
 		deleteSegment(targetSegment)
-		targetSegment = segment
-	} else {
-		// add segment
-		targetPartition, err := colReplica.getPartitionByIDPrivate(segment.collectionID, segment.partitionID)
-		if err != nil {
-			return err
-		}
-		targetPartition.segments = append(targetPartition.segments, segment)
-		colReplica.segments[segment.ID()] = segment
 	}
+
+	targetSegment = segment
 	return nil
 }
 
 //-----------------------------------------------------------------------------------------------------
+func (colReplica *collectionReplicaImpl) getTSafe() tSafe {
+	return colReplica.tSafe
+}
+
 func (colReplica *collectionReplicaImpl) freeAll() {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
-	for _, seg := range colReplica.segments {
-		deleteSegment(seg)
-	}
-	for _, col := range colReplica.collections {
-		deleteCollection(col)
+	for id := range colReplica.collections {
+		_ = colReplica.removeCollectionPrivate(id)
 	}
 
+	colReplica.collections = make(map[UniqueID]*Collection)
+	colReplica.partitions = make(map[UniqueID]*Partition)
 	colReplica.segments = make(map[UniqueID]*Segment)
-	colReplica.collections = make([]*Collection, 0)
+}
+
+func newCollectionReplicaImpl() collectionReplica {
+	collections := make(map[int64]*Collection)
+	partitions := make(map[int64]*Partition)
+	segments := make(map[int64]*Segment)
+
+	tSafe := newTSafe()
+
+	var replica collectionReplica = &collectionReplicaImpl{
+		collections: collections,
+		partitions:  partitions,
+		segments:    segments,
+
+		tSafe: tSafe,
+	}
+
+	return replica
 }

@@ -13,23 +13,35 @@ package querynode
 import "C"
 
 type Partition struct {
-	id       UniqueID
-	segments []*Segment
-	enableDM bool
+	collectionID UniqueID
+	partitionID  UniqueID
+	segmentIDs   []UniqueID
+	enableDM     bool
 }
 
 func (p *Partition) ID() UniqueID {
-	return p.id
+	return p.partitionID
 }
 
-func (p *Partition) Segments() *[]*Segment {
-	return &(*p).segments
+func (p *Partition) addSegmentID(segmentID UniqueID) {
+	p.segmentIDs = append(p.segmentIDs, segmentID)
 }
 
-func newPartition(partitionID UniqueID) *Partition {
+func (p *Partition) removeSegmentID(segmentID UniqueID) {
+	tmpIDs := make([]UniqueID, 0)
+	for _, id := range p.segmentIDs {
+		if id == segmentID {
+			tmpIDs = append(tmpIDs, id)
+		}
+	}
+	p.segmentIDs = tmpIDs
+}
+
+func newPartition(collectionID UniqueID, partitionID UniqueID) *Partition {
 	var newPartition = &Partition{
-		id:       partitionID,
-		enableDM: false,
+		collectionID: collectionID,
+		partitionID:  partitionID,
+		enableDM:     false,
 	}
 
 	return newPartition

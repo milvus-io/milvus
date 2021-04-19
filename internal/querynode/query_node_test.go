@@ -18,7 +18,7 @@ import (
 )
 
 const ctxTimeInMillisecond = 5000
-const closeWithDeadline = true
+const debug = false
 
 const defaultPartitionID = UniqueID(2021)
 
@@ -121,7 +121,9 @@ func newQueryNodeMock() *QueryNode {
 
 	var ctx context.Context
 
-	if closeWithDeadline {
+	if debug {
+		ctx = context.Background()
+	} else {
 		var cancel context.CancelFunc
 		d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 		ctx, cancel = context.WithDeadline(context.Background(), d)
@@ -129,8 +131,6 @@ func newQueryNodeMock() *QueryNode {
 			<-ctx.Done()
 			cancel()
 		}()
-	} else {
-		ctx = context.Background()
 	}
 
 	svr := NewQueryNode(ctx, 0)

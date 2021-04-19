@@ -11,13 +11,15 @@ func TestCollectionReplica_getCollectionNum(t *testing.T) {
 	node := newQueryNodeMock()
 	initTestMeta(t, node, 0, 0)
 	assert.Equal(t, node.replica.getCollectionNum(), 1)
-	node.Stop()
+	err := node.Stop()
+	assert.NoError(t, err)
 }
 
 func TestCollectionReplica_addCollection(t *testing.T) {
 	node := newQueryNodeMock()
 	initTestMeta(t, node, 0, 0)
-	node.Stop()
+	err := node.Stop()
+	assert.NoError(t, err)
 }
 
 func TestCollectionReplica_removeCollection(t *testing.T) {
@@ -28,7 +30,8 @@ func TestCollectionReplica_removeCollection(t *testing.T) {
 	err := node.replica.removeCollection(0)
 	assert.NoError(t, err)
 	assert.Equal(t, node.replica.getCollectionNum(), 0)
-	node.Stop()
+	err = node.Stop()
+	assert.NoError(t, err)
 }
 
 func TestCollectionReplica_getCollectionByID(t *testing.T) {
@@ -39,7 +42,8 @@ func TestCollectionReplica_getCollectionByID(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, targetCollection)
 	assert.Equal(t, targetCollection.ID(), collectionID)
-	node.Stop()
+	err = node.Stop()
+	assert.NoError(t, err)
 }
 
 func TestCollectionReplica_hasCollection(t *testing.T) {
@@ -52,7 +56,8 @@ func TestCollectionReplica_hasCollection(t *testing.T) {
 	hasCollection = node.replica.hasCollection(UniqueID(1))
 	assert.Equal(t, hasCollection, false)
 
-	node.Stop()
+	err := node.Stop()
+	assert.NoError(t, err)
 }
 
 //----------------------------------------------------------------------------------------------------- partition
@@ -65,15 +70,15 @@ func TestCollectionReplica_getPartitionNum(t *testing.T) {
 	for _, id := range partitionIDs {
 		err := node.replica.addPartition(collectionID, id)
 		assert.NoError(t, err)
-		partition, err := node.replica.getPartitionByID(collectionID, id)
+		partition, err := node.replica.getPartitionByID(id)
 		assert.NoError(t, err)
 		assert.Equal(t, partition.ID(), id)
 	}
 
-	partitionNum, err := node.replica.getPartitionNum(collectionID)
+	partitionNum := node.replica.getPartitionNum()
+	assert.Equal(t, partitionNum, len(partitionIDs)+1)
+	err := node.Stop()
 	assert.NoError(t, err)
-	assert.Equal(t, partitionNum, len(partitionIDs)+1) // _default
-	node.Stop()
 }
 
 func TestCollectionReplica_addPartition(t *testing.T) {
@@ -85,11 +90,12 @@ func TestCollectionReplica_addPartition(t *testing.T) {
 	for _, id := range partitionIDs {
 		err := node.replica.addPartition(collectionID, id)
 		assert.NoError(t, err)
-		partition, err := node.replica.getPartitionByID(collectionID, id)
+		partition, err := node.replica.getPartitionByID(id)
 		assert.NoError(t, err)
 		assert.Equal(t, partition.ID(), id)
 	}
-	node.Stop()
+	err := node.Stop()
+	assert.NoError(t, err)
 }
 
 func TestCollectionReplica_removePartition(t *testing.T) {
@@ -102,60 +108,14 @@ func TestCollectionReplica_removePartition(t *testing.T) {
 	for _, id := range partitionIDs {
 		err := node.replica.addPartition(collectionID, id)
 		assert.NoError(t, err)
-		partition, err := node.replica.getPartitionByID(collectionID, id)
+		partition, err := node.replica.getPartitionByID(id)
 		assert.NoError(t, err)
 		assert.Equal(t, partition.ID(), id)
-		err = node.replica.removePartition(collectionID, id)
+		err = node.replica.removePartition(id)
 		assert.NoError(t, err)
 	}
-	node.Stop()
-}
-
-func TestCollectionReplica_addPartitionsByCollectionMeta(t *testing.T) {
-	node := newQueryNodeMock()
-	collectionID := UniqueID(0)
-	initTestMeta(t, node, collectionID, 0)
-
-	collectionMeta := genTestCollectionMeta(collectionID, false)
-	collectionMeta.PartitionIDs = []UniqueID{0, 1, 2}
-
-	err := node.replica.addPartitionsByCollectionMeta(collectionMeta)
+	err := node.Stop()
 	assert.NoError(t, err)
-	partitionNum, err := node.replica.getPartitionNum(UniqueID(0))
-	assert.NoError(t, err)
-	assert.Equal(t, partitionNum, len(collectionMeta.PartitionIDs)+1)
-	hasPartition := node.replica.hasPartition(UniqueID(0), UniqueID(0))
-	assert.Equal(t, hasPartition, true)
-	hasPartition = node.replica.hasPartition(UniqueID(0), UniqueID(1))
-	assert.Equal(t, hasPartition, true)
-	hasPartition = node.replica.hasPartition(UniqueID(0), UniqueID(2))
-	assert.Equal(t, hasPartition, true)
-
-	node.Stop()
-}
-
-func TestCollectionReplica_removePartitionsByCollectionMeta(t *testing.T) {
-	node := newQueryNodeMock()
-	collectionID := UniqueID(0)
-	initTestMeta(t, node, collectionID, 0)
-
-	collectionMeta := genTestCollectionMeta(collectionID, false)
-	collectionMeta.PartitionIDs = []UniqueID{0}
-
-	err := node.replica.addPartitionsByCollectionMeta(collectionMeta)
-	assert.NoError(t, err)
-	partitionNum, err := node.replica.getPartitionNum(UniqueID(0))
-	assert.NoError(t, err)
-	assert.Equal(t, partitionNum, len(collectionMeta.PartitionIDs)+1)
-
-	hasPartition := node.replica.hasPartition(UniqueID(0), UniqueID(0))
-	assert.Equal(t, hasPartition, true)
-	hasPartition = node.replica.hasPartition(UniqueID(0), UniqueID(1))
-	assert.Equal(t, hasPartition, false)
-	hasPartition = node.replica.hasPartition(UniqueID(0), UniqueID(2))
-	assert.Equal(t, hasPartition, false)
-
-	node.Stop()
 }
 
 func TestCollectionReplica_getPartitionByTag(t *testing.T) {
@@ -168,12 +128,13 @@ func TestCollectionReplica_getPartitionByTag(t *testing.T) {
 	for _, id := range collectionMeta.PartitionIDs {
 		err := node.replica.addPartition(collectionID, id)
 		assert.NoError(t, err)
-		partition, err := node.replica.getPartitionByID(collectionID, id)
+		partition, err := node.replica.getPartitionByID(id)
 		assert.NoError(t, err)
 		assert.Equal(t, partition.ID(), id)
 		assert.NotNil(t, partition)
 	}
-	node.Stop()
+	err := node.Stop()
+	assert.NoError(t, err)
 }
 
 func TestCollectionReplica_hasPartition(t *testing.T) {
@@ -184,11 +145,12 @@ func TestCollectionReplica_hasPartition(t *testing.T) {
 	collectionMeta := genTestCollectionMeta(collectionID, false)
 	err := node.replica.addPartition(collectionID, collectionMeta.PartitionIDs[0])
 	assert.NoError(t, err)
-	hasPartition := node.replica.hasPartition(collectionID, defaultPartitionID)
+	hasPartition := node.replica.hasPartition(defaultPartitionID)
 	assert.Equal(t, hasPartition, true)
-	hasPartition = node.replica.hasPartition(collectionID, defaultPartitionID+1)
+	hasPartition = node.replica.hasPartition(defaultPartitionID + 1)
 	assert.Equal(t, hasPartition, false)
-	node.Stop()
+	err = node.Stop()
+	assert.NoError(t, err)
 }
 
 //----------------------------------------------------------------------------------------------------- segment
@@ -206,7 +168,8 @@ func TestCollectionReplica_addSegment(t *testing.T) {
 		assert.Equal(t, targetSeg.segmentID, UniqueID(i))
 	}
 
-	node.Stop()
+	err := node.Stop()
+	assert.NoError(t, err)
 }
 
 func TestCollectionReplica_removeSegment(t *testing.T) {
@@ -226,7 +189,8 @@ func TestCollectionReplica_removeSegment(t *testing.T) {
 		assert.NoError(t, err)
 	}
 
-	node.Stop()
+	err := node.Stop()
+	assert.NoError(t, err)
 }
 
 func TestCollectionReplica_getSegmentByID(t *testing.T) {
@@ -244,7 +208,8 @@ func TestCollectionReplica_getSegmentByID(t *testing.T) {
 		assert.Equal(t, targetSeg.segmentID, UniqueID(i))
 	}
 
-	node.Stop()
+	err := node.Stop()
+	assert.NoError(t, err)
 }
 
 func TestCollectionReplica_hasSegment(t *testing.T) {
@@ -266,7 +231,8 @@ func TestCollectionReplica_hasSegment(t *testing.T) {
 		assert.Equal(t, hasSeg, false)
 	}
 
-	node.Stop()
+	err := node.Stop()
+	assert.NoError(t, err)
 }
 
 func TestCollectionReplica_freeAll(t *testing.T) {
@@ -274,6 +240,7 @@ func TestCollectionReplica_freeAll(t *testing.T) {
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionID, 0)
 
-	node.Stop()
+	err := node.Stop()
+	assert.NoError(t, err)
 
 }
