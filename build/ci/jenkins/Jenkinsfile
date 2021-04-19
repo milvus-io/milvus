@@ -18,6 +18,11 @@ pipeline {
         PACKAGE_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/${PROJECT_NAME}/package/${PACKAGE_NAME}"
         DOCKER_CREDENTIALS_ID = "ba070c98-c8cc-4f7c-b657-897715f359fc"
         DOKCER_REGISTRY_URL = "registry.zilliz.com"
+        SOURCE_REPO = "${DOKCER_REGISTRY_URL}/milvus-distributed"
+        TARGET_REPO = "${DOKCER_REGISTRY_URL}/milvus-distributed"
+        SOURCE_TAG = "${CHANGE_TARGET ? CHANGE_TARGET : SEMVER}-${LOWER_BUILD_TYPE}"
+        TARGET_TAG = "${SEMVER}-${LOWER_BUILD_TYPE}"
+        DOCKER_BUILDKIT = 1
     }
     stages {
         stage ('Build and UnitTest') {
@@ -51,16 +56,26 @@ pipeline {
                     yamlFile "build/ci/jenkins/pod/docker-pod.yaml"
                 }
             }
-            environment{
-                SOURCE_REPO = "${DOKCER_REGISTRY_URL}/milvus-distributed"
-                TARGET_REPO = "${DOKCER_REGISTRY_URL}/milvus-distributed"
-                SOURCE_TAG = "${CHANGE_TARGET ? CHANGE_TARGET : SEMVER}-${LOWER_BUILD_TYPE}"
-                TARGET_TAG = "${SEMVER}-${LOWER_BUILD_TYPE}"
-                DOCKER_BUILDKIT = 1
-            }
             steps {
                 container('publish-images') {
                     MPLModule('Publish')
+                }
+            }
+        }
+
+        stage ('Dev Test') {
+            agent {
+                label "performance"
+            }
+            environment {
+                DOCKER_COMPOSE_PROJECT_NAME = "${PROJECT_NAME}-${SEMVER}-${env.BUILD_NUMBER}".replaceAll("\\.", "-").replaceAll("_", "-")
+            }
+            steps {
+                MPLModule('Python Regression')
+            }
+            post {
+                cleanup {
+                    deleteDir() /* clean up our workspace */
                 }
             }
         }

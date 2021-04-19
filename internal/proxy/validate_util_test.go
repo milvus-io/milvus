@@ -9,7 +9,6 @@ import (
 )
 
 func TestValidateCollectionName(t *testing.T) {
-	Params.Init()
 	assert.Nil(t, ValidateCollectionName("abc"))
 	assert.Nil(t, ValidateCollectionName("_123abc"))
 	assert.Nil(t, ValidateCollectionName("abc123_$"))
@@ -34,8 +33,8 @@ func TestValidateCollectionName(t *testing.T) {
 }
 
 func TestValidatePartitionTag(t *testing.T) {
-	Params.Init()
 	assert.Nil(t, ValidatePartitionTag("abc", true))
+	assert.Nil(t, ValidatePartitionTag("123abc", true))
 	assert.Nil(t, ValidatePartitionTag("_123abc", true))
 	assert.Nil(t, ValidatePartitionTag("abc123_$", true))
 
@@ -44,7 +43,6 @@ func TestValidatePartitionTag(t *testing.T) {
 		longName[i] = 'a'
 	}
 	invalidNames := []string{
-		"123abc",
 		"$abc",
 		"_12 ac",
 		" ",
@@ -62,7 +60,6 @@ func TestValidatePartitionTag(t *testing.T) {
 }
 
 func TestValidateFieldName(t *testing.T) {
-	Params.Init()
 	assert.Nil(t, ValidateFieldName("abc"))
 	assert.Nil(t, ValidateFieldName("_123abc"))
 
@@ -86,7 +83,6 @@ func TestValidateFieldName(t *testing.T) {
 }
 
 func TestValidateDimension(t *testing.T) {
-	Params.Init()
 	assert.Nil(t, ValidateDimension(1, false))
 	assert.Nil(t, ValidateDimension(Params.MaxDimension(), false))
 	assert.Nil(t, ValidateDimension(8, true))

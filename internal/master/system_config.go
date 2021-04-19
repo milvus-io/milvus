@@ -10,11 +10,11 @@ import (
 
 	"github.com/spf13/viper"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 )
 
 type SysConfig struct {
-	kv *kv.EtcdKV
+	kv *etcdkv.EtcdKV
 }
 
 // Initialize Configs from config files, and store them in Etcd.

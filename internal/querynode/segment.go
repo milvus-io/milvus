@@ -208,7 +208,7 @@ func (s *Segment) segmentSearch(plan *Plan,
 	var cTimestamp = (*C.ulong)(&timestamp[0])
 	var cPlaceHolder = (*C.CPlaceholderGroup)(&cPlaceholderGroups[0])
 	var cNumGroups = C.int(len(placeHolderGroups))
-	cQueryResult := (*C.CQueryResult)(&searchResult.cQueryResult)
+	var cQueryResult = (*C.CQueryResult)(&searchResult.cQueryResult)
 
 	var status = C.Search(s.segmentPtr, plan.cPlan, cPlaceHolder, cTimestamp, cNumGroups, cQueryResult)
 	errorCode := status.error_code
@@ -220,4 +220,19 @@ func (s *Segment) segmentSearch(plan *Plan,
 	}
 
 	return &searchResult, nil
+}
+
+func (s *Segment) fillTargetEntry(plan *Plan,
+	result *SearchResult) error {
+
+	var status = C.FillTargetEntry(s.segmentPtr, plan.cPlan, result.cQueryResult)
+	errorCode := status.error_code
+
+	if errorCode != 0 {
+		errorMsg := C.GoString(status.error_msg)
+		defer C.free(unsafe.Pointer(status.error_msg))
+		return errors.New("FillTargetEntry failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	}
+
+	return nil
 }

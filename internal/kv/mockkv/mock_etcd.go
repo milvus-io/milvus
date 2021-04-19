@@ -1,14 +1,14 @@
 package mockkv
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/kv"
+	memkv "github.com/zilliztech/milvus-distributed/internal/kv/mem"
 )
 
 //  use MemoryKV to mock EtcdKV
-func NewEtcdKV() *kv.MemoryKV {
-	return kv.NewMemoryKV()
+func NewEtcdKV() *memkv.MemoryKV {
+	return memkv.NewMemoryKV()
 }
 
-func NewMemoryKV() *kv.MemoryKV {
-	return kv.NewMemoryKV()
+func NewMemoryKV() *memkv.MemoryKV {
+	return memkv.NewMemoryKV()
 }

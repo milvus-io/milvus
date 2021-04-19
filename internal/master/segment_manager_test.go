@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
@@ -29,7 +30,7 @@ var segMgr *SegmentManager
 var collName = "coll_segmgr_test"
 var collID = int64(1001)
 var partitionTag = "test"
-var kvBase *kv.EtcdKV
+var kvBase kv.TxnBase
 var master *Master
 var masterCancelFunc context.CancelFunc
 
@@ -48,7 +49,7 @@ func setup() {
 	if err != nil {
 		panic(err)
 	}
-	kvBase = kv.NewEtcdKV(cli, rootPath)
+	kvBase = etcdkv.NewEtcdKV(cli, rootPath)
 	tmpMt, err := NewMetaTable(kvBase)
 	if err != nil {
 		panic(err)

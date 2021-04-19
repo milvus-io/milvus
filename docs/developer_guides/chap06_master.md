@@ -184,7 +184,7 @@ Note that *tenantId*, *proxyId*, *collectionId*, *segmentId* are unique strings 
 
 ```go
 type metaTable struct {
-  kv kv.Base // client of a reliable kv service, i.e. etcd client
+  kv kv.TxnBase // client of a reliable kv service, i.e. etcd client
   tenantId2Meta map[UniqueId]TenantMeta // tenant id to tenant meta
   proxyId2Meta map[UniqueId]ProxyMeta // proxy id to proxy meta
   collId2Meta map[UniqueId]CollectionMeta // collection id to collection meta
@@ -216,7 +216,7 @@ func (meta *metaTable) GetSegmentById(segId UniqueId)(*SegmentMeta, error)
 func (meta *metaTable) DeleteSegment(segId UniqueId) error
 func (meta *metaTable) CloseSegment(segId UniqueId, closeTs Timestamp, num_rows int64) error
 
-func NewMetaTable(kv kv.Base) (*metaTable,error)
+func NewMetaTable(kv kv.TxnBase) (*metaTable,error)
 ```
 
 *metaTable* maintains meta both in memory and *etcdKV*. It keeps meta's consistency in both sides. All its member functions may be called concurrently.

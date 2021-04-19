@@ -4,7 +4,7 @@ import (
 	"path"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/kv"
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -25,10 +25,10 @@ func ParseTS(ts uint64) (time.Time, uint64) {
 	return physicalTime, logical
 }
 
-func NewTSOKVBase(etcdAddr []string, tsoRoot, subPath string) *kv.EtcdKV {
+func NewTSOKVBase(etcdAddr []string, tsoRoot, subPath string) *etcdkv.EtcdKV {
 	client, _ := clientv3.New(clientv3.Config{
 		Endpoints:   etcdAddr,
 		DialTimeout: 5 * time.Second,
 	})
-	return kv.NewEtcdKV(client, path.Join(tsoRoot, subPath))
+	return etcdkv.NewEtcdKV(client, path.Join(tsoRoot, subPath))
 }

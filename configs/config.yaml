@@ -42,6 +42,13 @@ etcd:
   rootpath: by-dev
   segthreshold: 10000
 
+minio:
+  address: localhost
+  port: 9000
+  accessKeyID: minioadmin
+  secretAccessKey: minioadmin
+  useSSL: false
+
 timesync:
   interval: 400
 

@@ -13,8 +13,6 @@ services:
       ETCD_ADDRESS: ${ETCD_ADDRESS}
     networks: 
       - milvus
-    ports:
-      - "53100:53100"
 
   proxy:
     image: ${TARGET_REPO}/proxy:${TARGET_TAG}
@@ -26,8 +24,6 @@ services:
     environment: 
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       MASTER_ADDRESS: ${MASTER_ADDRESS}
-    ports:
-      - "19530:19530"
     networks: 
       - milvus
 
