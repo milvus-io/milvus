@@ -90,7 +90,7 @@ void
 GetDistancesOfQueryResult(CIndexQueryResult res, float* distances);
 
 CStatus
-DeleteQueryResult(CIndexQueryResult res);
+DeleteIndexQueryResult(CIndexQueryResult res);
 
 #ifdef __cplusplus
 };

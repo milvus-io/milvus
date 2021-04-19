@@ -17,6 +17,7 @@ type IndexService interface {
   BuildIndex(BuildIndexRequest) (BuildIndexResponse, error)
   GetIndexStates(IndexStatesRequest) (IndexStatesResponse, error)
   GetIndexFilePaths(IndexFilePathRequest) (IndexFilePathsResponse, error)
+  DropIndex(DropIndexRequest) (Status, error)
   GetTimeTickChannel() (StringResponse, error)
   GetStatisticsChannel() (StringResponse, error)
   NotifyTaskState(TaskStateNotification) error
@@ -101,6 +102,14 @@ type IndexFilePathRequest struct {
 
 type IndexFilePathsResponse struct {
   FilePaths []string
+}
+```
+
+* *DropIndex*
+
+```go
+type DropIndexRequest struct {
+    IndexID UniqueID
 }
 ```
 

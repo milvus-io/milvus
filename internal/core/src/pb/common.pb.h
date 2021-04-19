@@ -149,12 +149,13 @@ enum IndexState : int {
   INPROGRESS = 2,
   FINISHED = 3,
   FAILED = 4,
+  DELETED = 5,
   IndexState_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   IndexState_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool IndexState_IsValid(int value);
 constexpr IndexState IndexState_MIN = NONE;
-constexpr IndexState IndexState_MAX = FAILED;
+constexpr IndexState IndexState_MAX = DELETED;
 constexpr int IndexState_ARRAYSIZE = IndexState_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* IndexState_descriptor();

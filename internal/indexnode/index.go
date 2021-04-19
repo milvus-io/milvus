@@ -70,7 +70,7 @@ func CreateQueryResult() (QueryResult, error) {
 
 func (qs *CQueryResult) Delete() error {
 	fn := func() C.CStatus {
-		return C.DeleteQueryResult(qs.ptr)
+		return C.DeleteIndexQueryResult(qs.ptr)
 	}
 	return TryCatch(fn)
 }

@@ -26,6 +26,7 @@ type Master interface {
   
   CreateIndex(req CreateIndexRequest) error
   DescribeIndex(DescribeIndexRequest) (DescribeIndexResponse, error)
+  DropIndex(DropIndexRequest) (Status, error)
   
   AllocTimestamp(req TsoRequest) (TsoResponse, error)
   AllocID(req IDRequest) (IDResponse, error)
@@ -215,6 +216,18 @@ type IndexDescription struct {
 
 type DescribeIndexResponse struct {
   IndexDescriptions []IndexDescription
+}
+```
+
+* *DropIndex*
+
+```go
+type DropIndexRequest struct {
+  MsgBase
+  DbName string
+  CollectionName string
+  FieldName string
+  IndexName string
 }
 ```
 
