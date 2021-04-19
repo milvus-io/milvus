@@ -115,8 +115,7 @@ class TestGetCollectionStats:
         stats = connect.get_collection_stats(collection)
         assert int(stats[row_count]) == default_nb
 
-    # @pytest.mark.tags("0331")
-    # TODO ci failed
+    @pytest.mark.tags("0331")
     def test_get_collection_stats_single(self, connect, collection):
         '''
         target: get row count with collection_stats

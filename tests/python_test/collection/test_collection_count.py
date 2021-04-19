@@ -1,12 +1,3 @@
-import pdb
-import copy
-import logging
-import itertools
-from time import sleep
-import threading
-from multiprocessing import Process
-import sklearn.preprocessing
-
 import pytest
 from utils import *
 from constants import *
@@ -38,14 +29,8 @@ class TestCollectionCount:
     @pytest.fixture(
         scope="function",
         params=gen_simple_index()
-        # params=[{'index_type': 'RHNSW_PQ', 'metric_type': 'L2', 'params': {'M': 48, 'PQM': 64, 'efConstruction': 500}},
-        #          {'index_type': 'IVF_PQ', 'metric_type': 'L2', 'params': {'m': 16, 'nbits': 8, 'nlist': 128}}]
     )
     def get_simple_index(self, request, connect):
-        # if str(connect._cmd("mode")[1]) == "CPU":
-        #     if request.param["index_type"] in index_cpu_not_support():
-        #         pytest.skip("sq8h not support in cpu mode")
-        # request.param.update({"metric_type": "L2"})
         return request.param
 
     @pytest.mark.tags("0331")
@@ -214,12 +199,10 @@ class TestCollectionCountIP:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        # if str(connect._cmd("mode")[1]) == "CPU":
-        #     if request.param["index_type"] in index_cpu_not_support():
-        #         pytest.skip("sq8h not support in cpu mode")
         request.param.update({"metric_type": "IP"})
         return request.param
 
+    @pytest.mark.tags("0331")
     def test_collection_count_after_index_created(self, connect, collection, get_simple_index, insert_count):
         '''
         target: test count_entities, after index have been created
@@ -229,7 +212,6 @@ class TestCollectionCountIP:
         entities = gen_entities(insert_count)
         connect.insert(collection, entities)
         connect.flush([collection])
-        # connect.load_collection(collection)
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == insert_count
