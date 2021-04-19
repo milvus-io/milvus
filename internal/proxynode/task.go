@@ -106,9 +106,17 @@ func (it *InsertTask) Execute() error {
 		return err
 	}
 	it.CollectionID = collID
-	partitionID, err := globalMetaCache.GetPartitionID(collectionName, it.PartitionName)
-	if err != nil {
-		return err
+	var partitionID UniqueID
+	if len(it.PartitionName) > 0 {
+		partitionID, err = globalMetaCache.GetPartitionID(collectionName, it.PartitionName)
+		if err != nil {
+			return err
+		}
+	} else {
+		partitionID, err = globalMetaCache.GetPartitionID(collectionName, Params.DefaultPartitionTag)
+		if err != nil {
+			return err
+		}
 	}
 	it.PartitionID = partitionID
 	var rowIDBegin UniqueID
@@ -463,6 +471,25 @@ func (st *SearchTask) PreExecute() error {
 	st.Query = &commonpb.Blob{
 		Value: queryBytes,
 	}
+
+	st.ResultChannelID = Params.SearchResultChannelNames[0]
+	st.DbID = 0 // todo
+	collectionID, err := globalMetaCache.GetCollectionID(collectionName)
+	if err != nil { // err is not nil if collection not exists
+		return err
+	}
+	st.CollectionID = collectionID
+	st.PartitionIDs = make([]UniqueID, 0)
+	for _, partitionName := range st.query.PartitionNames {
+		partitionID, err := globalMetaCache.GetPartitionID(collectionName, partitionName)
+		if err != nil {
+			return err
+		}
+		st.PartitionIDs = append(st.PartitionIDs, partitionID)
+	}
+	st.Dsl = st.query.Dsl
+	st.PlaceholderGroup = st.query.PlaceholderGroup
+
 	return nil
 }
 
