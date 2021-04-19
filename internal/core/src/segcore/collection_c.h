@@ -9,9 +9,21 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#pragma once
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+enum ErrorCode {
+    Success = 0,
+    UnexpectedException = 1,
+};
+
+typedef struct CStatus {
+    int error_code;
+    const char* error_msg;
+} CStatus;
 
 typedef void* CCollection;
 

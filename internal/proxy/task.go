@@ -7,6 +7,8 @@ import (
 	"math"
 	"strconv"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
 	"github.com/golang/protobuf/proto"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
@@ -99,13 +101,20 @@ func (it *InsertTask) Execute() error {
 		return err
 	}
 	autoID := description.Schema.AutoID
+	var rowIDBegin UniqueID
+	var rowIDEnd UniqueID
 	if autoID || true {
+		if it.HashValues == nil || len(it.HashValues) == 0 {
+			it.HashValues = make([]uint32, 0)
+		}
 		rowNums := len(it.BaseInsertTask.RowData)
-		rowIDBegin, rowIDEnd, _ := it.rowIDAllocator.Alloc(uint32(rowNums))
+		rowIDBegin, rowIDEnd, _ = it.rowIDAllocator.Alloc(uint32(rowNums))
 		it.BaseInsertTask.RowIDs = make([]UniqueID, rowNums)
 		for i := rowIDBegin; i < rowIDEnd; i++ {
 			offset := i - rowIDBegin
 			it.BaseInsertTask.RowIDs[offset] = i
+			hashValue, _ := typeutil.Hash32Int64(i)
+			it.HashValues = append(it.HashValues, hashValue)
 		}
 	}
 
@@ -121,6 +130,8 @@ func (it *InsertTask) Execute() error {
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		},
+		Begin: rowIDBegin,
+		End:   rowIDEnd,
 	}
 	if err != nil {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
@@ -287,7 +298,7 @@ func (dct *DropCollectionTask) Execute() error {
 }
 
 func (dct *DropCollectionTask) PostExecute() error {
-	return nil
+	return globalMetaCache.Remove(dct.CollectionName.CollectionName)
 }
 
 type QueryTask struct {
@@ -325,6 +336,18 @@ func (qt *QueryTask) SetTs(ts Timestamp) {
 }
 
 func (qt *QueryTask) PreExecute() error {
+	collectionName := qt.query.CollectionName
+	if !globalMetaCache.Hit(collectionName) {
+		err := globalMetaCache.Update(collectionName)
+		if err != nil {
+			return err
+		}
+	}
+	_, err := globalMetaCache.Get(collectionName)
+	if err != nil { // err is not nil if collection not exists
+		return err
+	}
+
 	if err := ValidateCollectionName(qt.query.CollectionName); err != nil {
 		return err
 	}
@@ -352,7 +375,7 @@ func (qt *QueryTask) Execute() error {
 	var tsMsg msgstream.TsMsg = &msgstream.SearchMsg{
 		SearchRequest: qt.SearchRequest,
 		BaseMsg: msgstream.BaseMsg{
-			HashValues:     []int32{int32(Params.ProxyID())},
+			HashValues:     []uint32{uint32(Params.ProxyID())},
 			BeginTimestamp: qt.Timestamp,
 			EndTimestamp:   qt.Timestamp,
 		},
@@ -378,25 +401,33 @@ func (qt *QueryTask) PostExecute() error {
 			log.Print("wait to finish failed, timeout!")
 			return errors.New("wait to finish failed, timeout")
 		case searchResults := <-qt.resultBuf:
-			rlen := len(searchResults) // query num
+			filterSearchResult := make([]*internalpb.SearchResult, 0)
+			for _, partialSearchResult := range searchResults {
+				if partialSearchResult.Status.ErrorCode == commonpb.ErrorCode_SUCCESS {
+					filterSearchResult = append(filterSearchResult, partialSearchResult)
+				}
+			}
+
+			rlen := len(filterSearchResult) // query num
 			if rlen <= 0 {
 				qt.result = &servicepb.QueryResult{}
 				return nil
 			}
 
-			n := len(searchResults[0].Hits) // n
+			n := len(filterSearchResult[0].Hits) // n
 			if n <= 0 {
 				qt.result = &servicepb.QueryResult{}
 				return nil
 			}
 
 			hits := make([][]*servicepb.Hits, rlen)
-			for i, searchResult := range searchResults {
+			for i, partialSearchResult := range filterSearchResult {
 				hits[i] = make([]*servicepb.Hits, n)
-				for j, bs := range searchResult.Hits {
+				for j, bs := range partialSearchResult.Hits {
 					hits[i][j] = &servicepb.Hits{}
 					err := proto.Unmarshal(bs, hits[i][j])
 					if err != nil {
+						log.Println("unmarshal error")
 						return err
 					}
 				}
@@ -428,6 +459,17 @@ func (qt *QueryTask) PostExecute() error {
 						}
 					}
 					choiceOffset := locs[choice]
+					// check if distance is valid, `invalid` here means very very big,
+					// in this process, distance here is the smallest, so the rest of distance are all invalid
+					if hits[choice][i].Scores[choiceOffset] >= float32(math.MaxFloat32) {
+						qt.result = &servicepb.QueryResult{
+							Status: &commonpb.Status{
+								ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+								Reason:    "topk in dsl greater than the row nums of collection",
+							},
+						}
+						return nil
+					}
 					reducedHits.IDs = append(reducedHits.IDs, hits[choice][i].IDs[choiceOffset])
 					if hits[choice][i].RowData != nil && len(hits[choice][i].RowData) > 0 {
 						reducedHits.RowData = append(reducedHits.RowData, hits[choice][i].RowData[choiceOffset])
@@ -437,6 +479,7 @@ func (qt *QueryTask) PostExecute() error {
 				}
 				reducedHitsBs, err := proto.Marshal(reducedHits)
 				if err != nil {
+					log.Println("marshal error")
 					return err
 				}
 				qt.result.Hits = append(qt.result.Hits, reducedHitsBs)

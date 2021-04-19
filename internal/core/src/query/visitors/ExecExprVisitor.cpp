@@ -79,7 +79,7 @@ ExecExprVisitor::ExecRangeVisitorImpl(RangeExprImpl<T>& expr, IndexFunc index_fu
     Assert(field_offset_opt);
     auto field_offset = field_offset_opt.value();
     auto& field_meta = schema[field_offset];
-    auto vec_ptr = records.get_scalar_entity<T>(field_offset);
+    auto vec_ptr = records.get_entity<T>(field_offset);
     auto& vec = *vec_ptr;
     auto& indexing_record = segment_.get_indexing_record();
     const segcore::ScalarIndexingEntry<T>& entry = indexing_record.get_scalar_entry<T>(field_offset);

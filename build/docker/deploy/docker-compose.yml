@@ -2,27 +2,29 @@ version: '3.5'
 
 services:
   master:
-    image: master
+    image: ${TARGET_REPO}/master:${TARGET_TAG}
     build:
       context: ../../../
       dockerfile: build/docker/deploy/master/DockerFile
+      cache_from:
+        - ${SOURCE_REPO}/master:${SOURCE_TAG}
     environment: 
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       ETCD_ADDRESS: ${ETCD_ADDRESS}
-      MASTER_ADDRESS: ${MASTER_ADDRESS}
     networks: 
       - milvus
     ports:
       - "53100:53100"
 
   proxy:
-    image: proxy
+    image: ${TARGET_REPO}/proxy:${TARGET_TAG}
     build:
       context: ../../../
       dockerfile: build/docker/deploy/proxy/DockerFile
+      cache_from:
+        - ${SOURCE_REPO}/proxy:${SOURCE_TAG}
     environment: 
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
-      ETCD_ADDRESS: ${ETCD_ADDRESS}
       MASTER_ADDRESS: ${MASTER_ADDRESS}
     ports:
       - "19530:19530"
@@ -30,10 +32,12 @@ services:
       - milvus
 
   querynode:
-    image: querynode
+    image: ${TARGET_REPO}/querynode:${TARGET_TAG}
     build:
       context: ../../../
       dockerfile: build/docker/deploy/querynode/DockerFile
+      cache_from:
+        - ${SOURCE_REPO}/querynode:${SOURCE_TAG}
     environment: 
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       ETCD_ADDRESS: ${ETCD_ADDRESS}

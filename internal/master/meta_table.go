@@ -110,7 +110,7 @@ func (mt *metaTable) saveCollectionMeta(coll *pb.CollectionMeta) error {
 	collBytes := proto.MarshalTextString(coll)
 	mt.collID2Meta[coll.ID] = *coll
 	mt.collName2ID[coll.Schema.Name] = coll.ID
-	return mt.client.Save("/collection/"+strconv.FormatInt(coll.ID, 10), string(collBytes))
+	return mt.client.Save("/collection/"+strconv.FormatInt(coll.ID, 10), collBytes)
 }
 
 // metaTable.ddLock.Lock() before call this function
@@ -119,7 +119,7 @@ func (mt *metaTable) saveSegmentMeta(seg *pb.SegmentMeta) error {
 
 	mt.segID2Meta[seg.SegmentID] = *seg
 
-	return mt.client.Save("/segment/"+strconv.FormatInt(seg.SegmentID, 10), string(segBytes))
+	return mt.client.Save("/segment/"+strconv.FormatInt(seg.SegmentID, 10), segBytes)
 }
 
 // metaTable.ddLock.Lock() before call this function
@@ -132,7 +132,7 @@ func (mt *metaTable) saveCollectionAndDeleteSegmentsMeta(coll *pb.CollectionMeta
 	kvs := make(map[string]string)
 	collStrs := proto.MarshalTextString(coll)
 
-	kvs["/collection/"+strconv.FormatInt(coll.ID, 10)] = string(collStrs)
+	kvs["/collection/"+strconv.FormatInt(coll.ID, 10)] = collStrs
 
 	for _, segID := range segIDs {
 		_, ok := mt.segID2Meta[segID]
@@ -152,14 +152,14 @@ func (mt *metaTable) saveCollectionsAndSegmentsMeta(coll *pb.CollectionMeta, seg
 	kvs := make(map[string]string)
 	collBytes := proto.MarshalTextString(coll)
 
-	kvs["/collection/"+strconv.FormatInt(coll.ID, 10)] = string(collBytes)
+	kvs["/collection/"+strconv.FormatInt(coll.ID, 10)] = collBytes
 
 	mt.collID2Meta[coll.ID] = *coll
 	mt.collName2ID[coll.Schema.Name] = coll.ID
 
 	segBytes := proto.MarshalTextString(seg)
 
-	kvs["/segment/"+strconv.FormatInt(seg.SegmentID, 10)] = string(segBytes)
+	kvs["/segment/"+strconv.FormatInt(seg.SegmentID, 10)] = segBytes
 
 	mt.segID2Meta[seg.SegmentID] = *seg
 

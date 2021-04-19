@@ -186,7 +186,7 @@ func TestSegmentManager_SegmentStats(t *testing.T) {
 	baseMsg := msgstream.BaseMsg{
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
-		HashValues:     []int32{1},
+		HashValues:     []uint32{1},
 	}
 	msg := msgstream.QueryNodeSegStatsMsg{
 		QueryNodeSegStats: stats,
@@ -358,7 +358,7 @@ func TestSegmentManager_RPC(t *testing.T) {
 					},
 				},
 				BaseMsg: msgstream.BaseMsg{
-					HashValues: []int32{0},
+					HashValues: []uint32{0},
 				},
 			},
 		},

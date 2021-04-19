@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: build-env
+  labels:
+    app: milvus-distributed
+    componet: build-env
+spec:
+  securityContext:
+    runAsUser: 2000
+    runAsGroup: 2000
+  containers:
+  - name: build-env
+    image: milvusdb/milvus-distributed-dev:amd64-ubuntu18.04-20201124-101232
+    env:
+    - name: OS_NAME
+      value: "ubuntu18.04"
+    - name: BUILD_ENV_IMAGE_ID
+      value: "f0f52760fde8758793f5a68c39ba20298c812e754de337ba4cc7fd8edf4ae7a9"
+    command:
+    - cat
+    tty: true
+    resources:
+      limits:
+        memory: "16Gi"
+        cpu: "8.0"
+      requests:
+        memory: "8Gi"
+        cpu: "4.0"
+  - name: etcd
+    image: quay.io/coreos/etcd:v3.4.13
+    env:
+    - name: ETCD_LISTEN_CLIENT_URLS
+      value: "http://0.0.0.0:2379"
+    - name: ETCD_ADVERTISE_CLIENT_URLS
+      value: "http://0.0.0.0:2379"
+    ports:
+    - containerPort: 2379
+      name: etcd
+    securityContext:
+       runAsUser: 0
+       runAsGroup: 0
+  - name: pulsar
+    image: apachepulsar/pulsar:2.6.1
+    ports:
+    - containerPort: 6650
+      name: pulsar
+    command: ["bin/pulsar", "standalone"]
+    securityContext:
+       runAsUser: 0
+       runAsGroup: 0
