@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 func TestReplica_Collection(t *testing.T) {
@@ -123,16 +124,17 @@ func TestReplica_Segment(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, UniqueID(0), update.SegmentID)
 		assert.Equal(t, int64(100), update.NumRows)
-		assert.True(t, update.IsNewSegment)
+		assert.NotNil(t, update.StartPosition)
+		assert.Nil(t, update.EndPosition)
 
+		err = replica.setIsFlushed(0)
+		assert.NoError(t, err)
+		err = replica.setEndPosition(0, &internalpb.MsgPosition{})
+		assert.NoError(t, err)
 		update, err = replica.getSegmentStatisticsUpdates(0)
 		assert.NoError(t, err)
-		assert.False(t, update.IsNewSegment)
-		assert.NotNil(t, update.StartPosition)
-		assert.Equal(t, UniqueID(0), update.SegmentID)
-		assert.Equal(t, int64(100), update.NumRows)
-		assert.Zero(t, update.StartPosition.Timestamp)
-		assert.Zero(t, update.StartPosition.MsgID)
+		assert.Nil(t, update.StartPosition)
+		assert.NotNil(t, update.EndPosition)
 	})
 
 	t.Run("Test errors", func(t *testing.T) {
@@ -142,9 +144,6 @@ func TestReplica_Segment(t *testing.T) {
 		seg, err := replica.getSegmentByID(0)
 		assert.Error(t, err)
 		assert.Nil(t, seg)
-
-		err = replica.removeSegment(0)
-		assert.Error(t, err)
 
 		err = replica.updateStatistics(0, 0)
 		assert.Error(t, err)

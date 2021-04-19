@@ -36,6 +36,7 @@ type (
 		gcRecord       *gcRecord
 		timeRange      TimeRange
 		startPositions []*internalpb.MsgPosition
+		endPositions   []*internalpb.MsgPosition
 	}
 
 	deleteMsg struct {

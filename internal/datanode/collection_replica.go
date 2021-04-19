@@ -3,6 +3,7 @@ package datanode
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"go.uber.org/zap"
 
@@ -24,18 +25,23 @@ type Replica interface {
 	addSegment(segmentID UniqueID, collID UniqueID, partitionID UniqueID, channelName string) error
 	removeSegment(segmentID UniqueID) error
 	hasSegment(segmentID UniqueID) bool
+	setIsFlushed(segmentID UniqueID) error
+	setStartPosition(segmentID UniqueID, startPos *internalpb.MsgPosition) error
+	setEndPosition(segmentID UniqueID, endPos *internalpb.MsgPosition) error
 	updateStatistics(segmentID UniqueID, numRows int64) error
 	getSegmentStatisticsUpdates(segmentID UniqueID) (*internalpb.SegmentStatisticsUpdates, error)
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 }
 
 type Segment struct {
-	segmentID     UniqueID
-	collectionID  UniqueID
-	partitionID   UniqueID
-	numRows       int64
-	memorySize    int64
-	isNew         bool
+	segmentID    UniqueID
+	collectionID UniqueID
+	partitionID  UniqueID
+	numRows      int64
+	memorySize   int64
+	isNew        atomic.Value // bool
+	isFlushed    bool
+
 	createTime    Timestamp // not using
 	endTime       Timestamp // not using
 	startPosition *internalpb.MsgPosition
@@ -44,12 +50,12 @@ type Segment struct {
 
 type CollectionSegmentReplica struct {
 	mu          sync.RWMutex
-	segments    []*Segment
+	segments    map[UniqueID]*Segment
 	collections map[UniqueID]*Collection
 }
 
 func newReplica() Replica {
-	segments := make([]*Segment, 0)
+	segments := make(map[UniqueID]*Segment)
 	collections := make(map[UniqueID]*Collection)
 
 	var replica Replica = &CollectionSegmentReplica{
@@ -64,12 +70,11 @@ func (replica *CollectionSegmentReplica) getSegmentByID(segmentID UniqueID) (*Se
 	replica.mu.RLock()
 	defer replica.mu.RUnlock()
 
-	for _, segment := range replica.segments {
-		if segment.segmentID == segmentID {
-			return segment, nil
-		}
+	if seg, ok := replica.segments[segmentID]; ok {
+		return seg, nil
 	}
 	return nil, fmt.Errorf("Cannot find segment, id = %v", segmentID)
+
 }
 
 func (replica *CollectionSegmentReplica) addSegment(
@@ -90,12 +95,15 @@ func (replica *CollectionSegmentReplica) addSegment(
 		segmentID:     segmentID,
 		collectionID:  collID,
 		partitionID:   partitionID,
-		isNew:         true,
+		isFlushed:     false,
 		createTime:    0,
 		startPosition: position,
 		endPosition:   new(internalpb.MsgPosition),
 	}
-	replica.segments = append(replica.segments, seg)
+
+	seg.isNew.Store(true)
+
+	replica.segments[segmentID] = seg
 	return nil
 }
 
@@ -103,65 +111,96 @@ func (replica *CollectionSegmentReplica) removeSegment(segmentID UniqueID) error
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
 
-	for index, ele := range replica.segments {
-		if ele.segmentID == segmentID {
-			log.Debug("Removing segment", zap.Int64("Segment ID", segmentID))
-			numOfSegs := len(replica.segments)
-			replica.segments[index] = replica.segments[numOfSegs-1]
-			replica.segments = replica.segments[:numOfSegs-1]
-			return nil
-		}
-	}
-	return fmt.Errorf("Error, there's no segment %v", segmentID)
+	delete(replica.segments, segmentID)
+
+	return nil
 }
 
 func (replica *CollectionSegmentReplica) hasSegment(segmentID UniqueID) bool {
 	replica.mu.RLock()
 	defer replica.mu.RUnlock()
 
-	for _, ele := range replica.segments {
-		if ele.segmentID == segmentID {
-			return true
-		}
+	_, ok := replica.segments[segmentID]
+	return ok
+}
+
+func (replica *CollectionSegmentReplica) setIsFlushed(segmentID UniqueID) error {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
+
+	if seg, ok := replica.segments[segmentID]; ok {
+		seg.isFlushed = true
+		return nil
 	}
-	return false
+
+	return fmt.Errorf("There's no segment %v", segmentID)
+}
+
+func (replica *CollectionSegmentReplica) setStartPosition(segmentID UniqueID, startPos *internalpb.MsgPosition) error {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
+
+	if startPos == nil {
+		return fmt.Errorf("Nil MsgPosition")
+	}
+
+	if seg, ok := replica.segments[segmentID]; ok {
+		seg.startPosition = startPos
+		return nil
+	}
+	return fmt.Errorf("There's no segment %v", segmentID)
+}
+
+func (replica *CollectionSegmentReplica) setEndPosition(segmentID UniqueID, endPos *internalpb.MsgPosition) error {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
+
+	if endPos == nil {
+		return fmt.Errorf("Nil MsgPosition")
+	}
+
+	if seg, ok := replica.segments[segmentID]; ok {
+		seg.endPosition = endPos
+		return nil
+	}
+	return fmt.Errorf("There's no segment %v", segmentID)
 }
 
 func (replica *CollectionSegmentReplica) updateStatistics(segmentID UniqueID, numRows int64) error {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
 
-	for _, ele := range replica.segments {
-		if ele.segmentID == segmentID {
-			log.Debug("updating segment", zap.Int64("Segment ID", segmentID), zap.Int64("numRows", numRows))
-			ele.memorySize = 0
-			ele.numRows += numRows
-			return nil
-		}
+	if seg, ok := replica.segments[segmentID]; ok {
+		log.Debug("updating segment", zap.Int64("Segment ID", segmentID), zap.Int64("numRows", numRows))
+		seg.memorySize = 0
+		seg.numRows += numRows
+		return nil
 	}
-	return fmt.Errorf("Error, there's no segment %v", segmentID)
+
+	return fmt.Errorf("There's no segment %v", segmentID)
 }
 
 func (replica *CollectionSegmentReplica) getSegmentStatisticsUpdates(segmentID UniqueID) (*internalpb.SegmentStatisticsUpdates, error) {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
 
-	for _, ele := range replica.segments {
-		if ele.segmentID == segmentID {
-			updates := &internalpb.SegmentStatisticsUpdates{
-				SegmentID:     segmentID,
-				MemorySize:    ele.memorySize,
-				NumRows:       ele.numRows,
-				IsNewSegment:  ele.isNew,
-				StartPosition: new(internalpb.MsgPosition),
-			}
-
-			if ele.isNew {
-				updates.StartPosition = ele.startPosition
-				ele.isNew = false
-			}
-			return updates, nil
+	if seg, ok := replica.segments[segmentID]; ok {
+		updates := &internalpb.SegmentStatisticsUpdates{
+			SegmentID:  segmentID,
+			MemorySize: seg.memorySize,
+			NumRows:    seg.numRows,
 		}
+
+		if seg.isNew.Load() == true {
+			updates.StartPosition = seg.startPosition
+			seg.isNew.Store(false)
+		}
+
+		if seg.isFlushed {
+			updates.EndPosition = seg.endPosition
+		}
+
+		return updates, nil
 	}
 	return nil, fmt.Errorf("Error, there's no segment %v", segmentID)
 }

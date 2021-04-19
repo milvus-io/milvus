@@ -145,12 +145,21 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 		collectionID: collID,
 	}
 
+	startPos := []*internalpb.MsgPosition{
+		{
+			ChannelName: "aaa",
+			MsgID:       "000",
+			Timestamp:   0,
+		},
+	}
+
 	tsMessages := make([]msgstream.TsMsg, 0)
 	tsMessages = append(tsMessages, msgstream.TsMsg(&createCollMsg))
 	tsMessages = append(tsMessages, msgstream.TsMsg(&dropCollMsg))
 	tsMessages = append(tsMessages, msgstream.TsMsg(&createPartitionMsg))
 	tsMessages = append(tsMessages, msgstream.TsMsg(&dropPartitionMsg))
-	msgStream := flowgraph.GenerateMsgStreamMsg(tsMessages, Timestamp(0), Timestamp(3), make([]*internalpb.MsgPosition, 0))
+	msgStream := flowgraph.GenerateMsgStreamMsg(tsMessages, Timestamp(0), Timestamp(3),
+		startPos, startPos)
 	var inMsg Msg = msgStream
 	ddNode.Operate(ctx, []Msg{inMsg})
 }

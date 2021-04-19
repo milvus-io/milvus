@@ -101,7 +101,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 	}
 
 	// Updating segment statistics
-	uniqueSeg := make(map[UniqueID]bool)
+	uniqueSeg := make(map[UniqueID]int64)
 	for _, msg := range iMsg.insertMessages {
 		currentSegID := msg.GetSegmentID()
 		collID := msg.GetCollectionID()
@@ -112,6 +112,13 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 			if err != nil {
 				log.Error("add segment wrong", zap.Error(err))
 			}
+
+			switch {
+			case iMsg.startPositions == nil || len(iMsg.startPositions) <= 0:
+				log.Error("insert Msg StartPosition empty")
+			default:
+				ibNode.replica.setStartPosition(currentSegID, iMsg.startPositions[0])
+			}
 		}
 
 		if !ibNode.flushMeta.hasSegmentFlush(currentSegID) {
@@ -121,30 +128,24 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 			}
 		}
 
-		err := ibNode.replica.updateStatistics(currentSegID, int64(len(msg.RowIDs)))
-		if err != nil {
-			log.Error("update Segment Row number wrong", zap.Error(err))
-		}
-
-		if _, ok := uniqueSeg[currentSegID]; !ok {
-			uniqueSeg[currentSegID] = true
-		}
+		segNum := uniqueSeg[currentSegID]
+		uniqueSeg[currentSegID] = segNum + int64(len(msg.RowIDs))
 	}
 
 	segIDs := make([]UniqueID, 0, len(uniqueSeg))
-	for id := range uniqueSeg {
+	for id, num := range uniqueSeg {
 		segIDs = append(segIDs, id)
+
+		err := ibNode.replica.updateStatistics(id, num)
+		if err != nil {
+			log.Error("update Segment Row number wrong", zap.Error(err))
+		}
 	}
 
 	if len(segIDs) > 0 {
-		switch {
-		case iMsg.startPositions == nil || len(iMsg.startPositions) <= 0:
-			log.Error("insert Msg StartPosition empty")
-		default:
-			err := ibNode.updateSegStatistics(segIDs, iMsg.startPositions[0])
-			if err != nil {
-				log.Error("update segment statistics error", zap.Error(err))
-			}
+		err := ibNode.updateSegStatistics(segIDs)
+		if err != nil {
+			log.Error("update segment statistics error", zap.Error(err))
 		}
 	}
 
@@ -413,6 +414,13 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 		// 1.3 store in buffer
 		ibNode.insertBuffer.insertData[currentSegID] = idata
 
+		switch {
+		case iMsg.endPositions == nil || len(iMsg.endPositions) <= 0:
+			log.Error("insert Msg EndPosition empty")
+		default:
+			ibNode.replica.setEndPosition(currentSegID, iMsg.endPositions[0])
+		}
+
 		// 1.4 if full
 		//   1.4.1 generate binlogs
 		if ibNode.insertBuffer.full(currentSegID) {
@@ -534,6 +542,9 @@ func (ibNode *insertBufferNode) flushSegment(segID UniqueID, partitionID UniqueI
 }
 
 func (ibNode *insertBufferNode) completeFlush(segID UniqueID) error {
+	ibNode.replica.setIsFlushed(segID)
+	ibNode.updateSegStatistics([]UniqueID{segID})
+
 	msgPack := msgstream.MsgPack{}
 	completeFlushMsg := internalpb.SegmentFlushCompletedMsg{
 		Base: &commonpb.MsgBase{
@@ -576,7 +587,7 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 	return ibNode.timeTickStream.Produce(context.TODO(), &msgPack)
 }
 
-func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID, currentPosition *internalpb.MsgPosition) error {
+func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID) error {
 	log.Debug("Updating segments statistics...")
 	statsUpdates := make([]*internalpb.SegmentStatisticsUpdates, 0, len(segIDs))
 	for _, segID := range segIDs {
@@ -585,8 +596,6 @@ func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID, currentPo
 			log.Error("get segment statistics updates wrong", zap.Int64("segmentID", segID), zap.Error(err))
 			continue
 		}
-		updates.StartPosition.Timestamp = currentPosition.GetTimestamp()
-		updates.StartPosition.MsgID = currentPosition.GetMsgID()
 		statsUpdates = append(statsUpdates, updates)
 	}
 

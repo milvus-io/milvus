@@ -20,10 +20,15 @@ func (handler *statsHandler) HandleSegmentStat(segStats *internalpb.SegmentStati
 		return err
 	}
 
-	if segStats.IsNewSegment {
+	if segStats.StartPosition != nil {
 		segMeta.OpenTime = segStats.CreateTime
 		segMeta.StartPosition = segStats.StartPosition
 	}
+
+	if segStats.EndPosition != nil {
+		segMeta.EndPosition = segStats.EndPosition
+	}
+
 	segMeta.SealedTime = segStats.EndTime
 	segMeta.NumRows = segStats.NumRows
 	segMeta.MemSize = segStats.MemorySize

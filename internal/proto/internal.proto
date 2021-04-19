@@ -170,7 +170,6 @@ message SegmentStatisticsUpdates {
   uint64 end_time = 5;
   internal.MsgPosition start_position = 6;
   internal.MsgPosition end_position = 7;
-  bool isNewSegment = 8;
 }
 
 message SegmentStatistics {

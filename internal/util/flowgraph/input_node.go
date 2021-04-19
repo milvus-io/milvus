@@ -50,6 +50,7 @@ func (inNode *InputNode) Operate(ctx context.Context, msgs []Msg) ([]Msg, contex
 		timestampMin:   msgPack.BeginTs,
 		timestampMax:   msgPack.EndTs,
 		startPositions: msgPack.StartPositions,
+		endPositions:   msgPack.EndPositions,
 	}
 
 	return []Msg{msgStreamMsg}, ctx

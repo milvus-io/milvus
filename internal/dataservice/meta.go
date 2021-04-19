@@ -398,12 +398,12 @@ func BuildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueI
 		State:         commonpb.SegmentState_Growing,
 		StartPosition: &internalpb.MsgPosition{
 			ChannelName: channelName,
-			MsgID:       "0",
+			MsgID:       "",
 			Timestamp:   0,
 		},
 		EndPosition: &internalpb.MsgPosition{
 			ChannelName: channelName,
-			MsgID:       "0",
+			MsgID:       "",
 			Timestamp:   0,
 		},
 	}, nil

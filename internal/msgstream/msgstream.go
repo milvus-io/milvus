@@ -17,7 +17,7 @@ type MsgPack struct {
 	EndTs          Timestamp
 	Msgs           []TsMsg
 	StartPositions []*MsgPosition
-	endPositions   []*MsgPosition
+	EndPositions   []*MsgPosition
 }
 
 type RepackFunc func(msgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error)
