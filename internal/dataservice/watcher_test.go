@@ -18,8 +18,7 @@ import (
 func TestDataNodeTTWatcher(t *testing.T) {
 	ctx := context.Background()
 	Params.Init()
-	c := make(chan struct{})
-	cluster := newDataNodeCluster(c)
+	cluster := newDataNodeCluster()
 	defer cluster.ShutDownClients()
 	schema := newTestSchema()
 	allocator := newMockAllocator()

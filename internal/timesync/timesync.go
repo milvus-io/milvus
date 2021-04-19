@@ -3,6 +3,7 @@ package timesync
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -25,6 +26,7 @@ type (
 		GetTimeTick() (Timestamp, error)
 		Start()
 		Close()
+		AddPeer(peerID UniqueID) error
 	}
 
 	softTimeTickBarrier struct {
@@ -37,13 +39,13 @@ type (
 	}
 
 	hardTimeTickBarrier struct {
-		peer2Tt    map[UniqueID]Timestamp
-		outTt      chan Timestamp
-		ttStream   ms.MsgStream
-		ctx        context.Context
-		wg         sync.WaitGroup
-		loopCtx    context.Context
-		loopCancel context.CancelFunc
+		peer2Tt   map[UniqueID]Timestamp
+		peer2TtMu sync.Mutex
+		outTt     chan Timestamp
+		ttStream  ms.MsgStream
+		ctx       context.Context
+		cancel    context.CancelFunc
+		wg        sync.WaitGroup
 	}
 )
 
@@ -149,7 +151,6 @@ func (ttBarrier *hardTimeTickBarrier) GetTimeTick() (Timestamp, error) {
 func (ttBarrier *hardTimeTickBarrier) Start() {
 	// Last timestamp synchronized
 	ttBarrier.wg.Add(1)
-	ttBarrier.loopCtx, ttBarrier.loopCancel = context.WithCancel(ttBarrier.ctx)
 	state := Timestamp(0)
 	go func(ctx context.Context) {
 		defer logutil.LogPanic()
@@ -162,8 +163,10 @@ func (ttBarrier *hardTimeTickBarrier) Start() {
 			default:
 			}
 			ttmsgs := ttBarrier.ttStream.Consume()
-			if len(ttmsgs.Msgs) > 0 {
+
+			if ttmsgs != nil && len(ttmsgs.Msgs) > 0 {
 				log.Debug("receive tt msg")
+				ttBarrier.peer2TtMu.Lock()
 				for _, timetickmsg := range ttmsgs.Msgs {
 					// Suppose ttmsg.Timestamp from stream is always larger than the previous one,
 					// that `ttmsg.Timestamp > oldT`
@@ -181,20 +184,20 @@ func (ttBarrier *hardTimeTickBarrier) Start() {
 					}
 
 					ttBarrier.peer2Tt[ttmsg.Base.SourceID] = ttmsg.Base.Timestamp
-
 					newState := ttBarrier.minTimestamp()
 					if newState > state {
 						ttBarrier.outTt <- newState
 						state = newState
 					}
 				}
+				ttBarrier.peer2TtMu.Unlock()
 			}
 		}
-	}(ttBarrier.loopCtx)
+	}(ttBarrier.ctx)
 }
 
 func (ttBarrier *hardTimeTickBarrier) Close() {
-	ttBarrier.loopCancel()
+	ttBarrier.cancel()
 	ttBarrier.wg.Wait()
 }
 
@@ -208,24 +211,29 @@ func (ttBarrier *hardTimeTickBarrier) minTimestamp() Timestamp {
 	return tempMin
 }
 
+func (ttBarrier *hardTimeTickBarrier) AddPeer(peerID UniqueID) error {
+	ttBarrier.peer2TtMu.Lock()
+	defer ttBarrier.peer2TtMu.Unlock()
+	if _, ok := ttBarrier.peer2Tt[peerID]; ok {
+		return fmt.Errorf("peer %d already exist", peerID)
+	}
+	ttBarrier.peer2Tt[peerID] = Timestamp(0)
+	return nil
+}
+
 func NewHardTimeTickBarrier(ctx context.Context, ttStream ms.MsgStream, peerIds []UniqueID) *hardTimeTickBarrier {
-	if len(peerIds) <= 0 {
-		log.Error("[newSoftTimeTickBarrier] peerIds is empty!")
-		return nil
-	}
+	ttbarrier := hardTimeTickBarrier{}
+	ttbarrier.ttStream = ttStream
+	ttbarrier.outTt = make(chan Timestamp, 1024)
 
-	sttbarrier := hardTimeTickBarrier{}
-	sttbarrier.ttStream = ttStream
-	sttbarrier.outTt = make(chan Timestamp, 1024)
-
-	sttbarrier.peer2Tt = make(map[UniqueID]Timestamp)
-	sttbarrier.ctx = ctx
+	ttbarrier.peer2Tt = make(map[UniqueID]Timestamp)
+	ttbarrier.ctx, ttbarrier.cancel = context.WithCancel(ctx)
 	for _, id := range peerIds {
-		sttbarrier.peer2Tt[id] = Timestamp(0)
+		ttbarrier.peer2Tt[id] = Timestamp(0)
 	}
-	if len(peerIds) != len(sttbarrier.peer2Tt) {
-		log.Warn("[newSoftTimeTickBarrier] there are duplicate peerIds!", zap.Int64s("peerIDs", peerIds))
+	if len(peerIds) != len(ttbarrier.peer2Tt) {
+		log.Warn("[newHardTimeTickBarrier] there are duplicate peerIds!", zap.Int64s("peerIDs", peerIds))
 	}
 
-	return &sttbarrier
+	return &ttbarrier
 }

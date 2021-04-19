@@ -11,8 +11,7 @@ import (
 func TestDataNodeClusterRegister(t *testing.T) {
 	Params.Init()
 	Params.DataNodeNum = 3
-	ch := make(chan struct{})
-	cluster := newDataNodeCluster(ch)
+	cluster := newDataNodeCluster()
 	ids := make([]int64, 0, Params.DataNodeNum)
 	for i := 0; i < Params.DataNodeNum; i++ {
 		c := newMockDataNodeClient(int64(i))
@@ -31,8 +30,6 @@ func TestDataNodeClusterRegister(t *testing.T) {
 		})
 		ids = append(ids, int64(i))
 	}
-	_, ok := <-ch
-	assert.False(t, ok)
 	assert.EqualValues(t, Params.DataNodeNum, cluster.GetNumOfNodes())
 	assert.EqualValues(t, ids, cluster.GetNodeIDs())
 	states, err := cluster.GetDataNodeStates(context.TODO())
@@ -64,7 +61,7 @@ func TestWatchChannels(t *testing.T) {
 		{1, []string{"c1", "c2", "c3", "c4", "c5", "c6", "c7"}, []int{3, 2, 2}},
 	}
 
-	cluster := newDataNodeCluster(make(chan struct{}))
+	cluster := newDataNodeCluster()
 	for _, c := range cases {
 		for i := 0; i < Params.DataNodeNum; i++ {
 			c := newMockDataNodeClient(int64(i))

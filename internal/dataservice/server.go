@@ -39,40 +39,44 @@ type (
 	Timestamp = typeutil.Timestamp
 )
 type Server struct {
-	ctx               context.Context
-	serverLoopCtx     context.Context
-	serverLoopCancel  context.CancelFunc
-	serverLoopWg      sync.WaitGroup
-	state             atomic.Value
-	client            *etcdkv.EtcdKV
-	meta              *meta
-	segAllocator      segmentAllocatorInterface
-	statsHandler      *statsHandler
-	ddHandler         *ddHandler
-	allocator         allocatorInterface
-	cluster           *dataNodeCluster
-	msgProducer       *timesync.MsgProducer
-	registerFinishCh  chan struct{}
-	masterClient      types.MasterService
-	ttMsgStream       msgstream.MsgStream
-	k2sMsgStream      msgstream.MsgStream
-	ddChannelName     string
-	segmentInfoStream msgstream.MsgStream
-	insertChannels    []string
-	msFactory         msgstream.Factory
-	ttBarrier         timesync.TimeTickBarrier
+	ctx              context.Context
+	serverLoopCtx    context.Context
+	serverLoopCancel context.CancelFunc
+	serverLoopWg     sync.WaitGroup
+	state            atomic.Value
+	client           *etcdkv.EtcdKV
+	meta             *meta
+	segAllocator     segmentAllocatorInterface
+	statsHandler     *statsHandler
+	ddHandler        *ddHandler
+	allocator        allocatorInterface
+	cluster          *dataNodeCluster
+	msgProducer      *timesync.MsgProducer
+	masterClient     types.MasterService
+	ttMsgStream      msgstream.MsgStream
+	k2sMsgStream     msgstream.MsgStream
+	ddChannelMu      struct {
+		sync.Mutex
+		name string
+	}
+	segmentInfoStream    msgstream.MsgStream
+	insertChannels       []string
+	msFactory            msgstream.Factory
+	ttBarrier            timesync.TimeTickBarrier
+	createDataNodeClient func(addr string) types.DataNode
 }
 
 func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	rand.Seed(time.Now().UnixNano())
-	ch := make(chan struct{})
 	s := &Server{
-		ctx:              ctx,
-		registerFinishCh: ch,
-		cluster:          newDataNodeCluster(ch),
-		msFactory:        factory,
+		ctx:       ctx,
+		cluster:   newDataNodeCluster(),
+		msFactory: factory,
 	}
 	s.insertChannels = s.getInsertChannels()
+	s.createDataNodeClient = func(addr string) types.DataNode {
+		return grpcdatanodeclient.NewClient(addr)
+	}
 	s.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return s, nil
 }
@@ -105,10 +109,12 @@ func (s *Server) Start() error {
 		return err
 	}
 
-	s.allocator = newAllocator(s.masterClient)
 	if err = s.initMeta(); err != nil {
 		return err
 	}
+
+	s.allocator = newAllocator(s.masterClient)
+
 	s.statsHandler = newStatsHandler(s.meta)
 	s.ddHandler = newDDHandler(s.meta, s.segAllocator, s.masterClient)
 	s.initSegmentInfoChannel()
@@ -116,8 +122,6 @@ func (s *Server) Start() error {
 	if err = s.loadMetaFromMaster(); err != nil {
 		return err
 	}
-	s.waitDataNodeRegister()
-	s.cluster.WatchInsertChannels(s.insertChannels)
 	if err = s.initMsgProducer(); err != nil {
 		return err
 	}
@@ -149,11 +153,7 @@ func (s *Server) initMeta() error {
 		}
 		return nil
 	}
-	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
-	if err != nil {
-		return err
-	}
-	return nil
+	return retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
 }
 
 func (s *Server) initSegmentInfoChannel() {
@@ -163,6 +163,7 @@ func (s *Server) initSegmentInfoChannel() {
 	s.segmentInfoStream = segmentInfoStream
 	s.segmentInfoStream.Start()
 }
+
 func (s *Server) initMsgProducer() error {
 	var err error
 	if s.ttMsgStream, err = s.msFactory.NewMsgStream(s.ctx); err != nil {
@@ -195,12 +196,8 @@ func (s *Server) loadMetaFromMaster() error {
 	if err = s.checkMasterIsHealthy(); err != nil {
 		return err
 	}
-	if s.ddChannelName == "" {
-		channel, err := s.masterClient.GetDdChannel(ctx)
-		if err != nil {
-			return err
-		}
-		s.ddChannelName = channel.Value
+	if err = s.getDDChannel(); err != nil {
+		return err
 	}
 	collections, err := s.masterClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
 		Base: &commonpb.MsgBase{
@@ -255,6 +252,19 @@ func (s *Server) loadMetaFromMaster() error {
 		}
 	}
 	log.Debug("load collection meta from master complete")
+	return nil
+}
+
+func (s *Server) getDDChannel() error {
+	s.ddChannelMu.Lock()
+	defer s.ddChannelMu.Unlock()
+	if len(s.ddChannelMu.name) == 0 {
+		resp, err := s.masterClient.GetDdChannel(s.ctx)
+		if err = VerifyResponse(resp, err); err != nil {
+			return err
+		}
+		s.ddChannelMu.name = resp.Value
+	}
 	return nil
 }
 
@@ -364,9 +374,13 @@ func (s *Server) startProxyServiceTimeTickLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			log.Debug("Proxy service timetick loop shut down")
+			return
 		default:
 		}
 		msgPack := flushStream.Consume()
+		if msgPack == nil {
+			continue
+		}
 		for _, msg := range msgPack.Msgs {
 			if msg.Type() != commonpb.MsgType_TimeTick {
 				log.Warn("receive unknown msg from proxy service timetick", zap.Stringer("msgType", msg.Type()))
@@ -384,8 +398,8 @@ func (s *Server) startProxyServiceTimeTickLoop(ctx context.Context) {
 func (s *Server) startDDChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
 	ddStream, _ := s.msFactory.NewMsgStream(ctx)
-	ddStream.AsConsumer([]string{s.ddChannelName}, Params.DataServiceSubscriptionName)
-	log.Debug("dataservice AsConsumer: " + s.ddChannelName + " : " + Params.DataServiceSubscriptionName)
+	ddStream.AsConsumer([]string{s.ddChannelMu.name}, Params.DataServiceSubscriptionName)
+	log.Debug("dataservice AsConsumer: " + s.ddChannelMu.name + " : " + Params.DataServiceSubscriptionName)
 	ddStream.Start()
 	defer ddStream.Close()
 	for {
@@ -405,17 +419,11 @@ func (s *Server) startDDChannel(ctx context.Context) {
 	}
 }
 
-func (s *Server) waitDataNodeRegister() {
-	log.Debug("waiting data node to register")
-	<-s.registerFinishCh
-	log.Debug("all data nodes register")
-}
-
 func (s *Server) Stop() error {
 	s.cluster.ShutDownClients()
-	s.ttBarrier.Close()
 	s.ttMsgStream.Close()
 	s.k2sMsgStream.Close()
+	s.ttBarrier.Close()
 	s.msgProducer.Close()
 	s.segmentInfoStream.Close()
 	s.stopServerLoop()
@@ -475,24 +483,47 @@ func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeReque
 	log.Debug("DataService: RegisterNode:", zap.String("IP", req.Address.Ip), zap.Int64("Port", req.Address.Port))
 	node, err := s.newDataNode(req.Address.Ip, req.Address.Port, req.Base.SourceID)
 	if err != nil {
-		return nil, err
+		ret.Status.Reason = err.Error()
+		return ret, nil
 	}
 
-	s.cluster.Register(node)
+	resp, err := node.client.WatchDmChannels(s.ctx, &datapb.WatchDmChannelsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   0,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  Params.NodeID,
+		},
+		ChannelNames: s.insertChannels,
+	})
 
-	if s.ddChannelName == "" {
-		resp, err := s.masterClient.GetDdChannel(ctx)
-		if err = VerifyResponse(resp, err); err != nil {
+	if err = VerifyResponse(resp, err); err != nil {
+		ret.Status.Reason = err.Error()
+		return ret, nil
+	}
+
+	if err := s.getDDChannel(); err != nil {
+		ret.Status.Reason = err.Error()
+		return ret, nil
+	}
+
+	if s.ttBarrier != nil {
+		if err = s.ttBarrier.AddPeer(node.id); err != nil {
 			ret.Status.Reason = err.Error()
-			return ret, err
+			return ret, nil
 		}
-		s.ddChannelName = resp.Value
 	}
+
+	if err = s.cluster.Register(node); err != nil {
+		ret.Status.Reason = err.Error()
+		return ret, nil
+	}
+
 	ret.Status.ErrorCode = commonpb.ErrorCode_Success
 	ret.InitParams = &internalpb.InitParams{
 		NodeID: Params.NodeID,
 		StartParams: []*commonpb.KeyValuePair{
-			{Key: "DDChannelName", Value: s.ddChannelName},
+			{Key: "DDChannelName", Value: s.ddChannelMu.name},
 			{Key: "SegmentStatisticsChannelName", Value: Params.StatisticsChannelName},
 			{Key: "TimeTickChannelName", Value: Params.TimeTickChannelName},
 			{Key: "CompleteFlushChannelName", Value: Params.SegmentInfoChannelName},
@@ -502,7 +533,7 @@ func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeReque
 }
 
 func (s *Server) newDataNode(ip string, port int64, id UniqueID) (*dataNode, error) {
-	client := grpcdatanodeclient.NewClient(fmt.Sprintf("%s:%d", ip, port))
+	client := s.createDataNodeClient(fmt.Sprintf("%s:%d", ip, port))
 	if err := client.Init(); err != nil {
 		return nil, err
 	}
