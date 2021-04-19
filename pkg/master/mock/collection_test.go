@@ -9,7 +9,7 @@ import (
 var C = Collection{
 	ID:            uint64(11111),
 	Name:          "test-collection",
-	CreateTime:    time.Now(),
+	CreateTime:    uint64(time.Now().Unix()),
 	SegmentIDs:    []uint64{uint64(10111)},
 	PartitionTags: []string{"default"},
 }

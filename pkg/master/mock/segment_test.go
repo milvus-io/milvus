@@ -34,15 +34,15 @@ var Ts = Segment{
 	Collection: Collection{
 		ID:            uint64(11111),
 		Name:          "test-collection",
-		CreateTime:    time.Now(),
+		CreateTime:    uint64(time.Now().Unix()),
 		SegmentIDs:    []uint64{uint64(10111)},
 		PartitionTags: []string{"default"},
 	},
 	PartitionTag:   "default",
 	ChannelStart:   1,
 	ChannelEnd:     100,
-	OpenTimeStamp:  time.Now(),
-	CloseTimeStamp: time.Now().Add(1 * time.Hour),
+	OpenTimeStamp:  uint64(time.Now().Unix()),
+	CloseTimeStamp: uint64(time.Now().Add(1 * time.Hour).Unix()),
 }
 
 func TestSegment2JSON(t *testing.T) {
