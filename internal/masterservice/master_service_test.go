@@ -1,126 +1,214 @@
 package masterservice
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
-	"regexp"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
-	cms "github.com/zilliztech/milvus-distributed/internal/masterservice"
+	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	msutil "github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
-func TestGrpcService(t *testing.T) {
-	rand.Seed(time.Now().UnixNano())
+type proxyMock struct {
+	randVal   int
+	collArray []string
+	mutex     sync.Mutex
+}
+
+func (p *proxyMock) GetTimeTickChannel() (string, error) {
+	return fmt.Sprintf("proxy-time-tick-%d", p.randVal), nil
+}
+func (p *proxyMock) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	p.collArray = append(p.collArray, request.CollectionName)
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		Reason:    "",
+	}, nil
+}
+func (p *proxyMock) GetCollArray() []string {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	ret := make([]string, 0, len(p.collArray))
+	ret = append(ret, p.collArray...)
+	return ret
+}
+
+type dataMock struct {
+	randVal int
+}
+
+func (d *dataMock) GetInsertBinlogPaths(req *datapb.InsertBinlogPathRequest) (*datapb.InsertBinlogPathsResponse, error) {
+	rst := &datapb.InsertBinlogPathsResponse{
+		FieldIDs: []int64{},
+		Paths:    []*internalpb2.StringList{},
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+	}
+	for i := 0; i < 200; i++ {
+		rst.FieldIDs = append(rst.FieldIDs, int64(i))
+		path := &internalpb2.StringList{
+			Values: []string{fmt.Sprintf("file0-%d", i), fmt.Sprintf("file1-%d", i), fmt.Sprintf("file2-%d", i)},
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_SUCCESS,
+				Reason:    "",
+			},
+		}
+		rst.Paths = append(rst.Paths, path)
+	}
+	return rst, nil
+}
+
+func (d *dataMock) GetSegmentInfoChannel() (string, error) {
+	return fmt.Sprintf("segment-info-channel-%d", d.randVal), nil
+}
+
+type indexMock struct {
+	fileArray []string
+	idxArray  []int64
+	mutex     sync.Mutex
+}
+
+func (idx *indexMock) BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
+	idx.mutex.Lock()
+	defer idx.mutex.Unlock()
+	idx.fileArray = append(idx.fileArray, req.DataPaths...)
+	idx.idxArray = append(idx.idxArray, rand.Int63())
+	return &indexpb.BuildIndexResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+		IndexID: idx.idxArray[len(idx.idxArray)-1],
+	}, nil
+}
+
+func (idx *indexMock) getFileArray() []string {
+	idx.mutex.Lock()
+	defer idx.mutex.Unlock()
+
+	ret := make([]string, 0, len(idx.fileArray))
+	ret = append(ret, idx.fileArray...)
+	return ret
+}
+
+func TestMasterService(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	core, err := NewCore(ctx)
+	assert.Nil(t, err)
 	randVal := rand.Int()
 
-	//cms.Params.Address = "127.0.0.1"
-	cms.Params.Port = (randVal % 100) + 10000
+	Params.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
+	Params.DdChannel = fmt.Sprintf("master-dd-%d", randVal)
+	Params.StatisticsChannel = fmt.Sprintf("master-statistics-%d", randVal)
+	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
+	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
+	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
 
-	svr, err := NewGrpcServer()
+	pm := &proxyMock{
+		randVal:   randVal,
+		collArray: make([]string, 0, 16),
+		mutex:     sync.Mutex{},
+	}
+	err = core.SetProxyService(pm)
 	assert.Nil(t, err)
 
-	// cms.Params.NodeID = 0
-	//cms.Params.PulsarAddress = "pulsar://127.0.0.1:6650"
-	//cms.Params.EtcdAddress = "127.0.0.1:2379"
-	cms.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
-	cms.Params.KvRootPath = fmt.Sprintf("/%d/test/kv", randVal)
-	cms.Params.ProxyTimeTickChannel = fmt.Sprintf("proxyTimeTick%d", randVal)
-	cms.Params.MsgChannelSubName = fmt.Sprintf("msgChannel%d", randVal)
-	cms.Params.TimeTickChannel = fmt.Sprintf("timeTick%d", randVal)
-	cms.Params.DdChannel = fmt.Sprintf("ddChannel%d", randVal)
-	cms.Params.StatisticsChannel = fmt.Sprintf("stateChannel%d", randVal)
-	cms.Params.DataServiceSegmentChannel = fmt.Sprintf("segmentChannel%d", randVal)
-
-	cms.Params.MaxPartitionNum = 64
-	cms.Params.DefaultPartitionName = "_default"
-	cms.Params.DefaultIndexName = "_default"
-
-	t.Logf("master service port = %d", cms.Params.Port)
-
-	core := svr.core.(*cms.Core)
-
-	err = svr.Init()
+	dm := &dataMock{randVal: randVal}
+	err = core.SetDataService(dm)
 	assert.Nil(t, err)
 
-	core.ProxyTimeTickChan = make(chan typeutil.Timestamp, 8)
-	core.DataNodeSegmentFlushCompletedChan = make(chan typeutil.UniqueID, 8)
-
-	timeTickArray := make([]typeutil.Timestamp, 0, 16)
-	core.SendTimeTick = func(ts typeutil.Timestamp) error {
-		t.Logf("send time tick %d", ts)
-		timeTickArray = append(timeTickArray, ts)
-		return nil
+	im := &indexMock{
+		fileArray: []string{},
+		idxArray:  []int64{},
+		mutex:     sync.Mutex{},
 	}
-	createCollectionArray := make([]*internalpb2.CreateCollectionRequest, 0, 16)
-	core.DdCreateCollectionReq = func(req *internalpb2.CreateCollectionRequest) error {
-		t.Logf("Create Colllection %s", req.CollectionName)
-		createCollectionArray = append(createCollectionArray, req)
-		return nil
-	}
-
-	dropCollectionArray := make([]*internalpb2.DropCollectionRequest, 0, 16)
-	core.DdDropCollectionReq = func(req *internalpb2.DropCollectionRequest) error {
-		t.Logf("Drop Collection %s", req.CollectionName)
-		dropCollectionArray = append(dropCollectionArray, req)
-		return nil
-	}
-
-	createPartitionArray := make([]*internalpb2.CreatePartitionRequest, 0, 16)
-	core.DdCreatePartitionReq = func(req *internalpb2.CreatePartitionRequest) error {
-		t.Logf("Create Partition %s", req.PartitionName)
-		createPartitionArray = append(createPartitionArray, req)
-		return nil
-	}
-
-	dropPartitionArray := make([]*internalpb2.DropPartitionRequest, 0, 16)
-	core.DdDropPartitionReq = func(req *internalpb2.DropPartitionRequest) error {
-		t.Logf("Drop Partition %s", req.PartitionName)
-		dropPartitionArray = append(dropPartitionArray, req)
-		return nil
-	}
-
-	core.DataServiceSegmentChan = make(chan *datapb.SegmentInfo, 1024)
-
-	core.GetBinlogFilePathsFromDataServiceReq = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
-		return []string{"file1", "file2", "file3"}, nil
-	}
-
-	var binlogLock sync.Mutex
-	binlogPathArray := make([]string, 0, 16)
-	core.BuildIndexReq = func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair) (typeutil.UniqueID, error) {
-		binlogLock.Lock()
-		defer binlogLock.Unlock()
-		binlogPathArray = append(binlogPathArray, binlog...)
-		return 2000, nil
-	}
-
-	collectionMetaCache := make([]string, 0, 16)
-	core.InvalidateCollectionMetaCache = func(ts typeutil.Timestamp, dbName string, collectionName string) error {
-		collectionMetaCache = append(collectionMetaCache, collectionName)
-		return nil
-	}
-
-	err = svr.Start()
+	err = core.SetIndexService(im)
 	assert.Nil(t, err)
 
-	cli, err := NewGrpcClient(fmt.Sprintf("%s:%d", cms.Params.Address, cms.Params.Port), 3*time.Second)
+	err = core.Init()
 	assert.Nil(t, err)
 
-	err = cli.Init()
+	err = core.Start()
 	assert.Nil(t, err)
 
-	err = cli.Start()
-	assert.Nil(t, err)
+	proxyTimeTickStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
+	proxyTimeTickStream.SetPulsarClient(Params.PulsarAddress)
+	proxyTimeTickStream.CreatePulsarProducers([]string{Params.ProxyTimeTickChannel})
+
+	dataServiceSegmentStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
+	dataServiceSegmentStream.SetPulsarClient(Params.PulsarAddress)
+	dataServiceSegmentStream.CreatePulsarProducers([]string{Params.DataServiceSegmentChannel})
+
+	timeTickStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
+	timeTickStream.SetPulsarClient(Params.PulsarAddress)
+	timeTickStream.CreatePulsarConsumers([]string{Params.TimeTickChannel}, Params.MsgChannelSubName, msutil.NewUnmarshalDispatcher(), 1024)
+	timeTickStream.Start()
+
+	ddStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
+	ddStream.SetPulsarClient(Params.PulsarAddress)
+	ddStream.CreatePulsarConsumers([]string{Params.DdChannel}, Params.MsgChannelSubName, msutil.NewUnmarshalDispatcher(), 1024)
+	ddStream.Start()
+
+	time.Sleep(time.Second)
+
+	t.Run("time tick", func(t *testing.T) {
+		var timeTick typeutil.Timestamp = 100
+		msgPack := ms.MsgPack{}
+		baseMsg := ms.BaseMsg{
+			MsgCtx:         nil,
+			BeginTimestamp: timeTick,
+			EndTimestamp:   timeTick,
+			HashValues:     []uint32{0},
+		}
+		timeTickResult := internalpb2.TimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kTimeTick,
+				MsgID:     0,
+				Timestamp: timeTick,
+				SourceID:  0,
+			},
+		}
+		timeTickMsg := &ms.TimeTickMsg{
+			BaseMsg:     baseMsg,
+			TimeTickMsg: timeTickResult,
+		}
+		msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
+		err := proxyTimeTickStream.Broadcast(&msgPack)
+		assert.Nil(t, err)
+
+		ttmsg, ok := <-timeTickStream.Chan()
+		assert.True(t, ok)
+		assert.Equal(t, len(ttmsg.Msgs), 1)
+		ttm, ok := (ttmsg.Msgs[0]).(*ms.TimeTickMsg)
+		assert.True(t, ok)
+		assert.Equal(t, ttm.Base.Timestamp, timeTick)
+
+		ddmsg, ok := <-ddStream.Chan()
+		assert.True(t, ok)
+		assert.Equal(t, len(ddmsg.Msgs), 1)
+		ddm, ok := (ddmsg.Msgs[0]).(*ms.TimeTickMsg)
+		assert.True(t, ok)
+		assert.Equal(t, ddm.Base.Timestamp, timeTick)
+	})
 
 	t.Run("create collection", func(t *testing.T) {
 		schema := schemapb.CollectionSchema{
@@ -139,7 +227,6 @@ func TestGrpcService(t *testing.T) {
 				},
 			},
 		}
-
 		sbf, err := proto.Marshal(&schema)
 		assert.Nil(t, err)
 
@@ -154,18 +241,23 @@ func TestGrpcService(t *testing.T) {
 			CollectionName: "testColl",
 			Schema:         sbf,
 		}
-
-		status, err := cli.CreateCollection(req)
+		status, err := core.CreateCollection(req)
 		assert.Nil(t, err)
-		assert.Equal(t, len(createCollectionArray), 1)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
-		assert.Equal(t, createCollectionArray[0].Base.MsgType, commonpb.MsgType_kCreateCollection)
-		assert.Equal(t, createCollectionArray[0].CollectionName, "testColl")
+
+		msg, ok := <-ddStream.Chan()
+		assert.True(t, ok)
+		assert.Equal(t, len(msg.Msgs), 1)
+		createMsg, ok := (msg.Msgs[0]).(*ms.CreateCollectionMsg)
+		assert.True(t, ok)
+		createMeta, err := core.MetaTable.GetCollectionByName("testColl")
+		assert.Nil(t, err)
+		assert.Equal(t, createMsg.CollectionID, createMeta.ID)
 
 		req.Base.MsgID = 101
 		req.Base.Timestamp = 101
 		req.Base.SourceID = 101
-		status, err = cli.CreateCollection(req)
+		status, err = core.CreateCollection(req)
 		assert.Nil(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UNEXPECTED_ERROR)
 
@@ -173,7 +265,7 @@ func TestGrpcService(t *testing.T) {
 		req.Base.Timestamp = 102
 		req.Base.SourceID = 102
 		req.CollectionName = "testColl-again"
-		status, err = cli.CreateCollection(req)
+		status, err = core.CreateCollection(req)
 		assert.Nil(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UNEXPECTED_ERROR)
 
@@ -184,28 +276,17 @@ func TestGrpcService(t *testing.T) {
 		req.Base.MsgID = 103
 		req.Base.Timestamp = 103
 		req.Base.SourceID = 103
-		status, err = cli.CreateCollection(req)
+		status, err = core.CreateCollection(req)
 		assert.Nil(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
-		assert.Equal(t, len(createCollectionArray), 2)
-		assert.Equal(t, createCollectionArray[1].Base.MsgType, commonpb.MsgType_kCreateCollection)
-		assert.Equal(t, createCollectionArray[1].CollectionName, "testColl-again")
 
-		//time stamp go back
-		schema.Name = "testColl-goback"
-		sbf, err = proto.Marshal(&schema)
+		msg, ok = <-ddStream.Chan()
+		assert.True(t, ok)
+		createMsg, ok = (msg.Msgs[0]).(*ms.CreateCollectionMsg)
+		assert.True(t, ok)
+		createMeta, err = core.MetaTable.GetCollectionByName("testColl-again")
 		assert.Nil(t, err)
-		req.CollectionName = schema.Name
-		req.Schema = sbf
-		req.Base.MsgID = 103
-		req.Base.Timestamp = 103
-		req.Base.SourceID = 103
-		status, err = cli.CreateCollection(req)
-		assert.Nil(t, err)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UNEXPECTED_ERROR)
-		matched, err := regexp.MatchString("input timestamp = [0-9]+, last dd time stamp = [0-9]+", status.Reason)
-		assert.Nil(t, err)
-		assert.True(t, matched)
+		assert.Equal(t, createMsg.CollectionID, createMeta.ID)
 	})
 
 	t.Run("has collection", func(t *testing.T) {
@@ -219,7 +300,7 @@ func TestGrpcService(t *testing.T) {
 			DbName:         "testDb",
 			CollectionName: "testColl",
 		}
-		rsp, err := cli.HasCollection(req)
+		rsp, err := core.HasCollection(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, rsp.Value, true)
@@ -234,7 +315,7 @@ func TestGrpcService(t *testing.T) {
 			DbName:         "testDb",
 			CollectionName: "testColl2",
 		}
-		rsp, err = cli.HasCollection(req)
+		rsp, err = core.HasCollection(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, rsp.Value, false)
@@ -248,12 +329,12 @@ func TestGrpcService(t *testing.T) {
 				SourceID:  111,
 			},
 			DbName:         "testDb",
-			CollectionName: "testColl2",
+			CollectionName: "testColl",
 		}
-		rsp, err = cli.HasCollection(req)
+		rsp, err = core.HasCollection(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
-		assert.Equal(t, rsp.Value, false)
+		assert.Equal(t, rsp.Value, true)
 	})
 
 	t.Run("describe collection", func(t *testing.T) {
@@ -269,11 +350,12 @@ func TestGrpcService(t *testing.T) {
 			DbName:         "testDb",
 			CollectionName: "testColl",
 		}
-		rsp, err := cli.DescribeCollection(req)
+		rsp, err := core.DescribeCollection(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, rsp.Schema.Name, "testColl")
 		assert.Equal(t, rsp.CollectionID, collMeta.ID)
+
 	})
 
 	t.Run("show collection", func(t *testing.T) {
@@ -286,7 +368,7 @@ func TestGrpcService(t *testing.T) {
 			},
 			DbName: "testDb",
 		}
-		rsp, err := cli.ShowCollections(req)
+		rsp, err := core.ShowCollections(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.ElementsMatch(t, rsp.CollectionNames, []string{"testColl", "testColl-again"})
@@ -305,7 +387,7 @@ func TestGrpcService(t *testing.T) {
 			CollectionName: "testColl",
 			PartitionName:  "testPartition",
 		}
-		status, err := cli.CreatePartition(req)
+		status, err := core.CreatePartition(req)
 		assert.Nil(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
@@ -315,6 +397,13 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, partMeta.PartitionName, "testPartition")
 
+		msg, ok := <-ddStream.Chan()
+		assert.True(t, ok)
+		assert.Equal(t, len(msg.Msgs), 1)
+		partMsg, ok := (msg.Msgs[0]).(*ms.CreatePartitionMsg)
+		assert.True(t, ok)
+		assert.Equal(t, partMsg.CollectionID, collMeta.ID)
+		assert.Equal(t, partMsg.PartitionID, partMeta.PartitionID)
 	})
 
 	t.Run("has partition", func(t *testing.T) {
@@ -329,7 +418,7 @@ func TestGrpcService(t *testing.T) {
 			CollectionName: "testColl",
 			PartitionName:  "testPartition",
 		}
-		rsp, err := cli.HasPartition(req)
+		rsp, err := core.HasPartition(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, rsp.Value, true)
@@ -349,7 +438,7 @@ func TestGrpcService(t *testing.T) {
 			CollectionName: "testColl",
 			CollectionID:   coll.ID,
 		}
-		rsp, err := cli.ShowPartitions(req)
+		rsp, err := core.ShowPartitions(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, len(rsp.PartitionNames), 2)
@@ -363,13 +452,36 @@ func TestGrpcService(t *testing.T) {
 		part, err := core.MetaTable.GetPartitionByID(partID)
 		assert.Nil(t, err)
 		assert.Zero(t, len(part.SegmentIDs))
+
 		seg := &datapb.SegmentInfo{
 			SegmentID:    1000,
 			CollectionID: coll.ID,
 			PartitionID:  part.PartitionID,
 		}
-		core.DataServiceSegmentChan <- seg
-		time.Sleep(time.Millisecond * 100)
+
+		msgPack := ms.MsgPack{}
+		baseMsg := ms.BaseMsg{
+			BeginTimestamp: 0,
+			EndTimestamp:   0,
+			HashValues:     []uint32{0},
+		}
+		segMsg := &ms.SegmentInfoMsg{
+			BaseMsg: baseMsg,
+			SegmentMsg: datapb.SegmentMsg{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_kSegmentInfo,
+					MsgID:     0,
+					Timestamp: 0,
+					SourceID:  0,
+				},
+				Segment: seg,
+			},
+		}
+		msgPack.Msgs = append(msgPack.Msgs, segMsg)
+		err = dataServiceSegmentStream.Broadcast(&msgPack)
+		assert.Nil(t, err)
+		time.Sleep(time.Second)
+
 		part, err = core.MetaTable.GetPartitionByID(partID)
 		assert.Nil(t, err)
 		assert.Equal(t, len(part.SegmentIDs), 1)
@@ -384,7 +496,7 @@ func TestGrpcService(t *testing.T) {
 			CollectionID: coll.ID,
 			PartitionID:  partID,
 		}
-		rsp, err := cli.ShowSegments(req)
+		rsp, err := core.ShowSegments(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, rsp.SegmentIDs[0], int64(1000))
@@ -404,16 +516,16 @@ func TestGrpcService(t *testing.T) {
 			FieldName:      "vector",
 			ExtraParams:    nil,
 		}
-		rsp, err := cli.CreateIndex(req)
+		rsp, err := core.CreateIndex(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_SUCCESS)
-		binlogLock.Lock()
-		defer binlogLock.Unlock()
-		assert.Equal(t, 3, len(binlogPathArray))
-		assert.ElementsMatch(t, binlogPathArray, []string{"file1", "file2", "file3"})
+		time.Sleep(time.Second)
+		files := im.getFileArray()
+		assert.Equal(t, 3, len(files))
+		assert.ElementsMatch(t, files, []string{"file0-100", "file1-100", "file2-100"})
 
 		req.FieldName = "no field"
-		rsp, err = cli.CreateIndex(req)
+		rsp, err = core.CreateIndex(req)
 		assert.Nil(t, err)
 		assert.NotEqual(t, rsp.ErrorCode, commonpb.ErrorCode_SUCCESS)
 	})
@@ -432,7 +544,7 @@ func TestGrpcService(t *testing.T) {
 			CollectionID: coll.ID,
 			SegmentID:    1000,
 		}
-		rsp, err := cli.DescribeSegment(req)
+		rsp, err := core.DescribeSegment(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		t.Logf("index id = %d", rsp.IndexID)
@@ -451,11 +563,11 @@ func TestGrpcService(t *testing.T) {
 			FieldName:      "vector",
 			IndexName:      "",
 		}
-		rsp, err := cli.DescribeIndex(req)
+		rsp, err := core.DescribeIndex(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, len(rsp.IndexDescriptions), 1)
-		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, cms.Params.DefaultIndexName)
+		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, Params.DefaultIndexName)
 	})
 
 	t.Run("flush segment", func(t *testing.T) {
@@ -465,18 +577,56 @@ func TestGrpcService(t *testing.T) {
 		part, err := core.MetaTable.GetPartitionByID(partID)
 		assert.Nil(t, err)
 		assert.Equal(t, len(part.SegmentIDs), 1)
+
 		seg := &datapb.SegmentInfo{
 			SegmentID:    1001,
 			CollectionID: coll.ID,
 			PartitionID:  part.PartitionID,
 		}
-		core.DataServiceSegmentChan <- seg
-		time.Sleep(time.Millisecond * 100)
+
+		msgPack := ms.MsgPack{}
+		baseMsg := ms.BaseMsg{
+			BeginTimestamp: 0,
+			EndTimestamp:   0,
+			HashValues:     []uint32{0},
+		}
+		segMsg := &ms.SegmentInfoMsg{
+			BaseMsg: baseMsg,
+			SegmentMsg: datapb.SegmentMsg{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_kSegmentInfo,
+					MsgID:     0,
+					Timestamp: 0,
+					SourceID:  0,
+				},
+				Segment: seg,
+			},
+		}
+		msgPack.Msgs = append(msgPack.Msgs, segMsg)
+		err = dataServiceSegmentStream.Broadcast(&msgPack)
+		assert.Nil(t, err)
+		time.Sleep(time.Second)
+
 		part, err = core.MetaTable.GetPartitionByID(partID)
 		assert.Nil(t, err)
 		assert.Equal(t, len(part.SegmentIDs), 2)
-		core.DataNodeSegmentFlushCompletedChan <- 1001
-		time.Sleep(time.Millisecond * 100)
+
+		flushMsg := &ms.FlushCompletedMsg{
+			BaseMsg: baseMsg,
+			SegmentFlushCompletedMsg: internalpb2.SegmentFlushCompletedMsg{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_kSegmentFlushDone,
+					MsgID:     0,
+					Timestamp: 0,
+					SourceID:  0,
+				},
+				SegmentID: 1001,
+			},
+		}
+		msgPack.Msgs = []ms.TsMsg{flushMsg}
+		err = dataServiceSegmentStream.Broadcast(&msgPack)
+		assert.Nil(t, err)
+		time.Sleep(time.Second)
 
 		req := &milvuspb.DescribeIndexRequest{
 			Base: &commonpb.MsgBase{
@@ -490,11 +640,11 @@ func TestGrpcService(t *testing.T) {
 			FieldName:      "vector",
 			IndexName:      "",
 		}
-		rsp, err := cli.DescribeIndex(req)
+		rsp, err := core.DescribeIndex(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, len(rsp.IndexDescriptions), 2)
-		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, cms.Params.DefaultIndexName)
+		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, Params.DefaultIndexName)
 		assert.Equal(t, rsp.IndexDescriptions[1].IndexName, "index_100")
 
 	})
@@ -511,15 +661,26 @@ func TestGrpcService(t *testing.T) {
 			CollectionName: "testColl",
 			PartitionName:  "testPartition",
 		}
-		status, err := cli.DropPartition(req)
+		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
+		assert.Nil(t, err)
+		dropPartID := collMeta.PartitionIDs[1]
+		status, err := core.DropPartition(req)
 		assert.Nil(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
-		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
+		collMeta, err = core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.PartitionIDs), 1)
 		partMeta, err := core.MetaTable.GetPartitionByID(collMeta.PartitionIDs[0])
 		assert.Nil(t, err)
-		assert.Equal(t, partMeta.PartitionName, cms.Params.DefaultPartitionName)
+		assert.Equal(t, partMeta.PartitionName, Params.DefaultPartitionName)
+
+		msg, ok := <-ddStream.Chan()
+		assert.True(t, ok)
+		assert.Equal(t, len(msg.Msgs), 1)
+		dmsg, ok := (msg.Msgs[0]).(*ms.DropPartitionMsg)
+		assert.True(t, ok)
+		assert.Equal(t, dmsg.CollectionID, collMeta.ID)
+		assert.Equal(t, dmsg.PartitionID, dropPartID)
 	})
 
 	t.Run("drop collection", func(t *testing.T) {
@@ -533,15 +694,21 @@ func TestGrpcService(t *testing.T) {
 			DbName:         "testDb",
 			CollectionName: "testColl",
 		}
-
-		status, err := cli.DropCollection(req)
+		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
-		assert.Equal(t, len(dropCollectionArray), 1)
+		status, err := core.DropCollection(req)
+		assert.Nil(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
-		assert.Equal(t, dropCollectionArray[0].Base.MsgType, commonpb.MsgType_kDropCollection)
-		assert.Equal(t, dropCollectionArray[0].CollectionName, "testColl")
-		assert.Equal(t, len(collectionMetaCache), 1)
-		assert.Equal(t, collectionMetaCache[0], "testColl")
+
+		msg, ok := <-ddStream.Chan()
+		assert.True(t, ok)
+		assert.Equal(t, len(msg.Msgs), 1)
+		dmsg, ok := (msg.Msgs[0]).(*ms.DropCollectionMsg)
+		assert.True(t, ok)
+		assert.Equal(t, dmsg.CollectionID, collMeta.ID)
+		collArray := pm.GetCollArray()
+		assert.Equal(t, len(collArray), 1)
+		assert.Equal(t, collArray[0], "testColl")
 
 		req = &milvuspb.DropCollectionRequest{
 			Base: &commonpb.MsgBase{
@@ -553,15 +720,17 @@ func TestGrpcService(t *testing.T) {
 			DbName:         "testDb",
 			CollectionName: "testColl",
 		}
-		status, err = cli.DropCollection(req)
+		status, err = core.DropCollection(req)
 		assert.Nil(t, err)
-		assert.Equal(t, len(dropCollectionArray), 1)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UNEXPECTED_ERROR)
+		time.Sleep(time.Second)
+		assert.Zero(t, len(ddStream.Chan()))
+		collArray = pm.GetCollArray()
+		assert.Equal(t, len(collArray), 1)
+		assert.Equal(t, collArray[0], "testColl")
 	})
 
-	err = cli.Stop()
+	err = core.Stop()
 	assert.Nil(t, err)
 
-	err = svr.Stop()
-	assert.Nil(t, err)
 }

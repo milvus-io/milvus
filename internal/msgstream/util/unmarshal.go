@@ -37,6 +37,8 @@ func (dispatcher *UnmarshalDispatcher) addDefaultMsgTemplates() {
 	dropPartitionMsg := msgstream.DropPartitionMsg{}
 	loadIndexMsg := msgstream.LoadIndexMsg{}
 	flushMsg := msgstream.FlushMsg{}
+	segmentInfoMsg := msgstream.SegmentInfoMsg{}
+	flushCompletedMsg := msgstream.FlushCompletedMsg{}
 
 	queryNodeSegStatsMsg := msgstream.QueryNodeStatsMsg{}
 	dispatcher.TempMap = make(map[commonpb.MsgType]UnmarshalFunc)
@@ -52,6 +54,8 @@ func (dispatcher *UnmarshalDispatcher) addDefaultMsgTemplates() {
 	dispatcher.TempMap[commonpb.MsgType_kDropPartition] = dropPartitionMsg.Unmarshal
 	dispatcher.TempMap[commonpb.MsgType_kLoadIndex] = loadIndexMsg.Unmarshal
 	dispatcher.TempMap[commonpb.MsgType_kFlush] = flushMsg.Unmarshal
+	dispatcher.TempMap[commonpb.MsgType_kSegmentInfo] = segmentInfoMsg.Unmarshal
+	dispatcher.TempMap[commonpb.MsgType_kSegmentFlushDone] = flushCompletedMsg.Unmarshal
 }
 
 func NewUnmarshalDispatcher() *UnmarshalDispatcher {

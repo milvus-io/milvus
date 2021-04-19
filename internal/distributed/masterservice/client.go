@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	cms "github.com/zilliztech/milvus-distributed/internal/masterservice"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
@@ -33,7 +33,7 @@ func NewGrpcClient(addr string, timeout time.Duration) (*GrpcClient, error) {
 	}, nil
 }
 
-func (c *GrpcClient) Init(params *cms.InitParams) error {
+func (c *GrpcClient) Init() error {
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
 	var err error
@@ -55,9 +55,8 @@ func (c *GrpcClient) Stop() error {
 	return c.conn.Close()
 }
 
-//TODO, grpc, get service state from server
 func (c *GrpcClient) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	return nil, nil
+	return c.grpcClient.GetComponentStatesRPC(context.Background(), &commonpb.Empty{})
 }
 
 //DDL request
@@ -112,18 +111,39 @@ func (c *GrpcClient) AllocID(in *masterpb.IDRequest) (*masterpb.IDResponse, erro
 }
 
 //receiver time tick from proxy service, and put it into this channel
-func (c *GrpcClient) GetTimeTickChannel(empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return c.grpcClient.GetTimeTickChannel(context.Background(), empty)
+func (c *GrpcClient) GetTimeTickChannel() (string, error) {
+	rsp, err := c.grpcClient.GetTimeTickChannelRPC(context.Background(), &commonpb.Empty{})
+	if err != nil {
+		return "", err
+	}
+	if rsp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return "", errors.Errorf("%s", rsp.Status.Reason)
+	}
+	return rsp.Value, nil
 }
 
 //receive ddl from rpc and time tick from proxy service, and put them into this channel
-func (c *GrpcClient) GetDdChannel(in *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return c.grpcClient.GetDdChannel(context.Background(), in)
+func (c *GrpcClient) GetDdChannel() (string, error) {
+	rsp, err := c.grpcClient.GetDdChannelRPC(context.Background(), &commonpb.Empty{})
+	if err != nil {
+		return "", err
+	}
+	if rsp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return "", errors.Errorf("%s", rsp.Status.Reason)
+	}
+	return rsp.Value, nil
 }
 
 //just define a channel, not used currently
-func (c *GrpcClient) GetStatisticsChannel(empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return c.grpcClient.GetStatisticsChannel(context.Background(), empty)
+func (c *GrpcClient) GetStatisticsChannel() (string, error) {
+	rsp, err := c.grpcClient.GetStatisticsChannelRPC(context.Background(), &commonpb.Empty{})
+	if err != nil {
+		return "", err
+	}
+	if rsp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return "", errors.Errorf("%s", rsp.Status.Reason)
+	}
+	return rsp.Value, nil
 }
 
 func (c *GrpcClient) DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {

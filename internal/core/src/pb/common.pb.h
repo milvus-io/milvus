@@ -196,6 +196,7 @@ enum MsgType : int {
   kGetIndexState = 502,
   kGetCollectionStatistics = 503,
   kGetPartitionStatistics = 504,
+  kSegmentInfo = 600,
   kTimeTick = 1200,
   kQueryNodeStats = 1201,
   kLoadIndex = 1202,

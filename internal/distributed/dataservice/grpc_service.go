@@ -58,7 +58,7 @@ func (s *Service) connectMaster() error {
 	if err != nil {
 		return err
 	}
-	if err = master.Init(nil); err != nil {
+	if err = master.Init(); err != nil {
 		return err
 	}
 	if err = master.Start(); err != nil {
