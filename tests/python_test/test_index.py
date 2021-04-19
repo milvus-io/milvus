@@ -419,6 +419,7 @@ class TestIndexBase:
       The following cases are used to test `drop_index` function
     ******************************************************************
     """
+    @pytest.mark.tags("0331")
     def test_drop_index(self, connect, collection, get_simple_index):
         '''
         target: test drop index interface
@@ -432,6 +433,7 @@ class TestIndexBase:
         assert not index
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_drop_index_repeatedly(self, connect, collection, get_simple_index):
         '''
         target: test drop index repeatedly
@@ -489,6 +491,7 @@ class TestIndexBase:
             connect.create_index(collection, field_name, get_simple_index)
             connect.drop_index(collection, field_name)
 
+    @pytest.mark.tags("0331")
     def test_drop_index_ip(self, connect, collection, get_simple_index):
         '''
         target: test drop index interface
@@ -503,6 +506,7 @@ class TestIndexBase:
         assert not index
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_drop_index_repeatedly_ip(self, connect, collection, get_simple_index):
         '''
         target: test drop index repeatedly
@@ -714,6 +718,7 @@ class TestIndexBinary:
       The following cases are used to test `drop_index` function
     ******************************************************************
     """
+    @pytest.mark.tags("0331")
     def test_drop_index(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test drop index interface
@@ -727,6 +732,7 @@ class TestIndexBinary:
         binary_index = connect.describe_index(binary_collection, binary_field_name)
         assert not binary_index
 
+    @pytest.mark.tags("0331")
     def test_drop_index_partition(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test drop index interface
