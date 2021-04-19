@@ -21,9 +21,14 @@
 namespace milvus {
 namespace indexbuilder {
 
-IndexWrapper::IndexWrapper(const char* serialized_type_params, const char* serialized_index_params) {
-    type_params_ = std::string(serialized_type_params);
-    index_params_ = std::string(serialized_index_params);
+IndexWrapper::IndexWrapper(const char* serialized_type_params,
+                           int64_t type_params_size,
+                           const char* serialized_index_params,
+                           int64_t index_params_size) {
+    type_params_ = std::string(serialized_type_params, type_params_size);
+    index_params_ = std::string(serialized_index_params, index_params_size);
+    //    std::cout << "type_params_.size(): " << type_params_.size() << std::endl;
+    //    std::cout << "index_params_.size(): " << index_params_.size() << std::endl;
 
     parse();
 
@@ -35,20 +40,21 @@ IndexWrapper::IndexWrapper(const char* serialized_type_params, const char* seria
     auto index_mode = mode.has_value() ? mode_map[mode.value()] : knowhere::IndexMode::MODE_CPU;
 
     index_ = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type, index_mode);
+    Assert(index_ != nullptr);
 }
 
 void
 IndexWrapper::parse() {
     namespace indexcgo = milvus::proto::indexcgo;
-    bool serialized_success;
+    bool deserialized_success;
 
     indexcgo::TypeParams type_config;
-    serialized_success = type_config.ParseFromString(type_params_);
-    Assert(serialized_success);
+    deserialized_success = type_config.ParseFromString(type_params_);
+    Assert(deserialized_success);
 
     indexcgo::IndexParams index_config;
-    serialized_success = index_config.ParseFromString(index_params_);
-    Assert(serialized_success);
+    deserialized_success = index_config.ParseFromString(index_params_);
+    Assert(deserialized_success);
 
     for (auto i = 0; i < type_config.params_size(); ++i) {
         auto type_param = type_config.params(i);

@@ -18,7 +18,10 @@ namespace indexbuilder {
 
 class IndexWrapper {
  public:
-    explicit IndexWrapper(const char* serialized_type_params, const char* serialized_index_params);
+    explicit IndexWrapper(const char* serialized_type_params,
+                          int64_t type_params_size,
+                          const char* serialized_index_params,
+                          int64_t index_params_size);
 
     int64_t
     dim();
