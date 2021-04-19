@@ -167,7 +167,7 @@ func (t *describeCollectionTask) Ts() (Timestamp, error) {
 	if t.req == nil {
 		return 0, errors.New("null request")
 	}
-	return Timestamp(t.req.Timestamp), nil
+	return t.req.Timestamp, nil
 }
 
 func (t *describeCollectionTask) Execute() error {
@@ -199,7 +199,7 @@ func (t *showCollectionsTask) Ts() (Timestamp, error) {
 	if t.req == nil {
 		return 0, errors.New("null request")
 	}
-	return Timestamp(t.req.Timestamp), nil
+	return t.req.Timestamp, nil
 }
 
 func (t *showCollectionsTask) Execute() error {

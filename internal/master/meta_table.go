@@ -133,17 +133,6 @@ func (mt *metaTable) saveSegmentMeta(seg *pb.SegmentMeta) error {
 }
 
 // mt.ddLock.Lock() before call this function
-func (mt *metaTable) deleteSegmentMeta(segID UniqueID) error {
-	_, ok := mt.segID2Meta[segID]
-
-	if ok {
-		delete(mt.segID2Meta, segID)
-	}
-
-	return mt.client.Remove("/segment/" + strconv.FormatInt(segID, 10))
-}
-
-// mt.ddLock.Lock() before call this function
 func (mt *metaTable) saveCollectionAndDeleteSegmentsMeta(coll *pb.CollectionMeta, segIDs []UniqueID) error {
 	segIDStrs := make([]string, 0, len(segIDs))
 	for _, segID := range segIDs {
