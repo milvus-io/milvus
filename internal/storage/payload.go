@@ -52,17 +52,15 @@ type PayloadReaderInterface interface {
 	ReleasePayloadReader() error
 	Close() error
 }
-type (
-	PayloadWriter struct {
-		payloadWriterPtr C.CPayloadWriter
-		colType          schemapb.DataType
-	}
+type PayloadWriter struct {
+	payloadWriterPtr C.CPayloadWriter
+	colType          schemapb.DataType
+}
 
-	PayloadReader struct {
-		payloadReaderPtr C.CPayloadReader
-		colType          schemapb.DataType
-	}
-)
+type PayloadReader struct {
+	payloadReaderPtr C.CPayloadReader
+	colType          schemapb.DataType
+}
 
 func NewPayloadWriter(colType schemapb.DataType) (*PayloadWriter, error) {
 	w := C.NewPayloadWriter(C.int(colType))
@@ -131,6 +129,8 @@ func (w *PayloadWriter) AddDataToPayload(msgs interface{}, dim ...int) error {
 				return errors.New("incorrect data type")
 			}
 			return w.AddOneStringToPayload(val)
+		default:
+			return errors.New("incorrect datatype")
 		}
 	case 1:
 		switch w.colType {
@@ -147,13 +147,14 @@ func (w *PayloadWriter) AddDataToPayload(msgs interface{}, dim ...int) error {
 				return errors.New("incorrect data type")
 			}
 			return w.AddFloatVectorToPayload(val, dim[0])
+		default:
+			return errors.New("incorrect datatype")
 		}
 
 	default:
 		return errors.New("incorrect input numbers")
 
 	}
-	return nil
 }
 
 func (w *PayloadWriter) AddBoolToPayload(msgs []bool) error {
@@ -433,6 +434,8 @@ func (r *PayloadReader) GetDataFromPayload(idx ...int) (interface{}, int, error)
 		case schemapb.DataType_String:
 			val, err := r.GetOneStringFromPayload(idx[0])
 			return val, 0, err
+		default:
+			return nil, 0, errors.New("Unknown type")
 		}
 	case 0:
 		switch r.colType {
@@ -475,8 +478,6 @@ func (r *PayloadReader) GetDataFromPayload(idx ...int) (interface{}, int, error)
 	default:
 		return nil, 0, errors.New("incorrect number of index")
 	}
-
-	return nil, 0, errors.New("unknown error")
 }
 
 func (r *PayloadReader) ReleasePayloadReader() error {

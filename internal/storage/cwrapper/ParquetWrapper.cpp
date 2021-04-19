@@ -296,6 +296,7 @@ CBuffer GetPayloadBufferFromWriter(CPayloadWriter payloadWriter) {
   if (p->output == nullptr) {
     buf.length = 0;
     buf.data = nullptr;
+	return buf;
   }
   auto &output = p->output->Buffer();
   buf.length = static_cast<int>(output.size());

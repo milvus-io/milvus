@@ -50,10 +50,6 @@ func (s BlobList) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 
-func NewBlob(key string, value []byte) *Blob {
-	return &Blob{key, value}
-}
-
 func (b Blob) GetKey() string {
 	return b.Key
 }
@@ -134,7 +130,6 @@ func NewInsertCodec(schema *etcdpb.CollectionMeta) *InsertCodec {
 func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID UniqueID, data *InsertData) ([]*Blob, error) {
 	var blobs []*Blob
 	var writer *InsertBinlogWriter
-	var err error
 	timeFieldData, ok := data.Data[ms.TimeStampField]
 	if !ok {
 		return nil, errors.New("data doesn't contains timestamp field")
@@ -143,10 +138,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 
 	for _, field := range insertCodec.Schema.Schema.Fields {
 		singleData := data.Data[field.FieldID]
-		writer, err = NewInsertBinlogWriter(field.DataType, insertCodec.Schema.ID, partitionID, segmentID, field.FieldID)
-		if err != nil {
-			return nil, err
-		}
+		writer = NewInsertBinlogWriter(field.DataType, insertCodec.Schema.ID, partitionID, segmentID, field.FieldID)
 		eventWriter, err := writer.NextInsertEventWriter()
 		if err != nil {
 			return nil, err
@@ -184,9 +176,6 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		}
 		if err != nil {
 			return nil, err
-		}
-		if writer == nil {
-			return nil, errors.New("binlog writer is nil")
 		}
 		writer.SetStartTimeStamp(typeutil.Timestamp(ts[0]))
 		writer.SetEndTimeStamp(typeutil.Timestamp(ts[len(ts)-1]))
@@ -442,10 +431,7 @@ func NewDataDefinitionCodec(collectionID int64) *DataDefinitionCodec {
 }
 
 func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequests []string, eventTypes []EventTypeCode) ([]*Blob, error) {
-	writer, err := NewDDLBinlogWriter(schemapb.DataType_Int64, dataDefinitionCodec.collectionID)
-	if err != nil {
-		return nil, err
-	}
+	writer := NewDDLBinlogWriter(schemapb.DataType_Int64, dataDefinitionCodec.collectionID)
 
 	var blobs []*Blob
 
@@ -478,10 +464,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 		Value: buffer,
 	})
 
-	writer, err = NewDDLBinlogWriter(schemapb.DataType_String, dataDefinitionCodec.collectionID)
-	if err != nil {
-		return nil, err
-	}
+	writer = NewDDLBinlogWriter(schemapb.DataType_String, dataDefinitionCodec.collectionID)
 
 	for pos, req := range ddRequests {
 		switch eventTypes[pos] {

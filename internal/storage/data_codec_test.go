@@ -10,7 +10,7 @@ import (
 )
 
 func TestInsertCodec(t *testing.T) {
-	Schema := &etcdpb.CollectionMeta{
+	schema := &etcdpb.CollectionMeta{
 		ID:            1,
 		CreateTime:    1,
 		SegmentIDs:    []int64{0, 1},
@@ -107,7 +107,7 @@ func TestInsertCodec(t *testing.T) {
 			},
 		},
 	}
-	insertCodec := NewInsertCodec(Schema)
+	insertCodec := NewInsertCodec(schema)
 	insertDataFirst := &InsertData{
 		Data: map[int64]FieldData{
 			0: &Int64FieldData{
@@ -221,11 +221,13 @@ func TestInsertCodec(t *testing.T) {
 	assert.Nil(t, err)
 	for _, blob := range firstBlobs {
 		blob.Key = fmt.Sprintf("1/insert_log/2/3/4/5/%d", 100)
+		assert.Equal(t, blob.GetKey(), blob.Key)
 	}
 	secondBlobs, err := insertCodec.Serialize(1, 1, insertDataSecond)
 	assert.Nil(t, err)
 	for _, blob := range secondBlobs {
 		blob.Key = fmt.Sprintf("1/insert_log/2/3/4/5/%d", 99)
+		assert.Equal(t, blob.GetKey(), blob.Key)
 	}
 	resultBlobs := append(firstBlobs, secondBlobs...)
 	partitionID, segmentID, resultData, err := insertCodec.Deserialize(resultBlobs)
@@ -258,6 +260,10 @@ func TestInsertCodec(t *testing.T) {
 	assert.Equal(t, []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
 		resultData.Data[109].(*FloatVectorFieldData).Data)
 	assert.Nil(t, insertCodec.Close())
+
+	blobs := []*Blob{}
+	_, _, _, err = insertCodec.Deserialize(blobs)
+	assert.NotNil(t, err)
 }
 func TestDDCodec(t *testing.T) {
 	dataDefinitionCodec := NewDataDefinitionCodec(int64(1))
@@ -289,6 +295,10 @@ func TestDDCodec(t *testing.T) {
 	assert.Equal(t, resultTs, ts)
 	assert.Equal(t, resultRequests, ddRequests)
 	assert.Nil(t, dataDefinitionCodec.Close())
+
+	blobs = []*Blob{}
+	_, _, err = dataDefinitionCodec.Deserialize(blobs)
+	assert.NotNil(t, err)
 }
 
 func TestIndexCodec(t *testing.T) {
@@ -323,4 +333,73 @@ func TestIndexCodec(t *testing.T) {
 	assert.EqualValues(t, indexParams, indexParamsOutput)
 	assert.EqualValues(t, "index_test_name", indexName)
 	assert.EqualValues(t, 1234, indexID)
+
+	blobs = []*Blob{}
+	_, _, _, _, err = indexCodec.Deserialize(blobs)
+	assert.NotNil(t, err)
+}
+
+func TestTsError(t *testing.T) {
+	insertData := &InsertData{}
+	insertCodec := NewInsertCodec(nil)
+	blobs, err := insertCodec.Serialize(1, 1, insertData)
+	assert.Nil(t, blobs)
+	assert.NotNil(t, err)
+}
+
+func TestSchemaError(t *testing.T) {
+	schema := &etcdpb.CollectionMeta{
+		ID:            1,
+		CreateTime:    1,
+		SegmentIDs:    []int64{0, 1},
+		PartitionTags: []string{"partition_0", "partition_1"},
+		Schema: &schemapb.CollectionSchema{
+			Name:        "schema",
+			Description: "schema",
+			AutoID:      true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      0,
+					Name:         "row_id",
+					IsPrimaryKey: false,
+					Description:  "row_id",
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:      1,
+					Name:         "Ts",
+					IsPrimaryKey: false,
+					Description:  "Ts",
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:      100,
+					Name:         "field_bool",
+					IsPrimaryKey: false,
+					Description:  "description_2",
+					DataType:     999,
+				},
+			},
+		},
+	}
+	insertData := &InsertData{
+		Data: map[int64]FieldData{
+			0: &Int64FieldData{
+				NumRows: 2,
+				Data:    []int64{3, 4},
+			},
+			1: &Int64FieldData{
+				NumRows: 2,
+				Data:    []int64{3, 4},
+			},
+			100: &BoolFieldData{
+				NumRows: 2,
+				Data:    []bool{true, false},
+			},
+		},
+	}
+	insertCodec := NewInsertCodec(schema)
+	blobs, err := insertCodec.Serialize(1, 1, insertData)
+	assert.Nil(t, blobs)
+	assert.NotNil(t, err)
 }

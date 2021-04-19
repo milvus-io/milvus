@@ -2,7 +2,6 @@ package storage
 
 import (
 	"encoding/binary"
-	"fmt"
 	"io"
 
 	"errors"
@@ -54,10 +53,7 @@ func (data *descriptorEventData) Write(buffer io.Writer) error {
 }
 
 func readDescriptorEventData(buffer io.Reader) (*descriptorEventData, error) {
-	event, err := newDescriptorEventData()
-	if err != nil {
-		return nil, err
-	}
+	event := newDescriptorEventData()
 
 	if err := binary.Read(buffer, binary.LittleEndian, &event.DescriptorEventDataFixPart); err != nil {
 		return nil, err
@@ -252,7 +248,7 @@ func getEventFixPartSize(code EventTypeCode) int32 {
 	case DropCollectionEventType:
 		return (&dropCollectionEventData{}).GetEventDataFixPartSize()
 	case CreatePartitionEventType:
-		return (&createCollectionEventData{}).GetEventDataFixPartSize()
+		return (&createPartitionEventData{}).GetEventDataFixPartSize()
 	case DropPartitionEventType:
 		return (&dropPartitionEventData{}).GetEventDataFixPartSize()
 	default:
@@ -260,7 +256,7 @@ func getEventFixPartSize(code EventTypeCode) int32 {
 	}
 }
 
-func newDescriptorEventData() (*descriptorEventData, error) {
+func newDescriptorEventData() *descriptorEventData {
 	data := descriptorEventData{
 		DescriptorEventDataFixPart: DescriptorEventDataFixPart{
 			BinlogVersion:   BinlogVersion,
@@ -278,49 +274,46 @@ func newDescriptorEventData() (*descriptorEventData, error) {
 	}
 	for i := DescriptorEventType; i < EventTypeEnd; i++ {
 		size := getEventFixPartSize(i)
-		if size == -1 {
-			return nil, fmt.Errorf("undefined event type %d", i)
-		}
 		data.PostHeaderLengths = append(data.PostHeaderLengths, uint8(size))
 	}
-	return &data, nil
+	return &data
 }
 
-func newInsertEventData() (*insertEventData, error) {
+func newInsertEventData() *insertEventData {
 	return &insertEventData{
 		StartTimestamp: 0,
 		EndTimestamp:   0,
-	}, nil
+	}
 }
-func newDeleteEventData() (*deleteEventData, error) {
+func newDeleteEventData() *deleteEventData {
 	return &deleteEventData{
 		StartTimestamp: 0,
 		EndTimestamp:   0,
-	}, nil
+	}
 }
-func newCreateCollectionEventData() (*createCollectionEventData, error) {
+func newCreateCollectionEventData() *createCollectionEventData {
 	return &createCollectionEventData{
 		StartTimestamp: 0,
 		EndTimestamp:   0,
-	}, nil
+	}
 }
-func newDropCollectionEventData() (*dropCollectionEventData, error) {
+func newDropCollectionEventData() *dropCollectionEventData {
 	return &dropCollectionEventData{
 		StartTimestamp: 0,
 		EndTimestamp:   0,
-	}, nil
+	}
 }
-func newCreatePartitionEventData() (*createPartitionEventData, error) {
+func newCreatePartitionEventData() *createPartitionEventData {
 	return &createPartitionEventData{
 		StartTimestamp: 0,
 		EndTimestamp:   0,
-	}, nil
+	}
 }
-func newDropPartitionEventData() (*dropPartitionEventData, error) {
+func newDropPartitionEventData() *dropPartitionEventData {
 	return &dropPartitionEventData{
 		StartTimestamp: 0,
 		EndTimestamp:   0,
-	}, nil
+	}
 }
 
 func readInsertEventDataFixPart(buffer io.Reader) (*insertEventData, error) {

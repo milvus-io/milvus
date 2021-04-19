@@ -34,12 +34,11 @@ func checkEventHeader(
 }
 
 func TestDescriptorEvent(t *testing.T) {
-	desc, err := newDescriptorEvent()
-	assert.Nil(t, err)
+	desc := newDescriptorEvent()
 
 	var buf bytes.Buffer
 
-	err = desc.Write(&buf)
+	err := desc.Write(&buf)
 	assert.Nil(t, err)
 
 	buffer := buf.Bytes()
@@ -1146,4 +1145,176 @@ func TestDropPartitionEvent(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+}
+
+func TestDescriptorEventTsError(t *testing.T) {
+	insertData := &insertEventData{
+		StartTimestamp: 0,
+		EndTimestamp:   0,
+	}
+	buf := new(bytes.Buffer)
+	err := insertData.WriteEventData(buf)
+	assert.NotNil(t, err)
+	insertData.StartTimestamp = 1000
+	err = insertData.WriteEventData(buf)
+	assert.NotNil(t, err)
+
+	deleteData := &deleteEventData{
+		StartTimestamp: 0,
+		EndTimestamp:   0,
+	}
+	err = deleteData.WriteEventData(buf)
+	assert.NotNil(t, err)
+	deleteData.StartTimestamp = 1000
+	err = deleteData.WriteEventData(buf)
+	assert.NotNil(t, err)
+
+	createCollectionData := &createCollectionEventData{
+		StartTimestamp: 0,
+		EndTimestamp:   0,
+	}
+	err = createCollectionData.WriteEventData(buf)
+	assert.NotNil(t, err)
+	createCollectionData.StartTimestamp = 1000
+	err = createCollectionData.WriteEventData(buf)
+	assert.NotNil(t, err)
+
+	dropCollectionData := &dropCollectionEventData{
+		StartTimestamp: 0,
+		EndTimestamp:   0,
+	}
+	err = dropCollectionData.WriteEventData(buf)
+	assert.NotNil(t, err)
+	dropCollectionData.StartTimestamp = 1000
+	err = dropCollectionData.WriteEventData(buf)
+	assert.NotNil(t, err)
+
+	createPartitionData := &createPartitionEventData{
+		StartTimestamp: 0,
+		EndTimestamp:   0,
+	}
+	err = createPartitionData.WriteEventData(buf)
+	assert.NotNil(t, err)
+	createPartitionData.StartTimestamp = 1000
+	err = createPartitionData.WriteEventData(buf)
+	assert.NotNil(t, err)
+
+	dropPartitionData := &dropPartitionEventData{
+		StartTimestamp: 0,
+		EndTimestamp:   0,
+	}
+	err = dropPartitionData.WriteEventData(buf)
+	assert.NotNil(t, err)
+	dropPartitionData.StartTimestamp = 1000
+	err = dropPartitionData.WriteEventData(buf)
+	assert.NotNil(t, err)
+}
+
+func TestReadFixPartError(t *testing.T) {
+	buf := new(bytes.Buffer)
+	_, err := readEventHeader(buf)
+	assert.NotNil(t, err)
+
+	_, err = readInsertEventDataFixPart(buf)
+	assert.NotNil(t, err)
+
+	_, err = readDeleteEventDataFixPart(buf)
+	assert.NotNil(t, err)
+
+	_, err = readCreateCollectionEventDataFixPart(buf)
+	assert.NotNil(t, err)
+
+	_, err = readDropCollectionEventDataFixPart(buf)
+	assert.NotNil(t, err)
+
+	_, err = readCreatePartitionEventDataFixPart(buf)
+	assert.NotNil(t, err)
+
+	_, err = readDropPartitionEventDataFixPart(buf)
+	assert.NotNil(t, err)
+
+	_, err = readDescriptorEventData(buf)
+	assert.NotNil(t, err)
+
+	event := newDescriptorEventData()
+	err = binary.Write(buf, binary.LittleEndian, event.DescriptorEventDataFixPart)
+	assert.Nil(t, err)
+	_, err = readDescriptorEventData(buf)
+	assert.NotNil(t, err)
+
+	size := getEventFixPartSize(EventTypeCode(10))
+	assert.Equal(t, size, int32(-1))
+}
+
+func TestEventReaderError(t *testing.T) {
+	buf := new(bytes.Buffer)
+	r, err := newEventReader(schemapb.DataType_Int64, buf)
+	assert.Nil(t, r)
+	assert.NotNil(t, err)
+
+	header := newEventHeader(DescriptorEventType)
+	err = header.Write(buf)
+	assert.Nil(t, err)
+
+	r, err = newEventReader(schemapb.DataType_Int64, buf)
+	assert.Nil(t, r)
+	assert.NotNil(t, err)
+
+	buf = new(bytes.Buffer)
+	header = newEventHeader(InsertEventType)
+	err = header.Write(buf)
+	assert.Nil(t, err)
+
+	r, err = newEventReader(schemapb.DataType_Int64, buf)
+	assert.Nil(t, r)
+	assert.NotNil(t, err)
+
+	buf = new(bytes.Buffer)
+	header = newEventHeader(InsertEventType)
+	header.EventLength = getEventFixPartSize(InsertEventType) + int32(binary.Size(header))
+	err = header.Write(buf)
+	assert.Nil(t, err)
+
+	insertData := &insertEventData{
+		StartTimestamp: 1000,
+		EndTimestamp:   2000,
+	}
+	err = binary.Write(buf, binary.LittleEndian, insertData)
+	assert.Nil(t, err)
+
+	r, err = newEventReader(schemapb.DataType_Int64, buf)
+	assert.Nil(t, r)
+	assert.NotNil(t, err)
+
+}
+
+func TestEventClose(t *testing.T) {
+	w, err := newInsertEventWriter(schemapb.DataType_String)
+	assert.Nil(t, err)
+	w.SetStartTimestamp(tsoutil.ComposeTS(10, 0))
+	w.SetEndTimestamp(tsoutil.ComposeTS(100, 0))
+	err = w.AddDataToPayload("1234")
+	assert.Nil(t, err)
+	err = w.Finish()
+	assert.Nil(t, err)
+
+	var buf bytes.Buffer
+	err = w.Write(&buf)
+	assert.Nil(t, err)
+	err = w.Close()
+	assert.Nil(t, err)
+
+	wBuf := buf.Bytes()
+	r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf))
+	assert.Nil(t, err)
+
+	err = r.Close()
+	assert.Nil(t, err)
+	err = r.Close()
+	assert.Nil(t, err)
+
+	_, err = r.readHeader()
+	assert.NotNil(t, err)
+	_, err = r.readData()
+	assert.NotNil(t, err)
 }
