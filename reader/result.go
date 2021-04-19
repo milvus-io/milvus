@@ -3,6 +3,7 @@ package reader
 import (
 	"fmt"
 	schema2 "github.com/czs007/suvlim/pulsar/client-go/schema"
+	"strconv"
 )
 
 type ResultEntityIds []int64
@@ -14,7 +15,7 @@ type SearchResult struct {
 
 func getResultTopicByClientId(clientId int64) string {
 	// TODO: Result topic?
-	return "result-topic/partition-" + string(clientId)
+	return "result-topic/partition-" + strconv.FormatInt(clientId, 10)
 }
 
 func publishResult(ids *ResultEntityIds, clientId int64) schema2.Status {
