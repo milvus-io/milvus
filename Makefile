@@ -57,8 +57,14 @@ lint:tools/bin/revive
 	@echo "Running $@ check"
 	@tools/bin/revive -formatter friendly -config tools/check/revive.toml ./...
 
+get-rocksdb:
+	@go env -w CGO_CFLAGS="-I$(PWD)/internal/kv/rocksdb/cwrapper/output/include"
+	@go env -w CGO_LDFLAGS="-L$(PWD)/internal/kv/rocksdb/cwrapper/output/lib -l:librocksdb.a -lstdc++ -lm -lz"
+	@(env bash $(PWD)/internal/kv/rocksdb/cwrapper/build.sh)
+	@go get github.com/tecbot/gorocksdb
+
 #TODO: Check code specifications by golangci-lint
-static-check:
+static-check:get-rocksdb
 	@echo "Running $@ check"
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint cache clean
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./internal/...
@@ -76,7 +82,7 @@ else
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./tests/go/...
 endif
 
-verifiers: getdeps cppcheck fmt static-check ruleguard
+verifiers: getdeps cppcheck fmt static-check
 
 # Builds various components locally.
 build-go: build-cpp
@@ -106,7 +112,7 @@ build-cpp-with-unittest:
 unittest: test-cpp test-go
 
 #TODO: proxy master query node writer's unittest
-test-go:
+test-go:get-rocksdb
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
 
