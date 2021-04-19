@@ -22,6 +22,8 @@ msgChannel:
     writeNodeTimeTick: "writeNodeTimeTick"
     # old name: statsChannels: "statistic"
     queryNodeStats: "query-node-stats"
+    # cmd for loadIndex, flush, etc...
+    cmd: "cmd"
 
   # sub name generation rule: ${subNamePrefix}-${NodeID}
   subNamePrefix:

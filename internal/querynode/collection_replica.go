@@ -54,7 +54,7 @@ type collectionReplica interface {
 
 	// segment
 	getSegmentNum() int
-	getSegmentStatistics() *internalpb.QueryNodeStats
+	getSegmentStatistics() []*internalpb.SegmentStats
 	addSegment(segmentID UniqueID, partitionTag string, collectionID UniqueID) error
 	removeSegment(segmentID UniqueID) error
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
@@ -317,7 +317,7 @@ func (colReplica *collectionReplicaImpl) getSegmentNum() int {
 	return len(colReplica.segments)
 }
 
-func (colReplica *collectionReplicaImpl) getSegmentStatistics() *internalpb.QueryNodeStats {
+func (colReplica *collectionReplicaImpl) getSegmentStatistics() []*internalpb.SegmentStats {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 
@@ -339,10 +339,7 @@ func (colReplica *collectionReplicaImpl) getSegmentStatistics() *internalpb.Quer
 		segment.recentlyModified = false
 	}
 
-	return &internalpb.QueryNodeStats{
-		MsgType:  internalpb.MsgType_kQueryNodeStats,
-		SegStats: statisticData,
-	}
+	return statisticData
 }
 
 func (colReplica *collectionReplicaImpl) addSegment(segmentID UniqueID, partitionTag string, collectionID UniqueID) error {
@@ -359,7 +356,7 @@ func (colReplica *collectionReplicaImpl) addSegment(segmentID UniqueID, partitio
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
-	var newSegment = newSegment(collection, segmentID)
+	var newSegment = newSegment(collection, segmentID, partitionTag, collectionID)
 
 	colReplica.segments[segmentID] = newSegment
 	*partition.Segments() = append(*partition.Segments(), newSegment)

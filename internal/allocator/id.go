@@ -21,6 +21,8 @@ type IDAllocator struct {
 
 	idStart UniqueID
 	idEnd   UniqueID
+
+	PeerID UniqueID
 }
 
 func NewIDAllocator(ctx context.Context, masterAddr string) (*IDAllocator, error) {
@@ -37,16 +39,17 @@ func NewIDAllocator(ctx context.Context, masterAddr string) (*IDAllocator, error
 	a.tChan = &emptyTicker{}
 	a.Allocator.syncFunc = a.syncID
 	a.Allocator.processFunc = a.processFunc
-	a.Allocator.checkFunc = a.checkFunc
+	a.Allocator.checkSyncFunc = a.checkSyncFunc
+	a.Allocator.pickCanDoFunc = a.pickCanDoFunc
 	a.init()
 	return a, nil
 }
 
-func (ia *IDAllocator) syncID() {
+func (ia *IDAllocator) syncID() bool {
 	fmt.Println("syncID")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	req := &internalpb.IDRequest{
-		PeerID: 1,
+		PeerID: ia.PeerID,
 		Role:   internalpb.PeerRole_Proxy,
 		Count:  ia.countPerRPC,
 	}
@@ -55,22 +58,32 @@ func (ia *IDAllocator) syncID() {
 	cancel()
 	if err != nil {
 		log.Println("syncID Failed!!!!!")
-		return
+		return false
 	}
 	ia.idStart = resp.GetID()
 	ia.idEnd = ia.idStart + int64(resp.GetCount())
+	return true
 }
 
-func (ia *IDAllocator) checkFunc(timeout bool) bool {
-	if timeout {
-		return timeout
-	}
+func (ia *IDAllocator) checkSyncFunc(timeout bool) bool {
+	return timeout || len(ia.toDoReqs) > 0
+}
+
+func (ia *IDAllocator) pickCanDoFunc() {
+	total := uint32(ia.idEnd - ia.idStart)
 	need := uint32(0)
+	idx := 0
 	for _, req := range ia.toDoReqs {
 		iReq := req.(*idRequest)
 		need += iReq.count
+		if need <= total {
+			ia.canDoReqs = append(ia.canDoReqs, req)
+			idx++
+		} else {
+			break
+		}
 	}
-	return ia.idStart+int64(need) >= ia.idEnd
+	ia.toDoReqs = ia.toDoReqs[idx:]
 }
 
 func (ia *IDAllocator) processFunc(req request) error {
