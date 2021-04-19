@@ -44,10 +44,7 @@ github.com/apache/pulsar/pulsar-client-go v0.0.0-20200901051823-800681aaa9af h1:
 github.com/apache/pulsar/pulsar-client-go v0.0.0-20200901051823-800681aaa9af/go.mod h1:QdYxU2iG99VVU6cvoBRkCgkazfJSL9WwPZ20PZR6aUk=
 github.com/beorn7/perks v0.0.0-20180321164747-3a771d992973 h1:xJ4a3vCFaGF/jqvzLMYoU8P317H5OQ+Via4RmuPwCS0=
 github.com/beorn7/perks v0.0.0-20180321164747-3a771d992973/go.mod h1:Dwedo/Wpr24TaqPxmxbtue+5NUziq4I4S80YR8gNf3Q=
-<<<<<<< HEAD
 github.com/beorn7/perks v1.0.0 h1:HWo1m869IqiPhD389kmkxeTalrjNbbJTC8LXupb+sl0=
-=======
->>>>>>> 2a377a76d1925a76a011a2364b47f4a199f003bf
 github.com/beorn7/perks v1.0.0/go.mod h1:KWe93zE9D1o94FZ5RNwFwVgaQK1VOXiVxmqh+CedLV8=
 github.com/bgentry/speakeasy v0.1.0/go.mod h1:+zsyZBPWlz7T6j88CTgSN5bM796AkVf0kBD4zp0CCIs=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=

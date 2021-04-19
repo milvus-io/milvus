@@ -1,13 +1,13 @@
-package writer
+package write_node
 
 import (
 	"context"
 	"fmt"
-	"github.com/czs007/suvlim/pulsar"
-	"github.com/czs007/suvlim/pulsar/schema"
-	"github.com/czs007/suvlim/writer/mock"
 	"strconv"
 	"sync"
+	"writer/message_client"
+	"writer/mock"
+	"writer/pb"
 )
 
 type SegmentIdInfo struct {
@@ -17,9 +17,9 @@ type SegmentIdInfo struct {
 }
 
 type WriteNode struct {
-	KvStore  *mock.TikvStore
-	mc       *pulsar.MessageClient
-	timeSync uint64
+	KvStore       *mock.TikvStore
+	MessageClient *message_client.MessageClient
+	TimeSync      uint64
 }
 
 func NewWriteNode(ctx context.Context,
@@ -27,15 +27,15 @@ func NewWriteNode(ctx context.Context,
 	topics []string,
 	timeSync uint64) (*WriteNode, error) {
 	kv, err := mock.NewTikvStore()
-	mc := &pulsar.MessageClient{}
+	mc := &message_client.MessageClient{}
 	return &WriteNode{
-		KvStore:  kv,
-		mc:       mc,
-		timeSync: timeSync,
+		KvStore:       kv,
+		MessageClient: mc,
+		TimeSync:      timeSync,
 	}, err
 }
 
-func (wn *WriteNode) InsertBatchData(ctx context.Context, data []*schema.InsertMsg, timeSync uint64, wg sync.WaitGroup) error {
+func (wn *WriteNode) InsertBatchData(ctx context.Context, data []*pb.InsertOrDeleteMsg, wg sync.WaitGroup) error {
 	var prefixKey string
 	var suffixKey string
 	var prefixKeys [][]byte
@@ -44,12 +44,12 @@ func (wn *WriteNode) InsertBatchData(ctx context.Context, data []*schema.InsertM
 	var timeStamp []uint64
 
 	for i := 0; i < len(data); i++ {
-		prefixKey = data[i].CollectionName + "-" + strconv.FormatUint(data[i].EntityId, 10)
-		suffixKey = strconv.FormatUint(data[i].SegmentId, 10)
+		prefixKey = data[i].CollectionName + "-" + strconv.FormatUint(uint64(data[i].Uid), 10)
+		suffixKey = strconv.FormatUint(uint64(data[i].SegmentId), 10)
 		prefixKeys = append(prefixKeys, []byte(prefixKey))
 		suffixKeys = append(suffixKeys, []byte(suffixKey))
-		binaryData = append(binaryData, data[i].Serialization())
-		timeStamp = append(timeStamp, data[i].Timestamp)
+		binaryData = append(binaryData, []byte(data[i].String()))
+		timeStamp = append(timeStamp, uint64(data[i].Timestamp))
 	}
 
 	error := (*wn.KvStore).PutRows(ctx, prefixKeys, timeStamp, suffixKeys, binaryData)
@@ -61,22 +61,22 @@ func (wn *WriteNode) InsertBatchData(ctx context.Context, data []*schema.InsertM
 	return nil
 }
 
-func (wn *WriteNode) DeleteBatchData(ctx context.Context, data []*schema.DeleteMsg, timeSync uint64, wg sync.WaitGroup) error {
+func (wn *WriteNode) DeleteBatchData(ctx context.Context, data []*pb.InsertOrDeleteMsg, wg sync.WaitGroup) error {
 	var segmentInfos []*SegmentIdInfo
 	var prefixKey string
 	var prefixKeys [][]byte
 	var timeStamps []uint64
 
 	for i := 0; i < len(data); i++ {
-		prefixKey = data[i].CollectionName + "-" + strconv.FormatUint(data[i].EntityId, 10)
+		prefixKey = data[i].CollectionName + "-" + strconv.FormatUint(uint64(data[i].Uid), 10)
 		prefixKeys = append(prefixKeys, []byte(prefixKey))
-		timeStamps = append(timeStamps, data[i].Timestamp)
+		timeStamps = append(timeStamps, uint64(data[i].Timestamp))
 	}
 	segmentIds := (*wn.KvStore).GetSegment(ctx, prefixKeys)
 	for i := 0; i < len(prefixKeys); i++ {
 		segmentInfos = append(segmentInfos, &SegmentIdInfo{
 			CollectionName: data[i].CollectionName,
-			EntityId:       data[i].EntityId,
+			EntityId:       data[i].Uid,
 			SegmentIds:     segmentIds,
 		})
 	}
@@ -89,12 +89,13 @@ func (wn *WriteNode) DeleteBatchData(ctx context.Context, data []*schema.DeleteM
 }
 
 func (wn *WriteNode) UpdateTimeSync(timeSync uint64) {
-	wn.timeSync = timeSync
+	wn.TimeSync = timeSync
 }
 
-func (wn *WriteNode) doWriteNode(ctx context.Context, timeSync uint64, wg sync.WaitGroup) {
+func (wn *WriteNode) DoWriteNode(ctx context.Context, timeSync uint64, wg sync.WaitGroup) {
 	wg.Add(2)
-	go wn.InsertBatchData(ctx, wn.mc.InsertMsg, timeSync, wg)
-	go wn.DeleteBatchData(ctx, wn.mc.DeleteMsg, timeSync, wg)
+	go wn.InsertBatchData(ctx, wn.MessageClient.InsertMsg, wg)
+	go wn.DeleteBatchData(ctx, wn.MessageClient.DeleteMsg, wg)
 	wg.Wait()
+	wn.UpdateTimeSync(timeSync)
 }
