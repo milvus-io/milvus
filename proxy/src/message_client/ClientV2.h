@@ -8,7 +8,9 @@
 namespace milvus::message_client {
 class MsgClientV2 {
  public:
-  static MsgClientV2 &GetInstance();
+  MsgClientV2(int64_t client_id,
+              std::string &service_url,
+              const pulsar::ClientConfiguration &config = pulsar::ClientConfiguration());
   ~MsgClientV2();
 
   // When using MsgClient, make sure it init successfully
@@ -29,11 +31,6 @@ class MsgClientV2 {
   static milvus::grpc::QueryResult GetQueryResult(int64_t query_id);
 
  private:
-
-  MsgClientV2(int64_t client_id,
-              std::string &service_url,
-              const pulsar::ClientConfiguration &config = pulsar::ClientConfiguration());
-
   int64_t GetUniqueQId() {
     return q_id_.fetch_add(1);
   }

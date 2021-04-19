@@ -14,3 +14,7 @@
 aux_source_directory( ${MILVUS_ENGINE_SRC}/utils UTILS_FILES )
 
 add_library( utils STATIC ${UTILS_FILES} )
+
+target_link_libraries(utils
+        libboost_filesystem.a
+        libboost_system.a)

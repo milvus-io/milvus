@@ -17,6 +17,7 @@
 
 #include "server/delivery/request/DeleteEntityByIDReq.h"
 #include "src/server/delivery/ReqScheduler.h"
+#include "server/MessageWrapper.h"
 
 #include <memory>
 #include <string>
@@ -41,8 +42,8 @@ DeleteEntityByIDReq::Create(const ContextPtr& context, const ::milvus::grpc::Del
 
 Status
 DeleteEntityByIDReq::OnExecute() {
-  auto &msg_client = message_client::MsgClientV2::GetInstance();
-  Status status = msg_client.SendMutMessage(*request_, timestamp_);
+  auto &msg_client = MessageWrapper::GetInstance().MessageClient();
+  Status status = msg_client->SendMutMessage(*request_, timestamp_);
   return status;
 }
 

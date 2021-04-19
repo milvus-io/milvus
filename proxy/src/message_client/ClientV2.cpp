@@ -2,18 +2,8 @@
 #include "pulsar/Result.h"
 #include "PartitionPolicy.h"
 #include "utils/CommonUtil.h"
-#include "config/ServerConfig.h"
-
 
 namespace milvus::message_client {
-
-MsgClientV2 &MsgClientV2::GetInstance() {
-  std::string pulsar_server_addr(std::string {"pulsar://"} + config.pulsar.address() + ":" + std::to_string(config.pulsar.port()));
-
-  int64_t client_id = 0;
-  static MsgClientV2 msg_client(client_id, pulsar_server_addr);
-  return msg_client;
-}
 
 MsgClientV2::MsgClientV2(int64_t client_id, std::string &service_url, const pulsar::ClientConfiguration &config)
     : client_id_(client_id), service_url_(service_url) {}

@@ -15,6 +15,7 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "server/delivery/ReqScheduler.h"
+#include "server/MessageWrapper.h"
 
 #include <memory>
 #include <string>
@@ -42,8 +43,8 @@ InsertReq::Create(const ContextPtr &context, const ::milvus::grpc::InsertParam *
 Status
 InsertReq::OnExecute() {
   LOG_SERVER_INFO_ << LogOut("[%s][%ld] ", "insert", 0) << "Execute InsertReq.";
-  auto &msg_client = message_client::MsgClientV2::GetInstance();
-  Status status = msg_client.SendMutMessage(*insert_param_, timestamp_);
+  auto &msg_client = MessageWrapper::GetInstance().MessageClient();
+  Status status = msg_client->SendMutMessage(*insert_param_, timestamp_);
   return status;
 }
 
