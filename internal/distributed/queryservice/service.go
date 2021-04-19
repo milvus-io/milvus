@@ -166,6 +166,10 @@ func (s *Server) CreateQueryChannel(ctx context.Context, req *commonpb.Empty) (*
 	return s.queryService.CreateQueryChannel()
 }
 
+func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error) {
+	return s.queryService.GetSegmentInfo(req)
+}
+
 func NewServer(ctx context.Context) *Server {
 	ctx1, cancel := context.WithCancel(ctx)
 	service, err := queryservice.NewQueryService(ctx1)

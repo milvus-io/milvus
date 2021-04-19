@@ -141,6 +141,26 @@ message ComponentStatesResponse {
   internal.ComponentStates states = 2;
 }
 
+message SegmentInfo {
+  int64 segmentID = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+  int64 mem_size = 4;
+  int64 num_rows = 5;
+  string index_name = 6;
+  int64 indexID = 7;
+}
+
+message SegmentInfoRequest {
+  common.MsgBase base = 1;
+  repeated int64 segmentIDs = 2;
+}
+
+message SegmentInfoResponse {
+  common.Status status = 1;
+  repeated SegmentInfo infos = 2;
+}
+
 service QueryService {
   rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
 
@@ -157,6 +177,7 @@ service QueryService {
   rpc GetStatisticsChannel(common.Empty) returns (milvus.StringResponse) {}
   rpc GetPartitionStates(PartitionStatesRequest) returns (PartitionStatesResponse) {}
   rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
+  rpc GetSegmentInfo(SegmentInfoRequest) returns (SegmentInfoResponse) {}
 }
 
 service QueryNode {
@@ -169,4 +190,5 @@ service QueryNode {
   rpc WatchDmChannels(WatchDmChannelsRequest) returns (common.Status) {}
   rpc LoadSegments(LoadSegmentRequest) returns (common.Status) {}
   rpc ReleaseSegments(ReleaseSegmentRequest) returns (common.Status) {}
+  rpc GetSegmentInfo(SegmentInfoRequest) returns (SegmentInfoResponse) {}
 }

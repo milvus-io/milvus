@@ -93,8 +93,10 @@ func (s *loadService) execute(l *loadIndex) error {
 	var err error
 	var indexBuffer [][]byte
 	var indexParams indexParam
+	var indexName string
+	var indexID UniqueID
 	fn := func() error {
-		indexBuffer, indexParams, err = s.loadIndex(l.indexPaths)
+		indexBuffer, indexParams, indexName, indexID, err = s.loadIndex(l.indexPaths)
 		if err != nil {
 			return err
 		}
@@ -117,8 +119,8 @@ func (s *loadService) execute(l *loadIndex) error {
 	if err != nil {
 		return err
 	}
-	//3. update segment index stats
-	err = s.updateSegmentIndexStats(indexParams, l)
+	// 3. update segment index stats
+	err = s.updateSegmentIndexStats(indexParams, indexName, indexID, l)
 	if err != nil {
 		return err
 	}
@@ -173,7 +175,7 @@ func (s *loadService) fieldsStatsKey2IDs(key string) (UniqueID, UniqueID, error)
 	return collectionID, fieldID, nil
 }
 
-func (s *loadService) updateSegmentIndexStats(indexParams indexParam, l *loadIndex) error {
+func (s *loadService) updateSegmentIndexStats(indexParams indexParam, indexName string, indexID UniqueID, l *loadIndex) error {
 	targetSegment, err := s.replica.getSegmentByID(l.segmentID)
 	if err != nil {
 		return err
@@ -214,30 +216,39 @@ func (s *loadService) updateSegmentIndexStats(indexParams indexParam, l *loadInd
 				})
 		}
 	}
-	return targetSegment.setIndexParam(l.fieldID, newIndexParams)
+	err = targetSegment.setIndexParam(l.fieldID, newIndexParams)
+	if err != nil {
+		return err
+	}
+	targetSegment.setIndexName(indexName)
+	targetSegment.setIndexID(indexID)
+
+	return nil
 }
 
-func (s *loadService) loadIndex(indexPath []string) ([][]byte, indexParam, error) {
+func (s *loadService) loadIndex(indexPath []string) ([][]byte, indexParam, string, UniqueID, error) {
 	index := make([][]byte, 0)
 
 	var indexParams indexParam
+	var indexName string
+	var indexID UniqueID
 	for _, p := range indexPath {
 		fmt.Println("load path = ", indexPath)
 		indexPiece, err := s.kv.Load(p)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, "", -1, err
 		}
 		// get index params when detecting indexParamPrefix
 		if path.Base(p) == storage.IndexParamsFile {
 			indexCodec := storage.NewIndexCodec()
-			_, indexParams, _, _, err = indexCodec.Deserialize([]*storage.Blob{
+			_, indexParams, indexName, indexID, err = indexCodec.Deserialize([]*storage.Blob{
 				{
 					Key:   storage.IndexParamsFile,
 					Value: []byte(indexPiece),
 				},
 			})
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, "", -1, err
 			}
 		} else {
 			index = append(index, []byte(indexPiece))
@@ -245,9 +256,9 @@ func (s *loadService) loadIndex(indexPath []string) ([][]byte, indexParam, error
 	}
 
 	if len(indexParams) <= 0 {
-		return nil, nil, errors.New("cannot find index param")
+		return nil, nil, "", -1, errors.New("cannot find index param")
 	}
-	return index, indexParams, nil
+	return index, indexParams, indexName, indexID, nil
 }
 
 func (s *loadService) updateSegmentIndex(indexParams indexParam, bytesIndex [][]byte, l *loadIndex) error {

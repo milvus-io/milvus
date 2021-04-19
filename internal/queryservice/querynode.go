@@ -21,3 +21,7 @@ func (qn *queryNodeInfo) GetComponentStates() (*internalpb2.ComponentStates, err
 func (qn *queryNodeInfo) LoadSegments(in *querypb.LoadSegmentRequest) (*commonpb.Status, error) {
 	return qn.client.LoadSegments(in)
 }
+
+func (qn *queryNodeInfo) GetSegmentInfo(in *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error) {
+	return qn.client.GetSegmentInfo(in)
+}
