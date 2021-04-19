@@ -17,7 +17,8 @@ NewPartition(CCollection collection, const char* partition_name) {
   return (void*)partition.release();
 }
 
-void DeletePartition(CPartition partition) {
+void
+DeletePartition(CPartition partition) {
   auto p = (milvus::dog_segment::Partition*)partition;
 
   // TODO: delete print

@@ -41,6 +41,28 @@ func TestMinioDriver_DeleteRow(t *testing.T){
 	assert.Nil(t, object2)
 }
 
+func TestMinioDriver_GetSegments(t *testing.T) {
+	err = client.PutRow(ctx, []byte("seg"), []byte("abcdefghijklmnoopqrstuvwxyz"), "SegmentA", 1234567)
+	assert.Nil(t, err)
+	err = client.PutRow(ctx, []byte("seg"), []byte("djhfkjsbdfbsdughorsgsdjhgoisdgh"), "SegmentA", 1235567)
+	assert.Nil(t, err)
+	err = client.PutRow(ctx, []byte("seg"), []byte("123854676ershdgfsgdfk,sdhfg;sdi8"), "SegmentB", 1236567)
+	assert.Nil(t, err)
+	err = client.PutRow(ctx, []byte("seg2"), []byte("testkeybarorbar_1"), "SegmentC", 1236567)
+	assert.Nil(t, err)
+
+	segements, err := client.GetSegments(ctx, []byte("seg"), 1237777)
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(segements))
+	if segements[0] == "SegmentA" {
+		assert.Equal(t, "SegmentA", segements[0])
+		assert.Equal(t, "SegmentB", segements[1])
+	} else {
+		assert.Equal(t, "SegmentB", segements[0])
+		assert.Equal(t, "SegmentA", segements[1])
+	}
+}
+
 func TestMinioDriver_PutRowsAndGetRows(t *testing.T){
 	keys := [][]byte{[]byte("foo"), []byte("bar")}
 	values := [][]byte{[]byte("The key is foo!"), []byte("The key is bar!")}

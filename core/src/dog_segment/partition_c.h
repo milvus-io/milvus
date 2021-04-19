@@ -6,9 +6,11 @@ extern "C" {
 
 typedef void* CPartition;
 
-CPartition NewPartition(CCollection collection, const char* partition_name);
+CPartition
+NewPartition(CCollection collection, const char* partition_name);
 
-void DeletePartition(CPartition partition);
+void
+DeletePartition(CPartition partition);
 
 #ifdef __cplusplus
 }

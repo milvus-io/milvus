@@ -9,7 +9,7 @@ func MvccEncode(key []byte, ts uint64, suffix string) ([]byte, error) {
 	return []byte(string(key) + "_" + fmt.Sprintf("%016x", ^ts) + "_" + suffix), nil
 }
 
-func MvccDecode(key string) (string, uint64, string, error) {
+func MvccDecode(key []byte) (string, uint64, string, error) {
 	if len(key) < 16 {
 		return "", 0, "", errors.New("insufficient bytes to decode value")
 	}
@@ -18,7 +18,7 @@ func MvccDecode(key string) (string, uint64, string, error) {
 	TSIndex := 0
 	undersCount := 0
 	for i := len(key) - 1; i > 0; i-- {
-		if key[i] == '_' {
+		if key[i] == byte('_') {
 			undersCount++
 			if undersCount == 1 {
 				suffixIndex = i + 1
@@ -34,13 +34,13 @@ func MvccDecode(key string) (string, uint64, string, error) {
 	}
 
 	var TS uint64
-	_, err := fmt.Sscanf(key[TSIndex:suffixIndex-1], "%x", &TS)
+	_, err := fmt.Sscanf(string(key[TSIndex:suffixIndex-1]), "%x", &TS)
 	TS = ^TS
 	if err != nil {
 		return "", 0, "", err
 	}
 
-	return key[0 : TSIndex-1], TS, key[suffixIndex:], nil
+	return string(key[0 : TSIndex-1]), TS, string(key[suffixIndex:]), nil
 }
 
 func LogEncode(key []byte, ts uint64, channel int) []byte {

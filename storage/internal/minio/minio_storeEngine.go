@@ -75,7 +75,7 @@ func (s *minioStore) Scan(ctx context.Context, keyStart Key, keyEnd Key, limit i
 				}
 				values = append(values, value)
 			}
-			limitCount--;
+			limitCount--
 			if limitCount <= 0{
 				break
 			}
