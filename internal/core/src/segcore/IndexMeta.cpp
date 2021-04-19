@@ -1,7 +1,7 @@
 #include "IndexMeta.h"
 #include <mutex>
 #include <cassert>
-namespace milvus::dog_segment {
+namespace milvus::segcore {
 
 Status
 IndexMeta::AddEntry(
@@ -47,4 +47,4 @@ IndexMeta::VerifyEntry(const Entry& entry) {
     }
 }
 
-}  // namespace milvus::dog_segment
+}  // namespace milvus::segcore

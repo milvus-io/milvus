@@ -13,9 +13,9 @@
 
 #include <iostream>
 #include <random>
-#include  "knowhere/common/Config.h"
-#include  "knowhere/index/vector_index/IndexHNSW.h"
-#include  "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "knowhere/common/Config.h"
+#include "knowhere/index/vector_index/IndexHNSW.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "knowhere/common/Exception.h"
 #include "unittest/utils.h"
 

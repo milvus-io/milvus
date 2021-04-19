@@ -185,7 +185,7 @@ func (s *proxyServer) Insert(ctx context.Context, req *servicepb.RowBatch) (*ser
 	if len(req.RowData) == 0 { //primary key is empty, set primary key by server
 		log.Printf("Set primary key")
 	}
-	if len(req.HashValues) != len(req.RowData) {
+	if len(req.HashKeys) != len(req.RowData) {
 		return &servicepb.IntegerRangeResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -194,8 +194,8 @@ func (s *proxyServer) Insert(ctx context.Context, req *servicepb.RowBatch) (*ser
 		}, nil
 	}
 
-	for i := 0; i < len(req.HashValues); i++ {
-		key := int64(req.HashValues[i])
+	for i := 0; i < len(req.HashKeys); i++ {
+		key := int64(req.HashKeys[i])
 		hash, err := typeutil.Hash32Int64(key)
 		if err != nil {
 			return nil, status.Errorf(codes.Unknown, "hash failed on %d", key)

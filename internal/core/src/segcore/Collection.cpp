@@ -6,7 +6,7 @@
 #include <google/protobuf/text_format.h>
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 
-namespace milvus::dog_segment {
+namespace milvus::segcore {
 
 Collection::Collection(std::string& collection_name, std::string& schema)
     : collection_name_(collection_name), schema_json_(schema) {
@@ -128,15 +128,15 @@ Collection::parse() {
     }
     auto schema = std::make_shared<Schema>();
     for (const milvus::proto::schema::FieldSchema& child : collection_meta.schema().fields()) {
-        const auto & type_params = child.type_params();
+        const auto& type_params = child.type_params();
         int dim = 16;
-        for (const auto & type_param: type_params){
-            if(type_param.key() == "dim"){
+        for (const auto& type_param : type_params) {
+            if (type_param.key() == "dim") {
                 // dim = type_param.value();
             }
         }
-        std::cout << "add Field, name :" << child.name() << ", datatype :" << child.data_type()
-                  << ", dim :" << dim << std::endl;
+        std::cout << "add Field, name :" << child.name() << ", datatype :" << child.data_type() << ", dim :" << dim
+                  << std::endl;
         schema->AddField(std::string_view(child.name()), DataType(child.data_type()), dim);
     }
     /*
@@ -146,4 +146,4 @@ Collection::parse() {
     schema_ = schema;
 }
 
-}  // namespace milvus::dog_segment
+}  // namespace milvus::segcore

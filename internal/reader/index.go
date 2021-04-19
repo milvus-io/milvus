@@ -4,7 +4,7 @@ package reader
 
 #cgo CFLAGS: -I../core/output/include
 
-#cgo LDFLAGS: -L../core/output/lib -lmilvus_dog_segment -Wl,-rpath=../core/output/lib
+#cgo LDFLAGS: -L../core/output/lib -lmilvus_segcore -Wl,-rpath=../core/output/lib
 
 #include "collection_c.h"
 #include "partition_c.h"

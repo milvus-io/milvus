@@ -203,10 +203,10 @@ endif ()
 set( GPU_ENABLE "false" )
 
 install(
-        DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/dog_segment/
+        DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/segcore/
         DESTINATION include
         FILES_MATCHING PATTERN "*_c.h"
 )
 
-install(FILES ${CMAKE_BINARY_DIR}/src/dog_segment/libmilvus_dog_segment.so
+install(FILES ${CMAKE_BINARY_DIR}/src/segcore/libmilvus_segcore.so
         DESTINATION lib)

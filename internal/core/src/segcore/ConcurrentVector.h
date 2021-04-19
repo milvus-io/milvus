@@ -8,7 +8,7 @@
 #include <shared_mutex>
 #include <vector>
 #include "EasyAssert.h"
-namespace milvus::dog_segment {
+namespace milvus::segcore {
 
 // we don't use std::array because capacity of concurrent_vector wastes too much memory
 // template <typename Type>
@@ -207,4 +207,4 @@ class ConcurrentVector : public VectorBase {
     ThreadSafeVector<Chunk> chunks_;
 };
 
-}  // namespace milvus::dog_segment
+}  // namespace milvus::segcore

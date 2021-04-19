@@ -17,18 +17,18 @@
 #include <thread>
 #include <vector>
 
-#include "dog_segment/ConcurrentVector.h"
-#include "dog_segment/SegmentBase.h"
+#include "segcore/ConcurrentVector.h"
+#include "segcore/SegmentBase.h"
 // #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
-#include "dog_segment/SegmentBase.h"
-#include "dog_segment/AckResponder.h"
+#include "segcore/SegmentBase.h"
+#include "segcore/AckResponder.h"
 
 using std::cin;
 using std::cout;
 using std::endl;
 using namespace milvus::engine;
-using namespace milvus::dog_segment;
+using namespace milvus::segcore;
 using std::vector;
 
 TEST(ConcurrentVector, TestABI) {

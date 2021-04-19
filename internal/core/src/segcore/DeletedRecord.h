@@ -5,7 +5,7 @@
 #include "knowhere//index/vector_index/IndexIVF.h"
 #include <memory>
 
-namespace milvus::dog_segment {
+namespace milvus::segcore {
 
 struct DeletedRecord {
     struct TmpBitmap {
@@ -60,4 +60,4 @@ DeletedRecord::TmpBitmap::clone(int64_t capacity) -> std::shared_ptr<TmpBitmap> 
     return res;
 }
 
-}  // namespace milvus::dog_segment
+}  // namespace milvus::segcore

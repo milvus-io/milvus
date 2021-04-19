@@ -2,7 +2,7 @@
 
 #include "SegmentBase.h"
 
-namespace milvus::dog_segment {
+namespace milvus::segcore {
 
 class Partition {
  public:
@@ -32,4 +32,4 @@ class Partition {
 
 using PartitionPtr = std::unique_ptr<Partition>;
 
-}  // namespace milvus::dog_segment
+}  // namespace milvus::segcore

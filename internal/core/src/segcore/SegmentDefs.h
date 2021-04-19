@@ -7,15 +7,14 @@
 #include "utils/Types.h"
 // #include "knowhere/index/Index.h"
 #include "utils/Status.h"
-#include "dog_segment/IndexMeta.h"
 #include "EasyAssert.h"
 
-namespace milvus::dog_segment {
+namespace milvus::segcore {
 using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
 using engine::DataType;
 using engine::FieldElementType;
 
-struct DogDataChunk {
+struct RowBasedRawData {
     void* raw_data;      // schema
     int sizeof_per_row;  // alignment
     int64_t count;
@@ -193,4 +192,4 @@ class Schema {
 using SchemaPtr = std::shared_ptr<Schema>;
 using idx_t = int64_t;
 
-}  // namespace milvus::dog_segment
+}  // namespace milvus::segcore
