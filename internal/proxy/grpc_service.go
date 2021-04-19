@@ -35,21 +35,18 @@ func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.
 
 	defer it.cancel()
 
-	var t task = it
-	p.taskSch.DmQueue.Enqueue(&t)
-	for {
-		select {
-		case <-ctx.Done():
-			log.Print("insert timeout!")
-			return &servicepb.IntegerRangeResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-					Reason:    "insert timeout!",
-				},
-			}, errors.New("insert timeout!")
-		case result := <-it.resultChan:
-			return result, nil
-		}
+	p.taskSch.DmQueue.Enqueue(it)
+	select {
+	case <-ctx.Done():
+		log.Print("insert timeout!")
+		return &servicepb.IntegerRangeResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "insert timeout!",
+			},
+		}, errors.New("insert timeout!")
+	case result := <-it.resultChan:
+		return result, nil
 	}
 }
 
@@ -69,19 +66,16 @@ func (p *Proxy) CreateCollection(ctx context.Context, req *schemapb.CollectionSc
 	cct.ctx, cct.cancel = context.WithCancel(ctx)
 	defer cct.cancel()
 
-	var t task = cct
-	p.taskSch.DdQueue.Enqueue(&t)
-	for {
-		select {
-		case <-ctx.Done():
-			log.Print("create collection timeout!")
-			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    "create collection timeout!",
-			}, errors.New("create collection timeout!")
-		case result := <-cct.resultChan:
-			return result, nil
-		}
+	p.taskSch.DdQueue.Enqueue(cct)
+	select {
+	case <-ctx.Done():
+		log.Print("create collection timeout!")
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    "create collection timeout!",
+		}, errors.New("create collection timeout!")
+	case result := <-cct.resultChan:
+		return result, nil
 	}
 }
 
@@ -102,21 +96,18 @@ func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.Qu
 	qt.SearchRequest.Query.Value = queryBytes
 	defer qt.cancel()
 
-	var t task = qt
-	p.taskSch.DqQueue.Enqueue(&t)
-	for {
-		select {
-		case <-ctx.Done():
-			log.Print("query timeout!")
-			return &servicepb.QueryResult{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-					Reason:    "query timeout!",
-				},
-			}, errors.New("query timeout!")
-		case result := <-qt.resultChan:
-			return result, nil
-		}
+	p.taskSch.DqQueue.Enqueue(qt)
+	select {
+	case <-ctx.Done():
+		log.Print("query timeout!")
+		return &servicepb.QueryResult{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "query timeout!",
+			},
+		}, errors.New("query timeout!")
+	case result := <-qt.resultChan:
+		return result, nil
 	}
 }
 
@@ -134,19 +125,16 @@ func (p *Proxy) DropCollection(ctx context.Context, req *servicepb.CollectionNam
 	dct.ctx, dct.cancel = context.WithCancel(ctx)
 	defer dct.cancel()
 
-	var t task = dct
-	p.taskSch.DdQueue.Enqueue(&t)
-	for {
-		select {
-		case <-ctx.Done():
-			log.Print("create collection timeout!")
-			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    "create collection timeout!",
-			}, errors.New("create collection timeout!")
-		case result := <-dct.resultChan:
-			return result, nil
-		}
+	p.taskSch.DdQueue.Enqueue(dct)
+	select {
+	case <-ctx.Done():
+		log.Print("create collection timeout!")
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    "create collection timeout!",
+		}, errors.New("create collection timeout!")
+	case result := <-dct.resultChan:
+		return result, nil
 	}
 }
 
@@ -164,22 +152,19 @@ func (p *Proxy) HasCollection(ctx context.Context, req *servicepb.CollectionName
 	hct.ctx, hct.cancel = context.WithCancel(ctx)
 	defer hct.cancel()
 
-	var t task = hct
-	p.taskSch.DqQueue.Enqueue(&t)
-	for {
-		select {
-		case <-ctx.Done():
-			log.Print("has collection timeout!")
-			return &servicepb.BoolResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-					Reason:    "has collection timeout!",
-				},
-				Value: false,
-			}, errors.New("has collection timeout!")
-		case result := <-hct.resultChan:
-			return result, nil
-		}
+	p.taskSch.DqQueue.Enqueue(hct)
+	select {
+	case <-ctx.Done():
+		log.Print("has collection timeout!")
+		return &servicepb.BoolResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "has collection timeout!",
+			},
+			Value: false,
+		}, errors.New("has collection timeout!")
+	case result := <-hct.resultChan:
+		return result, nil
 	}
 }
 
@@ -197,21 +182,18 @@ func (p *Proxy) DescribeCollection(ctx context.Context, req *servicepb.Collectio
 	dct.ctx, dct.cancel = context.WithCancel(ctx)
 	defer dct.cancel()
 
-	var t task = dct
-	p.taskSch.DqQueue.Enqueue(&t)
-	for {
-		select {
-		case <-ctx.Done():
-			log.Print("has collection timeout!")
-			return &servicepb.CollectionDescription{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-					Reason:    "describe collection timeout!",
-				},
-			}, errors.New("describe collection timeout!")
-		case result := <-dct.resultChan:
-			return result, nil
-		}
+	p.taskSch.DqQueue.Enqueue(dct)
+	select {
+	case <-ctx.Done():
+		log.Print("has collection timeout!")
+		return &servicepb.CollectionDescription{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "describe collection timeout!",
+			},
+		}, errors.New("describe collection timeout!")
+	case result := <-dct.resultChan:
+		return result, nil
 	}
 }
 
@@ -228,21 +210,18 @@ func (p *Proxy) ShowCollections(ctx context.Context, req *commonpb.Empty) (*serv
 	sct.ctx, sct.cancel = context.WithCancel(ctx)
 	defer sct.cancel()
 
-	var t task = sct
-	p.taskSch.DqQueue.Enqueue(&t)
-	for {
-		select {
-		case <-ctx.Done():
-			log.Print("show collections timeout!")
-			return &servicepb.StringListResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-					Reason:    "show collections timeout!",
-				},
-			}, errors.New("show collections timeout!")
-		case result := <-sct.resultChan:
-			return result, nil
-		}
+	p.taskSch.DqQueue.Enqueue(sct)
+	select {
+	case <-ctx.Done():
+		log.Print("show collections timeout!")
+		return &servicepb.StringListResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "show collections timeout!",
+			},
+		}, errors.New("show collections timeout!")
+	case result := <-sct.resultChan:
+		return result, nil
 	}
 }
 
