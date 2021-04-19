@@ -376,13 +376,18 @@ func (c *Core) startSegmentFlushCompletedLoop() {
 				log.Printf("GetCollectionBySegmentID, error = %s ", err.Error())
 			}
 			for _, f := range coll.FieldIndexes {
+				idxInfo, err := c.MetaTable.GetIndexByID(f.IndexID)
+				if err != nil {
+					log.Printf("index id = %d not found", f.IndexID)
+				}
+
 				fieldSch, err := GetFieldSchemaByID(coll, f.FiledID)
 				if err == nil {
 					t := &CreateIndexTask{
 						core:        c,
 						segmentID:   seg,
-						indexName:   f.IndexInfo.IndexName,
-						indexID:     f.IndexInfo.IndexID,
+						indexName:   idxInfo.IndexName,
+						indexID:     idxInfo.IndexID,
 						fieldSchema: fieldSch,
 						indexParams: nil,
 					}

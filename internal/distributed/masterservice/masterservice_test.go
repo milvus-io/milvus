@@ -517,9 +517,8 @@ func TestGrpcService(t *testing.T) {
 		rsp, err := cli.DescribeIndex(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
-		assert.Equal(t, len(rsp.IndexDescriptions), 2)
+		assert.Equal(t, len(rsp.IndexDescriptions), 1)
 		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, cms.Params.DefaultIndexName)
-		assert.Equal(t, rsp.IndexDescriptions[1].IndexName, "testColl_index_100")
 
 	})
 

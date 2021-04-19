@@ -24,4 +24,4 @@ master:
 
   maxPartitionNum: 4096
   nodeID: 100
-  timeout: 5 # time out, 5 seconds
+  timeout: 3600 # time out, 5 seconds

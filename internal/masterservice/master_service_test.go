@@ -604,8 +604,9 @@ func TestMasterService(t *testing.T) {
 		collMeta, err = core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.FieldIndexes), 2)
-		assert.Equal(t, len(collMeta.FieldIndexes), 2)
-		assert.Equal(t, collMeta.FieldIndexes[1].IndexInfo.IndexName, Params.DefaultIndexName)
+		idxMeta, err := core.MetaTable.GetIndexByID(collMeta.FieldIndexes[1].IndexID)
+		assert.Nil(t, err)
+		assert.Equal(t, idxMeta.IndexName, Params.DefaultIndexName)
 
 		req.FieldName = "no field"
 		rsp, err = core.CreateIndex(req)
@@ -727,7 +728,7 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
-		assert.Equal(t, len(rsp.IndexDescriptions), 3)
+		assert.Equal(t, len(rsp.IndexDescriptions), 2)
 		indexNames := make([]string, 0)
 		for _, d := range rsp.IndexDescriptions {
 			indexNames = append(indexNames, d.IndexName)
@@ -735,7 +736,6 @@ func TestMasterService(t *testing.T) {
 
 		assert.ElementsMatch(t, indexNames, []string{
 			"testColl_index_100",
-			Params.DefaultIndexName,
 			Params.DefaultIndexName,
 		})
 	})

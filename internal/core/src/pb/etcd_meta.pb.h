@@ -872,29 +872,26 @@ class FieldIndexInfo :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kIndexInfoFieldNumber = 2,
     kFiledIDFieldNumber = 1,
+    kIndexIDFieldNumber = 2,
   };
-  // .milvus.proto.etcd.IndexInfo index_info = 2;
-  bool has_index_info() const;
-  void clear_index_info();
-  const ::milvus::proto::etcd::IndexInfo& index_info() const;
-  ::milvus::proto::etcd::IndexInfo* release_index_info();
-  ::milvus::proto::etcd::IndexInfo* mutable_index_info();
-  void set_allocated_index_info(::milvus::proto::etcd::IndexInfo* index_info);
-
   // int64 filedID = 1;
   void clear_filedid();
   ::PROTOBUF_NAMESPACE_ID::int64 filedid() const;
   void set_filedid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // int64 indexID = 2;
+  void clear_indexid();
+  ::PROTOBUF_NAMESPACE_ID::int64 indexid() const;
+  void set_indexid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
   // @@protoc_insertion_point(class_scope:milvus.proto.etcd.FieldIndexInfo)
  private:
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::milvus::proto::etcd::IndexInfo* index_info_;
   ::PROTOBUF_NAMESPACE_ID::int64 filedid_;
+  ::PROTOBUF_NAMESPACE_ID::int64 indexid_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_etcd_5fmeta_2eproto;
 };
@@ -2456,55 +2453,18 @@ inline void FieldIndexInfo::set_filedid(::PROTOBUF_NAMESPACE_ID::int64 value) {
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.FieldIndexInfo.filedID)
 }
 
-// .milvus.proto.etcd.IndexInfo index_info = 2;
-inline bool FieldIndexInfo::has_index_info() const {
-  return this != internal_default_instance() && index_info_ != nullptr;
+// int64 indexID = 2;
+inline void FieldIndexInfo::clear_indexid() {
+  indexid_ = PROTOBUF_LONGLONG(0);
 }
-inline void FieldIndexInfo::clear_index_info() {
-  if (GetArenaNoVirtual() == nullptr && index_info_ != nullptr) {
-    delete index_info_;
-  }
-  index_info_ = nullptr;
+inline ::PROTOBUF_NAMESPACE_ID::int64 FieldIndexInfo::indexid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.FieldIndexInfo.indexID)
+  return indexid_;
 }
-inline const ::milvus::proto::etcd::IndexInfo& FieldIndexInfo::index_info() const {
-  const ::milvus::proto::etcd::IndexInfo* p = index_info_;
-  // @@protoc_insertion_point(field_get:milvus.proto.etcd.FieldIndexInfo.index_info)
-  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::etcd::IndexInfo*>(
-      &::milvus::proto::etcd::_IndexInfo_default_instance_);
-}
-inline ::milvus::proto::etcd::IndexInfo* FieldIndexInfo::release_index_info() {
-  // @@protoc_insertion_point(field_release:milvus.proto.etcd.FieldIndexInfo.index_info)
+inline void FieldIndexInfo::set_indexid(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
-  ::milvus::proto::etcd::IndexInfo* temp = index_info_;
-  index_info_ = nullptr;
-  return temp;
-}
-inline ::milvus::proto::etcd::IndexInfo* FieldIndexInfo::mutable_index_info() {
-  
-  if (index_info_ == nullptr) {
-    auto* p = CreateMaybeMessage<::milvus::proto::etcd::IndexInfo>(GetArenaNoVirtual());
-    index_info_ = p;
-  }
-  // @@protoc_insertion_point(field_mutable:milvus.proto.etcd.FieldIndexInfo.index_info)
-  return index_info_;
-}
-inline void FieldIndexInfo::set_allocated_index_info(::milvus::proto::etcd::IndexInfo* index_info) {
-  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
-  if (message_arena == nullptr) {
-    delete index_info_;
-  }
-  if (index_info) {
-    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
-    if (message_arena != submessage_arena) {
-      index_info = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
-          message_arena, index_info, submessage_arena);
-    }
-    
-  } else {
-    
-  }
-  index_info_ = index_info;
-  // @@protoc_insertion_point(field_set_allocated:milvus.proto.etcd.FieldIndexInfo.index_info)
+  indexid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.FieldIndexInfo.indexID)
 }
 
 // -------------------------------------------------------------------

@@ -32,7 +32,7 @@ message IndexInfo {
 
 message FieldIndexInfo{
   int64 filedID = 1;
-  IndexInfo index_info = 2;
+  int64 indexID = 2;
 }
 
 message CollectionInfo {
