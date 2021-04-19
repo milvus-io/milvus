@@ -3,11 +3,10 @@ package mock
 import (
 	"context"
 	"fmt"
+	"github.com/czs007/suvlim/conf"
 	"log"
 	"strconv"
 	"time"
-
-	"github.com/czs007/suvlim/conf"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 )
@@ -30,8 +29,8 @@ func FakePulsarProducer() {
 		Topic: conf.Config.Master.PulsarTopic,
 	})
 	testSegmentStats, _ := SegmentMarshal(SegmentStats{
-		SegementID: uint64(6875875531164062448),
-		MemorySize: uint64(9999),
+		SegementID: uint64(1111),
+		MemorySize: uint64(333322),
 		MemoryRate: float64(0.13),
 	})
 	for {
