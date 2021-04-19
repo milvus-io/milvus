@@ -26,7 +26,7 @@ require (
 	github.com/pingcap/log v0.0.0-20200828042413-fce0951f1463 // indirect
 	github.com/pivotal-golang/bytefmt v0.0.0-20200131002437-cf55d5288a48
 	github.com/prometheus/client_golang v1.5.1 // indirect
-	github.com/prometheus/common v0.10.0 // indirect
+	github.com/prometheus/common v0.10.0
 	github.com/prometheus/procfs v0.1.3 // indirect
 	github.com/sirupsen/logrus v1.6.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0

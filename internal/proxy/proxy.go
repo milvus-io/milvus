@@ -34,6 +34,7 @@ type Proxy struct {
 
 	idAllocator  *allocator.IDAllocator
 	tsoAllocator *allocator.TimestampAllocator
+	segAssigner  *allocator.SegIDAssigner
 
 	manipulationMsgStream *msgstream.PulsarMsgStream
 	queryMsgStream        *msgstream.PulsarMsgStream
@@ -97,6 +98,12 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 	}
 	p.tsoAllocator = tsoAllocator
 
+	segAssigner, err := allocator.NewSegIDAssigner(p.proxyLoopCtx, masterAddr)
+	if err != nil {
+		panic(err)
+	}
+	p.segAssigner = segAssigner
+
 	p.taskSch, err = NewTaskScheduler(p.proxyLoopCtx, p.idAllocator, p.tsoAllocator)
 	if err != nil {
 		return nil, err
@@ -121,6 +128,7 @@ func (p *Proxy) startProxy() error {
 	p.taskSch.Start()
 	p.idAllocator.Start()
 	p.tsoAllocator.Start()
+	p.segAssigner.Start()
 
 	// Run callbacks
 	for _, cb := range p.startCallbacks {
@@ -240,6 +248,8 @@ func (p *Proxy) stopProxyLoop() {
 	p.tsoAllocator.Close()
 
 	p.idAllocator.Close()
+
+	p.segAssigner.Close()
 
 	p.taskSch.Close()
 

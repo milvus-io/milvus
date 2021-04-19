@@ -171,7 +171,7 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "vus.proto.common.ErrorCode\022\016\n\006reason\030\002 \001"
   "(\t\"*\n\014KeyValuePair\022\013\n\003key\030\001 \001(\t\022\r\n\005value"
   "\030\002 \001(\t\"\025\n\004Blob\022\r\n\005value\030\001 \001(\014\"#\n\007Address"
-  "\022\n\n\002ip\030\001 \001(\t\022\014\n\004port\030\002 \001(\003*\242\004\n\tErrorCode"
+  "\022\n\n\002ip\030\001 \001(\t\022\014\n\004port\030\002 \001(\003*\270\004\n\tErrorCode"
   "\022\013\n\007SUCCESS\020\000\022\024\n\020UNEXPECTED_ERROR\020\001\022\022\n\016C"
   "ONNECT_FAILED\020\002\022\025\n\021PERMISSION_DENIED\020\003\022\031"
   "\n\025COLLECTION_NOT_EXISTS\020\004\022\024\n\020ILLEGAL_ARG"
@@ -185,9 +185,9 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "\030\n\024CANNOT_DELETE_FOLDER\020\023\022\026\n\022CANNOT_DELE"
   "TE_FILE\020\024\022\025\n\021BUILD_INDEX_ERROR\020\025\022\021\n\rILLE"
   "GAL_NLIST\020\026\022\027\n\023ILLEGAL_METRIC_TYPE\020\027\022\021\n\r"
-  "OUT_OF_MEMORY\020\030BBZ@github.com/zilliztech"
-  "/milvus-distributed/internal/proto/commo"
-  "npbb\006proto3"
+  "OUT_OF_MEMORY\020\030\022\024\n\017DD_REQUEST_RACE\020\350\007BBZ"
+  "@github.com/zilliztech/milvus-distribute"
+  "d/internal/proto/commonpbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_common_2eproto_deps[1] = {
 };
@@ -201,7 +201,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_com
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_common_2eproto_once;
 static bool descriptor_table_common_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_common_2eproto = {
-  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 851,
+  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 873,
   &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 5, 0,
   schemas, file_default_instances, TableStruct_common_2eproto::offsets,
   file_level_metadata_common_2eproto, 5, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,
@@ -242,6 +242,7 @@ bool ErrorCode_IsValid(int value) {
     case 22:
     case 23:
     case 24:
+    case 1000:
       return true;
     default:
       return false;

@@ -13,8 +13,7 @@ import (
 type Timestamp = typeutil.Timestamp
 
 const (
-	tsCountPerRPC         = 2 << 18 * 10
-	defaultUpdateInterval = 1000 * time.Millisecond
+	tsCountPerRPC = 2 << 18 * 10
 )
 
 type TimestampAllocator struct {
@@ -26,11 +25,11 @@ type TimestampAllocator struct {
 func NewTimestampAllocator(ctx context.Context, masterAddr string) (*TimestampAllocator, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	a := &TimestampAllocator{
-		Allocator: Allocator{reqs: make(chan request, maxMergeRequests),
+		Allocator: Allocator{reqs: make(chan request, maxConcurrentRequests),
 			ctx:           ctx1,
 			cancel:        cancel,
 			masterAddress: masterAddr,
-			countPerRPC:   maxMergeRequests,
+			countPerRPC:   tsCountPerRPC,
 		},
 	}
 	a.tChan = &ticker{
@@ -39,6 +38,18 @@ func NewTimestampAllocator(ctx context.Context, masterAddr string) (*TimestampAl
 	a.Allocator.syncFunc = a.syncTs
 	a.Allocator.processFunc = a.processFunc
 	return a, nil
+}
+
+func (ta *TimestampAllocator) checkFunc(timeout bool) bool {
+	if timeout {
+		return true
+	}
+	need := uint32(0)
+	for _, req := range ta.toDoReqs {
+		iReq := req.(*tsoRequest)
+		need += iReq.count
+	}
+	return ta.lastTsBegin+Timestamp(need) >= ta.lastTsEnd
 }
 
 func (ta *TimestampAllocator) syncTs() {
@@ -61,15 +72,12 @@ func (ta *TimestampAllocator) syncTs() {
 	ta.lastTsEnd = ta.lastTsBegin + uint64(resp.GetCount())
 }
 
-func (ta *TimestampAllocator) processFunc(req request) {
-	if req == nil {
-		fmt.Println("Occur nil!!!!")
-		return
-	}
+func (ta *TimestampAllocator) processFunc(req request) error {
 	tsoRequest := req.(*tsoRequest)
 	tsoRequest.timestamp = ta.lastTsBegin
 	ta.lastTsBegin++
 	fmt.Println("process tso")
+	return nil
 }
 
 func (ta *TimestampAllocator) AllocOne() (Timestamp, error) {
@@ -81,7 +89,6 @@ func (ta *TimestampAllocator) AllocOne() (Timestamp, error) {
 }
 
 func (ta *TimestampAllocator) Alloc(count uint32) ([]Timestamp, error) {
-	//req := tsoReqPool.Get().(*tsoRequest)
 	req := &tsoRequest{
 		baseRequest: baseRequest{done: make(chan error), valid: false},
 	}
@@ -100,4 +107,8 @@ func (ta *TimestampAllocator) Alloc(count uint32) ([]Timestamp, error) {
 		ret = append(ret, start+uint64(i))
 	}
 	return ret, nil
+}
+
+func (ta *TimestampAllocator) ClearCache() {
+
 }

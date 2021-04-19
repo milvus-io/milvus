@@ -206,8 +206,9 @@ func TestMaster_Partition(t *testing.T) {
 	assert.Equal(t, collMeta.Schema.Fields[1].IndexParams[0].Value, "col1_f2_iv1")
 	assert.Equal(t, collMeta.Schema.Fields[1].IndexParams[1].Value, "col1_f2_iv2")
 
-	assert.Equal(t, collMeta.PartitionTags[0], "partition1")
-	assert.Equal(t, collMeta.PartitionTags[1], "partition2")
+	//assert.Equal(t, collMeta.PartitionTags[0], "partition1")
+	//assert.Equal(t, collMeta.PartitionTags[1], "partition2")
+	assert.ElementsMatch(t, []string{"default", "partition1", "partition2"}, collMeta.PartitionTags)
 
 	showPartitionReq := internalpb.ShowPartitionRequest{
 		MsgType:        internalpb.MsgType_kShowPartitions,
@@ -219,7 +220,7 @@ func TestMaster_Partition(t *testing.T) {
 
 	stringList, err := cli.ShowPartitions(ctx, &showPartitionReq)
 	assert.Nil(t, err)
-	assert.ElementsMatch(t, []string{"partition1", "partition2"}, stringList.Values)
+	assert.ElementsMatch(t, []string{"default", "partition1", "partition2"}, stringList.Values)
 
 	showPartitionReq = internalpb.ShowPartitionRequest{
 		MsgType:        internalpb.MsgType_kShowPartitions,
