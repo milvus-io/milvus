@@ -1,10 +1,16 @@
-package pulsar
+package client_go
 
 import (
 	"fmt"
-	"github.com/czs007/suvlim/pulsar/schema"
+	"suvlim/pulsar/client-go/schema"
 	"sync"
 	"time"
+)
+
+var (
+	consumerWSchema = "{\"type\":\"record\",\"name\":\"suvlim\",\"namespace\":\"pulsar\",\"fields\":[" +
+		"{\"name\":\"MsgType\",\"type\":\"OpType\"}," +
+		"]}"
 )
 
 type WriteNode struct {
@@ -25,10 +31,10 @@ func main() {
 
 	mc := MessageClient{}
 	topics := []string{"insert", "delete"}
-	mc.InitClient("pulsar://localhost:6650", topics)
+	mc.InitClient("pulsar://localhost:6650", topics, consumerWSchema)
 
 	go mc.ReceiveMessage()
-
+	wg := sync.WaitGroup{}
 	wn := WriteNode{mc}
 
 	for {

@@ -109,6 +109,9 @@ type PulsarMessage struct {
 	Timestamp      int64
 	ClientId       int64
 	MsgType        OpType
+	TopicName      string
+	PartitionId    int64
+
 }
 
 type Message interface {
@@ -192,3 +195,4 @@ func (kms *Key2SegMsg) GetType() OpType {
 type SyncEofMsg struct {
 	MsgType OpType
 }
+

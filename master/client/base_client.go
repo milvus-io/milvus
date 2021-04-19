@@ -129,13 +129,6 @@ func (c *baseClient) leaderLoop() {
 	}
 }
 
-// ScheduleCheckLeader is used to check leader.
-func (c *baseClient) ScheduleCheckLeader() {
-	select {
-	case c.checkLeaderCh <- struct{}{}:
-	default:
-	}
-}
 
 // GetClusterID returns the ClusterID.
 func (c *baseClient) GetClusterID(context.Context) uint64 {
@@ -173,28 +166,6 @@ func (c *baseClient) updateURLs(members []*pdpb.Member) {
 	c.urls = urls
 }
 
-func (c *baseClient) switchLeader(addrs []string) error {
-	// FIXME: How to safely compare leader urls? For now, only allows one client url.
-	addr := addrs[0]
-
-	c.connMu.RLock()
-	oldLeader := c.connMu.leader
-	c.connMu.RUnlock()
-
-	if addr == oldLeader {
-		return nil
-	}
-
-	log.Info("[pd] switch leader", zap.String("new-leader", addr), zap.String("old-leader", oldLeader))
-	if _, err := c.getOrCreateGRPCConn(addr); err != nil {
-		return err
-	}
-
-	c.connMu.Lock()
-	defer c.connMu.Unlock()
-	c.connMu.leader = addr
-	return nil
-}
 
 func (c *baseClient) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 	c.connMu.RLock()

@@ -10,6 +10,10 @@ core/build/*
 core/.idea/
 .idea/
 .idea/*
+pulsar/client-cpp/cmake-build-debug/
+pulsar/client-cpp/cmake-build-debug/*
+pulsar/client-cpp/build/
+pulsar/client-cpp/build/*
 
 # vscode generated files
 .vscode

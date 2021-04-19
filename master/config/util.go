@@ -18,7 +18,6 @@ import (
 	"regexp"
 
 	"github.com/czs007/suvlim/errors"
-	"github.com/czs007/suvlim/pkg/metapb"
 )
 
 const (
@@ -34,19 +33,6 @@ func validateFormat(s, format string) error {
 	isValid, _ := regexp.MatchString(format, s)
 	if !isValid {
 		return errors.Errorf("%s does not match format %q", s, format)
-	}
-	return nil
-}
-
-// ValidateLabels checks the legality of the labels.
-func ValidateLabels(labels []*metapb.StoreLabel) error {
-	for _, label := range labels {
-		if err := validateFormat(label.Key, keyFormat); err != nil {
-			return err
-		}
-		if err := validateFormat(label.Value, valueFormat); err != nil {
-			return err
-		}
 	}
 	return nil
 }

@@ -1,0 +1,143 @@
+
+syntax = "proto3";
+
+package pb;
+
+enum ErrorCode {
+    SUCCESS = 0;
+    UNEXPECTED_ERROR = 1;
+    CONNECT_FAILED = 2;
+    PERMISSION_DENIED = 3;
+    COLLECTION_NOT_EXISTS = 4;
+    ILLEGAL_ARGUMENT = 5;
+    ILLEGAL_DIMENSION = 7;
+    ILLEGAL_INDEX_TYPE = 8;
+    ILLEGAL_COLLECTION_NAME = 9;
+    ILLEGAL_TOPK = 10;
+    ILLEGAL_ROWRECORD = 11;
+    ILLEGAL_VECTOR_ID = 12;
+    ILLEGAL_SEARCH_RESULT = 13;
+    FILE_NOT_FOUND = 14;
+    META_FAILED = 15;
+    CACHE_FAILED = 16;
+    CANNOT_CREATE_FOLDER = 17;
+    CANNOT_CREATE_FILE = 18;
+    CANNOT_DELETE_FOLDER = 19;
+    CANNOT_DELETE_FILE = 20;
+    BUILD_INDEX_ERROR = 21;
+    ILLEGAL_NLIST = 22;
+    ILLEGAL_METRIC_TYPE = 23;
+    OUT_OF_MEMORY = 24;
+}
+
+message Status {
+    ErrorCode error_code = 1;
+    string reason = 2;
+}
+
+enum DataType {
+    NONE = 0;
+    BOOL = 1;
+    INT8 = 2;
+    INT16 = 3;
+    INT32 = 4;
+    INT64 = 5;
+
+    FLOAT = 10;
+    DOUBLE = 11;
+
+    STRING = 20;
+
+    VECTOR_BINARY = 100;
+    VECTOR_FLOAT = 101;
+}
+
+enum OpType {
+    Insert      = 0;
+    Delete      = 1;
+    Search      = 2;
+    TimeSync    = 3;
+    Key2Seg     = 4;
+    Statistics  = 5;
+}
+
+message SegmentRecord {
+    repeated string seg_info = 1;
+}
+
+message VectorRowRecord {
+    repeated float float_data = 1;             //float vector data
+    bytes binary_data = 2;                      //binary vector data
+}
+
+message AttrRecord {
+    repeated int32 int32_value = 1;
+    repeated int64 int64_value = 2;
+    repeated float float_value = 3;
+    repeated double double_value = 4;
+}
+
+message VectorRecord {
+    repeated VectorRowRecord records = 1;
+}
+
+message VectorParam {
+    string json = 1;
+    VectorRecord row_record = 2;
+}
+
+message FieldValue {
+    string field_name = 1;
+    DataType type = 2;
+    AttrRecord attr_record = 3;
+    VectorRecord vector_record = 4;
+}
+
+message PulsarMessage {
+    string collection_name = 1;
+    repeated FieldValue fields = 2;
+    int64 entity_id = 3;
+    string partition_tag = 4;
+    VectorParam vector_param =5;
+    SegmentRecord segments = 6;
+    int64  timestamp = 7;
+    int64 client_id = 8;
+    OpType msg_type = 9;
+    string topic_name = 10;
+    int64 partition_id = 11;
+}
+
+//message PulsarMessages {
+//    string collection_name = 1;
+//    repeated FieldValue fields = 2;
+//    repeated int64 entity_id = 3;
+//    string partition_tag = 4;
+//    repeated VectorParam vector_param =5;
+//    repeated SegmentRecord segments = 6;
+//    repeated  int64  timestamp = 7;
+//    repeated int64 client_id = 8;
+//    OpType msg_type = 9;
+//    repeated string topic_name = 10;
+//    repeated int64 partition_id = 11;
+//}
+message TestData {
+    string id = 1;
+    string name = 2;
+}
+
+message InsertMsg {
+    int64 client_id = 1;
+}
+
+message DeleteMsg {
+    int64 client_id = 1;
+}
+
+message SearchMsg {
+    int64 client_id = 1;
+}
+
+message SearchResultMsg {
+    int64 client_id = 1;
+}
+
