@@ -71,7 +71,7 @@ func (meta *meta) reloadFromKV() error {
 		segmentInfo := &datapb.SegmentInfo{}
 		err = proto.UnmarshalText(value, segmentInfo)
 		if err != nil {
-			return err
+			return fmt.Errorf("DataService reloadFromKV UnMarshalText datapb.SegmentInfo err:%w", err)
 		}
 		meta.segID2Info[segmentInfo.SegmentID] = segmentInfo
 	}

@@ -3,6 +3,7 @@ package proxynode
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 
@@ -1115,7 +1116,7 @@ func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvus
 	}
 	segments, err := node.getSegmentsOfCollection(ctx, req.DbName, req.CollectionName)
 	if err != nil {
-		resp.Status.Reason = err.Error()
+		resp.Status.Reason = fmt.Errorf("getSegmentsOfCollection, err:%w", err).Error()
 		return resp, nil
 	}
 	infoResp, err := node.dataService.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
@@ -1128,7 +1129,7 @@ func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvus
 		SegmentIDs: segments,
 	})
 	if err != nil {
-		resp.Status.Reason = err.Error()
+		resp.Status.Reason = fmt.Errorf("dataService:GetSegmentInfo, err:%w", err).Error()
 		return resp, nil
 	}
 	if infoResp.Status.ErrorCode != commonpb.ErrorCode_Success {

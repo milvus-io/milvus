@@ -57,7 +57,7 @@ func (mt *metaTable) reloadFromKV() error {
 		indexMeta := indexpb.IndexMeta{}
 		err = proto.UnmarshalText(value, &indexMeta)
 		if err != nil {
-			return err
+			return fmt.Errorf("IndexService metaTable reloadFromKV UnmarshalText indexpb.IndexMeta err:%w", err)
 		}
 		mt.indexBuildID2Meta[indexMeta.IndexBuildID] = indexMeta
 	}
