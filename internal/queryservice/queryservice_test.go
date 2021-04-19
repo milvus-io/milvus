@@ -155,6 +155,9 @@ func (data *dataMock) GetSegmentStates(req *datapb.SegmentStatesRequest) (*datap
 
 	return ret, nil
 }
+func (data *dataMock) GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, error) {
+	return []string{"test-insert"}, nil
+}
 
 func TestQueryService_Init(t *testing.T) {
 	service, err := NewQueryService(context.Background())
