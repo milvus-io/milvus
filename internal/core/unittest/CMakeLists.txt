@@ -1,7 +1,8 @@
 enable_testing()
+find_package(GTest REQUIRED)
 
 include_directories(${CMAKE_HOME_DIRECTORY}/src)
-include_directories(${CMAKE_HOME_DIRECTORY}/src/index/knowhere)
+include_directories(>>>> ${CMAKE_HOME_DIRECTORY}/src/index/knowhere)
 set(MILVUS_TEST_FILES
         test_naive.cpp
         test_dog_segment.cpp

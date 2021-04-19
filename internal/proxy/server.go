@@ -146,28 +146,30 @@ func (s *proxyServer) ShowPartitions(ctx context.Context, req *servicepb.Collect
 
 func (s *proxyServer) DeleteByID(ctx context.Context, req *pb.DeleteByIDParam) (*commonpb.Status, error) {
 	log.Printf("delete entites, total = %d", len(req.IdArray))
-	pm := &manipulationReq{
-		ManipulationReqMsg: pb.ManipulationReqMsg{
-			CollectionName: req.CollectionName,
-			ReqType:        pb.ReqType_kDeleteEntityByID,
-			ProxyId:        s.proxyId,
-		},
-		proxy: s,
+	mReqMsg := pb.ManipulationReqMsg{
+		CollectionName: req.CollectionName,
+		ReqType:        pb.ReqType_kDeleteEntityByID,
+		ProxyId:        s.proxyId,
 	}
 	for _, id := range req.IdArray {
-		pm.PrimaryKeys = append(pm.PrimaryKeys, uint64(id))
+		mReqMsg.PrimaryKeys = append(mReqMsg.PrimaryKeys, uint64(id))
 	}
-	if len(pm.PrimaryKeys) > 1 {
-		if st := pm.PreExecute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
+	if len(mReqMsg.PrimaryKeys) > 1 {
+		mReq := &manipulationReq{
+			stats: make([]commonpb.Status, 1),
+			msgs:  append([]*pb.ManipulationReqMsg{}, &mReqMsg),
+			proxy: s,
+		}
+		if st := mReq.PreExecute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
 			return &st, nil
 		}
-		if st := pm.Execute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		if st := mReq.Execute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
 			return &st, nil
 		}
-		if st := pm.PostExecute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		if st := mReq.PostExecute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
 			return &st, nil
 		}
-		if st := pm.WaitToFinish(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		if st := mReq.WaitToFinish(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
 			return &st, nil
 		}
 	}
@@ -176,7 +178,7 @@ func (s *proxyServer) DeleteByID(ctx context.Context, req *pb.DeleteByIDParam) (
 
 func (s *proxyServer) Insert(ctx context.Context, req *servicepb.RowBatch) (*servicepb.IntegerRangeResponse, error) {
 	log.Printf("Insert Entities, total =  %d", len(req.RowData))
-	ipm := make(map[uint32]*manipulationReq)
+	msgMap := make(map[uint32]*pb.ManipulationReqMsg)
 
 	//TODO check collection schema's auto_id
 	if len(req.RowData) == 0 { //primary key is empty, set primary key by server
@@ -198,50 +200,55 @@ func (s *proxyServer) Insert(ctx context.Context, req *servicepb.RowBatch) (*ser
 			return nil, status.Errorf(codes.Unknown, "hash failed on %d", key)
 		}
 		hash = hash % uint32(len(s.readerTopics))
-		ip, ok := ipm[hash]
+		ipm, ok := msgMap[hash]
 		if !ok {
 			segId, err := s.getSegmentId(int32(hash), req.CollectionName)
 			if err != nil {
 				return nil, err
 			}
-			ipm[hash] = &manipulationReq{
-				ManipulationReqMsg: pb.ManipulationReqMsg{
-					CollectionName: req.CollectionName,
-					PartitionTag:   req.PartitionTag,
-					SegmentId:      segId,
-					ChannelId:      uint64(hash),
-					ReqType:        pb.ReqType_kInsert,
-					ProxyId:        s.proxyId,
-					//ExtraParams:    req.ExtraParams,
-				},
-				proxy: s,
+			msgMap[hash] = &pb.ManipulationReqMsg{
+				CollectionName: req.CollectionName,
+				PartitionTag:   req.PartitionTag,
+				SegmentId:      segId,
+				ChannelId:      uint64(hash),
+				ReqType:        pb.ReqType_kInsert,
+				ProxyId:        s.proxyId,
+				//ExtraParams:    req.ExtraParams,
 			}
-			ip = ipm[hash]
+			ipm = msgMap[hash]
 		}
-		ip.PrimaryKeys = append(ip.PrimaryKeys, key)
-		ip.RowsData = append(ip.RowsData, &pb.RowData{Blob: req.RowData[i].Value}) // czs_tag
+		ipm.PrimaryKeys = append(ipm.PrimaryKeys, key)
+		ipm.RowsData = append(ipm.RowsData, &pb.RowData{Blob: req.RowData[i].Value}) // czs_tag
 	}
-	for _, ip := range ipm {
-		if st := ip.PreExecute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS { //do nothing
-			return &servicepb.IntegerRangeResponse{
-				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
-			}, nil
-		}
-		if st := ip.Execute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS { // push into chan
-			return &servicepb.IntegerRangeResponse{
-				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
-			}, nil
-		}
-		if st := ip.PostExecute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS { //post to pulsar
-			return &servicepb.IntegerRangeResponse{
-				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
-			}, nil
-		}
+
+	// TODO: alloc manipulation request id
+	mReq := manipulationReq{
+		stats: make([]commonpb.Status, len(msgMap)),
+		msgs:  make([]*pb.ManipulationReqMsg, len(msgMap)),
+		wg:    sync.WaitGroup{},
+		proxy: s,
 	}
-	for _, ip := range ipm {
-		if st := ip.WaitToFinish(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
-			log.Printf("Wait to finish failed, error code = %d", st.ErrorCode)
-		}
+	for _, v := range msgMap {
+		mReq.msgs = append(mReq.msgs, v)
+	}
+	if st := mReq.PreExecute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS { //do nothing
+		return &servicepb.IntegerRangeResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
+		}, nil
+	}
+	if st := mReq.Execute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS { // push into chan
+		return &servicepb.IntegerRangeResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
+		}, nil
+	}
+	if st := mReq.PostExecute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS { //post to pulsar
+		return &servicepb.IntegerRangeResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
+		}, nil
+	}
+
+	if st := mReq.WaitToFinish(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		log.Printf("Wait to finish failed, error code = %d", st.ErrorCode)
 	}
 
 	return &servicepb.IntegerRangeResponse{

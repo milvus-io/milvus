@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	etcd "go.etcd.io/etcd/clientv3"
 	"strconv"
 )
@@ -55,6 +54,7 @@ type ProxyOptions struct {
 
 func ReadProxyOptionsFromConfig() (*ProxyOptions, error) {
 
+	conf.LoadConfig("config.yaml")
 	etcdRootPath := conf.Config.Etcd.Rootpath
 	if etcdRootPath[len(etcdRootPath)-1] == '/' {
 		etcdRootPath = etcdRootPath[0 : len(etcdRootPath)-1]
@@ -127,20 +127,10 @@ func StartProxy(opt *ProxyOptions) error {
 		ctx:           opt.ctx,
 	}
 
-	//errChan := make(chan error, 1)
-	//go func() {
-	//	err := startProxyServer(srv)
-	//	errChan <- err
-	//}()
 	err = startProxyServer(srv)
 	if err != nil {
 		return err
 	}
-
-	//wait unit grpc server has started
-	//if err := <-errChan; err != nil {
-	//	return err
-	//}
 
 	////////////////////////// time tick /////////////////////////////////
 	ttClient, err := pulsar.NewClient(pulsar.ClientOptions{URL: opt.pulsarAddr})

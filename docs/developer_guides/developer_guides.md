@@ -442,15 +442,15 @@ type TsMsg interface {
   Ts() Timestamp
 }
 
+type TsMsgMarshaler interface {
+  Marshal(input *TsMsg) ([]byte, Status)
+  Unmarshal(input []byte) (*TsMsg, Status)
+}
+
 type MsgPack struct {
   BeginTs Timestamp
   EndTs Timestamp
   Msgs []*TsMsg
-}
-
-type TsMsgMarshaler interface {
-  Marshal(input *TsMsg) ([]byte, Status)
-  Unmarshal(input []byte) (*TsMsg, Status)
 }
 
 type MsgStream interface {
@@ -461,17 +461,14 @@ type MsgStream interface {
 
 type PulsarMsgStream struct {
   client *pulsar.Client
-  msgHashFunc (*MsgPack) map[int32]*MsgPack // return a map from produceChannel idx to *MsgPack
-  producers []*pulsar.Producer
-  consumers []*pulsar.Consumer
+  produceChannels []string
+  consumeChannels []string
+  
   msgMarshaler *TsMsgMarshaler
   msgUnmarshaler *TsMsgMarshaler
 }
 
-func (ms *PulsarMsgStream) SetProducerChannels(channels []string)
-func (ms *PulsarMsgStream) SetConsumerChannels(channels []string)
 func (ms *PulsarMsgStream) SetMsgMarshaler(marshal *TsMsgMarshaler, unmarshal *TsMsgMarshaler)
-func (ms *PulsarMsgStream) SetMsgHashFunc(XXX)
 func (ms *PulsarMsgStream) Produce(*MsgPack) Status
 func (ms *PulsarMsgStream) Consume() *MsgPack //return messages in one time tick
 
