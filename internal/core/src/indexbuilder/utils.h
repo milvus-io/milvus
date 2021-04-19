@@ -36,16 +36,47 @@ BIN_List() {
     return ret;
 }
 
+std::vector<std::string>
+Need_ID_List() {
+    static std::vector<std::string> ret{
+        // milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+        // milvus::knowhere::IndexEnum::INDEX_NSG
+    };
+
+    return ret;
+}
+
+std::vector<std::string>
+Need_BuildAll_list() {
+    static std::vector<std::string> ret{milvus::knowhere::IndexEnum::INDEX_NSG};
+    return ret;
+}
+
+template <typename T>
+bool
+is_in_list(const T& t, std::function<std::vector<T>()> list_func) {
+    auto l = list_func();
+    return std::find(l.begin(), l.end(), t) != l.end();
+}
+
 bool
 is_in_bin_list(const milvus::knowhere::IndexType& index_type) {
-    auto bin_list = BIN_List();
-    return std::find(bin_list.begin(), bin_list.end(), index_type) != bin_list.end();
+    return is_in_list<std::string>(index_type, BIN_List);
 }
 
 bool
 is_in_nm_list(const milvus::knowhere::IndexType& index_type) {
-    auto nm_list = NM_List();
-    return std::find(nm_list.begin(), nm_list.end(), index_type) != nm_list.end();
+    return is_in_list<std::string>(index_type, NM_List);
+}
+
+bool
+is_in_need_build_all_list(const milvus::knowhere::IndexType& index_type) {
+    return is_in_list<std::string>(index_type, Need_BuildAll_list);
+}
+
+bool
+is_in_need_id_list(const milvus::knowhere::IndexType& index_type) {
+    return is_in_list<std::string>(index_type, Need_ID_List);
 }
 
 }  // namespace indexbuilder
