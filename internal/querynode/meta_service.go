@@ -31,7 +31,7 @@ type metaService struct {
 
 func newMetaService(ctx context.Context, replica *collectionReplica) *metaService {
 	ETCDAddr := Params.etcdAddress()
-	ETCDRootPath := Params.etcdRootPath()
+	MetaRootPath := Params.metaRootPath()
 
 	cli, _ := clientv3.New(clientv3.Config{
 		Endpoints:   []string{ETCDAddr},
@@ -40,7 +40,7 @@ func newMetaService(ctx context.Context, replica *collectionReplica) *metaServic
 
 	return &metaService{
 		ctx:     ctx,
-		kvBase:  kv.NewEtcdKV(cli, ETCDRootPath),
+		kvBase:  kv.NewEtcdKV(cli, MetaRootPath),
 		replica: replica,
 	}
 }
@@ -71,21 +71,21 @@ func (mService *metaService) start() {
 }
 
 func GetCollectionObjID(key string) string {
-	ETCDRootPath := Params.etcdRootPath()
+	ETCDRootPath := Params.metaRootPath()
 
 	prefix := path.Join(ETCDRootPath, CollectionPrefix) + "/"
 	return strings.TrimPrefix(key, prefix)
 }
 
 func GetSegmentObjID(key string) string {
-	ETCDRootPath := Params.etcdRootPath()
+	ETCDRootPath := Params.metaRootPath()
 
 	prefix := path.Join(ETCDRootPath, SegmentPrefix) + "/"
 	return strings.TrimPrefix(key, prefix)
 }
 
 func isCollectionObj(key string) bool {
-	ETCDRootPath := Params.etcdRootPath()
+	ETCDRootPath := Params.metaRootPath()
 
 	prefix := path.Join(ETCDRootPath, CollectionPrefix) + "/"
 	prefix = strings.TrimSpace(prefix)
@@ -95,7 +95,7 @@ func isCollectionObj(key string) bool {
 }
 
 func isSegmentObj(key string) bool {
-	ETCDRootPath := Params.etcdRootPath()
+	ETCDRootPath := Params.metaRootPath()
 
 	prefix := path.Join(ETCDRootPath, SegmentPrefix) + "/"
 	prefix = strings.TrimSpace(prefix)
