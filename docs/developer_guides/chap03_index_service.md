@@ -16,7 +16,9 @@ type IndexService interface {
   RegisterNode(req RegisterNodeRequest) (RegisterNodeResponse, error)
   BuildIndex(req BuildIndexRequest) (BuildIndexResponse, error)
 	GetIndexStates(req IndexStatesRequest) (IndexStatesResponse, error)
-	GetIndexFilePaths(req IndexFilePathRequest) (IndexFilePathsResponse, error)
+  GetIndexFilePaths(req IndexFilePathRequest) (IndexFilePathsResponse, error)
+  NotifyTaskState(TaskStateNotification) error
+
 }
 ```
 
@@ -47,6 +49,21 @@ type BuildIndexRequest struct {
 
 type BuildIndexResponse struct {
   IndexID UniqueID
+}
+```
+
+
+```go
+type BuildIndexCmd struct {
+  IndexID UniqueID
+  Req BuildIndexRequest
+}
+
+type TaskStateNotification struct {
+  IndexID UniqueID
+  IndexState IndexState
+  IndexFilePaths []string
+  FailReason  string
 }
 ```
 
@@ -95,7 +112,7 @@ type IndexNode interface {
 //  SetTimeTickChannel(channelName string) error
 //  SetStatsChannel(channelName string) error
   
-  BuildIndex(req BuildIndexRequest) (BuildIndexResponse, error)
+  BuildIndex(req BuildIndexCmd) error
 }
 ```
 
