@@ -19,6 +19,7 @@
 #include "grpc/ClientProxy.h"
 #include "interface/ConnectionImpl.h"
 #include "utils/TimeRecorder.h"
+#include <random>
 
 const int N = 200000;
 const int DIM = 16;
@@ -31,9 +32,14 @@ const milvus::FieldValue GetData() {
   for (int i = 0; i < N; i++) {
     int32_data.push_back(i);
   }
+  std::default_random_engine eng(rand() % 20);
+  std::normal_distribution<float> dis(0, 1);
   std::vector<milvus::VectorData> vector_data;
   for (int i = 0; i < N; i++) {
-    std::vector<float> float_data(DIM, 10.25);
+    std::vector<float> float_data(DIM);
+    for(auto &x: float_data) {
+      x = dis(eng);
+    }
     milvus::VectorData vectorData;
     vectorData.float_data = float_data;
     vector_data.push_back(vectorData);
