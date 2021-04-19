@@ -8,7 +8,6 @@ import (
 type (
 	Msg          = flowgraph.Msg
 	MsgStreamMsg = flowgraph.MsgStreamMsg
-	SegmentID    = UniqueID
 )
 
 type (
