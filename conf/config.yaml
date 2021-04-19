@@ -10,25 +10,23 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 master:
-  pulsarurl: "pulsar://localhost:6650"
+  adress: localhost
+  port: 53100
   pulsarmoniterinterval: 1
   pulsartopic: "monitor-topic"
-  etcdrootpath: "by-dev"
   segmentthreshole: 10000
-  defaultgrpcport: ":53100"
-  etcdendpoints: ["127.0.0.1:12379"]
 
 etcd:
   address: localhost
-  port: 2379
+  port: 12379
   rootpath: by-dev
   segthreshold: 10000
 
 timesync: 
-  interval: 10
+  interval: 400
 
 storage:
-  driver: MinIO
+  driver: TIKV
   address: localhost
   port: 0
   accesskey: ab
@@ -37,6 +35,25 @@ storage:
 pulsar:
   address: localhost
   port: 6650
+  topicnum: 128
+  nodenum: 1
+
+reader:
+  clientid: 1
+  stopflag: -1
+  readerqueuesize: 1024
+  searchchansize: 10000
+  key2segchansize: 10000
+  inserttopicstart: 0
+  inserttopicend: 128
+
+writer:
+  clientid: 1
+  stopflag: -2
+  readerqueuesize: 1024
+  searchbyidchansize: 10000
+  insertopicstart: 0
+  inserttopicend: 128
 
 proxy:
   timezone: UTC+8

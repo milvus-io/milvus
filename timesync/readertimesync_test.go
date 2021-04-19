@@ -206,14 +206,12 @@ func TestAlignTimeSync5(t *testing.T) {
 }
 
 func TestNewReaderTimeSync(t *testing.T) {
-	r, err := NewReaderTimeSync(pulsarAddr,
-		timeSyncTopic,
+	r, err := NewReaderTimeSync(timeSyncTopic,
 		timeSyncSubName,
 		[]string{readerTopic1, readerTopic2, readerTopic3, readerTopic4},
 		readerSubName,
 		[]int64{2, 1},
 		interval,
-		readStopFlag,
 		WithReaderQueueSize(8),
 	)
 	if err != nil {
@@ -290,14 +288,12 @@ func TestPulsarClient(t *testing.T) {
 }
 
 func TestReaderTimesync(t *testing.T) {
-	r, err := NewReaderTimeSync(pulsarAddr,
-		timeSyncTopic,
+	r, err := NewReaderTimeSync(timeSyncTopic,
 		timeSyncSubName,
 		[]string{readerTopic1, readerTopic2, readerTopic3, readerTopic4},
 		readerSubName,
 		[]int64{2, 1},
 		interval,
-		readStopFlag,
 		WithReaderQueueSize(1024),
 	)
 	if err != nil {
@@ -392,25 +388,21 @@ func TestReaderTimesync2(t *testing.T) {
 	go startProxy(pt1, 1, pr1, 1, pr2, 2, 2*time.Second, t)
 	go startProxy(pt2, 2, pr3, 3, pr4, 4, 2*time.Second, t)
 
-	r1, _ := NewReaderTimeSync(pulsarAddr,
-		timeSyncTopic2,
+	r1, _ := NewReaderTimeSync(timeSyncTopic2,
 		timeSyncSubName1,
 		[]string{readerTopic12, readerTopic22, readerTopic32, readerTopic42},
 		readerSubName1,
 		[]int64{2, 1},
 		interval,
-		readStopFlag1,
 		WithReaderQueueSize(1024),
 	)
 
-	r2, _ := NewReaderTimeSync(pulsarAddr,
-		timeSyncTopic2,
+	r2, _ := NewReaderTimeSync(timeSyncTopic2,
 		timeSyncSubName2,
 		[]string{readerTopic12, readerTopic22, readerTopic32, readerTopic42},
 		readerSubName2,
 		[]int64{2, 1},
 		interval,
-		readStopFlag2,
 		WithReaderQueueSize(1024),
 	)
 
@@ -514,14 +506,12 @@ func TestReaderTimesync3(t *testing.T) {
 		}
 	}()
 
-	r, err := NewReaderTimeSync(pulsarAddr,
-		timeSyncTopic3,
+	r, err := NewReaderTimeSync(timeSyncTopic3,
 		timeSyncSubName3,
 		[]string{readerTopic13, readerTopic23, readerTopic33, readerTopic43},
 		readerSubName3,
 		[]int64{1},
 		interval,
-		readStopFlag3,
 		WithReaderQueueSize(1024))
 	if err != nil {
 		t.Fatal(err)

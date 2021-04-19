@@ -3,6 +3,7 @@ package message_client
 import (
 	"context"
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/czs007/suvlim/conf"
 	msgpb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	timesync "github.com/czs007/suvlim/timesync"
 	"github.com/golang/protobuf/proto"
@@ -28,6 +29,9 @@ type MessageClient struct {
 	timestampBatchStart uint64
 	timestampBatchEnd   uint64
 	batchIDLen          int
+
+	//client id
+	MessageClientID int
 }
 
 func (mc *MessageClient) Send(ctx context.Context, msg msgpb.Key2SegMsg) {
@@ -107,6 +111,7 @@ func (mc *MessageClient) createClient(url string) pulsar.Client {
 func (mc *MessageClient) InitClient(url string) {
 	//create client
 	mc.client = mc.createClient(url)
+	mc.MessageClientID = conf.Config.Writer.ClientId
 
 	//create producer
 	mc.key2segProducer = mc.creatProducer("Key2Seg")
@@ -115,25 +120,32 @@ func (mc *MessageClient) InitClient(url string) {
 	mc.searchByIdConsumer = mc.createConsumer("SearchById")
 
 	//init channel
-	mc.searchByIdChan = make(chan *msgpb.EntityIdentity, 10000)
+	mc.searchByIdChan = make(chan *msgpb.EntityIdentity, conf.Config.Writer.SearchByIdChanSize)
 
 	//init msg slice
 	mc.InsertMsg = make([]*msgpb.InsertOrDeleteMsg, 0)
 	mc.DeleteMsg = make([]*msgpb.InsertOrDeleteMsg, 0)
 
 	//init timesync
-	URL := "pulsar://localhost:6650"
 	timeSyncTopic := "TimeSync"
-	timeSyncSubName := "writer"
-	readTopics := make([]string, 0, 1024)
-	for i := 0; i < 1024; i++ {
+	timeSyncSubName := "writer" + strconv.Itoa(mc.MessageClientID)
+	readTopics := make([]string, 0)
+	for i := conf.Config.Writer.InsertTopicStart; i < conf.Config.Writer.InsertTopicEnd; i++ {
 		str := "InsertOrDelete-partition-"
 		str = str + strconv.Itoa(i)
 		readTopics = append(readTopics, str)
 	}
-	readSubName := "writer"
+	readSubName := "writer" + strconv.Itoa(mc.MessageClientID)
+	// TODO::read proxy conf from config.yaml
 	proxyIdList := []int64{0}
-	timeSync, err := timesync.NewReaderTimeSync(URL, timeSyncTopic, timeSyncSubName, readTopics, readSubName, proxyIdList, 400, -1, timesync.WithReaderQueueSize(1024))
+	readerQueueSize := timesync.WithReaderQueueSize(conf.Config.Reader.ReaderQueueSize)
+	timeSync, err := timesync.NewReaderTimeSync(timeSyncTopic,
+		timeSyncSubName,
+		readTopics,
+		readSubName,
+		proxyIdList,
+		conf.Config.Writer.StopFlag,
+		readerQueueSize)
 	if err != nil {
 		log.Fatal(err)
 	}

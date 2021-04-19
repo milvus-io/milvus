@@ -104,9 +104,9 @@ func (node *QueryNode) processSegmentCreate(id string, value string) {
 	}
 	printSegmentStruct(segment)
 
-	if !isSegmentChannelRangeInQueryNodeChannelRange(segment) {
-		return
-	}
+	//if !isSegmentChannelRangeInQueryNodeChannelRange(segment) {
+	//	return
+	//}
 
 	collection := node.GetCollectionByID(segment.CollectionID)
 	if collection != nil {
@@ -147,9 +147,9 @@ func (node *QueryNode) processSegmentModify(id string, value string) {
 	}
 	printSegmentStruct(segment)
 
-	if !isSegmentChannelRangeInQueryNodeChannelRange(segment) {
-		return
-	}
+	//if !isSegmentChannelRangeInQueryNodeChannelRange(segment) {
+	//	return
+	//}
 
 	seg, err := node.GetSegmentBySegmentID(int64(segment.SegmentID)) // todo change  to uint64
 	if seg != nil {
@@ -269,7 +269,7 @@ func (node *QueryNode) InitFromMeta() error {
 }
 
 func (node *QueryNode) RunMetaService(ctx context.Context, wg *sync.WaitGroup) {
-	node.InitFromMeta()
+	//node.InitFromMeta()
 	metaChan := node.kvBase.WatchWithPrefix("")
 	for {
 		select {

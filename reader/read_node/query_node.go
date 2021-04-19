@@ -16,6 +16,7 @@ import "C"
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/stretchr/testify/assert"
 	"log"
 	"sort"
 	"sync"
@@ -225,6 +226,8 @@ func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 		// TODO: get timeRange from message client
 		var msgLen = node.PrepareBatchMsg()
 		var timeRange = TimeRange{node.messageClient.TimeSyncStart(), node.messageClient.TimeSyncEnd()}
+		assert.NotEqual(nil, 0, timeRange.timestampMin)
+		assert.NotEqual(nil, 0, timeRange.timestampMax)
 
 		if msgLen[0] == 0 && len(node.buffer.InsertDeleteBuffer) <= 0 {
 			continue
@@ -232,12 +235,12 @@ func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 
 		node.QueryNodeDataInit()
 		node.MessagesPreprocess(node.messageClient.InsertOrDeleteMsg, timeRange)
-		fmt.Println("MessagesPreprocess Done")
+		//fmt.Println("MessagesPreprocess Done")
 		node.WriterDelete()
 		node.PreInsertAndDelete()
-		fmt.Println("PreInsertAndDelete Done")
+		//fmt.Println("PreInsertAndDelete Done")
 		node.DoInsertAndDelete()
-		fmt.Println("DoInsertAndDelete Done")
+		//fmt.Println("DoInsertAndDelete Done")
 		node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
 	}
 	wg.Done()
@@ -337,7 +340,6 @@ func (node *QueryNode) MessagesPreprocess(insertDeleteMessages []*msgPb.InsertOr
 				atomic.AddInt32(&node.deletePreprocessData.count, 1)
 			}
 		} else {
-			fmt.Println("msg timestamp:= ", msg.Timestamp>>18)
 			node.buffer.InsertDeleteBuffer = append(node.buffer.InsertDeleteBuffer, msg)
 			node.buffer.validInsertDeleteBuffer = append(node.buffer.validInsertDeleteBuffer, true)
 		}

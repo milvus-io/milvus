@@ -75,11 +75,13 @@ struct ServerConfig {
     struct Pulsar{
         String address{"localhost"};
         Integer port{6650};
+        Integer topicnum{1024};
+        Integer nodenum{1};
     }pulsar;
 
     struct Master{
       String address{"localhost"};
-      Integer  port{6000};
+      Integer  port{53100};
     }master;
 
     struct Etcd{

@@ -7,8 +7,10 @@ set( GRPC_SERVICE_FILES
 
 set(unittest_srcs
         unittest_entry.cpp
-#        consumer_test.cpp producer_test.cpp
-		get_result_test.cpp)
+        consumer_test.cpp
+		producer_test.cpp
+		get_result_test.cpp
+		test_pulsar.cpp)
 
 
 add_executable(test_pulsar ${unittest_srcs} ${GRPC_SERVICE_FILES})
@@ -32,6 +34,7 @@ target_link_libraries(test_pulsar
         grpc++
 		pthread
 		stdc++
+		config
         )
 
 install(TARGETS test_pulsar DESTINATION unittest)

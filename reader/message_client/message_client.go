@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/czs007/suvlim/conf"
 	masterPb "github.com/czs007/suvlim/pkg/master/grpc/master"
 	msgpb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	timesync "github.com/czs007/suvlim/timesync"
@@ -35,7 +36,7 @@ type MessageClient struct {
 	timestampBatchEnd   uint64
 	batchIDLen          int
 
-	//
+	//client id
 	MessageClientID int
 }
 
@@ -151,11 +152,10 @@ func (mc *MessageClient) createClient(url string) pulsar.Client {
 	return client
 }
 
-func (mc *MessageClient) InitClient(url string, numOfQueryNode int) {
-	const ChannelNum = 1024
-
+func (mc *MessageClient) InitClient(url string) {
 	//create client
 	mc.client = mc.createClient(url)
+	mc.MessageClientID = conf.Config.Reader.ClientId
 
 	//create producer
 	mc.searchResultProducer = mc.creatProducer("SearchResult")
@@ -166,25 +166,33 @@ func (mc *MessageClient) InitClient(url string, numOfQueryNode int) {
 	mc.key2segConsumer = mc.createConsumer("Key2Seg")
 
 	// init channel
-	mc.searchChan = make(chan *msgpb.SearchMsg, 10000)
-	mc.key2SegChan = make(chan *msgpb.Key2SegMsg, 10000)
+	mc.searchChan = make(chan *msgpb.SearchMsg, conf.Config.Reader.SearchChanSize)
+	mc.key2SegChan = make(chan *msgpb.Key2SegMsg, conf.Config.Reader.Key2SegChanSize)
 
 	mc.InsertOrDeleteMsg = make([]*msgpb.InsertOrDeleteMsg, 0)
 	mc.Key2SegMsg = make([]*msgpb.Key2SegMsg, 0)
 
 	//init timesync
-	URL := "pulsar://localhost:6650"
 	timeSyncTopic := "TimeSync"
 	timeSyncSubName := "reader" + strconv.Itoa(mc.MessageClientID)
-	readTopics := make([]string, 0, ChannelNum)
-	for i := ChannelNum / numOfQueryNode * mc.MessageClientID; i < ChannelNum/numOfQueryNode*(mc.MessageClientID+1); i++ {
+	readTopics := make([]string, 0)
+	for i := conf.Config.Reader.InsertTopicStart; i < conf.Config.Reader.InsertTopicEnd; i++ {
 		str := "InsertOrDelete-partition-"
 		str = str + strconv.Itoa(i)
 		readTopics = append(readTopics, str)
 	}
+
 	readSubName := "reader" + strconv.Itoa(mc.MessageClientID)
+	// TODO::read proxy conf from config.yaml
 	proxyIdList := []int64{0}
-	timeSync, err := timesync.NewReaderTimeSync(URL, timeSyncTopic, timeSyncSubName, readTopics, readSubName, proxyIdList, 400, -2, timesync.WithReaderQueueSize(ChannelNum))
+	readerQueueSize := timesync.WithReaderQueueSize(conf.Config.Reader.ReaderQueueSize)
+	timeSync, err := timesync.NewReaderTimeSync(timeSyncTopic,
+		timeSyncSubName,
+		readTopics,
+		readSubName,
+		proxyIdList,
+		conf.Config.Reader.StopFlag,
+		readerQueueSize)
 	if err != nil {
 		log.Fatal(err)
 	}

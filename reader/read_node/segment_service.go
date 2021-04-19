@@ -34,7 +34,7 @@ func (node *QueryNode) SegmentsManagement() {
 }
 
 func (node *QueryNode) SegmentManagementService() {
-	sleepMillisecondTime := 200
+	sleepMillisecondTime := 1000
 	fmt.Println("do segments management in ", strconv.Itoa(sleepMillisecondTime), "ms")
 	for {
 		time.Sleep(time.Duration(sleepMillisecondTime) * time.Millisecond)

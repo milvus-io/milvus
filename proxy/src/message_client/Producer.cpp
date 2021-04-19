@@ -46,7 +46,6 @@ namespace message_client {
 
     Result MsgProducer::send(milvus::grpc::InsertOrDeleteMsg &msg) {
       int32_t channel_id = makeHash(std::to_string(msg.uid())) % 1024;
-//      std::cout << "partition id := " << channel_id <<std::endl;
       msg.set_channel_id(channel_id);
       auto msg_str = msg.SerializeAsString();
       return send(msg_str, msg.uid());
