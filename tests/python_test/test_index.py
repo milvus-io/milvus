@@ -58,6 +58,7 @@ class TestIndexBase:
         index = connect.describe_index(collection, field_name)
         assert index == get_simple_index
 
+    @pytest.mark.tags("0331")
     def test_create_index_on_field_not_existed(self, connect, collection, get_simple_index):
         '''
         target: test create index interface
@@ -69,6 +70,7 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             connect.create_index(collection, tmp_field_name, get_simple_index)
 
+    @pytest.mark.tags("0331")
     @pytest.mark.level(2)
     def test_create_index_on_field(self, connect, collection, get_simple_index):
         '''
@@ -81,6 +83,7 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             connect.create_index(collection, tmp_field_name, get_simple_index)
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_no_vectors(self, connect, collection, get_simple_index):
         '''
@@ -120,6 +123,7 @@ class TestIndexBase:
         index = connect.describe_index(collection, field_name)
         assert index == get_simple_index
 
+    @pytest.mark.tags("0331")
     def test_create_index_without_connect(self, dis_connect, collection):
         '''
         target: test create index without connection
@@ -173,6 +177,7 @@ class TestIndexBase:
         for t in threads:
             t.join()
 
+    @pytest.mark.tags("0331")
     def test_create_index_collection_not_existed(self, connect):
         '''
         target: test create index interface when collection name not existed
@@ -200,6 +205,7 @@ class TestIndexBase:
         index = connect.describe_index(collection, field_name)
         assert index == get_simple_index
 
+    @pytest.mark.tags("0331")
     @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_same_index_repeatedly(self, connect, collection, get_simple_index):
@@ -242,6 +248,7 @@ class TestIndexBase:
         index = connect.describe_index(collection, field_name)
         assert index == get_simple_index
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_no_vectors_ip(self, connect, collection, get_simple_index):
         '''
@@ -330,6 +337,7 @@ class TestIndexBase:
         for t in threads:
             t.join()
 
+    @pytest.mark.tags("0331")
     def test_create_index_collection_not_existed_ip(self, connect, collection):
         '''
         target: test create index interface when collection name not existed
@@ -358,6 +366,7 @@ class TestIndexBase:
         index = connect.describe_index(collection, field_name)
         assert index == default_index
 
+    @pytest.mark.tags("0331")
     @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_same_index_repeatedly_ip(self, connect, collection):
@@ -421,6 +430,7 @@ class TestIndexBase:
         index = connect.describe_index(collection, field_name)
         assert not index
 
+    @pytest.mark.tags("0331")
     @pytest.mark.level(2)
     def test_drop_index_without_connect(self, dis_connect, collection):
         '''
@@ -431,6 +441,7 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             dis_connect.drop_index(collection, field_name)
 
+    @pytest.mark.tags("0331")
     def test_drop_index_collection_not_existed(self, connect):
         '''
         target: test drop index interface when collection name not existed
@@ -442,6 +453,7 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             connect.drop_index(collection_name, field_name)
 
+    @pytest.mark.tags("0331")
     def test_drop_index_collection_not_create(self, connect, collection):
         '''
         target: test drop index interface when index not created
@@ -451,6 +463,7 @@ class TestIndexBase:
         # no create index
         connect.drop_index(collection, field_name)
 
+    @pytest.mark.tags("0331")
     @pytest.mark.level(2)
     def test_create_drop_index_repeatedly(self, connect, collection, get_simple_index):
         '''
@@ -489,6 +502,7 @@ class TestIndexBase:
         index = connect.describe_index(collection, field_name)
         assert not index
 
+    @pytest.mark.tags("0331")
     @pytest.mark.level(2)
     def test_drop_index_without_connect_ip(self, dis_connect, collection):
         '''
@@ -499,6 +513,7 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             dis_connect.drop_index(collection, field_name)
 
+    @pytest.mark.tags("0331")
     def test_drop_index_collection_not_create_ip(self, connect, collection):
         '''
         target: test drop index interface when index not created
@@ -509,6 +524,7 @@ class TestIndexBase:
         # no create index
         connect.drop_index(collection, field_name)
 
+    @pytest.mark.tags("0331")
     @pytest.mark.level(2)
     def test_create_drop_index_repeatedly_ip(self, connect, collection, get_simple_index):
         '''
@@ -722,12 +738,14 @@ class TestIndexInvalid(object):
     def get_collection_name(self, request):
         yield request.param
 
+    @pytest.mark.tags("0331")
     @pytest.mark.level(1)
     def test_create_index_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.create_index(collection_name, field_name, default_index)
 
+    @pytest.mark.tags("0331")
     @pytest.mark.level(1)
     def test_drop_index_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
@@ -780,6 +798,7 @@ class TestIndexAsync:
     ******************************************************************
     """
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index(self, connect, collection, get_simple_index):
         '''
@@ -795,6 +814,7 @@ class TestIndexAsync:
         # TODO:
         logging.getLogger().info(res)
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_drop(self, connect, collection, get_simple_index):
         '''
@@ -808,6 +828,7 @@ class TestIndexAsync:
         logging.getLogger().info("DROP")
         connect.drop_collection(collection)
 
+    @pytest.mark.tags("0331")
     @pytest.mark.level(2)
     def test_create_index_with_invalid_collection_name(self, connect):
         collection_name = " "
@@ -815,6 +836,7 @@ class TestIndexAsync:
         with pytest.raises(Exception) as e:
             res = future.result()
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_callback(self, connect, collection, get_simple_index):
         '''
