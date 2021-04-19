@@ -19,19 +19,18 @@ class TestConnect:
         else:
             return False
 
-    # TODO: remove
-    def _test_disconnect(self, connect):
+    @pytest.mark.tags("0331")
+    def test_close(self, connect):
         '''
         target: test disconnect
         method: disconnect a connected client
         expected: connect failed after disconnected
         '''
-        res = connect.close()
+        connect.close()
         with pytest.raises(Exception) as e:
-            res = connect.list_collections()
+            connect.list_collections()
 
-    # TODO: remove
-    def _test_disconnect_repeatedly(self, dis_connect, args):
+    def test_close_repeatedly(self, dis_connect, args):
         '''
         target: test disconnect repeatedly
         method: disconnect a connected client, disconnect again
@@ -48,7 +47,6 @@ class TestConnect:
         expected: connected is True        
         '''
         milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
-        # assert milvus.connected()
 
     # TODO: Currently we test with remote IP, localhost testing need to add
     def _test_connect_ip_localhost(self, args):
@@ -62,6 +60,7 @@ class TestConnect:
         # assert milvus.connected()
 
     @pytest.mark.timeout(CONNECT_TIMEOUT)
+    @pytest.mark.tags("0331")
     def test_connect_wrong_ip_null(self, args):
         '''
         target: test connect with wrong ip value
@@ -70,9 +69,9 @@ class TestConnect:
         '''
         ip = ""
         with pytest.raises(Exception) as e:
-            milvus = get_milvus(ip, args["port"], args["handler"])
-            # assert not milvus.connected()
+            get_milvus(ip, args["port"], args["handler"])
 
+    @pytest.mark.tags("0331")
     def test_connect_uri(self, args):
         '''
         target: test connect with correct uri
@@ -81,8 +80,8 @@ class TestConnect:
         '''
         uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
         milvus = get_milvus(args["ip"], args["port"], uri=uri_value, handler=args["handler"])
-        # assert milvus.connected()
 
+    @pytest.mark.tags("0331")
     def test_connect_uri_null(self, args):
         '''
         target: test connect with null uri
@@ -92,28 +91,28 @@ class TestConnect:
         uri_value = ""
         if self.local_ip(args):
             milvus = get_milvus(None, None, uri=uri_value, handler=args["handler"])
-            # assert milvus.connected()
         else:
             with pytest.raises(Exception) as e:
                 milvus = get_milvus(None, None, uri=uri_value, handler=args["handler"])
-                # assert not milvus.connected()
 
+    @pytest.mark.tags("0331")
     def test_connect_with_multiprocess(self, args):
         '''
         target: test uri connect with multiprocess
         method: set correct uri, test with multiprocessing connecting
         expected: all connection is connected        
         '''
-        processes = []
         def connect():
             milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
-            assert milvus           
+            assert milvus
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
             future_results = {executor.submit(
                 connect): i for i in range(100)}
             for future in concurrent.futures.as_completed(future_results):
                 future.result()
 
+    @pytest.mark.tags("0331")
     def test_connect_repeatedly(self, args):
         '''
         target: test connect repeatedly
@@ -122,10 +121,7 @@ class TestConnect:
         '''
         uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
         milvus = Milvus(uri=uri_value, handler=args["handler"])
-        # milvus.connect(uri=uri_value, timeout=5)
-        # milvus.connect(uri=uri_value, timeout=5)
         milvus = Milvus(uri=uri_value, handler=args["handler"])
-        # assert milvus.connected()
 
     def _test_add_vector_and_disconnect_concurrently(self):
         '''
@@ -153,19 +149,20 @@ class TestConnect:
         pass
 
     def _test_thread_safe_with_one_connection_shared_in_multi_threads(self):
-       '''
+        '''
         Target: test 1 connection thread safe
         Method: 1 connection shared in multi-threads, all adding vectors, or other things
         Expected: Functional as one thread
 
        '''
-       pass
+        pass
 
 
 class TestConnectIPInvalid(object):
     """
     Test connect server with invalid ip
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_ips()
@@ -175,11 +172,11 @@ class TestConnectIPInvalid(object):
 
     @pytest.mark.level(2)
     @pytest.mark.timeout(CONNECT_TIMEOUT)
+    @pytest.mark.tags("0331")
     def test_connect_with_invalid_ip(self, args, get_invalid_ip):
         ip = get_invalid_ip
         with pytest.raises(Exception) as e:
             milvus = get_milvus(ip, args["port"], args["handler"])
-            # assert not milvus.connected()
 
 
 class TestConnectPortInvalid(object):
@@ -196,6 +193,7 @@ class TestConnectPortInvalid(object):
 
     @pytest.mark.level(2)
     @pytest.mark.timeout(CONNECT_TIMEOUT)
+    @pytest.mark.tags("0331")
     def test_connect_with_invalid_port(self, args, get_invalid_port):
         '''
         target: test ip:port connect with invalid port value
@@ -205,13 +203,13 @@ class TestConnectPortInvalid(object):
         port = get_invalid_port
         with pytest.raises(Exception) as e:
             milvus = get_milvus(args["ip"], port, args["handler"])
-            # assert not milvus.connected()
 
 
 class TestConnectURIInvalid(object):
     """
     Test connect server with invalid uri
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_uris()
@@ -221,6 +219,7 @@ class TestConnectURIInvalid(object):
 
     @pytest.mark.level(2)
     @pytest.mark.timeout(CONNECT_TIMEOUT)
+    @pytest.mark.tags("0331")
     def test_connect_with_invalid_uri(self, get_invalid_uri, args):
         '''
         target: test uri connect with invalid uri value
@@ -230,4 +229,3 @@ class TestConnectURIInvalid(object):
         uri_value = get_invalid_uri
         with pytest.raises(Exception) as e:
             milvus = get_milvus(uri=uri_value, handler=args["handler"])
-            # assert not milvus.connected()

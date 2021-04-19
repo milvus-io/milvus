@@ -18,27 +18,50 @@ nprobe = 1
 epsilon = 0.001
 nlist = 128
 # index_params = {'index_type': IndexType.IVFLAT, 'nlist': 16384}
+default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 16384}, "metric_type": "L2"}
 
 
 class TestMixBase:
+    # TODO
+    def _test_mix_base(self, connect, collection):
+        nb = 200000
+        nq = 5
+        entities = gen_entities(nb=nb)
+        ids = connect.insert(collection, entities)
+        assert len(ids) == nb
+        connect.flush([collection])
+        connect.create_index(collection, default_float_vec_field_name, default_index)
+        index = connect.describe_index(collection, default_float_vec_field_name)
+        assert index == default_index
+        query, vecs = gen_query_vectors(default_float_vec_field_name, entities, default_top_k, nq)
+        connect.load_collection(collection)
+        res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == default_top_k
+        assert res[0]._distances[0] <= epsilon
+        assert check_id_result(res[0], ids[0])
+
     # disable
     def _test_search_during_createIndex(self, args):
         loops = 10000
         collection = gen_unique_str()
         query_vecs = [vectors[0], vectors[1]]
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
-        id_0 = 0; id_1 = 0
+        id_0 = 0;
+        id_1 = 0
         milvus_instance = get_milvus(args["handler"])
         # milvus_instance.connect(uri=uri)
         milvus_instance.create_collection({'collection_name': collection,
-             'dimension': default_dim,
-             'index_file_size': index_file_size,
-             'metric_type': "L2"})
+                                           'dimension': default_dim,
+                                           'index_file_size': index_file_size,
+                                           'metric_type': "L2"})
         for i in range(10):
             status, ids = milvus_instance.bulk_insert(collection, vectors)
             # logging.getLogger().info(ids)
             if i == 0:
-                id_0 = ids[0]; id_1 = ids[1]
+                id_0 = ids[0];
+                id_1 = ids[1]
+
         # def create_index(milvus_instance):
         #     logging.getLogger().info("In create index")
         #     status = milvus_instance.create_index(collection, index_params)
@@ -49,6 +72,7 @@ class TestMixBase:
             logging.getLogger().info("In add vectors")
             status, ids = milvus_instance.bulk_insert(collection, vectors)
             logging.getLogger().info(status)
+
         def search(milvus_instance):
             logging.getLogger().info("In search vectors")
             for i in range(loops):
@@ -56,13 +80,14 @@ class TestMixBase:
                 logging.getLogger().info(status)
                 assert result[0][0].id == id_0
                 assert result[1][0].id == id_1
+
         milvus_instance = get_milvus(args["handler"])
         # milvus_instance.connect(uri=uri)
-        p_search = Process(target=search, args=(milvus_instance, ))
+        p_search = Process(target=search, args=(milvus_instance,))
         p_search.start()
         milvus_instance = get_milvus(args["handler"])
         # milvus_instance.connect(uri=uri)
-        p_create = Process(target=insert, args=(milvus_instance, ))
+        p_create = Process(target=insert, args=(milvus_instance,))
         p_create.start()
         p_create.join()
 
@@ -79,7 +104,7 @@ class TestMixBase:
         idx = []
         index_param = {'nlist': nlist}
 
-        #create collection and add vectors
+        # create collection and add vectors
         for i in range(30):
             collection_name = gen_unique_str('test_mix_multi_collections')
             collection_list.append(collection_name)
@@ -123,7 +148,7 @@ class TestMixBase:
             status = connect.create_index(collection_list[50 + i], IndexType.IVF_SQ8, index_param)
             assert status.OK()
 
-        #describe index
+        # describe index
         for i in range(10):
             status, result = connect.get_index_info(collection_list[i])
             assert result._index_type == IndexType.FLAT
@@ -138,7 +163,7 @@ class TestMixBase:
             status, result = connect.get_index_info(collection_list[50 + i])
             assert result._index_type == IndexType.IVF_SQ8
 
-        #search
+        # search
         query_vecs = [vectors[0], vectors[10], vectors[20]]
         for i in range(60):
             collection = collection_list[i]
@@ -154,8 +179,18 @@ class TestMixBase:
                     logging.getLogger().info(idx[3 * i + j])
                 assert check_result(result[j], idx[3 * i + j])
 
+
 def check_result(result, id):
     if len(result) >= 5:
         return id in [result[0].id, result[1].id, result[2].id, result[3].id, result[4].id]
     else:
         return id in (i.id for i in result)
+
+
+def check_id_result(result, id):
+    limit_in = 5
+    ids = [entity.id for entity in result]
+    if len(result) >= limit_in:
+        return id in ids[:limit_in]
+    else:
+        return id in ids
