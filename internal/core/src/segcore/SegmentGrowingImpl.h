@@ -105,7 +105,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     int64_t
-    chunk_size() const final {
+    size_per_chunk() const final {
         return chunk_size_;
     }
 
@@ -126,7 +126,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     int64_t
-    get_safe_num_chunk() const override;
+    num_chunk_data() const override;
 
     Status
     LoadIndexing(const LoadIndexInfo& info) override;

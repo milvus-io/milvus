@@ -200,7 +200,7 @@ Parser::ParseVecNode(const Json& out_body) {
     auto field_offset = schema.get_offset(field_name);
 
     auto vec_node = [&]() -> std::unique_ptr<VectorPlanNode> {
-        auto field_meta = schema.operator[](field_name);
+        auto& field_meta = schema.operator[](field_name);
         auto data_type = field_meta.get_data_type();
         if (data_type == DataType::VECTOR_FLOAT) {
             return std::make_unique<FloatVectorANNS>();
@@ -252,7 +252,7 @@ template <typename T>
 ExprPtr
 Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
     auto expr = std::make_unique<RangeExprImpl<T>>();
-    auto field_meta = schema[field_name];
+    auto& field_meta = schema[field_name];
     auto data_type = field_meta.get_data_type();
     expr->data_type_ = data_type;
     expr->field_offset_ = schema.get_offset(field_name);

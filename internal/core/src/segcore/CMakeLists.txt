@@ -1,10 +1,11 @@
 
 set(SEGCORE_FILES
-        SegmentGrowingImpl.cpp
         Collection.cpp
         collection_c.cpp
         segment_c.cpp
         SegmentGrowing.cpp
+        SegmentGrowingImpl.cpp
+        SegmentSealedImpl.cpp
         IndexingEntry.cpp
         InsertRecord.cpp
         Reduce.cpp

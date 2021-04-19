@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"sync"
 
-	grpcindexservice "github.com/zilliztech/milvus-distributed/internal/distributed/indexservice"
+	serviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/indexservice/client"
 	"github.com/zilliztech/milvus-distributed/internal/indexnode"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
@@ -19,27 +19,29 @@ type Server struct {
 
 	grpcServer *grpc.Server
 
-	indexNodeLoopCtx    context.Context
-	indexNodeLoopCancel func()
-	indexNodeLoopWg     sync.WaitGroup
+	loopCtx    context.Context
+	loopCancel func()
+	loopWg     sync.WaitGroup
 }
 
-func NewGrpcServer(ctx context.Context, indexID int64) *Server {
-
+func NewGrpcServer(ctx context.Context, nodeID int64) *Server {
+	ctx1, cancel := context.WithCancel(ctx)
 	return &Server{
-		node: indexnode.NewIndexNode(ctx, indexID),
+		loopCtx:    ctx1,
+		loopCancel: cancel,
+		node:       indexnode.NewIndexNode(ctx, nodeID),
 	}
 }
 
 func registerNode() error {
 
-	indexServiceClient := grpcindexservice.NewClient(Params.ServiceAddress)
+	indexServiceClient := serviceclient.NewClient(indexnode.Params.ServiceAddress)
 
 	request := &indexpb.RegisterNodeRequest{
 		Base: nil,
 		Address: &commonpb.Address{
-			Ip:   Params.Address,
-			Port: int64(Params.Port),
+			Ip:   indexnode.Params.NodeIP,
+			Port: int64(indexnode.Params.NodePort),
 		},
 	}
 	resp, err := indexServiceClient.RegisterNode(request)
@@ -48,17 +50,17 @@ func registerNode() error {
 		return err
 	}
 
-	Params.NodeID = resp.InitParams.NodeID
-	log.Println("Register indexNode successful with nodeID=", Params.NodeID)
+	indexnode.Params.NodeID = resp.InitParams.NodeID
+	log.Println("Register indexNode successful with nodeID=", indexnode.Params.NodeID)
 
-	err = Params.LoadFromKVPair(resp.InitParams.StartParams)
+	err = indexnode.Params.LoadFromKVPair(resp.InitParams.StartParams)
 	return err
 }
 
 func (s *Server) grpcLoop() {
-	defer s.indexNodeLoopWg.Done()
+	defer s.loopWg.Done()
 
-	lis, err := net.Listen("tcp", ":"+strconv.Itoa(Params.Port))
+	lis, err := net.Listen("tcp", ":"+strconv.Itoa(indexnode.Params.NodePort))
 	if err != nil {
 		log.Fatalf("IndexNode grpc server fatal error=%v", err)
 	}
@@ -68,45 +70,41 @@ func (s *Server) grpcLoop() {
 	if err = s.grpcServer.Serve(lis); err != nil {
 		log.Fatalf("IndexNode grpc server fatal error=%v", err)
 	}
-	log.Println("IndexNode grpc server starting...")
 }
 
 func (s *Server) startIndexNode() error {
-	s.indexNodeLoopWg.Add(1)
+	s.loopWg.Add(1)
 	//TODO: How to make sure that grpc server has started successfully
 	go s.grpcLoop()
+
+	log.Println("IndexNode grpc server start successfully")
 
 	err := registerNode()
 	if err != nil {
 		return err
 	}
 
-	Params.Init()
+	indexnode.Params.Init()
 	return nil
 }
 
-func Init() {
-	Params.Init()
+func (s *Server) Init() {
+	indexnode.Params.Init()
+	log.Println("IndexNode init successfully, nodeAddress=", indexnode.Params.NodeAddress)
 }
 
 func CreateIndexNode(ctx context.Context) (*Server, error) {
 
-	ctx1, cancel := context.WithCancel(ctx)
-	s := &Server{
-		indexNodeLoopCtx:    ctx1,
-		indexNodeLoopCancel: cancel,
-	}
-
-	return s, nil
+	return NewGrpcServer(ctx, indexnode.Params.NodeID), nil
 }
 
 func (s *Server) Start() error {
-
+	s.Init()
 	return s.startIndexNode()
 }
 
 func (s *Server) Stop() {
-	s.indexNodeLoopWg.Wait()
+	s.loopWg.Wait()
 }
 
 func (s *Server) Close() {

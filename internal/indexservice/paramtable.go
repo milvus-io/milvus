@@ -13,8 +13,6 @@ type ParamTable struct {
 	Address string
 	Port    int
 
-	NodeID int64
-
 	MasterAddress string
 
 	EtcdAddress  string

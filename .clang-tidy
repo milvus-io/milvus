@@ -20,7 +20,7 @@ Checks: >
     -*, clang-diagnostic-*, -clang-diagnostic-error,
     clang-analyzer-*, -clang-analyzer-alpha*,
     google-*, -google-runtime-references, -google-readability-todo,
-    modernize-*, -modernize-pass-by-value, -modernize-use-equals-default,
+    modernize-*, -modernize-pass-by-value, -modernize-use-equals-default, -modernize-use-trailing-return-type,
     performance-faster-string-find, performance-for-range-copy,
     performance-implicit-conversion-in-loop, performance-inefficient-algorithm,
     performance-trivially-destructible, performance-inefficient-vector-operation,

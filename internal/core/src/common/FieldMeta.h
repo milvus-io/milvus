@@ -84,6 +84,13 @@ datatype_is_vector(DataType datatype) {
 
 struct FieldMeta {
  public:
+    FieldMeta(const FieldMeta&) = delete;
+    FieldMeta(FieldMeta&&) = default;
+    FieldMeta&
+    operator=(const FieldMeta&) = delete;
+    FieldMeta&
+    operator=(FieldMeta&&) = default;
+
     FieldMeta(const FieldName& name, FieldId id, DataType type) : name_(name), id_(id), type_(type) {
         Assert(!is_vector());
     }
