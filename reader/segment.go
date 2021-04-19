@@ -31,6 +31,7 @@ type Segment struct {
 	SegmentPtr       C.CSegmentBase
 	SegmentId        int64
 	SegmentCloseTime uint64
+	LastMemSize      uint64
 }
 
 func (s *Segment) GetStatus() int {
@@ -76,6 +77,10 @@ func (s *Segment) Close() error {
 	return nil
 }
 
+func (s *Segment) GetMemSize() uint64 {
+	return 100000
+}
+
 ////////////////////////////////////////////////////////////////////////////
 func (s *Segment) SegmentPreInsert(numOfRecords int) int64 {
 	/*C.PreInsert
@@ -113,7 +118,7 @@ func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]
 	var numOfRow = len(*entityIDs)
 	var sizeofPerRow = len((*records)[0])
 
-	var rawData = make([]byte, numOfRow * sizeofPerRow)
+	var rawData = make([]byte, numOfRow*sizeofPerRow)
 	for i := 0; i < len(*records); i++ {
 		copy(rawData, (*records)[i])
 	}
@@ -126,13 +131,13 @@ func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]
 	var cRawDataVoidPtr = unsafe.Pointer(&rawData[0])
 
 	var status = C.Insert(s.SegmentPtr,
-							cOffset,
-							cNumOfRows,
-							cEntityIdsPtr,
-							cTimestampsPtr,
+		cOffset,
+		cNumOfRows,
+		cEntityIdsPtr,
+		cTimestampsPtr,
 		cRawDataVoidPtr,
-							cSizeofPerRow,
-							cNumOfRows)
+		cSizeofPerRow,
+		cNumOfRows)
 
 	if status != 0 {
 		return errors.New("Insert failed, error code = " + strconv.Itoa(int(status)))

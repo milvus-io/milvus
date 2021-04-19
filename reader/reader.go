@@ -20,6 +20,11 @@ func StartQueryNode(pulsarURL string, numOfQueryNode int, messageClientID int) {
 	mc.ReceiveMessage()
 	qn := CreateQueryNode(0, 0, &mc)
 	qn.InitQueryNodeCollection()
+
+	// Segments Services
+	// go qn.SegmentManagementService()
+	go qn.SegmentStatisticService()
+
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 	go qn.RunInsertDelete(&wg)

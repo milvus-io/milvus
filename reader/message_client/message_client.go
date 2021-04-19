@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/apache/pulsar-client-go/pulsar"
+	masterPb "github.com/czs007/suvlim/pkg/master/grpc/master"
 	msgpb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	timesync "github.com/czs007/suvlim/timesync"
 	"github.com/golang/protobuf/proto"
@@ -20,10 +21,11 @@ type MessageClient struct {
 	key2SegChan chan *msgpb.Key2SegMsg
 
 	// pulsar
-	client               pulsar.Client
-	searchResultProducer pulsar.Producer
-	searchConsumer       pulsar.Consumer
-	key2segConsumer      pulsar.Consumer
+	client                   pulsar.Client
+	searchResultProducer     pulsar.Producer
+	segmentsStatisticProducer pulsar.Producer
+	searchConsumer           pulsar.Consumer
+	key2segConsumer          pulsar.Consumer
 
 	// batch messages
 	InsertOrDeleteMsg   []*msgpb.InsertOrDeleteMsg
@@ -45,12 +47,23 @@ func (mc *MessageClient) TimeSyncEnd() uint64 {
 	return mc.timestampBatchEnd
 }
 
-func (mc *MessageClient) Send(ctx context.Context, msg msgpb.QueryResult) {
+func (mc *MessageClient) SendResult(ctx context.Context, msg msgpb.QueryResult) {
 	var msgBuffer, _ = proto.Marshal(&msg)
 	if _, err := mc.searchResultProducer.Send(ctx, &pulsar.ProducerMessage{
 		Payload: msgBuffer,
 	}); err != nil {
 		log.Fatal(err)
+	}
+}
+
+func (mc *MessageClient) SendSegmentsStatistic(ctx context.Context, statisticData *[]masterPb.SegmentStat) {
+	for _, data := range *statisticData {
+		var stat, _ = proto.Marshal(&data)
+		if _, err := mc.segmentsStatisticProducer.Send(ctx, &pulsar.ProducerMessage{
+			Payload: stat,
+		}); err != nil {
+			log.Fatal(err)
+		}
 	}
 }
 
@@ -138,6 +151,7 @@ func (mc *MessageClient) InitClient(url string, numOfQueryNode int) {
 
 	//create producer
 	mc.searchResultProducer = mc.creatProducer("SearchResult")
+	mc.segmentsStatisticProducer = mc.creatProducer("SegmentsStatistic")
 
 	//create consumer
 	mc.searchConsumer = mc.createConsumer("Search")
@@ -176,6 +190,7 @@ func (mc *MessageClient) InitClient(url string, numOfQueryNode int) {
 func (mc *MessageClient) Close() {
 	mc.client.Close()
 	mc.searchResultProducer.Close()
+	mc.segmentsStatisticProducer.Close()
 	mc.searchConsumer.Close()
 	mc.key2segConsumer.Close()
 	mc.timeSyncCfg.Close()

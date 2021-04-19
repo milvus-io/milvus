@@ -2,9 +2,8 @@ package reader
 
 import (
 	"context"
-	"fmt"
+	masterPb "github.com/czs007/suvlim/pkg/master/grpc/master"
 	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
-	"strconv"
 )
 
 type ResultEntityIds []int64
@@ -14,17 +13,11 @@ type SearchResult struct {
 	ResultDistances []float32
 }
 
-func getResultTopicByClientId(clientId int64) string {
-	// TODO: Result topic?
-	return "result-topic/partition-" + strconv.FormatInt(clientId, 10)
-}
-
-func (node *QueryNode) PublishSearchResult(results *msgPb.QueryResult, clientId int64) msgPb.Status {
+func (node *QueryNode) PublishSearchResult(results *msgPb.QueryResult) msgPb.Status {
 	var ctx = context.Background()
 
-	var resultTopic = getResultTopicByClientId(clientId)
-	node.messageClient.Send(ctx, *results)
-	fmt.Println(resultTopic)
+	node.messageClient.SendResult(ctx, *results)
+
 	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
 }
 
@@ -38,14 +31,14 @@ func (node *QueryNode) PublishFailedSearchResult() msgPb.Status {
 
 	var ctx = context.Background()
 
-	node.messageClient.Send(ctx, results)
+	node.messageClient.SendResult(ctx, results)
 	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
 }
 
-func (node *QueryNode) PublicStatistic(statisticTopic string) msgPb.Status {
-	// TODO: get statistic info
-	// getStatisticInfo()
-	// var info = getStatisticInfo()
-	// TODO: Pulsar publish
+func (node *QueryNode) PublicStatistic(statisticData *[]masterPb.SegmentStat) msgPb.Status {
+	var ctx = context.Background()
+
+	node.messageClient.SendSegmentsStatistic(ctx, statisticData)
+
 	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
 }
