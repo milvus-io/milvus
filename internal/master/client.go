@@ -1,6 +1,7 @@
 package master
 
 import (
+	"sync"
 	"time"
 
 	buildindexclient "github.com/zilliztech/milvus-distributed/internal/indexbuilder/client"
@@ -20,9 +21,12 @@ type MockWriteNodeClient struct {
 	partitionTag string
 	timestamp    Timestamp
 	collectionID UniqueID
+	lock         sync.RWMutex
 }
 
 func (m *MockWriteNodeClient) FlushSegment(segmentID UniqueID, collectionID UniqueID, partitionTag string, timestamp Timestamp) error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
 	m.flushTime = time.Now()
 	m.segmentID = segmentID
 	m.collectionID = collectionID
@@ -33,6 +37,8 @@ func (m *MockWriteNodeClient) FlushSegment(segmentID UniqueID, collectionID Uniq
 
 func (m *MockWriteNodeClient) DescribeSegment(segmentID UniqueID) (*writerclient.SegmentDescription, error) {
 	now := time.Now()
+	m.lock.RLock()
+	defer m.lock.RUnlock()
 	if now.Sub(m.flushTime).Seconds() > 2 {
 		return &writerclient.SegmentDescription{
 			SegmentID: segmentID,

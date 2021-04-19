@@ -13,6 +13,7 @@ package querynode
 import "C"
 import (
 	"strconv"
+	"sync"
 	"unsafe"
 
 	"github.com/stretchr/testify/assert"
@@ -28,11 +29,24 @@ type Segment struct {
 	collectionID     UniqueID
 	lastMemSize      int64
 	lastRowCount     int64
+	mu               sync.Mutex
 	recentlyModified bool
 }
 
 func (s *Segment) ID() UniqueID {
 	return s.segmentID
+}
+
+func (s *Segment) SetRecentlyModified(modify bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recentlyModified = modify
+}
+
+func (s *Segment) GetRecentlyModified() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.recentlyModified
 }
 
 //-------------------------------------------------------------------------------------- constructor and destructor
@@ -161,7 +175,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 		return errors.New("Insert failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}
 
-	s.recentlyModified = true
+	s.SetRecentlyModified(true)
 	return nil
 }
 
