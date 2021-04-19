@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package milvus.proto.index;
+
+option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/indexpb";
+
+import "common.proto";
+import "internal.proto";
+
+
+message RegisterNodeRequest {
+  internal.MsgBase base = 1;
+  common.Address address = 2;
+}
+
+message RegisterNodeResponse {
+  internal.InitParams init_params = 1;
+}
+
+
+enum IndexState {
+  NONE = 0;
+  UNISSUED = 1;
+  INPROGRESS = 2;
+  FINISHED = 3;
+  FAILED = 4;
+}
+
+message IndexStatesRequest {
+  int64  indexID = 1;
+}
+
+message IndexStatesResponse {
+  common.Status status = 1;
+  IndexState state = 2;
+  int64 indexID = 3;
+}
+
+message BuildIndexRequest {
+  repeated string data_paths = 2;
+  repeated common.KeyValuePair type_params = 3;
+  repeated common.KeyValuePair index_params = 4;
+}
+
+message BuildIndexResponse {
+  common.Status status = 1;
+  int64 indexID = 2;
+}
+
+message IndexFilePathRequest {
+  int64 indexID = 1;
+}
+
+message IndexFilePathsResponse {
+  common.Status status = 1;
+  int64 indexID = 2;
+  repeated string index_file_paths = 3;
+}
+
+message IndexMeta {
+  IndexState state = 1;
+  int64   indexID = 2;
+  int64 enque_time = 3;
+  int64 schedule_time = 4;
+  int64 build_complete_time = 5;
+  BuildIndexRequest req = 6;
+  repeated string index_file_paths = 7;
+}
+
+/****************IndexService************************/
+service IndexService {
+  /**
+   * @brief This method is used to create collection
+   *
+   * @param CollectionSchema, use to provide collection information to be created.
+   *
+   * @return Status
+   */
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
+  rpc BuildIndex(BuildIndexRequest) returns (BuildIndexResponse){}
+  rpc GetIndexStates(IndexStatesRequest) returns (IndexStatesResponse) {}
+  rpc GetIndexFilePaths(IndexFilePathRequest) returns (IndexFilePathsResponse){}
+
+}

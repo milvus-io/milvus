@@ -13,7 +13,7 @@ type Master interface {
   CreateCollection(req CreateCollectionRequest) error
   DropCollection(req DropCollectionRequest) error
   HasCollection(req HasCollectionRequest) (bool, error)
-  DescribeCollection(req DescribeCollectionRequest) (CollectionDescriptionResponse, error)
+  DescribeCollection(req DescribeCollectionRequest) (DescribeCollectionResponse, error)
   GetCollectionStatistics(req CollectionStatsRequest) (CollectionStatsResponse, error)
   ShowCollections(req ShowCollectionRequest) (ShowCollectionResponse, error)
   
@@ -52,6 +52,7 @@ type RequestBase struct {
 type CreateCollectionRequest struct {
   RequestBase
   DbName string
+  CollectionName string
   Schema []bytes
 }
 ```
@@ -85,7 +86,7 @@ type DescribeCollectionRequest struct {
   CollectionName string
 }
 
-type CollectionDescriptionResponse struct {
+type DescribeCollectionResponse struct {
   Schema []bytes
 }
 ```
@@ -168,11 +169,10 @@ type PartitionStatsResponse struct {
 * *ShowPartitions*
 
 ```go
-type CreatePartitionRequest struct {
+type ShowPartitionRequest struct {
   RequestBase
   DbName string
   CollectionName string
-  PartitionName string
 }
 
 type ShowPartitionResponse struct {
@@ -188,7 +188,7 @@ type CreateIndexRequest struct {
   DbName string
   CollectionName string
   FieldName string
-  Params []KeyValuePair
+  Params [] KeyValuePair
 }
 ```
 

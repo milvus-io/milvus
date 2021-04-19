@@ -50,4 +50,4 @@ echo ${CMAKE_CMD}
 if [[ ! ${jobs+1} ]]; then
     jobs=$(nproc)
 fi
-make -j ${jobs}
+make -j ${jobs} VERBOSE=0

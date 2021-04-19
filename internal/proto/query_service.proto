@@ -1,0 +1,160 @@
+syntax = "proto3";
+
+package milvus.proto.query;
+
+option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/querypb";
+
+import "common.proto";
+import "internal.proto";
+
+
+message RegisterNodeRequest {
+  internal.MsgBase base = 1;
+  common.Address address = 2;
+}
+
+message RegisterNodeResponse {
+  internal.InitParams init_params = 1;
+}
+
+message ShowCollectionRequest {
+  internal.MsgBase base = 1;
+  int64  dbID = 2;
+}
+
+message ShowCollectionResponse  {
+  repeated int64  collectionIDs = 1;
+}
+
+message LoadCollectionRequest {
+  internal.MsgBase base = 1;
+  int64  dbID = 2;
+  int64 collectionID = 3;
+}
+
+
+message ReleaseCollectionRequest {
+  internal.MsgBase base = 1;
+  int64  dbID = 2;
+  int64 collectionID = 3;
+}
+
+
+message ShowPartitionRequest {
+  internal.MsgBase base = 1;
+  int64  dbID = 2;
+  int64  collectionID = 3;
+}
+
+message ShowPartitionResponse  {
+  repeated int64  partitionIDs = 1;
+}
+
+
+enum PartitionState {
+  NotExist = 0;
+  NotPresent = 1;
+  OnDist = 2;
+  PartialInMemory = 3;
+  InMemory = 4;
+  PartialInGPU = 5;
+  InGPU = 6;
+}
+
+message PartitionStates {
+  int64 partitionID = 1;
+  PartitionState state = 2;
+}
+
+message PartitionStatesRequest  {
+  internal.MsgBase base = 1;
+  int64  dbID = 2;
+  int64 collectionID = 3;
+  repeated int64  partitionIDs = 4;
+}
+
+message PartitionStatesResponse {
+  repeated PartitionStates partition_descriptions = 1;
+}
+
+
+message LoadPartitonRequest {
+  internal.MsgBase base = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+  repeated int64 partitionIDs = 4;
+}
+
+message ReleasePartitionRequest {
+  internal.MsgBase base = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+  repeated int64 partitionIDs = 4;
+}
+
+message CreateQueryChannelResponse {
+  string request_channel = 1;
+  string result_channel = 2;
+}
+
+
+message AddQueryChannelRequest {
+  internal.MsgBase base = 1;
+  string request_channelID = 2;
+  string result_channelID = 3;
+}
+
+
+message RemoveQueryChannelRequest {
+  internal.MsgBase base = 1;
+  string request_channelID = 2;
+  string result_channelID = 3;
+}
+
+message WatchDmChannelRequest  {
+  internal.MsgBase base = 1;
+  repeated string channelIDs = 2;
+}
+
+
+message LoadSegmentRequest {
+  internal.MsgBase base = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+  repeated int64 partitionIDs = 4;
+  repeated int64 segmentIDs = 5;
+  repeated int64 fieldIDs = 6;
+}
+
+message ReleaseSegmentRequest {
+  internal.MsgBase base = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+  repeated int64 partitionIDs = 4;
+  repeated int64 segmentIDs = 5;
+  repeated int64 fieldIDs = 6;
+}
+
+service QueryService {
+  /**
+   * @brief This method is used to create collection
+   *
+   * @param CollectionSchema, use to provide collection information to be created.
+   *
+   * @return Status
+   */
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
+  rpc  ShowCollections(ShowCollectionRequest) returns (ShowCollectionResponse) {}
+  rpc  LoadCollection(LoadCollectionRequest) returns (common.Status) {}
+  rpc  ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {}
+  rpc ShowPartitions(ShowPartitionRequest) returns (ShowPartitionResponse) {}
+  rpc GetPartitionStates(PartitionStatesRequest) returns (PartitionStatesResponse) {}
+  rpc LoadPartitions(LoadPartitonRequest) returns (common.Status) {}
+  rpc ReleasePartitions(ReleasePartitionRequest) returns (common.Status) {}
+  rpc CreateQueryChannel(common.Empty ) returns (CreateQueryChannelResponse) {}
+}
+
+
+
+
+

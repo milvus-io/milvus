@@ -1,0 +1,120 @@
+syntax = "proto3";
+package milvus.proto.master;
+
+option go_package="github.com/zilliztech/milvus-distributed/internal/proto/masterpb2";
+
+import "common.proto";
+import "milvus.proto";
+import "internal.proto";
+import "service_msg.proto";
+
+
+message IDRequest {
+    internal.MsgBase base = 1;
+    uint32 count = 2;
+}
+
+message IDResponse {
+    common.Status status = 1;
+    int64 ID = 2;
+    uint32 count = 3;
+}
+
+message TsoRequest {
+    internal.MsgBase base = 1;
+    uint32 count = 3;
+}
+
+message TsoResponse {
+    common.Status status = 1;
+    uint64 timestamp = 2;
+    uint32 count = 3;
+}
+
+service MasterService {
+    /**
+     * @brief This method is used to create collection
+     *
+     * @param CreateCollectionRequest, use to provide collection information to be created.
+     *
+     * @return Status
+     */
+    rpc CreateCollection(milvus.CreateCollectionRequest) returns (common.Status){}
+    
+    /**
+     * @brief This method is used to delete collection.
+     *
+     * @param DropCollectionRequest, collection name is going to be deleted.
+     *
+     * @return Status
+     */
+    rpc DropCollection(milvus.DropCollectionRequest) returns (common.Status) {}
+
+    /**
+     * @brief This method is used to test collection existence.
+     *
+     * @param HasCollectionRequest, collection name is going to be tested.
+     *
+     * @return BoolResponse
+     */
+    rpc HasCollection(milvus.HasCollectionRequest) returns (service.BoolResponse) {}
+
+    /**
+     * @brief This method is used to get collection schema.
+     *
+     * @param DescribeCollectionRequest, target collection name.
+     *
+     * @return CollectionSchema
+     */
+    rpc DescribeCollection(milvus.DescribeCollectionRequest) returns (milvus.DescribeCollectionResponse) {}
+
+    rpc GetCollectionStatistics(milvus.CollectionStatsRequest) returns (milvus.CollectionStatsResponse) {}
+
+
+    /**
+     * @brief This method is used to list all collections.
+     *
+     * @return StringListResponse, collection name list
+     */
+    rpc ShowCollections(milvus.ShowCollectionRequest) returns (milvus.ShowCollectionResponse) {}
+
+    /**
+     * @brief This method is used to create partition
+     *
+     * @return Status
+     */
+    rpc CreatePartition(milvus.CreatePartitionRequest) returns (common.Status) {}
+
+    /**
+     * @brief This method is used to drop partition
+     *
+     * @return Status
+     */
+    rpc DropPartition(milvus.DropPartitionRequest) returns (common.Status) {}
+
+    /**
+     * @brief This method is used to test partition existence.
+     *
+     * @return BoolResponse
+     */
+    rpc HasPartition(milvus.HasPartitionRequest) returns (service.BoolResponse) {}
+
+    rpc GetPartitionStatistics(milvus.PartitionStatsRequest) returns (milvus.PartitionStatsResponse) {}
+
+    /**
+     * @brief This method is used to show partition information
+     *
+     * @param ShowPartitionRequest, target collection name.
+     *
+     * @return StringListResponse
+     */
+    rpc ShowPartitions(milvus.ShowPartitionRequest) returns (milvus.ShowPartitionResponse) {}
+
+
+    rpc CreateIndex(milvus.CreateIndexRequest) returns (common.Status) {}
+    rpc DescribeIndex(milvus.DescribeIndexRequest) returns (milvus.DescribeIndexResponse) {}
+
+    rpc AllocTimestamp(TsoRequest) returns (TsoResponse) {}
+    rpc AllocID(IDRequest) returns (IDResponse) {}
+
+}

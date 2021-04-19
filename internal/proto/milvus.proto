@@ -1,0 +1,181 @@
+syntax = "proto3";
+package milvus.proto.milvus;
+
+option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/milvuspb";
+
+import "common.proto";
+import "internal.proto";
+
+message CreateCollectionRequest {
+  internal.MsgBase base = 1;
+  string dbName = 2;
+  string collectionName = 3;
+  repeated bytes schema = 4;
+}
+
+
+message DropCollectionRequest {
+  internal.MsgBase base = 1;
+  string dbName = 2;
+  string collectionName = 3;
+}
+
+message HasCollectionRequest {
+  internal.MsgBase base = 1;
+  string dbName = 2;
+  string collection_name = 3;
+}
+
+message DescribeCollectionRequest {
+  internal.MsgBase base = 1;
+  string dbName = 2;
+  string collection_name = 3;
+}
+
+message DescribeCollectionResponse {
+  repeated bytes schema = 1;
+}
+
+message LoadCollectionRequest {
+  internal.MsgBase base = 1;
+  string dbName = 2;
+  string collection_name = 3;
+}
+
+message ReleaseCollectionRequest {
+  internal.MsgBase base = 1;
+  string dbName = 2;
+  string collection_name = 3;
+}
+
+message CollectionStatsRequest {
+  internal.MsgBase base = 1;
+  string dbName = 2;
+  string collection_name = 3;
+}
+
+message CollectionStatsResponse {
+  repeated common.KeyValuePair stats = 1;
+}
+
+
+message ShowCollectionRequest {
+  internal.MsgBase base = 1;
+  string dbName = 2;
+}
+
+message ShowCollectionResponse {
+  repeated string collection_names = 1;
+}
+
+
+message CreatePartitionRequest {
+  internal.MsgBase base = 1;
+  string dbName = 2;
+  string collection_name = 3;
+  string partition_name = 4;
+}
+
+
+message DropPartitionRequest {
+  internal.MsgBase base = 1;
+  string dbName = 2;
+  string collection_name = 3;
+  string partition_name = 4;
+}
+
+message HasPartitionRequest {
+  internal.MsgBase base = 1;
+  string dbName = 2;
+  string collection_name = 3;
+  string partition_name = 4;
+}
+
+message LoadPartitonRequest {
+  internal.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  repeated string partition_names = 4;
+}
+
+message ReleasePartitionRequest {
+  internal.MsgBase base = 1;
+  string dbName = 2;
+  string collection_name = 3;
+  repeated  string partition_names = 4;
+}
+
+message PartitionStatsRequest  {
+  internal.MsgBase base = 1;
+  string dbName = 2;
+  string collection_name = 3;
+  string partition_name = 4;
+}
+
+message PartitionStatsResponse {
+  repeated common.KeyValuePair stats = 1;
+}
+
+message ShowPartitionRequest {
+  internal.MsgBase base = 1;
+  string dbName = 2;
+  string collection_name = 3;
+}
+
+message ShowPartitionResponse {
+  repeated  string partition_names = 1;
+}
+
+
+message CreateIndexRequest {
+  internal.MsgBase base = 1;
+  string dbName = 2;
+  string collection_name = 3;
+  string field_name = 4;
+  repeated common.KeyValuePair extra_params = 5;
+}
+
+message DescribeIndexRequest {
+  internal.MsgBase base = 1;
+  string dbName = 2;
+  string collection_name = 3;
+  string field_name = 4;
+}
+
+message IndexDescription {
+  string index_name = 1;
+  repeated common.KeyValuePair params = 2;
+}
+
+message DescribeIndexResponse {
+  repeated IndexDescription index_descriptions = 1;
+}
+
+message InsertRequest {
+  internal.MsgBase base = 1;
+  string dbName = 2;
+  string collection_name = 3;
+  string partition_name = 4;
+  repeated common.Blob row_data = 5;
+  repeated uint32  hash_keys = 6;
+}
+
+message InsertResponse {
+  int64  rowID_begin = 1;
+  int64  rowID_end = 2;
+}
+
+message SearchRequest {
+  internal.MsgBase base = 1;
+  string dbName = 2;
+  string collection_name = 3;
+  repeated  string partition_names = 4;
+  string dsl = 5;
+  repeated bytes placeholder_group = 6;
+}
+
+message FlushRequest {
+  internal.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+}

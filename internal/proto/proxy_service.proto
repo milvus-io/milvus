@@ -1,0 +1,37 @@
+syntax = "proto3";
+package milvus.proto.proxy;
+
+option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/proxypb";
+
+import "common.proto";
+import "internal.proto";
+
+
+message RegisterNodeRequest {
+  internal.MsgBase base = 1;
+  common.Address address = 2;
+}
+
+message RegisterNodeResponse {
+  internal.InitParams init_params = 1;
+}
+
+message RegisterLinkResponse {
+  common.Address address = 1;
+}
+
+message InvalidateCollMetaCacheRequest {
+  internal.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+}
+
+service ProxyService {
+  rpc RegisterLink(common.Empty) returns (RegisterLinkResponse) {}
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
+  rpc InvalidateCollectionMetaCache(InvalidateCollMetaCacheRequest) returns (common.Status) {}
+}
+
+service ProxyNodeService {
+  rpc InvalidateCollectionMetaCache(InvalidateCollMetaCacheRequest) returns (common.Status) {}
+}

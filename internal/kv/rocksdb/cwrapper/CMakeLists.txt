@@ -22,10 +22,8 @@ macro( build_rocksdb )
     set( ROCKSDB_CMAKE_ARGS
          "-DWITH_GFLAGS=OFF"
          "-DROCKSDB_BUILD_SHARED=OFF"
-#         "-DWITH_SNAPPY=ON"
-#         "-DWITH_LZ4=ON"
-#         "-DWITH_ZSTD=ON"
-#         "-DWITH_BZ2=ON"
+         #This is used to solve 'illegal instruction' problem in some machine
+         "-DPORTABLE=ON"
          "-DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}"
           )
 
