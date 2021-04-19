@@ -2,7 +2,6 @@ package master
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"math/rand"
 	"net"
@@ -11,14 +10,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/golang/protobuf/proto"
 	"go.etcd.io/etcd/clientv3"
 	"google.golang.org/grpc"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
-	"github.com/zilliztech/milvus-distributed/internal/master/controller"
 	"github.com/zilliztech/milvus-distributed/internal/master/id"
 	"github.com/zilliztech/milvus-distributed/internal/master/informer"
 	masterParams "github.com/zilliztech/milvus-distributed/internal/master/paramtable"
@@ -52,6 +48,14 @@ type Option struct {
 
 	PulsarDMChannels  []string
 	PulsarK2SChannels []string
+
+	DefaultRecordSize     int64
+	MinimumAssignSize     int64
+	SegmentThreshold      float64
+	SegmentExpireDuration int64
+	NumOfChannel          int
+	NumOfQueryNode        int
+	StatsChannels         string
 }
 
 type Master struct {
@@ -88,6 +92,9 @@ type Master struct {
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
+
+	segmentMgr *SegmentManager
+	statsMs    ms.MsgStream
 }
 
 func newKVBase(kvRoot string, etcdAddr []string) *kv.EtcdKV {
@@ -135,7 +142,7 @@ func CreateServer(ctx context.Context, opt *Option) (*Master, error) {
 		return nil, err
 	}
 	pulsarProxyStream := ms.NewPulsarMsgStream(ctx, 1024) //output stream
-	pulsarProxyStream.SetPulsarCient(opt.PulsarAddr)
+	pulsarProxyStream.SetPulsarClient(opt.PulsarAddr)
 	pulsarProxyStream.CreatePulsarConsumers(opt.PulsarProxyChannels, opt.PulsarProxySubName, ms.NewUnmarshalDispatcher(), 1024)
 	pulsarProxyStream.Start()
 	var proxyStream ms.MsgStream = pulsarProxyStream
@@ -143,7 +150,7 @@ func CreateServer(ctx context.Context, opt *Option) (*Master, error) {
 	tsmp.SetProxyTtBarrier(proxyTimeTickBarrier)
 
 	pulsarWriteStream := ms.NewPulsarMsgStream(ctx, 1024) //output stream
-	pulsarWriteStream.SetPulsarCient(opt.PulsarAddr)
+	pulsarWriteStream.SetPulsarClient(opt.PulsarAddr)
 	pulsarWriteStream.CreatePulsarConsumers(opt.PulsarWriteChannels, opt.PulsarWriteSubName, ms.NewUnmarshalDispatcher(), 1024)
 	pulsarWriteStream.Start()
 	var writeStream ms.MsgStream = pulsarWriteStream
@@ -151,14 +158,20 @@ func CreateServer(ctx context.Context, opt *Option) (*Master, error) {
 	tsmp.SetWriteNodeTtBarrier(writeTimeTickBarrier)
 
 	pulsarDMStream := ms.NewPulsarMsgStream(ctx, 1024) //input stream
-	pulsarDMStream.SetPulsarCient(opt.PulsarAddr)
+	pulsarDMStream.SetPulsarClient(opt.PulsarAddr)
 	pulsarDMStream.CreatePulsarProducers(opt.PulsarDMChannels)
 	tsmp.SetDMSyncStream(pulsarDMStream)
 
 	pulsarK2SStream := ms.NewPulsarMsgStream(ctx, 1024) //input stream
-	pulsarK2SStream.SetPulsarCient(opt.PulsarAddr)
+	pulsarK2SStream.SetPulsarClient(opt.PulsarAddr)
 	pulsarK2SStream.CreatePulsarProducers(opt.PulsarK2SChannels)
 	tsmp.SetK2sSyncStream(pulsarK2SStream)
+
+	// stats msg stream
+	statsMs := ms.NewPulsarMsgStream(ctx, 1024)
+	statsMs.SetPulsarClient(opt.PulsarAddr)
+	statsMs.CreatePulsarConsumers([]string{opt.StatsChannels}, "SegmentStats", ms.NewUnmarshalDispatcher(), 1024)
+	statsMs.Start()
 
 	m := &Master{
 		ctx:            ctx,
@@ -170,6 +183,8 @@ func CreateServer(ctx context.Context, opt *Option) (*Master, error) {
 		ssChan:         make(chan internalpb.SegmentStats, 10),
 		grpcErr:        make(chan error),
 		pc:             informer.NewPulsarClient(),
+		segmentMgr:     NewSegmentManager(metakv, opt),
+		statsMs:        statsMs,
 	}
 	m.grpcServer = grpc.NewServer()
 	masterpb.RegisterMasterServer(m.grpcServer, m)
@@ -220,7 +235,6 @@ func (s *Master) IsServing() bool {
 
 // Run runs the pd server.
 func (s *Master) Run(grpcPort int64) error {
-
 	if err := s.startServerLoop(s.ctx, grpcPort); err != nil {
 		return err
 	}
@@ -343,46 +357,6 @@ func (s *Master) tsLoop() {
 	}
 }
 
-// todo use messagestream
-func (s *Master) pulsarLoop() {
-	defer s.serverLoopWg.Done()
-
-	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-
-	consumer, err := s.pc.Client.Subscribe(pulsar.ConsumerOptions{
-		Topic:            masterParams.Params.PulsarToic(),
-		SubscriptionName: "my-sub",
-		Type:             pulsar.Shared,
-	})
-	if err != nil {
-		log.Fatal(err)
-		return
-	}
-	defer func() {
-		if err := consumer.Unsubscribe(); err != nil {
-			log.Fatal(err)
-		}
-		cancel()
-	}()
-
-	consumerChan := consumer.Chan()
-
-	for {
-		select {
-		case msg := <-consumerChan:
-			var m internalpb.SegmentStats
-			proto.Unmarshal(msg.Payload(), &m)
-			fmt.Printf("Received message msgId: %#v -- content: '%d'\n",
-				msg.ID(), m.SegmentID)
-			s.ssChan <- m
-			consumer.Ack(msg)
-		case <-ctx.Done():
-			log.Print("server is closed, exit pulsar loop")
-			return
-		}
-	}
-}
-
 func (s *Master) tasksExecutionLoop() {
 	defer s.serverLoopWg.Done()
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
@@ -412,14 +386,17 @@ func (s *Master) tasksExecutionLoop() {
 
 func (s *Master) segmentStatisticsLoop() {
 	defer s.serverLoopWg.Done()
-
+	defer s.statsMs.Close()
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 
 	for {
 		select {
-		case ss := <-s.ssChan:
-			controller.ComputeCloseTime(ss, s.kvBase)
+		case msg := <-s.statsMs.Chan():
+			err := s.segmentMgr.HandleQueryNodeMsgPack(msg)
+			if err != nil {
+				log.Println(err)
+			}
 		case <-ctx.Done():
 			log.Print("server is closed, exit segment statistics loop")
 			return

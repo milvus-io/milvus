@@ -956,8 +956,8 @@ func (unmarshaler *QueryReqUnmarshaler) Unmarshal(input *pulsar.Message) (*TsMsg
 | DescribePartition  | show a partition's name and its descriptive statistics       |
 | ShowPartitions     | list a collection's all partitions                           |
 | AllocTimestamp     | allocate a batch of consecutive timestamps                   |
-| AllocId            | allocate a batch of consecutive IDs                          |
-| AssignSegmentId    | assign segment id to insert rows (master determines which segment these rows belong to) |
+| AllocID            | allocate a batch of consecutive IDs                          |
+| AssignSegmentID    | assign segment id to insert rows (master determines which segment these rows belong to) |
 |                    |                                                              |
 |                    |                                                              |
 
@@ -1244,5 +1244,63 @@ func (syncMsgProducer *timeSyncMsgProducer) Close()
 
 
 
+#### 10.6 System Statistics
 
+###### 10.6.1 Query Node Statistics
+
+Query Node sends *QueryNodeSegStats* to a message stream. Master will consume it and update the segment meta. If the *MemSize* in *QueryNodeSegStats* is larger than a *SegmentThreshold*,  Master will close the segment and the segment can not be allocated anymore.
+
+```protobuf
+message SegmentStats {
+    int64 segmentID = 1;
+    int64 memory_size = 2;
+    int64 num_rows = 3;
+    bool recently_modified = 4;
+}
+
+message QueryNodeSegStats {
+    MsgType msg_type = 1;
+    int64 peerID = 2;
+    repeated SegmentStats seg_stats = 3;
+}
+```
+
+
+
+#### 10.7 Segment Management
+
+```go
+type assignment struct {
+	MemSize    int64
+	AssignTime time.Time
+}
+
+type segmentStatus struct {
+  assignments []*assignment
+}
+
+type collectionStatus struct {
+  openedSegment []UniqueID
+}
+
+type SegmentManagement struct {
+  segStatus map[UniqueID]*SegmentStatus
+  collStatus map[UniqueID]*collectionStatus
+}
+
+func (segMgr *SegmentManagement) Start() error
+func (segMgr *SegmentManagement) Close()
+
+func NewSegmentManagement(ctx context.Context) *SegmentManagement
+```
+
+
+
+###### 10.7.1 Assign Segment ID to Inserted Rows
+
+Master receives *AssignSegIDRequest* which contains a list of *SegIDRequest(count, channelID, collectionName, partitionTag)* from Proxy. Segment Manager will assign the opened segments or open a new segment if there is no enough space, and Segment Manager will record the allocated space which can be reallocated after a expire duration. 
+
+```go
+func (segMgr *SegmentManager) AssignSegmentID(segIDReq []*internalpb.SegIDRequest) ([]*internalpb.SegIDAssignment, error)
+```
 

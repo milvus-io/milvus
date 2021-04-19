@@ -154,7 +154,7 @@ func TestSearch_Search(t *testing.T) {
 	insertProducerChannels := []string{"insert"}
 
 	insertStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
-	insertStream.SetPulsarCient(pulsarURL)
+	insertStream.SetPulsarClient(pulsarURL)
 	insertStream.CreatePulsarProducers(insertProducerChannels)
 
 	var insertMsgStream msgstream.MsgStream = insertStream
@@ -172,7 +172,7 @@ func TestSearch_Search(t *testing.T) {
 
 	searchProducerChannels := []string{"search"}
 	searchStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
-	searchStream.SetPulsarCient(pulsarURL)
+	searchStream.SetPulsarClient(pulsarURL)
 	searchStream.CreatePulsarProducers(searchProducerChannels)
 
 	var searchRawData []byte

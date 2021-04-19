@@ -400,3 +400,27 @@ func (s *Master) AllocID(ctx context.Context, request *internalpb.IDRequest) (*i
 
 	return response, nil
 }
+
+func (s *Master) AssignSegmentID(ctx context.Context, request *internalpb.AssignSegIDRequest) (*internalpb.AssignSegIDResponse, error) {
+	segInfos, err := s.segmentMgr.AssignSegmentID(request.GetPerChannelReq())
+	if err != nil {
+		return &internalpb.AssignSegIDResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
+		}, nil
+	}
+	ts, err := tso.AllocOne()
+	if err != nil {
+		return &internalpb.AssignSegIDResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
+		}, nil
+	}
+	return &internalpb.AssignSegIDResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+		Timestamp:            ts,
+		ExpireDuration:       10000,
+		PerChannelAssignment: segInfos,
+	}, nil
+}

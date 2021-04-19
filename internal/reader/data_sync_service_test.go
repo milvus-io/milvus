@@ -160,7 +160,7 @@ func TestManipulationService_Start(t *testing.T) {
 	producerChannels := []string{"insert"}
 
 	insertStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
-	insertStream.SetPulsarCient(pulsarURL)
+	insertStream.SetPulsarClient(pulsarURL)
 	insertStream.CreatePulsarProducers(producerChannels)
 
 	var insertMsgStream msgstream.MsgStream = insertStream

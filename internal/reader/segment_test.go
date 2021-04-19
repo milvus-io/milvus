@@ -626,7 +626,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 	const receiveBufSize = 1024
 	searchProducerChannels := []string{"search"}
 	searchStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
-	searchStream.SetPulsarCient(pulsarURL)
+	searchStream.SetPulsarClient(pulsarURL)
 	searchStream.CreatePulsarProducers(searchProducerChannels)
 
 	var searchRawData []byte

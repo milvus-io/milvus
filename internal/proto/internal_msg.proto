@@ -71,6 +71,33 @@ message TsoResponse {
     uint32 count = 3;
 }
 
+message SegIDRequest {
+    uint32 count = 1;
+    int32 channelID = 2;
+    string coll_name = 3;
+    string partition_tag = 4;
+}
+
+message AssignSegIDRequest {
+    int64 peerID = 1;
+    PeerRole role = 2;
+    repeated SegIDRequest per_channel_req = 3;
+}
+
+message SegIDAssignment {
+    int64 segID = 1;
+    int32 channelID = 2;
+    uint32 count = 3;
+    string coll_name = 4;
+    string partition_tag = 5;
+}
+
+message AssignSegIDResponse {
+    common.Status status = 1;
+    uint64 timestamp = 2;
+    uint64 expire_duration = 3;
+    repeated SegIDAssignment per_channel_assignment = 4;
+}
 
 message CreateCollectionRequest {
     MsgType msg_type = 1;

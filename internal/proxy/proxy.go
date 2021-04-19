@@ -66,15 +66,15 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 	unmarshal := msgstream.NewUnmarshalDispatcher()
 
 	p.manipulationMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, bufSize)
-	p.manipulationMsgStream.SetPulsarCient(pulsarAddress)
+	p.manipulationMsgStream.SetPulsarClient(pulsarAddress)
 	p.manipulationMsgStream.CreatePulsarProducers(manipulationChannels)
 
 	p.queryMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, bufSize)
-	p.queryMsgStream.SetPulsarCient(pulsarAddress)
+	p.queryMsgStream.SetPulsarClient(pulsarAddress)
 	p.queryMsgStream.CreatePulsarProducers(queryChannels)
 
 	p.queryResultMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, bufSize)
-	p.queryResultMsgStream.SetPulsarCient(pulsarAddress)
+	p.queryResultMsgStream.SetPulsarClient(pulsarAddress)
 	p.queryResultMsgStream.CreatePulsarConsumers(queryResultChannels,
 		queryResultSubName,
 		unmarshal,
