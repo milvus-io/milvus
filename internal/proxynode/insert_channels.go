@@ -177,8 +177,10 @@ func (m *InsertChannelsMap) closeAllMsgStream() {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
-	for _, stream := range m.insertMsgStreams {
-		stream.Close()
+	for loc, stream := range m.insertMsgStreams {
+		if m.droppedBitMap[loc] == 0 && m.usageHistogram[loc] >= 1 {
+			stream.Close()
+		}
 	}
 
 	m.collectionID2InsertChannels = make(map[UniqueID]int)

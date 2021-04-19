@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"time"
 
 	ds "github.com/zilliztech/milvus-distributed/internal/dataservice"
 	dsc "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
@@ -12,12 +11,10 @@ import (
 	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
 	ps "github.com/zilliztech/milvus-distributed/internal/distributed/proxyservice"
 	psc "github.com/zilliztech/milvus-distributed/internal/distributed/proxyservice/client"
-	qsc "github.com/zilliztech/milvus-distributed/internal/distributed/queryservice/client"
 	is "github.com/zilliztech/milvus-distributed/internal/indexservice"
 	ms "github.com/zilliztech/milvus-distributed/internal/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-	qs "github.com/zilliztech/milvus-distributed/internal/queryservice"
 )
 
 type MasterService struct {
@@ -27,7 +24,6 @@ type MasterService struct {
 	proxyService *psc.Client
 	dataService  *dsc.Client
 	indexService *isc.Client
-	queryService *qsc.Client
 }
 
 func NewMasterService(ctx context.Context) (*MasterService, error) {
@@ -107,18 +103,6 @@ func NewMasterService(ctx context.Context) (*MasterService, error) {
 	if err = svr.SetIndexService(indexService); err != nil {
 		return nil, err
 	}
-
-	qs.Params.Init()
-	log.Printf("query service address = %s:%d", qs.Params.Address, qs.Params.Port)
-	queryService, err := qsc.NewClient(fmt.Sprintf("%s:%d", qs.Params.Address, qs.Params.Port), time.Duration(ms.Params.Timeout)*time.Second)
-	if err != nil {
-		return nil, err
-	}
-
-	if err = svr.SetQueryService(queryService); err != nil {
-		return nil, err
-	}
-
 	return &MasterService{
 		ctx: ctx,
 		svr: svr,
@@ -126,7 +110,6 @@ func NewMasterService(ctx context.Context) (*MasterService, error) {
 		proxyService: proxyService,
 		dataService:  dataService,
 		indexService: indexService,
-		queryService: queryService,
 	}, nil
 }
 
@@ -151,9 +134,6 @@ func (m *MasterService) Stop() error {
 		}
 		if m.dataService != nil {
 			_ = m.dataService.Stop()
-		}
-		if m.queryService != nil {
-			_ = m.queryService.Stop()
 		}
 		if m.svr != nil {
 			return m.svr.Stop()
