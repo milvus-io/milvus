@@ -10,11 +10,9 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
-MILVUS_CORE_DIR="${SCRIPTS_DIR}/../../core"
-MILVUS_PROXY_DIR="${SCRIPTS_DIR}/../../proxy"
+MILVUS_CORE_DIR="${SCRIPTS_DIR}/../../internal/core"
 CORE_INSTALL_PREFIX="${MILVUS_CORE_DIR}/milvus"
-PROXY_INSTALL_PREFIX="${MILVUS_PROXY_DIR}/milvus"
-UNITTEST_DIRS=("${CORE_INSTALL_PREFIX}/unittest" "${PROXY_INSTALL_PREFIX}/unittest")
+UNITTEST_DIRS=("${CORE_INSTALL_PREFIX}/unittest")
 
 # Currently core will install target lib to "core/lib"
 if [ -d "${MILVUS_CORE_DIR}/lib" ]; then
@@ -39,6 +37,6 @@ for UNITTEST_DIR in "${UNITTEST_DIRS[@]}"; do
 done
 
 # ignore Minio,S3 unittes
-MILVUS_DIR="${SCRIPTS_DIR}/../../"
+MILVUS_DIR="${SCRIPTS_DIR}/../../internal/"
 echo $MILVUS_DIR
-go test "${MILVUS_DIR}/storage/internal/tikv/..." "${MILVUS_DIR}/reader/..." "${MILVUS_DIR}/writer/..." "${MILVUS_DIR}/pkg/master/..." -failfast
+go test "${MILVUS_DIR}/storage/internal/tikv/..." "${MILVUS_DIR}/reader/..." "${MILVUS_DIR}/writer/..." "${MILVUS_DIR}/master/..." -failfast

@@ -43,8 +43,19 @@ endif()
 
 
 set(_PROTOBUF_LIBRARY_NAME "libprotobuf")
+
+#if(TARGET libprotoc)
+set(_gRPC_PROTOBUF_PROTOC_LIBRARIES libprotoc)
+#endif()
+
 set(gRPC_PROTOBUF_PROVIDER "module" CACHE STRING "Provider of protobuf library")
 set_property(CACHE gRPC_PROTOBUF_PROVIDER PROPERTY STRINGS "module" "package")
+
+
+#if(TARGET protoc)
+set(_gRPC_PROTOBUF_PROTOC protoc)
+set(_gRPC_PROTOBUF_PROTOC_EXECUTABLE $<TARGET_FILE:protoc>)
+#endif()
 
 # Building the protobuf tests require gmock what is not part of a standard protobuf checkout.
 # Disable them unless they are explicitly requested from the cmake command line (when we assume
@@ -64,3 +75,23 @@ if(NOT PROTOBUF_ROOT_DIR)
   set(PROTOBUF_ROOT_DIR ${protobuf_SOURCE_DIR})
 endif()
 
+
+set( PROTOC_EXCUTABLE           $<TARGET_FILE:protoc> )
+set( GRPC_CPP_PLUGIN_EXCUTABLE  $<TARGET_FILE:grpc_cpp_plugin> )
+#set( PROTO_INCLUDE_PATH "${MILVUS_SOURCE_DIR}/../proto/" )
+set( PROTO_PATH          "${MILVUS_SOURCE_DIR}/../proto/" )
+set( PROTO_OUTPUT_PATH          "${MILVUS_SOURCE_DIR}/src/pb/")
+
+add_custom_target(generate_suvlim_pb_grpc ALL DEPENDS protoc)
+message (STATUS "CURRENT SOURCE DIR" "${CMAKE_CURRENT_SOURCE_DIR}")
+
+add_custom_command(TARGET generate_suvlim_pb_grpc
+	POST_BUILD
+	COMMAND echo "${PROTOC_EXCUTABLE}"
+
+	COMMAND ${PROTOC_EXCUTABLE} -I "${PROTO_PATH}" --cpp_out "${PROTO_OUTPUT_PATH}"
+		"message.proto" "master.proto"
+		DEPENDS "${PROTO_PATH}/*.proto"
+	)
+
+set_property( GLOBAL PROPERTY PROTOC_EXCUTABLE ${PROTOC_EXCUTABLE})
