@@ -5,5 +5,4 @@
 *src/grpc*
 *output*
 *unittest*
-*bench*
 *src/pb*

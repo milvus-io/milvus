@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"go.uber.org/zap"
-
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -475,6 +475,7 @@ type PulsarTtMsgStream struct {
 	unsolvedBuf   map[Consumer][]TsMsg
 	unsolvedMutex *sync.Mutex
 	lastTimeStamp Timestamp
+	syncConsumer  chan int
 }
 
 func newPulsarTtMsgStream(ctx context.Context,
@@ -487,11 +488,13 @@ func newPulsarTtMsgStream(ctx context.Context,
 		return nil, err
 	}
 	unsolvedBuf := make(map[Consumer][]TsMsg)
+	syncConsumer := make(chan int, 1)
 
 	return &PulsarTtMsgStream{
 		PulsarMsgStream: *pulsarMsgStream,
 		unsolvedBuf:     unsolvedBuf,
 		unsolvedMutex:   &sync.Mutex{},
+		syncConsumer:    syncConsumer,
 	}, nil
 }
 
@@ -515,6 +518,9 @@ func (ms *PulsarTtMsgStream) AsConsumer(channels []string,
 			}
 
 			ms.consumerLock.Lock()
+			if len(ms.consumers) == 0 {
+				ms.syncConsumer <- 1
+			}
 			ms.consumers = append(ms.consumers, pc)
 			ms.unsolvedBuf[pc] = make([]TsMsg, 0)
 			ms.consumerChannels = append(ms.consumerChannels, channels[i])
@@ -536,11 +542,36 @@ func (ms *PulsarTtMsgStream) Start() {
 	}
 }
 
+func (ms *PulsarTtMsgStream) Close() {
+	ms.streamCancel()
+	close(ms.syncConsumer)
+	ms.wait.Wait()
+
+	for _, producer := range ms.producers {
+		if producer != nil {
+			producer.Close()
+		}
+	}
+	for _, consumer := range ms.consumers {
+		if consumer != nil {
+			consumer.Close()
+		}
+	}
+	if ms.client != nil {
+		ms.client.Close()
+	}
+}
+
 func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 	defer ms.wait.Done()
 	ms.unsolvedBuf = make(map[Consumer][]TsMsg)
 	isChannelReady := make(map[Consumer]bool)
 	eofMsgTimeStamp := make(map[Consumer]Timestamp)
+
+	if _, ok := <-ms.syncConsumer; !ok {
+		log.Debug("consumer closed!")
+		return
+	}
 
 	for {
 		select {
