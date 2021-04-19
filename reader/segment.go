@@ -86,8 +86,8 @@ func (s *Segment) SegmentInsert(entityIds *[]int64, timestamps *[]uint64, record
 	           void* raw_data,
 	           int sizeof_per_row,
 	           signed long int count,
-			   const unsigned long timestamp_min,
-			   const unsigned long timestamp_max);
+			   unsigned long timestamp_min,
+			   unsigned long timestamp_max);
 	*/
 	// Blobs to one big blob
 	var rowData []byte
@@ -127,7 +127,9 @@ func (s *Segment) SegmentDelete(entityIds *[]int64, timestamps *[]uint64, timest
 	Delete(CSegmentBase c_segment,
 	           long size,
 	           const unsigned long* primary_keys,
-	           const unsigned long* timestamps);
+	           const unsigned long* timestamps,
+			   unsigned long timestamp_min,
+			   unsigned long timestamp_max);
 	*/
 	size := len(*entityIds)
 
