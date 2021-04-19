@@ -105,7 +105,6 @@ TEST(Sealed, without_predicate) {
     auto ref_result = QueryResultToJson(qr);
 
     LoadIndexInfo load_info;
-    load_info.field_name = "fakevec";
     load_info.field_id = fake_id.get();
     load_info.index = indexing;
     load_info.index_params["metric_type"] = "L2";
@@ -198,7 +197,6 @@ TEST(Sealed, with_predicate) {
     auto result = indexing->Query(query_dataset, conf, nullptr);
 
     LoadIndexInfo load_info;
-    load_info.field_name = "fakevec";
     load_info.field_id = fake_id.get();
     load_info.index = indexing;
     load_info.index_params["metric_type"] = "L2";
@@ -312,7 +310,6 @@ TEST(Sealed, LoadFieldData) {
 
     LoadIndexInfo vec_info;
     vec_info.field_id = fakevec_id.get();
-    vec_info.field_name = "fakevec";
     vec_info.index = indexing;
     vec_info.index_params["metric_type"] = milvus::knowhere::Metric::L2;
     segment->LoadIndex(vec_info);

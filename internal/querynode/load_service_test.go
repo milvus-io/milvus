@@ -89,7 +89,7 @@ import (
 //				Timestamp: timestamps[0],
 //				SourceID:  0,
 //			},
-//			CollectionName: "collection0",
+//			CollectionID: UniqueID(collectionID),
 //			PartitionName:  "default",
 //			SegmentID:      segmentID,
 //			ChannelID:      "0",
@@ -425,7 +425,7 @@ import (
 //				Timestamp: timestamps[0],
 //				SourceID:  0,
 //			},
-//			CollectionName: "collection0",
+//			CollectionID: UniqueID(collectionID),
 //			PartitionName:  "default",
 //			SegmentID:      segmentID,
 //			ChannelID:      "0",
@@ -726,7 +726,7 @@ func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID
 	}
 
 	// buffer data to binLogs
-	collMeta := genTestCollectionMeta("collection0", collectionID, false)
+	collMeta := genTestCollectionMeta(collectionID, false)
 	collMeta.Schema.Fields = append(collMeta.Schema.Fields, &schemapb.FieldSchema{
 		FieldID:  0,
 		Name:     "uid",
@@ -853,7 +853,7 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 
 	// serialize index params
 	var indexCodec storage.IndexCodec
-	serializedIndexBlobs, err := indexCodec.Serialize(binarySet, indexParams)
+	serializedIndexBlobs, err := indexCodec.Serialize(binarySet, indexParams, "index_test_name", 1234)
 	if err != nil {
 		return nil, err
 	}
@@ -871,7 +871,7 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 	return indexPaths, nil
 }
 
-func doInsert(ctx context.Context, collectionName string, partitionTag string, segmentID UniqueID) error {
+func doInsert(ctx context.Context, collectionID UniqueID, partitionTag string, segmentID UniqueID) error {
 	const msgLength = 1000
 	const DIM = 16
 
@@ -907,12 +907,12 @@ func doInsert(ctx context.Context, collectionName string, partitionTag string, s
 					Timestamp: uint64(i + 1000),
 					SourceID:  0,
 				},
-				CollectionName: collectionName,
-				PartitionName:  partitionTag,
-				SegmentID:      segmentID,
-				ChannelID:      "0",
-				Timestamps:     []uint64{uint64(i + 1000)},
-				RowIDs:         []int64{int64(i)},
+				CollectionID:  collectionID,
+				PartitionName: partitionTag,
+				SegmentID:     segmentID,
+				ChannelID:     "0",
+				Timestamps:    []uint64{uint64(i + 1000)},
+				RowIDs:        []int64{int64(i)},
 				RowData: []*commonpb.Blob{
 					{Value: rawData},
 				},
@@ -1057,8 +1057,7 @@ func TestSegmentLoad_Search_Vector(t *testing.T) {
 	ctx := node.queryNodeLoopCtx
 	node.loadService = newLoadService(ctx, nil, nil, nil, node.replica, nil)
 
-	collectionName := "collection0"
-	initTestMeta(t, node, collectionName, collectionID, 0)
+	initTestMeta(t, node, collectionID, 0)
 
 	err := node.replica.addPartition(collectionID, partitionID)
 	assert.NoError(t, err)
@@ -1119,7 +1118,7 @@ func TestSegmentLoad_Search_Vector(t *testing.T) {
 	placeholderGroups = append(placeholderGroups, holder)
 
 	// wait for segment building index
-	time.Sleep(3 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	_, err = segment.segmentSearch(plan, placeholderGroups, []Timestamp{searchTimestamp})
 	assert.Nil(t, err)

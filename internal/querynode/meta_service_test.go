@@ -96,9 +96,8 @@ func TestMetaService_isSegmentChannelRangeInQueryNodeChannelRange(t *testing.T) 
 }
 
 func TestMetaService_printCollectionStruct(t *testing.T) {
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
 	printCollectionStruct(collectionMeta)
 }
 
@@ -156,7 +155,7 @@ func TestMetaService_processCollectionCreate(t *testing.T) {
 	collectionNum := node.replica.getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := node.replica.getCollectionByName("test")
+	collection, err := node.replica.getCollectionByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 	node.Stop()
@@ -164,9 +163,8 @@ func TestMetaService_processCollectionCreate(t *testing.T) {
 
 func TestMetaService_processSegmentCreate(t *testing.T) {
 	node := newQueryNodeMock()
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	initTestMeta(t, node, collectionName, collectionID, 0)
+	initTestMeta(t, node, collectionID, 0)
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	id := "0"
@@ -222,7 +220,7 @@ func TestMetaService_processCreate(t *testing.T) {
 	collectionNum := node.replica.getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := node.replica.getCollectionByName("test")
+	collection, err := node.replica.getCollectionByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
@@ -242,10 +240,9 @@ func TestMetaService_processCreate(t *testing.T) {
 
 func TestMetaService_processSegmentModify(t *testing.T) {
 	node := newQueryNodeMock()
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	segmentID := UniqueID(0)
-	initTestMeta(t, node, collectionName, collectionID, segmentID)
+	initTestMeta(t, node, collectionID, segmentID)
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	id := "0"
@@ -314,7 +311,7 @@ func TestMetaService_processCollectionModify(t *testing.T) {
 	collectionNum := node.replica.getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := node.replica.getCollectionByName("test")
+	collection, err := node.replica.getCollectionByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
@@ -363,7 +360,7 @@ func TestMetaService_processCollectionModify(t *testing.T) {
 				`
 
 	(*node.metaService).processCollectionModify(id, newValue)
-	collection, err = node.replica.getCollectionByName("test")
+	collection, err = node.replica.getCollectionByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
@@ -422,7 +419,7 @@ func TestMetaService_processModify(t *testing.T) {
 	collectionNum := node.replica.getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := node.replica.getCollectionByName("test")
+	collection, err := node.replica.getCollectionByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
@@ -485,7 +482,7 @@ func TestMetaService_processModify(t *testing.T) {
 				`
 
 	(*node.metaService).processModify(key1, msg3)
-	collection, err = node.replica.getCollectionByName("test")
+	collection, err = node.replica.getCollectionByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
@@ -517,9 +514,8 @@ func TestMetaService_processModify(t *testing.T) {
 
 func TestMetaService_processSegmentDelete(t *testing.T) {
 	node := newQueryNodeMock()
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	initTestMeta(t, node, collectionName, collectionID, 0)
+	initTestMeta(t, node, collectionID, 0)
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	id := "0"
@@ -578,7 +574,7 @@ func TestMetaService_processCollectionDelete(t *testing.T) {
 	collectionNum := node.replica.getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := node.replica.getCollectionByName("test")
+	collection, err := node.replica.getCollectionByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
@@ -626,7 +622,7 @@ func TestMetaService_processDelete(t *testing.T) {
 	collectionNum := node.replica.getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := node.replica.getCollectionByName("test")
+	collection, err := node.replica.getCollectionByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 

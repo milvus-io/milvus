@@ -39,9 +39,8 @@ type collectionReplica interface {
 	addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error
 	removeCollection(collectionID UniqueID) error
 	getCollectionByID(collectionID UniqueID) (*Collection, error)
-	getCollectionByName(collectionName string) (*Collection, error)
 	hasCollection(collectionID UniqueID) bool
-	getVecFieldsByCollectionID(collectionID UniqueID) (map[int64]string, error)
+	getVecFieldsByCollectionID(collectionID UniqueID) ([]int64, error)
 
 	// partition
 	// Partition tags in different collections are not unique,
@@ -150,19 +149,6 @@ func (colReplica *collectionReplicaImpl) getCollectionByIDPrivate(collectionID U
 	return nil, errors.New("cannot find collection, id = " + strconv.FormatInt(collectionID, 10))
 }
 
-func (colReplica *collectionReplicaImpl) getCollectionByName(collectionName string) (*Collection, error) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-
-	for _, collection := range colReplica.collections {
-		if collection.Name() == collectionName {
-			return collection, nil
-		}
-	}
-
-	return nil, errors.New("Cannot found collection: " + collectionName)
-}
-
 func (colReplica *collectionReplicaImpl) hasCollection(collectionID UniqueID) bool {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
@@ -175,7 +161,7 @@ func (colReplica *collectionReplicaImpl) hasCollection(collectionID UniqueID) bo
 	return false
 }
 
-func (colReplica *collectionReplicaImpl) getVecFieldsByCollectionID(collectionID UniqueID) (map[int64]string, error) {
+func (colReplica *collectionReplicaImpl) getVecFieldsByCollectionID(collectionID UniqueID) ([]int64, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 
@@ -184,10 +170,10 @@ func (colReplica *collectionReplicaImpl) getVecFieldsByCollectionID(collectionID
 		return nil, err
 	}
 
-	vecFields := make(map[int64]string)
+	vecFields := make([]int64, 0)
 	for _, field := range col.Schema().Fields {
 		if field.DataType == schemapb.DataType_VECTOR_BINARY || field.DataType == schemapb.DataType_VECTOR_FLOAT {
-			vecFields[field.FieldID] = field.Name
+			vecFields = append(vecFields, field.FieldID)
 		}
 	}
 

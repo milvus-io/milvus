@@ -110,7 +110,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	//}
 
 	// No dd record, do all insert requests.
-	records, ok := fdmNode.ddMsg.collectionRecords[msg.CollectionName]
+	records, ok := fdmNode.ddMsg.collectionRecords[msg.CollectionID]
 	if !ok {
 		return msg
 	}

@@ -13,10 +13,9 @@ import (
 )
 
 func TestReduce_AllFunc(t *testing.T) {
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	segmentID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
 	segment := newSegment2(collection, segmentID, Params.DefaultPartitionTag, collectionID, segTypeGrowing)

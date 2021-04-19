@@ -116,9 +116,16 @@ message InsertRequest {
 message SearchRequest {
   common.MsgBase base = 1;
   string result_channelID = 2;
-  common.Blob query = 3;
-
+  int64 dbID = 3;
+  int64 collectionID = 4;
+  repeated int64 partitionIDs = 5;
+  string dsl = 6;
+  // serialized `PlaceholderGroup`
+  bytes placeholder_group = 7;
+  common.Blob query = 8;
 }
+
+
 message SearchResults {
   common.MsgBase base = 1;
   common.Status status = 2;

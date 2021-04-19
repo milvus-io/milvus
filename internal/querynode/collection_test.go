@@ -8,11 +8,10 @@ import (
 
 func TestCollection_Partitions(t *testing.T) {
 	node := newQueryNodeMock()
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	initTestMeta(t, node, collectionName, collectionID, 0)
+	initTestMeta(t, node, collectionID, 0)
 
-	collection, err := node.replica.getCollectionByName(collectionName)
+	collection, err := node.replica.getCollectionByID(collectionID)
 	assert.NoError(t, err)
 
 	partitions := collection.Partitions()
@@ -20,22 +19,18 @@ func TestCollection_Partitions(t *testing.T) {
 }
 
 func TestCollection_newCollection(t *testing.T) {
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	assert.Equal(t, collection.Name(), collectionName)
 	assert.Equal(t, collection.ID(), collectionID)
 }
 
 func TestCollection_deleteCollection(t *testing.T) {
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	assert.Equal(t, collection.Name(), collectionName)
 	assert.Equal(t, collection.ID(), collectionID)
 	deleteCollection(collection)
 }
