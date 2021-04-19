@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "scheduler/task/Task.h"
+#include "scheduler/resource/Resource.h"
 
 namespace milvus {
 namespace scheduler {
@@ -36,5 +37,9 @@ class Pass {
 };
 using PassPtr = std::shared_ptr<Pass>;
 
+#ifdef MILVUS_GPU_VERSION
+int64_t FindProperDevice(const std::vector<int64_t>& device_ids, const std::string& key);
+ResourcePtr PickResource(const TaskPtr& task, const std::vector<int64_t>& device_ids, int64_t idx, std::string name);
+#endif
 }  // namespace scheduler
 }  // namespace milvus

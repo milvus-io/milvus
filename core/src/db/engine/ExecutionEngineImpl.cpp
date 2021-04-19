@@ -508,6 +508,7 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
     auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
+        LOG_ENGINE_DEBUG_ << "ExecutionEngineImpl::CopyToGpu: already_in_cache in gpu" << device_id;
         index_ = index;
     } else {
         if (index_ == nullptr) {
@@ -541,6 +542,7 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
             } else {
                 if (gpu_cache_enable) {
                     gpu_cache_mgr->InsertItem(location_, std::static_pointer_cast<cache::DataObj>(index_));
+                    LOG_ENGINE_DEBUG_ << "ExecutionEngineImpl::CopyToGpu: Gpu cache in device " << device_id;
                 }
                 LOG_ENGINE_DEBUG_ << "CPU to GPU" << device_id << " finished";
             }
