@@ -9,6 +9,7 @@ import (
 type Condition interface {
 	WaitToFinish() error
 	Notify(err error)
+	Ctx() context.Context
 }
 
 type TaskCondition struct {
@@ -29,6 +30,10 @@ func (tc *TaskCondition) WaitToFinish() error {
 
 func (tc *TaskCondition) Notify(err error) {
 	tc.done <- err
+}
+
+func (tc *TaskCondition) Ctx() context.Context {
+	return tc.ctx
 }
 
 func NewTaskCondition(ctx context.Context) *TaskCondition {
