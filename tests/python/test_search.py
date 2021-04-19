@@ -146,7 +146,6 @@ class TestSearchBase:
         yield request.param
 
     # PASS
-    @pytest.mark.skip("should pass")
     def test_search_flat(self, connect, collection, get_top_k, get_nq):
         '''
         target: test basic search function, all the search params is corrent, change top-k value
@@ -599,7 +598,6 @@ class TestSearchBase:
             res = connect.search(collection_name, default_query)
 
     # PASS
-    @pytest.mark.skip("should pass")
     def test_search_distance_l2(self, connect, collection):
         '''
         target: search collection, and check the result: distance
@@ -850,7 +848,6 @@ class TestSearchBase:
     # PASS
     @pytest.mark.level(2)
     @pytest.mark.timeout(30)
-    @pytest.mark.skip("should pass")
     def test_search_concurrent_multithreads(self, connect, args):
         '''
         target: test concurrent search with multiprocessess
@@ -886,7 +883,6 @@ class TestSearchBase:
     # PASS
     @pytest.mark.level(2)
     @pytest.mark.timeout(30)
-    @pytest.mark.skip("should pass")
     def test_search_concurrent_multithreads_single_connection(self, connect, args):
         '''
         target: test concurrent search with multiprocessess
@@ -920,7 +916,6 @@ class TestSearchBase:
 
     # PASS
     @pytest.mark.level(2)
-    @pytest.mark.skip("should pass")
     def test_search_multi_collections(self, connect, args):
         '''
         target: test search multi collections of L2
@@ -1011,7 +1006,6 @@ class TestSearchDSL(object):
             res = connect.search(collection, query)
 
     # PASS
-    @pytest.mark.skip("should pass")
     def test_query_vector_only(self, connect, collection):
         entities, ids = init_data(connect, collection)
         res = connect.search(collection, default_query)
@@ -1318,7 +1312,6 @@ class TestSearchDSL(object):
 
     # PASS
     @pytest.mark.level(2)
-    @pytest.mark.skip("should pass")
     def test_query_range_invalid_ranges(self, connect, collection):
         '''
         method: build query with invalid ranges
