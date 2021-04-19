@@ -19,6 +19,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Improvement
 -   \#4756 Improve the performance of get_vectors_by_id
 -   \#4856 Upgrade hnswlib to v0.5.0
+-   \#4958 Improve the performance of IVF index training 
 
 # Milvus 1.0.0 (2021-03-09)
 ## Bug
