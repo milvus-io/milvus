@@ -48,6 +48,10 @@ type Server struct {
 	indexServiceClient  *grpcindexserviceclient.Client
 }
 
+func (s *Server) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
 func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 
 	server := &Server{

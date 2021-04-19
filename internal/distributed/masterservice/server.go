@@ -27,6 +27,10 @@ type GrpcServer struct {
 	cancel context.CancelFunc
 }
 
+func (s *GrpcServer) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
 func NewGrpcServer(ctx context.Context, factory msgstream.Factory) (*GrpcServer, error) {
 	s := &GrpcServer{}
 	var err error

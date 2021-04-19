@@ -32,6 +32,10 @@ type Server struct {
 	loopWg     sync.WaitGroup
 }
 
+func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
 func (s *Server) Run() error {
 
 	if err := s.init(); err != nil {
