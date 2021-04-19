@@ -58,7 +58,7 @@ class SegmentNaive : public SegmentBase {
 
     // query contains metadata of
     Status
-    Query(const query::QueryPtr& query, Timestamp timestamp, QueryResult& results) override;
+    Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult& results) override;
 
     // stop receive insert requests
     // will move data to immutable vector or something

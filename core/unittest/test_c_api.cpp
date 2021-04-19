@@ -134,11 +134,11 @@ TEST(CApiTest, SearchTest) {
   auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
   assert(ins_res == 0);
 
-  long result_ids;
-  float result_distances;
-  auto sea_res = Search(segment, nullptr, 0, &result_ids, &result_distances);
+  long result_ids[10];
+  float result_distances[10];
+  auto sea_res = Search(segment, nullptr, 0, result_ids, result_distances);
   assert(sea_res == 0);
-  assert(result_ids == 104490);
+  assert(result_ids[0] == 100911);
 
   DeleteCollection(collection);
   DeletePartition(partition);
