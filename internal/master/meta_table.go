@@ -393,6 +393,34 @@ func (mt *metaTable) AddSegment(seg *pb.SegmentMeta) error {
 	return nil
 }
 
+func (mt *metaTable) UpdateSegment(seg *pb.SegmentMeta) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	collID := seg.CollectionID
+	collMeta := mt.collID2Meta[collID]
+	isNewSegID := true
+	for _, segID := range collMeta.SegmentIDs {
+		if segID == seg.SegmentID {
+			isNewSegID = false
+			break
+		}
+	}
+	if isNewSegID {
+		collMeta.SegmentIDs = append(collMeta.SegmentIDs, seg.SegmentID)
+		if err := mt.saveCollectionsAndSegmentsMeta(&collMeta, seg); err != nil {
+			_ = mt.reloadFromKV()
+			return err
+		}
+	} else {
+		if err := mt.saveSegmentMeta(seg); err != nil {
+			_ = mt.reloadFromKV()
+			return err
+		}
+	}
+	return nil
+}
+
 func (mt *metaTable) GetSegmentByID(segID UniqueID) (*pb.SegmentMeta, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()

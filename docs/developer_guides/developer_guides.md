@@ -1140,6 +1140,7 @@ func (meta *metaTable) HasPartition(collId UniqueId, tag string) bool
 func (meta *metaTable) DeletePartition(collId UniqueId, tag string) error
 
 func (meta *metaTable) AddSegment(seg *SegmentMeta) error
+func (meta *metaTable) UpdateSegment(seg *SegmentMeta) error
 func (meta *metaTable) GetSegmentById(segId UniqueId)(*SegmentMeta, error)
 func (meta *metaTable) DeleteSegment(segId UniqueId) error
 func (meta *metaTable) CloseSegment(segId UniqueId, closeTs Timestamp, num_rows int64) error

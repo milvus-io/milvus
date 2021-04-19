@@ -89,7 +89,7 @@ func (queue *BaseTaskQueue) PopUnissuedTask() task {
 
 func (queue *BaseTaskQueue) AddActiveTask(t task) {
 	queue.atLock.Lock()
-	defer queue.atLock.Lock()
+	defer queue.atLock.Unlock()
 
 	ts := t.EndTs()
 	_, ok := queue.activeTasks[ts]
@@ -102,7 +102,7 @@ func (queue *BaseTaskQueue) AddActiveTask(t task) {
 
 func (queue *BaseTaskQueue) PopActiveTask(ts Timestamp) task {
 	queue.atLock.Lock()
-	defer queue.atLock.Lock()
+	defer queue.atLock.Unlock()
 
 	t, ok := queue.activeTasks[ts]
 	if ok {
@@ -116,7 +116,7 @@ func (queue *BaseTaskQueue) PopActiveTask(ts Timestamp) task {
 
 func (queue *BaseTaskQueue) getTaskByReqID(reqID UniqueID) task {
 	queue.utLock.Lock()
-	defer queue.utLock.Lock()
+	defer queue.utLock.Unlock()
 	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
 		if e.Value.(task).ID() == reqID {
 			return e.Value.(task)

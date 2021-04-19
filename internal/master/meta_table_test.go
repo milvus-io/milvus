@@ -316,3 +316,54 @@ func TestMetaTable_Segment(t *testing.T) {
 	assert.Equal(t, 0, len(meta.segID2Meta))
 
 }
+
+func TestMetaTable_UpdateSegment(t *testing.T) {
+	err := gparams.GParams.LoadYaml("config.yaml")
+	if err != nil {
+		panic(err)
+	}
+	etcdPort, err := gparams.GParams.Load("etcd.port")
+	if err != nil {
+		panic(err)
+	}
+
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcdPort}})
+	assert.Nil(t, err)
+	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
+
+	_, err = cli.Delete(context.TODO(), "/etcd/test/root", clientv3.WithPrefix())
+	assert.Nil(t, err)
+
+	meta, err := NewMetaTable(etcdKV)
+	assert.Nil(t, err)
+	defer meta.client.Close()
+
+	colMeta := pb.CollectionMeta{
+		ID: 100,
+		Schema: &schemapb.CollectionSchema{
+			Name: "coll1",
+		},
+		CreateTime:    0,
+		SegmentIDs:    []UniqueID{},
+		PartitionTags: []string{},
+	}
+	segMeta := pb.SegmentMeta{
+		SegmentID:    200,
+		CollectionID: 100,
+		PartitionTag: "p1",
+		NumRows:      110,
+	}
+	err = meta.AddCollection(&colMeta)
+	assert.Nil(t, err)
+	err = meta.UpdateSegment(&segMeta)
+	assert.Nil(t, err)
+	seg, err := meta.GetSegmentByID(200)
+	assert.Nil(t, err)
+	assert.Equal(t, seg.NumRows, int64(110))
+	segMeta.NumRows = 210
+	err = meta.UpdateSegment(&segMeta)
+	assert.Nil(t, err)
+	seg, err = meta.GetSegmentByID(200)
+	assert.Nil(t, err)
+	assert.Equal(t, seg.NumRows, int64(210))
+}

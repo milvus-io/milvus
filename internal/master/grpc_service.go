@@ -360,7 +360,7 @@ func (s *Master) AllocTimestamp(ctx context.Context, request *internalpb.TsoRequ
 	if err != nil {
 		return &internalpb.TsoResponse{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
-		}, err
+		}, nil
 	}
 
 	response := &internalpb.TsoResponse{
@@ -379,7 +379,7 @@ func (s *Master) AllocID(ctx context.Context, request *internalpb.IDRequest) (*i
 	if err != nil {
 		return &internalpb.IDResponse{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
-		}, err
+		}, nil
 	}
 
 	response := &internalpb.IDResponse{
