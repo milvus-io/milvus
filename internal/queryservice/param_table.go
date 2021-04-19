@@ -27,7 +27,8 @@ type ParamTable struct {
 	// timetick
 	TimeTickChannelName string
 
-	Log log.Config
+	Log      log.Config
+	RoleName string
 }
 
 var Params ParamTable
@@ -57,6 +58,7 @@ func (p *ParamTable) Init() {
 		p.initStatsChannelName()
 		p.initTimeTickChannelName()
 		p.initQueryServiceAddress()
+		p.initRoleName()
 	})
 }
 
@@ -122,4 +124,8 @@ func (p *ParamTable) initQueryServiceAddress() {
 		panic(err)
 	}
 	p.Address = url
+}
+
+func (p *ParamTable) initRoleName() {
+	p.RoleName = fmt.Sprintf("%s-%d", "QueryService", p.NodeID)
 }

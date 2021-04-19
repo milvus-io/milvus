@@ -37,6 +37,8 @@ type ParamTable struct {
 	Timeout int
 
 	Log log.Config
+
+	RoleName string
 }
 
 func (p *ParamTable) Init() {
@@ -68,6 +70,7 @@ func (p *ParamTable) Init() {
 		p.initTimeout()
 
 		p.initLogCfg()
+		p.initRoleName()
 	})
 }
 
@@ -208,4 +211,8 @@ func (p *ParamTable) initLogCfg() {
 	} else {
 		p.Log.File.Filename = ""
 	}
+}
+
+func (p *ParamTable) initRoleName() {
+	p.RoleName = fmt.Sprintf("%s-%d", "MasterService", p.NodeID)
 }

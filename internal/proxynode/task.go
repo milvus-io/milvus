@@ -1942,6 +1942,7 @@ func (lct *LoadCollectionTask) OnEnqueue() error {
 }
 
 func (lct *LoadCollectionTask) PreExecute(ctx context.Context) error {
+	log.Debug("LoadCollectionTask PreExecute", zap.String("role", Params.RoleName), zap.Int64("msgID", lct.Base.MsgID))
 	lct.Base.MsgType = commonpb.MsgType_LoadCollection
 	lct.Base.SourceID = Params.ProxyID
 
@@ -1955,6 +1956,7 @@ func (lct *LoadCollectionTask) PreExecute(ctx context.Context) error {
 }
 
 func (lct *LoadCollectionTask) Execute(ctx context.Context) (err error) {
+	log.Debug("LoadCollectionTask Execute", zap.String("role", Params.RoleName), zap.Int64("msgID", lct.Base.MsgID))
 	collID, err := globalMetaCache.GetCollectionID(ctx, lct.CollectionName)
 	if err != nil {
 		return err
@@ -1975,11 +1977,17 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 		CollectionID: collID,
 		Schema:       collSchema,
 	}
+	log.Debug("send LoadCollectionRequest to query service", zap.String("role", Params.RoleName), zap.Int64("msgID", request.Base.MsgID), zap.Int64("collectionID", request.CollectionID),
+		zap.Any("schema", request.Schema))
 	lct.result, err = lct.queryService.LoadCollection(ctx, request)
-	return err
+	if err != nil {
+		return fmt.Errorf("call query service LoadCollection: %s", err)
+	}
+	return nil
 }
 
 func (lct *LoadCollectionTask) PostExecute(ctx context.Context) error {
+	log.Debug("LoadCollectionTask PostExecute", zap.String("role", Params.RoleName), zap.Int64("msgID", lct.Base.MsgID))
 	return nil
 }
 

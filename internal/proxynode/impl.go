@@ -181,15 +181,17 @@ func (node *ProxyNode) LoadCollection(ctx context.Context, request *milvuspb.Loa
 			Reason:    err.Error(),
 		}, nil
 	}
-
+	log.Debug("LoadCollectionRequest received", zap.String("role", Params.RoleName), zap.Int64("msgID", lct.Base.MsgID), zap.String("collection", request.CollectionName))
 	err = lct.WaitToFinish()
 	if err != nil {
+		log.Error("LoadCollectionTask failed", zap.String("role", Params.RoleName), zap.Int64("msgID", lct.Base.MsgID), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
 
+	log.Debug("LoadCollectionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", lct.Base.MsgID))
 	return lct.result, nil
 }
 
