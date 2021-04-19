@@ -55,11 +55,11 @@ func (c *Client) Stop() error {
 }
 
 func (c *Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	return c.grpcClient.GetComponentStates(context.Background(), nil)
+	return c.grpcClient.GetComponentStates(context.Background(), &commonpb.Empty{})
 }
 
 func (c *Client) GetTimeTickChannel() (string, error) {
-	resp, err := c.grpcClient.GetTimeTickChannel(context.Background(), nil)
+	resp, err := c.grpcClient.GetTimeTickChannel(context.Background(), &commonpb.Empty{})
 	if err != nil {
 		return "", err
 	}
@@ -70,7 +70,7 @@ func (c *Client) GetTimeTickChannel() (string, error) {
 }
 
 func (c *Client) GetStatisticsChannel() (string, error) {
-	resp, err := c.grpcClient.GetStatisticsChannel(context.Background(), nil)
+	resp, err := c.grpcClient.GetStatisticsChannel(context.Background(), &commonpb.Empty{})
 	if err != nil {
 		return "", err
 	}
@@ -124,7 +124,7 @@ func (c *Client) GetPartitionStatistics(req *datapb.PartitionStatsRequest) (*dat
 }
 
 func (c *Client) GetSegmentInfoChannel() (string, error) {
-	resp, err := c.grpcClient.GetSegmentInfoChannel(context.Background(), nil)
+	resp, err := c.grpcClient.GetSegmentInfoChannel(context.Background(), &commonpb.Empty{})
 	if err != nil {
 		return "", err
 	}

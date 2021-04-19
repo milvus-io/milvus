@@ -158,6 +158,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
         bulk_subscript_impl<int64_t>(*vec_ptr, seg_offsets, count, output);
     }
 
+    int64_t
+    num_chunk() const override;
+
     Status
     LoadIndexing(const LoadIndexInfo& info) override;
 
@@ -185,16 +188,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     get_deleted_bitmap(int64_t del_barrier, Timestamp query_timestamp, int64_t insert_barrier, bool force = false);
 
  protected:
-    int64_t
-    num_chunk() const override;
-
     SpanBase
     chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) const override;
-
-    void
-    check_search(const query::Plan* plan) const override {
-        Assert(plan);
-    }
 
  private:
     int64_t size_per_chunk_;

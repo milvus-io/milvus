@@ -46,12 +46,6 @@ struct SealedIndexingRecord {
         return field_indexings_.at(field_offset).get();
     }
 
-    void
-    drop_field_indexing(FieldOffset field_offset) {
-        std::unique_lock lck(mutex_);
-        field_indexings_.erase(field_offset);
-    }
-
     bool
     is_ready(FieldOffset field_offset) const {
         std::shared_lock lck(mutex_);

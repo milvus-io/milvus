@@ -20,28 +20,11 @@
 #include <map>
 #include <string>
 #include <vector>
-#include <optional>
-#include <boost/dynamic_bitset.hpp>
 
 namespace milvus::query {
 using Json = nlohmann::json;
 
 // class definitions
-
-struct ExtractedPlanInfo {
- public:
-    explicit ExtractedPlanInfo(int64_t size) : involved_fields_(size) {
-    }
-
-    void
-    add_involved_field(FieldOffset field_offset) {
-        involved_fields_.set(field_offset.get());
-    }
-
- public:
-    boost::dynamic_bitset<> involved_fields_;
-};
-
 struct Plan {
  public:
     explicit Plan(const Schema& schema) : schema_(schema) {
@@ -52,9 +35,7 @@ struct Plan {
     std::unique_ptr<VectorPlanNode> plan_node_;
     std::map<std::string, FieldOffset> tag2field_;  // PlaceholderName -> FieldOffset
     std::vector<FieldOffset> target_entries_;
-
- public:
-    std::optional<ExtractedPlanInfo> extra_info_opt_;
+    std::vector<FieldOffset> referred_fields_;
     // TODO: add move extra info
 };
 

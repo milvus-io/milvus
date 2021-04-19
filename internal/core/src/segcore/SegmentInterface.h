@@ -117,9 +117,6 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual void
     bulk_subscript(FieldOffset field_offset, const int64_t* seg_offsets, int64_t count, void* output) const = 0;
 
-    virtual void
-    check_search(const query::Plan* plan) const = 0;
-
  protected:
     mutable std::shared_mutex mutex_;
 };
