@@ -124,6 +124,26 @@ func (data *DataServiceMock) GetInsertBinlogPaths(req *datapb.InsertBinlogPathRe
 	return rsp, nil
 }
 
+func (data *DataServiceMock) GetSegmentStates(req *datapb.SegmentStatesRequest) (*datapb.SegmentStatesResponse, error) {
+	segmentGrowingInfo := &datapb.SegmentStateInfo{
+		State: commonpb.SegmentState_SegmentGrowing,
+	}
+	segmentFlushedInfo := &datapb.SegmentStateInfo{
+		State: commonpb.SegmentState_SegmentFlushed,
+	}
+
+	if data.Count < 10 {
+		data.Count++
+		return &datapb.SegmentStatesResponse{
+			States: []*datapb.SegmentStateInfo{segmentGrowingInfo},
+		}, nil
+	}
+
+	return &datapb.SegmentStatesResponse{
+		States: []*datapb.SegmentStateInfo{segmentFlushedInfo},
+	}, nil
+}
+
 type IndexServiceMock struct {
 	Count int
 }

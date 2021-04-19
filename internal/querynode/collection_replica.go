@@ -373,6 +373,9 @@ func (colReplica *collectionReplicaImpl) addSegmentPrivate(segmentID UniqueID, p
 		return err
 	}
 
+	if colReplica.hasSegmentPrivate(segmentID) {
+		return nil
+	}
 	partition.addSegmentID(segmentID)
 	var newSegment = newSegment(collection, segmentID, partitionID, collectionID, segType)
 	colReplica.segments[segmentID] = newSegment
