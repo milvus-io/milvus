@@ -10,7 +10,7 @@ import (
 
 type insertNode struct {
 	BaseNode
-	SegmentsMap *map[int64]*Segment
+	segmentsMap *map[int64]*Segment
 	insertMsg   *insertMsg
 }
 
@@ -19,6 +19,8 @@ func (iNode *insertNode) Name() string {
 }
 
 func (iNode *insertNode) Operate(in []*Msg) []*Msg {
+	// fmt.Println("Do insertNode operation")
+
 	if len(in) != 1 {
 		log.Println("Invalid operate message input in insertNode")
 		// TODO: add error handling
@@ -59,7 +61,7 @@ func (iNode *insertNode) preInsert() error {
 		}
 
 		var numOfRecords = len(iNode.insertMsg.insertData.insertRecords[segmentID])
-		var offset = targetSegment.SegmentPreInsert(numOfRecords)
+		var offset = targetSegment.segmentPreInsert(numOfRecords)
 		iNode.insertMsg.insertData.insertOffset[segmentID] = offset
 	}
 
@@ -67,7 +69,7 @@ func (iNode *insertNode) preInsert() error {
 }
 
 func (iNode *insertNode) getSegmentBySegmentID(segmentID int64) (*Segment, error) {
-	targetSegment, ok := (*iNode.SegmentsMap)[segmentID]
+	targetSegment, ok := (*iNode.segmentsMap)[segmentID]
 
 	if !ok {
 		return nil, errors.New("cannot found segment with id = " + strconv.FormatInt(segmentID, 10))
@@ -89,7 +91,7 @@ func (iNode *insertNode) insert(segmentID int64, wg *sync.WaitGroup) {
 	records := iNode.insertMsg.insertData.insertRecords[segmentID]
 	offsets := iNode.insertMsg.insertData.insertOffset[segmentID]
 
-	err = targetSegment.SegmentInsert(offsets, &ids, &timestamps, &records)
+	err = targetSegment.segmentInsert(offsets, &ids, &timestamps, &records)
 	if err != nil {
 		log.Println("insert failed")
 		// TODO: add error handling
@@ -100,12 +102,13 @@ func (iNode *insertNode) insert(segmentID int64, wg *sync.WaitGroup) {
 	wg.Done()
 }
 
-func newInsertNode() *insertNode {
+func newInsertNode(segmentsMap *map[int64]*Segment) *insertNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &insertNode{
-		BaseNode: baseNode,
+		BaseNode:    baseNode,
+		segmentsMap: segmentsMap,
 	}
 }

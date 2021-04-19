@@ -76,6 +76,7 @@ func (fg *TimeTickedFlowGraph) SetStartNode(nodeName string) error {
 	}
 
 	fg.startNode = startNode
+	fg.startNode.inputChannels = []chan *Msg{make(chan *Msg, maxQueueLength)}
 	return nil
 }
 

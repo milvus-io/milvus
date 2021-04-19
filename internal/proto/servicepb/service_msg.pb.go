@@ -305,7 +305,7 @@ func (m *PlaceholderValue) GetValue() *commonpb.Blob {
 }
 
 //*
-// @brief Query for Search call
+// @brief Query for search call
 type Query struct {
 	CollectionName       string              `protobuf:"bytes,1,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
 	PartitionTags        []string            `protobuf:"bytes,2,rep,name=partition_tags,json=partitionTags,proto3" json:"partition_tags,omitempty"`

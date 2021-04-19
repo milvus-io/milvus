@@ -2,7 +2,7 @@ package flowgraph
 
 import (
 	"context"
-	"fmt"
+	"log"
 	"sync"
 )
 
@@ -49,7 +49,14 @@ func (nodeCtx *nodeCtx) Start(ctx context.Context, wg *sync.WaitGroup) {
 			n := *nodeCtx.node
 			res := n.Operate(inputs)
 			wg := sync.WaitGroup{}
-			for i := 0; i < len(nodeCtx.downstreamInputChanIdx); i++ {
+			downstreamLength := len(nodeCtx.downstreamInputChanIdx)
+			if len(nodeCtx.downstream) < downstreamLength {
+				log.Fatal("nodeCtx.downstream length = ", len(nodeCtx.downstream))
+			}
+			if len(res) < downstreamLength {
+				log.Fatal("node result length = ", len(res))
+			}
+			for i := 0; i < downstreamLength; i++ {
 				wg.Add(1)
 				go nodeCtx.downstream[i].ReceiveMsg(&wg, res[i], nodeCtx.downstreamInputChanIdx[(*nodeCtx.downstream[i].node).Name()])
 			}
@@ -66,7 +73,8 @@ func (nodeCtx *nodeCtx) Close() {
 
 func (nodeCtx *nodeCtx) ReceiveMsg(wg *sync.WaitGroup, msg *Msg, inputChanIdx int) {
 	nodeCtx.inputChannels[inputChanIdx] <- msg
-	fmt.Println("node:", (*nodeCtx.node).Name(), "receive to input channel ", inputChanIdx)
+	// fmt.Println((*nodeCtx.node).Name(), "receive to input channel ", inputChanIdx)
+
 	wg.Done()
 }
 
