@@ -10,7 +10,7 @@ import (
 func TestResult_PublishSearchResult(t *testing.T) {
 	// Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection(0, "collection0", "fake schema")
+	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 	node.SegmentsMap[0] = segment
@@ -34,7 +34,7 @@ func TestResult_PublishSearchResult(t *testing.T) {
 func TestResult_PublishFailedSearchResult(t *testing.T) {
 	// Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection(0, "collection0", "fake schema")
+	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 	node.SegmentsMap[0] = segment
@@ -46,7 +46,7 @@ func TestResult_PublishFailedSearchResult(t *testing.T) {
 func TestResult_PublicStatistic(t *testing.T) {
 	// Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection(0, "collection0", "fake schema")
+	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 	node.SegmentsMap[0] = segment

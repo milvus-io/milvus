@@ -13,7 +13,7 @@ import (
 func TestSegment_ConstructorAndDestructor(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection(0, "collection0", "fake schema")
+	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
@@ -26,7 +26,7 @@ func TestSegment_ConstructorAndDestructor(t *testing.T) {
 func TestSegment_SegmentInsert(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection(0, "collection0", "fake schema")
+	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
@@ -71,7 +71,7 @@ func TestSegment_SegmentInsert(t *testing.T) {
 func TestSegment_SegmentDelete(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection(0, "collection0", "fake schema")
+	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
@@ -96,7 +96,7 @@ func TestSegment_SegmentDelete(t *testing.T) {
 func TestSegment_SegmentSearch(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection(0, "collection0", "fake schema")
+	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
@@ -156,7 +156,7 @@ func TestSegment_SegmentSearch(t *testing.T) {
 func TestSegment_SegmentPreInsert(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection(0, "collection0", "fake schema")
+	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
@@ -173,7 +173,7 @@ func TestSegment_SegmentPreInsert(t *testing.T) {
 func TestSegment_SegmentPreDelete(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection(0, "collection0", "fake schema")
+	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
@@ -192,7 +192,7 @@ func TestSegment_SegmentPreDelete(t *testing.T) {
 func TestSegment_GetStatus(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection(0, "collection0", "fake schema")
+	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
@@ -209,7 +209,7 @@ func TestSegment_GetStatus(t *testing.T) {
 func TestSegment_Close(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection(0, "collection0", "fake schema")
+	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
@@ -226,7 +226,7 @@ func TestSegment_Close(t *testing.T) {
 func TestSegment_GetRowCount(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection(0, "collection0", "fake schema")
+	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
@@ -275,7 +275,7 @@ func TestSegment_GetRowCount(t *testing.T) {
 func TestSegment_GetDeletedCount(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection(0, "collection0", "fake schema")
+	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
@@ -305,7 +305,7 @@ func TestSegment_GetDeletedCount(t *testing.T) {
 func TestSegment_GetMemSize(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection(0, "collection0", "fake schema")
+	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
@@ -346,6 +346,54 @@ func TestSegment_GetMemSize(t *testing.T) {
 	assert.Equal(t, memSize, uint64(1048714))
 
 	// 7. Destruct node, collection, and segment
+	partition.DeleteSegment(segment)
+	collection.DeletePartition(partition)
+	node.DeleteCollection(collection)
+}
+
+func TestSegment_RealSchemaTest(t *testing.T) {
+	// 1. Construct node, collection, partition and segment
+	// var schemaString = "id: 6873737669791618215\nname: \"collection0\"\nschema: \u003c\n  field_metas: \u003c\n    field_name: \"field_1\"\n    type: INT64\n  \u003e\n  field_metas: \u003c\n    field_name: \"field_2\"\n    type: FLOAT\n  \u003e\n  field_metas: \u003c\n    field_name: \"field_3\"\n    type: INT32\n  \u003e\n  field_metas: \u003c\n    field_name: \"field_vec\"\n    type: VECTOR_FLOAT\n  \u003e\n\u003e\ncreate_time: 1600416765\nsegment_ids: 6873737669791618215\npartition_tags: \"default\"\n"
+	// var schemaString = "id: 6873737669791618215\nname: \"collection0\"\nschema: \u003c\n  field_metas: \u003c\n    field_name: \"age\"\n    type: INT32\n  \u003e\n  field_metas: \u003c\n    field_name: \"fakevec\"\n    type: VECTOR_FLOAT\n  \u003e\n\u003e\ncreate_time: 1600416765\nsegment_ids: 6873737669791618215\npartition_tags: \"default\"\n"
+	var schemaString = "id: 6873737669791618215\nname: \"collection0\"\nschema: \u003c\n  field_metas: \u003c\n    field_name: \"age\"\n    type: INT32\n    dim: 1\n  \u003e\n  field_metas: \u003c\n    field_name: \"field_1\"\n    type: VECTOR_FLOAT\n    dim: 16\n  \u003e\n\u003e\ncreate_time: 1600416765\nsegment_ids: 6873737669791618215\npartition_tags: \"default\"\n"
+	node := NewQueryNode(0, 0)
+	var collection = node.NewCollection(0, "collection0", schemaString)
+	var partition = collection.NewPartition("partition0")
+	var segment = partition.NewSegment(0)
+
+	// 2. Create ids and timestamps
+	ids := []int64{1, 2, 3}
+	timestamps := []uint64{0, 0, 0}
+
+	// 3. Create records, use schema below:
+	// schema_tmp->AddField("fakeVec", DataType::VECTOR_FLOAT, 16);
+	// schema_tmp->AddField("age", DataType::INT32);
+	const DIM = 16
+	const N = 3
+	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	var rawData []byte
+	for _, ele := range vec {
+		buf := make([]byte, 4)
+		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
+		rawData = append(rawData, buf...)
+	}
+	bs := make([]byte, 4)
+	binary.LittleEndian.PutUint32(bs, 1)
+	rawData = append(rawData, bs...)
+	var records [][]byte
+	for i := 0; i < N; i++ {
+		records = append(records, rawData)
+	}
+
+	// 4. Do PreInsert
+	var offset = segment.SegmentPreInsert(N)
+	assert.GreaterOrEqual(t, offset, int64(0))
+
+	// 5. Do Insert
+	var err = segment.SegmentInsert(offset, &ids, &timestamps, &records)
+	assert.NoError(t, err)
+
+	// 6. Destruct node, collection, and segment
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
