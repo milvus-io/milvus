@@ -9,28 +9,21 @@ import (
 	"sync/atomic"
 	"time"
 
-	grpcdatanodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/datanode/client"
-
-	"go.uber.org/zap"
-
-	"github.com/zilliztech/milvus-distributed/internal/log"
-
 	"github.com/golang/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
-
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-
-	"github.com/zilliztech/milvus-distributed/internal/timesync"
-
+	grpcdatanodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/datanode/client"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
-	"go.etcd.io/etcd/clientv3"
-
+	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+	"github.com/zilliztech/milvus-distributed/internal/timesync"
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 )
 
 const role = "dataservice"
@@ -172,13 +165,20 @@ func (s *Server) checkStateIsHealthy() bool {
 }
 
 func (s *Server) initMeta() error {
-	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
-	if err != nil {
-		return err
+	connectEtcdFn := func() error {
+		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
+		if err != nil {
+			return err
+		}
+		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+		s.client = etcdKV
+		s.meta, err = newMeta(etcdKV)
+		if err != nil {
+			return err
+		}
+		return nil
 	}
-	etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
-	s.client = etcdKV
-	s.meta, err = newMeta(etcdKV)
+	err := retry.Retry(200, time.Millisecond*200, connectEtcdFn)
 	if err != nil {
 		return err
 	}

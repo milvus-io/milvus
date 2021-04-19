@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
-	"github.com/zilliztech/milvus-distributed/internal/tso"
-
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/log"
@@ -23,6 +21,8 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
+	"github.com/zilliztech/milvus-distributed/internal/tso"
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
@@ -768,15 +768,21 @@ func (c *Core) SetQueryService(s QueryServiceInterface) error {
 func (c *Core) Init() error {
 	var initError error = nil
 	c.initOnce.Do(func() {
-		if c.etcdCli, initError = clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second}); initError != nil {
+		connectEtcdFn := func() error {
+			if c.etcdCli, initError = clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second}); initError != nil {
+				return initError
+			}
+			c.metaKV = etcdkv.NewEtcdKV(c.etcdCli, Params.MetaRootPath)
+			if c.MetaTable, initError = NewMetaTable(c.metaKV); initError != nil {
+				return initError
+			}
+			c.kvBase = etcdkv.NewEtcdKV(c.etcdCli, Params.KvRootPath)
+			return nil
+		}
+		err := retry.Retry(200, time.Millisecond*200, connectEtcdFn)
+		if err != nil {
 			return
 		}
-		c.metaKV = etcdkv.NewEtcdKV(c.etcdCli, Params.MetaRootPath)
-		if c.MetaTable, initError = NewMetaTable(c.metaKV); initError != nil {
-			return
-		}
-
-		c.kvBase = etcdkv.NewEtcdKV(c.etcdCli, Params.KvRootPath)
 
 		c.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{Params.EtcdAddress}, Params.KvRootPath, "gid"))
 		if initError = c.idAllocator.Initialize(); initError != nil {

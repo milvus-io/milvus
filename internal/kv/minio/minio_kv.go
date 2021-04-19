@@ -3,6 +3,7 @@ package miniokv
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"io"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 )
 
 type MinIOKV struct {
@@ -29,10 +31,20 @@ type Option struct {
 }
 
 func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
-	minIOClient, err := minio.New(option.Address, &minio.Options{
-		Creds:  credentials.NewStaticV4(option.AccessKeyID, option.SecretAccessKeyID, ""),
-		Secure: option.UseSSL,
-	})
+	var minIOClient *minio.Client
+	connectMinIOFn := func() error {
+		var err error
+		minIOClient, err = minio.New(option.Address, &minio.Options{
+			Creds:  credentials.NewStaticV4(option.AccessKeyID, option.SecretAccessKeyID, ""),
+			Secure: option.UseSSL,
+		})
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
+	err := retry.Retry(200, time.Millisecond*200, connectMinIOFn)
 	if err != nil {
 		return nil, err
 	}

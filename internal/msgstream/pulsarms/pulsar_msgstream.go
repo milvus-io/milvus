@@ -113,7 +113,7 @@ func (ms *PulsarMsgStream) AsProducer(channels []string) {
 			ms.producers = append(ms.producers, pp)
 			return nil
 		}
-		err := util.Retry(10, time.Millisecond*200, fn)
+		err := util.Retry(20, time.Millisecond*200, fn)
 		if err != nil {
 			errMsg := "Failed to create producer " + channels[i] + ", error = " + err.Error()
 			panic(errMsg)
@@ -150,7 +150,7 @@ func (ms *PulsarMsgStream) AsConsumer(channels []string,
 			go ms.receiveMsg(pc)
 			return nil
 		}
-		err := util.Retry(10, time.Millisecond*200, fn)
+		err := util.Retry(20, time.Millisecond*200, fn)
 		if err != nil {
 			errMsg := "Failed to create consumer " + channels[i] + ", error = " + err.Error()
 			panic(errMsg)

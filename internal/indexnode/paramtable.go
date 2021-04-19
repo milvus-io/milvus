@@ -27,9 +27,6 @@ type ParamTable struct {
 
 	MasterAddress string
 
-	EtcdAddress  string
-	MetaRootPath string
-
 	MinIOAddress         string
 	MinIOAccessKeyID     string
 	MinIOSecretAccessKey string
@@ -48,8 +45,6 @@ func (pt *ParamTable) Init() {
 }
 
 func (pt *ParamTable) initParams() {
-	pt.initEtcdAddress()
-	pt.initMetaRootPath()
 	pt.initMinIOAddress()
 	pt.initMinIOAccessKeyID()
 	pt.initMinIOSecretAccessKey()
@@ -104,26 +99,6 @@ func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb2.InitParam
 
 	pt.initParams()
 	return nil
-}
-
-func (pt *ParamTable) initEtcdAddress() {
-	addr, err := pt.Load("_EtcdAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.EtcdAddress = addr
-}
-
-func (pt *ParamTable) initMetaRootPath() {
-	rootPath, err := pt.Load("etcd.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	subPath, err := pt.Load("etcd.metaSubPath")
-	if err != nil {
-		panic(err)
-	}
-	pt.MetaRootPath = rootPath + "/" + subPath
 }
 
 func (pt *ParamTable) initMinIOAddress() {
