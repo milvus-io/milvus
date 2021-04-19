@@ -557,6 +557,13 @@ class TestIndexBase:
             connect.create_index(collection, field_name, get_simple_index)
             connect.drop_index(collection, field_name)
 
+    def test_create_PQ_without_nbits(self, connect, collection):
+        PQ_index = {"index_type": "IVF_PQ", "params": {"nlist": 128, "m": 16}, "metric_type": "L2"}
+        ids = connect.insert(collection, default_entities)
+        connect.create_index(collection, field_name, PQ_index)
+        index = connect.describe_index(collection, field_name)
+        assert index == PQ_index
+
 
 class TestIndexBinary:
     @pytest.fixture(
