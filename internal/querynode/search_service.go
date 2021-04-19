@@ -8,6 +8,7 @@ import (
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
 	"log"
+	"regexp"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
@@ -26,8 +27,8 @@ type searchService struct {
 	replica      collectionReplica
 	tSafeWatcher *tSafeWatcher
 
+	serviceableTimeMutex sync.Mutex // guards serviceableTime
 	serviceableTime      Timestamp
-	serviceableTimeMutex sync.Mutex
 
 	msgBuffer             chan msgstream.TsMsg
 	unsolvedMsg           []msgstream.TsMsg
@@ -235,7 +236,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 		return errors.New("unmarshal query failed")
 	}
 	collectionName := query.CollectionName
-	partitionTags := query.PartitionTags
+	partitionTagsInQuery := query.PartitionTags
 	collection, err := ss.replica.getCollectionByName(collectionName)
 	if err != nil {
 		span.LogFields(oplog.Error(err))
@@ -260,15 +261,28 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	searchResults := make([]*SearchResult, 0)
 	matchedSegments := make([]*Segment, 0)
 
-	for _, partitionTag := range partitionTags {
-		hasPartition := ss.replica.hasPartition(collectionID, partitionTag)
-		if !hasPartition {
-			span.LogFields(oplog.Error(errors.New("search Failed, invalid partitionTag")))
-			return errors.New("search Failed, invalid partitionTag")
+	fmt.Println("search msg's partitionTag = ", partitionTagsInQuery)
+
+	var partitionTagsInCol []string
+	for _, partition := range collection.partitions {
+		partitionTag := partition.partitionTag
+		partitionTagsInCol = append(partitionTagsInCol, partitionTag)
+	}
+	var searchPartitionTag []string
+	if len(partitionTagsInQuery) == 0 {
+		searchPartitionTag = partitionTagsInCol
+	} else {
+		for _, tag := range partitionTagsInCol {
+			for _, toMatchTag := range partitionTagsInQuery {
+				re := regexp.MustCompile("^" + toMatchTag + "$")
+				if re.MatchString(tag) {
+					searchPartitionTag = append(searchPartitionTag, tag)
+				}
+			}
 		}
 	}
 
-	for _, partitionTag := range partitionTags {
+	for _, partitionTag := range searchPartitionTag {
 		partition, _ := ss.replica.getPartitionByTag(collectionID, partitionTag)
 		for _, segment := range partition.segments {
 			//fmt.Println("dsl = ", dsl)
@@ -285,30 +299,39 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	}
 
 	if len(searchResults) <= 0 {
-		var results = internalpb.SearchResult{
-			MsgType:         internalpb.MsgType_kSearchResult,
-			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
-			ReqID:           searchMsg.ReqID,
-			ProxyID:         searchMsg.ProxyID,
-			QueryNodeID:     ss.queryNodeID,
-			Timestamp:       searchTimestamp,
-			ResultChannelID: searchMsg.ResultChannelID,
-			Hits:            nil,
+		for _, group := range placeholderGroups {
+			nq := group.getNumOfQuery()
+			nilHits := make([][]byte, nq)
+			hit := &servicepb.Hits{}
+			for i := 0; i < int(nq); i++ {
+				bs, err := proto.Marshal(hit)
+				if err != nil {
+					span.LogFields(oplog.Error(err))
+					return err
+				}
+				nilHits[i] = bs
+			}
+			var results = internalpb.SearchResult{
+				MsgType:         internalpb.MsgType_kSearchResult,
+				Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
+				ReqID:           searchMsg.ReqID,
+				ProxyID:         searchMsg.ProxyID,
+				QueryNodeID:     ss.queryNodeID,
+				Timestamp:       searchTimestamp,
+				ResultChannelID: searchMsg.ResultChannelID,
+				Hits:            nilHits,
+			}
+			searchResultMsg := &msgstream.SearchResultMsg{
+				BaseMsg:      msgstream.BaseMsg{HashValues: []uint32{uint32(searchMsg.ResultChannelID)}},
+				SearchResult: results,
+			}
+			err = ss.publishSearchResult(searchResultMsg)
+			if err != nil {
+				span.LogFields(oplog.Error(err))
+				return err
+			}
+			return nil
 		}
-		searchResultMsg := &msgstream.SearchResultMsg{
-			BaseMsg: msgstream.BaseMsg{
-				MsgCtx:     searchMsg.MsgCtx,
-				HashValues: []uint32{uint32(searchMsg.ResultChannelID)},
-			},
-			SearchResult: results,
-		}
-		err = ss.publishSearchResult(searchResultMsg)
-		if err != nil {
-			span.LogFields(oplog.Error(err))
-			return err
-		}
-		span.LogFields(oplog.String("publish search research success", "publish search research success"))
-		return nil
 	}
 
 	inReduced := make([]bool, len(searchResults))
@@ -385,9 +408,9 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 }
 
 func (ss *searchService) publishSearchResult(msg msgstream.TsMsg) error {
-	span, ctx := opentracing.StartSpanFromContext(msg.GetMsgContext(), "publish search result")
-	defer span.Finish()
-	msg.SetMsgContext(ctx)
+	// span, ctx := opentracing.StartSpanFromContext(msg.GetMsgContext(), "publish search result")
+	// defer span.Finish()
+	// msg.SetMsgContext(ctx)
 	fmt.Println("Public SearchResult", msg.HashKeys())
 	msgPack := msgstream.MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, msg)
@@ -396,9 +419,10 @@ func (ss *searchService) publishSearchResult(msg msgstream.TsMsg) error {
 }
 
 func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg, errMsg string) error {
-	span, ctx := opentracing.StartSpanFromContext(msg.GetMsgContext(), "receive search msg")
-	defer span.Finish()
-	msg.SetMsgContext(ctx)
+	// span, ctx := opentracing.StartSpanFromContext(msg.GetMsgContext(), "receive search msg")
+	// defer span.Finish()
+	// msg.SetMsgContext(ctx)
+	fmt.Println("Public fail SearchResult!")
 	msgPack := msgstream.MsgPack{}
 	searchMsg, ok := msg.(*msgstream.SearchMsg)
 	if !ok {

@@ -419,9 +419,6 @@ func (qt *QueryTask) PreExecute() error {
 		}
 	}
 	qt.MsgType = internalpb.MsgType_kSearch
-	if qt.query.PartitionTags == nil || len(qt.query.PartitionTags) <= 0 {
-		qt.query.PartitionTags = []string{Params.defaultPartitionTag()}
-	}
 	queryBytes, err := proto.Marshal(qt.query)
 	if err != nil {
 		span.LogFields(oplog.Error(err))
@@ -502,7 +499,7 @@ func (qt *QueryTask) PostExecute() error {
 
 			hits := make([][]*servicepb.Hits, 0)
 			for _, partialSearchResult := range filterSearchResult {
-				if len(partialSearchResult.Hits) <= 0 {
+				if partialSearchResult.Hits == nil || len(partialSearchResult.Hits) <= 0 {
 					filterReason += "nq is zero\n"
 					continue
 				}
@@ -541,7 +538,16 @@ func (qt *QueryTask) PostExecute() error {
 				return nil
 			}
 
-			topk := len(hits[0][0].IDs)
+			topk := 0
+			getMax := func(a, b int) int {
+				if a > b {
+					return a
+				}
+				return b
+			}
+			for _, hit := range hits {
+				topk = getMax(topk, len(hit[0].IDs))
+			}
 			qt.result = &servicepb.QueryResult{
 				Status: &commonpb.Status{
 					ErrorCode: 0,
@@ -559,13 +565,21 @@ func (qt *QueryTask) PostExecute() error {
 				}
 
 				for j := 0; j < topk; j++ {
+					valid := false
 					choice, maxDistance := 0, minFloat32
 					for q, loc := range locs { // query num, the number of ways to merge
+						if loc >= len(hits[q][i].IDs) {
+							continue
+						}
 						distance := hits[q][i].Scores[loc]
-						if distance > maxDistance {
+						if distance > maxDistance || (distance == maxDistance && choice != q) {
 							choice = q
 							maxDistance = distance
+							valid = true
 						}
+					}
+					if !valid {
+						break
 					}
 					choiceOffset := locs[choice]
 					// check if distance is valid, `invalid` here means very very big,

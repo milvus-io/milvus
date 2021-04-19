@@ -65,12 +65,8 @@ func refreshChannelNames() {
 }
 
 func receiveTimeTickMsg(stream *ms.MsgStream) bool {
-	for {
-		result := (*stream).Consume()
-		if len(result.Msgs) > 0 {
-			return true
-		}
-	}
+	result := (*stream).Consume()
+	return result != nil
 }
 
 func getTimeTickMsgPack(ttmsgs [][2]uint64) *ms.MsgPack {
@@ -79,6 +75,14 @@ func getTimeTickMsgPack(ttmsgs [][2]uint64) *ms.MsgPack {
 		msgPack.Msgs = append(msgPack.Msgs, getTtMsg(internalpb.MsgType_kTimeTick, UniqueID(vi[0]), Timestamp(vi[1])))
 	}
 	return &msgPack
+}
+
+func mockTimeTickBroadCast(msgStream ms.MsgStream, time Timestamp) error {
+	timeTick := [][2]uint64{
+		{0, time},
+	}
+	ttMsgPackForDD := getTimeTickMsgPack(timeTick)
+	return msgStream.Broadcast(ttMsgPackForDD)
 }
 
 func TestMaster(t *testing.T) {
@@ -534,10 +538,15 @@ func TestMaster(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
+		time.Sleep(1000 * time.Millisecond)
+		timestampNow := Timestamp(time.Now().Unix())
+		err = mockTimeTickBroadCast(svr.timesSyncMsgProducer.ddSyncStream, timestampNow)
+		assert.NoError(t, err)
+
 		//consume msg
-		ddMs := ms.NewPulsarMsgStream(ctx, 1024)
+		ddMs := ms.NewPulsarTtMsgStream(ctx, 1024)
 		ddMs.SetPulsarClient(pulsarAddr)
-		ddMs.CreatePulsarConsumers(Params.DDChannelNames, "DDStream", ms.NewUnmarshalDispatcher(), 1024)
+		ddMs.CreatePulsarConsumers(Params.DDChannelNames, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
 		ddMs.Start()
 
 		var consumeMsg ms.MsgStream = ddMs
@@ -823,10 +832,15 @@ func TestMaster(t *testing.T) {
 		assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
 		//consume msg
-		ddMs := ms.NewPulsarMsgStream(ctx, 1024)
+		ddMs := ms.NewPulsarTtMsgStream(ctx, 1024)
 		ddMs.SetPulsarClient(pulsarAddr)
-		ddMs.CreatePulsarConsumers(Params.DDChannelNames, "DDStream", ms.NewUnmarshalDispatcher(), 1024)
+		ddMs.CreatePulsarConsumers(Params.DDChannelNames, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
 		ddMs.Start()
+
+		time.Sleep(1000 * time.Millisecond)
+		timestampNow := Timestamp(time.Now().Unix())
+		err = mockTimeTickBroadCast(svr.timesSyncMsgProducer.ddSyncStream, timestampNow)
+		assert.NoError(t, err)
 
 		var consumeMsg ms.MsgStream = ddMs
 		for {
@@ -850,19 +864,19 @@ func TestMaster(t *testing.T) {
 		writeNodeStream.CreatePulsarProducers(Params.WriteNodeTimeTickChannelNames)
 		writeNodeStream.Start()
 
-		ddMs := ms.NewPulsarMsgStream(ctx, 1024)
+		ddMs := ms.NewPulsarTtMsgStream(ctx, 1024)
 		ddMs.SetPulsarClient(pulsarAddr)
-		ddMs.CreatePulsarConsumers(Params.DDChannelNames, "DDStream", ms.NewUnmarshalDispatcher(), 1024)
+		ddMs.CreatePulsarConsumers(Params.DDChannelNames, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
 		ddMs.Start()
 
-		dMMs := ms.NewPulsarMsgStream(ctx, 1024)
+		dMMs := ms.NewPulsarTtMsgStream(ctx, 1024)
 		dMMs.SetPulsarClient(pulsarAddr)
-		dMMs.CreatePulsarConsumers(Params.InsertChannelNames, "DMStream", ms.NewUnmarshalDispatcher(), 1024)
+		dMMs.CreatePulsarConsumers(Params.InsertChannelNames, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
 		dMMs.Start()
 
 		k2sMs := ms.NewPulsarMsgStream(ctx, 1024)
 		k2sMs.SetPulsarClient(pulsarAddr)
-		k2sMs.CreatePulsarConsumers(Params.K2SChannelNames, "K2SStream", ms.NewUnmarshalDispatcher(), 1024)
+		k2sMs.CreatePulsarConsumers(Params.K2SChannelNames, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
 		k2sMs.Start()
 
 		ttsoftmsgs := [][2]uint64{
@@ -897,16 +911,22 @@ func TestMaster(t *testing.T) {
 		schemaBytes, err := proto.Marshal(&sch)
 		assert.Nil(t, err)
 
+		////////////////////////////CreateCollection////////////////////////
 		createCollectionReq := internalpb.CreateCollectionRequest{
 			MsgType:   internalpb.MsgType_kCreateCollection,
 			ReqID:     1,
-			Timestamp: uint64(time.Now().Unix()),
+			Timestamp: Timestamp(time.Now().Unix()),
 			ProxyID:   1,
 			Schema:    &commonpb.Blob{Value: schemaBytes},
 		}
 		st, err := cli.CreateCollection(ctx, &createCollectionReq)
 		assert.Nil(t, err)
 		assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
+
+		time.Sleep(1000 * time.Millisecond)
+		timestampNow := Timestamp(time.Now().Unix())
+		err = mockTimeTickBroadCast(svr.timesSyncMsgProducer.ddSyncStream, timestampNow)
+		assert.NoError(t, err)
 
 		var consumeMsg ms.MsgStream = ddMs
 		var createCollectionMsg *ms.CreateCollectionMsg
@@ -942,6 +962,11 @@ func TestMaster(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
+		time.Sleep(1000 * time.Millisecond)
+		timestampNow = Timestamp(time.Now().Unix())
+		err = mockTimeTickBroadCast(svr.timesSyncMsgProducer.ddSyncStream, timestampNow)
+		assert.NoError(t, err)
+
 		var createPartitionMsg *ms.CreatePartitionMsg
 		for {
 			result := consumeMsg.Consume()
@@ -976,6 +1001,11 @@ func TestMaster(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
+		time.Sleep(1000 * time.Millisecond)
+		timestampNow = Timestamp(time.Now().Unix())
+		err = mockTimeTickBroadCast(svr.timesSyncMsgProducer.ddSyncStream, timestampNow)
+		assert.NoError(t, err)
+
 		var dropPartitionMsg *ms.DropPartitionMsg
 		for {
 			result := consumeMsg.Consume()
@@ -1005,6 +1035,11 @@ func TestMaster(t *testing.T) {
 		st, err = cli.DropCollection(ctx, &dropCollectionReq)
 		assert.Nil(t, err)
 		assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
+
+		time.Sleep(1000 * time.Millisecond)
+		timestampNow = Timestamp(time.Now().Unix())
+		err = mockTimeTickBroadCast(svr.timesSyncMsgProducer.ddSyncStream, timestampNow)
+		assert.NoError(t, err)
 
 		var dropCollectionMsg *ms.DropCollectionMsg
 		for {

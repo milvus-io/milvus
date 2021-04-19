@@ -51,13 +51,16 @@ type ProxyNode interface {
 	CreateCollection(req CreateCollectionRequest) error
   DropCollection(req DropCollectionRequest) error
   HasCollection(req HasCollectionRequest) (bool, error)
-  DescribeCollection(req DescribeCollectionRequest) (CollectionDescription, error)
+  DescribeCollection(req DescribeCollectionRequest) (DescribeCollectionResponse, error)
+  GetCollectionStatistics(req CollectionStatsRequest) (CollectionStatsResponse, error)
   ShowCollections(req ShowCollectionRequest) ([]string, error)
+  
   CreatePartition(req CreatePartitionRequest) error
   DropPartition(req DropPartitionRequest) error
   HasPartition(req HasPartitionRequest) (bool, error)
-  DescribePartition(req DescribePartitionRequest) (PartitionDescription, error)
+  GetPartitionStatistics(req PartitionStatsRequest) (PartitionStatsResponse, error)
   ShowPartitions(req ShowPartitionRequest) ([]string, error)
+  
   CreateIndex(req CreateIndexRequest) error
   DescribeIndex(DescribeIndexRequest) (DescribeIndexResponse, error)
   

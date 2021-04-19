@@ -51,7 +51,17 @@ func (kv *RocksdbKV) Load(key string) (string, error) {
 }
 
 func (kv *RocksdbKV) LoadWithPrefix(key string) ([]string, []string, error) {
+	kv.readOptions.SetPrefixSameAsStart(true)
+	kv.db.Close()
+	kv.opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(len(key)))
+	var err error
+	kv.db, err = gorocksdb.OpenDb(kv.opts, kv.GetName())
+	if err != nil {
+		return nil, nil, err
+	}
+
 	iter := kv.db.NewIterator(kv.readOptions)
+	defer iter.Close()
 	keys := make([]string, 0)
 	values := make([]string, 0)
 	iter.Seek([]byte(key))
@@ -97,7 +107,17 @@ func (kv *RocksdbKV) MultiSave(kvs map[string]string) error {
 }
 
 func (kv *RocksdbKV) RemoveWithPrefix(prefix string) error {
+	kv.readOptions.SetPrefixSameAsStart(true)
+	kv.db.Close()
+	kv.opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(len(prefix)))
+	var err error
+	kv.db, err = gorocksdb.OpenDb(kv.opts, kv.GetName())
+	if err != nil {
+		return err
+	}
+
 	iter := kv.db.NewIterator(kv.readOptions)
+	defer iter.Close()
 	iter.Seek([]byte(prefix))
 	for ; iter.Valid(); iter.Next() {
 		key := iter.Key()

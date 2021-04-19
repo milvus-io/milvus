@@ -64,11 +64,11 @@ type collectionReplica interface {
 }
 
 type collectionReplicaImpl struct {
-	mu          sync.RWMutex
+	tSafe tSafe
+
+	mu          sync.RWMutex // guards collections and segments
 	collections []*Collection
 	segments    map[UniqueID]*Segment
-
-	tSafe tSafe
 }
 
 //----------------------------------------------------------------------------------------------------- tSafe
@@ -95,11 +95,10 @@ func (colReplica *collectionReplicaImpl) addCollection(collectionID UniqueID, sc
 }
 
 func (colReplica *collectionReplicaImpl) removeCollection(collectionID UniqueID) error {
-	collection, err := colReplica.getCollectionByID(collectionID)
-
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
+	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		return err
 	}
@@ -128,6 +127,10 @@ func (colReplica *collectionReplicaImpl) getCollectionByID(collectionID UniqueID
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 
+	return colReplica.getCollectionByIDPrivate(collectionID)
+}
+
+func (colReplica *collectionReplicaImpl) getCollectionByIDPrivate(collectionID UniqueID) (*Collection, error) {
 	for _, collection := range colReplica.collections {
 		if collection.ID() == collectionID {
 			return collection, nil
@@ -164,25 +167,25 @@ func (colReplica *collectionReplicaImpl) hasCollection(collectionID UniqueID) bo
 
 //----------------------------------------------------------------------------------------------------- partition
 func (colReplica *collectionReplicaImpl) getPartitionNum(collectionID UniqueID) (int, error) {
-	collection, err := colReplica.getCollectionByID(collectionID)
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		return -1, err
 	}
-
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
 
 	return len(collection.partitions), nil
 }
 
 func (colReplica *collectionReplicaImpl) addPartition(collectionID UniqueID, partitionTag string) error {
-	collection, err := colReplica.getCollectionByID(collectionID)
+	colReplica.mu.Lock()
+	defer colReplica.mu.Unlock()
+
+	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		return err
 	}
-
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
 
 	var newPartition = newPartition(partitionTag)
 
@@ -191,13 +194,17 @@ func (colReplica *collectionReplicaImpl) addPartition(collectionID UniqueID, par
 }
 
 func (colReplica *collectionReplicaImpl) removePartition(collectionID UniqueID, partitionTag string) error {
-	collection, err := colReplica.getCollectionByID(collectionID)
+	colReplica.mu.Lock()
+	defer colReplica.mu.Unlock()
+
+	return colReplica.removePartitionPrivate(collectionID, partitionTag)
+}
+
+func (colReplica *collectionReplicaImpl) removePartitionPrivate(collectionID UniqueID, partitionTag string) error {
+	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		return err
 	}
-
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
 
 	var tmpPartitions = make([]*Partition, 0)
 	for _, p := range *collection.Partitions() {
@@ -215,6 +222,7 @@ func (colReplica *collectionReplicaImpl) removePartition(collectionID UniqueID, 
 	return nil
 }
 
+// deprecated
 func (colReplica *collectionReplicaImpl) addPartitionsByCollectionMeta(colMeta *etcdpb.CollectionMeta) error {
 	if !colReplica.hasCollection(colMeta.ID) {
 		err := errors.New("Cannot find collection, id = " + strconv.FormatInt(colMeta.ID, 10))
@@ -239,12 +247,13 @@ func (colReplica *collectionReplicaImpl) addPartitionsByCollectionMeta(colMeta *
 }
 
 func (colReplica *collectionReplicaImpl) removePartitionsByCollectionMeta(colMeta *etcdpb.CollectionMeta) error {
-	col, err := colReplica.getCollectionByID(colMeta.ID)
+	colReplica.mu.Lock()
+	defer colReplica.mu.Unlock()
+
+	col, err := colReplica.getCollectionByIDPrivate(colMeta.ID)
 	if err != nil {
 		return err
 	}
-
-	colReplica.mu.Lock()
 
 	pToDel := make([]string, 0)
 	for _, partition := range col.partitions {
@@ -259,10 +268,8 @@ func (colReplica *collectionReplicaImpl) removePartitionsByCollectionMeta(colMet
 		}
 	}
 
-	colReplica.mu.Unlock()
-
 	for _, tag := range pToDel {
-		err := colReplica.removePartition(col.ID(), tag)
+		err := colReplica.removePartitionPrivate(col.ID(), tag)
 		if err != nil {
 			log.Println(err)
 		}
@@ -273,13 +280,17 @@ func (colReplica *collectionReplicaImpl) removePartitionsByCollectionMeta(colMet
 }
 
 func (colReplica *collectionReplicaImpl) getPartitionByTag(collectionID UniqueID, partitionTag string) (*Partition, error) {
-	collection, err := colReplica.getCollectionByID(collectionID)
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	return colReplica.getPartitionByTagPrivate(collectionID, partitionTag)
+}
+
+func (colReplica *collectionReplicaImpl) getPartitionByTagPrivate(collectionID UniqueID, partitionTag string) (*Partition, error) {
+	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		return nil, err
 	}
-
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
 
 	for _, p := range *collection.Partitions() {
 		if p.Tag() == partitionTag {
@@ -291,14 +302,14 @@ func (colReplica *collectionReplicaImpl) getPartitionByTag(collectionID UniqueID
 }
 
 func (colReplica *collectionReplicaImpl) hasPartition(collectionID UniqueID, partitionTag string) bool {
-	collection, err := colReplica.getCollectionByID(collectionID)
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		log.Println(err)
 		return false
 	}
-
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
 
 	for _, p := range *collection.Partitions() {
 		if p.Tag() == partitionTag {
@@ -332,29 +343,29 @@ func (colReplica *collectionReplicaImpl) getSegmentStatistics() []*internalpb.Se
 			SegmentID:        segmentID,
 			MemorySize:       currentMemSize,
 			NumRows:          segmentNumOfRows,
-			RecentlyModified: segment.recentlyModified,
+			RecentlyModified: segment.GetRecentlyModified(),
 		}
 
 		statisticData = append(statisticData, &stat)
-		segment.recentlyModified = false
+		segment.SetRecentlyModified(false)
 	}
 
 	return statisticData
 }
 
 func (colReplica *collectionReplicaImpl) addSegment(segmentID UniqueID, partitionTag string, collectionID UniqueID) error {
-	collection, err := colReplica.getCollectionByID(collectionID)
+	colReplica.mu.Lock()
+	defer colReplica.mu.Unlock()
+
+	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		return err
 	}
 
-	partition, err2 := colReplica.getPartitionByTag(collectionID, partitionTag)
+	partition, err2 := colReplica.getPartitionByTagPrivate(collectionID, partitionTag)
 	if err2 != nil {
 		return err2
 	}
-
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
 
 	var newSegment = newSegment(collection, segmentID, partitionTag, collectionID)
 

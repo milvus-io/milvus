@@ -8,13 +8,15 @@
 
 
 
-#### 8.2 API
+#### 8.2 Query Service API
 
 ```go
 type Client interface {
   RegisterNode(req NodeInfo) (InitParams, error)
-  DescribeService() (ServiceDescription, error)
-  DescribeParition(req DescribeParitionRequest) (PartitionDescriptions, error)
+  GetServiceStates() (ServiceStatesResponse, error)
+  ShowCollections(req ShowCollectionRequest) (ShowCollectionResponse, error)
+  ShowPartitions(req ShowPartitionRequest) (ShowPartitionResponse, error)
+  GetPartitionStates(req PartitionStatesRequest) (PartitionStatesResponse, error)
   LoadPartitions(req LoadPartitonRequest) error
   ReleasePartitions(req ReleasePartitionRequest) error
   CreateQueryChannel() (QueryChannels, error)
@@ -33,7 +35,7 @@ type NodeInfo struct {}
 type InitParams struct {}
 ```
 
-* *DescribeService*
+* *GetServiceStates*
 
 ```go
 type NodeState = int
@@ -44,36 +46,51 @@ const (
   ABNORMAL NodeState = 2
 )
 
-type QueryNodeDescription struct {
+//type ResourceCost struct {
+//  MemUsage int64
+//  CpuUsage float32
+//}
+
+type QueryNodeStates struct {
   NodeState NodeState
-  ResourceCost ResourceCost 
+  //ResourceCost ResourceCost 
 }
 
-type CollectionDescription struct {
-  ParitionIDs []UniqueID
+type ServiceStatesResponse struct {
+  ServiceState NodeState
+}
+```
+
+* *ShowCollections*
+
+```go
+type ShowCollectionRequest struct {
+  DbID UniqueID
 }
 
-type DbDescription struct {
-  CollectionDescriptions []CollectionDescription
+type ShowCollectionResponse struct {
+  CollectionIDs []UniqueID
+}
+```
+
+* *ShowPartitions*
+
+```go
+type ShowPartitionRequest struct {
+  DbID UniqueID
+  CollectionID UniqueID
 }
 
-type ServiceDescription struct {
-  DbDescriptions map[UniqueID]DbDescription
-  NodeDescriptions map[UniqueID]QueryNodeDescription
+type ShowPartitionResponse struct {
+  PartitionIDs []UniqueID
 }
 ```
 
 
 
-* *DescribeParition*
+* *GetPartitionStates*
 
 ```go
-type DescribeParitionRequest struct {
-  DbID UniqueID
-  CollectionID UniqueID
-  partitionIDs []UniqueID
-}
-
 type PartitionState = int
 
 const (
@@ -86,19 +103,19 @@ const (
   IN_GPU PartitionState = 6
 )
 
-type ResourceCost struct {
-  MemUsage int64
-  CpuUsage float32
+type PartitionStatesRequest struct {
+	DbID UniqueID
+  CollectionID UniqueID
+  partitionIDs []UniqueID
 }
 
-type PartitionDescription struct {
-  ID UniqueID
+type PartitionStates struct {
+  PartitionID UniqueID
   State PartitionState
-  ResourceCost ResourceCost
 }
 
-type PartitionDescriptions struct {
-  PartitionDescriptions []PartitionDescription
+type PartitionStatesResponse struct {
+  States []PartitionStates
 }
 ```
 

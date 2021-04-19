@@ -15,7 +15,10 @@ type Client interface {
   RegisterNode(req NodeInfo) (InitParams, error)
   AssignSegmentID(req AssignSegIDRequest) (AssignSegIDResponse, error)
   Flush(req FlushRequest) error
+  ShowSegments(req ShowSegmentRequest) (ShowSegmentResponse, error)
+  GetSegmentStates(req SegmentStatesRequest) (SegmentStatesResponse, error)
   GetInsertBinlogPaths(req InsertBinlogPathRequest) (InsertBinlogPathsResponse, error)
+  
   GetInsertChannels(req InsertChannelRequest) ([]string, error)
   GetTimeTickChannel() (string, error)
   GetStatsChannel() (string, error)
@@ -73,15 +76,53 @@ type FlushRequest struct {
 
 
 
+* *ShowSegments*
+
+```go
+type ShowSegmentRequest struct {
+  CollectionID UniqueID
+  PartitionID UniqueID
+}
+
+type ShowSegmentResponse struct {
+  SegmentIDs []UniqueID
+}
+```
+
+
+
+* *GetSegmentStates*
+
+```go
+enum SegmentState {
+    NONE = 0;
+    NOT_EXIST = 1;
+    GROWING = 2;
+    SEALED = 3;
+}
+
+type SegmentStatesRequest struct {
+  SegmentID UniqueID
+}
+
+type SegmentStatesResponse struct {
+  State SegmentState
+  CreateTime Timestamp
+  SealedTime Timestamp
+}
+```
+
+
+
 * *GetInsertBinlogPaths*
 
 ```go
 type InsertBinlogPathRequest struct {
-  segmentID UniqueID
+  SegmentID UniqueID
 }
 
 type InsertBinlogPathsResponse struct {
-  FieldIdxToPaths map[int32][]string
+  FieldIDToPaths map[int64][]string
 }
 ```
 
