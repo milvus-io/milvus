@@ -26,7 +26,7 @@ func (c *Collection) Name() string {
 }
 
 func (c *Collection) ID() UniqueID {
-	return (*c.meta).ID
+	return (*c.meta).Id
 }
 
 func (c *Collection) Partitions() *[]*Partition {

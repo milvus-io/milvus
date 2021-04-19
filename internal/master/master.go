@@ -194,7 +194,7 @@ func (s *Master) startServerLoop(ctx context.Context, grpcPort int64) {
 func (s *Master) stopServerLoop() {
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
-		log.Printf("server is cloded, exit grpc server")
+		log.Printf("server is closed, exit grpc server")
 	}
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()

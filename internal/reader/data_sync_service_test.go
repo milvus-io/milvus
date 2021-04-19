@@ -68,7 +68,7 @@ func TestManipulationService_Start(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		ID:            UniqueID(0),
+		Id:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIds:    []UniqueID{0},
@@ -80,7 +80,7 @@ func TestManipulationService_Start(t *testing.T) {
 
 	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.ID, UniqueID(0))
+	assert.Equal(t, collection.meta.Id, UniqueID(0))
 	assert.Equal(t, len(node.container.collections), 1)
 
 	partition, err := node.container.addPartition(collection, collectionMeta.PartitionTags[0])

@@ -3,7 +3,6 @@ package master
 import (
 	"errors"
 	"log"
-	"strconv"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -85,7 +84,7 @@ func (t *createCollectionTask) Execute() error {
 	}
 
 	collection := etcdpb.CollectionMeta{
-		ID:         collectionID,
+		Id:         collectionID,
 		Schema:     &schema,
 		CreateTime: ts,
 		// TODO: initial segment?
@@ -124,16 +123,9 @@ func (t *dropCollectionTask) Execute() error {
 		return err
 	}
 
-	collectionID := collectionMeta.ID
+	collectionID := collectionMeta.Id
 
-	err = (*t.kvBase).Remove(collectionMetaPrefix + strconv.FormatInt(collectionID, 10))
-	if err != nil {
-		return err
-	}
-
-	delete(t.mt.collID2Meta, collectionID)
-
-	return nil
+	return t.mt.DeleteCollection(collectionID)
 }
 
 //////////////////////////////////////////////////////////////////////////

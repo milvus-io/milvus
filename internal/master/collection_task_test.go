@@ -2,6 +2,7 @@ package master
 
 import (
 	"context"
+	"log"
 	"strconv"
 	"testing"
 
@@ -12,11 +13,12 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 	"go.etcd.io/etcd/clientv3"
 	"google.golang.org/grpc"
 )
 
-func TestMaster_CreateCollection(t *testing.T) {
+func TestMaster_CreateCollectionTask(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
@@ -31,10 +33,10 @@ func TestMaster_CreateCollection(t *testing.T) {
 
 	svr, err := CreateServer(ctx, "/test/root/kv", "/test/root/meta", "/test/root/meta/tso", []string{etcdAddr})
 	assert.Nil(t, err)
-	err = svr.Run(10001)
+	err = svr.Run(10002)
 	assert.Nil(t, err)
 
-	conn, err := grpc.DialContext(ctx, "127.0.0.1:10001", grpc.WithInsecure(), grpc.WithBlock())
+	conn, err := grpc.DialContext(ctx, "127.0.0.1:10002", grpc.WithInsecure(), grpc.WithBlock())
 	assert.Nil(t, err)
 	defer conn.Close()
 
@@ -106,13 +108,14 @@ func TestMaster_CreateCollection(t *testing.T) {
 		ProxyId:   1,
 		Schema:    &commonpb.Blob{Value: schemaBytes},
 	}
+	log.Printf("... [Create] collection col1\n")
 	st, err := cli.CreateCollection(ctx, &req)
 	assert.Nil(t, err)
 	assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
 	collMeta, err := svr.mt.GetCollectionByName(sch.Name)
 	assert.Nil(t, err)
-	t.Logf("collection id = %d", collMeta.Id)
+	t.Logf("collection id = %d", collMeta.ID)
 	assert.Equal(t, collMeta.CreateTime, uint64(11))
 	assert.Equal(t, collMeta.Schema.Name, "col1")
 	assert.Equal(t, collMeta.Schema.AutoId, false)
@@ -147,6 +150,37 @@ func TestMaster_CreateCollection(t *testing.T) {
 	st, err = cli.CreateCollection(ctx, &req)
 	assert.Nil(t, err)
 	assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
+	// ------------------------------DropCollectionTask---------------------------
+
+	log.Printf("... [Drop] collection col1\n")
+	ser := servicepb.CollectionName{CollectionName: "col1"}
+
+	reqDrop := internalpb.DropCollectionRequest{
+		MsgType:        internalpb.MsgType_kDropCollection,
+		ReqId:          1,
+		Timestamp:      11,
+		ProxyId:        1,
+		CollectionName: &ser,
+	}
+
+	st, err = cli.DropCollection(ctx, &reqDrop)
+	assert.Nil(t, err)
+	assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
+
+	collMeta, err = svr.mt.GetCollectionByName(sch.Name)
+	assert.NotNil(t, err)
+
+	// Drop again
+	st, err = cli.DropCollection(ctx, &reqDrop)
+	assert.Nil(t, err)
+	assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
+
+	// Create
+	req.Timestamp = Timestamp(11)
+	st, err = cli.CreateCollection(ctx, &req)
+	assert.Nil(t, err)
+	log.Printf(st.Reason)
+	assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
 	svr.Close()
 }

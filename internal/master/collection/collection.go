@@ -50,7 +50,7 @@ func GrpcMarshal(c *Collection) *Collection {
 	}
 	pbSchema.Fields = schemaSlice
 	grpcCollection := &etcdpb.CollectionMeta{
-		ID:            c.ID,
+		Id:            c.ID,
 		Schema:        pbSchema,
 		CreateTime:    c.CreateTime,
 		SegmentIds:    c.SegmentIDs,
