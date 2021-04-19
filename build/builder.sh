@@ -13,18 +13,18 @@ if [ "${1-}" = "pull" ]; then
     exit 0
 fi
 
-if [ "${1-}" = "gdbserver" ]; then
-    mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-gdbserver-home"
-    chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
-
-    docker-compose pull --ignore-pull-failures gdbserver
-    if [ "${CHECK_BUILDER:-}" == "1" ]; then
-        DATE_VERSION=latest docker-compose pull --ignore-pull-failures gdbserver
-        docker-compose build gdbserver
-    fi
-    docker-compose up -d gdbserver
-    exit 0
-fi
+# if [ "${1-}" = "gdbserver" ]; then
+#     mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-gdbserver-home"
+#     chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
+#
+#     docker-compose pull --ignore-pull-failures gdbserver
+#     if [ "${CHECK_BUILDER:-}" == "1" ]; then
+#         DATE_VERSION=latest docker-compose pull --ignore-pull-failures gdbserver
+#         docker-compose build gdbserver
+#     fi
+#     docker-compose up -d gdbserver
+#     exit 0
+# fi
 
 if [ "${1-}" = "down" ]; then
     docker-compose down
