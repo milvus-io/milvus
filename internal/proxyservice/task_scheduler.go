@@ -9,41 +9,41 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
 
-type TaskScheduler struct {
-	RegisterLinkTaskQueue                  TaskQueue
-	RegisterNodeTaskQueue                  TaskQueue
-	InvalidateCollectionMetaCacheTaskQueue TaskQueue
+type taskScheduler struct {
+	RegisterLinkTaskQueue                  taskQueue
+	RegisterNodeTaskQueue                  taskQueue
+	InvalidateCollectionMetaCacheTaskQueue taskQueue
 
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-func NewTaskScheduler(ctx context.Context) *TaskScheduler {
+func newTaskScheduler(ctx context.Context) *taskScheduler {
 	ctx1, cancel := context.WithCancel(ctx)
 
-	return &TaskScheduler{
-		RegisterLinkTaskQueue:                  NewBaseTaskQueue(),
-		RegisterNodeTaskQueue:                  NewBaseTaskQueue(),
-		InvalidateCollectionMetaCacheTaskQueue: NewBaseTaskQueue(),
+	return &taskScheduler{
+		RegisterLinkTaskQueue:                  newBaseTaskQueue(),
+		RegisterNodeTaskQueue:                  newBaseTaskQueue(),
+		InvalidateCollectionMetaCacheTaskQueue: newBaseTaskQueue(),
 		ctx:                                    ctx1,
 		cancel:                                 cancel,
 	}
 }
 
-func (sched *TaskScheduler) scheduleRegisterLinkTask() task {
+func (sched *taskScheduler) scheduleRegisterLinkTask() task {
 	return sched.RegisterLinkTaskQueue.PopTask()
 }
 
-func (sched *TaskScheduler) scheduleRegisterNodeTask() task {
+func (sched *taskScheduler) scheduleRegisterNodeTask() task {
 	return sched.RegisterNodeTaskQueue.PopTask()
 }
 
-func (sched *TaskScheduler) scheduleInvalidateCollectionMetaCacheTask() task {
+func (sched *taskScheduler) scheduleInvalidateCollectionMetaCacheTask() task {
 	return sched.InvalidateCollectionMetaCacheTaskQueue.PopTask()
 }
 
-func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
+func (sched *taskScheduler) processTask(t task, q taskQueue) {
 	span, ctx := trace.StartSpanFromContext(t.Ctx(),
 		opentracing.Tags{
 			"Type": t.Name(),
@@ -70,7 +70,7 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 	err = t.PostExecute(ctx)
 }
 
-func (sched *TaskScheduler) registerLinkLoop() {
+func (sched *taskScheduler) registerLinkLoop() {
 	defer sched.wg.Done()
 	for {
 		select {
@@ -85,7 +85,7 @@ func (sched *TaskScheduler) registerLinkLoop() {
 	}
 }
 
-func (sched *TaskScheduler) registerNodeLoop() {
+func (sched *taskScheduler) registerNodeLoop() {
 	defer sched.wg.Done()
 	for {
 		select {
@@ -100,7 +100,7 @@ func (sched *TaskScheduler) registerNodeLoop() {
 	}
 }
 
-func (sched *TaskScheduler) invalidateCollectionMetaCacheLoop() {
+func (sched *taskScheduler) invalidateCollectionMetaCacheLoop() {
 	defer sched.wg.Done()
 	for {
 		select {
@@ -115,7 +115,7 @@ func (sched *TaskScheduler) invalidateCollectionMetaCacheLoop() {
 	}
 }
 
-func (sched *TaskScheduler) Start() {
+func (sched *taskScheduler) Start() {
 	sched.wg.Add(1)
 	go sched.registerLinkLoop()
 
@@ -126,7 +126,7 @@ func (sched *TaskScheduler) Start() {
 	go sched.invalidateCollectionMetaCacheLoop()
 }
 
-func (sched *TaskScheduler) Close() {
+func (sched *taskScheduler) Close() {
 	sched.cancel()
 	sched.wg.Wait()
 }

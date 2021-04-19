@@ -15,10 +15,10 @@ import (
 )
 
 type ProxyService struct {
-	allocator NodeIDAllocator
-	sched     *TaskScheduler
+	allocator nodeIDAllocator
+	sched     *taskScheduler
 	tick      *TimeTick
-	nodeInfos *GlobalNodeInfoTable
+	nodeInfos *globalNodeInfoTable
 	stateCode internalpb.StateCode
 
 	//subStates *internalpb.ComponentStates
@@ -40,9 +40,9 @@ func NewProxyService(ctx context.Context, factory msgstream.Factory) (*ProxyServ
 		msFactory: factory,
 	}
 
-	s.allocator = NewNodeIDAllocator()
-	s.sched = NewTaskScheduler(ctx1)
-	s.nodeInfos = NewGlobalNodeInfoTable()
+	s.allocator = newNodeIDAllocator()
+	s.sched = newTaskScheduler(ctx1)
+	s.nodeInfos = newGlobalNodeInfoTable()
 	s.UpdateStateCode(internalpb.StateCode_Abnormal)
 	log.Debug("proxyservice", zap.Any("state of proxyservice: ", internalpb.StateCode_Abnormal))
 

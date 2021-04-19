@@ -8,7 +8,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/log"
 )
 
-type TaskQueue interface {
+type taskQueue interface {
 	Chan() <-chan int
 	Empty() bool
 	Full() bool
@@ -18,7 +18,7 @@ type TaskQueue interface {
 	Enqueue(t task) error
 }
 
-type BaseTaskQueue struct {
+type baseTaskQueue struct {
 	tasks *list.List
 	mtx   sync.Mutex
 
@@ -28,19 +28,19 @@ type BaseTaskQueue struct {
 	bufChan chan int // to block scheduler
 }
 
-func (queue *BaseTaskQueue) Chan() <-chan int {
+func (queue *baseTaskQueue) Chan() <-chan int {
 	return queue.bufChan
 }
 
-func (queue *BaseTaskQueue) Empty() bool {
+func (queue *baseTaskQueue) Empty() bool {
 	return queue.tasks.Len() <= 0
 }
 
-func (queue *BaseTaskQueue) Full() bool {
+func (queue *baseTaskQueue) Full() bool {
 	return int64(queue.tasks.Len()) >= queue.maxTaskNum
 }
 
-func (queue *BaseTaskQueue) addTask(t task) error {
+func (queue *baseTaskQueue) addTask(t task) error {
 	queue.mtx.Lock()
 	defer queue.mtx.Unlock()
 
@@ -52,7 +52,7 @@ func (queue *BaseTaskQueue) addTask(t task) error {
 	return nil
 }
 
-func (queue *BaseTaskQueue) FrontTask() task {
+func (queue *baseTaskQueue) FrontTask() task {
 	queue.mtx.Lock()
 	defer queue.mtx.Unlock()
 
@@ -64,7 +64,7 @@ func (queue *BaseTaskQueue) FrontTask() task {
 	return queue.tasks.Front().Value.(task)
 }
 
-func (queue *BaseTaskQueue) PopTask() task {
+func (queue *baseTaskQueue) PopTask() task {
 	queue.mtx.Lock()
 	defer queue.mtx.Unlock()
 
@@ -79,12 +79,12 @@ func (queue *BaseTaskQueue) PopTask() task {
 	return ft.Value.(task)
 }
 
-func (queue *BaseTaskQueue) Enqueue(t task) error {
+func (queue *baseTaskQueue) Enqueue(t task) error {
 	return queue.addTask(t)
 }
 
-func NewBaseTaskQueue() TaskQueue {
-	return &BaseTaskQueue{
+func newBaseTaskQueue() *baseTaskQueue {
+	return &baseTaskQueue{
 		tasks:      list.New(),
 		maxTaskNum: 1024,
 		bufChan:    make(chan int, 1024),

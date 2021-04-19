@@ -7,6 +7,8 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"go.uber.org/zap"
@@ -35,7 +37,7 @@ func (m *InsertChannelsMap) createInsertMsgStream(collID UniqueID, channels []st
 		return channels[i] <= channels[j]
 	})
 	for loc, existedChannels := range m.insertChannels {
-		if m.droppedBitMap[loc] == 0 && SortedSliceEqual(existedChannels, channels) {
+		if m.droppedBitMap[loc] == 0 && funcutil.SortedSliceEqual(existedChannels, channels) {
 			m.collectionID2InsertChannels[collID] = loc
 			m.usageHistogram[loc]++
 			return nil

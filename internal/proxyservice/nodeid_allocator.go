@@ -10,17 +10,17 @@ import (
 type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
-type NodeIDAllocator interface {
+type nodeIDAllocator interface {
 	AllocOne() UniqueID
 }
 
-type NaiveNodeIDAllocator struct {
+type naiveNodeIDAllocator struct {
 	allocator *allocator.IDAllocator
 	now       UniqueID
 	mtx       sync.Mutex
 }
 
-func (allocator *NaiveNodeIDAllocator) AllocOne() UniqueID {
+func (allocator *naiveNodeIDAllocator) AllocOne() UniqueID {
 	allocator.mtx.Lock()
 	defer func() {
 		// allocator.now++
@@ -29,8 +29,8 @@ func (allocator *NaiveNodeIDAllocator) AllocOne() UniqueID {
 	return allocator.now
 }
 
-func NewNodeIDAllocator() NodeIDAllocator {
-	return &NaiveNodeIDAllocator{
+func newNodeIDAllocator() *naiveNodeIDAllocator {
+	return &naiveNodeIDAllocator{
 		now: 1,
 	}
 }
