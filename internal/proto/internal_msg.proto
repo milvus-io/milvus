@@ -24,9 +24,13 @@ enum ReqType {
 
     /* Manipulation Requests */
     kInsert = 400;
+    kDelete = 401;
 
     /* Query */
     kSearch = 500;
+
+    /* System Control */
+    kTimeTick = 1200
 }
 
 enum PeerRole {

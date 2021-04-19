@@ -164,7 +164,7 @@ func TestProxyNode(t *testing.T) {
 		Id:            100,
 		Schema:        nil,
 		CreateTime:    0,
-		SegmentIds:    []uint64{101, 102},
+		SegmentIds:    []int64{101, 102},
 		PartitionTags: nil,
 	}
 	sm101 := etcdpb.SegmentMeta{
@@ -307,7 +307,7 @@ func TestProxyNode(t *testing.T) {
 		assert.Equal(t, insertR.EntityIdArray[i], int64(i+10))
 	}
 
-	var insertPrimaryKey []uint64
+	var insertPrimaryKey []int64
 	readerM1, ok := <-reader.Chan()
 	assert.True(t, ok)
 

@@ -125,7 +125,7 @@ func TestProxyServer_WatchEtcd(t *testing.T) {
 
 	col1 := etcdpb.CollectionMeta{
 		Id:         1,
-		SegmentIds: []uint64{2, 3},
+		SegmentIds: []int64{2, 3},
 	}
 	seg2 := etcdpb.SegmentMeta{
 		SegmentId: 2,
@@ -174,7 +174,7 @@ func TestProxyServer_WatchEtcd(t *testing.T) {
 
 	col4 := etcdpb.CollectionMeta{
 		Id:         4,
-		SegmentIds: []uint64{5},
+		SegmentIds: []int64{5},
 	}
 	seg5 := etcdpb.SegmentMeta{
 		SegmentId: 5,
@@ -206,7 +206,7 @@ func TestProxyServer_InsertAndDelete(t *testing.T) {
 		Id:            10,
 		Schema:        nil,
 		CreateTime:    0,
-		SegmentIds:    []uint64{11, 12},
+		SegmentIds:    []int64{11, 12},
 		PartitionTags: nil,
 	}
 	seg11 := etcdpb.SegmentMeta{
@@ -323,7 +323,7 @@ func TestProxyServer_InsertAndDelete(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equalf(t, dr.ErrorCode, pb.ErrorCode_SUCCESS, "delete failed, error code = %d, reason = %s", dr.ErrorCode, dr.Reason)
 
-	var primaryKey []uint64
+	var primaryKey []int64
 	isbreak = false
 	for {
 		if isbreak {
