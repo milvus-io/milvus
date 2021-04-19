@@ -22,7 +22,7 @@ all: build-cpp build-go
 get-check-deps:
 	@mkdir -p ${GOPATH}/bin
 	@which golangci-lint 1>/dev/null || (echo "Installing golangci-lint" && curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOPATH)/bin v1.27.0)
-#	@which ruleguard 1>/dev/null || (echo "Installing ruleguard" && GO111MODULE=off $(GO) get github.com/quasilyte/go-ruleguard/...)
+	@which ruleguard 1>/dev/null || (echo "Installing ruleguard" && GO111MODULE=off $(GO) get github.com/quasilyte/go-ruleguard/...)
 
 get-build-deps:
 	@(env bash $(PWD)/scripts/install_deps.sh)
@@ -36,9 +36,13 @@ fmt:
 lint:
 	@echo "Running $@ check"
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint cache clean
-#	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=5m --config ./.golangci.yml
+	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=1m --config ./.golangci.yml || true
 
-verifiers: get-check-deps fmt lint
+ruleguard:
+	@echo "Running $@ check"
+	@${GOPATH}/bin/ruleguard -rules ruleguard.rule.go ./... || true
+
+verifiers: get-check-deps fmt lint ruleguard
 
 # Builds various components locally.
 build-go: verifiers
@@ -65,7 +69,7 @@ test-go: verifiers build-go
 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
 
 test-cpp: build-cpp-with-unittest
-	@echo "Running cpp unittest..."
+	@echo "Running cpp unittests..."
 	@(env bash $(PWD)/scripts/run_cpp_unittest.sh)
 
 #TODO: build each component to docker

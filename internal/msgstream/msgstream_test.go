@@ -94,6 +94,22 @@ func getTsMsg(msgType MsgType, reqId int64, hashValue int32) *TsMsg {
 			TimeSyncMsg: timeSyncResult,
 		}
 		tsMsg = timeSyncMsg
+	case kTimeTick:
+		insertRequest := internalPb.InsertRequest{
+			ReqType:        internalPb.ReqType_kTimeTick,
+			ReqId:          reqId,
+			CollectionName: "Collection",
+			PartitionTag:   "Partition",
+			SegmentId:      1,
+			ChannelId:      1,
+			ProxyId:        1,
+			Timestamps:     []uint64{1},
+		}
+		insertMsg := InsertTask{
+			HashValues: []int32{hashValue},
+			InsertRequest: insertRequest,
+		}
+		tsMsg = insertMsg
 	}
 	return &tsMsg
 }
@@ -210,4 +226,18 @@ func TestStream_TimeSync(t *testing.T) {
 
 	//run stream
 	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, kTimeSync, kTimeSync)
+}
+
+func TestStream_BroadCast(t *testing.T) {
+	pulsarAddress := "pulsar://localhost:6650"
+	producerChannels := []string{"insert"}
+	consumerChannels := []string{"insert"}
+	consumerSubName := "subInsert"
+
+	msgPack := MsgPack{}
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(kTimeTick, 0, 0))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(kTimeTick, 3, 3))
+
+	//run stream
+	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, kInsert, kInsert)
 }
