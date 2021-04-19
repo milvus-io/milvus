@@ -35,6 +35,7 @@ func (dispatcher *UnmarshalDispatcher) addDefaultMsgTemplates() {
 	createPartitionMsg := CreatePartitionMsg{}
 	dropPartitionMsg := DropPartitionMsg{}
 	loadIndexMsg := LoadIndexMsg{}
+	flushMsg := FlushMsg{}
 
 	queryNodeSegStatsMsg := QueryNodeStatsMsg{}
 	dispatcher.tempMap = make(map[internalPb.MsgType]UnmarshalFunc)
@@ -49,7 +50,7 @@ func (dispatcher *UnmarshalDispatcher) addDefaultMsgTemplates() {
 	dispatcher.tempMap[internalPb.MsgType_kCreatePartition] = createPartitionMsg.Unmarshal
 	dispatcher.tempMap[internalPb.MsgType_kDropPartition] = dropPartitionMsg.Unmarshal
 	dispatcher.tempMap[internalPb.MsgType_kLoadIndex] = loadIndexMsg.Unmarshal
-
+	dispatcher.tempMap[internalPb.MsgType_kFlush] = flushMsg.Unmarshal
 }
 
 func NewUnmarshalDispatcher() *UnmarshalDispatcher {
