@@ -699,7 +699,7 @@ class TestIndexBinary:
     ***************************************************************
     """
     @pytest.mark.skip("repeat with test_create_index binary")
-    def test_get_index_info(self, connect, binary_collection, get_jaccard_index):
+    def _test_get_index_info(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test describe index interface
         method: create collection and add entities in it, create index, call describe index
@@ -719,7 +719,7 @@ class TestIndexBinary:
                             assert file["index_type"] == get_jaccard_index["index_type"]
 
     @pytest.mark.skip("repeat with test_create_index_partition binary")
-    def test_get_index_info_partition(self, connect, binary_collection, get_jaccard_index):
+    def _test_get_index_info_partition(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test describe index interface
         method: create collection, create partition and add entities in it, create index, call describe index
