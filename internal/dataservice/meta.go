@@ -29,15 +29,17 @@ type (
 		collID2Info map[UniqueID]*collectionInfo     // collection id to collection info
 		segID2Info  map[UniqueID]*datapb.SegmentInfo // segment id to segment info
 
-		ddLock sync.RWMutex
+		allocator allocator
+		ddLock    sync.RWMutex
 	}
 )
 
-func NewMetaTable(kv kv.TxnBase) (*meta, error) {
+func newMetaTable(kv kv.TxnBase, allocator allocator) (*meta, error) {
 	mt := &meta{
 		client:      kv,
 		collID2Info: make(map[UniqueID]*collectionInfo),
 		segID2Info:  make(map[UniqueID]*datapb.SegmentInfo),
+		allocator:   allocator,
 	}
 	err := mt.reloadFromKV()
 	if err != nil {
@@ -46,8 +48,8 @@ func NewMetaTable(kv kv.TxnBase) (*meta, error) {
 	return mt, nil
 }
 
-func (mt *meta) reloadFromKV() error {
-	_, values, err := mt.client.LoadWithPrefix("segment")
+func (meta *meta) reloadFromKV() error {
+	_, values, err := meta.client.LoadWithPrefix("segment")
 	if err != nil {
 		return err
 	}
@@ -58,123 +60,145 @@ func (mt *meta) reloadFromKV() error {
 		if err != nil {
 			return err
 		}
-		mt.segID2Info[segmentInfo.SegmentID] = segmentInfo
+		meta.segID2Info[segmentInfo.SegmentID] = segmentInfo
 	}
 
 	return nil
 }
 
-func (mt *meta) AddCollection(collectionInfo *collectionInfo) error {
-	mt.ddLock.Lock()
-	defer mt.ddLock.Unlock()
-	if _, ok := mt.collID2Info[collectionInfo.ID]; ok {
+func (meta *meta) AddCollection(collectionInfo *collectionInfo) error {
+	meta.ddLock.Lock()
+	defer meta.ddLock.Unlock()
+	if _, ok := meta.collID2Info[collectionInfo.ID]; ok {
 		return fmt.Errorf("collection %s with id %d already exist", collectionInfo.Schema.Name, collectionInfo.ID)
 	}
-	mt.collID2Info[collectionInfo.ID] = collectionInfo
+	meta.collID2Info[collectionInfo.ID] = collectionInfo
 	return nil
 }
 
-func (mt *meta) DropCollection(collID UniqueID) error {
-	mt.ddLock.Lock()
-	defer mt.ddLock.Unlock()
+func (meta *meta) DropCollection(collID UniqueID) error {
+	meta.ddLock.Lock()
+	defer meta.ddLock.Unlock()
 
-	if _, ok := mt.collID2Info[collID]; !ok {
+	if _, ok := meta.collID2Info[collID]; !ok {
 		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collID, 10))
 	}
-	delete(mt.collID2Info, collID)
-	for id, segment := range mt.segID2Info {
+	delete(meta.collID2Info, collID)
+	for id, segment := range meta.segID2Info {
 		if segment.CollectionID != collID {
 			continue
 		}
-		delete(mt.segID2Info, id)
-		if err := mt.removeSegmentInfo(id); err != nil {
+		delete(meta.segID2Info, id)
+		if err := meta.removeSegmentInfo(id); err != nil {
 			log.Printf("remove segment info failed, %s", err.Error())
-			_ = mt.reloadFromKV()
+			_ = meta.reloadFromKV()
 		}
 	}
 	return nil
 }
 
-func (mt *meta) HasCollection(collID UniqueID) bool {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-	_, ok := mt.collID2Info[collID]
+func (meta *meta) HasCollection(collID UniqueID) bool {
+	meta.ddLock.RLock()
+	defer meta.ddLock.RUnlock()
+	_, ok := meta.collID2Info[collID]
 	return ok
 }
 
-func (mt *meta) AddSegment(segmentInfo *datapb.SegmentInfo) error {
-	mt.ddLock.Lock()
-	defer mt.ddLock.Unlock()
-	if _, ok := mt.segID2Info[segmentInfo.SegmentID]; !ok {
+func (meta *meta) BuildSegment(collectionID UniqueID, partitionID UniqueID, channelRange []string) (*datapb.SegmentInfo, error) {
+	id, err := meta.allocator.allocID()
+	if err != nil {
+		return nil, err
+	}
+	ts, err := meta.allocator.allocTimestamp()
+	if err != nil {
+		return nil, err
+	}
+
+	return &datapb.SegmentInfo{
+		SegmentID:      id,
+		CollectionID:   collectionID,
+		PartitionID:    partitionID,
+		InsertChannels: channelRange,
+		OpenTime:       ts,
+		CloseTime:      0,
+		NumRows:        0,
+		MemSize:        0,
+	}, nil
+}
+
+func (meta *meta) AddSegment(segmentInfo *datapb.SegmentInfo) error {
+	meta.ddLock.Lock()
+	defer meta.ddLock.Unlock()
+	if _, ok := meta.segID2Info[segmentInfo.SegmentID]; !ok {
 		return fmt.Errorf("segment %d already exist", segmentInfo.SegmentID)
 	}
-	mt.segID2Info[segmentInfo.SegmentID] = segmentInfo
-	if err := mt.saveSegmentInfo(segmentInfo); err != nil {
-		_ = mt.reloadFromKV()
+	meta.segID2Info[segmentInfo.SegmentID] = segmentInfo
+	if err := meta.saveSegmentInfo(segmentInfo); err != nil {
+		_ = meta.reloadFromKV()
 		return err
 	}
 	return nil
 }
 
-func (mt *meta) UpdateSegment(segmentInfo *datapb.SegmentInfo) error {
-	mt.ddLock.Lock()
-	defer mt.ddLock.Unlock()
+func (meta *meta) UpdateSegment(segmentInfo *datapb.SegmentInfo) error {
+	meta.ddLock.Lock()
+	defer meta.ddLock.Unlock()
 
-	mt.segID2Info[segmentInfo.SegmentID] = segmentInfo
-	if err := mt.saveSegmentInfo(segmentInfo); err != nil {
-		_ = mt.reloadFromKV()
+	meta.segID2Info[segmentInfo.SegmentID] = segmentInfo
+	if err := meta.saveSegmentInfo(segmentInfo); err != nil {
+		_ = meta.reloadFromKV()
 		return err
 	}
 	return nil
 }
 
-func (mt *meta) GetSegmentByID(segID UniqueID) (*datapb.SegmentInfo, error) {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
+func (meta *meta) GetSegment(segID UniqueID) (*datapb.SegmentInfo, error) {
+	meta.ddLock.RLock()
+	defer meta.ddLock.RUnlock()
 
-	segmentInfo, ok := mt.segID2Info[segID]
+	segmentInfo, ok := meta.segID2Info[segID]
 	if !ok {
 		return nil, errors.Errorf("GetSegmentByID:can't find segment id = %d", segID)
 	}
 	return segmentInfo, nil
 }
 
-func (mt *meta) CloseSegment(segID UniqueID, closeTs Timestamp) error {
-	mt.ddLock.Lock()
-	defer mt.ddLock.Unlock()
+func (meta *meta) CloseSegment(segID UniqueID, closeTs Timestamp) error {
+	meta.ddLock.Lock()
+	defer meta.ddLock.Unlock()
 
-	segInfo, ok := mt.segID2Info[segID]
+	segInfo, ok := meta.segID2Info[segID]
 	if !ok {
 		return errors.Errorf("DropSegment:can't find segment id = " + strconv.FormatInt(segID, 10))
 	}
 
 	segInfo.CloseTime = closeTs
 
-	err := mt.saveSegmentInfo(segInfo)
+	err := meta.saveSegmentInfo(segInfo)
 	if err != nil {
-		_ = mt.reloadFromKV()
+		_ = meta.reloadFromKV()
 		return err
 	}
 	return nil
 }
 
-func (mt *meta) GetCollection(collectionID UniqueID) (*collectionInfo, error) {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
+func (meta *meta) GetCollection(collectionID UniqueID) (*collectionInfo, error) {
+	meta.ddLock.RLock()
+	defer meta.ddLock.RUnlock()
 
-	collectionInfo, ok := mt.collID2Info[collectionID]
+	collectionInfo, ok := meta.collID2Info[collectionID]
 	if !ok {
 		return nil, fmt.Errorf("collection %d not found", collectionID)
 	}
 	return collectionInfo, nil
 }
 
-func (mt *meta) saveSegmentInfo(segmentInfo *datapb.SegmentInfo) error {
+func (meta *meta) saveSegmentInfo(segmentInfo *datapb.SegmentInfo) error {
 	segBytes := proto.MarshalTextString(segmentInfo)
 
-	return mt.client.Save("/segment/"+strconv.FormatInt(segmentInfo.SegmentID, 10), segBytes)
+	return meta.client.Save("/segment/"+strconv.FormatInt(segmentInfo.SegmentID, 10), segBytes)
 }
 
-func (mt *meta) removeSegmentInfo(segID UniqueID) error {
-	return mt.client.Remove("/segment/" + strconv.FormatInt(segID, 10))
+func (meta *meta) removeSegmentInfo(segID UniqueID) error {
+	return meta.client.Remove("/segment/" + strconv.FormatInt(segID, 10))
 }

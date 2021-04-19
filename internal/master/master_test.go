@@ -1147,7 +1147,7 @@ func TestMaster(t *testing.T) {
 			NodeID:   1,
 			PeerRole: "ProxyNode",
 			SegIDRequests: []*datapb.SegIDRequest{
-				{Count: 10000, ChannelID: "0", CollName: collName, PartitionName: partitionName},
+				{Count: 10000, ChannelName: "0", CollName: collName, PartitionName: partitionName},
 			},
 		})
 		assert.Nil(t, err)
@@ -1156,7 +1156,7 @@ func TestMaster(t *testing.T) {
 		assert.EqualValues(t, commonpb.ErrorCode_SUCCESS, assignments[0].Status.ErrorCode)
 		assert.EqualValues(t, collName, assignments[0].CollName)
 		assert.EqualValues(t, partitionName, assignments[0].PartitionName)
-		assert.EqualValues(t, int32(0), assignments[0].ChannelID)
+		assert.EqualValues(t, "0", assignments[0].ChannelName)
 		assert.EqualValues(t, uint32(10000), assignments[0].Count)
 
 		// test stats

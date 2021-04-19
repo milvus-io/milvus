@@ -6,8 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
@@ -17,18 +15,18 @@ type errRemainInSufficient struct {
 	requestRows int
 }
 
-func newErrRemainInSufficient(requestRows int) *errRemainInSufficient {
-	return &errRemainInSufficient{requestRows: requestRows}
+func newErrRemainInSufficient(requestRows int) errRemainInSufficient {
+	return errRemainInSufficient{requestRows: requestRows}
 }
 
-func (err *errRemainInSufficient) Error() string {
+func (err errRemainInSufficient) Error() string {
 	return "segment remaining is insufficient for" + strconv.Itoa(err.requestRows)
 }
 
 // segmentAllocator is used to allocate rows for segments and record the allocations.
 type segmentAllocator interface {
 	// OpenSegment add the segment to allocator and set it allocatable
-	OpenSegment(segmentInfo *datapb.SegmentInfo) error
+	OpenSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, cRange channelRange) error
 	// AllocSegment allocate rows and record the allocation.
 	AllocSegment(collectionID UniqueID, partitionID UniqueID, channelName string, requestRows int) (UniqueID, int, Timestamp, error)
 	// GetSealedSegments get all sealed segment.
@@ -61,52 +59,42 @@ type (
 	segmentAllocatorImpl struct {
 		mt                     *meta
 		segments               map[UniqueID]*segmentStatus //segment id -> status
-		cMapper                *insertChannelMapper
 		segmentExpireDuration  int64
-		defaultSizePerRecord   int64
 		segmentThreshold       float64
 		segmentThresholdFactor float64
-		numOfChannels          int
-		numOfQueryNodes        int
 		mu                     sync.RWMutex
-		globalIDAllocator      func() (UniqueID, error)
-		globalTSOAllocator     func() (Timestamp, error)
+		allocator              allocator
 	}
 )
 
-func newSegmentAssigner(metaTable *meta, globalIDAllocator func() (UniqueID, error),
-	globalTSOAllocator func() (Timestamp, error)) (*segmentAllocatorImpl, error) {
+func newSegmentAssigner(metaTable *meta, allocator allocator) (*segmentAllocatorImpl, error) {
 	segmentAllocator := &segmentAllocatorImpl{
 		mt:                     metaTable,
 		segments:               make(map[UniqueID]*segmentStatus),
 		segmentExpireDuration:  Params.SegIDAssignExpiration,
-		defaultSizePerRecord:   Params.DefaultRecordSize,
 		segmentThreshold:       Params.SegmentSize * 1024 * 1024,
 		segmentThresholdFactor: Params.SegmentSizeFactor,
-		numOfChannels:          Params.TopicNum,
-		numOfQueryNodes:        Params.QueryNodeNum,
-		globalIDAllocator:      globalIDAllocator,
-		globalTSOAllocator:     globalTSOAllocator,
+		allocator:              allocator,
 	}
 	return segmentAllocator, nil
 }
 
-func (allocator *segmentAllocatorImpl) OpenSegment(segmentInfo *datapb.SegmentInfo) error {
-	if _, ok := allocator.segments[segmentInfo.SegmentID]; ok {
-		return fmt.Errorf("segment %d already exist", segmentInfo.SegmentID)
+func (allocator *segmentAllocatorImpl) OpenSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, cRange channelRange) error {
+	if _, ok := allocator.segments[segmentID]; ok {
+		return fmt.Errorf("segment %d already exist", segmentID)
 	}
-	totalRows, err := allocator.estimateTotalRows(segmentInfo.CollectionID)
+	totalRows, err := allocator.estimateTotalRows(collectionID)
 	if err != nil {
 		return err
 	}
-	allocator.segments[segmentInfo.SegmentID] = &segmentStatus{
-		id:             segmentInfo.SegmentID,
-		collectionID:   segmentInfo.CollectionID,
-		partitionID:    segmentInfo.PartitionID,
+	allocator.segments[segmentID] = &segmentStatus{
+		id:             segmentID,
+		collectionID:   collectionID,
+		partitionID:    partitionID,
 		total:          totalRows,
 		sealed:         false,
 		lastExpireTime: 0,
-		cRange:         segmentInfo.InsertChannels,
+		cRange:         cRange,
 	}
 	return nil
 }
@@ -143,7 +131,7 @@ func (allocator *segmentAllocatorImpl) alloc(segStatus *segmentStatus, numRows i
 	for _, allocation := range segStatus.allocations {
 		totalOfAllocations += allocation.rowNums
 	}
-	segMeta, err := allocator.mt.GetSegmentByID(segStatus.id)
+	segMeta, err := allocator.mt.GetSegment(segStatus.id)
 	if err != nil {
 		return false, err
 	}
@@ -152,7 +140,7 @@ func (allocator *segmentAllocatorImpl) alloc(segStatus *segmentStatus, numRows i
 		return false, nil
 	}
 
-	ts, err := allocator.globalTSOAllocator()
+	ts, err := allocator.allocator.allocTimestamp()
 	if err != nil {
 		return false, err
 	}
@@ -162,7 +150,7 @@ func (allocator *segmentAllocatorImpl) alloc(segStatus *segmentStatus, numRows i
 	segStatus.lastExpireTime = expireTs
 	segStatus.allocations = append(segStatus.allocations, &allocation{
 		numRows,
-		ts,
+		expireTs,
 	})
 
 	return true, nil
@@ -200,7 +188,7 @@ func (allocator *segmentAllocatorImpl) GetSealedSegments() ([]UniqueID, error) {
 }
 
 func (allocator *segmentAllocatorImpl) checkSegmentSealed(segStatus *segmentStatus) (bool, error) {
-	segMeta, err := allocator.mt.GetSegmentByID(segStatus.id)
+	segMeta, err := allocator.mt.GetSegment(segStatus.id)
 	if err != nil {
 		return false, err
 	}

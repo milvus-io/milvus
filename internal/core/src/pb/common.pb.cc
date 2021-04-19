@@ -249,7 +249,7 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "PE\020\027\022\021\n\rOUT_OF_MEMORY\020\030\022\024\n\017DD_REQUEST_RA"
   "CE\020\350\007*N\n\nIndexState\022\010\n\004NONE\020\000\022\014\n\010UNISSUE"
   "D\020\001\022\016\n\nINPROGRESS\020\002\022\014\n\010FINISHED\020\003\022\n\n\006FAI"
-  "LED\020\004*\245\004\n\007MsgType\022\t\n\005kNone\020\000\022\025\n\021kCreateC"
+  "LED\020\004*\274\004\n\007MsgType\022\t\n\005kNone\020\000\022\025\n\021kCreateC"
   "ollection\020d\022\023\n\017kDropCollection\020e\022\022\n\016kHas"
   "Collection\020f\022\027\n\023kDescribeCollection\020g\022\024\n"
   "\020kShowCollections\020h\022\022\n\016kGetSysConfigs\020i\022"
@@ -262,9 +262,10 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "ate\020\366\003\022\035\n\030kGetCollectionStatistics\020\367\003\022\034\n"
   "\027kGetPartitionStatistics\020\370\003\022\016\n\tkTimeTick"
   "\020\260\t\022\024\n\017kQueryNodeStats\020\261\t\022\017\n\nkLoadIndex\020"
-  "\262\t\022\017\n\nkRequestID\020\263\t\022\020\n\013kRequestTSO\020\264\tBBZ"
-  "@github.com/zilliztech/milvus-distribute"
-  "d/internal/proto/commonpbb\006proto3"
+  "\262\t\022\017\n\nkRequestID\020\263\t\022\020\n\013kRequestTSO\020\264\t\022\025\n"
+  "\020kAllocateSegment\020\265\tBBZ@github.com/zilli"
+  "ztech/milvus-distributed/internal/proto/"
+  "commonpbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_common_2eproto_deps[1] = {
 };
@@ -280,7 +281,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_com
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_common_2eproto_once;
 static bool descriptor_table_common_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_common_2eproto = {
-  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 1673,
+  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 1696,
   &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 7, 0,
   schemas, file_default_instances, TableStruct_common_2eproto::offsets,
   file_level_metadata_common_2eproto, 7, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,
@@ -378,6 +379,7 @@ bool MsgType_IsValid(int value) {
     case 1202:
     case 1203:
     case 1204:
+    case 1205:
       return true;
     default:
       return false;

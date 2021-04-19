@@ -176,7 +176,7 @@ func (sa *SegIDAssigner) pickCanDoFunc() {
 		if assign == nil || assign.Capacity(segRequest.timestamp) < records[colName][partitionName][channelID] {
 			partitionID, _ := typeutil.Hash32String(segRequest.colName)
 			sa.segReqs = append(sa.segReqs, &datapb.SegIDRequest{
-				ChannelID:     strconv.FormatUint(uint64(segRequest.channelID), 10),
+				ChannelName:   strconv.FormatUint(uint64(segRequest.channelID), 10),
 				Count:         segRequest.count,
 				CollName:      segRequest.colName,
 				PartitionName: segRequest.partitionName,
@@ -220,7 +220,7 @@ func (sa *SegIDAssigner) checkSegReqEqual(req1, req2 *datapb.SegIDRequest) bool 
 	if req1 == req2 {
 		return true
 	}
-	return req1.CollName == req2.CollName && req1.PartitionName == req2.PartitionName && req1.ChannelID == req2.ChannelID
+	return req1.CollName == req2.CollName && req1.PartitionName == req2.PartitionName && req1.ChannelName == req2.ChannelName
 }
 
 func (sa *SegIDAssigner) reduceSegReqs() {
@@ -281,7 +281,12 @@ func (sa *SegIDAssigner) syncSegments() bool {
 			log.Println("SyncSegment Error:", info.Status.Reason)
 			continue
 		}
-		assign := sa.getAssign(info.CollName, info.PartitionName, info.ChannelID)
+		// FIXME: use channelName
+		channel, err := strconv.Atoi(info.ChannelName)
+		if err != nil {
+			return false
+		}
+		assign := sa.getAssign(info.CollName, info.PartitionName, int32(channel))
 		segInfo := &segInfo{
 			segID:      info.SegID,
 			count:      info.Count,
@@ -298,7 +303,7 @@ func (sa *SegIDAssigner) syncSegments() bool {
 			assign = &assignInfo{
 				collID:        info.CollectionID,
 				partitionID:   info.PartitionID,
-				channelID:     info.ChannelID,
+				channelID:     int32(channel),
 				segInfos:      segInfos,
 				partitionName: info.PartitionName,
 				collName:      info.CollName,

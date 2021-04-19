@@ -112,8 +112,8 @@ func TestSegmentManager_AssignSegment(t *testing.T) {
 	for _, c := range cases {
 		result, _ := segManager.AssignSegment([]*datapb.SegIDRequest{
 			{Count: c.Count,
-				ChannelID: strconv.FormatInt(int64(c.ChannelID), 10),
-				CollName:  collName, PartitionName: partitionName},
+				ChannelName: strconv.FormatInt(int64(c.ChannelID), 10),
+				CollName:    collName, PartitionName: partitionName},
 		})
 		results = append(results, result...)
 		if c.Err {
@@ -239,9 +239,9 @@ func TestSegmentManager_SycnWritenode(t *testing.T) {
 	maxCount := uint32(Params.SegmentSize * 1024 * 1024 / float64(sizePerRecord))
 
 	req := []*datapb.SegIDRequest{
-		{Count: maxCount, ChannelID: "1", CollName: collName, PartitionName: partitionName},
-		{Count: maxCount, ChannelID: "2", CollName: collName, PartitionName: partitionName},
-		{Count: maxCount, ChannelID: "3", CollName: collName, PartitionName: partitionName},
+		{Count: maxCount, ChannelName: "1", CollName: collName, PartitionName: partitionName},
+		{Count: maxCount, ChannelName: "2", CollName: collName, PartitionName: partitionName},
+		{Count: maxCount, ChannelName: "3", CollName: collName, PartitionName: partitionName},
 	}
 	assignSegment, err := segManager.AssignSegment(req)
 	assert.Nil(t, err)
@@ -249,7 +249,7 @@ func TestSegmentManager_SycnWritenode(t *testing.T) {
 	assert.Nil(t, err)
 	for i := 0; i < len(assignSegment); i++ {
 		assert.EqualValues(t, maxCount, assignSegment[i].Count)
-		assert.EqualValues(t, i+1, assignSegment[i].ChannelID)
+		assert.EqualValues(t, strconv.Itoa(i+1), assignSegment[i].ChannelName)
 
 		err = mt.UpdateSegment(&pb.SegmentMeta{
 			SegmentID:    assignSegment[i].SegID,

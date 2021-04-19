@@ -20,7 +20,7 @@ message RegisterNodeResponse {
 
 message SegIDRequest {
   uint32 count = 1;
-  string channelID = 2;
+  string channelName = 2;
   int64  collectionID = 3;
   int64 partitionID = 4;
   string coll_name = 5;// todo remove
@@ -30,13 +30,14 @@ message SegIDRequest {
 message AssignSegIDRequest {
   int64 nodeID = 1;
   string peer_role = 2;
-  repeated SegIDRequest segIDRequests = 3;
+  uint64 timestamp = 3;
+  repeated SegIDRequest segIDRequests = 4;
 }
 
 
 message SegIDAssignment {
   int64 segID = 1;
-  int32 channelID = 2;
+  string channelName = 2;
   uint32 count = 3;
   int64 collectionID = 4;
   int64 partitionID = 5;
@@ -48,6 +49,7 @@ message SegIDAssignment {
 
 message AssignSegIDResponse {
   repeated SegIDAssignment segIDAssignments = 1;
+  common.Status status = 2;
 }
 
 message FlushRequest {
@@ -107,7 +109,7 @@ message InsertChannelRequest  {
 
 message WatchDmChannelRequest {
   common.MsgBase base = 1;
-  repeated  string channelIDs = 2;
+  repeated string channelNames = 2;
 }
 
 

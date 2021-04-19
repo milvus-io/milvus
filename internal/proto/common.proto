@@ -105,7 +105,7 @@ enum MsgType {
     kLoadIndex = 1202;
     kRequestID = 1203;
     kRequestTSO = 1204;
-
+    kAllocateSegment = 1205;
 }
 
 message MsgBase {
