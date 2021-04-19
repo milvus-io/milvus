@@ -7,12 +7,13 @@ import (
 	"sync"
 )
 
-func StartQueryNode(ctx context.Context, pulsarURL string) {
+func StartQueryNode(pulsarURL string) {
 	mc := message_client.MessageClient{}
-	mc.InitClient(ctx, pulsarURL)
+	mc.InitClient(pulsarURL)
 
 	mc.ReceiveMessage()
-	qn := CreateQueryNode(ctx, 0, 0, &mc)
+	qn := CreateQueryNode(0, 0, &mc)
+	ctx := context.Background()
 
 	// Segments Services
 	go qn.SegmentManagementService()
@@ -27,7 +28,7 @@ func StartQueryNode(ctx context.Context, pulsarURL string) {
 	}
 
 	wg.Add(3)
-	go qn.RunMetaService(&wg)
+	go qn.RunMetaService(ctx, &wg)
 	go qn.RunInsertDelete(&wg)
 	go qn.RunSearch(&wg)
 	wg.Wait()

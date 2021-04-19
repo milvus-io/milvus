@@ -74,9 +74,6 @@ struct ServerConfig {
     } network;
 
     struct Pulsar{
-        bool authentication{false};
-        String user{"user-default"};
-        String token{"fake-token"};
         String address{"localhost"};
         Integer port{6650};
         Integer topicnum{1024};

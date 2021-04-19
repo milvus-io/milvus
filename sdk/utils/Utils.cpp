@@ -38,11 +38,21 @@ print_help(const std::string& app_name) {
     printf("   -t --collection_name  target collection name, specify this will ignore collection parameters, "
            "default empty\n");
     printf("   -h --help             Print help information\n");
-    printf("   -i --id_start            "
-           "id_start, default:-1\n");
-    printf("   -c --count            id count, default:0\n");
-    printf("   -l --loop            loop, default:0\n");
+    printf("   -i --index            "
+           "Collection index type(1=IDMAP, 2=IVFLAT, 3=IVFSQ8, 5=IVFSQ8H), default:3\n");
+    printf("   -f --index_file_size  Collection index file size, default:1024\n");
+    printf("   -l --nlist            Collection index nlist, default:16384\n");
+    printf("   -m --metric           "
+           "Collection metric type(1=L2, 2=IP, 3=HAMMING, 4=JACCARD, 5=TANIMOTO, 6=SUBSTRUCTURE, 7=SUPERSTRUCTURE), "
+           "default:1\n");
+    printf("   -d --dimension        Collection dimension, default:128\n");
+    printf("   -r --rowcount         Collection total row count(unit:million), default:1\n");
+    printf("   -c --concurrency      Max client connections, default:20\n");
+    printf("   -q --query_count      Query total count, default:1000\n");
+    printf("   -n --nq               nq of each query, default:1\n");
     printf("   -k --topk             topk of each query, default:10\n");
+    printf("   -b --nprobe           nprobe of each query, default:16\n");
+    printf("   -v --print_result     Print query result, default:false\n");
     printf("\n");
 }
 
@@ -462,9 +472,10 @@ Utils::PrintTopKQueryResult(milvus::TopKQueryResult& topk_query_result) {
 
 
 void
-Utils::PrintHelp(int argc, char* argv[]) {
-	std::string app_name = basename(argv[0]);
-	print_help(app_name);
+Utils::HAHE(int argc){
+
+	std::cout<<"FUCK"<<std::endl;
+
 }
 
 
@@ -476,10 +487,18 @@ static struct option long_options[] = {{"server", optional_argument, nullptr, 's
                                            {"port", optional_argument, nullptr, 'p'},
                                            {"help", no_argument, nullptr, 'h'},
                                            {"collection_name", no_argument, nullptr, 't'},
-                                           {"id_start", optional_argument, nullptr, 'i'},
-                                           {"count", optional_argument, nullptr, 'c'},
-                                           {"loop", optional_argument, nullptr, 'l'},
+                                           {"index", optional_argument, nullptr, 'i'},
+                                           {"index_file_size", optional_argument, nullptr, 'f'},
+                                           {"nlist", optional_argument, nullptr, 'l'},
+                                           {"metric", optional_argument, nullptr, 'm'},
+                                           {"dimension", optional_argument, nullptr, 'd'},
+                                           {"rowcount", optional_argument, nullptr, 'r'},
+                                           {"concurrency", optional_argument, nullptr, 'c'},
+                                           {"query_count", optional_argument, nullptr, 'q'},
+                                           {"nq", optional_argument, nullptr, 'n'},
                                            {"topk", optional_argument, nullptr, 'k'},
+                                           {"nprobe", optional_argument, nullptr, 'b'},
+                                           {"print", optional_argument, nullptr, 'v'},
                                            {nullptr, 0, nullptr, 0}};
 
     int option_index = 0;
@@ -487,7 +506,7 @@ static struct option long_options[] = {{"server", optional_argument, nullptr, 's
 
     TestParameters parameters;
     int value;
-    while ((value = getopt_long(argc, argv, "s:p:t:i:l:c:k:h", long_options, &option_index)) != -1) {
+    while ((value = getopt_long(argc, argv, "s:p:t:i:f:l:m:d:r:c:q:n:k:b:vh", long_options, &option_index)) != -1) {
         switch (value) {
             case 's': {
                 char* address_ptr = strdup(optarg);
@@ -509,27 +528,72 @@ static struct option long_options[] = {{"server", optional_argument, nullptr, 's
             }
             case 'i': {
                 char* ptr = strdup(optarg);
-                parameters.id_start_ = atol(ptr);
+                parameters.index_type_ = atol(ptr);
                 free(ptr);
                 break;
             }
-            case 'c': {
+            case 'f': {
                 char* ptr = strdup(optarg);
-                parameters.id_count_ = atol(ptr);
+                parameters.index_file_size_ = atol(ptr);
                 free(ptr);
                 break;
             }
             case 'l': {
                 char* ptr = strdup(optarg);
-                parameters.loop_ = atol(ptr);
+                parameters.nlist_ = atol(ptr);
                 free(ptr);
                 break;
             }
-
+            case 'm': {
+                char* ptr = strdup(optarg);
+                parameters.metric_type_ = atol(ptr);
+                free(ptr);
+                break;
+            }
+            case 'd': {
+                char* ptr = strdup(optarg);
+                parameters.dimensions_ = atol(ptr);
+                free(ptr);
+                break;
+            }
+            case 'r': {
+                char* ptr = strdup(optarg);
+                parameters.row_count_ = atol(ptr);
+                free(ptr);
+                break;
+            }
+            case 'c': {
+                char* ptr = strdup(optarg);
+                parameters.concurrency_ = atol(ptr);
+                free(ptr);
+                break;
+            }
+            case 'q': {
+                char* ptr = strdup(optarg);
+                parameters.query_count_ = atol(ptr);
+                free(ptr);
+                break;
+            }
+            case 'n': {
+                char* ptr = strdup(optarg);
+                parameters.nq_ = atol(ptr);
+                free(ptr);
+                break;
+            }
             case 'k': {
                 char* ptr = strdup(optarg);
                 parameters.topk_ = atol(ptr);
                 free(ptr);
+                break;
+            }
+            case 'b': {
+                char* ptr = strdup(optarg);
+                parameters.nprobe_ = atol(ptr);
+                free(ptr);
+                break;
+            }
+            case 'v': {
+                parameters.print_result_ = true;
                 break;
             }
             case 'h':

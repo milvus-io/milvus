@@ -175,14 +175,6 @@ CommonUtil::TimeStrToTime(const std::string& time_str, time_t& time_integer, tm&
     return true;
 }
 
-std::string CommonUtil::TimeToString(std::chrono::high_resolution_clock::time_point t) {
-  std::time_t tt = std::chrono::system_clock::to_time_t(t);
-
-  char buf[100] = {0};
-  std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", std::localtime(&tt));
-  return std::string(buf);
-}
-
 void
 CommonUtil::ConvertTime(time_t time_integer, tm& time_struct) {
     localtime_r(&time_integer, &time_struct);

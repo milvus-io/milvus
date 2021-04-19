@@ -46,13 +46,13 @@ func SegmentStatsController() {
 	defer close(ssChan)
 	ssClient := informer.NewPulsarClient()
 
-	// segmentCloseLog := make(map[uint64]uint64, 0)
+	segmentCloseLog := make(map[uint64]uint64, 0)
 
 	go ssClient.Listener(ssChan)
 	for {
 		select {
 		case ss := <-ssChan:
-			// ComputeCloseTime(&segmentCloseLog, ss, kvbase)
+			ComputeCloseTime(&segmentCloseLog, ss, kvbase)
 			UpdateSegmentStatus(ss, kvbase)
 		//case <-time.After(5 * time.Second):
 		//	fmt.Println("timeout")
@@ -61,19 +61,16 @@ func SegmentStatsController() {
 	}
 }
 
-func GetPhysicalTimeNow() uint64 {
-	return uint64(time.Now().UnixNano() / int64(time.Millisecond))
-}
-
 func ComputeCloseTime(segmentCloseLog *map[uint64]uint64, ss mock.SegmentStats, kvbase kv.Base) error {
 	segmentID := ss.SegementID
 	if _, ok := (*segmentCloseLog)[segmentID]; ok {
 		// This segment has been closed
+		log.Println("Segment", segmentID, "has been closed")
 		return nil
 	}
 
 	if int(ss.MemorySize) > int(conf.Config.Master.SegmentThreshole*0.8) {
-		currentTime := GetPhysicalTimeNow()
+		currentTime := time.Now()
 		memRate := int(ss.MemoryRate)
 		if memRate == 0 {
 			//memRate = 1
@@ -83,54 +80,34 @@ func ComputeCloseTime(segmentCloseLog *map[uint64]uint64, ss mock.SegmentStats, 
 		sec := float64(conf.Config.Master.SegmentThreshole*0.2) / float64(memRate)
 		data, err := kvbase.Load("segment/" + strconv.Itoa(int(ss.SegementID)))
 		if err != nil {
-			log.Println("Load segment failed")
 			return err
 		}
 		seg, err := mock.JSON2Segment(data)
 		if err != nil {
-			log.Println("JSON2Segment failed")
 			return err
 		}
-
-		seg.CloseTimeStamp = currentTime + uint64(sec * 1000)
-		// Reduce time gap between Proxy and Master
-		seg.CloseTimeStamp = seg.CloseTimeStamp + uint64(5 * 1000)
-		fmt.Println("Close segment = ", seg.SegmentID, ",Close time = ", seg.CloseTimeStamp)
-
+		segmentLogicTime := seg.CloseTimeStamp << 46 >> 46
+		seg.CloseTimeStamp = uint64(currentTime.Add(time.Duration(sec) * time.Second).Unix()) << 18 + segmentLogicTime
+		fmt.Println("memRate = ", memRate, ",sec = ", sec ,",Close time = ", seg.CloseTimeStamp)
 		updateData, err := mock.Segment2JSON(*seg)
 		if err != nil {
-			log.Println("Update segment, Segment2JSON failed")
 			return err
 		}
-		err = kvbase.Save("segment/"+strconv.Itoa(int(ss.SegementID)), updateData)
-		if err != nil {
-			log.Println("Save segment failed")
-			return err
-		}
-
+		kvbase.Save("segment/"+strconv.Itoa(int(ss.SegementID)), updateData)
 		(*segmentCloseLog)[segmentID] = seg.CloseTimeStamp
-
 		//create new segment
 		newSegID := id.New().Uint64()
-		newSeg := mock.NewSegment(newSegID, seg.CollectionID, seg.CollectionName, "default", seg.ChannelStart, seg.ChannelEnd, currentTime, 1 << 46 - 1)
+		newSeg := mock.NewSegment(newSegID, seg.CollectionID, seg.CollectionName, "default", seg.ChannelStart, seg.ChannelEnd, currentTime, time.Unix(1<<36-1, 0))
 		newSegData, err := mock.Segment2JSON(*&newSeg)
 		if err != nil {
-			log.Println("Create new segment, Segment2JSON failed")
 			return err
 		}
-
 		//save to kv store
-		err = kvbase.Save("segment/"+strconv.Itoa(int(newSegID)), newSegData)
-		if err != nil {
-			log.Println("Save segment failed")
-			return err
-		}
-
+		kvbase.Save("segment/"+strconv.Itoa(int(newSegID)), newSegData)
 		// update collection data
 		c, _ := kvbase.Load("collection/" + strconv.Itoa(int(seg.CollectionID)))
 		collection, err := mock.JSON2Collection(c)
 		if err != nil {
-			log.Println("JSON2Segment failed")
 			return err
 		}
 		segIDs := collection.SegmentIDs
@@ -138,14 +115,9 @@ func ComputeCloseTime(segmentCloseLog *map[uint64]uint64, ss mock.SegmentStats, 
 		collection.SegmentIDs = segIDs
 		cData, err := mock.Collection2JSON(*collection)
 		if err != nil {
-			log.Println("Collection2JSON failed")
 			return err
 		}
-		err = kvbase.Save("collection/"+strconv.Itoa(int(seg.CollectionID)), cData)
-		if err != nil {
-			log.Println("Save collection failed")
-			return err
-		}
+		kvbase.Save("segment/"+strconv.Itoa(int(seg.CollectionID)), cData)
 	}
 	return nil
 }
@@ -175,7 +147,7 @@ func UpdateSegmentStatus(ss mock.SegmentStats, kvbase kv.Base) error {
 		if err != nil {
 			return err
 		}
-		err = kvbase.Save("segment/"+strconv.Itoa(int(seg.SegmentID)), segData)
+		err = kvbase.Save("segment/"+strconv.Itoa(int(seg.CollectionID)), segData)
 		if err != nil {
 			return err
 		}
@@ -262,8 +234,8 @@ func CollectionController(ch chan *messagepb.Mapping) {
 			time.Now(), fieldMetas, []uint64{sID, s2ID},
 			[]string{"default"})
 		cm := mock.GrpcMarshal(&c)
-		s := mock.NewSegment(sID, cID, collection.CollectionName, "default", 0, 511, GetPhysicalTimeNow(), 1 << 46 - 1)
-		s2 := mock.NewSegment(s2ID, cID, collection.CollectionName, "default", 512, 1023, GetPhysicalTimeNow(), 1 << 46 - 1)
+		s := mock.NewSegment(sID, cID, collection.CollectionName, "default", 0, 511, time.Now(), time.Unix(1<<36-1, 0))
+		s2 := mock.NewSegment(s2ID, cID, collection.CollectionName, "default", 512, 1023, time.Now(), time.Unix(1<<36-1, 0))
 		collectionData, _ := mock.Collection2JSON(*cm)
 		segmentData, err := mock.Segment2JSON(s)
 		if err != nil {
@@ -298,75 +270,37 @@ func WriteCollection2Datastore(collection *messagepb.Mapping) error {
 	})
 	defer cli.Close()
 	kvbase := kv.NewEtcdKVBase(cli, conf.Config.Etcd.Rootpath)
-
+	sID := id.New().Uint64()
 	cID := id.New().Uint64()
-
 	fieldMetas := []*messagepb.FieldMeta{}
 	if collection.Schema != nil {
 		fieldMetas = collection.Schema.FieldMetas
 	}
-
-	queryNodeNum := conf.Config.Master.QueryNodeNum
-	topicNum := conf.Config.Pulsar.TopicNum
-	var topicNumPerQueryNode int
-
-	if topicNum % queryNodeNum != 0 {
-		topicNumPerQueryNode = topicNum / queryNodeNum + 1
-	} else {
-		topicNumPerQueryNode = topicNum / queryNodeNum
-	}
-
-	fmt.Println("QueryNodeNum = ", queryNodeNum)
-	fmt.Println("TopicNum = ", topicNum)
-	fmt.Println("TopicNumPerQueryNode = ", topicNumPerQueryNode)
-
-	sIDs := make([]uint64, queryNodeNum)
-
-	for i := 0; i < queryNodeNum; i++ {
-		// For generating different id
-		time.Sleep(1000 * time.Millisecond)
-
-		sIDs[i] = id.New().Uint64()
-	}
-
 	c := mock.NewCollection(cID, collection.CollectionName,
-		time.Now(), fieldMetas, sIDs,
+		time.Now(), fieldMetas, []uint64{sID},
 		[]string{"default"})
 	cm := mock.GrpcMarshal(&c)
-
+	s := mock.NewSegment(sID, cID, collection.CollectionName, "default", 0, conf.Config.Pulsar.TopicNum, time.Now(), time.Unix(1<<46-1, 0))
 	collectionData, err := mock.Collection2JSON(*cm)
 	if err != nil {
 		log.Fatal(err)
 		return err
 	}
-
+	segmentData, err := mock.Segment2JSON(s)
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
 	err = kvbase.Save("collection/"+strconv.FormatUint(cID, 10), collectionData)
 	if err != nil {
 		log.Fatal(err)
 		return err
 	}
-
-	for i := 0; i < queryNodeNum; i++ {
-		chStart := i * topicNumPerQueryNode
-		chEnd := (i + 1) * topicNumPerQueryNode
-		if chEnd > topicNum {
-			chEnd = topicNum - 1
-		}
-		s := mock.NewSegment(sIDs[i], cID, collection.CollectionName, "default", chStart, chEnd, GetPhysicalTimeNow(), 1 << 46 - 1)
-
-		segmentData, err := mock.Segment2JSON(s)
-		if err != nil {
-			log.Fatal(err)
-			return err
-		}
-
-		err = kvbase.Save("segment/"+strconv.FormatUint(sIDs[i], 10), segmentData)
-		if err != nil {
-			log.Fatal(err)
-			return err
-		}
+	err = kvbase.Save("segment/"+strconv.FormatUint(sID, 10), segmentData)
+	if err != nil {
+		log.Fatal(err)
+		return err
 	}
-
 	return nil
 
 }

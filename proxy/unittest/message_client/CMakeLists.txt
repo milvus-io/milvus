@@ -8,8 +8,8 @@ set( GRPC_SERVICE_FILES
 set(unittest_srcs
         unittest_entry.cpp
         consumer_test.cpp
-#		producer_test.cpp
-#		get_result_test.cpp
+		producer_test.cpp
+		get_result_test.cpp
 		test_pulsar.cpp)
 
 
@@ -24,7 +24,6 @@ target_include_directories(test_pulsar PUBLIC ${PROJECT_BINARY_DIR}/thirdparty/a
 
 target_link_libraries(test_pulsar
 		message_client_cpp
-		log
 		libboost_filesystem.a
 		libboost_system.a
 		libboost_serialization.a
