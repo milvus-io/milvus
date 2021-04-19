@@ -20,10 +20,12 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type proxyMock struct {
+	types.ProxyService
 	randVal   int
 	collArray []string
 	mutex     sync.Mutex
@@ -54,6 +56,7 @@ func (p *proxyMock) GetCollArray() []string {
 }
 
 type dataMock struct {
+	types.DataService
 	randVal int
 }
 
@@ -81,6 +84,7 @@ func (d *dataMock) GetInsertBinlogPaths(ctx context.Context, req *datapb.InsertB
 }
 
 type queryMock struct {
+	types.QueryService
 	collID []typeutil.UniqueID
 	mutex  sync.Mutex
 }
@@ -105,6 +109,7 @@ func (d *dataMock) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringR
 }
 
 type indexMock struct {
+	types.IndexService
 	fileArray  []string
 	idxBuildID []int64
 	idxID      []int64

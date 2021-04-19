@@ -22,6 +22,8 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	cms "github.com/zilliztech/milvus-distributed/internal/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/types"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
@@ -31,19 +33,19 @@ import (
 
 // grpc wrapper
 type Server struct {
-	core        *cms.Core
-	grpcServer  *grpc.Server
-	grpcErrChan chan error
+	masterService *cms.Core
+	grpcServer    *grpc.Server
+	grpcErrChan   chan error
 
 	wg sync.WaitGroup
 
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	proxyService *psc.Client
-	dataService  *dsc.Client
-	indexService *isc.Client
-	queryService *qsc.Client
+	proxyService types.ProxyService
+	dataService  types.DataService
+	indexService types.IndexService
+	queryService types.QueryService
 
 	connectProxyService bool
 	connectDataService  bool
@@ -82,7 +84,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 	opentracing.SetGlobalTracer(tracer)
 	s.closer = closer
 
-	s.core, err = cms.NewCore(s.ctx, factory)
+	s.masterService, err = cms.NewCore(s.ctx, factory)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +113,7 @@ func (s *Server) init() error {
 		return err
 	}
 
-	s.core.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
+	s.masterService.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
 
 	if s.connectProxyService {
 		log.Debug("proxy service", zap.String("address", Params.ProxyServiceAddress))
@@ -125,7 +127,7 @@ func (s *Server) init() error {
 			panic(err)
 		}
 
-		if err = s.core.SetProxyService(ctx, proxyService); err != nil {
+		if err = s.masterService.SetProxyService(ctx, proxyService); err != nil {
 			panic(err)
 		}
 	}
@@ -143,7 +145,7 @@ func (s *Server) init() error {
 			panic(err)
 		}
 
-		if err = s.core.SetDataService(ctx, dataService); err != nil {
+		if err = s.masterService.SetDataService(ctx, dataService); err != nil {
 			panic(err)
 		}
 	}
@@ -154,7 +156,7 @@ func (s *Server) init() error {
 			panic(err)
 		}
 
-		if err := s.core.SetIndexService(ctx, indexService); err != nil {
+		if err := s.masterService.SetIndexService(ctx, indexService); err != nil {
 			panic(err)
 
 		}
@@ -170,14 +172,14 @@ func (s *Server) init() error {
 		if err = queryService.Start(); err != nil {
 			panic(err)
 		}
-		if err = s.core.SetQueryService(ctx, queryService); err != nil {
+		if err = s.masterService.SetQueryService(ctx, queryService); err != nil {
 			panic(err)
 		}
 	}
 	cms.Params.Init()
 	log.Debug("grpc init done ...")
 
-	if err := s.core.Init(); err != nil {
+	if err := s.masterService.Init(); err != nil {
 		return err
 	}
 	return nil
@@ -222,7 +224,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 func (s *Server) start() error {
 	log.Debug("Master Core start ...")
-	if err := s.core.Start(); err != nil {
+	if err := s.masterService.Start(); err != nil {
 		return err
 	}
 	return nil
@@ -244,8 +246,8 @@ func (s *Server) Stop() error {
 	if s.queryService != nil {
 		_ = s.queryService.Stop()
 	}
-	if s.core != nil {
-		return s.core.Stop()
+	if s.masterService != nil {
+		return s.masterService.Stop()
 	}
 	s.cancel()
 	if s.grpcServer != nil {
@@ -256,87 +258,87 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) GetComponentStatesRPC(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	return s.core.GetComponentStates(ctx)
+	return s.masterService.GetComponentStates(ctx)
 }
 
 //DDL request
 func (s *Server) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
-	return s.core.CreateCollection(ctx, in)
+	return s.masterService.CreateCollection(ctx, in)
 }
 
 func (s *Server) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
-	return s.core.DropCollection(ctx, in)
+	return s.masterService.DropCollection(ctx, in)
 }
 
 func (s *Server) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
-	return s.core.HasCollection(ctx, in)
+	return s.masterService.HasCollection(ctx, in)
 }
 
 func (s *Server) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-	return s.core.DescribeCollection(ctx, in)
+	return s.masterService.DescribeCollection(ctx, in)
 }
 
 func (s *Server) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
-	return s.core.ShowCollections(ctx, in)
+	return s.masterService.ShowCollections(ctx, in)
 }
 
 func (s *Server) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
-	return s.core.CreatePartition(ctx, in)
+	return s.masterService.CreatePartition(ctx, in)
 }
 
 func (s *Server) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
-	return s.core.DropPartition(ctx, in)
+	return s.masterService.DropPartition(ctx, in)
 }
 
 func (s *Server) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
-	return s.core.HasPartition(ctx, in)
+	return s.masterService.HasPartition(ctx, in)
 }
 
 func (s *Server) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
-	return s.core.ShowPartitions(ctx, in)
+	return s.masterService.ShowPartitions(ctx, in)
 }
 
 //index builder service
 func (s *Server) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
-	return s.core.CreateIndex(ctx, in)
+	return s.masterService.CreateIndex(ctx, in)
 }
 
 func (s *Server) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
-	return s.core.DropIndex(ctx, in)
+	return s.masterService.DropIndex(ctx, in)
 }
 
 func (s *Server) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
-	return s.core.DescribeIndex(ctx, in)
+	return s.masterService.DescribeIndex(ctx, in)
 }
 
 //global timestamp allocator
 func (s *Server) AllocTimestamp(ctx context.Context, in *masterpb.TsoRequest) (*masterpb.TsoResponse, error) {
-	return s.core.AllocTimestamp(ctx, in)
+	return s.masterService.AllocTimestamp(ctx, in)
 }
 
 func (s *Server) AllocID(ctx context.Context, in *masterpb.IDRequest) (*masterpb.IDResponse, error) {
-	return s.core.AllocID(ctx, in)
+	return s.masterService.AllocID(ctx, in)
 }
 
 //receiver time tick from proxy service, and put it into this channel
 func (s *Server) GetTimeTickChannelRPC(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.core.GetTimeTickChannel(ctx)
+	return s.masterService.GetTimeTickChannel(ctx)
 }
 
 //receive ddl from rpc and time tick from proxy service, and put them into this channel
 func (s *Server) GetDdChannelRPC(ctx context.Context, in *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.core.GetDdChannel(ctx)
+	return s.masterService.GetDdChannel(ctx)
 }
 
 //just define a channel, not used currently
 func (s *Server) GetStatisticsChannelRPC(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.core.GetStatisticsChannel(ctx)
+	return s.masterService.GetStatisticsChannel(ctx)
 }
 
 func (s *Server) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
-	return s.core.DescribeSegment(ctx, in)
+	return s.masterService.DescribeSegment(ctx, in)
 }
 
 func (s *Server) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error) {
-	return s.core.ShowSegments(ctx, in)
+	return s.masterService.ShowSegments(ctx, in)
 }
