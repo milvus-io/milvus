@@ -3,15 +3,12 @@ package indexnode
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"math/rand"
 	"time"
 
 	"go.uber.org/zap"
 
-	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go/config"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/log"
@@ -95,21 +92,6 @@ func (i *IndexNode) Init() error {
 		return err
 	}
 
-	// TODO
-	cfg := &config.Configuration{
-		ServiceName: fmt.Sprintf("index_node_%d", Params.NodeID),
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		},
-	}
-	tracer, closer, err := cfg.NewTracer()
-	if err != nil {
-		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
-	}
-	opentracing.SetGlobalTracer(tracer)
-	i.closer = closer
-
 	option := &miniokv.Option{
 		Address:           Params.MinIOAddress,
 		AccessKeyID:       Params.MinIOAccessKeyID,
@@ -140,9 +122,6 @@ func (i *IndexNode) Start() error {
 
 // Close closes the server.
 func (i *IndexNode) Stop() error {
-	if err := i.closer.Close(); err != nil {
-		return err
-	}
 	i.loopCancel()
 	if i.sched != nil {
 		i.sched.Close()

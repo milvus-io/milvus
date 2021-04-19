@@ -13,7 +13,6 @@ import (
 
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go/config"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -29,6 +28,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
 
 type Server struct {
@@ -143,18 +143,15 @@ func (s *Server) init() error {
 	Params.LoadFromEnv()
 	Params.LoadFromArgs()
 
+	dn.Params.Init()
+	dn.Params.Port = Params.Port
+	dn.Params.IP = Params.IP
+
 	log.Debug("DataNode port", zap.Int("port", Params.Port))
-	// TODO
-	cfg := &config.Configuration{
-		ServiceName: fmt.Sprintf("data_node ip: %s, port: %d", Params.IP, Params.Port),
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		},
-	}
-	tracer, closer, err := cfg.NewTracer()
+
+	tracer, closer, err := trace.InitTracing(fmt.Sprintf("data_node ip: %s, port: %d", Params.IP, Params.Port))
 	if err != nil {
-		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
+		log.Error("data_node", zap.String("init trace err", err.Error()))
 	}
 	opentracing.SetGlobalTracer(tracer)
 	s.closer = closer
@@ -209,10 +206,6 @@ func (s *Server) init() error {
 	if err := s.SetDataServiceInterface(dataService); err != nil {
 		panic(err)
 	}
-
-	dn.Params.Init()
-	dn.Params.Port = Params.Port
-	dn.Params.IP = Params.IP
 
 	s.datanode.NodeID = dn.Params.NodeID
 	s.datanode.UpdateStateCode(internalpb.StateCode_Initializing)

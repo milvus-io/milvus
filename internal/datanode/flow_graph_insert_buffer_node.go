@@ -100,6 +100,10 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 		// TODO: add error handling
 	}
 
+	if iMsg == nil {
+		return []Msg{}, ctx
+	}
+
 	// Updating segment statistics
 	uniqueSeg := make(map[UniqueID]int64)
 	for _, msg := range iMsg.insertMessages {

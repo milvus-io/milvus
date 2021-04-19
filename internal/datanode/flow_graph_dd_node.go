@@ -81,6 +81,10 @@ func (ddNode *ddNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Con
 		// TODO: add error handling
 	}
 
+	if msMsg == nil {
+		return []Msg{}, ctx
+	}
+
 	ddNode.ddMsg = &ddMsg{
 		collectionRecords: make(map[UniqueID][]*metaOperateRecord),
 		partitionRecords:  make(map[UniqueID][]*metaOperateRecord),

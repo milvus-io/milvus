@@ -16,7 +16,6 @@ import (
 
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go/config"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -32,6 +31,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	qn "github.com/zilliztech/milvus-distributed/internal/querynode"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
@@ -72,17 +72,14 @@ func (s *Server) init() error {
 	Params.LoadFromEnv()
 	Params.LoadFromArgs()
 
-	// TODO
-	cfg := &config.Configuration{
-		ServiceName: fmt.Sprintf("query_node ip: %s, port: %d", Params.QueryNodeIP, Params.QueryNodePort),
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		},
-	}
-	tracer, closer, err := cfg.NewTracer()
+	qn.Params.Init()
+	qn.Params.QueryNodeIP = Params.QueryNodeIP
+	qn.Params.QueryNodePort = int64(Params.QueryNodePort)
+	qn.Params.QueryNodeID = Params.QueryNodeID
+
+	tracer, closer, err := trace.InitTracing(fmt.Sprintf("query_node ip: %s, port: %d", Params.QueryNodeIP, Params.QueryNodePort))
 	if err != nil {
-		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
+		log.Error("query_node", zap.String("init trace err", err.Error()))
 	}
 	opentracing.SetGlobalTracer(tracer)
 	s.closer = closer
@@ -188,11 +185,6 @@ func (s *Server) init() error {
 	if err := s.SetDataService(dataService); err != nil {
 		panic(err)
 	}
-
-	qn.Params.Init()
-	qn.Params.QueryNodeIP = Params.QueryNodeIP
-	qn.Params.QueryNodePort = int64(Params.QueryNodePort)
-	qn.Params.QueryNodeID = Params.QueryNodeID
 
 	s.querynode.UpdateStateCode(internalpb.StateCode_Initializing)
 

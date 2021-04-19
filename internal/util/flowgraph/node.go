@@ -54,7 +54,7 @@ func (nodeCtx *nodeCtx) Start(ctx context.Context, wg *sync.WaitGroup) {
 		select {
 		case <-ctx.Done():
 			wg.Done()
-			fmt.Println(nodeCtx.node.Name(), "closed")
+			//fmt.Println(nodeCtx.node.Name(), "closed")
 			return
 		default:
 			// inputs from inputsMessages for Operate
@@ -64,7 +64,7 @@ func (nodeCtx *nodeCtx) Start(ctx context.Context, wg *sync.WaitGroup) {
 			var res []Msg
 			var sp opentracing.Span
 			if !nodeCtx.node.IsInputNode() {
-				msgCtx = nodeCtx.collectInputMessages()
+				msgCtx = nodeCtx.collectInputMessages(ctx)
 				inputs = nodeCtx.inputMessages
 			}
 			n := nodeCtx.node
@@ -108,7 +108,7 @@ func (nodeCtx *nodeCtx) ReceiveMsg(ctx context.Context, wg *sync.WaitGroup, msg 
 	wg.Done()
 }
 
-func (nodeCtx *nodeCtx) collectInputMessages() context.Context {
+func (nodeCtx *nodeCtx) collectInputMessages(exitCtx context.Context) context.Context {
 	var opts []opentracing.StartSpanOption
 
 	inputsNum := len(nodeCtx.inputChannels)
@@ -119,17 +119,21 @@ func (nodeCtx *nodeCtx) collectInputMessages() context.Context {
 	// and move them to inputMessages.
 	for i := 0; i < inputsNum; i++ {
 		channel := nodeCtx.inputChannels[i]
-		msgWithCtx, ok := <-channel
-		if !ok {
-			// TODO: add status
-			log.Println("input channel closed")
+		select {
+		case <-exitCtx.Done():
 			return nil
-		}
-		nodeCtx.inputMessages[i] = msgWithCtx.msg
-		if msgWithCtx.ctx != nil {
-			sp, _ := trace.StartSpanFromContext(msgWithCtx.ctx)
-			opts = append(opts, opentracing.ChildOf(sp.Context()))
-			sp.Finish()
+		case msgWithCtx, ok := <-channel:
+			if !ok {
+				// TODO: add status
+				log.Println("input channel closed")
+				return nil
+			}
+			nodeCtx.inputMessages[i] = msgWithCtx.msg
+			if msgWithCtx.ctx != nil {
+				sp, _ := trace.StartSpanFromContext(msgWithCtx.ctx)
+				opts = append(opts, opentracing.ChildOf(sp.Context()))
+				sp.Finish()
+			}
 		}
 	}
 
@@ -157,12 +161,16 @@ func (nodeCtx *nodeCtx) collectInputMessages() context.Context {
 				for nodeCtx.inputMessages[i].TimeTick() != latestTime {
 					fmt.Println("try to align timestamp, t1 =", latestTime, ", t2 =", nodeCtx.inputMessages[i].TimeTick())
 					channel := nodeCtx.inputChannels[i]
-					msg, ok := <-channel
-					if !ok {
-						log.Println("input channel closed")
+					select {
+					case <-exitCtx.Done():
 						return
+					case msg, ok := <-channel:
+						if !ok {
+							log.Println("input channel closed")
+							return
+						}
+						nodeCtx.inputMessages[i] = msg.msg
 					}
-					nodeCtx.inputMessages[i] = msg.msg
 				}
 			}
 			sign <- struct{}{}

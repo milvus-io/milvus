@@ -2,6 +2,7 @@ package trace
 
 import (
 	"context"
+	"io"
 	"runtime"
 	"strings"
 
@@ -11,9 +12,29 @@ import (
 	"github.com/opentracing/opentracing-go/ext"
 	"github.com/opentracing/opentracing-go/log"
 	"github.com/uber/jaeger-client-go"
+	"github.com/uber/jaeger-client-go/config"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
+
+func InitTracing(serviceName string) (opentracing.Tracer, io.Closer, error) {
+	if true {
+		cfg, err := config.FromEnv()
+		if err != nil {
+			return nil, nil, errors.New("trace from env error")
+		}
+		cfg.ServiceName = serviceName
+		return cfg.NewTracer()
+	}
+	cfg := &config.Configuration{
+		ServiceName: serviceName,
+		Sampler: &config.SamplerConfig{
+			Type:  "const",
+			Param: 1,
+		},
+	}
+	return cfg.NewTracer()
+}
 
 func StartSpanFromContext(ctx context.Context, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	if ctx == nil {

@@ -40,6 +40,10 @@ func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, cont
 		// TODO: add error handling
 	}
 
+	if msgStreamMsg == nil || ddMsg == nil {
+		return []Msg{}, ctx
+	}
+
 	fdmNode.ddMsg = ddMsg
 
 	var iMsg = insertMsg{
