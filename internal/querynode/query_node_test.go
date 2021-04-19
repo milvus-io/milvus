@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -99,10 +98,7 @@ func initTestMeta(t *testing.T, node *QueryNode, collectionName string, collecti
 	}
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID, isBinary)
 
-	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
-	assert.NotEqual(t, "", schemaBlob)
-
-	var err = node.replica.addCollection(collectionMeta.ID, schemaBlob)
+	var err = node.replica.addCollection(collectionMeta.ID, collectionMeta.Schema)
 	assert.NoError(t, err)
 
 	collection, err := node.replica.getCollectionByName(collectionName)

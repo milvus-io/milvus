@@ -4,7 +4,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
-type Service interface {
+type Component interface {
 	Init()
 	Start()
 	Stop()

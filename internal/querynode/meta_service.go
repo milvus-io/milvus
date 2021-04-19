@@ -136,8 +136,7 @@ func (mService *metaService) processCollectionCreate(id string, value string) {
 	col := mService.collectionUnmarshal(value)
 	if col != nil {
 		schema := col.Schema
-		schemaBlob := proto.MarshalTextString(schema)
-		err := mService.replica.addCollection(col.ID, schemaBlob)
+		err := mService.replica.addCollection(col.ID, schema)
 		if err != nil {
 			log.Println(err)
 		}

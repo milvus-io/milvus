@@ -5,7 +5,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
-type ServiceBase = typeutil.Service
+type ServiceBase = typeutil.Component
 
 type Interface interface {
 	ServiceBase

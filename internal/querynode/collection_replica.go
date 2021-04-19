@@ -20,6 +20,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
 /*
@@ -35,7 +36,7 @@ type collectionReplica interface {
 
 	// collection
 	getCollectionNum() int
-	addCollection(collectionID UniqueID, schemaBlob string) error
+	addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error
 	removeCollection(collectionID UniqueID) error
 	getCollectionByID(collectionID UniqueID) (*Collection, error)
 	getCollectionByName(collectionName string) (*Collection, error)
@@ -59,6 +60,7 @@ type collectionReplica interface {
 	removeSegment(segmentID UniqueID) error
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 	hasSegment(segmentID UniqueID) bool
+	getVecFieldIDsBySegmentID(segmentID UniqueID) ([]int64, error)
 
 	freeAll()
 }
@@ -84,11 +86,11 @@ func (colReplica *collectionReplicaImpl) getCollectionNum() int {
 	return len(colReplica.collections)
 }
 
-func (colReplica *collectionReplicaImpl) addCollection(collectionID UniqueID, schemaBlob string) error {
+func (colReplica *collectionReplicaImpl) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
-	var newCollection = newCollection(collectionID, schemaBlob)
+	var newCollection = newCollection(collectionID, schema)
 	colReplica.collections = append(colReplica.collections, newCollection)
 
 	return nil
@@ -406,6 +408,10 @@ func (colReplica *collectionReplicaImpl) getSegmentByID(segmentID UniqueID) (*Se
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 
+	return colReplica.getSegmentByIDPrivate(segmentID)
+}
+
+func (colReplica *collectionReplicaImpl) getSegmentByIDPrivate(segmentID UniqueID) (*Segment, error) {
 	targetSegment, ok := colReplica.segments[segmentID]
 
 	if !ok {
@@ -422,6 +428,32 @@ func (colReplica *collectionReplicaImpl) hasSegment(segmentID UniqueID) bool {
 	_, ok := colReplica.segments[segmentID]
 
 	return ok
+}
+
+func (colReplica *collectionReplicaImpl) getVecFieldIDsBySegmentID(segmentID UniqueID) ([]int64, error) {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	seg, err := colReplica.getSegmentByIDPrivate(segmentID)
+	if err != nil {
+		return nil, err
+	}
+	col, err := colReplica.getCollectionByIDPrivate(seg.collectionID)
+	if err != nil {
+		return nil, err
+	}
+
+	vecFields := make([]int64, 0)
+	for _, field := range col.Schema().Fields {
+		if field.DataType == schemapb.DataType_VECTOR_BINARY || field.DataType == schemapb.DataType_VECTOR_FLOAT {
+			vecFields = append(vecFields, field.FieldID)
+		}
+	}
+
+	if len(vecFields) <= 0 {
+		return nil, errors.New("no vector field in segment " + strconv.FormatInt(segmentID, 10))
+	}
+	return vecFields, nil
 }
 
 //-----------------------------------------------------------------------------------------------------

@@ -147,12 +147,21 @@ func (node *QueryNode) WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*com
 
 func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.Status, error) {
 	// TODO: support db
+	fieldIDs := in.FieldIDs
 	for _, segmentID := range in.SegmentIDs {
-		hasBeenBuiltIndex := segmentID > 0 // TODO: ???
-		indexID := UniqueID(0)             // TODO: ???
-		err := node.segManager.loadSegment(segmentID, hasBeenBuiltIndex, indexID, in.FieldIDs)
+		indexID := UniqueID(0) // TODO: ???
+		err := node.segManager.loadSegment(segmentID, &fieldIDs)
 		if err != nil {
-			// TODO: return or continue
+			// TODO: return or continue?
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			}
+			return status, err
+		}
+		err = node.segManager.loadIndex(segmentID, indexID)
+		if err != nil {
+			// TODO: return or continue?
 			status := &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    err.Error(),
