@@ -129,7 +129,7 @@ func CollectionController(ch chan *messagepb.Mapping) {
 			time.Now(), fieldMetas, []uuid.UUID{sID},
 			[]string{"default"})
 		cm := mock.GrpcMarshal(&c)
-		s := mock.NewSegment(sID, cID, "default", 0, 100, time.Now(), time.Unix(1<<36-1, 0))
+		s := mock.NewSegment(sID, cID, collection.CollectionName, "default", 0, 100, time.Now(), time.Unix(1<<36-1, 0))
 		collectionData, _ := mock.Collection2JSON(*cm)
 		segmentData, err := mock.Segment2JSON(s)
 		if err != nil {
