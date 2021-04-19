@@ -36,9 +36,7 @@ fmt:
 lint:
 	@echo "Running $@ check"
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint cache clean
-	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=1m --config ./.golangci.yml ./internal/... || true
-	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=1m --config ./.golangci.yml ./cmd/... || true
-	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=1m --config ./.golangci.yml ./test/... || true
+	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=1m --config ./.golangci.yml || true
 
 ruleguard:
 	@echo "Running $@ check"
@@ -47,7 +45,7 @@ ruleguard:
 verifiers: get-check-deps fmt lint ruleguard
 
 # Builds various components locally.
-build-go:
+build-go: verifiers
 	@echo "Building each component's binary to './'"
 	@echo "Building reader ..."
 	@mkdir -p $(INSTALL_PATH) && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/reader $(PWD)/cmd/reader/reader.go 1>/dev/null

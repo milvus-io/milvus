@@ -4,10 +4,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"strconv"
-
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/reader"
+	"strconv"
 )
 
 func main() {

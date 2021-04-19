@@ -17,10 +17,9 @@ type flowGraphStates struct {
 }
 
 type TimeTickedFlowGraph struct {
-	ctx       context.Context
-	states    *flowGraphStates
-	startNode *nodeCtx
-	nodeCtx   map[string]*nodeCtx
+	ctx     context.Context
+	states  *flowGraphStates
+	nodeCtx map[string]*nodeCtx
 }
 
 func (fg *TimeTickedFlowGraph) AddNode(node *Node) {
@@ -68,17 +67,6 @@ func (fg *TimeTickedFlowGraph) SetEdges(nodeName string, in []string, out []stri
 	return nil
 }
 
-func (fg *TimeTickedFlowGraph) SetStartNode(nodeName string) error {
-	startNode, ok := fg.nodeCtx[nodeName]
-	if !ok {
-		errMsg := "Cannot find node:" + nodeName
-		return errors.New(errMsg)
-	}
-
-	fg.startNode = startNode
-	return nil
-}
-
 func (fg *TimeTickedFlowGraph) Start() {
 	wg := sync.WaitGroup{}
 	for _, v := range fg.nodeCtx {
@@ -86,11 +74,6 @@ func (fg *TimeTickedFlowGraph) Start() {
 		go v.Start(fg.ctx, &wg)
 	}
 	wg.Wait()
-}
-
-func (fg *TimeTickedFlowGraph) Input(msg *Msg) {
-	// start node should have only 1 input channel
-	fg.startNode.inputChannels[0] <- msg
 }
 
 func (fg *TimeTickedFlowGraph) Close() error {

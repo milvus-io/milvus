@@ -1,9 +1,8 @@
 package main
 
 import (
-	"log"
-
 	"github.com/zilliztech/milvus-distributed/internal/proxy"
+	"log"
 )
 
 func main() {

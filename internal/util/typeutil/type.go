@@ -1,4 +1,4 @@
 package typeutil
 
 type Timestamp = uint64
-type ID = int64
+type Id = int64

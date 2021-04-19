@@ -46,7 +46,7 @@ func (c *Collection) DeletePartition(node *QueryNode, partition *Partition) {
 	for _, p := range c.Partitions {
 		if p.PartitionName == partition.PartitionName {
 			for _, s := range p.Segments {
-				delete(node.SegmentsMap, s.SegmentID)
+				delete(node.SegmentsMap, s.SegmentId)
 			}
 		} else {
 			tmpPartitions = append(tmpPartitions, p)

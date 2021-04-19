@@ -4,13 +4,12 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
-	"strconv"
-
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/msgclient"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
 	"github.com/zilliztech/milvus-distributed/internal/writer"
+	"log"
+	"strconv"
 )
 
 func main() {

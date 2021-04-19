@@ -9,7 +9,7 @@ import (
 
 type task interface {
 	Id() int64 // return ReqId
-	Type() internalpb.MsgType
+	Type() internalpb.ReqType
 	GetTs() typeutil.Timestamp
 	SetTs(ts typeutil.Timestamp)
 	PreExecute() error
@@ -20,7 +20,7 @@ type task interface {
 }
 
 type baseTask struct {
-	ReqType internalpb.MsgType
+	ReqType internalpb.ReqType
 	ReqId   int64
 	Ts      typeutil.Timestamp
 	ProxyId int64
@@ -30,7 +30,7 @@ func (bt *baseTask) Id() int64 {
 	return bt.ReqId
 }
 
-func (bt *baseTask) Type() internalpb.MsgType {
+func (bt *baseTask) Type() internalpb.ReqType {
 	return bt.ReqType
 }
 

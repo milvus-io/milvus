@@ -15,8 +15,9 @@ import "C"
 
 import (
 	"context"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/msgclient"
@@ -85,7 +86,7 @@ type QueryNode struct {
 	// context
 	ctx context.Context
 
-	QueryNodeID          uint64
+	QueryNodeId          uint64
 	Collections          []*Collection
 	SegmentsMap          map[int64]*Segment
 	messageClient        *msgclient.ReaderMessageClient
@@ -99,7 +100,7 @@ type QueryNode struct {
 	InsertLogs           []InsertLog
 }
 
-func NewQueryNode(ctx context.Context, queryNodeID uint64, timeSync uint64) *QueryNode {
+func NewQueryNode(ctx context.Context, queryNodeId uint64, timeSync uint64) *QueryNode {
 	mc := msgclient.ReaderMessageClient{}
 
 	queryNodeTimeSync := &QueryNodeTime{
@@ -127,7 +128,7 @@ func NewQueryNode(ctx context.Context, queryNodeID uint64, timeSync uint64) *Que
 
 	return &QueryNode{
 		ctx:               ctx,
-		QueryNodeID:       queryNodeID,
+		QueryNodeId:       queryNodeId,
 		Collections:       nil,
 		SegmentsMap:       segmentsMap,
 		messageClient:     &mc,
@@ -146,7 +147,7 @@ func (node *QueryNode) Close() {
 	}
 }
 
-func CreateQueryNode(ctx context.Context, queryNodeID uint64, timeSync uint64, mc *msgclient.ReaderMessageClient) *QueryNode {
+func CreateQueryNode(ctx context.Context, queryNodeId uint64, timeSync uint64, mc *msgclient.ReaderMessageClient) *QueryNode {
 	queryNodeTimeSync := &QueryNodeTime{
 		ReadTimeSyncMin: timeSync,
 		ReadTimeSyncMax: timeSync,
@@ -175,7 +176,7 @@ func CreateQueryNode(ctx context.Context, queryNodeID uint64, timeSync uint64, m
 
 	return &QueryNode{
 		ctx:               ctx,
-		QueryNodeID:       queryNodeID,
+		QueryNodeId:       queryNodeId,
 		Collections:       nil,
 		SegmentsMap:       segmentsMap,
 		messageClient:     mc,
@@ -201,8 +202,8 @@ func (node *QueryNode) QueryNodeDataInit() {
 	insertData := InsertData{
 		insertIDs:        make(map[int64][]int64),
 		insertTimestamps: make(map[int64][]uint64),
-		// insertRecords:    make(map[int64][][]byte),
-		insertOffset: make(map[int64]int64),
+		insertRecords:    make(map[int64][][]byte),
+		insertOffset:     make(map[int64]int64),
 	}
 
 	node.deletePreprocessData = deletePreprocessData
@@ -235,7 +236,7 @@ func (node *QueryNode) DeleteCollection(collection *Collection) {
 		if col.CollectionID == collectionID {
 			for _, p := range collection.Partitions {
 				for _, s := range p.Segments {
-					delete(node.SegmentsMap, s.SegmentID)
+					delete(node.SegmentsMap, s.SegmentId)
 				}
 			}
 		} else {

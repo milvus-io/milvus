@@ -10,8 +10,7 @@ import (
 
 func TestQueryNode_CreateQueryNode(t *testing.T) {
 	conf.LoadConfig("config.yaml")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, _ := context.WithCancel(context.Background())
 
 	node := CreateQueryNode(ctx, 0, 0, nil)
 	assert.NotNil(t, node)
@@ -19,8 +18,7 @@ func TestQueryNode_CreateQueryNode(t *testing.T) {
 
 func TestQueryNode_NewQueryNode(t *testing.T) {
 	conf.LoadConfig("config.yaml")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, _ := context.WithCancel(context.Background())
 
 	node := NewQueryNode(ctx, 0, 0)
 	assert.NotNil(t, node)
@@ -28,8 +26,7 @@ func TestQueryNode_NewQueryNode(t *testing.T) {
 
 func TestQueryNode_Close(t *testing.T) {
 	conf.LoadConfig("config.yaml")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, _ := context.WithCancel(context.Background())
 
 	node := CreateQueryNode(ctx, 0, 0, nil)
 	assert.NotNil(t, node)
@@ -39,8 +36,7 @@ func TestQueryNode_Close(t *testing.T) {
 
 func TestQueryNode_QueryNodeDataInit(t *testing.T) {
 	conf.LoadConfig("config.yaml")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, _ := context.WithCancel(context.Background())
 
 	node := CreateQueryNode(ctx, 0, 0, nil)
 	assert.NotNil(t, node)
@@ -54,8 +50,7 @@ func TestQueryNode_QueryNodeDataInit(t *testing.T) {
 
 func TestQueryNode_NewCollection(t *testing.T) {
 	conf.LoadConfig("config.yaml")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, _ := context.WithCancel(context.Background())
 
 	node := CreateQueryNode(ctx, 0, 0, nil)
 	assert.NotNil(t, node)
@@ -68,8 +63,7 @@ func TestQueryNode_NewCollection(t *testing.T) {
 
 func TestQueryNode_DeleteCollection(t *testing.T) {
 	conf.LoadConfig("config.yaml")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, _ := context.WithCancel(context.Background())
 
 	node := CreateQueryNode(ctx, 0, 0, nil)
 	assert.NotNil(t, node)

@@ -1,4 +1,4 @@
-package miniodriver
+package minio_driver
 
 import (
 	"context"

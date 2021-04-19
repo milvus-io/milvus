@@ -18,8 +18,7 @@ import (
 func TestSearch_Search(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, _ := context.WithCancel(context.Background())
 
 	mc := msgclient.ReaderMessageClient{}
 
@@ -115,7 +114,7 @@ func TestSearch_Search(t *testing.T) {
 		queryRawData = append(queryRawData, float32(i))
 	}
 
-	var queryJSON = "{\"field_name\":\"fakevec\",\"num_queries\":1,\"topK\":10}"
+	var queryJson = "{\"field_name\":\"fakevec\",\"num_queries\":1,\"topK\":10}"
 	searchMsg1 := msgPb.SearchMsg{
 		CollectionName: "collection0",
 		Records: &msgPb.VectorRowRecord{
@@ -126,11 +125,11 @@ func TestSearch_Search(t *testing.T) {
 		Timestamp:    uint64(0),
 		ClientId:     int64(0),
 		ExtraParams:  nil,
-		Json:         []string{queryJSON},
+		Json:         []string{queryJson},
 	}
 	searchMessages := []*msgPb.SearchMsg{&searchMsg1}
 
-	node.queryNodeTimeSync.updateSearchServiceTime(timeRange)
+	node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
 	assert.Equal(t, node.queryNodeTimeSync.ServiceTimeSync, timeRange.timestampMax)
 
 	status := node.Search(searchMessages)
