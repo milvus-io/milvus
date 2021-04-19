@@ -172,15 +172,20 @@ func (ss *searchService) doUnsolvedMsgSearch() {
 				ss.unsolvedMsg = append(ss.unsolvedMsg, msg)
 			}
 
-			msgBufferLength := len(ss.msgBuffer)
-			for i := 0; i < msgBufferLength; i++ {
+			for {
 				msg := <-ss.msgBuffer
 				if msg.EndTs() <= serviceTime {
 					searchMsg = append(searchMsg, msg)
 					continue
 				}
 				ss.unsolvedMsg = append(ss.unsolvedMsg, msg)
+
+				msgBufferLength := len(ss.msgBuffer)
+				if msgBufferLength <= 0 {
+					break
+				}
 			}
+
 			if len(searchMsg) <= 0 {
 				continue
 			}
