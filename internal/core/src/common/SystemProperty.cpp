@@ -11,6 +11,8 @@
 
 #include "common/SystemProperty.h"
 #include "utils/EasyAssert.h"
+#include <yaml-cpp/yaml.h>
+#include "common/Types.h"
 
 namespace milvus {
 class SystemPropertyImpl : public SystemProperty {
@@ -50,19 +52,20 @@ class SystemPropertyImpl : public SystemProperty {
         return name_to_types_.count(field_name);
     }
 
-    friend const SystemProperty&
-    SystemProperty::Instance();
+    friend SystemPropertyImpl&
+    InstanceImpl();
 
  private:
     std::map<FieldName, SystemFieldType> name_to_types_;
     std::map<FieldId, SystemFieldType> id_to_types_;
 };
 
-const SystemProperty&
-SystemProperty::Instance() {
+SystemPropertyImpl&
+InstanceImpl() {
     static auto impl = [] {
         SystemPropertyImpl impl;
         using Type = SystemFieldType;
+
         impl.name_to_types_.emplace(FieldName("RowID"), Type::RowId);
         impl.id_to_types_.emplace(FieldId(0), Type::RowId);
 
@@ -73,4 +76,10 @@ SystemProperty::Instance() {
     }();
     return impl;
 }
+
+const SystemProperty&
+SystemProperty::Instance() {
+    return InstanceImpl();
+}
+
 };  // namespace milvus

@@ -14,7 +14,7 @@ set(SEGCORE_FILES
         load_index_c.cpp
         SealedIndexingRecord.cpp
         SegmentInterface.cpp
-        )
+        SegcoreConfig.h SegcoreConfig.cpp)
 add_library(milvus_segcore SHARED
         ${SEGCORE_FILES}
         )

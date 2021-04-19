@@ -9,20 +9,16 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "segcore/SegmentGrowing.h"
-#include "segcore/SegmentGrowingImpl.h"
-
-namespace milvus::segcore {
+#include <gtest/gtest.h>
+#include "common/SystemProperty.h"
+#ifndef MILVUS_TEST_SEGCORE_YAML_PATH
+#error MILVUS_TEST_SEGCORE_YAML_PATH is not defined
+#define MILVUS_TEST_SEGCORE_YAML_PATH ""
+#endif
 
 int
-TestABI() {
-    return 42;
-}
+main(int argc, char** argv) {
+    ::testing::InitGoogleTest(&argc, argv);
 
-std::unique_ptr<SegmentGrowing>
-CreateGrowingSegment(SchemaPtr schema, const SegcoreConfig& segcore_config) {
-    auto segment = std::make_unique<SegmentGrowingImpl>(schema, segcore_config);
-    return segment;
+    return RUN_ALL_TESTS();
 }
-
-}  // namespace milvus::segcore

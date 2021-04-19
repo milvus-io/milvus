@@ -19,6 +19,7 @@
 #include "InsertRecord.h"
 #include <knowhere/index/vector_index/IndexIVF.h>
 #include <knowhere/index/structured_index_simple/StructuredIndexSort.h>
+#include "segcore/SegcoreConfig.h"
 
 namespace milvus::segcore {
 
@@ -26,8 +27,8 @@ namespace milvus::segcore {
 // All concurrent
 class FieldIndexing {
  public:
-    explicit FieldIndexing(const FieldMeta& field_meta, int64_t size_per_chunk)
-        : field_meta_(field_meta), size_per_chunk_(size_per_chunk) {
+    explicit FieldIndexing(const FieldMeta& field_meta, const SegcoreConfig& segcore_config)
+        : field_meta_(field_meta), segcore_config_(segcore_config) {
     }
     FieldIndexing(const FieldIndexing&) = delete;
     FieldIndexing&
@@ -44,7 +45,7 @@ class FieldIndexing {
 
     int64_t
     get_size_per_chunk() const {
-        return size_per_chunk_;
+        return segcore_config_.get_size_per_chunk();
     }
 
     virtual knowhere::Index*
@@ -53,7 +54,7 @@ class FieldIndexing {
  protected:
     // additional info
     const FieldMeta& field_meta_;
-    const int64_t size_per_chunk_;
+    const SegcoreConfig& segcore_config_;
 };
 template <typename T>
 class ScalarFieldIndexing : public FieldIndexing {
@@ -89,21 +90,22 @@ class VectorFieldIndexing : public FieldIndexing {
     }
 
     knowhere::Config
-    get_build_conf() const;
+    get_build_params() const;
+
     knowhere::Config
-    get_search_conf(int top_k) const;
+    get_search_params(int top_k) const;
 
  private:
     tbb::concurrent_vector<std::unique_ptr<knowhere::VecIndex>> data_;
 };
 
 std::unique_ptr<FieldIndexing>
-CreateIndex(const FieldMeta& field_meta, int64_t size_per_chunk);
+CreateIndex(const FieldMeta& field_meta, const SegcoreConfig& segcore_config);
 
 class IndexingRecord {
  public:
-    explicit IndexingRecord(const Schema& schema, int64_t size_per_chunk)
-        : schema_(schema), size_per_chunk_(size_per_chunk) {
+    explicit IndexingRecord(const Schema& schema, const SegcoreConfig& segcore_config)
+        : schema_(schema), segcore_config_(segcore_config) {
         Initialize();
     }
 
@@ -125,7 +127,7 @@ class IndexingRecord {
                 }
             }
 
-            field_indexings_.try_emplace(offset, CreateIndex(field, size_per_chunk_));
+            field_indexings_.try_emplace(offset, CreateIndex(field, segcore_config_));
         }
         assert(offset_id == schema_.size());
     }
@@ -170,6 +172,7 @@ class IndexingRecord {
 
  private:
     const Schema& schema_;
+    const SegcoreConfig& segcore_config_;
 
  private:
     // control info
@@ -177,7 +180,6 @@ class IndexingRecord {
     //    std::atomic<int64_t> finished_ack_ = 0;
     AckResponder finished_ack_;
     std::mutex mutex_;
-    int64_t size_per_chunk_;
 
  private:
     // field_offset => indexing

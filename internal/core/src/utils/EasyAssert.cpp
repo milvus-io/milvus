@@ -46,11 +46,11 @@ EasyAssertInfo(
 
 [[noreturn]] void
 ThrowWithTrace(const std::exception& exception) {
-    if (typeid(exception) == typeid(WrappedRuntimError)) {
+    if (typeid(exception) == typeid(WrappedRuntimeError)) {
         throw exception;
     }
     auto err_msg = exception.what() + std::string("\n") + EasyStackTrace();
-    throw WrappedRuntimError(err_msg);
+    throw WrappedRuntimeError(err_msg);
 }
 
 }  // namespace milvus::impl
