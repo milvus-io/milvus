@@ -32,14 +32,11 @@ type proxyMock struct {
 func (p *proxyMock) GetTimeTickChannel() (string, error) {
 	return fmt.Sprintf("proxy-time-tick-%d", p.randVal), nil
 }
-func (p *proxyMock) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+func (p *proxyMock) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) error {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	p.collArray = append(p.collArray, request.CollectionName)
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
-		Reason:    "",
-	}, nil
+	return nil
 }
 func (p *proxyMock) GetCollArray() []string {
 	p.mutex.Lock()
