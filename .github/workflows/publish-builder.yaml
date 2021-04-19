@@ -40,7 +40,7 @@ jobs:
       - name: Docker Build
         shell: bash
         run: |
-          SHOW_DATE=${{ steps.extracter.outputs.version }} docker-compose build ubuntu
+          DATE_VERSION=${{ steps.extracter.outputs.version }} docker-compose build ubuntu
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'zilliztech/milvus-distributed'
         continue-on-error: true
@@ -48,4 +48,4 @@ jobs:
         run: |
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
-          SHOW_DATE=${{ steps.extracter.outputs.version }} docker-compose push ubuntu
+          DATE_VERSION=${{ steps.extracter.outputs.version }} docker-compose push ubuntu

@@ -9,13 +9,13 @@ x-ccache: &ccache
 
 services:
   ubuntu:
-    image: ${REPO}:${ARCH}-ubuntu${UBUNTU}-${SHOW_DATE}
+    image: ${REPO}:${ARCH}-ubuntu${UBUNTU}-${DATE_VERSION}
     network_mode: "host"
     build:
       context: .
       dockerfile: build/docker/env/cpu/ubuntu${UBUNTU}/Dockerfile
       cache_from:
-        - ${REPO}:${ARCH}-ubuntu${UBUNTU}-${SHOW_DATE}
+        - ${REPO}:${ARCH}-ubuntu${UBUNTU}-${DATE_VERSION}
     shm_size: 2G
     environment:
       <<: *ccache
@@ -26,3 +26,23 @@ services:
     command: &ubuntu-command >
       /bin/bash -c "
         make build-cpp && make verifiers && make unittest"
+
+  gdbserver:
+    image: ${REPO}:${ARCH}-ubuntu${UBUNTU}-${DATE_VERSION}
+    build:
+      context: .
+      dockerfile: build/docker/env/cpu/ubuntu${UBUNTU}/Dockerfile
+      cache_from:
+        - ${REPO}:${ARCH}-ubuntu${UBUNTU}-${DATE_VERSION}
+    security_opt: # options needed for gdb debugging
+      - seccomp:unconfined
+      - apparmor:unconfined
+    environment:
+      <<: *ccache
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-gdbserver-cache:/ccache:delegated
+    container_name: debugger
+    entrypoint: ["/usr/sbin/sshd", "-D"]
+    ports:
+      - "7776:22"
+      - "7777:7777"
