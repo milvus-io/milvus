@@ -124,6 +124,15 @@ func TestReplica_Segment(t *testing.T) {
 		assert.Equal(t, UniqueID(0), update.SegmentID)
 		assert.Equal(t, int64(100), update.NumRows)
 		assert.True(t, update.IsNewSegment)
+
+		update, err = replica.getSegmentStatisticsUpdates(0)
+		assert.NoError(t, err)
+		assert.False(t, update.IsNewSegment)
+		assert.NotNil(t, update.StartPosition)
+		assert.Equal(t, UniqueID(0), update.SegmentID)
+		assert.Equal(t, int64(100), update.NumRows)
+		assert.Zero(t, update.StartPosition.Timestamp)
+		assert.Zero(t, update.StartPosition.MsgID)
 	})
 
 	t.Run("Test errors", func(t *testing.T) {
