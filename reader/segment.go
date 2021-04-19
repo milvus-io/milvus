@@ -13,8 +13,9 @@ package reader
 */
 import "C"
 import (
+	"fmt"
 	"github.com/czs007/suvlim/errors"
-	schema "github.com/czs007/suvlim/pkg/message"
+	schema "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"strconv"
 	"unsafe"
 )
@@ -109,16 +110,19 @@ func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]
 	           signed long int count);
 	*/
 	// Blobs to one big blob
-	var rawData []byte
+	var numOfRow = len(*entityIDs)
+	var sizeofPerRow = len((*records)[0])
+
+	var rawData = make([]byte, numOfRow * sizeofPerRow)
 	for i := 0; i < len(*records); i++ {
 		copy(rawData, (*records)[i])
 	}
 
 	var cOffset = C.long(offset)
-	var cNumOfRows = C.long(len(*entityIDs))
+	var cNumOfRows = C.long(numOfRow)
 	var cEntityIdsPtr = (*C.long)(&(*entityIDs)[0])
 	var cTimestampsPtr = (*C.ulong)(&(*timestamps)[0])
-	var cSizeofPerRow = C.int(len((*records)[0]))
+	var cSizeofPerRow = C.int(sizeofPerRow)
 	var cRawDataVoidPtr = unsafe.Pointer(&rawData[0])
 
 	var status = C.Insert(s.SegmentPtr,
@@ -160,31 +164,46 @@ func (s *Segment) SegmentDelete(offset int64, entityIDs *[]int64, timestamps *[]
 	return nil
 }
 
-func (s *Segment) SegmentSearch(queryString string, timestamp uint64, vectorRecord *schema.VectorRowRecord) (*SearchResult, error) {
+func (s *Segment) SegmentSearch(queryJson string, timestamp uint64, vectorRecord *schema.VectorRowRecord) (*SearchResult, error) {
 	/*C.Search
 	int
 	Search(CSegmentBase c_segment,
-	           void* fake_query,
+	           const char* query_json,
 	           unsigned long timestamp,
+			   float* query_raw_data,
+			   int num_of_query_raw_data,
 	           long int* result_ids,
 	           float* result_distances);
 	*/
 	// TODO: get top-k's k from queryString
-	const TopK = 1
+	const TopK = 10
 
 	resultIds := make([]int64, TopK)
 	resultDistances := make([]float32, TopK)
 
-	var cQueryPtr = unsafe.Pointer(nil)
+	var cQueryJson = C.CString(queryJson)
 	var cTimestamp = C.ulong(timestamp)
 	var cResultIds = (*C.long)(&resultIds[0])
 	var cResultDistances = (*C.float)(&resultDistances[0])
+	var cQueryRawData *C.float
+	var cQueryRawDataLength C.int
 
-	var status = C.Search(s.SegmentPtr, cQueryPtr, cTimestamp, cResultIds, cResultDistances)
+	if vectorRecord.BinaryData != nil {
+		return nil, errors.New("Data of binary type is not supported yet")
+	} else if len(vectorRecord.FloatData) <= 0 {
+		return nil, errors.New("Null query vector data")
+	} else {
+		cQueryRawData = (*C.float)(&vectorRecord.FloatData[0])
+		cQueryRawDataLength = (C.int)(len(vectorRecord.FloatData))
+	}
+
+	var status = C.Search(s.SegmentPtr, cQueryJson, cTimestamp, cQueryRawData, cQueryRawDataLength, cResultIds, cResultDistances)
 
 	if status != 0 {
 		return nil, errors.New("Search failed, error code = " + strconv.Itoa(int(status)))
 	}
+
+	fmt.Println("Search Result---- Ids =", resultIds, ", Distances =", resultDistances)
 
 	return &SearchResult{ResultIds: resultIds, ResultDistances: resultDistances}, nil
 }

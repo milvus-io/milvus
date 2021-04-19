@@ -3,15 +3,15 @@ package reader
 import (
 	"context"
 	"fmt"
-	msgPb "github.com/czs007/suvlim/pkg/message"
+	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"strconv"
 )
 
 type ResultEntityIds []int64
 
 type SearchResult struct {
-	ResultIds 			[]int64
-	ResultDistances 	[]float32
+	ResultIds       []int64
+	ResultDistances []float32
 }
 
 func getResultTopicByClientId(clientId int64) string {
@@ -25,6 +25,20 @@ func (node *QueryNode) PublishSearchResult(results *msgPb.QueryResult, clientId 
 	var resultTopic = getResultTopicByClientId(clientId)
 	node.messageClient.Send(ctx, *results)
 	fmt.Println(resultTopic)
+	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
+}
+
+func (node *QueryNode) PublishFailedSearchResult() msgPb.Status {
+	var results = msgPb.QueryResult{
+		Status: &msgPb.Status{
+			ErrorCode: 1,
+			Reason:    "Search Failed",
+		},
+	}
+
+	var ctx = context.Background()
+
+	node.messageClient.Send(ctx, results)
 	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
 }
 

@@ -3,19 +3,24 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/czs007/suvlim/conf"
-	"github.com/czs007/suvlim/storage/pkg"
-	"github.com/czs007/suvlim/writer/message_client"
-	"github.com/czs007/suvlim/writer/write_node"
 	"log"
 	"sync"
+	"strconv"
+	"github.com/czs007/suvlim/conf"
+	storage "github.com/czs007/suvlim/storage/pkg"
+	"github.com/czs007/suvlim/writer/message_client"
+	"github.com/czs007/suvlim/writer/write_node"
 	"time"
 )
 
 func main() {
-
+	pulsarAddr := "pulsar://"
+	pulsarAddr += conf.Config.Pulsar.Address
+	pulsarAddr += ":"
+	pulsarAddr += strconv.FormatInt(int64(conf.Config.Pulsar.Port), 10)
+	println(pulsarAddr)
 	mc := message_client.MessageClient{}
-	mc.InitClient("pulsar://localhost:6650")
+	mc.InitClient(pulsarAddr)
 	//TODO::close client / consumer/ producer
 	//mc.Close()
 
@@ -39,7 +44,9 @@ func main() {
 		msgLength := wn.MessageClient.PrepareBatchMsg()
 		readyDo := false
 		for _, len := range msgLength {
-			if len > 0 { readyDo = true }
+			if len > 0 {
+				readyDo = true
+			}
 		}
 		if readyDo {
 			wn.DoWriteNode(ctx, 100, &wg)

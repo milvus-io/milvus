@@ -5,5 +5,6 @@ import (
 )
 
 func TestReader_startQueryNode(t *testing.T) {
-	startQueryNode()
+	pulsarURL := "pulsar://192.168.2.28:6650"
+	startQueryNode(pulsarURL)
 }
