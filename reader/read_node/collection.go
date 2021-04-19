@@ -21,6 +21,10 @@ type Collection struct {
 }
 
 func (c *Collection) NewPartition(partitionName string) *Partition {
+	/*
+	CPartition
+	NewPartition(CCollection collection, const char* partition_name);
+	 */
 	cName := C.CString(partitionName)
 	partitionPtr := C.NewPartition(c.CollectionPtr, cName)
 
@@ -30,6 +34,10 @@ func (c *Collection) NewPartition(partitionName string) *Partition {
 }
 
 func (c *Collection) DeletePartition(partition *Partition) {
+	/*
+	void
+	DeletePartition(CPartition partition);
+	 */
 	cPtr := partition.PartitionPtr
 	C.DeletePartition(cPtr)
 

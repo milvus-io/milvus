@@ -141,7 +141,7 @@ func (node *QueryNode) processCollectionModify(id string, value string) {
 
 	goCollection := node.GetCollectionByID(collection.ID)
 	if goCollection != nil {
-		// goCollection.UpdateIndexes(collection.GrpcMarshalString)
+		node.UpdateIndexes(goCollection, &collection.GrpcMarshalString)
 	}
 
 }

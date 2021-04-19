@@ -18,12 +18,12 @@ import (
 
 type IndexConfig struct{}
 
-func (s *Segment) buildIndex() msgPb.Status {
-	/*C.BuildIndex
+func (s *Segment) buildIndex(collection* Collection) msgPb.Status {
+	/*
 	int
-	BuildIndex(CSegmentBase c_segment);
+	BuildIndex(CCollection c_collection, CSegmentBase c_segment);
 	*/
-	var status = C.BuildIndex(s.SegmentPtr)
+	var status = C.BuildIndex(collection.CollectionPtr, s.SegmentPtr)
 	if status != 0 {
 		return msgPb.Status{ErrorCode: msgPb.ErrorCode_BUILD_INDEX_ERROR}
 	}

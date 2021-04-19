@@ -10,6 +10,7 @@ namespace milvus::dog_segment {
 Collection::Collection(std::string &collection_name, std::string &schema):
       collection_name_(collection_name), schema_json_(schema) {
     parse();
+    index_ = nullptr;
 }
 
 
@@ -91,6 +92,7 @@ Collection::AddIndex(const grpc::IndexParam& index_param) {
 
 void
 Collection::CreateIndex(std::string &index_config) {
+
     if(index_config.empty()) {
         index_ = nullptr;
         std::cout << "null index config when create index" << std::endl;
@@ -118,6 +120,7 @@ Collection::CreateIndex(std::string &index_config) {
 void
 Collection::parse() {
     if(schema_json_.empty()) {
+        std::cout << "WARN: Use default schema" << std::endl;
         auto schema = std::make_shared<Schema>();
         schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
         schema->AddField("age", DataType::INT32);

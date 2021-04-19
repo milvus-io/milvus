@@ -158,6 +158,10 @@ func (node *QueryNode) QueryNodeDataInit() {
 }
 
 func (node *QueryNode) NewCollection(collectionID uint64, collectionName string, schemaConfig string) *Collection {
+	/*
+	void
+	UpdateIndexes(CCollection c_collection, const char *index_string);
+	 */
 	cName := C.CString(collectionName)
 	cSchema := C.CString(schemaConfig)
 	collection := C.NewCollection(cName, cSchema)
@@ -169,10 +173,24 @@ func (node *QueryNode) NewCollection(collectionID uint64, collectionName string,
 }
 
 func (node *QueryNode) DeleteCollection(collection *Collection) {
+	/*
+	void
+	DeleteCollection(CCollection collection);
+	 */
 	cPtr := collection.CollectionPtr
 	C.DeleteCollection(cPtr)
 
 	// TODO: remove from node.Collections
+}
+
+func (node *QueryNode) UpdateIndexes(collection *Collection, indexConfig *string) {
+	/*
+	void
+	UpdateIndexes(CCollection c_collection, const char *index_string);
+	*/
+	cCollectionPtr := collection.CollectionPtr
+	cIndexConfig := C.CString(*indexConfig)
+	C.UpdateIndexes(cCollectionPtr, cIndexConfig)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

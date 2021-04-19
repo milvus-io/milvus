@@ -551,6 +551,8 @@ knowhere::IndexPtr SegmentNaive::BuildVecIndexImpl(const IndexMeta::Entry &entry
 Status
 SegmentNaive::BuildIndex(IndexMetaPtr remote_index_meta) {
     if (remote_index_meta == nullptr) {
+        std::cout << "WARN: Null index ptr is detected, use default index" << std::endl;
+
         int dim = 0;
         std::string index_field_name;
 
