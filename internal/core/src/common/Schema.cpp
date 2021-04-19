@@ -72,6 +72,12 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
             schema->AddField(name, field_id, data_type);
         }
     }
+    if (schema->is_auto_id_) {
+        AssertInfo(!schema->primary_key_offset_opt_.has_value(), "auto id mode: shouldn't have primary key");
+    } else {
+        AssertInfo(schema->primary_key_offset_opt_.has_value(), "primary key should be specified when autoId is off");
+    }
+
     return schema;
 }
 }  // namespace milvus

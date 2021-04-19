@@ -15,8 +15,32 @@
 #include <set>
 #include <atomic>
 namespace milvus::segcore {
+
+// determined the largest number `ack` where
+// consecutive range [0, ack) has been all processed
+// e.g.:
+#if 0
+void
+example() {
+    AckResponder acker;  // initially empty
+
+    acker.AddSegment(10, 20);    // add [10, 20)
+    auto ack1 = acker.GetAck();  // get 0, since acker has { [10, 20) }
+
+    acker.AddSegment(0, 5);      // add [0, 5),
+    auto ack2 = acker.GetAck();  // get 5, since acker has { [0, 5), [10, 20) }
+
+    acker.AddSegment(5, 7);      // add [5, 7), will concatenated with [0, 5)
+    auto ack3 = acker.GetAck();  // get 7, since acker has { [0, 7), [10, 20) }
+
+    acker.AddSegment(7, 10);     // add [7, 10), will concatenate with [0, 5) & [10, 20)
+    auto ack4 = acker.GetAck();  // get 20, since acker has { [0, 20) }
+}
+#endif
 class AckResponder {
  public:
+    // specify that segment [seg_begin, seg_end) has been processed
+    // WARN: segments shouldn't overlap
     void
     AddSegment(int64_t seg_begin, int64_t seg_end) {
         std::lock_guard lck(mutex_);
@@ -27,6 +51,7 @@ class AckResponder {
         }
     }
 
+    // return ack
     int64_t
     GetAck() const {
         return minimum_;

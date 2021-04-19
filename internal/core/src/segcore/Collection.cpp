@@ -25,17 +25,18 @@ Collection::Collection(const std::string& collection_proto) : schema_proto_(coll
 
 void
 Collection::parse() {
-    if (schema_proto_.empty()) {
-        // TODO: remove hard code use unittests are ready
-        std::cout << "WARN: Use default schema" << std::endl;
-        auto schema = std::make_shared<Schema>();
-        schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
-        schema->AddDebugField("age", DataType::INT32);
-        collection_name_ = "default-collection";
-        schema_ = schema;
-        return;
-    }
+    // if (schema_proto_.empty()) {
+    //     // TODO: remove hard code use unittests are ready
+    //     std::cout << "WARN: Use default schema" << std::endl;
+    //     auto schema = std::make_shared<Schema>();
+    //     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    //     schema->AddDebugField("age", DataType::INT32);
+    //     collection_name_ = "default-collection";
+    //     schema_ = schema;
+    //     return;
+    // }
 
+    Assert(!schema_proto_.empty());
     milvus::proto::schema::CollectionSchema collection_schema;
     auto suc = google::protobuf::TextFormat::ParseFromString(schema_proto_, &collection_schema);
 
@@ -45,6 +46,7 @@ Collection::parse() {
 
     collection_name_ = collection_schema.name();
     schema_ = Schema::ParseFrom(collection_schema);
+    int i = 1 + 1;
 }
 
 }  // namespace milvus::segcore

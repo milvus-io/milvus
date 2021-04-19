@@ -22,6 +22,7 @@ set(MILVUS_TEST_FILES
         test_span.cpp
         test_load.cpp
         init_gtest.cpp
+        test_init.cpp
         )
 
 add_executable(all_tests
