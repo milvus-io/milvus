@@ -6,6 +6,7 @@
 
 #### 8.1 Overview
 
+<img src="./figs/data_service.jpeg" width=700>
 
 
 #### 8.2 API
