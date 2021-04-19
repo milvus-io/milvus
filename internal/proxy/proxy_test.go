@@ -36,11 +36,12 @@ var masterServer *master.Master
 var testNum = 10
 
 func startMaster(ctx context.Context) {
-	etcdAddr, err := Params.EtcdAddress()
+	master.Init()
+	etcdAddr, err := masterParam.Params.EtcdAddress()
 	if err != nil {
 		panic(err)
 	}
-	rootPath, err := Params.EtcdRootPath()
+	rootPath, err := masterParam.Params.EtcdRootPath()
 	if err != nil {
 		panic(err)
 	}
@@ -52,7 +53,6 @@ func startMaster(ctx context.Context) {
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}
-	masterParam.Params.InitParamTable()
 	if err := svr.Run(int64(masterParam.Params.Port())); err != nil {
 		log.Fatal("run server failed", zap.Error(err))
 	}

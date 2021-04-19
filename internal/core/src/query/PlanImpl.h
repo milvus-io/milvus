@@ -13,7 +13,14 @@ using Json = nlohmann::json;
 
 // class definitions
 struct Plan {
+ public:
+    Plan(const Schema& schema) : schema_(schema) {
+    }
+
+ public:
+    const Schema& schema_;
     std::unique_ptr<VectorPlanNode> plan_node_;
+    std::map<std::string, FieldId> tag2field_;  // PlaceholderName -> FieldId
     // TODO: add move extra info
 };
 

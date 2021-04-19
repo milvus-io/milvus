@@ -2,22 +2,28 @@ package reader
 
 import (
 	"context"
+	"log"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
-func newDmInputNode(ctx context.Context, pulsarURL string) *flowgraph.InputNode {
+func newDmInputNode(ctx context.Context) *flowgraph.InputNode {
 	const (
 		receiveBufSize = 1024
 		pulsarBufSize  = 1024
 	)
 
+	msgStreamURL, err := Params.PulsarAddress()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	consumeChannels := []string{"insert"}
 	consumeSubName := "insertSub"
 
 	insertStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
-	insertStream.SetPulsarCient(pulsarURL)
+	insertStream.SetPulsarCient(msgStreamURL)
 	unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
 	insertStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"strconv"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -14,8 +15,13 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
 
+const (
+	reqTimeoutInterval = time.Second * 2
+)
+
 func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.IntegerRangeResponse, error) {
 	it := &InsertTask{
+		Condition: NewTaskCondition(ctx),
 		BaseInsertTask: BaseInsertTask{
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: in.HashKeys,
@@ -27,14 +33,14 @@ func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.
 				RowData:        in.RowData,
 			},
 		},
-		done:                  make(chan error),
 		manipulationMsgStream: p.manipulationMsgStream,
 	}
 
-	it.ctx, it.cancel = context.WithCancel(ctx)
+	var cancel func()
+	it.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
 	// TODO: req_id, segment_id, channel_id, proxy_id, timestamps, row_ids
 
-	defer it.cancel()
+	defer cancel()
 
 	fn := func() error {
 		select {
@@ -70,18 +76,19 @@ func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.
 
 func (p *Proxy) CreateCollection(ctx context.Context, req *schemapb.CollectionSchema) (*commonpb.Status, error) {
 	cct := &CreateCollectionTask{
+		Condition: NewTaskCondition(ctx),
 		CreateCollectionRequest: internalpb.CreateCollectionRequest{
 			MsgType: internalpb.MsgType_kCreateCollection,
 			Schema:  &commonpb.Blob{},
 			// TODO: req_id, timestamp, proxy_id
 		},
 		masterClient: p.masterClient,
-		done:         make(chan error),
 	}
 	schemaBytes, _ := proto.Marshal(req)
 	cct.CreateCollectionRequest.Schema.Value = schemaBytes
-	cct.ctx, cct.cancel = context.WithCancel(ctx)
-	defer cct.cancel()
+	var cancel func()
+	cct.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
 
 	fn := func() error {
 		select {
@@ -112,23 +119,24 @@ func (p *Proxy) CreateCollection(ctx context.Context, req *schemapb.CollectionSc
 
 func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.QueryResult, error) {
 	qt := &QueryTask{
+		Condition: NewTaskCondition(ctx),
 		SearchRequest: internalpb.SearchRequest{
 			MsgType: internalpb.MsgType_kSearch,
 			Query:   &commonpb.Blob{},
 			// TODO: req_id, proxy_id, timestamp, result_channel_id
 		},
 		queryMsgStream: p.queryMsgStream,
-		done:           make(chan error),
 		resultBuf:      make(chan []*internalpb.SearchResult),
 	}
-	qt.ctx, qt.cancel = context.WithCancel(ctx)
+	var cancel func()
+	qt.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
 	// Hack with test, shit here but no other ways
 	reqID, _ := strconv.Atoi(req.CollectionName[len(req.CollectionName)-1:])
 	qt.ReqID = int64(reqID)
 	queryBytes, _ := proto.Marshal(req)
 	qt.SearchRequest.Query.Value = queryBytes
 	log.Printf("grpc address of query task: %p", qt)
-	defer qt.cancel()
+	defer cancel()
 
 	fn := func() error {
 		select {
@@ -163,16 +171,17 @@ func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.Qu
 
 func (p *Proxy) DropCollection(ctx context.Context, req *servicepb.CollectionName) (*commonpb.Status, error) {
 	dct := &DropCollectionTask{
+		Condition: NewTaskCondition(ctx),
 		DropCollectionRequest: internalpb.DropCollectionRequest{
 			MsgType: internalpb.MsgType_kDropCollection,
 			// TODO: req_id, timestamp, proxy_id
 			CollectionName: req,
 		},
 		masterClient: p.masterClient,
-		done:         make(chan error),
 	}
-	dct.ctx, dct.cancel = context.WithCancel(ctx)
-	defer dct.cancel()
+	var cancel func()
+	dct.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
 
 	fn := func() error {
 		select {
@@ -203,16 +212,17 @@ func (p *Proxy) DropCollection(ctx context.Context, req *servicepb.CollectionNam
 
 func (p *Proxy) HasCollection(ctx context.Context, req *servicepb.CollectionName) (*servicepb.BoolResponse, error) {
 	hct := &HasCollectionTask{
+		Condition: NewTaskCondition(ctx),
 		HasCollectionRequest: internalpb.HasCollectionRequest{
 			MsgType: internalpb.MsgType_kHasCollection,
 			// TODO: req_id, timestamp, proxy_id
 			CollectionName: req,
 		},
 		masterClient: p.masterClient,
-		done:         make(chan error),
 	}
-	hct.ctx, hct.cancel = context.WithCancel(ctx)
-	defer hct.cancel()
+	var cancel func()
+	hct.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
 
 	fn := func() error {
 		select {
@@ -247,16 +257,17 @@ func (p *Proxy) HasCollection(ctx context.Context, req *servicepb.CollectionName
 
 func (p *Proxy) DescribeCollection(ctx context.Context, req *servicepb.CollectionName) (*servicepb.CollectionDescription, error) {
 	dct := &DescribeCollectionTask{
+		Condition: NewTaskCondition(ctx),
 		DescribeCollectionRequest: internalpb.DescribeCollectionRequest{
 			MsgType: internalpb.MsgType_kDescribeCollection,
 			// TODO: req_id, timestamp, proxy_id
 			CollectionName: req,
 		},
 		masterClient: p.masterClient,
-		done:         make(chan error),
 	}
-	dct.ctx, dct.cancel = context.WithCancel(ctx)
-	defer dct.cancel()
+	var cancel func()
+	dct.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
 
 	fn := func() error {
 		select {
@@ -291,15 +302,16 @@ func (p *Proxy) DescribeCollection(ctx context.Context, req *servicepb.Collectio
 
 func (p *Proxy) ShowCollections(ctx context.Context, req *commonpb.Empty) (*servicepb.StringListResponse, error) {
 	sct := &ShowCollectionsTask{
+		Condition: NewTaskCondition(ctx),
 		ShowCollectionRequest: internalpb.ShowCollectionRequest{
 			MsgType: internalpb.MsgType_kDescribeCollection,
 			// TODO: req_id, timestamp, proxy_id
 		},
 		masterClient: p.masterClient,
-		done:         make(chan error),
 	}
-	sct.ctx, sct.cancel = context.WithCancel(ctx)
-	defer sct.cancel()
+	var cancel func()
+	sct.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
 
 	fn := func() error {
 		select {

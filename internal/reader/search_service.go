@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 
 	"github.com/golang/protobuf/proto"
@@ -19,7 +20,7 @@ type searchService struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	node                  *QueryNode
+	replica               *collectionReplica
 	searchMsgStream       *msgstream.MsgStream
 	searchResultMsgStream *msgstream.MsgStream
 }
@@ -31,24 +32,29 @@ type SearchResult struct {
 	ResultDistances []float32
 }
 
-func newSearchService(ctx context.Context, node *QueryNode, pulsarURL string) *searchService {
+func newSearchService(ctx context.Context, replica *collectionReplica) *searchService {
 	const (
 		//TODO:: read config file
 		receiveBufSize = 1024
 		pulsarBufSize  = 1024
 	)
 
+	msgStreamURL, err := Params.PulsarAddress()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	consumeChannels := []string{"search"}
 	consumeSubName := "subSearch"
 	searchStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
-	searchStream.SetPulsarCient(pulsarURL)
+	searchStream.SetPulsarCient(msgStreamURL)
 	unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
 	searchStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
 	var inputStream msgstream.MsgStream = searchStream
 
 	producerChannels := []string{"searchResult"}
 	searchResultStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
-	searchResultStream.SetPulsarCient(pulsarURL)
+	searchResultStream.SetPulsarCient(msgStreamURL)
 	searchResultStream.CreatePulsarProducers(producerChannels)
 	var outputStream msgstream.MsgStream = searchResultStream
 
@@ -57,7 +63,7 @@ func newSearchService(ctx context.Context, node *QueryNode, pulsarURL string) *s
 		ctx:    searchServiceCtx,
 		cancel: searchServiceCancel,
 
-		node:                  node,
+		replica:               replica,
 		searchMsgStream:       &inputStream,
 		searchResultMsgStream: &outputStream,
 	}
@@ -120,7 +126,7 @@ func (ss *searchService) search(searchMessages []msgstream.TsMsg) error {
 		}
 		collectionName := query.CollectionName
 		partitionTags := query.PartitionTags
-		collection, err := (*ss.node.container).getCollectionByName(collectionName)
+		collection, err := (*ss.replica).getCollectionByName(collectionName)
 		if err != nil {
 			return err
 		}
@@ -150,7 +156,7 @@ func (ss *searchService) search(searchMessages []msgstream.TsMsg) error {
 
 		// 3. Do search in all segments
 		for _, partitionTag := range partitionTags {
-			partition, err := (*ss.node.container).getPartitionByTag(collectionID, partitionTag)
+			partition, err := (*ss.replica).getPartitionByTag(collectionID, partitionTag)
 			if err != nil {
 				return err
 			}

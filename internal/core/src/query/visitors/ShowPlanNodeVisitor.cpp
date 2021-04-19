@@ -3,6 +3,7 @@
 #include <optional>
 
 #include "query/generated/ShowPlanNodeVisitor.h"
+#include "query/generated/ShowExprVisitor.h"
 
 namespace milvus::query {
 #if 0
@@ -49,7 +50,9 @@ ShowPlanNodeVisitor::visit(FloatVectorANNS& node) {
         {"placeholder_tag", node.placeholder_tag_},  //
     };
     if (node.predicate_.has_value()) {
-        PanicInfo("unimplemented");
+        ShowExprVisitor expr_show;
+        Assert(node.predicate_.value());
+        json_body["predicate"] = expr_show.call_child(node.predicate_->operator*());
     } else {
         json_body["predicate"] = "None";
     }

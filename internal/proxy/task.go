@@ -29,12 +29,11 @@ type BaseInsertTask = msgstream.InsertMsg
 
 type InsertTask struct {
 	BaseInsertTask
+	Condition
 	ts                    Timestamp
-	done                  chan error
 	result                *servicepb.IntegerRangeResponse
 	manipulationMsgStream *msgstream.PulsarMsgStream
 	ctx                   context.Context
-	cancel                context.CancelFunc
 }
 
 func (it *InsertTask) SetTs(ts Timestamp) {
@@ -86,29 +85,12 @@ func (it *InsertTask) PostExecute() error {
 	return nil
 }
 
-func (it *InsertTask) WaitToFinish() error {
-	for {
-		select {
-		case err := <-it.done:
-			return err
-		case <-it.ctx.Done():
-			log.Print("wait to finish failed, timeout!")
-			return errors.New("wait to finish failed, timeout")
-		}
-	}
-}
-
-func (it *InsertTask) Notify(err error) {
-	it.done <- err
-}
-
 type CreateCollectionTask struct {
+	Condition
 	internalpb.CreateCollectionRequest
 	masterClient masterpb.MasterClient
-	done         chan error
 	result       *commonpb.Status
 	ctx          context.Context
-	cancel       context.CancelFunc
 }
 
 func (cct *CreateCollectionTask) ID() UniqueID {
@@ -153,29 +135,12 @@ func (cct *CreateCollectionTask) PostExecute() error {
 	return nil
 }
 
-func (cct *CreateCollectionTask) WaitToFinish() error {
-	for {
-		select {
-		case err := <-cct.done:
-			return err
-		case <-cct.ctx.Done():
-			log.Print("wait to finish failed, timeout!")
-			return errors.New("wait to finish failed, timeout")
-		}
-	}
-}
-
-func (cct *CreateCollectionTask) Notify(err error) {
-	cct.done <- err
-}
-
 type DropCollectionTask struct {
+	Condition
 	internalpb.DropCollectionRequest
 	masterClient masterpb.MasterClient
-	done         chan error
 	result       *commonpb.Status
 	ctx          context.Context
-	cancel       context.CancelFunc
 }
 
 func (dct *DropCollectionTask) ID() UniqueID {
@@ -220,30 +185,13 @@ func (dct *DropCollectionTask) PostExecute() error {
 	return nil
 }
 
-func (dct *DropCollectionTask) WaitToFinish() error {
-	for {
-		select {
-		case err := <-dct.done:
-			return err
-		case <-dct.ctx.Done():
-			log.Print("wait to finish failed, timeout!")
-			return errors.New("wait to finish failed, timeout")
-		}
-	}
-}
-
-func (dct *DropCollectionTask) Notify(err error) {
-	dct.done <- err
-}
-
 type QueryTask struct {
+	Condition
 	internalpb.SearchRequest
 	queryMsgStream *msgstream.PulsarMsgStream
-	done           chan error
 	resultBuf      chan []*internalpb.SearchResult
 	result         *servicepb.QueryResult
 	ctx            context.Context
-	cancel         context.CancelFunc
 }
 
 func (qt *QueryTask) ID() UniqueID {
@@ -345,29 +293,12 @@ func (qt *QueryTask) PostExecute() error {
 	//return nil
 }
 
-func (qt *QueryTask) WaitToFinish() error {
-	for {
-		select {
-		case err := <-qt.done:
-			return err
-		case <-qt.ctx.Done():
-			log.Print("wait to finish failed, timeout!")
-			return errors.New("wait to finish failed, timeout")
-		}
-	}
-}
-
-func (qt *QueryTask) Notify(err error) {
-	qt.done <- err
-}
-
 type HasCollectionTask struct {
+	Condition
 	internalpb.HasCollectionRequest
 	masterClient masterpb.MasterClient
-	done         chan error
 	result       *servicepb.BoolResponse
 	ctx          context.Context
-	cancel       context.CancelFunc
 }
 
 func (hct *HasCollectionTask) ID() UniqueID {
@@ -415,29 +346,12 @@ func (hct *HasCollectionTask) PostExecute() error {
 	return nil
 }
 
-func (hct *HasCollectionTask) WaitToFinish() error {
-	for {
-		select {
-		case err := <-hct.done:
-			return err
-		case <-hct.ctx.Done():
-			log.Print("wait to finish failed, timeout!")
-			return errors.New("wait to finish failed, timeout")
-		}
-	}
-}
-
-func (hct *HasCollectionTask) Notify(err error) {
-	hct.done <- err
-}
-
 type DescribeCollectionTask struct {
+	Condition
 	internalpb.DescribeCollectionRequest
 	masterClient masterpb.MasterClient
-	done         chan error
 	result       *servicepb.CollectionDescription
 	ctx          context.Context
-	cancel       context.CancelFunc
 }
 
 func (dct *DescribeCollectionTask) ID() UniqueID {
@@ -484,29 +398,12 @@ func (dct *DescribeCollectionTask) PostExecute() error {
 	return nil
 }
 
-func (dct *DescribeCollectionTask) WaitToFinish() error {
-	for {
-		select {
-		case err := <-dct.done:
-			return err
-		case <-dct.ctx.Done():
-			log.Print("wait to finish failed, timeout!")
-			return errors.New("wait to finish failed, timeout")
-		}
-	}
-}
-
-func (dct *DescribeCollectionTask) Notify(err error) {
-	dct.done <- err
-}
-
 type ShowCollectionsTask struct {
+	Condition
 	internalpb.ShowCollectionRequest
 	masterClient masterpb.MasterClient
-	done         chan error
 	result       *servicepb.StringListResponse
 	ctx          context.Context
-	cancel       context.CancelFunc
 }
 
 func (sct *ShowCollectionsTask) ID() UniqueID {
@@ -551,20 +448,4 @@ func (sct *ShowCollectionsTask) Execute() error {
 
 func (sct *ShowCollectionsTask) PostExecute() error {
 	return nil
-}
-
-func (sct *ShowCollectionsTask) WaitToFinish() error {
-	for {
-		select {
-		case err := <-sct.done:
-			return err
-		case <-sct.ctx.Done():
-			log.Print("wait to finish failed, timeout!")
-			return errors.New("wait to finish failed, timeout")
-		}
-	}
-}
-
-func (sct *ShowCollectionsTask) Notify(err error) {
-	sct.done <- err
 }

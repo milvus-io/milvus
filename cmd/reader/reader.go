@@ -27,8 +27,8 @@ func main() {
 		sig = <-sc
 		cancel()
 	}()
-	pulsarAddress, _ := reader.Params.PulsarAddress()
-	reader.StartQueryNode(ctx, pulsarAddress)
+
+	reader.StartQueryNode(ctx)
 
 	switch sig {
 	case syscall.SIGTERM:
