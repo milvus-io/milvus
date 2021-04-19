@@ -39,7 +39,7 @@ func (c *Client) Init() error {
 
 	var err error
 	for i := 0; i < c.retry; i++ {
-		if c.conn, err = grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock()); err != nil {
+		if c.conn, err = grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock()); err == nil {
 			break
 		}
 	}
