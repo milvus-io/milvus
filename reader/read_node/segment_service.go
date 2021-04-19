@@ -35,8 +35,13 @@ func (node *QueryNode) SegmentManagementService() {
 	sleepMillisecondTime := 1000
 	fmt.Println("do segments management in ", strconv.Itoa(sleepMillisecondTime), "ms")
 	for {
-		time.Sleep(time.Duration(sleepMillisecondTime) * time.Millisecond)
-		node.SegmentsManagement()
+		select {
+		case <-node.ctx.Done():
+			return
+		default:
+			time.Sleep(time.Duration(sleepMillisecondTime) * time.Millisecond)
+			node.SegmentsManagement()
+		}
 	}
 }
 
@@ -91,7 +96,12 @@ func (node *QueryNode) SegmentStatisticService() {
 	sleepMillisecondTime := 1000
 	fmt.Println("do segments statistic in ", strconv.Itoa(sleepMillisecondTime), "ms")
 	for {
-		time.Sleep(time.Duration(sleepMillisecondTime) * time.Millisecond)
-		node.SegmentStatistic(sleepMillisecondTime)
+		select {
+		case <-node.ctx.Done():
+			return
+		default:
+			time.Sleep(time.Duration(sleepMillisecondTime) * time.Millisecond)
+			node.SegmentStatistic(sleepMillisecondTime)
+		}
 	}
 }

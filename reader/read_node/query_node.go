@@ -14,6 +14,7 @@ package reader
 import "C"
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/czs007/suvlim/conf"
@@ -87,6 +88,9 @@ type InsertLog struct {
 }
 
 type QueryNode struct {
+	// context
+	ctx context.Context
+
 	QueryNodeId   uint64
 	Collections   []*Collection
 	SegmentsMap   map[int64]*Segment
@@ -102,7 +106,7 @@ type QueryNode struct {
 	InsertLogs           []InsertLog
 }
 
-func NewQueryNode(queryNodeId uint64, timeSync uint64) *QueryNode {
+func NewQueryNode(ctx context.Context, queryNodeId uint64, timeSync uint64) *QueryNode {
 	mc := message_client.MessageClient{}
 
 	queryNodeTimeSync := &QueryNodeTime{
@@ -129,6 +133,7 @@ func NewQueryNode(queryNodeId uint64, timeSync uint64) *QueryNode {
 	}
 
 	return &QueryNode{
+		ctx:               ctx,
 		QueryNodeId:       queryNodeId,
 		Collections:       nil,
 		SegmentsMap:       segmentsMap,
@@ -140,11 +145,15 @@ func NewQueryNode(queryNodeId uint64, timeSync uint64) *QueryNode {
 }
 
 func (node *QueryNode) Close() {
-	node.messageClient.Close()
-	node.kvBase.Close()
+	if node.messageClient != nil {
+		node.messageClient.Close()
+	}
+	if node.kvBase != nil {
+		node.kvBase.Close()
+	}
 }
 
-func CreateQueryNode(queryNodeId uint64, timeSync uint64, mc *message_client.MessageClient) *QueryNode {
+func CreateQueryNode(ctx context.Context, queryNodeId uint64, timeSync uint64, mc *message_client.MessageClient) *QueryNode {
 	queryNodeTimeSync := &QueryNodeTime{
 		ReadTimeSyncMin: timeSync,
 		ReadTimeSyncMax: timeSync,
@@ -172,6 +181,7 @@ func CreateQueryNode(queryNodeId uint64, timeSync uint64, mc *message_client.Mes
 	}
 
 	return &QueryNode{
+		ctx:               ctx,
 		QueryNodeId:       queryNodeId,
 		Collections:       nil,
 		SegmentsMap:       segmentsMap,
@@ -269,52 +279,64 @@ func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 
 	if Debug {
 		for {
-			var msgLen = node.PrepareBatchMsg()
-			var timeRange = TimeRange{node.messageClient.TimeSyncStart(), node.messageClient.TimeSyncEnd()}
-			assert.NotEqual(nil, 0, timeRange.timestampMin)
-			assert.NotEqual(nil, 0, timeRange.timestampMax)
+			select {
+			case <-node.ctx.Done():
+				wg.Done()
+				return
+			default:
+				var msgLen = node.PrepareBatchMsg()
+				var timeRange = TimeRange{node.messageClient.TimeSyncStart(), node.messageClient.TimeSyncEnd()}
+				assert.NotEqual(nil, 0, timeRange.timestampMin)
+				assert.NotEqual(nil, 0, timeRange.timestampMax)
 
-			if node.msgCounter.InsertCounter/CountInsertMsgBaseline != BaselineCounter {
-				node.WriteQueryLog()
-				BaselineCounter = node.msgCounter.InsertCounter / CountInsertMsgBaseline
-			}
+				if node.msgCounter.InsertCounter/CountInsertMsgBaseline != BaselineCounter {
+					node.WriteQueryLog()
+					BaselineCounter = node.msgCounter.InsertCounter / CountInsertMsgBaseline
+				}
 
-			if msgLen[0] == 0 && len(node.buffer.InsertDeleteBuffer) <= 0 {
+				if msgLen[0] == 0 && len(node.buffer.InsertDeleteBuffer) <= 0 {
+					node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
+					continue
+				}
+
+				node.QueryNodeDataInit()
+				node.MessagesPreprocess(node.messageClient.InsertOrDeleteMsg, timeRange)
+				//fmt.Println("MessagesPreprocess Done")
+				node.WriterDelete()
+				node.PreInsertAndDelete()
+				//fmt.Println("PreInsertAndDelete Done")
+				node.DoInsertAndDelete()
+				//fmt.Println("DoInsertAndDelete Done")
 				node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
-				continue
 			}
-
-			node.QueryNodeDataInit()
-			node.MessagesPreprocess(node.messageClient.InsertOrDeleteMsg, timeRange)
-			//fmt.Println("MessagesPreprocess Done")
-			node.WriterDelete()
-			node.PreInsertAndDelete()
-			//fmt.Println("PreInsertAndDelete Done")
-			node.DoInsertAndDelete()
-			//fmt.Println("DoInsertAndDelete Done")
-			node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
 		}
 	} else {
 		for {
-			var msgLen = node.PrepareBatchMsg()
-			var timeRange = TimeRange{node.messageClient.TimeSyncStart(), node.messageClient.TimeSyncEnd()}
-			assert.NotEqual(nil, 0, timeRange.timestampMin)
-			assert.NotEqual(nil, 0, timeRange.timestampMax)
+			select {
+			case <-node.ctx.Done():
+				wg.Done()
+				return
+			default:
+				var msgLen = node.PrepareBatchMsg()
+				var timeRange = TimeRange{node.messageClient.TimeSyncStart(), node.messageClient.TimeSyncEnd()}
+				assert.NotEqual(nil, 0, timeRange.timestampMin)
+				assert.NotEqual(nil, 0, timeRange.timestampMax)
 
-			if msgLen[0] == 0 && len(node.buffer.InsertDeleteBuffer) <= 0 {
+				if msgLen[0] == 0 && len(node.buffer.InsertDeleteBuffer) <= 0 {
+					node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
+					continue
+				}
+
+				node.QueryNodeDataInit()
+				node.MessagesPreprocess(node.messageClient.InsertOrDeleteMsg, timeRange)
+				//fmt.Println("MessagesPreprocess Done")
+				node.WriterDelete()
+				node.PreInsertAndDelete()
+				//fmt.Println("PreInsertAndDelete Done")
+				node.DoInsertAndDelete()
+				//fmt.Println("DoInsertAndDelete Done")
 				node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
-				continue
 			}
-
-			node.QueryNodeDataInit()
-			node.MessagesPreprocess(node.messageClient.InsertOrDeleteMsg, timeRange)
-			//fmt.Println("MessagesPreprocess Done")
-			node.WriterDelete()
-			node.PreInsertAndDelete()
-			//fmt.Println("PreInsertAndDelete Done")
-			node.DoInsertAndDelete()
-			//fmt.Println("DoInsertAndDelete Done")
-			node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
 		}
 	}
 	wg.Done()
@@ -336,6 +358,9 @@ func (node *QueryNode) TestInsertDelete(timeRange TimeRange) {
 func (node *QueryNode) RunSearch(wg *sync.WaitGroup) {
 	for {
 		select {
+		case <-node.ctx.Done():
+			wg.Done()
+			return
 		case msg := <-node.messageClient.GetSearchChan():
 			node.messageClient.SearchMsg = node.messageClient.SearchMsg[:0]
 			node.messageClient.SearchMsg = append(node.messageClient.SearchMsg, msg)
@@ -650,7 +675,6 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 				rTmp = rTmp[:query.TopK]
 			}
 		}
-
 
 		var entities = msgPb.Entities{
 			Ids: make([]int64, 0),
