@@ -342,7 +342,6 @@ message DescribeIndexRequest {
     int64 proxyID = 4;
     string collection_name = 5;
     string field_name = 6;
-    repeated common.KeyValuePair extra_params = 7;
 }
 
 message DescribeIndexProgressRequest {
@@ -352,5 +351,4 @@ message DescribeIndexProgressRequest {
     int64 proxyID = 4;
     string collection_name = 5;
     string field_name = 6;
-    repeated common.KeyValuePair extra_params = 7;
 }

@@ -239,7 +239,7 @@ func (it *IndexBuildTask) Execute() error {
 			}
 		}
 
-		if !fOk || !bOk {
+		if !fOk && !bOk {
 			return errors.New("we expect FloatVectorFieldData or BinaryVectorFieldData")
 		}
 
