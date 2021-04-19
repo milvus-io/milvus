@@ -44,26 +44,18 @@ RUN mkdir -p /usr/local/go && wget -qO- "https://golang.org/dl/go1.15.2.linux-am
     chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    openssh-server gdb gdbserver && \
+    gdb gdbserver && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
-# Taken from - https://docs.docker.com/engine/examples/running_ssh_service/#environment-variables
-RUN mkdir /var/run/sshd && echo 'root:root' | chpasswd && \
-    useradd -u 2000 -ms /bin/bash debugger && echo 'debugger:milvus' | chpasswd
-
-# SSH login fix. Otherwise user is kicked off after login
-RUN sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd
-
-ENV NOTVISIBLE "in users profile"
-RUN echo "export VISIBLE=now" >> /etc/profile
-
-# 22 for ssh server. 7777 for gdb server.
-EXPOSE 22 7777
+RUN echo 'root:root' | chpasswd
 
 COPY --chown=0:0 build/docker/env/entrypoint.sh /
 
 RUN wget -qO- "https://github.com/benesch/autouseradd/releases/download/1.2.0/autouseradd-1.2.0-amd64.tar.gz" | tar xz -C / --strip-components 1
 
-ENTRYPOINT [ "autouseradd", "--user", "milvus", "--", "/entrypoint.sh" ]
+RUN wget -O /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini && \
+    chmod +x /tini
+
+ENTRYPOINT [ "/tini", "--", "autouseradd", "--user", "milvus", "--", "/entrypoint.sh" ]
 CMD ["tail", "-f", "/dev/null"]
