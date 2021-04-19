@@ -190,7 +190,7 @@ type DataNode interface {
   WatchDmChannels(req WatchDmChannelRequest) error
   //WatchDdChannel(channelName string) error
   //SetTimeTickChannel(channelName string) error
-  //SetStatsChannel(channelName string) error
+  //SetStatisticsChannel(channelName string) error
   
   FlushSegments(req FlushSegRequest) error
 }
@@ -215,6 +215,21 @@ type FlushSegRequest struct {
   DbID UniqueID
   CollectionID UniqueID
   SegmentID []UniqueID
+}
+```
+
+* *SegmentStatistics*
+
+```go
+type SegmentStatisticsUpdates struct {
+    SegmentID UniqueID
+    MemorySize int64
+    NumRows int64
+}
+
+type SegmentStatistics struct{
+    MsgBase
+    SegStats []*SegmentStatisticsUpdates
 }
 ```
 
