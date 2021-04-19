@@ -701,7 +701,7 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 
 		mt.indexID2Meta[idx.IndexID] = *idxInfo
 		k2 := path.Join(IndexMetaPrefix, strconv.FormatInt(idx.IndexID, 10))
-		v2 := proto.MarshalTextString(idx)
+		v2 := proto.MarshalTextString(idxInfo)
 		meta := map[string]string{k1: v1, k2: v2}
 
 		err = mt.client.MultiSave(meta)
@@ -751,40 +751,20 @@ func (mt *metaTable) GetIndexByName(collName string, fieldName string, indexName
 	if !ok {
 		return nil, errors.Errorf("collection %s not found", collName)
 	}
-	fileSchema, err := mt.GetFieldSchema(collName, fieldName)
+	fieldSchema, err := mt.GetFieldSchema(collName, fieldName)
 	if err != nil {
 		return nil, err
 	}
 
 	rstIndex := make([]pb.IndexInfo, 0, len(collMeta.FieldIndexes))
-	existMap := map[typeutil.UniqueID]bool{}
-
-	for _, partID := range collMeta.PartitionIDs {
-		partMeta, ok := mt.partitionID2Meta[partID]
-		if ok {
-			for _, segID := range partMeta.SegmentIDs {
-				idxMeta, ok := mt.segID2IndexMeta[segID]
-				if !ok {
-					continue
-				}
-				for idxID, segMeta := range *idxMeta {
-					if segMeta.FieldID != fileSchema.FieldID {
-						continue
-					}
-					idxMeta, ok := mt.indexID2Meta[idxID]
-					if !ok {
-						continue
-					}
-					if _, ok = existMap[idxID]; ok {
-						continue
-					}
-					if indexName == "" {
-						rstIndex = append(rstIndex, idxMeta)
-					} else if idxMeta.IndexName == indexName {
-						rstIndex = append(rstIndex, idxMeta)
-					}
-					existMap[idxID] = true
-				}
+	for _, idx := range collMeta.FieldIndexes {
+		if idx.FiledID == fieldSchema.FieldID {
+			idxInfo, ok := mt.indexID2Meta[idx.IndexID]
+			if !ok {
+				return nil, errors.Errorf("index id = %d not found", idx.IndexID)
+			}
+			if indexName == "" || idxInfo.IndexName == indexName {
+				rstIndex = append(rstIndex, idxInfo)
 			}
 		}
 	}

@@ -88,12 +88,11 @@ class TestInfoBase:
     @pytest.mark.skip("no create Index")
     def test_get_collection_info_after_index_created(self, connect, collection, get_simple_index):
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
-        res = connect.get_collection_info(collection)
-        for field in res["fields"]:
-            if field["name"] == default_float_vec_field_name:
-                index = field["indexes"][0]
-                assert index["index_type"] == get_simple_index["index_type"]
-                assert index["metric_type"] == get_simple_index["metric_type"]
+        info = connect.get_index_info(collection, field_name)
+        assert info == get_simple_index
+        res = connect.get_collection_info(collection, default_float_vec_field_name)
+        assert index["index_type"] == get_simple_index["index_type"]
+        assert index["metric_type"] == get_simple_index["metric_type"]
 
     @pytest.mark.level(2)
     def test_get_collection_info_without_connection(self, connect, collection, dis_connect):
