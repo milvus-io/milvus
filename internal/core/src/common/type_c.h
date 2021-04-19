@@ -19,6 +19,7 @@ enum SegmentType {
     Invalid = 0,
     Growing = 1,
     Sealed = 2,
+    Indexing = 3,
 };
 
 typedef enum SegmentType SegmentType;

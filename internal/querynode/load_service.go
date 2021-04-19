@@ -20,12 +20,15 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/storage"
 )
 
-type loadIndexService struct {
+const indexCheckInterval = 1
+
+type loadService struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	client *minioKV.MinIOKV
 
-	replica collectionReplica
+	queryNodeID UniqueID
+	replica     collectionReplica
 
 	fieldIndexes   map[string][]*internalpb2.IndexStats
 	fieldStatsChan chan []*internalpb2.FieldStats
@@ -33,63 +36,10 @@ type loadIndexService struct {
 	loadIndexReqChan   chan []msgstream.TsMsg
 	loadIndexMsgStream msgstream.MsgStream
 
-	queryNodeID UniqueID
+	segManager *segmentManager
 }
 
-func newLoadIndexService(ctx context.Context, replica collectionReplica) *loadIndexService {
-	ctx1, cancel := context.WithCancel(ctx)
-
-	option := &minioKV.Option{
-		Address:           Params.MinioEndPoint,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSLStr,
-		CreateBucket:      true,
-		BucketName:        Params.MinioBucketName,
-	}
-
-	// TODO: load bucketName from config
-	MinioKV, err := minioKV.NewMinIOKV(ctx1, option)
-	if err != nil {
-		panic(err)
-	}
-
-	// init msgStream
-	receiveBufSize := Params.LoadIndexReceiveBufSize
-	pulsarBufSize := Params.LoadIndexPulsarBufSize
-
-	msgStreamURL := Params.PulsarAddress
-
-	consumeChannels := Params.LoadIndexChannelNames
-	consumeSubName := Params.MsgChannelSubName
-
-	loadIndexStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize)
-	loadIndexStream.SetPulsarClient(msgStreamURL)
-	unmarshalDispatcher := util.NewUnmarshalDispatcher()
-	loadIndexStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
-
-	var stream msgstream.MsgStream = loadIndexStream
-
-	// init index load requests channel size by message receive buffer size
-	indexLoadChanSize := receiveBufSize
-
-	return &loadIndexService{
-		ctx:    ctx1,
-		cancel: cancel,
-		client: MinioKV,
-
-		replica:        replica,
-		fieldIndexes:   make(map[string][]*internalpb2.IndexStats),
-		fieldStatsChan: make(chan []*internalpb2.FieldStats, 1),
-
-		loadIndexReqChan:   make(chan []msgstream.TsMsg, indexLoadChanSize),
-		loadIndexMsgStream: stream,
-
-		queryNodeID: Params.QueryNodeID,
-	}
-}
-
-func (lis *loadIndexService) consume() {
+func (lis *loadService) consume() {
 	for {
 		select {
 		case <-lis.ctx.Done():
@@ -105,9 +55,37 @@ func (lis *loadIndexService) consume() {
 	}
 }
 
-func (lis *loadIndexService) start() {
+func (lis *loadService) indexListener() {
+	for {
+		select {
+		case <-lis.ctx.Done():
+			return
+		case <-time.After(indexCheckInterval * time.Second):
+			collectionIDs, segmentIDs := lis.replica.getSealedSegments()
+			for i := range collectionIDs {
+				// we don't need index id yet
+				_, buildID, err := lis.segManager.getIndexInfo(collectionIDs[i], segmentIDs[i])
+				if err != nil {
+					indexPaths, err := lis.segManager.getIndexPaths(buildID)
+					if err != nil {
+						log.Println(err)
+						continue
+					}
+					err = lis.segManager.loadIndex(segmentIDs[i], indexPaths)
+					if err != nil {
+						log.Println(err)
+						continue
+					}
+				}
+			}
+		}
+	}
+}
+
+func (lis *loadService) start() {
 	lis.loadIndexMsgStream.Start()
 	go lis.consume()
+	go lis.indexListener()
 
 	for {
 		select {
@@ -132,7 +110,7 @@ func (lis *loadIndexService) start() {
 	}
 }
 
-func (lis *loadIndexService) execute(msg msgstream.TsMsg) error {
+func (lis *loadService) execute(msg msgstream.TsMsg) error {
 	indexMsg, ok := msg.(*msgstream.LoadIndexMsg)
 	if !ok {
 		return errors.New("type assertion failed for LoadIndexMsg")
@@ -174,21 +152,21 @@ func (lis *loadIndexService) execute(msg msgstream.TsMsg) error {
 	return nil
 }
 
-func (lis *loadIndexService) close() {
+func (lis *loadService) close() {
 	if lis.loadIndexMsgStream != nil {
 		lis.loadIndexMsgStream.Close()
 	}
 	lis.cancel()
 }
 
-func (lis *loadIndexService) printIndexParams(index []*commonpb.KeyValuePair) {
+func (lis *loadService) printIndexParams(index []*commonpb.KeyValuePair) {
 	fmt.Println("=================================================")
 	for i := 0; i < len(index); i++ {
 		fmt.Println(index[i])
 	}
 }
 
-func (lis *loadIndexService) indexParamsEqual(index1 []*commonpb.KeyValuePair, index2 []*commonpb.KeyValuePair) bool {
+func (lis *loadService) indexParamsEqual(index1 []*commonpb.KeyValuePair, index2 []*commonpb.KeyValuePair) bool {
 	if len(index1) != len(index2) {
 		return false
 	}
@@ -204,11 +182,11 @@ func (lis *loadIndexService) indexParamsEqual(index1 []*commonpb.KeyValuePair, i
 	return true
 }
 
-func (lis *loadIndexService) fieldsStatsIDs2Key(collectionID UniqueID, fieldID UniqueID) string {
+func (lis *loadService) fieldsStatsIDs2Key(collectionID UniqueID, fieldID UniqueID) string {
 	return strconv.FormatInt(collectionID, 10) + "/" + strconv.FormatInt(fieldID, 10)
 }
 
-func (lis *loadIndexService) fieldsStatsKey2IDs(key string) (UniqueID, UniqueID, error) {
+func (lis *loadService) fieldsStatsKey2IDs(key string) (UniqueID, UniqueID, error) {
 	ids := strings.Split(key, "/")
 	if len(ids) != 2 {
 		return 0, 0, errors.New("illegal fieldsStatsKey")
@@ -224,7 +202,7 @@ func (lis *loadIndexService) fieldsStatsKey2IDs(key string) (UniqueID, UniqueID,
 	return collectionID, fieldID, nil
 }
 
-func (lis *loadIndexService) updateSegmentIndexStats(indexParams indexParam, indexMsg *msgstream.LoadIndexMsg) error {
+func (lis *loadService) updateSegmentIndexStats(indexParams indexParam, indexMsg *msgstream.LoadIndexMsg) error {
 	targetSegment, err := lis.replica.getSegmentByID(indexMsg.SegmentID)
 	if err != nil {
 		return err
@@ -265,12 +243,10 @@ func (lis *loadIndexService) updateSegmentIndexStats(indexParams indexParam, ind
 				})
 		}
 	}
-	targetSegment.setIndexParam(indexMsg.FieldID, indexMsg.IndexParams)
-
-	return nil
+	return targetSegment.setIndexParam(indexMsg.FieldID, indexMsg.IndexParams)
 }
 
-func (lis *loadIndexService) loadIndex(indexPath []string) ([][]byte, indexParam, error) {
+func (lis *loadService) loadIndex(indexPath []string) ([][]byte, indexParam, error) {
 	index := make([][]byte, 0)
 
 	var indexParams indexParam
@@ -303,7 +279,7 @@ func (lis *loadIndexService) loadIndex(indexPath []string) ([][]byte, indexParam
 	return index, indexParams, nil
 }
 
-func (lis *loadIndexService) updateSegmentIndex(indexParams indexParam, bytesIndex [][]byte, loadIndexMsg *msgstream.LoadIndexMsg) error {
+func (lis *loadService) updateSegmentIndex(indexParams indexParam, bytesIndex [][]byte, loadIndexMsg *msgstream.LoadIndexMsg) error {
 	segment, err := lis.replica.getSegmentByID(loadIndexMsg.SegmentID)
 	if err != nil {
 		return err
@@ -328,15 +304,10 @@ func (lis *loadIndexService) updateSegmentIndex(indexParams indexParam, bytesInd
 	if err != nil {
 		return err
 	}
-	err = segment.updateSegmentIndex(loadIndexInfo)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return segment.updateSegmentIndex(loadIndexInfo)
 }
 
-func (lis *loadIndexService) sendQueryNodeStats() error {
+func (lis *loadService) sendQueryNodeStats() error {
 	resultFieldsStats := make([]*internalpb2.FieldStats, 0)
 	for fieldStatsKey, indexStats := range lis.fieldIndexes {
 		colID, fieldID, err := lis.fieldsStatsKey2IDs(fieldStatsKey)
@@ -356,7 +327,7 @@ func (lis *loadIndexService) sendQueryNodeStats() error {
 	return nil
 }
 
-func (lis *loadIndexService) checkIndexReady(indexParams indexParam, loadIndexMsg *msgstream.LoadIndexMsg) (bool, error) {
+func (lis *loadService) checkIndexReady(indexParams indexParam, loadIndexMsg *msgstream.LoadIndexMsg) (bool, error) {
 	segment, err := lis.replica.getSegmentByID(loadIndexMsg.SegmentID)
 	if err != nil {
 		return false, err
@@ -366,4 +337,61 @@ func (lis *loadIndexService) checkIndexReady(indexParams indexParam, loadIndexMs
 	}
 	return true, nil
 
+}
+
+func newLoadService(ctx context.Context, masterClient MasterServiceInterface, dataClient DataServiceInterface, indexClient IndexServiceInterface, replica collectionReplica, dmStream msgstream.MsgStream) *loadService {
+	ctx1, cancel := context.WithCancel(ctx)
+
+	option := &minioKV.Option{
+		Address:           Params.MinioEndPoint,
+		AccessKeyID:       Params.MinioAccessKeyID,
+		SecretAccessKeyID: Params.MinioSecretAccessKey,
+		UseSSL:            Params.MinioUseSSLStr,
+		CreateBucket:      true,
+		BucketName:        Params.MinioBucketName,
+	}
+
+	MinioKV, err := minioKV.NewMinIOKV(ctx1, option)
+	if err != nil {
+		panic(err)
+	}
+
+	// init msgStream
+	receiveBufSize := Params.LoadIndexReceiveBufSize
+	pulsarBufSize := Params.LoadIndexPulsarBufSize
+
+	msgStreamURL := Params.PulsarAddress
+
+	consumeChannels := Params.LoadIndexChannelNames
+	consumeSubName := Params.MsgChannelSubName
+
+	loadIndexStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize)
+	loadIndexStream.SetPulsarClient(msgStreamURL)
+	unmarshalDispatcher := util.NewUnmarshalDispatcher()
+	loadIndexStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
+
+	var stream msgstream.MsgStream = loadIndexStream
+
+	// init index load requests channel size by message receive buffer size
+	indexLoadChanSize := receiveBufSize
+
+	// init segment manager
+	loadIndexReqChan := make(chan []msgstream.TsMsg, indexLoadChanSize)
+	manager := newSegmentManager(ctx1, masterClient, dataClient, indexClient, replica, dmStream, loadIndexReqChan)
+
+	return &loadService{
+		ctx:    ctx1,
+		cancel: cancel,
+		client: MinioKV,
+
+		replica:        replica,
+		queryNodeID:    Params.QueryNodeID,
+		fieldIndexes:   make(map[string][]*internalpb2.IndexStats),
+		fieldStatsChan: make(chan []*internalpb2.FieldStats, 1),
+
+		loadIndexReqChan:   loadIndexReqChan,
+		loadIndexMsgStream: stream,
+
+		segManager: manager,
+	}
 }

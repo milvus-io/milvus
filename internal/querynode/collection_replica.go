@@ -67,6 +67,7 @@ type collectionReplica interface {
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 	hasSegment(segmentID UniqueID) bool
 	getVecFieldsBySegmentID(segmentID UniqueID) (map[int64]string, error)
+	getSealedSegments() ([]UniqueID, []UniqueID)
 
 	freeAll()
 }
@@ -425,11 +426,11 @@ func (colReplica *collectionReplicaImpl) getSegmentStatistics() []*internalpb2.S
 			SegmentID:        segmentID,
 			MemorySize:       currentMemSize,
 			NumRows:          segmentNumOfRows,
-			RecentlyModified: segment.GetRecentlyModified(),
+			RecentlyModified: segment.getRecentlyModified(),
 		}
 
 		statisticData = append(statisticData, &stat)
-		segment.SetRecentlyModified(false)
+		segment.setRecentlyModified(false)
 	}
 
 	return statisticData
@@ -558,6 +559,22 @@ func (colReplica *collectionReplicaImpl) getVecFieldsBySegmentID(segmentID Uniqu
 
 	// return map[fieldID]fieldName
 	return vecFields, nil
+}
+
+func (colReplica *collectionReplicaImpl) getSealedSegments() ([]UniqueID, []UniqueID) {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	collectionIDs := make([]UniqueID, 0)
+	segmentIDs := make([]UniqueID, 0)
+	for k, v := range colReplica.segments {
+		if v.getType() == segTypeSealed {
+			collectionIDs = append(collectionIDs, v.collectionID)
+			segmentIDs = append(segmentIDs, k)
+		}
+	}
+
+	return collectionIDs, segmentIDs
 }
 
 //-----------------------------------------------------------------------------------------------------
