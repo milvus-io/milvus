@@ -2,6 +2,7 @@ try {
 
     sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d etcd'
     sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d pulsar'
+    sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d minio'
     dir ('build/docker/deploy') {
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} pull'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d master'
@@ -30,6 +31,7 @@ try {
 } finally {
     sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} rm -f -s -v pulsar'
     sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} rm -f -s -v etcd'
+    sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} rm -f -s -v minio'
     dir ('build/docker/deploy') {
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} down --rmi all -v || true'
     }
