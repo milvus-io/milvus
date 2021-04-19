@@ -30,6 +30,7 @@ class TestConnect:
         with pytest.raises(Exception) as e:
             connect.list_collections()
 
+    @pytest.mark.tags("0331")
     def test_close_repeatedly(self, dis_connect, args):
         '''
         target: test disconnect repeatedly
