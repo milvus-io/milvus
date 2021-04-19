@@ -12,9 +12,9 @@ import (
 )
 
 type metaTable struct {
-	client          kv.TxnBase //
+	client          kv.Base //
 	segID2FlushMeta map[UniqueID]*datapb.SegmentFlushMeta
-	collID2DdlMeta  map[UniqueID]*datapb.DDLFlushMeta // GOOSE TODO: addDDLFlush and has DDLFlush
+	collID2DdlMeta  map[UniqueID]*datapb.DDLFlushMeta
 
 	lock sync.RWMutex
 }
@@ -34,24 +34,6 @@ func NewMetaTable(kv kv.TxnBase) (*metaTable, error) {
 		return nil, err
 	}
 	return mt, nil
-}
-
-func (mt *metaTable) AppendDDLBinlogPaths(collID UniqueID, paths []string) error {
-	mt.lock.Lock()
-	defer mt.lock.Unlock()
-
-	_, ok := mt.collID2DdlMeta[collID]
-	if !ok {
-		mt.collID2DdlMeta[collID] = &datapb.DDLFlushMeta{
-			CollectionID: collID,
-			BinlogPaths:  make([]string, 0),
-		}
-	}
-
-	meta := mt.collID2DdlMeta[collID]
-	meta.BinlogPaths = append(meta.BinlogPaths, paths...)
-
-	return mt.saveDDLFlushMeta(meta)
 }
 
 func (mt *metaTable) AppendSegBinlogPaths(segmentID UniqueID, fieldID int64, dataPaths []string) error {
@@ -97,44 +79,6 @@ func (mt *metaTable) CompleteFlush(segmentID UniqueID) error {
 	return mt.saveSegFlushMeta(meta)
 }
 
-// metaTable.lock.Lock() before call this function
-func (mt *metaTable) saveDDLFlushMeta(meta *datapb.DDLFlushMeta) error {
-	value := proto.MarshalTextString(meta)
-
-	mt.collID2DdlMeta[meta.CollectionID] = meta
-	prefix := path.Join(Params.DDLFlushMetaSubPath, strconv.FormatInt(meta.CollectionID, 10))
-
-	return mt.client.Save(prefix, value)
-}
-
-func (mt *metaTable) reloadDdlMetaFromKV() error {
-	mt.collID2DdlMeta = make(map[UniqueID]*datapb.DDLFlushMeta)
-	_, values, err := mt.client.LoadWithPrefix(Params.DDLFlushMetaSubPath)
-	if err != nil {
-		return err
-	}
-
-	for _, value := range values {
-		ddlMeta := &datapb.DDLFlushMeta{}
-		err = proto.UnmarshalText(value, ddlMeta)
-		if err != nil {
-			return err
-		}
-		mt.collID2DdlMeta[ddlMeta.CollectionID] = ddlMeta
-	}
-	return nil
-}
-
-// metaTable.lock.Lock() before call this function
-func (mt *metaTable) saveSegFlushMeta(meta *datapb.SegmentFlushMeta) error {
-	value := proto.MarshalTextString(meta)
-
-	mt.segID2FlushMeta[meta.SegmentID] = meta
-	prefix := path.Join(Params.SegFlushMetaSubPath, strconv.FormatInt(meta.SegmentID, 10))
-
-	return mt.client.Save(prefix, value)
-}
-
 func (mt *metaTable) reloadSegMetaFromKV() error {
 	mt.segID2FlushMeta = make(map[UniqueID]*datapb.SegmentFlushMeta)
 
@@ -153,6 +97,16 @@ func (mt *metaTable) reloadSegMetaFromKV() error {
 	}
 
 	return nil
+}
+
+// metaTable.lock.Lock() before call this function
+func (mt *metaTable) saveSegFlushMeta(meta *datapb.SegmentFlushMeta) error {
+	value := proto.MarshalTextString(meta)
+
+	mt.segID2FlushMeta[meta.SegmentID] = meta
+	prefix := path.Join(Params.SegFlushMetaSubPath, strconv.FormatInt(meta.SegmentID, 10))
+
+	return mt.client.Save(prefix, value)
 }
 
 func (mt *metaTable) addSegmentFlush(segmentID UniqueID) error {
@@ -195,6 +149,61 @@ func (mt *metaTable) getSegBinlogPaths(segmentID UniqueID) (map[int64][]string, 
 		ret[field.FieldID] = field.BinlogPaths
 	}
 	return ret, nil
+}
+
+// --- DDL ---
+func (mt *metaTable) AppendDDLBinlogPaths(collID UniqueID, paths []string) error {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+
+	_, ok := mt.collID2DdlMeta[collID]
+	if !ok {
+		mt.collID2DdlMeta[collID] = &datapb.DDLFlushMeta{
+			CollectionID: collID,
+			BinlogPaths:  make([]string, 0),
+		}
+	}
+
+	meta := mt.collID2DdlMeta[collID]
+	meta.BinlogPaths = append(meta.BinlogPaths, paths...)
+
+	return mt.saveDDLFlushMeta(meta)
+}
+
+func (mt *metaTable) hasDDLFlushMeta(collID UniqueID) bool {
+	mt.lock.RLock()
+	defer mt.lock.RUnlock()
+
+	_, ok := mt.collID2DdlMeta[collID]
+	return ok
+}
+
+// metaTable.lock.Lock() before call this function
+func (mt *metaTable) saveDDLFlushMeta(meta *datapb.DDLFlushMeta) error {
+	value := proto.MarshalTextString(meta)
+
+	mt.collID2DdlMeta[meta.CollectionID] = meta
+	prefix := path.Join(Params.DDLFlushMetaSubPath, strconv.FormatInt(meta.CollectionID, 10))
+
+	return mt.client.Save(prefix, value)
+}
+
+func (mt *metaTable) reloadDdlMetaFromKV() error {
+	mt.collID2DdlMeta = make(map[UniqueID]*datapb.DDLFlushMeta)
+	_, values, err := mt.client.LoadWithPrefix(Params.DDLFlushMetaSubPath)
+	if err != nil {
+		return err
+	}
+
+	for _, value := range values {
+		ddlMeta := &datapb.DDLFlushMeta{}
+		err = proto.UnmarshalText(value, ddlMeta)
+		if err != nil {
+			return err
+		}
+		mt.collID2DdlMeta[ddlMeta.CollectionID] = ddlMeta
+	}
+	return nil
 }
 
 func (mt *metaTable) getDDLBinlogPaths(collID UniqueID) (map[UniqueID][]string, error) {
