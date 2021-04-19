@@ -21,11 +21,10 @@
 #include "src/version.h"
 #include "utils/SignalHandler.h"
 #include "utils/Status.h"
-#include "pulsar/Client.h"
+#include "pulsar/message_client/Client.h"
 
 INITIALIZE_EASYLOGGINGPP
 
-auto c = pulsar::Client("12");
 
 void
 print_help(const std::string& app_name) {
