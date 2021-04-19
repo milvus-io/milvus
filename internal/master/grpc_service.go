@@ -347,19 +347,19 @@ func (s *Master) AllocTimestamp(ctx context.Context, request *internalpb.TsoRequ
 	return response, nil
 }
 
-func (s *Master) AllocId(ctx context.Context, request *internalpb.IdRequest) (*internalpb.IdResponse, error) {
+func (s *Master) AllocID(ctx context.Context, request *internalpb.IDRequest) (*internalpb.IDResponse, error) {
 	count := request.GetCount()
 	ts, err := id.AllocOne()
 
 	if err != nil {
-		return &internalpb.IdResponse{
+		return &internalpb.IDResponse{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
 		}, err
 	}
 
-	response := &internalpb.IdResponse{
+	response := &internalpb.IDResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
-		Id:     ts,
+		ID:     ts,
 		Count:  count,
 	}
 

@@ -151,7 +151,7 @@ func (p *Proxy) queryResultLoop() {
 		}
 		tsMsg := msgPack.Msgs[0]
 		searchResultMsg, _ := (*tsMsg).(*msgstream.SearchResultMsg)
-		reqID := searchResultMsg.GetReqId()
+		reqID := searchResultMsg.GetReqID()
 		_, ok := queryResultBuf[reqID]
 		if !ok {
 			queryResultBuf[reqID] = make([]*internalpb.SearchResult, 0)

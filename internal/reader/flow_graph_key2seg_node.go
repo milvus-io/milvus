@@ -32,12 +32,12 @@ func newKey2SegNode() *key2SegNode {
 //
 //	var key2SegMsg = node.messageClient.Key2SegMsg
 //	for _, msg := range key2SegMsg {
-//		if msg.SegmentId == nil {
+//		if msg.SegmentID == nil {
 //			segmentIDs = append(segmentIDs, -1)
 //			entityIDs = append(entityIDs, msg.Uid)
 //			timestamps = append(timestamps, msg.Timestamp)
 //		} else {
-//			for _, segmentID := range msg.SegmentId {
+//			for _, segmentID := range msg.SegmentID {
 //				segmentIDs = append(segmentIDs, segmentID)
 //				entityIDs = append(entityIDs, msg.Uid)
 //				timestamps = append(timestamps, msg.Timestamp)

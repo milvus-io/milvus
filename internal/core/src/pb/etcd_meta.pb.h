@@ -199,40 +199,40 @@ class TenantMeta :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kInsertChannelIdsFieldNumber = 3,
-    kQueryChannelIdFieldNumber = 4,
-    kIdFieldNumber = 1,
+    kInsertChannelIDsFieldNumber = 3,
+    kQueryChannelIDFieldNumber = 4,
+    kIDFieldNumber = 1,
     kNumQueryNodesFieldNumber = 2,
   };
-  // repeated string insert_channel_ids = 3;
-  int insert_channel_ids_size() const;
-  void clear_insert_channel_ids();
-  const std::string& insert_channel_ids(int index) const;
-  std::string* mutable_insert_channel_ids(int index);
-  void set_insert_channel_ids(int index, const std::string& value);
-  void set_insert_channel_ids(int index, std::string&& value);
-  void set_insert_channel_ids(int index, const char* value);
-  void set_insert_channel_ids(int index, const char* value, size_t size);
-  std::string* add_insert_channel_ids();
-  void add_insert_channel_ids(const std::string& value);
-  void add_insert_channel_ids(std::string&& value);
-  void add_insert_channel_ids(const char* value);
-  void add_insert_channel_ids(const char* value, size_t size);
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& insert_channel_ids() const;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_insert_channel_ids();
+  // repeated string insert_channelIDs = 3;
+  int insert_channelids_size() const;
+  void clear_insert_channelids();
+  const std::string& insert_channelids(int index) const;
+  std::string* mutable_insert_channelids(int index);
+  void set_insert_channelids(int index, const std::string& value);
+  void set_insert_channelids(int index, std::string&& value);
+  void set_insert_channelids(int index, const char* value);
+  void set_insert_channelids(int index, const char* value, size_t size);
+  std::string* add_insert_channelids();
+  void add_insert_channelids(const std::string& value);
+  void add_insert_channelids(std::string&& value);
+  void add_insert_channelids(const char* value);
+  void add_insert_channelids(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& insert_channelids() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_insert_channelids();
 
-  // string query_channel_id = 4;
-  void clear_query_channel_id();
-  const std::string& query_channel_id() const;
-  void set_query_channel_id(const std::string& value);
-  void set_query_channel_id(std::string&& value);
-  void set_query_channel_id(const char* value);
-  void set_query_channel_id(const char* value, size_t size);
-  std::string* mutable_query_channel_id();
-  std::string* release_query_channel_id();
-  void set_allocated_query_channel_id(std::string* query_channel_id);
+  // string query_channelID = 4;
+  void clear_query_channelid();
+  const std::string& query_channelid() const;
+  void set_query_channelid(const std::string& value);
+  void set_query_channelid(std::string&& value);
+  void set_query_channelid(const char* value);
+  void set_query_channelid(const char* value, size_t size);
+  std::string* mutable_query_channelid();
+  std::string* release_query_channelid();
+  void set_allocated_query_channelid(std::string* query_channelid);
 
-  // int64 id = 1;
+  // int64 ID = 1;
   void clear_id();
   ::PROTOBUF_NAMESPACE_ID::int64 id() const;
   void set_id(::PROTOBUF_NAMESPACE_ID::int64 value);
@@ -247,8 +247,8 @@ class TenantMeta :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> insert_channel_ids_;
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr query_channel_id_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> insert_channelids_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr query_channelid_;
   ::PROTOBUF_NAMESPACE_ID::int64 id_;
   ::PROTOBUF_NAMESPACE_ID::int64 num_query_nodes_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
@@ -369,26 +369,26 @@ class ProxyMeta :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kResultChannelIdsFieldNumber = 3,
+    kResultChannelIDsFieldNumber = 3,
     kAddressFieldNumber = 2,
-    kIdFieldNumber = 1,
+    kIDFieldNumber = 1,
   };
-  // repeated string result_channel_ids = 3;
-  int result_channel_ids_size() const;
-  void clear_result_channel_ids();
-  const std::string& result_channel_ids(int index) const;
-  std::string* mutable_result_channel_ids(int index);
-  void set_result_channel_ids(int index, const std::string& value);
-  void set_result_channel_ids(int index, std::string&& value);
-  void set_result_channel_ids(int index, const char* value);
-  void set_result_channel_ids(int index, const char* value, size_t size);
-  std::string* add_result_channel_ids();
-  void add_result_channel_ids(const std::string& value);
-  void add_result_channel_ids(std::string&& value);
-  void add_result_channel_ids(const char* value);
-  void add_result_channel_ids(const char* value, size_t size);
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& result_channel_ids() const;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_result_channel_ids();
+  // repeated string result_channelIDs = 3;
+  int result_channelids_size() const;
+  void clear_result_channelids();
+  const std::string& result_channelids(int index) const;
+  std::string* mutable_result_channelids(int index);
+  void set_result_channelids(int index, const std::string& value);
+  void set_result_channelids(int index, std::string&& value);
+  void set_result_channelids(int index, const char* value);
+  void set_result_channelids(int index, const char* value, size_t size);
+  std::string* add_result_channelids();
+  void add_result_channelids(const std::string& value);
+  void add_result_channelids(std::string&& value);
+  void add_result_channelids(const char* value);
+  void add_result_channelids(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& result_channelids() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_result_channelids();
 
   // .milvus.proto.common.Address address = 2;
   bool has_address() const;
@@ -398,7 +398,7 @@ class ProxyMeta :
   ::milvus::proto::common::Address* mutable_address();
   void set_allocated_address(::milvus::proto::common::Address* address);
 
-  // int64 id = 1;
+  // int64 ID = 1;
   void clear_id();
   ::PROTOBUF_NAMESPACE_ID::int64 id() const;
   void set_id(::PROTOBUF_NAMESPACE_ID::int64 value);
@@ -408,7 +408,7 @@ class ProxyMeta :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> result_channel_ids_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> result_channelids_;
   ::milvus::proto::common::Address* address_;
   ::PROTOBUF_NAMESPACE_ID::int64 id_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
@@ -529,22 +529,22 @@ class CollectionMeta :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kSegmentIdsFieldNumber = 4,
+    kSegmentIDsFieldNumber = 4,
     kPartitionTagsFieldNumber = 5,
     kSchemaFieldNumber = 2,
-    kIdFieldNumber = 1,
+    kIDFieldNumber = 1,
     kCreateTimeFieldNumber = 3,
   };
-  // repeated int64 segment_ids = 4;
-  int segment_ids_size() const;
-  void clear_segment_ids();
-  ::PROTOBUF_NAMESPACE_ID::int64 segment_ids(int index) const;
-  void set_segment_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
-  void add_segment_ids(::PROTOBUF_NAMESPACE_ID::int64 value);
+  // repeated int64 segmentIDs = 4;
+  int segmentids_size() const;
+  void clear_segmentids();
+  ::PROTOBUF_NAMESPACE_ID::int64 segmentids(int index) const;
+  void set_segmentids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_segmentids(::PROTOBUF_NAMESPACE_ID::int64 value);
   const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
-      segment_ids() const;
+      segmentids() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
-      mutable_segment_ids();
+      mutable_segmentids();
 
   // repeated string partition_tags = 5;
   int partition_tags_size() const;
@@ -571,7 +571,7 @@ class CollectionMeta :
   ::milvus::proto::schema::CollectionSchema* mutable_schema();
   void set_allocated_schema(::milvus::proto::schema::CollectionSchema* schema);
 
-  // int64 id = 1;
+  // int64 ID = 1;
   void clear_id();
   ::PROTOBUF_NAMESPACE_ID::int64 id() const;
   void set_id(::PROTOBUF_NAMESPACE_ID::int64 value);
@@ -586,8 +586,8 @@ class CollectionMeta :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > segment_ids_;
-  mutable std::atomic<int> _segment_ids_cached_byte_size_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > segmentids_;
+  mutable std::atomic<int> _segmentids_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> partition_tags_;
   ::milvus::proto::schema::CollectionSchema* schema_;
   ::PROTOBUF_NAMESPACE_ID::int64 id_;
@@ -711,8 +711,8 @@ class SegmentMeta :
 
   enum : int {
     kPartitionTagFieldNumber = 3,
-    kSegmentIdFieldNumber = 1,
-    kCollectionIdFieldNumber = 2,
+    kSegmentIDFieldNumber = 1,
+    kCollectionIDFieldNumber = 2,
     kChannelStartFieldNumber = 4,
     kChannelEndFieldNumber = 5,
     kOpenTimeFieldNumber = 6,
@@ -730,15 +730,15 @@ class SegmentMeta :
   std::string* release_partition_tag();
   void set_allocated_partition_tag(std::string* partition_tag);
 
-  // int64 segment_id = 1;
-  void clear_segment_id();
-  ::PROTOBUF_NAMESPACE_ID::int64 segment_id() const;
-  void set_segment_id(::PROTOBUF_NAMESPACE_ID::int64 value);
+  // int64 segmentID = 1;
+  void clear_segmentid();
+  ::PROTOBUF_NAMESPACE_ID::int64 segmentid() const;
+  void set_segmentid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // int64 collection_id = 2;
-  void clear_collection_id();
-  ::PROTOBUF_NAMESPACE_ID::int64 collection_id() const;
-  void set_collection_id(::PROTOBUF_NAMESPACE_ID::int64 value);
+  // int64 collectionID = 2;
+  void clear_collectionid();
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid() const;
+  void set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
   // int32 channel_start = 4;
   void clear_channel_start();
@@ -771,8 +771,8 @@ class SegmentMeta :
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr partition_tag_;
-  ::PROTOBUF_NAMESPACE_ID::int64 segment_id_;
-  ::PROTOBUF_NAMESPACE_ID::int64 collection_id_;
+  ::PROTOBUF_NAMESPACE_ID::int64 segmentid_;
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid_;
   ::PROTOBUF_NAMESPACE_ID::int32 channel_start_;
   ::PROTOBUF_NAMESPACE_ID::int32 channel_end_;
   ::PROTOBUF_NAMESPACE_ID::uint64 open_time_;
@@ -792,18 +792,18 @@ class SegmentMeta :
 #endif  // __GNUC__
 // TenantMeta
 
-// int64 id = 1;
+// int64 ID = 1;
 inline void TenantMeta::clear_id() {
   id_ = PROTOBUF_LONGLONG(0);
 }
 inline ::PROTOBUF_NAMESPACE_ID::int64 TenantMeta::id() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.etcd.TenantMeta.id)
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.TenantMeta.ID)
   return id_;
 }
 inline void TenantMeta::set_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
   id_ = value;
-  // @@protoc_insertion_point(field_set:milvus.proto.etcd.TenantMeta.id)
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.TenantMeta.ID)
 }
 
 // int64 num_query_nodes = 2;
@@ -820,138 +820,138 @@ inline void TenantMeta::set_num_query_nodes(::PROTOBUF_NAMESPACE_ID::int64 value
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.TenantMeta.num_query_nodes)
 }
 
-// repeated string insert_channel_ids = 3;
-inline int TenantMeta::insert_channel_ids_size() const {
-  return insert_channel_ids_.size();
+// repeated string insert_channelIDs = 3;
+inline int TenantMeta::insert_channelids_size() const {
+  return insert_channelids_.size();
 }
-inline void TenantMeta::clear_insert_channel_ids() {
-  insert_channel_ids_.Clear();
+inline void TenantMeta::clear_insert_channelids() {
+  insert_channelids_.Clear();
 }
-inline const std::string& TenantMeta::insert_channel_ids(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.proto.etcd.TenantMeta.insert_channel_ids)
-  return insert_channel_ids_.Get(index);
+inline const std::string& TenantMeta::insert_channelids(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.TenantMeta.insert_channelIDs)
+  return insert_channelids_.Get(index);
 }
-inline std::string* TenantMeta::mutable_insert_channel_ids(int index) {
-  // @@protoc_insertion_point(field_mutable:milvus.proto.etcd.TenantMeta.insert_channel_ids)
-  return insert_channel_ids_.Mutable(index);
+inline std::string* TenantMeta::mutable_insert_channelids(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.etcd.TenantMeta.insert_channelIDs)
+  return insert_channelids_.Mutable(index);
 }
-inline void TenantMeta::set_insert_channel_ids(int index, const std::string& value) {
-  // @@protoc_insertion_point(field_set:milvus.proto.etcd.TenantMeta.insert_channel_ids)
-  insert_channel_ids_.Mutable(index)->assign(value);
+inline void TenantMeta::set_insert_channelids(int index, const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.TenantMeta.insert_channelIDs)
+  insert_channelids_.Mutable(index)->assign(value);
 }
-inline void TenantMeta::set_insert_channel_ids(int index, std::string&& value) {
-  // @@protoc_insertion_point(field_set:milvus.proto.etcd.TenantMeta.insert_channel_ids)
-  insert_channel_ids_.Mutable(index)->assign(std::move(value));
+inline void TenantMeta::set_insert_channelids(int index, std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.TenantMeta.insert_channelIDs)
+  insert_channelids_.Mutable(index)->assign(std::move(value));
 }
-inline void TenantMeta::set_insert_channel_ids(int index, const char* value) {
+inline void TenantMeta::set_insert_channelids(int index, const char* value) {
   GOOGLE_DCHECK(value != nullptr);
-  insert_channel_ids_.Mutable(index)->assign(value);
-  // @@protoc_insertion_point(field_set_char:milvus.proto.etcd.TenantMeta.insert_channel_ids)
+  insert_channelids_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.proto.etcd.TenantMeta.insert_channelIDs)
 }
-inline void TenantMeta::set_insert_channel_ids(int index, const char* value, size_t size) {
-  insert_channel_ids_.Mutable(index)->assign(
+inline void TenantMeta::set_insert_channelids(int index, const char* value, size_t size) {
+  insert_channelids_.Mutable(index)->assign(
     reinterpret_cast<const char*>(value), size);
-  // @@protoc_insertion_point(field_set_pointer:milvus.proto.etcd.TenantMeta.insert_channel_ids)
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.etcd.TenantMeta.insert_channelIDs)
 }
-inline std::string* TenantMeta::add_insert_channel_ids() {
-  // @@protoc_insertion_point(field_add_mutable:milvus.proto.etcd.TenantMeta.insert_channel_ids)
-  return insert_channel_ids_.Add();
+inline std::string* TenantMeta::add_insert_channelids() {
+  // @@protoc_insertion_point(field_add_mutable:milvus.proto.etcd.TenantMeta.insert_channelIDs)
+  return insert_channelids_.Add();
 }
-inline void TenantMeta::add_insert_channel_ids(const std::string& value) {
-  insert_channel_ids_.Add()->assign(value);
-  // @@protoc_insertion_point(field_add:milvus.proto.etcd.TenantMeta.insert_channel_ids)
+inline void TenantMeta::add_insert_channelids(const std::string& value) {
+  insert_channelids_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.etcd.TenantMeta.insert_channelIDs)
 }
-inline void TenantMeta::add_insert_channel_ids(std::string&& value) {
-  insert_channel_ids_.Add(std::move(value));
-  // @@protoc_insertion_point(field_add:milvus.proto.etcd.TenantMeta.insert_channel_ids)
+inline void TenantMeta::add_insert_channelids(std::string&& value) {
+  insert_channelids_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.proto.etcd.TenantMeta.insert_channelIDs)
 }
-inline void TenantMeta::add_insert_channel_ids(const char* value) {
+inline void TenantMeta::add_insert_channelids(const char* value) {
   GOOGLE_DCHECK(value != nullptr);
-  insert_channel_ids_.Add()->assign(value);
-  // @@protoc_insertion_point(field_add_char:milvus.proto.etcd.TenantMeta.insert_channel_ids)
+  insert_channelids_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.proto.etcd.TenantMeta.insert_channelIDs)
 }
-inline void TenantMeta::add_insert_channel_ids(const char* value, size_t size) {
-  insert_channel_ids_.Add()->assign(reinterpret_cast<const char*>(value), size);
-  // @@protoc_insertion_point(field_add_pointer:milvus.proto.etcd.TenantMeta.insert_channel_ids)
+inline void TenantMeta::add_insert_channelids(const char* value, size_t size) {
+  insert_channelids_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.proto.etcd.TenantMeta.insert_channelIDs)
 }
 inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
-TenantMeta::insert_channel_ids() const {
-  // @@protoc_insertion_point(field_list:milvus.proto.etcd.TenantMeta.insert_channel_ids)
-  return insert_channel_ids_;
+TenantMeta::insert_channelids() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.etcd.TenantMeta.insert_channelIDs)
+  return insert_channelids_;
 }
 inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
-TenantMeta::mutable_insert_channel_ids() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.proto.etcd.TenantMeta.insert_channel_ids)
-  return &insert_channel_ids_;
+TenantMeta::mutable_insert_channelids() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.etcd.TenantMeta.insert_channelIDs)
+  return &insert_channelids_;
 }
 
-// string query_channel_id = 4;
-inline void TenantMeta::clear_query_channel_id() {
-  query_channel_id_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+// string query_channelID = 4;
+inline void TenantMeta::clear_query_channelid() {
+  query_channelid_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
-inline const std::string& TenantMeta::query_channel_id() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.etcd.TenantMeta.query_channel_id)
-  return query_channel_id_.GetNoArena();
+inline const std::string& TenantMeta::query_channelid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.TenantMeta.query_channelID)
+  return query_channelid_.GetNoArena();
 }
-inline void TenantMeta::set_query_channel_id(const std::string& value) {
+inline void TenantMeta::set_query_channelid(const std::string& value) {
   
-  query_channel_id_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
-  // @@protoc_insertion_point(field_set:milvus.proto.etcd.TenantMeta.query_channel_id)
+  query_channelid_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.TenantMeta.query_channelID)
 }
-inline void TenantMeta::set_query_channel_id(std::string&& value) {
+inline void TenantMeta::set_query_channelid(std::string&& value) {
   
-  query_channel_id_.SetNoArena(
+  query_channelid_.SetNoArena(
     &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
-  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.etcd.TenantMeta.query_channel_id)
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.etcd.TenantMeta.query_channelID)
 }
-inline void TenantMeta::set_query_channel_id(const char* value) {
+inline void TenantMeta::set_query_channelid(const char* value) {
   GOOGLE_DCHECK(value != nullptr);
   
-  query_channel_id_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
-  // @@protoc_insertion_point(field_set_char:milvus.proto.etcd.TenantMeta.query_channel_id)
+  query_channelid_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.etcd.TenantMeta.query_channelID)
 }
-inline void TenantMeta::set_query_channel_id(const char* value, size_t size) {
+inline void TenantMeta::set_query_channelid(const char* value, size_t size) {
   
-  query_channel_id_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+  query_channelid_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
       ::std::string(reinterpret_cast<const char*>(value), size));
-  // @@protoc_insertion_point(field_set_pointer:milvus.proto.etcd.TenantMeta.query_channel_id)
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.etcd.TenantMeta.query_channelID)
 }
-inline std::string* TenantMeta::mutable_query_channel_id() {
+inline std::string* TenantMeta::mutable_query_channelid() {
   
-  // @@protoc_insertion_point(field_mutable:milvus.proto.etcd.TenantMeta.query_channel_id)
-  return query_channel_id_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  // @@protoc_insertion_point(field_mutable:milvus.proto.etcd.TenantMeta.query_channelID)
+  return query_channelid_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
-inline std::string* TenantMeta::release_query_channel_id() {
-  // @@protoc_insertion_point(field_release:milvus.proto.etcd.TenantMeta.query_channel_id)
+inline std::string* TenantMeta::release_query_channelid() {
+  // @@protoc_insertion_point(field_release:milvus.proto.etcd.TenantMeta.query_channelID)
   
-  return query_channel_id_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  return query_channelid_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
-inline void TenantMeta::set_allocated_query_channel_id(std::string* query_channel_id) {
-  if (query_channel_id != nullptr) {
+inline void TenantMeta::set_allocated_query_channelid(std::string* query_channelid) {
+  if (query_channelid != nullptr) {
     
   } else {
     
   }
-  query_channel_id_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), query_channel_id);
-  // @@protoc_insertion_point(field_set_allocated:milvus.proto.etcd.TenantMeta.query_channel_id)
+  query_channelid_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), query_channelid);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.etcd.TenantMeta.query_channelID)
 }
 
 // -------------------------------------------------------------------
 
 // ProxyMeta
 
-// int64 id = 1;
+// int64 ID = 1;
 inline void ProxyMeta::clear_id() {
   id_ = PROTOBUF_LONGLONG(0);
 }
 inline ::PROTOBUF_NAMESPACE_ID::int64 ProxyMeta::id() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.etcd.ProxyMeta.id)
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.ProxyMeta.ID)
   return id_;
 }
 inline void ProxyMeta::set_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
   id_ = value;
-  // @@protoc_insertion_point(field_set:milvus.proto.etcd.ProxyMeta.id)
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.ProxyMeta.ID)
 }
 
 // .milvus.proto.common.Address address = 2;
@@ -999,87 +999,87 @@ inline void ProxyMeta::set_allocated_address(::milvus::proto::common::Address* a
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.etcd.ProxyMeta.address)
 }
 
-// repeated string result_channel_ids = 3;
-inline int ProxyMeta::result_channel_ids_size() const {
-  return result_channel_ids_.size();
+// repeated string result_channelIDs = 3;
+inline int ProxyMeta::result_channelids_size() const {
+  return result_channelids_.size();
 }
-inline void ProxyMeta::clear_result_channel_ids() {
-  result_channel_ids_.Clear();
+inline void ProxyMeta::clear_result_channelids() {
+  result_channelids_.Clear();
 }
-inline const std::string& ProxyMeta::result_channel_ids(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.proto.etcd.ProxyMeta.result_channel_ids)
-  return result_channel_ids_.Get(index);
+inline const std::string& ProxyMeta::result_channelids(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.ProxyMeta.result_channelIDs)
+  return result_channelids_.Get(index);
 }
-inline std::string* ProxyMeta::mutable_result_channel_ids(int index) {
-  // @@protoc_insertion_point(field_mutable:milvus.proto.etcd.ProxyMeta.result_channel_ids)
-  return result_channel_ids_.Mutable(index);
+inline std::string* ProxyMeta::mutable_result_channelids(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.etcd.ProxyMeta.result_channelIDs)
+  return result_channelids_.Mutable(index);
 }
-inline void ProxyMeta::set_result_channel_ids(int index, const std::string& value) {
-  // @@protoc_insertion_point(field_set:milvus.proto.etcd.ProxyMeta.result_channel_ids)
-  result_channel_ids_.Mutable(index)->assign(value);
+inline void ProxyMeta::set_result_channelids(int index, const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.ProxyMeta.result_channelIDs)
+  result_channelids_.Mutable(index)->assign(value);
 }
-inline void ProxyMeta::set_result_channel_ids(int index, std::string&& value) {
-  // @@protoc_insertion_point(field_set:milvus.proto.etcd.ProxyMeta.result_channel_ids)
-  result_channel_ids_.Mutable(index)->assign(std::move(value));
+inline void ProxyMeta::set_result_channelids(int index, std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.ProxyMeta.result_channelIDs)
+  result_channelids_.Mutable(index)->assign(std::move(value));
 }
-inline void ProxyMeta::set_result_channel_ids(int index, const char* value) {
+inline void ProxyMeta::set_result_channelids(int index, const char* value) {
   GOOGLE_DCHECK(value != nullptr);
-  result_channel_ids_.Mutable(index)->assign(value);
-  // @@protoc_insertion_point(field_set_char:milvus.proto.etcd.ProxyMeta.result_channel_ids)
+  result_channelids_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.proto.etcd.ProxyMeta.result_channelIDs)
 }
-inline void ProxyMeta::set_result_channel_ids(int index, const char* value, size_t size) {
-  result_channel_ids_.Mutable(index)->assign(
+inline void ProxyMeta::set_result_channelids(int index, const char* value, size_t size) {
+  result_channelids_.Mutable(index)->assign(
     reinterpret_cast<const char*>(value), size);
-  // @@protoc_insertion_point(field_set_pointer:milvus.proto.etcd.ProxyMeta.result_channel_ids)
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.etcd.ProxyMeta.result_channelIDs)
 }
-inline std::string* ProxyMeta::add_result_channel_ids() {
-  // @@protoc_insertion_point(field_add_mutable:milvus.proto.etcd.ProxyMeta.result_channel_ids)
-  return result_channel_ids_.Add();
+inline std::string* ProxyMeta::add_result_channelids() {
+  // @@protoc_insertion_point(field_add_mutable:milvus.proto.etcd.ProxyMeta.result_channelIDs)
+  return result_channelids_.Add();
 }
-inline void ProxyMeta::add_result_channel_ids(const std::string& value) {
-  result_channel_ids_.Add()->assign(value);
-  // @@protoc_insertion_point(field_add:milvus.proto.etcd.ProxyMeta.result_channel_ids)
+inline void ProxyMeta::add_result_channelids(const std::string& value) {
+  result_channelids_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.etcd.ProxyMeta.result_channelIDs)
 }
-inline void ProxyMeta::add_result_channel_ids(std::string&& value) {
-  result_channel_ids_.Add(std::move(value));
-  // @@protoc_insertion_point(field_add:milvus.proto.etcd.ProxyMeta.result_channel_ids)
+inline void ProxyMeta::add_result_channelids(std::string&& value) {
+  result_channelids_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.proto.etcd.ProxyMeta.result_channelIDs)
 }
-inline void ProxyMeta::add_result_channel_ids(const char* value) {
+inline void ProxyMeta::add_result_channelids(const char* value) {
   GOOGLE_DCHECK(value != nullptr);
-  result_channel_ids_.Add()->assign(value);
-  // @@protoc_insertion_point(field_add_char:milvus.proto.etcd.ProxyMeta.result_channel_ids)
+  result_channelids_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.proto.etcd.ProxyMeta.result_channelIDs)
 }
-inline void ProxyMeta::add_result_channel_ids(const char* value, size_t size) {
-  result_channel_ids_.Add()->assign(reinterpret_cast<const char*>(value), size);
-  // @@protoc_insertion_point(field_add_pointer:milvus.proto.etcd.ProxyMeta.result_channel_ids)
+inline void ProxyMeta::add_result_channelids(const char* value, size_t size) {
+  result_channelids_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.proto.etcd.ProxyMeta.result_channelIDs)
 }
 inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
-ProxyMeta::result_channel_ids() const {
-  // @@protoc_insertion_point(field_list:milvus.proto.etcd.ProxyMeta.result_channel_ids)
-  return result_channel_ids_;
+ProxyMeta::result_channelids() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.etcd.ProxyMeta.result_channelIDs)
+  return result_channelids_;
 }
 inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
-ProxyMeta::mutable_result_channel_ids() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.proto.etcd.ProxyMeta.result_channel_ids)
-  return &result_channel_ids_;
+ProxyMeta::mutable_result_channelids() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.etcd.ProxyMeta.result_channelIDs)
+  return &result_channelids_;
 }
 
 // -------------------------------------------------------------------
 
 // CollectionMeta
 
-// int64 id = 1;
+// int64 ID = 1;
 inline void CollectionMeta::clear_id() {
   id_ = PROTOBUF_LONGLONG(0);
 }
 inline ::PROTOBUF_NAMESPACE_ID::int64 CollectionMeta::id() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.etcd.CollectionMeta.id)
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.CollectionMeta.ID)
   return id_;
 }
 inline void CollectionMeta::set_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
   id_ = value;
-  // @@protoc_insertion_point(field_set:milvus.proto.etcd.CollectionMeta.id)
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.CollectionMeta.ID)
 }
 
 // .milvus.proto.schema.CollectionSchema schema = 2;
@@ -1141,34 +1141,34 @@ inline void CollectionMeta::set_create_time(::PROTOBUF_NAMESPACE_ID::uint64 valu
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.CollectionMeta.create_time)
 }
 
-// repeated int64 segment_ids = 4;
-inline int CollectionMeta::segment_ids_size() const {
-  return segment_ids_.size();
+// repeated int64 segmentIDs = 4;
+inline int CollectionMeta::segmentids_size() const {
+  return segmentids_.size();
 }
-inline void CollectionMeta::clear_segment_ids() {
-  segment_ids_.Clear();
+inline void CollectionMeta::clear_segmentids() {
+  segmentids_.Clear();
 }
-inline ::PROTOBUF_NAMESPACE_ID::int64 CollectionMeta::segment_ids(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.proto.etcd.CollectionMeta.segment_ids)
-  return segment_ids_.Get(index);
+inline ::PROTOBUF_NAMESPACE_ID::int64 CollectionMeta::segmentids(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.CollectionMeta.segmentIDs)
+  return segmentids_.Get(index);
 }
-inline void CollectionMeta::set_segment_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
-  segment_ids_.Set(index, value);
-  // @@protoc_insertion_point(field_set:milvus.proto.etcd.CollectionMeta.segment_ids)
+inline void CollectionMeta::set_segmentids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  segmentids_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.CollectionMeta.segmentIDs)
 }
-inline void CollectionMeta::add_segment_ids(::PROTOBUF_NAMESPACE_ID::int64 value) {
-  segment_ids_.Add(value);
-  // @@protoc_insertion_point(field_add:milvus.proto.etcd.CollectionMeta.segment_ids)
+inline void CollectionMeta::add_segmentids(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  segmentids_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.etcd.CollectionMeta.segmentIDs)
 }
 inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
-CollectionMeta::segment_ids() const {
-  // @@protoc_insertion_point(field_list:milvus.proto.etcd.CollectionMeta.segment_ids)
-  return segment_ids_;
+CollectionMeta::segmentids() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.etcd.CollectionMeta.segmentIDs)
+  return segmentids_;
 }
 inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
-CollectionMeta::mutable_segment_ids() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.proto.etcd.CollectionMeta.segment_ids)
-  return &segment_ids_;
+CollectionMeta::mutable_segmentids() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.etcd.CollectionMeta.segmentIDs)
+  return &segmentids_;
 }
 
 // repeated string partition_tags = 5;
@@ -1240,32 +1240,32 @@ CollectionMeta::mutable_partition_tags() {
 
 // SegmentMeta
 
-// int64 segment_id = 1;
-inline void SegmentMeta::clear_segment_id() {
-  segment_id_ = PROTOBUF_LONGLONG(0);
+// int64 segmentID = 1;
+inline void SegmentMeta::clear_segmentid() {
+  segmentid_ = PROTOBUF_LONGLONG(0);
 }
-inline ::PROTOBUF_NAMESPACE_ID::int64 SegmentMeta::segment_id() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.etcd.SegmentMeta.segment_id)
-  return segment_id_;
+inline ::PROTOBUF_NAMESPACE_ID::int64 SegmentMeta::segmentid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.SegmentMeta.segmentID)
+  return segmentid_;
 }
-inline void SegmentMeta::set_segment_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
+inline void SegmentMeta::set_segmentid(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
-  segment_id_ = value;
-  // @@protoc_insertion_point(field_set:milvus.proto.etcd.SegmentMeta.segment_id)
+  segmentid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.SegmentMeta.segmentID)
 }
 
-// int64 collection_id = 2;
-inline void SegmentMeta::clear_collection_id() {
-  collection_id_ = PROTOBUF_LONGLONG(0);
+// int64 collectionID = 2;
+inline void SegmentMeta::clear_collectionid() {
+  collectionid_ = PROTOBUF_LONGLONG(0);
 }
-inline ::PROTOBUF_NAMESPACE_ID::int64 SegmentMeta::collection_id() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.etcd.SegmentMeta.collection_id)
-  return collection_id_;
+inline ::PROTOBUF_NAMESPACE_ID::int64 SegmentMeta::collectionid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.SegmentMeta.collectionID)
+  return collectionid_;
 }
-inline void SegmentMeta::set_collection_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
+inline void SegmentMeta::set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
-  collection_id_ = value;
-  // @@protoc_insertion_point(field_set:milvus.proto.etcd.SegmentMeta.collection_id)
+  collectionid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.SegmentMeta.collectionID)
 }
 
 // string partition_tag = 3;

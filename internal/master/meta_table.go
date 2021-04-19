@@ -60,7 +60,7 @@ func (mt *metaTable) reloadFromKV() error {
 		if err != nil {
 			return err
 		}
-		mt.tenantID2Meta[tenantMeta.Id] = tenantMeta
+		mt.tenantID2Meta[tenantMeta.ID] = tenantMeta
 	}
 
 	_, values, err = mt.client.LoadWithPrefix("proxy")
@@ -74,7 +74,7 @@ func (mt *metaTable) reloadFromKV() error {
 		if err != nil {
 			return err
 		}
-		mt.proxyID2Meta[proxyMeta.Id] = proxyMeta
+		mt.proxyID2Meta[proxyMeta.ID] = proxyMeta
 	}
 
 	_, values, err = mt.client.LoadWithPrefix("collection")
@@ -88,8 +88,8 @@ func (mt *metaTable) reloadFromKV() error {
 		if err != nil {
 			return err
 		}
-		mt.collID2Meta[collectionMeta.Id] = collectionMeta
-		mt.collName2ID[collectionMeta.Schema.Name] = collectionMeta.Id
+		mt.collID2Meta[collectionMeta.ID] = collectionMeta
+		mt.collName2ID[collectionMeta.Schema.Name] = collectionMeta.ID
 	}
 
 	_, values, err = mt.client.LoadWithPrefix("segment")
@@ -103,7 +103,7 @@ func (mt *metaTable) reloadFromKV() error {
 		if err != nil {
 			return err
 		}
-		mt.segID2Meta[segmentMeta.SegmentId] = segmentMeta
+		mt.segID2Meta[segmentMeta.SegmentID] = segmentMeta
 	}
 
 	return nil
@@ -115,9 +115,9 @@ func (mt *metaTable) saveCollectionMeta(coll *pb.CollectionMeta) error {
 	if err != nil {
 		return err
 	}
-	mt.collID2Meta[coll.Id] = *coll
-	mt.collName2ID[coll.Schema.Name] = coll.Id
-	return mt.client.Save("/collection/"+strconv.FormatInt(coll.Id, 10), string(collBytes))
+	mt.collID2Meta[coll.ID] = *coll
+	mt.collName2ID[coll.Schema.Name] = coll.ID
+	return mt.client.Save("/collection/"+strconv.FormatInt(coll.ID, 10), string(collBytes))
 }
 
 // mt.ddLock.Lock() before call this function
@@ -127,9 +127,9 @@ func (mt *metaTable) saveSegmentMeta(seg *pb.SegmentMeta) error {
 		return err
 	}
 
-	mt.segID2Meta[seg.SegmentId] = *seg
+	mt.segID2Meta[seg.SegmentID] = *seg
 
-	return mt.client.Save("/segment/"+strconv.FormatInt(seg.SegmentId, 10), string(segBytes))
+	return mt.client.Save("/segment/"+strconv.FormatInt(seg.SegmentID, 10), string(segBytes))
 }
 
 // mt.ddLock.Lock() before call this function
@@ -156,7 +156,7 @@ func (mt *metaTable) saveCollectionAndDeleteSegmentsMeta(coll *pb.CollectionMeta
 		return err
 	}
 
-	kvs["/collection/"+strconv.FormatInt(coll.Id, 10)] = string(collStrs)
+	kvs["/collection/"+strconv.FormatInt(coll.ID, 10)] = string(collStrs)
 
 	for _, segID := range segIDs {
 		_, ok := mt.segID2Meta[segID]
@@ -166,7 +166,7 @@ func (mt *metaTable) saveCollectionAndDeleteSegmentsMeta(coll *pb.CollectionMeta
 		}
 	}
 
-	mt.collID2Meta[coll.Id] = *coll
+	mt.collID2Meta[coll.ID] = *coll
 
 	return mt.client.MultiSaveAndRemove(kvs, segIDStrs)
 }
@@ -178,18 +178,18 @@ func (mt *metaTable) saveCollectionsAndSegmentsMeta(coll *pb.CollectionMeta, seg
 	if err != nil {
 		return err
 	}
-	kvs["/collection/"+strconv.FormatInt(coll.Id, 10)] = string(collBytes)
+	kvs["/collection/"+strconv.FormatInt(coll.ID, 10)] = string(collBytes)
 
-	mt.collID2Meta[coll.Id] = *coll
-	mt.collName2ID[coll.Schema.Name] = coll.Id
+	mt.collID2Meta[coll.ID] = *coll
+	mt.collName2ID[coll.Schema.Name] = coll.ID
 
 	segBytes, err := proto.Marshal(seg)
 	if err != nil {
 		return err
 	}
-	kvs["/segment/"+strconv.FormatInt(seg.SegmentId, 10)] = string(segBytes)
+	kvs["/segment/"+strconv.FormatInt(seg.SegmentID, 10)] = string(segBytes)
 
-	mt.segID2Meta[seg.SegmentId] = *seg
+	mt.segID2Meta[seg.SegmentID] = *seg
 
 	return mt.client.MultiSave(kvs)
 }
@@ -230,7 +230,7 @@ func (mt *metaTable) deleteCollectionsAndSegmentsMeta(collID UniqueID, segIDs []
 func (mt *metaTable) AddCollection(coll *pb.CollectionMeta) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-	if len(coll.SegmentIds) != 0 {
+	if len(coll.SegmentIDs) != 0 {
 		return errors.Errorf("segment should be empty when creating collection")
 	}
 	if len(coll.PartitionTags) != 0 {
@@ -257,7 +257,7 @@ func (mt *metaTable) DeleteCollection(collID UniqueID) error {
 		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collID, 10))
 	}
 
-	err := mt.deleteCollectionsAndSegmentsMeta(collID, collMeta.SegmentIds)
+	err := mt.deleteCollectionsAndSegmentsMeta(collID, collMeta.SegmentIDs)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -344,9 +344,9 @@ func (mt *metaTable) DeletePartition(collID UniqueID, tag string) error {
 		return nil
 	}
 
-	toDeleteSeg := make([]UniqueID, 0, len(collMeta.SegmentIds))
-	seg := make([]UniqueID, 0, len(collMeta.SegmentIds))
-	for _, s := range collMeta.SegmentIds {
+	toDeleteSeg := make([]UniqueID, 0, len(collMeta.SegmentIDs))
+	seg := make([]UniqueID, 0, len(collMeta.SegmentIDs))
+	for _, s := range collMeta.SegmentIDs {
 		sm, ok := mt.segID2Meta[s]
 		if !ok {
 			return errors.Errorf("can't find segment id = %d", s)
@@ -358,7 +358,7 @@ func (mt *metaTable) DeletePartition(collID UniqueID, tag string) error {
 		}
 	}
 	collMeta.PartitionTags = pt
-	collMeta.SegmentIds = seg
+	collMeta.SegmentIDs = seg
 
 	err := mt.saveCollectionAndDeleteSegmentsMeta(&collMeta, toDeleteSeg)
 	if err != nil {
@@ -371,9 +371,9 @@ func (mt *metaTable) DeletePartition(collID UniqueID, tag string) error {
 func (mt *metaTable) AddSegment(seg *pb.SegmentMeta) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-	collID := seg.CollectionId
+	collID := seg.CollectionID
 	collMeta := mt.collID2Meta[collID]
-	collMeta.SegmentIds = append(collMeta.SegmentIds, seg.SegmentId)
+	collMeta.SegmentIDs = append(collMeta.SegmentIDs, seg.SegmentID)
 	err := mt.saveCollectionsAndSegmentsMeta(&collMeta, seg)
 	if err != nil {
 		_ = mt.reloadFromKV()
@@ -402,14 +402,14 @@ func (mt *metaTable) DeleteSegment(segID UniqueID) error {
 		return errors.Errorf("can't find segment. id = " + strconv.FormatInt(segID, 10))
 	}
 
-	collMeta, ok := mt.collID2Meta[segMeta.CollectionId]
+	collMeta, ok := mt.collID2Meta[segMeta.CollectionID]
 	if !ok {
-		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(segMeta.CollectionId, 10))
+		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(segMeta.CollectionID, 10))
 	}
 
-	for i := 0; i < len(collMeta.SegmentIds); i++ {
-		if collMeta.SegmentIds[i] == segID {
-			collMeta.SegmentIds = append(collMeta.SegmentIds[:i], collMeta.SegmentIds[i+1:]...)
+	for i := 0; i < len(collMeta.SegmentIDs); i++ {
+		if collMeta.SegmentIDs[i] == segID {
+			collMeta.SegmentIDs = append(collMeta.SegmentIDs[:i], collMeta.SegmentIDs[i+1:]...)
 		}
 	}
 

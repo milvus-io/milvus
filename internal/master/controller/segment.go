@@ -23,7 +23,7 @@ func ComputeCloseTime(ss internalpb.SegmentStats, kvbase *kv.EtcdKV) error {
 			memRate = 1
 		}
 		sec := int(conf.Config.Master.SegmentThreshole*0.2) / memRate
-		data, err := kvbase.Load("segment/" + strconv.Itoa(int(ss.SegmentId)))
+		data, err := kvbase.Load("segment/" + strconv.Itoa(int(ss.SegmentID)))
 		if err != nil {
 			return err
 		}
@@ -37,7 +37,7 @@ func ComputeCloseTime(ss internalpb.SegmentStats, kvbase *kv.EtcdKV) error {
 		if err != nil {
 			return err
 		}
-		kvbase.Save("segment/"+strconv.Itoa(int(ss.SegmentId)), updateData)
+		kvbase.Save("segment/"+strconv.Itoa(int(ss.SegmentID)), updateData)
 		//create new segment
 		newSegID, _ := id.AllocOne()
 		newSeg := segment.NewSegment(newSegID, seg.CollectionID, seg.CollectionName, "default", seg.ChannelStart, seg.ChannelEnd, currentTime, time.Unix(1<<36-1, 0))

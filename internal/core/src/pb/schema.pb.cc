@@ -83,7 +83,7 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_schema_2eproto::offsets[] PROT
   ~0u,  // no _weak_field_map_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::CollectionSchema, name_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::CollectionSchema, description_),
-  PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::CollectionSchema, auto_id_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::CollectionSchema, autoid_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::CollectionSchema, fields_),
 };
 static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
@@ -103,16 +103,16 @@ const char descriptor_table_protodef_schema_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "\035.milvus.proto.schema.DataType\0226\n\013type_p"
   "arams\030\004 \003(\0132!.milvus.proto.common.KeyVal"
   "uePair\0227\n\014index_params\030\005 \003(\0132!.milvus.pr"
-  "oto.common.KeyValuePair\"x\n\020CollectionSch"
-  "ema\022\014\n\004name\030\001 \001(\t\022\023\n\013description\030\002 \001(\t\022\017"
-  "\n\007auto_id\030\003 \001(\010\0220\n\006fields\030\004 \003(\0132 .milvus"
-  ".proto.schema.FieldSchema*\221\001\n\010DataType\022\010"
-  "\n\004NONE\020\000\022\010\n\004BOOL\020\001\022\010\n\004INT8\020\002\022\t\n\005INT16\020\003\022"
-  "\t\n\005INT32\020\004\022\t\n\005INT64\020\005\022\t\n\005FLOAT\020\n\022\n\n\006DOUB"
-  "LE\020\013\022\n\n\006STRING\020\024\022\021\n\rVECTOR_BINARY\020d\022\020\n\014V"
-  "ECTOR_FLOAT\020eBBZ@github.com/zilliztech/m"
-  "ilvus-distributed/internal/proto/schemap"
-  "bb\006proto3"
+  "oto.common.KeyValuePair\"w\n\020CollectionSch"
+  "ema\022\014\n\004name\030\001 \001(\t\022\023\n\013description\030\002 \001(\t\022\016"
+  "\n\006autoID\030\003 \001(\010\0220\n\006fields\030\004 \003(\0132 .milvus."
+  "proto.schema.FieldSchema*\221\001\n\010DataType\022\010\n"
+  "\004NONE\020\000\022\010\n\004BOOL\020\001\022\010\n\004INT8\020\002\022\t\n\005INT16\020\003\022\t"
+  "\n\005INT32\020\004\022\t\n\005INT64\020\005\022\t\n\005FLOAT\020\n\022\n\n\006DOUBL"
+  "E\020\013\022\n\n\006STRING\020\024\022\021\n\rVECTOR_BINARY\020d\022\020\n\014VE"
+  "CTOR_FLOAT\020eBBZ@github.com/zilliztech/mi"
+  "lvus-distributed/internal/proto/schemapb"
+  "b\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_schema_2eproto_deps[1] = {
   &::descriptor_table_common_2eproto,
@@ -124,7 +124,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_sch
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_schema_2eproto_once;
 static bool descriptor_table_schema_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_schema_2eproto = {
-  &descriptor_table_schema_2eproto_initialized, descriptor_table_protodef_schema_2eproto, "schema.proto", 609,
+  &descriptor_table_schema_2eproto_initialized, descriptor_table_protodef_schema_2eproto, "schema.proto", 608,
   &descriptor_table_schema_2eproto_once, descriptor_table_schema_2eproto_sccs, descriptor_table_schema_2eproto_deps, 2, 1,
   schemas, file_default_instances, TableStruct_schema_2eproto::offsets,
   file_level_metadata_schema_2eproto, 2, file_level_enum_descriptors_schema_2eproto, file_level_service_descriptors_schema_2eproto,
@@ -680,7 +680,7 @@ CollectionSchema::CollectionSchema(const CollectionSchema& from)
   if (!from.description().empty()) {
     description_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.description_);
   }
-  auto_id_ = from.auto_id_;
+  autoid_ = from.autoid_;
   // @@protoc_insertion_point(copy_constructor:milvus.proto.schema.CollectionSchema)
 }
 
@@ -688,7 +688,7 @@ void CollectionSchema::SharedCtor() {
   ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_CollectionSchema_schema_2eproto.base);
   name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   description_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-  auto_id_ = false;
+  autoid_ = false;
 }
 
 CollectionSchema::~CollectionSchema() {
@@ -719,7 +719,7 @@ void CollectionSchema::Clear() {
   fields_.Clear();
   name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   description_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-  auto_id_ = false;
+  autoid_ = false;
   _internal_metadata_.Clear();
 }
 
@@ -745,10 +745,10 @@ const char* CollectionSchema::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPA
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // bool auto_id = 3;
+      // bool autoID = 3;
       case 3:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 24)) {
-          auto_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          autoid_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
@@ -824,13 +824,13 @@ bool CollectionSchema::MergePartialFromCodedStream(
         break;
       }
 
-      // bool auto_id = 3;
+      // bool autoID = 3;
       case 3: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (24 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
                    bool, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_BOOL>(
-                 input, &auto_id_)));
+                 input, &autoid_)));
         } else {
           goto handle_unusual;
         }
@@ -895,9 +895,9 @@ void CollectionSchema::SerializeWithCachedSizes(
       2, this->description(), output);
   }
 
-  // bool auto_id = 3;
-  if (this->auto_id() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBool(3, this->auto_id(), output);
+  // bool autoID = 3;
+  if (this->autoid() != 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBool(3, this->autoid(), output);
   }
 
   // repeated .milvus.proto.schema.FieldSchema fields = 4;
@@ -944,9 +944,9 @@ void CollectionSchema::SerializeWithCachedSizes(
         2, this->description(), target);
   }
 
-  // bool auto_id = 3;
-  if (this->auto_id() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBoolToArray(3, this->auto_id(), target);
+  // bool autoID = 3;
+  if (this->autoid() != 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBoolToArray(3, this->autoid(), target);
   }
 
   // repeated .milvus.proto.schema.FieldSchema fields = 4;
@@ -1003,8 +1003,8 @@ size_t CollectionSchema::ByteSizeLong() const {
         this->description());
   }
 
-  // bool auto_id = 3;
-  if (this->auto_id() != 0) {
+  // bool autoID = 3;
+  if (this->autoid() != 0) {
     total_size += 1 + 1;
   }
 
@@ -1044,8 +1044,8 @@ void CollectionSchema::MergeFrom(const CollectionSchema& from) {
 
     description_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.description_);
   }
-  if (from.auto_id() != 0) {
-    set_auto_id(from.auto_id());
+  if (from.autoid() != 0) {
+    set_autoid(from.autoid());
   }
 }
 
@@ -1075,7 +1075,7 @@ void CollectionSchema::InternalSwap(CollectionSchema* other) {
     GetArenaNoVirtual());
   description_.Swap(&other->description_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
-  swap(auto_id_, other->auto_id_);
+  swap(autoid_, other->autoid_);
 }
 
 ::PROTOBUF_NAMESPACE_ID::Metadata CollectionSchema::GetMetadata() const {

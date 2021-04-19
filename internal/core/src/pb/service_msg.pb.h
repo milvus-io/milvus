@@ -2422,11 +2422,11 @@ class Hits :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kIdsFieldNumber = 1,
+    kIDsFieldNumber = 1,
     kRowDataFieldNumber = 2,
     kScoresFieldNumber = 3,
   };
-  // repeated int64 ids = 1;
+  // repeated int64 IDs = 1;
   int ids_size() const;
   void clear_ids();
   ::PROTOBUF_NAMESPACE_ID::int64 ids(int index) const;
@@ -4109,7 +4109,7 @@ Score::mutable_values() {
 
 // Hits
 
-// repeated int64 ids = 1;
+// repeated int64 IDs = 1;
 inline int Hits::ids_size() const {
   return ids_.size();
 }
@@ -4117,25 +4117,25 @@ inline void Hits::clear_ids() {
   ids_.Clear();
 }
 inline ::PROTOBUF_NAMESPACE_ID::int64 Hits::ids(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.proto.service.Hits.ids)
+  // @@protoc_insertion_point(field_get:milvus.proto.service.Hits.IDs)
   return ids_.Get(index);
 }
 inline void Hits::set_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
   ids_.Set(index, value);
-  // @@protoc_insertion_point(field_set:milvus.proto.service.Hits.ids)
+  // @@protoc_insertion_point(field_set:milvus.proto.service.Hits.IDs)
 }
 inline void Hits::add_ids(::PROTOBUF_NAMESPACE_ID::int64 value) {
   ids_.Add(value);
-  // @@protoc_insertion_point(field_add:milvus.proto.service.Hits.ids)
+  // @@protoc_insertion_point(field_add:milvus.proto.service.Hits.IDs)
 }
 inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
 Hits::ids() const {
-  // @@protoc_insertion_point(field_list:milvus.proto.service.Hits.ids)
+  // @@protoc_insertion_point(field_list:milvus.proto.service.Hits.IDs)
   return ids_;
 }
 inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
 Hits::mutable_ids() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.proto.service.Hits.ids)
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.service.Hits.IDs)
   return &ids_;
 }
 

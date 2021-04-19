@@ -49,15 +49,15 @@ func (iNode *insertNode) Operate(in []*Msg) []*Msg {
 
 	// 1. hash insertMessages to insertData
 	for _, task := range iMsg.insertMessages {
-		if len(task.RowIds) != len(task.Timestamps) || len(task.RowIds) != len(task.RowData) {
+		if len(task.RowIDs) != len(task.Timestamps) || len(task.RowIDs) != len(task.RowData) {
 			// TODO: what if the messages are misaligned?
 			// Here, we ignore those messages and print error
 			log.Println("Error, misaligned messages detected")
 			continue
 		}
-		insertData.insertIDs[task.SegmentId] = append(insertData.insertIDs[task.SegmentId], task.RowIds...)
-		insertData.insertTimestamps[task.SegmentId] = append(insertData.insertTimestamps[task.SegmentId], task.Timestamps...)
-		insertData.insertRecords[task.SegmentId] = append(insertData.insertRecords[task.SegmentId], task.RowData...)
+		insertData.insertIDs[task.SegmentID] = append(insertData.insertIDs[task.SegmentID], task.RowIDs...)
+		insertData.insertTimestamps[task.SegmentID] = append(insertData.insertTimestamps[task.SegmentID], task.Timestamps...)
+		insertData.insertRecords[task.SegmentID] = append(insertData.insertRecords[task.SegmentID], task.RowData...)
 	}
 
 	// 2. do preInsert

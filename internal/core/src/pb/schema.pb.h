@@ -411,7 +411,7 @@ class CollectionSchema :
     kFieldsFieldNumber = 4,
     kNameFieldNumber = 1,
     kDescriptionFieldNumber = 2,
-    kAutoIdFieldNumber = 3,
+    kAutoIDFieldNumber = 3,
   };
   // repeated .milvus.proto.schema.FieldSchema fields = 4;
   int fields_size() const;
@@ -446,10 +446,10 @@ class CollectionSchema :
   std::string* release_description();
   void set_allocated_description(std::string* description);
 
-  // bool auto_id = 3;
-  void clear_auto_id();
-  bool auto_id() const;
-  void set_auto_id(bool value);
+  // bool autoID = 3;
+  void clear_autoid();
+  bool autoid() const;
+  void set_autoid(bool value);
 
   // @@protoc_insertion_point(class_scope:milvus.proto.schema.CollectionSchema)
  private:
@@ -459,7 +459,7 @@ class CollectionSchema :
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::FieldSchema > fields_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr description_;
-  bool auto_id_;
+  bool autoid_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_schema_2eproto;
 };
@@ -750,18 +750,18 @@ inline void CollectionSchema::set_allocated_description(std::string* description
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.schema.CollectionSchema.description)
 }
 
-// bool auto_id = 3;
-inline void CollectionSchema::clear_auto_id() {
-  auto_id_ = false;
+// bool autoID = 3;
+inline void CollectionSchema::clear_autoid() {
+  autoid_ = false;
 }
-inline bool CollectionSchema::auto_id() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.schema.CollectionSchema.auto_id)
-  return auto_id_;
+inline bool CollectionSchema::autoid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.CollectionSchema.autoID)
+  return autoid_;
 }
-inline void CollectionSchema::set_auto_id(bool value) {
+inline void CollectionSchema::set_autoid(bool value) {
   
-  auto_id_ = value;
-  // @@protoc_insertion_point(field_set:milvus.proto.schema.CollectionSchema.auto_id)
+  autoid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.CollectionSchema.autoID)
 }
 
 // repeated .milvus.proto.schema.FieldSchema fields = 4;

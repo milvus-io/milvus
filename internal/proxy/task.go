@@ -13,7 +13,7 @@ import (
 )
 
 type task interface {
-	ID() UniqueID // return ReqId
+	ID() UniqueID // return ReqID
 	Type() internalpb.MsgType
 	BeginTs() Timestamp
 	EndTs() Timestamp
@@ -50,7 +50,7 @@ func (it *InsertTask) EndTs() Timestamp {
 }
 
 func (it *InsertTask) ID() UniqueID {
-	return it.ReqId
+	return it.ReqID
 }
 
 func (it *InsertTask) Type() internalpb.MsgType {
@@ -104,7 +104,7 @@ type CreateCollectionTask struct {
 }
 
 func (cct *CreateCollectionTask) ID() UniqueID {
-	return cct.ReqId
+	return cct.ReqID
 }
 
 func (cct *CreateCollectionTask) Type() internalpb.MsgType {
@@ -172,7 +172,7 @@ type DropCollectionTask struct {
 }
 
 func (dct *DropCollectionTask) ID() UniqueID {
-	return dct.ReqId
+	return dct.ReqID
 }
 
 func (dct *DropCollectionTask) Type() internalpb.MsgType {
@@ -241,7 +241,7 @@ type QueryTask struct {
 }
 
 func (qt *QueryTask) ID() UniqueID {
-	return qt.ReqId
+	return qt.ReqID
 }
 
 func (qt *QueryTask) Type() internalpb.MsgType {
@@ -320,7 +320,7 @@ func (qt *QueryTask) Notify(err error) {
 				qt.resultChan <- &servicepb.QueryResult{}
 				return
 			}
-			k := len(searchResults[0].Hits[0].Ids) // k
+			k := len(searchResults[0].Hits[0].IDs) // k
 			queryResult := &servicepb.QueryResult{
 				Status: &commonpb.Status{
 					ErrorCode: 0,
@@ -347,7 +347,7 @@ func (qt *QueryTask) Notify(err error) {
 						}
 					}
 					choiceOffset := locs[choice]
-					hits.Ids = append(hits.Ids, searchResults[choice].Hits[i].Ids[choiceOffset])
+					hits.IDs = append(hits.IDs, searchResults[choice].Hits[i].IDs[choiceOffset])
 					hits.RowData = append(hits.RowData, searchResults[choice].Hits[i].RowData[choiceOffset])
 					hits.Scores = append(hits.Scores, searchResults[choice].Hits[i].Scores[choiceOffset])
 					locs[choice]++
@@ -369,7 +369,7 @@ type HasCollectionTask struct {
 }
 
 func (hct *HasCollectionTask) ID() UniqueID {
-	return hct.ReqId
+	return hct.ReqID
 }
 
 func (hct *HasCollectionTask) Type() internalpb.MsgType {
@@ -440,7 +440,7 @@ type DescribeCollectionTask struct {
 }
 
 func (dct *DescribeCollectionTask) ID() UniqueID {
-	return dct.ReqId
+	return dct.ReqID
 }
 
 func (dct *DescribeCollectionTask) Type() internalpb.MsgType {
@@ -510,7 +510,7 @@ type ShowCollectionsTask struct {
 }
 
 func (sct *ShowCollectionsTask) ID() UniqueID {
-	return sct.ReqId
+	return sct.ReqID
 }
 
 func (sct *ShowCollectionsTask) Type() internalpb.MsgType {

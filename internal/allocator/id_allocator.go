@@ -36,19 +36,19 @@ func NewIDAllocator(ctx context.Context) (*IDAllocator, error) {
 func (ta *IDAllocator) syncID() {
 	fmt.Println("syncID")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	req := &internalpb.IdRequest{
-		PeerId: 1,
+	req := &internalpb.IDRequest{
+		PeerID: 1,
 		Role:   internalpb.PeerRole_Proxy,
 		Count:  ta.countPerRPC,
 	}
-	resp, err := ta.masterClient.AllocId(ctx, req)
+	resp, err := ta.masterClient.AllocID(ctx, req)
 
 	cancel()
 	if err != nil {
 		log.Panic("syncID Failed!!!!!")
 		return
 	}
-	ta.idStart = resp.GetId()
+	ta.idStart = resp.GetID()
 	ta.idEnd = ta.idStart + int64(resp.GetCount())
 
 }

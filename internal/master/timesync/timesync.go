@@ -72,16 +72,16 @@ func (ttBarrier *softTimeTickBarrier) Start() error {
 				if len(ttmsgs.Msgs) > 0 {
 					for _, timetickmsg := range ttmsgs.Msgs {
 						ttmsg := (*timetickmsg).(*ms.TimeTickMsg)
-						oldT, ok := ttBarrier.peer2LastTt[ttmsg.PeerId]
-						log.Printf("[softTimeTickBarrier] peer(%d)=%d\n", ttmsg.PeerId, ttmsg.Timestamp)
+						oldT, ok := ttBarrier.peer2LastTt[ttmsg.PeerID]
+						log.Printf("[softTimeTickBarrier] peer(%d)=%d\n", ttmsg.PeerID, ttmsg.Timestamp)
 
 						if !ok {
-							log.Printf("[softTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.PeerId)
+							log.Printf("[softTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.PeerID)
 							continue
 						}
 
 						if ttmsg.Timestamp > oldT {
-							ttBarrier.peer2LastTt[ttmsg.PeerId] = ttmsg.Timestamp
+							ttBarrier.peer2LastTt[ttmsg.PeerID] = ttmsg.Timestamp
 
 							// get a legal Timestamp
 							ts := ttBarrier.minTimestamp()
@@ -189,20 +189,20 @@ func (ttBarrier *hardTimeTickBarrier) Start() error {
 						// Suppose ttmsg.Timestamp from stream is always larger than the previous one,
 						// that `ttmsg.Timestamp > oldT`
 						ttmsg := (*timetickmsg).(*ms.TimeTickMsg)
-						log.Printf("[hardTimeTickBarrier] peer(%d)=%d\n", ttmsg.PeerId, ttmsg.Timestamp)
+						log.Printf("[hardTimeTickBarrier] peer(%d)=%d\n", ttmsg.PeerID, ttmsg.Timestamp)
 
-						oldT, ok := ttBarrier.peer2Tt[ttmsg.PeerId]
+						oldT, ok := ttBarrier.peer2Tt[ttmsg.PeerID]
 						if !ok {
-							log.Printf("[hardTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.PeerId)
+							log.Printf("[hardTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.PeerID)
 							continue
 						}
 
 						if oldT > state {
 							log.Printf("[hardTimeTickBarrier] Warning: peer(%d) timestamp(%d) ahead\n",
-								ttmsg.PeerId, ttmsg.Timestamp)
+								ttmsg.PeerID, ttmsg.Timestamp)
 						}
 
-						ttBarrier.peer2Tt[ttmsg.PeerId] = ttmsg.Timestamp
+						ttBarrier.peer2Tt[ttmsg.PeerID] = ttmsg.Timestamp
 
 						newState := ttBarrier.minTimestamp()
 						if newState > state {

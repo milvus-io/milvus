@@ -68,7 +68,7 @@ func (tt *timeTick) tick() error {
 	var timeTickMsg msgstream.TsMsg = &msgstream.TimeTickMsg{
 		TimeTickMsg: internalpb.TimeTickMsg{
 			MsgType:   internalpb.MsgType_kTimeTick,
-			PeerId:    tt.peerID,
+			PeerID:    tt.peerID,
 			Timestamp: tt.currentTick,
 		},
 	}

@@ -6,32 +6,32 @@ import "common.proto";
 import "schema.proto";
 
 message TenantMeta {
-  int64 id = 1;
+  int64 ID = 1;
   int64 num_query_nodes = 2;
-  repeated string insert_channel_ids = 3;
-  string query_channel_id = 4;
+  repeated string insert_channelIDs = 3;
+  string query_channelID = 4;
 }
 
 
 message ProxyMeta {
-  int64 id = 1;
+  int64 ID = 1;
   common.Address address = 2;
-  repeated string result_channel_ids = 3;
+  repeated string result_channelIDs = 3;
 }
 
 
 message CollectionMeta {
-  int64 id=1;
+  int64 ID=1;
   schema.CollectionSchema schema=2;
   uint64 create_time=3;
-  repeated int64 segment_ids=4;
+  repeated int64 segmentIDs=4;
   repeated string partition_tags=5;
 }
 
 
 message SegmentMeta {
-  int64 segment_id=1;
-  int64 collection_id =2;
+  int64 segmentID=1;
+  int64 collectionID =2;
   string partition_tag=3;
   int32 channel_start=4;
   int32 channel_end=5;

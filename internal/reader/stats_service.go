@@ -51,7 +51,7 @@ func (sService *statsService) sendSegmentStatistic() {
 
 		stat := internalpb.SegmentStats{
 			// TODO: set master pb's segment id type from uint64 to int64
-			SegmentId:  segmentID,
+			SegmentID:  segmentID,
 			MemorySize: currentMemSize,
 			NumRows:    segmentNumOfRows,
 		}

@@ -44,7 +44,7 @@ func (ta *TimestampAllocator) syncTs() {
 	fmt.Println("sync TS")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	req := &internalpb.TsoRequest{
-		PeerId: 1,
+		PeerID: 1,
 		Role:   internalpb.PeerRole_Proxy,
 		Count:  ta.countPerRPC,
 	}

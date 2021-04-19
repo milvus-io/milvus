@@ -14,7 +14,7 @@ type Timestamp = typeutil.Timestamp
 //	return &msgpb.InsertOrDeleteMsg{
 //		CollectionName: collectionName,
 //		PartitionTag:   partitionTag,
-//		SegmentId:      UniqueID(entityId / 100),
+//		SegmentID:      UniqueID(entityId / 100),
 //		Uid:            UniqueID(entityId),
 //		Timestamp:      Timestamp(entityId),
 //		ClientId:       0,

@@ -42,6 +42,6 @@ message FieldSchema {
 message CollectionSchema {
     string name = 1;
     string description = 2;
-    bool auto_id = 3;
+    bool autoID = 3;
     repeated FieldSchema fields = 4;
 }
