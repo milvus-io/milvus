@@ -353,6 +353,7 @@ service MilvusService {
   rpc GetPersistentSegmentInfo(PersistentSegmentInfoRequest) returns (PersistentSegmentInfoResponse) {}
   rpc GetQuerySegmentInfo(QuerySegmentInfoRequest) returns (QuerySegmentInfoResponse) {}
 
+  rpc RegisterLink(common.Empty) returns (RegisterLinkResponse) {}
 }
 
 message RegisterLinkResponse {

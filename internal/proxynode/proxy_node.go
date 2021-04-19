@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
@@ -33,7 +34,7 @@ type NodeImpl struct {
 	ip         string
 	port       int
 
-	stateCode internalpb2.StateCode
+	stateCode atomic.Value
 
 	masterClient       MasterClient
 	indexServiceClient IndexServiceClient
@@ -65,7 +66,7 @@ func NewProxyNodeImpl(ctx context.Context, factory msgstream.Factory) (*NodeImpl
 		cancel:    cancel,
 		msFactory: factory,
 	}
-
+	node.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
 	return node, nil
 
 }
@@ -165,9 +166,6 @@ func (node *NodeImpl) Init() error {
 		Params.SearchResultChannelNames = []string{resp.ResultChannel}
 	}
 
-	node.UpdateStateCode(internalpb2.StateCode_HEALTHY)
-	log.Println("proxy node is healthy ...")
-
 	// todo
 	//Params.InsertChannelNames, err = node.dataServiceClient.GetInsertChannels()
 	//if err != nil {
@@ -263,6 +261,9 @@ func (node *NodeImpl) Start() error {
 	for _, cb := range node.startCallbacks {
 		cb()
 	}
+
+	node.UpdateStateCode(internalpb2.StateCode_HEALTHY)
+	log.Println("proxy node is healthy ...")
 
 	return nil
 }

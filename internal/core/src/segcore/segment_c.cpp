@@ -150,14 +150,14 @@ Insert(CSegmentInterface c_segment,
        void* raw_data,
        int sizeof_per_row,
        int64_t count) {
-    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
-    milvus::segcore::RowBasedRawData dataChunk{};
-
-    dataChunk.raw_data = raw_data;
-    dataChunk.sizeof_per_row = sizeof_per_row;
-    dataChunk.count = count;
-
     try {
+        auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
+        milvus::segcore::RowBasedRawData dataChunk{};
+
+        dataChunk.raw_data = raw_data;
+        dataChunk.sizeof_per_row = sizeof_per_row;
+        dataChunk.count = count;
+
         auto res = segment->Insert(reserved_offset, size, row_ids, timestamps, dataChunk);
 
         auto status = CStatus();

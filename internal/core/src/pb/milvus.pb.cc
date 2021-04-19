@@ -1610,7 +1610,7 @@ const char descriptor_table_protodef_milvus_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "n.Address\022+\n\006status\030\002 \001(\0132\033.milvus.proto"
   ".common.Status*@\n\017PlaceholderType\022\010\n\004NON"
   "E\020\000\022\021\n\rVECTOR_BINARY\020d\022\020\n\014VECTOR_FLOAT\020e"
-  "2\276\023\n\rMilvusService\022_\n\020CreateCollection\022,"
+  "2\227\024\n\rMilvusService\022_\n\020CreateCollection\022,"
   ".milvus.proto.milvus.CreateCollectionReq"
   "uest\032\033.milvus.proto.common.Status\"\000\022[\n\016D"
   "ropCollection\022*.milvus.proto.milvus.Drop"
@@ -1672,11 +1672,14 @@ const char descriptor_table_protodef_milvus_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "gmentInfoResponse\"\000\022t\n\023GetQuerySegmentIn"
   "fo\022,.milvus.proto.milvus.QuerySegmentInf"
   "oRequest\032-.milvus.proto.milvus.QuerySegm"
-  "entInfoResponse\"\0002g\n\014ProxyService\022W\n\014Reg"
-  "isterLink\022\032.milvus.proto.common.Empty\032)."
-  "milvus.proto.milvus.RegisterLinkResponse"
-  "\"\000BBZ@github.com/zilliztech/milvus-distr"
-  "ibuted/internal/proto/milvuspbb\006proto3"
+  "entInfoResponse\"\000\022W\n\014RegisterLink\022\032.milv"
+  "us.proto.common.Empty\032).milvus.proto.mil"
+  "vus.RegisterLinkResponse\"\0002g\n\014ProxyServi"
+  "ce\022W\n\014RegisterLink\022\032.milvus.proto.common"
+  ".Empty\032).milvus.proto.milvus.RegisterLin"
+  "kResponse\"\000BBZ@github.com/zilliztech/mil"
+  "vus-distributed/internal/proto/milvuspbb"
+  "\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_milvus_2eproto_deps[2] = {
   &::descriptor_table_common_2eproto,
@@ -1735,7 +1738,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_mil
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_milvus_2eproto_once;
 static bool descriptor_table_milvus_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_milvus_2eproto = {
-  &descriptor_table_milvus_2eproto_initialized, descriptor_table_protodef_milvus_2eproto, "milvus.proto", 8718,
+  &descriptor_table_milvus_2eproto_initialized, descriptor_table_protodef_milvus_2eproto, "milvus.proto", 8807,
   &descriptor_table_milvus_2eproto_once, descriptor_table_milvus_2eproto_sccs, descriptor_table_milvus_2eproto_deps, 48, 2,
   schemas, file_default_instances, TableStruct_milvus_2eproto::offsets,
   file_level_metadata_milvus_2eproto, 48, file_level_enum_descriptors_milvus_2eproto, file_level_service_descriptors_milvus_2eproto,

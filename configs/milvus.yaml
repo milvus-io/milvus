@@ -47,7 +47,7 @@ master:
   port: 53100
 
 proxyNode:
-  port: 21122
+  port: 19530
 
 queryService:
   address: localhost
@@ -55,7 +55,7 @@ queryService:
 
 proxyService:
   address: localhost
-  port: 19530
+  port: 21122
 
 queryNode:
   gracefulTime: 5000 #ms

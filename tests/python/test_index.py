@@ -820,8 +820,8 @@ class TestIndexAsync:
     @pytest.mark.level(2)
     def test_create_index_with_invalid_collectionname(self, connect):
         collection_name = " "
-        future = connect.create_index(collection_name, field_name, default_index, _async=True)
         with pytest.raises(Exception) as e:
+            future = connect.create_index(collection_name, field_name, default_index, _async=True)
             res = future.result()
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
