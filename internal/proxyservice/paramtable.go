@@ -8,48 +8,60 @@ import (
 
 type ParamTable struct {
 	paramtable.BaseTable
+
+	PulsarAddress          string
+	MasterAddress          string
+	NodeTimeTickChannel    []string
+	ServiceTimeTickChannel string
+	DataServiceAddress     string
 }
 
 var Params ParamTable
 
 func (pt *ParamTable) Init() {
 	pt.BaseTable.Init()
+
+	pt.initPulsarAddress()
+	pt.initMasterAddress()
+	pt.initNodeTimeTickChannel()
+	pt.initServiceTimeTickChannel()
+	pt.initDataServiceAddress()
 }
 
-func (pt *ParamTable) PulsarAddress() string {
+func (pt *ParamTable) initPulsarAddress() {
 	ret, err := pt.Load("_PulsarAddress")
 	if err != nil {
 		panic(err)
 	}
-	return ret
+	pt.PulsarAddress = ret
 }
 
-func (pt *ParamTable) MasterAddress() string {
+func (pt *ParamTable) initMasterAddress() {
 	ret, err := pt.Load("_MasterAddress")
 	if err != nil {
 		panic(err)
 	}
-	return ret
+	pt.MasterAddress = ret
 }
 
-func (pt *ParamTable) NodeTimeTickChannel() []string {
+func (pt *ParamTable) initNodeTimeTickChannel() {
 	prefix, err := pt.Load("msgChannel.chanNamePrefix.proxyTimeTick")
 	if err != nil {
 		log.Panic(err)
 	}
 	prefix += "-0"
-	return []string{prefix}
+	pt.NodeTimeTickChannel = []string{prefix}
 }
 
-func (pt *ParamTable) ServiceTimeTickChannel() string {
+func (pt *ParamTable) initServiceTimeTickChannel() {
 	ch, err := pt.Load("msgChannel.chanNamePrefix.proxyServiceTimeTick")
 	if err != nil {
 		log.Panic(err)
 	}
-	return ch
+	pt.ServiceTimeTickChannel = ch
 }
 
-func (pt *ParamTable) DataServiceAddress() string {
+func (pt *ParamTable) initDataServiceAddress() {
 	// NOT USED NOW
-	return "TODO: read from config"
+	pt.DataServiceAddress = "TODO: read from config"
 }

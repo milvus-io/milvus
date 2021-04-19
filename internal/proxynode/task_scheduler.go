@@ -374,13 +374,13 @@ func (sched *TaskScheduler) queryResultLoop() {
 	defer sched.wg.Done()
 
 	unmarshal := util.NewUnmarshalDispatcher()
-	queryResultMsgStream := pulsarms.NewPulsarMsgStream(sched.ctx, Params.MsgStreamSearchResultBufSize())
-	queryResultMsgStream.SetPulsarClient(Params.PulsarAddress())
-	queryResultMsgStream.CreatePulsarConsumers(Params.SearchResultChannelNames(),
-		Params.ProxySubName(),
+	queryResultMsgStream := pulsarms.NewPulsarMsgStream(sched.ctx, Params.MsgStreamSearchResultBufSize)
+	queryResultMsgStream.SetPulsarClient(Params.PulsarAddress)
+	queryResultMsgStream.CreatePulsarConsumers(Params.SearchResultChannelNames,
+		Params.ProxySubName,
 		unmarshal,
-		Params.MsgStreamSearchResultPulsarBufSize())
-	queryNodeNum := Params.queryNodeNum()
+		Params.MsgStreamSearchResultPulsarBufSize)
+	queryNodeNum := Params.QueryNodeNum
 
 	queryResultMsgStream.Start()
 	defer queryResultMsgStream.Close()

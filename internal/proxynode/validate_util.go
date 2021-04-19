@@ -30,9 +30,9 @@ func ValidateCollectionName(collName string) error {
 	}
 
 	invalidMsg := "Invalid collection name: " + collName + ". "
-	if int64(len(collName)) > Params.MaxNameLength() {
+	if int64(len(collName)) > Params.MaxNameLength {
 		msg := invalidMsg + "The length of a collection name must be less than " +
-			strconv.FormatInt(Params.MaxNameLength(), 10) + " characters."
+			strconv.FormatInt(Params.MaxNameLength, 10) + " characters."
 		return errors.New(msg)
 	}
 
@@ -61,9 +61,9 @@ func ValidatePartitionTag(partitionTag string, strictCheck bool) error {
 		return errors.New(msg)
 	}
 
-	if int64(len(partitionTag)) > Params.MaxNameLength() {
+	if int64(len(partitionTag)) > Params.MaxNameLength {
 		msg := invalidMsg + "The length of a partition tag must be less than " +
-			strconv.FormatInt(Params.MaxNameLength(), 10) + " characters."
+			strconv.FormatInt(Params.MaxNameLength, 10) + " characters."
 		return errors.New(msg)
 	}
 
@@ -95,9 +95,9 @@ func ValidateFieldName(fieldName string) error {
 	}
 
 	invalidMsg := "Invalid field name: " + fieldName + ". "
-	if int64(len(fieldName)) > Params.MaxNameLength() {
+	if int64(len(fieldName)) > Params.MaxNameLength {
 		msg := invalidMsg + "The length of a field name must be less than " +
-			strconv.FormatInt(Params.MaxNameLength(), 10) + " characters."
+			strconv.FormatInt(Params.MaxNameLength, 10) + " characters."
 		return errors.New(msg)
 	}
 
@@ -119,9 +119,9 @@ func ValidateFieldName(fieldName string) error {
 }
 
 func ValidateDimension(dim int64, isBinary bool) error {
-	if dim <= 0 || dim > Params.MaxDimension() {
+	if dim <= 0 || dim > Params.MaxDimension {
 		return errors.New("invalid dimension: " + strconv.FormatInt(dim, 10) + ". should be in range 1 ~ " +
-			strconv.FormatInt(Params.MaxDimension(), 10) + ".")
+			strconv.FormatInt(Params.MaxDimension, 10) + ".")
 	}
 	if isBinary && dim%8 != 0 {
 		return errors.New("invalid dimension: " + strconv.FormatInt(dim, 10) + ". should be multiple of 8.")

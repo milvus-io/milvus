@@ -503,7 +503,6 @@ func (node *NodeImpl) GetIndexState(ctx context.Context, request *milvuspb.Index
 	dipt := &GetIndexStateTask{
 		Condition:         NewTaskCondition(ctx),
 		IndexStateRequest: request,
-		masterClient:      node.masterClient,
 	}
 
 	var cancel func()
@@ -568,7 +567,7 @@ func (node *NodeImpl) Insert(ctx context.Context, request *milvuspb.InsertReques
 		rowIDAllocator:        node.idAllocator,
 	}
 	if len(it.PartitionName) <= 0 {
-		it.PartitionName = Params.defaultPartitionTag()
+		it.PartitionName = Params.DefaultPartitionTag
 	}
 
 	var cancel func()
@@ -621,9 +620,9 @@ func (node *NodeImpl) Search(ctx context.Context, request *milvuspb.SearchReques
 		SearchRequest: internalpb2.SearchRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_kSearch,
-				SourceID: Params.ProxyID(),
+				SourceID: Params.ProxyID,
 			},
-			ResultChannelID: strconv.FormatInt(Params.ProxyID(), 10),
+			ResultChannelID: strconv.FormatInt(Params.ProxyID, 10),
 		},
 		queryMsgStream: node.queryMsgStream,
 		resultBuf:      make(chan []*internalpb2.SearchResults),

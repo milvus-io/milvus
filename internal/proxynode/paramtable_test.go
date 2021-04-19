@@ -6,71 +6,71 @@ import (
 )
 
 func TestParamTable_InsertChannelRange(t *testing.T) {
-	ret := Params.InsertChannelNames()
+	ret := Params.InsertChannelNames
 	fmt.Println(ret)
 }
 
 func TestParamTable_DeleteChannelNames(t *testing.T) {
-	ret := Params.DeleteChannelNames()
+	ret := Params.DeleteChannelNames
 	fmt.Println(ret)
 }
 
 func TestParamTable_K2SChannelNames(t *testing.T) {
-	ret := Params.K2SChannelNames()
+	ret := Params.K2SChannelNames
 	fmt.Println(ret)
 }
 
 func TestParamTable_SearchChannelNames(t *testing.T) {
-	ret := Params.SearchChannelNames()
+	ret := Params.SearchChannelNames
 	fmt.Println(ret)
 }
 
 func TestParamTable_SearchResultChannelNames(t *testing.T) {
-	ret := Params.SearchResultChannelNames()
+	ret := Params.SearchResultChannelNames
 	fmt.Println(ret)
 }
 
 func TestParamTable_ProxySubName(t *testing.T) {
-	ret := Params.ProxySubName()
+	ret := Params.ProxySubName
 	fmt.Println(ret)
 }
 
 func TestParamTable_ProxyTimeTickChannelNames(t *testing.T) {
-	ret := Params.ProxyTimeTickChannelNames()
+	ret := Params.ProxyTimeTickChannelNames
 	fmt.Println(ret)
 }
 
 func TestParamTable_DataDefinitionChannelNames(t *testing.T) {
-	ret := Params.DataDefinitionChannelNames()
+	ret := Params.DataDefinitionChannelNames
 	fmt.Println(ret)
 }
 
 func TestParamTable_MsgStreamInsertBufSize(t *testing.T) {
-	ret := Params.MsgStreamInsertBufSize()
+	ret := Params.MsgStreamInsertBufSize
 	fmt.Println(ret)
 }
 
 func TestParamTable_MsgStreamSearchBufSize(t *testing.T) {
-	ret := Params.MsgStreamSearchBufSize()
+	ret := Params.MsgStreamSearchBufSize
 	fmt.Println(ret)
 }
 
 func TestParamTable_MsgStreamSearchResultBufSize(t *testing.T) {
-	ret := Params.MsgStreamSearchResultBufSize()
+	ret := Params.MsgStreamSearchResultBufSize
 	fmt.Println(ret)
 }
 
 func TestParamTable_MsgStreamSearchResultPulsarBufSize(t *testing.T) {
-	ret := Params.MsgStreamSearchResultPulsarBufSize()
+	ret := Params.MsgStreamSearchResultPulsarBufSize
 	fmt.Println(ret)
 }
 
 func TestParamTable_MsgStreamTimeTickBufSize(t *testing.T) {
-	ret := Params.MsgStreamTimeTickBufSize()
+	ret := Params.MsgStreamTimeTickBufSize
 	fmt.Println(ret)
 }
 
 func TestParamTable_defaultPartitionTag(t *testing.T) {
-	ret := Params.defaultPartitionTag()
+	ret := Params.DefaultPartitionTag
 	fmt.Println("default partition tag: ", ret)
 }

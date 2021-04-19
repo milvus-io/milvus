@@ -2,7 +2,11 @@ package proxyservice
 
 import (
 	"context"
-	"fmt"
+	"io/ioutil"
+	"log"
+	"os"
+	"path"
+	"runtime"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
@@ -18,17 +22,62 @@ import (
 )
 
 const (
-	timeoutInterval = time.Second * 10
+	timeoutInterval      = time.Second * 10
+	StartParamsKey       = "START_PARAMS"
+	ChannelYamlContent   = "advanced/channel.yaml"
+	CommonYamlContent    = "advanced/common.yaml"
+	DataNodeYamlContent  = "advanced/data_node.yaml"
+	MasterYamlContent    = "advanced/master.yaml"
+	ProxyNodeYamlContent = "advanced/proxy_node.yaml"
+	QueryNodeYamlContent = "advanced/query_node.yaml"
+	WriteNodeYamlContent = "advanced/write_node.yaml"
+	MilvusYamlContent    = "milvus.yaml"
 )
 
 func (s *ServiceImpl) fillNodeInitParams() error {
 	s.nodeStartParams = make([]*commonpb.KeyValuePair, 0)
-	nodeParams := &ParamTable{}
-	nodeParams.Init()
-	err := nodeParams.LoadYaml("advanced/proxy_node.yaml")
-	if err != nil {
-		return err
+
+	getConfigContentByName := func(fileName string) []byte {
+		_, fpath, _, _ := runtime.Caller(0)
+		configFile := path.Dir(fpath) + "/../../../configs/" + fileName
+		_, err := os.Stat(configFile)
+		if os.IsNotExist(err) {
+			runPath, err := os.Getwd()
+			if err != nil {
+				panic(err)
+			}
+			configFile = runPath + "/configs/" + fileName
+		}
+		data, err := ioutil.ReadFile(configFile)
+		if err != nil {
+			panic(err)
+		}
+		return data
 	}
+
+	channelYamlContent := getConfigContentByName(ChannelYamlContent)
+	commonYamlContent := getConfigContentByName(CommonYamlContent)
+	dataNodeYamlContent := getConfigContentByName(DataNodeYamlContent)
+	masterYamlContent := getConfigContentByName(MasterYamlContent)
+	proxyNodeYamlContent := getConfigContentByName(ProxyNodeYamlContent)
+	queryNodeYamlContent := getConfigContentByName(QueryNodeYamlContent)
+	writeNodeYamlContent := getConfigContentByName(WriteNodeYamlContent)
+	milvusYamlContent := getConfigContentByName(MilvusYamlContent)
+
+	var allContent []byte
+	allContent = append(allContent, channelYamlContent...)
+	allContent = append(allContent, commonYamlContent...)
+	allContent = append(allContent, dataNodeYamlContent...)
+	allContent = append(allContent, masterYamlContent...)
+	allContent = append(allContent, proxyNodeYamlContent...)
+	allContent = append(allContent, queryNodeYamlContent...)
+	allContent = append(allContent, writeNodeYamlContent...)
+	allContent = append(allContent, milvusYamlContent...)
+
+	s.nodeStartParams = append(s.nodeStartParams, &commonpb.KeyValuePair{
+		Key:   StartParamsKey,
+		Value: string(allContent),
+	})
 
 	return nil
 }
@@ -40,32 +89,18 @@ func (s *ServiceImpl) Init() error {
 	}
 
 	serviceTimeTickMsgStream := pulsarms.NewPulsarTtMsgStream(s.ctx, 1024)
-	serviceTimeTickMsgStream.SetPulsarClient(Params.PulsarAddress())
-	serviceTimeTickMsgStream.CreatePulsarProducers([]string{Params.ServiceTimeTickChannel()})
+	serviceTimeTickMsgStream.SetPulsarClient(Params.PulsarAddress)
+	serviceTimeTickMsgStream.CreatePulsarProducers([]string{Params.ServiceTimeTickChannel})
 
 	nodeTimeTickMsgStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024)
-	nodeTimeTickMsgStream.SetPulsarClient(Params.PulsarAddress())
-	nodeTimeTickMsgStream.CreatePulsarConsumers(Params.NodeTimeTickChannel(),
+	nodeTimeTickMsgStream.SetPulsarClient(Params.PulsarAddress)
+	nodeTimeTickMsgStream.CreatePulsarConsumers(Params.NodeTimeTickChannel,
 		"proxyservicesub", // TODO: add config
 		util.NewUnmarshalDispatcher(),
 		1024)
 
 	ttBarrier := newSoftTimeTickBarrier(s.ctx, nodeTimeTickMsgStream, []UniqueID{0}, 10)
 	s.tick = newTimeTick(s.ctx, ttBarrier, serviceTimeTickMsgStream)
-
-	// dataServiceAddr := Params.DataServiceAddress()
-	// s.dataServiceClient = dataservice.NewClient(dataServiceAddr)
-
-	// insertChannelsRequest := &datapb.InsertChannelRequest{}
-	// insertChannelNames, err := s.dataServiceClient.GetInsertChannels(insertChannelsRequest)
-	// if err != nil {
-	// 	return err
-	// }
-
-	// if len(insertChannelNames.Values) > 0 {
-	// 	namesStr := strings.Join(insertChannelNames.Values, ",")
-	// 	s.nodeStartParams = append(s.nodeStartParams, &commonpb.KeyValuePair{Key: KInsertChannelNames, Value: namesStr})
-	// }
 
 	s.state.State.StateCode = internalpb2.StateCode_HEALTHY
 
@@ -88,7 +123,7 @@ func (s *ServiceImpl) GetComponentStates() (*internalpb2.ComponentStates, error)
 }
 
 func (s *ServiceImpl) GetTimeTickChannel() (string, error) {
-	return Params.ServiceTimeTickChannel(), nil
+	return Params.ServiceTimeTickChannel, nil
 }
 
 func (s *ServiceImpl) GetStatisticsChannel() (string, error) {
@@ -96,7 +131,7 @@ func (s *ServiceImpl) GetStatisticsChannel() (string, error) {
 }
 
 func (s *ServiceImpl) RegisterLink() (*milvuspb.RegisterLinkResponse, error) {
-	fmt.Println("register link")
+	log.Println("register link")
 	ctx, cancel := context.WithTimeout(s.ctx, timeoutInterval)
 	defer cancel()
 
@@ -133,7 +168,7 @@ func (s *ServiceImpl) RegisterLink() (*milvuspb.RegisterLinkResponse, error) {
 }
 
 func (s *ServiceImpl) RegisterNode(request *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error) {
-	fmt.Println("RegisterNode: ", request)
+	log.Println("RegisterNode: ", request)
 	ctx, cancel := context.WithTimeout(s.ctx, timeoutInterval)
 	defer cancel()
 
@@ -173,7 +208,7 @@ func (s *ServiceImpl) RegisterNode(request *proxypb.RegisterNodeRequest) (*proxy
 }
 
 func (s *ServiceImpl) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) error {
-	fmt.Println("InvalidateCollectionMetaCache")
+	log.Println("InvalidateCollectionMetaCache")
 	ctx, cancel := context.WithTimeout(s.ctx, timeoutInterval)
 	defer cancel()
 

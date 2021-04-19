@@ -13,6 +13,34 @@ import (
 
 type ParamTable struct {
 	paramtable.BaseTable
+
+	NetworkPort                        int
+	NetworkAddress                     string
+	ProxyServiceAddress                string
+	MasterAddress                      string
+	PulsarAddress                      string
+	IndexServerAddress                 string
+	QueryNodeNum                       int
+	QueryNodeIDList                    []UniqueID
+	ProxyID                            UniqueID
+	TimeTickInterval                   time.Duration
+	InsertChannelNames                 []string
+	DeleteChannelNames                 []string
+	K2SChannelNames                    []string
+	SearchChannelNames                 []string
+	SearchResultChannelNames           []string
+	ProxySubName                       string
+	ProxyTimeTickChannelNames          []string
+	DataDefinitionChannelNames         []string
+	MsgStreamInsertBufSize             int64
+	MsgStreamSearchBufSize             int64
+	MsgStreamSearchResultBufSize       int64
+	MsgStreamSearchResultPulsarBufSize int64
+	MsgStreamTimeTickBufSize           int64
+	MaxNameLength                      int64
+	MaxFieldNum                        int64
+	MaxDimension                       int64
+	DefaultPartitionTag                string
 }
 
 var Params ParamTable
@@ -20,28 +48,40 @@ var Params ParamTable
 func (pt *ParamTable) Init() {
 	pt.BaseTable.Init()
 
-	err := pt.LoadYaml("advanced/proxy_node.yaml")
-	if err != nil {
-		panic(err)
-	}
-
-	proxyIDStr := os.Getenv("PROXY_ID")
-	if proxyIDStr == "" {
-		proxyIDList := pt.ProxyIDList()
-		if len(proxyIDList) <= 0 {
-			proxyIDStr = "0"
-		} else {
-			proxyIDStr = strconv.Itoa(int(proxyIDList[0]))
-		}
-	}
-	pt.Save("_proxyID", proxyIDStr)
+	pt.initNetworkPort()
+	pt.initNetworkAddress()
+	pt.initProxyServiceAddress()
+	pt.initMasterAddress()
+	pt.initPulsarAddress()
+	pt.initIndexServerAddress()
+	pt.initQueryNodeIDList()
+	pt.initQueryNodeNum()
+	pt.initProxyID()
+	pt.initTimeTickInterval()
+	pt.initInsertChannelNames()
+	pt.initDeleteChannelNames()
+	pt.initK2SChannelNames()
+	pt.initSearchChannelNames()
+	pt.initSearchResultChannelNames()
+	pt.initProxySubName()
+	pt.initProxyTimeTickChannelNames()
+	pt.initDataDefinitionChannelNames()
+	pt.initMsgStreamInsertBufSize()
+	pt.initMsgStreamSearchBufSize()
+	pt.initMsgStreamSearchResultBufSize()
+	pt.initMsgStreamSearchResultPulsarBufSize()
+	pt.initMsgStreamTimeTickBufSize()
+	pt.initMaxNameLength()
+	pt.initMaxFieldNum()
+	pt.initMaxDimension()
+	pt.initDefaultPartitionTag()
 }
 
-func (pt *ParamTable) NetworkPort() int {
-	return pt.ParseInt("proxyNode.port")
+func (pt *ParamTable) initNetworkPort() {
+	pt.NetworkPort = pt.ParseInt("proxyNode.port")
 }
 
-func (pt *ParamTable) NetworkAddress() string {
+func (pt *ParamTable) initNetworkAddress() {
 	addr, err := pt.Load("proxyNode.address")
 	if err != nil {
 		panic(err)
@@ -62,14 +102,14 @@ func (pt *ParamTable) NetworkAddress() string {
 	if err != nil {
 		panic(err)
 	}
-	return addr + ":" + port
+
+	pt.NetworkAddress = addr + ":" + port
 }
 
-func (pt *ParamTable) ProxyServiceAddress() string {
+func (pt *ParamTable) initProxyServiceAddress() {
 	addressFromEnv := os.Getenv("PROXY_SERVICE_ADDRESS")
 	if len(addressFromEnv) > 0 {
-		// TODO: or write to param table?
-		return addressFromEnv
+		pt.ProxyServiceAddress = addressFromEnv
 	}
 
 	addr, err := pt.Load("proxyService.address")
@@ -92,35 +132,55 @@ func (pt *ParamTable) ProxyServiceAddress() string {
 	if err != nil {
 		panic(err)
 	}
-	return addr + ":" + port
+	pt.ProxyServiceAddress = addr + ":" + port
 }
 
-func (pt *ParamTable) MasterAddress() string {
+func (pt *ParamTable) initMasterAddress() {
 	ret, err := pt.Load("_MasterAddress")
 	if err != nil {
 		panic(err)
 	}
-	return ret
+	pt.MasterAddress = ret
 }
 
-func (pt *ParamTable) PulsarAddress() string {
+func (pt *ParamTable) initPulsarAddress() {
 	ret, err := pt.Load("_PulsarAddress")
 	if err != nil {
 		panic(err)
 	}
-	return ret
+	pt.PulsarAddress = ret
 }
 
-func (pt *ParamTable) ProxyNum() int {
-	ret := pt.ProxyIDList()
-	return len(ret)
+func (pt *ParamTable) initIndexServerAddress() {
+	addr, err := pt.Load("indexServer.address")
+	if err != nil {
+		panic(err)
+	}
+
+	hostName, _ := net.LookupHost(addr)
+	if len(hostName) <= 0 {
+		if ip := net.ParseIP(addr); ip == nil {
+			panic("invalid ip indexServer.address")
+		}
+	}
+
+	port, err := pt.Load("indexServer.port")
+	if err != nil {
+		panic(err)
+	}
+	_, err = strconv.Atoi(port)
+	if err != nil {
+		panic(err)
+	}
+
+	pt.IndexServerAddress = addr + ":" + port
 }
 
-func (pt *ParamTable) queryNodeNum() int {
-	return len(pt.queryNodeIDList())
+func (pt *ParamTable) initQueryNodeNum() {
+	pt.QueryNodeNum = len(pt.QueryNodeIDList)
 }
 
-func (pt *ParamTable) queryNodeIDList() []UniqueID {
+func (pt *ParamTable) initQueryNodeIDList() []UniqueID {
 	queryNodeIDStr, err := pt.Load("nodeID.queryNodeIDList")
 	if err != nil {
 		panic(err)
@@ -137,7 +197,7 @@ func (pt *ParamTable) queryNodeIDList() []UniqueID {
 	return ret
 }
 
-func (pt *ParamTable) ProxyID() UniqueID {
+func (pt *ParamTable) initProxyID() {
 	proxyID, err := pt.Load("_proxyID")
 	if err != nil {
 		panic(err)
@@ -146,10 +206,10 @@ func (pt *ParamTable) ProxyID() UniqueID {
 	if err != nil {
 		panic(err)
 	}
-	return UniqueID(ID)
+	pt.ProxyID = UniqueID(ID)
 }
 
-func (pt *ParamTable) TimeTickInterval() time.Duration {
+func (pt *ParamTable) initTimeTickInterval() {
 	internalStr, err := pt.Load("proxyNode.timeTickInterval")
 	if err != nil {
 		panic(err)
@@ -158,21 +218,10 @@ func (pt *ParamTable) TimeTickInterval() time.Duration {
 	if err != nil {
 		panic(err)
 	}
-	return time.Duration(interval) * time.Millisecond
+	pt.TimeTickInterval = time.Duration(interval) * time.Millisecond
 }
 
-func (pt *ParamTable) sliceIndex() int {
-	proxyID := pt.ProxyID()
-	proxyIDList := pt.ProxyIDList()
-	for i := 0; i < len(proxyIDList); i++ {
-		if proxyID == proxyIDList[i] {
-			return i
-		}
-	}
-	return -1
-}
-
-func (pt *ParamTable) InsertChannelNames() []string {
+func (pt *ParamTable) initInsertChannelNames() {
 	prefix, err := pt.Load("msgChannel.chanNamePrefix.insert")
 	if err != nil {
 		panic(err)
@@ -188,17 +237,10 @@ func (pt *ParamTable) InsertChannelNames() []string {
 		ret = append(ret, prefix+strconv.Itoa(ID))
 	}
 
-	proxyNum := pt.ProxyNum()
-	sep := len(channelIDs) / proxyNum
-	index := pt.sliceIndex()
-	if index == -1 {
-		panic("ProxyID not Match with Config")
-	}
-	start := index * sep
-	return ret[start : start+sep]
+	pt.InsertChannelNames = ret
 }
 
-func (pt *ParamTable) DeleteChannelNames() []string {
+func (pt *ParamTable) initDeleteChannelNames() {
 	prefix, err := pt.Load("msgChannel.chanNamePrefix.delete")
 	if err != nil {
 		panic(err)
@@ -213,10 +255,10 @@ func (pt *ParamTable) DeleteChannelNames() []string {
 	for _, ID := range channelIDs {
 		ret = append(ret, prefix+strconv.Itoa(ID))
 	}
-	return ret
+	pt.DeleteChannelNames = ret
 }
 
-func (pt *ParamTable) K2SChannelNames() []string {
+func (pt *ParamTable) initK2SChannelNames() {
 	prefix, err := pt.Load("msgChannel.chanNamePrefix.k2s")
 	if err != nil {
 		panic(err)
@@ -231,10 +273,10 @@ func (pt *ParamTable) K2SChannelNames() []string {
 	for _, ID := range channelIDs {
 		ret = append(ret, prefix+strconv.Itoa(ID))
 	}
-	return ret
+	pt.K2SChannelNames = ret
 }
 
-func (pt *ParamTable) SearchChannelNames() []string {
+func (pt *ParamTable) initSearchChannelNames() {
 	prefix, err := pt.Load("msgChannel.chanNamePrefix.search")
 	if err != nil {
 		panic(err)
@@ -249,10 +291,10 @@ func (pt *ParamTable) SearchChannelNames() []string {
 	for _, ID := range channelIDs {
 		ret = append(ret, prefix+strconv.Itoa(ID))
 	}
-	return ret
+	pt.SearchChannelNames = ret
 }
 
-func (pt *ParamTable) SearchResultChannelNames() []string {
+func (pt *ParamTable) initSearchResultChannelNames() {
 	prefix, err := pt.Load("msgChannel.chanNamePrefix.searchResult")
 	if err != nil {
 		panic(err)
@@ -267,18 +309,10 @@ func (pt *ParamTable) SearchResultChannelNames() []string {
 	for _, ID := range channelIDs {
 		ret = append(ret, prefix+strconv.Itoa(ID))
 	}
-	proxyNum := pt.ProxyNum()
-	sep := len(channelIDs) / proxyNum
-	index := pt.sliceIndex()
-	if index == -1 {
-		panic("ProxyID not Match with Config")
-	}
-	start := index * sep
-
-	return ret[start : start+sep]
+	pt.SearchResultChannelNames = ret
 }
 
-func (pt *ParamTable) ProxySubName() string {
+func (pt *ParamTable) initProxySubName() {
 	prefix, err := pt.Load("msgChannel.subNamePrefix.proxySubNamePrefix")
 	if err != nil {
 		panic(err)
@@ -287,48 +321,48 @@ func (pt *ParamTable) ProxySubName() string {
 	if err != nil {
 		panic(err)
 	}
-	return prefix + "-" + proxyIDStr
+	pt.ProxySubName = prefix + "-" + proxyIDStr
 }
 
-func (pt *ParamTable) ProxyTimeTickChannelNames() []string {
+func (pt *ParamTable) initProxyTimeTickChannelNames() {
 	prefix, err := pt.Load("msgChannel.chanNamePrefix.proxyTimeTick")
 	if err != nil {
 		panic(err)
 	}
 	prefix += "-0"
-	return []string{prefix}
+	pt.ProxyTimeTickChannelNames = []string{prefix}
 }
 
-func (pt *ParamTable) DataDefinitionChannelNames() []string {
+func (pt *ParamTable) initDataDefinitionChannelNames() {
 	prefix, err := pt.Load("msgChannel.chanNamePrefix.dataDefinition")
 	if err != nil {
 		panic(err)
 	}
 	prefix += "-0"
-	return []string{prefix}
+	pt.DataDefinitionChannelNames = []string{prefix}
 }
 
-func (pt *ParamTable) MsgStreamInsertBufSize() int64 {
-	return pt.ParseInt64("proxyNode.msgStream.insert.bufSize")
+func (pt *ParamTable) initMsgStreamInsertBufSize() {
+	pt.MsgStreamInsertBufSize = pt.ParseInt64("proxyNode.msgStream.insert.bufSize")
 }
 
-func (pt *ParamTable) MsgStreamSearchBufSize() int64 {
-	return pt.ParseInt64("proxyNode.msgStream.search.bufSize")
+func (pt *ParamTable) initMsgStreamSearchBufSize() {
+	pt.MsgStreamSearchBufSize = pt.ParseInt64("proxyNode.msgStream.search.bufSize")
 }
 
-func (pt *ParamTable) MsgStreamSearchResultBufSize() int64 {
-	return pt.ParseInt64("proxyNode.msgStream.searchResult.recvBufSize")
+func (pt *ParamTable) initMsgStreamSearchResultBufSize() {
+	pt.MsgStreamSearchResultBufSize = pt.ParseInt64("proxyNode.msgStream.searchResult.recvBufSize")
 }
 
-func (pt *ParamTable) MsgStreamSearchResultPulsarBufSize() int64 {
-	return pt.ParseInt64("proxyNode.msgStream.searchResult.pulsarBufSize")
+func (pt *ParamTable) initMsgStreamSearchResultPulsarBufSize() {
+	pt.MsgStreamSearchResultPulsarBufSize = pt.ParseInt64("proxyNode.msgStream.searchResult.pulsarBufSize")
 }
 
-func (pt *ParamTable) MsgStreamTimeTickBufSize() int64 {
-	return pt.ParseInt64("proxyNode.msgStream.timeTick.bufSize")
+func (pt *ParamTable) initMsgStreamTimeTickBufSize() {
+	pt.MsgStreamTimeTickBufSize = pt.ParseInt64("proxyNode.msgStream.timeTick.bufSize")
 }
 
-func (pt *ParamTable) MaxNameLength() int64 {
+func (pt *ParamTable) initMaxNameLength() {
 	str, err := pt.Load("proxyNode.maxNameLength")
 	if err != nil {
 		panic(err)
@@ -337,10 +371,10 @@ func (pt *ParamTable) MaxNameLength() int64 {
 	if err != nil {
 		panic(err)
 	}
-	return maxNameLength
+	pt.MaxNameLength = maxNameLength
 }
 
-func (pt *ParamTable) MaxFieldNum() int64 {
+func (pt *ParamTable) initMaxFieldNum() {
 	str, err := pt.Load("proxyNode.maxFieldNum")
 	if err != nil {
 		panic(err)
@@ -349,10 +383,10 @@ func (pt *ParamTable) MaxFieldNum() int64 {
 	if err != nil {
 		panic(err)
 	}
-	return maxFieldNum
+	pt.MaxFieldNum = maxFieldNum
 }
 
-func (pt *ParamTable) MaxDimension() int64 {
+func (pt *ParamTable) initMaxDimension() {
 	str, err := pt.Load("proxyNode.maxDimension")
 	if err != nil {
 		panic(err)
@@ -361,13 +395,13 @@ func (pt *ParamTable) MaxDimension() int64 {
 	if err != nil {
 		panic(err)
 	}
-	return maxDimension
+	pt.MaxDimension = maxDimension
 }
 
-func (pt *ParamTable) defaultPartitionTag() string {
+func (pt *ParamTable) initDefaultPartitionTag() {
 	tag, err := pt.Load("common.defaultPartitionTag")
 	if err != nil {
 		panic(err)
 	}
-	return tag
+	pt.DefaultPartitionTag = tag
 }

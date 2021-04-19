@@ -4,25 +4,19 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"math/rand"
 	"sync"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 
-	grpcproxyservice "github.com/zilliztech/milvus-distributed/internal/distributed/proxyservice"
-
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go/config"
 
-	"google.golang.org/grpc"
-
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
@@ -34,15 +28,17 @@ type NodeImpl struct {
 	cancel func()
 	wg     sync.WaitGroup
 
-	proxyServiceClient *grpcproxyservice.Client
-	initParams         *internalpb2.InitParams
-	ip                 string
-	port               int
+	initParams *internalpb2.InitParams
+	ip         string
+	port       int
 
-	masterConn   *grpc.ClientConn
-	masterClient masterpb.MasterServiceClient
-	sched        *TaskScheduler
-	tick         *timeTick
+	masterClient       MasterClientInterface
+	indexServiceClient IndexServiceClient
+	queryServiceClient QueryServiceClient
+	dataServiceClient  DataServiceClient
+
+	sched *TaskScheduler
+	tick  *timeTick
 
 	idAllocator  *allocator.IDAllocator
 	tsoAllocator *allocator.TimestampAllocator
@@ -75,6 +71,36 @@ func (node *NodeImpl) Init() error {
 
 	var err error
 
+	err = node.masterClient.Init()
+	if err != nil {
+		return err
+	}
+	err = node.indexServiceClient.Init()
+	if err != nil {
+		return err
+	}
+	err = node.queryServiceClient.Init()
+	if err != nil {
+		return err
+	}
+	err = node.dataServiceClient.Init()
+	if err != nil {
+		return err
+	}
+
+	Params.SearchChannelNames, err = node.queryServiceClient.GetSearchChannelNames()
+	if err != nil {
+		return err
+	}
+	Params.SearchResultChannelNames, err = node.queryServiceClient.GetSearchResultChannelNames()
+	if err != nil {
+		return err
+	}
+	Params.InsertChannelNames, err = node.dataServiceClient.GetInsertChannelNames()
+	if err != nil {
+		return err
+	}
+
 	cfg := &config.Configuration{
 		ServiceName: "proxynode",
 		Sampler: &config.SamplerConfig{
@@ -88,38 +114,38 @@ func (node *NodeImpl) Init() error {
 	}
 	opentracing.SetGlobalTracer(node.tracer)
 
-	pulsarAddress := Params.PulsarAddress()
+	pulsarAddress := Params.PulsarAddress
 
-	node.queryMsgStream = pulsarms.NewPulsarMsgStream(node.ctx, Params.MsgStreamSearchBufSize())
+	node.queryMsgStream = pulsarms.NewPulsarMsgStream(node.ctx, Params.MsgStreamSearchBufSize)
 	node.queryMsgStream.SetPulsarClient(pulsarAddress)
-	node.queryMsgStream.CreatePulsarProducers(Params.SearchChannelNames())
+	node.queryMsgStream.CreatePulsarProducers(Params.SearchChannelNames)
 
-	masterAddr := Params.MasterAddress()
+	masterAddr := Params.MasterAddress
 	idAllocator, err := allocator.NewIDAllocator(node.ctx, masterAddr)
 
 	if err != nil {
 		return err
 	}
 	node.idAllocator = idAllocator
-	node.idAllocator.PeerID = Params.ProxyID()
+	node.idAllocator.PeerID = Params.ProxyID
 
 	tsoAllocator, err := allocator.NewTimestampAllocator(node.ctx, masterAddr)
 	if err != nil {
 		return err
 	}
 	node.tsoAllocator = tsoAllocator
-	node.tsoAllocator.PeerID = Params.ProxyID()
+	node.tsoAllocator.PeerID = Params.ProxyID
 
 	segAssigner, err := allocator.NewSegIDAssigner(node.ctx, masterAddr, node.lastTick)
 	if err != nil {
 		panic(err)
 	}
 	node.segAssigner = segAssigner
-	node.segAssigner.PeerID = Params.ProxyID()
+	node.segAssigner.PeerID = Params.ProxyID
 
-	node.manipulationMsgStream = pulsarms.NewPulsarMsgStream(node.ctx, Params.MsgStreamInsertBufSize())
+	node.manipulationMsgStream = pulsarms.NewPulsarMsgStream(node.ctx, Params.MsgStreamInsertBufSize)
 	node.manipulationMsgStream.SetPulsarClient(pulsarAddress)
-	node.manipulationMsgStream.CreatePulsarProducers(Params.InsertChannelNames())
+	node.manipulationMsgStream.CreatePulsarProducers(Params.InsertChannelNames)
 	repackFuncImpl := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
 		return insertRepackFunc(tsMsgs, hashKeys, node.segAssigner, true)
 	}
@@ -136,7 +162,20 @@ func (node *NodeImpl) Init() error {
 }
 
 func (node *NodeImpl) Start() error {
-	err := node.connectMaster()
+	var err error
+	err = node.masterClient.Start()
+	if err != nil {
+		return err
+	}
+	err = node.indexServiceClient.Start()
+	if err != nil {
+		return err
+	}
+	err = node.queryServiceClient.Start()
+	if err != nil {
+		return err
+	}
+	err = node.dataServiceClient.Start()
 	if err != nil {
 		return err
 	}
@@ -167,6 +206,23 @@ func (node *NodeImpl) Stop() error {
 	node.manipulationMsgStream.Close()
 	node.queryMsgStream.Close()
 	node.tick.Close()
+	var err error
+	err = node.dataServiceClient.Stop()
+	if err != nil {
+		return err
+	}
+	err = node.queryServiceClient.Stop()
+	if err != nil {
+		return err
+	}
+	err = node.indexServiceClient.Stop()
+	if err != nil {
+		return err
+	}
+	err = node.masterClient.Stop()
+	if err != nil {
+		return err
+	}
 
 	node.wg.Wait()
 
@@ -196,20 +252,4 @@ func (node *NodeImpl) lastTick() Timestamp {
 // AddCloseCallback adds a callback in the Close phase.
 func (node *NodeImpl) AddCloseCallback(callbacks ...func()) {
 	node.closeCallbacks = append(node.closeCallbacks, callbacks...)
-}
-
-func (node *NodeImpl) connectMaster() error {
-	masterAddr := Params.MasterAddress()
-	log.Printf("NodeImpl connected to master, master_addr=%s", masterAddr)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	conn, err := grpc.DialContext(ctx, masterAddr, grpc.WithInsecure(), grpc.WithBlock())
-	if err != nil {
-		log.Printf("NodeImpl connect to master failed, error= %v", err)
-		return err
-	}
-	log.Printf("NodeImpl connected to master, master_addr=%s", masterAddr)
-	node.masterConn = conn
-	node.masterClient = masterpb.NewMasterServiceClient(conn)
-	return nil
 }
