@@ -31,11 +31,11 @@ func newInsertChannelManager() *insertChannelManager {
 	}
 }
 
-func (cm *insertChannelManager) AllocChannels(collectionID UniqueID, groupNum int) ([]channelGroup, error) {
+func (cm *insertChannelManager) GetChannels(collectionID UniqueID, groupNum int) ([]channelGroup, error) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	if _, ok := cm.channelGroups[collectionID]; ok {
-		return nil, fmt.Errorf("channel group of collection %d already exist", collectionID)
+		return cm.channelGroups[collectionID], nil
 	}
 	channels := Params.InsertChannelNumPerCollection
 	m, n := channels/int64(groupNum), channels%int64(groupNum)
@@ -73,20 +73,4 @@ func (cm *insertChannelManager) GetChannelGroup(collectionID UniqueID, channelNa
 		}
 	}
 	return nil, fmt.Errorf("channel name %s not found", channelName)
-}
-
-func (cm *insertChannelManager) ContainsCollection(collectionID UniqueID) (bool, []string) {
-	cm.mu.RLock()
-	defer cm.mu.RUnlock()
-	_, ok := cm.channelGroups[collectionID]
-	if !ok {
-		return false, nil
-	}
-	ret := make([]string, 0)
-	for _, cr := range cm.channelGroups[collectionID] {
-		for _, c := range cr {
-			ret = append(ret, c)
-		}
-	}
-	return true, ret
 }
