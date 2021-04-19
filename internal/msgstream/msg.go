@@ -5,7 +5,6 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
@@ -558,42 +557,4 @@ func (lim *LoadIndexMsg) Unmarshal(input []byte) (TsMsg, error) {
 	loadIndexMsg := &LoadIndexMsg{LoadIndex: loadIndexRequest}
 
 	return loadIndexMsg, nil
-}
-
-/////////////////////////////////////////SegmentInfoMsg//////////////////////////////////////////
-type SegmentInfoMsg struct {
-	BaseMsg
-	datapb.SegmentMsg
-}
-
-func (sim *SegmentInfoMsg) Type() MsgType {
-	return sim.Base.MsgType
-}
-
-func (sim *SegmentInfoMsg) GetMsgContext() context.Context {
-	return sim.MsgCtx
-}
-
-func (sim *SegmentInfoMsg) SetMsgContext(ctx context.Context) {
-	sim.MsgCtx = ctx
-}
-
-func (sim *SegmentInfoMsg) Marshal(input TsMsg) ([]byte, error) {
-	segInfoMsg := input.(*SegmentInfoMsg)
-	mb, err := proto.Marshal(&segInfoMsg.SegmentMsg)
-	if err != nil {
-		return nil, err
-	}
-	return mb, nil
-}
-
-func (sim *SegmentInfoMsg) Unmarshal(input []byte) (TsMsg, error) {
-	segMsg := datapb.SegmentMsg{}
-	err := proto.Unmarshal(input, &segMsg)
-	if err != nil {
-		return nil, err
-	}
-	return &SegmentInfoMsg{
-		SegmentMsg: segMsg,
-	}, nil
 }

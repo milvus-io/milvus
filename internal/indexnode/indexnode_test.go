@@ -119,10 +119,10 @@ func TestBuilder_GRPC(t *testing.T) {
 
 	time.Sleep(time.Second * 3)
 
-	description, err := buildClient.GetIndexStates(indexID)
+	description, err := buildClient.GetIndexStates([]UniqueID{indexID})
 	assert.Nil(t, err)
-	assert.Equal(t, commonpb.IndexState_INPROGRESS, description.State)
-	assert.Equal(t, indexID, description.IndexID)
+	assert.Equal(t, commonpb.IndexState_INPROGRESS, description.States[0].State)
+	assert.Equal(t, indexID, description.States[0].IndexID)
 
 	indexDataPaths, err := buildClient.GetIndexFilePaths(indexID)
 	assert.Nil(t, err)

@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	"github.com/spf13/cast"
 	"github.com/spf13/viper"
 	memkv "github.com/zilliztech/milvus-distributed/internal/kv/mem"
@@ -59,6 +61,18 @@ func (gp *BaseTable) Init() {
 	}
 	gp.tryloadFromEnv()
 
+}
+
+func (gp *BaseTable) LoadFromKVPair(kvPairs []*commonpb.KeyValuePair) error {
+
+	for _, pair := range kvPairs {
+		err := gp.Save(pair.Key, pair.Value)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (gp *BaseTable) tryloadFromEnv() {

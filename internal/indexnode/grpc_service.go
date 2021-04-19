@@ -3,6 +3,7 @@ package indexnode
 import (
 	"context"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -56,14 +57,20 @@ func (b *Builder) BuildIndex(ctx context.Context, request *indexpb.BuildIndexReq
 }
 
 func (b *Builder) GetIndexStates(ctx context.Context, request *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
-	indexID := request.IndexID
-	ret, err := b.metaTable.GetIndexStates(indexID)
-	ret.Status = &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
-	ret.IndexID = indexID
-	if err != nil {
-		ret.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
-		ret.Status.Reason = err.Error()
+	var indexStates []*indexpb.IndexInfo
+	for _, indexID := range request.IndexID {
+		indexState, err := b.metaTable.GetIndexStates(indexID)
+		log.Println("GetIndexStates error, err=", err)
+		indexStates = append(indexStates, indexState)
 	}
+	ret := &indexpb.IndexStatesResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+		States: indexStates,
+	}
+
 	return ret, nil
 }
 

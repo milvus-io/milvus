@@ -9,20 +9,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/indexservice"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-
-	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
-
-	"go.etcd.io/etcd/clientv3"
-
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/indexservice"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
+	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"go.etcd.io/etcd/clientv3"
 	"google.golang.org/grpc"
 )
 
@@ -30,7 +27,23 @@ type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
 type IndexNode struct {
-	Builder
+	loopCtx    context.Context
+	loopCancel func()
+	loopWg     sync.WaitGroup
+
+	grpcServer *grpc.Server
+	sched      *TaskScheduler
+
+	idAllocator *allocator.IDAllocator
+
+	kv kv.Base
+
+	metaTable *metaTable
+	// Add callback functions at different stages
+	startCallbacks []func()
+	closeCallbacks []func()
+
+	indexNodeID   int64
 	serviceClient indexservice.Interface // method factory
 }
 
@@ -58,12 +71,62 @@ func (i *IndexNode) GetStatisticsChannel() (string, error) {
 	panic("implement me")
 }
 
-func (i *IndexNode) BuildIndex(req indexpb.BuildIndexRequest) (indexpb.BuildIndexResponse, error) {
-	panic("implement me")
+func (i *IndexNode) BuildIndex(req *indexpb.BuildIndexCmd) (*commonpb.Status, error) {
+	//TODO: build index in index node
+	ctx := context.Background()
+	t := NewIndexAddTask()
+	t.req = req.Req
+	t.idAllocator = i.idAllocator
+	t.buildQueue = i.sched.IndexBuildQueue
+	t.table = i.metaTable
+	t.kv = i.kv
+	var cancel func()
+	t.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
+
+	fn := func() error {
+		select {
+		case <-ctx.Done():
+			return errors.New("insert timeout")
+		default:
+			return i.sched.IndexAddQueue.Enqueue(t)
+		}
+	}
+	ret := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		Reason:    "",
+	}
+
+	err := fn()
+	if err != nil {
+		ret.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		ret.Reason = err.Error()
+		return ret, nil
+	}
+
+	err = t.WaitToFinish()
+	if err != nil {
+		ret.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		ret.Reason = err.Error()
+		return ret, nil
+	}
+	return ret, nil
 }
 
-func CreateIndexNode(ctx context.Context) (Interface, error) {
+func CreateIndexNode(ctx context.Context) (*IndexNode, error) {
 	return &IndexNode{}, nil
+}
+
+func NewIndexNode(ctx context.Context, indexID int64) *IndexNode {
+	ctx1, cancel := context.WithCancel(ctx)
+	in := &IndexNode{
+		loopCtx:    ctx1,
+		loopCancel: cancel,
+
+		indexNodeID: indexID,
+	}
+
+	return in
 }
 
 type Builder struct {

@@ -57,3 +57,11 @@ queryNode:
 indexBuilder:
     address: localhost
     port: 31000
+
+indexNode:
+  address: localhost
+  port: 21116
+
+indexServer:
+  address: localhost
+  port: 21118

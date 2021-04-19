@@ -131,11 +131,6 @@ message SegmentInfo {
   int64 mem_size=8;
 }
 
-message SegmentMsg{
-  common.MsgBase base = 1;
-  SegmentInfo segment = 2;
-}
-
 service DataService {
 
    rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}

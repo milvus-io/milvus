@@ -10,8 +10,8 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
-	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -26,7 +26,7 @@ import (
 //  datapb(data_service)
 //  indexpb(index_service)
 //  milvuspb -> servicepb
-//  masterpb2 -> masterpb (master_service)
+//  masterpb2 -> masterpb （master_service)
 
 type InitParams struct {
 	ProxyTimeTickChannel string
@@ -53,10 +53,12 @@ type Interface interface {
 	DropCollection(in *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
 	HasCollection(in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
 	DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+	GetCollectionStatistics(in *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error)
 	ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
 	CreatePartition(in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
 	DropPartition(in *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
 	HasPartition(in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
+	GetPartitionStatistics(in *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error)
 	ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
 
 	//index builder service
@@ -114,23 +116,23 @@ type Core struct {
 	kvBase  *etcdkv.EtcdKV
 	metaKV  *etcdkv.EtcdKV
 
-	//setMsgStreams, receive time tick from proxy service time tick channel
-	ProxyTimeTickChan chan typeutil.Timestamp
+	//TODO, receive time tick from proxy service time tick channel
+	ProxyTimeTickChan <-chan typeutil.Timestamp
 
-	//setMsgStreams, send time tick into dd channel and time tick channel
+	//TODO, send time tick into dd channel and time tick channel
 	SendTimeTick func(t typeutil.Timestamp) error
 
-	//setMsgStreams, send create collection into dd channel
-	DdCreateCollectionReq func(req *internalpb2.CreateCollectionRequest) error
+	//TODO, send create collection into dd channel
+	DdCreateCollectionReq func(req *CreateCollectionReqTask) error
 
-	//setMsgStreams, send drop collection into dd channel, and notify the proxy to delete this collection
-	DdDropCollectionReq func(req *internalpb2.DropCollectionRequest) error
+	//TODO, send drop collection into dd channel, and notify the proxy to delete this collection
+	DdDropCollectionReq func(req *DropCollectionReqTask) error
 
-	//setMsgStreams, send create partition into dd channel
-	DdCreatePartitionReq func(req *internalpb2.CreatePartitionRequest) error
+	//TODO, send create partition into dd channel
+	DdCreatePartitionReq func(req *CreatePartitionReqTask) error
 
-	//setMsgStreams, send drop partition into dd channel
-	DdDropPartitionReq func(req *internalpb2.DropPartitionRequest) error
+	//TODO, send drop partition into dd channel
+	DdDropPartitionReq func(req *DropPartitionReqTask) error
 
 	//dd request scheduler
 	ddReqQueue      chan reqTask //dd request will be push into this chan
@@ -146,6 +148,9 @@ type Core struct {
 	initOnce  sync.Once
 	startOnce sync.Once
 	isInit    atomic.Value
+
+	//TODO, get segment meta by segment id, from data service by grpc
+	GetSegmentMeta func(id typeutil.UniqueID) (*etcdpb.SegmentMeta, error)
 }
 
 // --------------------- function --------------------------
@@ -187,6 +192,9 @@ func (c *Core) checkInit() error {
 	}
 	if c.ddReqQueue == nil {
 		return errors.Errorf("ddReqQueue is nil")
+	}
+	if c.GetSegmentMeta == nil {
+		return errors.Errorf("GetSegmentMeta is nil")
 	}
 	if c.DdCreateCollectionReq == nil {
 		return errors.Errorf("DdCreateCollectionReq is nil")
@@ -253,185 +261,6 @@ func (c *Core) startTimeTickLoop() {
 	}
 }
 
-func (c *Core) setMsgStreams() error {
-	//proxy time tick stream,
-	proxyTimeTickStream := ms.NewPulsarMsgStream(c.ctx, 1024)
-	proxyTimeTickStream.SetPulsarClient(Params.PulsarAddress)
-	proxyTimeTickStream.CreatePulsarConsumers([]string{Params.ProxyTimeTickChannel}, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
-	proxyTimeTickStream.Start()
-
-	// master time tick channel
-	timeTickStream := ms.NewPulsarMsgStream(c.ctx, 1024)
-	timeTickStream.SetPulsarClient(Params.PulsarAddress)
-	timeTickStream.CreatePulsarProducers([]string{Params.TimeTickChannel})
-
-	// master dd channel
-	ddStream := ms.NewPulsarMsgStream(c.ctx, 1024)
-	ddStream.SetPulsarClient(Params.PulsarAddress)
-	ddStream.CreatePulsarProducers([]string{Params.DdChannel})
-
-	c.SendTimeTick = func(t typeutil.Timestamp) error {
-		msgPack := ms.MsgPack{}
-		baseMsg := ms.BaseMsg{
-			MsgCtx:         nil,
-			BeginTimestamp: t,
-			EndTimestamp:   t,
-			HashValues:     []uint32{0},
-		}
-		timeTickResult := internalpb2.TimeTickMsg{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kTimeTick,
-				MsgID:     0,
-				Timestamp: t,
-				SourceID:  int64(Params.NodeID),
-			},
-		}
-		timeTickMsg := &ms.TimeTickMsg{
-			BaseMsg:     baseMsg,
-			TimeTickMsg: timeTickResult,
-		}
-		msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
-		if err := timeTickStream.Broadcast(&msgPack); err != nil {
-			return err
-		}
-		if err := ddStream.Broadcast(&msgPack); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	c.DdCreateCollectionReq = func(req *internalpb2.CreateCollectionRequest) error {
-		msgPack := ms.MsgPack{}
-		baseMsg := ms.BaseMsg{
-			BeginTimestamp: req.Base.Timestamp,
-			EndTimestamp:   req.Base.Timestamp,
-			HashValues:     []uint32{0},
-		}
-		collMsg := &ms.CreateCollectionMsg{
-			BaseMsg:                 baseMsg,
-			CreateCollectionRequest: *req,
-		}
-		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(&msgPack); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	c.DdDropCollectionReq = func(req *internalpb2.DropCollectionRequest) error {
-		//TODO, notify proxy to delete this collection before send this msg into dd channel
-		msgPack := ms.MsgPack{}
-		baseMsg := ms.BaseMsg{
-			BeginTimestamp: req.Base.Timestamp,
-			EndTimestamp:   req.Base.Timestamp,
-			HashValues:     []uint32{0},
-		}
-		collMsg := &ms.DropCollectionMsg{
-			BaseMsg:               baseMsg,
-			DropCollectionRequest: *req,
-		}
-		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(&msgPack); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	c.DdCreatePartitionReq = func(req *internalpb2.CreatePartitionRequest) error {
-		msgPack := ms.MsgPack{}
-		baseMsg := ms.BaseMsg{
-			BeginTimestamp: req.Base.Timestamp,
-			EndTimestamp:   req.Base.Timestamp,
-			HashValues:     []uint32{0},
-		}
-		collMsg := &ms.CreatePartitionMsg{
-			BaseMsg:                baseMsg,
-			CreatePartitionRequest: *req,
-		}
-		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(&msgPack); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	c.DdDropPartitionReq = func(req *internalpb2.DropPartitionRequest) error {
-		msgPack := ms.MsgPack{}
-		baseMsg := ms.BaseMsg{
-			BeginTimestamp: req.Base.Timestamp,
-			EndTimestamp:   req.Base.Timestamp,
-			HashValues:     []uint32{0},
-		}
-		collMsg := &ms.DropPartitionMsg{
-			BaseMsg:              baseMsg,
-			DropPartitionRequest: *req,
-		}
-		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(&msgPack); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	// receive time tick from msg stream
-	go func() {
-		c.ProxyTimeTickChan = make(chan typeutil.Timestamp, 1024)
-		for {
-			select {
-			case <-c.ctx.Done():
-				return
-			case ttmsgs, ok := <-proxyTimeTickStream.Chan():
-				if !ok {
-					log.Printf("proxy time tick msg stream closed")
-					return
-				}
-				if len(ttmsgs.Msgs) > 0 {
-					for _, ttm := range ttmsgs.Msgs {
-						ttmsg, ok := ttm.(*ms.TimeTickMsg)
-						if !ok {
-							continue
-						}
-						c.ProxyTimeTickChan <- ttmsg.Base.Timestamp
-					}
-				}
-			}
-		}
-	}()
-
-	//segment channel, data service create segment,or data node flush segment will put msg in this channel
-	dataServiceStream := ms.NewPulsarMsgStream(c.ctx, 1024)
-	dataServiceStream.SetPulsarClient(Params.PulsarAddress)
-	dataServiceStream.CreatePulsarConsumers([]string{Params.DataServiceSegmentChannel}, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
-	dataServiceStream.Start()
-
-	// receive segment info from msg stream
-	go func() {
-		for {
-			select {
-			case <-c.ctx.Done():
-				return
-			case segMsg, ok := <-dataServiceStream.Chan():
-				if !ok {
-					log.Printf("data service segment msg closed")
-				}
-				if len(segMsg.Msgs) > 0 {
-					for _, segm := range segMsg.Msgs {
-						segInfoMsg, ok := segm.(*ms.SegmentInfoMsg)
-						if ok {
-							if err := c.MetaTable.AddSegment(segInfoMsg.Segment); err != nil {
-								log.Printf("create segment failed, segmentid = %d,colleciont id = %d, error = %s", segInfoMsg.Segment.SegmentID, segInfoMsg.Segment.CollectionID, err.Error())
-							}
-						}
-						//TODO, if data node flush
-					}
-				}
-			}
-		}
-	}()
-
-	return nil
-}
-
 func (c *Core) Init(params *InitParams) error {
 	var initError error = nil
 	c.initOnce.Do(func() {
@@ -455,7 +284,6 @@ func (c *Core) Init(params *InitParams) error {
 			return
 		}
 		c.ddReqQueue = make(chan reqTask, 1024)
-		initError = c.setMsgStreams()
 		c.isInit.Store(true)
 	})
 	return initError
@@ -630,6 +458,36 @@ func (c *Core) DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milv
 	return t.Rsp, nil
 }
 
+func (c *Core) GetCollectionStatistics(in *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error) {
+	t := &CollectionStatsReqTask{
+		baseReqTask: baseReqTask{
+			cv:   make(chan error),
+			core: c,
+		},
+		Req: in,
+		Rsp: &milvuspb.CollectionStatsResponse{
+			Stats:  nil,
+			Status: nil,
+		},
+	}
+	c.ddReqQueue <- t
+	err := t.WaitToFinish()
+	if err != nil {
+		return &milvuspb.CollectionStatsResponse{
+			Stats: nil,
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "GetCollectionStatistics failed: " + err.Error(),
+			},
+		}, nil
+	}
+	t.Rsp.Status = &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		Reason:    "",
+	}
+	return t.Rsp, nil
+}
+
 func (c *Core) ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
 	t := &ShowCollectionReqTask{
 		baseReqTask: baseReqTask{
@@ -730,6 +588,36 @@ func (c *Core) HasPartition(in *milvuspb.HasPartitionRequest) (*milvuspb.BoolRes
 		},
 		Value: t.HasPartition,
 	}, nil
+}
+
+func (c *Core) GetPartitionStatistics(in *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error) {
+	t := &PartitionStatsReqTask{
+		baseReqTask: baseReqTask{
+			cv:   make(chan error),
+			core: c,
+		},
+		Req: in,
+		Rsp: &milvuspb.PartitionStatsResponse{
+			Stats:  nil,
+			Status: nil,
+		},
+	}
+	c.ddReqQueue <- t
+	err := t.WaitToFinish()
+	if err != nil {
+		return &milvuspb.PartitionStatsResponse{
+			Stats: nil,
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "GetPartitionStatistics failed: " + err.Error(),
+			},
+		}, nil
+	}
+	t.Rsp.Status = &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		Reason:    "",
+	}
+	return t.Rsp, nil
 }
 
 func (c *Core) ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {

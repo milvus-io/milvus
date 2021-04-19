@@ -13,17 +13,16 @@ type ParamTable struct {
 	Port    int
 	NodeID  uint64
 
-	PulsarAddress             string
-	EtcdAddress               string
-	MetaRootPath              string
-	KvRootPath                string
-	ProxyTimeTickChannel      string
-	MsgChannelSubName         string
-	TimeTickChannel           string
-	DdChannel                 string
-	StatisticsChannel         string
-	DataServiceSegmentChannel string // data service create segment, or data node flush segment
+	PulsarAddress        string
+	EtcdAddress          string
+	MetaRootPath         string
+	KvRootPath           string
+	ProxyTimeTickChannel string
+	MsgChannelSubName    string
+	TimeTickChannel      string
+	DdChannel            string
+	StatisticsChannel    string
 
-	MaxPartitionNum      int64
-	DefaultPartitionName string
+	MaxPartitionNum     int64
+	DefaultPartitionTag string
 }
