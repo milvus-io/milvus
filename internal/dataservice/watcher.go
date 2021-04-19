@@ -66,7 +66,7 @@ func (watcher *dataNodeTimeTickWatcher) StartBackgroundLoop(ctx context.Context)
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("data node time tick watcher closed")
+			log.Println("data node time tick watcher clsoed")
 			return
 		case msg := <-watcher.msgQueue:
 			segments, err := watcher.allocator.GetSealedSegments()
@@ -83,10 +83,6 @@ func (watcher *dataNodeTimeTickWatcher) StartBackgroundLoop(ctx context.Context)
 				if expired {
 					segmentInfo, err := watcher.meta.GetSegment(id)
 					if err != nil {
-						log.Println(err.Error())
-						continue
-					}
-					if err = watcher.meta.SetSegmentState(id, datapb.SegmentState_SegmentSealed); err != nil {
 						log.Println(err.Error())
 						continue
 					}

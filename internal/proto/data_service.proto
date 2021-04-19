@@ -137,8 +137,6 @@ message SegmentInfo {
   int64 num_rows=8;
   int64 mem_size=9;
   SegmentState state = 10;
-  repeated internal.MsgPosition start_position = 11;
-  repeated internal.MsgPosition end_position = 12;
 }
 
 message SegmentMsg{
@@ -203,8 +201,6 @@ service DataService {
    rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
    rpc GetTimeTickChannel(common.Empty) returns(milvus.StringResponse) {}
    rpc GetStatisticsChannel(common.Empty) returns(milvus.StringResponse){}
-
-   rpc GetSegmentInfoChannel(common.Empty) returns (milvus.StringResponse){}
 }
 
 service DataNode {

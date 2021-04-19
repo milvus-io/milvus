@@ -29,6 +29,7 @@ type (
 		client      kv.TxnBase                       // client of a reliable kv service, i.e. etcd client
 		collID2Info map[UniqueID]*collectionInfo     // collection id to collection info
 		segID2Info  map[UniqueID]*datapb.SegmentInfo // segment id to segment info
+		allocator   allocator
 		ddLock      sync.RWMutex
 	}
 )
@@ -49,11 +50,12 @@ func (err errCollectionNotFound) Error() string {
 	return fmt.Sprintf("collection %d not found", err.collectionID)
 }
 
-func newMeta(kv kv.TxnBase) (*meta, error) {
+func newMeta(kv kv.TxnBase, allocator allocator) (*meta, error) {
 	mt := &meta{
 		client:      kv,
 		collID2Info: make(map[UniqueID]*collectionInfo),
 		segID2Info:  make(map[UniqueID]*datapb.SegmentInfo),
+		allocator:   allocator,
 	}
 	err := mt.reloadFromKV()
 	if err != nil {
@@ -118,6 +120,29 @@ func (meta *meta) GetCollection(collectionID UniqueID) (*collectionInfo, error) 
 	return collectionInfo, nil
 }
 
+func (meta *meta) BuildSegment(collectionID UniqueID, partitionID UniqueID, channelRange []string) (*datapb.SegmentInfo, error) {
+	id, err := meta.allocator.allocID()
+	if err != nil {
+		return nil, err
+	}
+	ts, err := meta.allocator.allocTimestamp()
+	if err != nil {
+		return nil, err
+	}
+
+	return &datapb.SegmentInfo{
+		SegmentID:      id,
+		CollectionID:   collectionID,
+		PartitionID:    partitionID,
+		InsertChannels: channelRange,
+		OpenTime:       ts,
+		SealedTime:     0,
+		NumRows:        0,
+		MemSize:        0,
+		State:          datapb.SegmentState_SegmentGrowing,
+	}, nil
+}
+
 func (meta *meta) AddSegment(segmentInfo *datapb.SegmentInfo) error {
 	meta.ddLock.Lock()
 	defer meta.ddLock.Unlock()
@@ -166,26 +191,7 @@ func (meta *meta) GetSegment(segID UniqueID) (*datapb.SegmentInfo, error) {
 	return segmentInfo, nil
 }
 
-func (meta *meta) OpenSegment(segmentID UniqueID, timetick Timestamp) error {
-	meta.ddLock.Lock()
-	defer meta.ddLock.Unlock()
-
-	segInfo, ok := meta.segID2Info[segmentID]
-	if !ok {
-		return newErrSegmentNotFound(segmentID)
-	}
-
-	segInfo.OpenTime = timetick
-
-	err := meta.saveSegmentInfo(segInfo)
-	if err != nil {
-		_ = meta.reloadFromKV()
-		return err
-	}
-	return nil
-}
-
-func (meta *meta) SealSegment(segID UniqueID, timetick Timestamp) error {
+func (meta *meta) SealSegment(segID UniqueID) error {
 	meta.ddLock.Lock()
 	defer meta.ddLock.Unlock()
 
@@ -194,9 +200,14 @@ func (meta *meta) SealSegment(segID UniqueID, timetick Timestamp) error {
 		return newErrSegmentNotFound(segID)
 	}
 
-	segInfo.SealedTime = timetick
+	ts, err := meta.allocator.allocTimestamp()
+	if err != nil {
+		return err
+	}
+	segInfo.SealedTime = ts
+	segInfo.State = datapb.SegmentState_SegmentSealed
 
-	err := meta.saveSegmentInfo(segInfo)
+	err = meta.saveSegmentInfo(segInfo)
 	if err != nil {
 		_ = meta.reloadFromKV()
 		return err
@@ -204,7 +215,7 @@ func (meta *meta) SealSegment(segID UniqueID, timetick Timestamp) error {
 	return nil
 }
 
-func (meta *meta) FlushSegment(segID UniqueID, timetick Timestamp) error {
+func (meta *meta) FlushSegment(segID UniqueID) error {
 	meta.ddLock.Lock()
 	defer meta.ddLock.Unlock()
 
@@ -213,26 +224,14 @@ func (meta *meta) FlushSegment(segID UniqueID, timetick Timestamp) error {
 		return newErrSegmentNotFound(segID)
 	}
 
-	segInfo.FlushedTime = timetick
-
-	err := meta.saveSegmentInfo(segInfo)
+	ts, err := meta.allocator.allocTimestamp()
 	if err != nil {
-		_ = meta.reloadFromKV()
 		return err
 	}
-	return nil
-}
+	segInfo.FlushedTime = ts
+	segInfo.State = datapb.SegmentState_SegmentFlushed
 
-func (meta *meta) SetSegmentState(segmentID UniqueID, state datapb.SegmentState) error {
-	meta.ddLock.Lock()
-	defer meta.ddLock.Unlock()
-
-	segInfo, ok := meta.segID2Info[segmentID]
-	if !ok {
-		return newErrSegmentNotFound(segmentID)
-	}
-	segInfo.State = state
-	err := meta.saveSegmentInfo(segInfo)
+	err = meta.saveSegmentInfo(segInfo)
 	if err != nil {
 		_ = meta.reloadFromKV()
 		return err
@@ -316,17 +315,4 @@ func (meta *meta) saveSegmentInfo(segmentInfo *datapb.SegmentInfo) error {
 
 func (meta *meta) removeSegmentInfo(segID UniqueID) error {
 	return meta.client.Remove("/segment/" + strconv.FormatInt(segID, 10))
-}
-func BuildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, channelRange []string) (*datapb.SegmentInfo, error) {
-	return &datapb.SegmentInfo{
-		SegmentID:      segmentID,
-		CollectionID:   collectionID,
-		PartitionID:    partitionID,
-		InsertChannels: channelRange,
-		OpenTime:       0,
-		SealedTime:     0,
-		NumRows:        0,
-		MemSize:        0,
-		State:          datapb.SegmentState_SegmentGrowing,
-	}, nil
 }
