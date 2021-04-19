@@ -22,6 +22,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/querynode/client"
+	"github.com/zilliztech/milvus-distributed/internal/storage"
 )
 
 func TestLoadIndexService_FloatVector(t *testing.T) {
@@ -273,6 +274,9 @@ func TestLoadIndexService_FloatVector(t *testing.T) {
 	binarySet, err := index.Serialize()
 	assert.Equal(t, err, nil)
 	indexPaths := make([]string, 0)
+	var indexCodec storage.IndexCodec
+	binarySet, err = indexCodec.Serialize(binarySet, indexParams)
+	assert.NoError(t, err)
 	for _, index := range binarySet {
 		path := strconv.Itoa(int(segmentID)) + "/" + index.Key
 		indexPaths = append(indexPaths, path)
@@ -588,6 +592,9 @@ func TestLoadIndexService_BinaryVector(t *testing.T) {
 	//save index to minio
 	binarySet, err := index.Serialize()
 	assert.Equal(t, err, nil)
+	var indexCodec storage.IndexCodec
+	binarySet, err = indexCodec.Serialize(binarySet, indexParams)
+	assert.NoError(t, err)
 	indexPaths := make([]string, 0)
 	for _, index := range binarySet {
 		path := strconv.Itoa(int(segmentID)) + "/" + index.Key

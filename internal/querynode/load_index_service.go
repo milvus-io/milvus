@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/storage"
 )
 
 type loadIndexService struct {
@@ -137,18 +139,10 @@ func (lis *loadIndexService) execute(msg msgstream.TsMsg) error {
 	}
 	// 1. use msg's index paths to get index bytes
 	var err error
-	ok, err = lis.checkIndexReady(indexMsg)
-	if err != nil {
-		return err
-	}
-	if ok {
-		// no error
-		return errors.New("")
-	}
-
 	var indexBuffer [][]byte
+	var indexParams indexParam
 	fn := func() error {
-		indexBuffer, err = lis.loadIndex(indexMsg.IndexPaths)
+		indexBuffer, indexParams, err = lis.loadIndex(indexMsg.IndexPaths)
 		if err != nil {
 			return err
 		}
@@ -158,13 +152,21 @@ func (lis *loadIndexService) execute(msg msgstream.TsMsg) error {
 	if err != nil {
 		return err
 	}
+	ok, err = lis.checkIndexReady(indexParams, indexMsg)
+	if err != nil {
+		return err
+	}
+	if ok {
+		// no error
+		return errors.New("")
+	}
 	// 2. use index bytes and index path to update segment
-	err = lis.updateSegmentIndex(indexBuffer, indexMsg)
+	err = lis.updateSegmentIndex(indexParams, indexBuffer, indexMsg)
 	if err != nil {
 		return err
 	}
 	//3. update segment index stats
-	err = lis.updateSegmentIndexStats(indexMsg)
+	err = lis.updateSegmentIndexStats(indexParams, indexMsg)
 	if err != nil {
 		return err
 	}
@@ -222,7 +224,7 @@ func (lis *loadIndexService) fieldsStatsKey2IDs(key string) (UniqueID, UniqueID,
 	return collectionID, fieldID, nil
 }
 
-func (lis *loadIndexService) updateSegmentIndexStats(indexMsg *msgstream.LoadIndexMsg) error {
+func (lis *loadIndexService) updateSegmentIndexStats(indexParams indexParam, indexMsg *msgstream.LoadIndexMsg) error {
 	targetSegment, err := lis.replica.getSegmentByID(indexMsg.SegmentID)
 	if err != nil {
 		return err
@@ -230,7 +232,13 @@ func (lis *loadIndexService) updateSegmentIndexStats(indexMsg *msgstream.LoadInd
 
 	fieldStatsKey := lis.fieldsStatsIDs2Key(targetSegment.collectionID, indexMsg.FieldID)
 	_, ok := lis.fieldIndexes[fieldStatsKey]
-	newIndexParams := indexMsg.IndexParams
+	newIndexParams := make([]*commonpb.KeyValuePair, 0)
+	for k, v := range indexParams {
+		newIndexParams = append(newIndexParams, &commonpb.KeyValuePair{
+			Key:   k,
+			Value: v,
+		})
+	}
 
 	// sort index params by key
 	sort.Slice(newIndexParams, func(i, j int) bool { return newIndexParams[i].Key < newIndexParams[j].Key })
@@ -262,22 +270,40 @@ func (lis *loadIndexService) updateSegmentIndexStats(indexMsg *msgstream.LoadInd
 	return nil
 }
 
-func (lis *loadIndexService) loadIndex(indexPath []string) ([][]byte, error) {
+func (lis *loadIndexService) loadIndex(indexPath []string) ([][]byte, indexParam, error) {
 	index := make([][]byte, 0)
 
-	for _, path := range indexPath {
+	var indexParams indexParam
+	for _, p := range indexPath {
 		fmt.Println("load path = ", indexPath)
-		indexPiece, err := (*lis.client).Load(path)
+		indexPiece, err := (*lis.client).Load(p)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		index = append(index, []byte(indexPiece))
+		// get index params when detecting indexParamPrefix
+		if path.Base(p) == storage.IndexParamsFile {
+			indexCodec := storage.NewIndexCodec()
+			_, indexParams, err = indexCodec.Deserialize([]*storage.Blob{
+				{
+					Key:   storage.IndexParamsFile,
+					Value: []byte(indexPiece),
+				},
+			})
+			if err != nil {
+				return nil, nil, err
+			}
+		} else {
+			index = append(index, []byte(indexPiece))
+		}
 	}
 
-	return index, nil
+	if len(indexParams) <= 0 {
+		return nil, nil, errors.New("cannot find index param")
+	}
+	return index, indexParams, nil
 }
 
-func (lis *loadIndexService) updateSegmentIndex(bytesIndex [][]byte, loadIndexMsg *msgstream.LoadIndexMsg) error {
+func (lis *loadIndexService) updateSegmentIndex(indexParams indexParam, bytesIndex [][]byte, loadIndexMsg *msgstream.LoadIndexMsg) error {
 	segment, err := lis.replica.getSegmentByID(loadIndexMsg.SegmentID)
 	if err != nil {
 		return err
@@ -292,8 +318,8 @@ func (lis *loadIndexService) updateSegmentIndex(bytesIndex [][]byte, loadIndexMs
 	if err != nil {
 		return err
 	}
-	for _, indexParam := range loadIndexMsg.IndexParams {
-		err = loadIndexInfo.appendIndexParam(indexParam.Key, indexParam.Value)
+	for k, v := range indexParams {
+		err = loadIndexInfo.appendIndexParam(k, v)
 		if err != nil {
 			return err
 		}
@@ -330,12 +356,12 @@ func (lis *loadIndexService) sendQueryNodeStats() error {
 	return nil
 }
 
-func (lis *loadIndexService) checkIndexReady(loadIndexMsg *msgstream.LoadIndexMsg) (bool, error) {
+func (lis *loadIndexService) checkIndexReady(indexParams indexParam, loadIndexMsg *msgstream.LoadIndexMsg) (bool, error) {
 	segment, err := lis.replica.getSegmentByID(loadIndexMsg.SegmentID)
 	if err != nil {
 		return false, err
 	}
-	if !segment.matchIndexParam(loadIndexMsg.FieldID, loadIndexMsg.IndexParams) {
+	if !segment.matchIndexParam(loadIndexMsg.FieldID, indexParams) {
 		return false, nil
 	}
 	return true, nil
