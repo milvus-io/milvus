@@ -1128,9 +1128,7 @@ func NewMetaTable(kv kv.Base) (*metaTable,error)
 
 * Soft Time Tick Barrier
 
-<img src="./raw_figs/soft_tt_barrier.jpeg" width=700>
-
-
+<img src="./raw_figs/Soft_time_tick_barrier.png" width=600>
 
 ```go
 type softTimeTickBarrier struct {
@@ -1151,7 +1149,7 @@ func newSoftTimeTickBarrier(ctx context.Context, ttStream *MsgStream, peerIds []
 
 * Hard Time Tick Barrier
 
-<img src="./raw_figs/hard_tt_barrier.jpeg" width=700>
+<img src="./raw_figs/Hard_time_tick_barrier.png" width=500>
 
 ```go
 type hardTimeTickBarrier struct {
@@ -1168,9 +1166,9 @@ func newHardTimeTickBarrier(ctx context.Context, ttStream *MsgStream, peerIds []
 
 
 
-###### 10.5.1 Time Synchornization Message Producer
+###### 10.5.1 Time Synchronization Message Producer
 
-<img src="./raw_figs/tt_msg_producer.jpeg" width=700>
+<img src="./raw_figs/time_sync_msg_producer.png" width=900>
 
 
 
