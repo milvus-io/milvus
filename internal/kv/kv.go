@@ -15,4 +15,6 @@ type Base interface {
 type TxnBase interface {
 	Base
 	MultiSaveAndRemove(saves map[string]string, removals []string) error
+	MultiRemoveWithPrefix(keys []string) error
+	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error
 }

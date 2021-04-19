@@ -194,3 +194,35 @@ func (kv *EtcdKV) WatchWithPrefix(key string) clientv3.WatchChan {
 	rch := kv.client.Watch(context.Background(), key, clientv3.WithPrefix())
 	return rch
 }
+
+func (kv *EtcdKV) MultiRemoveWithPrefix(keys []string) error {
+	ops := make([]clientv3.Op, 0, len(keys))
+	for _, k := range keys {
+		op := clientv3.OpDelete(path.Join(kv.rootPath, k), clientv3.WithPrefix())
+		ops = append(ops, op)
+	}
+	log.Printf("MultiRemoveWithPrefix")
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+
+	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	return err
+}
+
+func (kv *EtcdKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
+	ops := make([]clientv3.Op, 0, len(saves))
+	for key, value := range saves {
+		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
+	}
+
+	for _, keyDelete := range removals {
+		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete), clientv3.WithPrefix()))
+	}
+
+	log.Printf("MultiSaveAndRemove")
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+
+	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	return err
+}

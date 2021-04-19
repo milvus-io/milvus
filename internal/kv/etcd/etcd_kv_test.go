@@ -219,3 +219,74 @@ func TestEtcdKV_MultiSaveAndRemove(t *testing.T) {
 	assert.Error(t, err)
 	assert.Empty(t, val)
 }
+
+func TestEtcdKV_MultiRemoveWithPrefix(t *testing.T) {
+	etcdAddr, err := Params.Load("_EtcdAddress")
+	if err != nil {
+		panic(err)
+	}
+
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	assert.Nil(t, err)
+	rootPath := "/etcd/test/root"
+	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
+
+	defer etcdKV.Close()
+	defer etcdKV.RemoveWithPrefix("")
+
+	err = etcdKV.Save("x/abc/1", "1")
+	assert.Nil(t, err)
+	err = etcdKV.Save("x/abc/2", "2")
+	assert.Nil(t, err)
+	err = etcdKV.Save("x/def/1", "10")
+	assert.Nil(t, err)
+	err = etcdKV.Save("x/def/2", "20")
+	assert.Nil(t, err)
+
+	err = etcdKV.MultiRemoveWithPrefix([]string{"x/abc", "x/def", "not-exist"})
+	assert.Nil(t, err)
+	k, v, err := etcdKV.LoadWithPrefix("x")
+	assert.Nil(t, err)
+	assert.Zero(t, len(k))
+	assert.Zero(t, len(v))
+}
+
+func TestEtcdKV_MultiSaveAndRemoveWithPrefix(t *testing.T) {
+	etcdAddr, err := Params.Load("_EtcdAddress")
+	if err != nil {
+		panic(err)
+	}
+
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	assert.Nil(t, err)
+	rootPath := "/etcd/test/root"
+	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
+
+	defer etcdKV.Close()
+	defer etcdKV.RemoveWithPrefix("")
+
+	err = etcdKV.Save("x/abc/1", "1")
+	assert.Nil(t, err)
+	err = etcdKV.Save("x/abc/2", "2")
+	assert.Nil(t, err)
+	err = etcdKV.Save("x/def/1", "10")
+	assert.Nil(t, err)
+	err = etcdKV.Save("x/def/2", "20")
+	assert.Nil(t, err)
+
+	err = etcdKV.MultiSaveAndRemoveWithPrefix(map[string]string{"y/k1": "v1", "y/k2": "v2"}, []string{"x/abc", "x/def", "not-exist"})
+	assert.Nil(t, err)
+	k, v, err := etcdKV.LoadWithPrefix("x")
+	assert.Nil(t, err)
+	assert.Zero(t, len(k))
+	assert.Zero(t, len(v))
+
+	k, v, err = etcdKV.LoadWithPrefix("y")
+	assert.Nil(t, err)
+	assert.Equal(t, len(k), len(v))
+	assert.Equal(t, len(k), 2)
+	assert.Equal(t, k[0], rootPath+"/y/k1")
+	assert.Equal(t, k[1], rootPath+"/y/k2")
+	assert.Equal(t, v[0], "v1")
+	assert.Equal(t, v[1], "v2")
+}
