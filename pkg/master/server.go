@@ -21,7 +21,7 @@ import (
 )
 
 func Run() {
-	go mock.FakePulsarProducer()
+	// go mock.FakePulsarProducer()
 	go SegmentStatsController()
 	collectionChan := make(chan *messagepb.Mapping)
 	defer close(collectionChan)
@@ -45,27 +45,39 @@ func SegmentStatsController() {
 	ssChan := make(chan mock.SegmentStats, 10)
 	defer close(ssChan)
 	ssClient := informer.NewPulsarClient()
+
+	segmentCloseLog := make(map[uint64]uint64, 0)
+
 	go ssClient.Listener(ssChan)
 	for {
 		select {
 		case ss := <-ssChan:
-			ComputeCloseTime(ss, kvbase)
+			ComputeCloseTime(&segmentCloseLog, ss, kvbase)
 			UpdateSegmentStatus(ss, kvbase)
-		case <-time.After(5 * time.Second):
-			fmt.Println("timeout")
-			return
+		//case <-time.After(5 * time.Second):
+		//	fmt.Println("timeout")
+		//	return
 		}
 	}
 }
 
-func ComputeCloseTime(ss mock.SegmentStats, kvbase kv.Base) error {
+func ComputeCloseTime(segmentCloseLog *map[uint64]uint64, ss mock.SegmentStats, kvbase kv.Base) error {
+	segmentID := ss.SegementID
+	if _, ok := (*segmentCloseLog)[segmentID]; ok {
+		// This segment has been closed
+		log.Println("Segment", segmentID, "has been closed")
+		return nil
+	}
+
 	if int(ss.MemorySize) > int(conf.Config.Master.SegmentThreshole*0.8) {
 		currentTime := time.Now()
 		memRate := int(ss.MemoryRate)
 		if memRate == 0 {
-			memRate = 1
+			//memRate = 1
+			log.Println("memRate = 0")
+			return nil
 		}
-		sec := int(conf.Config.Master.SegmentThreshole*0.2) / memRate
+		sec := float64(conf.Config.Master.SegmentThreshole*0.2) / float64(memRate)
 		data, err := kvbase.Load("segment/" + strconv.Itoa(int(ss.SegementID)))
 		if err != nil {
 			return err
@@ -74,13 +86,15 @@ func ComputeCloseTime(ss mock.SegmentStats, kvbase kv.Base) error {
 		if err != nil {
 			return err
 		}
-		seg.CloseTimeStamp = uint64(currentTime.Add(time.Duration(sec) * time.Second).Unix())
+		segmentLogicTime := seg.CloseTimeStamp << 46 >> 46
+		seg.CloseTimeStamp = uint64(currentTime.Add(time.Duration(sec) * time.Second).Unix()) << 18 + segmentLogicTime
 		fmt.Println("memRate = ", memRate, ",sec = ", sec ,",Close time = ", seg.CloseTimeStamp)
 		updateData, err := mock.Segment2JSON(*seg)
 		if err != nil {
 			return err
 		}
 		kvbase.Save("segment/"+strconv.Itoa(int(ss.SegementID)), updateData)
+		(*segmentCloseLog)[segmentID] = seg.CloseTimeStamp
 		//create new segment
 		newSegID := id.New().Uint64()
 		newSeg := mock.NewSegment(newSegID, seg.CollectionID, seg.CollectionName, "default", seg.ChannelStart, seg.ChannelEnd, currentTime, time.Unix(1<<36-1, 0))

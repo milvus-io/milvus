@@ -49,7 +49,10 @@ func (pc PulsarClient) Listener(ssChan chan mock.SegmentStats) error {
 		if err != nil {
 			log.Fatal(err)
 		}
-		m, _ := mock.SegmentUnMarshal(msg.Payload())
+		m, err := mock.SegmentUnMarshal(msg.Payload())
+		if err != nil {
+			log.Println("SegmentUnMarshal Failed")
+		}
 		fmt.Printf("Received message msgId: %#v -- content: '%s'\n",
 			msg.ID(), m.SegementID)
 		ssChan <- m

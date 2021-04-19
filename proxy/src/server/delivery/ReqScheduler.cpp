@@ -121,9 +121,12 @@ ReqScheduler::TakeToExecute(ReqQueuePtr req_queue) {
         }
 
         try {
-            if (req->type() == ReqType::kInsert || req->type() == ReqType::kDeleteEntityByID || req->type() == ReqType::kSearch) {
+            if (req->type() == ReqType::kInsert || req->type() == ReqType::kDeleteEntityByID) {
               std::lock_guard lock(time_syc_mtx_);
               sending_ = true;
+              req->SetTimestamp(TSOracle::GetInstance().GetTimeStamp());
+            }
+            if (req->type() == ReqType::kSearch){
               req->SetTimestamp(TSOracle::GetInstance().GetTimeStamp());
             }
             auto status = req->Execute();

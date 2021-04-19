@@ -3,6 +3,7 @@ package mock
 import (
 	"bytes"
 	"encoding/gob"
+	"github.com/golang/protobuf/proto"
 	"time"
 
 	masterpb "github.com/czs007/suvlim/pkg/master/grpc/master"
@@ -16,6 +17,9 @@ type SegmentStats struct {
 	Rows       int64
 }
 
+// map[SegmentID]SegmentCloseTime
+type SegmentCloseLog map[uint64]uint64
+
 func SegmentMarshal(s SegmentStats) ([]byte, error) {
 	var nb bytes.Buffer
 	enc := gob.NewEncoder(&nb)
@@ -27,11 +31,17 @@ func SegmentMarshal(s SegmentStats) ([]byte, error) {
 }
 
 func SegmentUnMarshal(data []byte) (SegmentStats, error) {
-	var ss SegmentStats
-	dec := gob.NewDecoder(bytes.NewBuffer(data))
-	err := dec.Decode(&ss)
+	var pbSS masterpb.SegmentStat
+	err := proto.Unmarshal(data, &pbSS)
 	if err != nil {
 		return SegmentStats{}, err
+	}
+	var ss = SegmentStats{
+		SegementID: pbSS.SegmentId,
+		MemorySize: pbSS.MemorySize,
+		MemoryRate: float64(pbSS.MemoryRate),
+		Status:     pbSS.Status,
+		Rows:       pbSS.Rows,
 	}
 	return ss, nil
 }
