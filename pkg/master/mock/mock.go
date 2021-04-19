@@ -1,0 +1,5 @@
+package mock
+
+func MockServer() {
+
+}

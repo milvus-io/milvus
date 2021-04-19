@@ -105,5 +105,5 @@ metric:
   level: debug
 
 pulsar:
-  address: 192.168.2.18
+  address: localhost
   port: 6650

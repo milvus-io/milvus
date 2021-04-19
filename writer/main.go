@@ -24,6 +24,7 @@ func main() {
 	wg := sync.WaitGroup{}
 	ctx := context.Background()
 	kv, err := storage.NewStore(ctx, types.MinIODriver)
+	// if err != nil, should retry link
 	if err != nil {
 		log.Fatal(err)
 	}

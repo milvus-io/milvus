@@ -3,10 +3,10 @@ package write_node
 import (
 	"context"
 	"fmt"
+	msgpb "github.com/czs007/suvlim/pkg/message"
 	storage "github.com/czs007/suvlim/storage/pkg"
 	"github.com/czs007/suvlim/storage/pkg/types"
 	"github.com/czs007/suvlim/writer/message_client"
-	msgpb "github.com/czs007/suvlim/pkg/message"
 	"strconv"
 	"sync"
 )
@@ -64,11 +64,9 @@ func (wn *WriteNode) InsertBatchData(ctx context.Context, data []*msgpb.InsertOr
 }
 
 func (wn *WriteNode) DeleteBatchData(ctx context.Context, data []*msgpb.InsertOrDeleteMsg, wg *sync.WaitGroup) error {
-	//var segmentInfos []*SegmentIdInfo
 	var prefixKey string
 	var prefixKeys [][]byte
 	var timeStamps []uint64
-	//var segmentIds []string
 
 	for i := 0; i < len(data); i++ {
 		prefixKey = data[i].CollectionName + "-" + strconv.FormatUint(uint64(data[i].Uid), 10)
@@ -89,16 +87,8 @@ func (wn *WriteNode) DeleteBatchData(ctx context.Context, data []*msgpb.InsertOr
 			SegmentId: segmentIds,
 		}
 		wn.MessageClient.Send(ctx, segmentInfo)
-		//segmentIds = append(segmentIds, segmentId)
 	}
 
-	//for i := 0; i < len(prefixKeys); i++ {
-	//	segmentInfos = append(segmentInfos, &SegmentIdInfo{
-	//		CollectionName: data[i].CollectionName,
-	//		EntityId:       data[i].Uid,
-	//		SegmentIds:     segmentIds,
-	//	})
-	//}
 	err := (*wn.KvStore).DeleteRows(ctx, prefixKeys, timeStamps)
 	if err != nil {
 		fmt.Println("Can't delete data")
