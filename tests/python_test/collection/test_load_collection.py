@@ -1,10 +1,5 @@
 import pdb
 import pytest
-import logging
-import itertools
-from time import sleep
-import threading
-from multiprocessing import Process
 from utils import *
 from constants import *
 
@@ -26,14 +21,12 @@ class TestLoadCollection:
       The following cases are used to test `load_collection` function
     ******************************************************************
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        # if str(connect._cmd("mode")) == "CPU":
-        #     if request.param["index_type"] in index_cpu_not_support():
-        #         pytest.skip("sq8h not support in cpu mode")
         return request.param
 
     @pytest.fixture(
@@ -41,45 +34,47 @@ class TestLoadCollection:
         params=gen_binary_index()
     )
     def get_binary_index(self, request, connect):
-        logging.getLogger().info(request.param)
-        if request.param["index_type"] in binary_support():
-            return request.param
-        else:
-            pytest.skip("Skip index Temporary")
+        return request.param
 
+    # @pytest.mark.tags("0331")
+    # TODO ci failed
     def test_load_collection_after_index(self, connect, collection, get_simple_index):
         '''
         target: test load collection, after index created
         method: insert and create index, load collection with correct params
         expected: no error raised
-        ''' 
+        '''
         connect.insert(collection, default_entities)
         connect.flush([collection])
-        logging.getLogger().info(get_simple_index)
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         connect.load_collection(collection)
         connect.release_collection(collection)
 
     @pytest.mark.level(2)
+    # todo can't load repeat
     def test_load_collection_after_index_binary(self, connect, binary_collection, get_binary_index):
         '''
         target: test load binary_collection, after index created
         method: insert and create index, load binary_collection with correct params
         expected: no error raised
-        ''' 
-        connect.insert(binary_collection, default_binary_entities)
+        '''
+        ids = connect.insert(binary_collection, default_binary_entities)
+        assert len(ids) == default_nb
         connect.flush([binary_collection])
         for metric_type in binary_metrics():
-            logging.getLogger().info(metric_type)
             get_binary_index["metric_type"] = metric_type
+            connect.drop_index(binary_collection, default_binary_vec_field_name)
             if get_binary_index["index_type"] == "BIN_IVF_FLAT" and metric_type in structure_metrics():
                 with pytest.raises(Exception) as e:
                     connect.create_index(binary_collection, default_binary_vec_field_name, get_binary_index)
             else:
                 connect.create_index(binary_collection, default_binary_vec_field_name, get_binary_index)
+                index = connect.describe_index(binary_collection, default_binary_vec_field_name)
+                assert index == get_binary_index
             connect.load_collection(binary_collection)
-        connect.release_collection(binary_collection)
+            connect.release_collection(binary_collection)
 
+    @pytest.mark.tags("0331")
     def test_load_empty_collection(self, connect, collection):
         '''
         target: test load collection
@@ -90,6 +85,7 @@ class TestLoadCollection:
         connect.release_collection(collection)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_load_collection_dis_connect(self, dis_connect, collection):
         '''
         target: test load collection, without connection
@@ -100,6 +96,7 @@ class TestLoadCollection:
             dis_connect.load_collection(collection)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_release_collection_dis_connect(self, dis_connect, collection):
         '''
         target: test release collection, without connection
@@ -110,12 +107,14 @@ class TestLoadCollection:
             dis_connect.release_collection(collection)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_load_collection_not_existed(self, connect, collection):
         collection_name = gen_unique_str(uid)
         with pytest.raises(Exception) as e:
             connect.load_collection(collection_name)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_release_collection_not_existed(self, connect, collection):
         collection_name = gen_unique_str(uid)
         with pytest.raises(Exception) as e:
@@ -130,8 +129,15 @@ class TestLoadCollection:
         ids = connect.insert(collection, default_entities)
         assert len(ids) == default_nb
         connect.flush([collection])
-        with pytest.raises(Exception) as e:
-            connect.release_collection(collection)
+        connect.release_collection(collection)
+
+    @pytest.mark.tags("0331")
+    def test_load_collection_repeatedly(self, connect, collection):
+        ids = connect.insert(collection, default_entities)
+        assert len(ids) == default_nb
+        connect.flush([collection])
+        connect.load_collection(collection)
+        connect.load_collection(collection)
 
     @pytest.mark.level(2)
     def test_load_release_collection(self, connect, collection):
@@ -161,7 +167,7 @@ class TestLoadCollection:
         with pytest.raises(Exception) as e:
             connect.release_collection(collection)
 
-    # TODO
+    # 1132
     def test_load_collection_without_flush(self, connect, collection):
         """
         target: test load collection without flush
@@ -170,8 +176,8 @@ class TestLoadCollection:
         """
         ids = connect.insert(collection, default_entities)
         assert len(ids) == default_nb
-        with pytest.raises(Exception) as e:
-            connect.load_collection(collection)
+        # with pytest.raises(Exception) as e:
+        connect.load_collection(collection)
 
     # TODO
     def _test_load_collection_larger_than_memory(self):
@@ -200,7 +206,7 @@ class TestLoadCollection:
         res = connect.search(collection, default_single_query, partition_tags=[default_partition_name])
         assert len(res[0]) == default_top_k
 
-    def test_load_collection_release_part_partitions(self, connect, collection):
+    def test_load_collection_release_all_partitions(self, connect, collection):
         """
         target: test release all partitions after load collection
         method: load collection and release all partitions
@@ -227,19 +233,20 @@ class TestLoadCollection:
         ids = connect.insert(collection, default_entities, partition_tag=default_tag)
         assert len(ids) == default_nb
         connect.flush([collection])
-        connect.load_collection(collection)
-        connect.release_partitions(collection, [default_tag])
-        res = connect.search(collection, default_single_query)
-        assert len(res[0]) == 0
+        connect.load_partitions(collection, [default_tag])
+        connect.release_collection(collection)
+        with pytest.raises(Exception):
+            connect.search(collection, default_single_query)
+        # assert len(res[0]) == 0
 
 
 class TestReleaseAdvanced:
-    
-    def _test_release_collection_during_searching(self, connect, collection):
+
+    def test_release_collection_during_searching(self, connect, collection):
         """
-        target: test release collection during searching 
+        target: test release collection during searching
         method: insert entities into collection, flush and load collection, release collection during searching
-        expected: 
+        expected:
         """
         nq = 1000
         top_k = 1
@@ -247,16 +254,17 @@ class TestReleaseAdvanced:
         connect.flush([collection])
         connect.load_collection(collection)
         query, _ = gen_query_vectors(field_name, default_entities, top_k, nq)
-        res = connect.search(collection, query, _async=True)
+        future = connect.search(collection, query, _async=True)
         connect.release_collection(collection)
-        res = connect.search(collection, default_single_query)
-        assert len(res[0]) == 0
+        with pytest.raises(Exception):
+            connect.search(collection, default_single_query)
+        # assert len(res[0]) == 0
 
-    def _test_release_partition_during_searching(self, connect, collection):
+    def test_release_partition_during_searching(self, connect, collection):
         """
-        target: test release partition during searching 
+        target: test release partition during searching
         method: insert entities into partition, flush and load partition, release partition during searching
-        expected: 
+        expected:
         """
         nq = 1000
         top_k = 1
@@ -270,7 +278,7 @@ class TestReleaseAdvanced:
         res = connect.search(collection, default_single_query)
         assert len(res[0]) == 0
 
-    def _test_release_collection_during_searching_A(self, connect, collection):
+    def test_release_collection_during_searching_A(self, connect, collection):
         """
         target: test release collection during searching
         method: insert entities into partition, flush and load partition, release collection during searching
@@ -279,14 +287,15 @@ class TestReleaseAdvanced:
         nq = 1000
         top_k = 1
         connect.create_partition(collection, default_tag)
-        query, _ = gen_query_vectors(field_name, default_entities, top_k, nq) 
+        query, _ = gen_query_vectors(field_name, default_entities, top_k, nq)
         connect.insert(collection, default_entities, partition_tag=default_tag)
         connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
         res = connect.search(collection, query, _async=True)
         connect.release_collection(collection)
-        res = connect.search(collection, default_single_query)
-        assert len(res[0]) == 0
+        with pytest.raises(Exception):
+            connect.search(collection, default_single_query)
+        # assert len(res[0]) == 0
 
     def _test_release_collection_during_loading(self, connect, collection):
         """
@@ -299,13 +308,14 @@ class TestReleaseAdvanced:
 
         def load():
             connect.load_collection(collection)
+
         t = threading.Thread(target=load, args=())
         t.start()
         connect.release_collection(collection)
         res = connect.search(collection, default_single_query)
         assert len(res[0]) == 0
 
-    def _test_release_partition_during_loading(self, connect, collection):
+    def test_release_partition_during_loading(self, connect, collection):
         """
         target: test release partition during loading
         method: insert entities into partition, flush, release partition during loading
@@ -317,13 +327,14 @@ class TestReleaseAdvanced:
 
         def load():
             connect.load_collection(collection)
+
         t = threading.Thread(target=load, args=())
         t.start()
         connect.release_partitions(collection, [default_tag])
         res = connect.search(collection, default_single_query)
         assert len(res[0]) == 0
 
-    def _test_release_collection_during_inserting(self, connect, collection):
+    def test_release_collection_during_inserting(self, connect, collection):
         """
         target: test release collection during inserting
         method: load collection, do release collection during inserting
@@ -335,11 +346,13 @@ class TestReleaseAdvanced:
 
         def insert():
             connect.insert(collection, default_entities)
+
         t = threading.Thread(target=insert, args=())
         t.start()
         connect.release_collection(collection)
-        res = connect.search(collection, default_single_query)
-        assert len(res[0]) == 0
+        with pytest.raises(Exception):
+            res = connect.search(collection, default_single_query)
+        # assert len(res[0]) == 0
 
     def _test_release_collection_during_indexing(self, connect, collection):
         """
@@ -362,6 +375,7 @@ class TestLoadCollectionInvalid(object):
     """
     Test load collection with invalid params
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_strs()
@@ -370,12 +384,14 @@ class TestLoadCollectionInvalid(object):
         yield request.param
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_load_collection_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.load_collection(collection_name)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_release_collection_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
@@ -388,6 +404,7 @@ class TestLoadPartition:
       The following cases are used to test `load_collection` function
     ******************************************************************
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_simple_index()
@@ -420,8 +437,10 @@ class TestLoadPartition:
         assert len(ids) == default_nb
         connect.flush([collection])
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
+        search_param = get_search_param(get_simple_index["index_type"])
+        query, vecs = gen_query_vectors(field_name, default_entities, default_top_k, nq=1, search_params=search_param)
         connect.load_partitions(collection, [default_tag])
-        res = connect.search(collection, default_single_query)
+        res = connect.search(collection, query, partition_tags=[default_tag])
         assert len(res[0]) == default_top_k
 
     @pytest.mark.level(2)
@@ -432,7 +451,7 @@ class TestLoadPartition:
         expected: no error raised
         '''
         connect.create_partition(binary_collection, default_tag)
-        ids = connect.insert(binary_collection, default_binary_entities, partition_tag=[default_tag])
+        ids = connect.insert(binary_collection, default_binary_entities, partition_tag=default_tag)
         assert len(ids) == default_nb
         connect.flush([binary_collection])
         for metric_type in binary_metrics():
@@ -445,6 +464,7 @@ class TestLoadPartition:
                 connect.create_index(binary_collection, default_binary_vec_field_name, get_binary_index)
             connect.load_partitions(binary_collection, [default_tag])
 
+    @pytest.mark.tags("0331")
     def test_load_empty_partition(self, connect, collection):
         '''
         target: test load collection
@@ -457,6 +477,7 @@ class TestLoadPartition:
         assert len(res[0]) == 0
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_load_collection_dis_connect(self, connect, dis_connect, collection):
         '''
         target: test load collection, without connection
@@ -468,6 +489,7 @@ class TestLoadPartition:
             dis_connect.load_partitions(collection, [default_tag])
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_release_partition_dis_connect(self, connect, dis_connect, collection):
         '''
         target: test release collection, without connection
@@ -480,12 +502,14 @@ class TestLoadPartition:
             dis_connect.release_partitions(collection, [default_tag])
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_load_partition_not_existed(self, connect, collection):
         partition_name = gen_unique_str(uid)
         with pytest.raises(Exception) as e:
             connect.load_partitions(collection, [partition_name])
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_release_partition_not_existed(self, connect, collection):
         partition_name = gen_unique_str(uid)
         with pytest.raises(Exception) as e:
@@ -498,17 +522,16 @@ class TestLoadPartition:
         expected: raise exception
         """
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=[default_tag])
+        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
         assert len(ids) == default_nb
         connect.flush([collection])
-        with pytest.raises(Exception) as e:
-            connect.release_partitions(collection, [default_tag])
+        connect.release_partitions(collection, [default_tag])
 
     @pytest.mark.level(2)
     def test_load_release_after_drop(self, connect, collection):
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=[default_tag])
-        connect.flush([collection_name])
+        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
         connect.release_partitions(collection, [default_tag])
         connect.drop_partition(collection, default_tag)
@@ -524,8 +547,8 @@ class TestLoadPartition:
         expected: raise exception
         """
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=[default_tag])
-        connect.flush([collection_name])
+        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
         connect.drop_partition(collection, default_tag)
         with pytest.raises(Exception) as e:
@@ -538,8 +561,8 @@ class TestLoadPartition:
         expected: raise exception
         """
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=[default_tag])
-        connect.flush([collection_name])
+        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
         connect.release_partitions(collection, [default_tag])
         connect.drop_collection(collection)
@@ -553,6 +576,7 @@ class TestLoadPartitionInvalid(object):
     """
     Test load collection with invalid params
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_strs()
@@ -561,12 +585,14 @@ class TestLoadPartitionInvalid(object):
         yield request.param
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_load_partition_with_invalid_partition_name(self, connect, collection, get_partition_name):
         partition_name = get_partition_name
         with pytest.raises(Exception) as e:
             connect.load_partitions(collection, [partition_name])
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_release_partition_with_invalid_partition_name(self, connect, collection, get_partition_name):
         partition_name = get_partition_name
         with pytest.raises(Exception) as e:
