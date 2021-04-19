@@ -31,8 +31,7 @@ TimeSync::TimeSync(int64_t id,
     for (;;) {
       if (this->stop_) break;
       this->sync_msg_.set_timestamp(this->timestamp_());
-      //TODO, set msg type
-      //this->sync_msg_.set_msgtype();
+      this->sync_msg_.set_sync_type(milvus::grpc::READ);
       auto rst = producer.send(sync_msg_.SerializeAsString());
       if (rst != pulsar::ResultOk) {
         //TODO, add log
