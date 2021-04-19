@@ -59,6 +59,7 @@ type ReplicaInterface interface {
 
 	// segment
 	addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, segType segmentType) error
+	setSegment(segment *Segment) error
 	removeSegment(segmentID UniqueID) error
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 	hasSegment(segmentID UniqueID) bool
@@ -378,15 +379,15 @@ func (colReplica *collectionReplica) getEnabledPartitionIDsPrivate() []UniqueID 
 func (colReplica *collectionReplica) addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, segType segmentType) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
-	return colReplica.addSegmentPrivate(segmentID, partitionID, collectionID, segType)
-}
-
-func (colReplica *collectionReplica) addSegmentPrivate(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, segType segmentType) error {
 	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		return err
 	}
+	var newSegment = newSegment(collection, segmentID, partitionID, collectionID, segType)
+	return colReplica.addSegmentPrivate(segmentID, partitionID, newSegment)
+}
 
+func (colReplica *collectionReplica) addSegmentPrivate(segmentID UniqueID, partitionID UniqueID, segment *Segment) error {
 	partition, err := colReplica.getPartitionByIDPrivate(partitionID)
 	if err != nil {
 		return err
@@ -396,10 +397,19 @@ func (colReplica *collectionReplica) addSegmentPrivate(segmentID UniqueID, parti
 		return nil
 	}
 	partition.addSegmentID(segmentID)
-	var newSegment = newSegment(collection, segmentID, partitionID, collectionID, segType)
-	colReplica.segments[segmentID] = newSegment
+	colReplica.segments[segmentID] = segment
 
 	return nil
+}
+
+func (colReplica *collectionReplica) setSegment(segment *Segment) error {
+	colReplica.mu.Lock()
+	defer colReplica.mu.Unlock()
+	_, err := colReplica.getCollectionByIDPrivate(segment.collectionID)
+	if err != nil {
+		return err
+	}
+	return colReplica.addSegmentPrivate(segment.segmentID, segment.partitionID, segment)
 }
 
 func (colReplica *collectionReplica) removeSegment(segmentID UniqueID) error {

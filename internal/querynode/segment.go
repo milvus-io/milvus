@@ -35,8 +35,6 @@ const (
 	segmentTypeIndexing
 )
 
-type indexParam = map[string]string
-
 type Segment struct {
 	segmentPtr C.CSegmentInterface
 
@@ -57,9 +55,7 @@ type Segment struct {
 	segmentType segmentType
 
 	paramMutex sync.RWMutex // guards index
-	indexParam map[int64]indexParam
-	indexName  string
-	indexID    UniqueID
+	indexInfos map[int64]*indexInfo
 }
 
 //-------------------------------------------------------------------------------------- common interfaces
@@ -91,30 +87,6 @@ func (s *Segment) getRecentlyModified() bool {
 	return s.recentlyModified
 }
 
-func (s *Segment) setIndexName(name string) {
-	s.rmMutex.Lock()
-	defer s.rmMutex.Unlock()
-	s.indexName = name
-}
-
-func (s *Segment) getIndexName() string {
-	s.rmMutex.Lock()
-	defer s.rmMutex.Unlock()
-	return s.indexName
-}
-
-func (s *Segment) setIndexID(id UniqueID) {
-	s.rmMutex.Lock()
-	defer s.rmMutex.Unlock()
-	s.indexID = id
-}
-
-func (s *Segment) getIndexID() UniqueID {
-	s.rmMutex.Lock()
-	defer s.rmMutex.Unlock()
-	return s.indexID
-}
-
 func (s *Segment) setType(segType segmentType) {
 	s.typeMu.Lock()
 	defer s.typeMu.Unlock()
@@ -132,7 +104,7 @@ func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, c
 		CSegmentInterface
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
 	*/
-	initIndexParam := make(map[int64]indexParam)
+	indexInfos := make(map[int64]*indexInfo)
 	var segmentPtr C.CSegmentInterface
 	switch segType {
 	case segmentTypeInvalid:
@@ -155,7 +127,7 @@ func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, c
 		segmentID:        segmentID,
 		partitionID:      partitionID,
 		collectionID:     collectionID,
-		indexParam:       initIndexParam,
+		indexInfos:       indexInfos,
 		enableLoadBinLog: false,
 	}
 
@@ -270,28 +242,116 @@ func (s *Segment) fillTargetEntry(plan *Plan,
 	return nil
 }
 
-func (s *Segment) setIndexParam(fieldID int64, indexParamKv []*commonpb.KeyValuePair) error {
+//-------------------------------------------------------------------------------------- index info interface
+func (s *Segment) setIndexName(fieldID int64, name string) error {
 	s.paramMutex.Lock()
 	defer s.paramMutex.Unlock()
-	indexParamMap := make(indexParam)
-	if indexParamKv == nil {
+	if _, ok := s.indexInfos[fieldID]; !ok {
+		return errors.New("index info hasn't been init")
+	}
+	s.indexInfos[fieldID].setIndexName(name)
+	return nil
+}
+
+func (s *Segment) setIndexParam(fieldID int64, indexParams map[string]string) error {
+	s.paramMutex.Lock()
+	defer s.paramMutex.Unlock()
+	if indexParams == nil {
 		return errors.New("empty loadIndexMsg's indexParam")
 	}
-	for _, param := range indexParamKv {
-		indexParamMap[param.Key] = param.Value
+	if _, ok := s.indexInfos[fieldID]; !ok {
+		return errors.New("index info hasn't been init")
 	}
-	s.indexParam[fieldID] = indexParamMap
+	s.indexInfos[fieldID].setIndexParams(indexParams)
 	return nil
+}
+
+func (s *Segment) setIndexPaths(fieldID int64, indexPaths []string) error {
+	s.paramMutex.Lock()
+	defer s.paramMutex.Unlock()
+	if _, ok := s.indexInfos[fieldID]; !ok {
+		return errors.New("index info hasn't been init")
+	}
+	s.indexInfos[fieldID].setIndexPaths(indexPaths)
+	return nil
+}
+
+func (s *Segment) setIndexID(fieldID int64, id UniqueID) error {
+	s.paramMutex.Lock()
+	defer s.paramMutex.Unlock()
+	if _, ok := s.indexInfos[fieldID]; !ok {
+		return errors.New("index info hasn't been init")
+	}
+	s.indexInfos[fieldID].setIndexID(id)
+	return nil
+}
+
+func (s *Segment) setBuildID(fieldID int64, id UniqueID) error {
+	s.paramMutex.Lock()
+	defer s.paramMutex.Unlock()
+	if _, ok := s.indexInfos[fieldID]; !ok {
+		return errors.New("index info hasn't been init")
+	}
+	s.indexInfos[fieldID].setBuildID(id)
+	return nil
+}
+
+func (s *Segment) getIndexName(fieldID int64) string {
+	s.paramMutex.Lock()
+	defer s.paramMutex.Unlock()
+	if _, ok := s.indexInfos[fieldID]; !ok {
+		return ""
+	}
+	return s.indexInfos[fieldID].getIndexName()
+}
+
+func (s *Segment) getIndexID(fieldID int64) UniqueID {
+	s.paramMutex.Lock()
+	defer s.paramMutex.Unlock()
+	if _, ok := s.indexInfos[fieldID]; !ok {
+		return -1
+	}
+	return s.indexInfos[fieldID].getIndexID()
+}
+
+func (s *Segment) getBuildID(fieldID int64) UniqueID {
+	s.paramMutex.Lock()
+	defer s.paramMutex.Unlock()
+	if _, ok := s.indexInfos[fieldID]; !ok {
+		return -1
+	}
+	return s.indexInfos[fieldID].getBuildID()
+}
+
+func (s *Segment) getIndexPaths(fieldID int64) []string {
+	s.paramMutex.Lock()
+	defer s.paramMutex.Unlock()
+	if _, ok := s.indexInfos[fieldID]; !ok {
+		return nil
+	}
+	return s.indexInfos[fieldID].getIndexPaths()
+}
+
+func (s *Segment) getIndexParams(fieldID int64) map[string]string {
+	s.paramMutex.Lock()
+	defer s.paramMutex.Unlock()
+	if _, ok := s.indexInfos[fieldID]; !ok {
+		return nil
+	}
+	return s.indexInfos[fieldID].getIndexParams()
 }
 
 func (s *Segment) matchIndexParam(fieldID int64, indexParams indexParam) bool {
 	s.paramMutex.RLock()
 	defer s.paramMutex.RUnlock()
-	fieldIndexParam := s.indexParam[fieldID]
+	if _, ok := s.indexInfos[fieldID]; !ok {
+		return false
+	}
+	fieldIndexParam := s.indexInfos[fieldID].getIndexParams()
 	if fieldIndexParam == nil {
 		return false
 	}
-	paramSize := len(s.indexParam)
+	paramSize := len(s.indexInfos)
 	matchCount := 0
 	for k, v := range indexParams {
 		value, ok := fieldIndexParam[k]
@@ -304,6 +364,25 @@ func (s *Segment) matchIndexParam(fieldID int64, indexParams indexParam) bool {
 		matchCount++
 	}
 	return paramSize == matchCount
+}
+
+func (s *Segment) setIndexInfo(fieldID int64, info *indexInfo) error {
+	s.paramMutex.RLock()
+	defer s.paramMutex.RUnlock()
+	if s.indexInfos == nil {
+		return errors.New("indexInfos hasn't been init")
+	}
+	s.indexInfos[fieldID] = info
+	return nil
+}
+
+func (s *Segment) checkIndexReady(fieldID int64) bool {
+	s.paramMutex.RLock()
+	defer s.paramMutex.RUnlock()
+	if _, ok := s.indexInfos[fieldID]; !ok {
+		return false
+	}
+	return s.indexInfos[fieldID].getReadyLoad()
 }
 
 //-------------------------------------------------------------------------------------- interfaces for growing segment
@@ -549,7 +628,29 @@ func (s *Segment) dropFieldData(fieldID int64) error {
 	return nil
 }
 
-func (s *Segment) updateSegmentIndex(loadIndexInfo *LoadIndexInfo) error {
+func (s *Segment) updateSegmentIndex(bytesIndex [][]byte, fieldID UniqueID) error {
+	loadIndexInfo, err := newLoadIndexInfo()
+	defer deleteLoadIndexInfo(loadIndexInfo)
+	if err != nil {
+		return err
+	}
+	err = loadIndexInfo.appendFieldInfo(fieldID)
+	if err != nil {
+		return err
+	}
+	indexParams := s.getIndexParams(fieldID)
+	for k, v := range indexParams {
+		err = loadIndexInfo.appendIndexParam(k, v)
+		if err != nil {
+			return err
+		}
+	}
+	indexPaths := s.getIndexPaths(fieldID)
+	err = loadIndexInfo.appendIndex(bytesIndex, indexPaths)
+	if err != nil {
+		return err
+	}
+
 	if s.segmentPtr == nil {
 		return errors.New("null seg core pointer")
 	}

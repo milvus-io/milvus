@@ -602,14 +602,24 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 		if err != nil {
 			continue
 		}
+		var indexName string
+		var indexID int64
+		// TODO:: segment has multi vec column
+		if len(segment.indexInfos) > 0 {
+			for fieldID := range segment.indexInfos {
+				indexName = segment.getIndexName(fieldID)
+				indexID = segment.getIndexID(fieldID)
+				break
+			}
+		}
 		info := &queryPb.SegmentInfo{
 			SegmentID:    segment.ID(),
 			CollectionID: segment.collectionID,
 			PartitionID:  segment.partitionID,
 			MemSize:      segment.getMemSize(),
 			NumRows:      segment.getRowCount(),
-			IndexName:    segment.getIndexName(),
-			IndexID:      segment.getIndexID(),
+			IndexName:    indexName,
+			IndexID:      indexID,
 		}
 		infos = append(infos, info)
 	}

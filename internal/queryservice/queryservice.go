@@ -634,7 +634,8 @@ func (qs *QueryService) GetPartitionStates(ctx context.Context, req *querypb.Get
 
 func (qs *QueryService) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	segmentInfos := make([]*querypb.SegmentInfo, 0)
-	for _, node := range qs.queryNodes {
+	totalMemSize := int64(0)
+	for nodeID, node := range qs.queryNodes {
 		segmentInfo, err := node.client.GetSegmentInfo(ctx, req)
 		if err != nil {
 			return &querypb.GetSegmentInfoResponse{
@@ -645,6 +646,10 @@ func (qs *QueryService) GetSegmentInfo(ctx context.Context, req *querypb.GetSegm
 			}, err
 		}
 		segmentInfos = append(segmentInfos, segmentInfo.Infos...)
+		for _, info := range segmentInfo.Infos {
+			totalMemSize = totalMemSize + info.MemSize
+		}
+		log.Debug("getSegmentInfo", zap.Int64("nodeID", nodeID), zap.Int64("memory size", totalMemSize))
 	}
 	return &querypb.GetSegmentInfoResponse{
 		Status: &commonpb.Status{
