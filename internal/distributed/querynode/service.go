@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
+
 	"github.com/zilliztech/milvus-distributed/internal/types"
 
 	otgrpc "github.com/opentracing-contrib/go-grpc"
@@ -67,9 +69,6 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 func (s *Server) init() error {
 	ctx := context.Background()
 	Params.Init()
-	if !funcutil.CheckPortAvailable(Params.QueryNodePort) {
-		Params.QueryNodePort = funcutil.GetAvailablePort()
-	}
 	Params.LoadFromEnv()
 	Params.LoadFromArgs()
 
@@ -211,15 +210,24 @@ func (s *Server) start() error {
 func (s *Server) startGrpcLoop(grpcPort int) {
 	defer s.wg.Done()
 
-	addr := ":" + strconv.Itoa(grpcPort)
-
-	lis, err := net.Listen("tcp", addr)
+	var lis net.Listener
+	var err error
+	err = retry.Retry(10, 0, func() error {
+		addr := ":" + strconv.Itoa(grpcPort)
+		lis, err = net.Listen("tcp", addr)
+		if err == nil {
+			Params.QueryNodePort = lis.Addr().(*net.TCPAddr).Port
+		} else {
+			// set port=0 to get next available port
+			grpcPort = 0
+		}
+		return err
+	})
 	if err != nil {
 		log.Error("QueryNode GrpcServer:failed to listen", zap.Error(err))
 		s.grpcErrChan <- err
 		return
 	}
-	log.Debug("QueryNode", zap.String("address", addr))
 
 	tracer := opentracing.GlobalTracer()
 	s.grpcServer = grpc.NewServer(
