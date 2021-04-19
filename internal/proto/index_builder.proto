@@ -42,17 +42,20 @@ message DescribleIndexResponse {
     common.Status status = 1;
     IndexStatus index_status =2;
     int64 indexID = 3;
-    repeated string index_file_paths=4;
-    uint64 enque_time = 5;
-    uint64 schedule_time = 6;
-    uint64 build_complete_time = 7;
+    int64 enque_time = 4;
+    int64 schedule_time = 5;
+    int64 build_complete_time = 6;
 }
 
 
 message IndexMeta {
     IndexStatus status =1;
     int64   indexID = 2;
-    BuildIndexRequest req = 3;
+    int64 enque_time = 3;
+    int64 schedule_time = 4;
+    int64 build_complete_time = 5;
+    BuildIndexRequest req = 6;
+    repeated string index_file_paths=7;
 }
 
 service IndexBuildService {

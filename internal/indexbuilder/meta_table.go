@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
@@ -46,7 +47,6 @@ func (mt *metaTable) reloadFromKV() error {
 		}
 		mt.indexID2Meta[indexMeta.IndexID] = indexMeta
 	}
-
 	return nil
 }
 
@@ -59,29 +59,96 @@ func (mt *metaTable) saveIndexMeta(meta *pb.IndexMeta) error {
 	return mt.client.Save("/indexes/"+strconv.FormatInt(meta.IndexID, 10), value)
 }
 
-func (mt *metaTable) AddIndex(meta *pb.IndexMeta) error {
+func (mt *metaTable) AddIndex(indexID UniqueID, req *pb.BuildIndexRequest) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
-
-	return nil
-}
-
-func (mt *metaTable) UpdateIndex(meta *pb.IndexMeta) error {
-	mt.lock.Lock()
-	defer mt.lock.Unlock()
-
-	return nil
-}
-
-func (mt *metaTable) GetIndexByID(indexID UniqueID) (*pb.IndexMeta, error) {
-	mt.lock.RLock()
-	defer mt.lock.RUnlock()
-
-	sm, ok := mt.indexID2Meta[indexID]
-	if !ok {
-		return nil, errors.Errorf("can't find index id = %d", indexID)
+	_, ok := mt.indexID2Meta[indexID]
+	if ok {
+		return errors.Errorf("index already exists with ID = " + strconv.FormatInt(indexID, 10))
 	}
-	return &sm, nil
+	meta := &pb.IndexMeta{
+		Status:  pb.IndexStatus_UNISSUED,
+		IndexID: indexID,
+		Req:     req,
+	}
+	mt.saveIndexMeta(meta)
+	return nil
+}
+
+func (mt *metaTable) UpdateIndexStatus(indexID UniqueID, status pb.IndexStatus) error {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+	meta, ok := mt.indexID2Meta[indexID]
+	if !ok {
+		return errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexID, 10))
+	}
+	meta.Status = status
+	mt.saveIndexMeta(&meta)
+	return nil
+}
+
+func (mt *metaTable) UpdateIndexEnqueTime(indexID UniqueID, t time.Time) error {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+	meta, ok := mt.indexID2Meta[indexID]
+	if !ok {
+		return errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexID, 10))
+	}
+	meta.EnqueTime = t.UnixNano()
+	mt.saveIndexMeta(&meta)
+	return nil
+}
+
+func (mt *metaTable) UpdateIndexScheduleTime(indexID UniqueID, t time.Time) error {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+	meta, ok := mt.indexID2Meta[indexID]
+	if !ok {
+		return errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexID, 10))
+	}
+	meta.ScheduleTime = t.UnixNano()
+	mt.saveIndexMeta(&meta)
+	return nil
+}
+
+func (mt *metaTable) CompleteIndex(indexID UniqueID, dataPaths []string) error {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+	meta, ok := mt.indexID2Meta[indexID]
+	if !ok {
+		return errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexID, 10))
+	}
+	meta.Status = pb.IndexStatus_FINISHED
+	meta.IndexFilePaths = dataPaths
+	meta.BuildCompleteTime = time.Now().UnixNano()
+	mt.saveIndexMeta(&meta)
+	return nil
+}
+
+func (mt *metaTable) GetIndexDescription(indexID UniqueID) (*pb.DescribleIndexResponse, error) {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+	ret := &pb.DescribleIndexResponse{}
+	meta, ok := mt.indexID2Meta[indexID]
+	if !ok {
+		return ret, errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexID, 10))
+	}
+	ret.IndexStatus = meta.Status
+	ret.EnqueTime = meta.EnqueTime
+	ret.BuildCompleteTime = meta.BuildCompleteTime
+	ret.ScheduleTime = meta.ScheduleTime
+	return ret, nil
+}
+
+func (mt *metaTable) GetIndexFilePaths(indexID UniqueID) ([]string, error) {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+
+	meta, ok := mt.indexID2Meta[indexID]
+	if !ok {
+		return nil, errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexID, 10))
+	}
+	return meta.IndexFilePaths, nil
 }
 
 func (mt *metaTable) DeleteIndex(indexID UniqueID) error {

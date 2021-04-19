@@ -2,8 +2,6 @@ package indexbuilder
 
 import (
 	"context"
-	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
-	"go.etcd.io/etcd/clientv3"
 	"log"
 	"math/rand"
 	"net"
@@ -11,13 +9,17 @@ import (
 	"sync"
 	"time"
 
+	"go.etcd.io/etcd/clientv3"
+
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexbuilderpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"google.golang.org/grpc"
 )
 
 type UniqueID = typeutil.UniqueID
+type Timestamp = typeutil.Timestamp
 
 type Builder struct {
 	loopCtx    context.Context
@@ -66,7 +68,7 @@ func CreateBuilder(ctx context.Context) (*Builder, error) {
 	}
 	b.idAllocator = idAllocator
 
-	b.sched, err = NewTaskScheduler(b.loopCtx, b.idAllocator)
+	b.sched, err = NewTaskScheduler(b.loopCtx, b.idAllocator, b.metaTable)
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +89,8 @@ func (b *Builder) startBuilder() error {
 	for _, cb := range b.startCallbacks {
 		cb()
 	}
+
+	b.idAllocator.Start()
 
 	b.loopWg.Add(1)
 	go b.grpcLoop()
@@ -121,12 +125,13 @@ func (b *Builder) Start() error {
 func (b *Builder) stopBuilderLoop() {
 	b.loopCancel()
 
+	b.idAllocator.Close()
+
 	if b.grpcServer != nil {
 		b.grpcServer.GracefulStop()
 	}
 
 	b.sched.Close()
-
 	b.loopWg.Wait()
 }
 

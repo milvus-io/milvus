@@ -26,7 +26,7 @@ func (c *Client) DescribeSegment(semgentID UniqueID) (*SegmentDescription, error
 	return &SegmentDescription{}, nil
 }
 
-func (c *Client) GetInsertBinlogPaths(semgentID UniqueID) (map[int32]string, error) {
+func (c *Client) GetInsertBinlogPaths(semgentID UniqueID) (map[int32][]string, error) {
 	// query etcd
 	return nil, nil
 }

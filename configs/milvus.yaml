@@ -50,4 +50,4 @@ queryNode:
 
 indexBuilder:
     address: localhost
-    port: 310310
+    port: 31000

@@ -12,12 +12,12 @@ func TestParamTable_Init(t *testing.T) {
 
 func TestParamTable_Address(t *testing.T) {
 	address := Params.Address
-	assert.Equal(t, address, "localhost")
+	assert.Equal(t, address, "localhost:31000")
 }
 
 func TestParamTable_Port(t *testing.T) {
 	port := Params.Port
-	assert.Equal(t, port, 310310)
+	assert.Equal(t, port, 31000)
 }
 
 func TestParamTable_MetaRootPath(t *testing.T) {
