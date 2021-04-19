@@ -38,7 +38,7 @@ type ddData struct {
 }
 
 type ddBuffer struct {
-	ddData  map[UniqueID]*ddData
+	ddData  map[UniqueID]*ddData // collection ID
 	maxSize int
 }
 
@@ -88,6 +88,7 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 			timestampMin: msMsg.TimestampMin(),
 			timestampMax: msMsg.TimestampMax(),
 		},
+		flushMessages: make([]*msgstream.FlushMsg, 0),
 	}
 	ddNode.ddMsg = &ddMsg
 
@@ -98,6 +99,8 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 			return tsMessages[i].BeginTs() < tsMessages[j].BeginTs()
 		})
 
+	var flush bool = false
+	var flushSegID UniqueID
 	// do dd tasks
 	for _, msg := range tsMessages {
 		switch msg.Type() {
@@ -109,13 +112,19 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 			ddNode.createPartition(msg.(*msgstream.CreatePartitionMsg))
 		case internalPb.MsgType_kDropPartition:
 			ddNode.dropPartition(msg.(*msgstream.DropPartitionMsg))
+		case internalPb.MsgType_kFlush:
+			fMsg := msg.(*msgstream.FlushMsg)
+			flush = true
+			flushSegID = fMsg.SegmentID
+			ddMsg.flushMessages = append(ddMsg.flushMessages, fMsg)
 		default:
 			log.Println("Non supporting message type:", msg.Type())
 		}
 	}
 
 	// generate binlog
-	if ddNode.ddBuffer.full() {
+	if ddNode.ddBuffer.full() || flush {
+		log.Println(". dd buffer full or receive Flush msg ...")
 		ddCodec := &storage.DataDefinitionCodec{}
 		for collectionID, data := range ddNode.ddBuffer.ddData {
 			// buffer data to binlog
@@ -135,6 +144,7 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 				log.Println("illegal ddBuffer, failed to save binlog")
 				continue
 			} else {
+				log.Println(".. dd buffer flushing ...")
 				// Blob key example:
 				// ${tenant}/data_definition_log/${collection_id}/ts/${log_idx}
 				// ${tenant}/data_definition_log/${collection_id}/ddl/${log_idx}
@@ -163,11 +173,35 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 					log.Println(err)
 				}
 				log.Println("save dd binlog, key = ", ddKey)
+
+				ddlFlushMsg := &ddlFlushSyncMsg{
+					flushCompleted: false,
+					ddlBinlogPathMsg: ddlBinlogPathMsg{
+						collID: collectionID,
+						paths:  []string{timestampKey, ddKey},
+					},
+				}
+
+				ddNode.outCh <- ddlFlushMsg
 			}
+
 		}
 		// clear buffer
 		ddNode.ddBuffer.ddData = make(map[UniqueID]*ddData)
-		log.Println("dd buffer flushed")
+	}
+
+	if flush {
+
+		log.Println(".. manual flush completed ...")
+		ddlFlushMsg := &ddlFlushSyncMsg{
+			flushCompleted: true,
+			ddlBinlogPathMsg: ddlBinlogPathMsg{
+				segID: flushSegID,
+			},
+		}
+
+		ddNode.outCh <- ddlFlushMsg
+
 	}
 
 	var res Msg = ddNode.ddMsg

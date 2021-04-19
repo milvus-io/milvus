@@ -81,12 +81,12 @@ func TestFlushSyncService_Start(t *testing.T) {
 
 		for _, msg := range ddMsgs {
 			ddChan <- msg
-			time.Sleep(time.Millisecond * 10)
+			time.Sleep(time.Millisecond * 50)
 		}
 
 		for _, msg := range insertMsgs {
 			insertChan <- msg
-			time.Sleep(time.Millisecond * 10)
+			time.Sleep(time.Millisecond * 50)
 		}
 
 		ret, err := fService.metaTable.getSegBinlogPaths(SegID)

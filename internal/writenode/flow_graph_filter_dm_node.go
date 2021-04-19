@@ -46,6 +46,16 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 			timestampMax: msgStreamMsg.TimestampMax(),
 		},
 	}
+
+	for _, fmsg := range ddMsg.flushMessages {
+		switch fmsg.Type() {
+		case internalPb.MsgType_kFlush:
+			iMsg.flushMessages = append(iMsg.flushMessages, fmsg)
+		default:
+			log.Println("Non supporting message type:", fmsg.Type())
+		}
+	}
+
 	for _, msg := range msgStreamMsg.TsMessages() {
 		switch msg.Type() {
 		case internalPb.MsgType_kInsert:
@@ -53,8 +63,6 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 			if resMsg != nil {
 				iMsg.insertMessages = append(iMsg.insertMessages, resMsg)
 			}
-		case internalPb.MsgType_kFlush:
-			iMsg.flushMessages = append(iMsg.flushMessages, msg.(*msgstream.FlushMsg))
 		// case internalPb.MsgType_kDelete:
 		// dmMsg.deleteMessages = append(dmMsg.deleteMessages, (*msg).(*msgstream.DeleteTask))
 		default:

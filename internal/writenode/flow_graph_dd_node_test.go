@@ -5,6 +5,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -13,6 +17,7 @@ import (
 )
 
 func TestFlowGraphDDNode_Operate(t *testing.T) {
+	newMeta()
 	const ctxTimeInMillisecond = 2000
 	const closeWithDeadline = false
 	var ctx context.Context
@@ -26,9 +31,22 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 		ctx = context.Background()
 	}
 
+	ddChan := make(chan *ddlFlushSyncMsg, 10)
+	defer close(ddChan)
+	insertChan := make(chan *insertFlushSyncMsg, 10)
+	defer close(insertChan)
+
+	testPath := "/test/writenode/root/meta"
+	err := clearEtcd(testPath)
+	require.NoError(t, err)
+	Params.MetaRootPath = testPath
+	fService := newFlushSyncService(ctx, ddChan, insertChan)
+	assert.Equal(t, testPath, fService.metaTable.client.(*etcdkv.EtcdKV).GetPath("."))
+	go fService.start()
+
 	Params.FlushDdBufSize = 4
 
-	ddNode := newDDNode(ctx, nil)
+	ddNode := newDDNode(ctx, ddChan)
 
 	colID := UniqueID(0)
 	colName := "col-test-0"
@@ -114,11 +132,25 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 		DropPartitionRequest: dropPartitionReq,
 	}
 
+	flushMsg := msgstream.FlushMsg{
+		BaseMsg: msgstream.BaseMsg{
+			BeginTimestamp: Timestamp(5),
+			EndTimestamp:   Timestamp(5),
+			HashValues:     []uint32{uint32(0)},
+		},
+		FlushMsg: internalpb.FlushMsg{
+			MsgType:   internalpb.MsgType_kFlush,
+			SegmentID: 1,
+			Timestamp: Timestamp(6),
+		},
+	}
+
 	tsMessages := make([]msgstream.TsMsg, 0)
 	tsMessages = append(tsMessages, msgstream.TsMsg(&createColMsg))
 	tsMessages = append(tsMessages, msgstream.TsMsg(&dropColMsg))
 	tsMessages = append(tsMessages, msgstream.TsMsg(&createPartitionMsg))
 	tsMessages = append(tsMessages, msgstream.TsMsg(&dropPartitionMsg))
+	tsMessages = append(tsMessages, msgstream.TsMsg(&flushMsg))
 	msgStream := flowgraph.GenerateMsgStreamMsg(tsMessages, Timestamp(0), Timestamp(3))
 	var inMsg Msg = msgStream
 	ddNode.Operate([]*Msg{&inMsg})

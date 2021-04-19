@@ -21,6 +21,7 @@ type (
 		collectionRecords map[string][]metaOperateRecord
 		// TODO: use partition id
 		partitionRecords map[string][]metaOperateRecord
+		flushMessages    []*msgstream.FlushMsg
 		timeRange        TimeRange
 	}
 
