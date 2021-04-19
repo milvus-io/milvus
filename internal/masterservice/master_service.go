@@ -368,12 +368,12 @@ func (c *Core) tsLoop() {
 		select {
 		case <-tsoTicker.C:
 			if err := c.tsoAllocator.UpdateTSO(); err != nil {
-				log.Warn("failed to update timestamp", zap.String("error", err.Error()))
-				return
+				log.Warn("failed to update timestamp: ", zap.Error(err))
+				continue
 			}
 			if err := c.idAllocator.UpdateID(); err != nil {
-				log.Warn("failed to update id", zap.String("error", err.Error()))
-				return
+				log.Warn("failed to update id: ", zap.Error(err))
+				continue
 			}
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
