@@ -16,6 +16,9 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/indexnode"
 	minioKV "github.com/zilliztech/milvus-distributed/internal/kv/minio"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -23,7 +26,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/storage"
 )
 
-func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID) ([]*internalPb.StringList, []int64, error) {
+func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, keyPrefix string) ([]*internalPb.StringList, []int64, error) {
 	const (
 		msgLength = 1000
 		DIM       = 16
@@ -108,10 +111,8 @@ func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID
 	}
 
 	// binLogs -> minIO/S3
-	collIDStr := strconv.FormatInt(collectionID, 10)
-	partitionIDStr := strconv.FormatInt(partitionID, 10)
 	segIDStr := strconv.FormatInt(segmentID, 10)
-	keyPrefix := path.Join("query-node-seg-manager-test-minio-prefix", collIDStr, partitionIDStr, segIDStr)
+	keyPrefix = path.Join(keyPrefix, segIDStr)
 
 	paths := make([]*internalPb.StringList, 0)
 	fieldIDs := make([]int64, 0)
@@ -214,18 +215,197 @@ func generateIndex(segmentID UniqueID) ([]string, indexParam, error) {
 	return indexPaths, indexParams, nil
 }
 
+func doInsert(ctx context.Context, collectionName string, partitionTag string, segmentID UniqueID) error {
+	const msgLength = 1000
+	const DIM = 16
+
+	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	var rawData []byte
+	for _, ele := range vec {
+		buf := make([]byte, 4)
+		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
+		rawData = append(rawData, buf...)
+	}
+	bs := make([]byte, 4)
+	binary.LittleEndian.PutUint32(bs, 1)
+	rawData = append(rawData, bs...)
+
+	timeRange := TimeRange{
+		timestampMin: 0,
+		timestampMax: math.MaxUint64,
+	}
+
+	// messages generate
+	insertMessages := make([]msgstream.TsMsg, 0)
+	for i := 0; i < msgLength; i++ {
+		var msg msgstream.TsMsg = &msgstream.InsertMsg{
+			BaseMsg: msgstream.BaseMsg{
+				HashValues: []uint32{
+					uint32(i),
+				},
+			},
+			InsertRequest: internalPb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_kInsert,
+					MsgID:     0,
+					Timestamp: uint64(i + 1000),
+					SourceID:  0,
+				},
+				CollectionName: collectionName,
+				PartitionName:  partitionTag,
+				SegmentID:      segmentID,
+				ChannelID:      "0",
+				Timestamps:     []uint64{uint64(i + 1000)},
+				RowIDs:         []int64{int64(i)},
+				RowData: []*commonpb.Blob{
+					{Value: rawData},
+				},
+			},
+		}
+		insertMessages = append(insertMessages, msg)
+	}
+
+	msgPack := msgstream.MsgPack{
+		BeginTs: timeRange.timestampMin,
+		EndTs:   timeRange.timestampMax,
+		Msgs:    insertMessages,
+	}
+
+	// generate timeTick
+	timeTickMsgPack := msgstream.MsgPack{}
+	baseMsg := msgstream.BaseMsg{
+		BeginTimestamp: 1000,
+		EndTimestamp:   1500,
+		HashValues:     []uint32{0},
+	}
+	timeTickResult := internalPb.TimeTickMsg{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kTimeTick,
+			MsgID:     0,
+			Timestamp: 1000,
+			SourceID:  0,
+		},
+	}
+	timeTickMsg := &msgstream.TimeTickMsg{
+		BaseMsg:     baseMsg,
+		TimeTickMsg: timeTickResult,
+	}
+	timeTickMsgPack.Msgs = append(timeTickMsgPack.Msgs, timeTickMsg)
+
+	// pulsar produce
+	const receiveBufSize = 1024
+	insertChannels := Params.InsertChannelNames
+	ddChannels := Params.DDChannelNames
+	pulsarURL := Params.PulsarAddress
+
+	insertStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize)
+	insertStream.SetPulsarClient(pulsarURL)
+	insertStream.CreatePulsarProducers(insertChannels)
+	unmarshalDispatcher := util.NewUnmarshalDispatcher()
+	insertStream.CreatePulsarConsumers(insertChannels, Params.MsgChannelSubName, unmarshalDispatcher, receiveBufSize)
+
+	ddStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize)
+	ddStream.SetPulsarClient(pulsarURL)
+	ddStream.CreatePulsarProducers(ddChannels)
+
+	var insertMsgStream msgstream.MsgStream = insertStream
+	insertMsgStream.Start()
+
+	var ddMsgStream msgstream.MsgStream = ddStream
+	ddMsgStream.Start()
+
+	err := insertMsgStream.Produce(&msgPack)
+	if err != nil {
+		return err
+	}
+
+	err = insertMsgStream.Broadcast(&timeTickMsgPack)
+	if err != nil {
+		return err
+	}
+	err = ddMsgStream.Broadcast(&timeTickMsgPack)
+	if err != nil {
+		return err
+	}
+
+	//messages := insertStream.Consume()
+	//for _, msg := range messages.Msgs {
+	//
+	//}
+
+	return nil
+}
+
+func sentTimeTick(ctx context.Context) error {
+	timeTickMsgPack := msgstream.MsgPack{}
+	baseMsg := msgstream.BaseMsg{
+		BeginTimestamp: 1500,
+		EndTimestamp:   2000,
+		HashValues:     []uint32{0},
+	}
+	timeTickResult := internalPb.TimeTickMsg{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kTimeTick,
+			MsgID:     0,
+			Timestamp: math.MaxUint64,
+			SourceID:  0,
+		},
+	}
+	timeTickMsg := &msgstream.TimeTickMsg{
+		BaseMsg:     baseMsg,
+		TimeTickMsg: timeTickResult,
+	}
+	timeTickMsgPack.Msgs = append(timeTickMsgPack.Msgs, timeTickMsg)
+
+	// pulsar produce
+	const receiveBufSize = 1024
+	insertChannels := Params.InsertChannelNames
+	ddChannels := Params.DDChannelNames
+	pulsarURL := Params.PulsarAddress
+
+	insertStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize)
+	insertStream.SetPulsarClient(pulsarURL)
+	insertStream.CreatePulsarProducers(insertChannels)
+	unmarshalDispatcher := util.NewUnmarshalDispatcher()
+	insertStream.CreatePulsarConsumers(insertChannels, Params.MsgChannelSubName, unmarshalDispatcher, receiveBufSize)
+
+	ddStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize)
+	ddStream.SetPulsarClient(pulsarURL)
+	ddStream.CreatePulsarProducers(ddChannels)
+
+	var insertMsgStream msgstream.MsgStream = insertStream
+	insertMsgStream.Start()
+
+	var ddMsgStream msgstream.MsgStream = ddStream
+	ddMsgStream.Start()
+
+	err := insertMsgStream.Broadcast(&timeTickMsgPack)
+	if err != nil {
+		return err
+	}
+	err = ddMsgStream.Broadcast(&timeTickMsgPack)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func TestSegmentManager_load_release_and_search(t *testing.T) {
 	collectionID := UniqueID(0)
 	partitionID := UniqueID(1)
 	segmentID := UniqueID(2)
 	fieldIDs := []int64{0, 101}
 
+	// mock write insert bin log
+	keyPrefix := path.Join("query-node-seg-manager-test-minio-prefix", strconv.FormatInt(collectionID, 10), strconv.FormatInt(partitionID, 10))
+	Params.WriteNodeSegKvSubPath = keyPrefix
+
 	node := newQueryNodeMock()
 	defer node.Stop()
 
 	ctx := node.queryNodeLoopCtx
 	node.loadIndexService = newLoadIndexService(ctx, node.replica)
-	node.segManager = newSegmentManager(ctx, node.replica, node.loadIndexService.loadIndexReqChan)
+	node.segManager = newSegmentManager(ctx, node.replica, nil, node.loadIndexService.loadIndexReqChan)
 	go node.loadIndexService.start()
 
 	collectionName := "collection0"
@@ -237,7 +417,7 @@ func TestSegmentManager_load_release_and_search(t *testing.T) {
 	err = node.replica.addSegment(segmentID, partitionID, collectionID, segTypeSealed)
 	assert.NoError(t, err)
 
-	paths, srcFieldIDs, err := generateInsertBinLog(collectionID, partitionID, segmentID)
+	paths, srcFieldIDs, err := generateInsertBinLog(collectionID, partitionID, segmentID, keyPrefix)
 	assert.NoError(t, err)
 
 	fieldsMap := node.segManager.filterOutNeedlessFields(paths, srcFieldIDs, fieldIDs)
@@ -299,3 +479,111 @@ func TestSegmentManager_load_release_and_search(t *testing.T) {
 
 	<-ctx.Done()
 }
+
+//// NOTE: start pulsar before test
+//func TestSegmentManager_with_seek(t *testing.T) {
+//	collectionID := UniqueID(0)
+//	partitionID := UniqueID(1)
+//	//segmentID := UniqueID(2)
+//	fieldIDs := []int64{0, 101}
+//
+//	//// mock write insert bin log
+//	//keyPrefix := path.Join("query-node-seg-manager-test-minio-prefix", strconv.FormatInt(collectionID, 10), strconv.FormatInt(partitionID, 10))
+//	//Params.WriteNodeSegKvSubPath = keyPrefix + "/"
+//	node := newQueryNodeMock()
+//
+//	ctx := node.queryNodeLoopCtx
+//	go node.Start()
+//
+//	collectionName := "collection0"
+//	initTestMeta(t, node, collectionName, collectionID, 0)
+//
+//	err := node.replica.addPartition(collectionID, partitionID)
+//	assert.NoError(t, err)
+//
+//	//err = node.replica.addSegment(segmentID, partitionID, collectionID, segTypeSealed)
+//	//assert.NoError(t, err)
+//
+//	//paths, srcFieldIDs, err := generateInsertBinLog(collectionID, partitionID, segmentID, keyPrefix)
+//	//assert.NoError(t, err)
+//
+//	//fieldsMap := node.segManager.filterOutNeedlessFields(paths, srcFieldIDs, fieldIDs)
+//	//assert.Equal(t, len(fieldsMap), 2)
+//
+//	segmentIDToInsert := UniqueID(3)
+//	err = doInsert(ctx, collectionName, "default", segmentIDToInsert)
+//	assert.NoError(t, err)
+//
+//	startPositions := make([]*internalPb.MsgPosition, 0)
+//	for _, ch := range Params.InsertChannelNames {
+//		startPositions = append(startPositions, &internalPb.MsgPosition{
+//			ChannelName: ch,
+//		})
+//	}
+//	var positions []*internalPb.MsgPosition
+//	lastSegStates := &datapb.SegmentStatesResponse{
+//		State:          datapb.SegmentState_SegmentGrowing,
+//		StartPositions: positions,
+//	}
+//	loadReq := &querypb.LoadSegmentRequest{
+//		CollectionID:     collectionID,
+//		PartitionID:      partitionID,
+//		SegmentIDs:       []UniqueID{segmentIDToInsert},
+//		FieldIDs:         fieldIDs,
+//		LastSegmentState: lastSegStates,
+//	}
+//	_, err = node.LoadSegments(loadReq)
+//	assert.NoError(t, err)
+//
+//	err = sentTimeTick(ctx)
+//	assert.NoError(t, err)
+//
+//	// do search
+//	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
+//
+//	const DIM = 16
+//	var searchRawData []byte
+//	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+//	for _, ele := range vec {
+//		buf := make([]byte, 4)
+//		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
+//		searchRawData = append(searchRawData, buf...)
+//	}
+//	placeholderValue := milvuspb.PlaceholderValue{
+//		Tag:    "$0",
+//		Type:   milvuspb.PlaceholderType_VECTOR_FLOAT,
+//		Values: [][]byte{searchRawData},
+//	}
+//
+//	placeholderGroup := milvuspb.PlaceholderGroup{
+//		Placeholders: []*milvuspb.PlaceholderValue{&placeholderValue},
+//	}
+//
+//	placeHolderGroupBlob, err := proto.Marshal(&placeholderGroup)
+//	assert.NoError(t, err)
+//
+//	//searchTimestamp := Timestamp(1020)
+//	collection, err := node.replica.getCollectionByID(collectionID)
+//	assert.NoError(t, err)
+//	plan, err := createPlan(*collection, dslString)
+//	assert.NoError(t, err)
+//	holder, err := parserPlaceholderGroup(plan, placeHolderGroupBlob)
+//	assert.NoError(t, err)
+//	placeholderGroups := make([]*PlaceholderGroup, 0)
+//	placeholderGroups = append(placeholderGroups, holder)
+//
+//	// wait for segment building index
+//	time.Sleep(3 * time.Second)
+//
+//	//segment, err := node.replica.getSegmentByID(segmentIDToInsert)
+//	//assert.NoError(t, err)
+//	//_, err = segment.segmentSearch(plan, placeholderGroups, []Timestamp{searchTimestamp})
+//	//assert.Nil(t, err)
+//
+//	plan.delete()
+//	holder.delete()
+//
+//	<-ctx.Done()
+//	err = node.Stop()
+//	assert.NoError(t, err)
+//}
