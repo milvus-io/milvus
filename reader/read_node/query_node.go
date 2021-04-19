@@ -248,17 +248,11 @@ func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 	const CountMsgNum = 1000 * 1000
 
 	if Debug {
-		var start = time.Now()
 		var printFlag = true
+		var startTime = true
+		var start time.Time
 
 		for {
-			// Test insert time
-			if printFlag && node.msgCounter.InsertCounter >= CountMsgNum {
-				printFlag = false
-				timeSince := time.Since(start)
-				fmt.Println("============> Do", node.msgCounter.InsertCounter, "Insert in", timeSince, "<============")
-			}
-
 			var msgLen = node.PrepareBatchMsg()
 			var timeRange = TimeRange{node.messageClient.TimeSyncStart(), node.messageClient.TimeSyncEnd()}
 			assert.NotEqual(nil, 0, timeRange.timestampMin)
@@ -266,6 +260,12 @@ func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 
 			if msgLen[0] == 0 && len(node.buffer.InsertDeleteBuffer) <= 0 {
 				continue
+			}
+
+			if startTime {
+				fmt.Println("============> Start Test <============")
+				startTime = false
+				start = time.Now()
 			}
 
 			node.QueryNodeDataInit()
@@ -277,6 +277,13 @@ func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 			node.DoInsertAndDelete()
 			//fmt.Println("DoInsertAndDelete Done")
 			node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
+
+			// Test insert time
+			if printFlag && node.msgCounter.InsertCounter >= CountMsgNum {
+				printFlag = false
+				timeSince := time.Since(start)
+				fmt.Println("============> Do", node.msgCounter.InsertCounter, "Insert in", timeSince, "<============")
+			}
 		}
 	}
 
@@ -582,7 +589,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 				fmt.Println(err.Error())
 				return msgPb.Status{ErrorCode: 1}
 			}
-			fmt.Println(res.ResultIds)
+
 			for i := 0; i < len(res.ResultIds); i++ {
 				resultsTmp = append(resultsTmp, SearchResultTmp{ResultId: res.ResultIds[i], ResultDistance: res.ResultDistances[i]})
 			}
