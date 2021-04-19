@@ -388,9 +388,11 @@ class TestCollectionNameInvalid(object):
         with pytest.raises(Exception) as e:
             connect.flush(collection_name)
 
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_flush_empty(self, connect, collection):
         ids = connect.insert(collection, default_entities)
         assert len(ids) == default_nb
-        with pytest.raises(Exception) as e:
+        try:
             connect.flush()
+        except Exception as e:
+            assert e.args[0] == "Collection name list can not be None or empty"
