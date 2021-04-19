@@ -52,8 +52,94 @@ Status MsgClientV2::Init(const std::string &insert_delete,
   return Status::OK();
 }
 
-void MsgClientV2::GetQueryResult(int64_t query_id) {
-  throw std::exception();
+int64_t GetQueryNodeNum() {
+    return 2;
+}
+
+milvus::grpc::QueryResult Aggregation(std::vector<std::shared_ptr<grpc::QueryResult>> &results){
+    //TODO: QueryNode has only one
+    int64_t length = results.size();
+    std::vector<float> all_scores;
+    std::vector<float> all_distance;
+    std::vector<grpc::KeyValuePair> all_kv_pairs;
+    std::vector<int> index(length * results[0]->scores_size());
+
+    for (int n = 0; n < length * results[0]->scores_size(); ++n) {
+        index[n] = n;
+    }
+
+    for (int i = 0; i < length; i++){
+        for (int j = 0; j < results[i]->scores_size(); j++){
+            all_scores.push_back(results[i]->scores()[j]);
+            all_distance.push_back(results[i]->distances()[j]);
+            all_kv_pairs.push_back(results[i]->extra_params()[j]);
+        }
+    }
+
+    for (int k = 0; k < all_distance.size() - 1; ++k) {
+        for (int l = k + 1; l < all_distance.size(); ++l) {
+
+            if (all_distance[l] > all_distance[k]){
+                float distance_temp = all_distance[k];
+                all_distance[k] = all_distance[l];
+                all_distance[l] = distance_temp;
+
+                int index_temp = index[k];
+                index[k] = index[l];
+                index[l] = index_temp;
+            }
+        }
+    }
+
+    grpc::QueryResult result;
+//    result_prt->set_allocated_status(const_cast<milvus::grpc::Status*>(&results[0]->status()));
+    result.mutable_status()->CopyFrom(results[0]->status());
+    result.mutable_entities()->CopyFrom(results[0]->entities());
+    result.set_row_num(results[0]->row_num());
+
+    for (int m = 0; m < results[0]->scores_size(); ++m) {
+        result.add_scores(all_scores[index[m]]);
+        result.add_distances(all_distance[m]);
+        result.add_extra_params();
+        result.mutable_extra_params(m)->CopyFrom(all_kv_pairs[index[m]]);
+    }
+
+    result.set_query_id(results[0]->query_id());
+    result.set_client_id(results[0]->client_id());
+
+    return result;
+}
+
+milvus::grpc::QueryResult MsgClientV2::GetQueryResult(int64_t query_id) {
+//    Result result = MsgProducer::createProducer("result-partition-0");
+    auto client = std::make_shared<MsgClient>("pulsar://localhost:6650");
+    MsgConsumer consumer(client, "my_consumer");
+    consumer.subscribe("result");
+
+    std::vector<std::shared_ptr<grpc::QueryResult>> results;
+
+    int64_t query_node_num = GetQueryNodeNum();
+
+    std::map<int64_t, std::vector<std::shared_ptr<grpc::QueryResult>>> total_results;
+
+    while (true) {
+        auto received_result = total_results[query_id];
+        if (received_result.size() == query_node_num) {
+            break;
+        }
+        Message msg;
+        consumer.receive(msg);
+
+        grpc::QueryResult search_res_msg;
+        auto status = search_res_msg.ParseFromString(msg.getDataAsString());
+        if (status) {
+            auto message = std::make_shared<grpc::QueryResult>(search_res_msg);
+            total_results[message->query_id()].push_back(message);
+            consumer.acknowledge(msg);
+        }
+    }
+
+    return Aggregation(total_results[query_id]);
 }
 
 Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request) {
