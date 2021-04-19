@@ -4,7 +4,7 @@
 #include <any>
 #include <string>
 #include <optional>
-#include "segcore/SegmentDefs.h"
+#include "common/Schema.h"
 
 namespace milvus::query {
 class ExprVisitor;
@@ -60,7 +60,7 @@ using FieldId = std::string;
 
 struct TermExpr : Expr {
     FieldId field_id_;
-    segcore::DataType data_type_;
+    DataType data_type_;
     // std::vector<std::any> terms_;
 
  protected:
@@ -74,7 +74,7 @@ struct TermExpr : Expr {
 
 struct RangeExpr : Expr {
     FieldId field_id_;
-    segcore::DataType data_type_;
+    DataType data_type_;
     // std::vector<std::tuple<OpType, std::any>> conditions_;
  protected:
     // prevent accidential instantiation

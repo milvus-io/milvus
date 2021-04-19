@@ -38,7 +38,7 @@ func TestMaster_Partition(t *testing.T) {
 	assert.Nil(t, err)
 
 	port := 10000 + rand.Intn(1000)
-	svr, err := CreateServer(ctx, "/test/root/kv", "/test/root/meta", []string{etcdAddr})
+	svr, err := CreateServer(ctx, "/test/root/kv", "/test/root/meta", "/test/root/meta/tso", []string{etcdAddr})
 	assert.Nil(t, err)
 	err = svr.Run(int64(port))
 	assert.Nil(t, err)

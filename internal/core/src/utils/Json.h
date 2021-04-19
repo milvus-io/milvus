@@ -15,7 +15,7 @@
 
 namespace milvus {
 
-using json = nlohmann::json;
+using Json = nlohmann::json;
 
 #define JSON_NULL_CHECK(json)                                       \
     do {                                                            \

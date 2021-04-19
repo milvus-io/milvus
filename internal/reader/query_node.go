@@ -14,7 +14,6 @@ import "C"
 
 import (
 	"context"
-	"sync"
 )
 
 type QueryNode struct {
@@ -23,7 +22,7 @@ type QueryNode struct {
 	QueryNodeID uint64
 	pulsarURL   string
 
-	tSafe tSafe
+	tSafe Timestamp
 
 	container *container
 
@@ -31,16 +30,6 @@ type QueryNode struct {
 	metaService     *metaService
 	searchService   *searchService
 	statsService    *statsService
-}
-
-type tSafe interface {
-	getTSafe() Timestamp
-	setTSafe(t Timestamp)
-}
-
-type serviceTime struct {
-	tSafeMu sync.Mutex
-	time    Timestamp
 }
 
 func NewQueryNode(ctx context.Context, queryNodeID uint64, pulsarURL string) *QueryNode {
@@ -52,15 +41,13 @@ func NewQueryNode(ctx context.Context, queryNodeID uint64, pulsarURL string) *Qu
 		segments:    segmentsMap,
 	}
 
-	var tSafe tSafe = &serviceTime{}
-
 	return &QueryNode{
 		ctx: ctx,
 
 		QueryNodeID: queryNodeID,
 		pulsarURL:   pulsarURL,
 
-		tSafe: tSafe,
+		tSafe: 0,
 
 		container: &container,
 
@@ -85,16 +72,4 @@ func (node *QueryNode) Start() {
 
 func (node *QueryNode) Close() {
 	// TODO: close services
-}
-
-func (st *serviceTime) getTSafe() Timestamp {
-	st.tSafeMu.Lock()
-	defer st.tSafeMu.Unlock()
-	return st.time
-}
-
-func (st *serviceTime) setTSafe(t Timestamp) {
-	st.tSafeMu.Lock()
-	st.time = t
-	st.tSafeMu.Unlock()
 }

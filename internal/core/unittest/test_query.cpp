@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "query/Parser.h"
+#include "query/deprecated/Parser.h"
 #include "query/Expr.h"
 #include "query/PlanNode.h"
 #include "query/generated/ExprVisitor.h"
@@ -9,6 +9,9 @@
 #include "query/generated/ExecPlanNodeVisitor.h"
 #include "query/PlanImpl.h"
 
+using namespace milvus;
+using namespace milvus::query;
+using namespace milvus::segcore;
 TEST(Query, Naive) {
     SUCCEED();
     using namespace milvus::wtf;
@@ -53,10 +56,11 @@ TEST(Query, Naive) {
 TEST(Query, ShowExecutor) {
     using namespace milvus::query;
     using namespace milvus::segcore;
+    using namespace milvus;
     auto node = std::make_unique<FloatVectorANNS>();
     auto schema = std::make_shared<Schema>();
-    int64_t num_queries = 100L;
     schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    int64_t num_queries = 100L;
     auto raw_data = DataGen(schema, num_queries);
     auto& info = node->query_info_;
     info.metric_type_ = "L2";
@@ -94,7 +98,11 @@ TEST(Query, DSL) {
         ]
     }
 })";
-    auto plan = CreatePlan(dsl_string);
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+
+    auto plan = CreatePlan(*schema, dsl_string);
     auto res = shower.call_child(*plan->plan_node_);
     std::cout << res.dump(4) << std::endl;
 
@@ -113,16 +121,33 @@ TEST(Query, DSL) {
         }
     }
 })";
-    auto plan2 = CreatePlan(dsl_string2);
+    auto plan2 = CreatePlan(*schema, dsl_string2);
     auto res2 = shower.call_child(*plan2->plan_node_);
     std::cout << res2.dump(4) << std::endl;
     ASSERT_EQ(res, res2);
 }
 
 TEST(Query, ParsePlaceholderGroup) {
-    using namespace milvus::query;
-    using namespace milvus::segcore;
     namespace ser = milvus::proto::service;
+    std::string dsl_string = R"(
+{
+    "bool": {
+        "vector": {
+            "Vec": {
+                "metric_type": "L2",
+                "params": {
+                    "nprobe": 10
+                },
+                "query": "$0",
+                "topk": 10
+            }
+        }
+    }
+})";
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    auto plan = CreatePlan(*schema, dsl_string);
     int num_queries = 10;
     int dim = 16;
     std::default_random_engine e;
@@ -131,21 +156,20 @@ TEST(Query, ParsePlaceholderGroup) {
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
     value->set_type(ser::PlaceholderType::VECTOR_FLOAT);
-    for(int i = 0; i < num_queries; ++i) {
+    for (int i = 0; i < num_queries; ++i) {
         std::vector<float> vec;
-        for(int d = 0; d < dim; ++d) {
+        for (int d = 0; d < dim; ++d) {
             vec.push_back(dis(e));
         }
         // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
         value->add_values(vec.data(), vec.size() * sizeof(float));
     }
     auto blob = raw_group.SerializeAsString();
-    //ser::PlaceholderGroup new_group;
-    //new_group.ParseFromString()
-    auto fuck = ParsePlaceholderGroup(blob);
-    int x = 1+1;
+    // ser::PlaceholderGroup new_group;
+    // new_group.ParseFromString()
+    auto placeholder = ParsePlaceholderGroup(plan.get(), blob);
+    int x = 1 + 1;
 }
-
 
 TEST(Query, Exec) {
     using namespace milvus::query;

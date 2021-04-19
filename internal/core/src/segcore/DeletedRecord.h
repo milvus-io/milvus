@@ -1,8 +1,8 @@
 #pragma once
 
 #include "AckResponder.h"
-#include "SegmentDefs.h"
-#include "knowhere//index/vector_index/IndexIVF.h"
+#include "common/Schema.h"
+#include "knowhere/index/vector_index/IndexIVF.h"
 #include <memory>
 
 namespace milvus::segcore {

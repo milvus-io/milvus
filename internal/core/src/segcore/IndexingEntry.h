@@ -1,7 +1,7 @@
 #pragma once
 #include "AckResponder.h"
 #include <tbb/concurrent_vector.h>
-#include "SegmentDefs.h"
+#include "common/Schema.h"
 #include <optional>
 #include "InsertRecord.h"
 #include <knowhere/index/vector_index/IndexIVF.h>

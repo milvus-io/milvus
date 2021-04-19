@@ -100,8 +100,7 @@ TermExtract(const TermExpr& expr_raw) {
 void
 ShowExprVisitor::visit(TermExpr& expr) {
     Assert(!ret_.has_value());
-    Assert(segcore::field_is_vector(expr.data_type_) == false);
-    using segcore::DataType;
+    Assert(field_is_vector(expr.data_type_) == false);
     auto terms = [&] {
         switch (expr.data_type_) {
             case DataType::INT8:
@@ -125,7 +124,7 @@ ShowExprVisitor::visit(TermExpr& expr) {
 
     Json res{{"expr_type", "Term"},
              {"field_id", expr.field_id_},
-             {"data_type", segcore::datatype_name(expr.data_type_)},
+             {"data_type", datatype_name(expr.data_type_)},
              {"terms", std::move(terms)}};
 
     ret_ = res;
@@ -142,8 +141,7 @@ CondtionExtract(const RangeExpr& expr_raw) {
 void
 ShowExprVisitor::visit(RangeExpr& expr) {
     Assert(!ret_.has_value());
-    Assert(segcore::field_is_vector(expr.data_type_) == false);
-    using segcore::DataType;
+    Assert(field_is_vector(expr.data_type_) == false);
     auto conditions = [&] {
         switch (expr.data_type_) {
             case DataType::BOOL:
@@ -167,7 +165,7 @@ ShowExprVisitor::visit(RangeExpr& expr) {
 
     Json res{{"expr_type", "Range"},
              {"field_id", expr.field_id_},
-             {"data_type", segcore::datatype_name(expr.data_type_)},
+             {"data_type", datatype_name(expr.data_type_)},
              {"conditions", std::move(conditions)}};
 }
 }  // namespace milvus::query
