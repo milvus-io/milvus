@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	dn "github.com/zilliztech/milvus-distributed/internal/datanode"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -67,11 +66,6 @@ func (s *Server) SetDataServiceInterface(ds dn.DataServiceInterface) error {
 }
 
 func (s *Server) Init() error {
-	err := s.core.Init()
-	if err != nil {
-		return errors.Errorf("Init failed: %v", err)
-	}
-
 	return s.core.Init()
 }
 
