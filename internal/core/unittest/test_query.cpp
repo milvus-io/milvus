@@ -202,7 +202,7 @@ TEST(Query, ExecWithPredicate) {
     })";
     int64_t N = 1000 * 1000;
     auto dataset = DataGen(schema, N);
-    auto segment = std::make_unique<SegmentSmallIndex>(schema);
+    auto segment = CreateSegment(schema);
     segment->PreInsert(N);
     segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
 
@@ -292,7 +292,7 @@ TEST(Query, ExecTerm) {
     })";
     int64_t N = 1000 * 1000;
     auto dataset = DataGen(schema, N);
-    auto segment = std::make_unique<SegmentSmallIndex>(schema);
+    auto segment = CreateSegment(schema);
     segment->PreInsert(N);
     segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
 
@@ -338,7 +338,7 @@ TEST(Query, ExecWithoutPredicate) {
     })";
     int64_t N = 1000 * 1000;
     auto dataset = DataGen(schema, N);
-    auto segment = std::make_unique<SegmentSmallIndex>(schema);
+    auto segment = CreateSegment(schema);
     segment->PreInsert(N);
     segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
 
@@ -512,7 +512,7 @@ TEST(Query, ExecWithPredicateBinary) {
     })";
     int64_t N = 1000 * 1000;
     auto dataset = DataGen(schema, N);
-    auto segment = std::make_unique<SegmentSmallIndex>(schema);
+    auto segment = CreateSegment(schema);
     segment->PreInsert(N);
     segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
     auto vec_ptr = dataset.get_col<uint8_t>(0);

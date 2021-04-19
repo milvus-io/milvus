@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/SegmentBase.h"
-#include "segcore/SegmentNaive.h"
 #include "segcore/SegmentSmallIndex.h"
 
 namespace milvus::segcore {
@@ -46,8 +45,8 @@ TestABI() {
 }
 
 std::unique_ptr<SegmentBase>
-CreateSegment(SchemaPtr schema) {
-    auto segment = std::make_unique<SegmentSmallIndex>(schema);
+CreateSegment(SchemaPtr schema, int64_t chunk_size) {
+    auto segment = std::make_unique<SegmentSmallIndex>(schema, chunk_size);
     return segment;
 }
 }  // namespace milvus::segcore

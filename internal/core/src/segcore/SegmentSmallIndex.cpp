@@ -16,7 +16,6 @@
 #include <thread>
 #include <queue>
 
-#include "segcore/SegmentNaive.h"
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include <faiss/utils/distances.h>
@@ -179,7 +178,7 @@ SegmentSmallIndex::Insert(int64_t reserved_begin,
     }
 
     record_.ack_responder_.AddSegment(reserved_begin, reserved_begin + size);
-    indexing_record_.UpdateResourceAck(record_.ack_responder_.GetAck() / DefaultElementPerChunk, record_);
+    indexing_record_.UpdateResourceAck(record_.ack_responder_.GetAck() / chunk_size_, record_);
     return Status::OK();
 }
 
@@ -243,8 +242,7 @@ SegmentSmallIndex::BuildVecIndexImpl(const IndexMeta::Entry& entry) {
     std::vector<knowhere::DatasetPtr> datasets;
     for (int chunk_id = 0; chunk_id < uids.num_chunk(); ++chunk_id) {
         auto entities_chunk = entities->get_chunk(chunk_id).data();
-        int64_t count = chunk_id == uids.num_chunk() - 1 ? record_.reserved - chunk_id * DefaultElementPerChunk
-                                                         : DefaultElementPerChunk;
+        int64_t count = chunk_id == uids.num_chunk() - 1 ? record_.reserved - chunk_id * chunk_size_ : chunk_size_;
         datasets.push_back(knowhere::GenDataset(count, dim, entities_chunk));
     }
     for (auto& ds : datasets) {
@@ -326,9 +324,9 @@ SegmentSmallIndex::GetMemoryUsageInBytes() {
         }
     }
 #endif
-    int64_t ins_n = upper_align(record_.reserved, DefaultElementPerChunk);
+    int64_t ins_n = upper_align(record_.reserved, chunk_size_);
     total_bytes += ins_n * (schema_->get_total_sizeof() + 16 + 1);
-    int64_t del_n = upper_align(deleted_record_.reserved, DefaultElementPerChunk);
+    int64_t del_n = upper_align(deleted_record_.reserved, chunk_size_);
     total_bytes += del_n * (16 * 2);
     return total_bytes;
 }

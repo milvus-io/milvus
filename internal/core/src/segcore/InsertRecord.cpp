@@ -13,14 +13,14 @@
 
 namespace milvus::segcore {
 
-InsertRecord::InsertRecord(const Schema& schema) : uids_(1), timestamps_(1) {
+InsertRecord::InsertRecord(const Schema& schema, int64_t chunk_size) : uids_(1), timestamps_(1) {
     for (auto& field : schema) {
         if (field.is_vector()) {
             if (field.get_data_type() == DataType::VECTOR_FLOAT) {
-                entity_vec_.emplace_back(std::make_shared<ConcurrentVector<FloatVector>>(field.get_dim()));
+                entity_vec_.emplace_back(std::make_shared<ConcurrentVector<FloatVector>>(field.get_dim(), chunk_size));
                 continue;
             } else if (field.get_data_type() == DataType::VECTOR_BINARY) {
-                entity_vec_.emplace_back(std::make_shared<ConcurrentVector<BinaryVector>>(field.get_dim()));
+                entity_vec_.emplace_back(std::make_shared<ConcurrentVector<BinaryVector>>(field.get_dim(), chunk_size));
                 continue;
             } else {
                 PanicInfo("unsupported");
@@ -28,30 +28,30 @@ InsertRecord::InsertRecord(const Schema& schema) : uids_(1), timestamps_(1) {
         }
         switch (field.get_data_type()) {
             case DataType::INT8: {
-                entity_vec_.emplace_back(std::make_shared<ConcurrentVector<int8_t>>());
+                entity_vec_.emplace_back(std::make_shared<ConcurrentVector<int8_t>>(chunk_size));
                 break;
             }
             case DataType::INT16: {
-                entity_vec_.emplace_back(std::make_shared<ConcurrentVector<int16_t>>());
+                entity_vec_.emplace_back(std::make_shared<ConcurrentVector<int16_t>>(chunk_size));
                 break;
             }
             case DataType::INT32: {
-                entity_vec_.emplace_back(std::make_shared<ConcurrentVector<int32_t>>());
+                entity_vec_.emplace_back(std::make_shared<ConcurrentVector<int32_t>>(chunk_size));
                 break;
             }
 
             case DataType::INT64: {
-                entity_vec_.emplace_back(std::make_shared<ConcurrentVector<int64_t>>());
+                entity_vec_.emplace_back(std::make_shared<ConcurrentVector<int64_t>>(chunk_size));
                 break;
             }
 
             case DataType::FLOAT: {
-                entity_vec_.emplace_back(std::make_shared<ConcurrentVector<float>>());
+                entity_vec_.emplace_back(std::make_shared<ConcurrentVector<float>>(chunk_size));
                 break;
             }
 
             case DataType::DOUBLE: {
-                entity_vec_.emplace_back(std::make_shared<ConcurrentVector<double>>());
+                entity_vec_.emplace_back(std::make_shared<ConcurrentVector<double>>(chunk_size));
                 break;
             }
             default: {

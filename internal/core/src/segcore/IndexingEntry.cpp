@@ -24,8 +24,8 @@ VecIndexingEntry::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const Vector
 
     auto source = dynamic_cast<const ConcurrentVector<FloatVector>*>(vec_base);
     Assert(source);
-    auto chunk_size = source->num_chunk();
-    assert(ack_end <= chunk_size);
+    auto num_chunk = source->num_chunk();
+    assert(ack_end <= num_chunk);
     auto conf = get_build_conf();
     data_.grow_to_at_least(ack_end);
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
@@ -33,7 +33,7 @@ VecIndexingEntry::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const Vector
         // build index for chunk
         // TODO
         auto indexing = std::make_unique<knowhere::IVF>();
-        auto dataset = knowhere::GenDataset(DefaultElementPerChunk, dim, chunk.data());
+        auto dataset = knowhere::GenDataset(source->get_chunk_size(), dim, chunk.data());
         indexing->Train(dataset, conf);
         indexing->AddWithoutIds(dataset, conf);
         data_[chunk_id] = std::move(indexing);
@@ -87,25 +87,24 @@ void
 ScalarIndexingEntry<T>::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) {
     auto source = dynamic_cast<const ConcurrentVector<T>*>(vec_base);
     Assert(source);
-    auto chunk_size = source->num_chunk();
-    assert(ack_end <= chunk_size);
+    auto num_chunk = source->num_chunk();
+    assert(ack_end <= num_chunk);
     data_.grow_to_at_least(ack_end);
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
         const auto& chunk = source->get_chunk(chunk_id);
         // build index for chunk
         // TODO
-        Assert(chunk.size() == DefaultElementPerChunk);
         auto indexing = std::make_unique<knowhere::scalar::StructuredIndexSort<T>>();
-        indexing->Build(DefaultElementPerChunk, chunk.data());
+        indexing->Build(vec_base->get_chunk_size(), chunk.data());
         data_[chunk_id] = std::move(indexing);
     }
 }
 
 std::unique_ptr<IndexingEntry>
-CreateIndex(const FieldMeta& field_meta) {
+CreateIndex(const FieldMeta& field_meta, int64_t chunk_size) {
     if (field_meta.is_vector()) {
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-            return std::make_unique<VecIndexingEntry>(field_meta);
+            return std::make_unique<VecIndexingEntry>(field_meta, chunk_size);
         } else {
             // TODO
             PanicInfo("unsupported");
@@ -113,17 +112,17 @@ CreateIndex(const FieldMeta& field_meta) {
     }
     switch (field_meta.get_data_type()) {
         case DataType::INT8:
-            return std::make_unique<ScalarIndexingEntry<int8_t>>(field_meta);
+            return std::make_unique<ScalarIndexingEntry<int8_t>>(field_meta, chunk_size);
         case DataType::INT16:
-            return std::make_unique<ScalarIndexingEntry<int16_t>>(field_meta);
+            return std::make_unique<ScalarIndexingEntry<int16_t>>(field_meta, chunk_size);
         case DataType::INT32:
-            return std::make_unique<ScalarIndexingEntry<int32_t>>(field_meta);
+            return std::make_unique<ScalarIndexingEntry<int32_t>>(field_meta, chunk_size);
         case DataType::INT64:
-            return std::make_unique<ScalarIndexingEntry<int64_t>>(field_meta);
+            return std::make_unique<ScalarIndexingEntry<int64_t>>(field_meta, chunk_size);
         case DataType::FLOAT:
-            return std::make_unique<ScalarIndexingEntry<float>>(field_meta);
+            return std::make_unique<ScalarIndexingEntry<float>>(field_meta, chunk_size);
         case DataType::DOUBLE:
-            return std::make_unique<ScalarIndexingEntry<double>>(field_meta);
+            return std::make_unique<ScalarIndexingEntry<double>>(field_meta, chunk_size);
         default:
             PanicInfo("unsupported");
     }

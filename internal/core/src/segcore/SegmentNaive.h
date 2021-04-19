@@ -124,7 +124,8 @@ class SegmentNaive : public SegmentBase {
     friend std::unique_ptr<SegmentBase>
     CreateSegment(SchemaPtr schema);
 
-    explicit SegmentNaive(const SchemaPtr& schema) : schema_(schema), record_(*schema) {
+    static constexpr int64_t deprecated_fixed_chunk_size = 32 * 1024;
+    explicit SegmentNaive(const SchemaPtr& schema) : schema_(schema), record_(*schema, deprecated_fixed_chunk_size) {
     }
 
  private:

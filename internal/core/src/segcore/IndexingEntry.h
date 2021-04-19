@@ -26,7 +26,8 @@ namespace milvus::segcore {
 // All concurrent
 class IndexingEntry {
  public:
-    explicit IndexingEntry(const FieldMeta& field_meta) : field_meta_(field_meta) {
+    explicit IndexingEntry(const FieldMeta& field_meta, int64_t chunk_size)
+        : field_meta_(field_meta), chunk_size_(chunk_size) {
     }
     IndexingEntry(const IndexingEntry&) = delete;
     IndexingEntry&
@@ -41,9 +42,15 @@ class IndexingEntry {
         return field_meta_;
     }
 
+    int64_t
+    get_chunk_size() const {
+        return chunk_size_;
+    }
+
  protected:
     // additional info
     const FieldMeta& field_meta_;
+    const int64_t chunk_size_;
 };
 template <typename T>
 class ScalarIndexingEntry : public IndexingEntry {
@@ -88,11 +95,11 @@ class VecIndexingEntry : public IndexingEntry {
 };
 
 std::unique_ptr<IndexingEntry>
-CreateIndex(const FieldMeta& field_meta);
+CreateIndex(const FieldMeta& field_meta, int64_t chunk_size);
 
 class IndexingRecord {
  public:
-    explicit IndexingRecord(const Schema& schema) : schema_(schema) {
+    explicit IndexingRecord(const Schema& schema, int64_t chunk_size) : schema_(schema), chunk_size_(chunk_size) {
         Initialize();
     }
 
@@ -101,7 +108,7 @@ class IndexingRecord {
         int offset = 0;
         for (auto& field : schema_) {
             if (field.get_data_type() != DataType::VECTOR_BINARY) {
-                entries_.try_emplace(offset, CreateIndex(field));
+                entries_.try_emplace(offset, CreateIndex(field, chunk_size_));
             }
             ++offset;
         }
@@ -149,6 +156,7 @@ class IndexingRecord {
     //    std::atomic<int64_t> finished_ack_ = 0;
     AckResponder finished_ack_;
     std::mutex mutex_;
+    int64_t chunk_size_;
 
  private:
     // field_offset => indexing
