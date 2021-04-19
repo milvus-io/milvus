@@ -69,30 +69,28 @@ Search(CSegmentInterface c_segment,
        uint64_t* timestamps,
        int num_groups,
        CQueryResult* result) {
-    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
-    auto plan = (milvus::query::Plan*)c_plan;
-    std::vector<const milvus::query::PlaceholderGroup*> placeholder_groups;
-    for (int i = 0; i < num_groups; ++i) {
-        placeholder_groups.push_back((const milvus::query::PlaceholderGroup*)c_placeholder_groups[i]);
-    }
-
-    auto query_result = std::make_unique<milvus::QueryResult>();
-
     auto status = CStatus();
+    auto query_result = std::make_unique<milvus::QueryResult>();
     try {
+        auto segment = (milvus::segcore::SegmentInterface*)c_segment;
+        auto plan = (milvus::query::Plan*)c_plan;
+        std::vector<const milvus::query::PlaceholderGroup*> placeholder_groups;
+        for (int i = 0; i < num_groups; ++i) {
+            placeholder_groups.push_back((const milvus::query::PlaceholderGroup*)c_placeholder_groups[i]);
+        }
         *query_result = segment->Search(plan, placeholder_groups.data(), timestamps, num_groups);
         if (plan->plan_node_->query_info_.metric_type_ != milvus::MetricType::METRIC_INNER_PRODUCT) {
             for (auto& dis : query_result->result_distances_) {
                 dis *= -1;
             }
         }
+        *result = query_result.release();
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
         status.error_code = UnexpectedException;
         status.error_msg = strdup(e.what());
     }
-    *result = query_result.release();
 
     // result_ids and result_distances have been allocated memory in goLang,
     // so we don't need to malloc here.

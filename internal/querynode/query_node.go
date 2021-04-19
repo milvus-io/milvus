@@ -455,7 +455,7 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	if in.LastSegmentState.State == datapb.SegmentState_SegmentGrowing {
 		segmentNum := len(segmentIDs)
 		positions := in.LastSegmentState.StartPositions
-		err = node.loadService.segManager.seekSegment(positions)
+		err = node.loadService.seekSegment(positions)
 		if err != nil {
 			status := &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -466,7 +466,7 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 		segmentIDs = segmentIDs[:segmentNum-1]
 	}
 
-	err = node.loadService.segManager.loadSegment(collectionID, partitionID, segmentIDs, fieldIDs)
+	err = node.loadService.loadSegment(collectionID, partitionID, segmentIDs, fieldIDs)
 	if err != nil {
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -493,7 +493,7 @@ func (node *QueryNode) ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*comm
 
 	// release all fields in the segments
 	for _, id := range in.SegmentIDs {
-		err := node.loadService.segManager.releaseSegment(id)
+		err := node.loadService.releaseSegment(id)
 		if err != nil {
 			status := &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,

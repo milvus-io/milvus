@@ -820,6 +820,82 @@ func (dct *DescribeCollectionTask) PostExecute() error {
 	return nil
 }
 
+type GetCollectionsStatisticsTask struct {
+	Condition
+	*milvuspb.CollectionStatsRequest
+	dataServiceClient DataServiceClient
+	result            *milvuspb.CollectionStatsResponse
+	ctx               context.Context
+}
+
+func (g *GetCollectionsStatisticsTask) ID() UniqueID {
+	return g.Base.MsgID
+}
+
+func (g *GetCollectionsStatisticsTask) SetID(uid UniqueID) {
+	g.Base.MsgID = uid
+}
+
+func (g *GetCollectionsStatisticsTask) Type() commonpb.MsgType {
+	return g.Base.MsgType
+}
+
+func (g *GetCollectionsStatisticsTask) BeginTs() Timestamp {
+	return g.Base.Timestamp
+}
+
+func (g *GetCollectionsStatisticsTask) EndTs() Timestamp {
+	return g.Base.Timestamp
+}
+
+func (g *GetCollectionsStatisticsTask) SetTs(ts Timestamp) {
+	g.Base.Timestamp = ts
+}
+
+func (g *GetCollectionsStatisticsTask) OnEnqueue() error {
+	g.Base = &commonpb.MsgBase{}
+	return nil
+}
+
+func (g *GetCollectionsStatisticsTask) PreExecute() error {
+	g.Base.MsgType = commonpb.MsgType_kGetCollectionStatistics
+	g.Base.SourceID = Params.ProxyID
+	return nil
+}
+
+func (g *GetCollectionsStatisticsTask) Execute() error {
+	collID, err := globalMetaCache.GetCollectionID(g.CollectionName)
+	if err != nil {
+		return err
+	}
+	req := &datapb.CollectionStatsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kGetCollectionStatistics,
+			MsgID:     g.Base.MsgID,
+			Timestamp: g.Base.Timestamp,
+			SourceID:  g.Base.SourceID,
+		},
+		CollectionID: collID,
+	}
+
+	result, err := g.dataServiceClient.GetCollectionStatistics(req)
+	if err != nil {
+		return err
+	}
+	g.result = &milvuspb.CollectionStatsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+		Stats: result.Stats,
+	}
+	return nil
+}
+
+func (g *GetCollectionsStatisticsTask) PostExecute() error {
+	return nil
+}
+
 type ShowCollectionsTask struct {
 	Condition
 	*milvuspb.ShowCollectionRequest
