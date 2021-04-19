@@ -7,6 +7,7 @@
 #include <omp.h>
 #include <numeric>
 #include <algorithm>
+#include "log/Log.h"
 
 namespace milvus::message_client {
 
@@ -161,6 +162,8 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
                                    const std::function<uint64_t(const std::string &collection_name,
                                                                 uint64_t channel_id,
                                                                 uint64_t timestamp)> &segment_id) {
+  using stdclock = std::chrono::high_resolution_clock;
+  auto start = stdclock::now();
   // may have retry policy?
   auto row_count = request.rows_data_size();
   auto topic_num = config.pulsar.topicnum();
@@ -184,7 +187,7 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
       mut_msg.mutable_rows_data()->CopyFrom(request.rows_data(i));
       mut_msg.mutable_extra_params()->CopyFrom(request.extra_params());
 
-      auto callback = [&stats, &msg_sended,this_thread](Result result, const pulsar::MessageId& messageId){
+      auto callback = [&stats, &msg_sended, this_thread](Result result, const pulsar::MessageId &messageId) {
         msg_sended += 1;
         if (result != pulsar::ResultOk) {
           stats[this_thread] = Status(DB_ERROR, pulsar::strResult(result));
@@ -197,8 +200,14 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
       stats[this_thread] = Status(DB_ERROR, e.what());
     }
   }
-  while (msg_sended < row_count){
+  while (msg_sended < row_count) {
   }
+
+  auto end = stdclock::now();
+  auto data_size = request.ByteSize();
+  LOG_SERVER_INFO_ << "InsertReq Batch size:" << data_size / 1024.0 / 1024.0 << "M, "
+                   << "throughput: " << data_size / std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() * 1000 / 1024.0 / 1024
+                   << "M/s";
 
   for (auto &stat : stats) {
     if (!stat.ok()) {
@@ -213,6 +222,9 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::DeleteByIDParam &request,
                                    const std::function<uint64_t(const std::string &collection_name,
                                                                 uint64_t channel_id,
                                                                 uint64_t timestamp)> &segment_id) {
+  using stdclock = std::chrono::high_resolution_clock;
+  auto start = stdclock::now();
+
   auto row_count = request.id_array_size();
   auto topicnum = config.pulsar.topicnum();
   auto stats = std::vector<Status>(topicnum);
@@ -226,12 +238,9 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::DeleteByIDParam &request,
     mut_msg.set_uid(request.id_array(i));
     mut_msg.set_collection_name(request.collection_name());
     mut_msg.set_timestamp(timestamp);
-    uint64_t uid = request.id_array(i);
-    auto channel_id = makeHash(&uid, sizeof(uint64_t)) % topicnum;
-    mut_msg.set_segment_id(segment_id(request.collection_name(), channel_id, timestamp));
 
     int this_thread = omp_get_thread_num();
-    auto callback = [&stats, &msg_sended,this_thread](Result result, const pulsar::MessageId& messageId){
+    auto callback = [&stats, &msg_sended, this_thread](Result result, const pulsar::MessageId &messageId) {
       msg_sended += 1;
       if (result != pulsar::ResultOk) {
         stats[this_thread] = Status(DB_ERROR, pulsar::strResult(result));
@@ -239,8 +248,14 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::DeleteByIDParam &request,
     };
     paralle_mut_producers_[this_thread]->sendAsync(mut_msg, callback);
   }
-  while (msg_sended < row_count){
+  while (msg_sended < row_count) {
   }
+
+  auto end = stdclock::now();
+  auto data_size = request.ByteSize();
+  LOG_SERVER_INFO_ << "InsertReq Batch size:" << data_size / 1024.0 / 1024.0 << "M, "
+                   << "throughput: " << data_size / std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() * 1000 / 1024.0 / 1024
+                   << "M/s";
 
   for (auto &stat : stats) {
     if (!stat.ok()) {
@@ -294,7 +309,7 @@ Status MsgClientV2::SendQueryMessage(const milvus::grpc::SearchParam &request, u
 }
 
 MsgClientV2::~MsgClientV2() {
-  // insert_delete_producer_->close();
+//   insert_delete_producer_->close();
   for (auto &producer: paralle_mut_producers_) {
     producer->close();
   }
