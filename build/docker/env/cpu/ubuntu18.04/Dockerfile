@@ -38,8 +38,7 @@ ENV GOROOT /usr/local/go
 ENV GO111MODULE on
 ENV PATH $GOPATH/bin:$GOROOT/bin:$PATH
 RUN mkdir -p /usr/local/go && wget -qO- "https://golang.org/dl/go1.15.2.linux-amd64.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
-    mkdir -p "$GOPATH/src" "$GOPATH/src/github.com/zilliztech" "$GOPATH/bin" && \
-    go get github.com/golang/protobuf/protoc-gen-go@v1.3.2 && \
+    mkdir -p "$GOPATH/src" "$GOPATH/bin" && \
     curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ${GOPATH}/bin v1.27.0 && \
     export GO111MODULE=off && go get github.com/quasilyte/go-ruleguard/... && \
     chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)

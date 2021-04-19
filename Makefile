@@ -21,11 +21,18 @@ all: build-cpp build-go
 get-build-deps:
 	@(env bash $(PWD)/scripts/install_deps.sh)
 
+getdeps:
+	@mkdir -p ${GOPATH}/bin
+	@which golangci-lint 1>/dev/null || (echo "Installing golangci-lint" && curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOPATH)/bin v1.27.0)
+	@which ruleguard 1>/dev/null || (echo "Installing ruleguard" && GO111MODULE=off go get github.com/quasilyte/go-ruleguard/...)
+
 cppcheck:
 	@(env bash ${PWD}/scripts/core_build.sh -l)
 
 generated-proto-go:export protoc:=${PWD}/cmake_build/thirdparty/protobuf/protobuf-build/protoc
 generated-proto-go: build-cpp
+	@mkdir -p ${GOPATH}/bin
+	@which protoc-gen-go 1>/dev/null || (echo "Installing protoc-gen-go" && go get github.com/golang/protobuf/protoc-gen-go@v1.3.2)
 	@(env bash $(PWD)/scripts/proto_gen_go.sh)
 
 check-proto-product: generated-proto-go
@@ -51,7 +58,7 @@ ruleguard:
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./cmd/...
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./tests/go/...
 
-verifiers: cppcheck fmt lint ruleguard
+verifiers: getdeps cppcheck fmt lint ruleguard
 
 # Builds various components locally.
 build-go:

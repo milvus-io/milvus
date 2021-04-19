@@ -28,14 +28,8 @@ func (reader *BinlogReader) NextEventReader() (*EventReader, error) {
 			return nil, err
 		}
 		reader.currentEventReader = nil
-		if reader.currentOffset >= int32(reader.buffer.Len()) {
-			return nil, nil
-		}
-		// skip remaining bytes of this event
-		remaining := int(reader.currentOffset) - (reader.bufferLength - reader.buffer.Len())
-		reader.buffer.Next(remaining)
 	}
-	if reader.currentOffset >= int32(reader.buffer.Len()) {
+	if reader.buffer.Len() <= 0 {
 		return nil, nil
 	}
 	eventReader, err := newEventReader(reader.descriptorEvent.PayloadDataType, reader.buffer)
