@@ -1,5 +1,4 @@
 cd ..
-make
 
 echo "starting master"
 nohup ./bin/masterservice > ~/masterservice.out 2>&1 &

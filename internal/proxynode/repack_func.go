@@ -110,6 +110,7 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 			}
 			reqSegCountMap[reqID][channelID] = make(map[UniqueID]uint32)
 			reqSegCountMap[reqID][channelID] = mapInfo
+			log.Println("ProxyNode: repackFunc, reqSegCountMap, reqID:", reqID, " mapInfo: ", mapInfo)
 		}
 	}
 
