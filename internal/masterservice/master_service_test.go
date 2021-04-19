@@ -262,7 +262,7 @@ func TestMasterService(t *testing.T) {
 		}
 		timeTickResult := internalpb2.TimeTickMsg{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kTimeTick,
+				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     0,
 				Timestamp: timeTick,
 				SourceID:  0,
@@ -318,7 +318,7 @@ func TestMasterService(t *testing.T) {
 
 		req := &milvuspb.CreateCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kCreateCollection,
+				MsgType:   commonpb.MsgType_CreateCollection,
 				MsgID:     100,
 				Timestamp: 100,
 				SourceID:  100,
@@ -394,7 +394,7 @@ func TestMasterService(t *testing.T) {
 	t.Run("has collection", func(t *testing.T) {
 		req := &milvuspb.HasCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kHasCollection,
+				MsgType:   commonpb.MsgType_HasCollection,
 				MsgID:     110,
 				Timestamp: 110,
 				SourceID:  110,
@@ -409,7 +409,7 @@ func TestMasterService(t *testing.T) {
 
 		req = &milvuspb.HasCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kHasCollection,
+				MsgType:   commonpb.MsgType_HasCollection,
 				MsgID:     111,
 				Timestamp: 111,
 				SourceID:  111,
@@ -425,7 +425,7 @@ func TestMasterService(t *testing.T) {
 		// test time stamp go back
 		req = &milvuspb.HasCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kHasCollection,
+				MsgType:   commonpb.MsgType_HasCollection,
 				MsgID:     111,
 				Timestamp: 111,
 				SourceID:  111,
@@ -444,7 +444,7 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		req := &milvuspb.DescribeCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDescribeCollection,
+				MsgType:   commonpb.MsgType_DescribeCollection,
 				MsgID:     120,
 				Timestamp: 120,
 				SourceID:  120,
@@ -463,7 +463,7 @@ func TestMasterService(t *testing.T) {
 	t.Run("show collection", func(t *testing.T) {
 		req := &milvuspb.ShowCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kShowCollections,
+				MsgType:   commonpb.MsgType_ShowCollections,
 				MsgID:     130,
 				Timestamp: 130,
 				SourceID:  130,
@@ -480,7 +480,7 @@ func TestMasterService(t *testing.T) {
 	t.Run("create partition", func(t *testing.T) {
 		req := &milvuspb.CreatePartitionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kCreatePartition,
+				MsgType:   commonpb.MsgType_CreatePartition,
 				MsgID:     140,
 				Timestamp: 140,
 				SourceID:  140,
@@ -512,7 +512,7 @@ func TestMasterService(t *testing.T) {
 	t.Run("has partition", func(t *testing.T) {
 		req := &milvuspb.HasPartitionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kHasPartition,
+				MsgType:   commonpb.MsgType_HasPartition,
 				MsgID:     150,
 				Timestamp: 150,
 				SourceID:  150,
@@ -532,7 +532,7 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		req := &milvuspb.ShowPartitionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kShowPartitions,
+				MsgType:   commonpb.MsgType_ShowCollections,
 				MsgID:     160,
 				Timestamp: 160,
 				SourceID:  160,
@@ -572,7 +572,7 @@ func TestMasterService(t *testing.T) {
 			BaseMsg: baseMsg,
 			SegmentMsg: datapb.SegmentMsg{
 				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_kSegmentInfo,
+					MsgType:   commonpb.MsgType_SegmentInfo,
 					MsgID:     0,
 					Timestamp: 0,
 					SourceID:  0,
@@ -591,7 +591,7 @@ func TestMasterService(t *testing.T) {
 
 		req := &milvuspb.ShowSegmentRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kShowSegment,
+				MsgType:   commonpb.MsgType_ShowSegments,
 				MsgID:     170,
 				Timestamp: 170,
 				SourceID:  170,
@@ -609,7 +609,7 @@ func TestMasterService(t *testing.T) {
 	t.Run("create index", func(t *testing.T) {
 		req := &milvuspb.CreateIndexRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kCreateIndex,
+				MsgType:   commonpb.MsgType_CreateIndex,
 				MsgID:     180,
 				Timestamp: 180,
 				SourceID:  180,
@@ -654,7 +654,7 @@ func TestMasterService(t *testing.T) {
 
 		req := &milvuspb.DescribeSegmentRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDescribeSegment,
+				MsgType:   commonpb.MsgType_DescribeSegment,
 				MsgID:     190,
 				Timestamp: 190,
 				SourceID:  190,
@@ -671,7 +671,7 @@ func TestMasterService(t *testing.T) {
 	t.Run("describe index", func(t *testing.T) {
 		req := &milvuspb.DescribeIndexRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDescribeIndex,
+				MsgType:   commonpb.MsgType_DescribeIndex,
 				MsgID:     200,
 				Timestamp: 200,
 				SourceID:  200,
@@ -691,7 +691,7 @@ func TestMasterService(t *testing.T) {
 	t.Run("describe index not exist", func(t *testing.T) {
 		req := &milvuspb.DescribeIndexRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDescribeIndex,
+				MsgType:   commonpb.MsgType_DescribeIndex,
 				MsgID:     200,
 				Timestamp: 200,
 				SourceID:  200,
@@ -731,7 +731,7 @@ func TestMasterService(t *testing.T) {
 			BaseMsg: baseMsg,
 			SegmentMsg: datapb.SegmentMsg{
 				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_kSegmentInfo,
+					MsgType:   commonpb.MsgType_SegmentInfo,
 					MsgID:     0,
 					Timestamp: 0,
 					SourceID:  0,
@@ -752,7 +752,7 @@ func TestMasterService(t *testing.T) {
 			BaseMsg: baseMsg,
 			SegmentFlushCompletedMsg: internalpb2.SegmentFlushCompletedMsg{
 				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_kSegmentFlushDone,
+					MsgType:   commonpb.MsgType_SegmentFlushDone,
 					MsgID:     0,
 					Timestamp: 0,
 					SourceID:  0,
@@ -767,7 +767,7 @@ func TestMasterService(t *testing.T) {
 
 		req := &milvuspb.DescribeIndexRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDescribeIndex,
+				MsgType:   commonpb.MsgType_DescribeIndex,
 				MsgID:     210,
 				Timestamp: 210,
 				SourceID:  210,
@@ -787,7 +787,7 @@ func TestMasterService(t *testing.T) {
 	t.Run("drop index", func(t *testing.T) {
 		req := &milvuspb.DropIndexRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDropIndex,
+				MsgType:   commonpb.MsgType_DropIndex,
 				MsgID:     215,
 				Timestamp: 215,
 				SourceID:  215,
@@ -818,7 +818,7 @@ func TestMasterService(t *testing.T) {
 	t.Run("drop partition", func(t *testing.T) {
 		req := &milvuspb.DropPartitionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDropPartition,
+				MsgType:   commonpb.MsgType_DropPartition,
 				MsgID:     220,
 				Timestamp: 220,
 				SourceID:  220,
@@ -852,7 +852,7 @@ func TestMasterService(t *testing.T) {
 	t.Run("drop collection", func(t *testing.T) {
 		req := &milvuspb.DropCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDropCollection,
+				MsgType:   commonpb.MsgType_DropCollection,
 				MsgID:     230,
 				Timestamp: 230,
 				SourceID:  230,
@@ -884,7 +884,7 @@ func TestMasterService(t *testing.T) {
 
 		req = &milvuspb.DropCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDropCollection,
+				MsgType:   commonpb.MsgType_DropCollection,
 				MsgID:     231,
 				Timestamp: 231,
 				SourceID:  231,

@@ -537,7 +537,7 @@ func (ibNode *insertBufferNode) completeFlush(segID UniqueID) error {
 	msgPack := msgstream.MsgPack{}
 	completeFlushMsg := internalpb2.SegmentFlushCompletedMsg{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kSegmentFlushDone,
+			MsgType:   commonpb.MsgType_SegmentFlushDone,
 			MsgID:     0, // GOOSE TODO
 			Timestamp: 0, // GOOSE TODO
 			SourceID:  Params.NodeID,
@@ -565,7 +565,7 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 		},
 		TimeTickMsg: internalpb2.TimeTickMsg{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kTimeTick,
+				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     0,  // GOOSE TODO
 				Timestamp: ts, // GOOSE TODO
 				SourceID:  Params.NodeID,
@@ -592,7 +592,7 @@ func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID, currentPo
 
 	segStats := internalpb2.SegmentStatistics{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kSegmentStatistics,
+			MsgType:   commonpb.MsgType_SegmentStatistics,
 			MsgID:     UniqueID(0),  // GOOSE TODO
 			Timestamp: Timestamp(0), // GOOSE TODO
 			SourceID:  Params.NodeID,

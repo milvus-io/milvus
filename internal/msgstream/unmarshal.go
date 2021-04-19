@@ -56,21 +56,21 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 
 	p := &ProtoUnmarshalDispatcher{}
 	p.TempMap = make(map[commonpb.MsgType]UnmarshalFunc)
-	p.TempMap[commonpb.MsgType_kInsert] = insertMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_kDelete] = deleteMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_kSearch] = searchMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_kSearchResult] = searchResultMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_kTimeTick] = timeTickMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_kQueryNodeStats] = queryNodeSegStatsMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_kCreateCollection] = createCollectionMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_kDropCollection] = dropCollectionMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_kCreatePartition] = createPartitionMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_kDropPartition] = dropPartitionMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_kLoadIndex] = loadIndexMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_kFlush] = flushMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_kSegmentInfo] = segmentInfoMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_kSegmentFlushDone] = flushCompletedMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_kSegmentStatistics] = segmentStatisticsMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_Insert] = insertMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_Delete] = deleteMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_Search] = searchMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_SearchResult] = searchResultMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_TimeTick] = timeTickMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_QueryNodeStats] = queryNodeSegStatsMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_CreateCollection] = createCollectionMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_DropCollection] = dropCollectionMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_CreatePartition] = createPartitionMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_DropPartition] = dropPartitionMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_LoadIndex] = loadIndexMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_Flush] = flushMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_SegmentInfo] = segmentInfoMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_SegmentFlushDone] = flushCompletedMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_SegmentStatistics] = segmentStatisticsMsg.Unmarshal
 
 	return p
 }

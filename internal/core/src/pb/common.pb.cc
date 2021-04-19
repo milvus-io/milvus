@@ -261,29 +261,28 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "STATE_FAILED\020\004\022\027\n\023INDEX_STATE_DELETED\020\005*"
   "o\n\014SegmentState\022\017\n\013SegmentNone\020\000\022\023\n\017Segm"
   "entNotExist\020\001\022\022\n\016SegmentGrowing\020\002\022\021\n\rSeg"
-  "mentSealed\020\003\022\022\n\016SegmentFlushed\020\004*\225\006\n\007Msg"
-  "Type\022\t\n\005kNone\020\000\022\025\n\021kCreateCollection\020d\022\023"
-  "\n\017kDropCollection\020e\022\022\n\016kHasCollection\020f\022"
-  "\027\n\023kDescribeCollection\020g\022\024\n\020kShowCollect"
-  "ions\020h\022\022\n\016kGetSysConfigs\020i\022\023\n\017kLoadColle"
-  "ction\020j\022\026\n\022kReleaseCollection\020k\022\025\n\020kCrea"
-  "tePartition\020\310\001\022\023\n\016kDropPartition\020\311\001\022\022\n\rk"
-  "HasPartition\020\312\001\022\027\n\022kDescribePartition\020\313\001"
-  "\022\024\n\017kShowPartitions\020\314\001\022\023\n\016kLoadPartition"
-  "\020\315\001\022\026\n\021kReleasePartition\020\316\001\022\021\n\014kShowSegm"
-  "ent\020\372\001\022\025\n\020kDescribeSegment\020\373\001\022\021\n\014kCreate"
-  "Index\020\254\002\022\023\n\016kDescribeIndex\020\255\002\022\017\n\nkDropIn"
-  "dex\020\256\002\022\014\n\007kInsert\020\220\003\022\014\n\007kDelete\020\221\003\022\013\n\006kF"
-  "lush\020\222\003\022\014\n\007kSearch\020\364\003\022\022\n\rkSearchResult\020\365"
-  "\003\022\023\n\016kGetIndexState\020\366\003\022\035\n\030kGetCollection"
-  "Statistics\020\367\003\022\034\n\027kGetPartitionStatistics"
-  "\020\370\003\022\021\n\014kSegmentInfo\020\330\004\022\016\n\tkTimeTick\020\260\t\022\024"
-  "\n\017kQueryNodeStats\020\261\t\022\017\n\nkLoadIndex\020\262\t\022\017\n"
-  "\nkRequestID\020\263\t\022\020\n\013kRequestTSO\020\264\t\022\025\n\020kAll"
-  "ocateSegment\020\265\t\022\027\n\022kSegmentStatistics\020\266\t"
-  "\022\026\n\021kSegmentFlushDone\020\267\tBBZ@github.com/z"
-  "illiztech/milvus-distributed/internal/pr"
-  "oto/commonpbb\006proto3"
+  "mentSealed\020\003\022\022\n\016SegmentFlushed\020\004*\365\005\n\007Msg"
+  "Type\022\010\n\004None\020\000\022\024\n\020CreateCollection\020d\022\022\n\016"
+  "DropCollection\020e\022\021\n\rHasCollection\020f\022\026\n\022D"
+  "escribeCollection\020g\022\023\n\017ShowCollections\020h"
+  "\022\024\n\020GetSystemConfigs\020i\022\022\n\016LoadCollection"
+  "\020j\022\025\n\021ReleaseCollection\020k\022\024\n\017CreateParti"
+  "tion\020\310\001\022\022\n\rDropPartition\020\311\001\022\021\n\014HasPartit"
+  "ion\020\312\001\022\026\n\021DescribePartition\020\313\001\022\023\n\016ShowPa"
+  "rtitions\020\314\001\022\023\n\016LoadPartitions\020\315\001\022\026\n\021Rele"
+  "asePartitions\020\316\001\022\021\n\014ShowSegments\020\372\001\022\024\n\017D"
+  "escribeSegment\020\373\001\022\020\n\013CreateIndex\020\254\002\022\022\n\rD"
+  "escribeIndex\020\255\002\022\016\n\tDropIndex\020\256\002\022\013\n\006Inser"
+  "t\020\220\003\022\013\n\006Delete\020\221\003\022\n\n\005Flush\020\222\003\022\013\n\006Search\020"
+  "\364\003\022\021\n\014SearchResult\020\365\003\022\022\n\rGetIndexState\020\366"
+  "\003\022\034\n\027GetCollectionStatistics\020\367\003\022\033\n\026GetPa"
+  "rtitionStatistics\020\370\003\022\020\n\013SegmentInfo\020\330\004\022\r"
+  "\n\010TimeTick\020\260\t\022\023\n\016QueryNodeStats\020\261\t\022\016\n\tLo"
+  "adIndex\020\262\t\022\016\n\tRequestID\020\263\t\022\017\n\nRequestTSO"
+  "\020\264\t\022\024\n\017AllocateSegment\020\265\t\022\026\n\021SegmentStat"
+  "istics\020\266\t\022\025\n\020SegmentFlushDone\020\267\tBBZ@gith"
+  "ub.com/zilliztech/milvus-distributed/int"
+  "ernal/proto/commonpbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_common_2eproto_deps[1] = {
 };
@@ -299,7 +298,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_com
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_common_2eproto_once;
 static bool descriptor_table_common_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_common_2eproto = {
-  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 2420,
+  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 2388,
   &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 7, 0,
   schemas, file_default_instances, TableStruct_common_2eproto::offsets,
   file_level_metadata_common_2eproto, 7, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,

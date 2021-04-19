@@ -56,7 +56,7 @@ func (mService *metaService) loadCollections(ctx context.Context) error {
 func (mService *metaService) getCollectionNames(ctx context.Context) ([]string, error) {
 	req := &milvuspb.ShowCollectionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kShowCollections,
+			MsgType:   commonpb.MsgType_ShowCollections,
 			MsgID:     0, //GOOSE TODO
 			Timestamp: 0, // GOOSE TODO
 			SourceID:  Params.NodeID,
@@ -75,7 +75,7 @@ func (mService *metaService) createCollection(ctx context.Context, name string) 
 	log.Debug("Describing collections")
 	req := &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kDescribeCollection,
+			MsgType:   commonpb.MsgType_DescribeCollection,
 			MsgID:     0, //GOOSE TODO
 			Timestamp: 0, // GOOSE TODO
 			SourceID:  Params.NodeID,

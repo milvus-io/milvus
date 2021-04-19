@@ -77,59 +77,59 @@ message Address {
 }
 
 enum MsgType {
-    kNone = 0;
-    /* Definition Requests: collection */
-    kCreateCollection = 100;
-    kDropCollection = 101;
-    kHasCollection = 102;
-    kDescribeCollection = 103;
-    kShowCollections = 104;
-    kGetSysConfigs = 105;
-    kLoadCollection = 106;
-    kReleaseCollection = 107;
+    None = 0;
+    /* DEFINITION REQUESTS: COLLECTION */
+    CreateCollection = 100;
+    DropCollection = 101;
+    HasCollection = 102;
+    DescribeCollection = 103;
+    ShowCollections = 104;
+    GetSystemConfigs = 105;
+    LoadCollection = 106;
+    ReleaseCollection = 107;
 
-    /* Definition Requests: partition */
-    kCreatePartition = 200;
-    kDropPartition = 201;
-    kHasPartition = 202;
-    kDescribePartition = 203;
-    kShowPartitions = 204;
-    kLoadPartition = 205;
-    kReleasePartition = 206;
+    /* DEFINITION REQUESTS: PARTITION */
+    CreatePartition = 200;
+    DropPartition = 201;
+    HasPartition = 202;
+    DescribePartition = 203;
+    ShowPartitions = 204;
+    LoadPartitions = 205;
+    ReleasePartitions = 206;
 
-    /* Define Requests: segment */
-    kShowSegment = 250;
-    kDescribeSegment = 251;
+    /* DEFINE REQUESTS: SEGMENT */
+    ShowSegments = 250;
+    DescribeSegment = 251;
 
-    /* Definition Requests: Index */
-    kCreateIndex = 300;
-    kDescribeIndex = 301;
-    kDropIndex = 302;
+    /* DEFINITION REQUESTS: INDEX */
+    CreateIndex = 300;
+    DescribeIndex = 301;
+    DropIndex = 302;
 
-    /* Manipulation Requests */
-    kInsert = 400;
-    kDelete = 401;
-    kFlush = 402;
+    /* MANIPULATION REQUESTS */
+    Insert = 400;
+    Delete = 401;
+    Flush = 402;
 
-    /* Query */
-    kSearch = 500;
-    kSearchResult = 501;
-    kGetIndexState = 502;
-    kGetCollectionStatistics = 503;
-    kGetPartitionStatistics = 504;
+    /* QUERY */
+    Search = 500;
+    SearchResult = 501;
+    GetIndexState = 502;
+    GetCollectionStatistics = 503;
+    GetPartitionStatistics = 504;
 
-    /* Data Service */
-    kSegmentInfo = 600;
+    /* DATA SERVICE */
+    SegmentInfo = 600;
 
-    /* System Control */
-    kTimeTick = 1200;
-    kQueryNodeStats = 1201; // GOOSE TODO: Remove kQueryNodeStats
-    kLoadIndex = 1202;
-    kRequestID = 1203;
-    kRequestTSO = 1204;
-    kAllocateSegment = 1205;
-    kSegmentStatistics = 1206;
-    kSegmentFlushDone = 1207;
+    /* SYSTEM CONTROL */
+    TimeTick = 1200;
+    QueryNodeStats = 1201; // GOOSE TODO: Remove kQueryNodeStats
+    LoadIndex = 1202;
+    RequestID = 1203;
+    RequestTSO = 1204;
+    AllocateSegment = 1205;
+    SegmentStatistics = 1206;
+    SegmentFlushDone = 1207;
 }
 
 message MsgBase {

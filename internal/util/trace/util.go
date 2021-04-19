@@ -187,9 +187,9 @@ func allowTrace(in interface{}) bool {
 	}
 	switch res := in.(type) {
 	case msgstream.TsMsg:
-		return !(res.Type() == commonpb.MsgType_kTimeTick ||
-			res.Type() == commonpb.MsgType_kQueryNodeStats ||
-			res.Type() == commonpb.MsgType_kLoadIndex)
+		return !(res.Type() == commonpb.MsgType_TimeTick ||
+			res.Type() == commonpb.MsgType_QueryNodeStats ||
+			res.Type() == commonpb.MsgType_LoadIndex)
 	default:
 		return false
 	}

@@ -104,7 +104,7 @@ func (ta *TimestampAllocator) syncTs() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	req := &masterpb.TsoRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kRequestTSO,
+			MsgType:   commonpb.MsgType_RequestTSO,
 			MsgID:     0,
 			Timestamp: 0,
 			SourceID:  ta.PeerID,

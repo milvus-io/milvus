@@ -596,7 +596,7 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 			},
 			InsertRequest: internalpb2.InsertRequest{
 				Base: &commonpb.MsgBase{
-					MsgType: commonpb.MsgType_kInsert,
+					MsgType: commonpb.MsgType_Insert,
 					MsgID:   0,
 				},
 				CollectionName: request.CollectionName,
@@ -640,7 +640,7 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 		Condition: NewTaskCondition(ctx),
 		SearchRequest: &internalpb2.SearchRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:  commonpb.MsgType_kSearch,
+				MsgType:  commonpb.MsgType_Search,
 				SourceID: Params.ProxyID,
 			},
 			ResultChannelID: strconv.FormatInt(Params.ProxyID, 10),
@@ -718,7 +718,7 @@ func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvus
 	}
 	infoResp, err := node.dataService.GetSegmentInfo(ctx, &datapb.SegmentInfoRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kSegmentInfo,
+			MsgType:   commonpb.MsgType_SegmentInfo,
 			MsgID:     0,
 			Timestamp: 0,
 			SourceID:  Params.ProxyID,
@@ -765,7 +765,7 @@ func (node *ProxyNode) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.Qu
 	}
 	infoResp, err := node.queryService.GetSegmentInfo(ctx, &querypb.SegmentInfoRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kSegmentInfo,
+			MsgType:   commonpb.MsgType_SegmentInfo,
 			MsgID:     0,
 			Timestamp: 0,
 			SourceID:  Params.ProxyID,
@@ -800,7 +800,7 @@ func (node *ProxyNode) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.Qu
 func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName string, collectionName string) ([]UniqueID, error) {
 	describeCollectionResponse, err := node.masterService.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kDescribeCollection,
+			MsgType:   commonpb.MsgType_DescribeCollection,
 			MsgID:     0,
 			Timestamp: 0,
 			SourceID:  Params.ProxyID,
@@ -817,7 +817,7 @@ func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName strin
 	collectionID := describeCollectionResponse.CollectionID
 	showPartitionsResp, err := node.masterService.ShowPartitions(ctx, &milvuspb.ShowPartitionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kShowPartitions,
+			MsgType:   commonpb.MsgType_ShowPartitions,
 			MsgID:     0,
 			Timestamp: 0,
 			SourceID:  Params.ProxyID,
@@ -837,7 +837,7 @@ func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName strin
 	for _, partitionID := range showPartitionsResp.PartitionIDs {
 		showSegmentResponse, err := node.masterService.ShowSegments(ctx, &milvuspb.ShowSegmentRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kShowSegment,
+				MsgType:   commonpb.MsgType_ShowSegments,
 				MsgID:     0,
 				Timestamp: 0,
 				SourceID:  Params.ProxyID,

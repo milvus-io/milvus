@@ -108,7 +108,7 @@ func (node *QueryNode) Init() error {
 	ctx := context.Background()
 	registerReq := &queryPb.RegisterNodeRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_kNone,
+			MsgType:  commonpb.MsgType_None,
 			SourceID: Params.QueryNodeID,
 		},
 		Address: &commonpb.Address{

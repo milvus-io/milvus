@@ -312,7 +312,7 @@ func (loader *indexLoader) getIndexInfo(collectionID UniqueID, segmentID UniqueI
 	ctx := context.TODO()
 	req := &milvuspb.DescribeSegmentRequest{
 		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_kDescribeSegment,
+			MsgType: commonpb.MsgType_DescribeSegment,
 		},
 		CollectionID: collectionID,
 		SegmentID:    segmentID,

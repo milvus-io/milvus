@@ -59,7 +59,7 @@ func TestDataSyncService_Start(t *testing.T) {
 			},
 			InsertRequest: internalpb2.InsertRequest{
 				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_kInsert,
+					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     0,
 					Timestamp: uint64(i + 1000),
 					SourceID:  0,
@@ -94,7 +94,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	}
 	timeTickResult := internalpb2.TimeTickMsg{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kTimeTick,
+			MsgType:   commonpb.MsgType_TimeTick,
 			MsgID:     0,
 			Timestamp: math.MaxUint64,
 			SourceID:  0,

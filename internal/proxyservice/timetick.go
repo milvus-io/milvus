@@ -43,7 +43,7 @@ func (tt *TimeTick) Start() error {
 					},
 					TimeTickMsg: internalpb2.TimeTickMsg{
 						Base: &commonpb.MsgBase{
-							MsgType:   commonpb.MsgType_kTimeTick,
+							MsgType:   commonpb.MsgType_TimeTick,
 							MsgID:     0,
 							Timestamp: current,
 							SourceID:  0,

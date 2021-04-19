@@ -35,7 +35,7 @@ func TestStream_unmarshal_Insert(t *testing.T) {
 		},
 		InsertRequest: internalpb2.InsertRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kInsert,
+				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     1,
 				Timestamp: 11,
 				SourceID:  1,

@@ -82,7 +82,7 @@ func TestSearch_Search(t *testing.T) {
 		},
 		SearchRequest: internalpb2.SearchRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kSearch,
+				MsgType:   commonpb.MsgType_Search,
 				MsgID:     1,
 				Timestamp: uint64(10 + 1000),
 				SourceID:  1,
@@ -138,7 +138,7 @@ func TestSearch_Search(t *testing.T) {
 			},
 			InsertRequest: internalpb2.InsertRequest{
 				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_kInsert,
+					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     int64(i),
 					Timestamp: uint64(10 + 1000),
 					SourceID:  0,
@@ -172,7 +172,7 @@ func TestSearch_Search(t *testing.T) {
 	}
 	timeTickResult := internalpb2.TimeTickMsg{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kTimeTick,
+			MsgType:   commonpb.MsgType_TimeTick,
 			MsgID:     0,
 			Timestamp: math.MaxUint64,
 			SourceID:  0,
@@ -288,7 +288,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 		},
 		SearchRequest: internalpb2.SearchRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kSearch,
+				MsgType:   commonpb.MsgType_Search,
 				MsgID:     1,
 				Timestamp: uint64(10 + 1000),
 				SourceID:  1,
@@ -340,7 +340,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 			},
 			InsertRequest: internalpb2.InsertRequest{
 				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_kInsert,
+					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     int64(i),
 					Timestamp: uint64(i + 1000),
 					SourceID:  0,
@@ -374,7 +374,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	}
 	timeTickResult := internalpb2.TimeTickMsg{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kTimeTick,
+			MsgType:   commonpb.MsgType_TimeTick,
 			MsgID:     0,
 			Timestamp: math.MaxUint64,
 			SourceID:  0,

@@ -45,7 +45,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	// create collection
 	createCollReq := internalpb2.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kCreateCollection,
+			MsgType:   commonpb.MsgType_CreateCollection,
 			MsgID:     1,
 			Timestamp: 1,
 			SourceID:  1,
@@ -68,7 +68,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	// drop collection
 	dropCollReq := internalpb2.DropCollectionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kDropCollection,
+			MsgType:   commonpb.MsgType_DropCollection,
 			MsgID:     2,
 			Timestamp: 2,
 			SourceID:  2,
@@ -92,7 +92,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	// create partition
 	createPartitionReq := internalpb2.CreatePartitionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kCreatePartition,
+			MsgType:   commonpb.MsgType_CreatePartition,
 			MsgID:     3,
 			Timestamp: 3,
 			SourceID:  3,
@@ -116,7 +116,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	// drop partition
 	dropPartitionReq := internalpb2.DropPartitionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kDropPartition,
+			MsgType:   commonpb.MsgType_DropPartition,
 			MsgID:     4,
 			Timestamp: 4,
 			SourceID:  4,

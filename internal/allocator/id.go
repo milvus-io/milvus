@@ -84,7 +84,7 @@ func (ia *IDAllocator) syncID() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	req := &masterpb.IDRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kRequestID,
+			MsgType:   commonpb.MsgType_RequestID,
 			MsgID:     0,
 			Timestamp: 0,
 			SourceID:  ia.PeerID,

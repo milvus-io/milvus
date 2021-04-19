@@ -166,7 +166,7 @@ func (t *CreateCollectionReqTask) Execute() error {
 
 	ddPart := internalpb2.CreatePartitionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kCreatePartition,
+			MsgType:   commonpb.MsgType_CreatePartition,
 			MsgID:     t.Req.Base.MsgID, //TODO, msg id
 			Timestamp: t.Req.Base.Timestamp + 1,
 			SourceID:  t.Req.Base.SourceID,

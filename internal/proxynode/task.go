@@ -119,7 +119,7 @@ func (it *InsertTask) OnEnqueue() error {
 }
 
 func (it *InsertTask) PreExecute(ctx context.Context) error {
-	it.Base.MsgType = commonpb.MsgType_kInsert
+	it.Base.MsgType = commonpb.MsgType_Insert
 	it.Base.SourceID = Params.ProxyID
 
 	collectionName := it.BaseInsertTask.CollectionName
@@ -201,9 +201,9 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 	if err != nil {
 		resp, _ := it.dataService.GetInsertChannels(ctx, &datapb.InsertChannelRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kInsert, // todo
-				MsgID:     it.Base.MsgID,            // todo
-				Timestamp: 0,                        // todo
+				MsgType:   commonpb.MsgType_Insert, // todo
+				MsgID:     it.Base.MsgID,           // todo
+				Timestamp: 0,                       // todo
 				SourceID:  Params.ProxyID,
 			},
 			DbID:         0, // todo
@@ -289,7 +289,7 @@ func (cct *CreateCollectionTask) OnEnqueue() error {
 }
 
 func (cct *CreateCollectionTask) PreExecute(ctx context.Context) error {
-	cct.Base.MsgType = commonpb.MsgType_kCreateCollection
+	cct.Base.MsgType = commonpb.MsgType_CreateCollection
 	cct.Base.SourceID = Params.ProxyID
 
 	cct.schema = &schemapb.CollectionSchema{}
@@ -365,9 +365,9 @@ func (cct *CreateCollectionTask) Execute(ctx context.Context) error {
 		}
 		resp, _ := cct.dataServiceClient.GetInsertChannels(ctx, &datapb.InsertChannelRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kInsert, // todo
-				MsgID:     cct.Base.MsgID,           // todo
-				Timestamp: 0,                        // todo
+				MsgType:   commonpb.MsgType_Insert, // todo
+				MsgID:     cct.Base.MsgID,          // todo
+				Timestamp: 0,                       // todo
 				SourceID:  Params.ProxyID,
 			},
 			DbID:         0, // todo
@@ -437,7 +437,7 @@ func (dct *DropCollectionTask) OnEnqueue() error {
 }
 
 func (dct *DropCollectionTask) PreExecute(ctx context.Context) error {
-	dct.Base.MsgType = commonpb.MsgType_kDropCollection
+	dct.Base.MsgType = commonpb.MsgType_DropCollection
 	dct.Base.SourceID = Params.ProxyID
 
 	if err := ValidateCollectionName(dct.CollectionName); err != nil {
@@ -517,7 +517,7 @@ func (st *SearchTask) OnEnqueue() error {
 }
 
 func (st *SearchTask) PreExecute(ctx context.Context) error {
-	st.Base.MsgType = commonpb.MsgType_kSearch
+	st.Base.MsgType = commonpb.MsgType_Search
 	st.Base.SourceID = Params.ProxyID
 
 	collectionName := st.query.CollectionName
@@ -535,7 +535,7 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 	}
-	st.Base.MsgType = commonpb.MsgType_kSearch
+	st.Base.MsgType = commonpb.MsgType_Search
 	queryBytes, err := proto.Marshal(st.query)
 	if err != nil {
 		return err
@@ -787,7 +787,7 @@ func (hct *HasCollectionTask) OnEnqueue() error {
 }
 
 func (hct *HasCollectionTask) PreExecute(ctx context.Context) error {
-	hct.Base.MsgType = commonpb.MsgType_kHasCollection
+	hct.Base.MsgType = commonpb.MsgType_HasCollection
 	hct.Base.SourceID = Params.ProxyID
 
 	if err := ValidateCollectionName(hct.CollectionName); err != nil {
@@ -858,7 +858,7 @@ func (dct *DescribeCollectionTask) OnEnqueue() error {
 }
 
 func (dct *DescribeCollectionTask) PreExecute(ctx context.Context) error {
-	dct.Base.MsgType = commonpb.MsgType_kDescribeCollection
+	dct.Base.MsgType = commonpb.MsgType_DescribeCollection
 	dct.Base.SourceID = Params.ProxyID
 
 	if err := ValidateCollectionName(dct.CollectionName); err != nil {
@@ -929,7 +929,7 @@ func (g *GetCollectionsStatisticsTask) OnEnqueue() error {
 }
 
 func (g *GetCollectionsStatisticsTask) PreExecute(ctx context.Context) error {
-	g.Base.MsgType = commonpb.MsgType_kGetCollectionStatistics
+	g.Base.MsgType = commonpb.MsgType_GetCollectionStatistics
 	g.Base.SourceID = Params.ProxyID
 	return nil
 }
@@ -941,7 +941,7 @@ func (g *GetCollectionsStatisticsTask) Execute(ctx context.Context) error {
 	}
 	req := &datapb.CollectionStatsRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kGetCollectionStatistics,
+			MsgType:   commonpb.MsgType_GetCollectionStatistics,
 			MsgID:     g.Base.MsgID,
 			Timestamp: g.Base.Timestamp,
 			SourceID:  g.Base.SourceID,
@@ -1016,7 +1016,7 @@ func (sct *ShowCollectionsTask) OnEnqueue() error {
 }
 
 func (sct *ShowCollectionsTask) PreExecute(ctx context.Context) error {
-	sct.Base.MsgType = commonpb.MsgType_kShowCollections
+	sct.Base.MsgType = commonpb.MsgType_ShowCollections
 	sct.Base.SourceID = Params.ProxyID
 
 	return nil
@@ -1084,7 +1084,7 @@ func (cpt *CreatePartitionTask) OnEnqueue() error {
 }
 
 func (cpt *CreatePartitionTask) PreExecute(ctx context.Context) error {
-	cpt.Base.MsgType = commonpb.MsgType_kCreatePartition
+	cpt.Base.MsgType = commonpb.MsgType_CreatePartition
 	cpt.Base.SourceID = Params.ProxyID
 
 	collName, partitionTag := cpt.CollectionName, cpt.PartitionName
@@ -1161,7 +1161,7 @@ func (dpt *DropPartitionTask) OnEnqueue() error {
 }
 
 func (dpt *DropPartitionTask) PreExecute(ctx context.Context) error {
-	dpt.Base.MsgType = commonpb.MsgType_kDropPartition
+	dpt.Base.MsgType = commonpb.MsgType_DropPartition
 	dpt.Base.SourceID = Params.ProxyID
 
 	collName, partitionTag := dpt.CollectionName, dpt.PartitionName
@@ -1238,7 +1238,7 @@ func (hpt *HasPartitionTask) OnEnqueue() error {
 }
 
 func (hpt *HasPartitionTask) PreExecute(ctx context.Context) error {
-	hpt.Base.MsgType = commonpb.MsgType_kHasPartition
+	hpt.Base.MsgType = commonpb.MsgType_HasPartition
 	hpt.Base.SourceID = Params.ProxyID
 
 	collName, partitionTag := hpt.CollectionName, hpt.PartitionName
@@ -1314,7 +1314,7 @@ func (spt *ShowPartitionsTask) OnEnqueue() error {
 }
 
 func (spt *ShowPartitionsTask) PreExecute(ctx context.Context) error {
-	spt.Base.MsgType = commonpb.MsgType_kShowPartitions
+	spt.Base.MsgType = commonpb.MsgType_ShowPartitions
 	spt.Base.SourceID = Params.ProxyID
 
 	if err := ValidateCollectionName(spt.CollectionName); err != nil {
@@ -1385,7 +1385,7 @@ func (cit *CreateIndexTask) OnEnqueue() error {
 }
 
 func (cit *CreateIndexTask) PreExecute(ctx context.Context) error {
-	cit.Base.MsgType = commonpb.MsgType_kCreateIndex
+	cit.Base.MsgType = commonpb.MsgType_CreateIndex
 	cit.Base.SourceID = Params.ProxyID
 
 	collName, fieldName := cit.CollectionName, cit.FieldName
@@ -1463,7 +1463,7 @@ func (dit *DescribeIndexTask) OnEnqueue() error {
 }
 
 func (dit *DescribeIndexTask) PreExecute(ctx context.Context) error {
-	dit.Base.MsgType = commonpb.MsgType_kDescribeIndex
+	dit.Base.MsgType = commonpb.MsgType_DescribeIndex
 	dit.Base.SourceID = Params.ProxyID
 
 	collName, fieldName := dit.CollectionName, dit.FieldName
@@ -1546,7 +1546,7 @@ func (dit *DropIndexTask) OnEnqueue() error {
 }
 
 func (dit *DropIndexTask) PreExecute(ctx context.Context) error {
-	dit.Base.MsgType = commonpb.MsgType_kDropIndex
+	dit.Base.MsgType = commonpb.MsgType_DropIndex
 	dit.Base.SourceID = Params.ProxyID
 
 	collName, fieldName := dit.CollectionName, dit.FieldName
@@ -1625,7 +1625,7 @@ func (gist *GetIndexStateTask) OnEnqueue() error {
 }
 
 func (gist *GetIndexStateTask) PreExecute(ctx context.Context) error {
-	gist.Base.MsgType = commonpb.MsgType_kGetIndexState
+	gist.Base.MsgType = commonpb.MsgType_GetIndexState
 	gist.Base.SourceID = Params.ProxyID
 
 	collName, fieldName := gist.CollectionName, gist.FieldName
@@ -1650,7 +1650,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 
 	showPartitionRequest := &milvuspb.ShowPartitionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kShowPartitions,
+			MsgType:   commonpb.MsgType_ShowPartitions,
 			MsgID:     gist.Base.MsgID,
 			Timestamp: gist.Base.Timestamp,
 			SourceID:  Params.ProxyID,
@@ -1670,7 +1670,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 
 	describeIndexReq := milvuspb.DescribeIndexRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kDescribeIndex,
+			MsgType:   commonpb.MsgType_DescribeIndex,
 			MsgID:     gist.Base.MsgID,
 			Timestamp: gist.Base.Timestamp,
 			SourceID:  Params.ProxyID,
@@ -1703,7 +1703,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 	for _, partitionID := range partitions.PartitionIDs {
 		showSegmentsRequest := &milvuspb.ShowSegmentRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kShowSegment,
+				MsgType:   commonpb.MsgType_ShowSegments,
 				MsgID:     gist.Base.MsgID,
 				Timestamp: gist.Base.Timestamp,
 				SourceID:  Params.ProxyID,
@@ -1730,7 +1730,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 	for _, segmentID := range allSegmentIDs {
 		describeSegmentRequest := &milvuspb.DescribeSegmentRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDescribeSegment,
+				MsgType:   commonpb.MsgType_DescribeSegment,
 				MsgID:     gist.Base.MsgID,
 				Timestamp: gist.Base.Timestamp,
 				SourceID:  Params.ProxyID,
@@ -1856,7 +1856,7 @@ func (ft *FlushTask) OnEnqueue() error {
 }
 
 func (ft *FlushTask) PreExecute(ctx context.Context) error {
-	ft.Base.MsgType = commonpb.MsgType_kFlush
+	ft.Base.MsgType = commonpb.MsgType_Flush
 	ft.Base.SourceID = Params.ProxyID
 	return nil
 }
@@ -1869,7 +1869,7 @@ func (ft *FlushTask) Execute(ctx context.Context) error {
 		}
 		flushReq := &datapb.FlushRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kFlush,
+				MsgType:   commonpb.MsgType_Flush,
 				MsgID:     ft.Base.MsgID,
 				Timestamp: ft.Base.Timestamp,
 				SourceID:  ft.Base.SourceID,
@@ -1942,7 +1942,7 @@ func (lct *LoadCollectionTask) OnEnqueue() error {
 }
 
 func (lct *LoadCollectionTask) PreExecute(ctx context.Context) error {
-	lct.Base.MsgType = commonpb.MsgType_kLoadCollection
+	lct.Base.MsgType = commonpb.MsgType_LoadCollection
 	lct.Base.SourceID = Params.ProxyID
 
 	collName := lct.CollectionName
@@ -1966,7 +1966,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 
 	request := &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kLoadCollection,
+			MsgType:   commonpb.MsgType_LoadCollection,
 			MsgID:     lct.Base.MsgID,
 			Timestamp: lct.Base.Timestamp,
 			SourceID:  lct.Base.SourceID,
@@ -2029,7 +2029,7 @@ func (rct *ReleaseCollectionTask) OnEnqueue() error {
 }
 
 func (rct *ReleaseCollectionTask) PreExecute(ctx context.Context) error {
-	rct.Base.MsgType = commonpb.MsgType_kReleaseCollection
+	rct.Base.MsgType = commonpb.MsgType_ReleaseCollection
 	rct.Base.SourceID = Params.ProxyID
 
 	collName := rct.CollectionName
@@ -2048,7 +2048,7 @@ func (rct *ReleaseCollectionTask) Execute(ctx context.Context) (err error) {
 	}
 	request := &querypb.ReleaseCollectionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kReleaseCollection,
+			MsgType:   commonpb.MsgType_ReleaseCollection,
 			MsgID:     rct.Base.MsgID,
 			Timestamp: rct.Base.Timestamp,
 			SourceID:  rct.Base.SourceID,
@@ -2106,7 +2106,7 @@ func (lpt *LoadPartitionTask) OnEnqueue() error {
 }
 
 func (lpt *LoadPartitionTask) PreExecute(ctx context.Context) error {
-	lpt.Base.MsgType = commonpb.MsgType_kLoadPartition
+	lpt.Base.MsgType = commonpb.MsgType_LoadPartitions
 	lpt.Base.SourceID = Params.ProxyID
 
 	collName := lpt.CollectionName
@@ -2137,7 +2137,7 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 	}
 	request := &querypb.LoadPartitionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kLoadPartition,
+			MsgType:   commonpb.MsgType_LoadPartitions,
 			MsgID:     lpt.Base.MsgID,
 			Timestamp: lpt.Base.Timestamp,
 			SourceID:  lpt.Base.SourceID,
@@ -2201,7 +2201,7 @@ func (rpt *ReleasePartitionTask) OnEnqueue() error {
 }
 
 func (rpt *ReleasePartitionTask) PreExecute(ctx context.Context) error {
-	rpt.Base.MsgType = commonpb.MsgType_kReleasePartition
+	rpt.Base.MsgType = commonpb.MsgType_ReleasePartitions
 	rpt.Base.SourceID = Params.ProxyID
 
 	collName := rpt.CollectionName
@@ -2228,7 +2228,7 @@ func (rpt *ReleasePartitionTask) Execute(ctx context.Context) (err error) {
 	}
 	request := &querypb.ReleasePartitionRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kReleasePartition,
+			MsgType:   commonpb.MsgType_ReleasePartitions,
 			MsgID:     rpt.Base.MsgID,
 			Timestamp: rpt.Base.Timestamp,
 			SourceID:  rpt.Base.SourceID,

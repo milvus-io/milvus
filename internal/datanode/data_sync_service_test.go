@@ -74,7 +74,7 @@ func TestDataSyncService_Start(t *testing.T) {
 		},
 		TimeTickMsg: internalpb2.TimeTickMsg{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kTimeTick,
+				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     UniqueID(0),
 				Timestamp: math.MaxUint64,
 				SourceID:  0,
