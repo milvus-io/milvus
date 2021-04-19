@@ -3,6 +3,7 @@ package querynode
 import (
 	"context"
 	"encoding/binary"
+
 	"log"
 	"math"
 	"testing"
@@ -87,30 +88,103 @@ func TestSearch_Search(t *testing.T) {
 
 	// test data generate
 	const msgLength = 10
-	const receiveBufSize = 1024
 	const DIM = 16
-	insertProducerChannels := Params.insertChannelNames()
-	searchProducerChannels := Params.searchChannelNames()
-	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	const N = 10
 
-	// start search service
-	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
-	var searchRawData1 []byte
-	var searchRawData2 []byte
-	for i, ele := range vec {
+	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	var rawData []byte
+	for _, ele := range vec {
 		buf := make([]byte, 4)
-		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele+float32(i*2)))
-		searchRawData1 = append(searchRawData1, buf...)
+		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
+		rawData = append(rawData, buf...)
 	}
-	for i, ele := range vec {
+	bs := make([]byte, 4)
+	binary.LittleEndian.PutUint32(bs, 1)
+	rawData = append(rawData, bs...)
+	var records []*commonpb.Blob
+	for i := 0; i < N; i++ {
+		blob := &commonpb.Blob{
+			Value: rawData,
+		}
+		records = append(records, blob)
+	}
+
+	timeRange := TimeRange{
+		timestampMin: 0,
+		timestampMax: math.MaxUint64,
+	}
+
+	// messages generate
+	insertMessages := make([]msgstream.TsMsg, 0)
+	for i := 0; i < msgLength; i++ {
+		var msg msgstream.TsMsg = &msgstream.InsertMsg{
+			BaseMsg: msgstream.BaseMsg{
+				HashValues: []int32{
+					int32(i), int32(i),
+				},
+			},
+			InsertRequest: internalpb.InsertRequest{
+				MsgType:        internalpb.MsgType_kInsert,
+				ReqID:          int64(i),
+				CollectionName: "collection0",
+				PartitionTag:   "default",
+				SegmentID:      int64(0),
+				ChannelID:      int64(0),
+				ProxyID:        int64(0),
+				Timestamps:     []uint64{uint64(i + 1000), uint64(i + 1000)},
+				RowIDs:         []int64{int64(i * 2), int64(i*2 + 1)},
+				RowData: []*commonpb.Blob{
+					{Value: rawData},
+					{Value: rawData},
+				},
+			},
+		}
+		insertMessages = append(insertMessages, msg)
+	}
+
+	msgPack := msgstream.MsgPack{
+		BeginTs: timeRange.timestampMin,
+		EndTs:   timeRange.timestampMax,
+		Msgs:    insertMessages,
+	}
+
+	// pulsar produce
+	const receiveBufSize = 1024
+	insertProducerChannels := []string{"insert"}
+
+	insertStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
+	insertStream.SetPulsarClient(pulsarURL)
+	insertStream.CreatePulsarProducers(insertProducerChannels)
+
+	var insertMsgStream msgstream.MsgStream = insertStream
+	insertMsgStream.Start()
+	err = insertMsgStream.Produce(&msgPack)
+	assert.NoError(t, err)
+
+	// dataSync
+	node.dataSyncService = newDataSyncService(node.ctx, node.replica)
+	go node.dataSyncService.start()
+
+	time.Sleep(2 * time.Second)
+
+	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
+
+	searchProducerChannels := []string{"search"}
+	searchStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
+	searchStream.SetPulsarClient(pulsarURL)
+	searchStream.CreatePulsarProducers(searchProducerChannels)
+
+	var vecSearch = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17}
+	var searchRawData []byte
+	for _, ele := range vecSearch {
 		buf := make([]byte, 4)
-		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele+float32(i*4)))
-		searchRawData2 = append(searchRawData2, buf...)
+		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
+		searchRawData = append(searchRawData, buf...)
 	}
 	placeholderValue := servicepb.PlaceholderValue{
 		Tag:    "$0",
 		Type:   servicepb.PlaceholderType_VECTOR_FLOAT,
-		Values: [][]byte{searchRawData1, searchRawData2},
+		Values: [][]byte{searchRawData},
 	}
 
 	placeholderGroup := servicepb.PlaceholderGroup{
@@ -146,8 +220,8 @@ func TestSearch_Search(t *testing.T) {
 			MsgType:         internalpb.MsgType_kSearch,
 			ReqID:           int64(1),
 			ProxyID:         int64(1),
-			Timestamp:       uint64(10 + 1000),
-			ResultChannelID: int64(0),
+			Timestamp:       uint64(20 + 1000),
+			ResultChannelID: int64(1),
 			Query:           &blob,
 		},
 	}
@@ -155,97 +229,15 @@ func TestSearch_Search(t *testing.T) {
 	msgPackSearch := msgstream.MsgPack{}
 	msgPackSearch.Msgs = append(msgPackSearch.Msgs, searchMsg)
 
-	searchStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
-	searchStream.SetPulsarClient(pulsarURL)
-	searchStream.CreatePulsarProducers(searchProducerChannels)
-	searchStream.Start()
-	err = searchStream.Produce(&msgPackSearch)
+	var searchMsgStream msgstream.MsgStream = searchStream
+	searchMsgStream.Start()
+	err = searchMsgStream.Produce(&msgPackSearch)
 	assert.NoError(t, err)
 
 	node.searchService = newSearchService(node.ctx, node.replica)
 	go node.searchService.start()
 
-	// start insert
-	timeRange := TimeRange{
-		timestampMin: 0,
-		timestampMax: math.MaxUint64,
-	}
-
-	insertMessages := make([]msgstream.TsMsg, 0)
-	for i := 0; i < msgLength; i++ {
-		var rawData []byte
-		for _, ele := range vec {
-			buf := make([]byte, 4)
-			binary.LittleEndian.PutUint32(buf, math.Float32bits(ele+float32(i*2)))
-			rawData = append(rawData, buf...)
-		}
-		bs := make([]byte, 4)
-		binary.LittleEndian.PutUint32(bs, 1)
-		rawData = append(rawData, bs...)
-
-		var msg msgstream.TsMsg = &msgstream.InsertMsg{
-			BaseMsg: msgstream.BaseMsg{
-				HashValues: []int32{
-					int32(i),
-				},
-			},
-			InsertRequest: internalpb.InsertRequest{
-				MsgType:        internalpb.MsgType_kInsert,
-				ReqID:          int64(i),
-				CollectionName: "collection0",
-				PartitionTag:   "default",
-				SegmentID:      int64(0),
-				ChannelID:      int64(0),
-				ProxyID:        int64(0),
-				Timestamps:     []uint64{uint64(i + 1000)},
-				RowIDs:         []int64{int64(i)},
-				RowData: []*commonpb.Blob{
-					{Value: rawData},
-				},
-			},
-		}
-		insertMessages = append(insertMessages, msg)
-	}
-
-	msgPack := msgstream.MsgPack{
-		BeginTs: timeRange.timestampMin,
-		EndTs:   timeRange.timestampMax,
-		Msgs:    insertMessages,
-	}
-
-	// generate timeTick
-	timeTickMsgPack := msgstream.MsgPack{}
-	baseMsg := msgstream.BaseMsg{
-		BeginTimestamp: 0,
-		EndTimestamp:   0,
-		HashValues:     []int32{0},
-	}
-	timeTickResult := internalpb.TimeTickMsg{
-		MsgType:   internalpb.MsgType_kTimeTick,
-		PeerID:    UniqueID(0),
-		Timestamp: math.MaxUint64,
-	}
-	timeTickMsg := &msgstream.TimeTickMsg{
-		BaseMsg:     baseMsg,
-		TimeTickMsg: timeTickResult,
-	}
-	timeTickMsgPack.Msgs = append(timeTickMsgPack.Msgs, timeTickMsg)
-
-	// pulsar produce
-	insertStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
-	insertStream.SetPulsarClient(pulsarURL)
-	insertStream.CreatePulsarProducers(insertProducerChannels)
-	insertStream.Start()
-	err = insertStream.Produce(&msgPack)
-	assert.NoError(t, err)
-	err = insertStream.Broadcast(&timeTickMsgPack)
-	assert.NoError(t, err)
-
-	// dataSync
-	node.dataSyncService = newDataSyncService(node.ctx, node.replica)
-	go node.dataSyncService.start()
-
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	cancel()
 	node.Close()

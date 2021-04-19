@@ -141,15 +141,6 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 		hashValues := tsMsg.HashKeys()
 		bucketValues := make([]int32, len(hashValues))
 		for index, hashValue := range hashValues {
-			if tsMsg.Type() == internalPb.MsgType_kSearchResult {
-				searchResult := tsMsg.(*SearchResultMsg)
-				channelID := int32(searchResult.ResultChannelID)
-				if channelID >= int32(len(ms.producers)) {
-					return errors.New("Failed to produce pulsar msg to unKnow channel")
-				}
-				bucketValues[index] = channelID
-				continue
-			}
 			bucketValues[index] = hashValue % int32(len(ms.producers))
 		}
 		reBucketValues[channelID] = bucketValues

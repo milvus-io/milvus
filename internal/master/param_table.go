@@ -65,6 +65,10 @@ func (p *ParamTable) Init() {
 	if err != nil {
 		panic(err)
 	}
+	err = p.LoadYaml("advanced/common.yaml")
+	if err != nil {
+		panic(err)
+	}
 
 	// set members
 	p.initAddress()
@@ -430,7 +434,7 @@ func (p *ParamTable) initMaxPartitionNum() {
 }
 
 func (p *ParamTable) initDefaultPartitionTag() {
-	defaultTag, err := p.Load("master.defaultPartitionTag")
+	defaultTag, err := p.Load("common.defaultPartitionTag")
 	if err != nil {
 		panic(err)
 	}

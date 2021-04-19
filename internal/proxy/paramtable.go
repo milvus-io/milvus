@@ -31,6 +31,10 @@ func (pt *ParamTable) Init() {
 	if err != nil {
 		panic(err)
 	}
+	err = pt.LoadYaml("advanced/common.yaml")
+	if err != nil {
+		panic(err)
+	}
 
 	proxyIDStr := os.Getenv("PROXY_ID")
 	if proxyIDStr == "" {
@@ -474,4 +478,12 @@ func (pt *ParamTable) MaxFieldNum() int64 {
 		panic(err)
 	}
 	return maxFieldNum
+}
+
+func (pt *ParamTable) defaultPartitionTag() string {
+	tag, err := pt.Load("common.defaultPartitionTag")
+	if err != nil {
+		panic(err)
+	}
+	return tag
 }
