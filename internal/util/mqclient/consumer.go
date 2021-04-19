@@ -1,4 +1,4 @@
-package client
+package mqclient
 
 type SubscriptionInitialPosition int
 

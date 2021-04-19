@@ -1,4 +1,4 @@
-package pulsar
+package mqclient
 
 import (
 	"errors"
@@ -7,8 +7,6 @@ import (
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/client"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -26,7 +24,7 @@ func NewPulsarClient(opts pulsar.ClientOptions) (*pulsarClient, error) {
 	return cli, nil
 }
 
-func (pc *pulsarClient) CreateProducer(options client.ProducerOptions) (client.Producer, error) {
+func (pc *pulsarClient) CreateProducer(options ProducerOptions) (Producer, error) {
 	opts := pulsar.ProducerOptions{Topic: options.Topic}
 	pp, err := pc.client.CreateProducer(opts)
 	if err != nil {
@@ -39,7 +37,7 @@ func (pc *pulsarClient) CreateProducer(options client.ProducerOptions) (client.P
 	return producer, nil
 }
 
-func (pc *pulsarClient) Subscribe(options client.ConsumerOptions) (client.Consumer, error) {
+func (pc *pulsarClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 	receiveChannel := make(chan pulsar.ConsumerMessage, options.BufSize)
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:                       options.Topic,
@@ -51,7 +49,7 @@ func (pc *pulsarClient) Subscribe(options client.ConsumerOptions) (client.Consum
 	if err != nil {
 		return nil, err
 	}
-	msgChannel := make(chan client.ConsumerMessage, 1)
+	msgChannel := make(chan ConsumerMessage, 1)
 	pConsumer := &pulsarConsumer{c: consumer, msgChannel: msgChannel}
 
 	go func() {
@@ -70,21 +68,21 @@ func (pc *pulsarClient) Subscribe(options client.ConsumerOptions) (client.Consum
 	return pConsumer, nil
 }
 
-func (pc *pulsarClient) EarliestMessageID() client.MessageID {
+func (pc *pulsarClient) EarliestMessageID() MessageID {
 	msgID := pulsar.EarliestMessageID()
 	return &pulsarID{messageID: msgID}
 }
 
-func (pc *pulsarClient) StringToMsgID(id string) (client.MessageID, error) {
-	pID, err := typeutil.StringToPulsarMsgID(id)
+func (pc *pulsarClient) StringToMsgID(id string) (MessageID, error) {
+	pID, err := StringToPulsarMsgID(id)
 	if err != nil {
 		return nil, err
 	}
 	return &pulsarID{messageID: pID}, nil
 }
 
-func (pc *pulsarClient) BytesToMsgID(id []byte) (client.MessageID, error) {
-	pID, err := typeutil.DeserializePulsarMsgID(id)
+func (pc *pulsarClient) BytesToMsgID(id []byte) (MessageID, error) {
+	pID, err := DeserializePulsarMsgID(id)
 	if err != nil {
 		return nil, err
 	}

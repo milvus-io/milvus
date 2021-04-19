@@ -1,4 +1,4 @@
-package client
+package mqclient
 
 type Client interface {
 	// Create a producer instance

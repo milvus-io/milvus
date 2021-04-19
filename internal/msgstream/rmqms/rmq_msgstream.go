@@ -17,8 +17,8 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/mqclient"
 	client "github.com/zilliztech/milvus-distributed/internal/util/rocksmq/client/rocksmq"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type TsMsg = msgstream.TsMsg
@@ -301,7 +301,7 @@ func (rms *RmqMsgStream) receiveMsg(consumer Consumer) {
 
 			tsMsg.SetPosition(&msgstream.MsgPosition{
 				ChannelName: filepath.Base(consumer.Topic()),
-				MsgID:       typeutil.SerializeRmqID(rmqMsg.MsgID),
+				MsgID:       mqclient.SerializeRmqID(rmqMsg.MsgID),
 			})
 
 			msgPack := MsgPack{Msgs: []TsMsg{tsMsg}}
@@ -317,7 +317,7 @@ func (rms *RmqMsgStream) Chan() <-chan *msgstream.MsgPack {
 func (rms *RmqMsgStream) Seek(mp *msgstream.MsgPosition) error {
 	if _, ok := rms.consumers[mp.ChannelName]; ok {
 		consumer := rms.consumers[mp.ChannelName]
-		msgID, err := typeutil.DeserializeRmqID(mp.MsgID)
+		msgID, err := mqclient.DeserializeRmqID(mp.MsgID)
 		if err != nil {
 			return err
 		}
@@ -544,7 +544,7 @@ func (rtms *RmqTtMsgStream) findTimeTick(consumer Consumer,
 
 			tsMsg.SetPosition(&msgstream.MsgPosition{
 				ChannelName: filepath.Base(consumer.Topic()),
-				MsgID:       typeutil.SerializeRmqID(rmqMsg.MsgID),
+				MsgID:       mqclient.SerializeRmqID(rmqMsg.MsgID),
 			})
 
 			rtms.unsolvedMutex.Lock()
@@ -590,7 +590,7 @@ func (rtms *RmqTtMsgStream) Seek(mp *msgstream.MsgPosition) error {
 	if consumer == nil {
 		return errors.New("RocksMQ is not ready, consumer is nil")
 	}
-	seekMsgID, err := typeutil.DeserializeRmqID(mp.MsgID)
+	seekMsgID, err := mqclient.DeserializeRmqID(mp.MsgID)
 	if err != nil {
 		return err
 	}
@@ -629,7 +629,7 @@ func (rtms *RmqTtMsgStream) Seek(mp *msgstream.MsgPosition) error {
 			if tsMsg.BeginTs() > mp.Timestamp {
 				tsMsg.SetPosition(&msgstream.MsgPosition{
 					ChannelName: filepath.Base(consumer.Topic()),
-					MsgID:       typeutil.SerializeRmqID(rmqMsg.MsgID),
+					MsgID:       mqclient.SerializeRmqID(rmqMsg.MsgID),
 				})
 				rtms.unsolvedBuf[consumer] = append(rtms.unsolvedBuf[consumer], tsMsg)
 			}

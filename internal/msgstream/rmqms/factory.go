@@ -3,8 +3,8 @@ package rmqms
 import (
 	"context"
 
-	rocksmq2 "github.com/zilliztech/milvus-distributed/internal/msgstream/client/rocksmq"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/ms"
+	rocksmq2 "github.com/zilliztech/milvus-distributed/internal/util/mqclient"
 	client "github.com/zilliztech/milvus-distributed/internal/util/rocksmq/client/rocksmq"
 
 	"github.com/mitchellh/mapstructure"

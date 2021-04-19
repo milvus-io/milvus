@@ -1,4 +1,4 @@
-package client
+package mqclient
 
 type MessageID interface {
 	// Serialize the message id into a sequence of bytes that can be stored somewhere else

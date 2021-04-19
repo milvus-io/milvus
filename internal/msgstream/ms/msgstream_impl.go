@@ -12,18 +12,18 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/client"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/mqclient"
 	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 	"go.uber.org/zap"
 )
 
-type MessageID = client.MessageID
-type Client = client.Client
-type Producer = client.Producer
-type Consumer = client.Consumer
+type MessageID = mqclient.MessageID
+type Client = mqclient.Client
+type Producer = mqclient.Producer
+type Consumer = mqclient.Consumer
 type TsMsg = msgstream.TsMsg
 type MsgPack = msgstream.MsgPack
 type MsgType = msgstream.MsgType
@@ -88,7 +88,7 @@ func NewMsgStream(ctx context.Context,
 func (ms *msgStream) AsProducer(channels []string) {
 	for _, channel := range channels {
 		fn := func() error {
-			pp, err := ms.client.CreateProducer(client.ProducerOptions{Topic: channel})
+			pp, err := ms.client.CreateProducer(mqclient.ProducerOptions{Topic: channel})
 			if err != nil {
 				return err
 			}
@@ -117,12 +117,12 @@ func (ms *msgStream) AsConsumer(channels []string,
 			continue
 		}
 		fn := func() error {
-			receiveChannel := make(chan client.ConsumerMessage, ms.bufSize)
-			pc, err := ms.client.Subscribe(client.ConsumerOptions{
+			receiveChannel := make(chan mqclient.ConsumerMessage, ms.bufSize)
+			pc, err := ms.client.Subscribe(mqclient.ConsumerOptions{
 				Topic:                       channel,
 				SubscriptionName:            subName,
-				Type:                        client.KeyShared,
-				SubscriptionInitialPosition: client.SubscriptionPositionEarliest,
+				Type:                        mqclient.KeyShared,
+				SubscriptionInitialPosition: mqclient.SubscriptionPositionEarliest,
 				MessageChannel:              receiveChannel,
 			})
 			if err != nil {
@@ -234,7 +234,7 @@ func (ms *msgStream) Produce(msgPack *MsgPack) error {
 				return err
 			}
 
-			msg := &client.ProducerMessage{Payload: m, Properties: map[string]string{}}
+			msg := &mqclient.ProducerMessage{Payload: m, Properties: map[string]string{}}
 
 			trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
 
@@ -266,7 +266,7 @@ func (ms *msgStream) Broadcast(msgPack *MsgPack) error {
 			return err
 		}
 
-		msg := &client.ProducerMessage{Payload: m, Properties: map[string]string{}}
+		msg := &mqclient.ProducerMessage{Payload: m, Properties: map[string]string{}}
 
 		trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
 
@@ -424,12 +424,12 @@ func (ms *TtMsgStream) AsConsumer(channels []string,
 			continue
 		}
 		fn := func() error {
-			receiveChannel := make(chan client.ConsumerMessage, ms.bufSize)
-			pc, err := ms.client.Subscribe(client.ConsumerOptions{
+			receiveChannel := make(chan mqclient.ConsumerMessage, ms.bufSize)
+			pc, err := ms.client.Subscribe(mqclient.ConsumerOptions{
 				Topic:                       channel,
 				SubscriptionName:            subName,
-				Type:                        client.KeyShared,
-				SubscriptionInitialPosition: client.SubscriptionPositionEarliest,
+				Type:                        mqclient.KeyShared,
+				SubscriptionInitialPosition: mqclient.SubscriptionPositionEarliest,
 				MessageChannel:              receiveChannel,
 			})
 			if err != nil {
@@ -676,12 +676,12 @@ func (ms *TtMsgStream) Seek(mp *internalpb.MsgPosition) error {
 	}
 
 	fn := func() error {
-		receiveChannel := make(chan client.ConsumerMessage, ms.bufSize)
-		consumer, err = ms.client.Subscribe(client.ConsumerOptions{
+		receiveChannel := make(chan mqclient.ConsumerMessage, ms.bufSize)
+		consumer, err = ms.client.Subscribe(mqclient.ConsumerOptions{
 			Topic:                       seekChannel,
 			SubscriptionName:            subName,
-			SubscriptionInitialPosition: client.SubscriptionPositionEarliest,
-			Type:                        client.KeyShared,
+			SubscriptionInitialPosition: mqclient.SubscriptionPositionEarliest,
+			Type:                        mqclient.KeyShared,
 			MessageChannel:              receiveChannel,
 		})
 		if err != nil {
