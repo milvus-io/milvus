@@ -35,7 +35,7 @@ func TestGlobalTSOAllocator_GenerateTSO(t *testing.T) {
 	for i := 0; i < count; i++ {
 		ts, _ := GTsoAllocator.GenerateTSO(perCount)
 		physical, logical := tsoutil.ParseTS(ts)
-		if lastPhysical == physical {
+		if lastPhysical.Equal(physical) {
 			diff := logical - lastLogical
 			assert.Equal(t, uint64(perCount), diff)
 		}

@@ -87,7 +87,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
 
 	for i := 0; i < maxRetryCount; i++ {
 		current := (*atomicObject)(atomic.LoadPointer(&gta.tso.TSO))
-		if current == nil || current.physical == typeutil.ZeroTime {
+		if current == nil || current.physical.Equal(typeutil.ZeroTime) {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
 			log.Println("sync hasn't completed yet, wait for a while")
 			time.Sleep(200 * time.Millisecond)

@@ -137,7 +137,7 @@ func sendMsgFromCmd(ctx context.Context, fg *TimeTickedFlowGraph) {
 				return
 			}
 			// assert result
-			if res != math.Pow(num, 2)+math.Sqrt(num) {
+			if res-(math.Pow(num, 2)+math.Sqrt(num)) > 0.000001 {
 				fmt.Println(res)
 				fmt.Println(math.Pow(num, 2) + math.Sqrt(num))
 				panic("wrong answer")

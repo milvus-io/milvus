@@ -76,7 +76,7 @@ func TestTimeTick(t *testing.T) {
 				return
 			}
 			if tsm.Timestamp <= lastTimestamp {
-				t.Fatalf("current = %d, last = %d", uint64(tsm.Timestamp), uint64(lastTimestamp))
+				t.Fatalf("current = %d, last = %d", tsm.Timestamp, lastTimestamp)
 			}
 			t.Log("current = ", tsm.Timestamp)
 			lastTimestamp = tsm.Timestamp
