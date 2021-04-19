@@ -17,8 +17,6 @@
 namespace milvus::segcore {
 void
 VecIndexingEntry::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) {
-    // TODO
-
     assert(field_meta_.get_data_type() == DataType::VECTOR_FLOAT);
     auto dim = field_meta_.get_dim();
 
@@ -31,7 +29,6 @@ VecIndexingEntry::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const Vector
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
         const auto& chunk = source->get_chunk(chunk_id);
         // build index for chunk
-        // TODO
         auto indexing = std::make_unique<knowhere::IVF>();
         auto dataset = knowhere::GenDataset(source->get_chunk_size(), dim, chunk.data());
         indexing->Train(dataset, conf);
