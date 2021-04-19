@@ -64,21 +64,11 @@ struct ServerConfig {
     using Integer = ConfigValue<int64_t>;
     using Floating = ConfigValue<double>;
 
-    String version{"unknown"};
-
-    struct General {
-        String timezone{"unknown"};
-    } general;
+    String timezone{"unknown"};
 
     struct Network {
-        struct Bind {
-            String address{"unknown"};
-            Integer port{0};
-        } bind;
-        struct Http {
-            Bool enable{false};
-            Integer port{0};
-        } http;
+        String address{"unknown"};
+        Integer port{0};
     } network;
 
     struct Pulsar{
@@ -86,18 +76,6 @@ struct ServerConfig {
         Integer port{6650};
     }pulsar;
 
-    struct Storage {
-        String path{"unknown"};
-        Integer auto_flush_interval{0};
-    } storage;
-
-    struct Cache {
-        Integer cache_size{0};
-        Floating cpu_cache_threshold{0.0};
-        Integer insert_buffer_size{0};
-        Bool cache_insert_data{false};
-        String preload_collection{"unknown"};
-    } cache;
 
     struct Engine {
         Integer build_index_threshold{4096};
