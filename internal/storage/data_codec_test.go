@@ -12,7 +12,7 @@ func TestInsertCodecWriter(t *testing.T) {
 	base := Base{
 		Version:  1,
 		CommitID: 1,
-		TanentID: 1,
+		TenantID: 1,
 		Schema: &etcdpb.CollectionMeta{
 			ID:            1,
 			CreateTime:    1,
@@ -30,10 +30,10 @@ func TestInsertCodecWriter(t *testing.T) {
 						DataType:     schemapb.DataType_BOOL,
 					},
 					{
-						Name:         "field_int8",
+						Name:         "field_int64",
 						IsPrimaryKey: false,
 						Description:  "description_1",
-						DataType:     schemapb.DataType_INT8,
+						DataType:     schemapb.DataType_INT64,
 					},
 					{
 						Name:         "field_int16",
@@ -48,10 +48,10 @@ func TestInsertCodecWriter(t *testing.T) {
 						DataType:     schemapb.DataType_INT32,
 					},
 					{
-						Name:         "field_int64",
+						Name:         "field_int8",
 						IsPrimaryKey: false,
 						Description:  "description_1",
-						DataType:     schemapb.DataType_INT64,
+						DataType:     schemapb.DataType_INT8,
 					},
 					{
 						Name:         "field_float",
@@ -97,9 +97,9 @@ func TestInsertCodecWriter(t *testing.T) {
 				NumRows: 2,
 				data:    []bool{true, false},
 			},
-			1: Int8FieldData{
+			1: Int64FieldData{
 				NumRows: 2,
-				data:    []int8{1, 2},
+				data:    []int64{1, 2},
 			},
 			2: Int16FieldData{
 				NumRows: 2,
@@ -109,9 +109,9 @@ func TestInsertCodecWriter(t *testing.T) {
 				NumRows: 2,
 				data:    []int32{1, 2},
 			},
-			4: Int64FieldData{
+			4: Int8FieldData{
 				NumRows: 2,
-				data:    []int64{1, 2},
+				data:    []int8{1, 2},
 			},
 			5: FloatFieldData{
 				NumRows: 2,
@@ -137,7 +137,7 @@ func TestInsertCodecWriter(t *testing.T) {
 			},
 		},
 	}
-	blobs, err := insertCodec.Serialize(1, 1, 1, insertData, []Timestamp{0, 1})
+	blobs, err := insertCodec.Serialize(1, 1, 1, insertData)
 	assert.Nil(t, err)
 	partitionID, segmentID, resultData, err := insertCodec.Deserialize(blobs)
 	assert.Nil(t, err)
@@ -150,7 +150,7 @@ func TestDDCodecWriter(t *testing.T) {
 	base := Base{
 		Version:  1,
 		CommitID: 1,
-		TanentID: 1,
+		TenantID: 1,
 		Schema: &etcdpb.CollectionMeta{
 			ID:            1,
 			CreateTime:    1,
