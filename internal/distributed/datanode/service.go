@@ -5,7 +5,6 @@ import (
 	"net"
 	"strconv"
 	"sync"
-	"time"
 
 	dn "github.com/zilliztech/milvus-distributed/internal/datanode"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
@@ -14,11 +13,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 
 	"google.golang.org/grpc"
-)
-
-const (
-	RPCConnectionTimeout = 30 * time.Second
-	Retry                = 3
 )
 
 type Server struct {
@@ -32,11 +26,10 @@ type Server struct {
 	cancel context.CancelFunc
 }
 
-func New(masterService dn.MasterServiceInterface, dataService dn.DataServiceInterface) (*Server, error) {
+func New(ctx context.Context) (*Server, error) {
 	var s = &Server{}
 
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-	s.core = dn.NewDataNode(s.ctx, 0, masterService, dataService)
+	s.core = dn.NewDataNode(s.ctx)
 	s.grpcServer = grpc.NewServer()
 	datapb.RegisterDataNodeServer(s.grpcServer, s)
 	addr := dn.Params.IP + ":" + strconv.FormatInt(dn.Params.Port, 10)
@@ -63,6 +56,14 @@ func New(masterService dn.MasterServiceInterface, dataService dn.DataServiceInte
 	return s, nil
 }
 
+func (s *Server) SetMasterServiceInterface(ms dn.MasterServiceInterface) error {
+	return s.core.SetMasterServiceInterface(ms)
+}
+
+func (s *Server) SetDataServiceInterface(ds dn.DataServiceInterface) error {
+	return s.core.SetDataServiceInterface(ds)
+}
+
 func (s *Server) Init() error {
 	err := s.core.Init()
 	if err != nil {
@@ -85,9 +86,7 @@ func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) 
 }
 
 func (s *Server) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
-	}, s.core.WatchDmChannels(in)
+	return s.core.WatchDmChannels(in)
 }
 
 func (s *Server) FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) (*commonpb.Status, error) {

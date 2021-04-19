@@ -29,6 +29,7 @@ func refreshChannelNames() {
 	Params.DDChannelNames = []string{"datanode-test"}
 	Params.SegmentStatisticsChannelName = "segtment-statistics"
 	Params.CompleteFlushChannelName = "flush-completed"
+	Params.InsertChannelNames = []string{"intsert-a-1", "insert-b-1"}
 	Params.TimeTickChannelName = "hard-timetick"
 	suffix := "-test-data-node" + strconv.FormatInt(rand.Int63n(100), 10)
 	Params.DDChannelNames = makeNewChannelNames(Params.DDChannelNames, suffix)

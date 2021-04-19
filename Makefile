@@ -102,6 +102,12 @@ writenode: build-cpp
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/writenode $(PWD)/cmd/writenode/writenode.go 1>/dev/null
 
 # Builds various components locally.
+datanode: build-cpp
+	@echo "Building each component's binary to './bin'"
+	@echo "Building data node ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/datanode $(PWD)/cmd/datanode/main.go 1>/dev/null
+
+# Builds various components locally.
 indexnode: build-cpp
 	@echo "Building each component's binary to './bin'"
 	@echo "Building indexbuilder ..."

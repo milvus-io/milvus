@@ -59,21 +59,6 @@ func TestParamTable_DataNode(t *testing.T) {
 		log.Println("InsertChannelNames:", names)
 	})
 
-	t.Run("Test insertChannelRange", func(t *testing.T) {
-		channelRange := Params.InsertChannelRange
-		log.Println("InsertChannelRange:", channelRange)
-	})
-
-	t.Run("Test insertMsgStreamReceiveBufSize", func(t *testing.T) {
-		bufSize := Params.InsertReceiveBufSize
-		log.Println("InsertReceiveBufSize:", bufSize)
-	})
-
-	t.Run("Test insertPulsarBufSize", func(t *testing.T) {
-		bufSize := Params.InsertPulsarBufSize
-		log.Println("InsertPulsarBufSize:", bufSize)
-	})
-
 	t.Run("Test ddChannelNames", func(t *testing.T) {
 		names := Params.DDChannelNames
 		log.Println("DDChannelNames:", names)

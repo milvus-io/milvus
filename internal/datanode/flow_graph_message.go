@@ -56,7 +56,7 @@ type (
 
 	flushMsg struct {
 		msgID        UniqueID
-		Timestamp    Timestamp
+		timestamp    Timestamp
 		segmentIDs   []UniqueID
 		collectionID UniqueID
 	}

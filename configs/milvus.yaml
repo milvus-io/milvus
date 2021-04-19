@@ -22,8 +22,8 @@ etcd:
   rootPath: by-dev
   metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
   kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
-  segFlushMetaSubPath: writer/segment
-  ddlFlushMetaSubPath: writer/ddl
+  segFlushMetaSubPath: datanode/segment # Full Path = rootPath/metaSubPath/segFlushMetaSubPath
+  ddlFlushMetaSubPath: datanode/ddl     # Full Path = rootPath/metaSubPaht/ddlFlushMetaSubPath
   writeNodeSegKvSubPath: writer/segment # GOOSE TODO: remove this
   writeNodeDDLKvSubPath: writer/ddl # GOOSE TODO: remove this
   segThreshold: 10000

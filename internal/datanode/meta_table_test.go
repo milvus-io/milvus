@@ -15,9 +15,9 @@ func TestMetaTable_all(t *testing.T) {
 	etcdAddr := Params.EtcdAddress
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	require.NoError(t, err)
-	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root/writer")
+	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/meta/root")
 
-	_, err = cli.Delete(context.TODO(), "/etcd/test/root/writer", clientv3.WithPrefix())
+	_, err = cli.Delete(context.TODO(), "/etcd/test/meta/root", clientv3.WithPrefix())
 	require.NoError(t, err)
 
 	meta, err := NewMetaTable(etcdKV)
