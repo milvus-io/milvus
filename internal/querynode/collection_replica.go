@@ -540,11 +540,13 @@ func (colReplica *collectionReplica) replaceGrowingSegmentBySealedSegment(segmen
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 	if segment.segmentType != segmentTypeSealed && segment.segmentType != segmentTypeIndexing {
+		deleteSegment(segment)
 		return errors.New("unexpected segment type")
 	}
 	targetSegment, err := colReplica.getSegmentByIDPrivate(segment.ID())
 	if err == nil && targetSegment != nil {
 		if targetSegment.segmentType != segmentTypeGrowing {
+			deleteSegment(segment)
 			// target segment has been a sealed segment
 			return nil
 		}
