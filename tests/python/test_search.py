@@ -303,6 +303,7 @@ class TestSearchBase:
         assert len(res) == nq
         assert len(res[0]) == default_top_k
 
+    # pass
     # should fix, 336 assert fail, insert data don't have partitionTag, But search data have
     @pytest.mark.skip("search_index_partition")
     @pytest.mark.level(2)
