@@ -687,18 +687,22 @@ GrpcRequestHandler::Insert(::grpc::ServerContext *context, const ::milvus::grpc:
   if (request->entity_id_array_size() != 0 && request->entity_id_array_size() != request->rows_data_size()) {
     auto status = Status{SERVER_INVALID_ROWRECORD_ARRAY, "ID size not matches entity size"};
     SET_RESPONSE(response->mutable_status(), status, context);
+    return ::grpc::Status::OK;
   }
 
   // generate uid for entities
   //if (request->entity_id_array_size() == 0) {
   //    auto ids = std::vector<int64_t >(request->rows_data_size());
   //}
+  //  auto  *r = const_cast<::milvus::grpc::InsertParam *>(request);
+  //  r->set_entity_id_array(0,100);
 
   // delivery to pulsar message topic
   Status status = req_handler_.Insert(GetContext(context), request);
   if (status.ok()) {
     response->mutable_entity_id_array()->CopyFrom(request->entity_id_array());
   }
+  SET_RESPONSE(response->mutable_status(), status, context);
   return ::grpc::Status::OK;
 
 }

@@ -26,7 +26,7 @@ func TestSegmentInsert(t *testing.T) {
 	ids :=[] int64{1, 2, 3}
 	timestamps :=[] uint64 {0, 0, 0}
 
-	var err = segment.SegmentInsert(&ids, &timestamps, nil)
+	var err = segment.SegmentInsert(&ids, &timestamps, nil, 0, 0)
 	assert.NoError(t, err)
 
 	partition.DeleteSegment(segment)
@@ -43,7 +43,7 @@ func TestSegmentDelete(t *testing.T) {
 	ids :=[] int64{1, 2, 3}
 	timestamps :=[] uint64 {0, 0, 0}
 
-	var err = segment.SegmentDelete(&ids, &timestamps)
+	var err = segment.SegmentDelete(&ids, &timestamps, 0, 0)
 	assert.NoError(t, err)
 
 	partition.DeleteSegment(segment)
@@ -60,7 +60,7 @@ func TestSegmentSearch(t *testing.T) {
 	ids :=[] int64{1, 2, 3}
 	timestamps :=[] uint64 {0, 0, 0}
 
-	var insertErr = segment.SegmentInsert(&ids, &timestamps, nil)
+	var insertErr = segment.SegmentInsert(&ids, &timestamps, nil, 0, 0)
 	assert.NoError(t, insertErr)
 
 	var searchRes, searchErr = segment.SegmentSearch("fake query string", timestamps[0], nil)
@@ -109,7 +109,7 @@ func TestSegment_GetRowCount(t *testing.T) {
 	ids :=[] int64{1, 2, 3}
 	timestamps :=[] uint64 {0, 0, 0}
 
-	var err = segment.SegmentInsert(&ids, &timestamps, nil)
+	var err = segment.SegmentInsert(&ids, &timestamps, nil, 0, 0)
 	assert.NoError(t, err)
 
 	var rowCount = segment.GetRowCount()
@@ -129,7 +129,7 @@ func TestSegment_GetDeletedCount(t *testing.T) {
 	ids :=[] int64{1, 2, 3}
 	timestamps :=[] uint64 {0, 0, 0}
 
-	var err = segment.SegmentDelete(&ids, &timestamps)
+	var err = segment.SegmentDelete(&ids, &timestamps, 0, 0)
 	assert.NoError(t, err)
 
 	var deletedCount = segment.GetDeletedCount()

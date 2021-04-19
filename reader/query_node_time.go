@@ -24,8 +24,9 @@ func (t *QueryNodeTime) UpdateWriteTimeSync() {
 	t.WriteTimeSync = 0
 }
 
-func (t *QueryNodeTime) UpdateSearchTimeSync(timeRange TimeRange) {
-	t.SearchTimeSync = timeRange.timestampMax
+func (t *QueryNodeTime) UpdateSearchTimeSync() {
+	// TODO: Add time sync
+	t.SearchTimeSync = 0
 }
 
 func (t *QueryNodeTime) UpdateTSOTimeSync() {

@@ -41,6 +41,7 @@
 #include "utils/Log.h"
 #include "message_client/ClientV2.h"
 #include "server/timesync/TimeSync.h"
+#include "server/delivery/ReqScheduler.h"
 
 namespace milvus {
 namespace server {
@@ -103,7 +104,15 @@ GrpcServer::StartService() {
     HelloService helloService;
     builder.RegisterService(&helloService);
 
-    // report address to master, test only for now
+
+  // timeSync
+  // client id should same to MessageWrapper
+  int client_id = 0;
+  std::string pulsar_server_addr
+      (std::string{"pulsar://"} + config.pulsar.address() + ":" + std::to_string(config.pulsar.port()));
+  timesync::TimeSync syc(client_id,GetMessageTimeSyncTime, 20, pulsar_server_addr, "TimeSync");
+
+  // report address to master, test only for now
 //    auto reportClient = new ReportClient(::grpc::CreateChannel("192.168.2.28:50051",
 //                                                             ::grpc::InsecureChannelCredentials()));
 //    auto status = reportClient->ReportAddress();
