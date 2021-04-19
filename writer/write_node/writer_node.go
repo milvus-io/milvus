@@ -17,10 +17,15 @@ type SegmentIdInfo struct {
 	SegmentIds     []string
 }
 
+
 type WriteNode struct {
 	KvStore       *types.Store
 	MessageClient *message_client.MessageClient
 	TimeSync      uint64
+}
+
+func (wn *WriteNode) Close() {
+	wn.MessageClient.Close()
 }
 
 func NewWriteNode(ctx context.Context,
@@ -104,10 +109,10 @@ func (wn *WriteNode) UpdateTimeSync(timeSync uint64) {
 	wn.TimeSync = timeSync
 }
 
-func (wn *WriteNode) DoWriteNode(ctx context.Context, timeSync uint64, wg *sync.WaitGroup) {
+func (wn *WriteNode) DoWriteNode(ctx context.Context, wg *sync.WaitGroup) {
 	wg.Add(2)
 	go wn.InsertBatchData(ctx, wn.MessageClient.InsertMsg, wg)
 	go wn.DeleteBatchData(ctx, wn.MessageClient.DeleteMsg, wg)
 	wg.Wait()
-	wn.UpdateTimeSync(timeSync)
+	wn.UpdateTimeSync(wn.MessageClient.TimeSync())
 }

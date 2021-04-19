@@ -3,7 +3,7 @@ package readertimesync
 import (
 	"context"
 	"github.com/apache/pulsar-client-go/pulsar"
-	pb "github.com/czs007/suvlim/pkg/message"
+	pb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"github.com/golang/protobuf/proto"
 	"log"
 	"sync"
@@ -44,7 +44,7 @@ const (
 )
 
 func TestAlignTimeSync(t *testing.T) {
-	r := &readerTimeSyncCfg{
+	r := &ReaderTimeSyncCfg{
 		proxyIdList: []int64{1, 2, 3},
 		interval:    200,
 	}
@@ -75,7 +75,7 @@ func TestAlignTimeSync(t *testing.T) {
 }
 
 func TestAlignTimeSync2(t *testing.T) {
-	r := &readerTimeSyncCfg{
+	r := &ReaderTimeSyncCfg{
 		proxyIdList: []int64{1, 2, 3},
 		interval:    200,
 	}
@@ -104,7 +104,7 @@ func TestAlignTimeSync2(t *testing.T) {
 }
 
 func TestAlignTimeSync3(t *testing.T) {
-	r := &readerTimeSyncCfg{
+	r := &ReaderTimeSyncCfg{
 		proxyIdList: []int64{1, 2, 3},
 		interval:    200,
 	}
@@ -142,7 +142,7 @@ func TestAlignTimeSync3(t *testing.T) {
 }
 
 func TestAlignTimeSync4(t *testing.T) {
-	r := &readerTimeSyncCfg{
+	r := &ReaderTimeSyncCfg{
 		proxyIdList: []int64{1},
 		interval:    200,
 	}
@@ -173,7 +173,7 @@ func TestAlignTimeSync4(t *testing.T) {
 }
 
 func TestAlignTimeSync5(t *testing.T) {
-	r := &readerTimeSyncCfg{
+	r := &ReaderTimeSyncCfg{
 		proxyIdList: []int64{1, 2, 3},
 		interval:    200,
 	}
@@ -219,7 +219,7 @@ func TestNewReaderTimeSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rr := r.(*readerTimeSyncCfg)
+	rr := r.(*ReaderTimeSyncCfg)
 	if rr.pulsarClient == nil {
 		t.Fatalf("create pulsar client failed")
 	}
@@ -303,7 +303,7 @@ func TestReaderTimesync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rr := r.(*readerTimeSyncCfg)
+	rr := r.(*ReaderTimeSyncCfg)
 	pt1, err := rr.pulsarClient.CreateProducer(pulsar.ProducerOptions{Topic: timeSyncTopic})
 	if err != nil {
 		t.Fatalf("create time sync producer 1 error %v", err)

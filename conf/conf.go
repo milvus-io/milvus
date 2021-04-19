@@ -60,7 +60,7 @@ func init() {
 
 func load_config() {
 	//var config ServerConfig
-	filename := "conf/config.yaml"
+	filename := "../conf/config.yaml"
 	source, err := ioutil.ReadFile(filename)
 	if err != nil {
 		panic(err)
