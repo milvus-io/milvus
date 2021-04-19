@@ -174,7 +174,6 @@ class TestFlushBase:
         assert res["row_count"] == nb_new
 
     # TODO ci failed
-    # @pytest.mark.tags("fail")
     @pytest.mark.tags("0331")
     def test_add_flush_multiable_times(self, connect, collection):
         '''
@@ -237,7 +236,7 @@ class TestFlushBase:
         res = connect.get_collection_stats(id_collection)
         assert res["row_count"] == default_nb
 
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_delete_flush_multiable_times(self, connect, collection):
         '''
         method: delete entities, flush serveral times
@@ -287,7 +286,7 @@ class TestFlushBase:
         res = connect.get_collection_stats(collection)
         assert res["row_count"] == 0
 
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     @pytest.mark.level(2)
     def test_delete_flush_during_search(self, connect, collection, args):
         '''
