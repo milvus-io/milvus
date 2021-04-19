@@ -438,17 +438,17 @@ func (p *ParamTable) initDDChannelNames() {
 	if err != nil {
 		panic(err)
 	}
-	prefix += "-"
-	iRangeStr, err := p.Load("msgChannel.channelRange.dataDefinition")
-	if err != nil {
-		panic(err)
-	}
-	channelIDs := paramtable.ConvertRangeToIntSlice(iRangeStr, ",")
-	var ret []string
-	for _, ID := range channelIDs {
-		ret = append(ret, prefix+strconv.Itoa(ID))
-	}
-	p.DDChannelNames = ret
+	//prefix += "-"
+	//iRangeStr, err := p.Load("msgChannel.channelRange.dataDefinition")
+	//if err != nil {
+	//	panic(err)
+	//}
+	//channelIDs := paramtable.ConvertRangeToIntSlice(iRangeStr, ",")
+	//var ret []string
+	//for _, ID := range channelIDs {
+	//	ret = append(ret, prefix+strconv.Itoa(ID))
+	//}
+	p.DDChannelNames = []string{prefix}
 }
 
 func (p *ParamTable) initSliceIndex() {

@@ -162,6 +162,6 @@ func TestParamTable_metaRootPath(t *testing.T) {
 
 func TestParamTable_ddChannelName(t *testing.T) {
 	names := Params.DDChannelNames
-	contains := strings.Contains(names[0], "data-definition-0")
+	contains := strings.Contains(names[0], "data-definition")
 	assert.Equal(t, contains, true)
 }
