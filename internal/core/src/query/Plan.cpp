@@ -209,7 +209,7 @@ Parser::ParseVecNode(const Json& out_body) {
         }
     }();
     vec_node->query_info_.topK_ = topK;
-    vec_node->query_info_.metric_type_ = vec_info.at("metric_type");
+    vec_node->query_info_.metric_type_ = GetMetricType(vec_info.at("metric_type"));
     vec_node->query_info_.search_params_ = vec_info.at("params");
     vec_node->query_info_.field_offset_ = field_offset;
     vec_node->placeholder_tag_ = vec_info.at("query");

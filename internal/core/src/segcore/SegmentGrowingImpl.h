@@ -53,12 +53,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     Status
     Delete(int64_t reserverd_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) override;
 
-    QueryResult
-    Search(const query::Plan* Plan,
-           const query::PlaceholderGroup* placeholder_groups[],
-           const Timestamp timestamps[],
-           int64_t num_groups) const override;
-
     // stop receive insert requests
     // will move data to immutable vector or something
     Status
@@ -180,6 +174,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
           record_(*schema_, chunk_size),
           indexing_record_(*schema_, chunk_size) {
     }
+
+    void
+    vector_search(int64_t vec_count,
+                  query::QueryInfo query_info,
+                  const void* query_data,
+                  int64_t query_count,
+                  const BitsetView& bitset,
+                  QueryResult& output) const override;
 
  public:
     std::shared_ptr<DeletedRecord::TmpBitmap>

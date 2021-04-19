@@ -26,12 +26,6 @@ class SegmentSealedImpl : public SegmentSealed {
     LoadFieldData(const LoadFieldDataInfo& info) override;
 
  public:
-    QueryResult
-    Search(const query::Plan* Plan,
-           const query::PlaceholderGroup* placeholder_groups[],
-           const Timestamp timestamps[],
-           int64_t num_groups) const override;
-
     int64_t
     GetMemoryUsageInBytes() const override;
 
@@ -103,6 +97,14 @@ class SegmentSealedImpl : public SegmentSealed {
             row_count_opt_ = row_count;
         }
     }
+
+    void
+    vector_search(int64_t vec_count,
+                  query::QueryInfo query_info,
+                  const void* query_data,
+                  int64_t query_count,
+                  const BitsetView& bitset,
+                  QueryResult& output) const override;
 
     bool
     is_all_ready() const {

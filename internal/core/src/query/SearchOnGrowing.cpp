@@ -63,7 +63,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
     auto dim = field.get_dim();
     auto topK = info.topK_;
     auto total_count = topK * num_queries;
-    auto metric_type = GetMetricType(info.metric_type_);
+    auto metric_type = info.metric_type_;
 
     // step 3: small indexing search
     // std::vector<int64_t> final_uids(total_count, -1);
@@ -138,7 +138,7 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
     auto& record = segment.get_insert_record();
     // step 1: binary search to find the barrier of the snapshot
     // auto ins_barrier = get_barrier(record, timestamp);
-    auto metric_type = GetMetricType(info.metric_type_);
+    auto metric_type = info.metric_type_;
     // auto del_barrier = get_barrier(deleted_record_, timestamp);
 
 #if 0
@@ -195,37 +195,24 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
 }
 
 // TODO: refactor and merge this into one
-template <typename VectorType>
 void
 SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 int64_t ins_barrier,
                 const query::QueryInfo& info,
-                const EmbeddedType<VectorType>* query_data,
+                const void* query_data,
                 int64_t num_queries,
                 const faiss::BitsetView& bitset,
                 QueryResult& results) {
-    static_assert(IsVector<VectorType>);
-    if constexpr (std::is_same_v<VectorType, FloatVector>) {
-        FloatSearch(segment, info, query_data, num_queries, ins_barrier, bitset, results);
+    // TODO: add data_type to info
+    auto data_type = segment.get_schema()[info.field_offset_].get_data_type();
+    Assert(datatype_is_vector(data_type));
+    if (data_type == DataType::VECTOR_FLOAT) {
+        auto typed_data = reinterpret_cast<const float*>(query_data);
+        FloatSearch(segment, info, typed_data, num_queries, ins_barrier, bitset, results);
     } else {
-        BinarySearch(segment, info, query_data, num_queries, ins_barrier, bitset, results);
+        auto typed_data = reinterpret_cast<const uint8_t*>(query_data);
+        BinarySearch(segment, info, typed_data, num_queries, ins_barrier, bitset, results);
     }
 }
-template void
-SearchOnGrowing<FloatVector>(const segcore::SegmentGrowingImpl& segment,
-                             int64_t ins_barrier,
-                             const query::QueryInfo& info,
-                             const EmbeddedType<FloatVector>* query_data,
-                             int64_t num_queries,
-                             const faiss::BitsetView& bitset,
-                             QueryResult& results);
-template void
-SearchOnGrowing<BinaryVector>(const segcore::SegmentGrowingImpl& segment,
-                              int64_t ins_barrier,
-                              const query::QueryInfo& info,
-                              const EmbeddedType<BinaryVector>* query_data,
-                              int64_t num_queries,
-                              const faiss::BitsetView& bitset,
-                              QueryResult& results);
 
 }  // namespace milvus::query

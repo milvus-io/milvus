@@ -9,15 +9,15 @@ type QueryService struct {
 }
 
 //serverBase interface
-func (qs *QueryService) Init() error {
+func (qs *QueryService) Init() {
 	panic("implement me")
 }
 
-func (qs *QueryService) Start() error {
+func (qs *QueryService) Start() {
 	panic("implement me")
 }
 
-func (qs *QueryService) Stop() error {
+func (qs *QueryService) Stop() {
 	panic("implement me")
 }
 

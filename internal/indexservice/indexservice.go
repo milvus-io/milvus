@@ -46,15 +46,15 @@ type IndexService struct {
 type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
-func (i *IndexService) Init() error {
+func (i *IndexService) Init() {
 	panic("implement me")
 }
 
-func (i *IndexService) Start() error {
+func (i *IndexService) Start() {
 	panic("implement me")
 }
 
-func (i *IndexService) Stop() error {
+func (i *IndexService) Stop() {
 	panic("implement me")
 }
 

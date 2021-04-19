@@ -37,7 +37,7 @@ class ExecExprVisitor : public ExprVisitor {
 
  public:
     using RetType = std::deque<boost::dynamic_bitset<>>;
-    ExecExprVisitor(const segcore::SegmentGrowingImpl& segment, int64_t row_count)
+    ExecExprVisitor(const segcore::SegmentInternalInterface& segment, int64_t row_count)
         : segment_(segment), row_count_(row_count) {
     }
     RetType

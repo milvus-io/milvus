@@ -22,7 +22,7 @@
 
 using namespace milvus;
 using namespace milvus::segcore;
-using namespace milvus;
+using namespace milvus::query;
 
 TEST(Sealed, without_predicate) {
     using namespace milvus::query;
@@ -286,4 +286,41 @@ TEST(Sealed, LoadFieldData) {
         ASSERT_EQ(chunk_span1[i], ref1[i]);
         ASSERT_EQ(chunk_span2[i], ref2[i]);
     }
+    std::string dsl = R"({
+        "bool": {
+            "must": [
+            {
+                "range": {
+                    "double": {
+                        "GE": -1,
+                        "LT": 1
+                    }
+                }
+            },
+            {
+                "vector": {
+                    "fakevec": {
+                        "metric_type": "L2",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 5
+                    }
+                }
+            }
+            ]
+        }
+    })";
+
+    auto plan = CreatePlan(*schema, dsl);
+    auto num_queries = 5;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    Timestamp time = 1000000;
+    std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
+
+    auto qr = segment->Search(plan.get(), ph_group_arr.data(), &time, 1);
+    auto json = QueryResultToJson(qr);
+    std::cout << json.dump(1);
 }

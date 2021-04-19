@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/SegmentSealedImpl.h"
+#include "query/SearchOnSealed.h"
 namespace milvus::segcore {
 void
 SegmentSealedImpl::LoadIndex(const LoadIndexInfo& info) {
@@ -107,14 +108,6 @@ SegmentSealedImpl::chunk_index_impl(FieldOffset field_offset, int64_t chunk_id) 
     return nullptr;
 }
 
-QueryResult
-SegmentSealedImpl::Search(const query::Plan* Plan,
-                          const query::PlaceholderGroup** placeholder_groups,
-                          const Timestamp* timestamps,
-                          int64_t num_groups) const {
-    PanicInfo("unimplemented");
-}
-
 int64_t
 SegmentSealedImpl::GetMemoryUsageInBytes() const {
     // TODO: add estimate for index
@@ -132,6 +125,20 @@ SegmentSealedImpl::get_row_count() const {
 const Schema&
 SegmentSealedImpl::get_schema() const {
     return *schema_;
+}
+
+void
+SegmentSealedImpl::vector_search(int64_t vec_count,
+                                 query::QueryInfo query_info,
+                                 const void* query_data,
+                                 int64_t query_count,
+                                 const BitsetView& bitset,
+                                 QueryResult& output) const {
+    auto field_offset = query_info.field_offset_;
+    auto& field_meta = schema_->operator[](field_offset);
+    Assert(field_meta.is_vector());
+    Assert(vec_indexings_.is_ready(field_offset));
+    query::SearchOnSealed(*schema_, vec_indexings_, query_info, query_data, query_count, bitset, output);
 }
 
 SegmentSealedPtr
