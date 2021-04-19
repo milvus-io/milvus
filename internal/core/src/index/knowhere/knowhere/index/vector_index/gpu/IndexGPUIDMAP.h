@@ -39,9 +39,6 @@ class GPUIDMAP : public IDMAP, public GPUIndex {
     const float*
     GetRawVectors() override;
 
-    const int64_t*
-    GetRawIds() override;
-
     void
     GenGraph(const float*, const int64_t, GraphType&, const Config&);
 

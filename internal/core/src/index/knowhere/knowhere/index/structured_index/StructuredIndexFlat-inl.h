@@ -86,7 +86,7 @@ StructuredIndexFlat<T>::Range(const T value, const OperatorType op) {
     faiss::ConcurrentBitsetPtr bitset = std::make_shared<faiss::ConcurrentBitset>(data_.size());
     auto lb = data_.begin();
     auto ub = data_.end();
-    for (; lb <= ub; lb++) {
+    for (; lb < ub; lb++) {
         switch (op) {
             case OperatorType::LT:
                 if (*lb < IndexStructure<T>(value)) {
@@ -125,7 +125,7 @@ StructuredIndexFlat<T>::Range(T lower_bound_value, bool lb_inclusive, T upper_bo
     }
     auto lb = data_.begin();
     auto ub = data_.end();
-    for (; lb <= ub; ++lb) {
+    for (; lb < ub; ++lb) {
         if (lb_inclusive && ub_inclusive) {
             if (*lb >= IndexStructure<T>(lower_bound_value) && *lb <= IndexStructure<T>(upper_bound_value)) {
                 bitset->set(lb->idx_);

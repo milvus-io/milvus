@@ -40,18 +40,10 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
     Train(const DatasetPtr&, const Config&) override;
 
     void
-    Add(const DatasetPtr&, const Config&) override;
-
-    void
     AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
     Query(const DatasetPtr&, const Config&, const faiss::BitsetView&) override;
-
-#if 0
-    DatasetPtr
-    QueryById(const DatasetPtr& dataset, const Config& config) override;
-#endif
 
     int64_t
     Count() override;
@@ -64,26 +56,15 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
         return Count() * Dim() * sizeof(FloatType);
     }
 
-#if 0
-    DatasetPtr
-    GetVectorById(const DatasetPtr& dataset, const Config& config) override;
-#endif
-
     VecIndexPtr
     CopyCpuToGpu(const int64_t, const Config&);
 
     virtual const float*
     GetRawVectors();
 
-    virtual const int64_t*
-    GetRawIds();
-
  protected:
     virtual void
     QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&, const faiss::BitsetView&);
-
- protected:
-    std::mutex mutex_;
 };
 
 using IDMAPPtr = std::shared_ptr<IDMAP>;

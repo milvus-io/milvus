@@ -54,7 +54,7 @@ TEST_P(RHNSWSQ8Test, HNSW_basic) {
     assert(!xb.empty());
 
     index_->Train(base_dataset, conf);
-    index_->Add(base_dataset, conf);
+    index_->AddWithoutIds(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 
@@ -75,7 +75,7 @@ TEST_P(RHNSWSQ8Test, HNSW_delete) {
     assert(!xb.empty());
 
     index_->Train(base_dataset, conf);
-    index_->Add(base_dataset, conf);
+    index_->AddWithoutIds(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 
@@ -125,7 +125,7 @@ TEST_P(RHNSWSQ8Test, HNSW_serialize) {
 
     {
         index_->Train(base_dataset, conf);
-        index_->Add(base_dataset, conf);
+        index_->AddWithoutIds(base_dataset, conf);
         auto binaryset = index_->Serialize(conf);
         auto bin_idx = binaryset.GetByName(index_->index_type() + "_Index");
         auto bin_dat = binaryset.GetByName(QUANTIZATION_DATA);
@@ -155,7 +155,7 @@ TEST_P(RHNSWSQ8Test, HNSW_serialize) {
 TEST_P(RHNSWSQ8Test, HNSW_slice) {
     {
         index_->Train(base_dataset, conf);
-        index_->Add(base_dataset, conf);
+        index_->AddWithoutIds(base_dataset, conf);
         auto binaryset = index_->Serialize(conf);
         auto new_idx = std::make_shared<milvus::knowhere::IndexRHNSWSQ>();
         new_idx->Load(binaryset);

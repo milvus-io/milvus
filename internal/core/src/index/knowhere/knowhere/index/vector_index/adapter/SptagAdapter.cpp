@@ -18,13 +18,15 @@ namespace knowhere {
 std::shared_ptr<SPTAG::MetadataSet>
 ConvertToMetadataSet(const DatasetPtr& dataset_ptr) {
     auto elems = dataset_ptr->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
+
+    auto p_id = (int64_t*)malloc(sizeof(int64_t) * elems);
+    for (int64_t i = 0; i < elems; ++i) p_id[i] = i;
 
     auto p_offset = (int64_t*)malloc(sizeof(int64_t) * (elems + 1));
-    for (auto i = 0; i <= elems; ++i) p_offset[i] = i * 8;
+    for (int64_t i = 0; i <= elems; ++i) p_offset[i] = i * 8;
 
     std::shared_ptr<SPTAG::MetadataSet> metaset(
-        new SPTAG::MemMetadataSet(SPTAG::ByteArray((std::uint8_t*)p_data, elems * sizeof(int64_t), false),
+        new SPTAG::MemMetadataSet(SPTAG::ByteArray((std::uint8_t*)p_id, elems * sizeof(int64_t), true),
                                   SPTAG::ByteArray((std::uint8_t*)p_offset, elems * sizeof(int64_t), true), elems));
 
     return metaset;
@@ -54,7 +56,7 @@ ConvertToQueryResult(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-ConvertToDataset(std::vector<SPTAG::QueryResult> query_results) {
+ConvertToDataset(std::vector<SPTAG::QueryResult> query_results, std::shared_ptr<std::vector<int64_t>> uid) {
     auto k = query_results[0].GetResultNum();
     auto elems = query_results.size() * k;
 
@@ -64,12 +66,18 @@ ConvertToDataset(std::vector<SPTAG::QueryResult> query_results) {
     auto p_dist = (float*)malloc(p_dist_size);
 
 #pragma omp parallel for
-    for (auto i = 0; i < query_results.size(); ++i) {
+    for (size_t i = 0; i < query_results.size(); ++i) {
         auto results = query_results[i].GetResults();
         auto num_result = query_results[i].GetResultNum();
         for (auto j = 0; j < num_result; ++j) {
             //            p_id[i * k + j] = results[j].VID;
-            p_id[i * k + j] = *(int64_t*)query_results[i].GetMetadata(j).Data();
+            auto id = *(int64_t*)query_results[i].GetMetadata(j).Data();
+            if (uid != nullptr) {
+                if (id >= 0) {
+                    id = uid->at(id);
+                }
+            }
+            p_id[i * k + j] = id;
             p_dist[i * k + j] = results[j].Dist;
         }
     }

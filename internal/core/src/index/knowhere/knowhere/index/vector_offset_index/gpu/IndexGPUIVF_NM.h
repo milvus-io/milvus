@@ -35,7 +35,7 @@ class GPUIVF_NM : public IVF, public GPUIndex {
     Train(const DatasetPtr&, const Config&) override;
 
     void
-    Add(const DatasetPtr&, const Config&) override;
+    AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     void
     Load(const BinarySet&) override;

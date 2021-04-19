@@ -90,7 +90,7 @@ IndexAnnoy::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
         return;
     }
 
-    GET_TENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
 
     metric_type_ = config[Metric::TYPE];
     if (metric_type_ == Metric::L2) {
@@ -102,7 +102,7 @@ IndexAnnoy::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     for (int i = 0; i < rows; ++i) {
-        index_->add_item(p_ids[i], static_cast<const float*>(p_data) + dim * i);
+        index_->add_item(i, static_cast<const float*>(p_data) + dim * i);
     }
 
     index_->build(config[IndexParams::n_trees].get<int64_t>());
@@ -130,11 +130,14 @@ IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
         index_->get_nns_by_vector(static_cast<const float*>(p_data) + i * dim, k, search_k, &result, &distances,
                                   bitset);
 
-        int64_t result_num = result.size();
+        size_t result_num = result.size();
         auto local_p_id = p_id + k * i;
         auto local_p_dist = p_dist + k * i;
         memcpy(local_p_id, result.data(), result_num * sizeof(int64_t));
         memcpy(local_p_dist, distances.data(), result_num * sizeof(float));
+
+        MapOffsetToUid(local_p_id, result_num);
+
         for (; result_num < k; result_num++) {
             local_p_id[result_num] = -1;
             local_p_dist[result_num] = 1.0 / 0.0;

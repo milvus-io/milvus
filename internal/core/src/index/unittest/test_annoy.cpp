@@ -56,13 +56,12 @@ TEST_P(AnnoyTest, annoy_basic) {
         ASSERT_ANY_THROW(index_->Train(base_dataset, conf));
         ASSERT_ANY_THROW(index_->Query(query_dataset, conf, nullptr));
         ASSERT_ANY_THROW(index_->Serialize(conf));
-        ASSERT_ANY_THROW(index_->Add(base_dataset, conf));
         ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, conf));
         ASSERT_ANY_THROW(index_->Count());
         ASSERT_ANY_THROW(index_->Dim());
     }
 
-    index_->BuildAll(base_dataset, conf);  // Train + Add
+    index_->BuildAll(base_dataset, conf);  // Train + AddWithoutIds
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);
 
@@ -96,7 +95,7 @@ TEST_P(AnnoyTest, annoy_basic) {
 TEST_P(AnnoyTest, annoy_delete) {
     assert(!xb.empty());
 
-    index_->BuildAll(base_dataset, conf);  // Train + Add
+    index_->BuildAll(base_dataset, conf);  // Train + AddWithoutIds
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);
 

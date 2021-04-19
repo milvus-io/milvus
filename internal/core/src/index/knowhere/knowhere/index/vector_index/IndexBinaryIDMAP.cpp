@@ -13,7 +13,6 @@
 
 #include <faiss/IndexBinaryFlat.h>
 #include <faiss/MetaIndexes.h>
-#include <faiss/index_factory.h>
 
 #include <string>
 
@@ -29,8 +28,6 @@ BinaryIDMAP::Serialize(const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
 
-    std::lock_guard<std::mutex> lk(mutex_);
-    //    return SerializeImpl(index_type_);
     auto ret = SerializeImpl(index_type_);
     if (config.contains(INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
         Disassemble(config[INDEX_FILE_SLICE_SIZE_IN_MEGABYTE].get<int64_t>() * 1024 * 1024, ret);
@@ -41,7 +38,6 @@ BinaryIDMAP::Serialize(const Config& config) {
 void
 BinaryIDMAP::Load(const BinarySet& index_binary) {
     Assemble(const_cast<BinarySet&>(index_binary));
-    std::lock_guard<std::mutex> lk(mutex_);
     LoadImpl(index_binary, index_type_);
 }
 
@@ -60,6 +56,7 @@ BinaryIDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const fa
     auto p_dist = static_cast<float*>(malloc(p_dist_size));
 
     QueryImpl(rows, reinterpret_cast<const uint8_t*>(p_data), k, p_dist, p_id, config, bitset);
+    MapOffsetToUid(p_id, static_cast<size_t>(elems));
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
@@ -85,15 +82,14 @@ BinaryIDMAP::Dim() {
 }
 
 void
-BinaryIDMAP::Add(const DatasetPtr& dataset_ptr, const Config& config) {
+BinaryIDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
 
-    std::lock_guard<std::mutex> lk(mutex_);
-    GET_TENSOR_DATA_ID(dataset_ptr)
+    GET_TENSOR_DATA(dataset_ptr)
 
-    index_->add_with_ids(rows, reinterpret_cast<const uint8_t*>(p_data), p_ids);
+    index_->add(rows, reinterpret_cast<const uint8_t*>(p_data));
 }
 
 void
@@ -102,48 +98,19 @@ BinaryIDMAP::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     // so we let Tanimoto be the default type
     constexpr faiss::MetricType metric_type = faiss::METRIC_Tanimoto;
 
-    const char* desc = "BFlat";
     auto dim = config[meta::DIM].get<int64_t>();
-    auto index = faiss::index_binary_factory(dim, desc, metric_type);
-    index_.reset(index);
+    auto index = std::make_shared<faiss::IndexBinaryFlat>(dim, metric_type);
+    index_ = index;
 }
 
 const uint8_t*
 BinaryIDMAP::GetRawVectors() {
     try {
-        auto file_index = dynamic_cast<faiss::IndexBinaryIDMap*>(index_.get());
-        auto flat_index = dynamic_cast<faiss::IndexBinaryFlat*>(file_index->index);
+        auto flat_index = dynamic_cast<faiss::IndexBinaryFlat*>(index_.get());
         return flat_index->xb.data();
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
-}
-
-const int64_t*
-BinaryIDMAP::GetRawIds() {
-    try {
-        auto file_index = dynamic_cast<faiss::IndexBinaryIDMap*>(index_.get());
-        return file_index->id_map.data();
-    } catch (std::exception& e) {
-        KNOWHERE_THROW_MSG(e.what());
-    }
-}
-
-void
-BinaryIDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (!index_) {
-        KNOWHERE_THROW_MSG("index not initialize");
-    }
-
-    std::lock_guard<std::mutex> lk(mutex_);
-    GET_TENSOR_DATA(dataset_ptr)
-
-    std::vector<int64_t> new_ids(rows);
-    for (int i = 0; i < rows; ++i) {
-        new_ids[i] = i;
-    }
-
-    index_->add_with_ids(rows, reinterpret_cast<const uint8_t*>(p_data), new_ids.data());
 }
 
 void
@@ -155,14 +122,13 @@ BinaryIDMAP::QueryImpl(int64_t n,
                        const Config& config,
                        const faiss::BitsetView& bitset) {
     // assign the metric type
-    auto bin_flat_index = dynamic_cast<faiss::IndexBinaryIDMap*>(index_.get())->index;
-    bin_flat_index->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
 
     auto i_distances = reinterpret_cast<int32_t*>(distances);
-    bin_flat_index->search(n, data, k, i_distances, labels, bitset);
+    index_->search(n, data, k, i_distances, labels, bitset);
 
     // if hamming, it need transform int32 to float
-    if (bin_flat_index->metric_type == faiss::METRIC_Hamming) {
+    if (index_->metric_type == faiss::METRIC_Hamming) {
         int64_t num = n * k;
         for (int64_t i = 0; i < num; i++) {
             distances[i] = static_cast<float>(i_distances[i]);

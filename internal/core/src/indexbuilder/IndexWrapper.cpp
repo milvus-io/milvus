@@ -132,9 +132,9 @@ IndexWrapper::dim() {
 void
 IndexWrapper::BuildWithoutIds(const knowhere::DatasetPtr& dataset) {
     auto index_type = get_index_type();
-    if (index_type == milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
-        PanicInfo(std::string(index_type) + " doesn't support build without ids yet!");
-    }
+    // if (index_type == milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
+    //     PanicInfo(std::string(index_type) + " doesn't support build without ids yet!");
+    // }
     index_->Train(dataset, config_);
     index_->AddWithoutIds(dataset, config_);
 

@@ -32,7 +32,6 @@ BinaryIVF::Serialize(const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    std::lock_guard<std::mutex> lk(mutex_);
     auto ret = SerializeImpl(index_type_);
     if (config.contains(INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
         Disassemble(config[INDEX_FILE_SLICE_SIZE_IN_MEGABYTE].get<int64_t>() * 1024 * 1024, ret);
@@ -43,7 +42,6 @@ BinaryIVF::Serialize(const Config& config) {
 void
 BinaryIVF::Load(const BinarySet& index_binary) {
     Assemble(const_cast<BinarySet&>(index_binary));
-    std::lock_guard<std::mutex> lk(mutex_);
     LoadImpl(index_binary, index_type_);
 
     if (STATISTICS_LEVEL >= 3) {
@@ -70,6 +68,7 @@ BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
         auto p_dist = static_cast<float*>(malloc(p_dist_size));
 
         QueryImpl(rows, reinterpret_cast<const uint8_t*>(p_data), k, p_dist, p_id, config, bitset);
+        MapOffsetToUid(p_id, static_cast<size_t>(elems));
 
         auto ret_ds = std::make_shared<Dataset>();
 
@@ -141,7 +140,7 @@ BinaryIVF::ClearStatistics() {
 
 void
 BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    GET_TENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
 
     int64_t nlist = config[IndexParams::nlist];
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
@@ -149,8 +148,17 @@ BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     auto index = std::make_shared<faiss::IndexBinaryIVF>(coarse_quantizer, dim, nlist, metric_type);
     index->own_fields = true;
     index->train(rows, static_cast<const uint8_t*>(p_data));
-    index->add_with_ids(rows, static_cast<const uint8_t*>(p_data), p_ids);
     index_ = index;
+}
+
+void
+BinaryIVF::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+
+    GET_TENSOR_DATA(dataset_ptr)
+    index_->add(rows, reinterpret_cast<const uint8_t*>(p_data));
 }
 
 std::shared_ptr<faiss::IVFSearchParameters>

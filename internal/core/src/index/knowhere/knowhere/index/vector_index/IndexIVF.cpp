@@ -16,7 +16,6 @@
 #include <faiss/IndexIVFFlat.h>
 #include <faiss/IndexIVFPQ.h>
 #include <faiss/clone_index.h>
-#include <faiss/index_factory.h>
 #include <faiss/index_io.h>
 #ifdef MILVUS_GPU_VERSION
 #include <faiss/gpu/GpuAutoTune.h>
@@ -53,7 +52,6 @@ IVF::Serialize(const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    std::lock_guard<std::mutex> lk(mutex_);
     auto ret = SerializeImpl(index_type_);
     if (config.contains(INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
         Disassemble(config[INDEX_FILE_SLICE_SIZE_IN_MEGABYTE].get<int64_t>() * 1024 * 1024, ret);
@@ -64,7 +62,6 @@ IVF::Serialize(const Config& config) {
 void
 IVF::Load(const BinarySet& binary_set) {
     Assemble(const_cast<BinarySet&>(binary_set));
-    std::lock_guard<std::mutex> lk(mutex_);
     index_type_ = IndexEnum::INDEX_FAISS_IVFFLAT;
     LoadImpl(binary_set, index_type_);
 
@@ -78,7 +75,7 @@ void
 IVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR_DATA_DIM(dataset_ptr)
 
-    int64_t nlist = config[IndexParams::nlist].get<int64_t>();
+    auto nlist = config[IndexParams::nlist].get<int64_t>();
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
     auto index = std::make_shared<faiss::IndexIVFFlat>(coarse_quantizer, dim, nlist, metric_type);
@@ -88,23 +85,11 @@ IVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 void
-IVF::Add(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (!index_ || !index_->is_trained) {
-        KNOWHERE_THROW_MSG("index not initialize or trained");
-    }
-
-    std::lock_guard<std::mutex> lk(mutex_);
-    GET_TENSOR_DATA_ID(dataset_ptr)
-    index_->add_with_ids(rows, reinterpret_cast<const float*>(p_data), p_ids);
-}
-
-void
 IVF::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    std::lock_guard<std::mutex> lk(mutex_);
     GET_TENSOR_DATA(dataset_ptr)
     index_->add(rows, reinterpret_cast<const float*>(p_data));
 }
@@ -129,19 +114,7 @@ IVF::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::Bit
         auto p_dist = static_cast<float*>(malloc(p_dist_size));
 
         QueryImpl(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, config, bitset);
-
-        //    std::stringstream ss_res_id, ss_res_dist;
-        //    for (int i = 0; i < 10; ++i) {
-        //        printf("%llu", p_id[i]);
-        //        printf("\n");
-        //        printf("%.6f", p_dist[i]);
-        //        printf("\n");
-        //        ss_res_id << p_id[i] << " ";
-        //        ss_res_dist << p_dist[i] << " ";
-        //    }
-        //    std::cout << std::endl << "after search: " << std::endl;
-        //    std::cout << ss_res_id.str() << std::endl;
-        //    std::cout << ss_res_dist.str() << std::endl << std::endl;
+        MapOffsetToUid(p_id, static_cast<size_t>(elems));
 
         auto ret_ds = std::make_shared<Dataset>();
         ret_ds->Set(meta::IDS, p_id);

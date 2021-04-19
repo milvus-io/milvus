@@ -90,7 +90,6 @@ TEST_F(IVFNMGPUTest, ivf_basic_gpu) {
     }
 
     // null faiss index
-    ASSERT_ANY_THROW(index_->Add(base_dataset, conf_));
     ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, conf_));
 
     index_->BuildAll(base_dataset, conf_);

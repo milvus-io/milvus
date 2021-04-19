@@ -44,11 +44,6 @@ class IndexNGT : public VecIndex {
     }
 
     void
-    Add(const DatasetPtr& dataset_ptr, const Config& config) override {
-        KNOWHERE_THROW_MSG("NGT not support add item dynamically, please invoke BuildAll interface.");
-    }
-
-    void
     AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) override {
         KNOWHERE_THROW_MSG("Incremental index is not supported");
     }

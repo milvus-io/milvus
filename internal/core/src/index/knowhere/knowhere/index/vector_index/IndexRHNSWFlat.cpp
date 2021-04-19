@@ -41,17 +41,17 @@ IndexRHNSWFlat::Serialize(const Config& config) {
 
     try {
         auto res_set = IndexRHNSW::Serialize(config);
-        MemoryIOWriter writer;
-        writer.name = this->index_type() + "_Data";
         auto real_idx = dynamic_cast<faiss::IndexRHNSWFlat*>(index_.get());
         if (real_idx == nullptr) {
-            KNOWHERE_THROW_MSG("dynamic_cast<faiss::IndexRHNSWFlat*>(index_) failed during Serialize!");
+            KNOWHERE_THROW_MSG("index is not a faiss::IndexRHNSWFlat");
         }
-        auto storage_index = dynamic_cast<faiss::IndexFlat*>(real_idx->storage);
-        faiss::write_index(storage_index, &writer);
-        std::shared_ptr<uint8_t[]> data(writer.data_);
 
-        res_set.Append(writer.name, data, writer.rp);
+        int64_t meta_info[3] = {real_idx->storage->metric_type, real_idx->storage->d, real_idx->storage->ntotal};
+        auto meta_space = new uint8_t[sizeof(meta_info)];
+        memcpy(meta_space, meta_info, sizeof(meta_info));
+        std::shared_ptr<uint8_t[]> space_sp(meta_space, std::default_delete<uint8_t[]>());
+        res_set.Append("META", space_sp, sizeof(meta_info));
+
         if (config.contains(INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
             Disassemble(config[INDEX_FILE_SLICE_SIZE_IN_MEGABYTE].get<int64_t>() * 1024 * 1024, res_set);
         }
@@ -66,18 +66,16 @@ IndexRHNSWFlat::Load(const BinarySet& index_binary) {
     try {
         Assemble(const_cast<BinarySet&>(index_binary));
         IndexRHNSW::Load(index_binary);
-        MemoryIOReader reader;
-        reader.name = this->index_type() + "_Data";
-        auto binary = index_binary.GetByName(reader.name);
 
-        reader.total = static_cast<size_t>(binary->size);
-        reader.data_ = binary->data.get();
+        int64_t meta_info[3];  // = {metric_type, dim, ntotal}
+        auto meta_data = index_binary.GetByName("META");
+        memcpy(meta_info, meta_data->data.get(), meta_data->size);
 
         auto real_idx = dynamic_cast<faiss::IndexRHNSWFlat*>(index_.get());
-        if (real_idx == nullptr) {
-            KNOWHERE_THROW_MSG("dynamic_cast<faiss::IndexRHNSWFlat*>(index_) failed during Load!");
-        }
-        real_idx->storage = faiss::read_index(&reader);
+        real_idx->storage =
+            new faiss::IndexFlat(static_cast<faiss::idx_t>(meta_info[1]), static_cast<faiss::MetricType>(meta_info[0]));
+        auto binary_data = index_binary.GetByName(RAW_DATA);
+        real_idx->storage->add(meta_info[2], reinterpret_cast<const float*>(binary_data->data.get()));
         real_idx->init_hnsw();
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());

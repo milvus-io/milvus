@@ -41,16 +41,11 @@ class NSG_NM : public VecIndex {
     Load(const BinarySet&) override;
 
     void
-    BuildAll(const DatasetPtr& dataset_ptr, const Config& config) override {
-        Train(dataset_ptr, config);
-    }
+    BuildAll(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     void
-    Train(const DatasetPtr&, const Config&) override;
-
-    void
-    Add(const DatasetPtr&, const Config&) override {
-        KNOWHERE_THROW_MSG("Incremental index is not supported");
+    Train(const DatasetPtr&, const Config&) override {
+        KNOWHERE_THROW_MSG("NSG_NM not support add item dynamically, please invoke BuildAll interface.");
     }
 
     void
@@ -71,7 +66,6 @@ class NSG_NM : public VecIndex {
     UpdateIndexSize() override;
 
  private:
-    std::mutex mutex_;
     int64_t gpu_;
     std::shared_ptr<impl::NsgIndex> index_ = nullptr;
     std::shared_ptr<uint8_t[]> data_ = nullptr;

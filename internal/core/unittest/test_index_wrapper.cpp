@@ -146,7 +146,7 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
             xb_bin_data = dataset.get_col<uint8_t>(0);
             ids.resize(NB);
             std::iota(ids.begin(), ids.end(), 0);
-            xb_dataset = milvus::knowhere::GenDatasetWithIds(NB, DIM, xb_bin_data.data(), ids.data());
+            xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_bin_data.data());
         } else {
             xb_bin_data = dataset.get_col<uint8_t>(0);
             xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_bin_data.data());
@@ -202,7 +202,7 @@ TEST(BINFLAT, Build) {
     auto xb_data = dataset.get_col<uint8_t>(0);
     std::vector<milvus::knowhere::IDType> ids(NB, 0);
     std::iota(ids.begin(), ids.end(), 0);
-    auto xb_dataset = milvus::knowhere::GenDatasetWithIds(NB, DIM, xb_data.data(), ids.data());
+    auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
     ASSERT_NO_THROW(index->BuildAll(xb_dataset, conf));
 }
 
@@ -215,7 +215,7 @@ TEST(BINIDMAP, Build) {
     auto xb_data = dataset.get_col<uint8_t>(0);
     std::vector<milvus::knowhere::IDType> ids(NB, 0);
     std::iota(ids.begin(), ids.end(), 0);
-    auto xb_dataset = milvus::knowhere::GenDatasetWithIds(NB, DIM, xb_data.data(), ids.data());
+    auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
     ASSERT_NO_THROW(index->BuildAll(xb_dataset, conf));
 }
 
@@ -302,11 +302,11 @@ TEST(BinFlatWrapper, Build) {
     auto xb_data = dataset.get_col<uint8_t>(0);
     std::vector<milvus::knowhere::IDType> ids(NB, 0);
     std::iota(ids.begin(), ids.end(), 0);
-    auto xb_dataset = milvus::knowhere::GenDatasetWithIds(NB, DIM, xb_data.data(), ids.data());
+    auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
     auto index =
         std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
-    ASSERT_ANY_THROW(index->BuildWithoutIds(xb_dataset));
-    ASSERT_NO_THROW(index->BuildWithIds(xb_dataset));
+    ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
+    // ASSERT_NO_THROW(index->BuildWithIds(xb_dataset));
 }
 
 TEST(BinIdMapWrapper, Build) {
@@ -325,11 +325,11 @@ TEST(BinIdMapWrapper, Build) {
     auto xb_data = dataset.get_col<uint8_t>(0);
     std::vector<milvus::knowhere::IDType> ids(NB, 0);
     std::iota(ids.begin(), ids.end(), 0);
-    auto xb_dataset = milvus::knowhere::GenDatasetWithIds(NB, DIM, xb_data.data(), ids.data());
+    auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
     auto index =
         std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
     ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
-    ASSERT_NO_THROW(index->BuildWithIds(xb_dataset));
+    // ASSERT_NO_THROW(index->BuildWithIds(xb_dataset));
 }
 
 INSTANTIATE_TEST_CASE_P(
@@ -357,23 +357,14 @@ TEST_P(IndexWrapperTest, BuildWithoutIds) {
     auto index =
         std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
 
-    if (index_type == milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
-        ASSERT_ANY_THROW(index->BuildWithoutIds(xb_dataset));
-    } else {
-        ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
-    }
+    ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
 }
 
 TEST_P(IndexWrapperTest, Codec) {
     auto index =
         std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
 
-    if (index_type == milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
-        ASSERT_ANY_THROW(index->BuildWithoutIds(xb_dataset));
-        ASSERT_NO_THROW(index->BuildWithIds(xb_dataset));
-    } else {
-        ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
-    }
+    ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
 
     auto binary = index->Serialize();
     auto copy_index =
