@@ -18,6 +18,7 @@ const (
 	DropCollectionEventType
 	CreatePartitionEventType
 	DropPartitionEventType
+	EventTypeEnd
 )
 
 func (code EventTypeCode) String() string {
@@ -169,11 +170,19 @@ type dropPartitionEventWriter struct {
 	dropPartitionEventData
 }
 
-func newDescriptorEvent() descriptorEvent {
-	return descriptorEvent{
-		descriptorEventHeader: newDescriptorEventHeader(),
-		descriptorEventData:   newDescriptorEventData(),
+func newDescriptorEvent() (*descriptorEvent, error) {
+	header, err := newDescriptorEventHeader()
+	if err != nil {
+		return nil, err
 	}
+	data, err := newDescriptorEventData()
+	if err != nil {
+		return nil, err
+	}
+	return &descriptorEvent{
+		descriptorEventHeader: *header,
+		descriptorEventData:   *data,
+	}, err
 }
 
 func newInsertEventWriter(dataType schemapb.DataType, offset int32) (*insertEventWriter, error) {
@@ -181,17 +190,26 @@ func newInsertEventWriter(dataType schemapb.DataType, offset int32) (*insertEven
 	if err != nil {
 		return nil, err
 	}
+	header, err := newEventHeader(InsertEventType)
+	if err != nil {
+		return nil, err
+	}
+	data, err := newInsertEventData()
+	if err != nil {
+		return nil, err
+	}
+
 	writer := &insertEventWriter{
 		baseEventWriter: baseEventWriter{
-			eventHeader:            newEventHeader(InsertEventType),
+			eventHeader:            *header,
 			PayloadWriterInterface: payloadWriter,
 			isClosed:               false,
 			isFinish:               false,
 			offset:                 offset,
 		},
-		insertEventData: newInsertEventData(),
+		insertEventData: *data,
 	}
-	writer.baseEventWriter.getEventDataSize = writer.insertEventData.GetEventDataSize
+	writer.baseEventWriter.getEventDataSize = writer.insertEventData.GetEventDataFixPartSize
 	writer.baseEventWriter.writeEventData = writer.insertEventData.WriteEventData
 	return writer, nil
 }
@@ -201,17 +219,25 @@ func newDeleteEventWriter(dataType schemapb.DataType, offset int32) (*deleteEven
 	if err != nil {
 		return nil, err
 	}
+	header, err := newEventHeader(DeleteEventType)
+	if err != nil {
+		return nil, err
+	}
+	data, err := newDeleteEventData()
+	if err != nil {
+		return nil, err
+	}
 	writer := &deleteEventWriter{
 		baseEventWriter: baseEventWriter{
-			eventHeader:            newEventHeader(DeleteEventType),
+			eventHeader:            *header,
 			PayloadWriterInterface: payloadWriter,
 			isClosed:               false,
 			isFinish:               false,
 			offset:                 offset,
 		},
-		deleteEventData: newDeleteEventData(),
+		deleteEventData: *data,
 	}
-	writer.baseEventWriter.getEventDataSize = writer.deleteEventData.GetEventDataSize
+	writer.baseEventWriter.getEventDataSize = writer.deleteEventData.GetEventDataFixPartSize
 	writer.baseEventWriter.writeEventData = writer.deleteEventData.WriteEventData
 	return writer, nil
 }
@@ -220,17 +246,26 @@ func newCreateCollectionEventWriter(dataType schemapb.DataType, offset int32) (*
 	if err != nil {
 		return nil, err
 	}
+	header, err := newEventHeader(CreateCollectionEventType)
+	if err != nil {
+		return nil, err
+	}
+	data, err := newCreateCollectionEventData()
+	if err != nil {
+		return nil, err
+	}
+
 	writer := &createCollectionEventWriter{
 		baseEventWriter: baseEventWriter{
-			eventHeader:            newEventHeader(CreateCollectionEventType),
+			eventHeader:            *header,
 			PayloadWriterInterface: payloadWriter,
 			isClosed:               false,
 			isFinish:               false,
 			offset:                 offset,
 		},
-		createCollectionEventData: newCreateCollectionEventData(),
+		createCollectionEventData: *data,
 	}
-	writer.baseEventWriter.getEventDataSize = writer.createCollectionEventData.GetEventDataSize
+	writer.baseEventWriter.getEventDataSize = writer.createCollectionEventData.GetEventDataFixPartSize
 	writer.baseEventWriter.writeEventData = writer.createCollectionEventData.WriteEventData
 	return writer, nil
 }
@@ -239,17 +274,25 @@ func newDropCollectionEventWriter(dataType schemapb.DataType, offset int32) (*dr
 	if err != nil {
 		return nil, err
 	}
+	header, err := newEventHeader(DropCollectionEventType)
+	if err != nil {
+		return nil, err
+	}
+	data, err := newDropCollectionEventData()
+	if err != nil {
+		return nil, err
+	}
 	writer := &dropCollectionEventWriter{
 		baseEventWriter: baseEventWriter{
-			eventHeader:            newEventHeader(DropCollectionEventType),
+			eventHeader:            *header,
 			PayloadWriterInterface: payloadWriter,
 			isClosed:               false,
 			isFinish:               false,
 			offset:                 offset,
 		},
-		dropCollectionEventData: newDropCollectionEventData(),
+		dropCollectionEventData: *data,
 	}
-	writer.baseEventWriter.getEventDataSize = writer.dropCollectionEventData.GetEventDataSize
+	writer.baseEventWriter.getEventDataSize = writer.dropCollectionEventData.GetEventDataFixPartSize
 	writer.baseEventWriter.writeEventData = writer.dropCollectionEventData.WriteEventData
 	return writer, nil
 }
@@ -258,17 +301,26 @@ func newCreatePartitionEventWriter(dataType schemapb.DataType, offset int32) (*c
 	if err != nil {
 		return nil, err
 	}
+	header, err := newEventHeader(CreatePartitionEventType)
+	if err != nil {
+		return nil, err
+	}
+	data, err := newCreatePartitionEventData()
+	if err != nil {
+		return nil, err
+	}
+
 	writer := &createPartitionEventWriter{
 		baseEventWriter: baseEventWriter{
-			eventHeader:            newEventHeader(CreatePartitionEventType),
+			eventHeader:            *header,
 			PayloadWriterInterface: payloadWriter,
 			isClosed:               false,
 			isFinish:               false,
 			offset:                 offset,
 		},
-		createPartitionEventData: newCreatePartitionEventData(),
+		createPartitionEventData: *data,
 	}
-	writer.baseEventWriter.getEventDataSize = writer.createPartitionEventData.GetEventDataSize
+	writer.baseEventWriter.getEventDataSize = writer.createPartitionEventData.GetEventDataFixPartSize
 	writer.baseEventWriter.writeEventData = writer.createPartitionEventData.WriteEventData
 	return writer, nil
 }
@@ -277,17 +329,25 @@ func newDropPartitionEventWriter(dataType schemapb.DataType, offset int32) (*dro
 	if err != nil {
 		return nil, err
 	}
+	header, err := newEventHeader(DropPartitionEventType)
+	if err != nil {
+		return nil, err
+	}
+	data, err := newDropPartitionEventData()
+	if err != nil {
+		return nil, err
+	}
 	writer := &dropPartitionEventWriter{
 		baseEventWriter: baseEventWriter{
-			eventHeader:            newEventHeader(DropPartitionEventType),
+			eventHeader:            *header,
 			PayloadWriterInterface: payloadWriter,
 			isClosed:               false,
 			isFinish:               false,
 			offset:                 offset,
 		},
-		dropPartitionEventData: newDropPartitionEventData(),
+		dropPartitionEventData: *data,
 	}
-	writer.baseEventWriter.getEventDataSize = writer.dropPartitionEventData.GetEventDataSize
+	writer.baseEventWriter.getEventDataSize = writer.dropPartitionEventData.GetEventDataFixPartSize
 	writer.baseEventWriter.writeEventData = writer.dropPartitionEventData.WriteEventData
 	return writer, nil
 }

@@ -1,13 +1,11 @@
 package storage
 
 import (
-	"bytes"
 	"encoding/binary"
 	"io"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
-
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
@@ -20,9 +18,7 @@ type baseEventHeader struct {
 }
 
 func (header *baseEventHeader) GetMemoryUsageInBytes() int32 {
-	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.LittleEndian, header)
-	return int32(buf.Len())
+	return int32(binary.Size(header))
 }
 
 func (header *baseEventHeader) Write(buffer io.Writer) error {
@@ -52,7 +48,7 @@ func readDescriptorEventHeader(buffer io.Reader) (*descriptorEventHeader, error)
 	return header, nil
 }
 
-func newDescriptorEventHeader() descriptorEventHeader {
+func newDescriptorEventHeader() (*descriptorEventHeader, error) {
 	header := descriptorEventHeader{
 		Timestamp: tsoutil.ComposeTS(time.Now().UnixNano()/int64(time.Millisecond), 0),
 		TypeCode:  DescriptorEventType,
@@ -60,11 +56,11 @@ func newDescriptorEventHeader() descriptorEventHeader {
 	}
 	header.EventLength = header.GetMemoryUsageInBytes()
 	header.NextPosition = header.EventLength + 4
-	return header
+	return &header, nil
 }
 
-func newEventHeader(eventTypeCode EventTypeCode) eventHeader {
-	return eventHeader{
+func newEventHeader(eventTypeCode EventTypeCode) (*eventHeader, error) {
+	return &eventHeader{
 		baseEventHeader: baseEventHeader{
 			Timestamp:    tsoutil.ComposeTS(time.Now().UnixNano()/int64(time.Millisecond), 0),
 			TypeCode:     eventTypeCode,
@@ -72,5 +68,5 @@ func newEventHeader(eventTypeCode EventTypeCode) eventHeader {
 			EventLength:  -1,
 			NextPosition: -1,
 		},
-	}
+	}, nil
 }
