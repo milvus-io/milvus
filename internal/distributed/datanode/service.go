@@ -182,7 +182,7 @@ func (s *Server) init() error {
 	if err = masterClient.Start(); err != nil {
 		panic(err)
 	}
-	err = funcutil.WaitForComponentHealthy(ctx, masterClient, "MasterService", 100, time.Millisecond*200)
+	err = funcutil.WaitForComponentHealthy(ctx, masterClient, "MasterService", 1000000, time.Millisecond*200)
 
 	if err != nil {
 		panic(err)
@@ -202,7 +202,7 @@ func (s *Server) init() error {
 	if err = dataService.Start(); err != nil {
 		panic(err)
 	}
-	err = funcutil.WaitForComponentInitOrHealthy(ctx, dataService, "DataService", 100, time.Millisecond*200)
+	err = funcutil.WaitForComponentInitOrHealthy(ctx, dataService, "DataService", 1000000, time.Millisecond*200)
 	if err != nil {
 		panic(err)
 	}

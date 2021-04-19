@@ -46,7 +46,7 @@ func newMetaService(ctx context.Context, replica ReplicaInterface) *metaService 
 		}
 		return nil
 	}
-	err = retry.Retry(200, time.Millisecond*200, connectEtcdFn)
+	err = retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
 	if err != nil {
 		panic(err)
 	}

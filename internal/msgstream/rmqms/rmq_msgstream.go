@@ -9,14 +9,15 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/gogo/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	client "github.com/zilliztech/milvus-distributed/internal/util/rocksmq/client/rocksmq"
-
-	"go.uber.org/zap"
 )
 
 type TsMsg = msgstream.TsMsg
@@ -35,8 +36,9 @@ type Consumer = client.Consumer
 type RmqMsgStream struct {
 	ctx              context.Context
 	client           client.Client
-	producers        []Producer
-	consumers        []Consumer
+	producers        map[string]Producer
+	producerChannels []string
+	consumers        map[string]Consumer
 	consumerChannels []string
 	unmarshal        msgstream.UnmarshalDispatcher
 	repackFunc       msgstream.RepackFunc
@@ -45,6 +47,7 @@ type RmqMsgStream struct {
 	wait             *sync.WaitGroup
 	streamCancel     func()
 	rmqBufSize       int64
+	producerLock     *sync.Mutex
 	consumerLock     *sync.Mutex
 	consumerReflects []reflect.SelectCase
 
@@ -55,10 +58,11 @@ func newRmqMsgStream(ctx context.Context, receiveBufSize int64, rmqBufSize int64
 	unmarshal msgstream.UnmarshalDispatcher) (*RmqMsgStream, error) {
 
 	streamCtx, streamCancel := context.WithCancel(ctx)
-	producers := make([]Producer, 0)
-	consumers := make([]Consumer, 0)
-	consumerChannels := make([]string, 0)
+	producers := make(map[string]Producer)
+	producerChannels := make([]string, 0)
 	consumerReflects := make([]reflect.SelectCase, 0)
+	consumers := make(map[string]Consumer)
+	consumerChannels := make([]string, 0)
 	receiveBuf := make(chan *MsgPack, receiveBufSize)
 
 	var clientOpts client.ClientOptions
@@ -73,12 +77,14 @@ func newRmqMsgStream(ctx context.Context, receiveBufSize int64, rmqBufSize int64
 		ctx:              streamCtx,
 		client:           client,
 		producers:        producers,
+		producerChannels: producerChannels,
 		consumers:        consumers,
 		consumerChannels: consumerChannels,
 		unmarshal:        unmarshal,
 		receiveBuf:       receiveBuf,
 		streamCancel:     streamCancel,
 		consumerReflects: consumerReflects,
+		producerLock:     &sync.Mutex{},
 		consumerLock:     &sync.Mutex{},
 		wait:             &sync.WaitGroup{},
 		scMap:            &sync.Map{},
@@ -92,6 +98,8 @@ func (rms *RmqMsgStream) Start() {
 
 func (rms *RmqMsgStream) Close() {
 	rms.streamCancel()
+	rms.wait.Wait()
+
 	if rms.client != nil {
 		rms.client.Close()
 	}
@@ -105,7 +113,10 @@ func (rms *RmqMsgStream) AsProducer(channels []string) {
 	for _, channel := range channels {
 		pp, err := rms.client.CreateProducer(client.ProducerOptions{Topic: channel})
 		if err == nil {
-			rms.producers = append(rms.producers, pp)
+			rms.producerLock.Lock()
+			rms.producers[channel] = pp
+			rms.producerChannels = append(rms.producerChannels, channel)
+			rms.producerLock.Unlock()
 		} else {
 			errMsg := "Failed to create producer " + channel + ", error = " + err.Error()
 			panic(errMsg)
@@ -114,11 +125,14 @@ func (rms *RmqMsgStream) AsProducer(channels []string) {
 }
 
 func (rms *RmqMsgStream) AsConsumer(channels []string, groupName string) {
-	for i := 0; i < len(channels); i++ {
+	for _, channel := range channels {
+		if _, ok := rms.consumers[channel]; ok {
+			continue
+		}
 		fn := func() error {
 			receiveChannel := make(chan client.ConsumerMessage, rms.rmqBufSize)
 			pc, err := rms.client.Subscribe(client.ConsumerOptions{
-				Topic:            channels[i],
+				Topic:            channel,
 				SubscriptionName: groupName,
 				MessageChannel:   receiveChannel,
 			})
@@ -129,8 +143,8 @@ func (rms *RmqMsgStream) AsConsumer(channels []string, groupName string) {
 				return errors.New("RocksMQ is not ready, consumer is nil")
 			}
 
-			rms.consumers = append(rms.consumers, pc)
-			rms.consumerChannels = append(rms.consumerChannels, channels[i])
+			rms.consumers[channel] = pc
+			rms.consumerChannels = append(rms.consumerChannels, channel)
 			rms.consumerReflects = append(rms.consumerReflects, reflect.SelectCase{
 				Dir:  reflect.SelectRecv,
 				Chan: reflect.ValueOf(pc.Chan()),
@@ -141,7 +155,7 @@ func (rms *RmqMsgStream) AsConsumer(channels []string, groupName string) {
 		}
 		err := util.Retry(20, time.Millisecond*200, fn)
 		if err != nil {
-			errMsg := "Failed to create consumer " + channels[i] + ", error = " + err.Error()
+			errMsg := "Failed to create consumer " + channel + ", error = " + err.Error()
 			panic(errMsg)
 		}
 	}
@@ -194,6 +208,7 @@ func (rms *RmqMsgStream) Produce(ctx context.Context, pack *msgstream.MsgPack) e
 		return err
 	}
 	for k, v := range result {
+		channel := rms.producerChannels[k]
 		for i := 0; i < len(v.Msgs); i++ {
 			mb, err := v.Msgs[i].Marshal(v.Msgs[i])
 			if err != nil {
@@ -205,7 +220,7 @@ func (rms *RmqMsgStream) Produce(ctx context.Context, pack *msgstream.MsgPack) e
 				return err
 			}
 			msg := &client.ProducerMessage{Payload: m}
-			if err := rms.producers[k].Send(msg); err != nil {
+			if err := rms.producers[channel].Send(msg); err != nil {
 				return err
 			}
 		}
@@ -214,7 +229,6 @@ func (rms *RmqMsgStream) Produce(ctx context.Context, pack *msgstream.MsgPack) e
 }
 
 func (rms *RmqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) error {
-	producerLen := len(rms.producers)
 	for _, v := range msgPack.Msgs {
 		mb, err := v.Marshal(v)
 		if err != nil {
@@ -228,13 +242,15 @@ func (rms *RmqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) error 
 
 		msg := &client.ProducerMessage{Payload: m}
 
-		for i := 0; i < producerLen; i++ {
-			if err := rms.producers[i].Send(
+		rms.producerLock.Lock()
+		for _, producer := range rms.producers {
+			if err := producer.Send(
 				msg,
 			); err != nil {
 				return err
 			}
 		}
+		rms.producerLock.Unlock()
 	}
 	return nil
 }
@@ -249,7 +265,7 @@ func (rms *RmqMsgStream) Consume() (*msgstream.MsgPack, context.Context) {
 			}
 			return cm, nil
 		case <-rms.ctx.Done():
-			log.Debug("context closed")
+			//log.Debug("context closed")
 			return nil, nil
 		}
 	}
@@ -298,19 +314,17 @@ func (rms *RmqMsgStream) Chan() <-chan *msgstream.MsgPack {
 }
 
 func (rms *RmqMsgStream) Seek(mp *msgstream.MsgPosition) error {
-	for index, channel := range rms.consumerChannels {
-		if channel == mp.ChannelName {
-			msgID, err := strconv.ParseInt(mp.MsgID, 10, 64)
-			if err != nil {
-				return err
-			}
-			messageID := UniqueID(msgID)
-			err = rms.consumers[index].Seek(messageID)
-			if err != nil {
-				return err
-			}
-			return nil
+	if _, ok := rms.consumers[mp.ChannelName]; ok {
+		consumer := rms.consumers[mp.ChannelName]
+		msgID, err := strconv.ParseInt(mp.MsgID, 10, 64)
+		if err != nil {
+			return err
 		}
+		err = consumer.Seek(msgID)
+		if err != nil {
+			return err
+		}
+		return nil
 	}
 
 	return errors.New("msgStream seek fail")
@@ -319,6 +333,7 @@ func (rms *RmqMsgStream) Seek(mp *msgstream.MsgPosition) error {
 type RmqTtMsgStream struct {
 	RmqMsgStream
 	unsolvedBuf   map[Consumer][]TsMsg
+	msgPositions  map[Consumer]*internalpb.MsgPosition
 	unsolvedMutex *sync.Mutex
 	lastTimeStamp Timestamp
 	syncConsumer  chan int
@@ -330,24 +345,44 @@ func newRmqTtMsgStream(ctx context.Context, receiveBufSize int64, rmqBufSize int
 	if err != nil {
 		return nil, err
 	}
+
 	unsolvedBuf := make(map[Consumer][]TsMsg)
 	syncConsumer := make(chan int, 1)
+	msgPositions := make(map[Consumer]*internalpb.MsgPosition)
 
 	return &RmqTtMsgStream{
 		RmqMsgStream:  *rmqMsgStream,
 		unsolvedBuf:   unsolvedBuf,
+		msgPositions:  msgPositions,
 		unsolvedMutex: &sync.Mutex{},
 		syncConsumer:  syncConsumer,
 	}, nil
 }
 
+func (rtms *RmqTtMsgStream) addConsumer(consumer Consumer, channel string) {
+	if len(rtms.consumers) == 0 {
+		rtms.syncConsumer <- 1
+	}
+	rtms.consumers[channel] = consumer
+	rtms.unsolvedBuf[consumer] = make([]TsMsg, 0)
+	rtms.msgPositions[consumer] = &internalpb.MsgPosition{
+		ChannelName: channel,
+		MsgID:       "",
+		Timestamp:   rtms.lastTimeStamp,
+	}
+	rtms.consumerChannels = append(rtms.consumerChannels, channel)
+}
+
 func (rtms *RmqTtMsgStream) AsConsumer(channels []string,
 	groupName string) {
-	for i := 0; i < len(channels); i++ {
+	for _, channel := range channels {
+		if _, ok := rtms.consumers[channel]; ok {
+			continue
+		}
 		fn := func() error {
 			receiveChannel := make(chan client.ConsumerMessage, rtms.rmqBufSize)
 			pc, err := rtms.client.Subscribe(client.ConsumerOptions{
-				Topic:            channels[i],
+				Topic:            channel,
 				SubscriptionName: groupName,
 				MessageChannel:   receiveChannel,
 			})
@@ -355,22 +390,17 @@ func (rtms *RmqTtMsgStream) AsConsumer(channels []string,
 				return err
 			}
 			if pc == nil {
-				return errors.New("pulsar is not ready, consumer is nil")
+				return errors.New("RocksMQ is not ready, consumer is nil")
 			}
 
 			rtms.consumerLock.Lock()
-			if len(rtms.consumers) == 0 {
-				rtms.syncConsumer <- 1
-			}
-			rtms.consumers = append(rtms.consumers, pc)
-			rtms.unsolvedBuf[pc] = make([]TsMsg, 0)
-			rtms.consumerChannels = append(rtms.consumerChannels, channels[i])
+			rtms.addConsumer(pc, channel)
 			rtms.consumerLock.Unlock()
 			return nil
 		}
 		err := util.Retry(10, time.Millisecond*200, fn)
 		if err != nil {
-			errMsg := "Failed to create consumer " + channels[i] + ", error = " + err.Error()
+			errMsg := "Failed to create consumer " + channel + ", error = " + err.Error()
 			panic(errMsg)
 		}
 	}
@@ -427,7 +457,8 @@ func (rtms *RmqTtMsgStream) bufMsgPackToChannel() {
 				continue
 			}
 			timeTickBuf := make([]TsMsg, 0)
-			msgPositions := make([]*msgstream.MsgPosition, 0)
+			startMsgPosition := make([]*internalpb.MsgPosition, 0)
+			endMsgPositions := make([]*internalpb.MsgPosition, 0)
 			rtms.unsolvedMutex.Lock()
 			for consumer, msgs := range rtms.unsolvedBuf {
 				if len(msgs) == 0 {
@@ -448,19 +479,24 @@ func (rtms *RmqTtMsgStream) bufMsgPackToChannel() {
 				}
 				rtms.unsolvedBuf[consumer] = tempBuffer
 
+				startMsgPosition = append(startMsgPosition, rtms.msgPositions[consumer])
+				var newPos *internalpb.MsgPosition
 				if len(tempBuffer) > 0 {
-					msgPositions = append(msgPositions, &msgstream.MsgPosition{
+					newPos = &internalpb.MsgPosition{
 						ChannelName: tempBuffer[0].Position().ChannelName,
 						MsgID:       tempBuffer[0].Position().MsgID,
 						Timestamp:   timeStamp,
-					})
+					}
+					endMsgPositions = append(endMsgPositions, newPos)
 				} else {
-					msgPositions = append(msgPositions, &msgstream.MsgPosition{
+					newPos = &internalpb.MsgPosition{
 						ChannelName: timeTickMsg.Position().ChannelName,
 						MsgID:       timeTickMsg.Position().MsgID,
 						Timestamp:   timeStamp,
-					})
+					}
+					endMsgPositions = append(endMsgPositions, newPos)
 				}
+				rtms.msgPositions[consumer] = newPos
 			}
 			rtms.unsolvedMutex.Unlock()
 
@@ -468,7 +504,8 @@ func (rtms *RmqTtMsgStream) bufMsgPackToChannel() {
 				BeginTs:        rtms.lastTimeStamp,
 				EndTs:          timeStamp,
 				Msgs:           timeTickBuf,
-				StartPositions: msgPositions,
+				StartPositions: startMsgPosition,
+				EndPositions:   endMsgPositions,
 			}
 
 			rtms.receiveBuf <- &msgPack
@@ -524,73 +561,78 @@ func (rtms *RmqTtMsgStream) findTimeTick(consumer Consumer,
 }
 
 func (rtms *RmqTtMsgStream) Seek(mp *msgstream.MsgPosition) error {
+	if len(mp.MsgID) == 0 {
+		return errors.New("when msgID's length equal to 0, please use AsConsumer interface")
+	}
 	var consumer Consumer
-	var messageID UniqueID
-	for index, channel := range rtms.consumerChannels {
-		if filepath.Base(channel) == filepath.Base(mp.ChannelName) {
-			consumer = rtms.consumers[index]
-			if len(mp.MsgID) == 0 {
-				messageID = -1
-				break
-			}
-			seekMsgID, err := strconv.ParseInt(mp.MsgID, 10, 64)
-			if err != nil {
-				return err
-			}
-			messageID = seekMsgID
-			break
-		}
+	var err error
+	var hasWatched bool
+	seekChannel := mp.ChannelName
+	subName := mp.MsgGroup
+	rtms.consumerLock.Lock()
+	defer rtms.consumerLock.Unlock()
+	consumer, hasWatched = rtms.consumers[seekChannel]
+
+	if hasWatched {
+		return errors.New("the channel should has been subscribed")
 	}
 
-	if consumer != nil {
-		err := (consumer).Seek(messageID)
-		if err != nil {
-			return err
-		}
-		//TODO: Is this right?
-		if messageID == 0 {
+	receiveChannel := make(chan client.ConsumerMessage, rtms.rmqBufSize)
+	consumer, err = rtms.client.Subscribe(client.ConsumerOptions{
+		Topic:            seekChannel,
+		SubscriptionName: subName,
+		MessageChannel:   receiveChannel,
+	})
+	if err != nil {
+		return err
+	}
+	if consumer == nil {
+		return errors.New("RocksMQ is not ready, consumer is nil")
+	}
+	seekMsgID, err := strconv.ParseInt(mp.MsgID, 10, 64)
+	if err != nil {
+		return err
+	}
+	consumer.Seek(seekMsgID)
+	rtms.addConsumer(consumer, seekChannel)
+
+	if len(consumer.Chan()) == 0 {
+		return nil
+	}
+
+	for {
+		select {
+		case <-rtms.ctx.Done():
 			return nil
-		}
+		case rmqMsg, ok := <-consumer.Chan():
+			if !ok {
+				return errors.New("consumer closed")
+			}
 
-		rtms.unsolvedMutex.Lock()
-		rtms.unsolvedBuf[consumer] = make([]TsMsg, 0)
-		for {
-			select {
-			case <-rtms.ctx.Done():
-				return nil
-			case rmqMsg, ok := <-consumer.Chan():
-				if !ok {
-					return errors.New("consumer closed")
+			headerMsg := commonpb.MsgHeader{}
+			err := proto.Unmarshal(rmqMsg.Payload, &headerMsg)
+			if err != nil {
+				log.Error("Failed to unmarshal message header", zap.Error(err))
+			}
+			tsMsg, err := rtms.unmarshal.Unmarshal(rmqMsg.Payload, headerMsg.Base.MsgType)
+			if err != nil {
+				log.Error("Failed to unmarshal tsMsg", zap.Error(err))
+			}
+			if tsMsg.Type() == commonpb.MsgType_TimeTick {
+				if tsMsg.BeginTs() >= mp.Timestamp {
+					return nil
 				}
-
-				headerMsg := commonpb.MsgHeader{}
-				err := proto.Unmarshal(rmqMsg.Payload, &headerMsg)
-				if err != nil {
-					log.Error("Failed to unmarshal message header", zap.Error(err))
-				}
-				tsMsg, err := rtms.unmarshal.Unmarshal(rmqMsg.Payload, headerMsg.Base.MsgType)
-				if err != nil {
-					log.Error("Failed to unmarshal tsMsg", zap.Error(err))
-				}
-				if tsMsg.Type() == commonpb.MsgType_TimeTick {
-					if tsMsg.BeginTs() >= mp.Timestamp {
-						rtms.unsolvedMutex.Unlock()
-						return nil
-					}
-					continue
-				}
-				if tsMsg.BeginTs() > mp.Timestamp {
-					tsMsg.SetPosition(&msgstream.MsgPosition{
-						ChannelName: filepath.Base(consumer.Topic()),
-						MsgID:       strconv.Itoa(int(rmqMsg.MsgID)),
-					})
-					rtms.unsolvedBuf[consumer] = append(rtms.unsolvedBuf[consumer], tsMsg)
-				}
+				continue
+			}
+			if tsMsg.BeginTs() > mp.Timestamp {
+				tsMsg.SetPosition(&msgstream.MsgPosition{
+					ChannelName: filepath.Base(consumer.Topic()),
+					MsgID:       strconv.Itoa(int(rmqMsg.MsgID)),
+				})
+				rtms.unsolvedBuf[consumer] = append(rtms.unsolvedBuf[consumer], tsMsg)
 			}
 		}
 	}
-
-	return errors.New("msgStream seek fail")
 }
 
 func checkTimeTickMsg(msg map[Consumer]Timestamp,

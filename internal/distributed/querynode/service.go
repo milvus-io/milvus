@@ -111,7 +111,7 @@ func (s *Server) init() error {
 		panic(err)
 	}
 
-	err = funcutil.WaitForComponentInitOrHealthy(ctx, queryService, "QueryService", 100, time.Millisecond*200)
+	err = funcutil.WaitForComponentInitOrHealthy(ctx, queryService, "QueryService", 1000000, time.Millisecond*200)
 	if err != nil {
 		panic(err)
 	}
@@ -139,7 +139,7 @@ func (s *Server) init() error {
 		panic(err)
 	}
 
-	err = funcutil.WaitForComponentHealthy(ctx, masterService, "MasterService", 100, time.Millisecond*200)
+	err = funcutil.WaitForComponentHealthy(ctx, masterService, "MasterService", 1000000, time.Millisecond*200)
 	if err != nil {
 		panic(err)
 	}
@@ -160,7 +160,7 @@ func (s *Server) init() error {
 		panic(err)
 	}
 	// wait indexservice healthy
-	err = funcutil.WaitForComponentHealthy(ctx, indexService, "IndexService", 100, time.Millisecond*200)
+	err = funcutil.WaitForComponentHealthy(ctx, indexService, "IndexService", 1000000, time.Millisecond*200)
 	if err != nil {
 		panic(err)
 	}
@@ -180,7 +180,7 @@ func (s *Server) init() error {
 	if err = dataService.Start(); err != nil {
 		panic(err)
 	}
-	err = funcutil.WaitForComponentInitOrHealthy(ctx, dataService, "DataService", 100, time.Millisecond*200)
+	err = funcutil.WaitForComponentInitOrHealthy(ctx, dataService, "DataService", 1000000, time.Millisecond*200)
 	if err != nil {
 		panic(err)
 	}

@@ -206,7 +206,14 @@ ExecExprVisitor::ExecRangeVisitorDispatcher(RangeExpr& expr_raw) -> RetType {
         T val1, val2;
         std::tie(op1, val1) = conditions[0];
         std::tie(op2, val2) = conditions[1];
-        Assert(val1 <= val2);
+        // TODO: disable check?
+        if (val1 > val2) {
+            // Empty
+            auto size_per_chunk = segment_.size_per_chunk();
+            auto num_chunk = upper_div(row_count_, size_per_chunk);
+            RetType ret(num_chunk, boost::dynamic_bitset<>(size_per_chunk));
+            return ret;
+        }
         auto ops = std::make_tuple(op1, op2);
         if (false) {
         } else if (ops == std::make_tuple(OpType::GreaterThan, OpType::LessThan)) {

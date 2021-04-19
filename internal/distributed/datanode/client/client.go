@@ -48,7 +48,7 @@ func (c *Client) Init() error {
 		return nil
 	}
 
-	err := retry.Retry(100, time.Millisecond*200, connectGrpcFunc)
+	err := retry.Retry(100000, time.Millisecond*200, connectGrpcFunc)
 	if err != nil {
 		return err
 	}

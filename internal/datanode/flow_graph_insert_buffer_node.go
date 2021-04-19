@@ -117,7 +117,21 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 			case iMsg.startPositions == nil || len(iMsg.startPositions) <= 0:
 				log.Error("insert Msg StartPosition empty")
 			default:
-				ibNode.replica.setStartPosition(currentSegID, iMsg.startPositions[0])
+				segment, err := ibNode.replica.getSegmentByID(currentSegID)
+				if err != nil {
+					log.Error("get segment wrong", zap.Error(err))
+				}
+				var startPosition *internalpb.MsgPosition = nil
+				for _, pos := range iMsg.startPositions {
+					if pos.ChannelName == segment.channelName {
+						startPosition = pos
+					}
+				}
+				if startPosition == nil {
+					log.Error("get position wrong", zap.Error(err))
+				} else {
+					ibNode.replica.setStartPosition(currentSegID, startPosition)
+				}
 			}
 		}
 
@@ -418,7 +432,20 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 		case iMsg.endPositions == nil || len(iMsg.endPositions) <= 0:
 			log.Error("insert Msg EndPosition empty")
 		default:
-			ibNode.replica.setEndPosition(currentSegID, iMsg.endPositions[0])
+			segment, err := ibNode.replica.getSegmentByID(currentSegID)
+			if err != nil {
+				log.Error("get segment wrong", zap.Error(err))
+			}
+			var endPosition *internalpb.MsgPosition = nil
+			for _, pos := range iMsg.endPositions {
+				if pos.ChannelName == segment.channelName {
+					endPosition = pos
+				}
+			}
+			if endPosition == nil {
+				log.Error("get position wrong", zap.Error(err))
+			}
+			ibNode.replica.setEndPosition(currentSegID, endPosition)
 		}
 
 		// 1.4 if full

@@ -14,17 +14,17 @@ import (
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go/config"
-	nodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/querynode/client"
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/types"
 	"go.uber.org/zap"
 
+	nodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/querynode/client"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 )
 
@@ -232,11 +232,6 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 		if err != nil {
 			return fn(err), err
 		}
-
-		err = qs.watchDmChannels(dbID, collectionID)
-		if err != nil {
-			return fn(err), err
-		}
 	}
 
 	// get partitionIDs
@@ -297,9 +292,15 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 		log.Error("LoadCollectionRequest failed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Error(err))
 		return status, fmt.Errorf("load partitions: %s", err)
 	}
+
+	err = qs.watchDmChannels(dbID, collectionID)
+	if err != nil {
+		log.Error("LoadCollectionRequest failed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Error(err))
+		return fn(err), err
+	}
+
 	log.Debug("LoadCollectionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID))
 	return status, nil
-
 }
 
 func (qs *QueryService) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
@@ -330,7 +331,7 @@ func (qs *QueryService) ReleaseCollection(ctx context.Context, req *querypb.Rele
 		}, err
 	}
 
-	log.Debug("release collection end")
+	log.Debug("release collection end", zap.Int64("collectionID", collectionID))
 	//TODO:: queryNode cancel subscribe dmChannels
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -388,16 +389,14 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 		return fn(err), err
 	}
 
+	watchNeeded := false
 	_, err := qs.replica.getCollectionByID(dbID, collectionID)
 	if err != nil {
 		err = qs.replica.addCollection(dbID, collectionID, schema)
 		if err != nil {
 			return fn(err), err
 		}
-		err = qs.watchDmChannels(dbID, collectionID)
-		if err != nil {
-			return fn(err), err
-		}
+		watchNeeded = true
 	}
 
 	for _, partitionID := range partitionIDs {
@@ -446,7 +445,7 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 			return fn(err), err
 		}
 		for _, state := range resp.States {
-			log.Error("segment ", zap.String("state.SegmentID", fmt.Sprintln(state.SegmentID)), zap.String("state", fmt.Sprintln(state.StartPosition)))
+			log.Debug("segment ", zap.String("state.SegmentID", fmt.Sprintln(state.SegmentID)), zap.String("state", fmt.Sprintln(state.StartPosition)))
 			segmentID := state.SegmentID
 			segmentStates[segmentID] = state
 			channelName := state.StartPosition.ChannelName
@@ -459,36 +458,77 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 			}
 		}
 
+		excludeSegment := make([]UniqueID, 0)
+		for id, state := range segmentStates {
+			if state.State > commonpb.SegmentState_Growing {
+				excludeSegment = append(excludeSegment, id)
+			}
+		}
 		for channel, segmentIDs := range channel2segs {
 			sort.Slice(segmentIDs, func(i, j int) bool {
 				return segmentStates[segmentIDs[i]].StartPosition.Timestamp < segmentStates[segmentIDs[j]].StartPosition.Timestamp
 			})
+			toLoadSegmentIDs := make([]UniqueID, 0)
+			var watchedStartPos *internalpb.MsgPosition = nil
+			var startPosition *internalpb.MsgPosition = nil
+			for index, id := range segmentIDs {
+				if segmentStates[id].State <= commonpb.SegmentState_Growing {
+					if index > 0 {
+						pos := segmentStates[id].StartPosition
+						if len(pos.MsgID) == 0 {
+							watchedStartPos = startPosition
+							break
+						}
+					}
+					watchedStartPos = segmentStates[id].StartPosition
+					break
+				}
+				toLoadSegmentIDs = append(toLoadSegmentIDs, id)
+				watchedStartPos = segmentStates[id].EndPosition
+				startPosition = segmentStates[id].StartPosition
+			}
+			if watchedStartPos == nil {
+				watchedStartPos = &internalpb.MsgPosition{
+					ChannelName: channel,
+				}
+			}
 
-			states := make([]*datapb.SegmentStateInfo, 0)
-			for _, id := range segmentIDs {
-				states = append(states, segmentStates[id])
-			}
-			loadSegmentRequest := &querypb.LoadSegmentsRequest{
-				CollectionID:  collectionID,
-				PartitionID:   partitionID,
-				SegmentIDs:    segmentIDs,
-				SegmentStates: states,
-				Schema:        schema,
-			}
-			nodeID, err := qs.replica.getAssignedNodeIDByChannelName(dbID, collectionID, channel)
+			err = qs.replica.addDmChannel(dbID, collectionID, channel, watchedStartPos)
 			if err != nil {
 				return fn(err), err
 			}
-			queryNode := qs.queryNodes[nodeID]
-			//TODO:: seek when loadSegment may cause more msgs consumed
-			//TODO:: all query node should load partition's msg
-			status, err := queryNode.LoadSegments(ctx, loadSegmentRequest)
+			err = qs.replica.addExcludeSegmentIDs(dbID, collectionID, toLoadSegmentIDs)
 			if err != nil {
-				return status, err
+				return fn(err), err
+			}
+
+			segment2Node := qs.shuffleSegmentsToQueryNode(toLoadSegmentIDs)
+			for nodeID, assignedSegmentIDs := range segment2Node {
+				loadSegmentRequest := &querypb.LoadSegmentsRequest{
+					CollectionID: collectionID,
+					PartitionID:  partitionID,
+					SegmentIDs:   assignedSegmentIDs,
+					Schema:       schema,
+				}
+
+				queryNode := qs.queryNodes[nodeID]
+				status, err := queryNode.LoadSegments(ctx, loadSegmentRequest)
+				if err != nil {
+					return status, err
+				}
+				queryNode.AddSegments(assignedSegmentIDs, collectionID)
 			}
 		}
 
 		qs.replica.updatePartitionState(dbID, collectionID, partitionID, querypb.PartitionState_InMemory)
+	}
+
+	if watchNeeded {
+		err = qs.watchDmChannels(dbID, collectionID)
+		if err != nil {
+			log.Debug("LoadPartitionRequest completed", zap.Int64("msgID", req.Base.MsgID), zap.Int64s("partitionIDs", partitionIDs), zap.Error(err))
+			return fn(err), err
+		}
 	}
 
 	log.Debug("LoadPartitionRequest completed", zap.Int64("msgID", req.Base.MsgID), zap.Int64s("partitionIDs", partitionIDs))
@@ -529,7 +569,7 @@ func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.Rele
 		}
 	}
 
-	log.Debug("start release partitions end")
+	log.Debug("start release partitions end", zap.String("partitionIDs", fmt.Sprintln(partitionIDs)))
 	//TODO:: queryNode cancel subscribe dmChannels
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -683,93 +723,159 @@ func (qs *QueryService) watchDmChannels(dbID UniqueID, collectionID UniqueID) er
 	}
 
 	dmChannels := resp.Values
-	watchedChannels2NodeID := make(map[string]int64)
-	unWatchedChannels := make([]string, 0)
+	channelsWithoutPos := make([]string, 0)
 	for _, channel := range dmChannels {
 		findChannel := false
-		for nodeID, node := range qs.queryNodes {
-			watchedChannels := node.dmChannelNames
-			for _, watchedChannel := range watchedChannels {
-				if channel == watchedChannel {
-					findChannel = true
-					watchedChannels2NodeID[channel] = nodeID
-					break
-				}
+		ChannelsWithPos := collection.dmChannels
+		for _, ch := range ChannelsWithPos {
+			if channel == ch {
+				findChannel = true
+				break
 			}
 		}
 		if !findChannel {
-			unWatchedChannels = append(unWatchedChannels, channel)
+			channelsWithoutPos = append(channelsWithoutPos, channel)
 		}
 	}
-	channels2NodeID := qs.shuffleChannelsToQueryNode(unWatchedChannels)
-	err = qs.replica.addDmChannels(dbID, collection.id, channels2NodeID)
-	if err != nil {
-		return err
-	}
-	err = qs.replica.addDmChannels(dbID, collection.id, watchedChannels2NodeID)
-	if err != nil {
-		return err
-	}
-	node2channels := make(map[int64][]string)
-	for channel, nodeID := range channels2NodeID {
-		if _, ok := node2channels[nodeID]; ok {
-			node2channels[nodeID] = append(node2channels[nodeID], channel)
-		} else {
-			channels := make([]string, 0)
-			channels = append(channels, channel)
-			node2channels[nodeID] = channels
+	for _, ch := range channelsWithoutPos {
+		pos := &internalpb.MsgPosition{
+			ChannelName: ch,
+		}
+		err = qs.replica.addDmChannel(dbID, collectionID, ch, pos)
+		if err != nil {
+			return err
 		}
 	}
 
-	for nodeID, channels := range node2channels {
+	channels2NodeID := qs.shuffleChannelsToQueryNode(dmChannels)
+	for nodeID, channels := range channels2NodeID {
 		node := qs.queryNodes[nodeID]
+		watchDmChannelsInfo := make([]*querypb.WatchDmChannelInfo, 0)
+		for _, ch := range channels {
+			info := &querypb.WatchDmChannelInfo{
+				ChannelID:        ch,
+				Pos:              collection.dmChannels2Pos[ch],
+				ExcludedSegments: collection.excludeSegmentIds,
+			}
+			watchDmChannelsInfo = append(watchDmChannelsInfo, info)
+		}
 		request := &querypb.WatchDmChannelsRequest{
-			ChannelIDs: channels,
+			CollectionID: collectionID,
+			ChannelIDs:   channels,
+			Infos:        watchDmChannelsInfo,
 		}
 		_, err := node.WatchDmChannels(ctx, request)
 		if err != nil {
 			return err
 		}
+		node.AddDmChannels(channels, collectionID)
 		log.Debug("query node ", zap.String("nodeID", strconv.FormatInt(nodeID, 10)), zap.String("watch channels", fmt.Sprintln(channels)))
-		node.AddDmChannels(channels)
 	}
 
 	return nil
 }
 
-func (qs *QueryService) shuffleChannelsToQueryNode(dmChannels []string) map[string]int64 {
-	maxNumDMChannel := 0
-	res := make(map[string]int64)
-	if len(dmChannels) == 0 {
-		return res
+func (qs *QueryService) shuffleChannelsToQueryNode(dmChannels []string) map[int64][]string {
+	maxNumChannels := 0
+	for _, node := range qs.queryNodes {
+		numChannels := 0
+		for _, chs := range node.channels2Col {
+			numChannels += len(chs)
+		}
+		if numChannels > maxNumChannels {
+			maxNumChannels = numChannels
+		}
 	}
-	node2lens := make(map[int64]int)
-	for id, node := range qs.queryNodes {
-		node2lens[id] = len(node.dmChannelNames)
-	}
+	res := make(map[int64][]string)
 	offset := 0
+	loopAll := false
 	for {
 		lastOffset := offset
-		for id, len := range node2lens {
-			if len >= maxNumDMChannel {
-				maxNumDMChannel = len
-			} else {
-				res[dmChannels[offset]] = id
-				node2lens[id]++
+		if !loopAll {
+			for id, node := range qs.queryNodes {
+				if len(node.segments) >= maxNumChannels {
+					continue
+				}
+				if _, ok := res[id]; !ok {
+					res[id] = make([]string, 0)
+				}
+				res[id] = append(res[id], dmChannels[offset])
 				offset++
+				if offset == len(dmChannels) {
+					return res
+				}
+			}
+		} else {
+			for id := range qs.queryNodes {
+				if _, ok := res[id]; !ok {
+					res[id] = make([]string, 0)
+				}
+				res[id] = append(res[id], dmChannels[offset])
+				offset++
+				if offset == len(dmChannels) {
+					return res
+				}
 			}
 		}
 		if lastOffset == offset {
-			for id := range node2lens {
-				res[dmChannels[offset]] = id
-				node2lens[id]++
-				offset++
-				break
-			}
-		}
-		if offset == len(dmChannels) {
-			break
+			loopAll = true
 		}
 	}
-	return res
+}
+
+func (qs *QueryService) shuffleSegmentsToQueryNode(segmentIDs []UniqueID) map[int64][]UniqueID {
+	maxNumSegments := 0
+	for _, node := range qs.queryNodes {
+		numSegments := 0
+		for _, ids := range node.segments {
+			numSegments += len(ids)
+		}
+		if numSegments > maxNumSegments {
+			maxNumSegments = numSegments
+		}
+	}
+	res := make(map[int64][]UniqueID)
+	for nodeID := range qs.queryNodes {
+		segments := make([]UniqueID, 0)
+		res[nodeID] = segments
+	}
+
+	if len(segmentIDs) == 0 {
+		return res
+	}
+
+	offset := 0
+	loopAll := false
+	for {
+		lastOffset := offset
+		if !loopAll {
+			for id, node := range qs.queryNodes {
+				if len(node.segments) >= maxNumSegments {
+					continue
+				}
+				if _, ok := res[id]; !ok {
+					res[id] = make([]UniqueID, 0)
+				}
+				res[id] = append(res[id], segmentIDs[offset])
+				offset++
+				if offset == len(segmentIDs) {
+					return res
+				}
+			}
+		} else {
+			for id := range qs.queryNodes {
+				if _, ok := res[id]; !ok {
+					res[id] = make([]UniqueID, 0)
+				}
+				res[id] = append(res[id], segmentIDs[offset])
+				offset++
+				if offset == len(segmentIDs) {
+					return res
+				}
+			}
+		}
+		if lastOffset == offset {
+			loopAll = true
+		}
+	}
 }

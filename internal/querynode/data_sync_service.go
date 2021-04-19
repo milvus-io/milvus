@@ -12,8 +12,11 @@ import (
 )
 
 type dataSyncService struct {
-	ctx context.Context
-	fg  *flowgraph.TimeTickedFlowGraph
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	collectionID UniqueID
+	fg           *flowgraph.TimeTickedFlowGraph
 
 	dmStream  msgstream.MsgStream
 	msFactory msgstream.Factory
@@ -21,12 +24,16 @@ type dataSyncService struct {
 	replica ReplicaInterface
 }
 
-func newDataSyncService(ctx context.Context, replica ReplicaInterface, factory msgstream.Factory) *dataSyncService {
+func newDataSyncService(ctx context.Context, replica ReplicaInterface, factory msgstream.Factory, collectionID UniqueID) *dataSyncService {
+	ctx1, cancel := context.WithCancel(ctx)
+
 	service := &dataSyncService{
-		ctx:       ctx,
-		fg:        nil,
-		replica:   replica,
-		msFactory: factory,
+		ctx:          ctx1,
+		cancel:       cancel,
+		collectionID: collectionID,
+		fg:           nil,
+		replica:      replica,
+		msFactory:    factory,
 	}
 
 	service.initNodes()
@@ -38,6 +45,7 @@ func (dsService *dataSyncService) start() {
 }
 
 func (dsService *dataSyncService) close() {
+	dsService.cancel()
 	if dsService.fg != nil {
 		dsService.fg.Close()
 	}
@@ -50,10 +58,10 @@ func (dsService *dataSyncService) initNodes() {
 
 	var dmStreamNode node = dsService.newDmInputNode(dsService.ctx)
 
-	var filterDmNode node = newFilteredDmNode(dsService.replica)
+	var filterDmNode node = newFilteredDmNode(dsService.replica, dsService.collectionID)
 
-	var insertNode node = newInsertNode(dsService.replica)
-	var serviceTimeNode node = newServiceTimeNode(dsService.ctx, dsService.replica, dsService.msFactory)
+	var insertNode node = newInsertNode(dsService.replica, dsService.collectionID)
+	var serviceTimeNode node = newServiceTimeNode(dsService.ctx, dsService.replica, dsService.msFactory, dsService.collectionID)
 
 	dsService.fg.AddNode(dmStreamNode)
 

@@ -2,31 +2,25 @@ package querynode
 
 import (
 	"context"
-	"strconv"
-
-	"github.com/zilliztech/milvus-distributed/internal/types"
-
 	"errors"
+	"strconv"
 
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	minioKV "github.com/zilliztech/milvus-distributed/internal/kv/minio"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 )
 
 // segmentLoader is only responsible for loading the field data from binlog
 type segmentLoader struct {
 	replica ReplicaInterface
 
-	dmStream msgstream.MsgStream
-
 	dataService types.DataService
 
-	kv     kv.Base // minio kv
-	iCodec *storage.InsertCodec
+	kv kv.Base // minio kv
 
 	indexLoader *indexLoader
 }
@@ -117,6 +111,8 @@ func (loader *segmentLoader) checkTargetFields(paths []*internalpb.StringList, s
 }
 
 func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, targetFields map[int64]*internalpb.StringList) error {
+	iCodec := storage.InsertCodec{}
+	defer iCodec.Close()
 	for id, p := range targetFields {
 		if id == timestampFieldID {
 			// seg core doesn't need timestamp field
@@ -136,7 +132,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, targetField
 				Value: []byte(binLog),
 			})
 		}
-		_, _, insertData, err := loader.iCodec.Deserialize(blobs)
+		_, _, insertData, err := iCodec.Deserialize(blobs)
 		if err != nil {
 			// TODO: return or continue
 			return err
@@ -193,7 +189,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, targetField
 	return nil
 }
 
-func newSegmentLoader(ctx context.Context, masterService types.MasterService, indexService types.IndexService, dataService types.DataService, replica ReplicaInterface, dmStream msgstream.MsgStream) *segmentLoader {
+func newSegmentLoader(ctx context.Context, masterService types.MasterService, indexService types.IndexService, dataService types.DataService, replica ReplicaInterface) *segmentLoader {
 	option := &minioKV.Option{
 		Address:           Params.MinioEndPoint,
 		AccessKeyID:       Params.MinioAccessKeyID,
@@ -212,12 +208,9 @@ func newSegmentLoader(ctx context.Context, masterService types.MasterService, in
 	return &segmentLoader{
 		replica: replica,
 
-		dmStream: dmStream,
-
 		dataService: dataService,
 
-		kv:     client,
-		iCodec: &storage.InsertCodec{},
+		kv: client,
 
 		indexLoader: iLoader,
 	}

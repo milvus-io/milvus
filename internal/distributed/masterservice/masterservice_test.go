@@ -357,6 +357,7 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, partMeta.PartitionName, "testPartition")
 
+		assert.Equal(t, 1, len(collectionMetaCache))
 	})
 
 	t.Run("has partition", func(t *testing.T) {
@@ -600,6 +601,7 @@ func TestGrpcService(t *testing.T) {
 		partMeta, err := core.MetaTable.GetPartitionByID(collMeta.PartitionIDs[0])
 		assert.Nil(t, err)
 		assert.Equal(t, partMeta.PartitionName, cms.Params.DefaultPartitionName)
+		assert.Equal(t, 2, len(collectionMetaCache))
 	})
 
 	t.Run("drop collection", func(t *testing.T) {
@@ -620,7 +622,7 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, dropCollectionArray[0].Base.MsgType, commonpb.MsgType_DropCollection)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
 		assert.Equal(t, dropCollectionArray[0].CollectionName, "testColl")
-		assert.Equal(t, len(collectionMetaCache), 1)
+		assert.Equal(t, len(collectionMetaCache), 3)
 		assert.Equal(t, collectionMetaCache[0], "testColl")
 
 		req = &milvuspb.DropCollectionRequest{

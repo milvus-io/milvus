@@ -29,7 +29,12 @@ func initLogCfg() log.Config {
 	logCfg.File.MaxSize = 300
 	logCfg.File.MaxBackups = 20
 	logCfg.File.MaxDays = 10
-	logCfg.File.Filename = "/tmp/milvus/singlenode.log"
+	ciFileDir := "/milvus-distributed/logs/"
+	if _, err := os.Stat(ciFileDir); err == nil {
+		logCfg.File.Filename = ciFileDir + "singlenode.log"
+	} else {
+		logCfg.File.Filename = "/tmp/milvus/singlenode.log"
+	}
 	return logCfg
 }
 

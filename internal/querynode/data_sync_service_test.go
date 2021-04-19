@@ -18,6 +18,8 @@ import (
 func TestDataSyncService_Start(t *testing.T) {
 	ctx := context.Background()
 
+	collectionID := UniqueID(0)
+
 	node := newQueryNodeMock()
 	initTestMeta(t, node, 0, 0)
 	// test data generate
@@ -64,7 +66,7 @@ func TestDataSyncService_Start(t *testing.T) {
 					Timestamp: uint64(i + 1000),
 					SourceID:  0,
 				},
-				CollectionID: UniqueID(0),
+				CollectionID: collectionID,
 				PartitionID:  defaultPartitionID,
 				SegmentID:    int64(0),
 				ChannelID:    "0",
@@ -132,8 +134,8 @@ func TestDataSyncService_Start(t *testing.T) {
 	assert.NoError(t, err)
 
 	// dataSync
-	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica, msFactory)
-	go node.dataSyncService.start()
+	node.dataSyncServices[collectionID] = newDataSyncService(node.queryNodeLoopCtx, node.replica, msFactory, collectionID)
+	go node.dataSyncServices[collectionID].start()
 
 	<-node.queryNodeLoopCtx.Done()
 	node.Stop()

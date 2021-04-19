@@ -150,7 +150,7 @@ func (s *Server) initMeta() error {
 		}
 		return nil
 	}
-	err := retry.Retry(200, time.Millisecond*200, connectEtcdFn)
+	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
 	if err != nil {
 		return err
 	}
@@ -343,16 +343,10 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 				continue
 			}
 			realMsg := msg.(*msgstream.FlushCompletedMsg)
-
-			segmentInfo, err := s.meta.GetSegment(realMsg.SegmentID)
+			err := s.meta.FlushSegment(realMsg.SegmentID, realMsg.BeginTimestamp)
+			log.Debug("dataservice flushed segment", zap.Any("segmentID", realMsg.SegmentID), zap.Error(err))
 			if err != nil {
 				log.Error("get segment from meta error", zap.Int64("segmentID", realMsg.SegmentID), zap.Error(err))
-				continue
-			}
-			segmentInfo.FlushedTime = realMsg.BeginTimestamp
-			segmentInfo.State = commonpb.SegmentState_Flushed
-			if err = s.meta.UpdateSegment(segmentInfo); err != nil {
-				log.Error("update segment error", zap.Error(err))
 				continue
 			}
 		}

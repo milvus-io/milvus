@@ -111,7 +111,12 @@ func (loader *indexLoader) execute(l *loadIndex) error {
 	if err != nil {
 		return err
 	}
-	// 3. update segment index stats
+	// 3. drop vector field data if index loaded successfully
+	err = loader.dropVectorFieldData(l.segmentID, l.fieldID)
+	if err != nil {
+		return err
+	}
+	// 4. update segment index stats
 	err = loader.updateSegmentIndexStats(indexParams, indexName, indexID, l)
 	if err != nil {
 		return err
@@ -275,6 +280,14 @@ func (loader *indexLoader) updateSegmentIndex(indexParams indexParam, bytesIndex
 		return err
 	}
 	return segment.updateSegmentIndex(loadIndexInfo)
+}
+
+func (loader *indexLoader) dropVectorFieldData(segmentID UniqueID, vecFieldID int64) error {
+	segment, err := loader.replica.getSegmentByID(segmentID)
+	if err != nil {
+		return err
+	}
+	return segment.dropFieldData(vecFieldID)
 }
 
 func (loader *indexLoader) sendQueryNodeStats() error {

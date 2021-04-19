@@ -765,7 +765,7 @@ func (c *Core) Init() error {
 			c.kvBase = etcdkv.NewEtcdKV(c.etcdCli, Params.KvRootPath)
 			return nil
 		}
-		err := retry.Retry(200, time.Millisecond*200, connectEtcdFn)
+		err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
 		if err != nil {
 			return
 		}
@@ -1001,7 +1001,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
-		log.Debug("DescribeCollection Failed", zap.String("name", in.CollectionName))
+		log.Debug("DescribeCollection Failed", zap.String("name", in.CollectionName), zap.Error(err))
 		return &milvuspb.DescribeCollectionResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,

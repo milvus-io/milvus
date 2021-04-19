@@ -169,7 +169,6 @@ func (meta *meta) AddSegment(segmentInfo *datapb.SegmentInfo) error {
 func (meta *meta) UpdateSegment(segmentInfo *datapb.SegmentInfo) error {
 	meta.ddLock.Lock()
 	defer meta.ddLock.Unlock()
-
 	meta.segID2Info[segmentInfo.SegmentID] = segmentInfo
 	if err := meta.saveSegmentInfo(segmentInfo); err != nil {
 		_ = meta.reloadFromKV()
@@ -252,7 +251,7 @@ func (meta *meta) FlushSegment(segID UniqueID, timetick Timestamp) error {
 	}
 
 	segInfo.FlushedTime = timetick
-
+	segInfo.State = commonpb.SegmentState_Flushed
 	err := meta.saveSegmentInfo(segInfo)
 	if err != nil {
 		_ = meta.reloadFromKV()

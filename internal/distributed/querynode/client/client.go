@@ -37,7 +37,7 @@ func (c *Client) Init() error {
 	ctx, cancel := context.WithTimeout(context.Background(), RPCConnectionTimeout)
 	defer cancel()
 	var err error
-	for i := 0; i < Retry; i++ {
+	for i := 0; i < Retry*100; i++ {
 		if c.conn, err = grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),

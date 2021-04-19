@@ -419,6 +419,9 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	// error doesn't matter here
+	_ = t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
+
 	return nil
 }
 
@@ -467,6 +470,9 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// error doesn't matter here
+	_ = t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 	return nil
 }
 

@@ -12,6 +12,7 @@ package querynode
 */
 import "C"
 import (
+	"fmt"
 	"strconv"
 	"sync"
 	"unsafe"
@@ -31,7 +32,7 @@ const (
 	segmentTypeInvalid segmentType = iota
 	segmentTypeGrowing
 	segmentTypeSealed
-	segTypeIndexing
+	segmentTypeIndexing
 )
 
 type indexParam = map[string]string
@@ -268,34 +269,6 @@ func (s *Segment) fillTargetEntry(plan *Plan,
 	return nil
 }
 
-// segment, err := loadService.replica.getSegmentByID(segmentID)
-func (s *Segment) updateSegmentIndex(loadIndexInfo *LoadIndexInfo) error {
-	if s.segmentPtr == nil {
-		return errors.New("null seg core pointer")
-	}
-	var status C.CStatus
-
-	if s.segmentType == segmentTypeGrowing {
-		status = C.UpdateSegmentIndex(s.segmentPtr, loadIndexInfo.cLoadIndexInfo)
-	} else if s.segmentType == segmentTypeSealed {
-		status = C.UpdateSealedSegmentIndex(s.segmentPtr, loadIndexInfo.cLoadIndexInfo)
-	} else {
-		return errors.New("illegal segment type")
-	}
-
-	errorCode := status.error_code
-
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("updateSegmentIndex failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
-	}
-
-	s.setType(segTypeIndexing)
-
-	return nil
-}
-
 func (s *Segment) setIndexParam(fieldID int64, indexParamKv []*commonpb.KeyValuePair) error {
 	s.paramMutex.Lock()
 	defer s.paramMutex.Unlock()
@@ -461,7 +434,8 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int, data interfa
 		return errors.New("null seg core pointer")
 	}
 	if s.segmentType != segmentTypeSealed {
-		return errors.New("illegal segment type when loading field data")
+		errMsg := fmt.Sprintln("segmentLoadFieldData failed, illegal segment type ", s.segmentType, "segmentID = ", s.ID())
+		return errors.New(errMsg)
 	}
 
 	// data interface check
@@ -536,7 +510,86 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int, data interfa
 		return errors.New("LoadFieldData failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}
 
-	log.Debug("load field done", zap.Int64("fieldID", fieldID), zap.Int("row count", rowCount))
+	log.Debug("load field done",
+		zap.Int64("fieldID", fieldID),
+		zap.Int("row count", rowCount),
+		zap.Int64("segmentID", s.ID()))
+
+	return nil
+}
+
+func (s *Segment) dropFieldData(fieldID int64) error {
+	/*
+		CStatus
+		DropFieldData(CSegmentInterface c_segment, int64_t field_id);
+	*/
+	if s.segmentPtr == nil {
+		return errors.New("null seg core pointer")
+	}
+	if s.segmentType != segmentTypeIndexing {
+		errMsg := fmt.Sprintln("dropFieldData failed, illegal segment type ", s.segmentType, "segmentID = ", s.ID())
+		return errors.New(errMsg)
+	}
+
+	var status = C.DropFieldData(s.segmentPtr, C.long(fieldID))
+	errorCode := status.error_code
+	if errorCode != 0 {
+		errorMsg := C.GoString(status.error_msg)
+		defer C.free(unsafe.Pointer(status.error_msg))
+		return errors.New("dropFieldData failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	}
+
+	log.Debug("dropFieldData done", zap.Int64("fieldID", fieldID), zap.Int64("segmentID", s.ID()))
+
+	return nil
+}
+
+func (s *Segment) updateSegmentIndex(loadIndexInfo *LoadIndexInfo) error {
+	if s.segmentPtr == nil {
+		return errors.New("null seg core pointer")
+	}
+
+	if s.segmentType != segmentTypeSealed {
+		errMsg := fmt.Sprintln("updateSegmentIndex failed, illegal segment type ", s.segmentType, "segmentID = ", s.ID())
+		return errors.New(errMsg)
+	}
+
+	status := C.UpdateSealedSegmentIndex(s.segmentPtr, loadIndexInfo.cLoadIndexInfo)
+	errorCode := status.error_code
+	if errorCode != 0 {
+		errorMsg := C.GoString(status.error_msg)
+		defer C.free(unsafe.Pointer(status.error_msg))
+		return errors.New("updateSegmentIndex failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	}
+
+	s.setType(segmentTypeIndexing)
+	log.Debug("updateSegmentIndex done", zap.Int64("segmentID", s.ID()))
+
+	return nil
+}
+
+func (s *Segment) dropSegmentIndex(fieldID int64) error {
+	/*
+		CStatus
+		DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id);
+	*/
+	if s.segmentPtr == nil {
+		return errors.New("null seg core pointer")
+	}
+	if s.segmentType != segmentTypeIndexing {
+		errMsg := fmt.Sprintln("dropFieldData failed, illegal segment type ", s.segmentType, "segmentID = ", s.ID())
+		return errors.New(errMsg)
+	}
+
+	var status = C.DropSealedSegmentIndex(s.segmentPtr, C.long(fieldID))
+	errorCode := status.error_code
+	if errorCode != 0 {
+		errorMsg := C.GoString(status.error_msg)
+		defer C.free(unsafe.Pointer(status.error_msg))
+		return errors.New("dropSegmentIndex failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	}
+
+	log.Debug("dropSegmentIndex done", zap.Int64("fieldID", fieldID), zap.Int64("segmentID", s.ID()))
 
 	return nil
 }

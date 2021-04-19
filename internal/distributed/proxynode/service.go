@@ -185,7 +185,7 @@ func (s *Server) init() error {
 	if err != nil {
 		return err
 	}
-	err = funcutil.WaitForComponentHealthy(ctx, s.masterServiceClient, "MasterService", 100, time.Millisecond*200)
+	err = funcutil.WaitForComponentHealthy(ctx, s.masterServiceClient, "MasterService", 1000000, time.Millisecond*200)
 
 	if err != nil {
 		panic(err)

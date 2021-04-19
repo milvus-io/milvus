@@ -29,16 +29,24 @@ AssembleNegBitset(const BitsetSimple& bitset_simple) {
     for (auto& bitset : bitset_simple) {
         N += bitset.size();
     }
+
     aligned_vector<uint8_t> result(upper_align(upper_div(N, 8), 64));
 
-    auto acc_byte_count = 0;
-    for (auto& bitset : bitset_simple) {
-        auto size = bitset.size();
-        Assert(size % 8 == 0);
-        auto byte_count = size / 8;
+    if (bitset_simple.size() == 1) {
+        auto& bitset = bitset_simple[0];
+        auto byte_count = upper_div(bitset.size(), 8);
         auto src_ptr = boost_ext::get_data(bitset);
-        memcpy(result.data() + acc_byte_count, src_ptr, byte_count);
-        acc_byte_count += byte_count;
+        memcpy(result.data(), src_ptr, byte_count);
+    } else {
+        auto acc_byte_count = 0;
+        for (auto& bitset : bitset_simple) {
+            auto size = bitset.size();
+            Assert(size % 8 == 0);
+            auto byte_count = size / 8;
+            auto src_ptr = boost_ext::get_data(bitset);
+            memcpy(result.data() + acc_byte_count, src_ptr, byte_count);
+            acc_byte_count += byte_count;
+        }
     }
 
     // revert the bitset

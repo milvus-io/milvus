@@ -2,6 +2,7 @@ package querynode
 
 import (
 	"context"
+	"fmt"
 
 	"go.uber.org/zap"
 
@@ -12,7 +13,8 @@ import (
 
 type filterDmNode struct {
 	baseNode
-	replica ReplicaInterface
+	collectionID UniqueID
+	replica      ReplicaInterface
 }
 
 func (fdmNode *filterDmNode) Name() string {
@@ -31,6 +33,10 @@ func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, cont
 	if !ok {
 		log.Error("type assertion failed for MsgStreamMsg")
 		// TODO: add error handling
+	}
+
+	if msgStreamMsg == nil {
+		return []Msg{}, ctx
 	}
 
 	var iMsg = insertMsg{
@@ -60,12 +66,29 @@ func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, cont
 }
 
 func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg) *msgstream.InsertMsg {
-	// TODO: open this check
-	// check if partition dm enable
-	enableCollection := fdmNode.replica.hasCollection(msg.CollectionID)
-	enablePartition := fdmNode.replica.hasPartition(msg.PartitionID)
-	if !enableCollection || !enablePartition {
+	// check if collection and partition exist
+	collection := fdmNode.replica.hasCollection(msg.CollectionID)
+	partition := fdmNode.replica.hasPartition(msg.PartitionID)
+	if !collection || !partition {
 		return nil
+	}
+
+	// check if the collection from message is target collection
+	if msg.CollectionID != fdmNode.collectionID {
+		return nil
+	}
+
+	// check if the segment is in excluded segments
+	excludedSegments, err := fdmNode.replica.getExcludedSegments(fdmNode.collectionID)
+	log.Debug("excluded segments", zap.String("segmentIDs", fmt.Sprintln(excludedSegments)))
+	if err != nil {
+		log.Error(err.Error())
+		return nil
+	}
+	for _, id := range excludedSegments {
+		if msg.SegmentID == id {
+			return nil
+		}
 	}
 
 	// TODO: If the last record is drop type, all insert requests are invalid.
@@ -80,27 +103,14 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		return nil
 	}
 
-	tmpTimestamps := make([]Timestamp, 0)
-	tmpRowIDs := make([]int64, 0)
-	tmpRowData := make([]*commonpb.Blob, 0)
-
-	for i, t := range msg.Timestamps {
-		tmpTimestamps = append(tmpTimestamps, t)
-		tmpRowIDs = append(tmpRowIDs, msg.RowIDs[i])
-		tmpRowData = append(tmpRowData, msg.RowData[i])
-	}
-
-	if len(tmpRowIDs) <= 0 {
+	if len(msg.Timestamps) <= 0 {
 		return nil
 	}
 
-	msg.Timestamps = tmpTimestamps
-	msg.RowIDs = tmpRowIDs
-	msg.RowData = tmpRowData
 	return msg
 }
 
-func newFilteredDmNode(replica ReplicaInterface) *filterDmNode {
+func newFilteredDmNode(replica ReplicaInterface, collectionID UniqueID) *filterDmNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -109,7 +119,8 @@ func newFilteredDmNode(replica ReplicaInterface) *filterDmNode {
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &filterDmNode{
-		baseNode: baseNode,
-		replica:  replica,
+		baseNode:     baseNode,
+		collectionID: collectionID,
+		replica:      replica,
 	}
 }

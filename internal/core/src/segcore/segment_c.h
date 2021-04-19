@@ -80,12 +80,18 @@ Delete(CSegmentInterface c_segment,
 int64_t
 PreDelete(CSegmentInterface c_segment, int64_t size);
 
-//////////////////////////////    interfaces for growing segment    //////////////////////////////
+//////////////////////////////    interfaces for sealed segment    //////////////////////////////
 CStatus
 LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_info);
 
 CStatus
 UpdateSealedSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info);
+
+CStatus
+DropFieldData(CSegmentInterface c_segment, int64_t field_id);
+
+CStatus
+DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id);
 
 //////////////////////////////    deprecated interfaces    //////////////////////////////
 CStatus

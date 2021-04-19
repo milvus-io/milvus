@@ -209,5 +209,6 @@ message QueryNodeStats {
 message MsgPosition {
   string channel_name = 1;
   string msgID = 2;
-  uint64 timestamp = 3;
+  string msgGroup = 3;
+  uint64 timestamp = 4;
 }

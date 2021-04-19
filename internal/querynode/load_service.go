@@ -2,19 +2,16 @@ package querynode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/types"
-
-	"errors"
-
 	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 )
 
 const loadingCheckInterval = 3
@@ -76,7 +73,7 @@ func (s *loadService) loadSegmentActively(wg *sync.WaitGroup) {
 }
 
 // load segment passively
-func (s *loadService) loadSegment(collectionID UniqueID, partitionID UniqueID, segmentIDs []UniqueID, fieldIDs []int64) error {
+func (s *loadService) loadSegmentPassively(collectionID UniqueID, partitionID UniqueID, segmentIDs []UniqueID, fieldIDs []int64) error {
 	// TODO: interim solution
 	if len(fieldIDs) == 0 {
 		var err error
@@ -168,10 +165,10 @@ func (s *loadService) loadSegmentInternal(collectionID UniqueID, partitionID Uni
 	return nil
 }
 
-func newLoadService(ctx context.Context, masterService types.MasterService, dataService types.DataService, indexService types.IndexService, replica ReplicaInterface, dmStream msgstream.MsgStream) *loadService {
+func newLoadService(ctx context.Context, masterService types.MasterService, dataService types.DataService, indexService types.IndexService, replica ReplicaInterface) *loadService {
 	ctx1, cancel := context.WithCancel(ctx)
 
-	segLoader := newSegmentLoader(ctx1, masterService, indexService, dataService, replica, dmStream)
+	segLoader := newSegmentLoader(ctx1, masterService, indexService, dataService, replica)
 
 	return &loadService{
 		ctx:    ctx1,

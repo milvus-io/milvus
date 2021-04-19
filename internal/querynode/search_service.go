@@ -4,11 +4,11 @@ import "C"
 import (
 	"context"
 	"errors"
+	"fmt"
+	"go.uber.org/zap"
 	"strconv"
 	"strings"
 	"sync"
-
-	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/log"
@@ -24,13 +24,14 @@ type searchService struct {
 	cancel context.CancelFunc
 
 	replica      ReplicaInterface
-	tSafeWatcher *tSafeWatcher
+	tSafeMutex   *sync.Mutex
+	tSafeWatcher map[UniqueID]*tSafeWatcher
 
 	serviceableTimeMutex sync.Mutex // guards serviceableTime
-	serviceableTime      Timestamp
+	serviceableTime      map[UniqueID]Timestamp
 
-	msgBuffer             chan msgstream.TsMsg
-	unsolvedMsg           []msgstream.TsMsg
+	msgBuffer             chan *msgstream.SearchMsg
+	unsolvedMsg           []*msgstream.SearchMsg
 	searchMsgStream       msgstream.MsgStream
 	searchResultMsgStream msgstream.MsgStream
 	queryNodeID           UniqueID
@@ -54,17 +55,18 @@ func newSearchService(ctx context.Context, replica ReplicaInterface, factory msg
 	log.Debug("querynode AsProducer: " + strings.Join(producerChannels, ", "))
 
 	searchServiceCtx, searchServiceCancel := context.WithCancel(ctx)
-	msgBuffer := make(chan msgstream.TsMsg, receiveBufSize)
-	unsolvedMsg := make([]msgstream.TsMsg, 0)
+	msgBuffer := make(chan *msgstream.SearchMsg, receiveBufSize)
+	unsolvedMsg := make([]*msgstream.SearchMsg, 0)
 	return &searchService{
 		ctx:             searchServiceCtx,
 		cancel:          searchServiceCancel,
-		serviceableTime: Timestamp(0),
+		serviceableTime: make(map[UniqueID]Timestamp),
 		msgBuffer:       msgBuffer,
 		unsolvedMsg:     unsolvedMsg,
 
 		replica:      replica,
-		tSafeWatcher: newTSafeWatcher(),
+		tSafeMutex:   &sync.Mutex{},
+		tSafeWatcher: make(map[UniqueID]*tSafeWatcher),
 
 		searchMsgStream:       searchStream,
 		searchResultMsgStream: searchResultStream,
@@ -75,7 +77,6 @@ func newSearchService(ctx context.Context, replica ReplicaInterface, factory msg
 func (ss *searchService) start() {
 	ss.searchMsgStream.Start()
 	ss.searchResultMsgStream.Start()
-	ss.register()
 	ss.wait.Add(2)
 	go ss.receiveSearchMsg()
 	go ss.doUnsolvedMsgSearch()
@@ -92,30 +93,61 @@ func (ss *searchService) close() {
 	ss.cancel()
 }
 
-func (ss *searchService) register() {
-	tSafe := ss.replica.getTSafe()
-	tSafe.registerTSafeWatcher(ss.tSafeWatcher)
+func (ss *searchService) register(collectionID UniqueID) {
+	tSafe := ss.replica.getTSafe(collectionID)
+	ss.tSafeMutex.Lock()
+	ss.tSafeWatcher[collectionID] = newTSafeWatcher()
+	ss.tSafeMutex.Unlock()
+	tSafe.registerTSafeWatcher(ss.tSafeWatcher[collectionID])
 }
 
-func (ss *searchService) waitNewTSafe() Timestamp {
+func (ss *searchService) waitNewTSafe(collectionID UniqueID) (Timestamp, error) {
 	// block until dataSyncService updating tSafe
-	ss.tSafeWatcher.hasUpdate()
-	timestamp := ss.replica.getTSafe().get()
-	return timestamp
+	ss.tSafeWatcher[collectionID].hasUpdate()
+	ts := ss.replica.getTSafe(collectionID)
+	if ts != nil {
+		return ts.get(), nil
+	}
+	return 0, errors.New("tSafe closed, collectionID =" + fmt.Sprintln(collectionID))
 }
 
-func (ss *searchService) getServiceableTime() Timestamp {
+func (ss *searchService) getServiceableTime(collectionID UniqueID) Timestamp {
 	ss.serviceableTimeMutex.Lock()
 	defer ss.serviceableTimeMutex.Unlock()
-	return ss.serviceableTime
+	//t, ok := ss.serviceableTime[collectionID]
+	//if !ok {
+	//	return 0, errors.New("cannot found")
+	//}
+	return ss.serviceableTime[collectionID]
 }
 
-func (ss *searchService) setServiceableTime(t Timestamp) {
+func (ss *searchService) setServiceableTime(collectionID UniqueID, t Timestamp) {
 	ss.serviceableTimeMutex.Lock()
 	// hard code gracefultime to 1 second
 	// TODO: use config to set gracefultime
-	ss.serviceableTime = t + 1000*1000*1000
+	ss.serviceableTime[collectionID] = t + 1000*1000*1000
 	ss.serviceableTimeMutex.Unlock()
+}
+
+func (ss *searchService) collectionCheck(collectionID UniqueID) error {
+	// check if collection exists
+	if _, ok := ss.tSafeWatcher[collectionID]; !ok {
+		err := errors.New("no collection found, collectionID = " + strconv.FormatInt(collectionID, 10))
+		log.Error(err.Error())
+		return err
+	}
+	return nil
+}
+
+func (ss *searchService) emptySearch(searchMsg *msgstream.SearchMsg) {
+	err := ss.search(searchMsg)
+	if err != nil {
+		log.Error(err.Error())
+		err2 := ss.publishFailedSearchResult(searchMsg, err.Error())
+		if err2 != nil {
+			log.Error("publish FailedSearchResult failed", zap.Error(err2))
+		}
+	}
 }
 
 func (ss *searchService) receiveSearchMsg() {
@@ -129,26 +161,34 @@ func (ss *searchService) receiveSearchMsg() {
 			if msgPack == nil || len(msgPack.Msgs) <= 0 {
 				continue
 			}
-			searchMsg := make([]msgstream.TsMsg, 0)
-			serverTime := ss.getServiceableTime()
-			for i, msg := range msgPack.Msgs {
-				if msg.BeginTs() > serverTime {
-					ss.msgBuffer <- msg
+			searchNum := 0
+			for _, msg := range msgPack.Msgs {
+				sm, ok := msg.(*msgstream.SearchMsg)
+				if !ok {
 					continue
 				}
-				searchMsg = append(searchMsg, msgPack.Msgs[i])
-			}
-			for _, msg := range searchMsg {
-				err := ss.search(msg)
+				err := ss.collectionCheck(sm.CollectionID)
+				if err != nil {
+					ss.emptySearch(sm)
+					searchNum++
+					continue
+				}
+				serviceTime := ss.getServiceableTime(sm.CollectionID)
+				if msg.BeginTs() > serviceTime {
+					ss.msgBuffer <- sm
+					continue
+				}
+				err = ss.search(sm)
 				if err != nil {
 					log.Error(err.Error())
-					err2 := ss.publishFailedSearchResult(msg, err.Error())
+					err2 := ss.publishFailedSearchResult(sm, err.Error())
 					if err2 != nil {
 						log.Error("publish FailedSearchResult failed", zap.Error(err2))
 					}
 				}
+				searchNum++
 			}
-			log.Debug("ReceiveSearchMsg, do search done", zap.Int("num of searchMsg", len(searchMsg)))
+			log.Debug("ReceiveSearchMsg, do search done", zap.Int("num of searchMsg", searchNum))
 		}
 	}
 }
@@ -160,18 +200,36 @@ func (ss *searchService) doUnsolvedMsgSearch() {
 		case <-ss.ctx.Done():
 			return
 		default:
-			serviceTime := ss.waitNewTSafe()
-			ss.setServiceableTime(serviceTime)
-			searchMsg := make([]msgstream.TsMsg, 0)
-			tempMsg := make([]msgstream.TsMsg, 0)
+			searchMsg := make([]*msgstream.SearchMsg, 0)
+			tempMsg := make([]*msgstream.SearchMsg, 0)
 			tempMsg = append(tempMsg, ss.unsolvedMsg...)
 			ss.unsolvedMsg = ss.unsolvedMsg[:0]
-			for _, msg := range tempMsg {
-				if msg.EndTs() <= serviceTime {
-					searchMsg = append(searchMsg, msg)
+
+			serviceTimeTmpTable := make(map[UniqueID]Timestamp)
+
+			searchNum := 0
+			for _, sm := range tempMsg {
+				err := ss.collectionCheck(sm.CollectionID)
+				if err != nil {
+					ss.emptySearch(sm)
+					searchNum++
 					continue
 				}
-				ss.unsolvedMsg = append(ss.unsolvedMsg, msg)
+				_, ok := serviceTimeTmpTable[sm.CollectionID]
+				if !ok {
+					serviceTime, err := ss.waitNewTSafe(sm.CollectionID)
+					if err != nil {
+						// TODO: emptySearch or continue, note: collection has been released
+						continue
+					}
+					ss.setServiceableTime(sm.CollectionID, serviceTime)
+					serviceTimeTmpTable[sm.CollectionID] = serviceTime
+				}
+				if sm.EndTs() <= serviceTimeTmpTable[sm.CollectionID] {
+					searchMsg = append(searchMsg, sm)
+					continue
+				}
+				ss.unsolvedMsg = append(ss.unsolvedMsg, sm)
 			}
 
 			for {
@@ -179,40 +237,52 @@ func (ss *searchService) doUnsolvedMsgSearch() {
 				if msgBufferLength <= 0 {
 					break
 				}
-				msg := <-ss.msgBuffer
-				if msg.EndTs() <= serviceTime {
-					searchMsg = append(searchMsg, msg)
+				sm := <-ss.msgBuffer
+				err := ss.collectionCheck(sm.CollectionID)
+				if err != nil {
+					ss.emptySearch(sm)
+					searchNum++
 					continue
 				}
-				ss.unsolvedMsg = append(ss.unsolvedMsg, msg)
+				_, ok := serviceTimeTmpTable[sm.CollectionID]
+				if !ok {
+					serviceTime, err := ss.waitNewTSafe(sm.CollectionID)
+					if err != nil {
+						// TODO: emptySearch or continue, note: collection has been released
+						continue
+					}
+					ss.setServiceableTime(sm.CollectionID, serviceTime)
+					serviceTimeTmpTable[sm.CollectionID] = serviceTime
+				}
+				if sm.EndTs() <= serviceTimeTmpTable[sm.CollectionID] {
+					searchMsg = append(searchMsg, sm)
+					continue
+				}
+				ss.unsolvedMsg = append(ss.unsolvedMsg, sm)
 			}
 
 			if len(searchMsg) <= 0 {
 				continue
 			}
-			for _, msg := range searchMsg {
-				err := ss.search(msg)
+			for _, sm := range searchMsg {
+				err := ss.search(sm)
 				if err != nil {
 					log.Error(err.Error())
-					err2 := ss.publishFailedSearchResult(msg, err.Error())
+					err2 := ss.publishFailedSearchResult(sm, err.Error())
 					if err2 != nil {
 						log.Error("publish FailedSearchResult failed", zap.Error(err2))
 					}
 				}
+				searchNum++
 			}
-			log.Debug("doUnsolvedMsgSearch, do search done", zap.Int("num of searchMsg", len(searchMsg)))
+			log.Debug("doUnsolvedMsgSearch, do search done", zap.Int("num of searchMsg", searchNum))
 		}
 	}
 }
 
 // TODO:: cache map[dsl]plan
 // TODO: reBatched search requests
-func (ss *searchService) search(msg msgstream.TsMsg) error {
-	searchMsg, ok := msg.(*msgstream.SearchMsg)
-	if !ok {
-		return errors.New("invalid request type = " + string(msg.Type()))
-	}
-
+func (ss *searchService) search(searchMsg *msgstream.SearchMsg) error {
 	searchTimestamp := searchMsg.Base.Timestamp
 	var queryBlob = searchMsg.Query.Value
 	query := milvuspb.SearchRequest{}
@@ -250,21 +320,17 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	partitionIDsInQuery := searchMsg.PartitionIDs
 	if len(partitionIDsInQuery) == 0 {
 		if len(partitionIDsInCol) == 0 {
-			return errors.New("can't find any partition in this collection on query node")
+			return errors.New("none of this collection's partition has been loaded")
 		}
 		searchPartitionIDs = partitionIDsInCol
 	} else {
-		findPartition := false
 		for _, id := range partitionIDsInQuery {
-			_, err := ss.replica.getPartitionByID(id)
-			if err == nil {
-				searchPartitionIDs = append(searchPartitionIDs, id)
-				findPartition = true
+			_, err2 := ss.replica.getPartitionByID(id)
+			if err2 != nil {
+				return err2
 			}
 		}
-		if !findPartition {
-			return errors.New("partition to be searched not exist in query node")
-		}
+		searchPartitionIDs = partitionIDsInQuery
 	}
 
 	for _, partitionID := range searchPartitionIDs {
@@ -380,14 +446,15 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 		}
 
 		// For debugging, please don't delete.
+		//fmt.Println("==================== search result ======================")
 		//for i := 0; i < len(hits); i++ {
 		//	testHits := milvuspb.Hits{}
 		//	err := proto.Unmarshal(hits[i], &testHits)
 		//	if err != nil {
 		//		panic(err)
 		//	}
-		//	log.Debug(testHits.IDs)
-		//	log.Debug(testHits.Scores)
+		//	fmt.Println(testHits.IDs)
+		//	fmt.Println(testHits.Scores)
 		//}
 		err = ss.publishSearchResult(searchResultMsg)
 		if err != nil {
@@ -412,16 +479,12 @@ func (ss *searchService) publishSearchResult(msg msgstream.TsMsg) error {
 	return err
 }
 
-func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg, errMsg string) error {
+func (ss *searchService) publishFailedSearchResult(searchMsg *msgstream.SearchMsg, errMsg string) error {
 	// span, ctx := opentracing.StartSpanFromContext(msg.GetMsgContext(), "receive search msg")
 	// defer span.Finish()
 	// msg.SetMsgContext(ctx)
 	//log.Debug("Public fail SearchResult!")
 	msgPack := msgstream.MsgPack{}
-	searchMsg, ok := msg.(*msgstream.SearchMsg)
-	if !ok {
-		return errors.New("invalid request type = " + string(msg.Type()))
-	}
 
 	resultChannelInt, _ := strconv.ParseInt(searchMsg.ResultChannelID, 10, 64)
 	searchResultMsg := &msgstream.SearchResultMsg{

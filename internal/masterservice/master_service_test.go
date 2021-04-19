@@ -508,6 +508,9 @@ func TestMasterService(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, partMsg.CollectionID, collMeta.ID)
 		assert.Equal(t, partMsg.PartitionID, partMeta.PartitionID)
+
+		assert.Equal(t, 1, len(pm.GetCollArray()))
+		assert.Equal(t, "testColl", pm.GetCollArray()[0])
 	})
 
 	t.Run("has partition", func(t *testing.T) {
@@ -893,6 +896,9 @@ func TestMasterService(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, dmsg.CollectionID, collMeta.ID)
 		assert.Equal(t, dmsg.PartitionID, dropPartID)
+
+		assert.Equal(t, 2, len(pm.GetCollArray()))
+		assert.Equal(t, "testColl", pm.GetCollArray()[1])
 	})
 
 	t.Run("drop collection", func(t *testing.T) {
@@ -919,8 +925,8 @@ func TestMasterService(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, dmsg.CollectionID, collMeta.ID)
 		collArray := pm.GetCollArray()
-		assert.Equal(t, len(collArray), 1)
-		assert.Equal(t, collArray[0], "testColl")
+		assert.Equal(t, len(collArray), 3)
+		assert.Equal(t, collArray[2], "testColl")
 
 		time.Sleep(time.Millisecond * 100)
 		qm.mutex.Lock()
@@ -944,8 +950,8 @@ func TestMasterService(t *testing.T) {
 		time.Sleep(time.Second)
 		assert.Zero(t, len(ddStream.Chan()))
 		collArray = pm.GetCollArray()
-		assert.Equal(t, len(collArray), 1)
-		assert.Equal(t, collArray[0], "testColl")
+		assert.Equal(t, len(collArray), 3)
+		assert.Equal(t, collArray[2], "testColl")
 	})
 
 	err = core.Stop()
