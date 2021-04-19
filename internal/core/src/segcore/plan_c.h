@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-#include "collection_c.h"
+#include "segcore/collection_c.h"
 #include <stdbool.h>
 #include <stdint.h>
 

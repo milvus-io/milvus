@@ -14,8 +14,8 @@ extern "C" {
 #endif
 
 #include <stdbool.h>
-#include "collection_c.h"
-#include "plan_c.h"
+#include "segcore/collection_c.h"
+#include "segcore/plan_c.h"
 #include <stdint.h>
 
 typedef void* CSegmentBase;

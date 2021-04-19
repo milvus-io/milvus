@@ -203,7 +203,7 @@ set( GPU_ENABLE "false" )
 
 install(
         DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/segcore/
-        DESTINATION include
+        DESTINATION include/segcore/
         FILES_MATCHING PATTERN "*_c.h"
 )
 
