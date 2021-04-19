@@ -804,7 +804,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			resp.Status.Reason = err.Error()
 			return resp, nil
 		}
-		infos[i] = segmentInfo
+		infos[i] = proto.Clone(segmentInfo).(*datapb.SegmentInfo)
 	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.Infos = infos
