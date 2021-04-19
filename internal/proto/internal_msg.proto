@@ -100,11 +100,11 @@ message SegIDAssignment {
     string coll_name = 4;
     string partition_tag = 5;
     uint64 expire_time = 6;
+    common.Status status = 7;
 }
 
 message AssignSegIDResponse {
-    common.Status status = 1;
-    repeated SegIDAssignment per_channel_assignment = 2;
+    repeated SegIDAssignment per_channel_assignment = 1;
 }
 
 message CreateCollectionRequest {

@@ -112,13 +112,13 @@ func TestSegmentManager_AssignSegment(t *testing.T) {
 
 	var results = make([]*internalpb.SegIDAssignment, 0)
 	for _, c := range cases {
-		result, err := segManager.AssignSegment([]*internalpb.SegIDRequest{{Count: c.Count, ChannelID: c.ChannelID, CollName: collName, PartitionTag: partitionTag}})
+		result, _ := segManager.AssignSegment([]*internalpb.SegIDRequest{{Count: c.Count, ChannelID: c.ChannelID, CollName: collName, PartitionTag: partitionTag}})
 		results = append(results, result...)
 		if c.Err {
-			assert.NotNil(t, err)
+			assert.EqualValues(t, commonpb.ErrorCode_UNEXPECTED_ERROR, result[0].Status.ErrorCode)
 			continue
 		}
-		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_SUCCESS, result[0].Status.ErrorCode)
 		if c.SameIDWith != -1 {
 			assert.EqualValues(t, result[0].SegID, results[c.SameIDWith].SegID)
 		}
@@ -257,9 +257,9 @@ func TestSegmentManager_RPC(t *testing.T) {
 		},
 	})
 	assert.Nil(t, err)
-	assert.EqualValues(t, commonpb.ErrorCode_SUCCESS, resp.Status.ErrorCode)
 	assignments := resp.GetPerChannelAssignment()
 	assert.EqualValues(t, 1, len(assignments))
+	assert.EqualValues(t, commonpb.ErrorCode_SUCCESS, assignments[0].Status.ErrorCode)
 	assert.EqualValues(t, collName, assignments[0].CollName)
 	assert.EqualValues(t, partitionTag, assignments[0].PartitionTag)
 	assert.EqualValues(t, int32(0), assignments[0].ChannelID)
