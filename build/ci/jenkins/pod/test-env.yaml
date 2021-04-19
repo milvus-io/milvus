@@ -7,7 +7,7 @@ metadata:
 spec:
   containers:
   - name: test-env
-    image: milvusdb/pytest:20210311-bfdffdd
+    image: milvusdb/pytest:20210322-201a528
     command:
     - cat
     tty: true
