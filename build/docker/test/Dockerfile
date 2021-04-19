@@ -13,6 +13,6 @@ FROM python:3.6.8-jessie
 
 COPY ./tests/python_test/requirements.txt /requirements.txt
 
-RUN python3 -m pip install -r /requirements.txt && python3 -m pip install git+https://gitee.com/quicksilver/pytest-tags.git
+RUN python3 -m pip install --no-cache-dir -r /requirements.txt
 
 CMD ["tail", "-f", "/dev/null"]
