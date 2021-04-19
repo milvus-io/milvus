@@ -312,7 +312,6 @@ type ReleaseSegmentRequest struct {
   CollectionID UniqueID
   PartitionIDs []UniqueID
   SegmentIDs   []UniqueID
-  FieldIDs     []UniqueID
 }
 ```
 
