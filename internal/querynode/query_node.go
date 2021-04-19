@@ -121,7 +121,7 @@ func (node *QueryNode) Init() error {
 	if err != nil {
 		panic(err)
 	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+	if resp.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		panic(resp.Status.Reason)
 	}
 
@@ -248,14 +248,14 @@ func (node *QueryNode) SetDataService(data types.DataService) error {
 func (node *QueryNode) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	stats := &internalpb2.ComponentStates{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 	}
 	code, ok := node.stateCode.Load().(internalpb2.StateCode)
 	if !ok {
 		errMsg := "unexpected error in type assertion"
 		stats.Status = &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 			Reason:    errMsg,
 		}
 		return stats, errors.New(errMsg)
@@ -281,7 +281,7 @@ func (node *QueryNode) AddQueryChannel(in *queryPb.AddQueryChannelsRequest) (*co
 	if node.searchService == nil || node.searchService.searchMsgStream == nil {
 		errMsg := "null search service or null search message stream"
 		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 			Reason:    errMsg,
 		}
 
@@ -300,7 +300,7 @@ func (node *QueryNode) AddQueryChannel(in *queryPb.AddQueryChannelsRequest) (*co
 	log.Debug("querynode AsProducer: " + strings.Join(producerChannels, ", "))
 
 	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 	}
 	return status, nil
 }
@@ -309,7 +309,7 @@ func (node *QueryNode) RemoveQueryChannel(in *queryPb.RemoveQueryChannelsRequest
 	if node.searchService == nil || node.searchService.searchMsgStream == nil {
 		errMsg := "null search service or null search result message stream"
 		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 			Reason:    errMsg,
 		}
 
@@ -320,7 +320,7 @@ func (node *QueryNode) RemoveQueryChannel(in *queryPb.RemoveQueryChannelsRequest
 	if !ok {
 		errMsg := "type assertion failed for search message stream"
 		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 			Reason:    errMsg,
 		}
 
@@ -331,7 +331,7 @@ func (node *QueryNode) RemoveQueryChannel(in *queryPb.RemoveQueryChannelsRequest
 	if !ok {
 		errMsg := "type assertion failed for search result message stream"
 		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 			Reason:    errMsg,
 		}
 
@@ -350,7 +350,7 @@ func (node *QueryNode) RemoveQueryChannel(in *queryPb.RemoveQueryChannelsRequest
 	resultStream.AsProducer(producerChannels)
 
 	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 	}
 	return status, nil
 }
@@ -359,7 +359,7 @@ func (node *QueryNode) WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*com
 	if node.dataSyncService == nil || node.dataSyncService.dmStream == nil {
 		errMsg := "null data sync service or null data manipulation stream"
 		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 			Reason:    errMsg,
 		}
 
@@ -373,7 +373,7 @@ func (node *QueryNode) WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*com
 		_ = t
 		errMsg := "type assertion failed for dm message stream"
 		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 			Reason:    errMsg,
 		}
 
@@ -387,7 +387,7 @@ func (node *QueryNode) WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*com
 	log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
 
 	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 	}
 	return status, nil
 }
@@ -403,14 +403,14 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	log.Debug("query node load segment", zap.String("loadSegmentRequest", fmt.Sprintln(in)))
 
 	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 	}
 	hasCollection := node.replica.hasCollection(collectionID)
 	hasPartition := node.replica.hasPartition(partitionID)
 	if !hasCollection {
 		err := node.replica.addCollection(collectionID, schema)
 		if err != nil {
-			status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+			status.ErrorCode = commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR
 			status.Reason = err.Error()
 			return status, err
 		}
@@ -418,14 +418,14 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	if !hasPartition {
 		err := node.replica.addPartition(collectionID, partitionID)
 		if err != nil {
-			status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+			status.ErrorCode = commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR
 			status.Reason = err.Error()
 			return status, err
 		}
 	}
 	err := node.replica.enablePartition(partitionID)
 	if err != nil {
-		status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		status.ErrorCode = commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR
 		status.Reason = err.Error()
 		return status, err
 	}
@@ -436,7 +436,7 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 
 	if len(in.SegmentIDs) != len(in.SegmentStates) {
 		err := errors.New("len(segmentIDs) should equal to len(segmentStates)")
-		status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		status.ErrorCode = commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR
 		status.Reason = err.Error()
 		return status, err
 	}
@@ -460,7 +460,7 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	err = node.dataSyncService.seekSegment(position)
 	if err != nil {
 		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 			Reason:    err.Error(),
 		}
 		return status, err
@@ -468,7 +468,7 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 
 	err = node.loadService.loadSegment(collectionID, partitionID, segmentIDs, fieldIDs)
 	if err != nil {
-		status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		status.ErrorCode = commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR
 		status.Reason = err.Error()
 		return status, err
 	}
@@ -479,26 +479,26 @@ func (node *QueryNode) ReleaseCollection(in *queryPb.ReleaseCollectionRequest) (
 	err := node.replica.removeCollection(in.CollectionID)
 	if err != nil {
 		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 			Reason:    err.Error(),
 		}
 		return status, err
 	}
 
 	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 	}, nil
 }
 
 func (node *QueryNode) ReleasePartitions(in *queryPb.ReleasePartitionRequest) (*commonpb.Status, error) {
 	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 	}
 	for _, id := range in.PartitionIDs {
 		err := node.loadService.segLoader.replica.removePartition(id)
 		if err != nil {
 			// not return, try to release all partitions
-			status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+			status.ErrorCode = commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR
 			status.Reason = err.Error()
 		}
 	}
@@ -507,13 +507,13 @@ func (node *QueryNode) ReleasePartitions(in *queryPb.ReleasePartitionRequest) (*
 
 func (node *QueryNode) ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error) {
 	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 	}
 	for _, id := range in.SegmentIDs {
 		err2 := node.loadService.segLoader.replica.removeSegment(id)
 		if err2 != nil {
 			// not return, try to release all segments
-			status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+			status.ErrorCode = commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR
 			status.Reason = err2.Error()
 		}
 	}
@@ -540,7 +540,7 @@ func (node *QueryNode) GetSegmentInfo(in *queryPb.SegmentInfoRequest) (*queryPb.
 	}
 	return &queryPb.SegmentInfoResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 		Infos: infos,
 	}, nil

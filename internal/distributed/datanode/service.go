@@ -238,11 +238,11 @@ func (s *Server) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelR
 func (s *Server) FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) (*commonpb.Status, error) {
 	if s.datanode.State.Load().(internalpb2.StateCode) != internalpb2.StateCode_HEALTHY {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 			Reason:    "DataNode isn't healthy.",
 		}, errors.New("DataNode is not ready yet")
 	}
 	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 	}, s.datanode.FlushSegments(ctx, in)
 }

@@ -321,7 +321,7 @@ func (loader *indexLoader) getIndexInfo(collectionID UniqueID, segmentID UniqueI
 	if err != nil {
 		return 0, 0, err
 	}
-	if response.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+	if response.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		return -1, -1, errors.New(response.Status.Reason)
 	}
 	return response.IndexID, response.BuildID, nil
@@ -337,7 +337,7 @@ func (loader *indexLoader) getIndexPaths(indexBuildID UniqueID) ([]string, error
 		IndexBuildIDs: []UniqueID{indexBuildID},
 	}
 	pathResponse, err := loader.indexService.GetIndexFilePaths(ctx, indexFilePathRequest)
-	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		return nil, err
 	}
 

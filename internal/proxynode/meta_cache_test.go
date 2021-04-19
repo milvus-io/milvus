@@ -21,7 +21,7 @@ func (m *MockMasterClientInterface) ShowPartitions(ctx context.Context, in *milv
 	if in.CollectionName == "collection1" {
 		return &milvuspb.ShowPartitionResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_SUCCESS,
+				ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 			},
 			PartitionIDs:   []typeutil.UniqueID{1, 2},
 			PartitionNames: []string{"par1", "par2"},
@@ -29,7 +29,7 @@ func (m *MockMasterClientInterface) ShowPartitions(ctx context.Context, in *milv
 	}
 	return &milvuspb.ShowPartitionResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 		PartitionIDs:   []typeutil.UniqueID{},
 		PartitionNames: []string{},
@@ -40,7 +40,7 @@ func (m *MockMasterClientInterface) DescribeCollection(ctx context.Context, in *
 	if in.CollectionName == "collection1" {
 		return &milvuspb.DescribeCollectionResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_SUCCESS,
+				ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 			},
 			CollectionID: typeutil.UniqueID(1),
 			Schema: &schemapb.CollectionSchema{
@@ -50,7 +50,7 @@ func (m *MockMasterClientInterface) DescribeCollection(ctx context.Context, in *
 	}
 	return &milvuspb.DescribeCollectionResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 		},
 		CollectionID: typeutil.UniqueID(0),
 		Schema:       nil,

@@ -42,7 +42,7 @@ func (loader *segmentLoader) getInsertBinlogPaths(segmentID UniqueID) ([]*intern
 	}
 
 	pathResponse, err := loader.dataService.GetInsertBinlogPaths(ctx, insertBinlogPathRequest)
-	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		return nil, nil, err
 	}
 
@@ -63,7 +63,7 @@ func (loader *segmentLoader) GetSegmentStates(segmentID UniqueID) (*datapb.Segme
 		SegmentIDs: []int64{segmentID},
 	}
 	statesResponse, err := loader.dataService.GetSegmentStates(ctx, segmentStatesRequest)
-	if err != nil || statesResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+	if err != nil || statesResponse.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		return nil, err
 	}
 	if len(statesResponse.States) != 1 {

@@ -19,11 +19,11 @@ func VerifyResponse(response interface{}, err error) error {
 	}
 	switch resp := response.(type) {
 	case Response:
-		if resp.GetStatus().ErrorCode != commonpb.ErrorCode_SUCCESS {
+		if resp.GetStatus().ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 			return errors.New(resp.GetStatus().Reason)
 		}
 	case *commonpb.Status:
-		if resp.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		if resp.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 			return errors.New(resp.Reason)
 		}
 	default:

@@ -121,14 +121,14 @@ func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 
 	nty := &indexpb.BuildIndexNotification{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 		IndexBuildID:   it.cmd.IndexBuildID,
 		NodeID:         it.nodeID,
 		IndexFilePaths: it.savePaths,
 	}
 	if it.err != nil {
-		nty.Status.ErrorCode = commonpb.ErrorCode_BUILD_INDEX_ERROR
+		nty.Status.ErrorCode = commonpb.ErrorCode_ERROR_CODE_BUILD_INDEX_ERROR
 	}
 
 	ctx = context.TODO()
@@ -138,7 +138,7 @@ func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 
-	if resp.ErrorCode != commonpb.ErrorCode_SUCCESS {
+	if resp.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		err = errors.New(resp.Reason)
 	}
 	log.Println("[IndexBuildTask][PostExecute] err", err)

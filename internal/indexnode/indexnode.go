@@ -85,7 +85,7 @@ func (i *IndexNode) Init() error {
 		return err2
 	}
 
-	if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+	if resp.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		return errors.New(resp.Status.Reason)
 	}
 
@@ -174,12 +174,12 @@ func (i *IndexNode) BuildIndex(ctx context.Context, request *indexpb.BuildIndexC
 	}
 
 	ret := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 	}
 
 	err := i.sched.IndexBuildQueue.Enqueue(t)
 	if err != nil {
-		ret.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		ret.ErrorCode = commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR
 		ret.Reason = err.Error()
 		return ret, nil
 	}
@@ -190,7 +190,7 @@ func (i *IndexNode) BuildIndex(ctx context.Context, request *indexpb.BuildIndexC
 func (i *IndexNode) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	i.sched.IndexBuildQueue.tryToRemoveUselessIndexBuildTask(request.IndexID)
 	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		Reason:    "",
 	}, nil
 }
@@ -217,7 +217,7 @@ func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb2.Compon
 		State:              stateInfo,
 		SubcomponentStates: nil, // todo add subcomponents states
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 	}
 	return ret, nil
@@ -226,7 +226,7 @@ func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb2.Compon
 func (i *IndexNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 	}, nil
 }
@@ -234,7 +234,7 @@ func (i *IndexNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRes
 func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 	}, nil
 }

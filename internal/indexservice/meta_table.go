@@ -113,7 +113,7 @@ func (mt *metaTable) NotifyBuildIndex(nty *indexpb.BuildIndexNotification) error
 		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 
-	if nty.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+	if nty.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		meta.State = commonpb.IndexState_INDEX_STATE_FAILED
 		meta.FailReason = nty.Status.Reason
 	} else {

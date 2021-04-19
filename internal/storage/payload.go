@@ -168,7 +168,7 @@ func (w *PayloadWriter) AddBoolToPayload(msgs []bool) error {
 	status := C.AddBooleanToPayload(w.payloadWriterPtr, cMsgs, cLength)
 
 	errCode := commonpb.ErrorCode(status.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(status.error_msg)
 		defer C.free(unsafe.Pointer(status.error_msg))
 		return errors.New(msg)
@@ -187,7 +187,7 @@ func (w *PayloadWriter) AddInt8ToPayload(msgs []int8) error {
 	status := C.AddInt8ToPayload(w.payloadWriterPtr, cMsgs, cLength)
 
 	errCode := commonpb.ErrorCode(status.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(status.error_msg)
 		defer C.free(unsafe.Pointer(status.error_msg))
 		return errors.New(msg)
@@ -207,7 +207,7 @@ func (w *PayloadWriter) AddInt16ToPayload(msgs []int16) error {
 	status := C.AddInt16ToPayload(w.payloadWriterPtr, cMsgs, cLength)
 
 	errCode := commonpb.ErrorCode(status.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(status.error_msg)
 		defer C.free(unsafe.Pointer(status.error_msg))
 		return errors.New(msg)
@@ -227,7 +227,7 @@ func (w *PayloadWriter) AddInt32ToPayload(msgs []int32) error {
 	status := C.AddInt32ToPayload(w.payloadWriterPtr, cMsgs, cLength)
 
 	errCode := commonpb.ErrorCode(status.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(status.error_msg)
 		defer C.free(unsafe.Pointer(status.error_msg))
 		return errors.New(msg)
@@ -247,7 +247,7 @@ func (w *PayloadWriter) AddInt64ToPayload(msgs []int64) error {
 	status := C.AddInt64ToPayload(w.payloadWriterPtr, cMsgs, cLength)
 
 	errCode := commonpb.ErrorCode(status.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(status.error_msg)
 		defer C.free(unsafe.Pointer(status.error_msg))
 		return errors.New(msg)
@@ -267,7 +267,7 @@ func (w *PayloadWriter) AddFloatToPayload(msgs []float32) error {
 	status := C.AddFloatToPayload(w.payloadWriterPtr, cMsgs, cLength)
 
 	errCode := commonpb.ErrorCode(status.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(status.error_msg)
 		defer C.free(unsafe.Pointer(status.error_msg))
 		return errors.New(msg)
@@ -287,7 +287,7 @@ func (w *PayloadWriter) AddDoubleToPayload(msgs []float64) error {
 	status := C.AddDoubleToPayload(w.payloadWriterPtr, cMsgs, cLength)
 
 	errCode := commonpb.ErrorCode(status.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(status.error_msg)
 		defer C.free(unsafe.Pointer(status.error_msg))
 		return errors.New(msg)
@@ -308,7 +308,7 @@ func (w *PayloadWriter) AddOneStringToPayload(msg string) error {
 	st := C.AddOneStringToPayload(w.payloadWriterPtr, cmsg, clength)
 
 	errCode := commonpb.ErrorCode(st.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(st.error_msg)
 		defer C.free(unsafe.Pointer(st.error_msg))
 		return errors.New(msg)
@@ -333,7 +333,7 @@ func (w *PayloadWriter) AddBinaryVectorToPayload(binVec []byte, dim int) error {
 
 	st := C.AddBinaryVectorToPayload(w.payloadWriterPtr, cBinVec, cDim, cLength)
 	errCode := commonpb.ErrorCode(st.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(st.error_msg)
 		defer C.free(unsafe.Pointer(st.error_msg))
 		return errors.New(msg)
@@ -358,7 +358,7 @@ func (w *PayloadWriter) AddFloatVectorToPayload(floatVec []float32, dim int) err
 
 	st := C.AddFloatVectorToPayload(w.payloadWriterPtr, cBinVec, cDim, cLength)
 	errCode := commonpb.ErrorCode(st.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(st.error_msg)
 		defer C.free(unsafe.Pointer(st.error_msg))
 		return errors.New(msg)
@@ -369,7 +369,7 @@ func (w *PayloadWriter) AddFloatVectorToPayload(floatVec []float32, dim int) err
 func (w *PayloadWriter) FinishPayloadWriter() error {
 	st := C.FinishPayloadWriter(w.payloadWriterPtr)
 	errCode := commonpb.ErrorCode(st.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(st.error_msg)
 		defer C.free(unsafe.Pointer(st.error_msg))
 		return errors.New(msg)
@@ -397,7 +397,7 @@ func (w *PayloadWriter) GetPayloadLengthFromWriter() (int, error) {
 func (w *PayloadWriter) ReleasePayloadWriter() error {
 	st := C.ReleasePayloadWriter(w.payloadWriterPtr)
 	errCode := commonpb.ErrorCode(st.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(st.error_msg)
 		defer C.free(unsafe.Pointer(st.error_msg))
 		return errors.New(msg)
@@ -482,7 +482,7 @@ func (r *PayloadReader) GetDataFromPayload(idx ...int) (interface{}, int, error)
 func (r *PayloadReader) ReleasePayloadReader() error {
 	st := C.ReleasePayloadReader(r.payloadReaderPtr)
 	errCode := commonpb.ErrorCode(st.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(st.error_msg)
 		defer C.free(unsafe.Pointer(st.error_msg))
 		return errors.New(msg)
@@ -500,7 +500,7 @@ func (r *PayloadReader) GetBoolFromPayload() ([]bool, error) {
 
 	st := C.GetBoolFromPayload(r.payloadReaderPtr, &cMsg, &cSize)
 	errCode := commonpb.ErrorCode(st.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(st.error_msg)
 		defer C.free(unsafe.Pointer(st.error_msg))
 		return nil, errors.New(msg)
@@ -520,7 +520,7 @@ func (r *PayloadReader) GetInt8FromPayload() ([]int8, error) {
 
 	st := C.GetInt8FromPayload(r.payloadReaderPtr, &cMsg, &cSize)
 	errCode := commonpb.ErrorCode(st.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(st.error_msg)
 		defer C.free(unsafe.Pointer(st.error_msg))
 		return nil, errors.New(msg)
@@ -540,7 +540,7 @@ func (r *PayloadReader) GetInt16FromPayload() ([]int16, error) {
 
 	st := C.GetInt16FromPayload(r.payloadReaderPtr, &cMsg, &cSize)
 	errCode := commonpb.ErrorCode(st.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(st.error_msg)
 		defer C.free(unsafe.Pointer(st.error_msg))
 		return nil, errors.New(msg)
@@ -560,7 +560,7 @@ func (r *PayloadReader) GetInt32FromPayload() ([]int32, error) {
 
 	st := C.GetInt32FromPayload(r.payloadReaderPtr, &cMsg, &cSize)
 	errCode := commonpb.ErrorCode(st.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(st.error_msg)
 		defer C.free(unsafe.Pointer(st.error_msg))
 		return nil, errors.New(msg)
@@ -580,7 +580,7 @@ func (r *PayloadReader) GetInt64FromPayload() ([]int64, error) {
 
 	st := C.GetInt64FromPayload(r.payloadReaderPtr, &cMsg, &cSize)
 	errCode := commonpb.ErrorCode(st.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(st.error_msg)
 		defer C.free(unsafe.Pointer(st.error_msg))
 		return nil, errors.New(msg)
@@ -600,7 +600,7 @@ func (r *PayloadReader) GetFloatFromPayload() ([]float32, error) {
 
 	st := C.GetFloatFromPayload(r.payloadReaderPtr, &cMsg, &cSize)
 	errCode := commonpb.ErrorCode(st.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(st.error_msg)
 		defer C.free(unsafe.Pointer(st.error_msg))
 		return nil, errors.New(msg)
@@ -620,7 +620,7 @@ func (r *PayloadReader) GetDoubleFromPayload() ([]float64, error) {
 
 	st := C.GetDoubleFromPayload(r.payloadReaderPtr, &cMsg, &cSize)
 	errCode := commonpb.ErrorCode(st.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(st.error_msg)
 		defer C.free(unsafe.Pointer(st.error_msg))
 		return nil, errors.New(msg)
@@ -641,7 +641,7 @@ func (r *PayloadReader) GetOneStringFromPayload(idx int) (string, error) {
 	st := C.GetOneStringFromPayload(r.payloadReaderPtr, C.int(idx), &cStr, &cSize)
 
 	errCode := commonpb.ErrorCode(st.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(st.error_msg)
 		defer C.free(unsafe.Pointer(st.error_msg))
 		return "", errors.New(msg)
@@ -661,7 +661,7 @@ func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, error) {
 
 	st := C.GetBinaryVectorFromPayload(r.payloadReaderPtr, &cMsg, &cDim, &cLen)
 	errCode := commonpb.ErrorCode(st.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(st.error_msg)
 		defer C.free(unsafe.Pointer(st.error_msg))
 		return nil, 0, errors.New(msg)
@@ -684,7 +684,7 @@ func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, error) {
 
 	st := C.GetFloatVectorFromPayload(r.payloadReaderPtr, &cMsg, &cDim, &cLen)
 	errCode := commonpb.ErrorCode(st.error_code)
-	if errCode != commonpb.ErrorCode_SUCCESS {
+	if errCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		msg := C.GoString(st.error_msg)
 		defer C.free(unsafe.Pointer(st.error_msg))
 		return nil, 0, errors.New(msg)

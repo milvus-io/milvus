@@ -91,7 +91,7 @@ func (m *MasterServiceMock) DescribeSegment(in *milvuspb.DescribeSegmentRequest)
 	}
 	rsp := &milvuspb.DescribeSegmentResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 		IndexID: in.SegmentID, // use index id as segment id
 		BuildID: in.SegmentID,
@@ -169,13 +169,13 @@ func (index *IndexServiceMock) GetIndexFilePaths(req *indexpb.IndexFilePathsRequ
 	indexPathInfo := make([]*indexpb.IndexFilePathInfo, 1)
 	indexPathInfo[0] = &indexpb.IndexFilePathInfo{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 		IndexFilePaths: []string{indexPaths1, indexPaths2},
 	}
 	rsp := &indexpb.IndexFilePathsResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 		FilePaths: indexPathInfo,
 	}
@@ -187,7 +187,7 @@ type queryServiceMock struct{}
 func (q *queryServiceMock) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
 	return &querypb.RegisterNodeResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 		InitParams: &internalPb.InitParams{
 			NodeID: int64(0),

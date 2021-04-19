@@ -61,7 +61,7 @@ func (c *Client) GetComponentStates(ctx context.Context) (*internalpb2.Component
 func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 	}, nil
 }
@@ -69,7 +69,7 @@ func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 		},
 	}, nil
 }

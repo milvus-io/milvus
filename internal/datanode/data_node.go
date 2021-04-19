@@ -161,7 +161,7 @@ func (node *DataNode) UpdateStateCode(code internalpb2.StateCode) {
 
 func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {
 	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+		ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 	}
 
 	switch {
@@ -176,7 +176,7 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 
 	default:
 		Params.InsertChannelNames = in.GetChannelNames()
-		status.ErrorCode = commonpb.ErrorCode_SUCCESS
+		status.ErrorCode = commonpb.ErrorCode_ERROR_CODE_SUCCESS
 		node.watchDm <- struct{}{}
 		return status, nil
 	}
@@ -191,7 +191,7 @@ func (node *DataNode) GetComponentStates(ctx context.Context) (*internalpb2.Comp
 			StateCode: node.State.Load().(internalpb2.StateCode),
 		},
 		SubcomponentStates: make([]*internalpb2.ComponentInfo, 0),
-		Status:             &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
+		Status:             &commonpb.Status{ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS},
 	}
 	return states, nil
 }
@@ -228,7 +228,7 @@ func (node *DataNode) Stop() error {
 func (node *DataNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 			Reason:    "",
 		},
 		Value: "",
@@ -238,7 +238,7 @@ func (node *DataNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringR
 func (node *DataNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 			Reason:    "",
 		},
 		Value: "",
