@@ -40,6 +40,7 @@ class TestCreateCollection:
     def get_segment_row_limit(self, request):
         yield request.param
 
+    @pytest.mark.tags("0331")
     def test_create_collection_fields(self, connect, get_filter_field, get_vector_field):
         '''
         target: test create normal collection with different fields
@@ -71,6 +72,7 @@ class TestCreateCollection:
         connect.create_collection(collection_name, fields)
         assert connect.has_collection(collection_name)
 
+    @pytest.mark.tags("0331")
     def test_create_collection_after_insert(self, connect, collection):
         '''
         target: test insert vector, then create collection again
@@ -83,6 +85,7 @@ class TestCreateCollection:
         with pytest.raises(Exception) as e:
             connect.create_collection(collection, default_fields)
 
+    @pytest.mark.tags("0331")
     def test_create_collection_after_insert_flush(self, connect, collection):
         '''
         target: test insert vector, then create collection again
@@ -95,6 +98,7 @@ class TestCreateCollection:
             connect.create_collection(collection, default_fields)
 
     # TODO: assert exception
+    @pytest.mark.tags("0331")
     def test_create_collection_without_connection(self, dis_connect):
         '''
         target: test create collection, without connection
@@ -105,6 +109,7 @@ class TestCreateCollection:
         with pytest.raises(Exception) as e:
             dis_connect.create_collection(collection_name, default_fields)
 
+    @pytest.mark.tags("0331")
     def test_create_collection_existed(self, connect):
         '''
         target: test create collection but the collection name have already existed
@@ -116,6 +121,7 @@ class TestCreateCollection:
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, default_fields)
 
+    @pytest.mark.tags("0331")
     def test_create_after_drop_collection(self, connect, collection):
         '''
         target: create with the same collection name after collection dropped 
@@ -127,6 +133,7 @@ class TestCreateCollection:
         connect.create_collection(collection, default_fields)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_create_collection_multithread(self, connect):
         '''
         target: test create collection with multithread
@@ -203,6 +210,7 @@ class TestCreateCollectionInvalid(object):
             connect.create_collection(collection_name, fields)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_create_collection_with_invalid_dimension(self, connect, get_dim):
         dimension = get_dim
         collection_name = gen_unique_str()
@@ -212,23 +220,27 @@ class TestCreateCollectionInvalid(object):
              connect.create_collection(collection_name, fields)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_create_collection_with_invalid_collection_name(self, connect, get_invalid_string):
         collection_name = get_invalid_string
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, default_fields)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_create_collection_with_empty_collection_name(self, connect):
         collection_name = ''
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, default_fields)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_create_collection_with_none_collection_name(self, connect):
         collection_name = None
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, default_fields)
 
+    @pytest.mark.tags("0331")
     def test_create_collection_no_dimension(self, connect):
         '''
         target: test create collection with no dimension params
@@ -257,6 +269,7 @@ class TestCreateCollectionInvalid(object):
         assert res["segment_row_limit"] == default_server_segment_row_limit
 
     # TODO: assert exception
+    @pytest.mark.tags("0331")
     def test_create_collection_limit_fields(self, connect):
         collection_name = gen_unique_str(uid)
         limit_num = 64
@@ -270,6 +283,7 @@ class TestCreateCollectionInvalid(object):
 
     # TODO: assert exception
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_create_collection_invalid_field_name(self, connect, get_invalid_string):
         collection_name = gen_unique_str(uid)
         fields = copy.deepcopy(default_fields)
@@ -280,6 +294,7 @@ class TestCreateCollectionInvalid(object):
             connect.create_collection(collection_name, fields)
 
     # TODO: assert exception
+    @pytest.mark.tags("0331")
     def test_create_collection_invalid_field_type(self, connect, get_field_type):
         collection_name = gen_unique_str(uid)
         fields = copy.deepcopy(default_fields)

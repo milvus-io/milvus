@@ -16,6 +16,7 @@ class TestHasCollection:
       The following cases are used to test `has_collection` function
     ******************************************************************
     """
+    @pytest.mark.tags("0331")
     def test_has_collection(self, connect, collection):
         '''
         target: test if the created collection existed
@@ -25,6 +26,7 @@ class TestHasCollection:
         assert connect.has_collection(collection)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_has_collection_without_connection(self, collection, dis_connect):
         '''
         target: test has collection, without connection
@@ -34,6 +36,7 @@ class TestHasCollection:
         with pytest.raises(Exception) as e:
             assert dis_connect.has_collection(collection)
 
+    @pytest.mark.tags("0331")
     def test_has_collection_not_existed(self, connect):
         '''
         target: test if collection not created
@@ -48,6 +51,7 @@ class TestHasCollection:
         assert not connect.has_collection(collection_name)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_has_collection_multithread(self, connect):
         '''
         target: test create collection with multithread
@@ -83,19 +87,23 @@ class TestHasCollectionInvalid(object):
         yield request.param
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_has_collection_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.has_collection(collection_name)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_has_collection_with_empty_collection_name(self, connect):
         collection_name = ''
         with pytest.raises(Exception) as e:
             connect.has_collection(collection_name)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_has_collection_with_none_collection_name(self, connect):
         collection_name = None
         with pytest.raises(Exception) as e:
             connect.has_collection(collection_name)
+

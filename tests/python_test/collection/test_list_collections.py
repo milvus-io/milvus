@@ -12,7 +12,7 @@ class TestListCollections:
       The following cases are used to test `list_collections` function
     ******************************************************************
     """
-
+    @pytest.mark.tags("0331")
     def test_list_collections(self, connect, collection):
         '''
         target: test list collections
@@ -21,6 +21,7 @@ class TestListCollections:
         '''
         assert collection in connect.list_collections()
 
+    @pytest.mark.tags("0331")
     def test_list_collections_multi_collections(self, connect):
         '''
         target: test list collections
@@ -34,6 +35,7 @@ class TestListCollections:
             assert collection_name in connect.list_collections()
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_list_collections_without_connection(self, dis_connect):
         '''
         target: test list collections, without connection
@@ -43,6 +45,7 @@ class TestListCollections:
         with pytest.raises(Exception) as e:
             dis_connect.list_collections()
 
+    @pytest.mark.tags("0331")
     def test_list_collections_not_existed(self, connect):
         '''
         target: test if collection not created
@@ -58,6 +61,7 @@ class TestListCollections:
 
     # TODO: make sure to run this case in the end
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_list_collections_no_collection(self, connect):
         '''
         target: test show collections is correct or not, if no collection in db
@@ -71,6 +75,7 @@ class TestListCollections:
                 assert connect.has_collection(collection_name)
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_list_collections_multithread(self, connect):
         '''
         target: test list collection with multithread
@@ -92,3 +97,4 @@ class TestListCollections:
             time.sleep(0.2)
         for t in threads:
             t.join()
+
