@@ -193,6 +193,8 @@ service QueryNode {
   rpc RemoveQueryChannel(RemoveQueryChannelsRequest) returns (common.Status) {}
   rpc WatchDmChannels(WatchDmChannelsRequest) returns (common.Status) {}
   rpc LoadSegments(LoadSegmentRequest) returns (common.Status) {}
+  rpc ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {}
+  rpc ReleasePartitions(ReleasePartitionRequest) returns (common.Status) {}
   rpc ReleaseSegments(ReleaseSegmentRequest) returns (common.Status) {}
   rpc GetSegmentInfo(SegmentInfoRequest) returns (SegmentInfoResponse) {}
 }

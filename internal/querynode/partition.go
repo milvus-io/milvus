@@ -11,6 +11,7 @@ package querynode
 
 */
 import "C"
+import "fmt"
 
 type Partition struct {
 	collectionID UniqueID
@@ -44,5 +45,6 @@ func newPartition(collectionID UniqueID, partitionID UniqueID) *Partition {
 		enable:       false,
 	}
 
+	fmt.Println("create partition", partitionID)
 	return newPartition
 }

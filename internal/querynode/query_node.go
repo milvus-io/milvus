@@ -38,6 +38,8 @@ type Node interface {
 	RemoveQueryChannel(in *queryPb.RemoveQueryChannelsRequest) (*commonpb.Status, error)
 	WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error)
 	LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.Status, error)
+	ReleaseCollection(in *queryPb.ReleaseCollectionRequest) (*commonpb.Status, error)
+	ReleasePartitions(in *queryPb.ReleasePartitionRequest) (*commonpb.Status, error)
 	ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error)
 	GetSegmentInfo(in *queryPb.SegmentInfoRequest) (*queryPb.SegmentInfoResponse, error)
 }
@@ -479,32 +481,49 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	}, nil
 }
 
-func (node *QueryNode) ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error) {
-	for _, id := range in.PartitionIDs {
-		err := node.replica.enablePartition(id)
-		if err != nil {
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			}
-			return status, err
+func (node *QueryNode) ReleaseCollection(in *queryPb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+	err := node.replica.removeCollection(in.CollectionID)
+	if err != nil {
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
 		}
+		return status, err
 	}
 
-	// release all fields in the segments
-	for _, id := range in.SegmentIDs {
-		err := node.loadService.segLoader.releaseSegment(id)
-		if err != nil {
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			}
-			return status, err
-		}
-	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 	}, nil
+}
+
+func (node *QueryNode) ReleasePartitions(in *queryPb.ReleasePartitionRequest) (*commonpb.Status, error) {
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+	}
+	for _, id := range in.PartitionIDs {
+		err := node.loadService.segLoader.replica.removePartition(id)
+		if err != nil {
+			// not return, try to release all partitions
+			status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+			status.Reason = err.Error()
+		}
+	}
+	return status, nil
+}
+
+func (node *QueryNode) ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error) {
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+	}
+	for _, id := range in.SegmentIDs {
+		err2 := node.loadService.segLoader.replica.removeSegment(id)
+		if err2 != nil {
+			// not return, try to release all segments
+			status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+			status.Reason = err2.Error()
+		}
+	}
+	return status, nil
 }
 
 func (node *QueryNode) GetSegmentInfo(in *queryPb.SegmentInfoRequest) (*queryPb.SegmentInfoResponse, error) {

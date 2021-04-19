@@ -36,6 +36,14 @@ func (qn *queryNodeInfo) AddQueryChannel(in *querypb.AddQueryChannelsRequest) (*
 	return qn.client.AddQueryChannel(in)
 }
 
+func (qn *queryNodeInfo) ReleaseCollection(in *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+	return qn.client.ReleaseCollection(in)
+}
+
+func (qn *queryNodeInfo) ReleasePartitions(in *querypb.ReleasePartitionRequest) (*commonpb.Status, error) {
+	return qn.client.ReleasePartitions(in)
+}
+
 func newQueryNodeInfo(client QueryNodeInterface) *queryNodeInfo {
 	segments := make([]UniqueID, 0)
 	dmChannelNames := make([]string, 0)

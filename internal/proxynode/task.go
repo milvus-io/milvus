@@ -555,7 +555,7 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 	for _, partitionName := range st.query.PartitionNames {
 		partitionID, err := globalMetaCache.GetPartitionID(collectionName, partitionName)
 		if err != nil {
-			return err
+			continue
 		}
 		st.PartitionIDs = append(st.PartitionIDs, partitionID)
 	}

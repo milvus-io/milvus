@@ -93,6 +93,14 @@ func (c *Client) LoadSegments(in *querypb.LoadSegmentRequest) (*commonpb.Status,
 	return c.grpcClient.LoadSegments(context.TODO(), in)
 }
 
+func (c *Client) ReleaseCollection(in *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+	return c.grpcClient.ReleaseCollection(context.TODO(), in)
+}
+
+func (c *Client) ReleasePartitions(in *querypb.ReleasePartitionRequest) (*commonpb.Status, error) {
+	return c.grpcClient.ReleasePartitions(context.TODO(), in)
+}
+
 func (c *Client) ReleaseSegments(in *querypb.ReleaseSegmentRequest) (*commonpb.Status, error) {
 	return c.grpcClient.ReleaseSegments(context.TODO(), in)
 }

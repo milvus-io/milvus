@@ -165,9 +165,9 @@ func (index *CIndex) Load(blobs []*Blob) error {
 		binarySet.Datas = append(binarySet.Datas, &indexcgopb.Binary{Key: blob.Key, Value: blob.Value})
 	}
 
-	datas, err := proto.Marshal(binarySet)
-	if err != nil {
-		return err
+	datas, err2 := proto.Marshal(binarySet)
+	if err2 != nil {
+		return err2
 	}
 
 	/*
