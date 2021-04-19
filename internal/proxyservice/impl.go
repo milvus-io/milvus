@@ -30,7 +30,6 @@ const (
 	MasterYamlContent    = "advanced/master.yaml"
 	ProxyNodeYamlContent = "advanced/proxy_node.yaml"
 	QueryNodeYamlContent = "advanced/query_node.yaml"
-	WriteNodeYamlContent = "advanced/write_node.yaml"
 	MilvusYamlContent    = "milvus.yaml"
 )
 
@@ -62,7 +61,6 @@ func (s *ServiceImpl) fillNodeInitParams() error {
 	masterYamlContent := getConfigContentByName(MasterYamlContent)
 	proxyNodeYamlContent := getConfigContentByName(ProxyNodeYamlContent)
 	queryNodeYamlContent := getConfigContentByName(QueryNodeYamlContent)
-	writeNodeYamlContent := getConfigContentByName(WriteNodeYamlContent)
 	milvusYamlContent := getConfigContentByName(MilvusYamlContent)
 
 	appendContent := func(key string, content []byte) {
@@ -77,7 +75,6 @@ func (s *ServiceImpl) fillNodeInitParams() error {
 	appendContent(MasterYamlContent, masterYamlContent)
 	appendContent(ProxyNodeYamlContent, proxyNodeYamlContent)
 	appendContent(QueryNodeYamlContent, queryNodeYamlContent)
-	appendContent(WriteNodeYamlContent, writeNodeYamlContent)
 	appendContent(MilvusYamlContent, milvusYamlContent)
 
 	// var allContent []byte

@@ -411,12 +411,12 @@ func (dct *DropCollectionTask) PreExecute() error {
 
 func (dct *DropCollectionTask) Execute() error {
 	var err error
+	collID, err := globalMetaCache.GetCollectionID(dct.CollectionName)
+	if err != nil {
+		return err
+	}
 	dct.result, err = dct.masterClient.DropCollection(dct.DropCollectionRequest)
 	if dct.result.ErrorCode == commonpb.ErrorCode_SUCCESS {
-		collID, err := globalMetaCache.GetCollectionID(dct.CollectionName)
-		if err != nil {
-			return err
-		}
 		err = globalInsertChannelsMap.closeInsertMsgStream(collID)
 		if err != nil {
 			return err
