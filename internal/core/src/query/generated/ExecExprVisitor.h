@@ -4,6 +4,7 @@
 #include "segcore/SegmentSmallIndex.h"
 #include <optional>
 #include "query/ExprImpl.h"
+#include "boost/dynamic_bitset.hpp"
 #include "ExprVisitor.h"
 
 namespace milvus::query {
@@ -22,7 +23,7 @@ class ExecExprVisitor : ExprVisitor {
     visit(RangeExpr& expr) override;
 
  public:
-    using RetType = std::vector<std::vector<bool>>;
+    using RetType = std::deque<boost::dynamic_bitset<>>;
     explicit ExecExprVisitor(segcore::SegmentSmallIndex& segment) : segment_(segment) {
     }
     RetType

@@ -65,10 +65,6 @@ class SegmentSmallIndex : public SegmentBase {
     Status
     Delete(int64_t reserverd_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) override;
 
-    // query contains metadata of
-    Status
-    QueryDeprecated(query::QueryDeprecatedPtr query_info, Timestamp timestamp, QueryResult& results) override;
-
     Status
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup* placeholder_groups[],
@@ -112,6 +108,16 @@ class SegmentSmallIndex : public SegmentBase {
         return record_;
     }
 
+    const IndexingRecord&
+    get_indexing_record() const {
+        return indexing_record_;
+    }
+
+    const DeletedRecord&
+    get_deleted_record() const {
+        return deleted_record_;
+    }
+
     const Schema&
     get_schema() const {
         return *schema_;
@@ -148,12 +154,12 @@ class SegmentSmallIndex : public SegmentBase {
     // Status
     // QueryBruteForceImpl(query::QueryPtr query, Timestamp timestamp, QueryResult& results);
 
-    Status
-    QueryBruteForceImpl(const query::QueryInfo& info,
-                        const float* query_data,
-                        int64_t num_queries,
-                        Timestamp timestamp,
-                        QueryResult& results);
+    //    Status
+    //    QueryBruteForceImpl(const query::QueryInfo& info,
+    //                        const float* query_data,
+    //                        int64_t num_queries,
+    //                        Timestamp timestamp,
+    //                        QueryResult& results);
 
     template <typename Type>
     knowhere::IndexPtr
@@ -172,4 +178,5 @@ class SegmentSmallIndex : public SegmentBase {
     // std::unordered_map<std::string, knowhere::IndexPtr> indexings_;  // index_name => indexing
     tbb::concurrent_unordered_multimap<idx_t, int64_t> uid2offset_;
 };
+
 }  // namespace milvus::segcore
