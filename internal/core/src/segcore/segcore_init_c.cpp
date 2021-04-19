@@ -10,12 +10,26 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "index/thirdparty/faiss/FaissHook.h"
-#include "segcore/SegcoreInit.h"
+#include "segcore/segcore_init_c.h"
+#include "knowhere/archive/KnowhereConfig.h"
 #include <iostream>
+#include "utils/Log.h"
+
 namespace milvus::segcore {
-void
-SegcoreInit() {
-    std::string cpu_flags;
-    faiss::hook_init(cpu_flags);
+static void
+SegcoreInitImpl() {
+    namespace eg = milvus::engine;
+    eg::KnowhereConfig::SetSimdType(eg::KnowhereConfig::SimdType::AUTO);
+    eg::KnowhereConfig::SetBlasThreshold(16384);
+    eg::KnowhereConfig::SetEarlyStopThreshold(0);
+    eg::KnowhereConfig::SetLogHandler();
+    eg::KnowhereConfig::SetStatisticsLevel(0);
+    el::Configurations el_conf;
+    el_conf.setGlobally(el::ConfigurationType::Enabled, std::to_string(false));
 }
 }  // namespace milvus::segcore
+
+extern "C" void
+SegcoreInit() {
+    milvus::segcore::SegcoreInitImpl();
+}

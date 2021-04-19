@@ -52,6 +52,10 @@ set_target_properties(index_log PROPERTIES RULE_LAUNCH_COMPILE "")
 set_target_properties(index_log PROPERTIES RULE_LAUNCH_LINK "")
 include_directories(${MILVUS_THIRDPARTY_SRC})
 
+set(config_srcs
+        knowhere/archive/KnowhereConfig.cpp
+        )
+
 set(vector_index_srcs
         knowhere/index/IndexType.cpp
         knowhere/index/vector_index/adapter/VectorAdapter.cpp
@@ -149,6 +153,7 @@ if (NOT TARGET knowhere)
     add_library(
             knowhere STATIC
             ${external_srcs}
+            ${config_srcs}
             ${vector_index_srcs}
             ${vector_offset_index_srcs}
     )
