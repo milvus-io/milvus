@@ -8,9 +8,8 @@ if [ ! -d "${HOME}" ]; then
 fi
 
 # Setup $PS1 for a consistent and reasonable prompt
-if [ -w "${HOME}" ] && [ ! -f "${HOME}"/.bashrc ]; then
-  echo "PS1='\s-\v \w \$ '" > "${HOME}"/.bashrc
-  echo -e 'if [ -f /etc/bashrc ]; then\n  . /etc/bashrc\nfi' >> "${HOME}"/.bashrc
+if [ -w "${HOME}" ] && [ -d /etc/skel ]; then
+  cp /etc/skel/.bash* "${HOME}"
 fi
 
 # Add current (arbitrary) user to /etc/passwd and /etc/group

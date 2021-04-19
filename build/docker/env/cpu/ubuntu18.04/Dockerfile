@@ -41,6 +41,11 @@ RUN mkdir -p /usr/local/go && wget -qO- "https://golang.org/dl/go1.15.2.linux-am
     mkdir -p "$GOPATH/src" "$GOPATH/bin" && \
     curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ${GOPATH}/bin v1.27.0 && \
     export GO111MODULE=on && go get github.com/quasilyte/go-ruleguard/cmd/ruleguard@v0.2.1 && \
+    go get -v github.com/ramya-rao-a/go-outline && \
+    go get -v golang.org/x/tools/gopls && \
+    go get -v github.com/uudashr/gopkgs/v2/cmd/gopkgs && \
+    go get -v github.com/go-delve/delve/cmd/dlv && \
+    go get -v honnef.co/go/tools/cmd/staticcheck && \
     chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -50,6 +55,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN echo 'root:root' | chpasswd
 
+RUN mkdir -p /home/milvus/.vscode-server/extensions \
+        /home/milvus/.vscode-server-insiders/extensions \
+    && chmod -R 777 /home/milvus
+
 COPY --chown=0:0 build/docker/env/entrypoint.sh /
 
 RUN wget -qO- "https://github.com/benesch/autouseradd/releases/download/1.2.0/autouseradd-1.2.0-amd64.tar.gz" | tar xz -C / --strip-components 1
@@ -57,5 +66,5 @@ RUN wget -qO- "https://github.com/benesch/autouseradd/releases/download/1.2.0/au
 RUN wget -O /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini && \
     chmod +x /tini
 
-ENTRYPOINT [ "/tini", "--", "autouseradd", "--user", "milvus", "--", "/entrypoint.sh" ]
+ENTRYPOINT [ "/tini", "--", "autouseradd", "--no-create-home", "--user", "milvus", "--", "/entrypoint.sh" ]
 CMD ["tail", "-f", "/dev/null"]
