@@ -27,6 +27,8 @@ type ParamTable struct {
 	MaxPartitionNum      int64
 	DefaultPartitionName string
 	DefaultIndexName     string
+
+	Timeout int
 }
 
 func (p *ParamTable) Init() {
@@ -54,6 +56,8 @@ func (p *ParamTable) Init() {
 	p.initMaxPartitionNum()
 	p.initDefaultPartitionName()
 	p.initDefaultIndexName()
+
+	p.initTimeout()
 }
 
 func (p *ParamTable) initAddress() {
@@ -162,4 +166,8 @@ func (p *ParamTable) initDefaultIndexName() {
 		panic(err)
 	}
 	p.DefaultIndexName = name
+}
+
+func (p *ParamTable) initTimeout() {
+	p.Timeout = p.ParseInt("master.timeout")
 }
