@@ -85,13 +85,12 @@ BuildBinaryVecIndexWithoutIds(CIndex index, int64_t data_size, const uint8_t* ve
 }
 
 CStatus
-SerializeToSlicedBuffer(CIndex index, int32_t* buffer_size, char** res_buffer) {
+SerializeToSlicedBuffer(CIndex index, CBinary* c_binary) {
     auto status = CStatus();
     try {
         auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
         auto binary = cIndex->Serialize();
-        *buffer_size = binary.size;
-        *res_buffer = binary.data;
+        *c_binary = binary.release();
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
@@ -99,6 +98,25 @@ SerializeToSlicedBuffer(CIndex index, int32_t* buffer_size, char** res_buffer) {
         status.error_msg = strdup(e.what());
     }
     return status;
+}
+
+int64_t
+GetCBinarySize(CBinary c_binary) {
+    auto cBinary = (milvus::indexbuilder::IndexWrapper::Binary*)c_binary;
+    return cBinary->data.size();
+}
+
+// Note: the memory of data is allocated outside
+void
+GetCBinaryData(CBinary c_binary, void* data) {
+    auto cBinary = (milvus::indexbuilder::IndexWrapper::Binary*)c_binary;
+    memcpy(data, cBinary->data.data(), cBinary->data.size());
+}
+
+void
+DeleteCBinary(CBinary c_binary) {
+    auto cBinary = (milvus::indexbuilder::IndexWrapper::Binary*)c_binary;
+    delete cBinary;
 }
 
 CStatus
@@ -264,4 +282,9 @@ DeleteIndexQueryResult(CIndexQueryResult res) {
         status.error_msg = strdup(e.what());
     }
     return status;
+}
+
+void
+DeleteByteArray(const char* array) {
+    delete[] array;
 }

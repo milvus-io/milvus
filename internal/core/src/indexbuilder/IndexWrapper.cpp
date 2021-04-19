@@ -214,8 +214,9 @@ IndexWrapper::StoreRawData(const knowhere::DatasetPtr& dataset) {
 
 /*
  * brief Return serialized binary set
+ * TODO: use a more efficient method to manage memory, consider std::vector later
  */
-milvus::indexbuilder::IndexWrapper::Binary
+std::unique_ptr<IndexWrapper::Binary>
 IndexWrapper::Serialize() {
     auto binarySet = index_->Serialize(config_);
     auto index_type = get_index_type();
@@ -238,10 +239,11 @@ IndexWrapper::Serialize() {
     auto ok = ret.SerializeToString(&serialized_data);
     Assert(ok);
 
-    auto data = new char[serialized_data.length()];
-    memcpy(data, serialized_data.c_str(), serialized_data.length());
+    auto binary = std::make_unique<IndexWrapper::Binary>();
+    binary->data.resize(serialized_data.length());
+    memcpy(binary->data.data(), serialized_data.c_str(), serialized_data.length());
 
-    return {data, static_cast<int32_t>(serialized_data.length())};
+    return binary;
 }
 
 void

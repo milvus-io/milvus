@@ -195,6 +195,12 @@ func (it *IndexBuildTask) Execute() error {
 		fmt.Println("NewCIndex err:", err.Error())
 		return err
 	}
+	defer func() {
+		err = it.index.Delete()
+		if err != nil {
+			log.Print("CIndexDelete Failed")
+		}
+	}()
 
 	getKeyByPathNaive := func(path string) string {
 		// splitElements := strings.Split(path, "/")
@@ -301,9 +307,9 @@ func (it *IndexBuildTask) Execute() error {
 			it.savePaths = append(it.savePaths, savePath)
 		}
 	}
-	err = it.index.Delete()
-	if err != nil {
-		log.Print("CIndexDelete Failed")
-	}
+	// err = it.index.Delete()
+	// if err != nil {
+	// 	log.Print("CIndexDelete Failed")
+	// }
 	return nil
 }

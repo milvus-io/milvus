@@ -130,14 +130,10 @@ type CIndex struct {
 }
 
 func (index *CIndex) Serialize() ([]*Blob, error) {
-	/*
-		CStatus
-		SerializeToSlicedBuffer(CIndex index, int32_t* buffer_size, char** res_buffer);
-	*/
+	var cBinary C.CBinary
+	defer C.DeleteCBinary(cBinary)
 
-	var cDumpedSlicedBuffer *C.char
-	var bufferSize int32
-	status := C.SerializeToSlicedBuffer(index.indexPtr, (*C.int32_t)(unsafe.Pointer(&bufferSize)), &cDumpedSlicedBuffer)
+	status := C.SerializeToSlicedBuffer(index.indexPtr, &cBinary)
 	errorCode := status.error_code
 	if errorCode != 0 {
 		errorMsg := C.GoString(status.error_msg)
@@ -145,11 +141,12 @@ func (index *CIndex) Serialize() ([]*Blob, error) {
 		return nil, errors.New("SerializeToSlicedBuffer failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}
 
-	defer C.free(unsafe.Pointer(cDumpedSlicedBuffer))
+	binarySize := C.GetCBinarySize(cBinary)
+	binaryData := make([]byte, binarySize)
+	C.GetCBinaryData(cBinary, unsafe.Pointer(&binaryData[0]))
 
-	dumpedSlicedBuffer := C.GoBytes(unsafe.Pointer(cDumpedSlicedBuffer), (C.int32_t)(bufferSize))
 	var blobs indexcgopb.BinarySet
-	err := proto.Unmarshal(dumpedSlicedBuffer, &blobs)
+	err := proto.Unmarshal(binaryData, &blobs)
 	if err != nil {
 		return nil, err
 	}

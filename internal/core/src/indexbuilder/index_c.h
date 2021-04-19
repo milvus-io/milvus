@@ -32,6 +32,7 @@ extern "C" {
 
 typedef void* CIndex;
 typedef void* CIndexQueryResult;
+typedef void* CBinary;
 
 // TODO: how could we pass map between go and c++ more efficiently?
 // Solution: using protobuf instead of json, this way significantly increase programming efficiency
@@ -49,7 +50,17 @@ CStatus
 BuildBinaryVecIndexWithoutIds(CIndex index, int64_t data_size, const uint8_t* vectors);
 
 CStatus
-SerializeToSlicedBuffer(CIndex index, int32_t* buffer_size, char** res_buffer);
+SerializeToSlicedBuffer(CIndex index, CBinary* c_binary);
+
+int64_t
+GetCBinarySize(CBinary c_binary);
+
+// Note: the memory of data is allocated outside
+void
+GetCBinaryData(CBinary c_binary, void* data);
+
+void
+DeleteCBinary(CBinary c_binary);
 
 CStatus
 LoadFromSlicedBuffer(CIndex index, const char* serialized_sliced_blob_buffer, int32_t size);
@@ -91,6 +102,9 @@ GetDistancesOfQueryResult(CIndexQueryResult res, float* distances);
 
 CStatus
 DeleteIndexQueryResult(CIndexQueryResult res);
+
+void
+DeleteByteArray(const char* array);
 
 #ifdef __cplusplus
 };

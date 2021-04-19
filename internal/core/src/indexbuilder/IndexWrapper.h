@@ -29,11 +29,10 @@ class IndexWrapper {
     BuildWithoutIds(const knowhere::DatasetPtr& dataset);
 
     struct Binary {
-        char* data;
-        int32_t size;
+        std::vector<char> data;
     };
 
-    Binary
+    std::unique_ptr<Binary>
     Serialize();
 
     void

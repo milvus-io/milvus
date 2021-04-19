@@ -556,7 +556,7 @@ TEST(IVFFLATNMWrapper, Codec) {
     auto binary = index->Serialize();
     auto copy_index =
         std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
-    ASSERT_NO_THROW(copy_index->Load(binary.data, binary.size));
+    ASSERT_NO_THROW(copy_index->Load(binary->data.data(), binary->data.size()));
     ASSERT_EQ(copy_index->dim(), copy_index->dim());
     auto copy_binary = copy_index->Serialize();
 }
@@ -657,13 +657,13 @@ TEST_P(IndexWrapperTest, Codec) {
     auto binary = index->Serialize();
     auto copy_index =
         std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
-    ASSERT_NO_THROW(copy_index->Load(binary.data, binary.size));
+    ASSERT_NO_THROW(copy_index->Load(binary->data.data(), binary->data.size()));
     ASSERT_EQ(copy_index->dim(), copy_index->dim());
     auto copy_binary = copy_index->Serialize();
     if (!milvus::indexbuilder::is_in_nm_list(index_type)) {
         // binary may be not same due to uncertain internal map order
-        ASSERT_EQ(binary.size, copy_binary.size);
-        ASSERT_EQ(strcmp(binary.data, copy_binary.data), 0);
+        ASSERT_EQ(binary->data.size(), copy_binary->data.size());
+        ASSERT_EQ(binary->data, copy_binary->data);
     }
 }
 
