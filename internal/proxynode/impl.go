@@ -3,6 +3,7 @@ package proxynode
 import (
 	"context"
 	"errors"
+	"os"
 	"strconv"
 
 	"go.uber.org/zap"
@@ -1281,7 +1282,7 @@ func (node *ProxyNode) RegisterLink(ctx context.Context, req *milvuspb.RegisterL
 		Address: nil,
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
+			Reason:    os.Getenv("DEPLOY_MODE"),
 		},
 	}, nil
 }
