@@ -132,7 +132,7 @@ func (mt *metaTable) reloadFromKV() error {
 		partitionInfo := pb.PartitionInfo{}
 		err = proto.UnmarshalText(value, &partitionInfo)
 		if err != nil {
-			return fmt.Errorf("MasterService UnmarshalText PartitionInfo err:%w", err)
+			return fmt.Errorf("MasterService UnmarshalText pb.PartitionInfo err:%w", err)
 		}
 		collID, ok := mt.partitionID2CollID[partitionInfo.PartitionID]
 		if !ok {
@@ -383,7 +383,7 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	}
 
 	// number of partition tags (except _default) should be limited to 4096 by default
-	if int64(len(coll.PartitionIDs)) > Params.MaxPartitionNum {
+	if int64(len(coll.PartitionIDs)) >= Params.MaxPartitionNum {
 		return fmt.Errorf("maximum partition's number should be limit to %d", Params.MaxPartitionNum)
 	}
 	for _, t := range coll.PartitionIDs {
