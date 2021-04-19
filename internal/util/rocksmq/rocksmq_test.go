@@ -269,3 +269,52 @@ func TestRocksMQ_Throughout(t *testing.T) {
 	cDuration := ct1 - ct0
 	log.Printf("Total consume %d item, cost %v ms, throughout %v / s", entityNum, cDuration, int64(entityNum)*1000/cDuration)
 }
+
+func TestRocksMQ_MultiChan(t *testing.T) {
+	etcdAddr := os.Getenv("ETCD_ADDRESS")
+	if etcdAddr == "" {
+		etcdAddr = "localhost:2379"
+	}
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	assert.Nil(t, err)
+	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
+	defer etcdKV.Close()
+	idAllocator := NewGlobalIDAllocator("dummy", etcdKV)
+	_ = idAllocator.Initialize()
+
+	name := "/tmp/rocksmq_multichan"
+	defer os.RemoveAll(name)
+	rmq, err := NewRocksMQ(name, idAllocator)
+	assert.Nil(t, err)
+
+	channelName0 := "chan01"
+	channelName1 := "chan11"
+	err = rmq.CreateChannel(channelName0)
+	assert.Nil(t, err)
+	defer rmq.DestroyChannel(channelName0)
+	err = rmq.CreateChannel(channelName1)
+	assert.Nil(t, err)
+	defer rmq.DestroyChannel(channelName1)
+	assert.Nil(t, err)
+
+	loopNum := 10
+	for i := 0; i < loopNum; i++ {
+		msg0 := "for_chann0_" + strconv.Itoa(i)
+		msg1 := "for_chann1_" + strconv.Itoa(i)
+		pMsg0 := ProducerMessage{payload: []byte(msg0)}
+		pMsg1 := ProducerMessage{payload: []byte(msg1)}
+		err = rmq.Produce(channelName0, []ProducerMessage{pMsg0})
+		assert.Nil(t, err)
+		err = rmq.Produce(channelName1, []ProducerMessage{pMsg1})
+		assert.Nil(t, err)
+	}
+
+	groupName := "test_group"
+	_ = rmq.DestroyConsumerGroup(groupName, channelName1)
+	_, err = rmq.CreateConsumerGroup(groupName, channelName1)
+	assert.Nil(t, err)
+	cMsgs, err := rmq.Consume(groupName, channelName1, 1)
+	assert.Nil(t, err)
+	assert.Equal(t, len(cMsgs), 1)
+	assert.Equal(t, string(cMsgs[0].Payload), "for_chann1_"+strconv.Itoa(0))
+}

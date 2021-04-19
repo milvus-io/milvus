@@ -144,7 +144,7 @@ func (ms *RmqMsgStream) Produce(pack *msgstream.MsgPack) error {
 				channelID := searchResult.ResultChannelID
 				channelIDInt, _ := strconv.ParseInt(channelID, 10, 64)
 				if channelIDInt >= int64(len(ms.producers)) {
-					return errors.New("Failed to produce pulsar msg to unKnow channel")
+					return errors.New("Failed to produce rmq msg to unKnow channel")
 				}
 				bucketValues[index] = int32(channelIDInt)
 				continue
@@ -177,38 +177,6 @@ func (ms *RmqMsgStream) Produce(pack *msgstream.MsgPack) error {
 			mb, err := v.Msgs[i].Marshal(v.Msgs[i])
 			if err != nil {
 				return err
-			}
-			//
-			//msg := &pulsar.ProducerMessage{Payload: mb}
-
-			//var child opentracing.Span
-			if v.Msgs[i].Type() == commonpb.MsgType_kInsert ||
-				v.Msgs[i].Type() == commonpb.MsgType_kSearch ||
-				v.Msgs[i].Type() == commonpb.MsgType_kSearchResult {
-				//tracer := opentracing.GlobalTracer()
-				//ctx := v.Msgs[i].GetMsgContext()
-				//if ctx == nil {
-				//	ctx = context.Background()
-				//}
-				//
-				//if parent := opentracing.SpanFromContext(ctx); parent != nil {
-				//	child = tracer.StartSpan("start send pulsar msg",
-				//		opentracing.FollowsFrom(parent.Context()))
-				//} else {
-				//	child = tracer.StartSpan("start send pulsar msg")
-				//}
-				//child.SetTag("hash keys", v.Msgs[i].HashKeys())
-				//child.SetTag("start time", v.Msgs[i].BeginTs())
-				//child.SetTag("end time", v.Msgs[i].EndTs())
-				//child.SetTag("msg type", v.Msgs[i].Type())
-				//msg.Properties = make(map[string]string)
-				//err = tracer.Inject(child.Context(), opentracing.TextMap, &propertiesReaderWriter{msg.Properties})
-				//if err != nil {
-				//	child.LogFields(oplog.Error(err))
-				//	child.Finish()
-				//	return err
-				//}
-				//child.LogFields(oplog.String("inject success", "inject success"))
 			}
 
 			m, err := msgstream.ConvertToByteArray(mb)
