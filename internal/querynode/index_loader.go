@@ -19,7 +19,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	minioKV "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -94,7 +94,7 @@ func (loader *indexLoader) execute(l *loadIndex) error {
 		}
 		return nil
 	}
-	err = util.Retry(5, time.Millisecond*200, fn)
+	err = msgstream.Retry(5, time.Millisecond*200, fn)
 	if err != nil {
 		return err
 	}

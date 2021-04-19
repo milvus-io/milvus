@@ -12,17 +12,15 @@ import (
 	ds "github.com/zilliztech/milvus-distributed/internal/dataservice"
 	"github.com/zilliztech/milvus-distributed/internal/logutil"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/rmqms"
 	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
 	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
 
 func newMsgFactory(localMsg bool) msgstream.Factory {
 	if localMsg {
-		return rmqms.NewFactory()
+		return msgstream.NewRmsFactory()
 	}
-	return pulsarms.NewFactory()
+	return msgstream.NewPmsFactory()
 }
 
 type MilvusRoles struct {

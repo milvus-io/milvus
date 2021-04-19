@@ -12,7 +12,7 @@ import (
 
 	distributed "github.com/zilliztech/milvus-distributed/cmd/distributed/components"
 	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/queryservice"
 )
 
@@ -28,7 +28,7 @@ func main() {
 		}
 	}()
 
-	msFactory := pulsarms.NewFactory()
+	msFactory := msgstream.NewPmsFactory()
 
 	svr, err := distributed.NewQueryService(ctx, msFactory)
 	if err != nil {

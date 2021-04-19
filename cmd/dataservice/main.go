@@ -12,7 +12,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/cmd/distributed/components"
 	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
 func main() {
@@ -22,7 +22,7 @@ func main() {
 	dataservice.Params.Init()
 	logutil.SetupLogger(&dataservice.Params.Log)
 	defer log.Sync()
-	msFactory := pulsarms.NewFactory()
+	msFactory := msgstream.NewPmsFactory()
 
 	svr, err := components.NewDataService(ctx, msFactory)
 	if err != nil {

@@ -1,23 +1,21 @@
-package memms
+package msgstream
 
 import (
 	"errors"
 	"sync"
-
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
 var Mmq *MemMQ
 var once sync.Once
 
-type Consumer struct {
+type MemConsumer struct {
 	GroupName   string
 	ChannelName string
-	MsgChan     chan *msgstream.MsgPack
+	MsgChan     chan *MsgPack
 }
 
 type MemMQ struct {
-	consumers  map[string][]*Consumer
+	consumers  map[string][]*MemConsumer
 	consumerMu sync.Mutex
 }
 
@@ -26,7 +24,7 @@ func (mmq *MemMQ) CreateChannel(channelName string) error {
 	defer mmq.consumerMu.Unlock()
 
 	if _, ok := mmq.consumers[channelName]; !ok {
-		consumers := make([]*Consumer, 0)
+		consumers := make([]*MemConsumer, 0)
 		mmq.consumers[channelName] = consumers
 	}
 
@@ -49,13 +47,13 @@ func (mmq *MemMQ) DestroyChannel(channelName string) error {
 	return nil
 }
 
-func (mmq *MemMQ) CreateConsumerGroup(groupName string, channelName string) (*Consumer, error) {
+func (mmq *MemMQ) CreateConsumerGroup(groupName string, channelName string) (*MemConsumer, error) {
 	mmq.consumerMu.Lock()
 	defer mmq.consumerMu.Unlock()
 
 	consumers, ok := mmq.consumers[channelName]
 	if !ok {
-		consumers = make([]*Consumer, 0)
+		consumers = make([]*MemConsumer, 0)
 		mmq.consumers[channelName] = consumers
 	}
 
@@ -67,10 +65,10 @@ func (mmq *MemMQ) CreateConsumerGroup(groupName string, channelName string) (*Co
 	}
 
 	// append new
-	consumer := Consumer{
+	consumer := MemConsumer{
 		GroupName:   groupName,
 		ChannelName: channelName,
-		MsgChan:     make(chan *msgstream.MsgPack, 1024),
+		MsgChan:     make(chan *MsgPack, 1024),
 	}
 
 	mmq.consumers[channelName] = append(mmq.consumers[channelName], &consumer)
@@ -86,7 +84,7 @@ func (mmq *MemMQ) DestroyConsumerGroup(groupName string, channelName string) err
 		return nil
 	}
 
-	tempConsumers := make([]*Consumer, 0)
+	tempConsumers := make([]*MemConsumer, 0)
 	for _, consumer := range consumers {
 		if consumer.GroupName == groupName {
 			// send nil to consumer so that client can close it self
@@ -137,7 +135,7 @@ func (mmq *MemMQ) Broadcast(msgPack *MsgPack) error {
 }
 
 func (mmq *MemMQ) Consume(groupName string, channelName string) (*MsgPack, error) {
-	var consumer *Consumer = nil
+	var consumer *MemConsumer = nil
 	mmq.consumerMu.Lock()
 	consumers := mmq.consumers[channelName]
 	for _, c := range consumers {
@@ -162,7 +160,7 @@ func InitMmq() error {
 		Mmq = &MemMQ{
 			consumerMu: sync.Mutex{},
 		}
-		Mmq.consumers = make(map[string][]*Consumer)
+		Mmq.consumers = make(map[string][]*MemConsumer)
 	})
 	return err
 }

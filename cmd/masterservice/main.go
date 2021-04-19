@@ -11,7 +11,7 @@ import (
 	distributed "github.com/zilliztech/milvus-distributed/cmd/distributed/components"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/masterservice"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"go.uber.org/zap"
 )
 
@@ -27,7 +27,7 @@ func main() {
 		}
 	}()
 
-	msFactory := pulsarms.NewFactory()
+	msFactory := msgstream.NewPmsFactory()
 	ms, err := distributed.NewMasterService(ctx, msFactory)
 	if err != nil {
 		panic(err)

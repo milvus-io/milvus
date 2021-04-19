@@ -2,19 +2,15 @@ package trace
 
 import (
 	"context"
+	"errors"
 	"io"
 	"runtime"
 	"strings"
 
-	"errors"
-
 	"github.com/opentracing/opentracing-go"
-	"github.com/opentracing/opentracing-go/ext"
 	"github.com/opentracing/opentracing-go/log"
 	"github.com/uber/jaeger-client-go"
 	"github.com/uber/jaeger-client-go/config"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
 
 func InitTracing(serviceName string) io.Closer {
@@ -50,7 +46,7 @@ func InitTracing(serviceName string) io.Closer {
 
 func StartSpanFromContext(ctx context.Context, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	if ctx == nil {
-		return noopSpan(), ctx
+		return NoopSpan(), ctx
 	}
 
 	var pcs [1]uintptr
@@ -79,7 +75,7 @@ func StartSpanFromContext(ctx context.Context, opts ...opentracing.StartSpanOpti
 
 func StartSpanFromContextWithOperationName(ctx context.Context, operationName string, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	if ctx == nil {
-		return noopSpan(), ctx
+		return NoopSpan(), ctx
 	}
 
 	var pcs [1]uintptr
@@ -140,73 +136,20 @@ func InfoFromContext(ctx context.Context) (traceID string, sampled bool, found b
 
 func InjectContextToPulsarMsgProperties(sc opentracing.SpanContext, properties map[string]string) {
 	tracer := opentracing.GlobalTracer()
-	tracer.Inject(sc, opentracing.TextMap, propertiesReaderWriter{properties})
+	tracer.Inject(sc, opentracing.TextMap, PropertiesReaderWriter{properties})
 }
 
-func ExtractFromPulsarMsgProperties(msg msgstream.TsMsg, properties map[string]string) (opentracing.Span, bool) {
-	if !allowTrace(msg) {
-		return noopSpan(), false
-	}
-	tracer := opentracing.GlobalTracer()
-	sc, _ := tracer.Extract(opentracing.TextMap, propertiesReaderWriter{properties})
-	name := "receive pulsar msg"
-	opts := []opentracing.StartSpanOption{
-		ext.RPCServerOption(sc),
-		opentracing.Tags{
-			"ID":       msg.ID(),
-			"Type":     msg.Type(),
-			"HashKeys": msg.HashKeys(),
-			"Position": msg.Position(),
-		}}
-	return opentracing.StartSpan(name, opts...), true
+type PropertiesReaderWriter struct {
+	PpMap map[string]string
 }
 
-func MsgSpanFromCtx(ctx context.Context, msg msgstream.TsMsg, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
-	if ctx == nil {
-		return noopSpan(), ctx
-	}
-	if !allowTrace(msg) {
-		return noopSpan(), ctx
-	}
-	operationName := "send pulsar msg"
-	opts = append(opts, opentracing.Tags{
-		"ID":       msg.ID(),
-		"Type":     msg.Type(),
-		"HashKeys": msg.HashKeys(),
-		"Position": msg.Position(),
-	})
-
-	var pcs [1]uintptr
-	n := runtime.Callers(2, pcs[:])
-	if n < 1 {
-		span, ctx := opentracing.StartSpanFromContext(ctx, operationName, opts...)
-		span.LogFields(log.Error(errors.New("runtime.Callers failed")))
-		return span, ctx
-	}
-	file, line := runtime.FuncForPC(pcs[0]).FileLine(pcs[0])
-
-	if parentSpan := opentracing.SpanFromContext(ctx); parentSpan != nil {
-		opts = append(opts, opentracing.ChildOf(parentSpan.Context()))
-	}
-	span := opentracing.StartSpan(operationName, opts...)
-	ctx = opentracing.ContextWithSpan(ctx, span)
-
-	span.LogFields(log.String("filename", file), log.Int("line", line))
-
-	return span, ctx
-}
-
-type propertiesReaderWriter struct {
-	ppMap map[string]string
-}
-
-func (ppRW propertiesReaderWriter) Set(key, val string) {
+func (ppRW PropertiesReaderWriter) Set(key, val string) {
 	key = strings.ToLower(key)
-	ppRW.ppMap[key] = val
+	ppRW.PpMap[key] = val
 }
 
-func (ppRW propertiesReaderWriter) ForeachKey(handler func(key, val string) error) error {
-	for k, val := range ppRW.ppMap {
+func (ppRW PropertiesReaderWriter) ForeachKey(handler func(key, val string) error) error {
+	for k, val := range ppRW.PpMap {
 		if err := handler(k, val); err != nil {
 			return err
 		}
@@ -214,20 +157,6 @@ func (ppRW propertiesReaderWriter) ForeachKey(handler func(key, val string) erro
 	return nil
 }
 
-func allowTrace(in interface{}) bool {
-	if in == nil {
-		return false
-	}
-	switch res := in.(type) {
-	case msgstream.TsMsg:
-		return !(res.Type() == commonpb.MsgType_TimeTick ||
-			res.Type() == commonpb.MsgType_QueryNodeStats ||
-			res.Type() == commonpb.MsgType_LoadIndex)
-	default:
-		return false
-	}
-}
-
-func noopSpan() opentracing.Span {
+func NoopSpan() opentracing.Span {
 	return opentracing.NoopTracer{}.StartSpan("Default-span")
 }

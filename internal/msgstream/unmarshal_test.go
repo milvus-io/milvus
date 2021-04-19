@@ -8,10 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
-
-var Params paramtable.BaseTable
 
 func newInsertMsgUnmarshal(input []byte) (TsMsg, error) {
 	insertRequest := internalpb.InsertRequest{}

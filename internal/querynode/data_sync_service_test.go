@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
@@ -110,7 +109,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	insertChannels := Params.InsertChannelNames
 	pulsarURL := Params.PulsarAddress
 
-	msFactory := pulsarms.NewFactory()
+	msFactory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
 		"receiveBufSize": receiveBufSize,
 		"pulsarAddress":  pulsarURL,

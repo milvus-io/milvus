@@ -17,7 +17,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/indexnode"
 	minioKV "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -1015,7 +1014,7 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, 
 	insertChannels := Params.InsertChannelNames
 	ddChannels := Params.DDChannelNames
 
-	msFactory := pulsarms.NewFactory()
+	msFactory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
 		"receiveBufSize": receiveBufSize,
 		"pulsarAddress":  Params.PulsarAddress,
@@ -1081,7 +1080,7 @@ func sentTimeTick(ctx context.Context) error {
 	insertChannels := Params.InsertChannelNames
 	ddChannels := Params.DDChannelNames
 
-	msFactory := pulsarms.NewFactory()
+	msFactory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
 		"receiveBufSize": receiveBufSize,
 		"pulsarAddress":  Params.PulsarAddress,

@@ -27,8 +27,6 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/ms"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -343,48 +341,48 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 }
 
 func (node *QueryNode) RemoveQueryChannel(ctx context.Context, in *queryPb.RemoveQueryChannelRequest) (*commonpb.Status, error) {
-	if node.searchService == nil || node.searchService.searchMsgStream == nil {
-		errMsg := "null search service or null search result message stream"
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    errMsg,
-		}
+	// if node.searchService == nil || node.searchService.searchMsgStream == nil {
+	// 	errMsg := "null search service or null search result message stream"
+	// 	status := &commonpb.Status{
+	// 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	// 		Reason:    errMsg,
+	// 	}
 
-		return status, errors.New(errMsg)
-	}
+	// 	return status, errors.New(errMsg)
+	// }
 
-	searchStream, ok := node.searchService.searchMsgStream.(*pulsarms.PulsarMsgStream)
-	if !ok {
-		errMsg := "type assertion failed for search message stream"
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    errMsg,
-		}
+	// searchStream, ok := node.searchService.searchMsgStream.(*pulsarms.PulsarMsgStream)
+	// if !ok {
+	// 	errMsg := "type assertion failed for search message stream"
+	// 	status := &commonpb.Status{
+	// 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	// 		Reason:    errMsg,
+	// 	}
 
-		return status, errors.New(errMsg)
-	}
+	// 	return status, errors.New(errMsg)
+	// }
 
-	resultStream, ok := node.searchService.searchResultMsgStream.(*pulsarms.PulsarMsgStream)
-	if !ok {
-		errMsg := "type assertion failed for search result message stream"
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    errMsg,
-		}
+	// resultStream, ok := node.searchService.searchResultMsgStream.(*pulsarms.PulsarMsgStream)
+	// if !ok {
+	// 	errMsg := "type assertion failed for search result message stream"
+	// 	status := &commonpb.Status{
+	// 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	// 		Reason:    errMsg,
+	// 	}
 
-		return status, errors.New(errMsg)
-	}
+	// 	return status, errors.New(errMsg)
+	// }
 
-	// remove request channel
-	consumeChannels := []string{in.RequestChannelID}
-	consumeSubName := Params.MsgChannelSubName
-	// TODO: searchStream.RemovePulsarConsumers(producerChannels)
-	searchStream.AsConsumer(consumeChannels, consumeSubName)
+	// // remove request channel
+	// consumeChannels := []string{in.RequestChannelID}
+	// consumeSubName := Params.MsgChannelSubName
+	// // TODO: searchStream.RemovePulsarConsumers(producerChannels)
+	// searchStream.AsConsumer(consumeChannels, consumeSubName)
 
-	// remove result channel
-	producerChannels := []string{in.ResultChannelID}
-	// TODO: resultStream.RemovePulsarProducer(producerChannels)
-	resultStream.AsProducer(producerChannels)
+	// // remove result channel
+	// producerChannels := []string{in.ResultChannelID}
+	// // TODO: resultStream.RemovePulsarProducer(producerChannels)
+	// resultStream.AsProducer(producerChannels)
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -407,7 +405,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 	}
 
 	switch t := ds.dmStream.(type) {
-	case *ms.TtMsgStream:
+	case *msgstream.MqTtMsgStream:
 	default:
 		_ = t
 		errMsg := "type assertion failed for dm message stream"

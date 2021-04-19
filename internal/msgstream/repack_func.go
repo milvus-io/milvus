@@ -1,17 +1,11 @@
-package util
+package msgstream
 
 import (
 	"errors"
 
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
-
-type MsgStream = msgstream.MsgStream
-type TsMsg = msgstream.TsMsg
-type MsgPack = msgstream.MsgPack
-type BaseMsg = msgstream.BaseMsg
 
 func InsertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
 	result := make(map[int32]*MsgPack)
@@ -19,7 +13,7 @@ func InsertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 		if request.Type() != commonpb.MsgType_Insert {
 			return nil, errors.New("msg's must be Insert")
 		}
-		insertRequest := request.(*msgstream.InsertMsg)
+		insertRequest := request.(*InsertMsg)
 		keys := hashKeys[i]
 
 		timestampLen := len(insertRequest.Timestamps)
@@ -56,7 +50,7 @@ func InsertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 				RowData:        []*commonpb.Blob{insertRequest.RowData[index]},
 			}
 
-			insertMsg := &msgstream.InsertMsg{
+			insertMsg := &InsertMsg{
 				BaseMsg: BaseMsg{
 					Ctx: request.TraceCtx(),
 				},
@@ -74,7 +68,7 @@ func DeleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 		if request.Type() != commonpb.MsgType_Delete {
 			return nil, errors.New("msg's must be Delete")
 		}
-		deleteRequest := request.(*msgstream.DeleteMsg)
+		deleteRequest := request.(*DeleteMsg)
 		keys := hashKeys[i]
 
 		timestampLen := len(deleteRequest.Timestamps)
@@ -105,7 +99,7 @@ func DeleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 				PrimaryKeys:    []int64{deleteRequest.PrimaryKeys[index]},
 			}
 
-			deleteMsg := &msgstream.DeleteMsg{
+			deleteMsg := &DeleteMsg{
 				BaseMsg: BaseMsg{
 					Ctx: request.TraceCtx(),
 				},

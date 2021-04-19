@@ -1,4 +1,4 @@
-package ms
+package msgstream
 
 import (
 	"context"
@@ -11,8 +11,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/mqclient"
@@ -20,28 +18,12 @@ import (
 	"go.uber.org/zap"
 )
 
-type MessageID = mqclient.MessageID
-type Client = mqclient.Client
-type Producer = mqclient.Producer
-type Consumer = mqclient.Consumer
-type TsMsg = msgstream.TsMsg
-type MsgPack = msgstream.MsgPack
-type MsgType = msgstream.MsgType
-type UniqueID = msgstream.UniqueID
-type BaseMsg = msgstream.BaseMsg
-type Timestamp = msgstream.Timestamp
-type IntPrimaryKey = msgstream.IntPrimaryKey
-type TimeTickMsg = msgstream.TimeTickMsg
-type QueryNodeStatsMsg = msgstream.QueryNodeStatsMsg
-type RepackFunc = msgstream.RepackFunc
-type UnmarshalDispatcher = msgstream.UnmarshalDispatcher
-
-type msgStream struct {
+type mqMsgStream struct {
 	ctx              context.Context
-	client           Client
-	producers        map[string]Producer
+	client           mqclient.Client
+	producers        map[string]mqclient.Producer
 	producerChannels []string
-	consumers        map[string]Consumer
+	consumers        map[string]mqclient.Consumer
 	consumerChannels []string
 	repackFunc       RepackFunc
 	unmarshal        UnmarshalDispatcher
@@ -53,20 +35,20 @@ type msgStream struct {
 	consumerLock     *sync.Mutex
 }
 
-func NewMsgStream(ctx context.Context,
+func NewMqMsgStream(ctx context.Context,
 	receiveBufSize int64,
 	bufSize int64,
-	client Client,
-	unmarshal UnmarshalDispatcher) (*msgStream, error) {
+	client mqclient.Client,
+	unmarshal UnmarshalDispatcher) (*mqMsgStream, error) {
 
 	streamCtx, streamCancel := context.WithCancel(ctx)
-	producers := make(map[string]Producer)
-	consumers := make(map[string]Consumer)
+	producers := make(map[string]mqclient.Producer)
+	consumers := make(map[string]mqclient.Consumer)
 	producerChannels := make([]string, 0)
 	consumerChannels := make([]string, 0)
 	receiveBuf := make(chan *MsgPack, receiveBufSize)
 
-	stream := &msgStream{
+	stream := &mqMsgStream{
 		ctx:              streamCtx,
 		client:           client,
 		producers:        producers,
@@ -85,7 +67,7 @@ func NewMsgStream(ctx context.Context,
 	return stream, nil
 }
 
-func (ms *msgStream) AsProducer(channels []string) {
+func (ms *mqMsgStream) AsProducer(channels []string) {
 	for _, channel := range channels {
 		fn := func() error {
 			pp, err := ms.client.CreateProducer(mqclient.ProducerOptions{Topic: channel})
@@ -102,7 +84,7 @@ func (ms *msgStream) AsProducer(channels []string) {
 			ms.producerLock.Unlock()
 			return nil
 		}
-		err := util.Retry(20, time.Millisecond*200, fn)
+		err := Retry(20, time.Millisecond*200, fn)
 		if err != nil {
 			errMsg := "Failed to create producer " + channel + ", error = " + err.Error()
 			panic(errMsg)
@@ -110,7 +92,7 @@ func (ms *msgStream) AsProducer(channels []string) {
 	}
 }
 
-func (ms *msgStream) AsConsumer(channels []string,
+func (ms *mqMsgStream) AsConsumer(channels []string,
 	subName string) {
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
@@ -138,7 +120,7 @@ func (ms *msgStream) AsConsumer(channels []string,
 			go ms.receiveMsg(pc)
 			return nil
 		}
-		err := util.Retry(20, time.Millisecond*200, fn)
+		err := Retry(20, time.Millisecond*200, fn)
 		if err != nil {
 			errMsg := "Failed to create consumer " + channel + ", error = " + err.Error()
 			panic(errMsg)
@@ -146,14 +128,14 @@ func (ms *msgStream) AsConsumer(channels []string,
 	}
 }
 
-func (ms *msgStream) SetRepackFunc(repackFunc RepackFunc) {
+func (ms *mqMsgStream) SetRepackFunc(repackFunc RepackFunc) {
 	ms.repackFunc = repackFunc
 }
 
-func (ms *msgStream) Start() {
+func (ms *mqMsgStream) Start() {
 }
 
-func (ms *msgStream) Close() {
+func (ms *mqMsgStream) Close() {
 	ms.streamCancel()
 	ms.wait.Wait()
 
@@ -172,7 +154,7 @@ func (ms *msgStream) Close() {
 	}
 }
 
-func (ms *msgStream) Produce(msgPack *MsgPack) error {
+func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 	tsMsgs := msgPack.Msgs
 	if len(tsMsgs) <= 0 {
 		log.Debug("Warning: Receive empty msgPack")
@@ -187,7 +169,7 @@ func (ms *msgStream) Produce(msgPack *MsgPack) error {
 		bucketValues := make([]int32, len(hashValues))
 		for index, hashValue := range hashValues {
 			if tsMsg.Type() == commonpb.MsgType_SearchResult {
-				searchResult := tsMsg.(*msgstream.SearchResultMsg)
+				searchResult := tsMsg.(*SearchResultMsg)
 				channelID := searchResult.ResultChannelID
 				channelIDInt, _ := strconv.ParseInt(channelID, 10, 64)
 				if channelIDInt >= int64(len(ms.producers)) {
@@ -209,11 +191,11 @@ func (ms *msgStream) Produce(msgPack *MsgPack) error {
 		msgType := (tsMsgs[0]).Type()
 		switch msgType {
 		case commonpb.MsgType_Insert:
-			result, err = util.InsertRepackFunc(tsMsgs, reBucketValues)
+			result, err = InsertRepackFunc(tsMsgs, reBucketValues)
 		case commonpb.MsgType_Delete:
-			result, err = util.DeleteRepackFunc(tsMsgs, reBucketValues)
+			result, err = DeleteRepackFunc(tsMsgs, reBucketValues)
 		default:
-			result, err = util.DefaultRepackFunc(tsMsgs, reBucketValues)
+			result, err = DefaultRepackFunc(tsMsgs, reBucketValues)
 		}
 	}
 	if err != nil {
@@ -222,14 +204,14 @@ func (ms *msgStream) Produce(msgPack *MsgPack) error {
 	for k, v := range result {
 		channel := ms.producerChannels[k]
 		for i := 0; i < len(v.Msgs); i++ {
-			sp, spanCtx := trace.MsgSpanFromCtx(v.Msgs[i].TraceCtx(), v.Msgs[i])
+			sp, spanCtx := MsgSpanFromCtx(v.Msgs[i].TraceCtx(), v.Msgs[i])
 
 			mb, err := v.Msgs[i].Marshal(v.Msgs[i])
 			if err != nil {
 				return err
 			}
 
-			m, err := msgstream.ConvertToByteArray(mb)
+			m, err := ConvertToByteArray(mb)
 			if err != nil {
 				return err
 			}
@@ -252,16 +234,16 @@ func (ms *msgStream) Produce(msgPack *MsgPack) error {
 	return nil
 }
 
-func (ms *msgStream) Broadcast(msgPack *MsgPack) error {
+func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) error {
 	for _, v := range msgPack.Msgs {
-		sp, spanCtx := trace.MsgSpanFromCtx(v.TraceCtx(), v)
+		sp, spanCtx := MsgSpanFromCtx(v.TraceCtx(), v)
 
 		mb, err := v.Marshal(v)
 		if err != nil {
 			return err
 		}
 
-		m, err := msgstream.ConvertToByteArray(mb)
+		m, err := ConvertToByteArray(mb)
 		if err != nil {
 			return err
 		}
@@ -287,7 +269,7 @@ func (ms *msgStream) Broadcast(msgPack *MsgPack) error {
 	return nil
 }
 
-func (ms *msgStream) Consume() *MsgPack {
+func (ms *mqMsgStream) Consume() *MsgPack {
 	for {
 		select {
 		case cm, ok := <-ms.receiveBuf:
@@ -303,7 +285,7 @@ func (ms *msgStream) Consume() *MsgPack {
 	}
 }
 
-func (ms *msgStream) receiveMsg(consumer Consumer) {
+func (ms *mqMsgStream) receiveMsg(consumer mqclient.Consumer) {
 	defer ms.wait.Done()
 
 	for {
@@ -327,12 +309,12 @@ func (ms *msgStream) receiveMsg(consumer Consumer) {
 				continue
 			}
 
-			sp, ok := trace.ExtractFromPulsarMsgProperties(tsMsg, msg.Properties())
+			sp, ok := ExtractFromPulsarMsgProperties(tsMsg, msg.Properties())
 			if ok {
 				tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
 			}
 
-			tsMsg.SetPosition(&msgstream.MsgPosition{
+			tsMsg.SetPosition(&MsgPosition{
 				ChannelName: filepath.Base(msg.Topic()),
 				//FIXME
 				MsgID: msg.ID().Serialize(),
@@ -346,11 +328,11 @@ func (ms *msgStream) receiveMsg(consumer Consumer) {
 	}
 }
 
-func (ms *msgStream) Chan() <-chan *MsgPack {
+func (ms *mqMsgStream) Chan() <-chan *MsgPack {
 	return ms.receiveBuf
 }
 
-func (ms *msgStream) Seek(mp *internalpb.MsgPosition) error {
+func (ms *mqMsgStream) Seek(mp *internalpb.MsgPosition) error {
 	if _, ok := ms.consumers[mp.ChannelName]; ok {
 		consumer := ms.consumers[mp.ChannelName]
 		messageID, err := ms.client.BytesToMsgID(mp.MsgID)
@@ -367,32 +349,32 @@ func (ms *msgStream) Seek(mp *internalpb.MsgPosition) error {
 	return errors.New("msgStream seek fail")
 }
 
-type TtMsgStream struct {
-	msgStream
-	unsolvedBuf     map[Consumer][]TsMsg
-	msgPositions    map[Consumer]*internalpb.MsgPosition
+type MqTtMsgStream struct {
+	mqMsgStream
+	unsolvedBuf     map[mqclient.Consumer][]TsMsg
+	msgPositions    map[mqclient.Consumer]*internalpb.MsgPosition
 	unsolvedMutex   *sync.Mutex
 	lastTimeStamp   Timestamp
 	syncConsumer    chan int
-	stopConsumeChan map[Consumer]chan bool
+	stopConsumeChan map[mqclient.Consumer]chan bool
 }
 
-func NewTtMsgStream(ctx context.Context,
+func NewMqTtMsgStream(ctx context.Context,
 	receiveBufSize int64,
 	bufSize int64,
-	client Client,
-	unmarshal UnmarshalDispatcher) (*TtMsgStream, error) {
-	msgStream, err := NewMsgStream(ctx, receiveBufSize, bufSize, client, unmarshal)
+	client mqclient.Client,
+	unmarshal UnmarshalDispatcher) (*MqTtMsgStream, error) {
+	msgStream, err := NewMqMsgStream(ctx, receiveBufSize, bufSize, client, unmarshal)
 	if err != nil {
 		return nil, err
 	}
-	unsolvedBuf := make(map[Consumer][]TsMsg)
-	stopChannel := make(map[Consumer]chan bool)
-	msgPositions := make(map[Consumer]*internalpb.MsgPosition)
+	unsolvedBuf := make(map[mqclient.Consumer][]TsMsg)
+	stopChannel := make(map[mqclient.Consumer]chan bool)
+	msgPositions := make(map[mqclient.Consumer]*internalpb.MsgPosition)
 	syncConsumer := make(chan int, 1)
 
-	return &TtMsgStream{
-		msgStream:       *msgStream,
+	return &MqTtMsgStream{
+		mqMsgStream:     *msgStream,
 		unsolvedBuf:     unsolvedBuf,
 		msgPositions:    msgPositions,
 		unsolvedMutex:   &sync.Mutex{},
@@ -401,7 +383,7 @@ func NewTtMsgStream(ctx context.Context,
 	}, nil
 }
 
-func (ms *TtMsgStream) addConsumer(consumer Consumer, channel string) {
+func (ms *MqTtMsgStream) addConsumer(consumer mqclient.Consumer, channel string) {
 	if len(ms.consumers) == 0 {
 		ms.syncConsumer <- 1
 	}
@@ -417,7 +399,7 @@ func (ms *TtMsgStream) addConsumer(consumer Consumer, channel string) {
 	ms.stopConsumeChan[consumer] = stopConsumeChan
 }
 
-func (ms *TtMsgStream) AsConsumer(channels []string,
+func (ms *MqTtMsgStream) AsConsumer(channels []string,
 	subName string) {
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
@@ -444,7 +426,7 @@ func (ms *TtMsgStream) AsConsumer(channels []string,
 			ms.consumerLock.Unlock()
 			return nil
 		}
-		err := util.Retry(10, time.Millisecond*200, fn)
+		err := Retry(10, time.Millisecond*200, fn)
 		if err != nil {
 			errMsg := "Failed to create consumer " + channel + ", error = " + err.Error()
 			panic(errMsg)
@@ -452,14 +434,14 @@ func (ms *TtMsgStream) AsConsumer(channels []string,
 	}
 }
 
-func (ms *TtMsgStream) Start() {
+func (ms *MqTtMsgStream) Start() {
 	if ms.consumers != nil {
 		ms.wait.Add(1)
 		go ms.bufMsgPackToChannel()
 	}
 }
 
-func (ms *TtMsgStream) Close() {
+func (ms *MqTtMsgStream) Close() {
 	ms.streamCancel()
 	close(ms.syncConsumer)
 	ms.wait.Wait()
@@ -479,11 +461,11 @@ func (ms *TtMsgStream) Close() {
 	}
 }
 
-func (ms *TtMsgStream) bufMsgPackToChannel() {
+func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 	defer ms.wait.Done()
-	ms.unsolvedBuf = make(map[Consumer][]TsMsg)
-	isChannelReady := make(map[Consumer]bool)
-	eofMsgTimeStamp := make(map[Consumer]Timestamp)
+	ms.unsolvedBuf = make(map[mqclient.Consumer][]TsMsg)
+	isChannelReady := make(map[mqclient.Consumer]bool)
+	eofMsgTimeStamp := make(map[mqclient.Consumer]Timestamp)
 
 	if _, ok := <-ms.syncConsumer; !ok {
 		log.Debug("consumer closed!")
@@ -570,8 +552,8 @@ func (ms *TtMsgStream) bufMsgPackToChannel() {
 	}
 }
 
-func (ms *TtMsgStream) findTimeTick(consumer Consumer,
-	eofMsgMap map[Consumer]Timestamp,
+func (ms *MqTtMsgStream) findTimeTick(consumer mqclient.Consumer,
+	eofMsgMap map[mqclient.Consumer]Timestamp,
 	wg *sync.WaitGroup,
 	findMapMutex *sync.RWMutex) {
 	defer wg.Done()
@@ -599,12 +581,12 @@ func (ms *TtMsgStream) findTimeTick(consumer Consumer,
 			}
 
 			// set msg info to tsMsg
-			tsMsg.SetPosition(&msgstream.MsgPosition{
+			tsMsg.SetPosition(&MsgPosition{
 				ChannelName: filepath.Base(msg.Topic()),
 				MsgID:       msg.ID().Serialize(),
 			})
 
-			sp, ok := trace.ExtractFromPulsarMsgProperties(tsMsg, msg.Properties())
+			sp, ok := ExtractFromPulsarMsgProperties(tsMsg, msg.Properties())
 			if ok {
 				tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
 			}
@@ -627,8 +609,8 @@ func (ms *TtMsgStream) findTimeTick(consumer Consumer,
 	}
 }
 
-func checkTimeTickMsg(msg map[Consumer]Timestamp,
-	isChannelReady map[Consumer]bool,
+func checkTimeTickMsg(msg map[mqclient.Consumer]Timestamp,
+	isChannelReady map[mqclient.Consumer]bool,
 	mu *sync.RWMutex) (Timestamp, bool) {
 	checkMap := make(map[Timestamp]int)
 	var maxTime Timestamp = 0
@@ -658,11 +640,11 @@ func checkTimeTickMsg(msg map[Consumer]Timestamp,
 	return 0, false
 }
 
-func (ms *TtMsgStream) Seek(mp *internalpb.MsgPosition) error {
+func (ms *MqTtMsgStream) Seek(mp *internalpb.MsgPosition) error {
 	if len(mp.MsgID) == 0 {
 		return errors.New("when msgID's length equal to 0, please use AsConsumer interface")
 	}
-	var consumer Consumer
+	var consumer mqclient.Consumer
 	var err error
 	var hasWatched bool
 	seekChannel := mp.ChannelName
@@ -706,7 +688,7 @@ func (ms *TtMsgStream) Seek(mp *internalpb.MsgPosition) error {
 
 		return nil
 	}
-	err = util.Retry(20, time.Millisecond*200, fn)
+	err = Retry(20, time.Millisecond*200, fn)
 	if err != nil {
 		errMsg := "Failed to seek, error = " + err.Error()
 		panic(errMsg)
@@ -744,7 +726,7 @@ func (ms *TtMsgStream) Seek(mp *internalpb.MsgPosition) error {
 				continue
 			}
 			if tsMsg.BeginTs() > mp.Timestamp {
-				tsMsg.SetPosition(&msgstream.MsgPosition{
+				tsMsg.SetPosition(&MsgPosition{
 					ChannelName: filepath.Base(msg.Topic()),
 					MsgID:       msg.ID().Serialize(),
 				})
