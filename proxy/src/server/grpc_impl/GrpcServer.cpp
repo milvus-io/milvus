@@ -34,6 +34,8 @@
 
 #include "GrpcRequestHandler.h"
 #include "config/ServerConfig.h"
+#include "server/hello/HelloService.h"
+#include "server/hello/ReportAddress.h"
 // #include "server/DBWrapper.h"
 #include "server/grpc_impl/interceptor/SpanInterceptor.h"
 #include "utils/Log.h"
@@ -82,7 +84,7 @@ Status
 GrpcServer::StartService() {
     SetThreadName("grpcserv_thread");
 
-    std::string server_address(config.network.address() + ":" + std::to_string(config.network.port()));
+    std::string server_address(config.network.bind.address() + ":" + std::to_string(config.network.bind.port()));
 
     ::grpc::ServerBuilder builder;
     builder.SetOption(std::unique_ptr<::grpc::ServerBuilderOption>(new NoReusePortOption));
@@ -99,6 +101,9 @@ GrpcServer::StartService() {
     builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
 
+    HelloService helloService;
+    builder.RegisterService(&helloService);
+
 
   // timeSync
   // client id should same to MessageWrapper
@@ -107,6 +112,14 @@ GrpcServer::StartService() {
       (std::string{"pulsar://"} + config.pulsar.address() + ":" + std::to_string(config.pulsar.port()));
   timesync::TimeSync syc(client_id,GetMessageTimeSyncTime, 20, pulsar_server_addr, "TimeSync");
 
+  // report address to master, test only for now
+//    auto reportClient = new ReportClient(::grpc::CreateChannel("192.168.2.28:50051",
+//                                                             ::grpc::InsecureChannelCredentials()));
+//    auto status = reportClient->ReportAddress();
+//    delete(reportClient);
+//    if (!status.ok()){
+//        return Status(milvus::DB_ERROR, "");
+//    }
 
     // Add gRPC interceptor
     using InterceptorI = ::grpc::experimental::ServerInterceptorFactoryInterface;

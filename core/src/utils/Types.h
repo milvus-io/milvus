@@ -137,10 +137,8 @@ struct AttrsData {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 struct QueryResult {
-    uint64_t row_num_;     // row_num_ = topK * num_queries_
-    uint64_t topK_;
-    uint64_t num_queries_; // currently must be 1
-    engine::ResultIds result_ids_; // top1, top2, ..;
+    uint64_t row_num_;
+    engine::ResultIds result_ids_;
     engine::ResultDistances result_distances_;
     // engine::DataChunkPtr data_chunk_;
 };

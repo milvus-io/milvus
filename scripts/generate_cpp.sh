@@ -49,7 +49,7 @@ GRPC_INCLUDE=.:.
 rm -rf proto-cpp && mkdir -p proto-cpp
 
 PB_FILES=()
-GRPC_FILES=("message.proto")
+GRPC_FILES=("hello.proto" "master.proto" "message.proto")
 
 ALL_FILES=("${PB_FILES[@]}")
 ALL_FILES+=("${GRPC_FILES[@]}")

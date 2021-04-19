@@ -41,11 +41,7 @@ if [ -z $GOPATH ]; then
     exit 1
 fi
 
-export PATH=${GOPATH}/bin:$PATH
-echo `which protoc-gen-go`
-
 GO_PREFIX_PATH=github.com/czs007/suvlim/pkg
-
 
 function collect() {
     file=$(basename $1)

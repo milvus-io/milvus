@@ -2,8 +2,8 @@ package message_client
 
 import (
 	"context"
-	"github.com/apache/pulsar-client-go/pulsar"
-	msgpb "github.com/czs007/suvlim/pkg/master/grpc/message"
+	"github.com/apache/pulsar/pulsar-client-go/pulsar"
+	msgpb "github.com/czs007/suvlim/pkg/message"
 	"github.com/golang/protobuf/proto"
 	"log"
 )
@@ -30,9 +30,8 @@ type MessageClient struct {
 }
 
 func (mc *MessageClient) Send(ctx context.Context, msg msgpb.Key2SegMsg) {
-	var msgBuffer, _ = proto.Marshal(&msg)
-	if _, err := mc.key2segProducer.Send(ctx, &pulsar.ProducerMessage{
-		Payload: msgBuffer,
+	if err := mc.key2segProducer.Send(ctx, pulsar.ProducerMessage{
+		Payload: []byte(msg.String()),
 	}); err != nil {
 		log.Fatal(err)
 	}

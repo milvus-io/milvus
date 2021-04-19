@@ -22,6 +22,7 @@
 #include "utils/SignalHandler.h"
 #include "utils/Status.h"
 #include "message_client/Client.h"
+#include "etcd_watcher/etcd_watcher.h"
 
 INITIALIZE_EASYLOGGINGPP
 

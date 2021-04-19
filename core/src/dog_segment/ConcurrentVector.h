@@ -115,7 +115,7 @@ class ConcurrentVector : public VectorBase {
 
     void
     set_data_raw(ssize_t element_offset, void* source, ssize_t element_count) override {
-        set_data(element_offset, static_cast<const Type*>(source), element_count);
+        set_data(element_count, static_cast<const Type*>(source), element_count);
     }
 
     void

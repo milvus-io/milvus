@@ -15,36 +15,34 @@ import "C"
 
 import (
 	"fmt"
-	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
+	msgPb "github.com/czs007/suvlim/pkg/message"
 	"github.com/czs007/suvlim/reader/message_client"
 	"sort"
 	"sync"
-	"sync/atomic"
-	"time"
 )
 
 type InsertData struct {
-	insertIDs        map[int64][]int64
-	insertTimestamps map[int64][]uint64
-	insertRecords    map[int64][][]byte
-	insertOffset     map[int64]int64
+	insertIDs 			map[int64][]int64
+	insertTimestamps 	map[int64][]uint64
+	insertRecords 		map[int64][][]byte
+	insertOffset		map[int64]int64
 }
 
 type DeleteData struct {
-	deleteIDs        map[int64][]int64
-	deleteTimestamps map[int64][]uint64
-	deleteOffset     map[int64]int64
+	deleteIDs 			map[int64][]int64
+	deleteTimestamps 	map[int64][]uint64
+	deleteOffset		map[int64]int64
 }
 
 type DeleteRecord struct {
-	entityID  int64
-	timestamp uint64
-	segmentID int64
+	entityID  		int64
+	timestamp 		uint64
+	segmentID 		int64
 }
 
 type DeletePreprocessData struct {
-	deleteRecords []*DeleteRecord
-	count         int32
+	deleteRecords  			[]*DeleteRecord
+	count            		chan int
 }
 
 type QueryNodeDataBuffer struct {
@@ -62,7 +60,7 @@ type QueryNode struct {
 	queryNodeTimeSync    *QueryNodeTime
 	buffer               QueryNodeDataBuffer
 	deletePreprocessData DeletePreprocessData
-	deleteData           DeleteData
+	deleteData			 DeleteData
 	insertData           InsertData
 }
 
@@ -79,45 +77,13 @@ func NewQueryNode(queryNodeId uint64, timeSync uint64) *QueryNode {
 
 	segmentsMap := make(map[int64]*Segment)
 
-	buffer := QueryNodeDataBuffer{
-		InsertDeleteBuffer:      make([]*msgPb.InsertOrDeleteMsg, 0),
-		SearchBuffer:            make([]*msgPb.SearchMsg, 0),
-		validInsertDeleteBuffer: make([]bool, 0),
-		validSearchBuffer:       make([]bool, 0),
-	}
-
 	return &QueryNode{
-		QueryNodeId:          queryNodeId,
-		Collections:          nil,
-		SegmentsMap:          segmentsMap,
-		messageClient:        mc,
-		queryNodeTimeSync:    queryNodeTimeSync,
-		buffer:               buffer,
+		QueryNodeId:       queryNodeId,
+		Collections:       nil,
+		SegmentsMap:       segmentsMap,
+		messageClient:     mc,
+		queryNodeTimeSync: queryNodeTimeSync,
 	}
-}
-
-func (node *QueryNode) QueryNodeDataInit() {
-	deletePreprocessData := DeletePreprocessData{
-		deleteRecords: make([]*DeleteRecord, 0),
-		count:         0,
-	}
-
-	deleteData := DeleteData{
-		deleteIDs:        make(map[int64][]int64),
-		deleteTimestamps: make(map[int64][]uint64),
-		deleteOffset:     make(map[int64]int64),
-	}
-
-	insertData := InsertData{
-		insertIDs:        make(map[int64][]int64),
-		insertTimestamps: make(map[int64][]uint64),
-		insertRecords:    make(map[int64][][]byte),
-		insertOffset:     make(map[int64]int64),
-	}
-
-	node.deletePreprocessData = deletePreprocessData
-	node.deleteData = deleteData
-	node.insertData = insertData
 }
 
 func (node *QueryNode) NewCollection(collectionName string, schemaConfig string) *Collection {
@@ -140,14 +106,13 @@ func (node *QueryNode) DeleteCollection(collection *Collection) {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-func (node *QueryNode) PrepareBatchMsg() []int {
-	var msgLen = node.messageClient.PrepareBatchMsg()
-	return msgLen
+func (node *QueryNode) PrepareBatchMsg() {
+	node.messageClient.PrepareBatchMsg()
 }
 
 func (node *QueryNode) StartMessageClient() {
 	// TODO: add consumerMsgSchema
-	node.messageClient.InitClient("pulsar://192.168.2.28:6650")
+	node.messageClient.InitClient("pulsar://localhost:6650")
 
 	go node.messageClient.ReceiveMessage()
 }
@@ -158,47 +123,26 @@ func (node *QueryNode) InitQueryNodeCollection() {
 	var newCollection = node.NewCollection("collection1", "fakeSchema")
 	var newPartition = newCollection.NewPartition("partition1")
 	// TODO: add segment id
-	var segment = newPartition.NewSegment(0)
-	node.SegmentsMap[0] = segment
+	var _ = newPartition.NewSegment(0)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 func (node *QueryNode) RunInsertDelete() {
 	for {
-		time.Sleep(2 * 1000 * time.Millisecond)
-		node.QueryNodeDataInit()
 		// TODO: get timeRange from message client
 		var timeRange = TimeRange{0, 0}
-		var msgLen = node.PrepareBatchMsg()
-		fmt.Println("PrepareBatchMsg Done, Insert len = ", msgLen[0])
-		if msgLen[0] == 0 {
-			fmt.Println("0 msg found")
-			continue
-		}
+		node.PrepareBatchMsg()
 		node.MessagesPreprocess(node.messageClient.InsertOrDeleteMsg, timeRange)
-		fmt.Println("MessagesPreprocess Done")
 		node.WriterDelete()
 		node.PreInsertAndDelete()
-		fmt.Println("PreInsertAndDelete Done")
 		node.DoInsertAndDelete()
-		fmt.Println("DoInsertAndDelete Done")
 		node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
-		fmt.Print("UpdateSearchTimeSync Done\n\n\n")
 	}
 }
 
 func (node *QueryNode) RunSearch() {
 	for {
-		time.Sleep(2 * 1000 * time.Millisecond)
-		if len(node.messageClient.GetSearchChan()) <= 0 {
-			fmt.Println("null Search")
-			continue
-		}
-		node.messageClient.SearchMsg = node.messageClient.SearchMsg[:0]
-		msg := <-node.messageClient.GetSearchChan()
-		node.messageClient.SearchMsg = append(node.messageClient.SearchMsg, msg)
-		fmt.Println("Do Search...")
 		node.Search(node.messageClient.SearchMsg)
 	}
 }
@@ -206,29 +150,26 @@ func (node *QueryNode) RunSearch() {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 func (node *QueryNode) MessagesPreprocess(insertDeleteMessages []*msgPb.InsertOrDeleteMsg, timeRange TimeRange) msgPb.Status {
-	//var tMax = timeRange.timestampMax
+	var tMax = timeRange.timestampMax
 
 	// 1. Extract messages before readTimeSync from QueryNodeDataBuffer.
 	//    Set valid bitmap to false.
 	for i, msg := range node.buffer.InsertDeleteBuffer {
-		//if msg.Timestamp < tMax {
-		if msg.Op == msgPb.OpType_INSERT {
-			if msg.RowsData == nil {
-				continue
+		if msg.Timestamp < tMax {
+			if msg.Op == msgPb.OpType_INSERT {
+				node.insertData.insertIDs[msg.SegmentId] = append(node.insertData.insertIDs[msg.SegmentId], msg.Uid)
+				node.insertData.insertTimestamps[msg.SegmentId] = append(node.insertData.insertTimestamps[msg.SegmentId], msg.Timestamp)
+				node.insertData.insertRecords[msg.SegmentId] = append(node.insertData.insertRecords[msg.SegmentId], msg.RowsData.Blob)
+			} else if msg.Op == msgPb.OpType_DELETE {
+				var r = DeleteRecord {
+					entityID: msg.Uid,
+					timestamp: msg.Timestamp,
+				}
+				node.deletePreprocessData.deleteRecords = append(node.deletePreprocessData.deleteRecords, &r)
+				node.deletePreprocessData.count <- <- node.deletePreprocessData.count + 1
 			}
-			node.insertData.insertIDs[msg.SegmentId] = append(node.insertData.insertIDs[msg.SegmentId], msg.Uid)
-			node.insertData.insertTimestamps[msg.SegmentId] = append(node.insertData.insertTimestamps[msg.SegmentId], msg.Timestamp)
-			node.insertData.insertRecords[msg.SegmentId] = append(node.insertData.insertRecords[msg.SegmentId], msg.RowsData.Blob)
-		} else if msg.Op == msgPb.OpType_DELETE {
-			var r = DeleteRecord{
-				entityID:  msg.Uid,
-				timestamp: msg.Timestamp,
-			}
-			node.deletePreprocessData.deleteRecords = append(node.deletePreprocessData.deleteRecords, &r)
-			atomic.AddInt32(&node.deletePreprocessData.count, 1)
+			node.buffer.validInsertDeleteBuffer[i] = false
 		}
-		node.buffer.validInsertDeleteBuffer[i] = false
-		//}
 	}
 
 	// 2. Remove invalid messages from buffer.
@@ -244,49 +185,45 @@ func (node *QueryNode) MessagesPreprocess(insertDeleteMessages []*msgPb.InsertOr
 	//    Move massages after readTimeSync to QueryNodeDataBuffer.
 	//    Set valid bitmap to true.
 	for _, msg := range insertDeleteMessages {
-		//if msg.Timestamp < tMax {
-		if msg.Op == msgPb.OpType_INSERT {
-			if msg.RowsData == nil {
-				continue
+		if msg.Timestamp < tMax {
+			if msg.Op == msgPb.OpType_INSERT {
+				node.insertData.insertIDs[msg.SegmentId] = append(node.insertData.insertIDs[msg.SegmentId], msg.Uid)
+				node.insertData.insertTimestamps[msg.SegmentId] = append(node.insertData.insertTimestamps[msg.SegmentId], msg.Timestamp)
+				node.insertData.insertRecords[msg.SegmentId] = append(node.insertData.insertRecords[msg.SegmentId], msg.RowsData.Blob)
+			} else if msg.Op == msgPb.OpType_DELETE {
+				var r = DeleteRecord {
+					entityID: msg.Uid,
+					timestamp: msg.Timestamp,
+				}
+				node.deletePreprocessData.deleteRecords = append(node.deletePreprocessData.deleteRecords, &r)
+				node.deletePreprocessData.count <- <- node.deletePreprocessData.count + 1
 			}
-			node.insertData.insertIDs[msg.SegmentId] = append(node.insertData.insertIDs[msg.SegmentId], msg.Uid)
-			node.insertData.insertTimestamps[msg.SegmentId] = append(node.insertData.insertTimestamps[msg.SegmentId], msg.Timestamp)
-			node.insertData.insertRecords[msg.SegmentId] = append(node.insertData.insertRecords[msg.SegmentId], msg.RowsData.Blob)
-		} else if msg.Op == msgPb.OpType_DELETE {
-			var r = DeleteRecord{
-				entityID:  msg.Uid,
-				timestamp: msg.Timestamp,
-			}
-			node.deletePreprocessData.deleteRecords = append(node.deletePreprocessData.deleteRecords, &r)
-			atomic.AddInt32(&node.deletePreprocessData.count, 1)
+		} else {
+			node.buffer.InsertDeleteBuffer = append(node.buffer.InsertDeleteBuffer, msg)
+			node.buffer.validInsertDeleteBuffer = append(node.buffer.validInsertDeleteBuffer, true)
 		}
-		//} else {
-		//	node.buffer.InsertDeleteBuffer = append(node.buffer.InsertDeleteBuffer, msg)
-		//	node.buffer.validInsertDeleteBuffer = append(node.buffer.validInsertDeleteBuffer, true)
-		//}
 	}
 
-	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
+	return msgPb.Status{ErrorCode: 0}
 }
 
 func (node *QueryNode) WriterDelete() msgPb.Status {
 	// TODO: set timeout
 	for {
-		if node.deletePreprocessData.count == 0 {
-			return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
-		}
-		node.messageClient.PrepareKey2SegmentMsg()
 		var ids, timestamps, segmentIDs = node.GetKey2Segments()
-		for i := 0; i < len(*ids); i++ {
-			id := (*ids)[i]
-			timestamp := (*timestamps)[i]
-			segmentID := (*segmentIDs)[i]
+		for i := 0; i <= len(ids); i++ {
+			id := ids[i]
+			timestamp := timestamps[i]
+			segmentID := segmentIDs[i]
 			for _, r := range node.deletePreprocessData.deleteRecords {
 				if r.timestamp == timestamp && r.entityID == id {
 					r.segmentID = segmentID
-					atomic.AddInt32(&node.deletePreprocessData.count, -1)
+					node.deletePreprocessData.count <- <- node.deletePreprocessData.count - 1
 				}
 			}
+		}
+		if <- node.deletePreprocessData.count == 0 {
+			return msgPb.Status{ErrorCode: 0}
 		}
 	}
 }
@@ -324,7 +261,7 @@ func (node *QueryNode) PreInsertAndDelete() msgPb.Status {
 		node.deleteData.deleteOffset[segmentID] = offset
 	}
 
-	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
+	return msgPb.Status{ErrorCode: 0}
 }
 
 func (node *QueryNode) DoInsertAndDelete() msgPb.Status {
@@ -339,12 +276,11 @@ func (node *QueryNode) DoInsertAndDelete() msgPb.Status {
 	for segmentID, deleteIDs := range node.deleteData.deleteIDs {
 		wg.Add(1)
 		var deleteTimestamps = node.deleteData.deleteTimestamps[segmentID]
-		fmt.Println("Doing delete......")
 		go node.DoDelete(segmentID, &deleteIDs, &deleteTimestamps, &wg)
 	}
 
 	wg.Wait()
-	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
+	return msgPb.Status{ErrorCode: 0}
 }
 
 func (node *QueryNode) DoInsert(segmentID int64, records *[][]byte, wg *sync.WaitGroup) msgPb.Status {
@@ -365,7 +301,7 @@ func (node *QueryNode) DoInsert(segmentID int64, records *[][]byte, wg *sync.Wai
 	}
 
 	wg.Done()
-	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
+	return msgPb.Status{ErrorCode: 0}
 }
 
 func (node *QueryNode) DoDelete(segmentID int64, deleteIDs *[]int64, deleteTimestamps *[]uint64, wg *sync.WaitGroup) msgPb.Status {
@@ -384,15 +320,15 @@ func (node *QueryNode) DoDelete(segmentID int64, deleteIDs *[]int64, deleteTimes
 	}
 
 	wg.Done()
-	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
+	return msgPb.Status{ErrorCode: 0}
 }
 
 func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
-	var clientId = (*(searchMessages[0])).ClientId
+	var clientId = searchMessages[0].ClientId
 
 	type SearchResultTmp struct {
-		ResultId       int64
-		ResultDistance float32
+		ResultId 			int64
+		ResultDistance 		float32
 	}
 
 	// Traverse all messages in the current messageClient.
@@ -405,7 +341,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 			return msgPb.Status{ErrorCode: 1}
 		}
 
-		var resultsTmp = make([]SearchResultTmp, 0)
+		var resultsTmp []SearchResultTmp
 		// TODO: get top-k's k from queryString
 		const TopK = 1
 
@@ -414,9 +350,9 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 
 		// 1. Timestamp check
 		// TODO: return or wait? Or adding graceful time
-		//if timestamp > node.queryNodeTimeSync.SearchTimeSync {
-		//	return msgPb.Status{ErrorCode: 1}
-		//}
+		if timestamp > node.queryNodeTimeSync.SearchTimeSync {
+			return msgPb.Status{ErrorCode: 1}
+		}
 
 		// 2. Do search in all segments
 		for _, partition := range targetCollection.Partitions {
@@ -426,8 +362,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 					fmt.Println(err.Error())
 					return msgPb.Status{ErrorCode: 1}
 				}
-				fmt.Println(res.ResultIds)
-				for i := 0; i < len(res.ResultIds); i++ {
+				for i := 0; i <= len(res.ResultIds); i++ {
 					resultsTmp = append(resultsTmp, SearchResultTmp{ResultId: res.ResultIds[i], ResultDistance: res.ResultDistances[i]})
 				}
 			}
@@ -448,22 +383,15 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 			return resultsTmp[i].ResultDistance < resultsTmp[j].ResultDistance
 		})
 		resultsTmp = resultsTmp[:TopK]
-		var entities = msgPb.Entities{
-			Ids: make([]int64, 0),
-		}
-		var results = msgPb.QueryResult{
-			Entities:  &entities,
-			Distances: make([]float32, 0),
-			QueryId:   msg.Uid,
-		}
+		var results SearchResult
 		for _, res := range resultsTmp {
-			results.Entities.Ids = append(results.Entities.Ids, res.ResultId)
-			results.Distances = append(results.Distances, res.ResultDistance)
+			results.ResultIds = append(results.ResultIds, res.ResultId)
+			results.ResultDistances = append(results.ResultDistances, res.ResultDistance)
 		}
 
 		// 3. publish result to pulsar
-		node.PublishSearchResult(&results, clientId)
+		publishSearchResult(&results, clientId)
 	}
 
-	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
+	return msgPb.Status{ErrorCode: 0}
 }

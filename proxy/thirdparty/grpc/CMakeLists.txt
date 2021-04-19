@@ -66,6 +66,10 @@ add_custom_command(TARGET generate_suvlim_pb_grpc
 	COMMAND echo "${PROTOC_EXCUTABLE}"
 	COMMAND bash "${PROTO_GEN_SCRIPTS_DIR}/generate_go.sh" -p  "${PROTOC_EXCUTABLE}"
 	COMMAND echo "${PROTO_GEN_SCRIPTS_DIR}/generate_cpp.sh" -p "${PROTOC_EXCUTABLE}" -g "${GRPC_CPP_PLUGIN_EXCUTABLE}"
+	COMMAND ${PROTOC_EXCUTABLE} -I "${PROTO_PATH}/proto" --grpc_out "${PROTO_PATH}" --cpp_out "${PROTO_PATH}"
+		--plugin=protoc-gen-grpc="${GRPC_CPP_PLUGIN_EXCUTABLE}"
+		"${PROTO_PATH}/proto/etcd.proto"
+		DEPENDS "${PROTO_PATH}/proto/etcd.proto"
 	)
 
 set_property( GLOBAL PROPERTY PROTOC_EXCUTABLE ${PROTOC_EXCUTABLE})

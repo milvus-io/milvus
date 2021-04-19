@@ -13,9 +13,8 @@ package reader
 */
 import "C"
 import (
-	"fmt"
 	"github.com/czs007/suvlim/errors"
-	schema "github.com/czs007/suvlim/pkg/master/grpc/message"
+	schema "github.com/czs007/suvlim/pkg/message"
 	"strconv"
 	"unsafe"
 )
@@ -82,9 +81,9 @@ func (s *Segment) SegmentPreInsert(numOfRecords int) int64 {
 	long int
 	PreInsert(CSegmentBase c_segment, long int size);
 	*/
-	var offset = C.PreInsert(s.SegmentPtr, C.long(int64(numOfRecords)))
+	var offset = C.PreInsert(C.long(int64(numOfRecords)))
 
-	return int64(offset)
+	return offset
 }
 
 func (s *Segment) SegmentPreDelete(numOfRecords int) int64 {
@@ -92,9 +91,9 @@ func (s *Segment) SegmentPreDelete(numOfRecords int) int64 {
 	long int
 	PreDelete(CSegmentBase c_segment, long int size);
 	*/
-	var offset = C.PreDelete(s.SegmentPtr, C.long(int64(numOfRecords)))
+	var offset = C.PreDelete(C.long(int64(numOfRecords)))
 
-	return int64(offset)
+	return offset
 }
 
 func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]uint64, records *[][]byte) error {
@@ -110,19 +109,16 @@ func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]
 	           signed long int count);
 	*/
 	// Blobs to one big blob
-	var numOfRow = len(*entityIDs)
-	var sizeofPerRow = len((*records)[0])
-
-	var rawData = make([]byte, numOfRow * sizeofPerRow)
+	var rawData []byte
 	for i := 0; i < len(*records); i++ {
 		copy(rawData, (*records)[i])
 	}
 
 	var cOffset = C.long(offset)
-	var cNumOfRows = C.long(numOfRow)
-	var cEntityIdsPtr = (*C.long)(&(*entityIDs)[0])
+	var cNumOfRows = C.long(len(*entityIDs))
+	var cEntityIdsPtr = (*C.ulong)(&(*entityIDs)[0])
 	var cTimestampsPtr = (*C.ulong)(&(*timestamps)[0])
-	var cSizeofPerRow = C.int(sizeofPerRow)
+	var cSizeofPerRow = C.int(len((*records)[0]))
 	var cRawDataVoidPtr = unsafe.Pointer(&rawData[0])
 
 	var status = C.Insert(s.SegmentPtr,
@@ -152,7 +148,7 @@ func (s *Segment) SegmentDelete(offset int64, entityIDs *[]int64, timestamps *[]
 	*/
 	var cOffset = C.long(offset)
 	var cSize = C.long(len(*entityIDs))
-	var cEntityIdsPtr = (*C.long)(&(*entityIDs)[0])
+	var cEntityIdsPtr = (*C.ulong)(&(*entityIDs)[0])
 	var cTimestampsPtr = (*C.ulong)(&(*timestamps)[0])
 
 	var status = C.Delete(s.SegmentPtr, cOffset, cSize, cEntityIdsPtr, cTimestampsPtr)
@@ -174,7 +170,7 @@ func (s *Segment) SegmentSearch(queryString string, timestamp uint64, vectorReco
 	           float* result_distances);
 	*/
 	// TODO: get top-k's k from queryString
-	const TopK = 10
+	const TopK = 1
 
 	resultIds := make([]int64, TopK)
 	resultDistances := make([]float32, TopK)
@@ -189,8 +185,6 @@ func (s *Segment) SegmentSearch(queryString string, timestamp uint64, vectorReco
 	if status != 0 {
 		return nil, errors.New("Search failed, error code = " + strconv.Itoa(int(status)))
 	}
-
-	fmt.Println("Search Result---- Ids =", resultIds, ", Distances =", resultDistances)
 
 	return &SearchResult{ResultIds: resultIds, ResultDistances: resultDistances}, nil
 }

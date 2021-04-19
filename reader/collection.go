@@ -34,3 +34,15 @@ func (c *Collection) DeletePartition(partition *Partition) {
 
 	// TODO: remove from c.Partitions
 }
+
+func (c *Collection) GetSegments() ([]*Segment, error) {
+	// TODO: add get segments
+	//segments, status := C.GetSegments(c.CollectionPtr)
+	//
+	//if status != 0 {
+	//	return nil, errors.New("get segments failed")
+	//}
+	//
+	//return segments, nil
+	return nil, nil
+}

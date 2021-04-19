@@ -45,7 +45,7 @@ class SegmentBase {
 
     // query contains metadata of
     virtual Status
-    Query(query::QueryPtr query, Timestamp timestamp, QueryResult& results) = 0;
+    Query(const query::QueryPtr& query, Timestamp timestamp, QueryResult& results) = 0;
 
     // // THIS FUNCTION IS REMOVED
     // virtual Status
