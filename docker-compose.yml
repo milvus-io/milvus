@@ -20,7 +20,6 @@ services:
       <<: *ccache
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       ETCD_ADDRESS: ${ETCD_ADDRESS}
-      MASTER_ADDRESS: ${MASTER_ADDRESS}
       MINIO_ADDRESS: ${MINIO_ADDRESS}
     volumes: &ubuntu-volumes
       - .:/go/src/github.com/zilliztech/milvus-distributed:delegated
@@ -46,7 +45,6 @@ services:
     environment:
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       ETCD_ADDRESS: ${ETCD_ADDRESS}
-      MASTER_ADDRESS: ${MASTER_ADDRESS}
       MINIO_ADDRESS: ${MINIO_ADDRESS}
     volumes:
       - .:/go/src/github.com/zilliztech/milvus-distributed:delegated
