@@ -8,11 +8,20 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/zilliztech/milvus-distributed/internal/datanode"
+	"github.com/zilliztech/milvus-distributed/internal/dataservice"
+	"github.com/zilliztech/milvus-distributed/internal/indexnode"
+	"github.com/zilliztech/milvus-distributed/internal/indexservice"
+	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/zilliztech/milvus-distributed/internal/masterservice"
+	"github.com/zilliztech/milvus-distributed/internal/proxynode"
+	"github.com/zilliztech/milvus-distributed/internal/proxyservice"
+	"github.com/zilliztech/milvus-distributed/internal/querynode"
+	"github.com/zilliztech/milvus-distributed/internal/queryservice"
+
 	"github.com/zilliztech/milvus-distributed/cmd/distributed/components"
-	ds "github.com/zilliztech/milvus-distributed/internal/dataservice"
 	"github.com/zilliztech/milvus-distributed/internal/logutil"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
 	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
 
@@ -34,168 +43,234 @@ type MilvusRoles struct {
 	EnableIndexService     bool `env:"ENABLE_INDEX_SERVICE"`
 	EnableIndexNode        bool `env:"ENABLE_INDEX_NODE"`
 	EnableMsgStreamService bool `env:"ENABLE_MSGSTREAM_SERVICE"`
-	EnableStandalone       bool `env:"ENABLE_STANDALONE"`
-}
-
-func (mr *MilvusRoles) HasAnyRole() bool {
-	return mr.EnableMaster || mr.EnableMsgStreamService ||
-		mr.EnableProxyService || mr.EnableProxyNode ||
-		mr.EnableQueryService || mr.EnableQueryNode ||
-		mr.EnableDataService || mr.EnableDataNode ||
-		mr.EnableIndexService || mr.EnableIndexNode || mr.EnableStandalone
 }
 
 func (mr *MilvusRoles) EnvValue(env string) bool {
 	env = strings.ToLower(env)
 	env = strings.Trim(env, " ")
-	if env == "1" || env == "true" {
-		return true
-	}
-	return false
+	return env == "1" || env == "true"
 }
 
 func (mr *MilvusRoles) Run(localMsg bool) {
-
 	closer := trace.InitTracing("singleNode")
 	if closer != nil {
 		defer closer.Close()
 	}
 
-	if !mr.HasAnyRole() {
-		return
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var masterService *components.MasterService
 	if mr.EnableMaster {
+		var ms *components.MasterService
+
 		go func() {
+			masterservice.Params.Init()
+			logutil.SetupLogger(&masterservice.Params.Log)
+			defer log.Sync()
+
 			factory := newMsgFactory(localMsg)
 			var err error
-			masterService, err = components.NewMasterService(ctx, factory)
+			ms, err = components.NewMasterService(ctx, factory)
 			if err != nil {
 				panic(err)
 			}
-			_ = masterService.Run()
+			_ = ms.Run()
 		}()
+
+		if ms != nil {
+			defer ms.Stop()
+		}
 	}
 
-	var proxyService *components.ProxyService
 	if mr.EnableProxyService {
+		var ps *components.ProxyService
+
 		go func() {
+			proxyservice.Params.Init()
+			logutil.SetupLogger(&proxyservice.Params.Log)
+			defer log.Sync()
+
 			factory := newMsgFactory(localMsg)
 			var err error
-			proxyService, err = components.NewProxyService(ctx, factory)
+			ps, err = components.NewProxyService(ctx, factory)
 			if err != nil {
 				panic(err)
 			}
-			_ = proxyService.Run()
+			_ = ps.Run()
 		}()
+
+		if ps != nil {
+			defer ps.Stop()
+		}
 	}
 
-	var proxyNode *components.ProxyNode
 	if mr.EnableProxyNode {
+		var pn *components.ProxyNode
+
 		go func() {
+			proxynode.Params.Init()
+			logutil.SetupLogger(&proxynode.Params.Log)
+			defer log.Sync()
+
 			factory := newMsgFactory(localMsg)
 			var err error
-			proxyNode, err = components.NewProxyNode(ctx, factory)
+			pn, err = components.NewProxyNode(ctx, factory)
 			if err != nil {
 				panic(err)
 			}
-			_ = proxyNode.Run()
+			_ = pn.Run()
 		}()
+
+		if pn != nil {
+			defer pn.Stop()
+		}
 	}
 
-	var queryService *components.QueryService
 	if mr.EnableQueryService {
+		var qs *components.QueryService
+
 		go func() {
+			queryservice.Params.Init()
+			logutil.SetupLogger(&queryservice.Params.Log)
+			defer log.Sync()
+
 			factory := newMsgFactory(localMsg)
 			var err error
-			queryService, err = components.NewQueryService(ctx, factory)
+			qs, err = components.NewQueryService(ctx, factory)
 			if err != nil {
 				panic(err)
 			}
-			_ = queryService.Run()
+			_ = qs.Run()
 		}()
+
+		if qs != nil {
+			defer qs.Stop()
+		}
 	}
 
-	var queryNode *components.QueryNode
 	if mr.EnableQueryNode {
+		var qn *components.QueryNode
+
 		go func() {
+			querynode.Params.Init()
+			logutil.SetupLogger(&querynode.Params.Log)
+			defer log.Sync()
+
 			factory := newMsgFactory(localMsg)
 			var err error
-			queryNode, err = components.NewQueryNode(ctx, factory)
+			qn, err = components.NewQueryNode(ctx, factory)
 			if err != nil {
 				panic(err)
 			}
-			_ = queryNode.Run()
+			_ = qn.Run()
 		}()
+
+		if qn != nil {
+			defer qn.Stop()
+		}
 	}
 
-	var dataService *components.DataService
 	if mr.EnableDataService {
+		var ds *components.DataService
+
 		go func() {
+			dataservice.Params.Init()
+			logutil.SetupLogger(&dataservice.Params.Log)
+			defer log.Sync()
+
 			factory := newMsgFactory(localMsg)
 			var err error
-			// Init data service params
-			ds.Params.Init()
-			logutil.SetupLogger(&ds.Params.Log)
-			dataService, err = components.NewDataService(ctx, factory)
+			ds, err = components.NewDataService(ctx, factory)
 			if err != nil {
 				panic(err)
 			}
-			_ = dataService.Run()
+			_ = ds.Run()
 		}()
+
+		if ds != nil {
+			defer ds.Stop()
+		}
 	}
 
-	var dataNode *components.DataNode
 	if mr.EnableDataNode {
+		var dn *components.DataNode
+
 		go func() {
+			datanode.Params.Init()
+			logutil.SetupLogger(&datanode.Params.Log)
+			defer log.Sync()
+
 			factory := newMsgFactory(localMsg)
 			var err error
-			dataNode, err = components.NewDataNode(ctx, factory)
+			dn, err = components.NewDataNode(ctx, factory)
 			if err != nil {
 				panic(err)
 			}
-			_ = dataNode.Run()
+			_ = dn.Run()
 		}()
+
+		if dn != nil {
+			defer dn.Stop()
+		}
 	}
 
-	var indexService *components.IndexService
 	if mr.EnableIndexService {
+		var is *components.IndexService
+
 		go func() {
+			indexservice.Params.Init()
+			logutil.SetupLogger(&indexservice.Params.Log)
+			defer log.Sync()
+
 			var err error
-			indexService, err = components.NewIndexService(ctx)
+			is, err = components.NewIndexService(ctx)
 			if err != nil {
 				panic(err)
 			}
-			_ = indexService.Run()
+			_ = is.Run()
 		}()
+
+		if is != nil {
+			defer is.Stop()
+		}
 	}
 
-	var indexNode *components.IndexNode
 	if mr.EnableIndexNode {
+		var in *components.IndexNode
+
 		go func() {
+			indexnode.Params.Init()
+			logutil.SetupLogger(&indexnode.Params.Log)
+			defer log.Sync()
+
 			var err error
-			indexNode, err = components.NewIndexNode(ctx)
+			in, err = components.NewIndexNode(ctx)
 			if err != nil {
 				panic(err)
 			}
-			_ = indexNode.Run()
+			_ = in.Run()
 		}()
+
+		if in != nil {
+			in.Stop()
+		}
 	}
 
-	var msgStream *components.MsgStream
 	if mr.EnableMsgStreamService {
+		var mss *components.MsgStream
+
 		go func() {
 			var err error
-			msgStream, err = components.NewMsgStreamService(ctx)
+			mss, err = components.NewMsgStreamService(ctx)
 			if err != nil {
 				panic(err)
 			}
-			_ = msgStream.Run()
+			_ = mss.Run()
 		}()
+
+		if mss != nil {
+			defer mss.Stop()
+		}
 	}
 
 	sc := make(chan os.Signal, 1)
@@ -206,66 +281,4 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		syscall.SIGQUIT)
 	sig := <-sc
 	fmt.Printf("Get %s signal to exit", sig.String())
-
-	if mr.EnableMaster {
-		if masterService != nil {
-			_ = masterService.Stop()
-		}
-	}
-
-	if mr.EnableProxyService {
-		if proxyService != nil {
-			_ = proxyService.Stop()
-		}
-	}
-
-	if mr.EnableProxyNode {
-		if proxyNode != nil {
-			_ = proxyNode.Stop()
-		}
-	}
-
-	if mr.EnableQueryService {
-		if queryService != nil {
-			_ = queryService.Stop()
-		}
-	}
-
-	if mr.EnableQueryNode {
-		if queryNode != nil {
-			_ = queryNode.Stop()
-		}
-	}
-
-	if mr.EnableDataService {
-		if dataService != nil {
-			_ = dataService.Stop()
-		}
-	}
-
-	if mr.EnableDataNode {
-		if dataNode != nil {
-			_ = dataNode.Stop()
-		}
-	}
-
-	if mr.EnableIndexService {
-		if indexService != nil {
-			_ = indexService.Stop()
-		}
-	}
-
-	if mr.EnableIndexNode {
-		if indexNode != nil {
-			_ = indexNode.Stop()
-		}
-	}
-
-	if mr.EnableMsgStreamService {
-		if msgStream != nil {
-			_ = msgStream.Stop()
-		}
-	}
-
-	defer rocksmq.CloseRocksMQ()
 }
