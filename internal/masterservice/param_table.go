@@ -1,10 +1,13 @@
 package masterservice
 
 import (
+	"sync"
+
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
 
 var Params ParamTable
+var once sync.Once
 
 type ParamTable struct {
 	paramtable.BaseTable
@@ -32,32 +35,34 @@ type ParamTable struct {
 }
 
 func (p *ParamTable) Init() {
-	// load yaml
-	p.BaseTable.Init()
-	err := p.LoadYaml("advanced/master.yaml")
-	if err != nil {
-		panic(err)
-	}
+	once.Do(func() {
+		// load yaml
+		p.BaseTable.Init()
+		err := p.LoadYaml("advanced/master.yaml")
+		if err != nil {
+			panic(err)
+		}
 
-	p.initAddress()
-	p.initPort()
-	p.initNodeID()
+		p.initAddress()
+		p.initPort()
+		p.initNodeID()
 
-	p.initPulsarAddress()
-	p.initEtcdAddress()
-	p.initMetaRootPath()
-	p.initKvRootPath()
+		p.initPulsarAddress()
+		p.initEtcdAddress()
+		p.initMetaRootPath()
+		p.initKvRootPath()
 
-	p.initMsgChannelSubName()
-	p.initTimeTickChannel()
-	p.initDdChannelName()
-	p.initStatisticsChannelName()
+		p.initMsgChannelSubName()
+		p.initTimeTickChannel()
+		p.initDdChannelName()
+		p.initStatisticsChannelName()
 
-	p.initMaxPartitionNum()
-	p.initDefaultPartitionName()
-	p.initDefaultIndexName()
+		p.initMaxPartitionNum()
+		p.initDefaultPartitionName()
+		p.initDefaultIndexName()
 
-	p.initTimeout()
+		p.initTimeout()
+	})
 }
 
 func (p *ParamTable) initAddress() {

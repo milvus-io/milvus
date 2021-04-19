@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
@@ -64,88 +65,91 @@ type ParamTable struct {
 }
 
 var Params ParamTable
+var once sync.Once
 
 func (p *ParamTable) Init() {
-	p.BaseTable.Init()
-	err := p.LoadYaml("advanced/query_node.yaml")
-	if err != nil {
-		panic(err)
-	}
-
-	err = p.LoadYaml("milvus.yaml")
-	if err != nil {
-		panic(err)
-	}
-
-	queryNodeIDStr := os.Getenv("QUERY_NODE_ID")
-	if queryNodeIDStr == "" {
-		queryNodeIDList := p.QueryNodeIDList()
-		if len(queryNodeIDList) <= 0 {
-			queryNodeIDStr = "0"
-		} else {
-			queryNodeIDStr = strconv.Itoa(int(queryNodeIDList[0]))
+	once.Do(func() {
+		p.BaseTable.Init()
+		err := p.LoadYaml("advanced/query_node.yaml")
+		if err != nil {
+			panic(err)
 		}
-	}
 
-	queryNodeIP := os.Getenv("QUERY_NODE_IP")
-	if queryNodeIP == "" {
-		p.QueryNodeIP = "localhost"
-	} else {
-		p.QueryNodeIP = queryNodeIP
-	}
-	p.QueryNodePort = int64(funcutil.GetAvailablePort())
+		err = p.LoadYaml("milvus.yaml")
+		if err != nil {
+			panic(err)
+		}
 
-	err = p.LoadYaml("advanced/common.yaml")
-	if err != nil {
-		panic(err)
-	}
-	err = p.Save("_queryNodeID", queryNodeIDStr)
-	if err != nil {
-		panic(err)
-	}
+		queryNodeIDStr := os.Getenv("QUERY_NODE_ID")
+		if queryNodeIDStr == "" {
+			queryNodeIDList := p.QueryNodeIDList()
+			if len(queryNodeIDList) <= 0 {
+				queryNodeIDStr = "0"
+			} else {
+				queryNodeIDStr = strconv.Itoa(int(queryNodeIDList[0]))
+			}
+		}
 
-	p.initQueryNodeID()
-	p.initQueryNodeNum()
-	p.initQueryTimeTickChannelName()
-	p.initQueryTimeTickReceiveBufSize()
+		queryNodeIP := os.Getenv("QUERY_NODE_IP")
+		if queryNodeIP == "" {
+			p.QueryNodeIP = "localhost"
+		} else {
+			p.QueryNodeIP = queryNodeIP
+		}
+		p.QueryNodePort = int64(funcutil.GetAvailablePort())
 
-	p.initMinioEndPoint()
-	p.initMinioAccessKeyID()
-	p.initMinioSecretAccessKey()
-	p.initMinioUseSSLStr()
-	p.initMinioBucketName()
+		err = p.LoadYaml("advanced/common.yaml")
+		if err != nil {
+			panic(err)
+		}
+		err = p.Save("_queryNodeID", queryNodeIDStr)
+		if err != nil {
+			panic(err)
+		}
 
-	p.initPulsarAddress()
-	p.initETCDAddress()
-	p.initMetaRootPath()
-	p.initWriteNodeSegKvSubPath()
-	p.initIndexBuilderAddress()
+		p.initQueryNodeID()
+		p.initQueryNodeNum()
+		p.initQueryTimeTickChannelName()
+		p.initQueryTimeTickReceiveBufSize()
 
-	p.initGracefulTime()
-	p.initMsgChannelSubName()
-	p.initSliceIndex()
+		p.initMinioEndPoint()
+		p.initMinioAccessKeyID()
+		p.initMinioSecretAccessKey()
+		p.initMinioUseSSLStr()
+		p.initMinioBucketName()
 
-	p.initFlowGraphMaxQueueLength()
-	p.initFlowGraphMaxParallelism()
+		p.initPulsarAddress()
+		p.initETCDAddress()
+		p.initMetaRootPath()
+		p.initWriteNodeSegKvSubPath()
+		p.initIndexBuilderAddress()
 
-	p.initInsertChannelNames()
-	p.initInsertChannelRange()
-	p.initInsertReceiveBufSize()
-	p.initInsertPulsarBufSize()
+		p.initGracefulTime()
+		p.initMsgChannelSubName()
+		p.initSliceIndex()
 
-	p.initDDChannelNames()
-	p.initDDReceiveBufSize()
-	p.initDDPulsarBufSize()
+		p.initFlowGraphMaxQueueLength()
+		p.initFlowGraphMaxParallelism()
 
-	p.initSearchChannelNames()
-	p.initSearchResultChannelNames()
-	p.initSearchReceiveBufSize()
-	p.initSearchPulsarBufSize()
-	p.initSearchResultReceiveBufSize()
+		p.initInsertChannelNames()
+		p.initInsertChannelRange()
+		p.initInsertReceiveBufSize()
+		p.initInsertPulsarBufSize()
 
-	p.initStatsPublishInterval()
-	p.initStatsChannelName()
-	p.initStatsReceiveBufSize()
+		p.initDDChannelNames()
+		p.initDDReceiveBufSize()
+		p.initDDPulsarBufSize()
+
+		p.initSearchChannelNames()
+		p.initSearchResultChannelNames()
+		p.initSearchReceiveBufSize()
+		p.initSearchPulsarBufSize()
+		p.initSearchResultReceiveBufSize()
+
+		p.initStatsPublishInterval()
+		p.initStatsChannelName()
+		p.initStatsReceiveBufSize()
+	})
 }
 
 // ---------------------------------------------------------- query node

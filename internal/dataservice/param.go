@@ -2,6 +2,7 @@ package dataservice
 
 import (
 	"strconv"
+	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
@@ -37,38 +38,41 @@ type ParamTable struct {
 }
 
 var Params ParamTable
+var once sync.Once
 
 func (p *ParamTable) Init() {
-	// load yaml
-	p.BaseTable.Init()
+	once.Do(func() {
+		// load yaml
+		p.BaseTable.Init()
 
-	if err := p.LoadYaml("advanced/data_service.yaml"); err != nil {
-		panic(err)
-	}
+		if err := p.LoadYaml("advanced/data_service.yaml"); err != nil {
+			panic(err)
+		}
 
-	// set members
-	p.initAddress()
-	p.initPort()
-	p.initNodeID()
+		// set members
+		p.initAddress()
+		p.initPort()
+		p.initNodeID()
 
-	p.initEtcdAddress()
-	p.initMetaRootPath()
-	p.initKvRootPath()
-	p.initPulsarAddress()
+		p.initEtcdAddress()
+		p.initMetaRootPath()
+		p.initKvRootPath()
+		p.initPulsarAddress()
 
-	p.initSegmentSize()
-	p.initSegmentSizeFactor()
-	p.initDefaultRecordSize()
-	p.initSegIDAssignExpiration()
-	p.initInsertChannelPrefixName()
-	p.initInsertChannelNum()
-	p.initStatisticsChannelName()
-	p.initTimeTickChannelName()
-	p.initDataNodeNum()
-	p.initSegmentInfoChannelName()
-	p.initDataServiceSubscriptionName()
-	p.initK2SChannelNames()
-	p.initSegmentFlushMetaPath()
+		p.initSegmentSize()
+		p.initSegmentSizeFactor()
+		p.initDefaultRecordSize()
+		p.initSegIDAssignExpiration()
+		p.initInsertChannelPrefixName()
+		p.initInsertChannelNum()
+		p.initStatisticsChannelName()
+		p.initTimeTickChannelName()
+		p.initDataNodeNum()
+		p.initSegmentInfoChannelName()
+		p.initDataServiceSubscriptionName()
+		p.initK2SChannelNames()
+		p.initSegmentFlushMetaPath()
+	})
 }
 
 func (p *ParamTable) initAddress() {

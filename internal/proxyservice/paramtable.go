@@ -2,6 +2,7 @@ package proxyservice
 
 import (
 	"log"
+	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
@@ -19,21 +20,24 @@ type ParamTable struct {
 }
 
 var Params ParamTable
+var once sync.Once
 
 func (pt *ParamTable) Init() {
-	pt.BaseTable.Init()
+	once.Do(func() {
+		pt.BaseTable.Init()
 
-	if err := pt.LoadYaml("advanced/data_service.yaml"); err != nil {
-		panic(err)
-	}
+		if err := pt.LoadYaml("advanced/data_service.yaml"); err != nil {
+			panic(err)
+		}
 
-	pt.initPulsarAddress()
-	pt.initMasterAddress()
-	pt.initNodeTimeTickChannel()
-	pt.initServiceTimeTickChannel()
-	pt.initDataServiceAddress()
-	pt.initInsertChannelPrefixName()
-	pt.initInsertChannelNum()
+		pt.initPulsarAddress()
+		pt.initMasterAddress()
+		pt.initNodeTimeTickChannel()
+		pt.initServiceTimeTickChannel()
+		pt.initDataServiceAddress()
+		pt.initInsertChannelPrefixName()
+		pt.initInsertChannelNum()
+	})
 }
 
 func (pt *ParamTable) initPulsarAddress() {

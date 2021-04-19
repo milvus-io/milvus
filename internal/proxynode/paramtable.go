@@ -5,6 +5,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cast"
@@ -53,6 +54,7 @@ type ParamTable struct {
 }
 
 var Params ParamTable
+var once sync.Once
 
 func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb2.InitParams) error {
 	pt.ProxyID = initParams.NodeID
@@ -200,12 +202,14 @@ func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb2.InitParam
 }
 
 func (pt *ParamTable) Init() {
-	pt.BaseTable.Init()
-	// err := pt.LoadYaml("advanced/proxy_node.yaml")
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// pt.initParams()
+	once.Do(func() {
+		pt.BaseTable.Init()
+		// err := pt.LoadYaml("advanced/proxy_node.yaml")
+		// if err != nil {
+		// 	panic(err)
+		// }
+		// pt.initParams()
+	})
 }
 
 func (pt *ParamTable) initParams() {
