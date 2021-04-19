@@ -668,6 +668,25 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, Params.DefaultIndexName)
 	})
 
+	t.Run("describe index not exist", func(t *testing.T) {
+		req := &milvuspb.DescribeIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kDescribeIndex,
+				MsgID:     200,
+				Timestamp: 200,
+				SourceID:  200,
+			},
+			DbName:         "",
+			CollectionName: "testColl",
+			FieldName:      "vector",
+			IndexName:      "not-exist-index",
+		}
+		rsp, err := core.DescribeIndex(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_INDEX_NOT_EXIST)
+		assert.Equal(t, len(rsp.IndexDescriptions), 0)
+	})
+
 	t.Run("flush segment", func(t *testing.T) {
 		coll, err := core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)

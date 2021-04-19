@@ -5,14 +5,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	memkv "github.com/zilliztech/milvus-distributed/internal/kv/mem"
+	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-
-	memkv "github.com/zilliztech/milvus-distributed/internal/kv/mem"
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 )
 
 func newMemoryMeta(allocator allocatorInterface) (*meta, error) {
@@ -55,17 +55,29 @@ func newTestSchema() *schemapb.CollectionSchema {
 type mockDataNodeClient struct {
 }
 
+func (c *mockDataNodeClient) Init() error {
+	return nil
+}
+
+func (c *mockDataNodeClient) Start() error {
+	return nil
+}
+
+func (c *mockDataNodeClient) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
+	//TODO
+	return nil, nil
+}
+
+func (c *mockDataNodeClient) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return nil, nil
+}
+
 func newMockDataNodeClient() *mockDataNodeClient {
 	return &mockDataNodeClient{}
 }
 
 func (c *mockDataNodeClient) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}, nil
-}
-
-func (c *mockDataNodeClient) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	// todo
-	return nil, nil
 }
 
 func (c *mockDataNodeClient) FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) (*commonpb.Status, error) {

@@ -7,9 +7,9 @@ type (
 	Timestamp     = typeutil.Timestamp
 	IntPrimaryKey = typeutil.IntPrimaryKey
 	DSL           = string
-
-	TimeRange struct {
-		timestampMin Timestamp
-		timestampMax Timestamp
-	}
 )
+
+type TimeRange struct {
+	timestampMin Timestamp
+	timestampMax Timestamp
+}

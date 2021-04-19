@@ -8,6 +8,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/zilliztech/milvus-distributed/internal/types"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -16,10 +18,10 @@ import (
 type metaService struct {
 	ctx          context.Context
 	replica      Replica
-	masterClient MasterServiceInterface
+	masterClient types.MasterService
 }
 
-func newMetaService(ctx context.Context, replica Replica, m MasterServiceInterface) *metaService {
+func newMetaService(ctx context.Context, replica Replica, m types.MasterService) *metaService {
 	return &metaService{
 		ctx:          ctx,
 		replica:      replica,

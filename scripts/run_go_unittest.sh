@@ -20,7 +20,7 @@ go test -race -cover "${MILVUS_DIR}/kv/..." "${MILVUS_DIR}/tso/..." "${MILVUS_DI
 go test -race -cover "${MILVUS_DIR}/datanode/..." -failfast
 go test -race -cover "${MILVUS_DIR}/indexnode/..." -failfast
 #go test -race -cover "${MILVUS_DIR}/msgstream/..." "${MILVUS_DIR}/querynode/..." "${MILVUS_DIR}/storage"   "${MILVUS_DIR}/util/..." -failfast
-go test -race -cover "${MILVUS_DIR}/querynode/..." -failfast
+go test -cover "${MILVUS_DIR}/querynode/..." -failfast
 #go test -race -cover "${MILVUS_DIR}/msgstream/..." "${MILVUS_DIR}/storage"   "${MILVUS_DIR}/util/..." -failfast
 #go test -race -cover "${MILVUS_DIR}/msgstream/..." "${MILVUS_DIR}/util/..." -failfast
 go test -race -cover "${MILVUS_DIR}/msgstream/..." -failfast

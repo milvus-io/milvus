@@ -1293,9 +1293,16 @@ func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequ
 		idxNames = append(idxNames, i.IndexName)
 	}
 	log.Debug("DescribeIndex Success", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.Strings("index names", idxNames))
-	t.Rsp.Status = &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
-		Reason:    "",
+	if len(t.Rsp.IndexDescriptions) == 0 {
+		t.Rsp.Status = &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_INDEX_NOT_EXIST,
+			Reason:    "index not exist",
+		}
+	} else {
+		t.Rsp.Status = &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		}
 	}
 	return t.Rsp, nil
 }

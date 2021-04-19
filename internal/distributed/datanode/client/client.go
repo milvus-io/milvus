@@ -7,10 +7,12 @@ import (
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-	"github.com/zilliztech/milvus-distributed/internal/util/retry"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -62,8 +64,13 @@ func (c *Client) Stop() error {
 	return c.conn.Close()
 }
 
-func (c *Client) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	return c.grpc.GetComponentStates(ctx, empty)
+func (c *Client) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
+	return c.grpc.GetComponentStates(ctx, &commonpb.Empty{})
+}
+
+func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	//TODO: implement grpc GetStatisticsChannel interface
+	panic("implement me")
 }
 
 func (c *Client) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {

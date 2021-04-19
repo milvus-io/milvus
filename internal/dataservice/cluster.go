@@ -8,29 +8,27 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/zilliztech/milvus-distributed/internal/types"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
-type (
-	dataNode struct {
-		id      int64
-		address struct {
-			ip   string
-			port int64
-		}
-		client     DataNodeClient
-		channelNum int
+type dataNode struct {
+	id      int64
+	address struct {
+		ip   string
+		port int64
 	}
-	dataNodeCluster struct {
-		mu       sync.RWMutex
-		finishCh chan struct{}
-		nodes    []*dataNode
-	}
-)
+	client     types.DataNode
+	channelNum int
+}
+type dataNodeCluster struct {
+	mu       sync.RWMutex
+	finishCh chan struct{}
+	nodes    []*dataNode
+}
 
 func (node *dataNode) String() string {
 	return fmt.Sprintf("id: %d, address: %s:%d", node.id, node.address.ip, node.address.port)
@@ -114,7 +112,7 @@ func (c *dataNodeCluster) GetDataNodeStates(ctx context.Context) ([]*internalpb2
 	defer c.mu.RUnlock()
 	ret := make([]*internalpb2.ComponentInfo, 0)
 	for _, node := range c.nodes {
-		states, err := node.client.GetComponentStates(ctx, &commonpb.Empty{})
+		states, err := node.client.GetComponentStates(ctx)
 		if err != nil {
 			log.Error("get component states error", zap.Stringer("dataNode", node), zap.Error(err))
 			continue
