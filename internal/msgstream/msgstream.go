@@ -353,15 +353,16 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 		default:
 			wg := sync.WaitGroup{}
 			mu := sync.Mutex{}
+			findMapMutex := sync.RWMutex{}
 			for i := 0; i < len(ms.consumers); i++ {
 				if isChannelReady[i] {
 					continue
 				}
 				wg.Add(1)
-				go ms.findTimeTick(i, eofMsgTimeStamp, &wg, &mu)
+				go ms.findTimeTick(i, eofMsgTimeStamp, &wg, &mu, &findMapMutex)
 			}
 			wg.Wait()
-			timeStamp, ok := checkTimeTickMsg(eofMsgTimeStamp, isChannelReady)
+			timeStamp, ok := checkTimeTickMsg(eofMsgTimeStamp, isChannelReady, &findMapMutex)
 			if !ok || timeStamp <= ms.lastTimeStamp {
 				log.Printf("All timeTick's timestamps are inconsistent")
 				continue
@@ -394,7 +395,8 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 func (ms *PulsarTtMsgStream) findTimeTick(channelIndex int,
 	eofMsgMap map[int]Timestamp,
 	wg *sync.WaitGroup,
-	mu *sync.Mutex) {
+	mu *sync.Mutex,
+	findMapMutex *sync.RWMutex) {
 	defer wg.Done()
 	for {
 		select {
@@ -421,7 +423,9 @@ func (ms *PulsarTtMsgStream) findTimeTick(channelIndex int,
 				log.Printf("Failed to unmarshal, error = %v", err)
 			}
 			if headerMsg.MsgType == internalPb.MsgType_kTimeTick {
+				findMapMutex.Lock()
 				eofMsgMap[channelIndex] = tsMsg.(*TimeTickMsg).Timestamp
+				findMapMutex.Unlock()
 				return
 			}
 			mu.Lock()
@@ -470,7 +474,7 @@ func (ms *InMemMsgStream) Chan() <- chan *MsgPack {
 }
 */
 
-func checkTimeTickMsg(msg map[int]Timestamp, isChannelReady []bool) (Timestamp, bool) {
+func checkTimeTickMsg(msg map[int]Timestamp, isChannelReady []bool, mu *sync.RWMutex) (Timestamp, bool) {
 	checkMap := make(map[Timestamp]int)
 	var maxTime Timestamp = 0
 	for _, v := range msg {
@@ -485,7 +489,10 @@ func checkTimeTickMsg(msg map[int]Timestamp, isChannelReady []bool) (Timestamp, 
 		}
 		return maxTime, true
 	}
-	for i, v := range msg {
+	for i := range msg {
+		mu.RLock()
+		v := msg[i]
+		mu.Unlock()
 		if v != maxTime {
 			isChannelReady[i] = false
 		} else {
