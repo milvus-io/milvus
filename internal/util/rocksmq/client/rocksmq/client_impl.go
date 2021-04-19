@@ -99,7 +99,6 @@ func consume(ctx context.Context, consumer *consumer) {
 			log.Debug("client finished")
 			return
 		case _, ok := <-consumer.MsgMutex():
-			log.Debug("Before consume")
 			if !ok {
 				// consumer MsgMutex closed, goroutine exit
 				log.Debug("consumer MsgMutex closed")
