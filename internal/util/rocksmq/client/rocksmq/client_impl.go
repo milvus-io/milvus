@@ -93,8 +93,8 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 }
 
 func consume(ctx context.Context, consumer *consumer) {
-	for { //nolint:gosimple
-		select { //nolint:gosimple
+	for {
+		select {
 		case <-ctx.Done():
 			log.Debug("client finished")
 			return
@@ -126,7 +126,6 @@ func consume(ctx context.Context, consumer *consumer) {
 					Payload: msg[0].Payload,
 				}
 			}
-		default:
 		}
 	}
 }
