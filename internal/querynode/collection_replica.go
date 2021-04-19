@@ -351,9 +351,9 @@ func (colReplica *collectionReplicaImpl) addSegment(segmentID UniqueID, partitio
 		return err
 	}
 
-	partition, err := colReplica.getPartitionByTag(collectionID, partitionTag)
-	if err != nil {
-		return err
+	partition, err2 := colReplica.getPartitionByTag(collectionID, partitionTag)
+	if err2 != nil {
+		return err2
 	}
 
 	colReplica.mu.Lock()
