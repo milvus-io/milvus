@@ -511,7 +511,7 @@ TEST(WalTest, MANAGER_APPEND_FAILED) {
     ids.clear();
     data_float.clear();
     ASSERT_FALSE(manager->Insert(schema.collection_id_, "", ids, data_float));
-    ASSERT_FALSE(manager->DeleteById(schema.collection_id_, ids));
+    ASSERT_FALSE(manager->DeleteById(schema.collection_id_, "", ids));
 }
 
 TEST(WalTest, MANAGER_RECOVERY_TEST) {
