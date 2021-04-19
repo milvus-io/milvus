@@ -27,8 +27,9 @@ func TestMetaService_start(t *testing.T) {
 	}
 
 	// init query node
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
+	node.metaService = newMetaService(ctx, node.container)
 
 	(*node.metaService).start()
 }
@@ -186,8 +187,9 @@ func TestMetaService_processCollectionCreate(t *testing.T) {
 	defer cancel()
 
 	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
+	node.metaService = newMetaService(ctx, node.container)
 
 	id := "0"
 	value := `schema: <
@@ -215,10 +217,10 @@ func TestMetaService_processCollectionCreate(t *testing.T) {
 
 	node.metaService.processCollectionCreate(id, value)
 
-	collectionNum := (*node.replica).getCollectionNum()
+	collectionNum := (*node.container).getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := (*node.replica).getCollectionByName("test")
+	collection, err := (*node.container).getCollectionByName("test")
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 }
@@ -231,8 +233,9 @@ func TestMetaService_processSegmentCreate(t *testing.T) {
 	defer cancel()
 
 	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
+	node.metaService = newMetaService(ctx, node.container)
 
 	collectionName := "collection0"
 	fieldVec := schemapb.FieldSchema{
@@ -275,10 +278,10 @@ func TestMetaService_processSegmentCreate(t *testing.T) {
 	colMetaBlob, err := proto.Marshal(&collectionMeta)
 	assert.NoError(t, err)
 
-	err = (*node.replica).addCollection(&collectionMeta, string(colMetaBlob))
+	err = (*node.container).addCollection(&collectionMeta, string(colMetaBlob))
 	assert.NoError(t, err)
 
-	err = (*node.replica).addPartition(UniqueID(0), "default")
+	err = (*node.container).addPartition(UniqueID(0), "default")
 	assert.NoError(t, err)
 
 	id := "0"
@@ -290,7 +293,7 @@ func TestMetaService_processSegmentCreate(t *testing.T) {
 
 	(*node.metaService).processSegmentCreate(id, value)
 
-	s, err := (*node.replica).getSegmentByID(UniqueID(0))
+	s, err := (*node.container).getSegmentByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, s.segmentID, UniqueID(0))
 }
@@ -303,8 +306,9 @@ func TestMetaService_processCreate(t *testing.T) {
 	defer cancel()
 
 	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
+	node.metaService = newMetaService(ctx, node.container)
 
 	key1 := "by-dev/collection/0"
 	msg1 := `schema: <
@@ -331,10 +335,10 @@ func TestMetaService_processCreate(t *testing.T) {
 				`
 
 	(*node.metaService).processCreate(key1, msg1)
-	collectionNum := (*node.replica).getCollectionNum()
+	collectionNum := (*node.container).getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := (*node.replica).getCollectionByName("test")
+	collection, err := (*node.container).getCollectionByName("test")
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
@@ -346,7 +350,7 @@ func TestMetaService_processCreate(t *testing.T) {
 				`
 
 	(*node.metaService).processCreate(key2, msg2)
-	s, err := (*node.replica).getSegmentByID(UniqueID(0))
+	s, err := (*node.container).getSegmentByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, s.segmentID, UniqueID(0))
 }
@@ -359,8 +363,9 @@ func TestMetaService_processSegmentModify(t *testing.T) {
 	defer cancel()
 
 	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
+	node.metaService = newMetaService(ctx, node.container)
 
 	collectionName := "collection0"
 	fieldVec := schemapb.FieldSchema{
@@ -403,10 +408,10 @@ func TestMetaService_processSegmentModify(t *testing.T) {
 	colMetaBlob, err := proto.Marshal(&collectionMeta)
 	assert.NoError(t, err)
 
-	err = (*node.replica).addCollection(&collectionMeta, string(colMetaBlob))
+	err = (*node.container).addCollection(&collectionMeta, string(colMetaBlob))
 	assert.NoError(t, err)
 
-	err = (*node.replica).addPartition(UniqueID(0), "default")
+	err = (*node.container).addPartition(UniqueID(0), "default")
 	assert.NoError(t, err)
 
 	id := "0"
@@ -417,7 +422,7 @@ func TestMetaService_processSegmentModify(t *testing.T) {
 				`
 
 	(*node.metaService).processSegmentCreate(id, value)
-	s, err := (*node.replica).getSegmentByID(UniqueID(0))
+	s, err := (*node.container).getSegmentByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, s.segmentID, UniqueID(0))
 
@@ -429,7 +434,7 @@ func TestMetaService_processSegmentModify(t *testing.T) {
 
 	// TODO: modify segment for testing processCollectionModify
 	(*node.metaService).processSegmentModify(id, newValue)
-	seg, err := (*node.replica).getSegmentByID(UniqueID(0))
+	seg, err := (*node.container).getSegmentByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, seg.segmentID, UniqueID(0))
 }
@@ -442,8 +447,9 @@ func TestMetaService_processCollectionModify(t *testing.T) {
 	defer cancel()
 
 	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
+	node.metaService = newMetaService(ctx, node.container)
 
 	id := "0"
 	value := `schema: <
@@ -470,10 +476,10 @@ func TestMetaService_processCollectionModify(t *testing.T) {
 				`
 
 	(*node.metaService).processCollectionCreate(id, value)
-	collectionNum := (*node.replica).getCollectionNum()
+	collectionNum := (*node.container).getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := (*node.replica).getCollectionByName("test")
+	collection, err := (*node.container).getCollectionByName("test")
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
@@ -502,7 +508,7 @@ func TestMetaService_processCollectionModify(t *testing.T) {
 				`
 
 	(*node.metaService).processCollectionModify(id, newValue)
-	collection, err = (*node.replica).getCollectionByName("test")
+	collection, err = (*node.container).getCollectionByName("test")
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 }
@@ -515,8 +521,9 @@ func TestMetaService_processModify(t *testing.T) {
 	defer cancel()
 
 	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
+	node.metaService = newMetaService(ctx, node.container)
 
 	key1 := "by-dev/collection/0"
 	msg1 := `schema: <
@@ -543,10 +550,10 @@ func TestMetaService_processModify(t *testing.T) {
 				`
 
 	(*node.metaService).processCreate(key1, msg1)
-	collectionNum := (*node.replica).getCollectionNum()
+	collectionNum := (*node.container).getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := (*node.replica).getCollectionByName("test")
+	collection, err := (*node.container).getCollectionByName("test")
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
@@ -558,7 +565,7 @@ func TestMetaService_processModify(t *testing.T) {
 				`
 
 	(*node.metaService).processCreate(key2, msg2)
-	s, err := (*node.replica).getSegmentByID(UniqueID(0))
+	s, err := (*node.container).getSegmentByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, s.segmentID, UniqueID(0))
 
@@ -588,7 +595,7 @@ func TestMetaService_processModify(t *testing.T) {
 				`
 
 	(*node.metaService).processModify(key1, msg3)
-	collection, err = (*node.replica).getCollectionByName("test")
+	collection, err = (*node.container).getCollectionByName("test")
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
@@ -600,7 +607,7 @@ func TestMetaService_processModify(t *testing.T) {
 
 	// TODO: modify segment for testing processCollectionModify
 	(*node.metaService).processModify(key2, msg4)
-	seg, err := (*node.replica).getSegmentByID(UniqueID(0))
+	seg, err := (*node.container).getSegmentByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, seg.segmentID, UniqueID(0))
 }
@@ -613,8 +620,9 @@ func TestMetaService_processSegmentDelete(t *testing.T) {
 	defer cancel()
 
 	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
+	node.metaService = newMetaService(ctx, node.container)
 
 	collectionName := "collection0"
 	fieldVec := schemapb.FieldSchema{
@@ -657,10 +665,10 @@ func TestMetaService_processSegmentDelete(t *testing.T) {
 	colMetaBlob, err := proto.Marshal(&collectionMeta)
 	assert.NoError(t, err)
 
-	err = (*node.replica).addCollection(&collectionMeta, string(colMetaBlob))
+	err = (*node.container).addCollection(&collectionMeta, string(colMetaBlob))
 	assert.NoError(t, err)
 
-	err = (*node.replica).addPartition(UniqueID(0), "default")
+	err = (*node.container).addPartition(UniqueID(0), "default")
 	assert.NoError(t, err)
 
 	id := "0"
@@ -671,12 +679,12 @@ func TestMetaService_processSegmentDelete(t *testing.T) {
 				`
 
 	(*node.metaService).processSegmentCreate(id, value)
-	seg, err := (*node.replica).getSegmentByID(UniqueID(0))
+	seg, err := (*node.container).getSegmentByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, seg.segmentID, UniqueID(0))
 
 	(*node.metaService).processSegmentDelete("0")
-	mapSize := (*node.replica).getSegmentNum()
+	mapSize := (*node.container).getSegmentNum()
 	assert.Equal(t, mapSize, 0)
 }
 
@@ -688,8 +696,9 @@ func TestMetaService_processCollectionDelete(t *testing.T) {
 	defer cancel()
 
 	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
+	node.metaService = newMetaService(ctx, node.container)
 
 	id := "0"
 	value := `schema: <
@@ -716,15 +725,15 @@ func TestMetaService_processCollectionDelete(t *testing.T) {
 				`
 
 	(*node.metaService).processCollectionCreate(id, value)
-	collectionNum := (*node.replica).getCollectionNum()
+	collectionNum := (*node.container).getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := (*node.replica).getCollectionByName("test")
+	collection, err := (*node.container).getCollectionByName("test")
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
 	(*node.metaService).processCollectionDelete(id)
-	collectionNum = (*node.replica).getCollectionNum()
+	collectionNum = (*node.container).getCollectionNum()
 	assert.Equal(t, collectionNum, 0)
 }
 
@@ -736,8 +745,9 @@ func TestMetaService_processDelete(t *testing.T) {
 	defer cancel()
 
 	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
+	node.metaService = newMetaService(ctx, node.container)
 
 	key1 := "by-dev/collection/0"
 	msg1 := `schema: <
@@ -764,10 +774,10 @@ func TestMetaService_processDelete(t *testing.T) {
 				`
 
 	(*node.metaService).processCreate(key1, msg1)
-	collectionNum := (*node.replica).getCollectionNum()
+	collectionNum := (*node.container).getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := (*node.replica).getCollectionByName("test")
+	collection, err := (*node.container).getCollectionByName("test")
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
@@ -779,15 +789,15 @@ func TestMetaService_processDelete(t *testing.T) {
 				`
 
 	(*node.metaService).processCreate(key2, msg2)
-	seg, err := (*node.replica).getSegmentByID(UniqueID(0))
+	seg, err := (*node.container).getSegmentByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, seg.segmentID, UniqueID(0))
 
 	(*node.metaService).processDelete(key1)
-	collectionsSize := (*node.replica).getCollectionNum()
+	collectionsSize := (*node.container).getCollectionNum()
 	assert.Equal(t, collectionsSize, 0)
 
-	mapSize := (*node.replica).getSegmentNum()
+	mapSize := (*node.container).getSegmentNum()
 	assert.Equal(t, mapSize, 0)
 }
 
@@ -805,8 +815,9 @@ func TestMetaService_processResp(t *testing.T) {
 	}
 
 	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
+	node.metaService = newMetaService(ctx, node.container)
 
 	metaChan := (*node.metaService).kvBase.WatchWithPrefix("")
 
@@ -832,8 +843,9 @@ func TestMetaService_loadCollections(t *testing.T) {
 	}
 
 	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
+	node.metaService = newMetaService(ctx, node.container)
 
 	err2 := (*node.metaService).loadCollections()
 	assert.Nil(t, err2)
@@ -853,8 +865,9 @@ func TestMetaService_loadSegments(t *testing.T) {
 	}
 
 	// init metaService
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
+	node.metaService = newMetaService(ctx, node.container)
 
 	err2 := (*node.metaService).loadSegments()
 	assert.Nil(t, err2)

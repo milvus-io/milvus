@@ -13,7 +13,8 @@ import (
 
 func TestPartition_Segments(t *testing.T) {
 	ctx := context.Background()
-	node := NewQueryNode(ctx, 0)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
 
 	collectionName := "collection0"
 	fieldVec := schemapb.FieldSchema{
@@ -56,17 +57,17 @@ func TestPartition_Segments(t *testing.T) {
 	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
 	assert.NotEqual(t, "", collectionMetaBlob)
 
-	var err = (*node.replica).addCollection(&collectionMeta, collectionMetaBlob)
+	var err = (*node.container).addCollection(&collectionMeta, collectionMetaBlob)
 	assert.NoError(t, err)
 
-	collection, err := (*node.replica).getCollectionByName(collectionName)
+	collection, err := (*node.container).getCollectionByName(collectionName)
 	assert.NoError(t, err)
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
 	assert.Equal(t, collection.meta.ID, UniqueID(0))
-	assert.Equal(t, (*node.replica).getCollectionNum(), 1)
+	assert.Equal(t, (*node.container).getCollectionNum(), 1)
 
 	for _, tag := range collectionMeta.PartitionTags {
-		err := (*node.replica).addPartition(collection.ID(), tag)
+		err := (*node.container).addPartition(collection.ID(), tag)
 		assert.NoError(t, err)
 	}
 
@@ -77,7 +78,7 @@ func TestPartition_Segments(t *testing.T) {
 
 	const segmentNum = 3
 	for i := 0; i < segmentNum; i++ {
-		err := (*node.replica).addSegment(UniqueID(i), targetPartition.partitionTag, collection.ID())
+		err := (*node.container).addSegment(UniqueID(i), targetPartition.partitionTag, collection.ID())
 		assert.NoError(t, err)
 	}
 

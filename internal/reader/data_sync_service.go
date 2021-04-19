@@ -4,23 +4,33 @@ import (
 	"context"
 	"log"
 
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
 type dataSyncService struct {
-	ctx context.Context
-	fg  *flowgraph.TimeTickedFlowGraph
+	ctx       context.Context
+	pulsarURL string
+	fg        *flowgraph.TimeTickedFlowGraph
 
-	replica *collectionReplica
+	// input streams
+	dmStream *msgstream.MsgStream
+	//	ddStream *msgstream.MsgStream
+	//	k2sStream *msgstream.MsgStream
+
+	node *QueryNode
 }
 
-func newDataSyncService(ctx context.Context, replica *collectionReplica) *dataSyncService {
+func newDataSyncService(ctx context.Context, node *QueryNode, pulsarURL string) *dataSyncService {
 
 	return &dataSyncService{
-		ctx: ctx,
-		fg:  nil,
+		ctx:       ctx,
+		pulsarURL: pulsarURL,
+		fg:        nil,
 
-		replica: replica,
+		dmStream: nil,
+
+		node: node,
 	}
 }
 
@@ -31,6 +41,7 @@ func (dsService *dataSyncService) start() {
 
 func (dsService *dataSyncService) close() {
 	dsService.fg.Close()
+	(*dsService.dmStream).Close()
 }
 
 func (dsService *dataSyncService) initNodes() {
@@ -38,10 +49,10 @@ func (dsService *dataSyncService) initNodes() {
 
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 
-	var dmStreamNode Node = newDmInputNode(dsService.ctx)
+	var dmStreamNode Node = newDmInputNode(dsService.ctx, dsService.pulsarURL)
 	var filterDmNode Node = newFilteredDmNode()
-	var insertNode Node = newInsertNode(dsService.replica)
-	var serviceTimeNode Node = newServiceTimeNode(dsService.replica)
+	var insertNode Node = newInsertNode(dsService.node.container)
+	var serviceTimeNode Node = newServiceTimeNode(dsService.node)
 
 	dsService.fg.AddNode(&dmStreamNode)
 	dsService.fg.AddNode(&filterDmNode)
@@ -79,4 +90,21 @@ func (dsService *dataSyncService) initNodes() {
 	if err != nil {
 		log.Fatal("set edges failed in node:", serviceTimeNode.Name())
 	}
+
+	dsService.setDmStream(&dmStreamNode)
 }
+
+func (dsService *dataSyncService) setDmStream(node *Node) {
+	if (*node).IsInputNode() {
+		inStream, ok := (*node).(*InputNode)
+		dsService.dmStream = inStream.InStream()
+		if !ok {
+			log.Fatal("Invalid inputNode")
+		}
+	} else {
+		log.Fatal("stream set failed")
+	}
+}
+
+func (dsService *dataSyncService) setDdStream(node *Node)  {}
+func (dsService *dataSyncService) setK2sStream(node *Node) {}

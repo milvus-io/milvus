@@ -15,87 +15,6 @@ import (
 
 // NOTE: start pulsar before test
 func TestStatsService_start(t *testing.T) {
-	Params.Init()
-	var ctx context.Context
-
-	if closeWithDeadline {
-		var cancel context.CancelFunc
-		d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-		ctx, cancel = context.WithDeadline(context.Background(), d)
-		defer cancel()
-	} else {
-		ctx = context.Background()
-	}
-
-	// init query node
-	node := NewQueryNode(ctx, 0)
-
-	// init meta
-	collectionName := "collection0"
-	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "16",
-			},
-		},
-	}
-
-	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "1",
-			},
-		},
-	}
-
-	schema := schemapb.CollectionSchema{
-		Name: collectionName,
-		Fields: []*schemapb.FieldSchema{
-			&fieldVec, &fieldInt,
-		},
-	}
-
-	collectionMeta := etcdpb.CollectionMeta{
-		ID:            UniqueID(0),
-		Schema:        &schema,
-		CreateTime:    Timestamp(0),
-		SegmentIDs:    []UniqueID{0},
-		PartitionTags: []string{"default"},
-	}
-
-	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
-	assert.NotEqual(t, "", collectionMetaBlob)
-
-	var err = (*node.replica).addCollection(&collectionMeta, collectionMetaBlob)
-	assert.NoError(t, err)
-
-	collection, err := (*node.replica).getCollectionByName(collectionName)
-	assert.NoError(t, err)
-	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.ID, UniqueID(0))
-	assert.Equal(t, (*node.replica).getCollectionNum(), 1)
-
-	err = (*node.replica).addPartition(collection.ID(), collectionMeta.PartitionTags[0])
-	assert.NoError(t, err)
-
-	segmentID := UniqueID(0)
-	err = (*node.replica).addSegment(segmentID, collectionMeta.PartitionTags[0], UniqueID(0))
-	assert.NoError(t, err)
-
-	// start stats service
-	node.statsService = newStatsService(node.ctx, node.replica)
-	node.statsService.start()
-}
-
-// NOTE: start pulsar before test
-func TestSegmentManagement_SegmentStatisticService(t *testing.T) {
-	Params.Init()
 	var ctx context.Context
 
 	if closeWithDeadline {
@@ -109,7 +28,7 @@ func TestSegmentManagement_SegmentStatisticService(t *testing.T) {
 
 	// init query node
 	pulsarURL := "pulsar://localhost:6650"
-	node := NewQueryNode(ctx, 0)
+	node := NewQueryNode(ctx, 0, pulsarURL)
 
 	// init meta
 	collectionName := "collection0"
@@ -153,20 +72,100 @@ func TestSegmentManagement_SegmentStatisticService(t *testing.T) {
 	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
 	assert.NotEqual(t, "", collectionMetaBlob)
 
-	var err = (*node.replica).addCollection(&collectionMeta, collectionMetaBlob)
+	var err = (*node.container).addCollection(&collectionMeta, collectionMetaBlob)
 	assert.NoError(t, err)
 
-	collection, err := (*node.replica).getCollectionByName(collectionName)
+	collection, err := (*node.container).getCollectionByName(collectionName)
 	assert.NoError(t, err)
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
 	assert.Equal(t, collection.meta.ID, UniqueID(0))
-	assert.Equal(t, (*node.replica).getCollectionNum(), 1)
+	assert.Equal(t, (*node.container).getCollectionNum(), 1)
 
-	err = (*node.replica).addPartition(collection.ID(), collectionMeta.PartitionTags[0])
+	err = (*node.container).addPartition(collection.ID(), collectionMeta.PartitionTags[0])
 	assert.NoError(t, err)
 
 	segmentID := UniqueID(0)
-	err = (*node.replica).addSegment(segmentID, collectionMeta.PartitionTags[0], UniqueID(0))
+	err = (*node.container).addSegment(segmentID, collectionMeta.PartitionTags[0], UniqueID(0))
+	assert.NoError(t, err)
+
+	// start stats service
+	node.statsService = newStatsService(node.ctx, node.container, node.pulsarURL)
+	node.statsService.start()
+}
+
+// NOTE: start pulsar before test
+func TestSegmentManagement_SegmentStatisticService(t *testing.T) {
+	var ctx context.Context
+
+	if closeWithDeadline {
+		var cancel context.CancelFunc
+		d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
+		ctx, cancel = context.WithDeadline(context.Background(), d)
+		defer cancel()
+	} else {
+		ctx = context.Background()
+	}
+
+	// init query node
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
+
+	// init meta
+	collectionName := "collection0"
+	fieldVec := schemapb.FieldSchema{
+		Name:     "vec",
+		DataType: schemapb.DataType_VECTOR_FLOAT,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "16",
+			},
+		},
+	}
+
+	fieldInt := schemapb.FieldSchema{
+		Name:     "age",
+		DataType: schemapb.DataType_INT32,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "1",
+			},
+		},
+	}
+
+	schema := schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			&fieldVec, &fieldInt,
+		},
+	}
+
+	collectionMeta := etcdpb.CollectionMeta{
+		ID:            UniqueID(0),
+		Schema:        &schema,
+		CreateTime:    Timestamp(0),
+		SegmentIDs:    []UniqueID{0},
+		PartitionTags: []string{"default"},
+	}
+
+	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
+	assert.NotEqual(t, "", collectionMetaBlob)
+
+	var err = (*node.container).addCollection(&collectionMeta, collectionMetaBlob)
+	assert.NoError(t, err)
+
+	collection, err := (*node.container).getCollectionByName(collectionName)
+	assert.NoError(t, err)
+	assert.Equal(t, collection.meta.Schema.Name, "collection0")
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
+	assert.Equal(t, (*node.container).getCollectionNum(), 1)
+
+	err = (*node.container).addPartition(collection.ID(), collectionMeta.PartitionTags[0])
+	assert.NoError(t, err)
+
+	segmentID := UniqueID(0)
+	err = (*node.container).addSegment(segmentID, collectionMeta.PartitionTags[0], UniqueID(0))
 	assert.NoError(t, err)
 
 	const receiveBufSize = 1024
@@ -179,9 +178,9 @@ func TestSegmentManagement_SegmentStatisticService(t *testing.T) {
 
 	var statsMsgStream msgstream.MsgStream = statsStream
 
-	node.statsService = newStatsService(node.ctx, node.replica)
-	node.statsService.statsStream = &statsMsgStream
-	(*node.statsService.statsStream).Start()
+	node.statsService = newStatsService(node.ctx, node.container, node.pulsarURL)
+	node.statsService.msgStream = &statsMsgStream
+	(*node.statsService.msgStream).Start()
 
 	// send stats
 	node.statsService.sendSegmentStatistic()

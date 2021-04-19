@@ -6,7 +6,7 @@ import (
 
 type serviceTimeNode struct {
 	BaseNode
-	replica *collectionReplica
+	node *QueryNode
 }
 
 func (stNode *serviceTimeNode) Name() string {
@@ -28,17 +28,17 @@ func (stNode *serviceTimeNode) Operate(in []*Msg) []*Msg {
 	}
 
 	// update service time
-	(*stNode.replica).setTSafe(serviceTimeMsg.timeRange.timestampMax)
+	stNode.node.tSafe.setTSafe(serviceTimeMsg.timeRange.timestampMax)
 	return nil
 }
 
-func newServiceTimeNode(replica *collectionReplica) *serviceTimeNode {
+func newServiceTimeNode(node *QueryNode) *serviceTimeNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &serviceTimeNode{
 		BaseNode: baseNode,
-		replica:  replica,
+		node:     node,
 	}
 }
