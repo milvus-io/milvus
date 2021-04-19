@@ -59,16 +59,12 @@ services:
   etcd:
     image: quay.io/coreos/etcd:v3.4.13
     command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379
-    ports:
-      - "2379:2379"
     networks:
       - milvus
 
   pulsar:
     image: apachepulsar/pulsar:2.6.1
     command: bin/pulsar standalone
-    ports:
-      - "6650:6650"
     networks:
       - milvus
 
