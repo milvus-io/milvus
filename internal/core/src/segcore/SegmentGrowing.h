@@ -18,7 +18,7 @@
 
 #include "query/deprecated/GeneralQuery.h"
 #include "query/Plan.h"
-#include "common/LoadInfo.h"
+#include "common/LoadIndex.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus {

@@ -44,25 +44,31 @@ func (s *Server) Start() {
 }
 
 func (s *Server) AddQueryChannel(ctx context.Context, in *querypb.AddQueryChannelsRequest) (*commonpb.Status, error) {
-	return s.node.AddQueryChannel(ctx, in)
+	// ignore ctx
+	return s.node.AddQueryChannel(in)
 }
 
 func (s *Server) RemoveQueryChannel(ctx context.Context, in *querypb.RemoveQueryChannelsRequest) (*commonpb.Status, error) {
-	return s.node.RemoveQueryChannel(ctx, in)
+	// ignore ctx
+	return s.node.RemoveQueryChannel(in)
 }
 
 func (s *Server) WatchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
-	return s.node.WatchDmChannels(ctx, in)
+	// ignore ctx
+	return s.node.WatchDmChannels(in)
 }
 
 func (s *Server) LoadSegments(ctx context.Context, in *querypb.LoadSegmentRequest) (*commonpb.Status, error) {
-	return s.node.LoadSegments(ctx, in)
+	// ignore ctx
+	return s.node.LoadSegments(in)
 }
 
 func (s *Server) ReleaseSegments(ctx context.Context, in *querypb.ReleaseSegmentRequest) (*commonpb.Status, error) {
-	return s.node.ReleaseSegments(ctx, in)
+	// ignore ctx
+	return s.node.ReleaseSegments(in)
 }
 
 func (s *Server) GetPartitionState(ctx context.Context, in *querypb.PartitionStatesRequest) (*querypb.PartitionStatesResponse, error) {
-	return s.node.GetPartitionState(ctx, in)
+	// ignore ctx
+	return s.node.GetPartitionState(in)
 }

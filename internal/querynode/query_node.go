@@ -29,12 +29,12 @@ type Node interface {
 	Start() error
 	Close()
 
-	AddQueryChannel(ctx context.Context, in *queryPb.AddQueryChannelsRequest) (*commonpb.Status, error)
-	RemoveQueryChannel(ctx context.Context, in *queryPb.RemoveQueryChannelsRequest) (*commonpb.Status, error)
-	WatchDmChannels(ctx context.Context, in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error)
-	LoadSegments(ctx context.Context, in *queryPb.LoadSegmentRequest) (*commonpb.Status, error)
-	ReleaseSegments(ctx context.Context, in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error)
-	GetPartitionState(ctx context.Context, in *queryPb.PartitionStatesRequest) (*queryPb.PartitionStatesResponse, error)
+	AddQueryChannel(in *queryPb.AddQueryChannelsRequest) (*commonpb.Status, error)
+	RemoveQueryChannel(in *queryPb.RemoveQueryChannelsRequest) (*commonpb.Status, error)
+	WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error)
+	LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.Status, error)
+	ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error)
+	GetPartitionState(in *queryPb.PartitionStatesRequest) (*queryPb.PartitionStatesResponse, error)
 }
 
 type QueryNode struct {
@@ -52,6 +52,8 @@ type QueryNode struct {
 	searchService    *searchService
 	loadIndexService *loadIndexService
 	statsService     *statsService
+
+	segManager *segmentManager
 
 	//opentracing
 	tracer opentracing.Tracer
