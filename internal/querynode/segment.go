@@ -25,14 +25,15 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
 
+type segmentType int32
+
 const (
-	segTypeInvalid = iota
-	segTypeGrowing
-	segTypeSealed
+	segmentTypeInvalid segmentType = iota
+	segmentTypeGrowing
+	segmentTypeSealed
 	segTypeIndexing
 )
 
-type segmentType = int
 type indexParam = map[string]string
 
 type Segment struct {
@@ -51,7 +52,7 @@ type Segment struct {
 	recentlyModified bool
 
 	typeMu      sync.Mutex // guards builtIndex
-	segmentType int
+	segmentType segmentType
 
 	paramMutex sync.RWMutex // guards index
 	indexParam map[int64]indexParam
@@ -132,12 +133,12 @@ func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, c
 	initIndexParam := make(map[int64]indexParam)
 	var segmentPtr C.CSegmentInterface
 	switch segType {
-	case segTypeInvalid:
+	case segmentTypeInvalid:
 		log.Error("illegal segment type when create segment")
 		return nil
-	case segTypeSealed:
+	case segmentTypeSealed:
 		segmentPtr = C.NewSegment(collection.collectionPtr, C.ulong(segmentID), C.Sealed)
-	case segTypeGrowing:
+	case segmentTypeGrowing:
 		segmentPtr = C.NewSegment(collection.collectionPtr, C.ulong(segmentID), C.Growing)
 	default:
 		log.Error("illegal segment type when create segment")
@@ -234,7 +235,7 @@ func (s *Segment) segmentSearch(plan *Plan,
 	var cPlaceHolder = (*C.CPlaceholderGroup)(&cPlaceholderGroups[0])
 	var cNumGroups = C.int(len(placeHolderGroups))
 
-	log.Debug("do search on segment", zap.Int64("segmentID", s.segmentID), zap.Int("segType", s.segmentType))
+	log.Debug("do search on segment", zap.Int64("segmentID", s.segmentID), zap.Int32("segmentType", int32(s.segmentType)))
 	var status = C.Search(s.segmentPtr, plan.cPlan, cPlaceHolder, cTimestamp, cNumGroups, &searchResult.cQueryResult)
 	errorCode := status.error_code
 
@@ -272,9 +273,9 @@ func (s *Segment) updateSegmentIndex(loadIndexInfo *LoadIndexInfo) error {
 	}
 	var status C.CStatus
 
-	if s.segmentType == segTypeGrowing {
+	if s.segmentType == segmentTypeGrowing {
 		status = C.UpdateSegmentIndex(s.segmentPtr, loadIndexInfo.cLoadIndexInfo)
-	} else if s.segmentType == segTypeSealed {
+	} else if s.segmentType == segmentTypeSealed {
 		status = C.UpdateSealedSegmentIndex(s.segmentPtr, loadIndexInfo.cLoadIndexInfo)
 	} else {
 		return errors.New("illegal segment type")
@@ -445,7 +446,7 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int, data interfa
 	if s.segmentPtr == nil {
 		return errors.New("null seg core pointer")
 	}
-	if s.segmentType != segTypeSealed {
+	if s.segmentType != segmentTypeSealed {
 		return errors.New("illegal segment type when loading field data")
 	}
 

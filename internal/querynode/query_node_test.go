@@ -125,7 +125,7 @@ func initTestMeta(t *testing.T, node *QueryNode, collectionID UniqueID, segmentI
 	err = node.replica.addPartition(collection.ID(), collectionMeta.PartitionIDs[0])
 	assert.NoError(t, err)
 
-	err = node.replica.addSegment(segmentID, collectionMeta.PartitionIDs[0], collectionID, segTypeGrowing)
+	err = node.replica.addSegment(segmentID, collectionMeta.PartitionIDs[0], collectionID, segmentTypeGrowing)
 	assert.NoError(t, err)
 }
 
@@ -196,7 +196,7 @@ func refreshChannelNames() {
 func (q *queryServiceMock) RegisterNode(ctx context.Context, req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
 	return &querypb.RegisterNodeResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		InitParams: &internalpb2.InitParams{
 			NodeID: int64(1),

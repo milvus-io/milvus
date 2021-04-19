@@ -152,7 +152,7 @@ func (mService *metaService) processSegmentCreate(id string, value string) {
 	// TODO: what if seg == nil? We need to notify master and return rpc request failed
 	if seg != nil {
 		// TODO: get partition id from segment meta
-		err := mService.replica.addSegment(seg.SegmentID, seg.PartitionID, seg.CollectionID, segTypeGrowing)
+		err := mService.replica.addSegment(seg.SegmentID, seg.PartitionID, seg.CollectionID, segmentTypeGrowing)
 		if err != nil {
 			log.Error(err.Error())
 			return

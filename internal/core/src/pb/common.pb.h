@@ -96,38 +96,38 @@ namespace proto {
 namespace common {
 
 enum ErrorCode : int {
-  ERROR_CODE_SUCCESS = 0,
-  ERROR_CODE_UNEXPECTED_ERROR = 1,
-  ERROR_CODE_CONNECT_FAILED = 2,
-  ERROR_CODE_PERMISSION_DENIED = 3,
-  ERROR_CODE_COLLECTION_NOT_EXISTS = 4,
-  ERROR_CODE_ILLEGAL_ARGUMENT = 5,
-  ERROR_CODE_ILLEGAL_DIMENSION = 7,
-  ERROR_CODE_ILLEGAL_INDEX_TYPE = 8,
-  ERROR_CODE_ILLEGAL_COLLECTION_NAME = 9,
-  ERROR_CODE_ILLEGAL_TOPK = 10,
-  ERROR_CODE_ILLEGAL_ROWRECORD = 11,
-  ERROR_CODE_ILLEGAL_VECTOR_ID = 12,
-  ERROR_CODE_ILLEGAL_SEARCH_RESULT = 13,
-  ERROR_CODE_FILE_NOT_FOUND = 14,
-  ERROR_CODE_META_FAILED = 15,
-  ERROR_CODE_CACHE_FAILED = 16,
-  ERROR_CODE_CANNOT_CREATE_FOLDER = 17,
-  ERROR_CODE_CANNOT_CREATE_FILE = 18,
-  ERROR_CODE_CANNOT_DELETE_FOLDER = 19,
-  ERROR_CODE_CANNOT_DELETE_FILE = 20,
-  ERROR_CODE_BUILD_INDEX_ERROR = 21,
-  ERROR_CODE_ILLEGAL_NLIST = 22,
-  ERROR_CODE_ILLEGAL_METRIC_TYPE = 23,
-  ERROR_CODE_OUT_OF_MEMORY = 24,
-  ERROR_CODE_INDEX_NOT_EXIST = 25,
-  ERROR_CODE_DD_REQUEST_RACE = 1000,
+  Success = 0,
+  UnexpectedError = 1,
+  ConnectFailed = 2,
+  PermissionDenied = 3,
+  CollectionNotExists = 4,
+  IllegalArgument = 5,
+  IllegalDimension = 7,
+  IllegalIndexType = 8,
+  IllegalCollectionName = 9,
+  IllegalTOPK = 10,
+  IllegalRowRecord = 11,
+  IllegalVectorID = 12,
+  IllegalSearchResult = 13,
+  FileNotFound = 14,
+  MetaFailed = 15,
+  CacheFailed = 16,
+  CannotCreateFolder = 17,
+  CannotCreateFile = 18,
+  CannotDeleteFolder = 19,
+  CannotDeleteFile = 20,
+  BuildIndexError = 21,
+  IllegalNLIST = 22,
+  IllegalMetricType = 23,
+  OutOfMemory = 24,
+  IndexNotExist = 25,
+  DDRequestRace = 1000,
   ErrorCode_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   ErrorCode_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool ErrorCode_IsValid(int value);
-constexpr ErrorCode ErrorCode_MIN = ERROR_CODE_SUCCESS;
-constexpr ErrorCode ErrorCode_MAX = ERROR_CODE_DD_REQUEST_RACE;
+constexpr ErrorCode ErrorCode_MIN = Success;
+constexpr ErrorCode ErrorCode_MAX = DDRequestRace;
 constexpr int ErrorCode_ARRAYSIZE = ErrorCode_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ErrorCode_descriptor();
@@ -202,7 +202,7 @@ inline bool SegmentState_Parse(
     SegmentState_descriptor(), name, value);
 }
 enum MsgType : int {
-  None = 0,
+  UnSpecific = 0,
   CreateCollection = 100,
   DropCollection = 101,
   HasCollection = 102,
@@ -244,7 +244,7 @@ enum MsgType : int {
   MsgType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool MsgType_IsValid(int value);
-constexpr MsgType MsgType_MIN = None;
+constexpr MsgType MsgType_MIN = UnSpecific;
 constexpr MsgType MsgType_MAX = SegmentFlushDone;
 constexpr int MsgType_ARRAYSIZE = MsgType_MAX + 1;
 

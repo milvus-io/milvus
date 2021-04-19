@@ -165,7 +165,7 @@ func (i *IndexService) GetComponentStates(ctx context.Context) (*internalpb2.Com
 		State:              stateInfo,
 		SubcomponentStates: nil, // todo add subcomponents states
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}
 	return ret, nil
@@ -174,7 +174,7 @@ func (i *IndexService) GetComponentStates(ctx context.Context) (*internalpb2.Com
 func (i *IndexService) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
 		Value: "",
@@ -184,7 +184,7 @@ func (i *IndexService) GetTimeTickChannel(ctx context.Context) (*milvuspb.String
 func (i *IndexService) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
 		Value: "",
@@ -195,7 +195,7 @@ func (i *IndexService) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRe
 	fmt.Println("builder building index ..., indexName = ", req.IndexName, "indexID = ", req.IndexID, "dataPath = ", req.DataPaths)
 	ret := &indexpb.BuildIndexResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 	}
 	t := &IndexAddTask{
@@ -230,18 +230,18 @@ func (i *IndexService) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRe
 
 	err := fn()
 	if err != nil {
-		ret.Status.ErrorCode = commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR
+		ret.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Status.Reason = err.Error()
 		return ret, nil
 	}
 
 	err = t.WaitToFinish()
 	if err != nil {
-		ret.Status.ErrorCode = commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR
+		ret.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Status.Reason = err.Error()
 		return ret, nil
 	}
-	ret.Status.ErrorCode = commonpb.ErrorCode_ERROR_CODE_SUCCESS
+	ret.Status.ErrorCode = commonpb.ErrorCode_Success
 	ret.IndexBuildID = t.indexBuildID
 	return ret, nil
 }
@@ -257,7 +257,7 @@ func (i *IndexService) GetIndexStates(ctx context.Context, req *indexpb.IndexSta
 	}
 	ret := &indexpb.IndexStatesResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		States: indexStates,
 	}
@@ -270,7 +270,7 @@ func (i *IndexService) DropIndex(ctx context.Context, req *indexpb.DropIndexRequ
 	err := i.metaTable.MarkIndexAsDeleted(req.IndexID)
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -289,7 +289,7 @@ func (i *IndexService) DropIndex(ctx context.Context, req *indexpb.DropIndexRequ
 	}()
 
 	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
 }
 
@@ -306,7 +306,7 @@ func (i *IndexService) GetIndexFilePaths(ctx context.Context, req *indexpb.Index
 
 	ret := &indexpb.IndexFilePathsResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		FilePaths: indexPaths,
 	}
@@ -315,11 +315,11 @@ func (i *IndexService) GetIndexFilePaths(ctx context.Context, req *indexpb.Index
 
 func (i *IndexService) NotifyBuildIndex(ctx context.Context, nty *indexpb.BuildIndexNotification) (*commonpb.Status, error) {
 	ret := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_Success,
 	}
 	log.Debug("indexservice", zap.String("[IndexService][NotifyBuildIndex]", nty.String()))
 	if err := i.metaTable.NotifyBuildIndex(nty); err != nil {
-		ret.ErrorCode = commonpb.ErrorCode_ERROR_CODE_BUILD_INDEX_ERROR
+		ret.ErrorCode = commonpb.ErrorCode_BuildIndexError
 		ret.Reason = err.Error()
 		log.Debug("indexservice", zap.String("[IndexService][NotifyBuildIndex][metaTable][NotifyBuildIndex]", err.Error()))
 	}

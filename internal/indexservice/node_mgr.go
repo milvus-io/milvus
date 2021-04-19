@@ -58,7 +58,7 @@ func (i *IndexService) prepareNodeInitParams() []*commonpb.KeyValuePair {
 func (i *IndexService) RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
 	ret := &indexpb.RegisterNodeResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 	}
 
@@ -74,7 +74,7 @@ func (i *IndexService) RegisterNode(ctx context.Context, req *indexpb.RegisterNo
 		return ret, nil
 	}
 
-	ret.Status.ErrorCode = commonpb.ErrorCode_ERROR_CODE_SUCCESS
+	ret.Status.ErrorCode = commonpb.ErrorCode_Success
 	params := i.prepareNodeInitParams()
 	ret.InitParams = &internalpb2.InitParams{
 		NodeID:      nodeID,

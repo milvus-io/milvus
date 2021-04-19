@@ -46,7 +46,7 @@ type loadIndex struct {
 }
 
 func (loader *indexLoader) doLoadIndex(wg *sync.WaitGroup) {
-	collectionIDs, _, segmentIDs := loader.replica.getSegmentsBySegmentType(segTypeSealed)
+	collectionIDs, _, segmentIDs := loader.replica.getSegmentsBySegmentType(segmentTypeSealed)
 	if len(collectionIDs) <= 0 {
 		wg.Done()
 		return
@@ -321,7 +321,7 @@ func (loader *indexLoader) getIndexInfo(collectionID UniqueID, segmentID UniqueI
 	if err != nil {
 		return 0, 0, err
 	}
-	if response.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
+	if response.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return -1, -1, errors.New(response.Status.Reason)
 	}
 
@@ -342,7 +342,7 @@ func (loader *indexLoader) getIndexPaths(indexBuildID UniqueID) ([]string, error
 		IndexBuildIDs: []UniqueID{indexBuildID},
 	}
 	pathResponse, err := loader.indexService.GetIndexFilePaths(ctx, indexFilePathRequest)
-	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
+	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return nil, err
 	}
 

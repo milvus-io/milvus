@@ -299,7 +299,7 @@ func (sa *SegIDAssigner) syncSegments() bool {
 	now := time.Now()
 	success := false
 	for _, info := range resp.SegIDAssignments {
-		if info.Status.GetErrorCode() != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
+		if info.Status.GetErrorCode() != commonpb.ErrorCode_Success {
 			log.Debug("proxynode", zap.String("SyncSegment Error", info.Status.Reason))
 			continue
 		}

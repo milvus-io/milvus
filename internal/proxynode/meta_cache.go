@@ -108,7 +108,7 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) 
 	if err != nil {
 		return 0, err
 	}
-	if coll.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
+	if coll.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return 0, errors.New(coll.Status.Reason)
 	}
 
@@ -139,7 +139,7 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName stri
 	if err != nil {
 		return nil, err
 	}
-	if coll.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
+	if coll.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return nil, errors.New(coll.Status.Reason)
 	}
 
@@ -171,7 +171,7 @@ func (m *MetaCache) GetPartitionID(ctx context.Context, collectionName string, p
 	if err != nil {
 		return 0, err
 	}
-	if partitions.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
+	if partitions.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return 0, fmt.Errorf("%s", partitions.Status.Reason)
 	}
 	if len(partitions.PartitionIDs) != len(partitions.PartitionNames) {

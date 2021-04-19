@@ -30,7 +30,7 @@ func (node *ProxyNode) InvalidateCollectionMetaCache(ctx context.Context, reques
 	collectionName := request.CollectionName
 	globalMetaCache.RemoveCollection(ctx, collectionName) // no need to return error, though collection may be not cached
 	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
 	}, nil
 }
@@ -49,7 +49,7 @@ func (node *ProxyNode) CreateCollection(ctx context.Context, request *milvuspb.C
 	err := node.sched.DdQueue.Enqueue(cct)
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -57,7 +57,7 @@ func (node *ProxyNode) CreateCollection(ctx context.Context, request *milvuspb.C
 	err = cct.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -78,7 +78,7 @@ func (node *ProxyNode) DropCollection(ctx context.Context, request *milvuspb.Dro
 	err := node.sched.DdQueue.Enqueue(dct)
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -86,7 +86,7 @@ func (node *ProxyNode) DropCollection(ctx context.Context, request *milvuspb.Dro
 	err = dct.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -108,7 +108,7 @@ func (node *ProxyNode) HasCollection(ctx context.Context, request *milvuspb.HasC
 	if err != nil {
 		return &milvuspb.BoolResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 		}, nil
@@ -118,7 +118,7 @@ func (node *ProxyNode) HasCollection(ctx context.Context, request *milvuspb.HasC
 	if err != nil {
 		return &milvuspb.BoolResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 		}, nil
@@ -142,7 +142,7 @@ func (node *ProxyNode) LoadCollection(ctx context.Context, request *milvuspb.Loa
 	err := node.sched.DdQueue.Enqueue(lct)
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -150,7 +150,7 @@ func (node *ProxyNode) LoadCollection(ctx context.Context, request *milvuspb.Loa
 	err = lct.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -171,7 +171,7 @@ func (node *ProxyNode) ReleaseCollection(ctx context.Context, request *milvuspb.
 	err := node.sched.DdQueue.Enqueue(rct)
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -179,7 +179,7 @@ func (node *ProxyNode) ReleaseCollection(ctx context.Context, request *milvuspb.
 	err = rct.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -201,7 +201,7 @@ func (node *ProxyNode) DescribeCollection(ctx context.Context, request *milvuspb
 	if err != nil {
 		return &milvuspb.DescribeCollectionResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 		}, nil
@@ -211,7 +211,7 @@ func (node *ProxyNode) DescribeCollection(ctx context.Context, request *milvuspb
 	if err != nil {
 		return &milvuspb.DescribeCollectionResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 		}, nil
@@ -233,7 +233,7 @@ func (node *ProxyNode) GetCollectionStatistics(ctx context.Context, request *mil
 	if err != nil {
 		return &milvuspb.CollectionStatsResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 		}, nil
@@ -243,7 +243,7 @@ func (node *ProxyNode) GetCollectionStatistics(ctx context.Context, request *mil
 	if err != nil {
 		return &milvuspb.CollectionStatsResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 		}, nil
@@ -265,7 +265,7 @@ func (node *ProxyNode) ShowCollections(ctx context.Context, request *milvuspb.Sh
 	if err != nil {
 		return &milvuspb.ShowCollectionResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 		}, nil
@@ -275,7 +275,7 @@ func (node *ProxyNode) ShowCollections(ctx context.Context, request *milvuspb.Sh
 	if err != nil {
 		return &milvuspb.ShowCollectionResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 		}, nil
@@ -297,14 +297,14 @@ func (node *ProxyNode) CreatePartition(ctx context.Context, request *milvuspb.Cr
 	err := node.sched.DdQueue.Enqueue(cpt)
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
 	err = cpt.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -325,14 +325,14 @@ func (node *ProxyNode) DropPartition(ctx context.Context, request *milvuspb.Drop
 
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
 	err = dpt.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -354,7 +354,7 @@ func (node *ProxyNode) HasPartition(ctx context.Context, request *milvuspb.HasPa
 	if err != nil {
 		return &milvuspb.BoolResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 			Value: false,
@@ -364,7 +364,7 @@ func (node *ProxyNode) HasPartition(ctx context.Context, request *milvuspb.HasPa
 	if err != nil {
 		return &milvuspb.BoolResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 			Value: false,
@@ -386,7 +386,7 @@ func (node *ProxyNode) LoadPartitions(ctx context.Context, request *milvuspb.Loa
 	err := node.sched.DdQueue.Enqueue(lpt)
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -394,7 +394,7 @@ func (node *ProxyNode) LoadPartitions(ctx context.Context, request *milvuspb.Loa
 	err = lpt.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -415,7 +415,7 @@ func (node *ProxyNode) ReleasePartitions(ctx context.Context, request *milvuspb.
 	err := node.sched.DdQueue.Enqueue(rpt)
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -423,7 +423,7 @@ func (node *ProxyNode) ReleasePartitions(ctx context.Context, request *milvuspb.
 	err = rpt.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -450,7 +450,7 @@ func (node *ProxyNode) ShowPartitions(ctx context.Context, request *milvuspb.Sho
 	if err != nil {
 		return &milvuspb.ShowPartitionResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 		}, nil
@@ -460,7 +460,7 @@ func (node *ProxyNode) ShowPartitions(ctx context.Context, request *milvuspb.Sho
 	if err != nil {
 		return &milvuspb.ShowPartitionResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 		}, nil
@@ -480,7 +480,7 @@ func (node *ProxyNode) CreateIndex(ctx context.Context, request *milvuspb.Create
 	err := node.sched.DdQueue.Enqueue(cit)
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -488,7 +488,7 @@ func (node *ProxyNode) CreateIndex(ctx context.Context, request *milvuspb.Create
 	err = cit.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -509,7 +509,7 @@ func (node *ProxyNode) DescribeIndex(ctx context.Context, request *milvuspb.Desc
 	if err != nil {
 		return &milvuspb.DescribeIndexResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 		}, nil
@@ -539,14 +539,14 @@ func (node *ProxyNode) DropIndex(ctx context.Context, request *milvuspb.DropInde
 	err := node.sched.DdQueue.Enqueue(dit)
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
 	err = dit.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -566,7 +566,7 @@ func (node *ProxyNode) GetIndexState(ctx context.Context, request *milvuspb.Inde
 	if err != nil {
 		return &milvuspb.IndexStateResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 		}, nil
@@ -576,7 +576,7 @@ func (node *ProxyNode) GetIndexState(ctx context.Context, request *milvuspb.Inde
 	if err != nil {
 		return &milvuspb.IndexStateResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 		}, nil
@@ -615,7 +615,7 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 	if err != nil {
 		return &milvuspb.InsertResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 		}, nil
@@ -625,7 +625,7 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 	if err != nil {
 		return &milvuspb.InsertResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 		}, nil
@@ -654,7 +654,7 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 	if err != nil {
 		return &milvuspb.SearchResults{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 		}, nil
@@ -664,7 +664,7 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 	if err != nil {
 		return &milvuspb.SearchResults{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
 		}, nil
@@ -685,7 +685,7 @@ func (node *ProxyNode) Flush(ctx context.Context, request *milvuspb.FlushRequest
 	err := node.sched.DdQueue.Enqueue(ft)
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -693,7 +693,7 @@ func (node *ProxyNode) Flush(ctx context.Context, request *milvuspb.FlushRequest
 	err = ft.WaitToFinish()
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
@@ -708,7 +708,7 @@ func (node *ProxyNode) GetDdChannel(ctx context.Context, request *commonpb.Empty
 func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.PersistentSegmentInfoRequest) (*milvuspb.PersistentSegmentInfoResponse, error) {
 	resp := &milvuspb.PersistentSegmentInfoResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 	}
 	segments, err := node.getSegmentsOfCollection(ctx, req.DbName, req.CollectionName)
@@ -729,7 +729,7 @@ func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvus
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
-	if infoResp.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
+	if infoResp.Status.ErrorCode != commonpb.ErrorCode_Success {
 		resp.Status.Reason = infoResp.Status.Reason
 		return resp, nil
 	}
@@ -747,7 +747,7 @@ func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvus
 			State:        info.State,
 		}
 	}
-	resp.Status.ErrorCode = commonpb.ErrorCode_ERROR_CODE_SUCCESS
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.Infos = persistentInfos
 	return resp, nil
 }
@@ -755,7 +755,7 @@ func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvus
 func (node *ProxyNode) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.QuerySegmentInfoRequest) (*milvuspb.QuerySegmentInfoResponse, error) {
 	resp := &milvuspb.QuerySegmentInfoResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 	}
 	segments, err := node.getSegmentsOfCollection(ctx, req.DbName, req.CollectionName)
@@ -776,7 +776,7 @@ func (node *ProxyNode) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.Qu
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
-	if infoResp.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
+	if infoResp.Status.ErrorCode != commonpb.ErrorCode_Success {
 		resp.Status.Reason = infoResp.Status.Reason
 		return resp, nil
 	}
@@ -792,7 +792,7 @@ func (node *ProxyNode) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.Qu
 			IndexID:      info.IndexID,
 		}
 	}
-	resp.Status.ErrorCode = commonpb.ErrorCode_ERROR_CODE_SUCCESS
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.Infos = queryInfos
 	return resp, nil
 }
@@ -811,7 +811,7 @@ func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName strin
 	if err != nil {
 		return nil, err
 	}
-	if describeCollectionResponse.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
+	if describeCollectionResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return nil, errors.New(describeCollectionResponse.Status.Reason)
 	}
 	collectionID := describeCollectionResponse.CollectionID
@@ -829,7 +829,7 @@ func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName strin
 	if err != nil {
 		return nil, err
 	}
-	if showPartitionsResp.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
+	if showPartitionsResp.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return nil, errors.New(showPartitionsResp.Status.Reason)
 	}
 
@@ -848,7 +848,7 @@ func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName strin
 		if err != nil {
 			return nil, err
 		}
-		if showSegmentResponse.Status.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
+		if showSegmentResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
 			return nil, errors.New(showSegmentResponse.Status.Reason)
 		}
 		ret = append(ret, showSegmentResponse.SegmentIDs...)
@@ -862,7 +862,7 @@ func (node *ProxyNode) RegisterLink(request *commonpb.Empty) (*milvuspb.Register
 		return &milvuspb.RegisterLinkResponse{
 			Address: nil,
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "proxy node not healthy",
 			},
 		}, nil
@@ -870,7 +870,7 @@ func (node *ProxyNode) RegisterLink(request *commonpb.Empty) (*milvuspb.Register
 	return &milvuspb.RegisterLinkResponse{
 		Address: nil,
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
 	}, nil
