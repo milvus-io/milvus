@@ -123,7 +123,7 @@ func (s *Server) init() error {
 	}()
 
 	s.wg.Add(1)
-	s.startGrpcLoop(Params.Port)
+	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
 	err = <-s.grpcErrChan
 	if err != nil {
