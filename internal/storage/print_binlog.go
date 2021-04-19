@@ -310,32 +310,28 @@ func printDDLPayloadValues(eventType EventTypeCode, colType schemapb.DataType, r
 			switch eventType {
 			case CreateCollectionEventType:
 				var req internalpb.CreateCollectionRequest
-				if err := proto.Unmarshal(([]byte)(val), &req); err != nil {
+				if err := proto.UnmarshalText(val, &req); err != nil {
 					return err
 				}
-				msg := proto.MarshalTextString(&req)
-				fmt.Printf("\t\t%d : create collection: %s\n", i, msg)
+				fmt.Printf("\t\t%d : create collection: %v\n", i, req)
 			case DropCollectionEventType:
-				var req internalpb.DropPartitionRequest
-				if err := proto.Unmarshal(([]byte)(val), &req); err != nil {
+				var req internalpb.DropCollectionRequest
+				if err := proto.UnmarshalText(val, &req); err != nil {
 					return err
 				}
-				msg := proto.MarshalTextString(&req)
-				fmt.Printf("\t\t%d : drop collection: %s\n", i, msg)
+				fmt.Printf("\t\t%d : drop collection: %v\n", i, req)
 			case CreatePartitionEventType:
 				var req internalpb.CreatePartitionRequest
-				if err := proto.Unmarshal(([]byte)(val), &req); err != nil {
+				if err := proto.UnmarshalText(val, &req); err != nil {
 					return err
 				}
-				msg := proto.MarshalTextString(&req)
-				fmt.Printf("\t\t%d : create partition: %s\n", i, msg)
+				fmt.Printf("\t\t%d : create partition: %v\n", i, req)
 			case DropPartitionEventType:
 				var req internalpb.DropPartitionRequest
-				if err := proto.Unmarshal(([]byte)(val), &req); err != nil {
+				if err := proto.UnmarshalText(val, &req); err != nil {
 					return err
 				}
-				msg := proto.MarshalTextString(&req)
-				fmt.Printf("\t\t%d : drop partition: %s\n", i, msg)
+				fmt.Printf("\t\t%d : drop partition: %v\n", i, req)
 			default:
 				return errors.Errorf("undefined ddl event type %d", eventType)
 			}
