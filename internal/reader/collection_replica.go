@@ -58,6 +58,8 @@ type collectionReplica interface {
 	removeSegment(segmentID UniqueID) error
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 	hasSegment(segmentID UniqueID) bool
+
+	freeAll()
 }
 
 type collectionReplicaImpl struct {
@@ -311,6 +313,9 @@ func (colReplica *collectionReplicaImpl) getSegmentNum() int {
 }
 
 func (colReplica *collectionReplicaImpl) getSegmentStatistics() *internalpb.QueryNodeSegStats {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
 	var statisticData = make([]*internalpb.SegmentStats, 0)
 
 	for segmentID, segment := range colReplica.segments {
@@ -404,4 +409,17 @@ func (colReplica *collectionReplicaImpl) hasSegment(segmentID UniqueID) bool {
 	_, ok := colReplica.segments[segmentID]
 
 	return ok
+}
+
+//-----------------------------------------------------------------------------------------------------
+func (colReplica *collectionReplicaImpl) freeAll() {
+	colReplica.mu.Lock()
+	defer colReplica.mu.Unlock()
+
+	for _, seg := range colReplica.segments {
+		deleteSegment(seg)
+	}
+	for _, col := range colReplica.collections {
+		deleteCollection(col)
+	}
 }
