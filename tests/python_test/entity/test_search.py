@@ -102,8 +102,8 @@ class TestSearchBase:
         logging.getLogger().info(request.param)
         if request.param["index_type"] in binary_support():
             return request.param
-        else:
-            pytest.skip("Skip index Temporary")
+        # else:
+        #     pytest.skip("Skip index Temporary")
 
     @pytest.fixture(
         scope="function",
@@ -113,8 +113,8 @@ class TestSearchBase:
         logging.getLogger().info(request.param)
         if request.param["index_type"] in binary_support():
             return request.param
-        else:
-            pytest.skip("Skip index Temporary")
+        # else:
+        #     pytest.skip("Skip index Temporary")
 
     @pytest.fixture(
         scope="function",
@@ -124,8 +124,8 @@ class TestSearchBase:
         logging.getLogger().info(request.param)
         if request.param["index_type"] == "FLAT":
             return request.param
-        else:
-            pytest.skip("Skip index Temporary")
+        # else:
+        #     pytest.skip("Skip index Temporary")
 
     """
     generate top-k params
@@ -235,7 +235,8 @@ class TestSearchBase:
         if top_k > max_top_k:
             with pytest.raises(Exception):
                 connect.search(collection, query, fields=['int64'])
-            pytest.skip("top_k value is larger than max_topp_k")
+            # pytest.skip("top_k value is larger than max_topp_k")
+            pass
         else:
             res = connect.search(collection, query, fields=['int64'])
             assert len(res) == 1
@@ -286,7 +287,7 @@ class TestSearchBase:
             assert res[0]._distances[0] < epsilon
             assert check_id_result(res[0], ids[0])
 
-    #@pytest.mark.tags("0331")
+    # @pytest.mark.tags("0331")
     def test_search_after_index_different_metric_type(self, connect, collection, get_simple_index):
         '''
         target: test search with different metric_type
@@ -301,10 +302,20 @@ class TestSearchBase:
         query, vecs = gen_query_vectors(field_name, entities, default_top_k, nq, metric_type=search_metric_type,
                                         search_params=search_param)
         connect.load_collection(collection)
-        res = connect.search(collection, query)
-        assert len(res) == nq
-        assert len(res[0]) == default_top_k
-        assert res[0]._distances[0] > res[0]._distances[default_top_k - 1]
+        if index_type == "FLAT": 
+            res = connect.search(collection, query)
+            assert len(res) == nq
+            assert len(res[0]) == default_top_k
+            assert res[0]._distances[0] > res[0]._distances[default_top_k - 1]
+        else:
+            with pytest.raises(Exception) as e:
+                res = connect.search(collection, query)
+
+    # TODO: need to enable 
+    # description: create/load/search
+    # @pytest.mark.tags("0331")
+    def _test_search_after_index_different_metric_type_2(self, connect, collection, get_simple_index):
+        pass
 
     @pytest.mark.level(2)
     def test_search_index_empty_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
@@ -1783,9 +1794,11 @@ class TestSearchInvalid(object):
         search_params = get_search_params
         index_type = get_simple_index["index_type"]
         if index_type in ["FLAT"]:
-            pytest.skip("skip in FLAT index")
+            # pytest.skip("skip in FLAT index")
+            pass
         if index_type != search_params["index_type"]:
-            pytest.skip("skip if index_type not matched")
+            # pytest.skip("skip if index_type not matched")
+            pass
         entities, ids = init_data(connect, collection)
         connect.create_index(collection, field_name, get_simple_index)
         query, vecs = gen_query_vectors(field_name, entities, default_top_k, 1,
@@ -1824,7 +1837,8 @@ class TestSearchInvalid(object):
         if args["handler"] == "HTTP":
             pytest.skip("skip in http mode")
         if index_type == "FLAT":
-            pytest.skip("skip in FLAT index")
+            # pytest.skip("skip in FLAT index")
+            pass
         entities, ids = init_data(connect, collection)
         connect.create_index(collection, field_name, get_simple_index)
         query, vecs = gen_query_vectors(field_name, entities, default_top_k, 1, search_params={})
