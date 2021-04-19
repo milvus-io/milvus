@@ -1,17 +1,33 @@
-package master
+package id
 
 import (
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/master/tso"
+	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
+
+type UniqueID = typeutil.UniqueID
 
 // GlobalTSOAllocator is the global single point TSO allocator.
 type GlobalIDAllocator struct {
-	allocator Allocator
+	allocator tso.Allocator
+}
+
+var allocator *GlobalIDAllocator
+
+func Init(etcdAddr []string, rootPath string) {
+	InitGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(etcdAddr, rootPath, "gid"))
+}
+
+func InitGlobalIDAllocator(key string, base kv.Base) {
+	allocator = NewGlobalIDAllocator(key, base)
+	allocator.Initialize()
 }
 
 func NewGlobalIDAllocator(key string, base kv.Base) *GlobalIDAllocator {
 	return &GlobalIDAllocator{
-		allocator: NewGlobalTSOAllocator(key, base),
+		allocator: tso.NewGlobalTSOAllocator(key, base),
 	}
 }
 
@@ -43,4 +59,16 @@ func (gia *GlobalIDAllocator) AllocOne() (UniqueID, error) {
 
 func (gia *GlobalIDAllocator) UpdateID() error {
 	return gia.allocator.UpdateTSO()
+}
+
+func AllocOne() (UniqueID, error) {
+	return allocator.AllocOne()
+}
+
+func Alloc(count uint32) (UniqueID, UniqueID, error) {
+	return allocator.Alloc(count)
+}
+
+func UpdateID() error {
+	return allocator.UpdateID()
 }

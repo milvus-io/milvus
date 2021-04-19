@@ -2,18 +2,19 @@ package master
 
 import (
 	"log"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/master/id"
+	masterParam "github.com/zilliztech/milvus-distributed/internal/master/paramtable"
+	"github.com/zilliztech/milvus-distributed/internal/master/tso"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -25,11 +26,17 @@ var partitionTag = "test"
 var kvBase *kv.EtcdKV
 
 func setup() {
-	Params.Init()
-	etcdAddress, err := Params.EtcdAddress()
+	masterParam.Params.Init()
+	etcdAddress, err := masterParam.Params.EtcdAddress()
 	if err != nil {
 		panic(err)
 	}
+	rootPath, err := masterParam.Params.EtcdRootPath()
+	if err != nil {
+		panic(err)
+	}
+	id.Init([]string{etcdAddress}, rootPath)
+	tso.Init([]string{etcdAddress}, rootPath)
 
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
 	if err != nil {
@@ -69,21 +76,7 @@ func setup() {
 		NumOfQueryNode:        3,
 		NumOfChannel:          5,
 	}
-
-	var cnt int64
-
-	segMgr = NewSegmentManager(mt, opt,
-		func() (UniqueID, error) {
-			val := atomic.AddInt64(&cnt, 1)
-			return val, nil
-		},
-		func() (Timestamp, error) {
-			val := atomic.AddInt64(&cnt, 1)
-			phy := time.Now().UnixNano() / int64(time.Millisecond)
-			ts := tsoutil.ComposeTS(phy, val)
-			return ts, nil
-		},
-	)
+	segMgr = NewSegmentManager(mt, opt)
 }
 
 func teardown() {
@@ -144,13 +137,13 @@ func TestSegmentManager_AssignSegmentID(t *testing.T) {
 	newReqs[0].Count = 1000000
 	_, err = segMgr.AssignSegmentID(newReqs)
 	assert.Error(t, errors.Errorf("request with count %d need about %d mem size which is larger than segment threshold",
-		1000000, Params.DefaultRecordSize()*1000000), err)
+		1000000, masterParam.Params.DefaultRecordSize()*1000000), err)
 }
 
 func TestSegmentManager_SegmentStats(t *testing.T) {
 	setup()
 	defer teardown()
-	ts, err := segMgr.globalTSOAllocator()
+	ts, err := tso.AllocOne()
 	assert.Nil(t, err)
 	err = mt.AddSegment(&pb.SegmentMeta{
 		SegmentID:    100,
@@ -165,7 +158,7 @@ func TestSegmentManager_SegmentStats(t *testing.T) {
 		MsgType: internalpb.MsgType_kQueryNodeSegStats,
 		PeerID:  1,
 		SegStats: []*internalpb.SegmentStats{
-			{SegmentID: 100, MemorySize: 25000 * Params.DefaultRecordSize(), NumRows: 25000, RecentlyModified: true},
+			{SegmentID: 100, MemorySize: 25000 * masterParam.Params.DefaultRecordSize(), NumRows: 25000, RecentlyModified: true},
 		},
 	}
 	baseMsg := msgstream.BaseMsg{
@@ -189,12 +182,12 @@ func TestSegmentManager_SegmentStats(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	segMeta, _ := mt.GetSegmentByID(100)
 	assert.Equal(t, int64(100), segMeta.SegmentID)
-	assert.Equal(t, 25000*Params.DefaultRecordSize(), segMeta.MemSize)
+	assert.Equal(t, 25000*masterParam.Params.DefaultRecordSize(), segMeta.MemSize)
 	assert.Equal(t, int64(25000), segMeta.NumRows)
 
 	// close segment
 	stats.SegStats[0].NumRows = 520000
-	stats.SegStats[0].MemorySize = 520000 * Params.DefaultRecordSize()
+	stats.SegStats[0].MemorySize = 520000 * masterParam.Params.DefaultRecordSize()
 	err = segMgr.HandleQueryNodeMsgPack(&msgPack)
 	assert.Nil(t, err)
 	time.Sleep(1 * time.Second)

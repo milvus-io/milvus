@@ -1,4 +1,4 @@
-package master
+package paramtable
 
 import (
 	"log"

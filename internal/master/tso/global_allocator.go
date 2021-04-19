@@ -1,4 +1,4 @@
-package master
+package tso
 
 import (
 	"log"
@@ -33,6 +33,17 @@ type Allocator interface {
 // GlobalTSOAllocator is the global single point TSO allocator.
 type GlobalTSOAllocator struct {
 	tso *timestampOracle
+}
+
+var allocator *GlobalTSOAllocator
+
+func Init(etcdAddr []string, rootPath string) {
+	InitGlobalTsoAllocator("timestamp", tsoutil.NewTSOKVBase(etcdAddr, rootPath, "tso"))
+}
+
+func InitGlobalTsoAllocator(key string, base kv.Base) {
+	allocator = NewGlobalTSOAllocator(key, base)
+	allocator.Initialize()
 }
 
 // NewGlobalTSOAllocator creates a new global TSO allocator.
@@ -115,4 +126,17 @@ func (gta *GlobalTSOAllocator) AllocOne() (typeutil.Timestamp, error) {
 // Reset is used to reset the TSO allocator.
 func (gta *GlobalTSOAllocator) Reset() {
 	gta.tso.ResetTimestamp()
+}
+
+func AllocOne() (typeutil.Timestamp, error) {
+	return allocator.AllocOne()
+}
+
+// Reset is used to reset the TSO allocator.
+func Alloc(count uint32) (typeutil.Timestamp, error) {
+	return allocator.Alloc(count)
+}
+
+func UpdateTSO() error {
+	return allocator.UpdateTSO()
 }

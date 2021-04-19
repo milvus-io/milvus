@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+	masterParams "github.com/zilliztech/milvus-distributed/internal/master/paramtable"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"go.etcd.io/etcd/clientv3"
@@ -15,7 +16,7 @@ import (
 func TestMetaTable_Collection(t *testing.T) {
 	Init()
 
-	etcdAddr, err := Params.EtcdAddress()
+	etcdAddr, err := masterParams.Params.EtcdAddress()
 	if err != nil {
 		panic(err)
 	}
@@ -155,7 +156,7 @@ func TestMetaTable_Collection(t *testing.T) {
 func TestMetaTable_DeletePartition(t *testing.T) {
 	Init()
 
-	etcdAddr, err := Params.EtcdAddress()
+	etcdAddr, err := masterParams.Params.EtcdAddress()
 	if err != nil {
 		panic(err)
 	}
@@ -249,7 +250,7 @@ func TestMetaTable_DeletePartition(t *testing.T) {
 func TestMetaTable_Segment(t *testing.T) {
 	Init()
 
-	etcdAddr, err := Params.EtcdAddress()
+	etcdAddr, err := masterParams.Params.EtcdAddress()
 	if err != nil {
 		panic(err)
 	}
@@ -333,7 +334,7 @@ func TestMetaTable_Segment(t *testing.T) {
 func TestMetaTable_UpdateSegment(t *testing.T) {
 	Init()
 
-	etcdAddr, err := Params.EtcdAddress()
+	etcdAddr, err := masterParams.Params.EtcdAddress()
 	if err != nil {
 		panic(err)
 	}

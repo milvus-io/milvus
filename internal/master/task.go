@@ -4,15 +4,16 @@ import (
 	"context"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 // TODO: get timestamp from timestampOracle
 
 type baseTask struct {
-	sch *ddRequestScheduler
-	mt  *metaTable
-	cv  chan error
+	kvBase *kv.EtcdKV
+	mt     *metaTable
+	cv     chan error
 }
 
 type task interface {

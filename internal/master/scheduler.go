@@ -1,17 +1,19 @@
 package master
 
+import (
+	"github.com/zilliztech/milvus-distributed/internal/master/id"
+)
+
 type ddRequestScheduler struct {
-	globalIDAllocator func() (UniqueID, error)
 	reqQueue          chan task
 	scheduleTimeStamp Timestamp
 }
 
-func NewDDRequestScheduler(allocGlobalID func() (UniqueID, error)) *ddRequestScheduler {
+func NewDDRequestScheduler() *ddRequestScheduler {
 	const channelSize = 1024
 
 	rs := ddRequestScheduler{
-		globalIDAllocator: allocGlobalID,
-		reqQueue:          make(chan task, channelSize),
+		reqQueue: make(chan task, channelSize),
 	}
 	return &rs
 }
@@ -19,4 +21,8 @@ func NewDDRequestScheduler(allocGlobalID func() (UniqueID, error)) *ddRequestSch
 func (rs *ddRequestScheduler) Enqueue(task task) error {
 	rs.reqQueue <- task
 	return nil
+}
+
+func allocGlobalID() (UniqueID, error) {
+	return id.AllocOne()
 }

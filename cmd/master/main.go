@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/zilliztech/milvus-distributed/internal/master"
+	masterParams "github.com/zilliztech/milvus-distributed/internal/master/paramtable"
 	"go.uber.org/zap"
 )
 
@@ -17,32 +18,32 @@ func main() {
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
 
-	etcdAddress, _ := master.Params.EtcdAddress()
-	etcdRootPath, _ := master.Params.EtcdRootPath()
-	pulsarAddr, _ := master.Params.PulsarAddress()
+	etcdAddress, _ := masterParams.Params.EtcdAddress()
+	etcdRootPath, _ := masterParams.Params.EtcdRootPath()
+	pulsarAddr, _ := masterParams.Params.PulsarAddress()
 	pulsarAddr = "pulsar://" + pulsarAddr
-	defaultRecordSize := master.Params.DefaultRecordSize()
-	minimumAssignSize := master.Params.MinimumAssignSize()
-	segmentThreshold := master.Params.SegmentThreshold()
-	segmentExpireDuration := master.Params.SegmentExpireDuration()
-	numOfChannel, _ := master.Params.TopicNum()
-	nodeNum, _ := master.Params.QueryNodeNum()
-	statsChannel := master.Params.StatsChannels()
+	defaultRecordSize := masterParams.Params.DefaultRecordSize()
+	minimumAssignSize := masterParams.Params.MinimumAssignSize()
+	segmentThreshold := masterParams.Params.SegmentThreshold()
+	segmentExpireDuration := masterParams.Params.SegmentExpireDuration()
+	numOfChannel, _ := masterParams.Params.TopicNum()
+	nodeNum, _ := masterParams.Params.QueryNodeNum()
+	statsChannel := masterParams.Params.StatsChannels()
 
 	opt := master.Option{
 		KVRootPath:            etcdRootPath,
 		MetaRootPath:          etcdRootPath,
 		EtcdAddr:              []string{etcdAddress},
 		PulsarAddr:            pulsarAddr,
-		ProxyIDs:              master.Params.ProxyIDList(),
-		PulsarProxyChannels:   master.Params.ProxyTimeSyncChannels(),
-		PulsarProxySubName:    master.Params.ProxyTimeSyncSubName(),
-		SoftTTBInterval:       master.Params.SoftTimeTickBarrierInterval(),
-		WriteIDs:              master.Params.WriteIDList(),
-		PulsarWriteChannels:   master.Params.WriteTimeSyncChannels(),
-		PulsarWriteSubName:    master.Params.WriteTimeSyncSubName(),
-		PulsarDMChannels:      master.Params.DMTimeSyncChannels(),
-		PulsarK2SChannels:     master.Params.K2STimeSyncChannels(),
+		ProxyIDs:              masterParams.Params.ProxyIDList(),
+		PulsarProxyChannels:   masterParams.Params.ProxyTimeSyncChannels(),
+		PulsarProxySubName:    masterParams.Params.ProxyTimeSyncSubName(),
+		SoftTTBInterval:       masterParams.Params.SoftTimeTickBarrierInterval(),
+		WriteIDs:              masterParams.Params.WriteIDList(),
+		PulsarWriteChannels:   masterParams.Params.WriteTimeSyncChannels(),
+		PulsarWriteSubName:    masterParams.Params.WriteTimeSyncSubName(),
+		PulsarDMChannels:      masterParams.Params.DMTimeSyncChannels(),
+		PulsarK2SChannels:     masterParams.Params.K2STimeSyncChannels(),
 		DefaultRecordSize:     defaultRecordSize,
 		MinimumAssignSize:     minimumAssignSize,
 		SegmentThreshold:      segmentThreshold,
@@ -70,7 +71,7 @@ func main() {
 		cancel()
 	}()
 
-	if err := svr.Run(int64(master.Params.Port())); err != nil {
+	if err := svr.Run(int64(masterParams.Params.Port())); err != nil {
 		log.Fatal("run server failed", zap.Error(err))
 	}
 
