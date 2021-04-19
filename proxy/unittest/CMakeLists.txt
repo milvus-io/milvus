@@ -17,7 +17,7 @@ include_directories(${MILVUS_ENGINE_SRC})
 include_directories(${MILVUS_THIRDPARTY_SRC})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
-include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
+include_directories(${MILVUS_ENGINE_SRC}/grpc)
 
 
 set( ENTRY_FILE ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp )

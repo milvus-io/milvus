@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 package milvus.grpc;
+option go_package="msgpb";
 
 enum ErrorCode {
     SUCCESS = 0;
@@ -97,7 +98,7 @@ message FieldName {
 message Mapping {
     Status status = 1;
     string collection_name = 2;
-    repeated FieldParam fields = 3;
+    Schema schema = 3;
     repeated KeyValuePair extra_params = 4;
 }
 

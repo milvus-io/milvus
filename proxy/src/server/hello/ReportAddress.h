@@ -1,7 +1,7 @@
 #pragma once
 
 #include "grpc++/grpc++.h"
-#include "src/grpc/gen-milvus/master.grpc.pb.h"
+#include "src/grpc/master.grpc.pb.h"
 
 class ReportClient {
 public:

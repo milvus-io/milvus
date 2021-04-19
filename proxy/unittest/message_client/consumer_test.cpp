@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include "message_client/Consumer.h"
-#include "grpc/gen-milvus/suvlim.pb.h"
+#include "grpc/message.pb.h"
 
 TEST(CLIENT_CPP, CONSUMER) {
   auto client= std::make_shared<milvus::message_client::MsgClient>("pulsar://localhost:6650");

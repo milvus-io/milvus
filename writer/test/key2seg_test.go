@@ -3,7 +3,7 @@ package test
 import (
 	"context"
 	"github.com/apache/pulsar/pulsar-client-go/pulsar"
-	"github.com/czs007/suvlim/writer/pb"
+	msgpb "github.com/czs007/suvlim/pkg/message"
 	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"log"
@@ -24,7 +24,7 @@ func TestKey2Seg(t *testing.T) {
 		SubscriptionName: "sub-1",
 	})
 
-	obj := pb.Key2SegMsg{}
+	obj := msgpb.Key2SegMsg{}
 	msg, err := consumer.Receive(context.Background())
 	proto.Unmarshal(msg.Payload(), &obj)
 	assert.Equal(t, obj.Uid, int64(0))

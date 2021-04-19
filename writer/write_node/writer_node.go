@@ -6,7 +6,7 @@ import (
 	storage "github.com/czs007/suvlim/storage/pkg"
 	"github.com/czs007/suvlim/storage/pkg/types"
 	"github.com/czs007/suvlim/writer/message_client"
-	"github.com/czs007/suvlim/writer/pb"
+	msgpb "github.com/czs007/suvlim/pkg/message"
 	"strconv"
 	"sync"
 )
@@ -36,7 +36,7 @@ func NewWriteNode(ctx context.Context,
 	}, err
 }
 
-func (wn *WriteNode) InsertBatchData(ctx context.Context, data []*pb.InsertOrDeleteMsg, wg *sync.WaitGroup) error {
+func (wn *WriteNode) InsertBatchData(ctx context.Context, data []*msgpb.InsertOrDeleteMsg, wg *sync.WaitGroup) error {
 	var prefixKey string
 	var suffixKey string
 	var prefixKeys [][]byte
@@ -63,7 +63,7 @@ func (wn *WriteNode) InsertBatchData(ctx context.Context, data []*pb.InsertOrDel
 	return nil
 }
 
-func (wn *WriteNode) DeleteBatchData(ctx context.Context, data []*pb.InsertOrDeleteMsg, wg *sync.WaitGroup) error {
+func (wn *WriteNode) DeleteBatchData(ctx context.Context, data []*msgpb.InsertOrDeleteMsg, wg *sync.WaitGroup) error {
 	//var segmentInfos []*SegmentIdInfo
 	var prefixKey string
 	var prefixKeys [][]byte
@@ -84,7 +84,7 @@ func (wn *WriteNode) DeleteBatchData(ctx context.Context, data []*pb.InsertOrDel
 			segmentIds = append(segmentIds, id)
 		}
 
-		segmentInfo := pb.Key2SegMsg{
+		segmentInfo := msgpb.Key2SegMsg{
 			Uid: data[i].Uid,
 			SegmentId: segmentIds,
 		}

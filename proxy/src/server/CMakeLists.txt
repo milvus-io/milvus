@@ -11,14 +11,12 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-set( GRPC_SERVICE_FILES ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/suvlim.grpc.pb.cc
-                        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/suvlim.pb.cc
-			#${MILVUS_ENGINE_SRC}/grpc/gen-status/status.grpc.pb.cc
-			#${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
-                        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/hello.grpc.pb.cc
-                        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/hello.pb.cc
-                        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/master.grpc.pb.cc
-                        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/master.pb.cc
+set( GRPC_SERVICE_FILES ${MILVUS_ENGINE_SRC}/grpc/message.grpc.pb.cc
+                        ${MILVUS_ENGINE_SRC}/grpc/message.pb.cc
+                        ${MILVUS_ENGINE_SRC}/grpc/hello.grpc.pb.cc
+                        ${MILVUS_ENGINE_SRC}/grpc/hello.pb.cc
+                        ${MILVUS_ENGINE_SRC}/grpc/master.grpc.pb.cc
+                        ${MILVUS_ENGINE_SRC}/grpc/master.pb.cc
                         )
 
 aux_source_directory( ${MILVUS_ENGINE_SRC}/server                   SERVER_SERVICE_FILES )

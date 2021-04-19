@@ -3,7 +3,7 @@
 #include "utils/Status.h"
 #include "Producer.h"
 #include "Consumer.h"
-#include "grpc/gen-milvus/suvlim.pb.h"
+#include "grpc/message.pb.h"
 
 namespace milvus::message_client {
 class MsgClientV2 {

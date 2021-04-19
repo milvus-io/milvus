@@ -15,7 +15,7 @@
 #include <cstdint>
 #include <thread>
 #include <string>
-#include "suvlim.pb.h"
+#include "grpc/message.pb.h"
 
 namespace milvus {
 namespace timesync {
