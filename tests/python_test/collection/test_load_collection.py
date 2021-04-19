@@ -36,9 +36,7 @@ class TestLoadCollection:
     def get_binary_index(self, request, connect):
         return request.param
 
-    # @pytest.mark.tags("0331")
-    # TODO ci failed
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_load_collection_after_index(self, connect, collection, get_simple_index):
         '''
         target: test load collection, after index created
@@ -53,8 +51,6 @@ class TestLoadCollection:
 
     @pytest.mark.tags("0331")
     @pytest.mark.level(2)
-    # todo can't load repeat
-    @pytest.mark.tags("fail")
     def test_load_collection_after_index_binary(self, connect, binary_collection, get_binary_index):
         '''
         target: test load binary_collection, after index created
@@ -146,6 +142,15 @@ class TestLoadCollection:
         connect.release_collection(collection)
 
     @pytest.mark.tags("0331")
+    def test_load_collection_after_load_release(self, connect, collection):
+        ids = connect.insert(collection, default_entities)
+        assert len(ids) == default_nb
+        connect.flush([collection])
+        connect.load_collection(collection)
+        connect.release_collection(collection)
+        connect.load_collection(collection)
+
+    @pytest.mark.tags("0331")
     def test_load_collection_repeatedly(self, connect, collection):
         ids = connect.insert(collection, default_entities)
         assert len(ids) == default_nb
@@ -199,8 +204,7 @@ class TestLoadCollection:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "describe collection failed: can't find collection: %s" % collection
 
-    # TODO
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_load_collection_without_flush(self, connect, collection):
         """
         target: test load collection without flush
@@ -209,11 +213,9 @@ class TestLoadCollection:
         """
         ids = connect.insert(collection, default_entities)
         assert len(ids) == default_nb
-        # with pytest.raises(Exception) as e:
         connect.load_collection(collection)
 
     # TODO
-    @pytest.mark.tags("fail")
     def _test_load_collection_larger_than_memory(self):
         """
         target: test load collection when memory less than collection size
@@ -236,8 +238,9 @@ class TestLoadCollection:
         connect.flush([collection])
         connect.load_collection(collection)
         connect.release_partitions(collection, [default_tag])
-        res = connect.search(collection, default_single_query, partition_tags=[default_tag])
-        assert len(res[0]) == 0
+        logging.getLogger().info(connect.get_collection_stats(collection))
+        with pytest.raises(Exception) as e:
+            connect.search(collection, default_single_query, partition_tags=[default_tag])
         res = connect.search(collection, default_single_query, partition_tags=[default_partition_name])
         assert len(res[0]) == default_top_k
 
@@ -256,8 +259,8 @@ class TestLoadCollection:
         connect.flush([collection])
         connect.load_collection(collection)
         connect.release_partitions(collection, [default_partition_name, default_tag])
-        res = connect.search(collection, default_single_query)
-        assert len(res[0]) == 0
+        with pytest.raises(Exception) as e:
+            connect.search(collection, default_single_query)
 
     @pytest.mark.tags("0331")
     def test_load_partitions_release_collection(self, connect, collection):
@@ -337,7 +340,6 @@ class TestReleaseAdvanced:
             connect.search(collection, default_single_query)
         # assert len(res[0]) == 0
 
-    @pytest.mark.tags("fail")
     def _test_release_collection_during_loading(self, connect, collection):
         """
         target: test release collection during loading
@@ -397,7 +399,6 @@ class TestReleaseAdvanced:
             res = connect.search(collection, default_single_query)
         # assert len(res[0]) == 0
 
-    @pytest.mark.tags("fail")
     def _test_release_collection_during_indexing(self, connect, collection):
         """
         target: test release collection during building index
@@ -406,7 +407,6 @@ class TestReleaseAdvanced:
         """
         pass
 
-    @pytest.mark.tags("fail")
     def _test_release_collection_during_droping_index(self, connect, collection):
         """
         target: test release collection during droping index
@@ -471,7 +471,7 @@ class TestLoadPartition:
         else:
             pytest.skip("Skip index Temporary")
 
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_load_partition_after_index(self, connect, collection, get_simple_index):
         '''
         target: test load collection, after index created
@@ -490,7 +490,7 @@ class TestLoadPartition:
         assert len(res[0]) == default_top_k
 
     @pytest.mark.level(2)
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_load_partition_after_index_binary(self, connect, binary_collection, get_binary_index):
         '''
         target: test load binary_collection, after index created
@@ -572,7 +572,7 @@ class TestLoadPartition:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "partitionID of partitionName:%s can not be find" % partition_name
 
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_release_partition_not_load(self, connect, collection):
         """
         target: test release collection without load
