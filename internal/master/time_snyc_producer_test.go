@@ -58,6 +58,7 @@ func initTestPulsarStream(ctx context.Context, pulsarAddress string,
 
 	return &input, &output
 }
+
 func receiveMsg(stream *ms.MsgStream) []uint64 {
 	receiveCount := 0
 	var results []uint64
