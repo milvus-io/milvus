@@ -26,12 +26,15 @@ const defaultPartitionID = UniqueID(2021)
 type queryServiceMock struct{}
 
 func setup() {
+	os.Setenv("QUERY_NODE_ID", "1")
 	Params.Init()
+	//Params.QueryNodeID = 1
 	Params.initQueryTimeTickChannelName()
 	Params.initSearchResultChannelNames()
 	Params.initStatsChannelName()
 	Params.initSearchChannelNames()
 	Params.MetaRootPath = "/etcd/test/root/querynode"
+
 }
 
 func genTestCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.CollectionInfo {
@@ -160,7 +163,7 @@ func newQueryNodeMock() *QueryNode {
 	}
 
 	msFactory := pulsarms.NewFactory()
-	svr := NewQueryNode(ctx, 0, msFactory)
+	svr := NewQueryNode(ctx, Params.QueryNodeID, msFactory)
 	err := svr.SetQueryService(&queryServiceMock{})
 	if err != nil {
 		panic(err)
@@ -208,5 +211,6 @@ func TestMain(m *testing.M) {
 func TestQueryNode_Start(t *testing.T) {
 	localNode := newQueryNodeMock()
 	localNode.Start()
+	<-localNode.queryNodeLoopCtx.Done()
 	localNode.Stop()
 }

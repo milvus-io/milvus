@@ -9,12 +9,6 @@ import (
 func TestParamTable(t *testing.T) {
 	Params.Init()
 
-	assert.NotEqual(t, Params.Address, "")
-	t.Logf("master address = %s", Params.Address)
-
-	assert.NotEqual(t, Params.Port, 0)
-	t.Logf("master port = %d", Params.Port)
-
 	assert.NotEqual(t, Params.NodeID, 0)
 	t.Logf("master node ID = %d", Params.NodeID)
 

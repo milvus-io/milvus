@@ -44,11 +44,6 @@ func TestParamTable_DataNode(t *testing.T) {
 		log.Println("DdBinlogRootPath:", path)
 	})
 
-	t.Run("Test MasterAddress", func(t *testing.T) {
-		address := Params.MasterAddress
-		log.Println("MasterAddress:", address)
-	})
-
 	t.Run("Test PulsarAddress", func(t *testing.T) {
 		address := Params.PulsarAddress
 		log.Println("PulsarAddress:", address)

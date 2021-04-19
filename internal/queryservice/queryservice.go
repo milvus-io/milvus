@@ -67,31 +67,22 @@ type QueryService struct {
 }
 
 func (qs *QueryService) Init() error {
-	Params.Init()
-	qs.isInit.Store(true)
 	return nil
 }
 
 func (qs *QueryService) Start() error {
-	isInit := qs.isInit.Load().(bool)
-
-	switch {
-	case !isInit:
-		return errors.New("call start before init")
-	case qs.dataServiceClient == nil:
-		return errors.New("dataService Client not set")
-	case qs.masterServiceClient == nil:
-		return errors.New("masterService Client not set")
-	}
-
-	qs.stateCode.Store(internalpb2.StateCode_HEALTHY)
+	qs.UpdateStateCode(internalpb2.StateCode_HEALTHY)
 	return nil
 }
 
 func (qs *QueryService) Stop() error {
 	qs.loopCancel()
-	qs.stateCode.Store(internalpb2.StateCode_ABNORMAL)
+	qs.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
 	return nil
+}
+
+func (qs *QueryService) UpdateStateCode(code internalpb2.StateCode) {
+	qs.stateCode.Store(code)
 }
 
 func (qs *QueryService) GetComponentStates() (*internalpb2.ComponentStates, error) {
@@ -624,8 +615,7 @@ func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryServ
 		qcMutex:       &sync.Mutex{},
 		msFactory:     factory,
 	}
-	service.stateCode.Store(internalpb2.StateCode_INITIALIZING)
-	service.isInit.Store(false)
+	service.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
 	return service, nil
 }
 

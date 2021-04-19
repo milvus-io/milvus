@@ -93,11 +93,6 @@ type Interface interface {
 	//segment
 	DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
 	ShowSegments(in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error)
-
-	//get system config from master, not used currently
-	//GetSysConfigs(in *milvuspb.SysConfigRequest)
-
-	//GetIndexState(ctx context.Context, request *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error)
 }
 
 // ------------------ struct -----------------------
@@ -182,7 +177,7 @@ type Core struct {
 	//call once
 	initOnce  sync.Once
 	startOnce sync.Once
-	isInit    atomic.Value
+	//isInit    atomic.Value
 
 	msFactory ms.Factory
 }
@@ -192,15 +187,17 @@ type Core struct {
 func NewCore(c context.Context, factory ms.Factory) (*Core, error) {
 	ctx, cancel := context.WithCancel(c)
 	rand.Seed(time.Now().UnixNano())
-	Params.Init()
 	core := &Core{
 		ctx:       ctx,
 		cancel:    cancel,
 		msFactory: factory,
 	}
-	core.stateCode.Store(internalpb2.StateCode_INITIALIZING)
-	core.isInit.Store(false)
+	core.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
 	return core, nil
+}
+
+func (c *Core) UpdateStateCode(code internalpb2.StateCode) {
+	c.stateCode.Store(code)
 }
 
 func (c *Core) checkInit() error {
@@ -788,7 +785,6 @@ func (c *Core) Init() error {
 		c.ddReqQueue = make(chan reqTask, 1024)
 		c.indexTaskQueue = make(chan *CreateIndexTask, 1024)
 		initError = c.setMsgStreams()
-		c.isInit.Store(true)
 	})
 	if initError == nil {
 		log.Printf("Master service State Code = %s", internalpb2.StateCode_name[int32(internalpb2.StateCode_INITIALIZING)])
@@ -797,10 +793,6 @@ func (c *Core) Init() error {
 }
 
 func (c *Core) Start() error {
-	isInit := c.isInit.Load().(bool)
-	if !isInit {
-		return errors.Errorf("call init before start")
-	}
 	if err := c.checkInit(); err != nil {
 		return err
 	}

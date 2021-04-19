@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
 
@@ -17,7 +16,6 @@ type ParamTable struct {
 	ETCDAddress           string
 	MetaRootPath          string
 	WriteNodeSegKvSubPath string
-	IndexBuilderAddress   string
 
 	QueryNodeIP                 string
 	QueryNodePort               int64
@@ -75,11 +73,6 @@ func (p *ParamTable) Init() {
 			panic(err)
 		}
 
-		err = p.LoadYaml("milvus.yaml")
-		if err != nil {
-			panic(err)
-		}
-
 		queryNodeIDStr := os.Getenv("QUERY_NODE_ID")
 		if queryNodeIDStr == "" {
 			queryNodeIDList := p.QueryNodeIDList()
@@ -90,18 +83,6 @@ func (p *ParamTable) Init() {
 			}
 		}
 
-		queryNodeIP := os.Getenv("QUERY_NODE_IP")
-		if queryNodeIP == "" {
-			p.QueryNodeIP = "localhost"
-		} else {
-			p.QueryNodeIP = queryNodeIP
-		}
-		p.QueryNodePort = int64(funcutil.GetAvailablePort())
-
-		err = p.LoadYaml("advanced/common.yaml")
-		if err != nil {
-			panic(err)
-		}
 		err = p.Save("_queryNodeID", queryNodeIDStr)
 		if err != nil {
 			panic(err)
@@ -122,7 +103,6 @@ func (p *ParamTable) Init() {
 		p.initETCDAddress()
 		p.initMetaRootPath()
 		p.initWriteNodeSegKvSubPath()
-		p.initIndexBuilderAddress()
 
 		p.initGracefulTime()
 		p.initMsgChannelSubName()
@@ -232,14 +212,6 @@ func (p *ParamTable) initPulsarAddress() {
 		panic(err)
 	}
 	p.PulsarAddress = url
-}
-
-func (p *ParamTable) initIndexBuilderAddress() {
-	ret, err := p.Load("_IndexBuilderAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.IndexBuilderAddress = ret
 }
 
 func (p *ParamTable) initInsertChannelRange() {

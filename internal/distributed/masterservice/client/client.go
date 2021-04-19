@@ -1,11 +1,10 @@
-package masterservice
+package grpcmasterserviceclient
 
 import (
 	"context"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	cms "github.com/zilliztech/milvus-distributed/internal/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
@@ -19,18 +18,20 @@ type GrpcClient struct {
 	conn       *grpc.ClientConn
 
 	//inner member
-	addr    string
-	timeout time.Duration
-	retry   int
+	addr        string
+	timeout     time.Duration
+	grpcTimeout time.Duration
+	retry       int
 }
 
-func NewGrpcClient(addr string, timeout time.Duration) (*GrpcClient, error) {
+func NewClient(addr string, timeout time.Duration) (*GrpcClient, error) {
 	return &GrpcClient{
-		grpcClient: nil,
-		conn:       nil,
-		addr:       addr,
-		timeout:    timeout,
-		retry:      3,
+		grpcClient:  nil,
+		conn:        nil,
+		addr:        addr,
+		timeout:     timeout,
+		grpcTimeout: time.Second * 5,
+		retry:       3,
 	}, nil
 }
 
@@ -47,7 +48,6 @@ func (c *GrpcClient) Init() error {
 		return err
 	}
 	c.grpcClient = masterpb.NewMasterServiceClient(c.conn)
-	cms.Params.Init()
 	return nil
 }
 
@@ -59,98 +59,98 @@ func (c *GrpcClient) Stop() error {
 }
 
 func (c *GrpcClient) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	return c.grpcClient.GetComponentStatesRPC(ctx, &commonpb.Empty{})
 }
 
 //DDL request
 func (c *GrpcClient) CreateCollection(in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	return c.grpcClient.CreateCollection(ctx, in)
 }
 
 func (c *GrpcClient) DropCollection(in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	return c.grpcClient.DropCollection(ctx, in)
 }
 func (c *GrpcClient) HasCollection(in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	return c.grpcClient.HasCollection(ctx, in)
 }
 func (c *GrpcClient) DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	return c.grpcClient.DescribeCollection(ctx, in)
 }
 
 func (c *GrpcClient) ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	return c.grpcClient.ShowCollections(ctx, in)
 }
 
 func (c *GrpcClient) CreatePartition(in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	return c.grpcClient.CreatePartition(ctx, in)
 }
 
 func (c *GrpcClient) DropPartition(in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	return c.grpcClient.DropPartition(ctx, in)
 }
 
 func (c *GrpcClient) HasPartition(in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	return c.grpcClient.HasPartition(ctx, in)
 }
 
 func (c *GrpcClient) ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	return c.grpcClient.ShowPartitions(ctx, in)
 }
 
 //index builder service
 func (c *GrpcClient) CreateIndex(in *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	return c.grpcClient.CreateIndex(ctx, in)
 }
 
 func (c *GrpcClient) DropIndex(in *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	return c.grpcClient.DropIndex(ctx, in)
 }
 
 func (c *GrpcClient) DescribeIndex(in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	return c.grpcClient.DescribeIndex(ctx, in)
 }
 
 //global timestamp allocator
 func (c *GrpcClient) AllocTimestamp(in *masterpb.TsoRequest) (*masterpb.TsoResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	return c.grpcClient.AllocTimestamp(ctx, in)
 }
 func (c *GrpcClient) AllocID(in *masterpb.IDRequest) (*masterpb.IDResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	return c.grpcClient.AllocID(ctx, in)
 }
 
 //receiver time tick from proxy service, and put it into this channel
 func (c *GrpcClient) GetTimeTickChannel() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	rsp, err := c.grpcClient.GetTimeTickChannelRPC(ctx, &commonpb.Empty{})
 	if err != nil {
@@ -164,7 +164,7 @@ func (c *GrpcClient) GetTimeTickChannel() (string, error) {
 
 //receive ddl from rpc and time tick from proxy service, and put them into this channel
 func (c *GrpcClient) GetDdChannel() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	rsp, err := c.grpcClient.GetDdChannelRPC(ctx, &commonpb.Empty{})
 	if err != nil {
@@ -178,7 +178,7 @@ func (c *GrpcClient) GetDdChannel() (string, error) {
 
 //just define a channel, not used currently
 func (c *GrpcClient) GetStatisticsChannel() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	rsp, err := c.grpcClient.GetStatisticsChannelRPC(ctx, &commonpb.Empty{})
 	if err != nil {
@@ -191,13 +191,13 @@ func (c *GrpcClient) GetStatisticsChannel() (string, error) {
 }
 
 func (c *GrpcClient) DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	return c.grpcClient.DescribeSegment(ctx, in)
 }
 
 func (c *GrpcClient) ShowSegments(in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), c.grpcTimeout)
 	defer cancel()
 	return c.grpcClient.ShowSegments(ctx, in)
 }

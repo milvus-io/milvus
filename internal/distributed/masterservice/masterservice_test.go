@@ -1,13 +1,17 @@
-package masterservice
+package grpcmasterservice
 
 import (
 	"context"
 	"fmt"
 	"math/rand"
 	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	grpcmasterserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
@@ -25,16 +29,23 @@ func TestGrpcService(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
 
-	//cms.Params.Address = "127.0.0.1"
-	cms.Params.Port = (randVal % 100) + 10000
+	Params.Init()
+	Params.Port = (randVal % 100) + 10000
+	parts := strings.Split(Params.Address, ":")
+	if len(parts) == 2 {
+		Params.Address = parts[0] + ":" + strconv.Itoa(Params.Port)
+		t.Log("newParams.Address:", Params.Address)
+	}
 
 	msFactory := pulsarms.NewFactory()
-	svr, err := NewGrpcServer(context.Background(), msFactory)
+	svr, err := NewServer(context.Background(), msFactory)
 	assert.Nil(t, err)
+	svr.connectQueryService = false
+	svr.connectProxyService = false
+	svr.connectIndexService = false
+	svr.connectDataService = false
 
-	// cms.Params.NodeID = 0
-	//cms.Params.PulsarAddress = "pulsar://127.0.0.1:6650"
-	//cms.Params.EtcdAddress = "127.0.0.1:2379"
+	cms.Params.Init()
 	cms.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
 	cms.Params.KvRootPath = fmt.Sprintf("/%d/test/kv", randVal)
 	cms.Params.ProxyTimeTickChannel = fmt.Sprintf("proxyTimeTick%d", randVal)
@@ -48,11 +59,14 @@ func TestGrpcService(t *testing.T) {
 	cms.Params.DefaultPartitionName = "_default"
 	cms.Params.DefaultIndexName = "_default"
 
-	t.Logf("master service port = %d", cms.Params.Port)
+	t.Logf("master service port = %d", Params.Port)
 
-	core := svr.core.(*cms.Core)
+	err = svr.startGrpc()
+	assert.Nil(t, err)
+	svr.core.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
 
-	err = svr.Init()
+	core := svr.core
+	err = core.Init()
 	assert.Nil(t, err)
 
 	core.ProxyTimeTickChan = make(chan typeutil.Timestamp, 8)
@@ -126,10 +140,12 @@ func TestGrpcService(t *testing.T) {
 		return nil
 	}
 
-	err = svr.Start()
+	err = svr.start()
 	assert.Nil(t, err)
 
-	cli, err := NewGrpcClient(fmt.Sprintf("%s:%d", cms.Params.Address, cms.Params.Port), 3*time.Second)
+	svr.core.UpdateStateCode(internalpb2.StateCode_HEALTHY)
+
+	cli, err := grpcmasterserviceclient.NewClient(Params.Address, 3*time.Second)
 	assert.Nil(t, err)
 
 	err = cli.Init()
@@ -178,6 +194,7 @@ func TestGrpcService(t *testing.T) {
 
 		status, err := cli.CreateCollection(req)
 		assert.Nil(t, err)
+
 		assert.Equal(t, len(createCollectionArray), 1)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, createCollectionArray[0].Base.MsgType, commonpb.MsgType_kCreateCollection)

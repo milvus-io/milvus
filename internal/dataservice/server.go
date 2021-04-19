@@ -9,11 +9,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	grpcdatanodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/datanode/client"
+
 	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
-
-	"github.com/zilliztech/milvus-distributed/internal/distributed/datanode"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
@@ -109,7 +109,7 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 		msFactory:        factory,
 	}
 	s.insertChannels = s.getInsertChannels()
-	s.state.Store(internalpb2.StateCode_INITIALIZING)
+	s.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
 	return s, nil
 }
 
@@ -158,9 +158,13 @@ func (s *Server) Start() error {
 		return err
 	}
 	s.startServerLoop()
-	s.state.Store(internalpb2.StateCode_HEALTHY)
+	s.UpdateStateCode(internalpb2.StateCode_HEALTHY)
 	log.Debug("start success")
 	return nil
+}
+
+func (s *Server) UpdateStateCode(code internalpb2.StateCode) {
+	s.state.Store(code)
 }
 
 func (s *Server) checkStateIsHealthy() bool {
@@ -466,11 +470,14 @@ func (s *Server) RegisterNode(req *datapb.RegisterNodeRequest) (*datapb.Register
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 		},
 	}
+	log.Info("DataService: RegisterNode:", zap.String("IP", req.Address.Ip), zap.Int64("Port", req.Address.Port))
 	node, err := s.newDataNode(req.Address.Ip, req.Address.Port, req.Base.SourceID)
 	if err != nil {
 		return nil, err
 	}
+
 	s.cluster.Register(node)
+
 	if s.ddChannelName == "" {
 		resp, err := s.masterClient.GetDdChannel()
 		if err = VerifyResponse(resp, err); err != nil {
@@ -493,10 +500,11 @@ func (s *Server) RegisterNode(req *datapb.RegisterNodeRequest) (*datapb.Register
 }
 
 func (s *Server) newDataNode(ip string, port int64, id UniqueID) (*dataNode, error) {
-	client := datanode.NewClient(fmt.Sprintf("%s:%d", ip, port))
+	client := grpcdatanodeclient.NewClient(fmt.Sprintf("%s:%d", ip, port))
 	if err := client.Init(); err != nil {
 		return nil, err
 	}
+
 	if err := client.Start(); err != nil {
 		return nil, err
 	}

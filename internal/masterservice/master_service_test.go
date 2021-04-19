@@ -162,6 +162,7 @@ func TestMasterService(t *testing.T) {
 	defer cancel()
 
 	msFactory := pulsarms.NewFactory()
+	Params.Init()
 	core, err := NewCore(ctx, msFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()

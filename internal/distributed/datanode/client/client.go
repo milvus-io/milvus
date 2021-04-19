@@ -1,19 +1,16 @@
-package datanode
+package grpcdatanodeclient
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 
 	"google.golang.org/grpc"
-)
-
-const (
-	RPCConnectionTimeout = 30 * time.Second
-	Retry                = 3
 )
 
 type Client struct {
@@ -26,18 +23,23 @@ type Client struct {
 func NewClient(address string) *Client {
 	return &Client{
 		address: address,
+		ctx:     context.Background(),
 	}
 }
 
 func (c *Client) Init() error {
-	ctx, cancel := context.WithTimeout(context.Background(), RPCConnectionTimeout)
-	defer cancel()
-	var err error
-	for i := 0; i < Retry; i++ {
-		if c.conn, err = grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBlock()); err == nil {
-			break
+
+	connectGrpcFunc := func() error {
+		log.Println("DataNode connect czs::", c.address)
+		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock())
+		if err != nil {
+			return err
 		}
+		c.conn = conn
+		return nil
 	}
+
+	err := retry.Retry(100, time.Millisecond*200, connectGrpcFunc)
 	if err != nil {
 		return err
 	}

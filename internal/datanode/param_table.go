@@ -18,8 +18,8 @@ type ParamTable struct {
 
 	// === DataNode Internal Components Configs ===
 	NodeID                  UniqueID
-	IP                      string // GOOSE TODO load from config file
-	Port                    int64
+	IP                      string
+	Port                    int
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
 	FlushInsertBufferSize   int32
@@ -29,8 +29,8 @@ type ParamTable struct {
 
 	// === DataNode External Components Configs ===
 	// --- External Client Address ---
-	MasterAddress  string
-	ServiceAddress string // GOOSE TODO: init from config file
+	//MasterAddress  string
+	//ServiceAddress string // GOOSE TODO: init from config file
 
 	// --- Pulsar ---
 	PulsarAddress string
@@ -80,8 +80,6 @@ func (p *ParamTable) Init() {
 
 		// === DataNode Internal Components Configs ===
 		p.initNodeID()
-		p.initIP()
-		p.initPort()
 		p.initFlowGraphMaxQueueLength()
 		p.initFlowGraphMaxParallelism()
 		p.initFlushInsertBufferSize()
@@ -90,10 +88,6 @@ func (p *ParamTable) Init() {
 		p.initDdBinlogRootPath()
 
 		// === DataNode External Components Configs ===
-		// --- Master ---
-		p.initMasterAddress()
-		p.initServiceAddress()
-
 		// --- Pulsar ---
 		p.initPulsarAddress()
 
@@ -140,19 +134,6 @@ func (p *ParamTable) initNodeID() {
 	p.NodeID = p.ParseInt64("_dataNodeID")
 }
 
-func (p *ParamTable) initIP() {
-	addr, err := p.Load("dataNode.address")
-	if err != nil {
-		panic(err)
-	}
-	p.IP = addr
-}
-
-func (p *ParamTable) initPort() {
-	port := p.ParseInt64("dataNode.port")
-	p.Port = port
-}
-
 // ---- flowgraph configs ----
 func (p *ParamTable) initFlowGraphMaxQueueLength() {
 	p.FlowGraphMaxQueueLength = p.ParseInt32("dataNode.dataSync.flowGraph.maxQueueLength")
@@ -187,29 +168,6 @@ func (p *ParamTable) initDdBinlogRootPath() {
 		panic(err)
 	}
 	p.DdBinlogRootPath = path.Join(rootPath, "data_definition_log")
-}
-
-// ===== DataNode External components configs ====
-// ---- Master ----
-func (p *ParamTable) initMasterAddress() {
-	addr, err := p.Load("_MasterAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.MasterAddress = addr
-}
-
-func (p *ParamTable) initServiceAddress() {
-	addr, err := p.Load("dataService.address")
-	if err != nil {
-		panic(err)
-	}
-
-	port, err := p.Load("dataService.port")
-	if err != nil {
-		panic(err)
-	}
-	p.ServiceAddress = addr + ":" + port
 }
 
 // ---- Pulsar ----

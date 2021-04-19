@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
 
@@ -36,12 +37,10 @@ func (pt *ParamTable) Init() {
 	})
 }
 
-// todo
 func (pt *ParamTable) LoadFromArgs() {
 
 }
 
-//todo
 func (pt *ParamTable) LoadFromEnv() {
 
 	masterAddress := os.Getenv("MASTER_ADDRESS")
@@ -67,6 +66,12 @@ func (pt *ParamTable) LoadFromEnv() {
 	dataServiceAddress := os.Getenv("DATA_SERVICE_ADDRESS")
 	if dataServiceAddress != "" {
 		pt.DataServiceAddress = dataServiceAddress
+	}
+
+	Params.IP = funcutil.GetLocalIP()
+	host := os.Getenv("PROXY_NODE_HOST")
+	if len(host) > 0 {
+		Params.IP = host
 	}
 
 }

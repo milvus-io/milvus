@@ -131,12 +131,11 @@ func (s *ServiceImpl) Init() error {
 	s.tick = newTimeTick(s.ctx, ttBarrier, serviceTimeTickMsgStream, insertTickMsgStream)
 	log.Println("create time tick ...")
 
-	s.stateCode = internalpb2.StateCode_HEALTHY
-
 	return nil
 }
 
 func (s *ServiceImpl) Start() error {
+	s.stateCode = internalpb2.StateCode_HEALTHY
 	s.sched.Start()
 	log.Println("start scheduler ...")
 	return s.tick.Start()
