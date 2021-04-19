@@ -135,6 +135,7 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             dis_connect.create_index(collection, field_name, get_simple_index)
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors(self, connect, collection, get_simple_index, get_nq):
         '''
@@ -223,7 +224,7 @@ class TestIndexBase:
         index = connect.describe_index(collection, field_name)
         assert index == get_simple_index
 
-    # TODO:
+    @pytest.mark.tags("0331")
     @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly(self, connect, collection):
@@ -299,6 +300,7 @@ class TestIndexBase:
         index = connect.describe_index(collection, field_name)
         assert index == get_simple_index
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors_ip(self, connect, collection, get_simple_index, get_nq):
         '''
@@ -392,7 +394,7 @@ class TestIndexBase:
         index = connect.describe_index(collection, field_name)
         assert index == default_index
 
-    # TODO:
+    @pytest.mark.tags("0331")
     @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly_ip(self, connect, collection):
@@ -630,6 +632,7 @@ class TestIndexBinary:
         binary_index = connect.describe_index(binary_collection, binary_field_name)
         assert binary_index == get_jaccard_index
 
+    @pytest.mark.tags("0331")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors(self, connect, binary_collection, get_jaccard_index, get_nq):
         '''
