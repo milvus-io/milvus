@@ -282,21 +282,23 @@ func (qs *QueryService) ReleaseCollection(req *querypb.ReleaseCollectionRequest)
 	fmt.Println("release collection start, collectionID = ", collectionID)
 	_, err := qs.replica.getCollectionByID(dbID, collectionID)
 	if err != nil {
+		fmt.Println("release collection end, query service don't have the log of collection ", collectionID)
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    err.Error(),
-		}, err
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		}, nil
 	}
 
-	for _, node := range qs.queryNodes {
+	for nodeID, node := range qs.queryNodes {
 		status, err := node.ReleaseCollection(req)
 		if err != nil {
+			fmt.Println("release collection end, node ", nodeID, " occur error")
 			return status, err
 		}
 	}
 
 	err = qs.replica.releaseCollection(dbID, collectionID)
 	if err != nil {
+		fmt.Println("release collection end, query service release replica error")
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    err.Error(),

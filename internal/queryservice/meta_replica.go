@@ -1,6 +1,8 @@
 package queryservice
 
 import (
+	"strconv"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -212,7 +214,9 @@ func (mp *metaReplicaImpl) releaseCollection(dbID UniqueID, collectionID UniqueI
 			}
 		}
 	}
-	return errors.New("releaseCollection: can't find dbID or collectionID")
+
+	errorStr := "releaseCollection: can't find dbID or collectionID " + strconv.FormatInt(collectionID, 10)
+	return errors.New(errorStr)
 }
 
 func (mp *metaReplicaImpl) releasePartition(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) error {
@@ -226,7 +230,9 @@ func (mp *metaReplicaImpl) releasePartition(dbID UniqueID, collectionID UniqueID
 			}
 		}
 	}
-	return errors.New("releasePartition: can't find dbID or collectionID or partitionID")
+
+	errorStr := "releasePartition: can't find dbID or collectionID or partitionID " + strconv.FormatInt(partitionID, 10)
+	return errors.New(errorStr)
 }
 
 func (mp *metaReplicaImpl) addDmChannels(dbID UniqueID, collectionID UniqueID, channels2NodeID map[string]int64) error {
