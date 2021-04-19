@@ -182,7 +182,7 @@ func (p *ParamTable) initSegmentInfoChannelName() {
 
 func (p *ParamTable) initDataServiceSubscriptionName() {
 	var err error
-	p.DataServiceSubscriptionName, err = p.Load("msgChannel.subNamePrefix.dataServiceSubNamePrefix")
+	p.DataServiceSubscriptionName, err = p.Load("msgChannel.chanNamePrefix.dataServiceSubNamePrefix")
 	if err != nil {
 		panic(err)
 	}
