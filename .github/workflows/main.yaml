@@ -10,6 +10,7 @@ on:
       - 'internal/**'
       - 'cmd/**'
       - '.github/workflows/main.yaml'
+      - '.env'
       - docker-compose.yml
       - Makefile
       - '!**.md'
@@ -20,6 +21,7 @@ on:
       - 'internal/**'
       - 'cmd/**'
       - '.github/workflows/main.yaml'
+      - '.env'
       - docker-compose.yml
       - Makefile
       - '!**.md'
