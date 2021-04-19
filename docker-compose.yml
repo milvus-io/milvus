@@ -40,6 +40,8 @@ services:
     environment:
       <<: *ccache
     volumes:
+      - .:/milvus-distributed:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-gdbserver-home:/home/debugger:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-gdbserver-cache:/ccache:delegated
     container_name: debugger
     entrypoint: ["/usr/sbin/sshd", "-D"]

@@ -9,12 +9,15 @@ pushd "${toplevel}"
 
 if [ "${1-}" = "pull" ]; then
     docker-compose pull --ignore-pull-failures ubuntu
+    docker-compose pull --ignore-pull-failures gdbserver
     exit 0
 fi
 
 if [ "${1-}" = "gdbserver" ]; then
-	mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-gdbserver-cache"
-	chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
+    mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-gdbserver-cache"
+    chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
+
+    docker-compose pull --ignore-pull-failures gdbserver
     docker-compose up -d gdbserver
     exit 0
 fi
