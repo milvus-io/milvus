@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"log"
-	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -37,25 +36,6 @@ func (pt *ParamTable) Init() {
 		proxyIDStr = "2"
 	}
 	pt.Save("_proxyID", proxyIDStr)
-}
-
-func (pt *ParamTable) NetWorkAddress() string {
-	addr, err := pt.Load("proxy.network.address")
-	if err != nil {
-		panic(err)
-	}
-	if ip := net.ParseIP(addr); ip == nil {
-		panic("invalid ip proxy.network.address")
-	}
-	port, err := pt.Load("proxy.network.port")
-	if err != nil {
-		panic(err)
-	}
-	_, err = strconv.Atoi(port)
-	if err != nil {
-		panic(err)
-	}
-	return addr + ":" + port
 }
 
 func (pt *ParamTable) MasterAddress() string {
