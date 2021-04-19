@@ -54,7 +54,12 @@ IndexWrapper::parse_impl(const std::string& serialized_params_str, knowhere::Con
         conf[key] = value;
     }
 
-    auto stoi_closure = [](const std::string& s) -> int { return std::stoi(s); };
+    auto stoi_closure = [](const std::string& s) -> auto {
+        return std::stoi(s);
+    };
+    auto stof_closure = [](const std::string& s) -> auto {
+        return std::stof(s);
+    };
 
     /***************************** meta *******************************/
     check_parameter<int>(conf, milvus::knowhere::meta::DIM, stoi_closure, std::nullopt);
@@ -88,7 +93,7 @@ IndexWrapper::parse_impl(const std::string& serialized_params_str, knowhere::Con
     check_parameter<int>(conf, milvus::knowhere::IndexParams::edge_size, stoi_closure, std::nullopt);
 
     /************************** NGT Search Params *****************************/
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::epsilon, stoi_closure, std::nullopt);
+    check_parameter<float>(conf, milvus::knowhere::IndexParams::epsilon, stof_closure, std::nullopt);
     check_parameter<int>(conf, milvus::knowhere::IndexParams::max_search_edges, stoi_closure, std::nullopt);
 
     /************************** NGT_PANNG Params *****************************/
@@ -274,6 +279,12 @@ IndexWrapper::QueryWithParam(const knowhere::DatasetPtr& dataset, const char* se
 
 std::unique_ptr<IndexWrapper::QueryResult>
 IndexWrapper::QueryImpl(const knowhere::DatasetPtr& dataset, const knowhere::Config& conf) {
+    auto load_raw_data_closure = [&]() { LoadRawData(); };  // hide this pointer
+    auto index_type = get_index_type();
+    if (is_in_nm_list(index_type)) {
+        std::call_once(raw_data_loaded_, load_raw_data_closure);
+    }
+
     auto res = index_->Query(dataset, conf, nullptr);
     auto ids = res->Get<int64_t*>(milvus::knowhere::meta::IDS);
     auto distances = res->Get<float*>(milvus::knowhere::meta::DISTANCE);
@@ -289,6 +300,20 @@ IndexWrapper::QueryImpl(const knowhere::DatasetPtr& dataset, const knowhere::Con
     memcpy(query_res->distances.data(), distances, sizeof(float) * nq * k);
 
     return std::move(query_res);
+}
+
+void
+IndexWrapper::LoadRawData() {
+    auto index_type = get_index_type();
+    if (is_in_nm_list(index_type)) {
+        auto bs = index_->Serialize(config_);
+        auto bptr = std::make_shared<milvus::knowhere::Binary>();
+        auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
+        bptr->data = std::shared_ptr<uint8_t[]>(static_cast<uint8_t*>(raw_data_.data()), deleter);
+        bptr->size = raw_data_.size();
+        bs.Append(RAW_DATA, bptr);
+        index_->Load(bs);
+    }
 }
 
 }  // namespace indexbuilder
