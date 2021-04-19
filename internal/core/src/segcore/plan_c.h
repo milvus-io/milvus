@@ -20,11 +20,14 @@ extern "C" {
 typedef void* CPlan;
 typedef void* CPlaceholderGroup;
 
-CPlan
-CreatePlan(CCollection col, const char* dsl);
+CStatus
+CreatePlan(CCollection col, const char* dsl, CPlan* res_plan);
 
-CPlaceholderGroup
-ParsePlaceholderGroup(CPlan plan, void* placeholder_group_blob, int64_t blob_size);
+CStatus
+ParsePlaceholderGroup(CPlan plan,
+                      void* placeholder_group_blob,
+                      int64_t blob_size,
+                      CPlaceholderGroup* res_placeholder_group);
 
 int64_t
 GetNumOfQueries(CPlaceholderGroup placeholder_group);

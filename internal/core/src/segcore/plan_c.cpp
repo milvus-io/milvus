@@ -13,21 +13,52 @@
 #include "query/Plan.h"
 #include "segcore/Collection.h"
 
-CPlan
-CreatePlan(CCollection c_col, const char* dsl) {
+CStatus
+CreatePlan(CCollection c_col, const char* dsl, CPlan* res_plan) {
     auto col = (milvus::segcore::Collection*)c_col;
-    auto res = milvus::query::CreatePlan(*col->get_schema(), dsl);
 
-    return (CPlan)res.release();
+    try {
+        auto res = milvus::query::CreatePlan(*col->get_schema(), dsl);
+
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        auto plan = (CPlan)res.release();
+        *res_plan = plan;
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedException;
+        status.error_msg = strdup(e.what());
+        *res_plan = nullptr;
+        return status;
+    }
 }
 
-CPlaceholderGroup
-ParsePlaceholderGroup(CPlan c_plan, void* placeholder_group_blob, int64_t blob_size) {
+CStatus
+ParsePlaceholderGroup(CPlan c_plan,
+                      void* placeholder_group_blob,
+                      int64_t blob_size,
+                      CPlaceholderGroup* res_placeholder_group) {
     std::string blob_string((char*)placeholder_group_blob, (char*)placeholder_group_blob + blob_size);
     auto plan = (milvus::query::Plan*)c_plan;
-    auto res = milvus::query::ParsePlaceholderGroup(plan, blob_string);
 
-    return (CPlaceholderGroup)res.release();
+    try {
+        auto res = milvus::query::ParsePlaceholderGroup(plan, blob_string);
+
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        auto group = (CPlaceholderGroup)res.release();
+        *res_placeholder_group = group;
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedException;
+        status.error_msg = strdup(e.what());
+        *res_placeholder_group = nullptr;
+        return status;
+    }
 }
 
 int64_t

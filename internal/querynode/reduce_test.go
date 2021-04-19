@@ -99,8 +99,10 @@ func TestReduce_AllFunc(t *testing.T) {
 		log.Print("marshal placeholderGroup failed")
 	}
 
-	plan := createPlan(*collection, dslString)
-	holder := parserPlaceholderGroup(plan, placeGroupByte)
+	plan, err := createPlan(*collection, dslString)
+	assert.NoError(t, err)
+	holder, err := parserPlaceholderGroup(plan, placeGroupByte)
+	assert.NoError(t, err)
 	placeholderGroups := make([]*PlaceholderGroup, 0)
 	placeholderGroups = append(placeholderGroups, holder)
 
