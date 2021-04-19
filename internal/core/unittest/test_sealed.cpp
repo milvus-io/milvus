@@ -277,7 +277,7 @@ TEST(Sealed, LoadFieldData) {
         vec_info.index_params["metric_type"] = milvus::knowhere::Metric::L2;
         segment->LoadIndex(vec_info);
     }
-    ASSERT_EQ(segment->num_chunk_data(), 1);
+    ASSERT_EQ(segment->num_chunk(), 1);
     auto chunk_span1 = segment->chunk_data<int64_t>(FieldOffset(1), 0);
     auto chunk_span2 = segment->chunk_data<double>(FieldOffset(2), 0);
     auto ref1 = dataset.get_col<int64_t>(1);

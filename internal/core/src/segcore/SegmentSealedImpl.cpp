@@ -29,7 +29,7 @@ SegmentSealedImpl::LoadIndex(const LoadIndexInfo& info) {
         row_count_opt_ = row_count;
     }
     Assert(!vec_indexings_.is_ready(field_offset));
-    vec_indexings_.add_entry(field_offset, GetMetricType(metric_type_str), info.index);
+    vec_indexings_.append_field_indexing(field_offset, GetMetricType(metric_type_str), info.index);
     ++ready_count_;
 }
 
@@ -77,13 +77,13 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
 }
 
 int64_t
-SegmentSealedImpl::num_chunk_index_safe(FieldOffset field_offset) const {
+SegmentSealedImpl::num_chunk_index(FieldOffset field_offset) const {
     // TODO: support scalar index
     return 0;
 }
 
 int64_t
-SegmentSealedImpl::num_chunk_data() const {
+SegmentSealedImpl::num_chunk() const {
     return 1;
 }
 
@@ -142,7 +142,7 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
 }
 
 SegmentSealedPtr
-CreateSealedSegment(SchemaPtr schema, int64_t chunk_size) {
+CreateSealedSegment(SchemaPtr schema, int64_t size_per_chunk) {
     return std::make_unique<SegmentSealedImpl>(schema);
 }
 

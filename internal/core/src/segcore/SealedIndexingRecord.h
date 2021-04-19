@@ -31,30 +31,30 @@ using SealedIndexingEntryPtr = std::unique_ptr<SealedIndexingEntry>;
 
 struct SealedIndexingRecord {
     void
-    add_entry(FieldOffset field_offset, MetricType metric_type, knowhere::VecIndexPtr indexing) {
+    append_field_indexing(FieldOffset field_offset, MetricType metric_type, knowhere::VecIndexPtr indexing) {
         auto ptr = std::make_unique<SealedIndexingEntry>();
         ptr->indexing_ = indexing;
         ptr->metric_type_ = metric_type;
         std::unique_lock lck(mutex_);
-        entries_[field_offset] = std::move(ptr);
+        field_indexings_[field_offset] = std::move(ptr);
     }
 
     const SealedIndexingEntry*
-    get_entry(FieldOffset field_offset) const {
+    get_field_indexing(FieldOffset field_offset) const {
         std::shared_lock lck(mutex_);
-        AssertInfo(entries_.count(field_offset), "field_offset not found");
-        return entries_.at(field_offset).get();
+        AssertInfo(field_indexings_.count(field_offset), "field_offset not found");
+        return field_indexings_.at(field_offset).get();
     }
 
     bool
     is_ready(FieldOffset field_offset) const {
         std::shared_lock lck(mutex_);
-        return entries_.count(field_offset);
+        return field_indexings_.count(field_offset);
     }
 
  private:
     // field_offset -> SealedIndexingEntry
-    std::map<FieldOffset, SealedIndexingEntryPtr> entries_;
+    std::map<FieldOffset, SealedIndexingEntryPtr> field_indexings_;
     mutable std::shared_mutex mutex_;
 };
 }  // namespace milvus::segcore
