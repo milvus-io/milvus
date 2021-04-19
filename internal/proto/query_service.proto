@@ -140,11 +140,6 @@ message ReleaseSegmentRequest {
   repeated int64 fieldIDs = 6;
 }
 
-message ComponentStatesResponse {
-  common.Status status = 1;
-  internal.ComponentStates states = 2;
-}
-
 message SegmentInfo {
   int64 segmentID = 1;
   int64 collectionID = 2;
@@ -187,7 +182,7 @@ service QueryService {
 service QueryNode {
   rpc GetTimeTickChannel(common.Empty) returns (milvus.StringResponse) {}
   rpc GetStatsChannel(common.Empty) returns (milvus.StringResponse) {}
-  rpc GetComponentStates(common.Empty) returns (ComponentStatesResponse) {}
+  rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
 
   rpc AddQueryChannel(AddQueryChannelsRequest) returns (common.Status) {}
   rpc RemoveQueryChannel(RemoveQueryChannelsRequest) returns (common.Status) {}

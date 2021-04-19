@@ -274,18 +274,26 @@ func (node *QueryNode) SetDataService(data DataServiceInterface) error {
 }
 
 func (node *QueryNode) GetComponentStates() (*internalpb2.ComponentStates, error) {
+	stats := &internalpb2.ComponentStates{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+	}
 	code, ok := node.stateCode.Load().(internalpb2.StateCode)
 	if !ok {
-		return nil, errors.New("unexpected error in type assertion")
+		errMsg := "unexpected error in type assertion"
+		stats.Status = &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    errMsg,
+		}
+		return stats, errors.New(errMsg)
 	}
 	info := &internalpb2.ComponentInfo{
 		NodeID:    Params.QueryNodeID,
 		Role:      typeutil.QueryNodeRole,
 		StateCode: code,
 	}
-	stats := &internalpb2.ComponentStates{
-		State: info,
-	}
+	stats.State = info
 	return stats, nil
 }
 
