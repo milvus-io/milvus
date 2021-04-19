@@ -780,6 +780,7 @@ class TestIndexInvalid(object):
     def get_index(self, request):
         yield request.param
 
+    @pytest.mark.tags("0331")
     @pytest.mark.level(2)
     def test_create_index_with_invalid_index_params(self, connect, collection, get_index):
         logging.getLogger().info(get_index)
