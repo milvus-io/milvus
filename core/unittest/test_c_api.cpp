@@ -188,7 +188,7 @@ TEST(CApiTest, BuildIndexTest) {
     std::vector<uint64_t> timestamps;
     std::vector<int64_t> uids;
 
-    int N = 3;
+    int N = 10000;
     int DIM = 16;
 
     std::vector<float> vec(DIM);
@@ -202,8 +202,8 @@ TEST(CApiTest, BuildIndexTest) {
         // append vec
 
         raw_data.insert(raw_data.end(),
-                        (const char*)&vec,
-                        ((const char*)&vec) + sizeof(float) * vec.size());
+                        (const char*)&vec[0],
+                        ((const char*)&vec[0]) + sizeof(float) * vec.size());
         int age = i;
         raw_data.insert(
             raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
@@ -238,7 +238,7 @@ TEST(CApiTest, BuildIndexTest) {
     CQueryInfo queryInfo{1, 10, "fakevec"};
 
     auto sea_res = Search(
-        segment, queryInfo, 1, query_raw_data.data(), DIM, result_ids, result_distances);
+        segment, queryInfo, 20, query_raw_data.data(), DIM, result_ids, result_distances);
     assert(sea_res == 0);
 
     DeleteCollection(collection);
