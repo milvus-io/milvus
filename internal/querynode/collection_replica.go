@@ -207,6 +207,9 @@ func (colReplica *collectionReplicaImpl) getFieldIDsByCollectionID(collectionID 
 		targetFields = append(targetFields, field.FieldID)
 	}
 
+	// add row id field
+	targetFields = append(targetFields, rowIDFieldID)
+
 	return targetFields, nil
 }
 

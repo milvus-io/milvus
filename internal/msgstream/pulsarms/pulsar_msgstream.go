@@ -2,15 +2,13 @@ package pulsarms
 
 import (
 	"context"
+	"log"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"go.uber.org/zap"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
@@ -66,15 +64,10 @@ func newPulsarMsgStream(ctx context.Context,
 	consumerReflects := make([]reflect.SelectCase, 0)
 	receiveBuf := make(chan *MsgPack, receiveBufSize)
 
-	var client pulsar.Client
-	var err error
-	opts := pulsar.ClientOptions{
-		URL: address,
-	}
-	client, err = pulsar.NewClient(opts)
+	client, err := pulsar.NewClient(pulsar.ClientOptions{URL: address})
 	if err != nil {
 		defer streamCancel()
-		log.Error("Set pulsar client failed, error", zap.Error(err))
+		log.Printf("Set pulsar client failed, error = %v", err)
 		return nil, err
 	}
 
@@ -210,7 +203,7 @@ func (ppRW *propertiesReaderWriter) ForeachKey(handler func(key, val string) err
 func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 	tsMsgs := msgPack.Msgs
 	if len(tsMsgs) <= 0 {
-		log.Debug("Warning: Receive empty msgPack")
+		log.Printf("Warning: Receive empty msgPack")
 		return nil
 	}
 	if len(ms.producers) <= 0 {
@@ -310,12 +303,12 @@ func (ms *PulsarMsgStream) Consume() *MsgPack {
 		select {
 		case cm, ok := <-ms.receiveBuf:
 			if !ok {
-				log.Debug("buf chan closed")
+				log.Println("buf chan closed")
 				return nil
 			}
 			return cm
 		case <-ms.ctx.Done():
-			log.Debug("context closed")
+			log.Printf("context closed")
 			return nil
 		}
 	}
@@ -327,7 +320,7 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 	for {
 		select {
 		case <-ms.ctx.Done():
-			log.Debug("done")
+			log.Println("done")
 			return
 		default:
 			tsMsgList := make([]TsMsg, 0)
@@ -394,12 +387,12 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 				headerMsg := commonpb.MsgHeader{}
 				err := proto.Unmarshal(pulsarMsg.Payload(), &headerMsg)
 				if err != nil {
-					log.Error("Failed to unmarshal message header", zap.Error(err))
+					log.Printf("Failed to unmarshal message header, error = %v", err)
 					continue
 				}
 				tsMsg, err := ms.unmarshal.Unmarshal(pulsarMsg.Payload(), headerMsg.Base.MsgType)
 				if err != nil {
-					log.Error("Failed to unmarshal tsMsg", zap.Error(err))
+					log.Printf("Failed to unmarshal tsMsg, error = %v", err)
 					continue
 				}
 
@@ -597,7 +590,7 @@ func (ms *PulsarTtMsgStream) findTimeTick(consumer Consumer,
 			return
 		case pulsarMsg, ok := <-consumer.Chan():
 			if !ok {
-				log.Debug("consumer closed!")
+				log.Printf("consumer closed!")
 				return
 			}
 			consumer.Ack(pulsarMsg)
@@ -605,12 +598,12 @@ func (ms *PulsarTtMsgStream) findTimeTick(consumer Consumer,
 			headerMsg := commonpb.MsgHeader{}
 			err := proto.Unmarshal(pulsarMsg.Payload(), &headerMsg)
 			if err != nil {
-				log.Error("Failed to unmarshal message header", zap.Error(err))
+				log.Printf("Failed to unmarshal message header, error = %v", err)
 				continue
 			}
 			tsMsg, err := ms.unmarshal.Unmarshal(pulsarMsg.Payload(), headerMsg.Base.MsgType)
 			if err != nil {
-				log.Error("Failed to unmarshal tsMsg", zap.Error(err))
+				log.Printf("Failed to unmarshal tsMsg, error = %v", err)
 				continue
 			}
 			// set pulsar info to tsMsg
@@ -669,11 +662,11 @@ func (ms *PulsarTtMsgStream) Seek(mp *internalpb2.MsgPosition) error {
 				headerMsg := commonpb.MsgHeader{}
 				err := proto.Unmarshal(pulsarMsg.Payload(), &headerMsg)
 				if err != nil {
-					log.Error("Failed to unmarshal message header", zap.Error(err))
+					log.Printf("Failed to unmarshal message header, error = %v", err)
 				}
 				tsMsg, err := ms.unmarshal.Unmarshal(pulsarMsg.Payload(), headerMsg.Base.MsgType)
 				if err != nil {
-					log.Error("Failed to unmarshal tsMsg", zap.Error(err))
+					log.Printf("Failed to unmarshal tsMsg, error = %v", err)
 				}
 				if tsMsg.Type() == commonpb.MsgType_kTimeTick {
 					if tsMsg.BeginTs() >= mp.Timestamp {
