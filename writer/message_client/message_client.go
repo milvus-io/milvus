@@ -2,13 +2,14 @@ package message_client
 
 import (
 	"context"
+	"log"
+	"strconv"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/czs007/suvlim/conf"
 	msgpb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	timesync "github.com/czs007/suvlim/timesync"
 	"github.com/golang/protobuf/proto"
-	"log"
-	"strconv"
 )
 
 type MessageClient struct {
@@ -19,8 +20,8 @@ type MessageClient struct {
 	searchByIdChan chan *msgpb.EntityIdentity
 
 	// pulsar
-	client          pulsar.Client
-	key2segProducer pulsar.Producer
+	client             pulsar.Client
+	key2segProducer    pulsar.Producer
 	searchByIdConsumer pulsar.Consumer
 
 	// batch messages
@@ -64,7 +65,6 @@ func (mc *MessageClient) receiveSearchByIdMsg() {
 	}
 }
 
-
 func (mc *MessageClient) ReceiveMessage() {
 	err := mc.timeSyncCfg.Start()
 	if err != nil {
@@ -100,7 +100,7 @@ func (mc *MessageClient) createClient(url string) pulsar.Client {
 	if conf.Config.Pulsar.Authentication {
 		// create client with Authentication
 		client, err := pulsar.NewClient(pulsar.ClientOptions{
-			URL: url,
+			URL:            url,
 			Authentication: pulsar.NewAuthenticationToken(conf.Config.Pulsar.Token),
 		})
 
@@ -163,7 +163,8 @@ func (mc *MessageClient) InitClient(url string) {
 	readSubName := "writer" + strconv.Itoa(mc.MessageClientID)
 	proxyIdList := conf.Config.Master.ProxyIdList
 	readerQueueSize := timesync.WithReaderQueueSize(conf.Config.Reader.ReaderQueueSize)
-	timeSync, err := timesync.NewReaderTimeSync(timeSyncTopic,
+	timeSync, err := timesync.NewReaderTimeSync(context.Background(),
+		timeSyncTopic,
 		timeSyncSubName,
 		readTopics,
 		readSubName,

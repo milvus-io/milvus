@@ -22,3 +22,4 @@ target_link_libraries(all_tests
         log
         pthread
         )
+install (TARGETS all_tests DESTINATION unittest)
