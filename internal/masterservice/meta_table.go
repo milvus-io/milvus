@@ -898,7 +898,7 @@ func (mt *metaTable) GetIndexByName(collName string, fieldName string, indexName
 	if !ok {
 		return nil, fmt.Errorf("collection %s not found", collName)
 	}
-	fieldSchema, err := mt.GetFieldSchema(collName, fieldName)
+	fieldSchema, err := mt.unlockGetFieldSchema(collName, fieldName)
 	if err != nil {
 		return nil, err
 	}
