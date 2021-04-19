@@ -70,11 +70,22 @@ func (ms *PulsarMsgStream) SetPulsarClient(address string) {
 
 func (ms *PulsarMsgStream) CreatePulsarProducers(channels []string) {
 	for i := 0; i < len(channels); i++ {
-		pp, err := (*ms.client).CreateProducer(pulsar.ProducerOptions{Topic: channels[i]})
-		if err != nil {
-			log.Printf("Failed to create querynode producer %s, error = %v", channels[i], err)
+		fn := func() error {
+			pp, err := (*ms.client).CreateProducer(pulsar.ProducerOptions{Topic: channels[i]})
+			if err != nil {
+				return err
+			}
+			if pp == nil {
+				return errors.New("pulsar is not ready, producer is nil")
+			}
+			ms.producers = append(ms.producers, &pp)
+			return nil
 		}
-		ms.producers = append(ms.producers, &pp)
+		err := Retry(10, time.Millisecond*200, fn)
+		if err != nil {
+			errMsg := "Failed to create producer " + channels[i] + ", error = " + err.Error()
+			panic(errMsg)
+		}
 	}
 }
 
@@ -104,7 +115,8 @@ func (ms *PulsarMsgStream) CreatePulsarConsumers(channels []string,
 		}
 		err := Retry(10, time.Millisecond*200, fn)
 		if err != nil {
-			panic("create pulsar consumer timeout!")
+			errMsg := "Failed to create consumer " + channels[i] + ", error = " + err.Error()
+			panic(errMsg)
 		}
 	}
 }
@@ -239,10 +251,6 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 
 	cases := make([]reflect.SelectCase, len(ms.consumers))
 	for i := 0; i < len(ms.consumers); i++ {
-		pc := *ms.consumers[i]
-		if pc == nil {
-			panic("pc is nil")
-		}
 		ch := (*ms.consumers[i]).Chan()
 		cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ch)}
 	}

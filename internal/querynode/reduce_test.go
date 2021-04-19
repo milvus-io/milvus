@@ -107,15 +107,21 @@ func TestReduce_AllFunc(t *testing.T) {
 	placeholderGroups = append(placeholderGroups, holder)
 
 	searchResults := make([]*SearchResult, 0)
+	matchedSegment := make([]*Segment, 0)
 	searchResult, err := segment.segmentSearch(plan, placeholderGroups, []Timestamp{0})
 	assert.Nil(t, err)
 	searchResults = append(searchResults, searchResult)
+	matchedSegment = append(matchedSegment, segment)
 
-	reducedSearchResults := reduceSearchResults(searchResults, 1)
-	assert.NotNil(t, reducedSearchResults)
+	testReduce := make([]bool, len(searchResults))
+	err = reduceSearchResults(searchResults, 1, testReduce)
+	assert.Nil(t, err)
+	err = fillTargetEntry(plan, searchResults, matchedSegment, testReduce)
+	assert.Nil(t, err)
 
-	marshaledHits := reducedSearchResults.reorganizeQueryResults(plan, placeholderGroups)
+	marshaledHits, err := reorganizeQueryResults(plan, placeholderGroups, searchResults, 1, testReduce)
 	assert.NotNil(t, marshaledHits)
+	assert.Nil(t, err)
 
 	hitsBlob, err := marshaledHits.getHitsBlob()
 	assert.Nil(t, err)
@@ -137,7 +143,6 @@ func TestReduce_AllFunc(t *testing.T) {
 	plan.delete()
 	holder.delete()
 	deleteSearchResults(searchResults)
-	deleteSearchResults([]*SearchResult{reducedSearchResults})
 	deleteMarshaledHits(marshaledHits)
 	deleteSegment(segment)
 	deleteCollection(collection)

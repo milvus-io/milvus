@@ -238,6 +238,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	placeholderGroups = append(placeholderGroups, placeholderGroup)
 
 	searchResults := make([]*SearchResult, 0)
+	matchedSegments := make([]*Segment, 0)
 
 	for _, partitionTag := range partitionTags {
 		hasPartition := (*ss.replica).hasPartition(collectionID, partitionTag)
@@ -257,6 +258,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 				return err
 			}
 			searchResults = append(searchResults, searchResult)
+			matchedSegments = append(matchedSegments, segment)
 		}
 	}
 
@@ -282,8 +284,20 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 		return nil
 	}
 
-	reducedSearchResult := reduceSearchResults(searchResults, int64(len(searchResults)))
-	marshaledHits := reducedSearchResult.reorganizeQueryResults(plan, placeholderGroups)
+	inReduced := make([]bool, len(searchResults))
+	numSegment := int64(len(searchResults))
+	err = reduceSearchResults(searchResults, numSegment, inReduced)
+	if err != nil {
+		return err
+	}
+	err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
+	if err != nil {
+		return err
+	}
+	marshaledHits, err := reorganizeQueryResults(plan, placeholderGroups, searchResults, numSegment, inReduced)
+	if err != nil {
+		return err
+	}
 	hitsBlob, err := marshaledHits.getHitsBlob()
 	if err != nil {
 		return err
@@ -291,12 +305,12 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 
 	var offset int64 = 0
 	for index := range placeholderGroups {
-		hitBolbSizePeerQuery, err := marshaledHits.hitBlobSizeInGroup(int64(index))
+		hitBlobSizePeerQuery, err := marshaledHits.hitBlobSizeInGroup(int64(index))
 		if err != nil {
 			return err
 		}
 		hits := make([][]byte, 0)
-		for _, len := range hitBolbSizePeerQuery {
+		for _, len := range hitBlobSizePeerQuery {
 			hits = append(hits, hitsBlob[offset:offset+len])
 			//test code to checkout marshaled hits
 			//marshaledHit := hitsBlob[offset:offset+len]
@@ -329,7 +343,6 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	}
 
 	deleteSearchResults(searchResults)
-	deleteSearchResults([]*SearchResult{reducedSearchResult})
 	deleteMarshaledHits(marshaledHits)
 	plan.delete()
 	placeholderGroup.delete()

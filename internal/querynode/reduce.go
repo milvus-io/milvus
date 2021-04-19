@@ -10,6 +10,8 @@ package querynode
 */
 import "C"
 import (
+	"errors"
+	"strconv"
 	"unsafe"
 )
 
@@ -21,26 +23,66 @@ type MarshaledHits struct {
 	cMarshaledHits C.CMarshaledHits
 }
 
-func reduceSearchResults(searchResults []*SearchResult, numSegments int64) *SearchResult {
+func reduceSearchResults(searchResults []*SearchResult, numSegments int64, inReduced []bool) error {
 	cSearchResults := make([]C.CQueryResult, 0)
 	for _, res := range searchResults {
 		cSearchResults = append(cSearchResults, res.cQueryResult)
 	}
 	cSearchResultPtr := (*C.CQueryResult)(&cSearchResults[0])
 	cNumSegments := C.long(numSegments)
-	res := C.ReduceQueryResults(cSearchResultPtr, cNumSegments)
-	return &SearchResult{cQueryResult: res}
+	cInReduced := (*C.bool)(&inReduced[0])
+
+	status := C.ReduceQueryResults(cSearchResultPtr, cNumSegments, cInReduced)
+
+	errorCode := status.error_code
+
+	if errorCode != 0 {
+		errorMsg := C.GoString(status.error_msg)
+		defer C.free(unsafe.Pointer(status.error_msg))
+		return errors.New("reduceSearchResults failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	}
+	return nil
 }
 
-func (sr *SearchResult) reorganizeQueryResults(plan *Plan, placeholderGroups []*PlaceholderGroup) *MarshaledHits {
+func fillTargetEntry(plan *Plan, searchResults []*SearchResult, matchedSegments []*Segment, inReduced []bool) error {
+	for i, value := range inReduced {
+		if value {
+			err := matchedSegments[i].fillTargetEntry(plan, searchResults[i])
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func reorganizeQueryResults(plan *Plan, placeholderGroups []*PlaceholderGroup, searchResults []*SearchResult, numSegments int64, inReduced []bool) (*MarshaledHits, error) {
 	cPlaceholderGroups := make([]C.CPlaceholderGroup, 0)
 	for _, pg := range placeholderGroups {
 		cPlaceholderGroups = append(cPlaceholderGroups, (*pg).cPlaceholderGroup)
 	}
-	cNumGroup := (C.long)(len(placeholderGroups))
-	var cPlaceHolder = (*C.CPlaceholderGroup)(&cPlaceholderGroups[0])
-	res := C.ReorganizeQueryResults(sr.cQueryResult, plan.cPlan, cPlaceHolder, cNumGroup)
-	return &MarshaledHits{cMarshaledHits: res}
+	var cPlaceHolderGroupPtr = (*C.CPlaceholderGroup)(&cPlaceholderGroups[0])
+	var cNumGroup = (C.long)(len(placeholderGroups))
+
+	cSearchResults := make([]C.CQueryResult, 0)
+	for _, res := range searchResults {
+		cSearchResults = append(cSearchResults, res.cQueryResult)
+	}
+	cSearchResultPtr := (*C.CQueryResult)(&cSearchResults[0])
+
+	var cNumSegments = C.long(numSegments)
+	var cInReduced = (*C.bool)(&inReduced[0])
+	var cMarshaledHits C.CMarshaledHits
+
+	status := C.ReorganizeQueryResults(&cMarshaledHits, cPlaceHolderGroupPtr, cNumGroup, cSearchResultPtr, cInReduced, cNumSegments, plan.cPlan)
+	errorCode := status.error_code
+
+	if errorCode != 0 {
+		errorMsg := C.GoString(status.error_msg)
+		defer C.free(unsafe.Pointer(status.error_msg))
+		return nil, errors.New("reorganizeQueryResults failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	}
+	return &MarshaledHits{cMarshaledHits: cMarshaledHits}, nil
 }
 
 func (mh *MarshaledHits) getHitsBlobSize() int64 {
