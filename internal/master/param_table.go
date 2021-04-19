@@ -55,19 +55,8 @@ var Params ParamTable
 func (p *ParamTable) Init() {
 	// load yaml
 	p.BaseTable.Init()
-	err := p.LoadYaml("milvus.yaml")
-	if err != nil {
-		panic(err)
-	}
-	err = p.LoadYaml("advanced/channel.yaml")
-	if err != nil {
-		panic(err)
-	}
-	err = p.LoadYaml("advanced/master.yaml")
-	if err != nil {
-		panic(err)
-	}
-	err = p.LoadYaml("advanced/common.yaml")
+
+	err := p.LoadYaml("advanced/master.yaml")
 	if err != nil {
 		panic(err)
 	}
@@ -115,15 +104,7 @@ func (p *ParamTable) initAddress() {
 }
 
 func (p *ParamTable) initPort() {
-	masterPort, err := p.Load("master.port")
-	if err != nil {
-		panic(err)
-	}
-	port, err := strconv.Atoi(masterPort)
-	if err != nil {
-		panic(err)
-	}
-	p.Port = port
+	p.Port = p.ParseInt("master.port")
 }
 
 func (p *ParamTable) initEtcdAddress() {
@@ -167,117 +148,40 @@ func (p *ParamTable) initKvRootPath() {
 }
 
 func (p *ParamTable) initTopicNum() {
-	insertChannelRange, err := p.Load("msgChannel.channelRange.insert")
+	iRangeStr, err := p.Load("msgChannel.channelRange.insert")
 	if err != nil {
 		panic(err)
 	}
-
-	channelRange := strings.Split(insertChannelRange, ",")
-	if len(channelRange) != 2 {
-		panic("Illegal channel range num")
-	}
-	channelBegin, err := strconv.Atoi(channelRange[0])
-	if err != nil {
-		panic(err)
-	}
-	channelEnd, err := strconv.Atoi(channelRange[1])
-	if err != nil {
-		panic(err)
-	}
-	if channelBegin < 0 || channelEnd < 0 {
-		panic("Illegal channel range value")
-	}
-	if channelBegin > channelEnd {
-		panic("Illegal channel range value")
-	}
-	p.TopicNum = channelEnd
+	rangeSlice := paramtable.ConvertRangeToIntRange(iRangeStr, ",")
+	p.TopicNum = rangeSlice[1] - rangeSlice[0]
 }
 
 func (p *ParamTable) initSegmentSize() {
-	threshold, err := p.Load("master.segment.size")
-	if err != nil {
-		panic(err)
-	}
-	segmentThreshold, err := strconv.ParseFloat(threshold, 64)
-	if err != nil {
-		panic(err)
-	}
-	p.SegmentSize = segmentThreshold
+	p.SegmentSize = p.ParseFloat("master.segment.size")
 }
 
 func (p *ParamTable) initSegmentSizeFactor() {
-	segFactor, err := p.Load("master.segment.sizeFactor")
-	if err != nil {
-		panic(err)
-	}
-	factor, err := strconv.ParseFloat(segFactor, 64)
-	if err != nil {
-		panic(err)
-	}
-	p.SegmentSizeFactor = factor
+	p.SegmentSizeFactor = p.ParseFloat("master.segment.sizeFactor")
 }
 
 func (p *ParamTable) initDefaultRecordSize() {
-	size, err := p.Load("master.segment.defaultSizePerRecord")
-	if err != nil {
-		panic(err)
-	}
-	res, err := strconv.ParseInt(size, 10, 64)
-	if err != nil {
-		panic(err)
-	}
-	p.DefaultRecordSize = res
+	p.DefaultRecordSize = p.ParseInt64("master.segment.defaultSizePerRecord")
 }
 
 func (p *ParamTable) initMinSegIDAssignCnt() {
-	size, err := p.Load("master.segment.minIDAssignCnt")
-	if err != nil {
-		panic(err)
-	}
-	res, err := strconv.ParseInt(size, 10, 64)
-	if err != nil {
-		panic(err)
-	}
-	p.MinSegIDAssignCnt = res
+	p.MinSegIDAssignCnt = p.ParseInt64("master.segment.minIDAssignCnt")
 }
 
 func (p *ParamTable) initMaxSegIDAssignCnt() {
-	size, err := p.Load("master.segment.maxIDAssignCnt")
-	if err != nil {
-		panic(err)
-	}
-	res, err := strconv.ParseInt(size, 10, 64)
-	if err != nil {
-		panic(err)
-	}
-	p.MaxSegIDAssignCnt = res
+	p.MaxSegIDAssignCnt = p.ParseInt64("master.segment.maxIDAssignCnt")
 }
 
 func (p *ParamTable) initSegIDAssignExpiration() {
-	duration, err := p.Load("master.segment.IDAssignExpiration")
-	if err != nil {
-		panic(err)
-	}
-	res, err := strconv.ParseInt(duration, 10, 64)
-	if err != nil {
-		panic(err)
-	}
-	p.SegIDAssignExpiration = res
+	p.SegIDAssignExpiration = p.ParseInt64("master.segment.IDAssignExpiration")
 }
 
 func (p *ParamTable) initQueryNodeNum() {
-	id, err := p.Load("nodeID.queryNodeIDList")
-	if err != nil {
-		panic(err)
-	}
-	ids := strings.Split(id, ",")
-	for _, i := range ids {
-		_, err := strconv.ParseInt(i, 10, 64)
-		if err != nil {
-			log.Panicf("load proxy id list error, %s", err.Error())
-		}
-	}
-	p.QueryNodeNum = len(ids)
+	p.QueryNodeNum = len(p.QueryNodeIDList())
 }
 
 func (p *ParamTable) initQueryNodeStatsChannelName() {
@@ -289,20 +193,7 @@ func (p *ParamTable) initQueryNodeStatsChannelName() {
 }
 
 func (p *ParamTable) initProxyIDList() {
-	id, err := p.Load("nodeID.proxyIDList")
-	if err != nil {
-		log.Panicf("load proxy id list error, %s", err.Error())
-	}
-	ids := strings.Split(id, ",")
-	idList := make([]typeutil.UniqueID, 0, len(ids))
-	for _, i := range ids {
-		v, err := strconv.ParseInt(i, 10, 64)
-		if err != nil {
-			log.Panicf("load proxy id list error, %s", err.Error())
-		}
-		idList = append(idList, typeutil.UniqueID(v))
-	}
-	p.ProxyIDList = idList
+	p.ProxyIDList = p.BaseTable.ProxyIDList()
 }
 
 func (p *ParamTable) initProxyTimeTickChannelNames() {
@@ -347,20 +238,7 @@ func (p *ParamTable) initSoftTimeTickBarrierInterval() {
 }
 
 func (p *ParamTable) initWriteNodeIDList() {
-	id, err := p.Load("nodeID.writeNodeIDList")
-	if err != nil {
-		log.Panic(err)
-	}
-	ids := strings.Split(id, ",")
-	idlist := make([]typeutil.UniqueID, 0, len(ids))
-	for _, i := range ids {
-		v, err := strconv.ParseInt(i, 10, 64)
-		if err != nil {
-			log.Panicf("load proxy id list error, %s", err.Error())
-		}
-		idlist = append(idlist, typeutil.UniqueID(v))
-	}
-	p.WriteNodeIDList = idlist
+	p.WriteNodeIDList = p.BaseTable.WriteNodeIDList()
 }
 
 func (p *ParamTable) initWriteNodeTimeTickChannelNames() {
@@ -385,81 +263,57 @@ func (p *ParamTable) initWriteNodeTimeTickChannelNames() {
 }
 
 func (p *ParamTable) initDDChannelNames() {
-	ch, err := p.Load("msgChannel.chanNamePrefix.dataDefinition")
+	prefix, err := p.Load("msgChannel.chanNamePrefix.dataDefinition")
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
-	id, err := p.Load("nodeID.queryNodeIDList")
+	prefix += "-"
+	iRangeStr, err := p.Load("msgChannel.channelRange.dataDefinition")
 	if err != nil {
-		log.Panicf("load query node id list error, %s", err.Error())
+		panic(err)
 	}
-	ids := strings.Split(id, ",")
-	channels := make([]string, 0, len(ids))
-	for _, i := range ids {
-		_, err := strconv.ParseInt(i, 10, 64)
-		if err != nil {
-			log.Panicf("load query node id list error, %s", err.Error())
-		}
-		channels = append(channels, ch+"-"+i)
+	channelIDs := paramtable.ConvertRangeToIntSlice(iRangeStr, ",")
+	var ret []string
+	for _, ID := range channelIDs {
+		ret = append(ret, prefix+strconv.Itoa(ID))
 	}
-	p.DDChannelNames = channels
+	p.DDChannelNames = ret
 }
 
 func (p *ParamTable) initInsertChannelNames() {
-	ch, err := p.Load("msgChannel.chanNamePrefix.insert")
-	if err != nil {
-		log.Fatal(err)
-	}
-	channelRange, err := p.Load("msgChannel.channelRange.insert")
+	prefix, err := p.Load("msgChannel.chanNamePrefix.insert")
 	if err != nil {
 		panic(err)
 	}
-
-	chanRange := strings.Split(channelRange, ",")
-	if len(chanRange) != 2 {
-		panic("Illegal channel range num")
-	}
-	channelBegin, err := strconv.Atoi(chanRange[0])
+	prefix += "-"
+	iRangeStr, err := p.Load("msgChannel.channelRange.insert")
 	if err != nil {
 		panic(err)
 	}
-	channelEnd, err := strconv.Atoi(chanRange[1])
-	if err != nil {
-		panic(err)
+	channelIDs := paramtable.ConvertRangeToIntSlice(iRangeStr, ",")
+	var ret []string
+	for _, ID := range channelIDs {
+		ret = append(ret, prefix+strconv.Itoa(ID))
 	}
-	if channelBegin < 0 || channelEnd < 0 {
-		panic("Illegal channel range value")
-	}
-	if channelBegin > channelEnd {
-		panic("Illegal channel range value")
-	}
-
-	channels := make([]string, channelEnd-channelBegin)
-	for i := 0; i < channelEnd-channelBegin; i++ {
-		channels[i] = ch + "-" + strconv.Itoa(channelBegin+i)
-	}
-	p.InsertChannelNames = channels
+	p.InsertChannelNames = ret
 }
 
 func (p *ParamTable) initK2SChannelNames() {
-	ch, err := p.Load("msgChannel.chanNamePrefix.k2s")
+	prefix, err := p.Load("msgChannel.chanNamePrefix.k2s")
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
-	id, err := p.Load("nodeID.writeNodeIDList")
+	prefix += "-"
+	iRangeStr, err := p.Load("msgChannel.channelRange.k2s")
 	if err != nil {
-		log.Panicf("load write node id list error, %s", err.Error())
+		panic(err)
 	}
-	ids := strings.Split(id, ",")
-	channels := make([]string, 0, len(ids))
-	for _, i := range ids {
-		_, err := strconv.ParseInt(i, 10, 64)
-		if err != nil {
-			log.Panicf("load write node id list error, %s", err.Error())
-		}
-		channels = append(channels, ch+"-"+i)
+	channelIDs := paramtable.ConvertRangeToIntSlice(iRangeStr, ",")
+	var ret []string
+	for _, ID := range channelIDs {
+		ret = append(ret, prefix+strconv.Itoa(ID))
 	}
-	p.K2SChannelNames = channels
+	p.K2SChannelNames = ret
 }
 
 func (p *ParamTable) initMaxPartitionNum() {
