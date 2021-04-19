@@ -22,11 +22,10 @@ type collectionReplica interface {
 
 	// segment
 	addSegment(segmentID UniqueID, collID UniqueID, partitionID UniqueID,
-		createTime Timestamp, positions []*internalpb2.MsgPosition) error
+		positions []*internalpb2.MsgPosition) error
 	removeSegment(segmentID UniqueID) error
 	hasSegment(segmentID UniqueID) bool
-	updateStatistics(segmentID UniqueID, numRows int64, endTime Timestamp,
-		positions []*internalpb2.MsgPosition) error
+	updateStatistics(segmentID UniqueID, numRows int64) error
 	getSegmentStatisticsUpdates(segmentID UniqueID) (*internalpb2.SegmentStatisticsUpdates, error)
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 }
@@ -39,10 +38,10 @@ type (
 		numRows        int64
 		memorySize     int64
 		isNew          bool
-		createTime     Timestamp
-		endTime        Timestamp
+		createTime     Timestamp // not using
+		endTime        Timestamp // not using
 		startPositions []*internalpb2.MsgPosition
-		endPositions   []*internalpb2.MsgPosition
+		endPositions   []*internalpb2.MsgPosition // not using
 	}
 
 	collectionReplicaImpl struct {
@@ -66,7 +65,7 @@ func (colReplica *collectionReplicaImpl) getSegmentByID(segmentID UniqueID) (*Se
 }
 
 func (colReplica *collectionReplicaImpl) addSegment(segmentID UniqueID, collID UniqueID,
-	partitionID UniqueID, createTime Timestamp, positions []*internalpb2.MsgPosition) error {
+	partitionID UniqueID, positions []*internalpb2.MsgPosition) error {
 
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
@@ -77,7 +76,7 @@ func (colReplica *collectionReplicaImpl) addSegment(segmentID UniqueID, collID U
 		collectionID:   collID,
 		partitionID:    partitionID,
 		isNew:          true,
-		createTime:     createTime,
+		createTime:     0,
 		startPositions: positions,
 		endPositions:   make([]*internalpb2.MsgPosition, 0),
 	}
@@ -113,7 +112,7 @@ func (colReplica *collectionReplicaImpl) hasSegment(segmentID UniqueID) bool {
 	return false
 }
 
-func (colReplica *collectionReplicaImpl) updateStatistics(segmentID UniqueID, numRows int64, endTime Timestamp, positions []*internalpb2.MsgPosition) error {
+func (colReplica *collectionReplicaImpl) updateStatistics(segmentID UniqueID, numRows int64) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
@@ -122,8 +121,6 @@ func (colReplica *collectionReplicaImpl) updateStatistics(segmentID UniqueID, nu
 			log.Printf("updating segment(%v) row nums: (%v)", segmentID, numRows)
 			ele.memorySize = 0
 			ele.numRows += numRows
-			ele.endTime = endTime
-			ele.endPositions = positions
 			return nil
 		}
 	}
@@ -137,17 +134,14 @@ func (colReplica *collectionReplicaImpl) getSegmentStatisticsUpdates(segmentID U
 	for _, ele := range colReplica.segments {
 		if ele.segmentID == segmentID {
 			updates := &internalpb2.SegmentStatisticsUpdates{
-				SegmentID:      segmentID,
-				MemorySize:     ele.memorySize,
-				NumRows:        ele.numRows,
-				IsNewSegment:   ele.isNew,
-				CreateTime:     ele.createTime,
-				EndTime:        ele.endTime,
-				StartPositions: ele.startPositions,
-				EndPositions:   ele.endPositions,
+				SegmentID:    segmentID,
+				MemorySize:   ele.memorySize,
+				NumRows:      ele.numRows,
+				IsNewSegment: ele.isNew,
 			}
 
 			if ele.isNew {
+				updates.StartPositions = ele.startPositions
 				ele.isNew = false
 			}
 			return updates, nil

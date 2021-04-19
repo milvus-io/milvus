@@ -111,17 +111,8 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 		collID := msg.GetCollectionID()
 		partitionID := msg.GetPartitionID()
 
-		currentPosition := make([]*internalpb2.MsgPosition, 0, len(Params.InsertChannelNames))
-		for _, name := range Params.InsertChannelNames {
-			currentPosition = append(currentPosition, &internalpb2.MsgPosition{
-				ChannelName: name,
-				MsgID:       strconv.FormatInt(msg.Base.MsgID, 10),
-				Timestamp:   msg.Base.GetTimestamp(),
-			})
-		}
-
 		if !ibNode.replica.hasSegment(currentSegID) {
-			err := ibNode.replica.addSegment(currentSegID, collID, partitionID, msg.Base.Timestamp, currentPosition)
+			err := ibNode.replica.addSegment(currentSegID, collID, partitionID, iMsg.startPositions)
 			if err != nil {
 				log.Println("Error: add segment error", err)
 			}
@@ -134,7 +125,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 			}
 		}
 
-		err := ibNode.replica.updateStatistics(currentSegID, int64(len(msg.RowIDs)), msg.Base.Timestamp, currentPosition)
+		err := ibNode.replica.updateStatistics(currentSegID, int64(len(msg.RowIDs)))
 		if err != nil {
 			log.Println("Error: update Segment Row number wrong, ", err)
 		}

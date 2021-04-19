@@ -9,6 +9,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 type filterDmNode struct {
@@ -71,6 +72,7 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 			timestampMin: msgStreamMsg.TimestampMin(),
 			timestampMax: msgStreamMsg.TimestampMax(),
 		},
+		startPositions: make([]*internalpb2.MsgPosition, 0),
 	}
 
 	iMsg.flushMessages = append(iMsg.flushMessages, ddMsg.flushMessages...)
@@ -98,6 +100,7 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 		}
 	}
 
+	iMsg.startPositions = append(iMsg.startPositions, msgStreamMsg.StartPositions()...)
 	iMsg.gcRecord = ddMsg.gcRecord
 	var res Msg = &iMsg
 	for _, child := range childs {

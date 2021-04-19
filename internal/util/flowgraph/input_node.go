@@ -63,9 +63,10 @@ func (inNode *InputNode) Operate([]*Msg) []*Msg {
 	}
 
 	var msgStreamMsg Msg = &MsgStreamMsg{
-		tsMessages:   msgPack.Msgs,
-		timestampMin: msgPack.BeginTs,
-		timestampMax: msgPack.EndTs,
+		tsMessages:     msgPack.Msgs,
+		timestampMin:   msgPack.BeginTs,
+		timestampMax:   msgPack.EndTs,
+		startPositions: msgPack.StartPositions,
 	}
 
 	for _, child := range childs {
