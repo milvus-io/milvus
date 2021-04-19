@@ -16,7 +16,6 @@
 #include <iostream>
 
 #include "utils/Utils.h"
-
 #include "grpc/ClientProxy.h"
 #include "interface/ConnectionImpl.h"
 #include "utils/TimeRecorder.h"

@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"flag"
 	"fmt"
+	s3 "github.com/czs007/suvlim/storage/internal/S3"
 	minio "github.com/czs007/suvlim/storage/internal/minio"
 	tikv "github.com/czs007/suvlim/storage/internal/tikv"
 	"github.com/czs007/suvlim/storage/pkg/types"
@@ -171,15 +172,15 @@ func runBatchDelete() {
 func main() {
 	// Parse command line
 	myflag := flag.NewFlagSet("myflag", flag.ExitOnError)
-	myflag.IntVar(&durationSecs, "d", 30, "Duration of each test in seconds")
+	myflag.IntVar(&durationSecs, "d", 5, "Duration of each test in seconds")
 	myflag.IntVar(&threads, "t", 1, "Number of threads to run")
 	myflag.IntVar(&loops, "l", 1, "Number of times to repeat test")
 	var sizeArg string
 	var storeType string
-	myflag.StringVar(&sizeArg, "z", "2k", "Size of objects in bytes with postfix K, M, and G")
-	myflag.StringVar(&storeType, "s", "tikv", "Storage type, tikv or minio")
+	myflag.StringVar(&sizeArg, "z", "1k", "Size of objects in bytes with postfix K, M, and G")
+	myflag.StringVar(&storeType, "s", "s3", "Storage type, tikv or minio or s3")
 	myflag.IntVar(&numVersion, "v", 1, "Max versions for each key")
-	myflag.IntVar(&batchOpSize, "b", 1000, "Batch operation kv pair number")
+	myflag.IntVar(&batchOpSize, "b", 100, "Batch operation kv pair number")
 
 	if err := myflag.Parse(os.Args[1:]); err != nil {
 		os.Exit(1)
@@ -191,20 +192,22 @@ func main() {
 		log.Fatalf("Invalid -z argument for object size: %v", err)
 	}
 	switch storeType {
-	case "tikv":
-		//var (
-		//	pdAddr = []string{"127.0.0.1:2379"}
-		//	conf   = config.Default()
-		//)
-		store, err = tikv.NewTikvStore(context.Background())
-		if err != nil {
-			log.Fatalf("Error when creating storage " + err.Error())
-		}
 	case "minio":
 		store, err = minio.NewMinioDriver(context.Background())
 		if err != nil {
 			log.Fatalf("Error when creating storage " + err.Error())
 		}
+	case "tikv":
+		store, err = tikv.NewTikvStore(context.Background())
+		if err != nil {
+			log.Fatalf("Error when creating storage " + err.Error())
+		}
+	case "s3":
+		store, err = s3.NewS3Driver(context.Background())
+		if err != nil {
+			log.Fatalf("Error when creating storage " + err.Error())
+		}
+
 	default:
 		log.Fatalf("Not supported storage type")
 	}
@@ -257,71 +260,71 @@ func main() {
 			loop, setTime, counter, counter*int32(batchOpSize), bytefmt.ByteSize(uint64(bps)), float64(counter)/setTime, float64(counter * int32(batchOpSize))/setTime))
 
 		// Record all test keys
-		totalKeyCount = keyNum
-		totalKeys = make([][]byte, totalKeyCount)
-		for i := int32(0); i < totalKeyCount; i++ {
-			totalKeys[i] = []byte(fmt.Sprint("key", i))
-		}
-
-		// Run the get case
-		counter = 0
-		startTime = time.Now()
-		endTime = startTime.Add(time.Second * time.Duration(durationSecs))
-		for n := 1; n <= threads; n++ {
-			wg.Add(1)
-			go runGet()
-		}
-		wg.Wait()
-
-		getTime := getFinish.Sub(startTime).Seconds()
-		bps = float64(uint64(counter)*valueSize) / getTime
-		fmt.Fprint(logFile, fmt.Sprintf("Loop %d: GET time %.1f secs, kv pairs = %d, speed = %sB/sec, %.1f operations/sec, %.1f kv/sec.\n",
-			loop, getTime, counter, bytefmt.ByteSize(uint64(bps)), float64(counter)/getTime, float64(counter)/getTime))
+		//totalKeyCount = keyNum
+		//totalKeys = make([][]byte, totalKeyCount)
+		//for i := int32(0); i < totalKeyCount; i++ {
+		//	totalKeys[i] = []byte(fmt.Sprint("key", i))
+		//}
+		//
+		//// Run the get case
+		//counter = 0
+		//startTime = time.Now()
+		//endTime = startTime.Add(time.Second * time.Duration(durationSecs))
+		//for n := 1; n <= threads; n++ {
+		//	wg.Add(1)
+		//	go runGet()
+		//}
+		//wg.Wait()
+		//
+		//getTime := getFinish.Sub(startTime).Seconds()
+		//bps = float64(uint64(counter)*valueSize) / getTime
+		//fmt.Fprint(logFile, fmt.Sprintf("Loop %d: GET time %.1f secs, kv pairs = %d, speed = %sB/sec, %.1f operations/sec, %.1f kv/sec.\n",
+		//	loop, getTime, counter, bytefmt.ByteSize(uint64(bps)), float64(counter)/getTime, float64(counter)/getTime))
 
 		// Run the batchGet case
-		counter = 0
-		startTime = time.Now()
-		endTime = startTime.Add(time.Second * time.Duration(durationSecs))
-		for n := 1; n <= threads; n++ {
-			wg.Add(1)
-			go runBatchGet()
-		}
-		wg.Wait()
-
-		getTime = getFinish.Sub(startTime).Seconds()
-		bps = float64(uint64(counter)*valueSize*uint64(batchOpSize)) / getTime
-		fmt.Fprint(logFile, fmt.Sprintf("Loop %d: BATCH GET time %.1f secs, batchs = %d, kv pairs = %d, speed = %sB/sec, %.1f operations/sec, %.1f kv/sec.\n",
-			loop, getTime, counter, counter*int32(batchOpSize), bytefmt.ByteSize(uint64(bps)), float64(counter)/getTime, float64(counter * int32(batchOpSize))/getTime))
-
-		// Run the delete case
-		counter = 0
-		startTime = time.Now()
-		endTime = startTime.Add(time.Second * time.Duration(durationSecs))
-		for n := 1; n <= threads; n++ {
-			wg.Add(1)
-			go runDelete()
-		}
-		wg.Wait()
-
-		deleteTime := deleteFinish.Sub(startTime).Seconds()
-		bps = float64(uint64(counter)*valueSize) / deleteTime
-		fmt.Fprint(logFile, fmt.Sprintf("Loop %d: Delete time %.1f secs, kv pairs = %d, %.1f operations/sec, %.1f kv/sec.\n",
-			loop, deleteTime, counter, float64(counter)/deleteTime, float64(counter)/deleteTime))
-
-		// Run the batchDelete case
-		counter = 0
-		startTime = time.Now()
-		endTime = startTime.Add(time.Second * time.Duration(durationSecs))
-		for n := 1; n <= threads; n++ {
-			wg.Add(1)
-			go runBatchDelete()
-		}
-		wg.Wait()
-
-		deleteTime = setFinish.Sub(startTime).Seconds()
-		bps = float64(uint64(counter)*valueSize*uint64(batchOpSize)) / setTime
-		fmt.Fprint(logFile, fmt.Sprintf("Loop %d: BATCH DELETE time %.1f secs, batchs = %d, kv pairs = %d, %.1f operations/sec, %.1f kv/sec.\n",
-			loop, setTime, counter, counter*int32(batchOpSize), float64(counter)/setTime, float64(counter * int32(batchOpSize))/setTime))
+		//counter = 0
+		//startTime = time.Now()
+		//endTime = startTime.Add(time.Second * time.Duration(durationSecs))
+		//for n := 1; n <= threads; n++ {
+		//	wg.Add(1)
+		//	go runBatchGet()
+		//}
+		//wg.Wait()
+		//
+		//getTime = getFinish.Sub(startTime).Seconds()
+		//bps = float64(uint64(counter)*valueSize*uint64(batchOpSize)) / getTime
+		//fmt.Fprint(logFile, fmt.Sprintf("Loop %d: BATCH GET time %.1f secs, batchs = %d, kv pairs = %d, speed = %sB/sec, %.1f operations/sec, %.1f kv/sec.\n",
+		//	loop, getTime, counter, counter*int32(batchOpSize), bytefmt.ByteSize(uint64(bps)), float64(counter)/getTime, float64(counter * int32(batchOpSize))/getTime))
+		//
+		//// Run the delete case
+		//counter = 0
+		//startTime = time.Now()
+		//endTime = startTime.Add(time.Second * time.Duration(durationSecs))
+		//for n := 1; n <= threads; n++ {
+		//	wg.Add(1)
+		//	go runDelete()
+		//}
+		//wg.Wait()
+		//
+		//deleteTime := deleteFinish.Sub(startTime).Seconds()
+		//bps = float64(uint64(counter)*valueSize) / deleteTime
+		//fmt.Fprint(logFile, fmt.Sprintf("Loop %d: Delete time %.1f secs, kv pairs = %d, %.1f operations/sec, %.1f kv/sec.\n",
+		//	loop, deleteTime, counter, float64(counter)/deleteTime, float64(counter)/deleteTime))
+		//
+		//// Run the batchDelete case
+		//counter = 0
+		//startTime = time.Now()
+		//endTime = startTime.Add(time.Second * time.Duration(durationSecs))
+		//for n := 1; n <= threads; n++ {
+		//	wg.Add(1)
+		//	go runBatchDelete()
+		//}
+		//wg.Wait()
+		//
+		//deleteTime = setFinish.Sub(startTime).Seconds()
+		//bps = float64(uint64(counter)*valueSize*uint64(batchOpSize)) / setTime
+		//fmt.Fprint(logFile, fmt.Sprintf("Loop %d: BATCH DELETE time %.1f secs, batchs = %d, kv pairs = %d, %.1f operations/sec, %.1f kv/sec.\n",
+		//	loop, setTime, counter, counter*int32(batchOpSize), float64(counter)/setTime, float64(counter * int32(batchOpSize))/setTime))
 
 		// Print line mark
 		lineMark := "\n"
