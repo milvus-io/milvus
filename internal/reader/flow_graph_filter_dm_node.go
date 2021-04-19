@@ -15,10 +15,10 @@ func (fdmNode *filterDmNode) Name() string {
 }
 
 func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
-	// fmt.Println("Do filterDmNode operation")
+	//fmt.Println("Do filterDmNode operation")
 
 	if len(in) != 1 {
-		log.Println("Invalid operate message input in filterDmNode")
+		log.Println("Invalid operate message input in filterDmNode, input length = ", len(in))
 		// TODO: add error handling
 	}
 

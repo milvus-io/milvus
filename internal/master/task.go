@@ -13,7 +13,7 @@ import (
 type baseTask struct {
 	kvBase *kv.EtcdKV
 	mt     *metaTable
-	cv     chan int
+	cv     chan error
 }
 
 type task interface {
@@ -21,27 +21,23 @@ type task interface {
 	Ts() (Timestamp, error)
 	Execute() error
 	WaitToFinish(ctx context.Context) error
-	Notify() error
-	NotifyTimeout() error
+	Notify(err error)
 }
 
-func (bt *baseTask) Notify() error {
-	bt.cv <- 0
-	return nil
-}
-
-func (bt *baseTask) NotifyTimeout() error {
-	bt.cv <- 0
-	return errors.New("request timeout")
+func (bt *baseTask) Notify(err error) {
+	bt.cv <- err
 }
 
 func (bt *baseTask) WaitToFinish(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
-		case <-bt.cv:
-			return nil
+			return errors.Errorf("context done")
+		case err, ok := <-bt.cv:
+			if !ok {
+				return errors.Errorf("notify chan closed")
+			}
+			return err
 		}
 	}
 }

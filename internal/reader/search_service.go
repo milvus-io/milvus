@@ -61,7 +61,7 @@ func (ss *searchService) start() {
 
 	producerChannels := []string{"searchResult"}
 
-	searchResultStream := msgstream.NewPulsarMsgStream(context.Background(), receiveBufSize)
+	searchResultStream := msgstream.NewPulsarMsgStream(ss.ctx, receiveBufSize)
 	searchResultStream.SetPulsarCient(ss.pulsarURL)
 	searchResultStream.CreatePulsarProducers(producerChannels)
 

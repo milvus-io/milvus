@@ -37,7 +37,7 @@
     cd milvus-distributed
     pwd_dir=`pwd`
     export PATH=$PATH:$(go env GOPATH)/bin
-    export protoc=${pwd_dir}/cmake_build/thirdparty/protobuf/protobuf-build/protoc
+    export protoc=${pwd_dir}/internal/core/cmake_build/thirdparty/protobuf/protobuf-build/protoc
     ./ci/scripts/proto_gen_go.sh
 ```
 

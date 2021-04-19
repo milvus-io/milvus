@@ -1,17 +1,19 @@
 package id
 
 import (
-	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/kv/mockkv"
 	"os"
-
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 )
 
 var GIdAllocator *GlobalIdAllocator
 
 func TestMain(m *testing.M) {
-	GIdAllocator = NewGlobalIdAllocator("idTimestamp", mockkv.NewEtcdKV())
+	conf.LoadConfig("config.yaml")
+	GIdAllocator = NewGlobalIdAllocator("idTimestamp", tsoutil.NewTSOKVBase("gid"))
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }
@@ -30,8 +32,8 @@ func TestGlobalIdAllocator_AllocOne(t *testing.T) {
 }
 
 func TestGlobalIdAllocator_Alloc(t *testing.T) {
-	count := uint32(2<<10)
+	count := uint32(2 << 10)
 	idStart, idEnd, err := GIdAllocator.Alloc(count)
 	assert.Nil(t, err)
-	assert.Equal(t, count, uint32(idEnd - idStart))
+	assert.Equal(t, count, uint32(idEnd-idStart))
 }
