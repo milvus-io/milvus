@@ -30,22 +30,14 @@ gid=$(id -g)
 [ "$uid" -lt 500 ] && uid=501
 [ "$gid" -lt 500 ] && gid=$uid
 
-awk 'c&&c--{sub(/^/,"#")} /# Build devcontainer/{c=5} 1' $ROOT_DIR/docker-compose.yml > $ROOT_DIR/docker-compose-devcontainer.yml.tmp
+awk 'c&&c--{sub(/^/,"#")} /# Build devcontainer/{c=5} 1' $ROOT_DIR/docker-compose.yml > $ROOT_DIR/docker-compose-vscode.yml.tmp
 
-awk 'c&&c--{sub(/^/,"#")} /# Command/{c=3} 1' $ROOT_DIR/docker-compose-devcontainer.yml.tmp > $ROOT_DIR/docker-compose-devcontainer.yml
+awk 'c&&c--{sub(/^/,"#")} /# Command/{c=3} 1' $ROOT_DIR/docker-compose-vscode.yml.tmp > $ROOT_DIR/docker-compose-vscode.yml
 
-rm $ROOT_DIR/docker-compose-devcontainer.yml.tmp
+rm $ROOT_DIR/docker-compose-vscode.yml.tmp
 
 if [ "${machine}" == "Mac" ];then
-    sed -i '' "s/# user: {{ CURRENT_ID }}/user: \"$uid:$gid\"/g" $ROOT_DIR/docker-compose-devcontainer.yml
+    sed -i '' "s/# user: {{ CURRENT_ID }}/user: \"$uid:$gid\"/g" $ROOT_DIR/docker-compose-vscode.yml
 else
-    sed -i "s/# user: {{ CURRENT_ID }}/user: \"$uid:$gid\"/g" $ROOT_DIR/docker-compose-devcontainer.yml
-fi
-
-if [ "${1-}" = "up" ]; then
-    docker-compose -f $ROOT_DIR/docker-compose-devcontainer.yml up -d
-fi
-
-if [ "${1-}" = "down" ]; then
-    docker-compose -f $ROOT_DIR/docker-compose-devcontainer.yml down
+    sed -i "s/# user: {{ CURRENT_ID }}/user: \"$uid:$gid\"/g" $ROOT_DIR/docker-compose-vscode.yml
 fi
