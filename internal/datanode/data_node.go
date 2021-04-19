@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"sync/atomic"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
@@ -56,7 +57,7 @@ type (
 		cancel  context.CancelFunc
 		NodeID  UniqueID
 		Role    string
-		State   internalpb2.StateCode
+		State   atomic.Value // internalpb2.StateCode_INITIALIZING
 		watchDm chan struct{}
 
 		dataSyncService *dataSyncService
@@ -66,7 +67,7 @@ type (
 		dataService   DataServiceInterface
 
 		flushChan chan *flushMsg
-		replica   collectionReplica
+		replica   Replica
 
 		closer io.Closer
 	}
@@ -81,7 +82,6 @@ func NewDataNode(ctx context.Context) *DataNode {
 		cancel:  cancel2,
 		NodeID:  Params.NodeID, // GOOSE TODO: How to init
 		Role:    typeutil.DataNodeRole,
-		State:   internalpb2.StateCode_INITIALIZING, // GOOSE TODO: atomic
 		watchDm: make(chan struct{}),
 
 		dataSyncService: nil,
@@ -90,6 +90,8 @@ func NewDataNode(ctx context.Context) *DataNode {
 		dataService:     nil,
 		replica:         nil,
 	}
+
+	node.State.Store(internalpb2.StateCode_INITIALIZING)
 
 	return node
 }
@@ -156,10 +158,7 @@ func (node *DataNode) Init() error {
 
 	}
 
-	var replica collectionReplica = &collectionReplicaImpl{
-		collections: make([]*Collection, 0),
-		segments:    make([]*Segment, 0),
-	}
+	replica := newReplica()
 
 	var alloc allocator = newAllocatorImpl(node.masterService)
 
@@ -178,7 +177,7 @@ func (node *DataNode) Init() error {
 func (node *DataNode) Start() error {
 	node.metaService.init()
 	go node.dataSyncService.start()
-	node.State = internalpb2.StateCode_HEALTHY
+	node.State.Store(internalpb2.StateCode_HEALTHY)
 	return nil
 }
 
@@ -189,7 +188,7 @@ func (node *DataNode) WatchDmChannels(in *datapb.WatchDmChannelRequest) (*common
 
 	switch {
 
-	case node.State != internalpb2.StateCode_INITIALIZING:
+	case node.State.Load() != internalpb2.StateCode_INITIALIZING:
 		status.Reason = fmt.Sprintf("DataNode %d not initializing!", node.NodeID)
 		return status, errors.New(status.GetReason())
 
@@ -206,12 +205,12 @@ func (node *DataNode) WatchDmChannels(in *datapb.WatchDmChannelRequest) (*common
 }
 
 func (node *DataNode) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	log.Println("DataNode current state:", node.State)
+	log.Println("DataNode current state:", node.State.Load())
 	states := &internalpb2.ComponentStates{
 		State: &internalpb2.ComponentInfo{
 			NodeID:    Params.NodeID,
 			Role:      node.Role,
-			StateCode: node.State,
+			StateCode: node.State.Load().(internalpb2.StateCode),
 		},
 		SubcomponentStates: make([]*internalpb2.ComponentInfo, 0),
 		Status:             &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
