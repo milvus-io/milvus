@@ -370,6 +370,7 @@ class TestInsertBase:
         res = connect.get_collection_stats(collection)
         assert res[row_count] == 2 * default_nb
 
+    @pytest.mark.tags("0331")
     def test_insert_dim_not_matched(self, connect, collection):
         '''
         target: test insert entities, the vector dimension is not equal to the collection dimension
@@ -378,7 +379,7 @@ class TestInsertBase:
         '''
         vectors = gen_vectors(default_nb, int(default_dim) // 2)
         insert_entities = copy.deepcopy(default_entities)
-        insert_entities[-1][default_float_vec_field_name] = vectors
+        insert_entities[-1]["values"] = vectors
         # logging.getLogger().info(len(insert_entities[-1][default_float_vec_field_name][0]))
         with pytest.raises(Exception) as e:
             connect.insert(collection, insert_entities)
