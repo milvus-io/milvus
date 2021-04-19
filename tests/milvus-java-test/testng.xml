@@ -1,8 +1,0 @@
-<suite name="Test-class Suite">
-    <test name="Test-class test" >
-        <classes>
-            <class name="com.TestConnect" />
-            <class name="com.TestMix" />
-        </classes>
-    </test>
-</suite>

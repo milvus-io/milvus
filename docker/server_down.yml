@@ -1,8 +1,0 @@
-groups:
-- name: milvus
-  rules:
-    - alert: MilvusServerDown
-      expr: up{job="milvus_server"}
-      for: 1s
-      labels:
-        serverity: page
