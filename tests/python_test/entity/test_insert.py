@@ -760,7 +760,7 @@ class TestInsertAsync:
             ids = future.result()
 
     # #1339
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_insert_async_invalid_params_raise_exception(self, connect, collection):
         '''
         target: test insert vectors with different length of vectors
