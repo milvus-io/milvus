@@ -181,6 +181,22 @@ def collection(request, connect):
     assert connect.has_collection(collection_name)
     return collection_name
 
+@pytest.fixture(scope="function")
+def collection_without_loading(request, connect):
+    ori_collection_name = getattr(request.module, "collection_id", "test")
+    collection_name = gen_unique_str(ori_collection_name)
+    try:
+        default_fields = gen_default_fields()
+        connect.create_collection(collection_name, default_fields)
+    except Exception as e:
+        pytest.exit(str(e))
+    def teardown():
+        if connect.has_collection(collection_name):
+            connect.drop_collection(collection_name, timeout=delete_timeout)
+    request.addfinalizer(teardown)
+    assert connect.has_collection(collection_name)
+    return collection_name
+
 
 # customised id
 @pytest.fixture(scope="function")
