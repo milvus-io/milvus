@@ -8,7 +8,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/master/controller"
 	milvusgrpc "github.com/zilliztech/milvus-distributed/internal/master/grpc"
-	messagepb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+  "github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/master/kv"
 
 	"go.etcd.io/etcd/clientv3"
@@ -16,7 +16,7 @@ import (
 
 func Run() {
 	kvbase := newKvBase()
-	collectionChan := make(chan *messagepb.Mapping)
+	collectionChan := make(chan *schemapb.CollectionSchema)
 	defer close(collectionChan)
 
 	errorch := make(chan error)
@@ -25,6 +25,7 @@ func Run() {
 	go milvusgrpc.Server(collectionChan, errorch, kvbase)
 	go controller.SegmentStatsController(kvbase, errorch)
 	go controller.CollectionController(collectionChan, kvbase, errorch)
+	//go timetick.TimeTickService()
 	for {
 		for v := range errorch {
 			log.Fatal(v)

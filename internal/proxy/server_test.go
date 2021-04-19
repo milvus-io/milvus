@@ -5,8 +5,10 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"github.com/apache/pulsar-client-go/pulsar"
-	mpb "github.com/zilliztech/milvus-distributed/internal/proto/master"
+	mpb "github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/clientv3"
@@ -61,13 +63,13 @@ func startTestProxyServer(proxy_addr string, master_addr string, t *testing.T) *
 		resultGroup:   "reusltG",
 		numReaderNode: 2,
 		proxyId:       1,
-		getTimestamp: func(count uint32) ([]Timestamp, pb.Status) {
+		getTimestamp: func(count uint32) ([]Timestamp, commonpb.Status) {
 			timestamp += 100
 			t := make([]Timestamp, count)
 			for i := 0; i < int(count); i++ {
 				t[i] = Timestamp(timestamp)
 			}
-			return t, pb.Status{ErrorCode: pb.ErrorCode_SUCCESS}
+			return t, commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 		},
 		client: client,
 		ctx:    ctx,
@@ -121,18 +123,17 @@ func TestProxyServer_WatchEtcd(t *testing.T) {
 	defer client.Close()
 	ctx, _ := context.WithTimeout(context.Background(), 2*time.Second)
 
-	col1 := mpb.Collection{
+	col1 := etcdpb.CollectionMeta{
 		Id:         1,
-		Name:       "c1",
 		SegmentIds: []uint64{2, 3},
 	}
-	seg2 := mpb.Segment{
+	seg2 := etcdpb.SegmentMeta{
 		SegmentId: 2,
-		Rows:      10,
+		NumRows:      10,
 	}
-	seg3 := mpb.Segment{
+	seg3 := etcdpb.SegmentMeta{
 		SegmentId: 3,
-		Rows:      10,
+		NumRows:      10,
 	}
 	if cb1, err := json.Marshal(&col1); err != nil {
 		t.Fatal(err)
@@ -171,14 +172,13 @@ func TestProxyServer_WatchEtcd(t *testing.T) {
 	assert.Equalf(t, cr.Status.ErrorCode, pb.ErrorCode_SUCCESS, "CountCollection failed : %s", cr.Status.Reason)
 	assert.Equalf(t, cr.CollectionRowCount, int64(20), "collection count expect to be 20, count = %d", cr.CollectionRowCount)
 
-	col4 := mpb.Collection{
+	col4 := etcdpb.CollectionMeta{
 		Id:         4,
-		Name:       "c4",
 		SegmentIds: []uint64{5},
 	}
-	seg5 := mpb.Segment{
+	seg5 := etcdpb.SegmentMeta{
 		SegmentId: 5,
-		Rows:      10,
+		NumRows:      10,
 	}
 	if cb4, err := json.Marshal(&col4); err != nil {
 		t.Fatal(err)
@@ -202,28 +202,24 @@ func TestProxyServer_InsertAndDelete(t *testing.T) {
 
 	defer client.Close()
 	ctx, _ := context.WithTimeout(context.Background(), 2*time.Second)
-	col10 := mpb.Collection{
+	col10 := etcdpb.CollectionMeta{
 		Id:            10,
-		Name:          "col10",
 		Schema:        nil,
 		CreateTime:    0,
 		SegmentIds:    []uint64{11, 12},
 		PartitionTags: nil,
-		Indexes:       nil,
 	}
-	seg11 := mpb.Segment{
+	seg11 := etcdpb.SegmentMeta{
 		SegmentId:    11,
 		CollectionId: 10,
 		ChannelStart: 0,
 		ChannelEnd:   1,
-		Status:       mpb.SegmentStatus_OPENED,
 	}
-	seg12 := mpb.Segment{
+	seg12 := etcdpb.SegmentMeta{
 		SegmentId:    12,
 		CollectionId: 10,
 		ChannelStart: 1,
 		ChannelEnd:   2,
-		Status:       mpb.SegmentStatus_OPENED,
 	}
 	if cb10, err := json.Marshal(&col10); err != nil {
 		t.Fatal(err)

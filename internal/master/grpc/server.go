@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 	"net"
 	"strconv"
@@ -11,11 +12,10 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
-	messagepb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"google.golang.org/grpc"
 )
 
-func Server(ch chan *messagepb.Mapping, errch chan error, kvbase kv.Base) {
+func Server(ch chan *schemapb.CollectionSchema, errch chan error, kvbase kv.Base) {
 	defaultGRPCPort := ":"
 	defaultGRPCPort += strconv.FormatInt(int64(conf.Config.Master.Port), 10)
 	lis, err := net.Listen("tcp", defaultGRPCPort)
@@ -34,7 +34,7 @@ func Server(ch chan *messagepb.Mapping, errch chan error, kvbase kv.Base) {
 }
 
 type GRPCMasterServer struct {
-	CreateRequest chan *messagepb.Mapping
+	CreateRequest chan *schemapb.CollectionSchema
 	kvbase        kv.Base
 }
 

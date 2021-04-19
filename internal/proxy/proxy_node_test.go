@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"github.com/apache/pulsar-client-go/pulsar"
-	mpb "github.com/zilliztech/milvus-distributed/internal/proto/master"
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
@@ -160,28 +160,24 @@ func TestProxyNode(t *testing.T) {
 		}
 	}()
 
-	cm100 := mpb.Collection{
+	cm100 := etcdpb.CollectionMeta{
 		Id:            100,
-		Name:          "cm100",
 		Schema:        nil,
 		CreateTime:    0,
 		SegmentIds:    []uint64{101, 102},
 		PartitionTags: nil,
-		Indexes:       nil,
 	}
-	sm101 := mpb.Segment{
+	sm101 := etcdpb.SegmentMeta{
 		SegmentId:    101,
 		CollectionId: 100,
 		ChannelStart: 0,
 		ChannelEnd:   1,
-		Status:       mpb.SegmentStatus_OPENED,
 	}
-	sm102 := mpb.Segment{
+	sm102 := etcdpb.SegmentMeta{
 		SegmentId:    102,
 		CollectionId: 100,
 		ChannelStart: 1,
 		ChannelEnd:   2,
-		Status:       mpb.SegmentStatus_OPENED,
 	}
 	if cm100b, err := json.Marshal(&cm100); err != nil {
 		t.Fatal(err)

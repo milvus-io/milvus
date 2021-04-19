@@ -5,17 +5,19 @@ import (
 	"fmt"
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
-	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	etcd "go.etcd.io/etcd/clientv3"
 	"strconv"
 )
 
 type BaseRequest interface {
-	Type() pb.ReqType
-	PreExecute() pb.Status
-	Execute() pb.Status
-	PostExecute() pb.Status
-	WaitToFinish() pb.Status
+	Type() internalpb.ReqType
+	PreExecute() commonpb.Status
+	Execute() commonpb.Status
+	PostExecute() commonpb.Status
+	WaitToFinish() commonpb.Status
 }
 
 type ProxyOptions struct {
@@ -156,13 +158,13 @@ func StartProxy(opt *ProxyOptions) error {
 		peer_id:              opt.timeTickPeerId,
 		ctx:                  opt.ctx,
 		areRequestsDelivered: func(ts Timestamp) bool { return srv.reqSch.AreRequestsDelivered(ts, 2) },
-		getTimestamp: func() (Timestamp, pb.Status) {
+		getTimestamp: func() (Timestamp, commonpb.Status) {
 			ts, st := tso.GetTimestamp(1)
 			return ts[0], st
 		},
 	}
 	s := tt.Restart()
-	if s.ErrorCode != pb.ErrorCode_SUCCESS {
+	if s.ErrorCode != commonpb.ErrorCode_SUCCESS {
 		return fmt.Errorf(s.Reason)
 	}
 

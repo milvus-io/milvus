@@ -5,7 +5,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 	"log"
 	"sync"
@@ -75,7 +74,7 @@ func (s *proxyServer) restartQueryRoutine(buf_size int) error {
 				return
 			case qm := <-s.reqSch.queryChan:
 				ts, st := s.getTimestamp(1)
-				if st.ErrorCode != pb.ErrorCode_SUCCESS {
+				if st.ErrorCode != commonpb.ErrorCode_SUCCESS {
 					log.Printf("get time stamp failed, error code = %d, msg = %s", st.ErrorCode, st.Reason)
 					break
 				}
