@@ -67,6 +67,7 @@ func (mService *metaService) getCollectionNames() ([]string, error) {
 }
 
 func (mService *metaService) createCollection(name string) error {
+	log.Println("Describing collections")
 	req := &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_kDescribeCollection,

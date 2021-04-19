@@ -23,7 +23,6 @@ const interval = 200
 func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	svr, err := dnc.New(ctx)
 	if err != nil {
@@ -114,6 +113,11 @@ func main() {
 		panic(err)
 	}
 
+	if err := svr.Start(); err != nil {
+		panic(err)
+	}
+	log.Println("Data node successfully started ...")
+
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
 		syscall.SIGHUP,
@@ -127,15 +131,13 @@ func main() {
 		cancel()
 	}()
 
-	if err := svr.Start(); err != nil {
-		panic(err)
-	}
-	log.Println("Data node successfully started ...")
-
 	<-ctx.Done()
 	log.Println("Got signal to exit signal:", sig.String())
 
-	svr.Stop()
+	if err := svr.Stop(); err != nil {
+		panic(err)
+	}
+
 	switch sig {
 	case syscall.SIGTERM:
 		exit(0)
