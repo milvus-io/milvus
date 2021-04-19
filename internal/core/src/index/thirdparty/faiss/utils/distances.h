@@ -17,6 +17,7 @@
 #include <faiss/utils/Heap.h>
 #include <faiss/utils/ConcurrentBitset.h>
 #include <faiss/utils/BitsetView.h>
+#include <faiss/impl/AuxIndexStructures.h>
 
 
 namespace faiss {
@@ -46,11 +47,6 @@ float fvec_Linf_sse (
         const float * y,
         size_t d);
 #endif
-
-float fvec_jaccard (
-        const float * x,
-        const float * y,
-        size_t d);
 
 /** Compute pairwise distances between sets of vectors
  *
@@ -174,7 +170,7 @@ void knn_inner_product (
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_minheap_array_t * res,
-        const BitsetView& bitset = nullptr);
+        const BitsetView bitset = nullptr);
 
 /** Same as knn_inner_product, for the L2 distance */
 void knn_L2sqr (
@@ -182,14 +178,14 @@ void knn_L2sqr (
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_maxheap_array_t * res,
-        const BitsetView& bitset = nullptr);
+        const BitsetView bitset = nullptr);
 
 void knn_jaccard (
         const float * x,
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_maxheap_array_t * res,
-        const BitsetView& bitset = nullptr);
+        const BitsetView bitset = nullptr);
         
 /** same as knn_L2sqr, but base_shift[bno] is subtracted to all
  * computed distances.
@@ -241,15 +237,19 @@ void range_search_L2sqr (
         const float * y,
         size_t d, size_t nx, size_t ny,
         float radius,
-        RangeSearchResult *result);
+        std::vector<RangeSearchPartialResult*> &result,
+        size_t buffer_size,
+        const BitsetView &bitset = nullptr);
 
 /// same as range_search_L2sqr for the inner product similarity
 void range_search_inner_product (
-        const float * x,
-        const float * y,
-        size_t d, size_t nx, size_t ny,
-        float radius,
-        RangeSearchResult *result);
+    const float * x,
+    const float * y,
+    size_t d, size_t nx, size_t ny,
+    float radius,
+    std::vector<RangeSearchPartialResult*> &result,
+    size_t buffer_size,
+    const BitsetView &bitset = nullptr);
 
 
 /***************************************************************************

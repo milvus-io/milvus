@@ -127,6 +127,7 @@ NsgIndex::InitNavigationPoint(float* data) {
     //
     // float r1 = distance_->Compare(center, ori_data_ + navigation_point * dimension, dimension);
     // assert(r1 == resset[0].distance);
+    delete[] center;
 }
 
 // Specify Link
@@ -871,7 +872,7 @@ NsgIndex::Search(const float* query,
                  float* dist,
                  int64_t* ids,
                  SearchParams& params,
-                 const faiss::BitsetView& bitset) {
+                 const faiss::BitsetView bitset) {
     std::vector<std::vector<Neighbor>> resset(nq);
 
     TimeRecorder rc("NsgIndex::search", 1);

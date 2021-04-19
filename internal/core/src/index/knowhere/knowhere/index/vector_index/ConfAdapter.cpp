@@ -194,6 +194,10 @@ IVFPQConfAdapter::CheckGPUPQParams(int64_t dimension, int64_t m, int64_t nbits) 
     static const std::vector<int64_t> support_dim_per_subquantizer{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1};
     static const std::vector<int64_t> support_subquantizer{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1};
 
+    if (!CheckCPUPQParams(dimension, m)) {
+        return false;
+    }
+
     int64_t sub_dim = dimension / m;
     return (std::find(std::begin(support_subquantizer), std::end(support_subquantizer), m) !=
             support_subquantizer.end()) &&
@@ -205,6 +209,34 @@ IVFPQConfAdapter::CheckGPUPQParams(int64_t dimension, int64_t m, int64_t nbits) 
 bool
 IVFPQConfAdapter::CheckCPUPQParams(int64_t dimension, int64_t m) {
     return (dimension % m == 0);
+}
+
+bool
+IVFHNSWConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
+    // HNSW param check
+    CheckIntByRange(knowhere::IndexParams::efConstruction, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
+    CheckIntByRange(knowhere::IndexParams::M, HNSW_MIN_M, HNSW_MAX_M);
+
+    // IVF param check
+    CheckIntByRange(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);
+
+    // auto tune params
+    auto rows = oricfg[knowhere::meta::ROWS].get<int64_t>();
+    auto nlist = oricfg[knowhere::IndexParams::nlist].get<int64_t>();
+    oricfg[knowhere::IndexParams::nlist] = MatchNlist(rows, nlist);
+
+    return ConfAdapter::CheckTrain(oricfg, mode);
+}
+
+bool
+IVFHNSWConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
+    // HNSW param check
+    CheckIntByRange(knowhere::IndexParams::ef, oricfg[knowhere::meta::TOPK], HNSW_MAX_EF);
+
+    // IVF param check
+    CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, MAX_NPROBE);
+
+    return ConfAdapter::CheckSearch(oricfg, type, mode);
 }
 
 bool

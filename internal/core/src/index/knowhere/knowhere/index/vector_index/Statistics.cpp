@@ -19,10 +19,10 @@
 #include <vector>
 
 #include "IndexIVF.h"
+#include "faiss/utils/ConcurrentBitset.h"
 #include "knowhere/common/Log.h"
 #include "knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/Statistics.h"
-#include "faiss/utils/ConcurrentBitset.h"
 
 namespace milvus {
 namespace knowhere {

@@ -62,7 +62,6 @@ IVF::Serialize(const Config& config) {
 void
 IVF::Load(const BinarySet& binary_set) {
     Assemble(const_cast<BinarySet&>(binary_set));
-    index_type_ = IndexEnum::INDEX_FAISS_IVFFLAT;
     LoadImpl(binary_set, index_type_);
 
     if (IndexMode() == IndexMode::MODE_CPU && STATISTICS_LEVEL >= 3) {
@@ -95,12 +94,23 @@ IVF::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IVF::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) {
+IVF::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView bitset) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
     GET_TENSOR_DATA(dataset_ptr)
+
+    int64_t* p_id = nullptr;
+    float* p_dist = nullptr;
+    auto release_when_exception = [&]() {
+        if (p_id != nullptr) {
+            free(p_id);
+        }
+        if (p_dist != nullptr) {
+            free(p_dist);
+        }
+    };
 
     try {
         fiu_do_on("IVF.Search.throw_std_exception", throw std::exception());
@@ -110,8 +120,8 @@ IVF::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::Bit
 
         size_t p_id_size = sizeof(int64_t) * elems;
         size_t p_dist_size = sizeof(float) * elems;
-        auto p_id = static_cast<int64_t*>(malloc(p_id_size));
-        auto p_dist = static_cast<float*>(malloc(p_dist_size));
+        p_id = static_cast<int64_t*>(malloc(p_id_size));
+        p_dist = static_cast<float*>(malloc(p_dist_size));
 
         QueryImpl(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, config, bitset);
         MapOffsetToUid(p_id, static_cast<size_t>(elems));
@@ -121,8 +131,10 @@ IVF::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::Bit
         ret_ds->Set(meta::DISTANCE, p_dist);
         return ret_ds;
     } catch (faiss::FaissException& e) {
+        release_when_exception();
         KNOWHERE_THROW_MSG(e.what());
     } catch (std::exception& e) {
+        release_when_exception();
         KNOWHERE_THROW_MSG(e.what());
     }
 }
@@ -310,7 +322,7 @@ IVF::QueryImpl(int64_t n,
                float* distances,
                int64_t* labels,
                const Config& config,
-               const faiss::BitsetView& bitset) {
+               const faiss::BitsetView bitset) {
     auto params = GenParams(config);
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     ivf_index->nprobe = std::min(params->nprobe, ivf_index->invlists->nlist);

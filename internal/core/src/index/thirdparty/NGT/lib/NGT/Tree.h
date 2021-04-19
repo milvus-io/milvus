@@ -263,7 +263,7 @@ namespace NGT {
 
     // for milvus
     void
-    getObjectIDsFromLeaf(Node::ID nid, ObjectDistances& rl, const faiss::BitsetView& bitset) {
+    getObjectIDsFromLeaf(Node::ID nid, ObjectDistances& rl, const faiss::BitsetView bitset) {
         LeafNode& ln = *(LeafNode*)getNode(nid);
         rl.clear();
         ObjectDistance r;

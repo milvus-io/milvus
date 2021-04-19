@@ -50,6 +50,7 @@ IVFSQHybrid::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         res_ = gpu_res;
         gpu_mode_ = 2;
     } else {
+        delete build_index;
         KNOWHERE_THROW_MSG("Build IVFSQHybrid can't get gpu resource");
     }
 
@@ -131,16 +132,15 @@ IVFSQHybrid::LoadData(const FaissIVFQuantizerPtr& quantizer_ptr, const Config& c
         option.allInGpu = true;
 
         auto ivf_quantizer = std::dynamic_pointer_cast<FaissIVFQuantizer>(quantizer_ptr);
-        if (ivf_quantizer == nullptr) {
+        if (ivf_quantizer == nullptr)
             KNOWHERE_THROW_MSG("quantizer type not faissivfquantizer");
-        }
 
-        auto index_composition = new faiss::IndexComposition;
-        index_composition->index = index_.get();
-        index_composition->quantizer = ivf_quantizer->quantizer;
-        index_composition->mode = 2;  // only 2
+        faiss::IndexComposition index_composition;
+        index_composition.index = index_.get();
+        index_composition.quantizer = ivf_quantizer->quantizer;
+        index_composition.mode = 2;  // only copy data
 
-        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), gpu_id, index_composition, &option);
+        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), gpu_id, &index_composition, &option);
         std::shared_ptr<faiss::Index> new_idx;
         new_idx.reset(gpu_index);
         auto sq_idx = std::make_shared<IVFSQHybrid>(new_idx, gpu_id, res);
@@ -159,17 +159,17 @@ IVFSQHybrid::LoadQuantizer(const Config& config) {
         faiss::gpu::GpuClonerOptions option;
         option.allInGpu = true;
 
-        auto index_composition = new faiss::IndexComposition;
-        index_composition->index = index_.get();
-        index_composition->quantizer = nullptr;
-        index_composition->mode = 1;  // only 1
+        faiss::IndexComposition index_composition;
+        index_composition.index = index_.get();
+        index_composition.quantizer = nullptr;
+        index_composition.mode = 1;  // only copy quantizer
 
-        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), gpu_id, index_composition, &option);
+        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), gpu_id, &index_composition, &option);
         delete gpu_index;
 
         auto q = std::make_shared<FaissIVFQuantizer>();
 
-        auto& q_ptr = index_composition->quantizer;
+        auto q_ptr = index_composition.quantizer;
         q->size = q_ptr->d * q_ptr->getNumVecs() * sizeof(float);
         q->quantizer = q_ptr;
         q->gpu_id = gpu_id;
@@ -246,7 +246,7 @@ IVFSQHybrid::QueryImpl(int64_t n,
                        float* distances,
                        int64_t* labels,
                        const Config& config,
-                       const faiss::BitsetView& bitset) {
+                       const faiss::BitsetView bitset) {
     if (gpu_mode_ == 2) {
         GPUIVF::QueryImpl(n, data, k, distances, labels, config, bitset);
         //        index_->search(n, (float*)data, k, distances, labels);

@@ -110,6 +110,7 @@ TEST_P(IVFNMCPUTest, ivf_basic_cpu) {
             auto clone_index = milvus::knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, conf_);
             auto clone_result = clone_index->Query(query_dataset, conf_, nullptr);
             AssertAnns(clone_result, nq, k);
+            ReleaseQueryResult(clone_result);
             std::cout << "clone C <=> G [" << index_type_ << "] success" << std::endl;
         });
         EXPECT_ANY_THROW(milvus::knowhere::cloner::CopyCpuToGpu(index_, -1, milvus::knowhere::Config()));
@@ -123,10 +124,13 @@ TEST_P(IVFNMCPUTest, ivf_basic_cpu) {
 
     auto result_bs_1 = index_->Query(query_dataset, conf_, concurrent_bitset_ptr);
     AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
+    ReleaseQueryResult(result_bs_1);
 
 #ifdef MILVUS_GPU_VERSION
     milvus::knowhere::FaissGpuResourceMgr::GetInstance().Dump();
 #endif
+
+    ReleaseQueryResult(result);
 }
 
 TEST_P(IVFNMCPUTest, ivf_slice) {
@@ -159,4 +163,5 @@ TEST_P(IVFNMCPUTest, ivf_slice) {
 
     auto result = index_->Query(query_dataset, conf_, nullptr);
     AssertAnns(result, nq, k);
+    ReleaseQueryResult(result);
 }

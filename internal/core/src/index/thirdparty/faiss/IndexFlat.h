@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <faiss/Index.h>
+#include <faiss/impl/AuxIndexStructures.h>
 
 
 namespace faiss {
@@ -35,7 +36,7 @@ struct IndexFlat: Index {
         idx_t k,
         float* distances,
         idx_t* labels,
-        const BitsetView& bitset = nullptr) const override;
+        const BitsetView bitset = nullptr) const override;
 
     void assign (
         idx_t n,
@@ -48,7 +49,15 @@ struct IndexFlat: Index {
         const float* x,
         float radius,
         RangeSearchResult* result,
-        const BitsetView& bitset = nullptr) const override;
+        const BitsetView bitset = nullptr) const override;
+
+    void range_search(
+        idx_t n,
+        const float* x,
+        float radius,
+        std::vector<RangeSearchPartialResult*> &result,
+        size_t buffer_size,
+        const BitsetView bitset = nullptr); // const override
 
     void reconstruct(idx_t key, float* recons) const override;
 
@@ -115,7 +124,7 @@ struct IndexFlatL2BaseShift: IndexFlatL2 {
         idx_t k,
         float* distances,
         idx_t* labels,
-        const BitsetView& bitset = nullptr) const override;
+        const BitsetView bitset = nullptr) const override;
 };
 
 
@@ -151,7 +160,7 @@ struct IndexRefineFlat: Index {
         idx_t k,
         float* distances,
         idx_t* labels,
-        const BitsetView& bitset = nullptr) const override;
+        const BitsetView bitset = nullptr) const override;
 
     ~IndexRefineFlat() override;
 };
@@ -180,7 +189,7 @@ struct IndexFlat1D:IndexFlatL2 {
         idx_t k,
         float* distances,
         idx_t* labels,
-        const BitsetView& bitset = nullptr) const override;
+        const BitsetView bitset = nullptr) const override;
 };
 
 

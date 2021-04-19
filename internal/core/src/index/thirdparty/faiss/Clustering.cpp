@@ -262,6 +262,7 @@ int split_clusters (size_t d, size_t k, size_t n,
 };
 
 ClusteringType clustering_type = ClusteringType::K_MEANS;
+double early_stop_threshold = 0.0;
 
 void Clustering::kmeans_algorithm(std::vector<int>& centroids_index, int64_t random_seed,
                                   size_t n_input_centroids, size_t d, size_t k,
@@ -532,6 +533,7 @@ void Clustering::train_encoded (idx_t nx, const uint8_t *x_in,
         // k-means iterations
 
         float err = 0;
+        float prev_objective = 0;
         for (int i = 0; i < niter; i++) {
             double t0s = getmillisecs();
 
@@ -600,6 +602,14 @@ void Clustering::train_encoded (idx_t nx, const uint8_t *x_in,
             }
 
             index.add (k, centroids.data());
+
+            // Early stop strategy
+            float diff = (prev_objective == 0) ? std::numeric_limits<float>::max() : (prev_objective - stats.obj) / prev_objective;
+            prev_objective = stats.obj;
+            if (diff < early_stop_threshold / 100.) {
+                break;
+            }
+
             InterruptCallback::check ();
         }
 

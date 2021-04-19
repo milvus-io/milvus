@@ -186,7 +186,7 @@ class ConcurrentBitset {
     }
 
     size_t
-    u8size() const {
+    size() const {
         return ((count_ + 8 - 1) >> 3);
     }
 
@@ -204,7 +204,7 @@ class ConcurrentBitset {
     count_1() {
         uint64_t ret = 0;
         auto p_data = reinterpret_cast<uint64_t *>(mutable_data());
-        auto len = u8size() >> 3;
+        auto len = size() >> 3;
         //auto remainder = size() % 8;
         auto popcount8 = [&](uint8_t x) -> int{
             x = (x & 0x55) + ((x >> 1) & 0x55);
@@ -217,7 +217,7 @@ class ConcurrentBitset {
             p_data ++;
         }
         auto p_byte = data() + (len << 3);
-        for (auto i = (len << 3); i < u8size(); ++ i) {
+        for (auto i = (len << 3); i < size(); ++ i) {
             ret += popcount8(*p_byte);
             p_byte ++;
         }

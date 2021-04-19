@@ -60,7 +60,7 @@ TEST(COMMON_TEST, BitsetView) {
         }
     }
 
-    auto view = [](const BitsetView& view_para) { return view_para; }(con_bitset);
+    auto view = [](const BitsetView view_para) { return view_para; }(con_bitset);
 
     boost::dynamic_bitset<> boo_bitset(N);
     for (int i = 0; i < N; ++i) {

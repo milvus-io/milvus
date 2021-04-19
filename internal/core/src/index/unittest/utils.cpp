@@ -246,6 +246,15 @@ PrintResult(const milvus::knowhere::DatasetPtr& result, const int& nq, const int
     std::cout << "dist\n" << ss_dist.str() << std::endl;
 }
 
+void
+ReleaseQueryResult(const milvus::knowhere::DatasetPtr& result) {
+    float* res_dist = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    free(res_dist);
+
+    int64_t* res_ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
+    free(res_ids);
+}
+
 // not used
 #if 0
 void

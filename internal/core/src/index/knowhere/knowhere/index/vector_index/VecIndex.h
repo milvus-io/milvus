@@ -24,6 +24,7 @@
 #include "knowhere/index/Index.h"
 #include "knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/Statistics.h"
+#include "knowhere/index/vector_index/helpers/DynamicResultSet.h"
 
 namespace milvus {
 namespace knowhere {
@@ -46,7 +47,7 @@ class VecIndex : public Index {
     AddWithoutIds(const DatasetPtr& dataset, const Config& config) = 0;
 
     virtual DatasetPtr
-    Query(const DatasetPtr& dataset, const Config& config, const faiss::BitsetView& bitset) = 0;
+    Query(const DatasetPtr& dataset, const Config& config, const faiss::BitsetView bitset) = 0;
 
     virtual int64_t
     Dim() = 0;
@@ -89,6 +90,23 @@ class VecIndex : public Index {
             for (size_t i = 0; i < n; i++) {
                 if (id[i] >= 0) {
                     id[i] = uids_->at(id[i]);
+                }
+            }
+        }
+    }
+
+    void
+    MapUids(DynamicResultSegment& milvus_dataset) {
+        if (uids_) {
+            for (auto& mrspr : milvus_dataset) {
+                for (auto j = 0; j < mrspr->buffers.size(); ++j) {
+                    auto buf = mrspr->buffers[j];
+                    auto len = j + 1 == mrspr->buffers.size() ? mrspr->wp : mrspr->buffer_size;
+                    for (auto i = 0; i < len; ++i) {
+                        if (buf.ids[i] >= 0) {
+                            buf.ids[i] = uids_->at(buf.ids[i]);
+                        }
+                    }
                 }
             }
         }

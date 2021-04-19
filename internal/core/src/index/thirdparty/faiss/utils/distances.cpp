@@ -129,9 +129,6 @@ void fvec_renorm_L2 (size_t d, size_t nx, float * __restrict x)
 
 
 
-
-
-
 /***************************************************************************
  * KNN functions
  ***************************************************************************/
@@ -143,7 +140,7 @@ static void knn_inner_product_sse (const float * x,
                         const float * y,
                         size_t d, size_t nx, size_t ny,
                         float_minheap_array_t * res,
-                        const BitsetView& bitset = nullptr)
+                        const BitsetView bitset = nullptr)
 {
     size_t k = res->k;
     size_t thread_max_num = omp_get_max_threads();
@@ -255,7 +252,7 @@ static void knn_L2sqr_sse (
                 const float * y,
                 size_t d, size_t nx, size_t ny,
                 float_maxheap_array_t * res,
-                const BitsetView& bitset = nullptr)
+                const BitsetView bitset = nullptr)
 {
     size_t k = res->k;
     size_t thread_max_num = omp_get_max_threads();
@@ -369,7 +366,7 @@ static void knn_inner_product_blas (
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_minheap_array_t * res,
-        const BitsetView& bitset = nullptr)
+        const BitsetView bitset = nullptr)
 {
     res->heapify ();
 
@@ -433,7 +430,7 @@ static void knn_L2sqr_blas (const float * x,
         size_t d, size_t nx, size_t ny,
         float_maxheap_array_t * res,
         const DistanceCorrection &corr,
-        const BitsetView& bitset = nullptr)
+        const BitsetView bitset = nullptr)
 {
     res->heapify ();
 
@@ -509,7 +506,7 @@ static void knn_jaccard_blas (const float * x,
                               size_t d, size_t nx, size_t ny,
                               float_maxheap_array_t * res,
                               const DistanceCorrection &corr,
-                              const BitsetView& bitset = nullptr)
+                              const BitsetView bitset = nullptr)
 {
     res->heapify ();
 
@@ -594,7 +591,7 @@ void knn_inner_product (const float * x,
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_minheap_array_t * res,
-        const BitsetView& bitset)
+        const BitsetView bitset)
 {
     if (nx < distance_compute_blas_threshold) {
         knn_inner_product_sse (x, y, d, nx, ny, res, bitset);
@@ -615,7 +612,7 @@ void knn_L2sqr (const float * x,
                 const float * y,
                 size_t d, size_t nx, size_t ny,
                 float_maxheap_array_t * res,
-                const BitsetView& bitset)
+                const BitsetView bitset)
 {
     if (nx < distance_compute_blas_threshold) {
         knn_L2sqr_sse (x, y, d, nx, ny, res, bitset);
@@ -629,7 +626,7 @@ void knn_jaccard (const float * x,
                   const float * y,
                   size_t d, size_t nx, size_t ny,
                   float_maxheap_array_t * res,
-                  const BitsetView& bitset)
+                  const BitsetView bitset)
 {
     if (d % 4 != 0) {
 //        knn_jaccard_sse (x, y, d, nx, ny, res);
@@ -807,13 +804,15 @@ void knn_L2sqr_by_idx (const float * x,
 /** Find the nearest neighbors for nx queries in a set of ny vectors
  * compute_l2 = compute pairwise squared L2 distance rather than inner prod
  */
-template <bool compute_l2>
+ template <bool compute_l2>
 static void range_search_blas (
         const float * x,
         const float * y,
         size_t d, size_t nx, size_t ny,
         float radius,
-        RangeSearchResult *result)
+        std::vector<RangeSearchPartialResult*> &res,
+        size_t buffer_size,
+        const BitsetView &bitset)
 {
 
     // BLAS does not like empty matrices
@@ -837,13 +836,13 @@ static void range_search_blas (
         fvec_norms_L2sqr (y_norms, y, d, ny);
     }
 
-    std::vector <RangeSearchPartialResult *> partial_results;
-
     for (size_t j0 = 0; j0 < ny; j0 += bs_y) {
         size_t j1 = j0 + bs_y;
         if (j1 > ny) j1 = ny;
-        RangeSearchPartialResult * pres = new RangeSearchPartialResult (result);
-        partial_results.push_back (pres);
+        RangeSearchResult *tmp_res = new RangeSearchResult(nx);
+        tmp_res->buffer_size = buffer_size;
+        RangeSearchPartialResult * pres = new RangeSearchPartialResult (tmp_res);
+        res.push_back (pres);
 
         for (size_t i0 = 0; i0 < nx; i0 += bs_x) {
             size_t i1 = i0 + bs_x;
@@ -867,14 +866,16 @@ static void range_search_blas (
 
                 for (size_t j = j0; j < j1; j++) {
                     float ip = *ip_line++;
-                    if (compute_l2) {
-                        float dis =  x_norms[i] + y_norms[j] - 2 * ip;
-                        if (dis < radius) {
-                            qres.add (dis, j);
-                        }
-                    } else {
-                        if (ip > radius) {
-                            qres.add (ip, j);
+                    if (bitset.empty() || !bitset.test((faiss::ConcurrentBitset::id_type_t)(j))) {
+                        if (compute_l2) {
+                            float dis =  x_norms[i] + y_norms[j] - 2 * ip;
+                            if (dis < radius) {
+                                qres.add (dis, j);
+                            }
+                        } else {
+                            if (ip > radius) {
+                                qres.add (ip, j);
+                            }
                         }
                     }
                 }
@@ -883,7 +884,7 @@ static void range_search_blas (
         InterruptCallback::check ();
     }
 
-    RangeSearchPartialResult::merge (partial_results);
+//    RangeSearchPartialResult::merge (partial_results);
 }
 
 
@@ -892,12 +893,16 @@ static void range_search_sse (const float * x,
                 const float * y,
                 size_t d, size_t nx, size_t ny,
                 float radius,
-                RangeSearchResult *res)
+                std::vector<RangeSearchPartialResult*> &res,
+                size_t buffer_size,
+                const BitsetView &bitset)
 {
 
 #pragma omp parallel
     {
-        RangeSearchPartialResult pres (res);
+        RangeSearchResult *tmp_res = new RangeSearchResult(nx);
+        tmp_res->buffer_size = buffer_size;
+        auto pres = new RangeSearchPartialResult(tmp_res);
 
 #pragma omp for
         for (size_t i = 0; i < nx; i++) {
@@ -905,9 +910,60 @@ static void range_search_sse (const float * x,
             const float * y_ = y;
             size_t j;
 
-            RangeQueryResult & qres = pres.new_result (i);
+            RangeQueryResult & qres = pres->new_result (i);
 
             for (j = 0; j < ny; j++) {
+                if (bitset.empty() || !bitset.test((faiss::ConcurrentBitset::id_type_t)(j))) {
+                    if (compute_l2) {
+                        float disij = fvec_L2sqr (x_, y_, d);
+                        if (disij < radius) {
+                            qres.add (disij, j);
+                        }
+                    } else {
+                        float ip = fvec_inner_product (x_, y_, d);
+                        if (ip > radius) {
+                            qres.add (ip, j);
+                        }
+                    }
+                }
+                y_ += d;
+            }
+
+        }
+#pragma omp critical
+        res.push_back(pres);
+    }
+
+    // check just at the end because the use case is typically just
+    // when the nb of queries is low.
+    InterruptCallback::check();
+}
+
+// range search by sse when nq = 1, namely single query situation
+template <bool compute_l2>
+static void range_search_sse_sq (const float * x,
+                const float * y,
+                size_t d, size_t nx, size_t ny,
+                float radius,
+                std::vector<RangeSearchPartialResult*> &res,
+                size_t buffer_size,
+                const BitsetView &bitset)
+{
+
+#pragma omp parallel
+    {
+        RangeSearchResult *tmp_res = new RangeSearchResult(nx);
+        tmp_res->buffer_size = buffer_size;
+        auto pres = new RangeSearchPartialResult(tmp_res);
+
+        const float * x_ = x;
+        size_t j;
+        RangeQueryResult & qres = pres->new_result (0);
+
+#pragma omp for
+        for (j = 0; j < ny; j++) {
+            const float * y_ = y + j * d;
+            if (bitset.empty() || !bitset.test((faiss::ConcurrentBitset::id_type_t)(j))) {
                 if (compute_l2) {
                     float disij = fvec_L2sqr (x_, y_, d);
                     if (disij < radius) {
@@ -919,11 +975,10 @@ static void range_search_sse (const float * x,
                         qres.add (ip, j);
                     }
                 }
-                y_ += d;
             }
-
         }
-        pres.finalize ();
+#pragma omp critical
+        res.push_back(pres);
     }
 
     // check just at the end because the use case is typically just
@@ -932,21 +987,24 @@ static void range_search_sse (const float * x,
 }
 
 
-
-
-
 void range_search_L2sqr (
         const float * x,
         const float * y,
         size_t d, size_t nx, size_t ny,
         float radius,
-        RangeSearchResult *res)
+        std::vector<RangeSearchPartialResult*> &res,
+        size_t buffer_size,
+        const BitsetView &bitset)
 {
 
     if (nx < distance_compute_blas_threshold) {
-        range_search_sse<true> (x, y, d, nx, ny, radius, res);
+        if (nx == 1) {
+            range_search_sse_sq<true> (x, y, d, nx, ny, radius, res, buffer_size, bitset);
+        } else {
+            range_search_sse<true> (x, y, d, nx, ny, radius, res, buffer_size, bitset);
+        }
     } else {
-        range_search_blas<true> (x, y, d, nx, ny, radius, res);
+        range_search_blas<true> (x, y, d, nx, ny, radius, res, buffer_size, bitset);
     }
 }
 
@@ -955,16 +1013,20 @@ void range_search_inner_product (
         const float * y,
         size_t d, size_t nx, size_t ny,
         float radius,
-        RangeSearchResult *res)
+        std::vector<RangeSearchPartialResult*> &res,
+        size_t buffer_size,
+        const BitsetView &bitset)
 {
 
     if (nx < distance_compute_blas_threshold) {
-        range_search_sse<false> (x, y, d, nx, ny, radius, res);
+        if (nx == 1)
+            range_search_sse_sq<false> (x, y, d, nx, ny, radius, res, buffer_size, bitset);
+        else
+            range_search_sse<false> (x, y, d, nx, ny, radius, res, buffer_size, bitset);
     } else {
-        range_search_blas<false> (x, y, d, nx, ny, radius, res);
+        range_search_blas<false> (x, y, d, nx, ny, radius, res, buffer_size, bitset);
     }
 }
-
 
 void pairwise_L2sqr (int64_t d,
                      int64_t nq, const float *xq,

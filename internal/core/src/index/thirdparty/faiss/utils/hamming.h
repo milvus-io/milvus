@@ -30,6 +30,7 @@
 #include <faiss/utils/Heap.h>
 #include <faiss/utils/ConcurrentBitset.h>
 #include <faiss/utils/BitsetView.h>
+#include <faiss/impl/AuxIndexStructures.h>
 
 /* The Hamming distance type */
 typedef int32_t hamdis_t;
@@ -108,8 +109,6 @@ struct BitstringReader {
  * Hamming distance computation functions
  **************************************************/
 
-
-
 extern size_t hamming_batch_size;
 
 inline int popcount64(uint64_t x) {
@@ -132,58 +131,6 @@ void hammings (
         hamdis_t * dis);
 
 
-
-
-/** Return the k smallest Hamming distances for a set of binary query vectors,
- * using a max heap.
- * @param a       queries, size ha->nh * ncodes
- * @param b       database, size nb * ncodes
- * @param nb      number of database vectors
- * @param ncodes  size of the binary codes (bytes)
- * @param ordered if != 0: order the results by decreasing distance
- *                (may be bottleneck for k/n > 0.01) */
-void hammings_knn_hc (
-        int_maxheap_array_t * ha,
-        const uint8_t * a,
-        const uint8_t * b,
-        size_t nb,
-        size_t ncodes,
-        int ordered,
-        const BitsetView& bitset = nullptr);
-
-/* Legacy alias to hammings_knn_hc. */
-void hammings_knn (
-  int_maxheap_array_t * ha,
-  const uint8_t * a,
-  const uint8_t * b,
-  size_t nb,
-  size_t ncodes,
-  int ordered,
-  const BitsetView& bitset = nullptr);
-
-/** Return the k smallest Hamming distances for a set of binary query vectors,
- * using counting max.
- * @param a       queries, size na * ncodes
- * @param b       database, size nb * ncodes
- * @param na      number of query vectors
- * @param nb      number of database vectors
- * @param k       number of vectors/distances to return
- * @param ncodes  size of the binary codes (bytes)
- * @param distances output distances from each query vector to its k nearest
- *                neighbors
- * @param labels  output ids of the k nearest neighbors to each query vector
- */
-void hammings_knn_mc (
-  const uint8_t * a,
-  const uint8_t * b,
-  size_t na,
-  size_t nb,
-  size_t k,
-  size_t ncodes,
-  int32_t *distances,
-  int64_t *labels,
-  const BitsetView& bitset = nullptr);
-
 /** same as hammings_knn except we are doing a range search with radius */
 void hamming_range_search (
     const uint8_t * a,
@@ -192,8 +139,9 @@ void hamming_range_search (
     size_t nb,
     int radius,
     size_t ncodes,
-    RangeSearchResult *result);
-
+    std::vector<faiss::RangeSearchPartialResult*>& result,
+    size_t buffer_size,
+    const BitsetView bitset);
 
 /* Counting the number of matches or of cross-matches (without returning them)
    For use with function that assume pre-allocated memory */

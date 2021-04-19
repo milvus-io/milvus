@@ -11,10 +11,9 @@
 
 #include <gtest/gtest.h>
 #include <knowhere/index/vector_index/IndexRHNSWFlat.h>
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include <iostream>
 #include <random>
-
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "knowhere/common/Exception.h"
 #include "unittest/utils.h"
 
@@ -59,6 +58,7 @@ TEST_P(RHNSWFlatTest, HNSW_basic) {
 
     auto result1 = index_->Query(query_dataset, conf, nullptr);
     //    AssertAnns(result1, nq, k);
+    ReleaseQueryResult(result1);
 
     // Serialize and Load before Query
     milvus::knowhere::BinarySet bs = index_->Serialize(conf);
@@ -76,6 +76,7 @@ TEST_P(RHNSWFlatTest, HNSW_basic) {
 
     auto result2 = tmp_index->Query(query_dataset, conf, nullptr);
     //    AssertAnns(result2, nq, k);
+    ReleaseQueryResult(result2);
 }
 
 TEST_P(RHNSWFlatTest, HNSW_delete) {
@@ -93,9 +94,11 @@ TEST_P(RHNSWFlatTest, HNSW_delete) {
 
     auto result1 = index_->Query(query_dataset, conf, nullptr);
     //    AssertAnns(result1, nq, k);
+    ReleaseQueryResult(result1);
 
     auto result2 = index_->Query(query_dataset, conf, bitset);
     //    AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
+    ReleaseQueryResult(result2);
 
     /*
      * delete result checked by eyes
@@ -172,6 +175,7 @@ TEST_P(RHNSWFlatTest, HNSW_serialize) {
         EXPECT_EQ(new_idx->Dim(), dim);
         auto result = new_idx->Query(query_dataset, conf, nullptr);
         //        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
+        ReleaseQueryResult(result);
     }
 }
 
@@ -193,5 +197,6 @@ TEST_P(RHNSWFlatTest, HNSW_slice) {
         EXPECT_EQ(new_idx->Dim(), dim);
         auto result = new_idx->Query(query_dataset, conf, nullptr);
         //        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
+        ReleaseQueryResult(result);
     }
 }

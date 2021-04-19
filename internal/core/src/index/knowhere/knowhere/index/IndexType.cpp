@@ -25,6 +25,7 @@ const char* INDEX_FAISS_IVFFLAT = "IVF_FLAT";
 const char* INDEX_FAISS_IVFPQ = "IVF_PQ";
 const char* INDEX_FAISS_IVFSQ8 = "IVF_SQ8";
 const char* INDEX_FAISS_IVFSQ8H = "IVF_SQ8_HYBRID";
+const char* INDEX_FAISS_IVFHNSW = "IVF_HNSW";
 const char* INDEX_FAISS_BIN_IDMAP = "BIN_FLAT";
 const char* INDEX_FAISS_BIN_IVFFLAT = "BIN_IVF_FLAT";
 const char* INDEX_NSG = "NSG";

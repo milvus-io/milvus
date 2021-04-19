@@ -40,61 +40,35 @@ void IndexBinaryFlat::reset() {
 
 void IndexBinaryFlat::search(idx_t n, const uint8_t *x, idx_t k,
                              int32_t *distances, idx_t *labels,
-                             const BitsetView& bitset) const {
-    const idx_t block_size = query_batch_size;
+                             const BitsetView bitset) const {
+
     if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
         float *D = reinterpret_cast<float*>(distances);
-        for (idx_t s = 0; s < n; s += block_size) {
-            idx_t nn = block_size;
-            if (s + block_size > n) {
-                nn = n - s;
-            }
+        float_maxheap_array_t res = {
+            size_t(n), size_t(k), labels, D
+        };
+        binary_distance_knn_hc(METRIC_Jaccard, &res, x, xb.data(), ntotal, code_size, bitset);
 
-            // We see the distances and labels as heaps.
-            float_maxheap_array_t res = {
-                    size_t(nn), size_t(k), labels + s * k, D + s * k
-            };
-
-            binary_distence_knn_hc(metric_type, &res, x + s * code_size, xb.data(), ntotal, code_size,
-                    /* ordered = */ true, bitset);
-
-        }
         if (metric_type == METRIC_Tanimoto) {
             for (int i = 0; i < k * n; i++) {
-                D[i] = -log2(1-D[i]);
+                D[i] = Jaccard_2_Tanimoto(D[i]);
             }
         }
+
+    } else if (metric_type == METRIC_Hamming) {
+        int_maxheap_array_t res = {
+            size_t(n), size_t(k), labels, distances
+        };
+        binary_distance_knn_hc(METRIC_Hamming, &res, x, xb.data(), ntotal, code_size, bitset);
+
     } else if (metric_type == METRIC_Substructure || metric_type == METRIC_Superstructure) {
         float *D = reinterpret_cast<float*>(distances);
-        for (idx_t s = 0; s < n; s += block_size) {
-            idx_t nn = block_size;
-            if (s + block_size > n) {
-                nn = n - s;
-            }
 
-            // only match ids will be chosed, not to use heap
-            binary_distence_knn_mc(metric_type, x + s * code_size, xb.data(), nn, ntotal, k, code_size,
-                    D + s * k, labels + s * k, bitset);
-        }
+        // only matched ids will be chosen, not to use heap
+        binary_distance_knn_mc(metric_type, x, xb.data(), n, ntotal, k, code_size,
+                    D, labels, bitset);
     } else {
-        for (idx_t s = 0; s < n; s += block_size) {
-            idx_t nn = block_size;
-            if (s + block_size > n) {
-                nn = n - s;
-            }
-            if (use_heap) {
-                // We see the distances and labels as heaps.
-                int_maxheap_array_t res = {
-                        size_t(nn), size_t(k), labels + s * k, distances + s * k
-                };
 
-                hammings_knn_hc(&res, x + s * code_size, xb.data(), ntotal, code_size,
-                        /* ordered = */ true, bitset);
-            } else {
-                hammings_knn_mc(x + s * code_size, xb.data(), nn, ntotal, k, code_size,
-                                distances + s * k, labels + s * k, bitset);
-            }
-        }
     }
 }
 
@@ -124,9 +98,43 @@ void IndexBinaryFlat::reconstruct(idx_t key, uint8_t *recons) const {
 
 void IndexBinaryFlat::range_search(idx_t n, const uint8_t *x, int radius,
                                    RangeSearchResult *result,
-                                   const BitsetView& bitset) const
+                                   const BitsetView bitset) const
 {
-    hamming_range_search (x, xb.data(), n, ntotal, radius, code_size, result);
+    FAISS_THROW_MSG("This interface is abandoned yet.");
 }
+
+void IndexBinaryFlat::range_search(faiss::IndexBinary::idx_t n,
+                                   const uint8_t* x,
+                                   float radius,
+                                   std::vector<faiss::RangeSearchPartialResult*>& result,
+                                   size_t buffer_size,
+                                   const faiss::BitsetView bitset)
+{
+    switch (metric_type) {
+        case METRIC_Jaccard: {
+            binary_range_search<CMax<float, int64_t>, float>(METRIC_Jaccard, x, xb.data(), n, ntotal, radius, code_size, result, buffer_size, bitset);
+            break;
+        }
+        case METRIC_Tanimoto: {
+            binary_range_search<CMax<float, int64_t>, float>(METRIC_Tanimoto, x, xb.data(), n, ntotal, radius, code_size, result, buffer_size, bitset);
+            break;
+        }
+        case METRIC_Hamming: {
+            binary_range_search<CMax<int, int64_t>, int>(METRIC_Hamming, x, xb.data(), n, ntotal, static_cast<int>(radius), code_size, result, buffer_size, bitset);
+            break;
+        }
+        case METRIC_Superstructure: {
+            binary_range_search<CMin<bool, int64_t>, bool>(METRIC_Superstructure, x, xb.data(), n, ntotal, false, code_size, result, buffer_size, bitset);
+            break;
+        }
+        case METRIC_Substructure: {
+            binary_range_search<CMin<bool, int64_t>, bool>(METRIC_Substructure, x, xb.data(), n, ntotal, false, code_size, result, buffer_size, bitset);
+            break;
+        }
+        default:
+            break;
+    }
+}
+//hamming_range_search (x, xb.data(), n, ntotal, radius, code_size, result, buffer_size, bitset);
 
 }  // namespace faiss

@@ -14,6 +14,7 @@
 
 #include "knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
+#include "knowhere/index/vector_index/IndexIVFHNSW.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -45,6 +46,8 @@ IndexFactory(const milvus::knowhere::IndexType& type, const milvus::knowhere::In
             return std::make_shared<milvus::knowhere::IVFPQ>();
         } else if (type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8) {
             return std::make_shared<milvus::knowhere::IVFSQ>();
+        } else if (type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFHNSW) {
+            return std::make_shared<milvus::knowhere::IVFHNSW>();
         } else if (type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H) {
             std::cout << "IVFSQ8H does not support MODE_CPU" << std::endl;
         } else {
@@ -120,6 +123,19 @@ class ParamGenerator {
                 {milvus::knowhere::IndexParams::nlist, 100},
                 {milvus::knowhere::IndexParams::nprobe, 4},
                 {milvus::knowhere::IndexParams::nbits, 8},
+                {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
+                {milvus::knowhere::meta::DEVICEID, DEVICEID},
+            };
+        } else if (type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFHNSW) {
+            return milvus::knowhere::Config{
+                {milvus::knowhere::meta::DIM, DIM},
+                {milvus::knowhere::meta::TOPK, K},
+                {milvus::knowhere::IndexParams::nlist, 100},
+                {milvus::knowhere::IndexParams::nprobe, 4},
+                {milvus::knowhere::IndexParams::M, 16},
+                {milvus::knowhere::IndexParams::efConstruction, 200},
+                {milvus::knowhere::IndexParams::ef, 200},
                 {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
                 {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
                 {milvus::knowhere::meta::DEVICEID, DEVICEID},
