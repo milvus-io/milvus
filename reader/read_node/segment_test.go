@@ -3,7 +3,7 @@ package reader
 import (
 	"encoding/binary"
 	"fmt"
-	schema "github.com/czs007/suvlim/pkg/master/grpc/message"
+	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"github.com/stretchr/testify/assert"
 	"math"
 	"testing"
@@ -100,14 +100,14 @@ func TestSegment_SegmentSearch(t *testing.T) {
 	var segment = partition.NewSegment(0)
 
 	// 2. Create ids and timestamps
-	ids := []int64{1, 2, 3}
-	timestamps := []uint64{0, 0, 0}
+	ids := make([]int64, 0)
+	timestamps := make([]uint64, 0)
 
 	// 3. Create records, use schema below:
 	// schema_tmp->AddField("fakeVec", DataType::VECTOR_FLOAT, 16);
 	// schema_tmp->AddField("age", DataType::INT32);
 	const DIM = 16
-	const N = 3
+	const N = 100
 	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 	var rawData []byte
 	for _, ele := range vec {
@@ -120,6 +120,8 @@ func TestSegment_SegmentSearch(t *testing.T) {
 	rawData = append(rawData, bs...)
 	var records [][]byte
 	for i := 0; i < N; i++ {
+		ids = append(ids, int64(i))
+		timestamps = append(timestamps, uint64(i + 1))
 		records = append(records, rawData)
 	}
 
@@ -137,10 +139,10 @@ func TestSegment_SegmentSearch(t *testing.T) {
 	for i := 0; i < 16; i ++ {
 		queryRawData = append(queryRawData, float32(i))
 	}
-	var vectorRecord = schema.VectorRowRecord {
+	var vectorRecord = msgPb.VectorRowRecord {
 		FloatData: queryRawData,
 	}
-	var searchRes, searchErr = segment.SegmentSearch(queryJson, timestamps[0], &vectorRecord)
+	var searchRes, searchErr = segment.SegmentSearch(queryJson, timestamps[N/2], &vectorRecord)
 	assert.NoError(t, searchErr)
 	fmt.Println(searchRes)
 

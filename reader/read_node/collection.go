@@ -2,9 +2,9 @@ package reader
 
 /*
 
-#cgo CFLAGS: -I../core/include
+#cgo CFLAGS: -I${SRCDIR}/../../core/include
 
-#cgo LDFLAGS: -L../core/lib -lmilvus_dog_segment -Wl,-rpath=../core/lib
+#cgo LDFLAGS: -L${SRCDIR}/../../core/lib -lmilvus_dog_segment -Wl,-rpath=${SRCDIR}/../../core/lib
 
 #include "collection_c.h"
 #include "partition_c.h"
@@ -16,6 +16,7 @@ import "C"
 type Collection struct {
 	CollectionPtr C.CCollection
 	CollectionName string
+	CollectionID uint64
 	Partitions []*Partition
 }
 
