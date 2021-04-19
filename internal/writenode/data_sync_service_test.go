@@ -197,8 +197,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	assert.NoError(t, err)
 
 	// dataSync
-	replica := newReplica()
-	node.dataSyncService = newDataSyncService(node.ctx, nil, nil, replica)
+	node.dataSyncService = newDataSyncService(node.ctx, nil, nil)
 	go node.dataSyncService.start()
 
 	node.Close()

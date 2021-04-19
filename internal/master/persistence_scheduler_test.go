@@ -59,11 +59,7 @@ func TestPersistenceScheduler(t *testing.T) {
 	//Init scheduler
 	indexLoadSch := NewIndexLoadScheduler(ctx, loadIndexClient, meta)
 	indexBuildSch := NewIndexBuildScheduler(ctx, buildIndexClient, meta, indexLoadSch)
-	cnt := 0
-	flushSch := NewFlushScheduler(ctx, flushClient, meta, indexBuildSch, func() (Timestamp, error) {
-		cnt++
-		return Timestamp(cnt), nil
-	})
+	flushSch := NewFlushScheduler(ctx, flushClient, meta, indexBuildSch)
 
 	//scheduler start
 	err = indexLoadSch.Start()

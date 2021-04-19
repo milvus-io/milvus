@@ -9,6 +9,9 @@ import (
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
+
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
@@ -27,7 +30,6 @@ type ddNode struct {
 
 	idAllocator *allocator.IDAllocator
 	kv          kv.Base
-	replica     collectionReplica
 }
 
 type ddData struct {
@@ -226,15 +228,6 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 		log.Println(err)
 		return
 	}
-
-	schemaStr := proto.MarshalTextString(&schema)
-	// add collection
-	err = ddNode.replica.addCollection(collectionID, schemaStr)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
 	collectionName := schema.Name
 	ddNode.ddMsg.collectionRecords[collectionName] = append(ddNode.ddMsg.collectionRecords[collectionName],
 		metaOperateRecord{
@@ -258,11 +251,6 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 
 func (ddNode *ddNode) dropCollection(msg *msgstream.DropCollectionMsg) {
 	collectionID := msg.CollectionID
-
-	err := ddNode.replica.removeCollection(collectionID)
-	if err != nil {
-		log.Println(err)
-	}
 
 	// remove collection
 	if _, ok := ddNode.ddRecords.collectionRecords[collectionID]; !ok {
@@ -359,7 +347,7 @@ func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
 	ddNode.ddBuffer.ddData[collectionID].eventTypes = append(ddNode.ddBuffer.ddData[collectionID].eventTypes, storage.DropPartitionEventType)
 }
 
-func newDDNode(ctx context.Context, outCh chan *ddlFlushSyncMsg, replica collectionReplica) *ddNode {
+func newDDNode(ctx context.Context, outCh chan *ddlFlushSyncMsg) *ddNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -372,16 +360,19 @@ func newDDNode(ctx context.Context, outCh chan *ddlFlushSyncMsg, replica collect
 		partitionRecords:  make(map[UniqueID]interface{}),
 	}
 
-	bucketName := Params.MinioBucketName
-	option := &miniokv.Option{
-		Address:           Params.MinioAddress,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSL,
-		BucketName:        bucketName,
-		CreateBucket:      true,
+	minIOEndPoint := Params.MinioAddress
+	minIOAccessKeyID := Params.MinioAccessKeyID
+	minIOSecretAccessKey := Params.MinioSecretAccessKey
+	minIOUseSSL := Params.MinioUseSSL
+	minIOClient, err := minio.New(minIOEndPoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(minIOAccessKeyID, minIOSecretAccessKey, ""),
+		Secure: minIOUseSSL,
+	})
+	if err != nil {
+		panic(err)
 	}
-	minioKV, err := miniokv.NewMinIOKV(ctx, option)
+	bucketName := Params.MinioBucketName
+	minioKV, err := miniokv.NewMinIOKV(ctx, minIOClient, bucketName)
 	if err != nil {
 		panic(err)
 	}
@@ -406,6 +397,5 @@ func newDDNode(ctx context.Context, outCh chan *ddlFlushSyncMsg, replica collect
 
 		idAllocator: idAllocator,
 		kv:          minioKV,
-		replica:     replica,
 	}
 }

@@ -13,7 +13,7 @@
 #include "@@base_visitor@@.h"
 
 namespace @@namespace@@ {
-class @@visitor_name@@ : public @@base_visitor@@ {
+class @@visitor_name@@ : @@base_visitor@@ {
  public:
 @@body@@
 
