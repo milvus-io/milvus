@@ -598,7 +598,7 @@ class TestIndexBase:
             connect.create_index(collection, field_name, get_simple_index)
             connect.drop_index(collection, field_name)
 
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_create_PQ_without_nbits(self, connect, collection):
         PQ_index = {"index_type": "IVF_PQ", "params": {"nlist": 128, "m": 16}, "metric_type": "L2"}
         ids = connect.insert(collection, default_entities)
