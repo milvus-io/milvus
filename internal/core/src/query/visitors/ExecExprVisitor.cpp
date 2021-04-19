@@ -25,7 +25,8 @@ namespace impl {
 class ExecExprVisitor : ExprVisitor {
  public:
     using RetType = std::deque<boost::dynamic_bitset<>>;
-    explicit ExecExprVisitor(const segcore::SegmentGrowingImpl& segment) : segment_(segment) {
+    ExecExprVisitor(const segcore::SegmentGrowingImpl& segment, int64_t row_count)
+        : segment_(segment), row_count_(row_count) {
     }
     RetType
     call_child(Expr& expr) {
@@ -51,7 +52,8 @@ class ExecExprVisitor : ExprVisitor {
     ExecTermVisitorImpl(TermExpr& expr_raw) -> RetType;
 
  private:
-    const segcore::SegmentGrowingImpl& segment_;
+    const segcore::SegmentInternalInterface& segment_;
+    int64_t row_count_;
     std::optional<RetType> ret_;
 };
 }  // namespace impl
@@ -118,36 +120,42 @@ template <typename T, typename IndexFunc, typename ElementFunc>
 auto
 ExecExprVisitor::ExecRangeVisitorImpl(RangeExprImpl<T>& expr, IndexFunc index_func, ElementFunc element_func)
     -> RetType {
-    auto& records = segment_.get_insert_record();
     auto data_type = expr.data_type_;
     auto& schema = segment_.get_schema();
     auto field_offset = expr.field_offset_;
     auto& field_meta = schema[field_offset];
-    auto vec_ptr = records.get_entity<T>(field_offset);
-    auto& vec = *vec_ptr;
-    auto& indexing_record = segment_.get_indexing_record();
-    const segcore::ScalarIndexingEntry<T>& entry = indexing_record.get_scalar_entry<T>(field_offset);
+    // auto vec_ptr = records.get_entity<T>(field_offset);
+    // auto& vec = *vec_ptr;
+    // const segcore::ScalarIndexingEntry<T>& entry = indexing_record.get_scalar_entry<T>(field_offset);
 
-    RetType results(vec.num_chunk());
-    auto indexing_barrier = indexing_record.get_finished_ack();
-    auto chunk_size = vec.get_chunk_size();
+    // RetType results(vec.num_chunk());
+    auto indexing_barrier = segment_.num_chunk_index_safe(field_offset);
+    auto chunk_size = segment_.chunk_size();
+    auto num_chunk = upper_div(row_count_, chunk_size);
+    RetType results;
+
+    using Index = knowhere::scalar::StructuredIndex<T>;
     for (auto chunk_id = 0; chunk_id < indexing_barrier; ++chunk_id) {
-        auto& result = results[chunk_id];
-        auto indexing = entry.get_indexing(chunk_id);
-        auto data = index_func(indexing);
-        result = std::move(*data);
-        Assert(result.size() == chunk_size);
+        // auto& result = results[chunk_id];
+        const Index& indexing = segment_.chunk_scalar_index<T>(field_offset, chunk_id);
+        // NOTE: knowhere is not const-ready
+        // This is a dirty workaround
+        auto data = index_func(const_cast<Index*>(&indexing));
+        Assert(data->size() == chunk_size);
+        results.emplace_back(std::move(*data));
     }
 
-    for (auto chunk_id = indexing_barrier; chunk_id < vec.num_chunk(); ++chunk_id) {
-        auto& result = results[chunk_id];
+    for (auto chunk_id = indexing_barrier; chunk_id < num_chunk; ++chunk_id) {
+        boost::dynamic_bitset<> result(chunk_size);
+        // auto& result = results[chunk_id];
         result.resize(chunk_size);
-        auto chunk = vec.get_chunk(chunk_id);
+        auto chunk = segment_.chunk_data<T>(field_offset, chunk_id);
         const T* data = chunk.data();
         for (int index = 0; index < chunk_size; ++index) {
             result[index] = element_func(data[index]);
         }
         Assert(result.size() == chunk_size);
+        results.emplace_back(std::move(result));
     }
     return results;
 }
@@ -274,29 +282,29 @@ template <typename T>
 auto
 ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> RetType {
     auto& expr = static_cast<TermExprImpl<T>&>(expr_raw);
-    auto& records = segment_.get_insert_record();
+    // auto& records = segment_.get_insert_record();
     auto data_type = expr.data_type_;
     auto& schema = segment_.get_schema();
 
     auto field_offset = expr_raw.field_offset_;
     auto& field_meta = schema[field_offset];
-    auto vec_ptr = records.get_entity<T>(field_offset);
-    auto& vec = *vec_ptr;
-    auto num_chunk = vec.num_chunk();
+    // auto vec_ptr = records.get_entity<T>(field_offset);
+    // auto& vec = *vec_ptr;
+    auto chunk_size = segment_.chunk_size();
+    auto num_chunk = upper_div(row_count_, chunk_size);
     RetType bitsets;
 
-    auto N = records.ack_responder_.GetAck();
+    // auto N = records.ack_responder_.GetAck();
+    // TODO: enable index for term
 
-    // small batch
-    auto chunk_size = vec.get_chunk_size();
     for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
-        auto& chunk = vec.get_chunk(chunk_id);
+        Span<T> chunk = segment_.chunk_data<T>(field_offset, chunk_id);
 
-        auto size = chunk_id == num_chunk - 1 ? N - chunk_id * chunk_size : chunk_size;
+        auto size = chunk_id == num_chunk - 1 ? row_count_ - chunk_id * chunk_size : chunk_size;
 
         boost::dynamic_bitset<> bitset(chunk_size);
         for (int i = 0; i < size; ++i) {
-            auto value = chunk[i];
+            auto value = chunk.data()[i];
             bool is_in = std::binary_search(expr.terms_.begin(), expr.terms_.end(), value);
             bitset[i] = is_in;
         }
