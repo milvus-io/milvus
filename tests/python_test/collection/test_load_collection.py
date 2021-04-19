@@ -297,9 +297,9 @@ class TestReleaseAdvanced:
         connect.insert(collection, default_entities)
         connect.flush([collection])
 
-        def load(collection):
+        def load():
             connect.load_collection(collection)
-        t = threading.Thread(target=load, (collection, ))
+        t = threading.Thread(target=load, args=())
         t.start()
         connect.release_collection(collection)
         res = connect.search(collection, default_single_query)
@@ -315,9 +315,9 @@ class TestReleaseAdvanced:
         connect.insert(collection, default_entities, partition_tag=default_tag)
         connect.flush([collection])
 
-        def load(collection):
+        def load():
             connect.load_collection(collection)
-        t = threading.Thread(target=load, (collection, ))
+        t = threading.Thread(target=load, args=())
         t.start()
         connect.release_partitions(collection, [default_tag])
         res = connect.search(collection, default_single_query)
@@ -333,9 +333,9 @@ class TestReleaseAdvanced:
         connect.flush([collection])
         connect.load_collection(collection)
 
-        def insert(collection):
+        def insert():
             connect.insert(collection, default_entities)
-        t = threading.Thread(target=insert, (collection, ))
+        t = threading.Thread(target=insert, args=())
         t.start()
         connect.release_collection(collection)
         res = connect.search(collection, default_single_query)
