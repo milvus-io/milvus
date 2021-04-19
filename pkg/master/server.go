@@ -47,6 +47,7 @@ func SegmentStatsController() {
 		select {
 		case ss := <-ssChan:
 			ComputeCloseTime(ss, kvbase)
+			UpdateSegmentStatus(ss, kvbase)
 		case <-time.After(5 * time.Second):
 			fmt.Println("timeout")
 			return
@@ -99,6 +100,39 @@ func ComputeCloseTime(ss mock.SegmentStats, kvbase kv.Base) error {
 			return err
 		}
 		kvbase.Save("segment/"+strconv.Itoa(int(seg.CollectionID)), cData)
+	}
+	return nil
+}
+
+func UpdateSegmentStatus(ss mock.SegmentStats, kvbase kv.Base) error {
+	segmentData, err := kvbase.Load("segment/" + strconv.Itoa(int(ss.SegementID)))
+	if err != nil {
+		return err
+	}
+	seg, err := mock.JSON2Segment(segmentData)
+	if err != nil {
+		return err
+	}
+	var changed bool
+	changed = false
+	if seg.Status != ss.Status {
+		changed = true
+		seg.Status = ss.Status
+	}
+	if seg.Rows != ss.Rows {
+		changed = true
+		seg.Rows = ss.Rows
+	}
+
+	if changed {
+		segData, err := mock.Segment2JSON(*seg)
+		if err != nil {
+			return err
+		}
+		err = kvbase.Save("segment/"+strconv.Itoa(int(seg.CollectionID)), segData)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
