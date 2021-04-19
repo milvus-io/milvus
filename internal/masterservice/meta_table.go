@@ -775,6 +775,9 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
+	if idxInfo.IndexParams == nil {
+		return nil, schemapb.FieldSchema{}, fmt.Errorf("index param is nil")
+	}
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
 		return nil, schemapb.FieldSchema{}, fmt.Errorf("collection %s not found", collName)
@@ -788,25 +791,33 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 		return nil, fieldSchema, err
 	}
 
-	exist := false
-	var existInfo pb.IndexInfo
-	if idxInfo.IndexParams != nil {
-		for _, f := range collMeta.FieldIndexes {
-			if f.FiledID == fieldSchema.FieldID {
-				existInfo, ok = mt.indexID2Meta[f.IndexID]
-				if !ok {
-					return nil, schemapb.FieldSchema{}, fmt.Errorf("index id = %d not found", f.IndexID)
-				}
-
-				// (collMeta.IndexNames[i] == indexName)
-				if EqualKeyPairArray(existInfo.IndexParams, idxInfo.IndexParams) {
-					exist = true
+	var dupIdx typeutil.UniqueID = 0
+	for _, f := range collMeta.FieldIndexes {
+		if f.FiledID == fieldSchema.FieldID {
+			if info, ok := mt.indexID2Meta[f.IndexID]; ok {
+				if info.IndexName == idxInfo.IndexName {
+					dupIdx = info.IndexID
 					break
 				}
 			}
 		}
 	}
-	if !exist && idxInfo.IndexParams != nil {
+
+	exist := false
+	var existInfo pb.IndexInfo
+	for _, f := range collMeta.FieldIndexes {
+		if f.FiledID == fieldSchema.FieldID {
+			existInfo, ok = mt.indexID2Meta[f.IndexID]
+			if !ok {
+				return nil, schemapb.FieldSchema{}, fmt.Errorf("index id = %d not found", f.IndexID)
+			}
+			if EqualKeyPairArray(existInfo.IndexParams, idxInfo.IndexParams) {
+				exist = true
+				break
+			}
+		}
+	}
+	if !exist {
 		idx := &pb.FieldIndexInfo{
 			FiledID: fieldSchema.FieldID,
 			IndexID: idxInfo.IndexID,
@@ -821,6 +832,15 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 		v2 := proto.MarshalTextString(idxInfo)
 		meta := map[string]string{k1: v1, k2: v2}
 
+		if dupIdx != 0 {
+			dupInfo := mt.indexID2Meta[dupIdx]
+			dupInfo.IndexName = dupInfo.IndexName + "_bak"
+			mt.indexID2Meta[dupIdx] = dupInfo
+			k := path.Join(IndexMetaPrefix, strconv.FormatInt(dupInfo.IndexID, 10))
+			v := proto.MarshalTextString(&dupInfo)
+			meta[k] = v
+		}
+
 		err = mt.client.MultiSave(meta)
 		if err != nil {
 			_ = mt.reloadFromKV()
@@ -834,7 +854,17 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 			mt.indexID2Meta[existInfo.IndexID] = existInfo
 			k := path.Join(IndexMetaPrefix, strconv.FormatInt(existInfo.IndexID, 10))
 			v := proto.MarshalTextString(&existInfo)
-			err = mt.client.Save(k, v)
+			meta := map[string]string{k: v}
+			if dupIdx != 0 {
+				dupInfo := mt.indexID2Meta[dupIdx]
+				dupInfo.IndexName = dupInfo.IndexName + "_bak"
+				mt.indexID2Meta[dupIdx] = dupInfo
+				k := path.Join(IndexMetaPrefix, strconv.FormatInt(dupInfo.IndexID, 10))
+				v := proto.MarshalTextString(&dupInfo)
+				meta[k] = v
+			}
+
+			err = mt.client.MultiSave(meta)
 			if err != nil {
 				_ = mt.reloadFromKV()
 				return nil, schemapb.FieldSchema{}, err

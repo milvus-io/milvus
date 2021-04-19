@@ -784,6 +784,51 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, Params.DefaultIndexName)
 	})
 
+	t.Run("over ride index", func(t *testing.T) {
+		req := &milvuspb.CreateIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreateIndex,
+				MsgID:     211,
+				Timestamp: 211,
+				SourceID:  211,
+			},
+			DbName:         "",
+			CollectionName: "testColl",
+			FieldName:      "vector",
+			ExtraParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "ik3",
+					Value: "iv3",
+				},
+			},
+		}
+
+		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
+		assert.Nil(t, err)
+		assert.Equal(t, len(collMeta.FieldIndexes), 1)
+		oldIdx := collMeta.FieldIndexes[0].IndexID
+
+		rsp, err := core.CreateIndex(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_ERROR_CODE_SUCCESS)
+		time.Sleep(time.Second)
+
+		collMeta, err = core.MetaTable.GetCollectionByName("testColl")
+		assert.Nil(t, err)
+		assert.Equal(t, len(collMeta.FieldIndexes), 2)
+
+		assert.Equal(t, oldIdx, collMeta.FieldIndexes[0].IndexID)
+
+		idxMeta, err := core.MetaTable.GetIndexByID(collMeta.FieldIndexes[1].IndexID)
+		assert.Nil(t, err)
+		assert.Equal(t, idxMeta.IndexName, Params.DefaultIndexName)
+
+		idxMeta, err = core.MetaTable.GetIndexByID(collMeta.FieldIndexes[0].IndexID)
+		assert.Nil(t, err)
+		assert.Equal(t, idxMeta.IndexName, Params.DefaultIndexName+"_bak")
+
+	})
+
 	t.Run("drop index", func(t *testing.T) {
 		req := &milvuspb.DropIndexRequest{
 			Base: &commonpb.MsgBase{
