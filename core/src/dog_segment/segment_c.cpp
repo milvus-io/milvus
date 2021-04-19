@@ -30,6 +30,7 @@ DeleteSegment(CSegmentBase segment) {
 
 int
 Insert(CSegmentBase c_segment,
+       long int reserved_offset,
        signed long int size,
        const long* primary_keys,
        const unsigned long* timestamps,
@@ -52,6 +53,7 @@ Insert(CSegmentBase c_segment,
 
 int
 Delete(CSegmentBase c_segment,
+       long int reserved_offset,
        long size,
        const long* primary_keys,
        const unsigned long* timestamps,

@@ -40,7 +40,7 @@ class SegmentBase {
     // TODO: add id into delete log, possibly bitmap
 
     virtual Status
-    Delete(int64_t size, const uint64_t* primary_keys, const Timestamp* timestamps) = 0;
+    Delete(int64_t reserved_offset, int64_t size, const uint64_t* primary_keys, const Timestamp* timestamps) = 0;
 
     // query contains metadata of
     virtual Status

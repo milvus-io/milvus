@@ -17,6 +17,7 @@ DeleteSegment(CSegmentBase segment);
 
 int
 Insert(CSegmentBase c_segment,
+       long int reserved_offset,
        signed long int size,
        const long* primary_keys,
        const unsigned long* timestamps,
@@ -26,13 +27,20 @@ Insert(CSegmentBase c_segment,
        unsigned long timestamp_min,
        unsigned long timestamp_max);
 
+long int
+PreInsert(long int size);
+
 int
 Delete(CSegmentBase c_segment,
+       long int reserved_offset,
        long size,
        const long* primary_keys,
        const unsigned long* timestamps,
        unsigned long timestamp_min,
        unsigned long timestamp_max);
+
+long int
+PreDelete(long int size);
 
 int
 Search(CSegmentBase c_segment,
