@@ -5,10 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strconv"
+	"strings"
 
 	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	queryPb "github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 )
 
@@ -28,6 +32,12 @@ type baseTask struct {
 	done chan error
 	ctx  context.Context
 	id   UniqueID
+}
+
+type watchDmChannelsTask struct {
+	baseTask
+	req  *queryPb.WatchDmChannelsRequest
+	node *QueryNode
 }
 
 type loadSegmentsTask struct {
@@ -57,20 +67,107 @@ func (b *baseTask) SetID(uid UniqueID) {
 }
 
 func (b *baseTask) WaitToFinish() error {
-	select {
-	case <-b.ctx.Done():
-		return errors.New("task timeout")
-	case err := <-b.done:
-		return err
-	}
+	err := <-b.done
+	return err
 }
 
 func (b *baseTask) Notify(err error) {
 	b.done <- err
 }
 
+// watchDmChannelsTask
+func (w *watchDmChannelsTask) Timestamp() Timestamp {
+	if w.req.Base == nil {
+		log.Error("nil base req in watchDmChannelsTask", zap.Any("collectionID", w.req.CollectionID))
+		return 0
+	}
+	return w.req.Base.Timestamp
+}
+
+func (w *watchDmChannelsTask) OnEnqueue() error {
+	if w.req == nil || w.req.Base == nil {
+		w.SetID(rand.Int63n(100000000000))
+	} else {
+		w.SetID(w.req.Base.MsgID)
+	}
+	return nil
+}
+
+func (w *watchDmChannelsTask) PreExecute(ctx context.Context) error {
+	return nil
+}
+
+func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
+	log.Debug("starting WatchDmChannels ...", zap.String("ChannelIDs", fmt.Sprintln(w.req.ChannelIDs)))
+	collectionID := w.req.CollectionID
+	ds, err := w.node.getDataSyncService(collectionID)
+	if err != nil || ds.dmStream == nil {
+		errMsg := "null data sync service or null data manipulation stream, collectionID = " + fmt.Sprintln(collectionID)
+		log.Error(errMsg)
+		return errors.New(errMsg)
+	}
+
+	switch t := ds.dmStream.(type) {
+	case *msgstream.MqTtMsgStream:
+	default:
+		_ = t
+		errMsg := "type assertion failed for dm message stream"
+		log.Error(errMsg)
+		return errors.New(errMsg)
+	}
+
+	getUniqueSubName := func() string {
+		prefixName := Params.MsgChannelSubName
+		return prefixName + "-" + strconv.FormatInt(collectionID, 10)
+	}
+
+	// add request channel
+	consumeChannels := w.req.ChannelIDs
+	toSeekInfo := make([]*internalpb.MsgPosition, 0)
+	toDirSubChannels := make([]string, 0)
+
+	consumeSubName := getUniqueSubName()
+
+	for _, info := range w.req.Infos {
+		if len(info.Pos.MsgID) == 0 {
+			toDirSubChannels = append(toDirSubChannels, info.ChannelID)
+			continue
+		}
+		info.Pos.MsgGroup = consumeSubName
+		toSeekInfo = append(toSeekInfo, info.Pos)
+
+		log.Debug("prevent inserting segments", zap.String("segmentIDs", fmt.Sprintln(info.ExcludedSegments)))
+		err := w.node.replica.addExcludedSegments(collectionID, info.ExcludedSegments)
+		if err != nil {
+			log.Error(err.Error())
+			return err
+		}
+	}
+
+	ds.dmStream.AsConsumer(toDirSubChannels, consumeSubName)
+	for _, pos := range toSeekInfo {
+		err := ds.dmStream.Seek(pos)
+		if err != nil {
+			errMsg := "msgStream seek error :" + err.Error()
+			log.Error(errMsg)
+			return errors.New(errMsg)
+		}
+	}
+	log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
+	log.Debug("WatchDmChannels done", zap.String("ChannelIDs", fmt.Sprintln(w.req.ChannelIDs)))
+	return nil
+}
+
+func (w *watchDmChannelsTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
 // loadSegmentsTask
 func (l *loadSegmentsTask) Timestamp() Timestamp {
+	if l.req.Base == nil {
+		log.Error("nil base req in loadSegmentsTask", zap.Any("collectionID", l.req.CollectionID))
+		return 0
+	}
 	return l.req.Base.Timestamp
 }
 
@@ -146,6 +243,10 @@ func (l *loadSegmentsTask) PostExecute(ctx context.Context) error {
 
 // releaseCollectionTask
 func (r *releaseCollectionTask) Timestamp() Timestamp {
+	if r.req.Base == nil {
+		log.Error("nil base req in releaseCollectionTask", zap.Any("collectionID", r.req.CollectionID))
+		return 0
+	}
 	return r.req.Base.Timestamp
 }
 
@@ -190,6 +291,10 @@ func (r *releaseCollectionTask) PostExecute(ctx context.Context) error {
 
 // releasePartitionsTask
 func (r *releasePartitionsTask) Timestamp() Timestamp {
+	if r.req.Base == nil {
+		log.Error("nil base req in releasePartitionsTask", zap.Any("collectionID", r.req.CollectionID))
+		return 0
+	}
 	return r.req.Base.Timestamp
 }
 

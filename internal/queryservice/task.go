@@ -353,6 +353,11 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 		segmentIDs := showSegmentResponse.SegmentIDs
 		if len(segmentIDs) == 0 {
 			loadSegmentRequest := &querypb.LoadSegmentsRequest{
+				// TODO: use unique id allocator to assign reqID
+				Base: &commonpb.MsgBase{
+					Timestamp: lpt.Base.Timestamp,
+					MsgID:     rand.Int63n(10000000000),
+				},
 				CollectionID: collectionID,
 				PartitionID:  partitionID,
 				Schema:       schema,
@@ -447,7 +452,8 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 				loadSegmentRequest := &querypb.LoadSegmentsRequest{
 					// TODO: use unique id allocator to assign reqID
 					Base: &commonpb.MsgBase{
-						MsgID: rand.Int63n(10000000000),
+						Timestamp: lpt.Base.Timestamp,
+						MsgID:     rand.Int63n(10000000000),
 					},
 					CollectionID: collectionID,
 					PartitionID:  partitionID,
