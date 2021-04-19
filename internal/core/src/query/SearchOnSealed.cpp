@@ -20,8 +20,9 @@
 
 namespace milvus::query {
 
+// negate bitset, and merge them into one
 aligned_vector<uint8_t>
-AssembleBitmap(const BitmapSimple& bitmap_simple) {
+AssembleNegBitmap(const BitmapSimple& bitmap_simple) {
     int64_t N = 0;
 
     for (auto& bitmap : bitmap_simple) {
@@ -52,7 +53,7 @@ SearchOnSealed(const Schema& schema,
                const void* query_data,
                int64_t num_queries,
                Timestamp timestamp,
-               std::optional<const BitmapSimple*> bitmaps_opt,
+               const faiss::BitsetView& bitset,
                QueryResult& result) {
     auto topK = query_info.topK_;
 
@@ -73,12 +74,7 @@ SearchOnSealed(const Schema& schema,
         auto conf = query_info.search_params_;
         conf[milvus::knowhere::meta::TOPK] = query_info.topK_;
         conf[milvus::knowhere::Metric::TYPE] = MetricTypeToName(indexing_entry->metric_type_);
-        if (bitmaps_opt.has_value()) {
-            auto bitmap = AssembleBitmap(*bitmaps_opt.value());
-            return indexing_entry->indexing_->Query(ds, conf, faiss::BitsetView(bitmap.data(), num_queries));
-        } else {
-            return indexing_entry->indexing_->Query(ds, conf, nullptr);
-        }
+        return indexing_entry->indexing_->Query(ds, conf, bitset);
     }();
 
     auto ids = final->Get<idx_t*>(knowhere::meta::IDS);
