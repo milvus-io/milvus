@@ -39,7 +39,6 @@ func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.
 
 	var cancel func()
 	it.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
-	// TODO: req_id, segment_id, channel_id, proxy_id, timestamps, row_ids
 
 	defer cancel()
 
@@ -81,7 +80,6 @@ func (p *Proxy) CreateCollection(ctx context.Context, req *schemapb.CollectionSc
 		CreateCollectionRequest: internalpb.CreateCollectionRequest{
 			MsgType: internalpb.MsgType_kCreateCollection,
 			Schema:  &commonpb.Blob{},
-			// TODO: req_id, timestamp, proxy_id
 		},
 		masterClient: p.masterClient,
 	}
@@ -124,7 +122,6 @@ func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.Qu
 		SearchRequest: internalpb.SearchRequest{
 			MsgType: internalpb.MsgType_kSearch,
 			Query:   &commonpb.Blob{},
-			// TODO: req_id, proxy_id, timestamp, result_channel_id
 		},
 		queryMsgStream: p.queryMsgStream,
 		resultBuf:      make(chan []*internalpb.SearchResult),
@@ -174,8 +171,7 @@ func (p *Proxy) DropCollection(ctx context.Context, req *servicepb.CollectionNam
 	dct := &DropCollectionTask{
 		Condition: NewTaskCondition(ctx),
 		DropCollectionRequest: internalpb.DropCollectionRequest{
-			MsgType: internalpb.MsgType_kDropCollection,
-			// TODO: req_id, timestamp, proxy_id
+			MsgType:        internalpb.MsgType_kDropCollection,
 			CollectionName: req,
 		},
 		masterClient: p.masterClient,
@@ -215,8 +211,7 @@ func (p *Proxy) HasCollection(ctx context.Context, req *servicepb.CollectionName
 	hct := &HasCollectionTask{
 		Condition: NewTaskCondition(ctx),
 		HasCollectionRequest: internalpb.HasCollectionRequest{
-			MsgType: internalpb.MsgType_kHasCollection,
-			// TODO: req_id, timestamp, proxy_id
+			MsgType:        internalpb.MsgType_kHasCollection,
 			CollectionName: req,
 		},
 		masterClient: p.masterClient,
@@ -260,8 +255,7 @@ func (p *Proxy) DescribeCollection(ctx context.Context, req *servicepb.Collectio
 	dct := &DescribeCollectionTask{
 		Condition: NewTaskCondition(ctx),
 		DescribeCollectionRequest: internalpb.DescribeCollectionRequest{
-			MsgType: internalpb.MsgType_kDescribeCollection,
-			// TODO: req_id, timestamp, proxy_id
+			MsgType:        internalpb.MsgType_kDescribeCollection,
 			CollectionName: req,
 		},
 		masterClient: p.masterClient,
@@ -306,7 +300,6 @@ func (p *Proxy) ShowCollections(ctx context.Context, req *commonpb.Empty) (*serv
 		Condition: NewTaskCondition(ctx),
 		ShowCollectionRequest: internalpb.ShowCollectionRequest{
 			MsgType: internalpb.MsgType_kDescribeCollection,
-			// TODO: req_id, timestamp, proxy_id
 		},
 		masterClient: p.masterClient,
 	}

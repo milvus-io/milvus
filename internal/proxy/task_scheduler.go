@@ -159,10 +159,14 @@ func (queue *BaseTaskQueue) TaskDoneTest(ts Timestamp) bool {
 }
 
 func (queue *BaseTaskQueue) Enqueue(t task) error {
-	// TODO: set Ts, ReqId, ProxyId
 	ts, _ := queue.sched.tsoAllocator.AllocOne()
-	log.Printf("allocate timestamp: %v", ts)
+	log.Printf("[Proxy] allocate timestamp: %v", ts)
 	t.SetTs(ts)
+
+	reqID, _ := queue.sched.idAllocator.AllocOne()
+	log.Printf("[Proxy] allocate reqID: %v", reqID)
+	t.SetID(reqID)
+
 	return queue.addUnissuedTask(t)
 }
 
@@ -180,15 +184,18 @@ type DqTaskQueue struct {
 }
 
 func (queue *DdTaskQueue) Enqueue(t task) error {
-
 	queue.lock.Lock()
 	defer queue.lock.Unlock()
 
-	// TODO: set Ts, ReqId, ProxyId
 	ts, _ := queue.sched.tsoAllocator.AllocOne()
+	log.Printf("[Proxy] allocate timestamp: %v", ts)
 	t.SetTs(ts)
-	return queue.addUnissuedTask(t)
 
+	reqID, _ := queue.sched.idAllocator.AllocOne()
+	log.Printf("[Proxy] allocate reqID: %v", reqID)
+	t.SetID(reqID)
+
+	return queue.addUnissuedTask(t)
 }
 
 func NewDdTaskQueue(sched *TaskScheduler) *DdTaskQueue {

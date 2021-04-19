@@ -58,10 +58,6 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 	// TODO: use config instead
 	pulsarAddress := Params.PulsarAddress()
 
-	p.manipulationMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, Params.MsgStreamInsertBufSize())
-	p.manipulationMsgStream.SetPulsarClient(pulsarAddress)
-	p.manipulationMsgStream.CreatePulsarProducers(Params.InsertChannelNames())
-
 	p.queryMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, Params.MsgStreamSearchBufSize())
 	p.queryMsgStream.SetPulsarClient(pulsarAddress)
 	p.queryMsgStream.CreatePulsarProducers(Params.SearchChannelNames())
@@ -85,6 +81,14 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 		panic(err)
 	}
 	p.segAssigner = segAssigner
+
+	p.manipulationMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, Params.MsgStreamInsertBufSize())
+	p.manipulationMsgStream.SetPulsarClient(pulsarAddress)
+	p.manipulationMsgStream.CreatePulsarProducers(Params.InsertChannelNames())
+	repackFuncImpl := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
+		return insertRepackFunc(tsMsgs, hashKeys, p.segAssigner, false)
+	}
+	p.manipulationMsgStream.SetRepackFunc(repackFuncImpl)
 
 	p.sched, err = NewTaskScheduler(p.proxyLoopCtx, p.idAllocator, p.tsoAllocator)
 	if err != nil {
