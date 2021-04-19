@@ -1,25 +1,23 @@
 #include "SegmentBase.h"
 #include "segment_c.h"
+#include "Partition.h"
 
 CSegmentBase
-SegmentBaseInit(unsigned long segment_id) {
-  std::cout << "Hello milvus" << std::endl;
-  auto seg = milvus::dog_segment::CreateSegment();
-  seg->set_segment_id(segment_id);
-  return (void*)seg;
+NewSegment(CPartition partition, unsigned long segment_id) {
+  auto p = (milvus::dog_segment::Partition*)partition;
+
+  auto segment = milvus::dog_segment::CreateSegment(p->get_schema());
+
+  segment->set_segment_id(segment_id);
+
+  return (void*)segment.release();
 }
 
-//int32_t Insert(CSegmentBase c_segment, signed long int size, const unsigned long* primary_keys, const unsigned long int* timestamps, DogDataChunk values) {
-//  auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
-//  milvus::dog_segment::DogDataChunk dataChunk{};
-//
-//  dataChunk.raw_data = values.raw_data;
-//  dataChunk.sizeof_per_row = values.sizeof_per_row;
-//  dataChunk.count = values.count;
-//
-//  auto res = segment->Insert(size, primary_keys, timestamps, dataChunk);
-//  return res.code();
-//}
+void DeleteSegment(CSegmentBase segment) {
+  auto s = (milvus::dog_segment::SegmentBase*)segment;
+
+  delete s;
+}
 
 int Insert(CSegmentBase c_segment,
                signed long int size,

@@ -9,24 +9,25 @@ type Partition struct {
 	Segments []*Segment
 }
 
-func (c *Collection) NewPartition(partitionName string) (*Partition, error) {
-	cName := C.CString(partitionName)
-	partitionPtr, status := C.NewPartition(c.CollectionPtr, cName)
+func (p *Partition) NewSegment(segmentId uint64) (*Segment, error) {
+	segmentPtr, status := C.NewSegment(p.PartitionPtr, segmentId)
 
 	if status != 0 {
-		return nil, errors.New("create partition failed")
+		return nil, errors.New("create segment failed")
 	}
 
-	return &Partition{PartitionPtr: partitionPtr, PartitionName: partitionName}, nil
+	var newSegment = &Segment{SegmentPtr: segmentPtr, SegmentId: segmentId}
+	p.Segments = append(p.Segments, newSegment)
+	return newSegment, nil
 }
 
-func (c *Collection) DeletePartition(partitionName string) error {
-	cName := C.CString(partitionName)
-	status := C.DeletePartition(c.CollectionPtr, cName)
+func (p *Partition) DeleteSegment() error {
+	status := C.DeleteSegment(p.PartitionPtr)
 
 	if status != 0 {
-		return errors.New("create partition failed")
+		return errors.New("delete segment failed")
 	}
 
+	// TODO: remove from p.Segments
 	return nil
 }

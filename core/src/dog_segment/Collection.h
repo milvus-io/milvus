@@ -15,15 +15,19 @@ public:
     // TODO: config to schema
     void parse();
 
-    void AddNewPartition();
+public:
+    SchemaPtr& get_schema() {
+      return schema_;
+    }
 
 private:
     // TODO: add Index ptr
     // IndexPtr index_ = nullptr;
     std::string collection_name_;
     std::string schema_json_;
-    milvus::dog_segment::SchemaPtr schema_;
-    std::vector<PartitionPtr> partitions_;
+    SchemaPtr schema_;
 };
+
+using CollectionPtr = std::unique_ptr<Collection>;
 
 }
