@@ -16,7 +16,7 @@ func (pp *pulsarProducer) Topic() string {
 }
 
 func (pp *pulsarProducer) Send(ctx context.Context, message *client.ProducerMessage) error {
-	ppm := &pulsar.ProducerMessage{Payload: message.Payload}
+	ppm := &pulsar.ProducerMessage{Payload: message.Payload, Properties: message.Properties}
 	_, err := pp.p.Send(ctx, ppm)
 	return err
 }

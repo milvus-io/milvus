@@ -285,7 +285,7 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 		return status, fmt.Errorf("load partitions: %s", err)
 	}
 
-	err = qs.watchDmChannels(dbID, collectionID)
+	err = qs.watchDmChannels(ctx, dbID, collectionID)
 	if err != nil {
 		log.Error("LoadCollectionRequest failed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Error(err))
 		return fn(err), err
@@ -516,7 +516,7 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 	}
 
 	if watchNeeded {
-		err = qs.watchDmChannels(dbID, collectionID)
+		err = qs.watchDmChannels(ctx, dbID, collectionID)
 		if err != nil {
 			log.Debug("LoadPartitionRequest completed", zap.Int64("msgID", req.Base.MsgID), zap.Int64s("partitionIDs", partitionIDs), zap.Error(err))
 			return fn(err), err
@@ -681,8 +681,7 @@ func (qs *QueryService) SetDataService(dataService types.DataService) {
 	qs.dataServiceClient = dataService
 }
 
-func (qs *QueryService) watchDmChannels(dbID UniqueID, collectionID UniqueID) error {
-	ctx := context.TODO()
+func (qs *QueryService) watchDmChannels(ctx context.Context, dbID UniqueID, collectionID UniqueID) error {
 	collection, err := qs.replica.getCollectionByID(0, collectionID)
 	if err != nil {
 		return err

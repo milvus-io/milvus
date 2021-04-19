@@ -139,7 +139,6 @@ func (s *Server) Stop() error {
 		}
 	}
 	s.cancel()
-	s.closer.Close()
 	err := s.proxyservice.Stop()
 	if err != nil {
 		return err

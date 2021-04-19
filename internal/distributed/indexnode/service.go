@@ -145,8 +145,10 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() error {
-	if err := s.closer.Close(); err != nil {
-		return err
+	if s.closer != nil {
+		if err := s.closer.Close(); err != nil {
+			return err
+		}
 	}
 	s.loopCancel()
 	if s.indexnode != nil {
