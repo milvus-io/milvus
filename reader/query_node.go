@@ -16,49 +16,61 @@ import "C"
 import (
 	"errors"
 	"fmt"
-	"github.com/czs007/suvlim/pulsar/client-go"
-	"github.com/czs007/suvlim/pulsar/client-go/schema"
+	messageClient "github.com/czs007/suvlim/pkg/message"
+	schema "github.com/czs007/suvlim/pkg/message"
+	"strconv"
 	"sync"
 	"time"
 )
 
-type QueryNodeDataBuffer struct {
-	InsertBuffer  []*schema.InsertMsg
-	DeleteBuffer  []*schema.DeleteMsg
-	SearchBuffer  []*schema.SearchMsg
-	validInsertBuffer  []bool
-	validDeleteBuffer  []bool
-	validSearchBuffer  []bool
+type DeleteRecord struct {
+	entityID  		int64
+	timestamp 		uint64
+	segmentID 		int64
 }
 
-type QueryNodeTimeSync struct {
-	deleteTimeSync uint64
-	insertTimeSync uint64
-	searchTimeSync uint64
+type DeleteRecords struct {
+	deleteRecords  		*[]DeleteRecord
+	count            	chan int
+}
+
+type QueryNodeDataBuffer struct {
+	InsertDeleteBuffer      []*schema.InsertOrDeleteMsg
+	SearchBuffer            []*schema.SearchMsg
+	validInsertDeleteBuffer []bool
+	validSearchBuffer       []bool
 }
 
 type QueryNode struct {
-	QueryNodeId               uint64
-	Collections               []*Collection
-	messageClient 			  client_go.MessageClient
-	queryNodeTimeSync         *QueryNodeTimeSync
-	buffer					  QueryNodeDataBuffer
+	QueryNodeId       uint64
+	Collections       []*Collection
+	SegmentsMap       map[int64]*Segment
+	messageClient     client_go.MessageClient
+	queryNodeTimeSync *QueryNodeTime
+	deleteRecordsMap  map[TimeRange]DeleteRecords
+	buffer            QueryNodeDataBuffer
 }
 
 func NewQueryNode(queryNodeId uint64, timeSync uint64) *QueryNode {
-	mc := client_go.MessageClient{}
+	mc := messageClient.MessageClient{}
 
-	queryNodeTimeSync := &QueryNodeTimeSync {
-		deleteTimeSync: timeSync,
-		insertTimeSync: timeSync,
-		searchTimeSync: timeSync,
+	queryNodeTimeSync := &QueryNodeTime{
+		ReadTimeSyncMin: timeSync,
+		ReadTimeSyncMax: timeSync,
+		WriteTimeSync:   timeSync,
+		SearchTimeSync:  timeSync,
+		TSOTimeSync:     timeSync,
 	}
 
+	segmentsMap := make(map[int64]*Segment)
+
 	return &QueryNode{
-		QueryNodeId:           queryNodeId,
-		Collections:           nil,
-		messageClient: 		   mc,
-		queryNodeTimeSync:     queryNodeTimeSync,
+		QueryNodeId:       queryNodeId,
+		Collections:       nil,
+		SegmentsMap:       segmentsMap,
+		messageClient:     mc,
+		queryNodeTimeSync: queryNodeTimeSync,
+		deleteRecordsMap:  make(map[int64]DeleteRecords),
 	}
 }
 
@@ -82,10 +94,15 @@ func (node *QueryNode) DeleteCollection(collection *Collection) {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-func (node *QueryNode) doQueryNode (wg *sync.WaitGroup) {
+func (node *QueryNode) doQueryNode(wg *sync.WaitGroup) {
 	wg.Add(3)
-	go node.Insert(node.messageClient.InsertMsg, wg)
-	go node.Delete(node.messageClient.DeleteMsg, wg)
+	// Do insert and delete messages sort, do insert
+	go node.InsertAndDelete(node.messageClient.InsertMsg, wg)
+	// Do delete messages sort
+	go node.searchDeleteInMap()
+	// Do delete
+	go node.Delete()
+	// Do search
 	go node.Search(node.messageClient.SearchMsg, wg)
 	wg.Wait()
 }
@@ -102,9 +119,9 @@ func (node *QueryNode) StartMessageClient() {
 	go node.messageClient.ReceiveMessage()
 }
 
-func (node *QueryNode) GetSegmentByEntityId(entityId uint64) *Segment {
+func (node *QueryNode) GetSegmentByEntityId() ([]int64, []uint64, []int64) {
 	// TODO: get id2segment info from pulsar
-	return nil
+	return nil, nil, nil
 }
 
 func (node *QueryNode) GetTargetSegment(collectionName *string, partitionTag *string) (*Segment, error) {
@@ -133,9 +150,14 @@ func (node *QueryNode) GetTargetSegment(collectionName *string, partitionTag *st
 	return nil, errors.New("cannot found target segment")
 }
 
-func (node *QueryNode) GetTSOTime() uint64 {
-	// TODO: Add time sync
-	return 0
+func (node *QueryNode) GetSegmentBySegmentID(segmentID int64) (*Segment, error) {
+	targetSegment := node.SegmentsMap[segmentID]
+
+	if targetSegment == nil {
+		return nil, errors.New("cannot found segment with id = " + strconv.FormatInt(segmentID, 10))
+	}
+
+	return targetSegment, nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -150,7 +172,8 @@ func (node *QueryNode) InitQueryNodeCollection() {
 }
 
 func (node *QueryNode) SegmentsManagement() {
-	var timeNow = node.GetTSOTime()
+	node.queryNodeTimeSync.UpdateTSOTimeSync()
+	var timeNow = node.queryNodeTimeSync.TSOTimeSync
 	for _, collection := range node.Collections {
 		for _, partition := range collection.Partitions {
 			for _, oldSegment := range partition.OpenedSegments {
@@ -181,155 +204,227 @@ func (node *QueryNode) SegmentService() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-func (node *QueryNode) Insert(insertMessages []*schema.InsertMsg, wg *sync.WaitGroup) schema.Status {
-	var timeNow = node.GetTSOTime()
-	var collectionName = insertMessages[0].CollectionName
-	var partitionTag = insertMessages[0].PartitionTag
-	var clientId = insertMessages[0].ClientId
+// TODO: receive delete messages individually
+func (node *QueryNode) InsertAndDelete(insertDeleteMessages []*schema.InsertOrDeleteMsg, wg *sync.WaitGroup) schema.Status {
+	node.queryNodeTimeSync.UpdateReadTimeSync()
 
-	// TODO: prevent Memory copy
-	var entityIds []uint64
-	var timestamps []uint64
-	var vectorRecords [][]*schema.FieldValue
+	var tMin = node.queryNodeTimeSync.ReadTimeSyncMin
+	var tMax = node.queryNodeTimeSync.ReadTimeSyncMax
+	var readTimeSyncRange = TimeRange{timestampMin: tMin, timestampMax: tMax}
 
-	for i, msg := range node.buffer.InsertBuffer {
-		if msg.Timestamp <= timeNow {
-			entityIds = append(entityIds, msg.EntityId)
-			timestamps = append(timestamps, msg.Timestamp)
-			vectorRecords = append(vectorRecords, msg.Fields)
-			node.buffer.validInsertBuffer[i] = false
+	var clientId = insertDeleteMessages[0].ClientId
+
+	var insertIDs = make(map[int64][]int64)
+	var insertTimestamps = make(map[int64][]uint64)
+	var insertRecords = make(map[int64][][]byte)
+
+	// 1. Extract messages before readTimeSync from QueryNodeDataBuffer.
+	//    Set valid bitmap to false.
+	for i, msg := range node.buffer.InsertDeleteBuffer {
+		if msg.Timestamp <= tMax {
+			if msg.Op == schema.OpType_INSERT {
+				insertIDs[msg.SegmentId] = append(insertIDs[msg.SegmentId], msg.Uid)
+				insertTimestamps[msg.SegmentId] = append(insertTimestamps[msg.SegmentId], msg.Timestamp)
+				insertRecords[msg.SegmentId] = append(insertRecords[msg.SegmentId], msg.RowsData.Blob)
+			} else if msg.Op == schema.OpType_DELETE {
+				var r = DeleteRecord {
+					entityID: msg.Uid,
+					timestamp: msg.Timestamp,
+				}
+				*node.deleteRecordsMap[readTimeSyncRange].deleteRecords = append(*node.deleteRecordsMap[readTimeSyncRange].deleteRecords, r)
+				node.deleteRecordsMap[readTimeSyncRange].count <- <- node.deleteRecordsMap[readTimeSyncRange].count + 1
+			}
+			node.buffer.validInsertDeleteBuffer[i] = false
 		}
 	}
 
-	for i, isValid := range node.buffer.validInsertBuffer {
+	// 2. Remove invalid messages from buffer.
+	for i, isValid := range node.buffer.validInsertDeleteBuffer {
 		if !isValid {
-			copy(node.buffer.InsertBuffer[i:], node.buffer.InsertBuffer[i+1:]) // Shift a[i+1:] left one index.
-			node.buffer.InsertBuffer[len(node.buffer.InsertBuffer)-1] = nil    // Erase last element (write zero value).
-			node.buffer.InsertBuffer = node.buffer.InsertBuffer[:len(node.buffer.InsertBuffer)-1]     // Truncate slice.
+			copy(node.buffer.InsertDeleteBuffer[i:], node.buffer.InsertDeleteBuffer[i+1:])                          // Shift a[i+1:] left one index.
+			node.buffer.InsertDeleteBuffer[len(node.buffer.InsertDeleteBuffer)-1] = nil                             // Erase last element (write zero value).
+			node.buffer.InsertDeleteBuffer = node.buffer.InsertDeleteBuffer[:len(node.buffer.InsertDeleteBuffer)-1] // Truncate slice.
 		}
 	}
 
-	for _, msg := range insertMessages {
-		if msg.Timestamp <= timeNow {
-			entityIds = append(entityIds, msg.EntityId)
-			timestamps = append(timestamps, msg.Timestamp)
-			vectorRecords = append(vectorRecords, msg.Fields)
+	// 3. Extract messages before readTimeSync from current messageClient.
+	//    Move massages after readTimeSync to QueryNodeDataBuffer.
+	//    Set valid bitmap to true.
+	for _, msg := range insertDeleteMessages {
+		if msg.Timestamp <= tMax {
+			if msg.Op == schema.OpType_INSERT {
+				insertIDs[msg.SegmentId] = append(insertIDs[msg.SegmentId], msg.Uid)
+				insertTimestamps[msg.SegmentId] = append(insertTimestamps[msg.SegmentId], msg.Timestamp)
+				insertRecords[msg.SegmentId] = append(insertRecords[msg.SegmentId], msg.RowsData.Blob)
+			} else if msg.Op == schema.OpType_DELETE {
+				var r = DeleteRecord {
+					entityID: msg.Uid,
+					timestamp: msg.Timestamp,
+				}
+				*node.deleteRecordsMap[readTimeSyncRange].deleteRecords = append(*node.deleteRecordsMap[readTimeSyncRange].deleteRecords, r)
+				node.deleteRecordsMap[readTimeSyncRange].count <- <- node.deleteRecordsMap[readTimeSyncRange].count + 1
+			}
 		} else {
-			node.buffer.InsertBuffer = append(node.buffer.InsertBuffer, msg)
-			node.buffer.validInsertBuffer = append(node.buffer.validInsertBuffer, true)
+			node.buffer.InsertDeleteBuffer = append(node.buffer.InsertDeleteBuffer, msg)
+			node.buffer.validInsertDeleteBuffer = append(node.buffer.validInsertDeleteBuffer, true)
 		}
 	}
 
-	var targetSegment, err = node.GetTargetSegment(&collectionName, &partitionTag)
-	if err != nil {
-		// TODO: throw runtime error
-		fmt.Println(err.Error())
-		return schema.Status{}
+	// 4. Do insert
+	// TODO: multi-thread insert
+	for segmentID, records := range insertRecords {
+		var targetSegment, err = node.GetSegmentBySegmentID(segmentID)
+		if err != nil {
+			fmt.Println(err.Error())
+			return schema.Status{ErrorCode: 1}
+		}
+		ids := insertIDs[segmentID]
+		timestamps := insertTimestamps[segmentID]
+		err = targetSegment.SegmentInsert(&ids, &timestamps, &records, tMin, tMax)
+		if err != nil {
+			fmt.Println(err.Error())
+			return schema.Status{ErrorCode: 1}
+		}
 	}
-
-	// TODO: check error
-	var result, _ = SegmentInsert(targetSegment, &entityIds, &timestamps, vectorRecords)
 
 	wg.Done()
-	return publishResult(&result, clientId)
+	return publishResult(nil, clientId)
 }
 
-func (node *QueryNode) Delete(deleteMessages []*schema.DeleteMsg, wg *sync.WaitGroup) schema.Status {
-	var timeNow = node.GetTSOTime()
-	var clientId = deleteMessages[0].ClientId
+//func (node *QueryNode) Insert(insertMessages []*schema.InsertMsg, wg *sync.WaitGroup) schema.Status {
+//	var timeNow = node.GetTSOTime()
+//	var collectionName = insertMessages[0].CollectionName
+//	var partitionTag = insertMessages[0].PartitionTag
+//	var clientId = insertMessages[0].ClientId
+//
+//	// TODO: prevent Memory copy
+//	var entityIds []uint64
+//	var timestamps []uint64
+//	var vectorRecords [][]*schema.FieldValue
+//
+//	for i, msg := range node.buffer.InsertBuffer {
+//		if msg.Timestamp <= timeNow {
+//			entityIds = append(entityIds, msg.EntityId)
+//			timestamps = append(timestamps, msg.Timestamp)
+//			vectorRecords = append(vectorRecords, msg.Fields)
+//			node.buffer.validInsertBuffer[i] = false
+//		}
+//	}
+//
+//	for i, isValid := range node.buffer.validInsertBuffer {
+//		if !isValid {
+//			copy(node.buffer.InsertBuffer[i:], node.buffer.InsertBuffer[i+1:]) // Shift a[i+1:] left one index.
+//			node.buffer.InsertBuffer[len(node.buffer.InsertBuffer)-1] = nil    // Erase last element (write zero value).
+//			node.buffer.InsertBuffer = node.buffer.InsertBuffer[:len(node.buffer.InsertBuffer)-1]     // Truncate slice.
+//		}
+//	}
+//
+//	for _, msg := range insertMessages {
+//		if msg.Timestamp <= timeNow {
+//			entityIds = append(entityIds, msg.EntityId)
+//			timestamps = append(timestamps, msg.Timestamp)
+//			vectorRecords = append(vectorRecords, msg.Fields)
+//		} else {
+//			node.buffer.InsertBuffer = append(node.buffer.InsertBuffer, msg)
+//			node.buffer.validInsertBuffer = append(node.buffer.validInsertBuffer, true)
+//		}
+//	}
+//
+//	var targetSegment, err = node.GetTargetSegment(&collectionName, &partitionTag)
+//	if err != nil {
+//		// TODO: throw runtime error
+//		fmt.Println(err.Error())
+//		return schema.Status{}
+//	}
+//
+//	// TODO: check error
+//	var result, _ = SegmentInsert(targetSegment, &entityIds, &timestamps, vectorRecords)
+//
+//	wg.Done()
+//	return publishResult(&result, clientId)
+//}
 
-	// TODO: prevent Memory copy
-	var entityIds []uint64
-	var timestamps []uint64
+func (node *QueryNode) searchDeleteInMap() {
+	var ids, timestamps, segmentIDs = node.GetSegmentByEntityId()
 
-	for i, msg := range node.buffer.DeleteBuffer {
-		if msg.Timestamp <= timeNow {
-			entityIds = append(entityIds, msg.EntityId)
-			timestamps = append(timestamps, msg.Timestamp)
-			node.buffer.validDeleteBuffer[i] = false
+	for i := 0; i <= len(ids); i++ {
+		id := ids[i]
+		timestamp := timestamps[i]
+		segmentID := segmentIDs[i]
+		for timeRange, records := range node.deleteRecordsMap {
+			if timestamp < timeRange.timestampMax && timestamp > timeRange.timestampMin {
+				for _, r := range *records.deleteRecords {
+					if r.timestamp == timestamp && r.entityID == id {
+						r.segmentID = segmentID
+						records.count <- <- records.count - 1
+					}
+				}
+			}
+		}
+	}
+}
+
+func (node *QueryNode) Delete() schema.Status {
+	type DeleteData struct {
+		ids 			*[]int64
+		timestamp 		*[]uint64
+	}
+	for _, records := range node.deleteRecordsMap {
+		// TODO: multi-thread delete
+		if <- records.count == 0 {
+			// 1. Sort delete records by segment id
+			segment2records := make(map[int64]DeleteData)
+			for _, r := range *records.deleteRecords {
+				*segment2records[r.segmentID].ids = append(*segment2records[r.segmentID].ids, r.entityID)
+				*segment2records[r.segmentID].timestamp = append(*segment2records[r.segmentID].timestamp, r.timestamp)
+			}
+			// 2. Do batched delete
+			for segmentID, deleteData := range segment2records {
+				var segment, err = node.GetSegmentBySegmentID(segmentID)
+				if err != nil {
+					fmt.Println(err.Error())
+					return schema.Status{ErrorCode: 1}
+				}
+				err = segment.SegmentDelete(deleteData.ids, deleteData.timestamp)
+				if err != nil {
+					fmt.Println(err.Error())
+					return schema.Status{ErrorCode: 1}
+				}
+			}
 		}
 	}
 
-	for i, isValid := range node.buffer.validDeleteBuffer {
-		if !isValid {
-			copy(node.buffer.DeleteBuffer[i:], node.buffer.DeleteBuffer[i+1:]) // Shift a[i+1:] left one index.
-			node.buffer.DeleteBuffer[len(node.buffer.DeleteBuffer)-1] = nil    // Erase last element (write zero value).
-			node.buffer.DeleteBuffer = node.buffer.DeleteBuffer[:len(node.buffer.DeleteBuffer)-1]     // Truncate slice.
-		}
-	}
-
-	for _, msg := range deleteMessages {
-		if msg.Timestamp <= timeNow {
-			entityIds = append(entityIds, msg.EntityId)
-			timestamps = append(timestamps, msg.Timestamp)
-		} else {
-			node.buffer.DeleteBuffer = append(node.buffer.DeleteBuffer, msg)
-			node.buffer.validDeleteBuffer = append(node.buffer.validDeleteBuffer, true)
-		}
-	}
-
-	if entityIds == nil {
-		// TODO: throw runtime error
-		fmt.Println("no entities found")
-		return schema.Status{}
-	}
-	// TODO: does all entities from a common batch are in the same segment?
-	var targetSegment = node.GetSegmentByEntityId(entityIds[0])
-
-	// TODO: check error
-	var result, _ = SegmentDelete(targetSegment, &entityIds, &timestamps)
-
-	wg.Done()
-	return publishResult(&result, clientId)
+	return schema.Status{ErrorCode: 0}
 }
 
 func (node *QueryNode) Search(searchMessages []*schema.SearchMsg, wg *sync.WaitGroup) schema.Status {
-	var timeNow = node.GetTSOTime()
-	var collectionName = searchMessages[0].CollectionName
-	var partitionTag = searchMessages[0].PartitionTag
 	var clientId = searchMessages[0].ClientId
-	var queryString = searchMessages[0].VectorParam.Json
 
-	// TODO: prevent Memory copy
-	var records []schema.VectorRecord
-	var timestamps []uint64
-
-	for i, msg := range node.buffer.SearchBuffer {
-		if msg.Timestamp <= timeNow {
-			records = append(records, *msg.VectorParam.RowRecord)
-			timestamps = append(timestamps, msg.Timestamp)
-			node.buffer.validSearchBuffer[i] = false
-		}
-	}
-
-	for i, isValid := range node.buffer.validSearchBuffer {
-		if !isValid {
-			copy(node.buffer.SearchBuffer[i:], node.buffer.SearchBuffer[i+1:]) // Shift a[i+1:] left one index.
-			node.buffer.SearchBuffer[len(node.buffer.SearchBuffer)-1] = nil    // Erase last element (write zero value).
-			node.buffer.SearchBuffer = node.buffer.SearchBuffer[:len(node.buffer.SearchBuffer)-1]     // Truncate slice.
-		}
-	}
-
+	// Traverse all messages in the current messageClient.
+	// TODO: Do not receive batched search requests
 	for _, msg := range searchMessages {
-		if msg.Timestamp <= timeNow {
-			records = append(records, *msg.VectorParam.RowRecord)
-			timestamps = append(timestamps, msg.Timestamp)
-		} else {
-			node.buffer.SearchBuffer = append(node.buffer.SearchBuffer, msg)
-			node.buffer.validSearchBuffer = append(node.buffer.validSearchBuffer, true)
+		var results []*SearchResult
+		// TODO: get top-k's k from queryString
+		const TopK = 1
+
+		// 1. Do search in all segment
+		var timestamp = msg.Timestamp
+		var vector = msg.Records
+		for _, segment := range node.SegmentsMap {
+			var res, err = segment.SegmentSearch("", timestamp, vector)
+			if err != nil {
+				fmt.Println(err.Error())
+				return schema.Status{ErrorCode: 1}
+			}
+			results = append(results, res)
 		}
-	}
 
-	var targetSegment, err = node.GetTargetSegment(&collectionName, &partitionTag)
-	if err != nil {
-		// TODO: throw runtime error
-		fmt.Println(err.Error())
-		return schema.Status{}
-	}
+		// 2. Reduce results
 
-	// TODO: check error
-	var result, _ = SegmentSearch(targetSegment, queryString, &timestamps, &records)
+		// 3. publish result to pulsar
+		publishSearchResult(&results, clientId)
+	}
 
 	wg.Done()
-	return publishSearchResult(result, clientId)
+	return schema.Status{ErrorCode: 0}
 }
