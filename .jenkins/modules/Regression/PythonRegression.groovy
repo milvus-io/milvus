@@ -36,7 +36,7 @@ try {
     throw exc
 } finally {
     dir ('build/docker/deploy') {
-        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} ps | tail -n +3 | awk \'{ print $1 }\' | ( while read arg; do docker logs -t $arg > $arg.log 2>&1; done )'
+        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} ps -a | tail -n +3 | awk \'{ print $1 }\' | ( while read arg; do docker logs -t $arg > $arg.log 2>&1; done )'
         archiveArtifacts artifacts: "**.log", allowEmptyArchive: true
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} down --rmi all -v || true'
     }

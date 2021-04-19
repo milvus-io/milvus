@@ -3,12 +3,10 @@ package components
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"time"
 
 	ms "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
-	"github.com/zilliztech/milvus-distributed/internal/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 
@@ -24,8 +22,8 @@ type DataService struct {
 func NewDataService(ctx context.Context, factory msgstream.Factory) (*DataService, error) {
 	service := dataservice.NewGrpcService(ctx, factory)
 
-	masterservice.Params.Init()
-	client, err := ms.NewGrpcClient(fmt.Sprintf("%s:%d", masterservice.Params.Address, masterservice.Params.Port), 30*time.Second)
+	dataservice.Params.Init()
+	client, err := ms.NewGrpcClient(dataservice.Params.MasterAddress, 30*time.Second)
 	if err != nil {
 		return nil, err
 	}
