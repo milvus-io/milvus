@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const ctxTimeInMillisecond = 200
+const ctxTimeInMillisecond = 2000
 const closeWithDeadline = true
 
 // NOTE: start pulsar and etcd before test
