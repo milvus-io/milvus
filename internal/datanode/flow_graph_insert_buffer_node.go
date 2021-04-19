@@ -137,6 +137,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				for _, pos := range iMsg.startPositions {
 					if pos.ChannelName == segment.channelName {
 						startPosition = pos
+						break
 					}
 				}
 				if startPosition == nil {
@@ -457,6 +458,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		if ibNode.insertBuffer.full(currentSegID) {
 			log.Debug(". Insert Buffer full, auto flushing ",
 				zap.Int32("num of rows", ibNode.insertBuffer.size(currentSegID)))
+
 			collSch, err := ibNode.getCollectionSchemaByID(collection.GetID())
 			if err != nil {
 				log.Error("Auto flush failed .. cannot get collection schema ..", zap.Error(err))
@@ -516,16 +518,23 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			log.Debug(".. Buffer not empty, flushing ..")
 			ibNode.flushMap.Store(currentSegID, ibNode.insertBuffer.insertData[currentSegID])
 			delete(ibNode.insertBuffer.insertData, currentSegID)
+			clearFn := func() {
+				finishCh <- false
+				log.Debug(".. Clearing flush Buffer ..")
+				ibNode.flushMap.Delete(currentSegID)
+			}
 
 			seg, err := ibNode.replica.getSegmentByID(currentSegID)
 			if err != nil {
 				log.Error("Flush failed .. cannot get segment ..", zap.Error(err))
+				clearFn()
 				continue
 			}
 
 			collSch, err := ibNode.getCollectionSchemaByID(seg.collectionID)
 			if err != nil {
 				log.Error("Flush failed .. cannot get collection schema ..", zap.Error(err))
+				clearFn()
 				continue
 			}
 
@@ -557,10 +566,11 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 func flushSegmentTxn(collMeta *etcdpb.CollectionMeta, segID UniqueID, partitionID UniqueID, collID UniqueID,
 	insertData *sync.Map, meta *binlogMeta, kv kv.Base, finishCh chan<- bool) {
 
-	defer func() {
+	clearFn := func(isSuccess bool) {
+		finishCh <- isSuccess
 		log.Debug(".. Clearing flush Buffer ..")
 		insertData.Delete(segID)
-	}()
+	}
 
 	inCodec := storage.NewInsertCodec(collMeta)
 
@@ -568,14 +578,14 @@ func flushSegmentTxn(collMeta *etcdpb.CollectionMeta, segID UniqueID, partitionI
 	data, ok := insertData.Load(segID)
 	if !ok {
 		log.Error("Flush failed ... cannot load insertData ..")
-		finishCh <- false
+		clearFn(false)
 		return
 	}
 
 	binLogs, err := inCodec.Serialize(partitionID, segID, data.(*InsertData))
 	if err != nil {
 		log.Error("Flush failed ... cannot generate binlog ..", zap.Error(err))
-		finishCh <- false
+		clearFn(false)
 		return
 	}
 
@@ -587,14 +597,14 @@ func flushSegmentTxn(collMeta *etcdpb.CollectionMeta, segID UniqueID, partitionI
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
 		if err != nil {
 			log.Error("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
-			finishCh <- false
+			clearFn(false)
 			return
 		}
 
 		k, err := meta.genKey(true, collID, partitionID, segID, fieldID)
 		if err != nil {
 			log.Error("Flush failed ... cannot alloc ID ..", zap.Error(err))
-			finishCh <- false
+			clearFn(false)
 			return
 		}
 
@@ -608,7 +618,7 @@ func flushSegmentTxn(collMeta *etcdpb.CollectionMeta, segID UniqueID, partitionI
 	if err != nil {
 		log.Error("Flush failed ... cannot save to MinIO ..", zap.Error(err))
 		_ = kv.MultiRemove(paths)
-		finishCh <- false
+		clearFn(false)
 		return
 	}
 
@@ -617,12 +627,11 @@ func flushSegmentTxn(collMeta *etcdpb.CollectionMeta, segID UniqueID, partitionI
 	if err != nil {
 		log.Error("Flush failed ... cannot save binlog paths ..", zap.Error(err))
 		_ = kv.MultiRemove(paths)
-		finishCh <- false
+		clearFn(false)
 		return
 	}
 
-	finishCh <- true
-
+	clearFn(true)
 }
 
 func (ibNode *insertBufferNode) completeFlush(segID UniqueID, finishCh <-chan bool) {

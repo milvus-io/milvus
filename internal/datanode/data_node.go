@@ -40,7 +40,7 @@ type DataNode struct {
 	masterService types.MasterService
 	dataService   types.DataService
 
-	flushChan chan *flushMsg
+	flushChan chan<- *flushMsg
 	replica   Replica
 
 	closer io.Closer
@@ -135,9 +135,10 @@ func (node *DataNode) Init() error {
 	var alloc allocatorInterface = newAllocator(node.masterService)
 
 	chanSize := 100
-	node.flushChan = make(chan *flushMsg, chanSize)
+	flushChan := make(chan *flushMsg, chanSize)
+	node.flushChan = flushChan
 
-	node.dataSyncService = newDataSyncService(node.ctx, node.flushChan, replica, alloc, node.msFactory)
+	node.dataSyncService = newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory)
 	node.dataSyncService.init()
 	node.metaService = newMetaService(node.ctx, replica, node.masterService)
 

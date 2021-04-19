@@ -29,7 +29,7 @@ type ddNode struct {
 	ddRecords *ddRecords
 	ddBuffer  *ddBuffer
 	flushMap  *sync.Map
-	inFlushCh chan *flushMsg
+	inFlushCh <-chan *flushMsg
 
 	kv         kv.Base
 	replica    Replica
@@ -429,7 +429,7 @@ func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
 }
 
 func newDDNode(ctx context.Context, binlogMeta *binlogMeta,
-	inFlushCh chan *flushMsg, replica Replica) *ddNode {
+	inFlushCh <-chan *flushMsg, replica Replica) *ddNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
