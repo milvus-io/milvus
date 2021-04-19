@@ -52,12 +52,6 @@ class IndexWrapper {
     void
     StoreRawData(const knowhere::DatasetPtr& dataset);
 
-    template <typename T>
-    void
-    check_parameter(const std::string& key,
-                    std::function<T(std::string)> fn,
-                    std::optional<T> default_v = std::nullopt);
-
  public:
     void
     BuildWithIds(const knowhere::DatasetPtr& dataset);
