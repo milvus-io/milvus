@@ -144,13 +144,11 @@ func (s *ServiceImpl) Stop() error {
 	var err error
 	nodeClients, err := s.nodeInfos.ObtainAllClients()
 	if err != nil {
-		panic(err)
 		return err
 	}
 	for _, nodeClient := range nodeClients {
 		err = nodeClient.Stop()
 		if err != nil {
-			panic(err)
 			return err
 		}
 	}
