@@ -1,6 +1,7 @@
 package writenode
 
 import (
+	"fmt"
 	"strconv"
 	"sync"
 
@@ -42,6 +43,7 @@ func (colReplica *collectionReplicaImpl) addCollection(collectionID UniqueID, sc
 }
 
 func (colReplica *collectionReplicaImpl) removeCollection(collectionID UniqueID) error {
+	fmt.Println("drop collection:", collectionID)
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 

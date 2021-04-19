@@ -1,10 +1,8 @@
 package writenode
 
 import (
-	"context"
 	"log"
-
-	"github.com/opentracing/opentracing-go"
+	"math"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -34,34 +32,11 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 		// TODO: add error handling
 	}
 
-	var childs []opentracing.Span
-	tracer := opentracing.GlobalTracer()
-	if tracer != nil {
-		for _, msg := range msgStreamMsg.TsMessages() {
-			if msg.Type() == internalPb.MsgType_kInsert {
-				var child opentracing.Span
-				ctx := msg.GetContext()
-				if parent := opentracing.SpanFromContext(ctx); parent != nil {
-					child = tracer.StartSpan("pass filter node",
-						opentracing.FollowsFrom(parent.Context()))
-				} else {
-					child = tracer.StartSpan("pass filter node")
-				}
-				child.SetTag("hash keys", msg.HashKeys())
-				child.SetTag("start time", msg.BeginTs())
-				child.SetTag("end time", msg.EndTs())
-				msg.SetContext(opentracing.ContextWithSpan(ctx, child))
-				childs = append(childs, child)
-			}
-		}
-	}
-
 	ddMsg, ok := (*in[1]).(*ddMsg)
 	if !ok {
 		log.Println("type assertion failed for ddMsg")
 		// TODO: add error handling
 	}
-
 	fdmNode.ddMsg = ddMsg
 
 	var iMsg = insertMsg{
@@ -82,20 +57,11 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 		}
 	}
 
-	for key, msg := range msgStreamMsg.TsMessages() {
+	for _, msg := range msgStreamMsg.TsMessages() {
 		switch msg.Type() {
 		case internalPb.MsgType_kInsert:
-			var ctx2 context.Context
-			if childs != nil {
-				if childs[key] != nil {
-					ctx2 = opentracing.ContextWithSpan(msg.GetContext(), childs[key])
-				} else {
-					ctx2 = context.Background()
-				}
-			}
 			resMsg := fdmNode.filterInvalidInsertMessage(msg.(*msgstream.InsertMsg))
 			if resMsg != nil {
-				resMsg.SetContext(ctx2)
 				iMsg.insertMessages = append(iMsg.insertMessages, resMsg)
 			}
 		// case internalPb.MsgType_kDelete:
@@ -104,11 +70,9 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 			log.Println("Non supporting message type:", msg.Type())
 		}
 	}
-	var res Msg = &iMsg
 
-	for _, child := range childs {
-		child.Finish()
-	}
+	iMsg.gcRecord = ddMsg.gcRecord
+	var res Msg = &iMsg
 	return []*Msg{&res}
 }
 
@@ -133,14 +97,31 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	tmpTimestamps := make([]Timestamp, 0)
 	tmpRowIDs := make([]int64, 0)
 	tmpRowData := make([]*commonpb.Blob, 0)
-	targetTimestamp := records[len(records)-1].timestamp
+
+	// calculate valid time range
+	timeBegin := Timestamp(0)
+	timeEnd := Timestamp(math.MaxUint64)
+	for _, record := range records {
+		if record.createOrDrop && timeBegin < record.timestamp {
+			timeBegin = record.timestamp
+		}
+		if !record.createOrDrop && timeEnd > record.timestamp {
+			timeEnd = record.timestamp
+		}
+	}
+
 	for i, t := range msg.Timestamps {
-		if t >= targetTimestamp {
+		if t >= timeBegin && t <= timeEnd {
 			tmpTimestamps = append(tmpTimestamps, t)
 			tmpRowIDs = append(tmpRowIDs, msg.RowIDs[i])
 			tmpRowData = append(tmpRowData, msg.RowData[i])
 		}
 	}
+
+	if len(tmpRowIDs) <= 0 {
+		return nil
+	}
+
 	msg.Timestamps = tmpTimestamps
 	msg.RowIDs = tmpRowIDs
 	msg.RowData = tmpRowData
