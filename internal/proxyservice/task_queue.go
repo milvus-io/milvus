@@ -2,10 +2,10 @@ package proxyservice
 
 import (
 	"container/list"
-	"log"
+	"errors"
 	"sync"
 
-	"errors"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 )
 
 type TaskQueue interface {

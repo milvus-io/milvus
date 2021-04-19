@@ -3,18 +3,18 @@ package proxyservice
 import (
 	"context"
 	"io/ioutil"
-	"log"
 	"os"
 	"path"
 	"runtime"
 	"strconv"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 )
 
@@ -37,7 +37,7 @@ func (s *ProxyService) fillNodeInitParams() error {
 		_, fpath, _, _ := runtime.Caller(0)
 		configFile := path.Dir(fpath) + "/../../configs/" + fileName
 		_, err := os.Stat(configFile)
-		log.Printf("configFile = %s", configFile)
+		log.Debug("proxyservice", zap.String("configFile = ", configFile))
 		if os.IsNotExist(err) {
 			runPath, err := os.Getwd()
 			if err != nil {
@@ -97,7 +97,7 @@ func (s *ProxyService) Init() error {
 	if err != nil {
 		return err
 	}
-	log.Println("fill node init params ...")
+	log.Debug("fill node init params ...")
 
 	m := map[string]interface{}{
 		"PulsarAddress":  Params.PulsarAddress,
@@ -110,9 +110,8 @@ func (s *ProxyService) Init() error {
 
 	serviceTimeTickMsgStream, _ := s.msFactory.NewTtMsgStream(s.ctx)
 	serviceTimeTickMsgStream.AsProducer([]string{Params.ServiceTimeTickChannel})
-	// FIXME(wxyu): use log.Debug instead
-	log.Println("proxyservice AsProducer: ", []string{Params.ServiceTimeTickChannel})
-	log.Println("create service time tick producer channel: ", []string{Params.ServiceTimeTickChannel})
+	log.Debug("proxyservice", zap.Strings("proxyservice AsProducer", []string{Params.ServiceTimeTickChannel}))
+	log.Debug("proxyservice", zap.Strings("create service time tick producer channel", []string{Params.ServiceTimeTickChannel}))
 
 	channels := make([]string, Params.InsertChannelNum)
 	var i int64 = 0
@@ -121,20 +120,17 @@ func (s *ProxyService) Init() error {
 	}
 	insertTickMsgStream, _ := s.msFactory.NewMsgStream(s.ctx)
 	insertTickMsgStream.AsProducer(channels)
-	// FIXME(wxyu): use log.Debug instead
-	log.Println("proxyservice AsProducer: ", channels)
-	log.Println("create insert time tick producer channel: ", channels)
+	log.Debug("proxyservice", zap.Strings("create insert time tick producer channels", channels))
 
 	nodeTimeTickMsgStream, _ := s.msFactory.NewMsgStream(s.ctx)
 	nodeTimeTickMsgStream.AsConsumer(Params.NodeTimeTickChannel,
 		"proxyservicesub") // TODO: add config
-	log.Println("proxynode AsConsumer: ", Params.NodeTimeTickChannel, " : ", "proxyservicesub")
-	log.Println("create node time tick consumer channel: ", Params.NodeTimeTickChannel)
+	log.Debug("proxyservice", zap.Strings("create node time tick consumer channel", Params.NodeTimeTickChannel))
 
 	ttBarrier := newSoftTimeTickBarrier(s.ctx, nodeTimeTickMsgStream, []UniqueID{1}, 10)
-	log.Println("create soft time tick barrier ...")
+	log.Debug("create soft time tick barrier ...")
 	s.tick = newTimeTick(s.ctx, ttBarrier, serviceTimeTickMsgStream, insertTickMsgStream)
-	log.Println("create time tick ...")
+	log.Debug("create time tick ...")
 
 	return nil
 }
@@ -142,21 +138,21 @@ func (s *ProxyService) Init() error {
 func (s *ProxyService) Start() error {
 	s.stateCode = internalpb2.StateCode_HEALTHY
 	s.sched.Start()
-	log.Println("start scheduler ...")
+	log.Debug("start scheduler ...")
 	return s.tick.Start()
 }
 
 func (s *ProxyService) Stop() error {
 	s.sched.Close()
-	log.Println("close scheduler ...")
+	log.Debug("close scheduler ...")
 	s.tick.Close()
-	log.Println("close time tick")
+	log.Debug("close time tick")
 
 	err := s.nodeInfos.ReleaseAllClients()
 	if err != nil {
 		panic(err)
 	}
-	log.Println("stop all node ProxyNodes ...")
+	log.Debug("stop all node ProxyNodes ...")
 
 	s.cancel()
 
@@ -198,7 +194,7 @@ func (s *ProxyService) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 }
 
 func (s *ProxyService) RegisterLink(ctx context.Context) (*milvuspb.RegisterLinkResponse, error) {
-	log.Println("register link")
+	log.Debug("register link")
 
 	t := &RegisterLinkTask{
 		ctx:       ctx,
@@ -234,7 +230,6 @@ func (s *ProxyService) RegisterLink(ctx context.Context) (*milvuspb.RegisterLink
 }
 
 func (s *ProxyService) RegisterNode(ctx context.Context, request *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error) {
-	log.Println("RegisterNode: ", request)
 
 	t := &RegisterNodeTask{
 		ctx:         ctx,
@@ -273,7 +268,7 @@ func (s *ProxyService) RegisterNode(ctx context.Context, request *proxypb.Regist
 }
 
 func (s *ProxyService) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	log.Println("InvalidateCollectionMetaCache")
+	log.Debug("InvalidateCollectionMetaCache")
 
 	t := &InvalidateCollectionMetaCacheTask{
 		ctx:       ctx,

@@ -2,17 +2,19 @@ package proxynode
 
 import (
 	"bytes"
-	"log"
+	"fmt"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/spf13/cast"
-
 	"github.com/spf13/viper"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"go.uber.org/zap"
 
+	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
 
@@ -52,6 +54,8 @@ type ParamTable struct {
 	MaxDimension                       int64
 	DefaultPartitionTag                string
 	DefaultIndexName                   string
+
+	Log log.Config
 }
 
 var Params ParamTable
@@ -73,7 +77,7 @@ func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb2.InitParam
 					for _, v := range val {
 						ss, err := cast.ToStringE(v)
 						if err != nil {
-							log.Panic(err)
+							log.Panic("proxynode", zap.String("error", err.Error()))
 						}
 						if len(str) == 0 {
 							str = ss
@@ -83,10 +87,10 @@ func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb2.InitParam
 					}
 
 				default:
-					log.Panicf("undefine config type, key=%s", key)
+					log.Panic("proxynode", zap.String("error", "Undefined config type, key="+key))
 				}
 			}
-			log.Println("key: ", key, ", value: ", str)
+			log.Debug("proxynode", zap.String(key, str))
 			err = pt.Save(key, str)
 			if err != nil {
 				panic(err)
@@ -148,6 +152,7 @@ func (pt *ParamTable) initParams() {
 	pt.initMaxDimension()
 	pt.initDefaultPartitionTag()
 	pt.initDefaultIndexName()
+	pt.initLogCfg()
 
 }
 
@@ -173,7 +178,7 @@ func (pt *ParamTable) initQueryNodeIDList() []UniqueID {
 	for _, i := range queryNodeIDs {
 		v, err := strconv.Atoi(i)
 		if err != nil {
-			log.Panicf("load proxynode id list error, %s", err.Error())
+			log.Panic("proxynode", zap.String("load proxynode id list error", err.Error()))
 		}
 		ret = append(ret, UniqueID(v))
 	}
@@ -397,4 +402,35 @@ func (pt *ParamTable) initDefaultIndexName() {
 		panic(err)
 	}
 	pt.DefaultIndexName = name
+}
+
+func (pt *ParamTable) initLogCfg() {
+	pt.Log = log.Config{}
+	format, err := pt.Load("log.format")
+	if err != nil {
+		panic(err)
+	}
+	pt.Log.Format = format
+	level, err := pt.Load("log.level")
+	if err != nil {
+		panic(err)
+	}
+	pt.Log.Level = level
+	devStr, err := pt.Load("log.dev")
+	if err != nil {
+		panic(err)
+	}
+	dev, err := strconv.ParseBool(devStr)
+	if err != nil {
+		panic(err)
+	}
+	pt.Log.Development = dev
+	pt.Log.File.MaxSize = pt.ParseInt("log.file.maxSize")
+	pt.Log.File.MaxBackups = pt.ParseInt("log.file.maxBackups")
+	pt.Log.File.MaxDays = pt.ParseInt("log.file.maxAge")
+	rootPath, err := pt.Load("log.file.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	pt.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("proxynode-%d.log", pt.ProxyID))
 }
