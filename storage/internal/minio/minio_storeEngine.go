@@ -8,7 +8,7 @@ import (
 	. "github.com/czs007/suvlim/storage/pkg/types"
 )
 
-var bucketName = "zcbucket"
+var bucketName = "zilliz"
 
 type minioStore struct {
 	client *minio.Client
