@@ -39,6 +39,14 @@ type MessageClient struct {
 	MessageClientID int
 }
 
+func (mc *MessageClient) GetTimeNow() uint64 {
+	msg, ok := <-mc.timeSyncCfg.TimeSync()
+	if !ok {
+		fmt.Println("cnn't get data from timesync chan")
+	}
+	return msg.Timestamp
+}
+
 func (mc *MessageClient) TimeSyncStart() uint64 {
 	return mc.timestampBatchStart
 }

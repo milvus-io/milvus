@@ -96,7 +96,12 @@ func (node *QueryNode) processSegmentCreate(id string, value string) {
 	if collection != nil {
 		partition := collection.GetPartitionByName(segment.PartitionTag)
 		if partition != nil {
-			partition.NewSegment(int64(segment.SegmentID)) // todo change all to uint64
+			newSegmentID := int64(segment.SegmentID) // todo change all to uint64
+			// start new segment and add it into partition.OpenedSegments
+			newSegment := partition.NewSegment(newSegmentID)
+			newSegment.SegmentStatus = SegmentOpened
+			partition.OpenedSegments = append(partition.OpenedSegments, newSegment)
+			node.SegmentsMap[newSegmentID] = newSegment
 		}
 	}
 	// segment.CollectionName
