@@ -2,6 +2,32 @@
 
 ## 10. Master
 
+,
+
+#### 10.1 API
+
+```go
+type Client interface {
+  CreateCollection(req CreateCollectionRequest) error
+  DropCollection(req DropCollectionRequest) error
+  HasCollection(req HasCollectionRequest) (bool, error)
+  DescribeCollection(req DescribeCollectionRequest) (CollectionDescription, error)
+  ShowCollections(req ShowCollectionRequest) ([]string, error)
+  CreatePartition(req CreatePartitionRequest) error
+  DropPartition(req DropPartitionRequest) error
+  HasPartition(req HasPartitionRequest) (bool, error)
+  DescribePartition(req DescribePartitionRequest) (PartitionDescription, error)
+  ShowPartitions(req ShowPartitionRequest) ([]string, error)
+  AllocTimestamp(req TsoRequest) (TsoResponse, error)
+  AllocID(req IDRequest) (IDResponse, error)
+  GetDdChannel() (string, error)
+  GetTimeTickChannel() (string, error)
+  GetStatsChannel() (string, error)
+}
+```
+
+
+
 
 
 #### 10.1 Interfaces (RPC)
