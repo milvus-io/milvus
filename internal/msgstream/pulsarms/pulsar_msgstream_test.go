@@ -568,7 +568,7 @@ func TestStream_PulsarTtMsgStream_Seek(t *testing.T) {
 	msgPack3.Msgs = append(msgPack3.Msgs, getTsMsg(commonpb.MsgType_kInsert, 9, 9))
 
 	msgPack4 := MsgPack{}
-	msgPack4.Msgs = append(msgPack2.Msgs, getTimeTickMsg(11, 11, 11))
+	msgPack4.Msgs = append(msgPack4.Msgs, getTimeTickMsg(11, 11, 11))
 
 	msgPack5 := MsgPack{}
 	msgPack5.Msgs = append(msgPack5.Msgs, getTimeTickMsg(15, 15, 15))
