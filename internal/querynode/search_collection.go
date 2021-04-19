@@ -10,12 +10,14 @@ import (
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
+	oplog "github.com/opentracing/opentracing-go/log"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/util/trace"
+	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 )
 
 type searchCollection struct {
@@ -135,18 +137,29 @@ func (s *searchCollection) receiveSearchMsg() {
 			log.Debug("stop searchCollection's receiveSearchMsg", zap.Int64("collectionID", s.collectionID))
 			return
 		case sm := <-s.msgBuffer:
+			sp, ctx := trace.StartSpanFromContext(sm.TraceCtx())
+			sm.SetTraceCtx(ctx)
 			log.Debug("get search message from msgBuffer",
 				zap.Int64("msgID", sm.ID()),
 				zap.Int64("collectionID", sm.CollectionID))
 			serviceTime := s.getServiceableTime()
 			if sm.BeginTs() > serviceTime {
+				bt, _ := tsoutil.ParseTS(sm.BeginTs())
+				st, _ := tsoutil.ParseTS(serviceTime)
 				log.Debug("querynode::receiveSearchMsg: add to unsolvedMsgs",
-					zap.Any("sm.BeginTs", sm.BeginTs()),
-					zap.Any("serviceTime", serviceTime),
+					zap.Any("sm.BeginTs", bt),
+					zap.Any("serviceTime", st),
 					zap.Any("delta seconds", (sm.BeginTs()-serviceTime)/(1000*1000*1000)),
 					zap.Any("collectionID", s.collectionID),
 				)
 				s.addToUnsolvedMsg(sm)
+				sp.LogFields(
+					oplog.String("send to unsolved buffer", "send to unsolved buffer"),
+					oplog.Object("begin ts", bt),
+					oplog.Object("serviceTime", st),
+					oplog.Float64("delta seconds", float64(sm.BeginTs()-serviceTime)/(1000.0*1000.0*1000.0)),
+				)
+				sp.Finish()
 				continue
 			}
 			log.Debug("doing search in receiveSearchMsg...",
@@ -166,6 +179,7 @@ func (s *searchCollection) receiveSearchMsg() {
 			log.Debug("do search done in receiveSearchMsg",
 				zap.Int64("msgID", sm.ID()),
 				zap.Int64("collectionID", sm.CollectionID))
+			sp.Finish()
 		}
 	}
 }
