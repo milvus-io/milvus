@@ -27,10 +27,10 @@ const (
 type metaService struct {
 	ctx       context.Context
 	kvBase    *kv.EtcdKV
-	container *ColSegContainer
+	container *container
 }
 
-func newMetaService(ctx context.Context, container *ColSegContainer) *metaService {
+func newMetaService(ctx context.Context, container *container) *metaService {
 	ETCDAddr := "http://"
 	ETCDAddr += conf.Config.Etcd.Address
 	ETCDPort := conf.Config.Etcd.Port
@@ -143,9 +143,12 @@ func (mService *metaService) processCollectionCreate(id string, value string) {
 
 	col := mService.collectionUnmarshal(value)
 	if col != nil {
-		newCollection := mService.container.addCollection(col, value)
+		err := (*mService.container).addCollection(col, value)
+		if err != nil {
+			log.Println(err)
+		}
 		for _, partitionTag := range col.PartitionTags {
-			_, err := mService.container.addPartition(newCollection, partitionTag)
+			err = (*mService.container).addPartition(col.ID, partitionTag)
 			if err != nil {
 				log.Println(err)
 			}
@@ -163,24 +166,10 @@ func (mService *metaService) processSegmentCreate(id string, value string) {
 
 	// TODO: what if seg == nil? We need to notify master and return rpc request failed
 	if seg != nil {
-		var col, err = mService.container.getCollectionByID(seg.CollectionID)
+		err := (*mService.container).addSegment(seg.SegmentID, seg.PartitionTag, seg.CollectionID)
 		if err != nil {
 			log.Println(err)
 			return
-		}
-		if col != nil {
-			var partition, err = mService.container.getPartitionByTag(col.Name(), seg.PartitionTag)
-			if err != nil {
-				log.Println(err)
-				return
-			}
-			if partition != nil {
-				_, err = mService.container.addSegment(col, partition, seg.SegmentID)
-				if err != nil {
-					log.Println(err)
-					return
-				}
-			}
 		}
 	}
 }
@@ -206,7 +195,7 @@ func (mService *metaService) processSegmentModify(id string, value string) {
 	}
 
 	if seg != nil {
-		targetSegment, err := mService.container.getSegmentByID(seg.SegmentID)
+		targetSegment, err := (*mService.container).getSegmentByID(seg.SegmentID)
 		if err != nil {
 			log.Println(err)
 			return
@@ -241,13 +230,7 @@ func (mService *metaService) processSegmentDelete(id string) {
 		log.Println("Cannot parse segment id:" + id)
 	}
 
-	seg, err := mService.container.getSegmentByID(segmentID)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	err = mService.container.removeSegment(seg)
+	err = (*mService.container).removeSegment(segmentID)
 	if err != nil {
 		log.Println(err)
 		return
@@ -262,13 +245,7 @@ func (mService *metaService) processCollectionDelete(id string) {
 		log.Println("Cannot parse collection id:" + id)
 	}
 
-	targetCollection, err := mService.container.getCollectionByID(collectionID)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	err = mService.container.removeCollection(targetCollection)
+	err = (*mService.container).removeCollection(collectionID)
 	if err != nil {
 		log.Println(err)
 		return
