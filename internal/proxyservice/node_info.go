@@ -1,10 +1,14 @@
 package proxyservice
 
 import (
-	"fmt"
+	"context"
+	"log"
 	"math/rand"
+	"strconv"
 	"sync"
 	"time"
+
+	grpcproxynodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/proxynode/client"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 
@@ -16,16 +20,12 @@ type NodeInfo struct {
 	port int64
 }
 
-// TODO: replace as real node client impl
 type NodeClient interface {
+	Init() error
+	Start() error
+	Stop() error
+
 	InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) error
-}
-
-type FakeNodeClient struct {
-}
-
-func (c *FakeNodeClient) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) error {
-	panic("implement me")
 }
 
 type GlobalNodeInfoTable struct {
@@ -86,9 +86,17 @@ func (table *GlobalNodeInfoTable) createClients() error {
 	for nodeID, info := range table.infos {
 		_, ok := table.clients[nodeID]
 		if !ok {
-			// TODO: use info to create client
-			fmt.Println(info)
-			table.clients[nodeID] = &FakeNodeClient{}
+			log.Println(info)
+			table.clients[nodeID] = grpcproxynodeclient.NewClient(context.Background(), info.ip+":"+strconv.Itoa(int(info.port)))
+			var err error
+			err = table.clients[nodeID].Init()
+			if err != nil {
+				return err
+			}
+			err = table.clients[nodeID].Start()
+			if err != nil {
+				return err
+			}
 		}
 	}
 

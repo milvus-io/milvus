@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"math/rand"
 	"sync"
 	"time"
@@ -112,6 +113,7 @@ func (node *NodeImpl) Init() error {
 	if err != nil {
 		return err
 	}
+	log.Println("service was ready ...")
 
 	request := &proxypb.RegisterNodeRequest{
 		Address: &commonpb.Address{
@@ -171,6 +173,7 @@ func (node *NodeImpl) Init() error {
 	}
 
 	node.UpdateStateCode(internalpb2.StateCode_HEALTHY)
+	log.Println("proxy node is healthy ...")
 
 	// todo
 	//Params.InsertChannelNames, err = node.dataServiceClient.GetInsertChannels()
@@ -196,6 +199,7 @@ func (node *NodeImpl) Init() error {
 	node.queryMsgStream = pulsarms.NewPulsarMsgStream(node.ctx, Params.MsgStreamSearchBufSize)
 	node.queryMsgStream.SetPulsarClient(pulsarAddress)
 	node.queryMsgStream.CreatePulsarProducers(Params.SearchChannelNames)
+	log.Println("create query message stream ...")
 
 	masterAddr := Params.MasterAddress
 	idAllocator, err := allocator.NewIDAllocator(node.ctx, masterAddr)
@@ -227,6 +231,7 @@ func (node *NodeImpl) Init() error {
 		return insertRepackFunc(tsMsgs, hashKeys, node.segAssigner, true)
 	}
 	node.manipulationMsgStream.SetRepackFunc(repackFuncImpl)
+	log.Println("create manipulation message stream ...")
 
 	node.sched, err = NewTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator)
 	if err != nil {
@@ -240,13 +245,28 @@ func (node *NodeImpl) Init() error {
 
 func (node *NodeImpl) Start() error {
 	initGlobalMetaCache(node.ctx, node)
+	log.Println("init global meta cache ...")
+
 	node.manipulationMsgStream.Start()
+	log.Println("start manipulation message stream ...")
+
 	node.queryMsgStream.Start()
+	log.Println("start query message stream ...")
+
 	node.sched.Start()
+	log.Println("start scheduler ...")
+
 	node.idAllocator.Start()
+	log.Println("start id allocator ...")
+
 	node.tsoAllocator.Start()
+	log.Println("start tso allocator ...")
+
 	node.segAssigner.Start()
+	log.Println("start seg assigner ...")
+
 	node.tick.Start()
+	log.Println("start time tick ...")
 
 	// Start callbacks
 	for _, cb := range node.startCallbacks {

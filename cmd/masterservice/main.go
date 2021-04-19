@@ -12,7 +12,8 @@ import (
 	dsc "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
 	isc "github.com/zilliztech/milvus-distributed/internal/distributed/indexservice/client"
 	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
-	psc "github.com/zilliztech/milvus-distributed/internal/distributed/proxyservice"
+	ps "github.com/zilliztech/milvus-distributed/internal/distributed/proxyservice"
+	psc "github.com/zilliztech/milvus-distributed/internal/distributed/proxyservice/client"
 	is "github.com/zilliztech/milvus-distributed/internal/indexservice"
 	ms "github.com/zilliztech/milvus-distributed/internal/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -33,9 +34,9 @@ func main() {
 
 	cnt := 0
 
-	psc.Params.Init()
-	log.Printf("proxy service address : %s", psc.Params.ServiceAddress)
-	proxyService := psc.NewClient(psc.Params.ServiceAddress)
+	ps.Params.Init()
+	log.Printf("proxy service address : %s", ps.Params.ServiceAddress)
+	proxyService := psc.NewClient(ps.Params.ServiceAddress)
 	if err = proxyService.Init(); err != nil {
 		panic(err)
 	}

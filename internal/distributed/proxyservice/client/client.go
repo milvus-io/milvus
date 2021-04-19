@@ -1,4 +1,4 @@
-package grpcproxyservice
+package grpcproxyserviceclient
 
 import (
 	"context"

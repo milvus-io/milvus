@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/spf13/cast"
+
 	"github.com/spf13/viper"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 
@@ -58,44 +59,50 @@ func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb2.InitParam
 
 	config := viper.New()
 	config.SetConfigType("yaml")
+	save := func() error {
+		for _, key := range config.AllKeys() {
+			val := config.Get(key)
+			str, err := cast.ToStringE(val)
+			if err != nil {
+				switch val := val.(type) {
+				case []interface{}:
+					str = str[:0]
+					for _, v := range val {
+						ss, err := cast.ToStringE(v)
+						if err != nil {
+							log.Panic(err)
+						}
+						if len(str) == 0 {
+							str = ss
+						} else {
+							str = str + "," + ss
+						}
+					}
+
+				default:
+					log.Panicf("undefine config type, key=%s", key)
+				}
+			}
+			log.Println("key: ", key, ", value: ", str)
+			err = pt.Save(key, str)
+			if err != nil {
+				panic(err)
+			}
+		}
+		return nil
+	}
+
 	for _, pair := range initParams.StartParams {
-		if pair.Key == StartParamsKey {
+		if strings.HasPrefix(pair.Key, StartParamsKey) {
 			err := config.ReadConfig(bytes.NewBuffer([]byte(pair.Value)))
 			if err != nil {
 				return err
 			}
-			break
-		}
-	}
-
-	for _, key := range config.AllKeys() {
-		val := config.Get(key)
-		str, err := cast.ToStringE(val)
-		if err != nil {
-			switch val := val.(type) {
-			case []interface{}:
-				str = str[:0]
-				for _, v := range val {
-					ss, err := cast.ToStringE(v)
-					if err != nil {
-						log.Panic(err)
-					}
-					if len(str) == 0 {
-						str = ss
-					} else {
-						str = str + "," + ss
-					}
-				}
-
-			default:
-				log.Panicf("undefine config type, key=%s", key)
+			err = save()
+			if err != nil {
+				return err
 			}
 		}
-		err = pt.Save(key, str)
-		if err != nil {
-			panic(err)
-		}
-
 	}
 
 	pt.initParams()
@@ -194,14 +201,18 @@ func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb2.InitParam
 
 func (pt *ParamTable) Init() {
 	pt.BaseTable.Init()
-	pt.initParams()
+	// err := pt.LoadYaml("advanced/proxy_node.yaml")
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// pt.initParams()
 }
 
 func (pt *ParamTable) initParams() {
 	pt.initPulsarAddress()
 	pt.initQueryNodeIDList()
 	pt.initQueryNodeNum()
-	pt.initProxyID()
+	// pt.initProxyID()
 	pt.initTimeTickInterval()
 	pt.initInsertChannelNames()
 	pt.initDeleteChannelNames()
@@ -264,11 +275,11 @@ func (pt *ParamTable) initProxyID() {
 }
 
 func (pt *ParamTable) initTimeTickInterval() {
-	internalStr, err := pt.Load("proxyNode.timeTickInterval")
+	intervalStr, err := pt.Load("proxyNode.timeTickInterval")
 	if err != nil {
 		panic(err)
 	}
-	interval, err := strconv.Atoi(internalStr)
+	interval, err := strconv.Atoi(intervalStr)
 	if err != nil {
 		panic(err)
 	}
@@ -371,11 +382,12 @@ func (pt *ParamTable) initProxySubName() {
 	if err != nil {
 		panic(err)
 	}
-	proxyIDStr, err := pt.Load("_proxyID")
-	if err != nil {
-		panic(err)
-	}
-	pt.ProxySubName = prefix + "-" + proxyIDStr
+	pt.ProxySubName = prefix
+	// proxyIDStr, err := pt.Load("_proxyID")
+	// if err != nil {
+	// 	panic(err)
+	// }
+	pt.ProxySubName = prefix + "-" + strconv.Itoa(int(pt.ProxyID))
 }
 
 func (pt *ParamTable) initProxyTimeTickChannelNames() {

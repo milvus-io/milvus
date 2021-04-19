@@ -116,6 +116,10 @@ func (t *RegisterNodeTask) Execute() error {
 	err := t.nodeInfos.Register(nodeID, &info)
 	// TODO: fill init params
 	t.response = &proxypb.RegisterNodeResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
 		InitParams: &internalpb2.InitParams{
 			NodeID:      nodeID,
 			StartParams: t.startParams,
