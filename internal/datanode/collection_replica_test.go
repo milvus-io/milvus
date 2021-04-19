@@ -129,12 +129,18 @@ func TestReplica_Segment(t *testing.T) {
 
 		err = replica.setIsFlushed(0)
 		assert.NoError(t, err)
+		err = replica.setStartPosition(0, &internalpb.MsgPosition{})
+		assert.NoError(t, err)
 		err = replica.setEndPosition(0, &internalpb.MsgPosition{})
 		assert.NoError(t, err)
 		update, err = replica.getSegmentStatisticsUpdates(0)
 		assert.NoError(t, err)
 		assert.Nil(t, update.StartPosition)
 		assert.NotNil(t, update.EndPosition)
+
+		err = replica.removeSegment(0)
+		assert.NoError(t, err)
+		assert.False(t, replica.hasSegment(0))
 	})
 
 	t.Run("Test errors", func(t *testing.T) {
@@ -144,6 +150,17 @@ func TestReplica_Segment(t *testing.T) {
 		seg, err := replica.getSegmentByID(0)
 		assert.Error(t, err)
 		assert.Nil(t, seg)
+
+		err = replica.setIsFlushed(0)
+		assert.Error(t, err)
+		err = replica.setStartPosition(0, &internalpb.MsgPosition{})
+		assert.Error(t, err)
+		err = replica.setStartPosition(0, nil)
+		assert.Error(t, err)
+		err = replica.setEndPosition(0, &internalpb.MsgPosition{})
+		assert.Error(t, err)
+		err = replica.setEndPosition(0, nil)
+		assert.Error(t, err)
 
 		err = replica.updateStatistics(0, 0)
 		assert.Error(t, err)

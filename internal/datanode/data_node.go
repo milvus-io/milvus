@@ -130,7 +130,6 @@ func (node *DataNode) Init() error {
 		default:
 			return fmt.Errorf("Invalid key: %v", kv.Key)
 		}
-
 	}
 
 	replica := newReplica()
@@ -140,11 +139,9 @@ func (node *DataNode) Init() error {
 	chanSize := 100
 	flushChan := make(chan *flushMsg, chanSize)
 	node.flushChan = flushChan
-
 	node.dataSyncService = newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory)
 	node.dataSyncService.init()
 	node.metaService = newMetaService(node.ctx, replica, node.masterService)
-
 	node.replica = replica
 
 	return nil
@@ -167,7 +164,6 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 	}
 
 	switch {
-
 	case node.State.Load() != internalpb.StateCode_Initializing:
 		status.Reason = fmt.Sprintf("DataNode %d not initializing!", node.NodeID)
 		return status, errors.New(status.GetReason())
