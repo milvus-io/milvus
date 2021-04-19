@@ -92,7 +92,7 @@ func (watcher *dataNodeTimeTickWatcher) handleTimeTickMsg(msg *msgstream.TimeTic
 				log.Error("get segment from meta error", zap.Int64("segmentID", id), zap.Error(err))
 				continue
 			}
-			if err = watcher.meta.SetSegmentState(id, commonpb.SegmentState_SegmentSealed); err != nil {
+			if err = watcher.meta.SetSegmentState(id, commonpb.SegmentState_Sealed); err != nil {
 				log.Error("set segment state error", zap.Int64("segmentID", id), zap.Error(err))
 				continue
 			}

@@ -1868,7 +1868,7 @@ func (m *IndexStateResponse) GetState() commonpb.IndexState {
 	if m != nil {
 		return m.State
 	}
-	return commonpb.IndexState_INDEX_STATE_NONE
+	return commonpb.IndexState_IndexStateNone
 }
 
 type DropIndexRequest struct {
@@ -2508,7 +2508,7 @@ func (m *PersistentSegmentInfo) GetState() commonpb.SegmentState {
 	if m != nil {
 		return m.State
 	}
-	return commonpb.SegmentState_SegmentNone
+	return commonpb.SegmentState_SegmentStateNone
 }
 
 type PersistentSegmentInfoRequest struct {

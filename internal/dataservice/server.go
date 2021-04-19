@@ -349,7 +349,7 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 				continue
 			}
 			segmentInfo.FlushedTime = realMsg.BeginTimestamp
-			segmentInfo.State = commonpb.SegmentState_SegmentFlushed
+			segmentInfo.State = commonpb.SegmentState_Flushed
 			if err = s.meta.UpdateSegment(segmentInfo); err != nil {
 				log.Error("update segment error", zap.Error(err))
 				continue

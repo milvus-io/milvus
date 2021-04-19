@@ -145,18 +145,18 @@ inline bool ErrorCode_Parse(
     ErrorCode_descriptor(), name, value);
 }
 enum IndexState : int {
-  INDEX_STATE_NONE = 0,
-  INDEX_STATE_UNISSUED = 1,
-  INDEX_STATE_IN_PROGRESS = 2,
-  INDEX_STATE_FINISHED = 3,
-  INDEX_STATE_FAILED = 4,
-  INDEX_STATE_DELETED = 5,
+  IndexStateNone = 0,
+  Unissued = 1,
+  InProgress = 2,
+  Finished = 3,
+  Failed = 4,
+  Deleted = 5,
   IndexState_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   IndexState_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool IndexState_IsValid(int value);
-constexpr IndexState IndexState_MIN = INDEX_STATE_NONE;
-constexpr IndexState IndexState_MAX = INDEX_STATE_DELETED;
+constexpr IndexState IndexState_MIN = IndexStateNone;
+constexpr IndexState IndexState_MAX = Deleted;
 constexpr int IndexState_ARRAYSIZE = IndexState_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* IndexState_descriptor();
@@ -174,17 +174,17 @@ inline bool IndexState_Parse(
     IndexState_descriptor(), name, value);
 }
 enum SegmentState : int {
-  SegmentNone = 0,
-  SegmentNotExist = 1,
-  SegmentGrowing = 2,
-  SegmentSealed = 3,
-  SegmentFlushed = 4,
+  SegmentStateNone = 0,
+  NotExist = 1,
+  Growing = 2,
+  Sealed = 3,
+  Flushed = 4,
   SegmentState_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   SegmentState_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool SegmentState_IsValid(int value);
-constexpr SegmentState SegmentState_MIN = SegmentNone;
-constexpr SegmentState SegmentState_MAX = SegmentFlushed;
+constexpr SegmentState SegmentState_MIN = SegmentStateNone;
+constexpr SegmentState SegmentState_MAX = Flushed;
 constexpr int SegmentState_ARRAYSIZE = SegmentState_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* SegmentState_descriptor();
@@ -202,7 +202,7 @@ inline bool SegmentState_Parse(
     SegmentState_descriptor(), name, value);
 }
 enum MsgType : int {
-  UnSpecific = 0,
+  Undefined = 0,
   CreateCollection = 100,
   DropCollection = 101,
   HasCollection = 102,
@@ -244,7 +244,7 @@ enum MsgType : int {
   MsgType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool MsgType_IsValid(int value);
-constexpr MsgType MsgType_MIN = UnSpecific;
+constexpr MsgType MsgType_MIN = Undefined;
 constexpr MsgType MsgType_MAX = SegmentFlushDone;
 constexpr int MsgType_ARRAYSIZE = MsgType_MAX + 1;
 

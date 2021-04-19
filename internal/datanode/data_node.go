@@ -95,7 +95,6 @@ func (node *DataNode) Init() error {
 
 	req := &datapb.RegisterNodeRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_UnSpecific,
 			SourceID: node.NodeID,
 		},
 		Address: &commonpb.Address{

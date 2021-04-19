@@ -667,7 +667,7 @@ func (m *SegmentStateInfo) GetState() commonpb.SegmentState {
 	if m != nil {
 		return m.State
 	}
-	return commonpb.SegmentState_SegmentNone
+	return commonpb.SegmentState_SegmentStateNone
 }
 
 func (m *SegmentStateInfo) GetCreateTime() uint64 {
@@ -1230,7 +1230,7 @@ func (m *SegmentInfo) GetState() commonpb.SegmentState {
 	if m != nil {
 		return m.State
 	}
-	return commonpb.SegmentState_SegmentNone
+	return commonpb.SegmentState_SegmentStateNone
 }
 
 func (m *SegmentInfo) GetStartPosition() *internalpb2.MsgPosition {

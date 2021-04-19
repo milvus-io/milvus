@@ -1,8 +1,15 @@
 #!/usr/bin/env groovy
 @Library('mpl') _
 
+String cron_timezone = "TZ=Asia/Shanghai"
+String cron_string = BRANCH_NAME == "r0.3-test" ? "50 22 * * * " : ""
+
 pipeline {
     agent none
+    triggers {
+        cron """${cron_timezone}
+            ${cron_string}"""
+    }
     options {
         timestamps()
     }

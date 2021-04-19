@@ -395,7 +395,7 @@ func BuildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueI
 		SealedTime:    0,
 		NumRows:       0,
 		MemSize:       0,
-		State:         commonpb.SegmentState_SegmentGrowing,
+		State:         commonpb.SegmentState_Growing,
 		StartPosition: &internalpb2.MsgPosition{
 			ChannelName: channelName,
 			MsgID:       "0",
