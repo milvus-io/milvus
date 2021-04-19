@@ -105,7 +105,7 @@ GrpcServer::StartService() {
   int client_id = 0;
   std::string pulsar_server_addr
       (std::string{"pulsar://"} + config.pulsar.address() + ":" + std::to_string(config.pulsar.port()));
-  timesync::TimeSync syc(client_id,GetMessageTimeSyncTime, 400, pulsar_server_addr, "TimeSync");
+  timesync::TimeSync syc(client_id,GetMessageTimeSyncTime, config.timesync.interval(), pulsar_server_addr, "TimeSync");
 
 
     // Add gRPC interceptor

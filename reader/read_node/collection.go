@@ -14,10 +14,10 @@ package reader
 import "C"
 
 type Collection struct {
-	CollectionPtr C.CCollection
+	CollectionPtr  C.CCollection
 	CollectionName string
-	CollectionID uint64
-	Partitions []*Partition
+	CollectionID   uint64
+	Partitions     []*Partition
 }
 
 func (c *Collection) NewPartition(partitionName string) *Partition {

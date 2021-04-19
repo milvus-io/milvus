@@ -184,7 +184,6 @@ func CollectionController(ch chan *messagepb.Mapping) {
 		if err != nil {
 			log.Fatal(err)
 		}
-
 	}
 }
 

@@ -36,7 +36,7 @@ class InsertReq : public BaseReq {
   OnPostExecute() override ;
 
  private:
-  const ::milvus::grpc::InsertParam *insert_param_;
+  const grpc::InsertParam *insert_param_;
 };
 
 }  // namespace server

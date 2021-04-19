@@ -31,8 +31,7 @@ class ReqHandler {
     ReqHandler() = default;
 
     Status
-    CreateCollection(const ContextPtr& context, const std::string& collection_name, FieldsType& fields,
-                     milvus::json& json_params);
+    CreateCollection(const ContextPtr& context, const ::milvus::grpc::Mapping *request);
 
     Status
     DropCollection(const ContextPtr& context, const std::string& collection_name);
@@ -44,8 +43,7 @@ class ReqHandler {
     ListCollections(const ContextPtr& context, std::vector<std::string>& collections);
 
     Status
-    GetCollectionInfo(const ContextPtr& context, const std::string& collection_name,
-                      CollectionSchema& collection_schema);
+    GetCollectionInfo(const ContextPtr& context, const ::milvus::grpc::CollectionName *request, ::milvus::grpc::Mapping& respons);
 
     Status
     GetCollectionStats(const ContextPtr& context, const std::string& collection_name, std::string& collection_stats);

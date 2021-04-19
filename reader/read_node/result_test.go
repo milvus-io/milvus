@@ -1,26 +1,27 @@
 package reader
 
 import (
+	"testing"
+
 	masterPb "github.com/czs007/suvlim/pkg/master/grpc/master"
 	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
-	"testing"
 )
 
 func TestResult_PublishSearchResult(t *testing.T) {
 	// Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection("collection0", "fake schema")
+	var collection = node.NewCollection(0, "collection0", "fake schema")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 	node.SegmentsMap[0] = segment
 
 	// TODO: start pulsar server
 	const N = 10
-	var entityIDs = msgPb.Entities {
+	var entityIDs = msgPb.Entities{
 		Ids: make([]int64, N),
 	}
-	var result = msgPb.QueryResult {
-		Entities: &entityIDs,
+	var result = msgPb.QueryResult{
+		Entities:  &entityIDs,
 		Distances: make([]float32, N),
 	}
 	for i := 0; i < N; i++ {
@@ -33,7 +34,7 @@ func TestResult_PublishSearchResult(t *testing.T) {
 func TestResult_PublishFailedSearchResult(t *testing.T) {
 	// Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection("collection0", "fake schema")
+	var collection = node.NewCollection(0, "collection0", "fake schema")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 	node.SegmentsMap[0] = segment
@@ -45,7 +46,7 @@ func TestResult_PublishFailedSearchResult(t *testing.T) {
 func TestResult_PublicStatistic(t *testing.T) {
 	// Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection("collection0", "fake schema")
+	var collection = node.NewCollection(0, "collection0", "fake schema")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 	node.SegmentsMap[0] = segment

@@ -80,7 +80,7 @@ set( SERVER_LIBS server )
 
 add_executable( milvus_server   ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
                                 )
-target_include_directories(server PUBLIC ${PROJECT_BINARY_DIR}/thirdparty/pulsar-client-cpp/pulsar-client-cpp-src/pulsar-client-cpp/include)
+target_include_directories(server PRIVATE ${PROJECT_BINARY_DIR}/thirdparty)
 
 
 target_link_libraries( milvus_server PRIVATE ${SERVER_LIBS} )

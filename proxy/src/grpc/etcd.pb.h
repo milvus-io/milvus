@@ -48,7 +48,7 @@ struct TableStruct_etcd_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[8]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[10]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -62,6 +62,12 @@ extern EventDefaultTypeInternal _Event_default_instance_;
 class KeyValue;
 class KeyValueDefaultTypeInternal;
 extern KeyValueDefaultTypeInternal _KeyValue_default_instance_;
+class RangeRequest;
+class RangeRequestDefaultTypeInternal;
+extern RangeRequestDefaultTypeInternal _RangeRequest_default_instance_;
+class RangeResponse;
+class RangeResponseDefaultTypeInternal;
+extern RangeResponseDefaultTypeInternal _RangeResponse_default_instance_;
 class ResponseHeader;
 class ResponseHeaderDefaultTypeInternal;
 extern ResponseHeaderDefaultTypeInternal _ResponseHeader_default_instance_;
@@ -84,6 +90,8 @@ extern WatchResponseDefaultTypeInternal _WatchResponse_default_instance_;
 PROTOBUF_NAMESPACE_OPEN
 template<> ::etcdserverpb::Event* Arena::CreateMaybeMessage<::etcdserverpb::Event>(Arena*);
 template<> ::etcdserverpb::KeyValue* Arena::CreateMaybeMessage<::etcdserverpb::KeyValue>(Arena*);
+template<> ::etcdserverpb::RangeRequest* Arena::CreateMaybeMessage<::etcdserverpb::RangeRequest>(Arena*);
+template<> ::etcdserverpb::RangeResponse* Arena::CreateMaybeMessage<::etcdserverpb::RangeResponse>(Arena*);
 template<> ::etcdserverpb::ResponseHeader* Arena::CreateMaybeMessage<::etcdserverpb::ResponseHeader>(Arena*);
 template<> ::etcdserverpb::WatchCancelRequest* Arena::CreateMaybeMessage<::etcdserverpb::WatchCancelRequest>(Arena*);
 template<> ::etcdserverpb::WatchCreateRequest* Arena::CreateMaybeMessage<::etcdserverpb::WatchCreateRequest>(Arena*);
@@ -93,6 +101,60 @@ template<> ::etcdserverpb::WatchResponse* Arena::CreateMaybeMessage<::etcdserver
 PROTOBUF_NAMESPACE_CLOSE
 namespace etcdserverpb {
 
+enum RangeRequest_SortOrder : int {
+  RangeRequest_SortOrder_NONE = 0,
+  RangeRequest_SortOrder_ASCEND = 1,
+  RangeRequest_SortOrder_DESCEND = 2,
+  RangeRequest_SortOrder_RangeRequest_SortOrder_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
+  RangeRequest_SortOrder_RangeRequest_SortOrder_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
+};
+bool RangeRequest_SortOrder_IsValid(int value);
+constexpr RangeRequest_SortOrder RangeRequest_SortOrder_SortOrder_MIN = RangeRequest_SortOrder_NONE;
+constexpr RangeRequest_SortOrder RangeRequest_SortOrder_SortOrder_MAX = RangeRequest_SortOrder_DESCEND;
+constexpr int RangeRequest_SortOrder_SortOrder_ARRAYSIZE = RangeRequest_SortOrder_SortOrder_MAX + 1;
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* RangeRequest_SortOrder_descriptor();
+template<typename T>
+inline const std::string& RangeRequest_SortOrder_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, RangeRequest_SortOrder>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function RangeRequest_SortOrder_Name.");
+  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
+    RangeRequest_SortOrder_descriptor(), enum_t_value);
+}
+inline bool RangeRequest_SortOrder_Parse(
+    const std::string& name, RangeRequest_SortOrder* value) {
+  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<RangeRequest_SortOrder>(
+    RangeRequest_SortOrder_descriptor(), name, value);
+}
+enum RangeRequest_SortTarget : int {
+  RangeRequest_SortTarget_KEY = 0,
+  RangeRequest_SortTarget_VERSION = 1,
+  RangeRequest_SortTarget_CREATE = 2,
+  RangeRequest_SortTarget_MOD = 3,
+  RangeRequest_SortTarget_VALUE = 4,
+  RangeRequest_SortTarget_RangeRequest_SortTarget_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
+  RangeRequest_SortTarget_RangeRequest_SortTarget_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
+};
+bool RangeRequest_SortTarget_IsValid(int value);
+constexpr RangeRequest_SortTarget RangeRequest_SortTarget_SortTarget_MIN = RangeRequest_SortTarget_KEY;
+constexpr RangeRequest_SortTarget RangeRequest_SortTarget_SortTarget_MAX = RangeRequest_SortTarget_VALUE;
+constexpr int RangeRequest_SortTarget_SortTarget_ARRAYSIZE = RangeRequest_SortTarget_SortTarget_MAX + 1;
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* RangeRequest_SortTarget_descriptor();
+template<typename T>
+inline const std::string& RangeRequest_SortTarget_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, RangeRequest_SortTarget>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function RangeRequest_SortTarget_Name.");
+  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
+    RangeRequest_SortTarget_descriptor(), enum_t_value);
+}
+inline bool RangeRequest_SortTarget_Parse(
+    const std::string& name, RangeRequest_SortTarget* value) {
+  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<RangeRequest_SortTarget>(
+    RangeRequest_SortTarget_descriptor(), name, value);
+}
 enum WatchCreateRequest_FilterType : int {
   WatchCreateRequest_FilterType_NOPUT = 0,
   WatchCreateRequest_FilterType_NODELETE = 1,
@@ -145,6 +207,462 @@ inline bool Event_EventType_Parse(
 }
 // ===================================================================
 
+class RangeRequest :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:etcdserverpb.RangeRequest) */ {
+ public:
+  RangeRequest();
+  virtual ~RangeRequest();
+
+  RangeRequest(const RangeRequest& from);
+  RangeRequest(RangeRequest&& from) noexcept
+    : RangeRequest() {
+    *this = ::std::move(from);
+  }
+
+  inline RangeRequest& operator=(const RangeRequest& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline RangeRequest& operator=(RangeRequest&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const RangeRequest& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const RangeRequest* internal_default_instance() {
+    return reinterpret_cast<const RangeRequest*>(
+               &_RangeRequest_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    0;
+
+  friend void swap(RangeRequest& a, RangeRequest& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(RangeRequest* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline RangeRequest* New() const final {
+    return CreateMaybeMessage<RangeRequest>(nullptr);
+  }
+
+  RangeRequest* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<RangeRequest>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const RangeRequest& from);
+  void MergeFrom(const RangeRequest& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(RangeRequest* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "etcdserverpb.RangeRequest";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_etcd_2eproto);
+    return ::descriptor_table_etcd_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  typedef RangeRequest_SortOrder SortOrder;
+  static constexpr SortOrder NONE =
+    RangeRequest_SortOrder_NONE;
+  static constexpr SortOrder ASCEND =
+    RangeRequest_SortOrder_ASCEND;
+  static constexpr SortOrder DESCEND =
+    RangeRequest_SortOrder_DESCEND;
+  static inline bool SortOrder_IsValid(int value) {
+    return RangeRequest_SortOrder_IsValid(value);
+  }
+  static constexpr SortOrder SortOrder_MIN =
+    RangeRequest_SortOrder_SortOrder_MIN;
+  static constexpr SortOrder SortOrder_MAX =
+    RangeRequest_SortOrder_SortOrder_MAX;
+  static constexpr int SortOrder_ARRAYSIZE =
+    RangeRequest_SortOrder_SortOrder_ARRAYSIZE;
+  static inline const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor*
+  SortOrder_descriptor() {
+    return RangeRequest_SortOrder_descriptor();
+  }
+  template<typename T>
+  static inline const std::string& SortOrder_Name(T enum_t_value) {
+    static_assert(::std::is_same<T, SortOrder>::value ||
+      ::std::is_integral<T>::value,
+      "Incorrect type passed to function SortOrder_Name.");
+    return RangeRequest_SortOrder_Name(enum_t_value);
+  }
+  static inline bool SortOrder_Parse(const std::string& name,
+      SortOrder* value) {
+    return RangeRequest_SortOrder_Parse(name, value);
+  }
+
+  typedef RangeRequest_SortTarget SortTarget;
+  static constexpr SortTarget KEY =
+    RangeRequest_SortTarget_KEY;
+  static constexpr SortTarget VERSION =
+    RangeRequest_SortTarget_VERSION;
+  static constexpr SortTarget CREATE =
+    RangeRequest_SortTarget_CREATE;
+  static constexpr SortTarget MOD =
+    RangeRequest_SortTarget_MOD;
+  static constexpr SortTarget VALUE =
+    RangeRequest_SortTarget_VALUE;
+  static inline bool SortTarget_IsValid(int value) {
+    return RangeRequest_SortTarget_IsValid(value);
+  }
+  static constexpr SortTarget SortTarget_MIN =
+    RangeRequest_SortTarget_SortTarget_MIN;
+  static constexpr SortTarget SortTarget_MAX =
+    RangeRequest_SortTarget_SortTarget_MAX;
+  static constexpr int SortTarget_ARRAYSIZE =
+    RangeRequest_SortTarget_SortTarget_ARRAYSIZE;
+  static inline const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor*
+  SortTarget_descriptor() {
+    return RangeRequest_SortTarget_descriptor();
+  }
+  template<typename T>
+  static inline const std::string& SortTarget_Name(T enum_t_value) {
+    static_assert(::std::is_same<T, SortTarget>::value ||
+      ::std::is_integral<T>::value,
+      "Incorrect type passed to function SortTarget_Name.");
+    return RangeRequest_SortTarget_Name(enum_t_value);
+  }
+  static inline bool SortTarget_Parse(const std::string& name,
+      SortTarget* value) {
+    return RangeRequest_SortTarget_Parse(name, value);
+  }
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kKeyFieldNumber = 1,
+    kRangeEndFieldNumber = 2,
+    kLimitFieldNumber = 3,
+    kRevisionFieldNumber = 4,
+    kSortOrderFieldNumber = 5,
+    kSortTargetFieldNumber = 6,
+    kMinModRevisionFieldNumber = 10,
+    kMaxModRevisionFieldNumber = 11,
+    kMinCreateRevisionFieldNumber = 12,
+    kMaxCreateRevisionFieldNumber = 13,
+    kSerializableFieldNumber = 7,
+    kKeysOnlyFieldNumber = 8,
+    kCountOnlyFieldNumber = 9,
+  };
+  // bytes key = 1;
+  void clear_key();
+  const std::string& key() const;
+  void set_key(const std::string& value);
+  void set_key(std::string&& value);
+  void set_key(const char* value);
+  void set_key(const void* value, size_t size);
+  std::string* mutable_key();
+  std::string* release_key();
+  void set_allocated_key(std::string* key);
+
+  // bytes range_end = 2;
+  void clear_range_end();
+  const std::string& range_end() const;
+  void set_range_end(const std::string& value);
+  void set_range_end(std::string&& value);
+  void set_range_end(const char* value);
+  void set_range_end(const void* value, size_t size);
+  std::string* mutable_range_end();
+  std::string* release_range_end();
+  void set_allocated_range_end(std::string* range_end);
+
+  // int64 limit = 3;
+  void clear_limit();
+  ::PROTOBUF_NAMESPACE_ID::int64 limit() const;
+  void set_limit(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // int64 revision = 4;
+  void clear_revision();
+  ::PROTOBUF_NAMESPACE_ID::int64 revision() const;
+  void set_revision(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // .etcdserverpb.RangeRequest.SortOrder sort_order = 5;
+  void clear_sort_order();
+  ::etcdserverpb::RangeRequest_SortOrder sort_order() const;
+  void set_sort_order(::etcdserverpb::RangeRequest_SortOrder value);
+
+  // .etcdserverpb.RangeRequest.SortTarget sort_target = 6;
+  void clear_sort_target();
+  ::etcdserverpb::RangeRequest_SortTarget sort_target() const;
+  void set_sort_target(::etcdserverpb::RangeRequest_SortTarget value);
+
+  // int64 min_mod_revision = 10;
+  void clear_min_mod_revision();
+  ::PROTOBUF_NAMESPACE_ID::int64 min_mod_revision() const;
+  void set_min_mod_revision(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // int64 max_mod_revision = 11;
+  void clear_max_mod_revision();
+  ::PROTOBUF_NAMESPACE_ID::int64 max_mod_revision() const;
+  void set_max_mod_revision(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // int64 min_create_revision = 12;
+  void clear_min_create_revision();
+  ::PROTOBUF_NAMESPACE_ID::int64 min_create_revision() const;
+  void set_min_create_revision(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // int64 max_create_revision = 13;
+  void clear_max_create_revision();
+  ::PROTOBUF_NAMESPACE_ID::int64 max_create_revision() const;
+  void set_max_create_revision(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // bool serializable = 7;
+  void clear_serializable();
+  bool serializable() const;
+  void set_serializable(bool value);
+
+  // bool keys_only = 8;
+  void clear_keys_only();
+  bool keys_only() const;
+  void set_keys_only(bool value);
+
+  // bool count_only = 9;
+  void clear_count_only();
+  bool count_only() const;
+  void set_count_only(bool value);
+
+  // @@protoc_insertion_point(class_scope:etcdserverpb.RangeRequest)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr key_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr range_end_;
+  ::PROTOBUF_NAMESPACE_ID::int64 limit_;
+  ::PROTOBUF_NAMESPACE_ID::int64 revision_;
+  int sort_order_;
+  int sort_target_;
+  ::PROTOBUF_NAMESPACE_ID::int64 min_mod_revision_;
+  ::PROTOBUF_NAMESPACE_ID::int64 max_mod_revision_;
+  ::PROTOBUF_NAMESPACE_ID::int64 min_create_revision_;
+  ::PROTOBUF_NAMESPACE_ID::int64 max_create_revision_;
+  bool serializable_;
+  bool keys_only_;
+  bool count_only_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_etcd_2eproto;
+};
+// -------------------------------------------------------------------
+
+class RangeResponse :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:etcdserverpb.RangeResponse) */ {
+ public:
+  RangeResponse();
+  virtual ~RangeResponse();
+
+  RangeResponse(const RangeResponse& from);
+  RangeResponse(RangeResponse&& from) noexcept
+    : RangeResponse() {
+    *this = ::std::move(from);
+  }
+
+  inline RangeResponse& operator=(const RangeResponse& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline RangeResponse& operator=(RangeResponse&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const RangeResponse& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const RangeResponse* internal_default_instance() {
+    return reinterpret_cast<const RangeResponse*>(
+               &_RangeResponse_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    1;
+
+  friend void swap(RangeResponse& a, RangeResponse& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(RangeResponse* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline RangeResponse* New() const final {
+    return CreateMaybeMessage<RangeResponse>(nullptr);
+  }
+
+  RangeResponse* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<RangeResponse>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const RangeResponse& from);
+  void MergeFrom(const RangeResponse& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(RangeResponse* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "etcdserverpb.RangeResponse";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_etcd_2eproto);
+    return ::descriptor_table_etcd_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kKvsFieldNumber = 2,
+    kHeaderFieldNumber = 1,
+    kCountFieldNumber = 4,
+    kMoreFieldNumber = 3,
+  };
+  // repeated .etcdserverpb.KeyValue kvs = 2;
+  int kvs_size() const;
+  void clear_kvs();
+  ::etcdserverpb::KeyValue* mutable_kvs(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::etcdserverpb::KeyValue >*
+      mutable_kvs();
+  const ::etcdserverpb::KeyValue& kvs(int index) const;
+  ::etcdserverpb::KeyValue* add_kvs();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::etcdserverpb::KeyValue >&
+      kvs() const;
+
+  // .etcdserverpb.ResponseHeader header = 1;
+  bool has_header() const;
+  void clear_header();
+  const ::etcdserverpb::ResponseHeader& header() const;
+  ::etcdserverpb::ResponseHeader* release_header();
+  ::etcdserverpb::ResponseHeader* mutable_header();
+  void set_allocated_header(::etcdserverpb::ResponseHeader* header);
+
+  // int64 count = 4;
+  void clear_count();
+  ::PROTOBUF_NAMESPACE_ID::int64 count() const;
+  void set_count(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // bool more = 3;
+  void clear_more();
+  bool more() const;
+  void set_more(bool value);
+
+  // @@protoc_insertion_point(class_scope:etcdserverpb.RangeResponse)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::etcdserverpb::KeyValue > kvs_;
+  ::etcdserverpb::ResponseHeader* header_;
+  ::PROTOBUF_NAMESPACE_ID::int64 count_;
+  bool more_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_etcd_2eproto;
+};
+// -------------------------------------------------------------------
+
 class WatchRequest :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:etcdserverpb.WatchRequest) */ {
  public:
@@ -194,7 +712,7 @@ class WatchRequest :
                &_WatchRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    0;
+    2;
 
   friend void swap(WatchRequest& a, WatchRequest& b) {
     a.Swap(&b);
@@ -361,7 +879,7 @@ class WatchCreateRequest :
                &_WatchCreateRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    1;
+    3;
 
   friend void swap(WatchCreateRequest& a, WatchCreateRequest& b) {
     a.Swap(&b);
@@ -588,7 +1106,7 @@ class WatchCancelRequest :
                &_WatchCancelRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    2;
+    4;
 
   friend void swap(WatchCancelRequest& a, WatchCancelRequest& b) {
     a.Swap(&b);
@@ -719,7 +1237,7 @@ class WatchProgressRequest :
                &_WatchProgressRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    3;
+    5;
 
   friend void swap(WatchProgressRequest& a, WatchProgressRequest& b) {
     a.Swap(&b);
@@ -841,7 +1359,7 @@ class WatchResponse :
                &_WatchResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    4;
+    6;
 
   friend void swap(WatchResponse& a, WatchResponse& b) {
     a.Swap(&b);
@@ -1036,7 +1554,7 @@ class ResponseHeader :
                &_ResponseHeader_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    5;
+    7;
 
   friend void swap(ResponseHeader& a, ResponseHeader& b) {
     a.Swap(&b);
@@ -1188,7 +1706,7 @@ class KeyValue :
                &_KeyValue_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    6;
+    8;
 
   friend void swap(KeyValue& a, KeyValue& b) {
     a.Swap(&b);
@@ -1366,7 +1884,7 @@ class Event :
                &_Event_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    7;
+    9;
 
   friend void swap(Event& a, Event& b) {
     a.Swap(&b);
@@ -1512,6 +2030,379 @@ class Event :
   #pragma GCC diagnostic push
   #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #endif  // __GNUC__
+// RangeRequest
+
+// bytes key = 1;
+inline void RangeRequest::clear_key() {
+  key_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& RangeRequest::key() const {
+  // @@protoc_insertion_point(field_get:etcdserverpb.RangeRequest.key)
+  return key_.GetNoArena();
+}
+inline void RangeRequest::set_key(const std::string& value) {
+  
+  key_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:etcdserverpb.RangeRequest.key)
+}
+inline void RangeRequest::set_key(std::string&& value) {
+  
+  key_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:etcdserverpb.RangeRequest.key)
+}
+inline void RangeRequest::set_key(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  key_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:etcdserverpb.RangeRequest.key)
+}
+inline void RangeRequest::set_key(const void* value, size_t size) {
+  
+  key_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:etcdserverpb.RangeRequest.key)
+}
+inline std::string* RangeRequest::mutable_key() {
+  
+  // @@protoc_insertion_point(field_mutable:etcdserverpb.RangeRequest.key)
+  return key_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* RangeRequest::release_key() {
+  // @@protoc_insertion_point(field_release:etcdserverpb.RangeRequest.key)
+  
+  return key_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void RangeRequest::set_allocated_key(std::string* key) {
+  if (key != nullptr) {
+    
+  } else {
+    
+  }
+  key_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), key);
+  // @@protoc_insertion_point(field_set_allocated:etcdserverpb.RangeRequest.key)
+}
+
+// bytes range_end = 2;
+inline void RangeRequest::clear_range_end() {
+  range_end_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& RangeRequest::range_end() const {
+  // @@protoc_insertion_point(field_get:etcdserverpb.RangeRequest.range_end)
+  return range_end_.GetNoArena();
+}
+inline void RangeRequest::set_range_end(const std::string& value) {
+  
+  range_end_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:etcdserverpb.RangeRequest.range_end)
+}
+inline void RangeRequest::set_range_end(std::string&& value) {
+  
+  range_end_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:etcdserverpb.RangeRequest.range_end)
+}
+inline void RangeRequest::set_range_end(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  range_end_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:etcdserverpb.RangeRequest.range_end)
+}
+inline void RangeRequest::set_range_end(const void* value, size_t size) {
+  
+  range_end_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:etcdserverpb.RangeRequest.range_end)
+}
+inline std::string* RangeRequest::mutable_range_end() {
+  
+  // @@protoc_insertion_point(field_mutable:etcdserverpb.RangeRequest.range_end)
+  return range_end_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* RangeRequest::release_range_end() {
+  // @@protoc_insertion_point(field_release:etcdserverpb.RangeRequest.range_end)
+  
+  return range_end_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void RangeRequest::set_allocated_range_end(std::string* range_end) {
+  if (range_end != nullptr) {
+    
+  } else {
+    
+  }
+  range_end_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), range_end);
+  // @@protoc_insertion_point(field_set_allocated:etcdserverpb.RangeRequest.range_end)
+}
+
+// int64 limit = 3;
+inline void RangeRequest::clear_limit() {
+  limit_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 RangeRequest::limit() const {
+  // @@protoc_insertion_point(field_get:etcdserverpb.RangeRequest.limit)
+  return limit_;
+}
+inline void RangeRequest::set_limit(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  limit_ = value;
+  // @@protoc_insertion_point(field_set:etcdserverpb.RangeRequest.limit)
+}
+
+// int64 revision = 4;
+inline void RangeRequest::clear_revision() {
+  revision_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 RangeRequest::revision() const {
+  // @@protoc_insertion_point(field_get:etcdserverpb.RangeRequest.revision)
+  return revision_;
+}
+inline void RangeRequest::set_revision(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  revision_ = value;
+  // @@protoc_insertion_point(field_set:etcdserverpb.RangeRequest.revision)
+}
+
+// .etcdserverpb.RangeRequest.SortOrder sort_order = 5;
+inline void RangeRequest::clear_sort_order() {
+  sort_order_ = 0;
+}
+inline ::etcdserverpb::RangeRequest_SortOrder RangeRequest::sort_order() const {
+  // @@protoc_insertion_point(field_get:etcdserverpb.RangeRequest.sort_order)
+  return static_cast< ::etcdserverpb::RangeRequest_SortOrder >(sort_order_);
+}
+inline void RangeRequest::set_sort_order(::etcdserverpb::RangeRequest_SortOrder value) {
+  
+  sort_order_ = value;
+  // @@protoc_insertion_point(field_set:etcdserverpb.RangeRequest.sort_order)
+}
+
+// .etcdserverpb.RangeRequest.SortTarget sort_target = 6;
+inline void RangeRequest::clear_sort_target() {
+  sort_target_ = 0;
+}
+inline ::etcdserverpb::RangeRequest_SortTarget RangeRequest::sort_target() const {
+  // @@protoc_insertion_point(field_get:etcdserverpb.RangeRequest.sort_target)
+  return static_cast< ::etcdserverpb::RangeRequest_SortTarget >(sort_target_);
+}
+inline void RangeRequest::set_sort_target(::etcdserverpb::RangeRequest_SortTarget value) {
+  
+  sort_target_ = value;
+  // @@protoc_insertion_point(field_set:etcdserverpb.RangeRequest.sort_target)
+}
+
+// bool serializable = 7;
+inline void RangeRequest::clear_serializable() {
+  serializable_ = false;
+}
+inline bool RangeRequest::serializable() const {
+  // @@protoc_insertion_point(field_get:etcdserverpb.RangeRequest.serializable)
+  return serializable_;
+}
+inline void RangeRequest::set_serializable(bool value) {
+  
+  serializable_ = value;
+  // @@protoc_insertion_point(field_set:etcdserverpb.RangeRequest.serializable)
+}
+
+// bool keys_only = 8;
+inline void RangeRequest::clear_keys_only() {
+  keys_only_ = false;
+}
+inline bool RangeRequest::keys_only() const {
+  // @@protoc_insertion_point(field_get:etcdserverpb.RangeRequest.keys_only)
+  return keys_only_;
+}
+inline void RangeRequest::set_keys_only(bool value) {
+  
+  keys_only_ = value;
+  // @@protoc_insertion_point(field_set:etcdserverpb.RangeRequest.keys_only)
+}
+
+// bool count_only = 9;
+inline void RangeRequest::clear_count_only() {
+  count_only_ = false;
+}
+inline bool RangeRequest::count_only() const {
+  // @@protoc_insertion_point(field_get:etcdserverpb.RangeRequest.count_only)
+  return count_only_;
+}
+inline void RangeRequest::set_count_only(bool value) {
+  
+  count_only_ = value;
+  // @@protoc_insertion_point(field_set:etcdserverpb.RangeRequest.count_only)
+}
+
+// int64 min_mod_revision = 10;
+inline void RangeRequest::clear_min_mod_revision() {
+  min_mod_revision_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 RangeRequest::min_mod_revision() const {
+  // @@protoc_insertion_point(field_get:etcdserverpb.RangeRequest.min_mod_revision)
+  return min_mod_revision_;
+}
+inline void RangeRequest::set_min_mod_revision(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  min_mod_revision_ = value;
+  // @@protoc_insertion_point(field_set:etcdserverpb.RangeRequest.min_mod_revision)
+}
+
+// int64 max_mod_revision = 11;
+inline void RangeRequest::clear_max_mod_revision() {
+  max_mod_revision_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 RangeRequest::max_mod_revision() const {
+  // @@protoc_insertion_point(field_get:etcdserverpb.RangeRequest.max_mod_revision)
+  return max_mod_revision_;
+}
+inline void RangeRequest::set_max_mod_revision(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  max_mod_revision_ = value;
+  // @@protoc_insertion_point(field_set:etcdserverpb.RangeRequest.max_mod_revision)
+}
+
+// int64 min_create_revision = 12;
+inline void RangeRequest::clear_min_create_revision() {
+  min_create_revision_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 RangeRequest::min_create_revision() const {
+  // @@protoc_insertion_point(field_get:etcdserverpb.RangeRequest.min_create_revision)
+  return min_create_revision_;
+}
+inline void RangeRequest::set_min_create_revision(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  min_create_revision_ = value;
+  // @@protoc_insertion_point(field_set:etcdserverpb.RangeRequest.min_create_revision)
+}
+
+// int64 max_create_revision = 13;
+inline void RangeRequest::clear_max_create_revision() {
+  max_create_revision_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 RangeRequest::max_create_revision() const {
+  // @@protoc_insertion_point(field_get:etcdserverpb.RangeRequest.max_create_revision)
+  return max_create_revision_;
+}
+inline void RangeRequest::set_max_create_revision(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  max_create_revision_ = value;
+  // @@protoc_insertion_point(field_set:etcdserverpb.RangeRequest.max_create_revision)
+}
+
+// -------------------------------------------------------------------
+
+// RangeResponse
+
+// .etcdserverpb.ResponseHeader header = 1;
+inline bool RangeResponse::has_header() const {
+  return this != internal_default_instance() && header_ != nullptr;
+}
+inline void RangeResponse::clear_header() {
+  if (GetArenaNoVirtual() == nullptr && header_ != nullptr) {
+    delete header_;
+  }
+  header_ = nullptr;
+}
+inline const ::etcdserverpb::ResponseHeader& RangeResponse::header() const {
+  const ::etcdserverpb::ResponseHeader* p = header_;
+  // @@protoc_insertion_point(field_get:etcdserverpb.RangeResponse.header)
+  return p != nullptr ? *p : *reinterpret_cast<const ::etcdserverpb::ResponseHeader*>(
+      &::etcdserverpb::_ResponseHeader_default_instance_);
+}
+inline ::etcdserverpb::ResponseHeader* RangeResponse::release_header() {
+  // @@protoc_insertion_point(field_release:etcdserverpb.RangeResponse.header)
+  
+  ::etcdserverpb::ResponseHeader* temp = header_;
+  header_ = nullptr;
+  return temp;
+}
+inline ::etcdserverpb::ResponseHeader* RangeResponse::mutable_header() {
+  
+  if (header_ == nullptr) {
+    auto* p = CreateMaybeMessage<::etcdserverpb::ResponseHeader>(GetArenaNoVirtual());
+    header_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:etcdserverpb.RangeResponse.header)
+  return header_;
+}
+inline void RangeResponse::set_allocated_header(::etcdserverpb::ResponseHeader* header) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete header_;
+  }
+  if (header) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      header = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, header, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  header_ = header;
+  // @@protoc_insertion_point(field_set_allocated:etcdserverpb.RangeResponse.header)
+}
+
+// repeated .etcdserverpb.KeyValue kvs = 2;
+inline int RangeResponse::kvs_size() const {
+  return kvs_.size();
+}
+inline void RangeResponse::clear_kvs() {
+  kvs_.Clear();
+}
+inline ::etcdserverpb::KeyValue* RangeResponse::mutable_kvs(int index) {
+  // @@protoc_insertion_point(field_mutable:etcdserverpb.RangeResponse.kvs)
+  return kvs_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::etcdserverpb::KeyValue >*
+RangeResponse::mutable_kvs() {
+  // @@protoc_insertion_point(field_mutable_list:etcdserverpb.RangeResponse.kvs)
+  return &kvs_;
+}
+inline const ::etcdserverpb::KeyValue& RangeResponse::kvs(int index) const {
+  // @@protoc_insertion_point(field_get:etcdserverpb.RangeResponse.kvs)
+  return kvs_.Get(index);
+}
+inline ::etcdserverpb::KeyValue* RangeResponse::add_kvs() {
+  // @@protoc_insertion_point(field_add:etcdserverpb.RangeResponse.kvs)
+  return kvs_.Add();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::etcdserverpb::KeyValue >&
+RangeResponse::kvs() const {
+  // @@protoc_insertion_point(field_list:etcdserverpb.RangeResponse.kvs)
+  return kvs_;
+}
+
+// bool more = 3;
+inline void RangeResponse::clear_more() {
+  more_ = false;
+}
+inline bool RangeResponse::more() const {
+  // @@protoc_insertion_point(field_get:etcdserverpb.RangeResponse.more)
+  return more_;
+}
+inline void RangeResponse::set_more(bool value) {
+  
+  more_ = value;
+  // @@protoc_insertion_point(field_set:etcdserverpb.RangeResponse.more)
+}
+
+// int64 count = 4;
+inline void RangeResponse::clear_count() {
+  count_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 RangeResponse::count() const {
+  // @@protoc_insertion_point(field_get:etcdserverpb.RangeResponse.count)
+  return count_;
+}
+inline void RangeResponse::set_count(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  count_ = value;
+  // @@protoc_insertion_point(field_set:etcdserverpb.RangeResponse.count)
+}
+
+// -------------------------------------------------------------------
+
 // WatchRequest
 
 // .etcdserverpb.WatchCreateRequest create_request = 1;
@@ -2439,6 +3330,10 @@ inline void Event::set_allocated_prev_kv(::etcdserverpb::KeyValue* prev_kv) {
 
 // -------------------------------------------------------------------
 
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 
 // @@protoc_insertion_point(namespace_scope)
 
@@ -2446,6 +3341,16 @@ inline void Event::set_allocated_prev_kv(::etcdserverpb::KeyValue* prev_kv) {
 
 PROTOBUF_NAMESPACE_OPEN
 
+template <> struct is_proto_enum< ::etcdserverpb::RangeRequest_SortOrder> : ::std::true_type {};
+template <>
+inline const EnumDescriptor* GetEnumDescriptor< ::etcdserverpb::RangeRequest_SortOrder>() {
+  return ::etcdserverpb::RangeRequest_SortOrder_descriptor();
+}
+template <> struct is_proto_enum< ::etcdserverpb::RangeRequest_SortTarget> : ::std::true_type {};
+template <>
+inline const EnumDescriptor* GetEnumDescriptor< ::etcdserverpb::RangeRequest_SortTarget>() {
+  return ::etcdserverpb::RangeRequest_SortTarget_descriptor();
+}
 template <> struct is_proto_enum< ::etcdserverpb::WatchCreateRequest_FilterType> : ::std::true_type {};
 template <>
 inline const EnumDescriptor* GetEnumDescriptor< ::etcdserverpb::WatchCreateRequest_FilterType>() {

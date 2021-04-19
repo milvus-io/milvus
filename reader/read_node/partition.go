@@ -14,8 +14,8 @@ package reader
 import "C"
 
 type Partition struct {
-	PartitionPtr C.CPartition
-	PartitionName string
+	PartitionPtr   C.CPartition
+	PartitionName  string
 	OpenedSegments []*Segment
 	ClosedSegments []*Segment
 }
