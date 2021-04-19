@@ -1,0 +1,185 @@
+version: '3.5'
+
+services:
+  etcd:
+    image: quay.io/coreos/etcd:latest
+    command: etcd -listen-peer-urls=http://127.0.0.1:2380 -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379,http://0.0.0.0:4001 -initial-advertise-peer-urls=http://127.0.0.1:2380 --initial-cluster default=http://127.0.0.1:2380
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+      - "4001:4001"
+    networks:
+      - milvus
+
+  pulsar:
+    image: apachepulsar/pulsar:latest
+    command: bin/pulsar standalone
+    ports:
+      - "6650:6650"
+      - "18080:8080"
+    networks:
+      - milvus
+
+  minio:
+    image: minio/minio:RELEASE.2020-12-03T00-03-10Z
+    ports:
+      - "9000:9000"
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: minio server /minio_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - milvus
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "6831:6831/udp"
+      - "16686:16686"
+    networks:
+      - milvus
+
+  master:
+    image: ${TARGET_DOCKER_IMAGE}
+    command: ["/milvus-distributed/bin/milvus", "run", "master"]
+    environment:
+      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
+      ETCD_ADDRESS: ${ETCD_ADDRESS}
+      INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
+      DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
+      QUERY_SERVICE_ADDRESS: ${QUERY_SERVICE_ADDRESS}
+      PROXY_SERVICE_ADDRESS: ${PROXY_SERVICE_ADDRESS}
+    depends_on:
+      - "etcd"
+      - "pulsar"
+      - "minio"
+      - "jaeger"
+    networks:
+      - milvus
+
+  proxyservice:
+    image: ${TARGET_DOCKER_IMAGE}
+    command: ["/milvus-distributed/bin/milvus", "run", "proxyservice"]
+    environment:
+      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
+    depends_on:
+      - "etcd"
+      - "pulsar"
+      - "minio"
+      - "jaeger"
+    networks:
+      - milvus
+
+  proxynode:
+    image: ${TARGET_DOCKER_IMAGE}
+    command: ["/milvus-distributed/bin/milvus", "run", "proxynode"]
+    environment:
+      ETCD_ADDRESS: ${ETCD_ADDRESS}
+      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
+      MASTER_ADDRESS: ${MASTER_ADDRESS}
+      PROXY_NODE_HOST: ${PROXY_NODE_HOST}
+      PROXY_SERVICE_ADDRESS: ${PROXY_SERVICE_ADDRESS}
+      INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
+      DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
+      QUERY_SERVICE_ADDRESS: ${QUERY_SERVICE_ADDRESS}
+    ports:
+      - "19530:19530"
+    depends_on:
+      - "proxyservice"
+    networks:
+      - milvus
+
+  queryservice:
+    image: ${TARGET_DOCKER_IMAGE}
+    command: ["/milvus-distributed/bin/milvus", "run", "queryservice"]
+    environment:
+      MASTER_ADDRESS: ${MASTER_ADDRESS}
+      DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
+    depends_on:
+      - "etcd"
+      - "pulsar"
+      - "minio"
+      - "jaeger"
+    networks:
+      - milvus
+
+  querynode:
+    image: ${TARGET_DOCKER_IMAGE}
+    command: ["/milvus-distributed/bin/milvus", "run", "querynode"]
+    environment:
+      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
+      MASTER_ADDRESS: ${MASTER_ADDRESS}
+      MINIO_ADDRESS: ${MINIO_ADDRESS}
+      DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
+      INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
+      QUERY_SERVICE_ADDRESS: ${QUERY_SERVICE_ADDRESS}
+      QUERY_NODE_ID: ${QUERY_NODE_ID}
+    depends_on:
+      - "queryservice"
+    networks:
+      - milvus
+
+  indexservice:
+    image: ${TARGET_DOCKER_IMAGE}
+    command: ["/milvus-distributed/bin/milvus", "run", "indexservice"]
+    environment:
+      MASTER_ADDRESS: ${MASTER_ADDRESS}
+      ETCD_ADDRESS: ${ETCD_ADDRESS}
+      MINIO_ADDRESS: ${MINIO_ADDRESS}
+    depends_on:
+      - "etcd"
+      - "pulsar"
+      - "minio"
+      - "jaeger"
+    networks:
+      - milvus
+
+  indexnode:
+    image: ${TARGET_DOCKER_IMAGE}
+    command: ["/milvus-distributed/bin/milvus", "run", "indexnode"]
+    environment:
+      INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
+      MINIO_ADDRESS: ${MINIO_ADDRESS}
+      INDEX_NODE_HOST: ${INDEX_NODE_HOST}
+    depends_on:
+      - "indexservice"
+    networks:
+      - milvus
+
+  dataservice:
+    image: ${TARGET_DOCKER_IMAGE}
+    command: ["/milvus-distributed/bin/milvus", "run", "dataservice"]
+    environment:
+      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
+      ETCD_ADDRESS: ${ETCD_ADDRESS}
+      MASTER_ADDRESS: ${MASTER_ADDRESS}
+      MINIO_ADDRESS: ${MINIO_ADDRESS}
+    depends_on:
+      - "etcd"
+      - "pulsar"
+      - "minio"
+      - "jaeger"
+    networks:
+      - milvus
+
+  datanode:
+    image: ${TARGET_DOCKER_IMAGE}
+    command: ["/milvus-distributed/bin/milvus", "run", "datanode"]
+    environment:
+      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
+      ETCD_ADDRESS: ${ETCD_ADDRESS}
+      MASTER_ADDRESS: ${MASTER_ADDRESS}
+      MINIO_ADDRESS: ${MINIO_ADDRESS}
+      DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
+    depends_on:
+      - "dataservice"
+    networks:
+      - milvus
+
+networks:
+  milvus:
