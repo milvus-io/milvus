@@ -50,7 +50,7 @@ type Master struct {
 	// chans
 	ssChan chan internalpb.SegmentStatistics
 
-	kvBase    kv.Base
+	kvBase    *kv.EtcdKV
 	scheduler *ddRequestScheduler
 	mt        metaTable
 	// Add callback functions at different stages
@@ -58,7 +58,7 @@ type Master struct {
 	closeCallbacks []func()
 }
 
-func newKvBase() kv.Base {
+func newKvBase() *kv.EtcdKV {
 	etcdAddr := conf.Config.Etcd.Address
 	etcdAddr += ":"
 	etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)

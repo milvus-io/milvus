@@ -11,7 +11,7 @@ import (
 // TODO: get timestamp from timestampOracle
 
 type baseTask struct {
-	kvBase *kv.Base
+	kvBase *kv.EtcdKV
 	mt     *metaTable
 	cv     chan int
 }

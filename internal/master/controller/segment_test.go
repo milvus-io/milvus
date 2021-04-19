@@ -11,7 +11,7 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
-func newKvBase() kv.Base {
+func newKvBase() *kv.EtcdKV {
 	etcdAddr := conf.Config.Etcd.Address
 	etcdAddr += ":"
 	etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)

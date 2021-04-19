@@ -18,7 +18,7 @@ import (
 
 type UniqueID = typeutil.UniqueID
 
-func CollectionController(ch chan *schemapb.CollectionSchema, kvbase kv.Base, errch chan error) {
+func CollectionController(ch chan *schemapb.CollectionSchema, kvbase *kv.EtcdKV, errch chan error) {
 	for collectionMeta := range ch {
 		sID, _ := id.AllocOne()
 		cID, _ := id.AllocOne()
@@ -57,7 +57,7 @@ func CollectionController(ch chan *schemapb.CollectionSchema, kvbase kv.Base, er
 	}
 }
 
-func WriteCollection2Datastore(collectionMeta *schemapb.CollectionSchema, kvbase kv.Base) error {
+func WriteCollection2Datastore(collectionMeta *schemapb.CollectionSchema, kvbase *kv.EtcdKV) error {
 	sID, _ := id.AllocOne()
 	cID, _ := id.AllocOne()
 	fieldMetas := []*schemapb.FieldSchema{}

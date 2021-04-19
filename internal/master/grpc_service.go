@@ -17,7 +17,7 @@ func (s *Master) CreateCollection(ctx context.Context, in *internalpb.CreateColl
 	var t task = &createCollectionTask{
 		req: in,
 		baseTask: baseTask{
-			kvBase: &s.kvBase,
+			kvBase: s.kvBase,
 			mt:     &s.mt,
 			cv:     make(chan int),
 		},
@@ -50,7 +50,7 @@ func (s *Master) DropCollection(ctx context.Context, in *internalpb.DropCollecti
 	var t task = &dropCollectionTask{
 		req: in,
 		baseTask: baseTask{
-			kvBase: &s.kvBase,
+			kvBase: s.kvBase,
 			mt:     &s.mt,
 			cv:     make(chan int),
 		},
@@ -83,7 +83,7 @@ func (s *Master) HasCollection(ctx context.Context, in *internalpb.HasCollection
 	var t task = &hasCollectionTask{
 		req: in,
 		baseTask: baseTask{
-			kvBase: &s.kvBase,
+			kvBase: s.kvBase,
 			mt:     &s.mt,
 			cv:     make(chan int),
 		},
@@ -126,7 +126,7 @@ func (s *Master) DescribeCollection(ctx context.Context, in *internalpb.Describe
 	var t task = &describeCollectionTask{
 		req: in,
 		baseTask: baseTask{
-			kvBase: &s.kvBase,
+			kvBase: s.kvBase,
 			mt:     &s.mt,
 			cv:     make(chan int),
 		},
@@ -152,7 +152,7 @@ func (s *Master) ShowCollections(ctx context.Context, in *internalpb.ShowCollect
 	var t task = &showCollectionsTask{
 		req: in,
 		baseTask: baseTask{
-			kvBase: &s.kvBase,
+			kvBase: s.kvBase,
 			mt:     &s.mt,
 			cv:     make(chan int),
 		},
@@ -179,7 +179,7 @@ func (s *Master) CreatePartition(ctx context.Context, in *internalpb.CreateParti
 	var t task = &createPartitionTask{
 		req: in,
 		baseTask: baseTask{
-			kvBase: &s.kvBase,
+			kvBase: s.kvBase,
 			mt:     &s.mt,
 			cv:     make(chan int),
 		},
@@ -212,7 +212,7 @@ func (s *Master) DropPartition(ctx context.Context, in *internalpb.DropPartition
 	var t task = &dropPartitionTask{
 		req: in,
 		baseTask: baseTask{
-			kvBase: &s.kvBase,
+			kvBase: s.kvBase,
 			mt:     &s.mt,
 			cv:     make(chan int),
 		},
@@ -245,7 +245,7 @@ func (s *Master) HasPartition(ctx context.Context, in *internalpb.HasPartitionRe
 	var t task = &hasPartitionTask{
 		req: in,
 		baseTask: baseTask{
-			kvBase: &s.kvBase,
+			kvBase: s.kvBase,
 			mt:     &s.mt,
 			cv:     make(chan int),
 		},
@@ -288,7 +288,7 @@ func (s *Master) DescribePartition(ctx context.Context, in *internalpb.DescribeP
 	var t task = &describePartitionTask{
 		req: in,
 		baseTask: baseTask{
-			kvBase: &s.kvBase,
+			kvBase: s.kvBase,
 			mt:     &s.mt,
 			cv:     make(chan int),
 		},
@@ -314,7 +314,7 @@ func (s *Master) ShowPartitions(ctx context.Context, in *internalpb.ShowPartitio
 	var t task = &showPartitionTask{
 		req: in,
 		baseTask: baseTask{
-			kvBase: &s.kvBase,
+			kvBase: s.kvBase,
 			mt:     &s.mt,
 			cv:     make(chan int),
 		},
