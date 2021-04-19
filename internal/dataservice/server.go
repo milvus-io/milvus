@@ -623,18 +623,28 @@ func (s *Server) GetSegmentStates(req *datapb.SegmentStatesRequest) (*datapb.Seg
 		return resp, nil
 	}
 
-	segmentInfo, err := s.meta.GetSegment(req.SegmentID)
-	if err != nil {
-		resp.Status.Reason = "get segment states error: " + err.Error()
-		return resp, nil
+	for _, segmentID := range req.SegmentIDs {
+		state := &datapb.SegmentStateInfo{
+			Status:    &commonpb.Status{},
+			SegmentID: segmentID,
+		}
+		segmentInfo, err := s.meta.GetSegment(segmentID)
+		if err != nil {
+			state.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+			state.Status.Reason = "get segment states error: " + err.Error()
+		} else {
+			state.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
+			state.State = segmentInfo.State
+			state.CreateTime = segmentInfo.OpenTime
+			state.SealedTime = segmentInfo.SealedTime
+			state.FlushedTime = segmentInfo.FlushedTime
+			state.StartPositions = segmentInfo.StartPosition
+			state.EndPositions = segmentInfo.EndPosition
+		}
+		resp.States = append(resp.States, state)
 	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
-	resp.State = segmentInfo.State
-	resp.CreateTime = segmentInfo.OpenTime
-	resp.SealedTime = segmentInfo.SealedTime
-	resp.FlushedTime = segmentInfo.FlushedTime
-	resp.StartPositions = segmentInfo.StartPosition
-	resp.EndPositions = segmentInfo.EndPosition
+
 	return resp, nil
 }
 

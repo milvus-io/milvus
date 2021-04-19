@@ -132,7 +132,7 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 		}
 
 	default:
-		log.Println(". default: do nothing ...")
+		//log.Println(". default: do nothing ...")
 	}
 
 	// generate binlog

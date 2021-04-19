@@ -67,7 +67,7 @@ func (ttBarrier *softTimeTickBarrier) GetTimeTick() (Timestamp, error) {
 			}
 		}
 		atomic.StoreInt64(&(ttBarrier.lastTt), int64(ts))
-		log.Println("current tick: ", ts)
+		// log.Println("current tick: ", ts)
 		return ts, ttBarrier.ctx.Err()
 	}
 }
@@ -95,8 +95,8 @@ func (ttBarrier *softTimeTickBarrier) Start() error {
 							log.Printf("[softTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.Base.SourceID)
 							continue
 						}
-						log.Println("ttmsg.Base.Timestamp: ", ttmsg.Base.Timestamp)
-						log.Println("oldT: ", oldT)
+						// log.Println("ttmsg.Base.Timestamp: ", ttmsg.Base.Timestamp)
+						// log.Println("oldT: ", oldT)
 						if ttmsg.Base.Timestamp > oldT {
 							ttBarrier.peer2LastTt[ttmsg.Base.SourceID] = ttmsg.Base.Timestamp
 

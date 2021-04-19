@@ -1271,7 +1271,7 @@ func (c *Core) AllocTimestamp(in *masterpb.TsoRequest) (*masterpb.TsoResponse, e
 			Count:     0,
 		}, nil
 	}
-	log.Printf("AllocTimestamp : %d", ts)
+	// log.Printf("AllocTimestamp : %d", ts)
 	return &masterpb.TsoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,

@@ -124,7 +124,7 @@ message LoadSegmentRequest {
   int64 partitionID = 4;
   repeated int64 segmentIDs = 5;
   repeated int64 fieldIDs = 6;
-  data.SegmentStatesResponse last_segment_state = 7;
+  data.SegmentStateInfo last_segment_state = 7;
 }
 
 message ReleaseSegmentRequest {
@@ -152,7 +152,7 @@ service QueryService {
   rpc LoadCollection(LoadCollectionRequest) returns (common.Status) {}
   rpc ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {}
 
-  rpc CreateQueryChannel(common.Empty ) returns (CreateQueryChannelResponse) {}
+  rpc CreateQueryChannel(common.Empty) returns (CreateQueryChannelResponse) {}
   rpc GetTimeTickChannel(common.Empty) returns (milvus.StringResponse) {}
   rpc GetStatisticsChannel(common.Empty) returns (milvus.StringResponse) {}
   rpc GetPartitionStates(PartitionStatesRequest) returns (PartitionStatesResponse) {}
