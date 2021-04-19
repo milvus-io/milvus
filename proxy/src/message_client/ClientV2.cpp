@@ -168,7 +168,11 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
                                    const std::function<uint64_t(const std::string &collection_name,
                                                                 uint64_t channel_id,
                                                                 uint64_t timestamp)> &segment_id) {
+  const uint64_t num_records_log = 100 * 10000;
+  static uint64_t num_inserted = 0;
+  static uint64_t size_inserted = 0;
   using stdclock = std::chrono::high_resolution_clock;
+  static stdclock::duration time_cost;
   auto start = stdclock::now();
   // may have retry policy?
   auto row_count = request.rows_data_size();
@@ -210,17 +214,26 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
   }
 
   auto end = stdclock::now();
-  auto data_size = request.ByteSize();
-  char buff[128];
-  auto r = getcwd(buff, 128);
-  auto path = std::string(buff);
-  std::ofstream file(path + "/proxy2pulsar.benchmark", std::fstream::app);
-  file << "InsertReq Batch size:" << data_size / 1024.0 / 1024.0 << "M, "
-       << "cost" << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / 1000.0 << "s, "
-       << "throughput: "
-       << data_size / std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() * 1000 / 1024.0
-           / 1024
-       << "M/s" << std::endl;
+  time_cost += (end - start);
+  num_inserted += row_count;
+  size_inserted += request.ByteSize();
+  if (num_inserted >= num_records_log) {
+//    char buff[128];
+//    auto r = getcwd(buff, 128);
+    auto path = std::string("/tmp");
+    std::ofstream file(path + "/proxy2pulsar.benchmark", std::fstream::app);
+    file << "[" << milvus::CommonUtil::TimeToString(start) << "]"
+        << " Insert " << num_inserted << " records, "
+         << "size:" << size_inserted / 1024.0 / 1024.0 << "M, "
+         << "cost" << std::chrono::duration_cast<std::chrono::milliseconds>(time_cost).count() / 1000.0 << "s, "
+         << "throughput: "
+         << double(size_inserted) / std::chrono::duration_cast<std::chrono::milliseconds>(time_cost).count() * 1000 / 1024.0
+             / 1024
+         << "M/s" << std::endl;
+    time_cost = stdclock::duration(0);
+    num_inserted = 0;
+    size_inserted = 0;
+  }
 
   for (auto &stat : stats) {
     if (!stat.ok()) {

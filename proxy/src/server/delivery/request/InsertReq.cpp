@@ -24,6 +24,7 @@
 #include <utility>
 #include <vector>
 #include <unistd.h>
+#include "utils/CommonUtil.h"
 
 #ifdef ENABLE_CPU_PROFILING
 #include <gperftools/profiler.h>
@@ -60,9 +61,9 @@ InsertReq::OnExecute() {
   static int log_flag = 0;
   static bool shouldBenchmark = false;
   static std::stringstream log;
-  char buff[128];
-  auto r = getcwd(buff, 128);
-  auto path = std::string(buff);
+//  char buff[128];
+//  auto r = getcwd(buff, 128);
+  auto path = std::string("/tmp");
   std::ofstream file(path + "/proxy.benchmark", std::fstream::app);
 #endif
 
@@ -89,16 +90,17 @@ InsertReq::OnExecute() {
 #ifdef BENCHMARK
   inserted_count += insert_param_->rows_data_size();
   inserted_size += insert_param_->ByteSize();
-  if (shouldBenchmark && inserted_count > 1000) {
+  if (shouldBenchmark) {
     end = stdclock::now();
     ready_log_records += inserted_count;
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / 1000.0;
     if (duration > interval) {
-      log << "===================>Insert: "
-          << inserted_count << "records,"
-          << " size: " << inserted_size / MB << "MB"
-          << " cost: " << duration << "s,"
-          << " throughput: "
+      log << "[" << milvus::CommonUtil::TimeToString(start) << "] "
+          << "Insert "
+          << inserted_count << " records, "
+          << "size: " << inserted_size / MB << "MB, "
+          << "cost: " << duration << "s, "
+          << "throughput: "
           << double(inserted_size) / duration / MB
           << "M/s\n";
       auto new_flag = ready_log_records / per_log_records;
