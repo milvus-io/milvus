@@ -13,6 +13,8 @@
 #include "utils/Types.h"
 #include <faiss/MetricType.h>
 #include <string>
+#include <boost/align/aligned_allocator.hpp>
+#include <vector>
 
 namespace milvus {
 using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
@@ -23,5 +25,16 @@ using MetricType = faiss::MetricType;
 
 faiss::MetricType
 GetMetricType(const std::string& type);
+
+// NOTE: dependent type
+// used at meta-template programming
+template <class...>
+constexpr std::true_type always_true{};
+
+template <class...>
+constexpr std::false_type always_false{};
+
+template <typename T>
+using aligned_vector = std::vector<T, boost::alignment::aligned_allocator<T, 512>>;
 
 }  // namespace milvus
