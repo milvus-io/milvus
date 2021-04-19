@@ -9,7 +9,7 @@ on:
       - 'scripts/**'
       - 'internal/**'
       - 'cmd/**'
-      - '.github/workflows/main.yml'
+      - '.github/workflows/main.yaml'
       - docker-compose.yml
       - '!**.md'
       - '!**_test.go'
@@ -19,48 +19,58 @@ on:
       - 'scripts/**'
       - 'internal/**'
       - 'cmd/**'
-      - '.github/workflows/main.yml'
+      - '.github/workflows/main.yaml'
       - docker-compose.yml
       - '!**.md'
       - '!**_test.go'
 
 jobs:
   ubuntu:
-    name: AMD64 ubuntu-18.04
-    runs-on: ubuntu-18.04
+    name: AMD64 Ubuntu ${{ matrix.ubuntu }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: [18.04]
+    env:
+      UBUNTU: ${{ matrix.ubuntu }}
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-      - name: Install Dependency
-        run: |
-          ./scripts/install_deps.sh
-          go get github.com/golang/protobuf/protoc-gen-go@v1.3.2
-      - name: Cache Core Thirdparty
-        id: cache-core
-        uses: actions/cache@v2
+      - name: Check Dockerfile
+        uses: reviewdog/action-hadolint@v1
         with:
-          path: |
-            ./internal/core/cmake_build
-          key: ${{ runner.os }}-core-thirdparty
-      - name: Build Cpp
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-check # Default is github-pr-check
+      - name: Docker Pull
+        shell: bash
         run: |
-          ./scripts/core_build.sh -u
-      - name: Generat Proto GO File
+          docker-compose pull --ignore-pull-failures ubuntu
+      - name: Docker Build
+        shell: bash
         run: |
-          echo `pwd`
-          pwd_dir=`pwd`
-          export PATH=$PATH:$(go env GOPATH)/bin
-          export protoc=${pwd_dir}/internal/core/cmake_build/thirdparty/protobuf/protobuf-build/protoc
-          ./scripts/proto_gen_go.sh
-      - name: Build GO
+          docker-compose build ubuntu
+          docker rmi $(docker images | grep '<none>' | awk '{print $3}') || exit 0
+      - name: Cache Docker Volumes
+        uses: actions/cache@v1
+        with:
+          path: .docker
+          key: ubuntu${{ matrix.ubuntu }}-${{ hashFiles('internal/core/**') }}
+          restore-keys: ubuntu${{ matrix.ubuntu }}-
+      - name: Docker Run
         run: |
-          go build -o ./cmd/writer/writer ./cmd/writer/writer.go
-          go build -o ./cmd/reader/reader ./cmd/reader/reader.go
-          go build -o ./cmd/master/master ./cmd/master/master.go
-          go build -o ./cmd/proxy/proxy ./cmd/proxy/proxy.go
-      - name: Docker Pull And Run
+          docker-compose run ubuntu
+      - name: Run UnitTest
+        shell: bash
         run: |
-          docker-compose up -d
-      - name: Run Unittest
+          cd ${GITHUB_WORKSPACE}/deployments/docker && docker-compose up -d
+          cd ${GITHUB_WORKSPACE}/scripts/ && ./run_unittest.sh
+      - name: Docker Push
+        if: success() && github.event_name == 'push' && github.repository == 'zilliztech/milvus-distributed'
+        continue-on-error: true
+        shell: bash
         run: |
-          ./scripts/run_unittest.sh
+          docker login -u ${{ secrets.DOCKERHUB_USER }} \
+                       -p ${{ secrets.DOCKERHUB_TOKEN }}
+          docker-compose push ubuntu

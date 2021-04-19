@@ -12,7 +12,7 @@ import (
 )
 
 type manipulationReq struct {
-	stats []commonpb.Status
+	commonpb.Status
 	msgs  []*pb.ManipulationReqMsg
 	wg    sync.WaitGroup
 	proxy *proxyServer
@@ -26,13 +26,14 @@ func (req *manipulationReq) Ts() (Timestamp, error) {
 	return Timestamp(req.msgs[0].Timestamp), nil
 }
 func (req *manipulationReq) SetTs(ts Timestamp) {
-	for _, msg := range req.msgs {
-		msg.Timestamp = uint64(ts)
+	for _, mreq := range req.msgs {
+		mreq.Timestamp = uint64(ts)
 	}
 }
 
 // BaseRequest interfaces
 func (req *manipulationReq) Type() pb.ReqType {
+	// TODO: return a invalid ReqType?
 	if req.msgs == nil {
 		return 0
 	}
@@ -58,17 +59,11 @@ func (req *manipulationReq) Execute() commonpb.Status {
 
 func (req *manipulationReq) PostExecute() commonpb.Status { // send into pulsar
 	req.wg.Add(1)
-	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
+	return req.Status
 }
 
 func (req *manipulationReq) WaitToFinish() commonpb.Status { // wait until send into pulsar
 	req.wg.Wait()
-
-	for _, stat := range req.stats{
-		if stat.ErrorCode != commonpb.ErrorCode_SUCCESS{
-			return stat
-		}
-	}
 	// update timestamp if necessary
 	ts, _ := req.Ts()
 	req.proxy.reqSch.mTimestampMux.Lock()
@@ -78,7 +73,7 @@ func (req *manipulationReq) WaitToFinish() commonpb.Status { // wait until send 
 	} else {
 		log.Printf("there is some wrong with m_timestamp, it goes back, current = %d, previous = %d", ts, req.proxy.reqSch.mTimestamp)
 	}
-	return req.stats[0]
+	return req.Status
 }
 
 func (s *proxyServer) restartManipulationRoutine(bufSize int) error {
@@ -114,23 +109,22 @@ func (s *proxyServer) restartManipulationRoutine(bufSize int) error {
 				ts, st := s.getTimestamp(1)
 				if st.ErrorCode != commonpb.ErrorCode_SUCCESS {
 					log.Printf("get time stamp failed, error code = %d, msg = %s", st.ErrorCode, st.Reason)
-					ip.stats[0] = st
+					ip.Status = st
 					ip.wg.Done()
 					break
 				}
 				ip.SetTs(ts[0])
 
 				wg := sync.WaitGroup{}
-				for i, mq := range ip.msgs {
+				for _, mq := range ip.msgs {
 					mq := mq
-					i := i
-					wg.Add(1)
 					go func() {
+						wg.Add(1)
 						defer wg.Done()
 						mb, err := proto.Marshal(mq)
 						if err != nil {
 							log.Printf("Marshal ManipulationReqMsg failed, error = %v", err)
-							ip.stats[i] = commonpb.Status{
+							ip.Status = commonpb.Status{
 								ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 								Reason:    fmt.Sprintf("Marshal ManipulationReqMsg failed, error=%v", err),
 							}
@@ -141,7 +135,7 @@ func (s *proxyServer) restartManipulationRoutine(bufSize int) error {
 						case pb.ReqType_kInsert:
 							if _, err := readers[mq.ChannelId].Send(s.ctx, &pulsar.ProducerMessage{Payload: mb}); err != nil {
 								log.Printf("post into puslar failed, error = %v", err)
-								ip.stats[i] = commonpb.Status{
+								ip.Status = commonpb.Status{
 									ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 									Reason:    fmt.Sprintf("Post into puslar failed, error=%v", err.Error()),
 								}
@@ -150,10 +144,6 @@ func (s *proxyServer) restartManipulationRoutine(bufSize int) error {
 						case pb.ReqType_kDeleteEntityByID:
 							if _, err = deleter.Send(s.ctx, &pulsar.ProducerMessage{Payload: mb}); err != nil {
 								log.Printf("post into pulsar filed, error = %v", err)
-								ip.stats[i] = commonpb.Status{
-									ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-									Reason:    fmt.Sprintf("Post into puslar failed, error=%v", err.Error()),
-								}
 								return
 							}
 						default:
