@@ -182,10 +182,6 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 	if len(coll.PartitionIDs) != 0 {
 		return errors.Errorf("partitions should be empty when creating collection")
 	}
-	if _, ok := mt.collName2ID[coll.Schema.Name]; ok {
-		return errors.Errorf("collection %s exist", coll.Schema.Name)
-	}
-
 	coll.PartitionIDs = append(coll.PartitionIDs, part.PartitionID)
 	mt.collID2Meta[coll.ID] = *coll
 	mt.collName2ID[coll.Schema.Name] = coll.ID
@@ -409,7 +405,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	for _, segID := range partMeta.SegmentIDs {
 		segIndexMeta, ok := mt.segID2IndexMeta[segID]
 		if !ok {
-			log.Printf("segment id = %d has no index meta", segID)
+			log.Printf("segment id = %d not exist", segID)
 			continue
 		}
 		delete(mt.segID2IndexMeta, segID)
@@ -632,27 +628,6 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, in
 		}
 	}
 	return rstID, fieldSchema, nil
-}
-
-func (mt *metaTable) GetSegmentVectorFields(segID typeutil.UniqueID) ([]*schemapb.FieldSchema, error) {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-	collID, ok := mt.segID2CollID[segID]
-	if !ok {
-		return nil, errors.Errorf("segment id %d not belong to any collection", segID)
-	}
-	collMeta, ok := mt.collID2Meta[collID]
-	if !ok {
-		return nil, errors.Errorf("segment id %d not belong to any collection which has dropped", segID)
-	}
-	rst := make([]*schemapb.FieldSchema, 0, 2)
-	for _, f := range collMeta.Schema.Fields {
-		if f.DataType == schemapb.DataType_VECTOR_BINARY || f.DataType == schemapb.DataType_VECTOR_FLOAT {
-			field := proto.Clone(f)
-			rst = append(rst, field.(*schemapb.FieldSchema))
-		}
-	}
-	return rst, nil
 }
 
 func (mt *metaTable) GetIndexByName(collName string, fieldName string, indexName string) ([]pb.IndexInfo, error) {

@@ -51,6 +51,10 @@ proxyNode:
   address: localhost
   port: 19530
 
+queryService:
+  address: localhost
+  port: 19531
+
 proxyService:
   address: localhost
   port: 19530

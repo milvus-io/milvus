@@ -5,6 +5,7 @@ package milvus.proto.query;
 option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/querypb";
 
 import "common.proto";
+import "milvus.proto";
 import "internal.proto";
 
 message RegisterNodeRequest {
@@ -53,7 +54,7 @@ message ShowPartitionResponse  {
 enum PartitionState {
   NotExist = 0;
   NotPresent = 1;
-  OnDist = 2;
+  OnDisk = 2;
   PartialInMemory = 3;
   InMemory = 4;
   PartialInGPU = 5;
@@ -133,19 +134,9 @@ message ReleaseSegmentRequest {
   repeated int64 fieldIDs = 6;
 }
 
-message GetTimeTickChannelResponse {
+message ComponentStatesResponse {
   common.Status status = 1;
-  string time_tick_channelID = 2;
-}
-
-message GetStatsChannelResponse {
-  common.Status status = 1;
-  string stats_channelID = 2;
-}
-
-message ServiceStatesResponse {
-  common.Status status = 1;
-  internal.ComponentStates server_states = 2;
+  internal.ComponentStates states = 2;
 }
 
 service QueryService {
@@ -160,16 +151,16 @@ service QueryService {
   rpc ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {}
 
   rpc CreateQueryChannel(common.Empty ) returns (CreateQueryChannelResponse) {}
-  rpc GetTimeTickChannel(common.Empty) returns (GetTimeTickChannelResponse) {}
-  rpc GetStatsChannel(common.Empty) returns (GetStatsChannelResponse) {}
+  rpc GetTimeTickChannel(common.Empty) returns (milvus.StringResponse) {}
+  rpc GetStatisticsChannel(common.Empty) returns (milvus.StringResponse) {}
   rpc GetPartitionStates(PartitionStatesRequest) returns (PartitionStatesResponse) {}
-  rpc GetComponentStates(common.Empty) returns (ServiceStatesResponse) {}
+  rpc GetComponentStates(common.Empty) returns (ComponentStatesResponse) {}
 }
 
 service QueryNode {
-  rpc GetTimeTickChannel(common.Empty) returns (GetTimeTickChannelResponse) {}
-  rpc GetStatsChannel(common.Empty) returns (GetStatsChannelResponse) {}
-  rpc GetComponentStates(common.Empty) returns (ServiceStatesResponse) {}
+  rpc GetTimeTickChannel(common.Empty) returns (milvus.StringResponse) {}
+  rpc GetStatsChannel(common.Empty) returns (milvus.StringResponse) {}
+  rpc GetComponentStates(common.Empty) returns (ComponentStatesResponse) {}
 
   rpc AddQueryChannel(AddQueryChannelsRequest) returns (common.Status) {}
   rpc RemoveQueryChannel(RemoveQueryChannelsRequest) returns (common.Status) {}

@@ -51,7 +51,6 @@ func TestGrpcService(t *testing.T) {
 	assert.Nil(t, err)
 
 	core.ProxyTimeTickChan = make(chan typeutil.Timestamp, 8)
-	core.DataNodeSegmentFlushCompletedChan = make(chan typeutil.UniqueID, 8)
 
 	timeTickArray := make([]typeutil.Timestamp, 0, 16)
 	core.SendTimeTick = func(ts typeutil.Timestamp) error {
@@ -200,8 +199,6 @@ func TestGrpcService(t *testing.T) {
 	})
 
 	t.Run("describe collection", func(t *testing.T) {
-		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
-		assert.Nil(t, err)
 		req := &milvuspb.DescribeCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kDescribeCollection,
@@ -216,7 +213,6 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, rsp.Schema.Name, "testColl")
-		assert.Equal(t, rsp.CollectionID, collMeta.ID)
 	})
 
 	t.Run("show collection", func(t *testing.T) {
@@ -279,8 +275,6 @@ func TestGrpcService(t *testing.T) {
 	})
 
 	t.Run("show partition", func(t *testing.T) {
-		coll, err := core.MetaTable.GetCollectionByName("testColl")
-		assert.Nil(t, err)
 		req := &milvuspb.ShowPartitionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kShowPartitions,
@@ -290,7 +284,6 @@ func TestGrpcService(t *testing.T) {
 			},
 			DbName:         "testDb",
 			CollectionName: "testColl",
-			CollectionID:   coll.ID,
 		}
 		rsp, err := cli.ShowPartitions(req)
 		assert.Nil(t, err)
@@ -319,7 +312,7 @@ func TestGrpcService(t *testing.T) {
 
 		req := &milvuspb.ShowSegmentRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kShowSegment,
+				MsgType:   111, //TODO show segment request msg type
 				MsgID:     111,
 				Timestamp: 111,
 				SourceID:  111,
@@ -365,7 +358,7 @@ func TestGrpcService(t *testing.T) {
 
 		req := &milvuspb.DescribeSegmentRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDescribeSegment,
+				MsgType:   113, //TODO, describe segment request msg type
 				MsgID:     113,
 				Timestamp: 113,
 				SourceID:  113,
@@ -397,47 +390,6 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, len(rsp.IndexDescriptions), 1)
 		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, cms.Params.DefaultIndexName)
-	})
-
-	t.Run("flush segment", func(t *testing.T) {
-		coll, err := core.MetaTable.GetCollectionByName("testColl")
-		assert.Nil(t, err)
-		partID := coll.PartitionIDs[1]
-		part, err := core.MetaTable.GetPartitionByID(partID)
-		assert.Nil(t, err)
-		assert.Equal(t, len(part.SegmentIDs), 1)
-		seg := &datapb.SegmentInfo{
-			SegmentID:    1001,
-			CollectionID: coll.ID,
-			PartitionID:  part.PartitionID,
-		}
-		core.DataServiceSegmentChan <- seg
-		time.Sleep(time.Millisecond * 100)
-		part, err = core.MetaTable.GetPartitionByID(partID)
-		assert.Nil(t, err)
-		assert.Equal(t, len(part.SegmentIDs), 2)
-		core.DataNodeSegmentFlushCompletedChan <- 1001
-		time.Sleep(time.Millisecond * 100)
-
-		req := &milvuspb.DescribeIndexRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDescribeIndex,
-				MsgID:     115,
-				Timestamp: 115,
-				SourceID:  115,
-			},
-			DbName:         "",
-			CollectionName: "testColl",
-			FieldName:      "vector",
-			IndexName:      "",
-		}
-		rsp, err := cli.DescribeIndex(req)
-		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
-		assert.Equal(t, len(rsp.IndexDescriptions), 2)
-		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, cms.Params.DefaultIndexName)
-		assert.Equal(t, rsp.IndexDescriptions[1].IndexName, "index_100")
-
 	})
 
 	t.Run("drop partition", func(t *testing.T) {

@@ -1,4 +1,4 @@
-package querynode
+package grpcquerynode
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/querynode"
 )
@@ -49,45 +50,45 @@ func (s *Server) Stop() error {
 	return s.Stop()
 }
 
-func (s *Server) GetTimeTickChannel(ctx context.Context, in *commonpb.Empty) (*querypb.GetTimeTickChannelResponse, error) {
+func (s *Server) GetTimeTickChannel(ctx context.Context, in *commonpb.Empty) (*milvuspb.StringResponse, error) {
 	// ignore ctx and in
 	channel, err := s.node.GetTimeTickChannel()
 	if err != nil {
 		return nil, err
 	}
-	return &querypb.GetTimeTickChannelResponse{
+	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		},
-		TimeTickChannelID: channel,
+		Value: channel,
 	}, nil
 }
 
-func (s *Server) GetStatsChannel(ctx context.Context, in *commonpb.Empty) (*querypb.GetStatsChannelResponse, error) {
+func (s *Server) GetStatsChannel(ctx context.Context, in *commonpb.Empty) (*milvuspb.StringResponse, error) {
 	// ignore ctx and in
 	channel, err := s.node.GetStatisticsChannel()
 	if err != nil {
 		return nil, err
 	}
-	return &querypb.GetStatsChannelResponse{
+	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		},
-		StatsChannelID: channel,
+		Value: channel,
 	}, nil
 }
 
-func (s *Server) GetComponentStates(ctx context.Context, in *commonpb.Empty) (*querypb.ServiceStatesResponse, error) {
+func (s *Server) GetComponentStates(ctx context.Context, in *commonpb.Empty) (*querypb.ComponentStatesResponse, error) {
 	// ignore ctx and in
 	componentStates, err := s.node.GetComponentStates()
 	if err != nil {
 		return nil, err
 	}
-	return &querypb.ServiceStatesResponse{
+	return &querypb.ComponentStatesResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		},
-		ServerStates: componentStates,
+		States: componentStates,
 	}, nil
 }
 

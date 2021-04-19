@@ -1,7 +1,11 @@
-package querynode
+package grpcquerynodeclient
 
 import (
 	"context"
+	"log"
+	"time"
+
+	"google.golang.org/grpc"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -18,7 +22,7 @@ func (c *Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	if err != nil {
 		return nil, err
 	}
-	return states.ServerStates, nil
+	return states.States, nil
 }
 
 func (c *Client) GetTimeTickChannel() (string, error) {
@@ -26,7 +30,7 @@ func (c *Client) GetTimeTickChannel() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return response.TimeTickChannelID, nil
+	return response.Value, nil
 }
 
 func (c *Client) GetStatisticsChannel() (string, error) {
@@ -34,7 +38,7 @@ func (c *Client) GetStatisticsChannel() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return response.StatsChannelID, nil
+	return response.Value, nil
 }
 
 func (c *Client) AddQueryChannel(in *querypb.AddQueryChannelsRequest) (*commonpb.Status, error) {
@@ -55,4 +59,18 @@ func (c *Client) LoadSegments(in *querypb.LoadSegmentRequest) (*commonpb.Status,
 
 func (c *Client) ReleaseSegments(in *querypb.ReleaseSegmentRequest) (*commonpb.Status, error) {
 	return c.grpcClient.ReleaseSegments(context.TODO(), in)
+}
+
+func NewClient(address string) *Client {
+	ctx1, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, err := grpc.DialContext(ctx1, address, grpc.WithInsecure(), grpc.WithBlock())
+	if err != nil {
+		log.Printf("connect to queryNode failed, error= %v", err)
+	}
+	log.Printf("connected to queryNode, queryNode=%s", address)
+
+	return &Client{
+		grpcClient: querypb.NewQueryNodeClient(conn),
+	}
 }

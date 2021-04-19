@@ -4,7 +4,6 @@ import (
 	"context"
 	"log"
 	"math/rand"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -139,9 +138,6 @@ type Core struct {
 	//setMsgStreams segment channel, receive segment info from data service, if master create segment
 	DataServiceSegmentChan chan *datapb.SegmentInfo
 
-	//setMsgStreams ,if segment flush completed, data node would put segment id into msg stream
-	DataNodeSegmentFlushCompletedChan chan typeutil.UniqueID
-
 	//TODO,get binlog file path from data service,
 	GetBinlogFilePathsFromDataServiceReq func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
 
@@ -231,9 +227,6 @@ func (c *Core) checkInit() error {
 	if c.indexTaskQueue == nil {
 		return errors.Errorf("indexTaskQueue is nil")
 	}
-	if c.DataNodeSegmentFlushCompletedChan == nil {
-		return errors.Errorf("DataNodeSegmentFlushCompletedChan is nil")
-	}
 	log.Printf("master node id = %d\n", Params.NodeID)
 	return nil
 }
@@ -318,39 +311,11 @@ func (c *Core) startCreateIndexLoop() {
 			return
 		case t, ok := <-c.indexTaskQueue:
 			if !ok {
-				log.Printf("index task chan has closed, exit loop")
+				log.Printf("index task chan is close, exit loop")
 				return
 			}
 			if err := t.BuildIndex(); err != nil {
 				log.Printf("create index failed, error = %s", err.Error())
-			}
-		}
-	}
-}
-
-func (c *Core) startSegmentFlushCompletedLoop() {
-	for {
-		select {
-		case <-c.ctx.Done():
-			log.Printf("close segment flush completed loop")
-			return
-		case seg, ok := <-c.DataNodeSegmentFlushCompletedChan:
-			if !ok {
-				log.Printf("data node segment flush completed chan has colsed, exit loop")
-			}
-			fields, err := c.MetaTable.GetSegmentVectorFields(seg)
-			if err != nil {
-				log.Printf("GetSegmentVectorFields, error = %s ", err.Error())
-			}
-			for _, f := range fields {
-				t := &CreateIndexTask{
-					core:        c,
-					segmentID:   seg,
-					indexName:   "index_" + strconv.FormatInt(f.FieldID, 10),
-					fieldSchema: f,
-					indexParams: nil,
-				}
-				c.indexTaskQueue <- t
 			}
 		}
 	}
@@ -577,7 +542,6 @@ func (c *Core) Start() error {
 		go c.startTimeTickLoop()
 		go c.startDataServiceSegmentLoop()
 		go c.startCreateIndexLoop()
-		go c.startSegmentFlushCompletedLoop()
 		c.stateCode.Store(internalpb2.StateCode_HEALTHY)
 	})
 	return nil

@@ -27,21 +27,11 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	queryPb "github.com/zilliztech/milvus-distributed/internal/proto/querypb"
-	queryserviceimpl "github.com/zilliztech/milvus-distributed/internal/queryservice"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
-type Node interface {
-	GetComponentStates() (*internalpb2.ComponentStates, error)
-	GetTimeTickChannel() (string, error)
-	GetStatisticsChannel() (string, error)
-
-	AddQueryChannel(in *queryPb.AddQueryChannelsRequest) (*commonpb.Status, error)
-	RemoveQueryChannel(in *queryPb.RemoveQueryChannelsRequest) (*commonpb.Status, error)
-	WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error)
-	LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.Status, error)
-	ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error)
-}
+type Node = typeutil.QueryNodeInterface
+type QueryService = typeutil.QueryServiceInterface
 
 type QueryNode struct {
 	typeutil.Service
@@ -117,13 +107,13 @@ func Init() {
 }
 
 func (node *QueryNode) Init() error {
-	registerReq := queryPb.RegisterNodeRequest{
+	registerReq := &queryPb.RegisterNodeRequest{
 		Address: &commonpb.Address{
 			Ip:   Params.QueryNodeIP,
 			Port: Params.QueryNodePort,
 		},
 	}
-	var client queryserviceimpl.Interface // TODO: init interface
+	var client QueryService // TODO: init interface
 	response, err := client.RegisterNode(registerReq)
 	if err != nil {
 		panic(err)
