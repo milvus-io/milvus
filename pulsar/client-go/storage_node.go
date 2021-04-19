@@ -2,7 +2,7 @@ package client_go
 
 import (
 	"fmt"
-	"suvlim/pulsar/client-go/schema"
+	"github.com/czs007/suvlim/pulsar/client-go/schema"
 	"sync"
 	"time"
 )
@@ -27,7 +27,7 @@ func (wn *WriteNode) doWriteNode(wg sync.WaitGroup) {
 func (wn *WriteNode) PrepareBatchMsg() {
 	wn.mc.PrepareBatchMsg(JobType(1))
 }
-func main() {
+func storageNodeMain() {
 
 	mc := MessageClient{}
 	topics := []string{"insert", "delete"}

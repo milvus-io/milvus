@@ -28,6 +28,7 @@ DeleteSegment(CSegmentBase segment) {
   delete s;
 }
 
+//////////////////////////////////////////////////////////////////
 
 int
 Insert(CSegmentBase c_segment,
@@ -78,4 +79,81 @@ Search(CSegmentBase c_segment,
   memcpy(result_distances, query_result.result_distances_.data(), query_result.row_num_ * sizeof(float));
 
   return res.code();
+}
+
+//////////////////////////////////////////////////////////////////
+
+int
+Close(CSegmentBase c_segment) {
+  auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
+  auto status = segment->Close();
+  return status.code();
+}
+
+
+bool
+IsOpened(CSegmentBase c_segment) {
+  auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
+  auto status = segment->get_state();
+  return status == milvus::dog_segment::SegmentBase::SegmentState::Open;
+}
+
+//////////////////////////////////////////////////////////////////
+
+long int
+GetRowCount(CSegmentBase c_segment) {
+  auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
+  auto row_count = segment->get_row_count();
+  return row_count;
+}
+
+
+long int
+GetDeletedCount(CSegmentBase c_segment) {
+  auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
+  auto deleted_count = segment->get_deleted_count();
+  return deleted_count;
+}
+
+
+unsigned long
+GetTimeBegin(CSegmentBase c_segment) {
+  auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
+  auto time_begin = segment->get_time_begin();
+  return time_begin;
+}
+
+
+void
+SetTimeBegin(CSegmentBase c_segment, unsigned long time_begin) {
+  auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
+  segment->set_time_begin(time_begin);
+}
+
+
+unsigned long
+GetTimeEnd(CSegmentBase c_segment) {
+  auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
+  auto time_end = segment->get_time_end();
+  return time_end;
+}
+
+void
+SetTimeEnd(CSegmentBase c_segment, unsigned long time_end) {
+  auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
+  segment->set_time_end(time_end);
+}
+
+
+unsigned long
+GetSegmentId(CSegmentBase c_segment) {
+  auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
+  auto segment_id = segment->get_segment_id();
+  return segment_id;
+}
+
+void
+SetSegmentId(CSegmentBase c_segment, unsigned long segment_id) {
+  auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
+  segment->set_segment_id(segment_id);
 }

@@ -125,17 +125,15 @@ func (node *QueryNode) GetTargetSegment(collectionName *string, partitionTag *st
 		return nil, errors.New("cannot found target partition")
 	}
 
-	for _, segment := range targetPartition.Segments {
-		var segmentStatus = segment.GetStatus()
-		if segmentStatus == 0 {
-			return segment, nil
-		}
+	for _, segment := range targetPartition.OpenedSegments {
+		// TODO: add other conditions
+		return segment, nil
 	}
 
 	return nil, errors.New("cannot found target segment")
 }
 
-func (node *QueryNode) GetTimeSync() uint64 {
+func (node *QueryNode) GetTSOTime() uint64 {
 	// TODO: Add time sync
 	return 0
 }
@@ -152,17 +150,22 @@ func (node *QueryNode) InitQueryNodeCollection() {
 }
 
 func (node *QueryNode) SegmentsManagement() {
-	var timeSync = node.GetTimeSync()
+	var timeNow = node.GetTSOTime()
 	for _, collection := range node.Collections {
 		for _, partition := range collection.Partitions {
-			for _, segment := range partition.Segments {
+			for _, oldSegment := range partition.OpenedSegments {
 				// TODO: check segment status
-				if timeSync >= segment.SegmentCloseTime {
-					segment.Close()
+				if timeNow >= oldSegment.SegmentCloseTime {
+					// start new segment and add it into partition.OpenedSegments
 					// TODO: add atomic segment id
 					var newSegment = partition.NewSegment(0)
-					newSegment.SegmentCloseTime = timeSync + SegmentLifetime
-					partition.Segments = append(partition.Segments, newSegment)
+					newSegment.SegmentCloseTime = timeNow + SegmentLifetime
+					partition.OpenedSegments = append(partition.OpenedSegments, newSegment)
+
+					// close old segment and move it into partition.ClosedSegments
+					// TODO: check status
+					var _ = oldSegment.Close()
+					partition.ClosedSegments = append(partition.ClosedSegments, oldSegment)
 				}
 			}
 		}
@@ -179,7 +182,7 @@ func (node *QueryNode) SegmentService() {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 func (node *QueryNode) Insert(insertMessages []*schema.InsertMsg, wg *sync.WaitGroup) schema.Status {
-	var timeSync = node.GetTimeSync()
+	var timeNow = node.GetTSOTime()
 	var collectionName = insertMessages[0].CollectionName
 	var partitionTag = insertMessages[0].PartitionTag
 	var clientId = insertMessages[0].ClientId
@@ -190,7 +193,7 @@ func (node *QueryNode) Insert(insertMessages []*schema.InsertMsg, wg *sync.WaitG
 	var vectorRecords [][]*schema.FieldValue
 
 	for i, msg := range node.buffer.InsertBuffer {
-		if msg.Timestamp <= timeSync {
+		if msg.Timestamp <= timeNow {
 			entityIds = append(entityIds, msg.EntityId)
 			timestamps = append(timestamps, msg.Timestamp)
 			vectorRecords = append(vectorRecords, msg.Fields)
@@ -207,7 +210,7 @@ func (node *QueryNode) Insert(insertMessages []*schema.InsertMsg, wg *sync.WaitG
 	}
 
 	for _, msg := range insertMessages {
-		if msg.Timestamp <= timeSync {
+		if msg.Timestamp <= timeNow {
 			entityIds = append(entityIds, msg.EntityId)
 			timestamps = append(timestamps, msg.Timestamp)
 			vectorRecords = append(vectorRecords, msg.Fields)
@@ -232,7 +235,7 @@ func (node *QueryNode) Insert(insertMessages []*schema.InsertMsg, wg *sync.WaitG
 }
 
 func (node *QueryNode) Delete(deleteMessages []*schema.DeleteMsg, wg *sync.WaitGroup) schema.Status {
-	var timeSync = node.GetTimeSync()
+	var timeNow = node.GetTSOTime()
 	var clientId = deleteMessages[0].ClientId
 
 	// TODO: prevent Memory copy
@@ -240,7 +243,7 @@ func (node *QueryNode) Delete(deleteMessages []*schema.DeleteMsg, wg *sync.WaitG
 	var timestamps []uint64
 
 	for i, msg := range node.buffer.DeleteBuffer {
-		if msg.Timestamp <= timeSync {
+		if msg.Timestamp <= timeNow {
 			entityIds = append(entityIds, msg.EntityId)
 			timestamps = append(timestamps, msg.Timestamp)
 			node.buffer.validDeleteBuffer[i] = false
@@ -256,7 +259,7 @@ func (node *QueryNode) Delete(deleteMessages []*schema.DeleteMsg, wg *sync.WaitG
 	}
 
 	for _, msg := range deleteMessages {
-		if msg.Timestamp <= timeSync {
+		if msg.Timestamp <= timeNow {
 			entityIds = append(entityIds, msg.EntityId)
 			timestamps = append(timestamps, msg.Timestamp)
 		} else {
@@ -281,7 +284,7 @@ func (node *QueryNode) Delete(deleteMessages []*schema.DeleteMsg, wg *sync.WaitG
 }
 
 func (node *QueryNode) Search(searchMessages []*schema.SearchMsg, wg *sync.WaitGroup) schema.Status {
-	var timeSync = node.GetTimeSync()
+	var timeNow = node.GetTSOTime()
 	var collectionName = searchMessages[0].CollectionName
 	var partitionTag = searchMessages[0].PartitionTag
 	var clientId = searchMessages[0].ClientId
@@ -292,7 +295,7 @@ func (node *QueryNode) Search(searchMessages []*schema.SearchMsg, wg *sync.WaitG
 	var timestamps []uint64
 
 	for i, msg := range node.buffer.SearchBuffer {
-		if msg.Timestamp <= timeSync {
+		if msg.Timestamp <= timeNow {
 			records = append(records, *msg.VectorParam.RowRecord)
 			timestamps = append(timestamps, msg.Timestamp)
 			node.buffer.validSearchBuffer[i] = false
@@ -308,7 +311,7 @@ func (node *QueryNode) Search(searchMessages []*schema.SearchMsg, wg *sync.WaitG
 	}
 
 	for _, msg := range searchMessages {
-		if msg.Timestamp <= timeSync {
+		if msg.Timestamp <= timeNow {
 			records = append(records, *msg.VectorParam.RowRecord)
 			timestamps = append(timestamps, msg.Timestamp)
 		} else {
