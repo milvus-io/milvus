@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
@@ -40,7 +42,8 @@ func TestStatsProcess(t *testing.T) {
 		ts := tsoutil.ComposeTS(phy, val)
 		return ts, nil
 	}
-	statsProcessor := NewStatsProcessor(mt, globalTsoAllocator)
+	runtimeStats := NewRuntimeStats()
+	statsProcessor := NewStatsProcessor(mt, runtimeStats, globalTsoAllocator)
 
 	ts, err := globalTsoAllocator()
 	assert.Nil(t, err)
@@ -75,6 +78,14 @@ func TestStatsProcess(t *testing.T) {
 		SegStats: []*internalpb.SegmentStats{
 			{SegmentID: 100, MemorySize: 2500000, NumRows: 25000, RecentlyModified: true},
 		},
+		FieldStats: []*internalpb.FieldStats{
+			{CollectionID: 1, FieldID: 100, IndexStats: []*internalpb.IndexStats{
+				{IndexParams: []*commonpb.KeyValuePair{}, NumRelatedSegments: 100},
+			}},
+			{CollectionID: 2, FieldID: 100, IndexStats: []*internalpb.IndexStats{
+				{IndexParams: []*commonpb.KeyValuePair{}, NumRelatedSegments: 200},
+			}},
+		},
 	}
 	baseMsg := msgstream.BaseMsg{
 		BeginTimestamp: 0,
@@ -98,5 +109,8 @@ func TestStatsProcess(t *testing.T) {
 	assert.Equal(t, int64(100), segMeta.SegmentID)
 	assert.Equal(t, int64(2500000), segMeta.MemSize)
 	assert.Equal(t, int64(25000), segMeta.NumRows)
+
+	assert.EqualValues(t, 100, runtimeStats.collStats[1].fieldStats[100][0].numOfRelatedSegments)
+	assert.EqualValues(t, 200, runtimeStats.collStats[2].fieldStats[100][0].numOfRelatedSegments)
 
 }
