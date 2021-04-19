@@ -3,6 +3,7 @@ module github.com/zilliztech/milvus-distributed
 go 1.15
 
 require (
+	github.com/HdrHistogram/hdrhistogram-go v1.0.1 // indirect
 	github.com/apache/pulsar-client-go v0.1.1
 	github.com/apache/thrift/lib/go/thrift v0.0.0-20210120171102-e27e82c46ba4
 	github.com/facebookgo/ensure v0.0.0-20200202191622-63f1cf65ac4c // indirect
@@ -21,6 +22,7 @@ require (
 	github.com/mitchellh/mapstructure v1.1.2
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/onsi/gomega v1.10.5 // indirect
+	github.com/opentracing/opentracing-go v1.2.0
 	github.com/pierrec/lz4 v2.5.2+incompatible // indirect
 	github.com/sirupsen/logrus v1.6.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0
@@ -28,6 +30,8 @@ require (
 	github.com/spf13/viper v1.7.1
 	github.com/stretchr/testify v1.6.1
 	github.com/tecbot/gorocksdb v0.0.0-20191217155057-f0fad39f321c
+	github.com/uber/jaeger-client-go v2.25.0+incompatible
+	github.com/uber/jaeger-lib v2.4.0+incompatible // indirect
 	github.com/yahoo/athenz v1.9.16 // indirect
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
 	go.uber.org/zap v1.15.0

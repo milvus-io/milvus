@@ -7,7 +7,10 @@ import (
 	"log"
 	"sync"
 
+	"github.com/opentracing/opentracing-go"
+	oplog "github.com/opentracing/opentracing-go/log"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
 
 type TaskQueue interface {
@@ -184,32 +187,38 @@ func (sched *TaskScheduler) scheduleIndexAddTask() task {
 //}
 
 func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
-
-	err := t.PreExecute()
+	span, ctx := trace.StartSpanFromContext(t.Ctx(),
+		opentracing.Tags{
+			"Type": t.Name(),
+		})
+	defer span.Finish()
+	span.LogFields(oplog.String("scheduler process PreExecute", t.Name()))
+	err := t.PreExecute(ctx)
 
 	defer func() {
 		t.Notify(err)
 		log.Printf("notify with error: %v", err)
 	}()
 	if err != nil {
+		trace.LogError(span, err)
 		return
 	}
 
+	span.LogFields(oplog.String("scheduler process AddActiveTask", t.Name()))
 	q.AddActiveTask(t)
-	log.Printf("task add to active list ...")
 	defer func() {
+		span.LogFields(oplog.String("scheduler process PopActiveTask", t.Name()))
 		q.PopActiveTask(t.ID())
-		log.Printf("pop from active list ...")
 	}()
 
-	err = t.Execute()
+	span.LogFields(oplog.String("scheduler process Execute", t.Name()))
+	err = t.Execute(ctx)
 	if err != nil {
-		log.Printf("execute definition task failed, error = %v", err)
+		trace.LogError(span, err)
 		return
 	}
-	log.Printf("task execution done ...")
-	err = t.PostExecute()
-	log.Printf("post execute task done ...")
+	span.LogFields(oplog.String("scheduler process PostExecute", t.Name()))
+	err = t.PostExecute(ctx)
 }
 
 func (sched *TaskScheduler) indexAddLoop() {

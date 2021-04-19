@@ -146,11 +146,17 @@ func (i *NodeImpl) SetIndexServiceClient(serviceClient typeutil.IndexServiceInte
 }
 
 func (i *NodeImpl) BuildIndex(request *indexpb.BuildIndexCmd) (*commonpb.Status, error) {
-	t := newIndexBuildTask()
-	t.cmd = request
-	t.kv = i.kv
-	t.serviceClient = i.serviceClient
-	t.nodeID = Params.NodeID
+	ctx := context.Background()
+	t := &IndexBuildTask{
+		BaseTask: BaseTask{
+			ctx:  ctx,
+			done: make(chan error), // intend to do this
+		},
+		cmd:           request,
+		kv:            i.kv,
+		serviceClient: i.serviceClient,
+		nodeID:        Params.NodeID,
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 

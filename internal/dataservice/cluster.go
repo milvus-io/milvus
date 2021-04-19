@@ -1,9 +1,12 @@
 package dataservice
 
 import (
-	"log"
+	"fmt"
 	"sync"
 
+	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
@@ -27,6 +30,10 @@ type (
 		nodes    []*dataNode
 	}
 )
+
+func (node *dataNode) String() string {
+	return fmt.Sprintf("id: %d, address: %s:%d", node.id, node.address.ip, node.address.port)
+}
 
 func newDataNodeCluster(finishCh chan struct{}) *dataNodeCluster {
 	return &dataNodeCluster{
@@ -92,12 +99,8 @@ func (c *dataNodeCluster) WatchInsertChannels(channels []string) {
 			},
 			ChannelNames: group,
 		})
-		if err != nil {
-			log.Println(err.Error())
-			continue
-		}
-		if resp.ErrorCode != commonpb.ErrorCode_SUCCESS {
-			log.Println(resp.Reason)
+		if err = VerifyResponse(resp, err); err != nil {
+			log.Error("watch dm channels error", zap.Stringer("dataNode", c.nodes[i]), zap.Error(err))
 			continue
 		}
 		c.nodes[i].channelNum += len(group)
@@ -111,7 +114,7 @@ func (c *dataNodeCluster) GetDataNodeStates() ([]*internalpb2.ComponentInfo, err
 	for _, node := range c.nodes {
 		states, err := node.client.GetComponentStates(&commonpb.Empty{})
 		if err != nil {
-			log.Println(err.Error())
+			log.Error("get component states error", zap.Stringer("dataNode", node), zap.Error(err))
 			continue
 		}
 		ret = append(ret, states.State)
@@ -124,7 +127,7 @@ func (c *dataNodeCluster) FlushSegment(request *datapb.FlushSegRequest) {
 	defer c.mu.RUnlock()
 	for _, node := range c.nodes {
 		if _, err := node.client.FlushSegments(request); err != nil {
-			log.Println(err.Error())
+			log.Error("flush segment err", zap.Stringer("dataNode", node), zap.Error(err))
 			continue
 		}
 	}
@@ -133,7 +136,7 @@ func (c *dataNodeCluster) FlushSegment(request *datapb.FlushSegRequest) {
 func (c *dataNodeCluster) ShutDownClients() {
 	for _, node := range c.nodes {
 		if err := node.client.Stop(); err != nil {
-			log.Println(err.Error())
+			log.Error("stop client error", zap.Stringer("dataNode", node), zap.Error(err))
 			continue
 		}
 	}

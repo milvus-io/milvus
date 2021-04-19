@@ -90,6 +90,7 @@ const {
 }
 
 type TsMsg interface {
+    ID() UniqueID
     SetTs(ts Timestamp)
     BeginTs() Timestamp
     EndTs() Timestamp

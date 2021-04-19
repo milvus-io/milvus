@@ -3,6 +3,10 @@ package proxyservice
 import (
 	"context"
 	"sync"
+
+	"github.com/opentracing/opentracing-go"
+	oplog "github.com/opentracing/opentracing-go/log"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
 
 type TaskScheduler struct {
@@ -40,21 +44,30 @@ func (sched *TaskScheduler) scheduleInvalidateCollectionMetaCacheTask() task {
 }
 
 func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
-	var err error
-	err = t.PreExecute()
+	span, ctx := trace.StartSpanFromContext(t.Ctx(),
+		opentracing.Tags{
+			"Type": t.Name(),
+		})
+	defer span.Finish()
+	span.LogFields(oplog.String("scheduler process PreExecute", t.Name()))
+	err := t.PreExecute(ctx)
 
 	defer func() {
+		trace.LogError(span, err)
 		t.Notify(err)
 	}()
 	if err != nil {
 		return
 	}
 
-	err = t.Execute()
+	span.LogFields(oplog.String("scheduler process Execute", t.Name()))
+	err = t.Execute(ctx)
 	if err != nil {
+		trace.LogError(span, err)
 		return
 	}
-	err = t.PostExecute()
+	span.LogFields(oplog.String("scheduler process PostExecute", t.Name()))
+	err = t.PostExecute(ctx)
 }
 
 func (sched *TaskScheduler) registerLinkLoop() {

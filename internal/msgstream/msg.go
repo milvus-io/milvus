@@ -1,7 +1,6 @@
 package msgstream
 
 import (
-	"context"
 	"errors"
 
 	"github.com/golang/protobuf/proto"
@@ -14,6 +13,7 @@ type MsgType = commonpb.MsgType
 type MarshalType = interface{}
 
 type TsMsg interface {
+	ID() UniqueID
 	BeginTs() Timestamp
 	EndTs() Timestamp
 	Type() MsgType
@@ -25,7 +25,6 @@ type TsMsg interface {
 }
 
 type BaseMsg struct {
-	MsgCtx         context.Context
 	BeginTimestamp Timestamp
 	EndTimestamp   Timestamp
 	HashValues     []uint32
@@ -65,6 +64,10 @@ func ConvertToByteArray(input interface{}) ([]byte, error) {
 type InsertMsg struct {
 	BaseMsg
 	internalpb2.InsertRequest
+}
+
+func (it *InsertMsg) ID() UniqueID {
+	return it.Base.MsgID
 }
 
 func (it *InsertMsg) Type() MsgType {
@@ -115,6 +118,10 @@ type FlushCompletedMsg struct {
 	internalpb2.SegmentFlushCompletedMsg
 }
 
+func (fl *FlushCompletedMsg) ID() UniqueID {
+	return fl.Base.MsgID
+}
+
 func (fl *FlushCompletedMsg) Type() MsgType {
 	return fl.Base.MsgType
 }
@@ -153,6 +160,10 @@ type FlushMsg struct {
 	internalpb2.FlushMsg
 }
 
+func (fl *FlushMsg) ID() UniqueID {
+	return fl.Base.MsgID
+}
+
 func (fl *FlushMsg) Type() MsgType {
 	return fl.Base.MsgType
 }
@@ -188,6 +199,10 @@ func (fl *FlushMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 type DeleteMsg struct {
 	BaseMsg
 	internalpb2.DeleteRequest
+}
+
+func (dt *DeleteMsg) ID() UniqueID {
+	return dt.Base.MsgID
 }
 
 func (dt *DeleteMsg) Type() MsgType {
@@ -239,6 +254,10 @@ type SearchMsg struct {
 	internalpb2.SearchRequest
 }
 
+func (st *SearchMsg) ID() UniqueID {
+	return st.Base.MsgID
+}
+
 func (st *SearchMsg) Type() MsgType {
 	return st.Base.MsgType
 }
@@ -276,6 +295,10 @@ type SearchResultMsg struct {
 	internalpb2.SearchResults
 }
 
+func (srt *SearchResultMsg) ID() UniqueID {
+	return srt.Base.MsgID
+}
+
 func (srt *SearchResultMsg) Type() MsgType {
 	return srt.Base.MsgType
 }
@@ -311,6 +334,10 @@ func (srt *SearchResultMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 type TimeTickMsg struct {
 	BaseMsg
 	internalpb2.TimeTickMsg
+}
+
+func (tst *TimeTickMsg) ID() UniqueID {
+	return tst.Base.MsgID
 }
 
 func (tst *TimeTickMsg) Type() MsgType {
@@ -351,6 +378,10 @@ type QueryNodeStatsMsg struct {
 	internalpb2.QueryNodeStats
 }
 
+func (qs *QueryNodeStatsMsg) ID() UniqueID {
+	return qs.Base.MsgID
+}
+
 func (qs *QueryNodeStatsMsg) Type() MsgType {
 	return qs.Base.MsgType
 }
@@ -384,6 +415,10 @@ func (qs *QueryNodeStatsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 type SegmentStatisticsMsg struct {
 	BaseMsg
 	internalpb2.SegmentStatistics
+}
+
+func (ss *SegmentStatisticsMsg) ID() UniqueID {
+	return ss.Base.MsgID
 }
 
 func (ss *SegmentStatisticsMsg) Type() MsgType {
@@ -431,6 +466,10 @@ type CreateCollectionMsg struct {
 	internalpb2.CreateCollectionRequest
 }
 
+func (cc *CreateCollectionMsg) ID() UniqueID {
+	return cc.Base.MsgID
+}
+
 func (cc *CreateCollectionMsg) Type() MsgType {
 	return cc.Base.MsgType
 }
@@ -466,6 +505,10 @@ func (cc *CreateCollectionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 type DropCollectionMsg struct {
 	BaseMsg
 	internalpb2.DropCollectionRequest
+}
+
+func (dc *DropCollectionMsg) ID() UniqueID {
+	return dc.Base.MsgID
 }
 
 func (dc *DropCollectionMsg) Type() MsgType {
@@ -505,6 +548,10 @@ type CreatePartitionMsg struct {
 	internalpb2.CreatePartitionRequest
 }
 
+func (cc *CreatePartitionMsg) ID() UniqueID {
+	return cc.Base.MsgID
+}
+
 func (cc *CreatePartitionMsg) Type() MsgType {
 	return cc.Base.MsgType
 }
@@ -540,6 +587,10 @@ func (cc *CreatePartitionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 type DropPartitionMsg struct {
 	BaseMsg
 	internalpb2.DropPartitionRequest
+}
+
+func (dc *DropPartitionMsg) ID() UniqueID {
+	return dc.Base.MsgID
 }
 
 func (dc *DropPartitionMsg) Type() MsgType {
@@ -579,16 +630,12 @@ type LoadIndexMsg struct {
 	internalpb2.LoadIndex
 }
 
+func (lim *LoadIndexMsg) ID() UniqueID {
+	return lim.Base.MsgID
+}
+
 func (lim *LoadIndexMsg) Type() MsgType {
 	return lim.Base.MsgType
-}
-
-func (lim *LoadIndexMsg) GetMsgContext() context.Context {
-	return lim.MsgCtx
-}
-
-func (lim *LoadIndexMsg) SetMsgContext(ctx context.Context) {
-	lim.MsgCtx = ctx
 }
 
 func (lim *LoadIndexMsg) Marshal(input TsMsg) (MarshalType, error) {
@@ -620,6 +667,10 @@ func (lim *LoadIndexMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 type SegmentInfoMsg struct {
 	BaseMsg
 	datapb.SegmentMsg
+}
+
+func (sim *SegmentInfoMsg) ID() UniqueID {
+	return sim.Base.MsgID
 }
 
 func (sim *SegmentInfoMsg) Type() MsgType {

@@ -9,10 +9,12 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-
+	"github.com/opentracing/opentracing-go"
+	oplog "github.com/opentracing/opentracing-go/log"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
 
 type TaskQueue interface {
@@ -295,31 +297,42 @@ func (sched *TaskScheduler) getTaskByReqID(collMeta UniqueID) task {
 }
 
 func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
-
-	err := t.PreExecute()
+	span, ctx := trace.StartSpanFromContext(t.Ctx(),
+		opentracing.Tags{
+			"Type": t.Name(),
+			"ID":   t.ID(),
+		})
+	defer span.Finish()
+	span.LogFields(oplog.Int64("scheduler process PreExecute", t.ID()))
+	err := t.PreExecute(ctx)
 
 	defer func() {
 		t.Notify(err)
 		// log.Printf("notify with error: %v", err)
 	}()
 	if err != nil {
+		trace.LogError(span, err)
 		return
 	}
 
+	span.LogFields(oplog.Int64("scheduler process AddActiveTask", t.ID()))
 	q.AddActiveTask(t)
+
 	// log.Printf("task add to active list ...")
 	defer func() {
+		span.LogFields(oplog.Int64("scheduler process PopActiveTask", t.ID()))
 		q.PopActiveTask(t.EndTs())
 		// log.Printf("pop from active list ...")
 	}()
-
-	err = t.Execute()
+	span.LogFields(oplog.Int64("scheduler process Execute", t.ID()))
+	err = t.Execute(ctx)
 	if err != nil {
-		log.Printf("execute definition task failed, error = %v", err)
+		trace.LogError(span, err)
 		return
 	}
 	// log.Printf("task execution done ...")
-	err = t.PostExecute()
+	span.LogFields(oplog.Int64("scheduler process PostExecute", t.ID()))
+	err = t.PostExecute(ctx)
 	// log.Printf("post execute task done ...")
 }
 

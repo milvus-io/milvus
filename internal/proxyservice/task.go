@@ -18,10 +18,19 @@ const (
 	FromNode   TaskEnum = 2
 )
 
+const (
+	RegisterLinkTaskName                  = "RegisLinkTask"
+	RegisterNodeTaskName                  = "RegisNodeTask"
+	InvalidateCollectionMetaCacheTaskName = "InvalidateCollectionMetaCacheTask"
+)
+
 type task interface {
-	PreExecute() error
-	Execute() error
-	PostExecute() error
+	Ctx() context.Context
+	ID() UniqueID // return ReqID
+	Name() string
+	PreExecute(ctx context.Context) error
+	Execute(ctx context.Context) error
+	PostExecute(ctx context.Context) error
 	WaitToFinish() error
 	Notify(err error)
 }
@@ -58,15 +67,28 @@ func NewTaskCondition(ctx context.Context) Condition {
 
 type RegisterLinkTask struct {
 	Condition
+	ctx       context.Context
 	response  *milvuspb.RegisterLinkResponse
 	nodeInfos *GlobalNodeInfoTable
 }
 
-func (t *RegisterLinkTask) PreExecute() error {
+func (t *RegisterLinkTask) Ctx() context.Context {
+	return t.ctx
+}
+
+func (t *RegisterLinkTask) ID() UniqueID {
+	return 0
+}
+
+func (t *RegisterLinkTask) Name() string {
+	return RegisterLinkTaskName
+}
+
+func (t *RegisterLinkTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *RegisterLinkTask) Execute() error {
+func (t *RegisterLinkTask) Execute(ctx context.Context) error {
 	info, err := t.nodeInfos.Pick()
 	if err != nil {
 		return err
@@ -84,12 +106,13 @@ func (t *RegisterLinkTask) Execute() error {
 	return nil
 }
 
-func (t *RegisterLinkTask) PostExecute() error {
+func (t *RegisterLinkTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
 type RegisterNodeTask struct {
 	Condition
+	ctx         context.Context
 	request     *proxypb.RegisterNodeRequest
 	response    *proxypb.RegisterNodeResponse
 	startParams []*commonpb.KeyValuePair
@@ -97,11 +120,23 @@ type RegisterNodeTask struct {
 	nodeInfos   *GlobalNodeInfoTable
 }
 
-func (t *RegisterNodeTask) PreExecute() error {
+func (t *RegisterNodeTask) Ctx() context.Context {
+	return t.ctx
+}
+
+func (t *RegisterNodeTask) ID() UniqueID {
+	return t.request.Base.MsgID
+}
+
+func (t *RegisterNodeTask) Name() string {
+	return RegisterNodeTaskName
+}
+
+func (t *RegisterNodeTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *RegisterNodeTask) Execute() error {
+func (t *RegisterNodeTask) Execute(ctx context.Context) error {
 	nodeID := t.allocator.AllocOne()
 	info := NodeInfo{
 		ip:   t.request.Address.Ip,
@@ -122,22 +157,35 @@ func (t *RegisterNodeTask) Execute() error {
 	return err
 }
 
-func (t *RegisterNodeTask) PostExecute() error {
+func (t *RegisterNodeTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
 type InvalidateCollectionMetaCacheTask struct {
 	Condition
+	ctx       context.Context
 	request   *proxypb.InvalidateCollMetaCacheRequest
 	response  *commonpb.Status
 	nodeInfos *GlobalNodeInfoTable
 }
 
-func (t *InvalidateCollectionMetaCacheTask) PreExecute() error {
+func (t *InvalidateCollectionMetaCacheTask) Ctx() context.Context {
+	return t.ctx
+}
+
+func (t *InvalidateCollectionMetaCacheTask) ID() UniqueID {
+	return t.request.Base.MsgID
+}
+
+func (t *InvalidateCollectionMetaCacheTask) Name() string {
+	return InvalidateCollectionMetaCacheTaskName
+}
+
+func (t *InvalidateCollectionMetaCacheTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *InvalidateCollectionMetaCacheTask) Execute() error {
+func (t *InvalidateCollectionMetaCacheTask) Execute(ctx context.Context) error {
 	var err error
 	clients, err := t.nodeInfos.ObtainAllClients()
 	if err != nil {
@@ -158,6 +206,6 @@ func (t *InvalidateCollectionMetaCacheTask) Execute() error {
 	return nil
 }
 
-func (t *InvalidateCollectionMetaCacheTask) PostExecute() error {
+func (t *InvalidateCollectionMetaCacheTask) PostExecute(ctx context.Context) error {
 	return nil
 }

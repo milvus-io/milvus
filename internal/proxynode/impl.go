@@ -39,6 +39,7 @@ func (node *NodeImpl) CreateCollection(request *milvuspb.CreateCollectionRequest
 	defer cancel()
 
 	cct := &CreateCollectionTask{
+		ctx:                     ctx,
 		Condition:               NewTaskCondition(ctx),
 		CreateCollectionRequest: request,
 		masterClient:            node.masterClient,
@@ -70,6 +71,7 @@ func (node *NodeImpl) DropCollection(request *milvuspb.DropCollectionRequest) (*
 	defer cancel()
 
 	dct := &DropCollectionTask{
+		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		DropCollectionRequest: request,
 		masterClient:          node.masterClient,
@@ -100,6 +102,7 @@ func (node *NodeImpl) HasCollection(request *milvuspb.HasCollectionRequest) (*mi
 	defer cancel()
 
 	hct := &HasCollectionTask{
+		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		HasCollectionRequest: request,
 		masterClient:         node.masterClient,
@@ -134,6 +137,7 @@ func (node *NodeImpl) LoadCollection(request *milvuspb.LoadCollectionRequest) (*
 	defer cancel()
 
 	lct := &LoadCollectionTask{
+		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		LoadCollectionRequest: request,
 		queryserviceClient:    node.queryServiceClient,
@@ -164,6 +168,7 @@ func (node *NodeImpl) ReleaseCollection(request *milvuspb.ReleaseCollectionReque
 	defer cancel()
 
 	rct := &ReleaseCollectionTask{
+		ctx:                      ctx,
 		Condition:                NewTaskCondition(ctx),
 		ReleaseCollectionRequest: request,
 		queryserviceClient:       node.queryServiceClient,
@@ -194,6 +199,7 @@ func (node *NodeImpl) DescribeCollection(request *milvuspb.DescribeCollectionReq
 	defer cancel()
 
 	dct := &DescribeCollectionTask{
+		ctx:                       ctx,
 		Condition:                 NewTaskCondition(ctx),
 		DescribeCollectionRequest: request,
 		masterClient:              node.masterClient,
@@ -227,6 +233,7 @@ func (node *NodeImpl) GetCollectionStatistics(request *milvuspb.CollectionStatsR
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	g := &GetCollectionsStatisticsTask{
+		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		CollectionStatsRequest: request,
 		dataServiceClient:      node.dataServiceClient,
@@ -260,6 +267,7 @@ func (node *NodeImpl) ShowCollections(request *milvuspb.ShowCollectionRequest) (
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	sct := &ShowCollectionsTask{
+		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		ShowCollectionRequest: request,
 		masterClient:          node.masterClient,
@@ -293,6 +301,7 @@ func (node *NodeImpl) CreatePartition(request *milvuspb.CreatePartitionRequest) 
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	cpt := &CreatePartitionTask{
+		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		CreatePartitionRequest: request,
 		masterClient:           node.masterClient,
@@ -321,6 +330,7 @@ func (node *NodeImpl) DropPartition(request *milvuspb.DropPartitionRequest) (*co
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	dpt := &DropPartitionTask{
+		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		DropPartitionRequest: request,
 		masterClient:         node.masterClient,
@@ -350,6 +360,7 @@ func (node *NodeImpl) HasPartition(request *milvuspb.HasPartitionRequest) (*milv
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	hpt := &HasPartitionTask{
+		ctx:                 ctx,
 		Condition:           NewTaskCondition(ctx),
 		HasPartitionRequest: request,
 		masterClient:        node.masterClient,
@@ -386,6 +397,7 @@ func (node *NodeImpl) LoadPartitions(request *milvuspb.LoadPartitonRequest) (*co
 	defer cancel()
 
 	lpt := &LoadPartitionTask{
+		ctx:                 ctx,
 		Condition:           NewTaskCondition(ctx),
 		LoadPartitonRequest: request,
 		queryserviceClient:  node.queryServiceClient,
@@ -416,6 +428,7 @@ func (node *NodeImpl) ReleasePartitions(request *milvuspb.ReleasePartitionReques
 	defer cancel()
 
 	rpt := &ReleasePartitionTask{
+		ctx:                     ctx,
 		Condition:               NewTaskCondition(ctx),
 		ReleasePartitionRequest: request,
 		queryserviceClient:      node.queryServiceClient,
@@ -449,6 +462,7 @@ func (node *NodeImpl) ShowPartitions(request *milvuspb.ShowPartitionRequest) (*m
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	spt := &ShowPartitionsTask{
+		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		ShowPartitionRequest: request,
 		masterClient:         node.masterClient,
@@ -483,6 +497,7 @@ func (node *NodeImpl) CreateIndex(request *milvuspb.CreateIndexRequest) (*common
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	cit := &CreateIndexTask{
+		ctx:                ctx,
 		Condition:          NewTaskCondition(ctx),
 		CreateIndexRequest: request,
 		masterClient:       node.masterClient,
@@ -512,6 +527,7 @@ func (node *NodeImpl) DescribeIndex(request *milvuspb.DescribeIndexRequest) (*mi
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	dit := &DescribeIndexTask{
+		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		DescribeIndexRequest: request,
 		masterClient:         node.masterClient,
@@ -545,6 +561,7 @@ func (node *NodeImpl) DropIndex(request *milvuspb.DropIndexRequest) (*commonpb.S
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	dit := &DropIndexTask{
+		ctx:              ctx,
 		Condition:        NewTaskCondition(ctx),
 		DropIndexRequest: request,
 		masterClient:     node.masterClient,
@@ -571,6 +588,7 @@ func (node *NodeImpl) GetIndexState(request *milvuspb.IndexStateRequest) (*milvu
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	dipt := &GetIndexStateTask{
+		ctx:                ctx,
 		Condition:          NewTaskCondition(ctx),
 		IndexStateRequest:  request,
 		indexServiceClient: node.indexServiceClient,
@@ -605,6 +623,7 @@ func (node *NodeImpl) Insert(request *milvuspb.InsertRequest) (*milvuspb.InsertR
 	defer cancel()
 
 	it := &InsertTask{
+		ctx:               ctx,
 		Condition:         NewTaskCondition(ctx),
 		dataServiceClient: node.dataServiceClient,
 		BaseInsertTask: BaseInsertTask{
@@ -656,8 +675,9 @@ func (node *NodeImpl) Search(request *milvuspb.SearchRequest) (*milvuspb.SearchR
 	defer cancel()
 
 	qt := &SearchTask{
+		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
-		SearchRequest: internalpb2.SearchRequest{
+		SearchRequest: &internalpb2.SearchRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_kSearch,
 				SourceID: Params.ProxyID,
@@ -697,6 +717,7 @@ func (node *NodeImpl) Flush(request *milvuspb.FlushRequest) (*commonpb.Status, e
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	ft := &FlushTask{
+		ctx:               ctx,
 		Condition:         NewTaskCondition(ctx),
 		FlushRequest:      request,
 		dataServiceClient: node.dataServiceClient,

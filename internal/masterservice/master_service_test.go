@@ -235,7 +235,6 @@ func TestMasterService(t *testing.T) {
 		var timeTick typeutil.Timestamp = 100
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
-			MsgCtx:         nil,
 			BeginTimestamp: timeTick,
 			EndTimestamp:   timeTick,
 			HashValues:     []uint32{0},
