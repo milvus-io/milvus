@@ -27,5 +27,5 @@ services:
         /milvus-distributed/scripts/core_build.sh -u && \
         go build -o /milvus-distributed/cmd/writer/writer /milvus-distributed/cmd/writer/writer.go && \
         go build -o /milvus-distributed/cmd/reader/reader /milvus-distributed/cmd/reader/reader.go && \
-        go build -o /milvus-distributed/cmd/master/master /milvus-distributed/cmd/master/master.go && \
+        go build -o /milvus-distributed/cmd/master/master /milvus-distributed/cmd/master/main.go && \
         go build -o /milvus-distributed/cmd/proxy/proxy /milvus-distributed/cmd/proxy/proxy.go"

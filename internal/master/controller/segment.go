@@ -9,26 +9,11 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/master/collection"
 	"github.com/zilliztech/milvus-distributed/internal/master/id"
-	"github.com/zilliztech/milvus-distributed/internal/master/informer"
+	//"github.com/zilliztech/milvus-distributed/internal/master/informer"
 	"github.com/zilliztech/milvus-distributed/internal/master/kv"
 	"github.com/zilliztech/milvus-distributed/internal/master/segment"
 )
 
-func SegmentStatsController(kvbase kv.Base, errch chan error) {
-	ssChan := make(chan internalpb.SegmentStatistics, 10)
-	ssClient := informer.NewPulsarClient()
-	go segment.Listener(ssChan, ssClient)
-	for {
-		select {
-		case ss := <-ssChan:
-			errch <- ComputeCloseTime(ss, kvbase)
-		case <-time.After(5 * time.Second):
-			fmt.Println("wait for new request")
-			return
-		}
-	}
-
-}
 
 func ComputeCloseTime(ss internalpb.SegmentStatistics, kvbase kv.Base) error {
 	if int(ss.MemorySize) > int(conf.Config.Master.SegmentThreshole*0.8) {

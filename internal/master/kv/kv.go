@@ -9,4 +9,5 @@ type Base interface {
 	Watch(key string) clientv3.WatchChan
 	WatchWithPrefix(key string) clientv3.WatchChan
 	LoadWithPrefix(key string) ( []string, []string)
+	Close()
 }

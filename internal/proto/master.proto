@@ -87,4 +87,7 @@ service Master {
      * @return StringListResponse
      */
     rpc ShowPartitions(internal.ShowPartitionRequest) returns (service.StringListResponse) {}
+
+
+    rpc Tso(stream internal.TsoRequest) returns (stream internal.TsoResponse) {}
 }
