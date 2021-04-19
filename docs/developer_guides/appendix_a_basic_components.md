@@ -286,7 +286,7 @@ func NewIdAllocator(ctx context.Context) *IdAllocator
 
 Let's take a brief review of Hybrid Logical Clock (HLC). HLC uses 64bits timestamps which are composed of a 46-bits physical component (thought of as and always close to local wall time) and a 18-bits logical component (used to distinguish between events with the same physical component).
 
-<img src="/Users/grt/Project/grt/milvus-distributed/docs/developer_guides/figs/hlc.png" width=400>
+<img src="./figs/hlc.png" width=400>
 
 HLC's logical part is advanced on each request. The phsical part can be increased in two cases: 
 

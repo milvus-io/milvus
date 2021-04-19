@@ -234,7 +234,7 @@ func NewMetaTable(kv kv.TxnBase) (*metaTable,error)
 * Soft Time Tick Barrier
 
 
-<img src="/Users/grt/Project/grt/milvus-distributed/docs/developer_guides/figs/soft_time_tick_barrier.png" width=500>
+<img src="./figs/soft_time_tick_barrier.png" width=500>
 
 ```go
 type softTimeTickBarrier struct {
@@ -256,7 +256,7 @@ func newSoftTimeTickBarrier(ctx context.Context, ttStream *MsgStream, peerIds []
 
 * Hard Time Tick Barrier
 
-<img src="/Users/grt/Project/grt/milvus-distributed/docs/developer_guides/figs/hard_time_tick_barrier.png" width=420>
+<img src="./figs/hard_time_tick_barrier.png" width=420>
 
 ```go
 type hardTimeTickBarrier struct {
@@ -276,7 +276,7 @@ func newHardTimeTickBarrier(ctx context.Context, ttStream *MsgStream, peerIds []
 
 ###### 10.5.1 Time Synchronization Message Producer
 
-<img src="/Users/grt/Project/grt/milvus-distributed/docs/developer_guides/figs/time_sync_msg_producer.png" width=700>
+<img src="./figs/time_sync_msg_producer.png" width=700>
 
 
  ```go
