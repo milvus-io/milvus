@@ -457,7 +457,13 @@ func (t *ShowPartitionReqTask) IgnoreTimeStamp() bool {
 }
 
 func (t *ShowPartitionReqTask) Execute() error {
-	coll, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
+	var coll *etcdpb.CollectionInfo
+	var err error
+	if t.Req.CollectionName == "" {
+		coll, err = t.core.MetaTable.GetCollectionByID(t.Req.CollectionID)
+	} else {
+		coll, err = t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
+	}
 	if err != nil {
 		return err
 	}
