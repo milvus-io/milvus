@@ -114,4 +114,8 @@ func TestParamTable_DataNode(t *testing.T) {
 		log.Println("MinioBucketName:", name)
 	})
 
+	t.Run("Test sliceIndex", func(t *testing.T) {
+		idx := Params.sliceIndex()
+		log.Println("sliceIndex:", idx)
+	})
 }
