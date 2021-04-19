@@ -267,10 +267,11 @@ L2(const float* point_a, const float* point_b, int dim) {
     return dis;
 }
 
-int hamming_weight(uint8_t n) {
-    int count=0;
-    while(n != 0){
-        count += n&1;
+int
+hamming_weight(uint8_t n) {
+    int count = 0;
+    while (n != 0) {
+        count += n & 1;
         n >>= 1;
     }
     return count;
