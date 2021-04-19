@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#pragma once
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -17,26 +19,27 @@ extern "C" {
 #include <stdlib.h>
 #include <stdint.h>
 
+#include "common/type_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/load_index_c.h"
-#include "common/status_c.h"
 
-typedef void* CSegmentBase;
+typedef void* CSegmentInterface;
 typedef void* CQueryResult;
 
-CSegmentBase
-NewSegment(CCollection collection, uint64_t segment_id);
+CSegmentInterface
+NewSegment(CCollection collection, uint64_t segment_id, int seg_type);
 
 void
-DeleteSegment(CSegmentBase segment);
+DeleteSegment(CSegmentInterface segment);
 
 void
 DeleteQueryResult(CQueryResult query_result);
 
 //////////////////////////////////////////////////////////////////
 
+// interface for growing segment
 CStatus
-Insert(CSegmentBase c_segment,
+Insert(CSegmentInterface c_segment,
        int64_t reserved_offset,
        int64_t size,
        const int64_t* row_ids,
@@ -45,50 +48,65 @@ Insert(CSegmentBase c_segment,
        int sizeof_per_row,
        int64_t count);
 
+// interface for growing segment
 int64_t
-PreInsert(CSegmentBase c_segment, int64_t size);
+PreInsert(CSegmentInterface c_segment, int64_t size);
 
+// interface for growing segment
 CStatus
-Delete(
-    CSegmentBase c_segment, int64_t reserved_offset, int64_t size, const int64_t* row_ids, const uint64_t* timestamps);
+Delete(CSegmentInterface c_segment,
+       int64_t reserved_offset,
+       int64_t size,
+       const int64_t* row_ids,
+       const uint64_t* timestamps);
 
+// interface for growing segment
 int64_t
-PreDelete(CSegmentBase c_segment, int64_t size);
+PreDelete(CSegmentInterface c_segment, int64_t size);
 
+// common interface
 CStatus
-Search(CSegmentBase c_segment,
+Search(CSegmentInterface c_segment,
        CPlan plan,
        CPlaceholderGroup* placeholder_groups,
        uint64_t* timestamps,
        int num_groups,
        CQueryResult* result);
 
+// common interface
 CStatus
-FillTargetEntry(CSegmentBase c_segment, CPlan c_plan, CQueryResult result);
+FillTargetEntry(CSegmentInterface c_segment, CPlan c_plan, CQueryResult result);
 
+// deprecated
 CStatus
-UpdateSegmentIndex(CSegmentBase c_segment, CLoadIndexInfo c_load_index_info);
+UpdateSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info);
 //////////////////////////////////////////////////////////////////
 
+// deprecated
 int
-Close(CSegmentBase c_segment);
+Close(CSegmentInterface c_segment);
 
+// deprecated
 int
-BuildIndex(CCollection c_collection, CSegmentBase c_segment);
+BuildIndex(CCollection c_collection, CSegmentInterface c_segment);
 
+// deprecated
 bool
-IsOpened(CSegmentBase c_segment);
+IsOpened(CSegmentInterface c_segment);
 
+// common interface
 int64_t
-GetMemoryUsageInBytes(CSegmentBase c_segment);
+GetMemoryUsageInBytes(CSegmentInterface c_segment);
 
 //////////////////////////////////////////////////////////////////
 
+// common interface
 int64_t
-GetRowCount(CSegmentBase c_segment);
+GetRowCount(CSegmentInterface c_segment);
 
+// ???
 int64_t
-GetDeletedCount(CSegmentBase c_segment);
+GetDeletedCount(CSegmentInterface c_segment);
 
 #ifdef __cplusplus
 }

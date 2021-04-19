@@ -13,7 +13,8 @@
 nodeID: # will be deprecated after v0.2
   proxyIDList: [0]
   queryNodeIDList: [1, 2]
-  writeNodeIDList: [3]
+  writeNodeIDList: [3] # GOOSE TODO: remove this
+  dataNodeIDList: [3] 
 
 etcd:
   address: localhost
@@ -21,8 +22,10 @@ etcd:
   rootPath: by-dev
   metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
   kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
-  writeNodeSegKvSubPath: writer/segment
-  writeNodeDDLKvSubPath: writer/ddl
+  segFlushMetaSubPath: writer/segment
+  ddlFlushMetaSubPath: writer/ddl
+  writeNodeSegKvSubPath: writer/segment # GOOSE TODO: remove this
+  writeNodeDDLKvSubPath: writer/ddl # GOOSE TODO: remove this
   segThreshold: 10000
 
 minio:
