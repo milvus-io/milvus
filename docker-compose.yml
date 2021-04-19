@@ -10,6 +10,7 @@ x-ccache: &ccache
 services:
   ubuntu:
     image: ${REPO}:${ARCH}-ubuntu${UBUNTU}-${SHOW_DATE}
+    network_mode: "host"
     build:
       context: .
       dockerfile: build/docker/env/cpu/ubuntu${UBUNTU}/Dockerfile
@@ -24,4 +25,4 @@ services:
     working_dir: "/milvus-distributed"
     command: &ubuntu-command >
       /bin/bash -c "
-        make verifiers && make all"
+        make verifiers && make unittest"

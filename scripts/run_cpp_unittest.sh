@@ -28,7 +28,7 @@ for UNITTEST_DIR in "${UNITTEST_DIRS[@]}"; do
   for test in `ls ${UNITTEST_DIR}`; do
     echo $test " running..."
     # run unittest
-#    ${UNITTEST_DIR}/${test}
+    ${UNITTEST_DIR}/${test}
     if [ $? -ne 0 ]; then
         echo ${UNITTEST_DIR}/${test} "run failed"
         exit 1
