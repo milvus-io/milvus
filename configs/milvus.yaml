@@ -38,6 +38,8 @@ minio:
 pulsar:
   address: localhost
   port: 6650
+  rest-port: 18080 # keep same with pulsar container
+  maxMessageSize: 5242880 # 5 * 1024 * 1024
   authentication: false
   user: user-default
   token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJKb2UifQ.ipevRNuRP6HflG8cFKnmUPtypruRC4fb1DWtoLL62SY

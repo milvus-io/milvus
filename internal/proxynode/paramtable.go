@@ -19,7 +19,9 @@ import (
 )
 
 const (
-	StartParamsKey = "START_PARAMS"
+	StartParamsKey                 = "START_PARAMS"
+	PulsarMaxMessageSizeKey        = "maxMessageSize"
+	SuggestPulsarMaxMessageSizeKey = 5 * 1024 * 1024
 )
 
 type ParamTable struct {
@@ -55,7 +57,8 @@ type ParamTable struct {
 	DefaultPartitionTag                string
 	DefaultIndexName                   string
 
-	Log log.Config
+	PulsarMaxMessageSize int
+	Log                  log.Config
 }
 
 var Params ParamTable
@@ -154,6 +157,7 @@ func (pt *ParamTable) initParams() {
 	pt.initDefaultIndexName()
 	pt.initLogCfg()
 
+	pt.initPulsarMaxMessageSize()
 }
 
 func (pt *ParamTable) initPulsarAddress() {
@@ -402,6 +406,42 @@ func (pt *ParamTable) initDefaultIndexName() {
 		panic(err)
 	}
 	pt.DefaultIndexName = name
+}
+
+func (pt *ParamTable) initPulsarMaxMessageSize() {
+	// pulsarHost, err := pt.Load("pulsar.address")
+	// if err != nil {
+	// 	panic(err)
+	// }
+
+	// pulsarRestPort, err := pt.Load("pulsar.rest-port")
+	// if err != nil {
+	// 	panic(err)
+	// }
+
+	// protocol := "http"
+	// url := "/admin/v2/brokers/configuration/runtime"
+	// runtimeConfig, err := GetPulsarConfig(protocol, pulsarHost, pulsarRestPort, url)
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// maxMessageSizeStr := fmt.Sprintf("%v", runtimeConfig[PulsarMaxMessageSizeKey])
+	// pt.PulsarMaxMessageSize, err = strconv.Atoi(maxMessageSizeStr)
+	// if err != nil {
+	// 	panic(err)
+	// }
+
+	maxMessageSizeStr, err := pt.Load("pulsar.maxMessageSize")
+	if err != nil {
+		pt.PulsarMaxMessageSize = SuggestPulsarMaxMessageSizeKey
+	} else {
+		maxMessageSize, err := strconv.Atoi(maxMessageSizeStr)
+		if err != nil {
+			pt.PulsarMaxMessageSize = SuggestPulsarMaxMessageSizeKey
+		} else {
+			pt.PulsarMaxMessageSize = maxMessageSize
+		}
+	}
 }
 
 func (pt *ParamTable) initLogCfg() {

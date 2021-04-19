@@ -16,6 +16,7 @@ require (
 	github.com/golang/mock v1.3.1
 	github.com/golang/protobuf v1.3.2
 	github.com/google/btree v1.0.0
+	github.com/jarcoal/httpmock v1.0.8
 	github.com/klauspost/compress v1.10.11 // indirect
 	github.com/minio/minio-go/v7 v7.0.5
 	github.com/mitchellh/mapstructure v1.1.2
