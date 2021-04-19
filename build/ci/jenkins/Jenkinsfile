@@ -79,7 +79,7 @@ pipeline {
                     DOCKER_COMPOSE_PROJECT_NAME = "${PROJECT_NAME}-${SEMVER}-${env.BUILD_NUMBER}".replaceAll("\\.", "-").replaceAll("_", "-")
                 }
                 agent {
-                    label 'performance'
+                    label "${REGRESSION_SERVICE_NAME}"
                 }
                 stages {
                     stage('Test') {
