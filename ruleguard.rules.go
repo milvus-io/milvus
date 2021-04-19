@@ -46,6 +46,7 @@ func unconvert(m fluent.Matcher) {
 func timeeq(m fluent.Matcher) {
 	m.Match("$t0 == $t1").Where(m["t0"].Type.Is("time.Time")).Report("using == with time.Time")
 	m.Match("$t0 != $t1").Where(m["t0"].Type.Is("time.Time")).Report("using != with time.Time")
+	m.Match(`map[$k]$v`).Where(m["k"].Type.Is("time.Time")).Report("map with time.Time keys are easy to misuse")
 }
 
 // Wrong err in error check
@@ -213,10 +214,13 @@ func ifreturn(m fluent.Matcher) {
 func oddifsequence(m fluent.Matcher) {
 	/*
 		m.Match("if $x { $*_ }; if $x {$*_ }").Report("odd sequence of if test")
+
 		m.Match("if $x == $y { $*_ }; if $y == $x {$*_ }").Report("odd sequence of if tests")
 		m.Match("if $x != $y { $*_ }; if $y != $x {$*_ }").Report("odd sequence of if tests")
+
 		m.Match("if $x < $y { $*_ }; if $y > $x {$*_ }").Report("odd sequence of if tests")
 		m.Match("if $x <= $y { $*_ }; if $y >= $x {$*_ }").Report("odd sequence of if tests")
+
 		m.Match("if $x > $y { $*_ }; if $y < $x {$*_ }").Report("odd sequence of if tests")
 		m.Match("if $x >= $y { $*_ }; if $y <= $x {$*_ }").Report("odd sequence of if tests")
 	*/
@@ -357,7 +361,7 @@ func largeloopcopy(m fluent.Matcher) {
 	m.Match(
 		`for $_, $v := range $_ { $*_ }`,
 	).
-		Where(m["v"].Type.Size > 512).
+		Where(m["v"].Type.Size > 1024).
 		Report(`loop copies large value each iteration`)
 }
 
@@ -453,4 +457,21 @@ func hmacnew(m fluent.Matcher) {
 	hmac.New($f, $_)`,
 	).Where(m["x"].Pure).
 		Report("invalid hash passed to hmac.New()")
+}
+
+func writestring(m fluent.Matcher) {
+	m.Match(`io.WriteString($w, string($b))`).
+		Where(m["b"].Type.Is("[]byte")).
+		Suggest("$w.Write($b)")
+}
+
+func badlock(m fluent.Matcher) {
+	// Shouldn't give many false positives without type filter
+	// as Lock+Unlock pairs in combination with defer gives us pretty
+	// a good chance to guess correctly. If we constrain the type to sync.Mutex
+	// then it'll be harder to match embedded locks and custom methods
+	// that may forward the call to the sync.Mutex (or other synchronization primitive).
+
+	m.Match(`$mu.Lock(); defer $mu.RUnlock()`).Report(`maybe $mu.RLock() was intended?`)
+	m.Match(`$mu.RLock(); defer $mu.Unlock()`).Report(`maybe $mu.Lock() was intended?`)
 }
