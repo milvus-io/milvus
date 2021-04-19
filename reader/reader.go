@@ -2,12 +2,20 @@ package reader
 
 import (
 	"github.com/czs007/suvlim/reader/message_client"
+	"log"
 	"sync"
 )
 
-func StartQueryNode(pulsarURL string) {
-	mc := message_client.MessageClient{}
-	mc.InitClient(pulsarURL)
+func StartQueryNode(pulsarURL string, numOfQueryNode int, messageClientID int) {
+	if messageClientID >= numOfQueryNode {
+		log.Printf("Illegal channel id")
+		return
+	}
+
+	mc := message_client.MessageClient{
+		MessageClientID: messageClientID,
+	}
+	mc.InitClient(pulsarURL, numOfQueryNode)
 
 	mc.ReceiveMessage()
 	qn := CreateQueryNode(0, 0, &mc)

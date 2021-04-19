@@ -17,7 +17,6 @@ import (
 	"fmt"
 	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"github.com/czs007/suvlim/reader/message_client"
-	"github.com/stretchr/testify/assert"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -178,12 +177,6 @@ func (node *QueryNode) PrepareBatchMsg() []int {
 	return msgLen
 }
 
-func (node *QueryNode) StartMessageClient(pulsarURL string) {
-	// TODO: add consumerMsgSchema
-	node.messageClient.InitClient(pulsarURL)
-	go node.messageClient.ReceiveMessage()
-}
-
 func (node *QueryNode) InitQueryNodeCollection() {
 	// TODO: remove hard code, add collection creation request
 	// TODO: error handle
@@ -274,22 +267,21 @@ func (node *QueryNode) MessagesPreprocess(insertDeleteMessages []*msgPb.InsertOr
 	}
 
 	// 2. Remove invalid messages from buffer.
-	bufferLen := len(node.buffer.validInsertDeleteBuffer)
-	assert.Equal(nil, len(node.buffer.validInsertDeleteBuffer), len(node.buffer.InsertDeleteBuffer))
-	for i:= 0; i < bufferLen - 2; i++ {
-		if !node.buffer.validInsertDeleteBuffer[i] {
-			copy(node.buffer.InsertDeleteBuffer[i:], node.buffer.InsertDeleteBuffer[i+1:])                          // Shift a[i+1:] left one index.
-			node.buffer.InsertDeleteBuffer[len(node.buffer.InsertDeleteBuffer)-1] = nil                             // Erase last element (write zero value).
-			node.buffer.InsertDeleteBuffer = node.buffer.InsertDeleteBuffer[:len(node.buffer.InsertDeleteBuffer)-1] // Truncate slice.
+	tmpInsertOrDeleteBuffer := make([]*msgPb.InsertOrDeleteMsg ,0)
+	for i, isValid := range node.buffer.validInsertDeleteBuffer {
+		if isValid {
+			tmpInsertOrDeleteBuffer = append(tmpInsertOrDeleteBuffer, node.buffer.InsertDeleteBuffer[i])
 		}
 	}
+	node.buffer.InsertDeleteBuffer = tmpInsertOrDeleteBuffer
 
+	// 3. Resize the valid bitmap and set all bits to true.
 	node.buffer.validInsertDeleteBuffer = node.buffer.validInsertDeleteBuffer[:len(node.buffer.InsertDeleteBuffer)]
 	for i := range node.buffer.validInsertDeleteBuffer {
 		node.buffer.validInsertDeleteBuffer[i] = true
 	}
 
-	// 3. Extract messages before readTimeSync from current messageClient.
+	// 4. Extract messages before readTimeSync from current messageClient.
 	//    Move massages after readTimeSync to QueryNodeDataBuffer.
 	//    Set valid bitmap to true.
 	for _, msg := range insertDeleteMessages {
