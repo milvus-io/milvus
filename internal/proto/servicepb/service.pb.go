@@ -255,7 +255,7 @@ func (c *milvusServiceClient) Insert(ctx context.Context, in *RowBatch, opts ...
 
 func (c *milvusServiceClient) Search(ctx context.Context, in *Query, opts ...grpc.CallOption) (*QueryResult, error) {
 	out := new(QueryResult)
-	err := c.cc.Invoke(ctx, "/milvus.proto.service.MilvusService/search", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.service.MilvusService/Search", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -378,7 +378,7 @@ func (*UnimplementedMilvusServiceServer) Insert(ctx context.Context, req *RowBat
 	return nil, status.Errorf(codes.Unimplemented, "method Insert not implemented")
 }
 func (*UnimplementedMilvusServiceServer) Search(ctx context.Context, req *Query) (*QueryResult, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method search not implemented")
+	return nil, status.Errorf(codes.Unimplemented, "method Search not implemented")
 }
 
 func RegisterMilvusServiceServer(s *grpc.Server, srv MilvusServiceServer) {
@@ -593,7 +593,7 @@ func _MilvusService_Search_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.service.MilvusService/search",
+		FullMethod: "/milvus.proto.service.MilvusService/Search",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MilvusServiceServer).Search(ctx, req.(*Query))
@@ -650,7 +650,7 @@ var _MilvusService_serviceDesc = grpc.ServiceDesc{
 			Handler:    _MilvusService_Insert_Handler,
 		},
 		{
-			MethodName: "search",
+			MethodName: "Search",
 			Handler:    _MilvusService_Search_Handler,
 		},
 	},

@@ -13,33 +13,57 @@ package reader
 */
 import "C"
 import (
-	"github.com/stretchr/testify/assert"
 	"strconv"
 	"unsafe"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	servicePb "github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
 
-type IntPrimaryKey = typeutil.IntPrimaryKey
-
 type Segment struct {
-	SegmentPtr       C.CSegmentBase
-	SegmentID        UniqueID
-	SegmentCloseTime Timestamp
-	LastMemSize      int64
-	SegmentStatus    int
+	segmentPtr       C.CSegmentBase
+	segmentID        UniqueID
+	lastMemSize      int64
+	lastRowCount     int64
 	recentlyModified bool
 }
 
+func (s *Segment) ID() UniqueID {
+	return s.segmentID
+}
+
+//-------------------------------------------------------------------------------------- constructor and destructor
+func newSegment(collection *Collection, segmentID int64) *Segment {
+	/*
+		CSegmentBase
+		newSegment(CPartition partition, unsigned long segment_id);
+	*/
+	var tmp C.CPartition
+	segmentPtr := C.NewSegment(tmp, C.ulong(segmentID))
+	var newSegment = &Segment{segmentPtr: segmentPtr, segmentID: segmentID}
+
+	return newSegment
+}
+
+func deleteSegment(segment *Segment) {
+	/*
+		void
+		deleteSegment(CSegmentBase segment);
+	*/
+	cPtr := segment.segmentPtr
+	C.DeleteSegment(cPtr)
+}
+
+//-------------------------------------------------------------------------------------- stats functions
 func (s *Segment) getRowCount() int64 {
 	/*
 		long int
 		getRowCount(CSegmentBase c_segment);
 	*/
-	var rowCount = C.GetRowCount(s.SegmentPtr)
+	var rowCount = C.GetRowCount(s.segmentPtr)
 	return int64(rowCount)
 }
 
@@ -48,7 +72,7 @@ func (s *Segment) getDeletedCount() int64 {
 		long int
 		getDeletedCount(CSegmentBase c_segment);
 	*/
-	var deletedCount = C.GetDeletedCount(s.SegmentPtr)
+	var deletedCount = C.GetDeletedCount(s.segmentPtr)
 	return int64(deletedCount)
 }
 
@@ -57,18 +81,18 @@ func (s *Segment) getMemSize() int64 {
 		long int
 		GetMemoryUsageInBytes(CSegmentBase c_segment);
 	*/
-	var memoryUsageInBytes = C.GetMemoryUsageInBytes(s.SegmentPtr)
+	var memoryUsageInBytes = C.GetMemoryUsageInBytes(s.segmentPtr)
 
 	return int64(memoryUsageInBytes)
 }
 
-////////////////////////////////////////////////////////////////////////////
+//-------------------------------------------------------------------------------------- preprocess functions
 func (s *Segment) segmentPreInsert(numOfRecords int) int64 {
 	/*
 		long int
 		PreInsert(CSegmentBase c_segment, long int size);
 	*/
-	var offset = C.PreInsert(s.SegmentPtr, C.long(int64(numOfRecords)))
+	var offset = C.PreInsert(s.segmentPtr, C.long(int64(numOfRecords)))
 
 	return int64(offset)
 }
@@ -78,11 +102,12 @@ func (s *Segment) segmentPreDelete(numOfRecords int) int64 {
 		long int
 		PreDelete(CSegmentBase c_segment, long int size);
 	*/
-	var offset = C.PreDelete(s.SegmentPtr, C.long(int64(numOfRecords)))
+	var offset = C.PreDelete(s.segmentPtr, C.long(int64(numOfRecords)))
 
 	return int64(offset)
 }
 
+//-------------------------------------------------------------------------------------- dm & search functions
 func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps *[]Timestamp, records *[]*commonpb.Blob) error {
 	/*
 		int
@@ -115,7 +140,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 	var cSizeofPerRow = C.int(sizeofPerRow)
 	var cRawDataVoidPtr = unsafe.Pointer(&rawData[0])
 
-	var status = C.Insert(s.SegmentPtr,
+	var status = C.Insert(s.segmentPtr,
 		cOffset,
 		cNumOfRows,
 		cEntityIdsPtr,
@@ -145,7 +170,7 @@ func (s *Segment) segmentDelete(offset int64, entityIDs *[]UniqueID, timestamps 
 	var cEntityIdsPtr = (*C.long)(&(*entityIDs)[0])
 	var cTimestampsPtr = (*C.ulong)(&(*timestamps)[0])
 
-	var status = C.Delete(s.SegmentPtr, cOffset, cSize, cEntityIdsPtr, cTimestampsPtr)
+	var status = C.Delete(s.segmentPtr, cOffset, cSize, cEntityIdsPtr, cTimestampsPtr)
 
 	if status != 0 {
 		return errors.New("Delete failed, error code = " + strconv.Itoa(int(status)))
@@ -154,18 +179,17 @@ func (s *Segment) segmentDelete(offset int64, entityIDs *[]UniqueID, timestamps 
 	return nil
 }
 
-func (s *Segment) segmentSearch(query *queryInfo, timestamp Timestamp, vectorRecord *msgPb.VectorRowRecord) (*SearchResult, error) {
+func (s *Segment) segmentSearch(query *queryInfo, timestamp Timestamp, vectorRecord *servicePb.PlaceholderValue) (*SearchResult, error) {
 	/*
-		int
-		search(CSegmentBase c_segment,
-		       CQueryInfo  c_query_info,
-		       unsigned long timestamp,
-		       float* query_raw_data,
-		       int num_of_query_raw_data,
-		       long int* result_ids,
-		       float* result_distances);
 	*/
 	//type CQueryInfo C.CQueryInfo
+
+
+	/*
+		void* Search(void* plan, void* placeholder_groups, uint64_t* timestamps, int num_groups, long int* result_ids,
+		       float* result_distances)
+	*/
+
 
 	cQuery := C.CQueryInfo{
 		num_queries: C.long(query.NumQueries),
@@ -182,16 +206,16 @@ func (s *Segment) segmentSearch(query *queryInfo, timestamp Timestamp, vectorRec
 	var cQueryRawData *C.float
 	var cQueryRawDataLength C.int
 
-	if vectorRecord.BinaryData != nil {
-		return nil, errors.New("data of binary type is not supported yet")
-	} else if len(vectorRecord.FloatData) <= 0 {
-		return nil, errors.New("null query vector data")
-	} else {
-		cQueryRawData = (*C.float)(&vectorRecord.FloatData[0])
-		cQueryRawDataLength = (C.int)(len(vectorRecord.FloatData))
-	}
+	//if vectorRecord.BinaryData != nil {
+	//	return nil, errors.New("data of binary type is not supported yet")
+	//} else if len(vectorRecord.FloatData) <= 0 {
+	//	return nil, errors.New("null query vector data")
+	//} else {
+	//	cQueryRawData = (*C.float)(&vectorRecord.FloatData[0])
+	//	cQueryRawDataLength = (C.int)(len(vectorRecord.FloatData))
+	//}
 
-	var status = C.Search(s.SegmentPtr, cQuery, cTimestamp, cQueryRawData, cQueryRawDataLength, cResultIds, cResultDistances)
+	var status = C.Search(s.segmentPtr, cQuery, cTimestamp, cQueryRawData, cQueryRawDataLength, cResultIds, cResultDistances)
 
 	if status != 0 {
 		return nil, errors.New("search failed, error code = " + strconv.Itoa(int(status)))

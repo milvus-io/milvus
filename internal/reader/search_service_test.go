@@ -97,7 +97,7 @@ package reader
 //	assert.Equal(t, len(node.buffer.validInsertDeleteBuffer), 0)
 //
 //	assert.Equal(t, len(node.SegmentsMap), 10)
-//	assert.Equal(t, len(node.Collections[0].Partitions[0].Segments), 10)
+//	assert.Equal(t, len(node.Collections[0].Partitions[0].segments), 10)
 //
 //	node.PreInsertAndDelete()
 //

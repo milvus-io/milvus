@@ -7,7 +7,6 @@ import (
 type serviceTimeNode struct {
 	BaseNode
 	node           *QueryNode
-	serviceTimeMsg serviceTimeMsg
 }
 
 func (stNode *serviceTimeNode) Name() string {
@@ -28,7 +27,8 @@ func (stNode *serviceTimeNode) Operate(in []*Msg) []*Msg {
 		// TODO: add error handling
 	}
 
-	stNode.node.queryNodeTime.updateSearchServiceTime(serviceTimeMsg.timeRange)
+	// update service time
+	stNode.node.tSafe = serviceTimeMsg.timeRange.timestampMax
 	return nil
 }
 

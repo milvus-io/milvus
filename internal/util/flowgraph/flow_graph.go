@@ -5,22 +5,11 @@ import (
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
-type Timestamp = typeutil.Timestamp
-
-type flowGraphStates struct {
-	startTick         Timestamp
-	numActiveTasks    map[string]int64
-	numCompletedTasks map[string]int64
-}
-
 type TimeTickedFlowGraph struct {
-	ctx       context.Context
-	states    *flowGraphStates
-	startNode *nodeCtx
-	nodeCtx   map[string]*nodeCtx
+	ctx     context.Context
+	nodeCtx map[NodeName]*nodeCtx
 }
 
 func (fg *TimeTickedFlowGraph) AddNode(node *Node) {
@@ -68,18 +57,6 @@ func (fg *TimeTickedFlowGraph) SetEdges(nodeName string, in []string, out []stri
 	return nil
 }
 
-func (fg *TimeTickedFlowGraph) SetStartNode(nodeName string) error {
-	startNode, ok := fg.nodeCtx[nodeName]
-	if !ok {
-		errMsg := "Cannot find node:" + nodeName
-		return errors.New(errMsg)
-	}
-
-	fg.startNode = startNode
-	fg.startNode.inputChannels = []chan *Msg{make(chan *Msg, maxQueueLength)}
-	return nil
-}
-
 func (fg *TimeTickedFlowGraph) Start() {
 	wg := sync.WaitGroup{}
 	for _, v := range fg.nodeCtx {
@@ -87,11 +64,6 @@ func (fg *TimeTickedFlowGraph) Start() {
 		go v.Start(fg.ctx, &wg)
 	}
 	wg.Wait()
-}
-
-func (fg *TimeTickedFlowGraph) Input(msg *Msg) {
-	// start node should have only 1 input channel
-	fg.startNode.inputChannels[0] <- msg
 }
 
 func (fg *TimeTickedFlowGraph) Close() error {
@@ -103,12 +75,7 @@ func (fg *TimeTickedFlowGraph) Close() error {
 
 func NewTimeTickedFlowGraph(ctx context.Context) *TimeTickedFlowGraph {
 	flowGraph := TimeTickedFlowGraph{
-		ctx: ctx,
-		states: &flowGraphStates{
-			startTick:         0,
-			numActiveTasks:    make(map[string]int64),
-			numCompletedTasks: make(map[string]int64),
-		},
+		ctx:     ctx,
 		nodeCtx: make(map[string]*nodeCtx),
 	}
 

@@ -1,6 +1,7 @@
 package msgstream
 
 import (
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
@@ -12,7 +13,10 @@ type UnmarshalDispatcher struct {
 }
 
 func (dispatcher *UnmarshalDispatcher) Unmarshal(input []byte, msgType internalPb.MsgType) (*TsMsg, error) {
-	unmarshalFunc := dispatcher.tempMap[msgType]
+	unmarshalFunc, ok := dispatcher.tempMap[msgType]
+	if ok == false {
+		return nil, errors.New("Not set unmarshalFunc for this messageType")
+	}
 	return unmarshalFunc(input)
 }
 
