@@ -1,4 +1,4 @@
-package mock
+package main
 
 import (
 	"context"
@@ -7,12 +7,15 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/czs007/suvlim/conf"
-
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/czs007/suvlim/conf"
+	"github.com/czs007/suvlim/pkg/master/mock"
 )
 
-func FakePulsarProducer() {
+func main() {
+	FakeProduecer()
+}
+func FakeProduecer() {
 	pulsarAddr := "pulsar://"
 	pulsarAddr += conf.Config.Pulsar.Address
 	pulsarAddr += ":"
@@ -29,23 +32,20 @@ func FakePulsarProducer() {
 	producer, err := client.CreateProducer(pulsar.ProducerOptions{
 		Topic: conf.Config.Master.PulsarTopic,
 	})
-	testSegmentStats, _ := SegmentMarshal(SegmentStats{
-		SegementID: uint64(6875875531164062448),
+	testSegmentStats, _ := mock.SegmentMarshal(mock.SegmentStats{
+		SegementID: uint64(6875939483227099806),
 		MemorySize: uint64(9999),
 		MemoryRate: float64(0.13),
 	})
-	for {
-		_, err = producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: testSegmentStats,
-		})
-		time.Sleep(1 * time.Second)
-	}
+	_, err = producer.Send(context.Background(), &pulsar.ProducerMessage{
+		Payload: testSegmentStats,
+	})
+	time.Sleep(1 * time.Second)
 	defer producer.Close()
 
 	if err != nil {
-		fmt.Println("Failed to publish message", err)
+		fmt.Errorf("%v", err)
 	}
 	fmt.Println("Published message")
-}
 
-//TODO add a mock: memory increase
+}
