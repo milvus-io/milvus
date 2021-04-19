@@ -121,7 +121,7 @@ func (node *NodeImpl) Init() error {
 	node.manipulationMsgStream.SetPulsarClient(pulsarAddress)
 	node.manipulationMsgStream.CreatePulsarProducers(Params.InsertChannelNames())
 	repackFuncImpl := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
-		return insertRepackFunc(tsMsgs, hashKeys, node.segAssigner, false)
+		return insertRepackFunc(tsMsgs, hashKeys, node.segAssigner, true)
 	}
 	node.manipulationMsgStream.SetRepackFunc(repackFuncImpl)
 

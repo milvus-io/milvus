@@ -63,6 +63,22 @@ func (fService *flushSyncService) completeInsertFlush(segID UniqueID) {
 	fService.insertFlushed[segID] = true
 }
 
+func (fService *flushSyncService) InsertFlushCompleted(segID UniqueID) bool {
+	isinsertFlushed, ok := fService.insertFlushed[segID]
+	if !ok {
+		return false
+	}
+	return isinsertFlushed
+}
+
+func (fService *flushSyncService) DDFlushCompleted(segID UniqueID) bool {
+	isddFlushed, ok := fService.ddFlushed[segID]
+	if !ok {
+		return false
+	}
+	return isddFlushed
+}
+
 func (fService *flushSyncService) FlushCompleted(segID UniqueID) bool {
 	isddFlushed, ok := fService.ddFlushed[segID]
 	if !ok {
@@ -95,12 +111,18 @@ func (fService *flushSyncService) start() {
 				continue
 			}
 			fService.completeDDFlush(ddFlushMsg.segID)
+			if fService.FlushCompleted(ddFlushMsg.segID) {
+				//log.Printf("DD:Seg(%d) flush completed.", ddFlushMsg.segID)
+				fService.metaTable.CompleteFlush(Timestamp(0), ddFlushMsg.segID)
+			}
 
 		case insertFlushMsg := <-fService.insertChan:
 			if insertFlushMsg == nil {
 				continue
 			}
+			//log.Println("FlushSyncService insertFlushMsg ", insertFlushMsg.segID)
 			if !insertFlushMsg.flushCompleted {
+				//log.Println("FlushSyncService", insertFlushMsg.segID, " not flushCompleted")
 				err := fService.metaTable.AppendSegBinlogPaths(insertFlushMsg.ts, insertFlushMsg.segID, insertFlushMsg.fieldID,
 					insertFlushMsg.paths)
 				if err != nil {
@@ -109,6 +131,7 @@ func (fService *flushSyncService) start() {
 				}
 				continue
 			}
+
 			fService.completeInsertFlush(insertFlushMsg.segID)
 
 			if fService.FlushCompleted(insertFlushMsg.segID) {

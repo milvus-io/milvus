@@ -4,7 +4,6 @@ import "C"
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"regexp"
 	"strconv"
@@ -240,9 +239,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 		return errors.New("unmarshal query failed")
 	}
 	collectionName := query.CollectionName
-	fmt.Println("[ljq collection name]: ", collectionName)
 	partitionTagsInQuery := query.PartitionNames
-	fmt.Println("[search service ljq] query: ", query)
 	collection, err := ss.replica.getCollectionByName(collectionName)
 	if err != nil {
 		span.LogFields(oplog.Error(err))
@@ -267,7 +264,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	searchResults := make([]*SearchResult, 0)
 	matchedSegments := make([]*Segment, 0)
 
-	fmt.Println("search msg's partitionTag = ", partitionTagsInQuery)
+	//fmt.Println("search msg's partitionTag = ", partitionTagsInQuery)
 
 	var partitionTagsInCol []string
 	for _, partition := range collection.partitions {
@@ -411,7 +408,6 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 		//	fmt.Println(testHits.IDs)
 		//	fmt.Println(testHits.Scores)
 		//}
-
 		err = ss.publishSearchResult(searchResultMsg)
 		if err != nil {
 			span.LogFields(oplog.Error(err))
@@ -430,7 +426,6 @@ func (ss *searchService) publishSearchResult(msg msgstream.TsMsg) error {
 	// span, ctx := opentracing.StartSpanFromContext(msg.GetMsgContext(), "publish search result")
 	// defer span.Finish()
 	// msg.SetMsgContext(ctx)
-	fmt.Println("Public SearchResult", msg.HashKeys())
 	msgPack := msgstream.MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, msg)
 	err := ss.searchResultMsgStream.Produce(&msgPack)

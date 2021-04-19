@@ -2,6 +2,7 @@ package master
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
@@ -60,6 +61,7 @@ func (scheduler *IndexBuildScheduler) schedule(info interface{}) error {
 		return err
 	}
 	indexParams, err := scheduler.metaTable.GetFieldIndexParams(segMeta.CollectionID, indexBuildInfo.fieldID)
+
 	if err != nil {
 		return err
 	}
@@ -73,8 +75,8 @@ func (scheduler *IndexBuildScheduler) schedule(info interface{}) error {
 	}
 
 	indexID, err := scheduler.client.BuildIndex(indexBuildInfo.binlogFilePath, typeParamsMap, indexParamsMap)
-	log.Printf("build index for segment %d field %d", indexBuildInfo.segmentID, indexBuildInfo.fieldID)
 	if err != nil {
+		log.Printf("build index for segment %d field %d, failed:%s", indexBuildInfo.segmentID, indexBuildInfo.fieldID, err.Error())
 		return err
 	}
 
@@ -151,6 +153,7 @@ func (scheduler *IndexBuildScheduler) describe() error {
 						IndexFilePaths: filePaths,
 					})
 					if err != nil {
+						fmt.Println("indexbuilder scheduler updateFiledIndexMetaFailed", indexBuildInfo.segmentID)
 						return err
 					}
 

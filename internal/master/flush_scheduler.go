@@ -50,11 +50,11 @@ func (scheduler *FlushScheduler) schedule(id interface{}) error {
 	}
 	// todo set corrent timestamp
 	err = scheduler.client.FlushSegment(segmentID, segmentMeta.CollectionID, segmentMeta.PartitionTag, ts)
-	log.Printf("flush segment %d", segmentID)
 	if err != nil {
+		log.Println("flushsegment: ", segmentID, " error :", err.Error())
 		return err
 	}
-
+	//log.Printf("flush segment %d", segmentID)
 	scheduler.segmentDescribeChan <- segmentID
 
 	return nil
@@ -78,6 +78,7 @@ func (scheduler *FlushScheduler) describe() error {
 					continue
 				}
 				if !description.IsClosed {
+					//log.Println("describe segment ", singleSegmentID, " IsClosed :False")
 					continue
 				}
 

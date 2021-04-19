@@ -95,7 +95,6 @@ func (c *Client) DescribeSegment(segmentID UniqueID) (*SegmentDescription, error
 	if err != nil {
 		return nil, err
 	}
-
 	if count <= 0 {
 		ret.IsClosed = false
 		return ret, nil
@@ -103,10 +102,11 @@ func (c *Client) DescribeSegment(segmentID UniqueID) (*SegmentDescription, error
 
 	value, err := c.kvClient.Load(key)
 	if err != nil {
-		return ret, err
+		return nil, err
 	}
 
 	flushMeta := pb.SegmentFlushMeta{}
+
 	err = proto.UnmarshalText(value, &flushMeta)
 	if err != nil {
 		return ret, err
