@@ -14,27 +14,29 @@
 #include "segcore/SegmentSmallIndex.h"
 #include <deque>
 #include <boost/dynamic_bitset.hpp>
+#include "query/SubQueryResult.h"
 
 namespace milvus::query {
 using BitmapChunk = boost::dynamic_bitset<>;
 using BitmapSimple = std::deque<BitmapChunk>;
 
+// TODO: merge these two search into one
 // note: c++17 don't support optional ref
 Status
-QueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
-                    const QueryInfo& info,
-                    const float* query_data,
-                    int64_t num_queries,
-                    Timestamp timestamp,
-                    std::optional<const BitmapSimple*> bitmap_opt,
-                    QueryResult& results);
+FloatSearch(const segcore::SegmentSmallIndex& segment,
+            const QueryInfo& info,
+            const float* query_data,
+            int64_t num_queries,
+            Timestamp timestamp,
+            std::optional<const BitmapSimple*> bitmap_opt,
+            QueryResult& results);
 
 Status
-BinaryQueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
-                          const query::QueryInfo& info,
-                          const uint8_t* query_data,
-                          int64_t num_queries,
-                          Timestamp timestamp,
-                          std::optional<const BitmapSimple*> bitmaps_opt,
-                          QueryResult& results);
+BinarySearch(const segcore::SegmentSmallIndex& segment,
+             const query::QueryInfo& info,
+             const uint8_t* query_data,
+             int64_t num_queries,
+             Timestamp timestamp,
+             std::optional<const BitmapSimple*> bitmaps_opt,
+             QueryResult& results);
 }  // namespace milvus::query

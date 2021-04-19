@@ -165,7 +165,7 @@ CStatus
 FillTargetEntry(CSegmentBase c_segment, CPlan c_plan, CQueryResult c_result) {
     auto segment = (milvus::segcore::SegmentBase*)c_segment;
     auto plan = (milvus::query::Plan*)c_plan;
-    auto result = (milvus::engine::QueryResult*)c_result;
+    auto result = (milvus::QueryResult*)c_result;
 
     auto status = CStatus();
     try {
