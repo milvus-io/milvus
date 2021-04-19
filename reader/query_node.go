@@ -383,6 +383,9 @@ func (node *QueryNode) DoInsertAndDelete() msgPb.Status {
 
 	// Do delete
 	for segmentID, deleteIDs := range node.deleteData.deleteIDs {
+		if segmentID < 0 {
+			continue
+		}
 		wg.Add(1)
 		var deleteTimestamps = node.deleteData.deleteTimestamps[segmentID]
 		fmt.Println("Doing delete......")
