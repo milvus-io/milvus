@@ -78,13 +78,6 @@ type RocksMQ struct {
 	channelMu   map[string]*sync.Mutex
 
 	notify map[string][]*Consumer
-	//ctx              context.Context
-	//serverLoopWg     sync.WaitGroup
-	//serverLoopCtx    context.Context
-	//serverLoopCancel func()
-
-	//// tso ticker
-	//tsoTicker *time.Ticker
 }
 
 func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*RocksMQ, error) {
@@ -210,7 +203,6 @@ func (rmq *RocksMQ) Produce(channelName string, messages []ProducerMessage) erro
 		return err
 	}
 
-	// TODO(yhz): Here assume allocated id size is equal to message size
 	if UniqueID(msgLen) != idEnd-idStart {
 		return errors.New("Obtained id length is not equal that of message")
 	}

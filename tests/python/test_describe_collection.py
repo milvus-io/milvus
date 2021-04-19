@@ -1,3 +1,4 @@
+import copy
 from .utils import *
 from .constants import *
 
@@ -17,7 +18,7 @@ class TestDescribeCollection:
         expected: returned value is the same
         '''
         collection_name = gen_unique_str(uid)
-        df = default_fields
+        df = copy.deepcopy(default_fields)
         df["fields"].append({"name": "int32", "type": DataType.INT32})
 
         connect.create_collection(collection_name, df)
