@@ -230,19 +230,29 @@ func (s *Server) Stop() error {
 		}
 	}
 	if s.proxyService != nil {
-		_ = s.proxyService.Stop()
+		if err := s.proxyService.Stop(); err != nil {
+			log.Debug("close proxyService client", zap.Error(err))
+		}
 	}
 	if s.indexService != nil {
-		_ = s.indexService.Stop()
+		if err := s.indexService.Stop(); err != nil {
+			log.Debug("close indexService client", zap.Error(err))
+		}
 	}
 	if s.dataService != nil {
-		_ = s.dataService.Stop()
+		if err := s.dataService.Stop(); err != nil {
+			log.Debug("close dataService client", zap.Error(err))
+		}
 	}
 	if s.queryService != nil {
-		_ = s.queryService.Stop()
+		if err := s.queryService.Stop(); err != nil {
+			log.Debug("close queryService client", zap.Error(err))
+		}
 	}
 	if s.masterService != nil {
-		return s.masterService.Stop()
+		if err := s.masterService.Stop(); err != nil {
+			log.Debug("close masterService", zap.Error(err))
+		}
 	}
 	s.cancel()
 	if s.grpcServer != nil {
