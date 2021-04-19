@@ -21,12 +21,20 @@
 
 const int TOP_K = 10;
 const int LOOP = 1000;
+const int DIM = 128;
 
 int main(int argc , char**argv) {
   TestParameters parameters = milvus_sdk::Utils::ParseTestParameters(argc, argv);
   if (!parameters.is_valid){
     return 0;
    }
+
+  if (parameters.collection_name_.empty()){
+	std::cout<< "should specify collection name!" << std::endl;
+	milvus_sdk::Utils::PrintHelp(argc, argv);
+	return 0;
+  }
+
 
   auto client = milvus::ConnectionImpl();
   milvus::ConnectParam connect_param;
@@ -36,8 +44,6 @@ int main(int argc , char**argv) {
   std::vector<int64_t> ids_array;
   std::vector<std::string> partition_list;
   partition_list.emplace_back("default");
-//  partition_list.emplace_back("partition-2");
-//  partition_list.emplace_back("partition-3");
 
   milvus::VectorParam vectorParam;
   std::vector<milvus::VectorData> vector_records;
