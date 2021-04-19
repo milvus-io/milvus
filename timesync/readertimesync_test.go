@@ -15,24 +15,32 @@ const (
 	pulsarAddr             = "pulsar://localhost:6650"
 	timeSyncTopic          = "timesync"
 	timeSyncTopic2         = "timesync2"
+	timeSyncTopic3         = "timesync3"
 	timeSyncSubName        = "timesync-g"
 	timeSyncSubName1       = "timesync-g1"
 	timeSyncSubName2       = "timesync-g2"
+	timeSyncSubName3       = "timesync-g3"
 	readerTopic1           = "reader1"
 	readerTopic12          = "reader12"
+	readerTopic13          = "reader13"
 	readerTopic2           = "reader2"
 	readerTopic22          = "reader22"
+	readerTopic23          = "reader23"
 	readerTopic3           = "reader3"
 	readerTopic32          = "reader32"
+	readerTopic33          = "reader33"
 	readerTopic4           = "reader4"
 	readerTopic42          = "reader42"
+	readerTopic43          = "reader43"
 	readerSubName          = "reader-g"
 	readerSubName1         = "reader-g1"
 	readerSubName2         = "reader-g2"
+	readerSubName3         = "reader-g3"
 	interval               = 200
 	readStopFlag     int64 = -1
 	readStopFlag1    int64 = -1
 	readStopFlag2    int64 = -2
+	readStopFlag3    int64 = -3
 )
 
 func TestAlignTimeSync(t *testing.T) {
@@ -458,6 +466,101 @@ func TestReaderTimesync2(t *testing.T) {
 	pr2.Close()
 	pr3.Close()
 	pr4.Close()
+}
+
+func TestReaderTimesync3(t *testing.T) {
+	client, _ := pulsar.NewClient(pulsar.ClientOptions{URL: pulsarAddr})
+	pt, _ := client.CreateProducer(pulsar.ProducerOptions{Topic: timeSyncTopic3})
+	pr1, _ := client.CreateProducer(pulsar.ProducerOptions{Topic: readerTopic13})
+	pr2, _ := client.CreateProducer(pulsar.ProducerOptions{Topic: readerTopic23})
+	pr3, _ := client.CreateProducer(pulsar.ProducerOptions{Topic: readerTopic33})
+	pr4, _ := client.CreateProducer(pulsar.ProducerOptions{Topic: readerTopic43})
+	defer func() {
+		pr1.Close()
+		pr2.Close()
+		pr3.Close()
+		pr4.Close()
+		pt.Close()
+		client.Close()
+	}()
+	go func() {
+		total := 2 * 1000 / 10
+		ticker := time.Tick(10 * time.Millisecond)
+		var timestamp uint64 = 0
+		prlist := []pulsar.Producer{pr1, pr2, pr3, pr4}
+		for i := 1; i <= total; i++ {
+			<-ticker
+			timestamp += 10
+			for idx, pr := range prlist {
+				msg := pb.InsertOrDeleteMsg{ClientId: int64(idx + 1), Timestamp: toTimestamp(timestamp)}
+				mb, err := proto.Marshal(&msg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := pr.Send(context.Background(), &pulsar.ProducerMessage{Payload: mb}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if i%20 == 0 {
+				tm := pb.TimeSyncMsg{Peer_Id: 1, Timestamp: toTimestamp(timestamp)}
+				tb, err := proto.Marshal(&tm)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := pt.Send(context.Background(), &pulsar.ProducerMessage{Payload: tb}); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}()
+
+	r, err := NewReaderTimeSync(pulsarAddr,
+		timeSyncTopic3,
+		timeSyncSubName3,
+		[]string{readerTopic13, readerTopic23, readerTopic33, readerTopic43},
+		readerSubName3,
+		[]int64{1},
+		interval,
+		readStopFlag3,
+		WithReaderQueueSize(1024))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	ctx, _ := context.WithTimeout(context.Background(), 3*time.Second)
+	if err := r.Start(); err != nil {
+		t.Fatal(err)
+	}
+	var tsm1, tsm2 TimeSyncMsg
+	var totalRecords int64 = 0
+	for {
+		if ctx.Err() != nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			tsm1.NumRecorders = 0
+			break
+		case tsm1 = <-r.TimeSync():
+
+		}
+		if tsm1.NumRecorders > 0 {
+			totalRecords += tsm1.NumRecorders
+			for i := int64(0); i < tsm1.NumRecorders; i++ {
+				im := <-r.InsertOrDelete()
+				if im.Timestamp < tsm2.Timestamp {
+					t.Fatalf("time sync error , im.Timestamp = %d, tsm2.Timestamp = %d", im.Timestamp, tsm2.Timestamp)
+				}
+			}
+			tsm2 = tsm1
+		}
+	}
+	log.Printf("total records = %d", totalRecords)
+	if totalRecords != 800 {
+		t.Fatalf("total records should be 800")
+	}
+
 }
 
 func getMillisecond(ts uint64) uint64 {
