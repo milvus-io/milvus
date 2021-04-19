@@ -708,5 +708,6 @@ message TimeSyncMsg{
 
 message Key2SegMsg {
     int64 uid = 1;
-    repeated int64 segment_id = 2;
+    uint64 timestamp = 2;
+    repeated int64 segment_id = 3;
 }

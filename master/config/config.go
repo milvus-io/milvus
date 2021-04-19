@@ -18,9 +18,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-
 	"github.com/czs007/suvlim/util/grpcutil"
-
 	//"google.golang.org/grpc"
 	"net/url"
 	"os"
@@ -39,8 +37,8 @@ import (
 
 // Config is the pd server configuration.
 type Config struct {
-	flagSet     *flag.FlagSet
-	Version     bool `json:"-"`
+	flagSet *flag.FlagSet
+	Version bool `json:"-"`
 	ConfigCheck bool `json:"-"`
 
 	ClientUrls          string `toml:"client-urls" json:"client-urls"`
@@ -48,29 +46,31 @@ type Config struct {
 	AdvertiseClientUrls string `toml:"advertise-client-urls" json:"advertise-client-urls"`
 	AdvertisePeerUrls   string `toml:"advertise-peer-urls" json:"advertise-peer-urls"`
 
-	Name              string `toml:"name" json:"name"`
-	DataDir           string `toml:"data-dir" json:"data-dir"`
+
+	Name    string `toml:"name" json:"name"`
+	DataDir string     `toml:"data-dir" json:"data-dir"`
 	EnableGRPCGateway bool   `json:"enable-grpc-gateway"`
 
 	InitialCluster      string `toml:"initial-cluster" json:"initial-cluster"`
 	InitialClusterState string `toml:"initial-cluster-state" json:"initial-cluster-state"`
 	InitialClusterToken string `toml:"initial-cluster-token" json:"initial-cluster-token"`
 
-	LeaderLease        int64      `toml:"lease" json:"lease"`
-	Log                log.Config `toml:"log" json:"log"`
-	LogFileDeprecated  string     `toml:"log-file" json:"log-file,omitempty"`
-	LogLevelDeprecated string     `toml:"log-level" json:"log-level,omitempty"`
+
+	LeaderLease int64 `toml:"lease" json:"lease"`
+	Log     log.Config `toml:"log" json:"log"`
+	LogFileDeprecated  string `toml:"log-file" json:"log-file,omitempty"`
+	LogLevelDeprecated string `toml:"log-level" json:"log-level,omitempty"`
 
 	PDServerCfg PDServerConfig `toml:"pd-server" json:"pd-server"`
 
-	TickInterval               typeutil.Duration `toml:"tick-interval"`
-	ElectionInterval           typeutil.Duration `toml:"election-interval"`
+	TickInterval typeutil.Duration `toml:"tick-interval"`
+	ElectionInterval typeutil.Duration `toml:"election-interval"`
 	DisableStrictReconfigCheck bool
 
 	// TsoSaveInterval is the interval to save timestamp.
 	TsoSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
 
-	PreVote  bool                    `toml:"enable-prevote"`
+	PreVote bool `toml:"enable-prevote"`
 	Security grpcutil.SecurityConfig `toml:"security" json:"security"`
 
 	configFile string
@@ -89,35 +89,35 @@ type Config struct {
 // NewConfig creates a new config.
 func NewConfig() *Config {
 	cfg := &Config{}
-	cfg.HeartbeatStreamBindInterval = typeutil.NewDuration(defaultHeartbeatStreamRebindInterval)
-	cfg.TickInterval = typeutil.NewDuration(defaultTickInterval)
-	cfg.ElectionInterval = typeutil.NewDuration(defaultElectionInterval)
 	cfg.flagSet = flag.NewFlagSet("pd", flag.ContinueOnError)
 	fs := cfg.flagSet
+
 	fs.BoolVar(&cfg.Version, "V", false, "print version information and exit")
 	fs.BoolVar(&cfg.Version, "version", false, "print version information and exit")
 	fs.StringVar(&cfg.configFile, "config", "", "config file")
 	fs.BoolVar(&cfg.ConfigCheck, "config-check", false, "check config file validity and exit")
 
-	fs.StringVar(&cfg.Name, "name", defaultName, "human-readable name for this pd member")
+	fs.StringVar(&cfg.Name, "name", "", "human-readable name for this pd member")
 
-	fs.StringVar(&cfg.DataDir, "data-dir", "/data/pd/data", "path to the data directory (default 'default.${name}')")
+	fs.StringVar(&cfg.DataDir, "data-dir", "", "path to the data directory (default 'default.${name}')")
 	fs.StringVar(&cfg.ClientUrls, "client-urls", defaultClientUrls, "url for client traffic")
-	fs.StringVar(&cfg.AdvertiseClientUrls, "advertise-client-urls", defaultClientUrls, "advertise url for client traffic (default '${client-urls}')")
+	fs.StringVar(&cfg.AdvertiseClientUrls, "advertise-client-urls", "", "advertise url for client traffic (default '${client-urls}')")
 	fs.StringVar(&cfg.PeerUrls, "peer-urls", defaultPeerUrls, "url for peer traffic")
-	fs.StringVar(&cfg.AdvertisePeerUrls, "advertise-peer-urls", defaultPeerUrls, "advertise url for peer traffic (default '${peer-urls}')")
-	fs.StringVar(&cfg.InitialCluster, "initial-cluster", "pd=http://127.0.0.1:12380", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
-	fs.StringVar(&cfg.InitialClusterState, "initial-cluster-start", defaultInitialClusterState, "initial cluster state")
+	fs.StringVar(&cfg.AdvertisePeerUrls, "advertise-peer-urls", "", "advertise url for peer traffic (default '${peer-urls}')")
+	fs.StringVar(&cfg.InitialCluster, "initial-cluster", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
+
 	fs.StringVar(&cfg.Log.Level, "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
+
 	return cfg
 }
 
+
 const (
-	defaultLeaderLease         = int64(3)
+	defaultLeaderLease             = int64(3)
 	defaultName                = "pd"
-	defaultClientUrls          = "http://127.0.0.1:12379,http://127.0.0.1:12378,http://127.0.0.1:12377"
-	defaultPeerUrls            = "http://127.0.0.1:12380,http://127.0.0.1:12381,http://127.0.0.1:12382"
+	defaultClientUrls          = "http://127.0.0.1:2379"
+	defaultPeerUrls            = "http://127.0.0.1:2380"
 	defaultInitialClusterState = embed.ClusterStateFlagNew
 	defaultInitialClusterToken = "pd-cluster"
 
@@ -131,7 +131,7 @@ const (
 
 	defaultHeartbeatStreamRebindInterval = time.Minute
 
-	defaultMaxResetTSGap       = 24 * time.Hour
+	defaultMaxResetTSGap    = 24 * time.Hour
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
 )
@@ -344,6 +344,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	adjustDuration(&c.TickInterval, defaultTickInterval)
 	adjustDuration(&c.ElectionInterval, defaultElectionInterval)
 
+
 	if err := c.PDServerCfg.adjust(configMetaData.Child("pd-server")); err != nil {
 		return err
 	}
@@ -388,6 +389,7 @@ func (c *Config) configFromFile(path string) (*toml.MetaData, error) {
 	return &meta, errors.WithStack(err)
 }
 
+
 // PDServerConfig is the configuration for pd server.
 type PDServerConfig struct {
 	// MaxResetTSGap is the max gap to reset the tso.
@@ -402,9 +404,10 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 // Clone returns a cloned PD server config.
 func (c *PDServerConfig) Clone() *PDServerConfig {
 	return &PDServerConfig{
-		MaxResetTSGap: c.MaxResetTSGap,
+		MaxResetTSGap:    c.MaxResetTSGap,
 	}
 }
+
 
 // ParseUrls parse a string into multiple urls.
 // Export for api.
@@ -504,11 +507,12 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.PeerTLSInfo.CertFile = c.Security.CertPath
 	cfg.PeerTLSInfo.KeyFile = c.Security.KeyPath
 	cfg.PeerTLSInfo.AllowedCN = allowedCN
-	//	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.logger, c.logger.Core(), c.logProps.Syncer)
+	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.logger, c.logger.Core(), c.logProps.Syncer)
 	cfg.EnableGRPCGateway = c.EnableGRPCGateway
 	cfg.EnableV2 = true
 	cfg.Logger = "zap"
 	var err error
+
 	cfg.LPUrls, err = ParseUrls(c.PeerUrls)
 	if err != nil {
 		return nil, err
