@@ -26,14 +26,16 @@
 // #include "segment/SegmentWriter.h"
 // #include "src/dog_segment/SegmentBase.h"
 // #include "utils/Json.h"
+#include <random>
+#include <gtest/gtest.h>
 #include "dog_segment/SegmentBase.h"
 using std::cin;
 using std::cout;
 using std::endl;
 
-using SegmentVisitor = milvus::engine::SegmentVisitor;
+// using SegmentVisitor = milvus::engine::SegmentVisitor;
 
-namespace {
+// namespace {
 // milvus::Status
 // CreateCollection(std::shared_ptr<DB> db, const std::string& collection_name, const LSN_TYPE& lsn) {
 //     CreateCollectionContext context;
@@ -73,7 +75,7 @@ namespace {
 // }
 // }  // namespace
 
-TEST_F(DogSegmentTest, TestABI) {
+TEST(DogSegmentTest, TestABI) {
     using namespace milvus::engine;
     using namespace milvus::dog_segment;
     ASSERT_EQ(TestABI(), 42);
@@ -135,7 +137,7 @@ TEST_F(DogSegmentTest, TestABI) {
 
 
 
-TEST_F(DogSegmentTest, MockTest) {
+TEST(DogSegmentTest, MockTest) {
     using namespace milvus::dog_segment;
     using namespace milvus::engine;
     auto schema = std::make_shared<Schema>();
@@ -161,11 +163,12 @@ TEST_F(DogSegmentTest, MockTest) {
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
     assert(raw_data.size() == line_sizeof * N);
 
-    auto segment = CreateSegment(schema);
+    auto segment = CreateSegment(schema).release();
     DogDataChunk data_chunk{raw_data.data(), (int)line_sizeof, N};
     segment->Insert(N, uids.data(), timestamps.data(), data_chunk);
     QueryResult query_result;
     segment->Query(nullptr, 0, query_result);
+    delete segment;
     int i = 0;
     i++;
 }
