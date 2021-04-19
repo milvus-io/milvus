@@ -8,9 +8,9 @@ set(DOG_SEGMENT_FILES
         partition_c.cpp
         segment_c.cpp
         )
-add_library(dog_segment SHARED
+add_library(milvus_dog_segment SHARED
         ${DOG_SEGMENT_FILES}
         )
 #add_dependencies( segment sqlite mysqlpp )
 
-target_link_libraries(dog_segment tbb utils pthread)
+target_link_libraries(milvus_dog_segment tbb utils pthread knowhere log)

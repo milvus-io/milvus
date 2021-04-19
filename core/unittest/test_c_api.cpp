@@ -137,7 +137,7 @@ TEST(CApiTest, SearchTest) {
 
   long result_ids[10];
   float result_distances[10];
-  auto sea_res = Search(segment, nullptr, 0, result_ids, result_distances);
+  auto sea_res = Search(segment, nullptr, 1, result_ids, result_distances);
   assert(sea_res == 0);
   assert(result_ids[0] == 100911);
 
