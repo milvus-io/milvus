@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"path"
 	"strconv"
 	"strings"
@@ -63,6 +64,7 @@ type Server struct {
 }
 
 func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
+	rand.Seed(time.Now().UnixNano())
 	ch := make(chan struct{})
 	s := &Server{
 		ctx:              ctx,

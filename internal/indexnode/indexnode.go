@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"time"
 
 	"github.com/opentracing/opentracing-go"
@@ -49,6 +50,7 @@ type IndexNode struct {
 }
 
 func NewIndexNode(ctx context.Context) (*IndexNode, error) {
+	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	b := &IndexNode{
 		loopCtx:    ctx1,

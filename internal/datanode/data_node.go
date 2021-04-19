@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
 	"sync/atomic"
 	"time"
 
@@ -49,7 +50,7 @@ type DataNode struct {
 }
 
 func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
-
+	rand.Seed(time.Now().UnixNano())
 	ctx2, cancel2 := context.WithCancel(ctx)
 	node := &DataNode{
 		ctx:     ctx2,
