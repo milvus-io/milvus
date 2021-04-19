@@ -3,6 +3,7 @@ package reader
 import (
 	"encoding/binary"
 	"fmt"
+	schema "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"github.com/stretchr/testify/assert"
 	"math"
 	"testing"
@@ -131,7 +132,15 @@ func TestSegment_SegmentSearch(t *testing.T) {
 	assert.NoError(t, err)
 
 	// 6. Do search
-	var searchRes, searchErr = segment.SegmentSearch("fake query string", timestamps[0], nil)
+	var queryJson = "{\"field_name\":\"fakevec\",\"num_queries\":1,\"topK\":10}"
+	var queryRawData = make([]float32, 0)
+	for i := 0; i < 16; i ++ {
+		queryRawData = append(queryRawData, float32(i))
+	}
+	var vectorRecord = schema.VectorRowRecord {
+		FloatData: queryRawData,
+	}
+	var searchRes, searchErr = segment.SegmentSearch(queryJson, timestamps[0], &vectorRecord)
 	assert.NoError(t, searchErr)
 	fmt.Println(searchRes)
 
