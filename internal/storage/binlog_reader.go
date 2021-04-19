@@ -11,14 +11,23 @@ import (
 type BinlogReader struct {
 	magicNumber int32
 	descriptorEvent
-	buffer    *bytes.Buffer
-	eventList []*EventReader
-	isClose   bool
+	currentEventReader *EventReader
+	buffer             *bytes.Buffer
+	bufferLength       int
+	currentOffset      int32
+	isClose            bool
 }
 
 func (reader *BinlogReader) NextEventReader() (*EventReader, error) {
 	if reader.isClose {
 		return nil, errors.New("bin log reader is closed")
+	}
+	if reader.currentEventReader != nil {
+		reader.currentOffset = reader.currentEventReader.NextPosition
+		if err := reader.currentEventReader.Close(); err != nil {
+			return nil, err
+		}
+		reader.currentEventReader = nil
 	}
 	if reader.buffer.Len() <= 0 {
 		return nil, nil
@@ -27,14 +36,15 @@ func (reader *BinlogReader) NextEventReader() (*EventReader, error) {
 	if err != nil {
 		return nil, err
 	}
-	reader.eventList = append(reader.eventList, eventReader)
-	return eventReader, nil
+	reader.currentEventReader = eventReader
+	return reader.currentEventReader, nil
 }
 
 func (reader *BinlogReader) readMagicNumber() (int32, error) {
 	if err := binary.Read(reader.buffer, binary.LittleEndian, &reader.magicNumber); err != nil {
 		return -1, err
 	}
+	reader.currentOffset = 4
 	if reader.magicNumber != MagicNumber {
 		return -1, errors.New("parse magic number failed, expected: " + strconv.Itoa(int(MagicNumber)) +
 			", actual: " + strconv.Itoa(int(reader.magicNumber)))
@@ -45,6 +55,7 @@ func (reader *BinlogReader) readMagicNumber() (int32, error) {
 
 func (reader *BinlogReader) readDescriptorEvent() (*descriptorEvent, error) {
 	event, err := ReadDescriptorEvent(reader.buffer)
+	reader.currentOffset = event.NextPosition
 	if err != nil {
 		return nil, err
 	}
@@ -56,20 +67,20 @@ func (reader *BinlogReader) Close() error {
 	if reader.isClose {
 		return nil
 	}
-	for _, e := range reader.eventList {
-		if err := e.Close(); err != nil {
+	reader.isClose = true
+	if reader.currentEventReader != nil {
+		if err := reader.currentEventReader.Close(); err != nil {
 			return err
 		}
 	}
-	reader.isClose = true
 	return nil
 }
 
 func NewBinlogReader(data []byte) (*BinlogReader, error) {
 	reader := &BinlogReader{
-		buffer:    bytes.NewBuffer(data),
-		eventList: []*EventReader{},
-		isClose:   false,
+		buffer:       bytes.NewBuffer(data),
+		bufferLength: len(data),
+		isClose:      false,
 	}
 
 	if _, err := reader.readMagicNumber(); err != nil {

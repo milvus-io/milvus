@@ -54,5 +54,6 @@ func TestBinlogWriterReader(t *testing.T) {
 
 	reader, err := binlogReader.NextEventReader()
 	assert.Nil(t, err)
+	fmt.Println("reader offset : " + strconv.Itoa(int(binlogReader.currentOffset)))
 	assert.Nil(t, reader)
 }

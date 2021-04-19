@@ -19,6 +19,11 @@ type ddMsg struct {
 	timeRange         TimeRange
 }
 
+type metaOperateRecord struct {
+	createOrDrop bool // create: true, drop: false
+	timestamp    Timestamp
+}
+
 type insertMsg struct {
 	insertMessages []*msgstream.InsertMsg
 	timeRange      TimeRange
