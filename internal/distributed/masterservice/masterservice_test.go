@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"regexp"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,12 +23,15 @@ func TestGrpcService(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
 
-	cms.Params.Address = "127.0.0.1"
+	//cms.Params.Address = "127.0.0.1"
 	cms.Params.Port = (randVal % 100) + 10000
-	cms.Params.NodeID = 0
 
-	cms.Params.PulsarAddress = "pulsar://127.0.0.1:6650"
-	cms.Params.EtcdAddress = "127.0.0.1:2379"
+	svr, err := NewGrpcServer()
+	assert.Nil(t, err)
+
+	// cms.Params.NodeID = 0
+	//cms.Params.PulsarAddress = "pulsar://127.0.0.1:6650"
+	//cms.Params.EtcdAddress = "127.0.0.1:2379"
 	cms.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
 	cms.Params.KvRootPath = fmt.Sprintf("/%d/test/kv", randVal)
 	cms.Params.ProxyTimeTickChannel = fmt.Sprintf("proxyTimeTick%d", randVal)
@@ -42,9 +46,6 @@ func TestGrpcService(t *testing.T) {
 	cms.Params.DefaultIndexName = "_default"
 
 	t.Logf("master service port = %d", cms.Params.Port)
-
-	svr, err := NewGrpcServer()
-	assert.Nil(t, err)
 
 	core := svr.core.(*cms.Core)
 
@@ -94,8 +95,11 @@ func TestGrpcService(t *testing.T) {
 		return []string{"file1", "file2", "file3"}, nil
 	}
 
+	var binlogLock sync.Mutex
 	binlogPathArray := make([]string, 0, 16)
 	core.BuildIndexReq = func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair) (typeutil.UniqueID, error) {
+		binlogLock.Lock()
+		defer binlogLock.Unlock()
 		binlogPathArray = append(binlogPathArray, binlog...)
 		return 2000, nil
 	}
@@ -109,7 +113,7 @@ func TestGrpcService(t *testing.T) {
 	err = svr.Start()
 	assert.Nil(t, err)
 
-	cli, err := NewGrpcClient(fmt.Sprintf("127.0.0.1:%d", cms.Params.Port), 3*time.Second)
+	cli, err := NewGrpcClient(fmt.Sprintf("%s:%d", cms.Params.Address, cms.Params.Port), 3*time.Second)
 	assert.Nil(t, err)
 
 	err = cli.Init(&cms.InitParams{ProxyTimeTickChannel: fmt.Sprintf("proxyTimeTick%d", randVal)})
@@ -403,6 +407,8 @@ func TestGrpcService(t *testing.T) {
 		rsp, err := cli.CreateIndex(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		binlogLock.Lock()
+		defer binlogLock.Unlock()
 		assert.Equal(t, 3, len(binlogPathArray))
 		assert.ElementsMatch(t, binlogPathArray, []string{"file1", "file2", "file3"})
 

@@ -13,6 +13,8 @@ msgChannel:
   # channel name generation rule: ${namePrefix}-${ChannelIdx}
   chanNamePrefix:
     dataDefinition: "data-definition"
+    masterTimeTick: "master-timetick"
+    masterStatistics: "master-statistics"
     insert: "insert"
     delete: "delete"
     search: "search"
