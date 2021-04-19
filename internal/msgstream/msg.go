@@ -1,6 +1,8 @@
 package msgstream
 
 import (
+	"context"
+
 	"github.com/golang/protobuf/proto"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
@@ -8,6 +10,8 @@ import (
 type MsgType = internalPb.MsgType
 
 type TsMsg interface {
+	GetContext() context.Context
+	SetContext(context.Context)
 	BeginTs() Timestamp
 	EndTs() Timestamp
 	Type() MsgType
@@ -17,6 +21,7 @@ type TsMsg interface {
 }
 
 type BaseMsg struct {
+	ctx            context.Context
 	BeginTimestamp Timestamp
 	EndTimestamp   Timestamp
 	HashValues     []uint32
@@ -42,6 +47,14 @@ type InsertMsg struct {
 
 func (it *InsertMsg) Type() MsgType {
 	return it.MsgType
+}
+
+func (it *InsertMsg) GetContext() context.Context {
+	return it.ctx
+}
+
+func (it *InsertMsg) SetContext(ctx context.Context) {
+	it.ctx = ctx
 }
 
 func (it *InsertMsg) Marshal(input TsMsg) ([]byte, error) {
@@ -88,6 +101,13 @@ func (fl *FlushMsg) Type() MsgType {
 	return fl.GetMsgType()
 }
 
+func (fl *FlushMsg) GetContext() context.Context {
+	return fl.ctx
+}
+func (fl *FlushMsg) SetContext(ctx context.Context) {
+	fl.ctx = ctx
+}
+
 func (fl *FlushMsg) Marshal(input TsMsg) ([]byte, error) {
 	flushMsgTask := input.(*FlushMsg)
 	flushMsg := &flushMsgTask.FlushMsg
@@ -119,6 +139,14 @@ type DeleteMsg struct {
 
 func (dt *DeleteMsg) Type() MsgType {
 	return dt.MsgType
+}
+
+func (dt *DeleteMsg) GetContext() context.Context {
+	return dt.ctx
+}
+
+func (dt *DeleteMsg) SetContext(ctx context.Context) {
+	dt.ctx = ctx
 }
 
 func (dt *DeleteMsg) Marshal(input TsMsg) ([]byte, error) {
@@ -165,6 +193,14 @@ func (st *SearchMsg) Type() MsgType {
 	return st.MsgType
 }
 
+func (st *SearchMsg) GetContext() context.Context {
+	return st.ctx
+}
+
+func (st *SearchMsg) SetContext(ctx context.Context) {
+	st.ctx = ctx
+}
+
 func (st *SearchMsg) Marshal(input TsMsg) ([]byte, error) {
 	searchTask := input.(*SearchMsg)
 	searchRequest := &searchTask.SearchRequest
@@ -196,6 +232,14 @@ type SearchResultMsg struct {
 
 func (srt *SearchResultMsg) Type() MsgType {
 	return srt.MsgType
+}
+
+func (srt *SearchResultMsg) GetContext() context.Context {
+	return srt.ctx
+}
+
+func (srt *SearchResultMsg) SetContext(ctx context.Context) {
+	srt.ctx = ctx
 }
 
 func (srt *SearchResultMsg) Marshal(input TsMsg) ([]byte, error) {
@@ -231,6 +275,14 @@ func (tst *TimeTickMsg) Type() MsgType {
 	return tst.MsgType
 }
 
+func (tst *TimeTickMsg) GetContext() context.Context {
+	return tst.ctx
+}
+
+func (tst *TimeTickMsg) SetContext(ctx context.Context) {
+	tst.ctx = ctx
+}
+
 func (tst *TimeTickMsg) Marshal(input TsMsg) ([]byte, error) {
 	timeTickTask := input.(*TimeTickMsg)
 	timeTick := &timeTickTask.TimeTickMsg
@@ -262,6 +314,14 @@ type QueryNodeStatsMsg struct {
 
 func (qs *QueryNodeStatsMsg) Type() MsgType {
 	return qs.MsgType
+}
+
+func (qs *QueryNodeStatsMsg) GetContext() context.Context {
+	return qs.ctx
+}
+
+func (qs *QueryNodeStatsMsg) SetContext(ctx context.Context) {
+	qs.ctx = ctx
 }
 
 func (qs *QueryNodeStatsMsg) Marshal(input TsMsg) ([]byte, error) {
@@ -305,6 +365,14 @@ func (cc *CreateCollectionMsg) Type() MsgType {
 	return cc.MsgType
 }
 
+func (cc *CreateCollectionMsg) GetContext() context.Context {
+	return cc.ctx
+}
+
+func (cc *CreateCollectionMsg) SetContext(ctx context.Context) {
+	cc.ctx = ctx
+}
+
 func (cc *CreateCollectionMsg) Marshal(input TsMsg) ([]byte, error) {
 	createCollectionMsg := input.(*CreateCollectionMsg)
 	createCollectionRequest := &createCollectionMsg.CreateCollectionRequest
@@ -337,6 +405,13 @@ type DropCollectionMsg struct {
 func (dc *DropCollectionMsg) Type() MsgType {
 	return dc.MsgType
 }
+func (dc *DropCollectionMsg) GetContext() context.Context {
+	return dc.ctx
+}
+
+func (dc *DropCollectionMsg) SetContext(ctx context.Context) {
+	dc.ctx = ctx
+}
 
 func (dc *DropCollectionMsg) Marshal(input TsMsg) ([]byte, error) {
 	dropCollectionMsg := input.(*DropCollectionMsg)
@@ -361,109 +436,18 @@ func (dc *DropCollectionMsg) Unmarshal(input []byte) (TsMsg, error) {
 	return dropCollectionMsg, nil
 }
 
-/////////////////////////////////////////HasCollection//////////////////////////////////////////
-type HasCollectionMsg struct {
-	BaseMsg
-	internalPb.HasCollectionRequest
-}
-
-func (hc *HasCollectionMsg) Type() MsgType {
-	return hc.MsgType
-}
-
-func (hc *HasCollectionMsg) Marshal(input TsMsg) ([]byte, error) {
-	hasCollectionMsg := input.(*HasCollectionMsg)
-	hasCollectionRequest := &hasCollectionMsg.HasCollectionRequest
-	mb, err := proto.Marshal(hasCollectionRequest)
-	if err != nil {
-		return nil, err
-	}
-	return mb, nil
-}
-
-func (hc *HasCollectionMsg) Unmarshal(input []byte) (TsMsg, error) {
-	hasCollectionRequest := internalPb.HasCollectionRequest{}
-	err := proto.Unmarshal(input, &hasCollectionRequest)
-	if err != nil {
-		return nil, err
-	}
-	hasCollectionMsg := &HasCollectionMsg{HasCollectionRequest: hasCollectionRequest}
-	hasCollectionMsg.BeginTimestamp = hasCollectionMsg.Timestamp
-	hasCollectionMsg.EndTimestamp = hasCollectionMsg.Timestamp
-
-	return hasCollectionMsg, nil
-}
-
-/////////////////////////////////////////DescribeCollection//////////////////////////////////////////
-type DescribeCollectionMsg struct {
-	BaseMsg
-	internalPb.DescribeCollectionRequest
-}
-
-func (dc *DescribeCollectionMsg) Type() MsgType {
-	return dc.MsgType
-}
-
-func (dc *DescribeCollectionMsg) Marshal(input TsMsg) ([]byte, error) {
-	describeCollectionMsg := input.(*DescribeCollectionMsg)
-	describeCollectionRequest := &describeCollectionMsg.DescribeCollectionRequest
-	mb, err := proto.Marshal(describeCollectionRequest)
-	if err != nil {
-		return nil, err
-	}
-	return mb, nil
-}
-
-func (dc *DescribeCollectionMsg) Unmarshal(input []byte) (TsMsg, error) {
-	describeCollectionRequest := internalPb.DescribeCollectionRequest{}
-	err := proto.Unmarshal(input, &describeCollectionRequest)
-	if err != nil {
-		return nil, err
-	}
-	describeCollectionMsg := &DescribeCollectionMsg{DescribeCollectionRequest: describeCollectionRequest}
-	describeCollectionMsg.BeginTimestamp = describeCollectionMsg.Timestamp
-	describeCollectionMsg.EndTimestamp = describeCollectionMsg.Timestamp
-
-	return describeCollectionMsg, nil
-}
-
-/////////////////////////////////////////ShowCollection//////////////////////////////////////////
-type ShowCollectionMsg struct {
-	BaseMsg
-	internalPb.ShowCollectionRequest
-}
-
-func (sc *ShowCollectionMsg) Type() MsgType {
-	return sc.MsgType
-}
-
-func (sc *ShowCollectionMsg) Marshal(input TsMsg) ([]byte, error) {
-	showCollectionMsg := input.(*ShowCollectionMsg)
-	showCollectionRequest := &showCollectionMsg.ShowCollectionRequest
-	mb, err := proto.Marshal(showCollectionRequest)
-	if err != nil {
-		return nil, err
-	}
-	return mb, nil
-}
-
-func (sc *ShowCollectionMsg) Unmarshal(input []byte) (TsMsg, error) {
-	showCollectionRequest := internalPb.ShowCollectionRequest{}
-	err := proto.Unmarshal(input, &showCollectionRequest)
-	if err != nil {
-		return nil, err
-	}
-	showCollectionMsg := &ShowCollectionMsg{ShowCollectionRequest: showCollectionRequest}
-	showCollectionMsg.BeginTimestamp = showCollectionMsg.Timestamp
-	showCollectionMsg.EndTimestamp = showCollectionMsg.Timestamp
-
-	return showCollectionMsg, nil
-}
-
 /////////////////////////////////////////CreatePartition//////////////////////////////////////////
 type CreatePartitionMsg struct {
 	BaseMsg
 	internalPb.CreatePartitionRequest
+}
+
+func (cc *CreatePartitionMsg) GetContext() context.Context {
+	return cc.ctx
+}
+
+func (cc *CreatePartitionMsg) SetContext(ctx context.Context) {
+	cc.ctx = ctx
 }
 
 func (cc *CreatePartitionMsg) Type() MsgType {
@@ -499,6 +483,14 @@ type DropPartitionMsg struct {
 	internalPb.DropPartitionRequest
 }
 
+func (dc *DropPartitionMsg) GetContext() context.Context {
+	return dc.ctx
+}
+
+func (dc *DropPartitionMsg) SetContext(ctx context.Context) {
+	dc.ctx = ctx
+}
+
 func (dc *DropPartitionMsg) Type() MsgType {
 	return dc.MsgType
 }
@@ -526,105 +518,6 @@ func (dc *DropPartitionMsg) Unmarshal(input []byte) (TsMsg, error) {
 	return dropPartitionMsg, nil
 }
 
-/////////////////////////////////////////HasPartition//////////////////////////////////////////
-type HasPartitionMsg struct {
-	BaseMsg
-	internalPb.HasPartitionRequest
-}
-
-func (hc *HasPartitionMsg) Type() MsgType {
-	return hc.MsgType
-}
-
-func (hc *HasPartitionMsg) Marshal(input TsMsg) ([]byte, error) {
-	hasPartitionMsg := input.(*HasPartitionMsg)
-	hasPartitionRequest := &hasPartitionMsg.HasPartitionRequest
-	mb, err := proto.Marshal(hasPartitionRequest)
-	if err != nil {
-		return nil, err
-	}
-	return mb, nil
-}
-
-func (hc *HasPartitionMsg) Unmarshal(input []byte) (TsMsg, error) {
-	hasPartitionRequest := internalPb.HasPartitionRequest{}
-	err := proto.Unmarshal(input, &hasPartitionRequest)
-	if err != nil {
-		return nil, err
-	}
-	hasPartitionMsg := &HasPartitionMsg{HasPartitionRequest: hasPartitionRequest}
-	hasPartitionMsg.BeginTimestamp = hasPartitionMsg.Timestamp
-	hasPartitionMsg.EndTimestamp = hasPartitionMsg.Timestamp
-
-	return hasPartitionMsg, nil
-}
-
-/////////////////////////////////////////DescribePartition//////////////////////////////////////////
-type DescribePartitionMsg struct {
-	BaseMsg
-	internalPb.DescribePartitionRequest
-}
-
-func (dc *DescribePartitionMsg) Type() MsgType {
-	return dc.MsgType
-}
-
-func (dc *DescribePartitionMsg) Marshal(input TsMsg) ([]byte, error) {
-	describePartitionMsg := input.(*DescribePartitionMsg)
-	describePartitionRequest := &describePartitionMsg.DescribePartitionRequest
-	mb, err := proto.Marshal(describePartitionRequest)
-	if err != nil {
-		return nil, err
-	}
-	return mb, nil
-}
-
-func (dc *DescribePartitionMsg) Unmarshal(input []byte) (TsMsg, error) {
-	describePartitionRequest := internalPb.DescribePartitionRequest{}
-	err := proto.Unmarshal(input, &describePartitionRequest)
-	if err != nil {
-		return nil, err
-	}
-	describePartitionMsg := &DescribePartitionMsg{DescribePartitionRequest: describePartitionRequest}
-	describePartitionMsg.BeginTimestamp = describePartitionMsg.Timestamp
-	describePartitionMsg.EndTimestamp = describePartitionMsg.Timestamp
-
-	return describePartitionMsg, nil
-}
-
-/////////////////////////////////////////ShowPartition//////////////////////////////////////////
-type ShowPartitionMsg struct {
-	BaseMsg
-	internalPb.ShowPartitionRequest
-}
-
-func (sc *ShowPartitionMsg) Type() MsgType {
-	return sc.MsgType
-}
-
-func (sc *ShowPartitionMsg) Marshal(input TsMsg) ([]byte, error) {
-	showPartitionMsg := input.(*ShowPartitionMsg)
-	showPartitionRequest := &showPartitionMsg.ShowPartitionRequest
-	mb, err := proto.Marshal(showPartitionRequest)
-	if err != nil {
-		return nil, err
-	}
-	return mb, nil
-}
-
-func (sc *ShowPartitionMsg) Unmarshal(input []byte) (TsMsg, error) {
-	showPartitionRequest := internalPb.ShowPartitionRequest{}
-	err := proto.Unmarshal(input, &showPartitionRequest)
-	if err != nil {
-		return nil, err
-	}
-	showPartitionMsg := &ShowPartitionMsg{ShowPartitionRequest: showPartitionRequest}
-	showPartitionMsg.BeginTimestamp = showPartitionMsg.Timestamp
-	showPartitionMsg.EndTimestamp = showPartitionMsg.Timestamp
-
-	return showPartitionMsg, nil
-}
-
 /////////////////////////////////////////LoadIndex//////////////////////////////////////////
 type LoadIndexMsg struct {
 	BaseMsg
@@ -633,6 +526,14 @@ type LoadIndexMsg struct {
 
 func (lim *LoadIndexMsg) Type() MsgType {
 	return lim.MsgType
+}
+
+func (lim *LoadIndexMsg) GetContext() context.Context {
+	return lim.ctx
+}
+
+func (lim *LoadIndexMsg) SetContext(ctx context.Context) {
+	lim.ctx = ctx
 }
 
 func (lim *LoadIndexMsg) Marshal(input TsMsg) ([]byte, error) {

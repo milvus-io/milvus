@@ -9,6 +9,9 @@ import (
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
+
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
@@ -357,16 +360,19 @@ func newDDNode(ctx context.Context, outCh chan *ddlFlushSyncMsg) *ddNode {
 		partitionRecords:  make(map[UniqueID]interface{}),
 	}
 
-	bucketName := Params.MinioBucketName
-	option := &miniokv.Option{
-		Address:           Params.MinioAddress,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSL,
-		BucketName:        bucketName,
-		CreateBucket:      true,
+	minIOEndPoint := Params.MinioAddress
+	minIOAccessKeyID := Params.MinioAccessKeyID
+	minIOSecretAccessKey := Params.MinioSecretAccessKey
+	minIOUseSSL := Params.MinioUseSSL
+	minIOClient, err := minio.New(minIOEndPoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(minIOAccessKeyID, minIOSecretAccessKey, ""),
+		Secure: minIOUseSSL,
+	})
+	if err != nil {
+		panic(err)
 	}
-	minioKV, err := miniokv.NewMinIOKV(ctx, option)
+	bucketName := Params.MinioBucketName
+	minioKV, err := miniokv.NewMinIOKV(ctx, minIOClient, bucketName)
 	if err != nil {
 		panic(err)
 	}

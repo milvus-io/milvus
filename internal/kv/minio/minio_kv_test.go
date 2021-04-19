@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 
@@ -13,31 +15,24 @@ import (
 
 var Params paramtable.BaseTable
 
-func newMinIOKVClient(ctx context.Context, bucketName string) (*miniokv.MinIOKV, error) {
+func TestMinIOKV_Load(t *testing.T) {
+	Params.Init()
 	endPoint, _ := Params.Load("_MinioAddress")
 	accessKeyID, _ := Params.Load("minio.accessKeyID")
 	secretAccessKey, _ := Params.Load("minio.secretAccessKey")
 	useSSLStr, _ := Params.Load("minio.useSSL")
-	useSSL, _ := strconv.ParseBool(useSSLStr)
-	option := &miniokv.Option{
-		Address:           endPoint,
-		AccessKeyID:       accessKeyID,
-		SecretAccessKeyID: secretAccessKey,
-		UseSSL:            useSSL,
-		BucketName:        bucketName,
-		CreateBucket:      true,
-	}
-	client, err := miniokv.NewMinIOKV(ctx, option)
-	return client, err
-}
-
-func TestMinIOKV_Load(t *testing.T) {
-	Params.Init()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	useSSL, _ := strconv.ParseBool(useSSLStr)
+
+	minioClient, err := minio.New(endPoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(accessKeyID, secretAccessKey, ""),
+		Secure: useSSL,
+	})
+	assert.Nil(t, err)
 
 	bucketName := "fantastic-tech-test"
-	MinIOKV, err := newMinIOKVClient(ctx, bucketName)
+	MinIOKV, err := miniokv.NewMinIOKV(ctx, minioClient, bucketName)
 	assert.Nil(t, err)
 	defer MinIOKV.RemoveWithPrefix("")
 
@@ -84,14 +79,25 @@ func TestMinIOKV_Load(t *testing.T) {
 }
 
 func TestMinIOKV_MultiSave(t *testing.T) {
-	Params.Init()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	bucketName := "fantastic-tech-test"
-	MinIOKV, err := newMinIOKVClient(ctx, bucketName)
+	Params.Init()
+	endPoint, _ := Params.Load("_MinioAddress")
+	accessKeyID, _ := Params.Load("minio.accessKeyID")
+	secretAccessKey, _ := Params.Load("minio.secretAccessKey")
+	useSSLStr, _ := Params.Load("minio.useSSL")
+	useSSL, _ := strconv.ParseBool(useSSLStr)
+
+	minioClient, err := minio.New(endPoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(accessKeyID, secretAccessKey, ""),
+		Secure: useSSL,
+	})
 	assert.Nil(t, err)
 
+	bucketName := "fantastic-tech-test"
+	MinIOKV, err := miniokv.NewMinIOKV(ctx, minioClient, bucketName)
+	assert.Nil(t, err)
 	defer MinIOKV.RemoveWithPrefix("")
 
 	err = MinIOKV.Save("key_1", "111")
@@ -111,13 +117,25 @@ func TestMinIOKV_MultiSave(t *testing.T) {
 }
 
 func TestMinIOKV_Remove(t *testing.T) {
-	Params.Init()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	Params.Init()
+	endPoint, _ := Params.Load("_MinioAddress")
+	accessKeyID, _ := Params.Load("minio.accessKeyID")
+	secretAccessKey, _ := Params.Load("minio.secretAccessKey")
+	useSSLStr, _ := Params.Load("minio.useSSL")
+	useSSL, _ := strconv.ParseBool(useSSLStr)
+
+	minioClient, err := minio.New(endPoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(accessKeyID, secretAccessKey, ""),
+		Secure: useSSL,
+	})
+	assert.Nil(t, err)
+
 	bucketName := "fantastic-tech-test"
-	MinIOKV, err := newMinIOKVClient(ctx, bucketName)
+	MinIOKV, err := miniokv.NewMinIOKV(ctx, minioClient, bucketName)
 	assert.Nil(t, err)
 	defer MinIOKV.RemoveWithPrefix("")
 
