@@ -36,11 +36,11 @@ func Collection2JSON(c Collection) (string, error) {
 	return string(b), nil
 }
 
-func JSON2Collection(s string) (Collection, error) {
+func JSON2Collection(s string) (*Collection, error) {
 	var c Collection
 	err := json.Unmarshal([]byte(s), &c)
 	if err != nil {
-		return Collection{}, err
+		return &Collection{}, err
 	}
-	return c, nil
+	return &c, nil
 }

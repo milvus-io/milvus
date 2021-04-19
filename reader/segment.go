@@ -27,8 +27,8 @@ const (
 )
 
 type Segment struct {
-	SegmentPtr C.CSegmentBase
-	SegmentId	int64
+	SegmentPtr       C.CSegmentBase
+	SegmentId        int64
 	SegmentCloseTime uint64
 }
 
@@ -76,43 +76,59 @@ func (s *Segment) Close() error {
 }
 
 ////////////////////////////////////////////////////////////////////////////
-func (s *Segment) SegmentInsert(entityIds *[]int64, timestamps *[]uint64, records *[][]byte, timestampMin uint64, timestampMax uint64) error {
+func (s *Segment) SegmentPreInsert(numOfRecords int) int64 {
+	/*C.PreInsert
+	long int
+	PreInsert(CSegmentBase c_segment, long int size);
+	*/
+	var offset = C.PreInsert(s.SegmentPtr, C.long(int64(numOfRecords)))
+
+	return int64(offset)
+}
+
+func (s *Segment) SegmentPreDelete(numOfRecords int) int64 {
+	/*C.PreDelete
+	long int
+	PreDelete(CSegmentBase c_segment, long int size);
+	*/
+	var offset = C.PreDelete(s.SegmentPtr, C.long(int64(numOfRecords)))
+
+	return int64(offset)
+}
+
+func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]uint64, records *[][]byte) error {
 	/*C.Insert
 	int
 	Insert(CSegmentBase c_segment,
+	           long int reserved_offset,
 	           signed long int size,
-	           const unsigned long* primary_keys,
+	           const long* primary_keys,
 	           const unsigned long* timestamps,
 	           void* raw_data,
 	           int sizeof_per_row,
-	           signed long int count,
-			   unsigned long timestamp_min,
-			   unsigned long timestamp_max);
+	           signed long int count);
 	*/
 	// Blobs to one big blob
-	var rowData []byte
+	var rawData []byte
 	for i := 0; i < len(*records); i++ {
-		copy(rowData, (*records)[i])
+		copy(rawData, (*records)[i])
 	}
 
-	// TODO: remove hard code schema
-	// auto schema_tmp = std::make_shared<Schema>();
-	// schema_tmp->AddField("fakeVec", DataType::VECTOR_FLOAT, 16);
-	// schema_tmp->AddField("age", DataType::INT32);
-	// TODO: remove hard code & fake dataChunk
-	const DIM = 4
-	const N = 3
-	var vec = [DIM]float32{1.1, 2.2, 3.3, 4.4}
-	var rawData []int8
-	for i := 0; i <= N; i++ {
-		for _, ele := range vec {
-			rawData=append(rawData, int8(ele))
-		}
-		rawData=append(rawData, int8(i))
-	}
-	const sizeofPerRow = 4 + DIM * 4
+	var cOffset = C.long(offset)
+	var cNumOfRows = C.long(len(*entityIDs))
+	var cEntityIdsPtr = (*C.long)(&(*entityIDs)[0])
+	var cTimestampsPtr = (*C.ulong)(&(*timestamps)[0])
+	var cSizeofPerRow = C.int(len((*records)[0]))
+	var cRawDataVoidPtr = unsafe.Pointer(&rawData[0])
 
-	var status = C.Insert(s.SegmentPtr, C.long(N), (*C.ulong)(&(*entityIds)[0]), (*C.ulong)(&(*timestamps)[0]), unsafe.Pointer(&rawData[0]), C.int(sizeofPerRow), C.long(N), C.ulong(timestampMin), C.ulong(timestampMax))
+	var status = C.Insert(s.SegmentPtr,
+							cOffset,
+							cNumOfRows,
+							cEntityIdsPtr,
+							cTimestampsPtr,
+		cRawDataVoidPtr,
+							cSizeofPerRow,
+							cNumOfRows)
 
 	if status != 0 {
 		return errors.New("Insert failed, error code = " + strconv.Itoa(int(status)))
@@ -121,19 +137,21 @@ func (s *Segment) SegmentInsert(entityIds *[]int64, timestamps *[]uint64, record
 	return nil
 }
 
-func (s *Segment) SegmentDelete(entityIds *[]int64, timestamps *[]uint64, timestampMin uint64, timestampMax uint64) error {
+func (s *Segment) SegmentDelete(offset int64, entityIDs *[]int64, timestamps *[]uint64) error {
 	/*C.Delete
 	int
 	Delete(CSegmentBase c_segment,
+	           long int reserved_offset,
 	           long size,
-	           const unsigned long* primary_keys,
-	           const unsigned long* timestamps,
-			   unsigned long timestamp_min,
-			   unsigned long timestamp_max);
+	           const long* primary_keys,
+	           const unsigned long* timestamps);
 	*/
-	size := len(*entityIds)
+	var cOffset = C.long(offset)
+	var cSize = C.long(len(*entityIDs))
+	var cEntityIdsPtr = (*C.long)(&(*entityIDs)[0])
+	var cTimestampsPtr = (*C.ulong)(&(*timestamps)[0])
 
-	var status = C.Delete(s.SegmentPtr, C.long(size), (*C.ulong)(&(*entityIds)[0]), (*C.ulong)(&(*timestamps)[0]), C.ulong(timestampMin), C.ulong(timestampMax))
+	var status = C.Delete(s.SegmentPtr, cOffset, cSize, cEntityIdsPtr, cTimestampsPtr)
 
 	if status != 0 {
 		return errors.New("Delete failed, error code = " + strconv.Itoa(int(status)))
@@ -157,7 +175,13 @@ func (s *Segment) SegmentSearch(queryString string, timestamp uint64, vectorReco
 	resultIds := make([]int64, TopK)
 	resultDistances := make([]float32, TopK)
 
-	var status = C.Search(s.SegmentPtr, unsafe.Pointer(nil), C.ulong(timestamp), (*C.long)(&resultIds[0]), (*C.float)(&resultDistances[0]))
+	var cQueryPtr = unsafe.Pointer(nil)
+	var cTimestamp = C.ulong(timestamp)
+	var cResultIds = (*C.long)(&resultIds[0])
+	var cResultDistances = (*C.float)(&resultDistances[0])
+
+	var status = C.Search(s.SegmentPtr, cQueryPtr, cTimestamp, cResultIds, cResultDistances)
+
 	if status != 0 {
 		return nil, errors.New("Search failed, error code = " + strconv.Itoa(int(status)))
 	}

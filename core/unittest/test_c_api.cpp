@@ -49,7 +49,7 @@ TEST(CApiTest, InsertTest) {
 
   std::vector<char> raw_data;
   std::vector<uint64_t> timestamps;
-  std::vector<uint64_t> uids;
+  std::vector<int64_t> uids;
   int N = 10000;
   std::default_random_engine e(67);
   for(int i = 0; i < N; ++i) {
@@ -67,7 +67,9 @@ TEST(CApiTest, InsertTest) {
 
   auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
-  auto res = Insert(segment, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
+  auto offset = PreInsert(segment, N);
+
+  auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
 
   assert(res == 0);
 
@@ -85,10 +87,12 @@ TEST(CApiTest, DeleteTest) {
   auto partition = NewPartition(collection, partition_name);
   auto segment = NewSegment(partition, 0);
 
-  unsigned long delete_primary_keys[] = {100000, 100001, 100002};
+  long delete_primary_keys[] = {100000, 100001, 100002};
   unsigned long delete_timestamps[] = {0, 0, 0};
 
-  auto del_res = Delete(segment, 1, delete_primary_keys, delete_timestamps);
+  auto offset = PreDelete(segment, 3);
+
+  auto del_res = Delete(segment, offset, 3, delete_primary_keys, delete_timestamps);
   assert(del_res == 0);
 
   DeleteCollection(collection);
@@ -107,7 +111,7 @@ TEST(CApiTest, SearchTest) {
 
   std::vector<char> raw_data;
   std::vector<uint64_t> timestamps;
-  std::vector<uint64_t> uids;
+  std::vector<int64_t> uids;
   int N = 10000;
   std::default_random_engine e(67);
   for(int i = 0; i < N; ++i) {
@@ -125,7 +129,9 @@ TEST(CApiTest, SearchTest) {
 
   auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
-  auto ins_res = Insert(segment, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
+  auto offset = PreInsert(segment, N);
+
+  auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
   assert(ins_res == 0);
 
   long result_ids;
@@ -184,7 +190,7 @@ TEST(CApiTest, GetRowCountTest) {
 
   std::vector<char> raw_data;
   std::vector<uint64_t> timestamps;
-  std::vector<uint64_t> uids;
+  std::vector<int64_t> uids;
   int N = 10000;
   std::default_random_engine e(67);
   for(int i = 0; i < N; ++i) {
@@ -202,7 +208,9 @@ TEST(CApiTest, GetRowCountTest) {
 
   auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
-  auto res = Insert(segment, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
+  auto offset = PreInsert(segment, N);
+
+  auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
   assert(res == 0);
 
   auto row_count = GetRowCount(segment);
@@ -221,58 +229,17 @@ TEST(CApiTest, GetDeletedCountTest) {
   auto partition = NewPartition(collection, partition_name);
   auto segment = NewSegment(partition, 0);
 
-  unsigned long delete_primary_keys[] = {100000, 100001, 100002};
+  long delete_primary_keys[] = {100000, 100001, 100002};
   unsigned long delete_timestamps[] = {0, 0, 0};
 
-  auto del_res = Delete(segment, 1, delete_primary_keys, delete_timestamps);
+  auto offset = PreDelete(segment, 3);
+
+  auto del_res = Delete(segment, offset, 3, delete_primary_keys, delete_timestamps);
   assert(del_res == 0);
 
   // TODO: assert(deleted_count == len(delete_primary_keys))
   auto deleted_count = GetDeletedCount(segment);
   assert(deleted_count == 0);
-
-  DeleteCollection(collection);
-  DeletePartition(partition);
-  DeleteSegment(segment);
-}
-
-TEST(CApiTest, TimeGetterAndSetterTest) {
-  auto collection_name = "collection0";
-  auto schema_tmp_conf = "null_schema";
-  auto collection = NewCollection(collection_name, schema_tmp_conf);
-  auto partition_name = "partition0";
-  auto partition = NewPartition(collection, partition_name);
-  auto segment = NewSegment(partition, 0);
-
-  uint64_t TIME_BEGIN = 100;
-  uint64_t TIME_END = 200;
-
-  SetTimeBegin(segment, TIME_BEGIN);
-  auto time_begin = GetTimeBegin(segment);
-  assert(time_begin == TIME_BEGIN);
-
-  SetTimeEnd(segment, TIME_END);
-  auto time_end = GetTimeEnd(segment);
-  assert(time_end == TIME_END);
-
-  DeleteCollection(collection);
-  DeletePartition(partition);
-  DeleteSegment(segment);
-}
-
-
-TEST(CApiTest, SegmentIDTest) {
-  auto collection_name = "collection0";
-  auto schema_tmp_conf = "null_schema";
-  auto collection = NewCollection(collection_name, schema_tmp_conf);
-  auto partition_name = "partition0";
-  auto partition = NewPartition(collection, partition_name);
-  auto segment = NewSegment(partition, 0);
-
-  uint64_t SEGMENT_ID = 1;
-  SetSegmentId(segment, SEGMENT_ID);
-  auto segment_id = GetSegmentId(segment);
-  assert(segment_id == SEGMENT_ID);
 
   DeleteCollection(collection);
   DeletePartition(partition);

@@ -1,246 +1,255 @@
-#include <shared_mutex>
+#include <dog_segment/SegmentNaive.h>
 
-#include "dog_segment/SegmentBase.h"
-#include "utils/Status.h"
-#include <tbb/concurrent_vector.h>
-#include <tbb/concurrent_unordered_map.h>
-#include <atomic>
+#include <algorithm>
+#include <numeric>
+#include <thread>
 
 namespace milvus::dog_segment {
-
 int
 TestABI() {
     return 42;
 }
 
-struct ColumnBasedDataChunk {
-    std::vector<std::vector<float>> entity_vecs;
-    static ColumnBasedDataChunk from(const DogDataChunk& source, const Schema& schema){
-        ColumnBasedDataChunk dest;
-        auto count = source.count;
-        auto raw_data = reinterpret_cast<const char*>(source.raw_data);
-        auto align = source.sizeof_per_row;
-        for(auto& field: schema) {
-            auto len = field.get_sizeof();
-            assert(len % sizeof(float) == 0);
-            std::vector<float> new_col(len * count / sizeof(float));
-            for(int64_t i = 0; i < count; ++i) {
-                memcpy(new_col.data() + i * len / sizeof(float), raw_data + i * align , len);
-            }
-            dest.entity_vecs.push_back(std::move(new_col));
-            // offset the raw_data
-            raw_data += len / sizeof(float);
-        }
-        return dest;
-    }
-};
-
-
-class SegmentNaive : public SegmentBase {
- public:
-    virtual ~SegmentNaive() = default;
-    // SegmentBase(std::shared_ptr<FieldsInfo> collection);
-
-    // TODO: originally, id should be put into data_chunk
-    // TODO: Is it ok to put them the other side?
-    Status
-    Insert(int64_t size, const uint64_t* primary_keys, const Timestamp* timestamps,
-           const DogDataChunk& values) override;
-
-    // TODO: add id into delete log, possibly bitmap
-    Status
-    Delete(int64_t size, const uint64_t* primary_keys, const Timestamp* timestamps) override;
-
-    // query contains metadata of
-    Status
-    Query(const query::QueryPtr& query, Timestamp timestamp, QueryResult& results) override;
-
-    // // THIS FUNCTION IS REMOVED
-    // virtual Status
-    // GetEntityByIds(Timestamp timestamp, const std::vector<Id>& ids, DataChunkPtr& results) = 0;
-
-    // stop receive insert requests
-    Status
-    Close() override {
-        std::lock_guard<std::shared_mutex> lck(mutex_);
-        assert(state_ == SegmentState::Open);
-        state_ = SegmentState::Closed;
-        return Status::OK();
-    }
-
-    //    // to make all data inserted visible
-    //    // maybe a no-op?
-    //    virtual Status
-    //    Flush(Timestamp timestamp) = 0;
-
-    // BuildIndex With Paramaters, must with Frozen State
-    // This function is atomic
-    // NOTE: index_params contains serveral policies for several index
-    Status
-    BuildIndex(std::shared_ptr<IndexConfig> index_params) override {
-        throw std::runtime_error("not implemented");
-    }
-
-    // Remove Index
-    Status
-    DropIndex(std::string_view field_name) override {
-        throw std::runtime_error("not implemented");
-    }
-
-    Status
-    DropRawData(std::string_view field_name) override {
-        // TODO: NO-OP
-        return Status::OK();
-    }
-
-    Status
-    LoadRawData(std::string_view field_name, const char* blob, int64_t blob_size) override {
-        // TODO: NO-OP
-        return Status::OK();
-    }
-
- public:
-    ssize_t
-    get_row_count() const override {
-        return ack_count_.load(std::memory_order_relaxed);
-    }
-
-    //    const FieldsInfo&
-    //    get_fields_info() const override {
-    //
-    //    }
-    //
-    //    // check is_indexed here
-    //    virtual const IndexConfig&
-    //    get_index_param() const = 0;
-    //
-    SegmentState
-    get_state() const override {
-        return state_.load(std::memory_order_relaxed);
-    }
-    //
-    //    std::shared_ptr<IndexData>
-    //    get_index_data();
-
-    ssize_t
-    get_deleted_count() const override {
-        return 0;
-    }
-
- public:
-    friend SegmentBasePtr
-    CreateSegment(SchemaPtr& schema);
-
- private:
-    SchemaPtr schema_;
-    std::shared_mutex mutex_;
-    std::atomic<SegmentState> state_ = SegmentState::Open;
-    std::atomic<int64_t> ack_count_ = 0;
-    tbb::concurrent_vector<uint64_t> uids_;
-    tbb::concurrent_vector<Timestamp> timestamps_;
-    std::vector<tbb::concurrent_vector<float>> entity_vecs_;
-    tbb::concurrent_unordered_map<uint64_t, int> internal_indexes_;
-
-    tbb::concurrent_unordered_multimap<int, Timestamp> delete_logs_;
-};
-
-SegmentBasePtr
-CreateSegment(SchemaPtr& schema) {
-    // TODO: remove hard code
-    auto schema_tmp = std::make_shared<Schema>();
-    schema_tmp->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
-    schema_tmp->AddField("age", DataType::INT32);
-
-    auto segment = std::make_unique<SegmentNaive>();
-    segment->schema_ = schema_tmp;
-    segment->entity_vecs_.resize(schema_tmp->size());
+std::unique_ptr<SegmentBase>
+CreateSegment(SchemaPtr schema, IndexMetaPtr remote_index_meta) {
+    auto segment = std::make_unique<SegmentNaive>(schema, remote_index_meta);
     return segment;
 }
 
-Status
-SegmentNaive::Insert(int64_t size, const uint64_t* primary_keys, const Timestamp* timestamps,
-                     const DogDataChunk& row_values) {
-    const auto& schema = *schema_;
-    auto data_chunk = ColumnBasedDataChunk::from(row_values, schema);
-
-    // insert datas
-    // TODO: use shared_lock
-    std::lock_guard lck(mutex_);
-    assert(state_ == SegmentState::Open);
-    auto ack_id = ack_count_.load();
-    uids_.grow_by(primary_keys, primary_keys + size);
-    for(int64_t i = 0; i < size; ++i) {
-        auto key = primary_keys[i];
-        auto internal_index = i + ack_id;
-        internal_indexes_[key] = internal_index;
+SegmentNaive::Record::Record(const Schema& schema) : uids_(1), timestamps_(1) {
+    for (auto& field : schema) {
+        if (field.is_vector()) {
+            assert(field.get_data_type() == DataType::VECTOR_FLOAT);
+            entity_vec_.emplace_back(std::make_shared<ConcurrentVector<float>>(field.get_dim()));
+        } else {
+            assert(field.get_data_type() == DataType::INT32);
+            entity_vec_.emplace_back(std::make_shared<ConcurrentVector<int32_t, false>>());
+        }
     }
-    timestamps_.grow_by(timestamps, timestamps + size);
-    for(int fid = 0; fid < schema.size(); ++fid) {
-        auto field = schema[fid];
-        auto total_len = field.get_sizeof() * size / sizeof(float);
-        auto source_vec = data_chunk.entity_vecs[fid];
-        entity_vecs_[fid].grow_by(source_vec.data(), source_vec.data() + total_len);
-    }
-
-    // finish insert
-    ack_count_ += size;
-    return Status::OK();
 }
 
-Status SegmentNaive::Delete(int64_t size, const uint64_t *primary_keys, const Timestamp *timestamps) {
-    for(int i = 0; i < size; ++i) {
-        auto key = primary_keys[i];
-        auto time = timestamps[i];
-        delete_logs_.insert(std::make_pair(key, time));
+int64_t
+SegmentNaive::PreInsert(int64_t size) {
+    auto reserved_begin = record_.reserved.fetch_add(size);
+    return reserved_begin;
+}
+
+int64_t
+SegmentNaive::PreDelete(int64_t size) {
+    throw std::runtime_error("unimplemented");
+}
+
+Status
+SegmentNaive::Insert(int64_t reserved_begin, int64_t size, const int64_t* uids_raw, const Timestamp* timestamps_raw,
+                     const DogDataChunk& entities_raw) {
+    assert(entities_raw.count == size);
+    assert(entities_raw.sizeof_per_row == schema_->get_total_sizeof());
+    auto raw_data = reinterpret_cast<const char*>(entities_raw.raw_data);
+    //    std::vector<char> entities(raw_data, raw_data + size * len_per_row);
+
+    auto len_per_row = entities_raw.sizeof_per_row;
+    std::vector<std::tuple<Timestamp, idx_t, int64_t>> ordering;
+    ordering.resize(size);
+    // #pragma omp parallel for
+    for (int i = 0; i < size; ++i) {
+        ordering[i] = std::make_tuple(timestamps_raw[i], uids_raw[i], i);
     }
+    std::sort(ordering.begin(), ordering.end());
+    auto sizeof_infos = schema_->get_sizeof_infos();
+    std::vector<int> offset_infos(schema_->size() + 1, 0);
+    std::partial_sum(sizeof_infos.begin(), sizeof_infos.end(), offset_infos.begin() + 1);
+    std::vector<std::vector<char>> entities(schema_->size());
+
+    for (int fid = 0; fid < schema_->size(); ++fid) {
+        auto len = sizeof_infos[fid];
+        entities[fid].resize(len * size);
+    }
+
+    std::vector<idx_t> uids(size);
+    std::vector<Timestamp> timestamps(size);
+    // #pragma omp parallel for
+    for (int index = 0; index < size; ++index) {
+        auto [t, uid, order_index] = ordering[index];
+        timestamps[index] = t;
+        uids[index] = uid;
+        for (int fid = 0; fid < schema_->size(); ++fid) {
+            auto len = sizeof_infos[fid];
+            auto offset = offset_infos[fid];
+            auto src = raw_data + offset + order_index * len_per_row;
+            auto dst = entities[fid].data() + index * len;
+            memcpy(dst, src, len);
+        }
+    }
+
+    record_.timestamps_.set_data(reserved_begin, timestamps.data(), size);
+    record_.uids_.set_data(reserved_begin, uids.data(), size);
+    for (int fid = 0; fid < schema_->size(); ++fid) {
+        record_.entity_vec_[fid]->set_data_raw(reserved_begin, entities[fid].data(), size);
+    }
+
+    record_.ack_responder_.AddSegment(reserved_begin, size);
     return Status::OK();
+
+    //    std::thread go(executor, std::move(uids), std::move(timestamps), std::move(entities));
+    //    go.detach();
+    //    const auto& schema = *schema_;
+    //    auto record_ptr = GetMutableRecord();
+    //    assert(record_ptr);
+    //    auto& record = *record_ptr;
+    //    auto data_chunk = ColumnBasedDataChunk::from(row_values, schema);
+    //
+    //    // TODO: use shared_lock for better concurrency
+    //    std::lock_guard lck(mutex_);
+    //    assert(state_ == SegmentState::Open);
+    //    auto ack_id = ack_count_.load();
+    //    record.uids_.grow_by(primary_keys, primary_keys + size);
+    //    for (int64_t i = 0; i < size; ++i) {
+    //        auto key = primary_keys[i];
+    //        auto internal_index = i + ack_id;
+    //        internal_indexes_[key] = internal_index;
+    //    }
+    //    record.timestamps_.grow_by(timestamps, timestamps + size);
+    //    for (int fid = 0; fid < schema.size(); ++fid) {
+    //        auto field = schema[fid];
+    //        auto total_len = field.get_sizeof() * size / sizeof(float);
+    //        auto source_vec = data_chunk.entity_vecs[fid];
+    //        record.entity_vecs_[fid].grow_by(source_vec.data(), source_vec.data() + total_len);
+    //    }
+    //
+    //    // finish insert
+    //    ack_count_ += size;
+    //    return Status::OK();
+}
+
+Status
+SegmentNaive::Delete(int64_t reserved_offset, int64_t size, const int64_t* primary_keys, const Timestamp* timestamps) {
+    throw std::runtime_error("unimplemented");
+    //    for (int i = 0; i < size; ++i) {
+    //        auto key = primary_keys[i];
+    //        auto time = timestamps[i];
+    //        delete_logs_.insert(std::make_pair(key, time));
+    //    }
+    //    return Status::OK();
 }
 
 // TODO: remove mock
+
 Status
-SegmentNaive::Query(const query::QueryPtr &query, Timestamp timestamp, QueryResult &result) {
-    std::shared_lock lck(mutex_);
-    auto ack_count = ack_count_.load();
-    assert(query == nullptr);
-    assert(schema_->size() >= 1);
-    const auto& field = schema_->operator[](0);
-    assert(field.get_data_type() == DataType::VECTOR_FLOAT);
-    assert(field.get_name() == "fakevec");
-    auto dim = field.get_dim();
-    // assume query vector is [0, 0, ..., 0]
-    std::vector<float> query_vector(dim, 0);
-    auto& target_vec = entity_vecs_[0];
-    int current_index = -1;
-    float min_diff = std::numeric_limits<float>::max();
-    for(int index = 0; index < ack_count; ++index) {
-        float diff = 0;
-        int offset = index * dim;
-        for(auto d = 0; d < dim; ++d) {
-            auto v = target_vec[offset + d] - query_vector[d];
-            diff += v * v;
-        }
-        if(diff < min_diff) {
-            min_diff = diff;
-            current_index = index;
-        }
-    }
-    QueryResult query_result;
-    query_result.row_num_ = 1;
-    query_result.result_distances_.push_back(min_diff);
-    query_result.result_ids_.push_back(uids_[current_index]);
-    // query_result.data_chunk_ = nullptr;
-    result = std::move(query_result);
-    return Status::OK();
+SegmentNaive::QueryImpl(const query::QueryPtr& query, Timestamp timestamp, QueryResult& result) {
+    throw std::runtime_error("unimplemented");
+    //    auto ack_count = ack_count_.load();
+    //    assert(query == nullptr);
+    //    assert(schema_->size() >= 1);
+    //    const auto& field = schema_->operator[](0);
+    //    assert(field.get_data_type() == DataType::VECTOR_FLOAT);
+    //    assert(field.get_name() == "fakevec");
+    //    auto dim = field.get_dim();
+    //    // assume query vector is [0, 0, ..., 0]
+    //    std::vector<float> query_vector(dim, 0);
+    //    auto& target_vec = record.entity_vecs_[0];
+    //    int current_index = -1;
+    //    float min_diff = std::numeric_limits<float>::max();
+    //    for (int index = 0; index < ack_count; ++index) {
+    //        float diff = 0;
+    //        int offset = index * dim;
+    //        for (auto d = 0; d < dim; ++d) {
+    //            auto v = target_vec[offset + d] - query_vector[d];
+    //            diff += v * v;
+    //        }
+    //        if (diff < min_diff) {
+    //            min_diff = diff;
+    //            current_index = index;
+    //        }
+    //    }
+    //    QueryResult query_result;
+    //    query_result.row_num_ = 1;
+    //    query_result.result_distances_.push_back(min_diff);
+    //    query_result.result_ids_.push_back(record.uids_[current_index]);
+    //    query_result.data_chunk_ = nullptr;
+    //    result = std::move(query_result);
+    //    return Status::OK();
 }
 
-}  // namespace milvus::engine
+Status
+SegmentNaive::Query(const query::QueryPtr& query, Timestamp timestamp, QueryResult& result) {
+    // TODO: enable delete
+    // TODO: enable index
+    auto& field = schema_->operator[](0);
+    assert(field.get_name() == "fakevec");
+    assert(field.get_data_type() == DataType::VECTOR_FLOAT);
+    auto dim = field.get_dim();
+    assert(query == nullptr);
+    int64_t barrier = [&]
+    {
+        auto& vec = record_.timestamps_;
+        int64_t beg = 0;
+        int64_t end = record_.ack_responder_.GetAck();
+        while (beg < end) {
+            auto mid = (beg + end) / 2;
+            if (vec[mid] < timestamp) {
+                end = mid + 1;
+            } else {
+                beg = mid;
+            }
 
+        }
+        return beg;
+    }();
+    // search until barriers
+    // TODO: optimize
+    auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_[0]);
+    for(int64_t i = 0; i < barrier; ++i) {
+//        auto element =
+        throw std::runtime_error("unimplemented");
+    }
 
+    return Status::OK();
+    // find end of binary
+    //    throw std::runtime_error("unimplemented");
+    //    auto record_ptr = GetMutableRecord();
+    //    if (record_ptr) {
+    //        return QueryImpl(*record_ptr, query, timestamp, result);
+    //    } else {
+    //        assert(ready_immutable_);
+    //        return QueryImpl(*record_immutable_, query, timestamp, result);
+    //    }
+}
 
+Status
+SegmentNaive::Close() {
+    state_ = SegmentState::Closed;
+    return Status::OK();
+    //    auto src_record = GetMutableRecord();
+    //    assert(src_record);
+    //
+    //    auto dst_record = std::make_shared<ImmutableRecord>(schema_->size());
+    //
+    //    auto data_move = [](auto& dst_vec, const auto& src_vec) {
+    //        assert(dst_vec.size() == 0);
+    //        dst_vec.insert(dst_vec.begin(), src_vec.begin(), src_vec.end());
+    //    };
+    //    data_move(dst_record->uids_, src_record->uids_);
+    //    data_move(dst_record->timestamps_, src_record->uids_);
+    //
+    //    assert(src_record->entity_vecs_.size() == schema_->size());
+    //    assert(dst_record->entity_vecs_.size() == schema_->size());
+    //    for (int i = 0; i < schema_->size(); ++i) {
+    //        data_move(dst_record->entity_vecs_[i], src_record->entity_vecs_[i]);
+    //    }
+    //    bool ready_old = false;
+    //    record_immutable_ = dst_record;
+    //    ready_immutable_.compare_exchange_strong(ready_old, true);
+    //    if (ready_old) {
+    //        throw std::logic_error("Close may be called twice, with potential race condition");
+    //    }
+    //    return Status::OK();
+}
 
+Status
+SegmentNaive::BuildIndex() {
+    throw std::runtime_error("unimplemented");
+    //    assert(ready_immutable_);
+    //    throw std::runtime_error("unimplemented");
+}
 
-
-
-
-
-
+}  // namespace milvus::dog_segment
