@@ -2,6 +2,7 @@ package funcutil
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -59,4 +60,18 @@ func WaitForComponentReady(service StateComponent, serviceName string, attempts 
 		return errors.New(errMsg)
 	}
 	return nil
+}
+
+func ParseIndexParamsMap(mStr string) (map[string]string, error) {
+	buffer := make(map[string]interface{})
+	err := json.Unmarshal([]byte(mStr), &buffer)
+	if err != nil {
+		return nil, errors.New("Unmarshal params failed")
+	}
+	ret := make(map[string]string)
+	for key, value := range buffer {
+		valueStr := fmt.Sprintf("%v", value)
+		ret[key] = valueStr
+	}
+	return ret, nil
 }

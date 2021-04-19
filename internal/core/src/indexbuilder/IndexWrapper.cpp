@@ -158,6 +158,7 @@ IndexWrapper::BuildWithoutIds(const knowhere::DatasetPtr& dataset) {
     auto index_mode = get_index_mode();
     config_[knowhere::meta::ROWS] = dataset->Get<int64_t>(knowhere::meta::ROWS);
     auto conf_adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
+    std::cout << "config_ when build index: " << config_ << std::endl;
     AssertInfo(conf_adapter->CheckTrain(config_, index_mode), "something wrong in index parameters!");
 
     if (is_in_need_id_list(index_type)) {
