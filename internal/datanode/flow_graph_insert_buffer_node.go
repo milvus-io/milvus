@@ -546,8 +546,7 @@ func (ibNode *insertBufferNode) completeFlush(segID UniqueID) error {
 	}
 
 	msgPack.Msgs = append(msgPack.Msgs, msg)
-	return ibNode.timeTickStream.Produce(&msgPack)
-
+	return ibNode.completeFlushStream.Produce(&msgPack)
 }
 
 func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {

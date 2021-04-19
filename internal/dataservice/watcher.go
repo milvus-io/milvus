@@ -100,7 +100,7 @@ func (watcher *dataNodeTimeTickWatcher) handleTimeTickMsg(msg *msgstream.TimeTic
 			}
 			watcher.cluster.FlushSegment(&datapb.FlushSegRequest{
 				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_kShowCollections,
+					MsgType:   commonpb.MsgType_kFlush,
 					MsgID:     -1, // todo add msg id
 					Timestamp: 0,  // todo
 					SourceID:  Params.NodeID,

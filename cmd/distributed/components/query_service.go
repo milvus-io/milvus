@@ -69,7 +69,7 @@ func NewQueryService(ctx context.Context) (*QueryService, error) {
 		if msStates.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
 			continue
 		}
-		if msStates.State.StateCode != internalpb2.StateCode_INITIALIZING && msStates.State.StateCode != internalpb2.StateCode_HEALTHY {
+		if msStates.State.StateCode != internalpb2.StateCode_HEALTHY && msStates.State.StateCode != internalpb2.StateCode_INITIALIZING {
 			continue
 		}
 		break
