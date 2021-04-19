@@ -3,13 +3,15 @@
 #include <random>
 #include <memory>
 #include <cstring>
+#include "segcore/SegmentBase.h"
 namespace milvus::segcore {
 
 struct GeneratedData {
     std::vector<char> rows_;
     std::vector<std::vector<char>> cols_;
-    void
-    generate_rows(int N, SchemaPtr schema);
+    std::vector<idx_t> row_ids_;
+    std::vector<Timestamp> timestamps_;
+    RowBasedRawData raw_;
     template <typename T>
     auto
     get_col(int index) {
@@ -18,8 +20,14 @@ struct GeneratedData {
         memcpy(ret.data(), target.data(), target.size());
         return ret;
     }
-};
 
+ private:
+    GeneratedData() = default;
+    friend GeneratedData
+    DataGen(SchemaPtr schema, int64_t N, uint64_t seed);
+    void
+    generate_rows(int N, SchemaPtr schema);
+};
 inline void
 GeneratedData::generate_rows(int N, SchemaPtr schema) {
     std::vector<int> offset_infos(schema->size() + 1, 0);
@@ -42,10 +50,10 @@ GeneratedData::generate_rows(int N, SchemaPtr schema) {
 }
 
 inline GeneratedData
-DataGen(SchemaPtr schema, int64_t N) {
+DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
     using std::vector;
     std::vector<vector<char>> cols;
-    std::default_random_engine er(42);
+    std::default_random_engine er(seed);
     std::normal_distribution<> distr(0, 1);
     int offset = 0;
 
@@ -70,10 +78,16 @@ DataGen(SchemaPtr schema, int64_t N) {
             }
             case engine::DataType::INT32: {
                 vector<int> data(N);
-                int count = 0;
                 for (auto& x : data) {
-                    x = count + offset * N;
-                    ++count;
+                    x = er() % (2 * N);
+                }
+                insert_cols(data);
+                break;
+            }
+            case engine::DataType::FLOAT: {
+                vector<float> data(N);
+                for (auto& x : data) {
+                    x = distr(er);
                 }
                 insert_cols(data);
                 break;
@@ -87,6 +101,13 @@ DataGen(SchemaPtr schema, int64_t N) {
     GeneratedData res;
     res.cols_ = std::move(cols);
     res.generate_rows(N, schema);
+    for (int i = 0; i < N; ++i) {
+        res.row_ids_.push_back(i);
+        res.timestamps_.push_back(i);
+    }
+    res.raw_.raw_data = res.rows_.data();
+    res.raw_.sizeof_per_row = schema->get_total_sizeof();
+    res.raw_.count = N;
     return std::move(res);
 }
 

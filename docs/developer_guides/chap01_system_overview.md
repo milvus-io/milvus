@@ -66,3 +66,8 @@ Each of the WAL is attached with a timestamp, which is the time when the log is 
 
 For better throughput, Milvus allows asynchronous state synchronization between WAL and index/binlog/table. Whenever the data is not fresh enough to satisfiy a query, the query will be suspended until the data is up-to-date, or timeout will be returned.
 
+
+
+#### 1.5 Stream and Time
+
+In order to boost throughput, we model Milvus as a stream-driven system. 

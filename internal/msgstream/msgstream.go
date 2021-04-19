@@ -372,6 +372,46 @@ func (ms *PulsarTtMsgStream) findTimeTick(channelIndex int,
 	}
 }
 
+
+//TODO test InMemMsgStream 
+/*
+type InMemMsgStream struct {
+	buffer chan *MsgPack
+}
+
+func (ms *InMemMsgStream) Start() {}
+func (ms *InMemMsgStream) Close() {}
+
+func (ms *InMemMsgStream) ProduceOne(msg TsMsg) error {
+	msgPack := MsgPack{}
+	msgPack.BeginTs = msg.BeginTs()
+	msgPack.EndTs = msg.EndTs()
+	msgPack.Msgs = append(msgPack.Msgs, msg)
+	buffer <- &msgPack
+	return nil
+}
+
+func (ms *InMemMsgStream) Produce(msgPack *MsgPack) error {
+	buffer <- msgPack
+	return nil
+}
+
+func (ms *InMemMsgStream) Broadcast(msgPack *MsgPack) error {
+	return ms.Produce(msgPack)
+}
+
+func (ms *InMemMsgStream) Consume() *MsgPack {
+	select {
+	case msgPack := <-ms.buffer:
+		return msgPack
+	}
+}
+
+func (ms *InMemMsgStream) Chan() <- chan *MsgPack {
+	return buffer
+}
+*/
+
 func checkTimeTickMsg(msg map[int]Timestamp) (Timestamp, bool) {
 	checkMap := make(map[Timestamp]int)
 	for _, v := range msg {

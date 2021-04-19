@@ -107,9 +107,17 @@ class SegmentSmallIndex : public SegmentBase {
     GetMemoryUsageInBytes() override;
 
  public:
-    void
-    get_insert_record();
+    const InsertRecord&
+    get_insert_record() const {
+        return record_;
+    }
 
+    const Schema&
+    get_schema() const {
+        return *schema_;
+    }
+
+ public:
     ssize_t
     get_row_count() const override {
         return record_.ack_responder_.GetAck();

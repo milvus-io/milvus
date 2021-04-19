@@ -1,8 +1,9 @@
 #pragma once
 // Generated File
 // DO NOT EDIT
-#include "segcore/SegmentNaive.h"
+#include "segcore/SegmentSmallIndex.h"
 #include <optional>
+#include "query/ExprImpl.h"
 #include "ExprVisitor.h"
 
 namespace milvus::query {
@@ -21,8 +22,8 @@ class ExecExprVisitor : ExprVisitor {
     visit(RangeExpr& expr) override;
 
  public:
-    using RetType = faiss::ConcurrentBitsetPtr;
-    explicit ExecExprVisitor(segcore::SegmentNaive& segment) : segment_(segment) {
+    using RetType = std::vector<std::vector<bool>>;
+    explicit ExecExprVisitor(segcore::SegmentSmallIndex& segment) : segment_(segment) {
     }
     RetType
     call_child(Expr& expr) {
@@ -34,8 +35,17 @@ class ExecExprVisitor : ExprVisitor {
         return std::move(ret.value());
     }
 
+ public:
+    template <typename Tp, typename Func>
+    auto
+    ExecRangeVisitorImpl(RangeExprImpl<Tp>& expr_scp, Func func) -> RetType;
+
+    template <typename T>
+    auto
+    ExecRangeVisitorDispatcher(RangeExpr& expr_raw) -> RetType;
+
  private:
-    segcore::SegmentNaive& segment_;
+    segcore::SegmentSmallIndex& segment_;
     std::optional<RetType> ret_;
 };
 }  // namespace milvus::query

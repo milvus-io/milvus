@@ -59,21 +59,21 @@ class Schema {
     }
 
     const std::vector<int>&
-    get_sizeof_infos() {
+    get_sizeof_infos() const {
         return sizeof_infos_;
     }
 
     std::optional<int>
-    get_offset(const std::string& field_name) {
+    get_offset(const std::string& field_name) const {
         if (!offsets_.count(field_name)) {
             return std::nullopt;
         } else {
-            return offsets_[field_name];
+            return offsets_.at(field_name);
         }
     }
 
     const std::vector<FieldMeta>&
-    get_fields() {
+    get_fields() const {
         return fields_;
     }
 
