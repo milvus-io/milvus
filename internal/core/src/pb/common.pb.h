@@ -221,6 +221,7 @@ enum MsgType : int {
   kDescribeSegment = 251,
   kCreateIndex = 300,
   kDescribeIndex = 301,
+  kDropIndex = 302,
   kInsert = 400,
   kDelete = 401,
   kFlush = 402,

@@ -45,6 +45,7 @@ type DataServiceInterface interface {
 
 type IndexServiceInterface interface {
 	BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error)
+	DropIndex(req *indexpb.DropIndexRequest) (*commonpb.Status, error)
 }
 
 type QueryServiceInterface interface {
@@ -72,6 +73,7 @@ type Interface interface {
 	//index builder service
 	CreateIndex(in *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
 	DescribeIndex(in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
+	DropIndex(in *milvuspb.DropIndexRequest) (*commonpb.Status, error)
 
 	//global timestamp allocator
 	AllocTimestamp(in *masterpb.TsoRequest) (*masterpb.TsoResponse, error)
@@ -156,6 +158,7 @@ type Core struct {
 
 	//call index builder's client to build index, return build id
 	BuildIndexReq func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error)
+	DropIndexReq  func(indexID typeutil.UniqueID) error
 
 	//proxy service interface, notify proxy service to drop collection
 	InvalidateCollectionMetaCache func(ts typeutil.Timestamp, dbName string, collectionName string) error
@@ -245,6 +248,9 @@ func (c *Core) checkInit() error {
 	}
 	if c.BuildIndexReq == nil {
 		return errors.Errorf("BuildIndexReq is nil")
+	}
+	if c.DropIndexReq == nil {
+		return errors.Errorf("DropIndexReq is nil")
 	}
 	if c.InvalidateCollectionMetaCache == nil {
 		return errors.Errorf("InvalidateCollectionMetaCache is nil")
@@ -374,11 +380,13 @@ func (c *Core) startSegmentFlushCompletedLoop() {
 			coll, err := c.MetaTable.GetCollectionBySegmentID(seg)
 			if err != nil {
 				log.Printf("GetCollectionBySegmentID, error = %s ", err.Error())
+				break
 			}
 			for _, f := range coll.FieldIndexes {
 				idxInfo, err := c.MetaTable.GetIndexByID(f.IndexID)
 				if err != nil {
 					log.Printf("index id = %d not found", f.IndexID)
+					continue
 				}
 
 				fieldSch, err := GetFieldSchemaByID(coll, f.FiledID)
@@ -716,6 +724,20 @@ func (c *Core) SetIndexService(s IndexServiceInterface) error {
 		}
 		return rsp.IndexBuildID, nil
 	}
+
+	c.DropIndexReq = func(indexID typeutil.UniqueID) error {
+		rsp, err := s.DropIndex(&indexpb.DropIndexRequest{
+			IndexID: indexID,
+		})
+		if err != nil {
+			return err
+		}
+		if rsp.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			return errors.Errorf("%s", rsp.Reason)
+		}
+		return nil
+	}
+
 	return nil
 }
 
@@ -1230,6 +1252,36 @@ func (c *Core) DescribeIndex(in *milvuspb.DescribeIndexRequest) (*milvuspb.Descr
 		Reason:    "",
 	}
 	return t.Rsp, nil
+}
+
+func (c *Core) DropIndex(in *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
+	code := c.stateCode.Load().(internalpb2.StateCode)
+	if code != internalpb2.StateCode_HEALTHY {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
+		}, nil
+	}
+	log.Printf("DropIndex : collection : %s, filed : %s , index : %s", in.CollectionName, in.FieldName, in.IndexName)
+	t := &DropIndexReqTask{
+		baseReqTask: baseReqTask{
+			cv:   make(chan error),
+			core: c,
+		},
+		Req: in,
+	}
+	c.ddReqQueue <- t
+	err := t.WaitToFinish()
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    "DropIndex failed, error = %s" + err.Error(),
+		}, nil
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		Reason:    "",
+	}, nil
 }
 
 func (c *Core) DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {

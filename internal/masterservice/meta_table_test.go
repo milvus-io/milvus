@@ -215,4 +215,28 @@ func TestMetaTable(t *testing.T) {
 		assert.Zero(t, len(idx))
 	})
 
+	t.Run("drop index", func(t *testing.T) {
+		idx, ok, err := mt.DropIndex("testColl", "field110", "field110")
+		assert.Nil(t, err)
+		assert.True(t, ok)
+		assert.Equal(t, idx, int64(10000))
+
+		_, ok, err = mt.DropIndex("testColl", "field110", "field110-error")
+		assert.Nil(t, err)
+		assert.False(t, ok)
+
+		idxs, err := mt.GetIndexByName("testColl", "field110", "field110")
+		assert.Nil(t, err)
+		assert.Zero(t, len(idxs))
+
+		idxs, err = mt.GetIndexByName("testColl", "field110", "field110-1")
+		assert.Nil(t, err)
+		assert.Equal(t, len(idxs), 1)
+		assert.Equal(t, idxs[0].IndexID, int64(2001))
+
+		_, err = mt.GetSegmentIndexInfoByID(100, -1, "")
+		assert.NotNil(t, err)
+
+	})
+
 }

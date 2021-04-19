@@ -107,6 +107,15 @@ func TestGrpcService(t *testing.T) {
 		return 2000, nil
 	}
 
+	var dropIDLock sync.Mutex
+	dropID := make([]typeutil.UniqueID, 0, 16)
+	core.DropIndexReq = func(indexID typeutil.UniqueID) error {
+		dropIDLock.Lock()
+		defer dropIDLock.Unlock()
+		dropID = append(dropID, indexID)
+		return nil
+	}
+
 	collectionMetaCache := make([]string, 0, 16)
 	core.InvalidateCollectionMetaCache = func(ts typeutil.Timestamp, dbName string, collectionName string) error {
 		collectionMetaCache = append(collectionMetaCache, collectionName)
@@ -519,6 +528,33 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, len(rsp.IndexDescriptions), 1)
 		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, cms.Params.DefaultIndexName)
+
+	})
+
+	t.Run("drop index", func(t *testing.T) {
+		req := &milvuspb.DropIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kDropIndex,
+				MsgID:     215,
+				Timestamp: 215,
+				SourceID:  215,
+			},
+			DbName:         "",
+			CollectionName: "testColl",
+			FieldName:      "vector",
+			IndexName:      cms.Params.DefaultIndexName,
+		}
+		idx, err := core.MetaTable.GetIndexByName("testColl", "vector", cms.Params.DefaultIndexName)
+		assert.Nil(t, err)
+		assert.Equal(t, len(idx), 1)
+		rsp, err := cli.DropIndex(req)
+		assert.Nil(t, err)
+		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_SUCCESS)
+
+		dropIDLock.Lock()
+		assert.Equal(t, len(dropID), 1)
+		assert.Equal(t, dropID[0], idx[0].IndexID)
+		dropIDLock.Unlock()
 
 	})
 

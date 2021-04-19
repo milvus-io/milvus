@@ -105,22 +105,35 @@ func (d *dataMock) GetSegmentInfoChannel() (*milvuspb.StringResponse, error) {
 }
 
 type indexMock struct {
-	fileArray []string
-	idxArray  []int64
-	mutex     sync.Mutex
+	fileArray  []string
+	idxBuildID []int64
+	idxID      []int64
+	idxDropID  []int64
+	mutex      sync.Mutex
 }
 
 func (idx *indexMock) BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
 	idx.mutex.Lock()
 	defer idx.mutex.Unlock()
 	idx.fileArray = append(idx.fileArray, req.DataPaths...)
-	idx.idxArray = append(idx.idxArray, rand.Int63())
+	idx.idxBuildID = append(idx.idxBuildID, rand.Int63())
+	idx.idxID = append(idx.idxID, req.IndexID)
 	return &indexpb.BuildIndexResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 			Reason:    "",
 		},
-		IndexBuildID: idx.idxArray[len(idx.idxArray)-1],
+		IndexBuildID: idx.idxBuildID[len(idx.idxBuildID)-1],
+	}, nil
+}
+
+func (idx *indexMock) DropIndex(req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+	idx.mutex.Lock()
+	defer idx.mutex.Unlock()
+	idx.idxDropID = append(idx.idxDropID, req.IndexID)
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		Reason:    "",
 	}, nil
 }
 
@@ -173,9 +186,11 @@ func TestMasterService(t *testing.T) {
 	assert.Nil(t, err)
 
 	im := &indexMock{
-		fileArray: []string{},
-		idxArray:  []int64{},
-		mutex:     sync.Mutex{},
+		fileArray:  []string{},
+		idxBuildID: []int64{},
+		idxID:      []int64{},
+		idxDropID:  []int64{},
+		mutex:      sync.Mutex{},
 	}
 	err = core.SetIndexService(im)
 	assert.Nil(t, err)
@@ -739,6 +754,37 @@ func TestMasterService(t *testing.T) {
 			"testColl_index_100",
 			Params.DefaultIndexName,
 		})
+	})
+
+	t.Run("drop index", func(t *testing.T) {
+		req := &milvuspb.DropIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kDropIndex,
+				MsgID:     215,
+				Timestamp: 215,
+				SourceID:  215,
+			},
+			DbName:         "",
+			CollectionName: "testColl",
+			FieldName:      "vector",
+			IndexName:      Params.DefaultIndexName,
+		}
+		idx, err := core.MetaTable.GetIndexByName("testColl", "vector", Params.DefaultIndexName)
+		assert.Nil(t, err)
+		assert.Equal(t, len(idx), 1)
+
+		rsp, err := core.DropIndex(req)
+		assert.Nil(t, err)
+		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_SUCCESS)
+
+		im.mutex.Lock()
+		assert.Equal(t, len(im.idxDropID), 1)
+		assert.Equal(t, im.idxDropID[0], idx[0].IndexID)
+		im.mutex.Unlock()
+
+		idx, err = core.MetaTable.GetIndexByName("testColl", "vector", Params.DefaultIndexName)
+		assert.Nil(t, err)
+		assert.Equal(t, len(idx), 0)
 	})
 
 	t.Run("drop partition", func(t *testing.T) {

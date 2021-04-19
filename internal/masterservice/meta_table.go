@@ -563,6 +563,81 @@ func (mt *metaTable) AddIndex(seg *pb.SegmentIndexInfo) error {
 	return nil
 }
 
+func (mt *metaTable) DropIndex(collName, fieldName, indexName string) (typeutil.UniqueID, bool, error) {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	collID, ok := mt.collName2ID[collName]
+	if !ok {
+		return 0, false, errors.Errorf("collection name = %s not exist", collName)
+	}
+	collMeta, ok := mt.collID2Meta[collID]
+	if !ok {
+		return 0, false, errors.Errorf("collection name  = %s not has meta", collName)
+	}
+	fieldSch, err := mt.unlockGetFieldSchema(collName, fieldName)
+	if err != nil {
+		return 0, false, err
+	}
+	fieldIdxInfo := make([]*pb.FieldIndexInfo, 0, len(collMeta.FieldIndexes))
+	var dropIdxID typeutil.UniqueID
+	for i, info := range collMeta.FieldIndexes {
+		if info.FiledID != fieldSch.FieldID {
+			fieldIdxInfo = append(fieldIdxInfo, info)
+			continue
+		}
+		idxMeta, ok := mt.indexID2Meta[info.IndexID]
+		if !ok {
+			fieldIdxInfo = append(fieldIdxInfo, info)
+			log.Printf("index id = %d not has meta", info.IndexID)
+			continue
+		}
+		if idxMeta.IndexName != indexName {
+			fieldIdxInfo = append(fieldIdxInfo, info)
+			continue
+		}
+		dropIdxID = info.IndexID
+		fieldIdxInfo = append(fieldIdxInfo, collMeta.FieldIndexes[i+1:]...)
+		break
+	}
+	if len(fieldIdxInfo) == len(collMeta.FieldIndexes) {
+		log.Printf("collection = %s, field = %s, index = %s not found", collName, fieldName, indexName)
+		return 0, false, nil
+	}
+	collMeta.FieldIndexes = fieldIdxInfo
+	mt.collID2Meta[collID] = collMeta
+	saveMeta := map[string]string{path.Join(CollectionMetaPrefix, strconv.FormatInt(collID, 10)): proto.MarshalTextString(&collMeta)}
+
+	delete(mt.indexID2Meta, dropIdxID)
+	delMeta := []string{path.Join(IndexMetaPrefix, strconv.FormatInt(dropIdxID, 10))}
+
+	for _, partID := range collMeta.PartitionIDs {
+		partMeta, ok := mt.partitionID2Meta[partID]
+		if !ok {
+			log.Printf("partition id = %d not exist", partID)
+			continue
+		}
+		for _, segID := range partMeta.SegmentIDs {
+			segInfo, ok := mt.segID2IndexMeta[segID]
+			if ok {
+				_, ok := (*segInfo)[dropIdxID]
+				if ok {
+					delete(*segInfo, dropIdxID)
+					delMeta = append(delMeta, path.Join(SegmentIndexMetaPrefix, strconv.FormatInt(segID, 10), strconv.FormatInt(dropIdxID, 10)))
+				}
+			}
+		}
+	}
+
+	err = mt.client.MultiSaveAndRemove(saveMeta, delMeta)
+	if err != nil {
+		_ = mt.reloadFromKV()
+		return 0, false, err
+	}
+
+	return dropIdxID, true, nil
+}
+
 func (mt *metaTable) GetSegmentIndexInfoByID(segID typeutil.UniqueID, filedID int64, idxName string) (pb.SegmentIndexInfo, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()

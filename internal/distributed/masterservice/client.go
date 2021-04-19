@@ -123,6 +123,13 @@ func (c *GrpcClient) CreateIndex(in *milvuspb.CreateIndexRequest) (*commonpb.Sta
 	defer cancel()
 	return c.grpcClient.CreateIndex(ctx, in)
 }
+
+func (c *GrpcClient) DropIndex(in *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
+	defer cancel()
+	return c.grpcClient.DropIndex(ctx, in)
+}
+
 func (c *GrpcClient) DescribeIndex(in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cms.Params.Timeout))
 	defer cancel()

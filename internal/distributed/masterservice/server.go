@@ -27,10 +27,6 @@ type GrpcServer struct {
 	cancel context.CancelFunc
 }
 
-func (s *GrpcServer) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
-	panic("implement me")
-}
-
 func NewGrpcServer(ctx context.Context, factory msgstream.Factory) (*GrpcServer, error) {
 	s := &GrpcServer{}
 	var err error
@@ -155,6 +151,10 @@ func (s *GrpcServer) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartit
 //index builder service
 func (s *GrpcServer) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	return s.core.CreateIndex(in)
+}
+
+func (s *GrpcServer) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
+	return s.core.DropIndex(in)
 }
 
 func (s *GrpcServer) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {

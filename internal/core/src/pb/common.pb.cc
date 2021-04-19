@@ -252,7 +252,7 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "LED\020\004\022\013\n\007DELETED\020\005*o\n\014SegmentState\022\017\n\013Se"
   "gmentNone\020\000\022\023\n\017SegmentNotExist\020\001\022\022\n\016Segm"
   "entGrowing\020\002\022\021\n\rSegmentSealed\020\003\022\022\n\016Segme"
-  "ntFlushed\020\004*\204\006\n\007MsgType\022\t\n\005kNone\020\000\022\025\n\021kC"
+  "ntFlushed\020\004*\225\006\n\007MsgType\022\t\n\005kNone\020\000\022\025\n\021kC"
   "reateCollection\020d\022\023\n\017kDropCollection\020e\022\022"
   "\n\016kHasCollection\020f\022\027\n\023kDescribeCollectio"
   "n\020g\022\024\n\020kShowCollections\020h\022\022\n\016kGetSysConf"
@@ -263,17 +263,17 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "\001\022\023\n\016kLoadPartition\020\315\001\022\026\n\021kReleasePartit"
   "ion\020\316\001\022\021\n\014kShowSegment\020\372\001\022\025\n\020kDescribeSe"
   "gment\020\373\001\022\021\n\014kCreateIndex\020\254\002\022\023\n\016kDescribe"
-  "Index\020\255\002\022\014\n\007kInsert\020\220\003\022\014\n\007kDelete\020\221\003\022\013\n\006"
-  "kFlush\020\222\003\022\014\n\007kSearch\020\364\003\022\022\n\rkSearchResult"
-  "\020\365\003\022\023\n\016kGetIndexState\020\366\003\022\035\n\030kGetCollecti"
-  "onStatistics\020\367\003\022\034\n\027kGetPartitionStatisti"
-  "cs\020\370\003\022\021\n\014kSegmentInfo\020\330\004\022\016\n\tkTimeTick\020\260\t"
-  "\022\024\n\017kQueryNodeStats\020\261\t\022\017\n\nkLoadIndex\020\262\t\022"
-  "\017\n\nkRequestID\020\263\t\022\020\n\013kRequestTSO\020\264\t\022\025\n\020kA"
-  "llocateSegment\020\265\t\022\027\n\022kSegmentStatistics\020"
-  "\266\t\022\026\n\021kSegmentFlushDone\020\267\tBBZ@github.com"
-  "/zilliztech/milvus-distributed/internal/"
-  "proto/commonpbb\006proto3"
+  "Index\020\255\002\022\017\n\nkDropIndex\020\256\002\022\014\n\007kInsert\020\220\003\022"
+  "\014\n\007kDelete\020\221\003\022\013\n\006kFlush\020\222\003\022\014\n\007kSearch\020\364\003"
+  "\022\022\n\rkSearchResult\020\365\003\022\023\n\016kGetIndexState\020\366"
+  "\003\022\035\n\030kGetCollectionStatistics\020\367\003\022\034\n\027kGet"
+  "PartitionStatistics\020\370\003\022\021\n\014kSegmentInfo\020\330"
+  "\004\022\016\n\tkTimeTick\020\260\t\022\024\n\017kQueryNodeStats\020\261\t\022"
+  "\017\n\nkLoadIndex\020\262\t\022\017\n\nkRequestID\020\263\t\022\020\n\013kRe"
+  "questTSO\020\264\t\022\025\n\020kAllocateSegment\020\265\t\022\027\n\022kS"
+  "egmentStatistics\020\266\t\022\026\n\021kSegmentFlushDone"
+  "\020\267\tBBZ@github.com/zilliztech/milvus-dist"
+  "ributed/internal/proto/commonpbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_common_2eproto_deps[1] = {
 };
@@ -289,7 +289,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_com
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_common_2eproto_once;
 static bool descriptor_table_common_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_common_2eproto = {
-  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 2022,
+  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 2039,
   &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 7, 0,
   schemas, file_default_instances, TableStruct_common_2eproto::offsets,
   file_level_metadata_common_2eproto, 7, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,
@@ -398,6 +398,7 @@ bool MsgType_IsValid(int value) {
     case 251:
     case 300:
     case 301:
+    case 302:
     case 400:
     case 401:
     case 402:
