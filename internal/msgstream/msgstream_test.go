@@ -13,19 +13,19 @@ func repackFunc(msgs []*TsMsg, hashKeys [][]int32) map[int32]*MsgPack {
 	result := make(map[int32]*MsgPack)
 	for i, request := range msgs {
 		keys := hashKeys[i]
-		for _, channelId := range keys {
-			_, ok := result[channelId]
+		for _, channelID := range keys {
+			_, ok := result[channelID]
 			if ok == false {
 				msgPack := MsgPack{}
-				result[channelId] = &msgPack
+				result[channelID] = &msgPack
 			}
-			result[channelId].Msgs = append(result[channelId].Msgs, request)
+			result[channelID].Msgs = append(result[channelID].Msgs, request)
 		}
 	}
 	return result
 }
 
-func getTsMsg(msgType MsgType, reqId UniqueID, hashValue int32) *TsMsg {
+func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) *TsMsg {
 	var tsMsg TsMsg
 	baseMsg := BaseMsg{
 		BeginTimestamp: 0,
@@ -36,7 +36,7 @@ func getTsMsg(msgType MsgType, reqId UniqueID, hashValue int32) *TsMsg {
 	case internalPb.MsgType_kInsert:
 		insertRequest := internalPb.InsertRequest{
 			MsgType:        internalPb.MsgType_kInsert,
-			ReqId:          reqId,
+			ReqId:          reqID,
 			CollectionName: "Collection",
 			PartitionTag:   "Partition",
 			SegmentId:      1,
@@ -52,7 +52,7 @@ func getTsMsg(msgType MsgType, reqId UniqueID, hashValue int32) *TsMsg {
 	case internalPb.MsgType_kDelete:
 		deleteRequest := internalPb.DeleteRequest{
 			MsgType:        internalPb.MsgType_kDelete,
-			ReqId:          reqId,
+			ReqId:          reqID,
 			CollectionName: "Collection",
 			ChannelId:      1,
 			ProxyId:        1,
@@ -67,7 +67,7 @@ func getTsMsg(msgType MsgType, reqId UniqueID, hashValue int32) *TsMsg {
 	case internalPb.MsgType_kSearch:
 		searchRequest := internalPb.SearchRequest{
 			MsgType:         internalPb.MsgType_kSearch,
-			ReqId:           reqId,
+			ReqId:           reqID,
 			ProxyId:         1,
 			Timestamp:       1,
 			ResultChannelId: 1,
@@ -81,7 +81,7 @@ func getTsMsg(msgType MsgType, reqId UniqueID, hashValue int32) *TsMsg {
 		searchResult := internalPb.SearchResult{
 			MsgType:         internalPb.MsgType_kSearchResult,
 			Status:          &commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS},
-			ReqId:           reqId,
+			ReqId:           reqID,
 			ProxyId:         1,
 			QueryNodeId:     1,
 			Timestamp:       1,
@@ -95,7 +95,7 @@ func getTsMsg(msgType MsgType, reqId UniqueID, hashValue int32) *TsMsg {
 	case internalPb.MsgType_kTimeTick:
 		timeTickResult := internalPb.TimeTickMsg{
 			MsgType:   internalPb.MsgType_kTimeTick,
-			PeerId:    reqId,
+			PeerId:    reqID,
 			Timestamp: 1,
 		}
 		timeTickMsg := &TimeTickMsg{
@@ -107,7 +107,7 @@ func getTsMsg(msgType MsgType, reqId UniqueID, hashValue int32) *TsMsg {
 	return &tsMsg
 }
 
-func getTimeTickMsg(reqId UniqueID, hashValue int32, time uint64) *TsMsg {
+func getTimeTickMsg(reqID UniqueID, hashValue int32, time uint64) *TsMsg {
 	var tsMsg TsMsg
 	baseMsg := BaseMsg{
 		BeginTimestamp: 0,
@@ -116,7 +116,7 @@ func getTimeTickMsg(reqId UniqueID, hashValue int32, time uint64) *TsMsg {
 	}
 	timeTickResult := internalPb.TimeTickMsg{
 		MsgType:   internalPb.MsgType_kTimeTick,
-		PeerId:    reqId,
+		PeerId:    reqID,
 		Timestamp: time,
 	}
 	timeTickMsg := &TimeTickMsg{
@@ -167,6 +167,7 @@ func initPulsarTtStream(pulsarAddress string,
 	for _, opt := range opts {
 		inputStream.SetRepackFunc(opt)
 	}
+	inputStream.Start()
 	var input MsgStream = inputStream
 
 	// set output stream

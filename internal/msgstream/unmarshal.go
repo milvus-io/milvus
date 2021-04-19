@@ -14,8 +14,8 @@ type UnmarshalDispatcher struct {
 
 func (dispatcher *UnmarshalDispatcher) Unmarshal(input []byte, msgType internalPb.MsgType) (*TsMsg, error) {
 	unmarshalFunc, ok := dispatcher.tempMap[msgType]
-	if ok == false {
-		return nil, errors.New("Not set unmarshalFunc for this messageType")
+	if !ok {
+		return nil, errors.New(string("Not set unmarshalFunc for this messageType."))
 	}
 	return unmarshalFunc(input)
 }
