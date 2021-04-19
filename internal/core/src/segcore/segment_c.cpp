@@ -79,62 +79,23 @@ PreDelete(CSegmentBase c_segment, long int size) {
     return segment->PreDelete(size);
 }
 
-// int
-// Search(CSegmentBase c_segment,
-//           const char*  query_json,
-//           unsigned long timestamp,
-//           float* query_raw_data,
-//           int num_of_query_raw_data,
-//           long int* result_ids,
-//           float* result_distances) {
-//  auto segment = (milvus::segcore::SegmentBase*)c_segment;
-//  milvus::segcore::QueryResult query_result;
-//
-//  // parse query param json
-//  auto query_param_json_string = std::string(query_json);
-//  auto query_param_json = nlohmann::json::parse(query_param_json_string);
-//
-//  // construct QueryPtr
-//  auto query_ptr = std::make_shared<milvus::query::Query>();
-//  query_ptr->num_queries = query_param_json["num_queries"];
-//  query_ptr->topK = query_param_json["topK"];
-//  query_ptr->field_name = query_param_json["field_name"];
-//
-//  query_ptr->query_raw_data.resize(num_of_query_raw_data);
-//  memcpy(query_ptr->query_raw_data.data(), query_raw_data, num_of_query_raw_data * sizeof(float));
-//
-//  auto res = segment->Query(query_ptr, timestamp, query_result);
-//
-//  // result_ids and result_distances have been allocated memory in goLang,
-//  // so we don't need to malloc here.
-//  memcpy(result_ids, query_result.result_ids_.data(), query_result.row_num_ * sizeof(long int));
-//  memcpy(result_distances, query_result.result_distances_.data(), query_result.row_num_ * sizeof(float));
-//
-//  return res.code();
-//}
-
 int
 Search(CSegmentBase c_segment,
-       CQueryInfo c_query_info,
-       unsigned long timestamp,
-       float* query_raw_data,
-       int num_of_query_raw_data,
+       CPlan c_plan,
+       CPlaceholderGroup* c_placeholder_groups,
+       unsigned long* timestamps,
+       int num_groups,
        long int* result_ids,
        float* result_distances) {
     auto segment = (milvus::segcore::SegmentBase*)c_segment;
+    auto plan = (milvus::query::Plan*)c_plan;
+    std::vector<const milvus::query::PlaceholderGroup*> placeholder_groups;
+    for (int i = 0; i < num_groups; ++i) {
+        placeholder_groups.push_back((const milvus::query::PlaceholderGroup*)c_placeholder_groups[i]);
+    }
     milvus::segcore::QueryResult query_result;
 
-    // construct QueryPtr
-    auto query_ptr = std::make_shared<milvus::query::QueryDeprecated>();
-
-    query_ptr->num_queries = c_query_info.num_queries;
-    query_ptr->topK = c_query_info.topK;
-    query_ptr->field_name = c_query_info.field_name;
-
-    query_ptr->query_raw_data.resize(num_of_query_raw_data);
-    memcpy(query_ptr->query_raw_data.data(), query_raw_data, num_of_query_raw_data * sizeof(float));
-
-    auto res = segment->QueryDeprecated(query_ptr, timestamp, query_result);
+    auto res = segment->Search(plan, placeholder_groups.data(), timestamps, num_groups, query_result);
 
     // result_ids and result_distances have been allocated memory in goLang,
     // so we don't need to malloc here.

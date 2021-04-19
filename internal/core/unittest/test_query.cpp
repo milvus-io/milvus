@@ -168,7 +168,6 @@ TEST(Query, ParsePlaceholderGroup) {
     // ser::PlaceholderGroup new_group;
     // new_group.ParseFromString()
     auto placeholder = ParsePlaceholderGroup(plan.get(), blob);
-    int x = 1 + 1;
 }
 
 TEST(Query, Exec) {

@@ -8,6 +8,7 @@ package reader
 
 #include "collection_c.h"
 #include "segment_c.h"
+#include "plan_c.h"
 
 */
 import "C"
@@ -19,7 +20,6 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	servicePb "github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
 
 type Segment struct {
@@ -178,41 +178,26 @@ func (s *Segment) segmentDelete(offset int64, entityIDs *[]UniqueID, timestamps 
 	return nil
 }
 
-func (s *Segment) segmentSearch(query *queryInfo, timestamp Timestamp, vectorRecord *servicePb.PlaceholderValue) (*SearchResult, error) {
-	/*
-	 */
-	//type CQueryInfo C.CQueryInfo
-
+func (s *Segment) segmentSearch(plan *Plan, placeHolderGroups []*PlaceholderGroup, timestamp []Timestamp, numQueries int64, topK int64) (*SearchResult, error) {
 	/*
 		void* Search(void* plan, void* placeholder_groups, uint64_t* timestamps, int num_groups, long int* result_ids,
 		       float* result_distances)
 	*/
 
-	cQuery := C.CQueryInfo{
-		num_queries: C.long(query.NumQueries),
-		topK:        C.int(query.TopK),
-		field_name:  C.CString(query.FieldName),
+	resultIds := make([]IntPrimaryKey, topK*numQueries)
+	resultDistances := make([]float32, topK*numQueries)
+	cPlaceholderGroups := make([]C.CPlaceholderGroup, 0)
+	for _, pg := range placeHolderGroups {
+		cPlaceholderGroups = append(cPlaceholderGroups, (*pg).cPlaceholderGroup)
 	}
 
-	resultIds := make([]IntPrimaryKey, int64(query.TopK)*query.NumQueries)
-	resultDistances := make([]float32, int64(query.TopK)*query.NumQueries)
-
-	var cTimestamp = C.ulong(timestamp)
+	var cTimestamp = (*C.ulong)(&timestamp[0])
 	var cResultIds = (*C.long)(&resultIds[0])
 	var cResultDistances = (*C.float)(&resultDistances[0])
-	var cQueryRawData *C.float
-	var cQueryRawDataLength C.int
+	var cPlaceHolder = (*C.CPlaceholderGroup)(&cPlaceholderGroups[0])
+	var cNumGroups = C.int(len(placeHolderGroups))
 
-	//if vectorRecord.BinaryData != nil {
-	//	return nil, errors.New("data of binary type is not supported yet")
-	//} else if len(vectorRecord.FloatData) <= 0 {
-	//	return nil, errors.New("null query vector data")
-	//} else {
-	//	cQueryRawData = (*C.float)(&vectorRecord.FloatData[0])
-	//	cQueryRawDataLength = (C.int)(len(vectorRecord.FloatData))
-	//}
-
-	var status = C.Search(s.segmentPtr, cQuery, cTimestamp, cQueryRawData, cQueryRawDataLength, cResultIds, cResultDistances)
+	var status = C.Search(s.segmentPtr, plan.cPlan, cPlaceHolder, cTimestamp, cNumGroups, cResultIds, cResultDistances)
 
 	if status != 0 {
 		return nil, errors.New("search failed, error code = " + strconv.Itoa(int(status)))

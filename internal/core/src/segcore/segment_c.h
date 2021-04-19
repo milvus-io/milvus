@@ -4,14 +4,9 @@ extern "C" {
 
 #include <stdbool.h>
 #include "collection_c.h"
+#include "plan_c.h"
 
 typedef void* CSegmentBase;
-
-typedef struct CQueryInfo {
-    long int num_queries;
-    int topK;
-    const char* field_name;
-} CQueryInfo;
 
 CSegmentBase
 NewSegment(CCollection collection, unsigned long segment_id);
@@ -41,21 +36,12 @@ Delete(
 long int
 PreDelete(CSegmentBase c_segment, long int size);
 
-// int
-// Search(CSegmentBase c_segment,
-//           const char*  query_json,
-//           unsigned long timestamp,
-//           float* query_raw_data,
-//           int num_of_query_raw_data,
-//           long int* result_ids,
-//           float* result_distances);
-
 int
 Search(CSegmentBase c_segment,
-       CQueryInfo c_query_info,
-       unsigned long timestamp,
-       float* query_raw_data,
-       int num_of_query_raw_data,
+       CPlan plan,
+       CPlaceholderGroup* placeholder_groups,
+       unsigned long* timestamps,
+       int num_groups,
        long int* result_ids,
        float* result_distances);
 

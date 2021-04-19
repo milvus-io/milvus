@@ -5,6 +5,7 @@
 
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
+#include "pb/service_msg.pb.h"
 
 #include <chrono>
 namespace chrono = std::chrono;
@@ -105,20 +106,55 @@ TEST(CApiTest, SearchTest) {
     auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
     assert(ins_res == 0);
 
-    long result_ids[10];
-    float result_distances[10];
+    const char* dsl_string = R"(
+    {
+        "bool": {
+            "vector": {
+                "fakevec": {
+                    "metric_type": "L2",
+                    "params": {
+                        "nprobe": 10
+                    },
+                    "query": "$0",
+                    "topk": 10
+                }
+            }
+        }
+    })";
 
-    auto query_json = std::string(R"({"field_name":"fakevec","num_queries":1,"topK":10})");
-    std::vector<float> query_raw_data(16);
-    for (int i = 0; i < 16; i++) {
-        query_raw_data[i] = e() % 2000 * 0.001 - 1.0;
+    namespace ser = milvus::proto::service;
+    int num_queries = 10;
+    int dim = 16;
+    std::normal_distribution<double> dis(0, 1);
+    ser::PlaceholderGroup raw_group;
+    auto value = raw_group.add_placeholders();
+    value->set_tag("$0");
+    value->set_type(ser::PlaceholderType::VECTOR_FLOAT);
+    for (int i = 0; i < num_queries; ++i) {
+        std::vector<float> vec;
+        for (int d = 0; d < dim; ++d) {
+            vec.push_back(dis(e));
+        }
+        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
+        value->add_values(vec.data(), vec.size() * sizeof(float));
     }
+    auto blob = raw_group.SerializeAsString();
 
-    CQueryInfo queryInfo{1, 10, "fakevec"};
+    auto plan = CreatePlan(collection, dsl_string);
+    auto placeholderGroup = ParsePlaceholderGroup(nullptr, blob.data(), blob.length());
+    std::vector<CPlaceholderGroup> placeholderGroups;
+    placeholderGroups.push_back(placeholderGroup);
+    timestamps.clear();
+    timestamps.push_back(1);
 
-    auto sea_res = Search(segment, queryInfo, 1, query_raw_data.data(), 16, result_ids, result_distances);
+    long result_ids[100];
+    float result_distances[100];
+
+    auto sea_res = Search(segment, plan, placeholderGroups.data(), timestamps.data(), 1, result_ids, result_distances);
     assert(sea_res == 0);
 
+    DeletePlan(plan);
+    DeletePlaceholderGroup(placeholderGroup);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -131,26 +167,22 @@ TEST(CApiTest, BuildIndexTest) {
     std::vector<char> raw_data;
     std::vector<uint64_t> timestamps;
     std::vector<int64_t> uids;
-
     int N = 10000;
-    int DIM = 16;
-
-    std::vector<float> vec(DIM);
-    for (int i = 0; i < DIM; i++) {
-        vec[i] = i;
-    }
-
-    for (int i = 0; i < N; i++) {
-        uids.push_back(i);
-        timestamps.emplace_back(i);
+    std::default_random_engine e(67);
+    for (int i = 0; i < N; ++i) {
+        uids.push_back(100000 + i);
+        timestamps.push_back(0);
         // append vec
-
-        raw_data.insert(raw_data.end(), (const char*)&vec[0], ((const char*)&vec[0]) + sizeof(float) * vec.size());
-        int age = i;
+        float vec[16];
+        for (auto& x : vec) {
+            x = e() % 2000 * 0.001 - 1.0;
+        }
+        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
+        int age = e() % 100;
         raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
     }
 
-    auto line_sizeof = (sizeof(int) + sizeof(float) * DIM);
+    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
     auto offset = PreInsert(segment, N);
 
@@ -161,18 +193,55 @@ TEST(CApiTest, BuildIndexTest) {
     Close(segment);
     BuildIndex(collection, segment);
 
-    long result_ids[10];
-    float result_distances[10];
+    const char* dsl_string = R"(
+    {
+        "bool": {
+            "vector": {
+                "fakevec": {
+                    "metric_type": "L2",
+                    "params": {
+                        "nprobe": 10
+                    },
+                    "query": "$0",
+                    "topk": 10
+                }
+            }
+        }
+    })";
 
-    std::vector<float> query_raw_data(DIM);
-    for (int i = 0; i < DIM; i++) {
-        query_raw_data[i] = i;
+    namespace ser = milvus::proto::service;
+    int num_queries = 10;
+    int dim = 16;
+    std::normal_distribution<double> dis(0, 1);
+    ser::PlaceholderGroup raw_group;
+    auto value = raw_group.add_placeholders();
+    value->set_tag("$0");
+    value->set_type(ser::PlaceholderType::VECTOR_FLOAT);
+    for (int i = 0; i < num_queries; ++i) {
+        std::vector<float> vec;
+        for (int d = 0; d < dim; ++d) {
+            vec.push_back(dis(e));
+        }
+        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
+        value->add_values(vec.data(), vec.size() * sizeof(float));
     }
+    auto blob = raw_group.SerializeAsString();
 
-    CQueryInfo queryInfo{1, 10, "fakevec"};
+    auto plan = CreatePlan(collection, dsl_string);
+    auto placeholderGroup = ParsePlaceholderGroup(nullptr, blob.data(), blob.length());
+    std::vector<CPlaceholderGroup> placeholderGroups;
+    placeholderGroups.push_back(placeholderGroup);
+    timestamps.clear();
+    timestamps.push_back(1);
 
-    auto sea_res = Search(segment, queryInfo, 20, query_raw_data.data(), DIM, result_ids, result_distances);
+    long result_ids[100];
+    float result_distances[100];
+
+    auto sea_res = Search(segment, plan, placeholderGroups.data(), timestamps.data(), 1, result_ids, result_distances);
     assert(sea_res == 0);
+
+    DeletePlan(plan);
+    DeletePlaceholderGroup(placeholderGroup);
 
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -271,123 +340,124 @@ generate_data(int N) {
 }
 }  // namespace
 
-TEST(CApiTest, TestSearchPreference) {
-    auto schema_tmp_conf = "";
-    auto collection = NewCollection(schema_tmp_conf);
-    auto segment = NewSegment(collection, 0);
-
-    auto beg = chrono::high_resolution_clock::now();
-    auto next = beg;
-    int N = 1000 * 1000 * 10;
-    auto [raw_data, timestamps, uids] = generate_data(N);
-    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
-
-    next = chrono::high_resolution_clock::now();
-    std::cout << "generate_data: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms"
-              << std::endl;
-    beg = next;
-
-    auto offset = PreInsert(segment, N);
-    auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
-    assert(res == 0);
-    next = chrono::high_resolution_clock::now();
-    std::cout << "insert: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms" << std::endl;
-    beg = next;
-
-    auto N_del = N / 100;
-    std::vector<uint64_t> del_ts(N_del, 100);
-    auto pre_off = PreDelete(segment, N_del);
-    Delete(segment, pre_off, N_del, uids.data(), del_ts.data());
-
-    next = chrono::high_resolution_clock::now();
-    std::cout << "delete1: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms" << std::endl;
-    beg = next;
-
-    auto row_count = GetRowCount(segment);
-    assert(row_count == N);
-
-    std::vector<long> result_ids(10 * 16);
-    std::vector<float> result_distances(10 * 16);
-
-    CQueryInfo queryInfo{1, 10, "fakevec"};
-    auto sea_res =
-        Search(segment, queryInfo, 104, (float*)raw_data.data(), 16, result_ids.data(), result_distances.data());
-
-    //    ASSERT_EQ(sea_res, 0);
-    //    ASSERT_EQ(result_ids[0], 10 * N);
-    //    ASSERT_EQ(result_distances[0], 0);
-
-    next = chrono::high_resolution_clock::now();
-    std::cout << "query1: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms" << std::endl;
-    beg = next;
-    sea_res = Search(segment, queryInfo, 104, (float*)raw_data.data(), 16, result_ids.data(), result_distances.data());
-
-    //    ASSERT_EQ(sea_res, 0);
-    //    ASSERT_EQ(result_ids[0], 10 * N);
-    //    ASSERT_EQ(result_distances[0], 0);
-
-    next = chrono::high_resolution_clock::now();
-    std::cout << "query2: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms" << std::endl;
-    beg = next;
-
-    // Close(segment);
-    // BuildIndex(segment);
-
-    next = chrono::high_resolution_clock::now();
-    std::cout << "build index: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms"
-              << std::endl;
-    beg = next;
-
-    std::vector<int64_t> result_ids2(10);
-    std::vector<float> result_distances2(10);
-
-    sea_res =
-        Search(segment, queryInfo, 104, (float*)raw_data.data(), 16, result_ids2.data(), result_distances2.data());
-
-    //    sea_res = Search(segment, nullptr, 104, result_ids2.data(),
-    //    result_distances2.data());
-
-    next = chrono::high_resolution_clock::now();
-    std::cout << "search10: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms" << std::endl;
-    beg = next;
-
-    sea_res =
-        Search(segment, queryInfo, 104, (float*)raw_data.data(), 16, result_ids2.data(), result_distances2.data());
-
-    next = chrono::high_resolution_clock::now();
-    std::cout << "search11: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms" << std::endl;
-    beg = next;
-
-    //    std::cout << "case 1" << std::endl;
-    //    for (int i = 0; i < 10; ++i) {
-    //        std::cout << result_ids[i] << "->" << result_distances[i] << std::endl;
-    //    }
-    //    std::cout << "case 2" << std::endl;
-    //    for (int i = 0; i < 10; ++i) {
-    //        std::cout << result_ids2[i] << "->" << result_distances2[i] << std::endl;
-    //    }
-    //
-    //    for (auto x : result_ids2) {
-    //        ASSERT_GE(x, 10 * N + N_del);
-    //        ASSERT_LT(x, 10 * N + N);
-    //    }
-
-    //    auto iter = 0;
-    //    for(int i = 0; i < result_ids.size(); ++i) {
-    //        auto uid = result_ids[i];
-    //        auto dis = result_distances[i];
-    //        if(uid >= 10 * N + N_del) {
-    //            auto uid2 = result_ids2[iter];
-    //            auto dis2 = result_distances2[iter];
-    //            ASSERT_EQ(uid, uid2);
-    //            ASSERT_EQ(dis, dis2);
-    //            ++iter;
-    //        }
-    //    }
-
-    DeleteCollection(collection);
-    DeleteSegment(segment);
-}
+// TEST(CApiTest, TestSearchPreference) {
+//    auto schema_tmp_conf = "";
+//    auto collection = NewCollection(schema_tmp_conf);
+//    auto segment = NewSegment(collection, 0);
+//
+//    auto beg = chrono::high_resolution_clock::now();
+//    auto next = beg;
+//    int N = 1000 * 1000 * 10;
+//    auto [raw_data, timestamps, uids] = generate_data(N);
+//    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
+//
+//    next = chrono::high_resolution_clock::now();
+//    std::cout << "generate_data: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms"
+//              << std::endl;
+//    beg = next;
+//
+//    auto offset = PreInsert(segment, N);
+//    auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
+//    assert(res == 0);
+//    next = chrono::high_resolution_clock::now();
+//    std::cout << "insert: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms" << std::endl;
+//    beg = next;
+//
+//    auto N_del = N / 100;
+//    std::vector<uint64_t> del_ts(N_del, 100);
+//    auto pre_off = PreDelete(segment, N_del);
+//    Delete(segment, pre_off, N_del, uids.data(), del_ts.data());
+//
+//    next = chrono::high_resolution_clock::now();
+//    std::cout << "delete1: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms" << std::endl;
+//    beg = next;
+//
+//    auto row_count = GetRowCount(segment);
+//    assert(row_count == N);
+//
+//    std::vector<long> result_ids(10 * 16);
+//    std::vector<float> result_distances(10 * 16);
+//
+//    CQueryInfo queryInfo{1, 10, "fakevec"};
+//    auto sea_res =
+//        Search(segment, queryInfo, 104, (float*)raw_data.data(), 16, result_ids.data(), result_distances.data());
+//
+//    //    ASSERT_EQ(sea_res, 0);
+//    //    ASSERT_EQ(result_ids[0], 10 * N);
+//    //    ASSERT_EQ(result_distances[0], 0);
+//
+//    next = chrono::high_resolution_clock::now();
+//    std::cout << "query1: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms" << std::endl;
+//    beg = next;
+//    sea_res = Search(segment, queryInfo, 104, (float*)raw_data.data(), 16, result_ids.data(),
+//    result_distances.data());
+//
+//    //    ASSERT_EQ(sea_res, 0);
+//    //    ASSERT_EQ(result_ids[0], 10 * N);
+//    //    ASSERT_EQ(result_distances[0], 0);
+//
+//    next = chrono::high_resolution_clock::now();
+//    std::cout << "query2: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms" << std::endl;
+//    beg = next;
+//
+//    // Close(segment);
+//    // BuildIndex(segment);
+//
+//    next = chrono::high_resolution_clock::now();
+//    std::cout << "build index: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms"
+//              << std::endl;
+//    beg = next;
+//
+//    std::vector<int64_t> result_ids2(10);
+//    std::vector<float> result_distances2(10);
+//
+//    sea_res =
+//        Search(segment, queryInfo, 104, (float*)raw_data.data(), 16, result_ids2.data(), result_distances2.data());
+//
+//    //    sea_res = Search(segment, nullptr, 104, result_ids2.data(),
+//    //    result_distances2.data());
+//
+//    next = chrono::high_resolution_clock::now();
+//    std::cout << "search10: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms" << std::endl;
+//    beg = next;
+//
+//    sea_res =
+//        Search(segment, queryInfo, 104, (float*)raw_data.data(), 16, result_ids2.data(), result_distances2.data());
+//
+//    next = chrono::high_resolution_clock::now();
+//    std::cout << "search11: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms" << std::endl;
+//    beg = next;
+//
+//    //    std::cout << "case 1" << std::endl;
+//    //    for (int i = 0; i < 10; ++i) {
+//    //        std::cout << result_ids[i] << "->" << result_distances[i] << std::endl;
+//    //    }
+//    //    std::cout << "case 2" << std::endl;
+//    //    for (int i = 0; i < 10; ++i) {
+//    //        std::cout << result_ids2[i] << "->" << result_distances2[i] << std::endl;
+//    //    }
+//    //
+//    //    for (auto x : result_ids2) {
+//    //        ASSERT_GE(x, 10 * N + N_del);
+//    //        ASSERT_LT(x, 10 * N + N);
+//    //    }
+//
+//    //    auto iter = 0;
+//    //    for(int i = 0; i < result_ids.size(); ++i) {
+//    //        auto uid = result_ids[i];
+//    //        auto dis = result_distances[i];
+//    //        if(uid >= 10 * N + N_del) {
+//    //            auto uid2 = result_ids2[iter];
+//    //            auto dis2 = result_distances2[iter];
+//    //            ASSERT_EQ(uid, uid2);
+//    //            ASSERT_EQ(dis, dis2);
+//    //            ++iter;
+//    //        }
+//    //    }
+//
+//    DeleteCollection(collection);
+//    DeleteSegment(segment);
+//}
 
 TEST(CApiTest, GetDeletedCountTest) {
     auto schema_tmp_conf = "";
