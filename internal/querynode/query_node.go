@@ -472,8 +472,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 		node.replica.initExcludedSegments(collectionID)
 		node.dataSyncServices[collectionID] = newDataSyncService(node.queryNodeLoopCtx, node.replica, node.msFactory, collectionID)
 		go node.dataSyncServices[collectionID].start()
-		node.replica.addTSafe(collectionID)
-		node.searchService.register(collectionID)
+		node.searchService.startSearchCollection(collectionID)
 	}
 	if !hasPartition {
 		err := node.replica.addPartition(collectionID, partitionID)
@@ -509,11 +508,12 @@ func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.Releas
 	if _, ok := node.dataSyncServices[in.CollectionID]; ok {
 		node.dataSyncServices[in.CollectionID].close()
 		delete(node.dataSyncServices, in.CollectionID)
-		node.searchService.tSafeMutex.Lock()
-		delete(node.searchService.tSafeWatcher, in.CollectionID)
-		node.searchService.tSafeMutex.Unlock()
 		node.replica.removeTSafe(in.CollectionID)
 		node.replica.removeExcludedSegments(in.CollectionID)
+	}
+
+	if node.searchService.hasSearchCollection(in.CollectionID) {
+		node.searchService.stopSearchCollection(in.CollectionID)
 	}
 
 	err := node.replica.removeCollection(in.CollectionID)
