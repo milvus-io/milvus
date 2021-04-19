@@ -727,14 +727,8 @@ func (s *Server) GetCollectionStatistics(req *datapb.CollectionStatsRequest) (*d
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
-	memsize, err := s.meta.GetMemSizeOfCollection(req.CollectionID)
-	if err != nil {
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
-	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "nums", Value: strconv.FormatInt(nums, 10)})
-	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "memsize", Value: strconv.FormatInt(memsize, 10)})
+	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
 	return resp, nil
 }
 
