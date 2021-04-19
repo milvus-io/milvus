@@ -21,6 +21,9 @@ type timeSyncMsgProducer struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	proxyWatchers     []chan *ms.TimeTickMsg
+	writeNodeWatchers []chan *ms.TimeTickMsg
 }
 
 func NewTimeSyncMsgProducer(ctx context.Context) (*timeSyncMsgProducer, error) {
@@ -47,7 +50,15 @@ func (syncMsgProducer *timeSyncMsgProducer) SetK2sSyncStream(k2sSync ms.MsgStrea
 	syncMsgProducer.k2sSyncStream = k2sSync
 }
 
-func (syncMsgProducer *timeSyncMsgProducer) broadcastMsg(barrier TimeTickBarrier, streams []ms.MsgStream) error {
+func (syncMsgProducer *timeSyncMsgProducer) WatchProxyTtBarrier(watcher chan *ms.TimeTickMsg) {
+	syncMsgProducer.proxyWatchers = append(syncMsgProducer.proxyWatchers, watcher)
+}
+
+func (syncMsgProducer *timeSyncMsgProducer) WatchWriteNodeTtBarrier(watcher chan *ms.TimeTickMsg) {
+	syncMsgProducer.writeNodeWatchers = append(syncMsgProducer.writeNodeWatchers, watcher)
+}
+
+func (syncMsgProducer *timeSyncMsgProducer) broadcastMsg(barrier TimeTickBarrier, streams []ms.MsgStream, channels []chan *ms.TimeTickMsg) error {
 	for {
 		select {
 		case <-syncMsgProducer.ctx.Done():
@@ -79,6 +90,10 @@ func (syncMsgProducer *timeSyncMsgProducer) broadcastMsg(barrier TimeTickBarrier
 			for _, stream := range streams {
 				err = stream.Broadcast(&msgPack)
 			}
+
+			for _, channel := range channels {
+				channel <- timeTickMsg
+			}
 			if err != nil {
 				return err
 			}
@@ -97,8 +112,8 @@ func (syncMsgProducer *timeSyncMsgProducer) Start() error {
 		return err
 	}
 
-	go syncMsgProducer.broadcastMsg(syncMsgProducer.proxyTtBarrier, []ms.MsgStream{syncMsgProducer.dmSyncStream, syncMsgProducer.ddSyncStream})
-	go syncMsgProducer.broadcastMsg(syncMsgProducer.writeNodeTtBarrier, []ms.MsgStream{syncMsgProducer.k2sSyncStream})
+	go syncMsgProducer.broadcastMsg(syncMsgProducer.proxyTtBarrier, []ms.MsgStream{syncMsgProducer.dmSyncStream, syncMsgProducer.ddSyncStream}, syncMsgProducer.proxyWatchers)
+	go syncMsgProducer.broadcastMsg(syncMsgProducer.writeNodeTtBarrier, []ms.MsgStream{syncMsgProducer.k2sSyncStream}, syncMsgProducer.writeNodeWatchers)
 
 	return nil
 }
