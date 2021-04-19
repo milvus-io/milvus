@@ -94,8 +94,8 @@ class Utils {
     static TestParameters
     ParseTestParameters(int argc, char* argv[]);
 
-    static
-    void PrintHelp(int argc, char* argv[]);
+    static void
+    HAHE(int argc);
 
 
 };

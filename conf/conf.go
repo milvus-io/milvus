@@ -47,11 +47,37 @@ type PulsarConfig struct {
 	TopicNum int
 }
 
-//type ProxyConfig struct {
-//	Timezone string
-//	Address  string
-//	Port     int32
-//}
+type ProxyConfig struct {
+	Timezone         string `yaml:"timezone"`
+	ProxyId          int    `yaml:"proxy_id"`
+	NumReaderNodes   int    `yaml:"numReaderNodes"`
+	TosSaveInterval  int    `yaml:"tsoSaveInterval"`
+	TimeTickInterval int    `yaml:"timeTickInterval"`
+	PulsarTopics     struct {
+		ReaderTopicPrefix string `yaml:"readerTopicPrefix"`
+		NumReaderTopics   int    `yaml:"numReaderTopics"`
+		DeleteTopic       string `yaml:"deleteTopic"`
+		QueryTopic        string `yaml:"queryTopic"`
+		ResultTopic       string `yaml:"resultTopic"`
+		ResultGroup       string `yaml:"resultGroup"`
+		TimeTickTopic     string `yaml:"timeTickTopic"`
+	} `yaml:"pulsarTopics"`
+	Network struct {
+		Address string `yaml:"address"`
+		Port    int    `yaml:"port"`
+	} `yaml:"network"`
+	Logs struct {
+		Level          string `yaml:"level"`
+		TraceEnable    bool   `yaml:"trace.enable"`
+		Path           string `yaml:"path"`
+		MaxLogFileSize string `yaml:"max_log_file_size"`
+		LogRotateNum   int    `yaml:"log_rotate_num"`
+	} `yaml:"logs"`
+	Storage struct {
+		Path              string `yaml:"path"`
+		AutoFlushInterval int    `yaml:"auto_flush_interval"`
+	} `yaml:"storage"`
+}
 
 type Reader struct {
 	ClientId        int
@@ -68,10 +94,8 @@ type Writer struct {
 	StopFlag           int64
 	ReaderQueueSize    int
 	SearchByIdChanSize int
-	Parallelism        int
 	TopicStart         int
 	TopicEnd           int
-	Bucket             string
 }
 
 type ServerConfig struct {
@@ -82,7 +106,7 @@ type ServerConfig struct {
 	Pulsar   PulsarConfig
 	Writer   Writer
 	Reader   Reader
-	//Proxy    ProxyConfig
+	Proxy    ProxyConfig
 }
 
 var Config ServerConfig
