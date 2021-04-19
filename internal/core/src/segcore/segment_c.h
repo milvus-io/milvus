@@ -31,7 +31,7 @@ CSegmentInterface
 NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
 
 void
-DeleteSegment(CSegmentInterface segment);
+DeleteSegment(CSegmentInterface c_segment);
 
 void
 DeleteQueryResult(CQueryResult query_result);
@@ -67,11 +67,9 @@ Insert(CSegmentInterface c_segment,
        int sizeof_per_row,
        int64_t count);
 
-// interface for growing segment
 int64_t
 PreInsert(CSegmentInterface c_segment, int64_t size);
 
-// interface for growing segment
 CStatus
 Delete(CSegmentInterface c_segment,
        int64_t reserved_offset,
@@ -79,7 +77,6 @@ Delete(CSegmentInterface c_segment,
        const int64_t* row_ids,
        const uint64_t* timestamps);
 
-// interface for growing segment
 int64_t
 PreDelete(CSegmentInterface c_segment, int64_t size);
 
@@ -87,19 +84,19 @@ PreDelete(CSegmentInterface c_segment, int64_t size);
 CStatus
 LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_info);
 
+CStatus
+UpdateSealedSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info);
+
 //////////////////////////////    deprecated interfaces    //////////////////////////////
 CStatus
 UpdateSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info);
 
-// deprecated
 int
 Close(CSegmentInterface c_segment);
 
-// deprecated
 int
 BuildIndex(CCollection c_collection, CSegmentInterface c_segment);
 
-// deprecated
 bool
 IsOpened(CSegmentInterface c_segment);
 

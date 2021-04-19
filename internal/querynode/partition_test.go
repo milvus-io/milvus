@@ -30,6 +30,6 @@ func TestPartition_Segments(t *testing.T) {
 
 func TestPartition_newPartition(t *testing.T) {
 	partitionTag := "default"
-	partition := newPartition(partitionTag)
+	partition := newPartition2(partitionTag)
 	assert.Equal(t, partition.partitionTag, partitionTag)
 }

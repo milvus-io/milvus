@@ -1,12 +1,19 @@
 package querynode
 
 import (
+	"context"
 	"log"
+
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 type serviceTimeNode struct {
 	baseNode
-	replica collectionReplica
+	replica           collectionReplica
+	timeTickMsgStream *pulsarms.PulsarMsgStream
 }
 
 func (stNode *serviceTimeNode) Name() string {
@@ -31,6 +38,10 @@ func (stNode *serviceTimeNode) Operate(in []*Msg) []*Msg {
 	stNode.replica.getTSafe().set(serviceTimeMsg.timeRange.timestampMax)
 	//fmt.Println("update tSafe to:", getPhysicalTime(serviceTimeMsg.timeRange.timestampMax))
 
+	if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {
+		log.Printf("Error: send time tick into pulsar channel failed, %s\n", err.Error())
+	}
+
 	var res Msg = &gcMsg{
 		gcRecord:  serviceTimeMsg.gcRecord,
 		timeRange: serviceTimeMsg.timeRange,
@@ -38,7 +49,28 @@ func (stNode *serviceTimeNode) Operate(in []*Msg) []*Msg {
 	return []*Msg{&res}
 }
 
-func newServiceTimeNode(replica collectionReplica) *serviceTimeNode {
+func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {
+	msgPack := msgstream.MsgPack{}
+	timeTickMsg := msgstream.TimeTickMsg{
+		BaseMsg: msgstream.BaseMsg{
+			BeginTimestamp: ts,
+			EndTimestamp:   ts,
+			HashValues:     []uint32{0},
+		},
+		TimeTickMsg: internalpb2.TimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kTimeTick,
+				MsgID:     0,
+				Timestamp: ts,
+				SourceID:  Params.QueryNodeID,
+			},
+		},
+	}
+	msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
+	return stNode.timeTickMsgStream.Produce(&msgPack)
+}
+
+func newServiceTimeNode(ctx context.Context, replica collectionReplica) *serviceTimeNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -46,8 +78,13 @@ func newServiceTimeNode(replica collectionReplica) *serviceTimeNode {
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
+	timeTimeMsgStream := pulsarms.NewPulsarMsgStream(ctx, Params.SearchReceiveBufSize)
+	timeTimeMsgStream.SetPulsarClient(Params.PulsarAddress)
+	timeTimeMsgStream.CreatePulsarProducers([]string{Params.QueryNodeTimeTickChannelName})
+
 	return &serviceTimeNode{
-		baseNode: baseNode,
-		replica:  replica,
+		baseNode:          baseNode,
+		replica:           replica,
+		timeTickMsgStream: timeTimeMsgStream,
 	}
 }

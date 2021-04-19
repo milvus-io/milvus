@@ -30,9 +30,17 @@ func (p *Partition) Segments() *[]*Segment {
 	return &(*p).segments
 }
 
-func newPartition(partitionTag string) *Partition {
+func newPartition2(partitionTag string) *Partition {
 	var newPartition = &Partition{
 		partitionTag: partitionTag,
+	}
+
+	return newPartition
+}
+
+func newPartition(partitionID UniqueID) *Partition {
+	var newPartition = &Partition{
+		id: partitionID,
 	}
 
 	return newPartition

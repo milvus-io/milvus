@@ -136,7 +136,6 @@ func (lis *loadIndexService) execute(msg msgstream.TsMsg) error {
 		return errors.New("type assertion failed for LoadIndexMsg")
 	}
 	// 1. use msg's index paths to get index bytes
-	fmt.Println("start load index")
 	var err error
 	ok, err = lis.checkIndexReady(indexMsg)
 	if err != nil {
@@ -169,6 +168,7 @@ func (lis *loadIndexService) execute(msg msgstream.TsMsg) error {
 	if err != nil {
 		return err
 	}
+	fmt.Println("load index done")
 	return nil
 }
 

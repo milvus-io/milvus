@@ -13,7 +13,7 @@ func TestStatsService_start(t *testing.T) {
 	initTestMeta(t, node, "collection0", 0, 0)
 	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, nil)
 	node.statsService.start()
-	node.Close()
+	node.Stop()
 }
 
 //NOTE: start pulsar before test
@@ -39,5 +39,5 @@ func TestSegmentManagement_sendSegmentStatistic(t *testing.T) {
 
 	// send stats
 	node.statsService.publicStatistic(nil)
-	node.Close()
+	node.Stop()
 }

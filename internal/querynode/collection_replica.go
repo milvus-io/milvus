@@ -46,7 +46,8 @@ type collectionReplica interface {
 	// Partition tags in different collections are not unique,
 	// so partition api should specify the target collection.
 	getPartitionNum(collectionID UniqueID) (int, error)
-	addPartition(collectionID UniqueID, partitionTag string) error
+	addPartition2(collectionID UniqueID, partitionTag string) error
+	addPartition(collectionID UniqueID, partitionID UniqueID) error
 	removePartition(collectionID UniqueID, partitionTag string) error
 	addPartitionsByCollectionMeta(colMeta *etcdpb.CollectionMeta) error
 	removePartitionsByCollectionMeta(colMeta *etcdpb.CollectionMeta) error
@@ -182,7 +183,7 @@ func (colReplica *collectionReplicaImpl) getPartitionNum(collectionID UniqueID) 
 	return len(collection.partitions), nil
 }
 
-func (colReplica *collectionReplicaImpl) addPartition(collectionID UniqueID, partitionTag string) error {
+func (colReplica *collectionReplicaImpl) addPartition2(collectionID UniqueID, partitionTag string) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
@@ -191,7 +192,22 @@ func (colReplica *collectionReplicaImpl) addPartition(collectionID UniqueID, par
 		return err
 	}
 
-	var newPartition = newPartition(partitionTag)
+	var newPartition = newPartition2(partitionTag)
+
+	*collection.Partitions() = append(*collection.Partitions(), newPartition)
+	return nil
+}
+
+func (colReplica *collectionReplicaImpl) addPartition(collectionID UniqueID, partitionID UniqueID) error {
+	colReplica.mu.Lock()
+	defer colReplica.mu.Unlock()
+
+	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
+	if err != nil {
+		return err
+	}
+
+	var newPartition = newPartition(partitionID)
 
 	*collection.Partitions() = append(*collection.Partitions(), newPartition)
 	return nil
@@ -240,7 +256,7 @@ func (colReplica *collectionReplicaImpl) addPartitionsByCollectionMeta(colMeta *
 	}
 
 	for _, tag := range pToAdd {
-		err := colReplica.addPartition(colMeta.ID, tag)
+		err := colReplica.addPartition2(colMeta.ID, tag)
 		if err != nil {
 			log.Println(err)
 		}

@@ -1520,3 +1520,50 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
+
+TEST(CApiTest, SealedSegmentTest) {
+    auto schema_tmp_conf = R"(name: "test"
+                                fields: <
+                                  fieldID: 100
+                                  name: "vec"
+                                  data_type: VECTOR_FLOAT
+                                  type_params: <
+                                    key: "dim"
+                                    value: "16"
+                                  >
+                                  index_params: <
+                                    key: "metric_type"
+                                    value: "L2"
+                                  >
+                                >
+                                fields: <
+                                  fieldID: 101
+                                  name: "age"
+                                  data_type: INT32
+                                  type_params: <
+                                    key: "dim"
+                                    value: "1"
+                                  >
+                                >)";
+    auto collection = NewCollection(schema_tmp_conf);
+    auto segment = NewSegment(collection, 0, Sealed);
+
+    int N = 10000;
+    std::default_random_engine e(67);
+    auto ages = std::vector<int32_t>(N);
+    for (auto& age : ages) {
+        age = e() % 2000;
+    }
+    auto blob = (void*)(&ages[0]);
+
+    auto load_info = CLoadFieldDataInfo{101, blob, N};
+
+    // TODO: open load test
+    //    auto res = LoadFieldData(segment, load_info);
+    //    assert(res.error_code == Success);
+    //    auto count = GetRowCount(segment);
+    //    assert(count == N);
+
+    DeleteCollection(collection);
+    DeleteSegment(segment);
+}

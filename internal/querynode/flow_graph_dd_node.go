@@ -102,7 +102,7 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 	}
 
 	// add default partition
-	err = ddNode.replica.addPartition(collectionID, Params.DefaultPartitionTag)
+	err = ddNode.replica.addPartition2(collectionID, Params.DefaultPartitionTag)
 	if err != nil {
 		log.Println(err)
 		return
@@ -139,7 +139,7 @@ func (ddNode *ddNode) createPartition(msg *msgstream.CreatePartitionMsg) {
 	collectionID := msg.CollectionID
 	partitionName := msg.PartitionName
 
-	err := ddNode.replica.addPartition(collectionID, partitionName)
+	err := ddNode.replica.addPartition2(collectionID, partitionName)
 	if err != nil {
 		log.Println(err)
 		return

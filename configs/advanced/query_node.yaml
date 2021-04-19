@@ -46,3 +46,6 @@ queryNode:
     loadIndex:
       recvBufSize: 512
       pulsarBufSize: 512
+
+    timeTick:
+      recvBufSize: 64

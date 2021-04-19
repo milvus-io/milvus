@@ -46,9 +46,9 @@ NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type) {
 }
 
 void
-DeleteSegment(CSegmentInterface segment) {
+DeleteSegment(CSegmentInterface c_segment) {
     // TODO: use dynamic cast, and return c status
-    auto s = (milvus::segcore::SegmentGrowing*)segment;
+    auto s = (milvus::segcore::SegmentInterface*)c_segment;
 
     std::cout << "delete segment " << std::endl;
     delete s;
@@ -67,7 +67,7 @@ Search(CSegmentInterface c_segment,
        uint64_t* timestamps,
        int num_groups,
        CQueryResult* result) {
-    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
+    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
     auto plan = (milvus::query::Plan*)c_plan;
     std::vector<const milvus::query::PlaceholderGroup*> placeholder_groups;
     for (int i = 0; i < num_groups; ++i) {
@@ -102,7 +102,7 @@ Search(CSegmentInterface c_segment,
 
 CStatus
 FillTargetEntry(CSegmentInterface c_segment, CPlan c_plan, CQueryResult c_result) {
-    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
+    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
     auto plan = (milvus::query::Plan*)c_plan;
     auto result = (milvus::QueryResult*)c_result;
 
@@ -120,18 +120,19 @@ FillTargetEntry(CSegmentInterface c_segment, CPlan c_plan, CQueryResult c_result
 
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment) {
-    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
+    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
     auto mem_size = segment->GetMemoryUsageInBytes();
     return mem_size;
 }
 
 int64_t
 GetRowCount(CSegmentInterface c_segment) {
-    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
+    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
     auto row_count = segment->get_row_count();
     return row_count;
 }
 
+// TODO: segmentInterface implement get_deleted_count()
 int64_t
 GetDeletedCount(CSegmentInterface c_segment) {
     auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
@@ -211,12 +212,15 @@ PreDelete(CSegmentInterface c_segment, int64_t size) {
 //////////////////////////////    interfaces for sealed segment    //////////////////////////////
 CStatus
 LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_info) {
-    auto segment = (milvus::segcore::SegmentSealed*)c_segment;
-
     try {
+        auto segment_interface = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto segment = dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
+        AssertInfo(segment != nullptr, "segment conversion failed");
         auto load_info =
             LoadFieldDataInfo{load_field_data_info.field_id, load_field_data_info.blob, load_field_data_info.row_count};
         segment->LoadFieldData(load_info);
+        std::cout << "load field done, field_id = " << load_info.field_id << ", row count = " << load_info.row_count
+                  << std::endl;
         auto status = CStatus();
         status.error_code = Success;
         status.error_msg = "";
@@ -229,15 +233,36 @@ LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_in
     }
 }
 
+CStatus
+UpdateSealedSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info) {
+    auto status = CStatus();
+    try {
+        auto segment_interface = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto segment = dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
+        AssertInfo(segment != nullptr, "segment conversion failed");
+        auto load_index_info = (LoadIndexInfo*)c_load_index_info;
+        segment->LoadIndex(*load_index_info);
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedException;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}
+
 //////////////////////////////    deprecated interfaces    //////////////////////////////
 CStatus
 UpdateSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info) {
     auto status = CStatus();
     try {
-        auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
+        auto segment_interface = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto segment = dynamic_cast<milvus::segcore::SegmentGrowing*>(segment_interface);
+        AssertInfo(segment != nullptr, "segment conversion failed");
         auto load_index_info = (LoadIndexInfo*)c_load_index_info;
         auto res = segment->LoadIndexing(*load_index_info);
-        status.error_code = Success;
+        status.error_code = res.code();
         status.error_msg = "";
         return status;
     } catch (std::exception& e) {
