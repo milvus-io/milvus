@@ -164,8 +164,11 @@ func CreateQueryNode(queryNodeId uint64, timeSync uint64, mc *message_client.Mes
 
 	msgCounter := MsgCounter{
 		InsertCounter: 0,
+		InsertTime:    time.Now(),
 		DeleteCounter: 0,
+		DeleteTime:    time.Now(),
 		SearchCounter: 0,
+		SearchTime:    time.Now(),
 	}
 
 	return &QueryNode{
@@ -263,7 +266,6 @@ func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 	const Debug = true
 	const CountInsertMsgBaseline = 1000 * 1000
 	var BaselineCounter int64 = 0
-	node.msgCounter.InsertTime = time.Now()
 
 	if Debug {
 		for {
