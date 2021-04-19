@@ -4,53 +4,53 @@
 #include <any>
 #include <string>
 #include <optional>
-#include "Predicate.h"
+#include "Expr.h"
 namespace milvus::query {
-class QueryNodeVisitor;
+class PlanNodeVisitor;
 
-enum class QueryNodeType {
+enum class PlanNodeType {
     kInvalid = 0,
     kScan,
     kANNS,
 };
 
 // Base of all Nodes
-struct QueryNode {
-    QueryNodeType node_type;
+struct PlanNode {
+    PlanNodeType node_type;
 
  public:
-    virtual ~QueryNode() = default;
+    virtual ~PlanNode() = default;
     virtual void
-    accept(QueryNodeVisitor&) = 0;
+    accept(PlanNodeVisitor&) = 0;
 };
 
-using QueryNodePtr = std::unique_ptr<QueryNode>;
+using PlanNodePtr = std::unique_ptr<PlanNode>;
 
-struct VectorQueryNode : QueryNode {
-    std::optional<QueryNodePtr> child_;
+struct VectorPlanNode : PlanNode {
+    std::optional<PlanNodePtr> child_;
     int64_t num_queries_;
     int64_t dim_;
     FieldId field_id_;
 
  public:
     virtual void
-    accept(QueryNodeVisitor&) = 0;
+    accept(PlanNodeVisitor&) = 0;
 };
 
-struct FloatVectorANNS : VectorQueryNode {
+struct FloatVectorANNS : VectorPlanNode {
     std::shared_ptr<float> data;
     std::string metric_type_;  // TODO: use enum
  public:
     void
-    accept(QueryNodeVisitor&) override;
+    accept(PlanNodeVisitor&) override;
 };
 
-struct BinaryVectorANNS : VectorQueryNode {
+struct BinaryVectorANNS : VectorPlanNode {
     std::shared_ptr<uint8_t> data;
     std::string metric_type_;  // TODO: use enum
  public:
     void
-    accept(QueryNodeVisitor&) override;
+    accept(PlanNodeVisitor&) override;
 };
 
 }  // namespace milvus::query

@@ -1,6 +1,8 @@
 # TODO
 set(MILVUS_QUERY_SRCS
-        BinaryQuery.cpp
+        deprecated/BinaryQuery.cpp
+        generated/PlanNode.cpp
+        generated/Expr.cpp
         Parser.cpp
         )
 add_library(milvus_query ${MILVUS_QUERY_SRCS})

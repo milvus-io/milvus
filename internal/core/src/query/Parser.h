@@ -1,8 +1,8 @@
 #pragma once
 #include "pb/service_msg.pb.h"
-#include "query/BooleanQuery.h"
-#include "query/BinaryQuery.h"
-#include "query/GeneralQuery.h"
+#include "query/deprecated/BooleanQuery.h"
+#include "query/deprecated/BinaryQuery.h"
+#include "query/deprecated/GeneralQuery.h"
 
 namespace milvus::wtf {
 

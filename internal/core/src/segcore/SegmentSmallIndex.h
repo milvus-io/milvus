@@ -11,7 +11,7 @@
 #include "ConcurrentVector.h"
 #include "segcore/SegmentBase.h"
 // #include "knowhere/index/structured_index/StructuredIndex.h"
-#include "query/GeneralQuery.h"
+#include "query/deprecated/GeneralQuery.h"
 #include "utils/Status.h"
 #include "segcore/DeletedRecord.h"
 #include "EasyAssert.h"
