@@ -178,7 +178,6 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
     auto channel_id = makeHash(&uid, sizeof(uint64_t)) % topic_num;
     try {
       mut_msg.set_segment_id(segment_id(request.collection_name(), channel_id, timestamp));
-      printf("%ld \n", mut_msg.segment_id());
       mut_msg.mutable_rows_data()->CopyFrom(request.rows_data(i));
       mut_msg.mutable_extra_params()->CopyFrom(request.extra_params());
 
