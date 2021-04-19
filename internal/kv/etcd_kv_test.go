@@ -3,17 +3,23 @@ package kv
 import (
 	"context"
 	"path"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
+	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 	"go.etcd.io/etcd/clientv3"
 )
 
 func TestEtcdKV_Load(t *testing.T) {
-	conf.LoadConfig("config.yaml")
-	etcdPort := strconv.Itoa(int(conf.Config.Etcd.Port))
+	err := gparams.GParams.LoadYaml("config.yaml")
+	if err != nil {
+		panic(err)
+	}
+	etcdPort, err := gparams.GParams.Load("etcd.port")
+	if err != nil {
+		panic(err)
+	}
+
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcdPort}})
 	assert.Nil(t, err)
 	rootpath := "/etcd/test/root"
@@ -68,8 +74,15 @@ func TestEtcdKV_Load(t *testing.T) {
 }
 
 func TestEtcdKV_MultiSave(t *testing.T) {
-	conf.LoadConfig("config.yaml")
-	etcdPort := strconv.Itoa(int(conf.Config.Etcd.Port))
+	err := gparams.GParams.LoadYaml("config.yaml")
+	if err != nil {
+		panic(err)
+	}
+	etcdPort, err := gparams.GParams.Load("etcd.port")
+	if err != nil {
+		panic(err)
+	}
+
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcdPort}})
 	assert.Nil(t, err)
 	rootpath := "/etcd/test/root"
@@ -97,8 +110,15 @@ func TestEtcdKV_MultiSave(t *testing.T) {
 }
 
 func TestEtcdKV_Remove(t *testing.T) {
-	conf.LoadConfig("config.yaml")
-	etcdPort := strconv.Itoa(int(conf.Config.Etcd.Port))
+	err := gparams.GParams.LoadYaml("config.yaml")
+	if err != nil {
+		panic(err)
+	}
+	etcdPort, err := gparams.GParams.Load("etcd.port")
+	if err != nil {
+		panic(err)
+	}
+
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcdPort}})
 	assert.Nil(t, err)
 	rootpath := "/etcd/test/root"
@@ -166,8 +186,15 @@ func TestEtcdKV_Remove(t *testing.T) {
 }
 
 func TestEtcdKV_MultiSaveAndRemove(t *testing.T) {
-	conf.LoadConfig("config.yaml")
-	etcdPort := strconv.Itoa(int(conf.Config.Etcd.Port))
+	err := gparams.GParams.LoadYaml("config.yaml")
+	if err != nil {
+		panic(err)
+	}
+	etcdPort, err := gparams.GParams.Load("etcd.port")
+	if err != nil {
+		panic(err)
+	}
+
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcdPort}})
 	assert.Nil(t, err)
 	rootpath := "/etcd/test/root"

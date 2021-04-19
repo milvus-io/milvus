@@ -2,20 +2,25 @@ package master
 
 import (
 	"context"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 	"go.etcd.io/etcd/clientv3"
 )
 
 func TestMetaTable_Collection(t *testing.T) {
-	conf.LoadConfig("config.yaml")
-	etcdPort := strconv.Itoa(int(conf.Config.Etcd.Port))
+	err := gparams.GParams.LoadYaml("config.yaml")
+	if err != nil {
+		panic(err)
+	}
+	etcdPort, err := gparams.GParams.Load("etcd.port")
+	if err != nil {
+		panic(err)
+	}
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcdPort}})
 	assert.Nil(t, err)
 	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
@@ -137,8 +142,15 @@ func TestMetaTable_Collection(t *testing.T) {
 }
 
 func TestMetaTable_DeletePartition(t *testing.T) {
-	conf.LoadConfig("config.yaml")
-	etcdPort := strconv.Itoa(int(conf.Config.Etcd.Port))
+	err := gparams.GParams.LoadYaml("config.yaml")
+	if err != nil {
+		panic(err)
+	}
+	etcdPort, err := gparams.GParams.Load("etcd.port")
+	if err != nil {
+		panic(err)
+	}
+
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcdPort}})
 	assert.Nil(t, err)
 	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
@@ -220,8 +232,15 @@ func TestMetaTable_DeletePartition(t *testing.T) {
 }
 
 func TestMetaTable_Segment(t *testing.T) {
-	conf.LoadConfig("config.yaml")
-	etcdPort := strconv.Itoa(int(conf.Config.Etcd.Port))
+	err := gparams.GParams.LoadYaml("config.yaml")
+	if err != nil {
+		panic(err)
+	}
+	etcdPort, err := gparams.GParams.Load("etcd.port")
+	if err != nil {
+		panic(err)
+	}
+
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcdPort}})
 	assert.Nil(t, err)
 	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")

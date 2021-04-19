@@ -6,14 +6,17 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zilliztech/milvus-distributed/internal/conf"
+	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 )
 
 var GIdAllocator *GlobalIDAllocator
 
 func TestMain(m *testing.M) {
-	conf.LoadConfig("config.yaml")
+	err := gparams.GParams.LoadYaml("config.yaml")
+	if err != nil {
+		panic(err)
+	}
 	GIdAllocator = NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase("gid"))
 	exitCode := m.Run()
 	os.Exit(exitCode)

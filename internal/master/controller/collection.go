@@ -5,15 +5,13 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-
-	"github.com/zilliztech/milvus-distributed/internal/master/id"
-
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/master/collection"
+	"github.com/zilliztech/milvus-distributed/internal/master/id"
 	"github.com/zilliztech/milvus-distributed/internal/master/segment"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type UniqueID = typeutil.UniqueID
@@ -68,7 +66,15 @@ func WriteCollection2Datastore(collectionMeta *schemapb.CollectionSchema, kvbase
 		time.Now(), fieldMetas, []UniqueID{sID},
 		[]string{"default"})
 	cm := collection.GrpcMarshal(&c)
-	s := segment.NewSegment(sID, cID, collectionMeta.Name, "default", 0, conf.Config.Pulsar.TopicNum, time.Now(), time.Unix(1<<46-1, 0))
+	pulsarTopicNum, err := gparams.GParams.Load("pulsar.topicnum")
+	if err != nil {
+		panic(err)
+	}
+	topicNum, err := strconv.Atoi(pulsarTopicNum)
+	if err != nil {
+		panic(err)
+	}
+	s := segment.NewSegment(sID, cID, collectionMeta.Name, "default", 0, topicNum, time.Now(), time.Unix(1<<46-1, 0))
 	collectionData, err := collection.Collection2JSON(*cm)
 	if err != nil {
 		log.Fatal(err)

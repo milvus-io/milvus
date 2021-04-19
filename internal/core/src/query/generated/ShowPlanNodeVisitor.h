@@ -1,12 +1,7 @@
 #pragma once
 // Generated File
 // DO NOT EDIT
-#include "utils/EasyAssert.h"
-#include "utils/Json.h"
-#include <optional>
-
 #include "PlanNodeVisitor.h"
-
 namespace milvus::query {
 class ShowPlanNodeVisitor : PlanNodeVisitor {
  public:
@@ -26,7 +21,6 @@ class ShowPlanNodeVisitor : PlanNodeVisitor {
         node.accept(*this);
         assert(ret_.has_value());
         auto ret = std::move(ret_);
-        ret_ = std::nullopt;
         return std::move(ret.value());
     }
 

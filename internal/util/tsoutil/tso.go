@@ -3,11 +3,10 @@ package tsoutil
 import (
 	"fmt"
 	"path"
-	"strconv"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -29,13 +28,24 @@ func ParseTS(ts uint64) (time.Time, uint64) {
 }
 
 func NewTSOKVBase(subPath string) *kv.EtcdKV {
-	etcdAddr := conf.Config.Etcd.Address
-	etcdAddr += ":"
-	etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)
+	etcdAddr, err := gparams.GParams.Load("etcd.address")
+	if err != nil {
+		panic(err)
+	}
+	etcdPort, err := gparams.GParams.Load("etcd.port")
+	if err != nil {
+		panic(err)
+	}
+	etcdAddr = etcdAddr + ":" + etcdPort
 	fmt.Println("etcdAddr ::: ", etcdAddr)
 	client, _ := clientv3.New(clientv3.Config{
 		Endpoints:   []string{etcdAddr},
 		DialTimeout: 5 * time.Second,
 	})
-	return kv.NewEtcdKV(client, path.Join(conf.Config.Etcd.Rootpath, subPath))
+
+	etcdRootPath, err := gparams.GParams.Load("etcd.rootpath")
+	if err != nil {
+		panic(err)
+	}
+	return kv.NewEtcdKV(client, path.Join(etcdRootPath, subPath))
 }

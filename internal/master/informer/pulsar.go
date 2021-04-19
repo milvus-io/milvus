@@ -2,19 +2,22 @@ package informer
 
 import (
 	"log"
-	"strconv"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-
 	"github.com/apache/pulsar-client-go/pulsar"
+	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 )
 
 func NewPulsarClient() *PulsarClient {
-	pulsarAddr := "pulsar://"
-	pulsarAddr += conf.Config.Pulsar.Address
-	pulsarAddr += ":"
-	pulsarAddr += strconv.FormatInt(int64(conf.Config.Pulsar.Port), 10)
+	pulsarAddr, err := gparams.GParams.Load("pulsar.address")
+	if err != nil {
+		panic(err)
+	}
+	pulsarPort, err := gparams.GParams.Load("pulsar.port")
+	if err != nil {
+		panic(err)
+	}
+	pulsarAddr = "pulsar://" + pulsarAddr + ":" + pulsarPort
 	client, err := pulsar.NewClient(pulsar.ClientOptions{
 		URL:               pulsarAddr,
 		OperationTimeout:  30 * time.Second,

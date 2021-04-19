@@ -3,10 +3,8 @@ package proxy
 import (
 	"context"
 	"errors"
-	"log"
 
 	"github.com/golang/protobuf/proto"
-
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -28,27 +26,44 @@ func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.
 			},
 		},
 		done:                  make(chan error),
-		resultChan:            make(chan *servicepb.IntegerRangeResponse),
 		manipulationMsgStream: p.manipulationMsgStream,
 	}
+
 	it.ctx, it.cancel = context.WithCancel(ctx)
 	// TODO: req_id, segment_id, channel_id, proxy_id, timestamps, row_ids
 
 	defer it.cancel()
 
-	p.taskSch.DmQueue.Enqueue(it)
-	select {
-	case <-ctx.Done():
-		log.Print("insert timeout!")
+	fn := func() error {
+		select {
+		case <-ctx.Done():
+			return errors.New("insert timeout")
+		default:
+			return p.taskSch.DdQueue.Enqueue(it)
+		}
+	}
+	err := fn()
+
+	if err != nil {
 		return &servicepb.IntegerRangeResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    "insert timeout!",
+				Reason:    err.Error(),
 			},
-		}, errors.New("insert timeout")
-	case result := <-it.resultChan:
-		return result, nil
+		}, nil
 	}
+
+	err = it.WaitToFinish()
+	if err != nil {
+		return &servicepb.IntegerRangeResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	return it.result, nil
 }
 
 func (p *Proxy) CreateCollection(ctx context.Context, req *schemapb.CollectionSchema) (*commonpb.Status, error) {
@@ -60,24 +75,37 @@ func (p *Proxy) CreateCollection(ctx context.Context, req *schemapb.CollectionSc
 		},
 		masterClient: p.masterClient,
 		done:         make(chan error),
-		resultChan:   make(chan *commonpb.Status),
 	}
 	schemaBytes, _ := proto.Marshal(req)
 	cct.CreateCollectionRequest.Schema.Value = schemaBytes
 	cct.ctx, cct.cancel = context.WithCancel(ctx)
 	defer cct.cancel()
 
-	p.taskSch.DdQueue.Enqueue(cct)
-	select {
-	case <-ctx.Done():
-		log.Print("create collection timeout!")
+	fn := func() error {
+		select {
+		case <-ctx.Done():
+			return errors.New("create collection timeout")
+		default:
+			return p.taskSch.DdQueue.Enqueue(cct)
+		}
+	}
+	err := fn()
+	if err != nil {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    "create collection timeout!",
-		}, errors.New("create collection timeout")
-	case result := <-cct.resultChan:
-		return result, nil
+			Reason:    err.Error(),
+		}, err
 	}
+
+	err = cct.WaitToFinish()
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, err
+	}
+
+	return cct.result, nil
 }
 
 func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.QueryResult, error) {
@@ -90,26 +118,41 @@ func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.Qu
 		queryMsgStream: p.queryMsgStream,
 		done:           make(chan error),
 		resultBuf:      make(chan []*internalpb.SearchResult),
-		resultChan:     make(chan *servicepb.QueryResult),
 	}
 	qt.ctx, qt.cancel = context.WithCancel(ctx)
 	queryBytes, _ := proto.Marshal(req)
 	qt.SearchRequest.Query.Value = queryBytes
 	defer qt.cancel()
 
-	p.taskSch.DqQueue.Enqueue(qt)
-	select {
-	case <-ctx.Done():
-		log.Print("query timeout!")
+	fn := func() error {
+		select {
+		case <-ctx.Done():
+			return errors.New("create collection timeout")
+		default:
+			return p.taskSch.DdQueue.Enqueue(qt)
+		}
+	}
+	err := fn()
+	if err != nil {
 		return &servicepb.QueryResult{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    "query timeout!",
+				Reason:    err.Error(),
 			},
-		}, errors.New("query timeout")
-	case result := <-qt.resultChan:
-		return result, nil
+		}, err
 	}
+
+	err = qt.WaitToFinish()
+	if err != nil {
+		return &servicepb.QueryResult{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+		}, err
+	}
+
+	return qt.result, nil
 }
 
 func (p *Proxy) DropCollection(ctx context.Context, req *servicepb.CollectionName) (*commonpb.Status, error) {
@@ -121,22 +164,35 @@ func (p *Proxy) DropCollection(ctx context.Context, req *servicepb.CollectionNam
 		},
 		masterClient: p.masterClient,
 		done:         make(chan error),
-		resultChan:   make(chan *commonpb.Status),
 	}
 	dct.ctx, dct.cancel = context.WithCancel(ctx)
 	defer dct.cancel()
 
-	p.taskSch.DdQueue.Enqueue(dct)
-	select {
-	case <-ctx.Done():
-		log.Print("create collection timeout!")
+	fn := func() error {
+		select {
+		case <-ctx.Done():
+			return errors.New("create collection timeout")
+		default:
+			return p.taskSch.DdQueue.Enqueue(dct)
+		}
+	}
+	err := fn()
+	if err != nil {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    "create collection timeout!",
-		}, errors.New("create collection timeout")
-	case result := <-dct.resultChan:
-		return result, nil
+			Reason:    err.Error(),
+		}, err
 	}
+
+	err = dct.WaitToFinish()
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, err
+	}
+
+	return dct.result, nil
 }
 
 func (p *Proxy) HasCollection(ctx context.Context, req *servicepb.CollectionName) (*servicepb.BoolResponse, error) {
@@ -148,25 +204,39 @@ func (p *Proxy) HasCollection(ctx context.Context, req *servicepb.CollectionName
 		},
 		masterClient: p.masterClient,
 		done:         make(chan error),
-		resultChan:   make(chan *servicepb.BoolResponse),
 	}
 	hct.ctx, hct.cancel = context.WithCancel(ctx)
 	defer hct.cancel()
 
-	p.taskSch.DqQueue.Enqueue(hct)
-	select {
-	case <-ctx.Done():
-		log.Print("has collection timeout!")
+	fn := func() error {
+		select {
+		case <-ctx.Done():
+			return errors.New("create collection timeout")
+		default:
+			return p.taskSch.DdQueue.Enqueue(hct)
+		}
+	}
+	err := fn()
+	if err != nil {
 		return &servicepb.BoolResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    "has collection timeout!",
+				Reason:    err.Error(),
 			},
-			Value: false,
-		}, errors.New("has collection timeout")
-	case result := <-hct.resultChan:
-		return result, nil
+		}, err
 	}
+
+	err = hct.WaitToFinish()
+	if err != nil {
+		return &servicepb.BoolResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+		}, err
+	}
+
+	return hct.result, nil
 }
 
 func (p *Proxy) DescribeCollection(ctx context.Context, req *servicepb.CollectionName) (*servicepb.CollectionDescription, error) {
@@ -178,24 +248,39 @@ func (p *Proxy) DescribeCollection(ctx context.Context, req *servicepb.Collectio
 		},
 		masterClient: p.masterClient,
 		done:         make(chan error),
-		resultChan:   make(chan *servicepb.CollectionDescription),
 	}
 	dct.ctx, dct.cancel = context.WithCancel(ctx)
 	defer dct.cancel()
 
-	p.taskSch.DqQueue.Enqueue(dct)
-	select {
-	case <-ctx.Done():
-		log.Print("has collection timeout!")
+	fn := func() error {
+		select {
+		case <-ctx.Done():
+			return errors.New("create collection timeout")
+		default:
+			return p.taskSch.DdQueue.Enqueue(dct)
+		}
+	}
+	err := fn()
+	if err != nil {
 		return &servicepb.CollectionDescription{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    "describe collection timeout!",
+				Reason:    err.Error(),
 			},
-		}, errors.New("describe collection timeout")
-	case result := <-dct.resultChan:
-		return result, nil
+		}, err
 	}
+
+	err = dct.WaitToFinish()
+	if err != nil {
+		return &servicepb.CollectionDescription{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+		}, err
+	}
+
+	return dct.result, nil
 }
 
 func (p *Proxy) ShowCollections(ctx context.Context, req *commonpb.Empty) (*servicepb.StringListResponse, error) {
@@ -206,24 +291,39 @@ func (p *Proxy) ShowCollections(ctx context.Context, req *commonpb.Empty) (*serv
 		},
 		masterClient: p.masterClient,
 		done:         make(chan error),
-		resultChan:   make(chan *servicepb.StringListResponse),
 	}
 	sct.ctx, sct.cancel = context.WithCancel(ctx)
 	defer sct.cancel()
 
-	p.taskSch.DqQueue.Enqueue(sct)
-	select {
-	case <-ctx.Done():
-		log.Print("show collections timeout!")
+	fn := func() error {
+		select {
+		case <-ctx.Done():
+			return errors.New("create collection timeout")
+		default:
+			return p.taskSch.DdQueue.Enqueue(sct)
+		}
+	}
+	err := fn()
+	if err != nil {
 		return &servicepb.StringListResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    "show collections timeout!",
+				Reason:    err.Error(),
 			},
-		}, errors.New("show collections timeout")
-	case result := <-sct.resultChan:
-		return result, nil
+		}, err
 	}
+
+	err = sct.WaitToFinish()
+	if err != nil {
+		return &servicepb.StringListResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+		}, err
+	}
+
+	return sct.result, nil
 }
 
 func (p *Proxy) CreatePartition(ctx context.Context, in *servicepb.PartitionName) (*commonpb.Status, error) {

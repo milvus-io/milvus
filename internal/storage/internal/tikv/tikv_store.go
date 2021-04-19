@@ -8,9 +8,9 @@ import (
 
 	"github.com/tikv/client-go/config"
 	"github.com/tikv/client-go/rawkv"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 	. "github.com/zilliztech/milvus-distributed/internal/storage/internal/tikv/codec"
 	. "github.com/zilliztech/milvus-distributed/internal/storage/type"
+	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 )
 
 func keyAddOne(key Key) Key {
@@ -88,11 +88,21 @@ type TikvStore struct {
 }
 
 func NewTikvStore(ctx context.Context) (*TikvStore, error) {
-	conf.LoadConfig("config.yaml")
-	var pdAddress0 = conf.Config.Storage.Address + ":" + strconv.FormatInt(int64(conf.Config.Storage.Port), 10)
-	pdAddrs := []string{pdAddress0}
+	err := gparams.GParams.LoadYaml("config.yaml")
+	if err != nil {
+		panic(err)
+	}
+	pdAddress, err := gparams.GParams.Load("storage.address")
+	if err != nil {
+		panic(err)
+	}
+	pdPort, err := gparams.GParams.Load("storage.port")
+	if err != nil {
+		panic(err)
+	}
+	pdAddress = pdAddress + ":" + pdPort
 	conf := config.Default()
-	client, err := rawkv.NewClient(ctx, pdAddrs, conf)
+	client, err := rawkv.NewClient(ctx, []string{pdAddress}, conf)
 	if err != nil {
 		return nil, err
 	}

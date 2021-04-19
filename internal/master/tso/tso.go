@@ -22,7 +22,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/util/kvutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
@@ -47,7 +47,7 @@ type atomicObject struct {
 // timestampOracle is used to maintain the logic of tso.
 type timestampOracle struct {
 	key    string
-	kvBase kv.Base
+	kvBase kvutil.Base
 
 	// TODO: remove saveInterval
 	saveInterval  time.Duration

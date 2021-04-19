@@ -3,8 +3,11 @@ package proxy
 import (
 	"context"
 	"log"
+	"strconv"
 	"sync"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/conf"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -14,10 +17,12 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 )
 
+type tickCheckFunc = func(Timestamp) bool
+
 type timeTick struct {
 	lastTick    Timestamp
 	currentTick Timestamp
-	interval    uint64
+	interval    int64
 
 	pulsarProducer pulsar.Producer
 
@@ -30,21 +35,29 @@ type timeTick struct {
 	cancel func()
 	timer  *time.Ticker
 
-	areRequestsDelivered func(ts Timestamp) bool
+	checkFunc tickCheckFunc
 }
 
-func newTimeTick(ctx context.Context, tsoAllocator *allocator.TimestampAllocator) *timeTick {
+func newTimeTick(ctx context.Context,
+	tsoAllocator *allocator.TimestampAllocator,
+	checkFunc tickCheckFunc) *timeTick {
 	ctx1, cancel := context.WithCancel(ctx)
 	t := &timeTick{
 		ctx:          ctx1,
 		cancel:       cancel,
 		tsoAllocator: tsoAllocator,
+		interval:     200,
+		peerID:       1,
+		checkFunc:    checkFunc,
 	}
 
-	bufSzie := int64(1000)
-	t.tickMsgStream = msgstream.NewPulsarMsgStream(t.ctx, bufSzie)
+	bufSize := int64(1000)
+	t.tickMsgStream = msgstream.NewPulsarMsgStream(t.ctx, bufSize)
+	pulsarAddress := "pulsar://"
+	pulsarAddress += conf.Config.Pulsar.Address
+	pulsarAddress += ":"
+	pulsarAddress += strconv.FormatInt(int64(conf.Config.Pulsar.Port), 10)
 
-	pulsarAddress := "pulsar://localhost:6650"
 	producerChannels := []string{"timeTick"}
 	t.tickMsgStream.SetPulsarCient(pulsarAddress)
 	t.tickMsgStream.CreatePulsarProducers(producerChannels)
@@ -61,7 +74,7 @@ func (tt *timeTick) tick() error {
 		tt.currentTick = ts
 	}
 
-	if !tt.areRequestsDelivered(tt.currentTick) {
+	if !tt.checkFunc(tt.currentTick) {
 		return nil
 	}
 	msgPack := msgstream.MsgPack{}

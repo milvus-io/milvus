@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"math/big"
 	"math/rand"
 	"sync"
 	"testing"
@@ -137,7 +138,8 @@ func sendMsgFromCmd(ctx context.Context, fg *TimeTickedFlowGraph) {
 				return
 			}
 			// assert result
-			if res-(math.Pow(num, 2)+math.Sqrt(num)) > 0.000001 {
+			expect := math.Pow(num, 2) + math.Sqrt(num)
+			if big.NewFloat(res) != big.NewFloat(expect) {
 				fmt.Println(res)
 				fmt.Println(math.Pow(num, 2) + math.Sqrt(num))
 				panic("wrong answer")

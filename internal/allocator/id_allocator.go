@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/conf"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -20,11 +23,17 @@ type IDAllocator struct {
 }
 
 func NewIDAllocator(ctx context.Context) (*IDAllocator, error) {
+	masterAddr := conf.Config.Etcd.Address
+	masterAddr += ":"
+	masterAddr += strconv.FormatInt(int64(conf.Config.Master.Port), 10)
+
 	ctx1, cancel := context.WithCancel(ctx)
 	a := &IDAllocator{
 		Allocator: Allocator{reqs: make(chan request, maxMergeRequests),
-			ctx:    ctx1,
-			cancel: cancel,
+			ctx:           ctx1,
+			cancel:        cancel,
+			masterAddress: masterAddr,
+			countPerRPC:   maxMergeRequests,
 		},
 	}
 	a.tChan = &emptyTicker{}

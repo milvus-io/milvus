@@ -31,7 +31,7 @@ type InsertTask struct {
 	BaseInsertTask
 	ts                    Timestamp
 	done                  chan error
-	resultChan            chan *servicepb.IntegerRangeResponse
+	result                *servicepb.IntegerRangeResponse
 	manipulationMsgStream *msgstream.PulsarMsgStream
 	ctx                   context.Context
 	cancel                context.CancelFunc
@@ -98,7 +98,7 @@ type CreateCollectionTask struct {
 	internalpb.CreateCollectionRequest
 	masterClient masterpb.MasterClient
 	done         chan error
-	resultChan   chan *commonpb.Status
+	result       *commonpb.Status
 	ctx          context.Context
 	cancel       context.CancelFunc
 }
@@ -131,12 +131,12 @@ func (cct *CreateCollectionTask) Execute() error {
 	resp, err := cct.masterClient.CreateCollection(cct.ctx, &cct.CreateCollectionRequest)
 	if err != nil {
 		log.Printf("create collection failed, error= %v", err)
-		cct.resultChan <- &commonpb.Status{
+		cct.result = &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    err.Error(),
 		}
 	} else {
-		cct.resultChan <- resp
+		cct.result = resp
 	}
 	return err
 }
@@ -166,7 +166,7 @@ type DropCollectionTask struct {
 	internalpb.DropCollectionRequest
 	masterClient masterpb.MasterClient
 	done         chan error
-	resultChan   chan *commonpb.Status
+	result       *commonpb.Status
 	ctx          context.Context
 	cancel       context.CancelFunc
 }
@@ -199,12 +199,12 @@ func (dct *DropCollectionTask) Execute() error {
 	resp, err := dct.masterClient.DropCollection(dct.ctx, &dct.DropCollectionRequest)
 	if err != nil {
 		log.Printf("drop collection failed, error= %v", err)
-		dct.resultChan <- &commonpb.Status{
+		dct.result = &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    err.Error(),
 		}
 	} else {
-		dct.resultChan <- resp
+		dct.result = resp
 	}
 	return err
 }
@@ -235,7 +235,7 @@ type QueryTask struct {
 	queryMsgStream *msgstream.PulsarMsgStream
 	done           chan error
 	resultBuf      chan []*internalpb.SearchResult
-	resultChan     chan *servicepb.QueryResult
+	result         *servicepb.QueryResult
 	ctx            context.Context
 	cancel         context.CancelFunc
 }
@@ -312,12 +312,12 @@ func (qt *QueryTask) Notify(err error) {
 		case searchResults := <-qt.resultBuf:
 			rlen := len(searchResults) // query num
 			if rlen <= 0 {
-				qt.resultChan <- &servicepb.QueryResult{}
+				qt.result = &servicepb.QueryResult{}
 				return
 			}
 			n := len(searchResults[0].Hits) // n
 			if n <= 0 {
-				qt.resultChan <- &servicepb.QueryResult{}
+				qt.result = &servicepb.QueryResult{}
 				return
 			}
 			k := len(searchResults[0].Hits[0].IDs) // k
@@ -354,7 +354,7 @@ func (qt *QueryTask) Notify(err error) {
 				}
 				queryResult.Hits = append(queryResult.Hits, hits)
 			}
-			qt.resultChan <- queryResult
+			qt.result = queryResult
 		}
 	}
 }
@@ -363,7 +363,7 @@ type HasCollectionTask struct {
 	internalpb.HasCollectionRequest
 	masterClient masterpb.MasterClient
 	done         chan error
-	resultChan   chan *servicepb.BoolResponse
+	result       *servicepb.BoolResponse
 	ctx          context.Context
 	cancel       context.CancelFunc
 }
@@ -396,7 +396,7 @@ func (hct *HasCollectionTask) Execute() error {
 	resp, err := hct.masterClient.HasCollection(hct.ctx, &hct.HasCollectionRequest)
 	if err != nil {
 		log.Printf("has collection failed, error= %v", err)
-		hct.resultChan <- &servicepb.BoolResponse{
+		hct.result = &servicepb.BoolResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    "internal error",
@@ -404,7 +404,7 @@ func (hct *HasCollectionTask) Execute() error {
 			Value: false,
 		}
 	} else {
-		hct.resultChan <- resp
+		hct.result = resp
 	}
 	return err
 }
@@ -434,7 +434,7 @@ type DescribeCollectionTask struct {
 	internalpb.DescribeCollectionRequest
 	masterClient masterpb.MasterClient
 	done         chan error
-	resultChan   chan *servicepb.CollectionDescription
+	result       *servicepb.CollectionDescription
 	ctx          context.Context
 	cancel       context.CancelFunc
 }
@@ -467,14 +467,14 @@ func (dct *DescribeCollectionTask) Execute() error {
 	resp, err := dct.masterClient.DescribeCollection(dct.ctx, &dct.DescribeCollectionRequest)
 	if err != nil {
 		log.Printf("describe collection failed, error= %v", err)
-		dct.resultChan <- &servicepb.CollectionDescription{
+		dct.result = &servicepb.CollectionDescription{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    "internal error",
 			},
 		}
 	} else {
-		dct.resultChan <- resp
+		dct.result = resp
 	}
 	return err
 }
@@ -504,7 +504,7 @@ type ShowCollectionsTask struct {
 	internalpb.ShowCollectionRequest
 	masterClient masterpb.MasterClient
 	done         chan error
-	resultChan   chan *servicepb.StringListResponse
+	result       *servicepb.StringListResponse
 	ctx          context.Context
 	cancel       context.CancelFunc
 }
@@ -537,14 +537,14 @@ func (sct *ShowCollectionsTask) Execute() error {
 	resp, err := sct.masterClient.ShowCollections(sct.ctx, &sct.ShowCollectionRequest)
 	if err != nil {
 		log.Printf("show collections failed, error= %v", err)
-		sct.resultChan <- &servicepb.StringListResponse{
+		sct.result = &servicepb.StringListResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    "internal error",
 			},
 		}
 	} else {
-		sct.resultChan <- resp
+		sct.result = resp
 	}
 	return err
 }

@@ -16,7 +16,6 @@ import (
 	"go.etcd.io/etcd/clientv3"
 	"google.golang.org/grpc"
 
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/master/controller"
@@ -25,6 +24,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/master/tso"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
+	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 )
 
 // Server is the pd server.
@@ -236,8 +236,13 @@ func (s *Master) pulsarLoop() {
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 
+	pulsarTopic, err := gparams.GParams.Load("master.pulsartopic")
+	if err != nil {
+		panic(err)
+	}
+
 	consumer, err := s.pc.Client.Subscribe(pulsar.ConsumerOptions{
-		Topic:            conf.Config.Master.PulsarTopic,
+		Topic:            pulsarTopic,
 		SubscriptionName: "my-sub",
 		Type:             pulsar.Shared,
 	})
