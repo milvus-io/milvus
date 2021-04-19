@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/czs007/suvlim/conf"
 	"github.com/czs007/suvlim/storage/pkg"
 	"github.com/czs007/suvlim/writer/message_client"
 	"github.com/czs007/suvlim/writer/write_node"
-	"github.com/czs007/suvlim/conf"
 	"log"
 	"sync"
 	"time"
