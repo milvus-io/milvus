@@ -7,7 +7,7 @@
 #include "utils/Types.h"
 // #include "knowhere/index/Index.h"
 #include "utils/Status.h"
-#include "EasyAssert.h"
+#include "utils/EasyAssert.h"
 
 namespace milvus::segcore {
 using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp

@@ -9,7 +9,6 @@ set(SEGCORE_FILES
         collection_c.cpp
         partition_c.cpp
         segment_c.cpp
-        EasyAssert.cpp
         SegmentBase.cpp
         IndexingEntry.cpp
         InsertRecord.cpp

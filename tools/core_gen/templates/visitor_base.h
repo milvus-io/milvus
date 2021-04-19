@@ -10,7 +10,7 @@
 namespace @@namespace@@ {
 class @@root_base@@Visitor {
  public:
-    virtual ~@@root_base@@Visitor() = 0;
+    virtual ~@@root_base@@Visitor() = default;
 
  public:
 @@body@@
