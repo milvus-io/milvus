@@ -1,0 +1,19 @@
+
+syntax = "proto3";
+
+package milvus.proto.service;
+option go_package="github.com/zilliztech/milvus-distributed/internal/proto/writerpb";
+
+message FieldFlushMeta {
+    int32 fieldID = 1;
+    repeated string binlog_paths = 2;
+}
+
+//etcd meta
+message SegmentFlushMeta{
+    int64 segmentID = 1;
+    bool is_closed = 2;
+    uint64 open_time =3;
+    uint64 close_time = 4;
+    repeated FieldFlushMeta fields = 5;
+}

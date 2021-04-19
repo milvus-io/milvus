@@ -34,6 +34,9 @@ type ParamTable struct {
 	MsgChannelSubName   string
 	DefaultPartitionTag string
 	SliceIndex          int
+
+	EtcdAddress  string
+	MetaRootPath string
 }
 
 var Params ParamTable
@@ -60,6 +63,8 @@ func (p *ParamTable) Init() {
 	}
 
 	p.initPulsarAddress()
+	p.initEtcdAddress()
+	p.initMetaRootPath()
 
 	p.initWriteNodeID()
 	p.initWriteNodeNum()
@@ -240,4 +245,24 @@ func (p *ParamTable) initSliceIndex() {
 
 func (p *ParamTable) initWriteNodeNum() {
 	p.WriteNodeNum = len(p.WriteNodeIDList())
+}
+
+func (p *ParamTable) initEtcdAddress() {
+	addr, err := p.Load("_EtcdAddress")
+	if err != nil {
+		panic(err)
+	}
+	p.EtcdAddress = addr
+}
+
+func (p *ParamTable) initMetaRootPath() {
+	rootPath, err := p.Load("etcd.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	subPath, err := p.Load("etcd.metaSubPath")
+	if err != nil {
+		panic(err)
+	}
+	p.MetaRootPath = rootPath + "/" + subPath
 }
