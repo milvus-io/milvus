@@ -2,7 +2,6 @@ package msgstream
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"reflect"
 	"strconv"
@@ -234,14 +233,6 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 			}
 
 			msg := &pulsar.ProducerMessage{Payload: mb}
-			if v.Msgs[i].Type() == commonpb.MsgType_kDelete {
-				headerMsg := commonpb.MsgHeader{}
-				err := proto.Unmarshal(mb, &headerMsg)
-				if err != nil {
-					fmt.Println(err.Error())
-				}
-
-			}
 
 			var child opentracing.Span
 			if v.Msgs[i].Type() == commonpb.MsgType_kInsert ||
@@ -395,10 +386,7 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 				(*ms.consumers[chosen]).AckID(pulsarMsg.ID())
 
 				headerMsg := commonpb.MsgHeader{}
-				payload := pulsarMsg.Payload()
-				err := proto.Unmarshal(payload, &headerMsg)
-				//delete2, _ := ms.unmarshal.Unmarshal(payload, commonpb.MsgType_kDelete)
-				//fmt.Println(delete2)
+				err := proto.Unmarshal(pulsarMsg.Payload(), &headerMsg)
 				if err != nil {
 					log.Printf("Failed to unmarshal message header, error = %v", err)
 					continue

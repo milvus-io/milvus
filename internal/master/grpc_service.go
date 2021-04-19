@@ -3,11 +3,11 @@ package master
 import (
 	"context"
 	"fmt"
-
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 )
@@ -466,6 +466,26 @@ func (s *Master) GetIndexState(ctx context.Context, req *milvuspb.IndexStateRequ
 
 	task.resp.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
 	return task.resp, nil
+}
+
+func (s *Master) GetCollectionStatistics(ctx context.Context, request *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error) {
+	panic("implement me")
+}
+
+func (s *Master) GetPartitionStatistics(ctx context.Context, request *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error) {
+	panic("implement me")
+}
+
+func (s *Master) GetServiceStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ServiceStates, error) {
+	panic("implement me")
+}
+
+func (s *Master) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
+	panic("implement me")
+}
+
+func (s *Master) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
+	panic("implement me")
 }
 
 func (s *Master) DescribeSegment(ctx context.Context, request *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {

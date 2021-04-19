@@ -86,7 +86,6 @@ enum MsgType {
     /* Definition Requests: Index */
     kCreateIndex = 300;
     kDescribeIndex = 301;
-    kDescribeIndexProgress = 302;
 
     /* Manipulation Requests */
     kInsert = 400;
@@ -96,6 +95,9 @@ enum MsgType {
     /* Query */
     kSearch = 500;
     kSearchResult = 501;
+    kGetIndexState = 502;
+    kGetCollectionStatistics = 503;
+    kGetPartitionStatistics = 504;
 
     /* System Control */
     kTimeTick = 1200;
