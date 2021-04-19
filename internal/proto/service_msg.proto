@@ -135,14 +135,33 @@ message PartitionDescription {
     repeated common.KeyValuePair statistics = 3;
 }
 
+/**
+ * @brief Response of GetSysConfig
+ */
+message SysConfigResponse {
+    common.Status status = 1;
+    repeated string keys = 2;
+    repeated string values = 3;
+}
+
+/**
+ * @brief Scores of a query. 
+ *        The default value of tag is "root". 
+ *        It corresponds to the final score of each hit.
+ */
+message Score {
+    string tag = 1;
+    repeated float values = 2;
+}
+
 
 /**
  * @brief Entities hit by query
  */
 message Hits {
     repeated int64 IDs = 1;
-    repeated bytes row_data = 2;
-    repeated float scores = 3;
+    repeated common.Blob row_data = 2;
+    repeated Score scores = 3;
 }
 
 
@@ -151,6 +170,6 @@ message Hits {
  */
 message QueryResult {
     common.Status status = 1;
-    repeated bytes hits = 2;
+    repeated Hits hits = 2;
 }
 
