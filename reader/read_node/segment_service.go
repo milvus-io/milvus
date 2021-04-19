@@ -19,7 +19,7 @@ func (node *QueryNode) SegmentsManagement() {
 		for _, partition := range collection.Partitions {
 			for _, oldSegment := range partition.OpenedSegments {
 				// TODO: check segment status
-				if oldSegment.SegmentCloseTime != -1 && timeNow >= oldSegment.SegmentCloseTime {
+				if timeNow >= oldSegment.SegmentCloseTime {
 					// close old segment and move it into partition.ClosedSegments
 					if oldSegment.SegmentStatus != SegmentOpened {
 						log.Println("Never reach here, Opened segment cannot be closed")
