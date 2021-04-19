@@ -18,6 +18,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -41,8 +42,8 @@ type Proxy struct {
 	tsoAllocator *allocator.TimestampAllocator
 	segAssigner  *allocator.SegIDAssigner
 
-	manipulationMsgStream *msgstream.PulsarMsgStream
-	queryMsgStream        *msgstream.PulsarMsgStream
+	manipulationMsgStream *pulsarms.PulsarMsgStream
+	queryMsgStream        *pulsarms.PulsarMsgStream
 
 	tracer opentracing.Tracer
 	closer io.Closer
@@ -80,7 +81,7 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 
 	pulsarAddress := Params.PulsarAddress()
 
-	p.queryMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, Params.MsgStreamSearchBufSize())
+	p.queryMsgStream = pulsarms.NewPulsarMsgStream(p.proxyLoopCtx, Params.MsgStreamSearchBufSize())
 	p.queryMsgStream.SetPulsarClient(pulsarAddress)
 	p.queryMsgStream.CreatePulsarProducers(Params.SearchChannelNames())
 
@@ -107,7 +108,7 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 	p.segAssigner = segAssigner
 	p.segAssigner.PeerID = Params.ProxyID()
 
-	p.manipulationMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, Params.MsgStreamInsertBufSize())
+	p.manipulationMsgStream = pulsarms.NewPulsarMsgStream(p.proxyLoopCtx, Params.MsgStreamInsertBufSize())
 	p.manipulationMsgStream.SetPulsarClient(pulsarAddress)
 	p.manipulationMsgStream.CreatePulsarProducers(Params.InsertChannelNames())
 	repackFuncImpl := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {

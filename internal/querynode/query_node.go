@@ -20,7 +20,8 @@ import (
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go/config"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	queryPb "github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 )
@@ -167,7 +168,7 @@ func (node *QueryNode) AddQueryChannel(in *queryPb.AddQueryChannelsRequest) (*co
 		return status, errors.New(errMsg)
 	}
 
-	searchStream, ok := node.searchService.searchMsgStream.(*msgstream.PulsarMsgStream)
+	searchStream, ok := node.searchService.searchMsgStream.(*pulsarms.PulsarMsgStream)
 	if !ok {
 		errMsg := "type assertion failed for search message stream"
 		status := &commonpb.Status{
@@ -178,7 +179,7 @@ func (node *QueryNode) AddQueryChannel(in *queryPb.AddQueryChannelsRequest) (*co
 		return status, errors.New(errMsg)
 	}
 
-	resultStream, ok := node.searchService.searchResultMsgStream.(*msgstream.PulsarMsgStream)
+	resultStream, ok := node.searchService.searchResultMsgStream.(*pulsarms.PulsarMsgStream)
 	if !ok {
 		errMsg := "type assertion failed for search result message stream"
 		status := &commonpb.Status{
@@ -193,7 +194,7 @@ func (node *QueryNode) AddQueryChannel(in *queryPb.AddQueryChannelsRequest) (*co
 	pulsarBufSize := Params.SearchPulsarBufSize
 	consumeChannels := []string{in.RequestChannelID}
 	consumeSubName := Params.MsgChannelSubName
-	unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
+	unmarshalDispatcher := util.NewUnmarshalDispatcher()
 	searchStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
 
 	// add result channel
@@ -217,7 +218,7 @@ func (node *QueryNode) RemoveQueryChannel(in *queryPb.RemoveQueryChannelsRequest
 		return status, errors.New(errMsg)
 	}
 
-	searchStream, ok := node.searchService.searchMsgStream.(*msgstream.PulsarMsgStream)
+	searchStream, ok := node.searchService.searchMsgStream.(*pulsarms.PulsarMsgStream)
 	if !ok {
 		errMsg := "type assertion failed for search message stream"
 		status := &commonpb.Status{
@@ -228,7 +229,7 @@ func (node *QueryNode) RemoveQueryChannel(in *queryPb.RemoveQueryChannelsRequest
 		return status, errors.New(errMsg)
 	}
 
-	resultStream, ok := node.searchService.searchResultMsgStream.(*msgstream.PulsarMsgStream)
+	resultStream, ok := node.searchService.searchResultMsgStream.(*pulsarms.PulsarMsgStream)
 	if !ok {
 		errMsg := "type assertion failed for search result message stream"
 		status := &commonpb.Status{
@@ -243,7 +244,7 @@ func (node *QueryNode) RemoveQueryChannel(in *queryPb.RemoveQueryChannelsRequest
 	pulsarBufSize := Params.SearchPulsarBufSize
 	consumeChannels := []string{in.RequestChannelID}
 	consumeSubName := Params.MsgChannelSubName
-	unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
+	unmarshalDispatcher := util.NewUnmarshalDispatcher()
 	// TODO: searchStream.RemovePulsarConsumers(producerChannels)
 	searchStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
 
@@ -269,7 +270,7 @@ func (node *QueryNode) WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*com
 		return status, errors.New(errMsg)
 	}
 
-	fgDMMsgStream, ok := node.dataSyncService.dmStream.(*msgstream.PulsarMsgStream)
+	fgDMMsgStream, ok := node.dataSyncService.dmStream.(*pulsarms.PulsarMsgStream)
 	if !ok {
 		errMsg := "type assertion failed for dm message stream"
 		status := &commonpb.Status{
@@ -284,7 +285,7 @@ func (node *QueryNode) WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*com
 	pulsarBufSize := Params.SearchPulsarBufSize
 	consumeChannels := in.ChannelIDs
 	consumeSubName := Params.MsgChannelSubName
-	unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
+	unmarshalDispatcher := util.NewUnmarshalDispatcher()
 	fgDMMsgStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
 
 	status := &commonpb.Status{

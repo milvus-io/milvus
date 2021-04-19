@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
@@ -41,15 +43,15 @@ func initPulsarStream(pulsarAddress string,
 	consumerSubName string) (*ms.MsgStream, *ms.MsgStream) {
 
 	// set input stream
-	inputStream := ms.NewPulsarMsgStream(context.Background(), 100)
+	inputStream := pulsarms.NewPulsarMsgStream(context.Background(), 100)
 	inputStream.SetPulsarClient(pulsarAddress)
 	inputStream.CreatePulsarProducers(producerChannels)
 	var input ms.MsgStream = inputStream
 
 	// set output stream
-	outputStream := ms.NewPulsarMsgStream(context.Background(), 100)
+	outputStream := pulsarms.NewPulsarMsgStream(context.Background(), 100)
 	outputStream.SetPulsarClient(pulsarAddress)
-	unmarshalDispatcher := ms.NewUnmarshalDispatcher()
+	unmarshalDispatcher := util.NewUnmarshalDispatcher()
 	outputStream.CreatePulsarConsumers(consumerChannels, consumerSubName, unmarshalDispatcher, 100)
 	outputStream.Start()
 	var output ms.MsgStream = outputStream

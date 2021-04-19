@@ -16,6 +16,8 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/indexnode"
 	minioKV "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
@@ -124,10 +126,10 @@ func TestLoadIndexService_FloatVector(t *testing.T) {
 	insertChannels := Params.InsertChannelNames
 	ddChannels := Params.DDChannelNames
 
-	insertStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	insertStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 	insertStream.SetPulsarClient(Params.PulsarAddress)
 	insertStream.CreatePulsarProducers(insertChannels)
-	ddStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	ddStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 	ddStream.SetPulsarClient(Params.PulsarAddress)
 	ddStream.CreatePulsarProducers(ddChannels)
 
@@ -202,7 +204,7 @@ func TestLoadIndexService_FloatVector(t *testing.T) {
 			Msgs: []msgstream.TsMsg{searchMsg},
 		}
 	}
-	searchStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	searchStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 	searchStream.SetPulsarClient(Params.PulsarAddress)
 	searchStream.CreatePulsarProducers(newSearchChannelNames)
 	searchStream.Start()
@@ -210,9 +212,9 @@ func TestLoadIndexService_FloatVector(t *testing.T) {
 	assert.NoError(t, err)
 
 	//get search result
-	searchResultStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	searchResultStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 	searchResultStream.SetPulsarClient(Params.PulsarAddress)
-	unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
+	unmarshalDispatcher := util.NewUnmarshalDispatcher()
 	searchResultStream.CreatePulsarConsumers(newSearchResultChannelNames, "loadIndexTestSubSearchResult", unmarshalDispatcher, receiveBufSize)
 	searchResultStream.Start()
 	searchResult := searchResultStream.Consume()
@@ -288,9 +290,9 @@ func TestLoadIndexService_FloatVector(t *testing.T) {
 	client.LoadIndex(indexPaths, segmentID, fieldID, "vec", indexParams)
 
 	// init message stream consumer and do checks
-	statsMs := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, Params.StatsReceiveBufSize)
+	statsMs := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, Params.StatsReceiveBufSize)
 	statsMs.SetPulsarClient(Params.PulsarAddress)
-	statsMs.CreatePulsarConsumers([]string{Params.StatsChannelName}, Params.MsgChannelSubName, msgstream.NewUnmarshalDispatcher(), Params.StatsReceiveBufSize)
+	statsMs.CreatePulsarConsumers([]string{Params.StatsChannelName}, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), Params.StatsReceiveBufSize)
 	statsMs.Start()
 
 	findFiledStats := false
@@ -457,10 +459,10 @@ func TestLoadIndexService_BinaryVector(t *testing.T) {
 	insertChannels := Params.InsertChannelNames
 	ddChannels := Params.DDChannelNames
 
-	insertStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	insertStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 	insertStream.SetPulsarClient(Params.PulsarAddress)
 	insertStream.CreatePulsarProducers(insertChannels)
-	ddStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	ddStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 	ddStream.SetPulsarClient(Params.PulsarAddress)
 	ddStream.CreatePulsarProducers(ddChannels)
 
@@ -524,7 +526,7 @@ func TestLoadIndexService_BinaryVector(t *testing.T) {
 			Msgs: []msgstream.TsMsg{searchMsg},
 		}
 	}
-	searchStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	searchStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 	searchStream.SetPulsarClient(Params.PulsarAddress)
 	searchStream.CreatePulsarProducers(newSearchChannelNames)
 	searchStream.Start()
@@ -532,9 +534,9 @@ func TestLoadIndexService_BinaryVector(t *testing.T) {
 	assert.NoError(t, err)
 
 	//get search result
-	searchResultStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	searchResultStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 	searchResultStream.SetPulsarClient(Params.PulsarAddress)
-	unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
+	unmarshalDispatcher := util.NewUnmarshalDispatcher()
 	searchResultStream.CreatePulsarConsumers(newSearchResultChannelNames, "loadIndexTestSubSearchResult2", unmarshalDispatcher, receiveBufSize)
 	searchResultStream.Start()
 	searchResult := searchResultStream.Consume()
@@ -604,9 +606,9 @@ func TestLoadIndexService_BinaryVector(t *testing.T) {
 	client.LoadIndex(indexPaths, segmentID, fieldID, "vec", indexParams)
 
 	// init message stream consumer and do checks
-	statsMs := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, Params.StatsReceiveBufSize)
+	statsMs := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, Params.StatsReceiveBufSize)
 	statsMs.SetPulsarClient(Params.PulsarAddress)
-	statsMs.CreatePulsarConsumers([]string{Params.StatsChannelName}, Params.MsgChannelSubName, msgstream.NewUnmarshalDispatcher(), Params.StatsReceiveBufSize)
+	statsMs.CreatePulsarConsumers([]string{Params.StatsChannelName}, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), Params.StatsReceiveBufSize)
 	statsMs.Start()
 
 	findFiledStats := false

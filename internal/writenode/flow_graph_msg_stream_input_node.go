@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
@@ -16,11 +18,11 @@ func newDmInputNode(ctx context.Context) *flowgraph.InputNode {
 	consumeChannels := Params.InsertChannelNames
 	consumeSubName := Params.MsgChannelSubName
 
-	insertStream := msgstream.NewPulsarTtMsgStream(ctx, receiveBufSize)
+	insertStream := pulsarms.NewPulsarTtMsgStream(ctx, receiveBufSize)
 
 	// TODO could panic of nil pointer
 	insertStream.SetPulsarClient(msgStreamURL)
-	unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
+	unmarshalDispatcher := util.NewUnmarshalDispatcher()
 
 	// TODO could panic of nil pointer
 	insertStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
@@ -43,9 +45,9 @@ func newDDInputNode(ctx context.Context) *flowgraph.InputNode {
 	consumeChannels := Params.DDChannelNames
 	consumeSubName := Params.MsgChannelSubName
 
-	ddStream := msgstream.NewPulsarTtMsgStream(ctx, receiveBufSize)
+	ddStream := pulsarms.NewPulsarTtMsgStream(ctx, receiveBufSize)
 	ddStream.SetPulsarClient(msgStreamURL)
-	unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
+	unmarshalDispatcher := util.NewUnmarshalDispatcher()
 	ddStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
 
 	var stream msgstream.MsgStream = ddStream

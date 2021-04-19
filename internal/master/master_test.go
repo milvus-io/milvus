@@ -19,6 +19,8 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -554,9 +556,9 @@ func TestMaster(t *testing.T) {
 		assert.NoError(t, err)
 
 		//consume msg
-		ddMs := ms.NewPulsarTtMsgStream(ctx, 1024)
+		ddMs := pulsarms.NewPulsarTtMsgStream(ctx, 1024)
 		ddMs.SetPulsarClient(pulsarAddr)
-		ddMs.CreatePulsarConsumers(Params.DDChannelNames, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
+		ddMs.CreatePulsarConsumers(Params.DDChannelNames, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), 1024)
 		ddMs.Start()
 
 		var consumeMsg ms.MsgStream = ddMs
@@ -876,9 +878,9 @@ func TestMaster(t *testing.T) {
 		assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
 		//consume msg
-		ddMs := ms.NewPulsarTtMsgStream(ctx, 1024)
+		ddMs := pulsarms.NewPulsarTtMsgStream(ctx, 1024)
 		ddMs.SetPulsarClient(pulsarAddr)
-		ddMs.CreatePulsarConsumers(Params.DDChannelNames, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
+		ddMs.CreatePulsarConsumers(Params.DDChannelNames, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), 1024)
 		ddMs.Start()
 
 		time.Sleep(1000 * time.Millisecond)
@@ -898,29 +900,29 @@ func TestMaster(t *testing.T) {
 
 	t.Run("TestBroadCastRequest", func(t *testing.T) {
 
-		proxyTimeTickStream := ms.NewPulsarMsgStream(ctx, 1024) //input stream
+		proxyTimeTickStream := pulsarms.NewPulsarMsgStream(ctx, 1024) //input stream
 		proxyTimeTickStream.SetPulsarClient(pulsarAddr)
 		proxyTimeTickStream.CreatePulsarProducers(Params.ProxyTimeTickChannelNames)
 		proxyTimeTickStream.Start()
 
-		writeNodeStream := ms.NewPulsarMsgStream(ctx, 1024) //input stream
+		writeNodeStream := pulsarms.NewPulsarMsgStream(ctx, 1024) //input stream
 		writeNodeStream.SetPulsarClient(pulsarAddr)
 		writeNodeStream.CreatePulsarProducers(Params.WriteNodeTimeTickChannelNames)
 		writeNodeStream.Start()
 
-		ddMs := ms.NewPulsarTtMsgStream(ctx, 1024)
+		ddMs := pulsarms.NewPulsarTtMsgStream(ctx, 1024)
 		ddMs.SetPulsarClient(pulsarAddr)
-		ddMs.CreatePulsarConsumers(Params.DDChannelNames, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
+		ddMs.CreatePulsarConsumers(Params.DDChannelNames, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), 1024)
 		ddMs.Start()
 
-		dMMs := ms.NewPulsarTtMsgStream(ctx, 1024)
+		dMMs := pulsarms.NewPulsarTtMsgStream(ctx, 1024)
 		dMMs.SetPulsarClient(pulsarAddr)
-		dMMs.CreatePulsarConsumers(Params.InsertChannelNames, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
+		dMMs.CreatePulsarConsumers(Params.InsertChannelNames, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), 1024)
 		dMMs.Start()
 
-		k2sMs := ms.NewPulsarMsgStream(ctx, 1024)
+		k2sMs := pulsarms.NewPulsarMsgStream(ctx, 1024)
 		k2sMs.SetPulsarClient(pulsarAddr)
-		k2sMs.CreatePulsarConsumers(Params.K2SChannelNames, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
+		k2sMs.CreatePulsarConsumers(Params.K2SChannelNames, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), 1024)
 		k2sMs.Start()
 
 		ttsoftmsgs := [][2]uint64{
@@ -1162,7 +1164,7 @@ func TestMaster(t *testing.T) {
 		// test stats
 		segID := assignments[0].SegID
 		pulsarAddress := Params.PulsarAddress
-		msgStream := ms.NewPulsarMsgStream(ctx, 1024)
+		msgStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
 		msgStream.SetPulsarClient(pulsarAddress)
 		msgStream.CreatePulsarProducers([]string{Params.QueryNodeStatsChannelName})
 		msgStream.Start()

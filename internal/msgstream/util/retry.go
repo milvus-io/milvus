@@ -1,4 +1,4 @@
-package msgstream
+package util
 
 import (
 	"log"

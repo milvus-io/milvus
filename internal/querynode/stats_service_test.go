@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 )
 
 // NOTE: start pulsar before test
@@ -26,7 +27,7 @@ func TestSegmentManagement_sendSegmentStatistic(t *testing.T) {
 
 	pulsarURL := Params.PulsarAddress
 
-	statsStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	statsStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 	statsStream.SetPulsarClient(pulsarURL)
 	statsStream.CreatePulsarProducers(producerChannels)
 

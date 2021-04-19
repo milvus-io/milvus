@@ -11,6 +11,8 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
@@ -255,18 +257,18 @@ func (c *Core) startTimeTickLoop() {
 
 func (c *Core) setMsgStreams() error {
 	//proxy time tick stream,
-	proxyTimeTickStream := ms.NewPulsarMsgStream(c.ctx, 1024)
+	proxyTimeTickStream := pulsarms.NewPulsarMsgStream(c.ctx, 1024)
 	proxyTimeTickStream.SetPulsarClient(Params.PulsarAddress)
-	proxyTimeTickStream.CreatePulsarConsumers([]string{Params.ProxyTimeTickChannel}, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
+	proxyTimeTickStream.CreatePulsarConsumers([]string{Params.ProxyTimeTickChannel}, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), 1024)
 	proxyTimeTickStream.Start()
 
 	// master time tick channel
-	timeTickStream := ms.NewPulsarMsgStream(c.ctx, 1024)
+	timeTickStream := pulsarms.NewPulsarMsgStream(c.ctx, 1024)
 	timeTickStream.SetPulsarClient(Params.PulsarAddress)
 	timeTickStream.CreatePulsarProducers([]string{Params.TimeTickChannel})
 
 	// master dd channel
-	ddStream := ms.NewPulsarMsgStream(c.ctx, 1024)
+	ddStream := pulsarms.NewPulsarMsgStream(c.ctx, 1024)
 	ddStream.SetPulsarClient(Params.PulsarAddress)
 	ddStream.CreatePulsarProducers([]string{Params.DdChannel})
 
@@ -399,9 +401,9 @@ func (c *Core) setMsgStreams() error {
 	}()
 
 	//segment channel, data service create segment,or data node flush segment will put msg in this channel
-	dataServiceStream := ms.NewPulsarMsgStream(c.ctx, 1024)
+	dataServiceStream := pulsarms.NewPulsarMsgStream(c.ctx, 1024)
 	dataServiceStream.SetPulsarClient(Params.PulsarAddress)
-	dataServiceStream.CreatePulsarConsumers([]string{Params.DataServiceSegmentChannel}, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
+	dataServiceStream.CreatePulsarConsumers([]string{Params.DataServiceSegmentChannel}, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), 1024)
 	dataServiceStream.Start()
 
 	// receive segment info from msg stream

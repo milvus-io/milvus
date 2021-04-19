@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/master"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -330,7 +331,7 @@ func TestProxy_Search(t *testing.T) {
 		defer group.Done()
 		queryResultChannels := []string{"QueryResult"}
 		bufSize := 1024
-		queryResultMsgStream := msgstream.NewPulsarMsgStream(ctx, int64(bufSize))
+		queryResultMsgStream := pulsarms.NewPulsarMsgStream(ctx, int64(bufSize))
 		pulsarAddress := Params.PulsarAddress()
 		queryResultMsgStream.SetPulsarClient(pulsarAddress)
 		assert.NotEqual(t, queryResultMsgStream, nil, "query result message stream should not be nil!")

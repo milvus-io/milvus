@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
@@ -41,7 +42,7 @@ func (sService *statsService) start() {
 	msgStreamURL := Params.PulsarAddress
 	producerChannels := []string{Params.StatsChannelName}
 
-	statsStream := msgstream.NewPulsarMsgStream(sService.ctx, receiveBufSize)
+	statsStream := pulsarms.NewPulsarMsgStream(sService.ctx, receiveBufSize)
 	statsStream.SetPulsarClient(msgStreamURL)
 	statsStream.CreatePulsarProducers(producerChannels)
 
