@@ -2,10 +2,10 @@ package proxy
 
 import (
 	"context"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"errors"
 	"log"
 
-	"github.com/pingcap/goleveldb/leveldb/errors"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"

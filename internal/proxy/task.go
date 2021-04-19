@@ -3,12 +3,13 @@ package proxy
 import (
 	"context"
 	"errors"
+	"log"
+
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
-	"log"
 )
 
 type task interface {
@@ -96,10 +97,10 @@ func (it *InsertTask) Notify(err error) {
 type CreateCollectionTask struct {
 	internalpb.CreateCollectionRequest
 	masterClient masterpb.MasterClient
-	done chan error
-	resultChan chan *commonpb.Status
-	ctx context.Context
-	cancel context.CancelFunc
+	done         chan error
+	resultChan   chan *commonpb.Status
+	ctx          context.Context
+	cancel       context.CancelFunc
 }
 
 func (cct *CreateCollectionTask) Id() UniqueID {
@@ -132,7 +133,7 @@ func (cct *CreateCollectionTask) Execute() error {
 		log.Printf("create collection failed, error= %v", err)
 		cct.resultChan <- &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason: err.Error(),
+			Reason:    err.Error(),
 		}
 	} else {
 		cct.resultChan <- resp
@@ -148,9 +149,9 @@ func (cct *CreateCollectionTask) WaitToFinish() error {
 	defer cct.cancel()
 	for {
 		select {
-		case err := <- cct.done:
+		case err := <-cct.done:
 			return err
-		case <- cct.ctx.Done():
+		case <-cct.ctx.Done():
 			log.Print("wait to finish failed, timeout!")
 			return errors.New("wait to finish failed, timeout!")
 		}

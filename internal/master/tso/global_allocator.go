@@ -14,15 +14,18 @@
 package tso
 
 import (
+	"log"
+	"path"
 	"strconv"
 	"sync/atomic"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/kv"
 
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"go.etcd.io/etcd/clientv3"
 
-	"github.com/pingcap/log"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.uber.org/zap"
@@ -66,7 +69,7 @@ func NewGlobalTSOAllocator(key string) Allocator {
 	var saveInterval time.Duration = 3 * time.Second
 	return &GlobalTSOAllocator{
 		timestampOracle: &timestampOracle{
-			client:        client,
+			kvBase:        kv.NewEtcdKV(client, path.Join(conf.Config.Etcd.Rootpath, "tso")),
 			rootPath:      conf.Config.Etcd.Rootpath,
 			saveInterval:  saveInterval,
 			maxResetTSGap: func() time.Duration { return 3 * time.Second },
@@ -104,7 +107,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
 		current := (*atomicObject)(atomic.LoadPointer(&gta.timestampOracle.TSO))
 		if current == nil || current.physical == typeutil.ZeroTime {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
-			log.Info("sync hasn't completed yet, wait for a while")
+			log.Println("sync hasn't completed yet, wait for a while")
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
@@ -112,7 +115,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
 		physical = current.physical.UnixNano() / int64(time.Millisecond)
 		logical = atomic.AddInt64(&current.logical, int64(count))
 		if logical >= maxLogical {
-			log.Error("logical part outside of max logical interval, please check ntp time",
+			log.Println("logical part outside of max logical interval, please check ntp time",
 				zap.Int("retry-count", i))
 			time.Sleep(UpdateTimestampStep)
 			continue

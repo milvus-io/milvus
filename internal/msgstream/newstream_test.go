@@ -217,7 +217,7 @@ func TestNewTtStream_Insert_TimeSync(t *testing.T) {
 		Timestamps:     []Timestamp{1},
 	}
 	insertMsg := &InsertMsg{
-		BaseMsg: BaseMsg{HashValues: []int32{2}},
+		BaseMsg:       BaseMsg{HashValues: []int32{2}},
 		InsertRequest: insertRequest,
 	}
 	var tsMsg TsMsg = insertMsg
@@ -245,7 +245,7 @@ func TestNewTtStream_Insert_TimeSync(t *testing.T) {
 				fmt.Println("msg type: ", (*v).Type(), ", msg value: ", *v)
 			}
 		}
-		if receiveCount + 1 >= len(msgPack.Msgs) {
+		if receiveCount+1 >= len(msgPack.Msgs) {
 			break
 		}
 	}

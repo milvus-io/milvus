@@ -25,8 +25,6 @@ type GlobalIdAllocator struct {
 	allocator tso.Allocator
 }
 
-//func getID
-
 var allocator GlobalIdAllocator = GlobalIdAllocator{
 	allocator: tso.NewGlobalTSOAllocator("idTimestamp"),
 }

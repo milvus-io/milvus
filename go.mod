@@ -5,7 +5,6 @@ go 1.15
 require (
 	code.cloudfoundry.org/bytefmt v0.0.0-20200131002437-cf55d5288a48 // indirect
 	github.com/apache/pulsar-client-go v0.1.1
-	github.com/apache/pulsar/pulsar-client-go v0.0.0-20200901051823-800681aaa9af
 	github.com/aws/aws-sdk-go v1.30.8
 	github.com/coreos/etcd v3.3.25+incompatible // indirect
 	github.com/frankban/quicktest v1.10.2 // indirect
@@ -22,9 +21,9 @@ require (
 	github.com/onsi/gomega v1.10.0 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pierrec/lz4 v2.5.2+incompatible // indirect
-	github.com/pingcap/check v0.0.0-20200212061837-5e12011dc712
+	github.com/pingcap/check v0.0.0-20200212061837-5e12011dc712 // indirect
 	github.com/pingcap/errors v0.11.4 // indirect
-	github.com/pingcap/log v0.0.0-20200828042413-fce0951f1463
+	github.com/pingcap/log v0.0.0-20200828042413-fce0951f1463 // indirect
 	github.com/pivotal-golang/bytefmt v0.0.0-20200131002437-cf55d5288a48
 	github.com/prometheus/client_golang v1.5.1 // indirect
 	github.com/prometheus/common v0.10.0 // indirect
@@ -34,10 +33,8 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.6.1
 	github.com/tikv/client-go v0.0.0-20200824032810-95774393107b
-	github.com/tikv/pd v2.1.19+incompatible
 	github.com/yahoo/athenz v1.9.16 // indirect
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
-	go.uber.org/atomic v1.6.0
 	go.uber.org/zap v1.15.0
 	golang.org/x/crypto v0.0.0-20200820211705-5c72a883971a // indirect
 	golang.org/x/lint v0.0.0-20200302205851-738671d3881b // indirect

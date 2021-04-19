@@ -5,10 +5,11 @@ import (
 	"log"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 )
 
 type timeTick struct {
@@ -33,10 +34,10 @@ func (tt *timeTick) tick() error {
 	if tt.areRequestsDelivered(tt.currentTick) == false {
 		return errors.New("Failed")
 	}
-	tsm := pb.TimeSyncMsg{
+	tsm := internalpb.TimeTickMsg{
+		MsgType:   internalpb.MsgType_kTimeTick,
+		PeerId:    tt.peer_id,
 		Timestamp: uint64(tt.currentTick),
-		Peer_Id:   tt.peer_id,
-		SyncType:  pb.SyncType_READ,
 	}
 	payload, err := proto.Marshal(&tsm)
 	if err != nil {

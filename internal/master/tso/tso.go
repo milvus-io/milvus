@@ -15,7 +15,6 @@ package tso
 
 import (
 	"log"
-	"path"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -23,10 +22,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/util/etcdutil"
+	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-	"go.etcd.io/etcd/clientv3"
 )
 
 const (
@@ -48,9 +46,10 @@ type atomicObject struct {
 
 // timestampOracle is used to maintain the logic of tso.
 type timestampOracle struct {
-	client   *clientv3.Client
 	rootPath string
 	key      string
+	kvBase   *kv.EtcdKV
+
 	// TODO: remove saveInterval
 	saveInterval  time.Duration
 	maxResetTSGap func() time.Duration
@@ -59,40 +58,29 @@ type timestampOracle struct {
 	lastSavedTime atomic.Value
 }
 
-func (t *timestampOracle) getTimestampPath() string {
-	return path.Join(t.rootPath, t.key)
-}
-
 func (t *timestampOracle) loadTimestamp() (time.Time, error) {
-	data, err := etcdutil.GetValue(t.client, t.getTimestampPath())
+	strData, err := t.kvBase.Load(t.key)
+
+	var binData []byte = []byte(strData)
+
 	if err != nil {
 		return typeutil.ZeroTime, err
 	}
-	if len(data) == 0 {
+	if len(binData) == 0 {
 		return typeutil.ZeroTime, nil
 	}
-	return typeutil.ParseTimestamp(data)
+	return typeutil.ParseTimestamp(binData)
 }
 
 // save timestamp, if lastTs is 0, we think the timestamp doesn't exist, so create it,
 // otherwise, update it.
 func (t *timestampOracle) saveTimestamp(ts time.Time) error {
-	key := t.getTimestampPath()
 	data := typeutil.Uint64ToBytes(uint64(ts.UnixNano()))
-	err := errors.New("")
-	println("%v,%v", key, data)
-	//resp, err := leadership.LeaderTxn().
-	//	Then(clientv3.OpPut(key, string(data))).
-	//	Commit()
+	err := t.kvBase.Save(t.key, string(data))
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	//if !resp.Succeeded {
-	//	return errors.New("save timestamp failed, maybe we lost leader")
-	//}
-
 	t.lastSavedTime.Store(ts)
-
 	return nil
 }
 

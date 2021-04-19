@@ -1,13 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
-	"go.uber.org/zap"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
-	"context"
+
+	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/proxy"

@@ -14,7 +14,7 @@ import (
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
-	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 type UniqueID = typeutil.UniqueID
@@ -38,6 +38,7 @@ type TimeTickReader struct {
 func (r *TimeTickReader) Start() {
 	go r.readTimeTick()
 	go r.timeSync()
+
 }
 
 func (r *TimeTickReader) Close() {
@@ -73,7 +74,10 @@ func (r *TimeTickReader) timeSync() {
 				}
 			}
 			//send timestamp flag to reader channel
-			msg := pb.InsertOrDeleteMsg{Timestamp: minTimeStamp, ClientId: stopReadFlagId}
+			msg := internalpb.TimeTickMsg{
+				Timestamp: minTimeStamp,
+				MsgType:   internalpb.MsgType_kTimeTick,
+			}
 			payload, err := proto.Marshal(&msg)
 			if err != nil {
 				//TODO log error
@@ -101,12 +105,12 @@ func (r *TimeTickReader) readTimeTick() {
 			}
 
 			msg := cm.Message
-			var tsm pb.TimeSyncMsg
+			var tsm internalpb.TimeTickMsg
 			if err := proto.Unmarshal(msg.Payload(), &tsm); err != nil {
 				log.Printf("UnMarshal timetick flag error  %v", err)
 			}
 
-			r.timeTickPeerProxy[tsm.Peer_Id] = tsm.Timestamp
+			r.timeTickPeerProxy[tsm.PeerId] = tsm.Timestamp
 			r.timeTickConsumer.AckID(msg.ID())
 		}
 	}

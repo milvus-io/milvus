@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"math"
 	"testing"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 
 	"github.com/stretchr/testify/assert"
 	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
@@ -76,7 +77,7 @@ func TestSegment_SegmentInsert(t *testing.T) {
 	rawData = append(rawData, bs...)
 	var records []*commonpb.Blob
 	for i := 0; i < N; i++ {
-		blob := &commonpb.Blob {
+		blob := &commonpb.Blob{
 			Value: rawData,
 		}
 		records = append(records, blob)
@@ -177,7 +178,7 @@ func TestSegment_SegmentSearch(t *testing.T) {
 	rawData = append(rawData, bs...)
 	var records []*commonpb.Blob
 	for i := 0; i < N; i++ {
-		blob := &commonpb.Blob {
+		blob := &commonpb.Blob{
 			Value: rawData,
 		}
 		ids = append(ids, int64(i))
@@ -319,7 +320,7 @@ func TestSegment_GetRowCount(t *testing.T) {
 	rawData = append(rawData, bs...)
 	var records []*commonpb.Blob
 	for i := 0; i < N; i++ {
-		blob := &commonpb.Blob {
+		blob := &commonpb.Blob{
 			Value: rawData,
 		}
 		records = append(records, blob)
@@ -429,7 +430,7 @@ func TestSegment_GetMemSize(t *testing.T) {
 	rawData = append(rawData, bs...)
 	var records []*commonpb.Blob
 	for i := 0; i < N; i++ {
-		blob := &commonpb.Blob {
+		blob := &commonpb.Blob{
 			Value: rawData,
 		}
 		records = append(records, blob)
