@@ -57,7 +57,7 @@ jobs:
       - name: Start Service
         shell: bash
         run: |
-          cd ${GITHUB_WORKSPACE}/deployments/docker && docker-compose up -d
+          cd ${GITHUB_WORKSPACE}/deployments/docker && docker-compose -p milvus-distributed up -d
       - name: Build and UnitTest
         env:
           CHECK_BUILDER: "1"

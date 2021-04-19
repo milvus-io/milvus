@@ -48,7 +48,7 @@ func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.
 		case <-ctx.Done():
 			return errors.New("insert timeout")
 		default:
-			return p.taskSch.DmQueue.Enqueue(it)
+			return p.sched.DmQueue.Enqueue(it)
 		}
 	}
 	err := fn()
@@ -96,7 +96,7 @@ func (p *Proxy) CreateCollection(ctx context.Context, req *schemapb.CollectionSc
 		case <-ctx.Done():
 			return errors.New("create collection timeout")
 		default:
-			return p.taskSch.DdQueue.Enqueue(cct)
+			return p.sched.DdQueue.Enqueue(cct)
 		}
 	}
 	err := fn()
@@ -144,7 +144,7 @@ func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.Qu
 		case <-ctx.Done():
 			return errors.New("create collection timeout")
 		default:
-			return p.taskSch.DqQueue.Enqueue(qt)
+			return p.sched.DqQueue.Enqueue(qt)
 		}
 	}
 	err := fn()
@@ -189,7 +189,7 @@ func (p *Proxy) DropCollection(ctx context.Context, req *servicepb.CollectionNam
 		case <-ctx.Done():
 			return errors.New("create collection timeout")
 		default:
-			return p.taskSch.DdQueue.Enqueue(dct)
+			return p.sched.DdQueue.Enqueue(dct)
 		}
 	}
 	err := fn()
@@ -230,7 +230,7 @@ func (p *Proxy) HasCollection(ctx context.Context, req *servicepb.CollectionName
 		case <-ctx.Done():
 			return errors.New("create collection timeout")
 		default:
-			return p.taskSch.DdQueue.Enqueue(hct)
+			return p.sched.DdQueue.Enqueue(hct)
 		}
 	}
 	err := fn()
@@ -275,7 +275,7 @@ func (p *Proxy) DescribeCollection(ctx context.Context, req *servicepb.Collectio
 		case <-ctx.Done():
 			return errors.New("create collection timeout")
 		default:
-			return p.taskSch.DdQueue.Enqueue(dct)
+			return p.sched.DdQueue.Enqueue(dct)
 		}
 	}
 	err := fn()
@@ -319,7 +319,7 @@ func (p *Proxy) ShowCollections(ctx context.Context, req *commonpb.Empty) (*serv
 		case <-ctx.Done():
 			return errors.New("create collection timeout")
 		default:
-			return p.taskSch.DdQueue.Enqueue(sct)
+			return p.sched.DdQueue.Enqueue(sct)
 		}
 	}
 	err := fn()
@@ -369,7 +369,7 @@ func (p *Proxy) CreatePartition(ctx context.Context, in *servicepb.PartitionName
 		case <-ctx.Done():
 			return errors.New("create partition timeout")
 		default:
-			return p.taskSch.DdQueue.Enqueue(cpt)
+			return p.sched.DdQueue.Enqueue(cpt)
 		}
 	}()
 
@@ -415,7 +415,7 @@ func (p *Proxy) DropPartition(ctx context.Context, in *servicepb.PartitionName) 
 		case <-ctx.Done():
 			return errors.New("drop partition timeout")
 		default:
-			return p.taskSch.DdQueue.Enqueue(dpt)
+			return p.sched.DdQueue.Enqueue(dpt)
 		}
 	}()
 
@@ -461,7 +461,7 @@ func (p *Proxy) HasPartition(ctx context.Context, in *servicepb.PartitionName) (
 		case <-ctx.Done():
 			return errors.New("has partition timeout")
 		default:
-			return p.taskSch.DdQueue.Enqueue(hpt)
+			return p.sched.DdQueue.Enqueue(hpt)
 		}
 	}()
 
@@ -513,7 +513,7 @@ func (p *Proxy) DescribePartition(ctx context.Context, in *servicepb.PartitionNa
 		case <-ctx.Done():
 			return errors.New("describe partion timeout")
 		default:
-			return p.taskSch.DdQueue.Enqueue(dpt)
+			return p.sched.DdQueue.Enqueue(dpt)
 		}
 	}()
 
@@ -566,7 +566,7 @@ func (p *Proxy) ShowPartitions(ctx context.Context, req *servicepb.CollectionNam
 		case <-ctx.Done():
 			return errors.New("show partition timeout")
 		default:
-			return p.taskSch.DdQueue.Enqueue(spt)
+			return p.sched.DdQueue.Enqueue(spt)
 		}
 	}()
 
