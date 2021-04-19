@@ -6,7 +6,7 @@ import "common.proto";
 import "service_msg.proto";
 
 
-enum ReqType {
+enum MsgType {
     kNone = 0;
     /* Definition Requests: collection */
     kCreateCollection = 100;
@@ -72,7 +72,7 @@ message TsoResponse {
 
 
 message CreateCollectionRequest {
-    ReqType req_type = 1;
+    MsgType msg_type = 1;
     int64 req_id = 2;
     uint64 timestamp = 3;
     int64 proxy_id = 4;
@@ -81,7 +81,7 @@ message CreateCollectionRequest {
 
 
 message DropCollectionRequest {
-    ReqType req_type = 1;
+    MsgType msg_type = 1;
     int64 req_id = 2;
     uint64 timestamp = 3;
     int64 proxy_id = 4;
@@ -90,7 +90,7 @@ message DropCollectionRequest {
 
 
 message HasCollectionRequest {
-    ReqType req_type = 1;
+    MsgType msg_type = 1;
     int64 req_id = 2;
     uint64 timestamp = 3;
     int64 proxy_id = 4;
@@ -99,7 +99,7 @@ message HasCollectionRequest {
 
 
 message DescribeCollectionRequest {
-    ReqType req_type = 1;
+    MsgType msg_type = 1;
     int64 req_id = 2;
     uint64 timestamp = 3;
     int64 proxy_id = 4;
@@ -108,7 +108,7 @@ message DescribeCollectionRequest {
 
 
 message ShowCollectionRequest {
-    ReqType req_type = 1;
+    MsgType msg_type = 1;
     int64 req_id = 2;
     uint64 timestamp = 3;
     int64 proxy_id = 4;
@@ -116,7 +116,7 @@ message ShowCollectionRequest {
 
 
 message CreatePartitionRequest {
-    ReqType req_type = 1;
+    MsgType msg_type = 1;
     int64 req_id = 2;
     uint64 timestamp = 3;
     int64 proxy_id = 4;
@@ -125,7 +125,7 @@ message CreatePartitionRequest {
 
 
 message DropPartitionRequest {
-    ReqType req_type = 1;
+    MsgType msg_type = 1;
     int64 req_id = 2;
     uint64 timestamp = 3;
     int64 proxy_id = 4;
@@ -134,7 +134,7 @@ message DropPartitionRequest {
 
 
 message HasPartitionRequest {
-    ReqType req_type = 1;
+    MsgType msg_type = 1;
     int64 req_id = 2;
     uint64 timestamp = 3;
     int64 proxy_id = 4;
@@ -143,7 +143,7 @@ message HasPartitionRequest {
 
 
 message DescribePartitionRequest {
-    ReqType req_type = 1;
+    MsgType msg_type = 1;
     int64 req_id = 2;
     uint64 timestamp = 3;
     int64 proxy_id = 4;
@@ -152,7 +152,7 @@ message DescribePartitionRequest {
 
 
 message ShowPartitionRequest {
-    ReqType req_type = 1;
+    MsgType msg_type = 1;
     int64 req_id = 2;
     uint64 timestamp = 3;
     int64 proxy_id = 4;
@@ -161,7 +161,7 @@ message ShowPartitionRequest {
 
 
 message InsertRequest {
-    ReqType req_type = 1;
+    MsgType msg_type = 1;
     int64 req_id = 2;
     string collection_name = 3;
     string partition_tag = 4;
@@ -175,7 +175,7 @@ message InsertRequest {
 
 
 message DeleteRequest {
-    ReqType req_type = 1;
+    MsgType msg_type = 1;
     int64 req_id = 2;
     string collection_name = 3;
     int64 channel_id = 4;
@@ -186,7 +186,7 @@ message DeleteRequest {
 
 
 message SearchRequest {
-    ReqType req_type = 1;
+    MsgType msg_type = 1;
     int64 req_id = 2;
     int64 proxy_id = 3;
     uint64 timestamp = 4;
@@ -204,7 +204,6 @@ message SearchResult {
     int64 result_channel_id = 6;
     repeated service.Hits hits = 7;
 }
-
 
 message TimeTickMsg {
     int64 peer_id = 1;

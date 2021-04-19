@@ -29,7 +29,7 @@ func getTsMsg(msgType MsgType, reqId int64, hashValue int32) *TsMsg {
 	switch msgType {
 	case KInsert:
 		insertRequest := internalPb.InsertRequest{
-			ReqType:        internalPb.ReqType_kInsert,
+			MsgType:        internalPb.MsgType_kInsert,
 			ReqId:          reqId,
 			CollectionName: "Collection",
 			PartitionTag:   "Partition",
@@ -45,7 +45,7 @@ func getTsMsg(msgType MsgType, reqId int64, hashValue int32) *TsMsg {
 		tsMsg = insertMsg
 	case KDelete:
 		deleteRequest := internalPb.DeleteRequest{
-			ReqType:        internalPb.ReqType_kDelete,
+			MsgType:        internalPb.MsgType_kDelete,
 			ReqId:          reqId,
 			CollectionName: "Collection",
 			ChannelId:      1,
@@ -60,7 +60,7 @@ func getTsMsg(msgType MsgType, reqId int64, hashValue int32) *TsMsg {
 		tsMsg = deleteMsg
 	case KSearch:
 		searchRequest := internalPb.SearchRequest{
-			ReqType:         internalPb.ReqType_kSearch,
+			MsgType:         internalPb.MsgType_kSearch,
 			ReqId:           reqId,
 			ProxyId:         1,
 			Timestamp:       1,
@@ -97,7 +97,7 @@ func getTsMsg(msgType MsgType, reqId int64, hashValue int32) *TsMsg {
 		tsMsg = timeSyncMsg
 	case KTimeTick:
 		insertRequest := internalPb.InsertRequest{
-			ReqType:        internalPb.ReqType_kTimeTick,
+			MsgType:        internalPb.MsgType_kTimeTick,
 			ReqId:          reqId,
 			CollectionName: "Collection",
 			PartitionTag:   "Partition",
