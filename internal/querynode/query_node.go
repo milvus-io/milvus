@@ -27,8 +27,8 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/ms"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/rmqms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -407,8 +407,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 	}
 
 	switch t := ds.dmStream.(type) {
-	case *pulsarms.PulsarTtMsgStream:
-	case *rmqms.RmqTtMsgStream:
+	case *ms.TtMsgStream:
 	default:
 		_ = t
 		errMsg := "type assertion failed for dm message stream"

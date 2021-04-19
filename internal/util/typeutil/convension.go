@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/client"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 )
 
@@ -42,6 +44,10 @@ func Uint64ToBytes(v uint64) []byte {
 }
 
 func PulsarMsgIDToString(messageID pulsar.MessageID) string {
+	return strings.ToValidUTF8(string(messageID.Serialize()), "")
+}
+
+func MsgIDToString(messageID client.MessageID) string {
 	return strings.ToValidUTF8(string(messageID.Serialize()), "")
 }
 

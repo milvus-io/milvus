@@ -10,6 +10,10 @@ const (
 	SubscriptionPositionEarliest
 )
 
+func EarliestMessageID() UniqueID {
+	return -1
+}
+
 type ConsumerOptions struct {
 	// The topic that this consumer will subscribe on
 	Topic string
@@ -27,7 +31,9 @@ type ConsumerOptions struct {
 }
 
 type ConsumerMessage struct {
+	Consumer
 	MsgID   UniqueID
+	Topic   string
 	Payload []byte
 }
 
