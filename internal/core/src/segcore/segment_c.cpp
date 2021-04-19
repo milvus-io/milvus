@@ -19,7 +19,7 @@
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include <cstdint>
 #include <boost/concept_check.hpp>
-#include "common/LoadIndex.h"
+#include "common/LoadInfo.h"
 
 CSegmentBase
 NewSegment(CCollection collection, uint64_t segment_id) {
