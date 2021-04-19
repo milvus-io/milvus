@@ -67,6 +67,7 @@ ExecExprVisitor::visit(BoolUnaryExpr& expr) {
         switch (expr.op_type_) {
             case OpType::LogicalNot: {
                 chunk.flip();
+                break;
             }
             default: {
                 PanicInfo("Invalid OpType");
