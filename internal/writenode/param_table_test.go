@@ -64,7 +64,7 @@ func TestParamTable_WriteNode(t *testing.T) {
 
 	t.Run("Test timeTickChannelName", func(t *testing.T) {
 		name := Params.WriteNodeTimeTickChannelName
-		assert.Equal(t, name, "writeNodeTimeTick")
+		assert.Equal(t, name, "writeNodeTimeTick-3")
 	})
 
 	t.Run("Test minioAccessKeyID", func(t *testing.T) {

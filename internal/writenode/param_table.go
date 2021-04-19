@@ -260,7 +260,7 @@ func (p *ParamTable) initWriteNodeTimeTickChannelName() {
 	if err != nil {
 		panic(err)
 	}
-	p.WriteNodeTimeTickChannelName = channels
+	p.WriteNodeTimeTickChannelName = channels + "-" + strconv.FormatInt(p.WriteNodeID, 10)
 }
 
 func (p *ParamTable) initSliceIndex() {
