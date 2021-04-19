@@ -55,9 +55,10 @@ ExecExprVisitor::visit(TermExpr& expr) {
     PanicInfo("unimplemented");
 }
 
-template <typename T, typename Func>
+template <typename T, typename IndexFunc, typename ElementFunc>
 auto
-ExecExprVisitor::ExecRangeVisitorImpl(RangeExprImpl<T>& expr, Func func) -> RetType {
+ExecExprVisitor::ExecRangeVisitorImpl(RangeExprImpl<T>& expr, IndexFunc index_func, ElementFunc element_func)
+    -> RetType {
     auto& records = segment_.get_insert_record();
     auto data_type = expr.data_type_;
     auto& schema = segment_.get_schema();
@@ -67,15 +68,28 @@ ExecExprVisitor::ExecRangeVisitorImpl(RangeExprImpl<T>& expr, Func func) -> RetT
     auto& field_meta = schema[field_offset];
     auto vec_ptr = records.get_scalar_entity<T>(field_offset);
     auto& vec = *vec_ptr;
+    auto& indexing_record = segment_.get_indexing_record();
+    const segcore::ScalarIndexingEntry<T>& entry = indexing_record.get_scalar_entry<T>(field_offset);
+
     RetType results(vec.chunk_size());
-    for (auto chunk_id = 0; chunk_id < vec.chunk_size(); ++chunk_id) {
+    auto indexing_barrier = indexing_record.get_finished_ack();
+    for (auto chunk_id = 0; chunk_id < indexing_barrier; ++chunk_id) {
+        auto& result = results[chunk_id];
+        auto indexing = entry.get_indexing(chunk_id);
+        auto data = index_func(indexing);
+        result = ~std::move(*data);
+        Assert(result.size() == segcore::DefaultElementPerChunk);
+    }
+
+    for (auto chunk_id = indexing_barrier; chunk_id < vec.chunk_size(); ++chunk_id) {
         auto& result = results[chunk_id];
         result.resize(segcore::DefaultElementPerChunk);
         auto chunk = vec.get_chunk(chunk_id);
         const T* data = chunk.data();
         for (int index = 0; index < segcore::DefaultElementPerChunk; ++index) {
-            result[index] = func(data[index]);
+            result[index] = element_func(data[index]);
         }
+        Assert(result.size() == segcore::DefaultElementPerChunk);
     }
     return results;
 }
@@ -89,6 +103,8 @@ ExecExprVisitor::ExecRangeVisitorDispatcher(RangeExpr& expr_raw) -> RetType {
     auto conditions = expr.conditions_;
     std::sort(conditions.begin(), conditions.end());
     using OpType = RangeExpr::OpType;
+    using Index = knowhere::scalar::StructuredIndex<T>;
+    using Operator = knowhere::scalar::OperatorType;
     if (conditions.size() == 1) {
         auto cond = conditions[0];
         // auto [op, val] = cond; // strange bug on capture
@@ -96,27 +112,39 @@ ExecExprVisitor::ExecRangeVisitorDispatcher(RangeExpr& expr_raw) -> RetType {
         auto val = std::get<1>(cond);
         switch (op) {
             case OpType::Equal: {
-                return ExecRangeVisitorImpl(expr, [val](T x) { return !(x == val); });
+                auto index_func = [val](Index* index) { return index->In(1, &val); };
+                return ExecRangeVisitorImpl(expr, index_func, [val](T x) { return !(x == val); });
             }
 
             case OpType::NotEqual: {
-                return ExecRangeVisitorImpl(expr, [val](T x) { return !(x != val); });
+                auto index_func = [val](Index* index) {
+                    // Note: index->NotIn() is buggy, investigating
+                    // this is a workaround
+                    auto res = index->In(1, &val);
+                    *res = ~std::move(*res);
+                    return res;
+                };
+                return ExecRangeVisitorImpl(expr, index_func, [val](T x) { return !(x != val); });
             }
 
             case OpType::GreaterEqual: {
-                return ExecRangeVisitorImpl(expr, [val](T x) { return !(x >= val); });
+                auto index_func = [val](Index* index) { return index->Range(val, Operator::GE); };
+                return ExecRangeVisitorImpl(expr, index_func, [val](T x) { return !(x >= val); });
             }
 
             case OpType::GreaterThan: {
-                return ExecRangeVisitorImpl(expr, [val](T x) { return !(x > val); });
+                auto index_func = [val](Index* index) { return index->Range(val, Operator::GT); };
+                return ExecRangeVisitorImpl(expr, index_func, [val](T x) { return !(x > val); });
             }
 
             case OpType::LessEqual: {
-                return ExecRangeVisitorImpl(expr, [val](T x) { return !(x <= val); });
+                auto index_func = [val](Index* index) { return index->Range(val, Operator::LE); };
+                return ExecRangeVisitorImpl(expr, index_func, [val](T x) { return !(x <= val); });
             }
 
             case OpType::LessThan: {
-                return ExecRangeVisitorImpl(expr, [val](T x) { return !(x < val); });
+                auto index_func = [val](Index* index) { return index->Range(val, Operator::LT); };
+                return ExecRangeVisitorImpl(expr, index_func, [val](T x) { return !(x < val); });
             }
             default: {
                 PanicInfo("unsupported range node");
@@ -131,13 +159,17 @@ ExecExprVisitor::ExecRangeVisitorDispatcher(RangeExpr& expr_raw) -> RetType {
         auto ops = std::make_tuple(op1, op2);
         if (false) {
         } else if (ops == std::make_tuple(OpType::GreaterThan, OpType::LessThan)) {
-            return ExecRangeVisitorImpl(expr, [val1, val2](T x) { return !(val1 < x && x < val2); });
+            auto index_func = [val1, val2](Index* index) { return index->Range(val1, false, val2, false); };
+            return ExecRangeVisitorImpl(expr, index_func, [val1, val2](T x) { return !(val1 < x && x < val2); });
         } else if (ops == std::make_tuple(OpType::GreaterThan, OpType::LessEqual)) {
-            return ExecRangeVisitorImpl(expr, [val1, val2](T x) { return !(val1 < x && x <= val2); });
+            auto index_func = [val1, val2](Index* index) { return index->Range(val1, false, val2, true); };
+            return ExecRangeVisitorImpl(expr, index_func, [val1, val2](T x) { return !(val1 < x && x <= val2); });
         } else if (ops == std::make_tuple(OpType::GreaterEqual, OpType::LessThan)) {
-            return ExecRangeVisitorImpl(expr, [val1, val2](T x) { return !(val1 <= x && x < val2); });
+            auto index_func = [val1, val2](Index* index) { return index->Range(val1, true, val2, false); };
+            return ExecRangeVisitorImpl(expr, index_func, [val1, val2](T x) { return !(val1 <= x && x < val2); });
         } else if (ops == std::make_tuple(OpType::GreaterEqual, OpType::LessEqual)) {
-            return ExecRangeVisitorImpl(expr, [val1, val2](T x) { return !(val1 <= x && x <= val2); });
+            auto index_func = [val1, val2](Index* index) { return index->Range(val1, true, val2, true); };
+            return ExecRangeVisitorImpl(expr, index_func, [val1, val2](T x) { return !(val1 <= x && x <= val2); });
         } else {
             PanicInfo("unsupported range node");
         }
@@ -157,7 +189,7 @@ ExecExprVisitor::visit(RangeExpr& expr) {
         //    ret = ExecRangeVisitorDispatcher<bool>(expr);
         //    break;
         //}
-        case DataType::BOOL:
+        // case DataType::BOOL:
         case DataType::INT8: {
             ret = ExecRangeVisitorDispatcher<int8_t>(expr);
             break;

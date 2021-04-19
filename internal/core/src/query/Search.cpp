@@ -15,7 +15,9 @@ create_bitmap_view(std::optional<const BitmapSimple*> bitmaps_opt, int64_t chunk
     auto& bitmaps = *bitmaps_opt.value();
     auto& src_vec = bitmaps.at(chunk_id);
     auto dst = std::make_shared<faiss::ConcurrentBitset>(src_vec.size());
-    boost::to_block_range(src_vec, dst->mutable_data());
+    auto iter = reinterpret_cast<BitmapChunk::block_type*>(dst->mutable_data());
+
+    boost::to_block_range(src_vec, iter);
     return dst;
 }
 
@@ -28,9 +30,9 @@ QueryBruteForceImpl(const SegmentSmallIndex& segment,
                     Timestamp timestamp,
                     std::optional<const BitmapSimple*> bitmaps_opt,
                     QueryResult& results) {
-    auto& record = segment.get_insert_record();
     auto& schema = segment.get_schema();
     auto& indexing_record = segment.get_indexing_record();
+    auto& record = segment.get_insert_record();
     // step 1: binary search to find the barrier of the snapshot
     auto ins_barrier = get_barrier(record, timestamp);
     auto max_chunk = upper_div(ins_barrier, DefaultElementPerChunk);
@@ -48,7 +50,6 @@ QueryBruteForceImpl(const SegmentSmallIndex& segment,
     Assert(vecfield_offset_opt.has_value());
     auto vecfield_offset = vecfield_offset_opt.value();
     auto& field = schema[vecfield_offset];
-    auto vec_ptr = record.get_vec_entity<float>(vecfield_offset);
 
     Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
     auto dim = field.get_dim();
@@ -61,31 +62,45 @@ QueryBruteForceImpl(const SegmentSmallIndex& segment,
     std::vector<float> final_dis(total_count, std::numeric_limits<float>::max());
 
     auto max_indexed_id = indexing_record.get_finished_ack();
-    const auto& indexing_entry = indexing_record.get_indexing(vecfield_offset);
+    const auto& indexing_entry = indexing_record.get_vec_entry(vecfield_offset);
     auto search_conf = indexing_entry.get_search_conf(topK);
 
     for (int chunk_id = 0; chunk_id < max_indexed_id; ++chunk_id) {
-        auto indexing = indexing_entry.get_indexing(chunk_id);
-        auto src_data = vec_ptr->get_chunk(chunk_id).data();
-        auto dataset = knowhere::GenDataset(num_queries, dim, src_data);
+        auto indexing = indexing_entry.get_vec_indexing(chunk_id);
+        auto dataset = knowhere::GenDataset(num_queries, dim, query_data);
         auto bitmap_view = create_bitmap_view(bitmaps_opt, chunk_id);
         auto ans = indexing->Query(dataset, search_conf, bitmap_view);
         auto dis = ans->Get<float*>(milvus::knowhere::meta::DISTANCE);
         auto uids = ans->Get<int64_t*>(milvus::knowhere::meta::IDS);
+        // convert chunk uid to segment uid
+        for (int64_t i = 0; i < total_count; ++i) {
+            auto& x = uids[i];
+            if (x != -1) {
+                x += chunk_id * DefaultElementPerChunk;
+            }
+        }
         merge_into(num_queries, topK, final_dis.data(), final_uids.data(), dis, uids);
     }
 
+    auto vec_ptr = record.get_vec_entity<float>(vecfield_offset);
     // step 4: brute force search where small indexing is unavailable
     for (int chunk_id = max_indexed_id; chunk_id < max_chunk; ++chunk_id) {
         std::vector<int64_t> buf_uids(total_count, -1);
         std::vector<float> buf_dis(total_count, std::numeric_limits<float>::max());
 
         faiss::float_maxheap_array_t buf = {(size_t)num_queries, (size_t)topK, buf_uids.data(), buf_dis.data()};
-        auto src_data = vec_ptr->get_chunk(chunk_id).data();
+        auto& chunk = vec_ptr->get_chunk(chunk_id);
         auto nsize =
             chunk_id != max_chunk - 1 ? DefaultElementPerChunk : ins_barrier - chunk_id * DefaultElementPerChunk;
         auto bitmap_view = create_bitmap_view(bitmaps_opt, chunk_id);
-        faiss::knn_L2sqr(query_data, src_data, dim, num_queries, nsize, &buf, bitmap_view);
+        faiss::knn_L2sqr(query_data, chunk.data(), dim, num_queries, nsize, &buf, bitmap_view);
+        Assert(buf_uids.size() == total_count);
+        // convert chunk uid to segment uid
+        for (auto& x : buf_uids) {
+            if (x != -1) {
+                x += chunk_id * DefaultElementPerChunk;
+            }
+        }
         merge_into(num_queries, topK, final_dis.data(), final_uids.data(), buf_dis.data(), buf_uids.data());
     }
 

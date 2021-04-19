@@ -16,9 +16,10 @@
 #include <string>
 #include "faiss/utils/ConcurrentBitset.h"
 #include "knowhere/index/Index.h"
+#include <boost/dynamic_bitset.hpp>
 
 namespace milvus {
-namespace knowhere {
+namespace knowhere::scalar {
 
 enum class OperatorType { LT = 0, LE = 1, GT = 3, GE = 4 };
 
@@ -60,6 +61,8 @@ struct IndexStructure {
     T a_;
     size_t idx_;
 };
+using TargetBitmap = boost::dynamic_bitset<>;
+using TargetBitmapPtr = std::unique_ptr<TargetBitmap>;
 
 template <typename T>
 class StructuredIndex : public Index {
@@ -67,20 +70,20 @@ class StructuredIndex : public Index {
     virtual void
     Build(const size_t n, const T* values) = 0;
 
-    virtual const faiss::ConcurrentBitsetPtr
+    virtual const TargetBitmapPtr
     In(const size_t n, const T* values) = 0;
 
-    virtual const faiss::ConcurrentBitsetPtr
+    virtual const TargetBitmapPtr
     NotIn(const size_t n, const T* values) = 0;
 
-    virtual const faiss::ConcurrentBitsetPtr
+    virtual const TargetBitmapPtr
     Range(const T value, const OperatorType op) = 0;
 
-    virtual const faiss::ConcurrentBitsetPtr
+    virtual const TargetBitmapPtr
     Range(const T lower_bound_value, bool lb_inclusive, const T upper_bound_value, bool ub_inclusive) = 0;
 };
 
 template <typename T>
 using StructuredIndexPtr = std::shared_ptr<StructuredIndex<T>>;
-}  // namespace knowhere
+}  // namespace knowhere::scalar
 }  // namespace milvus

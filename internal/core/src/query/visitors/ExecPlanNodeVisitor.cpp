@@ -55,8 +55,9 @@ ExecPlanNodeVisitor::visit(FloatVectorANNS& node) {
         auto bitmap = ExecExprVisitor(*segment).call_child(*node.predicate_.value());
         auto ptr = &bitmap;
         QueryBruteForceImpl(*segment, node.query_info_, src_data, num_queries, timestamp_, ptr, ret);
+    } else {
+        QueryBruteForceImpl(*segment, node.query_info_, src_data, num_queries, timestamp_, std::nullopt, ret);
     }
-    QueryBruteForceImpl(*segment, node.query_info_, src_data, num_queries, timestamp_, std::nullopt, ret);
     ret_ = ret;
 }
 

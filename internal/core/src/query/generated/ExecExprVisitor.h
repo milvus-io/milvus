@@ -37,9 +37,9 @@ class ExecExprVisitor : ExprVisitor {
     }
 
  public:
-    template <typename Tp, typename Func>
+    template <typename T, typename IndexFunc, typename ElementFunc>
     auto
-    ExecRangeVisitorImpl(RangeExprImpl<Tp>& expr_scp, Func func) -> RetType;
+    ExecRangeVisitorImpl(RangeExprImpl<T>& expr, IndexFunc func, ElementFunc element_func) -> RetType;
 
     template <typename T>
     auto

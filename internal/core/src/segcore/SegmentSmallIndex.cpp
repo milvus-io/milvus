@@ -168,7 +168,7 @@ SegmentSmallIndex::Insert(int64_t reserved_begin,
     }
 
     record_.ack_responder_.AddSegment(reserved_begin, reserved_begin + size);
-    // indexing_record_.UpdateResourceAck(record_.ack_responder_.GetAck() / DefaultElementPerChunk);
+    indexing_record_.UpdateResourceAck(record_.ack_responder_.GetAck() / DefaultElementPerChunk, record_);
     return Status::OK();
 }
 
@@ -280,7 +280,7 @@ SegmentSmallIndex::BuildIndex(IndexMetaPtr remote_index_meta) {
     if (record_.ack_responder_.GetAck() < 1024 * 4) {
         return Status(SERVER_BUILD_INDEX_ERROR, "too few elements");
     }
-    // AssertInfo(false, "unimplemented");
+    AssertInfo(false, "unimplemented");
     return Status::OK();
 #if 0
     index_meta_ = remote_index_meta;

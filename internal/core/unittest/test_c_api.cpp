@@ -192,7 +192,7 @@ TEST(CApiTest, BuildIndexTest) {
 
     // TODO: add index ptr
     Close(segment);
-    BuildIndex(collection, segment);
+    // BuildIndex(collection, segment);
 
     const char* dsl_string = R"(
     {
