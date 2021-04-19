@@ -54,8 +54,6 @@ func newDescriptorEventHeader() (*descriptorEventHeader, error) {
 		TypeCode:  DescriptorEventType,
 		ServerID:  ServerID,
 	}
-	header.EventLength = header.GetMemoryUsageInBytes()
-	header.NextPosition = header.EventLength + 4
 	return &header, nil
 }
 

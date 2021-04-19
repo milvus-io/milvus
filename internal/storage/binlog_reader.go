@@ -46,7 +46,7 @@ func (reader *BinlogReader) readMagicNumber() (int32, error) {
 	}
 	reader.currentOffset = 4
 	if reader.magicNumber != MagicNumber {
-		return -1, errors.New("parse magic number failed, expected: " + strconv.Itoa(MagicNumber) +
+		return -1, errors.New("parse magic number failed, expected: " + strconv.Itoa(int(MagicNumber)) +
 			", actual: " + strconv.Itoa(int(reader.magicNumber)))
 	}
 

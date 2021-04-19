@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
@@ -179,6 +180,9 @@ func newDescriptorEvent() (*descriptorEvent, error) {
 	if err != nil {
 		return nil, err
 	}
+	header.EventLength = header.GetMemoryUsageInBytes() + data.GetMemoryUsageInBytes()
+	header.NextPosition = int32(binary.Size(MagicNumber)) + header.EventLength
+	data.HeaderLength = int8(binary.Size(eventHeader{}))
 	return &descriptorEvent{
 		descriptorEventHeader: *header,
 		descriptorEventData:   *data,
@@ -242,6 +246,10 @@ func newDeleteEventWriter(dataType schemapb.DataType, offset int32) (*deleteEven
 	return writer, nil
 }
 func newCreateCollectionEventWriter(dataType schemapb.DataType, offset int32) (*createCollectionEventWriter, error) {
+	if dataType != schemapb.DataType_STRING && dataType != schemapb.DataType_INT64 {
+		return nil, errors.New("incorrect data type")
+	}
+
 	payloadWriter, err := NewPayloadWriter(dataType)
 	if err != nil {
 		return nil, err
@@ -270,6 +278,10 @@ func newCreateCollectionEventWriter(dataType schemapb.DataType, offset int32) (*
 	return writer, nil
 }
 func newDropCollectionEventWriter(dataType schemapb.DataType, offset int32) (*dropCollectionEventWriter, error) {
+	if dataType != schemapb.DataType_STRING && dataType != schemapb.DataType_INT64 {
+		return nil, errors.New("incorrect data type")
+	}
+
 	payloadWriter, err := NewPayloadWriter(dataType)
 	if err != nil {
 		return nil, err
@@ -297,6 +309,10 @@ func newDropCollectionEventWriter(dataType schemapb.DataType, offset int32) (*dr
 	return writer, nil
 }
 func newCreatePartitionEventWriter(dataType schemapb.DataType, offset int32) (*createPartitionEventWriter, error) {
+	if dataType != schemapb.DataType_STRING && dataType != schemapb.DataType_INT64 {
+		return nil, errors.New("incorrect data type")
+	}
+
 	payloadWriter, err := NewPayloadWriter(dataType)
 	if err != nil {
 		return nil, err
@@ -325,6 +341,10 @@ func newCreatePartitionEventWriter(dataType schemapb.DataType, offset int32) (*c
 	return writer, nil
 }
 func newDropPartitionEventWriter(dataType schemapb.DataType, offset int32) (*dropPartitionEventWriter, error) {
+	if dataType != schemapb.DataType_STRING && dataType != schemapb.DataType_INT64 {
+		return nil, errors.New("incorrect data type")
+	}
+
 	payloadWriter, err := NewPayloadWriter(dataType)
 	if err != nil {
 		return nil, err
