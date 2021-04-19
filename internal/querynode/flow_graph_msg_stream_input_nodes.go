@@ -5,11 +5,11 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
 func (dsService *dataSyncService) newDmInputNode(ctx context.Context) *flowgraph.InputNode {
+	factory := msgstream.ProtoUDFactory{}
 	receiveBufSize := Params.InsertReceiveBufSize
 	pulsarBufSize := Params.InsertPulsarBufSize
 
@@ -18,10 +18,9 @@ func (dsService *dataSyncService) newDmInputNode(ctx context.Context) *flowgraph
 	consumeChannels := Params.InsertChannelNames
 	consumeSubName := Params.MsgChannelSubName
 
-	insertStream := pulsarms.NewPulsarTtMsgStream(ctx, receiveBufSize)
+	insertStream := pulsarms.NewPulsarTtMsgStream(ctx, receiveBufSize, pulsarBufSize, factory.NewUnmarshalDispatcher())
 	insertStream.SetPulsarClient(msgStreamURL)
-	unmarshalDispatcher := util.NewUnmarshalDispatcher()
-	insertStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
+	insertStream.CreatePulsarConsumers(consumeChannels, consumeSubName)
 
 	var stream msgstream.MsgStream = insertStream
 	dsService.dmStream = stream
@@ -34,6 +33,7 @@ func (dsService *dataSyncService) newDmInputNode(ctx context.Context) *flowgraph
 }
 
 func (dsService *dataSyncService) newDDInputNode(ctx context.Context) *flowgraph.InputNode {
+	factory := msgstream.ProtoUDFactory{}
 	receiveBufSize := Params.DDReceiveBufSize
 	pulsarBufSize := Params.DDPulsarBufSize
 
@@ -42,10 +42,9 @@ func (dsService *dataSyncService) newDDInputNode(ctx context.Context) *flowgraph
 	consumeChannels := Params.DDChannelNames
 	consumeSubName := Params.MsgChannelSubName
 
-	ddStream := pulsarms.NewPulsarTtMsgStream(ctx, receiveBufSize)
+	ddStream := pulsarms.NewPulsarTtMsgStream(ctx, receiveBufSize, pulsarBufSize, factory.NewUnmarshalDispatcher())
 	ddStream.SetPulsarClient(msgStreamURL)
-	unmarshalDispatcher := util.NewUnmarshalDispatcher()
-	ddStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
+	ddStream.CreatePulsarConsumers(consumeChannels, consumeSubName)
 
 	var stream msgstream.MsgStream = ddStream
 	dsService.ddStream = stream

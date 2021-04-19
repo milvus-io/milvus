@@ -16,7 +16,6 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -48,16 +47,17 @@ func newSearchService(ctx context.Context, replica collectionReplica) *searchSer
 
 	msgStreamURL := Params.PulsarAddress
 
+	factory := msgstream.ProtoUDFactory{}
+
 	consumeChannels := Params.SearchChannelNames
 	consumeSubName := Params.MsgChannelSubName
-	searchStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize)
+	searchStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize, pulsarBufSize, factory.NewUnmarshalDispatcher())
 	searchStream.SetPulsarClient(msgStreamURL)
-	unmarshalDispatcher := util.NewUnmarshalDispatcher()
-	searchStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
+	searchStream.CreatePulsarConsumers(consumeChannels, consumeSubName)
 	var inputStream msgstream.MsgStream = searchStream
 
 	producerChannels := Params.SearchResultChannelNames
-	searchResultStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize)
+	searchResultStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize, pulsarBufSize, factory.NewUnmarshalDispatcher())
 	searchResultStream.SetPulsarClient(msgStreamURL)
 	searchResultStream.CreatePulsarProducers(producerChannels)
 	var outputStream msgstream.MsgStream = searchResultStream
@@ -239,6 +239,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 		return errors.New("unmarshal query failed")
 	}
 	collectionID := searchMsg.CollectionID
+	partitionTagsInQuery := query.PartitionNames
 	collection, err := ss.replica.getCollectionByID(collectionID)
 	if err != nil {
 		span.LogFields(oplog.Error(err))
@@ -262,30 +263,29 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	searchResults := make([]*SearchResult, 0)
 	matchedSegments := make([]*Segment, 0)
 
-	//fmt.Println("search msg's partitionID = ", partitionIDsInQuery)
+	//fmt.Println("search msg's partitionTag = ", partitionTagsInQuery)
 
-	var partitionIDsInCol []UniqueID
+	var partitionTagsInCol []string
 	for _, partition := range collection.partitions {
-		partitionID := partition.ID()
-		partitionIDsInCol = append(partitionIDsInCol, partitionID)
+		partitionTag := partition.partitionTag
+		partitionTagsInCol = append(partitionTagsInCol, partitionTag)
 	}
-	var searchPartitionIDs []UniqueID
-	partitionIDsInQuery := searchMsg.PartitionIDs
-	if len(partitionIDsInQuery) == 0 {
-		searchPartitionIDs = partitionIDsInCol
+	var searchPartitionTag []string
+	if len(partitionTagsInQuery) == 0 {
+		searchPartitionTag = partitionTagsInCol
 	} else {
-		for _, id := range partitionIDsInCol {
-			for _, toMatchID := range partitionIDsInQuery {
-				re := regexp.MustCompile("^" + strconv.FormatInt(toMatchID, 10) + "$")
-				if re.MatchString(strconv.FormatInt(id, 10)) {
-					searchPartitionIDs = append(searchPartitionIDs, id)
+		for _, tag := range partitionTagsInCol {
+			for _, toMatchTag := range partitionTagsInQuery {
+				re := regexp.MustCompile("^" + toMatchTag + "$")
+				if re.MatchString(tag) {
+					searchPartitionTag = append(searchPartitionTag, tag)
 				}
 			}
 		}
 	}
 
-	for _, partitionID := range searchPartitionIDs {
-		partition, _ := ss.replica.getPartitionByID(collectionID, partitionID)
+	for _, partitionTag := range searchPartitionTag {
+		partition, _ := ss.replica.getPartitionByTag(collectionID, partitionTag)
 		for _, segment := range partition.segments {
 			//fmt.Println("dsl = ", dsl)
 

@@ -51,7 +51,8 @@ func newTimeTick(ctx context.Context,
 		checkFunc:    checkFunc,
 	}
 
-	t.tickMsgStream = pulsarms.NewPulsarMsgStream(t.ctx, Params.MsgStreamTimeTickBufSize)
+	factory := msgstream.ProtoUDFactory{}
+	t.tickMsgStream = pulsarms.NewPulsarMsgStream(t.ctx, Params.MsgStreamTimeTickBufSize, 1024, factory.NewUnmarshalDispatcher())
 	pulsarAddress := Params.PulsarAddress
 
 	t.tickMsgStream.SetPulsarClient(pulsarAddress)

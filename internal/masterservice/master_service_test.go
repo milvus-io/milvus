@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
-	msutil "github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
@@ -147,22 +146,23 @@ func TestMasterService(t *testing.T) {
 	err = core.Start()
 	assert.Nil(t, err)
 
-	proxyTimeTickStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
+	factory := ms.ProtoUDFactory{}
+	proxyTimeTickStream := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
 	proxyTimeTickStream.SetPulsarClient(Params.PulsarAddress)
 	proxyTimeTickStream.CreatePulsarProducers([]string{Params.ProxyTimeTickChannel})
 
-	dataServiceSegmentStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
+	dataServiceSegmentStream := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
 	dataServiceSegmentStream.SetPulsarClient(Params.PulsarAddress)
 	dataServiceSegmentStream.CreatePulsarProducers([]string{Params.DataServiceSegmentChannel})
 
-	timeTickStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
+	timeTickStream := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
 	timeTickStream.SetPulsarClient(Params.PulsarAddress)
-	timeTickStream.CreatePulsarConsumers([]string{Params.TimeTickChannel}, Params.MsgChannelSubName, msutil.NewUnmarshalDispatcher(), 1024)
+	timeTickStream.CreatePulsarConsumers([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
 	timeTickStream.Start()
 
-	ddStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
+	ddStream := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
 	ddStream.SetPulsarClient(Params.PulsarAddress)
-	ddStream.CreatePulsarConsumers([]string{Params.DdChannel}, Params.MsgChannelSubName, msutil.NewUnmarshalDispatcher(), 1024)
+	ddStream.CreatePulsarConsumers([]string{Params.DdChannel}, Params.MsgChannelSubName)
 	ddStream.Start()
 
 	time.Sleep(time.Second)
@@ -657,10 +657,18 @@ func TestMasterService(t *testing.T) {
 		rsp, err := core.DescribeIndex(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+
 		assert.Equal(t, len(rsp.IndexDescriptions), 3)
-		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, Params.DefaultIndexName)
-		assert.Equal(t, rsp.IndexDescriptions[1].IndexName, "index_field_100_0")
-		assert.Equal(t, rsp.IndexDescriptions[2].IndexName, "index_field_100_1")
+		indexNames := make([]string, 0)
+		for _, d := range rsp.IndexDescriptions {
+			indexNames = append(indexNames, d.IndexName)
+		}
+
+		assert.ElementsMatch(t, indexNames, []string{
+			"index_field_100_0",
+			"index_field_100_1",
+			Params.DefaultIndexName,
+		})
 	})
 
 	t.Run("drop partition", func(t *testing.T) {

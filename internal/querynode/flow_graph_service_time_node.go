@@ -78,7 +78,8 @@ func newServiceTimeNode(ctx context.Context, replica collectionReplica) *service
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
-	timeTimeMsgStream := pulsarms.NewPulsarMsgStream(ctx, Params.SearchReceiveBufSize)
+	factory := msgstream.ProtoUDFactory{}
+	timeTimeMsgStream := pulsarms.NewPulsarMsgStream(ctx, Params.SearchReceiveBufSize, 1024, factory.NewUnmarshalDispatcher())
 	timeTimeMsgStream.SetPulsarClient(Params.PulsarAddress)
 	timeTimeMsgStream.CreatePulsarProducers([]string{Params.QueryTimeTickChannelName})
 

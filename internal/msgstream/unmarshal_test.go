@@ -1,4 +1,4 @@
-package util
+package msgstream
 
 import (
 	"fmt"
@@ -6,7 +6,6 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
@@ -14,12 +13,10 @@ import (
 
 var Params paramtable.BaseTable
 
-type Timestamp = msgstream.Timestamp
-
-func newInsertMsgUnmarshal(input []byte) (msgstream.TsMsg, error) {
+func newInsertMsgUnmarshal(input []byte) (TsMsg, error) {
 	insertRequest := internalpb2.InsertRequest{}
 	err := proto.Unmarshal(input, &insertRequest)
-	insertMsg := &msgstream.InsertMsg{InsertRequest: insertRequest}
+	insertMsg := &InsertMsg{InsertRequest: insertRequest}
 	fmt.Println("use func newInsertMsgUnmarshal unmarshal")
 	if err != nil {
 		return nil, err
@@ -29,9 +26,9 @@ func newInsertMsgUnmarshal(input []byte) (msgstream.TsMsg, error) {
 }
 
 func TestStream_unmarshal_Insert(t *testing.T) {
-	msgPack := msgstream.MsgPack{}
-	insertMsg := &msgstream.InsertMsg{
-		BaseMsg: msgstream.BaseMsg{
+	msgPack := MsgPack{}
+	insertMsg := &InsertMsg{
+		BaseMsg: BaseMsg{
 			BeginTimestamp: 0,
 			EndTimestamp:   0,
 			HashValues:     []uint32{1},
@@ -54,16 +51,21 @@ func TestStream_unmarshal_Insert(t *testing.T) {
 	}
 	msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 
-	unmarshalDispatcher := NewUnmarshalDispatcher()
-	unmarshalDispatcher.AddMsgTemplate(commonpb.MsgType_kInsert, newInsertMsgUnmarshal)
+	factory := &ProtoUDFactory{}
+	unmarshalDispatcher := factory.NewUnmarshalDispatcher()
+
+	// FIXME(wxyu): Maybe we dont need this interface
+	//unmarshalDispatcher.AddMsgTemplate(commonpb.MsgType_kInsert, newInsertMsgUnmarshal)
 
 	for _, v := range msgPack.Msgs {
 		headerMsg := commonpb.MsgHeader{}
 		payload, err := v.Marshal(v)
 		assert.Nil(t, err)
-		err = proto.Unmarshal(payload, &headerMsg)
+		p, err := ConvertToByteArray(payload)
 		assert.Nil(t, err)
-		msg, err := unmarshalDispatcher.Unmarshal(payload, headerMsg.Base.MsgType)
+		err = proto.Unmarshal(p, &headerMsg)
+		assert.Nil(t, err)
+		msg, err := unmarshalDispatcher.Unmarshal(p, headerMsg.Base.MsgType)
 		assert.Nil(t, err)
 		fmt.Println("msg type: ", msg.Type(), ", msg value: ", msg, "msg tag: ")
 	}

@@ -653,22 +653,24 @@ func newInsertBufferNode(ctx context.Context, flushMeta *metaTable,
 	}
 	minioPrefix := Params.InsertBinlogRootPath
 
+	factory := msgstream.ProtoUDFactory{}
+
 	//input stream, data node time tick
-	wTt := pulsarms.NewPulsarMsgStream(ctx, 1024)
+	wTt := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
 	wTt.SetPulsarClient(Params.PulsarAddress)
 	wTt.CreatePulsarProducers([]string{Params.TimeTickChannelName})
 	var wTtMsgStream msgstream.MsgStream = wTt
 	wTtMsgStream.Start()
 
 	// update statistics channel
-	segS := pulsarms.NewPulsarMsgStream(ctx, 1024)
+	segS := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
 	segS.SetPulsarClient(Params.PulsarAddress)
 	segS.CreatePulsarProducers([]string{Params.SegmentStatisticsChannelName})
 	var segStatisticsMsgStream msgstream.MsgStream = segS
 	segStatisticsMsgStream.Start()
 
 	// segment flush completed channel
-	cf := pulsarms.NewPulsarMsgStream(ctx, 1024)
+	cf := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
 	cf.SetPulsarClient(Params.PulsarAddress)
 	cf.CreatePulsarProducers([]string{Params.CompleteFlushChannelName})
 	var completeFlushStream msgstream.MsgStream = cf

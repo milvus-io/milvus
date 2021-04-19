@@ -61,12 +61,12 @@ func TestDataSyncService_Start(t *testing.T) {
 					Timestamp: uint64(i + 1000),
 					SourceID:  0,
 				},
-				CollectionID: UniqueID(0),
-				PartitionID:  defaultPartitionID,
-				SegmentID:    int64(0),
-				ChannelID:    "0",
-				Timestamps:   []uint64{uint64(i + 1000), uint64(i + 1000)},
-				RowIDs:       []int64{int64(i), int64(i)},
+				CollectionID:  UniqueID(0),
+				PartitionName: "default",
+				SegmentID:     int64(0),
+				ChannelID:     "0",
+				Timestamps:    []uint64{uint64(i + 1000), uint64(i + 1000)},
+				RowIDs:        []int64{int64(i), int64(i)},
 				RowData: []*commonpb.Blob{
 					{Value: rawData},
 					{Value: rawData},
@@ -109,11 +109,12 @@ func TestDataSyncService_Start(t *testing.T) {
 	ddChannels := Params.DDChannelNames
 	pulsarURL := Params.PulsarAddress
 
-	insertStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	factory := msgstream.ProtoUDFactory{}
+	insertStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
 	insertStream.SetPulsarClient(pulsarURL)
 	insertStream.CreatePulsarProducers(insertChannels)
 
-	ddStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	ddStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
 	ddStream.SetPulsarClient(pulsarURL)
 	ddStream.CreatePulsarProducers(ddChannels)
 

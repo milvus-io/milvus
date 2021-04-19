@@ -14,7 +14,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 )
 
 type TaskQueue interface {
@@ -372,14 +371,12 @@ func (sched *TaskScheduler) queryLoop() {
 
 func (sched *TaskScheduler) queryResultLoop() {
 	defer sched.wg.Done()
+	factory := msgstream.ProtoUDFactory{}
 
-	unmarshal := util.NewUnmarshalDispatcher()
-	queryResultMsgStream := pulsarms.NewPulsarMsgStream(sched.ctx, Params.MsgStreamSearchResultBufSize)
+	queryResultMsgStream := pulsarms.NewPulsarMsgStream(sched.ctx, Params.MsgStreamSearchResultBufSize, 1024, factory.NewUnmarshalDispatcher())
 	queryResultMsgStream.SetPulsarClient(Params.PulsarAddress)
 	queryResultMsgStream.CreatePulsarConsumers(Params.SearchResultChannelNames,
-		Params.ProxySubName,
-		unmarshal,
-		Params.MsgStreamSearchResultPulsarBufSize)
+		Params.ProxySubName)
 	queryNodeNum := Params.QueryNodeNum
 
 	queryResultMsgStream.Start()

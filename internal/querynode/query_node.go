@@ -24,7 +24,6 @@ import (
 	"github.com/uber/jaeger-client-go/config"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -332,11 +331,9 @@ func (node *QueryNode) AddQueryChannel(in *queryPb.AddQueryChannelsRequest) (*co
 	}
 
 	// add request channel
-	pulsarBufSize := Params.SearchPulsarBufSize
 	consumeChannels := []string{in.RequestChannelID}
 	consumeSubName := Params.MsgChannelSubName
-	unmarshalDispatcher := util.NewUnmarshalDispatcher()
-	searchStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
+	searchStream.CreatePulsarConsumers(consumeChannels, consumeSubName)
 
 	// add result channel
 	producerChannels := []string{in.ResultChannelID}
@@ -382,12 +379,10 @@ func (node *QueryNode) RemoveQueryChannel(in *queryPb.RemoveQueryChannelsRequest
 	}
 
 	// remove request channel
-	pulsarBufSize := Params.SearchPulsarBufSize
 	consumeChannels := []string{in.RequestChannelID}
 	consumeSubName := Params.MsgChannelSubName
-	unmarshalDispatcher := util.NewUnmarshalDispatcher()
 	// TODO: searchStream.RemovePulsarConsumers(producerChannels)
-	searchStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
+	searchStream.CreatePulsarConsumers(consumeChannels, consumeSubName)
 
 	// remove result channel
 	producerChannels := []string{in.ResultChannelID}
@@ -423,11 +418,9 @@ func (node *QueryNode) WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*com
 	}
 
 	// add request channel
-	pulsarBufSize := Params.SearchPulsarBufSize
 	consumeChannels := in.ChannelIDs
 	consumeSubName := Params.MsgChannelSubName
-	unmarshalDispatcher := util.NewUnmarshalDispatcher()
-	fgDMMsgStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
+	fgDMMsgStream.CreatePulsarConsumers(consumeChannels, consumeSubName)
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,

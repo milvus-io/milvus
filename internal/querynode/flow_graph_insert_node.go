@@ -81,7 +81,7 @@ func (iNode *insertNode) Operate(in []*Msg) []*Msg {
 
 		// check if segment exists, if not, create this segment
 		if !iNode.replica.hasSegment(task.SegmentID) {
-			err := iNode.replica.addSegment(task.SegmentID, task.PartitionID, task.CollectionID, segTypeGrowing)
+			err := iNode.replica.addSegment2(task.SegmentID, task.PartitionName, task.CollectionID, segTypeGrowing)
 			if err != nil {
 				log.Println(err)
 				continue

@@ -36,6 +36,7 @@ type QueryNodeStatsMsg = msgstream.QueryNodeStatsMsg
 type RepackFunc = msgstream.RepackFunc
 type Consumer = pulsar.Consumer
 type Producer = pulsar.Producer
+type UnmarshalDispatcher = msgstream.UnmarshalDispatcher
 
 type PulsarMsgStream struct {
 	ctx              context.Context
@@ -44,13 +45,14 @@ type PulsarMsgStream struct {
 	consumers        []Consumer
 	consumerChannels []string
 	repackFunc       RepackFunc
-	unmarshal        *util.UnmarshalDispatcher
+	unmarshal        UnmarshalDispatcher
 	receiveBuf       chan *MsgPack
 	wait             *sync.WaitGroup
 	streamCancel     func()
+	pulsarBufSize    int64
 }
 
-func NewPulsarMsgStream(ctx context.Context, receiveBufSize int64) *PulsarMsgStream {
+func NewPulsarMsgStream(ctx context.Context, receiveBufSize int64, pulsarBufSize int64, unmarshal UnmarshalDispatcher) *PulsarMsgStream {
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	producers := make([]Producer, 0)
 	consumers := make([]Consumer, 0)
@@ -61,6 +63,8 @@ func NewPulsarMsgStream(ctx context.Context, receiveBufSize int64) *PulsarMsgStr
 		producers:        producers,
 		consumers:        consumers,
 		consumerChannels: consumerChannels,
+		unmarshal:        unmarshal,
+		pulsarBufSize:    pulsarBufSize,
 	}
 	stream.receiveBuf = make(chan *MsgPack, receiveBufSize)
 	return stream
@@ -97,13 +101,10 @@ func (ms *PulsarMsgStream) CreatePulsarProducers(channels []string) {
 }
 
 func (ms *PulsarMsgStream) CreatePulsarConsumers(channels []string,
-	subName string,
-	unmarshal *util.UnmarshalDispatcher,
-	pulsarBufSize int64) {
-	ms.unmarshal = unmarshal
+	subName string) {
 	for i := 0; i < len(channels); i++ {
 		fn := func() error {
-			receiveChannel := make(chan pulsar.ConsumerMessage, pulsarBufSize)
+			receiveChannel := make(chan pulsar.ConsumerMessage, ms.pulsarBufSize)
 			pc, err := ms.client.Subscribe(pulsar.ConsumerOptions{
 				Topic:                       channels[i],
 				SubscriptionName:            subName,
@@ -236,7 +237,12 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 				return err
 			}
 
-			msg := &pulsar.ProducerMessage{Payload: mb}
+			m, err := msgstream.ConvertToByteArray(mb)
+			if err != nil {
+				return err
+			}
+
+			msg := &pulsar.ProducerMessage{Payload: m}
 
 			var child opentracing.Span
 			if v.Msgs[i].Type() == commonpb.MsgType_kInsert ||
@@ -293,7 +299,13 @@ func (ms *PulsarMsgStream) Broadcast(msgPack *MsgPack) error {
 		if err != nil {
 			return err
 		}
-		msg := &pulsar.ProducerMessage{Payload: mb}
+
+		m, err := msgstream.ConvertToByteArray(mb)
+		if err != nil {
+			return err
+		}
+
+		msg := &pulsar.ProducerMessage{Payload: m}
 		var child opentracing.Span
 		if v.Type() == commonpb.MsgType_kInsert ||
 			v.Type() == commonpb.MsgType_kSearch ||
@@ -467,11 +479,13 @@ type PulsarTtMsgStream struct {
 	lastTimeStamp Timestamp
 }
 
-func NewPulsarTtMsgStream(ctx context.Context, receiveBufSize int64) *PulsarTtMsgStream {
+func NewPulsarTtMsgStream(ctx context.Context, receiveBufSize int64, pulsarBufSize int64, unmarshal msgstream.UnmarshalDispatcher) *PulsarTtMsgStream {
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	pulsarMsgStream := PulsarMsgStream{
-		ctx:          streamCtx,
-		streamCancel: streamCancel,
+		ctx:           streamCtx,
+		streamCancel:  streamCancel,
+		pulsarBufSize: pulsarBufSize,
+		unmarshal:     unmarshal,
 	}
 	pulsarMsgStream.receiveBuf = make(chan *MsgPack, receiveBufSize)
 	return &PulsarTtMsgStream{
@@ -601,11 +615,10 @@ func (ms *PulsarTtMsgStream) findTimeTick(consumer Consumer,
 			if err != nil {
 				log.Printf("Failed to unmarshal, error = %v", err)
 			}
-			unMarshalFunc := (*ms.unmarshal).TempMap[headerMsg.Base.MsgType]
-			if unMarshalFunc == nil {
+			tsMsg, err := ms.unmarshal.Unmarshal(pulsarMsg.Payload(), headerMsg.Base.MsgType)
+			if tsMsg == nil && err != nil {
 				panic("null unMarshalFunc for " + headerMsg.Base.MsgType.String() + " msg type")
 			}
-			tsMsg, err := unMarshalFunc(pulsarMsg.Payload())
 			if err != nil {
 				log.Printf("Failed to unmarshal, error = %v", err)
 			}
@@ -674,11 +687,11 @@ func (ms *PulsarTtMsgStream) Seek(mp *internalpb2.MsgPosition) error {
 					if err != nil {
 						log.Printf("Failed to unmarshal msgHeader, error = %v", err)
 					}
-					unMarshalFunc := (*ms.unmarshal).TempMap[headerMsg.Base.MsgType]
-					if unMarshalFunc == nil {
+					tsMsg, err := ms.unmarshal.Unmarshal(pulsarMsg.Payload(), headerMsg.Base.MsgType)
+					if tsMsg == nil && err != nil {
 						panic("null unMarshalFunc for " + headerMsg.Base.MsgType.String() + " msg type")
+
 					}
-					tsMsg, err := unMarshalFunc(pulsarMsg.Payload())
 					if err != nil {
 						log.Printf("Failed to unmarshal pulsarMsg, error = %v", err)
 					}

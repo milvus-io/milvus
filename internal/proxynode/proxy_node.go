@@ -106,6 +106,7 @@ func (node *NodeImpl) waitForServiceReady(service Component, serviceName string)
 }
 
 func (node *NodeImpl) Init() error {
+	factory := msgstream.ProtoUDFactory{}
 
 	// todo wait for proxyservice state changed to Healthy
 
@@ -196,7 +197,7 @@ func (node *NodeImpl) Init() error {
 
 	pulsarAddress := Params.PulsarAddress
 
-	node.queryMsgStream = pulsarms.NewPulsarMsgStream(node.ctx, Params.MsgStreamSearchBufSize)
+	node.queryMsgStream = pulsarms.NewPulsarMsgStream(node.ctx, Params.MsgStreamSearchBufSize, 1024, factory.NewUnmarshalDispatcher())
 	node.queryMsgStream.SetPulsarClient(pulsarAddress)
 	node.queryMsgStream.CreatePulsarProducers(Params.SearchChannelNames)
 	log.Println("create query message stream ...")
@@ -224,7 +225,7 @@ func (node *NodeImpl) Init() error {
 	node.segAssigner = segAssigner
 	node.segAssigner.PeerID = Params.ProxyID
 
-	node.manipulationMsgStream = pulsarms.NewPulsarMsgStream(node.ctx, Params.MsgStreamInsertBufSize)
+	node.manipulationMsgStream = pulsarms.NewPulsarMsgStream(node.ctx, Params.MsgStreamInsertBufSize, 1024, factory.NewUnmarshalDispatcher())
 	node.manipulationMsgStream.SetPulsarClient(pulsarAddress)
 	node.manipulationMsgStream.CreatePulsarProducers(Params.InsertChannelNames)
 	repackFuncImpl := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {

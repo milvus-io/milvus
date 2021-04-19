@@ -16,8 +16,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
-
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 
@@ -85,7 +83,6 @@ type (
 		segAllocator      segmentAllocator
 		statsHandler      *statsHandler
 		ddHandler         *ddHandler
-		insertChannelMgr  *insertChannelManager
 		allocator         allocator
 		cluster           *dataNodeCluster
 		msgProducer       *timesync.MsgProducer
@@ -95,6 +92,7 @@ type (
 		k2sMsgStream      msgstream.MsgStream
 		ddChannelName     string
 		segmentInfoStream msgstream.MsgStream
+		insertChannels    []string
 	}
 )
 
@@ -103,12 +101,21 @@ func CreateServer(ctx context.Context) (*Server, error) {
 	ch := make(chan struct{})
 	s := &Server{
 		ctx:              ctx,
-		insertChannelMgr: newInsertChannelManager(),
 		registerFinishCh: ch,
 		cluster:          newDataNodeCluster(ch),
 	}
+	s.insertChannels = s.getInsertChannels()
 	s.state.Store(internalpb2.StateCode_INITIALIZING)
 	return s, nil
+}
+
+func (s *Server) getInsertChannels() []string {
+	channels := make([]string, Params.InsertChannelNum)
+	var i int64 = 0
+	for ; i < Params.InsertChannelNum; i++ {
+		channels[i] = Params.InsertChannelPrefixName + strconv.FormatInt(i, 10)
+	}
+	return channels
 }
 
 func (s *Server) SetMasterClient(masterClient MasterClient) {
@@ -137,6 +144,7 @@ func (s *Server) Start() error {
 	}
 	s.startServerLoop()
 	s.waitDataNodeRegister()
+	s.cluster.WatchInsertChannels(s.insertChannels)
 	if err = s.initMsgProducer(); err != nil {
 		return err
 	}
@@ -164,21 +172,23 @@ func (s *Server) initMeta() error {
 }
 
 func (s *Server) initSegmentInfoChannel() {
-	segmentInfoStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024)
+	factory := msgstream.ProtoUDFactory{}
+	segmentInfoStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
 	segmentInfoStream.SetPulsarClient(Params.PulsarAddress)
 	segmentInfoStream.CreatePulsarProducers([]string{Params.SegmentInfoChannelName})
 	s.segmentInfoStream = segmentInfoStream
 	s.segmentInfoStream.Start()
 }
 func (s *Server) initMsgProducer() error {
-	ttMsgStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024)
+	factory := msgstream.ProtoUDFactory{}
+	ttMsgStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
 	ttMsgStream.SetPulsarClient(Params.PulsarAddress)
-	ttMsgStream.CreatePulsarConsumers([]string{Params.TimeTickChannelName}, Params.DataServiceSubscriptionName, util.NewUnmarshalDispatcher(), 1024)
+	ttMsgStream.CreatePulsarConsumers([]string{Params.TimeTickChannelName}, Params.DataServiceSubscriptionName)
 	s.ttMsgStream = ttMsgStream
 	s.ttMsgStream.Start()
 	timeTickBarrier := timesync.NewHardTimeTickBarrier(s.ttMsgStream, s.cluster.GetNodeIDs())
 	dataNodeTTWatcher := newDataNodeTimeTickWatcher(s.meta, s.segAllocator, s.cluster)
-	k2sStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024)
+	k2sStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
 	k2sStream.SetPulsarClient(Params.PulsarAddress)
 	k2sStream.CreatePulsarProducers(Params.K2SChannelNames)
 	s.k2sMsgStream = k2sStream
@@ -300,9 +310,10 @@ func (s *Server) startServerLoop() {
 
 func (s *Server) startStatsChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
-	statsStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
+	factory := msgstream.ProtoUDFactory{}
+	statsStream := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
 	statsStream.SetPulsarClient(Params.PulsarAddress)
-	statsStream.CreatePulsarConsumers([]string{Params.StatisticsChannelName}, Params.DataServiceSubscriptionName, util.NewUnmarshalDispatcher(), 1024)
+	statsStream.CreatePulsarConsumers([]string{Params.StatisticsChannelName}, Params.DataServiceSubscriptionName)
 	statsStream.Start()
 	defer statsStream.Close()
 	for {
@@ -326,9 +337,10 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 
 func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
-	flushStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
+	factory := msgstream.ProtoUDFactory{}
+	flushStream := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
 	flushStream.SetPulsarClient(Params.PulsarAddress)
-	flushStream.CreatePulsarConsumers([]string{Params.SegmentInfoChannelName}, Params.DataServiceSubscriptionName, util.NewUnmarshalDispatcher(), 1024)
+	flushStream.CreatePulsarConsumers([]string{Params.SegmentInfoChannelName}, Params.DataServiceSubscriptionName)
 	flushStream.Start()
 	defer flushStream.Close()
 	for {
@@ -361,9 +373,10 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 
 func (s *Server) startDDChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
-	ddStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
+	factory := msgstream.ProtoUDFactory{}
+	ddStream := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
 	ddStream.SetPulsarClient(Params.PulsarAddress)
-	ddStream.CreatePulsarConsumers([]string{s.ddChannelName}, Params.DataServiceSubscriptionName, util.NewUnmarshalDispatcher(), 1024)
+	ddStream.CreatePulsarConsumers([]string{s.ddChannelName}, Params.DataServiceSubscriptionName)
 	ddStream.Start()
 	defer ddStream.Close()
 	for {
@@ -675,16 +688,7 @@ func (s *Server) GetInsertBinlogPaths(req *datapb.InsertBinlogPathRequest) (*dat
 }
 
 func (s *Server) GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, error) {
-	if !s.checkStateIsHealthy() {
-		return nil, errors.New("server is initializing")
-	}
-	channels, err := s.insertChannelMgr.GetChannels(req.CollectionID)
-	if err != nil {
-		return nil, err
-	}
-
-	s.cluster.WatchInsertChannels(req.CollectionID, channels)
-	return channels, nil
+	return s.insertChannels, nil
 }
 
 func (s *Server) GetCollectionStatistics(req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error) {
