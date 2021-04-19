@@ -262,30 +262,49 @@ func (mt *metaTable) HasCollection(collID typeutil.UniqueID) bool {
 	return ok
 }
 
-func (mt *metaTable) GetCollectionByID(collectionID typeutil.UniqueID) (pb.CollectionInfo, error) {
+func (mt *metaTable) GetCollectionByID(collectionID typeutil.UniqueID) (*pb.CollectionInfo, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
 	col, ok := mt.collID2Meta[collectionID]
 	if !ok {
-		return pb.CollectionInfo{}, errors.Errorf("can't find collection id : %d", collectionID)
+		return nil, errors.Errorf("can't find collection id : %d", collectionID)
 	}
-	return col, nil
+	colCopy := proto.Clone(&col)
+
+	return colCopy.(*pb.CollectionInfo), nil
 }
 
-func (mt *metaTable) GetCollectionByName(collectionName string) (pb.CollectionInfo, error) {
+func (mt *metaTable) GetCollectionByName(collectionName string) (*pb.CollectionInfo, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
 	vid, ok := mt.collName2ID[collectionName]
 	if !ok {
-		return pb.CollectionInfo{}, errors.Errorf("can't find collection: " + collectionName)
+		return nil, errors.Errorf("can't find collection: " + collectionName)
 	}
 	col, ok := mt.collID2Meta[vid]
 	if !ok {
-		return pb.CollectionInfo{}, errors.Errorf("can't find collection: " + collectionName)
+		return nil, errors.Errorf("can't find collection: " + collectionName)
 	}
-	return col, nil
+	colCopy := proto.Clone(&col)
+	return colCopy.(*pb.CollectionInfo), nil
+}
+
+func (mt *metaTable) GetCollectionBySegmentID(segID typeutil.UniqueID) (*pb.CollectionInfo, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	vid, ok := mt.segID2CollID[segID]
+	if !ok {
+		return nil, errors.Errorf("segment id %d not belong to any collection", segID)
+	}
+	col, ok := mt.collID2Meta[vid]
+	if !ok {
+		return nil, errors.Errorf("can't find collection id: %d", vid)
+	}
+	colCopy := proto.Clone(&col)
+	return colCopy.(*pb.CollectionInfo), nil
 }
 
 func (mt *metaTable) ListCollections() ([]string, error) {
@@ -564,6 +583,10 @@ func (mt *metaTable) GetFieldSchema(collName string, fieldName string) (schemapb
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
+	return mt.unlockGetFieldSchema(collName, fieldName)
+}
+
+func (mt *metaTable) unlockGetFieldSchema(collName string, fieldName string) (schemapb.FieldSchema, error) {
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
 		return schemapb.FieldSchema{}, errors.Errorf("collection %s not found", collName)
@@ -585,6 +608,10 @@ func (mt *metaTable) GetFieldSchema(collName string, fieldName string) (schemapb
 func (mt *metaTable) IsSegmentIndexed(segID typeutil.UniqueID, fieldSchema *schemapb.FieldSchema, indexParams []*commonpb.KeyValuePair) bool {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
+	return mt.unlockIsSegmentIndexed(segID, fieldSchema, indexParams)
+}
+
+func (mt *metaTable) unlockIsSegmentIndexed(segID typeutil.UniqueID, fieldSchema *schemapb.FieldSchema, indexParams []*commonpb.KeyValuePair) bool {
 	segIdx, ok := mt.segID2IndexMeta[segID]
 	if !ok {
 		return false
@@ -608,8 +635,9 @@ func (mt *metaTable) IsSegmentIndexed(segID typeutil.UniqueID, fieldSchema *sche
 
 // return segment ids, type params, error
 func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, indexParams []*commonpb.KeyValuePair) ([]typeutil.UniqueID, schemapb.FieldSchema, error) {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
 		return nil, schemapb.FieldSchema{}, errors.Errorf("collection %s not found", collName)
@@ -618,9 +646,37 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, in
 	if !ok {
 		return nil, schemapb.FieldSchema{}, errors.Errorf("collection %s not found", collName)
 	}
-	fieldSchema, err := mt.GetFieldSchema(collName, fieldName)
+	fieldSchema, err := mt.unlockGetFieldSchema(collName, fieldName)
 	if err != nil {
 		return nil, fieldSchema, err
+	}
+
+	exist := false
+	if indexParams != nil {
+		for _, f := range collMeta.IndexParams {
+			if f.FiledID == fieldSchema.FieldID {
+				if EqualKeyPairArray(f.IndexParams, indexParams) {
+					exist = true
+					break
+				}
+			}
+		}
+	}
+	if !exist && indexParams != nil {
+		collMeta.IndexParams = append(collMeta.IndexParams, &pb.IndexParamsInfo{
+			FiledID:     fieldSchema.FieldID,
+			IndexParams: indexParams,
+		})
+		mt.collID2Meta[collMeta.ID] = collMeta
+		k1 := path.Join(CollectionMetaPrefix, strconv.FormatInt(collMeta.ID, 10))
+		v1 := proto.MarshalTextString(&collMeta)
+
+		err := mt.client.Save(k1, v1)
+		if err != nil {
+			_ = mt.reloadFromKV()
+			return nil, schemapb.FieldSchema{}, err
+		}
+
 	}
 
 	rstID := make([]typeutil.UniqueID, 0, 16)
@@ -628,34 +684,13 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, in
 		partMeta, ok := mt.partitionID2Meta[partID]
 		if ok {
 			for _, segID := range partMeta.SegmentIDs {
-				if exist := mt.IsSegmentIndexed(segID, &fieldSchema, indexParams); !exist {
+				if exist := mt.unlockIsSegmentIndexed(segID, &fieldSchema, indexParams); !exist {
 					rstID = append(rstID, segID)
 				}
 			}
 		}
 	}
 	return rstID, fieldSchema, nil
-}
-
-func (mt *metaTable) GetSegmentVectorFields(segID typeutil.UniqueID) ([]*schemapb.FieldSchema, error) {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-	collID, ok := mt.segID2CollID[segID]
-	if !ok {
-		return nil, errors.Errorf("segment id %d not belong to any collection", segID)
-	}
-	collMeta, ok := mt.collID2Meta[collID]
-	if !ok {
-		return nil, errors.Errorf("segment id %d not belong to any collection which has dropped", segID)
-	}
-	rst := make([]*schemapb.FieldSchema, 0, 2)
-	for _, f := range collMeta.Schema.Fields {
-		if f.DataType == schemapb.DataType_VECTOR_BINARY || f.DataType == schemapb.DataType_VECTOR_FLOAT {
-			field := proto.Clone(f)
-			rst = append(rst, field.(*schemapb.FieldSchema))
-		}
-	}
-	return rst, nil
 }
 
 func (mt *metaTable) GetIndexByName(collName string, fieldName string, indexName string) ([]pb.IndexInfo, error) {

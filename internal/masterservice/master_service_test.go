@@ -220,7 +220,12 @@ func TestMasterService(t *testing.T) {
 					Description:  "vector",
 					DataType:     schemapb.DataType_VECTOR_FLOAT,
 					TypeParams:   nil,
-					IndexParams:  nil,
+					IndexParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "ik1",
+							Value: "iv1",
+						},
+					},
 				},
 			},
 		}
@@ -511,8 +516,17 @@ func TestMasterService(t *testing.T) {
 			DbName:         "",
 			CollectionName: "testColl",
 			FieldName:      "vector",
-			ExtraParams:    nil,
+			ExtraParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "ik2",
+					Value: "iv2",
+				},
+			},
 		}
+		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
+		assert.Nil(t, err)
+		assert.Equal(t, len(collMeta.IndexParams), 1)
+
 		rsp, err := core.CreateIndex(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_SUCCESS)
@@ -520,6 +534,9 @@ func TestMasterService(t *testing.T) {
 		files := im.getFileArray()
 		assert.Equal(t, 3, len(files))
 		assert.ElementsMatch(t, files, []string{"file0-100", "file1-100", "file2-100"})
+		collMeta, err = core.MetaTable.GetCollectionByName("testColl")
+		assert.Nil(t, err)
+		assert.Equal(t, len(collMeta.IndexParams), 2)
 
 		req.FieldName = "no field"
 		rsp, err = core.CreateIndex(req)
@@ -640,10 +657,10 @@ func TestMasterService(t *testing.T) {
 		rsp, err := core.DescribeIndex(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
-		assert.Equal(t, len(rsp.IndexDescriptions), 2)
+		assert.Equal(t, len(rsp.IndexDescriptions), 3)
 		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, Params.DefaultIndexName)
-		assert.Equal(t, rsp.IndexDescriptions[1].IndexName, "index_100")
-
+		assert.Equal(t, rsp.IndexDescriptions[1].IndexName, "index_field_100_0")
+		assert.Equal(t, rsp.IndexDescriptions[2].IndexName, "index_field_100_1")
 	})
 
 	t.Run("drop partition", func(t *testing.T) {
