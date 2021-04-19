@@ -7,4 +7,4 @@ add_library(milvus_dog_segment
     ${DOG_SEGMENT_FILES}
 )
 #add_dependencies( segment sqlite mysqlpp )
-target_link_libraries(milvus_dog_segment tbb milvus_utils pthread)
+target_link_libraries(milvus_dog_segment tbb milvus_utils)

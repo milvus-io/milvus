@@ -24,10 +24,10 @@ type writeNode struct {
 
 func NewWriteNode(ctx context.Context,
 	openSegmentId string,
-	timeSync uint64,
 	closeTime uint64,
 	nextSegmentId string,
-	nextCloseSegmentTime uint64) (*writeNode, error) {
+	nextCloseSegmentTime uint64,
+	timeSync uint64) (*writeNode, error) {
 	ctx = context.Background()
 	store, err := storage.NewStore(ctx, "TIKV")
 	writeTableTimeSync := &writeNodeTimeSync{deleteTimeSync: timeSync, insertTimeSync: timeSync}
@@ -44,7 +44,7 @@ func NewWriteNode(ctx context.Context,
 	}, nil
 }
 
-func (s *writeNode) InsertBatchData(ctx context.Context, data []schema.InsertMsg, time_sync uint64) error {
+func (s *writeNode) InsertBatchData(ctx context.Context, data []schema.InsertMsg, timeSync uint64) error {
 	var i int
 	var storeKey string
 
@@ -52,37 +52,57 @@ func (s *writeNode) InsertBatchData(ctx context.Context, data []schema.InsertMsg
 	var binaryData [][]byte
 	var timeStamps []uint64
 
-	for i = 0; i < cap(data); i++ {
+	for i = 0; i < len(data); i++ {
 		storeKey = data[i].CollectionName + strconv.FormatInt(data[i].EntityId, 10)
 		keys = append(keys, []byte(storeKey))
 		binaryData = append(binaryData, data[i].Serialization())
 		timeStamps = append(timeStamps, data[i].Timestamp)
 	}
 
-	if s.segmentCloseTime <= time_sync {
+	if s.segmentCloseTime <= timeSync {
 		s.openSegmentId = s.nextSegmentId
 		s.segmentCloseTime = s.nextSegmentCloseTime
 	}
 
-	(*s.kvStore).PutRows(ctx, keys, binaryData, s.openSegmentId, timeStamps)
-	s.UpdateInsertTimeSync(time_sync)
+	err := (*s.kvStore).PutRows(ctx, keys, binaryData, s.openSegmentId, timeStamps)
+	s.UpdateInsertTimeSync(timeSync)
+	return err
+}
+
+func (s *writeNode) DeleteBatchData(ctx context.Context, data []schema.DeleteMsg, timeSync uint64) error {
+	var i int
+	var storeKey string
+
+	var keys [][]byte
+	var timeStamps []uint64
+
+	for i = 0; i < len(data); i++ {
+		storeKey = data[i].CollectionName + strconv.FormatInt(data[i].EntityId, 10)
+		keys = append(keys, []byte(storeKey))
+		timeStamps = append(timeStamps, data[i].Timestamp)
+	}
+
+	//TODO:Get segment id for delete data and deliver those message to specify topic
+
+	err := (*s.kvStore).DeleteRows(ctx, keys, timeStamps)
+	s.UpdateDeleteTimeSync(timeSync)
+	return err
+}
+
+func (s *writeNode) AddNewSegment(segmentId string, closeSegmentTime uint64) error {
+	s.nextSegmentId = segmentId
+	s.nextSegmentCloseTime = closeSegmentTime
 	return nil
 }
 
-func (s *writeNode) DeleteBatchData(ctx context.Context, data []schema.DeleteMsg, time_sync uint64) error {
-	return nil
+func (s *writeNode) UpdateInsertTimeSync(timeSync uint64) {
+	s.timeSyncTable.insertTimeSync = timeSync
 }
 
-func (s *writeNode) AddNewSegment(segment_id string, close_segment_time uint64) error {
-	s.nextSegmentId = segment_id
-	s.nextSegmentCloseTime = close_segment_time
-	return nil
+func (s *writeNode) UpdateDeleteTimeSync(timeSync uint64) {
+	s.timeSyncTable.deleteTimeSync = timeSync
 }
 
-func (s *writeNode) UpdateInsertTimeSync(time_sync uint64) {
-	s.timeSyncTable.insertTimeSync = time_sync
-}
-
-func (s *writeNode) UpdateDeleteTimeSync(time_sync uint64) {
-	s.timeSyncTable.deleteTimeSync = time_sync
+func (s *writeNode) UpdateCloseTime(closeTime uint64) {
+	s.segmentCloseTime = closeTime
 }
