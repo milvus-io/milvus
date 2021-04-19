@@ -5,20 +5,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
-func newReplica() collectionReplica {
-	collections := make([]*Collection, 0)
-	segments := make([]*Segment, 0)
-
-	var replica collectionReplica = &collectionReplicaImpl{
-		collections: collections,
-		segments:    segments,
-	}
-	return replica
-}
-
 func initTestReplicaMeta(t *testing.T, replica collectionReplica, collectionName string, collectionID UniqueID, segmentID UniqueID) {
+	// GOOSE TODO remove
 	Factory := &MetaFactory{}
 	collectionMeta := Factory.CollectionMetaFactory(collectionID, collectionName)
 
@@ -33,71 +24,133 @@ func initTestReplicaMeta(t *testing.T, replica collectionReplica, collectionName
 
 }
 
-//----------------------------------------------------------------------------------------------------- collection
-func TestCollectionReplica_getCollectionNum(t *testing.T) {
-	replica := newReplica()
-	initTestReplicaMeta(t, replica, "collection0", 0, 0)
-	assert.Equal(t, replica.getCollectionNum(), 1)
+func TestReplica_Collection(t *testing.T) {
+	Factory := &MetaFactory{}
+	collMetaMock := Factory.CollectionMetaFactory(0, "collection0")
+
+	t.Run("Test add collection", func(t *testing.T) {
+
+		replica := newReplica()
+		assert.False(t, replica.hasCollection(0))
+		num := replica.getCollectionNum()
+		assert.Equal(t, 0, num)
+
+		err := replica.addCollection(0, collMetaMock.GetSchema())
+		assert.NoError(t, err)
+
+		assert.True(t, replica.hasCollection(0))
+		num = replica.getCollectionNum()
+		assert.Equal(t, 1, num)
+
+		coll, err := replica.getCollectionByID(0)
+		assert.NoError(t, err)
+		assert.NotNil(t, coll)
+		assert.Equal(t, UniqueID(0), coll.ID())
+		assert.Equal(t, "collection0", coll.Name())
+		assert.Equal(t, collMetaMock.GetSchema(), coll.Schema())
+
+		coll, err = replica.getCollectionByName("collection0")
+		assert.NoError(t, err)
+		assert.NotNil(t, coll)
+		assert.Equal(t, UniqueID(0), coll.ID())
+		assert.Equal(t, "collection0", coll.Name())
+		assert.Equal(t, collMetaMock.GetSchema(), coll.Schema())
+
+		collID, err := replica.getCollectionIDByName("collection0")
+		assert.NoError(t, err)
+		assert.Equal(t, UniqueID(0), collID)
+
+	})
+
+	t.Run("Test remove collection", func(t *testing.T) {
+		replica := newReplica()
+		err := replica.addCollection(0, collMetaMock.GetSchema())
+		require.NoError(t, err)
+
+		numsBefore := replica.getCollectionNum()
+		coll, err := replica.getCollectionByID(0)
+		require.NotNil(t, coll)
+		require.NoError(t, err)
+
+		err = replica.removeCollection(0)
+		assert.NoError(t, err)
+		numsAfter := replica.getCollectionNum()
+		assert.Equal(t, 1, numsBefore-numsAfter)
+
+		coll, err = replica.getCollectionByID(0)
+		assert.Nil(t, coll)
+		assert.Error(t, err)
+		err = replica.removeCollection(999999999)
+		assert.Error(t, err)
+	})
+
+	t.Run("Test errors", func(t *testing.T) {
+		replica := newReplica()
+		require.False(t, replica.hasCollection(0))
+		require.Equal(t, 0, replica.getCollectionNum())
+
+		coll, err := replica.getCollectionByName("Name-not-exist")
+		assert.Error(t, err)
+		assert.Nil(t, coll)
+
+		coll, err = replica.getCollectionByID(0)
+		assert.Error(t, err)
+		assert.Nil(t, coll)
+
+		collID, err := replica.getCollectionIDByName("Name-not-exist")
+		assert.Error(t, err)
+		assert.Zero(t, collID)
+
+		err = replica.removeCollection(0)
+		assert.Error(t, err)
+	})
+
 }
 
-func TestCollectionReplica_addCollection(t *testing.T) {
-	replica := newReplica()
-	initTestReplicaMeta(t, replica, "collection0", 0, 0)
-}
+func TestReplica_Segment(t *testing.T) {
+	t.Run("Test segment", func(t *testing.T) {
+		replica := newReplica()
+		assert.False(t, replica.hasSegment(0))
 
-func TestCollectionReplica_removeCollection(t *testing.T) {
-	replica := newReplica()
-	initTestReplicaMeta(t, replica, "collection0", 0, 0)
-	assert.Equal(t, replica.getCollectionNum(), 1)
+		err := replica.addSegment(0, 1, 2, make([]*internalpb2.MsgPosition, 0))
+		assert.NoError(t, err)
+		assert.True(t, replica.hasSegment(0))
 
-	err := replica.removeCollection(0)
-	assert.NoError(t, err)
-	assert.Equal(t, replica.getCollectionNum(), 0)
-}
+		seg, err := replica.getSegmentByID(0)
+		assert.NoError(t, err)
+		assert.NotNil(t, seg)
+		assert.Equal(t, UniqueID(1), seg.collectionID)
+		assert.Equal(t, UniqueID(2), seg.partitionID)
 
-func TestCollectionReplica_getCollectionByID(t *testing.T) {
-	replica := newReplica()
-	collectionName := "collection0"
-	collectionID := UniqueID(0)
-	initTestReplicaMeta(t, replica, collectionName, collectionID, 0)
-	targetCollection, err := replica.getCollectionByID(collectionID)
-	assert.NoError(t, err)
-	assert.NotNil(t, targetCollection)
-	assert.Equal(t, targetCollection.Name(), collectionName)
-	assert.Equal(t, targetCollection.ID(), collectionID)
-}
+		assert.Equal(t, int64(0), seg.numRows)
 
-func TestCollectionReplica_getCollectionByName(t *testing.T) {
-	replica := newReplica()
-	collectionName := "collection0"
-	collectionID := UniqueID(0)
-	initTestReplicaMeta(t, replica, collectionName, collectionID, 0)
+		err = replica.updateStatistics(0, 100)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(100), seg.numRows)
 
-	targetCollection, err := replica.getCollectionByName(collectionName)
-	assert.NoError(t, err)
-	assert.NotNil(t, targetCollection)
-	assert.Equal(t, targetCollection.Name(), collectionName)
-	assert.Equal(t, targetCollection.ID(), collectionID)
+		update, err := replica.getSegmentStatisticsUpdates(0)
+		assert.NoError(t, err)
+		assert.Equal(t, UniqueID(0), update.SegmentID)
+		assert.Equal(t, int64(100), update.NumRows)
+		assert.True(t, update.IsNewSegment)
+	})
 
-}
+	t.Run("Test errors", func(t *testing.T) {
+		replica := newReplica()
+		require.False(t, replica.hasSegment(0))
 
-func TestCollectionReplica_hasCollection(t *testing.T) {
-	replica := newReplica()
-	collectionName := "collection0"
-	collectionID := UniqueID(0)
-	initTestReplicaMeta(t, replica, collectionName, collectionID, 0)
+		seg, err := replica.getSegmentByID(0)
+		assert.Error(t, err)
+		assert.Nil(t, seg)
 
-	hasCollection := replica.hasCollection(collectionID)
-	assert.Equal(t, hasCollection, true)
-	hasCollection = replica.hasCollection(UniqueID(1))
-	assert.Equal(t, hasCollection, false)
+		err = replica.removeSegment(0)
+		assert.Error(t, err)
 
-}
+		err = replica.updateStatistics(0, 0)
+		assert.Error(t, err)
 
-func TestCollectionReplica_freeAll(t *testing.T) {
-	replica := newReplica()
-	collectionName := "collection0"
-	collectionID := UniqueID(0)
-	initTestReplicaMeta(t, replica, collectionName, collectionID, 0)
-
+		update, err := replica.getSegmentStatisticsUpdates(0)
+		assert.Error(t, err)
+		assert.Nil(t, update)
+	})
 }

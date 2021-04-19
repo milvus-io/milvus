@@ -17,6 +17,7 @@ type (
 	}
 
 	AllocatorFactory struct {
+		ID UniqueID
 	}
 
 	MasterServiceFactory struct {
@@ -161,9 +162,23 @@ func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionNa
 	return &collection
 }
 
+func NewAllocatorFactory(id ...UniqueID) *AllocatorFactory {
+	f := &AllocatorFactory{}
+	if len(id) == 1 {
+		f.ID = id[0]
+	}
+	return f
+}
+
+func (alloc AllocatorFactory) setID(id UniqueID) {
+	alloc.ID = id
+}
+
 func (alloc AllocatorFactory) allocID() (UniqueID, error) {
-	// GOOSE TODO: random ID generate
-	return UniqueID(0), nil
+	if alloc.ID == 0 {
+		return UniqueID(0), nil // GOOSE TODO: random ID generating
+	}
+	return alloc.ID, nil
 }
 
 func (m *MasterServiceFactory) setID(id UniqueID) {
