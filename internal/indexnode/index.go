@@ -131,9 +131,9 @@ type CIndex struct {
 
 func (index *CIndex) Serialize() ([]*Blob, error) {
 	var cBinary C.CBinary
-	defer C.DeleteCBinary(cBinary)
 
 	status := C.SerializeToSlicedBuffer(index.indexPtr, &cBinary)
+	defer C.DeleteCBinary(cBinary)
 	errorCode := status.error_code
 	if errorCode != 0 {
 		errorMsg := C.GoString(status.error_msg)
