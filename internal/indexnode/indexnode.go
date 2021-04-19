@@ -48,6 +48,7 @@ type IndexNode struct {
 }
 
 func NewIndexNode(ctx context.Context) (*IndexNode, error) {
+	log.Debug("new index node ...")
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	b := &IndexNode{
@@ -142,6 +143,14 @@ func (i *IndexNode) SetIndexServiceClient(serviceClient types.IndexService) {
 }
 
 func (i *IndexNode) BuildIndex(ctx context.Context, request *indexpb.BuildIndexRequest) (*commonpb.Status, error) {
+	log.Debug("indexnode building index ...",
+		zap.Int64("IndexBuildID", request.IndexBuildID),
+		zap.String("Indexname", request.IndexName),
+		zap.Int64("IndexID", request.IndexID),
+		zap.Strings("DataPaths", request.DataPaths),
+		zap.Any("TypeParams", request.TypeParams),
+		zap.Any("IndexParams", request.IndexParams))
+
 	t := &IndexBuildTask{
 		BaseTask: BaseTask{
 			ctx:  ctx,
@@ -168,6 +177,7 @@ func (i *IndexNode) BuildIndex(ctx context.Context, request *indexpb.BuildIndexR
 }
 
 func (i *IndexNode) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+	log.Debug("indexnode drop index ...", zap.Int64("index id", request.IndexID))
 	i.sched.IndexBuildQueue.tryToRemoveUselessIndexBuildTask(request.IndexID)
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -186,7 +196,7 @@ func (i *IndexNode) AddCloseCallback(callbacks ...func()) {
 }
 
 func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-
+	log.Debug("get indexnode components states ...")
 	stateInfo := &internalpb.ComponentInfo{
 		NodeID:    Params.NodeID,
 		Role:      "NodeImpl",
@@ -200,10 +210,17 @@ func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.Compone
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}
+
+	log.Debug("indexnode compoents states",
+		zap.Any("State", ret.State),
+		zap.Any("Status", ret.Status),
+		zap.Any("SubcomponentStates", ret.SubcomponentStates))
 	return ret, nil
 }
 
 func (i *IndexNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	log.Debug("get indexnode time tick channel ...")
+
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -212,6 +229,7 @@ func (i *IndexNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRes
 }
 
 func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	log.Debug("get indexnode statistics channel ...")
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,

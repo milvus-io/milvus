@@ -5,7 +5,10 @@ import (
 	"errors"
 	"strconv"
 
+	"go.uber.org/zap"
+
 	grpcindexnodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/indexnode/client"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -56,6 +59,7 @@ func (i *IndexService) prepareNodeInitParams() []*commonpb.KeyValuePair {
 }
 
 func (i *IndexService) RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
+	log.Debug("indexservice", zap.Any("register index node, node address = ", req.Address))
 	ret := &indexpb.RegisterNodeResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
