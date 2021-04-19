@@ -30,10 +30,10 @@ func (lic *LoadIndexClient) LoadIndex(indexPaths []string, segmentID int64, fiel
 	}
 
 	var indexParamsKV []*commonpb.KeyValuePair
-	for indexParam := range indexParams {
+	for key, value := range indexParams {
 		indexParamsKV = append(indexParamsKV, &commonpb.KeyValuePair{
-			Key:   indexParam,
-			Value: indexParams[indexParam],
+			Key:   key,
+			Value: value,
 		})
 	}
 
