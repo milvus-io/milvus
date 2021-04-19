@@ -53,6 +53,15 @@ func newTestSchema() *schemapb.CollectionSchema {
 }
 
 type mockDataNodeClient struct {
+	id    int64
+	state internalpb.StateCode
+}
+
+func newMockDataNodeClient(id int64) *mockDataNodeClient {
+	return &mockDataNodeClient{
+		id:    id,
+		state: internalpb.StateCode_Initializing,
+	}
 }
 
 func (c *mockDataNodeClient) Init() error {
@@ -60,20 +69,21 @@ func (c *mockDataNodeClient) Init() error {
 }
 
 func (c *mockDataNodeClient) Start() error {
+	c.state = internalpb.StateCode_Healthy
 	return nil
 }
 
 func (c *mockDataNodeClient) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	//TODO
-	return nil, nil
+	return &internalpb.ComponentStates{
+		State: &internalpb.ComponentInfo{
+			NodeID:    c.id,
+			StateCode: c.state,
+		},
+	}, nil
 }
 
 func (c *mockDataNodeClient) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return nil, nil
-}
-
-func newMockDataNodeClient() *mockDataNodeClient {
-	return &mockDataNodeClient{}
 }
 
 func (c *mockDataNodeClient) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
@@ -85,5 +95,6 @@ func (c *mockDataNodeClient) FlushSegments(ctx context.Context, in *datapb.Flush
 }
 
 func (c *mockDataNodeClient) Stop() error {
+	c.state = internalpb.StateCode_Abnormal
 	return nil
 }

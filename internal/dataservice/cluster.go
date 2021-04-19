@@ -25,7 +25,7 @@ type dataNode struct {
 	channelNum int
 }
 type dataNodeCluster struct {
-	mu       sync.RWMutex
+	sync.RWMutex
 	finishCh chan struct{}
 	nodes    []*dataNode
 }
@@ -42,8 +42,8 @@ func newDataNodeCluster(finishCh chan struct{}) *dataNodeCluster {
 }
 
 func (c *dataNodeCluster) Register(dataNode *dataNode) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.Lock()
+	defer c.Unlock()
 	if c.checkDataNodeNotExist(dataNode.address.ip, dataNode.address.port) {
 		c.nodes = append(c.nodes, dataNode)
 		if len(c.nodes) == Params.DataNodeNum {
@@ -62,23 +62,25 @@ func (c *dataNodeCluster) checkDataNodeNotExist(ip string, port int64) bool {
 }
 
 func (c *dataNodeCluster) GetNumOfNodes() int {
+	c.RLock()
+	defer c.RUnlock()
 	return len(c.nodes)
 }
 
 func (c *dataNodeCluster) GetNodeIDs() []int64 {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	ret := make([]int64, len(c.nodes))
-	for i, node := range c.nodes {
-		ret[i] = node.id
+	c.RLock()
+	defer c.RUnlock()
+	ret := make([]int64, 0, len(c.nodes))
+	for _, node := range c.nodes {
+		ret = append(ret, node.id)
 	}
 	return ret
 }
 
 func (c *dataNodeCluster) WatchInsertChannels(channels []string) {
 	ctx := context.TODO()
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.Lock()
+	defer c.Unlock()
 	var groups [][]string
 	if len(channels) < len(c.nodes) {
 		groups = make([][]string, len(channels))
@@ -108,8 +110,8 @@ func (c *dataNodeCluster) WatchInsertChannels(channels []string) {
 }
 
 func (c *dataNodeCluster) GetDataNodeStates(ctx context.Context) ([]*internalpb.ComponentInfo, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.RLock()
+	defer c.RUnlock()
 	ret := make([]*internalpb.ComponentInfo, 0)
 	for _, node := range c.nodes {
 		states, err := node.client.GetComponentStates(ctx)
@@ -124,8 +126,8 @@ func (c *dataNodeCluster) GetDataNodeStates(ctx context.Context) ([]*internalpb.
 
 func (c *dataNodeCluster) FlushSegment(request *datapb.FlushSegmentsRequest) {
 	ctx := context.TODO()
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.Lock()
+	defer c.Unlock()
 	for _, node := range c.nodes {
 		if _, err := node.client.FlushSegments(ctx, request); err != nil {
 			log.Error("flush segment err", zap.Stringer("dataNode", node), zap.Error(err))
@@ -135,6 +137,8 @@ func (c *dataNodeCluster) FlushSegment(request *datapb.FlushSegmentsRequest) {
 }
 
 func (c *dataNodeCluster) ShutDownClients() {
+	c.Lock()
+	defer c.Unlock()
 	for _, node := range c.nodes {
 		if err := node.client.Stop(); err != nil {
 			log.Error("stop client error", zap.Stringer("dataNode", node), zap.Error(err))
@@ -145,8 +149,8 @@ func (c *dataNodeCluster) ShutDownClients() {
 
 // Clear only for test
 func (c *dataNodeCluster) Clear() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.Lock()
+	defer c.Unlock()
 	c.finishCh = make(chan struct{})
 	c.nodes = make([]*dataNode, 0)
 }

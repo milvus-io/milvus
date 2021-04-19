@@ -4,7 +4,51 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"golang.org/x/net/context"
 )
+
+func TestDataNodeClusterRegister(t *testing.T) {
+	Params.Init()
+	Params.DataNodeNum = 3
+	ch := make(chan struct{})
+	cluster := newDataNodeCluster(ch)
+	ids := make([]int64, 0, Params.DataNodeNum)
+	for i := 0; i < Params.DataNodeNum; i++ {
+		c := newMockDataNodeClient(int64(i))
+		err := c.Init()
+		assert.Nil(t, err)
+		err = c.Start()
+		assert.Nil(t, err)
+		cluster.Register(&dataNode{
+			id: int64(i),
+			address: struct {
+				ip   string
+				port int64
+			}{"localhost", int64(9999 + i)},
+			client:     c,
+			channelNum: 0,
+		})
+		ids = append(ids, int64(i))
+	}
+	_, ok := <-ch
+	assert.False(t, ok)
+	assert.EqualValues(t, Params.DataNodeNum, cluster.GetNumOfNodes())
+	assert.EqualValues(t, ids, cluster.GetNodeIDs())
+	states, err := cluster.GetDataNodeStates(context.TODO())
+	assert.Nil(t, err)
+	assert.EqualValues(t, Params.DataNodeNum, len(states))
+	for _, s := range states {
+		assert.EqualValues(t, internalpb.StateCode_Healthy, s.StateCode)
+	}
+	cluster.ShutDownClients()
+	states, err = cluster.GetDataNodeStates(context.TODO())
+	assert.Nil(t, err)
+	assert.EqualValues(t, Params.DataNodeNum, len(states))
+	for _, s := range states {
+		assert.EqualValues(t, internalpb.StateCode_Abnormal, s.StateCode)
+	}
+}
 
 func TestWatchChannels(t *testing.T) {
 	Params.Init()
@@ -23,13 +67,18 @@ func TestWatchChannels(t *testing.T) {
 	cluster := newDataNodeCluster(make(chan struct{}))
 	for _, c := range cases {
 		for i := 0; i < Params.DataNodeNum; i++ {
+			c := newMockDataNodeClient(int64(i))
+			err := c.Init()
+			assert.Nil(t, err)
+			err = c.Start()
+			assert.Nil(t, err)
 			cluster.Register(&dataNode{
 				id: int64(i),
 				address: struct {
 					ip   string
 					port int64
 				}{"localhost", int64(9999 + i)},
-				client:     newMockDataNodeClient(),
+				client:     c,
 				channelNum: 0,
 			})
 		}
