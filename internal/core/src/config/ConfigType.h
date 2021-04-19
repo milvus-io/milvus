@@ -67,7 +67,11 @@ using BaseConfigPtr = std::shared_ptr<BaseConfig>;
 
 class BoolConfig : public BaseConfig {
  public:
-    BoolConfig(const char* name, const char* alias, bool modifiable, bool* config, bool default_value,
+    BoolConfig(const char* name,
+               const char* alias,
+               bool modifiable,
+               bool* config,
+               bool default_value,
                std::function<bool(bool val, std::string& err)> is_valid_fn,
                std::function<bool(bool val, bool prev, std::string& err)> update_fn);
 
@@ -90,7 +94,11 @@ class BoolConfig : public BaseConfig {
 
 class StringConfig : public BaseConfig {
  public:
-    StringConfig(const char* name, const char* alias, bool modifiable, std::string* config, const char* default_value,
+    StringConfig(const char* name,
+                 const char* alias,
+                 bool modifiable,
+                 std::string* config,
+                 const char* default_value,
                  std::function<bool(const std::string& val, std::string& err)> is_valid_fn,
                  std::function<bool(const std::string& val, const std::string& prev, std::string& err)> update_fn);
 
@@ -113,8 +121,13 @@ class StringConfig : public BaseConfig {
 
 class EnumConfig : public BaseConfig {
  public:
-    EnumConfig(const char* name, const char* alias, bool modifiable, configEnum* enumd, int64_t* config,
-               int64_t default_value, std::function<bool(int64_t val, std::string& err)> is_valid_fn,
+    EnumConfig(const char* name,
+               const char* alias,
+               bool modifiable,
+               configEnum* enumd,
+               int64_t* config,
+               int64_t default_value,
+               std::function<bool(int64_t val, std::string& err)> is_valid_fn,
                std::function<bool(int64_t val, int64_t prev, std::string& err)> update_fn);
 
  private:
@@ -137,8 +150,13 @@ class EnumConfig : public BaseConfig {
 
 class IntegerConfig : public BaseConfig {
  public:
-    IntegerConfig(const char* name, const char* alias, bool modifiable, int64_t lower_bound, int64_t upper_bound,
-                  int64_t* config, int64_t default_value,
+    IntegerConfig(const char* name,
+                  const char* alias,
+                  bool modifiable,
+                  int64_t lower_bound,
+                  int64_t upper_bound,
+                  int64_t* config,
+                  int64_t default_value,
                   std::function<bool(int64_t val, std::string& err)> is_valid_fn,
                   std::function<bool(int64_t val, int64_t prev, std::string& err)> update_fn);
 
@@ -163,8 +181,14 @@ class IntegerConfig : public BaseConfig {
 
 class FloatingConfig : public BaseConfig {
  public:
-    FloatingConfig(const char* name, const char* alias, bool modifiable, double lower_bound, double upper_bound,
-                   double* config, double default_value, std::function<bool(double val, std::string& err)> is_valid_fn,
+    FloatingConfig(const char* name,
+                   const char* alias,
+                   bool modifiable,
+                   double lower_bound,
+                   double upper_bound,
+                   double* config,
+                   double default_value,
+                   std::function<bool(double val, std::string& err)> is_valid_fn,
                    std::function<bool(double val, double prev, std::string& err)> update_fn);
 
  private:
@@ -188,8 +212,14 @@ class FloatingConfig : public BaseConfig {
 
 class SizeConfig : public BaseConfig {
  public:
-    SizeConfig(const char* name, const char* alias, bool modifiable, int64_t lower_bound, int64_t upper_bound,
-               int64_t* config, int64_t default_value, std::function<bool(int64_t val, std::string& err)> is_valid_fn,
+    SizeConfig(const char* name,
+               const char* alias,
+               bool modifiable,
+               int64_t lower_bound,
+               int64_t upper_bound,
+               int64_t* config,
+               int64_t default_value,
+               std::function<bool(int64_t val, std::string& err)> is_valid_fn,
                std::function<bool(int64_t val, int64_t prev, std::string& err)> update_fn);
 
  private:

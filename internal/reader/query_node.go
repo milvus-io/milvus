@@ -2,9 +2,9 @@ package reader
 
 /*
 
-#cgo CFLAGS: -I${SRCDIR}/../../core/include
+#cgo CFLAGS: -I${SRCDIR}/../core/output/include
 
-#cgo LDFLAGS: -L${SRCDIR}/../../core/lib -lmilvus_dog_segment -Wl,-rpath=${SRCDIR}/../../core/lib
+#cgo LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_dog_segment -Wl,-rpath=${SRCDIR}/../core/output/lib
 
 #include "collection_c.h"
 #include "partition_c.h"

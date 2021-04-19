@@ -32,8 +32,7 @@ macro(build_dependency DEPENDENCY_NAME)
     if ("${DEPENDENCY_NAME}" STREQUAL "Arrow")
         build_arrow()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "GTest")
-#        build_gtest()
-#        find_package(GTest REQUIRED)
+        find_package(GTest REQUIRED)
     elseif ("${DEPENDENCY_NAME}" STREQUAL "OpenBLAS")
         build_openblas()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "FAISS")
@@ -216,12 +215,12 @@ else ()
             )
 endif ()
 
-if (DEFINED ENV{KNOWHERE_GTEST_URL})
-    set(GTEST_SOURCE_URL "$ENV{KNOWHERE_GTEST_URL}")
-else ()
-    set(GTEST_SOURCE_URL
-            "https://github.com/google/googletest/archive/release-${GTEST_VERSION}.tar.gz")
-endif ()
+# if (DEFINED ENV{KNOWHERE_GTEST_URL})
+#     set(GTEST_SOURCE_URL "$ENV{KNOWHERE_GTEST_URL}")
+# else ()
+#     set(GTEST_SOURCE_URL
+#             "https://github.com/google/googletest/archive/release-${GTEST_VERSION}.tar.gz")
+# endif ()
 
 if (DEFINED ENV{KNOWHERE_OPENBLAS_URL})
     set(OPENBLAS_SOURCE_URL "$ENV{KNOWHERE_OPENBLAS_URL}")
@@ -387,77 +386,77 @@ endif()
 # ----------------------------------------------------------------------
 # Google gtest
 
-#macro(build_gtest)
-#    message(STATUS "Building gtest-${GTEST_VERSION} from source")
-#    set(GTEST_VENDORED TRUE)
-#    set(GTEST_CMAKE_CXX_FLAGS "${EP_CXX_FLAGS}")
-#
-#    if (APPLE)
-#        set(GTEST_CMAKE_CXX_FLAGS
-#                ${GTEST_CMAKE_CXX_FLAGS}
-#                -DGTEST_USE_OWN_TR1_TUPLE=1
-#                -Wno-unused-value
-#                -Wno-ignored-attributes)
-#    endif ()
-#
-#    set(GTEST_PREFIX "${INDEX_BINARY_DIR}/googletest_ep-prefix/src/googletest_ep")
-#    set(GTEST_INCLUDE_DIR "${GTEST_PREFIX}/include")
-#    set(GTEST_STATIC_LIB
-#            "${GTEST_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gtest${CMAKE_STATIC_LIBRARY_SUFFIX}")
-#    set(GTEST_MAIN_STATIC_LIB
-#            "${GTEST_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gtest_main${CMAKE_STATIC_LIBRARY_SUFFIX}")
-#
-#    set(GTEST_CMAKE_ARGS
-#            ${EP_COMMON_CMAKE_ARGS}
-#            "-DCMAKE_INSTALL_PREFIX=${GTEST_PREFIX}"
-#            "-DCMAKE_INSTALL_LIBDIR=lib"
-#            -DCMAKE_CXX_FLAGS=${GTEST_CMAKE_CXX_FLAGS}
-#            -DCMAKE_BUILD_TYPE=Release)
-#
-#    set(GMOCK_INCLUDE_DIR "${GTEST_PREFIX}/include")
-#    set(GMOCK_STATIC_LIB
-#            "${GTEST_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gmock${CMAKE_STATIC_LIBRARY_SUFFIX}"
-#            )
-#
-#        ExternalProject_Add(googletest_ep
-#                URL
-#                ${GTEST_SOURCE_URL}
-#                BUILD_COMMAND
-#                ${MAKE}
-#                ${MAKE_BUILD_ARGS}
-#                BUILD_BYPRODUCTS
-#                ${GTEST_STATIC_LIB}
-#                ${GTEST_MAIN_STATIC_LIB}
-#                ${GMOCK_STATIC_LIB}
-#                CMAKE_ARGS
-#                ${GTEST_CMAKE_ARGS}
-#                ${EP_LOG_OPTIONS})
-#
-#    # The include directory must exist before it is referenced by a target.
-#    file(MAKE_DIRECTORY "${GTEST_INCLUDE_DIR}")
-#
-#    add_library(gtest STATIC IMPORTED)
-#    set_target_properties(gtest
-#            PROPERTIES IMPORTED_LOCATION "${GTEST_STATIC_LIB}"
-#            INTERFACE_INCLUDE_DIRECTORIES "${GTEST_INCLUDE_DIR}")
-#
-#    add_library(gtest_main STATIC IMPORTED)
-#    set_target_properties(gtest_main
-#            PROPERTIES IMPORTED_LOCATION "${GTEST_MAIN_STATIC_LIB}"
-#            INTERFACE_INCLUDE_DIRECTORIES "${GTEST_INCLUDE_DIR}")
-#
-#    add_library(gmock STATIC IMPORTED)
-#    set_target_properties(gmock
-#            PROPERTIES IMPORTED_LOCATION "${GMOCK_STATIC_LIB}"
-#            INTERFACE_INCLUDE_DIRECTORIES "${GTEST_INCLUDE_DIR}")
-#
-#    add_dependencies(gtest googletest_ep)
-#    add_dependencies(gtest_main googletest_ep)
-#    add_dependencies(gmock googletest_ep)
-#
-#endmacro()
+# macro(build_gtest)
+#     message(STATUS "Building gtest-${GTEST_VERSION} from source")
+#     set(GTEST_VENDORED TRUE)
+#     set(GTEST_CMAKE_CXX_FLAGS "${EP_CXX_FLAGS}")
+# 
+#     if (APPLE)
+#         set(GTEST_CMAKE_CXX_FLAGS
+#                 ${GTEST_CMAKE_CXX_FLAGS}
+#                 -DGTEST_USE_OWN_TR1_TUPLE=1
+#                 -Wno-unused-value
+#                 -Wno-ignored-attributes)
+#     endif ()
+# 
+#     set(GTEST_PREFIX "${INDEX_BINARY_DIR}/googletest_ep-prefix/src/googletest_ep")
+#     set(GTEST_INCLUDE_DIR "${GTEST_PREFIX}/include")
+#     set(GTEST_STATIC_LIB
+#             "${GTEST_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gtest${CMAKE_STATIC_LIBRARY_SUFFIX}")
+#     set(GTEST_MAIN_STATIC_LIB
+#             "${GTEST_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gtest_main${CMAKE_STATIC_LIBRARY_SUFFIX}")
+# 
+#     set(GTEST_CMAKE_ARGS
+#             ${EP_COMMON_CMAKE_ARGS}
+#             "-DCMAKE_INSTALL_PREFIX=${GTEST_PREFIX}"
+#             "-DCMAKE_INSTALL_LIBDIR=lib"
+#             -DCMAKE_CXX_FLAGS=${GTEST_CMAKE_CXX_FLAGS}
+#             -DCMAKE_BUILD_TYPE=Release)
+# 
+#     set(GMOCK_INCLUDE_DIR "${GTEST_PREFIX}/include")
+#     set(GMOCK_STATIC_LIB
+#             "${GTEST_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gmock${CMAKE_STATIC_LIBRARY_SUFFIX}"
+#             )
+# 
+#         ExternalProject_Add(googletest_ep
+#                 URL
+#                 ${GTEST_SOURCE_URL}
+#                 BUILD_COMMAND
+#                 ${MAKE}
+#                 ${MAKE_BUILD_ARGS}
+#                 BUILD_BYPRODUCTS
+#                 ${GTEST_STATIC_LIB}
+#                 ${GTEST_MAIN_STATIC_LIB}
+#                 ${GMOCK_STATIC_LIB}
+#                 CMAKE_ARGS
+#                 ${GTEST_CMAKE_ARGS}
+#                 ${EP_LOG_OPTIONS})
+# 
+#     # The include directory must exist before it is referenced by a target.
+#     file(MAKE_DIRECTORY "${GTEST_INCLUDE_DIR}")
+# 
+#     add_library(gtest STATIC IMPORTED)
+#     set_target_properties(gtest
+#             PROPERTIES IMPORTED_LOCATION "${GTEST_STATIC_LIB}"
+#             INTERFACE_INCLUDE_DIRECTORIES "${GTEST_INCLUDE_DIR}")
+# 
+#     add_library(gtest_main STATIC IMPORTED)
+#     set_target_properties(gtest_main
+#             PROPERTIES IMPORTED_LOCATION "${GTEST_MAIN_STATIC_LIB}"
+#             INTERFACE_INCLUDE_DIRECTORIES "${GTEST_INCLUDE_DIR}")
+# 
+#     add_library(gmock STATIC IMPORTED)
+#     set_target_properties(gmock
+#             PROPERTIES IMPORTED_LOCATION "${GMOCK_STATIC_LIB}"
+#             INTERFACE_INCLUDE_DIRECTORIES "${GTEST_INCLUDE_DIR}")
+# 
+#     add_dependencies(gtest googletest_ep)
+#     add_dependencies(gtest_main googletest_ep)
+#     add_dependencies(gmock googletest_ep)
+# 
+# endmacro()
 
-# if (KNOWHERE_BUILD_TESTS AND NOT TARGET googletest_ep)
+## if (KNOWHERE_BUILD_TESTS AND NOT TARGET googletest_ep)
 #if ( NOT TARGET gtest AND KNOWHERE_BUILD_TESTS )
 #    resolve_dependency(GTest)
 #
@@ -654,3 +653,5 @@ if (KNOWHERE_WITH_FAISS AND NOT TARGET faiss_ep)
     include_directories(SYSTEM "${FAISS_INCLUDE_DIR}")
     link_directories(SYSTEM ${FAISS_PREFIX}/lib/)
 endif ()
+
+add_subdirectory(thirdparty/NGT)

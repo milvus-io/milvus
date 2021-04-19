@@ -149,7 +149,6 @@ ValidateGpuIndex(int32_t gpu_index) {
 #ifdef MILVUS_GPU_VERSION
 Status
 GetGpuMemory(int32_t gpu_index, int64_t& memory) {
-
     cudaDeviceProp deviceProp;
     auto cuda_err = cudaGetDeviceProperties(&deviceProp, gpu_index);
     if (cuda_err) {

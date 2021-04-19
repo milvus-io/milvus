@@ -56,7 +56,9 @@ class StringHelpFunctions {
     //  55,1122\"aa,bb\",yyy,\"kkk\"    55 | 1122aa,bb | yyy | kkk
     //  "55,1122"aa,bb",yyy,"kkk"   illegal
     static Status
-    SplitStringByQuote(const std::string& str, const std::string& delimeter, const std::string& quote,
+    SplitStringByQuote(const std::string& str,
+                       const std::string& delimeter,
+                       const std::string& quote,
                        std::vector<std::string>& result);
 
     // std regex match function

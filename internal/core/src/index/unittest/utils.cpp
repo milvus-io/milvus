@@ -61,8 +61,13 @@ DataGen::Generate(const int dim, const int nb, const int nq, const bool is_binar
 }
 
 void
-GenAll(const int64_t dim, const int64_t nb, std::vector<float>& xb, std::vector<int64_t>& ids,
-       std::vector<int64_t>& xids, const int64_t nq, std::vector<float>& xq) {
+GenAll(const int64_t dim,
+       const int64_t nb,
+       std::vector<float>& xb,
+       std::vector<int64_t>& ids,
+       std::vector<int64_t>& xids,
+       const int64_t nq,
+       std::vector<float>& xq) {
     xb.resize(nb * dim);
     xq.resize(nq * dim);
     ids.resize(nb);
@@ -71,8 +76,13 @@ GenAll(const int64_t dim, const int64_t nb, std::vector<float>& xb, std::vector<
 }
 
 void
-GenAll(const int64_t dim, const int64_t nb, std::vector<uint8_t>& xb, std::vector<int64_t>& ids,
-       std::vector<int64_t>& xids, const int64_t nq, std::vector<uint8_t>& xq) {
+GenAll(const int64_t dim,
+       const int64_t nb,
+       std::vector<uint8_t>& xb,
+       std::vector<int64_t>& ids,
+       std::vector<int64_t>& xids,
+       const int64_t nq,
+       std::vector<uint8_t>& xq) {
     xb.resize(nb * dim);
     xq.resize(nq * dim);
     ids.resize(nb);
@@ -81,8 +91,14 @@ GenAll(const int64_t dim, const int64_t nb, std::vector<uint8_t>& xb, std::vecto
 }
 
 void
-GenBase(const int64_t dim, const int64_t nb, const void* xb, int64_t* ids, const int64_t nq, const void* xq,
-        int64_t* xids, bool is_binary) {
+GenBase(const int64_t dim,
+        const int64_t nb,
+        const void* xb,
+        int64_t* ids,
+        const int64_t nq,
+        const void* xq,
+        int64_t* xids,
+        bool is_binary) {
     if (!is_binary) {
         float* xb_f = (float*)xb;
         float* xq_f = (float*)xq;

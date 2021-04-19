@@ -1,17 +1,10 @@
 # CLion generated files
-core/cmake-build-debug/
-core/cmake-build-debug/*
-core/cmake-build-release/
-core/cmake-build-release/*
-core/cmake_build/
-core/cmake_build/*
-core/build/
-core/build/*
-core/.idea/
-.idea/
-.idea/*
-pulsar/client-cpp/cmake-build-debug/
-pulsar/client-cpp/cmake-build-debug/*
+**/cmake-build-debug/*
+**/cmake_build/*
+**/cmake-build-release/*
+internal/core/output/*
+internal/core/build/*
+**/.idea/*
 pulsar/client-cpp/build/
 pulsar/client-cpp/build/*
 

@@ -37,7 +37,9 @@ class CommonUtil {
     GetExePath();
 
     static bool
-    TimeStrToTime(const std::string& time_str, time_t& time_integer, tm& time_struct,
+    TimeStrToTime(const std::string& time_str,
+                  time_t& time_integer,
+                  tm& time_struct,
                   const std::string& format = "%d-%d-%d %d:%d:%d");
 
     static void

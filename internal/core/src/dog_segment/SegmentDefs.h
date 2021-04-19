@@ -152,20 +152,23 @@ class Schema {
         return total_sizeof_;
     }
 
-    const std::vector<int>& get_sizeof_infos() {
+    const std::vector<int>&
+    get_sizeof_infos() {
         return sizeof_infos_;
     }
 
-    std::optional<int> get_offset(const std::string& field_name) {
-        if(!offsets_.count(field_name)) {
+    std::optional<int>
+    get_offset(const std::string& field_name) {
+        if (!offsets_.count(field_name)) {
             return std::nullopt;
         } else {
             return offsets_[field_name];
         }
     }
 
-    const std::vector<FieldMeta>& get_fields() {
-      return fields_;
+    const std::vector<FieldMeta>&
+    get_fields() {
+        return fields_;
     }
 
     const FieldMeta&
@@ -175,6 +178,7 @@ class Schema {
         auto offset = offset_iter->second;
         return (*this)[offset];
     }
+
  private:
     // this is where data holds
     std::vector<FieldMeta> fields_;

@@ -8,7 +8,7 @@ fi
 BUILD_OUTPUT_DIR="cmake_build"
 BUILD_TYPE="Release"
 BUILD_UNITTEST="OFF"
-INSTALL_PREFIX=$(pwd)/milvus
+INSTALL_PREFIX=$(pwd)/output
 MAKE_CLEAN="OFF"
 BUILD_COVERAGE="OFF"
 DB_PATH="/tmp/milvus"
@@ -20,13 +20,16 @@ WITH_PROMETHEUS="ON"
 CUDA_ARCH="DEFAULT"
 CUSTOM_THIRDPARTY_PATH=""
 
-while getopts "p:d:t:s:f:ulrcghzme" arg; do
+while getopts "p:d:t:s:f:o:ulrcghzme" arg; do
   case $arg in
   f)
     CUSTOM_THIRDPARTY_PATH=$OPTARG
     ;;
   p)
     INSTALL_PREFIX=$OPTARG
+    ;;
+  o)
+    BUILD_OUTPUT_DIR=$OPTARG
     ;;
   d)
     DB_PATH=$OPTARG

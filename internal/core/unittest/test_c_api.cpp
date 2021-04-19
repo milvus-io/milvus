@@ -16,7 +16,6 @@ TEST(CApiTest, CollectionTest) {
     DeleteCollection(collection);
 }
 
-
 TEST(CApiTest, PartitonTest) {
     auto collection_name = "collection0";
     auto schema_tmp_conf = "";
@@ -26,7 +25,6 @@ TEST(CApiTest, PartitonTest) {
     DeleteCollection(collection);
     DeletePartition(partition);
 }
-
 
 TEST(CApiTest, SegmentTest) {
     auto collection_name = "collection0";
@@ -39,7 +37,6 @@ TEST(CApiTest, SegmentTest) {
     DeletePartition(partition);
     DeleteSegment(segment);
 }
-
 
 TEST(CApiTest, InsertTest) {
     auto collection_name = "collection0";
@@ -62,25 +59,16 @@ TEST(CApiTest, InsertTest) {
         for (auto& x : vec) {
             x = e() % 2000 * 0.001 - 1.0;
         }
-        raw_data.insert(
-            raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
+        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
         int age = e() % 100;
-        raw_data.insert(
-            raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
+        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
     }
 
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
     auto offset = PreInsert(segment, N);
 
-    auto res = Insert(segment,
-                      offset,
-                      N,
-                      uids.data(),
-                      timestamps.data(),
-                      raw_data.data(),
-                      (int)line_sizeof,
-                      N);
+    auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
 
     assert(res == 0);
 
@@ -88,7 +76,6 @@ TEST(CApiTest, InsertTest) {
     DeletePartition(partition);
     DeleteSegment(segment);
 }
-
 
 TEST(CApiTest, DeleteTest) {
     auto collection_name = "collection0";
@@ -111,7 +98,6 @@ TEST(CApiTest, DeleteTest) {
     DeleteSegment(segment);
 }
 
-
 TEST(CApiTest, SearchTest) {
     auto collection_name = "collection0";
     auto schema_tmp_conf = "";
@@ -133,32 +119,22 @@ TEST(CApiTest, SearchTest) {
         for (auto& x : vec) {
             x = e() % 2000 * 0.001 - 1.0;
         }
-        raw_data.insert(
-            raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
+        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
         int age = e() % 100;
-        raw_data.insert(
-            raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
+        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
     }
 
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
     auto offset = PreInsert(segment, N);
 
-    auto ins_res = Insert(segment,
-                          offset,
-                          N,
-                          uids.data(),
-                          timestamps.data(),
-                          raw_data.data(),
-                          (int)line_sizeof,
-                          N);
+    auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
     assert(ins_res == 0);
 
     long result_ids[10];
     float result_distances[10];
 
-    auto query_json =
-        std::string(R"({"field_name":"fakevec","num_queries":1,"topK":10})");
+    auto query_json = std::string(R"({"field_name":"fakevec","num_queries":1,"topK":10})");
     std::vector<float> query_raw_data(16);
     for (int i = 0; i < 16; i++) {
         query_raw_data[i] = e() % 2000 * 0.001 - 1.0;
@@ -166,15 +142,13 @@ TEST(CApiTest, SearchTest) {
 
     CQueryInfo queryInfo{1, 10, "fakevec"};
 
-    auto sea_res = Search(
-        segment, queryInfo, 1, query_raw_data.data(), 16, result_ids, result_distances);
+    auto sea_res = Search(segment, queryInfo, 1, query_raw_data.data(), 16, result_ids, result_distances);
     assert(sea_res == 0);
 
     DeleteCollection(collection);
     DeletePartition(partition);
     DeleteSegment(segment);
 }
-
 
 TEST(CApiTest, BuildIndexTest) {
     auto collection_name = "collection0";
@@ -201,26 +175,16 @@ TEST(CApiTest, BuildIndexTest) {
         timestamps.emplace_back(i);
         // append vec
 
-        raw_data.insert(raw_data.end(),
-                        (const char*)&vec[0],
-                        ((const char*)&vec[0]) + sizeof(float) * vec.size());
+        raw_data.insert(raw_data.end(), (const char*)&vec[0], ((const char*)&vec[0]) + sizeof(float) * vec.size());
         int age = i;
-        raw_data.insert(
-            raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
+        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
     }
 
     auto line_sizeof = (sizeof(int) + sizeof(float) * DIM);
 
     auto offset = PreInsert(segment, N);
 
-    auto ins_res = Insert(segment,
-                          offset,
-                          N,
-                          uids.data(),
-                          timestamps.data(),
-                          raw_data.data(),
-                          (int)line_sizeof,
-                          N);
+    auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
     assert(ins_res == 0);
 
     // TODO: add index ptr
@@ -237,15 +201,13 @@ TEST(CApiTest, BuildIndexTest) {
 
     CQueryInfo queryInfo{1, 10, "fakevec"};
 
-    auto sea_res = Search(
-        segment, queryInfo, 20, query_raw_data.data(), DIM, result_ids, result_distances);
+    auto sea_res = Search(segment, queryInfo, 20, query_raw_data.data(), DIM, result_ids, result_distances);
     assert(sea_res == 0);
 
     DeleteCollection(collection);
     DeletePartition(partition);
     DeleteSegment(segment);
 }
-
 
 TEST(CApiTest, IsOpenedTest) {
     auto collection_name = "collection0";
@@ -263,7 +225,6 @@ TEST(CApiTest, IsOpenedTest) {
     DeleteSegment(segment);
 }
 
-
 TEST(CApiTest, CloseTest) {
     auto collection_name = "collection0";
     auto schema_tmp_conf = "";
@@ -280,55 +241,53 @@ TEST(CApiTest, CloseTest) {
     DeleteSegment(segment);
 }
 
-
 TEST(CApiTest, GetMemoryUsageInBytesTest) {
-  auto collection_name = "collection0";
-  auto schema_tmp_conf = "";
-  auto collection = NewCollection(collection_name, schema_tmp_conf);
-  auto partition_name = "partition0";
-  auto partition = NewPartition(collection, partition_name);
-  auto segment = NewSegment(partition, 0);
+    auto collection_name = "collection0";
+    auto schema_tmp_conf = "";
+    auto collection = NewCollection(collection_name, schema_tmp_conf);
+    auto partition_name = "partition0";
+    auto partition = NewPartition(collection, partition_name);
+    auto segment = NewSegment(partition, 0);
 
-  auto old_memory_usage_size = GetMemoryUsageInBytes(segment);
-  std::cout << "old_memory_usage_size = " << old_memory_usage_size << std::endl;
+    auto old_memory_usage_size = GetMemoryUsageInBytes(segment);
+    std::cout << "old_memory_usage_size = " << old_memory_usage_size << std::endl;
 
-  std::vector<char> raw_data;
-  std::vector<uint64_t> timestamps;
-  std::vector<int64_t> uids;
-  int N = 10000;
-  std::default_random_engine e(67);
-  for (int i = 0; i < N; ++i) {
-    uids.push_back(100000 + i);
-    timestamps.push_back(0);
-    // append vec
-    float vec[16];
-    for (auto &x: vec) {
-      x = e() % 2000 * 0.001 - 1.0;
+    std::vector<char> raw_data;
+    std::vector<uint64_t> timestamps;
+    std::vector<int64_t> uids;
+    int N = 10000;
+    std::default_random_engine e(67);
+    for (int i = 0; i < N; ++i) {
+        uids.push_back(100000 + i);
+        timestamps.push_back(0);
+        // append vec
+        float vec[16];
+        for (auto& x : vec) {
+            x = e() % 2000 * 0.001 - 1.0;
+        }
+        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
+        int age = e() % 100;
+        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
     }
-    raw_data.insert(raw_data.end(), (const char *) std::begin(vec), (const char *) std::end(vec));
-    int age = e() % 100;
-    raw_data.insert(raw_data.end(), (const char *) &age, ((const char *) &age) + sizeof(age));
-  }
 
-  auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
+    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
-  auto offset = PreInsert(segment, N);
+    auto offset = PreInsert(segment, N);
 
-  auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int) line_sizeof, N);
+    auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
 
-  assert(res == 0);
+    assert(res == 0);
 
-  auto memory_usage_size = GetMemoryUsageInBytes(segment);
+    auto memory_usage_size = GetMemoryUsageInBytes(segment);
 
-  std::cout << "new_memory_usage_size = " << memory_usage_size << std::endl;
+    std::cout << "new_memory_usage_size = " << memory_usage_size << std::endl;
 
-  assert(memory_usage_size == 2785280);
+    assert(memory_usage_size == 2785280);
 
-  DeleteCollection(collection);
-  DeletePartition(partition);
-  DeleteSegment(segment);
+    DeleteCollection(collection);
+    DeletePartition(partition);
+    DeleteSegment(segment);
 }
-
 
 namespace {
 auto
@@ -347,16 +306,13 @@ generate_data(int N) {
         for (auto& x : vec) {
             x = distribution(er);
         }
-        raw_data.insert(
-            raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
+        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
         int age = ei() % 100;
-        raw_data.insert(
-            raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
+        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
     }
     return std::make_tuple(raw_data, timestamps, uids);
 }
-}    // namespace
-
+}  // namespace
 
 TEST(CApiTest, TestSearchPreference) {
     auto collection_name = "collection0";
@@ -366,7 +322,6 @@ TEST(CApiTest, TestSearchPreference) {
     auto partition = NewPartition(collection, partition_name);
     auto segment = NewSegment(partition, 0);
 
-
     auto beg = chrono::high_resolution_clock::now();
     auto next = beg;
     int N = 1000 * 1000 * 10;
@@ -374,26 +329,15 @@ TEST(CApiTest, TestSearchPreference) {
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
     next = chrono::high_resolution_clock::now();
-    std::cout << "generate_data: "
-              << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms"
+    std::cout << "generate_data: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms"
               << std::endl;
     beg = next;
 
-
     auto offset = PreInsert(segment, N);
-    auto res = Insert(segment,
-                      offset,
-                      N,
-                      uids.data(),
-                      timestamps.data(),
-                      raw_data.data(),
-                      (int)line_sizeof,
-                      N);
+    auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
     assert(res == 0);
     next = chrono::high_resolution_clock::now();
-    std::cout << "insert: "
-              << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms"
-              << std::endl;
+    std::cout << "insert: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms" << std::endl;
     beg = next;
 
     auto N_del = N / 100;
@@ -402,11 +346,8 @@ TEST(CApiTest, TestSearchPreference) {
     Delete(segment, pre_off, N_del, uids.data(), del_ts.data());
 
     next = chrono::high_resolution_clock::now();
-    std::cout << "delete1: "
-              << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms"
-              << std::endl;
+    std::cout << "delete1: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms" << std::endl;
     beg = next;
-
 
     auto row_count = GetRowCount(segment);
     assert(row_count == N);
@@ -415,83 +356,52 @@ TEST(CApiTest, TestSearchPreference) {
     std::vector<float> result_distances(10 * 16);
 
     CQueryInfo queryInfo{1, 10, "fakevec"};
-    auto sea_res = Search(segment,
-                          queryInfo,
-                          104,
-                          (float*)raw_data.data(),
-                          16,
-                          result_ids.data(),
-                          result_distances.data());
+    auto sea_res =
+        Search(segment, queryInfo, 104, (float*)raw_data.data(), 16, result_ids.data(), result_distances.data());
 
     //    ASSERT_EQ(sea_res, 0);
     //    ASSERT_EQ(result_ids[0], 10 * N);
     //    ASSERT_EQ(result_distances[0], 0);
 
     next = chrono::high_resolution_clock::now();
-    std::cout << "query1: "
-              << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms"
-              << std::endl;
+    std::cout << "query1: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms" << std::endl;
     beg = next;
-    sea_res = Search(segment,
-                     queryInfo,
-                     104,
-                     (float*)raw_data.data(),
-                     16,
-                     result_ids.data(),
-                     result_distances.data());
+    sea_res = Search(segment, queryInfo, 104, (float*)raw_data.data(), 16, result_ids.data(), result_distances.data());
 
     //    ASSERT_EQ(sea_res, 0);
     //    ASSERT_EQ(result_ids[0], 10 * N);
     //    ASSERT_EQ(result_distances[0], 0);
 
     next = chrono::high_resolution_clock::now();
-    std::cout << "query2: "
-              << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms"
-              << std::endl;
+    std::cout << "query2: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms" << std::endl;
     beg = next;
 
     // Close(segment);
     // BuildIndex(segment);
 
     next = chrono::high_resolution_clock::now();
-    std::cout << "build index: "
-              << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms"
+    std::cout << "build index: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms"
               << std::endl;
     beg = next;
-
 
     std::vector<int64_t> result_ids2(10);
     std::vector<float> result_distances2(10);
 
-    sea_res = Search(segment,
-                     queryInfo,
-                     104,
-                     (float*)raw_data.data(),
-                     16,
-                     result_ids2.data(),
-                     result_distances2.data());
+    sea_res =
+        Search(segment, queryInfo, 104, (float*)raw_data.data(), 16, result_ids2.data(), result_distances2.data());
 
     //    sea_res = Search(segment, nullptr, 104, result_ids2.data(),
     //    result_distances2.data());
 
     next = chrono::high_resolution_clock::now();
-    std::cout << "search10: "
-              << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms"
-              << std::endl;
+    std::cout << "search10: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms" << std::endl;
     beg = next;
 
-    sea_res = Search(segment,
-                     queryInfo,
-                     104,
-                     (float*)raw_data.data(),
-                     16,
-                     result_ids2.data(),
-                     result_distances2.data());
+    sea_res =
+        Search(segment, queryInfo, 104, (float*)raw_data.data(), 16, result_ids2.data(), result_distances2.data());
 
     next = chrono::high_resolution_clock::now();
-    std::cout << "search11: "
-              << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms"
-              << std::endl;
+    std::cout << "search11: " << chrono::duration_cast<chrono::milliseconds>(next - beg).count() << "ms" << std::endl;
     beg = next;
 
     //    std::cout << "case 1" << std::endl;
@@ -551,7 +461,6 @@ TEST(CApiTest, GetDeletedCountTest) {
     DeleteSegment(segment);
 }
 
-
 TEST(CApiTest, GetRowCountTest) {
     auto collection_name = "collection0";
     auto schema_tmp_conf = "";
@@ -560,19 +469,11 @@ TEST(CApiTest, GetRowCountTest) {
     auto partition = NewPartition(collection, partition_name);
     auto segment = NewSegment(partition, 0);
 
-
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
     auto offset = PreInsert(segment, N);
-    auto res = Insert(segment,
-                      offset,
-                      N,
-                      uids.data(),
-                      timestamps.data(),
-                      raw_data.data(),
-                      (int)line_sizeof,
-                      N);
+    auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
     assert(res == 0);
 
     auto row_count = GetRowCount(segment);
@@ -584,10 +485,11 @@ TEST(CApiTest, GetRowCountTest) {
 }
 
 TEST(CApiTest, SchemaTest) {
-    std::string schema_string = "id: 6873737669791618215\nname: \"collection0\"\nschema: \u003c\n  "
-                                "field_metas: \u003c\n    field_name: \"age\"\n    type: INT32\n    dim: 1\n  \u003e\n  "
-                                "field_metas: \u003c\n    field_name: \"field_1\"\n    type: VECTOR_FLOAT\n    dim: 16\n  \u003e\n"
-                                "\u003e\ncreate_time: 1600416765\nsegment_ids: 6873737669791618215\npartition_tags: \"default\"\n";
+    std::string schema_string =
+        "id: 6873737669791618215\nname: \"collection0\"\nschema: \u003c\n  "
+        "field_metas: \u003c\n    field_name: \"age\"\n    type: INT32\n    dim: 1\n  \u003e\n  "
+        "field_metas: \u003c\n    field_name: \"field_1\"\n    type: VECTOR_FLOAT\n    dim: 16\n  \u003e\n"
+        "\u003e\ncreate_time: 1600416765\nsegment_ids: 6873737669791618215\npartition_tags: \"default\"\n";
 
     auto collection_name = "collection0";
     auto collection = NewCollection(collection_name, schema_string.data());

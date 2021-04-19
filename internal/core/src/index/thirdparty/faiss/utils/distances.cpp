@@ -152,6 +152,9 @@ static void knn_inner_product_sse (const float * x,
         size_t block_x = std::min(
                 get_L3_Size() / (d * sizeof(float) + thread_max_num * k * (sizeof(float) + sizeof(int64_t))),
                 nx);
+        if (block_x == 0) {
+            block_x = 1;
+        }
 
         size_t all_heap_size = block_x * k * thread_max_num;
         float *value = new float[all_heap_size];
@@ -261,6 +264,9 @@ static void knn_L2sqr_sse (
         size_t block_x = std::min(
                 get_L3_Size() / (d * sizeof(float) + thread_max_num * k * (sizeof(float) + sizeof(int64_t))),
                 nx);
+        if (block_x == 0) {
+            block_x = 1;
+        }
 
         size_t all_heap_size = block_x * k * thread_max_num;
         float *value = new float[all_heap_size];
@@ -279,7 +285,7 @@ static void knn_L2sqr_sse (
 
 #pragma omp parallel for schedule(static)
             for (size_t j = 0; j < ny; j++) {
-                auto test_bit = bitset_base && j + offset < bitset_base->capacity() && bitset_base->test(j + offset);
+                auto test_bit = bitset_base && j + offset < bitset_base->count() && bitset_base->test(j + offset);
                 if(!test_bit) {
                     size_t thread_no = omp_get_thread_num();
                     const float *y_j = y + j * d;
@@ -344,7 +350,7 @@ static void knn_L2sqr_sse (
             }
 
             for (size_t j = 0; j < ny; j++) {
-                auto test_bit = bitset_base && j + offset < bitset_base->capacity() && bitset_base->test(j + offset);
+                auto test_bit = bitset_base && j + offset < bitset_base->count() && bitset_base->test(j + offset);
                 if (!test_bit) {
                     float disij = fvec_L2sqr (x_i, y_j, d);
                     if (disij < val_[0]) {
@@ -475,7 +481,7 @@ static void knn_L2sqr_blas (const float * x,
                 const float *ip_line = ip_block + (i - i0) * (j1 - j0);
 
                 for (size_t j = j0; j < j1; j++) {
-                    auto test_bit = bitset_base && j + offset < bitset_base->capacity() && bitset_base->test(j + offset);
+                    auto test_bit = bitset_base && j + offset < bitset_base->count() && bitset_base->test(j + offset);
                     if(!test_bit){
                         float ip = *ip_line;
                         float dis = x_norms[i] + y_norms[j] - 2 * ip;
@@ -631,9 +637,9 @@ void knn_jaccard (const float * x,
                   float_maxheap_array_t * res,
                   ConcurrentBitsetPtr bitset)
 {
-    if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
+    if (d % 4 != 0) {
 //        knn_jaccard_sse (x, y, d, nx, ny, res);
-        printf("jaccard sse not implemented!\n");
+        printf("dimension is not a multiple of 4!\n");
     } else {
         NopDistanceCorrection nop;
         knn_jaccard_blas (x, y, d, nx, ny, res, nop, bitset);

@@ -95,7 +95,7 @@ IDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
+IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -108,7 +108,7 @@ IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     auto p_id = static_cast<int64_t*>(malloc(p_id_size));
     auto p_dist = static_cast<float*>(malloc(p_dist_size));
 
-    QueryImpl(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, config);
+    QueryImpl(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, config, bitset);
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
@@ -223,11 +223,17 @@ IDMAP::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
 #endif
 
 void
-IDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
+IDMAP::QueryImpl(int64_t n,
+                 const float* data,
+                 int64_t k,
+                 float* distances,
+                 int64_t* labels,
+                 const Config& config,
+                 const faiss::ConcurrentBitsetPtr& bitset) {
     // assign the metric type
     auto flat_index = dynamic_cast<faiss::IndexIDMap*>(index_.get())->index;
     flat_index->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-    index_->search(n, data, k, distances, labels, bitset_);
+    index_->search(n, data, k, distances, labels, bitset);
 }
 
 }  // namespace knowhere

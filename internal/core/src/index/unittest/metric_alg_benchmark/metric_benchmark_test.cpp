@@ -33,8 +33,14 @@ GenerateData(const int64_t dim, const int64_t n, float* x) {
 }
 
 void
-TestMetricAlg(std::unordered_map<std::string, metric_func_ptr>& func_map, const std::string& key, int64_t loop,
-              float* distance, const int64_t nb, const float* xb, const int64_t nq, const float* xq,
+TestMetricAlg(std::unordered_map<std::string, metric_func_ptr>& func_map,
+              const std::string& key,
+              int64_t loop,
+              float* distance,
+              const int64_t nb,
+              const float* xb,
+              const int64_t nq,
+              const float* xq,
               const int64_t dim) {
     int64_t diff = 0;
     for (int64_t i = 0; i < loop; i++) {

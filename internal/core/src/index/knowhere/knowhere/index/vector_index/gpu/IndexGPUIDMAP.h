@@ -55,7 +55,8 @@ class GPUIDMAP : public IDMAP, public GPUIndex {
     LoadImpl(const BinarySet&, const IndexType&) override;
 
     void
-    QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&) override;
+    QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&, const faiss::ConcurrentBitsetPtr& bitset)
+        override;
 };
 
 using GPUIDMAPPtr = std::shared_ptr<GPUIDMAP>;

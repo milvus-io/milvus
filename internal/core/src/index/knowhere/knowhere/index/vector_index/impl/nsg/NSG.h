@@ -83,8 +83,15 @@ class NsgIndex {
     Build_with_ids(size_t nb, float* data, const int64_t* ids, const BuildParams& parameters);
 
     void
-    Search(const float* query, float* data, const unsigned& nq, const unsigned& dim, const unsigned& k, float* dist,
-           int64_t* ids, SearchParams& params, faiss::ConcurrentBitsetPtr bitset = nullptr);
+    Search(const float* query,
+           float* data,
+           const unsigned& nq,
+           const unsigned& dim,
+           const unsigned& k,
+           float* dist,
+           int64_t* ids,
+           SearchParams& params,
+           faiss::ConcurrentBitsetPtr bitset = nullptr);
 
     int64_t
     GetSize();
@@ -108,7 +115,10 @@ class NsgIndex {
 
     // link specify
     void
-    GetNeighbors(const float* query, float* data, std::vector<Neighbor>& resset, std::vector<Neighbor>& fullset,
+    GetNeighbors(const float* query,
+                 float* data,
+                 std::vector<Neighbor>& resset,
+                 std::vector<Neighbor>& fullset,
                  boost::dynamic_bitset<>& has_calculated_dist);
 
     // FindUnconnectedNode
@@ -117,8 +127,8 @@ class NsgIndex {
 
     // navigation-point
     void
-    GetNeighbors(const float* query, float* data, std::vector<Neighbor>& resset, Graph& graph,
-                 SearchParams* param = nullptr);
+    GetNeighbors(
+        const float* query, float* data, std::vector<Neighbor>& resset, Graph& graph, SearchParams* param = nullptr);
 
     // only for search
     // void
@@ -128,11 +138,17 @@ class NsgIndex {
     Link(float* data);
 
     void
-    SyncPrune(float* data, size_t q, std::vector<Neighbor>& pool, boost::dynamic_bitset<>& has_calculated,
+    SyncPrune(float* data,
+              size_t q,
+              std::vector<Neighbor>& pool,
+              boost::dynamic_bitset<>& has_calculated,
               float* cut_graph_dist);
 
     void
-    SelectEdge(float* data, unsigned& cursor, std::vector<Neighbor>& sort_pool, std::vector<Neighbor>& result,
+    SelectEdge(float* data,
+               unsigned& cursor,
+               std::vector<Neighbor>& sort_pool,
+               std::vector<Neighbor>& result,
                bool limit = false);
 
     void

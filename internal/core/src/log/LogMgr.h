@@ -22,7 +22,10 @@ namespace milvus {
 class LogMgr {
  public:
     static Status
-    InitLog(bool trace_enable, const std::string& level, const std::string& logs_path, int64_t max_log_file_size,
+    InitLog(bool trace_enable,
+            const std::string& level,
+            const std::string& logs_path,
+            int64_t max_log_file_size,
             int64_t delete_exceeds);
 };
 

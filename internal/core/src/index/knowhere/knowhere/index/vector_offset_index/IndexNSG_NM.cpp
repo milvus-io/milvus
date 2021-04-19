@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <fiu/fiu-local.h>
 #include <string>
 
 #include "knowhere/common/Exception.h"
@@ -36,6 +37,7 @@ NSG_NM::Serialize(const Config& config) {
     }
 
     try {
+        fiu_do_on("NSG_NM.Serialize.throw_exception", throw std::exception());
         std::lock_guard<std::mutex> lk(mutex_);
         impl::NsgIndex* index = index_.get();
 
@@ -54,6 +56,7 @@ NSG_NM::Serialize(const Config& config) {
 void
 NSG_NM::Load(const BinarySet& index_binary) {
     try {
+        fiu_do_on("NSG_NM.Load.throw_exception", throw std::exception());
         std::lock_guard<std::mutex> lk(mutex_);
         auto binary = index_binary.GetByName("NSG_NM");
 
@@ -71,7 +74,7 @@ NSG_NM::Load(const BinarySet& index_binary) {
 }
 
 DatasetPtr
-NSG_NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
+NSG_NM::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -86,8 +89,6 @@ NSG_NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         auto p_id = static_cast<int64_t*>(malloc(p_id_size));
         auto p_dist = static_cast<float*>(malloc(p_dist_size));
 
-        faiss::ConcurrentBitsetPtr blacklist = GetBlacklist();
-
         impl::SearchParams s_params;
         s_params.search_length = config[IndexParams::search_length];
         s_params.k = config[meta::TOPK];
@@ -95,7 +96,7 @@ NSG_NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
             std::lock_guard<std::mutex> lk(mutex_);
             // index_->ori_data_ = (float*) data_.get();
             index_->Search(reinterpret_cast<const float*>(p_data), reinterpret_cast<float*>(data_.get()), rows, dim,
-                           topK, p_dist, p_id, s_params, blacklist);
+                           topK, p_dist, p_id, s_params, bitset);
         }
 
         auto ret_ds = std::make_shared<Dataset>();

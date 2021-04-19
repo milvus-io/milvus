@@ -77,17 +77,13 @@ endif()
 
 
 set( PROTOC_EXCUTABLE           $<TARGET_FILE:protoc> )
-set( GRPC_CPP_PLUGIN_EXCUTABLE  $<TARGET_FILE:grpc_cpp_plugin> )
-#set( PROTO_INCLUDE_PATH "${MILVUS_SOURCE_DIR}/../proto/" )
 set( PROTO_PATH          "${MILVUS_SOURCE_DIR}/../proto/" )
 set( PROTO_OUTPUT_PATH          "${MILVUS_SOURCE_DIR}/src/pb/")
 
-add_custom_target(generate_suvlim_pb_grpc ALL DEPENDS protoc)
-message (STATUS "CURRENT SOURCE DIR" "${CMAKE_CURRENT_SOURCE_DIR}")
+add_custom_target(generate_milvus_pb_grpc ALL DEPENDS protoc)
 
-add_custom_command(TARGET generate_suvlim_pb_grpc
+add_custom_command(TARGET generate_milvus_pb_grpc
 	POST_BUILD
-	COMMAND echo "${PROTOC_EXCUTABLE}"
 
 	COMMAND ${PROTOC_EXCUTABLE} -I "${PROTO_PATH}" --cpp_out "${PROTO_OUTPUT_PATH}"
 		"message.proto" "master.proto"

@@ -23,7 +23,6 @@
 #include <iostream>
 #include <vector>
 
-
 namespace milvus {
 
 namespace fs = boost::filesystem;
@@ -157,7 +156,9 @@ CommonUtil::GetExePath() {
 }
 
 bool
-CommonUtil::TimeStrToTime(const std::string& time_str, time_t& time_integer, tm& time_struct,
+CommonUtil::TimeStrToTime(const std::string& time_str,
+                          time_t& time_integer,
+                          tm& time_struct,
                           const std::string& format) {
     time_integer = 0;
     memset(&time_struct, 0, sizeof(tm));
@@ -186,15 +187,14 @@ CommonUtil::ConvertTime(tm time_struct, time_t& time_integer) {
 }
 
 uint64_t
-CommonUtil::RandomUINT64(){
-  std::random_device rd;     //Get a random seed from the OS entropy device, or whatever
-  std::mt19937_64 eng(rd()); //Use the 64-bit Mersenne Twister 19937 generator
-                             //and seed it with entropy.
-  //Define the distribution, by default it goes from 0 to MAX(unsigned long long)
-  //or what have you.
-  std::uniform_int_distribution<uint64_t> distr;
-  return distr(eng);
-
+CommonUtil::RandomUINT64() {
+    std::random_device rd;      // Get a random seed from the OS entropy device, or whatever
+    std::mt19937_64 eng(rd());  // Use the 64-bit Mersenne Twister 19937 generator
+                                // and seed it with entropy.
+    // Define the distribution, by default it goes from 0 to MAX(unsigned long long)
+    // or what have you.
+    std::uniform_int_distribution<uint64_t> distr;
+    return distr(eng);
 }
 
 #ifdef ENABLE_CPU_PROFILING

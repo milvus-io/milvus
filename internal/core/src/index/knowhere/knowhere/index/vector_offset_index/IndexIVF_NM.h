@@ -51,7 +51,7 @@ class IVF_NM : public VecIndex, public OffsetBaseIndex {
     AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
-    Query(const DatasetPtr&, const Config&) override;
+    Query(const DatasetPtr&, const Config&, const faiss::ConcurrentBitsetPtr& bitset) override;
 
 #if 0
     DatasetPtr
@@ -86,15 +86,21 @@ class IVF_NM : public VecIndex, public OffsetBaseIndex {
     GenParams(const Config&);
 
     virtual void
-    QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&);
+    QueryImpl(
+        int64_t, const float*, int64_t, float*, int64_t*, const Config&, const faiss::ConcurrentBitsetPtr& bitset);
 
     void
     SealImpl() override;
 
  protected:
     std::mutex mutex_;
-    std::shared_ptr<uint8_t[]> data_ = nullptr;
     std::vector<size_t> prefix_sum;
+
+    // data_:    if CPU, malloc memory while loading data
+    // ro_codes: if GPU, hold a ptr of read only codes so that
+    //            destruction won't be done twice
+    std::shared_ptr<uint8_t[]> data_ = nullptr;
+    faiss::PageLockMemoryPtr ro_codes = nullptr;
 };
 
 using IVFNMPtr = std::shared_ptr<IVF_NM>;

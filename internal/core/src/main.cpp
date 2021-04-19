@@ -22,7 +22,6 @@
 
 INITIALIZE_EASYLOGGINGPP
 
-
 void
 print_help(const std::string& app_name) {
     std::cout << std::endl << "Usage: " << app_name << " [OPTIONS]" << std::endl;

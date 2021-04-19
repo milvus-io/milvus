@@ -64,15 +64,11 @@ define_option(MILVUS_VERBOSE_THIRDPARTY_BUILD
 
 define_option(MILVUS_WITH_EASYLOGGINGPP "Build with Easylogging++ library" ON)
 
-define_option(MILVUS_WITH_GRPC "Build with GRPC" OFF)
-
 define_option(MILVUS_WITH_ZLIB "Build with zlib compression" ON)
 
 define_option(MILVUS_WITH_OPENTRACING "Build with Opentracing" ON)
 
 define_option(MILVUS_WITH_YAMLCPP "Build with yaml-cpp library" ON)
-
-define_option(MILVUS_WITH_PULSAR "Build with pulsar-client" ON)
 
 #----------------------------------------------------------------------
 set_option_category("Test and benchmark")

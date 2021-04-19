@@ -71,7 +71,10 @@ normalize(float* arr, int32_t nq, int32_t dim) {
 }
 
 void*
-hdf5_read(const std::string& file_name, const std::string& dataset_name, H5T_class_t dataset_class, int32_t& d_out,
+hdf5_read(const std::string& file_name,
+          const std::string& dataset_name,
+          H5T_class_t dataset_class,
+          int32_t& d_out,
           int32_t& n_out) {
     hid_t file, dataset, datatype, dataspace, memspace;
     H5T_class_t t_class;      /* data type class */
@@ -179,8 +182,12 @@ parse_ann_test_name(const std::string& ann_test_name, int32_t& dim, faiss::Metri
 }
 
 int32_t
-GetResultHitCount(const faiss::Index::idx_t* ground_index, const faiss::Index::idx_t* index, int32_t ground_k,
-                  int32_t k, int32_t nq, int32_t index_add_loops) {
+GetResultHitCount(const faiss::Index::idx_t* ground_index,
+                  const faiss::Index::idx_t* index,
+                  int32_t ground_k,
+                  int32_t k,
+                  int32_t nq,
+                  int32_t index_add_loops) {
     int32_t min_k = std::min(ground_k, k);
     int hit = 0;
     for (int32_t i = 0; i < nq; i++) {
@@ -220,9 +227,14 @@ print_array(const char* header, bool is_integer, const void* arr, int32_t nq, in
 #endif
 
 void
-load_base_data(faiss::Index*& index, const std::string& ann_test_name, const std::string& index_key,
-               faiss::gpu::StandardGpuResources& res, const faiss::MetricType metric_type, const int32_t dim,
-               int32_t index_add_loops, QueryMode mode = MODE_CPU) {
+load_base_data(faiss::Index*& index,
+               const std::string& ann_test_name,
+               const std::string& index_key,
+               faiss::gpu::StandardGpuResources& res,
+               const faiss::MetricType metric_type,
+               const int32_t dim,
+               int32_t index_add_loops,
+               QueryMode mode = MODE_CPU) {
     double t0 = elapsed();
 
     const std::string ann_file_name = ann_test_name + HDF5_POSTFIX;
@@ -286,8 +298,11 @@ load_base_data(faiss::Index*& index, const std::string& ann_test_name, const std
 }
 
 void
-load_query_data(faiss::Index::distance_t*& xq, int32_t& nq, const std::string& ann_test_name,
-                const faiss::MetricType metric_type, const int32_t dim) {
+load_query_data(faiss::Index::distance_t*& xq,
+                int32_t& nq,
+                const std::string& ann_test_name,
+                const faiss::MetricType metric_type,
+                const int32_t dim) {
     double t0 = elapsed();
     int32_t d;
 
@@ -333,9 +348,15 @@ load_ground_truth(faiss::Index::idx_t*& gt, int32_t& k, const std::string& ann_t
 }
 
 void
-test_with_nprobes(const std::string& ann_test_name, const std::string& index_key, faiss::Index* cpu_index,
-                  faiss::gpu::StandardGpuResources& res, const QueryMode query_mode, const faiss::Index::distance_t* xq,
-                  const faiss::Index::idx_t* gt, const std::vector<int32_t>& nprobes, const int32_t index_add_loops,
+test_with_nprobes(const std::string& ann_test_name,
+                  const std::string& index_key,
+                  faiss::Index* cpu_index,
+                  faiss::gpu::StandardGpuResources& res,
+                  const QueryMode query_mode,
+                  const faiss::Index::distance_t* xq,
+                  const faiss::Index::idx_t* gt,
+                  const std::vector<int32_t>& nprobes,
+                  const int32_t index_add_loops,
                   const int32_t search_loops) {
     double t0 = elapsed();
 
@@ -474,8 +495,12 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
 }
 
 void
-test_ann_hdf5(const std::string& ann_test_name, const std::string& cluster_type, const std::string& index_type,
-              const QueryMode query_mode, int32_t index_add_loops, const std::vector<int32_t>& nprobes,
+test_ann_hdf5(const std::string& ann_test_name,
+              const std::string& cluster_type,
+              const std::string& index_type,
+              const QueryMode query_mode,
+              int32_t index_add_loops,
+              const std::vector<int32_t>& nprobes,
               int32_t search_loops) {
     double t0 = elapsed();
 

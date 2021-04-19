@@ -15,6 +15,19 @@
 
 namespace faiss {
 
+/**
+ * The algorithm of clustering
+ */
+enum ClusteringType
+{
+    K_MEANS,
+    K_MEANS_PLUS_PLUS,
+    K_MEANS_TWO,
+};
+
+//The default algorithm use the K_MEANS
+extern ClusteringType clustering_type;
+
 
 /** Class for the clustering parameters. Can be passed to the
  * constructor of the Clustering object.
@@ -87,6 +100,24 @@ struct Clustering: ClusteringParameters {
     virtual void train (idx_t n, const float * x, faiss::Index & index,
                         const float *x_weights = nullptr);
 
+    /**
+     * @brief Kmeans algorithm
+     * 
+     * @param centroids_index   [out] centroids index
+     * @param random_seed       seed for the random number generator
+     * @param n_input_centroids the number of centroids that user input
+     * @param d                 dimension
+     * @param k                 number of centroids
+     * @param nx                size of data
+     * @param x_in              data of point
+     */
+    void kmeans_algorithm(std::vector<int>& centroids_index, int64_t random_seed,
+                          size_t n_input_centroids, size_t d, size_t k,
+                          idx_t nx, const uint8_t *x_in);
+
+    void kmeans_plus_plus_algorithm(std::vector<int>& centroids_index, int64_t random_seed,
+                                    size_t n_input_centroids, size_t d, size_t k,
+                                    idx_t nx, const uint8_t *x_in);
 
     /** run with encoded vectors
      *

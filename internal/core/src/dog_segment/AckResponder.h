@@ -11,13 +11,13 @@ class AckResponder {
         std::lock_guard lck(mutex_);
         fetch_and_flip(seg_end);
         auto old_begin = fetch_and_flip(seg_begin);
-        if(old_begin) {
+        if (old_begin) {
             minimal = *acks_.begin();
         }
     }
 
     int64_t
-    GetAck() const{
+    GetAck() const {
         return minimal;
     }
 
@@ -38,4 +38,4 @@ class AckResponder {
     std::set<int64_t> acks_ = {0};
     std::atomic<int64_t> minimal = 0;
 };
-}
+}  // namespace milvus::dog_segment

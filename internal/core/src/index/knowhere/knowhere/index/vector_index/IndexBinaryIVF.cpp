@@ -43,7 +43,7 @@ BinaryIVF::Load(const BinarySet& index_binary) {
 }
 
 DatasetPtr
-BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
+BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -59,7 +59,7 @@ BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         auto p_id = static_cast<int64_t*>(malloc(p_id_size));
         auto p_dist = static_cast<float*>(malloc(p_dist_size));
 
-        QueryImpl(rows, reinterpret_cast<const uint8_t*>(p_data), k, p_dist, p_id, config);
+        QueryImpl(rows, reinterpret_cast<const uint8_t*>(p_data), k, p_dist, p_id, config, bitset);
 
         auto ret_ds = std::make_shared<Dataset>();
 
@@ -126,15 +126,20 @@ BinaryIVF::GenParams(const Config& config) {
 }
 
 void
-BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels,
-                     const Config& config) {
+BinaryIVF::QueryImpl(int64_t n,
+                     const uint8_t* data,
+                     int64_t k,
+                     float* distances,
+                     int64_t* labels,
+                     const Config& config,
+                     const faiss::ConcurrentBitsetPtr& bitset) {
     auto params = GenParams(config);
     auto ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
     ivf_index->nprobe = params->nprobe;
 
     stdclock::time_point before = stdclock::now();
     auto i_distances = reinterpret_cast<int32_t*>(distances);
-    index_->search(n, data, k, i_distances, labels, bitset_);
+    index_->search(n, data, k, i_distances, labels, bitset);
 
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();

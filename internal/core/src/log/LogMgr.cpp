@@ -124,7 +124,10 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level) {
 }
 
 Status
-LogMgr::InitLog(bool trace_enable, const std::string& level, const std::string& logs_path, int64_t max_log_file_size,
+LogMgr::InitLog(bool trace_enable,
+                const std::string& level,
+                const std::string& logs_path,
+                int64_t max_log_file_size,
                 int64_t delete_exceeds) {
     std::unordered_map<std::string, int64_t> level_to_int{
         {"debug", 5}, {"info", 4}, {"warning", 3}, {"error", 2}, {"fatal", 1},

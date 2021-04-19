@@ -70,7 +70,7 @@ enum class FieldElementType {
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
-//class BinaryData : public cache::DataObj {
+// class BinaryData : public cache::DataObj {
 // public:
 //    int64_t
 //    Size() {
@@ -80,10 +80,10 @@ enum class FieldElementType {
 // public:
 //    std::vector<uint8_t> data_;
 //};
-//using BinaryDataPtr = std::shared_ptr<BinaryData>;
+// using BinaryDataPtr = std::shared_ptr<BinaryData>;
 //
 /////////////////////////////////////////////////////////////////////////////////////////////////////
-//class VaribleData : public cache::DataObj {
+// class VaribleData : public cache::DataObj {
 // public:
 //    int64_t
 //    Size() {
@@ -94,15 +94,15 @@ enum class FieldElementType {
 //    std::vector<uint8_t> data_;
 //    std::vector<int64_t> offset_;
 //};
-//using VaribleDataPtr = std::shared_ptr<VaribleData>;
+// using VaribleDataPtr = std::shared_ptr<VaribleData>;
 //
 /////////////////////////////////////////////////////////////////////////////////////////////////////
-//using FIELD_TYPE_MAP = std::unordered_map<std::string, DataType>;
-//using FIELD_WIDTH_MAP = std::unordered_map<std::string, int64_t>;
-//using FIXEDX_FIELD_MAP = std::unordered_map<std::string, BinaryDataPtr>;
-//using VARIABLE_FIELD_MAP = std::unordered_map<std::string, VaribleDataPtr>;
-//using VECTOR_INDEX_MAP = std::unordered_map<std::string, knowhere::VecIndexPtr>;
-//using STRUCTURED_INDEX_MAP = std::unordered_map<std::string, knowhere::IndexPtr>;
+// using FIELD_TYPE_MAP = std::unordered_map<std::string, DataType>;
+// using FIELD_WIDTH_MAP = std::unordered_map<std::string, int64_t>;
+// using FIXEDX_FIELD_MAP = std::unordered_map<std::string, BinaryDataPtr>;
+// using VARIABLE_FIELD_MAP = std::unordered_map<std::string, VaribleDataPtr>;
+// using VECTOR_INDEX_MAP = std::unordered_map<std::string, knowhere::VecIndexPtr>;
+// using STRUCTURED_INDEX_MAP = std::unordered_map<std::string, knowhere::IndexPtr>;
 
 // ///////////////////////////////////////////////////////////////////////////////////////////////////
 // struct DataChunk {
@@ -138,10 +138,10 @@ struct AttrsData {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 struct QueryResult {
-    uint64_t row_num_;     // row_num_ = topK * num_queries_
+    uint64_t row_num_;  // row_num_ = topK * num_queries_
     uint64_t topK_;
-    uint64_t num_queries_; // currently must be 1
-    engine::ResultIds result_ids_; // top1, top2, ..;
+    uint64_t num_queries_;          // currently must be 1
+    engine::ResultIds result_ids_;  // top1, top2, ..;
     engine::ResultDistances result_distances_;
     // engine::DataChunkPtr data_chunk_;
 };

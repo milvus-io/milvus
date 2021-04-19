@@ -32,11 +32,6 @@ set( FETCHCONTENT_QUIET     OFF )
 set( THREADS_PREFER_PTHREAD_FLAG ON )
 find_package( Threads REQUIRED )
 
-# ****************************** Thirdparty googletest ***************************************
-if ( MILVUS_BUILD_TESTS )
-	#    add_subdirectory( gtest )
-endif()
-
 # ****************************** Thirdparty yaml ***************************************
 if ( MILVUS_WITH_YAMLCPP )
     add_subdirectory( yaml-cpp )
@@ -48,3 +43,4 @@ if ( MILVUS_WITH_OPENTRACING )
 endif()
 
 add_subdirectory( protobuf )
+add_subdirectory( fiu )

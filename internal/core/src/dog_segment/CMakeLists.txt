@@ -11,7 +11,7 @@ set(DOG_SEGMENT_FILES
         partition_c.cpp
         segment_c.cpp
         EasyAssert.cpp
-	${PB_SRC_FILES}
+        ${PB_SRC_FILES}
         )
 add_library(milvus_dog_segment SHARED
         ${DOG_SEGMENT_FILES}
@@ -20,5 +20,9 @@ add_library(milvus_dog_segment SHARED
 
 #add_dependencies( segment sqlite mysqlpp )
 
-target_link_libraries(milvus_dog_segment tbb utils pthread knowhere log libprotobuf dl backtrace
-)
+target_link_libraries(milvus_dog_segment
+        tbb utils pthread knowhere log libprotobuf
+        dl backtrace
+        milvus_query
+        )
+

@@ -1,0 +1,43 @@
+
+/**
+ * @brief Field data type
+ */
+enum DataType {
+    NONE = 0;
+    BOOL = 1;
+    INT8 = 2;
+    INT16 = 3;
+    INT32 = 4;
+    INT64 = 5;
+
+    FLOAT = 10;
+    DOUBLE = 11;
+
+    STRING = 20;
+
+    VECTOR_BINARY = 100;
+    VECTOR_FLOAT = 101;
+}
+
+
+/**
+ * @brief Field schema
+ */
+message FieldSchema {
+    string name = 1;
+    string description = 2;
+    DataType data_type = 3;
+    repeated KeyValuePair type_params = 4;
+    repeated KeyValuePair index_params = 5;
+}
+
+
+/**
+ * @brief Collection schema
+ */
+message CollectionSchema {
+    string name = 1;
+    bool auto_id = 2;
+    repeated FieldSchema fields = 3;
+}
+
