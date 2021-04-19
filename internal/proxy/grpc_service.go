@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -18,8 +19,13 @@ const (
 )
 
 func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.IntegerRangeResponse, error) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "insert grpc received")
+	defer span.Finish()
+	span.SetTag("collection name", in.CollectionName)
+	span.SetTag("partition tag", in.PartitionTag)
 	log.Println("insert into: ", in.CollectionName)
 	it := &InsertTask{
+		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		BaseInsertTask: BaseInsertTask{
 			BaseMsg: msgstream.BaseMsg{
@@ -119,8 +125,14 @@ func (p *Proxy) CreateCollection(ctx context.Context, req *schemapb.CollectionSc
 }
 
 func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.QueryResult, error) {
+	span, ctx := opentracing.StartSpanFromContext(ctx, "search grpc received")
+	defer span.Finish()
+	span.SetTag("collection name", req.CollectionName)
+	span.SetTag("partition tag", req.PartitionTags)
+	span.SetTag("dsl", req.Dsl)
 	log.Println("search: ", req.CollectionName, req.Dsl)
 	qt := &QueryTask{
+		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		SearchRequest: internalpb.SearchRequest{
 			ProxyID:         Params.ProxyID(),

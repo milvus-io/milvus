@@ -110,6 +110,7 @@ func TestMaster(t *testing.T) {
 
 	conn, err := grpc.DialContext(ctx, Params.Address, grpc.WithInsecure(), grpc.WithBlock())
 	require.Nil(t, err)
+
 	cli := masterpb.NewMasterClient(conn)
 
 	t.Run("TestConfigTask", func(t *testing.T) {
@@ -885,12 +886,6 @@ func TestMaster(t *testing.T) {
 		assert.Nil(t, err)
 		var k2sMsgstream ms.MsgStream = k2sMs
 		assert.True(t, receiveTimeTickMsg(&k2sMsgstream))
-
-		conn, err := grpc.DialContext(ctx, Params.Address, grpc.WithInsecure(), grpc.WithBlock())
-		assert.Nil(t, err)
-		defer conn.Close()
-
-		cli := masterpb.NewMasterClient(conn)
 
 		sch := schemapb.CollectionSchema{
 			Name:        "name" + strconv.FormatUint(rand.Uint64(), 10),
