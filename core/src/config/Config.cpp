@@ -217,6 +217,14 @@ constexpr int64_t GB = 1UL << 30;
 constexpr int32_t PORT_NUMBER_MIN = 1024;
 constexpr int32_t PORT_NUMBER_MAX = 65535;
 
+/* server_version: config_version
+     {"0.6.x", "0.1"}
+     {"0.7.x", "0.2"}
+     {"0.8.x", "0.3"}
+     {"0.9.x", "0.4"}
+     {"0.10.x", "0.5"}
+     {"1.x.x", "0.5"}
+ */
 const char* SERVER_CONFIG_VERSION = "0.5";
 
 /////////////////////////////////////////////////////////////
