@@ -10,10 +10,9 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 
-nodeID: # will be deprecated after v0.2
-  proxyIDList: [0]
+nodeID: # will be deprecated later
   queryNodeIDList: [1]
-  dataNodeIDList: [3] 
+  dataNodeIDList: [3]
 
 etcd:
   address: localhost
@@ -22,10 +21,7 @@ etcd:
   metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
   kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
   segFlushMetaSubPath: datanode/segment # Full Path = rootPath/metaSubPath/segFlushMetaSubPath
-  ddlFlushMetaSubPath: datanode/ddl     # Full Path = rootPath/metaSubPaht/ddlFlushMetaSubPath
-  writeNodeSegKvSubPath: writer/segment # GOOSE TODO: remove this
-  writeNodeDDLKvSubPath: writer/ddl # GOOSE TODO: remove this
-  segThreshold: 10000
+  ddlFlushMetaSubPath: datanode/ddl     # Full Path = rootPath/metaSubPath/ddlFlushMetaSubPath
 
 minio:
   address: localhost
@@ -38,11 +34,7 @@ minio:
 pulsar:
   address: localhost
   port: 6650
-  rest-port: 18080 # keep same with pulsar container
-  maxMessageSize: 5242880 # 5 * 1024 * 1024
-  authentication: false
-  user: user-default
-  token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJKb2UifQ.ipevRNuRP6HflG8cFKnmUPtypruRC4fb1DWtoLL62SY
+  maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes
 
 master:
   address: localhost
@@ -60,7 +52,7 @@ proxyService:
   port: 21122
 
 queryNode:
-  gracefulTime: 5000 #ms
+  gracefulTime: 5000 # ms, for search
   port: 21123
 
 indexService:
@@ -78,11 +70,11 @@ dataNode:
   port: 21124
 
 log:
-  level: debug
+  level: debug # info, warn, error, panic, fatal, dpanic,
   file:
-    rootPath: ""
+    rootPath: "" # default to stdout, stderr
     maxSize: 300 # MB
     maxAge: 10 # day
     maxBackups: 20
-  dev: true
+  dev: true # false, change behaviour of dpaniclevel
   format: text # text/json

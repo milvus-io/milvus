@@ -22,11 +22,9 @@ msgChannel:
     k2s: "k2s"
     proxyTimeTick: "proxyTimeTick"
     proxyServiceTimeTick: "proxyServiceTimeTick"
-    writeNodeTimeTick: "writeNodeTimeTick" # GOOSE TODO: remove this
     dataNodeTimeTick: "dataNodeTimeTick"
     queryTimeTick: "queryTimeTick"
     dataNodeSegStatistics: "dataNodeSegStatistics"
-    # old name: statsChannels: "statistic"
     queryNodeStats: "query-node-stats"
     # cmd for loadIndex, flush, etc...
     cmd: "cmd"
@@ -40,7 +38,6 @@ msgChannel:
     masterSubNamePrefix: "master"
     proxySubNamePrefix: "proxy"
     queryNodeSubNamePrefix: "queryNode"
-    writeNodeSubNamePrefix: "writeNode" # GOOSE TODO: remove this
     dataNodeSubNamePrefix: "dataNode"
     dataServiceSubNamePrefix: "dataService"
 

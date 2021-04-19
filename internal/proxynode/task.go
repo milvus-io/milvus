@@ -159,7 +159,7 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 			return err
 		}
 	} else {
-		partitionID, err = globalMetaCache.GetPartitionID(ctx, collectionName, Params.DefaultPartitionTag)
+		partitionID, err = globalMetaCache.GetPartitionID(ctx, collectionName, Params.DefaultPartitionName)
 		if err != nil {
 			return err
 		}

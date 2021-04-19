@@ -10,6 +10,5 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 common:
-  defaultPartitionTag: _default #TODO, remove
   defaultPartitionName: "_default"
   defaultIndexName: "_default_idx"

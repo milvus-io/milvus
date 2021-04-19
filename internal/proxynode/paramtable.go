@@ -54,7 +54,7 @@ type ParamTable struct {
 	MaxNameLength                      int64
 	MaxFieldNum                        int64
 	MaxDimension                       int64
-	DefaultPartitionTag                string
+	DefaultPartitionName               string
 	DefaultIndexName                   string
 
 	PulsarMaxMessageSize int
@@ -136,7 +136,6 @@ func (pt *ParamTable) initParams() {
 	pt.initPulsarAddress()
 	pt.initQueryNodeIDList()
 	pt.initQueryNodeNum()
-	// pt.initProxyID()
 	pt.initTimeTickInterval()
 	pt.initInsertChannelNames()
 	pt.initDeleteChannelNames()
@@ -154,7 +153,7 @@ func (pt *ParamTable) initParams() {
 	pt.initMaxNameLength()
 	pt.initMaxFieldNum()
 	pt.initMaxDimension()
-	pt.initDefaultPartitionTag()
+	pt.initDefaultPartitionName()
 	pt.initDefaultIndexName()
 
 	pt.initPulsarMaxMessageSize()
@@ -189,18 +188,6 @@ func (pt *ParamTable) initQueryNodeIDList() []UniqueID {
 	}
 	pt.QueryNodeIDList = ret
 	return ret
-}
-
-func (pt *ParamTable) initProxyID() {
-	proxyID, err := pt.Load("_proxyID")
-	if err != nil {
-		panic(err)
-	}
-	ID, err := strconv.Atoi(proxyID)
-	if err != nil {
-		panic(err)
-	}
-	pt.ProxyID = UniqueID(ID)
 }
 
 func (pt *ParamTable) initTimeTickInterval() {
@@ -311,11 +298,6 @@ func (pt *ParamTable) initProxySubName() {
 	if err != nil {
 		panic(err)
 	}
-	pt.ProxySubName = prefix
-	// proxyIDStr, err := pt.Load("_proxyID")
-	// if err != nil {
-	// 	panic(err)
-	// }
 	pt.ProxySubName = prefix + "-" + strconv.Itoa(int(pt.ProxyID))
 }
 
@@ -393,12 +375,12 @@ func (pt *ParamTable) initMaxDimension() {
 	pt.MaxDimension = maxDimension
 }
 
-func (pt *ParamTable) initDefaultPartitionTag() {
-	tag, err := pt.Load("common.defaultPartitionTag")
+func (pt *ParamTable) initDefaultPartitionName() {
+	name, err := pt.Load("common.defaultPartitionName")
 	if err != nil {
 		panic(err)
 	}
-	pt.DefaultPartitionTag = tag
+	pt.DefaultPartitionName = name
 }
 
 func (pt *ParamTable) initDefaultIndexName() {

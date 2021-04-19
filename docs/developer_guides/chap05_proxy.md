@@ -403,7 +403,7 @@ type GlobalParamsTable struct {
 	MaxNameLength                      int64
 	MaxFieldNum                        int64
 	MaxDimension                       int64
-	DefaultPartitionTag                string
+	DefaultPartitionName               string
 	DefaultIndexName                   string
 }
 

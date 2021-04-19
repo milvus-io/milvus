@@ -946,7 +946,7 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 		rowIDAllocator: node.idAllocator,
 	}
 	if len(it.PartitionName) <= 0 {
-		it.PartitionName = Params.DefaultPartitionTag
+		it.PartitionName = Params.DefaultPartitionName
 	}
 
 	err := node.sched.DmQueue.Enqueue(it)
