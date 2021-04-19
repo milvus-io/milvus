@@ -55,7 +55,8 @@ func (pc PulsarClient) Listener(ssChan chan mock.SegmentStats) error {
 		}
 		//fmt.Printf("Received message msgId: %#v -- content: '%s'\n",
 		//	msg.ID(), m.SegementID)
-		fmt.Println("Received SegmentStats -- segmentID:", m.SegementID, ",memSize:", m.MemorySize, ",memRate:", m.MemoryRate)
+		fmt.Println("Received SegmentStats -- segmentID:", m.SegementID,
+			",memSize:", m.MemorySize, ",memRate:", m.MemoryRate, ",numRows:", m.Rows, ",status:", m.Status)
 		ssChan <- m
 		consumer.Ack(msg)
 	}

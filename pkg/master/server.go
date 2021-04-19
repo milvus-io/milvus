@@ -175,7 +175,7 @@ func UpdateSegmentStatus(ss mock.SegmentStats, kvbase kv.Base) error {
 		if err != nil {
 			return err
 		}
-		err = kvbase.Save("segment/"+strconv.Itoa(int(seg.CollectionID)), segData)
+		err = kvbase.Save("segment/"+strconv.Itoa(int(seg.SegmentID)), segData)
 		if err != nil {
 			return err
 		}

@@ -41,13 +41,13 @@ int main(int argc , char**argv) {
   milvus::VectorParam vectorParam;
   std::vector<milvus::VectorData> vector_records;
 
-  std::default_random_engine eng(rand() % 20);
+  std::default_random_engine eng(42);
   std::normal_distribution<float> dis(0, 1);
  
-  for (int j = 0; j < 10; ++j) {
+  for (int j = 0; j < 1; ++j) {
     milvus::VectorData vectorData;
     std::vector<float> float_data;
-    for (int i = 0; i < 100; ++i) {
+    for (int i = 0; i < 16; ++i) {
       float_data.emplace_back(dis(eng));
     }
 
