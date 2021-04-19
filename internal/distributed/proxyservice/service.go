@@ -73,11 +73,7 @@ func (s *Server) init() error {
 	proxyservice.Params.Init()
 	log.Debug("init params done")
 
-	tracer, closer, err := trace.InitTracing("proxy_service")
-	if err != nil {
-		log.Error("proxy_service", zap.String("init trace err", err.Error()))
-	}
-	opentracing.SetGlobalTracer(tracer)
+	closer := trace.InitTracing("proxy_service")
 	s.closer = closer
 
 	s.wg.Add(1)
@@ -137,8 +133,10 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() error {
-	if err := s.closer.Close(); err != nil {
-		return err
+	if s.closer != nil {
+		if err := s.closer.Close(); err != nil {
+			return err
+		}
 	}
 	s.cancel()
 	s.closer.Close()

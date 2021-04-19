@@ -118,8 +118,10 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) Stop() error {
-	if err := s.closer.Close(); err != nil {
-		return err
+	if s.closer != nil {
+		if err := s.closer.Close(); err != nil {
+			return err
+		}
 	}
 	s.cancel()
 	if s.grpcServer != nil {
@@ -149,17 +151,13 @@ func (s *Server) init() error {
 
 	log.Debug("DataNode port", zap.Int("port", Params.Port))
 
-	tracer, closer, err := trace.InitTracing(fmt.Sprintf("data_node ip: %s, port: %d", Params.IP, Params.Port))
-	if err != nil {
-		log.Error("data_node", zap.String("init trace err", err.Error()))
-	}
-	opentracing.SetGlobalTracer(tracer)
+	closer := trace.InitTracing(fmt.Sprintf("data_node ip: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer
 
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
-	err = <-s.grpcErrChan
+	err := <-s.grpcErrChan
 	if err != nil {
 		return err
 	}

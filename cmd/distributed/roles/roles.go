@@ -8,14 +8,14 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/zilliztech/milvus-distributed/internal/logutil"
-
 	"github.com/zilliztech/milvus-distributed/cmd/distributed/components"
 	ds "github.com/zilliztech/milvus-distributed/internal/dataservice"
+	"github.com/zilliztech/milvus-distributed/internal/logutil"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/rmqms"
 	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
 
 func newMsgFactory(localMsg bool) msgstream.Factory {
@@ -57,6 +57,12 @@ func (mr *MilvusRoles) EnvValue(env string) bool {
 }
 
 func (mr *MilvusRoles) Run(localMsg bool) {
+
+	closer := trace.InitTracing("singleNode")
+	if closer != nil {
+		defer closer.Close()
+	}
+
 	if !mr.HasAnyRole() {
 		return
 	}

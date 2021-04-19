@@ -66,11 +66,7 @@ func (s *Server) init() error {
 	Params.Init()
 	Params.LoadFromEnv()
 
-	tracer, closer, err := trace.InitTracing("data_service")
-	if err != nil {
-		log.Error("data_service", zap.String("init trace err", err.Error()))
-	}
-	opentracing.SetGlobalTracer(tracer)
+	closer := trace.InitTracing("data_service")
 	s.closer = closer
 
 	s.wg.Add(1)
@@ -147,8 +143,10 @@ func (s *Server) start() error {
 
 func (s *Server) Stop() error {
 	var err error
-	if err = s.closer.Close(); err != nil {
-		return err
+	if s.closer != nil {
+		if err = s.closer.Close(); err != nil {
+			return err
+		}
 	}
 	s.cancel()
 

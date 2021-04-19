@@ -56,11 +56,7 @@ func (s *Server) init() error {
 	Params.Init()
 	indexservice.Params.Init()
 
-	tracer, closer, err := trace.InitTracing("index_service")
-	if err != nil {
-		log.Error("index_service", zap.String("init trace err", err.Error()))
-	}
-	opentracing.SetGlobalTracer(tracer)
+	closer := trace.InitTracing("index_service")
 	s.closer = closer
 
 	s.loopWg.Add(1)
@@ -86,8 +82,10 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() error {
-	if err := s.closer.Close(); err != nil {
-		return err
+	if s.closer != nil {
+		if err := s.closer.Close(); err != nil {
+			return err
+		}
 	}
 	if s.indexservice != nil {
 		s.indexservice.Stop()

@@ -77,18 +77,14 @@ func (s *Server) init() error {
 	qn.Params.QueryNodePort = int64(Params.QueryNodePort)
 	qn.Params.QueryNodeID = Params.QueryNodeID
 
-	tracer, closer, err := trace.InitTracing(fmt.Sprintf("query_node ip: %s, port: %d", Params.QueryNodeIP, Params.QueryNodePort))
-	if err != nil {
-		log.Error("query_node", zap.String("init trace err", err.Error()))
-	}
-	opentracing.SetGlobalTracer(tracer)
+	closer := trace.InitTracing(fmt.Sprintf("query_node ip: %s, port: %d", Params.QueryNodeIP, Params.QueryNodePort))
 	s.closer = closer
 
 	log.Debug("QueryNode", zap.Int("port", Params.QueryNodePort))
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.QueryNodePort)
 	// wait for grpc server loop start
-	err = <-s.grpcErrChan
+	err := <-s.grpcErrChan
 	if err != nil {
 		return err
 	}
@@ -257,8 +253,10 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) Stop() error {
-	if err := s.closer.Close(); err != nil {
-		return err
+	if s.closer != nil {
+		if err := s.closer.Close(); err != nil {
+			return err
+		}
 	}
 
 	s.cancel()
