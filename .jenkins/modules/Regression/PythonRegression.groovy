@@ -44,7 +44,7 @@ try {
     sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} rm -f -s -v etcd'
     sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} rm -f -s -v minio'
     dir ('build/docker/test') {
-        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} run --rm ${REGRESSION_SERVICE_NAME} /bin/bash -c "rm -rf __pycache__ && rm -rf .pytest_cache"'
+        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} run --rm ${REGRESSION_SERVICE_NAME} /bin/bash -c "find . -name \'__pycache__\' | xargs rm -rf && find . -name \'.pytest_cache\' | xargs rm -rf"'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} down --rmi all -v || true'
     }
 }
