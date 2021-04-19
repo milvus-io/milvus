@@ -94,7 +94,6 @@ func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb.InitParams
 					log.Debug("proxynode", zap.String("error", "Undefined config type, key="+key))
 				}
 			}
-			log.Debug("proxynode", zap.String(key, str))
 			err = pt.Save(key, str)
 			if err != nil {
 				panic(err)

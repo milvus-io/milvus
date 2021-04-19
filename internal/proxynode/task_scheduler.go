@@ -172,10 +172,16 @@ func (queue *BaseTaskQueue) Enqueue(t task) error {
 		return err
 	}
 
-	ts, _ := queue.sched.tsoAllocator.AllocOne()
+	ts, err := queue.sched.tsoAllocator.AllocOne()
+	if err != nil {
+		return err
+	}
 	t.SetTs(ts)
 
-	reqID, _ := queue.sched.idAllocator.AllocOne()
+	reqID, err := queue.sched.idAllocator.AllocOne()
+	if err != nil {
+		return err
+	}
 	t.SetID(reqID)
 
 	return queue.addUnissuedTask(t)
