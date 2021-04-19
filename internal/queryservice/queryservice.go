@@ -3,6 +3,7 @@ package queryservice
 import (
 	"context"
 	"fmt"
+	"log"
 	"sort"
 	"strconv"
 	"sync/atomic"
@@ -24,7 +25,6 @@ type MasterServiceInterface interface {
 
 type DataServiceInterface interface {
 	GetSegmentStates(req *datapb.SegmentStatesRequest) (*datapb.SegmentStatesResponse, error)
-	GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, error)
 }
 
 type QueryNodeInterface interface {
@@ -47,7 +47,7 @@ type QueryService struct {
 
 	dataServiceClient   DataServiceInterface
 	masterServiceClient MasterServiceInterface
-	queryNodes          map[UniqueID]*queryNodeInfo
+	queryNodes          []*queryNodeInfo
 	numRegisterNode     uint64
 	numQueryChannel     uint64
 
@@ -87,7 +87,7 @@ func (qs *QueryService) GetComponentStates() (*internalpb2.ComponentStates, erro
 		componentStates, err := node.GetComponentStates()
 		if err != nil {
 			subComponentInfos = append(subComponentInfos, &internalpb2.ComponentInfo{
-				NodeID:    nodeID,
+				NodeID:    int64(nodeID),
 				StateCode: internalpb2.StateCode_ABNORMAL,
 			})
 			continue
@@ -111,21 +111,28 @@ func (qs *QueryService) GetStatisticsChannel() (string, error) {
 	return Params.StatsChannelName, nil
 }
 
+// TODO:: do addWatchDmChannel to query node after registerNode
 func (qs *QueryService) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
 	fmt.Println("register query node =", req.Address)
 	// TODO:: add mutex
-	allocatedID := len(qs.queryNodes)
+	allocatedID := uint64(len(qs.queryNodes))
 
 	registerNodeAddress := req.Address.Ip + ":" + strconv.FormatInt(req.Address.Port, 10)
 	var node *queryNodeInfo
 	if qs.enableGrpc {
 		client := nodeclient.NewClient(registerNodeAddress)
-		node = newQueryNodeInfo(client)
+		node = &queryNodeInfo{
+			client: client,
+			nodeID: allocatedID,
+		}
 	} else {
-		client := querynode.NewQueryNode(qs.loopCtx, uint64(allocatedID))
-		node = newQueryNodeInfo(client)
+		client := querynode.NewQueryNode(qs.loopCtx, allocatedID)
+		node = &queryNodeInfo{
+			client: client,
+			nodeID: allocatedID,
+		}
 	}
-	qs.queryNodes[UniqueID(allocatedID)] = node
+	qs.queryNodes = append(qs.queryNodes, node)
 
 	//TODO::return init params to queryNode
 	return &querypb.RegisterNodeResponse{
@@ -179,18 +186,8 @@ func (qs *QueryService) LoadCollection(req *querypb.LoadCollectionRequest) (*com
 	if err != nil {
 		return fn(err), err
 	}
-
-	if len(collection.dmChannelNames) != 0 {
+	if collection == nil {
 		return fn(nil), nil
-	}
-
-	channelRequest := datapb.InsertChannelRequest{
-		DbID:         req.DbID,
-		CollectionID: req.CollectionID,
-	}
-	dmChannels, err := qs.dataServiceClient.GetInsertChannels(&channelRequest)
-	if err != nil {
-		return fn(err), err
 	}
 
 	// get partitionIDs
@@ -209,21 +206,6 @@ func (qs *QueryService) LoadCollection(req *querypb.LoadCollectionRequest) (*com
 		return showPartitionResponse.Status, err
 	}
 	partitionIDs := showPartitionResponse.PartitionIDs
-
-	if len(partitionIDs) == 0 {
-		loadSegmentRequest := &querypb.LoadSegmentRequest{
-			CollectionID: collectionID,
-		}
-		for _, node := range qs.queryNodes {
-			_, err := node.LoadSegments(loadSegmentRequest)
-			if err != nil {
-				return fn(err), err
-			}
-		}
-		nodeIDs := qs.shuffleChannelsToQueryNode(dmChannels)
-		err = qs.watchDmChannels(dmChannels, nodeIDs, collection)
-		return fn(err), err
-	}
 
 	loadPartitionsRequest := &querypb.LoadPartitionRequest{
 		Base:         req.Base,
@@ -262,14 +244,6 @@ func (qs *QueryService) ReleaseCollection(req *querypb.ReleaseCollectionRequest)
 
 	status, err := qs.ReleasePartitions(releasePartitionRequest)
 
-	err = qs.replica.releaseCollection(dbID, collectionID)
-	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    err.Error(),
-		}, err
-	}
-	//TODO:: queryNode cancel subscribe dmChannels
 	return status, err
 }
 
@@ -302,40 +276,16 @@ func (qs *QueryService) LoadPartitions(req *querypb.LoadPartitionRequest) (*comm
 	dbID := req.DbID
 	collectionID := req.CollectionID
 	partitionIDs := req.PartitionIDs
-
+	qs.replica.loadPartition(dbID, collectionID, partitionIDs[0])
 	fn := func(err error) *commonpb.Status {
-		if err != nil {
-			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			}
-		}
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
 		}
 	}
 
-	if len(partitionIDs) == 0 {
-		err := errors.New("partitionIDs are empty")
-		return fn(err), err
-	}
-
-	var collection *collection = nil
-	var err error
-	if collection, err = qs.replica.loadCollection(dbID, collectionID); err != nil {
-		return fn(err), err
-	}
-
+	// get segments and load segment to query node
 	for _, partitionID := range partitionIDs {
-		partition, err := qs.replica.loadPartition(dbID, collectionID, partitionID)
-		if err != nil {
-			return fn(err), err
-		}
-
-		if partition == nil {
-			return fn(err), nil
-		}
-
 		showSegmentRequest := &milvuspb.ShowSegmentRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_kShowSegment,
@@ -347,110 +297,92 @@ func (qs *QueryService) LoadPartitions(req *querypb.LoadPartitionRequest) (*comm
 		if err != nil {
 			return fn(err), err
 		}
-
+		if showSegmentResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			log.Fatal("showSegment fail, v%", showSegmentResponse.Status.Reason)
+		}
 		segmentIDs := showSegmentResponse.SegmentIDs
 		segmentStates := make(map[UniqueID]*datapb.SegmentStateInfo)
-		channel2segs := make(map[string][]UniqueID)
+		channel2id := make(map[string]int)
+		//id2channels := make(map[int][]string)
+		id2segs := make(map[int][]UniqueID)
+		offset := 0
 
 		resp, err := qs.dataServiceClient.GetSegmentStates(&datapb.SegmentStatesRequest{
 			SegmentIDs: segmentIDs,
 		})
 
 		if err != nil {
-			return fn(err), err
+			log.Fatal("get segment states fail")
 		}
 
 		for _, state := range resp.States {
 			segmentID := state.SegmentID
 			segmentStates[segmentID] = state
-
-			channelName := state.StartPosition.ChannelName
-
-			if _, ok := channel2segs[channelName]; !ok {
-				segments := make([]UniqueID, 0)
-				segments = append(segments, segmentID)
-				channel2segs[channelName] = segments
-			} else {
-				channel2segs[channelName] = append(channel2segs[channelName], segmentID)
+			var flatChannelName string
+			// channelNames := make([]string, 0)
+			// for i, str := range state.StartPositions {
+			//     flatChannelName += str.ChannelName
+			//     channelNames = append(channelNames, str.ChannelName)
+			//     if i+1 < len(state.StartPositions) {
+			//         flatChannelName += "/"
+			//     }
+			// }
+			if flatChannelName == "" {
+				log.Fatal("segmentState's channel name is empty")
 			}
+			if _, ok := channel2id[flatChannelName]; !ok {
+				channel2id[flatChannelName] = offset
+				//id2channels[offset] = channelNames
+				id2segs[offset] = make([]UniqueID, 0)
+				id2segs[offset] = append(id2segs[offset], segmentID)
+				offset++
+			} else {
+				//TODO::check channel name
+				id := channel2id[flatChannelName]
+				id2segs[id] = append(id2segs[id], segmentID)
+			}
+		}
+		for key, value := range id2segs {
+			sort.Slice(value, func(i, j int) bool { return segmentStates[value[i]].CreateTime < segmentStates[value[j]].CreateTime })
+			selectedSegs := make([]UniqueID, 0)
+			for i, v := range value {
+				if segmentStates[v].State == commonpb.SegmentState_SegmentFlushed {
+					selectedSegs = append(selectedSegs, v)
+				} else {
+					if i > 0 && segmentStates[selectedSegs[i-1]].State != commonpb.SegmentState_SegmentFlushed {
+						break
+					}
+					selectedSegs = append(selectedSegs, v)
+				}
+			}
+			id2segs[key] = selectedSegs
 		}
 
 		qs.replica.updatePartitionState(dbID, collectionID, partitionID, querypb.PartitionState_PartialInMemory)
-		for channel, segmentIDs := range channel2segs {
-			sort.Slice(segmentIDs, func(i, j int) bool {
-				return segmentStates[segmentIDs[i]].StartPosition.Timestamp < segmentStates[segmentIDs[j]].StartPosition.Timestamp
-			})
-			var channelLoadDone = false
-			for _, node := range qs.queryNodes {
-				channels2node := node.dmChannelNames
-				for _, ch := range channels2node {
-					if channel == ch {
-						channelLoadDone = true
-						break
+
+		// TODO:: filter channel for query node
+		for channels, i := range channel2id {
+			for key, node := range qs.queryNodes {
+				if channels == node.insertChannels {
+					statesID := id2segs[i][len(id2segs[i])-1]
+					//TODO :: should be start position
+					// position := segmentStates[statesID-1].StartPositions
+					// segmentStates[statesID].StartPositions = position
+					loadSegmentRequest := &querypb.LoadSegmentRequest{
+						CollectionID:     collectionID,
+						PartitionID:      partitionID,
+						SegmentIDs:       id2segs[i],
+						LastSegmentState: segmentStates[statesID],
+					}
+					status, err := qs.queryNodes[key].LoadSegments(loadSegmentRequest)
+					if err != nil {
+						return status, err
 					}
 				}
-				if channelLoadDone {
-					break
-				}
-			}
-			if !channelLoadDone {
-				states := make([]*datapb.SegmentStateInfo, 0)
-				for _, id := range segmentIDs {
-					states = append(states, segmentStates[id])
-				}
-				loadSegmentRequest := &querypb.LoadSegmentRequest{
-					CollectionID:  collectionID,
-					PartitionID:   partitionID,
-					SegmentIDs:    segmentIDs,
-					SegmentStates: states,
-				}
-				dmChannels := []string{channel}
-				nodeIDs := qs.shuffleChannelsToQueryNode(dmChannels)
-				err = qs.watchDmChannels(dmChannels, nodeIDs, collection)
-				if err != nil {
-					return fn(err), err
-				}
-				queryNode := qs.queryNodes[nodeIDs[0]]
-				//TODO:: seek when loadSegment may cause more msgs consumed
-				status, err := queryNode.LoadSegments(loadSegmentRequest)
-				if err != nil {
-					return status, err
-				}
 			}
 		}
-
 		qs.replica.updatePartitionState(dbID, collectionID, partitionID, querypb.PartitionState_InMemory)
 	}
-
-	if len(collection.dmChannelNames) == 0 {
-		channelRequest := datapb.InsertChannelRequest{
-			DbID:         dbID,
-			CollectionID: collectionID,
-		}
-
-		dmChannels, err := qs.dataServiceClient.GetInsertChannels(&channelRequest)
-		if err != nil {
-			return fn(err), err
-		}
-		for _, partitionID := range partitionIDs {
-			loadSegmentRequest := &querypb.LoadSegmentRequest{
-				CollectionID: collectionID,
-				PartitionID:  partitionID,
-			}
-			for _, node := range qs.queryNodes {
-				_, err := node.LoadSegments(loadSegmentRequest)
-				if err != nil {
-					return fn(err), nil
-				}
-			}
-			nodeIDs := qs.shuffleChannelsToQueryNode(dmChannels)
-			err = qs.watchDmChannels(dmChannels, nodeIDs, collection)
-		}
-		if err != nil {
-			return fn(err), err
-		}
-	}
-
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 	}, nil
@@ -475,13 +407,6 @@ func (qs *QueryService) ReleasePartitions(req *querypb.ReleasePartitionRequest) 
 		}
 
 		segmentIDs = append(segmentIDs, res...)
-		err = qs.replica.releasePartition(dbID, collectionID, partitionID)
-		if err != nil {
-			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			}, err
-		}
 	}
 	releaseSegmentRequest := &querypb.ReleaseSegmentRequest{
 		Base:         req.Base,
@@ -498,7 +423,6 @@ func (qs *QueryService) ReleasePartitions(req *querypb.ReleasePartitionRequest) 
 		}
 	}
 
-	//TODO:: queryNode cancel subscribe dmChannels
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 	}, nil
@@ -562,14 +486,14 @@ func (qs *QueryService) GetSegmentInfo(req *querypb.SegmentInfoRequest) (*queryp
 }
 
 func NewQueryService(ctx context.Context) (*QueryService, error) {
-	nodes := make(map[UniqueID]*queryNodeInfo)
+	nodes := make([]*queryNodeInfo, 0)
 	ctx1, cancel := context.WithCancel(ctx)
 	replica := newMetaReplica()
 	service := &QueryService{
 		loopCtx:         ctx1,
 		loopCancel:      cancel,
-		replica:         replica,
 		queryNodes:      nodes,
+		replica:         replica,
 		numRegisterNode: 0,
 		numQueryChannel: 0,
 		enableGrpc:      false,
@@ -589,78 +513,4 @@ func (qs *QueryService) SetDataService(dataService DataServiceInterface) {
 
 func (qs *QueryService) SetEnableGrpc(en bool) {
 	qs.enableGrpc = en
-}
-
-func (qs *QueryService) watchDmChannels(dmChannels []string, assignedNodeIDs []UniqueID, collection *collection) error {
-	err := qs.replica.addDmChannels(collection.id, dmChannels)
-	if err != nil {
-		return err
-	}
-	node2channels := make(map[UniqueID][]string)
-	for i, channel := range dmChannels {
-		nodeID := assignedNodeIDs[i]
-		findChannel := false
-		for _, ch := range collection.dmChannelNames {
-			if channel == ch {
-				findChannel = true
-			}
-		}
-		if !findChannel {
-			if _, ok := node2channels[nodeID]; ok {
-				node2channels[nodeID] = append(node2channels[nodeID], channel)
-			} else {
-				channels := make([]string, 0)
-				channels = append(channels, channel)
-				node2channels[nodeID] = channels
-			}
-		}
-	}
-
-	for nodeID, channels := range node2channels {
-		node := qs.queryNodes[nodeID]
-		request := &querypb.WatchDmChannelsRequest{
-			ChannelIDs: channels,
-		}
-		_, err := node.WatchDmChannels(request)
-		node.AddDmChannels(channels)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (qs *QueryService) shuffleChannelsToQueryNode(dmChannels []string) []UniqueID {
-	maxNumDMChannel := 0
-	res := make([]UniqueID, 0)
-	node2lens := make(map[UniqueID]int)
-	for id, node := range qs.queryNodes {
-		node2lens[id] = len(node.dmChannelNames)
-	}
-	offset := 0
-	for {
-		lastOffset := offset
-		for id, len := range node2lens {
-			if len >= maxNumDMChannel {
-				maxNumDMChannel = len
-			} else {
-				res = append(res, id)
-				node2lens[id]++
-				offset++
-			}
-		}
-		if lastOffset == offset {
-			for id := range node2lens {
-				res = append(res, id)
-				node2lens[id]++
-				offset++
-				break
-			}
-		}
-		if offset == len(dmChannels) {
-			break
-		}
-	}
-	return res
 }

@@ -56,12 +56,11 @@ type (
 	}
 
 	DataNode struct {
-		ctx     context.Context
-		cancel  context.CancelFunc
-		NodeID  UniqueID
-		Role    string
-		State   internalpb2.StateCode
-		watchDm chan struct{}
+		ctx    context.Context
+		cancel context.CancelFunc
+		NodeID UniqueID
+		Role   string
+		State  internalpb2.StateCode
 
 		dataSyncService *dataSyncService
 		metaService     *metaService
@@ -82,13 +81,11 @@ func NewDataNode(ctx context.Context) *DataNode {
 	Params.Init()
 	ctx2, cancel2 := context.WithCancel(ctx)
 	node := &DataNode{
-		ctx:     ctx2,
-		cancel:  cancel2,
-		NodeID:  Params.NodeID, // GOOSE TODO: How to init
-		Role:    typeutil.DataNodeRole,
-		State:   internalpb2.StateCode_INITIALIZING, // GOOSE TODO: atomic
-		watchDm: make(chan struct{}),
-
+		ctx:             ctx2,
+		cancel:          cancel2,
+		NodeID:          Params.NodeID, // GOOSE TODO: How to init
+		Role:            typeutil.DataNodeRole,
+		State:           internalpb2.StateCode_INITIALIZING, // GOOSE TODO: atomic
 		dataSyncService: nil,
 		metaService:     nil,
 		masterService:   nil,
@@ -138,13 +135,6 @@ func (node *DataNode) Init() error {
 		return errors.Errorf("Register node failed: %v", err)
 	}
 
-	select {
-	case <-time.After(RPCConnectionTimeout):
-		return errors.New("Get DmChannels failed in 30 seconds")
-	case <-node.watchDm:
-		log.Println("insert channel names set")
-	}
-
 	for _, kv := range resp.InitParams.StartParams {
 		switch kv.Key {
 		case "DDChannelName":
@@ -172,10 +162,10 @@ func (node *DataNode) Init() error {
 	node.flushChan = make(chan *flushMsg, chanSize)
 
 	node.dataSyncService = newDataSyncService(node.ctx, node.flushChan, replica, alloc)
-	node.dataSyncService.init()
 	node.metaService = newMetaService(node.ctx, replica, node.masterService)
 
 	node.replica = replica
+	node.dataSyncService.initNodes()
 
 	// --- Opentracing ---
 	cfg := &config.Configuration{
@@ -201,9 +191,14 @@ func (node *DataNode) Init() error {
 
 func (node *DataNode) Start() error {
 	node.metaService.init()
+	return nil
+}
+
+// DataNode is HEALTHY until StartSync() is called
+func (node *DataNode) StartSync() {
+	node.dataSyncService.init()
 	go node.dataSyncService.start()
 	node.State = internalpb2.StateCode_HEALTHY
-	return nil
 }
 
 func (node *DataNode) WatchDmChannels(in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {
@@ -224,7 +219,7 @@ func (node *DataNode) WatchDmChannels(in *datapb.WatchDmChannelRequest) (*common
 	default:
 		Params.InsertChannelNames = in.GetChannelNames()
 		status.ErrorCode = commonpb.ErrorCode_SUCCESS
-		node.watchDm <- struct{}{}
+		node.StartSync()
 		return status, nil
 	}
 }

@@ -35,7 +35,7 @@ type Server struct {
 func (s *Server) Init() error {
 	log.Println("query service init")
 	if err := s.queryService.Init(); err != nil {
-		return err
+		panic(err)
 	}
 	s.queryService.SetEnableGrpc(true)
 	return nil
