@@ -7,6 +7,7 @@ option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/que
 import "common.proto";
 import "milvus.proto";
 import "internal.proto";
+import "data_service.proto";
 
 message RegisterNodeRequest {
   common.MsgBase base = 1;
@@ -123,6 +124,7 @@ message LoadSegmentRequest {
   int64 partitionID = 4;
   repeated int64 segmentIDs = 5;
   repeated int64 fieldIDs = 6;
+  data.SegmentStatesResponse last_segment_state = 7;
 }
 
 message ReleaseSegmentRequest {
