@@ -10,7 +10,9 @@ NewPartition(CCollection collection, const char* partition_name) {
 
   auto schema = c->get_schema();
 
-  auto partition = std::make_unique<milvus::dog_segment::Partition>(name, schema);
+  auto index = c->get_index();
+
+  auto partition = std::make_unique<milvus::dog_segment::Partition>(name, schema, index);
 
   // TODO: delete print
   std::cout << "create partition " << name << std::endl;

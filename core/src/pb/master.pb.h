@@ -190,6 +190,7 @@ class Collection :
   enum : int {
     kSegmentIdsFieldNumber = 5,
     kPartitionTagsFieldNumber = 6,
+    kIndexesFieldNumber = 7,
     kNameFieldNumber = 2,
     kSchemaFieldNumber = 3,
     kIdFieldNumber = 1,
@@ -222,6 +223,17 @@ class Collection :
   void add_partition_tags(const char* value, size_t size);
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& partition_tags() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_partition_tags();
+
+  // repeated .milvus.grpc.IndexParam indexes = 7;
+  int indexes_size() const;
+  void clear_indexes();
+  ::milvus::grpc::IndexParam* mutable_indexes(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::IndexParam >*
+      mutable_indexes();
+  const ::milvus::grpc::IndexParam& indexes(int index) const;
+  ::milvus::grpc::IndexParam* add_indexes();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::IndexParam >&
+      indexes() const;
 
   // string name = 2;
   void clear_name();
@@ -260,6 +272,7 @@ class Collection :
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 > segment_ids_;
   mutable std::atomic<int> _segment_ids_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> partition_tags_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::IndexParam > indexes_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr name_;
   ::milvus::grpc::Schema* schema_;
   ::PROTOBUF_NAMESPACE_ID::uint64 id_;
@@ -832,6 +845,33 @@ inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
 Collection::mutable_partition_tags() {
   // @@protoc_insertion_point(field_mutable_list:masterpb.Collection.partition_tags)
   return &partition_tags_;
+}
+
+// repeated .milvus.grpc.IndexParam indexes = 7;
+inline int Collection::indexes_size() const {
+  return indexes_.size();
+}
+inline ::milvus::grpc::IndexParam* Collection::mutable_indexes(int index) {
+  // @@protoc_insertion_point(field_mutable:masterpb.Collection.indexes)
+  return indexes_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::IndexParam >*
+Collection::mutable_indexes() {
+  // @@protoc_insertion_point(field_mutable_list:masterpb.Collection.indexes)
+  return &indexes_;
+}
+inline const ::milvus::grpc::IndexParam& Collection::indexes(int index) const {
+  // @@protoc_insertion_point(field_get:masterpb.Collection.indexes)
+  return indexes_.Get(index);
+}
+inline ::milvus::grpc::IndexParam* Collection::add_indexes() {
+  // @@protoc_insertion_point(field_add:masterpb.Collection.indexes)
+  return indexes_.Add();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::IndexParam >&
+Collection::indexes() const {
+  // @@protoc_insertion_point(field_list:masterpb.Collection.indexes)
+  return indexes_;
 }
 
 // -------------------------------------------------------------------

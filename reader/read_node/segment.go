@@ -24,8 +24,10 @@ import (
 const SegmentLifetime = 20000
 
 const (
-	SegmentOpened = 0
-	SegmentClosed = 1
+	SegmentOpened  = 0
+	SegmentClosed  = 1
+	SegmentIndexing = 2
+	SegmentIndexed = 3
 )
 
 type Segment struct {
@@ -33,6 +35,7 @@ type Segment struct {
 	SegmentId        int64
 	SegmentCloseTime uint64
 	LastMemSize      uint64
+	SegmentStatus    int
 }
 
 func (s *Segment) GetStatus() int {
