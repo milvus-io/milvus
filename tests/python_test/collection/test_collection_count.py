@@ -14,10 +14,12 @@ from constants import *
 uid = "collection_count"
 tag = "collection_count_tag"
 
+
 class TestCollectionCount:
     """
     params means different nb, the nb value may trigger merge, or not
     """
+
     @pytest.fixture(
         scope="function",
         params=[
@@ -32,17 +34,21 @@ class TestCollectionCount:
     """
     generate valid create_index params
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_simple_index()
+        # params=[{'index_type': 'RHNSW_PQ', 'metric_type': 'L2', 'params': {'M': 48, 'PQM': 64, 'efConstruction': 500}},
+        #          {'index_type': 'IVF_PQ', 'metric_type': 'L2', 'params': {'m': 16, 'nbits': 8, 'nlist': 128}}]
     )
     def get_simple_index(self, request, connect):
         # if str(connect._cmd("mode")[1]) == "CPU":
         #     if request.param["index_type"] in index_cpu_not_support():
         #         pytest.skip("sq8h not support in cpu mode")
-        request.param.update({"metric_type": "L2"})
+        # request.param.update({"metric_type": "L2"})
         return request.param
 
+    @pytest.mark.tags("0331")
     def test_collection_count(self, connect, collection, insert_count):
         '''
         target: test collection rows_count is correct or not
@@ -51,13 +57,13 @@ class TestCollectionCount:
         expected: the count is equal to the length of vectors
         '''
         entities = gen_entities(insert_count)
-        res = connect.insert(collection, entities)
+        ids = connect.insert(collection, entities)
+        assert len(ids) == insert_count
         connect.flush([collection])
-        # res = connect.count_entities(collection)
-        # assert res == insert_count
         stats = connect.get_collection_stats(collection)
-        assert stats["row_count"] == insert_count
+        assert stats[row_count] == insert_count
 
+    @pytest.mark.tags("0331")
     def test_collection_count_partition(self, connect, collection, insert_count):
         '''
         target: test collection rows_count is correct or not
@@ -67,12 +73,11 @@ class TestCollectionCount:
         '''
         entities = gen_entities(insert_count)
         connect.create_partition(collection, tag)
-        res_ids = connect.insert(collection, entities, partition_tag=tag)
+        ids = connect.insert(collection, entities, partition_tag=tag)
+        assert len(ids) == insert_count
         connect.flush([collection])
-        # res = connect.count_entities(collection)
-        # assert res == insert_count
         stats = connect.get_collection_stats(collection)
-        assert stats["row_count"] == insert_count
+        assert stats[row_count] == insert_count
 
     # def test_collection_count_multi_partitions_A(self, connect, collection, insert_count):
     #     '''
@@ -90,7 +95,7 @@ class TestCollectionCount:
     #     # res = connect.count_entities(collection)
     #     # assert res == insert_count
     #     stats = connect.get_collection_stats(collection)
-    #     assert stats["row_count"] == insert_count
+    #     assert stats[row_count] == insert_count
 
     # def test_collection_count_multi_partitions_B(self, connect, collection, insert_count):
     #     '''
@@ -108,7 +113,7 @@ class TestCollectionCount:
     #     # res = connect.count_entities(collection)
     #     # assert res == insert_count
     #     stats = connect.get_collection_stats(collection)
-    #     assert stats["row_count"] == insert_count
+    #     assert stats[row_count] == insert_count
 
     # def test_collection_count_multi_partitions_C(self, connect, collection, insert_count):
     #     '''
@@ -127,7 +132,7 @@ class TestCollectionCount:
     #     # res = connect.count_entities(collection)
     #     # assert res == insert_count * 2
     #     stats = connect.get_collection_stats(collection)
-    #     assert stats["row_count"] == insert_count * 2
+    #     assert stats[row_count] == insert_count * 2
 
     # def test_collection_count_multi_partitions_D(self, connect, collection, insert_count):
     #     '''
@@ -146,23 +151,22 @@ class TestCollectionCount:
     #     # res = connect.count_entities(collection)
     #     # assert res == insert_count * 2
     #     stats = connect.get_collection_stats(collection)
-    #     assert stats["row_count"] == insert_count * 2
+    #     assert stats[row_count] == insert_count * 2
 
     def test_collection_count_after_index_created(self, connect, collection, get_simple_index, insert_count):
         '''
         target: test count_entities, after index have been created
-        method: add vectors in db, and create index, then calling count_entities with correct params 
+        method: add vectors in db, and create index, then calling count_entities with correct params
         expected: count_entities raise exception
         '''
         entities = gen_entities(insert_count)
-        res = connect.insert(collection, entities)
+        connect.insert(collection, entities)
         connect.flush([collection])
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
-        # res = connect.count_entities(collection)
-        # assert res == insert_count
         stats = connect.get_collection_stats(collection)
-        assert stats["row_count"] == insert_count
+        assert stats[row_count] == insert_count
 
+    @pytest.mark.tags("0331")
     def test_count_without_connection(self, collection, dis_connect):
         '''
         target: test count_entities, without connection
@@ -172,23 +176,23 @@ class TestCollectionCount:
         with pytest.raises(Exception) as e:
             dis_connect.count_entities(collection)
 
+    @pytest.mark.tags("0331")
     def test_collection_count_no_vectors(self, connect, collection):
         '''
         target: test collection rows_count is correct or not, if collection is empty
         method: create collection and no vectors in it,
             assert the value returned by count_entities method is equal to 0
         expected: the count is equal to 0
-        '''    
-        # res = connect.count_entities(collection)
-        # assert res == 0
+        '''
         stats = connect.get_collection_stats(collection)
-        assert stats["row_count"] == 0
+        assert stats[row_count] == 0
 
 
 class TestCollectionCountIP:
     """
     params means different nb, the nb value may trigger merge, or not
     """
+
     @pytest.fixture(
         scope="function",
         params=[
@@ -203,6 +207,7 @@ class TestCollectionCountIP:
     """
     generate valid create_index params
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_simple_index()
@@ -217,22 +222,23 @@ class TestCollectionCountIP:
     def test_collection_count_after_index_created(self, connect, collection, get_simple_index, insert_count):
         '''
         target: test count_entities, after index have been created
-        method: add vectors in db, and create index, then calling count_entities with correct params 
+        method: add vectors in db, and create index, then calling count_entities with correct params
         expected: count_entities raise exception
         '''
         entities = gen_entities(insert_count)
-        res = connect.insert(collection, entities)
+        connect.insert(collection, entities)
         connect.flush([collection])
-        connect.create_index(collection, field_name, get_simple_index)
-        # res = connect.count_entities(collection)
-        # assert res == insert_count
+        # connect.load_collection(collection)
+        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         stats = connect.get_collection_stats(collection)
-        assert stats["row_count"] == insert_count
+        assert stats[row_count] == insert_count
+
 
 class TestCollectionCountBinary:
     """
     params means different nb, the nb value may trigger merge, or not
     """
+
     @pytest.fixture(
         scope="function",
         params=[
@@ -246,48 +252,37 @@ class TestCollectionCountBinary:
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index()
+        params=gen_binary_index()
     )
     def get_jaccard_index(self, request, connect):
-        if request.param["index_type"] in binary_support():
-            request.param["metric_type"] = "JACCARD"
-            return request.param
-        else:
-            pytest.skip("Skip index")
+        request.param["metric_type"] = "JACCARD"
+        return request.param
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index()
+        params=gen_binary_index()
     )
     def get_hamming_index(self, request, connect):
-        if request.param["index_type"] in binary_support():
-            request.param["metric_type"] = "HAMMING"
-            return request.param
-        else:
-            pytest.skip("Skip index")
+        request.param["metric_type"] = "HAMMING"
+        return request.param
 
     @pytest.fixture(
         scope="function",
         params=gen_simple_index()
     )
     def get_substructure_index(self, request, connect):
-        if request.param["index_type"] == "FLAT":
-            request.param["metric_type"] = "SUBSTRUCTURE"
-            return request.param
-        else:
-            pytest.skip("Skip index")
+        request.param["metric_type"] = "SUBSTRUCTURE"
+        return request.param
 
     @pytest.fixture(
         scope="function",
         params=gen_simple_index()
     )
     def get_superstructure_index(self, request, connect):
-        if request.param["index_type"] == "FLAT":
-            request.param["metric_type"] = "SUPERSTRUCTURE"
-            return request.param
-        else:
-            pytest.skip("Skip index")
+        request.param["metric_type"] = "SUPERSTRUCTURE"
+        return request.param
 
+    @pytest.mark.tags("0331")
     def test_collection_count(self, connect, binary_collection, insert_count):
         '''
         target: test collection rows_count is correct or not
@@ -296,14 +291,13 @@ class TestCollectionCountBinary:
         expected: the count is equal to the length of entities
         '''
         raw_vectors, entities = gen_binary_entities(insert_count)
-        res = connect.insert(binary_collection, entities)
-        logging.getLogger().info(len(res))
+        ids = connect.insert(binary_collection, entities)
+        assert len(ids) == insert_count
         connect.flush([binary_collection])
-        # res = connect.count_entities(binary_collection)
-        # assert res == insert_count
         stats = connect.get_collection_stats(binary_collection)
-        assert stats["row_count"] == insert_count
+        assert stats[row_count] == insert_count
 
+    @pytest.mark.tags("0331")
     def test_collection_count_partition(self, connect, binary_collection, insert_count):
         '''
         target: test collection rows_count is correct or not
@@ -313,12 +307,10 @@ class TestCollectionCountBinary:
         '''
         raw_vectors, entities = gen_binary_entities(insert_count)
         connect.create_partition(binary_collection, tag)
-        res_ids = connect.insert(binary_collection, entities, partition_tag=tag)
+        connect.insert(binary_collection, entities, partition_tag=tag)
         connect.flush([binary_collection])
-        # res = connect.count_entities(binary_collection)
-        # assert res == insert_count
         stats = connect.get_collection_stats(binary_collection)
-        assert stats["row_count"] == insert_count
+        assert stats[row_count] == insert_count
 
     # @pytest.mark.level(2)
     # def test_collection_count_multi_partitions_A(self, connect, binary_collection, insert_count):
@@ -337,7 +329,7 @@ class TestCollectionCountBinary:
     #     # res = connect.count_entities(binary_collection)
     #     # assert res == insert_count
     #     stats = connect.get_collection_stats(binary_collection)
-    #     assert stats["row_count"] == insert_count
+    #     assert stats[row_count] == insert_count
 
     # @pytest.mark.level(2)
     # def test_collection_count_multi_partitions_B(self, connect, binary_collection, insert_count):
@@ -356,7 +348,7 @@ class TestCollectionCountBinary:
     #     # res = connect.count_entities(binary_collection)
     #     # assert res == insert_count
     #     stats = connect.get_collection_stats(binary_collection)
-    #     assert stats["row_count"] == insert_count
+    #     assert stats[row_count] == insert_count
 
     # def test_collection_count_multi_partitions_C(self, connect, binary_collection, insert_count):
     #     '''
@@ -375,7 +367,7 @@ class TestCollectionCountBinary:
     #     # res = connect.count_entities(binary_collection)
     #     # assert res == insert_count * 2
     #     stats = connect.get_collection_stats(binary_collection)
-    #     assert stats["row_count"] == insert_count * 2
+    #     assert stats[row_count] == insert_count * 2
 
     # @pytest.mark.level(2)
     # def test_collection_count_multi_partitions_D(self, connect, binary_collection, insert_count):
@@ -395,57 +387,56 @@ class TestCollectionCountBinary:
     #     # res = connect.count_entities(binary_collection)
     #     # assert res == insert_count * 2
     #     stats = connect.get_collection_stats(binary_collection)
-    #     assert stats["row_count"] == insert_count * 2
+    #     assert stats[row_count] == insert_count * 2
 
     # TODO: need to update and enable
-    def _test_collection_count_after_index_created(self, connect, binary_collection, get_jaccard_index, insert_count):
+    @pytest.mark.tags("0331")
+    def test_collection_count_after_index_created(self, connect, binary_collection, get_jaccard_index, insert_count):
         '''
         target: test count_entities, after index have been created
-        method: add vectors in db, and create index, then calling count_entities with correct params 
+        method: add vectors in db, and create index, then calling count_entities with correct params
         expected: count_entities raise exception
         '''
         raw_vectors, entities = gen_binary_entities(insert_count)
-        res = connect.insert(binary_collection, entities)
+        connect.insert(binary_collection, entities)
         connect.flush([binary_collection])
-        connect.create_index(binary_collection, field_name, get_jaccard_index)
-        # res = connect.count_entities(binary_collection)
-        # assert res == insert_count
+        connect.create_index(binary_collection, default_binary_vec_field_name, get_jaccard_index)
         stats = connect.get_collection_stats(binary_collection)
-        assert stats["row_count"] == insert_count
+        assert stats[row_count] == insert_count
 
     # TODO: need to update and enable
-    def _test_collection_count_after_index_created(self, connect, binary_collection, get_hamming_index, insert_count):
+    @pytest.mark.tags("0331")
+    def test_collection_count_after_index_created(self, connect, binary_collection, get_hamming_index, insert_count):
         '''
         target: test count_entities, after index have been created
-        method: add vectors in db, and create index, then calling count_entities with correct params 
+        method: add vectors in db, and create index, then calling count_entities with correct params
         expected: count_entities raise exception
         '''
         raw_vectors, entities = gen_binary_entities(insert_count)
-        res = connect.insert(binary_collection, entities)
+        connect.insert(binary_collection, entities)
         connect.flush([binary_collection])
-        connect.create_index(binary_collection, field_name, get_hamming_index)
-        # res = connect.count_entities(binary_collection)
-        # assert res == insert_count
+        # connect.load_collection(binary_collection)
+        connect.create_index(binary_collection, default_binary_vec_field_name, get_hamming_index)
         stats = connect.get_collection_stats(binary_collection)
-        assert stats["row_count"] == insert_count
+        assert stats[row_count] == insert_count
 
+    @pytest.mark.tags("0331")
     def test_collection_count_no_entities(self, connect, binary_collection):
         '''
         target: test collection rows_count is correct or not, if collection is empty
         method: create collection and no vectors in it,
             assert the value returned by count_entities method is equal to 0
         expected: the count is equal to 0
-        '''    
-        # res = connect.count_entities(binary_collection)
-        # assert res == 0
+        '''
         stats = connect.get_collection_stats(binary_collection)
-        assert stats["row_count"] == 0
+        assert stats[row_count] == 0
 
 
 class TestCollectionMultiCollections:
     """
     params means different nb, the nb value may trigger merge, or not
     """
+
     @pytest.fixture(
         scope="function",
         params=[
@@ -456,51 +447,8 @@ class TestCollectionMultiCollections:
     )
     def insert_count(self, request):
         yield request.param
-        
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_jaccard_index(self, request, connect):
-        if request.param["index_type"] in binary_support():
-            request.param["metric_type"] = "JACCARD"
-            return request.param
-        else:
-            pytest.skip("Skip index")
 
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_hamming_index(self, request, connect):
-        if request.param["index_type"] in binary_support():
-            request.param["metric_type"] = "HAMMING"
-            return request.param
-        else:
-            pytest.skip("Skip index")
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_substructure_index(self, request, connect):
-        if request.param["index_type"] == "FLAT":
-            request.param["metric_type"] = "SUBSTRUCTURE"
-            return request.param
-        else:
-            pytest.skip("Skip index")
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_superstructure_index(self, request, connect):
-        if request.param["index_type"] == "FLAT":
-            request.param["metric_type"] = "SUPERSTRUCTURE"
-            return request.param
-        else:
-            pytest.skip("Skip index")
-
+    @pytest.mark.tags("0331")
     def test_collection_count_multi_collections_l2(self, connect, insert_count):
         '''
         target: test collection rows_count is correct or not with multiple collections of L2
@@ -515,15 +463,14 @@ class TestCollectionMultiCollections:
             collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_fields)
-            res = connect.insert(collection_name, entities)
+            connect.insert(collection_name, entities)
         connect.flush(collection_list)
         for i in range(collection_num):
-            # res = connect.count_entities(collection_list[i])
-            # assert res == insert_count
             stats = connect.get_collection_stats(collection_list[i])
-            assert stats["row_count"] == insert_count
+            assert stats[row_count] == insert_count
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_collection_count_multi_collections_binary(self, connect, binary_collection, insert_count):
         '''
         target: test collection rows_count is correct or not with multiple collections of JACCARD
@@ -532,22 +479,21 @@ class TestCollectionMultiCollections:
         expected: the count is equal to the length of entities
         '''
         raw_vectors, entities = gen_binary_entities(insert_count)
-        res = connect.insert(binary_collection, entities)
+        connect.insert(binary_collection, entities)
         collection_list = []
         collection_num = 20
         for i in range(collection_num):
             collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_binary_fields)
-            res = connect.insert(collection_name, entities)
+            connect.insert(collection_name, entities)
         connect.flush(collection_list)
         for i in range(collection_num):
-            # res = connect.count_entities(collection_list[i])
-            # assert res == insert_count
             stats = connect.get_collection_stats(collection_list[i])
-            assert stats["row_count"] == insert_count
+            assert stats[row_count] == insert_count
 
     @pytest.mark.level(2)
+    @pytest.mark.tags("0331")
     def test_collection_count_multi_collections_mix(self, connect):
         '''
         target: test collection rows_count is correct or not with multiple collections of JACCARD
@@ -561,7 +507,7 @@ class TestCollectionMultiCollections:
             collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_fields)
-            res = connect.insert(collection_name, default_entities)
+            connect.insert(collection_name, default_entities)
         for i in range(int(collection_num / 2), collection_num):
             collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
@@ -569,7 +515,5 @@ class TestCollectionMultiCollections:
             res = connect.insert(collection_name, default_binary_entities)
         connect.flush(collection_list)
         for i in range(collection_num):
-            # res = connect.count_entities(collection_list[i])
-            # assert res == default_nb
             stats = connect.get_collection_stats(collection_list[i])
-            assert stats["row_count"] == default_nb
+            assert stats[row_count] == default_nb

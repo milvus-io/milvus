@@ -26,7 +26,7 @@ type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
 type Server struct {
-	impl *indexservice.IndexService
+	indexservice *indexservice.IndexService
 
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
@@ -56,20 +56,20 @@ func (s *Server) init() error {
 
 	s.loopWg.Add(1)
 	go s.startGrpcLoop(Params.ServicePort)
-	// wait for grpc impl loop start
+	// wait for grpc indexservice loop start
 	if err := <-s.grpcErrChan; err != nil {
 		return err
 	}
-	s.impl.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
+	s.indexservice.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
 
-	if err := s.impl.Init(); err != nil {
+	if err := s.indexservice.Init(); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (s *Server) start() error {
-	if err := s.impl.Start(); err != nil {
+	if err := s.indexservice.Start(); err != nil {
 		return err
 	}
 	log.Println("indexService started")
@@ -80,8 +80,8 @@ func (s *Server) Stop() error {
 	if err := s.closer.Close(); err != nil {
 		return err
 	}
-	if s.impl != nil {
-		s.impl.Stop()
+	if s.indexservice != nil {
+		s.indexservice.Stop()
 	}
 
 	s.loopCancel()
@@ -94,27 +94,27 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
-	return s.impl.RegisterNode(ctx, req)
+	return s.indexservice.RegisterNode(ctx, req)
 }
 
 func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
-	return s.impl.BuildIndex(ctx, req)
+	return s.indexservice.BuildIndex(ctx, req)
 }
 
 func (s *Server) GetIndexStates(ctx context.Context, req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
-	return s.impl.GetIndexStates(ctx, req)
+	return s.indexservice.GetIndexStates(ctx, req)
 }
 
 func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	return s.impl.DropIndex(ctx, request)
+	return s.indexservice.DropIndex(ctx, request)
 }
 
 func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {
-	return s.impl.GetIndexFilePaths(ctx, req)
+	return s.indexservice.GetIndexFilePaths(ctx, req)
 }
 
 func (s *Server) NotifyBuildIndex(ctx context.Context, nty *indexpb.BuildIndexNotification) (*commonpb.Status, error) {
-	return s.impl.NotifyBuildIndex(ctx, nty)
+	return s.indexservice.NotifyBuildIndex(ctx, nty)
 }
 
 func (s *Server) startGrpcLoop(grpcPort int) {
@@ -147,15 +147,15 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	return s.impl.GetComponentStates(ctx)
+	return s.indexservice.GetComponentStates(ctx)
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.impl.GetTimeTickChannel(ctx)
+	return s.indexservice.GetTimeTickChannel(ctx)
 }
 
 func (s *Server) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.impl.GetStatisticsChannel(ctx)
+	return s.indexservice.GetStatisticsChannel(ctx)
 }
 
 func NewServer(ctx context.Context) (*Server, error) {
@@ -167,10 +167,10 @@ func NewServer(ctx context.Context) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{
-		loopCtx:     ctx1,
-		loopCancel:  cancel,
-		impl:        serverImp,
-		grpcErrChan: make(chan error),
+		loopCtx:      ctx1,
+		loopCancel:   cancel,
+		indexservice: serverImp,
+		grpcErrChan:  make(chan error),
 	}
 
 	cfg := &config.Configuration{

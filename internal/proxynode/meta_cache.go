@@ -9,13 +9,9 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
-
-type MasterClientInterface interface {
-	DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
-	ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
-}
 
 type Cache interface {
 	GetCollectionID(ctx context.Context, collectionName string) (typeutil.UniqueID, error)
@@ -32,7 +28,7 @@ type collectionInfo struct {
 }
 
 type MetaCache struct {
-	client MasterClientInterface
+	client types.MasterService
 
 	collInfo map[string]*collectionInfo
 	mu       sync.RWMutex
@@ -40,7 +36,7 @@ type MetaCache struct {
 
 var globalMetaCache Cache
 
-func InitMetaCache(client MasterClientInterface) error {
+func InitMetaCache(client types.MasterService) error {
 	var err error
 	globalMetaCache, err = NewMetaCache(client)
 	if err != nil {
@@ -49,7 +45,7 @@ func InitMetaCache(client MasterClientInterface) error {
 	return nil
 }
 
-func NewMetaCache(client MasterClientInterface) (*MetaCache, error) {
+func NewMetaCache(client types.MasterService) (*MetaCache, error) {
 	return &MetaCache{
 		client:   client,
 		collInfo: map[string]*collectionInfo{},

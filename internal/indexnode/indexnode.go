@@ -2,24 +2,24 @@ package indexnode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-
-	"errors"
-
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go/config"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
+	"github.com/zilliztech/milvus-distributed/internal/types"
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 )
 
 const (
@@ -39,7 +39,7 @@ type IndexNode struct {
 
 	kv kv.Base
 
-	serviceClient typeutil.IndexServiceInterface // method factory
+	serviceClient types.IndexService // method factory
 
 	// Add callback functions at different stages
 	startCallbacks []func()
@@ -155,7 +155,7 @@ func (i *IndexNode) UpdateStateCode(code internalpb2.StateCode) {
 	i.stateCode = code
 }
 
-func (i *IndexNode) SetIndexServiceClient(serviceClient typeutil.IndexServiceInterface) {
+func (i *IndexNode) SetIndexServiceClient(serviceClient types.IndexService) {
 	i.serviceClient = serviceClient
 }
 

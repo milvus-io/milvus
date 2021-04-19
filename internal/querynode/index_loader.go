@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/types"
+
 	"errors"
 
 	"go.uber.org/zap"
@@ -31,8 +33,8 @@ type indexLoader struct {
 	fieldIndexes   map[string][]*internalpb2.IndexStats
 	fieldStatsChan chan []*internalpb2.FieldStats
 
-	masterClient MasterServiceInterface
-	indexClient  IndexServiceInterface
+	masterService types.MasterService
+	indexService  types.IndexService
 
 	kv kv.Base // minio kv
 }
@@ -315,7 +317,7 @@ func (loader *indexLoader) getIndexInfo(collectionID UniqueID, segmentID UniqueI
 		CollectionID: collectionID,
 		SegmentID:    segmentID,
 	}
-	response, err := loader.masterClient.DescribeSegment(ctx, req)
+	response, err := loader.masterService.DescribeSegment(ctx, req)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -327,14 +329,14 @@ func (loader *indexLoader) getIndexInfo(collectionID UniqueID, segmentID UniqueI
 
 func (loader *indexLoader) getIndexPaths(indexBuildID UniqueID) ([]string, error) {
 	ctx := context.TODO()
-	if loader.indexClient == nil {
+	if loader.indexService == nil {
 		return nil, errors.New("null index service client")
 	}
 
 	indexFilePathRequest := &indexpb.IndexFilePathsRequest{
 		IndexBuildIDs: []UniqueID{indexBuildID},
 	}
-	pathResponse, err := loader.indexClient.GetIndexFilePaths(ctx, indexFilePathRequest)
+	pathResponse, err := loader.indexService.GetIndexFilePaths(ctx, indexFilePathRequest)
 	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
 		return nil, err
 	}
@@ -389,7 +391,7 @@ func (loader *indexLoader) loadIndexDelayed(collectionID, segmentID UniqueID, in
 	return nil
 }
 
-func newIndexLoader(ctx context.Context, masterClient MasterServiceInterface, indexClient IndexServiceInterface, replica ReplicaInterface) *indexLoader {
+func newIndexLoader(ctx context.Context, masterService types.MasterService, indexService types.IndexService, replica ReplicaInterface) *indexLoader {
 	option := &minioKV.Option{
 		Address:           Params.MinioEndPoint,
 		AccessKeyID:       Params.MinioAccessKeyID,
@@ -410,8 +412,8 @@ func newIndexLoader(ctx context.Context, masterClient MasterServiceInterface, in
 		fieldIndexes:   make(map[string][]*internalpb2.IndexStats),
 		fieldStatsChan: make(chan []*internalpb2.FieldStats, 1),
 
-		masterClient: masterClient,
-		indexClient:  indexClient,
+		masterService: masterService,
+		indexService:  indexService,
 
 		kv: client,
 	}

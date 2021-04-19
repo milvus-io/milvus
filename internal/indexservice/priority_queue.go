@@ -5,12 +5,13 @@ import (
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
+	"github.com/zilliztech/milvus-distributed/internal/types"
 )
 
 // An Item is something we manage in a priority queue.
 type PQItem struct {
-	value    typeutil.IndexNodeInterface // The value of the item; arbitrary.
+	value    types.IndexNode // The value of the item; arbitrary.
 	key      UniqueID
 	addr     *commonpb.Address
 	priority int // The priority of the item in the queue.
@@ -124,7 +125,7 @@ func (pq *PriorityQueue) Peek() interface{} {
 	//return item.value
 }
 
-func (pq *PriorityQueue) PeekClient() (UniqueID, typeutil.IndexNodeInterface) {
+func (pq *PriorityQueue) PeekClient() (UniqueID, types.IndexNode) {
 	item := pq.Peek()
 	if item == nil {
 		return UniqueID(-1), nil
@@ -132,11 +133,11 @@ func (pq *PriorityQueue) PeekClient() (UniqueID, typeutil.IndexNodeInterface) {
 	return item.(*PQItem).key, item.(*PQItem).value
 }
 
-func (pq *PriorityQueue) PeekAllClients() []typeutil.IndexNodeInterface {
+func (pq *PriorityQueue) PeekAllClients() []types.IndexNode {
 	pq.lock.RLock()
 	defer pq.lock.RUnlock()
 
-	var ret []typeutil.IndexNodeInterface
+	var ret []types.IndexNode
 	for _, item := range pq.items {
 		ret = append(ret, item.value)
 	}

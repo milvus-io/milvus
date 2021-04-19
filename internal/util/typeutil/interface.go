@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
@@ -22,24 +21,6 @@ type Service interface {
 type Component interface {
 	GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
 	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
-}
-
-// TODO
-type IndexNodeInterface interface {
-	Service
-	Component
-	BuildIndex(ctx context.Context, req *indexpb.BuildIndexCmd) (*commonpb.Status, error)
-	DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
-}
-
-type IndexServiceInterface interface {
-	Service
-	Component
-	RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error)
-	BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error)
-	GetIndexStates(ctx context.Context, req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error)
-	GetIndexFilePaths(ctx context.Context, req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error)
-	NotifyBuildIndex(ctx context.Context, nty *indexpb.BuildIndexNotification) (*commonpb.Status, error)
 }
 
 type QueryServiceInterface interface {

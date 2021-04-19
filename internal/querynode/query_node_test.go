@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/types"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
@@ -23,7 +25,9 @@ const debug = false
 
 const defaultPartitionID = UniqueID(2021)
 
-type queryServiceMock struct{}
+type queryServiceMock struct {
+	types.QueryService
+}
 
 func setup() {
 	os.Setenv("QUERY_NODE_ID", "1")

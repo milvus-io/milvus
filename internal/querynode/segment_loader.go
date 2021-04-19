@@ -4,6 +4,8 @@ import (
 	"context"
 	"strconv"
 
+	"github.com/zilliztech/milvus-distributed/internal/types"
+
 	"errors"
 
 	"github.com/zilliztech/milvus-distributed/internal/kv"
@@ -21,7 +23,7 @@ type segmentLoader struct {
 
 	dmStream msgstream.MsgStream
 
-	dataClient DataServiceInterface
+	dataService types.DataService
 
 	kv     kv.Base // minio kv
 	iCodec *storage.InsertCodec
@@ -31,7 +33,7 @@ type segmentLoader struct {
 
 func (loader *segmentLoader) getInsertBinlogPaths(segmentID UniqueID) ([]*internalpb2.StringList, []int64, error) {
 	ctx := context.TODO()
-	if loader.dataClient == nil {
+	if loader.dataService == nil {
 		return nil, nil, errors.New("null data service client")
 	}
 
@@ -39,7 +41,7 @@ func (loader *segmentLoader) getInsertBinlogPaths(segmentID UniqueID) ([]*intern
 		SegmentID: segmentID,
 	}
 
-	pathResponse, err := loader.dataClient.GetInsertBinlogPaths(ctx, insertBinlogPathRequest)
+	pathResponse, err := loader.dataService.GetInsertBinlogPaths(ctx, insertBinlogPathRequest)
 	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
 		return nil, nil, err
 	}
@@ -53,14 +55,14 @@ func (loader *segmentLoader) getInsertBinlogPaths(segmentID UniqueID) ([]*intern
 
 func (loader *segmentLoader) GetSegmentStates(segmentID UniqueID) (*datapb.SegmentStatesResponse, error) {
 	ctx := context.TODO()
-	if loader.dataClient == nil {
+	if loader.dataService == nil {
 		return nil, errors.New("null data service client")
 	}
 
 	segmentStatesRequest := &datapb.SegmentStatesRequest{
 		SegmentIDs: []int64{segmentID},
 	}
-	statesResponse, err := loader.dataClient.GetSegmentStates(ctx, segmentStatesRequest)
+	statesResponse, err := loader.dataService.GetSegmentStates(ctx, segmentStatesRequest)
 	if err != nil || statesResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
 		return nil, err
 	}
@@ -191,7 +193,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, targetField
 	return nil
 }
 
-func newSegmentLoader(ctx context.Context, masterClient MasterServiceInterface, indexClient IndexServiceInterface, dataClient DataServiceInterface, replica ReplicaInterface, dmStream msgstream.MsgStream) *segmentLoader {
+func newSegmentLoader(ctx context.Context, masterService types.MasterService, indexService types.IndexService, dataService types.DataService, replica ReplicaInterface, dmStream msgstream.MsgStream) *segmentLoader {
 	option := &minioKV.Option{
 		Address:           Params.MinioEndPoint,
 		AccessKeyID:       Params.MinioAccessKeyID,
@@ -206,13 +208,13 @@ func newSegmentLoader(ctx context.Context, masterClient MasterServiceInterface, 
 		panic(err)
 	}
 
-	iLoader := newIndexLoader(ctx, masterClient, indexClient, replica)
+	iLoader := newIndexLoader(ctx, masterService, indexService, replica)
 	return &segmentLoader{
 		replica: replica,
 
 		dmStream: dmStream,
 
-		dataClient: dataClient,
+		dataService: dataService,
 
 		kv:     client,
 		iCodec: &storage.InsertCodec{},

@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/zilliztech/milvus-distributed/internal/types"
+
 	"errors"
 
 	"go.uber.org/zap"
@@ -31,21 +33,6 @@ import (
 	queryPb "github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
-
-type Node interface {
-	typeutil.Component
-
-	AddQueryChannel(ctx context.Context, in *queryPb.AddQueryChannelsRequest) (*commonpb.Status, error)
-	RemoveQueryChannel(ctx context.Context, in *queryPb.RemoveQueryChannelsRequest) (*commonpb.Status, error)
-	WatchDmChannels(ctx context.Context, in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error)
-	LoadSegments(ctx context.Context, in *queryPb.LoadSegmentRequest) (*commonpb.Status, error)
-	ReleaseCollection(ctx context.Context, in *queryPb.ReleaseCollectionRequest) (*commonpb.Status, error)
-	ReleasePartitions(ctx context.Context, in *queryPb.ReleasePartitionRequest) (*commonpb.Status, error)
-	ReleaseSegments(ctx context.Context, in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error)
-	GetSegmentInfo(ctx context.Context, in *queryPb.SegmentInfoRequest) (*queryPb.SegmentInfoResponse, error)
-}
-
-type QueryService = typeutil.QueryServiceInterface
 
 type QueryNode struct {
 	typeutil.Service
@@ -66,10 +53,10 @@ type QueryNode struct {
 	statsService    *statsService
 
 	// clients
-	masterClient MasterServiceInterface
-	queryClient  QueryServiceInterface
-	indexClient  IndexServiceInterface
-	dataClient   DataServiceInterface
+	masterService types.MasterService
+	queryService  types.QueryService
+	indexService  types.IndexService
+	dataService   types.DataService
 
 	msFactory msgstream.Factory
 }
@@ -127,7 +114,7 @@ func (node *QueryNode) Init() error {
 		},
 	}
 
-	resp, err := node.queryClient.RegisterNode(ctx, registerReq)
+	resp, err := node.queryService.RegisterNode(ctx, registerReq)
 	if err != nil {
 		panic(err)
 	}
@@ -152,15 +139,15 @@ func (node *QueryNode) Init() error {
 
 	log.Debug("", zap.Int64("QueryNodeID", Params.QueryNodeID))
 
-	if node.masterClient == nil {
+	if node.masterService == nil {
 		log.Error("null master service detected")
 	}
 
-	if node.indexClient == nil {
+	if node.indexService == nil {
 		log.Error("null index service detected")
 	}
 
-	if node.dataClient == nil {
+	if node.dataService == nil {
 		log.Error("null data service detected")
 	}
 
@@ -183,7 +170,7 @@ func (node *QueryNode) Start() error {
 	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica, node.msFactory)
 	//node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
-	node.loadService = newLoadService(node.queryNodeLoopCtx, node.masterClient, node.dataClient, node.indexClient, node.replica, node.dataSyncService.dmStream)
+	node.loadService = newLoadService(node.queryNodeLoopCtx, node.masterService, node.dataService, node.indexService, node.replica, node.dataSyncService.dmStream)
 	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, node.loadService.segLoader.indexLoader.fieldStatsChan, node.msFactory)
 
 	// start services
@@ -223,35 +210,35 @@ func (node *QueryNode) UpdateStateCode(code internalpb2.StateCode) {
 	node.stateCode.Store(code)
 }
 
-func (node *QueryNode) SetMasterService(master MasterServiceInterface) error {
+func (node *QueryNode) SetMasterService(master types.MasterService) error {
 	if master == nil {
 		return errors.New("null master service interface")
 	}
-	node.masterClient = master
+	node.masterService = master
 	return nil
 }
 
-func (node *QueryNode) SetQueryService(query QueryServiceInterface) error {
+func (node *QueryNode) SetQueryService(query types.QueryService) error {
 	if query == nil {
 		return errors.New("null query service interface")
 	}
-	node.queryClient = query
+	node.queryService = query
 	return nil
 }
 
-func (node *QueryNode) SetIndexService(index IndexServiceInterface) error {
+func (node *QueryNode) SetIndexService(index types.IndexService) error {
 	if index == nil {
 		return errors.New("null index service interface")
 	}
-	node.indexClient = index
+	node.indexService = index
 	return nil
 }
 
-func (node *QueryNode) SetDataService(data DataServiceInterface) error {
+func (node *QueryNode) SetDataService(data types.DataService) error {
 	if data == nil {
 		return errors.New("null data service interface")
 	}
-	node.dataClient = data
+	node.dataService = data
 	return nil
 }
 

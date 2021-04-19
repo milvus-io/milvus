@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/types"
+
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go/config"
@@ -268,20 +270,20 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-func (s *Server) SetMasterService(master qn.MasterServiceInterface) error {
-	return s.impl.SetMasterService(master)
+func (s *Server) SetMasterService(masterService types.MasterService) error {
+	return s.impl.SetMasterService(masterService)
 }
 
-func (s *Server) SetQueryService(query qn.QueryServiceInterface) error {
-	return s.impl.SetQueryService(query)
+func (s *Server) SetQueryService(queryService types.QueryService) error {
+	return s.impl.SetQueryService(queryService)
 }
 
-func (s *Server) SetIndexService(index qn.IndexServiceInterface) error {
-	return s.impl.SetIndexService(index)
+func (s *Server) SetIndexService(indexService types.IndexService) error {
+	return s.impl.SetIndexService(indexService)
 }
 
-func (s *Server) SetDataService(data qn.DataServiceInterface) error {
-	return s.impl.SetDataService(data)
+func (s *Server) SetDataService(dataService types.DataService) error {
+	return s.impl.SetDataService(dataService)
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, in *commonpb.Empty) (*milvuspb.StringResponse, error) {

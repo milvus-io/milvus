@@ -11,21 +11,23 @@ import (
 	"github.com/opentracing/opentracing-go"
 	grpcindexserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/indexservice/client"
 	"github.com/zilliztech/milvus-distributed/internal/indexnode"
+	"github.com/zilliztech/milvus-distributed/internal/types"
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"google.golang.org/grpc"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-	"google.golang.org/grpc"
 )
 
 type Server struct {
-	impl *indexnode.IndexNode
+	indexnode *indexnode.IndexNode
 
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
 
-	indexServiceClient *grpcindexserviceclient.Client
+	indexServiceClient types.IndexService
 	loopCtx            context.Context
 	loopCancel         func()
 	loopWg             sync.WaitGroup
@@ -105,16 +107,16 @@ func (s *Server) init() error {
 	if err != nil {
 		return err
 	}
-	s.impl.SetIndexServiceClient(s.indexServiceClient)
+	s.indexnode.SetIndexServiceClient(s.indexServiceClient)
 
 	indexnode.Params.Init()
 	indexnode.Params.Port = Params.Port
 	indexnode.Params.IP = Params.IP
 	indexnode.Params.Address = Params.Address
 
-	s.impl.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
+	s.indexnode.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
 
-	err = s.impl.Init()
+	err = s.indexnode.Init()
 	if err != nil {
 		return err
 	}
@@ -122,7 +124,7 @@ func (s *Server) init() error {
 }
 
 func (s *Server) start() error {
-	err := s.impl.Start()
+	err := s.indexnode.Start()
 	if err != nil {
 		return err
 	}
@@ -131,8 +133,8 @@ func (s *Server) start() error {
 
 func (s *Server) Stop() error {
 	s.loopCancel()
-	if s.impl != nil {
-		s.impl.Stop()
+	if s.indexnode != nil {
+		s.indexnode.Stop()
 	}
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
@@ -143,23 +145,23 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexCmd) (*commonpb.Status, error) {
-	return s.impl.BuildIndex(ctx, req)
+	return s.indexnode.BuildIndex(ctx, req)
 }
 
 func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	return s.impl.DropIndex(ctx, request)
+	return s.indexnode.DropIndex(ctx, request)
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	return s.impl.GetComponentStates(ctx)
+	return s.indexnode.GetComponentStates(ctx)
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.impl.GetTimeTickChannel(ctx)
+	return s.indexnode.GetTimeTickChannel(ctx)
 }
 
 func (s *Server) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.impl.GetStatisticsChannel(ctx)
+	return s.indexnode.GetStatisticsChannel(ctx)
 }
 
 func NewServer(ctx context.Context) (*Server, error) {
@@ -173,7 +175,7 @@ func NewServer(ctx context.Context) (*Server, error) {
 	return &Server{
 		loopCtx:     ctx1,
 		loopCancel:  cancel,
-		impl:        node,
+		indexnode:   node,
 		grpcErrChan: make(chan error),
 	}, nil
 }
