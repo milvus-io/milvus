@@ -97,7 +97,7 @@ class TestCreateCollection:
         expected: error raised
         '''
         # pdb.set_trace()
-        connect.bulk_insert(collection, default_entity)
+        connect.insert(collection, default_entity)
 
         with pytest.raises(Exception) as e:
             connect.create_collection(collection, default_fields)
@@ -108,7 +108,7 @@ class TestCreateCollection:
         method: insert vector and create collection
         expected: error raised
         '''
-        connect.bulk_insert(collection, default_entity)
+        connect.insert(collection, default_entity)
         connect.flush([collection])
         with pytest.raises(Exception) as e:
             connect.create_collection(collection, default_fields)

@@ -36,14 +36,14 @@ def init_data(connect, collection, nb=1200, partition_tags=None, auto_id=True):
         insert_entities = gen_entities(nb, is_normal=True)
     if partition_tags is None:
         if auto_id:
-            ids = connect.bulk_insert(collection, insert_entities)
+            ids = connect.insert(collection, insert_entities)
         else:
-            ids = connect.bulk_insert(collection, insert_entities, ids=[i for i in range(nb)])
+            ids = connect.insert(collection, insert_entities, ids=[i for i in range(nb)])
     else:
         if auto_id:
-            ids = connect.bulk_insert(collection, insert_entities, partition_tag=partition_tags)
+            ids = connect.insert(collection, insert_entities, partition_tag=partition_tags)
         else:
-            ids = connect.bulk_insert(collection, insert_entities, ids=[i for i in range(nb)], partition_tag=partition_tags)
+            ids = connect.insert(collection, insert_entities, ids=[i for i in range(nb)], partition_tag=partition_tags)
     # connect.flush([collection])
     return insert_entities, ids
 
@@ -62,9 +62,9 @@ def init_binary_data(connect, collection, nb=1200, insert=True, partition_tags=N
         insert_raw_vectors, insert_entities = gen_binary_entities(nb)
     if insert is True:
         if partition_tags is None:
-            ids = connect.bulk_insert(collection, insert_entities)
+            ids = connect.insert(collection, insert_entities)
         else:
-            ids = connect.bulk_insert(collection, insert_entities, partition_tag=partition_tags)
+            ids = connect.insert(collection, insert_entities, partition_tag=partition_tags)
         connect.flush([collection])
     return insert_raw_vectors, insert_entities, ids
 
@@ -79,9 +79,9 @@ class TestSearchBase:
         params=gen_index()
     )
     def get_index(self, request, connect):
-        if str(connect._cmd("mode")) == "CPU":
-            if request.param["index_type"] in index_cpu_not_support():
-                pytest.skip("sq8h not support in CPU mode")
+        # if str(connect._cmd("mode")) == "CPU":
+        if request.param["index_type"] in index_cpu_not_support():
+            pytest.skip("sq8h not support in CPU mode")
         return request.param
 
     @pytest.fixture(
@@ -90,9 +90,9 @@ class TestSearchBase:
     )
     def get_simple_index(self, request, connect):
         import copy
-        if str(connect._cmd("mode")) == "CPU":
-            if request.param["index_type"] in index_cpu_not_support():
-                pytest.skip("sq8h not support in CPU mode")
+        # if str(connect._cmd("mode")) == "CPU":
+        if request.param["index_type"] in index_cpu_not_support():
+            pytest.skip("sq8h not support in CPU mode")
         return copy.deepcopy(request.param)
 
     @pytest.fixture(
@@ -1250,7 +1250,7 @@ class TestSearchDSL(object):
         collection_term = gen_unique_str("term")
         connect.create_collection(collection_term, term_fields)
         term_entities = add_field(entities, field_name="term")
-        ids = connect.bulk_insert(collection_term, term_entities)
+        ids = connect.insert(collection_term, term_entities)
         assert len(ids) == default_nb
         connect.flush([collection_term])
         count = connect.count_entities(collection_term) # count_entities is not impelmented
@@ -1695,9 +1695,9 @@ class TestSearchInvalid(object):
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")) == "CPU":
-            if request.param["index_type"] in index_cpu_not_support():
-                pytest.skip("sq8h not support in CPU mode")
+        # if str(connect._cmd("mode")) == "CPU":
+        if request.param["index_type"] in index_cpu_not_support():
+            pytest.skip("sq8h not support in CPU mode")
         return request.param
 
     # PASS
