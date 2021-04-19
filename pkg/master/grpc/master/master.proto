@@ -16,6 +16,13 @@ message Collection {
   repeated milvus.grpc.IndexParam indexes=7;
 }
 
+enum SegmentStatus {
+    OPENED = 0;
+    CLOSED = 1;
+    INDEXING = 2;
+    INDEXED = 3;
+}
+
 message Segment {
   uint64 segment_id=1;
   uint64 collection_id =2;
@@ -25,12 +32,16 @@ message Segment {
   uint64 open_timestamp=6;
   uint64 close_timestamp=7;
   string collection_name=8;
+  SegmentStatus status=9;
+  int64 rows=10;
 }
 
 message SegmentStat {
   uint64 segment_id=1;
   uint64 memory_size=2;
   float memory_rate=3;
+  SegmentStatus status=4;
+  int64 rows=5;
 }
 
 service Master {
