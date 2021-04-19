@@ -28,4 +28,3 @@ proxy:
       bufSize: 512
 
   maxNameLength: 255
-  maxFieldNum: 64

@@ -3,7 +3,6 @@ package master
 import (
 	"context"
 	"reflect"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -239,10 +238,6 @@ func TestMetaTable_DeletePartition(t *testing.T) {
 	assert.Equal(t, 1, len(meta.collName2ID))
 	assert.Equal(t, 1, len(meta.collID2Meta))
 	assert.Equal(t, 1, len(meta.segID2Meta))
-
-	// delete not exist
-	err = meta.DeletePartition(100, "not_exist")
-	assert.NotNil(t, err)
 }
 
 func TestMetaTable_Segment(t *testing.T) {
@@ -370,40 +365,4 @@ func TestMetaTable_UpdateSegment(t *testing.T) {
 	seg, err = meta.GetSegmentByID(200)
 	assert.Nil(t, err)
 	assert.Equal(t, seg.NumRows, int64(210))
-}
-
-func TestMetaTable_AddPartition_Limit(t *testing.T) {
-	Init()
-	Params.MaxPartitionNum = 256 // adding 4096 partitions is too slow
-	etcdAddr := Params.EtcdAddress
-
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
-	assert.Nil(t, err)
-	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
-
-	_, err = cli.Delete(context.TODO(), "/etcd/test/root", clientv3.WithPrefix())
-	assert.Nil(t, err)
-
-	meta, err := NewMetaTable(etcdKV)
-	assert.Nil(t, err)
-	defer meta.client.Close()
-
-	colMeta := pb.CollectionMeta{
-		ID: 100,
-		Schema: &schemapb.CollectionSchema{
-			Name: "coll1",
-		},
-		CreateTime:    0,
-		SegmentIDs:    []UniqueID{},
-		PartitionTags: []string{},
-	}
-	err = meta.AddCollection(&colMeta)
-	assert.Nil(t, err)
-
-	for i := 0; i < int(Params.MaxPartitionNum); i++ {
-		err := meta.AddPartition(100, "partition_"+strconv.Itoa(i))
-		assert.Nil(t, err)
-	}
-	err = meta.AddPartition(100, "partition_limit")
-	assert.NotNil(t, err)
 }
