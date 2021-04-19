@@ -11,7 +11,7 @@
 
 #include <iostream>
 #include "EasyAssert.h"
-#define BOOST_STACKTRACE_USE_BACKTRACE
+// #define BOOST_STACKTRACE_USE_BACKTRACE
 #include <boost/stacktrace.hpp>
 #include <sstream>
 
@@ -19,10 +19,14 @@ namespace milvus::impl {
 
 std::string
 EasyStackTrace() {
+    std::string output;
+#ifdef BOOST_STACKTRACE_USE_BACKTRACE
     auto stack_info = boost::stacktrace::stacktrace();
     std::ostringstream ss;
     ss << stack_info;
-    return ss.str();
+    output = std::string(ss.str());
+#endif
+    return output;
 }
 
 void
