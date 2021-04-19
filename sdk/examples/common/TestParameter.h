@@ -25,21 +25,12 @@ struct TestParameters {
     std::string port_;
     std::string collection_name_;
 
-    // collection parameters, only works when collection_name_ is empty
-    int64_t index_type_ = (int64_t)milvus::IndexType::IVFSQ8; // sq8
-    int64_t index_file_size_ = 1024; // 1024 MB
-    int64_t nlist_ = 16384;
-    int64_t metric_type_ = (int64_t)milvus::MetricType::L2; // L2
-    int64_t dimensions_ = 128;
-    int64_t row_count_ = 1; // 1 million
+    int64_t id_start_ = -1;
+    int64_t id_count_ = 0;
+    int64_t loop_ = 0;
 
     // query parameters
-    int64_t concurrency_ = 20; // 20 connections
-    int64_t query_count_ = 1000;
-    int64_t nq_ = 1;
     int64_t topk_ = 10;
-    int64_t nprobe_ = 16;
-    bool print_result_ = false;
     bool is_valid = true;
 };
 

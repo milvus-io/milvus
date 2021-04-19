@@ -160,8 +160,6 @@ github.com/eknkc/amber v0.0.0-20171010120322-cdade1c07385 h1:clC1lXBpe2kTj2VHdaI
 github.com/eknkc/amber v0.0.0-20171010120322-cdade1c07385/go.mod h1:0vRUJqYpeSZifjYj7uP3BG/gKcuzL9xWVV/Y+cK33KM=
 github.com/envoyproxy/data-plane-api v0.0.0-20200904023242-f4d8a28107ca h1:EvL1gA7uyPU2JVN93HbQwYOXyUjUJKYGStDN8eKD/Ss=
 github.com/envoyproxy/data-plane-api v0.0.0-20200909004014-2bb47b2b6fb0 h1:0edaQ8F7kgXmqz/tFjjl5rW/nAKUZ5Zg0Rv5vKiE6+U=
-github.com/envoyproxy/data-plane-api v0.0.0-20200923192109-df3147960318 h1:fdyLKTIP2g4GinIlHcG/8E1dDLgZIkyLIwV1mjvOxXk=
-github.com/envoyproxy/data-plane-api v0.0.0-20200924222414-c0b715aedb66 h1:c5a7hsMEcrARmUgB2N/gkgJDPCiNKXCXzTBXKvF3SVI=
 github.com/envoyproxy/go-control-plane v0.6.9/go.mod h1:SBwIajubJHhxtWwsL9s8ss4safvEdbitLhGGK48rN6g=
 github.com/envoyproxy/go-control-plane v0.9.0/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
 github.com/envoyproxy/go-control-plane v0.9.1-0.20191026205805-5f8ba28d4473/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
