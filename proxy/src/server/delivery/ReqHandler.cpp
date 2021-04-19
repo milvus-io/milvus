@@ -123,9 +123,8 @@ ReqHandler::ListPartitions(const ContextPtr& context, const std::string& collect
 }
 
 Status
-ReqHandler::CreateIndex(const ContextPtr& context, const std::string& collection_name, const std::string& field_name,
-                        const std::string& index_name, const milvus::json& json_params) {
-    BaseReqPtr req_ptr = CreateIndexReq::Create(context, collection_name, field_name, index_name, json_params);
+ReqHandler::CreateIndex(const ContextPtr& context, const ::milvus::grpc::IndexParam *request) {
+    BaseReqPtr req_ptr = CreateIndexReq::Create(context, request);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }

@@ -21,7 +21,24 @@ Status GrpcClient::CreateCollection(const milvus::grpc::Mapping &mapping) {
 
   if (!grpc_status.ok()) {
     std::cerr << "CreateHybridCollection gRPC failed!" << grpc_status.error_message() << std::endl;
-    return Status(grpc_status.error_code(), grpc_status.error_message());
+    return Status(grpc_status.error_code(), "CreateHybridCollection gRPC failed!" + grpc_status.error_message());
+  }
+
+  if (response.error_code() != grpc::SUCCESS) {
+    // TODO: LOG
+    return Status(response.error_code(), response.reason());
+  }
+  return Status::OK();
+}
+
+Status GrpcClient::CreateIndex(const milvus::grpc::IndexParam& request) {
+  ClientContext context;
+  ::milvus::grpc::Status response;
+  ::grpc::Status grpc_status = stub_->CreateIndex(&context, request, &response);
+
+  if (!grpc_status.ok()) {
+    std::cerr << "CreateIndex gRPC failed!" << grpc_status.error_message() << std::endl;
+    return Status(grpc_status.error_code(), "CreateIndex gRPC failed!" + grpc_status.error_message());
   }
 
   if (response.error_code() != grpc::SUCCESS) {

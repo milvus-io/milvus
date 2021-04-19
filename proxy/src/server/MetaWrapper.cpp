@@ -49,23 +49,28 @@ MetaWrapper &MetaWrapper::GetInstance() {
 }
 
 Status MetaWrapper::Init() {
-  etcd_root_path_ = config.etcd.rootpath();
-  segment_path_ = etcd_root_path_ + "segment/";
-  collection_path_ = etcd_root_path_ + "collection/";
+  try {
+    etcd_root_path_ = config.etcd.rootpath();
+    segment_path_ = etcd_root_path_ + "segment/";
+    collection_path_ = etcd_root_path_ + "collection/";
 
-  auto master_addr = config.master.address() + ":" + std::to_string(config.master.port());
-  master_client_ = std::make_shared<milvus::master::GrpcClient>(master_addr);
+    auto master_addr = config.master.address() + ":" + std::to_string(config.master.port());
+    master_client_ = std::make_shared<milvus::master::GrpcClient>(master_addr);
 
-  auto etcd_addr = config.etcd.address() + ":" + std::to_string(config.etcd.port());
-  etcd_client_ = std::make_shared<milvus::master::EtcdClient>(etcd_addr);
+    auto etcd_addr = config.etcd.address() + ":" + std::to_string(config.etcd.port());
+    etcd_client_ = std::make_shared<milvus::master::EtcdClient>(etcd_addr);
 
-  // init etcd watcher
-  auto f = [&](const etcdserverpb::WatchResponse &res) {
-    UpdateMeta(res);
-  };
-  watcher_ = std::make_shared<milvus::master::Watcher>(etcd_addr, segment_path_, f, true);
+    // init etcd watcher
+    auto f = [&](const etcdserverpb::WatchResponse &res) {
+      UpdateMeta(res);
+    };
+    watcher_ = std::make_shared<milvus::master::Watcher>(etcd_addr, segment_path_, f, true);
 
-  SyncMeta();
+    SyncMeta();
+  }
+  catch (const std::exception &e) {
+    return Status(DB_ERROR, "Init meta error");
+  }
 }
 
 std::shared_ptr<milvus::master::GrpcClient> MetaWrapper::MetaClient() {
@@ -113,6 +118,7 @@ uint64_t MetaWrapper::AskSegmentId(const std::string &collection_name, uint64_t 
         && segment_info.collection_name() == collection_name) {
       return segment_info.segment_id();
     }
+    return 0;
   }
   throw std::runtime_error("Can't find eligible segment");
 }

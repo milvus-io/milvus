@@ -24,9 +24,14 @@ class CreateIndexReq : public BaseReq {
     Create(const ContextPtr& context, const std::string& collection_name, const std::string& field_name,
            const std::string& index_name, const milvus::json& json_params);
 
+    static BaseReqPtr
+    Create(const ContextPtr& context, const ::milvus::grpc::IndexParam *request);
+
  protected:
     CreateIndexReq(const ContextPtr& context, const std::string& collection_name, const std::string& field_name,
                    const std::string& index_name, const milvus::json& json_params);
+
+    CreateIndexReq(const ContextPtr& context, const ::milvus::grpc::IndexParam *request);
 
     Status
     OnExecute() override;
@@ -36,6 +41,8 @@ class CreateIndexReq : public BaseReq {
     const std::string field_name_;
     const std::string index_name_;
     const milvus::json json_params_;
+
+    const ::milvus::grpc::IndexParam *request_;
 };
 
 }  // namespace server

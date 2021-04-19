@@ -18,6 +18,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "server/MetaWrapper.h"
 
 namespace milvus {
 namespace server {
@@ -32,16 +33,28 @@ CreateIndexReq::CreateIndexReq(const ContextPtr& context, const std::string& col
       json_params_(json_params) {
 }
 
+CreateIndexReq::CreateIndexReq(const ContextPtr& context, const ::milvus::grpc::IndexParam *request)
+    : BaseReq(context, ReqType::kCreateIndex),
+    request_(request){}
+
 BaseReqPtr
 CreateIndexReq::Create(const ContextPtr& context, const std::string& collection_name, const std::string& field_name,
                        const std::string& index_name, const milvus::json& json_params) {
     return std::shared_ptr<BaseReq>(new CreateIndexReq(context, collection_name, field_name, index_name, json_params));
 }
 
+BaseReqPtr
+CreateIndexReq::Create(const ContextPtr& context, const ::milvus::grpc::IndexParam *request){
+  return std::shared_ptr<BaseReq>(new CreateIndexReq(context, request));
+}
+
 Status
 CreateIndexReq::OnExecute() {
-
-    return Status::OK();
+  auto status = MetaWrapper::GetInstance().MetaClient()->CreateIndex(*request_);
+  if (status.ok()){
+    status = MetaWrapper::GetInstance().SyncMeta();
+  }
+  return status;
 }
 
 

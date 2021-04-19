@@ -17,9 +17,12 @@ class MsgProducer {
 
   Result createProducer(const std::string &topic);
   Result send(const Message &msg);
+  void sendAsync(const Message &msg, pulsar::SendCallback callback);
   Result send(const std::string &msg);
   Result send(const std::string &msg, const int64_t partitioned_key);
+  void sendAsync(const std::string &msg, int64_t partitioned_key, pulsar::SendCallback callback);
   Result send(milvus::grpc::InsertOrDeleteMsg &msg);
+  void sendAsync(milvus::grpc::InsertOrDeleteMsg &msg, pulsar::SendCallback callback);
   Result send(milvus::grpc::SearchMsg &msg);
 //  Result send(milvus::grpc::EntityIdentity &msg);
   Result send(milvus::grpc::TimeSyncMsg & msg);
