@@ -3,7 +3,7 @@ package write_node
 import (
 	"context"
 	"fmt"
-	msgpb "github.com/czs007/suvlim/pkg/message"
+	msgpb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	storage "github.com/czs007/suvlim/storage/pkg"
 	"github.com/czs007/suvlim/storage/pkg/types"
 	"github.com/czs007/suvlim/writer/message_client"
@@ -85,6 +85,7 @@ func (wn *WriteNode) DeleteBatchData(ctx context.Context, data []*msgpb.InsertOr
 		segmentInfo := msgpb.Key2SegMsg{
 			Uid: data[i].Uid,
 			SegmentId: segmentIds,
+			Timestamp: data[i].Timestamp,
 		}
 		wn.MessageClient.Send(ctx, segmentInfo)
 	}
