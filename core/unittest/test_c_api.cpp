@@ -238,7 +238,7 @@ TEST(CApiTest, BuildIndexTest) {
     CQueryInfo queryInfo{1, 10, "fakevec"};
 
     auto sea_res = Search(
-        segment, queryInfo, 20, query_raw_data.data(), DIM, result_ids, result_distances);
+        segment, queryInfo, 1, query_raw_data.data(), DIM, result_ids, result_distances);
     assert(sea_res == 0);
 
     DeleteCollection(collection);
