@@ -20,7 +20,7 @@ type (
 
 	TimeTickImpl struct {
 		ttBarrier TimeTickBarrier
-		channel   msgstream.MsgStream
+		channels  []msgstream.MsgStream
 		wg        sync.WaitGroup
 		ctx       context.Context
 		cancel    context.CancelFunc
@@ -58,17 +58,19 @@ func (tt *TimeTickImpl) Start() error {
 					},
 				}
 				msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
-				err = tt.channel.Produce(&msgPack)
-				if err != nil {
-					log.Println("send time tick error: ", err)
-				} else {
+				for _, channel := range tt.channels {
+					err = channel.Broadcast(&msgPack)
+					if err != nil {
+						log.Println("send time tick error: ", err)
+					}
 				}
-				log.Println("send to master: ", current)
 			}
 		}
 	}()
 
-	tt.channel.Start()
+	for _, channel := range tt.channels {
+		channel.Start()
+	}
 
 	err := tt.ttBarrier.Start()
 	if err != nil {
@@ -79,13 +81,15 @@ func (tt *TimeTickImpl) Start() error {
 }
 
 func (tt *TimeTickImpl) Close() {
-	tt.channel.Close()
+	for _, channel := range tt.channels {
+		channel.Close()
+	}
 	tt.ttBarrier.Close()
 	tt.cancel()
 	tt.wg.Wait()
 }
 
-func newTimeTick(ctx context.Context, ttBarrier TimeTickBarrier, channel msgstream.MsgStream) TimeTick {
+func newTimeTick(ctx context.Context, ttBarrier TimeTickBarrier, channels ...msgstream.MsgStream) TimeTick {
 	ctx1, cancel := context.WithCancel(ctx)
-	return &TimeTickImpl{ctx: ctx1, cancel: cancel, ttBarrier: ttBarrier, channel: channel}
+	return &TimeTickImpl{ctx: ctx1, cancel: cancel, ttBarrier: ttBarrier, channels: channels}
 }

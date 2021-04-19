@@ -137,7 +137,3 @@ func (c *Client) GetSegmentInfoChannel() (string, error) {
 func (c *Client) GetCount(req *datapb.CollectionCountRequest) (*datapb.CollectionCountResponse, error) {
 	return c.grpcClient.GetCount(context.Background(), req)
 }
-
-func (c *Client) GetSegmentInfo(req *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error) {
-	return c.grpcClient.GetSegmentInfo(context.Background(), req)
-}

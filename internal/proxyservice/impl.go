@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -108,6 +109,16 @@ func (s *ServiceImpl) Init() error {
 	serviceTimeTickMsgStream.CreatePulsarProducers([]string{Params.ServiceTimeTickChannel})
 	log.Println("create service time tick producer channel: ", []string{Params.ServiceTimeTickChannel})
 
+	channels := make([]string, Params.InsertChannelNum)
+	var i int64 = 0
+	for ; i < Params.InsertChannelNum; i++ {
+		channels[i] = Params.InsertChannelPrefixName + strconv.FormatInt(i, 10)
+	}
+	insertTickMsgStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024, 1024, dispatcherFactory.NewUnmarshalDispatcher())
+	insertTickMsgStream.SetPulsarClient(Params.PulsarAddress)
+	insertTickMsgStream.CreatePulsarProducers(channels)
+	log.Println("create service time tick producer channel: ", channels)
+
 	nodeTimeTickMsgStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024, 1024, dispatcherFactory.NewUnmarshalDispatcher())
 	nodeTimeTickMsgStream.SetPulsarClient(Params.PulsarAddress)
 	nodeTimeTickMsgStream.CreatePulsarConsumers(Params.NodeTimeTickChannel,
@@ -116,7 +127,7 @@ func (s *ServiceImpl) Init() error {
 
 	ttBarrier := newSoftTimeTickBarrier(s.ctx, nodeTimeTickMsgStream, []UniqueID{0}, 10)
 	log.Println("create soft time tick barrier ...")
-	s.tick = newTimeTick(s.ctx, ttBarrier, serviceTimeTickMsgStream)
+	s.tick = newTimeTick(s.ctx, ttBarrier, serviceTimeTickMsgStream, insertTickMsgStream)
 	log.Println("create time tick ...")
 
 	s.stateCode = internalpb2.StateCode_HEALTHY
