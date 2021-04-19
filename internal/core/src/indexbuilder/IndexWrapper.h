@@ -59,9 +59,6 @@ class IndexWrapper {
     std::string
     get_index_type();
 
-    std::string
-    get_metric_type();
-
     template <typename T>
     std::optional<T>
     get_config_by_name(std::string name);
