@@ -206,8 +206,8 @@ func (ms *PulsarMsgStream) Consume() *MsgPack {
 }
 
 func (ms *PulsarMsgStream) bufMsgPackToChannel() {
-	tsMsgList := make([]*TsMsg, 0)
 	for {
+		tsMsgList := make([]*TsMsg, 0)
 		for i := 0; i < len(ms.consumers); i++ {
 			consumerChan := (*ms.consumers[i]).Chan()
 			chanLen := len(consumerChan)

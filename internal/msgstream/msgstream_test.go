@@ -162,7 +162,7 @@ func TestStream_Insert(t *testing.T) {
 
 	msgPack := MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 0, 0))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 3, 3))
 
 	//run stream
 	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, internalPb.MsgType_kInsert, internalPb.MsgType_kInsert, false)
@@ -227,7 +227,7 @@ func TestStream_TimeTick(t *testing.T) {
 func TestStream_BroadCast(t *testing.T) {
 	pulsarAddress := "pulsar://localhost:6650"
 	producerChannels := []string{"insert1", "insert2"}
-	consumerChannels := []string{"insert2", "insert2"}
+	consumerChannels := []string{"insert1", "insert2"}
 	consumerSubName := "subInsert"
 
 	msgPack := MsgPack{}
