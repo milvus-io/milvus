@@ -48,13 +48,14 @@ type Option struct {
 	PulsarDMChannels  []string
 	PulsarK2SChannels []string
 
-	DefaultRecordSize     int64
-	MinimumAssignSize     int64
-	SegmentThreshold      float64
-	SegmentExpireDuration int64
-	NumOfChannel          int
-	NumOfQueryNode        int
-	StatsChannels         string
+	DefaultRecordSize      int64
+	MinimumAssignSize      int64
+	SegmentThreshold       float64
+	SegmentThresholdFactor float64
+	SegmentExpireDuration  int64
+	NumOfChannel           int
+	NumOfQueryNode         int
+	StatsChannels          string
 }
 
 type Master struct {
