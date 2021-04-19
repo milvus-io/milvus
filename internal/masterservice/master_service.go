@@ -95,7 +95,7 @@ type Core struct {
 
 	//get binlog file path from data service,
 	GetBinlogFilePathsFromDataServiceReq func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
-	GetNumRowsReq                        func(segID typeutil.UniqueID) (int64, error)
+	GetNumRowsReq                        func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error)
 
 	//call index builder's client to build index, return build id
 	BuildIndexReq func(ctx context.Context, binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error)
@@ -343,12 +343,14 @@ func (c *Core) startSegmentFlushCompletedLoop() {
 				fieldSch, err := GetFieldSchemaByID(coll, f.FiledID)
 				if err == nil {
 					t := &CreateIndexTask{
-						core:        c,
-						segmentID:   seg,
-						indexName:   idxInfo.IndexName,
-						indexID:     idxInfo.IndexID,
-						fieldSchema: fieldSch,
-						indexParams: idxInfo.IndexParams,
+						ctx:               c.ctx,
+						core:              c,
+						segmentID:         seg,
+						indexName:         idxInfo.IndexName,
+						indexID:           idxInfo.IndexID,
+						fieldSchema:       fieldSch,
+						indexParams:       idxInfo.IndexParams,
+						isFromFlushedChan: true,
 					}
 					c.indexTaskQueue <- t
 				}
@@ -659,7 +661,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 		return nil, fmt.Errorf("binlog file not exist, segment id = %d, field id = %d", segID, fieldID)
 	}
 
-	c.GetNumRowsReq = func(segID typeutil.UniqueID) (int64, error) {
+	c.GetNumRowsReq = func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
 		ts, err := c.tsoAllocator.Alloc(1)
 		if err != nil {
 			return 0, err
@@ -683,7 +685,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 			log.Debug("get segment info empty")
 			return 0, nil
 		}
-		if segInfo.Infos[0].FlushedTime == 0 {
+		if !isFromFlushedChan && segInfo.Infos[0].State != commonpb.SegmentState_Flushed {
 			log.Debug("segment id not flushed", zap.Int64("segment id", segID))
 			return 0, nil
 		}

@@ -112,7 +112,7 @@ func TestGrpcService(t *testing.T) {
 	core.GetBinlogFilePathsFromDataServiceReq = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
 		return []string{"file1", "file2", "file3"}, nil
 	}
-	core.GetNumRowsReq = func(segID typeutil.UniqueID) (int64, error) {
+	core.GetNumRowsReq = func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
 		return cms.Params.MinSegmentSizeToEnableIndex, nil
 	}
 

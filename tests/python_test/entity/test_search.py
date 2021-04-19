@@ -287,8 +287,7 @@ class TestSearchBase:
             assert res[0]._distances[0] < epsilon
             assert check_id_result(res[0], ids[0])
 
-    @pytest.mark.tags("0331")
-    # @pytest.mark.skip("r0.3-test")
+    #@pytest.mark.tags("0331")
     def test_search_after_index_different_metric_type(self, connect, collection, get_simple_index):
         '''
         target: test search with different metric_type

@@ -93,8 +93,18 @@ func (d *dataMock) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInf
 			{
 				FlushedTime: 100,
 				NumRows:     Params.MinSegmentSizeToEnableIndex,
+				State:       commonpb.SegmentState_Flushed,
 			},
 		},
+	}, nil
+}
+
+func (d *dataMock) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		Value: fmt.Sprintf("segment-info-channel-%d", d.randVal),
 	}, nil
 }
 
@@ -111,15 +121,6 @@ func (q *queryMock) ReleaseCollection(ctx context.Context, req *querypb.ReleaseC
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
-	}, nil
-}
-
-func (d *dataMock) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Value: fmt.Sprintf("segment-info-channel-%d", d.randVal),
 	}, nil
 }
 
