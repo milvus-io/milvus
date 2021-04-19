@@ -158,7 +158,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 	}
 	log.Debug("watchDmChannelsTask Enqueue done", zap.Any("collectionID", in.CollectionID))
 
-	go func() {
+	func() {
 		err = dct.WaitToFinish()
 		if err != nil {
 			log.Error(err.Error())
@@ -194,7 +194,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 	}
 	log.Debug("loadSegmentsTask Enqueue done", zap.Any("collectionID", in.CollectionID))
 
-	go func() {
+	func() {
 		err = dct.WaitToFinish()
 		if err != nil {
 			log.Error(err.Error())
@@ -230,7 +230,7 @@ func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.Releas
 	}
 	log.Debug("releaseCollectionTask Enqueue done", zap.Any("collectionID", in.CollectionID))
 
-	go func() {
+	func() {
 		err = dct.WaitToFinish()
 		if err != nil {
 			log.Error(err.Error())
@@ -266,7 +266,7 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, in *queryPb.Releas
 	}
 	log.Debug("releasePartitionsTask Enqueue done", zap.Any("collectionID", in.CollectionID))
 
-	go func() {
+	func() {
 		err = dct.WaitToFinish()
 		if err != nil {
 			log.Error(err.Error())
