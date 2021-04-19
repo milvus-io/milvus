@@ -2,11 +2,15 @@ package etcdkv
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"math/rand"
 	"path"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/zilliztech/milvus-distributed/internal/util/performance"
 	"go.uber.org/zap"
 
 	"go.etcd.io/etcd/clientv3"
@@ -23,10 +27,12 @@ type EtcdKV struct {
 
 // NewEtcdKV creates a new etcd kv.
 func NewEtcdKV(client *clientv3.Client, rootPath string) *EtcdKV {
-	return &EtcdKV{
+	kv := &EtcdKV{
 		client:   client,
 		rootPath: rootPath,
 	}
+	go kv.performanceTest(false, 16<<20)
+	return kv
 }
 
 func (kv *EtcdKV) Close() {
@@ -227,4 +233,47 @@ func (kv *EtcdKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals
 
 	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
 	return err
+}
+
+type Case struct {
+	Name      string
+	BlockSize int     // unit: byte
+	Speed     float64 // unit: MB/s
+}
+
+type Test struct {
+	Name  string
+	Cases []Case
+}
+
+func (kv *EtcdKV) performanceTest(toFile bool, totalBytes int) {
+	r := rand.Int()
+	results := Test{Name: "etcd performance"}
+	for i := 0; i < 10; i += 2 {
+		data := performance.GenerateData(2*1024, float64(9-i))
+		startT := time.Now()
+		for j := 0; j < totalBytes/(len(data)); j++ {
+			kv.Save(fmt.Sprintf("performance-rand%d-test-%d-%d", r, i, j), data)
+		}
+		tc := time.Since(startT)
+		results.Cases = append(results.Cases, Case{Name: "write", BlockSize: len(data), Speed: 16.0 / tc.Seconds()})
+
+		startT = time.Now()
+		for j := 0; j < totalBytes/(len(data)); j++ {
+			kv.Load(fmt.Sprintf("performance-rand%d-test-%d-%d", r, i, j))
+		}
+		tc = time.Since(startT)
+		results.Cases = append(results.Cases, Case{Name: "read", BlockSize: len(data), Speed: 16.0 / tc.Seconds()})
+	}
+	mb, err := json.Marshal(results)
+	if err != nil {
+		return
+	}
+	log.Debug(string(mb))
+	if toFile {
+		err = ioutil.WriteFile(fmt.Sprintf("./%d", r), mb, 0644)
+		if err != nil {
+			return
+		}
+	}
 }

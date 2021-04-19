@@ -19,7 +19,7 @@ class TestConnect:
         else:
             return False
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_close(self, connect):
         '''
         target: test disconnect
@@ -30,7 +30,7 @@ class TestConnect:
         with pytest.raises(Exception) as e:
             connect.list_collections()
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_close_repeatedly(self, dis_connect, args):
         '''
         target: test disconnect repeatedly
@@ -40,7 +40,7 @@ class TestConnect:
         with pytest.raises(Exception) as e:
             dis_connect.close()
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_connect_correct_ip_port(self, args):
         '''
         target: test connect with correct ip and port value
@@ -61,7 +61,7 @@ class TestConnect:
         # assert milvus.connected()
 
     @pytest.mark.timeout(CONNECT_TIMEOUT)
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_connect_wrong_ip_null(self, args):
         '''
         target: test connect with wrong ip value
@@ -72,7 +72,7 @@ class TestConnect:
         with pytest.raises(Exception) as e:
             get_milvus(ip, args["port"], args["handler"])
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_connect_uri(self, args):
         '''
         target: test connect with correct uri
@@ -82,7 +82,7 @@ class TestConnect:
         uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
         milvus = get_milvus(args["ip"], args["port"], uri=uri_value, handler=args["handler"])
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_connect_uri_null(self, args):
         '''
         target: test connect with null uri
@@ -96,7 +96,7 @@ class TestConnect:
             with pytest.raises(Exception) as e:
                 milvus = get_milvus(None, None, uri=uri_value, handler=args["handler"])
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_connect_with_multiprocess(self, args):
         '''
         target: test uri connect with multiprocess
@@ -113,7 +113,7 @@ class TestConnect:
             for future in concurrent.futures.as_completed(future_results):
                 future.result()
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_connect_repeatedly(self, args):
         '''
         target: test connect repeatedly
@@ -173,7 +173,7 @@ class TestConnectIPInvalid(object):
 
     @pytest.mark.level(2)
     @pytest.mark.timeout(CONNECT_TIMEOUT)
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_connect_with_invalid_ip(self, args, get_invalid_ip):
         ip = get_invalid_ip
         with pytest.raises(Exception) as e:
@@ -194,7 +194,7 @@ class TestConnectPortInvalid(object):
 
     @pytest.mark.level(2)
     @pytest.mark.timeout(CONNECT_TIMEOUT)
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_connect_with_invalid_port(self, args, get_invalid_port):
         '''
         target: test ip:port connect with invalid port value
@@ -220,7 +220,7 @@ class TestConnectURIInvalid(object):
 
     @pytest.mark.level(2)
     @pytest.mark.timeout(CONNECT_TIMEOUT)
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_connect_with_invalid_uri(self, get_invalid_uri, args):
         '''
         target: test uri connect with invalid uri value

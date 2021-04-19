@@ -58,7 +58,7 @@ class TestGetCollectionStats:
     def insert_count(self, request):
         yield request.param
 
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_get_collection_stats_name_not_existed(self, connect, collection):
         '''
         target: get collection stats where collection name does not exist
@@ -70,7 +70,7 @@ class TestGetCollectionStats:
             connect.get_collection_stats(collection_name)
 
     @pytest.mark.level(2)
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_get_collection_stats_name_invalid(self, connect, get_invalid_collection_name):
         '''
         target: get collection stats where collection name is invalid
@@ -81,7 +81,7 @@ class TestGetCollectionStats:
         with pytest.raises(Exception) as e:
             connect.get_collection_stats(collection_name)
 
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_get_collection_stats_empty(self, connect, collection):
         '''
         target: get collection stats where no entity in collection
@@ -92,7 +92,7 @@ class TestGetCollectionStats:
         connect.flush([collection])
         assert stats[row_count] == 0
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_get_collection_stats_without_connection(self, collection, dis_connect):
         '''
         target: test count_entities, without connection
@@ -102,7 +102,7 @@ class TestGetCollectionStats:
         with pytest.raises(Exception) as e:
             dis_connect.get_collection_stats(collection)
 
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_get_collection_stats_batch(self, connect, collection):
         '''
         target: get row count with collection_stats
@@ -115,7 +115,7 @@ class TestGetCollectionStats:
         stats = connect.get_collection_stats(collection)
         assert int(stats[row_count]) == default_nb
 
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_get_collection_stats_single(self, connect, collection):
         '''
         target: get row count with collection_stats
@@ -190,7 +190,7 @@ class TestGetCollectionStats:
         # pdb.set_trace()
         assert compact_before == compact_after
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_get_collection_stats_partition(self, connect, collection):
         '''
         target: get partition info in a collection
@@ -204,7 +204,7 @@ class TestGetCollectionStats:
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == default_nb
 
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_get_collection_stats_partitions(self, connect, collection):
         '''
         target: get partition info in a collection
@@ -227,7 +227,7 @@ class TestGetCollectionStats:
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == default_nb * 3
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_get_collection_stats_partitions_A(self, connect, collection, insert_count):
         '''
         target: test collection rows_count is correct or not
@@ -244,7 +244,7 @@ class TestGetCollectionStats:
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == insert_count
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_get_collection_stats_partitions_B(self, connect, collection, insert_count):
         '''
         target: test collection rows_count is correct or not
@@ -261,7 +261,7 @@ class TestGetCollectionStats:
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == insert_count
 
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_get_collection_stats_partitions_C(self, connect, collection, insert_count):
         '''
         target: test collection rows_count is correct or not
@@ -279,7 +279,7 @@ class TestGetCollectionStats:
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == insert_count*2
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_get_collection_stats_partitions_D(self, connect, collection, insert_count):
         '''
         target: test collection rows_count is correct or not
@@ -298,7 +298,7 @@ class TestGetCollectionStats:
         assert stats[row_count] == insert_count*2
 
     # TODO: assert metric type in stats response
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_get_collection_stats_after_index_created(self, connect, collection, get_simple_index):
         '''
         target: test collection info after index created
@@ -312,7 +312,7 @@ class TestGetCollectionStats:
         assert stats[row_count] == default_nb
 
     # TODO: assert metric type in stats response
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_get_collection_stats_after_index_created_ip(self, connect, collection, get_simple_index):
         '''
         target: test collection info after index created
@@ -329,7 +329,7 @@ class TestGetCollectionStats:
         assert stats[row_count] == default_nb
 
     # TODO: assert metric type in stats response
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_get_collection_stats_after_index_created_jac(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test collection info after index created
@@ -342,7 +342,7 @@ class TestGetCollectionStats:
         stats = connect.get_collection_stats(binary_collection)
         assert stats[row_count] == default_nb
 
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_get_collection_stats_after_create_different_index(self, connect, collection):
         '''
         target: test collection info after index created repeatedly
@@ -357,7 +357,7 @@ class TestGetCollectionStats:
             stats = connect.get_collection_stats(collection)
             assert stats[row_count] == default_nb
 
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_collection_count_multi_collections(self, connect):
         '''
         target: test collection rows_count is correct or not with multiple collections of L2
@@ -379,7 +379,7 @@ class TestGetCollectionStats:
             connect.drop_collection(collection_list[i])
 
     @pytest.mark.level(2)
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_collection_count_multi_collections_indexed(self, connect):
         '''
         target: test collection rows_count is correct or not with multiple collections of L2

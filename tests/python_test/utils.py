@@ -1005,3 +1005,9 @@ class MyThread(threading.Thread):
         super(MyThread, self).join()
         if self.exc:
             raise self.exc
+
+
+class CaseLabel:
+    tags_0331 = "0331"
+    tags_l1 = "l1"
+    tags_smoke = "smoke"

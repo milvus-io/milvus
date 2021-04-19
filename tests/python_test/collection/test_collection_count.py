@@ -33,7 +33,7 @@ class TestCollectionCount:
     def get_simple_index(self, request, connect):
         return request.param
 
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_collection_count(self, connect, collection, insert_count):
         '''
         target: test collection rows_count is correct or not
@@ -48,7 +48,7 @@ class TestCollectionCount:
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == insert_count
 
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_collection_count_partition(self, connect, collection, insert_count):
         '''
         target: test collection rows_count is correct or not
@@ -138,7 +138,7 @@ class TestCollectionCount:
     #     stats = connect.get_collection_stats(collection)
     #     assert stats[row_count] == insert_count * 2
 
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_collection_count_after_index_created(self, connect, collection, get_simple_index, insert_count):
         '''
         target: test count_entities, after index have been created
@@ -152,7 +152,7 @@ class TestCollectionCount:
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == insert_count
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_count_without_connection(self, collection, dis_connect):
         '''
         target: test count_entities, without connection
@@ -162,7 +162,7 @@ class TestCollectionCount:
         with pytest.raises(Exception) as e:
             dis_connect.count_entities(collection)
 
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_collection_count_no_vectors(self, connect, collection):
         '''
         target: test collection rows_count is correct or not, if collection is empty
@@ -202,7 +202,7 @@ class TestCollectionCountIP:
         request.param.update({"metric_type": "IP"})
         return request.param
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_collection_count_after_index_created(self, connect, collection, get_simple_index, insert_count):
         '''
         target: test count_entities, after index have been created
@@ -265,7 +265,7 @@ class TestCollectionCountBinary:
         request.param["metric_type"] = "SUPERSTRUCTURE"
         return request.param
 
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_collection_count(self, connect, binary_collection, insert_count):
         '''
         target: test collection rows_count is correct or not
@@ -280,7 +280,7 @@ class TestCollectionCountBinary:
         stats = connect.get_collection_stats(binary_collection)
         assert stats[row_count] == insert_count
 
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_collection_count_partition(self, connect, binary_collection, insert_count):
         '''
         target: test collection rows_count is correct or not
@@ -373,7 +373,7 @@ class TestCollectionCountBinary:
     #     assert stats[row_count] == insert_count * 2
 
     # TODO: need to update and enable
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_collection_count_after_index_created(self, connect, binary_collection, get_jaccard_index, insert_count):
         '''
         target: test count_entities, after index have been created
@@ -388,7 +388,7 @@ class TestCollectionCountBinary:
         assert stats[row_count] == insert_count
 
     # TODO: need to update and enable
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_collection_count_after_index_created_A(self, connect, binary_collection, get_hamming_index, insert_count):
         '''
         target: test count_entities, after index have been created
@@ -403,7 +403,7 @@ class TestCollectionCountBinary:
         stats = connect.get_collection_stats(binary_collection)
         assert stats[row_count] == insert_count
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_collection_count_no_entities(self, connect, binary_collection):
         '''
         target: test collection rows_count is correct or not, if collection is empty
@@ -431,7 +431,7 @@ class TestCollectionMultiCollections:
     def insert_count(self, request):
         yield request.param
 
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_collection_count_multi_collections_l2(self, connect, insert_count):
         '''
         target: test collection rows_count is correct or not with multiple collections of L2
@@ -453,7 +453,7 @@ class TestCollectionMultiCollections:
             assert stats[row_count] == insert_count
 
     @pytest.mark.level(2)
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_collection_count_multi_collections_binary(self, connect, binary_collection, insert_count):
         '''
         target: test collection rows_count is correct or not with multiple collections of JACCARD
@@ -476,7 +476,7 @@ class TestCollectionMultiCollections:
             assert stats[row_count] == insert_count
 
     @pytest.mark.level(2)
-    @pytest.mark.tags("0331", "l1")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_collection_count_multi_collections_mix(self, connect):
         '''
         target: test collection rows_count is correct or not with multiple collections of JACCARD
