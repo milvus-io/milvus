@@ -1,16 +1,26 @@
 package datanode
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	memkv "github.com/zilliztech/milvus-distributed/internal/kv/mem"
+	"github.com/stretchr/testify/require"
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
+	"go.etcd.io/etcd/clientv3"
 )
 
-func TestMetaTable_SegmentFlush(t *testing.T) {
+func TestMetaTable_all(t *testing.T) {
 
-	kvMock := memkv.NewMemoryKV()
-	meta, err := NewMetaTable(kvMock)
+	etcdAddr := Params.EtcdAddress
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	require.NoError(t, err)
+	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/meta/root")
+
+	_, err = cli.Delete(context.TODO(), "/etcd/test/meta/root", clientv3.WithPrefix())
+	require.NoError(t, err)
+
+	meta, err := NewMetaTable(etcdKV)
 	assert.NoError(t, err)
 	defer meta.client.Close()
 
@@ -55,36 +65,7 @@ func TestMetaTable_SegmentFlush(t *testing.T) {
 			ret)
 	})
 
-	t.Run("TestMetaTable_CompleteFlush", func(t *testing.T) {
-
-		var segmentID UniqueID = 401
-
-		err := meta.addSegmentFlush(segmentID)
-		assert.NoError(t, err)
-
-		ret, err := meta.checkFlushComplete(segmentID)
-		assert.NoError(t, err)
-		assert.Equal(t, false, ret)
-
-		meta.CompleteFlush(segmentID)
-
-		ret, err = meta.checkFlushComplete(segmentID)
-		assert.NoError(t, err)
-		assert.Equal(t, true, ret)
-	})
-
-}
-
-func TestMetaTable_DDLFlush(t *testing.T) {
-	kvMock := memkv.NewMemoryKV()
-	meta, err := NewMetaTable(kvMock)
-	assert.NoError(t, err)
-	defer meta.client.Close()
-
 	t.Run("TestMetaTable_AppendDDLBinlogPaths", func(t *testing.T) {
-
-		assert.False(t, meta.hasDDLFlushMeta(301))
-		assert.False(t, meta.hasDDLFlushMeta(302))
 
 		collID2Paths := map[UniqueID][]string{
 			301: {"a", "b", "c"},
@@ -103,8 +84,24 @@ func TestMetaTable_DDLFlush(t *testing.T) {
 			assert.Nil(t, err)
 			assert.Equal(t, map[UniqueID][]string{k: v}, ret)
 		}
-
-		assert.True(t, meta.hasDDLFlushMeta(301))
-		assert.True(t, meta.hasDDLFlushMeta(302))
 	})
+
+	t.Run("TestMetaTable_CompleteFlush", func(t *testing.T) {
+
+		var segmentID UniqueID = 401
+
+		err := meta.addSegmentFlush(segmentID)
+		assert.NoError(t, err)
+
+		ret, err := meta.checkFlushComplete(segmentID)
+		assert.NoError(t, err)
+		assert.Equal(t, false, ret)
+
+		meta.CompleteFlush(segmentID)
+
+		ret, err = meta.checkFlushComplete(segmentID)
+		assert.NoError(t, err)
+		assert.Equal(t, true, ret)
+	})
+
 }

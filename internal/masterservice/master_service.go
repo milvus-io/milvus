@@ -247,9 +247,7 @@ func (c *Core) checkInit() error {
 	if c.DataNodeSegmentFlushCompletedChan == nil {
 		return errors.Errorf("DataNodeSegmentFlushCompletedChan is nil")
 	}
-	log.Printf("master node id = %d", Params.NodeID)
-	log.Printf("master dd channel name = %s", Params.DdChannel)
-	log.Printf("master time ticke channel name = %s", Params.TimeTickChannel)
+	log.Printf("master node id = %d\n", Params.NodeID)
 	return nil
 }
 
@@ -609,7 +607,6 @@ func (c *Core) SetProxyService(s ProxyServiceInterface) error {
 		return err
 	}
 	Params.ProxyTimeTickChannel = rsp
-	log.Printf("proxy time tick channel name = %s", Params.ProxyTimeTickChannel)
 
 	c.InvalidateCollectionMetaCache = func(ts typeutil.Timestamp, dbName string, collectionName string) error {
 		err := s.InvalidateCollectionMetaCache(&proxypb.InvalidateCollMetaCacheRequest{
@@ -636,8 +633,6 @@ func (c *Core) SetDataService(s DataServiceInterface) error {
 		return err
 	}
 	Params.DataServiceSegmentChannel = rsp
-	log.Printf("data service segment channel name = %s", Params.DataServiceSegmentChannel)
-
 	c.GetBinlogFilePathsFromDataServiceReq = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
 		ts, err := c.tsoAllocator.Alloc(1)
 		if err != nil {

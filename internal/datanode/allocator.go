@@ -24,7 +24,7 @@ func newAllocatorImpl(s MasterServiceInterface) *allocatorImpl {
 func (alloc *allocatorImpl) allocID() (UniqueID, error) {
 	resp, err := alloc.masterService.AllocID(&masterpb.IDRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kRequestID,
+			MsgType:   commonpb.MsgType_kShowCollections,
 			MsgID:     1, // GOOSE TODO
 			Timestamp: 0, // GOOSE TODO
 			SourceID:  Params.NodeID,
