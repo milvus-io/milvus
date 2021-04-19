@@ -60,6 +60,7 @@ func refreshChannelNames() {
 	Params.InsertChannelNames = makeNewChannalNames(Params.InsertChannelNames, suffix)
 	Params.K2SChannelNames = makeNewChannalNames(Params.K2SChannelNames, suffix)
 	Params.ProxyTimeTickChannelNames = makeNewChannalNames(Params.ProxyTimeTickChannelNames, suffix)
+	Params.QueryNodeStatsChannelName = Params.QueryNodeStatsChannelName + suffix
 	Params.MetaRootPath = "/test" + strconv.FormatInt(rand.Int63n(100), 10) + "/root/kv"
 }
 
