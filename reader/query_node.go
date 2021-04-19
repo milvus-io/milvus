@@ -165,34 +165,47 @@ func (node *QueryNode) InitQueryNodeCollection() {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 func (node *QueryNode) RunInsertDelete() {
+	var count = 0
+	var start time.Time
 	for {
-		time.Sleep(2 * 1000 * time.Millisecond)
+		//time.Sleep(2 * 1000 * time.Millisecond)
 		node.QueryNodeDataInit()
 		// TODO: get timeRange from message client
 		var timeRange = TimeRange{0, 0}
 		var msgLen = node.PrepareBatchMsg()
-		fmt.Println("PrepareBatchMsg Done, Insert len = ", msgLen[0])
+		//fmt.Println("PrepareBatchMsg Done, Insert len = ", msgLen[0])
 		if msgLen[0] == 0 {
-			fmt.Println("0 msg found")
+			//fmt.Println("0 msg found")
 			continue
 		}
+		if count == 0 {
+			start = time.Now()
+		}
+		count+=msgLen[0]
 		node.MessagesPreprocess(node.messageClient.InsertOrDeleteMsg, timeRange)
-		fmt.Println("MessagesPreprocess Done")
+		//fmt.Println("MessagesPreprocess Done")
 		node.WriterDelete()
 		node.PreInsertAndDelete()
-		fmt.Println("PreInsertAndDelete Done")
+		//fmt.Println("PreInsertAndDelete Done")
 		node.DoInsertAndDelete()
-		fmt.Println("DoInsertAndDelete Done")
+		//fmt.Println("DoInsertAndDelete Done")
 		node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
-		fmt.Print("UpdateSearchTimeSync Done\n\n\n")
+		//fmt.Print("UpdateSearchTimeSync Done\n\n\n")
+		if count == 100000 - 1 {
+			elapsed := time.Since(start)
+			fmt.Println("Query node insert 10 × 10000 time:", elapsed)
+		}
 	}
 }
 
 func (node *QueryNode) RunSearch() {
 	for {
-		time.Sleep(2 * 1000 * time.Millisecond)
+		//time.Sleep(2 * 1000 * time.Millisecond)
+
+		start := time.Now()
+
 		if len(node.messageClient.GetSearchChan()) <= 0 {
-			fmt.Println("null Search")
+			//fmt.Println("null Search")
 			continue
 		}
 		node.messageClient.SearchMsg = node.messageClient.SearchMsg[:0]
@@ -200,6 +213,9 @@ func (node *QueryNode) RunSearch() {
 		node.messageClient.SearchMsg = append(node.messageClient.SearchMsg, msg)
 		fmt.Println("Do Search...")
 		node.Search(node.messageClient.SearchMsg)
+
+		elapsed := time.Since(start)
+		fmt.Println("Query node search time:", elapsed)
 	}
 }
 
@@ -459,7 +475,10 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 		for _, res := range resultsTmp {
 			results.Entities.Ids = append(results.Entities.Ids, res.ResultId)
 			results.Distances = append(results.Distances, res.ResultDistance)
+			results.Scores = append(results.Distances, float32(0))
 		}
+
+		results.RowNum = int64(len(results.Distances))
 
 		// 3. publish result to pulsar
 		node.PublishSearchResult(&results, clientId)
