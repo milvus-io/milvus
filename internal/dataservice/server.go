@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"path"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
 
 	"github.com/zilliztech/milvus-distributed/internal/distributed/datanode"
 
@@ -99,7 +102,6 @@ type (
 )
 
 func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
-	Params.Init()
 	ch := make(chan struct{})
 	s := &Server{
 		ctx:              ctx,
@@ -158,7 +160,7 @@ func (s *Server) Start() error {
 	}
 	s.startServerLoop()
 	s.state.Store(internalpb2.StateCode_HEALTHY)
-	log.Println("start success")
+	log.Debug("start success")
 	return nil
 }
 
@@ -210,7 +212,7 @@ func (s *Server) initMsgProducer() error {
 }
 
 func (s *Server) loadMetaFromMaster() error {
-	log.Println("loading collection meta from master")
+	log.Debug("loading collection meta from master")
 	if err := s.checkMasterIsHealthy(); err != nil {
 		return err
 	}
@@ -245,7 +247,7 @@ func (s *Server) loadMetaFromMaster() error {
 			CollectionName: collectionName,
 		})
 		if err != nil {
-			log.Println(err.Error())
+			log.Error("describe collection error", zap.Error(err))
 			continue
 		}
 		partitions, err := s.masterClient.ShowPartitions(&milvuspb.ShowPartitionRequest{
@@ -260,7 +262,7 @@ func (s *Server) loadMetaFromMaster() error {
 			CollectionID:   collection.CollectionID,
 		})
 		if err != nil {
-			log.Println(err.Error())
+			log.Error("show partitions error", zap.Error(err))
 			continue
 		}
 		err = s.meta.AddCollection(&collectionInfo{
@@ -269,11 +271,11 @@ func (s *Server) loadMetaFromMaster() error {
 			Partitions: partitions.PartitionIDs,
 		})
 		if err != nil {
-			log.Println(err.Error())
+			log.Error("add collection error", zap.Error(err))
 			continue
 		}
 	}
-	log.Println("load collection meta from master complete")
+	log.Debug("load collection meta from master complete")
 	return nil
 }
 
@@ -331,7 +333,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 			statistics := msg.(*msgstream.SegmentStatisticsMsg)
 			for _, stat := range statistics.SegStats {
 				if err := s.statsHandler.HandleSegmentStat(stat); err != nil {
-					log.Println(err.Error())
+					log.Error("handle segment stat error", zap.Error(err))
 					continue
 				}
 			}
@@ -348,7 +350,7 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("segment flush channel shut down")
+			log.Debug("segment flush channel shut down")
 			return
 		default:
 		}
@@ -361,13 +363,13 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 
 			segmentInfo, err := s.meta.GetSegment(realMsg.SegmentID)
 			if err != nil {
-				log.Println(err.Error())
+				log.Error("get segment error", zap.Error(err))
 				continue
 			}
 			segmentInfo.FlushedTime = realMsg.BeginTimestamp
 			segmentInfo.State = commonpb.SegmentState_SegmentFlushed
 			if err = s.meta.UpdateSegment(segmentInfo); err != nil {
-				log.Println(err.Error())
+				log.Error("update segment error", zap.Error(err))
 				continue
 			}
 		}
@@ -383,14 +385,14 @@ func (s *Server) startDDChannel(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("dd channel shut down")
+			log.Debug("dd channel shut down")
 			return
 		default:
 		}
 		msgPack := ddStream.Consume()
 		for _, msg := range msgPack.Msgs {
 			if err := s.ddHandler.HandleDDMsg(msg); err != nil {
-				log.Println(err.Error())
+				log.Error("handle dd msg error", zap.Error(err))
 				continue
 			}
 		}
@@ -398,9 +400,9 @@ func (s *Server) startDDChannel(ctx context.Context) {
 }
 
 func (s *Server) waitDataNodeRegister() {
-	log.Println("waiting data node to register")
+	log.Debug("waiting data node to register")
 	<-s.registerFinishCh
-	log.Println("all data nodes register")
+	log.Debug("all data nodes register")
 }
 
 func (s *Server) Stop() error {
@@ -549,8 +551,6 @@ func (s *Server) AssignSegmentID(req *datapb.AssignSegIDRequest) (*datapb.Assign
 				continue
 			}
 
-			log.Printf("no enough space for allocation of Collection %d, Partition %d, Channel %s, Count %d",
-				r.CollectionID, r.PartitionID, r.ChannelName, r.Count)
 			if err = s.openNewSegment(r.CollectionID, r.PartitionID, r.ChannelName); err != nil {
 				result.Status.Reason = fmt.Sprintf("open new segment of Collection %d, Partition %d, Channel %s, Count %d error:  %s",
 					r.CollectionID, r.PartitionID, r.ChannelName, r.Count, err.Error())
