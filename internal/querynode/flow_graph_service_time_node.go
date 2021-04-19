@@ -14,7 +14,7 @@ func (stNode *serviceTimeNode) Name() string {
 }
 
 func (stNode *serviceTimeNode) Operate(in []*Msg) []*Msg {
-	//fmt.Println("Do serviceTimeNode operation")
+	// fmt.Println("Do serviceTimeNode operation")
 
 	if len(in) != 1 {
 		log.Println("Invalid operate message input in serviceTimeNode, input length = ", len(in))
@@ -29,7 +29,6 @@ func (stNode *serviceTimeNode) Operate(in []*Msg) []*Msg {
 
 	// update service time
 	(*(*stNode.replica).getTSafe()).set(serviceTimeMsg.timeRange.timestampMax)
-	//fmt.Println("update tSafe to:", getPhysicalTime(serviceTimeMsg.timeRange.timestampMax))
 	return nil
 }
 
