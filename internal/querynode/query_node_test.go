@@ -27,6 +27,10 @@ type queryServiceMock struct{}
 
 func setup() {
 	Params.Init()
+	Params.initQueryTimeTickChannelName()
+	Params.initSearchResultChannelNames()
+	Params.initStatsChannelName()
+	Params.initSearchChannelNames()
 	Params.MetaRootPath = "/etcd/test/root/querynode"
 }
 

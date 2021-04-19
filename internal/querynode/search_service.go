@@ -44,11 +44,11 @@ func newSearchService(ctx context.Context, replica collectionReplica, factory ms
 	searchResultStream, _ := factory.NewMsgStream(ctx)
 
 	// query node doesn't need to consumer any search or search result channel actively.
-	//consumeChannels := Params.SearchChannelNames
-	//consumeSubName := Params.MsgChannelSubName
-	//searchStream.AsConsumer(consumeChannels, consumeSubName)
-	//producerChannels := Params.SearchResultChannelNames
-	//searchResultStream.AsProducer(producerChannels)
+	consumeChannels := Params.SearchChannelNames
+	consumeSubName := Params.MsgChannelSubName
+	searchStream.AsConsumer(consumeChannels, consumeSubName)
+	producerChannels := Params.SearchResultChannelNames
+	searchResultStream.AsProducer(producerChannels)
 
 	searchServiceCtx, searchServiceCancel := context.WithCancel(ctx)
 	msgBuffer := make(chan msgstream.TsMsg, receiveBufSize)

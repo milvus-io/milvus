@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"sync"
 	"sync/atomic"
 
 	nodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/querynode/client"
@@ -15,7 +16,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
-	"github.com/zilliztech/milvus-distributed/internal/querynode"
 )
 
 type MasterServiceInterface interface {
@@ -39,6 +39,11 @@ type QueryNodeInterface interface {
 	GetSegmentInfo(req *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error)
 }
 
+type queryChannelInfo struct {
+	requestChannel  string
+	responseChannel string
+}
+
 type QueryService struct {
 	loopCtx    context.Context
 	loopCancel context.CancelFunc
@@ -48,9 +53,9 @@ type QueryService struct {
 
 	dataServiceClient   DataServiceInterface
 	masterServiceClient MasterServiceInterface
-	queryNodes          map[UniqueID]*queryNodeInfo
-	numRegisterNode     uint64
-	numQueryChannel     uint64
+	queryNodes          map[int64]*queryNodeInfo
+	queryChannels       []*queryChannelInfo
+	qcMutex             *sync.Mutex
 
 	stateCode  atomic.Value
 	isInit     atomic.Value
@@ -124,37 +129,57 @@ func (qs *QueryService) GetStatisticsChannel() (string, error) {
 func (qs *QueryService) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
 	fmt.Println("register query node =", req.Address)
 	// TODO:: add mutex
-	allocatedID := len(qs.queryNodes)
+	nodeID := req.Base.SourceID
+	if _, ok := qs.queryNodes[nodeID]; ok {
+		err := errors.New("nodeID already exists")
+		return &querypb.RegisterNodeResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+		}, err
+	}
 
 	registerNodeAddress := req.Address.Ip + ":" + strconv.FormatInt(req.Address.Port, 10)
-	var node *queryNodeInfo
-	if qs.enableGrpc {
-		client := nodeclient.NewClient(registerNodeAddress)
-		if err := client.Init(); err != nil {
-			return &querypb.RegisterNodeResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				},
-				InitParams: new(internalpb2.InitParams),
-			}, err
-		}
-		if err := client.Start(); err != nil {
-			return nil, err
-		}
-		node = newQueryNodeInfo(client)
-	} else {
-		client := querynode.NewQueryNode(qs.loopCtx, uint64(allocatedID), qs.msFactory)
-		node = newQueryNodeInfo(client)
+	client := nodeclient.NewClient(registerNodeAddress)
+	if err := client.Init(); err != nil {
+		return &querypb.RegisterNodeResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			},
+			InitParams: new(internalpb2.InitParams),
+		}, err
 	}
-	qs.queryNodes[UniqueID(allocatedID)] = node
+	if err := client.Start(); err != nil {
+		return nil, err
+	}
+	qs.queryNodes[nodeID] = newQueryNodeInfo(client)
 
 	//TODO::return init params to queryNode
+	startParams := []*commonpb.KeyValuePair{
+		{Key: "StatsChannelName", Value: Params.StatsChannelName},
+		{Key: "TimeTickChannelName", Value: Params.TimeTickChannelName},
+	}
+	qs.qcMutex.Lock()
+	for _, queryChannel := range qs.queryChannels {
+		startParams = append(startParams, &commonpb.KeyValuePair{
+			Key:   "QueryChannelName",
+			Value: queryChannel.requestChannel,
+		})
+		startParams = append(startParams, &commonpb.KeyValuePair{
+			Key:   "QueryResultChannelName",
+			Value: queryChannel.responseChannel,
+		})
+	}
+	qs.qcMutex.Unlock()
+
 	return &querypb.RegisterNodeResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		},
 		InitParams: &internalpb2.InitParams{
-			NodeID: int64(allocatedID),
+			NodeID:      nodeID,
+			StartParams: startParams,
 		},
 	}, nil
 }
@@ -499,18 +524,26 @@ func (qs *QueryService) ReleasePartitions(req *querypb.ReleasePartitionRequest) 
 }
 
 func (qs *QueryService) CreateQueryChannel() (*querypb.CreateQueryChannelResponse, error) {
-	channelID := qs.numQueryChannel
-	qs.numQueryChannel++
+	channelID := len(qs.queryChannels)
 	allocatedQueryChannel := "query-" + strconv.FormatInt(int64(channelID), 10)
 	allocatedQueryResultChannel := "queryResult-" + strconv.FormatInt(int64(channelID), 10)
+
+	qs.qcMutex.Lock()
+	qs.queryChannels = append(qs.queryChannels, &queryChannelInfo{
+		requestChannel:  allocatedQueryChannel,
+		responseChannel: allocatedQueryResultChannel,
+	})
 
 	addQueryChannelsRequest := &querypb.AddQueryChannelsRequest{
 		RequestChannelID: allocatedQueryChannel,
 		ResultChannelID:  allocatedQueryResultChannel,
 	}
-	for _, node := range qs.queryNodes {
+	fmt.Println("query service create query channel, queryChannelName = ", allocatedQueryChannel)
+	for nodeID, node := range qs.queryNodes {
+		fmt.Println("node ", nodeID, " watch query channel")
 		_, err := node.AddQueryChannel(addQueryChannelsRequest)
 		if err != nil {
+			qs.qcMutex.Unlock()
 			return &querypb.CreateQueryChannelResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -519,6 +552,7 @@ func (qs *QueryService) CreateQueryChannel() (*querypb.CreateQueryChannelRespons
 			}, err
 		}
 	}
+	qs.qcMutex.Unlock()
 
 	return &querypb.CreateQueryChannelResponse{
 		Status: &commonpb.Status{
@@ -571,18 +605,18 @@ func (qs *QueryService) GetSegmentInfo(req *querypb.SegmentInfoRequest) (*queryp
 }
 
 func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryService, error) {
-	nodes := make(map[UniqueID]*queryNodeInfo)
+	nodes := make(map[int64]*queryNodeInfo)
+	queryChannels := make([]*queryChannelInfo, 0)
 	ctx1, cancel := context.WithCancel(ctx)
 	replica := newMetaReplica()
 	service := &QueryService{
-		loopCtx:         ctx1,
-		loopCancel:      cancel,
-		replica:         replica,
-		queryNodes:      nodes,
-		numRegisterNode: 0,
-		numQueryChannel: 0,
-		enableGrpc:      false,
-		msFactory:       factory,
+		loopCtx:       ctx1,
+		loopCancel:    cancel,
+		replica:       replica,
+		queryNodes:    nodes,
+		queryChannels: queryChannels,
+		qcMutex:       &sync.Mutex{},
+		msFactory:     factory,
 	}
 	service.stateCode.Store(internalpb2.StateCode_INITIALIZING)
 	service.isInit.Store(false)
@@ -595,10 +629,6 @@ func (qs *QueryService) SetMasterService(masterService MasterServiceInterface) {
 
 func (qs *QueryService) SetDataService(dataService DataServiceInterface) {
 	qs.dataServiceClient = dataService
-}
-
-func (qs *QueryService) SetEnableGrpc(en bool) {
-	qs.enableGrpc = en
 }
 
 func (qs *QueryService) watchDmChannels(dbID UniqueID, collectionID UniqueID) error {
@@ -620,7 +650,7 @@ func (qs *QueryService) watchDmChannels(dbID UniqueID, collectionID UniqueID) er
 	}
 
 	dmChannels := resp.Values
-	watchedChannels2NodeID := make(map[string]UniqueID)
+	watchedChannels2NodeID := make(map[string]int64)
 	unWatchedChannels := make([]string, 0)
 	for _, channel := range dmChannels {
 		findChannel := false
@@ -647,7 +677,7 @@ func (qs *QueryService) watchDmChannels(dbID UniqueID, collectionID UniqueID) er
 	if err != nil {
 		return err
 	}
-	node2channels := make(map[UniqueID][]string)
+	node2channels := make(map[int64][]string)
 	for channel, nodeID := range channels2NodeID {
 		if _, ok := node2channels[nodeID]; ok {
 			node2channels[nodeID] = append(node2channels[nodeID], channel)
@@ -674,13 +704,13 @@ func (qs *QueryService) watchDmChannels(dbID UniqueID, collectionID UniqueID) er
 	return nil
 }
 
-func (qs *QueryService) shuffleChannelsToQueryNode(dmChannels []string) map[string]UniqueID {
+func (qs *QueryService) shuffleChannelsToQueryNode(dmChannels []string) map[string]int64 {
 	maxNumDMChannel := 0
-	res := make(map[string]UniqueID)
+	res := make(map[string]int64)
 	if len(dmChannels) == 0 {
 		return res
 	}
-	node2lens := make(map[UniqueID]int)
+	node2lens := make(map[int64]int)
 	for id, node := range qs.queryNodes {
 		node2lens[id] = len(node.dmChannelNames)
 	}

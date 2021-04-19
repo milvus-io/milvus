@@ -109,7 +109,7 @@ func (p *ParamTable) Init() {
 
 		p.initQueryNodeID()
 		p.initQueryNodeNum()
-		p.initQueryTimeTickChannelName()
+		//p.initQueryTimeTickChannelName()
 		p.initQueryTimeTickReceiveBufSize()
 
 		p.initMinioEndPoint()
@@ -140,14 +140,14 @@ func (p *ParamTable) Init() {
 		p.initDDReceiveBufSize()
 		p.initDDPulsarBufSize()
 
-		p.initSearchChannelNames()
-		p.initSearchResultChannelNames()
+		//p.initSearchChannelNames()
+		//p.initSearchResultChannelNames()
 		p.initSearchReceiveBufSize()
 		p.initSearchPulsarBufSize()
 		p.initSearchResultReceiveBufSize()
 
 		p.initStatsPublishInterval()
-		p.initStatsChannelName()
+		//p.initStatsChannelName()
 		p.initStatsReceiveBufSize()
 	})
 }

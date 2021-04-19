@@ -14,12 +14,12 @@ import "C"
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log"
 	"sync/atomic"
 
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/rmqms"
@@ -118,21 +118,39 @@ func Init() {
 
 func (node *QueryNode) Init() error {
 	registerReq := &queryPb.RegisterNodeRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_kNone,
+			SourceID: Params.QueryNodeID,
+		},
 		Address: &commonpb.Address{
 			Ip:   Params.QueryNodeIP,
 			Port: Params.QueryNodePort,
 		},
 	}
 
-	response, err := node.queryClient.RegisterNode(registerReq)
+	resp, err := node.queryClient.RegisterNode(registerReq)
 	if err != nil {
 		panic(err)
 	}
-	if response.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-		panic(response.Status.Reason)
+	if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		panic(resp.Status.Reason)
 	}
 
-	Params.QueryNodeID = response.InitParams.NodeID
+	for _, kv := range resp.InitParams.StartParams {
+		switch kv.Key {
+		case "StatsChannelName":
+			Params.StatsChannelName = kv.Value
+		case "TimeTickChannelName":
+			Params.QueryTimeTickChannelName = kv.Value
+		case "QueryChannelName":
+			Params.SearchChannelNames = append(Params.SearchChannelNames, kv.Value)
+		case "QueryResultChannelName":
+			Params.SearchResultChannelNames = append(Params.SearchResultChannelNames, kv.Value)
+		default:
+			return errors.Errorf("Invalid key: %v", kv.Key)
+		}
+	}
+
 	fmt.Println("QueryNodeID is", Params.QueryNodeID)
 
 	if node.masterClient == nil {
