@@ -19,7 +19,7 @@ type searchService struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	container             container
+	node                  *QueryNode
 	searchMsgStream       *msgstream.MsgStream
 	searchResultMsgStream *msgstream.MsgStream
 }
@@ -57,7 +57,7 @@ func newSearchService(ctx context.Context, node *QueryNode, pulsarURL string) *s
 		ctx:    searchServiceCtx,
 		cancel: searchServiceCancel,
 
-		container:             *node.container,
+		node:                  node,
 		searchMsgStream:       &inputStream,
 		searchResultMsgStream: &outputStream,
 	}
@@ -68,7 +68,7 @@ func (ss *searchService) start() {
 	(*ss.searchResultMsgStream).Start()
 
 	go func() {
-			for {
+		for {
 			select {
 			case <-ss.ctx.Done():
 				return
@@ -95,7 +95,7 @@ func (ss *searchService) close() {
 	ss.cancel()
 }
 
-func (ss *searchService) search(searchMessages []*msgstream.TsMsg) error {
+func (ss *searchService) search(searchMessages []msgstream.TsMsg) error {
 
 	type SearchResult struct {
 		ResultID       int64
@@ -104,9 +104,9 @@ func (ss *searchService) search(searchMessages []*msgstream.TsMsg) error {
 	// TODO:: cache map[dsl]plan
 	// TODO: reBatched search requests
 	for _, msg := range searchMessages {
-		searchMsg, ok := (*msg).(*msgstream.SearchMsg)
+		searchMsg, ok := msg.(*msgstream.SearchMsg)
 		if !ok {
-			return errors.New("invalid request type = " + string((*msg).Type()))
+			return errors.New("invalid request type = " + string(msg.Type()))
 		}
 
 		searchTimestamp := searchMsg.Timestamp
@@ -120,7 +120,7 @@ func (ss *searchService) search(searchMessages []*msgstream.TsMsg) error {
 		}
 		collectionName := query.CollectionName
 		partitionTags := query.PartitionTags
-		collection, err := ss.container.getCollectionByName(collectionName)
+		collection, err := (*ss.node.container).getCollectionByName(collectionName)
 		if err != nil {
 			return err
 		}
@@ -150,7 +150,7 @@ func (ss *searchService) search(searchMessages []*msgstream.TsMsg) error {
 
 		// 3. Do search in all segments
 		for _, partitionTag := range partitionTags {
-			partition, err := ss.container.getPartitionByTag(collectionID, partitionTag)
+			partition, err := (*ss.node.container).getPartitionByTag(collectionID, partitionTag)
 			if err != nil {
 				return err
 			}
@@ -208,13 +208,15 @@ func (ss *searchService) search(searchMessages []*msgstream.TsMsg) error {
 		}
 
 		var tsMsg msgstream.TsMsg = &msgstream.SearchResultMsg{SearchResult: results}
-		ss.publishSearchResult(&tsMsg)
+		ss.publishSearchResult(tsMsg)
+		plan.Delete()
+		placeholderGroup.Delete()
 	}
 
 	return nil
 }
 
-func (ss *searchService) publishSearchResult(res *msgstream.TsMsg) {
+func (ss *searchService) publishSearchResult(res msgstream.TsMsg) {
 	msgPack := msgstream.MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, res)
 	(*ss.searchResultMsgStream).Produce(&msgPack)
@@ -228,6 +230,6 @@ func (ss *searchService) publishFailedSearchResult() {
 
 	var tsMsg msgstream.TsMsg = &msgstream.SearchResultMsg{SearchResult: errorResults}
 	msgPack := msgstream.MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, &tsMsg)
+	msgPack.Msgs = append(msgPack.Msgs, tsMsg)
 	(*ss.searchResultMsgStream).Produce(&msgPack)
 }

@@ -38,14 +38,14 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 			timestampMax: msMsg.TimestampMax(),
 		},
 	}
-	for _, msg := range *msMsg.TsMessages() {
-		switch (*msg).Type() {
+	for _, msg := range msMsg.TsMessages() {
+		switch msg.Type() {
 		case internalPb.MsgType_kInsert:
-			iMsg.insertMessages = append(iMsg.insertMessages, (*msg).(*msgstream.InsertMsg))
+			iMsg.insertMessages = append(iMsg.insertMessages, msg.(*msgstream.InsertMsg))
 		// case internalPb.MsgType_kDelete:
 		// dmMsg.deleteMessages = append(dmMsg.deleteMessages, (*msg).(*msgstream.DeleteTask))
 		default:
-			log.Println("Non supporting message type:", (*msg).Type())
+			log.Println("Non supporting message type:", msg.Type())
 		}
 	}
 

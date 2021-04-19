@@ -78,7 +78,7 @@ func (sService *statsService) publicStatistic(statistic *internalpb.QueryNodeSeg
 	}
 
 	var msgPack = msgstream.MsgPack{
-		Msgs: []*msgstream.TsMsg{&msg},
+		Msgs: []msgstream.TsMsg{msg},
 	}
 	err := (*sService.msgStream).Produce(&msgPack)
 	if err != nil {

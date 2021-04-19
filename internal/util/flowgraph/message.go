@@ -8,7 +8,7 @@ type Msg interface {
 }
 
 type MsgStreamMsg struct {
-	tsMessages   []*msgstream.TsMsg
+	tsMessages   []msgstream.TsMsg
 	timestampMin Timestamp
 	timestampMax Timestamp
 }
@@ -21,8 +21,8 @@ func (msMsg *MsgStreamMsg) DownStreamNodeIdx() int {
 	return 0
 }
 
-func (msMsg *MsgStreamMsg) TsMessages() *[]*msgstream.TsMsg {
-	return &msMsg.tsMessages
+func (msMsg *MsgStreamMsg) TsMessages() []msgstream.TsMsg {
+	return msMsg.tsMessages
 }
 
 func (msMsg *MsgStreamMsg) TimestampMin() Timestamp {

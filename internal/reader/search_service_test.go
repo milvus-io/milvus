@@ -115,7 +115,7 @@ func TestSearch_Search(t *testing.T) {
 	}
 
 	// messages generate
-	insertMessages := make([]*msgstream.TsMsg, 0)
+	insertMessages := make([]msgstream.TsMsg, 0)
 	for i := 0; i < msgLength; i++ {
 		var msg msgstream.TsMsg = &msgstream.InsertMsg{
 			BaseMsg: msgstream.BaseMsg{
@@ -139,7 +139,7 @@ func TestSearch_Search(t *testing.T) {
 				},
 			},
 		}
-		insertMessages = append(insertMessages, &msg)
+		insertMessages = append(insertMessages, msg)
 	}
 
 	msgPack := msgstream.MsgPack{
@@ -211,7 +211,7 @@ func TestSearch_Search(t *testing.T) {
 		Value: queryByte,
 	}
 
-	searchMsg := msgstream.SearchMsg{
+	searchMsg := &msgstream.SearchMsg{
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []int32{0},
 		},
@@ -225,10 +225,8 @@ func TestSearch_Search(t *testing.T) {
 		},
 	}
 
-	var tsMsg msgstream.TsMsg = &searchMsg
-
 	msgPackSearch := msgstream.MsgPack{}
-	msgPackSearch.Msgs = append(msgPackSearch.Msgs, &tsMsg)
+	msgPackSearch.Msgs = append(msgPackSearch.Msgs, searchMsg)
 
 	var searchMsgStream msgstream.MsgStream = searchStream
 	searchMsgStream.Start()

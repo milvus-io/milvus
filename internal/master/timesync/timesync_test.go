@@ -14,8 +14,7 @@ import (
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
-func getTtMsg(msgType internalPb.MsgType, peerID UniqueID, timeStamp uint64) *ms.TsMsg {
-	var tsMsg ms.TsMsg
+func getTtMsg(msgType internalPb.MsgType, peerID UniqueID, timeStamp uint64) ms.TsMsg {
 	baseMsg := ms.BaseMsg{
 		HashValues: []int32{int32(peerID)},
 	}
@@ -28,8 +27,8 @@ func getTtMsg(msgType internalPb.MsgType, peerID UniqueID, timeStamp uint64) *ms
 		BaseMsg:     baseMsg,
 		TimeTickMsg: timeTickResult,
 	}
-	tsMsg = timeTickMsg
-	return &tsMsg
+
+	return timeTickMsg
 }
 
 func initPulsarStream(pulsarAddress string,
