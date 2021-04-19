@@ -279,7 +279,8 @@ static void knn_L2sqr_sse (
 
 #pragma omp parallel for schedule(static)
             for (size_t j = 0; j < ny; j++) {
-                if(!bitset_base || !bitset_base->test(j + offset)) {
+                auto test_bit = bitset_base && j + offset < bitset_base->capacity() && bitset_base->test(j + offset);
+                if(!test_bit) {
                     size_t thread_no = omp_get_thread_num();
                     const float *y_j = y + j * d;
                     const float *x_i = x + x_from * d;
@@ -343,7 +344,8 @@ static void knn_L2sqr_sse (
             }
 
             for (size_t j = 0; j < ny; j++) {
-                if (!bitset_base || !bitset_base->test(j + offset)) {
+                auto test_bit = bitset_base && j + offset < bitset_base->capacity() && bitset_base->test(j + offset);
+                if (!test_bit) {
                     float disij = fvec_L2sqr (x_i, y_j, d);
                     if (disij < val_[0]) {
                         maxheap_swap_top (k, val_, ids_, disij, j);
@@ -473,7 +475,8 @@ static void knn_L2sqr_blas (const float * x,
                 const float *ip_line = ip_block + (i - i0) * (j1 - j0);
 
                 for (size_t j = j0; j < j1; j++) {
-                    if(!bitset_base || !bitset_base->test(j + offset)){
+                    auto test_bit = bitset_base && j + offset < bitset_base->capacity() && bitset_base->test(j + offset);
+                    if(!test_bit){
                         float ip = *ip_line;
                         float dis = x_norms[i] + y_norms[j] - 2 * ip;
 

@@ -8,6 +8,7 @@
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include <faiss/utils/distances.h>
+#include <tbb/iterators.h>
 
 
 namespace milvus::dog_segment {
@@ -330,6 +331,28 @@ SegmentNaive::QueryImpl(query::QueryPtr query_info, Timestamp timestamp, QueryRe
     return Status::OK();
 }
 
+void
+merge_into(int64_t queries, int64_t topk, float *distances, int64_t *uids, const float *new_distances, const int64_t *new_uids) {
+    for(int64_t qn = 0; qn < queries; ++qn) {
+        auto base = qn * topk;
+        auto dst_dis = distances + base;
+        auto dst_uids = uids + base;
+
+        auto src_dis = new_distances + base;
+        auto src_uids = new_uids + base;
+
+        std::vector<float> buf_dis(2*topk);
+        std::vector<int64_t> buf_uids(2*topk);
+
+        auto zip_src = tbb::make_zip_iterator(src_dis, src_uids);
+        auto zip_dst = tbb::make_zip_iterator(dst_dis, dst_uids);
+        auto zip_buf = tbb::make_zip_iterator(buf_dis.data(), buf_uids.data());
+        auto fuck = zip_src + 1;
+        std::merge(zip_dst, zip_dst + topk, zip_src, zip_src + topk, zip_buf);
+        std::copy_n(zip_buf, topk, zip_dst);
+    }
+}
+
 Status
 SegmentNaive::QueryBruteForceImpl(query::QueryPtr query_info, Timestamp timestamp, QueryResult &results) {
     auto ins_barrier = get_barrier(record_, timestamp);
@@ -343,12 +366,50 @@ SegmentNaive::QueryBruteForceImpl(query::QueryPtr query_info, Timestamp timestam
     auto bitmap = bitmap_holder->bitmap_ptr;
     auto topK = query_info->topK;
     auto num_queries = query_info->num_queries;
+    auto total_count = topK * num_queries;
     // TODO: optimize
 
     auto the_offset_opt = schema_->get_offset(query_info->field_name);
     assert(the_offset_opt.has_value());
     auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_.at(the_offset_opt.value()));
-    throw std::runtime_error("unimplemented");
+
+    std::vector<int64_t> final_uids(total_count);
+    std::vector<float> final_dis(total_count, std::numeric_limits<float>::max());
+
+    auto max_chunk = (ins_barrier + DefaultElementPerChunk - 1) / DefaultElementPerChunk;
+    for (int chunk_id = 0; chunk_id < max_chunk; ++chunk_id) {
+        std::vector<int64_t> buf_uids(total_count, -1);
+        std::vector<float> buf_dis(total_count, std::numeric_limits<float>::max());
+
+        faiss::float_maxheap_array_t buf = {
+                (size_t)num_queries, (size_t)topK, buf_uids.data(), buf_dis.data()};
+
+        auto src_data = vec_ptr->get_chunk(chunk_id).data();
+        auto nsize = chunk_id != max_chunk - 1? DefaultElementPerChunk: ins_barrier - chunk_id * DefaultElementPerChunk;
+        auto offset = chunk_id * DefaultElementPerChunk;
+
+        faiss::knn_L2sqr(query_info->query_raw_data.data(), src_data, dim, num_queries, nsize, &buf, bitmap, offset);
+        if(chunk_id == 0) {
+            final_uids = buf_uids;
+            final_dis = buf_dis;
+        } else {
+            merge_into(num_queries, topK, final_dis.data(), final_uids.data(), buf_dis.data(), buf_uids.data());
+        }
+    }
+
+
+    for(auto& id: final_uids) {
+        id = record_.uids_[id];
+    }
+
+    results.result_ids_ = std::move(final_uids);
+    results.result_distances_ = std::move(final_dis);
+    results.topK_ = topK;
+    results.num_queries_ = num_queries;
+    results.row_num_ = total_count;
+
+//    throw std::runtime_error("unimplemented");
+    return Status::OK();
 }
 
 
@@ -445,7 +506,7 @@ SegmentNaive::Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult
     if (index_ready_) {
         return QueryImpl(query_info, timestamp, result);
     } else {
-        return QuerySlowImpl(query_info, timestamp, result);
+        return QueryBruteForceImpl(query_info, timestamp, result);
     }
 }
 
@@ -493,6 +554,9 @@ knowhere::IndexPtr SegmentNaive::BuildVecIndexImpl(const IndexMeta::Entry &entry
 
 Status
 SegmentNaive::BuildIndex() {
+    if(record_.ack_responder_.GetAck() < 1024 * 4) {
+        return Status(SERVER_BUILD_INDEX_ERROR, "too few elements");
+    }
     for (auto&[index_name, entry]: index_meta_->get_entries()) {
         assert(entry.index_name == index_name);
         const auto &field = (*schema_)[entry.field_name];
