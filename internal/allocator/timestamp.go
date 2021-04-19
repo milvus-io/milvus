@@ -2,7 +2,7 @@ package allocator
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -144,10 +144,8 @@ func (ta *TimestampAllocator) Alloc(count uint32) ([]Timestamp, error) {
 	}
 	req.count = count
 	ta.Reqs <- req
-	req.Wait()
-
-	if !req.IsValid() {
-		return nil, errors.New("alloc time stamp request failed")
+	if err := req.Wait(); err != nil {
+		return nil, fmt.Errorf("alloc time stamp request failed: %s", err)
 	}
 
 	start, count := req.timestamp, req.count
