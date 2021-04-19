@@ -2,13 +2,12 @@ package rmqms
 
 import (
 	"context"
+	"errors"
 	"log"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"sync"
-
-	"errors"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
@@ -329,6 +328,7 @@ func (ms *RmqTtMsgStream) AsConsumer(channels []string,
 		}
 		consumer.MsgNum = make(chan int, ms.rmqBufSize)
 		ms.consumers = append(ms.consumers, *consumer)
+		ms.consumerChannels = append(ms.consumerChannels, consumer.ChannelName)
 		ms.consumerReflects = append(ms.consumerReflects, reflect.SelectCase{
 			Dir:  reflect.SelectRecv,
 			Chan: reflect.ValueOf(consumer.MsgNum),
@@ -376,6 +376,9 @@ func (ms *RmqTtMsgStream) bufMsgPackToChannel() {
 			msgPositions := make([]*msgstream.MsgPosition, 0)
 			ms.unsolvedMutex.Lock()
 			for consumer, msgs := range ms.unsolvedBuf {
+				if len(msgs) == 0 {
+					continue
+				}
 				tempBuffer := make([]TsMsg, 0)
 				var timeTickMsg TsMsg
 				for _, v := range msgs {
@@ -479,6 +482,10 @@ func (ms *RmqTtMsgStream) Seek(mp *msgstream.MsgPosition) error {
 	for index, channel := range ms.consumerChannels {
 		if filepath.Base(channel) == filepath.Base(mp.ChannelName) {
 			consumer = ms.consumers[index]
+			if len(mp.MsgID) == 0 {
+				msgID = -1
+				break
+			}
 			seekMsgID, err := strconv.ParseInt(mp.MsgID, 10, 64)
 			if err != nil {
 				return err
@@ -491,51 +498,94 @@ func (ms *RmqTtMsgStream) Seek(mp *msgstream.MsgPosition) error {
 	if err != nil {
 		return err
 	}
+	if msgID == -1 {
+		return nil
+	}
 	ms.unsolvedMutex.Lock()
 	ms.unsolvedBuf[consumer] = make([]TsMsg, 0)
 
+	// When rmq seek is called, msgNum can't be used before current msgs all consumed, because
+	// new msgNum is not generated. So just try to consume msgs
 	for {
-		select {
-		case <-ms.ctx.Done():
-			return nil
-		case num, ok := <-consumer.MsgNum:
-			if !ok {
-				return errors.New("consumer closed")
-			}
-			rmqMsg, err := rocksmq.Rmq.Consume(consumer.GroupName, consumer.ChannelName, num)
+		rmqMsg, err := rocksmq.Rmq.Consume(consumer.GroupName, consumer.ChannelName, 1)
+		if err != nil {
+			log.Printf("Failed to consume message in rocksmq, error = %v", err)
+		}
+		if len(rmqMsg) == 0 {
+			break
+		} else {
+			headerMsg := commonpb.MsgHeader{}
+			err := proto.Unmarshal(rmqMsg[0].Payload, &headerMsg)
 			if err != nil {
-				log.Printf("Failed to consume message in rocksmq, error = %v", err)
+				log.Printf("Failed to unmarshal message header, error = %v", err)
+				return err
+			}
+			tsMsg, err := ms.unmarshal.Unmarshal(rmqMsg[0].Payload, headerMsg.Base.MsgType)
+			if err != nil {
+				log.Printf("Failed to unmarshal tsMsg, error = %v", err)
+				return err
+			}
+
+			if headerMsg.Base.MsgType == commonpb.MsgType_kTimeTick {
+				if tsMsg.BeginTs() >= mp.Timestamp {
+					ms.unsolvedMutex.Unlock()
+					return nil
+				}
 				continue
 			}
-
-			for j := 0; j < len(rmqMsg); j++ {
-				headerMsg := commonpb.MsgHeader{}
-				err := proto.Unmarshal(rmqMsg[j].Payload, &headerMsg)
-				if err != nil {
-					log.Printf("Failed to unmarshal message header, error = %v", err)
-				}
-				tsMsg, err := ms.unmarshal.Unmarshal(rmqMsg[j].Payload, headerMsg.Base.MsgType)
-				if err != nil {
-					log.Printf("Failed to unmarshal tsMsg, error = %v", err)
-				}
-
-				if headerMsg.Base.MsgType == commonpb.MsgType_kTimeTick {
-					if tsMsg.BeginTs() >= mp.Timestamp {
-						ms.unsolvedMutex.Unlock()
-						return nil
-					}
-					continue
-				}
-				if tsMsg.BeginTs() > mp.Timestamp {
-					tsMsg.SetPosition(&msgstream.MsgPosition{
-						ChannelName: filepath.Base(consumer.ChannelName),
-						MsgID:       strconv.Itoa(int(rmqMsg[j].MsgID)),
-					})
-					ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
-				}
+			if tsMsg.BeginTs() > mp.Timestamp {
+				tsMsg.SetPosition(&msgstream.MsgPosition{
+					ChannelName: filepath.Base(consumer.ChannelName),
+					MsgID:       strconv.Itoa(int(rmqMsg[0].MsgID)),
+				})
+				ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
 			}
 		}
 	}
+	return nil
+
+	//for {
+	//	select {
+	//	case <-ms.ctx.Done():
+	//		return nil
+	//	case num, ok := <-consumer.MsgNum:
+	//		if !ok {
+	//			return errors.New("consumer closed")
+	//		}
+	//		rmqMsg, err := rocksmq.Rmq.Consume(consumer.GroupName, consumer.ChannelName, num)
+	//		if err != nil {
+	//			log.Printf("Failed to consume message in rocksmq, error = %v", err)
+	//			continue
+	//		}
+	//
+	//		for j := 0; j < len(rmqMsg); j++ {
+	//			headerMsg := commonpb.MsgHeader{}
+	//			err := proto.Unmarshal(rmqMsg[j].Payload, &headerMsg)
+	//			if err != nil {
+	//				log.Printf("Failed to unmarshal message header, error = %v", err)
+	//			}
+	//			tsMsg, err := ms.unmarshal.Unmarshal(rmqMsg[j].Payload, headerMsg.Base.MsgType)
+	//			if err != nil {
+	//				log.Printf("Failed to unmarshal tsMsg, error = %v", err)
+	//			}
+	//
+	//			if headerMsg.Base.MsgType == commonpb.MsgType_kTimeTick {
+	//				if tsMsg.BeginTs() >= mp.Timestamp {
+	//					ms.unsolvedMutex.Unlock()
+	//					return nil
+	//				}
+	//				continue
+	//			}
+	//			if tsMsg.BeginTs() > mp.Timestamp {
+	//				tsMsg.SetPosition(&msgstream.MsgPosition{
+	//					ChannelName: filepath.Base(consumer.ChannelName),
+	//					MsgID:       strconv.Itoa(int(rmqMsg[j].MsgID)),
+	//				})
+	//				ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
+	//			}
+	//		}
+	//	}
+	//}
 }
 
 func checkTimeTickMsg(msg map[rocksmq.Consumer]Timestamp,
