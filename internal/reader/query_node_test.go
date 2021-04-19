@@ -25,4 +25,5 @@ func TestQueryNode_start(t *testing.T) {
 
 	node := NewQueryNode(ctx, 0)
 	node.Start()
+	node.Close()
 }
