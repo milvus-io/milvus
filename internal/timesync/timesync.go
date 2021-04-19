@@ -38,7 +38,7 @@ type (
 	}
 )
 
-func NewSoftTimeTickBarrier(ttStream *ms.MsgStream, peerIds []UniqueID, minTtInterval Timestamp) *softTimeTickBarrier {
+func NewSoftTimeTickBarrier(ttStream ms.MsgStream, peerIds []UniqueID, minTtInterval Timestamp) *softTimeTickBarrier {
 	if len(peerIds) <= 0 {
 		log.Printf("[newSoftTimeTickBarrier] Error: peerIds is empty!\n")
 		return nil
@@ -46,7 +46,7 @@ func NewSoftTimeTickBarrier(ttStream *ms.MsgStream, peerIds []UniqueID, minTtInt
 
 	sttbarrier := softTimeTickBarrier{}
 	sttbarrier.minTtInterval = minTtInterval
-	sttbarrier.ttStream = *ttStream
+	sttbarrier.ttStream = ttStream
 	sttbarrier.outTt = make(chan Timestamp, 1024)
 	sttbarrier.peer2LastTt = make(map[UniqueID]Timestamp)
 	for _, id := range peerIds {
@@ -86,28 +86,29 @@ func (ttBarrier *softTimeTickBarrier) StartBackgroundLoop(ctx context.Context) {
 		case <-ctx.Done():
 			log.Printf("[TtBarrierStart] %s\n", ctx.Err())
 			return
-		case ttmsgs := <-ttBarrier.ttStream.Chan():
-			if len(ttmsgs.Msgs) > 0 {
-				for _, timetickmsg := range ttmsgs.Msgs {
-					ttmsg := timetickmsg.(*ms.TimeTickMsg)
-					oldT, ok := ttBarrier.peer2LastTt[ttmsg.Base.SourceID]
-					// log.Printf("[softTimeTickBarrier] peer(%d)=%d\n", ttmsg.PeerID, ttmsg.Timestamp)
+		default:
+		}
+		ttmsgs := ttBarrier.ttStream.Consume()
+		if len(ttmsgs.Msgs) > 0 {
+			for _, timetickmsg := range ttmsgs.Msgs {
+				ttmsg := timetickmsg.(*ms.TimeTickMsg)
+				oldT, ok := ttBarrier.peer2LastTt[ttmsg.Base.SourceID]
+				// log.Printf("[softTimeTickBarrier] peer(%d)=%d\n", ttmsg.PeerID, ttmsg.Timestamp)
 
-					if !ok {
-						log.Printf("[softTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.Base.SourceID)
+				if !ok {
+					log.Printf("[softTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.Base.SourceID)
+					continue
+				}
+				if ttmsg.Base.Timestamp > oldT {
+					ttBarrier.peer2LastTt[ttmsg.Base.SourceID] = ttmsg.Base.Timestamp
+
+					// get a legal Timestamp
+					ts := ttBarrier.minTimestamp()
+					lastTt := atomic.LoadInt64(&(ttBarrier.lastTt))
+					if lastTt != 0 && ttBarrier.minTtInterval > ts-Timestamp(lastTt) {
 						continue
 					}
-					if ttmsg.Base.Timestamp > oldT {
-						ttBarrier.peer2LastTt[ttmsg.Base.SourceID] = ttmsg.Base.Timestamp
-
-						// get a legal Timestamp
-						ts := ttBarrier.minTimestamp()
-						lastTt := atomic.LoadInt64(&(ttBarrier.lastTt))
-						if lastTt != 0 && ttBarrier.minTtInterval > ts-Timestamp(lastTt) {
-							continue
-						}
-						ttBarrier.outTt <- ts
-					}
+					ttBarrier.outTt <- ts
 				}
 			}
 		}
@@ -145,32 +146,32 @@ func (ttBarrier *hardTimeTickBarrier) StartBackgroundLoop(ctx context.Context) {
 		case <-ctx.Done():
 			log.Printf("[TtBarrierStart] %s\n", ctx.Err())
 			return
-		case ttmsgs := <-ttBarrier.ttStream.Chan():
-			if len(ttmsgs.Msgs) > 0 {
-				for _, timetickmsg := range ttmsgs.Msgs {
+		default:
+		}
+		ttmsgs := ttBarrier.ttStream.Consume()
+		if len(ttmsgs.Msgs) > 0 {
+			for _, timetickmsg := range ttmsgs.Msgs {
+				// Suppose ttmsg.Timestamp from stream is always larger than the previous one,
+				// that `ttmsg.Timestamp > oldT`
+				ttmsg := timetickmsg.(*ms.TimeTickMsg)
 
-					// Suppose ttmsg.Timestamp from stream is always larger than the previous one,
-					// that `ttmsg.Timestamp > oldT`
-					ttmsg := timetickmsg.(*ms.TimeTickMsg)
+				oldT, ok := ttBarrier.peer2Tt[ttmsg.Base.SourceID]
+				if !ok {
+					log.Printf("[hardTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.Base.SourceID)
+					continue
+				}
 
-					oldT, ok := ttBarrier.peer2Tt[ttmsg.Base.SourceID]
-					if !ok {
-						log.Printf("[hardTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.Base.SourceID)
-						continue
-					}
+				if oldT > state {
+					log.Printf("[hardTimeTickBarrier] Warning: peer(%d) timestamp(%d) ahead\n",
+						ttmsg.Base.SourceID, ttmsg.Base.Timestamp)
+				}
 
-					if oldT > state {
-						log.Printf("[hardTimeTickBarrier] Warning: peer(%d) timestamp(%d) ahead\n",
-							ttmsg.Base.SourceID, ttmsg.Base.Timestamp)
-					}
+				ttBarrier.peer2Tt[ttmsg.Base.SourceID] = ttmsg.Base.Timestamp
 
-					ttBarrier.peer2Tt[ttmsg.Base.SourceID] = ttmsg.Base.Timestamp
-
-					newState := ttBarrier.minTimestamp()
-					if newState > state {
-						ttBarrier.outTt <- newState
-						state = newState
-					}
+				newState := ttBarrier.minTimestamp()
+				if newState > state {
+					ttBarrier.outTt <- newState
+					state = newState
 				}
 			}
 		}
@@ -187,14 +188,14 @@ func (ttBarrier *hardTimeTickBarrier) minTimestamp() Timestamp {
 	return tempMin
 }
 
-func NewHardTimeTickBarrier(ttStream *ms.MsgStream, peerIds []UniqueID) *hardTimeTickBarrier {
+func NewHardTimeTickBarrier(ttStream ms.MsgStream, peerIds []UniqueID) *hardTimeTickBarrier {
 	if len(peerIds) <= 0 {
 		log.Printf("[newSoftTimeTickBarrier] Error: peerIds is empty!")
 		return nil
 	}
 
 	sttbarrier := hardTimeTickBarrier{}
-	sttbarrier.ttStream = *ttStream
+	sttbarrier.ttStream = ttStream
 	sttbarrier.outTt = make(chan Timestamp, 1024)
 
 	sttbarrier.peer2Tt = make(map[UniqueID]Timestamp)

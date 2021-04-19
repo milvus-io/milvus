@@ -1,6 +1,7 @@
 package memkv
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/google/btree"
@@ -110,7 +111,19 @@ func (kv *MemoryKV) MultiSaveAndRemove(saves map[string]string, removals []strin
 
 // todo
 func (kv *MemoryKV) LoadWithPrefix(key string) ([]string, []string, error) {
-	panic("implement me")
+	kv.Lock()
+	defer kv.Unlock()
+
+	keys := make([]string, 0)
+	values := make([]string, 0)
+	kv.tree.Ascend(func(i btree.Item) bool {
+		if strings.HasPrefix(i.(memoryKVItem).key, key) {
+			keys = append(keys, i.(memoryKVItem).key)
+			values = append(values, i.(memoryKVItem).value)
+		}
+		return true
+	})
+	return keys, values, nil
 }
 
 func (kv *MemoryKV) Close() {

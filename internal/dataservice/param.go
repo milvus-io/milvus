@@ -9,6 +9,9 @@ type ParamTable struct {
 
 	Address string
 	Port    int
+	NodeID  int64
+
+	MasterAddress string
 
 	EtcdAddress   string
 	MetaRootPath  string
@@ -25,7 +28,7 @@ type ParamTable struct {
 	InsertChannelNumPerCollection int64
 	StatisticsChannelName         string
 	TimeTickChannelName           string
-	DataNodeNum                   int64
+	DataNodeNum                   int
 }
 
 var Params ParamTable
@@ -42,6 +45,7 @@ func (p *ParamTable) Init() {
 	// set members
 	p.initAddress()
 	p.initPort()
+	p.NodeID = 1 // todo
 
 	p.initEtcdAddress()
 	p.initMetaRootPath()
@@ -51,6 +55,12 @@ func (p *ParamTable) Init() {
 	p.initSegmentSize()
 	p.initSegmentSizeFactor()
 	p.initDefaultRecordSize()
+	p.initSegIDAssignExpiration()
+	p.initInsertChannelPrefixName()
+	p.initInsertChannelNumPerCollection()
+	p.initStatisticsChannelName()
+	p.initTimeTickChannelName()
+	p.initDataNodeNum()
 }
 
 func (p *ParamTable) initAddress() {
@@ -114,4 +124,29 @@ func (p *ParamTable) initSegmentSizeFactor() {
 
 func (p *ParamTable) initDefaultRecordSize() {
 	p.DefaultRecordSize = p.ParseInt64("master.segment.defaultSizePerRecord")
+}
+
+// TODO read from config/env
+func (p *ParamTable) initSegIDAssignExpiration() {
+	p.SegIDAssignExpiration = 3000 //ms
+}
+
+func (p *ParamTable) initInsertChannelPrefixName() {
+	p.InsertChannelPrefixName = "insert-channel-"
+}
+
+func (p *ParamTable) initInsertChannelNumPerCollection() {
+	p.InsertChannelNumPerCollection = 4
+}
+
+func (p *ParamTable) initStatisticsChannelName() {
+	p.StatisticsChannelName = "dataservice-statistics-channel"
+}
+
+func (p *ParamTable) initTimeTickChannelName() {
+	p.TimeTickChannelName = "dataservice-timetick-channel"
+}
+
+func (p *ParamTable) initDataNodeNum() {
+	p.DataNodeNum = 2
 }

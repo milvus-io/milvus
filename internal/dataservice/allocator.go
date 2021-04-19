@@ -1,23 +1,54 @@
 package dataservice
 
+import (
+	"github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
+)
+
 type allocator interface {
 	allocTimestamp() (Timestamp, error)
 	allocID() (UniqueID, error)
 }
 
 type allocatorImpl struct {
-	// TODO call allocate functions in  client.go in master service
+	masterClient *masterservice.GrpcClient
 }
 
-// TODO implements
-func newAllocatorImpl() *allocatorImpl {
-	return nil
+func newAllocatorImpl(masterClient *masterservice.GrpcClient) *allocatorImpl {
+	return &allocatorImpl{
+		masterClient: masterClient,
+	}
 }
 
 func (allocator *allocatorImpl) allocTimestamp() (Timestamp, error) {
-	return 0, nil
+	resp, err := allocator.masterClient.AllocTimestamp(&masterpb.TsoRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kShowCollections,
+			MsgID:     -1, // todo add msg id
+			Timestamp: 0,  // todo
+			SourceID:  -1, // todo
+		},
+		Count: 1,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return resp.Timestamp, nil
 }
 
 func (allocator *allocatorImpl) allocID() (UniqueID, error) {
-	return 0, nil
+	resp, err := allocator.masterClient.AllocID(&masterpb.IDRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kShowCollections,
+			MsgID:     -1, // todo add msg id
+			Timestamp: 0,  // todo
+			SourceID:  -1, // todo
+		},
+		Count: 1,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return resp.ID, nil
 }
