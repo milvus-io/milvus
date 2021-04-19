@@ -59,11 +59,32 @@ const milvus::FieldValue GetData(int count) {
 
   value_map.int32_value["INT32"] = int32_data;
   value_map.vector_value["VECTOR"] = vector_data;
-  value_map.row_num = N;
+  value_map.row_num = count;
   return value_map;
 }
 
-bool checkSchema(){
+bool check_field(milvus::FieldPtr left, milvus::FieldPtr right){
+
+    if (left->field_name != right->field_name){
+	std::cout<<"filed_name not match! want "<< left->field_name << " but get "<<right->field_name << std::endl;
+	return false;
+    }
+
+    if (left->field_type != right->field_type){
+	std::cout<<"filed_type not match! want "<< int(left->field_type) << " but get "<< int(right->field_type) << std::endl;
+	return false;
+    }
+
+
+    if (left->dim != right->dim){
+	std::cout<<"dim not match! want "<< left->dim << " but get "<<right->dim << std::endl;
+	return false;
+    }
+
+    return true;	
+}
+
+bool check_schema(const milvus::Mapping & map){
     // Get Collection info
     bool ret = false;
 
@@ -80,11 +101,16 @@ bool checkSchema(){
 
     std::vector<milvus::FieldPtr> fields{field_ptr1, field_ptr2};
 
-    milvus::Mapping map;
-    //client.GetCollectionInfo(collection_name, map);
+    auto size_ = map.fields.size();
+    for ( int i =0; i != size_; ++ i){
+	auto ret = check_field(fields[i], map.fields[i]);
+	if (!ret){
+		return false;
+	}
+    }
 
     for (auto &f : map.fields) {
-      ///std::cout << f->field_name << ":" << int(f->field_type) << ":" << f->dim << "DIM" << std::endl;
+      std::cout << f->field_name << ":" << int(f->field_type) << ":" << f->dim << "DIM" << std::endl;
     }
 
     return true;
@@ -105,11 +131,21 @@ main(int argc, char* argv[]) {
 
     const std::string collection_name = parameters.collection_name_;
     auto client = milvus::ConnectionImpl();
+
     milvus::ConnectParam connect_param;
     connect_param.ip_address = parameters.address_.empty() ? "127.0.0.1":parameters.address_;
     connect_param.port = parameters.port_.empty() ? "19530":parameters.port_ ;
     client.Connect(connect_param);
 
+
+    milvus::Mapping map;
+    client.GetCollectionInfo(collection_name, map);
+
+    auto check_ret = check_schema(map);
+    if (!check_ret){
+	std::cout<<" Schema is not right!"<< std::endl;
+	return 0;
+    }
 
     int per_count = N / LOOP;
     int failed_count = 0;

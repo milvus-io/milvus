@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"github.com/czs007/suvlim/errors"
 	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
-	"github.com/stretchr/testify/assert"
 	"strconv"
 	"unsafe"
 )
@@ -144,13 +143,11 @@ func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]
 	var numOfRow = len(*entityIDs)
 	var sizeofPerRow = len((*records)[0])
 
-	assert.Equal(nil, numOfRow, len(*records))
-
-	var rawData = make([]byte, numOfRow * sizeofPerRow)
+	var rawData = make([]byte, numOfRow*sizeofPerRow)
 	var copyOffset = 0
 	for i := 0; i < len(*records); i++ {
 		copy(rawData[copyOffset:], (*records)[i])
-		copyOffset += sizeofPerRow
+		copyOffset += len((*records)[i])
 	}
 
 	var cOffset = C.long(offset)
