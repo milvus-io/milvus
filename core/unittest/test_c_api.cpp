@@ -85,29 +85,6 @@ TEST(CApiTest, DeleteTest) {
   auto partition = NewPartition(collection, partition_name);
   auto segment = NewSegment(partition, 0);
 
-  std::vector<char> raw_data;
-  std::vector<uint64_t> timestamps;
-  std::vector<uint64_t> uids;
-  int N = 10000;
-  std::default_random_engine e(67);
-  for(int i = 0; i < N; ++i) {
-    uids.push_back(100000 + i);
-    timestamps.push_back(0);
-    // append vec
-    float vec[16];
-    for(auto &x: vec) {
-      x = e() % 2000 * 0.001 - 1.0;
-    }
-    raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
-    int age = e() % 100;
-    raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
-  }
-
-  auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
-
-  auto ins_res = Insert(segment, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
-  assert(ins_res == 0);
-
   unsigned long delete_primary_keys[] = {100000, 100001, 100002};
   unsigned long delete_timestamps[] = {0, 0, 0};
 

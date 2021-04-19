@@ -102,7 +102,7 @@ func (node *QueryNode) StartMessageClient() {
 	go node.messageClient.ReceiveMessage()
 }
 
-func (node *QueryNode) GetSegmentByEntityId(entityId int64) *Segment {
+func (node *QueryNode) GetSegmentByEntityId(entityId uint64) *Segment {
 	// TODO: get id2segment info from pulsar
 	return nil
 }
@@ -185,7 +185,7 @@ func (node *QueryNode) Insert(insertMessages []*schema.InsertMsg, wg *sync.WaitG
 	var clientId = insertMessages[0].ClientId
 
 	// TODO: prevent Memory copy
-	var entityIds []int64
+	var entityIds []uint64
 	var timestamps []uint64
 	var vectorRecords [][]*schema.FieldValue
 
@@ -224,7 +224,8 @@ func (node *QueryNode) Insert(insertMessages []*schema.InsertMsg, wg *sync.WaitG
 		return schema.Status{}
 	}
 
-	var result = SegmentInsert(targetSegment, &entityIds, &timestamps, vectorRecords)
+	// TODO: check error
+	var result, _ = SegmentInsert(targetSegment, &entityIds, &timestamps, vectorRecords)
 
 	wg.Done()
 	return publishResult(&result, clientId)
@@ -232,11 +233,10 @@ func (node *QueryNode) Insert(insertMessages []*schema.InsertMsg, wg *sync.WaitG
 
 func (node *QueryNode) Delete(deleteMessages []*schema.DeleteMsg, wg *sync.WaitGroup) schema.Status {
 	var timeSync = node.GetTimeSync()
-	var collectionName = deleteMessages[0].CollectionName
 	var clientId = deleteMessages[0].ClientId
 
 	// TODO: prevent Memory copy
-	var entityIds []int64
+	var entityIds []uint64
 	var timestamps []uint64
 
 	for i, msg := range node.buffer.DeleteBuffer {
@@ -273,7 +273,8 @@ func (node *QueryNode) Delete(deleteMessages []*schema.DeleteMsg, wg *sync.WaitG
 	// TODO: does all entities from a common batch are in the same segment?
 	var targetSegment = node.GetSegmentByEntityId(entityIds[0])
 
-	var result = SegmentDelete(targetSegment, &entityIds, &timestamps)
+	// TODO: check error
+	var result, _ = SegmentDelete(targetSegment, &entityIds, &timestamps)
 
 	wg.Done()
 	return publishResult(&result, clientId)
@@ -323,7 +324,8 @@ func (node *QueryNode) Search(searchMessages []*schema.SearchMsg, wg *sync.WaitG
 		return schema.Status{}
 	}
 
-	var result = SegmentSearch(targetSegment, queryString, &timestamps, &records)
+	// TODO: check error
+	var result, _ = SegmentSearch(targetSegment, queryString, &timestamps, &records)
 
 	wg.Done()
 	return publishSearchResult(result, clientId)
