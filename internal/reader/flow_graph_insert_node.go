@@ -106,6 +106,7 @@ func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *syn
 	if err != nil {
 		log.Println("cannot find segment:", segmentID)
 		// TODO: add error handling
+		wg.Done()
 		return
 	}
 
@@ -116,8 +117,9 @@ func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *syn
 
 	err = targetSegment.segmentInsert(offsets, &ids, &timestamps, &records)
 	if err != nil {
-		log.Println("insert failed")
+		log.Println(err)
 		// TODO: add error handling
+		wg.Done()
 		return
 	}
 
