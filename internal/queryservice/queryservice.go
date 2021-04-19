@@ -311,6 +311,15 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 		}
 	}
 
+	if len(partitionIDsToLoad) == 0 {
+		log.Debug("load collection end", zap.String("collectionID", fmt.Sprintln(collectionID)))
+
+		return &commonpb.Status{
+			Reason:    "Partitions has been already loaded!",
+			ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
+		}, nil
+	}
+
 	loadPartitionsRequest := &querypb.LoadPartitionRequest{
 		Base:         req.Base,
 		DbID:         dbID,
