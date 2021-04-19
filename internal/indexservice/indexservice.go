@@ -27,6 +27,8 @@ import (
 
 const (
 	reqTimeoutInterval = time.Second * 10
+	durationInterval   = time.Second * 10
+	dropIndexLimit     = 20
 )
 
 type IndexService struct {
@@ -128,6 +130,9 @@ func (i *IndexService) Init() error {
 func (i *IndexService) Start() error {
 	i.loopWg.Add(1)
 	go i.tsLoop()
+
+	i.loopWg.Add(1)
+	go i.dropIndexLoop()
 
 	i.sched.Start()
 	// Start callbacks
@@ -278,34 +283,36 @@ func (i *IndexService) GetIndexStates(ctx context.Context, req *indexpb.GetIndex
 }
 
 func (i *IndexService) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	log.Debug("indexservice dropping index ...", zap.Int64("indexID", req.IndexID))
-	i.sched.IndexAddQueue.tryToRemoveUselessIndexAddTask(req.IndexID)
+	log.Debug("IndexService", zap.Int64("Drop Index ID", req.IndexID))
 
+	ret := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}
 	err := i.metaTable.MarkIndexAsDeleted(req.IndexID)
 	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		ret.Reason = err.Error()
+		return ret, nil
 	}
 
 	defer func() {
+		go func() {
+			unissuedIndexBuildIDs := i.sched.IndexAddQueue.tryToRemoveUselessIndexAddTask(req.IndexID)
+			for _, indexBuildID := range unissuedIndexBuildIDs {
+				i.metaTable.DeleteIndex(indexBuildID)
+			}
+		}()
+
 		go func() {
 			allNodeClients := i.nodeClients.PeekAllClients()
 			for _, client := range allNodeClients {
 				client.DropIndex(ctx, req)
 			}
 		}()
-		go func() {
-			i.metaTable.removeIndexFile(req.IndexID)
-			i.metaTable.removeMeta(req.IndexID)
-		}()
 	}()
 
-	log.Debug("indexservice drop index success")
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	log.Debug("IndexService", zap.Int64("DropIndex success by ID", req.IndexID))
+	return ret, nil
 }
 
 func (i *IndexService) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
@@ -333,19 +340,22 @@ func (i *IndexService) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIn
 }
 
 func (i *IndexService) NotifyBuildIndex(ctx context.Context, nty *indexpb.NotifyBuildIndexRequest) (*commonpb.Status, error) {
-	log.Debug("indexservice",
+	log.Debug("IndexService",
 		zap.Int64("notify build index", nty.IndexBuildID),
 		zap.Strings("index file paths", nty.IndexFilePaths),
 		zap.Int64("node ID", nty.NodeID))
 	ret := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
-	log.Debug("indexservice", zap.String("[IndexService][NotifyBuildIndex]", nty.String()))
+	log.Debug("IndexService", zap.String("[IndexService][NotifyBuildIndex]", nty.String()))
 	if err := i.metaTable.NotifyBuildIndex(nty); err != nil {
 		ret.ErrorCode = commonpb.ErrorCode_BuildIndexError
 		ret.Reason = err.Error()
-		log.Debug("indexservice", zap.String("[IndexService][NotifyBuildIndex][metaTable][NotifyBuildIndex]", err.Error()))
+		log.Debug("IndexService", zap.String("[IndexService][NotifyBuildIndex][metaTable][NotifyBuildIndex]", err.Error()))
 	}
+
+	log.Debug("IndexService", zap.Any("Index build completed with ID", nty.IndexBuildID))
+
 	i.nodeClients.IncPriority(nty.NodeID, -1)
 	return ret, nil
 }
@@ -367,6 +377,31 @@ func (i *IndexService) tsLoop() {
 			// Server is closed and it should return nil.
 			log.Debug("tsLoop is closed")
 			return
+		}
+	}
+}
+
+func (i *IndexService) dropIndexLoop() {
+	ctx, cancel := context.WithCancel(i.loopCtx)
+
+	defer cancel()
+	defer i.loopWg.Done()
+
+	timeTicker := time.NewTicker(durationInterval)
+
+	log.Debug("IndexService start drop index loop")
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timeTicker.C:
+			indexMetas := i.metaTable.getMarkDeleted(dropIndexLimit)
+			for j := 0; j < len(indexMetas); j++ {
+				if err := i.kv.MultiRemove(indexMetas[j].IndexFilePaths); err != nil {
+					log.Debug("IndexService", zap.String("Remove index files error", err.Error()))
+				}
+				i.metaTable.DeleteIndex(indexMetas[j].IndexBuildID)
+			}
 		}
 	}
 }

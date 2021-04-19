@@ -177,8 +177,25 @@ func (i *IndexNode) BuildIndex(ctx context.Context, request *indexpb.BuildIndexR
 }
 
 func (i *IndexNode) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	log.Debug("indexnode drop index ...", zap.Int64("index id", request.IndexID))
-	i.sched.IndexBuildQueue.tryToRemoveUselessIndexBuildTask(request.IndexID)
+	log.Debug("IndexNode", zap.Int64("Drop index by id", request.IndexID))
+	indexBuildIDs := i.sched.IndexBuildQueue.tryToRemoveUselessIndexBuildTask(request.IndexID)
+	log.Debug("IndexNode", zap.Any("The index of the IndexBuildIDs to be deleted", indexBuildIDs))
+	for _, indexBuildID := range indexBuildIDs {
+		nty := &indexpb.NotifyBuildIndexRequest{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			IndexBuildID:   indexBuildID,
+			NodeID:         Params.NodeID,
+			IndexFilePaths: []string{},
+		}
+		resp, err := i.serviceClient.NotifyBuildIndex(ctx, nty)
+		if err != nil {
+			log.Warn("IndexNode", zap.String("DropIndex notify error", err.Error()))
+		} else if resp.ErrorCode != commonpb.ErrorCode_Success {
+			log.Warn("IndexNode", zap.String("DropIndex notify error reason", resp.Reason))
+		}
+	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
