@@ -112,7 +112,7 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 		case commonpb.MsgType_kDropPartition:
 			ddNode.dropPartition(msg.(*msgstream.DropPartitionMsg))
 		default:
-			log.Println("Not supporting message type:", msg.Type())
+			log.Println("Non supporting message type:", msg.Type())
 		}
 	}
 
@@ -132,7 +132,7 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 		}
 
 	default:
-		log.Println(". default: do nothing ...")
+		log.Println("..........default do nothing")
 	}
 
 	// generate binlog
@@ -303,8 +303,8 @@ func (ddNode *ddNode) createPartition(msg *msgstream.CreatePartitionMsg) {
 	}
 	ddNode.ddRecords.partitionRecords[partitionID] = nil
 
-	partitionName := msg.PartitionName
-	ddNode.ddMsg.partitionRecords[partitionName] = append(ddNode.ddMsg.partitionRecords[partitionName],
+	partitionTag := msg.PartitionName
+	ddNode.ddMsg.partitionRecords[partitionTag] = append(ddNode.ddMsg.partitionRecords[partitionTag],
 		metaOperateRecord{
 			createOrDrop: true,
 			timestamp:    msg.Base.Timestamp,
@@ -341,8 +341,8 @@ func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
 	}
 	delete(ddNode.ddRecords.partitionRecords, partitionID)
 
-	partitionName := msg.PartitionName
-	ddNode.ddMsg.partitionRecords[partitionName] = append(ddNode.ddMsg.partitionRecords[partitionName],
+	partitionTag := msg.PartitionName
+	ddNode.ddMsg.partitionRecords[partitionTag] = append(ddNode.ddMsg.partitionRecords[partitionTag],
 		metaOperateRecord{
 			createOrDrop: false,
 			timestamp:    msg.Base.Timestamp,
