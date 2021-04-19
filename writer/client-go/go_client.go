@@ -3,8 +3,11 @@ package client_go
 import (
 	"context"
 	"github.com/apache/pulsar/pulsar-client-go/pulsar"
-	"github.com/czs007/suvlim/pulsar/client-go/schema"
+	"github.com/golang/protobuf/proto"
 	"log"
+	"suvlim/pulsar/client-go/pb"
+	"suvlim/pulsar/client-go/schema"
+	"sync"
 )
 
 var (
@@ -16,67 +19,77 @@ var (
 type MessageClient struct {
 
 	//message channel
-	insertChan chan *schema.InsertMsg
-	deleteChan chan *schema.DeleteMsg
-	searchChan chan *schema.SearchMsg
-	timeSyncChan chan *schema.TimeSyncMsg
-	key2SegChan chan *schema.Key2SegMsg
+	insertOrDeleteChan chan *pb.InsertOrDeleteMsg
+	searchChan chan *pb.SearchMsg
+	timeSyncChan chan *pb.TimeSyncMsg
+	key2SegChan chan *pb.Key2SegMsg
 
 	// pulsar
 	client pulsar.Client
-	syncInsertProducer pulsar.Producer
-	syncDeleteProducer pulsar.Producer
 	key2segProducer pulsar.Producer
-	consumer pulsar.Consumer
+	writeSyncProducer pulsar.Producer
+	insertOrDeleteConsumer pulsar.Consumer
+	searchConsumer pulsar.Consumer
+	timeSyncConsumer pulsar.Consumer
 
 	// batch messages
-	InsertMsg  []*schema.InsertMsg
-	DeleteMsg  []*schema.DeleteMsg
-	SearchMsg  []*schema.SearchMsg
-	timeMsg    []*schema.TimeSyncMsg
-	key2segMsg []*schema.Key2SegMsg
-
+	InsertOrDeleteMsg  []*pb.InsertOrDeleteMsg
+	SearchMsg  []*pb.SearchMsg
+	timeSyncMsg    []*pb.TimeSyncMsg
+	key2segMsg []*pb.Key2SegMsg
 }
 
-func (mc *MessageClient) ReceiveMessage() {
+func (mc *MessageClient)ReceiveInsertOrDeleteMsg() {
 	for {
-		pulsarMessage := schema.PulsarMessage{}
-		msg, err := mc.consumer.Receive(context.Background())
-		err = msg.GetValue(&pulsarMessage)
+		insetOrDeleteMsg := pb.InsertOrDeleteMsg{}
+		msg, err := mc.insertOrDeleteConsumer.Receive(context.Background())
+		err = msg.GetValue(&insetOrDeleteMsg)
 		if err != nil {
 			log.Fatal(err)
 		}
-
-		msgType := pulsarMessage.MsgType
-		switch msgType {
-		case schema.Insert:
-			IMsgObj := schema.InsertMsg{}
-			mc.insertChan <- &IMsgObj
-		case schema.Delete:
-			DMsgObj := schema.DeleteMsg{}
-			mc.deleteChan <- &DMsgObj
-		case schema.Search:
-			SMsgObj := schema.SearchMsg{}
-			mc.searchChan <- &SMsgObj
-		case schema.TimeSync:
-			TMsgObj := schema.TimeSyncMsg{}
-			mc.timeSyncChan <- &TMsgObj
-		case schema.Key2Seg:
-			KMsgObj := schema.Key2SegMsg{}
-			mc.key2SegChan <- &KMsgObj
-		}
+		mc.insertOrDeleteChan <- &insetOrDeleteMsg
 	}
 }
 
-func (mc *MessageClient) CreatProducer(schemaDef string, topicName string) pulsar.Producer{
-	schema  := pulsar.NewProtoSchema(schemaDef, nil)
-	producer, err := mc.client.CreateProducerWithSchema(pulsar.ProducerOptions{
+func (mc *MessageClient)ReceiveSearchMsg() {
+	for {
+		searchMsg := pb.SearchMsg{}
+		msg, err := mc.insertOrDeleteConsumer.Receive(context.Background())
+		err = msg.GetValue(&searchMsg)
+		if err != nil {
+			log.Fatal(err)
+		}
+		mc.searchChan <- &searchMsg
+	}
+}
+
+func (mc *MessageClient)ReceiveTimeSyncMsg() {
+	for {
+		timeSyncMsg := pb.TimeSyncMsg{}
+		msg, err := mc.insertOrDeleteConsumer.Receive(context.Background())
+		err = msg.GetValue(&timeSyncMsg)
+		if err != nil {
+			log.Fatal(err)
+		}
+		mc.timeSyncChan <- &timeSyncMsg
+	}
+}
+
+func (mc *MessageClient) ReceiveMessage() {
+	go mc.ReceiveInsertOrDeleteMsg()
+	go mc.ReceiveSearchMsg()
+	go mc.ReceiveTimeSyncMsg()
+}
+
+func (mc *MessageClient) CreatProducer(opType pb.OpType, topicName string) pulsar.Producer{
+	producer, err := mc.client.CreateProducer(pulsar.ProducerOptions{
 		Topic: topicName,
-	}, schema)
+	})
 	defer producer.Close()
 	if err != nil {
 		log.Fatal(err)
 	}
+	proto.Marshal()
 	return producer
 }
 
@@ -112,7 +125,7 @@ func (mc *MessageClient) InitClient(url string, topics []string, consumerMsgSche
 	//create producer
 	for topicIndex := range topics {
 		if topics[topicIndex] == "insert" {
-			mc.syncInsertProducer = mc.CreatProducer(SyncEofSchema, "insert")
+			mc.key2segProducer = mc.CreatProducer(SyncEofSchema, "insert")
 		}
 		if topics[topicIndex] == "delete" {
 			mc.syncDeleteProducer = mc.CreatProducer(SyncEofSchema, "delete")
