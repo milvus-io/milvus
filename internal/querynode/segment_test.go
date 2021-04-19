@@ -24,7 +24,7 @@ func TestSegment_newSegment(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment2(collection, segmentID, Params.DefaultPartitionTag, collectionID, segTypeGrowing)
+	segment := newSegment(collection, segmentID, Params.DefaultPartitionTag, collectionID)
 	assert.Equal(t, segmentID, segment.segmentID)
 	deleteSegment(segment)
 	deleteCollection(collection)
@@ -40,7 +40,7 @@ func TestSegment_deleteSegment(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment2(collection, segmentID, Params.DefaultPartitionTag, collectionID, segTypeGrowing)
+	segment := newSegment(collection, segmentID, Params.DefaultPartitionTag, collectionID)
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	deleteSegment(segment)
@@ -58,7 +58,7 @@ func TestSegment_getRowCount(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment2(collection, segmentID, Params.DefaultPartitionTag, collectionID, segTypeGrowing)
+	segment := newSegment(collection, segmentID, Params.DefaultPartitionTag, collectionID)
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	ids := []int64{1, 2, 3}
@@ -107,7 +107,7 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment2(collection, segmentID, Params.DefaultPartitionTag, collectionID, segTypeGrowing)
+	segment := newSegment(collection, segmentID, Params.DefaultPartitionTag, collectionID)
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	ids := []int64{1, 2, 3}
@@ -162,7 +162,7 @@ func TestSegment_getMemSize(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment2(collection, segmentID, Params.DefaultPartitionTag, collectionID, segTypeGrowing)
+	segment := newSegment(collection, segmentID, Params.DefaultPartitionTag, collectionID)
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	ids := []int64{1, 2, 3}
@@ -211,7 +211,7 @@ func TestSegment_segmentInsert(t *testing.T) {
 	assert.Equal(t, collection.Name(), collectionName)
 	assert.Equal(t, collection.ID(), collectionID)
 	segmentID := UniqueID(0)
-	segment := newSegment2(collection, segmentID, Params.DefaultPartitionTag, collectionID, segTypeGrowing)
+	segment := newSegment(collection, segmentID, Params.DefaultPartitionTag, collectionID)
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	ids := []int64{1, 2, 3}
@@ -256,7 +256,7 @@ func TestSegment_segmentDelete(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment2(collection, segmentID, Params.DefaultPartitionTag, collectionID, segTypeGrowing)
+	segment := newSegment(collection, segmentID, Params.DefaultPartitionTag, collectionID)
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	ids := []int64{1, 2, 3}
@@ -307,7 +307,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment2(collection, segmentID, Params.DefaultPartitionTag, collectionID, segTypeGrowing)
+	segment := newSegment(collection, segmentID, Params.DefaultPartitionTag, collectionID)
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	ids := []int64{1, 2, 3}
@@ -390,7 +390,7 @@ func TestSegment_segmentPreInsert(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment2(collection, segmentID, Params.DefaultPartitionTag, collectionID, segTypeGrowing)
+	segment := newSegment(collection, segmentID, Params.DefaultPartitionTag, collectionID)
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	const DIM = 16
@@ -430,7 +430,7 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment2(collection, segmentID, Params.DefaultPartitionTag, collectionID, segTypeGrowing)
+	segment := newSegment(collection, segmentID, Params.DefaultPartitionTag, collectionID)
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	ids := []int64{1, 2, 3}

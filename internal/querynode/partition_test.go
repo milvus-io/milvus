@@ -20,7 +20,7 @@ func TestPartition_Segments(t *testing.T) {
 
 	const segmentNum = 3
 	for i := 0; i < segmentNum; i++ {
-		err := node.replica.addSegment2(UniqueID(i), targetPartition.partitionTag, collection.ID(), segTypeGrowing)
+		err := node.replica.addSegment(UniqueID(i), targetPartition.partitionTag, collection.ID())
 		assert.NoError(t, err)
 	}
 
