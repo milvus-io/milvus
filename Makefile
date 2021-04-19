@@ -39,10 +39,15 @@ check-proto-product: generated-proto-go
 	@(env bash $(PWD)/scripts/check_proto_product.sh)
 
 fmt:
+ifdef GO_DIFF_FILES
+	@echo "Running $@ check"
+	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh $(GO_DIFF_FILES)
+else
 	@echo "Running $@ check"
 	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh cmd/
 	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh internal/
 	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh tests/go/
+endif
 
 #TODO: Check code specifications by golangci-lint
 lint:
@@ -53,10 +58,15 @@ lint:
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./tests/go/...
 
 ruleguard:
+ifdef GO_DIFF_FILES
+	@echo "Running $@ check"
+	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go $(GO_DIFF_FILES)
+else
 	@echo "Running $@ check"
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./internal/...
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./cmd/...
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./tests/go/...
+endif
 
 verifiers: getdeps cppcheck fmt lint ruleguard
 

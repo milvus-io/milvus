@@ -1,3 +1,5 @@
 #! /bin/bash
 
+export GO_DIFF_FILES=$(git diff --name-only --diff-filter=d HEAD "*.go")
+
 make fmt
