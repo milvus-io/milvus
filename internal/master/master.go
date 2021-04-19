@@ -43,9 +43,6 @@ type Master struct {
 	//grpc server
 	grpcServer *grpc.Server
 
-	// for tso.
-	tsoAllocator tso.Allocator
-
 	// pulsar client
 	pc *informer.PulsarClient
 
@@ -87,13 +84,13 @@ func newKVBase() *kv.EtcdKV {
 func CreateServer(ctx context.Context) (*Master, error) {
 	rand.Seed(time.Now().UnixNano())
 	id.InitGlobalIdAllocator("idTimestamp", newTSOKVBase("gid"))
+	tso.InitGlobalTsoAllocator("timestamp", newTSOKVBase("tso"))
 	m := &Master{
 		ctx:            ctx,
 		startTimestamp: time.Now().Unix(),
 		kvBase:         newKVBase(),
 		ssChan:         make(chan internalpb.SegmentStatistics, 10),
 		pc:             informer.NewPulsarClient(),
-		tsoAllocator: tso.NewGlobalTSOAllocator("timestamp", newTSOKVBase("tso")),
 	}
 	m.grpcServer = grpc.NewServer()
 	masterpb.RegisterMasterServer(m.grpcServer, m)
