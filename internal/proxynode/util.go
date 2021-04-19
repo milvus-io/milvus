@@ -97,3 +97,17 @@ func SortedSliceEqual(s1 interface{}, s2 interface{}) bool {
 	}
 	return true
 }
+
+func getMax(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func getMin(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
