@@ -358,20 +358,6 @@ func (manager *SegmentManager) initChannelRanges() error {
 	}
 	return nil
 }
-
-// ForceClose set segments of collection with collID closable, segment will be closed after the assignments of it has expired
-func (manager *SegmentManager) ForceClose(collID UniqueID) error {
-	status, ok := manager.collStatus[collID]
-	if !ok {
-		return nil
-	}
-
-	for _, segStatus := range status.segments {
-		segStatus.closable = true
-	}
-	return nil
-}
-
 func NewSegmentManager(ctx context.Context,
 	meta *metaTable,
 	globalIDAllocator func() (UniqueID, error),
