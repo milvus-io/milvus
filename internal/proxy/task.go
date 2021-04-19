@@ -487,6 +487,7 @@ func (qt *QueryTask) PostExecute() error {
 				Hits: make([][]byte, 0),
 			}
 
+			const minFloat32 = -1 * float32(math.MaxFloat32)
 			for i := 0; i < nq; i++ {
 				locs := make([]int, availableQueryNodeNum)
 				reducedHits := &servicepb.Hits{
@@ -496,18 +497,18 @@ func (qt *QueryTask) PostExecute() error {
 				}
 
 				for j := 0; j < topk; j++ {
-					choice, minDistance := 0, float32(math.MaxFloat32)
+					choice, maxDistance := 0, minFloat32
 					for q, loc := range locs { // query num, the number of ways to merge
 						distance := hits[q][i].Scores[loc]
-						if distance < minDistance {
+						if distance > maxDistance {
 							choice = q
-							minDistance = distance
+							maxDistance = distance
 						}
 					}
 					choiceOffset := locs[choice]
 					// check if distance is valid, `invalid` here means very very big,
 					// in this process, distance here is the smallest, so the rest of distance are all invalid
-					if hits[choice][i].Scores[choiceOffset] >= float32(math.MaxFloat32) {
+					if hits[choice][i].Scores[choiceOffset] <= minFloat32 {
 						break
 					}
 					reducedHits.IDs = append(reducedHits.IDs, hits[choice][i].IDs[choiceOffset])
@@ -516,6 +517,11 @@ func (qt *QueryTask) PostExecute() error {
 					}
 					reducedHits.Scores = append(reducedHits.Scores, hits[choice][i].Scores[choiceOffset])
 					locs[choice]++
+				}
+				if searchResults[0].MetricType != "IP" {
+					for k := range reducedHits.Scores {
+						reducedHits.Scores[k] *= -1
+					}
 				}
 				reducedHitsBs, err := proto.Marshal(reducedHits)
 				if err != nil {
