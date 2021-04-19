@@ -35,8 +35,3 @@ for UNITTEST_DIR in "${UNITTEST_DIRS[@]}"; do
     fi
   done
 done
-
-# ignore Minio,S3 unittes
-MILVUS_DIR="${SCRIPTS_DIR}/../../internal/"
-echo $MILVUS_DIR
-echo go test "${MILVUS_DIR}/storage/internal/tikv/..." "${MILVUS_DIR}/reader/..." "${MILVUS_DIR}/writer/..." "${MILVUS_DIR}/master/..." -failfast

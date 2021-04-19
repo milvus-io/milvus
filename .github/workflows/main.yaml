@@ -65,7 +65,7 @@ jobs:
         shell: bash
         run: |
           cd ${GITHUB_WORKSPACE}/deployments/docker && docker-compose up -d
-          cd ${GITHUB_WORKSPACE}/scripts/ && ./run_unittest.sh
+          cd ${GITHUB_WORKSPACE}/scripts/ && ./run_cpp_unittest.sh && ./run_go_unittest.sh
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'zilliztech/milvus-distributed'
         continue-on-error: true

@@ -9,7 +9,7 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-FROM ubuntu:18.04
+FROM ubuntu:bionic-20200921
 
 # pipefail is enabled for proper error detection in the `wget | apt-key add`
 # step
