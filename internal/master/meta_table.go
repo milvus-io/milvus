@@ -524,7 +524,7 @@ func (mt *metaTable) saveFieldIndexMetaToEtcd(meta *pb.FieldIndexMeta) error {
 	return mt.client.Save(key, marshaledMeta)
 }
 
-func (mt *metaTable) DeleteFieldIndexMeta(segID UniqueID, fieldID UniqueID, indexType string, indexParams []*commonpb.KeyValuePair) error {
+func (mt *metaTable) DeleteFieldIndexMeta(segID UniqueID, fieldID UniqueID, indexParams []*commonpb.KeyValuePair) error {
 	mt.indexLock.Lock()
 	defer mt.indexLock.Unlock()
 
@@ -566,6 +566,22 @@ func (mt *metaTable) HasFieldIndexMeta(segID UniqueID, fieldID UniqueID, indexPa
 		}
 	}
 	return false, nil
+}
+
+func (mt *metaTable) GetFieldIndexMeta(segID UniqueID, fieldID UniqueID, indexParams []*commonpb.KeyValuePair) (*pb.FieldIndexMeta, error) {
+	mt.indexLock.RLock()
+	defer mt.indexLock.RUnlock()
+
+	if _, ok := mt.segID2IndexMetas[segID]; !ok {
+		return nil, fmt.Errorf("can not find segment %d", segID)
+	}
+
+	for _, v := range mt.segID2IndexMetas[segID] {
+		if v.FieldID == fieldID && typeutil.CompareIndexParams(v.IndexParams, indexParams) {
+			return &v, nil
+		}
+	}
+	return nil, fmt.Errorf("can not find field %d", fieldID)
 }
 
 func (mt *metaTable) UpdateFieldIndexMeta(meta *pb.FieldIndexMeta) error {
@@ -634,4 +650,31 @@ func (mt *metaTable) GetFieldIndexParams(collID UniqueID, fieldID UniqueID) ([]*
 		}
 	}
 	return nil, fmt.Errorf("can not find field %d in collection %d", fieldID, collID)
+}
+
+func (mt *metaTable) UpdateFieldIndexParams(collName string, fieldName string, indexParams []*commonpb.KeyValuePair) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	vid, ok := mt.collName2ID[collName]
+	if !ok {
+		return errors.Errorf("can't find collection: " + collName)
+	}
+	meta, ok := mt.collID2Meta[vid]
+	if !ok {
+		return errors.Errorf("can't find collection: " + collName)
+	}
+
+	for _, fieldSchema := range meta.Schema.Fields {
+		if fieldSchema.Name == fieldName {
+			fieldSchema.IndexParams = indexParams
+			if err := mt.saveCollectionMeta(&meta); err != nil {
+				_ = mt.reloadFromKV()
+				return err
+			}
+			return nil
+		}
+	}
+
+	return fmt.Errorf("can not find field with id %s", fieldName)
 }
