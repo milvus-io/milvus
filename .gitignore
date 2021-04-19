@@ -1,0 +1,17 @@
+#proxy
+proxy/cmake_build
+proxy/thirdparty/grpc-src
+proxy/thirdparty/grpc-build
+.idea/
+.idea/*
+
+# Compiled source
+*.a
+*.so
+*.so.*
+*.o
+*.lo
+*.tar.gz
+*.log
+.coverage
+*.pyc
