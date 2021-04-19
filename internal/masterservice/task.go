@@ -1,6 +1,7 @@
 package masterservice
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/golang/protobuf/proto"
@@ -597,6 +598,7 @@ func (t *CreateIndexReqTask) Execute() error {
 			indexParams: t.Req.ExtraParams,
 		}
 		t.core.indexTaskQueue <- &task
+		fmt.Println("create index task enqueue, segID = ", seg)
 	}
 	return nil
 }

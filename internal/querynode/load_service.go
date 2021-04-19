@@ -10,7 +10,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
-const indexCheckInterval = 1
+const indexCheckInterval = 3
 
 type loadService struct {
 	ctx    context.Context
@@ -115,6 +115,7 @@ func (s *loadService) loadSegmentInternal(collectionID UniqueID, partitionID Uni
 		return err
 	}
 	if errIndex == nil {
+		fmt.Println("loading index...")
 		indexPaths, err := s.segLoader.indexLoader.getIndexPaths(buildID)
 		if err != nil {
 			return err

@@ -456,6 +456,11 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 					continue
 				}
 			}
+			err := ibNode.completeFlush(currentSegID)
+			if err != nil {
+				log.Println(err)
+			}
+			log.Println("Flush completed")
 		}
 	}
 

@@ -30,6 +30,10 @@ func (i *ServiceImpl) addNode(nodeID UniqueID, req *indexpb.RegisterNodeRequest)
 	if err != nil {
 		return err
 	}
+	err = nodeClient.Init()
+	if err != nil {
+		return err
+	}
 	item := &PQItem{
 		value:    nodeClient,
 		key:      nodeID,

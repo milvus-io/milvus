@@ -2,6 +2,7 @@ package indexservice
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -177,6 +178,7 @@ func (i *ServiceImpl) GetStatisticsChannel() (string, error) {
 }
 
 func (i *ServiceImpl) BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
+	fmt.Println("builder building index ..., indexName = ", req.IndexName, "indexID = ", req.IndexID, "dataPath = ", req.DataPaths)
 	ret := &indexpb.BuildIndexResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -244,10 +246,13 @@ func (i *ServiceImpl) GetIndexStates(req *indexpb.IndexStatesRequest) (*indexpb.
 }
 
 func (i *ServiceImpl) GetIndexFilePaths(req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {
-	var indexPaths []*indexpb.IndexFilePathInfo
+	var indexPaths []*indexpb.IndexFilePathInfo = nil
 
 	for _, indexID := range req.IndexBuildIDs {
-		indexPathInfo, _ := i.metaTable.GetIndexFilePathInfo(indexID)
+		indexPathInfo, err := i.metaTable.GetIndexFilePathInfo(indexID)
+		if err != nil {
+			return nil, err
+		}
 		indexPaths = append(indexPaths, indexPathInfo)
 	}
 

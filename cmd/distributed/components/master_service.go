@@ -103,6 +103,9 @@ func NewMasterService(ctx context.Context) (*MasterService, error) {
 	is.Params.Init()
 	log.Printf("index service address : %s", is.Params.Address)
 	indexService := isc.NewClient(is.Params.Address)
+	if err = indexService.Init(); err != nil {
+		return nil, err
+	}
 
 	if err = svr.SetIndexService(indexService); err != nil {
 		return nil, err
