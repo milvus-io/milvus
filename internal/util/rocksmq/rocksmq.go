@@ -69,20 +69,12 @@ type ConsumerGroupContext struct {
 }
 
 type RocksMQ struct {
-	//isServing        int64
 	store       *gorocksdb.DB
 	kv          kv.Base
 	channels    map[string]*Channel
 	cgCtxs      map[string]ConsumerGroupContext
 	idAllocator master.IDAllocator
 	mu          sync.Mutex
-	//ctx              context.Context
-	//serverLoopWg     sync.WaitGroup
-	//serverLoopCtx    context.Context
-	//serverLoopCancel func()
-
-	//// tso ticker
-	//tsoTicker *time.Ticker
 }
 
 func NewRocksMQ(name string, idAllocator master.IDAllocator) (*RocksMQ, error) {
@@ -107,76 +99,6 @@ func NewRocksMQ(name string, idAllocator master.IDAllocator) (*RocksMQ, error) {
 	}
 	return rmq, nil
 }
-
-//func (rmq *RocksMQ) startServerLoop(ctx context.Context) error {
-//	rmq.serverLoopCtx, rmq.serverLoopCancel = context.WithCancel(ctx)
-//
-//	go rmq.tsLoop()
-//
-//	return nil
-//}
-
-//func (rmq *RocksMQ) stopServerLoop() {
-//	rmq.serverLoopCancel()
-//	rmq.serverLoopWg.Wait()
-//}
-
-//func (rmq *RocksMQ) tsLoop() {
-//	defer rmq.serverLoopWg.Done()
-//	rmq.tsoTicker = time.NewTicker(master.UpdateTimestampStep)
-//	defer rmq.tsoTicker.Stop()
-//	ctx, cancel := context.WithCancel(rmq.serverLoopCtx)
-//	defer cancel()
-//
-//	for {
-//		select {
-//		case <-rmq.tsoTicker.C:
-//			if err := rmq.idAllocator.UpdateID(); err != nil {
-//				log.Println("failed to update id", err)
-//				return
-//			}
-//		case <-ctx.Done():
-//			// Server is closed and it should return nil.
-//			log.Println("tsLoop is closed")
-//			return
-//		}
-//	}
-//}
-
-//func (rmq *RocksMQ) Start() error {
-//	//init idAllocator
-//	// TODO(yhz): id allocator, which need to etcd address and path, where
-//	// we hardcode about the etcd path
-//	rmq.idAllocator = master.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{""}, "stand-alone/rocksmq", "gid"))
-//	if err := rmq.idAllocator.Initialize(); err != nil {
-//		return err
-//	}
-//
-//	// start server loop
-//	if err := rmq.startServerLoop(rmq.ctx); err != nil {
-//		return err
-//	}
-//
-//	atomic.StoreInt64(&rmq.isServing, 1)
-//
-//	return nil
-//}
-
-//func (rmq *RocksMQ) Stop() error {
-//	if !atomic.CompareAndSwapInt64(&rmq.isServing, 1, 0) {
-//		// server is already closed
-//		return nil
-//	}
-//
-//	log.Print("closing server")
-//
-//	rmq.stopServerLoop()
-//
-//	rmq.kv.Close()
-//	rmq.store.Close()
-//
-//	return nil
-//}
 
 func (rmq *RocksMQ) checkKeyExist(key string) bool {
 	val, _ := rmq.kv.Load(key)
