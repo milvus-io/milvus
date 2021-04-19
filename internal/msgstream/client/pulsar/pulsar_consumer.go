@@ -3,7 +3,6 @@ package pulsar
 import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/client"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type pulsarConsumer struct {
@@ -20,10 +19,7 @@ func (pc *pulsarConsumer) Chan() <-chan client.ConsumerMessage {
 }
 
 func (pc *pulsarConsumer) Seek(id client.MessageID) error {
-	messageID, err := typeutil.StringToPulsarMsgID(string(id.Serialize()))
-	if err != nil {
-		return err
-	}
+	messageID := id.(*pulsarID).messageID
 	return pc.c.Seek(messageID)
 }
 

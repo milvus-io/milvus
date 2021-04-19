@@ -676,26 +676,42 @@ func (ms *TtMsgStream) Seek(mp *internalpb.MsgPosition) error {
 		return errors.New("the channel should has been subscribed")
 	}
 
-	receiveChannel := make(chan client.ConsumerMessage, ms.bufSize)
-	consumer, err = ms.client.Subscribe(client.ConsumerOptions{
-		Topic:                       seekChannel,
-		SubscriptionName:            subName,
-		SubscriptionInitialPosition: client.SubscriptionPositionEarliest,
-		Type:                        client.KeyShared,
-		MessageChannel:              receiveChannel,
-	})
-	if err != nil {
-		return err
-	}
-	if consumer == nil {
-		return errors.New("Consumer is nil")
-	}
+	fn := func() error {
+		receiveChannel := make(chan client.ConsumerMessage, ms.bufSize)
+		consumer, err = ms.client.Subscribe(client.ConsumerOptions{
+			Topic:                       seekChannel,
+			SubscriptionName:            subName,
+			SubscriptionInitialPosition: client.SubscriptionPositionEarliest,
+			Type:                        client.KeyShared,
+			MessageChannel:              receiveChannel,
+		})
+		if err != nil {
+			return err
+		}
+		if consumer == nil {
+			err = errors.New("consumer is nil")
+			log.Debug("subscribe error", zap.String("error = ", err.Error()))
+			return err
+		}
 
-	seekMsgID, err := ms.client.BytesToMsgID(mp.MsgID)
-	if err != nil {
-		return err
+		seekMsgID, err := ms.client.BytesToMsgID(mp.MsgID)
+		if err != nil {
+			log.Debug("convert messageID error", zap.String("error = ", err.Error()))
+			return err
+		}
+		err = consumer.Seek(seekMsgID)
+		if err != nil {
+			log.Debug("seek error ", zap.String("error = ", err.Error()))
+			return err
+		}
+
+		return nil
 	}
-	_ = consumer.Seek(seekMsgID)
+	err = util.Retry(20, time.Millisecond*200, fn)
+	if err != nil {
+		errMsg := "Failed to seek, error = " + err.Error()
+		panic(errMsg)
+	}
 	ms.addConsumer(consumer, seekChannel)
 
 	//TODO: May cause problem

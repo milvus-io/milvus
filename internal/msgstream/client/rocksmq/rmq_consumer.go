@@ -1,8 +1,6 @@
 package rocksmq
 
 import (
-	"strconv"
-
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/client"
 	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq/client/rocksmq"
 )
@@ -21,10 +19,7 @@ func (rc *rmqConsumer) Chan() <-chan client.ConsumerMessage {
 }
 
 func (rc *rmqConsumer) Seek(id client.MessageID) error {
-	msgID, err := strconv.ParseInt(string(id.Serialize()), 10, 64)
-	if err != nil {
-		return err
-	}
+	msgID := id.(*rmqID).messageID
 	return rc.c.Seek(msgID)
 }
 
