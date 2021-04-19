@@ -39,6 +39,7 @@ type (
 		minIOKV      kv.Base
 		minioPrifex  string
 		idAllocator  *allocator.IDAllocator
+		outCh        chan *insertFlushSyncMsg
 	}
 
 	insertBuffer struct {
@@ -428,7 +429,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 	return nil
 }
 
-func newInsertBufferNode(ctx context.Context) *insertBufferNode {
+func newInsertBufferNode(ctx context.Context, outCh chan *insertFlushSyncMsg) *insertBufferNode {
 
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
@@ -447,10 +448,13 @@ func newInsertBufferNode(ctx context.Context) *insertBufferNode {
 	ETCDAddr := Params.EtcdAddress
 	MetaRootPath := Params.MetaRootPath
 	log.Println("metaRootPath: ", MetaRootPath)
-	cli, _ := clientv3.New(clientv3.Config{
+	cli, err := clientv3.New(clientv3.Config{
 		Endpoints:   []string{ETCDAddr},
 		DialTimeout: 5 * time.Second,
 	})
+	if err != nil {
+		panic(err)
+	}
 	kvClient := etcdkv.NewEtcdKV(cli, MetaRootPath)
 
 	// MinIO
@@ -460,14 +464,23 @@ func newInsertBufferNode(ctx context.Context) *insertBufferNode {
 	minioUseSSL := Params.MinioUseSSL
 	minioBucketName := Params.MinioBucketName
 
-	minioClient, _ := minio.New(minioendPoint, &minio.Options{
+	minioClient, err := minio.New(minioendPoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(miniioAccessKeyID, miniioSecretAccessKey, ""),
 		Secure: minioUseSSL,
 	})
-	minIOKV, _ := miniokv.NewMinIOKV(ctx, minioClient, minioBucketName)
+	if err != nil {
+		panic(err)
+	}
+	minIOKV, err := miniokv.NewMinIOKV(ctx, minioClient, minioBucketName)
+	if err != nil {
+		panic(err)
+	}
 	minioPrefix := Params.InsertLogRootPath
 
-	idAllocator, _ := allocator.NewIDAllocator(ctx, Params.MasterAddress)
+	idAllocator, err := allocator.NewIDAllocator(ctx, Params.MasterAddress)
+	if err != nil {
+		panic(err)
+	}
 
 	return &insertBufferNode{
 		BaseNode:     baseNode,
@@ -476,5 +489,6 @@ func newInsertBufferNode(ctx context.Context) *insertBufferNode {
 		minIOKV:      minIOKV,
 		minioPrifex:  minioPrefix,
 		idAllocator:  idAllocator,
+		outCh:        outCh,
 	}
 }

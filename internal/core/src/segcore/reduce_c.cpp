@@ -64,11 +64,6 @@ struct SearchResultPair {
         return (distance_ < pair.distance_);
     }
 
-    bool
-    operator>(const SearchResultPair& pair) const {
-        return (distance_ > pair.distance_);
-    }
-
     void
     reset_distance() {
         distance_ = search_result_->result_distances_[offset_];
@@ -94,7 +89,7 @@ GetResultData(std::vector<std::vector<int64_t>>& search_records,
     AssertInfo(topk > 0, "topK must greater than 0");
     for (int i = 0; i < topk; ++i) {
         result_pairs[0].reset_distance();
-        std::sort(result_pairs.begin(), result_pairs.end(), std::greater<>());
+        std::sort(result_pairs.begin(), result_pairs.end());
         auto& result_pair = result_pairs[0];
         auto index = result_pair.index_;
         is_selected[index] = true;

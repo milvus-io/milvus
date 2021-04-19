@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"testing"
+	"time"
 
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -60,6 +61,20 @@ func startMaster(ctx context.Context) {
 func TestMain(m *testing.M) {
 	Params.Init()
 	refreshChannelNames()
+	const ctxTimeInMillisecond = 2000
+	const closeWithDeadline = true
+	var ctx context.Context
+
+	if closeWithDeadline {
+		var cancel context.CancelFunc
+		d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
+		ctx, cancel = context.WithDeadline(context.Background(), d)
+		defer cancel()
+	} else {
+		ctx = context.Background()
+	}
+
+	startMaster(ctx)
 	p := Params
 	fmt.Println(p)
 	exitCode := m.Run()

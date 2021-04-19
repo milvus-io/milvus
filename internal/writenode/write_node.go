@@ -2,48 +2,37 @@ package writenode
 
 import (
 	"context"
-
-	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
-	"go.etcd.io/etcd/clientv3"
 )
 
 type WriteNode struct {
-	ctx             context.Context
-	WriteNodeID     uint64
-	dataSyncService *dataSyncService
-
-	metaTable *metaTable
+	ctx              context.Context
+	WriteNodeID      uint64
+	dataSyncService  *dataSyncService
+	flushSyncService *flushSyncService
 }
 
-func NewWriteNode(ctx context.Context, writeNodeID uint64) (*WriteNode, error) {
+func NewWriteNode(ctx context.Context, writeNodeID uint64) *WriteNode {
 
 	node := &WriteNode{
-		ctx:             ctx,
-		WriteNodeID:     writeNodeID,
-		dataSyncService: nil,
+		ctx:              ctx,
+		WriteNodeID:      writeNodeID,
+		dataSyncService:  nil,
+		flushSyncService: nil,
 	}
 
-	etcdAddress := Params.EtcdAddress
-	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
-	if err != nil {
-		return nil, err
-	}
-	etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
-	metaKV, err2 := NewMetaTable(etcdKV)
-	if err2 != nil {
-		return nil, err
-	}
-	node.metaTable = metaKV
-
-	return node, nil
+	return node
 }
 
 func (node *WriteNode) Start() {
-	node.dataSyncService = newDataSyncService(node.ctx)
-	// node.statsService = newStatsService(node.ctx)
+
+	ddChan := make(chan *ddlFlushSyncMsg, 5)
+	insertChan := make(chan *insertFlushSyncMsg, 5)
+	node.flushSyncService = newFlushSyncService(node.ctx, ddChan, insertChan)
+
+	node.dataSyncService = newDataSyncService(node.ctx, ddChan, insertChan)
 
 	go node.dataSyncService.start()
-	// node.statsService.start()
+	go node.flushSyncService.start()
 }
 
 func (node *WriteNode) Close() {
@@ -53,7 +42,4 @@ func (node *WriteNode) Close() {
 	if node.dataSyncService != nil {
 		(*node.dataSyncService).close()
 	}
-	// if node.statsService != nil {
-	//     (*node.statsService).close()
-	// }
 }

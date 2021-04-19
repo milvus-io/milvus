@@ -84,7 +84,7 @@ func TestParamTable_WriteNode(t *testing.T) {
 
 	t.Run("Test MinioBucketName", func(t *testing.T) {
 		name := Params.MinioBucketName
-		assert.Equal(t, name, "A-bucket")
+		assert.Equal(t, name, "a-bucket")
 	})
 
 	t.Run("Test FlushInsertBufSize", func(t *testing.T) {

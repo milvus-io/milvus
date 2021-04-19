@@ -140,11 +140,6 @@ Search(CSegmentBase c_segment,
     auto status = CStatus();
     try {
         auto res = segment->Search(plan, placeholder_groups.data(), timestamps, num_groups, *query_result);
-        if (plan->plan_node_->query_info_.metric_type_ != "IP") {
-            for (auto& dis : query_result->result_distances_) {
-                dis *= -1;
-            }
-        }
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {

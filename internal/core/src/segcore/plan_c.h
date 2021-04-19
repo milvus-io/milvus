@@ -35,9 +35,6 @@ GetNumOfQueries(CPlaceholderGroup placeholder_group);
 int64_t
 GetTopK(CPlan plan);
 
-const char*
-GetMetricType(CPlan plan);
-
 void
 DeletePlan(CPlan plan);
 

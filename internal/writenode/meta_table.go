@@ -55,13 +55,11 @@ func (mt *metaTable) AppendDDLBinlogPaths(collID UniqueID, paths []string) error
 	return mt.saveDDLFlushMeta(meta)
 }
 
-func (mt *metaTable) AppendSegBinlogPaths(timestamp Timestamp, segmentID UniqueID, fieldID int32, dataPaths []string) error {
-	mt.lock.Lock()
-	defer mt.lock.Unlock()
+func (mt *metaTable) AppendSegBinlogPaths(tsOpen Timestamp, segmentID UniqueID, fieldID int32, dataPaths []string) error {
 
 	_, ok := mt.segID2FlushMeta[segmentID]
 	if !ok {
-		err := mt.addSegmentFlush(segmentID, timestamp)
+		err := mt.addSegmentFlush(segmentID, tsOpen)
 		if err != nil {
 			return err
 		}
@@ -85,6 +83,19 @@ func (mt *metaTable) AppendSegBinlogPaths(timestamp Timestamp, segmentID UniqueI
 		}
 		meta.Fields = append(meta.Fields, newField)
 	}
+
+	return mt.saveSegFlushMeta(&meta)
+}
+
+func (mt *metaTable) CompleteFlush(tsClose Timestamp, segmentID UniqueID) error {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+	meta, ok := mt.segID2FlushMeta[segmentID]
+	if !ok {
+		return errors.Errorf("segment not exists with ID = " + strconv.FormatInt(segmentID, 10))
+	}
+	meta.IsClosed = true
+	meta.CloseTime = tsClose
 
 	return mt.saveSegFlushMeta(&meta)
 }
@@ -178,19 +189,6 @@ func (mt *metaTable) getFlushOpenTime(segmentID UniqueID) (Timestamp, error) {
 		return typeutil.ZeroTimestamp, errors.Errorf("segment not exists with ID = " + strconv.FormatInt(segmentID, 10))
 	}
 	return meta.OpenTime, nil
-}
-
-func (mt *metaTable) CompleteFlush(segmentID UniqueID, timestamp Timestamp) error {
-	mt.lock.Lock()
-	defer mt.lock.Unlock()
-	meta, ok := mt.segID2FlushMeta[segmentID]
-	if !ok {
-		return errors.Errorf("segment not exists with ID = " + strconv.FormatInt(segmentID, 10))
-	}
-	meta.IsClosed = true
-	meta.CloseTime = timestamp
-
-	return mt.saveSegFlushMeta(&meta)
 }
 
 func (mt *metaTable) checkFlushComplete(segmentID UniqueID) (bool, error) {

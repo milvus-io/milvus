@@ -25,6 +25,7 @@ type ddNode struct {
 	ddMsg     *ddMsg
 	ddRecords *ddRecords
 	ddBuffer  *ddBuffer
+	outCh     chan *ddlFlushSyncMsg // for flush sync
 
 	idAllocator *allocator.IDAllocator
 	kv          kv.Base
@@ -311,7 +312,7 @@ func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
 	ddNode.ddBuffer.ddData[collectionID].eventTypes = append(ddNode.ddBuffer.ddData[collectionID].eventTypes, storage.DropPartitionEventType)
 }
 
-func newDDNode(ctx context.Context) *ddNode {
+func newDDNode(ctx context.Context, outCh chan *ddlFlushSyncMsg) *ddNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -335,8 +336,8 @@ func newDDNode(ctx context.Context) *ddNode {
 	if err != nil {
 		panic(err)
 	}
-	// TODO: load bucket name from yaml?
-	minioKV, err := miniokv.NewMinIOKV(ctx, minIOClient, "write-node-dd-node")
+	bucketName := Params.MinioBucketName
+	minioKV, err := miniokv.NewMinIOKV(ctx, minIOClient, bucketName)
 	if err != nil {
 		panic(err)
 	}
@@ -357,6 +358,7 @@ func newDDNode(ctx context.Context) *ddNode {
 			ddData:  make(map[UniqueID]*ddData),
 			maxSize: Params.FlushDdBufSize,
 		},
+		outCh: outCh,
 
 		idAllocator: idAllocator,
 		kv:          minioKV,

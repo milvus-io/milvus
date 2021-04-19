@@ -27,8 +27,6 @@ func TestPlan_Plan(t *testing.T) {
 	assert.NotEqual(t, plan, nil)
 	topk := plan.getTopK()
 	assert.Equal(t, int(topk), 10)
-	metricType := plan.getMetricType()
-	assert.Equal(t, metricType, "L2")
 	plan.delete()
 	deleteCollection(collection)
 }
