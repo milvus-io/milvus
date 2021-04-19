@@ -14,6 +14,7 @@
 #include "query/GeneralQuery.h"
 #include "utils/Status.h"
 #include "dog_segment/DeletedRecord.h"
+#include "EasyAssert.h"
 
 namespace milvus::dog_segment {
 struct ColumnBasedDataChunk {
@@ -27,7 +28,7 @@ struct ColumnBasedDataChunk {
         auto align = source.sizeof_per_row;
         for (auto &field : schema) {
             auto len = field.get_sizeof();
-            assert(len % sizeof(float) == 0);
+            Assert(len % sizeof(float) == 0);
             std::vector<float> new_col(len * count / sizeof(float));
             for (int64_t i = 0; i < count; ++i) {
                 memcpy(new_col.data() + i * len / sizeof(float), raw_data + i * align, len);

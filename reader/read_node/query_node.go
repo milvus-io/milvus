@@ -16,7 +16,6 @@ import "C"
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/czs007/suvlim/conf"
 	"github.com/stretchr/testify/assert"
 	"log"
 	"sort"
@@ -333,13 +332,17 @@ func (node *QueryNode) RunSearch(wg *sync.WaitGroup) {
 			node.messageClient.SearchMsg = node.messageClient.SearchMsg[:0]
 			node.messageClient.SearchMsg = append(node.messageClient.SearchMsg, msg)
 			fmt.Println("Do Search...")
-			var status = node.Search(node.messageClient.SearchMsg)
-			if status.ErrorCode != 0 {
-				fmt.Println("Search Failed")
-				node.PublishFailedSearchResult()
+			for  {
+				if node.messageClient.SearchMsg[0].Timestamp < node.queryNodeTimeSync.ServiceTimeSync {
+					var status = node.Search(node.messageClient.SearchMsg)
+					if status.ErrorCode != 0 {
+						fmt.Println("Search Failed")
+						node.PublishFailedSearchResult()
+					}
+					break
+				}
 			}
 		default:
-
 		}
 	}
 	wg.Done()
@@ -580,8 +583,8 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 		// So the ServiceTimeSync is always less than searchTimestamp.
 		// Here, we manually make searchTimestamp's logic time minus `conf.Config.Timesync.Interval` milliseconds.
 		// Which means `searchTimestamp.logicTime = searchTimestamp.logicTime - conf.Config.Timesync.Interval`.
-		var logicTimestamp = searchTimestamp << 46 >> 46
-		searchTimestamp = (searchTimestamp >> 18 - uint64(conf.Config.Timesync.Interval)) << 18 + logicTimestamp
+		// var logicTimestamp = searchTimestamp << 46 >> 46
+		// searchTimestamp = (searchTimestamp >> 18 - uint64(conf.Config.Timesync.Interval)) << 18 + logicTimestamp
 
 		var vector = msg.Records
 		// We now only the first Json is valid.
@@ -590,7 +593,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 		// 1. Timestamp check
 		// TODO: return or wait? Or adding graceful time
 		if searchTimestamp > node.queryNodeTimeSync.ServiceTimeSync {
-			fmt.Println("Invalid query time, timestamp = ", searchTimestamp, ", SearchTimeSync = ", node.queryNodeTimeSync.ServiceTimeSync)
+			fmt.Println("Invalid query time, timestamp = ", searchTimestamp >> 18, ", SearchTimeSync = ", node.queryNodeTimeSync.ServiceTimeSync >> 18)
 			return msgPb.Status{ErrorCode: 1}
 		}
 
@@ -599,6 +602,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 
 		// 3. Do search in all segments
 		for _, segment := range node.SegmentsMap {
+			fmt.Println("Search in segment:", segment.SegmentId, ",segment rows:", segment.GetRowCount())
 			var res, err = segment.SegmentSearch(query, searchTimestamp, vector)
 			if err != nil {
 				fmt.Println(err.Error())

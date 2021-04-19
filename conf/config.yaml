@@ -52,7 +52,7 @@ reader:
 writer:
   clientid: 0
   stopflag: -2
-  readerqueuesize: 1024
+  readerqueuesize: 10000
   searchbyidchansize: 10000
   topicstart: 0
   topicend: 128

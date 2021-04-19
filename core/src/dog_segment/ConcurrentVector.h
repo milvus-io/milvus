@@ -7,6 +7,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <vector>
+#include "EasyAssert.h"
 namespace milvus::dog_segment {
 
 // we don't use std::array because capacity of concurrent_vector wastes too much memory
@@ -18,7 +19,7 @@ namespace milvus::dog_segment {
 //    }
 //    FixedVector(const FixedVector<Type>& placeholder_vec)
 //        : std::vector<Type>(placeholder_vec.placeholder_size_), is_placeholder_(false) {
-//        // assert(placeholder_vec.is_placeholder_);
+//        // Assert(placeholder_vec.is_placeholder_);
 //    }
 //    FixedVector(FixedVector<Type>&&) = delete;
 //
@@ -58,14 +59,14 @@ class ThreadSafeVector {
     }
     const Type&
     operator[](int64_t index) const {
-        assert(index < size_);
+        Assert(index < size_);
         std::shared_lock lck(mutex_);
         return vec_[index];
     }
 
     Type&
     operator[](int64_t index) {
-        assert(index < size_);
+        Assert(index < size_);
         std::shared_lock lck(mutex_);
         return vec_[index];
     }
@@ -105,7 +106,7 @@ class ConcurrentVector : public VectorBase {
  public:
 
     explicit ConcurrentVector(ssize_t dim = 1) : Dim(is_scalar ? 1 : dim), SizePerChunk(Dim * ElementsPerChunk) {
-        assert(is_scalar ? dim == 1 : dim != 1);
+        Assert(is_scalar ? dim == 1 : dim != 1);
     }
 
     void
@@ -171,7 +172,7 @@ class ConcurrentVector : public VectorBase {
 
     const Type&
     operator[](ssize_t element_index) const {
-        assert(Dim == 1);
+        Assert(Dim == 1);
         auto chunk_id = element_index / ElementsPerChunk;
         auto chunk_offset = element_index % ElementsPerChunk;
         return get_chunk(chunk_id)[chunk_offset];
@@ -190,7 +191,7 @@ class ConcurrentVector : public VectorBase {
             return;
         }
         auto chunk_max_size = chunks_.size();
-        assert(chunk_id < chunk_max_size);
+        Assert(chunk_id < chunk_max_size);
         Chunk& chunk = chunks_[chunk_id];
         auto ptr = chunk.data();
         std::copy_n(source + source_offset * Dim, element_count * Dim, ptr + chunk_offset * Dim);
