@@ -34,7 +34,6 @@
 #include "utils/SignalHandler.h"
 #include "utils/TimeRecorder.h"
 #include "MessageWrapper.h"
-#include "MetaWrapper.h"
 
 namespace milvus {
 namespace server {
@@ -241,14 +240,11 @@ Server::StartService() {
 
     grpc::GrpcServer::GetInstance().Start();
 
-    // Init pulsar message client
     stat = MessageWrapper::GetInstance().Init();
     if (!stat.ok()) {
         LOG_SERVER_ERROR_ << "Pulsar message client start service fail: " << stat.message();
         goto FAIL;
     }
-
-    MetaWrapper::GetInstance().Init();
 
     return Status::OK();
 FAIL:

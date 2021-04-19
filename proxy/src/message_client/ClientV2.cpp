@@ -3,6 +3,8 @@
 #include "PartitionPolicy.h"
 #include "utils/CommonUtil.h"
 #include <omp.h>
+#include <numeric>
+#include <algorithm>
 
 namespace milvus::message_client {
 
@@ -48,63 +50,80 @@ int64_t GetQueryNodeNum() {
     return 1;
 }
 
-milvus::grpc::QueryResult Aggregation(std::vector<std::shared_ptr<grpc::QueryResult>> &results) {
-  //TODO: QueryNode has only one
-  int64_t length = results.size();
+Status
+Aggregation(std::vector<std::shared_ptr<grpc::QueryResult>> results, milvus::grpc::QueryResult* result) {
+  if (results.empty()) {
+      return  Status(DB_ERROR, "The result is null!");
+  }
+
   std::vector<float> all_scores;
   std::vector<float> all_distance;
+  std::vector<int64_t> all_entities_ids;
+  std::vector<bool> all_valid_row;
+  std::vector<grpc::RowData> all_row_data;
   std::vector<grpc::KeyValuePair> all_kv_pairs;
-  std::vector<int> index(length * results[0]->distances_size());
 
-  for (int n = 0; n < length * results[0]->distances_size(); ++n) {
-    index[n] = n;
-  }
+    grpc::Status status;
+    int row_num = 0;
 
-  for (int i = 0; i < length; i++) {
-    for (int j = 0; j < results[i]->distances_size(); j++) {
-//      all_scores.push_back(results[i]->scores()[j]);
-      all_distance.push_back(results[i]->distances()[j]);
-//      all_kv_pairs.push_back(results[i]->extra_params()[j]);
-    }
-  }
-
-  for (int k = 0; k < all_distance.size() - 1; ++k) {
-    for (int l = k + 1; l < all_distance.size(); ++l) {
-
-      if (all_distance[l] > all_distance[k]) {
-        float distance_temp = all_distance[k];
-        all_distance[k] = all_distance[l];
-        all_distance[l] = distance_temp;
-
-        int index_temp = index[k];
-        index[k] = index[l];
-        index[l] = index_temp;
+  for (auto & result_per_node : results) {
+      if (result_per_node->status().error_code() != grpc::ErrorCode::SUCCESS){
+//    if (one_node_res->status().error_code() != grpc::ErrorCode::SUCCESS ||
+//        one_node_res->entities().status().error_code() != grpc::ErrorCode::SUCCESS) {
+          return Status(DB_ERROR, "QueryNode return wrong status!");
       }
-    }
+      for (int j = 0; j < result_per_node->distances_size(); j++) {
+          all_scores.push_back(result_per_node->scores()[j]);
+          all_distance.push_back(result_per_node->distances()[j]);
+//          all_kv_pairs.push_back(result_per_node->extra_params()[j]);
+      }
+      for (int k = 0; k < result_per_node->entities().ids_size(); ++k) {
+          all_entities_ids.push_back(result_per_node->entities().ids(k));
+//          all_valid_row.push_back(result_per_node->entities().valid_row(k));
+//          all_row_data.push_back(result_per_node->entities().rows_data(k));
+      }
+      if (result_per_node->row_num() > row_num){
+          row_num = result_per_node->row_num();
+      }
+      status = result_per_node->status();
   }
 
-    grpc::QueryResult result;
+    std::vector<int> index(all_distance.size());
 
-    result.mutable_status()->CopyFrom(results[0]->status());
-    result.mutable_entities()->CopyFrom(results[0]->entities());
-    result.set_row_num(results[0]->row_num());
+    iota(index.begin(), index.end(), 0);
 
-    for (int m = 0; m < results[0]->distances_size(); ++m) {
-//        result.add_scores(all_scores[index[m]]);
-        result.add_distances(all_distance[m]);
-//        result.add_extra_params();
-//        result.mutable_extra_params(m)->CopyFrom(all_kv_pairs[index[m]]);
+    std::stable_sort(index.begin(), index.end(),
+                     [&all_distance](size_t i1, size_t i2) {return all_distance[i1] > all_distance[i2];});
+
+    grpc::Entities result_entities;
+
+    for (int m = 0; m < result->row_num(); ++m) {
+        result->add_scores(all_scores[index[m]]);
+        result->add_distances(all_distance[index[m]]);
+//        result->add_extra_params();
+//        result->mutable_extra_params(m)->CopyFrom(all_kv_pairs[index[m]]);
+
+        result_entities.add_ids(all_entities_ids[index[m]]);
+//        result_entities.add_valid_row(all_valid_row[index[m]]);
+//        result_entities.add_rows_data();
+//        result_entities.mutable_rows_data(m)->CopyFrom(all_row_data[index[m]]);
     }
 
-//  result.set_query_id(results[0]->query_id());
-//  result.set_client_id(results[0]->client_id());
+    result_entities.mutable_status()->CopyFrom(status);
 
-  return result;
+    result->set_row_num(row_num);
+    result->mutable_entities()->CopyFrom(result_entities);
+    result->set_query_id(results[0]->query_id());
+//  result->set_client_id(results[0]->client_id());
+
+  return Status::OK();
 }
 
 Status MsgClientV2::GetQueryResult(int64_t query_id, milvus::grpc::QueryResult* result) {
 
     int64_t query_node_num = GetQueryNodeNum();
+
+    auto t1 = std::chrono::high_resolution_clock::now();
 
     while (true) {
         auto received_result = total_results[query_id];
@@ -124,8 +143,9 @@ Status MsgClientV2::GetQueryResult(int64_t query_id, milvus::grpc::QueryResult* 
             return Status(DB_ERROR, "can't parse message which from pulsar!");
         }
     }
-    *result = Aggregation(total_results[query_id]);
-    return Status::OK();
+    auto status = Aggregation(total_results[query_id], result);
+
+    return status;
 }
 
 Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request, uint64_t timestamp) {
@@ -155,7 +175,7 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request, uin
     }
   }
   for (auto &stat : stats) {
-    if (stat != pulsar::ResultOk) {
+    if (stat == pulsar::ResultOk) {
       return Status(DB_ERROR, pulsar::strResult(stat));
     }
   }
@@ -181,7 +201,7 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::DeleteByIDParam &request,
     }
   }
   for (auto &stat : stats) {
-    if (stat != pulsar::ResultOk) {
+    if (stat == pulsar::ResultOk) {
       return Status(DB_ERROR, pulsar::strResult(stat));
     }
   }
@@ -199,18 +219,19 @@ Status MsgClientV2::SendQueryMessage(const milvus::grpc::SearchParam &request, u
     search_msg.set_timestamp(timestamp);
     search_msg.set_dsl(request.dsl());
 
-    //TODO: get data type from master
     milvus::grpc::VectorRowRecord vector_row_recode;
     std::vector<float> vectors_records;
+    std::string binary_data;
     for (int i = 0; i < request.vector_param_size(); ++i) {
         search_msg.add_json(request.vector_param(i).json());
         for (int j = 0; j < request.vector_param(i).row_record().records_size(); ++j) {
             for (int k = 0; k < request.vector_param(i).row_record().records(j).float_data_size(); ++k) {
                 vector_row_recode.add_float_data(request.vector_param(i).row_record().records(j).float_data(k));
             }
-            vector_row_recode.set_binary_data(request.vector_param(i).row_record().records(j).binary_data());
+            binary_data.append(request.vector_param(i).row_record().records(j).binary_data());
         }
     }
+    vector_row_recode.set_binary_data(binary_data);
 
     search_msg.mutable_records()->CopyFrom(vector_row_recode);
 
@@ -222,80 +243,12 @@ Status MsgClientV2::SendQueryMessage(const milvus::grpc::SearchParam &request, u
         search_msg.mutable_extra_params(l)->CopyFrom(request.extra_params(l));
     }
 
-    std::cout << search_msg.collection_name() << std::endl;
     auto result = search_producer_->send(search_msg);
     if (result != pulsar::Result::ResultOk) {
         return Status(DB_ERROR, pulsar::strResult(result));
     }
 
     return Status::OK();
-
-//    milvus::grpc::QueryResult fake_message;
-//    milvus::grpc::QueryResult fake_message2;
-//
-//    milvus::grpc::Status fake_status;
-//    fake_status.set_error_code(milvus::grpc::ErrorCode::SUCCESS);
-//    std::string aaa = "hahaha";
-//    fake_status.set_reason(aaa);
-//
-//    milvus::grpc::RowData fake_row_data;
-//    fake_row_data.set_blob("fake_row_data");
-//
-//    milvus::grpc::Entities fake_entities;
-////    fake_entities.set_allocated_status(&fake_status);
-//    fake_entities.mutable_status()->CopyFrom(fake_status);
-//    for (int i = 0; i < 10; i++){
-//        fake_entities.add_ids(i);
-//        fake_entities.add_valid_row(true);
-//        fake_entities.add_rows_data()->CopyFrom(fake_row_data);
-//    }
-//
-//    int64_t fake_row_num = 10;
-//
-//    float fake_scores[10] = {1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8, 9.9, 0.0};
-//    float fake_distance[10] = {9.7, 9.6, 9.5, 9.8, 8.7, 8.8, 9.9, 8.8, 9.7, 8.9};
-//
-//    std::vector<milvus::grpc::KeyValuePair> fake_extra_params;
-//    milvus::grpc::KeyValuePair keyValuePair;
-//    for (int i = 0; i < 10; ++i) {
-//        keyValuePair.set_key(std::to_string(i));
-//        keyValuePair.set_value(std::to_string(i + 10));
-//        fake_extra_params.push_back(keyValuePair);
-//    }
-//
-//    int64_t fake_query_id = 10;
-//    int64_t fake_client_id = 1;
-//
-//    fake_message.mutable_status()->CopyFrom(fake_status);
-//    fake_message.mutable_entities()->CopyFrom(fake_entities);
-//    fake_message.set_row_num(fake_row_num);
-//    for (int i = 0; i < 10; i++) {
-//        fake_message.add_scores(fake_scores[i]);
-//        fake_message.add_distances(fake_distance[i]);
-//        fake_message.add_extra_params()->CopyFrom(fake_extra_params[i]);
-//    }
-//
-//    fake_message.set_query_id(fake_query_id);
-//    fake_message.set_client_id(fake_client_id);
-//
-//    float fake_scores2[10] = {2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8, 9.9, 0.0, 1.1};
-//    float fake_distance2[10] = {9.8, 8.6, 9.6, 9.7, 8.9, 8.8, 9.0, 9.8, 9.7, 8.9};
-//
-//    fake_message2.mutable_status()->CopyFrom(fake_status);
-//    fake_message2.mutable_entities()->CopyFrom(fake_entities);
-//    fake_message2.set_row_num(fake_row_num);
-//    for (int j = 0; j < 10; ++j) {
-//        fake_message2.add_scores(fake_scores2[j]);
-//        fake_message2.add_distances(fake_distance2[j]);
-//        fake_message2.add_extra_params()->CopyFrom(fake_extra_params[j]);
-//    }
-//
-//    fake_message2.set_query_id(fake_query_id);
-//    fake_message2.set_client_id(fake_client_id);
-//
-//    search_by_id_producer_->send(fake_message.SerializeAsString());
-//    search_by_id_producer_->send(fake_message2.SerializeAsString());
-//    return Status::OK();
 }
 
 MsgClientV2::~MsgClientV2() {

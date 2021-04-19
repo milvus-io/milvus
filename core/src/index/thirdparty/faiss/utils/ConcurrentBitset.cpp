@@ -197,7 +197,7 @@ ConcurrentBitset::capacity() {
 }
 
 size_t
-ConcurrentBitset::u8size() {
+ConcurrentBitset::size() {
     return ((capacity_ + 8 - 1) >> 3);
 }
 

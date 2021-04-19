@@ -26,7 +26,6 @@
 #include "tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
-#include "server/MetaWrapper.h"
 
 namespace milvus {
 namespace server {
@@ -341,10 +340,6 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext *context, const ::mil
   CHECK_NULLPTR_RETURN(request);
   LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
-  Status status =  MetaWrapper::GetInstance().MetaClient()->CreateCollection(*request);
-
-  LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
-  SET_RESPONSE(response, status, context)
   return ::grpc::Status::OK;
 }
 
@@ -857,8 +852,10 @@ GrpcRequestHandler::Search(::grpc::ServerContext *context, const ::milvus::grpc:
   LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
   //TODO: check if the request is legal
-  BaseReqPtr req_ptr = SearchReq::Create(GetContext(context), request, response);
-  ReqScheduler::ExecReq(req_ptr);
+
+    BaseReqPtr req_ptr = SearchReq::Create(GetContext(context), request, response);
+    ReqScheduler::ExecReq(req_ptr);
+
   return ::grpc::Status::OK;
 }
 
