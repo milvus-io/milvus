@@ -49,32 +49,32 @@ func (plan *Plan) delete() {
 	C.DeletePlan(plan.cPlan)
 }
 
-type PlaceholderGroup struct {
+type searchRequest struct {
 	cPlaceholderGroup C.CPlaceholderGroup
 }
 
-func parserPlaceholderGroup(plan *Plan, placeHolderBlob []byte) (*PlaceholderGroup, error) {
-	if len(placeHolderBlob) == 0 {
+func parseSearchRequest(plan *Plan, searchRequestBlob []byte) (*searchRequest, error) {
+	if len(searchRequestBlob) == 0 {
 		return nil, errors.New("empty search request")
 	}
-	var blobPtr = unsafe.Pointer(&placeHolderBlob[0])
-	blobSize := C.long(len(placeHolderBlob))
+	var blobPtr = unsafe.Pointer(&searchRequestBlob[0])
+	blobSize := C.long(len(searchRequestBlob))
 	var cPlaceholderGroup C.CPlaceholderGroup
 	status := C.ParsePlaceholderGroup(plan.cPlan, blobPtr, blobSize, &cPlaceholderGroup)
 
-	if err := HandleCStatus(&status, "parser placeholder group failed"); err != nil {
+	if err := HandleCStatus(&status, "parser searchRequest failed"); err != nil {
 		return nil, err
 	}
 
-	var newPlaceholderGroup = &PlaceholderGroup{cPlaceholderGroup: cPlaceholderGroup}
-	return newPlaceholderGroup, nil
+	var newSearchRequest = &searchRequest{cPlaceholderGroup: cPlaceholderGroup}
+	return newSearchRequest, nil
 }
 
-func (pg *PlaceholderGroup) getNumOfQuery() int64 {
+func (pg *searchRequest) getNumOfQuery() int64 {
 	numQueries := C.GetNumOfQueries(pg.cPlaceholderGroup)
 	return int64(numQueries)
 }
 
-func (pg *PlaceholderGroup) delete() {
+func (pg *searchRequest) delete() {
 	C.DeletePlaceholderGroup(pg.cPlaceholderGroup)
 }

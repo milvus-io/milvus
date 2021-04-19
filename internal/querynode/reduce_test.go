@@ -54,9 +54,9 @@ func TestReduce_AllFunc(t *testing.T) {
 
 	plan, err := createPlan(*collection, dslString)
 	assert.NoError(t, err)
-	holder, err := parserPlaceholderGroup(plan, placeGroupByte)
+	holder, err := parseSearchRequest(plan, placeGroupByte)
 	assert.NoError(t, err)
-	placeholderGroups := make([]*PlaceholderGroup, 0)
+	placeholderGroups := make([]*searchRequest, 0)
 	placeholderGroups = append(placeholderGroups, holder)
 
 	searchResults := make([]*SearchResult, 0)

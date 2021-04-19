@@ -166,7 +166,7 @@ import (
 //		Type:   milvuspb.PlaceholderType_VectorFloat,
 //		Values: [][]byte{searchRowByteData},
 //	}
-//	placeholderGroup := milvuspb.PlaceholderGroup{
+//	placeholderGroup := milvuspb.searchRequest{
 //		Placeholders: []*milvuspb.PlaceholderValue{&placeholderValue},
 //	}
 //	placeGroupByte, err := proto.Marshal(&placeholderGroup)
@@ -175,7 +175,7 @@ import (
 //	}
 //	query := milvuspb.SearchRequest{
 //		Dsl:              dslString,
-//		PlaceholderGroup: placeGroupByte,
+//		searchRequest: placeGroupByte,
 //	}
 //	queryByte, err := proto.Marshal(&query)
 //	if err != nil {
@@ -489,7 +489,7 @@ import (
 //		Type:   milvuspb.PlaceholderType_VectorBinary,
 //		Values: [][]byte{searchRowData},
 //	}
-//	placeholderGroup := milvuspb.PlaceholderGroup{
+//	placeholderGroup := milvuspb.searchRequest{
 //		Placeholders: []*milvuspb.PlaceholderValue{&placeholderValue},
 //	}
 //	placeGroupByte, err := proto.Marshal(&placeholderGroup)
@@ -498,7 +498,7 @@ import (
 //	}
 //	query := milvuspb.SearchRequest{
 //		Dsl:              dslString,
-//		PlaceholderGroup: placeGroupByte,
+//		searchRequest: placeGroupByte,
 //	}
 //	queryByte, err := proto.Marshal(&query)
 //	if err != nil {
@@ -1186,9 +1186,9 @@ func TestSegmentLoad_Search_Vector(t *testing.T) {
 	assert.NoError(t, err)
 	plan, err := createPlan(*collection, dslString)
 	assert.NoError(t, err)
-	holder, err := parserPlaceholderGroup(plan, placeHolderGroupBlob)
+	holder, err := parseSearchRequest(plan, placeHolderGroupBlob)
 	assert.NoError(t, err)
-	placeholderGroups := make([]*PlaceholderGroup, 0)
+	placeholderGroups := make([]*searchRequest, 0)
 	placeholderGroups = append(placeholderGroups, holder)
 
 	// wait for segment building index

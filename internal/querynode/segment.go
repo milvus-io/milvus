@@ -214,7 +214,7 @@ func (s *Segment) getMemSize() int64 {
 }
 
 func (s *Segment) segmentSearch(plan *Plan,
-	placeHolderGroups []*PlaceholderGroup,
+	searchRequests []*searchRequest,
 	timestamp []Timestamp) (*SearchResult, error) {
 	/*
 		CStatus
@@ -229,14 +229,14 @@ func (s *Segment) segmentSearch(plan *Plan,
 		return nil, errors.New("null seg core pointer")
 	}
 	cPlaceholderGroups := make([]C.CPlaceholderGroup, 0)
-	for _, pg := range placeHolderGroups {
+	for _, pg := range searchRequests {
 		cPlaceholderGroups = append(cPlaceholderGroups, (*pg).cPlaceholderGroup)
 	}
 
 	var searchResult SearchResult
 	var cTimestamp = (*C.ulong)(&timestamp[0])
 	var cPlaceHolder = (*C.CPlaceholderGroup)(&cPlaceholderGroups[0])
-	var cNumGroups = C.int(len(placeHolderGroups))
+	var cNumGroups = C.int(len(searchRequests))
 
 	log.Debug("do search on segment", zap.Int64("segmentID", s.segmentID), zap.Int32("segmentType", int32(s.segmentType)))
 	var status = C.Search(s.segmentPtr, plan.cPlan, cPlaceHolder, cTimestamp, cNumGroups, &searchResult.cQueryResult)
@@ -257,6 +257,7 @@ func (s *Segment) fillTargetEntry(plan *Plan,
 		return errors.New("null seg core pointer")
 	}
 
+	log.Debug("segment fill target entry, ", zap.Int64("segment ID = ", s.segmentID))
 	var status = C.FillTargetEntry(s.segmentPtr, plan.cPlan, result.cQueryResult)
 	errorCode := status.error_code
 
