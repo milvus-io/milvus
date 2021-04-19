@@ -58,6 +58,9 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 	reqSegCountMap := make(map[UniqueID]map[int32]map[UniqueID]uint32)
 
 	for reqID, countInfo := range channelCountMap {
+		if _, ok := reqSegCountMap[reqID]; !ok {
+			reqSegCountMap[reqID] = make(map[int32]map[UniqueID]uint32)
+		}
 		schema := reqSchemaMap[reqID]
 		collName, partitionTag := schema[0], schema[1]
 		for channelID, count := range countInfo {
@@ -65,6 +68,7 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 			if err != nil {
 				return nil, err
 			}
+			reqSegCountMap[reqID][channelID] = make(map[UniqueID]uint32)
 			reqSegCountMap[reqID][channelID] = mapInfo
 		}
 	}
@@ -74,6 +78,15 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 	reqSegAllocateCounter := make(map[UniqueID]map[int32]uint32)
 
 	for reqID, channelInfo := range reqSegCountMap {
+		if _, ok := reqSegAccumulateCountMap[reqID]; !ok {
+			reqSegAccumulateCountMap[reqID] = make(map[int32][]uint32)
+		}
+		if _, ok := reqSegIDMap[reqID]; !ok {
+			reqSegIDMap[reqID] = make(map[int32][]UniqueID)
+		}
+		if _, ok := reqSegAllocateCounter[reqID]; !ok {
+			reqSegAllocateCounter[reqID] = make(map[int32]uint32)
+		}
 		for channelID, segInfo := range channelInfo {
 			reqSegAllocateCounter[reqID][channelID] = 0
 			keys := make([]UniqueID, len(segInfo))
@@ -86,10 +99,16 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 			accumulate := uint32(0)
 			for _, key := range keys {
 				accumulate += segInfo[key]
+				if _, ok := reqSegAccumulateCountMap[reqID][channelID]; !ok {
+					reqSegAccumulateCountMap[reqID][channelID] = make([]uint32, 0)
+				}
 				reqSegAccumulateCountMap[reqID][channelID] = append(
 					reqSegAccumulateCountMap[reqID][channelID],
 					accumulate,
 				)
+				if _, ok := reqSegIDMap[reqID][channelID]; !ok {
+					reqSegIDMap[reqID][channelID] = make([]UniqueID, 0)
+				}
 				reqSegIDMap[reqID][channelID] = append(
 					reqSegIDMap[reqID][channelID],
 					key,
