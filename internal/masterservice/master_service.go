@@ -152,7 +152,7 @@ type Core struct {
 	GetBinlogFilePathsFromDataServiceReq func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
 
 	//TODO, call index builder's client to build index, return build id
-	BuildIndexReq func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error)
+	BuildIndexReq func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair) (typeutil.UniqueID, error)
 
 	//TODO, proxy service interface, notify proxy service to drop collection
 	InvalidateCollectionMetaCache func(ts typeutil.Timestamp, dbName string, collectionName string) error
@@ -671,13 +671,11 @@ func (c *Core) SetDataService(s DataServiceInterface) error {
 }
 
 func (c *Core) SetIndexService(s IndexServiceInterface) error {
-	c.BuildIndexReq = func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error) {
+	c.BuildIndexReq = func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair) (typeutil.UniqueID, error) {
 		rsp, err := s.BuildIndex(&indexpb.BuildIndexRequest{
 			DataPaths:   binlog,
 			TypeParams:  typeParams,
 			IndexParams: indexParams,
-			IndexID:     indexID,
-			IndexName:   indexName,
 		})
 		if err != nil {
 			return 0, err

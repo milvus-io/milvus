@@ -231,7 +231,7 @@ func (s *loadService) loadIndex(indexPath []string) ([][]byte, indexParam, error
 		// get index params when detecting indexParamPrefix
 		if path.Base(p) == storage.IndexParamsFile {
 			indexCodec := storage.NewIndexCodec()
-			_, indexParams, err = indexCodec.Deserialize([]*storage.Blob{
+			_, indexParams, _, _, err = indexCodec.Deserialize([]*storage.Blob{
 				{
 					Key:   storage.IndexParamsFile,
 					Value: []byte(indexPiece),
