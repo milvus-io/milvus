@@ -1,0 +1,48 @@
+name: Publish Builder
+# TODO: do not trigger action for some document file update
+
+# This workflow is triggered on pushes or pull request to the repository.
+on:
+  push:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - 'build/docker/**'
+      - '.github/workflows/publish-builder.yaml'
+  pull_request:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - 'build/docker/**'
+      - '.github/workflows/publish-builder.yaml'
+
+jobs:
+  publish-builder:
+    name: AMD64 Ubuntu ${{ matrix.ubuntu }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: [18.04]
+    env:
+      UBUNTU: ${{ matrix.ubuntu }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Check Dockerfile
+        uses: reviewdog/action-hadolint@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-check # Default is github-pr-check
+          hadolint_ignore: DL3008
+      - name: Docker Build
+        shell: bash
+        run: |
+          SHOW_DATE=`date +%Y%m%d-%H%M%S` docker-compose build ubuntu
+      - name: Docker Push
+        if: success() && github.event_name == 'push' && github.repository == 'zilliztech/milvus-distributed'
+        continue-on-error: true
+        shell: bash
+        run: |
+          docker login -u ${{ secrets.DOCKERHUB_USER }} \
+                       -p ${{ secrets.DOCKERHUB_TOKEN }}
+          SHOW_DATE=`date +%Y%m%d-%H%M%S` docker-compose push ubuntu

@@ -9,7 +9,7 @@ x-ccache: &ccache
 
 services:
   ubuntu:
-    image: ${REPO}:${ARCH}-ubuntu${UBUNTU}
+    image: ${REPO}:${ARCH}-ubuntu${UBUNTU}-${SHOW_DATE}
     build:
       context: .
       dockerfile: build/docker/env/cpu/ubuntu${UBUNTU}/Dockerfile
