@@ -157,6 +157,11 @@ IndexWrapper::BuildWithoutIds(const knowhere::DatasetPtr& dataset) {
     auto index_type = get_index_type();
     auto index_mode = get_index_mode();
     config_[knowhere::meta::ROWS] = dataset->Get<int64_t>(knowhere::meta::ROWS);
+    if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
+        if (!config_.contains(knowhere::IndexParams::nbits)) {
+            config_[knowhere::IndexParams::nbits] = 8;
+        }
+    }
     auto conf_adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
     std::cout << "config_ when build index: " << config_ << std::endl;
     AssertInfo(conf_adapter->CheckTrain(config_, index_mode), "something wrong in index parameters!");
@@ -183,6 +188,11 @@ IndexWrapper::BuildWithIds(const knowhere::DatasetPtr& dataset) {
     auto index_type = get_index_type();
     auto index_mode = get_index_mode();
     config_[knowhere::meta::ROWS] = dataset->Get<int64_t>(knowhere::meta::ROWS);
+    if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
+        if (!config_.contains(knowhere::IndexParams::nbits)) {
+            config_[knowhere::IndexParams::nbits] = 8;
+        }
+    }
     auto conf_adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
     AssertInfo(conf_adapter->CheckTrain(config_, index_mode), "something wrong in index parameters!");
     //    index_->Train(dataset, config_);
