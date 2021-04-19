@@ -3,7 +3,6 @@ package masterservice
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
@@ -23,6 +23,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 )
 
 //  internalpb2 -> internalpb
@@ -262,9 +263,9 @@ func (c *Core) checkInit() error {
 		return errors.Errorf("ReleaseCollection is nil")
 	}
 
-	log.Printf("master node id = %d", Params.NodeID)
-	log.Printf("master dd channel name = %s", Params.DdChannel)
-	log.Printf("master time ticke channel name = %s", Params.TimeTickChannel)
+	log.Info("master", zap.Int64("node id", int64(Params.NodeID)))
+	log.Info("master", zap.String("dd channel name", Params.DdChannel))
+	log.Info("master", zap.String("time tick channel name", Params.TimeTickChannel))
 	return nil
 }
 
@@ -272,11 +273,11 @@ func (c *Core) startDdScheduler() {
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Printf("close dd scheduler, exit task execution loop")
+			log.Info("close dd scheduler, exit task execution loop")
 			return
 		case task, ok := <-c.ddReqQueue:
 			if !ok {
-				log.Printf("dd chan is closed, exit task execution loopo")
+				log.Info("dd chan is closed, exit task execution loop")
 				return
 			}
 			ts, err := task.Ts()
@@ -301,18 +302,18 @@ func (c *Core) startTimeTickLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Printf("close master time tick loop")
+			log.Info("close master time tick loop")
 			return
 		case tt, ok := <-c.ProxyTimeTickChan:
 			if !ok {
-				log.Printf("proxyTimeTickStream is closed, exit time tick loop")
+				log.Info("proxyTimeTickStream is closed, exit time tick loop")
 				return
 			}
 			if tt <= c.lastTimeTick {
-				log.Printf("master time tick go back, last time tick = %d, input time tick = %d", c.lastTimeTick, tt)
+				log.Warn("master time tick go back", zap.Uint64("last time tick", c.lastTimeTick), zap.Uint64("input time tick ", tt))
 			}
 			if err := c.SendTimeTick(tt); err != nil {
-				log.Printf("master send time tick into dd and time_tick channel failed: %s", err.Error())
+				log.Warn("master send time tick into dd and time_tick channel failed", zap.String("error", err.Error()))
 			}
 			c.lastTimeTick = tt
 		}
@@ -324,20 +325,20 @@ func (c *Core) startDataServiceSegmentLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Printf("close data service segment loop")
+			log.Info("close data service segment loop")
 			return
 		case seg, ok := <-c.DataServiceSegmentChan:
 			if !ok {
-				log.Printf("data service segment is closed, exit loop")
+				log.Info("data service segment is closed, exit loop")
 				return
 			}
 			if seg == nil {
-				log.Printf("segment from data service is nill")
+				log.Warn("segment from data service is nil")
 			} else if err := c.MetaTable.AddSegment(seg); err != nil {
 				//what if master add segment failed, but data service success?
-				log.Printf("add segment info meta table failed ")
+				log.Warn("add segment info meta table failed ", zap.String("error", err.Error()))
 			} else {
-				log.Printf("add segment, collection id = %d, partition id = %d, segment id = %d", seg.CollectionID, seg.PartitionID, seg.SegmentID)
+				log.Debug("add segment", zap.Int64("collection id", seg.CollectionID), zap.Int64("partition id", seg.PartitionID), zap.Int64("segment id", seg.SegmentID))
 			}
 		}
 	}
@@ -348,17 +349,17 @@ func (c *Core) startCreateIndexLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Printf("close create index loop")
+			log.Info("close create index loop")
 			return
 		case t, ok := <-c.indexTaskQueue:
 			if !ok {
-				log.Printf("index task chan has closed, exit loop")
+				log.Info("index task chan has closed, exit loop")
 				return
 			}
 			if err := t.BuildIndex(); err != nil {
-				log.Printf("create index failed, error = %s", err.Error())
+				log.Warn("create index failed", zap.String("error", err.Error()))
 			} else {
-				log.Printf("create index,index name = %s, field name = %s, segment id = %d", t.indexName, t.fieldSchema.Name, t.segmentID)
+				log.Debug("create index", zap.String("index name", t.indexName), zap.String("field name", t.fieldSchema.Name), zap.Int64("segment id", t.segmentID))
 			}
 		}
 	}
@@ -368,21 +369,21 @@ func (c *Core) startSegmentFlushCompletedLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Printf("close segment flush completed loop")
+			log.Info("close segment flush completed loop")
 			return
 		case seg, ok := <-c.DataNodeSegmentFlushCompletedChan:
 			if !ok {
-				log.Printf("data node segment flush completed chan has colsed, exit loop")
+				log.Info("data node segment flush completed chan has colsed, exit loop")
 			}
 			coll, err := c.MetaTable.GetCollectionBySegmentID(seg)
 			if err != nil {
-				log.Printf("GetCollectionBySegmentID, error = %s ", err.Error())
+				log.Warn("GetCollectionBySegmentID", zap.String("error", err.Error()))
 				break
 			}
 			for _, f := range coll.FieldIndexes {
 				idxInfo, err := c.MetaTable.GetIndexByID(f.IndexID)
 				if err != nil {
-					log.Printf("index id = %d not found", f.IndexID)
+					log.Warn("index not found", zap.Int64("index id", f.IndexID))
 					continue
 				}
 
@@ -412,16 +413,16 @@ func (c *Core) tsLoop() {
 		select {
 		case <-tsoTicker.C:
 			if err := c.tsoAllocator.UpdateTSO(); err != nil {
-				log.Println("failed to update timestamp", err)
+				log.Warn("failed to update timestamp", zap.String("error", err.Error()))
 				return
 			}
 			if err := c.idAllocator.UpdateID(); err != nil {
-				log.Println("failed to update id", err)
+				log.Warn("failed to update id", zap.String("error", err.Error()))
 				return
 			}
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
-			log.Println("tsLoop is closed")
+			log.Info("tsLoop is closed")
 			return
 		}
 	}
@@ -577,7 +578,7 @@ func (c *Core) setMsgStreams() error {
 				return
 			case ttmsgs, ok := <-proxyTimeTickStream.Chan():
 				if !ok {
-					log.Printf("proxy time tick msg stream closed")
+					log.Warn("proxy time tick msg stream closed")
 					return
 				}
 				if len(ttmsgs.Msgs) > 0 {
@@ -611,7 +612,7 @@ func (c *Core) setMsgStreams() error {
 				return
 			case segMsg, ok := <-dataServiceStream.Chan():
 				if !ok {
-					log.Printf("data service segment msg closed")
+					log.Warn("data service segment msg closed")
 				}
 				if len(segMsg.Msgs) > 0 {
 					for _, segm := range segMsg.Msgs {
@@ -623,7 +624,7 @@ func (c *Core) setMsgStreams() error {
 							if ok {
 								c.DataNodeSegmentFlushCompletedChan <- flushMsg.SegmentFlushCompletedMsg.SegmentID
 							} else {
-								log.Printf("receive unexpected msg from data service stream, value = %v", segm)
+								log.Debug("receive unexpected msg from data service stream", zap.Stringer("segment", segInfoMsg.SegmentMsg.Segment))
 							}
 						}
 					}
@@ -641,7 +642,7 @@ func (c *Core) SetProxyService(s ProxyServiceInterface) error {
 		return err
 	}
 	Params.ProxyTimeTickChannel = rsp.Value
-	log.Printf("proxy time tick channel name = %s", Params.ProxyTimeTickChannel)
+	log.Info("proxy time tick", zap.String("channel name", Params.ProxyTimeTickChannel))
 
 	c.InvalidateCollectionMetaCache = func(ts typeutil.Timestamp, dbName string, collectionName string) error {
 		status, _ := s.InvalidateCollectionMetaCache(&proxypb.InvalidateCollMetaCacheRequest{
@@ -671,7 +672,7 @@ func (c *Core) SetDataService(s DataServiceInterface) error {
 		return err
 	}
 	Params.DataServiceSegmentChannel = rsp.Value
-	log.Printf("data service segment channel name = %s", Params.DataServiceSegmentChannel)
+	log.Info("data service segment", zap.String("channel name", Params.DataServiceSegmentChannel))
 
 	c.GetBinlogFilePathsFromDataServiceReq = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
 		ts, err := c.tsoAllocator.Alloc(1)
@@ -787,7 +788,7 @@ func (c *Core) Init() error {
 		initError = c.setMsgStreams()
 	})
 	if initError == nil {
-		log.Printf("Master service State Code = %s", internalpb2.StateCode_name[int32(internalpb2.StateCode_INITIALIZING)])
+		log.Info("Master service", zap.String("State Code", internalpb2.StateCode_name[int32(internalpb2.StateCode_INITIALIZING)]))
 	}
 	return initError
 }
@@ -805,7 +806,7 @@ func (c *Core) Start() error {
 		go c.tsLoop()
 		c.stateCode.Store(internalpb2.StateCode_HEALTHY)
 	})
-	log.Printf("Master service State Code = %s", internalpb2.StateCode_name[int32(internalpb2.StateCode_HEALTHY)])
+	log.Info("Master service", zap.String("State Code", internalpb2.StateCode_name[int32(internalpb2.StateCode_HEALTHY)]))
 	return nil
 }
 
@@ -817,7 +818,7 @@ func (c *Core) Stop() error {
 
 func (c *Core) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
-	log.Printf("GetComponentStates : %s", internalpb2.StateCode_name[int32(code)])
+	log.Info("GetComponentStates", zap.String("State Code", internalpb2.StateCode_name[int32(code)]))
 
 	return &internalpb2.ComponentStates{
 		State: &internalpb2.ComponentInfo{
@@ -861,7 +862,7 @@ func (c *Core) CreateCollection(in *milvuspb.CreateCollectionRequest) (*commonpb
 			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
 		}, nil
 	}
-	log.Printf("CreateCollection : %s", in.CollectionName)
+	log.Debug("CreateCollection ", zap.String("name", in.CollectionName))
 	t := &CreateCollectionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -872,11 +873,13 @@ func (c *Core) CreateCollection(in *milvuspb.CreateCollectionRequest) (*commonpb
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
+		log.Debug("CreateCollection failed", zap.String("name", in.CollectionName))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "Create collection failed: " + err.Error(),
 		}, nil
 	}
+	log.Debug("CreateCollection Success", zap.String("name", in.CollectionName))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 		Reason:    "",
@@ -891,7 +894,7 @@ func (c *Core) DropCollection(in *milvuspb.DropCollectionRequest) (*commonpb.Sta
 			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
 		}, nil
 	}
-	log.Printf("DropCollection : %s", in.CollectionName)
+	log.Debug("DropCollection", zap.String("name", in.CollectionName))
 	t := &DropCollectionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -902,11 +905,13 @@ func (c *Core) DropCollection(in *milvuspb.DropCollectionRequest) (*commonpb.Sta
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
+		log.Debug("DropCollection Failed", zap.String("name", in.CollectionName))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "Drop collection failed: " + err.Error(),
 		}, nil
 	}
+	log.Debug("DropCollection Success", zap.String("name", in.CollectionName))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 		Reason:    "",
@@ -924,7 +929,7 @@ func (c *Core) HasCollection(in *milvuspb.HasCollectionRequest) (*milvuspb.BoolR
 			Value: false,
 		}, nil
 	}
-	log.Printf("HasCollection : %s", in.CollectionName)
+	log.Debug("HasCollection", zap.String("name", in.CollectionName))
 	t := &HasCollectionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -936,6 +941,7 @@ func (c *Core) HasCollection(in *milvuspb.HasCollectionRequest) (*milvuspb.BoolR
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
+		log.Debug("HasCollection Failed", zap.String("name", in.CollectionName))
 		return &milvuspb.BoolResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -944,6 +950,7 @@ func (c *Core) HasCollection(in *milvuspb.HasCollectionRequest) (*milvuspb.BoolR
 			Value: false,
 		}, nil
 	}
+	log.Debug("HasCollection Success", zap.String("name", in.CollectionName))
 	return &milvuspb.BoolResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -965,7 +972,7 @@ func (c *Core) DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milv
 			CollectionID: 0,
 		}, nil
 	}
-	log.Printf("DescribeCollection : %s", in.CollectionName)
+	log.Debug("DescribeCollection", zap.String("name", in.CollectionName))
 	t := &DescribeCollectionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -977,6 +984,7 @@ func (c *Core) DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milv
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
+		log.Debug("DescribeCollection Failed", zap.String("name", in.CollectionName))
 		return &milvuspb.DescribeCollectionResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -985,6 +993,7 @@ func (c *Core) DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milv
 			Schema: nil,
 		}, nil
 	}
+	log.Debug("DescribeCollection Success", zap.String("name", in.CollectionName))
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 		Reason:    "",
@@ -1003,7 +1012,7 @@ func (c *Core) ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.Sh
 			CollectionNames: nil,
 		}, nil
 	}
-	log.Printf("ShowCollections : %s", in.DbName)
+	log.Debug("ShowCollections", zap.String("dbname", in.DbName))
 	t := &ShowCollectionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -1017,6 +1026,7 @@ func (c *Core) ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.Sh
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
+		log.Debug("ShowCollections failed", zap.String("dbname", in.DbName))
 		return &milvuspb.ShowCollectionResponse{
 			CollectionNames: nil,
 			Status: &commonpb.Status{
@@ -1025,6 +1035,7 @@ func (c *Core) ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.Sh
 			},
 		}, nil
 	}
+	log.Debug("ShowCollections Success", zap.String("dbname", in.DbName), zap.Strings("collection names", t.Rsp.CollectionNames))
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 		Reason:    "",
@@ -1040,7 +1051,7 @@ func (c *Core) CreatePartition(in *milvuspb.CreatePartitionRequest) (*commonpb.S
 			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
 		}, nil
 	}
-	log.Printf("CreatePartition : %s - %s", in.CollectionName, in.PartitionName)
+	log.Debug("CreatePartition", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
 	t := &CreatePartitionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -1051,11 +1062,13 @@ func (c *Core) CreatePartition(in *milvuspb.CreatePartitionRequest) (*commonpb.S
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
+		log.Debug("CreatePartition Failed", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "create partition failed: " + err.Error(),
 		}, nil
 	}
+	log.Debug("CreatePartition Success", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 		Reason:    "",
@@ -1070,7 +1083,7 @@ func (c *Core) DropPartition(in *milvuspb.DropPartitionRequest) (*commonpb.Statu
 			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
 		}, nil
 	}
-	log.Printf("DropPartition : %s - %s", in.CollectionName, in.PartitionName)
+	log.Debug("DropPartition", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
 	t := &DropPartitionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -1081,11 +1094,13 @@ func (c *Core) DropPartition(in *milvuspb.DropPartitionRequest) (*commonpb.Statu
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
+		log.Debug("DropPartition Failed", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "DropPartition failed: " + err.Error(),
 		}, nil
 	}
+	log.Debug("DropPartition Success", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 		Reason:    "",
@@ -1103,7 +1118,7 @@ func (c *Core) HasPartition(in *milvuspb.HasPartitionRequest) (*milvuspb.BoolRes
 			Value: false,
 		}, nil
 	}
-	log.Printf("HasPartition : %s - %s", in.CollectionName, in.PartitionName)
+	log.Debug("HasPartition", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
 	t := &HasPartitionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -1115,6 +1130,7 @@ func (c *Core) HasPartition(in *milvuspb.HasPartitionRequest) (*milvuspb.BoolRes
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
+		log.Debug("HasPartition Failed", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
 		return &milvuspb.BoolResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -1123,6 +1139,7 @@ func (c *Core) HasPartition(in *milvuspb.HasPartitionRequest) (*milvuspb.BoolRes
 			Value: false,
 		}, nil
 	}
+	log.Debug("HasPartition Success", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName))
 	return &milvuspb.BoolResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -1144,7 +1161,7 @@ func (c *Core) ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.Show
 			PartitionIDs:   nil,
 		}, nil
 	}
-	log.Printf("ShowPartitions : %s", in.CollectionName)
+	log.Debug("ShowPartitions", zap.String("collection name", in.CollectionName))
 	t := &ShowPartitionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -1167,6 +1184,7 @@ func (c *Core) ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.Show
 			},
 		}, nil
 	}
+	log.Debug("ShowPartitions Success", zap.String("collection name", in.CollectionName), zap.Strings("partition names", t.Rsp.PartitionNames), zap.Int64s("partition ids", t.Rsp.PartitionIDs))
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 		Reason:    "",
@@ -1182,7 +1200,7 @@ func (c *Core) CreateIndex(in *milvuspb.CreateIndexRequest) (*commonpb.Status, e
 			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
 		}, nil
 	}
-	log.Printf("CreateIndex : %s - %s ", in.CollectionName, in.FieldName)
+	log.Debug("CreateIndex", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName))
 	t := &CreateIndexReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -1193,11 +1211,13 @@ func (c *Core) CreateIndex(in *milvuspb.CreateIndexRequest) (*commonpb.Status, e
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
+		log.Debug("CreateIndex Failed", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "CreateIndex failed, error = " + err.Error(),
 		}, nil
 	}
+	log.Debug("CreateIndex Success", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 		Reason:    "",
@@ -1215,7 +1235,7 @@ func (c *Core) DescribeIndex(in *milvuspb.DescribeIndexRequest) (*milvuspb.Descr
 			IndexDescriptions: nil,
 		}, nil
 	}
-	log.Printf("DescribeIndex : %s - %s", in.CollectionName, in.FieldName)
+	log.Debug("DescribeIndex", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName))
 	t := &DescribeIndexReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -1238,6 +1258,11 @@ func (c *Core) DescribeIndex(in *milvuspb.DescribeIndexRequest) (*milvuspb.Descr
 			IndexDescriptions: nil,
 		}, nil
 	}
+	idxNames := make([]string, 0, len(t.Rsp.IndexDescriptions))
+	for _, i := range t.Rsp.IndexDescriptions {
+		idxNames = append(idxNames, i.IndexName)
+	}
+	log.Debug("DescribeIndex Success", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.Strings("index names", idxNames))
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 		Reason:    "",
@@ -1253,7 +1278,7 @@ func (c *Core) DropIndex(in *milvuspb.DropIndexRequest) (*commonpb.Status, error
 			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
 		}, nil
 	}
-	log.Printf("DropIndex : collection : %s, filed : %s , index : %s", in.CollectionName, in.FieldName, in.IndexName)
+	log.Debug("DropIndex", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.String("index name", in.IndexName))
 	t := &DropIndexReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -1264,11 +1289,13 @@ func (c *Core) DropIndex(in *milvuspb.DropIndexRequest) (*commonpb.Status, error
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
+		log.Debug("DropIndex Failed", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.String("index name", in.IndexName))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "DropIndex failed, error = %s" + err.Error(),
 		}, nil
 	}
+	log.Debug("DropIndex Success", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.String("index name", in.IndexName))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 		Reason:    "",
@@ -1286,7 +1313,7 @@ func (c *Core) DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.D
 			IndexID: 0,
 		}, nil
 	}
-	log.Printf("DescribeSegment : %d - %d", in.CollectionID, in.SegmentID)
+	log.Debug("DescribeSegment", zap.Int64("collection id", in.CollectionID), zap.Int64("segment id", in.SegmentID))
 	t := &DescribeSegmentReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -1301,6 +1328,7 @@ func (c *Core) DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.D
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
+		log.Debug("DescribeSegment Failed", zap.Int64("collection id", in.CollectionID), zap.Int64("segment id", in.SegmentID))
 		return &milvuspb.DescribeSegmentResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -1309,6 +1337,7 @@ func (c *Core) DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.D
 			IndexID: 0,
 		}, nil
 	}
+	log.Debug("DescribeSegment Success", zap.Int64("collection id", in.CollectionID), zap.Int64("segment id", in.SegmentID))
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 		Reason:    "",
@@ -1327,7 +1356,7 @@ func (c *Core) ShowSegments(in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegm
 			SegmentIDs: nil,
 		}, nil
 	}
-	log.Printf("ShowSegments : %d - %d", in.CollectionID, in.PartitionID)
+	log.Debug("ShowSegments", zap.Int64("collection id", in.CollectionID), zap.Int64("partition id", in.PartitionID))
 	t := &ShowSegmentReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -1350,6 +1379,7 @@ func (c *Core) ShowSegments(in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegm
 			SegmentIDs: nil,
 		}, nil
 	}
+	log.Debug("ShowSegments Success", zap.Int64("collection id", in.CollectionID), zap.Int64("partition id", in.PartitionID), zap.Int64s("segments ids", t.Rsp.SegmentIDs))
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 		Reason:    "",
@@ -1392,7 +1422,7 @@ func (c *Core) AllocID(in *masterpb.IDRequest) (*masterpb.IDResponse, error) {
 			Count: in.Count,
 		}, nil
 	}
-	log.Printf("AllocID : %d", start)
+	log.Debug("AllocID", zap.Int64("id start", start), zap.Uint32("count", in.Count))
 	return &masterpb.IDResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,

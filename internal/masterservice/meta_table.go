@@ -1,7 +1,6 @@
 package masterservice
 
 import (
-	"log"
 	"path"
 	"strconv"
 	"sync"
@@ -9,11 +8,13 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 const (
@@ -127,7 +128,7 @@ func (mt *metaTable) reloadFromKV() error {
 		}
 		collID, ok := mt.partitionID2CollID[partitionInfo.PartitionID]
 		if !ok {
-			log.Printf("partition id %d not belong to any collection", partitionInfo.PartitionID)
+			log.Warn("partition does not belong to any collection", zap.Int64("partition id", partitionInfo.PartitionID))
 			continue
 		}
 		mt.partitionID2Meta[partitionInfo.PartitionID] = partitionInfo
@@ -235,14 +236,14 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID) error {
 		metaKeys = append(metaKeys, path.Join(PartitionMetaPrefix, strconv.FormatInt(partID, 10)))
 		partMeta, ok := mt.partitionID2Meta[partID]
 		if !ok {
-			log.Printf("partition id = %d not exist", partID)
+			log.Warn("partition id not exist", zap.Int64("partition id", partID))
 			continue
 		}
 		delete(mt.partitionID2Meta, partID)
 		for _, segID := range partMeta.SegmentIDs {
 			segIndexMeta, ok := mt.segID2IndexMeta[segID]
 			if !ok {
-				log.Printf("segment id = %d not exist", segID)
+				log.Warn("segment id not exist", zap.Int64("segment id", segID))
 				continue
 			}
 			delete(mt.segID2IndexMeta, segID)
@@ -346,7 +347,7 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	for _, t := range coll.PartitionIDs {
 		part, ok := mt.partitionID2Meta[t]
 		if !ok {
-			log.Printf("partition id = %d not exist", t)
+			log.Warn("partition id not exist", zap.Int64("partition id", t))
 			continue
 		}
 		if part.PartitionName == partitionName {
@@ -441,7 +442,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	for _, segID := range partMeta.SegmentIDs {
 		segIndexMeta, ok := mt.segID2IndexMeta[segID]
 		if !ok {
-			log.Printf("segment id = %d has no index meta", segID)
+			log.Warn("segment has no index meta", zap.Int64("segment id", segID))
 			continue
 		}
 		delete(mt.segID2IndexMeta, segID)
@@ -449,7 +450,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 			delMetaKeys = append(delMetaKeys, path.Join(SegmentIndexMetaPrefix, strconv.FormatInt(segID, 10), strconv.FormatInt(indexID, 10)))
 			indexMeta, ok := mt.indexID2Meta[segIdxMeta.IndexID]
 			if !ok {
-				log.Printf("index id = %d not exist", segIdxMeta.IndexID)
+				log.Warn("index id not exist", zap.Int64("index id", segIdxMeta.IndexID))
 				continue
 			}
 			delete(mt.indexID2Meta, segIdxMeta.IndexID)
@@ -589,7 +590,7 @@ func (mt *metaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 		idxMeta, ok := mt.indexID2Meta[info.IndexID]
 		if !ok {
 			fieldIdxInfo = append(fieldIdxInfo, info)
-			log.Printf("index id = %d not has meta", info.IndexID)
+			log.Warn("index id not has meta", zap.Int64("index id", info.IndexID))
 			continue
 		}
 		if idxMeta.IndexName != indexName {
@@ -601,7 +602,7 @@ func (mt *metaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 		break
 	}
 	if len(fieldIdxInfo) == len(collMeta.FieldIndexes) {
-		log.Printf("collection = %s, field = %s, index = %s not found", collName, fieldName, indexName)
+		log.Warn("drop index,index not found", zap.String("collection name", collName), zap.String("filed name", fieldName), zap.String("index name", indexName))
 		return 0, false, nil
 	}
 	collMeta.FieldIndexes = fieldIdxInfo
@@ -614,7 +615,7 @@ func (mt *metaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 	for _, partID := range collMeta.PartitionIDs {
 		partMeta, ok := mt.partitionID2Meta[partID]
 		if !ok {
-			log.Printf("partition id = %d not exist", partID)
+			log.Warn("partition not exist", zap.Int64("partition id", partID))
 			continue
 		}
 		for _, segID := range partMeta.SegmentIDs {
