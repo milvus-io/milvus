@@ -9,10 +9,10 @@ import (
 )
 
 func newDmInputNode(ctx context.Context) *flowgraph.InputNode {
-	receiveBufSize := Params.dmMsgStreamReceiveBufSize()
+	receiveBufSize := Params.dmReceiveBufSize()
 	pulsarBufSize := Params.dmPulsarBufSize()
 
-	msgStreamURL, err := Params.PulsarAddress()
+	msgStreamURL, err := Params.pulsarAddress()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -27,6 +27,9 @@ func newDmInputNode(ctx context.Context) *flowgraph.InputNode {
 
 	var stream msgstream.MsgStream = insertStream
 
-	node := flowgraph.NewInputNode(&stream, "dmInputNode")
+	maxQueueLength := Params.flowGraphMaxQueueLength()
+	maxParallelism := Params.flowGraphMaxParallelism()
+
+	node := flowgraph.NewInputNode(&stream, "dmInputNode", maxQueueLength, maxParallelism)
 	return node
 }

@@ -1,7 +1,5 @@
 package reader
 
-import "github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
-
 type deleteNode struct {
 	BaseNode
 	deleteMsg deleteMsg
@@ -16,8 +14,8 @@ func (dNode *deleteNode) Operate(in []*Msg) []*Msg {
 }
 
 func newDeleteNode() *deleteNode {
-	maxQueueLength := flowgraph.Params.FlowGraphMaxQueueLength()
-	maxParallelism := flowgraph.Params.FlowGraphMaxParallelism()
+	maxQueueLength := Params.flowGraphMaxQueueLength()
+	maxParallelism := Params.flowGraphMaxParallelism()
 
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)

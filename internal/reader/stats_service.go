@@ -28,11 +28,11 @@ func newStatsService(ctx context.Context, replica *collectionReplica) *statsServ
 }
 
 func (sService *statsService) start() {
-	sleepTimeInterval := Params.statsServiceTimeInterval()
-	receiveBufSize := Params.statsMsgStreamReceiveBufSize()
+	sleepTimeInterval := Params.statsPublishInterval()
+	receiveBufSize := Params.statsReceiveBufSize()
 
 	// start pulsar
-	msgStreamURL, err := Params.PulsarAddress()
+	msgStreamURL, err := Params.pulsarAddress()
 	if err != nil {
 		log.Fatal(err)
 	}

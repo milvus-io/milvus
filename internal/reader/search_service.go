@@ -35,10 +35,10 @@ type SearchResult struct {
 }
 
 func newSearchService(ctx context.Context, replica *collectionReplica) *searchService {
-	receiveBufSize := Params.searchMsgStreamReceiveBufSize()
+	receiveBufSize := Params.searchReceiveBufSize()
 	pulsarBufSize := Params.searchPulsarBufSize()
 
-	msgStreamURL, err := Params.PulsarAddress()
+	msgStreamURL, err := Params.pulsarAddress()
 	if err != nil {
 		log.Fatal(err)
 	}

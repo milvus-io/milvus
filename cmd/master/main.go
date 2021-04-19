@@ -21,6 +21,7 @@ func main() {
 	etcdAddress, _ := masterParams.Params.EtcdAddress()
 	etcdRootPath, _ := masterParams.Params.EtcdRootPath()
 	pulsarAddr, _ := masterParams.Params.PulsarAddress()
+	pulsarAddr = "pulsar://" + pulsarAddr
 	defaultRecordSize := masterParams.Params.DefaultRecordSize()
 	minimumAssignSize := masterParams.Params.MinimumAssignSize()
 	segmentThreshold := masterParams.Params.SegmentThreshold()
@@ -34,15 +35,15 @@ func main() {
 		MetaRootPath:          etcdRootPath,
 		EtcdAddr:              []string{etcdAddress},
 		PulsarAddr:            pulsarAddr,
-		ProxyIDs:              nil,
-		PulsarProxyChannels:   nil,
-		PulsarProxySubName:    "",
-		SoftTTBInterval:       0,
-		WriteIDs:              nil,
-		PulsarWriteChannels:   nil,
-		PulsarWriteSubName:    "",
-		PulsarDMChannels:      nil,
-		PulsarK2SChannels:     nil,
+		ProxyIDs:              masterParams.Params.ProxyIDList(),
+		PulsarProxyChannels:   masterParams.Params.ProxyTimeSyncChannels(),
+		PulsarProxySubName:    masterParams.Params.ProxyTimeSyncSubName(),
+		SoftTTBInterval:       masterParams.Params.SoftTimeTickBarrierInterval(),
+		WriteIDs:              masterParams.Params.WriteIDList(),
+		PulsarWriteChannels:   masterParams.Params.WriteTimeSyncChannels(),
+		PulsarWriteSubName:    masterParams.Params.WriteTimeSyncSubName(),
+		PulsarDMChannels:      masterParams.Params.DMTimeSyncChannels(),
+		PulsarK2SChannels:     masterParams.Params.K2STimeSyncChannels(),
 		DefaultRecordSize:     defaultRecordSize,
 		MinimumAssignSize:     minimumAssignSize,
 		SegmentThreshold:      segmentThreshold,
