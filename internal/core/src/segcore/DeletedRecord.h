@@ -55,8 +55,8 @@ struct DeletedRecord {
  public:
     std::atomic<int64_t> reserved = 0;
     AckResponder ack_responder_;
-    ConcurrentVector<Timestamp, true> timestamps_;
-    ConcurrentVector<idx_t, true> uids_;
+    ConcurrentVector<Timestamp> timestamps_;
+    ConcurrentVector<idx_t> uids_;
 
  private:
     std::shared_ptr<TmpBitmap> lru_;

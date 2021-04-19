@@ -238,7 +238,7 @@ SegmentSmallIndex::BuildVecIndexImpl(const IndexMeta::Entry& entry) {
 
     auto indexing = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(entry.type, entry.mode);
     auto& uids = record_.uids_;
-    auto entities = record_.get_vec_entity<float>(offset);
+    auto entities = record_.get_entity<FloatVector>(offset);
 
     std::vector<knowhere::DatasetPtr> datasets;
     for (int chunk_id = 0; chunk_id < uids.chunk_size(); ++chunk_id) {
@@ -356,7 +356,7 @@ SegmentSmallIndex::FillTargetEntry(const query::Plan* plan, QueryResult& results
         auto& uids = record_.uids_;
         for (int64_t i = 0; i < size; ++i) {
             auto seg_offset = results.internal_seg_offsets_[i];
-            auto row_id = uids[seg_offset];
+            auto row_id = seg_offset == -1 ? -1 : uids[seg_offset];
             std::vector<char> blob(sizeof(row_id));
             memcpy(blob.data(), &row_id, sizeof(row_id));
             results.row_data_.emplace_back(std::move(blob));
@@ -367,10 +367,10 @@ SegmentSmallIndex::FillTargetEntry(const query::Plan* plan, QueryResult& results
         auto key_offset = key_offset_opt.value();
         auto field_meta = schema_->operator[](key_offset);
         Assert(field_meta.get_data_type() == DataType::INT64);
-        auto uids = record_.get_scalar_entity<int64_t>(key_offset);
+        auto uids = record_.get_entity<int64_t>(key_offset);
         for (int64_t i = 0; i < size; ++i) {
             auto seg_offset = results.internal_seg_offsets_[i];
-            auto row_id = uids->operator[](seg_offset);
+            auto row_id = seg_offset == -1 ? -1 : uids->operator[](seg_offset);
             std::vector<char> blob(sizeof(row_id));
             memcpy(blob.data(), &row_id, sizeof(row_id));
             results.row_data_.emplace_back(std::move(blob));

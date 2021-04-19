@@ -309,7 +309,8 @@ func (dct *DropCollectionTask) Execute() error {
 }
 
 func (dct *DropCollectionTask) PostExecute() error {
-	return globalMetaCache.Remove(dct.CollectionName.CollectionName)
+	globalMetaCache.Remove(dct.CollectionName.CollectionName)
+	return nil
 }
 
 type QueryTask struct {
@@ -413,16 +414,24 @@ func (qt *QueryTask) PostExecute() error {
 			return errors.New("wait to finish failed, timeout")
 		case searchResults := <-qt.resultBuf:
 			filterSearchResult := make([]*internalpb.SearchResult, 0)
+			var filterReason string
 			for _, partialSearchResult := range searchResults {
 				if partialSearchResult.Status.ErrorCode == commonpb.ErrorCode_SUCCESS {
 					filterSearchResult = append(filterSearchResult, partialSearchResult)
+				} else {
+					filterReason += partialSearchResult.Status.Reason + "\n"
 				}
 			}
 
-			rlen := len(filterSearchResult) // query num
+			rlen := len(filterSearchResult) // query node num
 			if rlen <= 0 {
-				qt.result = &servicepb.QueryResult{}
-				return nil
+				qt.result = &servicepb.QueryResult{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+						Reason:    filterReason,
+					},
+				}
+				return errors.New(filterReason)
 			}
 
 			n := len(filterSearchResult[0].Hits) // n

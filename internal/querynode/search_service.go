@@ -138,7 +138,7 @@ func (ss *searchService) receiveSearchMsg() {
 			for _, msg := range searchMsg {
 				err := ss.search(msg)
 				if err != nil {
-					log.Println("search Failed, error msg type: ", msg.Type())
+					log.Println(err)
 					err = ss.publishFailedSearchResult(msg)
 					if err != nil {
 						log.Println("publish FailedSearchResult failed, error message: ", err)
@@ -190,7 +190,7 @@ func (ss *searchService) doUnsolvedMsgSearch() {
 			for _, msg := range searchMsg {
 				err := ss.search(msg)
 				if err != nil {
-					log.Println("search Failed, error msg type: ", msg.Type())
+					log.Println(err)
 					err = ss.publishFailedSearchResult(msg)
 					if err != nil {
 						log.Println("publish FailedSearchResult failed, error message: ", err)
