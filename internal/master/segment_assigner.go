@@ -38,6 +38,11 @@ type SegmentAssigner struct {
 	mu                sync.Mutex
 }
 
+type AssignResult struct {
+	isSuccess  bool
+	expireTime Timestamp
+}
+
 func (assigner *SegmentAssigner) OpenSegment(segmentID UniqueID, numRows int) error {
 	assigner.mu.Lock()
 	defer assigner.mu.Unlock()
@@ -64,31 +69,33 @@ func (assigner *SegmentAssigner) CloseSegment(segmentID UniqueID) error {
 	return nil
 }
 
-func (assigner *SegmentAssigner) Assign(segmentID UniqueID, numRows int) (bool, error) {
+func (assigner *SegmentAssigner) Assign(segmentID UniqueID, numRows int) (*AssignResult, error) {
 	assigner.mu.Lock()
 	defer assigner.mu.Unlock()
+
+	res := &AssignResult{false, 0}
 	status, ok := assigner.segmentStatus[segmentID]
 	if !ok {
-		return false, errors.Errorf("segment %d is not opened", segmentID)
+		return res, errors.Errorf("segment %d is not opened", segmentID)
 	}
 
 	allocated, err := assigner.totalOfAssignments(segmentID)
 	if err != nil {
-		return false, err
+		return res, err
 	}
 
 	segMeta, err := assigner.mt.GetSegmentByID(segmentID)
 	if err != nil {
-		return false, err
+		return res, err
 	}
 	free := status.total - int(segMeta.NumRows) - allocated
 	if numRows > free {
-		return false, nil
+		return res, nil
 	}
 
 	ts, err := assigner.globalTSOAllocator()
 	if err != nil {
-		return false, err
+		return res, err
 	}
 	physicalTs, logicalTs := tsoutil.ParseTS(ts)
 	expirePhysicalTs := physicalTs.Add(time.Duration(assigner.segmentExpireDuration))
@@ -99,7 +106,9 @@ func (assigner *SegmentAssigner) Assign(segmentID UniqueID, numRows int) (bool, 
 		ts,
 	})
 
-	return true, nil
+	res.isSuccess = true
+	res.expireTime = expireTs
+	return res, nil
 }
 
 func (assigner *SegmentAssigner) CheckAssignmentExpired(segmentID UniqueID, timestamp Timestamp) (bool, error) {

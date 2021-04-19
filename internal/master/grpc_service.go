@@ -443,19 +443,11 @@ func (s *Master) AssignSegmentID(ctx context.Context, request *internalpb.Assign
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
 		}, nil
 	}
-	ts, err := s.tsoAllocator.AllocOne()
-	if err != nil {
-		return &internalpb.AssignSegIDResponse{
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
-		}, nil
-	}
 	return &internalpb.AssignSegIDResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 			Reason:    "",
 		},
-		Timestamp:            ts,
-		ExpireDuration:       10000,
 		PerChannelAssignment: segInfos,
 	}, nil
 }

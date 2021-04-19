@@ -114,7 +114,7 @@ func (manager *SegmentManager) assignSegment(
 		if err != nil {
 			return nil, err
 		}
-		if !result {
+		if !result.isSuccess {
 			continue
 		}
 
@@ -124,6 +124,7 @@ func (manager *SegmentManager) assignSegment(
 			Count:        count,
 			CollName:     collName,
 			PartitionTag: partitionTag,
+			ExpireTime:   result.expireTime,
 		}, nil
 
 	}
@@ -145,7 +146,7 @@ func (manager *SegmentManager) assignSegment(
 	if err != nil {
 		return nil, err
 	}
-	if !result {
+	if !result.isSuccess {
 		return nil, errors.Errorf("assign failed for segment %d", id)
 	}
 	return &internalpb.SegIDAssignment{
@@ -154,6 +155,7 @@ func (manager *SegmentManager) assignSegment(
 		Count:        count,
 		CollName:     collName,
 		PartitionTag: partitionTag,
+		ExpireTime:   result.expireTime,
 	}, nil
 }
 

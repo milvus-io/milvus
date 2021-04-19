@@ -87,11 +87,11 @@ func TestSegmentManager_AssignSegmentID(t *testing.T) {
 	assert.Nil(t, err)
 	result, err := segAssigner.Assign(100, 10000)
 	assert.Nil(t, err)
-	assert.True(t, result)
+	assert.True(t, result.isSuccess)
 
 	result, err = segAssigner.Assign(100, 95000)
 	assert.Nil(t, err)
-	assert.False(t, result)
+	assert.False(t, result.isSuccess)
 
 	time.Sleep(2 * time.Second)
 	timestamp, err = globalTsoAllocator()
@@ -109,7 +109,7 @@ func TestSegmentManager_AssignSegmentID(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 	result, err = segAssigner.Assign(100, 100000)
 	assert.Nil(t, err)
-	assert.True(t, result)
+	assert.True(t, result.isSuccess)
 
 	err = segAssigner.CloseSegment(100)
 	assert.Nil(t, err)
@@ -132,8 +132,8 @@ func TestSegmentManager_AssignSegmentID(t *testing.T) {
 	assert.Nil(t, err)
 	result, err = segAssigner.Assign(200, 10001)
 	assert.Nil(t, err)
-	assert.False(t, result)
+	assert.False(t, result.isSuccess)
 	result, err = segAssigner.Assign(200, 10000)
 	assert.Nil(t, err)
-	assert.True(t, result)
+	assert.True(t, result.isSuccess)
 }
