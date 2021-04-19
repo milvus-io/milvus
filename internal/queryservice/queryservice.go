@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	nodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/querynode/client"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
@@ -16,6 +17,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 )
 
 type MasterServiceInterface interface {
@@ -541,7 +543,11 @@ func (qs *QueryService) CreateQueryChannel() (*querypb.CreateQueryChannelRespons
 	fmt.Println("query service create query channel, queryChannelName = ", allocatedQueryChannel)
 	for nodeID, node := range qs.queryNodes {
 		fmt.Println("node ", nodeID, " watch query channel")
-		_, err := node.AddQueryChannel(addQueryChannelsRequest)
+		fn := func() error {
+			_, err := node.AddQueryChannel(addQueryChannelsRequest)
+			return err
+		}
+		err := retry.Retry(10, time.Millisecond*200, fn)
 		if err != nil {
 			qs.qcMutex.Unlock()
 			return &querypb.CreateQueryChannelResponse{

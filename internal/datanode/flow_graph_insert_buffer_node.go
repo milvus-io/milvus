@@ -246,7 +246,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 
 				var offset int
 				for _, blob := range msg.RowData {
-					bv := blob.GetValue()[pos+offset : pos+(dim/8)]
+					bv := blob.GetValue()[pos : pos+(dim/8)]
 					fieldData.Data = append(fieldData.Data, bv...)
 					offset = len(bv)
 				}
