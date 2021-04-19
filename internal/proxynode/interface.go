@@ -22,7 +22,6 @@ type MasterClient interface {
 	ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
 	CreateIndex(in *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
 	DescribeIndex(in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
-	DropIndex(in *milvuspb.DropIndexRequest) (*commonpb.Status, error)
 	ShowSegments(in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error)
 	DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
 }
@@ -91,7 +90,6 @@ type ProxyNode interface {
 	CreateIndex(request *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
 	DescribeIndex(request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
 	GetIndexState(request *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error)
-	DropIndex(request *milvuspb.DropIndexRequest) (*commonpb.Status, error)
 
 	Insert(request *milvuspb.InsertRequest) (*milvuspb.InsertResponse, error)
 	Search(request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error)
