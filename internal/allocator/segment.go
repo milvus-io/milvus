@@ -173,6 +173,7 @@ func (sa *SegIDAssigner) syncSegments() {
 	sa.segReqs = sa.segReqs[0:0]
 	fmt.Println("OOOOO", req.PerChannelReq)
 	resp, err := sa.masterClient.AssignSegmentID(ctx, req)
+	log.Printf("resp: %v", resp)
 
 	if resp.Status.GetErrorCode() != commonpb.ErrorCode_SUCCESS {
 		log.Panic("GRPC AssignSegmentID Failed")
@@ -248,6 +249,7 @@ func (sa *SegIDAssigner) processFunc(req request) error {
 		}
 	}
 	segRequest.segInfo = resultSegInfo
+	fmt.Println("process segmentID")
 	return nil
 }
 

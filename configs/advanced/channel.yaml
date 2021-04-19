@@ -34,6 +34,7 @@ msgChannel:
   channelRange:
     insert: [0, 1]
     delete: [0, 1]
+    dataDefinition: [0,1]
     k2s: [0, 1]
     search: [0, 1]
     searchResult: [0, 1]

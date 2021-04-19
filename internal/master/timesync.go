@@ -75,6 +75,7 @@ func (ttBarrier *softTimeTickBarrier) Start() error {
 							log.Printf("[softTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.PeerID)
 							continue
 						}
+
 						if ttmsg.Timestamp > oldT {
 							ttBarrier.peer2LastTt[ttmsg.PeerID] = ttmsg.Timestamp
 
@@ -84,6 +85,7 @@ func (ttBarrier *softTimeTickBarrier) Start() error {
 							if ttBarrier.lastTt != 0 && ttBarrier.minTtInterval > ts-Timestamp(lastTt) {
 								continue
 							}
+
 							ttBarrier.outTt <- ts
 						}
 					}

@@ -89,6 +89,15 @@ service Master {
     rpc ShowPartitions(internal.ShowPartitionRequest) returns (service.StringListResponse) {}
 
 
+    /**
+     * @brief This method is used to get system configs
+     *
+     * @param SysConfigRequest, keys or key_prefixes of the configs.
+     *
+     * @return SysConfigResponse
+     */
+    rpc GetSysConfigs(internal.SysConfigRequest) returns (service.SysConfigResponse) {}
+
     rpc AllocTimestamp(internal.TsoRequest) returns (internal.TsoResponse) {}
     rpc AllocID(internal.IDRequest) returns (internal.IDResponse) {}
 

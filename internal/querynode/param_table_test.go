@@ -120,9 +120,3 @@ func TestParamTable_statsChannelName(t *testing.T) {
 	name := Params.statsChannelName()
 	assert.Equal(t, name, "query-node-stats")
 }
-
-func TestParamTable_metaRootPath(t *testing.T) {
-	Params.Init()
-	path := Params.metaRootPath()
-	assert.Equal(t, path, "by-dev/meta")
-}

@@ -380,13 +380,18 @@ func (segMgr *SegmentManager) AssignSegmentID(segIDReq []*internalpb.SegIDReques
 // "/msg_stream/insert"
 
 message SysConfigRequest {
-	repeated string keys = 1;
-	repeated string key_prefixes = 2;
+    MsgType msg_type = 1;
+    int64 reqID = 2;
+    int64 proxyID = 3;
+    uint64 timestamp = 4;
+	repeated string keys = 5;
+	repeated string key_prefixes = 6;
 }
 
 message SysConfigResponse {
-	repeated string keys = 1;
-	repeated string values = 2;
+    common.Status status = 1;
+	repeated string keys = 2;
+	repeated string values = 3;
 }
 ```
 
@@ -394,12 +399,11 @@ message SysConfigResponse {
 
 ```go
 type SysConfig struct {
-  etcdKV *etcd
-  etcdPathPrefix string
+	kv *kv.EtcdKV
 }
 
 func (conf *SysConfig) InitFromFile(filePath string) (error)
-func (conf *SysConfig) GetByPrefix(keyPrefix string) ([]string, error)
+func (conf *SysConfig) GetByPrefix(keyPrefix string) (keys []string, values []string, err error)
 func (conf *SysConfig) Get(keys []string) ([]string, error)
 ```
 

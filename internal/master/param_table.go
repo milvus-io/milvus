@@ -17,8 +17,7 @@ type ParamTable struct {
 	Port    int
 
 	EtcdAddress   string
-	MetaRootPath  string
-	KvRootPath    string
+	EtcdRootPath  string
 	PulsarAddress string
 
 	// nodeID
@@ -40,6 +39,7 @@ type ParamTable struct {
 	// msgChannel
 	ProxyTimeTickChannelNames     []string
 	WriteNodeTimeTickChannelNames []string
+	DDChannelNames                []string
 	InsertChannelNames            []string
 	K2SChannelNames               []string
 	QueryNodeStatsChannelName     string
@@ -76,8 +76,7 @@ func (p *ParamTable) Init() {
 	p.initPort()
 
 	p.initEtcdAddress()
-	p.initMetaRootPath()
-	p.initKvRootPath()
+	p.initEtcdRootPath()
 	p.initPulsarAddress()
 
 	p.initProxyIDList()
@@ -97,6 +96,7 @@ func (p *ParamTable) Init() {
 	p.initProxyTimeTickChannelNames()
 	p.initWriteNodeTimeTickChannelNames()
 	p.initInsertChannelNames()
+	p.initDDChannelNames()
 	p.initK2SChannelNames()
 	p.initQueryNodeStatsChannelName()
 	p.initMsgChannelSubName()
@@ -140,28 +140,12 @@ func (p *ParamTable) initPulsarAddress() {
 	p.PulsarAddress = addr
 }
 
-func (p *ParamTable) initMetaRootPath() {
-	rootPath, err := p.Load("etcd.rootPath")
+func (p *ParamTable) initEtcdRootPath() {
+	path, err := p.Load("etcd.rootpath")
 	if err != nil {
 		panic(err)
 	}
-	subPath, err := p.Load("etcd.metaSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.MetaRootPath = rootPath + "/" + subPath
-}
-
-func (p *ParamTable) initKvRootPath() {
-	rootPath, err := p.Load("etcd.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	subPath, err := p.Load("etcd.kvSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.KvRootPath = rootPath + "/" + subPath
+	p.EtcdRootPath = path
 }
 
 func (p *ParamTable) initTopicNum() {
@@ -380,6 +364,27 @@ func (p *ParamTable) initWriteNodeTimeTickChannelNames() {
 		channels = append(channels, ch+"-"+i)
 	}
 	p.WriteNodeTimeTickChannelNames = channels
+}
+
+func (p *ParamTable) initDDChannelNames() {
+	ch, err := p.Load("msgChannel.chanNamePrefix.dataDefinition")
+	if err != nil {
+		log.Fatal(err)
+	}
+	id, err := p.Load("nodeID.queryNodeIDList")
+	if err != nil {
+		log.Panicf("load query node id list error, %s", err.Error())
+	}
+	ids := strings.Split(id, ",")
+	channels := make([]string, 0, len(ids))
+	for _, i := range ids {
+		_, err := strconv.ParseInt(i, 10, 64)
+		if err != nil {
+			log.Panicf("load query node id list error, %s", err.Error())
+		}
+		channels = append(channels, ch+"-"+i)
+	}
+	p.DDChannelNames = channels
 }
 
 func (p *ParamTable) initInsertChannelNames() {

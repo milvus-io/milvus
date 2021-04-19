@@ -77,6 +77,7 @@ func (ia *IDAllocator) processFunc(req request) error {
 	idRequest := req.(*idRequest)
 	idRequest.id = ia.idStart
 	ia.idStart++
+	fmt.Println("process ID")
 	return nil
 }
 
