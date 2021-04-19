@@ -465,48 +465,6 @@ GrpcRequestHandler::DescribeCollection(::grpc::ServerContext* context, const ::m
                                        ::milvus::grpc::Mapping* response) {
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
     CHECK_NULLPTR_RETURN(request);
-    try {
-        milvus::server::CollectionSchema collection_schema;
-        Status status =
-            req_handler_.GetCollectionInfo(GetContext(context), request->collection_name(), collection_schema);
-        if (!status.ok()) {
-            SET_RESPONSE(response->mutable_status(), status, context);
-            return ::grpc::Status::OK;
-        }
-
-        response->set_collection_name(request->collection_name());
-        for (auto& field_kv : collection_schema.fields_) {
-            auto field = response->add_fields();
-            auto& field_name = field_kv.first;
-            auto& field_schema = field_kv.second;
-
-            field->set_name(field_name);
-            field->set_type((milvus::grpc::DataType)field_schema.field_type_);
-
-            auto grpc_field_param = field->add_extra_params();
-            grpc_field_param->set_key(EXTRA_PARAM_KEY);
-            grpc_field_param->set_value(field_schema.field_params_.dump());
-
-            for (auto& item : field_schema.index_params_.items()) {
-                auto grpc_index_param = field->add_index_params();
-                grpc_index_param->set_key(item.key());
-                if (item.value().is_object()) {
-                    grpc_index_param->set_value(item.value().dump());
-                } else {
-                    grpc_index_param->set_value(item.value());
-                }
-            }
-        }
-
-        auto grpc_extra_param = response->add_extra_params();
-        grpc_extra_param->set_key(EXTRA_PARAM_KEY);
-        grpc_extra_param->set_value(collection_schema.extra_params_.dump());
-        LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
-        SET_RESPONSE(response->mutable_status(), status, context);
-    } catch (std::exception& ex) {
-        Status status = Status{SERVER_UNEXPECTED_ERROR, "Parsing json string wrong"};
-        SET_RESPONSE(response->mutable_status(), status, context);
-    }
     return ::grpc::Status::OK;
 }
 

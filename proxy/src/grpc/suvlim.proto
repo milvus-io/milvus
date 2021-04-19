@@ -679,7 +679,7 @@ message InsertOrDeleteMsg {
     RowData rows_data = 2;
     int64 uid = 3;            //optional
     string partition_tag = 4;
-    int64 timestamp =5;
+    uint64 timestamp =5;
     int64 segment_id = 6;
     int64 channel_id = 7;
     OpType op = 8;
@@ -692,7 +692,7 @@ message SearchMsg {
     VectorRowRecord records = 2;
     string partition_tag = 3;
     int64 uid = 4;
-    int64 timestamp =5;
+    uint64 timestamp =5;
     int64 client_id = 6;
     repeated KeyValuePair extra_params = 7;
 }
@@ -703,7 +703,7 @@ enum SyncType {
 }
 message TimeSyncMsg{
     int64 peer_Id = 1;
-    int64 Timestamp = 2;
+    uint64 Timestamp = 2;
     SyncType sync_type = 3;
 }
 

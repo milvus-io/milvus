@@ -7148,10 +7148,10 @@ class InsertOrDeleteMsg :
   ::PROTOBUF_NAMESPACE_ID::int64 uid() const;
   void set_uid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // int64 timestamp = 5;
+  // uint64 timestamp = 5;
   void clear_timestamp();
-  ::PROTOBUF_NAMESPACE_ID::int64 timestamp() const;
-  void set_timestamp(::PROTOBUF_NAMESPACE_ID::int64 value);
+  ::PROTOBUF_NAMESPACE_ID::uint64 timestamp() const;
+  void set_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
 
   // int64 segment_id = 6;
   void clear_segment_id();
@@ -7183,7 +7183,7 @@ class InsertOrDeleteMsg :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr partition_tag_;
   ::milvus::grpc::RowData* rows_data_;
   ::PROTOBUF_NAMESPACE_ID::int64 uid_;
-  ::PROTOBUF_NAMESPACE_ID::int64 timestamp_;
+  ::PROTOBUF_NAMESPACE_ID::uint64 timestamp_;
   ::PROTOBUF_NAMESPACE_ID::int64 segment_id_;
   ::PROTOBUF_NAMESPACE_ID::int64 channel_id_;
   ::PROTOBUF_NAMESPACE_ID::int64 client_id_;
@@ -7360,10 +7360,10 @@ class SearchMsg :
   ::PROTOBUF_NAMESPACE_ID::int64 uid() const;
   void set_uid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // int64 timestamp = 5;
+  // uint64 timestamp = 5;
   void clear_timestamp();
-  ::PROTOBUF_NAMESPACE_ID::int64 timestamp() const;
-  void set_timestamp(::PROTOBUF_NAMESPACE_ID::int64 value);
+  ::PROTOBUF_NAMESPACE_ID::uint64 timestamp() const;
+  void set_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
 
   // int64 client_id = 6;
   void clear_client_id();
@@ -7380,7 +7380,7 @@ class SearchMsg :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr partition_tag_;
   ::milvus::grpc::VectorRowRecord* records_;
   ::PROTOBUF_NAMESPACE_ID::int64 uid_;
-  ::PROTOBUF_NAMESPACE_ID::int64 timestamp_;
+  ::PROTOBUF_NAMESPACE_ID::uint64 timestamp_;
   ::PROTOBUF_NAMESPACE_ID::int64 client_id_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_suvlim_2eproto;
@@ -7509,10 +7509,10 @@ class TimeSyncMsg :
   ::PROTOBUF_NAMESPACE_ID::int64 peer_id() const;
   void set_peer_id(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // int64 Timestamp = 2;
+  // uint64 Timestamp = 2;
   void clear_timestamp();
-  ::PROTOBUF_NAMESPACE_ID::int64 timestamp() const;
-  void set_timestamp(::PROTOBUF_NAMESPACE_ID::int64 value);
+  ::PROTOBUF_NAMESPACE_ID::uint64 timestamp() const;
+  void set_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
 
   // .milvus.grpc.SyncType sync_type = 3;
   void clear_sync_type();
@@ -7525,7 +7525,7 @@ class TimeSyncMsg :
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::int64 peer_id_;
-  ::PROTOBUF_NAMESPACE_ID::int64 timestamp_;
+  ::PROTOBUF_NAMESPACE_ID::uint64 timestamp_;
   int sync_type_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_suvlim_2eproto;
@@ -12545,15 +12545,15 @@ inline void InsertOrDeleteMsg::set_allocated_partition_tag(std::string* partitio
   // @@protoc_insertion_point(field_set_allocated:milvus.grpc.InsertOrDeleteMsg.partition_tag)
 }
 
-// int64 timestamp = 5;
+// uint64 timestamp = 5;
 inline void InsertOrDeleteMsg::clear_timestamp() {
-  timestamp_ = PROTOBUF_LONGLONG(0);
+  timestamp_ = PROTOBUF_ULONGLONG(0);
 }
-inline ::PROTOBUF_NAMESPACE_ID::int64 InsertOrDeleteMsg::timestamp() const {
+inline ::PROTOBUF_NAMESPACE_ID::uint64 InsertOrDeleteMsg::timestamp() const {
   // @@protoc_insertion_point(field_get:milvus.grpc.InsertOrDeleteMsg.timestamp)
   return timestamp_;
 }
-inline void InsertOrDeleteMsg::set_timestamp(::PROTOBUF_NAMESPACE_ID::int64 value) {
+inline void InsertOrDeleteMsg::set_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value) {
   
   timestamp_ = value;
   // @@protoc_insertion_point(field_set:milvus.grpc.InsertOrDeleteMsg.timestamp)
@@ -12816,15 +12816,15 @@ inline void SearchMsg::set_uid(::PROTOBUF_NAMESPACE_ID::int64 value) {
   // @@protoc_insertion_point(field_set:milvus.grpc.SearchMsg.uid)
 }
 
-// int64 timestamp = 5;
+// uint64 timestamp = 5;
 inline void SearchMsg::clear_timestamp() {
-  timestamp_ = PROTOBUF_LONGLONG(0);
+  timestamp_ = PROTOBUF_ULONGLONG(0);
 }
-inline ::PROTOBUF_NAMESPACE_ID::int64 SearchMsg::timestamp() const {
+inline ::PROTOBUF_NAMESPACE_ID::uint64 SearchMsg::timestamp() const {
   // @@protoc_insertion_point(field_get:milvus.grpc.SearchMsg.timestamp)
   return timestamp_;
 }
-inline void SearchMsg::set_timestamp(::PROTOBUF_NAMESPACE_ID::int64 value) {
+inline void SearchMsg::set_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value) {
   
   timestamp_ = value;
   // @@protoc_insertion_point(field_set:milvus.grpc.SearchMsg.timestamp)
@@ -12892,15 +12892,15 @@ inline void TimeSyncMsg::set_peer_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
   // @@protoc_insertion_point(field_set:milvus.grpc.TimeSyncMsg.peer_Id)
 }
 
-// int64 Timestamp = 2;
+// uint64 Timestamp = 2;
 inline void TimeSyncMsg::clear_timestamp() {
-  timestamp_ = PROTOBUF_LONGLONG(0);
+  timestamp_ = PROTOBUF_ULONGLONG(0);
 }
-inline ::PROTOBUF_NAMESPACE_ID::int64 TimeSyncMsg::timestamp() const {
+inline ::PROTOBUF_NAMESPACE_ID::uint64 TimeSyncMsg::timestamp() const {
   // @@protoc_insertion_point(field_get:milvus.grpc.TimeSyncMsg.Timestamp)
   return timestamp_;
 }
-inline void TimeSyncMsg::set_timestamp(::PROTOBUF_NAMESPACE_ID::int64 value) {
+inline void TimeSyncMsg::set_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value) {
   
   timestamp_ = value;
   // @@protoc_insertion_point(field_set:milvus.grpc.TimeSyncMsg.Timestamp)
