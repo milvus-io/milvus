@@ -101,6 +101,7 @@ func (c *mockDataNodeClient) Stop() error {
 }
 
 type mockMasterService struct {
+	cnt int64
 }
 
 func newMockMasterService() *mockMasterService {
@@ -153,7 +154,14 @@ func (m *mockMasterService) HasCollection(ctx context.Context, req *milvuspb.Has
 }
 
 func (m *mockMasterService) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-	panic("not implemented") // TODO: Implement
+	return &milvuspb.DescribeCollectionResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "",
+		},
+		Schema:       nil,
+		CollectionID: 0,
+	}, nil
 }
 
 func (m *mockMasterService) ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
@@ -197,11 +205,29 @@ func (m *mockMasterService) DropIndex(ctx context.Context, req *milvuspb.DropInd
 
 //global timestamp allocator
 func (m *mockMasterService) AllocTimestamp(ctx context.Context, req *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
-	panic("not implemented") // TODO: Implement
+	val := atomic.AddInt64(&m.cnt, int64(req.Count))
+	phy := time.Now().UnixNano() / int64(time.Millisecond)
+	ts := tsoutil.ComposeTS(phy, val)
+	return &masterpb.AllocTimestampResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		Timestamp: ts,
+		Count:     req.Count,
+	}, nil
 }
 
 func (m *mockMasterService) AllocID(ctx context.Context, req *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
-	panic("not implemented") // TODO: Implement
+	val := atomic.AddInt64(&m.cnt, int64(req.Count))
+	return &masterpb.AllocIDResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		ID:    val,
+		Count: req.Count,
+	}, nil
 }
 
 //segment
