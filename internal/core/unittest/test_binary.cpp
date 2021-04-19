@@ -22,7 +22,7 @@ TEST(Binary, Insert) {
     int64_t topK = 5;
     auto schema = std::make_shared<Schema>();
     schema->AddField("vecbin", DataType::VECTOR_BINARY, 128, MetricType::METRIC_Jaccard);
-    schema->AddField("age", DataType::INT64);
+    schema->AddField("age", DataType::INT32);
     auto dataset = DataGen(schema, N, 10);
     auto segment = CreateSegment(schema);
     segment->PreInsert(N);

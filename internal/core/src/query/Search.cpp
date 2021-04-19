@@ -29,7 +29,6 @@ create_bitmap_view(std::optional<const BitmapSimple*> bitmaps_opt, int64_t chunk
     auto src_vec = ~bitmaps.at(chunk_id);
     auto dst = std::make_shared<faiss::ConcurrentBitset>(src_vec.size());
     auto iter = reinterpret_cast<BitmapChunk::block_type*>(dst->mutable_data());
-
     boost::to_block_range(src_vec, iter);
     return dst;
 }
@@ -131,16 +130,6 @@ QueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
     results.topK_ = topK;
     results.num_queries_ = num_queries;
 
-    // TODO: deprecated code begin
-    final_uids = results.internal_seg_offsets_;
-    for (auto& id : final_uids) {
-        if (id == -1) {
-            continue;
-        }
-        id = record.uids_[id];
-    }
-    results.result_ids_ = std::move(final_uids);
-    // TODO: deprecated code end
     return Status::OK();
 }
 
@@ -219,16 +208,6 @@ BinaryQueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
     results.topK_ = topK;
     results.num_queries_ = num_queries;
 
-    // TODO: deprecated code begin
-    final_uids = results.internal_seg_offsets_;
-    for (auto& id : final_uids) {
-        if (id == -1) {
-            continue;
-        }
-        id = record.uids_[id];
-    }
-    results.result_ids_ = std::move(final_uids);
-    // TODO: deprecated code end
     return Status::OK();
 }
 

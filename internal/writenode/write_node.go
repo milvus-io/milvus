@@ -23,7 +23,11 @@ func NewWriteNode(ctx context.Context, writeNodeID uint64) *WriteNode {
 	return node
 }
 
-func (node *WriteNode) Start() {
+func Init() {
+	Params.Init()
+}
+
+func (node *WriteNode) Start() error {
 
 	// TODO GOOSE Init Size??
 	chanSize := 100
@@ -35,6 +39,7 @@ func (node *WriteNode) Start() {
 
 	go node.dataSyncService.start()
 	go node.flushSyncService.start()
+	return nil
 }
 
 func (node *WriteNode) Close() {
