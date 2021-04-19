@@ -44,8 +44,8 @@ func (wn *WriteNode) InsertBatchData(ctx context.Context, data []*schema.InsertM
 	var timeStamp []uint64
 
 	for i := 0; i < len(data); i++ {
-		prefixKey = data[i].CollectionName + "_" + strconv.FormatInt(data[i].EntityId, 10)
-		suffixKey = data[i].PartitionTag + "_" + strconv.FormatUint(data[i].SegmentId, 10)
+		prefixKey = data[i].CollectionName + "-" + strconv.FormatUint(data[i].EntityId, 10)
+		suffixKey = strconv.FormatUint(data[i].SegmentId, 10)
 		prefixKeys = append(prefixKeys, []byte(prefixKey))
 		suffixKeys = append(suffixKeys, []byte(suffixKey))
 		binaryData = append(binaryData, data[i].Serialization())
@@ -68,7 +68,7 @@ func (wn *WriteNode) DeleteBatchData(ctx context.Context, data []*schema.DeleteM
 	var timeStamps []uint64
 
 	for i := 0; i < len(data); i++ {
-		prefixKey = data[i].CollectionName + "_" + strconv.FormatInt(data[i].EntityId, 10) + "_"
+		prefixKey = data[i].CollectionName + "-" + strconv.FormatUint(data[i].EntityId, 10)
 		prefixKeys = append(prefixKeys, []byte(prefixKey))
 		timeStamps = append(timeStamps, data[i].Timestamp)
 	}
