@@ -15,6 +15,9 @@ cmake-build-debug
 cmake-build-release
 cmake_build
 
+# Docker generated cache file
+.docker/
+
 # proxy
 proxy/milvus
 proxy/cmake_build
@@ -36,10 +39,8 @@ sdk/cmake-build-release
 sdk/cmake_build_release
 
 # Compiled source
-cmd/reader/reader
-cmd/master/main
-cmd/proxy/proxy
-cmd/benchmark/benckmark
+bin/
+lib/
 *.a
 *.so
 *.so.*
@@ -49,3 +50,5 @@ cmd/benchmark/benckmark
 *.log
 .coverage
 *.pyc
+
+.DS_Store

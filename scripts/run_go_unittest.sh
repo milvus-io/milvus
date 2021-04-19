@@ -11,6 +11,6 @@ done
 SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
 # ignore Minio,S3 unittes
-MILVUS_DIR="${SCRIPTS_DIR}/../../internal/"
+MILVUS_DIR="${SCRIPTS_DIR}/../internal/"
 echo $MILVUS_DIR
 echo go test "${MILVUS_DIR}/storage/internal/tikv/..." "${MILVUS_DIR}/reader/..." "${MILVUS_DIR}/writer/..." "${MILVUS_DIR}/master/..." "${MILVUS_DIR}/proxy/..." -failfast

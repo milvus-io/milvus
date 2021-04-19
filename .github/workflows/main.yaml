@@ -43,6 +43,7 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           reporter: github-pr-check # Default is github-pr-check
+          hadolint_ignore: DL3008
       - name: Docker Pull
         shell: bash
         run: |
@@ -61,11 +62,6 @@ jobs:
       - name: Docker Run
         run: |
           docker-compose run ubuntu
-      - name: Run UnitTest
-        shell: bash
-        run: |
-          cd ${GITHUB_WORKSPACE}/deployments/docker && docker-compose up -d
-          cd ${GITHUB_WORKSPACE}/scripts/ && ./run_cpp_unittest.sh && ./run_go_unittest.sh
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'zilliztech/milvus-distributed'
         continue-on-error: true
