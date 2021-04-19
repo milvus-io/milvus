@@ -26,7 +26,7 @@ usage:
 done
 
 
-PROTO_DIR=$SCRIPTS_DIR/../../internal/proto/
+PROTO_DIR=$SCRIPTS_DIR/../internal/proto/
 
 PROGRAM=$(basename "$0")
 GOPATH=$(go env GOPATH)

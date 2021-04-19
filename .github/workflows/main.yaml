@@ -6,25 +6,23 @@ on:
   push:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
-      - 'ci/**'
+      - 'scripts/**'
       - 'internal/**'
       - 'cmd/**'
       - '.github/workflows/main.yml'
       - docker-compose.yml
       - '!**.md'
       - '!**_test.go'
-      - '!ci/jenkins/**'
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
-      - 'ci/**'
+      - 'scripts/**'
       - 'internal/**'
       - 'cmd/**'
       - '.github/workflows/main.yml'
       - docker-compose.yml
       - '!**.md'
       - '!**_test.go'
-      - '!ci/jenkins/**'
 
 jobs:
   ubuntu:
@@ -35,7 +33,7 @@ jobs:
         uses: actions/checkout@v2
       - name: Install Dependency
         run: |
-          ./ci/scripts/install_deps.sh
+          ./scripts/install_deps.sh
           go get github.com/golang/protobuf/protoc-gen-go@v1.3.2
       - name: Cache Core Thirdparty
         id: cache-core
@@ -46,14 +44,14 @@ jobs:
           key: ${{ runner.os }}-core-thirdparty
       - name: Build Cpp
         run: |
-          ./ci/scripts/core_build.sh -u
+          ./scripts/core_build.sh -u
       - name: Generat Proto GO File
         run: |
           echo `pwd`
           pwd_dir=`pwd`
           export PATH=$PATH:$(go env GOPATH)/bin
           export protoc=${pwd_dir}/internal/core/cmake_build/thirdparty/protobuf/protobuf-build/protoc
-          ./ci/scripts/proto_gen_go.sh
+          ./scripts/proto_gen_go.sh
       - name: Build GO
         run: |
           go build -o ./cmd/writer/writer ./cmd/writer/writer.go
@@ -65,4 +63,4 @@ jobs:
           docker-compose up -d
       - name: Run Unittest
         run: |
-          ./ci/scripts/run_unittest.sh
+          ./scripts/run_unittest.sh
