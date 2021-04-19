@@ -171,6 +171,8 @@ func (mt *metaTable) addSegmentFlush(segmentID UniqueID, timestamp Timestamp) er
 }
 
 func (mt *metaTable) getFlushCloseTime(segmentID UniqueID) (Timestamp, error) {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
 	meta, ok := mt.segID2FlushMeta[segmentID]
 	if !ok {
 		return typeutil.ZeroTimestamp, errors.Errorf("segment not exists with ID = " + strconv.FormatInt(segmentID, 10))
@@ -179,6 +181,8 @@ func (mt *metaTable) getFlushCloseTime(segmentID UniqueID) (Timestamp, error) {
 }
 
 func (mt *metaTable) getFlushOpenTime(segmentID UniqueID) (Timestamp, error) {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
 	meta, ok := mt.segID2FlushMeta[segmentID]
 	if !ok {
 		return typeutil.ZeroTimestamp, errors.Errorf("segment not exists with ID = " + strconv.FormatInt(segmentID, 10))
@@ -187,6 +191,8 @@ func (mt *metaTable) getFlushOpenTime(segmentID UniqueID) (Timestamp, error) {
 }
 
 func (mt *metaTable) checkFlushComplete(segmentID UniqueID) (bool, error) {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
 	meta, ok := mt.segID2FlushMeta[segmentID]
 	if !ok {
 		return false, errors.Errorf("segment not exists with ID = " + strconv.FormatInt(segmentID, 10))
@@ -195,6 +201,8 @@ func (mt *metaTable) checkFlushComplete(segmentID UniqueID) (bool, error) {
 }
 
 func (mt *metaTable) getSegBinlogPaths(segmentID UniqueID) (map[int64][]string, error) {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
 
 	meta, ok := mt.segID2FlushMeta[segmentID]
 	if !ok {
@@ -208,6 +216,8 @@ func (mt *metaTable) getSegBinlogPaths(segmentID UniqueID) (map[int64][]string, 
 }
 
 func (mt *metaTable) getDDLBinlogPaths(collID UniqueID) (map[UniqueID][]string, error) {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
 
 	meta, ok := mt.collID2DdlMeta[collID]
 	if !ok {

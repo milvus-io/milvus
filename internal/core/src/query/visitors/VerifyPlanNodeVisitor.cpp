@@ -61,17 +61,6 @@ InferIndexType(const Json& search_params) {
     PanicInfo("failed to infer index type");
 }
 
-static knowhere::IndexType
-InferBinaryIndexType(const Json& search_params) {
-    namespace ip = knowhere::IndexParams;
-    namespace ie = knowhere::IndexEnum;
-    if (search_params.contains(ip::nprobe)) {
-        return ie::INDEX_FAISS_BIN_IVFFLAT;
-    } else {
-        return ie::INDEX_FAISS_BIN_IDMAP;
-    }
-}
-
 void
 VerifyPlanNodeVisitor::visit(FloatVectorANNS& node) {
     auto& search_params = node.query_info_.search_params_;
@@ -90,18 +79,7 @@ VerifyPlanNodeVisitor::visit(FloatVectorANNS& node) {
 
 void
 VerifyPlanNodeVisitor::visit(BinaryVectorANNS& node) {
-    auto& search_params = node.query_info_.search_params_;
-    auto inferred_type = InferBinaryIndexType(search_params);
-    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(inferred_type);
-    auto index_mode = knowhere::IndexMode::MODE_CPU;
-
-    // mock the api, topk will be passed from placeholder
-    auto params_copy = search_params;
-    params_copy[knowhere::meta::TOPK] = 10;
-
-    // NOTE: the second parameter is not checked in knowhere, may be redundant
-    auto passed = adapter->CheckSearch(params_copy, inferred_type, index_mode);
-    AssertInfo(passed, "invalid search params");
+    // TODO
 }
 
 }  // namespace milvus::query
