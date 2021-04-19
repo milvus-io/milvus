@@ -1143,7 +1143,7 @@ func TestSegmentLoad_Search_Vector(t *testing.T) {
 	assert.NoError(t, err)
 
 	fieldsMap, _ := node.loadService.segLoader.checkTargetFields(paths, srcFieldIDs, fieldIDs)
-	assert.Equal(t, len(fieldsMap), 2)
+	assert.Equal(t, len(fieldsMap), 4)
 
 	segment, err := node.replica.getSegmentByID(segmentID)
 	assert.NoError(t, err)
