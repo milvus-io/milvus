@@ -16,7 +16,7 @@ type Partition struct {
 	collectionID UniqueID
 	partitionID  UniqueID
 	segmentIDs   []UniqueID
-	enableDM     bool
+	enable       bool
 }
 
 func (p *Partition) ID() UniqueID {
@@ -41,7 +41,7 @@ func newPartition(collectionID UniqueID, partitionID UniqueID) *Partition {
 	var newPartition = &Partition{
 		collectionID: collectionID,
 		partitionID:  partitionID,
-		enableDM:     false,
+		enable:       false,
 	}
 
 	return newPartition

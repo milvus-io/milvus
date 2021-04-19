@@ -148,7 +148,7 @@ func (node *QueryNode) Start() error {
 	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica)
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 	node.loadService = newLoadService(node.queryNodeLoopCtx, node.masterClient, node.dataClient, node.indexClient, node.replica, node.dataSyncService.dmStream)
-	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, node.loadService.fieldStatsChan)
+	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, node.loadService.segLoader.indexLoader.fieldStatsChan)
 
 	// start services
 	go node.dataSyncService.start()
@@ -382,7 +382,7 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	segmentIDs := in.SegmentIDs
 	fieldIDs := in.FieldIDs
 
-	err := node.replica.enablePartitionDM(partitionID)
+	err := node.replica.enablePartition(partitionID)
 	if err != nil {
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -395,7 +395,7 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	for i, state := range in.SegmentStates {
 		if state.State == commonpb.SegmentState_SegmentGrowing {
 			position := state.StartPosition
-			err = node.loadService.seekSegment(position)
+			err = node.loadService.segLoader.seekSegment(position)
 			if err != nil {
 				status := &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -423,7 +423,7 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 
 func (node *QueryNode) ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error) {
 	for _, id := range in.PartitionIDs {
-		err := node.replica.enablePartitionDM(id)
+		err := node.replica.enablePartition(id)
 		if err != nil {
 			status := &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -435,7 +435,7 @@ func (node *QueryNode) ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*comm
 
 	// release all fields in the segments
 	for _, id := range in.SegmentIDs {
-		err := node.loadService.releaseSegment(id)
+		err := node.loadService.segLoader.releaseSegment(id)
 		if err != nil {
 			status := &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
