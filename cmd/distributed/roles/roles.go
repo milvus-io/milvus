@@ -12,6 +12,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/rmqms"
+	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq"
 )
 
 func newMsgFactory(localMsg bool) msgstream.Factory {
@@ -276,4 +277,6 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		}
 		log.Printf("exit msg stream service")
 	}
+
+	defer rocksmq.CloseRocksMQ()
 }

@@ -20,5 +20,5 @@ func initRoles(roles *roles.MilvusRoles) {
 func main() {
 	var roles roles.MilvusRoles
 	initRoles(&roles)
-	roles.Run(false)
+	roles.Run(true)
 }

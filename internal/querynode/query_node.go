@@ -16,12 +16,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"io"
 	"log"
 	"sync/atomic"
 
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/rmqms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	queryPb "github.com/zilliztech/milvus-distributed/internal/proto/querypb"
@@ -371,8 +372,11 @@ func (node *QueryNode) WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*com
 		return status, errors.New(errMsg)
 	}
 
-	fgDMMsgStream, ok := node.dataSyncService.dmStream.(*pulsarms.PulsarTtMsgStream)
-	if !ok {
+	switch t := node.dataSyncService.dmStream.(type) {
+	case *pulsarms.PulsarTtMsgStream:
+	case *rmqms.RmqTtMsgStream:
+	default:
+		_ = t
 		errMsg := "type assertion failed for dm message stream"
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -385,7 +389,7 @@ func (node *QueryNode) WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*com
 	// add request channel
 	consumeChannels := in.ChannelIDs
 	consumeSubName := Params.MsgChannelSubName
-	fgDMMsgStream.AsConsumer(consumeChannels, consumeSubName)
+	node.dataSyncService.dmStream.AsConsumer(consumeChannels, consumeSubName)
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
