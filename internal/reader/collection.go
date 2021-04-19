@@ -22,9 +22,9 @@ type Collection struct {
 
 func (c *Collection) NewPartition(partitionName string) *Partition {
 	/*
-	CPartition
-	NewPartition(CCollection collection, const char* partition_name);
-	 */
+		CPartition
+		NewPartition(CCollection collection, const char* partition_name);
+	*/
 	cName := C.CString(partitionName)
 	partitionPtr := C.NewPartition(c.CollectionPtr, cName)
 
@@ -33,13 +33,25 @@ func (c *Collection) NewPartition(partitionName string) *Partition {
 	return newPartition
 }
 
-func (c *Collection) DeletePartition(partition *Partition) {
+func (c *Collection) DeletePartition(node *QueryNode, partition *Partition) {
 	/*
-	void
-	DeletePartition(CPartition partition);
-	 */
+		void
+		DeletePartition(CPartition partition);
+	*/
 	cPtr := partition.PartitionPtr
 	C.DeletePartition(cPtr)
 
-	// TODO: remove from c.Partitions
+	tmpPartitions := make([]*Partition, 0)
+
+	for _, p := range c.Partitions {
+		if p.PartitionName == partition.PartitionName {
+			for _, s := range p.Segments {
+				delete(node.SegmentsMap, s.SegmentId)
+			}
+		} else {
+			tmpPartitions = append(tmpPartitions, p)
+		}
+	}
+
+	c.Partitions = tmpPartitions
 }

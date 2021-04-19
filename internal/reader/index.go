@@ -18,10 +18,10 @@ import (
 
 type IndexConfig struct{}
 
-func (s *Segment) buildIndex(collection* Collection) msgPb.Status {
+func (s *Segment) BuildIndex(collection *Collection) msgPb.Status {
 	/*
-	int
-	BuildIndex(CCollection c_collection, CSegmentBase c_segment);
+		int
+		BuildIndex(CCollection c_collection, CSegmentBase c_segment);
 	*/
 	var status = C.BuildIndex(collection.CollectionPtr, s.SegmentPtr)
 	if status != 0 {
@@ -30,8 +30,18 @@ func (s *Segment) buildIndex(collection* Collection) msgPb.Status {
 	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
 }
 
-func (s *Segment) dropIndex(fieldName string) msgPb.Status {
+func (s *Segment) DropIndex(fieldName string) msgPb.Status {
 	// WARN: Not support yet
 
 	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
+}
+
+func (node *QueryNode) UpdateIndexes(collection *Collection, indexConfig *string) {
+	/*
+		void
+		UpdateIndexes(CCollection c_collection, const char *index_string);
+	*/
+	cCollectionPtr := collection.CollectionPtr
+	cIndexConfig := C.CString(*indexConfig)
+	C.UpdateIndexes(cCollectionPtr, cIndexConfig)
 }

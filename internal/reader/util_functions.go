@@ -64,6 +64,16 @@ func (node *QueryNode) GetSegmentBySegmentID(segmentID int64) (*Segment, error) 
 	return targetSegment, nil
 }
 
+func (node *QueryNode) FoundSegmentBySegmentID(segmentID int64) bool {
+	targetSegment := node.SegmentsMap[segmentID]
+
+	if targetSegment == nil {
+		return false
+	}
+
+	return true
+}
+
 func (c *Collection) GetPartitionByName(partitionName string) (partition *Partition) {
 	for _, partition := range c.Partitions {
 		if partition.PartitionName == partitionName {
@@ -123,4 +133,22 @@ func (node *QueryNode) WriteQueryLog() {
 	}
 
 	fmt.Println("write log done")
+}
+
+func (node *QueryNode) PrepareBatchMsg() []int {
+	var msgLen = node.messageClient.PrepareBatchMsg()
+	return msgLen
+}
+
+func (node *QueryNode) QueryJson2Info(queryJson *string) *QueryInfo {
+	var query QueryInfo
+	var err = json.Unmarshal([]byte(*queryJson), &query)
+
+	if err != nil {
+		log.Fatal("Unmarshal query json failed")
+		return nil
+	}
+
+	//fmt.Println(query)
+	return &query
 }

@@ -7,8 +7,8 @@ import (
 	"math"
 	"testing"
 
-	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/stretchr/testify/assert"
+	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 )
 
 func TestSegment_ConstructorAndDestructor(t *testing.T) {
@@ -19,10 +19,20 @@ func TestSegment_ConstructorAndDestructor(t *testing.T) {
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
+	node.SegmentsMap[int64(0)] = segment
+
+	assert.Equal(t, collection.CollectionName, "collection0")
+	assert.Equal(t, partition.PartitionName, "partition0")
+	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, len(node.SegmentsMap), 1)
+
 	// 2. Destruct collection, partition and segment
-	partition.DeleteSegment(segment)
-	collection.DeletePartition(partition)
+	partition.DeleteSegment(node, segment)
+	collection.DeletePartition(node, partition)
 	node.DeleteCollection(collection)
+
+	assert.Equal(t, len(node.Collections), 0)
+	assert.Equal(t, len(node.SegmentsMap), 0)
 
 	node.Close()
 }
@@ -34,6 +44,13 @@ func TestSegment_SegmentInsert(t *testing.T) {
 	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
+
+	node.SegmentsMap[int64(0)] = segment
+
+	assert.Equal(t, collection.CollectionName, "collection0")
+	assert.Equal(t, partition.PartitionName, "partition0")
+	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
 	ids := []int64{1, 2, 3}
@@ -68,9 +85,12 @@ func TestSegment_SegmentInsert(t *testing.T) {
 	assert.NoError(t, err)
 
 	// 6. Destruct collection, partition and segment
-	partition.DeleteSegment(segment)
-	collection.DeletePartition(partition)
+	partition.DeleteSegment(node, segment)
+	collection.DeletePartition(node, partition)
 	node.DeleteCollection(collection)
+
+	assert.Equal(t, len(node.Collections), 0)
+	assert.Equal(t, len(node.SegmentsMap), 0)
 
 	node.Close()
 }
@@ -82,6 +102,13 @@ func TestSegment_SegmentDelete(t *testing.T) {
 	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
+
+	node.SegmentsMap[int64(0)] = segment
+
+	assert.Equal(t, collection.CollectionName, "collection0")
+	assert.Equal(t, partition.PartitionName, "partition0")
+	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
 	ids := []int64{1, 2, 3}
@@ -96,9 +123,12 @@ func TestSegment_SegmentDelete(t *testing.T) {
 	assert.NoError(t, err)
 
 	// 5. Destruct collection, partition and segment
-	partition.DeleteSegment(segment)
-	collection.DeletePartition(partition)
+	partition.DeleteSegment(node, segment)
+	collection.DeletePartition(node, partition)
 	node.DeleteCollection(collection)
+
+	assert.Equal(t, len(node.Collections), 0)
+	assert.Equal(t, len(node.SegmentsMap), 0)
 
 	node.Close()
 }
@@ -110,6 +140,13 @@ func TestSegment_SegmentSearch(t *testing.T) {
 	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
+
+	node.SegmentsMap[int64(0)] = segment
+
+	assert.Equal(t, collection.CollectionName, "collection0")
+	assert.Equal(t, partition.PartitionName, "partition0")
+	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
 	ids := make([]int64, 0)
@@ -160,9 +197,12 @@ func TestSegment_SegmentSearch(t *testing.T) {
 	fmt.Println(searchRes)
 
 	// 7. Destruct collection, partition and segment
-	partition.DeleteSegment(segment)
-	collection.DeletePartition(partition)
+	partition.DeleteSegment(node, segment)
+	collection.DeletePartition(node, partition)
 	node.DeleteCollection(collection)
+
+	assert.Equal(t, len(node.Collections), 0)
+	assert.Equal(t, len(node.SegmentsMap), 0)
 
 	node.Close()
 }
@@ -175,14 +215,24 @@ func TestSegment_SegmentPreInsert(t *testing.T) {
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
+	node.SegmentsMap[int64(0)] = segment
+
+	assert.Equal(t, collection.CollectionName, "collection0")
+	assert.Equal(t, partition.PartitionName, "partition0")
+	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, len(node.SegmentsMap), 1)
+
 	// 2. Do PreInsert
 	var offset = segment.SegmentPreInsert(10)
 	assert.GreaterOrEqual(t, offset, int64(0))
 
 	// 3. Destruct collection, partition and segment
-	partition.DeleteSegment(segment)
-	collection.DeletePartition(partition)
+	partition.DeleteSegment(node, segment)
+	collection.DeletePartition(node, partition)
 	node.DeleteCollection(collection)
+
+	assert.Equal(t, len(node.Collections), 0)
+	assert.Equal(t, len(node.SegmentsMap), 0)
 
 	node.Close()
 }
@@ -195,59 +245,69 @@ func TestSegment_SegmentPreDelete(t *testing.T) {
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
+	node.SegmentsMap[int64(0)] = segment
+
+	assert.Equal(t, collection.CollectionName, "collection0")
+	assert.Equal(t, partition.PartitionName, "partition0")
+	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, len(node.SegmentsMap), 1)
+
 	// 2. Do PreDelete
 	var offset = segment.SegmentPreDelete(10)
 	assert.GreaterOrEqual(t, offset, int64(0))
 
 	// 3. Destruct collection, partition and segment
-	partition.DeleteSegment(segment)
-	collection.DeletePartition(partition)
+	partition.DeleteSegment(node, segment)
+	collection.DeletePartition(node, partition)
 	node.DeleteCollection(collection)
+
+	assert.Equal(t, len(node.Collections), 0)
+	assert.Equal(t, len(node.SegmentsMap), 0)
 
 	node.Close()
 }
 
 //  Segment util functions test
 ////////////////////////////////////////////////////////////////////////////
-func TestSegment_GetStatus(t *testing.T) {
-	ctx := context.Background()
-	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(ctx, 0, 0)
-	var collection = node.NewCollection(0, "collection0", "")
-	var partition = collection.NewPartition("partition0")
-	var segment = partition.NewSegment(0)
+//func TestSegment_GetStatus(t *testing.T) {
+//	ctx := context.Background()
+//	// 1. Construct node, collection, partition and segment
+//	node := NewQueryNode(ctx, 0, 0)
+//	var collection = node.NewCollection(0, "collection0", "")
+//	var partition = collection.NewPartition("partition0")
+//	var segment = partition.NewSegment(0)
+//
+//	// 2. Get segment status
+//	var status = segment.GetStatus()
+//	assert.Equal(t, status, SegmentOpened)
+//
+//	// 3. Destruct collection, partition and segment
+//	partition.DeleteSegment(segment)
+//	collection.DeletePartition(partition)
+//	node.DeleteCollection(collection)
+//
+//	node.Close()
+//}
 
-	// 2. Get segment status
-	var status = segment.GetStatus()
-	assert.Equal(t, status, SegmentOpened)
-
-	// 3. Destruct collection, partition and segment
-	partition.DeleteSegment(segment)
-	collection.DeletePartition(partition)
-	node.DeleteCollection(collection)
-
-	node.Close()
-}
-
-func TestSegment_Close(t *testing.T) {
-	ctx := context.Background()
-	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(ctx, 0, 0)
-	var collection = node.NewCollection(0, "collection0", "")
-	var partition = collection.NewPartition("partition0")
-	var segment = partition.NewSegment(0)
-
-	// 2. Close segment
-	var err = segment.CloseSegment(collection)
-	assert.NoError(t, err)
-
-	// 3. Destruct collection, partition and segment
-	partition.DeleteSegment(segment)
-	collection.DeletePartition(partition)
-	node.DeleteCollection(collection)
-
-	node.Close()
-}
+//func TestSegment_Close(t *testing.T) {
+//	ctx := context.Background()
+//	// 1. Construct node, collection, partition and segment
+//	node := NewQueryNode(ctx, 0, 0)
+//	var collection = node.NewCollection(0, "collection0", "")
+//	var partition = collection.NewPartition("partition0")
+//	var segment = partition.NewSegment(0)
+//
+//	// 2. Close segment
+//	var err = segment.CloseSegment(collection)
+//	assert.NoError(t, err)
+//
+//	// 3. Destruct collection, partition and segment
+//	partition.DeleteSegment(segment)
+//	collection.DeletePartition(partition)
+//	node.DeleteCollection(collection)
+//
+//	node.Close()
+//}
 
 func TestSegment_GetRowCount(t *testing.T) {
 	ctx := context.Background()
@@ -256,6 +316,13 @@ func TestSegment_GetRowCount(t *testing.T) {
 	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
+
+	node.SegmentsMap[int64(0)] = segment
+
+	assert.Equal(t, collection.CollectionName, "collection0")
+	assert.Equal(t, partition.PartitionName, "partition0")
+	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
 	ids := []int64{1, 2, 3}
@@ -294,9 +361,12 @@ func TestSegment_GetRowCount(t *testing.T) {
 	assert.Equal(t, rowCount, int64(len(ids)))
 
 	// 7. Destruct collection, partition and segment
-	partition.DeleteSegment(segment)
-	collection.DeletePartition(partition)
+	partition.DeleteSegment(node, segment)
+	collection.DeletePartition(node, partition)
 	node.DeleteCollection(collection)
+
+	assert.Equal(t, len(node.Collections), 0)
+	assert.Equal(t, len(node.SegmentsMap), 0)
 
 	node.Close()
 }
@@ -308,6 +378,13 @@ func TestSegment_GetDeletedCount(t *testing.T) {
 	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
+
+	node.SegmentsMap[int64(0)] = segment
+
+	assert.Equal(t, collection.CollectionName, "collection0")
+	assert.Equal(t, partition.PartitionName, "partition0")
+	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
 	ids := []int64{1, 2, 3}
@@ -327,9 +404,12 @@ func TestSegment_GetDeletedCount(t *testing.T) {
 	assert.Equal(t, deletedCount, int64(0))
 
 	// 6. Destruct collection, partition and segment
-	partition.DeleteSegment(segment)
-	collection.DeletePartition(partition)
+	partition.DeleteSegment(node, segment)
+	collection.DeletePartition(node, partition)
 	node.DeleteCollection(collection)
+
+	assert.Equal(t, len(node.Collections), 0)
+	assert.Equal(t, len(node.SegmentsMap), 0)
 
 	node.Close()
 }
@@ -341,6 +421,13 @@ func TestSegment_GetMemSize(t *testing.T) {
 	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
+
+	node.SegmentsMap[int64(0)] = segment
+
+	assert.Equal(t, collection.CollectionName, "collection0")
+	assert.Equal(t, partition.PartitionName, "partition0")
+	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
 	ids := []int64{1, 2, 3}
@@ -379,9 +466,12 @@ func TestSegment_GetMemSize(t *testing.T) {
 	assert.Equal(t, memSize, uint64(2785280))
 
 	// 7. Destruct collection, partition and segment
-	partition.DeleteSegment(segment)
-	collection.DeletePartition(partition)
+	partition.DeleteSegment(node, segment)
+	collection.DeletePartition(node, partition)
 	node.DeleteCollection(collection)
+
+	assert.Equal(t, len(node.Collections), 0)
+	assert.Equal(t, len(node.SegmentsMap), 0)
 
 	node.Close()
 }
@@ -401,6 +491,13 @@ func TestSegment_RealSchemaTest(t *testing.T) {
 	var collection = node.NewCollection(0, "collection0", schemaString)
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
+
+	node.SegmentsMap[int64(0)] = segment
+
+	assert.Equal(t, collection.CollectionName, "collection0")
+	assert.Equal(t, partition.PartitionName, "partition0")
+	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
 	ids := []int64{1, 2, 3}
@@ -435,9 +532,12 @@ func TestSegment_RealSchemaTest(t *testing.T) {
 	assert.NoError(t, err)
 
 	// 6. Destruct collection, partition and segment
-	partition.DeleteSegment(segment)
-	collection.DeletePartition(partition)
+	partition.DeleteSegment(node, segment)
+	collection.DeletePartition(node, partition)
 	node.DeleteCollection(collection)
+
+	assert.Equal(t, len(node.Collections), 0)
+	assert.Equal(t, len(node.SegmentsMap), 0)
 
 	node.Close()
 }

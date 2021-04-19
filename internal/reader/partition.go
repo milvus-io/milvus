@@ -31,7 +31,7 @@ func (p *Partition) NewSegment(segmentId int64) *Segment {
 	return newSegment
 }
 
-func (p *Partition) DeleteSegment(segment *Segment) {
+func (p *Partition) DeleteSegment(node *QueryNode, segment *Segment) {
 	/*
 		void
 		DeleteSegment(CSegmentBase segment);
@@ -39,5 +39,15 @@ func (p *Partition) DeleteSegment(segment *Segment) {
 	cPtr := segment.SegmentPtr
 	C.DeleteSegment(cPtr)
 
-	// TODO: remove from p.Segments
+	tmpSegments := make([]*Segment, 0)
+
+	for _, s := range p.Segments {
+		if s.SegmentId == segment.SegmentId {
+			delete(node.SegmentsMap, s.SegmentId)
+		} else {
+			tmpSegments = append(tmpSegments, s)
+		}
+	}
+
+	p.Segments = tmpSegments
 }
