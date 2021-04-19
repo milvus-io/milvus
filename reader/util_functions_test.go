@@ -25,10 +25,11 @@ func TestUtilFunctions_GetSegmentBySegmentID(t *testing.T) {
 	node := NewQueryNode(0, 0)
 	var collection = node.NewCollection("collection0", "fake schema")
 	var partition = collection.NewPartition("partition0")
-	var _ = partition.NewSegment(0)
+	var segment = partition.NewSegment(0)
+	node.SegmentsMap[0] = segment
 
 	// 2. Get segment by segment id
 	var s0, err = node.GetSegmentBySegmentID(0)
 	assert.NoError(t, err)
-	assert.Equal(t, s0.SegmentId, 0)
+	assert.Equal(t, s0.SegmentId, int64(0))
 }
