@@ -14,7 +14,12 @@ import "C"
 
 type Partition struct {
 	partitionTag string
+	id           UniqueID
 	segments     []*Segment
+}
+
+func (p *Partition) ID() UniqueID {
+	return p.id
 }
 
 func (p *Partition) Tag() string {
