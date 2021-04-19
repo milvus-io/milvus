@@ -15,8 +15,8 @@
 #include "indexbuilder/index_c.h"
 
 CIndex
-CreateIndex(const char* type_params_str, const char* index_params_str) {
-    auto index = std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str, index_params_str);
+CreateIndex(const char* serialized_type_params, const char* serialized_index_params) {
+    auto index = std::make_unique<milvus::indexbuilder::IndexWrapper>(serialized_type_params, serialized_index_params);
 
     return (void*)(index.release());
 }
@@ -28,21 +28,24 @@ DeleteIndex(CIndex index) {
 }
 
 void
-BuildFloatVecIndex(CIndex index, int64_t row_nums, const float* vectors) {
+BuildFloatVecIndex(CIndex index, int64_t float_value_num, const float* vectors) {
     auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
     auto dim = cIndex->dim();
+    auto row_nums = float_value_num / dim;
     auto ds = milvus::knowhere::GenDataset(row_nums, dim, vectors);
     cIndex->BuildWithoutIds(ds);
 }
 
 char*
-SerializeToSlicedBuffer(CIndex index) {
+SerializeToSlicedBuffer(CIndex index, int32_t* buffer_size) {
     auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
-    return cIndex->Serialize();
+    auto binary = cIndex->Serialize();
+    *buffer_size = binary.size;
+    return binary.data;
 }
 
 void
-LoadFromSlicedBuffer(CIndex index, const char* dumped_blob_buffer) {
+LoadFromSlicedBuffer(CIndex index, const char* serialized_sliced_blob_buffer) {
     auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
-    cIndex->Load(dumped_blob_buffer);
+    cIndex->Load(serialized_sliced_blob_buffer);
 }
