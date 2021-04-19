@@ -1,4 +1,4 @@
-package indexbuilder
+package indexbuilderclient
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexbuilderpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
@@ -18,13 +19,6 @@ type Client struct {
 }
 
 type IndexStatus int32
-
-const (
-	NOTEXIST   IndexStatus = 0
-	UNISSUED   IndexStatus = 1
-	INPROGRESS IndexStatus = 2
-	FINISHED   IndexStatus = 3
-)
 
 type IndexDescription struct {
 	ID                UniqueID
@@ -41,8 +35,6 @@ func NewBuildIndexClient(conn *grpc.ClientConn) *Client {
 }
 
 func (c *Client) BuildIndexWithoutID(columnDataPaths []string, typeParams map[string]string, indexParams map[string]string) (UniqueID, error) {
-	//first new a build service client
-
 	var typeParamsKV []*commonpb.KeyValuePair
 	for typeParam := range typeParams {
 		typeParamsKV = append(typeParamsKV, &commonpb.KeyValuePair{
@@ -75,24 +67,47 @@ func (c *Client) BuildIndexWithoutID(columnDataPaths []string, typeParams map[st
 }
 
 func (c *Client) DescribeIndex(indexID UniqueID) (IndexDescription, error) {
-	//ctx := context.TODO()
-	//request := &indexbuilderpb.DescribleIndexRequest{
-	//	IndexID: indexID,
+	ctx := context.TODO()
+	request := &indexbuilderpb.DescribleIndexRequest{
+		IndexID: indexID,
+	}
+	response, err := c.client.DescribeIndex(ctx, request)
+	if err != nil {
+		return IndexDescription{}, err
+	}
+
+	enqueueTime, _ := tsoutil.ParseTS(response.EnqueTime)
+	scheduleTime, _ := tsoutil.ParseTS(response.ScheduleTime)
+	buildCompleteTime, _ := tsoutil.ParseTS(response.BuildCompleteTime)
+	indexDescription := IndexDescription{
+		ID:                indexID,
+		Status:            IndexStatus(response.IndexStatus),
+		EnqueueTime:       enqueueTime,
+		ScheduleTime:      scheduleTime,
+		BuildCompleteTime: buildCompleteTime,
+	}
+
+	//indexDescription := IndexDescription{
+	//	ID:           indexID,
+	//	Status:       IndexStatus(response.IndexStatus),
+	//	EnqueueTime:  time.Unix(0, response.EnqueTime),
+	//	ScheduleTime: time.Unix(-, response.ScheduleTime),
+	//	BuildCompleteTime: time.Unix(0, response.BuildCompleteTime),
 	//}
-	//response, err := c.client.DescribeIndex(ctx, request)
-	//if err != nil {
-	//	return IndexDescription{}, err
-	//}
-	//
-	//indexDescription := &IndexDescription{
-	//	ID:          indexID,
-	//	Status:      response.IndexStatus,
-	//	EnqueueTime: time.Unix(),
-	//}
-	return IndexDescription{}, nil
+
+	return indexDescription, nil
 }
 
-func (c *Client) GetIndexFilePaths(IndexID UniqueID) ([]string, error) {
+func (c *Client) GetIndexFilePaths(indexID UniqueID) ([]string, error) {
+	ctx := context.TODO()
+	request := &indexbuilderpb.GetIndexFilePathsRequest{
+		IndexID: indexID,
+	}
 
-	return nil, nil
+	response, err := c.client.GetIndexFilePaths(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	return response.IndexFilePaths, nil
 }
