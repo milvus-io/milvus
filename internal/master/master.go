@@ -54,6 +54,10 @@ type Master struct {
 	kvBase    *kv.EtcdKV
 	scheduler *ddRequestScheduler
 	mt        *metaTable
+
+	// tso ticker
+	tsTicker *time.Ticker
+
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
@@ -187,6 +191,10 @@ func (s *Master) startServerLoop(ctx context.Context, grpcPort int64) error {
 
 	s.serverLoopWg.Add(1)
 	go s.segmentStatisticsLoop()
+
+	s.serverLoopWg.Add(1)
+	go s.tsLoop()
+
 	return nil
 }
 
@@ -231,6 +239,31 @@ func (s *Master) grpcLoop(grpcPort int64) {
 		s.grpcErr <- err
 	}
 
+}
+
+func (s *Master) tsLoop() {
+	defer s.serverLoopWg.Done()
+	s.tsTicker = time.NewTicker(tso.UpdateTimestampStep)
+	defer s.tsTicker.Stop()
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+	for {
+		select {
+		case <-s.tsTicker.C:
+			if err := tso.UpdateTSO(); err != nil {
+				log.Println("failed to update timestamp", err)
+				return
+			}
+			if err := id.UpdateID(); err != nil {
+				log.Println("failed to update id", err)
+				return
+			}
+		case <-ctx.Done():
+			// Server is closed and it should return nil.
+			log.Println("tsLoop is closed")
+			return
+		}
+	}
 }
 
 // todo use messagestream

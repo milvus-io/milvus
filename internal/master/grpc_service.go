@@ -364,7 +364,7 @@ func (s *Master) AllocTimestamp(ctx context.Context, request *internalpb.TsoRequ
 	}
 
 	response := &internalpb.TsoResponse{
-		Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
+		Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
 		Timestamp: ts,
 		Count:     count,
 	}
@@ -383,7 +383,7 @@ func (s *Master) AllocID(ctx context.Context, request *internalpb.IDRequest) (*i
 	}
 
 	response := &internalpb.IDResponse{
-		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
 		ID:     ts,
 		Count:  count,
 	}

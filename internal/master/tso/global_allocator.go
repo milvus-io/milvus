@@ -136,3 +136,7 @@ func AllocOne() (typeutil.Timestamp, error) {
 func Alloc(count uint32) (typeutil.Timestamp, error) {
 	return allocator.Alloc(count)
 }
+
+func UpdateTSO() error {
+	return allocator.UpdateTSO()
+}
