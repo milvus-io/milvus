@@ -106,10 +106,13 @@ func (index *CIndex) BuildFloatVecIndexWithoutIds(vectors []float32) error {
 		CStatus
 		BuildFloatVecIndexWithoutIds(CIndex index, int64_t float_value_num, const float* vectors);
 	*/
+	fmt.Println("before BuildFloatVecIndexWithoutIds")
 	status := C.BuildFloatVecIndexWithoutIds(index.indexPtr, (C.int64_t)(len(vectors)), (*C.float)(&vectors[0]))
 	errorCode := status.error_code
+	fmt.Println("BuildFloatVecIndexWithoutIds error code: ", errorCode)
 	if errorCode != 0 {
 		errorMsg := C.GoString(status.error_msg)
+		fmt.Println("BuildFloatVecIndexWithoutIds error msg: ", errorMsg)
 		defer C.free(unsafe.Pointer(status.error_msg))
 		return errors.New("BuildFloatVecIndexWithoutIds failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}

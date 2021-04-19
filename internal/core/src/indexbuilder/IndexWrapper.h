@@ -62,6 +62,9 @@ class IndexWrapper {
     std::string
     get_metric_type();
 
+    knowhere::IndexMode
+    get_index_mode();
+
     template <typename T>
     std::optional<T>
     get_config_by_name(std::string name);
