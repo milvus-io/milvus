@@ -13,7 +13,6 @@
 #include <faiss/utils/BinaryDistance.h>
 #include "segcore/ConcurrentVector.h"
 #include "common/Schema.h"
-#include "query/SubQueryResult.h"
 
 namespace milvus::query {
 using MetricType = faiss::MetricType;
@@ -29,10 +28,12 @@ struct BinaryQueryDataset {
 
 }  // namespace dataset
 
-SubQueryResult
+void
 BinarySearchBruteForce(const dataset::BinaryQueryDataset& query_dataset,
                        const uint8_t* binary_chunk,
                        int64_t chunk_size,
-                       const faiss::BitsetView& bitset = nullptr);
+                       float* result_distances,
+                       idx_t* result_labels,
+                       faiss::ConcurrentBitsetPtr bitset = nullptr);
 
 }  // namespace milvus::query
