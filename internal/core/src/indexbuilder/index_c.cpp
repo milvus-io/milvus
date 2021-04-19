@@ -251,7 +251,7 @@ GetDistancesOfQueryResult(CIndexQueryResult res, float* distances) {
 }
 
 CStatus
-DeleteIndexQueryResult(CIndexQueryResult res) {
+DeleteQueryResult(CIndexQueryResult res) {
     auto status = CStatus();
     try {
         auto c_res = (milvus::indexbuilder::IndexWrapper::QueryResult*)res;

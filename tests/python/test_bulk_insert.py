@@ -129,6 +129,7 @@ class TestInsertBase:
         info = connect.get_index_info(collection, field_name)
         assert info == get_simple_index
 
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_after_create_index(self, connect, collection, get_simple_index):
         '''
@@ -142,6 +143,7 @@ class TestInsertBase:
         info = connect.get_index_info(collection, field_name)
         assert info == get_simple_index
 
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_search(self, connect, collection):
         '''
@@ -645,6 +647,7 @@ class TestInsertBinary:
         info = connect.get_index_info(binary_collection, binary_field_name)
         assert info == get_binary_index
 
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_binary_create_index(self, connect, binary_collection, get_binary_index):
         '''
@@ -842,6 +845,7 @@ class TestInsertMultiCollections:
         connect.flush([collection_name])
         assert len(ids) == 1
 
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_create_index_insert_vector_another(self, connect, collection, get_simple_index):
         '''
@@ -903,6 +907,7 @@ class TestInsertMultiCollections:
         count = connect.count_entities(collection_name)
         assert count == 1
 
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_vector_search_vector_another(self, connect, collection):
         '''
@@ -915,6 +920,7 @@ class TestInsertMultiCollections:
         ids = connect.bulk_insert(collection, default_entity)
         result = connect.search(collection_name, default_single_query)
 
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_vector_sleep_search_vector_another(self, connect, collection):
         '''
