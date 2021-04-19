@@ -137,7 +137,7 @@ ShowExprVisitor::visit(TermExpr& expr) {
     }();
 
     Json res{{"expr_type", "Term"},
-             {"field_offset", expr.field_offset_.get()},
+             {"field_id", expr.field_id_},
              {"data_type", datatype_name(expr.data_type_)},
              {"terms", std::move(terms)}};
 
@@ -184,7 +184,7 @@ ShowExprVisitor::visit(RangeExpr& expr) {
     }();
 
     Json res{{"expr_type", "Range"},
-             {"field_offset", expr.field_offset_.get()},
+             {"field_id", expr.field_id_},
              {"data_type", datatype_name(expr.data_type_)},
              {"conditions", std::move(conditions)}};
     ret_ = res;

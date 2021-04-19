@@ -12,6 +12,7 @@
 #pragma once
 #include <vector>
 
+#include "IndexMeta.h"
 #include "common/Types.h"
 #include "common/Schema.h"
 #include <memory>
@@ -81,6 +82,23 @@ class SegmentBase {
 
     virtual Status
     LoadIndexing(const LoadIndexInfo& info) = 0;
+
+    //    // to make all data inserted visible
+    //    // maybe a no-op?
+    //    virtual Status
+    //    Flush(Timestamp timestamp) = 0;
+
+    // watch changes
+    // NOTE: Segment will use this ptr as correct
+
+    virtual Status
+    DropRawData(std::string_view field_name) = 0;
+
+    virtual Status
+    LoadRawData(std::string_view field_name, const char* blob, int64_t blob_size) = 0;
+
+    virtual Status
+    BuildIndex(IndexMetaPtr index_meta) = 0;
 
     virtual int64_t
     GetMemoryUsageInBytes() = 0;

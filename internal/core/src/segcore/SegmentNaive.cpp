@@ -8,9 +8,8 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
-#if 0
 
-#include <segcore/deprecated/SegmentNaive.h>
+#include <segcore/SegmentNaive.h>
 #include <random>
 #include <algorithm>
 #include <numeric>
@@ -240,17 +239,20 @@ SegmentNaive::QueryImpl(query::QueryDeprecatedPtr query_info, Timestamp timestam
     Assert(bitmap_holder);
     Assert(bitmap_holder->bitmap_ptr->count() == ins_barrier);
 
-    auto field_name = FieldName(query_info->field_name);
-    auto field_offset = schema_->get_offset(field_name);
-    auto& field = schema_->operator[](field_name);
+    auto field_offset = schema_->get_offset(query_info->field_name);
+    auto& field = schema_->operator[](query_info->field_name);
 
     Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
     auto dim = field.get_dim();
     auto bitmap = bitmap_holder->bitmap_ptr;
     auto topK = query_info->topK;
     auto num_queries = query_info->num_queries;
-    auto vec_ptr = std::static_pointer_cast<ConcurrentVector<FloatVector>>(record_.entity_vec_.at(field_offset));
-    auto index_entry = index_meta_->lookup_by_field(field_name);
+    auto the_offset_opt = schema_->get_offset(query_info->field_name);
+    Assert(the_offset_opt.has_value());
+    Assert(the_offset_opt.value() < record_.entity_vec_.size());
+    auto vec_ptr =
+        std::static_pointer_cast<ConcurrentVector<FloatVector>>(record_.entity_vec_.at(the_offset_opt.value()));
+    auto index_entry = index_meta_->lookup_by_field(query_info->field_name);
     auto conf = index_entry.config;
 
     conf[milvus::knowhere::meta::TOPK] = query_info->topK;
@@ -294,17 +296,19 @@ SegmentNaive::QuerySlowImpl(query::QueryDeprecatedPtr query_info, Timestamp time
     auto del_barrier = get_barrier(deleted_record_, timestamp);
     auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
     Assert(bitmap_holder);
-    auto field_name = FieldName(query_info->field_name);
-    auto& field = schema_->operator[](field_name);
+
+    auto& field = schema_->operator[](query_info->field_name);
     Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
     auto dim = field.get_dim();
     auto bitmap = bitmap_holder->bitmap_ptr;
     auto topK = query_info->topK;
     auto num_queries = query_info->num_queries;
     // TODO: optimize
-    auto field_offset = schema_->get_offset(field_name);
-    Assert(field_offset < record_.entity_vec_.size());
-    auto vec_ptr = std::static_pointer_cast<ConcurrentVector<FloatVector>>(record_.entity_vec_.at(field_offset));
+    auto the_offset_opt = schema_->get_offset(query_info->field_name);
+    Assert(the_offset_opt.has_value());
+    Assert(the_offset_opt.value() < record_.entity_vec_.size());
+    auto vec_ptr =
+        std::static_pointer_cast<ConcurrentVector<FloatVector>>(record_.entity_vec_.at(the_offset_opt.value()));
     std::vector<std::priority_queue<std::pair<float, int>>> records(num_queries);
 
     auto get_L2_distance = [dim](const float* a, const float* b) {
@@ -366,7 +370,7 @@ SegmentNaive::QueryDeprecated(query::QueryDeprecatedPtr query_info, Timestamp ti
         query_info->topK = 10;
         query_info->num_queries = 1;
 
-        auto dim = schema_->operator[](FieldName("fakevec")).get_dim();
+        auto dim = schema_->operator[]("fakevec").get_dim();
         std::default_random_engine e(42);
         std::uniform_real_distribution<> dis(0.0, 1.0);
         query_info->query_raw_data.resize(query_info->num_queries * dim);
@@ -411,7 +415,7 @@ SegmentNaive::BuildIndex(IndexMetaPtr remote_index_meta) {
         for (auto& field : schema_->get_fields()) {
             if (field.get_data_type() == DataType::VECTOR_FLOAT) {
                 dim = field.get_dim();
-                index_field_name = field.get_name().get();
+                index_field_name = field.get_name();
             }
         }
 
@@ -460,5 +464,3 @@ SegmentNaive::GetMemoryUsageInBytes() {
 }
 
 }  // namespace milvus::segcore
-
-#endif

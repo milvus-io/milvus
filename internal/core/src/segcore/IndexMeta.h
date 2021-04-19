@@ -15,7 +15,6 @@
 //
 //#include "common/Schema.h"
 // #include "segcore/SegmentBase.h"
-#if 0
 #include "common/Schema.h"
 #include "knowhere/index/IndexType.h"
 #include "knowhere/common/Config.h"
@@ -34,7 +33,7 @@ class IndexMeta {
 
     struct Entry {
         std::string index_name;
-        FieldName field_name;
+        std::string field_name;
         IndexType type;
         IndexMode mode;
         IndexConfig config;
@@ -56,8 +55,8 @@ class IndexMeta {
     }
 
     const Entry&
-    lookup_by_field(const FieldName& field_name) {
-        AssertInfo(lookups_.count(field_name), field_name.get());
+    lookup_by_field(const std::string& field_name) {
+        AssertInfo(lookups_.count(field_name), field_name);
         auto index_name = lookups_.at(field_name);
         AssertInfo(entries_.count(index_name), index_name);
         return entries_.at(index_name);
@@ -70,10 +69,8 @@ class IndexMeta {
  private:
     SchemaPtr schema_;
     std::map<std::string, Entry> entries_;        // index_name => Entry
-    std::map<FieldName, std::string> lookups_;  // field_name => index_name
+    std::map<std::string, std::string> lookups_;  // field_name => index_name
 };
 
 using IndexMetaPtr = std::shared_ptr<IndexMeta>;
 }  // namespace milvus::segcore
-
-#endif

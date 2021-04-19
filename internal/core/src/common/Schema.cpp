@@ -35,7 +35,6 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     std::set<std::string> system_field_names = {"RowID", "Timestamp"};
 
     for (const milvus::proto::schema::FieldSchema& child : schema_proto.fields()) {
-        auto field_offset = FieldOffset(schema->size());
         auto field_id = child.fieldid();
         auto name = child.name();
         if (field_id < 100) {
@@ -48,7 +47,7 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
 
         if (child.is_primary_key()) {
             AssertInfo(!schema->primary_key_offset_opt_.has_value(), "repetitive primary key");
-            schema->primary_key_offset_opt_ = field_offset;
+            schema->primary_key_offset_opt_ = schema->size();
         }
 
         if (datatype_is_vector(data_type)) {
@@ -64,9 +63,9 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
             auto dim = boost::lexical_cast<int64_t>(type_map.at("dim"));
             AssertInfo(index_map.count("metric_type"), "index not found");
             auto metric_type = GetMetricType(index_map.at("metric_type"));
-            schema->AddField(FieldName(name), FieldId(field_id), data_type, dim, metric_type);
+            schema->AddField(name, data_type, dim, metric_type);
         } else {
-            schema->AddField(FieldName(name), FieldId(field_id), data_type);
+            schema->AddField(name, data_type);
         }
     }
     return schema;

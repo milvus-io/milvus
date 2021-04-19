@@ -23,48 +23,23 @@ struct InsertRecord {
     AckResponder ack_responder_;
     ConcurrentVector<Timestamp> timestamps_;
     ConcurrentVector<idx_t> uids_;
+    std::vector<std::shared_ptr<VectorBase>> entity_vec_;
 
     explicit InsertRecord(const Schema& schema, int64_t chunk_size);
-
-    auto
-    get_base_entity(FieldOffset field_offset) const {
-        auto ptr = entity_vec_[field_offset.get()];
-        return ptr;
-    }
-
     template <typename Type>
     auto
-    get_entity(FieldOffset field_offset) const {
-        auto base_ptr = get_base_entity(field_offset);
-        auto ptr = std::dynamic_pointer_cast<const ConcurrentVector<Type>>(base_ptr);
+    get_entity(int offset) const {
+        auto ptr = std::dynamic_pointer_cast<const ConcurrentVector<Type>>(entity_vec_[offset]);
         Assert(ptr);
         return ptr;
     }
 
     template <typename Type>
     auto
-    get_entity(FieldOffset field_offset) {
-        auto base_ptr = get_base_entity(field_offset);
-        auto ptr = std::dynamic_pointer_cast<ConcurrentVector<Type>>(base_ptr);
+    get_entity(int offset) {
+        auto ptr = std::dynamic_pointer_cast<ConcurrentVector<Type>>(entity_vec_[offset]);
         Assert(ptr);
         return ptr;
     }
-
-    template <typename Type>
-    void
-    insert_entity(int64_t chunk_size) {
-        static_assert(std::is_fundamental_v<Type>);
-        entity_vec_.emplace_back(std::make_shared<ConcurrentVector<Type>>(chunk_size));
-    }
-
-    template <typename VectorType>
-    void
-    insert_entity(int64_t dim, int64_t chunk_size) {
-        static_assert(std::is_base_of_v<VectorTrait, VectorType>);
-        entity_vec_.emplace_back(std::make_shared<ConcurrentVector<VectorType>>(dim, chunk_size));
-    }
-
- private:
-    std::vector<std::shared_ptr<VectorBase>> entity_vec_;
 };
 }  // namespace milvus::segcore

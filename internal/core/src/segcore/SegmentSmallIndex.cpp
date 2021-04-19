@@ -168,8 +168,7 @@ SegmentSmallIndex::Insert(int64_t reserved_begin,
     record_.timestamps_.set_data(reserved_begin, timestamps.data(), size);
     record_.uids_.set_data(reserved_begin, uids.data(), size);
     for (int fid = 0; fid < schema_->size(); ++fid) {
-        auto field_offset = FieldOffset(fid);
-        record_.get_base_entity(field_offset)->set_data_raw(reserved_begin, entities[fid].data(), size);
+        record_.entity_vec_[fid]->set_data_raw(reserved_begin, entities[fid].data(), size);
     }
 
     for (int i = 0; i < uids.size(); ++i) {
@@ -227,9 +226,103 @@ SegmentSmallIndex::Close() {
     return Status::OK();
 }
 
+template <typename Type>
+knowhere::IndexPtr
+SegmentSmallIndex::BuildVecIndexImpl(const IndexMeta::Entry& entry) {
+    auto offset_opt = schema_->get_offset(entry.field_name);
+    Assert(offset_opt.has_value());
+    auto offset = offset_opt.value();
+    auto field = (*schema_)[offset];
+    auto dim = field.get_dim();
+
+    auto indexing = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(entry.type, entry.mode);
+    auto& uids = record_.uids_;
+    auto entities = record_.get_entity<FloatVector>(offset);
+
+    std::vector<knowhere::DatasetPtr> datasets;
+    for (int chunk_id = 0; chunk_id < uids.num_chunk(); ++chunk_id) {
+        auto entities_chunk = entities->get_chunk(chunk_id).data();
+        int64_t count = chunk_id == uids.num_chunk() - 1 ? record_.reserved - chunk_id * chunk_size_ : chunk_size_;
+        datasets.push_back(knowhere::GenDataset(count, dim, entities_chunk));
+    }
+    for (auto& ds : datasets) {
+        indexing->Train(ds, entry.config);
+    }
+    for (auto& ds : datasets) {
+        indexing->AddWithoutIds(ds, entry.config);
+    }
+    return indexing;
+}
+
+Status
+SegmentSmallIndex::BuildIndex(IndexMetaPtr remote_index_meta) {
+    if (remote_index_meta == nullptr) {
+        PanicInfo("deprecated");
+        std::cout << "WARN: Null index ptr is detected, use default index" << std::endl;
+
+        int dim = 0;
+        std::string index_field_name;
+
+        for (auto& field : schema_->get_fields()) {
+            if (field.get_data_type() == DataType::VECTOR_FLOAT) {
+                dim = field.get_dim();
+                index_field_name = field.get_name();
+            }
+        }
+
+        Assert(dim != 0);
+        Assert(!index_field_name.empty());
+
+        auto index_meta = std::make_shared<IndexMeta>(schema_);
+        // TODO: this is merge of query conf and insert conf
+        // TODO: should be split into multiple configs
+        auto conf = milvus::knowhere::Config{
+            {milvus::knowhere::meta::DIM, dim},         {milvus::knowhere::IndexParams::nlist, 100},
+            {milvus::knowhere::IndexParams::nprobe, 4}, {milvus::knowhere::IndexParams::m, 4},
+            {milvus::knowhere::IndexParams::nbits, 8},  {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+            {milvus::knowhere::meta::DEVICEID, 0},
+        };
+        index_meta->AddEntry("fakeindex", index_field_name, knowhere::IndexEnum::INDEX_FAISS_IVFPQ,
+                             knowhere::IndexMode::MODE_CPU, conf);
+        remote_index_meta = index_meta;
+    }
+    if (record_.ack_responder_.GetAck() < 1024 * 4) {
+        return Status(SERVER_BUILD_INDEX_ERROR, "too few elements");
+    }
+    PanicInfo("unimplemented");
+#if 0
+    index_meta_ = remote_index_meta;
+    for (auto& [index_name, entry] : index_meta_->get_entries()) {
+        Assert(entry.index_name == index_name);
+        const auto& field = (*schema_)[entry.field_name];
+
+        if (field.is_vector()) {
+            Assert(field.get_data_type() == engine::DataType::VECTOR_FLOAT);
+            auto index_ptr = BuildVecIndexImpl<float>(entry);
+            indexings_[index_name] = index_ptr;
+        } else {
+            throw std::runtime_error("unimplemented");
+        }
+    }
+
+    index_ready_ = true;
+    return Status::OK();
+#endif
+}
+
 int64_t
 SegmentSmallIndex::GetMemoryUsageInBytes() {
     int64_t total_bytes = 0;
+#if 0
+    if (index_ready_) {
+        auto& index_entries = index_meta_->get_entries();
+        for (auto [index_name, entry] : index_entries) {
+            Assert(schema_->operator[](entry.field_name).is_vector());
+            auto vec_ptr = std::static_pointer_cast<knowhere::VecIndex>(indexings_[index_name]);
+            total_bytes += vec_ptr->IndexSize();
+        }
+    }
+#endif
     int64_t ins_n = upper_align(record_.reserved, chunk_size_);
     total_bytes += ins_n * (schema_->get_total_sizeof() + 16 + 1);
     int64_t del_n = upper_align(deleted_record_.reserved, chunk_size_);
@@ -287,7 +380,8 @@ SegmentSmallIndex::FillTargetEntry(const query::Plan* plan, QueryResult& results
 
 Status
 SegmentSmallIndex::LoadIndexing(const LoadIndexInfo& info) {
-    auto field_offset = schema_->get_offset(FieldName(info.field_name));
+    auto field_offset_opt = schema_->get_offset(info.field_name);
+    AssertInfo(field_offset_opt.has_value(), "field name(" + info.field_name + ") not found");
 
     Assert(info.index_params.count("metric_type"));
     auto metric_type_str = info.index_params.at("metric_type");
@@ -296,7 +390,7 @@ SegmentSmallIndex::LoadIndexing(const LoadIndexInfo& info) {
     entry->metric_type_ = GetMetricType(metric_type_str);
     entry->indexing_ = info.index;
 
-    sealed_indexing_record_.add_entry(field_offset, std::move(entry));
+    sealed_indexing_record_.add_entry(field_offset_opt.value(), std::move(entry));
     return Status::OK();
 }
 

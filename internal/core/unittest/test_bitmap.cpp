@@ -18,7 +18,7 @@ TEST(Bitmap, Naive) {
     using namespace milvus::segcore;
     using namespace milvus::query;
     auto schema = std::make_shared<Schema>();
-    schema->AddDebugField("height", DataType::FLOAT);
+    schema->AddField("height", DataType::FLOAT);
     int N = 10000;
     auto raw_data = DataGen(schema, N);
     auto vec = raw_data.get_col<float>(0);
