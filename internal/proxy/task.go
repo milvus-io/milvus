@@ -181,6 +181,33 @@ func (cct *CreateCollectionTask) PreExecute() error {
 		if err := ValidateFieldName(field.Name); err != nil {
 			return err
 		}
+		if field.DataType == schemapb.DataType_VECTOR_FLOAT || field.DataType == schemapb.DataType_VECTOR_BINARY {
+			exist := false
+			var dim int64 = 0
+			for _, param := range field.TypeParams {
+				if param.Key == "dim" {
+					exist = true
+					tmp, err := strconv.ParseInt(param.Value, 10, 64)
+					if err != nil {
+						return err
+					}
+					dim = tmp
+					break
+				}
+			}
+			if !exist {
+				return errors.New("dimension is not defined in field type params")
+			}
+			if field.DataType == schemapb.DataType_VECTOR_FLOAT {
+				if err := ValidateDimension(dim, false); err != nil {
+					return err
+				}
+			} else {
+				if err := ValidateDimension(dim, true); err != nil {
+					return err
+				}
+			}
+		}
 	}
 
 	return nil
