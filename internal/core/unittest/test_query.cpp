@@ -72,7 +72,7 @@ TEST(Query, ShowExecutor) {
     using namespace milvus;
     auto node = std::make_unique<FloatVectorANNS>();
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     int64_t num_queries = 100L;
     auto raw_data = DataGen(schema, num_queries);
     auto& info = node->query_info_;
@@ -98,7 +98,7 @@ TEST(Query, DSL) {
         "must": [
             {
                 "vector": {
-                    "Vec": {
+                    "fakevec": {
                         "metric_type": "L2",
                         "params": {
                             "nprobe": 10
@@ -113,7 +113,7 @@ TEST(Query, DSL) {
 })";
 
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
 
     auto plan = CreatePlan(*schema, dsl_string);
     auto res = shower.call_child(*plan->plan_node_);
@@ -123,7 +123,7 @@ TEST(Query, DSL) {
 {
     "bool": {
         "vector": {
-            "Vec": {
+            "fakevec": {
                 "metric_type": "L2",
                 "params": {
                     "nprobe": 10
@@ -159,7 +159,7 @@ TEST(Query, ParsePlaceholderGroup) {
 })";
 
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     auto plan = CreatePlan(*schema, dsl_string);
     int64_t num_queries = 100000;
     int dim = 16;
@@ -172,7 +172,7 @@ TEST(Query, ExecWithPredicate) {
     using namespace milvus::query;
     using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddField("age", DataType::FLOAT);
     std::string dsl = R"({
         "bool": {
@@ -217,8 +217,8 @@ TEST(Query, ExecWithPredicate) {
     int topk = 5;
 
     Json json = QueryResultToJson(qr);
-
-    auto ref = Json::parse(R"([
+    auto ref = Json::parse(R"(
+[
   [
     [
       "980486->3.149221",
@@ -257,15 +257,14 @@ TEST(Query, ExecWithPredicate) {
     ]
   ]
 ])");
-
-    ASSERT_EQ(json, ref);
+    ASSERT_EQ(json.dump(2), ref.dump(2));
 }
 
-TEST(Query, ExecWihtoutPredicate) {
+TEST(Query, ExecWithoutPredicate) {
     using namespace milvus::query;
     using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddField("age", DataType::FLOAT);
     std::string dsl = R"({
         "bool": {
@@ -301,18 +300,49 @@ TEST(Query, ExecWihtoutPredicate) {
     segment->Search(plan.get(), ph_group_arr.data(), &time, 1, qr);
     std::vector<std::vector<std::string>> results;
     int topk = 5;
-    for (int q = 0; q < num_queries; ++q) {
-        std::vector<std::string> result;
-        for (int k = 0; k < topk; ++k) {
-            int index = q * topk + k;
-            result.emplace_back(std::to_string(qr.result_ids_[index]) + "->" +
-                                std::to_string(qr.result_distances_[index]));
-        }
-        results.emplace_back(std::move(result));
-    }
-
-    Json json{results};
-    std::cout << json.dump(2);
+    auto json = QueryResultToJson(qr);
+    auto ref = Json::parse(R"(
+[
+  [
+    [
+      "980486->3.149221",
+      "318367->3.661235",
+      "302798->4.553688",
+      "321424->4.757450",
+      "565529->5.083780"
+    ],
+    [
+      "233390->7.931535",
+      "238958->8.109344",
+      "230645->8.439169",
+      "901939->8.658772",
+      "380328->8.731251"
+    ],
+    [
+      "749862->3.398494",
+      "701321->3.632437",
+      "897246->3.749835",
+      "750683->3.897577",
+      "105995->4.073595"
+    ],
+    [
+      "138274->3.454446",
+      "124548->3.783290",
+      "840855->4.782170",
+      "936719->5.026924",
+      "709627->5.063170"
+    ],
+    [
+      "810401->3.926393",
+      "46575->4.054171",
+      "201740->4.274491",
+      "669040->4.399628",
+      "231500->4.831223"
+    ]
+  ]
+]
+)");
+    ASSERT_EQ(json.dump(2), ref.dump(2));
 }
 
 TEST(Query, FillSegment) {
@@ -331,6 +361,9 @@ TEST(Query, FillSegment) {
         auto param = field->add_type_params();
         param->set_key("dim");
         param->set_value("16");
+        auto iparam = field->add_index_params();
+        iparam->set_key("metric_type");
+        iparam->set_value("L2");
     }
 
     {
@@ -391,4 +424,58 @@ TEST(Query, FillSegment) {
         ASSERT_EQ(val, std_val);
         ++std_index;
     }
+}
+
+TEST(Query, ExecWithPredicateBinary) {
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    auto schema = std::make_shared<Schema>();
+    schema->AddField("fakevec", DataType::VECTOR_BINARY, 512, MetricType::METRIC_Jaccard);
+    schema->AddField("age", DataType::FLOAT);
+    std::string dsl = R"({
+        "bool": {
+            "must": [
+            {
+                "range": {
+                    "age": {
+                        "GE": -1,
+                        "LT": 1
+                    }
+                }
+            },
+            {
+                "vector": {
+                    "fakevec": {
+                        "metric_type": "Jaccard",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 5
+                    }
+                }
+            }
+            ]
+        }
+    })";
+    int64_t N = 1000 * 1000;
+    auto dataset = DataGen(schema, N);
+    auto segment = std::make_unique<SegmentSmallIndex>(schema);
+    segment->PreInsert(N);
+    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    auto vec_ptr = dataset.get_col<uint8_t>(0);
+
+    auto plan = CreatePlan(*schema, dsl);
+    auto num_queries = 5;
+    auto ph_group_raw = CreateBinaryPlaceholderGroupFromBlob(num_queries, 512, vec_ptr.data() + 1024 * 512 / 8);
+    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    QueryResult qr;
+    Timestamp time = 1000000;
+    std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
+    segment->Search(plan.get(), ph_group_arr.data(), &time, 1, qr);
+    int topk = 5;
+
+    Json json = QueryResultToJson(qr);
+    std::cout << json.dump(2);
+    // ASSERT_EQ(json.dump(2), ref.dump(2));
 }

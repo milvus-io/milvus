@@ -25,7 +25,7 @@ FetchContent_Declare(
     protobuf
     URL        ${GTEST_SOURCE_URL} 
     URL_MD5    "9562b27cc6ac5ebd087f201f1310c885"
-    DOWNLOAD_DIR    ${MILVUS_BINARY_DIR}/3rdparty_download/download
+    DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH}
     SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/protobuf-src
     BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/protobuf-build
 

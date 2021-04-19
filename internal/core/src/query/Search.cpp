@@ -16,6 +16,7 @@
 
 #include <faiss/utils/distances.h>
 #include "utils/tools.h"
+#include "query/BruteForceSearch.h"
 
 namespace milvus::query {
 using segcore::DefaultElementPerChunk;
@@ -41,7 +42,7 @@ QueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
                     int64_t num_queries,
                     Timestamp timestamp,
                     std::optional<const BitmapSimple*> bitmaps_opt,
-                    segcore::QueryResult& results) {
+                    QueryResult& results) {
     auto& schema = segment.get_schema();
     auto& indexing_record = segment.get_indexing_record();
     auto& record = segment.get_insert_record();
@@ -131,7 +132,92 @@ QueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
     }
     results.result_ids_ = std::move(final_uids);
     // TODO: deprecated code end
-
     return Status::OK();
 }
+
+Status
+BinaryQueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
+                          const query::QueryInfo& info,
+                          const uint8_t* query_data,
+                          int64_t num_queries,
+                          Timestamp timestamp,
+                          std::optional<const BitmapSimple*> bitmaps_opt,
+                          QueryResult& results) {
+    auto& schema = segment.get_schema();
+    auto& indexing_record = segment.get_indexing_record();
+    auto& record = segment.get_insert_record();
+    // step 1: binary search to find the barrier of the snapshot
+    auto ins_barrier = get_barrier(record, timestamp);
+    auto max_chunk = upper_div(ins_barrier, DefaultElementPerChunk);
+    auto metric_type = GetMetricType(info.metric_type_);
+    // auto del_barrier = get_barrier(deleted_record_, timestamp);
+
+#if 0
+    auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
+    Assert(bitmap_holder);
+    auto bitmap = bitmap_holder->bitmap_ptr;
+#endif
+
+    // step 2.1: get meta
+    // step 2.2: get which vector field to search
+    auto vecfield_offset_opt = schema.get_offset(info.field_id_);
+    Assert(vecfield_offset_opt.has_value());
+    auto vecfield_offset = vecfield_offset_opt.value();
+    auto& field = schema[vecfield_offset];
+
+    Assert(field.get_data_type() == DataType::VECTOR_BINARY);
+    auto dim = field.get_dim();
+    auto code_size = dim / 8;
+    auto topK = info.topK_;
+    auto total_count = topK * num_queries;
+
+    // step 3: small indexing search
+    std::vector<int64_t> final_uids(total_count, -1);
+    std::vector<float> final_dis(total_count, std::numeric_limits<float>::max());
+    query::dataset::BinaryQueryDataset query_dataset{metric_type, num_queries, topK, code_size, query_data};
+
+    using segcore::BinaryVector;
+    auto vec_ptr = record.get_entity<BinaryVector>(vecfield_offset);
+
+    auto max_indexed_id = 0;
+    // step 4: brute force search where small indexing is unavailable
+    for (int chunk_id = max_indexed_id; chunk_id < max_chunk; ++chunk_id) {
+        std::vector<int64_t> buf_uids(total_count, -1);
+        std::vector<float> buf_dis(total_count, std::numeric_limits<float>::max());
+
+        auto& chunk = vec_ptr->get_chunk(chunk_id);
+        auto nsize =
+            chunk_id != max_chunk - 1 ? DefaultElementPerChunk : ins_barrier - chunk_id * DefaultElementPerChunk;
+
+        auto bitmap_view = create_bitmap_view(bitmaps_opt, chunk_id);
+        BinarySearchBruteForce(query_dataset, chunk.data(), nsize, buf_dis.data(), buf_uids.data(), bitmap_view);
+
+        // convert chunk uid to segment uid
+        for (auto& x : buf_uids) {
+            if (x != -1) {
+                x += chunk_id * DefaultElementPerChunk;
+            }
+        }
+
+        segcore::merge_into(num_queries, topK, final_dis.data(), final_uids.data(), buf_dis.data(), buf_uids.data());
+    }
+
+    results.result_distances_ = std::move(final_dis);
+    results.internal_seg_offsets_ = std::move(final_uids);
+    results.topK_ = topK;
+    results.num_queries_ = num_queries;
+
+    // TODO: deprecated code begin
+    final_uids = results.internal_seg_offsets_;
+    for (auto& id : final_uids) {
+        if (id == -1) {
+            continue;
+        }
+        id = record.uids_[id];
+    }
+    results.result_ids_ = std::move(final_uids);
+    // TODO: deprecated code end
+    return Status::OK();
+}
+
 }  // namespace milvus::query

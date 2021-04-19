@@ -26,15 +26,25 @@ static std::unique_ptr<VectorPlanNode>
 ParseVecNode(Plan* plan, const Json& out_body) {
     Assert(out_body.is_object());
     // TODO add binary info
-    auto vec_node = std::make_unique<FloatVectorANNS>();
     Assert(out_body.size() == 1);
     auto iter = out_body.begin();
     std::string field_name = iter.key();
+
     auto& vec_info = iter.value();
     Assert(vec_info.is_object());
     auto topK = vec_info["topk"];
     AssertInfo(topK > 0, "topK must greater than 0");
     AssertInfo(topK < 16384, "topK is too large");
+    auto field_meta = plan->schema_.operator[](field_name);
+
+    auto vec_node = [&]() -> std::unique_ptr<VectorPlanNode> {
+        auto data_type = field_meta.get_data_type();
+        if (data_type == DataType::VECTOR_FLOAT) {
+            return std::make_unique<FloatVectorANNS>();
+        } else {
+            return std::make_unique<BinaryVectorANNS>();
+        }
+    }();
     vec_node->query_info_.topK_ = topK;
     vec_node->query_info_.metric_type_ = vec_info.at("metric_type");
     vec_node->query_info_.search_params_ = vec_info.at("params");

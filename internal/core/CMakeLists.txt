@@ -35,10 +35,6 @@ message( STATUS "Build version = ${MILVUS_VERSION}" )
 get_last_commit_id( LAST_COMMIT_ID )
 message( STATUS "LAST_COMMIT_ID = ${LAST_COMMIT_ID}" )
 
-#configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/src/version.h.in
-#                ${CMAKE_CURRENT_SOURCE_DIR}/src/version.h @ONLY )
-
-# unset(CMAKE_EXPORT_COMPILE_COMMANDS CACHE)
 set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
 
 # **************************** Project ****************************

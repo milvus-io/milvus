@@ -28,7 +28,7 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
     visit(BinaryVectorANNS& node) override;
 
  public:
-    using RetType = segcore::QueryResult;
+    using RetType = QueryResult;
     ExecPlanNodeVisitor(segcore::SegmentBase& segment, Timestamp timestamp, const PlaceholderGroup& placeholder_group)
         : segment_(segment), timestamp_(timestamp), placeholder_group_(placeholder_group) {
     }
