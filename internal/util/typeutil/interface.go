@@ -21,7 +21,6 @@ type Component interface {
 
 type IndexNodeInterface interface {
 	Service
-	Component
 	BuildIndex(req *indexpb.BuildIndexCmd) (*commonpb.Status, error)
 }
 

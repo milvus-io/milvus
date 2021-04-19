@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
 
@@ -43,6 +44,7 @@ func (s *Service) SetMasterClient(masterClient dataservice.MasterClient) {
 }
 
 func (s *Service) Init() error {
+	var err error
 	s.grpcServer = grpc.NewServer()
 	datapb.RegisterDataServiceServer(s.grpcServer, s)
 	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", dataservice.Params.Address, dataservice.Params.Port))
@@ -50,9 +52,20 @@ func (s *Service) Init() error {
 		log.Fatal(err.Error())
 		return nil
 	}
-	if err = s.grpcServer.Serve(lis); err != nil {
-		log.Fatal(err.Error())
-		return nil
+	c := make(chan struct{})
+	go func() {
+		if err2 := s.grpcServer.Serve(lis); err2 != nil {
+			log.Println(err.Error())
+			close(c)
+			err = err2
+		}
+	}()
+	timer := time.NewTimer(1 * time.Second)
+	select {
+	case <-timer.C:
+		break
+	case <-c:
+		return err
 	}
 	return s.server.Init()
 }

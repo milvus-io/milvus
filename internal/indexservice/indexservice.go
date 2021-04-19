@@ -26,11 +26,8 @@ const (
 
 type IndexService struct {
 	nodeClients *PriorityQueue
-	nodeStates  map[UniqueID]*internalpb2.ComponentStates
-	state       internalpb2.StateCode
 
-	ID UniqueID
-
+	//factory method
 	loopCtx    context.Context
 	loopCancel func()
 	loopWg     sync.WaitGroup
@@ -88,11 +85,6 @@ func CreateIndexService(ctx context.Context) (*IndexService, error) {
 		return nil, err
 	}
 
-	i.ID, err = i.idAllocator.AllocOne()
-	if err != nil {
-		return nil, err
-	}
-
 	connectMinIOFn := func() error {
 		option := &miniokv.Option{
 			Address:           Params.MinIOAddress,
@@ -147,21 +139,7 @@ func (i *IndexService) Stop() error {
 }
 
 func (i *IndexService) GetComponentStates() (*internalpb2.ComponentStates, error) {
-
-	stateInfo := &internalpb2.ComponentInfo{
-		NodeID:    i.ID,
-		Role:      "IndexService",
-		StateCode: i.state,
-	}
-
-	ret := &internalpb2.ComponentStates{
-		State:              stateInfo,
-		SubcomponentStates: nil, // todo add subcomponents states
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-		},
-	}
-	return ret, nil
+	panic("implement me")
 }
 
 func (i *IndexService) GetTimeTickChannel() (string, error) {
@@ -169,7 +147,7 @@ func (i *IndexService) GetTimeTickChannel() (string, error) {
 }
 
 func (i *IndexService) GetStatisticsChannel() (string, error) {
-	return "", nil
+	panic("implement me")
 }
 
 func (i *IndexService) BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
