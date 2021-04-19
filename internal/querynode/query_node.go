@@ -353,7 +353,7 @@ func (node *QueryNode) WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*com
 		return status, errors.New(errMsg)
 	}
 
-	fgDMMsgStream, ok := node.dataSyncService.dmStream.(*pulsarms.PulsarMsgStream)
+	fgDMMsgStream, ok := node.dataSyncService.dmStream.(*pulsarms.PulsarTtMsgStream)
 	if !ok {
 		errMsg := "type assertion failed for dm message stream"
 		status := &commonpb.Status{
@@ -381,7 +381,30 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	partitionID := in.PartitionID
 	segmentIDs := in.SegmentIDs
 	fieldIDs := in.FieldIDs
+	schema := in.Schema
 
+	hasCollection := node.replica.hasCollection(collectionID)
+	hasPartition := node.replica.hasPartition(partitionID)
+	if !hasCollection {
+		err := node.replica.addCollection(collectionID, schema)
+		if err != nil {
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			}
+			return status, err
+		}
+	}
+	if !hasPartition {
+		err := node.replica.addPartition(collectionID, partitionID)
+		if err != nil {
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			}
+			return status, err
+		}
+	}
 	err := node.replica.enablePartition(partitionID)
 	if err != nil {
 		status := &commonpb.Status{
@@ -395,7 +418,7 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	for i, state := range in.SegmentStates {
 		if state.State == commonpb.SegmentState_SegmentGrowing {
 			position := state.StartPosition
-			err = node.loadService.segLoader.seekSegment(position)
+			err := node.loadService.segLoader.seekSegment(position)
 			if err != nil {
 				status := &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,

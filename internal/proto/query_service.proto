@@ -128,6 +128,7 @@ message LoadSegmentRequest {
   repeated int64 segmentIDs = 5;
   repeated int64 fieldIDs = 6;
   repeated data.SegmentStateInfo segment_states = 7;
+  schema.CollectionSchema schema = 8;
 }
 
 message ReleaseSegmentRequest {

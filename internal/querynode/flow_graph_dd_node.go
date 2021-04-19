@@ -2,9 +2,6 @@ package querynode
 
 import (
 	"log"
-	"sort"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 
 	"github.com/golang/protobuf/proto"
 
@@ -52,27 +49,27 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 	ddNode.ddMsg.gcRecord = &gcRecord
 
 	// sort tsMessages
-	tsMessages := msMsg.TsMessages()
-	sort.Slice(tsMessages,
-		func(i, j int) bool {
-			return tsMessages[i].BeginTs() < tsMessages[j].BeginTs()
-		})
+	//tsMessages := msMsg.TsMessages()
+	//sort.Slice(tsMessages,
+	//	func(i, j int) bool {
+	//		return tsMessages[i].BeginTs() < tsMessages[j].BeginTs()
+	//	})
 
 	// do dd tasks
-	for _, msg := range tsMessages {
-		switch msg.Type() {
-		case commonpb.MsgType_kCreateCollection:
-			ddNode.createCollection(msg.(*msgstream.CreateCollectionMsg))
-		case commonpb.MsgType_kDropCollection:
-			ddNode.dropCollection(msg.(*msgstream.DropCollectionMsg))
-		case commonpb.MsgType_kCreatePartition:
-			ddNode.createPartition(msg.(*msgstream.CreatePartitionMsg))
-		case commonpb.MsgType_kDropPartition:
-			ddNode.dropPartition(msg.(*msgstream.DropPartitionMsg))
-		default:
-			log.Println("Non supporting message type:", msg.Type())
-		}
-	}
+	//for _, msg := range tsMessages {
+	//	switch msg.Type() {
+	//	case commonpb.MsgType_kCreateCollection:
+	//		ddNode.createCollection(msg.(*msgstream.CreateCollectionMsg))
+	//	case commonpb.MsgType_kDropCollection:
+	//		ddNode.dropCollection(msg.(*msgstream.DropCollectionMsg))
+	//	case commonpb.MsgType_kCreatePartition:
+	//		ddNode.createPartition(msg.(*msgstream.CreatePartitionMsg))
+	//	case commonpb.MsgType_kDropPartition:
+	//		ddNode.dropPartition(msg.(*msgstream.DropPartitionMsg))
+	//	default:
+	//		log.Println("Non supporting message type:", msg.Type())
+	//	}
+	//}
 
 	var res Msg = ddNode.ddMsg
 	return []*Msg{&res}

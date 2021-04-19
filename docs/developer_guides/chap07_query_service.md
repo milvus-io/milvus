@@ -77,6 +77,7 @@ type LoadCollectionRequest struct {
   MsgBase
   DbID UniqueID
   CollectionID UniqueID
+  schema schemapb.CollectionSchema
 }
 ```
 
@@ -144,6 +145,7 @@ type LoadPartitonRequest struct {
   DbID UniqueID
   CollectionID UniqueID
   PartitionIDs []UniqueID
+  schema schemapb.CollectionSchema
 }
 ```
 

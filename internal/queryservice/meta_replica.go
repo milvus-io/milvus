@@ -3,19 +3,23 @@ package queryservice
 import (
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
 type metaReplica interface {
 	getCollections(dbID UniqueID) ([]*collection, error)
 	getPartitions(dbID UniqueID, collectionID UniqueID) ([]*partition, error)
 	getSegments(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) ([]*segment, error)
-	loadCollection(dbID UniqueID, collectionID UniqueID) (*collection, error)
-	loadPartition(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) (*partition, error)
+	getCollectionByID(dbID UniqueID, collectionID UniqueID) (*collection, error)
+	getPartitionByID(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) (*partition, error)
+	addCollection(dbID UniqueID, collectionID UniqueID, schema *schemapb.CollectionSchema) error
+	addPartition(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) error
 	updatePartitionState(dbID UniqueID, collectionID UniqueID, partitionID UniqueID, state querypb.PartitionState) error
 	getPartitionStates(dbID UniqueID, collectionID UniqueID, partitionIDs []UniqueID) ([]*querypb.PartitionStates, error)
 	releaseCollection(dbID UniqueID, collectionID UniqueID) error
 	releasePartition(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) error
-	addDmChannels(collectionID UniqueID, channels []string) error
+	addDmChannels(dbID UniqueID, collectionID UniqueID, channels2NodeID map[string]UniqueID) error
+	getAssignedNodeIDByChannelName(dbID UniqueID, collectionID UniqueID, channel string) (UniqueID, error)
 }
 
 type segment struct {
@@ -29,9 +33,10 @@ type partition struct {
 }
 
 type collection struct {
-	id             UniqueID
-	partitions     map[UniqueID]*partition
-	dmChannelNames []string
+	id              UniqueID
+	partitions      map[UniqueID]*partition
+	dmChannels2Node map[string]UniqueID
+	schema          *schemapb.CollectionSchema
 }
 
 type metaReplicaImpl struct {
@@ -50,22 +55,25 @@ func newMetaReplica() metaReplica {
 	}
 }
 
-func (mp *metaReplicaImpl) addCollection(dbID UniqueID, collectionID UniqueID) (*collection, error) {
+func (mp *metaReplicaImpl) addCollection(dbID UniqueID, collectionID UniqueID, schema *schemapb.CollectionSchema) error {
 	//TODO:: assert dbID = 0 exist
 	if _, ok := mp.db2collections[dbID]; ok {
 		partitions := make(map[UniqueID]*partition)
+		channels := make(map[string]UniqueID)
 		newCollection := &collection{
-			id:         collectionID,
-			partitions: partitions,
+			id:              collectionID,
+			partitions:      partitions,
+			schema:          schema,
+			dmChannels2Node: channels,
 		}
 		mp.db2collections[dbID] = append(mp.db2collections[dbID], newCollection)
-		return newCollection, nil
+		return nil
 	}
 
-	return nil, errors.New("addCollection: can't find dbID when add collection")
+	return errors.New("addCollection: can't find dbID when add collection")
 }
 
-func (mp *metaReplicaImpl) addPartition(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) (*partition, error) {
+func (mp *metaReplicaImpl) addPartition(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) error {
 	if collections, ok := mp.db2collections[dbID]; ok {
 		for _, collection := range collections {
 			if collection.id == collectionID {
@@ -77,11 +85,11 @@ func (mp *metaReplicaImpl) addPartition(dbID UniqueID, collectionID UniqueID, pa
 					segments: segments,
 				}
 				partitions[partitionID] = partition
-				return partition, nil
+				return nil
 			}
 		}
 	}
-	return nil, errors.New("addPartition: can't find collection when add partition")
+	return errors.New("addPartition: can't find collection when add partition")
 }
 
 func (mp *metaReplicaImpl) getCollections(dbID UniqueID) ([]*collection, error) {
@@ -125,49 +133,31 @@ func (mp *metaReplicaImpl) getSegments(dbID UniqueID, collectionID UniqueID, par
 	return nil, errors.New("getSegments: can't find segmentID")
 }
 
-func (mp *metaReplicaImpl) loadCollection(dbID UniqueID, collectionID UniqueID) (*collection, error) {
-	var res *collection = nil
-	if collections, err := mp.getCollections(dbID); err == nil {
+func (mp *metaReplicaImpl) getCollectionByID(dbID UniqueID, collectionID UniqueID) (*collection, error) {
+	if collections, ok := mp.db2collections[dbID]; ok {
 		for _, collection := range collections {
 			if collectionID == collection.id {
-				res = collection
+				return collection, nil
 			}
 		}
 	}
-	if res == nil {
-		collection, err := mp.addCollection(dbID, collectionID)
-		if err != nil {
-			return nil, err
-		}
-		res = collection
-	}
-	return res, nil
+
+	return nil, errors.New("getCollectionByID: can't find collectionID")
 }
 
-func (mp *metaReplicaImpl) loadPartition(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) (*partition, error) {
-	var collection *collection = nil
-	var partition *partition = nil
-	var err error
-	for _, col := range mp.db2collections[dbID] {
-		if col.id == collectionID {
-			collection = col
+func (mp *metaReplicaImpl) getPartitionByID(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) (*partition, error) {
+	if collections, ok := mp.db2collections[dbID]; ok {
+		for _, collection := range collections {
+			if collectionID == collection.id {
+				partitions := collection.partitions
+				if partition, ok := partitions[partitionID]; ok {
+					return partition, nil
+				}
+			}
 		}
-	}
-	if collection == nil {
-		collection, err = mp.addCollection(dbID, collectionID)
-		if err != nil {
-			return partition, err
-		}
-	}
-	if _, ok := collection.partitions[partitionID]; !ok {
-		partition, err = mp.addPartition(dbID, collectionID, partitionID)
-		if err != nil {
-			return partition, err
-		}
-		return partition, nil
 	}
 
-	return nil, nil
+	return nil, errors.New("getPartitionByID: can't find partitionID")
 }
 
 func (mp *metaReplicaImpl) updatePartitionState(dbID UniqueID,
@@ -235,27 +225,30 @@ func (mp *metaReplicaImpl) releasePartition(dbID UniqueID, collectionID UniqueID
 	return errors.New("releasePartition: can't find dbID or collectionID or partitionID")
 }
 
-func (mp *metaReplicaImpl) addDmChannels(collectionID UniqueID, channels []string) error {
-	//TODO :: use dbID
-	if collections, ok := mp.db2collections[0]; ok {
+func (mp *metaReplicaImpl) addDmChannels(dbID UniqueID, collectionID UniqueID, channels2NodeID map[string]UniqueID) error {
+	if collections, ok := mp.db2collections[dbID]; ok {
 		for _, collection := range collections {
 			if collectionID == collection.id {
-				dmChannels := collection.dmChannelNames
-				for _, channel := range channels {
-					match := false
-					for _, existedChannel := range dmChannels {
-						if channel == existedChannel {
-							match = true
-							break
-						}
-					}
-					if !match {
-						dmChannels = append(dmChannels, channel)
-					}
+				for channel, id := range channels2NodeID {
+					collection.dmChannels2Node[channel] = id
 				}
 				return nil
 			}
 		}
 	}
 	return errors.New("addDmChannels: can't find dbID or collectionID")
+}
+
+func (mp *metaReplicaImpl) getAssignedNodeIDByChannelName(dbID UniqueID, collectionID UniqueID, channel string) (UniqueID, error) {
+	if collections, ok := mp.db2collections[dbID]; ok {
+		for _, collection := range collections {
+			if collectionID == collection.id {
+				if id, ok := collection.dmChannels2Node[channel]; ok {
+					return id, nil
+				}
+			}
+		}
+	}
+
+	return 0, errors.New("getAssignedNodeIDByChannelName: can't find dbID or collectionID")
 }
