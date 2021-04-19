@@ -145,18 +145,18 @@ inline bool ErrorCode_Parse(
     ErrorCode_descriptor(), name, value);
 }
 enum IndexState : int {
-  NONE = 0,
-  UNISSUED = 1,
-  INPROGRESS = 2,
-  FINISHED = 3,
-  FAILED = 4,
-  DELETED = 5,
+  INDEX_STATE_NONE = 0,
+  INDEX_STATE_UNISSUED = 1,
+  INDEX_STATE_IN_PROGRESS = 2,
+  INDEX_STATE_FINISHED = 3,
+  INDEX_STATE_FAILED = 4,
+  INDEX_STATE_DELETED = 5,
   IndexState_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   IndexState_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool IndexState_IsValid(int value);
-constexpr IndexState IndexState_MIN = NONE;
-constexpr IndexState IndexState_MAX = DELETED;
+constexpr IndexState IndexState_MIN = INDEX_STATE_NONE;
+constexpr IndexState IndexState_MAX = INDEX_STATE_DELETED;
 constexpr int IndexState_ARRAYSIZE = IndexState_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* IndexState_descriptor();

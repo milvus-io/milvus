@@ -1868,7 +1868,7 @@ func (m *IndexStateResponse) GetState() commonpb.IndexState {
 	if m != nil {
 		return m.State
 	}
-	return commonpb.IndexState_NONE
+	return commonpb.IndexState_INDEX_STATE_NONE
 }
 
 type DropIndexRequest struct {
