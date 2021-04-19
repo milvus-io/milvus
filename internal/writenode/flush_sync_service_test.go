@@ -91,7 +91,7 @@ func TestFlushSyncService_Start(t *testing.T) {
 
 		ret, err := fService.metaTable.getSegBinlogPaths(SegID)
 		assert.NoError(t, err)
-		assert.Equal(t, map[int32][]string{
+		assert.Equal(t, map[int64][]string{
 			0: {"x", "y", "z"},
 			1: {"x", "y", "z"},
 			2: {"x", "y", "z"},
@@ -147,7 +147,7 @@ func geninsertFlushSyncMsgs(segID UniqueID) []*insertFlushSyncMsg {
 			insertBinlogPathMsg: insertBinlogPathMsg{
 				ts:      Timestamp(1000 + i),
 				segID:   segID,
-				fieldID: int32(i),
+				fieldID: int64(i),
 				paths:   []string{"x", "y", "z"},
 			},
 		})

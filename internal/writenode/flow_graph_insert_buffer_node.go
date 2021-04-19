@@ -417,7 +417,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 						insertBinlogPathMsg: insertBinlogPathMsg{
 							ts:      iMsg.timeRange.timestampMax,
 							segID:   currentSegID,
-							fieldID: int32(fieldID),
+							fieldID: fieldID,
 							paths:   []string{key},
 						},
 					}
@@ -495,7 +495,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 						insertBinlogPathMsg: insertBinlogPathMsg{
 							ts:      flushTs,
 							segID:   currentSegID,
-							fieldID: int32(fieldID),
+							fieldID: fieldID,
 							paths:   []string{key},
 						},
 					}

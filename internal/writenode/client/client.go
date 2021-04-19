@@ -8,6 +8,8 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/writerpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
@@ -19,17 +21,22 @@ type Timestamp = typeutil.Timestamp
 type Client struct {
 	kvClient kv.TxnBase // client of a reliable kv service, i.e. etcd client
 	kvPrefix string
+
+	flushStream msgstream.MsgStream
 }
 
-func NewWriterClient(etcdAddress string, kvRootPath string) (*Client, error) {
+func NewWriterClient(etcdAddress string, kvRootPath string, writeNodeKvSubPath string, flushStream msgstream.MsgStream) (*Client, error) {
+	// init kv client
 	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
 	if err != nil {
 		return nil, err
 	}
 	kvClient := etcdkv.NewEtcdKV(etcdClient, kvRootPath)
+
 	return &Client{
-		kvClient: kvClient,
-		kvPrefix: "writer/segment/",
+		kvClient:    kvClient,
+		kvPrefix:    writeNodeKvSubPath,
+		flushStream: flushStream,
 	}, nil
 }
 
@@ -41,8 +48,27 @@ type SegmentDescription struct {
 }
 
 func (c *Client) FlushSegment(segmentID UniqueID) error {
-	// push msg to pulsar channel
-	return nil
+	baseMsg := msgstream.BaseMsg{
+		BeginTimestamp: 0,
+		EndTimestamp:   0,
+		HashValues:     []uint32{0},
+	}
+
+	flushMsg := internalPb.FlushMsg{
+		MsgType:   internalPb.MsgType_kFlush,
+		SegmentID: segmentID,
+		Timestamp: Timestamp(0),
+	}
+
+	fMsg := &msgstream.FlushMsg{
+		BaseMsg:  baseMsg,
+		FlushMsg: flushMsg,
+	}
+	msgPack := msgstream.MsgPack{}
+	msgPack.Msgs = append(msgPack.Msgs, fMsg)
+
+	err := c.flushStream.Produce(&msgPack)
+	return err
 }
 
 func (c *Client) DescribeSegment(segmentID UniqueID) (*SegmentDescription, error) {
@@ -69,7 +95,7 @@ func (c *Client) DescribeSegment(segmentID UniqueID) (*SegmentDescription, error
 	return ret, nil
 }
 
-func (c *Client) GetInsertBinlogPaths(segmentID UniqueID) (map[int32][]string, error) {
+func (c *Client) GetInsertBinlogPaths(segmentID UniqueID) (map[int64][]string, error) {
 	key := c.kvPrefix + strconv.FormatInt(segmentID, 10)
 
 	value, err := c.kvClient.Load(key)
@@ -82,7 +108,7 @@ func (c *Client) GetInsertBinlogPaths(segmentID UniqueID) (map[int32][]string, e
 	if err != nil {
 		return nil, err
 	}
-	ret := make(map[int32][]string)
+	ret := make(map[int64][]string)
 	for _, field := range flushMeta.Fields {
 		ret[field.FieldID] = field.BinlogPaths
 	}

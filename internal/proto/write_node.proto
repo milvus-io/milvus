@@ -5,7 +5,7 @@ package milvus.proto.service;
 option go_package="github.com/zilliztech/milvus-distributed/internal/proto/writerpb";
 
 message FieldFlushMeta {
-    int32 fieldID = 1;
+    int64 fieldID = 1;
     repeated string binlog_paths = 2;
 }
 

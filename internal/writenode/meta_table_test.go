@@ -56,7 +56,7 @@ func TestMetaTable_all(t *testing.T) {
 		err := meta.addSegmentFlush(segmentID, tsOpen)
 		assert.Nil(t, err)
 
-		exp := map[int32][]string{
+		exp := map[int64][]string{
 			1: {"a", "b", "c"},
 			2: {"b", "a", "c"},
 		}
@@ -72,7 +72,7 @@ func TestMetaTable_all(t *testing.T) {
 		ret, err := meta.getSegBinlogPaths(segmentID)
 		assert.Nil(t, err)
 		assert.Equal(t,
-			map[int32][]string{
+			map[int64][]string{
 				1: {"a", "a", "b", "b", "c", "c"},
 				2: {"b", "b", "a", "a", "c", "c"}},
 			ret)
