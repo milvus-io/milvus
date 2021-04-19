@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -224,9 +223,8 @@ func (lis *loadIndexService) loadIndex(indexPath []string) ([][]byte, error) {
 	index := make([][]byte, 0)
 
 	for _, path := range indexPath {
-		// get binarySetKey from indexPath
-		binarySetKey := filepath.Base(path)
-		indexPiece, err := (*lis.client).Load(binarySetKey)
+		fmt.Println("load path = ", indexPath)
+		indexPiece, err := (*lis.client).Load(path)
 		if err != nil {
 			return nil, err
 		}

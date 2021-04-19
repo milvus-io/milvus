@@ -38,6 +38,7 @@ func (colReplica *collectionReplicaImpl) addCollection(collectionID UniqueID, sc
 
 	var newCollection = newCollection(collectionID, schemaBlob)
 	colReplica.collections = append(colReplica.collections, newCollection)
+	fmt.Println("yyy, create collection: ", newCollection.Name())
 
 	return nil
 }
@@ -51,6 +52,8 @@ func (colReplica *collectionReplicaImpl) removeCollection(collectionID UniqueID)
 	for _, col := range colReplica.collections {
 		if col.ID() != collectionID {
 			tmpCollections = append(tmpCollections, col)
+		} else {
+			fmt.Println("yyy, drop collection name: ", col.Name())
 		}
 	}
 	colReplica.collections = tmpCollections

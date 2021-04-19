@@ -17,7 +17,7 @@ import (
 func TestSegment_newSegment(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
 	assert.NotEqual(t, "", schemaBlob)
 
@@ -35,7 +35,7 @@ func TestSegment_newSegment(t *testing.T) {
 func TestSegment_deleteSegment(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
 	assert.NotEqual(t, "", schemaBlob)
 
@@ -55,7 +55,7 @@ func TestSegment_deleteSegment(t *testing.T) {
 func TestSegment_getRowCount(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
 	assert.NotEqual(t, "", schemaBlob)
 
@@ -106,7 +106,7 @@ func TestSegment_getRowCount(t *testing.T) {
 func TestSegment_getDeletedCount(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
 	assert.NotEqual(t, "", schemaBlob)
 
@@ -163,7 +163,7 @@ func TestSegment_getDeletedCount(t *testing.T) {
 func TestSegment_getMemSize(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
 	assert.NotEqual(t, "", schemaBlob)
 
@@ -215,7 +215,7 @@ func TestSegment_getMemSize(t *testing.T) {
 func TestSegment_segmentInsert(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
 	assert.NotEqual(t, "", schemaBlob)
 
@@ -261,7 +261,7 @@ func TestSegment_segmentInsert(t *testing.T) {
 func TestSegment_segmentDelete(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
 	assert.NotEqual(t, "", schemaBlob)
 
@@ -314,7 +314,7 @@ func TestSegment_segmentDelete(t *testing.T) {
 func TestSegment_segmentSearch(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
 	assert.NotEqual(t, "", schemaBlob)
 
@@ -399,7 +399,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 func TestSegment_segmentPreInsert(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
 	assert.NotEqual(t, "", schemaBlob)
 
@@ -441,7 +441,7 @@ func TestSegment_segmentPreInsert(t *testing.T) {
 func TestSegment_segmentPreDelete(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
 	assert.NotEqual(t, "", schemaBlob)
 

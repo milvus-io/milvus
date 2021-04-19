@@ -1,16 +1,24 @@
 package querynode
 
 import (
+	"encoding/binary"
+	"fmt"
+	"log"
+	"math"
 	"math/rand"
 	"sort"
+	"strconv"
 	"testing"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/zilliztech/milvus-distributed/internal/indexbuilder"
 	minioKV "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 	"github.com/zilliztech/milvus-distributed/internal/querynode/client"
 )
 
@@ -21,20 +29,195 @@ func TestLoadIndexService(t *testing.T) {
 	initTestMeta(t, node, "collection0", collectionID, segmentID)
 
 	// loadIndexService and statsService
-	node.loadIndexService = newLoadIndexService(node.queryNodeLoopCtx, node.replica)
-	go node.loadIndexService.start()
-	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, node.loadIndexService.fieldStatsChan)
-	go node.statsService.start()
+	oldSearchChannelNames := Params.SearchChannelNames
+	var newSearchChannelNames []string
+	for _, channel := range oldSearchChannelNames {
+		newSearchChannelNames = append(newSearchChannelNames, channel+"new")
+	}
+	Params.SearchChannelNames = newSearchChannelNames
+
+	oldSearchResultChannelNames := Params.SearchChannelNames
+	var newSearchResultChannelNames []string
+	for _, channel := range oldSearchResultChannelNames {
+		newSearchResultChannelNames = append(newSearchResultChannelNames, channel+"new")
+	}
+	Params.SearchResultChannelNames = newSearchResultChannelNames
+	go node.Start()
+
+	//generate insert data
+	const msgLength = 1000
+	const receiveBufSize = 1024
+	const DIM = 16
+	var insertRowBlob []*commonpb.Blob
+	var timestamps []uint64
+	var rowIDs []int64
+	var hashValues []uint32
+	for n := 0; n < msgLength; n++ {
+		rowData := make([]byte, 0)
+		for i := 0; i < DIM; i++ {
+			vec := make([]byte, 4)
+			binary.LittleEndian.PutUint32(vec, math.Float32bits(float32(n*i)))
+			rowData = append(rowData, vec...)
+		}
+		age := make([]byte, 4)
+		binary.LittleEndian.PutUint32(age, 1)
+		rowData = append(rowData, age...)
+		blob := &commonpb.Blob{
+			Value: rowData,
+		}
+		insertRowBlob = append(insertRowBlob, blob)
+		timestamps = append(timestamps, uint64(n))
+		rowIDs = append(rowIDs, int64(n))
+		hashValues = append(hashValues, uint32(n))
+	}
+
+	var insertMsg msgstream.TsMsg = &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{
+			HashValues: hashValues,
+		},
+		InsertRequest: internalpb.InsertRequest{
+			MsgType:        internalpb.MsgType_kInsert,
+			ReqID:          0,
+			CollectionName: "collection0",
+			PartitionTag:   "default",
+			SegmentID:      segmentID,
+			ChannelID:      int64(0),
+			ProxyID:        int64(0),
+			Timestamps:     timestamps,
+			RowIDs:         rowIDs,
+			RowData:        insertRowBlob,
+		},
+	}
+	insertMsgPack := msgstream.MsgPack{
+		BeginTs: 0,
+		EndTs:   math.MaxUint64,
+		Msgs:    []msgstream.TsMsg{insertMsg},
+	}
+
+	// generate timeTick
+	timeTickMsg := &msgstream.TimeTickMsg{
+		BaseMsg: msgstream.BaseMsg{
+			BeginTimestamp: 0,
+			EndTimestamp:   0,
+			HashValues:     []uint32{0},
+		},
+		TimeTickMsg: internalpb.TimeTickMsg{
+			MsgType:   internalpb.MsgType_kTimeTick,
+			PeerID:    UniqueID(0),
+			Timestamp: math.MaxUint64,
+		},
+	}
+	timeTickMsgPack := &msgstream.MsgPack{
+		Msgs: []msgstream.TsMsg{timeTickMsg},
+	}
+
+	// pulsar produce
+	insertChannels := Params.InsertChannelNames
+	ddChannels := Params.DDChannelNames
+
+	insertStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	insertStream.SetPulsarClient(Params.PulsarAddress)
+	insertStream.CreatePulsarProducers(insertChannels)
+	ddStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	ddStream.SetPulsarClient(Params.PulsarAddress)
+	ddStream.CreatePulsarProducers(ddChannels)
+
+	var insertMsgStream msgstream.MsgStream = insertStream
+	insertMsgStream.Start()
+	var ddMsgStream msgstream.MsgStream = ddStream
+	ddMsgStream.Start()
+
+	err := insertMsgStream.Produce(&insertMsgPack)
+	assert.NoError(t, err)
+	err = insertMsgStream.Broadcast(timeTickMsgPack)
+	assert.NoError(t, err)
+	err = ddMsgStream.Broadcast(timeTickMsgPack)
+	assert.NoError(t, err)
+
+	// generator searchRowData
+	var searchRowData []float32
+	for i := 0; i < DIM; i++ {
+		searchRowData = append(searchRowData, float32(42*i))
+	}
+
+	//generate search data and send search msg
+	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
+	var searchRowByteData []byte
+	for i := range searchRowData {
+		vec := make([]byte, 4)
+		binary.LittleEndian.PutUint32(vec, math.Float32bits(searchRowData[i]))
+		searchRowByteData = append(searchRowByteData, vec...)
+	}
+	placeholderValue := servicepb.PlaceholderValue{
+		Tag:    "$0",
+		Type:   servicepb.PlaceholderType_VECTOR_FLOAT,
+		Values: [][]byte{searchRowByteData},
+	}
+	placeholderGroup := servicepb.PlaceholderGroup{
+		Placeholders: []*servicepb.PlaceholderValue{&placeholderValue},
+	}
+	placeGroupByte, err := proto.Marshal(&placeholderGroup)
+	if err != nil {
+		log.Print("marshal placeholderGroup failed")
+	}
+	query := servicepb.Query{
+		CollectionName:   "collection0",
+		PartitionTags:    []string{"default"},
+		Dsl:              dslString,
+		PlaceholderGroup: placeGroupByte,
+	}
+	queryByte, err := proto.Marshal(&query)
+	if err != nil {
+		log.Print("marshal query failed")
+	}
+	blob := commonpb.Blob{
+		Value: queryByte,
+	}
+	fn := func(n int64) *msgstream.MsgPack {
+		searchMsg := &msgstream.SearchMsg{
+			BaseMsg: msgstream.BaseMsg{
+				HashValues: []uint32{0},
+			},
+			SearchRequest: internalpb.SearchRequest{
+				MsgType:         internalpb.MsgType_kSearch,
+				ReqID:           n,
+				ProxyID:         int64(1),
+				Timestamp:       uint64(msgLength),
+				ResultChannelID: int64(0),
+				Query:           &blob,
+			},
+		}
+		return &msgstream.MsgPack{
+			Msgs: []msgstream.TsMsg{searchMsg},
+		}
+	}
+	searchStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	searchStream.SetPulsarClient(Params.PulsarAddress)
+	searchStream.CreatePulsarProducers(newSearchChannelNames)
+	searchStream.Start()
+	err = searchStream.Produce(fn(1))
+	assert.NoError(t, err)
+
+	//get search result
+	searchResultStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	searchResultStream.SetPulsarClient(Params.PulsarAddress)
+	unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
+	searchResultStream.CreatePulsarConsumers(newSearchResultChannelNames, "loadIndexTestSubSearchResult", unmarshalDispatcher, receiveBufSize)
+	searchResultStream.Start()
+	searchResult := searchResultStream.Consume()
+	assert.NotNil(t, searchResult)
+	unMarshaledHit := servicepb.Hits{}
+	err = proto.Unmarshal(searchResult.Msgs[0].(*msgstream.SearchResultMsg).Hits[0], &unMarshaledHit)
+	assert.Nil(t, err)
 
 	// gen load index message pack
-	const msgLength = 10000
 	indexParams := make(map[string]string)
 	indexParams["index_type"] = "IVF_PQ"
 	indexParams["index_mode"] = "cpu"
 	indexParams["dim"] = "16"
 	indexParams["k"] = "10"
 	indexParams["nlist"] = "100"
-	indexParams["nprobe"] = "4"
+	indexParams["nprobe"] = "10"
 	indexParams["m"] = "4"
 	indexParams["nbits"] = "8"
 	indexParams["metric_type"] = "L2"
@@ -51,19 +234,15 @@ func TestLoadIndexService(t *testing.T) {
 	// generator index
 	typeParams := make(map[string]string)
 	typeParams["dim"] = "16"
-	index, err := indexbuilder.NewCIndex(typeParams, indexParams)
-	assert.Nil(t, err)
-	const DIM = 16
-	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 	var indexRowData []float32
-	for i := 0; i < msgLength; i++ {
-		for i, ele := range vec {
-			indexRowData = append(indexRowData, ele+float32(i*4))
+	for n := 0; n < msgLength; n++ {
+		for i := 0; i < DIM; i++ {
+			indexRowData = append(indexRowData, float32(n*i))
 		}
 	}
+	index, err := indexbuilder.NewCIndex(typeParams, indexParams)
+	assert.Nil(t, err)
 	err = index.BuildFloatVecIndexWithoutIds(indexRowData)
-	assert.Equal(t, err, nil)
-	binarySet, err := index.Serialize()
 	assert.Equal(t, err, nil)
 
 	option := &minioKV.Option{
@@ -77,22 +256,29 @@ func TestLoadIndexService(t *testing.T) {
 
 	minioKV, err := minioKV.NewMinIOKV(node.queryNodeLoopCtx, option)
 	assert.Equal(t, err, nil)
+	//save index to minio
+	binarySet, err := index.Serialize()
+	assert.Equal(t, err, nil)
 	indexPaths := make([]string, 0)
 	for _, index := range binarySet {
-		indexPaths = append(indexPaths, index.Key)
-		minioKV.Save(index.Key, string(index.Value))
+		path := strconv.Itoa(int(segmentID)) + "/" + index.Key
+		indexPaths = append(indexPaths, path)
+		minioKV.Save(path, string(index.Value))
 	}
+
+	//test index search result
+	indexResult, err := index.QueryOnFloatVecIndexWithParam(searchRowData, indexParams)
+	assert.Equal(t, err, nil)
 
 	// create loadIndexClient
 	fieldID := UniqueID(100)
 	loadIndexChannelNames := Params.LoadIndexChannelNames
-	pulsarURL := Params.PulsarAddress
-	client := client.NewLoadIndexClient(node.queryNodeLoopCtx, pulsarURL, loadIndexChannelNames)
+	client := client.NewLoadIndexClient(node.queryNodeLoopCtx, Params.PulsarAddress, loadIndexChannelNames)
 	client.LoadIndex(indexPaths, segmentID, fieldID, "vec", indexParams)
 
 	// init message stream consumer and do checks
 	statsMs := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, Params.StatsReceiveBufSize)
-	statsMs.SetPulsarClient(pulsarURL)
+	statsMs.SetPulsarClient(Params.PulsarAddress)
 	statsMs.CreatePulsarConsumers([]string{Params.StatsChannelName}, Params.MsgChannelSubName, msgstream.NewUnmarshalDispatcher(), Params.StatsReceiveBufSize)
 	statsMs.Start()
 
@@ -126,6 +312,23 @@ func TestLoadIndexService(t *testing.T) {
 			break
 		}
 	}
+
+	err = searchStream.Produce(fn(2))
+	assert.NoError(t, err)
+	searchResult = searchResultStream.Consume()
+	assert.NotNil(t, searchResult)
+	err = proto.Unmarshal(searchResult.Msgs[0].(*msgstream.SearchResultMsg).Hits[0], &unMarshaledHit)
+	assert.Nil(t, err)
+
+	idsIndex := indexResult.IDs()
+	idsSegment := unMarshaledHit.IDs
+	assert.Equal(t, len(idsIndex), len(idsSegment))
+	for i := 0; i < len(idsIndex); i++ {
+		assert.Equal(t, idsIndex[i], idsSegment[i])
+	}
+	Params.SearchChannelNames = oldSearchChannelNames
+	Params.SearchResultChannelNames = oldSearchResultChannelNames
+	fmt.Println("loadIndex floatVector test Done!")
 
 	defer assert.Equal(t, findFiledStats, true)
 	<-node.queryNodeLoopCtx.Done()

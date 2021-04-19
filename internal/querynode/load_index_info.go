@@ -10,6 +10,8 @@ package querynode
 import "C"
 import (
 	"errors"
+	"fmt"
+	"path/filepath"
 	"strconv"
 	"unsafe"
 )
@@ -77,7 +79,9 @@ func (li *LoadIndexInfo) appendIndex(bytesIndex [][]byte, indexKeys []string) er
 	for i, byteIndex := range bytesIndex {
 		indexPtr := unsafe.Pointer(&byteIndex[0])
 		indexLen := C.long(len(byteIndex))
-		indexKey := C.CString(indexKeys[i])
+		binarySetKey := filepath.Base(indexKeys[i])
+		fmt.Println("index key = ", binarySetKey)
+		indexKey := C.CString(binarySetKey)
 		status = C.AppendBinaryIndex(cBinarySet, indexPtr, indexLen, indexKey)
 		errorCode = status.error_code
 		if errorCode != 0 {

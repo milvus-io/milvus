@@ -16,7 +16,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
-const ctxTimeInMillisecond = 2000
+const ctxTimeInMillisecond = 5000
 const closeWithDeadline = true
 
 func setup() {
@@ -24,24 +24,46 @@ func setup() {
 	Params.MetaRootPath = "/etcd/test/root/querynode"
 }
 
-func genTestCollectionMeta(collectionName string, collectionID UniqueID) *etcdpb.CollectionMeta {
-	fieldVec := schemapb.FieldSchema{
-		FieldID:      UniqueID(100),
-		Name:         "vec",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_VECTOR_FLOAT,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "16",
+func genTestCollectionMeta(collectionName string, collectionID UniqueID, isBinary bool) *etcdpb.CollectionMeta {
+	var fieldVec schemapb.FieldSchema
+	if isBinary {
+		fieldVec = schemapb.FieldSchema{
+			FieldID:      UniqueID(100),
+			Name:         "vec",
+			IsPrimaryKey: false,
+			DataType:     schemapb.DataType_VECTOR_BINARY,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: "16",
+				},
 			},
-		},
-		IndexParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "metric_type",
-				Value: "L2",
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "metric_type",
+					Value: "JACCARD",
+				},
 			},
-		},
+		}
+	} else {
+		fieldVec = schemapb.FieldSchema{
+			FieldID:      UniqueID(100),
+			Name:         "vec",
+			IsPrimaryKey: false,
+			DataType:     schemapb.DataType_VECTOR_FLOAT,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: "16",
+				},
+			},
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "metric_type",
+					Value: "L2",
+				},
+			},
+		}
 	}
 
 	fieldInt := schemapb.FieldSchema{
@@ -71,7 +93,7 @@ func genTestCollectionMeta(collectionName string, collectionID UniqueID) *etcdpb
 }
 
 func initTestMeta(t *testing.T, node *QueryNode, collectionName string, collectionID UniqueID, segmentID UniqueID) {
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
 	assert.NotEqual(t, "", schemaBlob)

@@ -138,7 +138,7 @@ func TestCollectionReplica_addPartitionsByCollectionMeta(t *testing.T) {
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionName, collectionID, 0)
 
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 	collectionMeta.PartitionTags = []string{"p0", "p1", "p2"}
 
 	err := node.replica.addPartitionsByCollectionMeta(collectionMeta)
@@ -162,7 +162,7 @@ func TestCollectionReplica_removePartitionsByCollectionMeta(t *testing.T) {
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionName, collectionID, 0)
 
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 	collectionMeta.PartitionTags = []string{"p0"}
 
 	err := node.replica.addPartitionsByCollectionMeta(collectionMeta)
@@ -187,7 +187,7 @@ func TestCollectionReplica_getPartitionByTag(t *testing.T) {
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionName, collectionID, 0)
 
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 
 	for _, tag := range collectionMeta.PartitionTags {
 		err := node.replica.addPartition(collectionID, tag)
@@ -206,7 +206,7 @@ func TestCollectionReplica_hasPartition(t *testing.T) {
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionName, collectionID, 0)
 
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 	err := node.replica.addPartition(collectionID, collectionMeta.PartitionTags[0])
 	assert.NoError(t, err)
 	hasPartition := node.replica.hasPartition(collectionID, "default")
