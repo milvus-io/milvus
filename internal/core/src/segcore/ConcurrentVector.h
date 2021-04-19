@@ -25,33 +25,6 @@
 
 namespace milvus::segcore {
 
-// we don't use std::array because capacity of concurrent_vector wastes too much memory
-// template <typename Type>
-// class FixedVector : public std::vector<Type> {
-// public:
-//    // This is a stupid workaround for tbb API to avoid memory copy
-//    explicit FixedVector(int64_t size) : placeholder_size_(size) {
-//    }
-//    FixedVector(const FixedVector<Type>& placeholder_vec)
-//        : std::vector<Type>(placeholder_vec.placeholder_size_), is_placeholder_(false) {
-//        // Assert(placeholder_vec.is_placeholder_);
-//    }
-//    FixedVector(FixedVector<Type>&&) = delete;
-//
-//    FixedVector&
-//    operator=(FixedVector<Type>&&) = delete;
-//
-//    FixedVector&
-//    operator=(const FixedVector<Type>&) = delete;
-//
-//    bool is_placeholder() {
-//        return is_placeholder_;
-//    }
-// private:
-//    bool is_placeholder_ = true;
-//    int placeholder_size_ = 0;
-//};
-
 template <typename Type>
 using FixedVector = boost::container::vector<Type>;
 
