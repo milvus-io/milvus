@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	buildindexclient "github.com/zilliztech/milvus-distributed/internal/indexbuilder/client"
+	buildindexclient "github.com/zilliztech/milvus-distributed/internal/indexnode/client"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexbuilderpb"
 	writerclient "github.com/zilliztech/milvus-distributed/internal/writenode/client"
 )

@@ -1,8 +1,8 @@
 {
     "name": "Milvus Distributed Dev Container Definition",
-    "dockerComposeFile": ["./docker-compose-vscode.yml"],
+    "dockerComposeFile": ["./docker-compose-devcontainer.yml"],
     "service": "ubuntu",
-    "initializeCommand": "scripts/init_devcontainer.sh && docker-compose -f docker-compose-vscode.yml down || true",
+    "initializeCommand": "scripts/devcontainer.sh && docker-compose -f docker-compose-devcontainer.yml down || true",
     "workspaceFolder": "/go/src/github.com/zilliztech/milvus-distributed",
     "shutdownAction": "stopCompose",
     "extensions": [

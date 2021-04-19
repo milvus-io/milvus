@@ -40,7 +40,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
             const float* query_data,
             int64_t num_queries,
             Timestamp timestamp,
-            std::optional<const BitmapSimple*> bitmaps_opt,
+            const BitsetView& bitset,
             QueryResult& results) {
     auto& schema = segment.get_schema();
     auto& indexing_record = segment.get_indexing_record();
@@ -79,20 +79,21 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
 
     // TODO: use sub_qr
     for (int chunk_id = 0; chunk_id < max_indexed_id; ++chunk_id) {
-        auto bitset = create_bitmap_view(bitmaps_opt, chunk_id);
+        auto chunk_size = indexing_entry.get_chunk_size();
         auto indexing = indexing_entry.get_vec_indexing(chunk_id);
-        auto sub_qr = SearchOnIndex(query_dataset, *indexing, search_conf, bitset);
+
+        auto sub_view = BitsetSubView(bitset, chunk_id * chunk_size, chunk_size);
+        auto sub_qr = SearchOnIndex(query_dataset, *indexing, search_conf, sub_view);
 
         // convert chunk uid to segment uid
         for (auto& x : sub_qr.mutable_labels()) {
             if (x != -1) {
-                x += chunk_id * indexing_entry.get_chunk_size();
+                x += chunk_id * chunk_size;
             }
         }
 
         final_qr.merge(sub_qr);
     }
-    using segcore::FloatVector;
     auto vec_ptr = record.get_entity<FloatVector>(vecfield_offset);
 
     // step 4: brute force search where small indexing is unavailable
@@ -101,15 +102,14 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
     auto max_chunk = upper_div(ins_barrier, vec_chunk_size);
 
     for (int chunk_id = max_indexed_id; chunk_id < max_chunk; ++chunk_id) {
-        auto bitmap_view = create_bitmap_view(bitmaps_opt, chunk_id);
-
         auto& chunk = vec_ptr->get_chunk(chunk_id);
 
         auto element_begin = chunk_id * vec_chunk_size;
         auto element_end = std::min(ins_barrier, (chunk_id + 1) * vec_chunk_size);
         auto chunk_size = element_end - element_begin;
 
-        auto sub_qr = FloatSearchBruteForce(query_dataset, chunk.data(), chunk_size, bitmap_view);
+        auto sub_view = BitsetSubView(bitset, element_begin, chunk_size);
+        auto sub_qr = FloatSearchBruteForce(query_dataset, chunk.data(), chunk_size, sub_view);
 
         // convert chunk uid to segment uid
         for (auto& x : sub_qr.mutable_labels()) {
@@ -134,7 +134,7 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
              const uint8_t* query_data,
              int64_t num_queries,
              Timestamp timestamp,
-             std::optional<const BitmapSimple*> bitmaps_opt,
+             const faiss::BitsetView& bitset,
              QueryResult& results) {
     auto& schema = segment.get_schema();
     auto& indexing_record = segment.get_indexing_record();
@@ -161,11 +161,8 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
     auto total_count = topK * num_queries;
 
     // step 3: small indexing search
-    // TODO: this is too intrusive
-    // TODO: use QuerySubResult instead
     query::dataset::BinaryQueryDataset query_dataset{metric_type, num_queries, topK, dim, query_data};
 
-    using segcore::BinaryVector;
     auto vec_ptr = record.get_entity<BinaryVector>(vecfield_offset);
 
     auto max_indexed_id = 0;
@@ -180,8 +177,8 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
         auto element_end = std::min(ins_barrier, (chunk_id + 1) * vec_chunk_size);
         auto nsize = element_end - element_begin;
 
-        auto bitmap_view = create_bitmap_view(bitmaps_opt, chunk_id);
-        auto sub_result = BinarySearchBruteForce(query_dataset, chunk.data(), nsize, bitmap_view);
+        auto sub_view = BitsetSubView(bitset, element_begin, nsize);
+        auto sub_result = BinarySearchBruteForce(query_dataset, chunk.data(), nsize, sub_view);
 
         // convert chunk uid to segment uid
         for (auto& x : sub_result.mutable_labels()) {
