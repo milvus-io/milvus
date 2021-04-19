@@ -25,7 +25,7 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 	reqSchemaMap := make(map[UniqueID][]string)
 
 	for i, request := range tsMsgs {
-		if request.Type() != internalpb.MsgType_kInsert {
+		if request.Type() != commonpb.MsgType_kInsert {
 			return nil, errors.New(string("msg's must be Insert"))
 		}
 		insertRequest, ok := request.(*msgstream.InsertMsg)
@@ -168,7 +168,7 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 			}
 			segmentID := getSegmentID(reqID, key)
 			sliceRequest := internalpb.InsertRequest{
-				MsgType:        internalpb.MsgType_kInsert,
+				MsgType:        commonpb.MsgType_kInsert,
 				ReqID:          reqID,
 				CollectionName: collectionName,
 				PartitionTag:   partitionTag,

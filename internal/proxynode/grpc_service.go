@@ -32,7 +32,7 @@ func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.
 				HashValues: in.HashKeys,
 			},
 			InsertRequest: internalpb.InsertRequest{
-				MsgType:        internalpb.MsgType_kInsert,
+				MsgType:        commonpb.MsgType_kInsert,
 				CollectionName: in.CollectionName,
 				PartitionTag:   in.PartitionTag,
 				RowData:        in.RowData,
@@ -87,7 +87,7 @@ func (p *Proxy) CreateCollection(ctx context.Context, req *schemapb.CollectionSc
 	cct := &CreateCollectionTask{
 		Condition: NewTaskCondition(ctx),
 		CreateCollectionRequest: internalpb.CreateCollectionRequest{
-			MsgType: internalpb.MsgType_kCreateCollection,
+			MsgType: commonpb.MsgType_kCreateCollection,
 			Schema:  &commonpb.Blob{},
 		},
 		masterClient: p.masterClient,
@@ -183,7 +183,7 @@ func (p *Proxy) DropCollection(ctx context.Context, req *servicepb.CollectionNam
 	dct := &DropCollectionTask{
 		Condition: NewTaskCondition(ctx),
 		DropCollectionRequest: internalpb.DropCollectionRequest{
-			MsgType:        internalpb.MsgType_kDropCollection,
+			MsgType:        commonpb.MsgType_kDropCollection,
 			CollectionName: req,
 		},
 		masterClient: p.masterClient,
@@ -224,7 +224,7 @@ func (p *Proxy) HasCollection(ctx context.Context, req *servicepb.CollectionName
 	hct := &HasCollectionTask{
 		Condition: NewTaskCondition(ctx),
 		HasCollectionRequest: internalpb.HasCollectionRequest{
-			MsgType:        internalpb.MsgType_kHasCollection,
+			MsgType:        commonpb.MsgType_kHasCollection,
 			CollectionName: req,
 		},
 		masterClient: p.masterClient,
@@ -269,7 +269,7 @@ func (p *Proxy) DescribeCollection(ctx context.Context, req *servicepb.Collectio
 	dct := &DescribeCollectionTask{
 		Condition: NewTaskCondition(ctx),
 		DescribeCollectionRequest: internalpb.DescribeCollectionRequest{
-			MsgType:        internalpb.MsgType_kDescribeCollection,
+			MsgType:        commonpb.MsgType_kDescribeCollection,
 			CollectionName: req,
 		},
 		masterClient: p.masterClient,
@@ -314,7 +314,7 @@ func (p *Proxy) ShowCollections(ctx context.Context, req *commonpb.Empty) (*serv
 	sct := &ShowCollectionsTask{
 		Condition: NewTaskCondition(ctx),
 		ShowCollectionRequest: internalpb.ShowCollectionRequest{
-			MsgType: internalpb.MsgType_kDescribeCollection,
+			MsgType: commonpb.MsgType_kDescribeCollection,
 		},
 		masterClient: p.masterClient,
 	}
@@ -358,7 +358,7 @@ func (p *Proxy) CreatePartition(ctx context.Context, in *servicepb.PartitionName
 	cpt := &CreatePartitionTask{
 		Condition: NewTaskCondition(ctx),
 		CreatePartitionRequest: internalpb.CreatePartitionRequest{
-			MsgType:       internalpb.MsgType_kCreatePartition,
+			MsgType:       commonpb.MsgType_kCreatePartition,
 			ReqID:         0,
 			Timestamp:     0,
 			ProxyID:       0,
@@ -404,7 +404,7 @@ func (p *Proxy) DropPartition(ctx context.Context, in *servicepb.PartitionName) 
 	dpt := &DropPartitionTask{
 		Condition: NewTaskCondition(ctx),
 		DropPartitionRequest: internalpb.DropPartitionRequest{
-			MsgType:       internalpb.MsgType_kDropPartition,
+			MsgType:       commonpb.MsgType_kDropPartition,
 			ReqID:         0,
 			Timestamp:     0,
 			ProxyID:       0,
@@ -451,7 +451,7 @@ func (p *Proxy) HasPartition(ctx context.Context, in *servicepb.PartitionName) (
 	hpt := &HasPartitionTask{
 		Condition: NewTaskCondition(ctx),
 		HasPartitionRequest: internalpb.HasPartitionRequest{
-			MsgType:       internalpb.MsgType_kHasPartition,
+			MsgType:       commonpb.MsgType_kHasPartition,
 			ReqID:         0,
 			Timestamp:     0,
 			ProxyID:       0,
@@ -504,7 +504,7 @@ func (p *Proxy) DescribePartition(ctx context.Context, in *servicepb.PartitionNa
 	dpt := &DescribePartitionTask{
 		Condition: NewTaskCondition(ctx),
 		DescribePartitionRequest: internalpb.DescribePartitionRequest{
-			MsgType:       internalpb.MsgType_kDescribePartition,
+			MsgType:       commonpb.MsgType_kDescribePartition,
 			ReqID:         0,
 			Timestamp:     0,
 			ProxyID:       0,
@@ -559,7 +559,7 @@ func (p *Proxy) ShowPartitions(ctx context.Context, req *servicepb.CollectionNam
 	spt := &ShowPartitionsTask{
 		Condition: NewTaskCondition(ctx),
 		ShowPartitionRequest: internalpb.ShowPartitionRequest{
-			MsgType:        internalpb.MsgType_kShowPartitions,
+			MsgType:        commonpb.MsgType_kShowPartitions,
 			ReqID:          0,
 			Timestamp:      0,
 			ProxyID:        0,
@@ -611,7 +611,7 @@ func (p *Proxy) CreateIndex(ctx context.Context, indexParam *servicepb.IndexPara
 	cit := &CreateIndexTask{
 		Condition: NewTaskCondition(ctx),
 		CreateIndexRequest: internalpb.CreateIndexRequest{
-			MsgType:        internalpb.MsgType_kCreateIndex,
+			MsgType:        commonpb.MsgType_kCreateIndex,
 			CollectionName: indexParam.CollectionName,
 			FieldName:      indexParam.FieldName,
 			ExtraParams:    indexParam.ExtraParams,
@@ -655,7 +655,7 @@ func (p *Proxy) DescribeIndex(ctx context.Context, req *servicepb.DescribeIndexR
 	dit := &DescribeIndexTask{
 		Condition: NewTaskCondition(ctx),
 		DescribeIndexRequest: internalpb.DescribeIndexRequest{
-			MsgType:        internalpb.MsgType_kDescribeIndex,
+			MsgType:        commonpb.MsgType_kDescribeIndex,
 			CollectionName: req.CollectionName,
 			FieldName:      req.FieldName,
 		},
@@ -708,7 +708,7 @@ func (p *Proxy) DescribeIndexProgress(ctx context.Context, req *servicepb.Descri
 	dipt := &DescribeIndexProgressTask{
 		Condition: NewTaskCondition(ctx),
 		DescribeIndexProgressRequest: internalpb.DescribeIndexProgressRequest{
-			MsgType:        internalpb.MsgType_kDescribeIndexProgress,
+			MsgType:        commonpb.MsgType_kDescribeIndexProgress,
 			CollectionName: req.CollectionName,
 			FieldName:      req.FieldName,
 		},

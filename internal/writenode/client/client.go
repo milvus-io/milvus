@@ -3,6 +3,8 @@ package writerclient
 import (
 	"strconv"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	"github.com/golang/protobuf/proto"
 	"go.etcd.io/etcd/clientv3"
 
@@ -56,7 +58,7 @@ func (c *Client) FlushSegment(segmentID UniqueID, collectionID UniqueID, partiti
 	}
 
 	flushMsg := internalPb.FlushMsg{
-		MsgType:      internalPb.MsgType_kFlush,
+		MsgType:      commonpb.MsgType_kFlush,
 		SegmentID:    segmentID,
 		CollectionID: collectionID,
 		PartitionTag: partitionTag,

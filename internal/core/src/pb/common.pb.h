@@ -48,7 +48,7 @@ struct TableStruct_common_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[5]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[6]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -70,6 +70,9 @@ extern EmptyDefaultTypeInternal _Empty_default_instance_;
 class KeyValuePair;
 class KeyValuePairDefaultTypeInternal;
 extern KeyValuePairDefaultTypeInternal _KeyValuePair_default_instance_;
+class MsgBase;
+class MsgBaseDefaultTypeInternal;
+extern MsgBaseDefaultTypeInternal _MsgBase_default_instance_;
 class Status;
 class StatusDefaultTypeInternal;
 extern StatusDefaultTypeInternal _Status_default_instance_;
@@ -81,6 +84,7 @@ template<> ::milvus::proto::common::Address* Arena::CreateMaybeMessage<::milvus:
 template<> ::milvus::proto::common::Blob* Arena::CreateMaybeMessage<::milvus::proto::common::Blob>(Arena*);
 template<> ::milvus::proto::common::Empty* Arena::CreateMaybeMessage<::milvus::proto::common::Empty>(Arena*);
 template<> ::milvus::proto::common::KeyValuePair* Arena::CreateMaybeMessage<::milvus::proto::common::KeyValuePair>(Arena*);
+template<> ::milvus::proto::common::MsgBase* Arena::CreateMaybeMessage<::milvus::proto::common::MsgBase>(Arena*);
 template<> ::milvus::proto::common::Status* Arena::CreateMaybeMessage<::milvus::proto::common::Status>(Arena*);
 PROTOBUF_NAMESPACE_CLOSE
 namespace milvus {
@@ -134,6 +138,52 @@ inline bool ErrorCode_Parse(
     const std::string& name, ErrorCode* value) {
   return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<ErrorCode>(
     ErrorCode_descriptor(), name, value);
+}
+enum MsgType : int {
+  kNone = 0,
+  kCreateCollection = 100,
+  kDropCollection = 101,
+  kHasCollection = 102,
+  kDescribeCollection = 103,
+  kShowCollections = 104,
+  kGetSysConfigs = 105,
+  kCreatePartition = 200,
+  kDropPartition = 201,
+  kHasPartition = 202,
+  kDescribePartition = 203,
+  kShowPartitions = 204,
+  kCreateIndex = 300,
+  kDescribeIndex = 301,
+  kDescribeIndexProgress = 302,
+  kInsert = 400,
+  kDelete = 401,
+  kFlush = 402,
+  kSearch = 500,
+  kSearchResult = 501,
+  kTimeTick = 1200,
+  kQueryNodeStats = 1201,
+  kLoadIndex = 1202,
+  MsgType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
+  MsgType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
+};
+bool MsgType_IsValid(int value);
+constexpr MsgType MsgType_MIN = kNone;
+constexpr MsgType MsgType_MAX = kLoadIndex;
+constexpr int MsgType_ARRAYSIZE = MsgType_MAX + 1;
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* MsgType_descriptor();
+template<typename T>
+inline const std::string& MsgType_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, MsgType>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function MsgType_Name.");
+  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
+    MsgType_descriptor(), enum_t_value);
+}
+inline bool MsgType_Parse(
+    const std::string& name, MsgType* value) {
+  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<MsgType>(
+    MsgType_descriptor(), name, value);
 }
 // ===================================================================
 
@@ -832,6 +882,158 @@ class Address :
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_common_2eproto;
 };
+// -------------------------------------------------------------------
+
+class MsgBase :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.common.MsgBase) */ {
+ public:
+  MsgBase();
+  virtual ~MsgBase();
+
+  MsgBase(const MsgBase& from);
+  MsgBase(MsgBase&& from) noexcept
+    : MsgBase() {
+    *this = ::std::move(from);
+  }
+
+  inline MsgBase& operator=(const MsgBase& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline MsgBase& operator=(MsgBase&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const MsgBase& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const MsgBase* internal_default_instance() {
+    return reinterpret_cast<const MsgBase*>(
+               &_MsgBase_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    5;
+
+  friend void swap(MsgBase& a, MsgBase& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(MsgBase* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline MsgBase* New() const final {
+    return CreateMaybeMessage<MsgBase>(nullptr);
+  }
+
+  MsgBase* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<MsgBase>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const MsgBase& from);
+  void MergeFrom(const MsgBase& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(MsgBase* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.common.MsgBase";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_common_2eproto);
+    return ::descriptor_table_common_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kMsgIDFieldNumber = 2,
+    kTimestampFieldNumber = 3,
+    kSourceIDFieldNumber = 4,
+    kMsgTypeFieldNumber = 1,
+  };
+  // int64 msgID = 2;
+  void clear_msgid();
+  ::PROTOBUF_NAMESPACE_ID::int64 msgid() const;
+  void set_msgid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // uint64 timestamp = 3;
+  void clear_timestamp();
+  ::PROTOBUF_NAMESPACE_ID::uint64 timestamp() const;
+  void set_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
+
+  // int64 sourceID = 4;
+  void clear_sourceid();
+  ::PROTOBUF_NAMESPACE_ID::int64 sourceid() const;
+  void set_sourceid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // .milvus.proto.common.MsgType msg_type = 1;
+  void clear_msg_type();
+  ::milvus::proto::common::MsgType msg_type() const;
+  void set_msg_type(::milvus::proto::common::MsgType value);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.common.MsgBase)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::int64 msgid_;
+  ::PROTOBUF_NAMESPACE_ID::uint64 timestamp_;
+  ::PROTOBUF_NAMESPACE_ID::int64 sourceid_;
+  int msg_type_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_common_2eproto;
+};
 // ===================================================================
 
 
@@ -1142,9 +1344,71 @@ inline void Address::set_port(::PROTOBUF_NAMESPACE_ID::int64 value) {
   // @@protoc_insertion_point(field_set:milvus.proto.common.Address.port)
 }
 
+// -------------------------------------------------------------------
+
+// MsgBase
+
+// .milvus.proto.common.MsgType msg_type = 1;
+inline void MsgBase::clear_msg_type() {
+  msg_type_ = 0;
+}
+inline ::milvus::proto::common::MsgType MsgBase::msg_type() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.MsgBase.msg_type)
+  return static_cast< ::milvus::proto::common::MsgType >(msg_type_);
+}
+inline void MsgBase::set_msg_type(::milvus::proto::common::MsgType value) {
+  
+  msg_type_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.common.MsgBase.msg_type)
+}
+
+// int64 msgID = 2;
+inline void MsgBase::clear_msgid() {
+  msgid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 MsgBase::msgid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.MsgBase.msgID)
+  return msgid_;
+}
+inline void MsgBase::set_msgid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  msgid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.common.MsgBase.msgID)
+}
+
+// uint64 timestamp = 3;
+inline void MsgBase::clear_timestamp() {
+  timestamp_ = PROTOBUF_ULONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::uint64 MsgBase::timestamp() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.MsgBase.timestamp)
+  return timestamp_;
+}
+inline void MsgBase::set_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value) {
+  
+  timestamp_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.common.MsgBase.timestamp)
+}
+
+// int64 sourceID = 4;
+inline void MsgBase::clear_sourceid() {
+  sourceid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 MsgBase::sourceid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.MsgBase.sourceID)
+  return sourceid_;
+}
+inline void MsgBase::set_sourceid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  sourceid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.common.MsgBase.sourceID)
+}
+
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
@@ -1166,6 +1430,11 @@ template <> struct is_proto_enum< ::milvus::proto::common::ErrorCode> : ::std::t
 template <>
 inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::ErrorCode>() {
   return ::milvus::proto::common::ErrorCode_descriptor();
+}
+template <> struct is_proto_enum< ::milvus::proto::common::MsgType> : ::std::true_type {};
+template <>
+inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::MsgType>() {
+  return ::milvus::proto::common::MsgType_descriptor();
 }
 
 PROTOBUF_NAMESPACE_CLOSE

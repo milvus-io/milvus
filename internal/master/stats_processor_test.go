@@ -73,7 +73,7 @@ func TestStatsProcess(t *testing.T) {
 	})
 	assert.Nil(t, err)
 	stats := internalpb.QueryNodeStats{
-		MsgType: internalpb.MsgType_kQueryNodeStats,
+		MsgType: commonpb.MsgType_kQueryNodeStats,
 		PeerID:  1,
 		SegStats: []*internalpb.SegmentStats{
 			{SegmentID: 100, MemorySize: 2500000, NumRows: 25000, RecentlyModified: true},

@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -73,7 +75,7 @@ func (tt *timeTick) tick() error {
 			HashValues: []uint32{uint32(Params.ProxyID())},
 		},
 		TimeTickMsg: internalpb.TimeTickMsg{
-			MsgType:   internalpb.MsgType_kTimeTick,
+			MsgType:   commonpb.MsgType_kTimeTick,
 			PeerID:    tt.peerID,
 			Timestamp: tt.currentTick,
 		},

@@ -3,8 +3,9 @@ package master
 import (
 	"context"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 // TODO: get timestamp from timestampOracle
@@ -16,7 +17,7 @@ type baseTask struct {
 }
 
 type task interface {
-	Type() internalpb.MsgType
+	Type() commonpb.MsgType
 	Ts() (Timestamp, error)
 	Execute() error
 	WaitToFinish(ctx context.Context) error

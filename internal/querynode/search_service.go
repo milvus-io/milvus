@@ -5,11 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/opentracing/opentracing-go"
-	oplog "github.com/opentracing/opentracing-go/log"
 	"log"
 	"regexp"
 	"sync"
+
+	"github.com/opentracing/opentracing-go"
+	oplog "github.com/opentracing/opentracing-go/log"
 
 	"github.com/golang/protobuf/proto"
 
@@ -312,7 +313,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 				nilHits[i] = bs
 			}
 			var results = internalpb.SearchResult{
-				MsgType:         internalpb.MsgType_kSearchResult,
+				MsgType:         commonpb.MsgType_kSearchResult,
 				Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
 				ReqID:           searchMsg.ReqID,
 				ProxyID:         searchMsg.ProxyID,
@@ -377,7 +378,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 			offset += len
 		}
 		var results = internalpb.SearchResult{
-			MsgType:         internalpb.MsgType_kSearchResult,
+			MsgType:         commonpb.MsgType_kSearchResult,
 			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
 			ReqID:           searchMsg.ReqID,
 			ProxyID:         searchMsg.ProxyID,
@@ -429,7 +430,7 @@ func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg, errMsg s
 		return errors.New("invalid request type = " + string(msg.Type()))
 	}
 	var results = internalpb.SearchResult{
-		MsgType:         internalpb.MsgType_kSearchResult,
+		MsgType:         commonpb.MsgType_kSearchResult,
 		Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR, Reason: errMsg},
 		ReqID:           searchMsg.ReqID,
 		ProxyID:         searchMsg.ProxyID,

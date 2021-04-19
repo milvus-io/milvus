@@ -9,7 +9,7 @@ import "internal.proto";
 
 
 message RegisterNodeRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   common.Address address = 2;
 }
 
@@ -47,13 +47,13 @@ message AssignSegIDResponse {
 }
 
 message FlushRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 4;
 }
 
 message ShowSegmentRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   int64  collectionID = 2;
   int64  partitionID = 3;
 }
@@ -71,7 +71,7 @@ enum SegmentState {
 
 
 message SegmentStatesRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   int64  segmentID = 2;
 }
 
@@ -83,7 +83,7 @@ message SegmentStatesResponse {
 
 
 message InsertBinlogPathRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   int64 segmentID = 2;
 }
 
@@ -94,20 +94,20 @@ message InsertBinlogPathsResponse {
 
 
 message InsertChannelRequest  {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   int64  dbID = 2;
   int64  collectionID = 3;
 }
 
 
 message WatchDmChannelRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   repeated  string channelIDs = 2;
 }
 
 
 message FlushSegRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   int64  dbID = 2;
   int64 collectionID = 3;
   repeated int64 segmentIDs = 4;

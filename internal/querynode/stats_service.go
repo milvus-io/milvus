@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
@@ -73,7 +75,7 @@ func (sService *statsService) publicStatistic(fieldStats []*internalpb.FieldStat
 	segStats := sService.replica.getSegmentStatistics()
 
 	queryNodeStats := internalpb.QueryNodeStats{
-		MsgType:    internalpb.MsgType_kQueryNodeStats,
+		MsgType:    commonpb.MsgType_kQueryNodeStats,
 		PeerID:     Params.QueryNodeID,
 		SegStats:   segStats,
 		FieldStats: fieldStats,

@@ -52,7 +52,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	colName := "col-test-0"
 	// create collection
 	createColReq := internalpb.CreateCollectionRequest{
-		MsgType:      internalpb.MsgType_kCreateCollection,
+		MsgType:      commonpb.MsgType_kCreateCollection,
 		CollectionID: colID,
 		ReqID:        1,
 		Timestamp:    1,
@@ -70,7 +70,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 
 	// drop collection
 	dropColReq := internalpb.DropCollectionRequest{
-		MsgType:        internalpb.MsgType_kDropCollection,
+		MsgType:        commonpb.MsgType_kDropCollection,
 		CollectionID:   colID,
 		ReqID:          2,
 		Timestamp:      2,
@@ -90,7 +90,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	partitionTag := "partition-test-0"
 	// create partition
 	createPartitionReq := internalpb.CreatePartitionRequest{
-		MsgType:      internalpb.MsgType_kCreatePartition,
+		MsgType:      commonpb.MsgType_kCreatePartition,
 		CollectionID: colID,
 		PartitionID:  partitionID,
 		ReqID:        3,
@@ -112,7 +112,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 
 	// drop partition
 	dropPartitionReq := internalpb.DropPartitionRequest{
-		MsgType:      internalpb.MsgType_kDropPartition,
+		MsgType:      commonpb.MsgType_kDropPartition,
 		CollectionID: colID,
 		PartitionID:  partitionID,
 		ReqID:        4,
@@ -139,7 +139,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 			HashValues:     []uint32{uint32(0)},
 		},
 		FlushMsg: internalpb.FlushMsg{
-			MsgType:   internalpb.MsgType_kFlush,
+			MsgType:   commonpb.MsgType_kFlush,
 			SegmentID: 1,
 			Timestamp: Timestamp(6),
 		},

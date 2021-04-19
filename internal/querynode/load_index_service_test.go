@@ -79,7 +79,7 @@ func TestLoadIndexService_FloatVector(t *testing.T) {
 			HashValues: hashValues,
 		},
 		InsertRequest: internalpb.InsertRequest{
-			MsgType:        internalpb.MsgType_kInsert,
+			MsgType:        commonpb.MsgType_kInsert,
 			ReqID:          0,
 			CollectionName: "collection0",
 			PartitionTag:   "default",
@@ -105,7 +105,7 @@ func TestLoadIndexService_FloatVector(t *testing.T) {
 			HashValues:     []uint32{0},
 		},
 		TimeTickMsg: internalpb.TimeTickMsg{
-			MsgType:   internalpb.MsgType_kTimeTick,
+			MsgType:   commonpb.MsgType_kTimeTick,
 			PeerID:    UniqueID(0),
 			Timestamp: math.MaxUint64,
 		},
@@ -182,7 +182,7 @@ func TestLoadIndexService_FloatVector(t *testing.T) {
 				HashValues: []uint32{0},
 			},
 			SearchRequest: internalpb.SearchRequest{
-				MsgType:         internalpb.MsgType_kSearch,
+				MsgType:         commonpb.MsgType_kSearch,
 				ReqID:           n,
 				ProxyID:         int64(1),
 				Timestamp:       uint64(msgLength),
@@ -404,7 +404,7 @@ func TestLoadIndexService_BinaryVector(t *testing.T) {
 			HashValues: hashValues,
 		},
 		InsertRequest: internalpb.InsertRequest{
-			MsgType:        internalpb.MsgType_kInsert,
+			MsgType:        commonpb.MsgType_kInsert,
 			ReqID:          0,
 			CollectionName: "collection0",
 			PartitionTag:   "default",
@@ -430,7 +430,7 @@ func TestLoadIndexService_BinaryVector(t *testing.T) {
 			HashValues:     []uint32{0},
 		},
 		TimeTickMsg: internalpb.TimeTickMsg{
-			MsgType:   internalpb.MsgType_kTimeTick,
+			MsgType:   commonpb.MsgType_kTimeTick,
 			PeerID:    UniqueID(0),
 			Timestamp: math.MaxUint64,
 		},
@@ -496,7 +496,7 @@ func TestLoadIndexService_BinaryVector(t *testing.T) {
 				HashValues: []uint32{0},
 			},
 			SearchRequest: internalpb.SearchRequest{
-				MsgType:         internalpb.MsgType_kSearch,
+				MsgType:         commonpb.MsgType_kSearch,
 				ReqID:           n,
 				ProxyID:         int64(1),
 				Timestamp:       uint64(msgLength),

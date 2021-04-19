@@ -18,6 +18,7 @@ set(MILVUS_TEST_FILES
         test_reduce.cpp
         test_interface.cpp
         test_span.cpp
+        test_load.cpp
         )
 add_executable(all_tests
         ${MILVUS_TEST_FILES}

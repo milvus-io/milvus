@@ -80,7 +80,7 @@ func TestSearch_Search(t *testing.T) {
 			HashValues: []uint32{0},
 		},
 		SearchRequest: internalpb.SearchRequest{
-			MsgType:         internalpb.MsgType_kSearch,
+			MsgType:         commonpb.MsgType_kSearch,
 			ReqID:           int64(1),
 			ProxyID:         int64(1),
 			Timestamp:       uint64(10 + 1000),
@@ -127,7 +127,7 @@ func TestSearch_Search(t *testing.T) {
 				},
 			},
 			InsertRequest: internalpb.InsertRequest{
-				MsgType:        internalpb.MsgType_kInsert,
+				MsgType:        commonpb.MsgType_kInsert,
 				ReqID:          int64(i),
 				CollectionName: "collection0",
 				PartitionTag:   "default",
@@ -158,7 +158,7 @@ func TestSearch_Search(t *testing.T) {
 		HashValues:     []uint32{0},
 	}
 	timeTickResult := internalpb.TimeTickMsg{
-		MsgType:   internalpb.MsgType_kTimeTick,
+		MsgType:   commonpb.MsgType_kTimeTick,
 		PeerID:    UniqueID(0),
 		Timestamp: math.MaxUint64,
 	}
@@ -266,7 +266,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 			HashValues: []uint32{0},
 		},
 		SearchRequest: internalpb.SearchRequest{
-			MsgType:         internalpb.MsgType_kSearch,
+			MsgType:         commonpb.MsgType_kSearch,
 			ReqID:           int64(1),
 			ProxyID:         int64(1),
 			Timestamp:       uint64(10 + 1000),
@@ -317,7 +317,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 				},
 			},
 			InsertRequest: internalpb.InsertRequest{
-				MsgType:        internalpb.MsgType_kInsert,
+				MsgType:        commonpb.MsgType_kInsert,
 				ReqID:          int64(i),
 				CollectionName: "collection0",
 				PartitionTag:   "default",
@@ -348,7 +348,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 		HashValues:     []uint32{0},
 	}
 	timeTickResult := internalpb.TimeTickMsg{
-		MsgType:   internalpb.MsgType_kTimeTick,
+		MsgType:   commonpb.MsgType_kTimeTick,
 		PeerID:    UniqueID(0),
 		Timestamp: math.MaxUint64,
 	}

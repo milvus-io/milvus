@@ -5,12 +5,11 @@ option go_package="github.com/zilliztech/milvus-distributed/internal/proto/maste
 
 import "common.proto";
 import "milvus.proto";
-import "internal.proto";
 import "service_msg.proto";
 
 
 message IDRequest {
-    internal.MsgBase base = 1;
+    common.MsgBase base = 1;
     uint32 count = 2;
 }
 
@@ -21,7 +20,7 @@ message IDResponse {
 }
 
 message TsoRequest {
-    internal.MsgBase base = 1;
+    common.MsgBase base = 1;
     uint32 count = 3;
 }
 

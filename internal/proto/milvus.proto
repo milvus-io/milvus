@@ -4,11 +4,10 @@ package milvus.proto.milvus;
 option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/milvuspb";
 
 import "common.proto";
-import "internal.proto";
 import "schema.proto";
 
 message CreateCollectionRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collectionName = 3;
   // `schema` is the serialized `schema.CollectionSchema`
@@ -17,13 +16,13 @@ message CreateCollectionRequest {
 
 
 message DropCollectionRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collectionName = 3;
 }
 
 message HasCollectionRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
 }
@@ -34,7 +33,7 @@ message BoolResponse {
 }
 
 message DescribeCollectionRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
 }
@@ -45,19 +44,19 @@ message DescribeCollectionResponse {
 }
 
 message LoadCollectionRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
 }
 
 message ReleaseCollectionRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
 }
 
 message CollectionStatsRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
 }
@@ -69,7 +68,7 @@ message CollectionStatsResponse {
 
 
 message ShowCollectionRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
 }
 
@@ -80,7 +79,7 @@ message ShowCollectionResponse {
 
 
 message CreatePartitionRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
   string partition_name = 4;
@@ -88,35 +87,35 @@ message CreatePartitionRequest {
 
 
 message DropPartitionRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
   string partition_name = 4;
 }
 
 message HasPartitionRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
   string partition_name = 4;
 }
 
 message LoadPartitonRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
   repeated string partition_names = 4;
 }
 
 message ReleasePartitionRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
   repeated  string partition_names = 4;
 }
 
 message PartitionStatsRequest  {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
   string partition_name = 4;
@@ -128,7 +127,7 @@ message PartitionStatsResponse {
 }
 
 message ShowPartitionRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
 }
@@ -140,7 +139,7 @@ message ShowPartitionResponse {
 
 
 message CreateIndexRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
   string field_name = 4;
@@ -148,7 +147,7 @@ message CreateIndexRequest {
 }
 
 message DescribeIndexRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
   string field_name = 4;
@@ -165,7 +164,7 @@ message DescribeIndexResponse {
 }
 
 message InsertRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
   string partition_name = 4;
@@ -197,7 +196,7 @@ message PlaceholderGroup {
 }
 
 message SearchRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
   repeated  string partition_names = 4;
@@ -218,7 +217,7 @@ message QueryResult {
 }
 
 message FlushRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
 }

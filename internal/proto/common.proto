@@ -59,3 +59,48 @@ message Address {
   int64 port = 2;
 }
 
+enum MsgType {
+    kNone = 0;
+    /* Definition Requests: collection */
+    kCreateCollection = 100;
+    kDropCollection = 101;
+    kHasCollection = 102;
+    kDescribeCollection = 103;
+    kShowCollections = 104;
+    kGetSysConfigs = 105;
+
+    /* Definition Requests: partition */
+    kCreatePartition = 200;
+    kDropPartition = 201;
+    kHasPartition = 202;
+    kDescribePartition = 203;
+    kShowPartitions = 204;
+
+    /* Definition Requests: Index */
+    kCreateIndex = 300;
+    kDescribeIndex = 301;
+    kDescribeIndexProgress = 302;
+
+    /* Manipulation Requests */
+    kInsert = 400;
+    kDelete = 401;
+    kFlush = 402;
+
+    /* Query */
+    kSearch = 500;
+    kSearchResult = 501;
+
+    /* System Control */
+    kTimeTick = 1200;
+    kQueryNodeStats = 1201;
+    kLoadIndex = 1202;
+
+}
+
+message MsgBase {
+    MsgType msg_type = 1;
+    int64  msgID = 2;
+    uint64 timestamp = 3;
+    int64 sourceID = 4;
+}
+

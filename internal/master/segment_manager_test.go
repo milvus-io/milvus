@@ -145,7 +145,7 @@ func TestSegmentManager_AssignSegment(t *testing.T) {
 			BeginTimestamp: timestamp, EndTimestamp: timestamp, HashValues: []uint32{},
 		},
 		TimeTickMsg: internalpb.TimeTickMsg{
-			MsgType:   internalpb.MsgType_kTimeTick,
+			MsgType:   commonpb.MsgType_kTimeTick,
 			PeerID:    1,
 			Timestamp: timestamp,
 		},
@@ -264,7 +264,7 @@ func TestSegmentManager_SycnWritenode(t *testing.T) {
 			BeginTimestamp: timestamp, EndTimestamp: timestamp, HashValues: []uint32{},
 		},
 		TimeTickMsg: internalpb.TimeTickMsg{
-			MsgType:   internalpb.MsgType_kTimeTick,
+			MsgType:   commonpb.MsgType_kTimeTick,
 			PeerID:    1,
 			Timestamp: timestamp,
 		},

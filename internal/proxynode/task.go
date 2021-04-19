@@ -24,7 +24,7 @@ import (
 type task interface {
 	ID() UniqueID       // return ReqID
 	SetID(uid UniqueID) // set ReqID
-	Type() internalpb.MsgType
+	Type() commonpb.MsgType
 	BeginTs() Timestamp
 	EndTs() Timestamp
 	SetTs(ts Timestamp)
@@ -72,7 +72,7 @@ func (it *InsertTask) ID() UniqueID {
 	return it.ReqID
 }
 
-func (it *InsertTask) Type() internalpb.MsgType {
+func (it *InsertTask) Type() commonpb.MsgType {
 	return it.MsgType
 }
 
@@ -194,7 +194,7 @@ func (cct *CreateCollectionTask) SetID(uid UniqueID) {
 	cct.ReqID = uid
 }
 
-func (cct *CreateCollectionTask) Type() internalpb.MsgType {
+func (cct *CreateCollectionTask) Type() commonpb.MsgType {
 	return cct.MsgType
 }
 
@@ -304,7 +304,7 @@ func (dct *DropCollectionTask) SetID(uid UniqueID) {
 	dct.ReqID = uid
 }
 
-func (dct *DropCollectionTask) Type() internalpb.MsgType {
+func (dct *DropCollectionTask) Type() commonpb.MsgType {
 	return dct.MsgType
 }
 
@@ -366,7 +366,7 @@ func (qt *QueryTask) SetID(uid UniqueID) {
 	qt.ReqID = uid
 }
 
-func (qt *QueryTask) Type() internalpb.MsgType {
+func (qt *QueryTask) Type() commonpb.MsgType {
 	return qt.MsgType
 }
 
@@ -418,7 +418,7 @@ func (qt *QueryTask) PreExecute() error {
 			return err
 		}
 	}
-	qt.MsgType = internalpb.MsgType_kSearch
+	qt.MsgType = commonpb.MsgType_kSearch
 	queryBytes, err := proto.Marshal(qt.query)
 	if err != nil {
 		span.LogFields(oplog.Error(err))
@@ -628,7 +628,7 @@ func (hct *HasCollectionTask) SetID(uid UniqueID) {
 	hct.ReqID = uid
 }
 
-func (hct *HasCollectionTask) Type() internalpb.MsgType {
+func (hct *HasCollectionTask) Type() commonpb.MsgType {
 	return hct.MsgType
 }
 
@@ -688,7 +688,7 @@ func (dct *DescribeCollectionTask) SetID(uid UniqueID) {
 	dct.ReqID = uid
 }
 
-func (dct *DescribeCollectionTask) Type() internalpb.MsgType {
+func (dct *DescribeCollectionTask) Type() commonpb.MsgType {
 	return dct.MsgType
 }
 
@@ -741,7 +741,7 @@ func (sct *ShowCollectionsTask) SetID(uid UniqueID) {
 	sct.ReqID = uid
 }
 
-func (sct *ShowCollectionsTask) Type() internalpb.MsgType {
+func (sct *ShowCollectionsTask) Type() commonpb.MsgType {
 	return sct.MsgType
 }
 
@@ -797,7 +797,7 @@ func (cpt *CreatePartitionTask) SetID(uid UniqueID) {
 	cpt.ReqID = uid
 }
 
-func (cpt *CreatePartitionTask) Type() internalpb.MsgType {
+func (cpt *CreatePartitionTask) Type() commonpb.MsgType {
 	return cpt.MsgType
 }
 
@@ -852,7 +852,7 @@ func (dpt *DropPartitionTask) SetID(uid UniqueID) {
 	dpt.ReqID = uid
 }
 
-func (dpt *DropPartitionTask) Type() internalpb.MsgType {
+func (dpt *DropPartitionTask) Type() commonpb.MsgType {
 	return dpt.MsgType
 }
 
@@ -907,7 +907,7 @@ func (hpt *HasPartitionTask) SetID(uid UniqueID) {
 	hpt.ReqID = uid
 }
 
-func (hpt *HasPartitionTask) Type() internalpb.MsgType {
+func (hpt *HasPartitionTask) Type() commonpb.MsgType {
 	return hpt.MsgType
 }
 
@@ -961,7 +961,7 @@ func (dpt *DescribePartitionTask) SetID(uid UniqueID) {
 	dpt.ReqID = uid
 }
 
-func (dpt *DescribePartitionTask) Type() internalpb.MsgType {
+func (dpt *DescribePartitionTask) Type() commonpb.MsgType {
 	return dpt.MsgType
 }
 
@@ -1015,7 +1015,7 @@ func (spt *ShowPartitionsTask) SetID(uid UniqueID) {
 	spt.ReqID = uid
 }
 
-func (spt *ShowPartitionsTask) Type() internalpb.MsgType {
+func (spt *ShowPartitionsTask) Type() commonpb.MsgType {
 	return spt.MsgType
 }
 
@@ -1063,7 +1063,7 @@ func (cit *CreateIndexTask) SetID(uid UniqueID) {
 	cit.ReqID = uid
 }
 
-func (cit *CreateIndexTask) Type() internalpb.MsgType {
+func (cit *CreateIndexTask) Type() commonpb.MsgType {
 	return cit.MsgType
 }
 
@@ -1118,7 +1118,7 @@ func (dit *DescribeIndexTask) SetID(uid UniqueID) {
 	dit.ReqID = uid
 }
 
-func (dit *DescribeIndexTask) Type() internalpb.MsgType {
+func (dit *DescribeIndexTask) Type() commonpb.MsgType {
 	return dit.MsgType
 }
 
@@ -1173,7 +1173,7 @@ func (dipt *DescribeIndexProgressTask) SetID(uid UniqueID) {
 	dipt.ReqID = uid
 }
 
-func (dipt *DescribeIndexProgressTask) Type() internalpb.MsgType {
+func (dipt *DescribeIndexProgressTask) Type() commonpb.MsgType {
 	return dipt.MsgType
 }
 

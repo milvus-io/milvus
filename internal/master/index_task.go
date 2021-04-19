@@ -3,6 +3,8 @@ package master
 import (
 	"fmt"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
@@ -15,8 +17,8 @@ type createIndexTask struct {
 	segManager          SegmentManager
 }
 
-func (task *createIndexTask) Type() internalpb.MsgType {
-	return internalpb.MsgType_kCreateIndex
+func (task *createIndexTask) Type() commonpb.MsgType {
+	return commonpb.MsgType_kCreateIndex
 }
 
 func (task *createIndexTask) Ts() (Timestamp, error) {
@@ -111,8 +113,8 @@ type describeIndexTask struct {
 	resp *servicepb.DescribeIndexResponse
 }
 
-func (task *describeIndexTask) Type() internalpb.MsgType {
-	return internalpb.MsgType_kDescribeIndex
+func (task *describeIndexTask) Type() commonpb.MsgType {
+	return commonpb.MsgType_kDescribeIndex
 }
 
 func (task *describeIndexTask) Ts() (Timestamp, error) {
@@ -150,8 +152,8 @@ type describeIndexProgressTask struct {
 	resp         *servicepb.BoolResponse
 }
 
-func (task *describeIndexProgressTask) Type() internalpb.MsgType {
-	return internalpb.MsgType_kDescribeIndexProgress
+func (task *describeIndexProgressTask) Type() commonpb.MsgType {
+	return commonpb.MsgType_kDescribeIndexProgress
 }
 
 func (task *describeIndexProgressTask) Ts() (Timestamp, error) {

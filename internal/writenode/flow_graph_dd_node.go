@@ -8,12 +8,13 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
 )
@@ -106,15 +107,15 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 	// do dd tasks
 	for _, msg := range tsMessages {
 		switch msg.Type() {
-		case internalPb.MsgType_kCreateCollection:
+		case commonpb.MsgType_kCreateCollection:
 			ddNode.createCollection(msg.(*msgstream.CreateCollectionMsg))
-		case internalPb.MsgType_kDropCollection:
+		case commonpb.MsgType_kDropCollection:
 			ddNode.dropCollection(msg.(*msgstream.DropCollectionMsg))
-		case internalPb.MsgType_kCreatePartition:
+		case commonpb.MsgType_kCreatePartition:
 			ddNode.createPartition(msg.(*msgstream.CreatePartitionMsg))
-		case internalPb.MsgType_kDropPartition:
+		case commonpb.MsgType_kDropPartition:
 			ddNode.dropPartition(msg.(*msgstream.DropPartitionMsg))
-		case internalPb.MsgType_kFlush:
+		case commonpb.MsgType_kFlush:
 			fMsg := msg.(*msgstream.FlushMsg)
 			flushSegID := fMsg.SegmentID
 			ddMsg.flushMessages = append(ddMsg.flushMessages, fMsg)

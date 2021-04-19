@@ -3,11 +3,13 @@ package msgstream
 import (
 	"context"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	"github.com/golang/protobuf/proto"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
-type MsgType = internalPb.MsgType
+type MsgType = commonpb.MsgType
 
 type TsMsg interface {
 	GetMsgContext() context.Context

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"log"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	"github.com/golang/protobuf/proto"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
@@ -42,7 +44,7 @@ type showCollectionsTask struct {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *createCollectionTask) Type() internalpb.MsgType {
+func (t *createCollectionTask) Type() commonpb.MsgType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0
@@ -131,7 +133,7 @@ func (t *createCollectionTask) Execute() error {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *dropCollectionTask) Type() internalpb.MsgType {
+func (t *dropCollectionTask) Type() commonpb.MsgType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0
@@ -192,7 +194,7 @@ func (t *dropCollectionTask) Execute() error {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *hasCollectionTask) Type() internalpb.MsgType {
+func (t *hasCollectionTask) Type() commonpb.MsgType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0
@@ -222,7 +224,7 @@ func (t *hasCollectionTask) Execute() error {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *describeCollectionTask) Type() internalpb.MsgType {
+func (t *describeCollectionTask) Type() commonpb.MsgType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0
@@ -269,7 +271,7 @@ func (t *describeCollectionTask) Execute() error {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *showCollectionsTask) Type() internalpb.MsgType {
+func (t *showCollectionsTask) Type() commonpb.MsgType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0

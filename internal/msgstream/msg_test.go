@@ -9,7 +9,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 
-	commonPb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
@@ -43,7 +43,7 @@ func (tt *InsertTask) Unmarshal(input []byte) (TsMsg, error) {
 func newRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
 	result := make(map[int32]*MsgPack)
 	for i, request := range tsMsgs {
-		if request.Type() != internalPb.MsgType_kInsert {
+		if request.Type() != commonpb.MsgType_kInsert {
 			return nil, errors.New(string("msg's must be Insert"))
 		}
 		insertRequest := request.(*InsertTask).InsertRequest
@@ -65,7 +65,7 @@ func newRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, erro
 			}
 
 			sliceRequest := internalPb.InsertRequest{
-				MsgType:        internalPb.MsgType_kInsert,
+				MsgType:        commonpb.MsgType_kInsert,
 				ReqID:          insertRequest.ReqID,
 				CollectionName: insertRequest.CollectionName,
 				PartitionTag:   insertRequest.PartitionTag,
@@ -74,7 +74,7 @@ func newRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, erro
 				ProxyID:        insertRequest.ProxyID,
 				Timestamps:     []uint64{insertRequest.Timestamps[index]},
 				RowIDs:         []int64{insertRequest.RowIDs[index]},
-				RowData:        []*commonPb.Blob{insertRequest.RowData[index]},
+				RowData:        []*commonpb.Blob{insertRequest.RowData[index]},
 			}
 
 			insertMsg := &InsertTask{
@@ -94,7 +94,7 @@ func getInsertTask(reqID UniqueID, hashValue uint32) TsMsg {
 		HashValues:     []uint32{hashValue},
 	}
 	insertRequest := internalPb.InsertRequest{
-		MsgType:        internalPb.MsgType_kInsert,
+		MsgType:        commonpb.MsgType_kInsert,
 		ReqID:          reqID,
 		CollectionName: "Collection",
 		PartitionTag:   "Partition",
@@ -103,7 +103,7 @@ func getInsertTask(reqID UniqueID, hashValue uint32) TsMsg {
 		ProxyID:        1,
 		Timestamps:     []Timestamp{1},
 		RowIDs:         []int64{1},
-		RowData:        []*commonPb.Blob{{}},
+		RowData:        []*commonpb.Blob{{}},
 	}
 	insertMsg := InsertMsg{
 		BaseMsg:       baseMsg,
@@ -137,7 +137,7 @@ func TestStream_task_Insert(t *testing.T) {
 	outputStream.SetPulsarClient(pulsarAddress)
 	unmarshalDispatcher := NewUnmarshalDispatcher()
 	testTask := InsertTask{}
-	unmarshalDispatcher.AddMsgTemplate(internalPb.MsgType_kInsert, testTask.Unmarshal)
+	unmarshalDispatcher.AddMsgTemplate(commonpb.MsgType_kInsert, testTask.Unmarshal)
 	outputStream.CreatePulsarConsumers(consumerChannels, consumerSubName, unmarshalDispatcher, 100)
 	outputStream.Start()
 
