@@ -110,7 +110,7 @@ func TestStatsProcess(t *testing.T) {
 	assert.Equal(t, int64(2500000), segMeta.MemSize)
 	assert.Equal(t, int64(25000), segMeta.NumRows)
 
-	assert.EqualValues(t, 100, runtimeStats.collStats[1].fieldStats[100][0].numOfRelatedSegments)
-	assert.EqualValues(t, 200, runtimeStats.collStats[2].fieldStats[100][0].numOfRelatedSegments)
+	assert.EqualValues(t, 100, runtimeStats.collStats[1].fieldIndexStats[100][0].numOfRelatedSegments)
+	assert.EqualValues(t, 200, runtimeStats.collStats[2].fieldIndexStats[100][0].numOfRelatedSegments)
 
 }

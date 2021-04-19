@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
 
 type createIndexTask struct {
@@ -92,4 +93,90 @@ func (task *createIndexTask) Execute() error {
 
 	// close unfilled segment
 	return task.segManager.ForceClose(collMeta.ID)
+}
+
+type describeIndexTask struct {
+	baseTask
+	req  *internalpb.DescribeIndexRequest
+	resp *servicepb.DescribeIndexResponse
+}
+
+func (task *describeIndexTask) Type() internalpb.MsgType {
+	return internalpb.MsgType_kDescribeIndex
+}
+
+func (task *describeIndexTask) Ts() (Timestamp, error) {
+	return task.req.Timestamp, nil
+}
+
+func (task *describeIndexTask) Execute() error {
+	collMeta, err := task.mt.GetCollectionByName(task.req.CollectionName)
+	if err != nil {
+		return err
+	}
+
+	var fieldID int64 = -1
+	for _, fieldSchema := range collMeta.Schema.Fields {
+		if fieldSchema.Name == task.req.FieldName {
+			fieldID = fieldSchema.FieldID
+			break
+		}
+	}
+	if fieldID == -1 {
+		return fmt.Errorf("can not find field %s", task.req.FieldName)
+	}
+	indexParams, err := task.mt.GetFieldIndexParams(collMeta.ID, fieldID)
+	if err != nil {
+		return err
+	}
+	task.resp.ExtraParams = indexParams
+	return nil
+}
+
+type describeIndexProgressTask struct {
+	baseTask
+	req          *internalpb.DescribeIndexProgressRequest
+	runtimeStats *RuntimeStats
+	resp         *servicepb.BoolResponse
+}
+
+func (task *describeIndexProgressTask) Type() internalpb.MsgType {
+	return internalpb.MsgType_kDescribeIndexProgress
+}
+
+func (task *describeIndexProgressTask) Ts() (Timestamp, error) {
+	return task.req.Timestamp, nil
+}
+
+func (task *describeIndexProgressTask) Execute() error {
+	// get field id, collection id
+	collMeta, err := task.mt.GetCollectionByName(task.req.CollectionName)
+	if err != nil {
+		return err
+	}
+
+	var fieldID int64 = -1
+	for _, fieldSchema := range collMeta.Schema.Fields {
+		if fieldSchema.Name == task.req.FieldName {
+			fieldID = fieldSchema.FieldID
+			break
+		}
+	}
+	if fieldID == -1 {
+		return fmt.Errorf("can not find field %s", task.req.FieldName)
+	}
+
+	// total segment nums
+	totalSegmentNums := len(collMeta.SegmentIDs)
+
+	// get completed segment nums from querynode's runtime stats
+	relatedSegments := task.runtimeStats.GetTotalNumOfRelatedSegments(collMeta.ID, fieldID, task.req.ExtraParams)
+
+	if int64(totalSegmentNums) == relatedSegments {
+		task.resp.Value = true
+	} else {
+		task.resp.Value = false
+	}
+
+	return nil
 }
