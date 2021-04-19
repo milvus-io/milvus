@@ -81,10 +81,10 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		return msg
 	}
 
-	// If the last record is drop type, all insert requests are invalid.
-	if !records[len(records)-1].createOrDrop {
-		return nil
-	}
+	// TODO: If the last record is drop type, all insert requests are invalid.
+	//if !records[len(records)-1].createOrDrop {
+	//	return nil
+	//}
 
 	// Filter insert requests before last record.
 	if len(msg.RowIDs) != len(msg.Timestamps) || len(msg.RowIDs) != len(msg.RowData) {

@@ -68,18 +68,6 @@ func (kv *EtcdKV) Load(key string) (string, error) {
 	return string(resp.Kvs[0].Value), nil
 }
 
-func (kv *EtcdKV) GetCount(key string) (int64, error) {
-	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Get(ctx, key)
-	if err != nil {
-		return -1, err
-	}
-
-	return resp.Count, nil
-}
-
 func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error) {
 	ops := make([]clientv3.Op, 0, len(keys))
 	for _, keyLoad := range keys {
