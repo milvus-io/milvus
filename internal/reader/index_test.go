@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	msgPb "github.com/czs007/suvlim/internal/proto/message"
 	"math"
 	"testing"
 

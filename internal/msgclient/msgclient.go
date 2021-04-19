@@ -7,10 +7,10 @@ import (
 	"strconv"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	masterPb "github.com/zilliztech/milvus-distributed/internal/proto/master"
-	msgpb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/zilliztech/milvus-distributed/internal/timesync"
+	"github.com/czs007/suvlim/internal/conf"
+	masterPb "github.com/czs007/suvlim/internal/proto/master"
+	msgpb "github.com/czs007/suvlim/internal/proto/message"
+	"github.com/czs007/suvlim/internal/timesync"
 	"github.com/golang/protobuf/proto"
 )
 

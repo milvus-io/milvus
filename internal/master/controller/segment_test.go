@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/master/kv"
-	"github.com/zilliztech/milvus-distributed/internal/master/segment"
+	"github.com/czs007/suvlim/internal/conf"
+	"github.com/czs007/suvlim/internal/master/kv"
+	"github.com/czs007/suvlim/internal/master/segment"
 	"go.etcd.io/etcd/clientv3"
 )
 

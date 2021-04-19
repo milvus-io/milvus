@@ -5,12 +5,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/master/collection"
-	messagepb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/zilliztech/milvus-distributed/internal/master/id"
-	"github.com/zilliztech/milvus-distributed/internal/master/kv"
-	"github.com/zilliztech/milvus-distributed/internal/master/segment"
+	"github.com/czs007/suvlim/internal/conf"
+	"github.com/czs007/suvlim/internal/master/collection"
+	messagepb "github.com/czs007/suvlim/internal/proto/message"
+	"github.com/czs007/suvlim/internal/master/id"
+	"github.com/czs007/suvlim/internal/master/kv"
+	"github.com/czs007/suvlim/internal/master/segment"
 )
 
 func CollectionController(ch chan *messagepb.Mapping, kvbase kv.Base, errch chan error) {

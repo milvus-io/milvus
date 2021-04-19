@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/proxy"
+	"github.com/czs007/suvlim/internal/proxy"
 	"log"
 )
 

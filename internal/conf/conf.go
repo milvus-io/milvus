@@ -5,7 +5,7 @@ import (
 	"path"
 	"runtime"
 
-	storagetype "github.com/zilliztech/milvus-distributed/internal/storage/type"
+	storagetype "github.com/czs007/suvlim/internal/storage/type"
 	yaml "gopkg.in/yaml.v2"
 )
 

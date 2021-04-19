@@ -3,8 +3,8 @@ package collection
 import (
 	"time"
 
-	masterpb "github.com/zilliztech/milvus-distributed/internal/proto/master"
-	messagepb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	masterpb "github.com/czs007/suvlim/internal/proto/master"
+	messagepb "github.com/czs007/suvlim/internal/proto/message"
 	"github.com/gogo/protobuf/proto"
 	jsoniter "github.com/json-iterator/go"
 )

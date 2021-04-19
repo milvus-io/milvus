@@ -6,8 +6,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	. "github.com/zilliztech/milvus-distributed/internal/storage/type"
+	"github.com/czs007/suvlim/internal/conf"
+	. "github.com/czs007/suvlim/internal/storage/type"
 	"io"
 )
 

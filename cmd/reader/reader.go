@@ -4,8 +4,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/reader"
+	"github.com/czs007/suvlim/internal/conf"
+	"github.com/czs007/suvlim/internal/reader"
 	"strconv"
 )
 

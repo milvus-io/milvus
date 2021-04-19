@@ -19,7 +19,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/czs007/suvlim/internal/errors"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/log"
 	"go.etcd.io/etcd/clientv3"

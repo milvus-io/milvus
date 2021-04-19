@@ -6,7 +6,7 @@ package master
 import (
 	context "context"
 	fmt "fmt"
-	message "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	message "github.com/czs007/suvlim/internal/proto/message"
 	proto "github.com/golang/protobuf/proto"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"

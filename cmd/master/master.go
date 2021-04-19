@@ -3,8 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/master"
+	"github.com/czs007/suvlim/internal/conf"
+	"github.com/czs007/suvlim/internal/master"
 )
 
 // func main() {
