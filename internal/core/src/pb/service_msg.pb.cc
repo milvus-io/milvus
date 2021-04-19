@@ -473,7 +473,7 @@ const char descriptor_table_protodef_service_5fmsg_2eproto[] PROTOBUF_SECTION_VA
   "g\030\002 \001(\t\"z\n\010RowBatch\022\027\n\017collection_name\030\001"
   " \001(\t\022\025\n\rpartition_tag\030\002 \001(\t\022+\n\010row_data\030"
   "\003 \003(\0132\031.milvus.proto.common.Blob\022\021\n\thash"
-  "_keys\030\004 \003(\005\"d\n\020PlaceholderValue\022\013\n\003tag\030\001"
+  "_keys\030\004 \003(\r\"d\n\020PlaceholderValue\022\013\n\003tag\030\001"
   " \001(\t\0223\n\004type\030\002 \001(\0162%.milvus.proto.servic"
   "e.PlaceholderType\022\016\n\006values\030\003 \003(\014\"P\n\020Pla"
   "ceholderGroup\022<\n\014placeholders\030\001 \003(\0132&.mi"
@@ -1265,10 +1265,10 @@ const char* RowBatch::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::i
           } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 26);
         } else goto handle_unusual;
         continue;
-      // repeated int32 hash_keys = 4;
+      // repeated uint32 hash_keys = 4;
       case 4:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 34)) {
-          ptr = ::PROTOBUF_NAMESPACE_ID::internal::PackedInt32Parser(mutable_hash_keys(), ptr, ctx);
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::PackedUInt32Parser(mutable_hash_keys(), ptr, ctx);
           CHK_(ptr);
         } else if (static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 32) {
           add_hash_keys(::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr));
@@ -1346,15 +1346,15 @@ bool RowBatch::MergePartialFromCodedStream(
         break;
       }
 
-      // repeated int32 hash_keys = 4;
+      // repeated uint32 hash_keys = 4;
       case 4: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (34 & 0xFF)) {
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPackedPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::int32, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT32>(
+                   ::PROTOBUF_NAMESPACE_ID::uint32, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT32>(
                  input, this->mutable_hash_keys())));
         } else if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (32 & 0xFF)) {
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadRepeatedPrimitiveNoInline<
-                   ::PROTOBUF_NAMESPACE_ID::int32, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT32>(
+                   ::PROTOBUF_NAMESPACE_ID::uint32, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT32>(
                  1, 34u, input, this->mutable_hash_keys())));
         } else {
           goto handle_unusual;
@@ -1418,14 +1418,14 @@ void RowBatch::SerializeWithCachedSizes(
       output);
   }
 
-  // repeated int32 hash_keys = 4;
+  // repeated uint32 hash_keys = 4;
   if (this->hash_keys_size() > 0) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTag(4, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED, output);
     output->WriteVarint32(_hash_keys_cached_byte_size_.load(
         std::memory_order_relaxed));
   }
   for (int i = 0, n = this->hash_keys_size(); i < n; i++) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32NoTag(
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt32NoTag(
       this->hash_keys(i), output);
   }
 
@@ -1472,7 +1472,7 @@ void RowBatch::SerializeWithCachedSizes(
         3, this->row_data(static_cast<int>(i)), target);
   }
 
-  // repeated int32 hash_keys = 4;
+  // repeated uint32 hash_keys = 4;
   if (this->hash_keys_size() > 0) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTagToArray(
       4,
@@ -1482,7 +1482,7 @@ void RowBatch::SerializeWithCachedSizes(
         _hash_keys_cached_byte_size_.load(std::memory_order_relaxed),
          target);
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      WriteInt32NoTagToArray(this->hash_keys_, target);
+      WriteUInt32NoTagToArray(this->hash_keys_, target);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -1517,10 +1517,10 @@ size_t RowBatch::ByteSizeLong() const {
     }
   }
 
-  // repeated int32 hash_keys = 4;
+  // repeated uint32 hash_keys = 4;
   {
     size_t data_size = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      Int32Size(this->hash_keys_);
+      UInt32Size(this->hash_keys_);
     if (data_size > 0) {
       total_size += 1 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32Size(

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
 func isAlpha(c uint8) bool {
@@ -124,6 +125,58 @@ func ValidateDimension(dim int64, isBinary bool) error {
 	}
 	if isBinary && dim%8 != 0 {
 		return errors.New("invalid dimension: " + strconv.FormatInt(dim, 10) + ". should be multiple of 8.")
+	}
+	return nil
+}
+
+func ValidateVectorFieldMetricType(field *schemapb.FieldSchema) error {
+	if field.DataType != schemapb.DataType_VECTOR_FLOAT {
+		return nil
+	}
+	for _, params := range field.IndexParams {
+		if params.Key == "metric_type" {
+			return nil
+		}
+	}
+	return errors.New("vector float without metric_type")
+}
+
+func ValidateDuplicatedFieldName(fields []*schemapb.FieldSchema) error {
+	names := make(map[string]bool)
+	for _, field := range fields {
+		_, ok := names[field.Name]
+		if ok {
+			return errors.New("duplicated filed name")
+		}
+		names[field.Name] = true
+	}
+	return nil
+}
+
+func ValidatePrimaryKey(coll *schemapb.CollectionSchema) error {
+	//no primary key for auto id
+	if coll.AutoID {
+		for _, field := range coll.Fields {
+			if field.IsPrimaryKey {
+				return errors.Errorf("collection %s is auto id, so filed %s should not defined as primary key", coll.Name, field.Name)
+			}
+		}
+		return nil
+	}
+	idx := -1
+	for i, field := range coll.Fields {
+		if field.IsPrimaryKey {
+			if idx != -1 {
+				return errors.Errorf("there are more than one primary key, filed name = %s, %s", coll.Fields[idx].Name, field.Name)
+			}
+			if field.DataType != schemapb.DataType_INT64 {
+				return errors.Errorf("the data type of primary key should be int64")
+			}
+			idx = i
+		}
+	}
+	if idx == -1 {
+		return errors.Errorf("primay key is undefined")
 	}
 	return nil
 }

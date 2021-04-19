@@ -148,7 +148,7 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 				bucketValues[index] = channelID
 				continue
 			}
-			bucketValues[index] = hashValue % int32(len(ms.producers))
+			bucketValues[index] = int32(hashValue % uint32(len(ms.producers)))
 		}
 		reBucketValues[channelID] = bucketValues
 	}

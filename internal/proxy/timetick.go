@@ -70,7 +70,7 @@ func (tt *timeTick) tick() error {
 	msgPack := msgstream.MsgPack{}
 	timeTickMsg := &msgstream.TimeTickMsg{
 		BaseMsg: msgstream.BaseMsg{
-			HashValues: []int32{int32(Params.ProxyID())},
+			HashValues: []uint32{uint32(Params.ProxyID())},
 		},
 		TimeTickMsg: internalpb.TimeTickMsg{
 			MsgType:   internalpb.MsgType_kTimeTick,
