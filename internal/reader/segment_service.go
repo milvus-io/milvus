@@ -2,8 +2,8 @@ package reader
 
 import (
 	"fmt"
-	masterPb "github.com/zilliztech/milvus-distributed/internal/proto/master"
-	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"log"
 	"strconv"
 	"time"
@@ -46,23 +46,19 @@ import (
 //}
 
 func (node *QueryNode) SegmentStatistic(sleepMillisecondTime int) {
-	var statisticData = make([]masterPb.SegmentStat, 0)
+	var statisticData = make([]internalpb.SegmentStatistics, 0)
 
 	for segmentID, segment := range node.SegmentsMap {
 		currentMemSize := segment.GetMemSize()
-		memIncreaseRate := float32((int64(currentMemSize))-(int64(segment.LastMemSize))) / (float32(sleepMillisecondTime) / 1000)
 		segment.LastMemSize = currentMemSize
 
-		segmentStatus := segment.SegmentStatus
 		segmentNumOfRows := segment.GetRowCount()
 
-		stat := masterPb.SegmentStat{
+		stat := internalpb.SegmentStatistics{
 			// TODO: set master pb's segment id type from uint64 to int64
 			SegmentId:  uint64(segmentID),
 			MemorySize: currentMemSize,
-			MemoryRate: memIncreaseRate,
-			Status:     masterPb.SegmentStatus(segmentStatus),
-			Rows:       segmentNumOfRows,
+			NumRows: segmentNumOfRows,
 		}
 
 		statisticData = append(statisticData, stat)
@@ -71,7 +67,7 @@ func (node *QueryNode) SegmentStatistic(sleepMillisecondTime int) {
 	// fmt.Println("Publish segment statistic")
 	// fmt.Println(statisticData)
 	var status = node.PublicStatistic(&statisticData)
-	if status.ErrorCode != msgPb.ErrorCode_SUCCESS {
+	if status.ErrorCode != commonpb.ErrorCode_SUCCESS {
 		log.Printf("Publish segments statistic failed")
 	}
 }

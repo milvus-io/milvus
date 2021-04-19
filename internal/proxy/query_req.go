@@ -1,44 +1,45 @@
 package proxy
 
 import (
-	"fmt"
 	"github.com/apache/pulsar-client-go/pulsar"
-	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/golang/protobuf/proto"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 	"log"
-	"sort"
 	"sync"
 )
 
 type queryReq struct {
-	pb.QueryReqMsg
-	result []*pb.QueryResult
+	internalpb.SearchRequest
+	result []*internalpb.SearchResult
 	wg     sync.WaitGroup
 	proxy  *proxyServer
 }
 
 // BaseRequest interfaces
-func (req *queryReq) Type() pb.ReqType {
+func (req *queryReq) Type() internalpb.ReqType {
 	return req.ReqType
 }
 
-func (req *queryReq) PreExecute() pb.Status {
-	return pb.Status{ErrorCode: pb.ErrorCode_SUCCESS}
+func (req *queryReq) PreExecute() commonpb.Status {
+	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 }
 
-func (req *queryReq) Execute() pb.Status {
+func (req *queryReq) Execute() commonpb.Status {
 	req.proxy.reqSch.queryChan <- req
-	return pb.Status{ErrorCode: pb.ErrorCode_SUCCESS}
+	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 }
 
-func (req *queryReq) PostExecute() pb.Status { // send into pulsar
+func (req *queryReq) PostExecute() commonpb.Status { // send into pulsar
 	req.wg.Add(1)
-	return pb.Status{ErrorCode: pb.ErrorCode_SUCCESS}
+	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 }
 
-func (req *queryReq) WaitToFinish() pb.Status { // wait unitl send into pulsar
+func (req *queryReq) WaitToFinish() commonpb.Status { // wait unitl send into pulsar
 	req.wg.Wait()
-	return pb.Status{ErrorCode: pb.ErrorCode_SUCCESS}
+	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 }
 
 func (s *proxyServer) restartQueryRoutine(buf_size int) error {
@@ -78,20 +79,10 @@ func (s *proxyServer) restartQueryRoutine(buf_size int) error {
 					log.Printf("get time stamp failed, error code = %d, msg = %s", st.ErrorCode, st.Reason)
 					break
 				}
+				qm.Timestamp = uint64(ts[0])
 
-				q := pb.QueryReqMsg{
-					CollectionName: qm.CollectionName,
-					VectorParam:    qm.VectorParam,
-					PartitionTags:  qm.PartitionTags,
-					Dsl:            qm.Dsl,
-					ExtraParams:    qm.ExtraParams,
-					Timestamp:      uint64(ts[0]),
-					ProxyId:        qm.ProxyId,
-					QueryId:        qm.QueryId,
-					ReqType:        qm.ReqType,
-				}
 
-				qb, err := proto.Marshal(&q)
+				qb, err := proto.Marshal(qm)
 				if err != nil {
 					log.Printf("Marshal QueryReqMsg failed, error = %v", err)
 					continue
@@ -106,14 +97,14 @@ func (s *proxyServer) restartQueryRoutine(buf_size int) error {
 					log.Printf("there is some wrong with q_timestamp, it goes back, current = %d, previous = %d", ts[0], s.reqSch.q_timestamp)
 				}
 				s.reqSch.q_timestamp_mux.Unlock()
-				resultMap[qm.QueryId] = qm
+				resultMap[qm.ReqId] = qm
 				//log.Printf("start search, query id = %d", qm.QueryId)
 			case cm, ok := <-result.Chan():
 				if !ok {
 					log.Printf("consumer of result topic has closed")
 					return
 				}
-				var rm pb.QueryResult
+				var rm internalpb.SearchResult
 				if err := proto.Unmarshal(cm.Message.Payload(), &rm); err != nil {
 					log.Printf("Unmarshal QueryReqMsg failed, error = %v", err)
 					break
@@ -121,15 +112,15 @@ func (s *proxyServer) restartQueryRoutine(buf_size int) error {
 				if rm.ProxyId != s.proxyId {
 					break
 				}
-				qm, ok := resultMap[rm.QueryId]
+				qm, ok := resultMap[rm.ReqId]
 				if !ok {
-					log.Printf("unknown query id = %d", rm.QueryId)
+					log.Printf("unknown query id = %d", rm.ReqId)
 					break
 				}
 				qm.result = append(qm.result, &rm)
 				if len(qm.result) == s.numReaderNode {
 					qm.wg.Done()
-					delete(resultMap, rm.QueryId)
+					delete(resultMap, rm.ReqId)
 				}
 				result.AckID(cm.ID())
 			}
@@ -139,114 +130,102 @@ func (s *proxyServer) restartQueryRoutine(buf_size int) error {
 	return nil
 }
 
-func (s *proxyServer) reduceResult(query *queryReq) *pb.QueryResult {
-	if s.numReaderNode == 1 {
-		return query.result[0]
-	}
-	var result []*pb.QueryResult
+//func (s *proxyServer) reduceResult(query *queryReq) *servicepb.QueryResult {
+//}
+
+func (s *proxyServer) reduceResults(query *queryReq) *servicepb.QueryResult {
+
+	var results []*internalpb.SearchResult
+	var status commonpb.Status
+	status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
 	for _, r := range query.result {
-		if r.Status.ErrorCode == pb.ErrorCode_SUCCESS {
-			result = append(result, r)
+		status = *r.Status
+		if status.ErrorCode == commonpb.ErrorCode_SUCCESS {
+			results = append(results, r)
+		}else{
+			break
 		}
 	}
-	if len(result) == 0 {
-		return query.result[0]
+	if len(results) != s.numReaderNode{
+		status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
 	}
-	if len(result) == 1 {
-		return result[0]
+	if status.ErrorCode != commonpb.ErrorCode_SUCCESS{
+		result:= servicepb.QueryResult{
+			Status: &status,
+		}
+		return &result
 	}
 
-	var entities []*struct {
-		Ids       int64
-		ValidRow  bool
-		RowsData  *pb.RowData
-		Scores    float32
-		Distances float32
-	}
-	var rows int
-
-	result_err := func(msg string) *pb.QueryResult {
-		return &pb.QueryResult{
-			Status: &pb.Status{
-				ErrorCode: pb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    msg,
+	if s.numReaderNode == 1 {
+		result:= servicepb.QueryResult{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_SUCCESS,
 			},
+			Hits: results[0].Hits,
 		}
+		return &result
 	}
 
-	for _, r := range result {
-		if len(r.Entities.Ids) > rows {
-			rows = len(r.Entities.Ids)
-		}
-		if len(r.Entities.Ids) != len(r.Entities.ValidRow) {
-			return result_err(fmt.Sprintf("len(Entities.Ids)=%d, len(Entities.ValidRow)=%d", len(r.Entities.Ids), len(r.Entities.ValidRow)))
-		}
-		if len(r.Entities.Ids) != len(r.Entities.RowsData) {
-			return result_err(fmt.Sprintf("len(Entities.Ids)=%d, len(Entities.RowsData)=%d", len(r.Entities.Ids), len(r.Entities.RowsData)))
-		}
-		if len(r.Entities.Ids) != len(r.Scores) {
-			return result_err(fmt.Sprintf("len(Entities.Ids)=%d, len(Scores)=%d", len(r.Entities.Ids), len(r.Scores)))
-		}
-		if len(r.Entities.Ids) != len(r.Distances) {
-			return result_err(fmt.Sprintf("len(Entities.Ids)=%d, len(Distances)=%d", len(r.Entities.Ids), len(r.Distances)))
-		}
-		for i := 0; i < len(r.Entities.Ids); i++ {
-			entity := struct {
-				Ids       int64
-				ValidRow  bool
-				RowsData  *pb.RowData
-				Scores    float32
-				Distances float32
-			}{
-				Ids:       r.Entities.Ids[i],
-				ValidRow:  r.Entities.ValidRow[i],
-				RowsData:  r.Entities.RowsData[i],
-				Scores:    r.Scores[i],
-				Distances: r.Distances[i],
-			}
-			entities = append(entities, &entity)
-		}
-	}
-	sort.Slice(entities, func(i, j int) bool {
-		if entities[i].ValidRow == true {
-			if entities[j].ValidRow == false {
-				return true
-			}
-			return entities[i].Scores > entities[j].Scores
-		} else {
-			return false
-		}
-	})
-	rIds := make([]int64, 0, rows)
-	rValidRow := make([]bool, 0, rows)
-	rRowsData := make([]*pb.RowData, 0, rows)
-	rScores := make([]float32, 0, rows)
-	rDistances := make([]float32, 0, rows)
-	for i := 0; i < rows; i++ {
-		rIds = append(rIds, entities[i].Ids)
-		rValidRow = append(rValidRow, entities[i].ValidRow)
-		rRowsData = append(rRowsData, entities[i].RowsData)
-		rScores = append(rScores, entities[i].Scores)
-		rDistances = append(rDistances, entities[i].Distances)
-	}
+	//var entities []*struct {
+	//	Idx       int64
+	//	Score 	  float32
+	//	Hit		  *servicepb.Hits
+	//}
+	//var rows int
+	//
+	//result_err := func(msg string) *pb.QueryResult {
+	//	return &pb.QueryResult{
+	//		Status: &pb.Status{
+	//			ErrorCode: pb.ErrorCode_UNEXPECTED_ERROR,
+	//			Reason:    msg,
+	//		},
+	//	}
+	//}
 
-	return &pb.QueryResult{
-		Status: &pb.Status{
-			ErrorCode: pb.ErrorCode_SUCCESS,
+	//for _, r := range results {
+	//	for i := 0; i < len(r.Hits); i++ {
+	//		entity := struct {
+	//			Ids       int64
+	//			ValidRow  bool
+	//			RowsData  *pb.RowData
+	//			Scores    float32
+	//			Distances float32
+	//		}{
+	//			Ids:       r.Entities.Ids[i],
+	//			ValidRow:  r.Entities.ValidRow[i],
+	//			RowsData:  r.Entities.RowsData[i],
+	//			Scores:    r.Scores[i],
+	//			Distances: r.Distances[i],
+	//		}
+	//		entities = append(entities, &entity)
+	//	}
+	//}
+	//sort.Slice(entities, func(i, j int) bool {
+	//	if entities[i].ValidRow == true {
+	//		if entities[j].ValidRow == false {
+	//			return true
+	//		}
+	//		return entities[i].Scores > entities[j].Scores
+	//	} else {
+	//		return false
+	//	}
+	//})
+	//rIds := make([]int64, 0, rows)
+	//rValidRow := make([]bool, 0, rows)
+	//rRowsData := make([]*pb.RowData, 0, rows)
+	//rScores := make([]float32, 0, rows)
+	//rDistances := make([]float32, 0, rows)
+	//for i := 0; i < rows; i++ {
+	//	rIds = append(rIds, entities[i].Ids)
+	//	rValidRow = append(rValidRow, entities[i].ValidRow)
+	//	rRowsData = append(rRowsData, entities[i].RowsData)
+	//	rScores = append(rScores, entities[i].Scores)
+	//	rDistances = append(rDistances, entities[i].Distances)
+	//}
+
+	return &servicepb.QueryResult{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		},
-		Entities: &pb.Entities{
-			Status: &pb.Status{
-				ErrorCode: pb.ErrorCode_SUCCESS,
-			},
-			Ids:      rIds,
-			ValidRow: rValidRow,
-			RowsData: rRowsData,
-		},
-		RowNum:      int64(rows),
-		Scores:      rScores,
-		Distances:   rDistances,
-		ExtraParams: result[0].ExtraParams,
-		QueryId:     query.QueryId,
-		ProxyId:     query.ProxyId,
 	}
 }

@@ -86,7 +86,7 @@ add_custom_command(TARGET generate_milvus_pb_grpc
 	POST_BUILD
 
 	COMMAND ${PROTOC_EXCUTABLE} -I "${PROTO_PATH}" --cpp_out "${PROTO_OUTPUT_PATH}"
-		"message.proto" "master.proto"
+		"common.proto" "schema.proto" "etcd_meta.proto"
 		DEPENDS "${PROTO_PATH}/*.proto"
 	)
 

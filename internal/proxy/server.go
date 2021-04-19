@@ -4,7 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	mpb "github.com/zilliztech/milvus-distributed/internal/proto/master"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	mpb "github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/zilliztech/milvus-distributed/internal/master/collection"
 	"github.com/golang/protobuf/proto"
@@ -25,7 +30,7 @@ const (
 )
 
 type proxyServer struct {
-	pb.UnimplementedMilvusServiceServer
+	servicepb.UnimplementedMilvusServiceServer
 	address       string
 	masterAddress string
 	rootPath      string   // etcd root path
@@ -47,58 +52,99 @@ type proxyServer struct {
 	grpcServer   *grpc.Server
 	reqSch       *requestScheduler
 	///////////////////////////////////////////////////////////////
-	collectionList   map[uint64]*mpb.Collection
+	collectionList   map[uint64]*etcdpb.CollectionMeta
 	nameCollectionId map[string]uint64
-	segmentList      map[uint64]*mpb.Segment
+	segmentList      map[uint64]*etcdpb.SegmentMeta
 	collectionMux    sync.Mutex
 	queryId          atomic.Uint64
 }
 
-func (s *proxyServer) CreateCollection(ctx context.Context, req *pb.Mapping) (*pb.Status, error) {
-	log.Printf("create collection %s", req.CollectionName)
-	return s.masterClient.CreateCollection(ctx, req)
-}
 
-func (s *proxyServer) CountCollection(ctx context.Context, req *pb.CollectionName) (*pb.CollectionRowCount, error) {
-	s.collectionMux.Lock()
-	defer s.collectionMux.Unlock()
 
-	collection_id, ok := s.nameCollectionId[req.CollectionName]
-	if !ok {
-		return &pb.CollectionRowCount{
-			CollectionRowCount: 0,
-			Status: &pb.Status{
-				ErrorCode: pb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    fmt.Sprintf("unable to get collection %s", req.CollectionName),
-			},
-		}, nil
-	}
-	if info, ok := s.collectionList[collection_id]; ok {
-		count := int64(0)
-		for _, seg_id := range info.SegmentIds {
-			if seg, ok := s.segmentList[seg_id]; ok {
-				count += seg.Rows
-			}
-		}
-		return &pb.CollectionRowCount{
-			CollectionRowCount: count,
-			Status: &pb.Status{
-				ErrorCode: pb.ErrorCode_SUCCESS,
-			},
-		}, nil
-	}
-	return &pb.CollectionRowCount{
-		CollectionRowCount: 0,
-		Status: &pb.Status{
-			ErrorCode: pb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    fmt.Sprintf("unable to get collection %s", req.CollectionName),
-		},
+func (s *proxyServer) CreateCollection(ctx context.Context, req *schemapb.CollectionSchema) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: 0,
+		Reason:    "",
 	}, nil
 }
 
-func (s *proxyServer) CreateIndex(ctx context.Context, req *pb.IndexParam) (*pb.Status, error) {
-	log.Printf("create index, collection name = %s, index name = %s, filed_name = %s", req.CollectionName, req.IndexName, req.FieldName)
-	return s.masterClient.CreateIndex(ctx, req)
+
+func (s *proxyServer) DropCollection(ctx context.Context, req *servicepb.CollectionName) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: 0,
+		Reason:    "",
+	}, nil
+}
+
+func (s *proxyServer) HasCollection(ctx context.Context, req *servicepb.CollectionName) (*servicepb.BoolResponse, error) {
+	return &servicepb.BoolResponse{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+			Reason:    "",
+		},
+		Value: true,
+	},nil
+}
+
+func (s *proxyServer) DescribeCollection(ctx context.Context, req *servicepb.CollectionName) (*servicepb.CollectionDescription, error) {
+	return &servicepb.CollectionDescription{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+			Reason:    "",
+		},
+	},nil
+}
+
+func (s *proxyServer) ShowCollections(ctx context.Context, req * commonpb.Empty) (*servicepb.StringListResponse, error) {
+	return &servicepb.StringListResponse{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+			Reason:    "",
+		},
+	},nil
+}
+
+
+func (s *proxyServer) CreatePartition(ctx context.Context, in *servicepb.PartitionName) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: 0,
+		Reason:    "",
+	}, nil
+}
+
+func (s *proxyServer) DropPartition(ctx context.Context, in *servicepb.PartitionName) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: 0,
+		Reason:    "",
+	}, nil
+}
+
+func (s *proxyServer) HasPartition(ctx context.Context, in *servicepb.PartitionName) (*servicepb.BoolResponse, error) {
+	return &servicepb.BoolResponse{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+			Reason:    "",
+		},
+		Value: true,
+	},nil
+}
+
+func (s *proxyServer) DescribePartition(ctx context.Context, in *servicepb.PartitionName) (*servicepb.PartitionDescription, error) {
+	return &servicepb.PartitionDescription{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+			Reason:    "",
+		},
+	},nil
+}
+
+func (s *proxyServer) ShowPartitions(ctx context.Context, req *servicepb.CollectionName) (*servicepb.StringListResponse, error) {
+	return &servicepb.StringListResponse{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+			Reason:    "",
+		},
+	},nil
 }
 
 func (s *proxyServer) DeleteByID(ctx context.Context, req *pb.DeleteByIDParam) (*pb.Status, error) {
@@ -131,26 +177,26 @@ func (s *proxyServer) DeleteByID(ctx context.Context, req *pb.DeleteByIDParam) (
 	return &pb.Status{ErrorCode: pb.ErrorCode_SUCCESS}, nil
 }
 
-func (s *proxyServer) Insert(ctx context.Context, req *pb.InsertParam) (*pb.EntityIds, error) {
-	log.Printf("Insert Entities, total =  %d", len(req.RowsData))
+
+func (s *proxyServer) Insert(ctx context.Context, req *servicepb.RowBatch) (*servicepb.IntegerRangeResponse, error) {
+	log.Printf("Insert Entities, total =  %d", len(req.RowData))
 	ipm := make(map[uint32]*manipulationReq)
 
-	//TODO
-	if len(req.EntityIdArray) == 0 { //primary key is empty, set primary key by server
+	//TODO check collection schema's auto_id
+	if len(req.RowData) == 0 { //primary key is empty, set primary key by server
 		log.Printf("Set primary key")
 	}
-	if len(req.EntityIdArray) != len(req.RowsData) {
-		return &pb.EntityIds{
-			Status: &pb.Status{
-				ErrorCode: pb.ErrorCode_UNEXPECTED_ERROR,
+	if len(req.HashValues) != len(req.RowData) {
+		return &servicepb.IntegerRangeResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    fmt.Sprintf("length of EntityIdArray not equal to lenght of RowsData"),
 			},
-			EntityIdArray: req.EntityIdArray,
 		}, nil
 	}
 
-	for i := 0; i < len(req.EntityIdArray); i++ {
-		key := uint64(req.EntityIdArray[i])
+	for i := 0; i < len(req.HashValues); i++ {
+		key := uint64(req.HashValues[i])
 		hash, err := Hash32_Uint64(key)
 		if err != nil {
 			return nil, status.Errorf(codes.Unknown, "hash failed on %d", key)
@@ -170,32 +216,29 @@ func (s *proxyServer) Insert(ctx context.Context, req *pb.InsertParam) (*pb.Enti
 					ChannelId:      uint64(hash),
 					ReqType:        pb.ReqType_kInsert,
 					ProxyId:        s.proxyId,
-					ExtraParams:    req.ExtraParams,
+					//ExtraParams:    req.ExtraParams,
 				},
 				proxy: s,
 			}
 			ip = ipm[hash]
 		}
 		ip.PrimaryKeys = append(ip.PrimaryKeys, key)
-		ip.RowsData = append(ip.RowsData, req.RowsData[i])
+		ip.RowsData = append(ip.RowsData, &pb.RowData{Blob:req.RowData[i].Value}) // czs_tag
 	}
 	for _, ip := range ipm {
 		if st := ip.PreExecute(); st.ErrorCode != pb.ErrorCode_SUCCESS { //do nothing
-			return &pb.EntityIds{
-				Status:        &st,
-				EntityIdArray: req.EntityIdArray,
+			return &servicepb.IntegerRangeResponse{
+				Status:        &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
 			}, nil
 		}
 		if st := ip.Execute(); st.ErrorCode != pb.ErrorCode_SUCCESS { // push into chan
-			return &pb.EntityIds{
-				Status:        &st,
-				EntityIdArray: req.EntityIdArray,
+			return &servicepb.IntegerRangeResponse{
+				Status:        &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
 			}, nil
 		}
 		if st := ip.PostExecute(); st.ErrorCode != pb.ErrorCode_SUCCESS { //post to pulsar
-			return &pb.EntityIds{
-				Status:        &st,
-				EntityIdArray: req.EntityIdArray,
+			return &servicepb.IntegerRangeResponse{
+				Status:        &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
 			}, nil
 		}
 	}
@@ -205,58 +248,46 @@ func (s *proxyServer) Insert(ctx context.Context, req *pb.InsertParam) (*pb.Enti
 		}
 	}
 
-	return &pb.EntityIds{
-		Status: &pb.Status{
-			ErrorCode: pb.ErrorCode_SUCCESS,
+	return &servicepb.IntegerRangeResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		},
-		EntityIdArray: req.EntityIdArray,
 	}, nil
 }
 
-func (s *proxyServer) Search(ctx context.Context, req *pb.SearchParam) (*pb.QueryResult, error) {
+func (s *proxyServer) Search(ctx context.Context, req *servicepb.Query) (*servicepb.QueryResult, error) {
 	qm := &queryReq{
-		QueryReqMsg: pb.QueryReqMsg{
-			CollectionName: req.CollectionName,
-			VectorParam:    req.VectorParam,
-			PartitionTags:  req.PartitionTag,
-			Dsl:            req.Dsl,
-			ExtraParams:    req.ExtraParams,
+		SearchRequest: internalpb.SearchRequest{
+			ReqType:        internalpb.ReqType_kSearch,
 			ProxyId:        s.proxyId,
-			QueryId:        s.queryId.Add(1),
-			ReqType:        pb.ReqType_kSearch,
+			ReqId:        s.queryId.Add(1),
+			Timestamp: 0,
+			ResultChannelId: 0,
 		},
 		proxy: s,
 	}
-	log.Printf("search on collection %s, proxy id = %d, query id = %d", req.CollectionName, qm.ProxyId, qm.QueryId)
-	if st := qm.PreExecute(); st.ErrorCode != pb.ErrorCode_SUCCESS {
-		return &pb.QueryResult{
+	log.Printf("search on collection %s, proxy id = %d, query id = %d", req.CollectionName, qm.ProxyId, qm.ReqId)
+	if st := qm.PreExecute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return &servicepb.QueryResult{
 			Status:  &st,
-			QueryId: qm.QueryId,
-			ProxyId: qm.ProxyId,
 		}, nil
 	}
-	if st := qm.Execute(); st.ErrorCode != pb.ErrorCode_SUCCESS {
-		return &pb.QueryResult{
+	if st := qm.Execute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return &servicepb.QueryResult{
 			Status:  &st,
-			QueryId: qm.QueryId,
-			ProxyId: qm.ProxyId,
 		}, nil
 	}
-	if st := qm.PostExecute(); st.ErrorCode != pb.ErrorCode_SUCCESS {
-		return &pb.QueryResult{
+	if st := qm.PostExecute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return &servicepb.QueryResult{
 			Status:  &st,
-			QueryId: qm.QueryId,
-			ProxyId: qm.ProxyId,
 		}, nil
 	}
-	if st := qm.WaitToFinish(); st.ErrorCode != pb.ErrorCode_SUCCESS {
-		return &pb.QueryResult{
+	if st := qm.WaitToFinish(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return &servicepb.QueryResult{
 			Status:  &st,
-			QueryId: qm.QueryId,
-			ProxyId: qm.ProxyId,
 		}, nil
 	}
-	return s.reduceResult(qm), nil
+	return s.reduceResults(qm), nil
 }
 
 //check if proxySerer is set correct
@@ -319,15 +350,11 @@ func (s *proxyServer) getSegmentId(channelId int32, colName string) (uint64, err
 		return 0, status.Errorf(codes.Unknown, "can't get collection, name = %s, id = %d", colName, colId)
 	}
 	for _, segId := range colInfo.SegmentIds {
-		seg, ok := s.segmentList[segId]
+		_, ok := s.segmentList[segId]
 		if !ok {
 			return 0, status.Errorf(codes.Unknown, "can't get segment of %d", segId)
 		}
-		if seg.Status == mpb.SegmentStatus_OPENED {
-			if seg.ChannelStart <= channelId && channelId < seg.ChannelEnd {
-				return segId, nil
-			}
-		}
+		return segId, nil
 	}
 	return 0, status.Errorf(codes.Unknown, "can't get segment id, channel id = %d", channelId)
 }
@@ -360,7 +387,7 @@ func (s *proxyServer) StartGrpcServer() error {
 		s.wg.Add(1)
 		defer s.wg.Done()
 		server := grpc.NewServer()
-		pb.RegisterMilvusServiceServer(server, s)
+		servicepb.RegisterMilvusServiceServer(server, s)
 		err := server.Serve(lis)
 		if err != nil {
 			log.Fatalf("Proxy grpc server fatal error=%v", err)
@@ -379,22 +406,22 @@ func (s *proxyServer) WatchEtcd() error {
 	}
 	for _, cob := range cos.Kvs {
 		// TODO: simplify collection struct
-		var co mpb.Collection
+		var co etcdpb.CollectionMeta
 		var mco collection.Collection
 		if err := json.Unmarshal(cob.Value, &mco); err != nil {
 			return err
 		}
 		proto.UnmarshalText(mco.GrpcMarshalString, &co)
-		s.nameCollectionId[co.Name] = co.Id
+		s.nameCollectionId[co.Schema.Name] = co.Id
 		s.collectionList[co.Id] = &co
-		log.Printf("watch collection, name = %s, id = %d", co.Name, co.Id)
+		log.Printf("watch collection, name = %s, id = %d", co.Schema.Name, co.Id)
 	}
 	segs, err := s.client.Get(s.ctx, s.rootPath+"/"+keySegmentPath, etcd.WithPrefix())
 	if err != nil {
 		return err
 	}
 	for _, segb := range segs.Kvs {
-		var seg mpb.Segment
+		var seg etcdpb.SegmentMeta
 		if err := json.Unmarshal(segb.Value, &seg); err != nil {
 			return err
 		}
@@ -416,15 +443,15 @@ func (s *proxyServer) WatchEtcd() error {
 					s.collectionMux.Lock()
 					defer s.collectionMux.Unlock()
 					for _, e := range coe.Events {
-						var co mpb.Collection
+						var co etcdpb.CollectionMeta
 						var mco collection.Collection
 						if err := json.Unmarshal(e.Kv.Value, &mco); err != nil {
 							log.Printf("unmarshal Collection failed, error = %v", err)
 						} else {
 							proto.UnmarshalText(mco.GrpcMarshalString, &co)
-							s.nameCollectionId[co.Name] = co.Id
+							s.nameCollectionId[co.Schema.Name] = co.Id
 							s.collectionList[co.Id] = &co
-							log.Printf("watch collection, name = %s, id = %d", co.Name, co.Id)
+							log.Printf("watch collection, name = %s, id = %d", co.Schema.Name, co.Id)
 						}
 					}
 				}()
@@ -433,7 +460,7 @@ func (s *proxyServer) WatchEtcd() error {
 					s.collectionMux.Lock()
 					defer s.collectionMux.Unlock()
 					for _, e := range sege.Events {
-						var seg mpb.Segment
+						var seg etcdpb.SegmentMeta
 						if err := json.Unmarshal(e.Kv.Value, &seg); err != nil {
 							log.Printf("unmarshal Segment failed, error = %v", err)
 						} else {
@@ -462,8 +489,8 @@ func startProxyServer(srv *proxyServer) error {
 	}
 
 	srv.nameCollectionId = make(map[string]uint64)
-	srv.collectionList = make(map[uint64]*mpb.Collection)
-	srv.segmentList = make(map[uint64]*mpb.Segment)
+	srv.collectionList = make(map[uint64]*etcdpb.CollectionMeta)
+	srv.segmentList = make(map[uint64]*etcdpb.SegmentMeta)
 
 	if err := srv.connectMaster(); err != nil {
 		return err

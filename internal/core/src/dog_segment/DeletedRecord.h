@@ -50,7 +50,7 @@ struct DeletedRecord {
     std::shared_mutex shared_mutex_;
 };
 
-auto
+inline auto
 DeletedRecord::TmpBitmap::clone(int64_t capacity) -> std::shared_ptr<TmpBitmap> {
     auto res = std::make_shared<TmpBitmap>();
     res->del_barrier = this->del_barrier;

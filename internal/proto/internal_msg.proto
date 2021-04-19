@@ -1,0 +1,193 @@
+syntax = "proto3";
+package milvus.proto.internal;
+option go_package="github.com/zilliztech/milvus-distributed/internal/proto/internalpb";
+
+import "common.proto";
+import "service_msg.proto";
+
+
+enum ReqType {
+    kNone = 0;
+    /* Definition Requests: collection */
+    kCreateCollection = 100;
+    kDropCollection = 101;
+    kHasCollection = 102;
+    kDescribeCollection = 103;
+    kShowCollections = 104;
+
+    /* Definition Requests: partition */
+    kCreatePartition = 200;
+    kDropPartition = 201;
+    kHasPartition = 202;
+    kDescribePartition = 203;
+    kShowPartitions = 204;
+
+    /* Manipulation Requests */
+    kInsert = 400;
+
+    /* Query */
+    kSearch = 500;
+}
+
+
+message CreateCollectionRequest {
+    ReqType req_type = 1;
+    uint64 req_id = 2;
+    uint64 timestamp = 3;
+    int64 proxy_id = 4;
+    common.Blob schema = 5;
+}
+
+
+message DropCollectionRequest {
+    ReqType req_type = 1;
+    uint64 req_id = 2;
+    uint64 timestamp = 3;
+    int64 proxy_id = 4;
+    service.CollectionName collection_name = 5;
+}
+
+
+message HasCollectionRequest {
+    ReqType req_type = 1;
+    uint64 req_id = 2;
+    uint64 timestamp = 3;
+    int64 proxy_id = 4;
+    service.CollectionName collection_name = 5;
+}
+
+
+message DescribeCollectionRequest {
+    ReqType req_type = 1;
+    uint64 req_id = 2;
+    uint64 timestamp = 3;
+    int64 proxy_id = 4;
+    service.CollectionName collection_name = 5;
+}
+
+
+message ShowCollectionRequest {
+    ReqType req_type = 1;
+    uint64 req_id = 2;
+    uint64 timestamp = 3;
+    int64 proxy_id = 4;
+}
+
+
+message CreatePartitionRequest {
+    ReqType req_type = 1;
+    uint64 req_id = 2;
+    uint64 timestamp = 3;
+    int64 proxy_id = 4;
+    service.PartitionName partition_name = 5;
+}
+
+
+message DropPartitionRequest {
+    ReqType req_type = 1;
+    uint64 req_id = 2;
+    uint64 timestamp = 3;
+    int64 proxy_id = 4;
+    service.PartitionName partition_name = 5;
+}
+
+
+message HasPartitionRequest {
+    ReqType req_type = 1;
+    uint64 req_id = 2;
+    uint64 timestamp = 3;
+    int64 proxy_id = 4;
+    service.PartitionName partition_name = 5;
+}
+
+
+message DescribePartitionRequest {
+    ReqType req_type = 1;
+    uint64 req_id = 2;
+    uint64 timestamp = 3;
+    int64 proxy_id = 4;
+    service.PartitionName partition_name = 5;
+}
+
+
+message ShowPartitionRequest {
+    ReqType req_type = 1;
+    uint64 req_id = 2;
+    uint64 timestamp = 3;
+    int64 proxy_id = 4;
+    service.CollectionName collection_name = 5;
+}
+
+
+message InsertRequest {
+    ReqType req_type = 1;
+    uint64 req_id = 2;
+    string collection_name = 3;
+    string partition_tag = 4;
+    uint64 segment_id = 5;
+    uint64 channel_id = 6;
+    int64 proxy_id = 7;
+    uint64 timestamp = 8;
+    repeated int64 row_ids = 9;
+    repeated common.Blob row_data = 10;
+}
+
+
+message DeleteRequest {
+    ReqType req_type = 1;
+    uint64 req_id = 2;
+    string collection_name = 3;
+    uint64 channel_id = 4;
+    int64 proxy_id = 5;
+    uint64 timestamp = 6;
+    repeated int64 primary_keys = 7;
+}
+
+
+message SearchRequest {
+    ReqType req_type = 1;
+    uint64 req_id = 2;
+    int64 proxy_id = 3;
+    uint64 timestamp = 4;
+    uint64 result_channel_id = 5;
+    common.Blob query = 6;
+
+}
+
+message SearchResult {
+    common.Status status = 1;
+    uint64 req_id = 2;
+    int64 proxy_id = 3;
+    int64 query_node_id = 4;
+    uint64 timestamp = 5;
+    uint64 result_channel_id = 6;
+    repeated service.Hits hits = 7;
+}
+
+
+message TimeSyncMsg {
+    int64 peer_id = 1;
+    uint64 timestamp = 2;
+}
+
+
+message Key2Seg {
+    int64 row_id = 1;
+    uint64 primary_key = 2;
+    uint64 timestamp = 3;
+    bool is_valid = 4;
+    repeated uint64 segment_ids = 5;
+}
+
+
+message Key2SegMsg {
+    uint64 req_id = 1;
+    repeated Key2Seg key2seg = 2;
+}
+
+
+message SegmentStatistics {
+  uint64 segment_id = 1;
+  uint64 memory_size = 2;
+  int64 num_rows = 3;
+}

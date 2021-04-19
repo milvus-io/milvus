@@ -13,6 +13,7 @@ import (
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/golang/protobuf/proto"
 )
@@ -77,7 +78,7 @@ layout of timestamp
 /-------46 bit-----------\/------18bit-----\
 +-------------------------+================+
 */
-func toMillisecond(ts *pb.TimeSyncMsg) int {
+func toMillisecond(ts *internalpb.TimeSyncMsg) int {
 	// get Millisecond in second
 	return int(ts.GetTimestamp() >> 18)
 }
@@ -225,7 +226,7 @@ func (r *TimeSyncCfg) IsInsertDeleteChanFull() bool {
 	return len(r.insertOrDeleteChan) == len(r.readerProducer)*r.readerQueueSize
 }
 
-func (r *TimeSyncCfg) alignTimeSync(ts []*pb.TimeSyncMsg) []*pb.TimeSyncMsg {
+func (r *TimeSyncCfg) alignTimeSync(ts []*internalpb.TimeSyncMsg) []*internalpb.TimeSyncMsg {
 	if len(r.proxyIdList) > 1 {
 		if len(ts) > 1 {
 			for i := 1; i < len(r.proxyIdList); i++ {
@@ -238,9 +239,9 @@ func (r *TimeSyncCfg) alignTimeSync(ts []*pb.TimeSyncMsg) []*pb.TimeSyncMsg {
 				}
 			}
 			ts = ts[len(ts)-len(r.proxyIdList):]
-			sort.Slice(ts, func(i int, j int) bool { return ts[i].Peer_Id < ts[j].Peer_Id })
+			sort.Slice(ts, func(i int, j int) bool { return ts[i].PeerId < ts[j].PeerId })
 			for i := 0; i < len(r.proxyIdList); i++ {
-				if ts[i].Peer_Id != r.proxyIdList[i] {
+				if ts[i].PeerId != r.proxyIdList[i] {
 					ts = ts[:0]
 					return ts
 				}
@@ -254,7 +255,7 @@ func (r *TimeSyncCfg) alignTimeSync(ts []*pb.TimeSyncMsg) []*pb.TimeSyncMsg {
 	return ts
 }
 
-func (r *TimeSyncCfg) readTimeSync(ctx context.Context, ts []*pb.TimeSyncMsg, n int) ([]*pb.TimeSyncMsg, error) {
+func (r *TimeSyncCfg) readTimeSync(ctx context.Context, ts []*internalpb.TimeSyncMsg, n int) ([]*internalpb.TimeSyncMsg, error) {
 	for i := 0; i < n; i++ {
 		select {
 		case <-ctx.Done():
@@ -265,7 +266,7 @@ func (r *TimeSyncCfg) readTimeSync(ctx context.Context, ts []*pb.TimeSyncMsg, n 
 			}
 
 			msg := cm.Message
-			var tsm pb.TimeSyncMsg
+			var tsm internalpb.TimeSyncMsg
 			if err := proto.Unmarshal(msg.Payload(), &tsm); err != nil {
 				return nil, err
 			}
@@ -287,7 +288,7 @@ func (r *TimeSyncCfg) sendEOFMsg(ctx context.Context, msg *pulsar.ProducerMessag
 
 func (r *TimeSyncCfg) startTimeSync() {
 	ctx := r.ctx
-	tsm := make([]*pb.TimeSyncMsg, 0, len(r.proxyIdList)*2)
+	tsm := make([]*internalpb.TimeSyncMsg, 0, len(r.proxyIdList)*2)
 	var err error
 	for {
 		select {

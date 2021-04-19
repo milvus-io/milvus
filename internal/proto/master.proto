@@ -1,50 +1,90 @@
 syntax = "proto3";
+package milvus.proto.master;
 
-package masterpb;
+option go_package="github.com/zilliztech/milvus-distributed/internal/proto/masterpb";
 
-option go_package="github.com/zilliztech/milvus-distributed/internal/proto/master";
-
-import "message.proto";
-
-message Collection {
-  uint64 id=1;
-  string name=2;
-  milvus.grpc.Schema schema=3;
-  uint64 create_time=4;
-  repeated uint64 segment_ids=5;
-  repeated string partition_tags=6;
-  repeated milvus.grpc.IndexParam indexes=7;
-}
-
-enum SegmentStatus {
-    OPENED = 0;
-    CLOSED = 1;
-    INDEXING = 2;
-    INDEXED = 3;
-}
-
-message Segment {
-  uint64 segment_id=1;
-  uint64 collection_id =2;
-  string partition_tag=3;
-  int32 channel_start=4;
-  int32 channel_end=5;
-  uint64 open_timestamp=6;
-  uint64 close_timestamp=7;
-  string collection_name=8;
-  SegmentStatus status=9;
-  int64 rows=10;
-}
-
-message SegmentStat {
-  uint64 segment_id=1;
-  uint64 memory_size=2;
-  float memory_rate=3;
-  SegmentStatus status=4;
-  int64 rows=5;
-}
+import "common.proto";
+import "internal_msg.proto";
+import "service_msg.proto";
 
 service Master {
-  rpc CreateCollection(milvus.grpc.Mapping) returns (milvus.grpc.Status){}
-  rpc CreateIndex(milvus.grpc.IndexParam) returns (milvus.grpc.Status) {}
+    /**
+     * @brief This method is used to create collection
+     *
+     * @param CreateCollectionRequest, use to provide collection information to be created.
+     *
+     * @return Status
+     */
+    rpc CreateCollection(internal.CreateCollectionRequest) returns (common.Status){}
+    
+    /**
+     * @brief This method is used to delete collection.
+     *
+     * @param DropCollectionRequest, collection name is going to be deleted.
+     *
+     * @return Status
+     */
+    rpc DropCollection(internal.DropCollectionRequest) returns (common.Status) {}
+
+    /**
+     * @brief This method is used to test collection existence.
+     *
+     * @param HasCollectionRequest, collection name is going to be tested.
+     *
+     * @return BoolResponse
+     */
+    rpc HasCollection(internal.HasCollectionRequest) returns (service.BoolResponse) {}
+
+    /**
+     * @brief This method is used to get collection schema.
+     *
+     * @param DescribeCollectionRequest, target collection name.
+     *
+     * @return CollectionSchema
+     */
+    rpc DescribeCollection(internal.DescribeCollectionRequest) returns (service.CollectionDescription) {}
+
+    /**
+     * @brief This method is used to list all collections.
+     *
+     * @return StringListResponse, collection name list
+     */
+    rpc ShowCollections(internal.ShowCollectionRequest) returns (service.StringListResponse) {}
+
+    /**
+     * @brief This method is used to create partition
+     *
+     * @return Status
+     */
+    rpc CreatePartition(internal.CreatePartitionRequest) returns (common.Status) {}
+
+    /**
+     * @brief This method is used to drop partition
+     *
+     * @return Status
+     */
+    rpc DropPartition(internal.DropPartitionRequest) returns (common.Status) {}
+
+    /**
+     * @brief This method is used to test partition existence.
+     *
+     * @return BoolResponse
+     */
+    rpc HasPartition(internal.HasPartitionRequest) returns (service.BoolResponse) {}
+
+    /**
+     * @brief This method is used to get basic partition infomation.
+     *
+     * @return PartitionDescription
+     */
+    rpc DescribePartition(internal.DescribePartitionRequest) returns (service.PartitionDescription) {}
+
+    /**
+     * @brief This method is used to show partition information
+     *
+     * @param ShowPartitionRequest, target collection name.
+     *
+     * @return StringListResponse
+     */
+    rpc ShowPartitions(internal.ShowPartitionRequest) returns (service.StringListResponse) {}
 }

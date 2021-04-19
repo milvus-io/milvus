@@ -1,5 +1,7 @@
 #include "Collection.h"
-#include "pb/master.pb.h"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
+#include "pb/etcd_meta.pb.h"
 #include "pb/message.pb.h"
 #include <google/protobuf/text_format.h>
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
@@ -91,8 +93,8 @@ Collection::CreateIndex(std::string& index_config) {
         return;
     }
 
-    masterpb::Collection collection;
-    auto suc = google::protobuf::TextFormat::ParseFromString(index_config, &collection);
+    milvus::proto::etcd::CollectionMeta collection_meta;
+    auto suc = google::protobuf::TextFormat::ParseFromString(index_config, &collection_meta);
 
     if (!suc) {
         std::cerr << "unmarshal index string failed" << std::endl;
@@ -100,11 +102,11 @@ Collection::CreateIndex(std::string& index_config) {
 
     index_ = std::make_shared<IndexMeta>(schema_);
 
-    for (const auto& index : collection.indexes()) {
-        std::cout << "add index, index name =" << index.index_name() << ", field_name = " << index.field_name()
-                  << std::endl;
-        AddIndex(index);
-    }
+    // for (const auto& index : collection_meta.indexes()) {
+    //     std::cout << "add index, index name =" << index.index_name() << ", field_name = " << index.field_name()
+    //               << std::endl;
+    //     AddIndex(index);
+    // }
 }
 
 void
@@ -118,17 +120,24 @@ Collection::parse() {
         return;
     }
 
-    masterpb::Collection collection;
-    auto suc = google::protobuf::TextFormat::ParseFromString(schema_json_, &collection);
+    milvus::proto::etcd::CollectionMeta collection_meta;
+    auto suc = google::protobuf::TextFormat::ParseFromString(schema_json_, &collection_meta);
 
     if (!suc) {
         std::cerr << "unmarshal schema string failed" << std::endl;
     }
     auto schema = std::make_shared<Schema>();
-    for (const milvus::grpc::FieldMeta& child : collection.schema().field_metas()) {
-        std::cout << "add Field, name :" << child.field_name() << ", datatype :" << child.type()
-                  << ", dim :" << int(child.dim()) << std::endl;
-        schema->AddField(std::string_view(child.field_name()), DataType{child.type()}, int(child.dim()));
+    for (const milvus::proto::schema::FieldSchema& child : collection_meta.schema().fields()) {
+        const auto & type_params = child.type_params();
+        int dim = 16;
+        for (const auto & type_param: type_params){
+            if(type_param.key() == "dim"){
+                // dim = type_param.value();
+            }
+        }
+        std::cout << "add Field, name :" << child.name() << ", datatype :" << child.data_type()
+                  << ", dim :" << dim << std::endl;
+        schema->AddField(std::string_view(child.name()), DataType(child.data_type()), dim);
     }
     /*
     schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
