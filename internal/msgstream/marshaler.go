@@ -59,7 +59,7 @@ func (im *InsertMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
 func (im *InsertMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
 	insertRequest := internalPb.InsertRequest{}
 	err := proto.Unmarshal(input, &insertRequest)
-	insertTask := InsertTask{insertRequest}
+	insertTask := InsertTask{InsertRequest:insertRequest}
 
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
@@ -85,7 +85,7 @@ func (dm *DeleteMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
 func (dm *DeleteMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
 	deleteRequest := internalPb.DeleteRequest{}
 	err := proto.Unmarshal(input, &deleteRequest)
-	deleteTask := DeleteTask{deleteRequest}
+	deleteTask := DeleteTask{DeleteRequest:deleteRequest}
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
 	}
@@ -110,7 +110,7 @@ func (sm *SearchMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
 func (sm *SearchMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
 	searchRequest := internalPb.SearchRequest{}
 	err := proto.Unmarshal(input, &searchRequest)
-	searchTask := SearchTask{searchRequest}
+	searchTask := SearchTask{SearchRequest: searchRequest}
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
 	}
@@ -135,7 +135,7 @@ func (srm *SearchResultMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status
 func (srm *SearchResultMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
 	searchResult := internalPb.SearchResult{}
 	err := proto.Unmarshal(input, &searchResult)
-	searchResultTask := SearchResultTask{searchResult}
+	searchResultTask := SearchResultTask{SearchResult: searchResult}
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
 	}
@@ -160,7 +160,7 @@ func (tm *TimeSyncMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
 func (tm *TimeSyncMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
 	timeSyncMsg := internalPb.TimeSyncMsg{}
 	err := proto.Unmarshal(input, &timeSyncMsg)
-	timeSyncTask := TimeSyncTask{timeSyncMsg}
+	timeSyncTask := TimeSyncTask{TimeSyncMsg:timeSyncMsg}
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
 	}

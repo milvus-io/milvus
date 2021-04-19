@@ -2,35 +2,40 @@ package msgstream
 
 import (
 	"context"
+	"fmt"
 	"github.com/apache/pulsar-client-go/pulsar"
 	commonPb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"log"
 	"sync"
 )
 
-const PulsarChannelLength = 100
-
-type TimeStamp uint64
+type Timestamp uint64
 
 type MsgPack struct {
-	BeginTs TimeStamp
-	EndTs   TimeStamp
+	BeginTs Timestamp
+	EndTs   Timestamp
 	Msgs    []*TsMsg
 }
 
-type HashFunc func(*MsgPack) map[uint32]*MsgPack
+type RepackFunc func(msgs []*TsMsg, hashKeys [][]int32) map[int32]*MsgPack
 
 type MsgStream interface {
+	Start()
+	Close()
+
+	SetRepackFunc(repackFunc RepackFunc)
 	SetMsgMarshaler(marshal *TsMsgMarshaler, unmarshal *TsMsgMarshaler)
 	Produce(*MsgPack) commonPb.Status
 	Consume() *MsgPack // message can be consumed exactly once
 }
 
 type PulsarMsgStream struct {
-	client      *pulsar.Client
-	producers   []*pulsar.Producer
-	consumers   []*pulsar.Consumer
-	msgHashFunc HashFunc // return a map from produceChannel idx to *MsgPack
+	client         *pulsar.Client
+	producers      []*pulsar.Producer
+	consumers      []*pulsar.Consumer
+	repackFunc     RepackFunc // return a map from produceChannel idx to *MsgPack
+
+	receiveBuf     chan *MsgPack
 
 	msgMarshaler   *TsMsgMarshaler
 	msgUnmarshaler *TsMsgMarshaler
@@ -56,9 +61,9 @@ func (ms *PulsarMsgStream) SetProducers(channels []string) {
 	}
 }
 
-func (ms *PulsarMsgStream) SetConsumers(channels []string, subName string) {
+func (ms *PulsarMsgStream) SetConsumers(channels []string, subName string, pulsarBufSize int64) {
 	for i := 0; i < len(channels); i++ {
-		receiveChannel := make(chan pulsar.ConsumerMessage, PulsarChannelLength)
+		receiveChannel := make(chan pulsar.ConsumerMessage, pulsarBufSize)
 		pc, err := (*ms.client).Subscribe(pulsar.ConsumerOptions{
 			Topic:                       channels[i],
 			SubscriptionName:            subName,
@@ -78,27 +83,52 @@ func (ms *PulsarMsgStream) SetMsgMarshaler(marshal *TsMsgMarshaler, unmarshal *T
 	ms.msgUnmarshaler = unmarshal
 }
 
-func (ms *PulsarMsgStream) SetHashFunc(hashFunc HashFunc) {
-	ms.msgHashFunc = func(pack *MsgPack) map[uint32]*MsgPack {
-		hashResult := hashFunc(pack)
-		bucketResult := make(map[uint32]*MsgPack)
-		for k, v := range hashResult {
-			channelIndex := k % uint32(len(ms.producers))
-			_, ok := bucketResult[channelIndex]
-			if ok == false {
-				msgPack := MsgPack{}
-				bucketResult[channelIndex] = &msgPack
-			}
-			for _, msg := range v.Msgs {
-				bucketResult[channelIndex].Msgs = append(bucketResult[channelIndex].Msgs, msg)
-			}
+func (ms *PulsarMsgStream) SetRepackFunc(repackFunc RepackFunc) {
+	ms.repackFunc = repackFunc
+}
+
+func (ms *PulsarMsgStream) Start(){
+	go ms.bufMsgPackToChannel()
+}
+
+func (ms *PulsarMsgStream) Close() {
+	for _, producer := range ms.producers {
+		if producer != nil {
+			(*producer).Close()
 		}
-		return bucketResult
+	}
+	for _, consumer := range ms.consumers {
+		if consumer != nil {
+			(*consumer).Close()
+		}
+	}
+	if ms.client != nil {
+		(*ms.client).Close()
 	}
 }
 
-func (ms *PulsarMsgStream) Produce(msg *MsgPack) commonPb.Status {
-	result := ms.msgHashFunc(msg)
+func (ms *PulsarMsgStream) InitMsgPackBuf(msgPackBufSize int64) {
+	ms.receiveBuf = make(chan *MsgPack, msgPackBufSize)
+}
+
+
+func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) commonPb.Status {
+	tsMsgs := msgPack.Msgs
+	if len(tsMsgs) <=0 {
+		log.Println("receive empty msgPack")
+		return commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS}
+	}
+	reBucketValues := make([][]int32, len(tsMsgs))
+	for channelId, tsMsg := range tsMsgs {
+		hashValues := (*tsMsg).HashKeys()
+		bucketValues := make([]int32, len(hashValues))
+		for index, hashValue := range hashValues {
+			bucketValues[index] = hashValue % int32(len(ms.producers))
+		}
+		reBucketValues[channelId] = bucketValues
+	}
+
+	result := ms.repackFunc(tsMsgs, reBucketValues)
 	for k, v := range result {
 		for i := 0; i < len(v.Msgs); i++ {
 			mb, status := (*ms.msgMarshaler).Marshal(v.Msgs[i])
@@ -112,30 +142,53 @@ func (ms *PulsarMsgStream) Produce(msg *MsgPack) commonPb.Status {
 			); err != nil {
 				log.Printf("post into pulsar filed, error = %v", err)
 			}
+			fmt.Println("send a msg")
 		}
 	}
 
 	return commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS}
 }
+
 func (ms *PulsarMsgStream) Consume() *MsgPack {
-	tsMsgList := make([]*TsMsg, 0)
-	for i := 0; i < len(ms.consumers); i++ {
-		pulsarMsg, ok := <-(*ms.consumers[i]).Chan()
-		if ok == false {
-			log.Fatal("consumer closed!")
-			continue
+	ctx := context.Background()
+	for {
+		select {
+		case cm, ok := <-ms.receiveBuf:
+			if !ok {
+				log.Println("buf chan closed")
+				return nil
+			}
+			return cm
+		case <-ctx.Done():
+			return nil
 		}
-		(*ms.consumers[i]).AckID(pulsarMsg.ID())
-		tsMsg, status := (*ms.msgUnmarshaler).Unmarshal(pulsarMsg.Payload())
-		if status.ErrorCode != commonPb.ErrorCode_SUCCESS {
-			log.Printf("Marshal ManipulationReqMsg failed, error ")
-		}
-		tsMsgList = append(tsMsgList, tsMsg)
-
 	}
+}
 
-	msgPack := MsgPack{Msgs: tsMsgList}
-	return &msgPack
+func (ms *PulsarMsgStream) bufMsgPackToChannel() {
+	tsMsgList := make([]*TsMsg, 0)
+	for {
+		for i := 0; i < len(ms.consumers); i++ {
+			consumerChan := (*ms.consumers[i]).Chan()
+			chanLen := len(consumerChan)
+			for l := 0; l < chanLen; l++ {
+				pulsarMsg, ok := <-consumerChan
+				if ok == false {
+					log.Printf("channel closed")
+				}
+				(*ms.consumers[i]).AckID(pulsarMsg.ID())
+				tsMsg, status := (*ms.msgUnmarshaler).Unmarshal(pulsarMsg.Payload())
+				if status.ErrorCode != commonPb.ErrorCode_SUCCESS {
+					log.Printf("Marshal ManipulationReqMsg failed, error ")
+				}
+				tsMsgList = append(tsMsgList, tsMsg)
+			}
+		}
+		if len(tsMsgList) > 0 {
+			msgPack := MsgPack{Msgs: tsMsgList}
+			ms.receiveBuf <- &msgPack
+		}
+	}
 }
 
 type PulsarTtMsgStream struct {
@@ -143,13 +196,17 @@ type PulsarTtMsgStream struct {
 	inputBuf      []*TsMsg
 	unsolvedBuf   []*TsMsg
 	msgPacks      []*MsgPack
-	lastTimeStamp TimeStamp
+	lastTimeStamp Timestamp
 }
 
-func (ms *PulsarTtMsgStream) Consume() *MsgPack { //return messages in one time tick
+func (ms *PulsarTtMsgStream) Start(){
+	go ms.bufMsgPackToChannel()
+}
+
+func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 	wg := sync.WaitGroup{}
 	wg.Add(len(ms.consumers))
-	eofMsgTimeStamp := make(map[int]TimeStamp)
+	eofMsgTimeStamp := make(map[int]Timestamp)
 	mu := sync.Mutex{}
 	for i := 0; i < len(ms.consumers); i++ {
 		go ms.findTimeTick(context.Background(), i, eofMsgTimeStamp, &wg, &mu)
@@ -161,12 +218,10 @@ func (ms *PulsarTtMsgStream) Consume() *MsgPack { //return messages in one time 
 	}
 
 	timeTickBuf := make([]*TsMsg, 0)
-	for _, v := range ms.unsolvedBuf {
-		ms.inputBuf = append(ms.inputBuf, v)
-	}
+	ms.inputBuf = append(ms.inputBuf, ms.unsolvedBuf...)
 	ms.unsolvedBuf = ms.unsolvedBuf[:0]
 	for _, v := range ms.inputBuf {
-		if (*v).Ts() >= timeStamp {
+		if (*v).EndTs() >= timeStamp {
 			timeTickBuf = append(timeTickBuf, v)
 		} else {
 			ms.unsolvedBuf = append(ms.unsolvedBuf, v)
@@ -180,12 +235,12 @@ func (ms *PulsarTtMsgStream) Consume() *MsgPack { //return messages in one time 
 		Msgs:    timeTickBuf,
 	}
 
-	return &msgPack
+	ms.receiveBuf <- &msgPack
 }
 
 func (ms *PulsarTtMsgStream) findTimeTick(ctx context.Context,
 	channelIndex int,
-	eofMsgMap map[int]TimeStamp,
+	eofMsgMap map[int]Timestamp,
 	wg *sync.WaitGroup,
 	mu *sync.Mutex) {
 	for {
@@ -200,9 +255,10 @@ func (ms *PulsarTtMsgStream) findTimeTick(ctx context.Context,
 			(*ms.consumers[channelIndex]).Ack(pulsarMsg)
 			tsMsg, status := (*ms.msgUnmarshaler).Unmarshal(pulsarMsg.Payload())
 			// TODO:: Find the EOF
-			if (*tsMsg).Type() == kTimeTick {
-				eofMsgMap[channelIndex] = (*tsMsg).Ts()
-				break
+			if (*tsMsg).Type() == kTimeSync {
+				eofMsgMap[channelIndex] = (*tsMsg).EndTs()
+				wg.Done()
+				return
 			}
 			if status.ErrorCode != commonPb.ErrorCode_SUCCESS {
 				log.Printf("Marshal ManipulationReqMsg failed, error ")
@@ -212,11 +268,10 @@ func (ms *PulsarTtMsgStream) findTimeTick(ctx context.Context,
 			mu.Unlock()
 		}
 	}
-	wg.Done()
 }
 
-func checkTimeTickMsg(msg map[int]TimeStamp) (TimeStamp, bool) {
-	checkMap := make(map[TimeStamp]int)
+func checkTimeTickMsg(msg map[int]Timestamp) (Timestamp, bool) {
+	checkMap := make(map[Timestamp]int)
 	for _, v := range msg {
 		checkMap[v] += 1
 	}
