@@ -287,6 +287,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	if err != nil {
 		return err
 	}
+	queryNum := searchReq.getNumOfQuery()
 	searchRequests := make([]*searchRequest, 0)
 	searchRequests = append(searchRequests, searchReq)
 
@@ -315,6 +316,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 		searchPartitionIDs = partitionIDsInQuery
 	}
 
+	sp.LogFields(oplog.String("statistical time", "stats start"), oplog.Object("nq", queryNum), oplog.Object("dsl", dsl))
 	for _, partitionID := range searchPartitionIDs {
 		segmentIDs, err := s.replica.getSegmentIDs(partitionID)
 		if err != nil {
@@ -336,6 +338,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 		}
 	}
 
+	sp.LogFields(oplog.String("statistical time", "segment search end"))
 	if len(searchResults) <= 0 {
 		for _, group := range searchRequests {
 			nq := group.getNumOfQuery()
@@ -378,28 +381,34 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	if numSegment == 1 {
 		inReduced[0] = true
 		err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
+		sp.LogFields(oplog.String("statistical time", "fillTargetEntry end"))
 		if err != nil {
 			return err
 		}
 		marshaledHits, err = reorganizeSingleQueryResult(plan, searchRequests, searchResults[0])
+		sp.LogFields(oplog.String("statistical time", "reorganizeSingleQueryResult end"))
 		if err != nil {
 			return err
 		}
 	} else {
 		err = reduceSearchResults(searchResults, numSegment, inReduced)
+		sp.LogFields(oplog.String("statistical time", "reduceSearchResults end"))
 		if err != nil {
 			return err
 		}
 		err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
+		sp.LogFields(oplog.String("statistical time", "fillTargetEntry end"))
 		if err != nil {
 			return err
 		}
 		marshaledHits, err = reorganizeQueryResults(plan, searchRequests, searchResults, numSegment, inReduced)
+		sp.LogFields(oplog.String("statistical time", "reorganizeQueryResults end"))
 		if err != nil {
 			return err
 		}
 	}
 	hitsBlob, err := marshaledHits.getHitsBlob()
+	sp.LogFields(oplog.String("statistical time", "getHitsBlob end"))
 	if err != nil {
 		return err
 	}
@@ -457,8 +466,10 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 		}
 	}
 
+	sp.LogFields(oplog.String("statistical time", "before free c++ memory"))
 	deleteSearchResults(searchResults)
 	deleteMarshaledHits(marshaledHits)
+	sp.LogFields(oplog.String("statistical time", "stats done"))
 	plan.delete()
 	searchReq.delete()
 	return nil

@@ -33,7 +33,7 @@ add_library(milvus_segcore SHARED
         )
 
 target_link_libraries(milvus_segcore
-        tbb milvus_utils pthread knowhere log milvus_proto
+        tbb milvus_utils pthread knowhere log milvus_proto ${OpenMP_CXX_FLAGS}
         dl backtrace
         milvus_common
         milvus_query
