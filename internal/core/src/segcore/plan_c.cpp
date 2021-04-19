@@ -26,9 +26,15 @@ CreatePlan(CCollection c_col, const char* dsl, CPlan* res_plan) {
         auto plan = (CPlan)res.release();
         *res_plan = plan;
         return status;
+    } catch (milvus::SegcoreError& e) {
+        auto status = CStatus();
+        status.error_code = e.get_error_code();
+        status.error_msg = strdup(e.what());
+        *res_plan = nullptr;
+        return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         *res_plan = nullptr;
         return status;
@@ -54,7 +60,7 @@ ParsePlaceholderGroup(CPlan c_plan,
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         *res_placeholder_group = nullptr;
         return status;

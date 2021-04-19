@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <vector>
-#include <utils/EasyAssert.h>
+#include <exceptions/EasyAssert.h>
 #include "segcore/reduce_c.h"
 
 #include "segcore/Reduce.h"
@@ -155,7 +155,7 @@ ReduceQueryResults(CQueryResult* c_search_results, int64_t num_segments, bool* i
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -227,7 +227,7 @@ ReorganizeQueryResults(CMarshaledHits* c_marshaled_hits,
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         *c_marshaled_hits = nullptr;
         return status;

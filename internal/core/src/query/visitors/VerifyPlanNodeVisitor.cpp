@@ -58,7 +58,7 @@ InferIndexType(const Json& search_params) {
             return key_list.at(key);
         }
     }
-    PanicInfo("failed to infer index type");
+    PanicCodeInfo(ErrorCodeEnum::IllegalArgument, "failed to infer index type");
 }
 
 static knowhere::IndexType
@@ -85,7 +85,9 @@ VerifyPlanNodeVisitor::visit(FloatVectorANNS& node) {
 
     // NOTE: the second parameter is not checked in knowhere, may be redundant
     auto passed = adapter->CheckSearch(params_copy, inferred_type, index_mode);
-    AssertInfo(passed, "invalid search params");
+    if (!passed) {
+        PanicCodeInfo(ErrorCodeEnum::IllegalArgument, "invalid search params");
+    }
 }
 
 void
@@ -101,7 +103,9 @@ VerifyPlanNodeVisitor::visit(BinaryVectorANNS& node) {
 
     // NOTE: the second parameter is not checked in knowhere, may be redundant
     auto passed = adapter->CheckSearch(params_copy, inferred_type, index_mode);
-    AssertInfo(passed, "invalid search params");
+    if (!passed) {
+        PanicCodeInfo(ErrorCodeEnum::IllegalArgument, "invalid search params");
+    }
 }
 
 }  // namespace milvus::query

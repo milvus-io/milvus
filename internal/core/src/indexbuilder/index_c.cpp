@@ -36,7 +36,7 @@ CreateIndex(const char* serialized_type_params, const char* serialized_index_par
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
     }
     return status;
@@ -60,7 +60,7 @@ BuildFloatVecIndexWithoutIds(CIndex index, int64_t float_value_num, const float*
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
     }
     return status;
@@ -78,7 +78,7 @@ BuildBinaryVecIndexWithoutIds(CIndex index, int64_t data_size, const uint8_t* ve
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
     }
     return status;
@@ -96,7 +96,7 @@ SerializeToSlicedBuffer(CIndex index, CBinary* c_binary) {
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
     }
     return status;
@@ -138,7 +138,7 @@ LoadFromSlicedBuffer(CIndex index, const char* serialized_sliced_blob_buffer, in
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
     }
     return status;
@@ -158,7 +158,7 @@ QueryOnFloatVecIndex(CIndex index, int64_t float_value_num, const float* vectors
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
     }
     return status;
@@ -182,7 +182,7 @@ QueryOnFloatVecIndexWithParam(CIndex index,
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
     }
     return status;
@@ -202,7 +202,7 @@ QueryOnBinaryVecIndex(CIndex index, int64_t data_size, const uint8_t* vectors, C
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
     }
     return status;
@@ -226,7 +226,7 @@ QueryOnBinaryVecIndexWithParam(CIndex index,
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
     }
     return status;
@@ -242,7 +242,7 @@ CreateQueryResult(CIndexQueryResult* res) {
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
     }
     return status;
@@ -288,7 +288,7 @@ DeleteIndexQueryResult(CIndexQueryResult res) {
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
     }
     return status;

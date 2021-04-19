@@ -12,7 +12,7 @@
 #pragma once
 // Generated File
 // DO NOT EDIT
-#include "utils/EasyAssert.h"
+#include "exceptions/EasyAssert.h"
 #include "utils/Json.h"
 #include <optional>
 #include <utility>

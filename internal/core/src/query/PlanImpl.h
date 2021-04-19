@@ -14,7 +14,7 @@
 #include "Plan.h"
 #include "utils/Json.h"
 #include "PlanNode.h"
-#include "utils/EasyAssert.h"
+#include "exceptions/EasyAssert.h"
 #include "pb/milvus.pb.h"
 #include <memory>
 #include <map>

@@ -88,7 +88,7 @@ Search(CSegmentInterface c_segment,
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
     }
 
@@ -112,7 +112,7 @@ FillTargetEntry(CSegmentInterface c_segment, CPlan c_plan, CQueryResult c_result
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::runtime_error& e) {
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
     }
     return status;
@@ -166,7 +166,7 @@ Insert(CSegmentInterface c_segment,
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -183,7 +183,7 @@ PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset) {
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -206,7 +206,7 @@ Delete(CSegmentInterface c_segment,
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -235,7 +235,7 @@ LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_in
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -254,7 +254,7 @@ UpdateSealedSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_inde
         status.error_msg = "";
         return status;
     } catch (std::exception& e) {
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -273,7 +273,7 @@ DropFieldData(CSegmentInterface c_segment, int64_t field_id) {
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -291,7 +291,7 @@ DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id) {
         status.error_msg = "";
         return status;
     } catch (std::exception& e) {
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -311,7 +311,7 @@ UpdateSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info
         status.error_msg = "";
         return status;
     } catch (std::exception& e) {
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }

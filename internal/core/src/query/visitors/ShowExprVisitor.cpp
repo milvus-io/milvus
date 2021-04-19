@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "query/Plan.h"
-#include "utils/EasyAssert.h"
+#include "exceptions/EasyAssert.h"
 #include "utils/Json.h"
 #include <utility>
 #include "query/generated/ShowExprVisitor.h"

@@ -19,7 +19,7 @@
 #include <shared_mutex>
 #include <vector>
 #include <utility>
-#include "utils/EasyAssert.h"
+#include "exceptions/EasyAssert.h"
 #include "utils/tools.h"
 #include <boost/container/vector.hpp>
 #include "common/Types.h"

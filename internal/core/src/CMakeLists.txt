@@ -23,6 +23,7 @@ foreach (DIR ${INDEX_INCLUDE_DIRS})
 endforeach ()
 
 
+add_subdirectory( exceptions )
 add_subdirectory( utils )
 add_subdirectory( log )
 add_subdirectory( pb )

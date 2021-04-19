@@ -12,7 +12,7 @@
 #pragma once
 #include "common/Types.h"
 #include "utils/Status.h"
-#include "utils/EasyAssert.h"
+#include "exceptions/EasyAssert.h"
 #include <string>
 #include <stdexcept>
 #include <optional>

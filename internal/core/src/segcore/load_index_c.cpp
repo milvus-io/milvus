@@ -13,7 +13,7 @@
 #include "index/knowhere/knowhere/index/vector_index/VecIndexFactory.h"
 #include "segcore/load_index_c.h"
 #include "common/LoadInfo.h"
-#include "utils/EasyAssert.h"
+#include "exceptions/EasyAssert.h"
 
 CStatus
 NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {
@@ -26,7 +26,7 @@ NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -52,7 +52,7 @@ AppendIndexParam(CLoadIndexInfo c_load_index_info, const char* c_index_key, cons
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -70,7 +70,7 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info, int64_t field_id) {
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -101,7 +101,7 @@ AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -118,7 +118,7 @@ NewBinarySet(CBinarySet* c_binary_set) {
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
@@ -139,7 +139,7 @@ AppendBinaryIndex(CBinarySet c_binary_set, void* index_binary, int64_t index_siz
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
-        status.error_code = UnexpectedException;
+        status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }

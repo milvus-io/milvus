@@ -16,7 +16,7 @@
 #include <utility>
 #include <memory>
 #include <tbb/concurrent_hash_map.h>
-#include "utils/EasyAssert.h"
+#include "exceptions/EasyAssert.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "common/Types.h"
 
