@@ -60,6 +60,9 @@ func TestMaster_Partition(t *testing.T) {
 		K2SChannelNames:               []string{"k2s0", "k2s1"},
 		QueryNodeStatsChannelName:     "statistic",
 		MsgChannelSubName:             Params.MsgChannelSubName,
+
+		MaxPartitionNum:     int64(4096),
+		DefaultPartitionTag: "_default",
 	}
 
 	port := 10000 + rand.Intn(1000)
@@ -212,7 +215,7 @@ func TestMaster_Partition(t *testing.T) {
 
 	//assert.Equal(t, collMeta.PartitionTags[0], "partition1")
 	//assert.Equal(t, collMeta.PartitionTags[1], "partition2")
-	assert.ElementsMatch(t, []string{"default", "partition1", "partition2"}, collMeta.PartitionTags)
+	assert.ElementsMatch(t, []string{"_default", "partition1", "partition2"}, collMeta.PartitionTags)
 
 	showPartitionReq := internalpb.ShowPartitionRequest{
 		MsgType:        internalpb.MsgType_kShowPartitions,
@@ -224,7 +227,7 @@ func TestMaster_Partition(t *testing.T) {
 
 	stringList, err := cli.ShowPartitions(ctx, &showPartitionReq)
 	assert.Nil(t, err)
-	assert.ElementsMatch(t, []string{"default", "partition1", "partition2"}, stringList.Values)
+	assert.ElementsMatch(t, []string{"_default", "partition1", "partition2"}, stringList.Values)
 
 	showPartitionReq = internalpb.ShowPartitionRequest{
 		MsgType:        internalpb.MsgType_kShowPartitions,

@@ -20,6 +20,12 @@ func (p *ParamTable) Init() {
 	if err != nil {
 		panic(err)
 	}
+
+	err = p.LoadYaml("milvus.yaml")
+	if err != nil {
+		panic(err)
+	}
+
 	err = p.LoadYaml("advanced/channel.yaml")
 	if err != nil {
 		panic(err)
@@ -199,6 +205,18 @@ func (p *ParamTable) etcdRootPath() string {
 		panic(err)
 	}
 	return etcdRootPath
+}
+
+func (p *ParamTable) gracefulTime() int64 {
+	gracefulTime, err := p.Load("queryNode.gracefulTime")
+	if err != nil {
+		panic(err)
+	}
+	time, err := strconv.Atoi(gracefulTime)
+	if err != nil {
+		panic(err)
+	}
+	return int64(time)
 }
 
 func (p *ParamTable) insertChannelNames() []string {

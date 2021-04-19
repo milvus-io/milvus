@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"log"
+	"math"
+	"strconv"
 
 	"github.com/golang/protobuf/proto"
+
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -164,6 +167,10 @@ func (cct *CreateCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (cct *CreateCollectionTask) PreExecute() error {
+	if int64(len(cct.schema.Fields)) > Params.MaxFieldNum() {
+		return errors.New("maximum field's number should be limited to " + strconv.FormatInt(Params.MaxFieldNum(), 10))
+	}
+
 	// validate collection name
 	if err := ValidateCollectionName(cct.schema.Name); err != nil {
 		return err
@@ -338,7 +345,17 @@ func (qt *QueryTask) PostExecute() error {
 				qt.result = &servicepb.QueryResult{}
 				return nil
 			}
-			k := len(searchResults[0].Hits[0].IDs) // k
+			var hits [][]*servicepb.Hits = make([][]*servicepb.Hits, rlen)
+			for i, sr := range searchResults {
+				hits[i] = make([]*servicepb.Hits, n)
+				for j, bs := range sr.Hits {
+					err := proto.Unmarshal(bs, hits[i][j])
+					if err != nil {
+						return err
+					}
+				}
+			}
+			k := len(hits[0][0].IDs)
 			queryResult := &servicepb.QueryResult{
 				Status: &commonpb.Status{
 					ErrorCode: 0,
@@ -351,26 +368,27 @@ func (qt *QueryTask) PostExecute() error {
 			//		len(queryResult.Hits[i].Ids) == k for i in range(n)
 			for i := 0; i < n; n++ { // n
 				locs := make([]int, rlen)
-				hits := &servicepb.Hits{}
+				reducedHits := &servicepb.Hits{}
 				for j := 0; j < k; j++ { // k
-					choice, maxScore := 0, float32(0)
+					choice, minDistance := 0, float32(math.MaxFloat32)
 					for q, loc := range locs { // query num, the number of ways to merge
-						score := func(score *servicepb.Score) float32 {
-							// TODO: get score of root
-							return 0.0
-						}(searchResults[q].Hits[i].Scores[loc])
-						if score > maxScore {
+						distance := hits[q][i].Scores[loc]
+						if distance < minDistance {
 							choice = q
-							maxScore = score
+							minDistance = distance
 						}
 					}
 					choiceOffset := locs[choice]
-					hits.IDs = append(hits.IDs, searchResults[choice].Hits[i].IDs[choiceOffset])
-					hits.RowData = append(hits.RowData, searchResults[choice].Hits[i].RowData[choiceOffset])
-					hits.Scores = append(hits.Scores, searchResults[choice].Hits[i].Scores[choiceOffset])
+					reducedHits.IDs = append(reducedHits.IDs, hits[choice][i].IDs[choiceOffset])
+					reducedHits.RowData = append(reducedHits.RowData, hits[choice][i].RowData[choiceOffset])
+					reducedHits.Scores = append(reducedHits.Scores, hits[choice][i].Scores[choiceOffset])
 					locs[choice]++
 				}
-				queryResult.Hits = append(queryResult.Hits, hits)
+				reducedHitsBs, err := proto.Marshal(reducedHits)
+				if err != nil {
+					return err
+				}
+				queryResult.Hits = append(queryResult.Hits, reducedHitsBs)
 			}
 			qt.result = queryResult
 		}

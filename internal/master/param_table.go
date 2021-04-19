@@ -43,6 +43,9 @@ type ParamTable struct {
 	K2SChannelNames               []string
 	QueryNodeStatsChannelName     string
 	MsgChannelSubName             string
+
+	MaxPartitionNum     int64
+	DefaultPartitionTag string
 }
 
 var Params ParamTable
@@ -91,6 +94,8 @@ func (p *ParamTable) Init() {
 	p.initK2SChannelNames()
 	p.initQueryNodeStatsChannelName()
 	p.initMsgChannelSubName()
+	p.initMaxPartitionNum()
+	p.initDefaultPartitionTag()
 }
 
 func (p *ParamTable) initAddress() {
@@ -410,4 +415,25 @@ func (p *ParamTable) initK2SChannelNames() {
 		channels = append(channels, ch+"-"+i)
 	}
 	p.K2SChannelNames = channels
+}
+
+func (p *ParamTable) initMaxPartitionNum() {
+	str, err := p.Load("master.maxPartitionNum")
+	if err != nil {
+		panic(err)
+	}
+	maxPartitionNum, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.MaxPartitionNum = maxPartitionNum
+}
+
+func (p *ParamTable) initDefaultPartitionTag() {
+	defaultTag, err := p.Load("master.defaultPartitionTag")
+	if err != nil {
+		panic(err)
+	}
+
+	p.DefaultPartitionTag = defaultTag
 }
