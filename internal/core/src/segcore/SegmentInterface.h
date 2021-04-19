@@ -26,14 +26,14 @@ namespace milvus::segcore {
 class SegmentInterface {
  public:
     // fill results according to target_entries in plan
-    void
-    FillTargetEntry(const query::Plan* plan, QueryResult& results) const;
+    virtual void
+    FillTargetEntry(const query::Plan* plan, QueryResult& results) const = 0;
 
-    QueryResult
+    virtual QueryResult
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup* placeholder_groups[],
            const Timestamp timestamps[],
-           int64_t num_groups) const;
+           int64_t num_groups) const = 0;
 
     virtual int64_t
     GetMemoryUsageInBytes() const = 0;
@@ -47,13 +47,6 @@ class SegmentInterface {
     virtual ~SegmentInterface() = default;
 
  protected:
-    // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to system_type
-    virtual void
-    bulk_subscript(SystemFieldType system_type, const int64_t* seg_offsets, int64_t count, void* output) const = 0;
-
-    // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to field_offset
-    virtual void
-    bulk_subscript(FieldOffset field_offset, const int64_t* seg_offsets, int64_t count, void* output) const = 0;
 };
 
 // internal API for DSL calculation
@@ -76,6 +69,15 @@ class SegmentInternalInterface : public SegmentInterface {
         AssertInfo(ptr, "entry mismatch");
         return *ptr;
     }
+
+    QueryResult
+    Search(const query::Plan* Plan,
+           const query::PlaceholderGroup* placeholder_groups[],
+           const Timestamp timestamps[],
+           int64_t num_groups) const override;
+
+    void
+    FillTargetEntry(const query::Plan* plan, QueryResult& results) const override;
 
  public:
     virtual void
@@ -106,6 +108,17 @@ class SegmentInternalInterface : public SegmentInterface {
     // internal API: return chunk_index in span, support scalar index only
     virtual const knowhere::Index*
     chunk_index_impl(FieldOffset field_offset, int64_t chunk_id) const = 0;
+
+    // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to system_type
+    virtual void
+    bulk_subscript(SystemFieldType system_type, const int64_t* seg_offsets, int64_t count, void* output) const = 0;
+
+    // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to field_offset
+    virtual void
+    bulk_subscript(FieldOffset field_offset, const int64_t* seg_offsets, int64_t count, void* output) const = 0;
+
+ protected:
+    mutable std::shared_mutex mutex_;
 };
 
 }  // namespace milvus::segcore

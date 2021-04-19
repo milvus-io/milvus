@@ -15,7 +15,8 @@ namespace milvus::segcore {
 class Naive;
 
 void
-SegmentInterface::FillTargetEntry(const query::Plan* plan, QueryResult& results) const {
+SegmentInternalInterface::FillTargetEntry(const query::Plan* plan, QueryResult& results) const {
+    std::shared_lock lck(mutex_);
     AssertInfo(plan, "empty plan");
     auto size = results.result_distances_.size();
     Assert(results.internal_seg_offsets_.size() == size);
@@ -42,10 +43,11 @@ SegmentInterface::FillTargetEntry(const query::Plan* plan, QueryResult& results)
 }
 
 QueryResult
-SegmentInterface::Search(const query::Plan* plan,
-                         const query::PlaceholderGroup** placeholder_groups,
-                         const Timestamp* timestamps,
-                         int64_t num_groups) const {
+SegmentInternalInterface::Search(const query::Plan* plan,
+                                 const query::PlaceholderGroup** placeholder_groups,
+                                 const Timestamp* timestamps,
+                                 int64_t num_groups) const {
+    std::shared_lock lck(mutex_);
     Assert(num_groups == 1);
     query::ExecPlanNodeVisitor visitor(*this, timestamps[0], *placeholder_groups[0]);
     auto results = visitor.get_moved_result(*plan->plan_node_);
