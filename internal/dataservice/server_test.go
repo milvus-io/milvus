@@ -172,7 +172,7 @@ func TestShowSegments(t *testing.T) {
 			})
 			assert.Nil(t, err)
 			assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-			assert.EqualValues(t, test.expected, resp.SegmentIDs)
+			assert.ElementsMatch(t, test.expected, resp.SegmentIDs)
 		})
 	}
 }
@@ -217,7 +217,7 @@ func TestFlush(t *testing.T) {
 	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	ids, err := svr.segAllocator.GetSealedSegments(context.TODO())
 	assert.Nil(t, err)
-	assert.EqualValues(t, []UniqueID{1, 2}, ids)
+	assert.ElementsMatch(t, ids, []UniqueID{1, 2})
 }
 
 func TestGetComponentStates(t *testing.T) {
