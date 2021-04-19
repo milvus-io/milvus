@@ -99,7 +99,7 @@ message FieldName {
 message Mapping {
     Status status = 1;
     string collection_name = 2;
-    repeated FieldParam fields = 3;
+    Schema schema = 3;
     repeated KeyValuePair extra_params = 4;
 }
 
@@ -672,8 +672,6 @@ service MilvusService {
 enum OpType {
     INSERT = 0;
     DELETE = 1;
-    SEARCH = 2;
-    SEARCH_RESULT = 3;
 }
 
 message InsertOrDeleteMsg {
@@ -699,10 +697,14 @@ message SearchMsg {
     repeated KeyValuePair extra_params = 7;
 }
 
+enum SyncType {
+    READ = 0;
+    WRITE = 1;
+}
 message TimeSyncMsg{
-	int64 ClientId = 1;
-	int64 Timestamp = 2;
-	OpType MsgType = 3;
+    int64 peer_Id = 1;
+    int64 Timestamp = 2;
+    SyncType sync_type = 3;
 }
 
 message SegmentRecord {
@@ -711,7 +713,6 @@ message SegmentRecord {
 }
 
 message Key2SegMsg {
-	int64 client_id = 1;
-	SegmentRecord records = 2;
-	OpType msg_type = 3;
+    int64 client_id = 1;
+    SegmentRecord records = 2;
 }
