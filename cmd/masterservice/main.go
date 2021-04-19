@@ -41,7 +41,7 @@ func main() {
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
 	sig := <-sc
-	log.Info("Get signal to exit", zap.String("signal", sig.String()))
+	log.Debug("Get signal to exit", zap.String("signal", sig.String()))
 	err = ms.Stop()
 	if err != nil {
 		panic(err)

@@ -469,7 +469,7 @@ func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeReque
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 		},
 	}
-	log.Info("DataService: RegisterNode:", zap.String("IP", req.Address.Ip), zap.Int64("Port", req.Address.Port))
+	log.Debug("DataService: RegisterNode:", zap.String("IP", req.Address.Ip), zap.Int64("Port", req.Address.Port))
 	node, err := s.newDataNode(req.Address.Ip, req.Address.Port, req.Base.SourceID)
 	if err != nil {
 		return nil, err
