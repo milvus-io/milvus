@@ -38,22 +38,22 @@ import (
 //  masterpb2 -> masterpb (master_service)
 
 type ProxyServiceInterface interface {
-	GetTimeTickChannel() (*milvuspb.StringResponse, error)
-	InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
+	GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error)
+	InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
 }
 
 type DataServiceInterface interface {
-	GetInsertBinlogPaths(req *datapb.InsertBinlogPathRequest) (*datapb.InsertBinlogPathsResponse, error)
-	GetSegmentInfoChannel() (*milvuspb.StringResponse, error)
+	GetInsertBinlogPaths(ctx context.Context, req *datapb.InsertBinlogPathRequest) (*datapb.InsertBinlogPathsResponse, error)
+	GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 }
 
 type IndexServiceInterface interface {
-	BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error)
-	DropIndex(req *indexpb.DropIndexRequest) (*commonpb.Status, error)
+	BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error)
+	DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
 }
 
 type QueryServiceInterface interface {
-	ReleaseCollection(req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)
+	ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)
 }
 
 type Interface interface {
@@ -61,42 +61,42 @@ type Interface interface {
 	Init() error
 	Start() error
 	Stop() error
-	GetComponentStates() (*internalpb2.ComponentStates, error)
+	GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
 
 	//DDL request
-	CreateCollection(in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
-	DropCollection(in *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
-	HasCollection(in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
-	DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
-	ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
-	CreatePartition(in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
-	DropPartition(in *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
-	HasPartition(in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
-	ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
+	CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
+	DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
+	HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
+	DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+	ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
+	CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
+	DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
+	HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
+	ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
 
 	//index builder service
-	CreateIndex(in *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
-	DescribeIndex(in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
-	DropIndex(in *milvuspb.DropIndexRequest) (*commonpb.Status, error)
+	CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
+	DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
+	DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*commonpb.Status, error)
 
 	//global timestamp allocator
-	AllocTimestamp(in *masterpb.TsoRequest) (*masterpb.TsoResponse, error)
-	AllocID(in *masterpb.IDRequest) (*masterpb.IDResponse, error)
+	AllocTimestamp(ctx context.Context, in *masterpb.TsoRequest) (*masterpb.TsoResponse, error)
+	AllocID(ctx context.Context, in *masterpb.IDRequest) (*masterpb.IDResponse, error)
 
 	//TODO, master load these channel form config file ?
 
 	//receiver time tick from proxy service, and put it into this channel
-	GetTimeTickChannel() (string, error)
+	GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 
 	//receive ddl from rpc and time tick from proxy service, and put them into this channel
-	GetDdChannel() (string, error)
+	GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 
 	//just define a channel, not used currently
-	GetStatisticsChannel() (string, error)
+	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 
 	//segment
-	DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
-	ShowSegments(in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error)
+	DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
+	ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error)
 }
 
 // ------------------ struct -----------------------
@@ -639,8 +639,8 @@ func (c *Core) setMsgStreams() error {
 	return nil
 }
 
-func (c *Core) SetProxyService(s ProxyServiceInterface) error {
-	rsp, err := s.GetTimeTickChannel()
+func (c *Core) SetProxyService(ctx context.Context, s ProxyServiceInterface) error {
+	rsp, err := s.GetTimeTickChannel(ctx)
 	if err != nil {
 		return err
 	}
@@ -648,7 +648,7 @@ func (c *Core) SetProxyService(s ProxyServiceInterface) error {
 	log.Info("proxy time tick", zap.String("channel name", Params.ProxyTimeTickChannel))
 
 	c.InvalidateCollectionMetaCache = func(ts typeutil.Timestamp, dbName string, collectionName string) error {
-		status, _ := s.InvalidateCollectionMetaCache(&proxypb.InvalidateCollMetaCacheRequest{
+		status, _ := s.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   0, //TODO,MsgType
 				MsgID:     0,
@@ -669,8 +669,8 @@ func (c *Core) SetProxyService(s ProxyServiceInterface) error {
 	return nil
 }
 
-func (c *Core) SetDataService(s DataServiceInterface) error {
-	rsp, err := s.GetSegmentInfoChannel()
+func (c *Core) SetDataService(ctx context.Context, s DataServiceInterface) error {
+	rsp, err := s.GetSegmentInfoChannel(ctx)
 	if err != nil {
 		return err
 	}
@@ -682,7 +682,7 @@ func (c *Core) SetDataService(s DataServiceInterface) error {
 		if err != nil {
 			return nil, err
 		}
-		binlog, err := s.GetInsertBinlogPaths(&datapb.InsertBinlogPathRequest{
+		binlog, err := s.GetInsertBinlogPaths(ctx, &datapb.InsertBinlogPathRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   0, //TODO, msy type
 				MsgID:     0,
@@ -707,9 +707,9 @@ func (c *Core) SetDataService(s DataServiceInterface) error {
 	return nil
 }
 
-func (c *Core) SetIndexService(s IndexServiceInterface) error {
+func (c *Core) SetIndexService(ctx context.Context, s IndexServiceInterface) error {
 	c.BuildIndexReq = func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error) {
-		rsp, err := s.BuildIndex(&indexpb.BuildIndexRequest{
+		rsp, err := s.BuildIndex(ctx, &indexpb.BuildIndexRequest{
 			DataPaths:   binlog,
 			TypeParams:  typeParams,
 			IndexParams: indexParams,
@@ -726,7 +726,7 @@ func (c *Core) SetIndexService(s IndexServiceInterface) error {
 	}
 
 	c.DropIndexReq = func(indexID typeutil.UniqueID) error {
-		rsp, err := s.DropIndex(&indexpb.DropIndexRequest{
+		rsp, err := s.DropIndex(ctx, &indexpb.DropIndexRequest{
 			IndexID: indexID,
 		})
 		if err != nil {
@@ -741,7 +741,7 @@ func (c *Core) SetIndexService(s IndexServiceInterface) error {
 	return nil
 }
 
-func (c *Core) SetQueryService(s QueryServiceInterface) error {
+func (c *Core) SetQueryService(ctx context.Context, s QueryServiceInterface) error {
 	c.ReleaseCollection = func(ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
 		req := &querypb.ReleaseCollectionRequest{
 			Base: &commonpb.MsgBase{
@@ -753,7 +753,7 @@ func (c *Core) SetQueryService(s QueryServiceInterface) error {
 			DbID:         dbID,
 			CollectionID: collectionID,
 		}
-		rsp, err := s.ReleaseCollection(req)
+		rsp, err := s.ReleaseCollection(ctx, req)
 		if err != nil {
 			return err
 		}
@@ -825,7 +825,7 @@ func (c *Core) Stop() error {
 	return nil
 }
 
-func (c *Core) GetComponentStates() (*internalpb2.ComponentStates, error) {
+func (c *Core) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
 	log.Info("GetComponentStates", zap.String("State Code", internalpb2.StateCode_name[int32(code)]))
 
@@ -851,19 +851,37 @@ func (c *Core) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	}, nil
 }
 
-func (c *Core) GetTimeTickChannel() (string, error) {
-	return Params.TimeTickChannel, nil
+func (c *Core) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+		Value: Params.TimeTickChannel,
+	}, nil
 }
 
-func (c *Core) GetDdChannel() (string, error) {
-	return Params.DdChannel, nil
+func (c *Core) GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+		Value: Params.DdChannel,
+	}, nil
 }
 
-func (c *Core) GetStatisticsChannel() (string, error) {
-	return Params.StatisticsChannel, nil
+func (c *Core) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+		Value: Params.StatisticsChannel,
+	}, nil
 }
 
-func (c *Core) CreateCollection(in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
+func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
 	if code != internalpb2.StateCode_HEALTHY {
 		return &commonpb.Status{
@@ -895,7 +913,7 @@ func (c *Core) CreateCollection(in *milvuspb.CreateCollectionRequest) (*commonpb
 	}, nil
 }
 
-func (c *Core) DropCollection(in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
 	if code != internalpb2.StateCode_HEALTHY {
 		return &commonpb.Status{
@@ -927,7 +945,7 @@ func (c *Core) DropCollection(in *milvuspb.DropCollectionRequest) (*commonpb.Sta
 	}, nil
 }
 
-func (c *Core) HasCollection(in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
+func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
 	if code != internalpb2.StateCode_HEALTHY {
 		return &milvuspb.BoolResponse{
@@ -969,7 +987,7 @@ func (c *Core) HasCollection(in *milvuspb.HasCollectionRequest) (*milvuspb.BoolR
 	}, nil
 }
 
-func (c *Core) DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
 	if code != internalpb2.StateCode_HEALTHY {
 		return &milvuspb.DescribeCollectionResponse{
@@ -1010,7 +1028,7 @@ func (c *Core) DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milv
 	return t.Rsp, nil
 }
 
-func (c *Core) ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
+func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
 	if code != internalpb2.StateCode_HEALTHY {
 		return &milvuspb.ShowCollectionResponse{
@@ -1052,7 +1070,7 @@ func (c *Core) ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.Sh
 	return t.Rsp, nil
 }
 
-func (c *Core) CreatePartition(in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
+func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
 	if code != internalpb2.StateCode_HEALTHY {
 		return &commonpb.Status{
@@ -1084,7 +1102,7 @@ func (c *Core) CreatePartition(in *milvuspb.CreatePartitionRequest) (*commonpb.S
 	}, nil
 }
 
-func (c *Core) DropPartition(in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
+func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
 	if code != internalpb2.StateCode_HEALTHY {
 		return &commonpb.Status{
@@ -1116,7 +1134,7 @@ func (c *Core) DropPartition(in *milvuspb.DropPartitionRequest) (*commonpb.Statu
 	}, nil
 }
 
-func (c *Core) HasPartition(in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
+func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
 	if code != internalpb2.StateCode_HEALTHY {
 		return &milvuspb.BoolResponse{
@@ -1158,7 +1176,7 @@ func (c *Core) HasPartition(in *milvuspb.HasPartitionRequest) (*milvuspb.BoolRes
 	}, nil
 }
 
-func (c *Core) ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
+func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
 	if code != internalpb2.StateCode_HEALTHY {
 		return &milvuspb.ShowPartitionResponse{
@@ -1201,7 +1219,7 @@ func (c *Core) ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.Show
 	return t.Rsp, nil
 }
 
-func (c *Core) CreateIndex(in *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
+func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
 	if code != internalpb2.StateCode_HEALTHY {
 		return &commonpb.Status{
@@ -1233,7 +1251,7 @@ func (c *Core) CreateIndex(in *milvuspb.CreateIndexRequest) (*commonpb.Status, e
 	}, nil
 }
 
-func (c *Core) DescribeIndex(in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
+func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
 	if code != internalpb2.StateCode_HEALTHY {
 		return &milvuspb.DescribeIndexResponse{
@@ -1279,7 +1297,7 @@ func (c *Core) DescribeIndex(in *milvuspb.DescribeIndexRequest) (*milvuspb.Descr
 	return t.Rsp, nil
 }
 
-func (c *Core) DropIndex(in *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
+func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
 	if code != internalpb2.StateCode_HEALTHY {
 		return &commonpb.Status{
@@ -1311,7 +1329,7 @@ func (c *Core) DropIndex(in *milvuspb.DropIndexRequest) (*commonpb.Status, error
 	}, nil
 }
 
-func (c *Core) DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
+func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
 	if code != internalpb2.StateCode_HEALTHY {
 		return &milvuspb.DescribeSegmentResponse{
@@ -1354,7 +1372,7 @@ func (c *Core) DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.D
 	return t.Rsp, nil
 }
 
-func (c *Core) ShowSegments(in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error) {
+func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
 	if code != internalpb2.StateCode_HEALTHY {
 		return &milvuspb.ShowSegmentResponse{
@@ -1396,7 +1414,7 @@ func (c *Core) ShowSegments(in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegm
 	return t.Rsp, nil
 }
 
-func (c *Core) AllocTimestamp(in *masterpb.TsoRequest) (*masterpb.TsoResponse, error) {
+func (c *Core) AllocTimestamp(ctx context.Context, in *masterpb.TsoRequest) (*masterpb.TsoResponse, error) {
 	ts, err := c.tsoAllocator.Alloc(in.Count)
 	if err != nil {
 		return &masterpb.TsoResponse{
@@ -1419,7 +1437,7 @@ func (c *Core) AllocTimestamp(in *masterpb.TsoRequest) (*masterpb.TsoResponse, e
 	}, nil
 }
 
-func (c *Core) AllocID(in *masterpb.IDRequest) (*masterpb.IDResponse, error) {
+func (c *Core) AllocID(ctx context.Context, in *masterpb.IDRequest) (*masterpb.IDResponse, error) {
 	start, _, err := c.idAllocator.Alloc(in.Count)
 	if err != nil {
 		return &masterpb.IDResponse{

@@ -30,20 +30,21 @@ func newMetaService(ctx context.Context, replica Replica, m MasterServiceInterfa
 
 func (mService *metaService) init() {
 	log.Debug("Initing meta ...")
-	err := mService.loadCollections()
+	ctx := context.Background()
+	err := mService.loadCollections(ctx)
 	if err != nil {
 		log.Error("metaService init failed", zap.Error(err))
 	}
 }
 
-func (mService *metaService) loadCollections() error {
-	names, err := mService.getCollectionNames()
+func (mService *metaService) loadCollections(ctx context.Context) error {
+	names, err := mService.getCollectionNames(ctx)
 	if err != nil {
 		return err
 	}
 
 	for _, name := range names {
-		err := mService.createCollection(name)
+		err := mService.createCollection(ctx, name)
 		if err != nil {
 			return err
 		}
@@ -51,7 +52,7 @@ func (mService *metaService) loadCollections() error {
 	return nil
 }
 
-func (mService *metaService) getCollectionNames() ([]string, error) {
+func (mService *metaService) getCollectionNames(ctx context.Context) ([]string, error) {
 	req := &milvuspb.ShowCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_kShowCollections,
@@ -62,14 +63,14 @@ func (mService *metaService) getCollectionNames() ([]string, error) {
 		DbName: "default", // GOOSE TODO
 	}
 
-	response, err := mService.masterClient.ShowCollections(req)
+	response, err := mService.masterClient.ShowCollections(ctx, req)
 	if err != nil {
 		return nil, errors.Errorf("Get collection names from master service wrong: %v", err)
 	}
 	return response.GetCollectionNames(), nil
 }
 
-func (mService *metaService) createCollection(name string) error {
+func (mService *metaService) createCollection(ctx context.Context, name string) error {
 	log.Debug("Describing collections")
 	req := &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
@@ -82,7 +83,7 @@ func (mService *metaService) createCollection(name string) error {
 		CollectionName: name,
 	}
 
-	response, err := mService.masterClient.DescribeCollection(req)
+	response, err := mService.masterClient.DescribeCollection(ctx, req)
 	if err != nil {
 		return errors.Errorf("Describe collection %v from master service wrong: %v", name, err)
 	}

@@ -47,9 +47,9 @@ func GetLocalIP() string {
 	return ipv4.LocalIP()
 }
 
-func WaitForComponentStates(service StateComponent, serviceName string, states []internalpb2.StateCode, attempts int, sleep time.Duration) error {
+func WaitForComponentStates(ctx context.Context, service StateComponent, serviceName string, states []internalpb2.StateCode, attempts int, sleep time.Duration) error {
 	checkFunc := func() error {
-		resp, err := service.GetComponentStates()
+		resp, err := service.GetComponentStates(ctx)
 		if err != nil {
 			return err
 		}
@@ -74,16 +74,16 @@ func WaitForComponentStates(service StateComponent, serviceName string, states [
 	return retry.Retry(attempts, sleep, checkFunc)
 }
 
-func WaitForComponentInitOrHealthy(service StateComponent, serviceName string, attempts int, sleep time.Duration) error {
-	return WaitForComponentStates(service, serviceName, []internalpb2.StateCode{internalpb2.StateCode_INITIALIZING, internalpb2.StateCode_HEALTHY}, attempts, sleep)
+func WaitForComponentInitOrHealthy(ctx context.Context, service StateComponent, serviceName string, attempts int, sleep time.Duration) error {
+	return WaitForComponentStates(ctx, service, serviceName, []internalpb2.StateCode{internalpb2.StateCode_INITIALIZING, internalpb2.StateCode_HEALTHY}, attempts, sleep)
 }
 
-func WaitForComponentInit(service StateComponent, serviceName string, attempts int, sleep time.Duration) error {
-	return WaitForComponentStates(service, serviceName, []internalpb2.StateCode{internalpb2.StateCode_INITIALIZING}, attempts, sleep)
+func WaitForComponentInit(ctx context.Context, service StateComponent, serviceName string, attempts int, sleep time.Duration) error {
+	return WaitForComponentStates(ctx, service, serviceName, []internalpb2.StateCode{internalpb2.StateCode_INITIALIZING}, attempts, sleep)
 }
 
-func WaitForComponentHealthy(service StateComponent, serviceName string, attempts int, sleep time.Duration) error {
-	return WaitForComponentStates(service, serviceName, []internalpb2.StateCode{internalpb2.StateCode_HEALTHY}, attempts, sleep)
+func WaitForComponentHealthy(ctx context.Context, service StateComponent, serviceName string, attempts int, sleep time.Duration) error {
+	return WaitForComponentStates(ctx, service, serviceName, []internalpb2.StateCode{internalpb2.StateCode_HEALTHY}, attempts, sleep)
 }
 
 func ParseIndexParamsMap(mStr string) (map[string]string, error) {

@@ -122,7 +122,7 @@ func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 		IndexFilePaths: it.savePaths,
 	}
 
-	resp, err := it.serviceClient.NotifyBuildIndex(nty)
+	resp, err := it.serviceClient.NotifyBuildIndex(ctx, nty)
 	if err != nil {
 		log.Println("IndexBuildTask notify err:", err.Error())
 		return err

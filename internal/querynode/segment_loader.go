@@ -40,6 +40,7 @@ func (loader *segmentLoader) seekSegment(position *internalpb2.MsgPosition) erro
 }
 
 func (loader *segmentLoader) getInsertBinlogPaths(segmentID UniqueID) ([]*internalpb2.StringList, []int64, error) {
+	ctx := context.TODO()
 	if loader.dataClient == nil {
 		return nil, nil, errors.New("null data service client")
 	}
@@ -48,7 +49,7 @@ func (loader *segmentLoader) getInsertBinlogPaths(segmentID UniqueID) ([]*intern
 		SegmentID: segmentID,
 	}
 
-	pathResponse, err := loader.dataClient.GetInsertBinlogPaths(insertBinlogPathRequest)
+	pathResponse, err := loader.dataClient.GetInsertBinlogPaths(ctx, insertBinlogPathRequest)
 	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
 		return nil, nil, err
 	}
@@ -61,6 +62,7 @@ func (loader *segmentLoader) getInsertBinlogPaths(segmentID UniqueID) ([]*intern
 }
 
 func (loader *segmentLoader) GetSegmentStates(segmentID UniqueID) (*datapb.SegmentStatesResponse, error) {
+	ctx := context.TODO()
 	if loader.dataClient == nil {
 		return nil, errors.New("null data service client")
 	}
@@ -68,7 +70,7 @@ func (loader *segmentLoader) GetSegmentStates(segmentID UniqueID) (*datapb.Segme
 	segmentStatesRequest := &datapb.SegmentStatesRequest{
 		SegmentIDs: []int64{segmentID},
 	}
-	statesResponse, err := loader.dataClient.GetSegmentStates(segmentStatesRequest)
+	statesResponse, err := loader.dataClient.GetSegmentStates(ctx, segmentStatesRequest)
 	if err != nil || statesResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
 		return nil, err
 	}

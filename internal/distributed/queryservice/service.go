@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	otgrpc "github.com/opentracing-contrib/go-grpc"
+	"github.com/opentracing/opentracing-go"
 	dsc "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice/client"
 	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
@@ -69,6 +71,7 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) init() error {
+	ctx := context.Background()
 	Params.Init()
 
 	s.wg.Add(1)
@@ -96,7 +99,7 @@ func (s *Server) init() error {
 		panic(err)
 	}
 	// wait for master init or healthy
-	err = funcutil.WaitForComponentInitOrHealthy(masterService, "MasterService", 100, time.Millisecond*200)
+	err = funcutil.WaitForComponentInitOrHealthy(ctx, masterService, "MasterService", 100, time.Millisecond*200)
 	if err != nil {
 		panic(err)
 	}
@@ -116,7 +119,7 @@ func (s *Server) init() error {
 	if err = dataService.Start(); err != nil {
 		panic(err)
 	}
-	err = funcutil.WaitForComponentInitOrHealthy(dataService, "DataService", 100, time.Millisecond*200)
+	err = funcutil.WaitForComponentInitOrHealthy(ctx, dataService, "DataService", 100, time.Millisecond*200)
 	if err != nil {
 		panic(err)
 	}
@@ -148,7 +151,11 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	ctx, cancel := context.WithCancel(s.loopCtx)
 	defer cancel()
 
-	s.grpcServer = grpc.NewServer()
+	tracer := opentracing.GlobalTracer()
+	s.grpcServer = grpc.NewServer(grpc.UnaryInterceptor(
+		otgrpc.OpenTracingServerInterceptor(tracer)),
+		grpc.StreamInterceptor(
+			otgrpc.OpenTracingStreamServerInterceptor(tracer)))
 	querypb.RegisterQueryServiceServer(s.grpcServer, s)
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
@@ -171,57 +178,15 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, req *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	componentStates, err := s.impl.GetComponentStates()
-	if err != nil {
-		return &internalpb2.ComponentStates{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			},
-		}, err
-	}
-
-	return componentStates, nil
+	return s.impl.GetComponentStates(ctx)
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	channel, err := s.impl.GetTimeTickChannel()
-	if err != nil {
-		return &milvuspb.StringResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			},
-		}, err
-	}
-
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-			Reason:    "",
-		},
-		Value: channel,
-	}, nil
+	return s.impl.GetTimeTickChannel(ctx)
 }
 
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	statisticsChannel, err := s.impl.GetStatisticsChannel()
-	if err != nil {
-		return &milvuspb.StringResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			},
-		}, err
-	}
-
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-			Reason:    "",
-		},
-		Value: statisticsChannel,
-	}, nil
+	return s.impl.GetStatisticsChannel(ctx)
 }
 
 func (s *Server) SetMasterService(m qs.MasterServiceInterface) error {
@@ -235,41 +200,41 @@ func (s *Server) SetDataService(d qs.DataServiceInterface) error {
 }
 
 func (s *Server) RegisterNode(ctx context.Context, req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
-	return s.impl.RegisterNode(req)
+	return s.impl.RegisterNode(ctx, req)
 }
 
 func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionRequest) (*querypb.ShowCollectionResponse, error) {
-	return s.impl.ShowCollections(req)
+	return s.impl.ShowCollections(ctx, req)
 }
 
 func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
-	return s.impl.LoadCollection(req)
+	return s.impl.LoadCollection(ctx, req)
 }
 
 func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	return s.impl.ReleaseCollection(req)
+	return s.impl.ReleaseCollection(ctx, req)
 }
 
 func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionRequest) (*querypb.ShowPartitionResponse, error) {
-	return s.impl.ShowPartitions(req)
+	return s.impl.ShowPartitions(ctx, req)
 }
 
 func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.PartitionStatesRequest) (*querypb.PartitionStatesResponse, error) {
-	return s.impl.GetPartitionStates(req)
+	return s.impl.GetPartitionStates(ctx, req)
 }
 
 func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionRequest) (*commonpb.Status, error) {
-	return s.impl.LoadPartitions(req)
+	return s.impl.LoadPartitions(ctx, req)
 }
 
 func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionRequest) (*commonpb.Status, error) {
-	return s.impl.ReleasePartitions(req)
+	return s.impl.ReleasePartitions(ctx, req)
 }
 
 func (s *Server) CreateQueryChannel(ctx context.Context, req *commonpb.Empty) (*querypb.CreateQueryChannelResponse, error) {
-	return s.impl.CreateQueryChannel()
+	return s.impl.CreateQueryChannel(ctx)
 }
 
 func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error) {
-	return s.impl.GetSegmentInfo(req)
+	return s.impl.GetSegmentInfo(ctx, req)
 }

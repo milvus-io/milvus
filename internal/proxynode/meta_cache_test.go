@@ -1,6 +1,7 @@
 package proxynode
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,7 +14,7 @@ import (
 type MockMasterClientInterface struct {
 }
 
-func (m *MockMasterClientInterface) ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
+func (m *MockMasterClientInterface) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
 	if in.CollectionName == "collection1" {
 		return &milvuspb.ShowPartitionResponse{
 			Status: &commonpb.Status{
@@ -32,7 +33,7 @@ func (m *MockMasterClientInterface) ShowPartitions(in *milvuspb.ShowPartitionReq
 	}, nil
 }
 
-func (m *MockMasterClientInterface) DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+func (m *MockMasterClientInterface) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	if in.CollectionName == "collection1" {
 		return &milvuspb.DescribeCollectionResponse{
 			Status: &commonpb.Status{
@@ -54,44 +55,46 @@ func (m *MockMasterClientInterface) DescribeCollection(in *milvuspb.DescribeColl
 }
 
 func TestMetaCache_GetCollection(t *testing.T) {
+	ctx := context.Background()
 	client := &MockMasterClientInterface{}
 	err := InitMetaCache(client)
 	assert.Nil(t, err)
 
-	id, err := globalMetaCache.GetCollectionID("collection1")
+	id, err := globalMetaCache.GetCollectionID(ctx, "collection1")
 	assert.Nil(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(1))
-	schema, err := globalMetaCache.GetCollectionSchema("collection1")
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, "collection1")
 	assert.Nil(t, err)
 	assert.Equal(t, schema, &schemapb.CollectionSchema{
 		AutoID: true,
 	})
-	id, err = globalMetaCache.GetCollectionID("collection2")
+	id, err = globalMetaCache.GetCollectionID(ctx, "collection2")
 	assert.NotNil(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(0))
-	schema, err = globalMetaCache.GetCollectionSchema("collection2")
+	schema, err = globalMetaCache.GetCollectionSchema(ctx, "collection2")
 	assert.NotNil(t, err)
 	assert.Nil(t, schema)
 }
 
 func TestMetaCache_GetPartitionID(t *testing.T) {
+	ctx := context.Background()
 	client := &MockMasterClientInterface{}
 	err := InitMetaCache(client)
 	assert.Nil(t, err)
 
-	id, err := globalMetaCache.GetPartitionID("collection1", "par1")
+	id, err := globalMetaCache.GetPartitionID(ctx, "collection1", "par1")
 	assert.Nil(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(1))
-	id, err = globalMetaCache.GetPartitionID("collection1", "par2")
+	id, err = globalMetaCache.GetPartitionID(ctx, "collection1", "par2")
 	assert.Nil(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(2))
-	id, err = globalMetaCache.GetPartitionID("collection1", "par3")
+	id, err = globalMetaCache.GetPartitionID(ctx, "collection1", "par3")
 	assert.NotNil(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(0))
-	id, err = globalMetaCache.GetPartitionID("collection2", "par3")
+	id, err = globalMetaCache.GetPartitionID(ctx, "collection2", "par3")
 	assert.NotNil(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(0))
-	id, err = globalMetaCache.GetPartitionID("collection2", "par4")
+	id, err = globalMetaCache.GetPartitionID(ctx, "collection2", "par4")
 	assert.NotNil(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(0))
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	otgrpc "github.com/opentracing-contrib/go-grpc"
+	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 
@@ -30,8 +32,13 @@ func NewClient(addr string) *Client {
 }
 
 func (c *Client) Init() error {
+	tracer := opentracing.GlobalTracer()
 	connectGrpcFunc := func() error {
-		conn, err := grpc.DialContext(c.ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock())
+		conn, err := grpc.DialContext(c.ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
+			grpc.WithUnaryInterceptor(
+				otgrpc.OpenTracingClientInterceptor(tracer)),
+			grpc.WithStreamInterceptor(
+				otgrpc.OpenTracingStreamClientInterceptor(tracer)))
 		if err != nil {
 			return err
 		}
@@ -56,62 +63,62 @@ func (c *Client) Stop() error {
 	return c.conn.Close()
 }
 
-func (c *Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	return c.grpcClient.GetComponentStates(context.Background(), &commonpb.Empty{})
+func (c *Client) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
+	return c.grpcClient.GetComponentStates(ctx, &commonpb.Empty{})
 }
 
-func (c *Client) GetTimeTickChannel() (*milvuspb.StringResponse, error) {
-	return c.grpcClient.GetTimeTickChannel(context.Background(), &commonpb.Empty{})
+func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return c.grpcClient.GetTimeTickChannel(ctx, &commonpb.Empty{})
 }
 
-func (c *Client) GetStatisticsChannel() (*milvuspb.StringResponse, error) {
-	return c.grpcClient.GetStatisticsChannel(context.Background(), &commonpb.Empty{})
+func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return c.grpcClient.GetStatisticsChannel(ctx, &commonpb.Empty{})
 }
 
-func (c *Client) RegisterNode(req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
-	return c.grpcClient.RegisterNode(context.Background(), req)
+func (c *Client) RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
+	return c.grpcClient.RegisterNode(ctx, req)
 }
 
-func (c *Client) Flush(req *datapb.FlushRequest) (*commonpb.Status, error) {
-	return c.grpcClient.Flush(context.Background(), req)
+func (c *Client) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error) {
+	return c.grpcClient.Flush(ctx, req)
 }
 
-func (c *Client) AssignSegmentID(req *datapb.AssignSegIDRequest) (*datapb.AssignSegIDResponse, error) {
-	return c.grpcClient.AssignSegmentID(context.Background(), req)
+func (c *Client) AssignSegmentID(ctx context.Context, req *datapb.AssignSegIDRequest) (*datapb.AssignSegIDResponse, error) {
+	return c.grpcClient.AssignSegmentID(ctx, req)
 }
 
-func (c *Client) ShowSegments(req *datapb.ShowSegmentRequest) (*datapb.ShowSegmentResponse, error) {
-	return c.grpcClient.ShowSegments(context.Background(), req)
+func (c *Client) ShowSegments(ctx context.Context, req *datapb.ShowSegmentRequest) (*datapb.ShowSegmentResponse, error) {
+	return c.grpcClient.ShowSegments(ctx, req)
 }
 
-func (c *Client) GetSegmentStates(req *datapb.SegmentStatesRequest) (*datapb.SegmentStatesResponse, error) {
-	return c.grpcClient.GetSegmentStates(context.Background(), req)
+func (c *Client) GetSegmentStates(ctx context.Context, req *datapb.SegmentStatesRequest) (*datapb.SegmentStatesResponse, error) {
+	return c.grpcClient.GetSegmentStates(ctx, req)
 }
 
-func (c *Client) GetInsertBinlogPaths(req *datapb.InsertBinlogPathRequest) (*datapb.InsertBinlogPathsResponse, error) {
-	return c.grpcClient.GetInsertBinlogPaths(context.Background(), req)
+func (c *Client) GetInsertBinlogPaths(ctx context.Context, req *datapb.InsertBinlogPathRequest) (*datapb.InsertBinlogPathsResponse, error) {
+	return c.grpcClient.GetInsertBinlogPaths(ctx, req)
 }
 
-func (c *Client) GetInsertChannels(req *datapb.InsertChannelRequest) (*internalpb2.StringList, error) {
-	return c.grpcClient.GetInsertChannels(context.Background(), req)
+func (c *Client) GetInsertChannels(ctx context.Context, req *datapb.InsertChannelRequest) (*internalpb2.StringList, error) {
+	return c.grpcClient.GetInsertChannels(ctx, req)
 }
 
-func (c *Client) GetCollectionStatistics(req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error) {
-	return c.grpcClient.GetCollectionStatistics(context.Background(), req)
+func (c *Client) GetCollectionStatistics(ctx context.Context, req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error) {
+	return c.grpcClient.GetCollectionStatistics(ctx, req)
 }
 
-func (c *Client) GetPartitionStatistics(req *datapb.PartitionStatsRequest) (*datapb.PartitionStatsResponse, error) {
-	return c.grpcClient.GetPartitionStatistics(context.Background(), req)
+func (c *Client) GetPartitionStatistics(ctx context.Context, req *datapb.PartitionStatsRequest) (*datapb.PartitionStatsResponse, error) {
+	return c.grpcClient.GetPartitionStatistics(ctx, req)
 }
 
-func (c *Client) GetSegmentInfoChannel() (*milvuspb.StringResponse, error) {
-	return c.grpcClient.GetSegmentInfoChannel(context.Background(), &commonpb.Empty{})
+func (c *Client) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return c.grpcClient.GetSegmentInfoChannel(ctx, &commonpb.Empty{})
 }
 
-func (c *Client) GetCount(req *datapb.CollectionCountRequest) (*datapb.CollectionCountResponse, error) {
-	return c.grpcClient.GetCount(context.Background(), req)
+func (c *Client) GetCount(ctx context.Context, req *datapb.CollectionCountRequest) (*datapb.CollectionCountResponse, error) {
+	return c.grpcClient.GetCount(ctx, req)
 }
 
-func (c *Client) GetSegmentInfo(req *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error) {
-	return c.grpcClient.GetSegmentInfo(context.Background(), req)
+func (c *Client) GetSegmentInfo(ctx context.Context, req *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error) {
+	return c.grpcClient.GetSegmentInfo(ctx, req)
 }

@@ -2,6 +2,7 @@ package datanode
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"math"
 	"math/rand"
@@ -416,7 +417,7 @@ func (m *MasterServiceFactory) setCollectionName(name string) {
 	m.collectionName = name
 }
 
-func (m *MasterServiceFactory) AllocID(in *masterpb.IDRequest) (*masterpb.IDResponse, error) {
+func (m *MasterServiceFactory) AllocID(ctx context.Context, in *masterpb.IDRequest) (*masterpb.IDResponse, error) {
 	resp := &masterpb.IDResponse{
 		Status: &commonpb.Status{},
 		ID:     m.ID,
@@ -424,7 +425,7 @@ func (m *MasterServiceFactory) AllocID(in *masterpb.IDRequest) (*masterpb.IDResp
 	return resp, nil
 }
 
-func (m *MasterServiceFactory) ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
+func (m *MasterServiceFactory) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
 	resp := &milvuspb.ShowCollectionResponse{
 		Status:          &commonpb.Status{},
 		CollectionNames: []string{m.collectionName},
@@ -432,7 +433,7 @@ func (m *MasterServiceFactory) ShowCollections(in *milvuspb.ShowCollectionReques
 	return resp, nil
 
 }
-func (m *MasterServiceFactory) DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+func (m *MasterServiceFactory) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	f := MetaFactory{}
 	meta := f.CollectionMetaFactory(m.collectionID, m.collectionName)
 	resp := &milvuspb.DescribeCollectionResponse{
@@ -443,7 +444,7 @@ func (m *MasterServiceFactory) DescribeCollection(in *milvuspb.DescribeCollectio
 	return resp, nil
 }
 
-func (m *MasterServiceFactory) GetComponentStates() (*internalpb2.ComponentStates, error) {
+func (m *MasterServiceFactory) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
 	return &internalpb2.ComponentStates{
 		State:              &internalpb2.ComponentInfo{},
 		SubcomponentStates: make([]*internalpb2.ComponentInfo, 0),

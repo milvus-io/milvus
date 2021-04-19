@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"sync"
 
+	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go/config"
 	"github.com/zilliztech/milvus-distributed/internal/indexservice"
@@ -93,33 +94,27 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
-
-	return s.impl.RegisterNode(req)
+	return s.impl.RegisterNode(ctx, req)
 }
 
 func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
-
-	return s.impl.BuildIndex(req)
+	return s.impl.BuildIndex(ctx, req)
 }
 
 func (s *Server) GetIndexStates(ctx context.Context, req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
-
-	return s.impl.GetIndexStates(req)
+	return s.impl.GetIndexStates(ctx, req)
 }
 
 func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-
-	return s.impl.DropIndex(request)
+	return s.impl.DropIndex(ctx, request)
 }
 
 func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {
-
-	return s.impl.GetIndexFilePaths(req)
+	return s.impl.GetIndexFilePaths(ctx, req)
 }
 
 func (s *Server) NotifyBuildIndex(ctx context.Context, nty *indexpb.BuildIndexNotification) (*commonpb.Status, error) {
-
-	return s.impl.NotifyBuildIndex(nty)
+	return s.impl.NotifyBuildIndex(ctx, nty)
 }
 
 func (s *Server) startGrpcLoop(grpcPort int) {
@@ -137,7 +132,11 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	ctx, cancel := context.WithCancel(s.loopCtx)
 	defer cancel()
 
-	s.grpcServer = grpc.NewServer()
+	tracer := opentracing.GlobalTracer()
+	s.grpcServer = grpc.NewServer(grpc.UnaryInterceptor(
+		otgrpc.OpenTracingServerInterceptor(tracer)),
+		grpc.StreamInterceptor(
+			otgrpc.OpenTracingStreamServerInterceptor(tracer)))
 	indexpb.RegisterIndexServiceServer(s.grpcServer, s)
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
@@ -148,40 +147,15 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	return s.impl.GetComponentStates()
+	return s.impl.GetComponentStates(ctx)
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	resp := &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-		},
-	}
-	channel, err := s.impl.GetTimeTickChannel()
-	if err != nil {
-		resp.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
-
-	resp.Value = channel
-	return resp, nil
+	return s.impl.GetTimeTickChannel(ctx)
 }
 
 func (s *Server) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	resp := &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-		},
-	}
-	channel, err := s.impl.GetStatisticsChannel()
-	if err != nil {
-		resp.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
-	resp.Value = channel
-	return resp, nil
+	return s.impl.GetStatisticsChannel(ctx)
 }
 
 func NewServer(ctx context.Context) (*Server, error) {

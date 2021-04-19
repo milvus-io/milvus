@@ -2,6 +2,8 @@ package grpcquerynode
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log"
 	"net"
 	"strconv"
@@ -15,8 +17,11 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 
+	otgrpc "github.com/opentracing-contrib/go-grpc"
+	"github.com/opentracing/opentracing-go"
 	"google.golang.org/grpc"
 
+	"github.com/uber/jaeger-client-go/config"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -40,6 +45,8 @@ type Server struct {
 	masterService *msc.GrpcClient
 	indexService  *isc.Client
 	queryService  *qsc.Client
+
+	closer io.Closer
 }
 
 func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
@@ -55,7 +62,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 }
 
 func (s *Server) init() error {
-
+	ctx := context.Background()
 	Params.Init()
 	if !funcutil.CheckPortAvailable(Params.QueryNodePort) {
 		Params.QueryNodePort = funcutil.GetAvailablePort()
@@ -63,11 +70,26 @@ func (s *Server) init() error {
 	Params.LoadFromEnv()
 	Params.LoadFromArgs()
 
+	// TODO
+	cfg := &config.Configuration{
+		ServiceName: fmt.Sprintf("query_node ip: %s, port: %d", Params.QueryNodeIP, Params.QueryNodePort),
+		Sampler: &config.SamplerConfig{
+			Type:  "const",
+			Param: 1,
+		},
+	}
+	tracer, closer, err := cfg.NewTracer()
+	if err != nil {
+		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
+	}
+	opentracing.SetGlobalTracer(tracer)
+	s.closer = closer
+
 	log.Println("QueryNode, port:", Params.QueryNodePort)
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.QueryNodePort)
 	// wait for grpc server loop start
-	err := <-s.grpcErrChan
+	err = <-s.grpcErrChan
 	if err != nil {
 		return err
 	}
@@ -87,7 +109,7 @@ func (s *Server) init() error {
 		panic(err)
 	}
 
-	err = funcutil.WaitForComponentInitOrHealthy(queryService, "QueryService", 100, time.Millisecond*200)
+	err = funcutil.WaitForComponentInitOrHealthy(ctx, queryService, "QueryService", 100, time.Millisecond*200)
 	if err != nil {
 		panic(err)
 	}
@@ -115,7 +137,7 @@ func (s *Server) init() error {
 		panic(err)
 	}
 
-	err = funcutil.WaitForComponentHealthy(masterService, "MasterService", 100, time.Millisecond*200)
+	err = funcutil.WaitForComponentHealthy(ctx, masterService, "MasterService", 100, time.Millisecond*200)
 	if err != nil {
 		panic(err)
 	}
@@ -136,7 +158,7 @@ func (s *Server) init() error {
 		panic(err)
 	}
 	// wait indexservice healthy
-	err = funcutil.WaitForComponentHealthy(indexService, "IndexService", 100, time.Millisecond*200)
+	err = funcutil.WaitForComponentHealthy(ctx, indexService, "IndexService", 100, time.Millisecond*200)
 	if err != nil {
 		panic(err)
 	}
@@ -156,7 +178,7 @@ func (s *Server) init() error {
 	if err = dataService.Start(); err != nil {
 		panic(err)
 	}
-	err = funcutil.WaitForComponentInitOrHealthy(dataService, "DataService", 100, time.Millisecond*200)
+	err = funcutil.WaitForComponentInitOrHealthy(ctx, dataService, "DataService", 100, time.Millisecond*200)
 	if err != nil {
 		panic(err)
 	}
@@ -196,7 +218,11 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	}
 	log.Println("QueryNode:: addr:", addr)
 
-	s.grpcServer = grpc.NewServer()
+	tracer := opentracing.GlobalTracer()
+	s.grpcServer = grpc.NewServer(grpc.UnaryInterceptor(
+		otgrpc.OpenTracingServerInterceptor(tracer)),
+		grpc.StreamInterceptor(
+			otgrpc.OpenTracingStreamServerInterceptor(tracer)))
 	querypb.RegisterQueryNodeServer(s.grpcServer, s)
 
 	ctx, cancel := context.WithCancel(s.ctx)
@@ -225,13 +251,16 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) Stop() error {
+	if err := s.closer.Close(); err != nil {
+		return err
+	}
+
 	s.cancel()
-	var err error
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
 	}
 
-	err = s.impl.Stop()
+	err := s.impl.Stop()
 	if err != nil {
 		return err
 	}

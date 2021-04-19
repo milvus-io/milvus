@@ -62,7 +62,8 @@ func NewNodeImpl(ctx context.Context) (*NodeImpl, error) {
 }
 
 func (i *NodeImpl) Init() error {
-	err := funcutil.WaitForComponentHealthy(i.serviceClient, "IndexService", 10, time.Second)
+	ctx := context.Background()
+	err := funcutil.WaitForComponentHealthy(ctx, i.serviceClient, "IndexService", 10, time.Second)
 
 	if err != nil {
 		return err
@@ -75,7 +76,7 @@ func (i *NodeImpl) Init() error {
 		},
 	}
 
-	resp, err2 := i.serviceClient.RegisterNode(request)
+	resp, err2 := i.serviceClient.RegisterNode(ctx, request)
 	if err2 != nil {
 		log.Printf("Index NodeImpl connect to IndexService failed, error= %v", err)
 		return err2

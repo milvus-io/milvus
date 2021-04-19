@@ -27,7 +27,7 @@ type NodeClient interface {
 	Start() error
 	Stop() error
 
-	InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
+	InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
 }
 
 type GlobalNodeInfoTable struct {

@@ -117,7 +117,7 @@ func (it *IndexAddTask) Execute(ctx context.Context) error {
 		Req:          it.req,
 	}
 	log.Println("before index ...")
-	resp, err := it.builderClient.BuildIndex(cmd)
+	resp, err := it.builderClient.BuildIndex(ctx, cmd)
 	if err != nil {
 		return err
 	}

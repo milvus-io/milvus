@@ -15,9 +15,6 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go/config"
-	"io"
 	"log"
 	"sync/atomic"
 
@@ -34,14 +31,14 @@ import (
 type Node interface {
 	typeutil.Component
 
-	AddQueryChannel(in *queryPb.AddQueryChannelsRequest) (*commonpb.Status, error)
-	RemoveQueryChannel(in *queryPb.RemoveQueryChannelsRequest) (*commonpb.Status, error)
-	WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error)
-	LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.Status, error)
-	ReleaseCollection(in *queryPb.ReleaseCollectionRequest) (*commonpb.Status, error)
-	ReleasePartitions(in *queryPb.ReleasePartitionRequest) (*commonpb.Status, error)
-	ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error)
-	GetSegmentInfo(in *queryPb.SegmentInfoRequest) (*queryPb.SegmentInfoResponse, error)
+	AddQueryChannel(ctx context.Context, in *queryPb.AddQueryChannelsRequest) (*commonpb.Status, error)
+	RemoveQueryChannel(ctx context.Context, in *queryPb.RemoveQueryChannelsRequest) (*commonpb.Status, error)
+	WatchDmChannels(ctx context.Context, in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error)
+	LoadSegments(ctx context.Context, in *queryPb.LoadSegmentRequest) (*commonpb.Status, error)
+	ReleaseCollection(ctx context.Context, in *queryPb.ReleaseCollectionRequest) (*commonpb.Status, error)
+	ReleasePartitions(ctx context.Context, in *queryPb.ReleasePartitionRequest) (*commonpb.Status, error)
+	ReleaseSegments(ctx context.Context, in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error)
+	GetSegmentInfo(ctx context.Context, in *queryPb.SegmentInfoRequest) (*queryPb.SegmentInfoResponse, error)
 }
 
 type QueryService = typeutil.QueryServiceInterface
@@ -63,9 +60,6 @@ type QueryNode struct {
 	searchService   *searchService
 	loadService     *loadService
 	statsService    *statsService
-
-	//opentracing
-	closer io.Closer
 
 	// clients
 	masterClient MasterServiceInterface
@@ -117,6 +111,7 @@ func NewQueryNodeWithoutID(ctx context.Context, factory msgstream.Factory) *Quer
 }
 
 func (node *QueryNode) Init() error {
+	ctx := context.Background()
 	registerReq := &queryPb.RegisterNodeRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_kNone,
@@ -128,7 +123,7 @@ func (node *QueryNode) Init() error {
 		},
 	}
 
-	resp, err := node.queryClient.RegisterNode(registerReq)
+	resp, err := node.queryClient.RegisterNode(ctx, registerReq)
 	if err != nil {
 		panic(err)
 	}
@@ -152,20 +147,6 @@ func (node *QueryNode) Init() error {
 	}
 
 	fmt.Println("QueryNodeID is", Params.QueryNodeID)
-
-	cfg := &config.Configuration{
-		ServiceName: fmt.Sprintf("query_node_%d", node.QueryNodeID),
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		},
-	}
-	tracer, closer, err := cfg.NewTracer()
-	if err != nil {
-		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
-	}
-	opentracing.SetGlobalTracer(tracer)
-	node.closer = closer
 
 	if node.masterClient == nil {
 		log.Println("WARN: null master service detected")
@@ -230,9 +211,6 @@ func (node *QueryNode) Stop() error {
 	}
 	if node.statsService != nil {
 		node.statsService.close()
-	}
-	if node.closer != nil {
-		node.closer.Close()
 	}
 	return nil
 }

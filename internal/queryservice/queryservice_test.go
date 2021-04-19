@@ -12,6 +12,7 @@ import (
 )
 
 func TestQueryService_Init(t *testing.T) {
+	ctx := context.Background()
 	msFactory := pulsarms.NewFactory()
 	service, err := NewQueryService(context.Background(), msFactory)
 	assert.Nil(t, err)
@@ -19,20 +20,20 @@ func TestQueryService_Init(t *testing.T) {
 	service.Start()
 
 	t.Run("Test create channel", func(t *testing.T) {
-		response, err := service.CreateQueryChannel()
+		response, err := service.CreateQueryChannel(ctx)
 		assert.Nil(t, err)
 		assert.Equal(t, response.RequestChannel, "query-0")
 		assert.Equal(t, response.ResultChannel, "queryResult-0")
 	})
 
 	t.Run("Test Get statistics channel", func(t *testing.T) {
-		response, err := service.GetStatisticsChannel()
+		response, err := service.GetStatisticsChannel(ctx)
 		assert.Nil(t, err)
 		assert.Equal(t, response, "query-node-stats")
 	})
 
 	t.Run("Test Get timeTick channel", func(t *testing.T) {
-		response, err := service.GetTimeTickChannel()
+		response, err := service.GetTimeTickChannel(ctx)
 		assert.Nil(t, err)
 		assert.Equal(t, response, "queryTimeTick")
 	})
@@ -41,6 +42,7 @@ func TestQueryService_Init(t *testing.T) {
 }
 
 func TestQueryService_load(t *testing.T) {
+	ctx := context.Background()
 	msFactory := pulsarms.NewFactory()
 	service, err := NewQueryService(context.Background(), msFactory)
 	assert.Nil(t, err)
@@ -51,13 +53,13 @@ func TestQueryService_load(t *testing.T) {
 	registerNodeRequest := &querypb.RegisterNodeRequest{
 		Address: &commonpb.Address{},
 	}
-	service.RegisterNode(registerNodeRequest)
+	service.RegisterNode(ctx, registerNodeRequest)
 
 	t.Run("Test LoadSegment", func(t *testing.T) {
 		loadCollectionRequest := &querypb.LoadCollectionRequest{
 			CollectionID: 1,
 		}
-		response, err := service.LoadCollection(loadCollectionRequest)
+		response, err := service.LoadCollection(ctx, loadCollectionRequest)
 		assert.Nil(t, err)
 		assert.Equal(t, response.ErrorCode, commonpb.ErrorCode_SUCCESS)
 	})
@@ -67,7 +69,7 @@ func TestQueryService_load(t *testing.T) {
 			CollectionID: 1,
 			PartitionIDs: []UniqueID{1},
 		}
-		response, err := service.LoadPartitions(loadPartitionRequest)
+		response, err := service.LoadPartitions(ctx, loadPartitionRequest)
 		assert.Nil(t, err)
 		assert.Equal(t, response.ErrorCode, commonpb.ErrorCode_SUCCESS)
 	})

@@ -192,7 +192,7 @@ func (t *InvalidateCollectionMetaCacheTask) Execute(ctx context.Context) error {
 		return err
 	}
 	for _, c := range clients {
-		status, _ := c.InvalidateCollectionMetaCache(t.request)
+		status, _ := c.InvalidateCollectionMetaCache(ctx, t.request)
 		if status == nil {
 			return errors.New("invalidate collection meta cache error")
 		}
