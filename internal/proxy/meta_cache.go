@@ -11,14 +11,14 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
 
-type MetaCache interface {
+type Cache interface {
 	Hit(collectionName string) bool
 	Get(collectionName string) (*servicepb.CollectionDescription, error)
 	Update(collectionName string) error
-	//Write(collectionName string, schema *servicepb.CollectionDescription) error
+	Remove(collectionName string) error
 }
 
-var globalMetaCache MetaCache
+var globalMetaCache Cache
 
 type SimpleMetaCache struct {
 	mu             sync.RWMutex
@@ -30,29 +30,54 @@ type SimpleMetaCache struct {
 	ctx            context.Context
 }
 
-func (smc *SimpleMetaCache) Hit(collectionName string) bool {
-	smc.mu.RLock()
-	defer smc.mu.RUnlock()
-	_, ok := smc.metas[collectionName]
+func (metaCache *SimpleMetaCache) Hit(collectionName string) bool {
+	metaCache.mu.RLock()
+	defer metaCache.mu.RUnlock()
+	_, ok := metaCache.metas[collectionName]
 	return ok
 }
 
-func (smc *SimpleMetaCache) Get(collectionName string) (*servicepb.CollectionDescription, error) {
-	smc.mu.RLock()
-	defer smc.mu.RUnlock()
-	schema, ok := smc.metas[collectionName]
+func (metaCache *SimpleMetaCache) Get(collectionName string) (*servicepb.CollectionDescription, error) {
+	metaCache.mu.RLock()
+	defer metaCache.mu.RUnlock()
+	schema, ok := metaCache.metas[collectionName]
 	if !ok {
 		return nil, errors.New("collection meta miss")
 	}
 	return schema, nil
 }
 
-func (smc *SimpleMetaCache) Update(collectionName string) error {
-	reqID, err := smc.reqIDAllocator.AllocOne()
+func (metaCache *SimpleMetaCache) Update(collectionName string) error {
+	reqID, err := metaCache.reqIDAllocator.AllocOne()
 	if err != nil {
 		return err
 	}
-	ts, err := smc.tsoAllocator.AllocOne()
+	ts, err := metaCache.tsoAllocator.AllocOne()
+	if err != nil {
+		return err
+	}
+	hasCollectionReq := &internalpb.HasCollectionRequest{
+		MsgType:   internalpb.MsgType_kHasCollection,
+		ReqID:     reqID,
+		Timestamp: ts,
+		ProxyID:   metaCache.proxyID,
+		CollectionName: &servicepb.CollectionName{
+			CollectionName: collectionName,
+		},
+	}
+	has, err := metaCache.masterClient.HasCollection(metaCache.ctx, hasCollectionReq)
+	if err != nil {
+		return err
+	}
+	if !has.Value {
+		return errors.New("collection " + collectionName + " not exists")
+	}
+
+	reqID, err = metaCache.reqIDAllocator.AllocOne()
+	if err != nil {
+		return err
+	}
+	ts, err = metaCache.tsoAllocator.AllocOne()
 	if err != nil {
 		return err
 	}
@@ -60,20 +85,32 @@ func (smc *SimpleMetaCache) Update(collectionName string) error {
 		MsgType:   internalpb.MsgType_kDescribeCollection,
 		ReqID:     reqID,
 		Timestamp: ts,
-		ProxyID:   smc.proxyID,
+		ProxyID:   metaCache.proxyID,
 		CollectionName: &servicepb.CollectionName{
 			CollectionName: collectionName,
 		},
 	}
-
-	resp, err := smc.masterClient.DescribeCollection(smc.ctx, req)
+	resp, err := metaCache.masterClient.DescribeCollection(metaCache.ctx, req)
 	if err != nil {
 		return err
 	}
 
-	smc.mu.Lock()
-	defer smc.mu.Unlock()
-	smc.metas[collectionName] = resp
+	metaCache.mu.Lock()
+	defer metaCache.mu.Unlock()
+	metaCache.metas[collectionName] = resp
+
+	return nil
+}
+
+func (metaCache *SimpleMetaCache) Remove(collectionName string) error {
+	metaCache.mu.Lock()
+	defer metaCache.mu.Unlock()
+
+	_, ok := metaCache.metas[collectionName]
+	if !ok {
+		return errors.New("cannot find collection: " + collectionName)
+	}
+	delete(metaCache.metas, collectionName)
 
 	return nil
 }
