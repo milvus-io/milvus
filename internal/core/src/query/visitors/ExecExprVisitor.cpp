@@ -121,9 +121,7 @@ ExecExprVisitor::ExecRangeVisitorImpl(RangeExprImpl<T>& expr, IndexFunc index_fu
     auto& records = segment_.get_insert_record();
     auto data_type = expr.data_type_;
     auto& schema = segment_.get_schema();
-    auto field_offset_opt = schema.get_offset(expr.field_id_);
-    Assert(field_offset_opt);
-    auto field_offset = field_offset_opt.value();
+    auto field_offset = expr.field_offset_;
     auto& field_meta = schema[field_offset];
     auto vec_ptr = records.get_entity<T>(field_offset);
     auto& vec = *vec_ptr;
@@ -234,7 +232,7 @@ ExecExprVisitor::ExecRangeVisitorDispatcher(RangeExpr& expr_raw) -> RetType {
 
 void
 ExecExprVisitor::visit(RangeExpr& expr) {
-    auto& field_meta = segment_.get_schema()[expr.field_id_];
+    auto& field_meta = segment_.get_schema()[expr.field_offset_];
     Assert(expr.data_type_ == field_meta.get_data_type());
     RetType ret;
     switch (expr.data_type_) {
@@ -279,9 +277,8 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> RetType {
     auto& records = segment_.get_insert_record();
     auto data_type = expr.data_type_;
     auto& schema = segment_.get_schema();
-    auto field_offset_opt = schema.get_offset(expr.field_id_);
-    Assert(field_offset_opt);
-    auto field_offset = field_offset_opt.value();
+
+    auto field_offset = expr_raw.field_offset_;
     auto& field_meta = schema[field_offset];
     auto vec_ptr = records.get_entity<T>(field_offset);
     auto& vec = *vec_ptr;
@@ -310,7 +307,7 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> RetType {
 
 void
 ExecExprVisitor::visit(TermExpr& expr) {
-    auto& field_meta = segment_.get_schema()[expr.field_id_];
+    auto& field_meta = segment_.get_schema()[expr.field_offset_];
     Assert(expr.data_type_ == field_meta.get_data_type());
     RetType ret;
     switch (expr.data_type_) {

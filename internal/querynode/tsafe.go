@@ -31,7 +31,7 @@ type tSafe interface {
 }
 
 type tSafeImpl struct {
-	tSafeMu     sync.Mutex // guards all fields
+	tSafeMu     sync.Mutex
 	tSafe       Timestamp
 	watcherList []*tSafeWatcher
 }

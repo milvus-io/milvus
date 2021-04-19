@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
+#if 0
 
 #include <tbb/concurrent_priority_queue.h>
 #include <tbb/concurrent_unordered_map.h>
@@ -162,3 +163,5 @@ class SegmentNaive : public SegmentBase {
     tbb::concurrent_unordered_multimap<idx_t, int64_t> uid2offset_;
 };
 }  // namespace milvus::segcore
+
+#endif

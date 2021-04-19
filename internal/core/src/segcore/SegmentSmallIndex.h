@@ -67,26 +67,6 @@ class SegmentSmallIndex : public SegmentBase {
     Status
     Close() override;
 
-    // using IndexType = knowhere::IndexType;
-    // using IndexMode = knowhere::IndexMode;
-    // using IndexConfig = knowhere::Config;
-    // BuildIndex With Paramaters, must with Frozen State
-    // NOTE: index_params contains several policies for several index
-    // TODO: currently, index has to be set at startup, and can't be modified
-    // AddIndex and DropIndex will be added later
-    Status
-    BuildIndex(IndexMetaPtr index_meta) override;
-
-    Status
-    DropRawData(std::string_view field_name) override {
-        PanicInfo("unimplemented");
-    }
-
-    Status
-    LoadRawData(std::string_view field_name, const char* blob, int64_t blob_size) override {
-        PanicInfo("unimplemented");
-    }
-
     int64_t
     GetMemoryUsageInBytes() override;
 
@@ -150,10 +130,6 @@ class SegmentSmallIndex : public SegmentBase {
     std::shared_ptr<DeletedRecord::TmpBitmap>
     get_deleted_bitmap(int64_t del_barrier, Timestamp query_timestamp, int64_t insert_barrier, bool force = false);
 
-    template <typename Type>
-    knowhere::IndexPtr
-    BuildVecIndexImpl(const IndexMeta::Entry& entry);
-
     Status
     FillTargetEntry(const query::Plan* Plan, QueryResult& results) override;
 
@@ -161,7 +137,6 @@ class SegmentSmallIndex : public SegmentBase {
     int64_t chunk_size_;
     SchemaPtr schema_;
     std::atomic<SegmentState> state_ = SegmentState::Open;
-    IndexMetaPtr index_meta_;
 
     InsertRecord record_;
     DeletedRecord deleted_record_;

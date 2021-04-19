@@ -25,18 +25,16 @@ import (
 type indexParam = map[string]string
 
 type Segment struct {
-	segmentPtr   C.CSegmentBase
-	segmentID    UniqueID
-	partitionTag string // TODO: use partitionID
-	collectionID UniqueID
-	lastMemSize  int64
-	lastRowCount int64
-
-	rmMutex          sync.Mutex // guards recentlyModified
+	segmentPtr       C.CSegmentBase
+	segmentID        UniqueID
+	partitionTag     string // TODO: use partitionID
+	collectionID     UniqueID
+	lastMemSize      int64
+	lastRowCount     int64
+	mu               sync.Mutex
 	recentlyModified bool
-
-	paramMutex sync.RWMutex // guards indexParam
-	indexParam map[int64]indexParam
+	indexParam       map[int64]indexParam
+	paramMutex       sync.RWMutex
 }
 
 func (s *Segment) ID() UniqueID {
@@ -44,14 +42,14 @@ func (s *Segment) ID() UniqueID {
 }
 
 func (s *Segment) SetRecentlyModified(modify bool) {
-	s.rmMutex.Lock()
-	defer s.rmMutex.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.recentlyModified = modify
 }
 
 func (s *Segment) GetRecentlyModified() bool {
-	s.rmMutex.Lock()
-	defer s.rmMutex.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.recentlyModified
 }
 
