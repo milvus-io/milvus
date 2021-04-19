@@ -7,8 +7,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
-
 	"google.golang.org/grpc"
 
 	"github.com/zilliztech/milvus-distributed/internal/dataservice"
@@ -21,10 +19,9 @@ import (
 )
 
 type Service struct {
-	server       *dataservice.Server
-	ctx          context.Context
-	grpcServer   *grpc.Server
-	masterClient *masterservice.GrpcClient
+	server     *dataservice.Server
+	ctx        context.Context
+	grpcServer *grpc.Server
 }
 
 func NewGrpcService(ctx context.Context) *Service {
@@ -49,18 +46,17 @@ func (s *Service) Init() error {
 	datapb.RegisterDataServiceServer(s.grpcServer, s)
 	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", dataservice.Params.Address, dataservice.Params.Port))
 	if err != nil {
-		log.Fatal(err.Error())
 		return nil
 	}
 	c := make(chan struct{})
 	go func() {
 		if err2 := s.grpcServer.Serve(lis); err2 != nil {
-			log.Println(err.Error())
 			close(c)
 			err = err2
 		}
 	}()
 	timer := time.NewTimer(1 * time.Second)
+	defer timer.Stop()
 	select {
 	case <-timer.C:
 		break
