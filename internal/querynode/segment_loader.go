@@ -13,7 +13,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
 )
 
@@ -31,13 +31,13 @@ type segmentLoader struct {
 	indexLoader *indexLoader
 }
 
-func (loader *segmentLoader) getInsertBinlogPaths(segmentID UniqueID) ([]*internalpb2.StringList, []int64, error) {
+func (loader *segmentLoader) getInsertBinlogPaths(segmentID UniqueID) ([]*internalpb.StringList, []int64, error) {
 	ctx := context.TODO()
 	if loader.dataService == nil {
 		return nil, nil, errors.New("null data service client")
 	}
 
-	insertBinlogPathRequest := &datapb.InsertBinlogPathRequest{
+	insertBinlogPathRequest := &datapb.GetInsertBinlogPathsRequest{
 		SegmentID: segmentID,
 	}
 
@@ -47,19 +47,19 @@ func (loader *segmentLoader) getInsertBinlogPaths(segmentID UniqueID) ([]*intern
 	}
 
 	if len(pathResponse.FieldIDs) != len(pathResponse.Paths) || len(pathResponse.FieldIDs) <= 0 {
-		return nil, nil, errors.New("illegal InsertBinlogPathsResponse")
+		return nil, nil, errors.New("illegal GetInsertBinlogPathsResponse")
 	}
 
 	return pathResponse.Paths, pathResponse.FieldIDs, nil
 }
 
-func (loader *segmentLoader) GetSegmentStates(segmentID UniqueID) (*datapb.SegmentStatesResponse, error) {
+func (loader *segmentLoader) GetSegmentStates(segmentID UniqueID) (*datapb.GetSegmentStatesResponse, error) {
 	ctx := context.TODO()
 	if loader.dataService == nil {
 		return nil, errors.New("null data service client")
 	}
 
-	segmentStatesRequest := &datapb.SegmentStatesRequest{
+	segmentStatesRequest := &datapb.GetSegmentStatesRequest{
 		SegmentIDs: []int64{segmentID},
 	}
 	statesResponse, err := loader.dataService.GetSegmentStates(ctx, segmentStatesRequest)
@@ -91,8 +91,8 @@ func (loader *segmentLoader) filterOutVectorFields(fieldIDs []int64, vectorField
 	return targetFields
 }
 
-func (loader *segmentLoader) checkTargetFields(paths []*internalpb2.StringList, srcFieldIDs []int64, dstFieldIDs []int64) (map[int64]*internalpb2.StringList, error) {
-	targetFields := make(map[int64]*internalpb2.StringList)
+func (loader *segmentLoader) checkTargetFields(paths []*internalpb.StringList, srcFieldIDs []int64, dstFieldIDs []int64) (map[int64]*internalpb.StringList, error) {
+	targetFields := make(map[int64]*internalpb.StringList)
 
 	containsFunc := func(s []int64, e int64) bool {
 		for _, a := range s {
@@ -116,7 +116,7 @@ func (loader *segmentLoader) checkTargetFields(paths []*internalpb2.StringList, 
 	return targetFields, nil
 }
 
-func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, targetFields map[int64]*internalpb2.StringList) error {
+func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, targetFields map[int64]*internalpb.StringList) error {
 	for id, p := range targetFields {
 		if id == timestampFieldID {
 			// seg core doesn't need timestamp field

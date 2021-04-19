@@ -15,7 +15,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 )
 
@@ -297,7 +297,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 			resultChannelInt, _ := strconv.ParseInt(searchMsg.ResultChannelID, 10, 64)
 			searchResultMsg := &msgstream.SearchResultMsg{
 				BaseMsg: msgstream.BaseMsg{HashValues: []uint32{uint32(resultChannelInt)}},
-				SearchResults: internalpb2.SearchResults{
+				SearchResults: internalpb.SearchResults{
 					Base: &commonpb.MsgBase{
 						MsgType:   commonpb.MsgType_SearchResult,
 						MsgID:     searchMsg.Base.MsgID,
@@ -359,7 +359,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 		resultChannelInt, _ := strconv.ParseInt(searchMsg.ResultChannelID, 10, 64)
 		searchResultMsg := &msgstream.SearchResultMsg{
 			BaseMsg: msgstream.BaseMsg{HashValues: []uint32{uint32(resultChannelInt)}},
-			SearchResults: internalpb2.SearchResults{
+			SearchResults: internalpb.SearchResults{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_SearchResult,
 					MsgID:     searchMsg.Base.MsgID,
@@ -420,7 +420,7 @@ func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg, errMsg s
 	resultChannelInt, _ := strconv.ParseInt(searchMsg.ResultChannelID, 10, 64)
 	searchResultMsg := &msgstream.SearchResultMsg{
 		BaseMsg: msgstream.BaseMsg{HashValues: []uint32{uint32(resultChannelInt)}},
-		SearchResults: internalpb2.SearchResults{
+		SearchResults: internalpb.SearchResults{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_SearchResult,
 				MsgID:     searchMsg.Base.MsgID,

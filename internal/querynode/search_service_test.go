@@ -14,7 +14,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 )
 
@@ -49,7 +49,7 @@ func TestSearch_Search(t *testing.T) {
 	}
 	placeholderValue := milvuspb.PlaceholderValue{
 		Tag:    "$0",
-		Type:   milvuspb.PlaceholderType_VECTOR_FLOAT,
+		Type:   milvuspb.PlaceholderType_FloatVector,
 		Values: [][]byte{searchRawData1, searchRawData2},
 	}
 
@@ -80,7 +80,7 @@ func TestSearch_Search(t *testing.T) {
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{0},
 		},
-		SearchRequest: internalpb2.SearchRequest{
+		SearchRequest: internalpb.SearchRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Search,
 				MsgID:     1,
@@ -136,7 +136,7 @@ func TestSearch_Search(t *testing.T) {
 					uint32(i),
 				},
 			},
-			InsertRequest: internalpb2.InsertRequest{
+			InsertRequest: internalpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     int64(i),
@@ -170,7 +170,7 @@ func TestSearch_Search(t *testing.T) {
 		EndTimestamp:   0,
 		HashValues:     []uint32{0},
 	}
-	timeTickResult := internalpb2.TimeTickMsg{
+	timeTickResult := internalpb.TimeTickMsg{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_TimeTick,
 			MsgID:     0,
@@ -255,7 +255,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	}
 	placeholderValue := milvuspb.PlaceholderValue{
 		Tag:    "$0",
-		Type:   milvuspb.PlaceholderType_VECTOR_FLOAT,
+		Type:   milvuspb.PlaceholderType_FloatVector,
 		Values: [][]byte{searchRawData1, searchRawData2},
 	}
 
@@ -286,7 +286,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{0},
 		},
-		SearchRequest: internalpb2.SearchRequest{
+		SearchRequest: internalpb.SearchRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Search,
 				MsgID:     1,
@@ -338,7 +338,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 					uint32(i),
 				},
 			},
-			InsertRequest: internalpb2.InsertRequest{
+			InsertRequest: internalpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     int64(i),
@@ -372,7 +372,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 		EndTimestamp:   0,
 		HashValues:     []uint32{0},
 	}
-	timeTickResult := internalpb2.TimeTickMsg{
+	timeTickResult := internalpb.TimeTickMsg{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_TimeTick,
 			MsgID:     0,

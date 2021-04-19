@@ -9,7 +9,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 type filterDmNode struct {
@@ -49,7 +49,7 @@ func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, cont
 			timestampMin: msgStreamMsg.TimestampMin(),
 			timestampMax: msgStreamMsg.TimestampMax(),
 		},
-		startPositions: make([]*internalpb2.MsgPosition, 0),
+		startPositions: make([]*internalpb.MsgPosition, 0),
 	}
 
 	iMsg.flushMessages = append(iMsg.flushMessages, ddMsg.flushMessages...)

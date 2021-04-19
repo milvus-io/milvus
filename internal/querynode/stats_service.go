@@ -8,7 +8,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 type statsService struct {
@@ -16,12 +16,12 @@ type statsService struct {
 
 	replica ReplicaInterface
 
-	fieldStatsChan chan []*internalpb2.FieldStats
+	fieldStatsChan chan []*internalpb.FieldStats
 	statsStream    msgstream.MsgStream
 	msFactory      msgstream.Factory
 }
 
-func newStatsService(ctx context.Context, replica ReplicaInterface, fieldStatsChan chan []*internalpb2.FieldStats, factory msgstream.Factory) *statsService {
+func newStatsService(ctx context.Context, replica ReplicaInterface, fieldStatsChan chan []*internalpb.FieldStats, factory msgstream.Factory) *statsService {
 
 	return &statsService{
 		ctx: ctx,
@@ -69,10 +69,10 @@ func (sService *statsService) close() {
 	}
 }
 
-func (sService *statsService) publicStatistic(fieldStats []*internalpb2.FieldStats) {
+func (sService *statsService) publicStatistic(fieldStats []*internalpb.FieldStats) {
 	segStats := sService.replica.getSegmentStatistics()
 
-	queryNodeStats := internalpb2.QueryNodeStats{
+	queryNodeStats := internalpb.QueryNodeStats{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_QueryNodeStats,
 			SourceID: Params.QueryNodeID,

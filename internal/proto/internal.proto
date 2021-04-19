@@ -1,6 +1,6 @@
 syntax = "proto3";
 package milvus.proto.internal;
-option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/internalpb2";
+option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/internalpb";
 
 import "common.proto";
 
@@ -11,7 +11,7 @@ enum StateCode {
 }
 
 message ComponentInfo {
-  int64  nodeID = 1;
+  int64 nodeID = 1;
   string role = 2;
   StateCode state_code = 3;
   repeated common.KeyValuePair extra_info = 4;
@@ -23,7 +23,19 @@ message ComponentStates {
   common.Status status = 3;
 }
 
-message  NodeInfo {
+message GetComponentStatesRequest {
+}
+
+message GetTimeTickChannelRequest {
+}
+
+message GetStatisticsChannelRequest {
+}
+
+message GetDdChannelRequest {
+}
+
+message NodeInfo {
   common.Address address = 1;
   string role = 2;
 }
@@ -42,7 +54,6 @@ message TimeTickMsg {
   common.MsgBase base = 1;
 }
 
-
 message CreateCollectionRequest {
   common.MsgBase base = 1;
   string db_name = 2;
@@ -52,7 +63,6 @@ message CreateCollectionRequest {
   int64 collectionID = 5;
   bytes schema = 6;
 }
-
 
 message DropCollectionRequest {
   common.MsgBase base = 1;
@@ -67,22 +77,20 @@ message CreatePartitionRequest {
   string db_name = 2;
   string collection_name = 3;
   string partition_name = 4;
-  int64  dbID = 5;
+  int64 dbID = 5;
   int64 collectionID = 6;
   int64 partitionID = 7;
 }
-
 
 message DropPartitionRequest {
   common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
   string partition_name = 4;
-  int64  dbID = 5;
+  int64 dbID = 5;
   int64 collectionID = 6;
   int64 partitionID = 7;
 }
-
 
 message CreateIndexRequest {
   common.MsgBase base = 1;
@@ -93,9 +101,7 @@ message CreateIndexRequest {
   int64 collectionID = 6;
   int64 fieldID = 7;
   repeated common.KeyValuePair extra_params = 8;
-
 }
-
 
 message InsertRequest {
   common.MsgBase base = 1;
@@ -112,7 +118,6 @@ message InsertRequest {
   repeated common.Blob row_data = 12;
 }
 
-
 message SearchRequest {
   common.MsgBase base = 1;
   string result_channelID = 2;
@@ -125,7 +130,6 @@ message SearchRequest {
   common.Blob query = 8;
 }
 
-
 message SearchResults {
   common.MsgBase base = 1;
   common.Status status = 2;
@@ -133,7 +137,6 @@ message SearchResults {
   string metric_type = 4;
   repeated bytes hits = 5;
 }
-
 
 message DeleteRequest {
   common.MsgBase base = 1;
@@ -149,20 +152,6 @@ message FlushMsg {
   int64 collectionID = 3;
   string partitionTag = 4;
 }
-
-//message Key2Seg {
-//  int64 rowID = 1;
-//  int64 primary_key = 2;
-//  uint64 timestamp = 3;
-//  bool is_valid = 4;
-//  repeated int64 segmentIDs = 5;
-//}
-//
-//
-//message Key2SegMsg {
-//  int64 reqID = 1;
-//  repeated Key2Seg key2seg = 2;
-//}
 
 message LoadIndex {
   common.MsgBase base = 1;

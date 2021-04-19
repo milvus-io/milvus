@@ -12,7 +12,7 @@ import (
 )
 
 func TestInsertBinlog(t *testing.T) {
-	w, err := NewInsertBinlogWriter(schemapb.DataType_INT64, 10, 20, 30, 40)
+	w, err := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
 	assert.Nil(t, err)
 
 	e1, err := w.NextInsertEventWriter()
@@ -133,7 +133,7 @@ func TestInsertBinlog(t *testing.T) {
 
 	//descriptor data fix, payload type
 	colType := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, schemapb.DataType(colType), schemapb.DataType_INT64)
+	assert.Equal(t, schemapb.DataType(colType), schemapb.DataType_Int64)
 	pos += int(unsafe.Sizeof(colType))
 
 	//descriptor data, post header lengths
@@ -183,7 +183,7 @@ func TestInsertBinlog(t *testing.T) {
 
 	//insert e1, payload
 	e1Payload := buf[pos:e1NxtPos]
-	e1r, err := NewPayloadReader(schemapb.DataType_INT64, e1Payload)
+	e1r, err := NewPayloadReader(schemapb.DataType_Int64, e1Payload)
 	assert.Nil(t, err)
 	e1a, err := e1r.GetInt64FromPayload()
 	assert.Nil(t, err)
@@ -231,7 +231,7 @@ func TestInsertBinlog(t *testing.T) {
 
 	//insert e2, payload
 	e2Payload := buf[pos:]
-	e2r, err := NewPayloadReader(schemapb.DataType_INT64, e2Payload)
+	e2r, err := NewPayloadReader(schemapb.DataType_Int64, e2Payload)
 	assert.Nil(t, err)
 	e2a, err := e2r.GetInt64FromPayload()
 	assert.Nil(t, err)
@@ -272,7 +272,7 @@ func TestInsertBinlog(t *testing.T) {
 }
 
 func TestDeleteBinlog(t *testing.T) {
-	w, err := NewDeleteBinlogWriter(schemapb.DataType_INT64, 50)
+	w, err := NewDeleteBinlogWriter(schemapb.DataType_Int64, 50)
 	assert.Nil(t, err)
 
 	e1, err := w.NextDeleteEventWriter()
@@ -393,7 +393,7 @@ func TestDeleteBinlog(t *testing.T) {
 
 	//descriptor data fix, payload type
 	colType := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, schemapb.DataType(colType), schemapb.DataType_INT64)
+	assert.Equal(t, schemapb.DataType(colType), schemapb.DataType_Int64)
 	pos += int(unsafe.Sizeof(colType))
 
 	//descriptor data, post header lengths
@@ -443,7 +443,7 @@ func TestDeleteBinlog(t *testing.T) {
 
 	//insert e1, payload
 	e1Payload := buf[pos:e1NxtPos]
-	e1r, err := NewPayloadReader(schemapb.DataType_INT64, e1Payload)
+	e1r, err := NewPayloadReader(schemapb.DataType_Int64, e1Payload)
 	assert.Nil(t, err)
 	e1a, err := e1r.GetInt64FromPayload()
 	assert.Nil(t, err)
@@ -491,7 +491,7 @@ func TestDeleteBinlog(t *testing.T) {
 
 	//insert e2, payload
 	e2Payload := buf[pos:]
-	e2r, err := NewPayloadReader(schemapb.DataType_INT64, e2Payload)
+	e2r, err := NewPayloadReader(schemapb.DataType_Int64, e2Payload)
 	assert.Nil(t, err)
 	e2a, err := e2r.GetInt64FromPayload()
 	assert.Nil(t, err)
@@ -532,7 +532,7 @@ func TestDeleteBinlog(t *testing.T) {
 }
 
 func TestDDLBinlog1(t *testing.T) {
-	w, err := NewDDLBinlogWriter(schemapb.DataType_INT64, 50)
+	w, err := NewDDLBinlogWriter(schemapb.DataType_Int64, 50)
 	assert.Nil(t, err)
 
 	e1, err := w.NextCreateCollectionEventWriter()
@@ -653,7 +653,7 @@ func TestDDLBinlog1(t *testing.T) {
 
 	//descriptor data fix, payload type
 	colType := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, schemapb.DataType(colType), schemapb.DataType_INT64)
+	assert.Equal(t, schemapb.DataType(colType), schemapb.DataType_Int64)
 	pos += int(unsafe.Sizeof(colType))
 
 	//descriptor data, post header lengths
@@ -703,7 +703,7 @@ func TestDDLBinlog1(t *testing.T) {
 
 	//insert e1, payload
 	e1Payload := buf[pos:e1NxtPos]
-	e1r, err := NewPayloadReader(schemapb.DataType_INT64, e1Payload)
+	e1r, err := NewPayloadReader(schemapb.DataType_Int64, e1Payload)
 	assert.Nil(t, err)
 	e1a, err := e1r.GetInt64FromPayload()
 	assert.Nil(t, err)
@@ -751,7 +751,7 @@ func TestDDLBinlog1(t *testing.T) {
 
 	//insert e2, payload
 	e2Payload := buf[pos:]
-	e2r, err := NewPayloadReader(schemapb.DataType_INT64, e2Payload)
+	e2r, err := NewPayloadReader(schemapb.DataType_Int64, e2Payload)
 	assert.Nil(t, err)
 	e2a, err := e2r.GetInt64FromPayload()
 	assert.Nil(t, err)
@@ -792,7 +792,7 @@ func TestDDLBinlog1(t *testing.T) {
 }
 
 func TestDDLBinlog2(t *testing.T) {
-	w, err := NewDDLBinlogWriter(schemapb.DataType_INT64, 50)
+	w, err := NewDDLBinlogWriter(schemapb.DataType_Int64, 50)
 	assert.Nil(t, err)
 
 	e1, err := w.NextCreatePartitionEventWriter()
@@ -913,7 +913,7 @@ func TestDDLBinlog2(t *testing.T) {
 
 	//descriptor data fix, payload type
 	colType := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, schemapb.DataType(colType), schemapb.DataType_INT64)
+	assert.Equal(t, schemapb.DataType(colType), schemapb.DataType_Int64)
 	pos += int(unsafe.Sizeof(colType))
 
 	//descriptor data, post header lengths
@@ -963,7 +963,7 @@ func TestDDLBinlog2(t *testing.T) {
 
 	//insert e1, payload
 	e1Payload := buf[pos:e1NxtPos]
-	e1r, err := NewPayloadReader(schemapb.DataType_INT64, e1Payload)
+	e1r, err := NewPayloadReader(schemapb.DataType_Int64, e1Payload)
 	assert.Nil(t, err)
 	e1a, err := e1r.GetInt64FromPayload()
 	assert.Nil(t, err)
@@ -1011,7 +1011,7 @@ func TestDDLBinlog2(t *testing.T) {
 
 	//insert e2, payload
 	e2Payload := buf[pos:]
-	e2r, err := NewPayloadReader(schemapb.DataType_INT64, e2Payload)
+	e2r, err := NewPayloadReader(schemapb.DataType_Int64, e2Payload)
 	assert.Nil(t, err)
 	e2a, err := e2r.GetInt64FromPayload()
 	assert.Nil(t, err)

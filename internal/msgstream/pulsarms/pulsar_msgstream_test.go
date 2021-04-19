@@ -13,7 +13,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
 
@@ -49,7 +49,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 	}
 	switch msgType {
 	case commonpb.MsgType_Insert:
-		insertRequest := internalpb2.InsertRequest{
+		insertRequest := internalpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     reqID,
@@ -70,7 +70,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 		}
 		return insertMsg
 	case commonpb.MsgType_Delete:
-		deleteRequest := internalpb2.DeleteRequest{
+		deleteRequest := internalpb.DeleteRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Delete,
 				MsgID:     reqID,
@@ -88,7 +88,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 		}
 		return deleteMsg
 	case commonpb.MsgType_Search:
-		searchRequest := internalpb2.SearchRequest{
+		searchRequest := internalpb.SearchRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Search,
 				MsgID:     reqID,
@@ -104,7 +104,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 		}
 		return searchMsg
 	case commonpb.MsgType_SearchResult:
-		searchResult := internalpb2.SearchResults{
+		searchResult := internalpb.SearchResults{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_SearchResult,
 				MsgID:     reqID,
@@ -120,7 +120,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 		}
 		return searchResultMsg
 	case commonpb.MsgType_TimeTick:
-		timeTickResult := internalpb2.TimeTickMsg{
+		timeTickResult := internalpb.TimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     reqID,
@@ -134,7 +134,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 		}
 		return timeTickMsg
 	case commonpb.MsgType_QueryNodeStats:
-		queryNodeSegStats := internalpb2.QueryNodeStats{
+		queryNodeSegStats := internalpb.QueryNodeStats{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_QueryNodeStats,
 				SourceID: reqID,
@@ -155,7 +155,7 @@ func getTimeTickMsg(reqID UniqueID, hashValue uint32, time uint64) TsMsg {
 		EndTimestamp:   0,
 		HashValues:     []uint32{hashValue},
 	}
-	timeTickResult := internalpb2.TimeTickMsg{
+	timeTickResult := internalpb.TimeTickMsg{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_TimeTick,
 			MsgID:     reqID,
@@ -403,7 +403,7 @@ func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
 		HashValues:     []uint32{1, 3},
 	}
 
-	insertRequest := internalpb2.InsertRequest{
+	insertRequest := internalpb.InsertRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Insert,
 			MsgID:     1,
@@ -459,7 +459,7 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 		HashValues:     []uint32{1, 3},
 	}
 
-	deleteRequest := internalpb2.DeleteRequest{
+	deleteRequest := internalpb.DeleteRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Delete,
 			MsgID:     1,

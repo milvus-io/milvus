@@ -24,7 +24,7 @@ func newAllocator(s types.MasterService) *allocator {
 
 func (alloc *allocator) allocID() (UniqueID, error) {
 	ctx := context.TODO()
-	resp, err := alloc.masterService.AllocID(ctx, &masterpb.IDRequest{
+	resp, err := alloc.masterService.AllocID(ctx, &masterpb.AllocIDRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestID,
 			MsgID:     1, // GOOSE TODO

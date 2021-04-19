@@ -124,7 +124,7 @@ func (info *assignInfo) IsActive(now time.Time) bool {
 type SegIDAssigner struct {
 	Allocator
 	assignInfos map[UniqueID]*list.List // collectionID -> *list.List
-	segReqs     []*datapb.SegIDRequest
+	segReqs     []*datapb.SegmentIDRequest
 	getTickFunc func() Timestamp
 	PeerID      UniqueID
 
@@ -198,7 +198,7 @@ func (sa *SegIDAssigner) pickCanDoFunc() {
 		records[collID][partitionID][channelName] += segRequest.count
 		assign, err := sa.getAssign(segRequest.collID, segRequest.partitionID, segRequest.channelName)
 		if err != nil || assign.Capacity(segRequest.timestamp) < records[collID][partitionID][channelName] {
-			sa.segReqs = append(sa.segReqs, &datapb.SegIDRequest{
+			sa.segReqs = append(sa.segReqs, &datapb.SegmentIDRequest{
 				ChannelName:  channelName,
 				Count:        segRequest.count,
 				CollectionID: collID,
@@ -234,7 +234,7 @@ func (sa *SegIDAssigner) checkSyncFunc(timeout bool) bool {
 	return timeout || len(sa.segReqs) != 0
 }
 
-func (sa *SegIDAssigner) checkSegReqEqual(req1, req2 *datapb.SegIDRequest) bool {
+func (sa *SegIDAssigner) checkSegReqEqual(req1, req2 *datapb.SegmentIDRequest) bool {
 	if req1 == nil || req2 == nil {
 		return false
 	}
@@ -251,9 +251,9 @@ func (sa *SegIDAssigner) reduceSegReqs() {
 		return
 	}
 
-	var newSegReqs []*datapb.SegIDRequest
+	var newSegReqs []*datapb.SegmentIDRequest
 	for _, req1 := range sa.segReqs {
-		var req2 *datapb.SegIDRequest
+		var req2 *datapb.SegmentIDRequest
 		for _, req3 := range newSegReqs {
 			if sa.checkSegReqEqual(req1, req3) {
 				req2 = req3
@@ -282,13 +282,13 @@ func (sa *SegIDAssigner) syncSegments() bool {
 	sa.reduceSegReqs()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	req := &datapb.AssignSegIDRequest{
-		NodeID:        sa.PeerID,
-		PeerRole:      typeutil.ProxyNodeRole,
-		SegIDRequests: sa.segReqs,
+	req := &datapb.AssignSegmentIDRequest{
+		NodeID:            sa.PeerID,
+		PeerRole:          typeutil.ProxyNodeRole,
+		SegmentIDRequests: sa.segReqs,
 	}
 
-	sa.segReqs = []*datapb.SegIDRequest{}
+	sa.segReqs = []*datapb.SegmentIDRequest{}
 	resp, err := sa.dataService.AssignSegmentID(ctx, req)
 
 	if err != nil {

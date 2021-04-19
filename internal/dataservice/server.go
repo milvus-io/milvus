@@ -28,7 +28,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 )
 
@@ -73,7 +73,7 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 		msFactory:        factory,
 	}
 	s.insertChannels = s.getInsertChannels()
-	s.UpdateStateCode(internalpb2.StateCode_Abnormal)
+	s.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return s, nil
 }
 
@@ -122,17 +122,17 @@ func (s *Server) Start() error {
 		return err
 	}
 	s.startServerLoop()
-	s.UpdateStateCode(internalpb2.StateCode_Healthy)
+	s.UpdateStateCode(internalpb.StateCode_Healthy)
 	log.Debug("start success")
 	return nil
 }
 
-func (s *Server) UpdateStateCode(code internalpb2.StateCode) {
+func (s *Server) UpdateStateCode(code internalpb.StateCode) {
 	s.state.Store(code)
 }
 
 func (s *Server) checkStateIsHealthy() bool {
-	return s.state.Load().(internalpb2.StateCode) == internalpb2.StateCode_Healthy
+	return s.state.Load().(internalpb.StateCode) == internalpb.StateCode_Healthy
 }
 
 func (s *Server) initMeta() error {
@@ -202,7 +202,7 @@ func (s *Server) loadMetaFromMaster() error {
 		}
 		s.ddChannelName = channel.Value
 	}
-	collections, err := s.masterClient.ShowCollections(ctx, &milvuspb.ShowCollectionRequest{
+	collections, err := s.masterClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_ShowCollections,
 			MsgID:     -1, // todo add msg id
@@ -229,7 +229,7 @@ func (s *Server) loadMetaFromMaster() error {
 			log.Error("describe collection error", zap.String("collectionName", collectionName), zap.Error(err))
 			continue
 		}
-		partitions, err := s.masterClient.ShowPartitions(ctx, &milvuspb.ShowPartitionRequest{
+		partitions, err := s.masterClient.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ShowPartitions,
 				MsgID:     -1, // todo
@@ -266,7 +266,7 @@ func (s *Server) checkMasterIsHealthy() error {
 		cancel()
 	}()
 	for {
-		var resp *internalpb2.ComponentStates
+		var resp *internalpb.ComponentStates
 		var err error
 		select {
 		case <-ctx.Done():
@@ -277,7 +277,7 @@ func (s *Server) checkMasterIsHealthy() error {
 				return err
 			}
 		}
-		if resp.State.StateCode == internalpb2.StateCode_Healthy {
+		if resp.State.StateCode == internalpb.StateCode_Healthy {
 			break
 		}
 	}
@@ -404,12 +404,12 @@ func (s *Server) stopServerLoop() {
 	s.serverLoopWg.Wait()
 }
 
-func (s *Server) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
-	resp := &internalpb2.ComponentStates{
-		State: &internalpb2.ComponentInfo{
+func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	resp := &internalpb.ComponentStates{
+		State: &internalpb.ComponentInfo{
 			NodeID:    Params.NodeID,
 			Role:      role,
-			StateCode: s.state.Load().(internalpb2.StateCode),
+			StateCode: s.state.Load().(internalpb.StateCode),
 		},
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -466,7 +466,7 @@ func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeReque
 		s.ddChannelName = resp.Value
 	}
 	ret.Status.ErrorCode = commonpb.ErrorCode_Success
-	ret.InitParams = &internalpb2.InitParams{
+	ret.InitParams = &internalpb.InitParams{
 		NodeID: Params.NodeID,
 		StartParams: []*commonpb.KeyValuePair{
 			{Key: "DDChannelName", Value: s.ddChannelName},
@@ -511,26 +511,26 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb
 	}, nil
 }
 
-func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegIDRequest) (*datapb.AssignSegIDResponse, error) {
-	resp := &datapb.AssignSegIDResponse{
+func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
+	resp := &datapb.AssignSegmentIDResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		SegIDAssignments: make([]*datapb.SegIDAssignment, 0),
+		SegIDAssignments: make([]*datapb.SegmentIDAssignment, 0),
 	}
 	if !s.checkStateIsHealthy() {
 		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		resp.Status.Reason = "server is initializing"
 		return resp, nil
 	}
-	for _, r := range req.SegIDRequests {
+	for _, r := range req.SegmentIDRequests {
 		if !s.meta.HasCollection(r.CollectionID) {
 			if err := s.loadCollectionFromMaster(r.CollectionID); err != nil {
 				log.Error("load collection from master error", zap.Int64("collectionID", r.CollectionID), zap.Error(err))
 				continue
 			}
 		}
-		result := &datapb.SegIDAssignment{
+		result := &datapb.SegmentIDAssignment{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			},
@@ -630,8 +630,8 @@ func (s *Server) openNewSegment(collectionID UniqueID, partitionID UniqueID, cha
 	return nil
 }
 
-func (s *Server) ShowSegments(ctx context.Context, req *datapb.ShowSegmentRequest) (*datapb.ShowSegmentResponse, error) {
-	resp := &datapb.ShowSegmentResponse{
+func (s *Server) ShowSegments(ctx context.Context, req *datapb.ShowSegmentsRequest) (*datapb.ShowSegmentsResponse, error) {
+	resp := &datapb.ShowSegmentsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
@@ -646,8 +646,8 @@ func (s *Server) ShowSegments(ctx context.Context, req *datapb.ShowSegmentReques
 	return resp, nil
 }
 
-func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.SegmentStatesRequest) (*datapb.SegmentStatesResponse, error) {
-	resp := &datapb.SegmentStatesResponse{
+func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
+	resp := &datapb.GetSegmentStatesResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
@@ -682,8 +682,8 @@ func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.SegmentStates
 	return resp, nil
 }
 
-func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.InsertBinlogPathRequest) (*datapb.InsertBinlogPathsResponse, error) {
-	resp := &datapb.InsertBinlogPathsResponse{
+func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
+	resp := &datapb.GetInsertBinlogPathsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
@@ -701,10 +701,10 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.InsertBin
 		return resp, nil
 	}
 	fields := make([]UniqueID, len(flushMeta.Fields))
-	paths := make([]*internalpb2.StringList, len(flushMeta.Fields))
+	paths := make([]*internalpb.StringList, len(flushMeta.Fields))
 	for i, field := range flushMeta.Fields {
 		fields[i] = field.FieldID
-		paths[i] = &internalpb2.StringList{Values: field.BinlogPaths}
+		paths[i] = &internalpb.StringList{Values: field.BinlogPaths}
 	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.FieldIDs = fields
@@ -712,8 +712,8 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.InsertBin
 	return resp, nil
 }
 
-func (s *Server) GetInsertChannels(ctx context.Context, req *datapb.InsertChannelRequest) (*internalpb2.StringList, error) {
-	return &internalpb2.StringList{
+func (s *Server) GetInsertChannels(ctx context.Context, req *datapb.GetInsertChannelsRequest) (*internalpb.StringList, error) {
+	return &internalpb.StringList{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
@@ -721,8 +721,8 @@ func (s *Server) GetInsertChannels(ctx context.Context, req *datapb.InsertChanne
 	}, nil
 }
 
-func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error) {
-	resp := &datapb.CollectionStatsResponse{
+func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
+	resp := &datapb.GetCollectionStatisticsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
@@ -737,7 +737,7 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.Collec
 	return resp, nil
 }
 
-func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.PartitionStatsRequest) (*datapb.PartitionStatsResponse, error) {
+func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
 	// todo implement
 	return nil, nil
 }
@@ -751,8 +751,8 @@ func (s *Server) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringRes
 	}, nil
 }
 
-func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error) {
-	resp := &datapb.SegmentInfoResponse{
+func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+	resp := &datapb.GetSegmentInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},

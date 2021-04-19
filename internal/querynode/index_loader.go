@@ -22,7 +22,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
 )
@@ -30,8 +30,8 @@ import (
 type indexLoader struct {
 	replica ReplicaInterface
 
-	fieldIndexes   map[string][]*internalpb2.IndexStats
-	fieldStatsChan chan []*internalpb2.FieldStats
+	fieldIndexes   map[string][]*internalpb.IndexStats
+	fieldStatsChan chan []*internalpb.FieldStats
 
 	masterService types.MasterService
 	indexService  types.IndexService
@@ -182,9 +182,9 @@ func (loader *indexLoader) updateSegmentIndexStats(indexParams indexParam, index
 	// sort index params by key
 	sort.Slice(newIndexParams, func(i, j int) bool { return newIndexParams[i].Key < newIndexParams[j].Key })
 	if !ok {
-		loader.fieldIndexes[fieldStatsKey] = make([]*internalpb2.IndexStats, 0)
+		loader.fieldIndexes[fieldStatsKey] = make([]*internalpb.IndexStats, 0)
 		loader.fieldIndexes[fieldStatsKey] = append(loader.fieldIndexes[fieldStatsKey],
-			&internalpb2.IndexStats{
+			&internalpb.IndexStats{
 				IndexParams:        newIndexParams,
 				NumRelatedSegments: 1,
 			})
@@ -198,7 +198,7 @@ func (loader *indexLoader) updateSegmentIndexStats(indexParams indexParam, index
 		}
 		if isNewIndex {
 			loader.fieldIndexes[fieldStatsKey] = append(loader.fieldIndexes[fieldStatsKey],
-				&internalpb2.IndexStats{
+				&internalpb.IndexStats{
 					IndexParams:        newIndexParams,
 					NumRelatedSegments: 1,
 				})
@@ -278,13 +278,13 @@ func (loader *indexLoader) updateSegmentIndex(indexParams indexParam, bytesIndex
 }
 
 func (loader *indexLoader) sendQueryNodeStats() error {
-	resultFieldsStats := make([]*internalpb2.FieldStats, 0)
+	resultFieldsStats := make([]*internalpb.FieldStats, 0)
 	for fieldStatsKey, indexStats := range loader.fieldIndexes {
 		colID, fieldID, err := loader.fieldsStatsKey2IDs(fieldStatsKey)
 		if err != nil {
 			return err
 		}
-		fieldStats := internalpb2.FieldStats{
+		fieldStats := internalpb.FieldStats{
 			CollectionID: colID,
 			FieldID:      fieldID,
 			IndexStats:   indexStats,
@@ -338,7 +338,7 @@ func (loader *indexLoader) getIndexPaths(indexBuildID UniqueID) ([]string, error
 		return nil, errors.New("null index service client")
 	}
 
-	indexFilePathRequest := &indexpb.IndexFilePathsRequest{
+	indexFilePathRequest := &indexpb.GetIndexFilePathsRequest{
 		IndexBuildIDs: []UniqueID{indexBuildID},
 	}
 	pathResponse, err := loader.indexService.GetIndexFilePaths(ctx, indexFilePathRequest)
@@ -414,8 +414,8 @@ func newIndexLoader(ctx context.Context, masterService types.MasterService, inde
 	return &indexLoader{
 		replica: replica,
 
-		fieldIndexes:   make(map[string][]*internalpb2.IndexStats),
-		fieldStatsChan: make(chan []*internalpb2.FieldStats, 1),
+		fieldIndexes:   make(map[string][]*internalpb.IndexStats),
+		fieldStatsChan: make(chan []*internalpb.FieldStats, 1),
 
 		masterService: masterService,
 		indexService:  indexService,

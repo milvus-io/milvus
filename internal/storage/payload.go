@@ -76,56 +76,56 @@ func (w *PayloadWriter) AddDataToPayload(msgs interface{}, dim ...int) error {
 	switch len(dim) {
 	case 0:
 		switch w.colType {
-		case schemapb.DataType_BOOL:
+		case schemapb.DataType_Bool:
 			val, ok := msgs.([]bool)
 			if !ok {
 				return errors.New("incorrect data type")
 			}
 			return w.AddBoolToPayload(val)
 
-		case schemapb.DataType_INT8:
+		case schemapb.DataType_Int8:
 			val, ok := msgs.([]int8)
 			if !ok {
 				return errors.New("incorrect data type")
 			}
 			return w.AddInt8ToPayload(val)
 
-		case schemapb.DataType_INT16:
+		case schemapb.DataType_Int16:
 			val, ok := msgs.([]int16)
 			if !ok {
 				return errors.New("incorrect data type")
 			}
 			return w.AddInt16ToPayload(val)
 
-		case schemapb.DataType_INT32:
+		case schemapb.DataType_Int32:
 			val, ok := msgs.([]int32)
 			if !ok {
 				return errors.New("incorrect data type")
 			}
 			return w.AddInt32ToPayload(val)
 
-		case schemapb.DataType_INT64:
+		case schemapb.DataType_Int64:
 			val, ok := msgs.([]int64)
 			if !ok {
 				return errors.New("incorrect data type")
 			}
 			return w.AddInt64ToPayload(val)
 
-		case schemapb.DataType_FLOAT:
+		case schemapb.DataType_Float:
 			val, ok := msgs.([]float32)
 			if !ok {
 				return errors.New("incorrect data type")
 			}
 			return w.AddFloatToPayload(val)
 
-		case schemapb.DataType_DOUBLE:
+		case schemapb.DataType_Double:
 			val, ok := msgs.([]float64)
 			if !ok {
 				return errors.New("incorrect data type")
 			}
 			return w.AddDoubleToPayload(val)
 
-		case schemapb.DataType_STRING:
+		case schemapb.DataType_String:
 			val, ok := msgs.(string)
 			if !ok {
 				return errors.New("incorrect data type")
@@ -134,14 +134,14 @@ func (w *PayloadWriter) AddDataToPayload(msgs interface{}, dim ...int) error {
 		}
 	case 1:
 		switch w.colType {
-		case schemapb.DataType_VECTOR_BINARY:
+		case schemapb.DataType_BinaryVector:
 			val, ok := msgs.([]byte)
 			if !ok {
 				return errors.New("incorrect data type")
 			}
 			return w.AddBinaryVectorToPayload(val, dim[0])
 
-		case schemapb.DataType_VECTOR_FLOAT:
+		case schemapb.DataType_FloatVector:
 			val, ok := msgs.([]float32)
 			if !ok {
 				return errors.New("incorrect data type")
@@ -430,44 +430,44 @@ func (r *PayloadReader) GetDataFromPayload(idx ...int) (interface{}, int, error)
 	switch len(idx) {
 	case 1:
 		switch r.colType {
-		case schemapb.DataType_STRING:
+		case schemapb.DataType_String:
 			val, err := r.GetOneStringFromPayload(idx[0])
 			return val, 0, err
 		}
 	case 0:
 		switch r.colType {
-		case schemapb.DataType_BOOL:
+		case schemapb.DataType_Bool:
 			val, err := r.GetBoolFromPayload()
 			return val, 0, err
 
-		case schemapb.DataType_INT8:
+		case schemapb.DataType_Int8:
 			val, err := r.GetInt8FromPayload()
 			return val, 0, err
 
-		case schemapb.DataType_INT16:
+		case schemapb.DataType_Int16:
 			val, err := r.GetInt16FromPayload()
 			return val, 0, err
 
-		case schemapb.DataType_INT32:
+		case schemapb.DataType_Int32:
 			val, err := r.GetInt32FromPayload()
 			return val, 0, err
 
-		case schemapb.DataType_INT64:
+		case schemapb.DataType_Int64:
 			val, err := r.GetInt64FromPayload()
 			return val, 0, err
 
-		case schemapb.DataType_FLOAT:
+		case schemapb.DataType_Float:
 			val, err := r.GetFloatFromPayload()
 			return val, 0, err
 
-		case schemapb.DataType_DOUBLE:
+		case schemapb.DataType_Double:
 			val, err := r.GetDoubleFromPayload()
 			return val, 0, err
 
-		case schemapb.DataType_VECTOR_BINARY:
+		case schemapb.DataType_BinaryVector:
 			return r.GetBinaryVectorFromPayload()
 
-		case schemapb.DataType_VECTOR_FLOAT:
+		case schemapb.DataType_FloatVector:
 			return r.GetFloatVectorFromPayload()
 		default:
 			return nil, 0, errors.New("Unknown type")
@@ -491,7 +491,7 @@ func (r *PayloadReader) ReleasePayloadReader() error {
 }
 
 func (r *PayloadReader) GetBoolFromPayload() ([]bool, error) {
-	if r.colType != schemapb.DataType_BOOL {
+	if r.colType != schemapb.DataType_Bool {
 		return nil, errors.New("incorrect data type")
 	}
 
@@ -511,7 +511,7 @@ func (r *PayloadReader) GetBoolFromPayload() ([]bool, error) {
 }
 
 func (r *PayloadReader) GetInt8FromPayload() ([]int8, error) {
-	if r.colType != schemapb.DataType_INT8 {
+	if r.colType != schemapb.DataType_Int8 {
 		return nil, errors.New("incorrect data type")
 	}
 
@@ -531,7 +531,7 @@ func (r *PayloadReader) GetInt8FromPayload() ([]int8, error) {
 }
 
 func (r *PayloadReader) GetInt16FromPayload() ([]int16, error) {
-	if r.colType != schemapb.DataType_INT16 {
+	if r.colType != schemapb.DataType_Int16 {
 		return nil, errors.New("incorrect data type")
 	}
 
@@ -551,7 +551,7 @@ func (r *PayloadReader) GetInt16FromPayload() ([]int16, error) {
 }
 
 func (r *PayloadReader) GetInt32FromPayload() ([]int32, error) {
-	if r.colType != schemapb.DataType_INT32 {
+	if r.colType != schemapb.DataType_Int32 {
 		return nil, errors.New("incorrect data type")
 	}
 
@@ -571,7 +571,7 @@ func (r *PayloadReader) GetInt32FromPayload() ([]int32, error) {
 }
 
 func (r *PayloadReader) GetInt64FromPayload() ([]int64, error) {
-	if r.colType != schemapb.DataType_INT64 {
+	if r.colType != schemapb.DataType_Int64 {
 		return nil, errors.New("incorrect data type")
 	}
 
@@ -591,7 +591,7 @@ func (r *PayloadReader) GetInt64FromPayload() ([]int64, error) {
 }
 
 func (r *PayloadReader) GetFloatFromPayload() ([]float32, error) {
-	if r.colType != schemapb.DataType_FLOAT {
+	if r.colType != schemapb.DataType_Float {
 		return nil, errors.New("incorrect data type")
 	}
 
@@ -611,7 +611,7 @@ func (r *PayloadReader) GetFloatFromPayload() ([]float32, error) {
 }
 
 func (r *PayloadReader) GetDoubleFromPayload() ([]float64, error) {
-	if r.colType != schemapb.DataType_DOUBLE {
+	if r.colType != schemapb.DataType_Double {
 		return nil, errors.New("incorrect data type")
 	}
 
@@ -631,7 +631,7 @@ func (r *PayloadReader) GetDoubleFromPayload() ([]float64, error) {
 }
 
 func (r *PayloadReader) GetOneStringFromPayload(idx int) (string, error) {
-	if r.colType != schemapb.DataType_STRING {
+	if r.colType != schemapb.DataType_String {
 		return "", errors.New("incorrect data type")
 	}
 
@@ -651,7 +651,7 @@ func (r *PayloadReader) GetOneStringFromPayload(idx int) (string, error) {
 
 // ,dimension, error
 func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, error) {
-	if r.colType != schemapb.DataType_VECTOR_BINARY {
+	if r.colType != schemapb.DataType_BinaryVector {
 		return nil, 0, errors.New("incorrect data type")
 	}
 
@@ -674,7 +674,7 @@ func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, error) {
 
 // ,dimension, error
 func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, error) {
-	if r.colType != schemapb.DataType_VECTOR_FLOAT {
+	if r.colType != schemapb.DataType_FloatVector {
 		return nil, 0, errors.New("incorrect data type")
 	}
 

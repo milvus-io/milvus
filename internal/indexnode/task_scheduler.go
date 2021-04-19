@@ -130,7 +130,7 @@ func (queue *BaseTaskQueue) tryToRemoveUselessIndexBuildTask(indexID UniqueID) {
 		if !ok {
 			continue
 		}
-		if indexBuildTask.cmd.Req.IndexID == indexID {
+		if indexBuildTask.req.IndexID == indexID {
 			queue.unissuedTasks.Remove(e)
 		}
 	}

@@ -26,7 +26,7 @@ func newAllocator(masterClient types.MasterService) *allocator {
 
 func (allocator *allocator) allocTimestamp() (Timestamp, error) {
 	ctx := context.TODO()
-	resp, err := allocator.masterClient.AllocTimestamp(ctx, &masterpb.TsoRequest{
+	resp, err := allocator.masterClient.AllocTimestamp(ctx, &masterpb.AllocTimestampRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_ShowCollections,
 			MsgID:     -1, // todo add msg id
@@ -43,7 +43,7 @@ func (allocator *allocator) allocTimestamp() (Timestamp, error) {
 
 func (allocator *allocator) allocID() (UniqueID, error) {
 	ctx := context.TODO()
-	resp, err := allocator.masterClient.AllocID(ctx, &masterpb.IDRequest{
+	resp, err := allocator.masterClient.AllocID(ctx, &masterpb.AllocIDRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_ShowCollections,
 			MsgID:     -1, // todo add msg id

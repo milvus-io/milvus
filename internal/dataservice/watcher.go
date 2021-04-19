@@ -96,7 +96,7 @@ func (watcher *dataNodeTimeTickWatcher) handleTimeTickMsg(msg *msgstream.TimeTic
 				log.Error("set segment state error", zap.Int64("segmentID", id), zap.Error(err))
 				continue
 			}
-			watcher.cluster.FlushSegment(&datapb.FlushSegRequest{
+			watcher.cluster.FlushSegment(&datapb.FlushSegmentsRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_Flush,
 					MsgID:     -1, // todo add msg id

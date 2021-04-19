@@ -92,7 +92,7 @@ func TestMetaService_processCollectionCreate(t *testing.T) {
 				fields: <
 				fieldID:100
 				name: "vec"
-				data_type: VECTOR_FLOAT
+				data_type: FloatVector
 				type_params: <
 				  key: "dim"
 				  value: "16"
@@ -105,7 +105,7 @@ func TestMetaService_processCollectionCreate(t *testing.T) {
 				fields: <
 				fieldID:101
 				name: "age"
-				data_type: INT32
+				data_type: Int32
 				type_params: <
 				  key: "dim"
 				  value: "1"
@@ -154,7 +154,7 @@ func TestMetaService_processCreate(t *testing.T) {
 				fields: <
 				fieldID:100
 				name: "vec"
-				data_type: VECTOR_FLOAT
+				data_type: FloatVector
 				type_params: <
 				  key: "dim"
 				  value: "16"
@@ -167,7 +167,7 @@ func TestMetaService_processCreate(t *testing.T) {
 				fields: <
 				fieldID:101
 				name: "age"
-				data_type: INT32
+				data_type: Int32
 				type_params: <
 				  key: "dim"
 				  value: "1"

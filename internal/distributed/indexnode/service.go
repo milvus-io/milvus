@@ -16,7 +16,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
@@ -119,7 +119,7 @@ func (s *Server) init() error {
 	indexnode.Params.IP = Params.IP
 	indexnode.Params.Address = Params.Address
 
-	s.indexnode.UpdateStateCode(internalpb2.StateCode_Initializing)
+	s.indexnode.UpdateStateCode(internalpb.StateCode_Initializing)
 
 	err = s.indexnode.Init()
 	if err != nil {
@@ -149,24 +149,24 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexCmd) (*commonpb.Status, error) {
+func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+	return s.indexnode.GetComponentStates(ctx)
+}
+
+func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
+	return s.indexnode.GetTimeTickChannel(ctx)
+}
+
+func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
+	return s.indexnode.GetStatisticsChannel(ctx)
+}
+
+func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*commonpb.Status, error) {
 	return s.indexnode.BuildIndex(ctx, req)
 }
 
 func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	return s.indexnode.DropIndex(ctx, request)
-}
-
-func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	return s.indexnode.GetComponentStates(ctx)
-}
-
-func (s *Server) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.indexnode.GetTimeTickChannel(ctx)
-}
-
-func (s *Server) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.indexnode.GetStatisticsChannel(ctx)
 }
 
 func NewServer(ctx context.Context) (*Server, error) {

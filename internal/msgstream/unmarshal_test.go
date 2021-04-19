@@ -7,14 +7,14 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
 
 var Params paramtable.BaseTable
 
 func newInsertMsgUnmarshal(input []byte) (TsMsg, error) {
-	insertRequest := internalpb2.InsertRequest{}
+	insertRequest := internalpb.InsertRequest{}
 	err := proto.Unmarshal(input, &insertRequest)
 	insertMsg := &InsertMsg{InsertRequest: insertRequest}
 	fmt.Println("use func newInsertMsgUnmarshal unmarshal")
@@ -33,7 +33,7 @@ func TestStream_unmarshal_Insert(t *testing.T) {
 			EndTimestamp:   0,
 			HashValues:     []uint32{1},
 		},
-		InsertRequest: internalpb2.InsertRequest{
+		InsertRequest: internalpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     1,

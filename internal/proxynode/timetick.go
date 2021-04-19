@@ -12,7 +12,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 type tickCheckFunc = func(Timestamp) bool
@@ -76,7 +76,7 @@ func (tt *timeTick) tick() error {
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{uint32(Params.ProxyID)},
 		},
-		TimeTickMsg: internalpb2.TimeTickMsg{
+		TimeTickMsg: internalpb.TimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     0,

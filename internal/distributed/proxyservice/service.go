@@ -17,7 +17,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/proxyservice"
@@ -33,7 +33,7 @@ type Server struct {
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
 
-	impl *proxyservice.ProxyService
+	proxyservice *proxyservice.ProxyService
 
 	tracer opentracing.Tracer
 	closer io.Closer
@@ -63,7 +63,7 @@ func NewServer(ctx1 context.Context, factory msgstream.Factory) (*Server, error)
 	}
 	opentracing.SetGlobalTracer(server.tracer)
 
-	server.impl, err = proxyservice.NewProxyService(server.ctx, factory)
+	server.proxyservice, err = proxyservice.NewProxyService(server.ctx, factory)
 	if err != nil {
 		return nil, err
 	}
@@ -94,10 +94,10 @@ func (s *Server) init() error {
 	if err := <-s.grpcErrChan; err != nil {
 		return err
 	}
-	s.impl.UpdateStateCode(internalpb2.StateCode_Initializing)
+	s.proxyservice.UpdateStateCode(internalpb.StateCode_Initializing)
 	log.Debug("grpc init done ...")
 
-	if err := s.impl.Init(); err != nil {
+	if err := s.proxyservice.Init(); err != nil {
 		return err
 	}
 	return nil
@@ -138,7 +138,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 func (s *Server) start() error {
 	log.Debug("proxy ProxyService start ...")
-	if err := s.impl.Start(); err != nil {
+	if err := s.proxyservice.Start(); err != nil {
 		return err
 	}
 	return nil
@@ -150,7 +150,7 @@ func (s *Server) Stop() error {
 	}
 	s.cancel()
 	s.closer.Close()
-	err := s.impl.Stop()
+	err := s.proxyservice.Stop()
 	if err != nil {
 		return err
 	}
@@ -161,22 +161,26 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-func (s *Server) RegisterLink(ctx context.Context, empty *commonpb.Empty) (*milvuspb.RegisterLinkResponse, error) {
-	return s.impl.RegisterLink(ctx)
+func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+	return s.proxyservice.GetComponentStates(ctx)
+}
+
+func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
+	return s.proxyservice.GetTimeTickChannel(ctx)
+}
+
+func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
+	return s.proxyservice.GetStatisticsChannel(ctx)
+}
+
+func (s *Server) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {
+	return s.proxyservice.RegisterLink(ctx)
 }
 
 func (s *Server) RegisterNode(ctx context.Context, request *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error) {
-	return s.impl.RegisterNode(ctx, request)
+	return s.proxyservice.RegisterNode(ctx, request)
 }
 
 func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	return s.impl.InvalidateCollectionMetaCache(ctx, request)
-}
-
-func (s *Server) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.impl.GetTimeTickChannel(ctx)
-}
-
-func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	return s.impl.GetComponentStates(ctx)
+	return s.proxyservice.InvalidateCollectionMetaCache(ctx, request)
 }

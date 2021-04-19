@@ -26,7 +26,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/types"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
@@ -114,7 +114,7 @@ func (s *Server) init() error {
 		return err
 	}
 
-	s.masterService.UpdateStateCode(internalpb2.StateCode_Initializing)
+	s.masterService.UpdateStateCode(internalpb.StateCode_Initializing)
 
 	if s.connectProxyService {
 		log.Debug("proxy service", zap.String("address", Params.ProxyServiceAddress))
@@ -261,8 +261,23 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-func (s *Server) GetComponentStatesRPC(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
+func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return s.masterService.GetComponentStates(ctx)
+}
+
+//receiver time tick from proxy service, and put it into this channel
+func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
+	return s.masterService.GetTimeTickChannel(ctx)
+}
+
+//just define a channel, not used currently
+func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
+	return s.masterService.GetStatisticsChannel(ctx)
+}
+
+//receive ddl from rpc and time tick from proxy service, and put them into this channel
+func (s *Server) GetDdChannel(ctx context.Context, req *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
+	return s.masterService.GetDdChannel(ctx)
 }
 
 //DDL request
@@ -282,7 +297,7 @@ func (s *Server) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCo
 	return s.masterService.DescribeCollection(ctx, in)
 }
 
-func (s *Server) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
+func (s *Server) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	return s.masterService.ShowCollections(ctx, in)
 }
 
@@ -298,7 +313,7 @@ func (s *Server) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequ
 	return s.masterService.HasPartition(ctx, in)
 }
 
-func (s *Server) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
+func (s *Server) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	return s.masterService.ShowPartitions(ctx, in)
 }
 
@@ -316,33 +331,18 @@ func (s *Server) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRe
 }
 
 //global timestamp allocator
-func (s *Server) AllocTimestamp(ctx context.Context, in *masterpb.TsoRequest) (*masterpb.TsoResponse, error) {
+func (s *Server) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
 	return s.masterService.AllocTimestamp(ctx, in)
 }
 
-func (s *Server) AllocID(ctx context.Context, in *masterpb.IDRequest) (*masterpb.IDResponse, error) {
+func (s *Server) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
 	return s.masterService.AllocID(ctx, in)
-}
-
-//receiver time tick from proxy service, and put it into this channel
-func (s *Server) GetTimeTickChannelRPC(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.masterService.GetTimeTickChannel(ctx)
-}
-
-//receive ddl from rpc and time tick from proxy service, and put them into this channel
-func (s *Server) GetDdChannelRPC(ctx context.Context, in *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.masterService.GetDdChannel(ctx)
-}
-
-//just define a channel, not used currently
-func (s *Server) GetStatisticsChannelRPC(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.masterService.GetStatisticsChannel(ctx)
 }
 
 func (s *Server) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
 	return s.masterService.DescribeSegment(ctx, in)
 }
 
-func (s *Server) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error) {
+func (s *Server) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
 	return s.masterService.ShowSegments(ctx, in)
 }

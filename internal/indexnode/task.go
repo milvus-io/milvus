@@ -73,7 +73,7 @@ type IndexBuildTask struct {
 	index         Index
 	kv            kv.Base
 	savePaths     []string
-	cmd           *indexpb.BuildIndexCmd
+	req           *indexpb.BuildIndexRequest
 	serviceClient types.IndexService
 	nodeID        UniqueID
 }
@@ -95,7 +95,7 @@ func (bt *BaseTask) Name() string {
 }
 
 func (it *IndexBuildTask) OnEnqueue() error {
-	it.SetID(it.cmd.IndexBuildID)
+	it.SetID(it.req.IndexBuildID)
 	log.Debug("indexnode", zap.Int64("[IndexBuilderTask] Enqueue TaskID", it.ID()))
 	return nil
 }
@@ -120,11 +120,11 @@ func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 
-	nty := &indexpb.BuildIndexNotification{
+	nty := &indexpb.NotifyBuildIndexRequest{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		IndexBuildID:   it.cmd.IndexBuildID,
+		IndexBuildID:   it.req.IndexBuildID,
 		NodeID:         it.nodeID,
 		IndexFilePaths: it.savePaths,
 	}
@@ -151,7 +151,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	var err error
 
 	typeParams := make(map[string]string)
-	for _, kvPair := range it.cmd.Req.GetTypeParams() {
+	for _, kvPair := range it.req.GetTypeParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
 		_, ok := typeParams[key]
 		if ok {
@@ -171,7 +171,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	}
 
 	indexParams := make(map[string]string)
-	for _, kvPair := range it.cmd.Req.GetIndexParams() {
+	for _, kvPair := range it.req.GetIndexParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
 		_, ok := indexParams[key]
 		if ok {
@@ -228,7 +228,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 		return blobs
 	}
 
-	toLoadDataPaths := it.cmd.Req.GetDataPaths()
+	toLoadDataPaths := it.req.GetDataPaths()
 	keys := make([]string, 0)
 	blobs := make([]*Blob, 0)
 	for _, path := range toLoadDataPaths {
@@ -284,14 +284,14 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 		}
 
 		var indexCodec storage.IndexCodec
-		serializedIndexBlobs, err := indexCodec.Serialize(getStorageBlobs(indexBlobs), indexParams, it.cmd.Req.IndexName, it.cmd.Req.IndexID)
+		serializedIndexBlobs, err := indexCodec.Serialize(getStorageBlobs(indexBlobs), indexParams, it.req.IndexName, it.req.IndexID)
 		if err != nil {
 			return err
 		}
 
 		getSavePathByKey := func(key string) string {
 			// TODO: fix me, use more reasonable method
-			return strconv.Itoa(int(it.cmd.IndexBuildID)) + "/" + strconv.Itoa(int(partitionID)) + "/" + strconv.Itoa(int(segmentID)) + "/" + key
+			return strconv.Itoa(int(it.req.IndexBuildID)) + "/" + strconv.Itoa(int(partitionID)) + "/" + strconv.Itoa(int(segmentID)) + "/" + key
 		}
 		saveBlob := func(path string, value []byte) error {
 			return it.kv.Save(path, string(value))

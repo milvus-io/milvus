@@ -7,7 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
@@ -25,7 +25,7 @@ type Replica interface {
 	removeSegment(segmentID UniqueID) error
 	hasSegment(segmentID UniqueID) bool
 	updateStatistics(segmentID UniqueID, numRows int64) error
-	getSegmentStatisticsUpdates(segmentID UniqueID) (*internalpb2.SegmentStatisticsUpdates, error)
+	getSegmentStatisticsUpdates(segmentID UniqueID) (*internalpb.SegmentStatisticsUpdates, error)
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 }
 
@@ -38,8 +38,8 @@ type Segment struct {
 	isNew         bool
 	createTime    Timestamp // not using
 	endTime       Timestamp // not using
-	startPosition *internalpb2.MsgPosition
-	endPosition   *internalpb2.MsgPosition // not using
+	startPosition *internalpb.MsgPosition
+	endPosition   *internalpb.MsgPosition // not using
 }
 
 type CollectionSegmentReplica struct {
@@ -82,7 +82,7 @@ func (replica *CollectionSegmentReplica) addSegment(
 	defer replica.mu.Unlock()
 	log.Debug("Add Segment", zap.Int64("Segment ID", segmentID))
 
-	position := &internalpb2.MsgPosition{
+	position := &internalpb.MsgPosition{
 		ChannelName: channelName,
 	}
 
@@ -93,7 +93,7 @@ func (replica *CollectionSegmentReplica) addSegment(
 		isNew:         true,
 		createTime:    0,
 		startPosition: position,
-		endPosition:   new(internalpb2.MsgPosition),
+		endPosition:   new(internalpb.MsgPosition),
 	}
 	replica.segments = append(replica.segments, seg)
 	return nil
@@ -142,18 +142,18 @@ func (replica *CollectionSegmentReplica) updateStatistics(segmentID UniqueID, nu
 	return fmt.Errorf("Error, there's no segment %v", segmentID)
 }
 
-func (replica *CollectionSegmentReplica) getSegmentStatisticsUpdates(segmentID UniqueID) (*internalpb2.SegmentStatisticsUpdates, error) {
+func (replica *CollectionSegmentReplica) getSegmentStatisticsUpdates(segmentID UniqueID) (*internalpb.SegmentStatisticsUpdates, error) {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
 
 	for _, ele := range replica.segments {
 		if ele.segmentID == segmentID {
-			updates := &internalpb2.SegmentStatisticsUpdates{
+			updates := &internalpb.SegmentStatisticsUpdates{
 				SegmentID:     segmentID,
 				MemorySize:    ele.memorySize,
 				NumRows:       ele.numRows,
 				IsNewSegment:  ele.isNew,
-				StartPosition: new(internalpb2.MsgPosition),
+				StartPosition: new(internalpb.MsgPosition),
 			}
 
 			if ele.isNew {

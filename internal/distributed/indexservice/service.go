@@ -18,7 +18,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -63,7 +63,7 @@ func (s *Server) init() error {
 	if err := <-s.grpcErrChan; err != nil {
 		return err
 	}
-	s.indexservice.UpdateStateCode(internalpb2.StateCode_Initializing)
+	s.indexservice.UpdateStateCode(internalpb.StateCode_Initializing)
 
 	if err := s.indexservice.Init(); err != nil {
 		return err
@@ -96,6 +96,18 @@ func (s *Server) Stop() error {
 	return nil
 }
 
+func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+	return s.indexservice.GetComponentStates(ctx)
+}
+
+func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
+	return s.indexservice.GetTimeTickChannel(ctx)
+}
+
+func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
+	return s.indexservice.GetStatisticsChannel(ctx)
+}
+
 func (s *Server) RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
 	return s.indexservice.RegisterNode(ctx, req)
 }
@@ -104,7 +116,7 @@ func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest)
 	return s.indexservice.BuildIndex(ctx, req)
 }
 
-func (s *Server) GetIndexStates(ctx context.Context, req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
+func (s *Server) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
 	return s.indexservice.GetIndexStates(ctx, req)
 }
 
@@ -112,11 +124,11 @@ func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexReques
 	return s.indexservice.DropIndex(ctx, request)
 }
 
-func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {
+func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
 	return s.indexservice.GetIndexFilePaths(ctx, req)
 }
 
-func (s *Server) NotifyBuildIndex(ctx context.Context, nty *indexpb.BuildIndexNotification) (*commonpb.Status, error) {
+func (s *Server) NotifyBuildIndex(ctx context.Context, nty *indexpb.NotifyBuildIndexRequest) (*commonpb.Status, error) {
 	return s.indexservice.NotifyBuildIndex(ctx, nty)
 }
 
@@ -149,19 +161,6 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	if err := s.grpcServer.Serve(lis); err != nil {
 		s.grpcErrChan <- err
 	}
-
-}
-
-func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	return s.indexservice.GetComponentStates(ctx)
-}
-
-func (s *Server) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.indexservice.GetTimeTickChannel(ctx)
-}
-
-func (s *Server) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.indexservice.GetStatisticsChannel(ctx)
 }
 
 func NewServer(ctx context.Context) (*Server, error) {

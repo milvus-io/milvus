@@ -182,7 +182,7 @@ func printBinlogFile(filename string) error {
 func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface) error {
 	fmt.Println("\tpayload values:")
 	switch colType {
-	case schemapb.DataType_BOOL:
+	case schemapb.DataType_Bool:
 		val, err := reader.GetBoolFromPayload()
 		if err != nil {
 			return err
@@ -190,7 +190,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 		for i, v := range val {
 			fmt.Printf("\t\t%d : %v\n", i, v)
 		}
-	case schemapb.DataType_INT8:
+	case schemapb.DataType_Int8:
 		val, err := reader.GetInt8FromPayload()
 		if err != nil {
 			return err
@@ -198,7 +198,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 		for i, v := range val {
 			fmt.Printf("\t\t%d : %d\n", i, v)
 		}
-	case schemapb.DataType_INT16:
+	case schemapb.DataType_Int16:
 		val, err := reader.GetInt16FromPayload()
 		if err != nil {
 			return err
@@ -206,7 +206,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 		for i, v := range val {
 			fmt.Printf("\t\t%d : %d\n", i, v)
 		}
-	case schemapb.DataType_INT32:
+	case schemapb.DataType_Int32:
 		val, err := reader.GetInt32FromPayload()
 		if err != nil {
 			return err
@@ -214,7 +214,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 		for i, v := range val {
 			fmt.Printf("\t\t%d : %d\n", i, v)
 		}
-	case schemapb.DataType_INT64:
+	case schemapb.DataType_Int64:
 		val, err := reader.GetInt64FromPayload()
 		if err != nil {
 			return err
@@ -222,7 +222,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 		for i, v := range val {
 			fmt.Printf("\t\t%d : %d\n", i, v)
 		}
-	case schemapb.DataType_FLOAT:
+	case schemapb.DataType_Float:
 		val, err := reader.GetFloatFromPayload()
 		if err != nil {
 			return err
@@ -230,7 +230,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 		for i, v := range val {
 			fmt.Printf("\t\t%d : %f\n", i, v)
 		}
-	case schemapb.DataType_DOUBLE:
+	case schemapb.DataType_Double:
 		val, err := reader.GetDoubleFromPayload()
 		if err != nil {
 			return err
@@ -238,7 +238,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 		for i, v := range val {
 			fmt.Printf("\t\t%d : %v\n", i, v)
 		}
-	case schemapb.DataType_STRING:
+	case schemapb.DataType_String:
 		rows, err := reader.GetPayloadLengthFromReader()
 		if err != nil {
 			return err
@@ -250,7 +250,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 			}
 			fmt.Printf("\t\t%d : %s\n", i, val)
 		}
-	case schemapb.DataType_VECTOR_BINARY:
+	case schemapb.DataType_BinaryVector:
 		val, dim, err := reader.GetBinaryVectorFromPayload()
 		if err != nil {
 			return err
@@ -265,7 +265,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 			}
 			fmt.Println()
 		}
-	case schemapb.DataType_VECTOR_FLOAT:
+	case schemapb.DataType_FloatVector:
 		val, dim, err := reader.GetFloatVectorFromPayload()
 		if err != nil {
 			return err
@@ -288,7 +288,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 func printDDLPayloadValues(eventType EventTypeCode, colType schemapb.DataType, reader PayloadReaderInterface) error {
 	fmt.Println("\tpayload values:")
 	switch colType {
-	case schemapb.DataType_INT64:
+	case schemapb.DataType_Int64:
 		val, err := reader.GetInt64FromPayload()
 		if err != nil {
 			return err
@@ -297,7 +297,7 @@ func printDDLPayloadValues(eventType EventTypeCode, colType schemapb.DataType, r
 			physical, logical := tsoutil.ParseTS(uint64(v))
 			fmt.Printf("\t\t%d : physical : %v ; logical : %d\n", i, physical, logical)
 		}
-	case schemapb.DataType_STRING:
+	case schemapb.DataType_String:
 		rows, err := reader.GetPayloadLengthFromReader()
 		if err != nil {
 			return err

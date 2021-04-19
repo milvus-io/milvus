@@ -17,9 +17,9 @@ type MockMasterClientInterface struct {
 	types.MasterService
 }
 
-func (m *MockMasterClientInterface) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
+func (m *MockMasterClientInterface) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	if in.CollectionName == "collection1" {
-		return &milvuspb.ShowPartitionResponse{
+		return &milvuspb.ShowPartitionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
@@ -27,7 +27,7 @@ func (m *MockMasterClientInterface) ShowPartitions(ctx context.Context, in *milv
 			PartitionNames: []string{"par1", "par2"},
 		}, nil
 	}
-	return &milvuspb.ShowPartitionResponse{
+	return &milvuspb.ShowPartitionsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},

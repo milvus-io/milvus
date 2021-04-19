@@ -3,14 +3,14 @@ package msgstream
 import (
 	"context"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 type IntPrimaryKey = typeutil.IntPrimaryKey
-type MsgPosition = internalpb2.MsgPosition
+type MsgPosition = internalpb.MsgPosition
 
 type MsgPack struct {
 	BeginTs        Timestamp

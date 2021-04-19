@@ -161,7 +161,7 @@ func (m *MetaCache) GetPartitionID(ctx context.Context, collectionName string, p
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	req := &milvuspb.ShowPartitionRequest{
+	req := &milvuspb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_ShowPartitions,
 		},

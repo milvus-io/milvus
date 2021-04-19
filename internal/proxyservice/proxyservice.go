@@ -7,7 +7,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 type ProxyService struct {
@@ -15,9 +15,9 @@ type ProxyService struct {
 	sched     *TaskScheduler
 	tick      *TimeTick
 	nodeInfos *GlobalNodeInfoTable
-	stateCode internalpb2.StateCode
+	stateCode internalpb.StateCode
 
-	//subStates *internalpb2.ComponentStates
+	//subStates *internalpb.ComponentStates
 
 	nodeStartParams []*commonpb.KeyValuePair
 
@@ -39,7 +39,7 @@ func NewProxyService(ctx context.Context, factory msgstream.Factory) (*ProxyServ
 	s.allocator = NewNodeIDAllocator()
 	s.sched = NewTaskScheduler(ctx1)
 	s.nodeInfos = NewGlobalNodeInfoTable()
-	s.stateCode = internalpb2.StateCode_Abnormal
+	s.stateCode = internalpb.StateCode_Abnormal
 
 	return s, nil
 }

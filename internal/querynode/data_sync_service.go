@@ -7,7 +7,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
@@ -99,7 +99,7 @@ func (dsService *dataSyncService) initNodes() {
 	}
 }
 
-func (dsService *dataSyncService) seekSegment(position *internalpb2.MsgPosition) error {
+func (dsService *dataSyncService) seekSegment(position *internalpb.MsgPosition) error {
 	err := dsService.dmStream.Seek(position)
 	if err != nil {
 		return err

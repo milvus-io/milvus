@@ -11,7 +11,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 // NOTE: start pulsar before test
@@ -57,7 +57,7 @@ func TestDataSyncService_Start(t *testing.T) {
 					uint32(i), uint32(i),
 				},
 			},
-			InsertRequest: internalpb2.InsertRequest{
+			InsertRequest: internalpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     0,
@@ -92,7 +92,7 @@ func TestDataSyncService_Start(t *testing.T) {
 		EndTimestamp:   0,
 		HashValues:     []uint32{0},
 	}
-	timeTickResult := internalpb2.TimeTickMsg{
+	timeTickResult := internalpb.TimeTickMsg{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_TimeTick,
 			MsgID:     0,

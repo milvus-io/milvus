@@ -25,7 +25,8 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 )
@@ -214,7 +215,7 @@ func (s *Server) init() error {
 	dn.Params.IP = Params.IP
 
 	s.datanode.NodeID = dn.Params.NodeID
-	s.datanode.UpdateStateCode(internalpb2.StateCode_Initializing)
+	s.datanode.UpdateStateCode(internalpb.StateCode_Initializing)
 
 	if err := s.datanode.Init(); err != nil {
 		log.Warn("datanode init error: ", zap.Error(err))
@@ -227,22 +228,24 @@ func (s *Server) start() error {
 	return s.datanode.Start()
 }
 
-func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
+func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return s.datanode.GetComponentStates(ctx)
 }
 
-func (s *Server) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {
-	return s.datanode.WatchDmChannels(ctx, in)
+func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
+	return s.datanode.GetStatisticsChannel(ctx)
 }
 
-func (s *Server) FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) (*commonpb.Status, error) {
-	if s.datanode.State.Load().(internalpb2.StateCode) != internalpb2.StateCode_Healthy {
+func (s *Server) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
+	return s.datanode.WatchDmChannels(ctx, req)
+}
+
+func (s *Server) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
+	if s.datanode.State.Load().(internalpb.StateCode) != internalpb.StateCode_Healthy {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "DataNode isn't healthy.",
 		}, errors.New("DataNode is not ready yet")
 	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, s.datanode.FlushSegments(ctx, in)
+	return s.datanode.FlushSegments(ctx, req)
 }

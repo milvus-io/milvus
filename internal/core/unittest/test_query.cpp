@@ -595,7 +595,7 @@ TEST(Query, FillSegment) {
         field->set_is_primary_key(false);
         field->set_description("asdgfsagf");
         field->set_fieldid(100);
-        field->set_data_type(pb::schema::DataType::VECTOR_FLOAT);
+        field->set_data_type(pb::schema::DataType::FloatVector);
         auto param = field->add_type_params();
         param->set_key("dim");
         param->set_value("16");
@@ -610,7 +610,7 @@ TEST(Query, FillSegment) {
         field->set_fieldid(101);
         field->set_is_primary_key(true);
         field->set_description("asdgfsagf");
-        field->set_data_type(pb::schema::DataType::INT64);
+        field->set_data_type(pb::schema::DataType::Int64);
     }
 
     {
@@ -619,7 +619,7 @@ TEST(Query, FillSegment) {
         field->set_fieldid(102);
         field->set_is_primary_key(false);
         field->set_description("asdgfsagf");
-        field->set_data_type(pb::schema::DataType::INT32);
+        field->set_data_type(pb::schema::DataType::Int32);
     }
 
     auto schema = Schema::ParseFrom(proto);

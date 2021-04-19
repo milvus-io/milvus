@@ -19,7 +19,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
@@ -178,7 +178,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 		var pos int = 0 // Record position of blob
 		for _, field := range collSchema.Fields {
 			switch field.DataType {
-			case schemapb.DataType_VECTOR_FLOAT:
+			case schemapb.DataType_FloatVector:
 				var dim int
 				for _, t := range field.TypeParams {
 					if t.Key == "dim" {
@@ -221,7 +221,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 				pos += offset
 				fieldData.NumRows += len(msg.RowIDs)
 
-			case schemapb.DataType_VECTOR_BINARY:
+			case schemapb.DataType_BinaryVector:
 				var dim int
 				for _, t := range field.TypeParams {
 					if t.Key == "dim" {
@@ -255,7 +255,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 				pos += offset
 				fieldData.NumRows += len(msg.RowData)
 
-			case schemapb.DataType_BOOL:
+			case schemapb.DataType_Bool:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.BoolFieldData{
 						NumRows: 0,
@@ -276,7 +276,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 				pos += int(unsafe.Sizeof(*(&v)))
 				fieldData.NumRows += len(msg.RowIDs)
 
-			case schemapb.DataType_INT8:
+			case schemapb.DataType_Int8:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.Int8FieldData{
 						NumRows: 0,
@@ -296,7 +296,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 				pos += int(unsafe.Sizeof(*(&v)))
 				fieldData.NumRows += len(msg.RowIDs)
 
-			case schemapb.DataType_INT16:
+			case schemapb.DataType_Int16:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.Int16FieldData{
 						NumRows: 0,
@@ -316,7 +316,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 				pos += int(unsafe.Sizeof(*(&v)))
 				fieldData.NumRows += len(msg.RowIDs)
 
-			case schemapb.DataType_INT32:
+			case schemapb.DataType_Int32:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.Int32FieldData{
 						NumRows: 0,
@@ -336,7 +336,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 				pos += int(unsafe.Sizeof(*(&v)))
 				fieldData.NumRows += len(msg.RowIDs)
 
-			case schemapb.DataType_INT64:
+			case schemapb.DataType_Int64:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.Int64FieldData{
 						NumRows: 0,
@@ -367,7 +367,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 					fieldData.NumRows += len(msg.RowIDs)
 				}
 
-			case schemapb.DataType_FLOAT:
+			case schemapb.DataType_Float:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.FloatFieldData{
 						NumRows: 0,
@@ -387,7 +387,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 				pos += int(unsafe.Sizeof(*(&v)))
 				fieldData.NumRows += len(msg.RowIDs)
 
-			case schemapb.DataType_DOUBLE:
+			case schemapb.DataType_Double:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.DoubleFieldData{
 						NumRows: 0,
@@ -535,7 +535,7 @@ func (ibNode *insertBufferNode) flushSegment(segID UniqueID, partitionID UniqueI
 
 func (ibNode *insertBufferNode) completeFlush(segID UniqueID) error {
 	msgPack := msgstream.MsgPack{}
-	completeFlushMsg := internalpb2.SegmentFlushCompletedMsg{
+	completeFlushMsg := internalpb.SegmentFlushCompletedMsg{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_SegmentFlushDone,
 			MsgID:     0, // GOOSE TODO
@@ -563,7 +563,7 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 			EndTimestamp:   ts,
 			HashValues:     []uint32{0},
 		},
-		TimeTickMsg: internalpb2.TimeTickMsg{
+		TimeTickMsg: internalpb.TimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     0,  // GOOSE TODO
@@ -576,9 +576,9 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 	return ibNode.timeTickStream.Produce(context.TODO(), &msgPack)
 }
 
-func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID, currentPosition *internalpb2.MsgPosition) error {
+func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID, currentPosition *internalpb.MsgPosition) error {
 	log.Debug("Updating segments statistics...")
-	statsUpdates := make([]*internalpb2.SegmentStatisticsUpdates, 0, len(segIDs))
+	statsUpdates := make([]*internalpb.SegmentStatisticsUpdates, 0, len(segIDs))
 	for _, segID := range segIDs {
 		updates, err := ibNode.replica.getSegmentStatisticsUpdates(segID)
 		if err != nil {
@@ -590,7 +590,7 @@ func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID, currentPo
 		statsUpdates = append(statsUpdates, updates)
 	}
 
-	segStats := internalpb2.SegmentStatistics{
+	segStats := internalpb.SegmentStatistics{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_SegmentStatistics,
 			MsgID:     UniqueID(0),  // GOOSE TODO

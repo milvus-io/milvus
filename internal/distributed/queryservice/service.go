@@ -10,19 +10,20 @@ import (
 
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-
 	dsc "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice/client"
 	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	qs "github.com/zilliztech/milvus-distributed/internal/queryservice"
+	"github.com/zilliztech/milvus-distributed/internal/types"
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
-	qs "github.com/zilliztech/milvus-distributed/internal/queryservice"
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 )
 
 type Server struct {
@@ -33,7 +34,7 @@ type Server struct {
 
 	grpcErrChan chan error
 
-	impl *qs.QueryService
+	queryservice *qs.QueryService
 
 	msFactory msgstream.Factory
 
@@ -50,11 +51,11 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 	}
 
 	return &Server{
-		impl:        svr,
-		loopCtx:     ctx1,
-		loopCancel:  cancel,
-		msFactory:   factory,
-		grpcErrChan: make(chan error),
+		queryservice: svr,
+		loopCtx:      ctx1,
+		loopCancel:   cancel,
+		msFactory:    factory,
+		grpcErrChan:  make(chan error),
 	}, nil
 }
 
@@ -129,9 +130,9 @@ func (s *Server) init() error {
 	}
 
 	qs.Params.Init()
-	s.impl.UpdateStateCode(internalpb2.StateCode_Initializing)
+	s.queryservice.UpdateStateCode(internalpb.StateCode_Initializing)
 
-	if err := s.impl.Init(); err != nil {
+	if err := s.queryservice.Init(); err != nil {
 		return err
 	}
 	return nil
@@ -169,11 +170,11 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 }
 
 func (s *Server) start() error {
-	return s.impl.Start()
+	return s.queryservice.Start()
 }
 
 func (s *Server) Stop() error {
-	err := s.impl.Stop()
+	err := s.queryservice.Stop()
 	s.loopCancel()
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
@@ -181,64 +182,64 @@ func (s *Server) Stop() error {
 	return err
 }
 
-func (s *Server) GetComponentStates(ctx context.Context, req *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	return s.impl.GetComponentStates(ctx)
-}
-
-func (s *Server) GetTimeTickChannel(ctx context.Context, req *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.impl.GetTimeTickChannel(ctx)
-}
-
-func (s *Server) GetStatisticsChannel(ctx context.Context, req *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.impl.GetStatisticsChannel(ctx)
-}
-
-func (s *Server) SetMasterService(m qs.MasterServiceInterface) error {
-	s.impl.SetMasterService(m)
+func (s *Server) SetMasterService(m types.MasterService) error {
+	s.queryservice.SetMasterService(m)
 	return nil
 }
 
-func (s *Server) SetDataService(d qs.DataServiceInterface) error {
-	s.impl.SetDataService(d)
+func (s *Server) SetDataService(d types.DataService) error {
+	s.queryservice.SetDataService(d)
 	return nil
+}
+
+func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+	return s.queryservice.GetComponentStates(ctx)
+}
+
+func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
+	return s.queryservice.GetTimeTickChannel(ctx)
+}
+
+func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
+	return s.queryservice.GetStatisticsChannel(ctx)
 }
 
 func (s *Server) RegisterNode(ctx context.Context, req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
-	return s.impl.RegisterNode(ctx, req)
+	return s.queryservice.RegisterNode(ctx, req)
 }
 
-func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionRequest) (*querypb.ShowCollectionResponse, error) {
-	return s.impl.ShowCollections(ctx, req)
+func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
+	return s.queryservice.ShowCollections(ctx, req)
 }
 
 func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
-	return s.impl.LoadCollection(ctx, req)
+	return s.queryservice.LoadCollection(ctx, req)
 }
 
 func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	return s.impl.ReleaseCollection(ctx, req)
+	return s.queryservice.ReleaseCollection(ctx, req)
 }
 
-func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionRequest) (*querypb.ShowPartitionResponse, error) {
-	return s.impl.ShowPartitions(ctx, req)
+func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
+	return s.queryservice.ShowPartitions(ctx, req)
 }
 
-func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.PartitionStatesRequest) (*querypb.PartitionStatesResponse, error) {
-	return s.impl.GetPartitionStates(ctx, req)
+func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
+	return s.queryservice.GetPartitionStates(ctx, req)
 }
 
-func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionRequest) (*commonpb.Status, error) {
-	return s.impl.LoadPartitions(ctx, req)
+func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
+	return s.queryservice.LoadPartitions(ctx, req)
 }
 
-func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionRequest) (*commonpb.Status, error) {
-	return s.impl.ReleasePartitions(ctx, req)
+func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
+	return s.queryservice.ReleasePartitions(ctx, req)
 }
 
-func (s *Server) CreateQueryChannel(ctx context.Context, req *commonpb.Empty) (*querypb.CreateQueryChannelResponse, error) {
-	return s.impl.CreateQueryChannel(ctx)
+func (s *Server) CreateQueryChannel(ctx context.Context, req *querypb.CreateQueryChannelRequest) (*querypb.CreateQueryChannelResponse, error) {
+	return s.queryservice.CreateQueryChannel(ctx)
 }
 
-func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error) {
-	return s.impl.GetSegmentInfo(ctx, req)
+func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
+	return s.queryservice.GetSegmentInfo(ctx, req)
 }

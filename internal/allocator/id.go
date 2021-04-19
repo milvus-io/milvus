@@ -82,7 +82,7 @@ func (ia *IDAllocator) connectMaster() error {
 
 func (ia *IDAllocator) syncID() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	req := &masterpb.IDRequest{
+	req := &masterpb.AllocIDRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestID,
 			MsgID:     0,

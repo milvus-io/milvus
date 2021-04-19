@@ -197,7 +197,7 @@ CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::VECTOR_FLOAT);
+    value->set_type(ser::PlaceholderType::FloatVector);
     std::normal_distribution<double> dis(0, 1);
     std::default_random_engine e(seed);
     for (int i = 0; i < num_queries; ++i) {
@@ -217,7 +217,7 @@ CreatePlaceholderGroupFromBlob(int64_t num_queries, int dim, const float* src) {
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::VECTOR_FLOAT);
+    value->set_type(ser::PlaceholderType::FloatVector);
     int64_t src_index = 0;
 
     for (int i = 0; i < num_queries; ++i) {
@@ -238,7 +238,7 @@ CreateBinaryPlaceholderGroup(int64_t num_queries, int64_t dim, int64_t seed = 42
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::VECTOR_BINARY);
+    value->set_type(ser::PlaceholderType::BinaryVector);
     std::default_random_engine e(seed);
     for (int i = 0; i < num_queries; ++i) {
         std::vector<uint8_t> vec;
@@ -258,7 +258,7 @@ CreateBinaryPlaceholderGroupFromBlob(int64_t num_queries, int64_t dim, const uin
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::VECTOR_BINARY);
+    value->set_type(ser::PlaceholderType::BinaryVector);
     for (int i = 0; i < num_queries; ++i) {
         std::vector<uint8_t> vec;
         for (int d = 0; d < dim / 8; ++d) {

@@ -8,7 +8,7 @@ import (
 	grpcindexnodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/indexnode/client"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 func (i *IndexService) removeNode(nodeID UniqueID) {
@@ -76,7 +76,7 @@ func (i *IndexService) RegisterNode(ctx context.Context, req *indexpb.RegisterNo
 
 	ret.Status.ErrorCode = commonpb.ErrorCode_Success
 	params := i.prepareNodeInitParams()
-	ret.InitParams = &internalpb2.InitParams{
+	ret.InitParams = &internalpb.InitParams{
 		NodeID:      nodeID,
 		StartParams: params,
 	}

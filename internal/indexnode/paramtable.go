@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cast"
 	"github.com/spf13/viper"
 	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
 
@@ -59,7 +59,7 @@ func (pt *ParamTable) initParams() {
 	pt.initLogCfg()
 }
 
-func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb2.InitParams) error {
+func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb.InitParams) error {
 	pt.NodeID = initParams.NodeID
 
 	config := viper.New()

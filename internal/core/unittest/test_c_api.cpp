@@ -162,7 +162,7 @@ TEST(CApiTest, SearchTest) {
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::VECTOR_FLOAT);
+    value->set_type(ser::PlaceholderType::FloatVector);
     for (int i = 0; i < num_queries; ++i) {
         std::vector<float> vec;
         for (int d = 0; d < dim; ++d) {
@@ -385,9 +385,9 @@ generate_collection_shema(std::string metric_type, std::string dim, bool is_bina
     vec_field_schema->set_name("fakevec");
     vec_field_schema->set_fieldid(100);
     if (is_binary) {
-        vec_field_schema->set_data_type(schema::DataType::VECTOR_BINARY);
+        vec_field_schema->set_data_type(schema::DataType::BinaryVector);
     } else {
-        vec_field_schema->set_data_type(schema::DataType::VECTOR_FLOAT);
+        vec_field_schema->set_data_type(schema::DataType::FloatVector);
     }
     auto metric_type_param = vec_field_schema->add_index_params();
     metric_type_param->set_key("metric_type");
@@ -400,7 +400,7 @@ generate_collection_shema(std::string metric_type, std::string dim, bool is_bina
     ;
     other_field_schema->set_name("counter");
     other_field_schema->set_fieldid(101);
-    other_field_schema->set_data_type(schema::DataType::INT64);
+    other_field_schema->set_data_type(schema::DataType::Int64);
 
     std::string schema_string;
     auto marshal = google::protobuf::TextFormat::PrintToString(collection_schema, &schema_string);
@@ -680,7 +680,7 @@ TEST(CApiTest, Reduce) {
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::VECTOR_FLOAT);
+    value->set_type(ser::PlaceholderType::FloatVector);
     for (int i = 0; i < num_queries; ++i) {
         std::vector<float> vec;
         for (int d = 0; d < dim; ++d) {
@@ -1527,7 +1527,7 @@ TEST(CApiTest, SealedSegmentTest) {
                                 fields: <
                                   fieldID: 100
                                   name: "vec"
-                                  data_type: VECTOR_FLOAT
+                                  data_type: FloatVector
                                   type_params: <
                                     key: "dim"
                                     value: "16"
@@ -1540,7 +1540,7 @@ TEST(CApiTest, SealedSegmentTest) {
                                 fields: <
                                   fieldID: 101
                                   name: "age"
-                                  data_type: INT32
+                                  data_type: Int32
                                   type_params: <
                                     key: "dim"
                                     value: "1"

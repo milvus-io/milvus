@@ -20,7 +20,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
@@ -82,7 +82,7 @@ import (
 //		BaseMsg: msgstream.BaseMsg{
 //			HashValues: hashValues,
 //		},
-//		InsertRequest: internalpb2.InsertRequest{
+//		InsertRequest: internalpb.InsertRequest{
 //			Base: &commonpb.MsgBase{
 //				MsgType:   commonpb.MsgType_kInsert,
 //				MsgID:     0,
@@ -111,7 +111,7 @@ import (
 //			EndTimestamp:   0,
 //			HashValues:     []uint32{0},
 //		},
-//		TimeTickMsg: internalpb2.TimeTickMsg{
+//		TimeTickMsg: internalpb.TimeTickMsg{
 //			Base: &commonpb.MsgBase{
 //				MsgType:   commonpb.MsgType_kTimeTick,
 //				MsgID:     0,
@@ -163,7 +163,7 @@ import (
 //	}
 //	placeholderValue := milvuspb.PlaceholderValue{
 //		Tag:    "$0",
-//		Type:   milvuspb.PlaceholderType_VECTOR_FLOAT,
+//		Type:   milvuspb.PlaceholderType_VectorFloat,
 //		Values: [][]byte{searchRowByteData},
 //	}
 //	placeholderGroup := milvuspb.PlaceholderGroup{
@@ -189,7 +189,7 @@ import (
 //			BaseMsg: msgstream.BaseMsg{
 //				HashValues: []uint32{0},
 //			},
-//			SearchRequest: internalpb2.SearchRequest{
+//			SearchRequest: internalpb.SearchRequest{
 //				Base: &commonpb.MsgBase{
 //					MsgType:   commonpb.MsgType_kSearch,
 //					MsgID:     n,
@@ -416,7 +416,7 @@ import (
 //		BaseMsg: msgstream.BaseMsg{
 //			HashValues: hashValues,
 //		},
-//		InsertRequest: internalpb2.InsertRequest{
+//		InsertRequest: internalpb.InsertRequest{
 //			Base: &commonpb.MsgBase{
 //				MsgType:   commonpb.MsgType_kInsert,
 //				MsgID:     0,
@@ -445,7 +445,7 @@ import (
 //			EndTimestamp:   0,
 //			HashValues:     []uint32{0},
 //		},
-//		TimeTickMsg: internalpb2.TimeTickMsg{
+//		TimeTickMsg: internalpb.TimeTickMsg{
 //			Base: &commonpb.MsgBase{
 //				MsgType:   commonpb.MsgType_kTimeTick,
 //				MsgID:     0,
@@ -486,7 +486,7 @@ import (
 //	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"JACCARD\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
 //	placeholderValue := milvuspb.PlaceholderValue{
 //		Tag:    "$0",
-//		Type:   milvuspb.PlaceholderType_VECTOR_BINARY,
+//		Type:   milvuspb.PlaceholderType_VectorBinary,
 //		Values: [][]byte{searchRowData},
 //	}
 //	placeholderGroup := milvuspb.PlaceholderGroup{
@@ -512,7 +512,7 @@ import (
 //			BaseMsg: msgstream.BaseMsg{
 //				HashValues: []uint32{0},
 //			},
-//			SearchRequest: internalpb2.SearchRequest{
+//			SearchRequest: internalpb.SearchRequest{
 //				Base: &commonpb.MsgBase{
 //					MsgType:   commonpb.MsgType_kSearch,
 //					MsgID:     n,
@@ -678,7 +678,7 @@ func genETCDCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.Collect
 			FieldID:      UniqueID(100),
 			Name:         "vec",
 			IsPrimaryKey: false,
-			DataType:     schemapb.DataType_VECTOR_BINARY,
+			DataType:     schemapb.DataType_BinaryVector,
 			TypeParams: []*commonpb.KeyValuePair{
 				{
 					Key:   "dim",
@@ -697,7 +697,7 @@ func genETCDCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.Collect
 			FieldID:      UniqueID(100),
 			Name:         "vec",
 			IsPrimaryKey: false,
-			DataType:     schemapb.DataType_VECTOR_FLOAT,
+			DataType:     schemapb.DataType_FloatVector,
 			TypeParams: []*commonpb.KeyValuePair{
 				{
 					Key:   "dim",
@@ -717,7 +717,7 @@ func genETCDCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.Collect
 		FieldID:      UniqueID(101),
 		Name:         "age",
 		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_INT32,
+		DataType:     schemapb.DataType_Int32,
 	}
 
 	schema := schemapb.CollectionSchema{
@@ -737,7 +737,7 @@ func genETCDCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.Collect
 	return &collectionMeta
 }
 
-func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, keyPrefix string) ([]*internalpb2.StringList, []int64, error) {
+func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, keyPrefix string) ([]*internalpb.StringList, []int64, error) {
 	const (
 		msgLength = 1000
 		DIM       = 16
@@ -792,12 +792,12 @@ func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID
 	collMeta.Schema.Fields = append(collMeta.Schema.Fields, &schemapb.FieldSchema{
 		FieldID:  0,
 		Name:     "uid",
-		DataType: schemapb.DataType_INT64,
+		DataType: schemapb.DataType_Int64,
 	})
 	collMeta.Schema.Fields = append(collMeta.Schema.Fields, &schemapb.FieldSchema{
 		FieldID:  1,
 		Name:     "timestamp",
-		DataType: schemapb.DataType_INT64,
+		DataType: schemapb.DataType_Int64,
 	})
 	inCodec := storage.NewInsertCodec(collMeta)
 	binLogs, err := inCodec.Serialize(partitionID, segmentID, insertData)
@@ -825,7 +825,7 @@ func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID
 	segIDStr := strconv.FormatInt(segmentID, 10)
 	keyPrefix = path.Join(keyPrefix, segIDStr)
 
-	paths := make([]*internalpb2.StringList, 0)
+	paths := make([]*internalpb.StringList, 0)
 	fieldIDs := make([]int64, 0)
 	fmt.Println(".. saving binlog to MinIO ...", len(binLogs))
 	for _, blob := range binLogs {
@@ -835,7 +835,7 @@ func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID
 		if err != nil {
 			return nil, nil, err
 		}
-		paths = append(paths, &internalpb2.StringList{
+		paths = append(paths, &internalpb.StringList{
 			Values: []string{key},
 		})
 		fieldID, err := strconv.Atoi(blob.Key)
@@ -962,7 +962,7 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, 
 					uint32(i),
 				},
 			},
-			InsertRequest: internalpb2.InsertRequest{
+			InsertRequest: internalpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_Insert,
 					MsgID:     0,
@@ -996,7 +996,7 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, 
 		EndTimestamp:   1500,
 		HashValues:     []uint32{0},
 	}
-	timeTickResult := internalpb2.TimeTickMsg{
+	timeTickResult := internalpb.TimeTickMsg{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_TimeTick,
 			MsgID:     0,
@@ -1062,7 +1062,7 @@ func sentTimeTick(ctx context.Context) error {
 		EndTimestamp:   2000,
 		HashValues:     []uint32{0},
 	}
-	timeTickResult := internalpb2.TimeTickMsg{
+	timeTickResult := internalpb.TimeTickMsg{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_TimeTick,
 			MsgID:     0,
@@ -1170,7 +1170,7 @@ func TestSegmentLoad_Search_Vector(t *testing.T) {
 	}
 	placeholderValue := milvuspb.PlaceholderValue{
 		Tag:    "$0",
-		Type:   milvuspb.PlaceholderType_VECTOR_FLOAT,
+		Type:   milvuspb.PlaceholderType_FloatVector,
 		Values: [][]byte{searchRawData},
 	}
 

@@ -17,7 +17,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
@@ -32,7 +32,7 @@ type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
 type IndexNode struct {
-	stateCode internalpb2.StateCode
+	stateCode internalpb.StateCode
 
 	loopCtx    context.Context
 	loopCancel func()
@@ -123,7 +123,7 @@ func (i *IndexNode) Init() error {
 		return err
 	}
 
-	i.UpdateStateCode(internalpb2.StateCode_Healthy)
+	i.UpdateStateCode(internalpb.StateCode_Healthy)
 
 	return nil
 }
@@ -154,7 +154,7 @@ func (i *IndexNode) Stop() error {
 	return nil
 }
 
-func (i *IndexNode) UpdateStateCode(code internalpb2.StateCode) {
+func (i *IndexNode) UpdateStateCode(code internalpb.StateCode) {
 	i.stateCode = code
 }
 
@@ -162,13 +162,13 @@ func (i *IndexNode) SetIndexServiceClient(serviceClient types.IndexService) {
 	i.serviceClient = serviceClient
 }
 
-func (i *IndexNode) BuildIndex(ctx context.Context, request *indexpb.BuildIndexCmd) (*commonpb.Status, error) {
+func (i *IndexNode) BuildIndex(ctx context.Context, request *indexpb.BuildIndexRequest) (*commonpb.Status, error) {
 	t := &IndexBuildTask{
 		BaseTask: BaseTask{
 			ctx:  ctx,
 			done: make(chan error),
 		},
-		cmd:           request,
+		req:           request,
 		kv:            i.kv,
 		serviceClient: i.serviceClient,
 		nodeID:        Params.NodeID,
@@ -206,15 +206,15 @@ func (i *IndexNode) AddCloseCallback(callbacks ...func()) {
 	i.closeCallbacks = append(i.closeCallbacks, callbacks...)
 }
 
-func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
+func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 
-	stateInfo := &internalpb2.ComponentInfo{
+	stateInfo := &internalpb.ComponentInfo{
 		NodeID:    Params.NodeID,
 		Role:      "NodeImpl",
 		StateCode: i.stateCode,
 	}
 
-	ret := &internalpb2.ComponentStates{
+	ret := &internalpb.ComponentStates{
 		State:              stateInfo,
 		SubcomponentStates: nil, // todo add subcomponents states
 		Status: &commonpb.Status{

@@ -107,12 +107,12 @@ func TestValidateVectorFieldMetricType(t *testing.T) {
 		Name:         "",
 		IsPrimaryKey: false,
 		Description:  "",
-		DataType:     schemapb.DataType_INT64,
+		DataType:     schemapb.DataType_Int64,
 		TypeParams:   nil,
 		IndexParams:  nil,
 	}
 	assert.Nil(t, ValidateVectorFieldMetricType(field1))
-	field1.DataType = schemapb.DataType_VECTOR_FLOAT
+	field1.DataType = schemapb.DataType_FloatVector
 	assert.NotNil(t, ValidateVectorFieldMetricType(field1))
 	field1.IndexParams = []*commonpb.KeyValuePair{
 		{
@@ -170,9 +170,9 @@ func TestValidatePrimaryKey(t *testing.T) {
 	assert.NotNil(t, ValidateSchema(&coll))
 	coll.AutoID = false
 	assert.NotNil(t, ValidateSchema(&coll))
-	pf.DataType = schemapb.DataType_BOOL
+	pf.DataType = schemapb.DataType_Bool
 	assert.NotNil(t, ValidateSchema(&coll))
-	pf.DataType = schemapb.DataType_INT64
+	pf.DataType = schemapb.DataType_Int64
 	assert.Nil(t, ValidateSchema(&coll))
 	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
 		Name:         "",
@@ -200,7 +200,7 @@ func TestValidateSchema(t *testing.T) {
 		FieldID:      100,
 		IsPrimaryKey: false,
 		Description:  "",
-		DataType:     schemapb.DataType_INT64,
+		DataType:     schemapb.DataType_Int64,
 		TypeParams:   nil,
 		IndexParams:  nil,
 	}
@@ -210,10 +210,10 @@ func TestValidateSchema(t *testing.T) {
 	pf1.IsPrimaryKey = true
 	assert.Nil(t, ValidateSchema(coll))
 
-	pf1.DataType = schemapb.DataType_INT32
+	pf1.DataType = schemapb.DataType_Int32
 	assert.NotNil(t, ValidateSchema(coll))
 
-	pf1.DataType = schemapb.DataType_INT64
+	pf1.DataType = schemapb.DataType_Int64
 	assert.Nil(t, ValidateSchema(coll))
 
 	pf2 := &schemapb.FieldSchema{
@@ -221,7 +221,7 @@ func TestValidateSchema(t *testing.T) {
 		FieldID:      101,
 		IsPrimaryKey: true,
 		Description:  "",
-		DataType:     schemapb.DataType_INT64,
+		DataType:     schemapb.DataType_Int64,
 		TypeParams:   nil,
 		IndexParams:  nil,
 	}
@@ -245,10 +245,10 @@ func TestValidateSchema(t *testing.T) {
 	pf2.DataType = -1
 	assert.NotNil(t, ValidateSchema(coll))
 
-	pf2.DataType = schemapb.DataType_VECTOR_FLOAT
+	pf2.DataType = schemapb.DataType_FloatVector
 	assert.NotNil(t, ValidateSchema(coll))
 
-	pf2.DataType = schemapb.DataType_INT64
+	pf2.DataType = schemapb.DataType_Int64
 	assert.Nil(t, ValidateSchema(coll))
 
 	tp3Good := []*commonpb.KeyValuePair{
@@ -327,7 +327,7 @@ func TestValidateSchema(t *testing.T) {
 		FieldID:      102,
 		IsPrimaryKey: false,
 		Description:  "",
-		DataType:     schemapb.DataType_VECTOR_FLOAT,
+		DataType:     schemapb.DataType_FloatVector,
 		TypeParams:   tp3Good,
 		IndexParams:  ip3Good,
 	}

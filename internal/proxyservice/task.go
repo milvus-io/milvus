@@ -6,7 +6,7 @@ import (
 	"errors"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 )
@@ -150,7 +150,7 @@ func (t *RegisterNodeTask) Execute(ctx context.Context) error {
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		InitParams: &internalpb2.InitParams{
+		InitParams: &internalpb.InitParams{
 			NodeID:      nodeID,
 			StartParams: t.startParams,
 		},

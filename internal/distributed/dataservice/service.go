@@ -28,18 +28,18 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 )
 
 type Server struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+	dataService *dataservice.Server
+	ctx         context.Context
+	cancel      context.CancelFunc
 
 	grpcErrChan chan error
 	wg          sync.WaitGroup
 
-	dataService   *dataservice.Server
 	grpcServer    *grpc.Server
 	masterService types.MasterService
 
@@ -101,7 +101,7 @@ func (s *Server) init() error {
 	if err = client.Start(); err != nil {
 		panic(err)
 	}
-	s.dataService.UpdateStateCode(internalpb2.StateCode_Initializing)
+	s.dataService.UpdateStateCode(internalpb.StateCode_Initializing)
 
 	ctx := context.Background()
 	err = funcutil.WaitForComponentInitOrHealthy(ctx, client, "MasterService", 100, time.Millisecond*200)
@@ -188,58 +188,58 @@ func (s *Server) Run() error {
 	return nil
 }
 
-func (s *Server) GetSegmentInfo(ctx context.Context, request *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error) {
-	return s.dataService.GetSegmentInfo(ctx, request)
-}
-
-func (s *Server) RegisterNode(ctx context.Context, request *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
-	return s.dataService.RegisterNode(ctx, request)
-}
-
-func (s *Server) Flush(ctx context.Context, request *datapb.FlushRequest) (*commonpb.Status, error) {
-	return s.dataService.Flush(ctx, request)
-}
-
-func (s *Server) AssignSegmentID(ctx context.Context, request *datapb.AssignSegIDRequest) (*datapb.AssignSegIDResponse, error) {
-	return s.dataService.AssignSegmentID(ctx, request)
-}
-
-func (s *Server) ShowSegments(ctx context.Context, request *datapb.ShowSegmentRequest) (*datapb.ShowSegmentResponse, error) {
-	return s.dataService.ShowSegments(ctx, request)
-}
-
-func (s *Server) GetSegmentStates(ctx context.Context, request *datapb.SegmentStatesRequest) (*datapb.SegmentStatesResponse, error) {
-	return s.dataService.GetSegmentStates(ctx, request)
-}
-
-func (s *Server) GetInsertBinlogPaths(ctx context.Context, request *datapb.InsertBinlogPathRequest) (*datapb.InsertBinlogPathsResponse, error) {
-	return s.dataService.GetInsertBinlogPaths(ctx, request)
-}
-
-func (s *Server) GetInsertChannels(ctx context.Context, request *datapb.InsertChannelRequest) (*internalpb2.StringList, error) {
-	return s.dataService.GetInsertChannels(ctx, request)
-}
-
-func (s *Server) GetCollectionStatistics(ctx context.Context, request *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error) {
-	return s.dataService.GetCollectionStatistics(ctx, request)
-}
-
-func (s *Server) GetPartitionStatistics(ctx context.Context, request *datapb.PartitionStatsRequest) (*datapb.PartitionStatsResponse, error) {
-	return s.dataService.GetPartitionStatistics(ctx, request)
-}
-
-func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
+func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return s.dataService.GetComponentStates(ctx)
 }
 
-func (s *Server) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
+func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.dataService.GetTimeTickChannel(ctx)
 }
 
-func (s *Server) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
+func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.dataService.GetStatisticsChannel(ctx)
 }
 
-func (s *Server) GetSegmentInfoChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
+func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+	return s.dataService.GetSegmentInfo(ctx, req)
+}
+
+func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
+	return s.dataService.RegisterNode(ctx, req)
+}
+
+func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error) {
+	return s.dataService.Flush(ctx, req)
+}
+
+func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
+	return s.dataService.AssignSegmentID(ctx, req)
+}
+
+func (s *Server) ShowSegments(ctx context.Context, req *datapb.ShowSegmentsRequest) (*datapb.ShowSegmentsResponse, error) {
+	return s.dataService.ShowSegments(ctx, req)
+}
+
+func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
+	return s.dataService.GetSegmentStates(ctx, req)
+}
+
+func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
+	return s.dataService.GetInsertBinlogPaths(ctx, req)
+}
+
+func (s *Server) GetInsertChannels(ctx context.Context, req *datapb.GetInsertChannelsRequest) (*internalpb.StringList, error) {
+	return s.dataService.GetInsertChannels(ctx, req)
+}
+
+func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
+	return s.dataService.GetCollectionStatistics(ctx, req)
+}
+
+func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
+	return s.dataService.GetPartitionStatistics(ctx, req)
+}
+
+func (s *Server) GetSegmentInfoChannel(ctx context.Context, req *datapb.GetSegmentInfoChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.dataService.GetSegmentInfoChannel(ctx)
 }

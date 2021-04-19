@@ -27,7 +27,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	qn "github.com/zilliztech/milvus-distributed/internal/querynode"
@@ -38,7 +38,7 @@ import (
 type UniqueID = typeutil.UniqueID
 
 type Server struct {
-	impl        *qn.QueryNode
+	querynode   *qn.QueryNode
 	wg          sync.WaitGroup
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -60,7 +60,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 	s := &Server{
 		ctx:         ctx1,
 		cancel:      cancel,
-		impl:        qn.NewQueryNodeWithoutID(ctx, factory),
+		querynode:   qn.NewQueryNodeWithoutID(ctx, factory),
 		grpcErrChan: make(chan error),
 	}
 	return s, nil
@@ -194,17 +194,17 @@ func (s *Server) init() error {
 	qn.Params.QueryNodePort = int64(Params.QueryNodePort)
 	qn.Params.QueryNodeID = Params.QueryNodeID
 
-	s.impl.UpdateStateCode(internalpb2.StateCode_Initializing)
+	s.querynode.UpdateStateCode(internalpb.StateCode_Initializing)
 
-	if err := s.impl.Init(); err != nil {
-		log.Error("impl init error: ", zap.Error(err))
+	if err := s.querynode.Init(); err != nil {
+		log.Error("querynode init error: ", zap.Error(err))
 		return err
 	}
 	return nil
 }
 
 func (s *Server) start() error {
-	return s.impl.Start()
+	return s.querynode.Start()
 }
 
 func (s *Server) startGrpcLoop(grpcPort int) {
@@ -274,7 +274,7 @@ func (s *Server) Stop() error {
 		s.grpcServer.GracefulStop()
 	}
 
-	err := s.impl.Stop()
+	err := s.querynode.Stop()
 	if err != nil {
 		return err
 	}
@@ -283,89 +283,69 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) SetMasterService(masterService types.MasterService) error {
-	return s.impl.SetMasterService(masterService)
+	return s.querynode.SetMasterService(masterService)
 }
 
 func (s *Server) SetQueryService(queryService types.QueryService) error {
-	return s.impl.SetQueryService(queryService)
+	return s.querynode.SetQueryService(queryService)
 }
 
 func (s *Server) SetIndexService(indexService types.IndexService) error {
-	return s.impl.SetIndexService(indexService)
+	return s.querynode.SetIndexService(indexService)
 }
 
 func (s *Server) SetDataService(dataService types.DataService) error {
-	return s.impl.SetDataService(dataService)
+	return s.querynode.SetDataService(dataService)
 }
 
-func (s *Server) GetTimeTickChannel(ctx context.Context, in *commonpb.Empty) (*milvuspb.StringResponse, error) {
+func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
+	return s.querynode.GetTimeTickChannel(ctx)
+}
+
+func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
+	return s.querynode.GetStatisticsChannel(ctx)
+}
+
+func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	// ignore ctx and in
-	channel, err := s.impl.GetTimeTickChannel()
-	if err != nil {
-		return nil, err
-	}
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Value: channel,
-	}, nil
+	return s.querynode.GetComponentStates(ctx)
 }
 
-func (s *Server) GetStatsChannel(ctx context.Context, in *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	// ignore ctx and in
-	channel, err := s.impl.GetStatisticsChannel()
-	if err != nil {
-		return nil, err
-	}
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Value: channel,
-	}, nil
-}
-
-func (s *Server) GetComponentStates(ctx context.Context, in *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	// ignore ctx and in
-	return s.impl.GetComponentStates()
-}
-
-func (s *Server) AddQueryChannel(ctx context.Context, in *querypb.AddQueryChannelsRequest) (*commonpb.Status, error) {
+func (s *Server) AddQueryChannel(ctx context.Context, req *querypb.AddQueryChannelRequest) (*commonpb.Status, error) {
 	// ignore ctx
-	return s.impl.AddQueryChannel(in)
+	return s.querynode.AddQueryChannel(ctx, req)
 }
 
-func (s *Server) RemoveQueryChannel(ctx context.Context, in *querypb.RemoveQueryChannelsRequest) (*commonpb.Status, error) {
+func (s *Server) RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQueryChannelRequest) (*commonpb.Status, error) {
 	// ignore ctx
-	return s.impl.RemoveQueryChannel(in)
+	return s.querynode.RemoveQueryChannel(ctx, req)
 }
 
-func (s *Server) WatchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
+func (s *Server) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	// ignore ctx
-	return s.impl.WatchDmChannels(in)
+	return s.querynode.WatchDmChannels(ctx, req)
 }
 
-func (s *Server) LoadSegments(ctx context.Context, in *querypb.LoadSegmentRequest) (*commonpb.Status, error) {
+func (s *Server) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	// ignore ctx
-	return s.impl.LoadSegments(in)
+	return s.querynode.LoadSegments(ctx, req)
 }
 
-func (s *Server) ReleaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	// ignore ctx
-	return s.impl.ReleaseCollection(in)
+	return s.querynode.ReleaseCollection(ctx, req)
 }
 
-func (s *Server) ReleasePartitions(ctx context.Context, in *querypb.ReleasePartitionRequest) (*commonpb.Status, error) {
+func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	// ignore ctx
-	return s.impl.ReleasePartitions(in)
+	return s.querynode.ReleasePartitions(ctx, req)
 }
 
-func (s *Server) ReleaseSegments(ctx context.Context, in *querypb.ReleaseSegmentRequest) (*commonpb.Status, error) {
+func (s *Server) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
 	// ignore ctx
-	return s.impl.ReleaseSegments(in)
+	return s.querynode.ReleaseSegments(ctx, req)
 }
 
-func (s *Server) GetSegmentInfo(ctx context.Context, in *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error) {
-	return s.impl.GetSegmentInfo(in)
+func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
+	return s.querynode.GetSegmentInfo(ctx, req)
 }

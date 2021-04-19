@@ -12,7 +12,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 type dataNode struct {
@@ -90,7 +90,7 @@ func (c *dataNodeCluster) WatchInsertChannels(channels []string) {
 		groups[i%length] = append(groups[i%length], channel)
 	}
 	for i, group := range groups {
-		resp, err := c.nodes[i].client.WatchDmChannels(ctx, &datapb.WatchDmChannelRequest{
+		resp, err := c.nodes[i].client.WatchDmChannels(ctx, &datapb.WatchDmChannelsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DescribeCollection,
 				MsgID:     -1, // todo
@@ -107,10 +107,10 @@ func (c *dataNodeCluster) WatchInsertChannels(channels []string) {
 	}
 }
 
-func (c *dataNodeCluster) GetDataNodeStates(ctx context.Context) ([]*internalpb2.ComponentInfo, error) {
+func (c *dataNodeCluster) GetDataNodeStates(ctx context.Context) ([]*internalpb.ComponentInfo, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	ret := make([]*internalpb2.ComponentInfo, 0)
+	ret := make([]*internalpb.ComponentInfo, 0)
 	for _, node := range c.nodes {
 		states, err := node.client.GetComponentStates(ctx)
 		if err != nil {
@@ -122,7 +122,7 @@ func (c *dataNodeCluster) GetDataNodeStates(ctx context.Context) ([]*internalpb2
 	return ret, nil
 }
 
-func (c *dataNodeCluster) FlushSegment(request *datapb.FlushSegRequest) {
+func (c *dataNodeCluster) FlushSegment(request *datapb.FlushSegmentsRequest) {
 	ctx := context.TODO()
 	c.mu.RLock()
 	defer c.mu.RUnlock()

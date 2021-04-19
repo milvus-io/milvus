@@ -7,7 +7,7 @@ import (
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"google.golang.org/grpc"
@@ -65,8 +65,21 @@ func (c *GrpcClient) Stop() error {
 }
 
 // TODO: timeout need to be propagated through ctx
-func (c *GrpcClient) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
-	return c.grpcClient.GetComponentStatesRPC(ctx, &commonpb.Empty{})
+func (c *GrpcClient) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	return c.grpcClient.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
+}
+func (c *GrpcClient) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return c.grpcClient.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
+}
+
+//just define a channel, not used currently
+func (c *GrpcClient) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return c.grpcClient.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+}
+
+//receive ddl from rpc and time tick from proxy service, and put them into this channel
+func (c *GrpcClient) GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return c.grpcClient.GetDdChannel(ctx, &internalpb.GetDdChannelRequest{})
 }
 
 //DDL request
@@ -84,7 +97,7 @@ func (c *GrpcClient) DescribeCollection(ctx context.Context, in *milvuspb.Descri
 	return c.grpcClient.DescribeCollection(ctx, in)
 }
 
-func (c *GrpcClient) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
+func (c *GrpcClient) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	return c.grpcClient.ShowCollections(ctx, in)
 }
 
@@ -100,7 +113,7 @@ func (c *GrpcClient) HasPartition(ctx context.Context, in *milvuspb.HasPartition
 	return c.grpcClient.HasPartition(ctx, in)
 }
 
-func (c *GrpcClient) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
+func (c *GrpcClient) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	return c.grpcClient.ShowPartitions(ctx, in)
 }
 
@@ -118,32 +131,18 @@ func (c *GrpcClient) DescribeIndex(ctx context.Context, in *milvuspb.DescribeInd
 }
 
 //global timestamp allocator
-func (c *GrpcClient) AllocTimestamp(ctx context.Context, in *masterpb.TsoRequest) (*masterpb.TsoResponse, error) {
+func (c *GrpcClient) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
 	return c.grpcClient.AllocTimestamp(ctx, in)
 }
-func (c *GrpcClient) AllocID(ctx context.Context, in *masterpb.IDRequest) (*masterpb.IDResponse, error) {
+func (c *GrpcClient) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
 	return c.grpcClient.AllocID(ctx, in)
 }
 
 //receiver time tick from proxy service, and put it into this channel
-func (c *GrpcClient) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return c.grpcClient.GetTimeTickChannelRPC(ctx, &commonpb.Empty{})
-}
-
-//receive ddl from rpc and time tick from proxy service, and put them into this channel
-func (c *GrpcClient) GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return c.grpcClient.GetDdChannelRPC(ctx, &commonpb.Empty{})
-}
-
-//just define a channel, not used currently
-func (c *GrpcClient) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return c.grpcClient.GetStatisticsChannelRPC(ctx, &commonpb.Empty{})
-}
-
 func (c *GrpcClient) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
 	return c.grpcClient.DescribeSegment(ctx, in)
 }
 
-func (c *GrpcClient) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error) {
+func (c *GrpcClient) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
 	return c.grpcClient.ShowSegments(ctx, in)
 }
