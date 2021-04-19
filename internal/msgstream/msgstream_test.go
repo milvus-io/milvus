@@ -115,14 +115,14 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 			TimeTickMsg: timeTickResult,
 		}
 		return timeTickMsg
-	case internalPb.MsgType_kQueryNodeSegStats:
-		queryNodeSegStats := internalPb.QueryNodeSegStats{
-			MsgType: internalPb.MsgType_kQueryNodeSegStats,
+	case internalPb.MsgType_kQueryNodeStats:
+		queryNodeSegStats := internalPb.QueryNodeStats{
+			MsgType: internalPb.MsgType_kQueryNodeStats,
 			PeerID:  reqID,
 		}
-		queryNodeSegStatsMsg := &QueryNodeSegStatsMsg{
-			BaseMsg:           baseMsg,
-			QueryNodeSegStats: queryNodeSegStats,
+		queryNodeSegStatsMsg := &QueryNodeStatsMsg{
+			BaseMsg:        baseMsg,
+			QueryNodeStats: queryNodeSegStats,
 		}
 		return queryNodeSegStatsMsg
 	}
@@ -473,7 +473,7 @@ func TestStream_PulsarMsgStream_DefaultRepackFunc(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kTimeTick, 1, 1))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearch, 2, 2))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearchResult, 3, 3))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kQueryNodeSegStats, 4, 4))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kQueryNodeStats, 4, 4))
 
 	inputStream := NewPulsarMsgStream(context.Background(), 100)
 	inputStream.SetPulsarClient(pulsarAddress)

@@ -177,8 +177,8 @@ func TestSegmentManager_SegmentStats(t *testing.T) {
 		OpenTime:     ts,
 	})
 	assert.Nil(t, err)
-	stats := internalpb.QueryNodeSegStats{
-		MsgType: internalpb.MsgType_kQueryNodeSegStats,
+	stats := internalpb.QueryNodeStats{
+		MsgType: internalpb.MsgType_kQueryNodeStats,
 		PeerID:  1,
 		SegStats: []*internalpb.SegmentStats{
 			{SegmentID: 100, MemorySize: 2500000, NumRows: 25000, RecentlyModified: true},
@@ -189,9 +189,9 @@ func TestSegmentManager_SegmentStats(t *testing.T) {
 		EndTimestamp:   0,
 		HashValues:     []uint32{1},
 	}
-	msg := msgstream.QueryNodeSegStatsMsg{
-		QueryNodeSegStats: stats,
-		BaseMsg:           baseMsg,
+	msg := msgstream.QueryNodeStatsMsg{
+		QueryNodeStats: stats,
+		BaseMsg:        baseMsg,
 	}
 
 	var tsMsg msgstream.TsMsg = &msg
@@ -350,9 +350,9 @@ func TestSegmentManager_RPC(t *testing.T) {
 		BeginTs: 102,
 		EndTs:   104,
 		Msgs: []msgstream.TsMsg{
-			&msgstream.QueryNodeSegStatsMsg{
-				QueryNodeSegStats: internalpb.QueryNodeSegStats{
-					MsgType: internalpb.MsgType_kQueryNodeSegStats,
+			&msgstream.QueryNodeStatsMsg{
+				QueryNodeStats: internalpb.QueryNodeStats{
+					MsgType: internalpb.MsgType_kQueryNodeStats,
 					PeerID:  1,
 					SegStats: []*internalpb.SegmentStats{
 						{SegmentID: segID, MemorySize: 600000000, NumRows: 1000000, RecentlyModified: true},

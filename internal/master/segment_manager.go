@@ -50,9 +50,9 @@ func (segMgr *SegmentManager) HandleQueryNodeMsgPack(msgPack *msgstream.MsgPack)
 	segMgr.mu.Lock()
 	defer segMgr.mu.Unlock()
 	for _, msg := range msgPack.Msgs {
-		statsMsg, ok := msg.(*msgstream.QueryNodeSegStatsMsg)
+		statsMsg, ok := msg.(*msgstream.QueryNodeStatsMsg)
 		if !ok {
-			return errors.Errorf("Type of message is not QueryNodeSegStatsMsg")
+			return errors.Errorf("Type of message is not QueryNodeStatsMsg")
 		}
 
 		for _, segStat := range statsMsg.GetSegStats() {
