@@ -6,9 +6,9 @@ import (
 )
 
 func TestFakeCreateCollectionByGRPC(t *testing.T) {
-	collectionName, segmentID := FakeCreateCollectionByGRPC()
-	if collectionName != "grpc-client-test" {
-		t.Error("Collection name wrong")
+	reason, segmentID := FakeCreateCollectionByGRPC()
+	if reason != "" {
+		t.Error(reason)
 	}
 	fmt.Println(collectionName)
 	fmt.Println(segmentID)

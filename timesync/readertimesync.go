@@ -10,7 +10,7 @@ import (
 	"sort"
 )
 
-const TimeSyncClientId int64 = -1
+const ReadStopFlagEnd int64 = 0
 
 type ReaderTimeSync interface {
 	Start() error
@@ -36,15 +36,17 @@ type readerTimeSyncCfg struct {
 	timesyncMsgChan    chan TimeSyncMsg
 	insertOrDeleteChan chan *pb.InsertOrDeleteMsg //output insert or delete msg
 
-	interval        int
-	proxyIdList     []int64
-	readerQueueSize int
+	readStopFlagClientId int64
+	interval             int
+	proxyIdList          []int64
+	readerQueueSize      int
 
 	revTimesyncFromReader map[uint64]int
 
 	ctx    context.Context
 	cancel context.CancelFunc
 }
+
 /*
 layout of timestamp
    time  ms                     logic number
@@ -64,6 +66,7 @@ func NewReaderTimeSync(
 	readSubName string,
 	proxyIdList []int64,
 	interval int,
+	readStopFlagClientId int64,
 	opts ...ReaderTimeSyncOption,
 ) (ReaderTimeSync, error) {
 	//check if proxyId has duplication
@@ -94,6 +97,10 @@ func NewReaderTimeSync(
 	if r.readerQueueSize == 0 {
 		r.readerQueueSize = 1024
 	}
+	if readStopFlagClientId >= ReadStopFlagEnd {
+		return nil, fmt.Errorf("read stop flag client id should less than %d", ReadStopFlagEnd)
+	}
+	r.readStopFlagClientId = readStopFlagClientId
 
 	r.timesyncMsgChan = make(chan TimeSyncMsg, len(readTopics)*r.readerQueueSize)
 	r.insertOrDeleteChan = make(chan *pb.InsertOrDeleteMsg, len(readTopics)*r.readerQueueSize)
@@ -190,8 +197,9 @@ func (r *readerTimeSyncCfg) alignTimeSync(ts []*pb.TimeSyncMsg) []*pb.TimeSyncMs
 			}
 		}
 	} else {
-		ts = ts[len(ts)-1:]
-		return ts
+		if len(ts) > 1 {
+			ts = ts[len(ts)-1:]
+		}
 	}
 	return ts
 }
@@ -201,7 +209,10 @@ func (r *readerTimeSyncCfg) readTimeSync(ctx context.Context, ts []*pb.TimeSyncM
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case cm := <-r.timeSyncConsumer.Chan():
+		case cm, ok := <-r.timeSyncConsumer.Chan():
+			if ok == false {
+				return nil, fmt.Errorf("timesync consumer closed")
+			}
 			msg := cm.Message
 			var tsm pb.TimeSyncMsg
 			if err := proto.Unmarshal(msg.Payload(), &tsm); err != nil {
@@ -239,7 +250,7 @@ func (r *readerTimeSyncCfg) startTimeSync() {
 		}
 		tsm = tsm[:0]
 		//send timestamp flag to reader channel
-		msg := pb.InsertOrDeleteMsg{Timestamp: ts, ClientId: TimeSyncClientId}
+		msg := pb.InsertOrDeleteMsg{Timestamp: ts, ClientId: r.readStopFlagClientId}
 		payload, err := proto.Marshal(&msg)
 		if err != nil {
 			//TODO log error
@@ -255,6 +266,10 @@ func (r *readerTimeSyncCfg) startTimeSync() {
 	}
 }
 
+func (r *readerTimeSyncCfg) isReadStopFlag(imsg *pb.InsertOrDeleteMsg) bool {
+	return imsg.ClientId < ReadStopFlagEnd
+}
+
 func (r *readerTimeSyncCfg) startReadTopics() {
 	ctx, _ := context.WithCancel(r.ctx)
 	tsm := TimeSyncMsg{Timestamp: 0, NumRecorders: 0}
@@ -262,7 +277,11 @@ func (r *readerTimeSyncCfg) startReadTopics() {
 		select {
 		case <-ctx.Done():
 			return
-		case cm := <-r.readerConsumer.Chan():
+		case cm, ok := <-r.readerConsumer.Chan():
+			if ok == false {
+				//TODO,log error
+				log.Printf("reader consumer closed")
+			}
 			msg := cm.Message
 			var imsg pb.InsertOrDeleteMsg
 			if err := proto.Unmarshal(msg.Payload(), &imsg); err != nil {
@@ -270,18 +289,20 @@ func (r *readerTimeSyncCfg) startReadTopics() {
 				log.Printf("unmarshal InsertOrDeleteMsg error %v", err)
 				break
 			}
-			if imsg.ClientId == TimeSyncClientId { //timestamp flag
-				gval := r.revTimesyncFromReader[imsg.Timestamp]
-				gval++
-				if gval >= len(r.readerProducer) {
-					if imsg.Timestamp >= tsm.Timestamp {
-						tsm.Timestamp = imsg.Timestamp
-						r.timesyncMsgChan <- tsm
-						tsm.NumRecorders = 0
+			if r.isReadStopFlag(&imsg) { //timestamp flag
+				if imsg.ClientId == r.readStopFlagClientId {
+					gval := r.revTimesyncFromReader[imsg.Timestamp]
+					gval++
+					if gval >= len(r.readerProducer) {
+						if imsg.Timestamp >= tsm.Timestamp {
+							tsm.Timestamp = imsg.Timestamp
+							r.timesyncMsgChan <- tsm
+							tsm.NumRecorders = 0
+						}
+						delete(r.revTimesyncFromReader, imsg.Timestamp)
+					} else {
+						r.revTimesyncFromReader[imsg.Timestamp] = gval
 					}
-					delete(r.revTimesyncFromReader, imsg.Timestamp)
-				} else {
-					r.revTimesyncFromReader[imsg.Timestamp] = gval
 				}
 			} else {
 				if r.IsInsertDeleteChanFull() {

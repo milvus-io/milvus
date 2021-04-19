@@ -25,20 +25,19 @@ namespace server {
 class SearchReq : public BaseReq {
  public:
     static BaseReqPtr
-    Create(const ContextPtr& context, const query::QueryPtr& query_ptr, const milvus::json& json_params,
-            engine::QueryResultPtr& result);
+    Create(const ContextPtr& context, const ::milvus::grpc::SearchParam *request,
+           ::milvus::grpc::QueryResult *response);
 
  protected:
-    SearchReq(const ContextPtr& context, const query::QueryPtr& query_ptr, const milvus::json& json_params,
-              engine::QueryResultPtr& result);
+    SearchReq(const ContextPtr& context, const ::milvus::grpc::SearchParam *request,
+              ::milvus::grpc::QueryResult *result);
 
     Status
     OnExecute() override;
 
  private:
-    milvus::query::QueryPtr query_ptr_;
-    milvus::json json_params_;
-    engine::QueryResultPtr& result_;
+    const ::milvus::grpc::SearchParam *request_;
+    ::milvus::grpc::QueryResult* result_;
 };
 
 }  // namespace server

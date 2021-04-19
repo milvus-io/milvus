@@ -9,7 +9,8 @@ CSegmentBase
 NewSegment(CPartition partition, unsigned long segment_id) {
   auto p = (milvus::dog_segment::Partition*)partition;
 
-  auto segment = milvus::dog_segment::CreateSegment(p->get_schema());
+  // TODO: remove hard code null index ptr
+  auto segment = milvus::dog_segment::CreateSegment(p->get_schema(), nullptr);
 
   // TODO: delete print
   std::cout << "create segment " << segment_id << std::endl;

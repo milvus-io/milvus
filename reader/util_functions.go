@@ -6,35 +6,21 @@ import (
 )
 
 // Function `GetSegmentByEntityId` should return entityIDs, timestamps and segmentIDs
-func (node *QueryNode) GetKey2Segments() ([]int64, []uint64, []int64) {
-	// TODO: get id2segment info from pulsar
-	return nil, nil, nil
-}
+func (node *QueryNode) GetKey2Segments() (*[]int64, *[]uint64, *[]int64) {
+	var entityIDs []int64
+	var timestamps []uint64
+	var segmentIDs []int64
 
-func (node *QueryNode) GetTargetSegment(collectionName *string, partitionTag *string) (*Segment, error) {
-	var targetPartition *Partition
-
-	for _, collection := range node.Collections {
-		if *collectionName == collection.CollectionName {
-			for _, partition := range collection.Partitions {
-				if *partitionTag == partition.PartitionName {
-					targetPartition = partition
-					break
-				}
-			}
+	var key2SegMsg = &node.messageClient.Key2SegMsg
+	for _, msg := range *key2SegMsg {
+		for _, segmentID := range (*msg).SegmentId {
+			entityIDs = append(entityIDs, msg.Uid)
+			timestamps = append(timestamps, msg.Timestamp)
+			segmentIDs = append(segmentIDs, segmentID)
 		}
 	}
 
-	if targetPartition == nil {
-		return nil, errors.New("cannot found target partition")
-	}
-
-	for _, segment := range targetPartition.OpenedSegments {
-		// TODO: add other conditions
-		return segment, nil
-	}
-
-	return nil, errors.New("cannot found target segment")
+	return &entityIDs, &timestamps, &segmentIDs
 }
 
 func (node *QueryNode) GetCollectionByCollectionName(collectionName string) (*Collection, error) {

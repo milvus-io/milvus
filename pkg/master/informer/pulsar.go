@@ -39,7 +39,7 @@ func (pc PulsarClient) Listener(ssChan chan mock.SegmentStats) error {
 	if err != nil {
 		log.Fatal(err)
 	}
-	for i := 0; i < 10; i++ {
+	for {
 		msg, err := consumer.Receive(context.TODO())
 		if err != nil {
 			log.Fatal(err)

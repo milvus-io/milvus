@@ -647,11 +647,11 @@ var fileDescriptor_78b27e6f04f44c6e = []byte{
 
 // Reference imports to suppress errors if they are not otherwise used.
 var _ context.Context
-var _ grpc.ClientConn
+var _ grpc.ClientConnInterface
 
 // This is a compile-time assertion to ensure that this generated file
 // is compatible with the grpc package it is being compiled against.
-const _ = grpc.SupportPackageIsVersion4
+const _ = grpc.SupportPackageIsVersion6
 
 // PDClient is the client API for PD service.
 //
@@ -663,10 +663,10 @@ type PDClient interface {
 }
 
 type pDClient struct {
-	cc *grpc.ClientConn
+	cc grpc.ClientConnInterface
 }
 
-func NewPDClient(cc *grpc.ClientConn) PDClient {
+func NewPDClient(cc grpc.ClientConnInterface) PDClient {
 	return &pDClient{cc}
 }
 
