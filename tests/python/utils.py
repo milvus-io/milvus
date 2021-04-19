@@ -243,7 +243,7 @@ def gen_single_vector_fields():
 def gen_default_fields(auto_id=True):
     default_fields = {
         "fields": [
-            {"name": "int64", "type": DataType.INT64, "is_primary_key": not auto_id},
+            {"name": "int64", "type": DataType.INT64},
             {"name": "float", "type": DataType.FLOAT},
             {"name": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR,
              "params": {"dim": default_dim},
@@ -258,7 +258,7 @@ def gen_default_fields(auto_id=True):
 def gen_binary_default_fields(auto_id=True):
     default_fields = {
         "fields": [
-            {"name": "int64", "type": DataType.INT64, "is_primary_key": not auto_id},
+            {"name": "int64", "type": DataType.INT64},
             {"name": "float", "type": DataType.FLOAT},
             {"name": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "params": {"dim": default_dim}, "indexes": [{"metric_type": "JACCARD"}]}
             ],
