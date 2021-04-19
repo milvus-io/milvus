@@ -420,7 +420,7 @@ class TestInsertBase:
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
-    @pytest.mark.skip(" todo support  type check")
+    # @pytest.mark.skip(" todo support  type check")
     def test_insert_with_field_type_not_match(self, connect, collection):
         '''
         target: test insert entities, with the entity field type updated
