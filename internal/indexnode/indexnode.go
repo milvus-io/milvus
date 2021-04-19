@@ -2,11 +2,15 @@ package indexnode
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 
+	"github.com/opentracing/opentracing-go"
+	"github.com/uber/jaeger-client-go/config"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
@@ -40,6 +44,8 @@ type NodeImpl struct {
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
+
+	closer io.Closer
 }
 
 func NewNodeImpl(ctx context.Context) (*NodeImpl, error) {
@@ -57,9 +63,7 @@ func NewNodeImpl(ctx context.Context) (*NodeImpl, error) {
 }
 
 func (i *NodeImpl) Init() error {
-	log.Println("AAAAAAAAAAAAAAAAA", i.serviceClient)
 	err := funcutil.WaitForComponentHealthy(i.serviceClient, "IndexService", 10, time.Second)
-	log.Println("BBBBBBBBB", i.serviceClient)
 
 	if err != nil {
 		return err
@@ -86,6 +90,21 @@ func (i *NodeImpl) Init() error {
 	if err != nil {
 		return err
 	}
+
+	// TODO
+	cfg := &config.Configuration{
+		ServiceName: fmt.Sprintf("index_node_%d", Params.NodeID),
+		Sampler: &config.SamplerConfig{
+			Type:  "const",
+			Param: 1,
+		},
+	}
+	tracer, closer, err := cfg.NewTracer()
+	if err != nil {
+		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
+	}
+	opentracing.SetGlobalTracer(tracer)
+	i.closer = closer
 
 	connectMinIOFn := func() error {
 		option := &miniokv.Option{
@@ -126,6 +145,9 @@ func (i *NodeImpl) Start() error {
 
 // Close closes the server.
 func (i *NodeImpl) Stop() error {
+	if err := i.closer.Close(); err != nil {
+		return err
+	}
 	i.loopCancel()
 	if i.sched != nil {
 		i.sched.Close()

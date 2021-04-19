@@ -1,6 +1,7 @@
 package querynode
 
 import (
+	"context"
 	"log"
 
 	"github.com/golang/protobuf/proto"
@@ -19,15 +20,15 @@ func (ddNode *ddNode) Name() string {
 	return "ddNode"
 }
 
-func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
-	//fmt.Println("Do ddNode operation")
+func (ddNode *ddNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
+	//fmt.Println("Do filterDmNode operation")
 
 	if len(in) != 1 {
 		log.Println("Invalid operate message input in ddNode, input length = ", len(in))
 		// TODO: add error handling
 	}
 
-	msMsg, ok := (*in[0]).(*MsgStreamMsg)
+	msMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
 		log.Println("type assertion failed for MsgStreamMsg")
 		// TODO: add error handling
@@ -72,7 +73,7 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 	//}
 
 	var res Msg = ddNode.ddMsg
-	return []*Msg{&res}
+	return []Msg{res}, ctx
 }
 
 func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {

@@ -1,0 +1,11 @@
+[
+    {
+        "server": "eros",
+        "suite_params": [
+            {
+                "suite": "gpu_search_stability.yaml",
+                "image_type": "gpu"
+            }
+        ]
+    }
+]

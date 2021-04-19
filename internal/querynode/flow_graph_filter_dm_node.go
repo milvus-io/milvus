@@ -1,6 +1,7 @@
 package querynode
 
 import (
+	"context"
 	"log"
 	"math"
 
@@ -18,7 +19,7 @@ func (fdmNode *filterDmNode) Name() string {
 	return "fdmNode"
 }
 
-func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
+func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
 	//fmt.Println("Do filterDmNode operation")
 
 	if len(in) != 2 {
@@ -26,13 +27,13 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 		// TODO: add error handling
 	}
 
-	msgStreamMsg, ok := (*in[0]).(*MsgStreamMsg)
+	msgStreamMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
 		log.Println("type assertion failed for MsgStreamMsg")
 		// TODO: add error handling
 	}
 
-	ddMsg, ok := (*in[1]).(*ddMsg)
+	ddMsg, ok := in[1].(*ddMsg)
 	if !ok {
 		log.Println("type assertion failed for ddMsg")
 		// TODO: add error handling
@@ -63,7 +64,7 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 	iMsg.gcRecord = ddMsg.gcRecord
 	var res Msg = &iMsg
 
-	return []*Msg{&res}
+	return []Msg{res}, ctx
 }
 
 func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg) *msgstream.InsertMsg {

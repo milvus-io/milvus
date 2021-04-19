@@ -1,0 +1,10 @@
+[
+    {
+        "suite_params": [
+            {
+                "suite": "loop_stability.yaml",
+                "image_type": "gpu"
+            }
+        ]
+    }
+]

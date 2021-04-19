@@ -68,7 +68,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 
 	//TODO
 	cfg := &config.Configuration{
-		ServiceName: "proxy_service",
+		ServiceName: "master_service",
 		Sampler: &config.SamplerConfig{
 			Type:  "const",
 			Param: 1,

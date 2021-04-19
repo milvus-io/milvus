@@ -47,19 +47,19 @@ func (m *intMsg) DownStreamNodeIdx() int {
 	return 1
 }
 
-func intMsg2Msg(in []*intMsg) []*Msg {
-	out := make([]*Msg, 0)
+func intMsg2Msg(in []*intMsg) []Msg {
+	out := make([]Msg, 0)
 	for _, msg := range in {
 		var m Msg = msg
-		out = append(out, &m)
+		out = append(out, m)
 	}
 	return out
 }
 
-func msg2IntMsg(in []*Msg) []*intMsg {
+func msg2IntMsg(in []Msg) []*intMsg {
 	out := make([]*intMsg, 0)
 	for _, msg := range in {
-		out = append(out, (*msg).(*intMsg))
+		out = append(out, msg.(*intMsg))
 	}
 	return out
 }
@@ -68,43 +68,43 @@ func (a *nodeA) Name() string {
 	return "NodeA"
 }
 
-func (a *nodeA) Operate(in []*Msg) []*Msg {
-	return append(in, in...)
+func (a *nodeA) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
+	return append(in, in...), nil
 }
 
 func (b *nodeB) Name() string {
 	return "NodeB"
 }
 
-func (b *nodeB) Operate(in []*Msg) []*Msg {
+func (b *nodeB) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
 	messages := make([]*intMsg, 0)
 	for _, msg := range msg2IntMsg(in) {
 		messages = append(messages, &intMsg{
 			num: math.Pow(msg.num, 2),
 		})
 	}
-	return intMsg2Msg(messages)
+	return intMsg2Msg(messages), nil
 }
 
 func (c *nodeC) Name() string {
 	return "NodeC"
 }
 
-func (c *nodeC) Operate(in []*Msg) []*Msg {
+func (c *nodeC) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
 	messages := make([]*intMsg, 0)
 	for _, msg := range msg2IntMsg(in) {
 		messages = append(messages, &intMsg{
 			num: math.Sqrt(msg.num),
 		})
 	}
-	return intMsg2Msg(messages)
+	return intMsg2Msg(messages), nil
 }
 
 func (d *nodeD) Name() string {
 	return "NodeD"
 }
 
-func (d *nodeD) Operate(in []*Msg) []*Msg {
+func (d *nodeD) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
 	messages := make([]*intMsg, 0)
 	outLength := len(in) / 2
 	inMessages := msg2IntMsg(in)
@@ -117,7 +117,7 @@ func (d *nodeD) Operate(in []*Msg) []*Msg {
 	d.d = messages[0].num
 	d.resChan <- d.d
 	fmt.Println("flow graph result:", d.d)
-	return intMsg2Msg(messages)
+	return intMsg2Msg(messages), nil
 }
 
 func sendMsgFromCmd(ctx context.Context, fg *TimeTickedFlowGraph) {
@@ -129,8 +129,12 @@ func sendMsgFromCmd(ctx context.Context, fg *TimeTickedFlowGraph) {
 			time.Sleep(time.Millisecond * time.Duration(500))
 			var num = float64(rand.Int() % 100)
 			var msg Msg = &intMsg{num: num}
+			var msgWithContext = &MsgWithCtx{
+				ctx: ctx,
+				msg: msg,
+			}
 			a := nodeA{}
-			fg.nodeCtx[a.Name()].inputChannels[0] <- &msg
+			fg.nodeCtx[a.Name()].inputChannels[0] <- msgWithContext
 			fmt.Println("send number", num, "to node", a.Name())
 			res, ok := receiveResult(ctx, fg)
 			if !ok {
@@ -156,7 +160,7 @@ func sendMsgFromCmd(ctx context.Context, fg *TimeTickedFlowGraph) {
 func receiveResultFromNodeD(res *float64, fg *TimeTickedFlowGraph, wg *sync.WaitGroup) {
 	d := nodeD{}
 	node := fg.nodeCtx[d.Name()]
-	nd, ok := (*node.node).(*nodeD)
+	nd, ok := node.node.(*nodeD)
 	if !ok {
 		log.Fatal("not nodeD type")
 	}
@@ -167,7 +171,7 @@ func receiveResultFromNodeD(res *float64, fg *TimeTickedFlowGraph, wg *sync.Wait
 func receiveResult(ctx context.Context, fg *TimeTickedFlowGraph) (float64, bool) {
 	d := nodeD{}
 	node := fg.nodeCtx[d.Name()]
-	nd, ok := (*node.node).(*nodeD)
+	nd, ok := node.node.(*nodeD)
 	if !ok {
 		log.Fatal("not nodeD type")
 	}
@@ -211,10 +215,10 @@ func TestTimeTickedFlowGraph_Start(t *testing.T) {
 		resChan: make(chan float64),
 	}
 
-	fg.AddNode(&a)
-	fg.AddNode(&b)
-	fg.AddNode(&c)
-	fg.AddNode(&d)
+	fg.AddNode(a)
+	fg.AddNode(b)
+	fg.AddNode(c)
+	fg.AddNode(d)
 
 	var err = fg.SetEdges(a.Name(),
 		[]string{},
@@ -250,7 +254,7 @@ func TestTimeTickedFlowGraph_Start(t *testing.T) {
 
 	// init node A
 	nodeCtxA := fg.nodeCtx[a.Name()]
-	nodeCtxA.inputChannels = []chan *Msg{make(chan *Msg, 10)}
+	nodeCtxA.inputChannels = []chan *MsgWithCtx{make(chan *MsgWithCtx, 10)}
 
 	go fg.Start()
 

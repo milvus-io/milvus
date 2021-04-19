@@ -1,0 +1,11 @@
+[
+    {
+        "server": "athena",
+        "suite_params": [
+            {
+                "suite": "011_cpu_search_binary.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+]

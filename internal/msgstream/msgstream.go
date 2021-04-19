@@ -32,7 +32,7 @@ type MsgStream interface {
 
 	Produce(context.Context, *MsgPack) error
 	Broadcast(context.Context, *MsgPack) error
-	Consume() *MsgPack
+	Consume() (*MsgPack, context.Context)
 	Seek(offset *MsgPosition) error
 }
 

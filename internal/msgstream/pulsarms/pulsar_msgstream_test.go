@@ -223,7 +223,7 @@ func initPulsarTtStream(pulsarAddress string,
 func receiveMsg(outputStream msgstream.MsgStream, msgCount int) {
 	receiveCount := 0
 	for {
-		result := outputStream.Consume()
+		result, _ := outputStream.Consume()
 		if len(result.Msgs) > 0 {
 			msgs := result.Msgs
 			for _, v := range msgs {
@@ -607,13 +607,13 @@ func TestStream_PulsarTtMsgStream_Seek(t *testing.T) {
 	assert.Nil(t, err)
 
 	outputStream.Consume()
-	receivedMsg := outputStream.Consume()
+	receivedMsg, _ := outputStream.Consume()
 	for _, position := range receivedMsg.StartPositions {
 		outputStream.Seek(position)
 	}
 	err = inputStream.Broadcast(ctx, &msgPack5)
 	assert.Nil(t, err)
-	seekMsg := outputStream.Consume()
+	seekMsg, _ := outputStream.Consume()
 	for _, msg := range seekMsg.Msgs {
 		assert.Equal(t, msg.BeginTs(), uint64(14))
 	}

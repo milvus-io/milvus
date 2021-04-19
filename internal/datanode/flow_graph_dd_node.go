@@ -66,7 +66,7 @@ func (ddNode *ddNode) Name() string {
 	return "ddNode"
 }
 
-func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
+func (ddNode *ddNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
 	//fmt.Println("Do filterDdNode operation")
 
 	if len(in) != 1 {
@@ -74,7 +74,7 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 		// TODO: add error handling
 	}
 
-	msMsg, ok := (*in[0]).(*MsgStreamMsg)
+	msMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
 		log.Println("type assertion failed for MsgStreamMsg")
 		// TODO: add error handling
@@ -141,7 +141,7 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 	}
 
 	var res Msg = ddNode.ddMsg
-	return []*Msg{&res}
+	return []Msg{res}, ctx
 }
 
 func (ddNode *ddNode) flush() {

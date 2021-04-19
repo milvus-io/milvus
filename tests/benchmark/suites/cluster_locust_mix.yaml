@@ -1,0 +1,47 @@
+locust_mix_performance:
+  collections:
+    -
+      milvus:
+        db_config.primary_path: /test/milvus/db_data_011/cluster/locust_mix
+        suffix_path: true
+        cache_config.insert_buffer_size: 2GB
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 4GB
+        gpu_resource_config.search_resources:
+          gpu0
+        gpu_resource_config.build_index_resources:
+          gpu0
+        wal_enable: true
+        external_mysql: true
+        cluster: true
+        readonly:
+          replicas: 2 
+      collection_name: sift_1m_500000_128_l2
+      ni_per: 50000
+      build_index: true
+      index_type: ivf_sq8
+      index_param:
+        nlist: 1024
+      task:
+        types:
+          - type: flush
+            weight: 1
+          -
+            type: query
+            weight: 30
+            params:
+              top_k: 10
+              nq: 100
+              search_param:
+                nprobe: 16
+          -
+            type: insert
+            weight: 10
+            params:
+              nb: 1
+        connection_num: 1
+        clients_num: 10
+        hatch_rate: 2
+        during_time: 600 

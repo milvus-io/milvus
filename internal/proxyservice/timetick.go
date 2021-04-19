@@ -5,11 +5,9 @@ import (
 	"log"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 type (
@@ -58,6 +56,9 @@ func (tt *TimeTickImpl) Start() error {
 					},
 				}
 				msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
+				for _, msg := range msgPack.Msgs {
+					log.Println("msg type xxxxxxxxxxxxxxxxxxxxxxxx", msg.Type())
+				}
 				for _, channel := range tt.channels {
 					err = channel.Broadcast(tt.ctx, &msgPack)
 					if err != nil {

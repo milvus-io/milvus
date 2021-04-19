@@ -1,6 +1,7 @@
 package querynode
 
 import (
+	"context"
 	"log"
 )
 
@@ -13,7 +14,7 @@ func (gcNode *gcNode) Name() string {
 	return "gcNode"
 }
 
-func (gcNode *gcNode) Operate(in []*Msg) []*Msg {
+func (gcNode *gcNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
 	//fmt.Println("Do gcNode operation")
 
 	if len(in) != 1 {
@@ -21,7 +22,7 @@ func (gcNode *gcNode) Operate(in []*Msg) []*Msg {
 		// TODO: add error handling
 	}
 
-	_, ok := (*in[0]).(*gcMsg)
+	_, ok := in[0].(*gcMsg)
 	if !ok {
 		log.Println("type assertion failed for gcMsg")
 		// TODO: add error handling
@@ -47,7 +48,7 @@ func (gcNode *gcNode) Operate(in []*Msg) []*Msg {
 	//	}
 	//}
 
-	return nil
+	return nil, ctx
 }
 
 func newGCNode(replica collectionReplica) *gcNode {

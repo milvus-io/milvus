@@ -1,0 +1,17 @@
+insert_performance:
+  collections:
+    - 
+      server:
+        db_config.primary_path: /test/milvus/db_data_8/shards_sift_1m_128_128_l2_insert
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: false 
+        gpu_resource_config.search_resources:
+          - gpu0
+        gpu_resource_config.build_index_resources:
+          - gpu0
+        wal_enable: true
+      collection_name: sift_1m_128_128_l2
+      ni_per: 10000
+      build_index: false
+      index_type: flat

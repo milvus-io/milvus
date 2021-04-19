@@ -56,15 +56,15 @@ func (dsService *dataSyncService) initNodes() {
 	var serviceTimeNode node = newServiceTimeNode(dsService.ctx, dsService.replica, dsService.msFactory)
 	var gcNode node = newGCNode(dsService.replica)
 
-	dsService.fg.AddNode(&dmStreamNode)
-	dsService.fg.AddNode(&ddStreamNode)
+	dsService.fg.AddNode(dmStreamNode)
+	dsService.fg.AddNode(ddStreamNode)
 
-	dsService.fg.AddNode(&filterDmNode)
-	dsService.fg.AddNode(&ddNode)
+	dsService.fg.AddNode(filterDmNode)
+	dsService.fg.AddNode(ddNode)
 
-	dsService.fg.AddNode(&insertNode)
-	dsService.fg.AddNode(&serviceTimeNode)
-	dsService.fg.AddNode(&gcNode)
+	dsService.fg.AddNode(insertNode)
+	dsService.fg.AddNode(serviceTimeNode)
+	dsService.fg.AddNode(gcNode)
 
 	// dmStreamNode
 	var err = dsService.fg.SetEdges(dmStreamNode.Name(),

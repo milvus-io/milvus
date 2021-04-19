@@ -2,18 +2,21 @@ package grpcindexservice
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log"
 	"net"
 	"strconv"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-
+	"github.com/opentracing/opentracing-go"
+	"github.com/uber/jaeger-client-go/config"
 	"github.com/zilliztech/milvus-distributed/internal/indexservice"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"google.golang.org/grpc"
 )
@@ -30,6 +33,8 @@ type Server struct {
 	loopCtx    context.Context
 	loopCancel func()
 	loopWg     sync.WaitGroup
+
+	closer io.Closer
 }
 
 func (s *Server) Run() error {
@@ -71,6 +76,9 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() error {
+	if err := s.closer.Close(); err != nil {
+		return err
+	}
 	if s.impl != nil {
 		s.impl.Stop()
 	}
@@ -190,6 +198,20 @@ func NewServer(ctx context.Context) (*Server, error) {
 		impl:        serverImp,
 		grpcErrChan: make(chan error),
 	}
+
+	cfg := &config.Configuration{
+		ServiceName: "index_service",
+		Sampler: &config.SamplerConfig{
+			Type:  "const",
+			Param: 1,
+		},
+	}
+	tracer, closer, err := cfg.NewTracer()
+	if err != nil {
+		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
+	}
+	opentracing.SetGlobalTracer(tracer)
+	s.closer = closer
 
 	return s, nil
 }

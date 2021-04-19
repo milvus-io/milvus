@@ -5,14 +5,12 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
-	"go.uber.org/zap"
-
+	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -21,6 +19,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 type TsMsg = msgstream.TsMsg
@@ -52,6 +51,8 @@ type PulsarMsgStream struct {
 	pulsarBufSize    int64
 	consumerLock     *sync.Mutex
 	consumerReflects []reflect.SelectCase
+
+	scMap *sync.Map
 }
 
 func newPulsarMsgStream(ctx context.Context,
@@ -92,6 +93,7 @@ func newPulsarMsgStream(ctx context.Context,
 		consumerReflects: consumerReflects,
 		consumerLock:     &sync.Mutex{},
 		wait:             &sync.WaitGroup{},
+		scMap:            &sync.Map{},
 	}
 
 	return stream, nil
@@ -180,29 +182,6 @@ func (ms *PulsarMsgStream) Close() {
 	if ms.client != nil {
 		ms.client.Close()
 	}
-}
-
-type propertiesReaderWriter struct {
-	ppMap map[string]string
-}
-
-func (ppRW *propertiesReaderWriter) Set(key, val string) {
-	// The GRPC HPACK implementation rejects any uppercase keys here.
-	//
-	// As such, since the HTTP_HEADERS format is case-insensitive anyway, we
-	// blindly lowercase the key (which is guaranteed to work in the
-	// Inject/Extract sense per the OpenTracing spec).
-	key = strings.ToLower(key)
-	ppRW.ppMap[key] = val
-}
-
-func (ppRW *propertiesReaderWriter) ForeachKey(handler func(key, val string) error) error {
-	for k, val := range ppRW.ppMap {
-		if err := handler(k, val); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (ms *PulsarMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
@@ -316,18 +295,31 @@ func (ms *PulsarMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) erro
 	return nil
 }
 
-func (ms *PulsarMsgStream) Consume() *MsgPack {
+func (ms *PulsarMsgStream) Consume() (*MsgPack, context.Context) {
 	for {
 		select {
 		case cm, ok := <-ms.receiveBuf:
 			if !ok {
 				log.Debug("buf chan closed")
-				return nil
+				return nil, nil
 			}
-			return cm
+			var ctx context.Context
+			var opts []opentracing.StartSpanOption
+			for _, msg := range cm.Msgs {
+				sc, loaded := ms.scMap.LoadAndDelete(msg.ID())
+				if loaded {
+					opts = append(opts, opentracing.ChildOf(sc.(opentracing.SpanContext)))
+				}
+			}
+			if len(opts) != 0 {
+				ctx = context.Background()
+			}
+			sp, ctx := trace.StartSpanFromContext(ctx, opts...)
+			sp.Finish()
+			return cm, ctx
 		case <-ms.ctx.Done():
 			log.Debug("context closed")
-			return nil
+			return nil, nil
 		}
 	}
 }
@@ -360,8 +352,15 @@ func (ms *PulsarMsgStream) receiveMsg(consumer Consumer) {
 				MsgID:       typeutil.PulsarMsgIDToString(pulsarMsg.ID()),
 			})
 
+			sp, ok := trace.ExtractFromPulsarMsgProperties(tsMsg, pulsarMsg.Properties())
+			if ok {
+				ms.scMap.Store(tsMsg.ID(), sp.Context())
+			}
+
 			msgPack := MsgPack{Msgs: []TsMsg{tsMsg}}
 			ms.receiveBuf <- &msgPack
+
+			sp.Finish()
 		}
 	}
 }
@@ -687,11 +686,17 @@ func (ms *PulsarTtMsgStream) findTimeTick(consumer Consumer,
 				log.Error("Failed to unmarshal tsMsg", zap.Error(err))
 				continue
 			}
+
 			// set pulsar info to tsMsg
 			tsMsg.SetPosition(&msgstream.MsgPosition{
 				ChannelName: filepath.Base(pulsarMsg.Topic()),
 				MsgID:       typeutil.PulsarMsgIDToString(pulsarMsg.ID()),
 			})
+
+			sp, ok := trace.ExtractFromPulsarMsgProperties(tsMsg, pulsarMsg.Properties())
+			if ok {
+				ms.scMap.Store(tsMsg.ID(), sp.Context())
+			}
 
 			ms.unsolvedMutex.Lock()
 			ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
@@ -701,8 +706,10 @@ func (ms *PulsarTtMsgStream) findTimeTick(consumer Consumer,
 				findMapMutex.Lock()
 				eofMsgMap[consumer] = tsMsg.(*TimeTickMsg).Base.Timestamp
 				findMapMutex.Unlock()
+				sp.Finish()
 				return
 			}
+			sp.Finish()
 		}
 	}
 }
