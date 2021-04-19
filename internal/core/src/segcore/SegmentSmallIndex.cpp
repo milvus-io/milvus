@@ -50,7 +50,7 @@ SegmentSmallIndex::get_deleted_bitmap(int64_t del_barrier,
         for (auto del_index = del_barrier; del_index < old->del_barrier; ++del_index) {
             // get uid in delete logs
             auto uid = deleted_record_.uids_[del_index];
-            // map uid to corresponding offsets, select the max one, which should be the target
+            // map uid to corrensponding offsets, select the max one, which should be the target
             // the max one should be closest to query_timestamp, so the delete log should refer to it
             int64_t the_offset = -1;
             auto [iter_b, iter_e] = uid2offset_.equal_range(uid);
@@ -73,7 +73,7 @@ SegmentSmallIndex::get_deleted_bitmap(int64_t del_barrier,
         for (auto del_index = old->del_barrier; del_index < del_barrier; ++del_index) {
             // get uid in delete logs
             auto uid = deleted_record_.uids_[del_index];
-            // map uid to corresponding offsets, select the max one, which should be the target
+            // map uid to corrensponding offsets, select the max one, which should be the target
             // the max one should be closest to query_timestamp, so the delete log should refer to it
             int64_t the_offset = -1;
             auto [iter_b, iter_e] = uid2offset_.equal_range(uid);
@@ -228,7 +228,7 @@ SegmentSmallIndex::QueryBruteForceImpl(const query::QueryInfo& info,
                                        QueryResult& results) {
     // step 1: binary search to find the barrier of the snapshot
     auto ins_barrier = get_barrier(record_, timestamp);
-    // auto del_barrier = get_barrier(deleted_record_, timestamp);
+    auto del_barrier = get_barrier(deleted_record_, timestamp);
 #if 0
     auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
     Assert(bitmap_holder);
@@ -321,6 +321,7 @@ SegmentSmallIndex::QueryDeprecated(query::QueryDeprecatedPtr query_info, Timesta
             x = dis(e);
         }
     }
+    int64_t inferred_dim = query_info->query_raw_data.size() / query_info->num_queries;
     // TODO
     query::QueryInfo info{
         query_info->topK,
@@ -337,10 +338,10 @@ SegmentSmallIndex::QueryDeprecated(query::QueryDeprecatedPtr query_info, Timesta
 Status
 SegmentSmallIndex::Close() {
     if (this->record_.reserved != this->record_.ack_responder_.GetAck()) {
-        PanicInfo("insert not ready");
+        std::runtime_error("insert not ready");
     }
-    if (this->deleted_record_.reserved != this->deleted_record_.ack_responder_.GetAck()) {
-        PanicInfo("delete not ready");
+    if (this->deleted_record_.reserved != this->record_.ack_responder_.GetAck()) {
+        std::runtime_error("delete not ready");
     }
     state_ = SegmentState::Closed;
     return Status::OK();
@@ -356,6 +357,8 @@ SegmentSmallIndex::BuildVecIndexImpl(const IndexMeta::Entry& entry) {
     auto dim = field.get_dim();
 
     auto indexing = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(entry.type, entry.mode);
+    auto chunk_size = record_.uids_.chunk_size();
+
     auto& uids = record_.uids_;
     auto entities = record_.get_vec_entity<float>(offset);
 
@@ -395,7 +398,7 @@ SegmentSmallIndex::BuildIndex(IndexMetaPtr remote_index_meta) {
 
         auto index_meta = std::make_shared<IndexMeta>(schema_);
         // TODO: this is merge of query conf and insert conf
-        // TODO: should be split into multiple configs
+        // TODO: should be splitted into multiple configs
         auto conf = milvus::knowhere::Config{
             {milvus::knowhere::meta::DIM, dim},         {milvus::knowhere::IndexParams::nlist, 100},
             {milvus::knowhere::IndexParams::nprobe, 4}, {milvus::knowhere::IndexParams::m, 4},
@@ -428,16 +431,8 @@ SegmentSmallIndex::BuildIndex(IndexMetaPtr remote_index_meta) {
     }
 
     index_ready_ = true;
-    return Status::OK();
 #endif
-}
-
-static uint64_t
-upper_align(int64_t value, int64_t align) {
-    Assert(align > 0);
-    Assert((align & (align - 1)) == 0);
-    auto groups = (value + align - 1) / align;
-    return groups * align;
+    return Status::OK();
 }
 
 int64_t
@@ -453,9 +448,9 @@ SegmentSmallIndex::GetMemoryUsageInBytes() {
         }
     }
 #endif
-    int64_t ins_n = upper_align(record_.reserved, DefaultElementPerChunk);
+    int64_t ins_n = (record_.reserved + DefaultElementPerChunk - 1) & ~(DefaultElementPerChunk - 1);
     total_bytes += ins_n * (schema_->get_total_sizeof() + 16 + 1);
-    int64_t del_n = upper_align(deleted_record_.reserved, DefaultElementPerChunk);
+    int64_t del_n = (deleted_record_.reserved + DefaultElementPerChunk - 1) & ~(DefaultElementPerChunk - 1);
     total_bytes += del_n * (16 * 2);
     return total_bytes;
 }

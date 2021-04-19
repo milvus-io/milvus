@@ -38,6 +38,10 @@ struct VectorPlanNode : PlanNode {
     std::optional<ExprPtr> predicate_;
     QueryInfo query_info_;
     std::string placeholder_tag_;
+
+ public:
+    virtual void
+    accept(PlanNodeVisitor&) = 0;
 };
 
 struct FloatVectorANNS : VectorPlanNode {

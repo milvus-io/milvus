@@ -52,10 +52,8 @@ ParseRangeNodeImpl(const Schema& schema, const std::string& field_name, const Js
     expr->data_type_ = data_type;
     expr->field_id_ = field_name;
     for (auto& item : body.items()) {
-        auto op_name = to_lower(item.key());
-
-        AssertInfo(RangeExpr::mapping_.count(op_name), "op(" + op_name + ") not found");
-        auto op = RangeExpr::mapping_.at(op_name);
+        auto& op_name = item.key();
+        auto op = RangeExpr::mapping_.at(to_lower(op_name));
         T value = item.value();
         expr->conditions_.emplace_back(op, value);
     }
@@ -132,6 +130,7 @@ CreatePlan(const Schema& schema, const std::string& dsl_str) {
 
 std::unique_ptr<PlaceholderGroup>
 ParsePlaceholderGroup(const Plan* plan, const std::string& blob) {
+    (void)plan;
     namespace ser = milvus::proto::service;
     auto result = std::make_unique<PlaceholderGroup>();
     ser::PlaceholderGroup ph_group;
@@ -140,14 +139,9 @@ ParsePlaceholderGroup(const Plan* plan, const std::string& blob) {
     for (auto& info : ph_group.placeholders()) {
         Placeholder element;
         element.tag_ = info.tag();
-        Assert(plan->tag2field_.count(element.tag_));
-        auto field_id = plan->tag2field_.at(element.tag_);
-        auto& field_meta = plan->schema_[field_id];
         element.num_of_queries_ = info.values_size();
         AssertInfo(element.num_of_queries_, "must have queries");
-        Assert(element.num_of_queries_ > 0);
         element.line_sizeof_ = info.values().Get(0).size();
-        Assert(field_meta.get_sizeof() == element.line_sizeof_);
         auto& target = element.blob_;
         target.reserve(element.line_sizeof_ * element.num_of_queries_);
         for (auto& line : info.values()) {

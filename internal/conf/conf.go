@@ -18,9 +18,10 @@ type UniqueID = typeutil.UniqueID
 type MasterConfig struct {
 	Address               string
 	Port                  int32
-	PulsarMoniterInterval int32
+	PulsarMonitorInterval int32
 	PulsarTopic           string
-	SegmentThreshole      float32
+	SegmentThreshold      float32
+	SegmentExpireDuration int64
 	ProxyIDList           []UniqueID
 	QueryNodeNum          int
 	WriteNodeNum          int

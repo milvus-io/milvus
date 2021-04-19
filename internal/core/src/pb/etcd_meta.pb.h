@@ -718,6 +718,7 @@ class SegmentMeta :
     kOpenTimeFieldNumber = 6,
     kCloseTimeFieldNumber = 7,
     kNumRowsFieldNumber = 8,
+    kMemSizeFieldNumber = 9,
   };
   // string partition_tag = 3;
   void clear_partition_tag();
@@ -765,6 +766,11 @@ class SegmentMeta :
   ::PROTOBUF_NAMESPACE_ID::int64 num_rows() const;
   void set_num_rows(::PROTOBUF_NAMESPACE_ID::int64 value);
 
+  // int64 mem_size = 9;
+  void clear_mem_size();
+  ::PROTOBUF_NAMESPACE_ID::int64 mem_size() const;
+  void set_mem_size(::PROTOBUF_NAMESPACE_ID::int64 value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.etcd.SegmentMeta)
  private:
   class _Internal;
@@ -778,6 +784,7 @@ class SegmentMeta :
   ::PROTOBUF_NAMESPACE_ID::uint64 open_time_;
   ::PROTOBUF_NAMESPACE_ID::uint64 close_time_;
   ::PROTOBUF_NAMESPACE_ID::int64 num_rows_;
+  ::PROTOBUF_NAMESPACE_ID::int64 mem_size_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_etcd_5fmeta_2eproto;
 };
@@ -1387,6 +1394,20 @@ inline void SegmentMeta::set_num_rows(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
   num_rows_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.SegmentMeta.num_rows)
+}
+
+// int64 mem_size = 9;
+inline void SegmentMeta::clear_mem_size() {
+  mem_size_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 SegmentMeta::mem_size() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.SegmentMeta.mem_size)
+  return mem_size_;
+}
+inline void SegmentMeta::set_mem_size(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  mem_size_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.SegmentMeta.mem_size)
 }
 
 #ifdef __GNUC__

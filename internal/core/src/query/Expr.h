@@ -22,10 +22,18 @@ using ExprPtr = std::unique_ptr<Expr>;
 struct BinaryExpr : Expr {
     ExprPtr left_;
     ExprPtr right_;
+
+ public:
+    void
+    accept(ExprVisitor&) = 0;
 };
 
 struct UnaryExpr : Expr {
     ExprPtr child_;
+
+ public:
+    void
+    accept(ExprVisitor&) = 0;
 };
 
 // TODO: not enabled in sprint 1
@@ -52,7 +60,7 @@ using FieldId = std::string;
 
 struct TermExpr : Expr {
     FieldId field_id_;
-    DataType data_type_ = DataType::NONE;
+    DataType data_type_;
     // std::vector<std::any> terms_;
 
  protected:
@@ -66,7 +74,7 @@ struct TermExpr : Expr {
 
 struct RangeExpr : Expr {
     FieldId field_id_;
-    DataType data_type_ = DataType::NONE;
+    DataType data_type_;
     enum class OpType { LessThan, LessEqual, GreaterThan, GreaterEqual, Equal, NotEqual };
     static const std::map<std::string, OpType> mapping_;  // op_name -> op
 

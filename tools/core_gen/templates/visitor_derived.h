@@ -2,7 +2,7 @@
 @@root_base@@Visitor
 ####
 @@@@body@struct_name
-    void
+    virtual void
     visit(@@struct_name@@& @@parameter_name@@) override;
 ####
 @@@@main
