@@ -4,8 +4,8 @@ import (
 	"log"
 	"os"
 	"strconv"
-	"strings"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
 
@@ -87,22 +87,13 @@ func (p *ParamTable) Init() {
 		}
 	}
 
-	queryNodeAddress := os.Getenv("QUERY_NODE_ADDRESS")
-	if queryNodeAddress == "" {
+	queryNodeIP := os.Getenv("QUERY_NODE_IP")
+	if queryNodeIP == "" {
 		p.QueryNodeIP = "localhost"
-		p.QueryNodePort = 20010
 	} else {
-		ipAndPort := strings.Split(queryNodeAddress, ":")
-		if len(ipAndPort) != 2 {
-			panic("illegal query node address")
-		}
-		p.QueryNodeIP = ipAndPort[0]
-		port, err := strconv.ParseInt(ipAndPort[1], 10, 64)
-		if err != nil {
-			panic(err)
-		}
-		p.QueryNodePort = port
+		p.QueryNodeIP = queryNodeIP
 	}
+	p.QueryNodePort = int64(funcutil.GetAvailablePort())
 
 	err = p.LoadYaml("advanced/common.yaml")
 	if err != nil {
