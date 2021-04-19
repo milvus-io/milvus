@@ -47,7 +47,8 @@ func TestFlowGraphInputBufferNode_Operate(t *testing.T) {
 	go fService.start()
 
 	// Params.FlushInsertBufSize = 2
-	iBNode := newInsertBufferNode(ctx, insertChan)
+	replica := newReplica()
+	iBNode := newInsertBufferNode(ctx, insertChan, replica)
 
 	newMeta()
 	inMsg := genInsertMsg()
