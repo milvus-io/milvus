@@ -565,13 +565,21 @@ func (t *ShowSegmentReqTask) Execute() error {
 	if err != nil {
 		return err
 	}
+	exist := false
 	for _, partID := range coll.PartitionIDs {
-		partMeta, err := t.core.MetaTable.GetPartitionByID(partID)
-		if err != nil {
-			return err
+		if partID == t.Req.PartitionID {
+			exist = true
+			break
 		}
-		t.Rsp.SegmentIDs = append(t.Rsp.SegmentIDs, partMeta.SegmentIDs...)
 	}
+	if !exist {
+		return errors.Errorf("partition id = %d not belong to collection id = %d", t.Req.PartitionID, t.Req.CollectionID)
+	}
+	partMeta, err := t.core.MetaTable.GetPartitionByID(t.Req.PartitionID)
+	if err != nil {
+		return err
+	}
+	t.Rsp.SegmentIDs = append(t.Rsp.SegmentIDs, partMeta.SegmentIDs...)
 	return nil
 }
 
