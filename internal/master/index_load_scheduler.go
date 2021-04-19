@@ -3,15 +3,12 @@ package master
 import (
 	"context"
 	"log"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
 
 type IndexLoadInfo struct {
 	segmentID      UniqueID
 	fieldID        UniqueID
 	fieldName      string
-	indexParams    []*commonpb.KeyValuePair
 	indexFilePaths []string
 }
 
@@ -39,11 +36,7 @@ func NewIndexLoadScheduler(ctx context.Context, client LoadIndexClient, metaTabl
 
 func (scheduler *IndexLoadScheduler) schedule(info interface{}) error {
 	indexLoadInfo := info.(*IndexLoadInfo)
-	indexParams := make(map[string]string)
-	for _, kv := range indexLoadInfo.indexParams {
-		indexParams[kv.Key] = kv.Value
-	}
-	err := scheduler.client.LoadIndex(indexLoadInfo.indexFilePaths, indexLoadInfo.segmentID, indexLoadInfo.fieldID, indexLoadInfo.fieldName, indexParams)
+	err := scheduler.client.LoadIndex(indexLoadInfo.indexFilePaths, indexLoadInfo.segmentID, indexLoadInfo.fieldID, indexLoadInfo.fieldName)
 	//TODO: Save data to meta table
 	if err != nil {
 		return err

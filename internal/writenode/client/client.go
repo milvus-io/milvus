@@ -6,6 +6,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"go.etcd.io/etcd/clientv3"
 
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -79,6 +80,21 @@ func (c *Client) DescribeSegment(segmentID UniqueID) (*SegmentDescription, error
 	}
 
 	key := c.kvPrefix + strconv.FormatInt(segmentID, 10)
+
+	etcdKV, ok := c.kvClient.(*etcdkv.EtcdKV)
+	if !ok {
+		return nil, errors.New("type assertion failed for etcd kv")
+	}
+	count, err := etcdKV.GetCount(key)
+	if err != nil {
+		return nil, err
+	}
+
+	if count <= 0 {
+		ret.IsClosed = false
+		return ret, nil
+	}
+
 	value, err := c.kvClient.Load(key)
 	if err != nil {
 		return ret, err

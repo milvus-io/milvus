@@ -50,8 +50,6 @@ type ParamTable struct {
 
 	MaxPartitionNum     int64
 	DefaultPartitionTag string
-
-	LoadIndexChannelNames []string
 }
 
 var Params ParamTable
@@ -99,8 +97,6 @@ func (p *ParamTable) Init() {
 	p.initMsgChannelSubName()
 	p.initMaxPartitionNum()
 	p.initDefaultPartitionTag()
-
-	p.initLoadIndexChannelNames()
 }
 
 func (p *ParamTable) initAddress() {
@@ -359,12 +355,4 @@ func (p *ParamTable) initDefaultPartitionTag() {
 	}
 
 	p.DefaultPartitionTag = defaultTag
-}
-
-func (p *ParamTable) initLoadIndexChannelNames() {
-	loadIndexChannelName, err := p.Load("msgChannel.chanNamePrefix.cmd")
-	if err != nil {
-		panic(err)
-	}
-	p.LoadIndexChannelNames = []string{loadIndexChannelName}
 }
