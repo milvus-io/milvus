@@ -204,7 +204,7 @@ func (s *Server) loadMetaFromMaster() error {
 		err = s.meta.AddCollection(&collectionInfo{
 			ID:         collection.CollectionID,
 			Schema:     collection.Schema,
-			partitions: partitions.PartitionIDs,
+			Partitions: partitions.PartitionIDs,
 		})
 		if err != nil {
 			log.Println(err.Error())

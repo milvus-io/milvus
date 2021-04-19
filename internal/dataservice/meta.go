@@ -23,7 +23,7 @@ type (
 	collectionInfo struct {
 		ID         UniqueID
 		Schema     *schemapb.CollectionSchema
-		partitions []UniqueID
+		Partitions []UniqueID
 	}
 	meta struct {
 		client      kv.TxnBase                       // client of a reliable kv service, i.e. etcd client
@@ -146,7 +146,7 @@ func (meta *meta) BuildSegment(collectionID UniqueID, partitionID UniqueID, chan
 func (meta *meta) AddSegment(segmentInfo *datapb.SegmentInfo) error {
 	meta.ddLock.Lock()
 	defer meta.ddLock.Unlock()
-	if _, ok := meta.segID2Info[segmentInfo.SegmentID]; !ok {
+	if _, ok := meta.segID2Info[segmentInfo.SegmentID]; ok {
 		return fmt.Errorf("segment %d already exist", segmentInfo.SegmentID)
 	}
 	meta.segID2Info[segmentInfo.SegmentID] = segmentInfo
@@ -273,12 +273,12 @@ func (meta *meta) AddPartition(collectionID UniqueID, partitionID UniqueID) erro
 		return newErrCollectionNotFound(collectionID)
 	}
 
-	for _, t := range coll.partitions {
+	for _, t := range coll.Partitions {
 		if t == partitionID {
 			return errors.Errorf("partition %d already exists.", partitionID)
 		}
 	}
-	coll.partitions = append(coll.partitions, partitionID)
+	coll.Partitions = append(coll.Partitions, partitionID)
 	return nil
 }
 
@@ -292,7 +292,7 @@ func (meta *meta) DropPartition(collID UniqueID, partitionID UniqueID) error {
 	}
 
 	idx := -1
-	for i, id := range collection.partitions {
+	for i, id := range collection.Partitions {
 		if partitionID == id {
 			idx = i
 			break
@@ -303,7 +303,7 @@ func (meta *meta) DropPartition(collID UniqueID, partitionID UniqueID) error {
 		return fmt.Errorf("cannot find partition id %d", partitionID)
 	}
 
-	collection.partitions = append(collection.partitions[:idx], collection.partitions[idx+1:]...)
+	collection.Partitions = append(collection.Partitions[:idx], collection.Partitions[idx+1:]...)
 	return nil
 }
 

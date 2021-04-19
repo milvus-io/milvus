@@ -17,8 +17,9 @@ func TestAllocSegment(t *testing.T) {
 	segAllocator, err := newSegmentAllocator(meta, mockAllocator)
 	assert.Nil(t, err)
 
-	schema := NewTestSchema()
+	schema := newTestSchema()
 	collID, err := mockAllocator.allocID()
+	assert.Nil(t, err)
 	err = meta.AddCollection(&collectionInfo{
 		ID:     collID,
 		Schema: schema,
@@ -65,8 +66,9 @@ func TestSealSegment(t *testing.T) {
 	segAllocator, err := newSegmentAllocator(meta, mockAllocator)
 	assert.Nil(t, err)
 
-	schema := NewTestSchema()
+	schema := newTestSchema()
 	collID, err := mockAllocator.allocID()
+	assert.Nil(t, err)
 	err = meta.AddCollection(&collectionInfo{
 		ID:     collID,
 		Schema: schema,
@@ -90,7 +92,7 @@ func TestSealSegment(t *testing.T) {
 	assert.EqualValues(t, 0, len(ids))
 	sealedSegments, err := segAllocator.GetSealedSegments()
 	assert.Nil(t, err)
-	assert.EqualValues(t, 10, sealedSegments)
+	assert.EqualValues(t, 10, len(sealedSegments))
 }
 
 func TestExpireSegment(t *testing.T) {
@@ -101,8 +103,9 @@ func TestExpireSegment(t *testing.T) {
 	segAllocator, err := newSegmentAllocator(meta, mockAllocator)
 	assert.Nil(t, err)
 
-	schema := NewTestSchema()
+	schema := newTestSchema()
 	collID, err := mockAllocator.allocID()
+	assert.Nil(t, err)
 	err = meta.AddCollection(&collectionInfo{
 		ID:     collID,
 		Schema: schema,
