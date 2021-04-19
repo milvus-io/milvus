@@ -121,38 +121,129 @@ func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.Qu
 }
 
 func (p *Proxy) DropCollection(ctx context.Context, req *servicepb.CollectionName) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: 0,
-		Reason:    "",
-	}, nil
+	dct := &DropCollectionTask{
+		DropCollectionRequest: internalpb.DropCollectionRequest{
+			MsgType: internalpb.MsgType_kDropCollection,
+			// TODO: req_id, timestamp, proxy_id
+			CollectionName: req,
+		},
+		masterClient: p.masterClient,
+		done:         make(chan error),
+		resultChan:   make(chan *commonpb.Status),
+	}
+	dct.ctx, dct.cancel = context.WithCancel(ctx)
+	defer dct.cancel()
+
+	var t task = dct
+	p.taskSch.DdQueue.Enqueue(&t)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Print("create collection timeout!")
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "create collection timeout!",
+			}, errors.New("create collection timeout!")
+		case result := <-dct.resultChan:
+			return result, nil
+		}
+	}
 }
 
 func (p *Proxy) HasCollection(ctx context.Context, req *servicepb.CollectionName) (*servicepb.BoolResponse, error) {
-	return &servicepb.BoolResponse{
-		Status: &commonpb.Status{
-			ErrorCode: 0,
-			Reason:    "",
+	hct := &HasCollectionTask{
+		HasCollectionRequest: internalpb.HasCollectionRequest{
+			MsgType: internalpb.MsgType_kHasCollection,
+			// TODO: req_id, timestamp, proxy_id
+			CollectionName: req,
 		},
-		Value: true,
-	}, nil
+		masterClient: p.masterClient,
+		done:         make(chan error),
+		resultChan:   make(chan *servicepb.BoolResponse),
+	}
+	hct.ctx, hct.cancel = context.WithCancel(ctx)
+	defer hct.cancel()
+
+	var t task = hct
+	p.taskSch.DqQueue.Enqueue(&t)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Print("has collection timeout!")
+			return &servicepb.BoolResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+					Reason:    "has collection timeout!",
+				},
+				Value: false,
+			}, errors.New("has collection timeout!")
+		case result := <-hct.resultChan:
+			return result, nil
+		}
+	}
 }
 
 func (p *Proxy) DescribeCollection(ctx context.Context, req *servicepb.CollectionName) (*servicepb.CollectionDescription, error) {
-	return &servicepb.CollectionDescription{
-		Status: &commonpb.Status{
-			ErrorCode: 0,
-			Reason:    "",
+	dct := &DescribeCollectionTask{
+		DescribeCollectionRequest: internalpb.DescribeCollectionRequest{
+			MsgType: internalpb.MsgType_kDescribeCollection,
+			// TODO: req_id, timestamp, proxy_id
+			CollectionName: req,
 		},
-	}, nil
+		masterClient: p.masterClient,
+		done:         make(chan error),
+		resultChan:   make(chan *servicepb.CollectionDescription),
+	}
+	dct.ctx, dct.cancel = context.WithCancel(ctx)
+	defer dct.cancel()
+
+	var t task = dct
+	p.taskSch.DqQueue.Enqueue(&t)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Print("has collection timeout!")
+			return &servicepb.CollectionDescription{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+					Reason:    "describe collection timeout!",
+				},
+			}, errors.New("describe collection timeout!")
+		case result := <-dct.resultChan:
+			return result, nil
+		}
+	}
 }
 
 func (p *Proxy) ShowCollections(ctx context.Context, req *commonpb.Empty) (*servicepb.StringListResponse, error) {
-	return &servicepb.StringListResponse{
-		Status: &commonpb.Status{
-			ErrorCode: 0,
-			Reason:    "",
+	sct := &ShowCollectionsTask{
+		ShowCollectionRequest: internalpb.ShowCollectionRequest{
+			MsgType: internalpb.MsgType_kDescribeCollection,
+			// TODO: req_id, timestamp, proxy_id
 		},
-	}, nil
+		masterClient: p.masterClient,
+		done:         make(chan error),
+		resultChan:   make(chan *servicepb.StringListResponse),
+	}
+	sct.ctx, sct.cancel = context.WithCancel(ctx)
+	defer sct.cancel()
+
+	var t task = sct
+	p.taskSch.DqQueue.Enqueue(&t)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Print("show collections timeout!")
+			return &servicepb.StringListResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+					Reason:    "show collections timeout!",
+				},
+			}, errors.New("show collections timeout!")
+		case result := <-sct.resultChan:
+			return result, nil
+		}
+	}
 }
 
 func (p *Proxy) CreatePartition(ctx context.Context, in *servicepb.PartitionName) (*commonpb.Status, error) {

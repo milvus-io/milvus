@@ -162,6 +162,74 @@ func (cct *CreateCollectionTask) Notify(err error) {
 	cct.done <- err
 }
 
+type DropCollectionTask struct {
+	internalpb.DropCollectionRequest
+	masterClient masterpb.MasterClient
+	done         chan error
+	resultChan   chan *commonpb.Status
+	ctx          context.Context
+	cancel       context.CancelFunc
+}
+
+func (dct *DropCollectionTask) Id() UniqueID {
+	return dct.ReqId
+}
+
+func (dct *DropCollectionTask) Type() internalpb.MsgType {
+	return dct.MsgType
+}
+
+func (dct *DropCollectionTask) BeginTs() Timestamp {
+	return dct.Timestamp
+}
+
+func (dct *DropCollectionTask) EndTs() Timestamp {
+	return dct.Timestamp
+}
+
+func (dct *DropCollectionTask) SetTs(ts Timestamp) {
+	dct.Timestamp = ts
+}
+
+func (dct *DropCollectionTask) PreExecute() error {
+	return nil
+}
+
+func (dct *DropCollectionTask) Execute() error {
+	resp, err := dct.masterClient.DropCollection(dct.ctx, &dct.DropCollectionRequest)
+	if err != nil {
+		log.Printf("drop collection failed, error= %v", err)
+		dct.resultChan <- &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}
+	} else {
+		dct.resultChan <- resp
+	}
+	return err
+}
+
+func (dct *DropCollectionTask) PostExecute() error {
+	return nil
+}
+
+func (dct *DropCollectionTask) WaitToFinish() error {
+	defer dct.cancel()
+	for {
+		select {
+		case err := <-dct.done:
+			return err
+		case <-dct.ctx.Done():
+			log.Print("wait to finish failed, timeout!")
+			return errors.New("wait to finish failed, timeout!")
+		}
+	}
+}
+
+func (dct *DropCollectionTask) Notify(err error) {
+	dct.done <- err
+}
+
 type QueryTask struct {
 	internalpb.SearchRequest
 	queryMsgStream *msgstream.PulsarMsgStream
@@ -289,4 +357,215 @@ func (qt *QueryTask) Notify(err error) {
 			qt.resultChan <- queryResult
 		}
 	}
+}
+
+type HasCollectionTask struct {
+	internalpb.HasCollectionRequest
+	masterClient masterpb.MasterClient
+	done         chan error
+	resultChan   chan *servicepb.BoolResponse
+	ctx          context.Context
+	cancel       context.CancelFunc
+}
+
+func (hct *HasCollectionTask) Id() UniqueID {
+	return hct.ReqId
+}
+
+func (hct *HasCollectionTask) Type() internalpb.MsgType {
+	return hct.MsgType
+}
+
+func (hct *HasCollectionTask) BeginTs() Timestamp {
+	return hct.Timestamp
+}
+
+func (hct *HasCollectionTask) EndTs() Timestamp {
+	return hct.Timestamp
+}
+
+func (hct *HasCollectionTask) SetTs(ts Timestamp) {
+	hct.Timestamp = ts
+}
+
+func (hct *HasCollectionTask) PreExecute() error {
+	return nil
+}
+
+func (hct *HasCollectionTask) Execute() error {
+	resp, err := hct.masterClient.HasCollection(hct.ctx, &hct.HasCollectionRequest)
+	if err != nil {
+		log.Printf("has collection failed, error= %v", err)
+		hct.resultChan <- &servicepb.BoolResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "internal error",
+			},
+			Value: false,
+		}
+	} else {
+		hct.resultChan <- resp
+	}
+	return err
+}
+
+func (hct *HasCollectionTask) PostExecute() error {
+	return nil
+}
+
+func (hct *HasCollectionTask) WaitToFinish() error {
+	defer hct.cancel()
+	for {
+		select {
+		case err := <-hct.done:
+			return err
+		case <-hct.ctx.Done():
+			log.Print("wait to finish failed, timeout!")
+			return errors.New("wait to finish failed, timeout!")
+		}
+	}
+}
+
+func (hct *HasCollectionTask) Notify(err error) {
+	hct.done <- err
+}
+
+type DescribeCollectionTask struct {
+	internalpb.DescribeCollectionRequest
+	masterClient masterpb.MasterClient
+	done         chan error
+	resultChan   chan *servicepb.CollectionDescription
+	ctx          context.Context
+	cancel       context.CancelFunc
+}
+
+func (dct *DescribeCollectionTask) Id() UniqueID {
+	return dct.ReqId
+}
+
+func (dct *DescribeCollectionTask) Type() internalpb.MsgType {
+	return dct.MsgType
+}
+
+func (dct *DescribeCollectionTask) BeginTs() Timestamp {
+	return dct.Timestamp
+}
+
+func (dct *DescribeCollectionTask) EndTs() Timestamp {
+	return dct.Timestamp
+}
+
+func (dct *DescribeCollectionTask) SetTs(ts Timestamp) {
+	dct.Timestamp = ts
+}
+
+func (dct *DescribeCollectionTask) PreExecute() error {
+	return nil
+}
+
+func (dct *DescribeCollectionTask) Execute() error {
+	resp, err := dct.masterClient.DescribeCollection(dct.ctx, &dct.DescribeCollectionRequest)
+	if err != nil {
+		log.Printf("describe collection failed, error= %v", err)
+		dct.resultChan <- &servicepb.CollectionDescription{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "internal error",
+			},
+		}
+	} else {
+		dct.resultChan <- resp
+	}
+	return err
+}
+
+func (dct *DescribeCollectionTask) PostExecute() error {
+	return nil
+}
+
+func (dct *DescribeCollectionTask) WaitToFinish() error {
+	defer dct.cancel()
+	for {
+		select {
+		case err := <-dct.done:
+			return err
+		case <-dct.ctx.Done():
+			log.Print("wait to finish failed, timeout!")
+			return errors.New("wait to finish failed, timeout!")
+		}
+	}
+}
+
+func (dct *DescribeCollectionTask) Notify(err error) {
+	dct.done <- err
+}
+
+type ShowCollectionsTask struct {
+	internalpb.ShowCollectionRequest
+	masterClient masterpb.MasterClient
+	done         chan error
+	resultChan   chan *servicepb.StringListResponse
+	ctx          context.Context
+	cancel       context.CancelFunc
+}
+
+func (sct *ShowCollectionsTask) Id() UniqueID {
+	return sct.ReqId
+}
+
+func (sct *ShowCollectionsTask) Type() internalpb.MsgType {
+	return sct.MsgType
+}
+
+func (sct *ShowCollectionsTask) BeginTs() Timestamp {
+	return sct.Timestamp
+}
+
+func (sct *ShowCollectionsTask) EndTs() Timestamp {
+	return sct.Timestamp
+}
+
+func (sct *ShowCollectionsTask) SetTs(ts Timestamp) {
+	sct.Timestamp = ts
+}
+
+func (sct *ShowCollectionsTask) PreExecute() error {
+	return nil
+}
+
+func (sct *ShowCollectionsTask) Execute() error {
+	resp, err := sct.masterClient.ShowCollections(sct.ctx, &sct.ShowCollectionRequest)
+	if err != nil {
+		log.Printf("show collections failed, error= %v", err)
+		sct.resultChan <- &servicepb.StringListResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "internal error",
+			},
+		}
+	} else {
+		sct.resultChan <- resp
+	}
+	return err
+}
+
+func (sct *ShowCollectionsTask) PostExecute() error {
+	return nil
+}
+
+func (sct *ShowCollectionsTask) WaitToFinish() error {
+	defer sct.cancel()
+	for {
+		select {
+		case err := <-sct.done:
+			return err
+		case <-sct.ctx.Done():
+			log.Print("wait to finish failed, timeout!")
+			return errors.New("wait to finish failed, timeout!")
+		}
+	}
+}
+
+func (sct *ShowCollectionsTask) Notify(err error) {
+	sct.done <- err
 }
