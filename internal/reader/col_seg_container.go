@@ -126,12 +126,14 @@ func (container *ColSegContainer) removePartition(partition *Partition) error {
 	return errors.New("cannot found partition, tag = " + partition.Tag())
 }
 
-func (container *ColSegContainer) getPartitionByTag(partitionTag string) (*Partition, error) {
-	for _, col := range container.collections {
-		for _, p := range *col.Partitions() {
-			if p.Tag() == partitionTag {
-				return p, nil
-			}
+func (container *ColSegContainer) getPartitionByTag(collectionName string, partitionTag string) (*Partition, error) {
+	targetCollection, err := container.getCollectionByName(collectionName)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range *targetCollection.Partitions() {
+		if p.Tag() == partitionTag {
+			return p, nil
 		}
 	}
 

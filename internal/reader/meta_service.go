@@ -169,7 +169,7 @@ func (mService *metaService) processSegmentCreate(id string, value string) {
 			return
 		}
 		if col != nil {
-			var partition, err = mService.container.getPartitionByTag(seg.PartitionTag)
+			var partition, err = mService.container.getPartitionByTag(col.Name(), seg.PartitionTag)
 			if err != nil {
 				log.Println(err)
 				return
