@@ -5,6 +5,7 @@ import (
 	"log"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
@@ -83,18 +84,28 @@ func (ms *PulsarMsgStream) CreatePulsarConsumers(channels []string,
 	pulsarBufSize int64) {
 	ms.unmarshal = unmarshal
 	for i := 0; i < len(channels); i++ {
-		receiveChannel := make(chan pulsar.ConsumerMessage, pulsarBufSize)
-		pc, err := (*ms.client).Subscribe(pulsar.ConsumerOptions{
-			Topic:                       channels[i],
-			SubscriptionName:            subName,
-			Type:                        pulsar.KeyShared,
-			SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
-			MessageChannel:              receiveChannel,
-		})
-		if err != nil {
-			log.Printf("Failed to subscribe topic, error = %v", err)
+		fn := func() error {
+			receiveChannel := make(chan pulsar.ConsumerMessage, pulsarBufSize)
+			pc, err := (*ms.client).Subscribe(pulsar.ConsumerOptions{
+				Topic:                       channels[i],
+				SubscriptionName:            subName,
+				Type:                        pulsar.KeyShared,
+				SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
+				MessageChannel:              receiveChannel,
+			})
+			if err != nil {
+				return err
+			}
+			if pc == nil {
+				return errors.New("pulsar is not ready, consumer is nil")
+			}
+			ms.consumers = append(ms.consumers, &pc)
+			return nil
 		}
-		ms.consumers = append(ms.consumers, &pc)
+		err := Retry(10, time.Millisecond*200, fn)
+		if err != nil {
+			panic("create pulsar consumer timeout!")
+		}
 	}
 }
 
@@ -228,6 +239,10 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 
 	cases := make([]reflect.SelectCase, len(ms.consumers))
 	for i := 0; i < len(ms.consumers); i++ {
+		pc := *ms.consumers[i]
+		if pc == nil {
+			panic("pc is nil")
+		}
 		ch := (*ms.consumers[i]).Chan()
 		cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ch)}
 	}

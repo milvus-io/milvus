@@ -101,7 +101,7 @@ class TestInsertBase:
         connect.flush([collection])
         connect.drop_collection(collection)
 
-    @pytest.mark.skip
+    @pytest.mark.skip("create_index")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_create_index(self, connect, collection, get_simple_index):
         '''
@@ -119,7 +119,7 @@ class TestInsertBase:
             if field["name"] == field_name:
                 assert field["indexes"][0] == get_simple_index
 
-    @pytest.mark.skip
+    @pytest.mark.skip("create_index")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_after_create_index(self, connect, collection, get_simple_index):
         '''
@@ -150,7 +150,7 @@ class TestInsertBase:
         logging.getLogger().debug(res)
         assert res
 
-    @pytest.mark.skip
+    @pytest.mark.skip("segment row count")
     def test_insert_segment_row_count(self, connect, collection):
         nb = default_segment_row_limit + 1
         res_ids = connect.insert(collection, gen_entities_rows(nb))
@@ -182,7 +182,6 @@ class TestInsertBase:
         with pytest.raises(Exception) as e:
             res_ids = connect.insert(id_collection, gen_entities_rows(nb))
 
-    @pytest.mark.skip("todo fix")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_twice_ids_no_ids(self, connect, collection):
         '''
@@ -205,7 +204,6 @@ class TestInsertBase:
         assert len(ids) == default_nb
         assert connect.has_partition(collection, default_tag)
 
-    @pytest.mark.skip("todo support custom id")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_tag_with_ids(self, connect, id_collection):
         '''
@@ -254,7 +252,7 @@ class TestInsertBase:
         with pytest.raises(Exception) as e:
             ids = connect.insert(gen_unique_str("not_exist_collection"), default_entities_rows)
 
-    @pytest.mark.skip("todo support dim check")
+    @pytest.mark.skip("todo support row data check")
     def test_insert_dim_not_matched(self, connect, collection):
         '''
         target: test insert entities, the vector dimension is not equal to the collection dimension
@@ -277,7 +275,7 @@ class TestInsertBinary:
         request.param["metric_type"] = "JACCARD"
         return request.param
 
-    @pytest.mark.skip
+    @pytest.mark.skip("count entities")
     def test_insert_binary_entities(self, connect, binary_collection):
         '''
         target: test insert entities in binary collection
@@ -289,7 +287,6 @@ class TestInsertBinary:
         connect.flush()
         assert connect.count_entities(binary_collection) == default_nb
 
-    @pytest.mark.skip
     def test_insert_binary_tag(self, connect, binary_collection):
         '''
         target: test insert entities and create partition tag
@@ -302,7 +299,7 @@ class TestInsertBinary:
         assert connect.has_partition(binary_collection, default_tag)
 
     # TODO
-    @pytest.mark.skip
+    @pytest.mark.skip("count entities")
     @pytest.mark.level(2)
     def test_insert_binary_multi_times(self, connect, binary_collection):
         '''
@@ -316,7 +313,7 @@ class TestInsertBinary:
         connect.flush([binary_collection])
         assert connect.count_entities(binary_collection) == default_nb
 
-    @pytest.mark.skip
+    @pytest.mark.skip("create index")
     def test_insert_binary_after_create_index(self, connect, binary_collection, get_binary_index):
         '''
         target: test insert binary entities after build index
@@ -333,7 +330,7 @@ class TestInsertBinary:
             if field["name"] == binary_field_name:
                 assert field["indexes"][0] == get_binary_index
 
-    @pytest.mark.skip
+    @pytest.mark.skip("create index")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_binary_create_index(self, connect, binary_collection, get_binary_index):
         '''
@@ -406,7 +403,7 @@ class TestInsertInvalid(object):
     def get_field_vectors_value(self, request):
         yield request.param
 
-    @pytest.mark.skip("todo support field check")
+    @pytest.mark.skip("todo support row data check")
     def test_insert_field_name_not_match(self, connect, collection):
         '''
         target: test insert, with field name not matched
@@ -432,7 +429,7 @@ class TestInsertInvalid(object):
         else:
             connect.insert(collection, default_entity_row, partition_tag=tag_name)
 
-    @pytest.mark.skip("todo support field check")
+    @pytest.mark.skip("todo support row data check")
     def test_insert_with_less_field(self, connect, collection):
         tmp_entity = copy.deepcopy(default_entity_row)
         tmp_entity[0].pop(default_float_vec_field_name)
@@ -457,7 +454,7 @@ class TestInsertInvalid(object):
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
-    @pytest.mark.skip("todo support field check")
+    @pytest.mark.skip("todo support row data check")
     def test_insert_with_invalid_field_vector_value(self, connect, collection, get_field_vectors_value):
         tmp_entity = copy.deepcopy(default_entity_row)
         tmp_entity[0][default_float_vec_field_name][1] = get_field_vectors_value

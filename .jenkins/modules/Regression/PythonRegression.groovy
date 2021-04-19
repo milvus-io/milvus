@@ -10,7 +10,7 @@ try {
     dir ('build/docker/test') {
         sh 'docker pull ${SOURCE_REPO}/pytest:${SOURCE_TAG} || true'
         sh 'docker-compose build --force-rm regression'
-        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} run --rm regression || true'
+        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} run --rm regression'
         try {
             withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
                 sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${DOKCER_REGISTRY_URL}'
