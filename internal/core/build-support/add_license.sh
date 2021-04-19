@@ -1,12 +1,10 @@
-LICENSE=$1
-FOLDER=$2
-
-if [ -z ${FOLDER} ] || [ -z ${LICENSE} ]; then
-    echo "usage $0 <path/to/license> <path/to/code_folder>"
+FOLDER=$1
+if [ -z ${FOLDER} ]; then
+    echo usage $0 [folder_to_add_license]
     exit
+else
+    echo good
 fi
-
-cat ${LICENSE} > /dev/null || exit -1
 
 FILES=`find ${FOLDER} \
 | grep -E "(*\.cpp$|*\.h$|*\.cu$)" \
@@ -15,16 +13,13 @@ FILES=`find ${FOLDER} \
 | grep -v cmake-build \
 | grep -v output \
 | grep -v "\.pb\."`
-# echo formating ${FILES} ...
-skip_count=0
+echo formating ${FILES} ...
 for f in ${FILES}; do
-  if (grep "Apache License" $f > /dev/null);then 
-    # echo "No need to copy the License Header to $f"
-    skip_count=$((skip_count+1))
+  if (grep "Apache License" $f);then 
+    echo "No need to copy the License Header to $f"
   else
-    cat ${LICENSE} $f > $f.new
+    cat cpp_license.txt $f > $f.new
     mv $f.new $f
     echo "License Header copied to $f"
   fi 
 done   
-echo "license adder: $skip_count file(s) skiped"

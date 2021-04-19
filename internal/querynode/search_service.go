@@ -139,10 +139,10 @@ func (ss *searchService) receiveSearchMsg() {
 				err := ss.search(msg)
 				if err != nil {
 					log.Println("search Failed, error msg type: ", msg.Type())
-					err = ss.publishFailedSearchResult(msg)
-					if err != nil {
-						log.Println("publish FailedSearchResult failed, error message: ", err)
-					}
+				}
+				err = ss.publishFailedSearchResult(msg)
+				if err != nil {
+					log.Println("publish FailedSearchResult failed, error message: ", err)
 				}
 			}
 			log.Println("ReceiveSearchMsg, do search done, num of searchMsg = ", len(searchMsg))
@@ -191,10 +191,10 @@ func (ss *searchService) doUnsolvedMsgSearch() {
 				err := ss.search(msg)
 				if err != nil {
 					log.Println("search Failed, error msg type: ", msg.Type())
-					err = ss.publishFailedSearchResult(msg)
-					if err != nil {
-						log.Println("publish FailedSearchResult failed, error message: ", err)
-					}
+				}
+				err = ss.publishFailedSearchResult(msg)
+				if err != nil {
+					log.Println("publish FailedSearchResult failed, error message: ", err)
 				}
 			}
 			log.Println("doUnsolvedMsgSearch, do search done, num of searchMsg = ", len(searchMsg))
@@ -225,15 +225,9 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	}
 	collectionID := collection.ID()
 	dsl := query.Dsl
-	plan, err := createPlan(*collection, dsl)
-	if err != nil {
-		return err
-	}
+	plan := createPlan(*collection, dsl)
 	placeHolderGroupBlob := query.PlaceholderGroup
-	placeholderGroup, err := parserPlaceholderGroup(plan, placeHolderGroupBlob)
-	if err != nil {
-		return err
-	}
+	placeholderGroup := parserPlaceholderGroup(plan, placeHolderGroupBlob)
 	placeholderGroups := make([]*PlaceholderGroup, 0)
 	placeholderGroups = append(placeholderGroups, placeholderGroup)
 
@@ -257,7 +251,12 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	}
 
 	if len(searchResults) <= 0 {
-		return errors.New("search Failed, invalid partitionTag")
+		log.Println("search Failed, invalid partitionTag")
+		err = ss.publishFailedSearchResult(msg)
+		if err != nil {
+			log.Println("publish FailedSearchResult failed, error message: ", err)
+		}
+		return err
 	}
 
 	reducedSearchResult := reduceSearchResults(searchResults, int64(len(searchResults)))
@@ -297,7 +296,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 			Hits:            hits,
 		}
 		searchResultMsg := &msgstream.SearchResultMsg{
-			BaseMsg:      msgstream.BaseMsg{HashValues: []uint32{0}},
+			BaseMsg:      msgstream.BaseMsg{HashValues: []int32{0}},
 			SearchResult: results,
 		}
 		err = ss.publishSearchResult(searchResultMsg)
@@ -342,7 +341,7 @@ func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg) error {
 	}
 
 	tsMsg := &msgstream.SearchResultMsg{
-		BaseMsg:      msgstream.BaseMsg{HashValues: []uint32{0}},
+		BaseMsg:      msgstream.BaseMsg{HashValues: []int32{0}},
 		SearchResult: results,
 	}
 	msgPack.Msgs = append(msgPack.Msgs, tsMsg)

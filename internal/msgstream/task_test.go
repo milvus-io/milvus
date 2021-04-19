@@ -87,11 +87,11 @@ func newRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, erro
 	return result, nil
 }
 
-func getInsertTask(reqID UniqueID, hashValue uint32) TsMsg {
+func getInsertTask(reqID UniqueID, hashValue int32) TsMsg {
 	baseMsg := BaseMsg{
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
-		HashValues:     []uint32{hashValue},
+		HashValues:     []int32{hashValue},
 	}
 	insertRequest := internalPb.InsertRequest{
 		MsgType:        internalPb.MsgType_kInsert,

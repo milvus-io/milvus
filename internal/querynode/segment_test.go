@@ -690,10 +690,8 @@ func TestSegment_segmentSearch(t *testing.T) {
 	}
 
 	searchTimestamp := Timestamp(1020)
-	plan, err := createPlan(*collection, dslString)
-	assert.NoError(t, err)
-	holder, err := parserPlaceholderGroup(plan, placeHolderGroupBlob)
-	assert.NoError(t, err)
+	plan := createPlan(*collection, dslString)
+	holder := parserPlaceholderGroup(plan, placeHolderGroupBlob)
 	placeholderGroups := make([]*PlaceholderGroup, 0)
 	placeholderGroups = append(placeholderGroups, holder)
 

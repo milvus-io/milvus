@@ -87,24 +87,6 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
                 insert_cols(data);
                 break;
             }
-            case engine::DataType::VECTOR_BINARY: {
-                auto dim = field.get_dim();
-                Assert(dim % 8 == 0);
-                vector<uint8_t> data(dim / 8 * N);
-                for (auto& x : data) {
-                    x = er();
-                }
-                insert_cols(data);
-                break;
-            }
-            case engine::DataType::INT64: {
-                vector<int64_t> data(N);
-                for (auto& x : data) {
-                    x = er();
-                }
-                insert_cols(data);
-                break;
-            }
             case engine::DataType::INT32: {
                 vector<int> data(N);
                 for (auto& x : data) {
@@ -159,42 +141,5 @@ CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
     }
     return raw_group;
 }
-
-inline auto
-CreateBinaryPlaceholderGroup(int64_t num_queries, int64_t dim, int64_t seed = 42) {
-    assert(dim % 8 == 0);
-    namespace ser = milvus::proto::service;
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::VECTOR_FLOAT);
-    std::default_random_engine e(seed);
-    for (int i = 0; i < num_queries; ++i) {
-        std::vector<uint8_t> vec;
-        for (int d = 0; d < dim / 8; ++d) {
-            vec.push_back(e());
-        }
-        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
-        value->add_values(vec.data(), vec.size() * sizeof(float));
-    }
-    return raw_group;
-}
-
-inline Json
-QueryResultToJson(const QueryResult& qr) {
-    int64_t num_queries = qr.num_queries_;
-    int64_t topk = qr.topK_;
-    std::vector<std::vector<std::string>> results;
-    for (int q = 0; q < num_queries; ++q) {
-        std::vector<std::string> result;
-        for (int k = 0; k < topk; ++k) {
-            int index = q * topk + k;
-            result.emplace_back(std::to_string(qr.internal_seg_offsets_[index]) + "->" +
-                                std::to_string(qr.result_distances_[index]));
-        }
-        results.emplace_back(std::move(result));
-    }
-    return Json{results};
-};
 
 }  // namespace milvus::segcore

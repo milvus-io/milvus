@@ -38,7 +38,7 @@ TEST(ConcurrentVector, TestABI) {
 
 TEST(ConcurrentVector, TestSingle) {
     auto dim = 8;
-    ConcurrentVectorImpl<int, false, 32> c_vec(dim);
+    ConcurrentVector<int, false, 32> c_vec(dim);
     std::default_random_engine e(42);
     int data = 0;
     auto total_count = 0;
@@ -66,7 +66,7 @@ TEST(ConcurrentVector, TestMultithreads) {
     constexpr int threads = 16;
     std::vector<int64_t> total_counts(threads);
 
-    ConcurrentVectorImpl<int64_t, false, 32> c_vec(dim);
+    ConcurrentVector<int64_t, false, 32> c_vec(dim);
     std::atomic<int64_t> ack_counter = 0;
     //    std::mutex mutex;
 

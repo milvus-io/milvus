@@ -30,7 +30,7 @@ message RowBatch {
     string collection_name = 1;
     string partition_tag = 2;
     repeated common.Blob row_data = 3;
-    repeated uint32 hash_keys = 4;
+    repeated int32 hash_keys = 4;
 }
 
 /**

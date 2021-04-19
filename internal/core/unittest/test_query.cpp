@@ -214,9 +214,17 @@ TEST(Query, ExecWithPredicate) {
     Timestamp time = 1000000;
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
     segment->Search(plan.get(), ph_group_arr.data(), &time, 1, qr);
+    std::vector<std::vector<std::string>> results;
     int topk = 5;
-
-    Json json = QueryResultToJson(qr);
+    for (int q = 0; q < num_queries; ++q) {
+        std::vector<std::string> result;
+        for (int k = 0; k < topk; ++k) {
+            int index = q * topk + k;
+            result.emplace_back(std::to_string(qr.result_ids_[index]) + "->" +
+                                std::to_string(qr.result_distances_[index]));
+        }
+        results.emplace_back(std::move(result));
+    }
 
     auto ref = Json::parse(R"([
   [
@@ -258,6 +266,7 @@ TEST(Query, ExecWithPredicate) {
   ]
 ])");
 
+    Json json{results};
     ASSERT_EQ(json, ref);
 }
 

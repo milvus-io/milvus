@@ -100,9 +100,7 @@ class IndexingRecord {
     Initialize() {
         int offset = 0;
         for (auto& field : schema_) {
-            if (field.get_data_type() != DataType::VECTOR_BINARY) {
-                entries_.try_emplace(offset, CreateIndex(field));
-            }
+            entries_.try_emplace(offset, CreateIndex(field));
             ++offset;
         }
         assert(offset == schema_.size());

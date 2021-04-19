@@ -17,10 +17,21 @@ extern "C" {
 #include <stdlib.h>
 #include <stdint.h>
 
+#include "segcore/collection_c.h"
 #include "segcore/plan_c.h"
 
 typedef void* CSegmentBase;
 typedef void* CQueryResult;
+
+enum ErrorCode {
+    Success = 0,
+    UnexpectedException = 1,
+};
+
+typedef struct CStatus {
+    int error_code;
+    const char* error_msg;
+} CStatus;
 
 CSegmentBase
 NewSegment(CCollection collection, uint64_t segment_id);

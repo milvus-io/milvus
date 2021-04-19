@@ -573,15 +573,15 @@ class RowBatch :
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::Blob >&
       row_data() const;
 
-  // repeated uint32 hash_keys = 4;
+  // repeated int32 hash_keys = 4;
   int hash_keys_size() const;
   void clear_hash_keys();
-  ::PROTOBUF_NAMESPACE_ID::uint32 hash_keys(int index) const;
-  void set_hash_keys(int index, ::PROTOBUF_NAMESPACE_ID::uint32 value);
-  void add_hash_keys(::PROTOBUF_NAMESPACE_ID::uint32 value);
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >&
+  ::PROTOBUF_NAMESPACE_ID::int32 hash_keys(int index) const;
+  void set_hash_keys(int index, ::PROTOBUF_NAMESPACE_ID::int32 value);
+  void add_hash_keys(::PROTOBUF_NAMESPACE_ID::int32 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int32 >&
       hash_keys() const;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >*
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int32 >*
       mutable_hash_keys();
 
   // string collection_name = 1;
@@ -612,7 +612,7 @@ class RowBatch :
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::Blob > row_data_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 > hash_keys_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int32 > hash_keys_;
   mutable std::atomic<int> _hash_keys_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr partition_tag_;
@@ -2777,31 +2777,31 @@ RowBatch::row_data() const {
   return row_data_;
 }
 
-// repeated uint32 hash_keys = 4;
+// repeated int32 hash_keys = 4;
 inline int RowBatch::hash_keys_size() const {
   return hash_keys_.size();
 }
 inline void RowBatch::clear_hash_keys() {
   hash_keys_.Clear();
 }
-inline ::PROTOBUF_NAMESPACE_ID::uint32 RowBatch::hash_keys(int index) const {
+inline ::PROTOBUF_NAMESPACE_ID::int32 RowBatch::hash_keys(int index) const {
   // @@protoc_insertion_point(field_get:milvus.proto.service.RowBatch.hash_keys)
   return hash_keys_.Get(index);
 }
-inline void RowBatch::set_hash_keys(int index, ::PROTOBUF_NAMESPACE_ID::uint32 value) {
+inline void RowBatch::set_hash_keys(int index, ::PROTOBUF_NAMESPACE_ID::int32 value) {
   hash_keys_.Set(index, value);
   // @@protoc_insertion_point(field_set:milvus.proto.service.RowBatch.hash_keys)
 }
-inline void RowBatch::add_hash_keys(::PROTOBUF_NAMESPACE_ID::uint32 value) {
+inline void RowBatch::add_hash_keys(::PROTOBUF_NAMESPACE_ID::int32 value) {
   hash_keys_.Add(value);
   // @@protoc_insertion_point(field_add:milvus.proto.service.RowBatch.hash_keys)
 }
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >&
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int32 >&
 RowBatch::hash_keys() const {
   // @@protoc_insertion_point(field_list:milvus.proto.service.RowBatch.hash_keys)
   return hash_keys_;
 }
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >*
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int32 >*
 RowBatch::mutable_hash_keys() {
   // @@protoc_insertion_point(field_mutable_list:milvus.proto.service.RowBatch.hash_keys)
   return &hash_keys_;
