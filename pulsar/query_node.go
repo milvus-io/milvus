@@ -13,9 +13,9 @@ type QueryNode struct {
 
 func (qn *QueryNode)doQueryNode(wg sync.WaitGroup) {
 	wg.Add(3)
-	go qn.insert_query(qn.mc.insertMsg, wg)
-	go qn.delete_query(qn.mc.deleteMsg, wg)
-	go qn.search_query(qn.mc.searchMsg, wg)
+	go qn.insert_query(qn.mc.InsertMsg, wg)
+	go qn.delete_query(qn.mc.DeleteMsg, wg)
+	go qn.search_query(qn.mc.SearchMsg, wg)
 	wg.Wait()
 }
 

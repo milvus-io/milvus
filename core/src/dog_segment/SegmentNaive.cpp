@@ -130,6 +130,10 @@ class SegmentNaive : public SegmentBase {
  public:
     friend std::unique_ptr<SegmentBase>
     CreateSegment(SchemaPtr schema);
+
+    friend SegmentBase*
+    CreateSegment();
+
  private:
     SchemaPtr schema_;
     std::shared_mutex mutex_;
@@ -151,6 +155,15 @@ CreateSegment(SchemaPtr schema) {
     return segment;
 }
 
+SegmentBase* CreateSegment() {
+  auto segment = new SegmentNaive();
+  auto schema = std::make_shared<Schema>();
+  schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+  schema->AddField("age", DataType::INT32);
+  segment->schema_ = schema;
+  segment->entity_vecs_.resize(schema->size());
+  return segment;
+}
 
 Status
 SegmentNaive::Insert(int64_t size, const uint64_t* primary_keys, const Timestamp* timestamps,
@@ -158,6 +171,7 @@ SegmentNaive::Insert(int64_t size, const uint64_t* primary_keys, const Timestamp
     const auto& schema = *schema_;
     auto data_chunk = ColumnBasedDataChunk::from(row_values, schema);
 
+    std::cout << "key:" << std::endl;
     // insert datas
     // TODO: use shared_lock
     std::lock_guard lck(mutex_);
@@ -166,6 +180,7 @@ SegmentNaive::Insert(int64_t size, const uint64_t* primary_keys, const Timestamp
     uids_.grow_by(primary_keys, primary_keys + size);
     for(int64_t i = 0; i < size; ++i) {
         auto key = primary_keys[i];
+        std::cout << key << std::endl;
         auto internal_index = i + ack_id;
         internal_indexes_[key] = internal_index;
     }

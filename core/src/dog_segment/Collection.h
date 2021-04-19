@@ -1,37 +1,43 @@
 #pragma once
 
 #include "SegmentDefs.h"
+#include "SegmentBase.h"
 
 //////////////////////////////////////////////////////////////////
 
+namespace milvus::dog_segment {
+
 class Partition {
 public:
-    const std::deque<SegmentBasePtr>& segments() const {
+    explicit Partition(std::string& partition_name): partition_name_(partition_name) {}
+
+    const std::vector<SegmentBasePtr> &segments() const {
       return segments_;
     }
 
 private:
-    std::string name_;
-    std::deque<SegmentBasePtr> segments_;
+    std::string partition_name_;
+    std::vector<SegmentBasePtr> segments_;
 };
 
-using PartitionPtr = std::shard_ptr<Partition>;
+using PartitionPtr = std::shared_ptr<Partition>;
 
 //////////////////////////////////////////////////////////////////
 
 class Collection {
 public:
-    explicit Collection(std::string name): name_(name){}
+    explicit Collection(std::string &collection_name, std::string &schema)
+        : collection_name_(collection_name), schema_json_(schema) {}
 
     // TODO: set index
-    set_index() {}
+    void set_index() {}
 
-    set_schema(std::string config) {
+    void parse() {
       // TODO: config to schema
-      schema_ = null;
     }
 
 public:
+
 //    std::vector<int64_t> Insert() {
 //       for (auto partition: partitions_) {
 //         for (auto segment: partition.segments()) {
@@ -43,9 +49,12 @@ public:
 //    }
 
 private:
-    // TODO: Index ptr
-    IndexPtr index_ = nullptr;
-    std::string name_;
-    SchemaPtr schema_;
+    // TODO: add Index ptr
+    // IndexPtr index_ = nullptr;
+    std::string collection_name_;
+    std::string schema_json_;
+    milvus::dog_segment::SchemaPtr schema_;
     std::vector<PartitionPtr> partitions_;
 };
+
+}

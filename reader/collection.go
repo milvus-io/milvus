@@ -8,6 +8,7 @@ import (
 type Collection struct {
 	CollectionPtr *C.Collection
 	CollectionName string
+	Partitions []*Partition
 }
 
 // TODO: Schema
@@ -43,14 +44,4 @@ func (c *Collection) GetSegments() ([]*Segment, error) {
 	}
 
 	return segments, nil
-}
-
-func (c *Collection) CreateSegment() error {
-	status := C.CreateSegment(c.CollectionPtr)
-
-	if status != 0 {
-		return errors.New("create segment failed")
-	}
-
-	return nil
 }

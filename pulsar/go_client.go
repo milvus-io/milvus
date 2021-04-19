@@ -47,10 +47,10 @@ type MessageClient struct {
 	consumer pulsar.Consumer
 
 	// batch messages
-	insertMsg []*schema.InsertMsg
-	deleteMsg []*schema.DeleteMsg
-	searchMsg []*schema.SearchMsg
-	timeMsg []*schema.TimeSyncMsg
+	InsertMsg  []*schema.InsertMsg
+	DeleteMsg  []*schema.DeleteMsg
+	SearchMsg  []*schema.SearchMsg
+	timeMsg    []*schema.TimeSyncMsg
 	key2segMsg []*schema.Key2SegMsg
 
 }
@@ -150,9 +150,9 @@ const (
 
 func (mc *MessageClient) PrepareBatchMsg(jobType JobType) {
 	// assume the channel not full
-	mc.insertMsg = make([]*schema.InsertMsg, 1000)
-	mc.deleteMsg = make([]*schema.DeleteMsg, 1000)
-	mc.searchMsg = make([]*schema.SearchMsg, 1000)
+	mc.InsertMsg = make([]*schema.InsertMsg, 1000)
+	mc.DeleteMsg = make([]*schema.DeleteMsg, 1000)
+	mc.SearchMsg = make([]*schema.SearchMsg, 1000)
 	mc.timeMsg = make([]*schema.TimeSyncMsg, 1000)
 	mc.key2segMsg = make([]*schema.Key2SegMsg, 1000)
 
@@ -167,11 +167,11 @@ func (mc *MessageClient) PrepareBatchMsg(jobType JobType) {
 	// get message from channel to slice
 	for i := 0; i < insertLen; i++ {
 		msg := <- mc.insertChan
-		mc.insertMsg[i] = msg
+		mc.InsertMsg[i] = msg
 	}
 	for i := 0; i < deleteLen; i++ {
 		msg := <- mc.deleteChan
-		mc.deleteMsg[i] = msg
+		mc.DeleteMsg[i] = msg
 	}
 	for i := 0; i < timeLen; i++ {
 		msg := <- mc.timeSyncChan
@@ -185,7 +185,7 @@ func (mc *MessageClient) PrepareBatchMsg(jobType JobType) {
 
 		for i := 0; i < searchLen; i++ {
 			msg := <-mc.searchChan
-			mc.searchMsg[i] = msg
+			mc.SearchMsg[i] = msg
 		}
 	}
 }
