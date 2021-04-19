@@ -19,6 +19,7 @@ extern "C" {
 
 #include "segcore/plan_c.h"
 #include "segcore/load_index_c.h"
+#include "common/status_c.h"
 
 typedef void* CSegmentBase;
 typedef void* CQueryResult;

@@ -15,16 +15,15 @@
 extern "C" {
 #endif
 
-typedef void* CCollection;
+enum ErrorCode {
+    Success = 0,
+    UnexpectedException = 1,
+};
 
-CCollection
-NewCollection(const char* schema_proto_blob);
-
-void
-DeleteCollection(CCollection collection);
-
-const char*
-GetCollectionName(CCollection collection);
+typedef struct CStatus {
+    int error_code;
+    const char* error_msg;
+} CStatus;
 
 #ifdef __cplusplus
 }
