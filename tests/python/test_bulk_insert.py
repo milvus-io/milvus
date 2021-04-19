@@ -563,7 +563,7 @@ class TestInsertBase:
             milvus.flush([collection])
 
         for i in range(thread_num):
-            t = TestThread(target=insert, args=(i,))
+            t = MilvusTestThread(target=insert, args=(i,))
             threads.append(t)
             t.start()
         for t in threads:
@@ -817,7 +817,6 @@ class TestInsertAsync:
             future.result()
 
 
-@pytest.mark.skip
 class TestInsertMultiCollections:
     """
     ******************************************************************
@@ -959,7 +958,6 @@ class TestInsertMultiCollections:
         result = connect.search(collection_name, default_single_query)
 
 
-@pytest.mark.skip
 class TestInsertInvalid(object):
     """
     Test inserting vectors with invalid collection names

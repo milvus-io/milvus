@@ -20,6 +20,7 @@ class TestCreateBase:
 
     @pytest.mark.level(2)
     @pytest.mark.timeout(600)
+    @pytest.mark.skip
     def test_create_partition_limit(self, connect, collection, args):
         '''
         target: test create partitions, check status returned

@@ -235,7 +235,7 @@ def gen_single_filter_fields():
 def gen_single_vector_fields():
     fields = []
     for data_type in [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR]:
-        field = {"name": data_type.name, "type": data_type, "params": {"dim": default_dim}}
+        field = {"name": data_type.name, "type": data_type, "params": {"dim": default_dim}, "indexes": [{"metric_type": "L2"}]}
         fields.append(field)
     return fields
 
@@ -243,9 +243,11 @@ def gen_single_vector_fields():
 def gen_default_fields(auto_id=True):
     default_fields = {
         "fields": [
-            {"name": "int64", "type": DataType.INT64},
+            {"name": "int64", "type": DataType.INT64, "is_primary_key": not auto_id},
             {"name": "float", "type": DataType.FLOAT},
-            {"name": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": default_dim}},
+            {"name": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR,
+             "params": {"dim": default_dim},
+             "indexes": [{"metric_type": "L2"}]},
         ],
         "segment_row_limit": default_segment_row_limit,
         "auto_id": auto_id
@@ -974,19 +976,19 @@ def restart_server(helm_release_name):
     return res
 
 
-class TestThread(threading.Thread):
+class MilvusTestThread(threading.Thread):
     def __init__(self, target, args=()):
         threading.Thread.__init__(self, target=target, args=args)
 
     def run(self):
         self.exc = None
         try:
-            super(TestThread, self).run()
+            super(MilvusTestThread, self).run()
         except BaseException as e:
             self.exc = e
 
     def join(self):
-        super(TestThread, self).join()
+        super(MilvusTestThread, self).join()
         if self.exc:
             raise self.exc
 
