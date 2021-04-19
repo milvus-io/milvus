@@ -157,6 +157,7 @@ class TestCreateBase:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "partitionID of partitionName:%s can not be find" % tag_new
 
+    @pytest.mark.tags("fail")
     def test_create_partition_insert_same_tags(self, connect, id_collection):
         '''
         target: test create partition, and insert vectors, check status returned
@@ -174,6 +175,7 @@ class TestCreateBase:
         res = connect.get_collection_stats(id_collection)
         assert res["row_count"] == default_nb * 2
 
+    @pytest.mark.tags("fail")
     @pytest.mark.level(2)
     def test_create_partition_insert_same_tags_two_collections(self, connect, collection):
         '''

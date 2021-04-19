@@ -10,6 +10,7 @@ from constants import *
 
 uid = "has_collection"
 
+
 class TestHasCollection:
     """
     ******************************************************************
