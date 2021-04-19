@@ -42,5 +42,20 @@ services:
     networks:
       - milvus
 
+  writenode:
+    image: ${TARGET_REPO}/writenode:${TARGET_TAG}
+    build:
+      context: ../../../
+      dockerfile: build/docker/deploy/writenode/DockerFile
+      cache_from:
+        - ${SOURCE_REPO}/writenode:${SOURCE_TAG}
+    environment: 
+      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
+      ETCD_ADDRESS: ${ETCD_ADDRESS}
+      MASTER_ADDRESS: ${MASTER_ADDRESS}
+      MINIO_ADDRESS: ${MINIO_ADDRESS}
+    networks:
+      - milvus
+
 networks:
   milvus:
