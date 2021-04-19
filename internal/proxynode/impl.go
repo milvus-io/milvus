@@ -25,7 +25,12 @@ func (node *NodeImpl) UpdateStateCode(code internalpb2.StateCode) {
 }
 
 func (node *NodeImpl) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	panic("implement me")
+	collectionName := request.CollectionName
+	_ = globalMetaCache.Remove(collectionName) // no need to return error, though collection may be not cached
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		Reason:    "",
+	}, nil
 }
 
 func (node *NodeImpl) CreateCollection(request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
