@@ -21,6 +21,7 @@ type ParamTable struct {
 	KvRootPath            string
 	WriteNodeSegKvSubPath string
 	PulsarAddress         string
+	IndexBuilderAddress   string
 
 	// nodeID
 	ProxyIDList     []typeutil.UniqueID
@@ -71,6 +72,7 @@ func (p *ParamTable) Init() {
 	p.initKvRootPath()
 	p.initWriteNodeSegKvSubPath()
 	p.initPulsarAddress()
+	p.initIndexBuilderAddress()
 
 	p.initProxyIDList()
 	p.initWriteNodeIDList()
@@ -123,6 +125,14 @@ func (p *ParamTable) initPulsarAddress() {
 		panic(err)
 	}
 	p.PulsarAddress = addr
+}
+
+func (p *ParamTable) initIndexBuilderAddress() {
+	ret, err := p.Load("_IndexBuilderAddress")
+	if err != nil {
+		panic(err)
+	}
+	p.IndexBuilderAddress = ret
 }
 
 func (p *ParamTable) initMetaRootPath() {
