@@ -21,11 +21,6 @@ func TestParamTable_QueryNode(t *testing.T) {
 		assert.Contains(t, Params.QueryNodeIDList(), id)
 	})
 
-	t.Run("Test num", func(t *testing.T) {
-		num := Params.QueryNodeNum
-		assert.Equal(t, num, 2)
-	})
-
 	t.Run("Test time tick channel", func(t *testing.T) {
 		ch := Params.QueryTimeTickChannelName
 		assert.Equal(t, ch, "queryTimeTick")
