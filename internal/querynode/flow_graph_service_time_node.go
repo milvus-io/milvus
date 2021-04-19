@@ -80,7 +80,7 @@ func newServiceTimeNode(ctx context.Context, replica collectionReplica) *service
 
 	timeTimeMsgStream := pulsarms.NewPulsarMsgStream(ctx, Params.SearchReceiveBufSize)
 	timeTimeMsgStream.SetPulsarClient(Params.PulsarAddress)
-	timeTimeMsgStream.CreatePulsarProducers([]string{Params.QueryNodeTimeTickChannelName})
+	timeTimeMsgStream.CreatePulsarProducers([]string{Params.QueryTimeTickChannelName})
 
 	return &serviceTimeNode{
 		baseNode:          baseNode,

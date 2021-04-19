@@ -16,16 +16,6 @@ func TestParamTable_PulsarAddress(t *testing.T) {
 }
 
 func TestParamTable_QueryNode(t *testing.T) {
-	t.Run("Test ip", func(t *testing.T) {
-		ip := Params.QueryNodeIP
-		assert.Equal(t, ip, "localhost")
-	})
-
-	t.Run("Test port", func(t *testing.T) {
-		port := Params.QueryNodePort
-		assert.Equal(t, port, int64(20010))
-	})
-
 	t.Run("Test id", func(t *testing.T) {
 		id := Params.QueryNodeID
 		assert.Contains(t, Params.QueryNodeIDList(), id)
@@ -37,12 +27,12 @@ func TestParamTable_QueryNode(t *testing.T) {
 	})
 
 	t.Run("Test time tick channel", func(t *testing.T) {
-		ch := Params.QueryNodeTimeTickChannelName
-		assert.Equal(t, ch, "queryNodeTimeTick")
+		ch := Params.QueryTimeTickChannelName
+		assert.Equal(t, ch, "queryTimeTick")
 	})
 
 	t.Run("Test time tick ReceiveBufSize", func(t *testing.T) {
-		size := Params.QueryNodeTimeTickReceiveBufSize
+		size := Params.QueryTimeTickReceiveBufSize
 		assert.Equal(t, size, int64(64))
 	})
 }

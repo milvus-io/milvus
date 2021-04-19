@@ -16,9 +16,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	queryserviceimpl "github.com/zilliztech/milvus-distributed/internal/queryservice"
 	"io"
 	"sync/atomic"
+
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
+	queryserviceimpl "github.com/zilliztech/milvus-distributed/internal/queryservice"
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go/config"
@@ -31,9 +34,7 @@ import (
 )
 
 type Node interface {
-	Init()
-	Start()
-	Stop()
+	typeutil.Service
 
 	GetComponentStates() (*internalpb2.ComponentStates, error)
 	GetTimeTickChannel() (string, error)
@@ -123,7 +124,7 @@ func Init() {
 	Params.Init()
 }
 
-func (node *QueryNode) Init() {
+func (node *QueryNode) Init() error {
 	registerReq := queryPb.RegisterNodeRequest{
 		Address: &commonpb.Address{
 			Ip:   Params.QueryNodeIP,
@@ -141,9 +142,10 @@ func (node *QueryNode) Init() {
 	// TODO: use response.initParams
 
 	Params.Init()
+	return nil
 }
 
-func (node *QueryNode) Start() {
+func (node *QueryNode) Start() error {
 	// todo add connectMaster logic
 	// init services and manager
 	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica)
@@ -162,9 +164,10 @@ func (node *QueryNode) Start() {
 
 	node.stateCode.Store(internalpb2.StateCode_HEALTHY)
 	<-node.queryNodeLoopCtx.Done()
+	return nil
 }
 
-func (node *QueryNode) Stop() {
+func (node *QueryNode) Stop() error {
 	node.stateCode.Store(internalpb2.StateCode_ABNORMAL)
 	node.queryNodeLoopCancel()
 
@@ -187,6 +190,7 @@ func (node *QueryNode) Stop() {
 	if node.closer != nil {
 		node.closer.Close()
 	}
+	return nil
 }
 
 func (node *QueryNode) GetComponentStates() (*internalpb2.ComponentStates, error) {
@@ -206,7 +210,7 @@ func (node *QueryNode) GetComponentStates() (*internalpb2.ComponentStates, error
 }
 
 func (node *QueryNode) GetTimeTickChannel() (string, error) {
-	return Params.QueryNodeTimeTickChannelName, nil
+	return Params.QueryTimeTickChannelName, nil
 }
 
 func (node *QueryNode) GetStatisticsChannel() (string, error) {

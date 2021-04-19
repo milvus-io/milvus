@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
@@ -15,12 +16,12 @@ type ParamTable struct {
 	ETCDAddress   string
 	MetaRootPath  string
 
-	QueryNodeIP                     string
-	QueryNodePort                   int64
-	QueryNodeID                     UniqueID
-	QueryNodeNum                    int
-	QueryNodeTimeTickChannelName    string
-	QueryNodeTimeTickReceiveBufSize int64
+	QueryNodeIP                 string
+	QueryNodePort               int64
+	QueryNodeID                 UniqueID
+	QueryNodeNum                int
+	QueryTimeTickChannelName    string
+	QueryTimeTickReceiveBufSize int64
 
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
@@ -90,6 +91,23 @@ func (p *ParamTable) Init() {
 		}
 	}
 
+	queryNodeAddress := os.Getenv("QUERY_NODE_ADDRESS")
+	if queryNodeAddress == "" {
+		p.QueryNodeIP = "localhost"
+		p.QueryNodePort = 20010
+	} else {
+		ipAndPort := strings.Split(queryNodeAddress, ":")
+		if len(ipAndPort) != 2 {
+			panic("illegal query node address")
+		}
+		p.QueryNodeIP = ipAndPort[0]
+		port, err := strconv.ParseInt(ipAndPort[1], 10, 64)
+		if err != nil {
+			panic(err)
+		}
+		p.QueryNodePort = port
+	}
+
 	err = p.LoadYaml("advanced/common.yaml")
 	if err != nil {
 		panic(err)
@@ -99,12 +117,10 @@ func (p *ParamTable) Init() {
 		panic(err)
 	}
 
-	p.initQueryNodeIP()
-	p.initQueryNodePort()
 	p.initQueryNodeID()
 	p.initQueryNodeNum()
-	p.initQueryNodeTimeTickChannelName()
-	p.initQueryNodeTimeTickReceiveBufSize()
+	p.initQueryTimeTickChannelName()
+	p.initQueryTimeTickReceiveBufSize()
 
 	p.initMinioEndPoint()
 	p.initMinioAccessKeyID()
@@ -149,25 +165,6 @@ func (p *ParamTable) Init() {
 }
 
 // ---------------------------------------------------------- query node
-func (p *ParamTable) initQueryNodeIP() {
-	ip, err := p.Load("queryNode.ip")
-	if err != nil {
-		panic(err)
-	}
-	p.QueryNodeIP = ip
-}
-
-func (p *ParamTable) initQueryNodePort() {
-	port, err := p.Load("queryNode.port")
-	if err != nil {
-		panic(err)
-	}
-	p.QueryNodePort, err = strconv.ParseInt(port, 10, 64)
-	if err != nil {
-		panic(err)
-	}
-}
-
 func (p *ParamTable) initQueryNodeID() {
 	queryNodeID, err := p.Load("_queryNodeID")
 	if err != nil {
@@ -184,16 +181,16 @@ func (p *ParamTable) initQueryNodeNum() {
 	p.QueryNodeNum = len(p.QueryNodeIDList())
 }
 
-func (p *ParamTable) initQueryNodeTimeTickChannelName() {
-	ch, err := p.Load("msgChannel.chanNamePrefix.queryNodeTimeTick")
+func (p *ParamTable) initQueryTimeTickChannelName() {
+	ch, err := p.Load("msgChannel.chanNamePrefix.queryTimeTick")
 	if err != nil {
 		log.Fatal(err)
 	}
-	p.QueryNodeTimeTickChannelName = ch
+	p.QueryTimeTickChannelName = ch
 }
 
-func (p *ParamTable) initQueryNodeTimeTickReceiveBufSize() {
-	p.QueryNodeTimeTickReceiveBufSize = p.ParseInt64("queryNode.msgStream.timeTick.recvBufSize")
+func (p *ParamTable) initQueryTimeTickReceiveBufSize() {
+	p.QueryTimeTickReceiveBufSize = p.ParseInt64("queryNode.msgStream.timeTick.recvBufSize")
 }
 
 // ---------------------------------------------------------- minio

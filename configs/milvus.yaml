@@ -52,8 +52,6 @@ proxyNode:
   port: 19530
 
 queryNode:
-  ip: localhost
-  port: 20010
   gracefulTime: 5000 #ms
 
 indexBuilder:
