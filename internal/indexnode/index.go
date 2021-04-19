@@ -14,10 +14,9 @@ package indexnode
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"unsafe"
-
-	"errors"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"

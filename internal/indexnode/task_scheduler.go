@@ -4,12 +4,14 @@ import (
 	"container/list"
 	"context"
 	"errors"
-	"log"
 	"sync"
+
+	"go.uber.org/zap"
 
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
 
@@ -69,7 +71,7 @@ func (queue *BaseTaskQueue) FrontUnissuedTask() task {
 	defer queue.utLock.Unlock()
 
 	if queue.unissuedTasks.Len() <= 0 {
-		log.Println("FrontUnissuedTask sorry, but the unissued task list is empty!")
+		log.Debug("FrontUnissuedTask sorry, but the unissued task list is empty!")
 		return nil
 	}
 
@@ -81,7 +83,7 @@ func (queue *BaseTaskQueue) PopUnissuedTask() task {
 	defer queue.utLock.Unlock()
 
 	if queue.unissuedTasks.Len() <= 0 {
-		log.Println("PopUnissued task sorry, but the unissued task list is empty!")
+		log.Debug("PopUnissued task sorry, but the unissued task list is empty!")
 		return nil
 	}
 
@@ -98,7 +100,7 @@ func (queue *BaseTaskQueue) AddActiveTask(t task) {
 	tID := t.ID()
 	_, ok := queue.activeTasks[tID]
 	if ok {
-		log.Fatalf("task with ID %v already in active task list!", tID)
+		log.Debug("indexnode", zap.Int64("task with ID %v already in active task list!", tID))
 	}
 
 	queue.activeTasks[tID] = t
@@ -113,7 +115,7 @@ func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
 		delete(queue.activeTasks, tID)
 		return t
 	}
-	log.Fatalf("sorry, but the ID %d was not found in the active task list!", tID)
+	log.Debug("indexnode", zap.Int64("sorry, but the ID was not found in the active task list!", tID))
 	return nil
 }
 
@@ -184,7 +186,7 @@ func NewTaskScheduler(ctx context.Context,
 
 func (sched *TaskScheduler) setParallelism(parallel int) {
 	if parallel <= 0 {
-		log.Println("can not set parallelism to less than zero!")
+		log.Debug("can not set parallelism to less than zero!")
 		return
 	}
 	sched.buildParallel = parallel
@@ -241,7 +243,7 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 }
 
 func (sched *TaskScheduler) indexBuildLoop() {
-	log.Println("index build loop ...")
+	log.Debug("index build loop ...")
 	defer sched.wg.Done()
 	for {
 		select {

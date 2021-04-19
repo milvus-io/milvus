@@ -2,9 +2,11 @@ package indexservice
 
 import (
 	"net"
+	"path"
 	"strconv"
 	"sync"
 
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
 
@@ -25,6 +27,8 @@ type ParamTable struct {
 	MinIOSecretAccessKey string
 	MinIOUseSSL          bool
 	MinioBucketName      string
+
+	Log log.Config
 }
 
 var Params ParamTable
@@ -44,6 +48,7 @@ func (pt *ParamTable) Init() {
 		pt.initMinIOSecretAccessKey()
 		pt.initMinIOUseSSL()
 		pt.initMinioBucketName()
+		pt.initLogCfg()
 	})
 }
 
@@ -157,4 +162,35 @@ func (pt *ParamTable) initMinioBucketName() {
 		panic(err)
 	}
 	pt.MinioBucketName = bucketName
+}
+
+func (pt *ParamTable) initLogCfg() {
+	pt.Log = log.Config{}
+	format, err := pt.Load("log.format")
+	if err != nil {
+		panic(err)
+	}
+	pt.Log.Format = format
+	level, err := pt.Load("log.level")
+	if err != nil {
+		panic(err)
+	}
+	pt.Log.Level = level
+	devStr, err := pt.Load("log.dev")
+	if err != nil {
+		panic(err)
+	}
+	dev, err := strconv.ParseBool(devStr)
+	if err != nil {
+		panic(err)
+	}
+	pt.Log.Development = dev
+	pt.Log.File.MaxSize = pt.ParseInt("log.file.maxSize")
+	pt.Log.File.MaxBackups = pt.ParseInt("log.file.maxBackups")
+	pt.Log.File.MaxDays = pt.ParseInt("log.file.maxAge")
+	rootPath, err := pt.Load("log.file.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	pt.Log.File.Filename = path.Join(rootPath, "indexservice-%d.log")
 }

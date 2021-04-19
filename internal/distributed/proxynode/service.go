@@ -4,12 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"net"
 	"strconv"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 
 	"google.golang.org/grpc"
 
@@ -22,6 +23,7 @@ import (
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go/config"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -72,10 +74,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.wg.Done()
 
-	log.Println("network port: ", grpcPort)
+	log.Debug("proxynode", zap.Int("network port", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
-		log.Printf("Server:failed to listen: %v", err)
+		log.Warn("proxynode", zap.String("Server:failed to listen:", err.Error()))
 		s.grpcErrChan <- err
 		return
 	}
@@ -107,12 +109,12 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Println("proxy node init done ...")
+	log.Debug("proxy node init done ...")
 
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Println("proxy node start done ...")
+	log.Debug("proxy node start done ...")
 	return nil
 }
 
@@ -128,9 +130,9 @@ func (s *Server) init() error {
 
 	Params.Address = Params.IP + ":" + strconv.FormatInt(int64(Params.Port), 10)
 
-	log.Println("proxy host: ", Params.IP)
-	log.Println("proxy port: ", Params.Port)
-	log.Println("proxy address: ", Params.Address)
+	log.Debug("proxynode", zap.String("proxy host", Params.IP))
+	log.Debug("proxynode", zap.Int("proxy port", Params.Port))
+	log.Debug("proxynode", zap.String("proxy address", Params.Address))
 
 	// TODO
 	cfg := &config.Configuration{
@@ -151,7 +153,7 @@ func (s *Server) init() error {
 		if err != nil {
 			err2 := s.Stop()
 			if err2 != nil {
-				log.Println("Init failed, and Stop failed")
+				log.Debug("Init failed, and Stop failed")
 			}
 		}
 	}()
@@ -160,7 +162,7 @@ func (s *Server) init() error {
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
 	err = <-s.grpcErrChan
-	log.Println("create grpc server ...")
+	log.Debug("create grpc server ...")
 	if err != nil {
 		return err
 	}
@@ -171,10 +173,10 @@ func (s *Server) init() error {
 		return err
 	}
 	s.impl.SetProxyServiceClient(s.proxyServiceClient)
-	log.Println("set proxy service client ...")
+	log.Debug("set proxy service client ...")
 
 	masterServiceAddr := Params.MasterAddress
-	log.Println("master address: ", masterServiceAddr)
+	log.Debug("proxynode", zap.String("master address", masterServiceAddr))
 	timeout := 3 * time.Second
 	s.masterServiceClient, err = grpcmasterserviceclient.NewClient(masterServiceAddr, timeout)
 	if err != nil {
@@ -190,30 +192,30 @@ func (s *Server) init() error {
 		panic(err)
 	}
 	s.impl.SetMasterClient(s.masterServiceClient)
-	log.Println("set master client ...")
+	log.Debug("set master client ...")
 
 	dataServiceAddr := Params.DataServiceAddress
-	log.Println("data service address ...", dataServiceAddr)
+	log.Debug("proxynode", zap.String("data service address", dataServiceAddr))
 	s.dataServiceClient = grpcdataserviceclient.NewClient(dataServiceAddr)
 	err = s.dataServiceClient.Init()
 	if err != nil {
 		return err
 	}
 	s.impl.SetDataServiceClient(s.dataServiceClient)
-	log.Println("set data service address ...")
+	log.Debug("set data service address ...")
 
 	indexServiceAddr := Params.IndexServerAddress
-	log.Println("index server address: ", indexServiceAddr)
+	log.Debug("proxynode", zap.String("index server address", indexServiceAddr))
 	s.indexServiceClient = grpcindexserviceclient.NewClient(indexServiceAddr)
 	err = s.indexServiceClient.Init()
 	if err != nil {
 		return err
 	}
 	s.impl.SetIndexServiceClient(s.indexServiceClient)
-	log.Println("set index service client ...")
+	log.Debug("set index service client ...")
 
 	queryServiceAddr := Params.QueryServiceAddress
-	log.Println("query server address: ", queryServiceAddr)
+	log.Debug("proxynode", zap.String("query server address", queryServiceAddr))
 	s.queryServiceClient, err = grpcqueryserviceclient.NewClient(queryServiceAddr, timeout)
 	if err != nil {
 		return err
@@ -223,10 +225,10 @@ func (s *Server) init() error {
 		return err
 	}
 	s.impl.SetQueryServiceClient(s.queryServiceClient)
-	log.Println("set query service client ...")
+	log.Debug("set query service client ...")
 
 	proxynode.Params.Init()
-	log.Println("init params done ...")
+	log.Debug("init params done ...")
 	proxynode.Params.NetworkPort = Params.Port
 	proxynode.Params.IP = Params.IP
 	proxynode.Params.NetworkAddress = Params.Address
@@ -236,7 +238,7 @@ func (s *Server) init() error {
 	s.impl.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
 
 	if err := s.impl.Init(); err != nil {
-		log.Println("impl init error: ", err)
+		log.Debug("proxynode", zap.String("impl init error", err.Error()))
 		return err
 	}
 

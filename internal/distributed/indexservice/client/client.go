@@ -2,10 +2,7 @@ package grpcindexserviceclient
 
 import (
 	"context"
-	"log"
 	"time"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 
 	"google.golang.org/grpc"
 
@@ -14,6 +11,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
@@ -99,7 +97,6 @@ func (c *Client) NotifyBuildIndex(ctx context.Context, nty *indexpb.BuildIndexNo
 
 func NewClient(address string) *Client {
 
-	log.Println("new index service, address = ", address)
 	return &Client{
 		address: address,
 		ctx:     context.Background(),

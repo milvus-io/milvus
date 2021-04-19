@@ -3,14 +3,15 @@ package indexservice
 import (
 	"context"
 	"errors"
-	"log"
+
+	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
-	"github.com/zilliztech/milvus-distributed/internal/types"
-
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
+	"github.com/zilliztech/milvus-distributed/internal/types"
 )
 
 const (
@@ -96,7 +97,7 @@ func (it *IndexAddTask) OnEnqueue() error {
 }
 
 func (it *IndexAddTask) PreExecute(ctx context.Context) error {
-	log.Println("pretend to check Index Req")
+	log.Debug("pretend to check Index Req")
 	nodeID, builderClient := it.nodeClients.PeekClient()
 	if builderClient == nil {
 		return errors.New("IndexAddTask Service not available")
@@ -115,12 +116,12 @@ func (it *IndexAddTask) Execute(ctx context.Context) error {
 		IndexBuildID: it.indexBuildID,
 		Req:          it.req,
 	}
-	log.Println("before index ...")
+	log.Debug("before index ...")
 	resp, err := it.builderClient.BuildIndex(ctx, cmd)
 	if err != nil {
 		return err
 	}
-	log.Println("build index finish, err = ", err)
+	log.Debug("indexservice", zap.String("build index finish err", err.Error()))
 	if resp.ErrorCode != commonpb.ErrorCode_ERROR_CODE_SUCCESS {
 		return errors.New(resp.Reason)
 	}

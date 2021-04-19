@@ -4,25 +4,26 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"math/rand"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
+	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/tso"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 )
 
 const (
@@ -72,7 +73,7 @@ func NewIndexService(ctx context.Context) (*IndexService, error) {
 
 func (i *IndexService) Init() error {
 	etcdAddress := Params.EtcdAddress
-	log.Println("etcd address = ", etcdAddress)
+	log.Debug("indexservice", zap.String("etcd address", etcdAddress))
 	connectEtcdFn := func() error {
 		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
 		if err != nil {
@@ -134,7 +135,7 @@ func (i *IndexService) Start() error {
 	for _, cb := range i.startCallbacks {
 		cb()
 	}
-	log.Print("IndexService  start")
+	log.Debug("IndexService  start")
 
 	return nil
 }
@@ -316,12 +317,11 @@ func (i *IndexService) NotifyBuildIndex(ctx context.Context, nty *indexpb.BuildI
 	ret := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_ERROR_CODE_SUCCESS,
 	}
-	log.Println("[IndexService][NotifyBuildIndex]", nty.String())
+	log.Debug("indexservice", zap.String("[IndexService][NotifyBuildIndex]", nty.String()))
 	if err := i.metaTable.NotifyBuildIndex(nty); err != nil {
 		ret.ErrorCode = commonpb.ErrorCode_ERROR_CODE_BUILD_INDEX_ERROR
 		ret.Reason = err.Error()
-		log.Println("[IndexService][NotifyBuildIndex][metaTable][NotifyBuildIndex]", err)
-
+		log.Debug("indexservice", zap.String("[IndexService][NotifyBuildIndex][metaTable][NotifyBuildIndex]", err.Error()))
 	}
 	i.nodeClients.IncPriority(nty.NodeID, -1)
 	return ret, nil
@@ -337,12 +337,12 @@ func (i *IndexService) tsLoop() {
 		select {
 		case <-tsoTicker.C:
 			if err := i.idAllocator.UpdateID(); err != nil {
-				log.Println("failed to update id", err)
+				log.Debug("indexservice", zap.String("failed to update id", err.Error()))
 				return
 			}
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
-			log.Println("tsLoop is closed")
+			log.Debug("tsLoop is closed")
 			return
 		}
 	}

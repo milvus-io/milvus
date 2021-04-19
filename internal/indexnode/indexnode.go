@@ -5,22 +5,23 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math/rand"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go/config"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
-	"github.com/zilliztech/milvus-distributed/internal/types"
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+	"github.com/zilliztech/milvus-distributed/internal/types"
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 const (
@@ -81,7 +82,7 @@ func (i *IndexNode) Init() error {
 
 	resp, err2 := i.serviceClient.RegisterNode(ctx, request)
 	if err2 != nil {
-		log.Printf("Index NodeImpl connect to IndexService failed, error= %v", err)
+		log.Debug("indexnode", zap.String("Index NodeImpl connect to IndexService failed", err.Error()))
 		return err2
 	}
 
@@ -149,7 +150,7 @@ func (i *IndexNode) Stop() error {
 	for _, cb := range i.closeCallbacks {
 		cb()
 	}
-	log.Print("NodeImpl  closed.")
+	log.Debug("NodeImpl  closed.")
 	return nil
 }
 
@@ -183,7 +184,7 @@ func (i *IndexNode) BuildIndex(ctx context.Context, request *indexpb.BuildIndexC
 		ret.Reason = err.Error()
 		return ret, nil
 	}
-	log.Println("indexnode successfully schedule with indexBuildID = ", request.IndexBuildID)
+	log.Debug("indexnode", zap.Int64("indexnode successfully schedule with indexBuildID", request.IndexBuildID))
 	return ret, nil
 }
 

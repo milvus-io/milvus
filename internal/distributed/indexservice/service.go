@@ -4,16 +4,18 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"net"
 	"strconv"
 	"sync"
 
+	"go.uber.org/zap"
+
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go/config"
 	"github.com/zilliztech/milvus-distributed/internal/indexservice"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -73,7 +75,7 @@ func (s *Server) start() error {
 	if err := s.indexservice.Start(); err != nil {
 		return err
 	}
-	log.Println("indexService started")
+	log.Debug("indexService started")
 	return nil
 }
 
@@ -122,10 +124,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.loopWg.Done()
 
-	log.Println("network port: ", grpcPort)
+	log.Debug("indexservice", zap.Int("network port", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
-		log.Printf("GrpcServer:failed to listen: %v", err)
+		log.Warn("indexservice", zap.String("GrpcServer:failed to listen", err.Error()))
 		s.grpcErrChan <- err
 		return
 	}

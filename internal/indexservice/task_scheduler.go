@@ -3,16 +3,16 @@ package indexservice
 import (
 	"container/list"
 	"context"
-	"log"
+	"errors"
 	"sync"
 
-	"errors"
-
-	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"go.uber.org/zap"
 
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
 
@@ -101,7 +101,7 @@ func (queue *BaseTaskQueue) AddActiveTask(t task) {
 	tID := t.ID()
 	_, ok := queue.activeTasks[tID]
 	if ok {
-		log.Fatalf("task with ID %v already in active task list!", tID)
+		log.Warn("indexservice", zap.Int64("task with ID already in active task list!", tID))
 	}
 
 	queue.activeTasks[tID] = t
@@ -116,13 +116,13 @@ func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
 		delete(queue.activeTasks, tID)
 		return t
 	}
-	log.Fatalf("sorry, but the ID %d was not found in the active task list!", tID)
+	log.Debug("indexservice", zap.Int64("sorry, but the ID was not found in the active task list!", tID))
 	return nil
 }
 
 func (queue *BaseTaskQueue) Enqueue(t task) error {
 	tID, _ := queue.sched.idAllocator.AllocOne()
-	log.Printf("[Builder] allocate reqID: %v", tID)
+	log.Debug("indexservice", zap.Int64("[Builder] allocate reqID", tID))
 	t.SetID(tID)
 	err := t.OnEnqueue()
 	if err != nil {
@@ -219,7 +219,7 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 
 	defer func() {
 		t.Notify(err)
-		log.Printf("notify with error: %v", err)
+		log.Debug("indexservice", zap.String("notify with error", err.Error()))
 	}()
 	if err != nil {
 		trace.LogError(span, err)

@@ -2,24 +2,25 @@ package grpcindexnode
 
 import (
 	"context"
-	"log"
 	"math"
 	"net"
 	"strconv"
 	"sync"
 
+	"go.uber.org/zap"
+
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
 	grpcindexserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/indexservice/client"
 	"github.com/zilliztech/milvus-distributed/internal/indexnode"
-	"github.com/zilliztech/milvus-distributed/internal/types"
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-	"google.golang.org/grpc"
-
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+	"github.com/zilliztech/milvus-distributed/internal/types"
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"google.golang.org/grpc"
 )
 
 type Server struct {
@@ -50,10 +51,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.loopWg.Done()
 
-	log.Println("network port: ", grpcPort)
+	log.Debug("indexnode", zap.Int("network port: ", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
-		log.Printf("GrpcServer:failed to listen: %v", err)
+		log.Warn("indexnode", zap.String("GrpcServer:failed to listen", err.Error()))
 		s.grpcErrChan <- err
 		return
 	}
@@ -92,7 +93,7 @@ func (s *Server) init() error {
 		if err != nil {
 			err = s.Stop()
 			if err != nil {
-				log.Println("Init failed, and Stop failed")
+				log.Debug("Init failed, and Stop failed")
 			}
 		}
 	}()

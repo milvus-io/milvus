@@ -4,15 +4,17 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"net"
 	"strconv"
 	"sync"
 
+	"go.uber.org/zap"
+
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go/config"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -73,7 +75,7 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Println("proxy service init done ...")
+	log.Debug("proxy service init done ...")
 
 	if err := s.start(); err != nil {
 		return err
@@ -84,7 +86,7 @@ func (s *Server) Run() error {
 func (s *Server) init() error {
 	Params.Init()
 	proxyservice.Params.Init()
-	log.Println("init params done")
+	log.Debug("init params done")
 
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.ServicePort)
@@ -93,7 +95,7 @@ func (s *Server) init() error {
 		return err
 	}
 	s.impl.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
-	log.Println("grpc init done ...")
+	log.Debug("grpc init done ...")
 
 	if err := s.impl.Init(); err != nil {
 		return err
@@ -105,10 +107,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.wg.Done()
 
-	log.Println("network port: ", grpcPort)
+	log.Debug("proxyservice", zap.Int("network port", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
-		log.Printf("GrpcServer:failed to listen: %v", err)
+		log.Warn("proxyservice", zap.String("GrpcServer:failed to listen", err.Error()))
 		s.grpcErrChan <- err
 		return
 	}
@@ -135,7 +137,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 }
 
 func (s *Server) start() error {
-	log.Println("proxy ProxyService start ...")
+	log.Debug("proxy ProxyService start ...")
 	if err := s.impl.Start(); err != nil {
 		return err
 	}
