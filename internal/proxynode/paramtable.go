@@ -51,6 +51,7 @@ type ParamTable struct {
 	MaxFieldNum                        int64
 	MaxDimension                       int64
 	DefaultPartitionTag                string
+	DefaultIndexName                   string
 }
 
 var Params ParamTable
@@ -108,95 +109,6 @@ func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb2.InitParam
 	}
 
 	pt.initParams()
-	//
-	//pulsarPort := config.GetString(PulsarPort)
-	//pulsarHost := config.GetString(PulsarHost)
-	//pt.PulsarAddress = pulsarHost + ":" + pulsarPort
-	//
-	//
-	//queryNodeIDList := config.GetString(QueryNodeIDList)
-	//pt.QueryNodeIDList = nil
-	//queryNodeIDs := strings.Split(queryNodeIDList, ",")
-	//for _, queryNodeID := range queryNodeIDs {
-	//	v, err := strconv.Atoi(queryNodeID)
-	//	if err != nil {
-	//		return err
-	//	}
-	//	pt.QueryNodeIDList = append(pt.QueryNodeIDList, typeutil.UniqueID(v))
-	//}
-	//pt.QueryNodeNum = len(pt.QueryNodeIDList)
-	//
-	//timeTickInterval := config.GetString(TimeTickInterval)
-	//interval, err := strconv.Atoi(timeTickInterval)
-	//if err != nil {
-	//	return err
-	//}
-	//pt.TimeTickInterval = time.Duration(interval) * time.Millisecond
-	//
-	//subName := config.GetString(SubName)
-	//pt.ProxySubName = subName
-	//
-	//timeTickChannelNames := config.GetString(TimeTickChannelNames)
-	//pt.ProxyTimeTickChannelNames = []string{timeTickChannelNames}
-	//
-	//msgStreamInsertBufSizeStr := config.GetString(MsgStreamInsertBufSize)
-	//msgStreamInsertBufSize, err := strconv.Atoi(msgStreamInsertBufSizeStr)
-	//if err != nil {
-	//	return err
-	//}
-	//pt.MsgStreamInsertBufSize = int64(msgStreamInsertBufSize)
-	//
-	//msgStreamSearchBufSizeStr := config.GetString(MsgStreamSearchBufSize)
-	//msgStreamSearchBufSize, err := strconv.Atoi(msgStreamSearchBufSizeStr)
-	//if err != nil {
-	//	return err
-	//}
-	//pt.MsgStreamSearchBufSize = int64(msgStreamSearchBufSize)
-	//
-	//msgStreamSearchResultBufSizeStr := config.GetString(MsgStreamSearchResultBufSize)
-	//msgStreamSearchResultBufSize, err := strconv.Atoi(msgStreamSearchResultBufSizeStr)
-	//if err != nil {
-	//	return err
-	//}
-	//pt.MsgStreamSearchResultBufSize = int64(msgStreamSearchResultBufSize)
-	//
-	//msgStreamSearchResultPulsarBufSizeStr := config.GetString(MsgStreamSearchResultPulsarBufSize)
-	//msgStreamSearchResultPulsarBufSize, err := strconv.Atoi(msgStreamSearchResultPulsarBufSizeStr)
-	//if err != nil {
-	//	return err
-	//}
-	//pt.MsgStreamSearchResultPulsarBufSize = int64(msgStreamSearchResultPulsarBufSize)
-	//
-	//msgStreamTimeTickBufSizeStr := config.GetString(MsgStreamTimeTickBufSize)
-	//msgStreamTimeTickBufSize, err := strconv.Atoi(msgStreamTimeTickBufSizeStr)
-	//if err != nil {
-	//	return err
-	//}
-	//pt.MsgStreamTimeTickBufSize = int64(msgStreamTimeTickBufSize)
-	//
-	//maxNameLengthStr := config.GetString(MaxNameLength)
-	//maxNameLength, err := strconv.Atoi(maxNameLengthStr)
-	//if err != nil {
-	//	return err
-	//}
-	//pt.MaxNameLength = int64(maxNameLength)
-	//
-	//maxFieldNumStr := config.GetString(MaxFieldNum)
-	//maxFieldNum, err := strconv.Atoi(maxFieldNumStr)
-	//if err != nil {
-	//	return err
-	//}
-	//pt.MaxFieldNum = int64(maxFieldNum)
-	//
-	//maxDimensionStr := config.GetString(MaxDimension)
-	//maxDimension, err := strconv.Atoi(maxDimensionStr)
-	//if err != nil {
-	//	return err
-	//}
-	//pt.MaxDimension = int64(maxDimension)
-	//
-	//defaultPartitionTag := config.GetString(DefaultPartitionTag)
-	//pt.DefaultPartitionTag = defaultPartitionTag
 
 	return nil
 }
@@ -235,6 +147,8 @@ func (pt *ParamTable) initParams() {
 	pt.initMaxFieldNum()
 	pt.initMaxDimension()
 	pt.initDefaultPartitionTag()
+	pt.initDefaultIndexName()
+
 }
 
 func (pt *ParamTable) initPulsarAddress() {
@@ -474,4 +388,12 @@ func (pt *ParamTable) initDefaultPartitionTag() {
 		panic(err)
 	}
 	pt.DefaultPartitionTag = tag
+}
+
+func (pt *ParamTable) initDefaultIndexName() {
+	name, err := pt.Load("common.defaultIndexName")
+	if err != nil {
+		panic(err)
+	}
+	pt.DefaultIndexName = name
 }

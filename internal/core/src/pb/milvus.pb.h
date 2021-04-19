@@ -4912,10 +4912,11 @@ class IndexDescription :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kParamsFieldNumber = 2,
+    kParamsFieldNumber = 3,
     kIndexNameFieldNumber = 1,
+    kIndexIDFieldNumber = 2,
   };
-  // repeated .milvus.proto.common.KeyValuePair params = 2;
+  // repeated .milvus.proto.common.KeyValuePair params = 3;
   int params_size() const;
   void clear_params();
   ::milvus::proto::common::KeyValuePair* mutable_params(int index);
@@ -4937,6 +4938,11 @@ class IndexDescription :
   std::string* release_index_name();
   void set_allocated_index_name(std::string* index_name);
 
+  // int64 indexID = 2;
+  void clear_indexid();
+  ::PROTOBUF_NAMESPACE_ID::int64 indexid() const;
+  void set_indexid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.IndexDescription)
  private:
   class _Internal;
@@ -4944,6 +4950,7 @@ class IndexDescription :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair > params_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr index_name_;
+  ::PROTOBUF_NAMESPACE_ID::int64 indexid_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -12036,7 +12043,21 @@ inline void IndexDescription::set_allocated_index_name(std::string* index_name) 
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.IndexDescription.index_name)
 }
 
-// repeated .milvus.proto.common.KeyValuePair params = 2;
+// int64 indexID = 2;
+inline void IndexDescription::clear_indexid() {
+  indexid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 IndexDescription::indexid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.IndexDescription.indexID)
+  return indexid_;
+}
+inline void IndexDescription::set_indexid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  indexid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.IndexDescription.indexID)
+}
+
+// repeated .milvus.proto.common.KeyValuePair params = 3;
 inline int IndexDescription::params_size() const {
   return params_.size();
 }

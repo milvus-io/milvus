@@ -186,7 +186,8 @@ message DescribeIndexRequest {
 
 message IndexDescription {
   string index_name = 1;
-  repeated common.KeyValuePair params = 2;
+  int64  indexID = 2;
+  repeated common.KeyValuePair params = 3;
 }
 
 message DescribeIndexResponse {
