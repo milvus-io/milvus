@@ -524,7 +524,6 @@ class TestIndexBase:
             connect.drop_index(collection, field_name)
 
 
-@pytest.mark.skip("r0.3-test")
 class TestIndexBinary:
     @pytest.fixture(
         scope="function",
@@ -594,6 +593,7 @@ class TestIndexBinary:
         ids = connect.bulk_insert(binary_collection, default_binary_entities, partition_tag=default_tag)
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
 
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors(self, connect, binary_collection, get_jaccard_index, get_nq):
         '''
