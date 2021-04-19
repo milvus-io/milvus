@@ -35,19 +35,19 @@ func SegmentUnMarshal(data []byte) (SegmentStats, error) {
 }
 
 type Segment struct {
-	SegmentID      uint64     `json:"segment_id"`
-	Collection     Collection `json:"collection"`
-	PartitionTag   string     `json:"partition_tag"`
-	ChannelStart   int        `json:"channel_start"`
-	ChannelEnd     int        `json:"channel_end"`
-	OpenTimeStamp  uint64     `json:"open_timestamp"`
-	CloseTimeStamp uint64     `json:"close_timestamp"`
+	SegmentID      uint64 `json:"segment_id"`
+	CollectionID   uint64 `json:"collection_id"`
+	PartitionTag   string `json:"partition_tag"`
+	ChannelStart   int    `json:"channel_start"`
+	ChannelEnd     int    `json:"channel_end"`
+	OpenTimeStamp  uint64 `json:"open_timestamp"`
+	CloseTimeStamp uint64 `json:"close_timestamp"`
 }
 
-func NewSegment(id uuid.UUID, collection Collection, ptag string, chStart int, chEnd int, openTime time.Time, closeTime time.Time) Segment {
+func NewSegment(id uuid.UUID, collectioID uuid.UUID, ptag string, chStart int, chEnd int, openTime time.Time, closeTime time.Time) Segment {
 	return Segment{
 		SegmentID:      uint64(id.ID()),
-		Collection:     collection,
+		CollectionID:   uint64(id.ID()),
 		PartitionTag:   ptag,
 		ChannelStart:   chStart,
 		ChannelEnd:     chEnd,
