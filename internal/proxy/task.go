@@ -2,16 +2,13 @@ package proxy
 
 import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
-//type TimeStamp uint64
-
 type task interface {
-	Id() int64 // return ReqId
+	Id() UniqueID // return ReqId
 	Type() internalpb.MsgType
-	GetTs() typeutil.Timestamp
-	SetTs(ts typeutil.Timestamp)
+	GetTs() Timestamp
+	SetTs(ts Timestamp)
 	PreExecute() error
 	Execute() error
 	PostExecute() error
@@ -21,12 +18,12 @@ type task interface {
 
 type baseTask struct {
 	ReqType internalpb.MsgType
-	ReqId   int64
-	Ts      typeutil.Timestamp
-	ProxyId int64
+	ReqId   UniqueID
+	Ts      Timestamp
+	ProxyId UniqueID
 }
 
-func (bt *baseTask) Id() int64 {
+func (bt *baseTask) Id() UniqueID {
 	return bt.ReqId
 }
 
@@ -34,10 +31,10 @@ func (bt *baseTask) Type() internalpb.MsgType {
 	return bt.ReqType
 }
 
-func (bt *baseTask) GetTs() typeutil.Timestamp {
+func (bt *baseTask) GetTs() Timestamp {
 	return bt.Ts
 }
 
-func (bt *baseTask) SetTs(ts typeutil.Timestamp) {
+func (bt *baseTask) SetTs(ts Timestamp) {
 	bt.Ts = ts
 }

@@ -10,7 +10,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type manipulationReq struct {
@@ -21,15 +20,15 @@ type manipulationReq struct {
 }
 
 // TsMsg interfaces
-func (req *manipulationReq) Ts() (typeutil.Timestamp, error) {
+func (req *manipulationReq) Ts() (Timestamp, error) {
 	if req.msgs == nil {
 		return 0, errors.New("No typed manipulation request message in ")
 	}
-	return typeutil.Timestamp(req.msgs[0].Timestamp), nil
+	return req.msgs[0].Timestamp, nil
 }
-func (req *manipulationReq) SetTs(ts typeutil.Timestamp) {
+func (req *manipulationReq) SetTs(ts Timestamp) {
 	for _, msg := range req.msgs {
-		msg.Timestamp = uint64(ts)
+		msg.Timestamp = ts
 	}
 }
 

@@ -4,13 +4,11 @@ import (
 	"container/list"
 	"log"
 	"sync"
-
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type baseTaskQueue struct {
 	unissuedTasks *list.List
-	activeTasks   map[typeutil.Timestamp]*task
+	activeTasks   map[Timestamp]*task
 	utLock        sync.Mutex
 	atLock        sync.Mutex
 }
@@ -74,7 +72,7 @@ func (queue *baseTaskQueue) AddActiveTask(t *task) {
 	queue.activeTasks[ts] = t
 }
 
-func (queue *baseTaskQueue) PopActiveTask(ts typeutil.Timestamp) *task {
+func (queue *baseTaskQueue) PopActiveTask(ts Timestamp) *task {
 	queue.atLock.Lock()
 	defer queue.atLock.Lock()
 	t, ok := queue.activeTasks[ts]
@@ -86,7 +84,7 @@ func (queue *baseTaskQueue) PopActiveTask(ts typeutil.Timestamp) *task {
 	return nil
 }
 
-func (queue *baseTaskQueue) TaskDoneTest(ts typeutil.Timestamp) bool {
+func (queue *baseTaskQueue) TaskDoneTest(ts Timestamp) bool {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
@@ -219,7 +217,7 @@ func (sched *taskScheduler) Start() error {
 	return nil
 }
 
-func (sched *taskScheduler) TaskDoneTest(ts typeutil.Timestamp) bool {
+func (sched *taskScheduler) TaskDoneTest(ts Timestamp) bool {
 	ddTaskDone := sched.DdQueue.TaskDoneTest(ts)
 	dmTaskDone := sched.DmQueue.TaskDoneTest(ts)
 	dqTaskDone := sched.DqQueue.TaskDoneTest(ts)

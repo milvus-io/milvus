@@ -19,7 +19,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	mpb "github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"google.golang.org/grpc"
 )
@@ -71,11 +70,11 @@ func startTestProxyServer(proxy_addr string, master_addr string, t *testing.T) *
 		resultGroup:   "reusltG",
 		numReaderNode: 2,
 		proxyId:       1,
-		getTimestamp: func(count uint32) ([]typeutil.Timestamp, error) {
+		getTimestamp: func(count uint32) ([]Timestamp, error) {
 			timestamp += 100
-			t := make([]typeutil.Timestamp, count)
+			t := make([]Timestamp, count)
 			for i := 0; i < int(count); i++ {
-				t[i] = typeutil.Timestamp(timestamp)
+				t[i] = timestamp
 			}
 			return t, nil
 		},
@@ -379,7 +378,7 @@ func TestProxyServer_InsertAndDelete(t *testing.T) {
 		assert.Equalf(t, primaryKey[i], uint64(i+1), "insert failed")
 	}
 	t.Logf("m_timestamp = %d", ps.reqSch.mTimestamp)
-	assert.Equalf(t, ps.reqSch.mTimestamp, typeutil.Timestamp(1300), "insert failed")
+	assert.Equalf(t, ps.reqSch.mTimestamp, Timestamp(1300), "insert failed")
 }
 
 func TestProxyServer_Search(t *testing.T) {

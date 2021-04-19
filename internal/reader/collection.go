@@ -12,11 +12,14 @@ package reader
 
 */
 import "C"
+import "github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
+type UniqueID = typeutil.UniqueID
 
 type Collection struct {
 	CollectionPtr  C.CCollection
 	CollectionName string
-	CollectionID   int64
+	CollectionID   UniqueID
 	Partitions     []*Partition
 }
 

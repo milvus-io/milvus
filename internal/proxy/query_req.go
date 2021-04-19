@@ -63,7 +63,7 @@ func (s *proxyServer) restartQueryRoutine(buf_size int) error {
 		return err
 	}
 
-	resultMap := make(map[int64]*queryReq)
+	resultMap := make(map[UniqueID]*queryReq)
 
 	go func() {
 		defer result.Close()
@@ -164,63 +164,6 @@ func (s *proxyServer) reduceResults(query *queryReq) *servicepb.QueryResult {
 		}
 		return &result
 	}
-
-	//var entities []*struct {
-	//	Idx       int64
-	//	Score 	  float32
-	//	Hit		  *servicepb.Hits
-	//}
-	//var rows int
-	//
-	//result_err := func(msg string) *pb.QueryResult {
-	//	return &pb.QueryResult{
-	//		Status: &pb.Status{
-	//			ErrorCode: pb.ErrorCode_UNEXPECTED_ERROR,
-	//			Reason:    msg,
-	//		},
-	//	}
-	//}
-
-	//for _, r := range results {
-	//	for i := 0; i < len(r.Hits); i++ {
-	//		entity := struct {
-	//			Ids       int64
-	//			ValidRow  bool
-	//			RowsData  *pb.RowData
-	//			Scores    float32
-	//			Distances float32
-	//		}{
-	//			Ids:       r.Entities.Ids[i],
-	//			ValidRow:  r.Entities.ValidRow[i],
-	//			RowsData:  r.Entities.RowsData[i],
-	//			Scores:    r.Scores[i],
-	//			Distances: r.Distances[i],
-	//		}
-	//		entities = append(entities, &entity)
-	//	}
-	//}
-	//sort.Slice(entities, func(i, j int) bool {
-	//	if entities[i].ValidRow == true {
-	//		if entities[j].ValidRow == false {
-	//			return true
-	//		}
-	//		return entities[i].Scores > entities[j].Scores
-	//	} else {
-	//		return false
-	//	}
-	//})
-	//rIds := make([]int64, 0, rows)
-	//rValidRow := make([]bool, 0, rows)
-	//rRowsData := make([]*pb.RowData, 0, rows)
-	//rScores := make([]float32, 0, rows)
-	//rDistances := make([]float32, 0, rows)
-	//for i := 0; i < rows; i++ {
-	//	rIds = append(rIds, entities[i].Ids)
-	//	rValidRow = append(rValidRow, entities[i].ValidRow)
-	//	rRowsData = append(rRowsData, entities[i].RowsData)
-	//	rScores = append(rScores, entities[i].Scores)
-	//	rDistances = append(rDistances, entities[i].Distances)
-	//}
 
 	return &servicepb.QueryResult{
 		Status: &commonpb.Status{

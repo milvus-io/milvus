@@ -4,7 +4,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type insertTask struct {
@@ -29,8 +28,8 @@ func (it *insertTask) Execute() error {
 		SegmentId:      1, // TODO: use SegIdAssigner instead
 		// TODO: ChannelID
 		ProxyId:    it.ProxyId,
-		Timestamps: []typeutil.Timestamp{ts},
-		RowIds:     []int64{1}, // TODO: use RowIdAllocator instead
+		Timestamps: []Timestamp{ts},
+		RowIds:     []UniqueID{1}, // TODO: use RowIdAllocator instead
 		RowData:    it.rowBatch.RowData,
 	}
 	pulsarInsertTask := msgstream.InsertTask{

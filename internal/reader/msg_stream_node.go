@@ -3,6 +3,8 @@ package reader
 import (
 	"log"
 
+	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
@@ -36,7 +38,7 @@ func (msNode *msgStreamNode) Operate(in []*Msg) []*Msg {
 	}
 	for _, msg := range streamMsg.tsMessages {
 		switch (*msg).Type() {
-		case msgstream.KInsert:
+		case internalPb.MsgType_kInsert:
 			dmMsg.insertMessages = append(dmMsg.insertMessages, (*msg).(*msgstream.InsertTask))
 		// case msgstream.KDelete:
 		//	dmMsg.deleteMessages = append(dmMsg.deleteMessages, (*msg).(*msgstream.DeleteTask))

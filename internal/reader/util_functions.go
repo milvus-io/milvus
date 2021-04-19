@@ -12,10 +12,10 @@ import (
 )
 
 // Function `GetSegmentByEntityId` should return entityIDs, timestamps and segmentIDs
-func (node *QueryNode) GetKey2Segments() (*[]int64, *[]uint64, *[]int64) {
-	var entityIDs = make([]int64, 0)
-	var timestamps = make([]uint64, 0)
-	var segmentIDs = make([]int64, 0)
+func (node *QueryNode) GetKey2Segments() (*[]UniqueID, *[]Timestamp, *[]UniqueID) {
+	var entityIDs = make([]UniqueID, 0)
+	var timestamps = make([]Timestamp, 0)
+	var segmentIDs = make([]UniqueID, 0)
 
 	var key2SegMsg = node.messageClient.Key2SegMsg
 	for _, msg := range key2SegMsg {
@@ -35,7 +35,7 @@ func (node *QueryNode) GetKey2Segments() (*[]int64, *[]uint64, *[]int64) {
 	return &entityIDs, &timestamps, &segmentIDs
 }
 
-func (node *QueryNode) GetCollectionByID(collectionID int64) *Collection {
+func (node *QueryNode) GetCollectionByID(collectionID UniqueID) *Collection {
 	for _, collection := range node.Collections {
 		if collection.CollectionID == collectionID {
 			return collection
@@ -55,7 +55,7 @@ func (node *QueryNode) GetCollectionByCollectionName(collectionName string) (*Co
 	return nil, errors.New("Cannot found collection: " + collectionName)
 }
 
-func (node *QueryNode) GetSegmentBySegmentID(segmentID int64) (*Segment, error) {
+func (node *QueryNode) GetSegmentBySegmentID(segmentID UniqueID) (*Segment, error) {
 	targetSegment := node.SegmentsMap[segmentID]
 
 	if targetSegment == nil {
@@ -65,7 +65,7 @@ func (node *QueryNode) GetSegmentBySegmentID(segmentID int64) (*Segment, error) 
 	return targetSegment, nil
 }
 
-func (node *QueryNode) FoundSegmentBySegmentID(segmentID int64) bool {
+func (node *QueryNode) FoundSegmentBySegmentID(segmentID UniqueID) bool {
 	_, ok := node.SegmentsMap[segmentID]
 
 	return ok

@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
 	"github.com/zilliztech/milvus-distributed/internal/master/id"
 
 	"github.com/zilliztech/milvus-distributed/internal/conf"
@@ -13,6 +15,8 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/master/segment"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
+
+type UniqueID = typeutil.UniqueID
 
 func CollectionController(ch chan *schemapb.CollectionSchema, kvbase kv.Base, errch chan error) {
 	for collectionMeta := range ch {
@@ -24,7 +28,7 @@ func CollectionController(ch chan *schemapb.CollectionSchema, kvbase kv.Base, er
 			fieldMetas = collectionMeta.Fields
 		}
 		c := collection.NewCollection(cID, collectionMeta.Name,
-			time.Now(), fieldMetas, []int64{sID, s2ID},
+			time.Now(), fieldMetas, []UniqueID{sID, s2ID},
 			[]string{"default"})
 		cm := collection.GrpcMarshal(&c)
 		s := segment.NewSegment(sID, cID, collectionMeta.Name, "default", 0, 511, time.Now(), time.Unix(1<<36-1, 0))
@@ -61,7 +65,7 @@ func WriteCollection2Datastore(collectionMeta *schemapb.CollectionSchema, kvbase
 		fieldMetas = collectionMeta.Fields
 	}
 	c := collection.NewCollection(cID, collectionMeta.Name,
-		time.Now(), fieldMetas, []int64{sID},
+		time.Now(), fieldMetas, []UniqueID{sID},
 		[]string{"default"})
 	cm := collection.GrpcMarshal(&c)
 	s := segment.NewSegment(sID, cID, collectionMeta.Name, "default", 0, conf.Config.Pulsar.TopicNum, time.Now(), time.Unix(1<<46-1, 0))

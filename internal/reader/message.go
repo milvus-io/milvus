@@ -56,22 +56,22 @@ type serviceTimeMsg struct {
 }
 
 type InsertData struct {
-	insertIDs        map[int64][]int64
-	insertTimestamps map[int64][]uint64
-	insertRecords    map[int64][]*commonpb.Blob
-	insertOffset     map[int64]int64
+	insertIDs        map[UniqueID][]UniqueID
+	insertTimestamps map[UniqueID][]Timestamp
+	insertRecords    map[UniqueID][]*commonpb.Blob
+	insertOffset     map[UniqueID]int64
 }
 
 type DeleteData struct {
-	deleteIDs        map[int64][]int64
-	deleteTimestamps map[int64][]uint64
-	deleteOffset     map[int64]int64
+	deleteIDs        map[UniqueID][]UniqueID
+	deleteTimestamps map[UniqueID][]Timestamp
+	deleteOffset     map[UniqueID]int64
 }
 
 type DeleteRecord struct {
-	entityID  int64
-	timestamp uint64
-	segmentID int64
+	entityID  UniqueID
+	timestamp Timestamp
+	segmentID UniqueID
 }
 
 type DeletePreprocessData struct {

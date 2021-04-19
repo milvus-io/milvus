@@ -6,12 +6,16 @@ import (
 	"log"
 	"strconv"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
+
+type Timestamp = typeutil.Timestamp
 
 const collectionMetaPrefix = "collection/"
 
@@ -73,16 +77,16 @@ func (t *createCollectionTask) Execute() error {
 	}
 
 	// TODO: allocate collection id
-	var collectionId int64 = 0
+	var collectionId UniqueID = 0
 	// TODO: allocate timestamp
-	var collectionCreateTime uint64 = 0
+	var collectionCreateTime Timestamp = 0
 
 	collection := etcdpb.CollectionMeta{
 		Id:         collectionId,
 		Schema:     &schema,
 		CreateTime: collectionCreateTime,
 		// TODO: initial segment?
-		SegmentIds: make([]int64, 0),
+		SegmentIds: make([]UniqueID, 0),
 		// TODO: initial partition?
 		PartitionTags: make([]string, 0),
 	}

@@ -8,10 +8,10 @@ import (
 	msgpb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 )
 
-type ResultEntityIds []int64
+type ResultEntityIds []UniqueID
 
 type SearchResult struct {
-	ResultIds       []int64
+	ResultIds       []UniqueID
 	ResultDistances []float32
 }
 

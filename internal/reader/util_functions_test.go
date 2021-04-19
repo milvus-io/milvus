@@ -38,9 +38,9 @@ func TestUtilFunctions_GetKey2Segments(t *testing.T) {
 
 	for i := 0; i < msgLength; i++ {
 		key2SegMsg := msgPb.Key2SegMsg{
-			Uid:       int64(i),
-			Timestamp: uint64(i + 1000),
-			SegmentId: []int64{int64(i)},
+			Uid:       UniqueID(i),
+			Timestamp: Timestamp(i + 1000),
+			SegmentId: []UniqueID{UniqueID(i)},
 		}
 		node.messageClient.Key2SegMsg = append(node.messageClient.Key2SegMsg, &key2SegMsg)
 	}

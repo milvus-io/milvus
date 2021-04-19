@@ -7,13 +7,16 @@ import (
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
+
+type UniqueID = typeutil.UniqueID
 
 type IdAllocator struct {
 	Allocator
 
-	idStart int64
-	idEnd   int64
+	idStart UniqueID
+	idEnd   UniqueID
 }
 
 func NewIdAllocator(ctx context.Context) (*IdAllocator, error) {
@@ -56,7 +59,7 @@ func (ta *IdAllocator) processFunc(req request) {
 	fmt.Println("process Id")
 }
 
-func (ta *IdAllocator) AllocOne() (int64, error) {
+func (ta *IdAllocator) AllocOne() (UniqueID, error) {
 	ret, _, err := ta.Alloc(1)
 	if err != nil {
 		return 0, err
@@ -64,7 +67,7 @@ func (ta *IdAllocator) AllocOne() (int64, error) {
 	return ret, nil
 }
 
-func (ta *IdAllocator) Alloc(count uint32) (int64, int64, error) {
+func (ta *IdAllocator) Alloc(count uint32) (UniqueID, UniqueID, error) {
 	req := &idRequest{baseRequest: baseRequest{done: make(chan error), valid: false}}
 
 	req.count = count
@@ -74,6 +77,6 @@ func (ta *IdAllocator) Alloc(count uint32) (int64, int64, error) {
 	if !req.IsValid() {
 		return 0, 0, nil
 	}
-	start, count := int64(req.id), req.count
+	start, count := req.id, req.count
 	return start, start + int64(count), nil
 }

@@ -9,18 +9,17 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type timeTick struct {
-	lastTick             typeutil.Timestamp
-	currentTick          typeutil.Timestamp
+	lastTick             Timestamp
+	currentTick          Timestamp
 	interval             uint64
 	pulsarProducer       pulsar.Producer
 	peer_id              int64
 	ctx                  context.Context
-	areRequestsDelivered func(ts typeutil.Timestamp) bool
-	getTimestamp         func() (typeutil.Timestamp, error)
+	areRequestsDelivered func(ts Timestamp) bool
+	getTimestamp         func() (Timestamp, error)
 }
 
 func (tt *timeTick) tick() error {

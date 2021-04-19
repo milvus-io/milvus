@@ -2,21 +2,9 @@ package msgstream
 
 import (
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	. "github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
-type MsgType uint32
-
-const (
-	KInsert       MsgType = 400
-	KDelete       MsgType = 401
-	KSearch       MsgType = 500
-	KSearchResult MsgType = 1000
-
-	KSegmentStatics MsgType = 1100
-	KTimeTick       MsgType = 1200
-	KTimeSync       MsgType = 1201
-)
+type MsgType = internalPb.MsgType
 
 type TsMsg interface {
 	SetTs(ts Timestamp)
@@ -67,10 +55,7 @@ func (it InsertTask) EndTs() Timestamp {
 }
 
 func (it InsertTask) Type() MsgType {
-	if it.MsgType == internalPb.MsgType_kTimeTick {
-		return KTimeTick
-	}
-	return KInsert
+	return it.MsgType
 }
 
 func (it InsertTask) HashKeys() []int32 {
@@ -118,10 +103,8 @@ func (dt DeleteTask) EndTs() Timestamp {
 }
 
 func (dt DeleteTask) Type() MsgType {
-	if dt.MsgType == internalPb.MsgType_kTimeTick {
-		return KTimeTick
-	}
-	return KDelete
+	return dt.MsgType
+
 }
 
 func (dt DeleteTask) HashKeys() []int32 {
@@ -147,10 +130,7 @@ func (st SearchTask) EndTs() Timestamp {
 }
 
 func (st SearchTask) Type() MsgType {
-	if st.MsgType == internalPb.MsgType_kTimeTick {
-		return KTimeTick
-	}
-	return KSearch
+	return st.MsgType
 }
 
 func (st SearchTask) HashKeys() []int32 {
@@ -176,7 +156,7 @@ func (srt SearchResultTask) EndTs() Timestamp {
 }
 
 func (srt SearchResultTask) Type() MsgType {
-	return KSearchResult
+	return srt.MsgType
 }
 
 func (srt SearchResultTask) HashKeys() []int32 {
@@ -202,25 +182,9 @@ func (tst TimeTickTask) EndTs() Timestamp {
 }
 
 func (tst TimeTickTask) Type() MsgType {
-	return KTimeTick
+	return tst.MsgType
 }
 
 func (tst TimeTickTask) HashKeys() []int32 {
 	return tst.HashValues
 }
-
-///////////////////////////////////////////Key2Seg//////////////////////////////////////////
-//type Key2SegTask struct {
-//	internalPb.Key2SegMsg
-//}
-//
-////TODO::Key2SegMsg don't have timestamp
-//func (k2st Key2SegTask) SetTs(ts Timestamp) {}
-//
-//func (k2st Key2SegTask) Ts() Timestamp {
-//	return Timestamp(0)
-//}
-//
-//func (k2st Key2SegTask) Type() MsgType {
-//	return
-//}

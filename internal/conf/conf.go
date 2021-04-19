@@ -5,9 +5,13 @@ import (
 	"path"
 	"runtime"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
 	storagetype "github.com/zilliztech/milvus-distributed/internal/storage/type"
 	yaml "gopkg.in/yaml.v2"
 )
+
+type UniqueID = typeutil.UniqueID
 
 // yaml.MapSlice
 
@@ -17,7 +21,7 @@ type MasterConfig struct {
 	PulsarMoniterInterval int32
 	PulsarTopic           string
 	SegmentThreshole      float32
-	ProxyIdList           []int64
+	ProxyIdList           []UniqueID
 	QueryNodeNum          int
 	WriteNodeNum          int
 }

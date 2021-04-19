@@ -14,6 +14,10 @@ import (
 	etcd "go.etcd.io/etcd/clientv3"
 )
 
+type UniqueID = typeutil.UniqueID
+type Timestamp = typeutil.Timestamp
+type IntPrimaryKey = typeutil.IntPrimaryKey
+
 type BaseRequest interface {
 	Type() internalpb.MsgType
 	PreExecute() commonpb.Status
@@ -35,7 +39,7 @@ type ProxyOptions struct {
 	resultTopic            string
 	resultGroup            string
 	numReaderNode          int
-	proxyId                int64 //start from 1
+	proxyId                UniqueID //start from 1
 	etcdEndpoints          []string
 
 	//timestamporacle
@@ -45,7 +49,7 @@ type ProxyOptions struct {
 	//timetick
 	timeTickInterval uint64
 	timeTickTopic    string
-	timeTickPeerId   int64 //start from 1
+	timeTickPeerId   UniqueID //start from 1
 
 	// inner member
 	proxyServer *proxyServer
@@ -75,13 +79,13 @@ func ReadProxyOptionsFromConfig() (*ProxyOptions, error) {
 		resultTopic:            conf.Config.Proxy.PulsarTopics.ResultTopic,
 		resultGroup:            conf.Config.Proxy.PulsarTopics.ResultGroup,
 		numReaderNode:          conf.Config.Proxy.NumReaderNodes,
-		proxyId:                int64(conf.Config.Proxy.ProxyId),
+		proxyId:                UniqueID(conf.Config.Proxy.ProxyId),
 		etcdEndpoints:          []string{conf.Config.Etcd.Address + ":" + strconv.Itoa(int(conf.Config.Etcd.Port))},
 		tsoRootPath:            etcdRootPath,
 		tsoSaveInterval:        uint64(conf.Config.Proxy.TosSaveInterval),
 		timeTickInterval:       uint64(conf.Config.Proxy.TimeTickInterval),
 		timeTickTopic:          conf.Config.Proxy.PulsarTopics.TimeTickTopic,
-		timeTickPeerId:         int64(conf.Config.Proxy.ProxyId),
+		timeTickPeerId:         UniqueID(conf.Config.Proxy.ProxyId),
 	}, nil
 }
 
@@ -151,8 +155,8 @@ func StartProxy(opt *ProxyOptions) error {
 		pulsarProducer:       ttProducer,
 		peer_id:              opt.timeTickPeerId,
 		ctx:                  opt.ctx,
-		areRequestsDelivered: func(ts typeutil.Timestamp) bool { return srv.reqSch.AreRequestsDelivered(ts, 2) },
-		getTimestamp: func() (typeutil.Timestamp, error) {
+		areRequestsDelivered: func(ts Timestamp) bool { return srv.reqSch.AreRequestsDelivered(ts, 2) },
+		getTimestamp: func() (Timestamp, error) {
 			ts, st := tso.AllocOne()
 			return ts, st
 		},

@@ -6,6 +6,8 @@ import (
 	"log"
 	"strconv"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
@@ -25,6 +27,9 @@ const (
 	Statistics     MessageType = 5
 )
 
+type UniqueID = typeutil.UniqueID
+type Timestamp = typeutil.Timestamp
+
 type ReaderMessageClient struct {
 	// context
 	ctx context.Context
@@ -39,7 +44,7 @@ type ReaderMessageClient struct {
 	// pulsar
 	client pulsar.Client
 	//searchResultProducer     pulsar.Producer
-	searchResultProducers     map[int64]pulsar.Producer
+	searchResultProducers     map[UniqueID]pulsar.Producer
 	segmentsStatisticProducer pulsar.Producer
 	searchConsumer            pulsar.Consumer
 	key2segConsumer           pulsar.Consumer
@@ -48,27 +53,27 @@ type ReaderMessageClient struct {
 	InsertOrDeleteMsg   []*msgpb.InsertOrDeleteMsg
 	Key2SegMsg          []*msgpb.Key2SegMsg
 	SearchMsg           []*msgpb.SearchMsg
-	timestampBatchStart uint64
-	timestampBatchEnd   uint64
+	timestampBatchStart Timestamp
+	timestampBatchEnd   Timestamp
 	batchIDLen          int
 
 	//client id
 	MessageClientID int
 }
 
-func (mc *ReaderMessageClient) GetTimeNow() uint64 {
+func (mc *ReaderMessageClient) GetTimeNow() Timestamp {
 	return mc.timestampBatchEnd
 }
 
-func (mc *ReaderMessageClient) TimeSyncStart() uint64 {
+func (mc *ReaderMessageClient) TimeSyncStart() Timestamp {
 	return mc.timestampBatchStart
 }
 
-func (mc *ReaderMessageClient) TimeSyncEnd() uint64 {
+func (mc *ReaderMessageClient) TimeSyncEnd() Timestamp {
 	return mc.timestampBatchEnd
 }
 
-func (mc *ReaderMessageClient) SendResult(ctx context.Context, msg msgpb.QueryResult, producerKey int64) {
+func (mc *ReaderMessageClient) SendResult(ctx context.Context, msg msgpb.QueryResult, producerKey UniqueID) {
 	var msgBuffer, _ = proto.Marshal(&msg)
 	if _, err := mc.searchResultProducers[producerKey].Send(ctx, &pulsar.ProducerMessage{
 		Payload: msgBuffer,
@@ -203,7 +208,7 @@ func (mc *ReaderMessageClient) InitClient(ctx context.Context, url string) {
 	mc.MessageClientID = conf.Config.Reader.ClientId
 
 	//create producer
-	mc.searchResultProducers = make(map[int64]pulsar.Producer)
+	mc.searchResultProducers = make(map[UniqueID]pulsar.Producer)
 	proxyIdList := conf.Config.Master.ProxyIdList
 
 	searchResultTopicName := "SearchResult-"

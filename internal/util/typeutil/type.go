@@ -1,4 +1,5 @@
 package typeutil
 
 type Timestamp = uint64
-type ID = int64
+type IntPrimaryKey = int64
+type UniqueID = int64

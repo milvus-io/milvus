@@ -47,7 +47,7 @@ const (
 
 func TestAlignTimeSync(t *testing.T) {
 	r := &TimeSyncCfg{
-		proxyIdList: []int64{1, 2, 3},
+		proxyIdList: []UniqueID{1, 2, 3},
 		interval:    200,
 	}
 	ts := []*internalpb.TimeTickMsg{
@@ -78,7 +78,7 @@ func TestAlignTimeSync(t *testing.T) {
 
 func TestAlignTimeSync2(t *testing.T) {
 	r := &TimeSyncCfg{
-		proxyIdList: []int64{1, 2, 3},
+		proxyIdList: []UniqueID{1, 2, 3},
 		interval:    200,
 	}
 	ts := []*internalpb.TimeTickMsg{
@@ -107,7 +107,7 @@ func TestAlignTimeSync2(t *testing.T) {
 
 func TestAlignTimeSync3(t *testing.T) {
 	r := &TimeSyncCfg{
-		proxyIdList: []int64{1, 2, 3},
+		proxyIdList: []UniqueID{1, 2, 3},
 		interval:    200,
 	}
 	ts := []*internalpb.TimeTickMsg{
@@ -145,7 +145,7 @@ func TestAlignTimeSync3(t *testing.T) {
 
 func TestAlignTimeSync4(t *testing.T) {
 	r := &TimeSyncCfg{
-		proxyIdList: []int64{1},
+		proxyIdList: []UniqueID{1},
 		interval:    200,
 	}
 	ts := []*internalpb.TimeTickMsg{
@@ -176,7 +176,7 @@ func TestAlignTimeSync4(t *testing.T) {
 
 func TestAlignTimeSync5(t *testing.T) {
 	r := &TimeSyncCfg{
-		proxyIdList: []int64{1, 2, 3},
+		proxyIdList: []UniqueID{1, 2, 3},
 		interval:    200,
 	}
 	ts := []*internalpb.TimeTickMsg{
@@ -213,7 +213,7 @@ func TestNewTimeSync(t *testing.T) {
 		timeSyncSubName,
 		[]string{readerTopic1, readerTopic2, readerTopic3, readerTopic4},
 		readerSubName,
-		[]int64{2, 1},
+		[]UniqueID{2, 1},
 		interval,
 		WithReaderQueueSize(8),
 	)
@@ -296,7 +296,7 @@ func TestTimeSync(t *testing.T) {
 		timeSyncSubName,
 		[]string{readerTopic1, readerTopic2, readerTopic3, readerTopic4},
 		readerSubName,
-		[]int64{2, 1},
+		[]UniqueID{2, 1},
 		interval,
 		WithReaderQueueSize(1024),
 	)
@@ -589,7 +589,7 @@ func startWriteTimeSync(id int64, topic string, client pulsar.Client, duration t
 func startProxy(pt pulsar.Producer, ptid int64, pr1 pulsar.Producer, prid1 int64, pr2 pulsar.Producer, prid2 int64, duration time.Duration, t *testing.T) {
 	total := int(duration / (10 * time.Millisecond))
 	ticker := time.Tick(10 * time.Millisecond)
-	var timestamp uint64 = 0
+	var timestamp Timestamp = 0
 	for i := 1; i <= total; i++ {
 		<-ticker
 		timestamp += 10

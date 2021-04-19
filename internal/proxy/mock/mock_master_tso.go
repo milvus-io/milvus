@@ -4,17 +4,21 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 const timeWindow = time.Second
 
+type Timestamp = typeutil.Timestamp
+
 type TSOClient struct {
-	lastTs uint64
+	lastTs Timestamp
 	mux    sync.Mutex
 }
 
 // window is 1000ms default
-func (c *TSOClient) GetTimeStamp(ctx context.Context, n uint64) (ts uint64, count uint64, window time.Duration, err error) {
+func (c *TSOClient) GetTimeStamp(ctx context.Context, n Timestamp) (ts Timestamp, count uint64, window time.Duration, err error) {
 	c.mux.Lock()
 	defer c.mux.Unlock()
 	ts = c.lastTs

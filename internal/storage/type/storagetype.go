@@ -2,11 +2,13 @@ package storagetype
 
 import (
 	"context"
+
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type Key = []byte
 type Value = []byte
-type Timestamp = uint64
+type Timestamp = typeutil.Timestamp
 type DriverType = string
 type SegmentIndex = []byte
 type SegmentDL = []byte

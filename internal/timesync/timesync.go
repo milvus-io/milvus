@@ -11,12 +11,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 )
+
+type UniqueID = typeutil.UniqueID
+type Timestamp = typeutil.Timestamp
 
 type InsertLog struct {
 	MsgLength              int
@@ -44,7 +49,7 @@ type TimeSync interface {
 }
 
 type TimeSyncMsg struct {
-	Timestamp    uint64
+	Timestamp    Timestamp
 	NumRecorders int64
 }
 
@@ -89,7 +94,7 @@ func NewTimeSync(
 	timeSyncSubName string,
 	readTopics []string,
 	readSubName string,
-	proxyIdList []int64,
+	proxyIdList []UniqueID,
 	readStopFlagClientId int64,
 	opts ...TimeSyncOption,
 ) (TimeSync, error) {

@@ -9,7 +9,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 func TestTimeTick(t *testing.T) {
@@ -29,15 +28,15 @@ func TestTimeTick(t *testing.T) {
 
 	ctx, _ := context.WithTimeout(context.Background(), 4*time.Second)
 
-	var curTs typeutil.Timestamp
+	var curTs Timestamp
 	curTs = 0
 	tt := timeTick{
 		interval:             200,
 		pulsarProducer:       producer,
 		peer_id:              1,
 		ctx:                  ctx,
-		areRequestsDelivered: func(ts typeutil.Timestamp) bool { return true },
-		getTimestamp: func() (typeutil.Timestamp, error) {
+		areRequestsDelivered: func(ts Timestamp) bool { return true },
+		getTimestamp: func() (Timestamp, error) {
 			curTs = curTs + 100
 			return curTs, nil
 		},
