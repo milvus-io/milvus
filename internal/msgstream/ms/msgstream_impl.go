@@ -606,6 +606,7 @@ func (ms *TtMsgStream) findTimeTick(consumer Consumer,
 			}
 
 			// set msg info to tsMsg
+			log.Debug(msg.Topic() + "--------" + string(msg.ID().Serialize()))
 			tsMsg.SetPosition(&msgstream.MsgPosition{
 				ChannelName: filepath.Base(msg.Topic()),
 				MsgID:       msg.ID().Serialize(),
@@ -701,7 +702,7 @@ func (ms *TtMsgStream) Seek(mp *internalpb.MsgPosition) error {
 	if err != nil {
 		return err
 	}
-	consumer.Seek(seekMsgID)
+	_ = consumer.Seek(seekMsgID)
 	ms.addConsumer(consumer, seekChannel)
 
 	//TODO: May cause problem
