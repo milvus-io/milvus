@@ -29,9 +29,9 @@ class TestGetCollectionStats:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")) == "CPU":
-            if request.param["index_type"] in index_cpu_not_support():
-                pytest.skip("CPU not support index_type: ivf_sq8h")
+        # if str(connect._cmd("mode")) == "CPU":
+        #     if request.param["index_type"] in index_cpu_not_support():
+        #         pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
 
     @pytest.fixture(

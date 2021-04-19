@@ -30,9 +30,9 @@ class TestFlushBase:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "GPU":
-            if request.param["index_type"] not in ivf():
-                pytest.skip("Only support index_type: idmap/flat")
+        # if str(connect._cmd("mode")[1]) == "GPU":
+        #     if request.param["index_type"] not in ivf():
+        #         pytest.skip("Only support index_type: idmap/flat")
         return request.param
 
     @pytest.fixture(

@@ -6,7 +6,6 @@ from constants import *
 
 uid = "describe_collection"
 
-
 class TestDescribeCollection:
 
     @pytest.fixture(
@@ -29,9 +28,9 @@ class TestDescribeCollection:
     )
     def get_simple_index(self, request, connect):
         logging.getLogger().info(request.param)
-        if str(connect._cmd("mode")) == "CPU":
-            if request.param["index_type"] in index_cpu_not_support():
-                pytest.skip("sq8h not support in CPU mode")
+        # if str(connect._cmd("mode")) == "CPU":
+        #     if request.param["index_type"] in index_cpu_not_support():
+        #         pytest.skip("sq8h not support in CPU mode")
         return request.param
 
     """
@@ -68,6 +67,7 @@ class TestDescribeCollection:
     def test_describe_collection_after_index_created(self, connect, collection, get_simple_index):
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         res = connect.describe_collection(collection)
+        logging.getLogger().info(res)
         for field in res["fields"]:
             if field["name"] == default_float_vec_field_name:
                 index = field["indexes"][0]

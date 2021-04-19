@@ -37,9 +37,9 @@ class TestCollectionCount:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] in index_cpu_not_support():
-                pytest.skip("sq8h not support in cpu mode")
+        # if str(connect._cmd("mode")[1]) == "CPU":
+        #     if request.param["index_type"] in index_cpu_not_support():
+        #         pytest.skip("sq8h not support in cpu mode")
         request.param.update({"metric_type": "L2"})
         return request.param
 
@@ -208,9 +208,9 @@ class TestCollectionCountIP:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] in index_cpu_not_support():
-                pytest.skip("sq8h not support in cpu mode")
+        # if str(connect._cmd("mode")[1]) == "CPU":
+        #     if request.param["index_type"] in index_cpu_not_support():
+        #         pytest.skip("sq8h not support in cpu mode")
         request.param.update({"metric_type": "IP"})
         return request.param
 

@@ -24,9 +24,9 @@ class TestIndexBase:
     )
     def get_simple_index(self, request, connect):
         logging.getLogger().info(request.param)
-        if str(connect._cmd("mode")) == "CPU":
-            if request.param["index_type"] in index_cpu_not_support():
-                pytest.skip("sq8h not support in CPU mode")
+        # if str(connect._cmd("mode")) == "CPU":
+        #     if request.param["index_type"] in index_cpu_not_support():
+        #         pytest.skip("sq8h not support in CPU mode")
         return request.param
 
     @pytest.fixture(
@@ -528,9 +528,9 @@ class TestIndexBinary:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")) == "CPU":
-            if request.param["index_type"] in index_cpu_not_support():
-                pytest.skip("sq8h not support in CPU mode")
+        # if str(connect._cmd("mode")) == "CPU":
+        #     if request.param["index_type"] in index_cpu_not_support():
+        #         pytest.skip("sq8h not support in CPU mode")
         return request.param
 
     @pytest.fixture(
@@ -765,9 +765,9 @@ class TestIndexAsync:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")) == "CPU":
-            if request.param["index_type"] in index_cpu_not_support():
-                pytest.skip("sq8h not support in CPU mode")
+        # if str(connect._cmd("mode")) == "CPU":
+        #     if request.param["index_type"] in index_cpu_not_support():
+        #         pytest.skip("sq8h not support in CPU mode")
         return request.param
 
     def check_result(self, res):
