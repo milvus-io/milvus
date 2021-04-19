@@ -6,7 +6,7 @@ import (
 
 type serviceTimeNode struct {
 	BaseNode
-	replica collectionReplica
+	replica *collectionReplica
 }
 
 func (stNode *serviceTimeNode) Name() string {
@@ -28,12 +28,12 @@ func (stNode *serviceTimeNode) Operate(in []*Msg) []*Msg {
 	}
 
 	// update service time
-	stNode.replica.getTSafe().set(serviceTimeMsg.timeRange.timestampMax)
+	(*(*stNode.replica).getTSafe()).set(serviceTimeMsg.timeRange.timestampMax)
 	//fmt.Println("update tSafe to:", getPhysicalTime(serviceTimeMsg.timeRange.timestampMax))
 	return nil
 }
 
-func newServiceTimeNode(replica collectionReplica) *serviceTimeNode {
+func newServiceTimeNode(replica *collectionReplica) *serviceTimeNode {
 	maxQueueLength := Params.flowGraphMaxQueueLength()
 	maxParallelism := Params.flowGraphMaxParallelism()
 

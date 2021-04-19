@@ -55,3 +55,4 @@ cmake_build/
 
 .DS_Store
 *.swp
+cwrapper_build

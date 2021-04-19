@@ -31,7 +31,7 @@ import (
  * is up-to-date.
  */
 type collectionReplica interface {
-	getTSafe() tSafe
+	getTSafe() *tSafe
 
 	// collection
 	getCollectionNum() int
@@ -68,11 +68,11 @@ type collectionReplicaImpl struct {
 	collections []*Collection
 	segments    map[UniqueID]*Segment
 
-	tSafe tSafe
+	tSafe *tSafe
 }
 
 //----------------------------------------------------------------------------------------------------- tSafe
-func (colReplica *collectionReplicaImpl) getTSafe() tSafe {
+func (colReplica *collectionReplicaImpl) getTSafe() *tSafe {
 	return colReplica.tSafe
 }
 
@@ -111,7 +111,6 @@ func (colReplica *collectionReplicaImpl) removeCollection(collectionID UniqueID)
 		if col.ID() == collectionID {
 			for _, p := range *col.Partitions() {
 				for _, s := range *p.Segments() {
-					deleteSegment(colReplica.segments[s.ID()])
 					delete(colReplica.segments, s.ID())
 				}
 			}
@@ -203,7 +202,6 @@ func (colReplica *collectionReplicaImpl) removePartition(collectionID UniqueID, 
 	for _, p := range *collection.Partitions() {
 		if p.Tag() == partitionTag {
 			for _, s := range *p.Segments() {
-				deleteSegment(colReplica.segments[s.ID()])
 				delete(colReplica.segments, s.ID())
 			}
 		} else {

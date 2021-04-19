@@ -184,7 +184,7 @@ Note that *tenantId*, *proxyId*, *collectionId*, *segmentId* are unique strings 
 
 ```go
 type metaTable struct {
-  kv kv.Base // client of a reliable kv service, i.e. etcd client
+  kv kv.TxnBase // client of a reliable kv service, i.e. etcd client
   tenantId2Meta map[UniqueId]TenantMeta // tenant id to tenant meta
   proxyId2Meta map[UniqueId]ProxyMeta // proxy id to proxy meta
   collId2Meta map[UniqueId]CollectionMeta // collection id to collection meta
@@ -216,7 +216,7 @@ func (meta *metaTable) GetSegmentById(segId UniqueId)(*SegmentMeta, error)
 func (meta *metaTable) DeleteSegment(segId UniqueId) error
 func (meta *metaTable) CloseSegment(segId UniqueId, closeTs Timestamp, num_rows int64) error
 
-func NewMetaTable(kv kv.Base) (*metaTable,error)
+func NewMetaTable(kv kv.TxnBase) (*metaTable,error)
 ```
 
 *metaTable* maintains meta both in memory and *etcdKV*. It keeps meta's consistency in both sides. All its member functions may be called concurrently.
@@ -380,13 +380,18 @@ func (segMgr *SegmentManager) AssignSegmentID(segIDReq []*internalpb.SegIDReques
 // "/msg_stream/insert"
 
 message SysConfigRequest {
-	repeated string keys = 1;
-	repeated string key_prefixes = 2;
+    MsgType msg_type = 1;
+    int64 reqID = 2;
+    int64 proxyID = 3;
+    uint64 timestamp = 4;
+	repeated string keys = 5;
+	repeated string key_prefixes = 6;
 }
 
 message SysConfigResponse {
-	repeated string keys = 1;
-	repeated string values = 2;
+    common.Status status = 1;
+	repeated string keys = 2;
+	repeated string values = 3;
 }
 ```
 
@@ -394,12 +399,11 @@ message SysConfigResponse {
 
 ```go
 type SysConfig struct {
-  etcdKV *etcd
-  etcdPathPrefix string
+	kv *kv.EtcdKV
 }
 
 func (conf *SysConfig) InitFromFile(filePath string) (error)
-func (conf *SysConfig) GetByPrefix(keyPrefix string) ([]string, error)
+func (conf *SysConfig) GetByPrefix(keyPrefix string) (keys []string, values []string, err error)
 func (conf *SysConfig) Get(keys []string) ([]string, error)
 ```
 

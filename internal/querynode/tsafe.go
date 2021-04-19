@@ -36,11 +36,11 @@ type tSafeImpl struct {
 	watcherList []*tSafeWatcher
 }
 
-func newTSafe() tSafe {
+func newTSafe() *tSafe {
 	var t tSafe = &tSafeImpl{
 		watcherList: make([]*tSafeWatcher, 0),
 	}
-	return t
+	return &t
 }
 
 func (ts *tSafeImpl) registerTSafeWatcher(t *tSafeWatcher) {

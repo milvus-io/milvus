@@ -81,7 +81,7 @@ func setup() {
 
 	startMaster(ctx)
 	startProxy(ctx)
-	proxyAddr := Params.NetworkAddress()
+	proxyAddr := Params.NetWorkAddress()
 	addr := strings.Split(proxyAddr, ":")
 	if addr[0] == "0.0.0.0" {
 		proxyAddr = "127.0.0.1:" + addr[1]

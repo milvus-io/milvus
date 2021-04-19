@@ -2,8 +2,6 @@ package master
 
 import (
 	"context"
-	"math/rand"
-	"strconv"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
@@ -20,6 +18,7 @@ import (
 
 func TestMaster_Partition(t *testing.T) {
 	Init()
+	refreshMasterAddress()
 
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
@@ -66,13 +65,12 @@ func TestMaster_Partition(t *testing.T) {
 		DefaultPartitionTag: "_default",
 	}
 
-	port := 10000 + rand.Intn(1000)
 	svr, err := CreateServer(ctx)
 	assert.Nil(t, err)
-	err = svr.Run(int64(port))
+	err = svr.Run(int64(Params.Port))
 	assert.Nil(t, err)
 
-	conn, err := grpc.DialContext(ctx, "127.0.0.1:"+strconv.Itoa(port), grpc.WithInsecure(), grpc.WithBlock())
+	conn, err := grpc.DialContext(ctx, Params.Address, grpc.WithInsecure(), grpc.WithBlock())
 	assert.Nil(t, err)
 	defer conn.Close()
 

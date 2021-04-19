@@ -11,10 +11,10 @@ type dataSyncService struct {
 	ctx context.Context
 	fg  *flowgraph.TimeTickedFlowGraph
 
-	replica collectionReplica
+	replica *collectionReplica
 }
 
-func newDataSyncService(ctx context.Context, replica collectionReplica) *dataSyncService {
+func newDataSyncService(ctx context.Context, replica *collectionReplica) *dataSyncService {
 
 	return &dataSyncService{
 		ctx: ctx,

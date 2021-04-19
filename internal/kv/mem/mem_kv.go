@@ -1,4 +1,4 @@
-package kv
+package memkv
 
 import (
 	"sync"
