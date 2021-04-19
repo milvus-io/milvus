@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -384,6 +385,7 @@ func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (inMsgs []*msgstream.Insert
 }
 
 type AllocatorFactory struct {
+	sync.Mutex
 	r *rand.Rand
 }
 
@@ -395,7 +397,9 @@ func NewAllocatorFactory(id ...UniqueID) *AllocatorFactory {
 	return f
 }
 
-func (alloc AllocatorFactory) allocID() (UniqueID, error) {
+func (alloc *AllocatorFactory) allocID() (UniqueID, error) {
+	alloc.Lock()
+	defer alloc.Unlock()
 	return alloc.r.Int63n(1000000), nil
 }
 

@@ -45,7 +45,7 @@ func TestDataSyncService_Start(t *testing.T) {
 		"receiveBufSize": 1024,
 		"pulsarBufSize":  1024}
 	err := msFactory.SetParams(m)
-	sync := newDataSyncService(ctx, flushChan, replica, allocFactory, msFactory)
+	sync := newDataSyncService(ctx, flushChan, replica, &allocFactory, msFactory)
 	sync.replica.addCollection(collMeta.ID, collMeta.Schema)
 	sync.init()
 	go sync.start()
