@@ -37,6 +37,10 @@ func (pt *ParamTable) Init() {
 	pt.Save("_proxyID", proxyIDStr)
 }
 
+func (pt *ParamTable) NetworkPort() int {
+	return pt.ParseInt("proxy.port")
+}
+
 func (pt *ParamTable) NetworkAddress() string {
 	addr, err := pt.Load("proxy.address")
 	if err != nil {
