@@ -126,8 +126,6 @@ func deleteSegment(segment *Segment) {
 	*/
 	cPtr := segment.segmentPtr
 	C.DeleteSegment(cPtr)
-	segment.segmentPtr = nil
-	segment = nil
 }
 
 func (s *Segment) getRowCount() int64 {
@@ -135,9 +133,6 @@ func (s *Segment) getRowCount() int64 {
 		long int
 		getRowCount(CSegmentInterface c_segment);
 	*/
-	if s.segmentPtr == nil {
-		return -1
-	}
 	var rowCount = C.GetRowCount(s.segmentPtr)
 	return int64(rowCount)
 }
@@ -147,9 +142,6 @@ func (s *Segment) getDeletedCount() int64 {
 		long int
 		getDeletedCount(CSegmentInterface c_segment);
 	*/
-	if s.segmentPtr == nil {
-		return -1
-	}
 	var deletedCount = C.GetDeletedCount(s.segmentPtr)
 	return int64(deletedCount)
 }
@@ -159,9 +151,6 @@ func (s *Segment) getMemSize() int64 {
 		long int
 		GetMemoryUsageInBytes(CSegmentInterface c_segment);
 	*/
-	if s.segmentPtr == nil {
-		return -1
-	}
 	var memoryUsageInBytes = C.GetMemoryUsageInBytes(s.segmentPtr)
 
 	return int64(memoryUsageInBytes)
@@ -179,9 +168,7 @@ func (s *Segment) segmentSearch(plan *Plan,
 			long int* result_ids,
 			float* result_distances);
 	*/
-	if s.segmentPtr == nil {
-		return nil, errors.New("null seg core pointer")
-	}
+
 	cPlaceholderGroups := make([]C.CPlaceholderGroup, 0)
 	for _, pg := range placeHolderGroups {
 		cPlaceholderGroups = append(cPlaceholderGroups, (*pg).cPlaceholderGroup)
@@ -207,9 +194,6 @@ func (s *Segment) segmentSearch(plan *Plan,
 
 func (s *Segment) fillTargetEntry(plan *Plan,
 	result *SearchResult) error {
-	if s.segmentPtr == nil {
-		return errors.New("null seg core pointer")
-	}
 
 	var status = C.FillTargetEntry(s.segmentPtr, plan.cPlan, result.cQueryResult)
 	errorCode := status.error_code
@@ -225,9 +209,6 @@ func (s *Segment) fillTargetEntry(plan *Plan,
 
 // segment, err := loadService.replica.getSegmentByID(segmentID)
 func (s *Segment) updateSegmentIndex(loadIndexInfo *LoadIndexInfo) error {
-	if s.segmentPtr == nil {
-		return errors.New("null seg core pointer")
-	}
 	var status C.CStatus
 
 	if s.segmentType == segTypeGrowing {
@@ -256,7 +237,7 @@ func (s *Segment) setIndexParam(fieldID int64, indexParamKv []*commonpb.KeyValue
 	defer s.paramMutex.Unlock()
 	indexParamMap := make(indexParam)
 	if indexParamKv == nil {
-		return errors.New("empty loadIndexMsg's indexParam")
+		return errors.New("loadIndexMsg's indexParam empty")
 	}
 	for _, param := range indexParamKv {
 		indexParamMap[param.Key] = param.Value
@@ -320,9 +301,6 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 		           int sizeof_per_row,
 		           signed long int count);
 	*/
-	if s.segmentPtr == nil {
-		return errors.New("null seg core pointer")
-	}
 	// Blobs to one big blob
 	var numOfRow = len(*entityIDs)
 	var sizeofPerRow = len((*records)[0].Value)
@@ -373,9 +351,6 @@ func (s *Segment) segmentDelete(offset int64, entityIDs *[]UniqueID, timestamps 
 		           const long* primary_keys,
 		           const unsigned long* timestamps);
 	*/
-	if s.segmentPtr == nil {
-		return errors.New("null seg core pointer")
-	}
 	var cOffset = C.long(offset)
 	var cSize = C.long(len(*entityIDs))
 	var cEntityIdsPtr = (*C.long)(&(*entityIDs)[0])
@@ -400,9 +375,6 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int, data interfa
 		CStatus
 		LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_info);
 	*/
-	if s.segmentPtr == nil {
-		return errors.New("null seg core pointer")
-	}
 	if s.segmentType != segTypeSealed {
 		return errors.New("illegal segment type when loading field data")
 	}

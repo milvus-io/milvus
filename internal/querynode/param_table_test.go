@@ -60,6 +60,24 @@ func TestParamTable_minio(t *testing.T) {
 	})
 }
 
+func TestParamTable_LoadIndex(t *testing.T) {
+	t.Run("Test channel names", func(t *testing.T) {
+		names := Params.LoadIndexChannelNames
+		assert.Equal(t, len(names), 1)
+		assert.Contains(t, names[0], "cmd")
+	})
+
+	t.Run("Test recvBufSize", func(t *testing.T) {
+		size := Params.LoadIndexReceiveBufSize
+		assert.Equal(t, size, int64(512))
+	})
+
+	t.Run("Test pulsarBufSize", func(t *testing.T) {
+		size := Params.LoadIndexPulsarBufSize
+		assert.Equal(t, size, int64(512))
+	})
+}
+
 func TestParamTable_insertChannelRange(t *testing.T) {
 	channelRange := Params.InsertChannelRange
 	assert.Equal(t, 2, len(channelRange))

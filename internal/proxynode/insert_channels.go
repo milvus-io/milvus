@@ -75,6 +75,7 @@ type InsertChannelsMap struct {
 	insertChannels              [][]string            // it's a little confusing to use []string as the key of map
 	insertMsgStreams            []msgstream.MsgStream // maybe there's a better way to implement Set, just agilely now
 	droppedBitMap               []int                 // 0 -> normal, 1 -> dropped
+	usageHistogram              []int                 // message stream can be closed only when the use count is zero
 	mtx                         sync.RWMutex
 	nodeInstance                *NodeImpl
 }
@@ -93,6 +94,7 @@ func (m *InsertChannelsMap) createInsertMsgStream(collID UniqueID, channels []st
 	for loc, existedChannels := range m.insertChannels {
 		if m.droppedBitMap[loc] == 0 && SortedSliceEqual(existedChannels, channels) {
 			m.collectionID2InsertChannels[collID] = loc
+			m.usageHistogram[loc]++
 			return nil
 		}
 	}
@@ -108,6 +110,7 @@ func (m *InsertChannelsMap) createInsertMsgStream(collID UniqueID, channels []st
 	stream.Start()
 	m.insertMsgStreams = append(m.insertMsgStreams, stream)
 	m.droppedBitMap = append(m.droppedBitMap, 0)
+	m.usageHistogram = append(m.usageHistogram, 1)
 
 	return nil
 }
@@ -123,7 +126,14 @@ func (m *InsertChannelsMap) closeInsertMsgStream(collID UniqueID) error {
 	if m.droppedBitMap[loc] != 0 {
 		return errors.New("insert message stream already closed")
 	}
-	m.insertMsgStreams[loc].Close()
+	if m.usageHistogram[loc] <= 0 {
+		return errors.New("insert message stream already closed")
+	}
+
+	m.usageHistogram[loc]--
+	if m.usageHistogram[loc] <= 0 {
+		m.insertMsgStreams[loc].Close()
+	}
 	log.Print("close insert message stream ...")
 
 	m.droppedBitMap[loc] = 1
@@ -164,11 +174,28 @@ func (m *InsertChannelsMap) getInsertMsgStream(collID UniqueID) (msgstream.MsgSt
 	return m.insertMsgStreams[loc], nil
 }
 
+func (m *InsertChannelsMap) closeAllMsgStream() {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	for _, stream := range m.insertMsgStreams {
+		stream.Close()
+	}
+
+	m.collectionID2InsertChannels = make(map[UniqueID]int)
+	m.insertChannels = make([][]string, 0)
+	m.insertMsgStreams = make([]msgstream.MsgStream, 0)
+	m.droppedBitMap = make([]int, 0)
+	m.usageHistogram = make([]int, 0)
+}
+
 func newInsertChannelsMap(node *NodeImpl) *InsertChannelsMap {
 	return &InsertChannelsMap{
 		collectionID2InsertChannels: make(map[UniqueID]int),
 		insertChannels:              make([][]string, 0),
 		insertMsgStreams:            make([]msgstream.MsgStream, 0),
+		droppedBitMap:               make([]int, 0),
+		usageHistogram:              make([]int, 0),
 		nodeInstance:                node,
 	}
 }

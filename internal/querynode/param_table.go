@@ -58,6 +58,11 @@ type ParamTable struct {
 	StatsChannelName     string
 	StatsReceiveBufSize  int64
 
+	// load index
+	LoadIndexChannelNames   []string
+	LoadIndexReceiveBufSize int64
+	LoadIndexPulsarBufSize  int64
+
 	GracefulTime        int64
 	MsgChannelSubName   string
 	DefaultPartitionTag string
@@ -157,6 +162,10 @@ func (p *ParamTable) Init() {
 	p.initStatsPublishInterval()
 	p.initStatsChannelName()
 	p.initStatsReceiveBufSize()
+
+	p.initLoadIndexChannelNames()
+	p.initLoadIndexReceiveBufSize()
+	p.initLoadIndexPulsarBufSize()
 }
 
 // ---------------------------------------------------------- query node
@@ -477,4 +486,20 @@ func (p *ParamTable) initSliceIndex() {
 		}
 	}
 	p.SliceIndex = -1
+}
+
+func (p *ParamTable) initLoadIndexChannelNames() {
+	loadIndexChannelName, err := p.Load("msgChannel.chanNamePrefix.cmd")
+	if err != nil {
+		panic(err)
+	}
+	p.LoadIndexChannelNames = []string{loadIndexChannelName}
+}
+
+func (p *ParamTable) initLoadIndexReceiveBufSize() {
+	p.LoadIndexReceiveBufSize = p.ParseInt64("queryNode.msgStream.loadIndex.recvBufSize")
+}
+
+func (p *ParamTable) initLoadIndexPulsarBufSize() {
+	p.LoadIndexPulsarBufSize = p.ParseInt64("queryNode.msgStream.loadIndex.pulsarBufSize")
 }
