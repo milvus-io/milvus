@@ -152,7 +152,7 @@ func (node *ProxyNode) Init() error {
 		return err
 	}
 
-	node.queryMsgStream, _ = node.msFactory.NewMsgStream(node.ctx)
+	node.queryMsgStream, _ = node.msFactory.NewQueryMsgStream(node.ctx)
 	node.queryMsgStream.AsProducer(Params.SearchChannelNames)
 	// FIXME(wxyu): use log.Debug instead
 	log.Debug("proxynode", zap.Strings("proxynode AsProducer:", Params.SearchChannelNames))

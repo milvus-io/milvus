@@ -41,8 +41,8 @@ type ResultEntityIds []UniqueID
 func newSearchService(ctx context.Context, replica ReplicaInterface, factory msgstream.Factory) *searchService {
 	receiveBufSize := Params.SearchReceiveBufSize
 
-	searchStream, _ := factory.NewMsgStream(ctx)
-	searchResultStream, _ := factory.NewMsgStream(ctx)
+	searchStream, _ := factory.NewQueryMsgStream(ctx)
+	searchResultStream, _ := factory.NewQueryMsgStream(ctx)
 
 	// query node doesn't need to consumer any search or search result channel actively.
 	consumeChannels := Params.SearchChannelNames
