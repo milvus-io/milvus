@@ -38,18 +38,19 @@ void
 ShowPlanNodeVisitor::visit(FloatVectorANNS& node) {
     // std::vector<float> data(node.data_.get(), node.data_.get() + node.num_queries_  * node.dim_);
     assert(!ret_);
+    auto& info = node.query_info_;
     Json json_body{
         {"node_type", "FloatVectorANNS"},    //
-        {"metric_type", node.metric_type_},  //
-        {"dim", node.dim_},                  //
-        {"field_id_", node.field_id_},       //
-        {"num_queries", node.num_queries_},  //
-        {"data", node.data_},                //
+        {"metric_type", info.metric_type_},  //
+        {"dim", info.dim_},                  //
+        {"field_id_", info.field_id_},       //
+        {"num_queries", info.num_queries_},  //
+        {"topK", info.topK_},  //
     };
     if (node.predicate_.has_value()) {
         AssertInfo(false, "unimplemented");
     } else {
-        json_body["predicate"] = "nullopt";
+        // json_body["predicate"] = "nullopt";
     }
     ret_ = json_body;
 }

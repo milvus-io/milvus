@@ -6,7 +6,6 @@ void
 ####
 
 @@@@main
-#pragma once
 // Generated File
 // DO NOT EDIT
 #include "query/@@root_base@@.h"

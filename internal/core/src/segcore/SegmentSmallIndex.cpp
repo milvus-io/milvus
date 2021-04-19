@@ -1,13 +1,16 @@
-#include <segcore/SegmentSmallIndex.h>
 #include <random>
+
 #include <algorithm>
 #include <numeric>
 #include <thread>
 #include <queue>
 
+#include "segcore/SegmentNaive.h"
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include <faiss/utils/distances.h>
+#include "segcore/SegmentSmallIndex.h"
+#include "query/PlanNode.h"
 
 namespace milvus::segcore {
 
@@ -251,8 +254,9 @@ merge_into(int64_t queries,
     }
 }
 
+
 Status
-SegmentSmallIndex::QueryBruteForceImpl(query::QueryPtr query_info, Timestamp timestamp, QueryResult& results) {
+SegmentSmallIndex::QueryBruteForceImpl(const query::QueryInfo& info, const float* query_data, Timestamp timestamp, QueryResult& results) {
     // step 1: binary search to find the barrier of the snapshot
     auto ins_barrier = get_barrier(record_, timestamp);
     auto del_barrier = get_barrier(deleted_record_, timestamp);
@@ -263,20 +267,22 @@ SegmentSmallIndex::QueryBruteForceImpl(query::QueryPtr query_info, Timestamp tim
 #endif
 
     // step 2.1: get meta
-    auto& field = schema_->operator[](query_info->field_name);
-    Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
-    auto dim = field.get_dim();
-    auto topK = query_info->topK;
-    auto num_queries = query_info->num_queries;
-    auto total_count = topK * num_queries;
-    // TODO: optimize
-
     // step 2.2: get which vector field to search
-    auto vecfield_offset_opt = schema_->get_offset(query_info->field_name);
+    auto vecfield_offset_opt = schema_->get_offset(info.field_id_);
     Assert(vecfield_offset_opt.has_value());
     auto vecfield_offset = vecfield_offset_opt.value();
     Assert(vecfield_offset < record_.entity_vec_.size());
+
+    auto& field = schema_->operator[](vecfield_offset);
     auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_.at(vecfield_offset));
+
+    Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
+    auto dim = field.get_dim();
+    auto topK = info.topK_;
+    auto num_queries = info.num_queries_;
+    auto total_count = topK * num_queries;
+    // TODO: optimize
+
 
     // step 3: small indexing search
     std::vector<int64_t> final_uids(total_count, -1);
@@ -308,7 +314,7 @@ SegmentSmallIndex::QueryBruteForceImpl(query::QueryPtr query_info, Timestamp tim
         auto src_data = vec_ptr->get_chunk(chunk_id).data();
         auto nsize =
             chunk_id != max_chunk - 1 ? DefaultElementPerChunk : ins_barrier - chunk_id * DefaultElementPerChunk;
-        faiss::knn_L2sqr(query_info->query_raw_data.data(), src_data, dim, num_queries, nsize, &buf);
+        faiss::knn_L2sqr(query_data, src_data, dim, num_queries, nsize, &buf);
         merge_into(num_queries, topK, final_dis.data(), final_uids.data(), buf_dis.data(), buf_uids.data());
     }
 
@@ -327,7 +333,7 @@ SegmentSmallIndex::QueryBruteForceImpl(query::QueryPtr query_info, Timestamp tim
 }
 
 Status
-SegmentSmallIndex::Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult& result) {
+SegmentSmallIndex::QueryDeprecated(query::QueryPtr query_info, Timestamp timestamp, QueryResult& result) {
     // TODO: enable delete
     // TODO: enable index
     // TODO: remove mock
@@ -345,9 +351,16 @@ SegmentSmallIndex::Query(query::QueryPtr query_info, Timestamp timestamp, QueryR
             x = dis(e);
         }
     }
-
+    int64_t inferred_dim = query_info->query_raw_data.size() / query_info->num_queries;
     // TODO
-    return QueryBruteForceImpl(query_info, timestamp, result);
+    query::QueryInfo info {
+        query_info->num_queries,
+        inferred_dim,
+        query_info->topK,
+        query_info->field_name,
+        "L2"
+    };
+    return QueryBruteForceImpl(info, query_info->query_raw_data.data(), timestamp, result);
 }
 
 Status
