@@ -9,9 +9,6 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/opentracing/opentracing-go"
-	oplog "github.com/opentracing/opentracing-go/log"
-
 	"github.com/golang/protobuf/proto"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -145,19 +142,14 @@ func (ss *searchService) receiveSearchMsg() {
 				searchMsg = append(searchMsg, msgPack.Msgs[i])
 			}
 			for _, msg := range searchMsg {
-				span, ctx := opentracing.StartSpanFromContext(msg.GetMsgContext(), "receive search msg")
-				msg.SetMsgContext(ctx)
 				err := ss.search(msg)
 				if err != nil {
 					log.Println(err)
-					span.LogFields(oplog.Error(err))
 					err2 := ss.publishFailedSearchResult(msg, err.Error())
 					if err2 != nil {
-						span.LogFields(oplog.Error(err2))
 						log.Println("publish FailedSearchResult failed, error message: ", err2)
 					}
 				}
-				span.Finish()
 			}
 			log.Println("ReceiveSearchMsg, do search done, num of searchMsg = ", len(searchMsg))
 		}
@@ -219,12 +211,8 @@ func (ss *searchService) doUnsolvedMsgSearch() {
 // TODO:: cache map[dsl]plan
 // TODO: reBatched search requests
 func (ss *searchService) search(msg msgstream.TsMsg) error {
-	span, ctx := opentracing.StartSpanFromContext(msg.GetMsgContext(), "do search")
-	defer span.Finish()
-	msg.SetMsgContext(ctx)
 	searchMsg, ok := msg.(*msgstream.SearchMsg)
 	if !ok {
-		span.LogFields(oplog.Error(errors.New("invalid request type = " + string(msg.Type()))))
 		return errors.New("invalid request type = " + string(msg.Type()))
 	}
 
@@ -233,25 +221,21 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	query := milvuspb.SearchRequest{}
 	err := proto.Unmarshal(queryBlob, &query)
 	if err != nil {
-		span.LogFields(oplog.Error(err))
 		return errors.New("unmarshal query failed")
 	}
 	collectionID := searchMsg.CollectionID
 	collection, err := ss.replica.getCollectionByID(collectionID)
 	if err != nil {
-		span.LogFields(oplog.Error(err))
 		return err
 	}
 	dsl := query.Dsl
 	plan, err := createPlan(*collection, dsl)
 	if err != nil {
-		span.LogFields(oplog.Error(err))
 		return err
 	}
 	placeHolderGroupBlob := query.PlaceholderGroup
 	placeholderGroup, err := parserPlaceholderGroup(plan, placeHolderGroupBlob)
 	if err != nil {
-		span.LogFields(oplog.Error(err))
 		return err
 	}
 	placeholderGroups := make([]*PlaceholderGroup, 0)
@@ -290,7 +274,6 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 			searchResult, err := segment.segmentSearch(plan, placeholderGroups, []Timestamp{searchTimestamp})
 
 			if err != nil {
-				span.LogFields(oplog.Error(err))
 				return err
 			}
 			searchResults = append(searchResults, searchResult)
@@ -306,7 +289,6 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 			for i := 0; i < int(nq); i++ {
 				bs, err := proto.Marshal(hit)
 				if err != nil {
-					span.LogFields(oplog.Error(err))
 					return err
 				}
 				nilHits[i] = bs
@@ -329,7 +311,6 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 			}
 			err = ss.publishSearchResult(searchResultMsg)
 			if err != nil {
-				span.LogFields(oplog.Error(err))
 				return err
 			}
 			return nil
@@ -340,22 +321,18 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	numSegment := int64(len(searchResults))
 	err2 := reduceSearchResults(searchResults, numSegment, inReduced)
 	if err2 != nil {
-		span.LogFields(oplog.Error(err2))
 		return err2
 	}
 	err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
 	if err != nil {
-		span.LogFields(oplog.Error(err))
 		return err
 	}
 	marshaledHits, err := reorganizeQueryResults(plan, placeholderGroups, searchResults, numSegment, inReduced)
 	if err != nil {
-		span.LogFields(oplog.Error(err))
 		return err
 	}
 	hitsBlob, err := marshaledHits.getHitsBlob()
 	if err != nil {
-		span.LogFields(oplog.Error(err))
 		return err
 	}
 
@@ -407,7 +384,6 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 		//}
 		err = ss.publishSearchResult(searchResultMsg)
 		if err != nil {
-			span.LogFields(oplog.Error(err))
 			return err
 		}
 	}

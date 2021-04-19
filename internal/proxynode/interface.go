@@ -49,7 +49,7 @@ type QueryServiceClient interface {
 
 type DataServiceClient interface {
 	AssignSegmentID(req *datapb.AssignSegIDRequest) (*datapb.AssignSegIDResponse, error)
-	GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, error)
+	GetInsertChannels(req *datapb.InsertChannelRequest) (*internalpb2.StringList, error)
 	Flush(req *datapb.FlushRequest) (*commonpb.Status, error)
 	GetCollectionStatistics(req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error)
 
@@ -58,7 +58,7 @@ type DataServiceClient interface {
 }
 
 type ProxyServiceClient interface {
-	GetTimeTickChannel() (string, error)
+	GetTimeTickChannel() (*milvuspb.StringResponse, error)
 	RegisterNode(request *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error)
 	GetComponentStates() (*internalpb2.ComponentStates, error)
 }

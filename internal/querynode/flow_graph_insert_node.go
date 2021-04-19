@@ -6,8 +6,6 @@ import (
 	"log"
 	"sync"
 
-	"github.com/opentracing/opentracing-go"
-	oplog "github.com/opentracing/opentracing-go/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
 
@@ -42,30 +40,7 @@ func (iNode *insertNode) Operate(in []*Msg) []*Msg {
 		// TODO: add error handling
 	}
 
-	var childs []opentracing.Span
-	tracer := opentracing.GlobalTracer()
-	if tracer != nil && iMsg != nil {
-		for _, msg := range iMsg.insertMessages {
-			if msg.Type() == commonpb.MsgType_kInsert || msg.Type() == commonpb.MsgType_kSearch {
-				var child opentracing.Span
-				ctx := msg.GetMsgContext()
-				if parent := opentracing.SpanFromContext(ctx); parent != nil {
-					child = tracer.StartSpan("pass insert node",
-						opentracing.FollowsFrom(parent.Context()))
-				} else {
-					child = tracer.StartSpan("pass insert node")
-				}
-				child.SetTag("hash keys", msg.HashKeys())
-				child.SetTag("start time", msg.BeginTs())
-				child.SetTag("end time", msg.EndTs())
-				msg.SetMsgContext(opentracing.ContextWithSpan(ctx, child))
-				childs = append(childs, child)
-			}
-		}
-	}
-
 	insertData := InsertData{
-		insertContext:    make(map[int64]context.Context),
 		insertIDs:        make(map[int64][]int64),
 		insertTimestamps: make(map[int64][]uint64),
 		insertRecords:    make(map[int64][]*commonpb.Blob),
@@ -74,7 +49,6 @@ func (iNode *insertNode) Operate(in []*Msg) []*Msg {
 
 	// 1. hash insertMessages to insertData
 	for _, task := range iMsg.insertMessages {
-		insertData.insertContext[task.SegmentID] = task.GetMsgContext()
 		insertData.insertIDs[task.SegmentID] = append(insertData.insertIDs[task.SegmentID], task.RowIDs...)
 		insertData.insertTimestamps[task.SegmentID] = append(insertData.insertTimestamps[task.SegmentID], task.Timestamps...)
 		insertData.insertRecords[task.SegmentID] = append(insertData.insertRecords[task.SegmentID], task.RowData...)
@@ -108,7 +82,7 @@ func (iNode *insertNode) Operate(in []*Msg) []*Msg {
 	wg := sync.WaitGroup{}
 	for segmentID := range insertData.insertRecords {
 		wg.Add(1)
-		go iNode.insert(insertData.insertContext[segmentID], &insertData, segmentID, &wg)
+		go iNode.insert(&insertData, segmentID, &wg)
 	}
 	wg.Wait()
 
@@ -116,21 +90,15 @@ func (iNode *insertNode) Operate(in []*Msg) []*Msg {
 		gcRecord:  iMsg.gcRecord,
 		timeRange: iMsg.timeRange,
 	}
-	for _, child := range childs {
-		child.Finish()
-	}
 	return []*Msg{&res}
 }
 
-func (iNode *insertNode) insert(ctx context.Context, insertData *InsertData, segmentID int64, wg *sync.WaitGroup) {
-	span, _ := opentracing.StartSpanFromContext(ctx, "insert node insert function")
-	defer span.Finish()
+func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *sync.WaitGroup) {
 	var targetSegment, err = iNode.replica.getSegmentByID(segmentID)
 	if err != nil {
 		log.Println("cannot find segment:", segmentID)
 		// TODO: add error handling
 		wg.Done()
-		span.LogFields(oplog.Error(err))
 		return
 	}
 
@@ -144,7 +112,6 @@ func (iNode *insertNode) insert(ctx context.Context, insertData *InsertData, seg
 		log.Println(err)
 		// TODO: add error handling
 		wg.Done()
-		span.LogFields(oplog.Error(err))
 		return
 	}
 

@@ -2,9 +2,9 @@ package msgstream
 
 import (
 	"context"
+	"errors"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -14,8 +14,6 @@ type MsgType = commonpb.MsgType
 type MarshalType = interface{}
 
 type TsMsg interface {
-	GetMsgContext() context.Context
-	SetMsgContext(context.Context)
 	BeginTs() Timestamp
 	EndTs() Timestamp
 	Type() MsgType
@@ -59,7 +57,7 @@ func ConvertToByteArray(input interface{}) ([]byte, error) {
 	case []byte:
 		return output, nil
 	default:
-		return nil, errors.New("Cannot convert interface{} to []byte")
+		return nil, errors.New("cannot convert interface{} to []byte")
 	}
 }
 
@@ -71,14 +69,6 @@ type InsertMsg struct {
 
 func (it *InsertMsg) Type() MsgType {
 	return it.Base.MsgType
-}
-
-func (it *InsertMsg) GetMsgContext() context.Context {
-	return it.MsgCtx
-}
-
-func (it *InsertMsg) SetMsgContext(ctx context.Context) {
-	it.MsgCtx = ctx
 }
 
 func (it *InsertMsg) Marshal(input TsMsg) (MarshalType, error) {
@@ -129,13 +119,6 @@ func (fl *FlushCompletedMsg) Type() MsgType {
 	return fl.Base.MsgType
 }
 
-func (fl *FlushCompletedMsg) GetMsgContext() context.Context {
-	return fl.MsgCtx
-}
-func (fl *FlushCompletedMsg) SetMsgContext(ctx context.Context) {
-	fl.MsgCtx = ctx
-}
-
 func (fl *FlushCompletedMsg) Marshal(input TsMsg) (MarshalType, error) {
 	flushCompletedMsgTask := input.(*FlushCompletedMsg)
 	flushCompletedMsg := &flushCompletedMsgTask.SegmentFlushCompletedMsg
@@ -174,13 +157,6 @@ func (fl *FlushMsg) Type() MsgType {
 	return fl.Base.MsgType
 }
 
-func (fl *FlushMsg) GetMsgContext() context.Context {
-	return fl.MsgCtx
-}
-func (fl *FlushMsg) SetMsgContext(ctx context.Context) {
-	fl.MsgCtx = ctx
-}
-
 func (fl *FlushMsg) Marshal(input TsMsg) (MarshalType, error) {
 	flushMsgTask := input.(*FlushMsg)
 	flushMsg := &flushMsgTask.FlushMsg
@@ -216,14 +192,6 @@ type DeleteMsg struct {
 
 func (dt *DeleteMsg) Type() MsgType {
 	return dt.Base.MsgType
-}
-
-func (dt *DeleteMsg) GetMsgContext() context.Context {
-	return dt.MsgCtx
-}
-
-func (dt *DeleteMsg) SetMsgContext(ctx context.Context) {
-	dt.MsgCtx = ctx
 }
 
 func (dt *DeleteMsg) Marshal(input TsMsg) (MarshalType, error) {
@@ -275,14 +243,6 @@ func (st *SearchMsg) Type() MsgType {
 	return st.Base.MsgType
 }
 
-func (st *SearchMsg) GetMsgContext() context.Context {
-	return st.MsgCtx
-}
-
-func (st *SearchMsg) SetMsgContext(ctx context.Context) {
-	st.MsgCtx = ctx
-}
-
 func (st *SearchMsg) Marshal(input TsMsg) (MarshalType, error) {
 	searchTask := input.(*SearchMsg)
 	searchRequest := &searchTask.SearchRequest
@@ -320,14 +280,6 @@ func (srt *SearchResultMsg) Type() MsgType {
 	return srt.Base.MsgType
 }
 
-func (srt *SearchResultMsg) GetMsgContext() context.Context {
-	return srt.MsgCtx
-}
-
-func (srt *SearchResultMsg) SetMsgContext(ctx context.Context) {
-	srt.MsgCtx = ctx
-}
-
 func (srt *SearchResultMsg) Marshal(input TsMsg) (MarshalType, error) {
 	searchResultTask := input.(*SearchResultMsg)
 	searchResultRequest := &searchResultTask.SearchResults
@@ -363,14 +315,6 @@ type TimeTickMsg struct {
 
 func (tst *TimeTickMsg) Type() MsgType {
 	return tst.Base.MsgType
-}
-
-func (tst *TimeTickMsg) GetMsgContext() context.Context {
-	return tst.MsgCtx
-}
-
-func (tst *TimeTickMsg) SetMsgContext(ctx context.Context) {
-	tst.MsgCtx = ctx
 }
 
 func (tst *TimeTickMsg) Marshal(input TsMsg) (MarshalType, error) {
@@ -411,14 +355,6 @@ func (qs *QueryNodeStatsMsg) Type() MsgType {
 	return qs.Base.MsgType
 }
 
-func (qs *QueryNodeStatsMsg) GetMsgContext() context.Context {
-	return qs.MsgCtx
-}
-
-func (qs *QueryNodeStatsMsg) SetMsgContext(ctx context.Context) {
-	qs.MsgCtx = ctx
-}
-
 func (qs *QueryNodeStatsMsg) Marshal(input TsMsg) (MarshalType, error) {
 	queryNodeSegStatsTask := input.(*QueryNodeStatsMsg)
 	queryNodeSegStats := &queryNodeSegStatsTask.QueryNodeStats
@@ -452,14 +388,6 @@ type SegmentStatisticsMsg struct {
 
 func (ss *SegmentStatisticsMsg) Type() MsgType {
 	return ss.Base.MsgType
-}
-
-func (ss *SegmentStatisticsMsg) GetMsgContext() context.Context {
-	return ss.MsgCtx
-}
-
-func (ss *SegmentStatisticsMsg) SetMsgContext(ctx context.Context) {
-	ss.MsgCtx = ctx
 }
 
 func (ss *SegmentStatisticsMsg) Marshal(input TsMsg) (MarshalType, error) {
@@ -507,14 +435,6 @@ func (cc *CreateCollectionMsg) Type() MsgType {
 	return cc.Base.MsgType
 }
 
-func (cc *CreateCollectionMsg) GetMsgContext() context.Context {
-	return cc.MsgCtx
-}
-
-func (cc *CreateCollectionMsg) SetMsgContext(ctx context.Context) {
-	cc.MsgCtx = ctx
-}
-
 func (cc *CreateCollectionMsg) Marshal(input TsMsg) (MarshalType, error) {
 	createCollectionMsg := input.(*CreateCollectionMsg)
 	createCollectionRequest := &createCollectionMsg.CreateCollectionRequest
@@ -551,13 +471,6 @@ type DropCollectionMsg struct {
 func (dc *DropCollectionMsg) Type() MsgType {
 	return dc.Base.MsgType
 }
-func (dc *DropCollectionMsg) GetMsgContext() context.Context {
-	return dc.MsgCtx
-}
-
-func (dc *DropCollectionMsg) SetMsgContext(ctx context.Context) {
-	dc.MsgCtx = ctx
-}
 
 func (dc *DropCollectionMsg) Marshal(input TsMsg) (MarshalType, error) {
 	dropCollectionMsg := input.(*DropCollectionMsg)
@@ -590,14 +503,6 @@ func (dc *DropCollectionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 type CreatePartitionMsg struct {
 	BaseMsg
 	internalpb2.CreatePartitionRequest
-}
-
-func (cc *CreatePartitionMsg) GetMsgContext() context.Context {
-	return cc.MsgCtx
-}
-
-func (cc *CreatePartitionMsg) SetMsgContext(ctx context.Context) {
-	cc.MsgCtx = ctx
 }
 
 func (cc *CreatePartitionMsg) Type() MsgType {
@@ -635,14 +540,6 @@ func (cc *CreatePartitionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 type DropPartitionMsg struct {
 	BaseMsg
 	internalpb2.DropPartitionRequest
-}
-
-func (dc *DropPartitionMsg) GetMsgContext() context.Context {
-	return dc.MsgCtx
-}
-
-func (dc *DropPartitionMsg) SetMsgContext(ctx context.Context) {
-	dc.MsgCtx = ctx
 }
 
 func (dc *DropPartitionMsg) Type() MsgType {
@@ -727,14 +624,6 @@ type SegmentInfoMsg struct {
 
 func (sim *SegmentInfoMsg) Type() MsgType {
 	return sim.Base.MsgType
-}
-
-func (sim *SegmentInfoMsg) GetMsgContext() context.Context {
-	return sim.MsgCtx
-}
-
-func (sim *SegmentInfoMsg) SetMsgContext(ctx context.Context) {
-	sim.MsgCtx = ctx
 }
 
 func (sim *SegmentInfoMsg) Marshal(input TsMsg) (MarshalType, error) {

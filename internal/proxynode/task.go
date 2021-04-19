@@ -1,6 +1,7 @@
 package proxynode
 
 import (
+	"context"
 	"errors"
 	"log"
 	"math"
@@ -146,7 +147,6 @@ func (it *InsertTask) Execute() error {
 		EndTs:   it.EndTs(),
 		Msgs:    make([]msgstream.TsMsg, 1),
 	}
-	tsMsg.SetMsgContext(it.Ctx())
 
 	it.result = &milvuspb.InsertResponse{
 		Status: &commonpb.Status{
@@ -160,7 +160,7 @@ func (it *InsertTask) Execute() error {
 
 	stream, err := globalInsertChannelsMap.getInsertMsgStream(collID)
 	if err != nil {
-		collectionInsertChannels, err := it.dataServiceClient.GetInsertChannels(&datapb.InsertChannelRequest{
+		resp, _ := it.dataServiceClient.GetInsertChannels(&datapb.InsertChannelRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kInsert, // todo
 				MsgID:     it.Base.MsgID,            // todo
@@ -170,10 +170,13 @@ func (it *InsertTask) Execute() error {
 			DbID:         0, // todo
 			CollectionID: collID,
 		})
-		if err != nil {
-			return err
+		if resp == nil {
+			return errors.New("get insert channels resp is nil")
 		}
-		err = globalInsertChannelsMap.createInsertMsgStream(collID, collectionInsertChannels)
+		if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			return errors.New(resp.Status.Reason)
+		}
+		err = globalInsertChannelsMap.createInsertMsgStream(collID, resp.Values)
 		if err != nil {
 			return err
 		}
@@ -315,7 +318,7 @@ func (cct *CreateCollectionTask) Execute() error {
 		if err != nil {
 			return err
 		}
-		collectionInsertChannels, err := cct.dataServiceClient.GetInsertChannels(&datapb.InsertChannelRequest{
+		resp, _ := cct.dataServiceClient.GetInsertChannels(&datapb.InsertChannelRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kInsert, // todo
 				MsgID:     cct.Base.MsgID,           // todo
@@ -325,10 +328,13 @@ func (cct *CreateCollectionTask) Execute() error {
 			DbID:         0, // todo
 			CollectionID: collID,
 		})
-		if err != nil {
-			return err
+		if resp == nil {
+			return errors.New("get insert channels resp is nil")
 		}
-		err = globalInsertChannelsMap.createInsertMsgStream(collID, collectionInsertChannels)
+		if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			return errors.New(resp.Status.Reason)
+		}
+		err = globalInsertChannelsMap.createInsertMsgStream(collID, resp.Values)
 		if err != nil {
 			return err
 		}
@@ -387,19 +393,19 @@ func (dct *DropCollectionTask) PreExecute() error {
 }
 
 func (dct *DropCollectionTask) Execute() error {
-	var err error
 	collID, err := globalMetaCache.GetCollectionID(dct.CollectionName)
 	if err != nil {
 		return err
 	}
-	dct.result, err = dct.masterClient.DropCollection(dct.DropCollectionRequest)
-	if dct.result.ErrorCode == commonpb.ErrorCode_SUCCESS {
-		err = globalInsertChannelsMap.closeInsertMsgStream(collID)
-		if err != nil {
-			return err
-		}
+	dct.result, _ = dct.masterClient.DropCollection(dct.DropCollectionRequest)
+	if dct.result.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return errors.New(dct.result.Reason)
 	}
-	return err
+	err = globalInsertChannelsMap.closeInsertMsgStream(collID)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (dct *DropCollectionTask) PostExecute() error {
@@ -507,7 +513,6 @@ func (st *SearchTask) Execute() error {
 		EndTs:   st.Base.Timestamp,
 		Msgs:    make([]msgstream.TsMsg, 1),
 	}
-	tsMsg.SetMsgContext(st.Ctx())
 	msgPack.Msgs[0] = tsMsg
 	err := st.queryMsgStream.Produce(msgPack)
 	log.Printf("[NodeImpl] length of searchMsg: %v", len(msgPack.Msgs))
@@ -719,6 +724,12 @@ func (hct *HasCollectionTask) PreExecute() error {
 func (hct *HasCollectionTask) Execute() error {
 	var err error
 	hct.result, err = hct.masterClient.HasCollection(hct.HasCollectionRequest)
+	if hct.result == nil {
+		return errors.New("has collection resp is nil")
+	}
+	if hct.result.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return errors.New(hct.result.Status.Reason)
+	}
 	return err
 }
 
@@ -775,10 +786,13 @@ func (dct *DescribeCollectionTask) PreExecute() error {
 func (dct *DescribeCollectionTask) Execute() error {
 	var err error
 	dct.result, err = dct.masterClient.DescribeCollection(dct.DescribeCollectionRequest)
-	if err != nil {
-		return err
+	if dct.result == nil {
+		return errors.New("has collection resp is nil")
 	}
-	return nil
+	if dct.result.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return errors.New(dct.result.Status.Reason)
+	}
+	return err
 }
 
 func (dct *DescribeCollectionTask) PostExecute() error {
@@ -842,9 +856,12 @@ func (g *GetCollectionsStatisticsTask) Execute() error {
 		CollectionID: collID,
 	}
 
-	result, err := g.dataServiceClient.GetCollectionStatistics(req)
-	if err != nil {
-		return err
+	result, _ := g.dataServiceClient.GetCollectionStatistics(req)
+	if result == nil {
+		return errors.New("get collection statistics resp is nil")
+	}
+	if result.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return errors.New(result.Status.Reason)
 	}
 	g.result = &milvuspb.CollectionStatsResponse{
 		Status: &commonpb.Status{
@@ -865,6 +882,7 @@ type ShowCollectionsTask struct {
 	*milvuspb.ShowCollectionRequest
 	masterClient MasterClient
 	result       *milvuspb.ShowCollectionResponse
+	ctx          context.Context
 }
 
 func (sct *ShowCollectionsTask) OnEnqueue() error {
@@ -906,6 +924,12 @@ func (sct *ShowCollectionsTask) PreExecute() error {
 func (sct *ShowCollectionsTask) Execute() error {
 	var err error
 	sct.result, err = sct.masterClient.ShowCollections(sct.ShowCollectionRequest)
+	if sct.result == nil {
+		return errors.New("get collection statistics resp is nil")
+	}
+	if sct.result.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return errors.New(sct.result.Status.Reason)
+	}
 	return err
 }
 
@@ -968,6 +992,12 @@ func (cpt *CreatePartitionTask) PreExecute() error {
 
 func (cpt *CreatePartitionTask) Execute() (err error) {
 	cpt.result, err = cpt.masterClient.CreatePartition(cpt.CreatePartitionRequest)
+	if cpt.result == nil {
+		return errors.New("get collection statistics resp is nil")
+	}
+	if cpt.result.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return errors.New(cpt.result.Reason)
+	}
 	return err
 }
 
@@ -1030,6 +1060,12 @@ func (dpt *DropPartitionTask) PreExecute() error {
 
 func (dpt *DropPartitionTask) Execute() (err error) {
 	dpt.result, err = dpt.masterClient.DropPartition(dpt.DropPartitionRequest)
+	if dpt.result == nil {
+		return errors.New("get collection statistics resp is nil")
+	}
+	if dpt.result.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return errors.New(dpt.result.Reason)
+	}
 	return err
 }
 
@@ -1091,6 +1127,12 @@ func (hpt *HasPartitionTask) PreExecute() error {
 
 func (hpt *HasPartitionTask) Execute() (err error) {
 	hpt.result, err = hpt.masterClient.HasPartition(hpt.HasPartitionRequest)
+	if hpt.result == nil {
+		return errors.New("get collection statistics resp is nil")
+	}
+	if hpt.result.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return errors.New(hpt.result.Status.Reason)
+	}
 	return err
 }
 
@@ -1147,10 +1189,13 @@ func (spt *ShowPartitionsTask) PreExecute() error {
 func (spt *ShowPartitionsTask) Execute() error {
 	var err error
 	spt.result, err = spt.masterClient.ShowPartitions(spt.ShowPartitionRequest)
-	if err != nil {
-		return err
+	if spt.result == nil {
+		return errors.New("get collection statistics resp is nil")
 	}
-	return nil
+	if spt.result.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return errors.New(spt.result.Status.Reason)
+	}
+	return err
 }
 
 func (spt *ShowPartitionsTask) PostExecute() error {
@@ -1210,8 +1255,15 @@ func (cit *CreateIndexTask) PreExecute() error {
 	return nil
 }
 
-func (cit *CreateIndexTask) Execute() (err error) {
+func (cit *CreateIndexTask) Execute() error {
+	var err error
 	cit.result, err = cit.masterClient.CreateIndex(cit.CreateIndexRequest)
+	if cit.result == nil {
+		return errors.New("get collection statistics resp is nil")
+	}
+	if cit.result.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return errors.New(cit.result.Reason)
+	}
 	return err
 }
 
@@ -1275,6 +1327,12 @@ func (dit *DescribeIndexTask) PreExecute() error {
 func (dit *DescribeIndexTask) Execute() error {
 	var err error
 	dit.result, err = dit.masterClient.DescribeIndex(dit.DescribeIndexRequest)
+	if dit.result == nil {
+		return errors.New("get collection statistics resp is nil")
+	}
+	if dit.result.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return errors.New(dit.result.Status.Reason)
+	}
 	return err
 }
 
@@ -1495,9 +1553,9 @@ func (ft *FlushTask) Execute() error {
 			CollectionID: collID,
 		}
 		var status *commonpb.Status
-		status, err = ft.dataServiceClient.Flush(flushReq)
-		if err != nil {
-			return nil
+		status, _ = ft.dataServiceClient.Flush(flushReq)
+		if status == nil {
+			return errors.New("flush resp is nil")
 		}
 		if status.ErrorCode != commonpb.ErrorCode_SUCCESS {
 			return errors.New(status.Reason)

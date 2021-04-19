@@ -44,8 +44,8 @@ type DataService interface {
 	ShowSegments(req *datapb.ShowSegmentRequest) (*datapb.ShowSegmentResponse, error)
 	GetSegmentStates(req *datapb.SegmentStatesRequest) (*datapb.SegmentStatesResponse, error)
 	GetInsertBinlogPaths(req *datapb.InsertBinlogPathRequest) (*datapb.InsertBinlogPathsResponse, error)
-	GetSegmentInfoChannel() (string, error)
-	GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, error)
+	GetSegmentInfoChannel() (*milvuspb.StringResponse, error)
+	GetInsertChannels(req *datapb.InsertChannelRequest) (*internalpb2.StringList, error)
 	GetCollectionStatistics(req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error)
 	GetPartitionStatistics(req *datapb.PartitionStatsRequest) (*datapb.PartitionStatsResponse, error)
 	GetComponentStates() (*internalpb2.ComponentStates, error)
@@ -438,12 +438,22 @@ func (s *Server) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	return resp, nil
 }
 
-func (s *Server) GetTimeTickChannel() (string, error) {
-	return Params.TimeTickChannelName, nil
+func (s *Server) GetTimeTickChannel() (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+		Value: Params.TimeTickChannelName,
+	}, nil
 }
 
-func (s *Server) GetStatisticsChannel() (string, error) {
-	return Params.StatisticsChannelName, nil
+func (s *Server) GetStatisticsChannel() (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+		Value: Params.StatisticsChannelName,
+	}, nil
 }
 
 func (s *Server) RegisterNode(req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
@@ -687,8 +697,13 @@ func (s *Server) GetInsertBinlogPaths(req *datapb.InsertBinlogPathRequest) (*dat
 	return resp, nil
 }
 
-func (s *Server) GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, error) {
-	return s.insertChannels, nil
+func (s *Server) GetInsertChannels(req *datapb.InsertChannelRequest) (*internalpb2.StringList, error) {
+	return &internalpb2.StringList{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+		Values: s.insertChannels,
+	}, nil
 }
 
 func (s *Server) GetCollectionStatistics(req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error) {
@@ -718,8 +733,13 @@ func (s *Server) GetPartitionStatistics(req *datapb.PartitionStatsRequest) (*dat
 	return nil, nil
 }
 
-func (s *Server) GetSegmentInfoChannel() (string, error) {
-	return Params.SegmentInfoChannelName, nil
+func (s *Server) GetSegmentInfoChannel() (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+		Value: Params.SegmentInfoChannelName,
+	}, nil
 }
 
 func (s *Server) GetCount(req *datapb.CollectionCountRequest) (*datapb.CollectionCountResponse, error) {

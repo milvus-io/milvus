@@ -9,5 +9,5 @@ dataservice:
     defaultSizePerRecord: 1024
     # old name: segmentExpireDuration: 2000
     IDAssignExpiration: 2000 # ms
-  insertChannelNum: 16
+  insertChannelNum: 2
   dataNodeNum: 1

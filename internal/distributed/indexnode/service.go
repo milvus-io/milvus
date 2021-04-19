@@ -142,35 +142,11 @@ func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) 
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	ret, err := s.impl.GetTimeTickChannel()
-	resp := &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-		},
-	}
-	if err != nil {
-		resp.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
-		resp.Status.Reason = err.Error()
-	} else {
-		resp.Value = ret
-	}
-	return resp, nil
+	return s.impl.GetTimeTickChannel()
 }
 
 func (s *Server) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	ret, err := s.impl.GetStatisticsChannel()
-	resp := &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-		},
-	}
-	if err != nil {
-		resp.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
-		resp.Status.Reason = err.Error()
-	} else {
-		resp.Value = ret
-	}
-	return resp, nil
+	return s.impl.GetStatisticsChannel()
 }
 
 func NewServer(ctx context.Context) (*Server, error) {

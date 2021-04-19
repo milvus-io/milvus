@@ -4,6 +4,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 )
 
@@ -15,8 +16,8 @@ type Service interface {
 
 type Component interface {
 	GetComponentStates() (*internalpb2.ComponentStates, error)
-	GetTimeTickChannel() (string, error)
-	GetStatisticsChannel() (string, error)
+	GetTimeTickChannel() (*milvuspb.StringResponse, error)
+	GetStatisticsChannel() (*milvuspb.StringResponse, error)
 }
 
 type IndexNodeInterface interface {

@@ -5,6 +5,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
@@ -209,10 +211,18 @@ func (i *NodeImpl) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	return ret, nil
 }
 
-func (i *NodeImpl) GetTimeTickChannel() (string, error) {
-	return "", nil
+func (i *NodeImpl) GetTimeTickChannel() (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+	}, nil
 }
 
-func (i *NodeImpl) GetStatisticsChannel() (string, error) {
-	return "", nil
+func (i *NodeImpl) GetStatisticsChannel() (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+	}, nil
 }

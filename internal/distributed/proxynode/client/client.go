@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 	"google.golang.org/grpc"
@@ -39,9 +41,8 @@ func (c *Client) Stop() error {
 	return nil
 }
 
-func (c *Client) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) error {
-	_, err := c.grpcClient.InvalidateCollectionMetaCache(c.ctx, request)
-	return err
+func (c *Client) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+	return c.grpcClient.InvalidateCollectionMetaCache(c.ctx, request)
 }
 
 func NewClient(ctx context.Context, address string) *Client {

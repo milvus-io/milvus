@@ -13,7 +13,7 @@ type ProxyService interface {
   Service
   RegisterLink() (RegisterLinkResponse, error)
   RegisterNode(req RegisterNodeRequest) (RegisterNodeResponse, error)
-  InvalidateCollectionMetaCache(req InvalidateCollMetaCacheRequest) error
+  InvalidateCollectionMetaCache(req InvalidateCollMetaCacheRequest) (Status, error)
 }
 ```
 
@@ -72,8 +72,10 @@ type ProxyNode interface {
   Service
   //SetTimeTickChannel(channelName string) error
   //SetStatsChannel(channelName string) error
+
+  InvalidateCollectionMetaCache(request InvalidateCollMetaCacheRequest) (Status, error)
   
-	CreateCollection(req CreateCollectionRequest) error
+  CreateCollection(req CreateCollectionRequest) error
   DropCollection(req DropCollectionRequest) error
   HasCollection(req HasCollectionRequest) (bool, error)
   LoadCollection(req LoadCollectionRequest) error
@@ -92,12 +94,16 @@ type ProxyNode interface {
   
   CreateIndex(req CreateIndexRequest) error
   DescribeIndex(DescribeIndexRequest) (DescribeIndexResponse, error)
-  
+  GetIndexState(IndexStateRequest) (IndexStateResponse, error)
+
   Insert(req InsertRequest) (InsertResponse, error)
   Search(req SearchRequest) (SearchResults, error)
   Flush(req FlushRequest) error
-  GetPersistentSegmentInfo(req PersistentSegmentInfoRequest) (PersistentSegmentInfoResponse, error)
 
+  GetDdChannel(Empty) (StringResponse, error)
+
+  GetQuerySegmentInfo(QuerySegmentInfoRequest) (QuerySegmentInfoResponse, error)
+  GetPersistentSegmentInfo(PersistentSegmentInfoRequest) (PersistentSegmentInfoResponse, error)
 }
 ```
 

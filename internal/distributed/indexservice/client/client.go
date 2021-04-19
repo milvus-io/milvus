@@ -5,6 +5,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+
 	"google.golang.org/grpc"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -50,12 +52,20 @@ func (c *Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	return c.grpcClient.GetComponentStates(ctx, &commonpb.Empty{})
 }
 
-func (c *Client) GetTimeTickChannel() (string, error) {
-	return "", nil
+func (c *Client) GetTimeTickChannel() (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+	}, nil
 }
 
-func (c *Client) GetStatisticsChannel() (string, error) {
-	return "", nil
+func (c *Client) GetStatisticsChannel() (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+	}, nil
 }
 
 func (c *Client) RegisterNode(req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {

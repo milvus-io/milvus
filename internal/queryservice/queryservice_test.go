@@ -155,8 +155,13 @@ func (data *dataMock) GetSegmentStates(req *datapb.SegmentStatesRequest) (*datap
 
 	return ret, nil
 }
-func (data *dataMock) GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, error) {
-	return []string{"test-insert"}, nil
+func (data *dataMock) GetInsertChannels(req *datapb.InsertChannelRequest) (*internalpb2.StringList, error) {
+	return &internalpb2.StringList{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+		Values: []string{"test-insert"},
+	}, nil
 }
 
 func TestQueryService_Init(t *testing.T) {

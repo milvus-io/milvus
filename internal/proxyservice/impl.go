@@ -114,7 +114,7 @@ func (s *ServiceImpl) Init() error {
 	}
 	insertTickMsgStream, _ := factory.NewMsgStream(s.ctx)
 	insertTickMsgStream.AsProducer(channels)
-	log.Println("create service time tick producer channel: ", channels)
+	log.Println("create insert time tick producer channel: ", channels)
 
 	nodeTimeTickMsgStream, _ := factory.NewMsgStream(s.ctx)
 	nodeTimeTickMsgStream.AsConsumer(Params.NodeTimeTickChannel,
@@ -175,11 +175,16 @@ func (s *ServiceImpl) UpdateStateCode(code internalpb2.StateCode) {
 	s.stateCode = code
 }
 
-func (s *ServiceImpl) GetTimeTickChannel() (string, error) {
-	return Params.ServiceTimeTickChannel, nil
+func (s *ServiceImpl) GetTimeTickChannel() (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+		Value: Params.ServiceTimeTickChannel,
+	}, nil
 }
 
-func (s *ServiceImpl) GetStatisticsChannel() (string, error) {
+func (s *ServiceImpl) GetStatisticsChannel() (*milvuspb.StringResponse, error) {
 	panic("implement me")
 }
 
@@ -260,7 +265,7 @@ func (s *ServiceImpl) RegisterNode(request *proxypb.RegisterNodeRequest) (*proxy
 	return t.response, nil
 }
 
-func (s *ServiceImpl) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) error {
+func (s *ServiceImpl) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	log.Println("InvalidateCollectionMetaCache")
 	ctx, cancel := context.WithTimeout(s.ctx, timeoutInterval)
 	defer cancel()
@@ -275,13 +280,13 @@ func (s *ServiceImpl) InvalidateCollectionMetaCache(request *proxypb.InvalidateC
 
 	err = s.sched.InvalidateCollectionMetaCacheTaskQueue.Enqueue(t)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	err = t.WaitToFinish()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return nil, nil
 }

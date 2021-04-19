@@ -13,10 +13,12 @@
 ```go
 type IndexService interface {
   Service
-  RegisterNode(req RegisterNodeRequest) (RegisterNodeResponse, error)
-  BuildIndex(req BuildIndexRequest) (BuildIndexResponse, error)
-	GetIndexStates(req IndexStatesRequest) (IndexStatesResponse, error)
-  GetIndexFilePaths(req IndexFilePathRequest) (IndexFilePathsResponse, error)
+  RegisterNode(RegisterNodeRequest) (RegisterNodeResponse, error)
+  BuildIndex(BuildIndexRequest) (BuildIndexResponse, error)
+  GetIndexStates(IndexStatesRequest) (IndexStatesResponse, error)
+  GetIndexFilePaths(IndexFilePathRequest) (IndexFilePathsResponse, error)
+  GetTimeTickChannel() (StringResponse, error)
+  GetStatisticsChannel() (StringResponse, error)
   NotifyTaskState(TaskStateNotification) error
 
 }

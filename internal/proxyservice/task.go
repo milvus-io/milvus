@@ -149,9 +149,12 @@ func (t *InvalidateCollectionMetaCacheTask) Execute() error {
 		return err
 	}
 	for _, c := range clients {
-		err = c.InvalidateCollectionMetaCache(t.request)
-		if err != nil {
-			return err
+		status, _ := c.InvalidateCollectionMetaCache(t.request)
+		if status == nil {
+			return errors.New("invalidate collection meta cache error")
+		}
+		if status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			return errors.New(status.Reason)
 		}
 	}
 	return nil

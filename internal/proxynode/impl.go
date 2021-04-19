@@ -2,21 +2,18 @@ package proxynode
 
 import (
 	"context"
-	"errors"
 	"log"
 	"strconv"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 )
 
 const (

@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+
 	"google.golang.org/grpc"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -46,25 +48,25 @@ func (c *Client) RegisterNode(request *proxypb.RegisterNodeRequest) (*proxypb.Re
 	return c.proxyServiceClient.RegisterNode(c.ctx, request)
 }
 
-func (c *Client) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) error {
+func (c *Client) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	_, err := c.proxyServiceClient.InvalidateCollectionMetaCache(c.ctx, request)
-	return err
+	return nil, err
 }
 
-func (c *Client) GetTimeTickChannel() (string, error) {
-	response, err := c.proxyServiceClient.GetTimeTickChannel(c.ctx, &commonpb.Empty{})
-	if err != nil {
-		return "", err
-	}
-	return response.Value, nil
+func (c *Client) GetTimeTickChannel() (*milvuspb.StringResponse, error) {
+	return c.proxyServiceClient.GetTimeTickChannel(c.ctx, &commonpb.Empty{})
 }
 
 func (c *Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	return c.proxyServiceClient.GetComponentStates(c.ctx, &commonpb.Empty{})
 }
 
-func (c *Client) GetStatisticsChannel() (string, error) {
-	return "", nil
+func (c *Client) GetStatisticsChannel() (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+	}, nil
 }
 
 func NewClient(address string) *Client {
