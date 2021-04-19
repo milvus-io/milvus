@@ -1,4 +1,4 @@
-package querynode
+package querynodeimp
 
 import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"

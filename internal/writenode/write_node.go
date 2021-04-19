@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/opentracing/opentracing-go"
+	"github.com/uber/jaeger-client-go"
 	"github.com/uber/jaeger-client-go/config"
 )
 
@@ -51,9 +52,12 @@ func (node *WriteNode) Start() error {
 			Type:  "const",
 			Param: 1,
 		},
+		Reporter: &config.ReporterConfig{
+			LogSpans: true,
+		},
 	}
 	var err error
-	node.tracer, node.closer, err = cfg.NewTracer()
+	node.tracer, node.closer, err = cfg.NewTracer(config.Logger(jaeger.StdLogger))
 	if err != nil {
 		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
 	}

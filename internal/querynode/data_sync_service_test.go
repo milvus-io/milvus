@@ -1,4 +1,4 @@
-package querynode
+package querynodeimp
 
 import (
 	"encoding/binary"
@@ -14,7 +14,7 @@ import (
 
 // NOTE: start pulsar before test
 func TestDataSyncService_Start(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	initTestMeta(t, node, "collection0", 0, 0)
 	// test data generate
 	const msgLength = 10

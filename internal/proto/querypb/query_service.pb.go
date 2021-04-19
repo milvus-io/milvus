@@ -591,7 +591,7 @@ func (m *PartitionStatesResponse) GetPartitionDescriptions() []*PartitionStates 
 	return nil
 }
 
-type LoadPartitonRequest struct {
+type LoadPartitionRequest struct {
 	Base                 *internalpb2.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	DbID                 int64                `protobuf:"varint,2,opt,name=dbID,proto3" json:"dbID,omitempty"`
 	CollectionID         int64                `protobuf:"varint,3,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
@@ -601,53 +601,53 @@ type LoadPartitonRequest struct {
 	XXX_sizecache        int32                `json:"-"`
 }
 
-func (m *LoadPartitonRequest) Reset()         { *m = LoadPartitonRequest{} }
-func (m *LoadPartitonRequest) String() string { return proto.CompactTextString(m) }
-func (*LoadPartitonRequest) ProtoMessage()    {}
-func (*LoadPartitonRequest) Descriptor() ([]byte, []int) {
+func (m *LoadPartitionRequest) Reset()         { *m = LoadPartitionRequest{} }
+func (m *LoadPartitionRequest) String() string { return proto.CompactTextString(m) }
+func (*LoadPartitionRequest) ProtoMessage()    {}
+func (*LoadPartitionRequest) Descriptor() ([]byte, []int) {
 	return fileDescriptor_5fcb6756dc1afb8d, []int{11}
 }
 
-func (m *LoadPartitonRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_LoadPartitonRequest.Unmarshal(m, b)
+func (m *LoadPartitionRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_LoadPartitionRequest.Unmarshal(m, b)
 }
-func (m *LoadPartitonRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_LoadPartitonRequest.Marshal(b, m, deterministic)
+func (m *LoadPartitionRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_LoadPartitionRequest.Marshal(b, m, deterministic)
 }
-func (m *LoadPartitonRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_LoadPartitonRequest.Merge(m, src)
+func (m *LoadPartitionRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_LoadPartitionRequest.Merge(m, src)
 }
-func (m *LoadPartitonRequest) XXX_Size() int {
-	return xxx_messageInfo_LoadPartitonRequest.Size(m)
+func (m *LoadPartitionRequest) XXX_Size() int {
+	return xxx_messageInfo_LoadPartitionRequest.Size(m)
 }
-func (m *LoadPartitonRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_LoadPartitonRequest.DiscardUnknown(m)
+func (m *LoadPartitionRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_LoadPartitionRequest.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_LoadPartitonRequest proto.InternalMessageInfo
+var xxx_messageInfo_LoadPartitionRequest proto.InternalMessageInfo
 
-func (m *LoadPartitonRequest) GetBase() *internalpb2.MsgBase {
+func (m *LoadPartitionRequest) GetBase() *internalpb2.MsgBase {
 	if m != nil {
 		return m.Base
 	}
 	return nil
 }
 
-func (m *LoadPartitonRequest) GetDbID() int64 {
+func (m *LoadPartitionRequest) GetDbID() int64 {
 	if m != nil {
 		return m.DbID
 	}
 	return 0
 }
 
-func (m *LoadPartitonRequest) GetCollectionID() int64 {
+func (m *LoadPartitionRequest) GetCollectionID() int64 {
 	if m != nil {
 		return m.CollectionID
 	}
 	return 0
 }
 
-func (m *LoadPartitonRequest) GetPartitionIDs() []int64 {
+func (m *LoadPartitionRequest) GetPartitionIDs() []int64 {
 	if m != nil {
 		return m.PartitionIDs
 	}
@@ -764,7 +764,7 @@ func (m *CreateQueryChannelResponse) GetResultChannel() string {
 	return ""
 }
 
-type AddQueryChannelRequest struct {
+type AddQueryChannelsRequest struct {
 	Base                 *internalpb2.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	RequestChannelID     string               `protobuf:"bytes,2,opt,name=request_channelID,json=requestChannelID,proto3" json:"request_channelID,omitempty"`
 	ResultChannelID      string               `protobuf:"bytes,3,opt,name=result_channelID,json=resultChannelID,proto3" json:"result_channelID,omitempty"`
@@ -773,53 +773,53 @@ type AddQueryChannelRequest struct {
 	XXX_sizecache        int32                `json:"-"`
 }
 
-func (m *AddQueryChannelRequest) Reset()         { *m = AddQueryChannelRequest{} }
-func (m *AddQueryChannelRequest) String() string { return proto.CompactTextString(m) }
-func (*AddQueryChannelRequest) ProtoMessage()    {}
-func (*AddQueryChannelRequest) Descriptor() ([]byte, []int) {
+func (m *AddQueryChannelsRequest) Reset()         { *m = AddQueryChannelsRequest{} }
+func (m *AddQueryChannelsRequest) String() string { return proto.CompactTextString(m) }
+func (*AddQueryChannelsRequest) ProtoMessage()    {}
+func (*AddQueryChannelsRequest) Descriptor() ([]byte, []int) {
 	return fileDescriptor_5fcb6756dc1afb8d, []int{14}
 }
 
-func (m *AddQueryChannelRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_AddQueryChannelRequest.Unmarshal(m, b)
+func (m *AddQueryChannelsRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_AddQueryChannelsRequest.Unmarshal(m, b)
 }
-func (m *AddQueryChannelRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_AddQueryChannelRequest.Marshal(b, m, deterministic)
+func (m *AddQueryChannelsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_AddQueryChannelsRequest.Marshal(b, m, deterministic)
 }
-func (m *AddQueryChannelRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_AddQueryChannelRequest.Merge(m, src)
+func (m *AddQueryChannelsRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_AddQueryChannelsRequest.Merge(m, src)
 }
-func (m *AddQueryChannelRequest) XXX_Size() int {
-	return xxx_messageInfo_AddQueryChannelRequest.Size(m)
+func (m *AddQueryChannelsRequest) XXX_Size() int {
+	return xxx_messageInfo_AddQueryChannelsRequest.Size(m)
 }
-func (m *AddQueryChannelRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_AddQueryChannelRequest.DiscardUnknown(m)
+func (m *AddQueryChannelsRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_AddQueryChannelsRequest.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_AddQueryChannelRequest proto.InternalMessageInfo
+var xxx_messageInfo_AddQueryChannelsRequest proto.InternalMessageInfo
 
-func (m *AddQueryChannelRequest) GetBase() *internalpb2.MsgBase {
+func (m *AddQueryChannelsRequest) GetBase() *internalpb2.MsgBase {
 	if m != nil {
 		return m.Base
 	}
 	return nil
 }
 
-func (m *AddQueryChannelRequest) GetRequestChannelID() string {
+func (m *AddQueryChannelsRequest) GetRequestChannelID() string {
 	if m != nil {
 		return m.RequestChannelID
 	}
 	return ""
 }
 
-func (m *AddQueryChannelRequest) GetResultChannelID() string {
+func (m *AddQueryChannelsRequest) GetResultChannelID() string {
 	if m != nil {
 		return m.ResultChannelID
 	}
 	return ""
 }
 
-type RemoveQueryChannelRequest struct {
+type RemoveQueryChannelsRequest struct {
 	Base                 *internalpb2.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	RequestChannelID     string               `protobuf:"bytes,2,opt,name=request_channelID,json=requestChannelID,proto3" json:"request_channelID,omitempty"`
 	ResultChannelID      string               `protobuf:"bytes,3,opt,name=result_channelID,json=resultChannelID,proto3" json:"result_channelID,omitempty"`
@@ -828,53 +828,53 @@ type RemoveQueryChannelRequest struct {
 	XXX_sizecache        int32                `json:"-"`
 }
 
-func (m *RemoveQueryChannelRequest) Reset()         { *m = RemoveQueryChannelRequest{} }
-func (m *RemoveQueryChannelRequest) String() string { return proto.CompactTextString(m) }
-func (*RemoveQueryChannelRequest) ProtoMessage()    {}
-func (*RemoveQueryChannelRequest) Descriptor() ([]byte, []int) {
+func (m *RemoveQueryChannelsRequest) Reset()         { *m = RemoveQueryChannelsRequest{} }
+func (m *RemoveQueryChannelsRequest) String() string { return proto.CompactTextString(m) }
+func (*RemoveQueryChannelsRequest) ProtoMessage()    {}
+func (*RemoveQueryChannelsRequest) Descriptor() ([]byte, []int) {
 	return fileDescriptor_5fcb6756dc1afb8d, []int{15}
 }
 
-func (m *RemoveQueryChannelRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_RemoveQueryChannelRequest.Unmarshal(m, b)
+func (m *RemoveQueryChannelsRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_RemoveQueryChannelsRequest.Unmarshal(m, b)
 }
-func (m *RemoveQueryChannelRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_RemoveQueryChannelRequest.Marshal(b, m, deterministic)
+func (m *RemoveQueryChannelsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_RemoveQueryChannelsRequest.Marshal(b, m, deterministic)
 }
-func (m *RemoveQueryChannelRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_RemoveQueryChannelRequest.Merge(m, src)
+func (m *RemoveQueryChannelsRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_RemoveQueryChannelsRequest.Merge(m, src)
 }
-func (m *RemoveQueryChannelRequest) XXX_Size() int {
-	return xxx_messageInfo_RemoveQueryChannelRequest.Size(m)
+func (m *RemoveQueryChannelsRequest) XXX_Size() int {
+	return xxx_messageInfo_RemoveQueryChannelsRequest.Size(m)
 }
-func (m *RemoveQueryChannelRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_RemoveQueryChannelRequest.DiscardUnknown(m)
+func (m *RemoveQueryChannelsRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_RemoveQueryChannelsRequest.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_RemoveQueryChannelRequest proto.InternalMessageInfo
+var xxx_messageInfo_RemoveQueryChannelsRequest proto.InternalMessageInfo
 
-func (m *RemoveQueryChannelRequest) GetBase() *internalpb2.MsgBase {
+func (m *RemoveQueryChannelsRequest) GetBase() *internalpb2.MsgBase {
 	if m != nil {
 		return m.Base
 	}
 	return nil
 }
 
-func (m *RemoveQueryChannelRequest) GetRequestChannelID() string {
+func (m *RemoveQueryChannelsRequest) GetRequestChannelID() string {
 	if m != nil {
 		return m.RequestChannelID
 	}
 	return ""
 }
 
-func (m *RemoveQueryChannelRequest) GetResultChannelID() string {
+func (m *RemoveQueryChannelsRequest) GetResultChannelID() string {
 	if m != nil {
 		return m.ResultChannelID
 	}
 	return ""
 }
 
-type WatchDmChannelRequest struct {
+type WatchDmChannelsRequest struct {
 	Base                 *internalpb2.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	ChannelIDs           []string             `protobuf:"bytes,2,rep,name=channelIDs,proto3" json:"channelIDs,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}             `json:"-"`
@@ -882,39 +882,39 @@ type WatchDmChannelRequest struct {
 	XXX_sizecache        int32                `json:"-"`
 }
 
-func (m *WatchDmChannelRequest) Reset()         { *m = WatchDmChannelRequest{} }
-func (m *WatchDmChannelRequest) String() string { return proto.CompactTextString(m) }
-func (*WatchDmChannelRequest) ProtoMessage()    {}
-func (*WatchDmChannelRequest) Descriptor() ([]byte, []int) {
+func (m *WatchDmChannelsRequest) Reset()         { *m = WatchDmChannelsRequest{} }
+func (m *WatchDmChannelsRequest) String() string { return proto.CompactTextString(m) }
+func (*WatchDmChannelsRequest) ProtoMessage()    {}
+func (*WatchDmChannelsRequest) Descriptor() ([]byte, []int) {
 	return fileDescriptor_5fcb6756dc1afb8d, []int{16}
 }
 
-func (m *WatchDmChannelRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_WatchDmChannelRequest.Unmarshal(m, b)
+func (m *WatchDmChannelsRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_WatchDmChannelsRequest.Unmarshal(m, b)
 }
-func (m *WatchDmChannelRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_WatchDmChannelRequest.Marshal(b, m, deterministic)
+func (m *WatchDmChannelsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_WatchDmChannelsRequest.Marshal(b, m, deterministic)
 }
-func (m *WatchDmChannelRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_WatchDmChannelRequest.Merge(m, src)
+func (m *WatchDmChannelsRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_WatchDmChannelsRequest.Merge(m, src)
 }
-func (m *WatchDmChannelRequest) XXX_Size() int {
-	return xxx_messageInfo_WatchDmChannelRequest.Size(m)
+func (m *WatchDmChannelsRequest) XXX_Size() int {
+	return xxx_messageInfo_WatchDmChannelsRequest.Size(m)
 }
-func (m *WatchDmChannelRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_WatchDmChannelRequest.DiscardUnknown(m)
+func (m *WatchDmChannelsRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_WatchDmChannelsRequest.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_WatchDmChannelRequest proto.InternalMessageInfo
+var xxx_messageInfo_WatchDmChannelsRequest proto.InternalMessageInfo
 
-func (m *WatchDmChannelRequest) GetBase() *internalpb2.MsgBase {
+func (m *WatchDmChannelsRequest) GetBase() *internalpb2.MsgBase {
 	if m != nil {
 		return m.Base
 	}
 	return nil
 }
 
-func (m *WatchDmChannelRequest) GetChannelIDs() []string {
+func (m *WatchDmChannelsRequest) GetChannelIDs() []string {
 	if m != nil {
 		return m.ChannelIDs
 	}
@@ -1079,6 +1079,147 @@ func (m *ReleaseSegmentRequest) GetFieldIDs() []int64 {
 	return nil
 }
 
+type GetTimeTickChannelResponse struct {
+	Status               *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	TimeTickChannelID    string           `protobuf:"bytes,2,opt,name=time_tick_channelID,json=timeTickChannelID,proto3" json:"time_tick_channelID,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
+	XXX_unrecognized     []byte           `json:"-"`
+	XXX_sizecache        int32            `json:"-"`
+}
+
+func (m *GetTimeTickChannelResponse) Reset()         { *m = GetTimeTickChannelResponse{} }
+func (m *GetTimeTickChannelResponse) String() string { return proto.CompactTextString(m) }
+func (*GetTimeTickChannelResponse) ProtoMessage()    {}
+func (*GetTimeTickChannelResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_5fcb6756dc1afb8d, []int{19}
+}
+
+func (m *GetTimeTickChannelResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetTimeTickChannelResponse.Unmarshal(m, b)
+}
+func (m *GetTimeTickChannelResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetTimeTickChannelResponse.Marshal(b, m, deterministic)
+}
+func (m *GetTimeTickChannelResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetTimeTickChannelResponse.Merge(m, src)
+}
+func (m *GetTimeTickChannelResponse) XXX_Size() int {
+	return xxx_messageInfo_GetTimeTickChannelResponse.Size(m)
+}
+func (m *GetTimeTickChannelResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetTimeTickChannelResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_GetTimeTickChannelResponse proto.InternalMessageInfo
+
+func (m *GetTimeTickChannelResponse) GetStatus() *commonpb.Status {
+	if m != nil {
+		return m.Status
+	}
+	return nil
+}
+
+func (m *GetTimeTickChannelResponse) GetTimeTickChannelID() string {
+	if m != nil {
+		return m.TimeTickChannelID
+	}
+	return ""
+}
+
+type GetStatsChannelResponse struct {
+	Status               *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	StatsChannelID       string           `protobuf:"bytes,2,opt,name=stats_channelID,json=statsChannelID,proto3" json:"stats_channelID,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
+	XXX_unrecognized     []byte           `json:"-"`
+	XXX_sizecache        int32            `json:"-"`
+}
+
+func (m *GetStatsChannelResponse) Reset()         { *m = GetStatsChannelResponse{} }
+func (m *GetStatsChannelResponse) String() string { return proto.CompactTextString(m) }
+func (*GetStatsChannelResponse) ProtoMessage()    {}
+func (*GetStatsChannelResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_5fcb6756dc1afb8d, []int{20}
+}
+
+func (m *GetStatsChannelResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetStatsChannelResponse.Unmarshal(m, b)
+}
+func (m *GetStatsChannelResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetStatsChannelResponse.Marshal(b, m, deterministic)
+}
+func (m *GetStatsChannelResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetStatsChannelResponse.Merge(m, src)
+}
+func (m *GetStatsChannelResponse) XXX_Size() int {
+	return xxx_messageInfo_GetStatsChannelResponse.Size(m)
+}
+func (m *GetStatsChannelResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetStatsChannelResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_GetStatsChannelResponse proto.InternalMessageInfo
+
+func (m *GetStatsChannelResponse) GetStatus() *commonpb.Status {
+	if m != nil {
+		return m.Status
+	}
+	return nil
+}
+
+func (m *GetStatsChannelResponse) GetStatsChannelID() string {
+	if m != nil {
+		return m.StatsChannelID
+	}
+	return ""
+}
+
+type ServiceStatesResponse struct {
+	Status               *commonpb.Status           `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	ServerStates         *internalpb2.ServiceStates `protobuf:"bytes,2,opt,name=server_states,json=serverStates,proto3" json:"server_states,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}                   `json:"-"`
+	XXX_unrecognized     []byte                     `json:"-"`
+	XXX_sizecache        int32                      `json:"-"`
+}
+
+func (m *ServiceStatesResponse) Reset()         { *m = ServiceStatesResponse{} }
+func (m *ServiceStatesResponse) String() string { return proto.CompactTextString(m) }
+func (*ServiceStatesResponse) ProtoMessage()    {}
+func (*ServiceStatesResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_5fcb6756dc1afb8d, []int{21}
+}
+
+func (m *ServiceStatesResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_ServiceStatesResponse.Unmarshal(m, b)
+}
+func (m *ServiceStatesResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_ServiceStatesResponse.Marshal(b, m, deterministic)
+}
+func (m *ServiceStatesResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ServiceStatesResponse.Merge(m, src)
+}
+func (m *ServiceStatesResponse) XXX_Size() int {
+	return xxx_messageInfo_ServiceStatesResponse.Size(m)
+}
+func (m *ServiceStatesResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_ServiceStatesResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_ServiceStatesResponse proto.InternalMessageInfo
+
+func (m *ServiceStatesResponse) GetStatus() *commonpb.Status {
+	if m != nil {
+		return m.Status
+	}
+	return nil
+}
+
+func (m *ServiceStatesResponse) GetServerStates() *internalpb2.ServiceStates {
+	if m != nil {
+		return m.ServerStates
+	}
+	return nil
+}
+
 func init() {
 	proto.RegisterEnum("milvus.proto.query.PartitionState", PartitionState_name, PartitionState_value)
 	proto.RegisterType((*RegisterNodeRequest)(nil), "milvus.proto.query.RegisterNodeRequest")
@@ -1092,78 +1233,95 @@ func init() {
 	proto.RegisterType((*PartitionStates)(nil), "milvus.proto.query.PartitionStates")
 	proto.RegisterType((*PartitionStatesRequest)(nil), "milvus.proto.query.PartitionStatesRequest")
 	proto.RegisterType((*PartitionStatesResponse)(nil), "milvus.proto.query.PartitionStatesResponse")
-	proto.RegisterType((*LoadPartitonRequest)(nil), "milvus.proto.query.LoadPartitonRequest")
+	proto.RegisterType((*LoadPartitionRequest)(nil), "milvus.proto.query.LoadPartitionRequest")
 	proto.RegisterType((*ReleasePartitionRequest)(nil), "milvus.proto.query.ReleasePartitionRequest")
 	proto.RegisterType((*CreateQueryChannelResponse)(nil), "milvus.proto.query.CreateQueryChannelResponse")
-	proto.RegisterType((*AddQueryChannelRequest)(nil), "milvus.proto.query.AddQueryChannelRequest")
-	proto.RegisterType((*RemoveQueryChannelRequest)(nil), "milvus.proto.query.RemoveQueryChannelRequest")
-	proto.RegisterType((*WatchDmChannelRequest)(nil), "milvus.proto.query.WatchDmChannelRequest")
+	proto.RegisterType((*AddQueryChannelsRequest)(nil), "milvus.proto.query.AddQueryChannelsRequest")
+	proto.RegisterType((*RemoveQueryChannelsRequest)(nil), "milvus.proto.query.RemoveQueryChannelsRequest")
+	proto.RegisterType((*WatchDmChannelsRequest)(nil), "milvus.proto.query.WatchDmChannelsRequest")
 	proto.RegisterType((*LoadSegmentRequest)(nil), "milvus.proto.query.LoadSegmentRequest")
 	proto.RegisterType((*ReleaseSegmentRequest)(nil), "milvus.proto.query.ReleaseSegmentRequest")
+	proto.RegisterType((*GetTimeTickChannelResponse)(nil), "milvus.proto.query.GetTimeTickChannelResponse")
+	proto.RegisterType((*GetStatsChannelResponse)(nil), "milvus.proto.query.GetStatsChannelResponse")
+	proto.RegisterType((*ServiceStatesResponse)(nil), "milvus.proto.query.ServiceStatesResponse")
 }
 
 func init() { proto.RegisterFile("query_service.proto", fileDescriptor_5fcb6756dc1afb8d) }
 
 var fileDescriptor_5fcb6756dc1afb8d = []byte{
-	// 918 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xdc, 0x56, 0x6d, 0x6f, 0xe3, 0x44,
-	0x10, 0xae, 0x9b, 0xb6, 0x77, 0x99, 0xe6, 0xdc, 0xdc, 0xf6, 0xd2, 0x2b, 0x06, 0x9d, 0x8e, 0x05,
-	0xd4, 0xb4, 0x85, 0x44, 0x0a, 0x12, 0x42, 0x42, 0x02, 0xb5, 0xcd, 0xe9, 0x14, 0x89, 0x2b, 0x65,
-	0x2b, 0x04, 0xea, 0x97, 0xe0, 0xd8, 0x43, 0xb2, 0xe0, 0x97, 0x9c, 0x77, 0x5d, 0x68, 0xbf, 0x01,
-	0x12, 0x3f, 0x81, 0x5f, 0x00, 0x02, 0xfe, 0x15, 0x12, 0x7f, 0x04, 0x79, 0xd7, 0xf5, 0xd9, 0x89,
-	0x43, 0x22, 0x5e, 0x94, 0x8a, 0x6f, 0xde, 0xd9, 0x67, 0x66, 0x9e, 0x79, 0x66, 0xd7, 0x3b, 0xb0,
-	0xfd, 0x3c, 0xc6, 0xe8, 0xaa, 0x2f, 0x30, 0xba, 0xe4, 0x0e, 0xb6, 0xc6, 0x51, 0x28, 0x43, 0x42,
-	0x7c, 0xee, 0x5d, 0xc6, 0x42, 0xaf, 0x5a, 0x0a, 0x61, 0xd5, 0x9c, 0xd0, 0xf7, 0xc3, 0x40, 0xdb,
-	0x2c, 0x93, 0x07, 0x12, 0xa3, 0xc0, 0xf6, 0xf4, 0x9a, 0x7e, 0x6b, 0xc0, 0x36, 0xc3, 0x21, 0x17,
-	0x12, 0xa3, 0xd3, 0xd0, 0x45, 0x86, 0xcf, 0x63, 0x14, 0x92, 0x74, 0x60, 0x6d, 0x60, 0x0b, 0xdc,
-	0x35, 0x1e, 0x1b, 0xcd, 0xcd, 0xce, 0xa3, 0x56, 0x21, 0x70, 0x16, 0xe3, 0x99, 0x18, 0x1e, 0xdb,
-	0x02, 0x99, 0xc2, 0x92, 0x77, 0xe0, 0x8e, 0xed, 0xba, 0x11, 0x0a, 0xb1, 0xbb, 0xaa, 0xdc, 0x5e,
-	0x29, 0xba, 0xa5, 0x44, 0x8e, 0x34, 0x86, 0xdd, 0x80, 0xe9, 0x05, 0x3c, 0x28, 0x52, 0x10, 0xe3,
-	0x30, 0x10, 0x48, 0x8e, 0x61, 0x93, 0x07, 0x5c, 0xf6, 0xc7, 0x76, 0x64, 0xfb, 0x22, 0xa5, 0xf2,
-	0xea, 0x0c, 0x2a, 0xbd, 0x80, 0xcb, 0x33, 0x05, 0x64, 0xc0, 0xb3, 0x6f, 0xda, 0x87, 0xc6, 0xf9,
-	0x28, 0xfc, 0xfa, 0x24, 0xf4, 0x3c, 0x74, 0x24, 0x0f, 0x83, 0x7f, 0x52, 0x20, 0x81, 0x35, 0x77,
-	0xd0, 0xeb, 0xaa, 0xea, 0x2a, 0x4c, 0x7d, 0xd3, 0xf7, 0x61, 0x67, 0x32, 0x41, 0x4a, 0xff, 0x75,
-	0xb8, 0xe7, 0x64, 0xd6, 0x5e, 0x37, 0x29, 0xa0, 0xd2, 0xac, 0xb0, 0xa2, 0x91, 0x7e, 0x6f, 0x40,
-	0xe3, 0xc3, 0xd0, 0x76, 0xff, 0x33, 0x86, 0x84, 0x42, 0x2d, 0x9f, 0x72, 0xb7, 0xa2, 0xf6, 0x0a,
-	0x36, 0xfa, 0x83, 0x01, 0xbb, 0x0c, 0x3d, 0xb4, 0x05, 0x2e, 0x97, 0xc8, 0x77, 0x06, 0x3c, 0x48,
-	0xf4, 0x3c, 0xb3, 0x23, 0xc9, 0x97, 0x45, 0xe2, 0x3d, 0x7d, 0x68, 0x72, 0x1c, 0xd2, 0x96, 0x52,
-	0xa8, 0x8d, 0x6f, 0x8c, 0x2f, 0x3a, 0x5a, 0xb0, 0x51, 0x1f, 0xb6, 0x32, 0xc7, 0x73, 0x69, 0x4b,
-	0x14, 0xe4, 0x31, 0x6c, 0xe6, 0x20, 0xaa, 0x84, 0x0a, 0xcb, 0x9b, 0xc8, 0xbb, 0xb0, 0x2e, 0x12,
-	0xac, 0xa2, 0x6a, 0x76, 0x68, 0x6b, 0xfa, 0x22, 0xb7, 0x8a, 0x51, 0x99, 0x76, 0xa0, 0xbf, 0x1a,
-	0xb0, 0x33, 0x91, 0x6f, 0x09, 0x92, 0x4d, 0x29, 0xb3, 0x56, 0xa2, 0x4c, 0x0c, 0x0f, 0xa7, 0x98,
-	0xa6, 0xc2, 0x5e, 0xc0, 0x4e, 0x06, 0xed, 0xbb, 0x28, 0x9c, 0x88, 0x8f, 0x93, 0x6f, 0x2d, 0xf1,
-	0x66, 0xe7, 0xb5, 0xf9, 0x82, 0x08, 0xd6, 0xc8, 0x42, 0x74, 0x73, 0x11, 0xe8, 0xcf, 0x06, 0x6c,
-	0x27, 0x37, 0x4c, 0xc3, 0x97, 0x72, 0xa2, 0x16, 0x92, 0xe7, 0x37, 0x03, 0x1e, 0xa6, 0x77, 0x70,
-	0x99, 0xa7, 0x7f, 0x21, 0xae, 0x1e, 0x58, 0x27, 0x11, 0xda, 0x12, 0x3f, 0x4e, 0x3a, 0x71, 0x32,
-	0xb2, 0x83, 0x00, 0xbd, 0xac, 0x9b, 0x7b, 0xb0, 0x15, 0x69, 0xe2, 0x7d, 0x47, 0x6f, 0x29, 0xe2,
-	0x55, 0x66, 0xa6, 0xe6, 0xd4, 0x81, 0xbc, 0x01, 0x66, 0x84, 0x22, 0xf6, 0x5e, 0xe0, 0x56, 0x15,
-	0xee, 0x9e, 0xb6, 0xa6, 0x30, 0xfa, 0x93, 0x01, 0x3b, 0x47, 0xae, 0x5b, 0xcc, 0xf5, 0xf7, 0x85,
-	0x39, 0x84, 0xfb, 0x13, 0xf4, 0x52, 0x95, 0xaa, 0xac, 0x5e, 0x24, 0xd8, 0xeb, 0x92, 0x7d, 0xa8,
-	0x17, 0x29, 0xa6, 0xaa, 0x55, 0xd9, 0x56, 0x81, 0x64, 0xaf, 0x4b, 0x7f, 0x31, 0xe0, 0x25, 0x86,
-	0x7e, 0x78, 0x89, 0xb7, 0x9d, 0xe9, 0x57, 0xd0, 0xf8, 0xd4, 0x96, 0xce, 0xa8, 0xeb, 0xff, 0x0b,
-	0x24, 0x1f, 0x01, 0x64, 0x09, 0x93, 0x97, 0xbf, 0xd2, 0xac, 0xb2, 0x9c, 0x85, 0xfe, 0x6e, 0x00,
-	0x49, 0xee, 0xdf, 0x39, 0x0e, 0x7d, 0x0c, 0xe4, 0x2d, 0x3d, 0xd2, 0x49, 0x19, 0x42, 0x33, 0x4c,
-	0x10, 0xeb, 0x0a, 0x91, 0xb3, 0x10, 0x0b, 0xee, 0x7e, 0xc1, 0xd1, 0x73, 0x93, 0xdd, 0x0d, 0xb5,
-	0x9b, 0xad, 0xe9, 0x1f, 0x06, 0x34, 0xd2, 0xab, 0xfb, 0xff, 0xad, 0xf2, 0xe0, 0x1a, 0xcc, 0xe2,
-	0x2f, 0x97, 0xd4, 0xe0, 0xee, 0x69, 0x28, 0x9f, 0x7c, 0xc3, 0x85, 0xac, 0xaf, 0x10, 0x13, 0xe0,
-	0x34, 0x94, 0x67, 0x11, 0x0a, 0x0c, 0x64, 0xdd, 0x20, 0x00, 0x1b, 0x1f, 0x05, 0xdd, 0x64, 0x6f,
-	0x95, 0x6c, 0xa7, 0xaf, 0xa2, 0xed, 0xf5, 0x82, 0x67, 0xe8, 0x87, 0xd1, 0x55, 0xbd, 0x92, 0xb8,
-	0x67, 0xab, 0x35, 0x52, 0x87, 0x5a, 0x06, 0x79, 0x7a, 0xf6, 0x49, 0x7d, 0x9d, 0x54, 0x61, 0x5d,
-	0x7f, 0x6e, 0x74, 0x7e, 0xbc, 0x03, 0x35, 0x75, 0xab, 0xce, 0xf5, 0xc0, 0x4b, 0x1c, 0xa8, 0xe5,
-	0x87, 0x46, 0xb2, 0x57, 0xf6, 0x42, 0x94, 0x4c, 0xb6, 0x56, 0x73, 0x3e, 0x50, 0xff, 0xc6, 0xe8,
-	0x0a, 0xf9, 0x12, 0xb6, 0x8a, 0xc3, 0x9d, 0x20, 0xfb, 0x65, 0xee, 0xa5, 0x23, 0xa6, 0x75, 0xb0,
-	0x08, 0x34, 0xcb, 0x75, 0x01, 0x66, 0x71, 0x0e, 0x2c, 0x4f, 0x55, 0x3a, 0x2b, 0x5a, 0x2f, 0x97,
-	0x4e, 0xda, 0x49, 0x93, 0x62, 0x41, 0x57, 0xc8, 0xe7, 0x70, 0x7f, 0x6a, 0xba, 0x23, 0x6f, 0x96,
-	0x0b, 0x51, 0x3e, 0x04, 0xce, 0xcb, 0x30, 0x04, 0xb3, 0x30, 0x32, 0x09, 0xd2, 0x9c, 0x55, 0xfd,
-	0xe4, 0xe3, 0x66, 0xed, 0x2f, 0x80, 0xcc, 0x64, 0x0a, 0x81, 0x3c, 0x45, 0x39, 0x39, 0x61, 0x1d,
-	0x2c, 0x32, 0x1f, 0xa4, 0xe9, 0x0e, 0x17, 0xc2, 0x66, 0x09, 0x3f, 0xd3, 0x7d, 0xc9, 0x55, 0xb6,
-	0x37, 0xab, 0x2f, 0x13, 0x13, 0xc6, 0x3c, 0xcd, 0xfa, 0x59, 0x57, 0x72, 0xc1, 0x0f, 0xff, 0xa2,
-	0x2b, 0x53, 0xca, 0xcd, 0x49, 0x30, 0x00, 0x32, 0xfd, 0x4a, 0x13, 0xab, 0xd4, 0xe9, 0x89, 0x3f,
-	0x96, 0x57, 0x56, 0xab, 0x2c, 0xfb, 0xec, 0x97, 0x9e, 0xae, 0x1c, 0x1f, 0x5d, 0x7c, 0x30, 0xe4,
-	0x72, 0x14, 0x0f, 0x92, 0x40, 0xed, 0x6b, 0xee, 0x79, 0xfc, 0x5a, 0xa2, 0x33, 0x6a, 0xeb, 0x40,
-	0x6f, 0xb9, 0x5c, 0xc8, 0x88, 0x0f, 0x62, 0x89, 0x6e, 0xfb, 0xe6, 0x7f, 0xd7, 0x56, 0xd1, 0xdb,
-	0x2a, 0xfa, 0x78, 0x30, 0xd8, 0x50, 0xcb, 0xb7, 0xff, 0x0c, 0x00, 0x00, 0xff, 0xff, 0xc0, 0xd9,
-	0xfd, 0xa1, 0xd3, 0x0e, 0x00, 0x00,
+	// 1142 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xdc, 0x57, 0xed, 0x6e, 0x1b, 0x45,
+	0x17, 0xf6, 0xc6, 0x49, 0xde, 0xfa, 0xc4, 0xb1, 0x9d, 0xc9, 0xa7, 0xf6, 0x45, 0x55, 0x19, 0x0a,
+	0xf9, 0x02, 0x47, 0x72, 0x25, 0x84, 0x84, 0x04, 0x4a, 0xe2, 0x2a, 0xb2, 0x44, 0x43, 0x58, 0xb7,
+	0x42, 0xa4, 0x45, 0x66, 0xbd, 0x3b, 0xd8, 0x43, 0xf7, 0xc3, 0xdd, 0x19, 0xa7, 0x24, 0xff, 0x0a,
+	0x12, 0xb7, 0xc0, 0x15, 0x80, 0xe0, 0x06, 0xb8, 0x0f, 0xee, 0x00, 0x89, 0x1b, 0x41, 0x33, 0xbb,
+	0xde, 0xec, 0xae, 0x67, 0x63, 0x97, 0xb6, 0x4a, 0xc4, 0xbf, 0x9d, 0x33, 0x67, 0xce, 0xf3, 0xcc,
+	0x99, 0x73, 0x66, 0x9e, 0x85, 0xe5, 0x67, 0x43, 0x12, 0x9c, 0x77, 0x18, 0x09, 0xce, 0xa8, 0x45,
+	0xea, 0x83, 0xc0, 0xe7, 0x3e, 0x42, 0x2e, 0x75, 0xce, 0x86, 0x2c, 0x1c, 0xd5, 0xa5, 0x87, 0x5e,
+	0xb6, 0x7c, 0xd7, 0xf5, 0xbd, 0xd0, 0xa6, 0x57, 0xa8, 0xc7, 0x49, 0xe0, 0x99, 0x4e, 0x38, 0xc6,
+	0x2f, 0x34, 0x58, 0x36, 0x48, 0x8f, 0x32, 0x4e, 0x82, 0x63, 0xdf, 0x26, 0x06, 0x79, 0x36, 0x24,
+	0x8c, 0xa3, 0x06, 0xcc, 0x76, 0x4d, 0x46, 0x36, 0xb4, 0x3b, 0xda, 0xd6, 0x42, 0xe3, 0x76, 0x3d,
+	0x15, 0x38, 0x8e, 0xf1, 0x80, 0xf5, 0x0e, 0x4c, 0x46, 0x0c, 0xe9, 0x8b, 0x3e, 0x84, 0xff, 0x99,
+	0xb6, 0x1d, 0x10, 0xc6, 0x36, 0x66, 0xe4, 0xb2, 0xb7, 0xd2, 0xcb, 0x22, 0x22, 0xfb, 0xa1, 0x8f,
+	0x31, 0x72, 0xc6, 0xa7, 0xb0, 0x92, 0xa6, 0xc0, 0x06, 0xbe, 0xc7, 0x08, 0x3a, 0x80, 0x05, 0xea,
+	0x51, 0xde, 0x19, 0x98, 0x81, 0xe9, 0xb2, 0x88, 0xca, 0xdb, 0x39, 0x54, 0x5a, 0x1e, 0xe5, 0x27,
+	0xd2, 0xd1, 0x00, 0x1a, 0x7f, 0xe3, 0x0e, 0xac, 0xb6, 0xfb, 0xfe, 0xf3, 0x43, 0xdf, 0x71, 0x88,
+	0xc5, 0xa9, 0xef, 0xbd, 0xca, 0x06, 0x11, 0xcc, 0xda, 0xdd, 0x56, 0x53, 0xee, 0xae, 0x68, 0xc8,
+	0x6f, 0xfc, 0x09, 0xac, 0x65, 0x01, 0x22, 0xfa, 0x77, 0x61, 0xd1, 0x8a, 0xad, 0xad, 0xa6, 0xd8,
+	0x40, 0x71, 0xab, 0x68, 0xa4, 0x8d, 0xf8, 0x47, 0x0d, 0x56, 0x3f, 0xf3, 0x4d, 0xfb, 0x8d, 0x31,
+	0x44, 0x18, 0xca, 0x49, 0xc8, 0x8d, 0xa2, 0x9c, 0x4b, 0xd9, 0xf0, 0x4f, 0x1a, 0x6c, 0x18, 0xc4,
+	0x21, 0x26, 0x23, 0xd7, 0x4b, 0xe4, 0x07, 0x0d, 0x56, 0x44, 0x3e, 0x4f, 0xcc, 0x80, 0xd3, 0xeb,
+	0x22, 0xf1, 0x71, 0x58, 0x34, 0x09, 0x0e, 0xd1, 0x91, 0x62, 0x28, 0x0f, 0x46, 0xc6, 0xcb, 0x13,
+	0x4d, 0xd9, 0xb0, 0x0b, 0xd5, 0x78, 0x61, 0x9b, 0x9b, 0x9c, 0x30, 0x74, 0x07, 0x16, 0x12, 0x2e,
+	0x72, 0x0b, 0x45, 0x23, 0x69, 0x42, 0x1f, 0xc1, 0x1c, 0x13, 0xbe, 0x92, 0x6a, 0xa5, 0x81, 0xeb,
+	0xe3, 0x8d, 0x5c, 0x4f, 0x47, 0x35, 0xc2, 0x05, 0xf8, 0x37, 0x0d, 0xd6, 0x32, 0x78, 0xd7, 0x90,
+	0xb2, 0xb1, 0xcc, 0xcc, 0x2a, 0x32, 0x33, 0x84, 0xf5, 0x31, 0xa6, 0x51, 0x62, 0x4f, 0x61, 0x2d,
+	0x76, 0xed, 0xd8, 0x84, 0x59, 0x01, 0x1d, 0x88, 0xef, 0x30, 0xc5, 0x0b, 0x8d, 0x77, 0x26, 0x27,
+	0x84, 0x19, 0xab, 0x71, 0x88, 0x66, 0x22, 0x02, 0xfe, 0x55, 0x83, 0x15, 0xd1, 0x61, 0xd7, 0x59,
+	0x52, 0x53, 0xe5, 0xe7, 0x77, 0x0d, 0xd6, 0xa3, 0x26, 0xbc, 0xf1, 0x5c, 0x1d, 0xd0, 0x0f, 0x03,
+	0x62, 0x72, 0xf2, 0x85, 0x38, 0x8a, 0xc3, 0xbe, 0xe9, 0x79, 0xc4, 0x89, 0x8f, 0x73, 0x13, 0xaa,
+	0x41, 0x48, 0xbc, 0x63, 0x85, 0x53, 0x92, 0x78, 0xc9, 0xa8, 0x44, 0xe6, 0x68, 0x01, 0x7a, 0x17,
+	0x2a, 0x01, 0x61, 0x43, 0xe7, 0xd2, 0x6f, 0x46, 0xfa, 0x2d, 0x86, 0xd6, 0xc8, 0x0d, 0xff, 0xa2,
+	0xc1, 0xfa, 0xbe, 0x6d, 0x27, 0xb1, 0x5e, 0xa9, 0xca, 0x77, 0x61, 0x29, 0xc3, 0x2f, 0x4a, 0x53,
+	0xc9, 0xa8, 0xa5, 0x19, 0xb6, 0x9a, 0x68, 0x1b, 0x6a, 0x69, 0x8e, 0x51, 0xda, 0x4a, 0x46, 0x35,
+	0xc5, 0xb2, 0xd5, 0x14, 0xcd, 0xa8, 0x1b, 0xc4, 0xf5, 0xcf, 0xc8, 0x8d, 0xa7, 0xea, 0xc0, 0xda,
+	0x97, 0x26, 0xb7, 0xfa, 0x4d, 0xf7, 0x75, 0xb0, 0xbc, 0x0d, 0x10, 0x23, 0x8a, 0xd7, 0xbf, 0xb8,
+	0x55, 0x32, 0x12, 0x16, 0xfc, 0x97, 0x06, 0x48, 0xf4, 0x60, 0x9b, 0xf4, 0x5c, 0xe2, 0xf1, 0x1b,
+	0x5a, 0xd5, 0x62, 0x1b, 0x2c, 0x64, 0x28, 0x3c, 0xe6, 0xa4, 0x47, 0xc2, 0x82, 0x74, 0xb8, 0xf5,
+	0x2d, 0x25, 0x8e, 0x2d, 0x66, 0xe7, 0xe5, 0x6c, 0x3c, 0xc6, 0x7f, 0x6b, 0xb0, 0x1a, 0x75, 0xef,
+	0x7f, 0x78, 0x97, 0x2f, 0x34, 0xd0, 0x8f, 0x08, 0x7f, 0x48, 0x5d, 0xf2, 0x90, 0x5a, 0x4f, 0xb3,
+	0x8d, 0x7f, 0x0f, 0xe6, 0xc5, 0xb3, 0x34, 0x1c, 0xa9, 0xb5, 0xff, 0x2b, 0x15, 0x60, 0x5b, 0xba,
+	0x18, 0x91, 0x2b, 0xaa, 0xc3, 0x32, 0xa7, 0x2e, 0xe9, 0x70, 0x6a, 0x3d, 0x1d, 0x2b, 0xf2, 0x25,
+	0x9e, 0x86, 0x6a, 0x35, 0xf1, 0x73, 0x58, 0x3f, 0x22, 0x5c, 0x04, 0x61, 0xaf, 0x05, 0x7f, 0x13,
+	0xaa, 0xe2, 0x8b, 0x8d, 0x61, 0x57, 0x58, 0x02, 0xa3, 0xd5, 0xc4, 0x3f, 0x6b, 0xb0, 0xda, 0x0e,
+	0x05, 0x77, 0xe6, 0xfd, 0xfa, 0x57, 0xb8, 0x2d, 0x58, 0x14, 0xf2, 0x9d, 0x04, 0x1d, 0xf9, 0x94,
+	0x8f, 0x54, 0xf3, 0xdd, 0x9c, 0x02, 0x49, 0x23, 0x97, 0xc3, 0xa5, 0xe1, 0x68, 0xe7, 0x02, 0x2a,
+	0xe9, 0xd7, 0x10, 0x95, 0xe1, 0xd6, 0xb1, 0xcf, 0xef, 0x7f, 0x4f, 0x19, 0xaf, 0x15, 0x50, 0x05,
+	0xe0, 0xd8, 0xe7, 0x27, 0x01, 0x61, 0xc4, 0xe3, 0x35, 0x0d, 0x01, 0xcc, 0x7f, 0xee, 0x35, 0xc5,
+	0xdc, 0x0c, 0x5a, 0x8e, 0x04, 0x8b, 0xe9, 0xb4, 0xbc, 0x07, 0xc4, 0xf5, 0x83, 0xf3, 0x5a, 0x51,
+	0x2c, 0x8f, 0x47, 0xb3, 0xa8, 0x06, 0xe5, 0xd8, 0xe5, 0xe8, 0xe4, 0x51, 0x6d, 0x0e, 0x95, 0x60,
+	0x2e, 0xfc, 0x9c, 0x6f, 0xfc, 0x51, 0x82, 0xb2, 0xbc, 0xee, 0x22, 0x82, 0xc8, 0x82, 0x72, 0x52,
+	0xcf, 0xa3, 0x4d, 0xd5, 0xe3, 0xad, 0xf8, 0xe9, 0xd0, 0xb7, 0x26, 0x3b, 0x86, 0xf9, 0xc6, 0x05,
+	0xf4, 0x1d, 0x54, 0xd3, 0xba, 0x9b, 0xa1, 0x6d, 0xd5, 0x72, 0xa5, 0xfa, 0xd7, 0x77, 0xa6, 0x71,
+	0x8d, 0xb1, 0x7a, 0x50, 0x49, 0xe9, 0x41, 0x86, 0xb6, 0xf2, 0xd6, 0x67, 0x1f, 0x6e, 0x7d, 0x7b,
+	0x0a, 0xcf, 0x18, 0xe8, 0x2b, 0xa8, 0xa4, 0x94, 0x4a, 0x0e, 0x90, 0x4a, 0xcd, 0xe8, 0x57, 0x95,
+	0x1c, 0x2e, 0xa0, 0x0e, 0x2c, 0x65, 0xb5, 0x05, 0x43, 0xbb, 0xea, 0x84, 0x2b, 0x25, 0xc8, 0x24,
+	0x80, 0xd3, 0x90, 0xfb, 0x65, 0x02, 0xd5, 0xe7, 0xa1, 0xfc, 0xd7, 0x99, 0x14, 0xfb, 0x9b, 0x98,
+	0x7c, 0x22, 0xfc, 0xfb, 0x57, 0x90, 0x7f, 0x69, 0x84, 0x2e, 0xa0, 0x71, 0x3d, 0x83, 0x74, 0xe5,
+	0xa2, 0xfb, 0xee, 0x80, 0x9f, 0xeb, 0x75, 0x15, 0x7c, 0xbe, 0x26, 0x0a, 0x31, 0xc6, 0xaf, 0xce,
+	0x97, 0xc7, 0xc8, 0xbf, 0x7e, 0x71, 0x01, 0x3d, 0x81, 0x6a, 0xe6, 0x6e, 0xbc, 0x12, 0x60, 0x37,
+	0x07, 0x40, 0x75, 0xb9, 0xe2, 0x02, 0xf2, 0xe5, 0x0e, 0xb2, 0xbf, 0x37, 0x3b, 0xd3, 0x88, 0xf3,
+	0xe8, 0x18, 0x76, 0xa7, 0xf2, 0x8d, 0x01, 0x1f, 0x43, 0x4d, 0xb0, 0x49, 0xde, 0x7c, 0x57, 0xee,
+	0x47, 0xdd, 0x6d, 0xaa, 0x2b, 0x1b, 0x17, 0x1a, 0x7f, 0xce, 0x42, 0x49, 0x1e, 0x95, 0xbc, 0xa5,
+	0xbe, 0x86, 0x6a, 0x46, 0x62, 0xaa, 0xdb, 0x23, 0x47, 0x87, 0x4e, 0x2a, 0x30, 0x0b, 0xd0, 0xb8,
+	0x32, 0x44, 0x75, 0x75, 0x0d, 0xe7, 0x29, 0xc8, 0x49, 0x20, 0x4f, 0xa0, 0x9a, 0x11, 0x75, 0xea,
+	0xc3, 0x51, 0x2b, 0xbf, 0x49, 0xd1, 0x1f, 0x41, 0x39, 0xa1, 0xe1, 0x18, 0x7a, 0x2f, 0xaf, 0xbf,
+	0xd3, 0xfa, 0x67, 0x52, 0xd8, 0xc7, 0x50, 0x4d, 0xeb, 0xa6, 0x9c, 0x9b, 0x5c, 0x29, 0xae, 0x26,
+	0x05, 0xf7, 0x60, 0x69, 0xac, 0x62, 0xdf, 0x60, 0xc1, 0x1e, 0xec, 0x9f, 0x7e, 0xda, 0xa3, 0xbc,
+	0x3f, 0xec, 0x0a, 0x26, 0x7b, 0x17, 0xd4, 0x71, 0xe8, 0x05, 0x27, 0x56, 0x7f, 0x2f, 0x8c, 0xf2,
+	0x81, 0x4d, 0x19, 0x0f, 0x68, 0x77, 0xc8, 0x89, 0xbd, 0x37, 0x7a, 0xd9, 0xf7, 0x64, 0xe8, 0x3d,
+	0x19, 0x7a, 0xd0, 0xed, 0xce, 0xcb, 0xe1, 0xbd, 0x7f, 0x02, 0x00, 0x00, 0xff, 0xff, 0x13, 0x6f,
+	0x8a, 0xde, 0xe2, 0x13, 0x00, 0x00,
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -1186,13 +1344,16 @@ type QueryServiceClient interface {
 	// @return Status
 	RegisterNode(ctx context.Context, in *RegisterNodeRequest, opts ...grpc.CallOption) (*RegisterNodeResponse, error)
 	ShowCollections(ctx context.Context, in *ShowCollectionRequest, opts ...grpc.CallOption) (*ShowCollectionResponse, error)
+	ShowPartitions(ctx context.Context, in *ShowPartitionRequest, opts ...grpc.CallOption) (*ShowPartitionResponse, error)
+	LoadPartitions(ctx context.Context, in *LoadPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	ReleasePartitions(ctx context.Context, in *ReleasePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	LoadCollection(ctx context.Context, in *LoadCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ReleaseCollection(ctx context.Context, in *ReleaseCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	ShowPartitions(ctx context.Context, in *ShowPartitionRequest, opts ...grpc.CallOption) (*ShowPartitionResponse, error)
-	GetPartitionStates(ctx context.Context, in *PartitionStatesRequest, opts ...grpc.CallOption) (*PartitionStatesResponse, error)
-	LoadPartitions(ctx context.Context, in *LoadPartitonRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	ReleasePartitions(ctx context.Context, in *ReleasePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	CreateQueryChannel(ctx context.Context, in *commonpb.Empty, opts ...grpc.CallOption) (*CreateQueryChannelResponse, error)
+	GetTimeTickChannel(ctx context.Context, in *commonpb.Empty, opts ...grpc.CallOption) (*GetTimeTickChannelResponse, error)
+	GetStatsChannel(ctx context.Context, in *commonpb.Empty, opts ...grpc.CallOption) (*GetStatsChannelResponse, error)
+	GetPartitionStates(ctx context.Context, in *PartitionStatesRequest, opts ...grpc.CallOption) (*PartitionStatesResponse, error)
+	GetServiceStates(ctx context.Context, in *commonpb.Empty, opts ...grpc.CallOption) (*ServiceStatesResponse, error)
 }
 
 type queryServiceClient struct {
@@ -1221,6 +1382,33 @@ func (c *queryServiceClient) ShowCollections(ctx context.Context, in *ShowCollec
 	return out, nil
 }
 
+func (c *queryServiceClient) ShowPartitions(ctx context.Context, in *ShowPartitionRequest, opts ...grpc.CallOption) (*ShowPartitionResponse, error) {
+	out := new(ShowPartitionResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.query.QueryService/ShowPartitions", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryServiceClient) LoadPartitions(ctx context.Context, in *LoadPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, "/milvus.proto.query.QueryService/LoadPartitions", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryServiceClient) ReleasePartitions(ctx context.Context, in *ReleasePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, "/milvus.proto.query.QueryService/ReleasePartitions", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *queryServiceClient) LoadCollection(ctx context.Context, in *LoadCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, "/milvus.proto.query.QueryService/LoadCollection", in, out, opts...)
@@ -1239,9 +1427,27 @@ func (c *queryServiceClient) ReleaseCollection(ctx context.Context, in *ReleaseC
 	return out, nil
 }
 
-func (c *queryServiceClient) ShowPartitions(ctx context.Context, in *ShowPartitionRequest, opts ...grpc.CallOption) (*ShowPartitionResponse, error) {
-	out := new(ShowPartitionResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.query.QueryService/ShowPartitions", in, out, opts...)
+func (c *queryServiceClient) CreateQueryChannel(ctx context.Context, in *commonpb.Empty, opts ...grpc.CallOption) (*CreateQueryChannelResponse, error) {
+	out := new(CreateQueryChannelResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.query.QueryService/CreateQueryChannel", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryServiceClient) GetTimeTickChannel(ctx context.Context, in *commonpb.Empty, opts ...grpc.CallOption) (*GetTimeTickChannelResponse, error) {
+	out := new(GetTimeTickChannelResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.query.QueryService/GetTimeTickChannel", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryServiceClient) GetStatsChannel(ctx context.Context, in *commonpb.Empty, opts ...grpc.CallOption) (*GetStatsChannelResponse, error) {
+	out := new(GetStatsChannelResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.query.QueryService/GetStatsChannel", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1257,27 +1463,9 @@ func (c *queryServiceClient) GetPartitionStates(ctx context.Context, in *Partiti
 	return out, nil
 }
 
-func (c *queryServiceClient) LoadPartitions(ctx context.Context, in *LoadPartitonRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.query.QueryService/LoadPartitions", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *queryServiceClient) ReleasePartitions(ctx context.Context, in *ReleasePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.query.QueryService/ReleasePartitions", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *queryServiceClient) CreateQueryChannel(ctx context.Context, in *commonpb.Empty, opts ...grpc.CallOption) (*CreateQueryChannelResponse, error) {
-	out := new(CreateQueryChannelResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.query.QueryService/CreateQueryChannel", in, out, opts...)
+func (c *queryServiceClient) GetServiceStates(ctx context.Context, in *commonpb.Empty, opts ...grpc.CallOption) (*ServiceStatesResponse, error) {
+	out := new(ServiceStatesResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.query.QueryService/GetServiceStates", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1294,13 +1482,16 @@ type QueryServiceServer interface {
 	// @return Status
 	RegisterNode(context.Context, *RegisterNodeRequest) (*RegisterNodeResponse, error)
 	ShowCollections(context.Context, *ShowCollectionRequest) (*ShowCollectionResponse, error)
+	ShowPartitions(context.Context, *ShowPartitionRequest) (*ShowPartitionResponse, error)
+	LoadPartitions(context.Context, *LoadPartitionRequest) (*commonpb.Status, error)
+	ReleasePartitions(context.Context, *ReleasePartitionRequest) (*commonpb.Status, error)
 	LoadCollection(context.Context, *LoadCollectionRequest) (*commonpb.Status, error)
 	ReleaseCollection(context.Context, *ReleaseCollectionRequest) (*commonpb.Status, error)
-	ShowPartitions(context.Context, *ShowPartitionRequest) (*ShowPartitionResponse, error)
-	GetPartitionStates(context.Context, *PartitionStatesRequest) (*PartitionStatesResponse, error)
-	LoadPartitions(context.Context, *LoadPartitonRequest) (*commonpb.Status, error)
-	ReleasePartitions(context.Context, *ReleasePartitionRequest) (*commonpb.Status, error)
 	CreateQueryChannel(context.Context, *commonpb.Empty) (*CreateQueryChannelResponse, error)
+	GetTimeTickChannel(context.Context, *commonpb.Empty) (*GetTimeTickChannelResponse, error)
+	GetStatsChannel(context.Context, *commonpb.Empty) (*GetStatsChannelResponse, error)
+	GetPartitionStates(context.Context, *PartitionStatesRequest) (*PartitionStatesResponse, error)
+	GetServiceStates(context.Context, *commonpb.Empty) (*ServiceStatesResponse, error)
 }
 
 // UnimplementedQueryServiceServer can be embedded to have forward compatible implementations.
@@ -1313,26 +1504,35 @@ func (*UnimplementedQueryServiceServer) RegisterNode(ctx context.Context, req *R
 func (*UnimplementedQueryServiceServer) ShowCollections(ctx context.Context, req *ShowCollectionRequest) (*ShowCollectionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ShowCollections not implemented")
 }
+func (*UnimplementedQueryServiceServer) ShowPartitions(ctx context.Context, req *ShowPartitionRequest) (*ShowPartitionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ShowPartitions not implemented")
+}
+func (*UnimplementedQueryServiceServer) LoadPartitions(ctx context.Context, req *LoadPartitionRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LoadPartitions not implemented")
+}
+func (*UnimplementedQueryServiceServer) ReleasePartitions(ctx context.Context, req *ReleasePartitionRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReleasePartitions not implemented")
+}
 func (*UnimplementedQueryServiceServer) LoadCollection(ctx context.Context, req *LoadCollectionRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LoadCollection not implemented")
 }
 func (*UnimplementedQueryServiceServer) ReleaseCollection(ctx context.Context, req *ReleaseCollectionRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReleaseCollection not implemented")
 }
-func (*UnimplementedQueryServiceServer) ShowPartitions(ctx context.Context, req *ShowPartitionRequest) (*ShowPartitionResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ShowPartitions not implemented")
+func (*UnimplementedQueryServiceServer) CreateQueryChannel(ctx context.Context, req *commonpb.Empty) (*CreateQueryChannelResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateQueryChannel not implemented")
+}
+func (*UnimplementedQueryServiceServer) GetTimeTickChannel(ctx context.Context, req *commonpb.Empty) (*GetTimeTickChannelResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTimeTickChannel not implemented")
+}
+func (*UnimplementedQueryServiceServer) GetStatsChannel(ctx context.Context, req *commonpb.Empty) (*GetStatsChannelResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetStatsChannel not implemented")
 }
 func (*UnimplementedQueryServiceServer) GetPartitionStates(ctx context.Context, req *PartitionStatesRequest) (*PartitionStatesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetPartitionStates not implemented")
 }
-func (*UnimplementedQueryServiceServer) LoadPartitions(ctx context.Context, req *LoadPartitonRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method LoadPartitions not implemented")
-}
-func (*UnimplementedQueryServiceServer) ReleasePartitions(ctx context.Context, req *ReleasePartitionRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ReleasePartitions not implemented")
-}
-func (*UnimplementedQueryServiceServer) CreateQueryChannel(ctx context.Context, req *commonpb.Empty) (*CreateQueryChannelResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CreateQueryChannel not implemented")
+func (*UnimplementedQueryServiceServer) GetServiceStates(ctx context.Context, req *commonpb.Empty) (*ServiceStatesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetServiceStates not implemented")
 }
 
 func RegisterQueryServiceServer(s *grpc.Server, srv QueryServiceServer) {
@@ -1375,6 +1575,60 @@ func _QueryService_ShowCollections_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryService_ShowPartitions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ShowPartitionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServiceServer).ShowPartitions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/milvus.proto.query.QueryService/ShowPartitions",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServiceServer).ShowPartitions(ctx, req.(*ShowPartitionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryService_LoadPartitions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LoadPartitionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServiceServer).LoadPartitions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/milvus.proto.query.QueryService/LoadPartitions",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServiceServer).LoadPartitions(ctx, req.(*LoadPartitionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryService_ReleasePartitions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReleasePartitionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServiceServer).ReleasePartitions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/milvus.proto.query.QueryService/ReleasePartitions",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServiceServer).ReleasePartitions(ctx, req.(*ReleasePartitionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _QueryService_LoadCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(LoadCollectionRequest)
 	if err := dec(in); err != nil {
@@ -1411,20 +1665,56 @@ func _QueryService_ReleaseCollection_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
-func _QueryService_ShowPartitions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ShowPartitionRequest)
+func _QueryService_CreateQueryChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(commonpb.Empty)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(QueryServiceServer).ShowPartitions(ctx, in)
+		return srv.(QueryServiceServer).CreateQueryChannel(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.query.QueryService/ShowPartitions",
+		FullMethod: "/milvus.proto.query.QueryService/CreateQueryChannel",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(QueryServiceServer).ShowPartitions(ctx, req.(*ShowPartitionRequest))
+		return srv.(QueryServiceServer).CreateQueryChannel(ctx, req.(*commonpb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryService_GetTimeTickChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(commonpb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServiceServer).GetTimeTickChannel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/milvus.proto.query.QueryService/GetTimeTickChannel",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServiceServer).GetTimeTickChannel(ctx, req.(*commonpb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryService_GetStatsChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(commonpb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServiceServer).GetStatsChannel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/milvus.proto.query.QueryService/GetStatsChannel",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServiceServer).GetStatsChannel(ctx, req.(*commonpb.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1447,56 +1737,20 @@ func _QueryService_GetPartitionStates_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
-func _QueryService_LoadPartitions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(LoadPartitonRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(QueryServiceServer).LoadPartitions(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.query.QueryService/LoadPartitions",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(QueryServiceServer).LoadPartitions(ctx, req.(*LoadPartitonRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _QueryService_ReleasePartitions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ReleasePartitionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(QueryServiceServer).ReleasePartitions(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.query.QueryService/ReleasePartitions",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(QueryServiceServer).ReleasePartitions(ctx, req.(*ReleasePartitionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _QueryService_CreateQueryChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _QueryService_GetServiceStates_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(commonpb.Empty)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(QueryServiceServer).CreateQueryChannel(ctx, in)
+		return srv.(QueryServiceServer).GetServiceStates(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.query.QueryService/CreateQueryChannel",
+		FullMethod: "/milvus.proto.query.QueryService/GetServiceStates",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(QueryServiceServer).CreateQueryChannel(ctx, req.(*commonpb.Empty))
+		return srv.(QueryServiceServer).GetServiceStates(ctx, req.(*commonpb.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1514,20 +1768,8 @@ var _QueryService_serviceDesc = grpc.ServiceDesc{
 			Handler:    _QueryService_ShowCollections_Handler,
 		},
 		{
-			MethodName: "LoadCollection",
-			Handler:    _QueryService_LoadCollection_Handler,
-		},
-		{
-			MethodName: "ReleaseCollection",
-			Handler:    _QueryService_ReleaseCollection_Handler,
-		},
-		{
 			MethodName: "ShowPartitions",
 			Handler:    _QueryService_ShowPartitions_Handler,
-		},
-		{
-			MethodName: "GetPartitionStates",
-			Handler:    _QueryService_GetPartitionStates_Handler,
 		},
 		{
 			MethodName: "LoadPartitions",
@@ -1538,8 +1780,284 @@ var _QueryService_serviceDesc = grpc.ServiceDesc{
 			Handler:    _QueryService_ReleasePartitions_Handler,
 		},
 		{
+			MethodName: "LoadCollection",
+			Handler:    _QueryService_LoadCollection_Handler,
+		},
+		{
+			MethodName: "ReleaseCollection",
+			Handler:    _QueryService_ReleaseCollection_Handler,
+		},
+		{
 			MethodName: "CreateQueryChannel",
 			Handler:    _QueryService_CreateQueryChannel_Handler,
+		},
+		{
+			MethodName: "GetTimeTickChannel",
+			Handler:    _QueryService_GetTimeTickChannel_Handler,
+		},
+		{
+			MethodName: "GetStatsChannel",
+			Handler:    _QueryService_GetStatsChannel_Handler,
+		},
+		{
+			MethodName: "GetPartitionStates",
+			Handler:    _QueryService_GetPartitionStates_Handler,
+		},
+		{
+			MethodName: "GetServiceStates",
+			Handler:    _QueryService_GetServiceStates_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "query_service.proto",
+}
+
+// QueryNodeClient is the client API for QueryNode service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
+type QueryNodeClient interface {
+	AddQueryChannel(ctx context.Context, in *AddQueryChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	RemoveQueryChannel(ctx context.Context, in *RemoveQueryChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	WatchDmChannels(ctx context.Context, in *WatchDmChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	LoadSegments(ctx context.Context, in *LoadSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	ReleaseSegments(ctx context.Context, in *ReleaseSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	GetPartitionState(ctx context.Context, in *PartitionStatesRequest, opts ...grpc.CallOption) (*PartitionStatesResponse, error)
+}
+
+type queryNodeClient struct {
+	cc *grpc.ClientConn
+}
+
+func NewQueryNodeClient(cc *grpc.ClientConn) QueryNodeClient {
+	return &queryNodeClient{cc}
+}
+
+func (c *queryNodeClient) AddQueryChannel(ctx context.Context, in *AddQueryChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, "/milvus.proto.query.QueryNode/AddQueryChannel", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryNodeClient) RemoveQueryChannel(ctx context.Context, in *RemoveQueryChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, "/milvus.proto.query.QueryNode/RemoveQueryChannel", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryNodeClient) WatchDmChannels(ctx context.Context, in *WatchDmChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, "/milvus.proto.query.QueryNode/WatchDmChannels", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryNodeClient) LoadSegments(ctx context.Context, in *LoadSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, "/milvus.proto.query.QueryNode/LoadSegments", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryNodeClient) ReleaseSegments(ctx context.Context, in *ReleaseSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, "/milvus.proto.query.QueryNode/ReleaseSegments", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryNodeClient) GetPartitionState(ctx context.Context, in *PartitionStatesRequest, opts ...grpc.CallOption) (*PartitionStatesResponse, error) {
+	out := new(PartitionStatesResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.query.QueryNode/GetPartitionState", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// QueryNodeServer is the server API for QueryNode service.
+type QueryNodeServer interface {
+	AddQueryChannel(context.Context, *AddQueryChannelsRequest) (*commonpb.Status, error)
+	RemoveQueryChannel(context.Context, *RemoveQueryChannelsRequest) (*commonpb.Status, error)
+	WatchDmChannels(context.Context, *WatchDmChannelsRequest) (*commonpb.Status, error)
+	LoadSegments(context.Context, *LoadSegmentRequest) (*commonpb.Status, error)
+	ReleaseSegments(context.Context, *ReleaseSegmentRequest) (*commonpb.Status, error)
+	GetPartitionState(context.Context, *PartitionStatesRequest) (*PartitionStatesResponse, error)
+}
+
+// UnimplementedQueryNodeServer can be embedded to have forward compatible implementations.
+type UnimplementedQueryNodeServer struct {
+}
+
+func (*UnimplementedQueryNodeServer) AddQueryChannel(ctx context.Context, req *AddQueryChannelsRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AddQueryChannel not implemented")
+}
+func (*UnimplementedQueryNodeServer) RemoveQueryChannel(ctx context.Context, req *RemoveQueryChannelsRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemoveQueryChannel not implemented")
+}
+func (*UnimplementedQueryNodeServer) WatchDmChannels(ctx context.Context, req *WatchDmChannelsRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method WatchDmChannels not implemented")
+}
+func (*UnimplementedQueryNodeServer) LoadSegments(ctx context.Context, req *LoadSegmentRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LoadSegments not implemented")
+}
+func (*UnimplementedQueryNodeServer) ReleaseSegments(ctx context.Context, req *ReleaseSegmentRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReleaseSegments not implemented")
+}
+func (*UnimplementedQueryNodeServer) GetPartitionState(ctx context.Context, req *PartitionStatesRequest) (*PartitionStatesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetPartitionState not implemented")
+}
+
+func RegisterQueryNodeServer(s *grpc.Server, srv QueryNodeServer) {
+	s.RegisterService(&_QueryNode_serviceDesc, srv)
+}
+
+func _QueryNode_AddQueryChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddQueryChannelsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryNodeServer).AddQueryChannel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/milvus.proto.query.QueryNode/AddQueryChannel",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryNodeServer).AddQueryChannel(ctx, req.(*AddQueryChannelsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryNode_RemoveQueryChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveQueryChannelsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryNodeServer).RemoveQueryChannel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/milvus.proto.query.QueryNode/RemoveQueryChannel",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryNodeServer).RemoveQueryChannel(ctx, req.(*RemoveQueryChannelsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryNode_WatchDmChannels_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WatchDmChannelsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryNodeServer).WatchDmChannels(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/milvus.proto.query.QueryNode/WatchDmChannels",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryNodeServer).WatchDmChannels(ctx, req.(*WatchDmChannelsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryNode_LoadSegments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LoadSegmentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryNodeServer).LoadSegments(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/milvus.proto.query.QueryNode/LoadSegments",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryNodeServer).LoadSegments(ctx, req.(*LoadSegmentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryNode_ReleaseSegments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReleaseSegmentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryNodeServer).ReleaseSegments(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/milvus.proto.query.QueryNode/ReleaseSegments",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryNodeServer).ReleaseSegments(ctx, req.(*ReleaseSegmentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryNode_GetPartitionState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PartitionStatesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryNodeServer).GetPartitionState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/milvus.proto.query.QueryNode/GetPartitionState",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryNodeServer).GetPartitionState(ctx, req.(*PartitionStatesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+var _QueryNode_serviceDesc = grpc.ServiceDesc{
+	ServiceName: "milvus.proto.query.QueryNode",
+	HandlerType: (*QueryNodeServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "AddQueryChannel",
+			Handler:    _QueryNode_AddQueryChannel_Handler,
+		},
+		{
+			MethodName: "RemoveQueryChannel",
+			Handler:    _QueryNode_RemoveQueryChannel_Handler,
+		},
+		{
+			MethodName: "WatchDmChannels",
+			Handler:    _QueryNode_WatchDmChannels_Handler,
+		},
+		{
+			MethodName: "LoadSegments",
+			Handler:    _QueryNode_LoadSegments_Handler,
+		},
+		{
+			MethodName: "ReleaseSegments",
+			Handler:    _QueryNode_ReleaseSegments_Handler,
+		},
+		{
+			MethodName: "GetPartitionState",
+			Handler:    _QueryNode_GetPartitionState_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

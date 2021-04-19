@@ -1,11 +1,11 @@
-package querynode
+package querynodeimp
 
 import (
 	"log"
 )
 
 type gcNode struct {
-	BaseNode
+	baseNode
 	replica collectionReplica
 }
 
@@ -50,12 +50,12 @@ func newGCNode(replica collectionReplica) *gcNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
-	baseNode := BaseNode{}
+	baseNode := baseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &gcNode{
-		BaseNode: baseNode,
+		baseNode: baseNode,
 		replica:  replica,
 	}
 }

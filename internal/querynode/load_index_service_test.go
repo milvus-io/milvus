@@ -1,4 +1,4 @@
-package querynode
+package querynodeimp
 
 import (
 	"encoding/binary"
@@ -23,7 +23,7 @@ import (
 )
 
 func TestLoadIndexService_FloatVector(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	collectionID := rand.Int63n(1000000)
 	segmentID := rand.Int63n(1000000)
 	initTestMeta(t, node, "collection0", collectionID, segmentID)
@@ -276,7 +276,7 @@ func TestLoadIndexService_FloatVector(t *testing.T) {
 	// create loadIndexClient
 	fieldID := UniqueID(100)
 	loadIndexChannelNames := Params.LoadIndexChannelNames
-	client := client.NewLoadIndexClient(node.queryNodeLoopCtx, Params.PulsarAddress, loadIndexChannelNames)
+	client := client.NewQueryNodeClient(node.queryNodeLoopCtx, Params.PulsarAddress, loadIndexChannelNames)
 	client.LoadIndex(indexPaths, segmentID, fieldID, "vec", indexParams)
 
 	// init message stream consumer and do checks
@@ -341,7 +341,7 @@ func TestLoadIndexService_FloatVector(t *testing.T) {
 }
 
 func TestLoadIndexService_BinaryVector(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	collectionID := rand.Int63n(1000000)
 	segmentID := rand.Int63n(1000000)
 	initTestMeta(t, node, "collection0", collectionID, segmentID, true)
@@ -584,7 +584,7 @@ func TestLoadIndexService_BinaryVector(t *testing.T) {
 	// create loadIndexClient
 	fieldID := UniqueID(100)
 	loadIndexChannelNames := Params.LoadIndexChannelNames
-	client := client.NewLoadIndexClient(node.queryNodeLoopCtx, Params.PulsarAddress, loadIndexChannelNames)
+	client := client.NewQueryNodeClient(node.queryNodeLoopCtx, Params.PulsarAddress, loadIndexChannelNames)
 	client.LoadIndex(indexPaths, segmentID, fieldID, "vec", indexParams)
 
 	// init message stream consumer and do checks

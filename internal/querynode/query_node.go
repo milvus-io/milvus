@@ -1,4 +1,4 @@
-package querynode
+package querynodeimp
 
 /*
 
@@ -18,18 +18,36 @@ import (
 	"io"
 
 	"github.com/opentracing/opentracing-go"
+	"github.com/uber/jaeger-client-go"
 	"github.com/uber/jaeger-client-go/config"
+	"google.golang.org/grpc"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	queryPb "github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 )
+
+type Node interface {
+	Start() error
+	Close()
+
+	AddQueryChannel(ctx context.Context, in *queryPb.AddQueryChannelsRequest) (*commonpb.Status, error)
+	RemoveQueryChannel(ctx context.Context, in *queryPb.RemoveQueryChannelsRequest) (*commonpb.Status, error)
+	WatchDmChannels(ctx context.Context, in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error)
+	LoadSegments(ctx context.Context, in *queryPb.LoadSegmentRequest) (*commonpb.Status, error)
+	ReleaseSegments(ctx context.Context, in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error)
+	GetPartitionState(ctx context.Context, in *queryPb.PartitionStatesRequest) (*queryPb.PartitionStatesResponse, error)
+}
 
 type QueryNode struct {
 	queryNodeLoopCtx    context.Context
 	queryNodeLoopCancel context.CancelFunc
 
 	QueryNodeID uint64
+	grpcServer  *grpc.Server
 
 	replica collectionReplica
 
-	// services
+	// internal services
 	dataSyncService  *dataSyncService
 	metaService      *metaService
 	searchService    *searchService
@@ -45,7 +63,12 @@ func Init() {
 	Params.Init()
 }
 
-func NewQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
+func NewQueryNode(ctx context.Context, queryNodeID uint64) Node {
+	var node Node = newQueryNode(ctx, queryNodeID)
+	return node
+}
+
+func newQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
 
 	ctx1, cancel := context.WithCancel(ctx)
 	q := &QueryNode{
@@ -66,8 +89,11 @@ func NewQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
 			Type:  "const",
 			Param: 1,
 		},
+		Reporter: &config.ReporterConfig{
+			LogSpans: true,
+		},
 	}
-	q.tracer, q.closer, err = cfg.NewTracer()
+	q.tracer, q.closer, err = cfg.NewTracer(config.Logger(jaeger.StdLogger))
 	if err != nil {
 		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
 	}

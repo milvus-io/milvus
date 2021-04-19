@@ -1,4 +1,4 @@
-package querynode
+package querynodeimp
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 )
 
 type insertNode struct {
-	BaseNode
+	baseNode
 	replica collectionReplica
 }
 
@@ -162,12 +162,12 @@ func newInsertNode(replica collectionReplica) *insertNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
-	baseNode := BaseNode{}
+	baseNode := baseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &insertNode{
-		BaseNode: baseNode,
+		baseNode: baseNode,
 		replica:  replica,
 	}
 }

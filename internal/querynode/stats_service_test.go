@@ -1,4 +1,4 @@
-package querynode
+package querynodeimp
 
 import (
 	"testing"
@@ -8,7 +8,7 @@ import (
 
 // NOTE: start pulsar before test
 func TestStatsService_start(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	initTestMeta(t, node, "collection0", 0, 0)
 	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, nil)
 	node.statsService.start()
@@ -17,7 +17,7 @@ func TestStatsService_start(t *testing.T) {
 
 //NOTE: start pulsar before test
 func TestSegmentManagement_sendSegmentStatistic(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	initTestMeta(t, node, "collection0", 0, 0)
 
 	const receiveBufSize = 1024
