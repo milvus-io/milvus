@@ -7,18 +7,17 @@ import (
 	"os/signal"
 	"syscall"
 
-	grpcproxyservice "github.com/zilliztech/milvus-distributed/internal/distributed/proxyservice"
+	"github.com/zilliztech/milvus-distributed/cmd/distributed/components"
 
 	"go.uber.org/zap"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := grpcproxyservice.NewServer(ctx)
+	s, err := components.NewProxyService(ctx)
 	if err != nil {
-		log.Print("create server failed", zap.Error(err))
+		log.Fatal("create proxy service error: " + err.Error())
 	}
-
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
 		syscall.SIGHUP,
@@ -33,14 +32,14 @@ func main() {
 		cancel()
 	}()
 
-	if err := svr.Run(); err != nil {
+	if err := s.Run(); err != nil {
 		log.Fatal("init server failed", zap.Error(err))
 	}
 
 	<-ctx.Done()
 	log.Print("Got signal to exit", zap.String("signal", sig.String()))
 
-	if err := svr.Stop(); err != nil {
+	if err := s.Stop(); err != nil {
 		log.Fatal("stop server failed", zap.Error(err))
 	}
 	switch sig {
