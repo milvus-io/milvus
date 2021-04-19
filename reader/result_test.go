@@ -1,7 +1,7 @@
 package reader
 
 import (
-	msgPb "github.com/czs007/suvlim/pkg/message"
+	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"testing"
 )
 

@@ -21,7 +21,7 @@ Status::Status(StatusCode code, const std::string& msg) {
     // 4 bytes store code
     // 4 bytes store message length
     // the left bytes store message string
-    const uint32_t length = (uint32_t)msg.size();
+    auto length = static_cast<uint32_t>(msg.size());
     auto result = new char[length + sizeof(length) + CODE_WIDTH];
     std::memcpy(result, &code, CODE_WIDTH);
     std::memcpy(result + CODE_WIDTH, &length, sizeof(length));
@@ -30,15 +30,16 @@ Status::Status(StatusCode code, const std::string& msg) {
     state_ = result;
 }
 
-Status::Status() : state_(nullptr) {
-}
-
 Status::~Status() {
     delete state_;
 }
 
-Status::Status(const Status& s) : state_(nullptr) {
+Status::Status(const Status& s) {
     CopyFrom(s);
+}
+
+Status::Status(Status&& s) noexcept {
+    MoveFrom(s);
 }
 
 Status&
@@ -47,12 +48,8 @@ Status::operator=(const Status& s) {
     return *this;
 }
 
-Status::Status(Status&& s) : state_(nullptr) {
-    MoveFrom(s);
-}
-
 Status&
-Status::operator=(Status&& s) {
+Status::operator=(Status&& s) noexcept {
     MoveFrom(s);
     return *this;
 }

@@ -385,14 +385,31 @@ SegmentNaive::Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult
 Status
 SegmentNaive::Close() {
     state_ = SegmentState::Closed;
-    if(this->record_.reserved != this->record_.ack_responder_.GetAck()) {
-        std::runtime_error("insert not ready");
-    }
-    if(this->deleted_record_.reserved != this->record_.ack_responder_.GetAck()) {
-        std::runtime_error("delete not ready");
-    }
-    
     return Status::OK();
+    //    auto src_record = GetMutableRecord();
+    //    assert(src_record);
+    //
+    //    auto dst_record = std::make_shared<ImmutableRecord>(schema_->size());
+    //
+    //    auto data_move = [](auto& dst_vec, const auto& src_vec) {
+    //        assert(dst_vec.size() == 0);
+    //        dst_vec.insert(dst_vec.begin(), src_vec.begin(), src_vec.end());
+    //    };
+    //    data_move(dst_record->uids_, src_record->uids_);
+    //    data_move(dst_record->timestamps_, src_record->uids_);
+    //
+    //    assert(src_record->entity_vecs_.size() == schema_->size());
+    //    assert(dst_record->entity_vecs_.size() == schema_->size());
+    //    for (int i = 0; i < schema_->size(); ++i) {
+    //        data_move(dst_record->entity_vecs_[i], src_record->entity_vecs_[i]);
+    //    }
+    //    bool ready_old = false;
+    //    record_immutable_ = dst_record;
+    //    ready_immutable_.compare_exchange_strong(ready_old, true);
+    //    if (ready_old) {
+    //        throw std::logic_error("Close may be called twice, with potential race condition");
+    //    }
+    //    return Status::OK();
 }
 
 Status
