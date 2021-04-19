@@ -1133,6 +1133,7 @@ func (meta *metaTable) AddCollection(coll *CollectionMeta) error
 func (meta *metaTable) DeleteCollection(collId UniqueId) error
 func (meta *metaTable) HasCollection(collId UniqueId) bool
 func (meta *metaTable) GetCollectionByName(collName string) (*CollectionMeta, error)
+func (meta *metaTable) ListCollections()([]string, error)
 
 func (meta *metaTable) AddPartition(collId UniqueId, tag string) error
 func (meta *metaTable) HasPartition(collId UniqueId, tag string) bool

@@ -102,6 +102,11 @@ func TestMetaTable_Collection(t *testing.T) {
 	assert.NotNil(t, err)
 	err = meta.AddCollection(&colMeta5)
 	assert.NotNil(t, err)
+
+	collsName, err := meta.ListCollections()
+	assert.Nil(t, err)
+	assert.Equal(t, collsName, []string{"coll1", "coll2"})
+
 	hasCollection := meta.HasCollection(colMeta.ID)
 	assert.True(t, hasCollection)
 	err = meta.AddPartition(colMeta.ID, "p1")
