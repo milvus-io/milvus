@@ -1008,6 +1008,4 @@ class MyThread(threading.Thread):
 
 
 class CaseLabel:
-    tags_0331 = "0331"
-    tags_l1 = "l1"
     tags_smoke = "smoke"
