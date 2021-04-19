@@ -37,8 +37,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 
 	// Params.FlushDdBufferSize = 4
 	replica := newReplica()
-	allocatorMock := NewAllocatorFactory()
-	ddNode := newDDNode(ctx, newMetaTable(), inFlushCh, replica, allocatorMock)
+	ddNode := newDDNode(ctx, newBinlogMeta(), inFlushCh, replica)
 
 	collID := UniqueID(0)
 	collName := "col-test-0"

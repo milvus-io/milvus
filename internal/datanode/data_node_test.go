@@ -9,11 +9,13 @@ import (
 	"os"
 	"strconv"
 	"testing"
+	"time"
 
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
+	memkv "github.com/zilliztech/milvus-distributed/internal/kv/mem"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/types"
@@ -53,11 +55,10 @@ func TestMain(m *testing.M) {
 	os.Exit(exitCode)
 }
 
-func newMetaTable() *metaTable {
-	etcdClient, _ := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
-
-	etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
-	mt, _ := NewMetaTable(etcdKV)
+func newBinlogMeta() *binlogMeta {
+	kvMock := memkv.NewMemoryKV()
+	idAllocMock := NewAllocatorFactory(1)
+	mt, _ := NewBinlogMeta(kvMock, idAllocMock)
 	return mt
 }
 
@@ -100,10 +101,6 @@ type MetaFactory struct {
 
 type DataFactory struct {
 	rawData []byte
-}
-
-type AllocatorFactory struct {
-	ID UniqueID
 }
 
 type MasterServiceFactory struct {
@@ -386,23 +383,20 @@ func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (inMsgs []*msgstream.Insert
 	return
 }
 
+type AllocatorFactory struct {
+	r *rand.Rand
+}
+
 func NewAllocatorFactory(id ...UniqueID) *AllocatorFactory {
-	f := &AllocatorFactory{}
-	if len(id) == 1 {
-		f.ID = id[0]
+	f := &AllocatorFactory{
+		r: rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
+
 	return f
 }
 
-func (alloc AllocatorFactory) setID(id UniqueID) {
-	alloc.ID = id
-}
-
 func (alloc AllocatorFactory) allocID() (UniqueID, error) {
-	if alloc.ID == 0 {
-		return UniqueID(0), nil // GOOSE TODO: random ID generating
-	}
-	return alloc.ID, nil
+	return alloc.r.Int63n(1000000), nil
 }
 
 func (m *MasterServiceFactory) setID(id UniqueID) {

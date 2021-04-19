@@ -39,8 +39,8 @@ func TestParamTable_DataNode(t *testing.T) {
 		log.Println("InsertBinlogRootPath:", path)
 	})
 
-	t.Run("Test DdBinlogRootPath", func(t *testing.T) {
-		path := Params.DdBinlogRootPath
+	t.Run("Test DdlBinlogRootPath", func(t *testing.T) {
+		path := Params.DdlBinlogRootPath
 		log.Println("DdBinlogRootPath:", path)
 	})
 

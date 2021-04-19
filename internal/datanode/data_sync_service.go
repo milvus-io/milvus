@@ -58,25 +58,23 @@ func (dsService *dataSyncService) close() {
 
 func (dsService *dataSyncService) initNodes() {
 	// TODO: add delete pipeline support
-	// New metaTable
-	var mt *metaTable
+	var kvClient *clientv3.Client
+	var err error
 	connectEtcdFn := func() error {
-		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
-		if err != nil {
-			return err
-		}
-
-		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
-		mt, err = NewMetaTable(etcdKV)
+		kvClient, err = clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
 		if err != nil {
 			return err
 		}
 		return nil
 	}
-	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	err = retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
 	if err != nil {
 		panic(err)
 	}
+
+	etcdKV := etcdkv.NewEtcdKV(kvClient, Params.MetaRootPath)
+	// New binlogMeta
+	mt, _ := NewBinlogMeta(etcdKV, dsService.idAllocator)
 
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 
@@ -93,8 +91,8 @@ func (dsService *dataSyncService) initNodes() {
 	var ddStreamNode Node = newDDInputNode(dsService.ctx, dsService.msFactory)
 
 	var filterDmNode Node = newFilteredDmNode()
-	var ddNode Node = newDDNode(dsService.ctx, mt, dsService.flushChan, dsService.replica, dsService.idAllocator)
-	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, mt, dsService.replica, dsService.idAllocator, dsService.msFactory)
+	var ddNode Node = newDDNode(dsService.ctx, mt, dsService.flushChan, dsService.replica)
+	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, mt, dsService.replica, dsService.msFactory)
 	var gcNode Node = newGCNode(dsService.replica)
 
 	dsService.fg.AddNode(dmStreamNode)

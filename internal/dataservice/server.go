@@ -690,25 +690,29 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 		},
 	}
 	p := path.Join(Params.SegmentFlushMetaPath, strconv.FormatInt(req.SegmentID, 10))
-	value, err := s.client.Load(p)
+	_, values, err := s.client.LoadWithPrefix(p)
 	if err != nil {
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
-	flushMeta := &datapb.SegmentFlushMeta{}
-	err = proto.UnmarshalText(value, flushMeta)
-	if err != nil {
-		resp.Status.Reason = err.Error()
-		return resp, nil
+	m := make(map[int64][]string)
+	tMeta := &datapb.SegmentFieldBinlogMeta{}
+	for _, v := range values {
+		if err := proto.UnmarshalText(v, tMeta); err != nil {
+			resp.Status.Reason = err.Error()
+			return resp, nil
+		}
+		m[tMeta.FieldID] = append(m[tMeta.FieldID], tMeta.BinlogPath)
 	}
-	fields := make([]UniqueID, len(flushMeta.Fields))
-	paths := make([]*internalpb.StringList, len(flushMeta.Fields))
-	for i, field := range flushMeta.Fields {
-		fields[i] = field.FieldID
-		paths[i] = &internalpb.StringList{Values: field.BinlogPaths}
+
+	fids := make([]UniqueID, len(m))
+	paths := make([]*internalpb.StringList, len(m))
+	for k, v := range m {
+		fids = append(fids, k)
+		paths = append(paths, &internalpb.StringList{Values: v})
 	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
-	resp.FieldIDs = fields
+	resp.FieldIDs = fids
 	resp.Paths = paths
 	return resp, nil
 }
