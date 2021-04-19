@@ -42,7 +42,9 @@ lint:
 
 ruleguard:
 	@echo "Running $@ check"
-	@${GOPATH}/bin/ruleguard -rules ruleguard.rule.go ./... || true
+	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./internal/... || true
+	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./cmd/... || true
+	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./test/... || true
 
 verifiers: get-check-deps fmt lint ruleguard
 
