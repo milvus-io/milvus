@@ -26,8 +26,8 @@ const (
 type (
 	Inteface interface {
 		typeutil.Service
-		typeutil.Component
 
+		GetComponentStates() (*internalpb2.ComponentStates, error)
 		WatchDmChannels(in *datapb.WatchDmChannelRequest) (*commonpb.Status, error)
 		FlushSegments(in *datapb.FlushSegRequest) (*commonpb.Status, error)
 	}
@@ -43,7 +43,6 @@ type (
 	}
 
 	DataNode struct {
-		// GOOSE TODO: complete interface with component
 		ctx    context.Context
 		NodeID UniqueID
 		Role   string
@@ -125,7 +124,7 @@ func (node *DataNode) Init() error {
 	chanSize := 100
 	flushChan := make(chan *flushMsg, chanSize)
 	node.dataSyncService = newDataSyncService(node.ctx, flushChan, replica, alloc)
-	node.metaService = newMetaService(node.ctx, replica, node.masterService)
+	node.metaService = newMetaService(node.ctx, replica)
 	node.replica = replica
 
 	// Opentracing
@@ -155,7 +154,7 @@ func (node *DataNode) Init() error {
 func (node *DataNode) Start() error {
 
 	go node.dataSyncService.start()
-	node.metaService.init()
+	node.metaService.start()
 
 	return nil
 }

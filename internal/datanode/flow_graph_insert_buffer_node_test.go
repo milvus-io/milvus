@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/require"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -38,9 +39,11 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
+	schemaBlob := proto.MarshalTextString(collMeta.Schema)
+	require.NotEqual(t, "", schemaBlob)
 
 	replica := newReplica()
-	err = replica.addCollection(collMeta.ID, collMeta.Schema)
+	err = replica.addCollection(collMeta.ID, schemaBlob)
 	require.NoError(t, err)
 
 	// Params.FlushInsertBufSize = 2

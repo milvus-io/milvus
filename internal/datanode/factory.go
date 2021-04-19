@@ -3,8 +3,6 @@ package datanode
 import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
@@ -16,12 +14,6 @@ type (
 	}
 
 	AllocatorFactory struct {
-	}
-
-	MasterServiceFactory struct {
-		ID             UniqueID
-		collectionName string
-		collectionID   UniqueID
 	}
 )
 
@@ -163,43 +155,4 @@ func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionNa
 func (alloc AllocatorFactory) allocID() (UniqueID, error) {
 	// GOOSE TODO: random ID generate
 	return UniqueID(0), nil
-}
-
-func (m *MasterServiceFactory) setID(id UniqueID) {
-	m.ID = id // GOOSE TODO: random ID generator
-}
-
-func (m *MasterServiceFactory) setCollectionID(id UniqueID) {
-	m.collectionID = id
-}
-
-func (m *MasterServiceFactory) setCollectionName(name string) {
-	m.collectionName = name
-}
-
-func (m *MasterServiceFactory) AllocID(in *masterpb.IDRequest) (*masterpb.IDResponse, error) {
-	resp := &masterpb.IDResponse{
-		Status: &commonpb.Status{},
-		ID:     m.ID,
-	}
-	return resp, nil
-}
-
-func (m *MasterServiceFactory) ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
-	resp := &milvuspb.ShowCollectionResponse{
-		Status:          &commonpb.Status{},
-		CollectionNames: []string{m.collectionName},
-	}
-	return resp, nil
-
-}
-func (m *MasterServiceFactory) DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-	f := MetaFactory{}
-	meta := f.CollectionMetaFactory(m.collectionID, m.collectionName)
-	resp := &milvuspb.DescribeCollectionResponse{
-		Status:       &commonpb.Status{},
-		CollectionID: m.collectionID,
-		Schema:       meta.Schema,
-	}
-	return resp, nil
 }
