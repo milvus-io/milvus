@@ -19,6 +19,7 @@ func (b *Builder) BuildIndex(ctx context.Context, request *indexbuilderpb.BuildI
 	t.idAllocator = b.idAllocator
 	t.buildQueue = b.sched.IndexBuildQueue
 	t.table = b.metaTable
+	t.kv = b.kv
 	var cancel func()
 	t.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
