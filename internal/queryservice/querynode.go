@@ -2,6 +2,7 @@ package queryservice
 
 import (
 	"context"
+	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -10,7 +11,9 @@ import (
 )
 
 type queryNodeInfo struct {
-	client       types.QueryNode
+	client types.QueryNode
+
+	mu           sync.Mutex // guards segments and channels2Col
 	segments     map[UniqueID][]UniqueID
 	channels2Col map[UniqueID][]string
 }
@@ -32,6 +35,8 @@ func (qn *queryNodeInfo) WatchDmChannels(ctx context.Context, in *querypb.WatchD
 }
 
 func (qn *queryNodeInfo) AddDmChannels(channels []string, collectionID UniqueID) {
+	qn.mu.Lock()
+	defer qn.mu.Unlock()
 	if _, ok := qn.channels2Col[collectionID]; !ok {
 		chs := make([]string, 0)
 		qn.channels2Col[collectionID] = chs
@@ -39,7 +44,15 @@ func (qn *queryNodeInfo) AddDmChannels(channels []string, collectionID UniqueID)
 	qn.channels2Col[collectionID] = append(qn.channels2Col[collectionID], channels...)
 }
 
+func (qn *queryNodeInfo) getChannels2Col() map[UniqueID][]string {
+	qn.mu.Lock()
+	defer qn.mu.Unlock()
+	return qn.channels2Col
+}
+
 func (qn *queryNodeInfo) AddSegments(segmentIDs []UniqueID, collectionID UniqueID) {
+	qn.mu.Lock()
+	defer qn.mu.Unlock()
 	if _, ok := qn.segments[collectionID]; !ok {
 		seg := make([]UniqueID, 0)
 		qn.segments[collectionID] = seg
@@ -53,6 +66,8 @@ func (qn *queryNodeInfo) AddQueryChannel(ctx context.Context, in *querypb.AddQue
 
 func (qn *queryNodeInfo) ReleaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	status, err := qn.client.ReleaseCollection(ctx, in)
+	qn.mu.Lock()
+	defer qn.mu.Unlock()
 	if err != nil {
 		return status, err
 	}

@@ -19,6 +19,7 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -46,11 +47,12 @@ type QueryNode struct {
 	replica ReplicaInterface
 
 	// internal services
-	dataSyncServices map[UniqueID]*dataSyncService
 	metaService      *metaService
 	searchService    *searchService
 	loadService      *loadService
 	statsService     *statsService
+	dsServicesMu     sync.Mutex // guards dataSyncServices
+	dataSyncServices map[UniqueID]*dataSyncService
 
 	// clients
 	masterService types.MasterService
@@ -242,6 +244,32 @@ func (node *QueryNode) SetDataService(data types.DataService) error {
 	return nil
 }
 
+func (node *QueryNode) getDataSyncService(collectionID UniqueID) (*dataSyncService, error) {
+	node.dsServicesMu.Lock()
+	defer node.dsServicesMu.Unlock()
+	ds, ok := node.dataSyncServices[collectionID]
+	if !ok {
+		return nil, errors.New("cannot found dataSyncService, collectionID =" + fmt.Sprintln(collectionID))
+	}
+	return ds, nil
+}
+
+func (node *QueryNode) addDataSyncService(collectionID UniqueID, ds *dataSyncService) error {
+	node.dsServicesMu.Lock()
+	defer node.dsServicesMu.Unlock()
+	if _, ok := node.dataSyncServices[collectionID]; ok {
+		return errors.New("dataSyncService has been existed, collectionID =" + fmt.Sprintln(collectionID))
+	}
+	node.dataSyncServices[collectionID] = ds
+	return nil
+}
+
+func (node *QueryNode) removeDataSyncService(collectionID UniqueID) {
+	node.dsServicesMu.Lock()
+	defer node.dsServicesMu.Unlock()
+	delete(node.dataSyncServices, collectionID)
+}
+
 func (node *QueryNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	stats := &internalpb.ComponentStates{
 		Status: &commonpb.Status{
@@ -367,8 +395,8 @@ func (node *QueryNode) RemoveQueryChannel(ctx context.Context, in *queryPb.Remov
 func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	log.Debug("starting WatchDmChannels ...", zap.String("ChannelIDs", fmt.Sprintln(in.ChannelIDs)))
 	collectionID := in.CollectionID
-	service, ok := node.dataSyncServices[collectionID]
-	if !ok || service.dmStream == nil {
+	ds, err := node.getDataSyncService(collectionID)
+	if err != nil || ds.dmStream == nil {
 		errMsg := "null data sync service or null data manipulation stream, collectionID = " + fmt.Sprintln(collectionID)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -378,7 +406,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 		return status, errors.New(errMsg)
 	}
 
-	switch t := service.dmStream.(type) {
+	switch t := ds.dmStream.(type) {
 	case *pulsarms.PulsarTtMsgStream:
 	case *rmqms.RmqTtMsgStream:
 	default:
@@ -424,9 +452,9 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 		}
 	}
 
-	service.dmStream.AsConsumer(toDirSubChannels, consumeSubName)
+	ds.dmStream.AsConsumer(toDirSubChannels, consumeSubName)
 	for _, pos := range toSeekInfo {
-		err := service.dmStream.Seek(pos)
+		err := ds.dmStream.Seek(pos)
 		if err != nil {
 			errMsg := "msgStream seek error :" + err.Error()
 			status := &commonpb.Status{
@@ -470,8 +498,16 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 			return status, err
 		}
 		node.replica.initExcludedSegments(collectionID)
-		node.dataSyncServices[collectionID] = newDataSyncService(node.queryNodeLoopCtx, node.replica, node.msFactory, collectionID)
-		go node.dataSyncServices[collectionID].start()
+		newDS := newDataSyncService(node.queryNodeLoopCtx, node.replica, node.msFactory, collectionID)
+		// ignore duplicated dataSyncService error
+		node.addDataSyncService(collectionID, newDS)
+		ds, err := node.getDataSyncService(collectionID)
+		if err != nil {
+			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			status.Reason = err.Error()
+			return status, err
+		}
+		go ds.start()
 		node.searchService.startSearchCollection(collectionID)
 	}
 	if !hasPartition {
@@ -505,9 +541,10 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 }
 
 func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	if _, ok := node.dataSyncServices[in.CollectionID]; ok {
-		node.dataSyncServices[in.CollectionID].close()
-		delete(node.dataSyncServices, in.CollectionID)
+	ds, err := node.getDataSyncService(in.CollectionID)
+	if err == nil && ds != nil {
+		ds.close()
+		node.removeDataSyncService(in.CollectionID)
 		node.replica.removeTSafe(in.CollectionID)
 		node.replica.removeExcludedSegments(in.CollectionID)
 	}
@@ -516,7 +553,7 @@ func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.Releas
 		node.searchService.stopSearchCollection(in.CollectionID)
 	}
 
-	err := node.replica.removeCollection(in.CollectionID)
+	err = node.replica.removeCollection(in.CollectionID)
 	if err != nil {
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,

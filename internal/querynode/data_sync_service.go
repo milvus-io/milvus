@@ -49,6 +49,7 @@ func (dsService *dataSyncService) close() {
 	if dsService.fg != nil {
 		dsService.fg.Close()
 	}
+	log.Debug("dataSyncService closed", zap.Int64("collectionID", dsService.collectionID))
 }
 
 func (dsService *dataSyncService) initNodes() {
