@@ -244,6 +244,9 @@ func (node *NodeImpl) Init() error {
 }
 
 func (node *NodeImpl) Start() error {
+	initGlobalInsertChannelsMap(node)
+	log.Println("init global insert channels map ...")
+
 	initGlobalMetaCache(node.ctx, node)
 	log.Println("init global meta cache ...")
 

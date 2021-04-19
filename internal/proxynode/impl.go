@@ -40,6 +40,7 @@ func (node *NodeImpl) CreateCollection(request *milvuspb.CreateCollectionRequest
 		Condition:               NewTaskCondition(ctx),
 		CreateCollectionRequest: request,
 		masterClient:            node.masterClient,
+		dataServiceClient:       node.dataServiceClient,
 	}
 	var cancel func()
 	cct.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
@@ -79,6 +80,7 @@ func (node *NodeImpl) DropCollection(request *milvuspb.DropCollectionRequest) (*
 		Condition:             NewTaskCondition(ctx),
 		DropCollectionRequest: request,
 		masterClient:          node.masterClient,
+		dataServiceClient:     node.dataServiceClient,
 	}
 	var cancel func()
 	dct.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
@@ -569,8 +571,9 @@ func (node *NodeImpl) Insert(request *milvuspb.InsertRequest) (*milvuspb.InsertR
 	span.SetTag("partition tag", request.PartitionName)
 	log.Println("insert into: ", request.CollectionName)
 	it := &InsertTask{
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
+		ctx:               ctx,
+		Condition:         NewTaskCondition(ctx),
+		dataServiceClient: node.dataServiceClient,
 		BaseInsertTask: BaseInsertTask{
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: request.HashKeys,
@@ -585,8 +588,7 @@ func (node *NodeImpl) Insert(request *milvuspb.InsertRequest) (*milvuspb.InsertR
 				RowData:        request.RowData,
 			},
 		},
-		manipulationMsgStream: node.manipulationMsgStream,
-		rowIDAllocator:        node.idAllocator,
+		rowIDAllocator: node.idAllocator,
 	}
 	if len(it.PartitionName) <= 0 {
 		it.PartitionName = Params.DefaultPartitionTag
