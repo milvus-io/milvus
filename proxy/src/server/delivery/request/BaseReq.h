@@ -14,6 +14,7 @@
 #include "server/context/Context.h"
 #include "server/delivery/request/Types.h"
 #include "utils/Status.h"
+#include "pulsar/message_client/ClientV2.h"
 
 #include <condition_variable>
 #include <memory>
@@ -74,6 +75,9 @@ class BaseReq {
     void
     SetStatus(const Status& status);
 
+    void
+    SetTimestamp(uint64_t ts);
+
  protected:
     virtual Status
     OnPreExecute();
@@ -90,6 +94,8 @@ class BaseReq {
     std::string req_group_;
     bool async_;
     Status status_;
+    uint64_t timestamp_;
+
 
  private:
     mutable std::mutex finish_mtx_;

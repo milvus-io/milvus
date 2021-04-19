@@ -3,7 +3,6 @@ set(src-cpp
         ClientV2.cpp
         Consumer.cpp
         Producer.cpp
-        ${PROJECT_SOURCE_DIR}/src/grpc/gen-milvus/suvlim.pb.cc
         )
 
 add_library(message_client_cpp SHARED

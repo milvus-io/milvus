@@ -1,6 +1,6 @@
 
 #include "Consumer.h"
-#include "grpc/gen-milvus/suvlim.pb.h"
+#include "src/grpc/gen-milvus/suvlim.pb.h"
 
 namespace milvus {
 namespace message_client {

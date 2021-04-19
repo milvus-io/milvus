@@ -28,6 +28,7 @@
 #include "server/init/StorageChecker.h"
 #include "src/version.h"
 #include <yaml-cpp/yaml.h>
+#include "src/pulsar/message_client/ClientV2.h"
 #include "utils/Log.h"
 #include "utils/SignalHandler.h"
 #include "utils/TimeRecorder.h"
@@ -290,11 +291,11 @@ Server::StartService() {
 
     grpc::GrpcServer::GetInstance().Start();
 
-    // stat = storage::S3ClientWrapper::GetInstance().StartService();
-    // if (!stat.ok()) {
-    //     LOG_SERVER_ERROR_ << "S3Client start service fail: " << stat.message();
-    //     goto FAIL;
-    // }
+    stat = message_client::MsgClientV2::GetInstance().Init("topic-insert","topic-query","topic-result");
+    if (!stat.ok()) {
+        LOG_SERVER_ERROR_ << "Pulsar message client start service fail: " << stat.message();
+        goto FAIL;
+    }
 
     return Status::OK();
 FAIL:

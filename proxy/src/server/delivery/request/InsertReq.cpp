@@ -14,6 +14,7 @@
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
+#include "server/delivery/ReqScheduler.h"
 
 #include <memory>
 #include <string>
@@ -28,27 +29,27 @@
 namespace milvus {
 namespace server {
 
-InsertReq::InsertReq(const ContextPtr& context, const std::string& collection_name, const std::string& partition_name,
-                     const int64_t& row_count, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data)
+InsertReq::InsertReq(const ContextPtr &context, const ::milvus::grpc::InsertParam *insert_param)
     : BaseReq(context, ReqType::kInsert),
-      collection_name_(collection_name),
-      partition_name_(partition_name),
-      row_count_(row_count),
-      chunk_data_(chunk_data) {
+      insert_param_(insert_param) {
 }
 
 BaseReqPtr
-InsertReq::Create(const ContextPtr& context, const std::string& collection_name, const std::string& partition_name,
-                  const int64_t& row_count, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
-    return std::shared_ptr<BaseReq>(new InsertReq(context, collection_name, partition_name, row_count, chunk_data));
+InsertReq::Create(const ContextPtr &context, const ::milvus::grpc::InsertParam *insert_param) {
+  return std::shared_ptr<BaseReq>(new InsertReq(context, insert_param));
 }
 
 Status
 InsertReq::OnExecute() {
-    LOG_SERVER_INFO_ << LogOut("[%s][%ld] ", "insert", 0) << "Execute InsertReq.";
+  LOG_SERVER_INFO_ << LogOut("[%s][%ld] ", "insert", 0) << "Execute InsertReq.";
+  auto &msg_client = message_client::MsgClientV2::GetInstance();
+  Status status = msg_client.SendMutMessage(*insert_param_);
+  return status;
+}
 
-
-    return Status::OK();
+Status InsertReq::OnPostExecute() {
+  ReqScheduler::GetInstance().UpdateLatestDeliveredReqTime(timestamp_);
+  return Status::OK();
 }
 
 }  // namespace server

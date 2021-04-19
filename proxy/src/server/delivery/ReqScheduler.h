@@ -44,6 +44,11 @@ class ReqScheduler {
 
     static void
     ExecReq(const BaseReqPtr& req_ptr);
+    
+    void UpdateLatestDeliveredReqTime(int64_t time);
+    
+    int64_t GetLatestReqDeliveredTime();
+    
 
  protected:
     ReqScheduler();
@@ -58,6 +63,8 @@ class ReqScheduler {
 
  private:
     mutable std::mutex queue_mtx_;
+    
+    std::atomic<int64_t > latest_req_time_;
 
     std::map<std::string, ReqQueuePtr> req_groups_;
 

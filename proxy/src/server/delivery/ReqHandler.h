@@ -79,8 +79,7 @@ class ReqHandler {
               const std::string& index_name);
 
     Status
-    Insert(const ContextPtr& context, const std::string& collection_name, const std::string& partition_name,
-           const int64_t& row_count, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
+    Insert(const ContextPtr& context, const ::milvus::grpc::InsertParam* insert_param);
 
     Status
     GetEntityByID(const ContextPtr& context, const std::string& collection_name, const engine::IDNumbers& ids,
@@ -88,7 +87,7 @@ class ReqHandler {
                    engine::DataChunkPtr& data_chunk);
 
     Status
-    DeleteEntityByID(const ContextPtr& context, const std::string& collection_name, const engine::IDNumbers& ids);
+    DeleteEntityByID(const ContextPtr& context, const ::milvus::grpc::DeleteByIDParam *param);
 
     Status
     Search(const ContextPtr& context, const query::QueryPtr& query_ptr, const milvus::json& json_params,

@@ -29,18 +29,17 @@ namespace server {
 class DeleteEntityByIDReq : public BaseReq {
  public:
     static BaseReqPtr
-    Create(const ContextPtr& context, const std::string& collection_name, const engine::IDNumbers& entity_ids);
+    Create(const ContextPtr& context, const ::milvus::grpc::DeleteByIDParam *request);
 
  protected:
-    DeleteEntityByIDReq(const ContextPtr& context, const std::string& collection_name,
-                        const engine::IDNumbers& entity_ids);
+    DeleteEntityByIDReq(const ContextPtr& context, const ::milvus::grpc::DeleteByIDParam *request);
 
     Status
     OnExecute() override;
 
  private:
-    const std::string collection_name_;
-    const engine::IDNumbers& entity_ids_;
+   const ::milvus::grpc::DeleteByIDParam *request_;
+  Status OnPostExecute();
 };
 
 }  // namespace server

@@ -16,6 +16,7 @@
 // under the License.
 
 #include "server/delivery/request/DeleteEntityByIDReq.h"
+#include "src/server/delivery/ReqScheduler.h"
 
 #include <memory>
 #include <string>
@@ -29,21 +30,25 @@
 namespace milvus {
 namespace server {
 
-DeleteEntityByIDReq::DeleteEntityByIDReq(const ContextPtr& context, const std::string& collection_name,
-                                         const engine::IDNumbers& entity_ids)
-    : BaseReq(context, ReqType::kDeleteEntityByID), collection_name_(collection_name), entity_ids_(entity_ids) {
+DeleteEntityByIDReq::DeleteEntityByIDReq(const ContextPtr& context, const ::milvus::grpc::DeleteByIDParam *request)
+    : BaseReq(context, ReqType::kDeleteEntityByID), request_(request) {
 }
 
 BaseReqPtr
-DeleteEntityByIDReq::Create(const ContextPtr& context, const std::string& collection_name,
-                            const engine::IDNumbers& entity_ids) {
-    return std::shared_ptr<BaseReq>(new DeleteEntityByIDReq(context, collection_name, entity_ids));
+DeleteEntityByIDReq::Create(const ContextPtr& context, const ::milvus::grpc::DeleteByIDParam *request) {
+    return std::shared_ptr<BaseReq>(new DeleteEntityByIDReq(context, request));
 }
 
 Status
 DeleteEntityByIDReq::OnExecute() {
+  auto &msg_client = message_client::MsgClientV2::GetInstance();
+  Status status = msg_client.SendMutMessage(*request_);
+  return status;
+}
 
-    return Status::OK();
+Status DeleteEntityByIDReq::OnPostExecute() {
+  ReqScheduler::GetInstance().UpdateLatestDeliveredReqTime(timestamp_);
+  return Status::OK();
 }
 
 }  // namespace server
