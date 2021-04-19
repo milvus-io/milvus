@@ -109,7 +109,7 @@ func (s *Segment) segmentPreDelete(numOfRecords int) int64 {
 //-------------------------------------------------------------------------------------- dm & search functions
 func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps *[]Timestamp, records *[]*commonpb.Blob) error {
 	/*
-		CStatus
+		int
 		Insert(CSegmentBase c_segment,
 		           long int reserved_offset,
 		           signed long int size,
@@ -148,12 +148,8 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 		cSizeofPerRow,
 		cNumOfRows)
 
-	errorCode := status.error_code
-
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("Insert failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	if status != 0 {
+		return errors.New("Insert failed, error code = " + strconv.Itoa(int(status)))
 	}
 
 	s.recentlyModified = true
@@ -162,7 +158,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 
 func (s *Segment) segmentDelete(offset int64, entityIDs *[]UniqueID, timestamps *[]Timestamp) error {
 	/*
-		CStatus
+		int
 		Delete(CSegmentBase c_segment,
 		           long int reserved_offset,
 		           long size,
@@ -176,12 +172,8 @@ func (s *Segment) segmentDelete(offset int64, entityIDs *[]UniqueID, timestamps 
 
 	var status = C.Delete(s.segmentPtr, cOffset, cSize, cEntityIdsPtr, cTimestampsPtr)
 
-	errorCode := status.error_code
-
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("Delete failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	if status != 0 {
+		return errors.New("Delete failed, error code = " + strconv.Itoa(int(status)))
 	}
 
 	return nil
@@ -195,8 +187,7 @@ func (s *Segment) segmentSearch(plan *Plan,
 	numQueries int64,
 	topK int64) error {
 	/*
-		CStatus
-		Search(void* plan,
+		void* Search(void* plan,
 			void* placeholder_groups,
 			uint64_t* timestamps,
 			int num_groups,
@@ -220,20 +211,16 @@ func (s *Segment) segmentSearch(plan *Plan,
 	var cNumGroups = C.int(len(placeHolderGroups))
 
 	var status = C.Search(s.segmentPtr, plan.cPlan, cPlaceHolder, cTimestamp, cNumGroups, cNewResultIds, cNewResultDistances)
-	errorCode := status.error_code
-
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("Search failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	if status != 0 {
+		return errors.New("search failed, error code = " + strconv.Itoa(int(status)))
 	}
 
 	cNumQueries := C.long(numQueries)
 	cTopK := C.long(topK)
 	// reduce search result
-	mergeStatus := C.MergeInto(cNumQueries, cTopK, cResultDistances, cResultIds, cNewResultDistances, cNewResultIds)
-	if mergeStatus != 0 {
-		return errors.New("merge search result failed, error code = " + strconv.Itoa(int(mergeStatus)))
+	status = C.MergeInto(cNumQueries, cTopK, cResultDistances, cResultIds, cNewResultDistances, cNewResultIds)
+	if status != 0 {
+		return errors.New("merge search result failed, error code = " + strconv.Itoa(int(status)))
 	}
 	return nil
 }

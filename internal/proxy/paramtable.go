@@ -96,6 +96,27 @@ func (pt *ParamTable) ProxyIDList() []UniqueID {
 	return ret
 }
 
+func (pt *ParamTable) queryNodeNum() int {
+	return len(pt.queryNodeIDList())
+}
+
+func (pt *ParamTable) queryNodeIDList() []UniqueID {
+	queryNodeIDStr, err := pt.Load("nodeID.queryNodeIDList")
+	if err != nil {
+		panic(err)
+	}
+	var ret []UniqueID
+	queryNodeIDs := strings.Split(queryNodeIDStr, ",")
+	for _, i := range queryNodeIDs {
+		v, err := strconv.Atoi(i)
+		if err != nil {
+			log.Panicf("load proxy id list error, %s", err.Error())
+		}
+		ret = append(ret, UniqueID(v))
+	}
+	return ret
+}
+
 func (pt *ParamTable) ProxyID() UniqueID {
 	proxyID, err := pt.Load("_proxyID")
 	if err != nil {
@@ -396,11 +417,11 @@ func (pt *ParamTable) searchChannelNames() []string {
 }
 
 func (pt *ParamTable) searchResultChannelNames() []string {
-	ch, err := pt.Load("msgChannel.chanNamePrefix.search")
+	ch, err := pt.Load("msgChannel.chanNamePrefix.searchResult")
 	if err != nil {
 		log.Fatal(err)
 	}
-	channelRange, err := pt.Load("msgChannel.channelRange.search")
+	channelRange, err := pt.Load("msgChannel.channelRange.searchResult")
 	if err != nil {
 		panic(err)
 	}

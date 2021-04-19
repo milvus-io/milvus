@@ -13,7 +13,7 @@ import (
 type Timestamp = typeutil.Timestamp
 
 const (
-	tsCountPerRPC = 2 << 18 * 10
+	tsCountPerRPC = 2 << 15
 )
 
 type TimestampAllocator struct {
@@ -37,6 +37,7 @@ func NewTimestampAllocator(ctx context.Context, masterAddr string) (*TimestampAl
 	}
 	a.Allocator.syncFunc = a.syncTs
 	a.Allocator.processFunc = a.processFunc
+	a.Allocator.checkFunc = a.checkFunc
 	return a, nil
 }
 
