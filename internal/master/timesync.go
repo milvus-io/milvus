@@ -52,7 +52,7 @@ func (ttBarrier *softTimeTickBarrier) GetTimeTick() (Timestamp, error) {
 			}
 		}
 		atomic.StoreInt64(&(ttBarrier.lastTt), int64(ts))
-		return ts, nil
+		return ts, ttBarrier.ctx.Err()
 	}
 }
 
@@ -144,7 +144,7 @@ func (ttBarrier *hardTimeTickBarrier) GetTimeTick() (Timestamp, error) {
 		if !ok {
 			return 0, errors.Errorf("[GetTimeTick] closed.")
 		}
-		return ts, nil
+		return ts, ttBarrier.ctx.Err()
 	}
 }
 
