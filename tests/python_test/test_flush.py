@@ -201,6 +201,8 @@ class TestFlushBase:
         '''
         ids = [i for i in range(default_nb)]
         ids = connect.insert(id_collection, default_entities, ids)
+        # add flush
+        connect.flush([id_collection])
         timeout = 20
         start_time = time.time()
         while (time.time() - start_time < timeout):

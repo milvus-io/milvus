@@ -854,6 +854,7 @@ class TestInsertMultiCollections:
         collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
         ids = connect.insert(collection, default_entity)
+        connect.flush([collection])
         connect.create_index(collection_name, field_name, get_simple_index)
         index = connect.describe_index(collection_name, field_name)
         assert index == get_simple_index
