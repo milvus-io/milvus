@@ -72,7 +72,7 @@ func (queue *BaseTaskQueue) FrontUnissuedTask() task {
 	defer queue.utLock.Unlock()
 
 	if queue.unissuedTasks.Len() <= 0 {
-		log.Panic("sorry, but the unissued task list is empty!")
+		log.Warn("sorry, but the unissued task list is empty!")
 		return nil
 	}
 
@@ -219,7 +219,6 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 
 	defer func() {
 		t.Notify(err)
-		log.Debug("indexservice", zap.String("notify with error", err.Error()))
 	}()
 	if err != nil {
 		trace.LogError(span, err)

@@ -2,10 +2,12 @@ package proxynode
 
 import (
 	"errors"
-	"log"
 	"sort"
 	"unsafe"
 
+	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -97,7 +99,7 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 			ts, ok := channelMaxTSMap[reqID][channelID]
 			if !ok {
 				ts = typeutil.ZeroTimestamp
-				log.Println("Warning: did not get max Timstamp!")
+				log.Debug("Warning: did not get max Timstamp!")
 			}
 			channelName := getChannelName(collID, channelID)
 			if channelName == "" {
@@ -109,7 +111,7 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 			}
 			reqSegCountMap[reqID][channelID] = make(map[UniqueID]uint32)
 			reqSegCountMap[reqID][channelID] = mapInfo
-			log.Println("ProxyNode: repackFunc, reqSegCountMap, reqID:", reqID, " mapInfo: ", mapInfo)
+			log.Debug("proxynode", zap.Int64("repackFunc, reqSegCountMap, reqID", reqID), zap.Any("mapinfo", mapInfo))
 		}
 	}
 
@@ -167,13 +169,13 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 				return segIDSlice[index]
 			}
 		}
-		log.Panic("Can't Found SegmentID")
+		log.Warn("Can't Found SegmentID")
 		return 0
 	}
 
 	factor := 10
 	threshold := Params.PulsarMaxMessageSize / factor
-	log.Println("threshold of message size: ", threshold)
+	log.Debug("proxynode", zap.Int("threshold of message size: ", threshold))
 	// not accurate
 	getSizeOfInsertMsg := func(msg *msgstream.InsertMsg) int {
 		// if real struct, call unsafe.Sizeof directly,
@@ -202,7 +204,8 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 			size += int(unsafe.Sizeof(blob.Value))
 			size += len(blob.Value)
 		}
-		// log.Println("size of insert message: ", size)
+
+		//log.Debug("proxynode", zap.Int("insert message size", size))
 		return size
 	}
 	// not accurate

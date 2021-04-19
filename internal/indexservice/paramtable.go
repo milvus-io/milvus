@@ -37,6 +37,7 @@ var once sync.Once
 func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
+		pt.initLogCfg()
 		pt.initAddress()
 		pt.initPort()
 		pt.initEtcdAddress()
@@ -48,7 +49,6 @@ func (pt *ParamTable) Init() {
 		pt.initMinIOSecretAccessKey()
 		pt.initMinIOUseSSL()
 		pt.initMinioBucketName()
-		pt.initLogCfg()
 	})
 }
 
@@ -192,5 +192,9 @@ func (pt *ParamTable) initLogCfg() {
 	if err != nil {
 		panic(err)
 	}
-	pt.Log.File.Filename = path.Join(rootPath, "indexservice-%d.log")
+	if len(rootPath) != 0 {
+		pt.Log.File.Filename = path.Join(rootPath, "indexservice.log")
+	} else {
+		pt.Log.File.Filename = ""
+	}
 }

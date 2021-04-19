@@ -13,21 +13,25 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/zilliztech/milvus-distributed/cmd/distributed/components"
-
 	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/cmd/distributed/components"
+	"github.com/zilliztech/milvus-distributed/internal/indexservice"
+	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/zilliztech/milvus-distributed/internal/logutil"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
+	indexservice.Params.Init()
+	logutil.SetupLogger(&indexservice.Params.Log)
 	s, err := components.NewIndexService(ctx)
 	if err != nil {
-		log.Print("create server failed", zap.Error(err))
+		log.Debug("create server failed", zap.Error(err))
 	}
 
 	sc := make(chan os.Signal, 1)
@@ -48,7 +52,7 @@ func main() {
 	}
 
 	<-ctx.Done()
-	log.Print("Got signal to exit", zap.String("signal", sig.String()))
+	log.Debug("Got signal to exit", zap.String("signal", sig.String()))
 
 	if err := s.Stop(); err != nil {
 		log.Fatal("stop server failed", zap.Error(err))

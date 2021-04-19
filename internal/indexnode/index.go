@@ -18,7 +18,10 @@ import (
 	"fmt"
 	"unsafe"
 
+	"go.uber.org/zap"
+
 	"github.com/golang/protobuf/proto"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexcgopb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
@@ -188,13 +191,12 @@ func (index *CIndex) BuildFloatVecIndexWithoutIds(vectors []float32) error {
 		CStatus
 		BuildFloatVecIndexWithoutIds(CIndex index, int64_t float_value_num, const float* vectors);
 	*/
-	fmt.Println("before BuildFloatVecIndexWithoutIds")
+	log.Debug("before BuildFloatVecIndexWithoutIds")
 	status := C.BuildFloatVecIndexWithoutIds(index.indexPtr, (C.int64_t)(len(vectors)), (*C.float)(&vectors[0]))
 	errorCode := status.error_code
-	fmt.Println("BuildFloatVecIndexWithoutIds error code: ", errorCode)
 	if errorCode != 0 {
 		errorMsg := C.GoString(status.error_msg)
-		fmt.Println("BuildFloatVecIndexWithoutIds error msg: ", errorMsg)
+		log.Debug("indexnode", zap.String("BuildFloatVecIndexWithoutIds error msg: ", errorMsg))
 		defer C.free(unsafe.Pointer(status.error_msg))
 		return fmt.Errorf("BuildFloatVecIndexWithoutIds failed, C runtime error detected, error code = %d, err msg = %s", errorCode, errorMsg)
 	}
@@ -256,14 +258,13 @@ func NewCIndex(typeParams, indexParams map[string]string) (Index, error) {
 					CIndex* res_index);
 	*/
 	var indexPtr C.CIndex
-	fmt.Println("before create index ........................................")
+	log.Debug("before create index ...")
 	status := C.CreateIndex(typeParamsPointer, indexParamsPointer, &indexPtr)
-	fmt.Println("after create index ........................................")
+	log.Debug("after create index ...")
 	errorCode := status.error_code
-	fmt.Println("EEEEEEEEEEEEEEEEEEEEEEEEEE error code: ", errorCode)
 	if errorCode != 0 {
 		errorMsg := C.GoString(status.error_msg)
-		fmt.Println("EEEEEEEEEEEEEEEEEEEEEEEEEE error msg: ", errorMsg)
+		log.Debug("indexnode", zap.String("create index error msg", errorMsg))
 		defer C.free(unsafe.Pointer(status.error_msg))
 		return nil, fmt.Errorf(" failed, C runtime error detected, error code = %d, err msg = %s", errorCode, errorMsg)
 	}

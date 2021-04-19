@@ -66,7 +66,7 @@ func (pt *ParamTable) initMasterAddress() {
 func (pt *ParamTable) initNodeTimeTickChannel() {
 	prefix, err := pt.Load("msgChannel.chanNamePrefix.proxyTimeTick")
 	if err != nil {
-		log.Panic("proxyservice", zap.Error(err))
+		log.Error("proxyservice", zap.Error(err))
 	}
 	prefix += "-0"
 	pt.NodeTimeTickChannel = []string{prefix}
@@ -75,7 +75,7 @@ func (pt *ParamTable) initNodeTimeTickChannel() {
 func (pt *ParamTable) initServiceTimeTickChannel() {
 	ch, err := pt.Load("msgChannel.chanNamePrefix.proxyServiceTimeTick")
 	if err != nil {
-		log.Panic("proxyservice", zap.Error(err))
+		log.Error("proxyservice", zap.Error(err))
 	}
 	pt.ServiceTimeTickChannel = ch
 }
@@ -125,5 +125,9 @@ func (pt *ParamTable) initLogCfg() {
 	if err != nil {
 		panic(err)
 	}
-	pt.Log.File.Filename = path.Join(rootPath, "proxyservice-%d.log")
+	if len(rootPath) != 0 {
+		pt.Log.File.Filename = path.Join(rootPath, "proxyservice.log")
+	} else {
+		pt.Log.File.Filename = ""
+	}
 }

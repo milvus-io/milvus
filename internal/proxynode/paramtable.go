@@ -80,7 +80,7 @@ func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb.InitParams
 					for _, v := range val {
 						ss, err := cast.ToStringE(v)
 						if err != nil {
-							log.Panic("proxynode", zap.String("error", err.Error()))
+							log.Warn("proxynode", zap.String("error", err.Error()))
 						}
 						if len(str) == 0 {
 							str = ss
@@ -90,7 +90,7 @@ func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb.InitParams
 					}
 
 				default:
-					log.Panic("proxynode", zap.String("error", "Undefined config type, key="+key))
+					log.Debug("proxynode", zap.String("error", "Undefined config type, key="+key))
 				}
 			}
 			log.Debug("proxynode", zap.String(key, str))
@@ -123,6 +123,7 @@ func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb.InitParams
 func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
+		pt.initLogCfg()
 		// err := pt.LoadYaml("advanced/proxy_node.yaml")
 		// if err != nil {
 		// 	panic(err)
@@ -155,7 +156,6 @@ func (pt *ParamTable) initParams() {
 	pt.initMaxDimension()
 	pt.initDefaultPartitionTag()
 	pt.initDefaultIndexName()
-	pt.initLogCfg()
 
 	pt.initPulsarMaxMessageSize()
 }
@@ -182,7 +182,7 @@ func (pt *ParamTable) initQueryNodeIDList() []UniqueID {
 	for _, i := range queryNodeIDs {
 		v, err := strconv.Atoi(i)
 		if err != nil {
-			log.Panic("proxynode", zap.String("load proxynode id list error", err.Error()))
+			log.Error("proxynode", zap.String("load proxynode id list error", err.Error()))
 		}
 		ret = append(ret, UniqueID(v))
 	}
@@ -472,5 +472,9 @@ func (pt *ParamTable) initLogCfg() {
 	if err != nil {
 		panic(err)
 	}
-	pt.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("proxynode-%d.log", pt.ProxyID))
+	if len(rootPath) != 0 {
+		pt.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("proxynode-%d.log", pt.ProxyID))
+	} else {
+		pt.Log.File.Filename = ""
+	}
 }

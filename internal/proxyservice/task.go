@@ -2,7 +2,6 @@ package proxyservice
 
 import (
 	"context"
-
 	"errors"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"

@@ -200,7 +200,7 @@ func (mt *metaTable) DeleteIndex(indexBuildID UniqueID) error {
 	if !ok {
 		return fmt.Errorf("can't find index. id = %d", indexBuildID)
 	}
-	fmt.Print(indexMeta)
+	log.Debug("indexservice", zap.Stringer("indexMeta", &indexMeta))
 
 	return nil
 }

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-
 	"google.golang.org/grpc"
 
 	otgrpc "github.com/opentracing-contrib/go-grpc"

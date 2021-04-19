@@ -90,7 +90,7 @@ func (tt *timeTick) tick() error {
 	if err != nil {
 		log.Warn("proxynode", zap.String("error", err.Error()))
 	} else {
-		log.Warn("proxynode send time tick message")
+		log.Debug("proxynode send time tick message")
 	}
 	tt.tickLock.Lock()
 	defer tt.tickLock.Unlock()
