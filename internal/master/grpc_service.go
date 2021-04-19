@@ -93,7 +93,7 @@ func (s *Master) HasCollection(ctx context.Context, in *internalpb.HasCollection
 
 	response := &servicepb.BoolResponse{
 		Status: st,
-		Value:  t.(*hasCollectionTask).hasCollection,
+		Value:  false,
 	}
 
 	var err = s.scheduler.Enqueue(t)
@@ -109,6 +109,7 @@ func (s *Master) HasCollection(ctx context.Context, in *internalpb.HasCollection
 	}
 
 	st.ErrorCode = commonpb.ErrorCode_SUCCESS
+	response.Value = t.(*hasCollectionTask).hasCollection
 	return response, nil
 }
 
