@@ -14,11 +14,11 @@ type UniqueID = typeutil.UniqueID
 type ParamTable struct {
 	paramtable.BaseTable
 
-	Distributed bool
-	Address     string
-	Port        int
+	Address string
+	Port    int
 
 	MasterServiceAddress string
+	DataServiceAddress   string
 
 	PulsarAddress string
 	ETCDAddress   string
@@ -27,7 +27,7 @@ type ParamTable struct {
 	QueryServiceID UniqueID
 
 	QueryNodeID  UniqueID
-	QueryNodeNum int
+	QueryNodeNum uint64
 
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
@@ -160,7 +160,6 @@ func (p *ParamTable) Init() {
 	p.initAddress()
 	p.initPort()
 	p.initMasterServiceAddress()
-	p.initIsDistributed()
 }
 
 func (p *ParamTable) initMinioEndPoint() {
@@ -221,6 +220,14 @@ func (p *ParamTable) initMasterServiceAddress() {
 		panic(err)
 	}
 	p.MasterServiceAddress = url
+}
+
+func (p *ParamTable) initDataServiceAddress() {
+	url, err := p.Load("_DataServiceAddress")
+	if err != nil {
+		panic(err)
+	}
+	p.DataServiceAddress = url
 }
 
 func (p *ParamTable) initQueryNodeID() {
@@ -348,7 +355,7 @@ func (p *ParamTable) initInsertChannelNames() {
 	for _, ID := range channelIDs {
 		ret = append(ret, prefix+strconv.Itoa(ID))
 	}
-	sep := len(channelIDs) / p.QueryNodeNum
+	sep := len(channelIDs) / int(p.QueryNodeNum)
 	index := p.SliceIndex
 	if index == -1 {
 		panic("queryNodeID not Match with Config")
@@ -458,7 +465,7 @@ func (p *ParamTable) initSliceIndex() {
 }
 
 func (p *ParamTable) initQueryNodeNum() {
-	p.QueryNodeNum = len(p.QueryNodeIDList())
+	p.QueryNodeNum = uint64(len(p.QueryNodeIDList()))
 }
 
 func (p *ParamTable) initLoadIndexChannelNames() {
@@ -488,10 +495,6 @@ func (p *ParamTable) initTimeTickChannelName() {
 
 func (p *ParamTable) initTimeTickReceiveBufSize() {
 	p.TimeTickReceiveBufferSize = p.ParseInt64("queryNode.msgStream.timeTick.recvBufSize")
-}
-
-func (p *ParamTable) initIsDistributed() {
-	p.Distributed = false
 }
 
 func (p *ParamTable) initAddress() {

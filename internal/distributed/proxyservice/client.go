@@ -3,10 +3,6 @@ package grpcproxyservice
 import (
 	"context"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
 	"google.golang.org/grpc"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
@@ -46,18 +42,6 @@ func (c *Client) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMe
 	}
 	_, err = c.proxyServiceClient.InvalidateCollectionMetaCache(c.ctx, request)
 	return err
-}
-
-func (c *Client) GetTimeTickChannel() (string, error) {
-	response, err := c.proxyServiceClient.GetTimeTickChannel(c.ctx, &commonpb.Empty{})
-	if err != nil {
-		return "", err
-	}
-	return response.Value, nil
-}
-
-func (c *Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	return c.proxyServiceClient.GetComponentStates(c.ctx, &commonpb.Empty{})
 }
 
 func NewClient(address string) *Client {
