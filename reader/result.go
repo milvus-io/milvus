@@ -3,7 +3,7 @@ package reader
 import (
 	"context"
 	"fmt"
-	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
+	msgPb "github.com/czs007/suvlim/pkg/message"
 	"strconv"
 )
 

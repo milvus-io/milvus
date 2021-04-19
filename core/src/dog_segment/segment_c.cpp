@@ -3,6 +3,9 @@
 #include "SegmentBase.h"
 #include "segment_c.h"
 #include "Partition.h"
+#include <knowhere/index/vector_index/VecIndex.h>
+#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
+#include <knowhere/index/vector_index/VecIndexFactory.h>
 
 
 CSegmentBase
@@ -46,9 +49,6 @@ Insert(CSegmentBase c_segment,
   dataChunk.count = count;
 
   auto res = segment->Insert(reserved_offset, size, primary_keys, timestamps, dataChunk);
-
-  // TODO: delete print
-  // std::cout << "do segment insert, sizeof_per_row = " << sizeof_per_row << std::endl;
   return res.code();
 }
 
@@ -58,7 +58,7 @@ PreInsert(CSegmentBase c_segment, long int size) {
   auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
 
   // TODO: delete print
-  // std::cout << "PreInsert segment " << std::endl;
+  std::cout << "PreInsert segment " << std::endl;
   return segment->PreInsert(size);
 }
 
@@ -81,7 +81,7 @@ PreDelete(CSegmentBase c_segment, long int size) {
   auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
 
   // TODO: delete print
-  // std::cout << "PreDelete segment " << std::endl;
+  std::cout << "PreDelete segment " << std::endl;
   return segment->PreDelete(size);
 }
 
@@ -112,6 +112,13 @@ Close(CSegmentBase c_segment) {
   auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
   auto status = segment->Close();
   return status.code();
+}
+
+int
+BuildIndex(CSegmentBase c_segment) {
+    auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
+    auto status = segment->BuildIndex();
+    return status.code();
 }
 
 

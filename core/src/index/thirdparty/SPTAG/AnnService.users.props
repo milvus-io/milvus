@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(SolutionDir)AnnService.users.props.user" Condition="Exists('$(SolutionDir)AnnService.users.props.user')" />
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalOptions>$(SystemVersionDef) %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <PropertyGroup Label="UserMacros">
+	<OutAppDir>$(SolutionDir)\$(Platform)\$(Configuration)\</OutAppDir>
+    <OutLibDir>$(SolutionDir)\$(Platform)\$(Configuration)\</OutLibDir>
+	<JavaIncDir></JavaIncDir>
+	<JavaLib></JavaLib>
+  </PropertyGroup>
+</Project>
+

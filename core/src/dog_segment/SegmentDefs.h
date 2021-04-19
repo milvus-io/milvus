@@ -7,6 +7,7 @@
 #include "utils/Types.h"
 // #include "knowhere/index/Index.h"
 #include "utils/Status.h"
+#include "dog_segment/IndexMeta.h"
 
 namespace milvus::dog_segment {
 using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
@@ -152,6 +153,13 @@ class Schema {
         return sizeof_infos_;
     }
 
+    std::optional<int> get_offset(const std::string& field_name) {
+        if(!offsets_.count(field_name)) {
+            return std::nullopt;
+        } else {
+            return offsets_[field_name];
+        }
+    }
 
     const FieldMeta&
     operator[](const std::string& field_name) const {
@@ -160,7 +168,6 @@ class Schema {
         auto offset = offset_iter->second;
         return (*this)[offset];
     }
-
  private:
     // this is where data holds
     std::vector<FieldMeta> fields_;
@@ -173,5 +180,6 @@ class Schema {
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;
+using idx_t = int64_t;
 
 }  // namespace milvus::dog_segment

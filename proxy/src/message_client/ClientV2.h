@@ -31,7 +31,7 @@ class MsgClientV2 {
   //
   Status SendQueryMessage(const milvus::grpc::SearchParam &request, uint64_t timestamp, int64_t &query_id);
 
-  Status GetQueryResult(int64_t query_id, milvus::grpc::QueryResult* result);
+  Status GetQueryResult(int64_t query_id, milvus::grpc::QueryResult &result);
 
  private:
   int64_t GetUniqueQId() {
