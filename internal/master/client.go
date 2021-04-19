@@ -90,12 +90,12 @@ func (m *MockBuildIndexClient) GetIndexFilePaths(indexID UniqueID) ([]string, er
 }
 
 type LoadIndexClient interface {
-	LoadIndex(indexPaths []string, segmentID int64, fieldID int64, fieldName string) error
+	LoadIndex(indexPaths []string, segmentID int64, fieldID int64, fieldName string, indexParams map[string]string) error
 }
 
 type MockLoadIndexClient struct {
 }
 
-func (m *MockLoadIndexClient) LoadIndex(indexPaths []string, segmentID int64, fieldID int64, fieldName string) error {
+func (m *MockLoadIndexClient) LoadIndex(indexPaths []string, segmentID int64, fieldID int64, fieldName string, indexParams map[string]string) error {
 	return nil
 }

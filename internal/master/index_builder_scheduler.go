@@ -133,6 +133,7 @@ func (scheduler *IndexBuildScheduler) describe() error {
 						fieldID:        indexBuildInfo.fieldID,
 						fieldName:      fieldName,
 						indexFilePaths: filePaths,
+						indexParams:    channelInfo.indexParams,
 					}
 					// Save data to meta table
 					err = scheduler.metaTable.UpdateFieldIndexMeta(&etcdpb.FieldIndexMeta{
