@@ -37,12 +37,12 @@ class SegmentSealedImpl : public SegmentSealed {
 
  public:
     int64_t
-    num_chunk_index(FieldOffset field_offset) const override;
+    num_chunk_index_safe(FieldOffset field_offset) const override;
 
     int64_t
-    num_chunk() const override;
+    num_chunk_data() const override;
 
-    // return size_per_chunk for each chunk, renaming against confusion
+    // return chunk_size for each chunk, renaming against confusion
     int64_t
     size_per_chunk() const override;
 

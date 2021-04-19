@@ -4,9 +4,8 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+
+	"github.com/zilliztech/milvus-distributed/internal/datanode/factory"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,54 +20,9 @@ func newReplica() collectionReplica {
 	return replica
 }
 
-func genTestCollectionMeta(collectionName string, collectionID UniqueID) *etcdpb.CollectionMeta {
-	fieldVec := schemapb.FieldSchema{
-		FieldID:      UniqueID(100),
-		Name:         "vec",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_VECTOR_FLOAT,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "16",
-			},
-		},
-		IndexParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "metric_type",
-				Value: "L2",
-			},
-		},
-	}
-
-	fieldInt := schemapb.FieldSchema{
-		FieldID:      UniqueID(101),
-		Name:         "age",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_INT32,
-	}
-
-	schema := schemapb.CollectionSchema{
-		Name:   collectionName,
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{
-			&fieldVec, &fieldInt,
-		},
-	}
-
-	collectionMeta := etcdpb.CollectionMeta{
-		ID:            collectionID,
-		Schema:        &schema,
-		CreateTime:    Timestamp(0),
-		SegmentIDs:    []UniqueID{0},
-		PartitionTags: []string{"default"},
-	}
-
-	return &collectionMeta
-}
-
 func initTestReplicaMeta(t *testing.T, replica collectionReplica, collectionName string, collectionID UniqueID, segmentID UniqueID) {
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	Factory := &factory.MetaFactory{}
+	collectionMeta := Factory.CollectionMetaFactory(collectionID, collectionName)
 
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
 	require.NotEqual(t, "", schemaBlob)

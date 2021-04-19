@@ -10,15 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
-	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/master"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
 func makeNewChannelNames(names []string, suffix string) []string {
@@ -65,6 +61,7 @@ func startMaster(ctx context.Context) {
 
 func TestMain(m *testing.M) {
 	Params.Init()
+
 	refreshChannelNames()
 	const ctxTimeInMillisecond = 2000
 	const closeWithDeadline = true
@@ -104,93 +101,43 @@ func newDataNode() *DataNode {
 
 	svr := NewDataNode(ctx, 0)
 	return svr
-
 }
 
-func genTestDataNodeCollectionMeta(collectionName string, collectionID UniqueID, isBinary bool) *etcdpb.CollectionMeta {
-	var fieldVec schemapb.FieldSchema
-	if isBinary {
-		fieldVec = schemapb.FieldSchema{
-			FieldID:      UniqueID(100),
-			Name:         "vec",
-			IsPrimaryKey: false,
-			DataType:     schemapb.DataType_VECTOR_BINARY,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   "dim",
-					Value: "128",
-				},
-			},
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   "metric_type",
-					Value: "JACCARD",
-				},
-			},
-		}
-	} else {
-		fieldVec = schemapb.FieldSchema{
-			FieldID:      UniqueID(100),
-			Name:         "vec",
-			IsPrimaryKey: false,
-			DataType:     schemapb.DataType_VECTOR_FLOAT,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   "dim",
-					Value: "16",
-				},
-			},
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   "metric_type",
-					Value: "L2",
-				},
-			},
-		}
-	}
+func newMetaTable() *metaTable {
+	etcdClient, _ := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
 
-	fieldInt := schemapb.FieldSchema{
-		FieldID:      UniqueID(101),
-		Name:         "age",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_INT32,
-	}
-
-	schema := schemapb.CollectionSchema{
-		Name:   collectionName,
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{
-			&fieldVec, &fieldInt,
-		},
-	}
-
-	collectionMeta := etcdpb.CollectionMeta{
-		ID:            collectionID,
-		Schema:        &schema,
-		CreateTime:    Timestamp(0),
-		SegmentIDs:    []UniqueID{0},
-		PartitionTags: []string{"default"},
-	}
-
-	return &collectionMeta
+	etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+	mt, _ := NewMetaTable(etcdKV)
+	return mt
 }
 
-func initTestMeta(t *testing.T, node *DataNode, collectionName string, collectionID UniqueID, segmentID UniqueID, optional ...bool) {
-	isBinary := false
-	if len(optional) > 0 {
-		isBinary = optional[0]
+func clearEtcd(rootPath string) error {
+	etcdAddr := Params.EtcdAddress
+	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	if err != nil {
+		return err
 	}
-	collectionMeta := genTestDataNodeCollectionMeta(collectionName, collectionID, isBinary)
+	etcdKV := etcdkv.NewEtcdKV(etcdClient, rootPath)
 
-	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
-	require.NotEqual(t, "", schemaBlob)
+	err = etcdKV.RemoveWithPrefix("writer/segment")
+	if err != nil {
+		return err
+	}
+	_, _, err = etcdKV.LoadWithPrefix("writer/segment")
+	if err != nil {
+		return err
+	}
+	log.Println("Clear ETCD with prefix writer/segment ")
 
-	var err = node.replica.addCollection(collectionMeta.ID, schemaBlob)
-	require.NoError(t, err)
+	err = etcdKV.RemoveWithPrefix("writer/ddl")
+	if err != nil {
+		return err
+	}
+	_, _, err = etcdKV.LoadWithPrefix("writer/ddl")
+	if err != nil {
+		return err
+	}
+	log.Println("Clear ETCD with prefix writer/ddl")
+	return nil
 
-	collection, err := node.replica.getCollectionByName(collectionName)
-	require.NoError(t, err)
-	require.Equal(t, collection.Name(), collectionName)
-	require.Equal(t, collection.ID(), collectionID)
-	require.Equal(t, node.replica.getCollectionNum(), 1)
 }

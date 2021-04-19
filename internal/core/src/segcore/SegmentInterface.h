@@ -14,18 +14,15 @@
 #include "common/Schema.h"
 #include "query/Plan.h"
 #include "common/Span.h"
-#include "FieldIndexing.h"
+#include "IndexingEntry.h"
 #include <knowhere/index/vector_index/VecIndex.h>
 #include "common/SystemProperty.h"
 #include "query/PlanNode.h"
 
 namespace milvus::segcore {
 
-// common interface of SegmentSealed and SegmentGrowing
-// used by C API
 class SegmentInterface {
  public:
-    // fill results according to target_entries in plan
     void
     FillTargetEntry(const query::Plan* plan, QueryResult& results) const;
 
@@ -47,17 +44,14 @@ class SegmentInterface {
     virtual ~SegmentInterface() = default;
 
  protected:
-    // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to system_type
     virtual void
     bulk_subscript(SystemFieldType system_type, const int64_t* seg_offsets, int64_t count, void* output) const = 0;
 
-    // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to field_offset
     virtual void
     bulk_subscript(FieldOffset field_offset, const int64_t* seg_offsets, int64_t count, void* output) const = 0;
 };
 
 // internal API for DSL calculation
-// only for implementation
 class SegmentInternalInterface : public SegmentInterface {
  public:
     template <typename T>
@@ -86,24 +80,21 @@ class SegmentInternalInterface : public SegmentInterface {
                   const BitsetView& bitset,
                   QueryResult& output) const = 0;
 
-    // count of chunk that has index available
     virtual int64_t
-    num_chunk_index(FieldOffset field_offset) const = 0;
+    num_chunk_index_safe(FieldOffset field_offset) const = 0;
 
-    // count of chunks
     virtual int64_t
-    num_chunk() const = 0;
+    num_chunk_data() const = 0;
 
-    // element size in each chunk
+    // return chunk_size for each chunk, renaming against confusion
     virtual int64_t
     size_per_chunk() const = 0;
 
  protected:
-    // internal API: return chunk_data in span
+    // blob and row_count
     virtual SpanBase
     chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) const = 0;
 
-    // internal API: return chunk_index in span, support scalar index only
     virtual const knowhere::Index*
     chunk_index_impl(FieldOffset field_offset, int64_t chunk_id) const = 0;
 };

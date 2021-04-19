@@ -24,53 +24,47 @@ struct InsertRecord {
     ConcurrentVector<Timestamp> timestamps_;
     ConcurrentVector<idx_t> uids_;
 
-    explicit InsertRecord(const Schema& schema, int64_t size_per_chunk);
+    explicit InsertRecord(const Schema& schema, int64_t chunk_size);
 
-    // get field data without knowing the type
-    // return VectorBase type
     auto
-    get_field_data_base(FieldOffset field_offset) const {
-        auto ptr = field_datas_[field_offset.get()].get();
+    get_base_entity(FieldOffset field_offset) const {
+        auto ptr = entity_vec_[field_offset.get()].get();
         return ptr;
     }
 
-    // get field data in given type, const version
     template <typename Type>
     auto
-    get_field_data(FieldOffset field_offset) const {
-        auto base_ptr = get_field_data_base(field_offset);
+    get_entity(FieldOffset field_offset) const {
+        auto base_ptr = get_base_entity(field_offset);
         auto ptr = dynamic_cast<const ConcurrentVector<Type>*>(base_ptr);
         Assert(ptr);
         return ptr;
     }
 
-    // get field data in given type, nonconst version
     template <typename Type>
     auto
-    get_field_data(FieldOffset field_offset) {
-        auto base_ptr = get_field_data_base(field_offset);
+    get_entity(FieldOffset field_offset) {
+        auto base_ptr = get_base_entity(field_offset);
         auto ptr = dynamic_cast<ConcurrentVector<Type>*>(base_ptr);
         Assert(ptr);
         return ptr;
     }
 
-    // append a column of scalar type
     template <typename Type>
     void
-    append_field_data(int64_t size_per_chunk) {
+    insert_entity(int64_t chunk_size) {
         static_assert(std::is_fundamental_v<Type>);
-        field_datas_.emplace_back(std::make_unique<ConcurrentVector<Type>>(size_per_chunk));
+        entity_vec_.emplace_back(std::make_unique<ConcurrentVector<Type>>(chunk_size));
     }
 
-    // append a column of vector type
     template <typename VectorType>
     void
-    append_field_data(int64_t dim, int64_t size_per_chunk) {
+    insert_entity(int64_t dim, int64_t chunk_size) {
         static_assert(std::is_base_of_v<VectorTrait, VectorType>);
-        field_datas_.emplace_back(std::make_unique<ConcurrentVector<VectorType>>(dim, size_per_chunk));
+        entity_vec_.emplace_back(std::make_unique<ConcurrentVector<VectorType>>(dim, chunk_size));
     }
 
  private:
-    std::vector<std::unique_ptr<VectorBase>> field_datas_;
+    std::vector<std::unique_ptr<VectorBase>> entity_vec_;
 };
 }  // namespace milvus::segcore

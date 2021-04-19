@@ -120,8 +120,18 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 	select {
 	case fmsg := <-ddNode.inFlushCh:
 		log.Println(". receive flush message, flushing ...")
-		ddNode.flush()
-		ddNode.ddMsg.flushMessages = append(ddNode.ddMsg.flushMessages, fmsg)
+		localSegs := make([]UniqueID, 0)
+		for _, segID := range fmsg.segmentIDs {
+			if ddNode.replica.hasSegment(segID) {
+				localSegs = append(localSegs, segID)
+			}
+		}
+		if len(localSegs) > 0 {
+			ddNode.flush()
+			fmsg.segmentIDs = localSegs
+			ddNode.ddMsg.flushMessages = append(ddNode.ddMsg.flushMessages, fmsg)
+		}
+
 	default:
 		log.Println("..........default do nothing")
 	}

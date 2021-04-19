@@ -2,30 +2,18 @@ package datanode
 
 import (
 	"context"
-	"log"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.etcd.io/etcd/clientv3"
 
-	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
-func newMetaTable() *metaTable {
-	etcdClient, _ := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
-
-	etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
-	mt, _ := NewMetaTable(etcdKV)
-	return mt
-}
-
 func TestFlowGraphDDNode_Operate(t *testing.T) {
-	newMeta()
 	const ctxTimeInMillisecond = 2000
 	const closeWithDeadline = false
 	var ctx context.Context
@@ -94,7 +82,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	}
 
 	partitionID := UniqueID(100)
-	partitionTag := "partition-test-0"
+	partitionName := "partition-test-0"
 	// create partition
 	createPartitionReq := internalpb2.CreatePartitionRequest{
 		Base: &commonpb.MsgBase{
@@ -106,7 +94,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 		CollectionID:   colID,
 		PartitionID:    partitionID,
 		CollectionName: colName,
-		PartitionName:  partitionTag,
+		PartitionName:  partitionName,
 	}
 	createPartitionMsg := msgstream.CreatePartitionMsg{
 		BaseMsg: msgstream.BaseMsg{
@@ -128,7 +116,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 		CollectionID:   colID,
 		PartitionID:    partitionID,
 		CollectionName: colName,
-		PartitionName:  partitionTag,
+		PartitionName:  partitionName,
 	}
 	dropPartitionMsg := msgstream.DropPartitionMsg{
 		BaseMsg: msgstream.BaseMsg{
@@ -154,35 +142,4 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	msgStream := flowgraph.GenerateMsgStreamMsg(tsMessages, Timestamp(0), Timestamp(3))
 	var inMsg Msg = msgStream
 	ddNode.Operate([]*Msg{&inMsg})
-}
-
-func clearEtcd(rootPath string) error {
-	etcdAddr := Params.EtcdAddress
-	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
-	if err != nil {
-		return err
-	}
-	etcdKV := etcdkv.NewEtcdKV(etcdClient, rootPath)
-
-	err = etcdKV.RemoveWithPrefix("writer/segment")
-	if err != nil {
-		return err
-	}
-	_, _, err = etcdKV.LoadWithPrefix("writer/segment")
-	if err != nil {
-		return err
-	}
-	log.Println("Clear ETCD with prefix writer/segment ")
-
-	err = etcdKV.RemoveWithPrefix("writer/ddl")
-	if err != nil {
-		return err
-	}
-	_, _, err = etcdKV.LoadWithPrefix("writer/ddl")
-	if err != nil {
-		return err
-	}
-	log.Println("Clear ETCD with prefix writer/ddl")
-	return nil
-
 }

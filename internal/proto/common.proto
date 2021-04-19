@@ -111,6 +111,7 @@ enum MsgType {
     kRequestTSO = 1204;
     kAllocateSegment = 1205;
     kSegmentStatistics = 1206;
+    kSegmentFlushDone = 1207;
 }
 
 message MsgBase {

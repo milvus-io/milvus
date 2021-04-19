@@ -80,7 +80,7 @@ class SegmentGrowing : public SegmentInternalInterface {
 using SegmentGrowingPtr = std::unique_ptr<SegmentGrowing>;
 
 SegmentGrowingPtr
-CreateGrowingSegment(SchemaPtr schema, int64_t size_per_chunk = 32 * 1024);
+CreateGrowingSegment(SchemaPtr schema, int64_t chunk_size = 32 * 1024);
 
 }  // namespace segcore
 }  // namespace milvus
