@@ -129,7 +129,7 @@ func TestSearch_Search(t *testing.T) {
 	}
 	searchMessages := []*msgPb.SearchMsg{&searchMsg1}
 
-	node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
+	node.queryNodeTimeSync.updateSearchServiceTime(timeRange)
 	assert.Equal(t, node.queryNodeTimeSync.ServiceTimeSync, timeRange.timestampMax)
 
 	status := node.Search(searchMessages)

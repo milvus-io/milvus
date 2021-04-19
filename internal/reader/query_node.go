@@ -15,9 +15,8 @@ import "C"
 
 import (
 	"context"
-	"time"
-
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/msgclient"
@@ -202,7 +201,7 @@ func (node *QueryNode) QueryNodeDataInit() {
 	insertData := InsertData{
 		insertIDs:        make(map[int64][]int64),
 		insertTimestamps: make(map[int64][]uint64),
-		insertRecords:    make(map[int64][][]byte),
+		// insertRecords:    make(map[int64][][]byte),
 		insertOffset:     make(map[int64]int64),
 	}
 

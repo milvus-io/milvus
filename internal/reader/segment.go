@@ -13,12 +13,10 @@ package reader
 */
 import "C"
 import (
-	"strconv"
-	"unsafe"
-
-	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"strconv"
 )
 
 const SegmentLifetime = 20000
@@ -128,7 +126,7 @@ func (s *Segment) SegmentPreDelete(numOfRecords int) int64 {
 	return int64(offset)
 }
 
-func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]uint64, records *[][]byte) error {
+func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]uint64, records *[]*commonpb.Blob) error {
 	/*
 		int
 		Insert(CSegmentBase c_segment,
@@ -141,37 +139,37 @@ func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]
 		           signed long int count);
 	*/
 	// Blobs to one big blob
-	var numOfRow = len(*entityIDs)
-	var sizeofPerRow = len((*records)[0])
-
-	assert.Equal(nil, numOfRow, len(*records))
-
-	var rawData = make([]byte, numOfRow*sizeofPerRow)
-	var copyOffset = 0
-	for i := 0; i < len(*records); i++ {
-		copy(rawData[copyOffset:], (*records)[i])
-		copyOffset += sizeofPerRow
-	}
-
-	var cOffset = C.long(offset)
-	var cNumOfRows = C.long(numOfRow)
-	var cEntityIdsPtr = (*C.long)(&(*entityIDs)[0])
-	var cTimestampsPtr = (*C.ulong)(&(*timestamps)[0])
-	var cSizeofPerRow = C.int(sizeofPerRow)
-	var cRawDataVoidPtr = unsafe.Pointer(&rawData[0])
-
-	var status = C.Insert(s.SegmentPtr,
-		cOffset,
-		cNumOfRows,
-		cEntityIdsPtr,
-		cTimestampsPtr,
-		cRawDataVoidPtr,
-		cSizeofPerRow,
-		cNumOfRows)
-
-	if status != 0 {
-		return errors.New("Insert failed, error code = " + strconv.Itoa(int(status)))
-	}
+	//var numOfRow = len(*entityIDs)
+	//var sizeofPerRow = len((*records)[0])
+	//
+	//assert.Equal(nil, numOfRow, len(*records))
+	//
+	//var rawData = make([]byte, numOfRow*sizeofPerRow)
+	//var copyOffset = 0
+	//for i := 0; i < len(*records); i++ {
+	//	copy(rawData[copyOffset:], (*records)[i])
+	//	copyOffset += sizeofPerRow
+	//}
+	//
+	//var cOffset = C.long(offset)
+	//var cNumOfRows = C.long(numOfRow)
+	//var cEntityIdsPtr = (*C.long)(&(*entityIDs)[0])
+	//var cTimestampsPtr = (*C.ulong)(&(*timestamps)[0])
+	//var cSizeofPerRow = C.int(sizeofPerRow)
+	//var cRawDataVoidPtr = unsafe.Pointer(&rawData[0])
+	//
+	//var status = C.Insert(s.SegmentPtr,
+	//	cOffset,
+	//	cNumOfRows,
+	//	cEntityIdsPtr,
+	//	cTimestampsPtr,
+	//	cRawDataVoidPtr,
+	//	cSizeofPerRow,
+	//	cNumOfRows)
+	//
+	//if status != 0 {
+	//	return errors.New("Insert failed, error code = " + strconv.Itoa(int(status)))
+	//}
 
 	return nil
 }
