@@ -1,6 +1,7 @@
 set(COMMON_SRC
         Schema.cpp
         Types.cpp
+        SystemProperty.cpp
         )
 
 add_library(milvus_common
