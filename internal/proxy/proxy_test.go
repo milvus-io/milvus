@@ -180,6 +180,29 @@ func dropCollection(t *testing.T, name string) {
 	assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_SUCCESS, msg)
 }
 
+func createIndex(t *testing.T, collectionName, fieldName string) {
+
+	req := &servicepb.IndexParam{
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		ExtraParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "nlist",
+				Value: "1024",
+			},
+			{
+				Key:   "metric_type",
+				Value: "L2",
+			},
+		},
+	}
+
+	resp, err := proxyClient.CreateIndex(ctx, req)
+	assert.Nil(t, err)
+	msg := "Create Index for " + fieldName + " should succeed!"
+	assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_SUCCESS, msg)
+}
+
 func TestProxy_CreateCollection(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < testNum; i++ {
@@ -450,6 +473,22 @@ func TestProxy_PartitionGRPC(t *testing.T) {
 	wg.Wait()
 	dropCollection(t, collName)
 }
+
+// func TestProxy_CreateIndex(t *testing.T) {
+// 	var wg sync.WaitGroup
+// 	for i := 0; i < testNum; i++ {
+// 		i := i
+// 		collectionName := "Collection" + strconv.FormatInt(int64(i), 10)
+// 		fieldName := "Field" + strconv.FormatInt(int64(i), 10)
+// 		wg.Add(1)
+// 		go func(group *sync.WaitGroup) {
+// 			defer group.Done()
+// 			createIndex(t, collectionName, fieldName)
+// 			// dropIndex(t, collectionName, fieldName, indexName)
+// 		}(&wg)
+// 	}
+// 	wg.Wait()
+// }
 
 func TestMain(m *testing.M) {
 	setup()
