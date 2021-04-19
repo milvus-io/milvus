@@ -123,6 +123,7 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             dis_connect.create_index(collection, field_name, get_simple_index)
 
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors(self, connect, collection, get_simple_index, get_nq):
         '''
@@ -267,6 +268,7 @@ class TestIndexBase:
         get_simple_index["metric_type"] = "IP"
         connect.create_index(collection, field_name, get_simple_index)
 
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors_ip(self, connect, collection, get_simple_index, get_nq):
         '''
@@ -522,6 +524,7 @@ class TestIndexBase:
             connect.drop_index(collection, field_name)
 
 
+@pytest.mark.skip("r0.3-test")
 class TestIndexBinary:
     @pytest.fixture(
         scope="function",
