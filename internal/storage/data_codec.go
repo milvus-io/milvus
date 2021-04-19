@@ -540,6 +540,17 @@ func (dataDefinitionCodec *DataDefinitionCodec) Close() error {
 	return nil
 }
 
+//type IndexCodec struct {
+//	Base
+//	readerCloseFunc []func() error
+//}
+//
+////func (builder *IndexBuilder) Build(fieldData FieldData, typeParams map[string]string, indexParams map[string]string) ([]*Blob, error) {}
+//func (indexCodec *IndexCodec) Serialize(indexSlices []*Blob) ([]*Blob, error) {}
+//
+//// TODO: describe inputs and return
+//func (indexCodec *IndexCodec) Deserialize(blobs []*Blob) ([]*Blob, error) {}
+
 type IndexCodec struct {
 	Base
 }
