@@ -31,6 +31,10 @@ func (pt *ParamTable) Init() {
 	if err != nil {
 		panic(err)
 	}
+	err = pt.LoadYaml("advanced/common.yaml")
+	if err != nil {
+		panic(err)
+	}
 
 	proxyIDStr := os.Getenv("PROXY_ID")
 	if proxyIDStr == "" {
@@ -87,6 +91,27 @@ func (pt *ParamTable) ProxyIDList() []UniqueID {
 	var ret []UniqueID
 	proxyIDs := strings.Split(proxyIDStr, ",")
 	for _, i := range proxyIDs {
+		v, err := strconv.Atoi(i)
+		if err != nil {
+			log.Panicf("load proxy id list error, %s", err.Error())
+		}
+		ret = append(ret, UniqueID(v))
+	}
+	return ret
+}
+
+func (pt *ParamTable) queryNodeNum() int {
+	return len(pt.queryNodeIDList())
+}
+
+func (pt *ParamTable) queryNodeIDList() []UniqueID {
+	queryNodeIDStr, err := pt.Load("nodeID.queryNodeIDList")
+	if err != nil {
+		panic(err)
+	}
+	var ret []UniqueID
+	queryNodeIDs := strings.Split(queryNodeIDStr, ",")
+	for _, i := range queryNodeIDs {
 		v, err := strconv.Atoi(i)
 		if err != nil {
 			log.Panicf("load proxy id list error, %s", err.Error())
@@ -321,4 +346,144 @@ func (pt *ParamTable) MsgStreamSearchResultPulsarBufSize() int64 {
 
 func (pt *ParamTable) MsgStreamTimeTickBufSize() int64 {
 	return pt.parseInt64("proxy.msgStream.timeTick.bufSize")
+}
+
+func (pt *ParamTable) insertChannelNames() []string {
+	ch, err := pt.Load("msgChannel.chanNamePrefix.insert")
+	if err != nil {
+		log.Fatal(err)
+	}
+	channelRange, err := pt.Load("msgChannel.channelRange.insert")
+	if err != nil {
+		panic(err)
+	}
+
+	chanRange := strings.Split(channelRange, ",")
+	if len(chanRange) != 2 {
+		panic("Illegal channel range num")
+	}
+	channelBegin, err := strconv.Atoi(chanRange[0])
+	if err != nil {
+		panic(err)
+	}
+	channelEnd, err := strconv.Atoi(chanRange[1])
+	if err != nil {
+		panic(err)
+	}
+	if channelBegin < 0 || channelEnd < 0 {
+		panic("Illegal channel range value")
+	}
+	if channelBegin > channelEnd {
+		panic("Illegal channel range value")
+	}
+
+	channels := make([]string, channelEnd-channelBegin)
+	for i := 0; i < channelEnd-channelBegin; i++ {
+		channels[i] = ch + "-" + strconv.Itoa(channelBegin+i)
+	}
+	return channels
+}
+
+func (pt *ParamTable) searchChannelNames() []string {
+	ch, err := pt.Load("msgChannel.chanNamePrefix.search")
+	if err != nil {
+		log.Fatal(err)
+	}
+	channelRange, err := pt.Load("msgChannel.channelRange.search")
+	if err != nil {
+		panic(err)
+	}
+
+	chanRange := strings.Split(channelRange, ",")
+	if len(chanRange) != 2 {
+		panic("Illegal channel range num")
+	}
+	channelBegin, err := strconv.Atoi(chanRange[0])
+	if err != nil {
+		panic(err)
+	}
+	channelEnd, err := strconv.Atoi(chanRange[1])
+	if err != nil {
+		panic(err)
+	}
+	if channelBegin < 0 || channelEnd < 0 {
+		panic("Illegal channel range value")
+	}
+	if channelBegin > channelEnd {
+		panic("Illegal channel range value")
+	}
+
+	channels := make([]string, channelEnd-channelBegin)
+	for i := 0; i < channelEnd-channelBegin; i++ {
+		channels[i] = ch + "-" + strconv.Itoa(channelBegin+i)
+	}
+	return channels
+}
+
+func (pt *ParamTable) searchResultChannelNames() []string {
+	ch, err := pt.Load("msgChannel.chanNamePrefix.searchResult")
+	if err != nil {
+		log.Fatal(err)
+	}
+	channelRange, err := pt.Load("msgChannel.channelRange.searchResult")
+	if err != nil {
+		panic(err)
+	}
+
+	chanRange := strings.Split(channelRange, ",")
+	if len(chanRange) != 2 {
+		panic("Illegal channel range num")
+	}
+	channelBegin, err := strconv.Atoi(chanRange[0])
+	if err != nil {
+		panic(err)
+	}
+	channelEnd, err := strconv.Atoi(chanRange[1])
+	if err != nil {
+		panic(err)
+	}
+	if channelBegin < 0 || channelEnd < 0 {
+		panic("Illegal channel range value")
+	}
+	if channelBegin > channelEnd {
+		panic("Illegal channel range value")
+	}
+
+	channels := make([]string, channelEnd-channelBegin)
+	for i := 0; i < channelEnd-channelBegin; i++ {
+		channels[i] = ch + "-" + strconv.Itoa(channelBegin+i)
+	}
+	return channels
+}
+
+func (pt *ParamTable) MaxNameLength() int64 {
+	str, err := pt.Load("proxy.maxNameLength")
+	if err != nil {
+		panic(err)
+	}
+	maxNameLength, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	return maxNameLength
+}
+
+func (pt *ParamTable) MaxFieldNum() int64 {
+	str, err := pt.Load("proxy.maxFieldNum")
+	if err != nil {
+		panic(err)
+	}
+	maxFieldNum, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	return maxFieldNum
+}
+
+func (pt *ParamTable) defaultPartitionTag() string {
+	tag, err := pt.Load("common.defaultPartitionTag")
+	if err != nil {
+		panic(err)
+	}
+	return tag
 }
