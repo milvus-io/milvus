@@ -70,38 +70,38 @@ TEST(wrapper, inoutstream) {
   ASSERT_EQ(inarray->Value(4), 5);
 }
 
-TEST(wrapper, boolean) {
-  auto payload = NewPayloadWriter(ColumnType::BOOL);
-  bool data[] = {true, false, true, false};
-
-  auto st = AddBooleanToPayload(payload, data, 4);
-  ASSERT_EQ(st.error_code, ErrorCode::SUCCESS);
-  st = FinishPayloadWriter(payload);
-  ASSERT_EQ(st.error_code, ErrorCode::SUCCESS);
-  auto cb = GetPayloadBufferFromWriter(payload);
-  ASSERT_GT(cb.length, 0);
-  ASSERT_NE(cb.data, nullptr);
-  auto nums = GetPayloadLengthFromWriter(payload);
-  ASSERT_EQ(nums, 4);
-
-  auto reader = NewPayloadReader(ColumnType::BOOL, (uint8_t *) cb.data, cb.length);
-  bool *values;
-  int length;
-  st = GetBoolFromPayload(reader, &values, &length);
-  ASSERT_EQ(st.error_code, ErrorCode::SUCCESS);
-  ASSERT_NE(values, nullptr);
-  ASSERT_EQ(length, 4);
-  length = GetPayloadLengthFromReader(reader);
-  ASSERT_EQ(length, 4);
-  for (int i = 0; i < length; i++) {
-    ASSERT_EQ(data[i], values[i]);
-  }
-
-  st = ReleasePayloadWriter(payload);
-  ASSERT_EQ(st.error_code, ErrorCode::SUCCESS);
-  st = ReleasePayloadReader(reader);
-  ASSERT_EQ(st.error_code, ErrorCode::SUCCESS);
-}
+//TEST(wrapper, boolean) {
+//  auto payload = NewPayloadWriter(ColumnType::BOOL);
+//  bool data[] = {true, false, true, false};
+//
+//  auto st = AddBooleanToPayload(payload, data, 4);
+//  ASSERT_EQ(st.error_code, ErrorCode::SUCCESS);
+//  st = FinishPayloadWriter(payload);
+//  ASSERT_EQ(st.error_code, ErrorCode::SUCCESS);
+//  auto cb = GetPayloadBufferFromWriter(payload);
+//  ASSERT_GT(cb.length, 0);
+//  ASSERT_NE(cb.data, nullptr);
+//  auto nums = GetPayloadLengthFromWriter(payload);
+//  ASSERT_EQ(nums, 4);
+//
+//  auto reader = NewPayloadReader(ColumnType::BOOL, (uint8_t *) cb.data, cb.length);
+//  bool *values;
+//  int length;
+//  st = GetBoolFromPayload(reader, &values, &length);
+//  ASSERT_EQ(st.error_code, ErrorCode::SUCCESS);
+//  ASSERT_NE(values, nullptr);
+//  ASSERT_EQ(length, 4);
+//  length = GetPayloadLengthFromReader(reader);
+//  ASSERT_EQ(length, 4);
+//  for (int i = 0; i < length; i++) {
+//    ASSERT_EQ(data[i], values[i]);
+//  }
+//
+//  st = ReleasePayloadWriter(payload);
+//  ASSERT_EQ(st.error_code, ErrorCode::SUCCESS);
+//  st = ReleasePayloadReader(reader);
+//  ASSERT_EQ(st.error_code, ErrorCode::SUCCESS);
+//}
 
 #define NUMERIC_TEST(TEST_NAME, COLUMN_TYPE, DATA_TYPE, ADD_FUNC, GET_FUNC, ARRAY_TYPE) TEST(wrapper, TEST_NAME) {  \
 auto payload = NewPayloadWriter(COLUMN_TYPE);                                                             \
