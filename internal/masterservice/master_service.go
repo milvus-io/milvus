@@ -95,6 +95,7 @@ type Core struct {
 
 	//get binlog file path from data service,
 	GetBinlogFilePathsFromDataServiceReq func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
+	GetNumRowsReq                        func(segID typeutil.UniqueID) (int64, error)
 
 	//call index builder's client to build index, return build id
 	BuildIndexReq func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error)
@@ -187,6 +188,9 @@ func (c *Core) checkInit() error {
 	}
 	if c.GetBinlogFilePathsFromDataServiceReq == nil {
 		return errors.New("GetBinlogFilePathsFromDataServiceReq is nil")
+	}
+	if c.GetNumRowsReq == nil {
+		return errors.New("GetNumRowsReq is nil")
 	}
 	if c.BuildIndexReq == nil {
 		return errors.New("BuildIndexReq is nil")
@@ -629,7 +633,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 		}
 		binlog, err := s.GetInsertBinlogPaths(ctx, &datapb.InsertBinlogPathRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   0, //TODO, msy type
+				MsgType:   0, //TODO, msg type
 				MsgID:     0,
 				Timestamp: ts,
 				SourceID:  int64(Params.NodeID),
@@ -648,6 +652,37 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 			}
 		}
 		return nil, fmt.Errorf("binlog file not exist, segment id = %d, field id = %d", segID, fieldID)
+	}
+
+	c.GetNumRowsReq = func(segID typeutil.UniqueID) (int64, error) {
+		ts, err := c.tsoAllocator.Alloc(1)
+		if err != nil {
+			return 0, err
+		}
+		segInfo, err := s.GetSegmentInfo(ctx, &datapb.SegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   0, //TODO, msg type
+				MsgID:     0,
+				Timestamp: ts,
+				SourceID:  int64(Params.NodeID),
+			},
+			SegmentIDs: []typeutil.UniqueID{segID},
+		})
+		if err != nil {
+			return 0, err
+		}
+		if segInfo.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			return 0, fmt.Errorf("GetSegmentInfo from data service failed, error = %s", segInfo.Status.Reason)
+		}
+		if len(segInfo.Infos) != 1 {
+			log.Debug("get segment info empty")
+			return 0, nil
+		}
+		if segInfo.Infos[0].FlushedTime == 0 {
+			log.Debug("segment id not flushed", zap.Int64("segment id", segID))
+			return 0, nil
+		}
+		return segInfo.Infos[0].NumRows, nil
 	}
 	return nil
 }

@@ -1725,6 +1725,8 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 	getIndexStatesRequest := &indexpb.IndexStatesRequest{
 		IndexBuildIDs: make([]UniqueID, 0),
 	}
+	enableIndexBitMap := make([]bool, 0)
+	indexBuildIDs := make([]UniqueID, 0)
 
 	for _, segmentID := range allSegmentIDs {
 		describeSegmentRequest := &milvuspb.DescribeSegmentRequest{
@@ -1742,12 +1744,17 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 			return err
 		}
 		if segmentDesc.IndexID == matchIndexID {
-			getIndexStatesRequest.IndexBuildIDs = append(getIndexStatesRequest.IndexBuildIDs, segmentDesc.BuildID)
+			indexBuildIDs = append(indexBuildIDs, segmentDesc.BuildID)
+			if segmentDesc.EnableIndex {
+				enableIndexBitMap = append(enableIndexBitMap, true)
+			} else {
+				enableIndexBitMap = append(enableIndexBitMap, false)
+			}
 		}
 	}
 
-	log.Println("GetIndexState:: len of allSegmentIDs:", len(allSegmentIDs), " len of IndexBuildIDs", len(getIndexStatesRequest.IndexBuildIDs))
-	if len(allSegmentIDs) != len(getIndexStatesRequest.IndexBuildIDs) {
+	log.Println("GetIndexState:: len of allSegmentIDs:", len(allSegmentIDs), " len of IndexBuildIDs", len(indexBuildIDs))
+	if len(allSegmentIDs) != len(indexBuildIDs) {
 		gist.result = &milvuspb.IndexStateResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -1758,6 +1765,11 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	for idx, enableIndex := range enableIndexBitMap {
+		if enableIndex {
+			getIndexStatesRequest.IndexBuildIDs = append(getIndexStatesRequest.IndexBuildIDs, indexBuildIDs[idx])
+		}
+	}
 	states, err := gist.indexService.GetIndexStates(ctx, getIndexStatesRequest)
 	if err != nil {
 		return err

@@ -23,5 +23,6 @@ master:
     IDAssignExpiration: 2000 # ms
 
   maxPartitionNum: 4096
+  minSegmentSizeToEnableIndex: 4096
   nodeID: 100
   timeout: 3600 # time out, 5 seconds

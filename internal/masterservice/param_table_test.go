@@ -37,7 +37,10 @@ func TestParamTable(t *testing.T) {
 	t.Logf("master statistics channel = %s", Params.StatisticsChannel)
 
 	assert.NotEqual(t, Params.MaxPartitionNum, 0)
-	t.Logf("master initMaxPartitionNum = %d", Params.MaxPartitionNum)
+	t.Logf("master MaxPartitionNum = %d", Params.MaxPartitionNum)
+
+	assert.NotEqual(t, Params.MinSegmentSizeToEnableIndex, 0)
+	t.Logf("master MinSegmentSizeToEnableIndex = %d", Params.MinSegmentSizeToEnableIndex)
 
 	assert.NotEqual(t, Params.DefaultPartitionName, "")
 	t.Logf("default partition name = %s", Params.DefaultPartitionName)

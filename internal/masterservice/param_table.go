@@ -29,9 +29,10 @@ type ParamTable struct {
 	StatisticsChannel         string
 	DataServiceSegmentChannel string // get from data service, data service create segment, or data node flush segment
 
-	MaxPartitionNum      int64
-	DefaultPartitionName string
-	DefaultIndexName     string
+	MaxPartitionNum             int64
+	DefaultPartitionName        string
+	DefaultIndexName            string
+	MinSegmentSizeToEnableIndex int64
 
 	Timeout int
 
@@ -60,6 +61,7 @@ func (p *ParamTable) Init() {
 		p.initStatisticsChannelName()
 
 		p.initMaxPartitionNum()
+		p.initMinSegmentSizeToEnableIndex()
 		p.initDefaultPartitionName()
 		p.initDefaultIndexName()
 
@@ -147,6 +149,10 @@ func (p *ParamTable) initStatisticsChannelName() {
 
 func (p *ParamTable) initMaxPartitionNum() {
 	p.MaxPartitionNum = p.ParseInt64("master.maxPartitionNum")
+}
+
+func (p *ParamTable) initMinSegmentSizeToEnableIndex() {
+	p.MinSegmentSizeToEnableIndex = p.ParseInt64("master.minSegmentSizeToEnableIndex")
 }
 
 func (p *ParamTable) initDefaultPartitionName() {

@@ -553,6 +553,7 @@ func (t *DescribeSegmentReqTask) Execute() error {
 	}
 	t.Rsp.IndexID = segIdxInfo.IndexID
 	t.Rsp.BuildID = segIdxInfo.BuildID
+	t.Rsp.EnableIndex = segIdxInfo.EnableIndex
 	return nil
 }
 
@@ -731,30 +732,41 @@ func (t *CreateIndexTask) BuildIndex() error {
 	if t.core.MetaTable.IsSegmentIndexed(t.segmentID, t.fieldSchema, t.indexParams) {
 		return nil
 	}
-	binlogs, err := t.core.GetBinlogFilePathsFromDataServiceReq(t.segmentID, t.fieldSchema.FieldID)
+	rows, err := t.core.GetNumRowsReq(t.segmentID)
 	if err != nil {
 		return err
 	}
-	var bldID typeutil.UniqueID
-
-	if len(t.indexParams) == 0 {
-		t.indexParams = make([]*commonpb.KeyValuePair, 0, len(t.fieldSchema.IndexParams))
-		for _, p := range t.fieldSchema.IndexParams {
-			t.indexParams = append(t.indexParams, &commonpb.KeyValuePair{
-				Key:   p.Key,
-				Value: p.Value,
-			})
+	var bldID typeutil.UniqueID = 0
+	enableIdx := false
+	if rows < Params.MinSegmentSizeToEnableIndex {
+		log.Debug("num of is less than MinSegmentSizeToEnableIndex", zap.Int64("num rows", rows))
+	} else {
+		binlogs, err := t.core.GetBinlogFilePathsFromDataServiceReq(t.segmentID, t.fieldSchema.FieldID)
+		if err != nil {
+			return err
 		}
-	}
-	bldID, err = t.core.BuildIndexReq(binlogs, t.fieldSchema.TypeParams, t.indexParams, t.indexID, t.indexName)
-	if err != nil {
-		return err
+
+		if len(t.indexParams) == 0 {
+			t.indexParams = make([]*commonpb.KeyValuePair, 0, len(t.fieldSchema.IndexParams))
+			for _, p := range t.fieldSchema.IndexParams {
+				t.indexParams = append(t.indexParams, &commonpb.KeyValuePair{
+					Key:   p.Key,
+					Value: p.Value,
+				})
+			}
+		}
+		bldID, err = t.core.BuildIndexReq(binlogs, t.fieldSchema.TypeParams, t.indexParams, t.indexID, t.indexName)
+		if err != nil {
+			return err
+		}
+		enableIdx = true
 	}
 	seg := etcdpb.SegmentIndexInfo{
-		SegmentID: t.segmentID,
-		FieldID:   t.fieldSchema.FieldID,
-		IndexID:   t.indexID,
-		BuildID:   bldID,
+		SegmentID:   t.segmentID,
+		FieldID:     t.fieldSchema.FieldID,
+		IndexID:     t.indexID,
+		BuildID:     bldID,
+		EnableIndex: enableIdx,
 	}
 	err = t.core.MetaTable.AddIndex(&seg)
 	return err

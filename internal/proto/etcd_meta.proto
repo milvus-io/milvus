@@ -50,6 +50,7 @@ message SegmentIndexInfo {
   int64 fieldID = 2;
   int64 indexID = 3;
   int64 buildID = 4;
+  bool enable_index = 5;
 }
 
 message CollectionMeta {
