@@ -203,8 +203,6 @@ class TestIndexBase:
         connect.create_index(collection, field_name, get_simple_index)
         connect.create_index(collection, field_name, get_simple_index)
 
-    # TODO:
-    @pytest.mark.skip("get_collection_stats")
     @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly(self, connect, collection):
@@ -219,7 +217,7 @@ class TestIndexBase:
             connect.create_index(collection, field_name, index)
             stats = connect.get_collection_stats(collection)
             # assert stats["partitions"][0]["segments"][0]["index_name"] == index["index_type"]
-            assert stats["row_count"] == default_nb
+            assert stats["row_count"] == str(default_nb)
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_ip(self, connect, collection, get_simple_index):
@@ -355,7 +353,6 @@ class TestIndexBase:
 
     # TODO:
 
-    @pytest.mark.skip("get_collection_stats")
     @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly_ip(self, connect, collection):
@@ -370,7 +367,7 @@ class TestIndexBase:
             connect.create_index(collection, field_name, index)
             stats = connect.get_collection_stats(collection)
             # assert stats["partitions"][0]["segments"][0]["index_name"] == index["index_type"]
-            assert stats["row_count"] == default_nb
+            assert stats["row_count"] == str(default_nb)
 
     """
     ******************************************************************
