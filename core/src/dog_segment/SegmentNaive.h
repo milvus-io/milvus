@@ -105,6 +105,38 @@ class SegmentNaive : public SegmentBase {
         Record(const Schema& schema);
     };
 
+    tbb::concurrent_unordered_multimap<idx_t, int64_t> uid2offset_;
+
+    struct DeletedRecord {
+        std::atomic<int64_t> reserved = 0;
+        AckResponder ack_responder_;
+        ConcurrentVector<Timestamp, true> timestamps_;
+        ConcurrentVector<idx_t, true> uids_;
+        struct TmpBitmap {
+            // Just for query
+            int64_t del_barrier = 0;
+            std::vector<bool> bitmap;
+        };
+        std::shared_ptr<TmpBitmap> lru_;
+        std::shared_mutex shared_mutex_;
+
+        DeletedRecord(): lru_(std::make_shared<TmpBitmap>()) {}
+        auto get_lru_entry() {
+            std::shared_lock lck(shared_mutex_);
+            return lru_;
+        }
+        void insert_lru_entry(std::shared_ptr<TmpBitmap> new_entry) {
+            std::lock_guard lck(shared_mutex_);
+            if(new_entry->del_barrier <= lru_->del_barrier) {
+                // DO NOTHING
+                return;
+            }
+            lru_ = std::move(new_entry);
+        }
+    };
+
+    std::shared_ptr<DeletedRecord::TmpBitmap> get_deleted_bitmap(int64_t barrier, Timestamp query_timestamp, int64_t insert_barrier);
+
     Status
     QueryImpl(const query::QueryPtr& query, Timestamp timestamp, QueryResult& results);
 
@@ -134,7 +166,7 @@ class SegmentNaive : public SegmentBase {
     IndexMetaPtr index_meta_;
     std::atomic<SegmentState> state_ = SegmentState::Open;
     Record record_;
-
+    DeletedRecord deleted_record_;
     //  tbb::concurrent_unordered_map<uint64_t, int> internal_indexes_;
     //  std::shared_ptr<MutableRecord> record_mutable_;
     //  // to determined that if immutable data if available

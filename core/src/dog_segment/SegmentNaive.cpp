@@ -37,7 +37,71 @@ SegmentNaive::PreInsert(int64_t size) {
 
 int64_t
 SegmentNaive::PreDelete(int64_t size) {
-    throw std::runtime_error("unimplemented");
+    auto reserved_begin = deleted_record_.reserved.fetch_add(size);
+    return reserved_begin;
+}
+
+auto SegmentNaive::get_deleted_bitmap(int64_t del_barrier, Timestamp query_timestamp, int64_t insert_barrier) -> std::shared_ptr<DeletedRecord::TmpBitmap> {
+    auto old = deleted_record_.get_lru_entry();
+    if(old->del_barrier == del_barrier) {
+        return old;
+    }
+    auto current = std::make_shared<DeletedRecord::TmpBitmap>(*old);
+    auto& vec = current->bitmap;
+
+    if(del_barrier < old->del_barrier) {
+        for(auto del_index = del_barrier; del_index < old->del_barrier; ++del_index) {
+            // get uid in delete logs
+            auto uid = deleted_record_.uids_[del_index];
+            // map uid to corrensponding offsets, select the max one, which should be the target
+            // the max one should be closest to query_timestamp, so the delete log should refer to it
+            int64_t the_offset = -1;
+            auto [iter_b, iter_e] = uid2offset_.equal_range(uid);
+            for(auto iter = iter_b; iter != iter_e; ++iter) {
+                auto offset = iter->second;
+                if(record_.timestamps_[offset] < query_timestamp) {
+                    assert(offset < vec.size());
+                    the_offset = std::max(the_offset, offset);
+                }
+            }
+            // if not found, skip
+            if(the_offset == -1) {
+                continue;
+            }
+            // otherwise, clear the flag
+            vec[the_offset] = false;
+        }
+        return current;
+    } else {
+        for(auto del_index = old->del_barrier; del_index < del_barrier; ++del_index) {
+            // get uid in delete logs
+            auto uid = deleted_record_.uids_[del_index];
+            // map uid to corrensponding offsets, select the max one, which should be the target
+            // the max one should be closest to query_timestamp, so the delete log should refer to it
+            int64_t the_offset = -1;
+            auto [iter_b, iter_e] = uid2offset_.equal_range(uid);
+            for(auto iter = iter_b; iter != iter_e; ++iter) {
+                auto offset = iter->second;
+                if(offset >= insert_barrier){
+                    continue;
+                }
+                if(record_.timestamps_[offset] < query_timestamp) {
+                    assert(offset < vec.size());
+                    the_offset = std::max(the_offset, offset);
+                }
+            }
+
+            // if not found, skip
+            if(the_offset == -1) {
+                continue;
+            }
+
+            // otherwise, set the flag
+            vec[the_offset] = true;
+        }
+    }
+
+    return current;
 }
 
 Status
@@ -88,7 +152,13 @@ SegmentNaive::Insert(int64_t reserved_begin, int64_t size, const int64_t* uids_r
         record_.entity_vec_[fid]->set_data_raw(reserved_begin, entities[fid].data(), size);
     }
 
-    record_.ack_responder_.AddSegment(reserved_begin, size);
+    for(int i = 0; i < uids.size(); ++i) {
+        auto uid = uids[i];
+        // NOTE: this must be the last step, cannot be put above
+        uid2offset_.insert(std::make_pair(uid, reserved_begin + i));
+    }
+
+    record_.ack_responder_.AddSegment(reserved_begin, reserved_begin + size);
     return Status::OK();
 
     //    std::thread go(executor, std::move(uids), std::move(timestamps), std::move(entities));
@@ -123,8 +193,26 @@ SegmentNaive::Insert(int64_t reserved_begin, int64_t size, const int64_t* uids_r
 }
 
 Status
-SegmentNaive::Delete(int64_t reserved_offset, int64_t size, const int64_t* primary_keys, const Timestamp* timestamps) {
-    throw std::runtime_error("unimplemented");
+SegmentNaive::Delete(int64_t reserved_begin, int64_t size, const int64_t* uids_raw, const Timestamp* timestamps_raw) {
+    std::vector<std::tuple<Timestamp, idx_t>> ordering;
+    ordering.resize(size);
+    // #pragma omp parallel for
+    for (int i = 0; i < size; ++i) {
+        ordering[i] = std::make_tuple(timestamps_raw[i], uids_raw[i]);
+    }
+    std::sort(ordering.begin(), ordering.end());
+    std::vector<idx_t> uids(size);
+    std::vector<Timestamp> timestamps(size);
+    // #pragma omp parallel for
+    for (int index = 0; index < size; ++index) {
+        auto [t, uid] = ordering[index];
+        timestamps[index] = t;
+        uids[index] = uid;
+    }
+    deleted_record_.timestamps_.set_data(reserved_begin, timestamps.data(), size);
+    deleted_record_.uids_.set_data(reserved_begin, uids.data(), size);
+    deleted_record_.ack_responder_.AddSegment(reserved_begin, reserved_begin + size);
+    return Status::OK();
     //    for (int i = 0; i < size; ++i) {
     //        auto key = primary_keys[i];
     //        auto time = timestamps[i];
@@ -171,6 +259,22 @@ SegmentNaive::QueryImpl(const query::QueryPtr& query, Timestamp timestamp, Query
     //    return Status::OK();
 }
 
+template<typename RecordType>
+int64_t get_barrier(const RecordType& record, Timestamp timestamp) {
+    auto& vec = record.timestamps_;
+    int64_t beg = 0;
+    int64_t end = record.ack_responder_.GetAck();
+    while (beg < end) {
+        auto mid = (beg + end) / 2;
+        if (vec[mid] < timestamp) {
+            end = mid;
+        } else {
+            beg = mid + 1;
+        }
+    }
+    return beg;
+}
+
 Status
 SegmentNaive::Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult& result) {
     // TODO: enable delete
@@ -198,24 +302,7 @@ SegmentNaive::Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult
     auto topK = query_info->topK;
     auto num_queries = query_info->num_queries;
 
-
-    int64_t barrier = [&]
-    {
-        auto& vec = record_.timestamps_;
-        int64_t beg = 0;
-        int64_t end = record_.ack_responder_.GetAck();
-        while (beg < end) {
-            auto mid = (beg + end) / 2;
-            if (vec[mid] < timestamp) {
-                end = mid;
-            } else {
-                beg = mid + 1;
-            }
-
-        }
-        return beg;
-    }();
-
+    auto barrier = get_barrier(record_, timestamp);
 
     if(topK > barrier) {
         topK = barrier;
