@@ -103,6 +103,8 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 			return tsMessages[i].BeginTs() < tsMessages[j].BeginTs()
 		})
 
+	var flush bool = false
+	var flushSegID UniqueID
 	// do dd tasks
 	for _, msg := range tsMessages {
 		switch msg.Type() {
@@ -116,100 +118,98 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 			ddNode.dropPartition(msg.(*msgstream.DropPartitionMsg))
 		case internalPb.MsgType_kFlush:
 			fMsg := msg.(*msgstream.FlushMsg)
-			flushSegID := fMsg.SegmentID
+			flush = true
+			flushSegID = fMsg.SegmentID
 			ddMsg.flushMessages = append(ddMsg.flushMessages, fMsg)
-			ddNode.flush()
-
-			log.Println(".. manual flush completed ...")
-			ddlFlushMsg := &ddlFlushSyncMsg{
-				flushCompleted: true,
-				ddlBinlogPathMsg: ddlBinlogPathMsg{
-					segID: flushSegID,
-				},
-			}
-
-			ddNode.outCh <- ddlFlushMsg
-
 		default:
 			log.Println("Non supporting message type:", msg.Type())
 		}
 	}
 
 	// generate binlog
-	if ddNode.ddBuffer.full() {
-		ddNode.flush()
+	if ddNode.ddBuffer.full() || flush {
+		log.Println(". dd buffer full or receive Flush msg ...")
+		ddCodec := &storage.DataDefinitionCodec{}
+		for collectionID, data := range ddNode.ddBuffer.ddData {
+			// buffer data to binlog
+			binLogs, err := ddCodec.Serialize(data.timestamps, data.ddRequestString, data.eventTypes)
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+			if len(binLogs) != 2 {
+				log.Println("illegal binLogs")
+				continue
+			}
+
+			// binLogs -> minIO/S3
+			if len(data.ddRequestString) != len(data.timestamps) ||
+				len(data.timestamps) != len(data.eventTypes) {
+				log.Println("illegal ddBuffer, failed to save binlog")
+				continue
+			} else {
+				log.Println(".. dd buffer flushing ...")
+				// Blob key example:
+				// ${tenant}/data_definition_log/${collection_id}/ts/${log_idx}
+				// ${tenant}/data_definition_log/${collection_id}/ddl/${log_idx}
+				keyCommon := path.Join(Params.DdLogRootPath, strconv.FormatInt(collectionID, 10))
+
+				// save ts binlog
+				timestampLogIdx, err := ddNode.idAllocator.AllocOne()
+				if err != nil {
+					log.Println(err)
+				}
+				timestampKey := path.Join(keyCommon, binLogs[0].GetKey(), strconv.FormatInt(timestampLogIdx, 10))
+				err = ddNode.kv.Save(timestampKey, string(binLogs[0].GetValue()))
+				if err != nil {
+					log.Println(err)
+				}
+				log.Println("save ts binlog, key = ", timestampKey)
+
+				// save dd binlog
+				ddLogIdx, err := ddNode.idAllocator.AllocOne()
+				if err != nil {
+					log.Println(err)
+				}
+				ddKey := path.Join(keyCommon, binLogs[1].GetKey(), strconv.FormatInt(ddLogIdx, 10))
+				err = ddNode.kv.Save(ddKey, string(binLogs[1].GetValue()))
+				if err != nil {
+					log.Println(err)
+				}
+				log.Println("save dd binlog, key = ", ddKey)
+
+				ddlFlushMsg := &ddlFlushSyncMsg{
+					flushCompleted: false,
+					ddlBinlogPathMsg: ddlBinlogPathMsg{
+						collID: collectionID,
+						paths:  []string{timestampKey, ddKey},
+					},
+				}
+
+				ddNode.outCh <- ddlFlushMsg
+			}
+
+		}
+		// clear buffer
+		ddNode.ddBuffer.ddData = make(map[UniqueID]*ddData)
+	}
+
+	if flush {
+
+		log.Println(".. manual flush completed ...")
+		ddlFlushMsg := &ddlFlushSyncMsg{
+			flushCompleted: true,
+			ddlBinlogPathMsg: ddlBinlogPathMsg{
+				segID: flushSegID,
+			},
+		}
+
+		ddNode.outCh <- ddlFlushMsg
+
 	}
 
 	var res Msg = ddNode.ddMsg
 	return []*Msg{&res}
-}
-
-func (ddNode *ddNode) flush() {
-	// generate binlog
-	log.Println(". dd buffer full or receive Flush msg ...")
-	ddCodec := &storage.DataDefinitionCodec{}
-	for collectionID, data := range ddNode.ddBuffer.ddData {
-		// buffer data to binlog
-		binLogs, err := ddCodec.Serialize(data.timestamps, data.ddRequestString, data.eventTypes)
-		if err != nil {
-			log.Println(err)
-			continue
-		}
-		if len(binLogs) != 2 {
-			log.Println("illegal binLogs")
-			continue
-		}
-
-		// binLogs -> minIO/S3
-		if len(data.ddRequestString) != len(data.timestamps) ||
-			len(data.timestamps) != len(data.eventTypes) {
-			log.Println("illegal ddBuffer, failed to save binlog")
-			continue
-		} else {
-			log.Println(".. dd buffer flushing ...")
-			// Blob key example:
-			// ${tenant}/data_definition_log/${collection_id}/ts/${log_idx}
-			// ${tenant}/data_definition_log/${collection_id}/ddl/${log_idx}
-			keyCommon := path.Join(Params.DdLogRootPath, strconv.FormatInt(collectionID, 10))
-
-			// save ts binlog
-			timestampLogIdx, err := ddNode.idAllocator.AllocOne()
-			if err != nil {
-				log.Println(err)
-			}
-			timestampKey := path.Join(keyCommon, binLogs[0].GetKey(), strconv.FormatInt(timestampLogIdx, 10))
-			err = ddNode.kv.Save(timestampKey, string(binLogs[0].GetValue()))
-			if err != nil {
-				log.Println(err)
-			}
-			log.Println("save ts binlog, key = ", timestampKey)
-
-			// save dd binlog
-			ddLogIdx, err := ddNode.idAllocator.AllocOne()
-			if err != nil {
-				log.Println(err)
-			}
-			ddKey := path.Join(keyCommon, binLogs[1].GetKey(), strconv.FormatInt(ddLogIdx, 10))
-			err = ddNode.kv.Save(ddKey, string(binLogs[1].GetValue()))
-			if err != nil {
-				log.Println(err)
-			}
-			log.Println("save dd binlog, key = ", ddKey)
-
-			ddlFlushMsg := &ddlFlushSyncMsg{
-				flushCompleted: false,
-				ddlBinlogPathMsg: ddlBinlogPathMsg{
-					collID: collectionID,
-					paths:  []string{timestampKey, ddKey},
-				},
-			}
-
-			ddNode.outCh <- ddlFlushMsg
-		}
-
-	}
-	// clear buffer
-	ddNode.ddBuffer.ddData = make(map[UniqueID]*ddData)
 }
 
 func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
