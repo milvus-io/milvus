@@ -15,6 +15,7 @@ import "C"
 
 import (
 	"context"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/kv"
@@ -22,29 +23,31 @@ import (
 	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 )
 
-type InsertData struct {
-	insertIDs        map[int64][]int64
-	insertTimestamps map[int64][]uint64
-	insertRecords    map[int64][][]byte
-	insertOffset     map[int64]int64
-}
+type Timestamp = typeutil.Timestamp
 
-type DeleteData struct {
-	deleteIDs        map[int64][]int64
-	deleteTimestamps map[int64][]uint64
-	deleteOffset     map[int64]int64
-}
-
-type DeleteRecord struct {
-	entityID  int64
-	timestamp uint64
-	segmentID int64
-}
-
-type DeletePreprocessData struct {
-	deleteRecords []*DeleteRecord
-	count         int32
-}
+//type InsertData struct {
+//	insertIDs        map[int64][]int64
+//	insertTimestamps map[int64][]uint64
+//	insertRecords    map[int64][][]byte
+//	insertOffset     map[int64]int64
+//}
+//
+//type DeleteData struct {
+//	deleteIDs        map[int64][]int64
+//	deleteTimestamps map[int64][]uint64
+//	deleteOffset     map[int64]int64
+//}
+//
+//type DeleteRecord struct {
+//	entityID  int64
+//	timestamp uint64
+//	segmentID int64
+//}
+//
+//type DeletePreprocessData struct {
+//	deleteRecords []*DeleteRecord
+//	count         int32
+//}
 
 type QueryNodeDataBuffer struct {
 	InsertDeleteBuffer      []*msgPb.InsertOrDeleteMsg

@@ -1,11 +1,91 @@
 package reader
 
 import (
+	"context"
 	"fmt"
 	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 	"log"
 	"sync"
 )
+
+type manipulationService struct {
+	ctx context.Context
+	fg  *flowgraph.TimeTickedFlowGraph
+}
+
+func (dmService *manipulationService) initNodes() {
+	dmService.fg = flowgraph.NewTimeTickedFlowGraph(dmService.ctx)
+
+	var msgStreamNode Node = newMsgStreamNode()
+
+	var dmNode Node = newDmNode()
+	// var key2SegNode Node = newKey2SegNode()
+	var schemaUpdateNode Node = newSchemaUpdateNode()
+
+	var filteredDmNode Node = newFilteredDmNode()
+
+	var insertNode Node = newInsertNode()
+	// var deletePreprocessNode Node = newDeletePreprocessNode()
+	// var deleteNode Node = newDeleteNode()
+	var serviceTimeNode Node = newServiceTimeNode()
+
+	dmService.fg.AddNode(&msgStreamNode)
+
+	dmService.fg.AddNode(&dmNode)
+	// fg.AddNode(&key2SegNode)
+	dmService.fg.AddNode(&schemaUpdateNode)
+
+	dmService.fg.AddNode(&filteredDmNode)
+
+	dmService.fg.AddNode(&insertNode)
+	// fg.AddNode(&deletePreprocessNode)
+	// fg.AddNode(&deleteNode)
+	dmService.fg.AddNode(&serviceTimeNode)
+
+	// TODO: add delete pipeline support
+	var err = dmService.fg.SetEdges(dmNode.Name(),
+		[]string{},
+		[]string{filteredDmNode.Name()},
+	)
+	if err != nil {
+		log.Fatal("set edges failed in node:", dmNode.Name())
+	}
+
+	err = dmService.fg.SetEdges(schemaUpdateNode.Name(),
+		[]string{},
+		[]string{filteredDmNode.Name()},
+	)
+	if err != nil {
+		log.Fatal("set edges failed in node:", schemaUpdateNode.Name())
+	}
+
+	err = dmService.fg.SetEdges(filteredDmNode.Name(),
+		[]string{dmNode.Name(), schemaUpdateNode.Name()},
+		[]string{insertNode.Name()},
+	)
+	if err != nil {
+		log.Fatal("set edges failed in node:", filteredDmNode.Name())
+	}
+
+	err = dmService.fg.SetEdges(insertNode.Name(),
+		[]string{filteredDmNode.Name()},
+		[]string{serviceTimeNode.Name()},
+	)
+	if err != nil {
+		log.Fatal("set edges failed in node:", insertNode.Name())
+	}
+
+	err = dmService.fg.SetEdges(serviceTimeNode.Name(),
+		[]string{insertNode.Name()},
+		[]string{},
+	)
+	if err != nil {
+		log.Fatal("set edges failed in node:", serviceTimeNode.Name())
+	}
+
+	// TODO: add top nodes's initialization
+}
 
 func (node *QueryNode) MessagesPreprocess(insertDeleteMessages []*msgPb.InsertOrDeleteMsg, timeRange TimeRange) msgPb.Status {
 	var tMax = timeRange.timestampMax

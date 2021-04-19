@@ -14,22 +14,22 @@ import (
 const ctxTimeInMillisecond = 3000
 
 type nodeA struct {
-	baseNode
+	BaseNode
 	a float64
 }
 
 type nodeB struct {
-	baseNode
+	BaseNode
 	b float64
 }
 
 type nodeC struct {
-	baseNode
+	BaseNode
 	c float64
 }
 
 type nodeD struct {
-	baseNode
+	BaseNode
 	d       float64
 	resChan chan float64
 }
@@ -43,7 +43,7 @@ func (m *intMsg) TimeTick() Timestamp {
 	return m.t
 }
 
-func (m *intMsg) DownStreamNodeIdx() int32 {
+func (m *intMsg) DownStreamNodeIdx() int {
 	return 1
 }
 
@@ -178,22 +178,22 @@ func TestTimeTickedFlowGraph_Start(t *testing.T) {
 	fg := NewTimeTickedFlowGraph(ctx)
 
 	var a Node = &nodeA{
-		baseNode: baseNode{
+		BaseNode: BaseNode{
 			maxQueueLength: maxQueueLength,
 		},
 	}
 	var b Node = &nodeB{
-		baseNode: baseNode{
+		BaseNode: BaseNode{
 			maxQueueLength: maxQueueLength,
 		},
 	}
 	var c Node = &nodeC{
-		baseNode: baseNode{
+		BaseNode: BaseNode{
 			maxQueueLength: maxQueueLength,
 		},
 	}
 	var d Node = &nodeD{
-		baseNode: baseNode{
+		BaseNode: BaseNode{
 			maxQueueLength: maxQueueLength,
 		},
 		resChan: make(chan float64),
