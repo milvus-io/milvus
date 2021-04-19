@@ -1,10 +1,10 @@
 package reader
 
-func startQueryNode(pulsarURL string) {
+func startQueryNode() {
 	qn := NewQueryNode(0, 0)
 	qn.InitQueryNodeCollection()
 	//go qn.SegmentService()
-	qn.StartMessageClient(pulsarURL)
+	qn.StartMessageClient()
 
 	go qn.RunSearch()
 	qn.RunInsertDelete()

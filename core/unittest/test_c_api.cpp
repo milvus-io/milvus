@@ -139,14 +139,7 @@ TEST(CApiTest, SearchTest) {
 
   long result_ids[10];
   float result_distances[10];
-
-  auto query_json = std::string(R"({"field_name":"fakevec","num_queries":1,"topK":10})");
-  std::vector<float> query_raw_data(16);
-  for (int i = 0; i < 16; i++) {
-    query_raw_data[i] = e() % 2000 * 0.001 - 1.0;
-  }
-
-  auto sea_res = Search(segment, query_json.data(), 1, query_raw_data.data(), 16, result_ids, result_distances);
+  auto sea_res = Search(segment, nullptr, 1, result_ids, result_distances);
   assert(sea_res == 0);
 
   DeleteCollection(collection);
@@ -214,55 +207,65 @@ auto generate_data(int N) {
 }
 
 
-//TEST(CApiTest, TestQuery) {
-//    auto collection_name = "collection0";
-//    auto schema_tmp_conf = "null_schema";
-//    auto collection = NewCollection(collection_name, schema_tmp_conf);
-//    auto partition_name = "partition0";
-//    auto partition = NewPartition(collection, partition_name);
-//    auto segment = NewSegment(partition, 0);
-//
-//
-//    int N = 1000 * 1000;
-//    auto [raw_data, timestamps, uids] = generate_data(N);
-//    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
-//    auto offset = PreInsert(segment, N);
-//    auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
-//    assert(res == 0);
-//
-//    auto row_count = GetRowCount(segment);
-//    assert(row_count == N);
-//
-//    std::vector<long> result_ids(10);
-//    std::vector<float> result_distances(10);
-//    auto sea_res = Search(segment, nullptr, 1, result_ids.data(), result_distances.data());
-//
-//    ASSERT_EQ(sea_res, 0);
-//    ASSERT_EQ(result_ids[0], 10 * N);
-//    ASSERT_EQ(result_distances[0], 0);
-//
-//    std::vector<uint64_t> del_ts(N/2, 100);
-//    auto pre_off = PreDelete(segment, N / 2);
-//    Delete(segment, pre_off, N / 2, uids.data(), del_ts.data());
-//
-//    Close(segment);
-//    BuildIndex(segment);
-//
-//
-//    std::vector<long> result_ids2(10);
-//    std::vector<float> result_distances2(10);
-//    sea_res = Search(segment, nullptr, 104, result_ids2.data(), result_distances2.data());
-//
-//    for(auto x: result_ids2) {
-//        ASSERT_GE(x, 10 * N  + N / 2);
-//        ASSERT_LT(x, 10 * N + N);
-//    }
-//
+TEST(CApiTest, TestQuery) {
+    auto collection_name = "collection0";
+    auto schema_tmp_conf = "null_schema";
+    auto collection = NewCollection(collection_name, schema_tmp_conf);
+    auto partition_name = "partition0";
+    auto partition = NewPartition(collection, partition_name);
+    auto segment = NewSegment(partition, 0);
+
+
+    int N = 1000 * 1000;
+    auto [raw_data, timestamps, uids] = generate_data(N);
+    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
+    auto offset = PreInsert(segment, N);
+    auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
+    assert(res == 0);
+
+    auto row_count = GetRowCount(segment);
+    assert(row_count == N);
+
+    std::vector<long> result_ids(10);
+    std::vector<float> result_distances(10);
+    auto sea_res = Search(segment, nullptr, 1, result_ids.data(), result_distances.data());
+
+    ASSERT_EQ(sea_res, 0);
+    ASSERT_EQ(result_ids[0], 10 * N);
+    ASSERT_EQ(result_distances[0], 0);
+
+    auto N_del = N / 2;
+    std::vector<uint64_t> del_ts(N_del, 100);
+    auto pre_off = PreDelete(segment,  N_del);
+    Delete(segment, pre_off, N_del, uids.data(), del_ts.data());
+
+    Close(segment);
+    BuildIndex(segment);
+
+
+    std::vector<long> result_ids2(10);
+    std::vector<float> result_distances2(10);
+    sea_res = Search(segment, nullptr, 104, result_ids2.data(), result_distances2.data());
+
+    std::cout << "case 1" << std::endl;
+    for(int i = 0; i < 10; ++i) {
+        std::cout << result_ids[i] << "->" << result_distances[i] << std::endl;
+    }
+    std::cout << "case 2" << std::endl;
+    for(int i = 0; i < 10; ++i) {
+        std::cout << result_ids2[i] << "->" << result_distances2[i] << std::endl;
+    }
+
+    for(auto x: result_ids2) {
+        ASSERT_GE(x, 10 * N  + N_del);
+        ASSERT_LT(x, 10 * N + N);
+    }
+
 //    auto iter = 0;
 //    for(int i = 0; i < result_ids.size(); ++i) {
 //        auto uid = result_ids[i];
 //        auto dis = result_distances[i];
-//        if(uid >= 10 * N + N / 2) {
+//        if(uid >= 10 * N + N_del) {
 //            auto uid2 = result_ids2[iter];
 //            auto dis2 = result_distances2[iter];
 //            ASSERT_EQ(uid, uid2);
@@ -270,12 +273,12 @@ auto generate_data(int N) {
 //            ++iter;
 //        }
 //    }
-//
-//
-//    DeleteCollection(collection);
-//    DeletePartition(partition);
-//    DeleteSegment(segment);
-//}
+
+
+    DeleteCollection(collection);
+    DeletePartition(partition);
+    DeleteSegment(segment);
+}
 
 TEST(CApiTest, GetDeletedCountTest) {
   auto collection_name = "collection0";

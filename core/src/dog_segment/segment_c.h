@@ -40,10 +40,8 @@ PreDelete(CSegmentBase c_segment, long int size);
 
 int
 Search(CSegmentBase c_segment,
-           const char*  query_json,
+           void* fake_query,
            unsigned long timestamp,
-           float* query_raw_data,
-           int num_of_query_raw_data,
            long int* result_ids,
            float* result_distances);
 
