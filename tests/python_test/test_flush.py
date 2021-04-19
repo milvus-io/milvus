@@ -83,7 +83,7 @@ class TestFlushBase:
         # with pytest.raises(Exception) as e:
         #     connect.flush([collection])
 
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_add_partition_flush(self, connect, id_collection):
         '''
         method: add entities into partition in collection, flush serveral times
@@ -101,7 +101,7 @@ class TestFlushBase:
         res_count = connect.get_collection_stats(id_collection)
         assert res_count["row_count"] == default_nb * 2
 
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_add_partitions_flush(self, connect, id_collection):
         '''
         method: add entities into partitions in collection, flush one
@@ -118,7 +118,7 @@ class TestFlushBase:
         res = connect.get_collection_stats(id_collection)
         assert res["row_count"] == 2 * default_nb
 
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_add_collections_flush(self, connect, id_collection):
         '''
         method: add entities into collections, flush one
@@ -141,7 +141,7 @@ class TestFlushBase:
         res = connect.get_collection_stats(collection_new)
         assert res["row_count"] == default_nb
 
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_add_collections_fields_flush(self, connect, id_collection, get_filter_field, get_vector_field):
         '''
         method: create collection with different fields, and add entities into collections, flush one
@@ -185,11 +185,14 @@ class TestFlushBase:
         res = connect.get_collection_stats(collection)
         assert res["row_count"] == len(ids)
         # query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        connect.load_collection(collection)
         res = connect.search(collection, default_single_query)
         logging.getLogger().debug(res)
-        assert res
+        assert len(res) == 1
+        assert len(res[0].ids) == 10
+        assert len(res[0].distances) == 10
 
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_add_flush_auto(self, connect, id_collection):
         '''
         method: add entities
@@ -217,7 +220,7 @@ class TestFlushBase:
     def same_ids(self, request):
         yield request.param
 
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags("0331")
     def test_add_flush_same_ids(self, connect, id_collection, same_ids):
         '''
         method: add entities, with same ids, count(same ids) < 15, > 15
@@ -244,7 +247,11 @@ class TestFlushBase:
         for i in range(10):
             connect.flush([collection])
         # query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        connect.load_collection(collection)
         res = connect.search(collection, default_single_query)
+        assert len(res) == 1
+        assert len(res[0].ids) == 10
+        assert len(res[0].distances) == 10
         logging.getLogger().debug(res)
         # assert res
 
@@ -294,14 +301,14 @@ class TestFlushBase:
         nq = 10000
         query, query_vecs = gen_query_vectors(default_float_vec_field_name, default_entities, default_top_k, nq)
         time.sleep(0.1)
+        connect.load_collection(collection)
         future = connect.search(collection, query, _async=True)
+        res = future.result()
+        assert res
         delete_ids = [ids[0], ids[-1]]
-        # status = connect.delete_entity_by_id(collection, delete_ids)
         connect.flush([collection])
-        # res = future.result()
         res_count = connect.get_collection_stats(collection, timeout=120)
         assert res_count["row_count"] == loops * default_nb
-        # assert res_count["row_count"] == loops * default_nb - len(delete_ids)
 
 
 class TestFlushAsync:
@@ -380,3 +387,10 @@ class TestCollectionNameInvalid(object):
             pytest.skip("while collection_name is None, then flush all collections")
         with pytest.raises(Exception) as e:
             connect.flush(collection_name)
+
+    @pytest.mark.tags("fail")
+    def test_flush_empty(self, connect, collection):
+        ids = connect.insert(collection, default_entities)
+        assert len(ids) == default_nb
+        with pytest.raises(Exception) as e:
+            connect.flush()
