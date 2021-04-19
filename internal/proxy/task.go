@@ -449,3 +449,208 @@ func (sct *ShowCollectionsTask) Execute() error {
 func (sct *ShowCollectionsTask) PostExecute() error {
 	return nil
 }
+
+type CreatePartitionTask struct {
+	Condition
+	internalpb.CreatePartitionRequest
+	masterClient masterpb.MasterClient
+	result       *commonpb.Status
+	ctx          context.Context
+}
+
+func (cpt *CreatePartitionTask) ID() UniqueID {
+	return cpt.ReqID
+}
+
+func (cpt *CreatePartitionTask) Type() internalpb.MsgType {
+	return cpt.MsgType
+}
+
+func (cpt *CreatePartitionTask) BeginTs() Timestamp {
+	return cpt.Timestamp
+}
+
+func (cpt *CreatePartitionTask) EndTs() Timestamp {
+	return cpt.Timestamp
+}
+
+func (cpt *CreatePartitionTask) SetTs(ts Timestamp) {
+	cpt.Timestamp = ts
+}
+
+func (cpt *CreatePartitionTask) PreExecute() error {
+	return nil
+}
+
+func (cpt *CreatePartitionTask) Execute() (err error) {
+	cpt.result, err = cpt.masterClient.CreatePartition(cpt.ctx, &cpt.CreatePartitionRequest)
+	return err
+}
+
+func (cpt *CreatePartitionTask) PostExecute() error {
+	return nil
+}
+
+type DropPartitionTask struct {
+	Condition
+	internalpb.DropPartitionRequest
+	masterClient masterpb.MasterClient
+	result       *commonpb.Status
+	ctx          context.Context
+}
+
+func (dpt *DropPartitionTask) ID() UniqueID {
+	return dpt.ReqID
+}
+
+func (dpt *DropPartitionTask) Type() internalpb.MsgType {
+	return dpt.MsgType
+}
+
+func (dpt *DropPartitionTask) BeginTs() Timestamp {
+	return dpt.Timestamp
+}
+
+func (dpt *DropPartitionTask) EndTs() Timestamp {
+	return dpt.Timestamp
+}
+
+func (dpt *DropPartitionTask) SetTs(ts Timestamp) {
+	dpt.Timestamp = ts
+}
+
+func (dpt *DropPartitionTask) PreExecute() error {
+	return nil
+}
+
+func (dpt *DropPartitionTask) Execute() (err error) {
+	dpt.result, err = dpt.masterClient.DropPartition(dpt.ctx, &dpt.DropPartitionRequest)
+	return err
+}
+
+func (dpt *DropPartitionTask) PostExecute() error {
+	return nil
+}
+
+type HasPartitionTask struct {
+	Condition
+	internalpb.HasPartitionRequest
+	masterClient masterpb.MasterClient
+	result       *servicepb.BoolResponse
+	ctx          context.Context
+}
+
+func (hpt *HasPartitionTask) ID() UniqueID {
+	return hpt.ReqID
+}
+
+func (hpt *HasPartitionTask) Type() internalpb.MsgType {
+	return hpt.MsgType
+}
+
+func (hpt *HasPartitionTask) BeginTs() Timestamp {
+	return hpt.Timestamp
+}
+
+func (hpt *HasPartitionTask) EndTs() Timestamp {
+	return hpt.Timestamp
+}
+
+func (hpt *HasPartitionTask) SetTs(ts Timestamp) {
+	hpt.Timestamp = ts
+}
+
+func (hpt *HasPartitionTask) PreExecute() error {
+	return nil
+}
+
+func (hpt *HasPartitionTask) Execute() (err error) {
+	hpt.result, err = hpt.masterClient.HasPartition(hpt.ctx, &hpt.HasPartitionRequest)
+	return err
+}
+
+func (hpt *HasPartitionTask) PostExecute() error {
+	return nil
+}
+
+type DescribePartitionTask struct {
+	Condition
+	internalpb.DescribePartitionRequest
+	masterClient masterpb.MasterClient
+	result       *servicepb.PartitionDescription
+	ctx          context.Context
+}
+
+func (dpt *DescribePartitionTask) ID() UniqueID {
+	return dpt.ReqID
+}
+
+func (dpt *DescribePartitionTask) Type() internalpb.MsgType {
+	return dpt.MsgType
+}
+
+func (dpt *DescribePartitionTask) BeginTs() Timestamp {
+	return dpt.Timestamp
+}
+
+func (dpt *DescribePartitionTask) EndTs() Timestamp {
+	return dpt.Timestamp
+}
+
+func (dpt *DescribePartitionTask) SetTs(ts Timestamp) {
+	dpt.Timestamp = ts
+}
+
+func (dpt *DescribePartitionTask) PreExecute() error {
+	return nil
+}
+
+func (dpt *DescribePartitionTask) Execute() (err error) {
+	dpt.result, err = dpt.masterClient.DescribePartition(dpt.ctx, &dpt.DescribePartitionRequest)
+	return err
+}
+
+func (dpt *DescribePartitionTask) PostExecute() error {
+	return nil
+}
+
+type ShowPartitionsTask struct {
+	Condition
+	internalpb.ShowPartitionRequest
+	masterClient masterpb.MasterClient
+	result       *servicepb.StringListResponse
+	ctx          context.Context
+}
+
+func (spt *ShowPartitionsTask) ID() UniqueID {
+	return spt.ReqID
+}
+
+func (spt *ShowPartitionsTask) Type() internalpb.MsgType {
+	return spt.MsgType
+}
+
+func (spt *ShowPartitionsTask) BeginTs() Timestamp {
+	return spt.Timestamp
+}
+
+func (spt *ShowPartitionsTask) EndTs() Timestamp {
+	return spt.Timestamp
+}
+
+func (spt *ShowPartitionsTask) SetTs(ts Timestamp) {
+	spt.Timestamp = ts
+}
+
+func (spt *ShowPartitionsTask) PreExecute() error {
+	return nil
+}
+
+func (spt *ShowPartitionsTask) Execute() (err error) {
+	spt.result, err = spt.masterClient.ShowPartitions(spt.ctx, &spt.ShowPartitionRequest)
+	return err
+}
+
+func (spt *ShowPartitionsTask) PostExecute() error {
+	return nil
+}

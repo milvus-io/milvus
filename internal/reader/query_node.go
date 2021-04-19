@@ -63,7 +63,7 @@ func (node *QueryNode) Start() {
 	node.statsService = newStatsService(node.ctx, node.replica)
 
 	go node.dataSyncService.start()
-	// go node.searchService.start()
+	go node.searchService.start()
 	go node.metaService.start()
 	node.statsService.start()
 }

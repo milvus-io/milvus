@@ -345,43 +345,249 @@ func (p *Proxy) ShowCollections(ctx context.Context, req *commonpb.Empty) (*serv
 }
 
 func (p *Proxy) CreatePartition(ctx context.Context, in *servicepb.PartitionName) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: 0,
-		Reason:    "",
-	}, nil
+	cpt := &CreatePartitionTask{
+		Condition: NewTaskCondition(ctx),
+		CreatePartitionRequest: internalpb.CreatePartitionRequest{
+			MsgType:       internalpb.MsgType_kCreatePartition,
+			ReqID:         0,
+			Timestamp:     0,
+			ProxyID:       0,
+			PartitionName: in,
+			//TODO, ReqID,Timestamp,ProxyID
+		},
+		masterClient: p.masterClient,
+		result:       nil,
+		ctx:          nil,
+	}
+	var cancel func()
+	cpt.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
+
+	err := func() error {
+		select {
+		case <-ctx.Done():
+			return errors.New("create partition timeout")
+		default:
+			return p.taskSch.DdQueue.Enqueue(cpt)
+		}
+	}()
+
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, nil
+	}
+	err = cpt.WaitToFinish()
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, nil
+	}
+	return cpt.result, nil
+
 }
 
 func (p *Proxy) DropPartition(ctx context.Context, in *servicepb.PartitionName) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: 0,
-		Reason:    "",
-	}, nil
+	dpt := &DropPartitionTask{
+		Condition: NewTaskCondition(ctx),
+		DropPartitionRequest: internalpb.DropPartitionRequest{
+			MsgType:       internalpb.MsgType_kDropPartition,
+			ReqID:         0,
+			Timestamp:     0,
+			ProxyID:       0,
+			PartitionName: in,
+			//TODO, ReqID,Timestamp,ProxyID
+		},
+		masterClient: p.masterClient,
+		result:       nil,
+		ctx:          nil,
+	}
+
+	var cancel func()
+	dpt.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
+
+	err := func() error {
+		select {
+		case <-ctx.Done():
+			return errors.New("drop partition timeout")
+		default:
+			return p.taskSch.DdQueue.Enqueue(dpt)
+		}
+	}()
+
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, nil
+	}
+	err = dpt.WaitToFinish()
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, nil
+	}
+	return dpt.result, nil
+
 }
 
 func (p *Proxy) HasPartition(ctx context.Context, in *servicepb.PartitionName) (*servicepb.BoolResponse, error) {
-	return &servicepb.BoolResponse{
-		Status: &commonpb.Status{
-			ErrorCode: 0,
-			Reason:    "",
+	hpt := &HasPartitionTask{
+		Condition: NewTaskCondition(ctx),
+		HasPartitionRequest: internalpb.HasPartitionRequest{
+			MsgType:       internalpb.MsgType_kHasPartition,
+			ReqID:         0,
+			Timestamp:     0,
+			ProxyID:       0,
+			PartitionName: in,
+			//TODO, ReqID,Timestamp,ProxyID
 		},
-		Value: true,
-	}, nil
+		masterClient: p.masterClient,
+		result:       nil,
+		ctx:          nil,
+	}
+
+	var cancel func()
+	hpt.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
+
+	err := func() error {
+		select {
+		case <-ctx.Done():
+			return errors.New("has partition timeout")
+		default:
+			return p.taskSch.DdQueue.Enqueue(hpt)
+		}
+	}()
+
+	if err != nil {
+		return &servicepb.BoolResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+			Value: false,
+		}, nil
+	}
+	err = hpt.WaitToFinish()
+	if err != nil {
+		return &servicepb.BoolResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+			Value: false,
+		}, nil
+	}
+	return hpt.result, nil
+
 }
 
 func (p *Proxy) DescribePartition(ctx context.Context, in *servicepb.PartitionName) (*servicepb.PartitionDescription, error) {
-	return &servicepb.PartitionDescription{
-		Status: &commonpb.Status{
-			ErrorCode: 0,
-			Reason:    "",
+	dpt := &DescribePartitionTask{
+		Condition: NewTaskCondition(ctx),
+		DescribePartitionRequest: internalpb.DescribePartitionRequest{
+			MsgType:       internalpb.MsgType_kDescribePartition,
+			ReqID:         0,
+			Timestamp:     0,
+			ProxyID:       0,
+			PartitionName: in,
+			//TODO, ReqID,Timestamp,ProxyID
 		},
-	}, nil
+		masterClient: p.masterClient,
+		result:       nil,
+		ctx:          nil,
+	}
+
+	var cancel func()
+	dpt.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
+
+	err := func() error {
+		select {
+		case <-ctx.Done():
+			return errors.New("describe partion timeout")
+		default:
+			return p.taskSch.DdQueue.Enqueue(dpt)
+		}
+	}()
+
+	if err != nil {
+		return &servicepb.PartitionDescription{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+			Name:       in,
+			Statistics: nil,
+		}, nil
+	}
+
+	err = dpt.WaitToFinish()
+	if err != nil {
+		return &servicepb.PartitionDescription{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+			Name:       in,
+			Statistics: nil,
+		}, nil
+	}
+	return dpt.result, nil
 }
 
 func (p *Proxy) ShowPartitions(ctx context.Context, req *servicepb.CollectionName) (*servicepb.StringListResponse, error) {
-	return &servicepb.StringListResponse{
-		Status: &commonpb.Status{
-			ErrorCode: 0,
-			Reason:    "",
+	spt := &ShowPartitionsTask{
+		Condition: NewTaskCondition(ctx),
+		ShowPartitionRequest: internalpb.ShowPartitionRequest{
+			MsgType:        internalpb.MsgType_kShowPartitions,
+			ReqID:          0,
+			Timestamp:      0,
+			ProxyID:        0,
+			CollectionName: req,
 		},
-	}, nil
+		masterClient: p.masterClient,
+		result:       nil,
+		ctx:          nil,
+	}
+
+	var cancel func()
+	spt.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
+
+	err := func() error {
+		select {
+		case <-ctx.Done():
+			return errors.New("show partition timeout")
+		default:
+			return p.taskSch.DdQueue.Enqueue(spt)
+		}
+	}()
+
+	if err != nil {
+		return &servicepb.StringListResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+			Values: nil,
+		}, nil
+	}
+
+	err = spt.WaitToFinish()
+	if err != nil {
+		return &servicepb.StringListResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+			Values: nil,
+		}, nil
+	}
+	return spt.result, nil
 }
