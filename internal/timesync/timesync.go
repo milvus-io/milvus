@@ -78,7 +78,7 @@ layout of timestamp
 /-------46 bit-----------\/------18bit-----\
 +-------------------------+================+
 */
-func toMillisecond(ts *internalpb.TimeSyncMsg) int {
+func toMillisecond(ts *internalpb.TimeTickMsg) int {
 	// get Millisecond in second
 	return int(ts.GetTimestamp() >> 18)
 }
@@ -226,7 +226,7 @@ func (r *TimeSyncCfg) IsInsertDeleteChanFull() bool {
 	return len(r.insertOrDeleteChan) == len(r.readerProducer)*r.readerQueueSize
 }
 
-func (r *TimeSyncCfg) alignTimeSync(ts []*internalpb.TimeSyncMsg) []*internalpb.TimeSyncMsg {
+func (r *TimeSyncCfg) alignTimeSync(ts []*internalpb.TimeTickMsg) []*internalpb.TimeTickMsg {
 	if len(r.proxyIdList) > 1 {
 		if len(ts) > 1 {
 			for i := 1; i < len(r.proxyIdList); i++ {
@@ -255,7 +255,7 @@ func (r *TimeSyncCfg) alignTimeSync(ts []*internalpb.TimeSyncMsg) []*internalpb.
 	return ts
 }
 
-func (r *TimeSyncCfg) readTimeSync(ctx context.Context, ts []*internalpb.TimeSyncMsg, n int) ([]*internalpb.TimeSyncMsg, error) {
+func (r *TimeSyncCfg) readTimeSync(ctx context.Context, ts []*internalpb.TimeTickMsg, n int) ([]*internalpb.TimeTickMsg, error) {
 	for i := 0; i < n; i++ {
 		select {
 		case <-ctx.Done():
@@ -266,7 +266,7 @@ func (r *TimeSyncCfg) readTimeSync(ctx context.Context, ts []*internalpb.TimeSyn
 			}
 
 			msg := cm.Message
-			var tsm internalpb.TimeSyncMsg
+			var tsm internalpb.TimeTickMsg
 			if err := proto.Unmarshal(msg.Payload(), &tsm); err != nil {
 				return nil, err
 			}
@@ -288,7 +288,7 @@ func (r *TimeSyncCfg) sendEOFMsg(ctx context.Context, msg *pulsar.ProducerMessag
 
 func (r *TimeSyncCfg) startTimeSync() {
 	ctx := r.ctx
-	tsm := make([]*internalpb.TimeSyncMsg, 0, len(r.proxyIdList)*2)
+	tsm := make([]*internalpb.TimeTickMsg, 0, len(r.proxyIdList)*2)
 	var err error
 	for {
 		select {

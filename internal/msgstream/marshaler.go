@@ -149,7 +149,7 @@ type TimeSyncMarshaler struct{}
 
 func (tm *TimeSyncMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
 	timeSyncTask := (*input).(TimeSyncTask)
-	timeSyncMsg := &timeSyncTask.TimeSyncMsg
+	timeSyncMsg := &timeSyncTask.TimeTickMsg
 	mb, err := proto.Marshal(timeSyncMsg)
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
@@ -158,9 +158,9 @@ func (tm *TimeSyncMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
 }
 
 func (tm *TimeSyncMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
-	timeSyncMsg := internalPb.TimeSyncMsg{}
+	timeSyncMsg := internalPb.TimeTickMsg{}
 	err := proto.Unmarshal(input, &timeSyncMsg)
-	timeSyncTask := TimeSyncTask{TimeSyncMsg: timeSyncMsg}
+	timeSyncTask := TimeSyncTask{TimeTickMsg: timeSyncMsg}
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
 	}

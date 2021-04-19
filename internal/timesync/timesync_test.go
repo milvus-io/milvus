@@ -50,7 +50,7 @@ func TestAlignTimeSync(t *testing.T) {
 		proxyIdList: []int64{1, 2, 3},
 		interval:    200,
 	}
-	ts := []*internalpb.TimeSyncMsg{
+	ts := []*internalpb.TimeTickMsg{
 		{
 			PeerId:    1,
 			Timestamp: toTimestamp(5),
@@ -81,7 +81,7 @@ func TestAlignTimeSync2(t *testing.T) {
 		proxyIdList: []int64{1, 2, 3},
 		interval:    200,
 	}
-	ts := []*internalpb.TimeSyncMsg{
+	ts := []*internalpb.TimeTickMsg{
 		{
 			PeerId:    1,
 			Timestamp: toTimestamp(5),
@@ -110,7 +110,7 @@ func TestAlignTimeSync3(t *testing.T) {
 		proxyIdList: []int64{1, 2, 3},
 		interval:    200,
 	}
-	ts := []*internalpb.TimeSyncMsg{
+	ts := []*internalpb.TimeTickMsg{
 		{
 			PeerId:    1,
 			Timestamp: toTimestamp(5),
@@ -148,7 +148,7 @@ func TestAlignTimeSync4(t *testing.T) {
 		proxyIdList: []int64{1},
 		interval:    200,
 	}
-	ts := []*internalpb.TimeSyncMsg{
+	ts := []*internalpb.TimeTickMsg{
 		{
 			PeerId:    1,
 			Timestamp: toTimestamp(15),
@@ -179,7 +179,7 @@ func TestAlignTimeSync5(t *testing.T) {
 		proxyIdList: []int64{1, 2, 3},
 		interval:    200,
 	}
-	ts := []*internalpb.TimeSyncMsg{
+	ts := []*internalpb.TimeTickMsg{
 		{
 			PeerId:    1,
 			Timestamp: toTimestamp(5),
