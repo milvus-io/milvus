@@ -20,21 +20,28 @@ type collectionReplica interface {
 	hasCollection(collectionID UniqueID) bool
 
 	// segment
-	addSegment(segmentID UniqueID, collID UniqueID, partitionID UniqueID) error
+	addSegment(segmentID UniqueID, collID UniqueID, partitionID UniqueID,
+		createTime Timestamp, positions []*internalpb2.MsgPosition) error
 	removeSegment(segmentID UniqueID) error
 	hasSegment(segmentID UniqueID) bool
-	updateSegmentRowNums(segmentID UniqueID, numRows int64) error
+	updateStatistics(segmentID UniqueID, numRows int64, endTime Timestamp,
+		positions []*internalpb2.MsgPosition) error
 	getSegmentStatisticsUpdates(segmentID UniqueID) (*internalpb2.SegmentStatisticsUpdates, error)
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 }
 
 type (
 	Segment struct {
-		segmentID    UniqueID
-		collectionID UniqueID
-		partitionID  UniqueID
-		numRows      int64
-		memorySize   int64
+		segmentID      UniqueID
+		collectionID   UniqueID
+		partitionID    UniqueID
+		numRows        int64
+		memorySize     int64
+		isNew          bool
+		createTime     Timestamp
+		endTime        Timestamp
+		startPositions []*internalpb2.MsgPosition
+		endPositions   []*internalpb2.MsgPosition
 	}
 
 	collectionReplicaImpl struct {
@@ -45,7 +52,6 @@ type (
 )
 
 //----------------------------------------------------------------------------------------------------- collection
-
 func (colReplica *collectionReplicaImpl) getSegmentByID(segmentID UniqueID) (*Segment, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
@@ -58,15 +64,21 @@ func (colReplica *collectionReplicaImpl) getSegmentByID(segmentID UniqueID) (*Se
 	return nil, errors.Errorf("cannot find segment, id = %v", segmentID)
 }
 
-func (colReplica *collectionReplicaImpl) addSegment(segmentID UniqueID, collID UniqueID, partitionID UniqueID) error {
+func (colReplica *collectionReplicaImpl) addSegment(segmentID UniqueID, collID UniqueID,
+	partitionID UniqueID, createTime Timestamp, positions []*internalpb2.MsgPosition) error {
+
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 	log.Println("Add Segment", segmentID)
 
 	seg := &Segment{
-		segmentID:    segmentID,
-		collectionID: collID,
-		partitionID:  partitionID,
+		segmentID:      segmentID,
+		collectionID:   collID,
+		partitionID:    partitionID,
+		isNew:          true,
+		createTime:     createTime,
+		startPositions: positions,
+		endPositions:   make([]*internalpb2.MsgPosition, 0),
 	}
 	colReplica.segments = append(colReplica.segments, seg)
 	return nil
@@ -100,7 +112,7 @@ func (colReplica *collectionReplicaImpl) hasSegment(segmentID UniqueID) bool {
 	return false
 }
 
-func (colReplica *collectionReplicaImpl) updateSegmentRowNums(segmentID UniqueID, numRows int64) error {
+func (colReplica *collectionReplicaImpl) updateStatistics(segmentID UniqueID, numRows int64, endTime Timestamp, positions []*internalpb2.MsgPosition) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
@@ -109,6 +121,8 @@ func (colReplica *collectionReplicaImpl) updateSegmentRowNums(segmentID UniqueID
 			log.Printf("updating segment(%v) row nums: (%v)", segmentID, numRows)
 			ele.memorySize = 0
 			ele.numRows += numRows
+			ele.endTime = endTime
+			ele.endPositions = positions
 			return nil
 		}
 	}
@@ -116,15 +130,24 @@ func (colReplica *collectionReplicaImpl) updateSegmentRowNums(segmentID UniqueID
 }
 
 func (colReplica *collectionReplicaImpl) getSegmentStatisticsUpdates(segmentID UniqueID) (*internalpb2.SegmentStatisticsUpdates, error) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
+	colReplica.mu.Lock()
+	defer colReplica.mu.Unlock()
 
 	for _, ele := range colReplica.segments {
 		if ele.segmentID == segmentID {
 			updates := &internalpb2.SegmentStatisticsUpdates{
-				SegmentID:  segmentID,
-				MemorySize: ele.memorySize,
-				NumRows:    ele.numRows,
+				SegmentID:      segmentID,
+				MemorySize:     ele.memorySize,
+				NumRows:        ele.numRows,
+				IsNewSegment:   ele.isNew,
+				CreateTime:     ele.createTime,
+				EndTime:        ele.endTime,
+				StartPositions: ele.startPositions,
+				EndPositions:   ele.endPositions,
+			}
+
+			if ele.isNew {
+				ele.isNew = false
 			}
 			return updates, nil
 		}
