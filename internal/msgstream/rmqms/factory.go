@@ -35,8 +35,8 @@ func (f *Factory) NewTtMsgStream(ctx context.Context) (msgstream.MsgStream, erro
 func NewFactory() msgstream.Factory {
 	f := &Factory{
 		dispatcherFactory: msgstream.ProtoUDFactory{},
-		ReceiveBufSize:    64,
-		RmqBufSize:        64,
+		ReceiveBufSize:    1024,
+		RmqBufSize:        1024,
 	}
 
 	rocksmq.InitRocksMQ("/tmp/milvus_rdb")
