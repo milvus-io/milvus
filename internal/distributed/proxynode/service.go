@@ -235,7 +235,7 @@ func (s *Server) init() error {
 	// for purpose of ID Allocator
 	proxynode.Params.MasterAddress = Params.MasterAddress
 
-	s.impl.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
+	s.impl.UpdateStateCode(internalpb2.StateCode_Initializing)
 
 	if err := s.impl.Init(); err != nil {
 		log.Debug("proxynode", zap.String("impl init error", err.Error()))

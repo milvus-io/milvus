@@ -5,9 +5,9 @@ option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/int
 import "common.proto";
 
 enum StateCode {
-  INITIALIZING = 0;
-  HEALTHY = 1;
-  ABNORMAL = 2;
+  Initializing = 0;
+  Healthy = 1;
+  Abnormal = 2;
 }
 
 message ComponentInfo {

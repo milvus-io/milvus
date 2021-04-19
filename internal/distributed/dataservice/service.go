@@ -101,7 +101,7 @@ func (s *Server) init() error {
 	if err = client.Start(); err != nil {
 		panic(err)
 	}
-	s.dataService.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
+	s.dataService.UpdateStateCode(internalpb2.StateCode_Initializing)
 
 	ctx := context.Background()
 	err = funcutil.WaitForComponentInitOrHealthy(ctx, client, "MasterService", 100, time.Millisecond*200)

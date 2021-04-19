@@ -114,7 +114,7 @@ func (s *Server) init() error {
 		return err
 	}
 
-	s.masterService.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
+	s.masterService.UpdateStateCode(internalpb2.StateCode_Initializing)
 
 	if s.connectProxyService {
 		log.Debug("proxy service", zap.String("address", Params.ProxyServiceAddress))

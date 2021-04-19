@@ -136,7 +136,7 @@ func (s *ProxyService) Init() error {
 }
 
 func (s *ProxyService) Start() error {
-	s.stateCode = internalpb2.StateCode_HEALTHY
+	s.stateCode = internalpb2.StateCode_Healthy
 	s.sched.Start()
 	log.Debug("start scheduler ...")
 	return s.tick.Start()

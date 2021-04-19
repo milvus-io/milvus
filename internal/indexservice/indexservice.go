@@ -122,7 +122,7 @@ func (i *IndexService) Init() error {
 	if err != nil {
 		return err
 	}
-	i.UpdateStateCode(internalpb2.StateCode_HEALTHY)
+	i.UpdateStateCode(internalpb2.StateCode_Healthy)
 	return nil
 }
 

@@ -138,7 +138,7 @@ func NewCore(c context.Context, factory ms.Factory) (*Core, error) {
 		cancel:    cancel,
 		msFactory: factory,
 	}
-	core.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
+	core.UpdateStateCode(internalpb2.StateCode_Abnormal)
 	return core, nil
 }
 
@@ -782,7 +782,7 @@ func (c *Core) Init() error {
 		initError = c.setMsgStreams()
 	})
 	if initError == nil {
-		log.Debug("Master service", zap.String("State Code", internalpb2.StateCode_name[int32(internalpb2.StateCode_INITIALIZING)]))
+		log.Debug("Master service", zap.String("State Code", internalpb2.StateCode_name[int32(internalpb2.StateCode_Initializing)]))
 	}
 	return initError
 }
@@ -798,15 +798,15 @@ func (c *Core) Start() error {
 		go c.startCreateIndexLoop()
 		go c.startSegmentFlushCompletedLoop()
 		go c.tsLoop()
-		c.stateCode.Store(internalpb2.StateCode_HEALTHY)
+		c.stateCode.Store(internalpb2.StateCode_Healthy)
 	})
-	log.Debug("Master service", zap.String("State Code", internalpb2.StateCode_name[int32(internalpb2.StateCode_HEALTHY)]))
+	log.Debug("Master service", zap.String("State Code", internalpb2.StateCode_name[int32(internalpb2.StateCode_Healthy)]))
 	return nil
 }
 
 func (c *Core) Stop() error {
 	c.cancel()
-	c.stateCode.Store(internalpb2.StateCode_ABNORMAL)
+	c.stateCode.Store(internalpb2.StateCode_Abnormal)
 	return nil
 }
 
@@ -868,7 +868,7 @@ func (c *Core) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringRespon
 
 func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
-	if code != internalpb2.StateCode_HEALTHY {
+	if code != internalpb2.StateCode_Healthy {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
@@ -900,7 +900,7 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 
 func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
-	if code != internalpb2.StateCode_HEALTHY {
+	if code != internalpb2.StateCode_Healthy {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
@@ -932,7 +932,7 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 
 func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
-	if code != internalpb2.StateCode_HEALTHY {
+	if code != internalpb2.StateCode_Healthy {
 		return &milvuspb.BoolResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
@@ -974,7 +974,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 
 func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
-	if code != internalpb2.StateCode_HEALTHY {
+	if code != internalpb2.StateCode_Healthy {
 		return &milvuspb.DescribeCollectionResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
@@ -1015,7 +1015,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 
 func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
-	if code != internalpb2.StateCode_HEALTHY {
+	if code != internalpb2.StateCode_Healthy {
 		return &milvuspb.ShowCollectionResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
@@ -1057,7 +1057,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionR
 
 func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
-	if code != internalpb2.StateCode_HEALTHY {
+	if code != internalpb2.StateCode_Healthy {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
@@ -1089,7 +1089,7 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 
 func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
-	if code != internalpb2.StateCode_HEALTHY {
+	if code != internalpb2.StateCode_Healthy {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
@@ -1121,7 +1121,7 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 
 func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
-	if code != internalpb2.StateCode_HEALTHY {
+	if code != internalpb2.StateCode_Healthy {
 		return &milvuspb.BoolResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
@@ -1163,7 +1163,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 
 func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
-	if code != internalpb2.StateCode_HEALTHY {
+	if code != internalpb2.StateCode_Healthy {
 		return &milvuspb.ShowPartitionResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
@@ -1206,7 +1206,7 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionReq
 
 func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
-	if code != internalpb2.StateCode_HEALTHY {
+	if code != internalpb2.StateCode_Healthy {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
@@ -1238,7 +1238,7 @@ func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest)
 
 func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
-	if code != internalpb2.StateCode_HEALTHY {
+	if code != internalpb2.StateCode_Healthy {
 		return &milvuspb.DescribeIndexResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
@@ -1291,7 +1291,7 @@ func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequ
 
 func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
-	if code != internalpb2.StateCode_HEALTHY {
+	if code != internalpb2.StateCode_Healthy {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
 			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
@@ -1323,7 +1323,7 @@ func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*c
 
 func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
-	if code != internalpb2.StateCode_HEALTHY {
+	if code != internalpb2.StateCode_Healthy {
 		return &milvuspb.DescribeSegmentResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,
@@ -1366,7 +1366,7 @@ func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegment
 
 func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
-	if code != internalpb2.StateCode_HEALTHY {
+	if code != internalpb2.StateCode_Healthy {
 		return &milvuspb.ShowSegmentResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_ERROR_CODE_UNEXPECTED_ERROR,

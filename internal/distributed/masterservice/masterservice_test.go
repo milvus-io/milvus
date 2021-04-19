@@ -64,7 +64,7 @@ func TestGrpcService(t *testing.T) {
 
 	err = svr.startGrpc()
 	assert.Nil(t, err)
-	svr.masterService.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
+	svr.masterService.UpdateStateCode(internalpb2.StateCode_Initializing)
 
 	core := svr.masterService
 	err = core.Init()
@@ -147,7 +147,7 @@ func TestGrpcService(t *testing.T) {
 	err = svr.start()
 	assert.Nil(t, err)
 
-	svr.masterService.UpdateStateCode(internalpb2.StateCode_HEALTHY)
+	svr.masterService.UpdateStateCode(internalpb2.StateCode_Healthy)
 
 	cli, err := grpcmasterserviceclient.NewClient(Params.Address, 3*time.Second)
 	assert.Nil(t, err)
