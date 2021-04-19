@@ -14,7 +14,7 @@
 #include "server/context/Context.h"
 #include "server/delivery/request/Types.h"
 #include "utils/Status.h"
-#include "pulsar/message_client/ClientV2.h"
+#include "message_client/ClientV2.h"
 
 #include <condition_variable>
 #include <memory>

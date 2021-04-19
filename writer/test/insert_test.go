@@ -2,10 +2,10 @@ package test
 
 import (
 	"context"
+	"github.com/czs007/suvlim/writer/pb"
+	"github.com/czs007/suvlim/writer/write_node"
 	"sync"
 	"testing"
-	"writer/pb"
-	"writer/write_node"
 )
 
 func GetInsertMsg(collectionName string, partitionTag string, entityId int64) *pb.InsertOrDeleteMsg {
@@ -40,22 +40,14 @@ func TestInsert(t *testing.T) {
 	wg := sync.WaitGroup{}
 	wg.Add(3)
 	//var wg sync.WaitGroup
-	writerNode.InsertBatchData(ctx, insertMsgs, wg)
-	data1 := writerNode.KvStore.GetData(ctx)
-	//gtInsertBuffer := writerNode.GetInsertBuffer()
-	println(len(data1))
-
+	writerNode.InsertBatchData(ctx, insertMsgs, &wg)
 	var insertMsgs2 []*pb.InsertOrDeleteMsg
 	for i := 120; i < 200; i++ {
 		insertMsgs2 = append(insertMsgs2, GetInsertMsg("collection0", "tag02", int64(i)))
 	}
-	writerNode.InsertBatchData(ctx, insertMsgs2, wg)
-	data2 := writerNode.KvStore.GetData(ctx)
-	println(len(data2))
+	writerNode.InsertBatchData(ctx, insertMsgs2, &wg)
 	var deleteMsgs []*pb.InsertOrDeleteMsg
 	deleteMsgs = append(deleteMsgs, GetDeleteMsg("collection0", 2))
 	deleteMsgs = append(deleteMsgs, GetDeleteMsg("collection0", 120))
-	writerNode.DeleteBatchData(ctx, deleteMsgs, wg)
-	data3 := writerNode.KvStore.GetData(ctx)
-	println(len(data3))
+	writerNode.DeleteBatchData(ctx, deleteMsgs, &wg)
 }

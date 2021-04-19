@@ -28,7 +28,7 @@
 #include "server/init/StorageChecker.h"
 #include "src/version.h"
 #include <yaml-cpp/yaml.h>
-#include "src/pulsar/message_client/ClientV2.h"
+#include "message_client/ClientV2.h"
 #include "utils/Log.h"
 #include "utils/SignalHandler.h"
 #include "utils/TimeRecorder.h"
@@ -291,7 +291,7 @@ Server::StartService() {
 
     grpc::GrpcServer::GetInstance().Start();
 
-    stat = message_client::MsgClientV2::GetInstance().Init("topic-insert","topic-query","topic-result");
+    stat = message_client::MsgClientV2::GetInstance().Init("InsertOrDelete", "Search", "TimeSync", "SearchById", "SearchResult");
     if (!stat.ok()) {
         LOG_SERVER_ERROR_ << "Pulsar message client start service fail: " << stat.message();
         goto FAIL;

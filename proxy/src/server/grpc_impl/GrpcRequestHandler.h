@@ -27,9 +27,9 @@
 #include "server/delivery/ReqHandler.h"
 #include "server/grpc_impl/interceptor/GrpcInterceptorHookHandler.h"
 #include "src/utils/Status.h"
-#include "pulsar/message_client/Consumer.h"
-#include "pulsar/message_client/Producer.h"
-#include "pulsar/message_client/ClientV2.h"
+#include "message_client/Consumer.h"
+#include "message_client/Producer.h"
+#include "message_client/ClientV2.h"
 
 namespace milvus {
 namespace server {

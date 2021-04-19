@@ -25,7 +25,8 @@ add_subdirectory( query )
 add_subdirectory( db ) # target milvus_engine
 add_subdirectory( log )
 add_subdirectory( server )
-add_subdirectory( pulsar )
+add_subdirectory( message_client )
+add_subdirectory( test )
 
 set(link_lib
 	milvus_engine

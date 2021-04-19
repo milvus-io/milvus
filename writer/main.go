@@ -3,51 +3,33 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/czs007/suvlim/storage/pkg"
+	"github.com/czs007/suvlim/storage/pkg/types"
+	"github.com/czs007/suvlim/writer/message_client"
+	"github.com/czs007/suvlim/writer/write_node"
 	"log"
 	"sync"
 	"time"
-	"writer/message_client"
-	"writer/mock"
-	"writer/pb"
-	"writer/write_node"
 )
-
-func GetInsertMsg(collectionName string, partitionTag string, entityId int64) *pb.InsertOrDeleteMsg {
-	return &pb.InsertOrDeleteMsg{
-		CollectionName: collectionName,
-		PartitionTag:   partitionTag,
-		SegmentId:      int64(entityId / 100),
-		Uid:       		int64(entityId),
-		Timestamp:      int64(entityId),
-		ClientId:       0,
-	}
-}
-
-func GetDeleteMsg(collectionName string, entityId int64) *pb.InsertOrDeleteMsg {
-	return &pb.InsertOrDeleteMsg{
-		CollectionName: collectionName,
-		Uid:       		entityId,
-		Timestamp:      int64(entityId + 100),
-	}
-}
 
 func main() {
 
 	mc := message_client.MessageClient{}
 	mc.InitClient("pulsar://localhost:6650")
+	//mc.InitClient("pulsar://192.168.2.18:6650")
 	//TODO::close client / consumer/ producer
 	//mc.Close()
 
 	go mc.ReceiveMessage()
 	wg := sync.WaitGroup{}
 
-	kv, err := mock.NewTikvStore()
+	kv, err := storage.NewStore(context.Background(), types.MinIODriver)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	wn := write_node.WriteNode{
-		KvStore:       kv,
+		KvStore:       &kv,
 		MessageClient: &mc,
 		TimeSync:      100,
 	}
@@ -56,12 +38,13 @@ func main() {
 	for {
 		time.Sleep(200 * time.Millisecond)
 		msgLength := wn.MessageClient.PrepareBatchMsg()
-		readyDo := true
+		readyDo := false
 		for _, len := range msgLength {
-			if len <= 0 { readyDo = false }
+			if len > 0 { readyDo = true }
 		}
 		if readyDo {
-			wn.DoWriteNode(ctx, 100, wg)
+			wn.DoWriteNode(ctx, 100, &wg)
+			fmt.Println("write node do a batch message, storage len: ")
 		}
 		fmt.Println("do a batch in 200ms")
 	}
