@@ -12,7 +12,6 @@ import (
 	"github.com/golang/protobuf/proto"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -38,13 +37,8 @@ type searchService struct {
 
 type ResultEntityIds []UniqueID
 
-func newSearchService(ctx context.Context, replica collectionReplica) *searchService {
+func newSearchService(ctx context.Context, replica collectionReplica, factory msgstream.Factory) *searchService {
 	receiveBufSize := Params.SearchReceiveBufSize
-	pulsarBufSize := Params.SearchPulsarBufSize
-
-	msgStreamURL := Params.PulsarAddress
-
-	factory := pulsarms.NewFactory(msgStreamURL, receiveBufSize, pulsarBufSize)
 
 	consumeChannels := Params.SearchChannelNames
 	consumeSubName := Params.MsgChannelSubName

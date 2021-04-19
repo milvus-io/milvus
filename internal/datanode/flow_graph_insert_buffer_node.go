@@ -15,7 +15,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -621,7 +620,7 @@ func (ibNode *insertBufferNode) getCollectionSchemaByID(collectionID UniqueID) (
 }
 
 func newInsertBufferNode(ctx context.Context, flushMeta *metaTable,
-	replica Replica, alloc allocator) *insertBufferNode {
+	replica Replica, alloc allocator, factory msgstream.Factory) *insertBufferNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -650,8 +649,6 @@ func newInsertBufferNode(ctx context.Context, flushMeta *metaTable,
 		panic(err)
 	}
 	minioPrefix := Params.InsertBinlogRootPath
-
-	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
 
 	//input stream, data node time tick
 	wTt, _ := factory.NewMsgStream(ctx)

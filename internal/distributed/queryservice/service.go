@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -25,11 +26,13 @@ type Server struct {
 	loopCancel context.CancelFunc
 
 	queryService *qs.QueryService
+
+	msFactory msgstream.Factory
 }
 
-func NewServer(ctx context.Context) (*Server, error) {
+func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
-	service, err := qs.NewQueryService(ctx1)
+	service, err := qs.NewQueryService(ctx1, factory)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -39,6 +42,7 @@ func NewServer(ctx context.Context) (*Server, error) {
 		queryService: service,
 		loopCtx:      ctx1,
 		loopCancel:   cancel,
+		msFactory:    factory,
 	}, nil
 }
 

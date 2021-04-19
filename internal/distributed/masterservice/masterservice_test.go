@@ -12,6 +12,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	cms "github.com/zilliztech/milvus-distributed/internal/masterservice"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -27,7 +28,8 @@ func TestGrpcService(t *testing.T) {
 	//cms.Params.Address = "127.0.0.1"
 	cms.Params.Port = (randVal % 100) + 10000
 
-	svr, err := NewGrpcServer(context.Background())
+	msFactory := pulsarms.NewFactory()
+	svr, err := NewGrpcServer(context.Background(), msFactory)
 	assert.Nil(t, err)
 
 	// cms.Params.NodeID = 0

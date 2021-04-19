@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -70,10 +71,12 @@ type (
 		replica   Replica
 
 		closer io.Closer
+
+		msFactory msgstream.Factory
 	}
 )
 
-func NewDataNode(ctx context.Context) *DataNode {
+func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 
 	Params.Init()
 	ctx2, cancel2 := context.WithCancel(ctx)
@@ -89,6 +92,7 @@ func NewDataNode(ctx context.Context) *DataNode {
 		masterService:   nil,
 		dataService:     nil,
 		replica:         nil,
+		msFactory:       factory,
 	}
 
 	node.State.Store(internalpb2.StateCode_INITIALIZING)
@@ -165,7 +169,7 @@ func (node *DataNode) Init() error {
 	chanSize := 100
 	node.flushChan = make(chan *flushMsg, chanSize)
 
-	node.dataSyncService = newDataSyncService(node.ctx, node.flushChan, replica, alloc)
+	node.dataSyncService = newDataSyncService(node.ctx, node.flushChan, replica, alloc, node.msFactory)
 	node.dataSyncService.init()
 	node.metaService = newMetaService(node.ctx, replica, node.masterService)
 

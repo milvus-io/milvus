@@ -8,6 +8,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	cms "github.com/zilliztech/milvus-distributed/internal/masterservice"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
@@ -26,13 +27,14 @@ type GrpcServer struct {
 	cancel context.CancelFunc
 }
 
-func NewGrpcServer(ctx context.Context) (*GrpcServer, error) {
+func NewGrpcServer(ctx context.Context, factory msgstream.Factory) (*GrpcServer, error) {
 	s := &GrpcServer{}
 	var err error
 	s.ctx, s.cancel = context.WithCancel(ctx)
-	if s.core, err = cms.NewCore(s.ctx); err != nil {
+	if s.core, err = cms.NewCore(s.ctx, factory); err != nil {
 		return nil, err
 	}
+
 	s.grpcServer = grpc.NewServer()
 	s.grpcError = nil
 	masterpb.RegisterMasterServiceServer(s.grpcServer, s)

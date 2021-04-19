@@ -8,13 +8,15 @@ import (
 	"syscall"
 
 	"github.com/zilliztech/milvus-distributed/cmd/distributed/components"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 
 	"go.uber.org/zap"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
-	n, err := components.NewProxyNode(ctx)
+	msFactory := pulsarms.NewFactory()
+	n, err := components.NewProxyNode(ctx, msFactory)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}

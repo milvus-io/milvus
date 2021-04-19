@@ -39,7 +39,13 @@ func TestDataSyncService_Start(t *testing.T) {
 	flushChan := make(chan *flushMsg, chanSize)
 	replica := newReplica()
 	allocFactory := AllocatorFactory{}
-	sync := newDataSyncService(ctx, flushChan, replica, allocFactory)
+	msFactory := pulsarms.NewFactory()
+	m := map[string]interface{}{
+		"pulsarAddress":  pulsarURL,
+		"receiveBufSize": 1024,
+		"pulsarBufSize":  1024}
+	err := msFactory.SetParams(m)
+	sync := newDataSyncService(ctx, flushChan, replica, allocFactory, msFactory)
 	sync.replica.addCollection(collMeta.ID, collMeta.Schema)
 	sync.init()
 	go sync.start()
@@ -78,15 +84,14 @@ func TestDataSyncService_Start(t *testing.T) {
 	timeTickMsgPack.Msgs = append(timeTickMsgPack.Msgs, timeTickMsg)
 
 	// pulsar produce
-	const receiveBufSize = 1024
 	insertChannels := Params.InsertChannelNames
 	ddChannels := Params.DDChannelNames
 
-	factory := pulsarms.NewFactory(pulsarURL, receiveBufSize, 1024)
-	insertStream, _ := factory.NewMsgStream(ctx)
+	assert.NoError(t, err)
+	insertStream, _ := msFactory.NewMsgStream(ctx)
 	insertStream.AsProducer(insertChannels)
 
-	ddStream, _ := factory.NewMsgStream(ctx)
+	ddStream, _ := msFactory.NewMsgStream(ctx)
 	ddStream.AsProducer(ddChannels)
 
 	var insertMsgStream msgstream.MsgStream = insertStream
@@ -95,7 +100,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	var ddMsgStream msgstream.MsgStream = ddStream
 	ddMsgStream.Start()
 
-	err := insertMsgStream.Produce(&msgPack)
+	err = insertMsgStream.Produce(&msgPack)
 	assert.NoError(t, err)
 
 	err = insertMsgStream.Broadcast(&timeTickMsgPack)

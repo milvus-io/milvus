@@ -11,6 +11,7 @@ import (
 	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
 	qns "github.com/zilliztech/milvus-distributed/internal/distributed/querynode"
 	qsc "github.com/zilliztech/milvus-distributed/internal/distributed/queryservice/client"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 
 	ds "github.com/zilliztech/milvus-distributed/internal/dataservice"
 	is "github.com/zilliztech/milvus-distributed/internal/indexservice"
@@ -32,11 +33,11 @@ type QueryNode struct {
 	queryService  *qsc.Client
 }
 
-func NewQueryNode(ctx context.Context) (*QueryNode, error) {
+func NewQueryNode(ctx context.Context, factory msgstream.Factory) (*QueryNode, error) {
 	const retry = 10
 	const interval = 500
 
-	svr, err := qns.NewServer(ctx)
+	svr, err := qns.NewServer(ctx, factory)
 	if err != nil {
 		panic(err)
 	}

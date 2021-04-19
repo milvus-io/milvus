@@ -210,7 +210,7 @@ func initPulsarTtStream(pulsarAddress string,
 	var input msgstream.MsgStream = inputStream
 
 	// set output stream
-	outputStream, _ := NewPulsarTtMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	outputStream, _ := newPulsarTtMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
 	var output msgstream.MsgStream = outputStream

@@ -9,6 +9,7 @@ import (
 
 	nodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/querynode/client"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -54,6 +55,8 @@ type QueryService struct {
 	stateCode  atomic.Value
 	isInit     atomic.Value
 	enableGrpc bool
+
+	msFactory msgstream.Factory
 }
 
 func (qs *QueryService) Init() error {
@@ -140,7 +143,7 @@ func (qs *QueryService) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb
 		}
 		node = newQueryNodeInfo(client)
 	} else {
-		client := querynode.NewQueryNode(qs.loopCtx, uint64(allocatedID))
+		client := querynode.NewQueryNode(qs.loopCtx, uint64(allocatedID), qs.msFactory)
 		node = newQueryNodeInfo(client)
 	}
 	qs.queryNodes[UniqueID(allocatedID)] = node
@@ -546,7 +549,7 @@ func (qs *QueryService) GetSegmentInfo(req *querypb.SegmentInfoRequest) (*queryp
 	}, nil
 }
 
-func NewQueryService(ctx context.Context) (*QueryService, error) {
+func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryService, error) {
 	nodes := make(map[UniqueID]*queryNodeInfo)
 	ctx1, cancel := context.WithCancel(ctx)
 	replica := newMetaReplica()
@@ -558,6 +561,7 @@ func NewQueryService(ctx context.Context) (*QueryService, error) {
 		numRegisterNode: 0,
 		numQueryChannel: 0,
 		enableGrpc:      false,
+		msFactory:       factory,
 	}
 	service.stateCode.Store(internalpb2.StateCode_INITIALIZING)
 	service.isInit.Store(false)

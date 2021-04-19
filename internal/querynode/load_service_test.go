@@ -1014,14 +1014,22 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, 
 	const receiveBufSize = 1024
 	insertChannels := Params.InsertChannelNames
 	ddChannels := Params.DDChannelNames
-	pulsarURL := Params.PulsarAddress
 
-	factory := pulsarms.NewFactory(pulsarURL, receiveBufSize, 1024)
-	insertStream, _ := factory.NewMsgStream(ctx)
+	msFactory := pulsarms.NewFactory()
+	m := map[string]interface{}{
+		"receiveBufSize": receiveBufSize,
+		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarBufSize":  1024}
+	err := msFactory.SetParams(m)
+	if err != nil {
+		return err
+	}
+
+	insertStream, _ := msFactory.NewMsgStream(ctx)
 	insertStream.AsProducer(insertChannels)
 	insertStream.AsConsumer(insertChannels, Params.MsgChannelSubName)
 
-	ddStream, _ := factory.NewMsgStream(ctx)
+	ddStream, _ := msFactory.NewMsgStream(ctx)
 	ddStream.AsProducer(ddChannels)
 
 	var insertMsgStream msgstream.MsgStream = insertStream
@@ -1030,7 +1038,7 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, 
 	var ddMsgStream msgstream.MsgStream = ddStream
 	ddMsgStream.Start()
 
-	err := insertMsgStream.Produce(&msgPack)
+	err = insertMsgStream.Produce(&msgPack)
 	if err != nil {
 		return err
 	}
@@ -1072,14 +1080,22 @@ func sentTimeTick(ctx context.Context) error {
 	const receiveBufSize = 1024
 	insertChannels := Params.InsertChannelNames
 	ddChannels := Params.DDChannelNames
-	pulsarURL := Params.PulsarAddress
 
-	factory := pulsarms.NewFactory(pulsarURL, receiveBufSize, 1024)
-	insertStream, _ := factory.NewMsgStream(ctx)
+	msFactory := pulsarms.NewFactory()
+	m := map[string]interface{}{
+		"receiveBufSize": receiveBufSize,
+		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarBufSize":  1024}
+	err := msFactory.SetParams(m)
+	if err != nil {
+		return err
+	}
+
+	insertStream, _ := msFactory.NewMsgStream(ctx)
 	insertStream.AsProducer(insertChannels)
 	insertStream.AsConsumer(insertChannels, Params.MsgChannelSubName)
 
-	ddStream, _ := factory.NewMsgStream(ctx)
+	ddStream, _ := msFactory.NewMsgStream(ctx)
 	ddStream.AsProducer(ddChannels)
 
 	var insertMsgStream msgstream.MsgStream = insertStream
@@ -1088,7 +1104,7 @@ func sentTimeTick(ctx context.Context) error {
 	var ddMsgStream msgstream.MsgStream = ddStream
 	ddMsgStream.Start()
 
-	err := insertMsgStream.Broadcast(&timeTickMsgPack)
+	err = insertMsgStream.Broadcast(&timeTickMsgPack)
 	if err != nil {
 		return err
 	}

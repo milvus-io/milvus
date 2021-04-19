@@ -9,7 +9,17 @@ import (
 	"syscall"
 
 	"github.com/zilliztech/milvus-distributed/cmd/distributed/components"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/rmqms"
 )
+
+func newMsgFactory(localMsg bool) msgstream.Factory {
+	if localMsg {
+		return rmqms.NewFactory()
+	}
+	return pulsarms.NewFactory()
+}
 
 type MilvusRoles struct {
 	EnableMaster           bool `env:"ENABLE_MASTER"`
@@ -42,7 +52,7 @@ func (mr *MilvusRoles) EnvValue(env string) bool {
 	return false
 }
 
-func (mr *MilvusRoles) Run() {
+func (mr *MilvusRoles) Run(localMsg bool) {
 	if !mr.HasAnyRole() {
 		log.Printf("set the roles please ...")
 		return
@@ -55,8 +65,9 @@ func (mr *MilvusRoles) Run() {
 	if mr.EnableMaster {
 		log.Print("start as master service")
 		go func() {
+			factory := newMsgFactory(localMsg)
 			var err error
-			masterService, err = components.NewMasterService(ctx)
+			masterService, err = components.NewMasterService(ctx, factory)
 			if err != nil {
 				panic(err)
 			}
@@ -68,8 +79,9 @@ func (mr *MilvusRoles) Run() {
 	if mr.EnableProxyService {
 		log.Print("start as proxy service")
 		go func() {
+			factory := newMsgFactory(localMsg)
 			var err error
-			proxyService, err = components.NewProxyService(ctx)
+			proxyService, err = components.NewProxyService(ctx, factory)
 			if err != nil {
 				panic(err)
 			}
@@ -81,8 +93,9 @@ func (mr *MilvusRoles) Run() {
 	if mr.EnableProxyNode {
 		log.Print("start as proxy node")
 		go func() {
+			factory := newMsgFactory(localMsg)
 			var err error
-			proxyNode, err = components.NewProxyNode(ctx)
+			proxyNode, err = components.NewProxyNode(ctx, factory)
 			if err != nil {
 				panic(err)
 			}
@@ -94,8 +107,9 @@ func (mr *MilvusRoles) Run() {
 	if mr.EnableQueryService {
 		log.Print("start as query service")
 		go func() {
+			factory := newMsgFactory(localMsg)
 			var err error
-			queryService, err = components.NewQueryService(ctx)
+			queryService, err = components.NewQueryService(ctx, factory)
 			if err != nil {
 				panic(err)
 			}
@@ -107,8 +121,9 @@ func (mr *MilvusRoles) Run() {
 	if mr.EnableQueryNode {
 		log.Print("start as query node")
 		go func() {
+			factory := newMsgFactory(localMsg)
 			var err error
-			queryNode, err = components.NewQueryNode(ctx)
+			queryNode, err = components.NewQueryNode(ctx, factory)
 			if err != nil {
 				panic(err)
 			}
@@ -120,8 +135,9 @@ func (mr *MilvusRoles) Run() {
 	if mr.EnableDataService {
 		log.Print("start as data service")
 		go func() {
+			factory := newMsgFactory(localMsg)
 			var err error
-			dataService, err = components.NewDataService(ctx)
+			dataService, err = components.NewDataService(ctx, factory)
 			if err != nil {
 				panic(err)
 			}
@@ -133,8 +149,9 @@ func (mr *MilvusRoles) Run() {
 	if mr.EnableDataNode {
 		log.Print("start as data node")
 		go func() {
+			factory := newMsgFactory(localMsg)
 			var err error
-			dataNode, err = components.NewDataNode(ctx)
+			dataNode, err = components.NewDataNode(ctx, factory)
 			if err != nil {
 				panic(err)
 			}

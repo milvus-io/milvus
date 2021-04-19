@@ -15,6 +15,7 @@ import (
 	qsc "github.com/zilliztech/milvus-distributed/internal/distributed/queryservice/client"
 	is "github.com/zilliztech/milvus-distributed/internal/indexservice"
 	ms "github.com/zilliztech/milvus-distributed/internal/masterservice"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	qs "github.com/zilliztech/milvus-distributed/internal/queryservice"
@@ -30,10 +31,10 @@ type MasterService struct {
 	queryService *qsc.Client
 }
 
-func NewMasterService(ctx context.Context) (*MasterService, error) {
+func NewMasterService(ctx context.Context, factory msgstream.Factory) (*MasterService, error) {
 	const reTryCnt = 3
 
-	svr, err := msc.NewGrpcServer(ctx)
+	svr, err := msc.NewGrpcServer(ctx, factory)
 	if err != nil {
 		return nil, err
 	}

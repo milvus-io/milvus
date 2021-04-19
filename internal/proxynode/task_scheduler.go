@@ -13,7 +13,6 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 )
 
 type TaskQueue interface {
@@ -247,17 +246,21 @@ type TaskScheduler struct {
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	msFactory msgstream.Factory
 }
 
 func NewTaskScheduler(ctx context.Context,
 	idAllocator *allocator.IDAllocator,
-	tsoAllocator *allocator.TimestampAllocator) (*TaskScheduler, error) {
+	tsoAllocator *allocator.TimestampAllocator,
+	factory msgstream.Factory) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &TaskScheduler{
 		idAllocator:  idAllocator,
 		tsoAllocator: tsoAllocator,
 		ctx:          ctx1,
 		cancel:       cancel,
+		msFactory:    factory,
 	}
 	s.DdQueue = NewDdTaskQueue(s)
 	s.DmQueue = NewDmTaskQueue(s)
@@ -371,9 +374,8 @@ func (sched *TaskScheduler) queryLoop() {
 
 func (sched *TaskScheduler) queryResultLoop() {
 	defer sched.wg.Done()
-	factory := pulsarms.NewFactory(Params.PulsarAddress, Params.MsgStreamSearchResultBufSize, 1024)
 
-	queryResultMsgStream, _ := factory.NewMsgStream(sched.ctx)
+	queryResultMsgStream, _ := sched.msFactory.NewMsgStream(sched.ctx)
 	queryResultMsgStream.AsConsumer(Params.SearchResultChannelNames,
 		Params.ProxySubName)
 	queryNodeNum := Params.QueryNodeNum

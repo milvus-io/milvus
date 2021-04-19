@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"io"
 	"log"
 	"sync/atomic"
@@ -66,9 +67,11 @@ type QueryNode struct {
 	queryClient  QueryServiceInterface
 	indexClient  IndexServiceInterface
 	dataClient   DataServiceInterface
+
+	msFactory msgstream.Factory
 }
 
-func NewQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
+func NewQueryNode(ctx context.Context, queryNodeID uint64, factory msgstream.Factory) *QueryNode {
 	ctx1, cancel := context.WithCancel(ctx)
 	node := &QueryNode{
 		queryNodeLoopCtx:    ctx1,
@@ -79,6 +82,8 @@ func NewQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
 		metaService:     nil,
 		searchService:   nil,
 		statsService:    nil,
+
+		msFactory: factory,
 	}
 
 	node.replica = newCollectionReplicaImpl()
@@ -86,7 +91,7 @@ func NewQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
 	return node
 }
 
-func NewQueryNodeWithoutID(ctx context.Context) *QueryNode {
+func NewQueryNodeWithoutID(ctx context.Context, factory msgstream.Factory) *QueryNode {
 	ctx1, cancel := context.WithCancel(ctx)
 	node := &QueryNode{
 		queryNodeLoopCtx:    ctx1,
@@ -96,6 +101,8 @@ func NewQueryNodeWithoutID(ctx context.Context) *QueryNode {
 		metaService:     nil,
 		searchService:   nil,
 		statsService:    nil,
+
+		msFactory: factory,
 	}
 
 	node.replica = newCollectionReplicaImpl()
@@ -143,12 +150,23 @@ func (node *QueryNode) Init() error {
 }
 
 func (node *QueryNode) Start() error {
+	var err error
+	m := map[string]interface{}{
+		"PulsarAddress":  Params.PulsarAddress,
+		"ReceiveBufSize": 1024,
+		"PulsarBufSize":  1024}
+	err = node.msFactory.SetParams(m)
+	if err != nil {
+		return err
+	}
+
 	// init services and manager
-	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica)
-	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica)
+	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica, node.msFactory)
+	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica, node.msFactory)
 	//node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
+
 	node.loadService = newLoadService(node.queryNodeLoopCtx, node.masterClient, node.dataClient, node.indexClient, node.replica, node.dataSyncService.dmStream)
-	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, node.loadService.segLoader.indexLoader.fieldStatsChan)
+	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, node.loadService.segLoader.indexLoader.fieldStatsChan, node.msFactory)
 
 	// start services
 	go node.dataSyncService.start()

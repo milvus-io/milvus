@@ -9,6 +9,7 @@ import (
 
 	ms "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/masterservice"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 
 	"github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
@@ -20,8 +21,8 @@ type DataService struct {
 	masterClient *ms.GrpcClient
 }
 
-func NewDataService(ctx context.Context) (*DataService, error) {
-	service := dataservice.NewGrpcService(ctx)
+func NewDataService(ctx context.Context, factory msgstream.Factory) (*DataService, error) {
+	service := dataservice.NewGrpcService(ctx, factory)
 
 	masterservice.Params.Init()
 	client, err := ms.NewGrpcClient(fmt.Sprintf("%s:%d", masterservice.Params.Address, masterservice.Params.Port), 30*time.Second)

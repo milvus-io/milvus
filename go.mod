@@ -27,6 +27,7 @@ require (
 	github.com/klauspost/compress v1.10.11 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/minio/minio-go/v7 v7.0.5
+	github.com/mitchellh/mapstructure v1.1.2
 	github.com/modern-go/reflect2 v1.0.1
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/oklog/run v1.1.0

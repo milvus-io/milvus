@@ -5,7 +5,6 @@ import (
 	"log"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
@@ -70,7 +69,7 @@ func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {
 	return stNode.timeTickMsgStream.Produce(&msgPack)
 }
 
-func newServiceTimeNode(ctx context.Context, replica collectionReplica) *serviceTimeNode {
+func newServiceTimeNode(ctx context.Context, replica collectionReplica, factory msgstream.Factory) *serviceTimeNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -78,7 +77,6 @@ func newServiceTimeNode(ctx context.Context, replica collectionReplica) *service
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
-	factory := pulsarms.NewFactory(Params.PulsarAddress, Params.SearchReceiveBufSize, 1024)
 	timeTimeMsgStream, _ := factory.NewMsgStream(ctx)
 	timeTimeMsgStream.AsProducer([]string{Params.QueryTimeTickChannelName})
 

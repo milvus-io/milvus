@@ -13,6 +13,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -28,11 +29,11 @@ func (s *Service) GetSegmentInfo(ctx context.Context, request *datapb.SegmentInf
 	return s.server.GetSegmentInfo(request)
 }
 
-func NewGrpcService(ctx context.Context) *Service {
+func NewGrpcService(ctx context.Context, factory msgstream.Factory) *Service {
 	s := &Service{}
 	var err error
 	s.ctx = ctx
-	s.server, err = dataservice.CreateServer(s.ctx)
+	s.server, err = dataservice.CreateServer(s.ctx, factory)
 	if err != nil {
 		log.Fatalf("create server error: %s", err.Error())
 		return nil

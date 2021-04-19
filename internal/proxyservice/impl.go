@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
-
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -95,15 +93,22 @@ func (s *ServiceImpl) fillNodeInitParams() error {
 }
 
 func (s *ServiceImpl) Init() error {
-	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
-
 	err := s.fillNodeInitParams()
 	if err != nil {
 		return err
 	}
 	log.Println("fill node init params ...")
 
-	serviceTimeTickMsgStream, _ := factory.NewTtMsgStream(s.ctx)
+	m := map[string]interface{}{
+		"PulsarAddress":  Params.PulsarAddress,
+		"ReceiveBufSize": 1024,
+		"PulsarBufSize":  1024}
+	err = s.msFactory.SetParams(m)
+	if err != nil {
+		return err
+	}
+
+	serviceTimeTickMsgStream, _ := s.msFactory.NewTtMsgStream(s.ctx)
 	serviceTimeTickMsgStream.AsProducer([]string{Params.ServiceTimeTickChannel})
 	log.Println("create service time tick producer channel: ", []string{Params.ServiceTimeTickChannel})
 
@@ -112,11 +117,11 @@ func (s *ServiceImpl) Init() error {
 	for ; i < Params.InsertChannelNum; i++ {
 		channels[i] = Params.InsertChannelPrefixName + strconv.FormatInt(i, 10)
 	}
-	insertTickMsgStream, _ := factory.NewMsgStream(s.ctx)
+	insertTickMsgStream, _ := s.msFactory.NewMsgStream(s.ctx)
 	insertTickMsgStream.AsProducer(channels)
 	log.Println("create insert time tick producer channel: ", channels)
 
-	nodeTimeTickMsgStream, _ := factory.NewMsgStream(s.ctx)
+	nodeTimeTickMsgStream, _ := s.msFactory.NewMsgStream(s.ctx)
 	nodeTimeTickMsgStream.AsConsumer(Params.NodeTimeTickChannel,
 		"proxyservicesub") // TODO: add config
 	log.Println("create node time tick consumer channel: ", Params.NodeTimeTickChannel)

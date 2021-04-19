@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
@@ -26,10 +27,10 @@ type Server struct {
 	cancel context.CancelFunc
 }
 
-func NewServer(ctx context.Context) (*Server, error) {
+func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	s := &Server{
 		ctx:  ctx,
-		node: qn.NewQueryNodeWithoutID(ctx),
+		node: qn.NewQueryNodeWithoutID(ctx, factory),
 	}
 
 	qn.Params.Init()

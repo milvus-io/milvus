@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	distributed "github.com/zilliztech/milvus-distributed/cmd/distributed/components"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 )
 
 func main() {
@@ -15,7 +16,9 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dn, err := distributed.NewDataNode(ctx)
+	msFactory := pulsarms.NewFactory()
+
+	dn, err := distributed.NewDataNode(ctx, msFactory)
 	if err != nil {
 		panic(err)
 	}

@@ -148,7 +148,8 @@ func TestMasterService(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	core, err := NewCore(ctx)
+	msFactory := pulsarms.NewFactory()
+	core, err := NewCore(ctx, msFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
@@ -192,18 +193,24 @@ func TestMasterService(t *testing.T) {
 	err = core.Start()
 	assert.Nil(t, err)
 
-	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
-	proxyTimeTickStream, _ := factory.NewMsgStream(ctx)
+	m := map[string]interface{}{
+		"receiveBufSize": 1024,
+		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarBufSize":  1024}
+	err = msFactory.SetParams(m)
+	assert.Nil(t, err)
+
+	proxyTimeTickStream, _ := msFactory.NewMsgStream(ctx)
 	proxyTimeTickStream.AsProducer([]string{Params.ProxyTimeTickChannel})
 
-	dataServiceSegmentStream, _ := factory.NewMsgStream(ctx)
+	dataServiceSegmentStream, _ := msFactory.NewMsgStream(ctx)
 	dataServiceSegmentStream.AsProducer([]string{Params.DataServiceSegmentChannel})
 
-	timeTickStream, _ := factory.NewMsgStream(ctx)
+	timeTickStream, _ := msFactory.NewMsgStream(ctx)
 	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
 	timeTickStream.Start()
 
-	ddStream, _ := factory.NewMsgStream(ctx)
+	ddStream, _ := msFactory.NewMsgStream(ctx)
 	ddStream.AsConsumer([]string{Params.DdChannel}, Params.MsgChannelSubName)
 	ddStream.Start()
 

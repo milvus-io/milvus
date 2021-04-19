@@ -109,11 +109,18 @@ func TestDataSyncService_Start(t *testing.T) {
 	ddChannels := Params.DDChannelNames
 	pulsarURL := Params.PulsarAddress
 
-	factory := pulsarms.NewFactory(pulsarURL, receiveBufSize, 1024)
-	insertStream, _ := factory.NewMsgStream(node.queryNodeLoopCtx)
+	msFactory := pulsarms.NewFactory()
+	m := map[string]interface{}{
+		"receiveBufSize": receiveBufSize,
+		"pulsarAddress":  pulsarURL,
+		"pulsarBufSize":  1024}
+	err := msFactory.SetParams(m)
+	assert.Nil(t, err)
+
+	insertStream, _ := msFactory.NewMsgStream(node.queryNodeLoopCtx)
 	insertStream.AsProducer(insertChannels)
 
-	ddStream, _ := factory.NewMsgStream(node.queryNodeLoopCtx)
+	ddStream, _ := msFactory.NewMsgStream(node.queryNodeLoopCtx)
 	ddStream.AsProducer(ddChannels)
 
 	var insertMsgStream msgstream.MsgStream = insertStream
@@ -122,7 +129,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	var ddMsgStream msgstream.MsgStream = ddStream
 	ddMsgStream.Start()
 
-	err := insertMsgStream.Produce(&msgPack)
+	err = insertMsgStream.Produce(&msgPack)
 	assert.NoError(t, err)
 
 	err = insertMsgStream.Broadcast(&timeTickMsgPack)
@@ -131,7 +138,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	assert.NoError(t, err)
 
 	// dataSync
-	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica)
+	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica, msFactory)
 	go node.dataSyncService.start()
 
 	<-node.queryNodeLoopCtx.Done()
