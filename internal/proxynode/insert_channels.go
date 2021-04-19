@@ -14,18 +14,19 @@ import (
 	"go.uber.org/zap"
 )
 
-type InsertChannelsMap struct {
+type insertChannelsMap struct {
 	collectionID2InsertChannels map[UniqueID]int      // the value of map is the location of insertChannels & insertMsgStreams
 	insertChannels              [][]string            // it's a little confusing to use []string as the key of map
 	insertMsgStreams            []msgstream.MsgStream // maybe there's a better way to implement Set, just agilely now
 	droppedBitMap               []int                 // 0 -> normal, 1 -> dropped
 	usageHistogram              []int                 // message stream can be closed only when the use count is zero
-	mtx                         sync.RWMutex
-	nodeInstance                *ProxyNode
-	msFactory                   msgstream.Factory
+	// TODO: use fine grained lock
+	mtx          sync.RWMutex
+	nodeInstance *ProxyNode
+	msFactory    msgstream.Factory
 }
 
-func (m *InsertChannelsMap) createInsertMsgStream(collID UniqueID, channels []string) error {
+func (m *insertChannelsMap) CreateInsertMsgStream(collID UniqueID, channels []string) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -61,7 +62,7 @@ func (m *InsertChannelsMap) createInsertMsgStream(collID UniqueID, channels []st
 	return nil
 }
 
-func (m *InsertChannelsMap) closeInsertMsgStream(collID UniqueID) error {
+func (m *insertChannelsMap) CloseInsertMsgStream(collID UniqueID) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -80,13 +81,15 @@ func (m *InsertChannelsMap) closeInsertMsgStream(collID UniqueID) error {
 	if m.usageHistogram[loc] <= 0 {
 		m.insertMsgStreams[loc].Close()
 		m.droppedBitMap[loc] = 1
-		delete(m.collectionID2InsertChannels, collID)
 		log.Warn("close insert message stream ...")
 	}
+
+	delete(m.collectionID2InsertChannels, collID)
+
 	return nil
 }
 
-func (m *InsertChannelsMap) getInsertChannels(collID UniqueID) ([]string, error) {
+func (m *insertChannelsMap) GetInsertChannels(collID UniqueID) ([]string, error) {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
@@ -102,7 +105,7 @@ func (m *InsertChannelsMap) getInsertChannels(collID UniqueID) ([]string, error)
 	return ret, nil
 }
 
-func (m *InsertChannelsMap) getInsertMsgStream(collID UniqueID) (msgstream.MsgStream, error) {
+func (m *insertChannelsMap) GetInsertMsgStream(collID UniqueID) (msgstream.MsgStream, error) {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
@@ -118,7 +121,7 @@ func (m *InsertChannelsMap) getInsertMsgStream(collID UniqueID) (msgstream.MsgSt
 	return m.insertMsgStreams[loc], nil
 }
 
-func (m *InsertChannelsMap) closeAllMsgStream() {
+func (m *insertChannelsMap) CloseAllMsgStream() {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -135,8 +138,8 @@ func (m *InsertChannelsMap) closeAllMsgStream() {
 	m.usageHistogram = make([]int, 0)
 }
 
-func newInsertChannelsMap(node *ProxyNode) *InsertChannelsMap {
-	return &InsertChannelsMap{
+func newInsertChannelsMap(node *ProxyNode) *insertChannelsMap {
+	return &insertChannelsMap{
 		collectionID2InsertChannels: make(map[UniqueID]int),
 		insertChannels:              make([][]string, 0),
 		insertMsgStreams:            make([]msgstream.MsgStream, 0),
@@ -147,8 +150,12 @@ func newInsertChannelsMap(node *ProxyNode) *InsertChannelsMap {
 	}
 }
 
-var globalInsertChannelsMap *InsertChannelsMap
+var globalInsertChannelsMap *insertChannelsMap
+var initGlobalInsertChannelsMapOnce sync.Once
 
+// change to singleton mode later? Such as GetInsertChannelsMapInstance like GetConfAdapterMgrInstance.
 func initGlobalInsertChannelsMap(node *ProxyNode) {
-	globalInsertChannelsMap = newInsertChannelsMap(node)
+	initGlobalInsertChannelsMapOnce.Do(func() {
+		globalInsertChannelsMap = newInsertChannelsMap(node)
+	})
 }

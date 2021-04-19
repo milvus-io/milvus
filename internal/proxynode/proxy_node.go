@@ -249,7 +249,7 @@ func (node *ProxyNode) Start() error {
 func (node *ProxyNode) Stop() error {
 	node.cancel()
 
-	globalInsertChannelsMap.closeAllMsgStream()
+	globalInsertChannelsMap.CloseAllMsgStream()
 	node.tsoAllocator.Close()
 	node.idAllocator.Close()
 	node.segAssigner.Close()

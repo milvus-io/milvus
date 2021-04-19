@@ -204,7 +204,7 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 
 	msgPack.Msgs[0] = tsMsg
 
-	stream, err := globalInsertChannelsMap.getInsertMsgStream(collID)
+	stream, err := globalInsertChannelsMap.GetInsertMsgStream(collID)
 	if err != nil {
 		resp, _ := it.dataService.GetInsertChannels(ctx, &datapb.GetInsertChannelsRequest{
 			Base: &commonpb.MsgBase{
@@ -222,12 +222,12 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
 			return errors.New(resp.Status.Reason)
 		}
-		err = globalInsertChannelsMap.createInsertMsgStream(collID, resp.Values)
+		err = globalInsertChannelsMap.CreateInsertMsgStream(collID, resp.Values)
 		if err != nil {
 			return err
 		}
 	}
-	stream, err = globalInsertChannelsMap.getInsertMsgStream(collID)
+	stream, err = globalInsertChannelsMap.GetInsertMsgStream(collID)
 	if err != nil {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
@@ -386,7 +386,7 @@ func (cct *CreateCollectionTask) Execute(ctx context.Context) error {
 		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
 			return errors.New(resp.Status.Reason)
 		}
-		err = globalInsertChannelsMap.createInsertMsgStream(collID, resp.Values)
+		err = globalInsertChannelsMap.CreateInsertMsgStream(collID, resp.Values)
 		if err != nil {
 			return err
 		}
@@ -464,7 +464,7 @@ func (dct *DropCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	err = globalInsertChannelsMap.closeInsertMsgStream(collID)
+	err = globalInsertChannelsMap.CloseInsertMsgStream(collID)
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,9 @@
 package msgstream
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 type SimpleMsgStream struct {
 	msgChan chan *MsgPack
@@ -28,12 +31,28 @@ func (ms *SimpleMsgStream) AsConsumer(channels []string, subName string) {
 func (ms *SimpleMsgStream) SetRepackFunc(repackFunc RepackFunc) {
 }
 
-func (ms *SimpleMsgStream) Produce(pack *MsgPack) error {
+func (ms *SimpleMsgStream) getMsgCount() int {
+	ms.msgCountMtx.RLock()
+	defer ms.msgCountMtx.RUnlock()
+
+	return ms.msgCount
+}
+
+func (ms *SimpleMsgStream) increaseMsgCount(delta int) {
 	ms.msgCountMtx.Lock()
 	defer ms.msgCountMtx.Unlock()
 
+	ms.msgCount += delta
+}
+
+func (ms *SimpleMsgStream) decreaseMsgCount(delta int) {
+	ms.increaseMsgCount(-delta)
+}
+
+func (ms *SimpleMsgStream) Produce(pack *MsgPack) error {
+	defer ms.increaseMsgCount(1)
+
 	ms.msgChan <- pack
-	ms.msgCount++
 
 	return nil
 }
@@ -43,12 +62,11 @@ func (ms *SimpleMsgStream) Broadcast(pack *MsgPack) error {
 }
 
 func (ms *SimpleMsgStream) Consume() *MsgPack {
-	ms.msgCountMtx.RLock()
-	defer ms.msgCountMtx.RUnlock()
-
-	if ms.msgCount <= 0 {
+	if ms.getMsgCount() <= 0 {
 		return nil
 	}
+
+	defer ms.decreaseMsgCount(1)
 
 	return <-ms.msgChan
 }
@@ -62,4 +80,27 @@ func NewSimpleMsgStream() *SimpleMsgStream {
 		msgChan:  make(chan *MsgPack, 1024),
 		msgCount: 0,
 	}
+}
+
+type SimpleMsgStreamFactory struct {
+}
+
+func (factory *SimpleMsgStreamFactory) SetParams(params map[string]interface{}) error {
+	return nil
+}
+
+func (factory *SimpleMsgStreamFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
+	return NewSimpleMsgStream(), nil
+}
+
+func (factory *SimpleMsgStreamFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
+	return NewSimpleMsgStream(), nil
+}
+
+func (factory *SimpleMsgStreamFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
+	return NewSimpleMsgStream(), nil
+}
+
+func NewSimpleMsgStreamFactory() *SimpleMsgStreamFactory {
+	return &SimpleMsgStreamFactory{}
 }
