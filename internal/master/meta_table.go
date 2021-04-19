@@ -638,6 +638,22 @@ func (mt *metaTable) removeSegmentIndexMeta(segID UniqueID) error {
 	return nil
 }
 
+func (mt *metaTable) GetFieldTypeParams(collID UniqueID, fieldID UniqueID) ([]*commonpb.KeyValuePair, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	if _, ok := mt.collID2Meta[collID]; !ok {
+		return nil, fmt.Errorf("can not find collection with id %d", collID)
+	}
+
+	for _, fieldSchema := range mt.collID2Meta[collID].Schema.Fields {
+		if fieldSchema.FieldID == fieldID {
+			return fieldSchema.TypeParams, nil
+		}
+	}
+	return nil, fmt.Errorf("can not find field %d in collection %d", fieldID, collID)
+}
+
 func (mt *metaTable) GetFieldIndexParams(collID UniqueID, fieldID UniqueID) ([]*commonpb.KeyValuePair, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
