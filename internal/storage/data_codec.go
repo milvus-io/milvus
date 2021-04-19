@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	ms "github.com/zilliztech/milvus-distributed/internal/master"
+	ms "github.com/zilliztech/milvus-distributed/internal/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"

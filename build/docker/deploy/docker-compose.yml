@@ -1,20 +1,6 @@
 version: '3.5'
 
 services:
-  master:
-    image: ${TARGET_REPO}/master:${TARGET_TAG}
-    build:
-      context: ../../../
-      dockerfile: build/docker/deploy/master/DockerFile
-      cache_from:
-        - ${SOURCE_REPO}/master:${SOURCE_TAG}
-    environment: 
-      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
-      ETCD_ADDRESS: ${ETCD_ADDRESS}
-      INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
-    networks: 
-      - milvus
-
   proxyservice:
     image: ${TARGET_REPO}/proxyservice:${TARGET_TAG}
     build:
@@ -69,21 +55,6 @@ services:
       MINIO_ADDRESS: ${MINIO_ADDRESS}
     networks:
       - milvus
-
-  # writenode:
-  #   image: ${TARGET_REPO}/writenode:${TARGET_TAG}
-  #   build:
-  #     context: ../../../
-  #     dockerfile: build/docker/deploy/writenode/DockerFile
-  #     cache_from:
-  #       - ${SOURCE_REPO}/writenode:${SOURCE_TAG}
-  #   environment:
-  #     PULSAR_ADDRESS: ${PULSAR_ADDRESS}
-  #     ETCD_ADDRESS: ${ETCD_ADDRESS}
-  #     MASTER_ADDRESS: ${MASTER_ADDRESS}
-  #     MINIO_ADDRESS: ${MINIO_ADDRESS}
-  #   networks:
-  #     - milvus
 
   datanode:
     image: ${TARGET_REPO}/datanode:${TARGET_TAG}
