@@ -25,7 +25,6 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	queryPb "github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -445,7 +444,7 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	}
 
 	// segments are ordered before LoadSegments calling
-	if in.LastSegmentState.State == datapb.SegmentState_SegmentGrowing {
+	if in.LastSegmentState.State == commonpb.SegmentState_SegmentGrowing {
 		segmentNum := len(segmentIDs)
 		positions := in.LastSegmentState.StartPositions
 		err = node.loadService.seekSegment(positions)

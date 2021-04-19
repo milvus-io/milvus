@@ -41,6 +41,14 @@ enum IndexState {
     FAILED = 4;
 }
 
+enum SegmentState {
+    SegmentNone = 0;
+    SegmentNotExist = 1;
+    SegmentGrowing = 2;
+    SegmentSealed = 3;
+    SegmentFlushed = 4;
+}
+
 message Empty{}
 
 

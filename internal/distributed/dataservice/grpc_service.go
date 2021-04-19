@@ -24,6 +24,10 @@ type Service struct {
 	grpcServer *grpc.Server
 }
 
+func (s *Service) GetSegmentInfo(ctx context.Context, request *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error) {
+	panic("implement me")
+}
+
 func NewGrpcService(ctx context.Context) *Service {
 	s := &Service{}
 	var err error

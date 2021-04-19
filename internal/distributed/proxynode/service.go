@@ -320,3 +320,7 @@ func (s *Server) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*co
 func (s *Server) GetDdChannel(ctx context.Context, request *commonpb.Empty) (*milvuspb.StringResponse, error) {
 	return s.impl.GetDdChannel(request)
 }
+
+func (s *Server) GetPersistentSegmentInfo(ctx context.Context, request *milvuspb.PersistentSegmentInfoRequest) (*milvuspb.PersistentSegmentInfoResponse, error) {
+	panic("implement me")
+}

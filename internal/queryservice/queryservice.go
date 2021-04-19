@@ -345,10 +345,10 @@ func (qs *QueryService) LoadPartitions(req *querypb.LoadPartitionRequest) (*comm
 			sort.Slice(value, func(i, j int) bool { return segmentStates[value[i]].CreateTime < segmentStates[value[j]].CreateTime })
 			selectedSegs := make([]UniqueID, 0)
 			for i, v := range value {
-				if segmentStates[v].State == datapb.SegmentState_SegmentFlushed {
+				if segmentStates[v].State == commonpb.SegmentState_SegmentFlushed {
 					selectedSegs = append(selectedSegs, v)
 				} else {
-					if i > 0 && segmentStates[selectedSegs[i-1]].State != datapb.SegmentState_SegmentFlushed {
+					if i > 0 && segmentStates[selectedSegs[i-1]].State != commonpb.SegmentState_SegmentFlushed {
 						break
 					}
 					selectedSegs = append(selectedSegs, v)
