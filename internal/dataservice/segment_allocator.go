@@ -1,16 +1,17 @@
 package dataservice
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
+	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 )
 
 type errRemainInSufficient struct {
@@ -28,21 +29,21 @@ func (err errRemainInSufficient) Error() string {
 // segmentAllocator is used to allocate rows for segments and record the allocations.
 type segmentAllocatorInterface interface {
 	// OpenSegment add the segment to allocator and set it allocatable
-	OpenSegment(segmentInfo *datapb.SegmentInfo) error
+	OpenSegment(ctx context.Context, segmentInfo *datapb.SegmentInfo) error
 	// AllocSegment allocate rows and record the allocation.
-	AllocSegment(collectionID UniqueID, partitionID UniqueID, channelName string, requestRows int) (UniqueID, int, Timestamp, error)
+	AllocSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string, requestRows int) (UniqueID, int, Timestamp, error)
 	// GetSealedSegments get all sealed segment.
-	GetSealedSegments() ([]UniqueID, error)
+	GetSealedSegments(ctx context.Context) ([]UniqueID, error)
 	// SealSegment set segment sealed, the segment will not be allocated anymore.
-	SealSegment(segmentID UniqueID) error
+	SealSegment(ctx context.Context, segmentID UniqueID) error
 	// DropSegment drop the segment from allocator.
-	DropSegment(segmentID UniqueID)
+	DropSegment(ctx context.Context, segmentID UniqueID)
 	// ExpireAllocations check all allocations' expire time and remove the expired allocation.
-	ExpireAllocations(timeTick Timestamp) error
+	ExpireAllocations(ctx context.Context, timeTick Timestamp) error
 	// SealAllSegments get all opened segment ids of collection. return success and failed segment ids
-	SealAllSegments(collectionID UniqueID)
+	SealAllSegments(ctx context.Context, collectionID UniqueID)
 	// IsAllocationsExpired check all allocations of segment expired.
-	IsAllocationsExpired(segmentID UniqueID, ts Timestamp) (bool, error)
+	IsAllocationsExpired(ctx context.Context, segmentID UniqueID, ts Timestamp) (bool, error)
 }
 
 type segmentStatus struct {
@@ -81,7 +82,9 @@ func newSegmentAllocator(meta *meta, allocator allocatorInterface) *segmentAlloc
 	return segmentAllocator
 }
 
-func (allocator *segmentAllocator) OpenSegment(segmentInfo *datapb.SegmentInfo) error {
+func (allocator *segmentAllocator) OpenSegment(ctx context.Context, segmentInfo *datapb.SegmentInfo) error {
+	sp, _ := trace.StartSpanFromContext(ctx)
+	defer sp.Finish()
 	allocator.mu.Lock()
 	defer allocator.mu.Unlock()
 	if _, ok := allocator.segments[segmentInfo.SegmentID]; ok {
@@ -103,8 +106,10 @@ func (allocator *segmentAllocator) OpenSegment(segmentInfo *datapb.SegmentInfo) 
 	return nil
 }
 
-func (allocator *segmentAllocator) AllocSegment(collectionID UniqueID,
+func (allocator *segmentAllocator) AllocSegment(ctx context.Context, collectionID UniqueID,
 	partitionID UniqueID, channelName string, requestRows int) (segID UniqueID, retCount int, expireTime Timestamp, err error) {
+	sp, _ := trace.StartSpanFromContext(ctx)
+	defer sp.Finish()
 	allocator.mu.Lock()
 	defer allocator.mu.Unlock()
 
@@ -173,7 +178,9 @@ func (allocator *segmentAllocator) estimateTotalRows(collectionID UniqueID) (int
 	return int(allocator.segmentThreshold / float64(sizePerRecord)), nil
 }
 
-func (allocator *segmentAllocator) GetSealedSegments() ([]UniqueID, error) {
+func (allocator *segmentAllocator) GetSealedSegments(ctx context.Context) ([]UniqueID, error) {
+	sp, _ := trace.StartSpanFromContext(ctx)
+	defer sp.Finish()
 	allocator.mu.Lock()
 	defer allocator.mu.Unlock()
 	keys := make([]UniqueID, 0)
@@ -200,7 +207,9 @@ func (allocator *segmentAllocator) checkSegmentSealed(segStatus *segmentStatus) 
 	return float64(segMeta.NumRows) >= allocator.segmentThresholdFactor*float64(segStatus.total), nil
 }
 
-func (allocator *segmentAllocator) SealSegment(segmentID UniqueID) error {
+func (allocator *segmentAllocator) SealSegment(ctx context.Context, segmentID UniqueID) error {
+	sp, _ := trace.StartSpanFromContext(ctx)
+	defer sp.Finish()
 	allocator.mu.Lock()
 	defer allocator.mu.Unlock()
 	status, ok := allocator.segments[segmentID]
@@ -211,13 +220,17 @@ func (allocator *segmentAllocator) SealSegment(segmentID UniqueID) error {
 	return nil
 }
 
-func (allocator *segmentAllocator) DropSegment(segmentID UniqueID) {
+func (allocator *segmentAllocator) DropSegment(ctx context.Context, segmentID UniqueID) {
+	sp, _ := trace.StartSpanFromContext(ctx)
+	defer sp.Finish()
 	allocator.mu.Lock()
 	defer allocator.mu.Unlock()
 	delete(allocator.segments, segmentID)
 }
 
-func (allocator *segmentAllocator) ExpireAllocations(timeTick Timestamp) error {
+func (allocator *segmentAllocator) ExpireAllocations(ctx context.Context, timeTick Timestamp) error {
+	sp, _ := trace.StartSpanFromContext(ctx)
+	defer sp.Finish()
 	allocator.mu.Lock()
 	defer allocator.mu.Unlock()
 	for _, segStatus := range allocator.segments {
@@ -232,7 +245,9 @@ func (allocator *segmentAllocator) ExpireAllocations(timeTick Timestamp) error {
 	return nil
 }
 
-func (allocator *segmentAllocator) IsAllocationsExpired(segmentID UniqueID, ts Timestamp) (bool, error) {
+func (allocator *segmentAllocator) IsAllocationsExpired(ctx context.Context, segmentID UniqueID, ts Timestamp) (bool, error) {
+	sp, _ := trace.StartSpanFromContext(ctx)
+	defer sp.Finish()
 	allocator.mu.RLock()
 	defer allocator.mu.RUnlock()
 	status, ok := allocator.segments[segmentID]
@@ -242,7 +257,9 @@ func (allocator *segmentAllocator) IsAllocationsExpired(segmentID UniqueID, ts T
 	return status.lastExpireTime <= ts, nil
 }
 
-func (allocator *segmentAllocator) SealAllSegments(collectionID UniqueID) {
+func (allocator *segmentAllocator) SealAllSegments(ctx context.Context, collectionID UniqueID) {
+	sp, _ := trace.StartSpanFromContext(ctx)
+	defer sp.Finish()
 	allocator.mu.Lock()
 	defer allocator.mu.Unlock()
 	for _, status := range allocator.segments {
