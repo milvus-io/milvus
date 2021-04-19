@@ -291,9 +291,9 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 
 	inReduced := make([]bool, len(searchResults))
 	numSegment := int64(len(searchResults))
-	err2 := reduceSearchResults(searchResults, numSegment, inReduced)
-	if err2 != nil {
-		return err2
+	err = reduceSearchResults(searchResults, numSegment, inReduced)
+	if err != nil {
+		return err
 	}
 	err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
 	if err != nil {
