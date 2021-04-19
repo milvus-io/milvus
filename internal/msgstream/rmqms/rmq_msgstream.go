@@ -77,11 +77,6 @@ func (rms *RmqMsgStream) Start() {
 func (rms *RmqMsgStream) Close() {
 	rms.streamCancel()
 
-	for _, producer := range rms.producers {
-		if producer != "" {
-			_ = rocksmq.Rmq.DestroyChannel(producer)
-		}
-	}
 	for _, consumer := range rms.consumers {
 		_ = rocksmq.Rmq.DestroyConsumerGroup(consumer.GroupName, consumer.ChannelName)
 		close(consumer.MsgMutex)

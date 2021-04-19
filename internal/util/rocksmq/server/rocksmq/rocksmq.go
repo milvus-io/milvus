@@ -174,7 +174,13 @@ func (rmq *RocksMQ) CreateConsumerGroup(groupName string, channelName string) (*
 	key := groupName + "/" + channelName + "/current_id"
 	if rmq.checkKeyExist(key) {
 		log.Debug("RocksMQ: " + key + " existed.")
-		return nil, fmt.Errorf("ConsumerGroup %s already exists", groupName)
+		for _, consumer := range rmq.notify[channelName] {
+			if consumer.GroupName == groupName {
+				return consumer, nil
+			}
+		}
+
+		return nil, nil
 	}
 	err := rmq.kv.Save(key, DefaultMessageID)
 	if err != nil {
