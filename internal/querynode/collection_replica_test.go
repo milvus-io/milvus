@@ -258,6 +258,8 @@ func TestReplaceGrowingSegmentBySealedSegment(t *testing.T) {
 	ns := newSegment(collection, segmentID, defaultPartitionID, collectionID, segTypeSealed)
 	err = node.replica.replaceGrowingSegmentBySealedSegment(ns)
 	assert.NoError(t, err)
+	err = node.replica.setSegmentEnableIndex(segmentID, true)
+	assert.NoError(t, err)
 
 	segmentNums := node.replica.getSegmentNum()
 	assert.Equal(t, segmentNums, 1)

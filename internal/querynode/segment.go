@@ -44,6 +44,9 @@ type Segment struct {
 	lastMemSize  int64
 	lastRowCount int64
 
+	once        sync.Once // guards enableIndex
+	enableIndex bool
+
 	rmMutex          sync.Mutex // guards recentlyModified
 	recentlyModified bool
 
@@ -59,6 +62,18 @@ type Segment struct {
 //-------------------------------------------------------------------------------------- common interfaces
 func (s *Segment) ID() UniqueID {
 	return s.segmentID
+}
+
+func (s *Segment) setEnableIndex(enable bool) {
+	setOnce := func() {
+		s.enableIndex = enable
+	}
+
+	s.once.Do(setOnce)
+}
+
+func (s *Segment) getEnableIndex() bool {
+	return s.enableIndex
 }
 
 func (s *Segment) setRecentlyModified(modify bool) {
