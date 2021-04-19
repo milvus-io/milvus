@@ -28,10 +28,19 @@ DeleteIndex(CIndex index) {
 }
 
 void
-BuildFloatVecIndex(CIndex index, int64_t float_value_num, const float* vectors) {
+BuildFloatVecIndexWithoutIds(CIndex index, int64_t float_value_num, const float* vectors) {
     auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
     auto dim = cIndex->dim();
     auto row_nums = float_value_num / dim;
+    auto ds = milvus::knowhere::GenDataset(row_nums, dim, vectors);
+    cIndex->BuildWithoutIds(ds);
+}
+
+void
+BuildBinaryVecIndexWithoutIds(CIndex index, int64_t data_size, const uint8_t* vectors) {
+    auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
+    auto dim = cIndex->dim();
+    auto row_nums = (data_size * 8) / dim;
     auto ds = milvus::knowhere::GenDataset(row_nums, dim, vectors);
     cIndex->BuildWithoutIds(ds);
 }

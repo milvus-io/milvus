@@ -41,7 +41,10 @@ void
 DeleteIndex(CIndex index);
 
 void
-BuildFloatVecIndex(CIndex index, int64_t float_value_num, const float* vectors);
+BuildFloatVecIndexWithoutIds(CIndex index, int64_t float_value_num, const float* vectors);
+
+void
+BuildBinaryVecIndexWithoutIds(CIndex index, int64_t data_size, const uint8_t* vectors);
 
 char*
 SerializeToSlicedBuffer(CIndex index, int32_t* buffer_size);

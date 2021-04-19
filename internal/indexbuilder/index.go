@@ -27,7 +27,8 @@ type Blob = storage.Blob
 type Index interface {
 	Serialize() ([]*Blob, error)
 	Load([]*Blob) error
-	BuildFloatVecIndex(vectors []float32) error
+	BuildFloatVecIndexWithoutIds(vectors []float32) error
+	BuildBinaryVecIndexWithoutIds(vectors []byte) error
 	Delete() error
 }
 
@@ -78,12 +79,21 @@ func (index *CIndex) Load(blobs []*Blob) error {
 	return nil
 }
 
-func (index *CIndex) BuildFloatVecIndex(vectors []float32) error {
+func (index *CIndex) BuildFloatVecIndexWithoutIds(vectors []float32) error {
 	/*
 		void
-		BuildFloatVecIndex(CIndex index, int64_t float_value_num, const float* vectors);
+		BuildFloatVecIndexWithoutIds(CIndex index, int64_t float_value_num, const float* vectors);
 	*/
-	C.BuildFloatVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.float)(&vectors[0]))
+	C.BuildFloatVecIndexWithoutIds(index.indexPtr, (C.int64_t)(len(vectors)), (*C.float)(&vectors[0]))
+	return nil
+}
+
+func (index *CIndex) BuildBinaryVecIndexWithoutIds(vectors []byte) error {
+	/*
+		void
+		BuildBinaryVecIndexWithoutIds(CIndex index, int64_t data_size, const uint8_t* vectors);
+	*/
+	C.BuildBinaryVecIndexWithoutIds(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]))
 	return nil
 }
 

@@ -68,7 +68,7 @@ IndexWrapper::parse() {
 
     if (!config_.contains(milvus::knowhere::meta::DIM)) {
         // should raise exception here?
-        throw "dim must be specific in type params or index params!";
+        PanicInfo("dim must be specific in type params or index params!");
     } else {
         auto dim = config_[milvus::knowhere::meta::DIM].get<std::string>();
         config_[milvus::knowhere::meta::DIM] = std::stoi(dim);
@@ -130,8 +130,20 @@ IndexWrapper::dim() {
 
 void
 IndexWrapper::BuildWithoutIds(const knowhere::DatasetPtr& dataset) {
+    auto index_type = index_->index_type();
+    if (index_type == milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
+        PanicInfo(std::string(index_type) + " doesn't support build without ids yet!");
+    }
     index_->Train(dataset, config_);
     index_->AddWithoutIds(dataset, config_);
+}
+
+void
+IndexWrapper::BuildWithIds(const knowhere::DatasetPtr& dataset) {
+    Assert(dataset->data().find(milvus::knowhere::meta::IDS) != dataset->data().end());
+    //    index_->Train(dataset, config_);
+    //    index_->Add(dataset, config_);
+    index_->BuildAll(dataset, config_);
 }
 
 /*
