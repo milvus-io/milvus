@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
+
 	"github.com/stretchr/testify/assert"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"go.etcd.io/etcd/clientv3"
@@ -29,7 +31,7 @@ func TestRocksMQ(t *testing.T) {
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
-	idAllocator := NewGlobalIDAllocator("dummy", etcdKV)
+	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
 	name := "/tmp/rocksmq"
@@ -86,7 +88,7 @@ func TestRocksMQ_Loop(t *testing.T) {
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
-	idAllocator := NewGlobalIDAllocator("dummy", etcdKV)
+	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
 	name := "/tmp/rocksmq_1"
@@ -154,7 +156,7 @@ func TestRocksMQ_Goroutines(t *testing.T) {
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
-	idAllocator := NewGlobalIDAllocator("dummy", etcdKV)
+	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
 	name := "/tmp/rocksmq_2"
@@ -225,7 +227,7 @@ func TestRocksMQ_Throughout(t *testing.T) {
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
-	idAllocator := NewGlobalIDAllocator("dummy", etcdKV)
+	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
 	name := "/tmp/rocksmq_3"
@@ -279,7 +281,7 @@ func TestRocksMQ_MultiChan(t *testing.T) {
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
-	idAllocator := NewGlobalIDAllocator("dummy", etcdKV)
+	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
 	name := "/tmp/rocksmq_multichan"

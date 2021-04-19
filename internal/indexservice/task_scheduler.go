@@ -7,6 +7,8 @@ import (
 	"log"
 	"sync"
 
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
+
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
@@ -172,7 +174,7 @@ func NewIndexAddTaskQueue(sched *TaskScheduler) *IndexAddTaskQueue {
 type TaskScheduler struct {
 	IndexAddQueue TaskQueue
 
-	idAllocator *GlobalIDAllocator
+	idAllocator *allocator.GlobalIDAllocator
 	metaTable   *metaTable
 	kv          kv.Base
 
@@ -182,7 +184,7 @@ type TaskScheduler struct {
 }
 
 func NewTaskScheduler(ctx context.Context,
-	idAllocator *GlobalIDAllocator,
+	idAllocator *allocator.GlobalIDAllocator,
 	kv kv.Base,
 	table *metaTable) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)

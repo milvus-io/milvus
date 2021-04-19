@@ -1,10 +1,12 @@
-package indexservice
+package allocator
 
 import (
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/tso"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
-type IDAllocator interface {
+type GIDAllocator interface {
 	Alloc(count uint32) (UniqueID, UniqueID, error)
 	AllocOne() (UniqueID, error)
 	UpdateID() error
@@ -12,12 +14,12 @@ type IDAllocator interface {
 
 // GlobalTSOAllocator is the global single point TSO allocator.
 type GlobalIDAllocator struct {
-	allocator Allocator
+	allocator tso.Allocator
 }
 
 func NewGlobalIDAllocator(key string, base kv.TxnBase) *GlobalIDAllocator {
 	return &GlobalIDAllocator{
-		allocator: NewGlobalTSOAllocator(key, base),
+		allocator: tso.NewGlobalTSOAllocator(key, base),
 	}
 }
 
@@ -28,22 +30,22 @@ func (gia *GlobalIDAllocator) Initialize() error {
 
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
-func (gia *GlobalIDAllocator) Alloc(count uint32) (UniqueID, UniqueID, error) {
+func (gia *GlobalIDAllocator) Alloc(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 	timestamp, err := gia.allocator.GenerateTSO(count)
 	if err != nil {
 		return 0, 0, err
 	}
-	idStart := UniqueID(timestamp)
+	idStart := typeutil.UniqueID(timestamp)
 	idEnd := idStart + int64(count)
 	return idStart, idEnd, nil
 }
 
-func (gia *GlobalIDAllocator) AllocOne() (UniqueID, error) {
+func (gia *GlobalIDAllocator) AllocOne() (typeutil.UniqueID, error) {
 	timestamp, err := gia.allocator.GenerateTSO(1)
 	if err != nil {
 		return 0, err
 	}
-	idStart := UniqueID(timestamp)
+	idStart := typeutil.UniqueID(timestamp)
 	return idStart, nil
 }
 

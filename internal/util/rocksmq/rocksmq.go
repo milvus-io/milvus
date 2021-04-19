@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
+
 	"github.com/tecbot/gorocksdb"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
@@ -72,7 +74,7 @@ type RocksMQ struct {
 	kv          kv.Base
 	channels    map[string]*Channel
 	cgCtxs      map[string]ConsumerGroupContext
-	idAllocator IDAllocator
+	idAllocator allocator.GIDAllocator
 	produceMu   sync.Mutex
 	consumeMu   sync.Mutex
 
@@ -86,7 +88,7 @@ type RocksMQ struct {
 	//tsoTicker *time.Ticker
 }
 
-func NewRocksMQ(name string, idAllocator IDAllocator) (*RocksMQ, error) {
+func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*RocksMQ, error) {
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
 	bbto.SetBlockCache(gorocksdb.NewLRUCache(RocksDBLRUCacheCapacity))
 	opts := gorocksdb.NewDefaultOptions()

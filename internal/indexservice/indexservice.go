@@ -7,6 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/tso"
+
 	"go.etcd.io/etcd/clientv3"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
@@ -38,7 +41,7 @@ type ServiceImpl struct {
 
 	sched *TaskScheduler
 
-	idAllocator *GlobalIDAllocator
+	idAllocator *allocator.GlobalIDAllocator
 
 	kv kv.Base
 
@@ -88,7 +91,7 @@ func (i *ServiceImpl) Init() error {
 
 	//init idAllocator
 	kvRootPath := Params.KvRootPath
-	i.idAllocator = NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{etcdAddress}, kvRootPath, "index_gid"))
+	i.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{etcdAddress}, kvRootPath, "index_gid"))
 	if err := i.idAllocator.Initialize(); err != nil {
 		return err
 	}
@@ -316,7 +319,7 @@ func (i *ServiceImpl) NotifyBuildIndex(nty *indexpb.BuildIndexNotification) (*co
 }
 
 func (i *ServiceImpl) tsLoop() {
-	tsoTicker := time.NewTicker(UpdateTimestampStep)
+	tsoTicker := time.NewTicker(tso.UpdateTimestampStep)
 	defer tsoTicker.Stop()
 	ctx, cancel := context.WithCancel(i.loopCtx)
 	defer cancel()

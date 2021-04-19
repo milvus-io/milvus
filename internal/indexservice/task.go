@@ -4,6 +4,8 @@ import (
 	"context"
 	"log"
 
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
@@ -61,7 +63,7 @@ type IndexAddTask struct {
 	BaseTask
 	req               *indexpb.BuildIndexRequest
 	indexBuildID      UniqueID
-	idAllocator       *GlobalIDAllocator
+	idAllocator       *allocator.GlobalIDAllocator
 	buildQueue        TaskQueue
 	kv                kv.Base
 	builderClient     typeutil.IndexNodeInterface
