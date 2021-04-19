@@ -2,6 +2,7 @@ package indexnode
 
 import (
 	"net"
+	"os"
 	"strconv"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
@@ -12,6 +13,14 @@ type ParamTable struct {
 
 	Address string
 	Port    int
+
+	NodeAddress    string
+	NodeIP         string
+	NodePort       int
+	ServiceAddress string
+	ServicePort    int
+
+	NodeID int64
 
 	MasterAddress string
 
@@ -31,6 +40,8 @@ func (pt *ParamTable) Init() {
 	pt.BaseTable.Init()
 	pt.initAddress()
 	pt.initPort()
+	pt.initIndexServerAddress()
+	pt.initIndexServerPort()
 	pt.initEtcdAddress()
 	pt.initMasterAddress()
 	pt.initMetaRootPath()
@@ -68,6 +79,42 @@ func (pt *ParamTable) initAddress() {
 
 func (pt *ParamTable) initPort() {
 	pt.Port = pt.ParseInt("indexBuilder.port")
+}
+
+func (pt *ParamTable) initIndexServerAddress() {
+	//TODO: save IndexService address in paramtable kv?
+	serviceAddr := os.Getenv("INDEX_SERVICE_ADDRESS")
+	if serviceAddr == "" {
+		addr, err := pt.Load("indexServer.address")
+		if err != nil {
+			panic(err)
+		}
+
+		hostName, _ := net.LookupHost(addr)
+		if len(hostName) <= 0 {
+			if ip := net.ParseIP(addr); ip == nil {
+				panic("invalid ip indexServer.address")
+			}
+		}
+
+		port, err := pt.Load("indexServer.port")
+		if err != nil {
+			panic(err)
+		}
+		_, err = strconv.Atoi(port)
+		if err != nil {
+			panic(err)
+		}
+
+		pt.ServiceAddress = addr + ":" + port
+		return
+	}
+
+	pt.ServiceAddress = serviceAddr
+}
+
+func (pt ParamTable) initIndexServerPort() {
+	pt.ServicePort = pt.ParseInt("indexServer.port")
 }
 
 func (pt *ParamTable) initEtcdAddress() {
