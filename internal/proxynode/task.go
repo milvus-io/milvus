@@ -6,12 +6,13 @@ import (
 	"math"
 	"strconv"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -410,7 +411,7 @@ func (dct *DropCollectionTask) PostExecute() error {
 type SearchTask struct {
 	Condition
 	internalpb2.SearchRequest
-	queryMsgStream *pulsarms.PulsarMsgStream
+	queryMsgStream msgstream.MsgStream
 	resultBuf      chan []*internalpb2.SearchResults
 	result         *milvuspb.SearchResults
 	query          *milvuspb.SearchRequest
@@ -1285,8 +1286,9 @@ func (dit *DescribeIndexTask) PostExecute() error {
 type GetIndexStateTask struct {
 	Condition
 	*milvuspb.IndexStateRequest
-	indexServiceClient IndexServiceClient
-	result             *milvuspb.IndexStateResponse
+	indexServiceClient    IndexServiceClient
+	masterClientInterface MasterClient
+	result                *milvuspb.IndexStateResponse
 }
 
 func (dipt *GetIndexStateTask) OnEnqueue() error {
@@ -1336,17 +1338,98 @@ func (dipt *GetIndexStateTask) PreExecute() error {
 }
 
 func (dipt *GetIndexStateTask) Execute() error {
-	// TODO: use index service client
-	//var err error
-	//dipt.result, err = dipt.masterClient.GetIndexState(dipt.IndexStateRequest)
-	//return err
+	collectionName := dipt.CollectionName
+	collectionID, err := globalMetaCache.GetCollectionID(collectionName)
+	if err != nil { // err is not nil if collection not exists
+		return err
+	}
+
+	showPartitionRequest := &milvuspb.ShowPartitionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kShowPartitions,
+			MsgID:     dipt.Base.MsgID,
+			Timestamp: dipt.Base.Timestamp,
+			SourceID:  Params.ProxyID,
+		},
+		DbName:         dipt.DbName,
+		CollectionName: collectionName,
+		CollectionID:   collectionID,
+	}
+	partitions, err := dipt.masterClientInterface.ShowPartitions(showPartitionRequest)
+	if err != nil {
+		return err
+	}
+
+	for _, partitionID := range partitions.PartitionIDs {
+		showSegmentsRequest := &milvuspb.ShowSegmentRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kShowSegment,
+				MsgID:     dipt.Base.MsgID,
+				Timestamp: dipt.Base.Timestamp,
+				SourceID:  Params.ProxyID,
+			},
+			CollectionID: collectionID,
+			PartitionID:  partitionID,
+		}
+		segments, err := dipt.masterClientInterface.ShowSegments(showSegmentsRequest)
+		if err != nil {
+			return err
+		}
+
+		getIndexStatesRequest := &indexpb.IndexStatesRequest{
+			IndexBuildIDs: make([]UniqueID, 0),
+		}
+		for _, segmentID := range segments.SegmentIDs {
+			describeSegmentRequest := &milvuspb.DescribeSegmentRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_kDescribeSegment,
+					MsgID:     dipt.Base.MsgID,
+					Timestamp: dipt.Base.Timestamp,
+					SourceID:  Params.ProxyID,
+				},
+				CollectionID: collectionID,
+				SegmentID:    segmentID,
+			}
+			segmentDesc, err := dipt.masterClientInterface.DescribeSegment(describeSegmentRequest)
+			if err != nil {
+				return err
+			}
+
+			getIndexStatesRequest.IndexBuildIDs = append(getIndexStatesRequest.IndexBuildIDs, segmentDesc.BuildID)
+		}
+
+		states, err := dipt.indexServiceClient.GetIndexStates(getIndexStatesRequest)
+		if err != nil {
+			return err
+		}
+
+		if states.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			dipt.result = &milvuspb.IndexStateResponse{
+				Status: states.Status,
+				State:  commonpb.IndexState_FAILED,
+			}
+			return nil
+		}
+
+		for _, state := range states.States {
+			if state.State != commonpb.IndexState_FINISHED {
+				dipt.result = &milvuspb.IndexStateResponse{
+					Status: states.Status,
+					State:  state.State,
+				}
+				return nil
+			}
+		}
+	}
+
 	dipt.result = &milvuspb.IndexStateResponse{
 		Status: &commonpb.Status{
-			ErrorCode: 0,
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
 			Reason:    "",
 		},
 		State: commonpb.IndexState_FINISHED,
 	}
+
 	return nil
 }
 

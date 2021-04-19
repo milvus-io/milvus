@@ -54,8 +54,8 @@ type NodeImpl struct {
 	tsoAllocator *allocator.TimestampAllocator
 	segAssigner  *SegIDAssigner
 
-	manipulationMsgStream *pulsarms.PulsarMsgStream
-	queryMsgStream        *pulsarms.PulsarMsgStream
+	manipulationMsgStream msgstream.MsgStream
+	queryMsgStream        msgstream.MsgStream
 
 	tracer opentracing.Tracer
 	closer io.Closer
@@ -106,7 +106,7 @@ func (node *NodeImpl) waitForServiceReady(service Component, serviceName string)
 }
 
 func (node *NodeImpl) Init() error {
-	factory := msgstream.ProtoUDFactory{}
+	factory := pulsarms.NewFactory(Params.PulsarAddress, Params.MsgStreamSearchBufSize, 1024)
 
 	// todo wait for proxyservice state changed to Healthy
 
@@ -195,11 +195,8 @@ func (node *NodeImpl) Init() error {
 	}
 	opentracing.SetGlobalTracer(node.tracer)
 
-	pulsarAddress := Params.PulsarAddress
-
-	node.queryMsgStream = pulsarms.NewPulsarMsgStream(node.ctx, Params.MsgStreamSearchBufSize, 1024, factory.NewUnmarshalDispatcher())
-	node.queryMsgStream.SetPulsarClient(pulsarAddress)
-	node.queryMsgStream.CreatePulsarProducers(Params.SearchChannelNames)
+	node.queryMsgStream, _ = factory.NewMsgStream(node.ctx)
+	node.queryMsgStream.AsProducer(Params.SearchChannelNames)
 	log.Println("create query message stream ...")
 
 	masterAddr := Params.MasterAddress
@@ -225,9 +222,8 @@ func (node *NodeImpl) Init() error {
 	node.segAssigner = segAssigner
 	node.segAssigner.PeerID = Params.ProxyID
 
-	node.manipulationMsgStream = pulsarms.NewPulsarMsgStream(node.ctx, Params.MsgStreamInsertBufSize, 1024, factory.NewUnmarshalDispatcher())
-	node.manipulationMsgStream.SetPulsarClient(pulsarAddress)
-	node.manipulationMsgStream.CreatePulsarProducers(Params.InsertChannelNames)
+	node.manipulationMsgStream, _ = factory.NewMsgStream(node.ctx)
+	node.manipulationMsgStream.AsProducer(Params.InsertChannelNames)
 	repackFuncImpl := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
 		return insertRepackFunc(tsMsgs, hashKeys, node.segAssigner, true)
 	}

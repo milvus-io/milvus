@@ -3,6 +3,7 @@ package querynode
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 )
@@ -26,11 +27,10 @@ func TestSegmentManagement_sendSegmentStatistic(t *testing.T) {
 	producerChannels := []string{Params.StatsChannelName}
 
 	pulsarURL := Params.PulsarAddress
-
-	factory := msgstream.ProtoUDFactory{}
-	statsStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
-	statsStream.SetPulsarClient(pulsarURL)
-	statsStream.CreatePulsarProducers(producerChannels)
+	factory := pulsarms.NewFactory(pulsarURL, receiveBufSize, 1024)
+	statsStream, err := factory.NewMsgStream(node.queryNodeLoopCtx)
+	assert.Nil(t, err)
+	statsStream.AsProducer(producerChannels)
 
 	var statsMsgStream msgstream.MsgStream = statsStream
 

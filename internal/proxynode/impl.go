@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -442,8 +444,10 @@ func (node *NodeImpl) GetIndexState(request *milvuspb.IndexStateRequest) (*milvu
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	dipt := &GetIndexStateTask{
-		Condition:         NewTaskCondition(ctx),
-		IndexStateRequest: request,
+		Condition:             NewTaskCondition(ctx),
+		IndexStateRequest:     request,
+		indexServiceClient:    node.indexServiceClient,
+		masterClientInterface: node.masterClient,
 	}
 
 	err := node.sched.DdQueue.Enqueue(dipt)
@@ -638,6 +642,51 @@ func (node *NodeImpl) GetPersistentSegmentInfo(req *milvuspb.PersistentSegmentIn
 	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
 	resp.Infos = persistentInfos
+	return resp, nil
+}
+
+func (node *NodeImpl) GetQuerySegmentInfo(req *milvuspb.QuerySegmentInfoRequest) (*milvuspb.QuerySegmentInfoResponse, error) {
+	resp := &milvuspb.QuerySegmentInfoResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+		},
+	}
+	segments, err := node.getSegmentsOfCollection(req.DbName, req.CollectionName)
+	if err != nil {
+		resp.Status.Reason = err.Error()
+		return resp, nil
+	}
+	infoResp, err := node.queryServiceClient.GetSegmentInfo(&querypb.SegmentInfoRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kSegmentInfo,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  Params.ProxyID,
+		},
+		SegmentIDs: segments,
+	})
+	if err != nil {
+		resp.Status.Reason = err.Error()
+		return resp, nil
+	}
+	if infoResp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		resp.Status.Reason = infoResp.Status.Reason
+		return resp, nil
+	}
+	queryInfos := make([]*milvuspb.QuerySegmentInfo, len(infoResp.Infos))
+	for i, info := range infoResp.Infos {
+		queryInfos[i] = &milvuspb.QuerySegmentInfo{
+			SegmentID:    info.SegmentID,
+			CollectionID: info.CollectionID,
+			PartitionID:  info.PartitionID,
+			NumRows:      info.NumRows,
+			MemSize:      info.MemSize,
+			IndexName:    info.IndexName,
+			IndexID:      info.IndexID,
+		}
+	}
+	resp.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
+	resp.Infos = queryInfos
 	return resp, nil
 }
 
