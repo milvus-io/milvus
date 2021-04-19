@@ -5,8 +5,6 @@ import (
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/master/id"
-	"github.com/zilliztech/milvus-distributed/internal/master/tso"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -42,6 +40,8 @@ type SegmentManager struct {
 	segmentExpireDuration int64
 	numOfChannels         int
 	numOfQueryNodes       int
+	globalIDAllocator     func() (UniqueID, error)
+	globalTSOAllocator    func() (Timestamp, error)
 	mu                    sync.RWMutex
 }
 
@@ -97,7 +97,7 @@ func (segMgr *SegmentManager) closeSegment(segMeta *etcdpb.SegmentMeta) error {
 				return nil
 			}
 		}
-		ts, err := tso.AllocOne()
+		ts, err := segMgr.globalTSOAllocator()
 		if err != nil {
 			return err
 		}
@@ -251,11 +251,11 @@ func (segMgr *SegmentManager) openNewSegment(channelID int32, collID UniqueID, p
 		return nil, errors.Errorf("can't find the channel range which contains channel %d", channelID)
 	}
 
-	newID, err := id.AllocOne()
+	newID, err := segMgr.globalIDAllocator()
 	if err != nil {
 		return nil, err
 	}
-	openTime, err := tso.AllocOne()
+	openTime, err := segMgr.globalTSOAllocator()
 	if err != nil {
 		return nil, err
 	}
@@ -322,7 +322,11 @@ func (segMgr *SegmentManager) createChannelRanges() error {
 	return nil
 }
 
-func NewSegmentManager(meta *metaTable, opt *Option) *SegmentManager {
+func NewSegmentManager(meta *metaTable,
+	opt *Option,
+	globalIDAllocator func() (UniqueID, error),
+	globalTSOAllocator func() (Timestamp, error),
+) *SegmentManager {
 	segMgr := &SegmentManager{
 		metaTable:             meta,
 		channelRanges:         make([]*channelRange, 0),
@@ -334,6 +338,8 @@ func NewSegmentManager(meta *metaTable, opt *Option) *SegmentManager {
 		defaultSizePerRecord:  opt.DefaultRecordSize,
 		numOfChannels:         opt.NumOfChannel,
 		numOfQueryNodes:       opt.NumOfQueryNode,
+		globalIDAllocator:     globalIDAllocator,
+		globalTSOAllocator:    globalTSOAllocator,
 	}
 	segMgr.createChannelRanges()
 	return segMgr

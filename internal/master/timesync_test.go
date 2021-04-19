@@ -1,4 +1,4 @@
-package timesync
+package master
 
 import (
 	"context"
@@ -100,22 +100,22 @@ func TestTt_NewSoftTtBarrier(t *testing.T) {
 
 	validPeerIds := []UniqueID{1, 2, 3}
 
-	sttbarrier := NewSoftTimeTickBarrier(context.TODO(), ttStream, validPeerIds, minTtInterval)
+	sttbarrier := newSoftTimeTickBarrier(context.TODO(), ttStream, validPeerIds, minTtInterval)
 	assert.NotNil(t, sttbarrier)
 	sttbarrier.Close()
 
 	validPeerIds2 := []UniqueID{1, 1, 1}
-	sttbarrier = NewSoftTimeTickBarrier(context.TODO(), ttStream, validPeerIds2, minTtInterval)
+	sttbarrier = newSoftTimeTickBarrier(context.TODO(), ttStream, validPeerIds2, minTtInterval)
 	assert.NotNil(t, sttbarrier)
 	sttbarrier.Close()
 
 	// invalid peerIds
 	invalidPeerIds1 := make([]UniqueID, 0, 3)
-	sttbarrier = NewSoftTimeTickBarrier(context.TODO(), ttStream, invalidPeerIds1, minTtInterval)
+	sttbarrier = newSoftTimeTickBarrier(context.TODO(), ttStream, invalidPeerIds1, minTtInterval)
 	assert.Nil(t, sttbarrier)
 
 	invalidPeerIds2 := []UniqueID{}
-	sttbarrier = NewSoftTimeTickBarrier(context.TODO(), ttStream, invalidPeerIds2, minTtInterval)
+	sttbarrier = newSoftTimeTickBarrier(context.TODO(), ttStream, invalidPeerIds2, minTtInterval)
 	assert.Nil(t, sttbarrier)
 }
 
@@ -137,22 +137,22 @@ func TestTt_NewHardTtBarrier(t *testing.T) {
 
 	validPeerIds := []UniqueID{1, 2, 3}
 
-	sttbarrier := NewHardTimeTickBarrier(context.TODO(), ttStream, validPeerIds)
+	sttbarrier := newHardTimeTickBarrier(context.TODO(), ttStream, validPeerIds)
 	assert.NotNil(t, sttbarrier)
 	sttbarrier.Close()
 
 	validPeerIds2 := []UniqueID{1, 1, 1}
-	sttbarrier = NewHardTimeTickBarrier(context.TODO(), ttStream, validPeerIds2)
+	sttbarrier = newHardTimeTickBarrier(context.TODO(), ttStream, validPeerIds2)
 	assert.NotNil(t, sttbarrier)
 	sttbarrier.Close()
 
 	// invalid peerIds
 	invalidPeerIds1 := make([]UniqueID, 0, 3)
-	sttbarrier = NewHardTimeTickBarrier(context.TODO(), ttStream, invalidPeerIds1)
+	sttbarrier = newHardTimeTickBarrier(context.TODO(), ttStream, invalidPeerIds1)
 	assert.Nil(t, sttbarrier)
 
 	invalidPeerIds2 := []UniqueID{}
-	sttbarrier = NewHardTimeTickBarrier(context.TODO(), ttStream, invalidPeerIds2)
+	sttbarrier = newHardTimeTickBarrier(context.TODO(), ttStream, invalidPeerIds2)
 	assert.Nil(t, sttbarrier)
 }
 
@@ -175,7 +175,7 @@ func TestTt_SoftTtBarrierStart(t *testing.T) {
 
 	minTtInterval := Timestamp(10)
 	peerIds := []UniqueID{1, 2, 3}
-	sttbarrier := NewSoftTimeTickBarrier(context.TODO(), ttStream, peerIds, minTtInterval)
+	sttbarrier := newSoftTimeTickBarrier(context.TODO(), ttStream, peerIds, minTtInterval)
 	require.NotNil(t, sttbarrier)
 
 	sttbarrier.Start()
@@ -208,7 +208,7 @@ func TestTt_SoftTtBarrierGetTimeTickClose(t *testing.T) {
 	minTtInterval := Timestamp(10)
 	validPeerIds := []UniqueID{1, 2, 3}
 
-	sttbarrier := NewSoftTimeTickBarrier(context.TODO(), ttStream, validPeerIds, minTtInterval)
+	sttbarrier := newSoftTimeTickBarrier(context.TODO(), ttStream, validPeerIds, minTtInterval)
 	require.NotNil(t, sttbarrier)
 
 	sttbarrier.Start()
@@ -238,7 +238,7 @@ func TestTt_SoftTtBarrierGetTimeTickClose(t *testing.T) {
 	minTtInterval = Timestamp(10)
 	validPeerIds = []UniqueID{1, 2, 3}
 
-	sttbarrier01 := NewSoftTimeTickBarrier(context.TODO(), ttStream01, validPeerIds, minTtInterval)
+	sttbarrier01 := newSoftTimeTickBarrier(context.TODO(), ttStream01, validPeerIds, minTtInterval)
 	require.NotNil(t, sttbarrier01)
 	sttbarrier01.Start()
 
@@ -276,7 +276,7 @@ func TestTt_SoftTtBarrierGetTimeTickCancel(t *testing.T) {
 	validPeerIds := []UniqueID{1, 2, 3}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	sttbarrier := NewSoftTimeTickBarrier(ctx, ttStream, validPeerIds, minTtInterval)
+	sttbarrier := newSoftTimeTickBarrier(ctx, ttStream, validPeerIds, minTtInterval)
 	require.NotNil(t, sttbarrier)
 
 	sttbarrier.Start()
@@ -313,7 +313,7 @@ func TestTt_HardTtBarrierStart(t *testing.T) {
 	}()
 
 	peerIds := []UniqueID{1, 2, 3}
-	sttbarrier := NewHardTimeTickBarrier(context.TODO(), ttStream, peerIds)
+	sttbarrier := newHardTimeTickBarrier(context.TODO(), ttStream, peerIds)
 	require.NotNil(t, sttbarrier)
 
 	sttbarrier.Start()
@@ -348,7 +348,7 @@ func TestTt_HardTtBarrierGetTimeTick(t *testing.T) {
 	}()
 
 	peerIds := []UniqueID{1, 2, 3}
-	sttbarrier := NewHardTimeTickBarrier(context.TODO(), ttStream, peerIds)
+	sttbarrier := newHardTimeTickBarrier(context.TODO(), ttStream, peerIds)
 	require.NotNil(t, sttbarrier)
 
 	sttbarrier.Start()
@@ -380,7 +380,7 @@ func TestTt_HardTtBarrierGetTimeTick(t *testing.T) {
 	}()
 
 	peerIdsStuck := []UniqueID{1, 2, 3}
-	sttbarrierStuck := NewHardTimeTickBarrier(context.TODO(), ttStreamStuck, peerIdsStuck)
+	sttbarrierStuck := newHardTimeTickBarrier(context.TODO(), ttStreamStuck, peerIdsStuck)
 	require.NotNil(t, sttbarrierStuck)
 
 	sttbarrierStuck.Start()
@@ -413,7 +413,7 @@ func TestTt_HardTtBarrierGetTimeTick(t *testing.T) {
 	peerIdsCancel := []UniqueID{1, 2, 3}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	sttbarrierCancel := NewHardTimeTickBarrier(ctx, ttStreamCancel, peerIdsCancel)
+	sttbarrierCancel := newHardTimeTickBarrier(ctx, ttStreamCancel, peerIdsCancel)
 	require.NotNil(t, sttbarrierCancel)
 
 	sttbarrierCancel.Start()
