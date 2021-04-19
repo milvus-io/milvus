@@ -21,6 +21,7 @@ const closeWithDeadline = true
 
 func setup() {
 	Params.Init()
+	Params.MetaRootPath = "/etcd/test/root/querynode"
 }
 
 func genTestCollectionMeta(collectionName string, collectionID UniqueID) *etcdpb.CollectionMeta {
