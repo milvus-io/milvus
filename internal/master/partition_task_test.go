@@ -118,7 +118,6 @@ func TestMaster_Partition(t *testing.T) {
 	st, _ := cli.CreateCollection(ctx, &createCollectionReq)
 	assert.NotNil(t, st)
 	assert.Equal(t, commonpb.ErrorCode_SUCCESS, st.ErrorCode)
-	assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
 	createPartitionReq := internalpb.CreatePartitionRequest{
 		MsgType:       internalpb.MsgType_kCreatePartition,
@@ -130,7 +129,17 @@ func TestMaster_Partition(t *testing.T) {
 	st, _ = cli.CreatePartition(ctx, &createPartitionReq)
 	assert.NotNil(t, st)
 	assert.Equal(t, commonpb.ErrorCode_SUCCESS, st.ErrorCode)
-	assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
+
+	createPartitionReq = internalpb.CreatePartitionRequest{
+		MsgType:       internalpb.MsgType_kCreatePartition,
+		ReqID:         1,
+		Timestamp:     1,
+		ProxyID:       1,
+		PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition1"},
+	}
+	st, _ = cli.CreatePartition(ctx, &createPartitionReq)
+	assert.NotNil(t, st)
+	assert.Equal(t, commonpb.ErrorCode_UNEXPECTED_ERROR, st.ErrorCode)
 
 	createPartitionReq = internalpb.CreatePartitionRequest{
 		MsgType:       internalpb.MsgType_kCreatePartition,
@@ -142,7 +151,6 @@ func TestMaster_Partition(t *testing.T) {
 	st, _ = cli.CreatePartition(ctx, &createPartitionReq)
 	assert.NotNil(t, st)
 	assert.Equal(t, commonpb.ErrorCode_SUCCESS, st.ErrorCode)
-	assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
 	collMeta, err := svr.mt.GetCollectionByName(sch.Name)
 	assert.Nil(t, err)
@@ -192,6 +200,18 @@ func TestMaster_Partition(t *testing.T) {
 	assert.Nil(t, err)
 	assert.ElementsMatch(t, []string{"partition1", "partition2"}, stringList.Values)
 
+	showPartitionReq = internalpb.ShowPartitionRequest{
+		MsgType:        internalpb.MsgType_kShowPartitions,
+		ReqID:          1,
+		Timestamp:      3,
+		ProxyID:        1,
+		CollectionName: &servicepb.CollectionName{CollectionName: "col1"},
+	}
+
+	stringList, _ = cli.ShowPartitions(ctx, &showPartitionReq)
+	assert.NotNil(t, stringList)
+	assert.Equal(t, commonpb.ErrorCode_UNEXPECTED_ERROR, stringList.Status.ErrorCode)
+
 	hasPartitionReq := internalpb.HasPartitionRequest{
 		MsgType:       internalpb.MsgType_kHasPartition,
 		ReqID:         1,
@@ -203,6 +223,18 @@ func TestMaster_Partition(t *testing.T) {
 	hasPartition, err := cli.HasPartition(ctx, &hasPartitionReq)
 	assert.Nil(t, err)
 	assert.True(t, hasPartition.Value)
+
+	hasPartitionReq = internalpb.HasPartitionRequest{
+		MsgType:       internalpb.MsgType_kHasPartition,
+		ReqID:         1,
+		Timestamp:     4,
+		ProxyID:       1,
+		PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition1"},
+	}
+
+	hasPartition, _ = cli.HasPartition(ctx, &hasPartitionReq)
+	assert.NotNil(t, hasPartition)
+	assert.Equal(t, commonpb.ErrorCode_UNEXPECTED_ERROR, stringList.Status.ErrorCode)
 
 	hasPartitionReq = internalpb.HasPartitionRequest{
 		MsgType:       internalpb.MsgType_kHasPartition,
@@ -228,6 +260,18 @@ func TestMaster_Partition(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, commonpb.ErrorCode_SUCCESS, st.ErrorCode)
 
+	deletePartitionReq = internalpb.DropPartitionRequest{
+		MsgType:       internalpb.MsgType_kDropPartition,
+		ReqID:         1,
+		Timestamp:     6,
+		ProxyID:       1,
+		PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition2"},
+	}
+
+	st, _ = cli.DropPartition(ctx, &deletePartitionReq)
+	assert.NotNil(t, st)
+	assert.Equal(t, commonpb.ErrorCode_UNEXPECTED_ERROR, st.ErrorCode)
+
 	hasPartitionReq = internalpb.HasPartitionRequest{
 		MsgType:       internalpb.MsgType_kHasPartition,
 		ReqID:         1,
@@ -239,6 +283,29 @@ func TestMaster_Partition(t *testing.T) {
 	hasPartition, err = cli.HasPartition(ctx, &hasPartitionReq)
 	assert.Nil(t, err)
 	assert.False(t, hasPartition.Value)
+
+	describePartitionReq := internalpb.DescribePartitionRequest{
+		MsgType:       internalpb.MsgType_kDescribePartition,
+		ReqID:         1,
+		Timestamp:     9,
+		ProxyID:       1,
+		PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition1"},
+	}
+
+	describePartition, err := cli.DescribePartition(ctx, &describePartitionReq)
+	assert.Nil(t, err)
+	assert.Equal(t, &servicepb.PartitionName{CollectionName: "col1", Tag: "partition1"}, describePartition.Name)
+
+	describePartitionReq = internalpb.DescribePartitionRequest{
+		MsgType:       internalpb.MsgType_kDescribePartition,
+		ReqID:         1,
+		Timestamp:     8,
+		ProxyID:       1,
+		PartitionName: &servicepb.PartitionName{CollectionName: "col1", Tag: "partition1"},
+	}
+
+	describePartition, _ = cli.DescribePartition(ctx, &describePartitionReq)
+	assert.Equal(t, commonpb.ErrorCode_UNEXPECTED_ERROR, describePartition.Status.ErrorCode)
 
 	svr.Close()
 }

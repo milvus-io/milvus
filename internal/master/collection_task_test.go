@@ -149,6 +149,7 @@ func TestMaster_CreateCollectionTask(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotEqual(t, boolResp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
+	// CreateCollection Test
 	collMeta, err := svr.mt.GetCollectionByName(sch.Name)
 	assert.Nil(t, err)
 	t.Logf("collection id = %d", collMeta.ID)
@@ -181,6 +182,62 @@ func TestMaster_CreateCollectionTask(t *testing.T) {
 	assert.Equal(t, collMeta.Schema.Fields[1].IndexParams[1].Key, "col1_f2_ik2")
 	assert.Equal(t, collMeta.Schema.Fields[1].IndexParams[0].Value, "col1_f2_iv1")
 	assert.Equal(t, collMeta.Schema.Fields[1].IndexParams[1].Value, "col1_f2_iv2")
+
+	// DescribeCollection
+	reqDescribe := &internalpb.DescribeCollectionRequest{
+		MsgType:   internalpb.MsgType_kDescribeCollection,
+		ReqID:     1,
+		Timestamp: 11,
+		ProxyID:   1,
+		CollectionName: &servicepb.CollectionName{
+			CollectionName: "col1",
+		},
+	}
+	des, err := cli.DescribeCollection(ctx, reqDescribe)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_SUCCESS, des.Status.ErrorCode)
+
+	assert.Equal(t, "col1", des.Schema.Name)
+	assert.Equal(t, false, des.Schema.AutoID)
+	assert.Equal(t, 2, len(des.Schema.Fields))
+	assert.Equal(t, "col1_f1", des.Schema.Fields[0].Name)
+	assert.Equal(t, "col1_f2", des.Schema.Fields[1].Name)
+	assert.Equal(t, schemapb.DataType_VECTOR_FLOAT, des.Schema.Fields[0].DataType)
+	assert.Equal(t, schemapb.DataType_VECTOR_BINARY, des.Schema.Fields[1].DataType)
+	assert.Equal(t, 2, len(des.Schema.Fields[0].TypeParams))
+	assert.Equal(t, 2, len(des.Schema.Fields[0].IndexParams))
+	assert.Equal(t, 2, len(des.Schema.Fields[1].TypeParams))
+	assert.Equal(t, 2, len(des.Schema.Fields[1].IndexParams))
+	assert.Equal(t, "col1_f1_tk1", des.Schema.Fields[0].TypeParams[0].Key)
+	assert.Equal(t, "col1_f1_tv1", des.Schema.Fields[0].TypeParams[0].Value)
+	assert.Equal(t, "col1_f1_ik1", des.Schema.Fields[0].IndexParams[0].Key)
+	assert.Equal(t, "col1_f1_iv1", des.Schema.Fields[0].IndexParams[0].Value)
+	assert.Equal(t, "col1_f1_tk2", des.Schema.Fields[0].TypeParams[1].Key)
+	assert.Equal(t, "col1_f1_tv2", des.Schema.Fields[0].TypeParams[1].Value)
+	assert.Equal(t, "col1_f1_ik2", des.Schema.Fields[0].IndexParams[1].Key)
+	assert.Equal(t, "col1_f1_iv2", des.Schema.Fields[0].IndexParams[1].Value)
+
+	assert.Equal(t, "col1_f2_tk1", des.Schema.Fields[1].TypeParams[0].Key)
+	assert.Equal(t, "col1_f2_tv1", des.Schema.Fields[1].TypeParams[0].Value)
+	assert.Equal(t, "col1_f2_ik1", des.Schema.Fields[1].IndexParams[0].Key)
+	assert.Equal(t, "col1_f2_iv1", des.Schema.Fields[1].IndexParams[0].Value)
+	assert.Equal(t, "col1_f2_tk2", des.Schema.Fields[1].TypeParams[1].Key)
+	assert.Equal(t, "col1_f2_tv2", des.Schema.Fields[1].TypeParams[1].Value)
+	assert.Equal(t, "col1_f2_ik2", des.Schema.Fields[1].IndexParams[1].Key)
+	assert.Equal(t, "col1_f2_iv2", des.Schema.Fields[1].IndexParams[1].Value)
+
+	reqDescribe.CollectionName.CollectionName = "colNotExist"
+	des, err = cli.DescribeCollection(ctx, reqDescribe)
+	assert.Nil(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_SUCCESS, des.Status.ErrorCode)
+	log.Printf(des.Status.Reason)
+
+	reqDescribe.CollectionName.CollectionName = "col1"
+	reqDescribe.Timestamp = Timestamp(10)
+	des, err = cli.DescribeCollection(ctx, reqDescribe)
+	assert.Nil(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_SUCCESS, des.Status.ErrorCode)
+	log.Printf(des.Status.Reason)
 
 	req.Timestamp = Timestamp(10)
 	st, err = cli.CreateCollection(ctx, &req)
