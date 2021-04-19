@@ -11,7 +11,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -410,7 +409,7 @@ func (dct *DropCollectionTask) PostExecute() error {
 type SearchTask struct {
 	Condition
 	internalpb2.SearchRequest
-	queryMsgStream *pulsarms.PulsarMsgStream
+	queryMsgStream msgstream.MsgStream
 	resultBuf      chan []*internalpb2.SearchResults
 	result         *milvuspb.SearchResults
 	query          *milvuspb.SearchRequest

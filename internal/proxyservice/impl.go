@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -96,7 +95,7 @@ func (s *ServiceImpl) fillNodeInitParams() error {
 }
 
 func (s *ServiceImpl) Init() error {
-	dispatcherFactory := msgstream.ProtoUDFactory{}
+	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
 
 	err := s.fillNodeInitParams()
 	if err != nil {
@@ -104,9 +103,8 @@ func (s *ServiceImpl) Init() error {
 	}
 	log.Println("fill node init params ...")
 
-	serviceTimeTickMsgStream := pulsarms.NewPulsarTtMsgStream(s.ctx, 1024, 1024, dispatcherFactory.NewUnmarshalDispatcher())
-	serviceTimeTickMsgStream.SetPulsarClient(Params.PulsarAddress)
-	serviceTimeTickMsgStream.CreatePulsarProducers([]string{Params.ServiceTimeTickChannel})
+	serviceTimeTickMsgStream, _ := factory.NewTtMsgStream(s.ctx)
+	serviceTimeTickMsgStream.AsProducer([]string{Params.ServiceTimeTickChannel})
 	log.Println("create service time tick producer channel: ", []string{Params.ServiceTimeTickChannel})
 
 	channels := make([]string, Params.InsertChannelNum)
@@ -114,14 +112,12 @@ func (s *ServiceImpl) Init() error {
 	for ; i < Params.InsertChannelNum; i++ {
 		channels[i] = Params.InsertChannelPrefixName + strconv.FormatInt(i, 10)
 	}
-	insertTickMsgStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024, 1024, dispatcherFactory.NewUnmarshalDispatcher())
-	insertTickMsgStream.SetPulsarClient(Params.PulsarAddress)
-	insertTickMsgStream.CreatePulsarProducers(channels)
+	insertTickMsgStream, _ := factory.NewMsgStream(s.ctx)
+	insertTickMsgStream.AsProducer(channels)
 	log.Println("create service time tick producer channel: ", channels)
 
-	nodeTimeTickMsgStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024, 1024, dispatcherFactory.NewUnmarshalDispatcher())
-	nodeTimeTickMsgStream.SetPulsarClient(Params.PulsarAddress)
-	nodeTimeTickMsgStream.CreatePulsarConsumers(Params.NodeTimeTickChannel,
+	nodeTimeTickMsgStream, _ := factory.NewMsgStream(s.ctx)
+	nodeTimeTickMsgStream.AsConsumer(Params.NodeTimeTickChannel,
 		"proxyservicesub") // TODO: add config
 	log.Println("create node time tick consumer channel: ", Params.NodeTimeTickChannel)
 

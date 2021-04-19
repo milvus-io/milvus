@@ -130,10 +130,10 @@ import (
 //
 //	insertStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 //	insertStream.SetPulsarClient(Params.PulsarAddress)
-//	insertStream.CreatePulsarProducers(insertChannels)
+//	insertStream.AsProducer(insertChannels)
 //	ddStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 //	ddStream.SetPulsarClient(Params.PulsarAddress)
-//	ddStream.CreatePulsarProducers(ddChannels)
+//	ddStream.AsProducer(ddChannels)
 //
 //	var insertMsgStream msgstream.MsgStream = insertStream
 //	insertMsgStream.Start()
@@ -206,7 +206,7 @@ import (
 //	}
 //	searchStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 //	searchStream.SetPulsarClient(Params.PulsarAddress)
-//	searchStream.CreatePulsarProducers(newSearchChannelNames)
+//	searchStream.AsProducer(newSearchChannelNames)
 //	searchStream.Start()
 //	err = searchStream.Produce(fn(1))
 //	assert.NoError(t, err)
@@ -215,7 +215,7 @@ import (
 //	searchResultStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 //	searchResultStream.SetPulsarClient(Params.PulsarAddress)
 //	unmarshalDispatcher := util.NewUnmarshalDispatcher()
-//	searchResultStream.CreatePulsarConsumers(newSearchResultChannelNames, "loadIndexTestSubSearchResult", unmarshalDispatcher, receiveBufSize)
+//	searchResultStream.AsConsumer(newSearchResultChannelNames, "loadIndexTestSubSearchResult", unmarshalDispatcher, receiveBufSize)
 //	searchResultStream.Start()
 //	searchResult := searchResultStream.Consume()
 //	assert.NotNil(t, searchResult)
@@ -295,7 +295,7 @@ import (
 //	// init message stream consumer and do checks
 //	statsMs := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, Params.StatsReceiveBufSize)
 //	statsMs.SetPulsarClient(Params.PulsarAddress)
-//	statsMs.CreatePulsarConsumers([]string{Params.StatsChannelName}, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), Params.StatsReceiveBufSize)
+//	statsMs.AsConsumer([]string{Params.StatsChannelName}, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), Params.StatsReceiveBufSize)
 //	statsMs.Start()
 //
 //	findFiledStats := false
@@ -464,10 +464,10 @@ import (
 //
 //	insertStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 //	insertStream.SetPulsarClient(Params.PulsarAddress)
-//	insertStream.CreatePulsarProducers(insertChannels)
+//	insertStream.AsProducer(insertChannels)
 //	ddStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 //	ddStream.SetPulsarClient(Params.PulsarAddress)
-//	ddStream.CreatePulsarProducers(ddChannels)
+//	ddStream.AsProducer(ddChannels)
 //
 //	var insertMsgStream msgstream.MsgStream = insertStream
 //	insertMsgStream.Start()
@@ -529,7 +529,7 @@ import (
 //	}
 //	searchStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 //	searchStream.SetPulsarClient(Params.PulsarAddress)
-//	searchStream.CreatePulsarProducers(newSearchChannelNames)
+//	searchStream.AsProducer(newSearchChannelNames)
 //	searchStream.Start()
 //	err = searchStream.Produce(fn(1))
 //	assert.NoError(t, err)
@@ -538,7 +538,7 @@ import (
 //	searchResultStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 //	searchResultStream.SetPulsarClient(Params.PulsarAddress)
 //	unmarshalDispatcher := util.NewUnmarshalDispatcher()
-//	searchResultStream.CreatePulsarConsumers(newSearchResultChannelNames, "loadIndexTestSubSearchResult2", unmarshalDispatcher, receiveBufSize)
+//	searchResultStream.AsConsumer(newSearchResultChannelNames, "loadIndexTestSubSearchResult2", unmarshalDispatcher, receiveBufSize)
 //	searchResultStream.Start()
 //	searchResult := searchResultStream.Consume()
 //	assert.NotNil(t, searchResult)
@@ -612,7 +612,7 @@ import (
 //	// init message stream consumer and do checks
 //	statsMs := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, Params.StatsReceiveBufSize)
 //	statsMs.SetPulsarClient(Params.PulsarAddress)
-//	statsMs.CreatePulsarConsumers([]string{Params.StatsChannelName}, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), Params.StatsReceiveBufSize)
+//	statsMs.AsConsumer([]string{Params.StatsChannelName}, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), Params.StatsReceiveBufSize)
 //	statsMs.Start()
 //
 //	findFiledStats := false
@@ -1016,15 +1016,13 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, 
 	ddChannels := Params.DDChannelNames
 	pulsarURL := Params.PulsarAddress
 
-	factory := msgstream.ProtoUDFactory{}
-	insertStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
-	insertStream.SetPulsarClient(pulsarURL)
-	insertStream.CreatePulsarProducers(insertChannels)
-	insertStream.CreatePulsarConsumers(insertChannels, Params.MsgChannelSubName)
+	factory := pulsarms.NewFactory(pulsarURL, receiveBufSize, 1024)
+	insertStream, _ := factory.NewMsgStream(ctx)
+	insertStream.AsProducer(insertChannels)
+	insertStream.AsConsumer(insertChannels, Params.MsgChannelSubName)
 
-	ddStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
-	ddStream.SetPulsarClient(pulsarURL)
-	ddStream.CreatePulsarProducers(ddChannels)
+	ddStream, _ := factory.NewMsgStream(ctx)
+	ddStream.AsProducer(ddChannels)
 
 	var insertMsgStream msgstream.MsgStream = insertStream
 	insertMsgStream.Start()
@@ -1076,15 +1074,13 @@ func sentTimeTick(ctx context.Context) error {
 	ddChannels := Params.DDChannelNames
 	pulsarURL := Params.PulsarAddress
 
-	factory := msgstream.ProtoUDFactory{}
-	insertStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
-	insertStream.SetPulsarClient(pulsarURL)
-	insertStream.CreatePulsarProducers(insertChannels)
-	insertStream.CreatePulsarConsumers(insertChannels, Params.MsgChannelSubName)
+	factory := pulsarms.NewFactory(pulsarURL, receiveBufSize, 1024)
+	insertStream, _ := factory.NewMsgStream(ctx)
+	insertStream.AsProducer(insertChannels)
+	insertStream.AsConsumer(insertChannels, Params.MsgChannelSubName)
 
-	ddStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
-	ddStream.SetPulsarClient(pulsarURL)
-	ddStream.CreatePulsarProducers(ddChannels)
+	ddStream, _ := factory.NewMsgStream(ctx)
+	ddStream.AsProducer(ddChannels)
 
 	var insertMsgStream msgstream.MsgStream = insertStream
 	insertMsgStream.Start()

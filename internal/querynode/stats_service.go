@@ -36,16 +36,13 @@ func newStatsService(ctx context.Context, replica collectionReplica, fieldStatsC
 
 func (sService *statsService) start() {
 	sleepTimeInterval := Params.StatsPublishInterval
-	receiveBufSize := Params.StatsReceiveBufSize
 
 	// start pulsar
-	msgStreamURL := Params.PulsarAddress
 	producerChannels := []string{Params.StatsChannelName}
 
-	factory := msgstream.ProtoUDFactory{}
-	statsStream := pulsarms.NewPulsarMsgStream(sService.ctx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
-	statsStream.SetPulsarClient(msgStreamURL)
-	statsStream.CreatePulsarProducers(producerChannels)
+	factory := pulsarms.NewFactory(Params.PulsarAddress, Params.StatsReceiveBufSize, 1024)
+	statsStream, _ := factory.NewMsgStream(sService.ctx)
+	statsStream.AsProducer(producerChannels)
 
 	var statsMsgStream msgstream.MsgStream = statsStream
 

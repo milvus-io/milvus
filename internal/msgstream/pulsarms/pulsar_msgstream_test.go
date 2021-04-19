@@ -176,9 +176,8 @@ func initPulsarStream(pulsarAddress string,
 	factory := msgstream.ProtoUDFactory{}
 
 	// set input stream
-	inputStream := NewPulsarMsgStream(context.Background(), 100, 100, factory.NewUnmarshalDispatcher())
-	inputStream.SetPulsarClient(pulsarAddress)
-	inputStream.CreatePulsarProducers(producerChannels)
+	inputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	inputStream.AsProducer(producerChannels)
 	for _, opt := range opts {
 		inputStream.SetRepackFunc(opt)
 	}
@@ -186,9 +185,8 @@ func initPulsarStream(pulsarAddress string,
 	var input msgstream.MsgStream = inputStream
 
 	// set output stream
-	outputStream := NewPulsarMsgStream(context.Background(), 100, 100, factory.NewUnmarshalDispatcher())
-	outputStream.SetPulsarClient(pulsarAddress)
-	outputStream.CreatePulsarConsumers(consumerChannels, consumerSubName)
+	outputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
 	var output msgstream.MsgStream = outputStream
 
@@ -203,9 +201,8 @@ func initPulsarTtStream(pulsarAddress string,
 	factory := msgstream.ProtoUDFactory{}
 
 	// set input stream
-	inputStream := NewPulsarMsgStream(context.Background(), 100, 100, factory.NewUnmarshalDispatcher())
-	inputStream.SetPulsarClient(pulsarAddress)
-	inputStream.CreatePulsarProducers(producerChannels)
+	inputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	inputStream.AsProducer(producerChannels)
 	for _, opt := range opts {
 		inputStream.SetRepackFunc(opt)
 	}
@@ -213,9 +210,8 @@ func initPulsarTtStream(pulsarAddress string,
 	var input msgstream.MsgStream = inputStream
 
 	// set output stream
-	outputStream := NewPulsarTtMsgStream(context.Background(), 100, 100, factory.NewUnmarshalDispatcher())
-	outputStream.SetPulsarClient(pulsarAddress)
-	outputStream.CreatePulsarConsumers(consumerChannels, consumerSubName)
+	outputStream, _ := NewPulsarTtMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
 	var output msgstream.MsgStream = outputStream
 
@@ -417,14 +413,12 @@ func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 
 	factory := msgstream.ProtoUDFactory{}
-	inputStream := NewPulsarMsgStream(context.Background(), 100, 100, factory.NewUnmarshalDispatcher())
-	inputStream.SetPulsarClient(pulsarAddress)
-	inputStream.CreatePulsarProducers(producerChannels)
+	inputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	inputStream.AsProducer(producerChannels)
 	inputStream.Start()
 
-	outputStream := NewPulsarMsgStream(context.Background(), 100, 100, factory.NewUnmarshalDispatcher())
-	outputStream.SetPulsarClient(pulsarAddress)
-	outputStream.CreatePulsarConsumers(consumerChannels, consumerSubName)
+	outputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
 	var output msgstream.MsgStream = outputStream
 
@@ -470,14 +464,12 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, deleteMsg)
 
 	factory := msgstream.ProtoUDFactory{}
-	inputStream := NewPulsarMsgStream(context.Background(), 100, 100, factory.NewUnmarshalDispatcher())
-	inputStream.SetPulsarClient(pulsarAddress)
-	inputStream.CreatePulsarProducers(producerChannels)
+	inputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	inputStream.AsProducer(producerChannels)
 	inputStream.Start()
 
-	outputStream := NewPulsarMsgStream(context.Background(), 100, 100, factory.NewUnmarshalDispatcher())
-	outputStream.SetPulsarClient(pulsarAddress)
-	outputStream.CreatePulsarConsumers(consumerChannels, consumerSubName)
+	outputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
 	var output msgstream.MsgStream = outputStream
 
@@ -503,14 +495,12 @@ func TestStream_PulsarMsgStream_DefaultRepackFunc(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kQueryNodeStats, 4, 4))
 
 	factory := msgstream.ProtoUDFactory{}
-	inputStream := NewPulsarMsgStream(context.Background(), 100, 100, factory.NewUnmarshalDispatcher())
-	inputStream.SetPulsarClient(pulsarAddress)
-	inputStream.CreatePulsarProducers(producerChannels)
+	inputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	inputStream.AsProducer(producerChannels)
 	inputStream.Start()
 
-	outputStream := NewPulsarMsgStream(context.Background(), 100, 100, factory.NewUnmarshalDispatcher())
-	outputStream.SetPulsarClient(pulsarAddress)
-	outputStream.CreatePulsarConsumers(consumerChannels, consumerSubName)
+	outputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
+	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
 	var output msgstream.MsgStream = outputStream
 
