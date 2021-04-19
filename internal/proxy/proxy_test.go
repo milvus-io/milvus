@@ -210,7 +210,6 @@ func TestProxy_CreateCollection(t *testing.T) {
 		wg.Add(1)
 		go func(group *sync.WaitGroup) {
 			defer group.Done()
-			println("collectionName:", collectionName)
 			createCollection(t, collectionName)
 			dropCollection(t, collectionName)
 		}(&wg)
@@ -489,9 +488,7 @@ func TestProxy_CreateIndex(t *testing.T) {
 		go func(group *sync.WaitGroup) {
 			defer group.Done()
 			createCollection(t, collName)
-			if i%2 == 0 {
-				createIndex(t, collName, fieldName)
-			}
+			createIndex(t, collName, fieldName)
 			dropCollection(t, collName)
 			// dropIndex(t, collectionName, fieldName, indexName)
 		}(&wg)
@@ -513,9 +510,7 @@ func TestProxy_DescribeIndex(t *testing.T) {
 		go func(group *sync.WaitGroup) {
 			defer group.Done()
 			createCollection(t, collName)
-			if i%2 == 0 {
-				createIndex(t, collName, fieldName)
-			}
+			createIndex(t, collName, fieldName)
 			req := &servicepb.DescribeIndexRequest{
 				CollectionName: collName,
 				FieldName:      fieldName,
@@ -544,9 +539,7 @@ func TestProxy_DescribeIndexProgress(t *testing.T) {
 		go func(group *sync.WaitGroup) {
 			defer group.Done()
 			createCollection(t, collName)
-			if i%2 == 0 {
-				createIndex(t, collName, fieldName)
-			}
+			createIndex(t, collName, fieldName)
 			req := &servicepb.DescribeIndexProgressRequest{
 				CollectionName: collName,
 				FieldName:      fieldName,

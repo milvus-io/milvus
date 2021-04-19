@@ -1,5 +1,3 @@
-
-
 ## 8. Message Stream Service
 
 
@@ -8,13 +6,13 @@
 
 
 
-#### 8.2 API
+#### 8.2 Message Stream Service API
 
 ```go
 type Client interface {
-  CreateChannels(req CreateChannelRequest) (ChannelID []string, error)
-  DestoryChannels(channelID []string) error
-  DescribeChannels(channelID []string) (ChannelDescriptions, error)
+  CreateChannels(req CreateChannelRequest) (CreateChannelResponse, error)
+  DestoryChannels(req DestoryChannelRequest) error
+  DescribeChannels(req DescribeChannelRequest) (DescribeChannelResponse, error)
 }
 ```
 
@@ -30,7 +28,19 @@ type OwnerDescription struct {
 
 type CreateChannelRequest struct {
   OwnerDescription OwnerDescription
-  numChannels int
+  NumChannels int
+}
+
+type CreateChannelResponse struct {
+  ChannelIDs []string
+}
+```
+
+* *DestoryChannels*
+
+```go
+type DestoryChannelRequest struct {
+	ChannelIDs []string
 }
 ```
 
@@ -39,16 +49,19 @@ type CreateChannelRequest struct {
 * *DescribeChannels*
 
 ```go
+type DescribeChannelRequest struct {
+	ChannelIDs []string
+}
+
 type ChannelDescription struct {
+  ChannelID string
   Owner OwnerDescription
 }
 
-type ChannelDescriptions struct {
+type DescribeChannelResponse struct {
   Descriptions []ChannelDescription
 }
 ```
-
-
 
 
 
@@ -60,7 +73,7 @@ const {
   kInsert MsgType = 400
   kDelete MsgType = 401
   kSearch MsgType = 500
-  KSearchResult MsgType = 1000
+  kSearchResult MsgType = 1000
   
   kSegStatistics MsgType = 1100
   
@@ -153,4 +166,56 @@ func (dispatcher *MarshalDispatcher) addDefaultMsgTemplates()
 func NewUnmarshalDispatcher() *UnmarshalDispatcher
 ```
 
+
+
+#### A.4 RocksMQ
+
+RocksMQ is a RocksDB-based messaging/streaming library.
+
+```go
+type ProducerMessage struct {
+  Key string
+  Payload []byte
+} 
+```
+
+```go
+type ConsumerMessage struct {
+  MsgID MessageID
+  Key string
+  Payload []byte
+} 
+```
+
+
+
+```GO
+type RocksMQ struct {
+  CreateChannel(channelName string) error
+  DestroyChannel(channelName string) error
+  CreateConsumerGroup(groupName string) error
+  DestroyConsumerGroup(groupName string) error
+  
+  Produce(channelName string, messages []ProducerMessage) error
+  Consume(groupName string, channelName string, n int) ([]ConsumerMessage, error)
+  Seek(groupName string, channelName string, msgID MessageID) error
+}
+```
+
+
+
+##### A.4.1 Meta
+
+* channel meta
+
+```go
+"$(channel_name)/start_id", MessageID
+"$(channel_name)/end_id", MessageID
+```
+
+* consumer group meta
+
+```go
+"$(group_name)/$(channel_name)/current_id", MessageID
+```
 

@@ -44,8 +44,6 @@ func newTSafe() tSafe {
 }
 
 func (ts *tSafeImpl) registerTSafeWatcher(t *tSafeWatcher) {
-	ts.tSafeMu.Lock()
-	defer ts.tSafeMu.Unlock()
 	ts.watcherList = append(ts.watcherList, t)
 }
 
@@ -57,9 +55,8 @@ func (ts *tSafeImpl) get() Timestamp {
 
 func (ts *tSafeImpl) set(t Timestamp) {
 	ts.tSafeMu.Lock()
-	defer ts.tSafeMu.Unlock()
-
 	ts.tSafe = t
+	ts.tSafeMu.Unlock()
 	for _, watcher := range ts.watcherList {
 		watcher.notify()
 	}

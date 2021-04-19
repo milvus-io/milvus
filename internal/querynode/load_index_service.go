@@ -100,18 +100,8 @@ func (lis *loadIndexService) start() {
 					continue
 				}
 				// 1. use msg's index paths to get index bytes
-				fmt.Println("start load index")
-				var err error
-				ok, err = lis.checkIndexReady(indexMsg)
-				if err != nil {
-					log.Println(err)
-					continue
-				}
-				if ok {
-					continue
-				}
-
 				var indexBuffer [][]byte
+				var err error
 				fn := func() error {
 					indexBuffer, err = lis.loadIndex(indexMsg.IndexPaths)
 					if err != nil {
@@ -146,13 +136,6 @@ func (lis *loadIndexService) start() {
 			}
 		}
 	}
-}
-
-func (lis *loadIndexService) close() {
-	if lis.loadIndexMsgStream != nil {
-		lis.loadIndexMsgStream.Close()
-	}
-	lis.cancel()
 }
 
 func (lis *loadIndexService) printIndexParams(index []*commonpb.KeyValuePair) {
@@ -207,7 +190,6 @@ func (lis *loadIndexService) updateSegmentIndexStats(indexMsg *msgstream.LoadInd
 	fieldStatsKey := lis.fieldsStatsIDs2Key(targetSegment.collectionID, indexMsg.FieldID)
 	_, ok := lis.fieldIndexes[fieldStatsKey]
 	newIndexParams := indexMsg.IndexParams
-
 	// sort index params by key
 	sort.Slice(newIndexParams, func(i, j int) bool { return newIndexParams[i].Key < newIndexParams[j].Key })
 	if !ok {
@@ -233,7 +215,6 @@ func (lis *loadIndexService) updateSegmentIndexStats(indexMsg *msgstream.LoadInd
 				})
 		}
 	}
-	targetSegment.setIndexParam(indexMsg.FieldID, indexMsg.IndexParams)
 
 	return nil
 }
@@ -304,16 +285,4 @@ func (lis *loadIndexService) sendQueryNodeStats() error {
 	lis.fieldStatsChan <- resultFieldsStats
 	fmt.Println("sent field stats")
 	return nil
-}
-
-func (lis *loadIndexService) checkIndexReady(loadIndexMsg *msgstream.LoadIndexMsg) (bool, error) {
-	segment, err := lis.replica.getSegmentByID(loadIndexMsg.SegmentID)
-	if err != nil {
-		return false, err
-	}
-	if !segment.matchIndexParam(loadIndexMsg.FieldID, loadIndexMsg.IndexParams) {
-		return false, nil
-	}
-	return true, nil
-
 }

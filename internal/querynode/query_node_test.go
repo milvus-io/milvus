@@ -35,7 +35,7 @@ func genTestCollectionMeta(collectionName string, collectionID UniqueID, isBinar
 			TypeParams: []*commonpb.KeyValuePair{
 				{
 					Key:   "dim",
-					Value: "128",
+					Value: "16",
 				},
 			},
 			IndexParams: []*commonpb.KeyValuePair{
@@ -92,12 +92,8 @@ func genTestCollectionMeta(collectionName string, collectionID UniqueID, isBinar
 	return &collectionMeta
 }
 
-func initTestMeta(t *testing.T, node *QueryNode, collectionName string, collectionID UniqueID, segmentID UniqueID, optional ...bool) {
-	isBinary := false
-	if len(optional) > 0 {
-		isBinary = optional[0]
-	}
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID, isBinary)
+func initTestMeta(t *testing.T, node *QueryNode, collectionName string, collectionID UniqueID, segmentID UniqueID) {
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
 	assert.NotEqual(t, "", schemaBlob)

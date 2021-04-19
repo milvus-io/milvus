@@ -112,7 +112,6 @@ func (fService *flushSyncService) start() {
 			fService.completeInsertFlush(insertFlushMsg.segID)
 
 			if fService.FlushCompleted(insertFlushMsg.segID) {
-				log.Printf("Seg(%d) flush completed.", insertFlushMsg.segID)
 				fService.metaTable.CompleteFlush(insertFlushMsg.ts, insertFlushMsg.segID)
 			}
 		}

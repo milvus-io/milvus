@@ -46,7 +46,7 @@ func TestMaster_Scheduler_Collection(t *testing.T) {
 	pulsarDDStream.Start()
 	defer pulsarDDStream.Close()
 
-	consumeMs := ms.NewPulsarTtMsgStream(ctx, 1024)
+	consumeMs := ms.NewPulsarMsgStream(ctx, 1024)
 	consumeMs.SetPulsarClient(pulsarAddr)
 	consumeMs.CreatePulsarConsumers(consumerChannels, consumerSubName, ms.NewUnmarshalDispatcher(), 1024)
 	consumeMs.Start()
@@ -96,9 +96,6 @@ func TestMaster_Scheduler_Collection(t *testing.T) {
 	err = createCollectionTask.WaitToFinish(ctx)
 	assert.Nil(t, err)
 
-	err = mockTimeTickBroadCast(pulsarDDStream, Timestamp(12))
-	assert.NoError(t, err)
-
 	var consumeMsg ms.MsgStream = consumeMs
 	var createCollectionMsg *ms.CreateCollectionMsg
 	for {
@@ -121,7 +118,7 @@ func TestMaster_Scheduler_Collection(t *testing.T) {
 	dropCollectionReq := internalpb.DropCollectionRequest{
 		MsgType:        internalpb.MsgType_kDropCollection,
 		ReqID:          1,
-		Timestamp:      13,
+		Timestamp:      11,
 		ProxyID:        1,
 		CollectionName: &servicepb.CollectionName{CollectionName: sch.Name},
 	}
@@ -140,9 +137,6 @@ func TestMaster_Scheduler_Collection(t *testing.T) {
 	assert.Nil(t, err)
 	err = dropCollectionTask.WaitToFinish(ctx)
 	assert.Nil(t, err)
-
-	err = mockTimeTickBroadCast(pulsarDDStream, Timestamp(14))
-	assert.NoError(t, err)
 
 	var dropCollectionMsg *ms.DropCollectionMsg
 	for {
@@ -190,7 +184,7 @@ func TestMaster_Scheduler_Partition(t *testing.T) {
 	pulsarDDStream.Start()
 	defer pulsarDDStream.Close()
 
-	consumeMs := ms.NewPulsarTtMsgStream(ctx, 1024)
+	consumeMs := ms.NewPulsarMsgStream(ctx, 1024)
 	consumeMs.SetPulsarClient(pulsarAddr)
 	consumeMs.CreatePulsarConsumers(consumerChannels, consumerSubName, ms.NewUnmarshalDispatcher(), 1024)
 	consumeMs.Start()
@@ -240,9 +234,6 @@ func TestMaster_Scheduler_Partition(t *testing.T) {
 	err = createCollectionTask.WaitToFinish(ctx)
 	assert.Nil(t, err)
 
-	err = mockTimeTickBroadCast(pulsarDDStream, Timestamp(12))
-	assert.NoError(t, err)
-
 	var consumeMsg ms.MsgStream = consumeMs
 	var createCollectionMsg *ms.CreateCollectionMsg
 	for {
@@ -266,7 +257,7 @@ func TestMaster_Scheduler_Partition(t *testing.T) {
 	createPartitionReq := internalpb.CreatePartitionRequest{
 		MsgType:   internalpb.MsgType_kCreatePartition,
 		ReqID:     1,
-		Timestamp: 13,
+		Timestamp: 11,
 		ProxyID:   1,
 		PartitionName: &servicepb.PartitionName{
 			CollectionName: sch.Name,
@@ -287,9 +278,6 @@ func TestMaster_Scheduler_Partition(t *testing.T) {
 	assert.Nil(t, err)
 	err = createPartitionTask.WaitToFinish(ctx)
 	assert.Nil(t, err)
-
-	err = mockTimeTickBroadCast(pulsarDDStream, Timestamp(14))
-	assert.NoError(t, err)
 
 	var createPartitionMsg *ms.CreatePartitionMsg
 	for {
@@ -313,7 +301,7 @@ func TestMaster_Scheduler_Partition(t *testing.T) {
 	dropPartitionReq := internalpb.DropPartitionRequest{
 		MsgType:   internalpb.MsgType_kDropPartition,
 		ReqID:     1,
-		Timestamp: 15,
+		Timestamp: 11,
 		ProxyID:   1,
 		PartitionName: &servicepb.PartitionName{
 			CollectionName: sch.Name,
@@ -334,9 +322,6 @@ func TestMaster_Scheduler_Partition(t *testing.T) {
 	assert.Nil(t, err)
 	err = dropPartitionTask.WaitToFinish(ctx)
 	assert.Nil(t, err)
-
-	err = mockTimeTickBroadCast(pulsarDDStream, Timestamp(16))
-	assert.NoError(t, err)
 
 	var dropPartitionMsg *ms.DropPartitionMsg
 	for {

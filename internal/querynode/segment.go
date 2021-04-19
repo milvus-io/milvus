@@ -13,7 +13,6 @@ package querynode
 import "C"
 import (
 	"strconv"
-	"sync"
 	"unsafe"
 
 	"github.com/stretchr/testify/assert"
@@ -22,8 +21,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
 
-type indexParam = map[string]string
-
 type Segment struct {
 	segmentPtr       C.CSegmentBase
 	segmentID        UniqueID
@@ -31,26 +28,11 @@ type Segment struct {
 	collectionID     UniqueID
 	lastMemSize      int64
 	lastRowCount     int64
-	mu               sync.Mutex
 	recentlyModified bool
-	indexParam       map[int64]indexParam
-	paramMutex       sync.RWMutex
 }
 
 func (s *Segment) ID() UniqueID {
 	return s.segmentID
-}
-
-func (s *Segment) SetRecentlyModified(modify bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.recentlyModified = modify
-}
-
-func (s *Segment) GetRecentlyModified() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.recentlyModified
 }
 
 //-------------------------------------------------------------------------------------- constructor and destructor
@@ -59,14 +41,12 @@ func newSegment(collection *Collection, segmentID int64, partitionTag string, co
 		CSegmentBase
 		newSegment(CPartition partition, unsigned long segment_id);
 	*/
-	initIndexParam := make(map[int64]indexParam)
 	segmentPtr := C.NewSegment(collection.collectionPtr, C.ulong(segmentID))
 	var newSegment = &Segment{
 		segmentPtr:   segmentPtr,
 		segmentID:    segmentID,
 		partitionTag: partitionTag,
 		collectionID: collectionID,
-		indexParam:   initIndexParam,
 	}
 
 	return newSegment
@@ -181,7 +161,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 		return errors.New("Insert failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}
 
-	s.SetRecentlyModified(true)
+	s.recentlyModified = true
 	return nil
 }
 
@@ -275,40 +255,4 @@ func (s *Segment) updateSegmentIndex(loadIndexInfo *LoadIndexInfo) error {
 	}
 
 	return nil
-}
-
-func (s *Segment) setIndexParam(fieldID int64, indexParamKv []*commonpb.KeyValuePair) error {
-	s.paramMutex.Lock()
-	defer s.paramMutex.Unlock()
-	indexParamMap := make(indexParam)
-	if indexParamKv == nil {
-		return errors.New("loadIndexMsg's indexParam empty")
-	}
-	for _, param := range indexParamKv {
-		indexParamMap[param.Key] = param.Value
-	}
-	s.indexParam[fieldID] = indexParamMap
-	return nil
-}
-
-func (s *Segment) matchIndexParam(fieldID int64, indexParamKv []*commonpb.KeyValuePair) bool {
-	s.paramMutex.RLock()
-	defer s.paramMutex.RUnlock()
-	fieldIndexParam := s.indexParam[fieldID]
-	if fieldIndexParam == nil {
-		return false
-	}
-	paramSize := len(s.indexParam)
-	matchCount := 0
-	for _, param := range indexParamKv {
-		value, ok := fieldIndexParam[param.Key]
-		if !ok {
-			return false
-		}
-		if param.Value != value {
-			return false
-		}
-		matchCount++
-	}
-	return paramSize == matchCount
 }
