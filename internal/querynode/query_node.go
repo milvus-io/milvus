@@ -24,12 +24,10 @@ type QueryNode struct {
 
 	replica collectionReplica
 
-	// services
-	dataSyncService  *dataSyncService
-	metaService      *metaService
-	searchService    *searchService
-	loadIndexService *loadIndexService
-	statsService     *statsService
+	dataSyncService *dataSyncService
+	metaService     *metaService
+	searchService   *searchService
+	statsService    *statsService
 }
 
 func Init() {
@@ -71,13 +69,11 @@ func (node *QueryNode) Start() error {
 	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica)
 	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica)
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
-	node.loadIndexService = newLoadIndexService(node.queryNodeLoopCtx, node.replica)
-	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, node.loadIndexService.fieldStatsChan)
+	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica)
 
 	go node.dataSyncService.start()
 	go node.searchService.start()
 	go node.metaService.start()
-	go node.loadIndexService.start()
 	go node.statsService.start()
 
 	<-node.queryNodeLoopCtx.Done()

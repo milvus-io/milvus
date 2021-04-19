@@ -15,47 +15,6 @@ func TestParamTable_PulsarAddress(t *testing.T) {
 	assert.Equal(t, "6650", split[len(split)-1])
 }
 
-func TestParamTable_minio(t *testing.T) {
-	t.Run("Test endPoint", func(t *testing.T) {
-		endPoint := Params.MinioEndPoint
-		equal := endPoint == "localhost:9000" || endPoint == "minio:9000"
-		assert.Equal(t, equal, true)
-	})
-
-	t.Run("Test accessKeyID", func(t *testing.T) {
-		accessKeyID := Params.MinioAccessKeyID
-		assert.Equal(t, accessKeyID, "minioadmin")
-	})
-
-	t.Run("Test secretAccessKey", func(t *testing.T) {
-		secretAccessKey := Params.MinioSecretAccessKey
-		assert.Equal(t, secretAccessKey, "minioadmin")
-	})
-
-	t.Run("Test useSSL", func(t *testing.T) {
-		useSSL := Params.MinioUseSSLStr
-		assert.Equal(t, useSSL, false)
-	})
-}
-
-func TestParamTable_LoadIndex(t *testing.T) {
-	t.Run("Test channel names", func(t *testing.T) {
-		names := Params.LoadIndexChannelNames
-		assert.Equal(t, len(names), 1)
-		assert.Contains(t, names[0], "cmd")
-	})
-
-	t.Run("Test recvBufSize", func(t *testing.T) {
-		size := Params.LoadIndexReceiveBufSize
-		assert.Equal(t, size, int64(512))
-	})
-
-	t.Run("Test pulsarBufSize", func(t *testing.T) {
-		size := Params.LoadIndexPulsarBufSize
-		assert.Equal(t, size, int64(512))
-	})
-}
-
 func TestParamTable_QueryNodeID(t *testing.T) {
 	id := Params.QueryNodeID
 	assert.Contains(t, Params.QueryNodeIDList(), id)

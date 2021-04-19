@@ -13,14 +13,6 @@ type MsgStreamMsg struct {
 	timestampMax Timestamp
 }
 
-func GenerateMsgStreamMsg(tsMessages []msgstream.TsMsg, timestampMin, timestampMax Timestamp) *MsgStreamMsg {
-	return &MsgStreamMsg{
-		tsMessages:   tsMessages,
-		timestampMin: timestampMin,
-		timestampMax: timestampMax,
-	}
-}
-
 func (msMsg *MsgStreamMsg) TimeTick() Timestamp {
 	return msMsg.timestampMax
 }

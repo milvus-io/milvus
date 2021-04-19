@@ -24,7 +24,7 @@ import (
 // NOTE: start pulsar before test
 func TestDataSyncService_Start(t *testing.T) {
 	newMeta()
-	const ctxTimeInMillisecond = 2000
+	const ctxTimeInMillisecond = 200
 	const closeWithDeadline = true
 	var ctx context.Context
 

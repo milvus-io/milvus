@@ -18,7 +18,6 @@ extern "C" {
 #include <stdint.h>
 
 #include "segcore/plan_c.h"
-#include "segcore/load_index_c.h"
 
 typedef void* CSegmentBase;
 typedef void* CQueryResult;
@@ -65,8 +64,6 @@ Search(CSegmentBase c_segment,
 CStatus
 FillTargetEntry(CSegmentBase c_segment, CPlan c_plan, CQueryResult result);
 
-CStatus
-UpdateSegmentIndex(CSegmentBase c_segment, CLoadIndexInfo c_load_index_info);
 //////////////////////////////////////////////////////////////////
 
 int

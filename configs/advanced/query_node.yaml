@@ -42,7 +42,3 @@ queryNode:
 
     stats:
       recvBufSize: 64
-
-    loadIndex:
-      recvBufSize: 512
-      pulsarBufSize: 512

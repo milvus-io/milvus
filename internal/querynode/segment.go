@@ -9,6 +9,7 @@ package querynode
 #include "segcore/collection_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/reduce_c.h"
+
 */
 import "C"
 import (
@@ -24,8 +25,6 @@ import (
 type Segment struct {
 	segmentPtr       C.CSegmentBase
 	segmentID        UniqueID
-	partitionTag     string // TODO: use partitionID
-	collectionID     UniqueID
 	lastMemSize      int64
 	lastRowCount     int64
 	recentlyModified bool
@@ -36,18 +35,13 @@ func (s *Segment) ID() UniqueID {
 }
 
 //-------------------------------------------------------------------------------------- constructor and destructor
-func newSegment(collection *Collection, segmentID int64, partitionTag string, collectionID UniqueID) *Segment {
+func newSegment(collection *Collection, segmentID int64) *Segment {
 	/*
 		CSegmentBase
 		newSegment(CPartition partition, unsigned long segment_id);
 	*/
 	segmentPtr := C.NewSegment(collection.collectionPtr, C.ulong(segmentID))
-	var newSegment = &Segment{
-		segmentPtr:   segmentPtr,
-		segmentID:    segmentID,
-		partitionTag: partitionTag,
-		collectionID: collectionID,
-	}
+	var newSegment = &Segment{segmentPtr: segmentPtr, segmentID: segmentID}
 
 	return newSegment
 }
@@ -238,20 +232,6 @@ func (s *Segment) fillTargetEntry(plan *Plan,
 		errorMsg := C.GoString(status.error_msg)
 		defer C.free(unsafe.Pointer(status.error_msg))
 		return errors.New("FillTargetEntry failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
-	}
-
-	return nil
-}
-
-// segment, err := loadIndexService.replica.getSegmentByID(segmentID)
-func (s *Segment) updateSegmentIndex(loadIndexInfo *LoadIndexInfo) error {
-	status := C.UpdateSegmentIndex(s.segmentPtr, loadIndexInfo.cLoadIndexInfo)
-	errorCode := status.error_code
-
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("updateSegmentIndex failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}
 
 	return nil

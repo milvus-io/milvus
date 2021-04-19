@@ -10,9 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
-
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -402,9 +399,8 @@ func TestProxy_AssignSegID(t *testing.T) {
 	collectionName := "CreateCollection1"
 	createCollection(t, collectionName)
 	testNum := 1
-	futureTS := tsoutil.ComposeTS(time.Now().Add(time.Second*-1000).UnixNano()/int64(time.Millisecond), 0)
 	for i := 0; i < testNum; i++ {
-		segID, err := proxyServer.segAssigner.GetSegmentID(collectionName, Params.defaultPartitionTag(), int32(i), 200000, futureTS)
+		segID, err := proxyServer.segAssigner.GetSegmentID(collectionName, Params.defaultPartitionTag(), int32(i), 200000)
 		assert.Nil(t, err)
 		fmt.Println("segID", segID)
 	}

@@ -150,7 +150,7 @@ func CreateServer(ctx context.Context) (*Master, error) {
 	// stats msg stream
 	statsMs := ms.NewPulsarMsgStream(ctx, 1024)
 	statsMs.SetPulsarClient(pulsarAddr)
-	statsMs.CreatePulsarConsumers([]string{Params.QueryNodeStatsChannelName}, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
+	statsMs.CreatePulsarConsumers([]string{Params.QueryNodeStatsChannelName}, "SegmentStats", ms.NewUnmarshalDispatcher(), 1024)
 	statsMs.Start()
 
 	m := &Master{

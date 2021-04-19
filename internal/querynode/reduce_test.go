@@ -21,7 +21,7 @@ func TestReduce_AllFunc(t *testing.T) {
 	assert.NotEqual(t, "", schemaBlob)
 
 	collection := newCollection(collectionMeta.ID, schemaBlob)
-	segment := newSegment(collection, segmentID, Params.DefaultPartitionTag, collectionID)
+	segment := newSegment(collection, segmentID)
 
 	const DIM = 16
 	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
