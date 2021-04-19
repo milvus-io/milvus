@@ -60,7 +60,7 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
             if (!index_map.count("metric_type")) {
                 auto default_metric_type =
                     data_type == DataType::VECTOR_FLOAT ? MetricType::METRIC_L2 : MetricType::METRIC_Jaccard;
-                index_map["metric_type"] = default_metric_type;
+                index_map["metric_type"] = MetricTypeToName(default_metric_type);
             }
 
             AssertInfo(type_map.count("dim"), "dim not found");
