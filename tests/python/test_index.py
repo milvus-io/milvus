@@ -504,7 +504,6 @@ class TestIndexBase:
             connect.drop_index(collection, field_name)
 
 
-@pytest.mark.skip("binary")
 class TestIndexBinary:
     @pytest.fixture(
         scope="function",
@@ -590,6 +589,7 @@ class TestIndexBinary:
         res = connect.search(binary_collection, query, search_params=search_param)
         assert len(res) == nq
 
+    @pytest.mark.skip("get status for build index failed")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_invalid_metric_type_binary(self, connect, binary_collection, get_l2_index):
         '''
@@ -613,6 +613,7 @@ class TestIndexBinary:
     ******************************************************************
     """
 
+    @pytest.mark.skip("get_collection_stats does not impl")
     def test_get_index_info(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test describe index interface
@@ -632,6 +633,7 @@ class TestIndexBinary:
                         if "index_type" in file:
                             assert file["index_type"] == get_jaccard_index["index_type"]
 
+    @pytest.mark.skip("get_collection_stats does not impl")
     def test_get_index_info_partition(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test describe index interface
@@ -660,6 +662,7 @@ class TestIndexBinary:
     ******************************************************************
     """
 
+    @pytest.mark.skip("get_collection_stats and drop_index do not impl")
     def test_drop_index(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test drop index interface
@@ -674,6 +677,7 @@ class TestIndexBinary:
         # assert stats["partitions"][0]["segments"][0]["index_name"] == default_index_type
         assert not stats["partitions"][0]["segments"]
 
+    @pytest.mark.skip("get_collection_stats does not impl")
     def test_drop_index_partition(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test drop index interface
@@ -699,7 +703,6 @@ class TestIndexBinary:
                             assert False
 
 
-@pytest.mark.skip("wait for debugging...")
 class TestIndexInvalid(object):
     """
     Test create / describe / drop index interfaces with invalid collection names
@@ -738,7 +741,6 @@ class TestIndexInvalid(object):
             connect.create_index(collection, field_name, get_simple_index)
 
 
-@pytest.mark.skip("wait for debugging...")
 class TestIndexAsync:
     @pytest.fixture(scope="function", autouse=True)
     def skip_http_check(self, args):
