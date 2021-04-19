@@ -5,6 +5,7 @@ import (
 	"errors"
 	minIODriver "github.com/czs007/suvlim/storage/internal/minio"
 	tikvDriver "github.com/czs007/suvlim/storage/internal/tikv"
+	S3Driver "github.com/czs007/suvlim/storage/internal/S3"
 	"github.com/czs007/suvlim/storage/pkg/types"
 )
 
@@ -25,6 +26,8 @@ func NewStore(ctx context.Context, driver types.DriverType) (types.Store, error)
 			return nil, err
 		}
 		return store, nil
+	case types.S3DRIVER:
+		store , err = S3Driver.NewS3Driver(ctx)
 	}
 	return nil, errors.New("unsupported driver")
 }
