@@ -316,8 +316,8 @@ func (s *Segment) segmentPreInsert(numOfRecords int) (int64, error) {
 		return 0, nil
 	}
 	var offset int64
-	cOffset := C.long(offset)
-	status := C.PreInsert(s.segmentPtr, C.long(int64(numOfRecords)), &cOffset)
+	cOffset := (*C.long)(&offset)
+	status := C.PreInsert(s.segmentPtr, C.long(int64(numOfRecords)), cOffset)
 
 	errorCode := status.error_code
 
