@@ -7,7 +7,7 @@ import (
 	"math"
 	"testing"
 
-	msgPb "github.com/czs007/suvlim/internal/proto/message"
+	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/stretchr/testify/assert"
 )
 

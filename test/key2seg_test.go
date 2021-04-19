@@ -3,7 +3,7 @@ package test
 import (
 	"context"
 	"github.com/apache/pulsar-client-go/pulsar"
-	msgpb "github.com/czs007/suvlim/internal/proto/message"
+	msgpb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"log"

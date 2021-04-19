@@ -6,11 +6,11 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/czs007/suvlim/internal/conf"
-	"github.com/czs007/suvlim/internal/master/controller"
-	masterpb "github.com/czs007/suvlim/internal/proto/master"
-	messagepb "github.com/czs007/suvlim/internal/proto/message"
-	"github.com/czs007/suvlim/internal/master/kv"
+	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/master/controller"
+	masterpb "github.com/zilliztech/milvus-distributed/internal/proto/master"
+	messagepb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/master/kv"
 	"google.golang.org/grpc"
 )
 

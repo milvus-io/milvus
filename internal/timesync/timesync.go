@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/czs007/suvlim/internal/conf"
-	pb "github.com/czs007/suvlim/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/conf"
+	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/golang/protobuf/proto"
 )
 
