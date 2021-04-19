@@ -58,7 +58,7 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 	}
 
 	// TODO: use config instead
-	pulsarAddress := "pulsar://localhost:6650"
+	pulsarAddress := Params.PulsarAddress()
 	bufSize := int64(1000)
 	manipulationChannels := []string{"manipulation"}
 	queryChannels := []string{"query"}
@@ -81,10 +81,7 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 		unmarshal,
 		bufSize)
 
-	masterAddr, err := Params.MasterAddress()
-	if err != nil {
-		panic(err)
-	}
+	masterAddr := Params.MasterAddress()
 	idAllocator, err := allocator.NewIDAllocator(p.proxyLoopCtx, masterAddr)
 
 	if err != nil {
@@ -161,10 +158,7 @@ func (p *Proxy) grpcLoop() {
 }
 
 func (p *Proxy) connectMaster() error {
-	masterAddr, err := Params.MasterAddress()
-	if err != nil {
-		panic(err)
-	}
+	masterAddr := Params.MasterAddress()
 	log.Printf("Proxy connected to master, master_addr=%s", masterAddr)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

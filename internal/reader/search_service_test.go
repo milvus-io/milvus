@@ -26,7 +26,7 @@ func TestSearch_Search(t *testing.T) {
 	defer cancel()
 
 	// init query node
-	pulsarURL := "pulsar://localhost:6650"
+	pulsarURL, _ := Params.pulsarAddress()
 	node := NewQueryNode(ctx, 0)
 
 	// init meta

@@ -622,7 +622,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 
 	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
 
-	pulsarURL := "pulsar://localhost:6650"
+	pulsarURL, _ := Params.pulsarAddress()
 	const receiveBufSize = 1024
 	searchProducerChannels := []string{"search"}
 	searchStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)

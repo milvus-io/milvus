@@ -20,7 +20,7 @@ func TestMain(m *testing.M) {
 
 func TestEtcdKV_Load(t *testing.T) {
 
-	etcdAddr, err := Params.EtcdAddress()
+	etcdAddr, err := Params.Load("_EtcdAddress")
 	if err != nil {
 		panic(err)
 	}
@@ -78,7 +78,7 @@ func TestEtcdKV_Load(t *testing.T) {
 
 func TestEtcdKV_MultiSave(t *testing.T) {
 
-	etcdAddr, err := Params.EtcdAddress()
+	etcdAddr, err := Params.Load("_EtcdAddress")
 	if err != nil {
 		panic(err)
 	}
@@ -109,7 +109,7 @@ func TestEtcdKV_MultiSave(t *testing.T) {
 
 func TestEtcdKV_Remove(t *testing.T) {
 
-	etcdAddr, err := Params.EtcdAddress()
+	etcdAddr, err := Params.Load("_EtcdAddress")
 	if err != nil {
 		panic(err)
 	}
@@ -180,7 +180,7 @@ func TestEtcdKV_Remove(t *testing.T) {
 
 func TestEtcdKV_MultiSaveAndRemove(t *testing.T) {
 
-	etcdAddr, err := Params.EtcdAddress()
+	etcdAddr, err := Params.Load("_EtcdAddress")
 	if err != nil {
 		panic(err)
 	}

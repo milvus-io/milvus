@@ -48,11 +48,7 @@ func newTimeTick(ctx context.Context,
 
 	bufSize := int64(1000)
 	t.tickMsgStream = msgstream.NewPulsarMsgStream(t.ctx, bufSize)
-	pulsarAddress, err := Params.PulsarAddress()
-	if err != nil {
-		panic(err)
-	}
-	pulsarAddress = "pulsar://" + pulsarAddress
+	pulsarAddress := Params.PulsarAddress()
 
 	producerChannels := []string{"timeTick"}
 	t.tickMsgStream.SetPulsarClient(pulsarAddress)

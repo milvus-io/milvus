@@ -1,6 +1,7 @@
 package reader
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,7 +15,9 @@ func TestParamTable_PulsarAddress(t *testing.T) {
 	Params.Init()
 	address, err := Params.pulsarAddress()
 	assert.NoError(t, err)
-	assert.Equal(t, address, "pulsar://localhost:6650")
+	split := strings.Split(address, ":")
+	assert.Equal(t, split[0], "pulsar")
+	assert.Equal(t, split[len(split)-1], "6650")
 }
 
 func TestParamTable_QueryNodeID(t *testing.T) {

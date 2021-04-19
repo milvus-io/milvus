@@ -67,7 +67,8 @@ func getEmptyMsgPack() *ms.MsgPack {
 }
 
 func producer(channels []string, ttmsgs [][2]int) (*ms.MsgStream, *ms.MsgStream) {
-	pulsarAddress := "pulsar://localhost:6650"
+	Init()
+	pulsarAddress := Params.PulsarAddress()
 	consumerSubName := "subTimetick"
 	producerChannels := channels
 	consumerChannels := channels

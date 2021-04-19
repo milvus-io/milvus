@@ -13,15 +13,14 @@ package paramtable
 
 import (
 	"log"
+	"os"
 	"path"
 	"runtime"
-	"strconv"
 	"strings"
-
-	"github.com/zilliztech/milvus-distributed/internal/kv"
 
 	"github.com/spf13/cast"
 	"github.com/spf13/viper"
+	"github.com/zilliztech/milvus-distributed/internal/kv"
 )
 
 type Base interface {
@@ -44,25 +43,28 @@ func (gp *BaseTable) Init() {
 		panic(err)
 	}
 
-	etcdAddress, _ := gp.Load("etcd.address")
-	etcdPort, _ := gp.Load("etcd.port")
-	etcdAddress += ":" + etcdPort
+	etcdAddress := os.Getenv("ETCD_ADDRESS")
+	if etcdAddress == "" {
+		etcdAddress = "localhost:2379"
+	}
 	err = gp.Save("_EtcdAddress", etcdAddress)
 	if err != nil {
 		panic(err)
 	}
 
-	pulsarAddress, _ := gp.Load("pulsar.address")
-	pulsarPort, _ := gp.Load("pulsar.port")
-	pulsarAddress += ":" + pulsarPort
+	pulsarAddress := os.Getenv("PULSAR_ADDRESS")
+	if pulsarAddress == "" {
+		pulsarAddress = "pulsar://localhost:6650"
+	}
 	err = gp.Save("_PulsarAddress", pulsarAddress)
 	if err != nil {
 		panic(err)
 	}
 
-	masterAddress, _ := gp.Load("master.address")
-	masterPort, _ := gp.Load("master.port")
-	masterAddress += ":" + masterPort
+	masterAddress := os.Getenv("MASTER_ADDRESS")
+	if masterAddress == "" {
+		masterAddress = "localhost:53100"
+	}
 	err = gp.Save("_MasterAddress", masterAddress)
 	if err != nil {
 		panic(err)
@@ -109,7 +111,6 @@ func (gp *BaseTable) LoadYaml(fileName string) error {
 				log.Panicf("undefine config type, key=%s", key)
 			}
 		}
-		log.Printf("%s : %s", key, str)
 		err = gp.params.Save(strings.ToLower(key), str)
 		if err != nil {
 			panic(err)
@@ -126,37 +127,4 @@ func (gp *BaseTable) Remove(key string) error {
 
 func (gp *BaseTable) Save(key, value string) error {
 	return gp.params.Save(strings.ToLower(key), value)
-}
-
-func (gp *BaseTable) EtcdAddress() (string, error) {
-	return gp.Load("_EtcdAddress")
-}
-
-func (gp *BaseTable) PulsarAddress() (string, error) {
-	return gp.Load("_PulsarAddress")
-}
-
-func (gp *BaseTable) MasterAddress() (string, error) {
-	return gp.Load("_MasterAddress")
-}
-
-func (gp *BaseTable) EtcdRootPath() (string, error) {
-	return gp.Load("etcd.rootpath")
-}
-
-func (gp *BaseTable) TopicNum() (int, error) {
-	topicNum, _ := gp.Load("pulsar.topicnum")
-	return strconv.Atoi(topicNum)
-}
-
-func (gp *BaseTable) StorageAddress() (string, error) {
-	storageAddress, _ := gp.Load("storage.address")
-	storagePort, _ := gp.Load("storage.address")
-
-	return storageAddress + ":" + storagePort, nil
-}
-
-func (gp *BaseTable) BucketName() string {
-	bucketName, _ := gp.Load("writer.bucket")
-	return bucketName
 }

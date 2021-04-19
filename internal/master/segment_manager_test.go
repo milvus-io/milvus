@@ -26,10 +26,7 @@ var kvBase *kv.EtcdKV
 
 func setup() {
 	Params.Init()
-	etcdAddress, err := Params.EtcdAddress()
-	if err != nil {
-		panic(err)
-	}
+	etcdAddress := Params.EtcdAddress()
 
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
 	if err != nil {

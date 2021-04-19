@@ -32,7 +32,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	}
 
 	// init query node
-	pulsarURL := "pulsar://localhost:6650"
+	pulsarURL, _ := Params.pulsarAddress()
 	node := NewQueryNode(ctx, 0)
 
 	// init meta
