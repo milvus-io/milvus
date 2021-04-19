@@ -914,9 +914,11 @@ class TestSearchBase:
         num = 10
         top_k = 10
         nq = 20
+        collection_names = []
         for i in range(num):
             collection = gen_unique_str(uid + str(i))
             connect.create_collection(collection, default_fields)
+            collection_names.append(collection)
             entities, ids = init_data(connect, collection)
             assert len(ids) == default_nb
             query, vecs = gen_query_vectors(field_name, entities, top_k, nq, search_params=search_param)
@@ -927,6 +929,8 @@ class TestSearchBase:
                 assert check_id_result(res[i], ids[i])
                 assert res[i]._distances[0] < epsilon
                 assert res[i]._distances[1] > epsilon
+        for i in range(num):
+            connect.drop_collection(collection_names[i])
 
     @pytest.mark.skip("r0.3-test")
     def _test_query_entities_with_field_less_than_top_k(self, connect, id_collection):

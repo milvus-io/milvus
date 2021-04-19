@@ -792,6 +792,8 @@ class TestInsertMultiCollections:
             assert len(ids) == default_nb
             stats = connect.get_collection_stats(collection_name)
             assert stats[row_count] == default_nb
+        for i in range(collection_num):
+            connect.drop_collection(collection_list[i])
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.tags_smoke)
