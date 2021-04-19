@@ -11,6 +11,7 @@
 
 #include <string>
 #include <optional>
+#include <vector>
 #include "knowhere/index/vector_index/VecIndex.h"
 
 namespace milvus {
@@ -41,6 +42,9 @@ class IndexWrapper {
     void
     parse();
 
+    std::string
+    get_index_type();
+
     template <typename T>
     std::optional<T>
     get_config_by_name(std::string name);
@@ -56,6 +60,7 @@ class IndexWrapper {
     milvus::json type_config_;
     milvus::json index_config_;
     knowhere::Config config_;
+    std::vector<uint8_t> raw_data_;
 };
 
 }  // namespace indexbuilder

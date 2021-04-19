@@ -18,6 +18,7 @@
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "utils/EasyAssert.h"
 #include "IndexWrapper.h"
+#include "indexbuilder/utils.h"
 
 namespace milvus {
 namespace indexbuilder {
@@ -30,12 +31,10 @@ IndexWrapper::IndexWrapper(const char* serialized_type_params, const char* seria
 
     std::map<std::string, knowhere::IndexMode> mode_map = {{"CPU", knowhere::IndexMode::MODE_CPU},
                                                            {"GPU", knowhere::IndexMode::MODE_GPU}};
-    auto type = get_config_by_name<std::string>("index_type");
     auto mode = get_config_by_name<std::string>("index_mode");
-    auto index_type = type.has_value() ? type.value() : knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
     auto index_mode = mode.has_value() ? mode_map[mode.value()] : knowhere::IndexMode::MODE_CPU;
 
-    index_ = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type, index_mode);
+    index_ = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(get_index_type(), index_mode);
     Assert(index_ != nullptr);
 }
 
@@ -53,17 +52,17 @@ IndexWrapper::parse() {
     Assert(deserialized_success);
 
     for (auto i = 0; i < type_config.params_size(); ++i) {
-        auto type_param = type_config.params(i);
-        auto key = type_param.key();
-        auto value = type_param.value();
+        const auto& type_param = type_config.params(i);
+        const auto& key = type_param.key();
+        const auto& value = type_param.value();
         type_config_[key] = value;
         config_[key] = value;
     }
 
     for (auto i = 0; i < index_config.params_size(); ++i) {
-        auto index_param = index_config.params(i);
-        auto key = index_param.key();
-        auto value = index_param.value();
+        const auto& index_param = index_config.params(i);
+        const auto& key = index_param.key();
+        const auto& value = index_param.value();
         index_config_[key] = value;
         config_[key] = value;
     }
@@ -132,12 +131,26 @@ IndexWrapper::dim() {
 
 void
 IndexWrapper::BuildWithoutIds(const knowhere::DatasetPtr& dataset) {
-    auto index_type = index_->index_type();
+    auto index_type = get_index_type();
     if (index_type == milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
         PanicInfo(std::string(index_type) + " doesn't support build without ids yet!");
     }
     index_->Train(dataset, config_);
     index_->AddWithoutIds(dataset, config_);
+
+    if (is_in_nm_list(index_type)) {
+        auto tensor = dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
+        auto row_num = dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
+        auto dim = dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
+        int64_t data_size;
+        if (is_in_bin_list(index_type)) {
+            data_size = dim / 8 * row_num;
+        } else {
+            data_size = dim * row_num * sizeof(float);
+        }
+        raw_data_.resize(data_size);
+        memcpy(raw_data_.data(), tensor, data_size);
+    }
 }
 
 void
@@ -153,8 +166,15 @@ IndexWrapper::BuildWithIds(const knowhere::DatasetPtr& dataset) {
  */
 milvus::indexbuilder::IndexWrapper::Binary
 IndexWrapper::Serialize() {
-    namespace indexcgo = milvus::proto::indexcgo;
     auto binarySet = index_->Serialize(config_);
+    auto index_type = get_index_type();
+    if (is_in_nm_list(index_type)) {
+        std::shared_ptr<uint8_t[]> raw_data(new uint8_t[raw_data_.size()], std::default_delete<uint8_t[]>());
+        memcpy(raw_data.get(), raw_data_.data(), raw_data_.size());
+        binarySet.Append(RAW_DATA, raw_data, raw_data_.size());
+    }
+
+    namespace indexcgo = milvus::proto::indexcgo;
     indexcgo::BinarySet ret;
 
     for (auto [key, value] : binarySet.binary_map_) {
@@ -184,15 +204,24 @@ IndexWrapper::Load(const char* serialized_sliced_blob_buffer, int32_t size) {
 
     milvus::knowhere::BinarySet binarySet;
     for (auto i = 0; i < blob_buffer.datas_size(); i++) {
-        auto binary = blob_buffer.datas(i);
-        std::shared_ptr<uint8_t[]> binary_data(new uint8_t[binary.value().length() + 1],
-                                               std::default_delete<uint8_t[]>());
-        memcpy(binary_data.get(), binary.value().c_str(), binary.value().length());
-        binary_data[binary.value().length()] = 0;
-        binarySet.Append(binary.key(), binary_data, binary.value().length() + 1);
+        const auto& binary = blob_buffer.datas(i);
+        auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
+        auto bptr = std::make_shared<milvus::knowhere::Binary>();
+        bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)binary.value().c_str(), deleter);
+        bptr->size = binary.value().length();
+        binarySet.Append(binary.key(), bptr);
     }
 
     index_->Load(binarySet);
+}
+
+std::string
+IndexWrapper::get_index_type() {
+    // return index_->index_type();
+    // knowhere bug here
+    // the index_type of all ivf-based index will change to ivf flat after loaded
+    auto type = get_config_by_name<std::string>("index_type");
+    return type.has_value() ? type.value() : knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
 }
 
 }  // namespace indexbuilder
