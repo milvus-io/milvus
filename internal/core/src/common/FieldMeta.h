@@ -10,13 +10,18 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include "common/Types.h"
+#include "utils/Types.h"
 #include "utils/Status.h"
 #include "utils/EasyAssert.h"
+
 #include <string>
 #include <stdexcept>
-
 namespace milvus {
+
+using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
+using engine::DataType;
+using engine::FieldElementType;
+
 inline int
 field_sizeof(DataType data_type, int dim = 1) {
     switch (data_type) {
@@ -84,13 +89,7 @@ field_is_vector(DataType datatype) {
 
 struct FieldMeta {
  public:
-    FieldMeta(std::string_view name, DataType type) : name_(name), type_(type) {
-        Assert(!is_vector());
-    }
-
-    FieldMeta(std::string_view name, DataType type, int64_t dim, MetricType metric_type)
-        : name_(name), type_(type), vector_info_(VectorInfo{dim, metric_type}) {
-        Assert(is_vector());
+    FieldMeta(std::string_view name, DataType type, int dim = 1) : name_(name), type_(type), dim_(dim) {
     }
 
     bool
@@ -99,11 +98,14 @@ struct FieldMeta {
         return type_ == DataType::VECTOR_BINARY || type_ == DataType::VECTOR_FLOAT;
     }
 
-    int64_t
+    void
+    set_dim(int dim) {
+        dim_ = dim;
+    }
+
+    int
     get_dim() const {
-        Assert(is_vector());
-        Assert(vector_info_.has_value());
-        return vector_info_->dim_;
+        return dim_;
     }
 
     const std::string&
@@ -118,20 +120,12 @@ struct FieldMeta {
 
     int
     get_sizeof() const {
-        if (is_vector()) {
-            return field_sizeof(type_, get_dim());
-        } else {
-            return field_sizeof(type_, 1);
-        }
+        return field_sizeof(type_, dim_);
     }
 
  private:
-    struct VectorInfo {
-        int64_t dim_;
-        MetricType metric_type_;
-    };
     std::string name_;
     DataType type_ = DataType::NONE;
-    std::optional<VectorInfo> vector_info_;
+    int dim_ = 1;
 };
 }  // namespace milvus

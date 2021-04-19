@@ -12,7 +12,6 @@
 package paramtable
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -22,8 +21,6 @@ var Params = BaseTable{}
 
 func TestMain(m *testing.M) {
 	Params.Init()
-	code := m.Run()
-	os.Exit(code)
 }
 
 //func TestMain
@@ -58,13 +55,13 @@ func TestGlobalParamsTable_SaveAndLoad(t *testing.T) {
 }
 
 func TestGlobalParamsTable_LoadRange(t *testing.T) {
-	_ = Params.Save("xxxaab", "10")
-	_ = Params.Save("xxxfghz", "20")
-	_ = Params.Save("xxxbcde", "1.1")
-	_ = Params.Save("xxxabcd", "testSaveAndLoad")
-	_ = Params.Save("xxxzhi", "12")
+	_ = Params.Save("abc", "10")
+	_ = Params.Save("fghz", "20")
+	_ = Params.Save("bcde", "1.1")
+	_ = Params.Save("abcd", "testSaveAndLoad")
+	_ = Params.Save("zhi", "12")
 
-	keys, values, err := Params.LoadRange("xxxa", "xxxg", 10)
+	keys, values, err := Params.LoadRange("a", "g", 10)
 	assert.Nil(t, err)
 	assert.Equal(t, 4, len(keys))
 	assert.Equal(t, "10", values[0])
@@ -100,17 +97,24 @@ func TestGlobalParamsTable_Remove(t *testing.T) {
 }
 
 func TestGlobalParamsTable_LoadYaml(t *testing.T) {
-	err := Params.LoadYaml("milvus.yaml")
+	err := Params.LoadYaml("config.yaml")
 	assert.Nil(t, err)
 
-	err = Params.LoadYaml("advanced/channel.yaml")
-	assert.Nil(t, err)
+	value1, err1 := Params.Load("etcd.address")
+	value2, err2 := Params.Load("pulsar.port")
+	value3, err3 := Params.Load("reader.topicend")
+	value4, err4 := Params.Load("proxy.pulsarTopics.readerTopicPrefix")
+	value5, err5 := Params.Load("proxy.network.address")
 
-	_, err = Params.Load("etcd.address")
-	assert.Nil(t, err)
-	_, err = Params.Load("pulsar.port")
-	assert.Nil(t, err)
-	_, err = Params.Load("msgChannel.channelRange.insert")
-	assert.Nil(t, err)
+	assert.Equal(t, value1, "localhost")
+	assert.Equal(t, value2, "6650")
+	assert.Equal(t, value3, "128")
+	assert.Equal(t, value4, "milvusReader")
+	assert.Equal(t, value5, "0.0.0.0")
 
+	assert.Nil(t, err1)
+	assert.Nil(t, err2)
+	assert.Nil(t, err3)
+	assert.Nil(t, err4)
+	assert.Nil(t, err5)
 }

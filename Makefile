@@ -41,9 +41,9 @@ fmt:
 lint:
 	@echo "Running $@ check"
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint cache clean
-	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./internal/...
-	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./cmd/...
-	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./tests/go/...
+	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=5m --config ./.golangci.yml ./internal/...
+	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=5m --config ./.golangci.yml ./cmd/...
+	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=5m --config ./.golangci.yml ./tests/go/...
 
 ruleguard:
 	@echo "Running $@ check"
@@ -65,11 +65,9 @@ build-go:
 
 build-cpp:
 	@(env bash $(PWD)/scripts/core_build.sh)
-	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release)
 
 build-cpp-with-unittest:
 	@(env bash $(PWD)/scripts/core_build.sh -u)
-	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release)
 
 # Runs the tests.
 unittest: test-cpp test-go

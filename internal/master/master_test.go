@@ -4,11 +4,8 @@ import (
 	"context"
 	"log"
 	"math/rand"
-	"os"
 	"strconv"
 	"testing"
-
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
@@ -22,42 +19,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
-
-var testPORT = 53200
-
-func genMasterTestPort() int64 {
-	testPORT++
-	return int64(testPORT)
-}
-
-func refreshMasterAddress() {
-	masterPort := genMasterTestPort()
-	Params.Port = int(masterPort)
-	masterAddr := makeMasterAddress(masterPort)
-	Params.Address = masterAddr
-}
-
-func makeMasterAddress(port int64) string {
-	masterAddr := "127.0.0.1:" + strconv.FormatInt(port, 10)
-	return masterAddr
-}
-
-func makeNewChannalNames(names []string, suffix string) []string {
-	var ret []string
-	for _, name := range names {
-		ret = append(ret, name+suffix)
-	}
-	return ret
-}
-
-func refreshChannelNames() {
-	suffix := "_test" + strconv.FormatInt(rand.Int63n(100), 10)
-	Params.DDChannelNames = makeNewChannalNames(Params.DDChannelNames, suffix)
-	Params.WriteNodeTimeTickChannelNames = makeNewChannalNames(Params.WriteNodeTimeTickChannelNames, suffix)
-	Params.InsertChannelNames = makeNewChannalNames(Params.InsertChannelNames, suffix)
-	Params.K2SChannelNames = makeNewChannalNames(Params.K2SChannelNames, suffix)
-	Params.ProxyTimeTickChannelNames = makeNewChannalNames(Params.ProxyTimeTickChannelNames, suffix)
-}
 
 func receiveTimeTickMsg(stream *ms.MsgStream) bool {
 	for {
@@ -76,25 +37,13 @@ func getTimeTickMsgPack(ttmsgs [][2]uint64) *ms.MsgPack {
 	return &msgPack
 }
 
-func TestMain(m *testing.M) {
-	Init()
-	refreshMasterAddress()
-	refreshChannelNames()
-	etcdAddr := Params.EtcdAddress
-	gTestTsoAllocator = NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase([]string{etcdAddr}, "/test/root/kv", "tso"))
-	gTestIDAllocator = NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{etcdAddr}, "/test/root/kv", "gid"))
-	exitCode := m.Run()
-	os.Exit(exitCode)
-}
-
 func TestMaster(t *testing.T) {
 	Init()
-	refreshMasterAddress()
 	pulsarAddr := Params.PulsarAddress
-	Params.ProxyIDList = []UniqueID{0}
-	//Param
+
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
+
 	svr, err := CreateServer(ctx)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
@@ -149,7 +98,7 @@ func TestMaster(t *testing.T) {
 	var k2sMsgstream ms.MsgStream = k2sMs
 	assert.True(t, receiveTimeTickMsg(&k2sMsgstream))
 
-	conn, err := grpc.DialContext(ctx, Params.Address, grpc.WithInsecure(), grpc.WithBlock())
+	conn, err := grpc.DialContext(ctx, "127.0.0.1:53100", grpc.WithInsecure(), grpc.WithBlock())
 	assert.Nil(t, err)
 	defer conn.Close()
 

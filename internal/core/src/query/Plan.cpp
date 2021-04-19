@@ -26,25 +26,15 @@ static std::unique_ptr<VectorPlanNode>
 ParseVecNode(Plan* plan, const Json& out_body) {
     Assert(out_body.is_object());
     // TODO add binary info
+    auto vec_node = std::make_unique<FloatVectorANNS>();
     Assert(out_body.size() == 1);
     auto iter = out_body.begin();
     std::string field_name = iter.key();
-
     auto& vec_info = iter.value();
     Assert(vec_info.is_object());
     auto topK = vec_info["topk"];
     AssertInfo(topK > 0, "topK must greater than 0");
     AssertInfo(topK < 16384, "topK is too large");
-    auto field_meta = plan->schema_.operator[](field_name);
-
-    auto vec_node = [&]() -> std::unique_ptr<VectorPlanNode> {
-        auto data_type = field_meta.get_data_type();
-        if (data_type == DataType::VECTOR_FLOAT) {
-            return std::make_unique<FloatVectorANNS>();
-        } else {
-            return std::make_unique<BinaryVectorANNS>();
-        }
-    }();
     vec_node->query_info_.topK_ = topK;
     vec_node->query_info_.metric_type_ = vec_info.at("metric_type");
     vec_node->query_info_.search_params_ = vec_info.at("params");
@@ -70,6 +60,8 @@ to_lower(const std::string& raw) {
     return data;
 }
 
+template <class...>
+constexpr std::false_type always_false{};
 template <typename T>
 std::unique_ptr<Expr>
 ParseRangeNodeImpl(const Schema& schema, const std::string& field_name, const Json& body) {
@@ -83,62 +75,31 @@ ParseRangeNodeImpl(const Schema& schema, const std::string& field_name, const Js
 
         AssertInfo(RangeExpr::mapping_.count(op_name), "op(" + op_name + ") not found");
         auto op = RangeExpr::mapping_.at(op_name);
-        if constexpr (std::is_same_v<T, bool>) {
-            Assert(item.value().is_boolean());
-        } else if constexpr (std::is_integral_v<T>) {
+        if constexpr (std::is_integral_v<T>) {
             Assert(item.value().is_number_integer());
         } else if constexpr (std::is_floating_point_v<T>) {
             Assert(item.value().is_number());
         } else {
             static_assert(always_false<T>, "unsupported type");
-            __builtin_unreachable();
         }
         T value = item.value();
         expr->conditions_.emplace_back(op, value);
     }
-    std::sort(expr->conditions_.begin(), expr->conditions_.end());
-    return expr;
-}
-
-template <typename T>
-std::unique_ptr<Expr>
-ParseTermNodeImpl(const Schema& schema, const std::string& field_name, const Json& body) {
-    auto expr = std::make_unique<TermExprImpl<T>>();
-    auto data_type = schema[field_name].get_data_type();
-    Assert(body.is_array());
-    expr->field_id_ = field_name;
-    expr->data_type_ = data_type;
-    for (auto& value : body) {
-        if constexpr (std::is_same_v<T, bool>) {
-            Assert(value.is_boolean());
-        } else if constexpr (std::is_integral_v<T>) {
-            Assert(value.is_number_integer());
-        } else if constexpr (std::is_floating_point_v<T>) {
-            Assert(value.is_number());
-        } else {
-            static_assert(always_false<T>, "unsupported type");
-            __builtin_unreachable();
-        }
-        T real_value = value;
-        expr->terms_.push_back(real_value);
-    }
-    std::sort(expr->terms_.begin(), expr->terms_.end());
     return expr;
 }
 
 std::unique_ptr<Expr>
 ParseRangeNode(const Schema& schema, const Json& out_body) {
-    Assert(out_body.is_object());
     Assert(out_body.size() == 1);
     auto out_iter = out_body.begin();
     auto field_name = out_iter.key();
     auto body = out_iter.value();
     auto data_type = schema[field_name].get_data_type();
     Assert(!field_is_vector(data_type));
-
     switch (data_type) {
         case DataType::BOOL: {
-            return ParseRangeNodeImpl<bool>(schema, field_name, body);
+            PanicInfo("bool is not supported in Range node");
+            // return ParseRangeNodeImpl<bool>(schema, field_name, body);
         }
         case DataType::INT8:
             return ParseRangeNodeImpl<int8_t>(schema, field_name, body);
@@ -157,42 +118,6 @@ ParseRangeNode(const Schema& schema, const Json& out_body) {
     }
 }
 
-static std::unique_ptr<Expr>
-ParseTermNode(const Schema& schema, const Json& out_body) {
-    Assert(out_body.size() == 1);
-    auto out_iter = out_body.begin();
-    auto field_name = out_iter.key();
-    auto body = out_iter.value();
-    auto data_type = schema[field_name].get_data_type();
-    Assert(!field_is_vector(data_type));
-    switch (data_type) {
-        case DataType::BOOL: {
-            return ParseTermNodeImpl<bool>(schema, field_name, body);
-        }
-        case DataType::INT8: {
-            return ParseTermNodeImpl<int8_t>(schema, field_name, body);
-        }
-        case DataType::INT16: {
-            return ParseTermNodeImpl<int16_t>(schema, field_name, body);
-        }
-        case DataType::INT32: {
-            return ParseTermNodeImpl<int32_t>(schema, field_name, body);
-        }
-        case DataType::INT64: {
-            return ParseTermNodeImpl<int64_t>(schema, field_name, body);
-        }
-        case DataType::FLOAT: {
-            return ParseTermNodeImpl<float>(schema, field_name, body);
-        }
-        case DataType::DOUBLE: {
-            return ParseTermNodeImpl<double>(schema, field_name, body);
-        }
-        default: {
-            PanicInfo("unsupported data_type");
-        }
-    }
-}
-
 static std::unique_ptr<Plan>
 CreatePlanImplNaive(const Schema& schema, const std::string& dsl_str) {
     auto plan = std::make_unique<Plan>(schema);
@@ -208,10 +133,6 @@ CreatePlanImplNaive(const Schema& schema, const std::string& dsl_str) {
             if (pack.contains("vector")) {
                 auto& out_body = pack.at("vector");
                 plan->plan_node_ = ParseVecNode(plan.get(), out_body);
-            } else if (pack.contains("term")) {
-                AssertInfo(!predicate, "unsupported complex DSL");
-                auto& out_body = pack.at("term");
-                predicate = ParseTermNode(schema, out_body);
             } else if (pack.contains("range")) {
                 AssertInfo(!predicate, "unsupported complex DSL");
                 auto& out_body = pack.at("range");

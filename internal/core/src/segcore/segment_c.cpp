@@ -42,7 +42,7 @@ DeleteSegment(CSegmentBase segment) {
 
 void
 DeleteQueryResult(CQueryResult query_result) {
-    auto res = (milvus::QueryResult*)query_result;
+    auto res = (milvus::segcore::QueryResult*)query_result;
     delete res;
 }
 
@@ -134,7 +134,7 @@ Search(CSegmentBase c_segment,
         placeholder_groups.push_back((const milvus::query::PlaceholderGroup*)c_placeholder_groups[i]);
     }
 
-    auto query_result = std::make_unique<milvus::QueryResult>();
+    auto query_result = std::make_unique<milvus::segcore::QueryResult>();
 
     auto status = CStatus();
     try {

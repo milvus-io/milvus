@@ -260,8 +260,8 @@ def gen_binary_default_fields(auto_id=True):
         "fields": [
             {"name": "int64", "type": DataType.INT64, "is_primary_key": not auto_id},
             {"name": "float", "type": DataType.FLOAT},
-            {"name": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "params": {"dim": default_dim}, "indexes": [{"metric_type": "JACCARD"}]}
-            ],
+            {"name": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "params": {"dim": default_dim}}
+        ],
         "segment_row_limit": default_segment_row_limit,
         "auto_id": auto_id
     }

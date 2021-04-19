@@ -35,7 +35,7 @@ var master *Master
 var masterCancelFunc context.CancelFunc
 
 func setup() {
-	Init()
+	Params.Init()
 	etcdAddress := Params.EtcdAddress
 
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
@@ -218,8 +218,7 @@ func TestSegmentManager_SegmentStats(t *testing.T) {
 }
 
 func startupMaster() {
-	Init()
-	refreshMasterAddress()
+	Params.Init()
 	etcdAddress := Params.EtcdAddress
 	rootPath := "/test/root"
 	ctx, cancel := context.WithCancel(context.TODO())
@@ -232,6 +231,7 @@ func startupMaster() {
 	if err != nil {
 		panic(err)
 	}
+
 	Params = ParamTable{
 		Address: Params.Address,
 		Port:    Params.Port,
@@ -272,7 +272,7 @@ func startupMaster() {
 	if err != nil {
 		panic(err)
 	}
-	err = master.Run(int64(Params.Port))
+	err = master.Run(10013)
 
 	if err != nil {
 		panic(err)
@@ -289,7 +289,7 @@ func TestSegmentManager_RPC(t *testing.T) {
 	defer shutdownMaster()
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
-	dialContext, err := grpc.DialContext(ctx, Params.Address, grpc.WithInsecure(), grpc.WithBlock())
+	dialContext, err := grpc.DialContext(ctx, "127.0.0.1:10013", grpc.WithInsecure(), grpc.WithBlock())
 	assert.Nil(t, err)
 	defer dialContext.Close()
 	client := masterpb.NewMasterClient(dialContext)

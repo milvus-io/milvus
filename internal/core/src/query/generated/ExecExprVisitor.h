@@ -58,10 +58,6 @@ class ExecExprVisitor : ExprVisitor {
     auto
     ExecRangeVisitorDispatcher(RangeExpr& expr_raw) -> RetType;
 
-    template <typename T>
-    auto
-    ExecTermVisitorImpl(TermExpr& expr_raw) -> RetType;
-
  private:
     segcore::SegmentSmallIndex& segment_;
     std::optional<RetType> ret_;

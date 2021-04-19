@@ -20,8 +20,8 @@ project(wrapper-Arrow)
 include(ExternalProject)
 
 ExternalProject_Add(Arrow
-    GIT_REPOSITORY    ${GIT_ARROW_REPO}
-    GIT_TAG           ${GIT_ARROW_TAG}
+    GIT_REPOSITORY    https://github.com/apache/arrow.git
+    GIT_TAG           apache-arrow-2.0.0
     GIT_SHALLOW       true
     SOURCE_DIR        "${ARROW_ROOT}/arrow"
     SOURCE_SUBDIR     "cpp"

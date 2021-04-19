@@ -19,8 +19,19 @@ var Params ParamTable
 
 func (pt *ParamTable) Init() {
 	pt.BaseTable.Init()
-
-	err := pt.LoadYaml("advanced/proxy.yaml")
+	err := pt.LoadYaml("milvus.yaml")
+	if err != nil {
+		panic(err)
+	}
+	err = pt.LoadYaml("advanced/proxy.yaml")
+	if err != nil {
+		panic(err)
+	}
+	err = pt.LoadYaml("advanced/channel.yaml")
+	if err != nil {
+		panic(err)
+	}
+	err = pt.LoadYaml("advanced/common.yaml")
 	if err != nil {
 		panic(err)
 	}
@@ -37,24 +48,15 @@ func (pt *ParamTable) Init() {
 	pt.Save("_proxyID", proxyIDStr)
 }
 
-func (pt *ParamTable) NetworkPort() int {
-	return pt.ParseInt("proxy.port")
-}
-
-func (pt *ParamTable) NetworkAddress() string {
-	addr, err := pt.Load("proxy.address")
+func (pt *ParamTable) NetWorkAddress() string {
+	addr, err := pt.Load("proxy.network.address")
 	if err != nil {
 		panic(err)
 	}
-
-	hostName, _ := net.LookupHost(addr)
-	if len(hostName) <= 0 {
-		if ip := net.ParseIP(addr); ip == nil {
-			panic("invalid ip proxy.address")
-		}
+	if ip := net.ParseIP(addr); ip == nil {
+		panic("invalid ip proxy.network.address")
 	}
-
-	port, err := pt.Load("proxy.port")
+	port, err := pt.Load("proxy.network.port")
 	if err != nil {
 		panic(err)
 	}
@@ -84,6 +86,23 @@ func (pt *ParamTable) PulsarAddress() string {
 func (pt *ParamTable) ProxyNum() int {
 	ret := pt.ProxyIDList()
 	return len(ret)
+}
+
+func (pt *ParamTable) ProxyIDList() []UniqueID {
+	proxyIDStr, err := pt.Load("nodeID.proxyIDList")
+	if err != nil {
+		panic(err)
+	}
+	var ret []UniqueID
+	proxyIDs := strings.Split(proxyIDStr, ",")
+	for _, i := range proxyIDs {
+		v, err := strconv.Atoi(i)
+		if err != nil {
+			log.Panicf("load proxy id list error, %s", err.Error())
+		}
+		ret = append(ret, UniqueID(v))
+	}
+	return ret
 }
 
 func (pt *ParamTable) queryNodeNum() int {
@@ -131,6 +150,25 @@ func (pt *ParamTable) TimeTickInterval() time.Duration {
 	return time.Duration(interval) * time.Millisecond
 }
 
+func (pt *ParamTable) convertRangeToSlice(rangeStr, sep string) []int {
+	channelIDs := strings.Split(rangeStr, sep)
+	startStr := channelIDs[0]
+	endStr := channelIDs[1]
+	start, err := strconv.Atoi(startStr)
+	if err != nil {
+		panic(err)
+	}
+	end, err := strconv.Atoi(endStr)
+	if err != nil {
+		panic(err)
+	}
+	var ret []int
+	for i := start; i < end; i++ {
+		ret = append(ret, i)
+	}
+	return ret
+}
+
 func (pt *ParamTable) sliceIndex() int {
 	proxyID := pt.ProxyID()
 	proxyIDList := pt.ProxyIDList()
@@ -152,7 +190,7 @@ func (pt *ParamTable) InsertChannelNames() []string {
 	if err != nil {
 		panic(err)
 	}
-	channelIDs := paramtable.ConvertRangeToIntSlice(iRangeStr, ",")
+	channelIDs := pt.convertRangeToSlice(iRangeStr, ",")
 	var ret []string
 	for _, ID := range channelIDs {
 		ret = append(ret, prefix+strconv.Itoa(ID))
@@ -178,12 +216,19 @@ func (pt *ParamTable) DeleteChannelNames() []string {
 	if err != nil {
 		panic(err)
 	}
-	channelIDs := paramtable.ConvertRangeToIntSlice(dRangeStr, ",")
+	channelIDs := pt.convertRangeToSlice(dRangeStr, ",")
 	var ret []string
 	for _, ID := range channelIDs {
 		ret = append(ret, prefix+strconv.Itoa(ID))
 	}
-	return ret
+	proxyNum := pt.ProxyNum()
+	sep := len(channelIDs) / proxyNum
+	index := pt.sliceIndex()
+	if index == -1 {
+		panic("ProxyID not Match with Config")
+	}
+	start := index * sep
+	return ret[start : start+sep]
 }
 
 func (pt *ParamTable) K2SChannelNames() []string {
@@ -196,12 +241,19 @@ func (pt *ParamTable) K2SChannelNames() []string {
 	if err != nil {
 		panic(err)
 	}
-	channelIDs := paramtable.ConvertRangeToIntSlice(k2sRangeStr, ",")
+	channelIDs := pt.convertRangeToSlice(k2sRangeStr, ",")
 	var ret []string
 	for _, ID := range channelIDs {
 		ret = append(ret, prefix+strconv.Itoa(ID))
 	}
-	return ret
+	proxyNum := pt.ProxyNum()
+	sep := len(channelIDs) / proxyNum
+	index := pt.sliceIndex()
+	if index == -1 {
+		panic("ProxyID not Match with Config")
+	}
+	start := index * sep
+	return ret[start : start+sep]
 }
 
 func (pt *ParamTable) SearchChannelNames() []string {
@@ -209,17 +261,8 @@ func (pt *ParamTable) SearchChannelNames() []string {
 	if err != nil {
 		panic(err)
 	}
-	prefix += "-"
-	sRangeStr, err := pt.Load("msgChannel.channelRange.search")
-	if err != nil {
-		panic(err)
-	}
-	channelIDs := paramtable.ConvertRangeToIntSlice(sRangeStr, ",")
-	var ret []string
-	for _, ID := range channelIDs {
-		ret = append(ret, prefix+strconv.Itoa(ID))
-	}
-	return ret
+	prefix += "-0"
+	return []string{prefix}
 }
 
 func (pt *ParamTable) SearchResultChannelNames() []string {
@@ -232,7 +275,7 @@ func (pt *ParamTable) SearchResultChannelNames() []string {
 	if err != nil {
 		panic(err)
 	}
-	channelIDs := paramtable.ConvertRangeToIntSlice(sRangeStr, ",")
+	channelIDs := pt.convertRangeToSlice(sRangeStr, ",")
 	var ret []string
 	for _, ID := range channelIDs {
 		ret = append(ret, prefix+strconv.Itoa(ID))
@@ -278,24 +321,144 @@ func (pt *ParamTable) DataDefinitionChannelNames() []string {
 	return []string{prefix}
 }
 
+func (pt *ParamTable) parseInt64(key string) int64 {
+	valueStr, err := pt.Load(key)
+	if err != nil {
+		panic(err)
+	}
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		panic(err)
+	}
+	return int64(value)
+}
+
 func (pt *ParamTable) MsgStreamInsertBufSize() int64 {
-	return pt.ParseInt64("proxy.msgStream.insert.bufSize")
+	return pt.parseInt64("proxy.msgStream.insert.bufSize")
 }
 
 func (pt *ParamTable) MsgStreamSearchBufSize() int64 {
-	return pt.ParseInt64("proxy.msgStream.search.bufSize")
+	return pt.parseInt64("proxy.msgStream.search.bufSize")
 }
 
 func (pt *ParamTable) MsgStreamSearchResultBufSize() int64 {
-	return pt.ParseInt64("proxy.msgStream.searchResult.recvBufSize")
+	return pt.parseInt64("proxy.msgStream.searchResult.recvBufSize")
 }
 
 func (pt *ParamTable) MsgStreamSearchResultPulsarBufSize() int64 {
-	return pt.ParseInt64("proxy.msgStream.searchResult.pulsarBufSize")
+	return pt.parseInt64("proxy.msgStream.searchResult.pulsarBufSize")
 }
 
 func (pt *ParamTable) MsgStreamTimeTickBufSize() int64 {
-	return pt.ParseInt64("proxy.msgStream.timeTick.bufSize")
+	return pt.parseInt64("proxy.msgStream.timeTick.bufSize")
+}
+
+func (pt *ParamTable) insertChannelNames() []string {
+	ch, err := pt.Load("msgChannel.chanNamePrefix.insert")
+	if err != nil {
+		log.Fatal(err)
+	}
+	channelRange, err := pt.Load("msgChannel.channelRange.insert")
+	if err != nil {
+		panic(err)
+	}
+
+	chanRange := strings.Split(channelRange, ",")
+	if len(chanRange) != 2 {
+		panic("Illegal channel range num")
+	}
+	channelBegin, err := strconv.Atoi(chanRange[0])
+	if err != nil {
+		panic(err)
+	}
+	channelEnd, err := strconv.Atoi(chanRange[1])
+	if err != nil {
+		panic(err)
+	}
+	if channelBegin < 0 || channelEnd < 0 {
+		panic("Illegal channel range value")
+	}
+	if channelBegin > channelEnd {
+		panic("Illegal channel range value")
+	}
+
+	channels := make([]string, channelEnd-channelBegin)
+	for i := 0; i < channelEnd-channelBegin; i++ {
+		channels[i] = ch + "-" + strconv.Itoa(channelBegin+i)
+	}
+	return channels
+}
+
+func (pt *ParamTable) searchChannelNames() []string {
+	ch, err := pt.Load("msgChannel.chanNamePrefix.search")
+	if err != nil {
+		log.Fatal(err)
+	}
+	channelRange, err := pt.Load("msgChannel.channelRange.search")
+	if err != nil {
+		panic(err)
+	}
+
+	chanRange := strings.Split(channelRange, ",")
+	if len(chanRange) != 2 {
+		panic("Illegal channel range num")
+	}
+	channelBegin, err := strconv.Atoi(chanRange[0])
+	if err != nil {
+		panic(err)
+	}
+	channelEnd, err := strconv.Atoi(chanRange[1])
+	if err != nil {
+		panic(err)
+	}
+	if channelBegin < 0 || channelEnd < 0 {
+		panic("Illegal channel range value")
+	}
+	if channelBegin > channelEnd {
+		panic("Illegal channel range value")
+	}
+
+	channels := make([]string, channelEnd-channelBegin)
+	for i := 0; i < channelEnd-channelBegin; i++ {
+		channels[i] = ch + "-" + strconv.Itoa(channelBegin+i)
+	}
+	return channels
+}
+
+func (pt *ParamTable) searchResultChannelNames() []string {
+	ch, err := pt.Load("msgChannel.chanNamePrefix.searchResult")
+	if err != nil {
+		log.Fatal(err)
+	}
+	channelRange, err := pt.Load("msgChannel.channelRange.searchResult")
+	if err != nil {
+		panic(err)
+	}
+
+	chanRange := strings.Split(channelRange, ",")
+	if len(chanRange) != 2 {
+		panic("Illegal channel range num")
+	}
+	channelBegin, err := strconv.Atoi(chanRange[0])
+	if err != nil {
+		panic(err)
+	}
+	channelEnd, err := strconv.Atoi(chanRange[1])
+	if err != nil {
+		panic(err)
+	}
+	if channelBegin < 0 || channelEnd < 0 {
+		panic("Illegal channel range value")
+	}
+	if channelBegin > channelEnd {
+		panic("Illegal channel range value")
+	}
+
+	channels := make([]string, channelEnd-channelBegin)
+	for i := 0; i < channelEnd-channelBegin; i++ {
+		channels[i] = ch + "-" + strconv.Itoa(channelBegin+i)
+	}
+	return channels
 }
 
 func (pt *ParamTable) MaxNameLength() int64 {

@@ -196,7 +196,7 @@ class ConcurrentVectorImpl : public VectorBase {
     }
 
     ssize_t
-    num_chunk() const {
+    chunk_size() const {
         return chunks_.size();
     }
 
@@ -226,14 +226,8 @@ class ConcurrentVector : public ConcurrentVectorImpl<Type, true> {
     using ConcurrentVectorImpl<Type, true>::ConcurrentVectorImpl;
 };
 
-class VectorTrait {};
-
-class FloatVector : public VectorTrait {
-    using embedded_type = float;
-};
-class BinaryVector : public VectorTrait {
-    using embedded_type = uint8_t;
-};
+class FloatVector {};
+class BinaryVector {};
 
 template <>
 class ConcurrentVector<FloatVector> : public ConcurrentVectorImpl<float, false> {

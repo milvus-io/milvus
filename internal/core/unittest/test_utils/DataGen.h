@@ -31,14 +31,6 @@ struct GeneratedData {
         memcpy(ret.data(), target.data(), target.size());
         return ret;
     }
-    template <typename T>
-    auto
-    get_mutable_col(int index) {
-        auto& target = cols_.at(index);
-        assert(target.size() == row_ids_.size() * sizeof(T));
-        auto ptr = reinterpret_cast<T*>(target.data());
-        return ptr;
-    }
 
  private:
     GeneratedData() = default;
@@ -66,9 +58,6 @@ GeneratedData::generate_rows(int N, SchemaPtr schema) {
         }
     }
     rows_ = std::move(result);
-    raw_.raw_data = rows_.data();
-    raw_.sizeof_per_row = schema->get_total_sizeof();
-    raw_.count = N;
 }
 
 inline GeneratedData
@@ -140,12 +129,14 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
     }
     GeneratedData res;
     res.cols_ = std::move(cols);
+    res.generate_rows(N, schema);
     for (int i = 0; i < N; ++i) {
         res.row_ids_.push_back(i);
         res.timestamps_.push_back(i);
     }
-
-    res.generate_rows(N, schema);
+    res.raw_.raw_data = res.rows_.data();
+    res.raw_.sizeof_per_row = schema->get_total_sizeof();
+    res.raw_.count = N;
     return std::move(res);
 }
 
@@ -176,7 +167,7 @@ CreateBinaryPlaceholderGroup(int64_t num_queries, int64_t dim, int64_t seed = 42
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::VECTOR_BINARY);
+    value->set_type(ser::PlaceholderType::VECTOR_FLOAT);
     std::default_random_engine e(seed);
     for (int i = 0; i < num_queries; ++i) {
         std::vector<uint8_t> vec;
@@ -184,27 +175,7 @@ CreateBinaryPlaceholderGroup(int64_t num_queries, int64_t dim, int64_t seed = 42
             vec.push_back(e());
         }
         // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
-        value->add_values(vec.data(), vec.size());
-    }
-    return raw_group;
-}
-
-inline auto
-CreateBinaryPlaceholderGroupFromBlob(int64_t num_queries, int64_t dim, const uint8_t* ptr) {
-    assert(dim % 8 == 0);
-    namespace ser = milvus::proto::service;
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::VECTOR_BINARY);
-    for (int i = 0; i < num_queries; ++i) {
-        std::vector<uint8_t> vec;
-        for (int d = 0; d < dim / 8; ++d) {
-            vec.push_back(*ptr);
-            ++ptr;
-        }
-        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
-        value->add_values(vec.data(), vec.size());
+        value->add_values(vec.data(), vec.size() * sizeof(float));
     }
     return raw_group;
 }

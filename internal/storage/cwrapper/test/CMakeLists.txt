@@ -14,8 +14,6 @@ target_link_libraries(wrapper_test
         parquet arrow thrift utf8proc pthread
         )
 
-install(TARGETS wrapper_test DESTINATION ${CMAKE_INSTALL_PREFIX})
-
 # Defines `gtest_discover_tests()`.
 #include(GoogleTest)
 #gtest_discover_tests(milvusd_test)

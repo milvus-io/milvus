@@ -13,7 +13,6 @@ SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 MILVUS_CORE_DIR="${SCRIPTS_DIR}/../internal/core"
 CORE_INSTALL_PREFIX="${MILVUS_CORE_DIR}/output"
 UNITTEST_DIRS=("${CORE_INSTALL_PREFIX}/unittest")
-CWRAPPER_UNITTEST="${SCRIPTS_DIR}/../internal/storage/cwrapper/output/wrapper_test"
 
 # Currently core will install target lib to "core/output/lib"
 if [ -d "${CORE_INSTALL_PREFIX}/lib" ]; then
@@ -43,12 +42,3 @@ for UNITTEST_DIR in "${UNITTEST_DIRS[@]}"; do
   #  fi
   #done
 done
-
-# run cwrapper unittest
-if [ -f ${CWRAPPER_UNITTEST} ];then
-  ${CWRAPPER_UNITTEST}
-  if [ $? -ne 0 ]; then
-      echo ${CWRAPPER_UNITTEST} " run failed"
-      exit 1
-  fi
-fi

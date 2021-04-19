@@ -11,66 +11,20 @@
 
 #include "BruteForceSearch.h"
 #include <vector>
-#include <common/Types.h>
-#include <boost/dynamic_bitset.hpp>
-#include <queue>
 
 namespace milvus::query {
 
 void
-BinarySearchBruteForceNaive(MetricType metric_type,
-                            int64_t code_size,
-                            const uint8_t* binary_chunk,
-                            int64_t chunk_size,
-                            int64_t topk,
-                            int64_t num_queries,
-                            const uint8_t* query_data,
-                            float* result_distances,
-                            idx_t* result_labels,
-                            faiss::ConcurrentBitsetPtr bitset) {
-    // THIS IS A NAIVE IMPLEMENTATION, ready for optimize
-    Assert(metric_type == faiss::METRIC_Jaccard);
-    Assert(code_size % 4 == 0);
-
-    using T = std::tuple<float, int>;
-
-    for (int64_t q = 0; q < num_queries; ++q) {
-        auto query_ptr = query_data + code_size * q;
-        auto query = boost::dynamic_bitset(query_ptr, query_ptr + code_size);
-        std::vector<T> max_heap(topk + 1, std::make_tuple(std::numeric_limits<float>::max(), -1));
-
-        for (int64_t i = 0; i < chunk_size; ++i) {
-            auto element_ptr = binary_chunk + code_size * i;
-            auto element = boost::dynamic_bitset(element_ptr, element_ptr + code_size);
-            auto the_and = (query & element).count();
-            auto the_or = (query | element).count();
-            auto distance = the_or ? (float)(the_or - the_and) / the_or : 0;
-            if (distance < std::get<0>(max_heap[0])) {
-                max_heap[topk] = std::make_tuple(distance, i);
-                std::push_heap(max_heap.begin(), max_heap.end());
-                std::pop_heap(max_heap.begin(), max_heap.end());
-            }
-        }
-        std::sort(max_heap.begin(), max_heap.end());
-        for (int k = 0; k < topk; ++k) {
-            auto info = max_heap[k];
-            result_distances[k + q * topk] = std::get<0>(info);
-            result_labels[k + q * topk] = std::get<1>(info);
-        }
-    }
-}
-
-void
-BinarySearchBruteForceFast(MetricType metric_type,
-                           int64_t code_size,
-                           const uint8_t* binary_chunk,
-                           int64_t chunk_size,
-                           int64_t topk,
-                           int64_t num_queries,
-                           const uint8_t* query_data,
-                           float* result_distances,
-                           idx_t* result_labels,
-                           faiss::ConcurrentBitsetPtr bitset) {
+BinarySearchBruteForce(faiss::MetricType metric_type,
+                       int64_t code_size,
+                       const uint8_t* binary_chunk,
+                       int64_t chunk_size,
+                       int64_t topk,
+                       int64_t num_queries,
+                       const uint8_t* query_data,
+                       float* result_distances,
+                       idx_t* result_labels,
+                       faiss::ConcurrentBitsetPtr bitset) {
     const idx_t block_size = segcore::DefaultElementPerChunk;
     bool use_heap = true;
 
@@ -129,21 +83,6 @@ BinarySearchBruteForceFast(MetricType metric_type,
         for (int i = 0; i < num_queries; ++i) {
             result_distances[i] = static_cast<float>(int_distances[i]);
         }
-    } else {
-        PanicInfo("Unsupported metric type");
     }
-}
-
-void
-BinarySearchBruteForce(const dataset::BinaryQueryDataset& query_dataset,
-                       const uint8_t* binary_chunk,
-                       int64_t chunk_size,
-                       float* result_distances,
-                       idx_t* result_labels,
-                       faiss::ConcurrentBitsetPtr bitset) {
-    // TODO: refactor the internal function
-    BinarySearchBruteForceFast(query_dataset.metric_type, query_dataset.code_size, binary_chunk, chunk_size,
-                               query_dataset.topk, query_dataset.num_queries, query_dataset.query_data,
-                               result_distances, result_labels, bitset);
 }
 }  // namespace milvus::query

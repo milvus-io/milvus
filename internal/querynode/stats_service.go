@@ -14,11 +14,11 @@ import (
 
 type statsService struct {
 	ctx         context.Context
-	statsStream msgstream.MsgStream
-	replica     collectionReplica
+	statsStream *msgstream.MsgStream
+	replica     *collectionReplica
 }
 
-func newStatsService(ctx context.Context, replica collectionReplica) *statsService {
+func newStatsService(ctx context.Context, replica *collectionReplica) *statsService {
 
 	return &statsService{
 		ctx:         ctx,
@@ -44,8 +44,8 @@ func (sService *statsService) start() {
 
 	var statsMsgStream msgstream.MsgStream = statsStream
 
-	sService.statsStream = statsMsgStream
-	sService.statsStream.Start()
+	sService.statsStream = &statsMsgStream
+	(*sService.statsStream).Start()
 
 	// start service
 	fmt.Println("do segments statistic in ", strconv.Itoa(sleepTimeInterval), "ms")
@@ -60,13 +60,11 @@ func (sService *statsService) start() {
 }
 
 func (sService *statsService) close() {
-	if sService.statsStream != nil {
-		sService.statsStream.Close()
-	}
+	(*sService.statsStream).Close()
 }
 
 func (sService *statsService) sendSegmentStatistic() {
-	statisticData := sService.replica.getSegmentStatistics()
+	statisticData := (*sService.replica).getSegmentStatistics()
 
 	// fmt.Println("Publish segment statistic")
 	// fmt.Println(statisticData)
@@ -84,7 +82,7 @@ func (sService *statsService) publicStatistic(statistic *internalpb.QueryNodeSeg
 	var msgPack = msgstream.MsgPack{
 		Msgs: []msgstream.TsMsg{msg},
 	}
-	err := sService.statsStream.Produce(&msgPack)
+	err := (*sService.statsStream).Produce(&msgPack)
 	if err != nil {
 		log.Println(err)
 	}
