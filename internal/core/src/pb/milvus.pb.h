@@ -4073,8 +4073,8 @@ class DescribeSegmentResponse :
 
   enum : int {
     kStatusFieldNumber = 1,
-    kIndexDescriptionFieldNumber = 3,
     kIndexIDFieldNumber = 2,
+    kBuildIDFieldNumber = 3,
   };
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
@@ -4084,18 +4084,15 @@ class DescribeSegmentResponse :
   ::milvus::proto::common::Status* mutable_status();
   void set_allocated_status(::milvus::proto::common::Status* status);
 
-  // .milvus.proto.milvus.IndexDescription index_description = 3;
-  bool has_index_description() const;
-  void clear_index_description();
-  const ::milvus::proto::milvus::IndexDescription& index_description() const;
-  ::milvus::proto::milvus::IndexDescription* release_index_description();
-  ::milvus::proto::milvus::IndexDescription* mutable_index_description();
-  void set_allocated_index_description(::milvus::proto::milvus::IndexDescription* index_description);
-
   // int64 indexID = 2;
   void clear_indexid();
   ::PROTOBUF_NAMESPACE_ID::int64 indexid() const;
   void set_indexid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // int64 buildID = 3;
+  void clear_buildid();
+  ::PROTOBUF_NAMESPACE_ID::int64 buildid() const;
+  void set_buildid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.DescribeSegmentResponse)
  private:
@@ -4103,8 +4100,8 @@ class DescribeSegmentResponse :
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::milvus::proto::common::Status* status_;
-  ::milvus::proto::milvus::IndexDescription* index_description_;
   ::PROTOBUF_NAMESPACE_ID::int64 indexid_;
+  ::PROTOBUF_NAMESPACE_ID::int64 buildid_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -10322,55 +10319,18 @@ inline void DescribeSegmentResponse::set_indexid(::PROTOBUF_NAMESPACE_ID::int64 
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeSegmentResponse.indexID)
 }
 
-// .milvus.proto.milvus.IndexDescription index_description = 3;
-inline bool DescribeSegmentResponse::has_index_description() const {
-  return this != internal_default_instance() && index_description_ != nullptr;
+// int64 buildID = 3;
+inline void DescribeSegmentResponse::clear_buildid() {
+  buildid_ = PROTOBUF_LONGLONG(0);
 }
-inline void DescribeSegmentResponse::clear_index_description() {
-  if (GetArenaNoVirtual() == nullptr && index_description_ != nullptr) {
-    delete index_description_;
-  }
-  index_description_ = nullptr;
+inline ::PROTOBUF_NAMESPACE_ID::int64 DescribeSegmentResponse::buildid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.DescribeSegmentResponse.buildID)
+  return buildid_;
 }
-inline const ::milvus::proto::milvus::IndexDescription& DescribeSegmentResponse::index_description() const {
-  const ::milvus::proto::milvus::IndexDescription* p = index_description_;
-  // @@protoc_insertion_point(field_get:milvus.proto.milvus.DescribeSegmentResponse.index_description)
-  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::milvus::IndexDescription*>(
-      &::milvus::proto::milvus::_IndexDescription_default_instance_);
-}
-inline ::milvus::proto::milvus::IndexDescription* DescribeSegmentResponse::release_index_description() {
-  // @@protoc_insertion_point(field_release:milvus.proto.milvus.DescribeSegmentResponse.index_description)
+inline void DescribeSegmentResponse::set_buildid(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
-  ::milvus::proto::milvus::IndexDescription* temp = index_description_;
-  index_description_ = nullptr;
-  return temp;
-}
-inline ::milvus::proto::milvus::IndexDescription* DescribeSegmentResponse::mutable_index_description() {
-  
-  if (index_description_ == nullptr) {
-    auto* p = CreateMaybeMessage<::milvus::proto::milvus::IndexDescription>(GetArenaNoVirtual());
-    index_description_ = p;
-  }
-  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.DescribeSegmentResponse.index_description)
-  return index_description_;
-}
-inline void DescribeSegmentResponse::set_allocated_index_description(::milvus::proto::milvus::IndexDescription* index_description) {
-  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
-  if (message_arena == nullptr) {
-    delete index_description_;
-  }
-  if (index_description) {
-    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
-    if (message_arena != submessage_arena) {
-      index_description = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
-          message_arena, index_description, submessage_arena);
-    }
-    
-  } else {
-    
-  }
-  index_description_ = index_description;
-  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.DescribeSegmentResponse.index_description)
+  buildid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeSegmentResponse.buildID)
 }
 
 // -------------------------------------------------------------------

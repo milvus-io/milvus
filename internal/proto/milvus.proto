@@ -154,7 +154,7 @@ message DescribeSegmentRequest {
 message DescribeSegmentResponse {
   common.Status status = 1;
   int64 indexID = 2;
-  IndexDescription index_description = 3;
+  int64 buildID = 3;
 }
 
 message ShowSegmentRequest {
