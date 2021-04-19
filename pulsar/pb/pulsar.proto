@@ -52,9 +52,17 @@ enum DataType {
     VECTOR_FLOAT = 101;
 }
 
-message KeyValuePair {
-    string key = 1;
-    string value = 2;
+enum OpType {
+    Insert      = 0;
+    Delete      = 1;
+    Search      = 2;
+    TimeSync    = 3;
+    Key2Seg     = 4;
+    Statistics  = 5;
+}
+
+message SegmentRecord {
+    repeated string seg_info = 1;
 }
 
 message VectorRowRecord {
@@ -85,50 +93,28 @@ message FieldValue {
     VectorRecord vector_record = 4;
 }
 
-message Entities {
-    Status status = 1;
-    repeated int64 ids = 2;
-    repeated bool valid_row = 3;
-    repeated FieldValue fields = 4;
-}
-
-message InsertParam {
+message PulsarMessage {
     string collection_name = 1;
     repeated FieldValue fields = 2;
-    repeated int64 entity_id_array = 3;            //optional
+    int64 entity_id = 3;
     string partition_tag = 4;
-    repeated int64 timestamp = 5;
-    int64 grpc_server_client_id = 6;
-    repeated KeyValuePair extra_params = 7;
+    VectorParam vector_param =5;
+    SegmentRecord segments = 6;
+    int64  timestamp = 7;
+    int64 client_id = 8;
+    OpType msg_type = 9;
 }
 
-message EntityIds {
-    Status status = 1;
-    repeated int64 entity_id_array = 2;
-}
-
-message DeleteByIDParam {
+message PulsarMessages {
     string collection_name = 1;
-    repeated int64 id_array = 2;
-    repeated int64 timestamp = 3;
-    int64 grpc_server_client_id = 4;
+    repeated FieldValue fields = 2;
+    repeated int64 entity_id = 3;
+    string partition_tag = 4;
+    repeated VectorParam vector_param =5;
+    repeated SegmentRecord segments = 6;
+    repeated  int64  timestamp = 7;
+    repeated int64 client_id = 8;
+    OpType msg_type = 9;
 }
 
-message SearchParam {
-    string collection_name = 1;
-    repeated string partition_tag_array = 2;
-    repeated VectorParam vector_param = 3;
-    string dsl = 4;
-    repeated int64 timestamp = 5;
-    int64 grpc_server_client_id = 6;
-    repeated KeyValuePair extra_params = 7;
-}
 
-message QueryResult {
-    Status status = 1;
-    Entities entities = 2;
-    int64 row_num = 3;
-    repeated float scores = 4;
-    repeated float distances = 5;
-    repeated KeyValuePair extra_params = 6;
-}
