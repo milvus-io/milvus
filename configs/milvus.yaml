@@ -19,8 +19,6 @@ etcd:
   address: localhost
   port: 2379
   rootPath: by-dev
-  metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
-  kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
   segThreshold: 10000
 
 pulsar:
