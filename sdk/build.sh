@@ -1,7 +1,7 @@
 #!/bin/bash
 
-BUILD_OUTPUT_DIR="cmake_build"
-BUILD_TYPE="Debug"
+BUILD_OUTPUT_DIR="cmake_build_release"
+BUILD_TYPE="Release"
 MAKE_CLEAN="OFF"
 RUN_CPPLINT="OFF"
 

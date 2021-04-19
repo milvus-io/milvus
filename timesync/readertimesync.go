@@ -2,15 +2,33 @@ package readertimesync
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/czs007/suvlim/conf"
 	pb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"github.com/golang/protobuf/proto"
 	"log"
+	"os"
 	"sort"
 	"strconv"
 	"sync"
+	"time"
+)
+
+type InsertLog struct {
+	MsgLength              int
+	DurationInMilliseconds int64
+	InsertTime             time.Time
+	NumSince               int64
+	Speed                  float64
+}
+
+type TimeSyncRole int
+
+const (
+	Reader TimeSyncRole = 0
+	Writer TimeSyncRole = 1
 )
 
 const ReadStopFlagEnd int64 = 0
@@ -47,8 +65,10 @@ type ReaderTimeSyncCfg struct {
 
 	revTimesyncFromReader map[uint64]int
 
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx        context.Context
+	cancel     context.CancelFunc
+	InsertLogs []InsertLog
+	RoleType   TimeSyncRole
 }
 
 /*
@@ -293,9 +313,57 @@ func (r *ReaderTimeSyncCfg) isReadStopFlag(imsg *pb.InsertOrDeleteMsg) bool {
 	return imsg.ClientId < ReadStopFlagEnd
 }
 
+func (r *ReaderTimeSyncCfg) WriteInsertLog() {
+	fileName := "/tmp/reader_get_pulsar.txt"
+	if r.RoleType == Writer {
+		fileName = "/tmp/writer_get_pulsar.txt"
+	}
+
+
+	f, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// write logs
+	for _, insertLog := range r.InsertLogs {
+		insertLogJson, err := json.Marshal(&insertLog)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		writeString := string(insertLogJson) + "\n"
+		//fmt.Println(writeString)
+
+		_, err2 := f.WriteString(writeString)
+		if err2 != nil {
+			log.Fatal(err2)
+		}
+	}
+
+	// reset InsertLogs buffer
+	r.InsertLogs = make([]InsertLog, 0)
+
+	err = f.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("write get pulsar log done")
+}
+
 func (r *ReaderTimeSyncCfg) startReadTopics() {
 	ctx, _ := context.WithCancel(r.ctx)
 	tsm := TimeSyncMsg{Timestamp: 0, NumRecorders: 0}
+	const Debug = true
+	const WriterBaseline = 1000 * 1000
+	const LogBaseline = 100000
+	var Counter int64 = 0
+	var LastCounter int64 = 0
+	r.InsertLogs = make([]InsertLog, 0)
+	InsertTime := time.Now()
+	var BaselineCounter int64 = 0
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -332,7 +400,31 @@ func (r *ReaderTimeSyncCfg) startReadTopics() {
 					log.Printf("WARN :  Insert or delete chan is full ...")
 				}
 				tsm.NumRecorders++
-				r.insertOrDeleteChan <- &imsg
+				if Debug {
+					r.insertOrDeleteChan <- &imsg
+					Counter++
+					if Counter % LogBaseline == 0 {
+						timeNow := time.Now()
+						duration := timeNow.Sub(InsertTime)
+						speed := float64(Counter-LastCounter) / duration.Seconds()
+						insertLog := InsertLog{
+							MsgLength:              int(Counter - LastCounter),
+							DurationInMilliseconds: duration.Milliseconds(),
+							InsertTime:             timeNow,
+							NumSince:               Counter,
+							Speed:                  speed,
+						}
+						r.InsertLogs = append(r.InsertLogs, insertLog)
+						LastCounter = Counter
+						InsertTime = timeNow
+					}
+					if Counter/WriterBaseline != BaselineCounter  {
+						r.WriteInsertLog()
+						BaselineCounter = Counter/WriterBaseline
+					}
+				} else {
+					r.insertOrDeleteChan <- &imsg
+				}
 			}
 			r.readerConsumer.AckID(msg.ID())
 		}

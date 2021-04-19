@@ -200,6 +200,7 @@ func (mc *MessageClient) InitClient(url string) {
 		log.Fatal(err)
 	}
 	mc.timeSyncCfg = timeSync.(*timesync.ReaderTimeSyncCfg)
+	mc.timeSyncCfg.RoleType = timesync.Reader
 
 	mc.timestampBatchStart = 0
 	mc.timestampBatchEnd = 0
