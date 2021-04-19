@@ -59,6 +59,7 @@ cmake_build/
 .DS_Store
 *.swp
 cwrapper_build
+**/cwrapper_rocksdb_build/
 **/.clangd/*
 **/compile_commands.json
 **/.lint

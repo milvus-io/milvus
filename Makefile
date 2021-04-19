@@ -57,14 +57,8 @@ lint:tools/bin/revive
 	@echo "Running $@ check"
 	@tools/bin/revive -formatter friendly -config tools/check/revive.toml ./...
 
-get-rocksdb:
-	@go env -w CGO_CFLAGS="-I$(PWD)/internal/kv/rocksdb/cwrapper/output/include"
-	@go env -w CGO_LDFLAGS="-L$(PWD)/internal/kv/rocksdb/cwrapper/output/lib -l:librocksdb.a -lstdc++ -lm -lz"
-	@(env bash $(PWD)/internal/kv/rocksdb/cwrapper/build.sh)
-	@go get github.com/tecbot/gorocksdb
-
 #TODO: Check code specifications by golangci-lint
-static-check:get-rocksdb
+static-check:
 	@echo "Running $@ check"
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint cache clean
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./internal/...
@@ -85,7 +79,7 @@ endif
 verifiers: getdeps cppcheck fmt static-check ruleguard
 
 # Builds various components locally.
-build-go: build-cpp get-rocksdb
+build-go: build-cpp
 	@echo "Building each component's binary to './bin'"
 	@echo "Building master ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="0" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/master $(PWD)/cmd/master/main.go 1>/dev/null
@@ -105,6 +99,10 @@ build-go: build-cpp get-rocksdb
 build-cpp:
 	@(env bash $(PWD)/scripts/core_build.sh -f "$(CUSTOM_THIRDPARTY_PATH)")
 	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@go env -w CGO_CFLAGS="-I$(PWD)/internal/kv/rocksdb/cwrapper/output/include"
+	@go env -w CGO_LDFLAGS="-L$(PWD)/internal/kv/rocksdb/cwrapper/output/lib -l:librocksdb.a -lstdc++ -lm -lz"
+	@(env bash $(PWD)/scripts/cwrapper_rocksdb_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@go get github.com/tecbot/gorocksdb
 
 build-cpp-with-unittest:
 	@(env bash $(PWD)/scripts/core_build.sh -u -f "$(CUSTOM_THIRDPARTY_PATH)")
@@ -114,7 +112,7 @@ build-cpp-with-unittest:
 unittest: test-cpp test-go
 
 #TODO: proxy master query node writer's unittest
-test-go:get-rocksdb
+test-go:build-cpp
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
 
