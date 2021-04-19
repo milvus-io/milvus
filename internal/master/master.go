@@ -47,7 +47,7 @@ type Master struct {
 	pc *informer.PulsarClient
 
 	// chans
-	ssChan chan internalpb.SegmentStatistics
+	ssChan chan internalpb.SegmentStats
 
 	kvBase    *kv.EtcdKV
 	scheduler *ddRequestScheduler
@@ -93,7 +93,7 @@ func CreateServer(ctx context.Context, kvRootPath string, metaRootPath, tsoRootP
 		kvBase:         newKVBase(kvRootPath, etcdAddr),
 		scheduler:      NewDDRequestScheduler(),
 		mt:             metakv,
-		ssChan:         make(chan internalpb.SegmentStatistics, 10),
+		ssChan:         make(chan internalpb.SegmentStats, 10),
 		pc:             informer.NewPulsarClient(),
 	}
 	m.grpcServer = grpc.NewServer()
@@ -249,7 +249,7 @@ func (s *Master) pulsarLoop() {
 	for {
 		select {
 		case msg := <-consumerChan:
-			var m internalpb.SegmentStatistics
+			var m internalpb.SegmentStats
 			proto.Unmarshal(msg.Payload(), &m)
 			fmt.Printf("Received message msgId: %#v -- content: '%d'\n",
 				msg.ID(), m.SegmentId)
