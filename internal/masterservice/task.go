@@ -41,6 +41,8 @@ func (bt *baseReqTask) WaitToFinish() error {
 	select {
 	case <-bt.core.ctx.Done():
 		return errors.New("context done")
+	case <-bt.ctx.Done():
+		return errors.New("grpc context done")
 	case err, ok := <-bt.cv:
 		if !ok {
 			return errors.New("notify chan closed")

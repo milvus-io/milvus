@@ -16,12 +16,6 @@ import (
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/tso"
-	"github.com/zilliztech/milvus-distributed/internal/types"
-	"github.com/zilliztech/milvus-distributed/internal/util/retry"
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
@@ -30,6 +24,11 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
+	"github.com/zilliztech/milvus-distributed/internal/tso"
+	"github.com/zilliztech/milvus-distributed/internal/types"
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
+	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 //  internalpb -> internalpb

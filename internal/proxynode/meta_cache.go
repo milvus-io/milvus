@@ -158,8 +158,6 @@ func (m *MetaCache) GetPartitionID(ctx context.Context, collectionName string, p
 	if err == nil {
 		return partitionID, nil
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	req := &milvuspb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
@@ -174,6 +172,10 @@ func (m *MetaCache) GetPartitionID(ctx context.Context, collectionName string, p
 	if partitions.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return 0, fmt.Errorf("%s", partitions.Status.Reason)
 	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if len(partitions.PartitionIDs) != len(partitions.PartitionNames) {
 		return 0, fmt.Errorf("partition ids len: %d doesn't equal Partition name len %d",
 			len(partitions.PartitionIDs), len(partitions.PartitionNames))
