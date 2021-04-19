@@ -264,7 +264,12 @@ func (ta *Allocator) Close() {
 }
 
 func (ta *Allocator) CleanCache() {
-	req := &SyncRequest{BaseRequest: BaseRequest{Done: make(chan error), Valid: false}}
+	req := &SyncRequest{
+		BaseRequest: BaseRequest{
+			Done:  make(chan error),
+			Valid: false,
+		},
+	}
 	ta.ForceSyncChan <- req
 	_ = req.Wait()
 }

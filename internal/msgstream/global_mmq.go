@@ -106,8 +106,8 @@ func (mmq *MemMQ) Produce(channelName string, msgPack *MsgPack) error {
 	mmq.consumerMu.Lock()
 	defer mmq.consumerMu.Unlock()
 
-	consumers := mmq.consumers[channelName]
-	if consumers == nil {
+	consumers, ok := mmq.consumers[channelName]
+	if !ok {
 		return errors.New("Channel " + channelName + " doesn't exist")
 	}
 
@@ -137,7 +137,12 @@ func (mmq *MemMQ) Broadcast(msgPack *MsgPack) error {
 func (mmq *MemMQ) Consume(groupName string, channelName string) (*MsgPack, error) {
 	var consumer *MemConsumer = nil
 	mmq.consumerMu.Lock()
-	consumers := mmq.consumers[channelName]
+
+	consumers, ok := mmq.consumers[channelName]
+	if !ok {
+		return nil, errors.New("Channel " + channelName + " doesn't exist")
+	}
+
 	for _, c := range consumers {
 		if c.GroupName == groupName {
 			consumer = c

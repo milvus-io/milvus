@@ -79,81 +79,51 @@ endif
 verifiers: getdeps cppcheck fmt static-check ruleguard
 
 # Builds various components locally.
-
-master: build-cpp
-	@echo "Building each component's binary to './bin'"
-	@echo "Building masterservice ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/masterservice $(PWD)/cmd/masterservice/main.go 1>/dev/null
-
-proxynode: build-cpp
-	@echo "Building each component's binary to './bin'"
-	@echo "Building proxy node ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="0" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/proxynode $(PWD)/cmd/proxy/node/proxy_node.go 1>/dev/null
-
-# Builds various components locally.
-querynode: build-cpp
-	@echo "Building each component's binary to './bin'"
-	@echo "Building query node ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/querynode $(PWD)/cmd/querynode/querynode.go 1>/dev/null
-
-# Builds various components locally.
-datanode: build-cpp
-	@echo "Building each component's binary to './bin'"
-	@echo "Building data node ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/datanode $(PWD)/cmd/datanode/main.go 1>/dev/null
-
-# Builds various components locally.
-indexnode: build-cpp
-	@echo "Building each component's binary to './bin'"
-	@echo "Building distributed indexnode ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/indexnode $(PWD)/cmd/indexnode/main.go 1>/dev/null
-
-indexservice: build-cpp
-	@echo "Building each component's binary to './bin'"
-	@echo "Building distributed indexservice ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/indexservice $(PWD)/cmd/indexservice/main.go 1>/dev/null
-
-singlenode: build-cpp
-	@echo "Building singlenode ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/singlenode $(PWD)/cmd/singlenode/main.go 1>/dev/null
-
-queryservice: build-cpp
-	@echo "Building each component's binary to './bin'"
-	@echo "Building distributed queryservice ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/queryservice $(PWD)/cmd/queryservice/queryservice.go 1>/dev/null
-
-dataservice: build-cpp
-	@echo "Building dataservice ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/dataservice $(PWD)/cmd/dataservice/main.go 1>/dev/null
-
-# Builds various components locally.
-build-go: build-cpp
-	@echo "Building each component's binary to './bin'"
-	@echo "Building masterservice ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/masterservice $(PWD)/cmd/masterservice/main.go 1>/dev/null
-	@echo "Building proxy service ..."
-	# TODO: fix me, why proxy service need cgo enabled
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/proxyservice $(PWD)/cmd/proxy/service/proxy_service.go 1>/dev/null
-	@echo "Building proxy node ..."
-	# TODO: fix me, why proxy node need cgo enabled
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/proxynode $(PWD)/cmd/proxy/node/proxy_node.go 1>/dev/null
-	@echo "Building query service ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/queryservice $(PWD)/cmd/queryservice/queryservice.go 1>/dev/null
-	@echo "Building query node ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/querynode $(PWD)/cmd/querynode/querynode.go 1>/dev/null
+binlog:
 	@echo "Building binlog ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/binlog $(PWD)/cmd/binlog/main.go 1>/dev/null
-	@echo "Building singlenode ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/singlenode $(PWD)/cmd/singlenode/main.go 1>/dev/null
-	@echo "Building distributed indexservice ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/indexservice $(PWD)/cmd/indexservice/main.go 1>/dev/null
-	@echo "Building distributed indexnode ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/indexnode $(PWD)/cmd/indexnode/main.go 1>/dev/null
-	@echo "Building data node ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/datanode $(PWD)/cmd/datanode/main.go 1>/dev/null
-	@echo "Building dataservice ..."
+
+master:
+	@echo "Building master service ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/masterservice $(PWD)/cmd/masterservice/main.go 1>/dev/null
+
+proxyservice:
+	@echo "Building proxy service ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/proxyservice $(PWD)/cmd/proxy/service/proxy_service.go 1>/dev/null
+
+proxynode:
+	@echo "Building proxy node ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/proxynode $(PWD)/cmd/proxy/node/proxy_node.go 1>/dev/null
+
+queryservice:
+	@echo "Building query service ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/queryservice $(PWD)/cmd/queryservice/queryservice.go 1>/dev/null
+
+querynode:
+	@echo "Building query node ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/querynode $(PWD)/cmd/querynode/querynode.go 1>/dev/null
+
+dataservice:
+	@echo "Building data service ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/dataservice $(PWD)/cmd/dataservice/main.go 1>/dev/null
 
+datanode:
+	@echo "Building data node ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/datanode $(PWD)/cmd/datanode/main.go 1>/dev/null
+
+indexservice: build-cpp
+	@echo "Building index service ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/indexservice $(PWD)/cmd/indexservice/main.go 1>/dev/null
+
+indexnode: build-cpp
+	@echo "Building index node ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/indexnode $(PWD)/cmd/indexnode/main.go 1>/dev/null
+
+singlenode: build-cpp
+	@echo "Building single node ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/singlenode $(PWD)/cmd/singlenode/main.go 1>/dev/null
+
+build-go: binlog master proxyservice proxynode queryservice querynode indexservice indexnode datanode dataservice singlenode
 
 build-cpp:
 	@(env bash $(PWD)/scripts/core_build.sh -f "$(CUSTOM_THIRDPARTY_PATH)")
