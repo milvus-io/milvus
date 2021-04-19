@@ -134,8 +134,8 @@ func (node *NodeImpl) HasCollection(ctx context.Context, request *milvuspb.HasCo
 
 func (node *NodeImpl) LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
 	log.Println("load collection: ", request)
-	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
-	defer cancel()
+	//ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
+	//defer cancel()
 
 	lct := &LoadCollectionTask{
 		ctx:                   ctx,
