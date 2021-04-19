@@ -115,7 +115,9 @@ class SegmentNaive : public SegmentBase {
         struct TmpBitmap {
             // Just for query
             int64_t del_barrier = 0;
-            std::vector<bool> bitmap;
+            std::vector<char> bitmap;
+
+
         };
         std::shared_ptr<TmpBitmap> lru_;
         std::shared_mutex shared_mutex_;
@@ -135,7 +137,7 @@ class SegmentNaive : public SegmentBase {
         }
     };
 
-    std::shared_ptr<DeletedRecord::TmpBitmap> get_deleted_bitmap(int64_t barrier, Timestamp query_timestamp, int64_t insert_barrier);
+    std::shared_ptr<DeletedRecord::TmpBitmap> get_deleted_bitmap(int64_t del_barrier, Timestamp query_timestamp, int64_t insert_barrier);
 
     Status
     QueryImpl(const query::QueryPtr& query, Timestamp timestamp, QueryResult& results);
