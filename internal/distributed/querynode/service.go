@@ -5,14 +5,17 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"time"
 
 	"google.golang.org/grpc"
 
 	"github.com/zilliztech/milvus-distributed/internal/dataservice"
 	grpcdataserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
 	grpcindexserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/indexservice/client"
+	grpcmasterserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
 	grpcqueryserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/queryservice/client"
 	"github.com/zilliztech/milvus-distributed/internal/indexservice"
+	"github.com/zilliztech/milvus-distributed/internal/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
@@ -33,6 +36,16 @@ func NewServer(ctx context.Context) *Server {
 	queryservice.Params.Init()
 	queryClient := grpcqueryserviceclient.NewClient(queryservice.Params.Address)
 	if err := server.node.SetQueryService(queryClient); err != nil {
+		panic(err)
+	}
+
+	masterservice.Params.Init()
+	masterConnectTimeout := 10 * time.Second
+	masterClient, err := grpcmasterserviceclient.NewGrpcClient(masterservice.Params.Address, masterConnectTimeout)
+	if err != nil {
+		panic(err)
+	}
+	if err = server.node.SetMasterService(masterClient); err != nil {
 		panic(err)
 	}
 

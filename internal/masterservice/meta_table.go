@@ -536,9 +536,12 @@ func (mt *metaTable) GetSegmentIndexInfoByID(segID typeutil.UniqueID, filedID in
 		return pb.SegmentIndexInfo{}, errors.Errorf("segment id %d not has any index", segID)
 	}
 
-	if filedID == -1 && idxName == "" { // return any index
+	if filedID == -1 && idxName == "" { // return default index
 		for _, seg := range *segIdxMap {
-			return seg, nil
+			info, ok := mt.indexID2Meta[seg.IndexID]
+			if ok && info.IndexName == Params.DefaultIndexName {
+				return seg, nil
+			}
 		}
 	} else {
 		for idxID, seg := range *segIdxMap {
@@ -704,4 +707,15 @@ func (mt *metaTable) GetIndexByName(collName string, fieldName string, indexName
 		rst = append(rst, *rstIndex[i])
 	}
 	return rst, nil
+}
+
+func (mt *metaTable) GetIndexByID(indexID typeutil.UniqueID) (*pb.IndexInfo, error) {
+	mt.ddLock.RLock()
+	mt.ddLock.RUnlock()
+
+	indexInfo, ok := mt.indexID2Meta[indexID]
+	if !ok {
+		return nil, errors.New("cannot find index, id =" + strconv.FormatInt(indexID, 10))
+	}
+	return &indexInfo, nil
 }
