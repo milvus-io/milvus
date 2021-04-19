@@ -5,6 +5,7 @@
     "initializeCommand": "scripts/devcontainer.sh && docker-compose -f docker-compose-devcontainer.yml down || true",
     "workspaceFolder": "/go/src/github.com/zilliztech/milvus-distributed",
     "shutdownAction": "stopCompose",
+    "remoteEnv": { "GOPROXY": "https://goproxy.cn" },
     "extensions": [
       "ms-vscode.cpptools",
       "golang.go"
