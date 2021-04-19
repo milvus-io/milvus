@@ -12,57 +12,23 @@
 
 ```go
 type Client interface {
-  RegisterLink() (ProxyInfo, error)
-  RegisterNode(req NodeInfo) (InitParams, error)
   GetTimeTickChannel() (string, error)
   GetStatsChannel() (string, error)
 }
 ```
 
-* *RegisterLink*
+
+
+#### 6.1 Gateway API
 
 ```go
 type ProxyInfo struct {
   Address string
   Port int32
 }
-```
 
-* *RegisterNode*
-
-```go
-type NodeInfo struct {}
-
-type InitParams struct {}
-```
-
-
-
-#### 6.0 ProxyNode
-
-```go
-type ProxyNode interface {
-  Start() error
-  Close() error
-  
-  SetTimeTickChannel(channelID string) error
-  SetStatsChannel(channelID string) error
-  
-	CreateCollection(req CreateCollectionRequest) error
-  DropCollection(req DropCollectionRequest) error
-  HasCollection(req HasCollectionRequest) (bool, error)
-  DescribeCollection(req DescribeCollectionRequest) (CollectionDescription, error)
-  ShowCollections(req ShowCollectionRequest) ([]string, error)
-  CreatePartition(req CreatePartitionRequest) error
-  DropPartition(req DropPartitionRequest) error
-  HasPartition(req HasPartitionRequest) (bool, error)
-  DescribePartition(req DescribePartitionRequest) (PartitionDescription, error)
-  ShowPartitions(req ShowPartitionRequest) ([]string, error)
-  CreateIndex(req CreateIndexRequest) error
-  DescribeIndex(DescribeIndexRequest) (DescribeIndexResponse, error)
-  
-  Insert(req RowBatch) (InsertResponse, error)
-  Search(req SearchRequest) (SearchResults, error)
+type Client interface {
+  RegisterLink() (ProxyInfo, error)
 }
 ```
 
