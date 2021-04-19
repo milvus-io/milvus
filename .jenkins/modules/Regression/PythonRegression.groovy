@@ -23,16 +23,12 @@ timeout(time: "${regressionTimeout}", unit: 'MINUTES') {
                                    --set image.all.repository=${env.TARGET_REPO}/milvus-distributed \
                                    --set image.all.tag=${env.TARGET_TAG} \
                                    --set image.all.pullPolicy=Always \
-                                   --set logsPersistence.enabled=true \
-                                   --set logsPersistence.mountPath=/milvus-distributed/logs \
                                    --namespace ${env.HELM_RELEASE_NAMESPACE} ${env.HELM_RELEASE_NAME} ."
                 } else {
                     helmCMD = "helm install --wait --timeout 300s \
                                    --set image.all.repository=${env.TARGET_REPO}/milvus-distributed \
                                    --set image.all.tag=${env.TARGET_TAG} \
                                    --set image.all.pullPolicy=Always \
-                                   --set logsPersistence.enabled=true \
-                                   --set logsPersistence.mountPath=/milvus-distributed/logs \
                                    --namespace ${env.HELM_RELEASE_NAMESPACE} ${env.HELM_RELEASE_NAME} ."
                 }
 
@@ -66,23 +62,25 @@ timeout(time: "${regressionTimeout}", unit: 'MINUTES') {
             container('deploy-env') {
                 def milvusLabels = ""
                 if ("${REGRESSION_SERVICE_TYPE}" == "distributed") {
-                    milvusLabels = "app.kubernetes.io/instance=${env.HELM_RELEASE_NAME},component=proxyservice"
+                    milvusLabels = "app.kubernetes.io/instance=${env.HELM_RELEASE_NAME},app.kubernetes.io/name=milvus-ha"
                 } else {
-                    milvusLabels = "app.kubernetes.io/instance=${env.HELM_RELEASE_NAME},component=standalone"
+                    milvusLabels = "app.kubernetes.io/instance=${env.HELM_RELEASE_NAME},app.kubernetes.io/name=milvus-ha"
                 }
                 def etcdLabels = "app.kubernetes.io/instance=${env.HELM_RELEASE_NAME},app.kubernetes.io/name=etcd"
                 def minioLables = "release=${env.HELM_RELEASE_NAME},app=minio"
                 def pulsarLabels = "release=${env.HELM_RELEASE_NAME},app=pulsar"
+                def namespace = "${env.HELM_RELEASE_NAMESPACE}"
+                def artifactsPath = "${env.DEV_TEST_ARTIFACTS_PATH}"
 
 
-                sh "mkdir -p ${env.DEV_TEST_ARTIFACTS_PATH}"
-                sh "kubectl cp -n ${env.HELM_RELEASE_NAMESPACE} \$(kubectl get pod -n ${env.HELM_RELEASE_NAMESPACE} -l ${milvusLabels} -o jsonpath='{range.items[0]}{.metadata.name}'):logs ${env.DEV_TEST_ARTIFACTS_PATH}"
-                sh "kubectl logs --all-containers=true -n ${env.HELM_RELEASE_NAMESPACE} -l ${etcdLabels} > ${env.DEV_TEST_ARTIFACTS_PATH}/etcd-${REGRESSION_SERVICE_TYPE}.log"
-                sh "kubectl logs --all-containers=true -n ${env.HELM_RELEASE_NAMESPACE} -l ${minioLables} > ${env.DEV_TEST_ARTIFACTS_PATH}/minio-${REGRESSION_SERVICE_TYPE}.log"
+                sh "mkdir -p $artifactsPath"
+                sh "for pod in \$(kubectl get pod -n $namespace -l ${milvusLabels} -o jsonpath='{range.items[*]}{.metadata.name} '); do kubectl logs --all-containers -n $namespace \$pod > $artifactsPath/\$pod.log; done"
+                sh "for pod in \$(kubectl get pod -n $namespace -l ${etcdLabels} -o jsonpath='{range.items[*]}{.metadata.name} '); do kubectl logs --all-containers -n $namespace \$pod > $artifactsPath/\$pod.log; done"
+                sh "for pod in \$(kubectl get pod -n $namespace -l ${minioLables} -o jsonpath='{range.items[*]}{.metadata.name} '); do kubectl logs --all-containers -n $namespace \$pod > $artifactsPath/\$pod.log; done"
                 if ("${REGRESSION_SERVICE_TYPE}" == "distributed") {
-                    sh "kubectl logs --all-containers=true -n ${env.HELM_RELEASE_NAMESPACE} -l ${pulsarLabels} > ${env.DEV_TEST_ARTIFACTS_PATH}/pulsar-${REGRESSION_SERVICE_TYPE}.log"
+                    sh "for pod in \$(kubectl get pod -n $namespace -l ${pulsarLabels} -o jsonpath='{range.items[*]}{.metadata.name} '); do kubectl logs --all-containers -n $namespace \$pod > $artifactsPath/\$pod.log; done"
                 }
-                archiveArtifacts artifacts: "${env.DEV_TEST_ARTIFACTS_PATH}/**", allowEmptyArchive: true
+                archiveArtifacts artifacts: "$artifactsPath/**", allowEmptyArchive: true
             }
         }
     }
