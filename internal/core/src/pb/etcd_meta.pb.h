@@ -861,6 +861,7 @@ class CollectionInfo :
   enum : int {
     kPartitionIDsFieldNumber = 4,
     kIndexParamsFieldNumber = 5,
+    kIndexNamesFieldNumber = 6,
     kSchemaFieldNumber = 2,
     kIDFieldNumber = 1,
     kCreateTimeFieldNumber = 3,
@@ -886,6 +887,23 @@ class CollectionInfo :
   ::milvus::proto::etcd::IndexParamsInfo* add_index_params();
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::etcd::IndexParamsInfo >&
       index_params() const;
+
+  // repeated string index_names = 6;
+  int index_names_size() const;
+  void clear_index_names();
+  const std::string& index_names(int index) const;
+  std::string* mutable_index_names(int index);
+  void set_index_names(int index, const std::string& value);
+  void set_index_names(int index, std::string&& value);
+  void set_index_names(int index, const char* value);
+  void set_index_names(int index, const char* value, size_t size);
+  std::string* add_index_names();
+  void add_index_names(const std::string& value);
+  void add_index_names(std::string&& value);
+  void add_index_names(const char* value);
+  void add_index_names(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& index_names() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_index_names();
 
   // .milvus.proto.schema.CollectionSchema schema = 2;
   bool has_schema() const;
@@ -913,6 +931,7 @@ class CollectionInfo :
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > partitionids_;
   mutable std::atomic<int> _partitionids_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::etcd::IndexParamsInfo > index_params_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> index_names_;
   ::milvus::proto::schema::CollectionSchema* schema_;
   ::PROTOBUF_NAMESPACE_ID::int64 id_;
   ::PROTOBUF_NAMESPACE_ID::uint64 create_time_;
@@ -2525,6 +2544,71 @@ inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::etcd::I
 CollectionInfo::index_params() const {
   // @@protoc_insertion_point(field_list:milvus.proto.etcd.CollectionInfo.index_params)
   return index_params_;
+}
+
+// repeated string index_names = 6;
+inline int CollectionInfo::index_names_size() const {
+  return index_names_.size();
+}
+inline void CollectionInfo::clear_index_names() {
+  index_names_.Clear();
+}
+inline const std::string& CollectionInfo::index_names(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.CollectionInfo.index_names)
+  return index_names_.Get(index);
+}
+inline std::string* CollectionInfo::mutable_index_names(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.etcd.CollectionInfo.index_names)
+  return index_names_.Mutable(index);
+}
+inline void CollectionInfo::set_index_names(int index, const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.CollectionInfo.index_names)
+  index_names_.Mutable(index)->assign(value);
+}
+inline void CollectionInfo::set_index_names(int index, std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.CollectionInfo.index_names)
+  index_names_.Mutable(index)->assign(std::move(value));
+}
+inline void CollectionInfo::set_index_names(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  index_names_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.proto.etcd.CollectionInfo.index_names)
+}
+inline void CollectionInfo::set_index_names(int index, const char* value, size_t size) {
+  index_names_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.etcd.CollectionInfo.index_names)
+}
+inline std::string* CollectionInfo::add_index_names() {
+  // @@protoc_insertion_point(field_add_mutable:milvus.proto.etcd.CollectionInfo.index_names)
+  return index_names_.Add();
+}
+inline void CollectionInfo::add_index_names(const std::string& value) {
+  index_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.etcd.CollectionInfo.index_names)
+}
+inline void CollectionInfo::add_index_names(std::string&& value) {
+  index_names_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.proto.etcd.CollectionInfo.index_names)
+}
+inline void CollectionInfo::add_index_names(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  index_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.proto.etcd.CollectionInfo.index_names)
+}
+inline void CollectionInfo::add_index_names(const char* value, size_t size) {
+  index_names_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.proto.etcd.CollectionInfo.index_names)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+CollectionInfo::index_names() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.etcd.CollectionInfo.index_names)
+  return index_names_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+CollectionInfo::mutable_index_names() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.etcd.CollectionInfo.index_names)
+  return &index_names_;
 }
 
 // -------------------------------------------------------------------

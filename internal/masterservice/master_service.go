@@ -381,7 +381,7 @@ func (c *Core) startSegmentFlushCompletedLoop() {
 					t := &CreateIndexTask{
 						core:        c,
 						segmentID:   seg,
-						indexName:   fmt.Sprintf("index_field_%d_%d", f.FiledID, i),
+						indexName:   coll.IndexNames[i],
 						fieldSchema: fieldSch,
 						indexParams: nil,
 					}
