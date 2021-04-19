@@ -1,6 +1,7 @@
 package indexbuilder
 
 import (
+	"fmt"
 	"github.com/stretchr/testify/assert"
 	"math/rand"
 	"strconv"
@@ -9,10 +10,22 @@ import (
 
 const (
 	// index type
-	IvfPq      = "IVF_PQ"
-	IvfFlatNM  = "IVF_FLAT"
-	BinIvfFlat = "BIN_IVF_FLAT"
-	BinFlat    = "BIN_FLAT"
+	INDEX_FAISS_IDMAP       = "FLAT"
+	INDEX_FAISS_IVFFLAT     = "IVF_FLAT"
+	INDEX_FAISS_IVFPQ       = "IVF_PQ"
+	INDEX_FAISS_IVFSQ8      = "IVF_SQ8"
+	INDEX_FAISS_IVFSQ8H     = "IVF_SQ8_HYBRID"
+	INDEX_FAISS_BIN_IDMAP   = "BIN_FLAT"
+	INDEX_FAISS_BIN_IVFFLAT = "BIN_IVF_FLAT"
+	INDEX_NSG               = "NSG"
+
+	INDEX_HNSW      = "HNSW"
+	INDEX_RHNSWFlat = "RHNSW_FLAT"
+	INDEX_RHNSWPQ   = "RHNSW_PQ"
+	INDEX_RHNSWSQ   = "RHNSW_SQ"
+	INDEX_ANNOY     = "ANNOY"
+	INDEX_NGTPANNG  = "NGT_PANNG"
+	INDEX_NGTONNG   = "NGT_ONNG"
 
 	// metric type
 	L2      = "L2"
@@ -20,12 +33,18 @@ const (
 	hamming = "HAMMING"
 	Jaccard = "JACCARD"
 
-	dim       = 8
-	nlist     = 100
-	m         = 4
-	nbits     = 8
-	nb        = 8 * 10000
-	sliceSize = 4
+	dim            = 8
+	nlist          = 100
+	m              = 4
+	nbits          = 8
+	nb             = 8 * 10000
+	nprobe         = 8
+	sliceSize      = 4
+	efConstruction = 200
+	ef             = 200
+	edgeSize       = 10
+	epsilon        = 0.1
+	maxSearchEdges = 50
 )
 
 type testCase struct {
@@ -36,19 +55,41 @@ type testCase struct {
 
 func generateFloatVectorTestCases() []testCase {
 	return []testCase{
-		{IvfPq, L2, false},
-		{IvfPq, IP, false},
-		{IvfFlatNM, L2, false},
-		{IvfFlatNM, IP, false},
+		{INDEX_FAISS_IDMAP, L2, false},
+		{INDEX_FAISS_IDMAP, IP, false},
+		{INDEX_FAISS_IVFFLAT, L2, false},
+		{INDEX_FAISS_IVFFLAT, IP, false},
+		{INDEX_FAISS_IVFPQ, L2, false},
+		{INDEX_FAISS_IVFPQ, IP, false},
+		{INDEX_FAISS_IVFSQ8, L2, false},
+		{INDEX_FAISS_IVFSQ8, IP, false},
+		//{INDEX_FAISS_IVFSQ8H, L2, false}, // TODO: enable gpu
+		//{INDEX_FAISS_IVFSQ8H, IP, false},
+		{INDEX_NSG, L2, false},
+		{INDEX_NSG, IP, false},
+		//{INDEX_HNSW, L2, false}, // TODO: fix json parse exception
+		//{INDEX_HNSW, IP, false},
+		//{INDEX_RHNSWFlat, L2, false},
+		//{INDEX_RHNSWFlat, IP, false},
+		//{INDEX_RHNSWPQ, L2, false},
+		//{INDEX_RHNSWPQ, IP, false},
+		//{INDEX_RHNSWSQ, L2, false},
+		//{INDEX_RHNSWSQ, IP, false},
+		{INDEX_ANNOY, L2, false},
+		{INDEX_ANNOY, IP, false},
+		{INDEX_NGTPANNG, L2, false},
+		{INDEX_NGTPANNG, IP, false},
+		{INDEX_NGTONNG, L2, false},
+		{INDEX_NGTONNG, IP, false},
 	}
 }
 
 func generateBinaryVectorTestCases() []testCase {
 	return []testCase{
-		//{BinIvfFlat, Jaccard, true},
-		//{BinIvfFlat, hamming, true},
-		{BinFlat, Jaccard, true},
-		{BinFlat, hamming, true},
+		{INDEX_FAISS_BIN_IVFFLAT, Jaccard, true},
+		{INDEX_FAISS_BIN_IVFFLAT, hamming, true},
+		{INDEX_FAISS_BIN_IDMAP, Jaccard, true},
+		{INDEX_FAISS_BIN_IDMAP, hamming, true},
 	}
 }
 
@@ -61,22 +102,85 @@ func generateParams(indexType, metricType string) (map[string]string, map[string
 	indexParams := make(map[string]string)
 	indexParams["index_type"] = indexType
 	indexParams["metric_type"] = metricType
-	if indexType == IvfPq {
+	if indexType == INDEX_FAISS_IDMAP { // float vector
+		indexParams["dim"] = strconv.Itoa(dim)
+		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
+	} else if indexType == INDEX_FAISS_IVFFLAT {
+		indexParams["dim"] = strconv.Itoa(dim)
+		indexParams["nlist"] = strconv.Itoa(nlist)
+	} else if indexType == INDEX_FAISS_IVFPQ {
 		indexParams["dim"] = strconv.Itoa(dim)
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["m"] = strconv.Itoa(m)
 		indexParams["nbits"] = strconv.Itoa(nbits)
 		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
-	} else if indexType == BinIvfFlat {
+	} else if indexType == INDEX_FAISS_IVFSQ8 {
+		indexParams["dim"] = strconv.Itoa(dim)
+		indexParams["nlist"] = strconv.Itoa(nlist)
+		indexParams["nbits"] = strconv.Itoa(nbits)
+		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
+	} else if indexType == INDEX_FAISS_IVFSQ8H {
+		// TODO: enable gpu
+	} else if indexType == INDEX_NSG {
+		indexParams["dim"] = strconv.Itoa(dim)
+		indexParams["nlist"] = strconv.Itoa(163)
+		indexParams["nprobe"] = strconv.Itoa(nprobe)
+		indexParams["knng"] = strconv.Itoa(20)
+		indexParams["search_length"] = strconv.Itoa(40)
+		indexParams["out_degree"] = strconv.Itoa(30)
+		indexParams["candidate_pool_size"] = strconv.Itoa(100)
+	} else if indexType == INDEX_HNSW {
+		indexParams["dim"] = strconv.Itoa(dim)
+		indexParams["m"] = strconv.Itoa(16)
+		indexParams["efConstruction"] = strconv.Itoa(efConstruction)
+		indexParams["ef"] = strconv.Itoa(ef)
+	} else if indexType == INDEX_RHNSWFlat {
+		indexParams["dim"] = strconv.Itoa(dim)
+		indexParams["m"] = strconv.Itoa(16)
+		indexParams["efConstruction"] = strconv.Itoa(efConstruction)
+		indexParams["ef"] = strconv.Itoa(ef)
+		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
+	} else if indexType == INDEX_RHNSWPQ {
+		indexParams["dim"] = strconv.Itoa(dim)
+		indexParams["m"] = strconv.Itoa(16)
+		indexParams["efConstruction"] = strconv.Itoa(efConstruction)
+		indexParams["ef"] = strconv.Itoa(ef)
+		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
+		indexParams["PQM"] = strconv.Itoa(8)
+	} else if indexType == INDEX_RHNSWSQ {
+		indexParams["dim"] = strconv.Itoa(dim)
+		indexParams["m"] = strconv.Itoa(16)
+		indexParams["efConstruction"] = strconv.Itoa(efConstruction)
+		indexParams["ef"] = strconv.Itoa(ef)
+		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
+	} else if indexType == INDEX_ANNOY {
+		indexParams["dim"] = strconv.Itoa(dim)
+		indexParams["n_trees"] = strconv.Itoa(4)
+		indexParams["search_k"] = strconv.Itoa(100)
+		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
+	} else if indexType == INDEX_NGTPANNG {
+		indexParams["dim"] = strconv.Itoa(dim)
+		indexParams["edge_size"] = strconv.Itoa(edgeSize)
+		indexParams["epsilon"] = fmt.Sprint(epsilon)
+		indexParams["max_search_edges"] = strconv.Itoa(maxSearchEdges)
+		indexParams["forcedly_pruned_edge_size"] = strconv.Itoa(60)
+		indexParams["selectively_pruned_edge_size"] = strconv.Itoa(30)
+		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
+	} else if indexType == INDEX_NGTONNG {
+		indexParams["dim"] = strconv.Itoa(dim)
+		indexParams["edge_size"] = strconv.Itoa(edgeSize)
+		indexParams["epsilon"] = fmt.Sprint(epsilon)
+		indexParams["max_search_edges"] = strconv.Itoa(maxSearchEdges)
+		indexParams["outgoing_edge_size"] = strconv.Itoa(5)
+		indexParams["incoming_edge_size"] = strconv.Itoa(40)
+		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
+	} else if indexType == INDEX_FAISS_BIN_IVFFLAT { // binary vector
 		indexParams["dim"] = strconv.Itoa(dim)
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["m"] = strconv.Itoa(m)
 		indexParams["nbits"] = strconv.Itoa(nbits)
 		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
-	} else if indexType == IvfFlatNM {
-		indexParams["dim"] = strconv.Itoa(dim)
-		indexParams["nlist"] = strconv.Itoa(nlist)
-	} else if indexType == BinFlat {
+	} else if indexType == INDEX_FAISS_BIN_IDMAP {
 		indexParams["dim"] = strconv.Itoa(dim)
 	} else {
 		panic("")

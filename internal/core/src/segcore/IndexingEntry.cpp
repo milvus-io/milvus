@@ -111,8 +111,6 @@ CreateIndex(const FieldMeta& field_meta, int64_t chunk_size) {
         }
     }
     switch (field_meta.get_data_type()) {
-        case DataType::BOOL:
-            return std::make_unique<ScalarIndexingEntry<bool>>(field_meta, chunk_size);
         case DataType::INT8:
             return std::make_unique<ScalarIndexingEntry<int8_t>>(field_meta, chunk_size);
         case DataType::INT16:

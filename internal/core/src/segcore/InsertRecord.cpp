@@ -27,10 +27,6 @@ InsertRecord::InsertRecord(const Schema& schema, int64_t chunk_size) : uids_(1),
             }
         }
         switch (field.get_data_type()) {
-            case DataType::BOOL: {
-                entity_vec_.emplace_back(std::make_shared<ConcurrentVector<bool>>(chunk_size));
-                break;
-            }
             case DataType::INT8: {
                 entity_vec_.emplace_back(std::make_shared<ConcurrentVector<int8_t>>(chunk_size));
                 break;
