@@ -5,8 +5,6 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -679,24 +677,4 @@ func (mt *metaTable) UpdateFieldIndexParams(collName string, fieldName string, i
 	}
 
 	return fmt.Errorf("can not find field with id %s", fieldName)
-}
-
-func (mt *metaTable) IsIndexable(collID UniqueID, fieldID UniqueID) (bool, error) {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-
-	if _, ok := mt.collID2Meta[collID]; !ok {
-		return false, fmt.Errorf("can not find collection with id %d", collID)
-	}
-
-	for _, v := range mt.collID2Meta[collID].Schema.Fields {
-		// field is vector type and index params is not empty
-		if v.FieldID == fieldID && (v.DataType == schemapb.DataType_VECTOR_BINARY || v.DataType == schemapb.DataType_VECTOR_FLOAT) &&
-			len(v.IndexParams) != 0 {
-			return true, nil
-		}
-	}
-
-	// fieldID is not in schema(eg: timestamp) or not indexable
-	return false, nil
 }
