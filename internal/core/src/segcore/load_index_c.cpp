@@ -124,6 +124,12 @@ NewBinarySet(CBinarySet* c_binary_set) {
     }
 }
 
+void
+DeleteBinarySet(CBinarySet c_binary_set) {
+    auto binary_set = (milvus::knowhere::BinarySet*)c_binary_set;
+    delete binary_set;
+}
+
 CStatus
 AppendBinaryIndex(CBinarySet c_binary_set, void* index_binary, int64_t index_size, const char* c_index_key) {
     try {

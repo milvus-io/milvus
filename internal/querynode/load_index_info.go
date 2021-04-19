@@ -73,6 +73,7 @@ func (li *LoadIndexInfo) appendFieldInfo(fieldID int64) error {
 func (li *LoadIndexInfo) appendIndex(bytesIndex [][]byte, indexKeys []string) error {
 	var cBinarySet C.CBinarySet
 	status := C.NewBinarySet(&cBinarySet)
+	defer C.DeleteBinarySet(cBinarySet)
 
 	errorCode := status.error_code
 	if errorCode != 0 {

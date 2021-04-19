@@ -41,6 +41,9 @@ AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set);
 CStatus
 NewBinarySet(CBinarySet* c_binary_set);
 
+void
+DeleteBinarySet(CBinarySet c_binary_set);
+
 CStatus
 AppendBinaryIndex(CBinarySet c_binary_set, void* index_binary, int64_t index_size, const char* c_index_key);
 
