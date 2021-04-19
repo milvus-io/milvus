@@ -22,6 +22,7 @@
 #include "utils/EasyAssert.h"
 #include "utils/tools.h"
 #include <boost/container/vector.hpp>
+#include "common/Types.h"
 
 namespace milvus::segcore {
 
@@ -213,10 +214,15 @@ class ConcurrentVector : public ConcurrentVectorImpl<Type, true> {
 class VectorTrait {};
 
 class FloatVector : public VectorTrait {
+ public:
     using embedded_type = float;
+    static constexpr auto metric_type = DataType::VECTOR_FLOAT;
 };
+
 class BinaryVector : public VectorTrait {
+ public:
     using embedded_type = uint8_t;
+    static constexpr auto metric_type = DataType::VECTOR_BINARY;
 };
 
 template <>

@@ -312,6 +312,51 @@ TEST(Query, ExecTerm) {
     // for(auto x: )
 }
 
+TEST(Query, ExecEmpty) {
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    auto schema = std::make_shared<Schema>();
+    schema->AddField("age", DataType::FLOAT);
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    std::string dsl = R"({
+        "bool": {
+            "must": [
+            {
+                "vector": {
+                    "fakevec": {
+                        "metric_type": "L2",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 5
+                    }
+                }
+            }
+            ]
+        }
+    })";
+    int64_t N = 1000 * 1000;
+    auto segment = CreateSegment(schema);
+    auto plan = CreatePlan(*schema, dsl);
+    auto num_queries = 5;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    QueryResult qr;
+    Timestamp time = 1000000;
+    std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
+    segment->Search(plan.get(), ph_group_arr.data(), &time, 1, qr);
+    std::cout << QueryResultToJson(qr);
+
+    for (auto i : qr.internal_seg_offsets_) {
+        ASSERT_EQ(i, -1);
+    }
+
+    for (auto v : qr.result_distances_) {
+        ASSERT_EQ(v, std::numeric_limits<float>::max());
+    }
+}
+
 TEST(Query, ExecWithoutPredicate) {
     using namespace milvus::query;
     using namespace milvus::segcore;
@@ -336,13 +381,13 @@ TEST(Query, ExecWithoutPredicate) {
             ]
         }
     })";
+    auto plan = CreatePlan(*schema, dsl);
     int64_t N = 1000 * 1000;
     auto dataset = DataGen(schema, N);
     auto segment = CreateSegment(schema);
     segment->PreInsert(N);
     segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
 
-    auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
@@ -395,6 +440,47 @@ TEST(Query, ExecWithoutPredicate) {
 ]
 )");
     ASSERT_EQ(json.dump(2), ref.dump(2));
+}
+
+TEST(Indexing, InnerProduct) {
+    int64_t N = 100000;
+    constexpr auto dim = 16;
+    constexpr auto topk = 10;
+    auto num_queries = 5;
+    auto schema = std::make_shared<Schema>();
+    std::string dsl = R"({
+        "bool": {
+            "must": [
+            {
+                "vector": {
+                    "normalized": {
+                        "metric_type": "IP",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 5
+                    }
+                }
+            }
+            ]
+        }
+    })";
+    schema->AddField("normalized", DataType::VECTOR_FLOAT, dim, MetricType::METRIC_INNER_PRODUCT);
+    auto dataset = DataGen(schema, N);
+    auto segment = CreateSegment(schema);
+    auto plan = CreatePlan(*schema, dsl);
+    segment->PreInsert(N);
+    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    auto col = dataset.get_col<float>(0);
+
+    auto ph_group_raw = CreatePlaceholderGroupFromBlob(num_queries, 16, col.data());
+    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    std::vector<Timestamp> ts{(Timestamp)N * 2};
+    const auto* ptr = ph_group.get();
+    QueryResult qr;
+    segment->Search(plan.get(), &ptr, ts.data(), 1, qr);
+    std::cout << QueryResultToJson(qr).dump(2);
 }
 
 TEST(Query, FillSegment) {

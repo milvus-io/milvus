@@ -12,6 +12,7 @@ set(MILVUS_QUERY_SRCS
         Plan.cpp
         Search.cpp
         SearchOnSealed.cpp
+        SearchOnIndex.cpp
         SearchBruteForce.cpp
         SubQueryResult.cpp
         )
