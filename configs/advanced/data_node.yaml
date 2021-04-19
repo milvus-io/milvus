@@ -38,5 +38,5 @@ dataNode:
 
   flush:
     # max buffer size to flush
-    insertBufSize: 500
+    insertBufSize: 32000
     ddBufSize: 20
