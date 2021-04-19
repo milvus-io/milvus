@@ -382,7 +382,7 @@ generate_collection_shema(std::string metric_type, std::string dim) {
 
     auto vec_field_schema = collection_schema.add_fields();
     vec_field_schema->set_name("fakevec");
-    vec_field_schema->set_fieldid(0);
+    vec_field_schema->set_fieldid(100);
     vec_field_schema->set_data_type(schema::DataType::VECTOR_FLOAT);
     auto metric_type_param = vec_field_schema->add_index_params();
     metric_type_param->set_key("metric_type");
@@ -394,7 +394,7 @@ generate_collection_shema(std::string metric_type, std::string dim) {
     auto other_field_schema = collection_schema.add_fields();
     ;
     other_field_schema->set_name("counter");
-    other_field_schema->set_fieldid(1);
+    other_field_schema->set_fieldid(101);
     other_field_schema->set_data_type(schema::DataType::INT64);
 
     std::string schema_string;

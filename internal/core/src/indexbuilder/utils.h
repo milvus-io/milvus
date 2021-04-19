@@ -25,14 +25,17 @@ NM_List() {
     static std::vector<std::string> ret{
         milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
         milvus::knowhere::IndexEnum::INDEX_NSG,
+        milvus::knowhere::IndexEnum::INDEX_RHNSWFlat,
     };
     return ret;
 }
 
 std::vector<std::string>
 BIN_List() {
-    static std::vector<std::string> ret{milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
-                                        milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT};
+    static std::vector<std::string> ret{
+        milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
+        milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+    };
     return ret;
 }
 
@@ -40,7 +43,7 @@ std::vector<std::string>
 Need_ID_List() {
     static std::vector<std::string> ret{
         // milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
-        // milvus::knowhere::IndexEnum::INDEX_NSG
+        // milvus::knowhere::IndexEnum::INDEX_NSG,
     };
 
     return ret;
@@ -48,7 +51,9 @@ Need_ID_List() {
 
 std::vector<std::string>
 Need_BuildAll_list() {
-    static std::vector<std::string> ret{milvus::knowhere::IndexEnum::INDEX_NSG};
+    static std::vector<std::string> ret{
+        milvus::knowhere::IndexEnum::INDEX_NSG,
+    };
     return ret;
 }
 

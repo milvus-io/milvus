@@ -30,7 +30,19 @@ std::shared_ptr<Schema>
 Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     auto schema = std::make_shared<Schema>();
     schema->set_auto_id(schema_proto.autoid());
+
+    // NOTE: only two system
+    std::set<std::string> system_field_names = {"RowID", "Timestamp"};
+
     for (const milvus::proto::schema::FieldSchema& child : schema_proto.fields()) {
+        auto field_id = child.fieldid();
+        auto name = child.name();
+        if (field_id < 100) {
+            // system field id
+            AssertInfo(system_field_names.count(name), "id of non system field should be >= 100");
+            continue;
+        }
+
         auto data_type = DataType(child.data_type());
 
         if (child.is_primary_key()) {
@@ -51,9 +63,9 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
             auto dim = boost::lexical_cast<int64_t>(type_map.at("dim"));
             AssertInfo(index_map.count("metric_type"), "index not found");
             auto metric_type = GetMetricType(index_map.at("metric_type"));
-            schema->AddField(child.name(), data_type, dim, metric_type);
+            schema->AddField(name, data_type, dim, metric_type);
         } else {
-            schema->AddField(child.name(), data_type);
+            schema->AddField(name, data_type);
         }
     }
     return schema;

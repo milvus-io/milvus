@@ -84,10 +84,11 @@ func TestLoadIndexService(t *testing.T) {
 	}
 
 	// create loadIndexClient
+	fieldID := UniqueID(100)
 	loadIndexChannelNames := Params.LoadIndexChannelNames
 	pulsarURL := Params.PulsarAddress
 	client := client.NewLoadIndexClient(node.queryNodeLoopCtx, pulsarURL, loadIndexChannelNames)
-	client.LoadIndex(indexPaths, segmentID, UniqueID(0), "vec", indexParams)
+	client.LoadIndex(indexPaths, segmentID, fieldID, "vec", indexParams)
 
 	// init message stream consumer and do checks
 	statsMs := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, Params.StatsReceiveBufSize)
@@ -110,7 +111,7 @@ func TestLoadIndexService(t *testing.T) {
 			assert.Equal(t, ok, true)
 			assert.Equal(t, len(statsMsg.FieldStats), 1)
 			fieldStats0 := statsMsg.FieldStats[0]
-			assert.Equal(t, fieldStats0.FieldID, int64(0))
+			assert.Equal(t, fieldStats0.FieldID, fieldID)
 			assert.Equal(t, fieldStats0.CollectionID, collectionID)
 			assert.Equal(t, len(fieldStats0.IndexStats), 1)
 			indexStats0 := fieldStats0.IndexStats[0]
