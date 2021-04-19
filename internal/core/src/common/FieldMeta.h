@@ -15,6 +15,7 @@
 #include "utils/EasyAssert.h"
 #include <string>
 #include <stdexcept>
+#include <optional>
 
 namespace milvus {
 inline int
@@ -82,7 +83,7 @@ datatype_is_vector(DataType datatype) {
     return datatype == DataType::VECTOR_BINARY || datatype == DataType::VECTOR_FLOAT;
 }
 
-struct FieldMeta {
+class FieldMeta {
  public:
     FieldMeta(const FieldMeta&) = delete;
     FieldMeta(FieldMeta&&) = default;
@@ -95,7 +96,7 @@ struct FieldMeta {
         Assert(!is_vector());
     }
 
-    FieldMeta(const FieldName& name, FieldId id, DataType type, int64_t dim, MetricType metric_type)
+    FieldMeta(const FieldName& name, FieldId id, DataType type, int64_t dim, std::optional<MetricType> metric_type)
         : name_(name), id_(id), type_(type), vector_info_(VectorInfo{dim, metric_type}) {
         Assert(is_vector());
     }
@@ -113,7 +114,7 @@ struct FieldMeta {
         return vector_info_->dim_;
     }
 
-    MetricType
+    std::optional<MetricType>
     get_metric_type() const {
         Assert(is_vector());
         Assert(vector_info_.has_value());
@@ -147,7 +148,7 @@ struct FieldMeta {
  private:
     struct VectorInfo {
         int64_t dim_;
-        MetricType metric_type_;
+        std::optional<MetricType> metric_type_;
     };
     FieldName name_;
     FieldId id_;

@@ -21,6 +21,7 @@
 // #include "utils/Json.h"
 #include "test_utils/DataGen.h"
 #include <random>
+#include <optional>
 using std::cin;
 using std::cout;
 using std::endl;

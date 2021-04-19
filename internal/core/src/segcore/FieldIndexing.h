@@ -109,14 +109,25 @@ class IndexingRecord {
 
     void
     Initialize() {
-        int offset = 0;
-        for (auto& field : schema_) {
-            if (field.get_data_type() != DataType::VECTOR_BINARY) {
-                field_indexings_.try_emplace(FieldOffset(offset), CreateIndex(field, size_per_chunk_));
+        int offset_id = 0;
+        for (const FieldMeta& field : schema_) {
+            auto offset = FieldOffset(offset_id);
+            ++offset_id;
+
+            if (field.is_vector()) {
+                // TODO: skip binary small index now, reenable after config.yaml is ready
+                if (field.get_data_type() == DataType::VECTOR_BINARY) {
+                    continue;
+                }
+                // flat should be skipped
+                if (!field.get_metric_type().has_value()) {
+                    continue;
+                }
             }
-            ++offset;
+
+            field_indexings_.try_emplace(offset, CreateIndex(field, size_per_chunk_));
         }
-        assert(offset == schema_.size());
+        assert(offset_id == schema_.size());
     }
 
     // concurrent, reentrant
@@ -131,7 +142,7 @@ class IndexingRecord {
 
     const FieldIndexing&
     get_field_indexing(FieldOffset field_offset) const {
-        assert(field_indexings_.count(field_offset));
+        Assert(field_indexings_.count(field_offset));
         return *field_indexings_.at(field_offset);
     }
 
@@ -142,6 +153,12 @@ class IndexingRecord {
         AssertInfo(ptr, "invalid indexing");
         return *ptr;
     }
+
+    bool
+    is_in(FieldOffset field_offset) const {
+        return field_indexings_.count(field_offset);
+    }
+
     template <typename T>
     auto
     get_scalar_field_indexing(FieldOffset field_offset) const -> const ScalarFieldIndexing<T>& {

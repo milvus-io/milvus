@@ -178,7 +178,8 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
         query::dataset::QueryDataset dataset;
         dataset.query_data = query_data;
         dataset.num_queries = query_count;
-        dataset.metric_type = field_meta.get_metric_type();
+        // if(field_meta.is)
+        dataset.metric_type = query_info.metric_type_;
         dataset.topk = query_info.topK_;
         dataset.dim = field_meta.get_dim();
 

@@ -70,35 +70,40 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
     // std::vector<float> final_dis(total_count, std::numeric_limits<float>::max());
     SubQueryResult final_qr(num_queries, topK, metric_type);
     dataset::QueryDataset query_dataset{metric_type, num_queries, topK, dim, query_data};
-
-    auto max_indexed_id = indexing_record.get_finished_ack();
-    const auto& field_indexing = indexing_record.get_vec_field_indexing(vecfield_offset);
-    auto search_conf = field_indexing.get_search_conf(topK);
-
-    for (int chunk_id = 0; chunk_id < max_indexed_id; ++chunk_id) {
-        auto size_per_chunk = field_indexing.get_size_per_chunk();
-        auto indexing = field_indexing.get_chunk_indexing(chunk_id);
-
-        auto sub_view = BitsetSubView(bitset, chunk_id * size_per_chunk, size_per_chunk);
-        auto sub_qr = SearchOnIndex(query_dataset, *indexing, search_conf, sub_view);
-
-        // convert chunk uid to segment uid
-        for (auto& x : sub_qr.mutable_labels()) {
-            if (x != -1) {
-                x += chunk_id * size_per_chunk;
-            }
-        }
-
-        final_qr.merge(sub_qr);
-    }
     auto vec_ptr = record.get_field_data<FloatVector>(vecfield_offset);
+
+    int current_chunk_id = 0;
+
+    if (indexing_record.is_in(vecfield_offset)) {
+        auto max_indexed_id = indexing_record.get_finished_ack();
+        const auto& field_indexing = indexing_record.get_vec_field_indexing(vecfield_offset);
+        auto search_conf = field_indexing.get_search_conf(topK);
+        Assert(vec_ptr->get_size_per_chunk() == field_indexing.get_size_per_chunk());
+
+        for (int chunk_id = current_chunk_id; chunk_id < max_indexed_id; ++chunk_id) {
+            auto size_per_chunk = field_indexing.get_size_per_chunk();
+            auto indexing = field_indexing.get_chunk_indexing(chunk_id);
+
+            auto sub_view = BitsetSubView(bitset, chunk_id * size_per_chunk, size_per_chunk);
+            auto sub_qr = SearchOnIndex(query_dataset, *indexing, search_conf, sub_view);
+
+            // convert chunk uid to segment uid
+            for (auto& x : sub_qr.mutable_labels()) {
+                if (x != -1) {
+                    x += chunk_id * size_per_chunk;
+                }
+            }
+
+            final_qr.merge(sub_qr);
+        }
+        current_chunk_id = max_indexed_id;
+    }
 
     // step 4: brute force search where small indexing is unavailable
     auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
-    Assert(vec_size_per_chunk == field_indexing.get_size_per_chunk());
     auto max_chunk = upper_div(ins_barrier, vec_size_per_chunk);
 
-    for (int chunk_id = max_indexed_id; chunk_id < max_chunk; ++chunk_id) {
+    for (int chunk_id = current_chunk_id; chunk_id < max_chunk; ++chunk_id) {
         auto& chunk = vec_ptr->get_chunk(chunk_id);
 
         auto element_begin = chunk_id * vec_size_per_chunk;
@@ -116,6 +121,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
         }
         final_qr.merge(sub_qr);
     }
+    current_chunk_id = max_chunk;
 
     results.result_distances_ = std::move(final_qr.mutable_values());
     results.internal_seg_offsets_ = std::move(final_qr.mutable_labels());
