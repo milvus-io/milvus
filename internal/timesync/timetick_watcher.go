@@ -17,6 +17,14 @@ type MsgTimeTickWatcher struct {
 	msgQueue chan *ms.TimeTickMsg
 }
 
+func NewMsgTimeTickWatcher(streams ...ms.MsgStream) *MsgTimeTickWatcher {
+	watcher := &MsgTimeTickWatcher{
+		streams:  streams,
+		msgQueue: make(chan *ms.TimeTickMsg),
+	}
+	return watcher
+}
+
 func (watcher *MsgTimeTickWatcher) Watch(msg *ms.TimeTickMsg) {
 	watcher.msgQueue <- msg
 }

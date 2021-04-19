@@ -1,6 +1,8 @@
 package dataservice
 
 import (
+	"strconv"
+
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
 
@@ -10,8 +12,6 @@ type ParamTable struct {
 	Address string
 	Port    int
 	NodeID  int64
-
-	MasterAddress string
 
 	EtcdAddress   string
 	MetaRootPath  string
@@ -31,6 +31,7 @@ type ParamTable struct {
 	DataNodeNum                   int
 	SegmentInfoChannelName        string
 	DataServiceSubscriptionName   string
+	K2SChannelNames               []string
 }
 
 var Params ParamTable
@@ -39,15 +40,14 @@ func (p *ParamTable) Init() {
 	// load yaml
 	p.BaseTable.Init()
 
-	err := p.LoadYaml("advanced/master.yaml")
-	if err != nil {
+	if err := p.LoadYaml("advanced/data_service.yaml"); err != nil {
 		panic(err)
 	}
 
 	// set members
 	p.initAddress()
 	p.initPort()
-	p.NodeID = 1 // todo
+	p.initNodeID()
 
 	p.initEtcdAddress()
 	p.initMetaRootPath()
@@ -68,15 +68,19 @@ func (p *ParamTable) Init() {
 }
 
 func (p *ParamTable) initAddress() {
-	masterAddress, err := p.Load("master.address")
+	dataserviceAddress, err := p.Load("dataservice.address")
 	if err != nil {
 		panic(err)
 	}
-	p.Address = masterAddress
+	p.Address = dataserviceAddress
 }
 
 func (p *ParamTable) initPort() {
-	p.Port = p.ParseInt("master.port")
+	p.Port = p.ParseInt("dataservice.port")
+}
+
+func (p *ParamTable) initNodeID() {
+	p.NodeID = p.ParseInt64("dataservice.nodeID")
 }
 
 func (p *ParamTable) initEtcdAddress() {
@@ -119,46 +123,83 @@ func (p *ParamTable) initKvRootPath() {
 	p.KvRootPath = rootPath + "/" + subPath
 }
 func (p *ParamTable) initSegmentSize() {
-	p.SegmentSize = p.ParseFloat("master.segment.size")
+	p.SegmentSize = p.ParseFloat("dataservice.segment.size")
 }
 
 func (p *ParamTable) initSegmentSizeFactor() {
-	p.SegmentSizeFactor = p.ParseFloat("master.segment.sizeFactor")
+	p.SegmentSizeFactor = p.ParseFloat("dataservice.segment.sizeFactor")
 }
 
 func (p *ParamTable) initDefaultRecordSize() {
-	p.DefaultRecordSize = p.ParseInt64("master.segment.defaultSizePerRecord")
+	p.DefaultRecordSize = p.ParseInt64("dataservice.segment.defaultSizePerRecord")
 }
 
-// TODO read from config/env
 func (p *ParamTable) initSegIDAssignExpiration() {
-	p.SegIDAssignExpiration = 3000 //ms
+	p.SegIDAssignExpiration = p.ParseInt64("dataservice.segment.IDAssignExpiration") //ms
 }
 
 func (p *ParamTable) initInsertChannelPrefixName() {
-	p.InsertChannelPrefixName = "insert-channel-"
+	var err error
+	p.InsertChannelPrefixName, err = p.Load("msgChannel.chanNamePrefix.dataServiceInsertChannel")
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (p *ParamTable) initInsertChannelNumPerCollection() {
-	p.InsertChannelNumPerCollection = 4
+	p.InsertChannelNumPerCollection = p.ParseInt64("dataservice.insertChannelNumPerCollection")
 }
 
 func (p *ParamTable) initStatisticsChannelName() {
-	p.StatisticsChannelName = "dataservice-statistics-channel"
+	var err error
+	p.StatisticsChannelName, err = p.Load("msgChannel.chanNamePrefix.dataServiceStatistic")
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (p *ParamTable) initTimeTickChannelName() {
-	p.TimeTickChannelName = "dataservice-timetick-channel"
+	var err error
+	p.TimeTickChannelName, err = p.Load("msgChannel.chanNamePrefix.dataServiceTimeTick")
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (p *ParamTable) initDataNodeNum() {
-	p.DataNodeNum = 2
+	p.DataNodeNum = p.ParseInt("dataservice.dataNodeNum")
 }
 
 func (p *ParamTable) initSegmentInfoChannelName() {
-	p.SegmentInfoChannelName = "segment-info-channel"
+	var err error
+	p.SegmentInfoChannelName, err = p.Load("msgChannel.chanNamePrefix.dataServiceSegmentInfo")
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (p *ParamTable) initDataServiceSubscriptionName() {
-	p.DataServiceSubscriptionName = "dataserive-sub"
+	var err error
+	p.DataServiceSubscriptionName, err = p.Load("msgChannel.chanNamePrefix.dataServiceSubNamePrefix")
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (p *ParamTable) initK2SChannelNames() {
+	prefix, err := p.Load("msgChannel.chanNamePrefix.k2s")
+	if err != nil {
+		panic(err)
+	}
+	prefix += "-"
+	iRangeStr, err := p.Load("msgChannel.channelRange.k2s")
+	if err != nil {
+		panic(err)
+	}
+	channelIDs := paramtable.ConvertRangeToIntSlice(iRangeStr, ",")
+	var ret []string
+	for _, ID := range channelIDs {
+		ret = append(ret, prefix+strconv.Itoa(ID))
+	}
+	p.K2SChannelNames = ret
 }
