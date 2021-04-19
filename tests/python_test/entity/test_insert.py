@@ -167,8 +167,7 @@ class TestInsertBase:
         res = connect.search(collection, default_single_query)
         assert res
 
-    @pytest.mark.skip("No segment_row_limit")
-    def test_insert_segment_row_count(self, connect, collection):
+    def _test_insert_segment_row_count(self, connect, collection):
         nb = default_segment_row_limit + 1
         res_ids = connect.insert(collection, gen_entities(nb))
         connect.flush([collection])
