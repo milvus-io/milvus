@@ -683,7 +683,7 @@ func (c *Core) SetIndexService(s IndexServiceInterface) error {
 		if rsp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
 			return 0, errors.Errorf("BuildIndex from index service failed, error = %s", rsp.Status.Reason)
 		}
-		return rsp.IndexID, nil
+		return rsp.IndexBuildID, nil
 	}
 	return nil
 }

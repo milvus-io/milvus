@@ -20,13 +20,15 @@ message RegisterNodeResponse {
 }
 
 message IndexStatesRequest {
-  repeated int64 indexIDs = 1;
+  repeated int64 indexBuildIDs = 1;
 }
 
 message IndexInfo {
   common.IndexState state = 1;
-  int64 indexID = 2;
-  string Reason = 3;
+  int64 indexBuildID = 2;
+  int64 indexID = 3;
+  string index_name = 4;
+  string Reason = 5;
 }
 
 message IndexStatesResponse {
@@ -35,35 +37,37 @@ message IndexStatesResponse {
 }
 
 message BuildIndexRequest {
-  repeated string data_paths = 1;
-  repeated common.KeyValuePair type_params = 2;
-  repeated common.KeyValuePair index_params = 3;
+   string index_name = 1;
+   int64 indexID = 2;
+  repeated string data_paths = 3;
+  repeated common.KeyValuePair type_params = 4;
+  repeated common.KeyValuePair index_params = 5;
 }
 
 message BuildIndexResponse {
   common.Status status = 1;
-  int64 indexID = 2;
+  int64 indexBuildID = 2;
 }
 
 message BuildIndexCmd {
-  int64 indexID = 1;
+  int64 indexBuildID = 1;
   BuildIndexRequest req = 2;
 }
 
 message BuildIndexNotification {
   common.Status status = 1;
-  int64 indexID = 2;
+  int64 indexBuildID = 2;
   repeated string index_file_paths = 3;
   int64 nodeID = 4;
 }
 
 message IndexFilePathsRequest {
-  repeated int64 indexIDs = 1;
+  repeated int64 indexBuildIDs = 1;
 }
 
 message IndexFilePathInfo {
   common.Status status = 1;
-  int64 indexID = 2;
+  int64 indexBuildID = 2;
   repeated string index_file_paths = 3;
 }
 
@@ -73,8 +77,8 @@ message IndexFilePathsResponse {
 }
 
 message IndexMeta {
-  common.IndexState state = 1;
-  int64   indexID = 2;
+  int64   indexBuildID = 1;
+  common.IndexState state = 2;
   string fail_reason = 3;
   BuildIndexRequest req = 4;
   repeated string index_file_paths = 5;

@@ -24,8 +24,8 @@ import (
 )
 
 type metaTable struct {
-	client       kv.TxnBase                     // client of a reliable kv service, i.e. etcd client
-	indexID2Meta map[UniqueID]indexpb.IndexMeta // index id to index meta
+	client            kv.TxnBase                     // client of a reliable kv service, i.e. etcd client
+	indexBuildID2Meta map[UniqueID]indexpb.IndexMeta // index id to index meta
 
 	lock sync.RWMutex
 }
@@ -44,7 +44,7 @@ func NewMetaTable(kv kv.TxnBase) (*metaTable, error) {
 }
 
 func (mt *metaTable) reloadFromKV() error {
-	mt.indexID2Meta = make(map[UniqueID]indexpb.IndexMeta)
+	mt.indexBuildID2Meta = make(map[UniqueID]indexpb.IndexMeta)
 
 	_, values, err := mt.client.LoadWithPrefix("indexes")
 	if err != nil {
@@ -57,7 +57,7 @@ func (mt *metaTable) reloadFromKV() error {
 		if err != nil {
 			return err
 		}
-		mt.indexID2Meta[indexMeta.IndexID] = indexMeta
+		mt.indexBuildID2Meta[indexMeta.IndexBuildID] = indexMeta
 	}
 	return nil
 }
@@ -66,22 +66,22 @@ func (mt *metaTable) reloadFromKV() error {
 func (mt *metaTable) saveIndexMeta(meta *indexpb.IndexMeta) error {
 	value := proto.MarshalTextString(meta)
 
-	mt.indexID2Meta[meta.IndexID] = *meta
+	mt.indexBuildID2Meta[meta.IndexBuildID] = *meta
 
-	return mt.client.Save("/indexes/"+strconv.FormatInt(meta.IndexID, 10), value)
+	return mt.client.Save("/indexes/"+strconv.FormatInt(meta.IndexBuildID, 10), value)
 }
 
-func (mt *metaTable) AddIndex(indexID UniqueID, req *indexpb.BuildIndexRequest) error {
+func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequest) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
-	_, ok := mt.indexID2Meta[indexID]
+	_, ok := mt.indexBuildID2Meta[indexBuildID]
 	if ok {
-		return errors.Errorf("index already exists with ID = " + strconv.FormatInt(indexID, 10))
+		return errors.Errorf("index already exists with ID = " + strconv.FormatInt(indexBuildID, 10))
 	}
 	meta := &indexpb.IndexMeta{
-		State:   commonpb.IndexState_UNISSUED,
-		IndexID: indexID,
-		Req:     req,
+		State:        commonpb.IndexState_UNISSUED,
+		IndexBuildID: indexBuildID,
+		Req:          req,
 	}
 	return mt.saveIndexMeta(meta)
 }
@@ -89,10 +89,10 @@ func (mt *metaTable) AddIndex(indexID UniqueID, req *indexpb.BuildIndexRequest) 
 func (mt *metaTable) NotifyBuildIndex(nty *indexpb.BuildIndexNotification) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
-	indexID := nty.IndexID
-	meta, ok := mt.indexID2Meta[indexID]
+	indexBuildID := nty.IndexBuildID
+	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
-		return errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexID, 10))
+		return errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexBuildID, 10))
 	}
 
 	if nty.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
@@ -106,44 +106,45 @@ func (mt *metaTable) NotifyBuildIndex(nty *indexpb.BuildIndexNotification) error
 	return mt.saveIndexMeta(&meta)
 }
 
-func (mt *metaTable) GetIndexState(indexID UniqueID) (*indexpb.IndexInfo, error) {
+func (mt *metaTable) GetIndexState(indexBuildID UniqueID) (*indexpb.IndexInfo, error) {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 	ret := &indexpb.IndexInfo{
-		IndexID: indexID,
-		State:   commonpb.IndexState_NONE,
+		IndexBuildID: indexBuildID,
+		State:        commonpb.IndexState_NONE,
 	}
-	meta, ok := mt.indexID2Meta[indexID]
+	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
-		return ret, errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexID, 10))
+		return ret, errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexBuildID, 10))
 	}
-	ret.IndexID = meta.IndexID
+	ret.IndexID = meta.Req.IndexID
+	ret.IndexName = meta.Req.IndexName
 	ret.Reason = meta.FailReason
 	ret.State = meta.State
 	return ret, nil
 }
 
-func (mt *metaTable) GetIndexFilePathInfo(indexID UniqueID) (*indexpb.IndexFilePathInfo, error) {
+func (mt *metaTable) GetIndexFilePathInfo(indexBuildID UniqueID) (*indexpb.IndexFilePathInfo, error) {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 	ret := &indexpb.IndexFilePathInfo{
-		IndexID: indexID,
+		IndexBuildID: indexBuildID,
 	}
-	meta, ok := mt.indexID2Meta[indexID]
+	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
-		return nil, errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexID, 10))
+		return nil, errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexBuildID, 10))
 	}
 	ret.IndexFilePaths = meta.IndexFilePaths
 	return ret, nil
 }
 
-func (mt *metaTable) DeleteIndex(indexID UniqueID) error {
+func (mt *metaTable) DeleteIndex(indexBuildID UniqueID) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 
-	indexMeta, ok := mt.indexID2Meta[indexID]
+	indexMeta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
-		return errors.Errorf("can't find index. id = " + strconv.FormatInt(indexID, 10))
+		return errors.Errorf("can't find index. id = " + strconv.FormatInt(indexBuildID, 10))
 	}
 	fmt.Print(indexMeta)
 
