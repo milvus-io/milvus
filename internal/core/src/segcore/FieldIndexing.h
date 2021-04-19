@@ -24,14 +24,14 @@ namespace milvus::segcore {
 
 // this should be concurrent
 // All concurrent
-class IndexingEntry {
+class FieldIndexing {
  public:
-    explicit IndexingEntry(const FieldMeta& field_meta, int64_t chunk_size)
-        : field_meta_(field_meta), chunk_size_(chunk_size) {
+    explicit FieldIndexing(const FieldMeta& field_meta, int64_t size_per_chunk)
+        : field_meta_(field_meta), size_per_chunk_(size_per_chunk) {
     }
-    IndexingEntry(const IndexingEntry&) = delete;
-    IndexingEntry&
-    operator=(const IndexingEntry&) = delete;
+    FieldIndexing(const FieldIndexing&) = delete;
+    FieldIndexing&
+    operator=(const FieldIndexing&) = delete;
 
     // Do this in parallel
     virtual void
@@ -43,29 +43,29 @@ class IndexingEntry {
     }
 
     int64_t
-    get_chunk_size() const {
-        return chunk_size_;
+    get_size_per_chunk() const {
+        return size_per_chunk_;
     }
 
     virtual knowhere::Index*
-    get_indexing(int64_t chunk_id) const = 0;
+    get_chunk_indexing(int64_t chunk_id) const = 0;
 
  protected:
     // additional info
     const FieldMeta& field_meta_;
-    const int64_t chunk_size_;
+    const int64_t size_per_chunk_;
 };
 template <typename T>
-class ScalarIndexingEntry : public IndexingEntry {
+class ScalarFieldIndexing : public FieldIndexing {
  public:
-    using IndexingEntry::IndexingEntry;
+    using FieldIndexing::FieldIndexing;
 
     void
     BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) override;
 
     // concurrent
     knowhere::scalar::StructuredIndex<T>*
-    get_indexing(int64_t chunk_id) const override {
+    get_chunk_indexing(int64_t chunk_id) const override {
         Assert(!field_meta_.is_vector());
         return data_.at(chunk_id).get();
     }
@@ -74,16 +74,16 @@ class ScalarIndexingEntry : public IndexingEntry {
     tbb::concurrent_vector<std::unique_ptr<knowhere::scalar::StructuredIndex<T>>> data_;
 };
 
-class VecIndexingEntry : public IndexingEntry {
+class VectorFieldIndexing : public FieldIndexing {
  public:
-    using IndexingEntry::IndexingEntry;
+    using FieldIndexing::FieldIndexing;
 
     void
     BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) override;
 
     // concurrent
     knowhere::VecIndex*
-    get_indexing(int64_t chunk_id) const override {
+    get_chunk_indexing(int64_t chunk_id) const override {
         Assert(field_meta_.is_vector());
         return data_.at(chunk_id).get();
     }
@@ -97,12 +97,13 @@ class VecIndexingEntry : public IndexingEntry {
     tbb::concurrent_vector<std::unique_ptr<knowhere::VecIndex>> data_;
 };
 
-std::unique_ptr<IndexingEntry>
-CreateIndex(const FieldMeta& field_meta, int64_t chunk_size);
+std::unique_ptr<FieldIndexing>
+CreateIndex(const FieldMeta& field_meta, int64_t size_per_chunk);
 
 class IndexingRecord {
  public:
-    explicit IndexingRecord(const Schema& schema, int64_t chunk_size) : schema_(schema), chunk_size_(chunk_size) {
+    explicit IndexingRecord(const Schema& schema, int64_t size_per_chunk)
+        : schema_(schema), size_per_chunk_(size_per_chunk) {
         Initialize();
     }
 
@@ -111,7 +112,7 @@ class IndexingRecord {
         int offset = 0;
         for (auto& field : schema_) {
             if (field.get_data_type() != DataType::VECTOR_BINARY) {
-                entries_.try_emplace(FieldOffset(offset), CreateIndex(field, chunk_size_));
+                field_indexings_.try_emplace(FieldOffset(offset), CreateIndex(field, size_per_chunk_));
             }
             ++offset;
         }
@@ -128,24 +129,24 @@ class IndexingRecord {
         return finished_ack_.GetAck();
     }
 
-    const IndexingEntry&
-    get_entry(FieldOffset field_offset) const {
-        assert(entries_.count(field_offset));
-        return *entries_.at(field_offset);
+    const FieldIndexing&
+    get_field_indexing(FieldOffset field_offset) const {
+        assert(field_indexings_.count(field_offset));
+        return *field_indexings_.at(field_offset);
     }
 
-    const VecIndexingEntry&
-    get_vec_entry(FieldOffset field_offset) const {
-        auto& entry = get_entry(field_offset);
-        auto ptr = dynamic_cast<const VecIndexingEntry*>(&entry);
+    const VectorFieldIndexing&
+    get_vec_field_indexing(FieldOffset field_offset) const {
+        auto& field_indexing = get_field_indexing(field_offset);
+        auto ptr = dynamic_cast<const VectorFieldIndexing*>(&field_indexing);
         AssertInfo(ptr, "invalid indexing");
         return *ptr;
     }
     template <typename T>
     auto
-    get_scalar_entry(FieldOffset field_offset) const -> const ScalarIndexingEntry<T>& {
-        auto& entry = get_entry(field_offset);
-        auto ptr = dynamic_cast<const ScalarIndexingEntry<T>*>(&entry);
+    get_scalar_field_indexing(FieldOffset field_offset) const -> const ScalarFieldIndexing<T>& {
+        auto& entry = get_field_indexing(field_offset);
+        auto ptr = dynamic_cast<const ScalarFieldIndexing<T>*>(&entry);
         AssertInfo(ptr, "invalid indexing");
         return *ptr;
     }
@@ -159,11 +160,11 @@ class IndexingRecord {
     //    std::atomic<int64_t> finished_ack_ = 0;
     AckResponder finished_ack_;
     std::mutex mutex_;
-    int64_t chunk_size_;
+    int64_t size_per_chunk_;
 
  private:
     // field_offset => indexing
-    std::map<FieldOffset, std::unique_ptr<IndexingEntry>> entries_;
+    std::map<FieldOffset, std::unique_ptr<FieldIndexing>> field_indexings_;
 };
 
 }  // namespace milvus::segcore

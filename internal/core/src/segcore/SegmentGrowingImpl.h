@@ -27,7 +27,7 @@
 #include "utils/Status.h"
 #include "segcore/DeletedRecord.h"
 #include "utils/EasyAssert.h"
-#include "IndexingEntry.h"
+#include "FieldIndexing.h"
 #include "InsertRecord.h"
 #include <utility>
 #include <memory>
@@ -89,18 +89,18 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     // return count of index that has index, i.e., [0, num_chunk_index) have built index
     int64_t
-    num_chunk_index_safe(FieldOffset field_offset) const final {
+    num_chunk_index(FieldOffset field_offset) const final {
         return indexing_record_.get_finished_ack();
     }
 
     const knowhere::Index*
     chunk_index_impl(FieldOffset field_offset, int64_t chunk_id) const final {
-        return indexing_record_.get_entry(field_offset).get_indexing(chunk_id);
+        return indexing_record_.get_field_indexing(field_offset).get_chunk_indexing(chunk_id);
     }
 
     int64_t
     size_per_chunk() const final {
-        return chunk_size_;
+        return size_per_chunk_;
     }
 
  public:
@@ -152,27 +152,27 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     bulk_subscript(FieldOffset field_offset, const int64_t* seg_offsets, int64_t count, void* output) const override {
         // TODO: support more types
-        auto vec_ptr = record_.get_base_entity(field_offset);
+        auto vec_ptr = record_.get_field_data_base(field_offset);
         auto data_type = schema_->operator[](field_offset).get_data_type();
         Assert(data_type == DataType::INT64);
         bulk_subscript_impl<int64_t>(*vec_ptr, seg_offsets, count, output);
     }
 
     int64_t
-    num_chunk_data() const override;
+    num_chunk() const override;
 
     Status
     LoadIndexing(const LoadIndexInfo& info) override;
 
  public:
     friend std::unique_ptr<SegmentGrowing>
-    CreateGrowingSegment(SchemaPtr schema, int64_t chunk_size);
+    CreateGrowingSegment(SchemaPtr schema, int64_t size_per_chunk);
 
-    explicit SegmentGrowingImpl(SchemaPtr schema, int64_t chunk_size)
-        : chunk_size_(chunk_size),
+    explicit SegmentGrowingImpl(SchemaPtr schema, int64_t size_per_chunk)
+        : size_per_chunk_(size_per_chunk),
           schema_(std::move(schema)),
-          record_(*schema_, chunk_size),
-          indexing_record_(*schema_, chunk_size) {
+          record_(*schema_, size_per_chunk),
+          indexing_record_(*schema_, size_per_chunk) {
     }
 
     void
@@ -192,7 +192,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) const override;
 
  private:
-    int64_t chunk_size_;
+    int64_t size_per_chunk_;
     SchemaPtr schema_;
     std::atomic<SegmentState> state_ = SegmentState::Open;
 

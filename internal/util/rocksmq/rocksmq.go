@@ -255,11 +255,13 @@ func (rmq *RocksMQ) Consume(groupName string, channelName string, n int) ([]Cons
 	dataKey := fixChanName + "/" + currentID
 
 	// msgID is DefaultMessageID means this is the first consume operation
-	if currentID == DefaultMessageID {
-		iter.SeekToFirst()
-	} else {
-		iter.Seek([]byte(dataKey))
+	// currentID may be not valid if the deprecated values has been removed, when
+	// we move currentID to first location.
+	// Note that we assume currentId is always correct and not larger than the latest endID.
+	if iter.Seek([]byte(dataKey)); currentID != DefaultMessageID && iter.Valid() {
 		iter.Next()
+	} else {
+		iter.SeekToFirst()
 	}
 
 	offset := 0

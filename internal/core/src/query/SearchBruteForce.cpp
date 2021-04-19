@@ -24,7 +24,7 @@ SubQueryResult
 BinarySearchBruteForceFast(MetricType metric_type,
                            int64_t dim,
                            const uint8_t* binary_chunk,
-                           int64_t chunk_size,
+                           int64_t size_per_chunk,
                            int64_t topk,
                            int64_t num_queries,
                            const uint8_t* query_data,
@@ -34,7 +34,7 @@ BinarySearchBruteForceFast(MetricType metric_type,
     idx_t* result_labels = sub_result.get_labels();
 
     int64_t code_size = dim / 8;
-    const idx_t block_size = chunk_size;
+    const idx_t block_size = size_per_chunk;
     bool use_heap = true;
 
     if (metric_type == faiss::METRIC_Jaccard || metric_type == faiss::METRIC_Tanimoto) {
@@ -50,7 +50,7 @@ BinarySearchBruteForceFast(MetricType metric_type,
                                                 result_labels + query_base_index * topk, D + query_base_index * topk};
 
             binary_distence_knn_hc(metric_type, &res, query_data + query_base_index * code_size, binary_chunk,
-                                   chunk_size, code_size,
+                                   size_per_chunk, code_size,
                                    /* ordered = */ true, bitset);
         }
         if (metric_type == faiss::METRIC_Tanimoto) {
@@ -67,7 +67,7 @@ BinarySearchBruteForceFast(MetricType metric_type,
             }
 
             // only match ids will be chosed, not to use heap
-            binary_distence_knn_mc(metric_type, query_data + s * code_size, binary_chunk, nn, chunk_size, topk,
+            binary_distence_knn_mc(metric_type, query_data + s * code_size, binary_chunk, nn, size_per_chunk, topk,
                                    code_size, D + s * topk, result_labels + s * topk, bitset);
         }
     } else if (metric_type == faiss::METRIC_Hamming) {
@@ -82,10 +82,10 @@ BinarySearchBruteForceFast(MetricType metric_type,
                 faiss::int_maxheap_array_t res = {size_t(nn), size_t(topk), result_labels + s * topk,
                                                   int_distances.data() + s * topk};
 
-                hammings_knn_hc(&res, query_data + s * code_size, binary_chunk, chunk_size, code_size,
+                hammings_knn_hc(&res, query_data + s * code_size, binary_chunk, size_per_chunk, code_size,
                                 /* ordered = */ true, bitset);
             } else {
-                hammings_knn_mc(query_data + s * code_size, binary_chunk, nn, chunk_size, topk, code_size,
+                hammings_knn_mc(query_data + s * code_size, binary_chunk, nn, size_per_chunk, topk, code_size,
                                 int_distances.data() + s * topk, result_labels + s * topk, bitset);
             }
         }
@@ -101,7 +101,7 @@ BinarySearchBruteForceFast(MetricType metric_type,
 SubQueryResult
 FloatSearchBruteForce(const dataset::FloatQueryDataset& query_dataset,
                       const float* chunk_data,
-                      int64_t chunk_size,
+                      int64_t size_per_chunk,
                       const faiss::BitsetView& bitset) {
     auto metric_type = query_dataset.metric_type;
     auto num_queries = query_dataset.num_queries;
@@ -111,11 +111,11 @@ FloatSearchBruteForce(const dataset::FloatQueryDataset& query_dataset,
 
     if (metric_type == MetricType::METRIC_L2) {
         faiss::float_maxheap_array_t buf{(size_t)num_queries, (size_t)topk, sub_qr.get_labels(), sub_qr.get_values()};
-        faiss::knn_L2sqr(query_dataset.query_data, chunk_data, dim, num_queries, chunk_size, &buf, bitset);
+        faiss::knn_L2sqr(query_dataset.query_data, chunk_data, dim, num_queries, size_per_chunk, &buf, bitset);
         return sub_qr;
     } else {
         faiss::float_minheap_array_t buf{(size_t)num_queries, (size_t)topk, sub_qr.get_labels(), sub_qr.get_values()};
-        faiss::knn_inner_product(query_dataset.query_data, chunk_data, dim, num_queries, chunk_size, &buf, bitset);
+        faiss::knn_inner_product(query_dataset.query_data, chunk_data, dim, num_queries, size_per_chunk, &buf, bitset);
         return sub_qr;
     }
 }
@@ -123,10 +123,10 @@ FloatSearchBruteForce(const dataset::FloatQueryDataset& query_dataset,
 SubQueryResult
 BinarySearchBruteForce(const dataset::BinaryQueryDataset& query_dataset,
                        const uint8_t* binary_chunk,
-                       int64_t chunk_size,
+                       int64_t size_per_chunk,
                        const faiss::BitsetView& bitset) {
     // TODO: refactor the internal function
-    return BinarySearchBruteForceFast(query_dataset.metric_type, query_dataset.dim, binary_chunk, chunk_size,
+    return BinarySearchBruteForceFast(query_dataset.metric_type, query_dataset.dim, binary_chunk, size_per_chunk,
                                       query_dataset.topk, query_dataset.num_queries, query_dataset.query_data, bitset);
 }
 }  // namespace milvus::query

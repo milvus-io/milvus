@@ -20,8 +20,8 @@ TestABI() {
 }
 
 std::unique_ptr<SegmentGrowing>
-CreateGrowingSegment(SchemaPtr schema, int64_t chunk_size) {
-    auto segment = std::make_unique<SegmentGrowingImpl>(schema, chunk_size);
+CreateGrowingSegment(SchemaPtr schema, int64_t size_per_chunk) {
+    auto segment = std::make_unique<SegmentGrowingImpl>(schema, size_per_chunk);
     return segment;
 }
 
