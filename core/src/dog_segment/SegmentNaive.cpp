@@ -7,6 +7,7 @@
 
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
+#include <faiss/utils/distances.h>
 
 
 namespace milvus::dog_segment {
@@ -67,7 +68,7 @@ auto SegmentNaive::get_deleted_bitmap(int64_t del_barrier, Timestamp query_times
                                       int64_t insert_barrier, bool force) -> std::shared_ptr<DeletedRecord::TmpBitmap> {
     auto old = deleted_record_.get_lru_entry();
 
-    if(!force || old->bitmap_ptr->capacity() == insert_barrier) {
+    if (!force || old->bitmap_ptr->capacity() == insert_barrier) {
         if (old->del_barrier == del_barrier) {
             return old;
         }
@@ -286,15 +287,17 @@ SegmentNaive::QueryImpl(query::QueryPtr query_info, Timestamp timestamp, QueryRe
     auto bitmap = bitmap_holder->bitmap_ptr;
     auto topK = query_info->topK;
     auto num_queries = query_info->num_queries;
-    auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_[0]);
+    auto the_offset_opt = schema_->get_offset(query_info->field_name);
+    assert(the_offset_opt.has_value());
+    auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_.at(the_offset_opt.value()));
     auto index_entry = index_meta_->lookup_by_field(query_info->field_name);
     auto conf = index_entry.config;
 
     conf[milvus::knowhere::meta::TOPK] = query_info->topK;
     {
         auto count = 0;
-        for(int i = 0; i < bitmap->capacity(); ++i) {
-            if(bitmap->test(i)) {
+        for (int i = 0; i < bitmap->capacity(); ++i) {
+            if (bitmap->test(i)) {
                 ++count;
             }
         }
@@ -306,8 +309,8 @@ SegmentNaive::QueryImpl(query::QueryPtr query_info, Timestamp timestamp, QueryRe
     auto ds = knowhere::GenDataset(query_info->num_queries, dim, query_info->query_raw_data.data());
     auto final = indexing->Query(ds, conf);
 
-    auto ids = final->Get<idx_t*>(knowhere::meta::IDS);
-    auto distances = final->Get<float*>(knowhere::meta::DISTANCE);
+    auto ids = final->Get<idx_t *>(knowhere::meta::IDS);
+    auto distances = final->Get<float *>(knowhere::meta::DISTANCE);
 
     auto total_num = num_queries * topK;
     result.result_ids_.resize(total_num);
@@ -320,38 +323,38 @@ SegmentNaive::QueryImpl(query::QueryPtr query_info, Timestamp timestamp, QueryRe
     std::copy_n(ids, total_num, result.result_ids_.data());
     std::copy_n(distances, total_num, result.result_distances_.data());
 
-    for(auto& id: result.result_ids_) {
+    for (auto &id: result.result_ids_) {
         id = record_.uids_[id];
     }
 
     return Status::OK();
 }
 
+Status
+SegmentNaive::QueryBruteForceImpl(query::QueryPtr query_info, Timestamp timestamp, QueryResult &results) {
+    auto ins_barrier = get_barrier(record_, timestamp);
+    auto del_barrier = get_barrier(deleted_record_, timestamp);
+    auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
+    assert(bitmap_holder);
+
+    auto &field = schema_->operator[](query_info->field_name);
+    assert(field.get_data_type() == DataType::VECTOR_FLOAT);
+    auto dim = field.get_dim();
+    auto bitmap = bitmap_holder->bitmap_ptr;
+    auto topK = query_info->topK;
+    auto num_queries = query_info->num_queries;
+    // TODO: optimize
+
+    auto the_offset_opt = schema_->get_offset(query_info->field_name);
+    assert(the_offset_opt.has_value());
+    auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_.at(the_offset_opt.value()));
+    std::vector<std::priority_queue<std::pair<float, int>>> records(num_queries);
+    
+}
 
 
 Status
-SegmentNaive::Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult &result) {
-    // TODO: enable delete
-    // TODO: enable index
-    // TODO: remove mock
-    if (query_info == nullptr) {
-        query_info = std::make_shared<query::Query>();
-        query_info->field_name = "fakevec";
-        query_info->topK = 10;
-        query_info->num_queries = 1;
-
-        auto dim = schema_->operator[]("fakevec").get_dim();
-        std::default_random_engine e(42);
-        std::uniform_real_distribution<> dis(0.0, 1.0);
-        query_info->query_raw_data.resize(query_info->num_queries * dim);
-        for (auto &x: query_info->query_raw_data) {
-            x = dis(e);
-        }
-    }
-
-    if(index_ready_) {
-        return QueryImpl(query_info, timestamp, result);
-    }
+SegmentNaive::QuerySlowImpl(query::QueryPtr query_info, Timestamp timestamp, QueryResult &result) {
 
     auto ins_barrier = get_barrier(record_, timestamp);
     auto del_barrier = get_barrier(deleted_record_, timestamp);
@@ -364,6 +367,11 @@ SegmentNaive::Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult
     auto bitmap = bitmap_holder->bitmap_ptr;
     auto topK = query_info->topK;
     auto num_queries = query_info->num_queries;
+    // TODO: optimize
+    auto the_offset_opt = schema_->get_offset(query_info->field_name);
+    assert(the_offset_opt.has_value());
+    auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_.at(the_offset_opt.value()));
+    std::vector<std::priority_queue<std::pair<float, int>>> records(num_queries);
 
     auto get_L2_distance = [dim](const float *a, const float *b) {
         float L2_distance = 0;
@@ -374,10 +382,6 @@ SegmentNaive::Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult
         return L2_distance;
     };
 
-
-    // TODO: optimize
-    std::vector<std::priority_queue<std::pair<float, int>>> records(num_queries);
-    auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_[0]);
     for (int64_t i = 0; i < ins_barrier; ++i) {
         if (i < bitmap->capacity() && bitmap->test(i)) {
             continue;
@@ -417,15 +421,33 @@ SegmentNaive::Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult
     }
 
     return Status::OK();
-//     find end of binary
-//        throw std::runtime_error("unimplemented");
-//        auto record_ptr = GetMutableRecord();
-//        if (record_ptr) {
-//            return QueryImpl(*record_ptr, query, timestamp, result);
-//        } else {
-//            assert(ready_immutable_);
-//            return QueryImpl(*record_immutable_, query, timestamp, result);
-//        }
+}
+
+Status
+SegmentNaive::Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult &result) {
+    // TODO: enable delete
+    // TODO: enable index
+    // TODO: remove mock
+    if (query_info == nullptr) {
+        query_info = std::make_shared<query::Query>();
+        query_info->field_name = "fakevec";
+        query_info->topK = 10;
+        query_info->num_queries = 1;
+
+        auto dim = schema_->operator[]("fakevec").get_dim();
+        std::default_random_engine e(42);
+        std::uniform_real_distribution<> dis(0.0, 1.0);
+        query_info->query_raw_data.resize(query_info->num_queries * dim);
+        for (auto &x: query_info->query_raw_data) {
+            x = dis(e);
+        }
+    }
+
+    if (index_ready_) {
+        return QueryImpl(query_info, timestamp, result);
+    } else {
+        return QuerySlowImpl(query_info, timestamp, result);
+    }
 }
 
 Status

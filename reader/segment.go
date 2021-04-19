@@ -15,7 +15,7 @@ import "C"
 import (
 	"fmt"
 	"github.com/czs007/suvlim/errors"
-	schema "github.com/czs007/suvlim/pkg/master/grpc/message"
+	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"strconv"
 	"unsafe"
 )
@@ -74,6 +74,9 @@ func (s *Segment) Close() error {
 	if status != 0 {
 		return errors.New("Close segment failed, error code = " + strconv.Itoa(int(status)))
 	}
+
+	// Build index after closing segment
+	s.buildIndex()
 	return nil
 }
 
@@ -169,7 +172,7 @@ func (s *Segment) SegmentDelete(offset int64, entityIDs *[]int64, timestamps *[]
 	return nil
 }
 
-func (s *Segment) SegmentSearch(queryJson string, timestamp uint64, vectorRecord *schema.VectorRowRecord) (*SearchResult, error) {
+func (s *Segment) SegmentSearch(queryJson string, timestamp uint64, vectorRecord *msgPb.VectorRowRecord) (*SearchResult, error) {
 	/*C.Search
 	int
 	Search(CSegmentBase c_segment,

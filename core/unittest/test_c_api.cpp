@@ -211,7 +211,7 @@ auto generate_data(int N) {
 }
 
 
-TEST(CApiTest, TestQuery) {
+TEST(CApiTest, TestSearchWithIndex) {
     auto collection_name = "collection0";
     auto schema_tmp_conf = "null_schema";
     auto collection = NewCollection(collection_name, schema_tmp_conf);
