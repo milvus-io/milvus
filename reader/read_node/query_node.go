@@ -2,9 +2,9 @@ package reader
 
 /*
 
-#cgo CFLAGS: -I../core/include
+#cgo CFLAGS: -I${SRCDIR}/../../core/include
 
-#cgo LDFLAGS: -L../core/lib -lmilvus_dog_segment -Wl,-rpath=../core/lib
+#cgo LDFLAGS: -L${SRCDIR}/../../core/lib -lmilvus_dog_segment -Wl,-rpath=${SRCDIR}/../../core/lib
 
 #include "collection_c.h"
 #include "partition_c.h"
@@ -15,11 +15,14 @@ import "C"
 
 import (
 	"fmt"
-	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
-	"github.com/czs007/suvlim/reader/message_client"
 	"sort"
 	"sync"
 	"sync/atomic"
+
+	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
+	"github.com/czs007/suvlim/pkg/master/kv"
+	"github.com/czs007/suvlim/reader/message_client"
+	//"github.com/stretchr/testify/assert"
 )
 
 type InsertData struct {
@@ -54,16 +57,17 @@ type QueryNodeDataBuffer struct {
 }
 
 type QueryNode struct {
-	QueryNodeId          uint64
-	Collections          []*Collection
-	SegmentsMap          map[int64]*Segment
-	messageClient        *message_client.MessageClient
+	QueryNodeId   uint64
+	Collections   []*Collection
+	SegmentsMap   map[int64]*Segment
+	messageClient *message_client.MessageClient
 	//mc                   *message_client.MessageClient
 	queryNodeTimeSync    *QueryNodeTime
 	buffer               QueryNodeDataBuffer
 	deletePreprocessData DeletePreprocessData
 	deleteData           DeleteData
 	insertData           InsertData
+	kvBase               *kv.EtcdKVBase
 }
 
 func NewQueryNode(queryNodeId uint64, timeSync uint64) *QueryNode {
@@ -87,12 +91,12 @@ func NewQueryNode(queryNodeId uint64, timeSync uint64) *QueryNode {
 	}
 
 	return &QueryNode{
-		QueryNodeId:          queryNodeId,
-		Collections:          nil,
-		SegmentsMap:          segmentsMap,
-		messageClient:        &mc,
-		queryNodeTimeSync:    queryNodeTimeSync,
-		buffer:               buffer,
+		QueryNodeId:       queryNodeId,
+		Collections:       nil,
+		SegmentsMap:       segmentsMap,
+		messageClient:     &mc,
+		queryNodeTimeSync: queryNodeTimeSync,
+		buffer:            buffer,
 	}
 }
 
@@ -119,12 +123,12 @@ func CreateQueryNode(queryNodeId uint64, timeSync uint64, mc *message_client.Mes
 	}
 
 	return &QueryNode{
-		QueryNodeId:          queryNodeId,
-		Collections:          nil,
-		SegmentsMap:          segmentsMap,
-		messageClient:        mc,
-		queryNodeTimeSync:    queryNodeTimeSync,
-		buffer:               buffer,
+		QueryNodeId:       queryNodeId,
+		Collections:       nil,
+		SegmentsMap:       segmentsMap,
+		messageClient:     mc,
+		queryNodeTimeSync: queryNodeTimeSync,
+		buffer:            buffer,
 	}
 }
 
@@ -173,7 +177,7 @@ func (node *QueryNode) DeleteCollection(collection *Collection) {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 func (node *QueryNode) PrepareBatchMsg() []int {
-	var msgLen= node.messageClient.PrepareBatchMsg()
+	var msgLen = node.messageClient.PrepareBatchMsg()
 	return msgLen
 }
 
@@ -189,7 +193,7 @@ func (node *QueryNode) InitQueryNodeCollection() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-func (node *QueryNode) RunInsertDelete(wg * sync.WaitGroup) {
+func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 	for {
 		// TODO: get timeRange from message client
 		var msgLen = node.PrepareBatchMsg()
@@ -271,7 +275,7 @@ func (node *QueryNode) MessagesPreprocess(insertDeleteMessages []*msgPb.InsertOr
 	}
 
 	// 2. Remove invalid messages from buffer.
-	tmpInsertOrDeleteBuffer := make([]*msgPb.InsertOrDeleteMsg ,0)
+	tmpInsertOrDeleteBuffer := make([]*msgPb.InsertOrDeleteMsg, 0)
 	for i, isValid := range node.buffer.validInsertDeleteBuffer {
 		if isValid {
 			tmpInsertOrDeleteBuffer = append(tmpInsertOrDeleteBuffer, node.buffer.InsertDeleteBuffer[i])
