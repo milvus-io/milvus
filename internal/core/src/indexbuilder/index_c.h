@@ -31,6 +31,7 @@ extern "C" {
 #include "common/status_c.h"
 
 typedef void* CIndex;
+typedef void* CIndexQueryResult;
 
 // TODO: how could we pass map between go and c++ more efficiently?
 // Solution: using protobuf instead of json, this way significantly increase programming efficiency
@@ -52,6 +53,44 @@ SerializeToSlicedBuffer(CIndex index, int32_t* buffer_size, char** res_buffer);
 
 CStatus
 LoadFromSlicedBuffer(CIndex index, const char* serialized_sliced_blob_buffer, int32_t size);
+
+CStatus
+QueryOnFloatVecIndex(CIndex index, int64_t float_value_num, const float* vectors, CIndexQueryResult* res);
+
+CStatus
+QueryOnFloatVecIndexWithParam(CIndex index,
+                              int64_t float_value_num,
+                              const float* vectors,
+                              const char* serialized_search_params,
+                              CIndexQueryResult* res);
+
+CStatus
+QueryOnBinaryVecIndex(CIndex index, int64_t data_size, const uint8_t* vectors, CIndexQueryResult* res);
+
+CStatus
+QueryOnBinaryVecIndexWithParam(CIndex index,
+                               int64_t data_size,
+                               const uint8_t* vectors,
+                               const char* serialized_search_params,
+                               CIndexQueryResult* res);
+
+CStatus
+CreateQueryResult(CIndexQueryResult* res);
+
+int64_t
+NqOfQueryResult(CIndexQueryResult res);
+
+int64_t
+TopkOfQueryResult(CIndexQueryResult res);
+
+void
+GetIdsOfQueryResult(CIndexQueryResult res, int64_t* ids);
+
+void
+GetDistancesOfQueryResult(CIndexQueryResult res, float* distances);
+
+CStatus
+DeleteQueryResult(CIndexQueryResult res);
 
 #ifdef __cplusplus
 };

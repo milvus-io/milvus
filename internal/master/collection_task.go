@@ -71,6 +71,22 @@ func (t *createCollectionTask) Execute() error {
 		singleFiled.FieldID = int64(index + 100)
 	}
 
+	zeroField := &schemapb.FieldSchema{
+		FieldID:      int64(0),
+		Name:         "RowID",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT64,
+	}
+
+	oneField := &schemapb.FieldSchema{
+		FieldID:      int64(1),
+		Name:         "Timestamp",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT64,
+	}
+
+	schema.Fields = append(schema.Fields, zeroField, oneField)
+
 	collectionID, err := t.sch.globalIDAllocator()
 	if err != nil {
 		return err

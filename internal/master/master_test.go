@@ -99,6 +99,7 @@ func TestMaster(t *testing.T) {
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx)
+
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}
@@ -326,16 +327,23 @@ func TestMaster(t *testing.T) {
 		t.Logf("collection id = %d", collMeta.ID)
 		assert.Equal(t, collMeta.Schema.Name, "col1")
 		assert.Equal(t, collMeta.Schema.AutoID, false)
-		assert.Equal(t, len(collMeta.Schema.Fields), 2)
+		assert.Equal(t, len(collMeta.Schema.Fields), 4)
 		assert.Equal(t, collMeta.Schema.Fields[0].Name, "col1_f1")
 		assert.Equal(t, collMeta.Schema.Fields[1].Name, "col1_f2")
+		assert.Equal(t, collMeta.Schema.Fields[2].Name, "RowID")
+		assert.Equal(t, collMeta.Schema.Fields[3].Name, "Timestamp")
 		assert.Equal(t, collMeta.Schema.Fields[0].DataType, schemapb.DataType_VECTOR_FLOAT)
 		assert.Equal(t, collMeta.Schema.Fields[1].DataType, schemapb.DataType_VECTOR_BINARY)
+		assert.Equal(t, collMeta.Schema.Fields[2].DataType, schemapb.DataType_INT64)
+		assert.Equal(t, collMeta.Schema.Fields[3].DataType, schemapb.DataType_INT64)
 		assert.Equal(t, len(collMeta.Schema.Fields[0].TypeParams), 2)
 		assert.Equal(t, len(collMeta.Schema.Fields[0].IndexParams), 2)
 		assert.Equal(t, len(collMeta.Schema.Fields[1].TypeParams), 2)
 		assert.Equal(t, len(collMeta.Schema.Fields[1].IndexParams), 2)
 		assert.Equal(t, int64(100), collMeta.Schema.Fields[0].FieldID)
+		assert.Equal(t, int64(101), collMeta.Schema.Fields[1].FieldID)
+		assert.Equal(t, int64(0), collMeta.Schema.Fields[2].FieldID)
+		assert.Equal(t, int64(1), collMeta.Schema.Fields[3].FieldID)
 		assert.Equal(t, collMeta.Schema.Fields[0].TypeParams[0].Key, "col1_f1_tk1")
 		assert.Equal(t, collMeta.Schema.Fields[0].TypeParams[1].Key, "col1_f1_tk2")
 		assert.Equal(t, collMeta.Schema.Fields[0].TypeParams[0].Value, "col1_f1_tv1")
@@ -651,9 +659,11 @@ func TestMaster(t *testing.T) {
 		t.Logf("collection id = %d", collMeta.ID)
 		assert.Equal(t, collMeta.Schema.Name, "col1")
 		assert.Equal(t, collMeta.Schema.AutoID, false)
-		assert.Equal(t, len(collMeta.Schema.Fields), 2)
+		assert.Equal(t, len(collMeta.Schema.Fields), 4)
 		assert.Equal(t, collMeta.Schema.Fields[0].Name, "col1_f1")
 		assert.Equal(t, collMeta.Schema.Fields[1].Name, "col1_f2")
+		assert.Equal(t, collMeta.Schema.Fields[2].Name, "RowID")
+		assert.Equal(t, collMeta.Schema.Fields[3].Name, "Timestamp")
 		assert.Equal(t, collMeta.Schema.Fields[0].DataType, schemapb.DataType_VECTOR_FLOAT)
 		assert.Equal(t, collMeta.Schema.Fields[1].DataType, schemapb.DataType_VECTOR_BINARY)
 		assert.Equal(t, len(collMeta.Schema.Fields[0].TypeParams), 2)
@@ -919,7 +929,6 @@ func TestMaster(t *testing.T) {
 		assert.Equal(t, createCollectionReq.ReqID, createCollectionMsg.CreateCollectionRequest.ReqID)
 		assert.Equal(t, createCollectionReq.Timestamp, createCollectionMsg.CreateCollectionRequest.Timestamp)
 		assert.Equal(t, createCollectionReq.ProxyID, createCollectionMsg.CreateCollectionRequest.ProxyID)
-		assert.Equal(t, createCollectionReq.Schema.Value, createCollectionMsg.CreateCollectionRequest.Schema.Value)
 
 		////////////////////////////CreatePartition////////////////////////
 		partitionName := "partitionName" + strconv.FormatUint(rand.Uint64(), 10)

@@ -222,6 +222,30 @@ func newMeta() {
 		AutoID:      false,
 		Fields: []*schemapb.FieldSchema{
 			{
+				FieldID:     1,
+				Name:        "Timestamp",
+				Description: "test collection filed 1",
+				DataType:    schemapb.DataType_INT64,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "col1_f1_tk2",
+						Value: "col1_f1_tv2",
+					},
+				},
+			},
+			{
+				FieldID:     0,
+				Name:        "RawID",
+				Description: "test collection filed 1",
+				DataType:    schemapb.DataType_INT64,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "col1_f1_tk2",
+						Value: "col1_f1_tv2",
+					},
+				},
+			},
+			{
 				FieldID:     100,
 				Name:        "col1_f1",
 				Description: "test collection filed 1",
