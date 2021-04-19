@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
@@ -96,14 +98,20 @@ func TestPersistenceScheduler(t *testing.T) {
 
 	//wait flush segment request sent to build index node
 	time.Sleep(100 * time.Microsecond)
-	idxDes, err := buildIndexClient.GetIndexStates([]UniqueID{UniqueID(1)})
+	req := &indexpb.IndexStatesRequest{
+		IndexIDs: []UniqueID{UniqueID(1)},
+	}
+	idxDes, err := buildIndexClient.GetIndexStates(req)
 	assert.Nil(t, err)
 	assert.Equal(t, commonpb.IndexState_INPROGRESS, idxDes.States[0].State)
 
 	//wait build index to finish
 	time.Sleep(3 * time.Second)
 
-	idxDes, err = buildIndexClient.GetIndexStates([]UniqueID{UniqueID(1)})
+	req2 := &indexpb.IndexStatesRequest{
+		IndexIDs: []UniqueID{UniqueID(1)},
+	}
+	idxDes, err = buildIndexClient.GetIndexStates(req2)
 	assert.Nil(t, err)
 	assert.Equal(t, commonpb.IndexState_FINISHED, idxDes.States[0].State)
 

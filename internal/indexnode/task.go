@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"log"
 	"strconv"
-	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
 )
@@ -27,10 +27,9 @@ type task interface {
 }
 
 type BaseTask struct {
-	done  chan error
-	ctx   context.Context
-	id    UniqueID
-	table *metaTable
+	done chan error
+	ctx  context.Context
+	id   UniqueID
 }
 
 func (bt *BaseTask) ID() UniqueID {
@@ -54,83 +53,22 @@ func (bt *BaseTask) Notify(err error) {
 	bt.done <- err
 }
 
-type IndexAddTask struct {
-	BaseTask
-	req         *indexpb.BuildIndexRequest
-	indexID     UniqueID
-	idAllocator *allocator.IDAllocator
-	buildQueue  TaskQueue
-	kv          kv.Base
-}
-
-func (it *IndexAddTask) SetID(ID UniqueID) {
-	it.BaseTask.setID(ID)
-}
-
-func (it *IndexAddTask) OnEnqueue() error {
-	var err error
-	it.indexID, err = it.idAllocator.AllocOne()
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (it *IndexAddTask) PreExecute() error {
-	log.Println("pretend to check Index Req")
-	err := it.table.AddIndex(it.indexID, it.req)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (it *IndexAddTask) Execute() error {
-	t := newIndexBuildTask()
-	t.table = it.table
-	t.indexID = it.indexID
-	t.kv = it.kv
-	t.req = it.req
-	var cancel func()
-	t.ctx, cancel = context.WithTimeout(it.ctx, reqTimeoutInterval)
-	defer cancel()
-
-	fn := func() error {
-		select {
-		case <-t.ctx.Done():
-			return errors.New("index add timeout")
-		default:
-			return it.buildQueue.Enqueue(t)
-		}
-	}
-	return fn()
-}
-
-func (it *IndexAddTask) PostExecute() error {
-	return nil
-}
-
-func NewIndexAddTask() *IndexAddTask {
-	return &IndexAddTask{
-		BaseTask: BaseTask{
-			done: make(chan error),
-		},
-	}
-}
-
 type IndexBuildTask struct {
 	BaseTask
-	index     Index
-	indexID   UniqueID
-	kv        kv.Base
-	savePaths []string
-	req       *indexpb.BuildIndexRequest
+	index         Index
+	kv            kv.Base
+	savePaths     []string
+	cmd           *indexpb.BuildIndexCmd
+	serviceClient typeutil.IndexServiceInterface
+	nodeID        UniqueID
 }
 
 func newIndexBuildTask() *IndexBuildTask {
+	ctx := context.Background()
 	return &IndexBuildTask{
 		BaseTask: BaseTask{
-			done: make(chan error, 1), // intend to do this
+			ctx:  ctx,
+			done: make(chan error), // intend to do this
 		},
 	}
 }
@@ -140,21 +78,70 @@ func (it *IndexBuildTask) SetID(ID UniqueID) {
 }
 
 func (it *IndexBuildTask) OnEnqueue() error {
-	return it.table.UpdateIndexEnqueTime(it.indexID, time.Now())
+	it.SetID(it.cmd.IndexID)
+	log.Printf("[IndexBuilderTask] Enqueue TaskID: %v", it.ID())
+	return nil
 }
 
 func (it *IndexBuildTask) PreExecute() error {
-	return it.table.UpdateIndexScheduleTime(it.indexID, time.Now())
+	log.Println("preExecute...")
+	return nil
 }
 
-func (it *IndexBuildTask) Execute() error {
-	err := it.table.UpdateIndexState(it.indexID, commonpb.IndexState_INPROGRESS)
-	if err != nil {
+func (it *IndexBuildTask) PostExecute() error {
+	log.Println("PostExecute...")
+	var err error
+	defer func() {
+		if err != nil {
+			it.Rollback()
+		}
+	}()
+
+	if it.serviceClient == nil {
+		err = errors.New("IndexBuildTask, serviceClient is nil")
 		return err
 	}
 
+	nty := &indexpb.BuildIndexNotification{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+		IndexID:        it.cmd.IndexID,
+		NodeID:         it.nodeID,
+		IndexFilePaths: it.savePaths,
+	}
+
+	resp, err := it.serviceClient.NotifyBuildIndex(nty)
+	if err != nil {
+		log.Println("IndexBuildTask notify err:", err.Error())
+		return err
+	}
+
+	if resp.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		err = errors.New(resp.Reason)
+	}
+	return err
+}
+
+func (it *IndexBuildTask) Rollback() error {
+
+	if it.savePaths == nil {
+		return nil
+	}
+
+	err := it.kv.MultiRemove(it.savePaths)
+	if err != nil {
+		log.Println("IndexBuildTask Rollback Failed:", err.Error())
+		return err
+	}
+	return nil
+}
+
+func (it *IndexBuildTask) Execute() error {
+	log.Println("start build index ...")
+	var err error
 	typeParams := make(map[string]string)
-	for _, kvPair := range it.req.GetTypeParams() {
+	for _, kvPair := range it.cmd.Req.GetTypeParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
 		_, ok := typeParams[key]
 		if ok {
@@ -164,7 +151,7 @@ func (it *IndexBuildTask) Execute() error {
 	}
 
 	indexParams := make(map[string]string)
-	for _, kvPair := range it.req.GetIndexParams() {
+	for _, kvPair := range it.cmd.Req.GetIndexParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
 		_, ok := indexParams[key]
 		if ok {
@@ -205,7 +192,7 @@ func (it *IndexBuildTask) Execute() error {
 		return blobs
 	}
 
-	toLoadDataPaths := it.req.GetDataPaths()
+	toLoadDataPaths := it.cmd.Req.GetDataPaths()
 	keys := make([]string, 0)
 	blobs := make([]*Blob, 0)
 	for _, path := range toLoadDataPaths {
@@ -267,7 +254,7 @@ func (it *IndexBuildTask) Execute() error {
 
 		getSavePathByKey := func(key string) string {
 			// TODO: fix me, use more reasonable method
-			return strconv.Itoa(int(it.indexID)) + "/" + strconv.Itoa(int(partitionID)) + "/" + strconv.Itoa(int(segmentID)) + "/" + key
+			return strconv.Itoa(int(it.cmd.IndexID)) + "/" + strconv.Itoa(int(partitionID)) + "/" + strconv.Itoa(int(segmentID)) + "/" + key
 		}
 		saveBlob := func(path string, value []byte) error {
 			return it.kv.Save(path, string(value))
@@ -284,10 +271,9 @@ func (it *IndexBuildTask) Execute() error {
 			it.savePaths = append(it.savePaths, savePath)
 		}
 	}
-	it.index.Delete()
+	err = it.index.Delete()
+	if err != nil {
+		log.Print("CIndexDelete Failed")
+	}
 	return nil
-}
-
-func (it *IndexBuildTask) PostExecute() error {
-	return it.table.CompleteIndex(it.indexID, it.savePaths)
 }

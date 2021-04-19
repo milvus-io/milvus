@@ -2,6 +2,7 @@ package typeutil
 
 import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 )
@@ -16,6 +17,21 @@ type Component interface {
 	GetComponentStates() (*internalpb2.ComponentStates, error)
 	GetTimeTickChannel() (string, error)
 	GetStatisticsChannel() (string, error)
+}
+
+type IndexNodeInterface interface {
+	Service
+	BuildIndex(req *indexpb.BuildIndexCmd) (*commonpb.Status, error)
+}
+
+type IndexServiceInterface interface {
+	Service
+	Component
+	RegisterNode(req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error)
+	BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error)
+	GetIndexStates(req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error)
+	GetIndexFilePaths(req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error)
+	NotifyBuildIndex(nty *indexpb.BuildIndexNotification) (*commonpb.Status, error)
 }
 
 type QueryServiceInterface interface {

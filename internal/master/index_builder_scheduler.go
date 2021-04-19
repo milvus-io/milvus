@@ -2,9 +2,12 @@ package master
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -74,11 +77,73 @@ func (scheduler *IndexBuildScheduler) schedule(info interface{}) error {
 		indexParamsMap[kv.Key] = kv.Value
 	}
 
-	indexID, err := scheduler.client.BuildIndex(indexBuildInfo.binlogFilePath, typeParamsMap, indexParamsMap)
+	parseMap := func(mStr string) (map[string]string, error) {
+		buffer := make(map[string]interface{})
+		err := json.Unmarshal([]byte(mStr), &buffer)
+		if err != nil {
+			return nil, errors.New("Unmarshal params failed")
+		}
+		ret := make(map[string]string)
+		for key, value := range buffer {
+			valueStr := fmt.Sprintf("%v", value)
+			ret[key] = valueStr
+		}
+		return ret, nil
+	}
+	var typeParamsKV []*commonpb.KeyValuePair
+	for key := range typeParamsMap {
+		if key == "params" {
+			mapParams, err := parseMap(typeParamsMap[key])
+			if err != nil {
+				log.Println("parse params error: ", err)
+			}
+			for pk, pv := range mapParams {
+				typeParamsKV = append(typeParamsKV, &commonpb.KeyValuePair{
+					Key:   pk,
+					Value: pv,
+				})
+			}
+		} else {
+			typeParamsKV = append(typeParamsKV, &commonpb.KeyValuePair{
+				Key:   key,
+				Value: typeParamsMap[key],
+			})
+		}
+	}
+
+	var indexParamsKV []*commonpb.KeyValuePair
+	for key := range indexParamsMap {
+		if key == "params" {
+			mapParams, err := parseMap(indexParamsMap[key])
+			if err != nil {
+				log.Println("parse params error: ", err)
+			}
+			for pk, pv := range mapParams {
+				indexParamsKV = append(indexParamsKV, &commonpb.KeyValuePair{
+					Key:   pk,
+					Value: pv,
+				})
+			}
+		} else {
+			indexParamsKV = append(indexParamsKV, &commonpb.KeyValuePair{
+				Key:   key,
+				Value: indexParamsMap[key],
+			})
+		}
+	}
+
+	requset := &indexpb.BuildIndexRequest{
+		DataPaths:   indexBuildInfo.binlogFilePath,
+		TypeParams:  typeParamsKV,
+		IndexParams: indexParamsKV,
+	}
+
+	indexResp, err := scheduler.client.BuildIndex(requset)
 	if err != nil {
 		log.Printf("build index for segment %d field %d, failed:%s", indexBuildInfo.segmentID, indexBuildInfo.fieldID, err.Error())
 		return err
 	}
+	indexID := indexResp.IndexID
 
 	err = scheduler.metaTable.AddFieldIndexMeta(&etcdpb.FieldIndexMeta{
 		SegmentID:   indexBuildInfo.segmentID,
@@ -112,17 +177,34 @@ func (scheduler *IndexBuildScheduler) describe() error {
 			indexID := channelInfo.id
 			indexBuildInfo := channelInfo.info
 			for {
-				description, err := scheduler.client.GetIndexStates([]UniqueID{channelInfo.id})
+				indexIDs := []UniqueID{channelInfo.id}
+				request := &indexpb.IndexStatesRequest{
+					IndexIDs: indexIDs,
+				}
+				description, err := scheduler.client.GetIndexStates(request)
 				if err != nil {
 					return err
 				}
 				if description.States[0].State == commonpb.IndexState_FINISHED {
 					log.Printf("build index for segment %d field %d is finished", indexBuildInfo.segmentID, indexBuildInfo.fieldID)
-					filesPaths, err := scheduler.client.GetIndexFilePaths([]UniqueID{indexID})
+					request := &indexpb.IndexFilePathsRequest{
+						IndexIDs: indexIDs,
+					}
+
+					response, err := scheduler.client.GetIndexFilePaths(request)
 					if err != nil {
 						return err
 					}
-					filePaths := filesPaths[0]
+					var filePathsInfos [][]string
+					for _, indexID := range indexIDs {
+						for _, filePathInfo := range response.FilePaths {
+							if indexID == filePathInfo.IndexID {
+								filePathsInfos = append(filePathsInfos, filePathInfo.IndexFilePaths)
+								break
+							}
+						}
+					}
+					filePaths := filePathsInfos[0]
 
 					//TODO: remove fileName
 					var fieldName string

@@ -142,7 +142,7 @@ func InitIndexBuilder(wg *sync.WaitGroup) {
 	defer wg.Done()
 	indexnode.Init()
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := indexnode.CreateBuilder(ctx)
+	svr, err := indexnode.CreateIndexNode(ctx)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}
@@ -167,7 +167,7 @@ func InitIndexBuilder(wg *sync.WaitGroup) {
 	<-ctx.Done()
 	log.Print("Got signal to exit", zap.String("signal", sig.String()))
 
-	svr.Close()
+	svr.Stop()
 	switch sig {
 	case syscall.SIGTERM:
 		exit(0)

@@ -249,8 +249,9 @@ TEST(Sealed, LoadFieldData) {
     auto metric_type = MetricType::METRIC_L2;
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
-    schema->AddDebugField("counter", DataType::INT64);
-    schema->AddDebugField("double", DataType::DOUBLE);
+    auto counter_id = schema->AddDebugField("counter", DataType::INT64);
+    auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
+    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
 
     auto dataset = DataGen(schema, N);
 
@@ -268,24 +269,6 @@ TEST(Sealed, LoadFieldData) {
     indexing->AddWithoutIds(database, conf);
 
     auto segment = CreateSealedSegment(schema);
-    SealedLoader(dataset, *segment);
-    {
-        LoadIndexInfo vec_info;
-        vec_info.field_id = fakevec_id.get();
-        vec_info.field_name = "fakevec";
-        vec_info.index = indexing;
-        vec_info.index_params["metric_type"] = milvus::knowhere::Metric::L2;
-        segment->LoadIndex(vec_info);
-    }
-    ASSERT_EQ(segment->num_chunk(), 1);
-    auto chunk_span1 = segment->chunk_data<int64_t>(FieldOffset(1), 0);
-    auto chunk_span2 = segment->chunk_data<double>(FieldOffset(2), 0);
-    auto ref1 = dataset.get_col<int64_t>(1);
-    auto ref2 = dataset.get_col<double>(2);
-    for (int i = 0; i < N; ++i) {
-        ASSERT_EQ(chunk_span1[i], ref1[i]);
-        ASSERT_EQ(chunk_span2[i], ref2[i]);
-    }
     std::string dsl = R"({
         "bool": {
             "must": [
@@ -313,14 +296,47 @@ TEST(Sealed, LoadFieldData) {
         }
     })";
 
+    Timestamp time = 1000000;
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp time = 1000000;
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
+
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group_arr.data(), &time, 1));
+
+    SealedLoader(dataset, *segment);
+    segment->DropFieldData(nothing_id);
+
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group_arr.data(), &time, 1));
+
+    LoadIndexInfo vec_info;
+    vec_info.field_id = fakevec_id.get();
+    vec_info.field_name = "fakevec";
+    vec_info.index = indexing;
+    vec_info.index_params["metric_type"] = milvus::knowhere::Metric::L2;
+    segment->LoadIndex(vec_info);
+
+    ASSERT_EQ(segment->num_chunk(), 1);
+    auto chunk_span1 = segment->chunk_data<int64_t>(FieldOffset(1), 0);
+    auto chunk_span2 = segment->chunk_data<double>(FieldOffset(2), 0);
+    auto ref1 = dataset.get_col<int64_t>(1);
+    auto ref2 = dataset.get_col<double>(2);
+    for (int i = 0; i < N; ++i) {
+        ASSERT_EQ(chunk_span1[i], ref1[i]);
+        ASSERT_EQ(chunk_span2[i], ref2[i]);
+    }
 
     auto qr = segment->Search(plan.get(), ph_group_arr.data(), &time, 1);
     auto json = QueryResultToJson(qr);
     std::cout << json.dump(1);
+
+    segment->DropIndex(fakevec_id);
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group_arr.data(), &time, 1));
+    segment->LoadIndex(vec_info);
+    auto qr2 = segment->Search(plan.get(), ph_group_arr.data(), &time, 1);
+    auto json2 = QueryResultToJson(qr);
+    ASSERT_EQ(json.dump(-2), json2.dump(-2));
+    segment->DropFieldData(double_id);
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group_arr.data(), &time, 1));
 }

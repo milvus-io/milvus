@@ -24,6 +24,7 @@ import (
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
+	grpcindexserver.Init()
 	svr, err := grpcindexserver.CreateIndexServer(ctx)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
@@ -49,7 +50,7 @@ func main() {
 	<-ctx.Done()
 	log.Print("Got signal to exit", zap.String("signal", sig.String()))
 
-	svr.Close()
+	svr.Stop()
 	switch sig {
 	case syscall.SIGTERM:
 		exit(0)

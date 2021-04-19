@@ -66,13 +66,9 @@ indexBuilder:
     address: localhost
     port: 31000
 
-indexNode:
-  address: localhost
-  port: 21116
-
 indexServer:
   address: localhost
-  port: 21118
+  port: 31000
 
 dataNode:
   address: localhost

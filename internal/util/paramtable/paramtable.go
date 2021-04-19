@@ -145,7 +145,7 @@ func (gp *BaseTable) tryloadFromEnv() {
 		panic(err)
 	}
 
-	indexBuilderAddress := os.Getenv("INDEX_BUILDER_ADDRESS")
+	indexBuilderAddress := os.Getenv("INDEX_SERVICE_ADDRESS")
 	if indexBuilderAddress == "" {
 		indexBuilderHost, err := gp.Load("indexBuilder.address")
 		if err != nil {
@@ -157,7 +157,7 @@ func (gp *BaseTable) tryloadFromEnv() {
 		}
 		indexBuilderAddress = indexBuilderHost + ":" + port
 	}
-	err = gp.Save("_IndexBuilderAddress", indexBuilderAddress)
+	err = gp.Save("IndexServiceAddress", indexBuilderAddress)
 	if err != nil {
 		panic(err)
 	}

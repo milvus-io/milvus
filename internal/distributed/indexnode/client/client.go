@@ -11,25 +11,48 @@ import (
 )
 
 type Client struct {
-	grpcClient indexpb.IndexNodeClient
+	grpcClient  indexpb.IndexNodeClient
+	nodeAddress string
 }
 
-func (c Client) BuildIndex(req *indexpb.BuildIndexCmd) (*commonpb.Status, error) {
+func (c Client) Init() error {
+	return nil
+}
+
+func (c Client) Start() error {
+	return nil
+}
+
+func (c Client) Stop() error {
+	return nil
+}
+
+func (c *Client) tryConnect() error {
+	if c.grpcClient != nil {
+		return nil
+	}
+	ctx1, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, err := grpc.DialContext(ctx1, c.nodeAddress, grpc.WithInsecure(), grpc.WithBlock())
+	if err != nil {
+		log.Printf("Connect to IndexNode failed, error= %v", err)
+		return err
+	}
+	c.grpcClient = indexpb.NewIndexNodeClient(conn)
+	return nil
+}
+
+func (c *Client) BuildIndex(req *indexpb.BuildIndexCmd) (*commonpb.Status, error) {
 
 	ctx := context.TODO()
+	c.tryConnect()
 
 	return c.grpcClient.BuildIndex(ctx, req)
 }
 
-func NewClient(nodeAddress string) *Client {
-	ctx1, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	conn, err := grpc.DialContext(ctx1, nodeAddress, grpc.WithInsecure(), grpc.WithBlock())
-	if err != nil {
-		log.Printf("Connect to IndexNode failed, error= %v", err)
-	}
-	log.Printf("Connected to IndexService, IndexService=%s", nodeAddress)
+func NewClient(nodeAddress string) (*Client, error) {
+
 	return &Client{
-		grpcClient: indexpb.NewIndexNodeClient(conn),
-	}
+		nodeAddress: nodeAddress,
+	}, nil
 }

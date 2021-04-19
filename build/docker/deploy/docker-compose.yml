@@ -11,7 +11,7 @@ services:
     environment: 
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       ETCD_ADDRESS: ${ETCD_ADDRESS}
-      INDEX_BUILDER_ADDRESS: ${INDEX_BUILDER_ADDRESS}
+      INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
     networks: 
       - milvus
 

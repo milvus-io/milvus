@@ -63,21 +63,26 @@ func (m *MockWriteNodeClient) GetInsertBinlogPaths(segmentID UniqueID) (map[Uniq
 }
 
 type BuildIndexClient interface {
-	BuildIndex(columnDataPaths []string, typeParams map[string]string, indexParams map[string]string) (UniqueID, error)
-	GetIndexStates(indexIDs []UniqueID) (*indexpb.IndexStatesResponse, error)
-	GetIndexFilePaths(indexID []UniqueID) ([][]string, error)
+	BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error)
+	GetIndexStates(req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error)
+	GetIndexFilePaths(req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error)
 }
 
 type MockBuildIndexClient struct {
 	buildTime time.Time
 }
 
-func (m *MockBuildIndexClient) BuildIndex(columnDataPaths []string, typeParams map[string]string, indexParams map[string]string) (UniqueID, error) {
+func (m *MockBuildIndexClient) BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
 	m.buildTime = time.Now()
-	return 1, nil
+	return &indexpb.BuildIndexResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+		IndexID: int64(1),
+	}, nil
 }
 
-func (m *MockBuildIndexClient) GetIndexStates(indexIDs []UniqueID) (*indexpb.IndexStatesResponse, error) {
+func (m *MockBuildIndexClient) GetIndexStates(req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
 	now := time.Now()
 	ret := &indexpb.IndexStatesResponse{
 		Status: &commonpb.Status{
@@ -86,7 +91,7 @@ func (m *MockBuildIndexClient) GetIndexStates(indexIDs []UniqueID) (*indexpb.Ind
 	}
 	var indexStates []*indexpb.IndexInfo
 	if now.Sub(m.buildTime).Seconds() > 2 {
-		for _, indexID := range indexIDs {
+		for _, indexID := range req.IndexIDs {
 			indexState := &indexpb.IndexInfo{
 				State:   commonpb.IndexState_FINISHED,
 				IndexID: indexID,
@@ -96,7 +101,7 @@ func (m *MockBuildIndexClient) GetIndexStates(indexIDs []UniqueID) (*indexpb.Ind
 		ret.States = indexStates
 		return ret, nil
 	}
-	for _, indexID := range indexIDs {
+	for _, indexID := range req.IndexIDs {
 		indexState := &indexpb.IndexInfo{
 			State:   commonpb.IndexState_INPROGRESS,
 			IndexID: indexID,
@@ -107,8 +112,25 @@ func (m *MockBuildIndexClient) GetIndexStates(indexIDs []UniqueID) (*indexpb.Ind
 	return ret, nil
 }
 
-func (m *MockBuildIndexClient) GetIndexFilePaths(indexIDs []UniqueID) ([][]string, error) {
-	return [][]string{{"/binlog/index/file_1", "/binlog/index/file_2", "/binlog/index/file_3"}}, nil
+func (m *MockBuildIndexClient) GetIndexFilePaths(req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {
+	var filePathInfos []*indexpb.IndexFilePathInfo
+	for _, indexID := range req.IndexIDs {
+		filePaths := &indexpb.IndexFilePathInfo{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_SUCCESS,
+			},
+			IndexID:        indexID,
+			IndexFilePaths: []string{"/binlog/index/file_1", "/binlog/index/file_2", "/binlog/index/file_3"},
+		}
+		filePathInfos = append(filePathInfos, filePaths)
+	}
+
+	return &indexpb.IndexFilePathsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+		FilePaths: filePathInfos,
+	}, nil
 }
 
 type LoadIndexClient interface {
