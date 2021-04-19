@@ -12,7 +12,7 @@ pipeline {
     }
     options {
         timestamps()
-        parallelsAlwaysFailFast()
+        // parallelsAlwaysFailFast()
     }
     environment {
         PROJECT_NAME = "milvus"
