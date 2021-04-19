@@ -7,49 +7,48 @@ option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/que
 import "common.proto";
 import "internal.proto";
 
-
 message RegisterNodeRequest {
   common.MsgBase base = 1;
   common.Address address = 2;
 }
 
 message RegisterNodeResponse {
-  internal.InitParams init_params = 1;
+  common.Status status = 1;
+  internal.InitParams init_params = 2;
 }
 
 message ShowCollectionRequest {
   common.MsgBase base = 1;
-  int64  dbID = 2;
+  int64 dbID = 2;
 }
 
-message ShowCollectionResponse  {
-  repeated int64  collectionIDs = 1;
+message ShowCollectionResponse {
+  common.Status status = 1;
+  repeated int64 collectionIDs = 2;
 }
 
 message LoadCollectionRequest {
   common.MsgBase base = 1;
-  int64  dbID = 2;
+  int64 dbID = 2;
   int64 collectionID = 3;
 }
-
 
 message ReleaseCollectionRequest {
   common.MsgBase base = 1;
-  int64  dbID = 2;
+  int64 dbID = 2;
   int64 collectionID = 3;
 }
 
-
 message ShowPartitionRequest {
   common.MsgBase base = 1;
-  int64  dbID = 2;
-  int64  collectionID = 3;
+  int64 dbID = 2;
+  int64 collectionID = 3;
 }
 
 message ShowPartitionResponse  {
-  repeated int64  partitionIDs = 1;
+  common.Status status = 1;
+  repeated int64 partitionIDs = 2;
 }
-
 
 enum PartitionState {
   NotExist = 0;
@@ -66,17 +65,17 @@ message PartitionStates {
   PartitionState state = 2;
 }
 
-message PartitionStatesRequest  {
+message PartitionStatesRequest {
   common.MsgBase base = 1;
-  int64  dbID = 2;
+  int64 dbID = 2;
   int64 collectionID = 3;
   repeated int64  partitionIDs = 4;
 }
 
 message PartitionStatesResponse {
-  repeated PartitionStates partition_descriptions = 1;
+  common.Status status = 1;
+  repeated PartitionStates partition_descriptions = 2;
 }
-
 
 message LoadPartitionRequest {
   common.MsgBase base = 1;
@@ -93,10 +92,10 @@ message ReleasePartitionRequest {
 }
 
 message CreateQueryChannelResponse {
-  string request_channel = 1;
-  string result_channel = 2;
+  common.Status status = 1;
+  string request_channel = 2;
+  string result_channel = 3;
 }
-
 
 message AddQueryChannelsRequest {
   common.MsgBase base = 1;
@@ -104,18 +103,17 @@ message AddQueryChannelsRequest {
   string result_channelID = 3;
 }
 
-
 message RemoveQueryChannelsRequest {
-  common.MsgBase base = 1;
-  string request_channelID = 2;
-  string result_channelID = 3;
+  common.Status status = 1;
+  common.MsgBase base = 2;
+  string request_channelID = 3;
+  string result_channelID = 4;
 }
 
 message WatchDmChannelsRequest  {
   common.MsgBase base = 1;
   repeated string channelIDs = 2;
 }
-
 
 message LoadSegmentRequest {
   common.MsgBase base = 1;
@@ -151,13 +149,6 @@ message ServiceStatesResponse {
 }
 
 service QueryService {
-  /**
-   * @brief This method is used to create collection
-   *
-   * @param CollectionSchema, use to provide collection information to be created.
-   *
-   * @return Status
-   */
   rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
 
   rpc ShowCollections(ShowCollectionRequest) returns (ShowCollectionResponse) {}

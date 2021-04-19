@@ -45,6 +45,15 @@ ${protoc} --go_out=plugins=grpc,paths=source_relative:./etcdpb etcd_meta.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./indexcgopb index_cgo_msg.proto
 
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./internalpb internal_msg.proto
+
+PROTOBUF_GOOGLE_SRC=${SCRIPTS_DIR}/../cmake_build/thirdparty/protobuf/protobuf-src/src/google
+if [ -d ${PROTOBUF_GOOGLE_SRC} ]; then
+  echo ${PROTOBUF_GOOGLE_SRC}
+  ln -snf ${PROTOBUF_GOOGLE_SRC} google
+  ${protoc} --go_out=plugins=grpc,paths=source_relative:./internalpb msg_header.proto
+  unlink google
+fi
+
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./servicepb service_msg.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./servicepb service.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./masterpb master.proto

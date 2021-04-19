@@ -130,7 +130,7 @@ func TestDataSyncService_Start(t *testing.T) {
 			InsertRequest: internalPb.InsertRequest{
 				MsgType:        commonpb.MsgType_kInsert,
 				ReqID:          UniqueID(0),
-				CollectionName: "col1",
+				CollectionName: "coll1",
 				PartitionTag:   "default",
 				SegmentID:      UniqueID(1),
 				ChannelID:      UniqueID(0),
@@ -206,7 +206,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	<-ctx.Done()
 }
 
-func newMeta() *etcdpb.CollectionMeta {
+func newMeta() {
 	ETCDAddr := Params.EtcdAddress
 	MetaRootPath := Params.MetaRootPath
 
@@ -374,7 +374,5 @@ func newMeta() *etcdpb.CollectionMeta {
 	}
 	segBytes := proto.MarshalTextString(&segSch)
 	kvClient.Save("/segment/"+strconv.FormatInt(segSch.SegmentID, 10), segBytes)
-
-	return &collection
 
 }
