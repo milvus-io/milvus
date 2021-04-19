@@ -2,10 +2,13 @@ package allocator
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 
-	"errors"
+	"github.com/zilliztech/milvus-distributed/internal/log"
+	"go.uber.org/zap"
 )
 
 const (
@@ -106,11 +109,13 @@ type Allocator struct {
 	TChan         TickerChan
 	ForceSyncChan chan Request
 
-	SyncFunc    func() bool
+	SyncFunc    func() (bool, error)
 	ProcessFunc func(req Request) error
 
 	CheckSyncFunc func(timeout bool) bool
 	PickCanDoFunc func()
+	SyncErr       error
+	Role          string
 }
 
 func (ta *Allocator) Start() error {
@@ -183,7 +188,7 @@ func (ta *Allocator) pickCanDo() {
 func (ta *Allocator) sync(timeout bool) bool {
 	if ta.SyncFunc == nil || ta.CheckSyncFunc == nil {
 		ta.CanDoReqs = ta.ToDoReqs
-		ta.ToDoReqs = ta.ToDoReqs[0:0]
+		ta.ToDoReqs = nil
 		return true
 	}
 	if !timeout && len(ta.ToDoReqs) == 0 {
@@ -193,7 +198,8 @@ func (ta *Allocator) sync(timeout bool) bool {
 		return false
 	}
 
-	ret := ta.SyncFunc()
+	var ret bool
+	ret, ta.SyncErr = ta.SyncFunc()
 
 	if !timeout {
 		ta.TChan.Reset()
@@ -207,16 +213,28 @@ func (ta *Allocator) finishSyncRequest() {
 			req.Notify(nil)
 		}
 	}
-	ta.SyncReqs = ta.SyncReqs[0:0]
+	ta.SyncReqs = nil
 }
 
 func (ta *Allocator) failRemainRequest() {
+	var err error
+	if ta.SyncErr != nil {
+		err = fmt.Errorf("%s failRemainRequest err:%w", ta.Role, ta.SyncErr)
+	} else {
+		errMsg := fmt.Sprintf("%s failRemainRequest unexpected error", ta.Role)
+		err = errors.New(errMsg)
+	}
+	if len(ta.ToDoReqs) > 0 {
+		log.Debug("Allocator has some reqs to fail",
+			zap.Any("Role", ta.Role),
+			zap.Any("reqLen", len(ta.ToDoReqs)))
+	}
 	for _, req := range ta.ToDoReqs {
 		if req != nil {
-			req.Notify(errors.New("failed: unexpected error"))
+			req.Notify(err)
 		}
 	}
-	ta.ToDoReqs = []Request{}
+	ta.ToDoReqs = nil
 }
 
 func (ta *Allocator) finishRequest() {
@@ -241,7 +259,8 @@ func (ta *Allocator) Close() {
 	ta.CancelFunc()
 	ta.wg.Wait()
 	ta.TChan.Close()
-	ta.revokeRequest(errors.New("closing"))
+	errMsg := fmt.Sprintf("%s is closing", ta.Role)
+	ta.revokeRequest(errors.New(errMsg))
 }
 
 func (ta *Allocator) CleanCache() {

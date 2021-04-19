@@ -3,9 +3,11 @@ package allocator
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
@@ -38,6 +40,7 @@ func NewTimestampAllocator(ctx context.Context, masterAddr string) (*TimestampAl
 		Allocator: Allocator{
 			Ctx:        ctx1,
 			CancelFunc: cancel,
+			Role:       "TimestampAllocator",
 		},
 		masterAddress: masterAddr,
 		countPerRPC:   tsCountPerRPC,
@@ -57,7 +60,7 @@ func (ta *TimestampAllocator) Start() error {
 	connectMasterFn := func() error {
 		return ta.connectMaster()
 	}
-	err := retry.Retry(10, time.Millisecond*200, connectMasterFn)
+	err := retry.Retry(1000, time.Millisecond*200, connectMasterFn)
 	if err != nil {
 		panic("Timestamp local allocator connect to master failed")
 	}
@@ -70,10 +73,10 @@ func (ta *TimestampAllocator) connectMaster() error {
 	defer cancel()
 	conn, err := grpc.DialContext(ctx, ta.masterAddress, grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
-		log.Printf("Connect to master failed, error= %v", err)
+		log.Error("TimestampAllocator Connect to master failed", zap.Error(err))
 		return err
 	}
-	log.Printf("Connected to master, master_addr=%s", ta.masterAddress)
+	log.Debug("TimestampAllocator connected to master", zap.Any("masterAddress", ta.masterAddress))
 	ta.masterConn = conn
 	ta.masterClient = masterpb.NewMasterServiceClient(conn)
 	return nil
@@ -98,9 +101,26 @@ func (ta *TimestampAllocator) pickCanDoFunc() {
 		}
 	}
 	ta.ToDoReqs = ta.ToDoReqs[idx:]
+	log.Debug("TimestampAllocator pickCanDoFunc",
+		zap.Any("need", need),
+		zap.Any("total", total),
+		zap.Any("remainReqCnt", len(ta.ToDoReqs)))
 }
 
-func (ta *TimestampAllocator) syncTs() bool {
+func (ta *TimestampAllocator) gatherReqTsCount() uint32 {
+	need := uint32(0)
+	for _, req := range ta.ToDoReqs {
+		tReq := req.(*TSORequest)
+		need += tReq.count
+	}
+	return need
+}
+
+func (ta *TimestampAllocator) syncTs() (bool, error) {
+	need := ta.gatherReqTsCount()
+	if need < ta.countPerRPC {
+		need = ta.countPerRPC
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	req := &masterpb.AllocTimestampRequest{
 		Base: &commonpb.MsgBase{
@@ -109,18 +129,18 @@ func (ta *TimestampAllocator) syncTs() bool {
 			Timestamp: 0,
 			SourceID:  ta.PeerID,
 		},
-		Count: ta.countPerRPC,
+		Count: need,
 	}
-	resp, err := ta.masterClient.AllocTimestamp(ctx, req)
 
-	cancel()
+	resp, err := ta.masterClient.AllocTimestamp(ctx, req)
+	defer cancel()
+
 	if err != nil {
-		log.Println("syncTimestamp Failed!!!!!")
-		return false
+		return false, fmt.Errorf("syncTimestamp Failed:%w", err)
 	}
 	ta.lastTsBegin = resp.GetTimestamp()
 	ta.lastTsEnd = ta.lastTsBegin + uint64(resp.GetCount())
-	return true
+	return true, nil
 }
 
 func (ta *TimestampAllocator) processFunc(req Request) error {

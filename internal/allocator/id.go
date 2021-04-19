@@ -2,14 +2,16 @@ package allocator
 
 import (
 	"context"
-	"log"
+	"fmt"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/retry"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
@@ -41,6 +43,7 @@ func NewIDAllocator(ctx context.Context, masterAddr string) (*IDAllocator, error
 		Allocator: Allocator{
 			Ctx:        ctx1,
 			CancelFunc: cancel,
+			Role:       "IDAllocator",
 		},
 		countPerRPC:   IDCountPerRPC,
 		masterAddress: masterAddr,
@@ -58,12 +61,11 @@ func (ia *IDAllocator) Start() error {
 	connectMasterFn := func() error {
 		return ia.connectMaster()
 	}
-	err := retry.Retry(10, time.Millisecond*200, connectMasterFn)
+	err := retry.Retry(1000, time.Millisecond*200, connectMasterFn)
 	if err != nil {
 		panic("connect to master failed")
 	}
-	ia.Allocator.Start()
-	return nil
+	return ia.Allocator.Start()
 }
 
 func (ia *IDAllocator) connectMaster() error {
@@ -71,16 +73,31 @@ func (ia *IDAllocator) connectMaster() error {
 	defer cancel()
 	conn, err := grpc.DialContext(ctx, ia.masterAddress, grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
-		log.Printf("Connect to master failed, error= %v", err)
+		log.Error("Connect to master failed", zap.Any("Role", ia.Role), zap.Error(err))
 		return err
 	}
-	log.Printf("Connected to master, master_addr=%s", ia.masterAddress)
+	log.Debug("Connected to master", zap.Any("Role", ia.Role), zap.Any("masterAddress", ia.masterAddress))
 	ia.masterConn = conn
 	ia.masterClient = masterpb.NewMasterServiceClient(conn)
 	return nil
 }
 
-func (ia *IDAllocator) syncID() bool {
+func (ia *IDAllocator) gatherReqIDCount() uint32 {
+	need := uint32(0)
+	for _, req := range ia.ToDoReqs {
+		tReq := req.(*IDRequest)
+		need += tReq.count
+	}
+	return need
+}
+
+func (ia *IDAllocator) syncID() (bool, error) {
+
+	need := ia.gatherReqIDCount()
+	if need < ia.countPerRPC {
+		need = ia.countPerRPC
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	req := &masterpb.AllocIDRequest{
 		Base: &commonpb.MsgBase{
@@ -89,18 +106,17 @@ func (ia *IDAllocator) syncID() bool {
 			Timestamp: 0,
 			SourceID:  ia.PeerID,
 		},
-		Count: ia.countPerRPC,
+		Count: need,
 	}
 	resp, err := ia.masterClient.AllocID(ctx, req)
 
 	cancel()
 	if err != nil {
-		log.Println("syncID Failed!!!!!")
-		return false
+		return false, fmt.Errorf("syncID Failed:%w", err)
 	}
 	ia.idStart = resp.GetID()
 	ia.idEnd = ia.idStart + int64(resp.GetCount())
-	return true
+	return true, nil
 }
 
 func (ia *IDAllocator) checkSyncFunc(timeout bool) bool {
@@ -122,6 +138,10 @@ func (ia *IDAllocator) pickCanDoFunc() {
 		}
 	}
 	ia.ToDoReqs = ia.ToDoReqs[idx:]
+	log.Debug("IDAllocator pickCanDoFunc",
+		zap.Any("need", need),
+		zap.Any("total", total),
+		zap.Any("remainReqCnt", len(ia.ToDoReqs)))
 }
 
 func (ia *IDAllocator) processFunc(req Request) error {
