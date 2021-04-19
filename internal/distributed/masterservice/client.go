@@ -56,7 +56,7 @@ func (c *GrpcClient) Stop() error {
 }
 
 //TODO, grpc, get service state from server
-func (c *GrpcClient) GetServiceStates() (*internalpb2.ServiceStates, error) {
+func (c *GrpcClient) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	return nil, nil
 }
 

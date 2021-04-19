@@ -29,7 +29,7 @@ func (g Client) Stop() {
 	panic("implement me")
 }
 
-func (g Client) GetServiceStates() (internalpb2.ServiceStates, error) {
+func (g Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	panic("implement me")
 }
 

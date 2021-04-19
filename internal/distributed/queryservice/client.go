@@ -21,7 +21,7 @@ func (c *Client) Stop() {
 	panic("implement me")
 }
 
-func (c *Client) GetServiceStates() (internalpb2.ServiceStates, error) {
+func (c *Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	panic("implement me")
 }
 

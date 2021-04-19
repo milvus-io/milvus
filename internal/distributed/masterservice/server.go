@@ -73,7 +73,7 @@ func (s *GrpcServer) Stop() error {
 	return err
 }
 
-func (s *GrpcServer) GetServiceStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ServiceStates, error) {
+func (s *GrpcServer) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
 	return nil, nil
 }
 

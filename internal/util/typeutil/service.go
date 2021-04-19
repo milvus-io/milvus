@@ -11,7 +11,7 @@ type Service interface {
 }
 
 type Component interface {
-	GetServiceStates() (internalpb2.ServiceStates, error)
+	GetComponentStates() (*internalpb2.ComponentStates, error)
 	GetTimeTickChannel() (string, error)
 	GetStatisticsChannel() (string, error)
 }

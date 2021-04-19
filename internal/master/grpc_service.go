@@ -476,7 +476,7 @@ func (s *Master) GetPartitionStatistics(ctx context.Context, request *milvuspb.P
 	panic("implement me")
 }
 
-func (s *Master) GetServiceStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ServiceStates, error) {
+func (s *Master) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
 	panic("implement me")
 }
 

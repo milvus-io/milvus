@@ -11,17 +11,16 @@ enum StateCode {
 }
 
 
-message NodeStates {
+message ComponentInfo {
   int64  nodeID = 1;
   string role = 2;
   StateCode state_code = 3;
   repeated common.KeyValuePair extra_info = 4;
 }
 
-message ServiceStates {
-  StateCode state_code = 1;
-  repeated NodeStates node_states = 2;
-  repeated common.KeyValuePair extra_info = 3;
+message ComponentStates {
+  ComponentInfo state = 1;
+  repeated common.KeyValuePair subcomponent_states = 2;
 }
 
 message  NodeInfo {

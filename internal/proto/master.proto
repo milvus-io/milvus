@@ -117,7 +117,7 @@ service MasterService {
     // todo move to data service
     rpc AssignSegmentID(data.AssignSegIDRequest) returns (data.AssignSegIDResponse) {}
 
-    rpc GetServiceStates(common.Empty) returns (internal.ServiceStates) {}
+    rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
 
     rpc GetTimeTickChannel(common.Empty) returns (milvus.StringResponse) {}
 
