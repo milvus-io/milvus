@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"strconv"
 	"sync"
@@ -73,8 +74,11 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	log.Debug("DataNode address", zap.String("address", addr))
 
 	tracer := opentracing.GlobalTracer()
-	s.grpcServer = grpc.NewServer(grpc.UnaryInterceptor(
-		otgrpc.OpenTracingServerInterceptor(tracer)),
+	s.grpcServer = grpc.NewServer(
+		grpc.MaxRecvMsgSize(math.MaxInt32),
+		grpc.MaxSendMsgSize(math.MaxInt32),
+		grpc.UnaryInterceptor(
+			otgrpc.OpenTracingServerInterceptor(tracer)),
 		grpc.StreamInterceptor(
 			otgrpc.OpenTracingStreamServerInterceptor(tracer)))
 	datapb.RegisterDataNodeServer(s.grpcServer, s)

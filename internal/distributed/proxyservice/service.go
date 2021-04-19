@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"strconv"
 	"sync"
@@ -116,8 +117,11 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	defer cancel()
 
 	tracer := opentracing.GlobalTracer()
-	s.grpcServer = grpc.NewServer(grpc.UnaryInterceptor(
-		otgrpc.OpenTracingServerInterceptor(tracer)),
+	s.grpcServer = grpc.NewServer(
+		grpc.MaxRecvMsgSize(math.MaxInt32),
+		grpc.MaxSendMsgSize(math.MaxInt32),
+		grpc.UnaryInterceptor(
+			otgrpc.OpenTracingServerInterceptor(tracer)),
 		grpc.StreamInterceptor(
 			otgrpc.OpenTracingStreamServerInterceptor(tracer)))
 	proxypb.RegisterProxyServiceServer(s.grpcServer, s)
