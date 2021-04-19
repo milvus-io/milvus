@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+
 	"github.com/zilliztech/milvus-distributed/cmd/distributed/roles"
 )
 
@@ -20,5 +22,6 @@ func initRoles(roles *roles.MilvusRoles) {
 func main() {
 	var roles roles.MilvusRoles
 	initRoles(&roles)
+	os.Setenv("QUERY_NODE_ID", "1")
 	roles.Run(true)
 }
