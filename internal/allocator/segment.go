@@ -189,10 +189,7 @@ func (sa *SegIDAssigner) syncSegments() {
 	for _, info := range resp.PerChannelAssignment {
 		assign := sa.getAssign(info.CollName, info.PartitionTag, info.ChannelID)
 		if assign == nil {
-			colInfos, ok := sa.assignInfos[info.CollName]
-			if !ok {
-				colInfos = list.New()
-			}
+			colInfos := sa.assignInfos[info.CollName]
 			segInfo := make(map[UniqueID]uint32)
 			segInfo[info.SegID] = info.Count
 			newAssign := &assignInfo{

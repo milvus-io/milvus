@@ -82,16 +82,3 @@ func TestValidateFieldName(t *testing.T) {
 		assert.NotNil(t, ValidateFieldName(name))
 	}
 }
-
-func TestValidateDimension(t *testing.T) {
-	Params.Init()
-	assert.Nil(t, ValidateDimension(1, false))
-	assert.Nil(t, ValidateDimension(Params.MaxDimension(), false))
-	assert.Nil(t, ValidateDimension(8, true))
-	assert.Nil(t, ValidateDimension(Params.MaxDimension(), true))
-
-	// invalid dim
-	assert.NotNil(t, ValidateDimension(-1, false))
-	assert.NotNil(t, ValidateDimension(Params.MaxDimension()+1, false))
-	assert.NotNil(t, ValidateDimension(9, true))
-}
