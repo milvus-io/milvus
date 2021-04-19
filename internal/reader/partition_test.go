@@ -13,8 +13,8 @@ import (
 
 func TestPartition_Segments(t *testing.T) {
 	ctx := context.Background()
-	pulsarUrl := "pulsar://localhost:6650"
-	node := NewQueryNode(ctx, 0, pulsarUrl)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
 
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",

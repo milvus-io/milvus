@@ -61,7 +61,7 @@ func (tt *timeTick) tick() error {
 		tt.currentTick = ts
 	}
 
-	if tt.areRequestsDelivered(tt.currentTick) == false {
+	if !tt.areRequestsDelivered(tt.currentTick) {
 		return nil
 	}
 	msgPack := msgstream.MsgPack{}

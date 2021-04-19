@@ -3,13 +3,14 @@ package reader
 import (
 	"context"
 	"encoding/binary"
+	"math"
+	"testing"
+	"time"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	"math"
-	"testing"
-	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -33,8 +34,8 @@ func TestManipulationService_Start(t *testing.T) {
 	}
 
 	// init query node
-	pulsarUrl := "pulsar://localhost:6650"
-	node := NewQueryNode(ctx, 0, pulsarUrl)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
 
 	// init meta
 	fieldVec := schemapb.FieldSchema{
@@ -157,7 +158,7 @@ func TestManipulationService_Start(t *testing.T) {
 	producerChannels := []string{"insert"}
 
 	insertStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
-	insertStream.SetPulsarCient(pulsarUrl)
+	insertStream.SetPulsarCient(pulsarURL)
 	insertStream.CreatePulsarProducers(producerChannels)
 
 	var insertMsgStream msgstream.MsgStream = insertStream
@@ -171,10 +172,5 @@ func TestManipulationService_Start(t *testing.T) {
 
 	node.Close()
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		}
-	}
+	<-ctx.Done()
 }

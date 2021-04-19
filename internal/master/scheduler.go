@@ -21,7 +21,7 @@ func (rs *ddRequestScheduler) Enqueue(task task) error {
 	return nil
 }
 
-//TODO, allocGlobalId
-func allocGlobalId() (UniqueID, error) {
+//TODO, allocGlobalID
+func allocGlobalID() (UniqueID, error) {
 	return rand.Int63(), nil
 }

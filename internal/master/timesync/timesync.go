@@ -76,7 +76,7 @@ func (ttBarrier *softTimeTickBarrier) Start() error {
 						log.Printf("[softTimeTickBarrier] peer(%d)=%d\n", ttmsg.PeerId, ttmsg.Timestamp)
 
 						if !ok {
-							log.Printf("[softTimeTickBarrier] Warning: peerId %d not exist\n", ttmsg.PeerId)
+							log.Printf("[softTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.PeerId)
 							continue
 						}
 
@@ -108,7 +108,7 @@ func NewSoftTimeTickBarrier(ctx context.Context,
 	minTtInterval Timestamp) *softTimeTickBarrier {
 
 	if len(peerIds) <= 0 {
-		log.Printf("[NewSoftTimeTickBarrier] Error: peerIds is emtpy!\n")
+		log.Printf("[NewSoftTimeTickBarrier] Error: peerIds is empty!\n")
 		return nil
 	}
 
@@ -193,7 +193,7 @@ func (ttBarrier *hardTimeTickBarrier) Start() error {
 
 						oldT, ok := ttBarrier.peer2Tt[ttmsg.PeerId]
 						if !ok {
-							log.Printf("[hardTimeTickBarrier] Warning: peerId %d not exist\n", ttmsg.PeerId)
+							log.Printf("[hardTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.PeerId)
 							continue
 						}
 
@@ -233,7 +233,7 @@ func NewHardTimeTickBarrier(ctx context.Context,
 	peerIds []UniqueID) *hardTimeTickBarrier {
 
 	if len(peerIds) <= 0 {
-		log.Printf("[NewSoftTimeTickBarrier] Error: peerIds is emtpy!")
+		log.Printf("[NewSoftTimeTickBarrier] Error: peerIds is empty!")
 		return nil
 	}
 
@@ -259,5 +259,4 @@ func (ttBarrier *hardTimeTickBarrier) Close() {
 		ttBarrier.closeCh <- struct{}{}
 	}
 	ttBarrier.closed = true
-	return
 }

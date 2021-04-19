@@ -2,19 +2,19 @@ package kv
 
 import (
 	"context"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"path"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"go.etcd.io/etcd/clientv3"
 )
 
 func TestEtcdKV_Load(t *testing.T) {
 	conf.LoadConfig("config.yaml")
-	etcd_port := strconv.Itoa(int(conf.Config.Etcd.Port))
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcd_port}})
+	etcdPort := strconv.Itoa(int(conf.Config.Etcd.Port))
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcdPort}})
 	assert.Nil(t, err)
 	rootpath := "/etcd/test/root"
 	kv := NewEtcdKV(cli, rootpath)
@@ -69,8 +69,8 @@ func TestEtcdKV_Load(t *testing.T) {
 
 func TestEtcdKV_MultiSave(t *testing.T) {
 	conf.LoadConfig("config.yaml")
-	etcd_port := strconv.Itoa(int(conf.Config.Etcd.Port))
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcd_port}})
+	etcdPort := strconv.Itoa(int(conf.Config.Etcd.Port))
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcdPort}})
 	assert.Nil(t, err)
 	rootpath := "/etcd/test/root"
 	kv := NewEtcdKV(cli, rootpath)
@@ -98,8 +98,8 @@ func TestEtcdKV_MultiSave(t *testing.T) {
 
 func TestEtcdKV_Remove(t *testing.T) {
 	conf.LoadConfig("config.yaml")
-	etcd_port := strconv.Itoa(int(conf.Config.Etcd.Port))
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcd_port}})
+	etcdPort := strconv.Itoa(int(conf.Config.Etcd.Port))
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcdPort}})
 	assert.Nil(t, err)
 	rootpath := "/etcd/test/root"
 	kv := NewEtcdKV(cli, rootpath)
@@ -167,8 +167,8 @@ func TestEtcdKV_Remove(t *testing.T) {
 
 func TestEtcdKV_MultiSaveAndRemove(t *testing.T) {
 	conf.LoadConfig("config.yaml")
-	etcd_port := strconv.Itoa(int(conf.Config.Etcd.Port))
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcd_port}})
+	etcdPort := strconv.Itoa(int(conf.Config.Etcd.Port))
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcdPort}})
 	assert.Nil(t, err)
 	rootpath := "/etcd/test/root"
 	kv := NewEtcdKV(cli, rootpath)

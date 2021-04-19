@@ -14,8 +14,8 @@ import (
 //----------------------------------------------------------------------------------------------------- collection
 func TestColSegContainer_addCollection(t *testing.T) {
 	ctx := context.Background()
-	pulsarUrl := "pulsar://localhost:6650"
-	node := NewQueryNode(ctx, 0, pulsarUrl)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
 
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
@@ -66,8 +66,8 @@ func TestColSegContainer_addCollection(t *testing.T) {
 
 func TestColSegContainer_removeCollection(t *testing.T) {
 	ctx := context.Background()
-	pulsarUrl := "pulsar://localhost:6650"
-	node := NewQueryNode(ctx, 0, pulsarUrl)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
 
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
@@ -122,8 +122,8 @@ func TestColSegContainer_removeCollection(t *testing.T) {
 
 func TestColSegContainer_getCollectionByID(t *testing.T) {
 	ctx := context.Background()
-	pulsarUrl := "pulsar://localhost:6650"
-	node := NewQueryNode(ctx, 0, pulsarUrl)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
 
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
@@ -180,8 +180,8 @@ func TestColSegContainer_getCollectionByID(t *testing.T) {
 
 func TestColSegContainer_getCollectionByName(t *testing.T) {
 	ctx := context.Background()
-	pulsarUrl := "pulsar://localhost:6650"
-	node := NewQueryNode(ctx, 0, pulsarUrl)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
 
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
@@ -239,8 +239,8 @@ func TestColSegContainer_getCollectionByName(t *testing.T) {
 //----------------------------------------------------------------------------------------------------- partition
 func TestColSegContainer_addPartition(t *testing.T) {
 	ctx := context.Background()
-	pulsarUrl := "pulsar://localhost:6650"
-	node := NewQueryNode(ctx, 0, pulsarUrl)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
 
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
@@ -297,8 +297,8 @@ func TestColSegContainer_addPartition(t *testing.T) {
 
 func TestColSegContainer_removePartition(t *testing.T) {
 	ctx := context.Background()
-	pulsarUrl := "pulsar://localhost:6650"
-	node := NewQueryNode(ctx, 0, pulsarUrl)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
 
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
@@ -357,8 +357,8 @@ func TestColSegContainer_removePartition(t *testing.T) {
 
 func TestColSegContainer_getPartitionByTag(t *testing.T) {
 	ctx := context.Background()
-	pulsarUrl := "pulsar://localhost:6650"
-	node := NewQueryNode(ctx, 0, pulsarUrl)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
 
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
@@ -420,8 +420,8 @@ func TestColSegContainer_getPartitionByTag(t *testing.T) {
 //----------------------------------------------------------------------------------------------------- segment
 func TestColSegContainer_addSegment(t *testing.T) {
 	ctx := context.Background()
-	pulsarUrl := "pulsar://localhost:6650"
-	node := NewQueryNode(ctx, 0, pulsarUrl)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
 
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
@@ -482,8 +482,8 @@ func TestColSegContainer_addSegment(t *testing.T) {
 
 func TestColSegContainer_removeSegment(t *testing.T) {
 	ctx := context.Background()
-	pulsarUrl := "pulsar://localhost:6650"
-	node := NewQueryNode(ctx, 0, pulsarUrl)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
 
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
@@ -546,8 +546,8 @@ func TestColSegContainer_removeSegment(t *testing.T) {
 
 func TestColSegContainer_getSegmentByID(t *testing.T) {
 	ctx := context.Background()
-	pulsarUrl := "pulsar://localhost:6650"
-	node := NewQueryNode(ctx, 0, pulsarUrl)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
 
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
@@ -611,8 +611,8 @@ func TestColSegContainer_getSegmentByID(t *testing.T) {
 
 func TestColSegContainer_hasSegment(t *testing.T) {
 	ctx := context.Background()
-	pulsarUrl := "pulsar://localhost:6650"
-	node := NewQueryNode(ctx, 0, pulsarUrl)
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
 
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",

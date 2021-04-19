@@ -2,11 +2,11 @@ package master
 
 import (
 	"context"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -15,8 +15,8 @@ import (
 
 func TestMetaTable_Collection(t *testing.T) {
 	conf.LoadConfig("config.yaml")
-	etcd_port := strconv.Itoa(int(conf.Config.Etcd.Port))
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcd_port}})
+	etcdPort := strconv.Itoa(int(conf.Config.Etcd.Port))
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcdPort}})
 	assert.Nil(t, err)
 	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
 
@@ -138,8 +138,8 @@ func TestMetaTable_Collection(t *testing.T) {
 
 func TestMetaTable_DeletePartition(t *testing.T) {
 	conf.LoadConfig("config.yaml")
-	etcd_port := strconv.Itoa(int(conf.Config.Etcd.Port))
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcd_port}})
+	etcdPort := strconv.Itoa(int(conf.Config.Etcd.Port))
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcdPort}})
 	assert.Nil(t, err)
 	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
 
@@ -221,8 +221,8 @@ func TestMetaTable_DeletePartition(t *testing.T) {
 
 func TestMetaTable_Segment(t *testing.T) {
 	conf.LoadConfig("config.yaml")
-	etcd_port := strconv.Itoa(int(conf.Config.Etcd.Port))
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcd_port}})
+	etcdPort := strconv.Itoa(int(conf.Config.Etcd.Port))
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcdPort}})
 	assert.Nil(t, err)
 	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
 

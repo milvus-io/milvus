@@ -74,11 +74,11 @@ func (queue *BaseTaskQueue) PopActiveTask(ts Timestamp) task {
 	return nil
 }
 
-func (queue *BaseTaskQueue) getTaskByReqID(reqId UniqueID) task {
+func (queue *BaseTaskQueue) getTaskByReqID(reqID UniqueID) task {
 	queue.utLock.Lock()
 	defer queue.utLock.Lock()
 	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
-		if e.Value.(task).ID() == reqId {
+		if e.Value.(task).ID() == reqID {
 			return e.Value.(task)
 		}
 	}
@@ -86,7 +86,7 @@ func (queue *BaseTaskQueue) getTaskByReqID(reqId UniqueID) task {
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
 	for ats := range queue.activeTasks {
-		if queue.activeTasks[ats].ID() == reqId {
+		if queue.activeTasks[ats].ID() == reqID {
 			return queue.activeTasks[ats]
 		}
 	}
@@ -216,14 +216,14 @@ func (sched *TaskScheduler) scheduleDqTask() task {
 	return sched.DqQueue.PopUnissuedTask()
 }
 
-func (sched *TaskScheduler) getTaskByReqID(reqID UniqueID) task {
-	if t := sched.DdQueue.getTaskByReqID(reqID); t != nil {
+func (sched *TaskScheduler) getTaskByReqID(collMeta UniqueID) task {
+	if t := sched.DdQueue.getTaskByReqID(collMeta); t != nil {
 		return t
 	}
-	if t := sched.DmQueue.getTaskByReqID(reqID); t != nil {
+	if t := sched.DmQueue.getTaskByReqID(collMeta); t != nil {
 		return t
 	}
-	if t := sched.DqQueue.getTaskByReqID(reqID); t != nil {
+	if t := sched.DqQueue.getTaskByReqID(collMeta); t != nil {
 		return t
 	}
 	return nil

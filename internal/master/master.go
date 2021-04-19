@@ -73,7 +73,7 @@ func Init() {
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(ctx context.Context, kv_root_path string, meta_root_path, tso_root_path string, etcdAddr []string) (*Master, error) {
+func CreateServer(ctx context.Context, kvRootPath string, metaRootPath, tsoRootPath string, etcdAddr []string) (*Master, error) {
 	rand.Seed(time.Now().UnixNano())
 	Init()
 
@@ -81,7 +81,7 @@ func CreateServer(ctx context.Context, kv_root_path string, meta_root_path, tso_
 	if err != nil {
 		return nil, err
 	}
-	etcdkv := kv.NewEtcdKV(etcdClient, meta_root_path)
+	etcdkv := kv.NewEtcdKV(etcdClient, metaRootPath)
 	metakv, err := NewMetaTable(etcdkv)
 	if err != nil {
 		return nil, err
@@ -90,7 +90,7 @@ func CreateServer(ctx context.Context, kv_root_path string, meta_root_path, tso_
 	m := &Master{
 		ctx:            ctx,
 		startTimestamp: time.Now().Unix(),
-		kvBase:         newKVBase(kv_root_path, etcdAddr),
+		kvBase:         newKVBase(kvRootPath, etcdAddr),
 		scheduler:      NewDDRequestScheduler(),
 		mt:             metakv,
 		ssChan:         make(chan internalpb.SegmentStatistics, 10),

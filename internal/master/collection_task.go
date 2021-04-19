@@ -74,7 +74,7 @@ func (t *createCollectionTask) Execute() error {
 		return err
 	}
 
-	collectionID, err := allocGlobalId()
+	collectionID, err := allocGlobalID()
 	if err != nil {
 		return err
 	}
