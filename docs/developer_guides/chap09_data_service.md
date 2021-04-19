@@ -129,8 +129,10 @@ type SegmentStatesRequest struct {
 
 type SegmentStatesResponse struct {
   State SegmentState
-  CreateTime Timestamp
+  OpenTime Timestamp
   SealedTime Timestamp
+  MsgStartPositions []msgstream.MsgPosition
+  MsgEndPositions []msgstream.MsgPosition
 }
 ```
 

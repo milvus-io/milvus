@@ -4,7 +4,7 @@
 
 #### 8.1 Overview
 
-<img src="./figs/query_service.png" width=700>
+<img src="./figs/query_service.png" width=500>
 
 
 
@@ -230,6 +230,8 @@ type RemoveQueryChannelRequest struct {
 ```go
 type WatchDmChannelRequest struct {
   InsertChannelNames []string
+  StartSegment UniqueID
+  //FieldIDs []int64
 }
 ```
 
@@ -242,7 +244,7 @@ type LoadSegmentRequest struct {
   CollectionID UniqueID
   PartitionID UniqueID
   SegmentIDs []UniqueID
-  FieldIDs []int64
+  //FieldIDs []int64
 }
 ```
 
