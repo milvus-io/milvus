@@ -14,7 +14,7 @@ files=()
 files_need_gofmt=()
 
 if [ -f "$1" ];then
-    files+=("$1")
+  files+=("$1")
 fi
 
 if [ -d "$1" ];then
