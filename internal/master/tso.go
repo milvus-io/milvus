@@ -47,7 +47,7 @@ type atomicObject struct {
 // timestampOracle is used to maintain the logic of tso.
 type timestampOracle struct {
 	key    string
-	kvBase kv.TxnBase
+	kvBase kv.Base
 
 	// TODO: remove saveInterval
 	saveInterval  time.Duration
