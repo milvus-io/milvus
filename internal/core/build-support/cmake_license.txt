@@ -9,13 +9,3 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
-set(COMMON_SRC
-        Schema.cpp
-        Types.cpp
-        SystemProperty.cpp
-        )
-
-add_library(milvus_common
-        ${COMMON_SRC}
-        )
-target_link_libraries(milvus_common milvus_proto yaml-cpp)

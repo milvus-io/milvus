@@ -9,10 +9,11 @@ fi
 cat ${LICENSE} > /dev/null || exit -1
 
 FILES=`find ${FOLDER} \
-| grep -E "(*\.cpp$|*\.h$|*\.cu$)" \
+| grep -E "(*CMakeLists.txt$)" \
 | grep -v thirdparty \
 | grep -v cmake_build \
 | grep -v cmake-build \
+| grep -v "build/" \
 | grep -v output \
 | grep -v "\.pb\."`
 # echo formating ${FILES} ...
@@ -27,4 +28,3 @@ for f in ${FILES}; do
     echo "License Header copied to $f"
   fi 
 done   
-echo "license adder: $skip_count file(s) skiped"
