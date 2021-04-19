@@ -1,7 +1,6 @@
 package dataservice
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 )
@@ -12,10 +11,10 @@ type allocator interface {
 }
 
 type allocatorImpl struct {
-	masterClient *masterservice.GrpcClient
+	masterClient MasterClient
 }
 
-func newAllocatorImpl(masterClient *masterservice.GrpcClient) *allocatorImpl {
+func newAllocatorImpl(masterClient MasterClient) *allocatorImpl {
 	return &allocatorImpl{
 		masterClient: masterClient,
 	}
@@ -27,7 +26,7 @@ func (allocator *allocatorImpl) allocTimestamp() (Timestamp, error) {
 			MsgType:   commonpb.MsgType_kShowCollections,
 			MsgID:     -1, // todo add msg id
 			Timestamp: 0,  // todo
-			SourceID:  -1, // todo
+			SourceID:  Params.NodeID,
 		},
 		Count: 1,
 	})
@@ -43,7 +42,7 @@ func (allocator *allocatorImpl) allocID() (UniqueID, error) {
 			MsgType:   commonpb.MsgType_kShowCollections,
 			MsgID:     -1, // todo add msg id
 			Timestamp: 0,  // todo
-			SourceID:  -1, // todo
+			SourceID:  Params.NodeID,
 		},
 		Count: 1,
 	})

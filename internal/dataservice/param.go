@@ -32,6 +32,8 @@ type ParamTable struct {
 	SegmentInfoChannelName        string
 	DataServiceSubscriptionName   string
 	K2SChannelNames               []string
+
+	SegmentFlushMetaPath string
 }
 
 var Params ParamTable
@@ -202,4 +204,12 @@ func (p *ParamTable) initK2SChannelNames() {
 		ret = append(ret, prefix+strconv.Itoa(ID))
 	}
 	p.K2SChannelNames = ret
+}
+
+func (p *ParamTable) initSegmentFlushMetaPath() {
+	subPath, err := p.Load("etcd.segFlushMetaSubPath")
+	if err != nil {
+		panic(err)
+	}
+	p.SegmentFlushMetaPath = subPath
 }

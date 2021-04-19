@@ -2,16 +2,22 @@ package dataservice
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"path"
+	"strconv"
 	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/golang/protobuf/proto"
+	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
-
-	"github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 
@@ -45,6 +51,16 @@ type DataService interface {
 	GetComponentStates() (*internalpb2.ComponentStates, error)
 }
 
+type MasterClient interface {
+	ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
+	DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+	ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
+	GetDdChannel() (string, error)
+	AllocTimestamp(in *masterpb.TsoRequest) (*masterpb.TsoResponse, error)
+	AllocID(in *masterpb.IDRequest) (*masterpb.IDResponse, error)
+	GetComponentStates() (*internalpb2.ComponentStates, error)
+}
+
 type (
 	UniqueID  = typeutil.UniqueID
 	Timestamp = typeutil.Timestamp
@@ -53,7 +69,7 @@ type (
 		serverLoopCtx      context.Context
 		serverLoopCancel   context.CancelFunc
 		serverLoopWg       sync.WaitGroup
-		state              internalpb2.StateCode
+		state              atomic.Value
 		client             *etcdkv.EtcdKV
 		meta               *meta
 		segAllocator       segmentAllocator
@@ -63,7 +79,7 @@ type (
 		cluster            *dataNodeCluster
 		msgProducer        *timesync.MsgProducer
 		registerFinishCh   chan struct{}
-		masterClient       *masterservice.GrpcClient
+		masterClient       MasterClient
 		ttMsgStream        msgstream.MsgStream
 		k2sMsgStream       msgstream.MsgStream
 		ddChannelName      string
@@ -72,17 +88,21 @@ type (
 	}
 )
 
-func CreateServer(ctx context.Context, client *masterservice.GrpcClient) (*Server, error) {
+func CreateServer(ctx context.Context) (*Server, error) {
 	Params.Init()
 	ch := make(chan struct{})
-	return &Server{
+	s := &Server{
 		ctx:              ctx,
-		state:            internalpb2.StateCode_INITIALIZING,
 		insertChannelMgr: newInsertChannelManager(),
 		registerFinishCh: ch,
 		cluster:          newDataNodeCluster(ch),
-		masterClient:     client,
-	}, nil
+	}
+	s.state.Store(internalpb2.StateCode_INITIALIZING)
+	return s, nil
+}
+
+func (s *Server) SetMasterClient(masterClient MasterClient) {
+	s.masterClient = masterClient
 }
 
 func (s *Server) Init() error {
@@ -109,9 +129,13 @@ func (s *Server) Start() error {
 	}
 	s.startServerLoop()
 	s.waitDataNodeRegister()
-	s.state = internalpb2.StateCode_HEALTHY
+	s.state.Store(internalpb2.StateCode_HEALTHY)
 	log.Println("start success")
 	return nil
+}
+
+func (s *Server) checkStateIsHealthy() bool {
+	return s.state.Load().(internalpb2.StateCode) == internalpb2.StateCode_HEALTHY
 }
 
 func (s *Server) initMeta() error {
@@ -160,12 +184,15 @@ func (s *Server) initMsgProducer() error {
 
 func (s *Server) loadMetaFromMaster() error {
 	log.Println("loading collection meta from master")
+	if err := s.checkMasterIsHealthy(); err != nil {
+		return err
+	}
 	collections, err := s.masterClient.ShowCollections(&milvuspb.ShowCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_kShowCollections,
 			MsgID:     -1, // todo add msg id
 			Timestamp: 0,  // todo
-			SourceID:  -1, // todo
+			SourceID:  Params.NodeID,
 		},
 		DbName: "",
 	})
@@ -178,7 +205,7 @@ func (s *Server) loadMetaFromMaster() error {
 				MsgType:   commonpb.MsgType_kDescribeCollection,
 				MsgID:     -1, // todo
 				Timestamp: 0,  // todo
-				SourceID:  -1, // todo
+				SourceID:  Params.NodeID,
 			},
 			DbName:         "",
 			CollectionName: collectionName,
@@ -192,7 +219,7 @@ func (s *Server) loadMetaFromMaster() error {
 				MsgType:   commonpb.MsgType_kShowPartitions,
 				MsgID:     -1, // todo
 				Timestamp: 0,  // todo
-				SourceID:  -1, // todo
+				SourceID:  Params.NodeID,
 			},
 			DbName:         "",
 			CollectionName: collectionName,
@@ -215,6 +242,36 @@ func (s *Server) loadMetaFromMaster() error {
 	log.Println("load collection meta from master complete")
 	return nil
 }
+
+func (s *Server) checkMasterIsHealthy() error {
+	ticker := time.NewTicker(300 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
+	defer func() {
+		ticker.Stop()
+		cancel()
+	}()
+	for {
+		var resp *internalpb2.ComponentStates
+		var err error
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("master is not healthy")
+		case <-ticker.C:
+			resp, err = s.masterClient.GetComponentStates()
+			if err != nil {
+				return err
+			}
+			if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+				return errors.New(resp.Status.Reason)
+			}
+		}
+		if resp.State.StateCode == internalpb2.StateCode_HEALTHY {
+			break
+		}
+	}
+	return nil
+}
+
 func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 	s.serverLoopWg.Add(2)
@@ -308,7 +365,7 @@ func (s *Server) GetComponentStates() (*internalpb2.ComponentStates, error) {
 		State: &internalpb2.ComponentInfo{
 			NodeID:    Params.NodeID,
 			Role:      role,
-			StateCode: s.state,
+			StateCode: s.state.Load().(internalpb2.StateCode),
 		},
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -361,6 +418,12 @@ func (s *Server) RegisterNode(req *datapb.RegisterNodeRequest) (*datapb.Register
 }
 
 func (s *Server) Flush(req *datapb.FlushRequest) (*commonpb.Status, error) {
+	if !s.checkStateIsHealthy() {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    "server is initializing",
+		}, nil
+	}
 	s.segAllocator.SealAllSegments(req.CollectionID)
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -373,6 +436,11 @@ func (s *Server) AssignSegmentID(req *datapb.AssignSegIDRequest) (*datapb.Assign
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		},
 		SegIDAssignments: make([]*datapb.SegIDAssignment, 0),
+	}
+	if !s.checkStateIsHealthy() {
+		resp.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		resp.Status.Reason = "server is initializing"
+		return resp, nil
 	}
 	for _, r := range req.SegIDRequests {
 		result := &datapb.SegIDAssignment{
@@ -460,6 +528,14 @@ func (s *Server) openNewSegment(collectionID UniqueID, partitionID UniqueID, cha
 }
 
 func (s *Server) ShowSegments(req *datapb.ShowSegmentRequest) (*datapb.ShowSegmentResponse, error) {
+	if !s.checkStateIsHealthy() {
+		return &datapb.ShowSegmentResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "server is initializing",
+			},
+		}, nil
+	}
 	ids := s.meta.GetSegmentsByCollectionAndPartitionID(req.CollectionID, req.PartitionID)
 	return &datapb.ShowSegmentResponse{SegmentIDs: ids}, nil
 }
@@ -469,6 +545,10 @@ func (s *Server) GetSegmentStates(req *datapb.SegmentStatesRequest) (*datapb.Seg
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 		},
+	}
+	if !s.checkStateIsHealthy() {
+		resp.Status.Reason = "server is initializing"
+		return resp, nil
 	}
 
 	segmentInfo, err := s.meta.GetSegment(req.SegmentID)
@@ -486,10 +566,39 @@ func (s *Server) GetSegmentStates(req *datapb.SegmentStatesRequest) (*datapb.Seg
 }
 
 func (s *Server) GetInsertBinlogPaths(req *datapb.InsertBinlogPathRequest) (*datapb.InsertBinlogPathsResponse, error) {
-	panic("implement me")
+	// todo
+	resp := &datapb.InsertBinlogPathsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+		},
+	}
+	p := path.Join(Params.SegmentFlushMetaPath, strconv.FormatInt(req.SegmentID, 10))
+	value, err := s.client.Load(p)
+	if err != nil {
+		resp.Status.Reason = err.Error()
+		return resp, nil
+	}
+	flushMeta := &datapb.SegmentFlushMeta{}
+	err = proto.UnmarshalText(value, flushMeta)
+	if err != nil {
+		resp.Status.Reason = err.Error()
+		return resp, nil
+	}
+	fields := make([]UniqueID, len(flushMeta.Fields))
+	paths := make([]*internalpb2.StringList, len(flushMeta.Fields))
+	for _, field := range flushMeta.Fields {
+		fields = append(fields, field.FieldID)
+		paths = append(paths, &internalpb2.StringList{Values: field.BinlogPaths})
+	}
+	resp.FieldIDs = fields
+	resp.Paths = paths
+	return resp, nil
 }
 
 func (s *Server) GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, error) {
+	if !s.checkStateIsHealthy() {
+		return nil, errors.New("server is initializing")
+	}
 	contains, ret := s.insertChannelMgr.ContainsCollection(req.CollectionID)
 	if contains {
 		return ret, nil
