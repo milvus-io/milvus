@@ -17,6 +17,7 @@
 #include "utils/Utils.h"
 #include <random>
 
+const int NUM_OF_VECTOR = 1;
 const int TOP_K = 10;
 const int LOOP = 1000;
 
@@ -32,7 +33,7 @@ get_vector_param() {
 
   std::normal_distribution<float> dis(0, 1);
  
-  for (int j = 0; j < 1; ++j) {
+  for (int j = 0; j < NUM_OF_VECTOR; ++j) {
     milvus::VectorData vectorData;
     std::vector<float> float_data;
     for (int i = 0; i < DIM; ++i) {
@@ -44,7 +45,7 @@ get_vector_param() {
   }
 
   nlohmann::json vector_param_json;
-  vector_param_json["num_queries"] = 1;
+  vector_param_json["num_queries"] = NUM_OF_VECTOR;
   vector_param_json["topK"] = TOP_K;
   vector_param_json["field_name"] = "field_vec";
   std::string vector_param_json_string = vector_param_json.dump();

@@ -218,8 +218,8 @@ func (s *Segment) SegmentSearch(query *QueryInfo, timestamp uint64, vectorRecord
 		field_name:  C.CString(query.FieldName),
 	}
 
-	resultIds := make([]int64, query.TopK)
-	resultDistances := make([]float32, query.TopK)
+	resultIds := make([]int64, int64(query.TopK) * query.NumQueries)
+	resultDistances := make([]float32, int64(query.TopK) * query.NumQueries)
 
 	var cTimestamp = C.ulong(timestamp)
 	var cResultIds = (*C.long)(&resultIds[0])

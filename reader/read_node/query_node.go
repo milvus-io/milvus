@@ -276,7 +276,7 @@ func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 
 			if node.msgCounter.InsertCounter/CountInsertMsgBaseline != BaselineCounter {
 				node.WriteQueryLog()
-				BaselineCounter = node.msgCounter.InsertCounter/CountInsertMsgBaseline
+				BaselineCounter = node.msgCounter.InsertCounter / CountInsertMsgBaseline
 			}
 
 			if msgLen[0] == 0 && len(node.buffer.InsertDeleteBuffer) <= 0 {
@@ -339,10 +339,10 @@ func (node *QueryNode) RunSearch(wg *sync.WaitGroup) {
 		case msg := <-node.messageClient.GetSearchChan():
 			node.messageClient.SearchMsg = node.messageClient.SearchMsg[:0]
 			node.messageClient.SearchMsg = append(node.messageClient.SearchMsg, msg)
-			fmt.Println("Do Search...")
 			//for  {
 			//if node.messageClient.SearchMsg[0].Timestamp < node.queryNodeTimeSync.ServiceTimeSync {
 			var status = node.Search(node.messageClient.SearchMsg)
+			fmt.Println("Do Search done")
 			if status.ErrorCode != 0 {
 				fmt.Println("Search Failed")
 				node.PublishFailedSearchResult()
@@ -504,8 +504,8 @@ func (node *QueryNode) DoInsertAndDelete() msgPb.Status {
 		}
 		wg.Add(1)
 		var deleteTimestamps = node.deleteData.deleteTimestamps[segmentID]
-		fmt.Println("Doing delete......")
 		go node.DoDelete(segmentID, &deleteIDs, &deleteTimestamps, &wg)
+		fmt.Println("Do delete done")
 	}
 
 	wg.Wait()
@@ -513,7 +513,6 @@ func (node *QueryNode) DoInsertAndDelete() msgPb.Status {
 }
 
 func (node *QueryNode) DoInsert(segmentID int64, wg *sync.WaitGroup) msgPb.Status {
-	fmt.Println("Doing insert..., len = ", len(node.insertData.insertIDs[segmentID]))
 	var targetSegment, err = node.GetSegmentBySegmentID(segmentID)
 	if err != nil {
 		fmt.Println(err.Error())
@@ -526,6 +525,7 @@ func (node *QueryNode) DoInsert(segmentID int64, wg *sync.WaitGroup) msgPb.Statu
 	offsets := node.insertData.insertOffset[segmentID]
 
 	err = targetSegment.SegmentInsert(offsets, &ids, &timestamps, &records)
+	fmt.Println("Do insert done, len = ", len(node.insertData.insertIDs[segmentID]))
 
 	node.QueryLog(len(ids))
 
@@ -584,8 +584,6 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 	// TODO: Do not receive batched search requests
 	for _, msg := range searchMessages {
 		var clientId = msg.ClientId
-		var resultsTmp = make([]SearchResultTmp, 0)
-
 		var searchTimestamp = msg.Timestamp
 
 		// ServiceTimeSync update by readerTimeSync, which is get from proxy.
@@ -610,6 +608,11 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 
 		// 2. Get query information from query json
 		query := node.QueryJson2Info(&queryJson)
+		// 2d slice for receiving multiple queries's results
+		var resultsTmp = make([][]SearchResultTmp, query.NumQueries)
+		for i := 0; i < int(query.NumQueries); i++ {
+			resultsTmp[i] = make([]SearchResultTmp, 0)
+		}
 
 		// 3. Do search in all segments
 		for _, segment := range node.SegmentsMap {
@@ -625,18 +628,30 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 				return msgPb.Status{ErrorCode: 1}
 			}
 
-			for i := 0; i < len(res.ResultIds); i++ {
-				resultsTmp = append(resultsTmp, SearchResultTmp{ResultId: res.ResultIds[i], ResultDistance: res.ResultDistances[i]})
+			for i := 0; i < int(query.NumQueries); i++ {
+				for j := i * query.TopK; j < (i+1)*query.TopK; j++ {
+					resultsTmp[i] = append(resultsTmp[i], SearchResultTmp{
+						ResultId:       res.ResultIds[j],
+						ResultDistance: res.ResultDistances[j],
+					})
+				}
 			}
 		}
 
 		// 4. Reduce results
-		sort.Slice(resultsTmp, func(i, j int) bool {
-			return resultsTmp[i].ResultDistance < resultsTmp[j].ResultDistance
-		})
-		if len(resultsTmp) > query.TopK {
-			resultsTmp = resultsTmp[:query.TopK]
+		for _, rTmp := range resultsTmp {
+			sort.Slice(rTmp, func(i, j int) bool {
+				return rTmp[i].ResultDistance < rTmp[j].ResultDistance
+			})
 		}
+
+		for _, rTmp := range resultsTmp {
+			if len(rTmp) > query.TopK {
+				rTmp = rTmp[:query.TopK]
+			}
+		}
+
+
 		var entities = msgPb.Entities{
 			Ids: make([]int64, 0),
 		}
@@ -649,15 +664,19 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 			QueryId:   msg.Uid,
 			ClientId:  clientId,
 		}
-		for _, res := range resultsTmp {
-			results.Entities.Ids = append(results.Entities.Ids, res.ResultId)
-			results.Distances = append(results.Distances, res.ResultDistance)
-			results.Scores = append(results.Distances, float32(0))
+		for _, rTmp := range resultsTmp {
+			for _, res := range rTmp {
+				results.Entities.Ids = append(results.Entities.Ids, res.ResultId)
+				results.Distances = append(results.Distances, res.ResultDistance)
+				results.Scores = append(results.Distances, float32(0))
+			}
 		}
-
-		results.RowNum = int64(len(results.Distances))
+		// Send numQueries to RowNum.
+		results.RowNum = query.NumQueries
 
 		// 5. publish result to pulsar
+		//fmt.Println(results.Entities.Ids)
+		//fmt.Println(results.Distances)
 		node.PublishSearchResult(&results)
 	}
 
