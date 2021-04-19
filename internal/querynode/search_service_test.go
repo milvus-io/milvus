@@ -1,6 +1,7 @@
 package querynode
 
 import (
+	"context"
 	"encoding/binary"
 	"log"
 	"math"
@@ -12,15 +13,12 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
-	//"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	//"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
 
 func TestSearch_Search(t *testing.T) {
-	node := newQueryNode()
+	node := NewQueryNode(context.Background(), 0)
 	initTestMeta(t, node, "collection0", 0, 0)
 
 	pulsarURL, _ := Params.pulsarAddress()
@@ -191,7 +189,7 @@ func TestSearch_Search(t *testing.T) {
 }
 
 func TestSearch_SearchMultiSegments(t *testing.T) {
-	node := newQueryNode()
+	node := NewQueryNode(context.Background(), 0)
 	initTestMeta(t, node, "collection0", 0, 0)
 
 	pulsarURL, _ := Params.pulsarAddress()

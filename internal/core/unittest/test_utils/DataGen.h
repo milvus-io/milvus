@@ -167,7 +167,7 @@ CreateBinaryPlaceholderGroup(int64_t num_queries, int64_t dim, int64_t seed = 42
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::VECTOR_FLOAT);
+    value->set_type(ser::PlaceholderType::VECTOR_BINARY);
     std::default_random_engine e(seed);
     for (int i = 0; i < num_queries; ++i) {
         std::vector<uint8_t> vec;
@@ -175,7 +175,27 @@ CreateBinaryPlaceholderGroup(int64_t num_queries, int64_t dim, int64_t seed = 42
             vec.push_back(e());
         }
         // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
-        value->add_values(vec.data(), vec.size() * sizeof(float));
+        value->add_values(vec.data(), vec.size());
+    }
+    return raw_group;
+}
+
+inline auto
+CreateBinaryPlaceholderGroupFromBlob(int64_t num_queries, int64_t dim, const uint8_t* ptr) {
+    assert(dim % 8 == 0);
+    namespace ser = milvus::proto::service;
+    ser::PlaceholderGroup raw_group;
+    auto value = raw_group.add_placeholders();
+    value->set_tag("$0");
+    value->set_type(ser::PlaceholderType::VECTOR_BINARY);
+    for (int i = 0; i < num_queries; ++i) {
+        std::vector<uint8_t> vec;
+        for (int d = 0; d < dim / 8; ++d) {
+            vec.push_back(*ptr);
+            ++ptr;
+        }
+        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
+        value->add_values(vec.data(), vec.size());
     }
     return raw_group;
 }

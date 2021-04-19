@@ -21,8 +21,11 @@ import (
 
 	"github.com/spf13/cast"
 	"github.com/spf13/viper"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
+	memkv "github.com/zilliztech/milvus-distributed/internal/kv/mem"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
+
+type UniqueID = typeutil.UniqueID
 
 type Base interface {
 	Load(key string) (string, error)
@@ -34,11 +37,11 @@ type Base interface {
 }
 
 type BaseTable struct {
-	params *kv.MemoryKV
+	params *memkv.MemoryKV
 }
 
 func (gp *BaseTable) Init() {
-	gp.params = kv.NewMemoryKV()
+	gp.params = memkv.NewMemoryKV()
 
 	err := gp.LoadYaml("milvus.yaml")
 	if err != nil {
@@ -51,6 +54,15 @@ func (gp *BaseTable) Init() {
 	}
 
 	err = gp.LoadYaml("advanced/channel.yaml")
+	if err != nil {
+		panic(err)
+	}
+
+	minioAddress := os.Getenv("MINIO_ADDRESS")
+	if minioAddress == "" {
+		minioAddress = "localhost:9000"
+	}
+	err = gp.Save("_MinioAddress", minioAddress)
 	if err != nil {
 		panic(err)
 	}
@@ -150,6 +162,18 @@ func (gp *BaseTable) Save(key, value string) error {
 	return gp.params.Save(strings.ToLower(key), value)
 }
 
+func (gp *BaseTable) ParseFloat(key string) float64 {
+	valueStr, err := gp.Load(key)
+	if err != nil {
+		panic(err)
+	}
+	value, err := strconv.ParseFloat(valueStr, 64)
+	if err != nil {
+		panic(err)
+	}
+	return value
+}
+
 func (gp *BaseTable) ParseInt64(key string) int64 {
 	valueStr, err := gp.Load(key)
 	if err != nil {
@@ -184,6 +208,57 @@ func (gp *BaseTable) ParseInt(key string) int {
 		panic(err)
 	}
 	return value
+}
+
+func (gp *BaseTable) WriteNodeIDList() []UniqueID {
+	proxyIDStr, err := gp.Load("nodeID.writeNodeIDList")
+	if err != nil {
+		panic(err)
+	}
+	var ret []UniqueID
+	proxyIDs := strings.Split(proxyIDStr, ",")
+	for _, i := range proxyIDs {
+		v, err := strconv.Atoi(i)
+		if err != nil {
+			log.Panicf("load write node id list error, %s", err.Error())
+		}
+		ret = append(ret, UniqueID(v))
+	}
+	return ret
+}
+
+func (gp *BaseTable) ProxyIDList() []UniqueID {
+	proxyIDStr, err := gp.Load("nodeID.proxyIDList")
+	if err != nil {
+		panic(err)
+	}
+	var ret []UniqueID
+	proxyIDs := strings.Split(proxyIDStr, ",")
+	for _, i := range proxyIDs {
+		v, err := strconv.Atoi(i)
+		if err != nil {
+			log.Panicf("load proxy id list error, %s", err.Error())
+		}
+		ret = append(ret, UniqueID(v))
+	}
+	return ret
+}
+
+func (gp *BaseTable) QueryNodeIDList() []UniqueID {
+	queryNodeIDStr, err := gp.Load("nodeID.queryNodeIDList")
+	if err != nil {
+		panic(err)
+	}
+	var ret []UniqueID
+	queryNodeIDs := strings.Split(queryNodeIDStr, ",")
+	for _, i := range queryNodeIDs {
+		v, err := strconv.Atoi(i)
+		if err != nil {
+			log.Panicf("load proxy id list error, %s", err.Error())
+		}
+		ret = append(ret, UniqueID(v))
+	}
+	return ret
 }
 
 // package methods

@@ -19,6 +19,7 @@ import (
 
 func TestMaster_CollectionTask(t *testing.T) {
 	Init()
+	refreshMasterAddress()
 
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
@@ -55,6 +56,7 @@ func TestMaster_CollectionTask(t *testing.T) {
 		// msgChannel
 		ProxyTimeTickChannelNames:     []string{"proxy1", "proxy2"},
 		WriteNodeTimeTickChannelNames: []string{"write3", "write4"},
+		DDChannelNames:                []string{"dd1", "dd2"},
 		InsertChannelNames:            []string{"dm0", "dm1"},
 		K2SChannelNames:               []string{"k2s0", "k2s1"},
 		QueryNodeStatsChannelName:     "statistic",
@@ -63,10 +65,10 @@ func TestMaster_CollectionTask(t *testing.T) {
 
 	svr, err := CreateServer(ctx)
 	assert.Nil(t, err)
-	err = svr.Run(10002)
+	err = svr.Run(int64(Params.Port))
 	assert.Nil(t, err)
 
-	conn, err := grpc.DialContext(ctx, "127.0.0.1:10002", grpc.WithInsecure(), grpc.WithBlock())
+	conn, err := grpc.DialContext(ctx, Params.Address, grpc.WithInsecure(), grpc.WithBlock())
 	assert.Nil(t, err)
 	defer conn.Close()
 

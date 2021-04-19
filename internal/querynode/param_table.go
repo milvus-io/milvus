@@ -4,7 +4,6 @@ import (
 	"log"
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
@@ -24,7 +23,7 @@ func (p *ParamTable) Init() {
 
 	queryNodeIDStr := os.Getenv("QUERY_NODE_ID")
 	if queryNodeIDStr == "" {
-		queryNodeIDList := p.queryNodeIDList()
+		queryNodeIDList := p.QueryNodeIDList()
 		if len(queryNodeIDList) <= 0 {
 			queryNodeIDStr = "0"
 		} else {
@@ -40,23 +39,6 @@ func (p *ParamTable) pulsarAddress() (string, error) {
 		panic(err)
 	}
 	return url, nil
-}
-
-func (p *ParamTable) queryNodeIDList() []UniqueID {
-	queryNodeIDStr, err := p.Load("nodeID.queryNodeIDList")
-	if err != nil {
-		panic(err)
-	}
-	var ret []UniqueID
-	queryNodeIDs := strings.Split(queryNodeIDStr, ",")
-	for _, i := range queryNodeIDs {
-		v, err := strconv.Atoi(i)
-		if err != nil {
-			log.Panicf("load proxy id list error, %s", err.Error())
-		}
-		ret = append(ret, UniqueID(v))
-	}
-	return ret
 }
 
 func (p *ParamTable) QueryNodeID() UniqueID {
@@ -232,7 +214,7 @@ func (p *ParamTable) statsChannelName() string {
 
 func (p *ParamTable) sliceIndex() int {
 	queryNodeID := p.QueryNodeID()
-	queryNodeIDList := p.queryNodeIDList()
+	queryNodeIDList := p.QueryNodeIDList()
 	for i := 0; i < len(queryNodeIDList); i++ {
 		if queryNodeID == queryNodeIDList[i] {
 			return i
@@ -242,5 +224,5 @@ func (p *ParamTable) sliceIndex() int {
 }
 
 func (p *ParamTable) queryNodeNum() int {
-	return len(p.queryNodeIDList())
+	return len(p.QueryNodeIDList())
 }

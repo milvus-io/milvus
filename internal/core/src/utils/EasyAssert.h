@@ -11,6 +11,7 @@
 
 #pragma once
 #include <string_view>
+#include <stdexcept>
 #include <exception>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +22,10 @@ namespace milvus::impl {
 void
 EasyAssertInfo(
     bool value, std::string_view expr_str, std::string_view filename, int lineno, std::string_view extra_info);
+
+class WrappedRuntimError : public std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
 
 [[noreturn]] void
 ThrowWithTrace(const std::exception& exception);

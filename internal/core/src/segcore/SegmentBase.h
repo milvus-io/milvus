@@ -24,7 +24,7 @@ namespace milvus {
 namespace segcore {
 // using engine::DataChunk;
 // using engine::DataChunkPtr;
-using engine::QueryResult;
+using QueryResult = milvus::QueryResult;
 struct RowBasedRawData {
     void* raw_data;      // schema
     int sizeof_per_row;  // alignment

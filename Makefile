@@ -65,9 +65,11 @@ build-go:
 
 build-cpp:
 	@(env bash $(PWD)/scripts/core_build.sh)
+	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release)
 
 build-cpp-with-unittest:
 	@(env bash $(PWD)/scripts/core_build.sh -u)
+	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release)
 
 # Runs the tests.
 unittest: test-cpp test-go

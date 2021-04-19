@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
@@ -29,12 +30,12 @@ var segMgr *SegmentManager
 var collName = "coll_segmgr_test"
 var collID = int64(1001)
 var partitionTag = "test"
-var kvBase *kv.EtcdKV
+var kvBase kv.TxnBase
 var master *Master
 var masterCancelFunc context.CancelFunc
 
 func setup() {
-	Params.Init()
+	Init()
 	etcdAddress := Params.EtcdAddress
 
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
@@ -48,7 +49,7 @@ func setup() {
 	if err != nil {
 		panic(err)
 	}
-	kvBase = kv.NewEtcdKV(cli, rootPath)
+	kvBase = etcdkv.NewEtcdKV(cli, rootPath)
 	tmpMt, err := NewMetaTable(kvBase)
 	if err != nil {
 		panic(err)
@@ -217,7 +218,8 @@ func TestSegmentManager_SegmentStats(t *testing.T) {
 }
 
 func startupMaster() {
-	Params.Init()
+	Init()
+	refreshMasterAddress()
 	etcdAddress := Params.EtcdAddress
 	rootPath := "/test/root"
 	ctx, cancel := context.WithCancel(context.TODO())
@@ -230,7 +232,6 @@ func startupMaster() {
 	if err != nil {
 		panic(err)
 	}
-
 	Params = ParamTable{
 		Address: Params.Address,
 		Port:    Params.Port,
@@ -271,7 +272,7 @@ func startupMaster() {
 	if err != nil {
 		panic(err)
 	}
-	err = master.Run(10013)
+	err = master.Run(int64(Params.Port))
 
 	if err != nil {
 		panic(err)
@@ -288,7 +289,7 @@ func TestSegmentManager_RPC(t *testing.T) {
 	defer shutdownMaster()
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
-	dialContext, err := grpc.DialContext(ctx, "127.0.0.1:10013", grpc.WithInsecure(), grpc.WithBlock())
+	dialContext, err := grpc.DialContext(ctx, Params.Address, grpc.WithInsecure(), grpc.WithBlock())
 	assert.Nil(t, err)
 	defer dialContext.Close()
 	client := masterpb.NewMasterClient(dialContext)

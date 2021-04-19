@@ -15,15 +15,25 @@
 #include "common/Schema.h"
 
 namespace milvus::query {
+using MetricType = faiss::MetricType;
+
+namespace dataset {
+struct BinaryQueryDataset {
+    MetricType metric_type;
+    int64_t num_queries;
+    int64_t topk;
+    int64_t code_size;
+    const uint8_t* query_data;
+};
+
+}  // namespace dataset
+
 void
-BinarySearchBruteForce(faiss::MetricType metric_type,
-                       int64_t code_size,
+BinarySearchBruteForce(const dataset::BinaryQueryDataset& query_dataset,
                        const uint8_t* binary_chunk,
                        int64_t chunk_size,
-                       int64_t topk,
-                       int64_t num_queries,
-                       const uint8_t* query_data,
                        float* result_distances,
                        idx_t* result_labels,
                        faiss::ConcurrentBitsetPtr bitset = nullptr);
+
 }  // namespace milvus::query

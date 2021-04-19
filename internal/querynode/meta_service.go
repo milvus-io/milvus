@@ -12,7 +12,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 
-	"github.com/zilliztech/milvus-distributed/internal/kv"
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
@@ -25,7 +25,7 @@ const (
 
 type metaService struct {
 	ctx     context.Context
-	kvBase  *kv.EtcdKV
+	kvBase  *etcdkv.EtcdKV
 	replica collectionReplica
 }
 
@@ -40,7 +40,7 @@ func newMetaService(ctx context.Context, replica collectionReplica) *metaService
 
 	return &metaService{
 		ctx:     ctx,
-		kvBase:  kv.NewEtcdKV(cli, MetaRootPath),
+		kvBase:  etcdkv.NewEtcdKV(cli, MetaRootPath),
 		replica: replica,
 	}
 }
