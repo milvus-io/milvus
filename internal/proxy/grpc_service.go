@@ -3,7 +3,7 @@ package proxy
 import (
 	"context"
 	"errors"
-	"github.com/gogo/protobuf/proto"
+	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"log"
 
