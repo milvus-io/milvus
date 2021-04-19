@@ -101,7 +101,6 @@ class TestInsertBase:
         connect.flush([collection])
         connect.drop_collection(collection)
 
-    @pytest.mark.skip("create index")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_create_index(self, connect, collection, get_simple_index):
         '''
@@ -119,7 +118,6 @@ class TestInsertBase:
             if field["name"] == field_name:
                 assert field["indexes"][0] == get_simple_index
 
-    @pytest.mark.skip("create index")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_create_index_new(self, connect, collection, get_simple_index):
         '''
@@ -137,7 +135,6 @@ class TestInsertBase:
             if field["name"] == field_name:
                 assert field["indexes"][0] == get_simple_index
 
-    @pytest.mark.skip("create index")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_after_create_index(self, connect, collection, get_simple_index):
         '''
@@ -154,7 +151,6 @@ class TestInsertBase:
             if field["name"] == field_name:
                 assert field["indexes"][0] == get_simple_index
 
-    # @pytest.mark.skip(" later ")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_search(self, connect, collection):
         '''
@@ -645,7 +641,6 @@ class TestInsertBinary:
         connect.flush([binary_collection])
         assert connect.count_entities(binary_collection) == default_nb
 
-    @pytest.mark.skip("create index")
     def test_insert_binary_after_create_index(self, connect, binary_collection, get_binary_index):
         '''
         target: test insert binary entities after build index
@@ -662,7 +657,6 @@ class TestInsertBinary:
             if field["name"] == binary_field_name:
                 assert field["indexes"][0] == get_binary_index
 
-    @pytest.mark.skip("create index")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_binary_create_index(self, connect, binary_collection, get_binary_index):
         '''
@@ -863,7 +857,6 @@ class TestInsertMultiCollections:
         connect.flush([collection_name])
         assert len(ids) == 1
 
-    @pytest.mark.skip("create index")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_create_index_insert_vector_another(self, connect, collection, get_simple_index):
         '''
@@ -877,7 +870,7 @@ class TestInsertMultiCollections:
         ids = connect.bulk_insert(collection, default_entity)
         connect.drop_collection(collection_name)
 
-    @pytest.mark.skip("create index")
+    @pytest.mark.skip("count entities")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_vector_create_index_another(self, connect, collection, get_simple_index):
         '''
@@ -892,7 +885,7 @@ class TestInsertMultiCollections:
         count = connect.count_entities(collection_name)
         assert count == 0
 
-    @pytest.mark.skip("create index")
+    @pytest.mark.skip("count entities")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_vector_sleep_create_index_another(self, connect, collection, get_simple_index):
         '''

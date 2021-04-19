@@ -332,11 +332,11 @@ func (colReplica *collectionReplicaImpl) getSegmentStatistics() []*internalpb.Se
 			SegmentID:        segmentID,
 			MemorySize:       currentMemSize,
 			NumRows:          segmentNumOfRows,
-			RecentlyModified: segment.recentlyModified,
+			RecentlyModified: segment.GetRecentlyModified(),
 		}
 
 		statisticData = append(statisticData, &stat)
-		segment.recentlyModified = false
+		segment.SetRecentlyModified(false)
 	}
 
 	return statisticData

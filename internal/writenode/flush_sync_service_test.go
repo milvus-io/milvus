@@ -90,7 +90,7 @@ func TestFlushSyncService_Start(t *testing.T) {
 		}
 
 		for {
-			if len(ddChan) == 0 && len(insertChan) == 0 {
+			if len(ddChan) == 0 && len(insertChan) == 0 && fService.FlushCompleted(SegID) {
 				break
 			}
 		}
@@ -114,10 +114,6 @@ func TestFlushSyncService_Start(t *testing.T) {
 		assert.Equal(t, Timestamp(2010), ts)
 
 		cp, err := fService.metaTable.checkFlushComplete(SegID)
-		assert.NoError(t, err)
-		assert.Equal(t, true, cp)
-
-		cp, err = fService.metaTable.checkFlushComplete(SegID)
 		assert.NoError(t, err)
 		assert.Equal(t, true, cp)
 
