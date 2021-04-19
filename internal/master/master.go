@@ -44,6 +44,9 @@ type Master struct {
 
 	kvBase               *etcdkv.EtcdKV
 	scheduler            *ddRequestScheduler
+	flushSch             *FlushScheduler
+	indexBuildSch        *IndexBuildScheduler
+	indexLoadSch         *IndexLoadScheduler
 	metaTable            *metaTable
 	timesSyncMsgProducer *timeSyncMsgProducer
 
@@ -176,15 +179,24 @@ func CreateServer(ctx context.Context) (*Master, error) {
 	m.scheduler.SetDDMsgStream(pulsarDDStream)
 	m.scheduler.SetIDAllocator(func() (UniqueID, error) { return m.idAllocator.AllocOne() })
 
+	flushClient := &MockWriteNodeClient{}
+	buildIndexClient := &MockBuildIndexClient{}
+	loadIndexClient := &MockLoadIndexClient{}
+
+	m.indexLoadSch = NewIndexLoadScheduler(ctx, loadIndexClient, m.metaTable)
+	m.indexBuildSch = NewIndexBuildScheduler(ctx, buildIndexClient, m.metaTable, m.indexLoadSch)
+	m.flushSch = NewFlushScheduler(ctx, flushClient, m.metaTable, m.indexBuildSch)
+
 	m.segmentAssigner = NewSegmentAssigner(ctx, metakv,
 		func() (Timestamp, error) { return m.tsoAllocator.AllocOne() },
 		proxyTtBarrierWatcher,
 	)
+
 	m.segmentManager, err = NewSegmentManager(ctx, metakv,
 		func() (UniqueID, error) { return m.idAllocator.AllocOne() },
 		func() (Timestamp, error) { return m.tsoAllocator.AllocOne() },
 		writeNodeTtBarrierWatcher,
-		&MockFlushScheduler{}, // todo replace mock with real flush scheduler
+		m.flushSch,
 		m.segmentAssigner)
 
 	if err != nil {
@@ -283,6 +295,18 @@ func (s *Master) startServerLoop(ctx context.Context, grpcPort int64) error {
 	if err := s.scheduler.Start(); err != nil {
 		return err
 	}
+	s.serverLoopWg.Add(1)
+	if err := s.indexLoadSch.Start(); err != nil {
+		return err
+	}
+	s.serverLoopWg.Add(1)
+	if err := s.indexBuildSch.Start(); err != nil {
+		return err
+	}
+	s.serverLoopWg.Add(1)
+	if err := s.flushSch.Start(); err != nil {
+		return err
+	}
 
 	s.serverLoopWg.Add(1)
 	go s.grpcLoop(grpcPort)
@@ -304,6 +328,12 @@ func (s *Master) stopServerLoop() {
 	s.timesSyncMsgProducer.Close()
 	s.serverLoopWg.Done()
 	s.scheduler.Close()
+	s.serverLoopWg.Done()
+	s.flushSch.Close()
+	s.serverLoopWg.Done()
+	s.indexBuildSch.Close()
+	s.serverLoopWg.Done()
+	s.indexLoadSch.Close()
 	s.serverLoopWg.Done()
 
 	if s.grpcServer != nil {
