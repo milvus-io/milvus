@@ -371,10 +371,11 @@ func (sched *TaskScheduler) queryLoop() {
 
 func (sched *TaskScheduler) queryResultLoop() {
 	defer sched.wg.Done()
-	factory := pulsarms.NewFactory(Params.PulsarAddress, Params.MsgStreamSearchResultBufSize, 1024)
+	factory := msgstream.ProtoUDFactory{}
 
-	queryResultMsgStream, _ := factory.NewMsgStream(sched.ctx)
-	queryResultMsgStream.AsConsumer(Params.SearchResultChannelNames,
+	queryResultMsgStream := pulsarms.NewPulsarMsgStream(sched.ctx, Params.MsgStreamSearchResultBufSize, 1024, factory.NewUnmarshalDispatcher())
+	queryResultMsgStream.SetPulsarClient(Params.PulsarAddress)
+	queryResultMsgStream.CreatePulsarConsumers(Params.SearchResultChannelNames,
 		Params.ProxySubName)
 	queryNodeNum := Params.QueryNodeNum
 

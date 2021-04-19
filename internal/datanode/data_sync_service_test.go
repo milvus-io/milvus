@@ -82,12 +82,14 @@ func TestDataSyncService_Start(t *testing.T) {
 	insertChannels := Params.InsertChannelNames
 	ddChannels := Params.DDChannelNames
 
-	factory := pulsarms.NewFactory(pulsarURL, receiveBufSize, 1024)
-	insertStream, _ := factory.NewMsgStream(ctx)
-	insertStream.AsProducer(insertChannels)
+	factory := msgstream.ProtoUDFactory{}
+	insertStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
+	insertStream.SetPulsarClient(pulsarURL)
+	insertStream.CreatePulsarProducers(insertChannels)
 
-	ddStream, _ := factory.NewMsgStream(ctx)
-	ddStream.AsProducer(ddChannels)
+	ddStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
+	ddStream.SetPulsarClient(pulsarURL)
+	ddStream.CreatePulsarProducers(ddChannels)
 
 	var insertMsgStream msgstream.MsgStream = insertStream
 	insertMsgStream.Start()

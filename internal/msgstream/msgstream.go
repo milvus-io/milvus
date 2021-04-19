@@ -1,8 +1,6 @@
 package msgstream
 
 import (
-	"context"
-
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
@@ -26,17 +24,9 @@ type MsgStream interface {
 	Start()
 	Close()
 	Chan() <-chan *MsgPack
-	AsProducer(channels []string)
-	AsConsumer(channels []string, subName string)
-	SetRepackFunc(repackFunc RepackFunc)
 
 	Produce(*MsgPack) error
 	Broadcast(*MsgPack) error
 	Consume() *MsgPack
 	Seek(offset *MsgPosition) error
-}
-
-type Factory interface {
-	NewMsgStream(ctx context.Context) (MsgStream, error)
-	NewTtMsgStream(ctx context.Context) (MsgStream, error)
 }

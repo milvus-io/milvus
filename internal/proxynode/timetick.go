@@ -26,7 +26,7 @@ type timeTick struct {
 	pulsarProducer pulsar.Producer
 
 	tsoAllocator  *allocator.TimestampAllocator
-	tickMsgStream msgstream.MsgStream
+	tickMsgStream *pulsarms.PulsarMsgStream
 
 	peerID    UniqueID
 	wg        sync.WaitGroup
@@ -51,9 +51,12 @@ func newTimeTick(ctx context.Context,
 		checkFunc:    checkFunc,
 	}
 
-	factory := pulsarms.NewFactory(Params.PulsarAddress, Params.MsgStreamTimeTickBufSize, 1024)
-	t.tickMsgStream, _ = factory.NewMsgStream(t.ctx)
-	t.tickMsgStream.AsProducer(Params.ProxyTimeTickChannelNames)
+	factory := msgstream.ProtoUDFactory{}
+	t.tickMsgStream = pulsarms.NewPulsarMsgStream(t.ctx, Params.MsgStreamTimeTickBufSize, 1024, factory.NewUnmarshalDispatcher())
+	pulsarAddress := Params.PulsarAddress
+
+	t.tickMsgStream.SetPulsarClient(pulsarAddress)
+	t.tickMsgStream.CreatePulsarProducers(Params.ProxyTimeTickChannelNames)
 	return t
 }
 
