@@ -7,7 +7,7 @@ import (
 )
 
 func startQueryNode() {
-	qn := NewQueryNode(0)
+	qn := NewQueryNode(0, 0)
 	qn.InitQueryNodeCollection()
 	go qn.SegmentService()
 	qn.StartMessageClient()

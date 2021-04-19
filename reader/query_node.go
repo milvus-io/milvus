@@ -1,6 +1,18 @@
 package reader
 
+/*
+
+#cgo CFLAGS: -I../core/include
+
+#cgo LDFLAGS: -L../core/lib -lmilvus_dog_segment -Wl,-rpath=../core/lib
+
+#include "collection_c.h"
+#include "partition_c.h"
+#include "segment_c.h"
+
+*/
 import "C"
+
 import (
 	"errors"
 	"fmt"
@@ -26,13 +38,14 @@ type QueryNodeTimeSync struct {
 }
 
 type QueryNode struct {
+	QueryNodeId               uint64
 	Collections               []*Collection
 	messageClient 			  pulsar.MessageClient
 	queryNodeTimeSync         *QueryNodeTimeSync
 	buffer					  QueryNodeDataBuffer
 }
 
-func NewQueryNode(timeSync uint64) *QueryNode {
+func NewQueryNode(queryNodeId uint64, timeSync uint64) *QueryNode {
 	mc := pulsar.MessageClient{}
 
 	queryNodeTimeSync := &QueryNodeTimeSync {
@@ -42,18 +55,16 @@ func NewQueryNode(timeSync uint64) *QueryNode {
 	}
 
 	return &QueryNode{
+		QueryNodeId:           queryNodeId,
 		Collections:           nil,
 		messageClient: 		   mc,
 		queryNodeTimeSync:     queryNodeTimeSync,
 	}
 }
 
-// TODO: Schema
-type CollectionSchema string
-
-func (node *QueryNode) NewCollection(collectionName string, schema CollectionSchema) *Collection {
+func (node *QueryNode) NewCollection(collectionName string, schemaConfig string) *Collection {
 	cName := C.CString(collectionName)
-	cSchema := C.CString(schema)
+	cSchema := C.CString(schemaConfig)
 	collection := C.NewCollection(cName, cSchema)
 
 	var newCollection = &Collection{CollectionPtr: collection, CollectionName: collectionName}
@@ -212,7 +223,7 @@ func (node *QueryNode) Insert(insertMessages []*schema.InsertMsg, wg *sync.WaitG
 		return schema.Status{}
 	}
 
-	var result = SegmentInsert(targetSegment, collectionName, partitionTag, &entityIds, &timestamps, vectorRecords)
+	var result = SegmentInsert(targetSegment, &entityIds, &timestamps, vectorRecords)
 
 	wg.Done()
 	return publishResult(&result, clientId)
