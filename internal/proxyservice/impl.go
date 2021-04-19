@@ -199,8 +199,6 @@ func (s *ProxyService) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 
 func (s *ProxyService) RegisterLink(ctx context.Context) (*milvuspb.RegisterLinkResponse, error) {
 	log.Println("register link")
-	ctx, cancel := context.WithTimeout(ctx, timeoutInterval)
-	defer cancel()
 
 	t := &RegisterLinkTask{
 		ctx:       ctx,
@@ -237,8 +235,6 @@ func (s *ProxyService) RegisterLink(ctx context.Context) (*milvuspb.RegisterLink
 
 func (s *ProxyService) RegisterNode(ctx context.Context, request *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error) {
 	log.Println("RegisterNode: ", request)
-	ctx, cancel := context.WithTimeout(ctx, timeoutInterval)
-	defer cancel()
 
 	t := &RegisterNodeTask{
 		ctx:         ctx,
@@ -278,8 +274,6 @@ func (s *ProxyService) RegisterNode(ctx context.Context, request *proxypb.Regist
 
 func (s *ProxyService) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	log.Println("InvalidateCollectionMetaCache")
-	ctx, cancel := context.WithTimeout(ctx, timeoutInterval)
-	defer cancel()
 
 	t := &InvalidateCollectionMetaCacheTask{
 		ctx:       ctx,
