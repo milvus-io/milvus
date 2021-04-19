@@ -14,8 +14,8 @@
 #include "segcore/Collection.h"
 
 CCollection
-NewCollection(const char* collection_proto) {
-    auto proto = std::string(collection_proto);
+NewCollection(const char* schema_proto_blob) {
+    auto proto = std::string(schema_proto_blob);
 
     auto collection = std::make_unique<milvus::segcore::Collection>(proto);
 
@@ -32,4 +32,11 @@ DeleteCollection(CCollection collection) {
     // TODO: delete print
     std::cout << "delete collection " << col->get_collection_name() << std::endl;
     delete col;
+}
+
+const char*
+GetCollectionName(CCollection collection) {
+    auto col = (milvus::segcore::Collection*)collection;
+
+    return strdup(col->get_collection_name().data());
 }

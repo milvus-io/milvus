@@ -26,6 +26,14 @@ TEST(CApiTest, CollectionTest) {
     DeleteCollection(collection);
 }
 
+TEST(CApiTest, GetCollectionNameTest) {
+    auto schema_tmp_conf = "";
+    auto collection = NewCollection(schema_tmp_conf);
+    auto name = GetCollectionName(collection);
+    assert(strcmp(name, "default-collection") == 0);
+    DeleteCollection(collection);
+}
+
 TEST(CApiTest, SegmentTest) {
     auto schema_tmp_conf = "";
     auto collection = NewCollection(schema_tmp_conf);

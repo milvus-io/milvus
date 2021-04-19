@@ -18,7 +18,7 @@ import (
 
 type QueryNode struct {
 	queryNodeLoopCtx    context.Context
-	queryNodeLoopCancel func()
+	queryNodeLoopCancel context.CancelFunc
 
 	QueryNodeID uint64
 
@@ -75,6 +75,8 @@ func (node *QueryNode) Start() error {
 	go node.searchService.start()
 	go node.metaService.start()
 	go node.statsService.start()
+
+	<-node.queryNodeLoopCtx.Done()
 	return nil
 }
 

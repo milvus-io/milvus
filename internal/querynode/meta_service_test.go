@@ -1,32 +1,19 @@
 package querynode
 
 import (
-	"context"
 	"math"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 )
 
 func TestMetaService_start(t *testing.T) {
-	var ctx context.Context
+	node := newQueryNode()
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
-	if closeWithDeadline {
-		var cancel context.CancelFunc
-		d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-		ctx, cancel = context.WithDeadline(context.Background(), d)
-		defer cancel()
-	} else {
-		ctx = context.Background()
-	}
-
-	// init query node
-	node := NewQueryNode(ctx, 0)
-	node.metaService = newMetaService(ctx, node.replica)
-
-	(*node.metaService).start()
+	node.metaService.start()
 	node.Close()
 }
 

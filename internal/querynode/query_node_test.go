@@ -2,18 +2,21 @@ package querynode
 
 import (
 	"context"
+	"math/rand"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
-const ctxTimeInMillisecond = 200
+const ctxTimeInMillisecond = 2000
 const closeWithDeadline = true
 
 func setup() {
@@ -66,16 +69,16 @@ func genTestCollectionMeta(collectionName string, collectionID UniqueID) *etcdpb
 func initTestMeta(t *testing.T, node *QueryNode, collectionName string, collectionID UniqueID, segmentID UniqueID) {
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
 
-	collectionMetaBlob := proto.MarshalTextString(collectionMeta)
-	assert.NotEqual(t, "", collectionMetaBlob)
+	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
+	assert.NotEqual(t, "", schemaBlob)
 
-	var err = node.replica.addCollection(collectionMeta, collectionMetaBlob)
+	var err = node.replica.addCollection(collectionMeta.ID, schemaBlob)
 	assert.NoError(t, err)
 
 	collection, err := node.replica.getCollectionByName(collectionName)
 	assert.NoError(t, err)
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
-	assert.Equal(t, collection.meta.ID, collectionID)
+	assert.Equal(t, collection.Name(), collectionName)
+	assert.Equal(t, collection.ID(), collectionID)
 	assert.Equal(t, node.replica.getCollectionNum(), 1)
 
 	err = node.replica.addPartition(collection.ID(), collectionMeta.PartitionTags[0])
@@ -93,7 +96,10 @@ func newQueryNode() *QueryNode {
 		var cancel context.CancelFunc
 		d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 		ctx, cancel = context.WithDeadline(context.Background(), d)
-		defer cancel()
+		go func() {
+			<-ctx.Done()
+			cancel()
+		}()
 	} else {
 		ctx = context.Background()
 	}
@@ -103,8 +109,26 @@ func newQueryNode() *QueryNode {
 
 }
 
+func makeNewChannelNames(names []string, suffix string) []string {
+	var ret []string
+	for _, name := range names {
+		ret = append(ret, name+suffix)
+	}
+	return ret
+}
+
+func refreshChannelNames() {
+	suffix := "_test_query_node" + strconv.FormatInt(rand.Int63n(100), 10)
+	Params.DDChannelNames = makeNewChannelNames(Params.DDChannelNames, suffix)
+	Params.InsertChannelNames = makeNewChannelNames(Params.InsertChannelNames, suffix)
+	Params.SearchChannelNames = makeNewChannelNames(Params.SearchChannelNames, suffix)
+	Params.SearchResultChannelNames = makeNewChannelNames(Params.SearchResultChannelNames, suffix)
+	Params.StatsChannelName = Params.StatsChannelName + suffix
+}
+
 func TestMain(m *testing.M) {
 	setup()
+	refreshChannelNames()
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }

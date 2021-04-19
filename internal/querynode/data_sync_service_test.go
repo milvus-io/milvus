@@ -14,7 +14,6 @@ import (
 
 // NOTE: start pulsar before test
 func TestDataSyncService_Start(t *testing.T) {
-
 	node := newQueryNode()
 	initTestMeta(t, node, "collection0", 0, 0)
 	// test data generate
@@ -99,26 +98,36 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	// pulsar produce
 	const receiveBufSize = 1024
-	producerChannels := Params.insertChannelNames()
-	pulsarURL, _ := Params.pulsarAddress()
+	insertChannels := Params.InsertChannelNames
+	ddChannels := Params.DDChannelNames
+	pulsarURL := Params.PulsarAddress
 
 	insertStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 	insertStream.SetPulsarClient(pulsarURL)
-	insertStream.CreatePulsarProducers(producerChannels)
+	insertStream.CreatePulsarProducers(insertChannels)
+
+	ddStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	ddStream.SetPulsarClient(pulsarURL)
+	ddStream.CreatePulsarProducers(ddChannels)
 
 	var insertMsgStream msgstream.MsgStream = insertStream
 	insertMsgStream.Start()
+
+	var ddMsgStream msgstream.MsgStream = ddStream
+	ddMsgStream.Start()
 
 	err := insertMsgStream.Produce(&msgPack)
 	assert.NoError(t, err)
 
 	err = insertMsgStream.Broadcast(&timeTickMsgPack)
 	assert.NoError(t, err)
+	err = ddMsgStream.Broadcast(&timeTickMsgPack)
+	assert.NoError(t, err)
 
 	// dataSync
 	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica)
 	go node.dataSyncService.start()
 
+	<-node.queryNodeLoopCtx.Done()
 	node.Close()
-
 }

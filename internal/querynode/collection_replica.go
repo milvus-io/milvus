@@ -13,13 +13,13 @@ package querynode
 import "C"
 import (
 	"fmt"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"log"
 	"strconv"
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 /*
@@ -35,7 +35,7 @@ type collectionReplica interface {
 
 	// collection
 	getCollectionNum() int
-	addCollection(collMeta *etcdpb.CollectionMeta, colMetaBlob string) error
+	addCollection(collectionID UniqueID, schemaBlob string) error
 	removeCollection(collectionID UniqueID) error
 	getCollectionByID(collectionID UniqueID) (*Collection, error)
 	getCollectionByName(collectionName string) (*Collection, error)
@@ -84,11 +84,11 @@ func (colReplica *collectionReplicaImpl) getCollectionNum() int {
 	return len(colReplica.collections)
 }
 
-func (colReplica *collectionReplicaImpl) addCollection(collMeta *etcdpb.CollectionMeta, colMetaBlob string) error {
+func (colReplica *collectionReplicaImpl) addCollection(collectionID UniqueID, schemaBlob string) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
-	var newCollection = newCollection(collMeta, colMetaBlob)
+	var newCollection = newCollection(collectionID, schemaBlob)
 	colReplica.collections = append(colReplica.collections, newCollection)
 
 	return nil

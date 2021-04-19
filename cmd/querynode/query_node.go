@@ -16,7 +16,7 @@ import (
 func main() {
 
 	querynode.Init()
-	fmt.Println("QueryNodeID is", querynode.Params.QueryNodeID())
+	fmt.Println("QueryNodeID is", querynode.Params.QueryNodeID)
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
 	svr := querynode.NewQueryNode(ctx, 0)

@@ -14,8 +14,8 @@ func (ksNode *key2SegNode) Operate(in []*Msg) []*Msg {
 }
 
 func newKey2SegNode() *key2SegNode {
-	maxQueueLength := Params.flowGraphMaxQueueLength()
-	maxParallelism := Params.flowGraphMaxParallelism()
+	maxQueueLength := Params.FlowGraphMaxQueueLength
+	maxParallelism := Params.FlowGraphMaxParallelism
 
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)

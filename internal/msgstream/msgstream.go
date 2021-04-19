@@ -344,22 +344,27 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 	defer ms.wait.Done()
 	ms.unsolvedBuf = make([]TsMsg, 0)
 	ms.inputBuf = make([]TsMsg, 0)
+	isChannelReady := make([]bool, len(ms.consumers))
+	eofMsgTimeStamp := make(map[int]Timestamp)
 	for {
 		select {
 		case <-ms.ctx.Done():
 			return
 		default:
 			wg := sync.WaitGroup{}
-			wg.Add(len(ms.consumers))
-			eofMsgTimeStamp := make(map[int]Timestamp)
 			mu := sync.Mutex{}
 			for i := 0; i < len(ms.consumers); i++ {
+				if isChannelReady[i] {
+					continue
+				}
+				wg.Add(1)
 				go ms.findTimeTick(i, eofMsgTimeStamp, &wg, &mu)
 			}
 			wg.Wait()
-			timeStamp, ok := checkTimeTickMsg(eofMsgTimeStamp)
-			if !ok {
+			timeStamp, ok := checkTimeTickMsg(eofMsgTimeStamp, isChannelReady)
+			if !ok || timeStamp <= ms.lastTimeStamp {
 				log.Printf("All timeTick's timestamps are inconsistent")
+				continue
 			}
 
 			timeTickBuf := make([]TsMsg, 0)
@@ -384,7 +389,6 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 			ms.lastTimeStamp = timeStamp
 		}
 	}
-
 }
 
 func (ms *PulsarTtMsgStream) findTimeTick(channelIndex int,
@@ -463,16 +467,29 @@ func (ms *InMemMsgStream) Chan() <- chan *MsgPack {
 }
 */
 
-func checkTimeTickMsg(msg map[int]Timestamp) (Timestamp, bool) {
+func checkTimeTickMsg(msg map[int]Timestamp, isChannelReady []bool) (Timestamp, bool) {
 	checkMap := make(map[Timestamp]int)
+	var maxTime Timestamp = 0
 	for _, v := range msg {
 		checkMap[v]++
-	}
-	if len(checkMap) <= 1 {
-		for k := range checkMap {
-			return k, true
+		if v > maxTime {
+			maxTime = v
 		}
 	}
+	if len(checkMap) <= 1 {
+		for i := range msg {
+			isChannelReady[i] = false
+		}
+		return maxTime, true
+	}
+	for i, v := range msg {
+		if v != maxTime {
+			isChannelReady[i] = false
+		} else {
+			isChannelReady[i] = true
+		}
+	}
+
 	return 0, false
 }
 

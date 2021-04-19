@@ -103,19 +103,21 @@ message AssignSegIDResponse {
 
 message CreateCollectionRequest {
     MsgType msg_type = 1;
-    int64 reqID = 2;
-    uint64 timestamp = 3;
-    int64 proxyID = 4;
-    common.Blob schema = 5;
+    int64 collectionID = 2;
+    int64 reqID = 3;
+    uint64 timestamp = 4;
+    int64 proxyID = 5;
+    common.Blob schema = 6;
 }
 
 
 message DropCollectionRequest {
     MsgType msg_type = 1;
-    int64 reqID = 2;
-    uint64 timestamp = 3;
-    int64 proxyID = 4;
-    service.CollectionName collection_name = 5;
+    int64 collectionID = 2;
+    int64 reqID = 3;
+    uint64 timestamp = 4;
+    int64 proxyID = 5;
+    service.CollectionName collection_name = 6;
 }
 
 
@@ -147,19 +149,23 @@ message ShowCollectionRequest {
 
 message CreatePartitionRequest {
     MsgType msg_type = 1;
-    int64 reqID = 2;
-    uint64 timestamp = 3;
-    int64 proxyID = 4;
-    service.PartitionName partition_name = 5;
+    int64 collectionID = 2;
+    int64 partitionID = 3;
+    int64 reqID = 4;
+    uint64 timestamp = 5;
+    int64 proxyID = 6;
+    service.PartitionName partition_name = 7;
 }
 
 
 message DropPartitionRequest {
     MsgType msg_type = 1;
-    int64 reqID = 2;
-    uint64 timestamp = 3;
-    int64 proxyID = 4;
-    service.PartitionName partition_name = 5;
+    int64 collectionID = 2;
+    int64 partitionID = 3;
+    int64 reqID = 4;
+    uint64 timestamp = 5;
+    int64 proxyID = 6;
+    service.PartitionName partition_name = 7;
 }
 
 
