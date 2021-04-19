@@ -17,7 +17,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-func TestMaster_CreateCollectionTask(t *testing.T) {
+func TestMaster_CollectionTask(t *testing.T) {
 	err := gparams.GParams.LoadYaml("config.yaml")
 	if err != nil {
 		panic(err)
@@ -118,6 +118,7 @@ func TestMaster_CreateCollectionTask(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
+	// HasCollection
 	reqHasCollection := internalpb.HasCollectionRequest{
 		MsgType:   internalpb.MsgType_kHasCollection,
 		ReqID:     1,
@@ -128,26 +129,45 @@ func TestMaster_CreateCollectionTask(t *testing.T) {
 		},
 	}
 
-	// HasCollection "col1" is true
+	// "col1" is true
 	log.Printf("... [Has] collection col1\n")
 	boolResp, err := cli.HasCollection(ctx, &reqHasCollection)
 	assert.Nil(t, err)
 	assert.Equal(t, true, boolResp.Value)
 	assert.Equal(t, boolResp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
-	// HasCollection "colNotExist" is false
+	// "colNotExist" is false
 	reqHasCollection.CollectionName.CollectionName = "colNotExist"
 	boolResp, err = cli.HasCollection(ctx, &reqHasCollection)
 	assert.Nil(t, err)
 	assert.Equal(t, boolResp.Value, false)
 	assert.Equal(t, boolResp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
-	// HasCollection error
+	// error
 	reqHasCollection.Timestamp = Timestamp(10)
 	reqHasCollection.CollectionName.CollectionName = "col1"
 	boolResp, err = cli.HasCollection(ctx, &reqHasCollection)
 	assert.Nil(t, err)
 	assert.NotEqual(t, boolResp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+
+	// ShowCollection
+	reqShowCollection := internalpb.ShowCollectionRequest{
+		MsgType:   internalpb.MsgType_kShowCollections,
+		ReqID:     1,
+		Timestamp: 11,
+		ProxyID:   1,
+	}
+
+	listResp, err := cli.ShowCollections(ctx, &reqShowCollection)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_SUCCESS, listResp.Status.ErrorCode)
+	assert.Equal(t, 1, len(listResp.Values))
+	assert.Equal(t, "col1", listResp.Values[0])
+
+	reqShowCollection.Timestamp = Timestamp(10)
+	listResp, err = cli.ShowCollections(ctx, &reqShowCollection)
+	assert.Nil(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_SUCCESS, listResp.Status.ErrorCode)
 
 	// CreateCollection Test
 	collMeta, err := svr.mt.GetCollectionByName(sch.Name)
@@ -183,7 +203,12 @@ func TestMaster_CreateCollectionTask(t *testing.T) {
 	assert.Equal(t, collMeta.Schema.Fields[1].IndexParams[0].Value, "col1_f2_iv1")
 	assert.Equal(t, collMeta.Schema.Fields[1].IndexParams[1].Value, "col1_f2_iv2")
 
-	// DescribeCollection
+	req.Timestamp = Timestamp(10)
+	st, err = cli.CreateCollection(ctx, &req)
+	assert.Nil(t, err)
+	assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
+
+	// DescribeCollection Test
 	reqDescribe := &internalpb.DescribeCollectionRequest{
 		MsgType:   internalpb.MsgType_kDescribeCollection,
 		ReqID:     1,
@@ -239,11 +264,6 @@ func TestMaster_CreateCollectionTask(t *testing.T) {
 	assert.NotEqual(t, commonpb.ErrorCode_SUCCESS, des.Status.ErrorCode)
 	log.Printf(des.Status.Reason)
 
-	req.Timestamp = Timestamp(10)
-	st, err = cli.CreateCollection(ctx, &req)
-	assert.Nil(t, err)
-	assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
-
 	// ------------------------------DropCollectionTask---------------------------
 	log.Printf("... [Drop] collection col1\n")
 	ser := servicepb.CollectionName{CollectionName: "col1"}
@@ -272,22 +292,51 @@ func TestMaster_CreateCollectionTask(t *testing.T) {
 	assert.Equal(t, false, boolResp.Value)
 	assert.Equal(t, commonpb.ErrorCode_SUCCESS, boolResp.Status.ErrorCode)
 
+	// ShowCollections
+	reqShowCollection.Timestamp = Timestamp(11)
+	listResp, err = cli.ShowCollections(ctx, &reqShowCollection)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_SUCCESS, listResp.Status.ErrorCode)
+	assert.Equal(t, 0, len(listResp.Values))
+
 	// Drop again
 	st, err = cli.DropCollection(ctx, &reqDrop)
 	assert.Nil(t, err)
 	assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
-	// Create
+	// Create "col1"
 	req.Timestamp = Timestamp(11)
 	st, err = cli.CreateCollection(ctx, &req)
 	assert.Nil(t, err)
-	log.Printf(st.Reason)
 	assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
 	boolResp, err = cli.HasCollection(ctx, &reqHasCollection)
 	assert.Nil(t, err)
 	assert.Equal(t, true, boolResp.Value)
 	assert.Equal(t, commonpb.ErrorCode_SUCCESS, boolResp.Status.ErrorCode)
+
+	// Create "col2"
+	sch.Name = "col2"
+	schemaBytes, err = proto.Marshal(&sch)
+	assert.Nil(t, err)
+
+	req = internalpb.CreateCollectionRequest{
+		MsgType:   internalpb.MsgType_kCreateCollection,
+		ReqID:     1,
+		Timestamp: 11,
+		ProxyID:   1,
+		Schema:    &commonpb.Blob{Value: schemaBytes},
+	}
+	st, err = cli.CreateCollection(ctx, &req)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_SUCCESS, st.ErrorCode)
+
+	// Show Collections
+	listResp, err = cli.ShowCollections(ctx, &reqShowCollection)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_SUCCESS, listResp.Status.ErrorCode)
+	assert.Equal(t, 2, len(listResp.Values))
+	assert.ElementsMatch(t, []string{"col1", "col2"}, listResp.Values)
 
 	svr.Close()
 }
