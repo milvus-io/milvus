@@ -34,6 +34,7 @@ type ParamTable struct {
 	SegmentInfoChannelName      string
 	DataServiceSubscriptionName string
 	K2SChannelNames             []string
+	ProxyTimeTickChannelName    string
 
 	SegmentFlushMetaPath string
 	Log                  log.Config
@@ -73,6 +74,7 @@ func (p *ParamTable) Init() {
 		p.initK2SChannelNames()
 		p.initSegmentFlushMetaPath()
 		p.initLogCfg()
+		p.initProxyServiceTimeTickChannelName()
 	})
 }
 
@@ -242,4 +244,12 @@ func (p *ParamTable) initLogCfg() {
 	} else {
 		p.Log.File.Filename = ""
 	}
+}
+
+func (p *ParamTable) initProxyServiceTimeTickChannelName() {
+	ch, err := p.Load("msgChannel.chanNamePrefix.proxyServiceTimeTick")
+	if err != nil {
+		panic(err)
+	}
+	p.ProxyTimeTickChannelName = ch
 }
