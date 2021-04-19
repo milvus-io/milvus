@@ -49,7 +49,7 @@ void
 SearchOnSealed(const Schema& schema,
                const segcore::SealedIndexingRecord& record,
                const QueryInfo& query_info,
-               const float* query_data,
+               const void* query_data,
                int64_t num_queries,
                Timestamp timestamp,
                std::optional<const BitmapSimple*> bitmaps_opt,
@@ -58,7 +58,7 @@ SearchOnSealed(const Schema& schema,
 
     auto field_offset = query_info.field_offset_;
     auto& field = schema[field_offset];
-    Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
+    // Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
     auto dim = field.get_dim();
 
     Assert(record.test_readiness(field_offset));

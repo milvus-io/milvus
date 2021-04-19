@@ -104,7 +104,13 @@ ExecPlanNodeVisitor::visit(BinaryVectorANNS& node) {
         bitset_pack = &bitmap_holder;
     }
 
-    BinarySearch(*segment, node.query_info_, src_data, num_queries, timestamp_, bitset_pack, ret);
+    auto& sealed_indexing = segment->get_sealed_indexing_record();
+    if (sealed_indexing.test_readiness(node.query_info_.field_offset_)) {
+        SearchOnSealed(segment->get_schema(), sealed_indexing, node.query_info_, src_data, num_queries, timestamp_,
+                       bitset_pack, ret);
+    } else {
+        BinarySearch(*segment, node.query_info_, src_data, num_queries, timestamp_, bitset_pack, ret);
+    }
     ret_ = ret;
 }
 
