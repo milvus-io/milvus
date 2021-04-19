@@ -2,6 +2,29 @@
 
 ## 6. Proxy
 
+#### 6.0 Proxy Service API
+
+```protobuf
+message Credential {
+	string address
+	//TODO: we should add keys/tokens here
+}
+
+message ProxyInfo {
+	common.Status
+	string address
+	int32 port
+}
+
+service ProxyService {
+	rpc RegisterLink(Credential) returns (ProxyInfo){}	//TODO: call IAM
+}
+```
+
+
+
+
+
 #### 6.1 Proxy Instance
 
 ```go
