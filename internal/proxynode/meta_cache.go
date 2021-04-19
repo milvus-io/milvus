@@ -188,6 +188,9 @@ func (m *MetaCache) GetPartitionID(collectionName string, partitionName string) 
 		}
 	}
 	partInfo := m.collInfo[collectionName].partInfo
+	if partInfo == nil {
+		partInfo = map[string]typeutil.UniqueID{}
+	}
 
 	for i := 0; i < len(partitions.PartitionIDs); i++ {
 		_, ok := partInfo[partitions.PartitionNames[i]]

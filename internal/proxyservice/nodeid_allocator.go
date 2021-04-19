@@ -24,7 +24,7 @@ type NaiveNodeIDAllocatorImpl struct {
 func (allocator *NaiveNodeIDAllocatorImpl) AllocOne() UniqueID {
 	allocator.mtx.Lock()
 	defer func() {
-		// allocator.now++
+		allocator.now++
 		allocator.mtx.Unlock()
 	}()
 	return allocator.now
@@ -32,6 +32,6 @@ func (allocator *NaiveNodeIDAllocatorImpl) AllocOne() UniqueID {
 
 func NewNodeIDAllocator() NodeIDAllocator {
 	return &NaiveNodeIDAllocatorImpl{
-		now: 1,
+		now: 0,
 	}
 }

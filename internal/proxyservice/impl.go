@@ -280,13 +280,19 @@ func (s *ServiceImpl) InvalidateCollectionMetaCache(request *proxypb.InvalidateC
 
 	err = s.sched.InvalidateCollectionMetaCacheTaskQueue.Enqueue(t)
 	if err != nil {
-		return nil, err
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, nil
 	}
 
 	err = t.WaitToFinish()
 	if err != nil {
-		return nil, err
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, nil
 	}
 
-	return nil, nil
+	return t.response, nil
 }

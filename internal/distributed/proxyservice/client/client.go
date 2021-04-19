@@ -49,8 +49,7 @@ func (c *Client) RegisterNode(request *proxypb.RegisterNodeRequest) (*proxypb.Re
 }
 
 func (c *Client) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	_, err := c.proxyServiceClient.InvalidateCollectionMetaCache(c.ctx, request)
-	return nil, err
+	return c.proxyServiceClient.InvalidateCollectionMetaCache(c.ctx, request)
 }
 
 func (c *Client) GetTimeTickChannel() (*milvuspb.StringResponse, error) {
