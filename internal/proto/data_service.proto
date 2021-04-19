@@ -155,8 +155,8 @@ message SegmentMsg{
 
 message CollectionStatsRequest{
   common.MsgBase base = 1;
-  string dbID = 2;
-  string collectionID = 3;
+  int64 dbID = 2;
+  int64 collectionID = 3;
 }
 
 message CollectionStatsResponse {
@@ -166,9 +166,9 @@ message CollectionStatsResponse {
 
 message PartitionStatsRequest{
   common.MsgBase base = 1;
-  string dbID = 2;
-  string collectionID = 3;
-  string partitionID = 4;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+  int64 partitionID = 4;
 }
 
 message PartitionStatsResponse {
@@ -192,6 +192,17 @@ message DDLFlushMeta {
   repeated string binlog_paths = 2;
 }
 
+message CollectionCountRequest{
+  common.MsgBase base = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+}
+
+message CollectionCountResponse{
+  common.Status status = 1;
+  int64 count = 2;
+}
+
 service DataService {
 
   rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
@@ -212,6 +223,7 @@ service DataService {
   rpc GetStatisticsChannel(common.Empty) returns(milvus.StringResponse){}
 
   rpc GetSegmentInfoChannel(common.Empty) returns (milvus.StringResponse){}
+   rpc GetCount(CollectionCountRequest) returns (CollectionCountResponse){}
 }
 
 service DataNode {

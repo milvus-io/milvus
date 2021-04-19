@@ -10,6 +10,7 @@ try {
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d indexservice'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d indexnode'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d queryservice'
+        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d dataservice'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} run -e QUERY_NODE_ID=1 -d querynode'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} run -e QUERY_NODE_ID=2 -d querynode'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} run -e DATA_NODE_ID=3 -d datanode'
