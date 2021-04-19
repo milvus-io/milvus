@@ -31,7 +31,7 @@ SegmentSealedImpl::LoadIndex(const LoadIndexInfo& info) {
     }
     Assert(!vec_indexings_.is_ready(field_offset));
     vec_indexings_.append_field_indexing(field_offset, GetMetricType(metric_type_str), info.index);
-    ++ready_count_;
+    set_field_ready(field_offset, true);
 }
 
 void
@@ -70,10 +70,10 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
         // write data under lock
         std::unique_lock lck(mutex_);
         update_row_count(info.row_count);
-        AssertInfo(columns_data_[field_offset.get()].empty(), "already exists");
-        columns_data_[field_offset.get()] = std::move(vec_data);
+        AssertInfo(field_datas_[field_offset.get()].empty(), "already exists");
+        field_datas_[field_offset.get()] = std::move(vec_data);
 
-        ++ready_count_;
+        set_field_ready(field_offset, true);
     }
 }
 
@@ -96,10 +96,10 @@ SegmentSealedImpl::size_per_chunk() const {
 SpanBase
 SegmentSealedImpl::chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) const {
     std::shared_lock lck(mutex_);
+    Assert(is_field_ready(field_offset));
     auto& field_meta = schema_->operator[](field_offset);
     auto element_sizeof = field_meta.get_sizeof();
-    Assert(is_all_ready());
-    SpanBase base(columns_data_[field_offset.get()].data(), row_count_opt_.value(), element_sizeof);
+    SpanBase base(field_datas_[field_offset.get()].data(), row_count_opt_.value(), element_sizeof);
     return base;
 }
 
@@ -143,13 +143,39 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
 }
 void
 SegmentSealedImpl::DropFieldData(const FieldId field_id) {
-    std::unique_lock lck(mutex_);
-    PanicInfo("unimplemented");
+    if (SystemProperty::Instance().IsSystem(field_id)) {
+        auto system_field_type = SystemProperty::Instance().GetSystemFieldType(field_id);
+        Assert(system_field_type == SystemFieldType::RowId);
+
+        std::unique_lock lck(mutex_);
+        --system_ready_count_;
+        auto row_ids = std::move(row_ids_);
+        lck.unlock();
+
+        row_ids.clear();
+    } else {
+        auto field_offset = schema_->get_offset(field_id);
+        auto& field_meta = schema_->operator[](field_offset);
+        Assert(!field_meta.is_vector());
+
+        std::unique_lock lck(mutex_);
+        set_field_ready(field_offset, false);
+        auto vec = std::move(field_datas_[field_offset.get()]);
+        lck.unlock();
+
+        vec.clear();
+    }
 }
+
 void
 SegmentSealedImpl::DropIndex(const FieldId field_id) {
+    Assert(!SystemProperty::Instance().IsSystem(field_id));
+    auto field_offset = schema_->get_offset(field_id);
+    auto& field_meta = schema_->operator[](field_offset);
+    Assert(field_meta.is_vector());
+
     std::unique_lock lck(mutex_);
-    PanicInfo("unimplemented");
+    vec_indexings_.drop_field_indexing(field_offset);
 }
 
 SegmentSealedPtr

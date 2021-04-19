@@ -18,7 +18,8 @@
 namespace milvus::segcore {
 class SegmentSealedImpl : public SegmentSealed {
  public:
-    explicit SegmentSealedImpl(SchemaPtr schema) : schema_(schema), columns_data_(schema->size()) {
+    explicit SegmentSealedImpl(SchemaPtr schema)
+        : schema_(schema), field_datas_(schema->size()), field_ready_bitset_(schema->size()) {
     }
     void
     LoadIndex(const LoadIndexInfo& info) override;
@@ -65,7 +66,7 @@ class SegmentSealedImpl : public SegmentSealed {
                    const int64_t* seg_offsets,
                    int64_t count,
                    void* output) const override {
-        Assert(is_all_ready());
+        Assert(is_system_field_ready());
         Assert(system_type == SystemFieldType::RowId);
         bulk_subscript_impl<int64_t>(row_ids_.data(), seg_offsets, count, output);
     }
@@ -74,10 +75,29 @@ class SegmentSealedImpl : public SegmentSealed {
     // where Vec is determined from field_offset
     void
     bulk_subscript(FieldOffset field_offset, const int64_t* seg_offsets, int64_t count, void* output) const override {
-        Assert(is_all_ready());
+        Assert(is_field_ready(field_offset));
         auto& field_meta = schema_->operator[](field_offset);
         Assert(field_meta.get_data_type() == DataType::INT64);
-        bulk_subscript_impl<int64_t>(columns_data_[field_offset.get()].data(), seg_offsets, count, output);
+        bulk_subscript_impl<int64_t>(field_datas_[field_offset.get()].data(), seg_offsets, count, output);
+    }
+
+    void
+    check_search(const query::Plan* plan) const override {
+        Assert(plan);
+        Assert(plan->extra_info_opt_.has_value());
+
+        if (!is_system_field_ready()) {
+            PanicInfo("System Field RowID is not loaded");
+        }
+
+        auto& request_fields = plan->extra_info_opt_.value().involved_fields_;
+        Assert(request_fields.size() == field_ready_bitset_.size());
+        auto absent_fields = request_fields - field_ready_bitset_;
+        if (absent_fields.any()) {
+            auto field_offset = FieldOffset(absent_fields.find_first());
+            auto& field_meta = schema_->operator[](field_offset);
+            PanicInfo("User Field(" + field_meta.get_name().get() + ") is not loaded");
+        }
     }
 
  private:
@@ -116,25 +136,25 @@ class SegmentSealedImpl : public SegmentSealed {
     }
 
     bool
-    is_all_ready() const {
-        // TODO: optimize here
-        // NOTE: including row_ids
-        if (!is_system_field_ready()) {
-            return false;
-        }
-        return ready_count_ == schema_->size();
+    is_field_ready(FieldOffset field_offset) const {
+        return field_ready_bitset_.test(field_offset.get());
+    }
+
+    void
+    set_field_ready(FieldOffset field_offset, bool flag = true) {
+        field_ready_bitset_[field_offset.get()] = flag;
     }
 
  private:
     // segment loading state
-    std::atomic<int> ready_count_ = 0;
+    boost::dynamic_bitset<> field_ready_bitset_;
     std::atomic<int> system_ready_count_ = 0;
     // segment datas
     // TODO: generate index for scalar
     std::optional<int64_t> row_count_opt_;
     std::map<FieldOffset, knowhere::IndexPtr> scalar_indexings_;
     SealedIndexingRecord vec_indexings_;
-    std::vector<aligned_vector<char>> columns_data_;
+    std::vector<aligned_vector<char>> field_datas_;
     aligned_vector<idx_t> row_ids_;
     SchemaPtr schema_;
 };

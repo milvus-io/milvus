@@ -12,8 +12,7 @@ import (
 
 type filterDmNode struct {
 	baseNode
-	ddMsg   *ddMsg
-	replica collectionReplica
+	ddMsg *ddMsg
 }
 
 func (fdmNode *filterDmNode) Name() string {
@@ -103,12 +102,6 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 }
 
 func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg) *msgstream.InsertMsg {
-	// TODO: open this check
-	// check if partition dm enable
-	//if enable, _ := fdmNode.replica.getEnablePartitionDM(msg.CollectionID, msg.PartitionID); !enable {
-	//	return nil
-	//}
-
 	// No dd record, do all insert requests.
 	records, ok := fdmNode.ddMsg.collectionRecords[msg.CollectionName]
 	if !ok {
@@ -161,7 +154,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	return msg
 }
 
-func newFilteredDmNode(replica collectionReplica) *filterDmNode {
+func newFilteredDmNode() *filterDmNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -171,6 +164,5 @@ func newFilteredDmNode(replica collectionReplica) *filterDmNode {
 
 	return &filterDmNode{
 		baseNode: baseNode,
-		replica:  replica,
 	}
 }

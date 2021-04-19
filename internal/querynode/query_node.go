@@ -136,7 +136,7 @@ func (node *QueryNode) Start() error {
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 	node.loadIndexService = newLoadIndexService(node.queryNodeLoopCtx, node.replica)
 	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, node.loadIndexService.fieldStatsChan)
-	node.segManager = newSegmentManager(node.queryNodeLoopCtx, node.replica, node.dataSyncService.dmStream, node.loadIndexService.loadIndexReqChan)
+	node.segManager = newSegmentManager(node.queryNodeLoopCtx, node.replica, node.loadIndexService.loadIndexReqChan)
 
 	// start services
 	go node.dataSyncService.start()
@@ -344,31 +344,14 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	segmentIDs := in.SegmentIDs
 	fieldIDs := in.FieldIDs
 
-	err := node.replica.enablePartitionDM(collectionID, partitionID)
-	if err != nil {
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    err.Error(),
-		}
-		return status, err
-	}
-
 	// segments are ordered before LoadSegments calling
 	if in.LastSegmentState.State == datapb.SegmentState_SegmentGrowing {
 		segmentNum := len(segmentIDs)
-		positions := in.LastSegmentState.StartPositions
-		err = node.segManager.seekSegment(positions)
-		if err != nil {
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			}
-			return status, err
-		}
+		node.segManager.seekSegment(segmentIDs[segmentNum-1])
 		segmentIDs = segmentIDs[:segmentNum-1]
 	}
 
-	err = node.segManager.loadSegment(collectionID, partitionID, segmentIDs, fieldIDs)
+	err := node.segManager.loadSegment(collectionID, partitionID, segmentIDs, fieldIDs)
 	if err != nil {
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -380,17 +363,6 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 }
 
 func (node *QueryNode) ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error) {
-	for _, id := range in.PartitionIDs {
-		err := node.replica.enablePartitionDM(in.CollectionID, id)
-		if err != nil {
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			}
-			return status, err
-		}
-	}
-
 	// release all fields in the segments
 	for _, id := range in.SegmentIDs {
 		err := node.segManager.releaseSegment(id)

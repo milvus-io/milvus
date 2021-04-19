@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strconv"
 
-	indexnodeclient "github.com/zilliztech/milvus-distributed/internal/indexnode/client"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -14,31 +13,52 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
-	writerclient "github.com/zilliztech/milvus-distributed/internal/writenode/client"
 )
 
 type segmentManager struct {
 	replica collectionReplica
 
-	dmStream         msgstream.MsgStream
 	loadIndexReqChan chan []msgstream.TsMsg
 
-	dataClient  *writerclient.Client
-	indexClient *indexnodeclient.Client
+	// TODO: replace by client instead of grpc client
+	dataClient         datapb.DataServiceClient
+	indexBuilderClient indexpb.IndexServiceClient
 
 	kv     kv.Base // minio kv
 	iCodec *storage.InsertCodec
 }
 
-func (s *segmentManager) seekSegment(positions []*internalPb.MsgPosition) error {
-	// TODO: open seek
-	//for _, position := range positions {
-	//	err := s.dmStream.Seek(position)
-	//	if err != nil {
-	//		return err
-	//	}
-	//}
-	return nil
+func newSegmentManager(ctx context.Context, replica collectionReplica, loadIndexReqChan chan []msgstream.TsMsg) *segmentManager {
+	bucketName := Params.MinioBucketName
+	option := &miniokv.Option{
+		Address:           Params.MinioEndPoint,
+		AccessKeyID:       Params.MinioAccessKeyID,
+		SecretAccessKeyID: Params.MinioSecretAccessKey,
+		UseSSL:            Params.MinioUseSSLStr,
+		BucketName:        bucketName,
+		CreateBucket:      true,
+	}
+
+	minioKV, err := miniokv.NewMinIOKV(ctx, option)
+	if err != nil {
+		panic(err)
+	}
+
+	return &segmentManager{
+		replica:          replica,
+		loadIndexReqChan: loadIndexReqChan,
+
+		// TODO: init clients
+		dataClient:         nil,
+		indexBuilderClient: nil,
+
+		kv:     minioKV,
+		iCodec: &storage.InsertCodec{},
+	}
+}
+
+func (s *segmentManager) seekSegment(segmentID UniqueID) {
+	// TODO: impl
 }
 
 func (s *segmentManager) loadSegment(collectionID UniqueID, partitionID UniqueID, segmentIDs []UniqueID, fieldIDs []int64) error {
@@ -61,11 +81,7 @@ func (s *segmentManager) loadSegment(collectionID UniqueID, partitionID UniqueID
 		}
 
 		targetFields := s.filterOutNeedlessFields(paths, srcFieldIDs, fieldIDs)
-		// replace segment
-		err = s.replica.removeSegment(segmentID)
-		if err != nil {
-			return err
-		}
+		// create segment
 		err = s.replica.addSegment(segmentID, partitionID, collectionID, segTypeSealed)
 		if err != nil {
 			return err
@@ -102,25 +118,16 @@ func (s *segmentManager) getInsertBinlogPaths(segmentID UniqueID) ([]*internalPb
 		SegmentID: segmentID,
 	}
 
-	pathResponse, err := s.dataClient.GetInsertBinlogPaths(insertBinlogPathRequest.SegmentID)
+	pathResponse, err := s.dataClient.GetInsertBinlogPaths(context.TODO(), insertBinlogPathRequest)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	//if len(pathResponse.FieldIDs) != len(pathResponse.Paths) {
-	//	return nil, nil, errors.New("illegal InsertBinlogPathsResponse")
-	//}
-
-	fieldIDs := make([]int64, 0)
-	paths := make([]*internalPb.StringList, 0)
-	for k, v := range pathResponse {
-		fieldIDs = append(fieldIDs, k)
-		paths = append(paths, &internalPb.StringList{
-			Values: v,
-		})
+	if len(pathResponse.FieldIDs) != len(pathResponse.Paths) {
+		return nil, nil, errors.New("illegal InsertBinlogPathsResponse")
 	}
 
-	return paths, fieldIDs, nil
+	return pathResponse.Paths, pathResponse.FieldIDs, nil
 }
 
 func (s *segmentManager) filterOutNeedlessFields(paths []*internalPb.StringList, srcFieldIDS []int64, dstFields []int64) map[int64]*internalPb.StringList {
@@ -227,15 +234,12 @@ func (s *segmentManager) getIndexPaths(indexID UniqueID) ([]string, error) {
 	indexFilePathRequest := &indexpb.IndexFilePathsRequest{
 		IndexIDs: []UniqueID{indexID},
 	}
-	pathResponse, err := s.indexClient.GetIndexFilePaths(indexFilePathRequest.IndexIDs)
-	//if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-	//	return nil, err
-	//}
-	if err != nil {
+	pathResponse, err := s.indexBuilderClient.GetIndexFilePaths(context.TODO(), indexFilePathRequest)
+	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
 		return nil, err
 	}
 
-	return pathResponse[0], nil
+	return pathResponse.FilePaths[0].IndexFilePaths, nil
 }
 
 func (s *segmentManager) getIndexParam() (indexParam, error) {
@@ -288,43 +292,4 @@ func (s *segmentManager) sendLoadIndex(indexPaths []string,
 
 	messages := []msgstream.TsMsg{loadIndexMsg}
 	s.loadIndexReqChan <- messages
-}
-
-func newSegmentManager(ctx context.Context, replica collectionReplica, dmStream msgstream.MsgStream, loadIndexReqChan chan []msgstream.TsMsg) *segmentManager {
-	bucketName := Params.MinioBucketName
-	option := &miniokv.Option{
-		Address:           Params.MinioEndPoint,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSLStr,
-		BucketName:        bucketName,
-		CreateBucket:      true,
-	}
-
-	minioKV, err := miniokv.NewMinIOKV(ctx, option)
-	if err != nil {
-		panic(err)
-	}
-
-	dataClient, err := writerclient.NewWriterClient(Params.ETCDAddress, Params.MetaRootPath, Params.WriteNodeSegKvSubPath, nil)
-	if err != nil {
-		panic(err)
-	}
-
-	indexClient, err := indexnodeclient.NewBuildIndexClient(ctx, Params.IndexBuilderAddress)
-	if err != nil {
-		panic(err)
-	}
-
-	return &segmentManager{
-		replica:          replica,
-		dmStream:         dmStream,
-		loadIndexReqChan: loadIndexReqChan,
-
-		dataClient:  dataClient,
-		indexClient: indexClient,
-
-		kv:     minioKV,
-		iCodec: &storage.InsertCodec{},
-	}
 }

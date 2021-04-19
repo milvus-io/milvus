@@ -48,6 +48,7 @@ SegmentInternalInterface::Search(const query::Plan* plan,
                                  const Timestamp* timestamps,
                                  int64_t num_groups) const {
     std::shared_lock lck(mutex_);
+    check_search(plan);
     Assert(num_groups == 1);
     query::ExecPlanNodeVisitor visitor(*this, timestamps[0], *placeholder_groups[0]);
     auto results = visitor.get_moved_result(*plan->plan_node_);

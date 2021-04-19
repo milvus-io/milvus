@@ -1,4 +1,4 @@
-package rmqms
+package rmqmsgstream
 
 import (
 	"context"
