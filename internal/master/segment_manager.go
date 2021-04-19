@@ -78,6 +78,9 @@ func (segMgr *SegmentManager) handleSegmentStat(segStats *internalpb.SegmentStat
 	segMeta.MemSize = segStats.MemorySize
 
 	if segStats.MemorySize > int64(segMgr.segmentThresholdFactor*segMgr.segmentThreshold) {
+		if err := segMgr.metaTable.UpdateSegment(segMeta); err != nil {
+			return err
+		}
 		return segMgr.closeSegment(segMeta)
 	}
 	return segMgr.metaTable.UpdateSegment(segMeta)
@@ -104,7 +107,7 @@ func (segMgr *SegmentManager) closeSegment(segMeta *etcdpb.SegmentMeta) error {
 		segMeta.CloseTime = ts
 	}
 
-	err := segMgr.metaTable.CloseSegment(segMeta.SegmentID, segMeta.GetCloseTime(), segMeta.NumRows, segMeta.MemSize)
+	err := segMgr.metaTable.CloseSegment(segMeta.SegmentID, segMeta.GetCloseTime())
 	if err != nil {
 		return err
 	}
