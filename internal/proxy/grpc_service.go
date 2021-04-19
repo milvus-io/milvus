@@ -595,7 +595,48 @@ func (p *Proxy) ShowPartitions(ctx context.Context, req *servicepb.CollectionNam
 }
 
 func (p *Proxy) CreateIndex(ctx context.Context, indexParam *servicepb.IndexParam) (*commonpb.Status, error) {
-	return nil, nil
+	log.Println("create index: ", indexParam.IndexName)
+	cit := &CreateIndexTask{
+		Condition: NewTaskCondition(ctx),
+		CreateIndexRequest: internalpb.CreateIndexRequest{
+			MsgType:        internalpb.MsgType_kCreateIndex,
+			CollectionName: indexParam.CollectionName,
+			FieldName:      indexParam.FieldName,
+			IndexName:      indexParam.IndexName,
+			ExtraParams:    indexParam.ExtraParams,
+		},
+		masterClient: p.masterClient,
+	}
+
+	var cancel func()
+	cit.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
+
+	fn := func() error {
+		select {
+		case <-ctx.Done():
+			return errors.New("create index timeout")
+		default:
+			return p.sched.DdQueue.Enqueue(cit)
+		}
+	}
+	err := fn()
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	err = cit.WaitToFinish()
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	return cit.result, nil
 }
 
 func (p *Proxy) DescribeIndex(context.Context, *servicepb.IndexParam) (*servicepb.DescribeIndexResponse, error) {
