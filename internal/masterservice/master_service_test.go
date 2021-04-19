@@ -15,6 +15,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
@@ -535,7 +536,7 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		req := &milvuspb.ShowPartitionsRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_ShowCollections,
+				MsgType:   commonpb.MsgType_ShowPartitions,
 				MsgID:     160,
 				Timestamp: 160,
 				SourceID:  160,
@@ -953,7 +954,525 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, collArray[2], "testColl")
 	})
 
+	t.Run("context_cancel", func(t *testing.T) {
+		ctx2, cancel2 := context.WithTimeout(ctx, time.Millisecond*100)
+		defer cancel2()
+		time.Sleep(time.Millisecond * 150)
+		st, err := core.CreateCollection(ctx2, &milvuspb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreateCollection,
+				MsgID:     1000,
+				Timestamp: 1000,
+				SourceID:  1000,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_Success)
+
+		st, err = core.DropCollection(ctx2, &milvuspb.DropCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DropCollection,
+				MsgID:     1001,
+				Timestamp: 1001,
+				SourceID:  1001,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp1, err := core.HasCollection(ctx2, &milvuspb.HasCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_HasCollection,
+				MsgID:     1002,
+				Timestamp: 1002,
+				SourceID:  1002,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp1.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp2, err := core.DescribeCollection(ctx2, &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DescribeCollection,
+				MsgID:     1003,
+				Timestamp: 1003,
+				SourceID:  1003,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp2.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp3, err := core.ShowCollections(ctx2, &milvuspb.ShowCollectionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_ShowCollections,
+				MsgID:     1004,
+				Timestamp: 1004,
+				SourceID:  1004,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp3.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		st, err = core.CreatePartition(ctx2, &milvuspb.CreatePartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreatePartition,
+				MsgID:     1005,
+				Timestamp: 1005,
+				SourceID:  1005,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_Success)
+
+		st, err = core.DropPartition(ctx2, &milvuspb.DropPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DropPartition,
+				MsgID:     1006,
+				Timestamp: 1006,
+				SourceID:  1006,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp4, err := core.HasPartition(ctx2, &milvuspb.HasPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_HasPartition,
+				MsgID:     1007,
+				Timestamp: 1007,
+				SourceID:  1007,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp4.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp5, err := core.ShowPartitions(ctx2, &milvuspb.ShowPartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_ShowPartitions,
+				MsgID:     1008,
+				Timestamp: 1008,
+				SourceID:  1008,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp5.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		st, err = core.CreateIndex(ctx2, &milvuspb.CreateIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreateIndex,
+				MsgID:     1009,
+				Timestamp: 1009,
+				SourceID:  1009,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp6, err := core.DescribeIndex(ctx2, &milvuspb.DescribeIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DescribeIndex,
+				MsgID:     1010,
+				Timestamp: 1010,
+				SourceID:  1010,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp6.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		st, err = core.DropIndex(ctx2, &milvuspb.DropIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DropIndex,
+				MsgID:     1011,
+				Timestamp: 1011,
+				SourceID:  1011,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp7, err := core.DescribeSegment(ctx2, &milvuspb.DescribeSegmentRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DescribeSegment,
+				MsgID:     1012,
+				Timestamp: 1012,
+				SourceID:  1012,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp7.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp8, err := core.ShowSegments(ctx2, &milvuspb.ShowSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_ShowSegments,
+				MsgID:     1013,
+				Timestamp: 1013,
+				SourceID:  1013,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp8.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+	})
+
+	t.Run("undefine req type", func(t *testing.T) {
+		st, err := core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Undefined,
+				MsgID:     2000,
+				Timestamp: 2000,
+				SourceID:  2000,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_Success)
+
+		st, err = core.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Undefined,
+				MsgID:     2001,
+				Timestamp: 2001,
+				SourceID:  2001,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp1, err := core.HasCollection(ctx, &milvuspb.HasCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Undefined,
+				MsgID:     2002,
+				Timestamp: 2002,
+				SourceID:  2002,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp1.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp2, err := core.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Undefined,
+				MsgID:     2003,
+				Timestamp: 2003,
+				SourceID:  2003,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp2.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp3, err := core.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Undefined,
+				MsgID:     2004,
+				Timestamp: 2004,
+				SourceID:  2004,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp3.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		st, err = core.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Undefined,
+				MsgID:     2005,
+				Timestamp: 2005,
+				SourceID:  2005,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_Success)
+
+		st, err = core.DropPartition(ctx, &milvuspb.DropPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Undefined,
+				MsgID:     2006,
+				Timestamp: 2006,
+				SourceID:  2006,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp4, err := core.HasPartition(ctx, &milvuspb.HasPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Undefined,
+				MsgID:     2007,
+				Timestamp: 2007,
+				SourceID:  2007,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp4.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp5, err := core.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Undefined,
+				MsgID:     2008,
+				Timestamp: 2008,
+				SourceID:  2008,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp5.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		st, err = core.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Undefined,
+				MsgID:     2009,
+				Timestamp: 2009,
+				SourceID:  2009,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp6, err := core.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Undefined,
+				MsgID:     2010,
+				Timestamp: 2010,
+				SourceID:  2010,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp6.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		st, err = core.DropIndex(ctx, &milvuspb.DropIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Undefined,
+				MsgID:     2011,
+				Timestamp: 2011,
+				SourceID:  2011,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp7, err := core.DescribeSegment(ctx, &milvuspb.DescribeSegmentRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Undefined,
+				MsgID:     2012,
+				Timestamp: 2012,
+				SourceID:  2012,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp7.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp8, err := core.ShowSegments(ctx, &milvuspb.ShowSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Undefined,
+				MsgID:     2013,
+				Timestamp: 2013,
+				SourceID:  2013,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp8.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+	})
+
+	t.Run("alloc time tick", func(t *testing.T) {
+		req := &masterpb.AllocTimestampRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Undefined,
+				MsgID:     3000,
+				Timestamp: 3000,
+				SourceID:  3000,
+			},
+			Count: 1,
+		}
+		rsp, err := core.AllocTimestamp(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, uint32(1), rsp.Count)
+		assert.NotZero(t, rsp.Timestamp)
+	})
+
+	t.Run("alloc id", func(t *testing.T) {
+		req := &masterpb.AllocIDRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Undefined,
+				MsgID:     3001,
+				Timestamp: 3001,
+				SourceID:  3001,
+			},
+			Count: 1,
+		}
+		rsp, err := core.AllocID(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, uint32(1), rsp.Count)
+		assert.NotZero(t, rsp.ID)
+	})
+
+	t.Run("get_channels", func(t *testing.T) {
+		_, err := core.GetTimeTickChannel(ctx)
+		assert.Nil(t, err)
+		_, err = core.GetDdChannel(ctx)
+		assert.Nil(t, err)
+		_, err = core.GetStatisticsChannel(ctx)
+		assert.Nil(t, err)
+	})
+
 	err = core.Stop()
 	assert.Nil(t, err)
+	st, err := core.GetComponentStates(ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, st.Status.ErrorCode, commonpb.ErrorCode_Success)
+	assert.NotEqual(t, st.State.StateCode, internalpb.StateCode_Healthy)
 
+	t.Run("state_not_healthy", func(t *testing.T) {
+		st, err := core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreateCollection,
+				MsgID:     4000,
+				Timestamp: 4000,
+				SourceID:  4000,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_Success)
+
+		st, err = core.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DropCollection,
+				MsgID:     4001,
+				Timestamp: 4001,
+				SourceID:  4001,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp1, err := core.HasCollection(ctx, &milvuspb.HasCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_HasCollection,
+				MsgID:     4002,
+				Timestamp: 4002,
+				SourceID:  4002,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp1.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp2, err := core.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DescribeCollection,
+				MsgID:     4003,
+				Timestamp: 4003,
+				SourceID:  4003,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp2.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp3, err := core.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_ShowCollections,
+				MsgID:     4004,
+				Timestamp: 4004,
+				SourceID:  4004,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp3.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		st, err = core.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreatePartition,
+				MsgID:     4005,
+				Timestamp: 4005,
+				SourceID:  4005,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_Success)
+
+		st, err = core.DropPartition(ctx, &milvuspb.DropPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DropPartition,
+				MsgID:     4006,
+				Timestamp: 4006,
+				SourceID:  4006,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp4, err := core.HasPartition(ctx, &milvuspb.HasPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_HasPartition,
+				MsgID:     4007,
+				Timestamp: 4007,
+				SourceID:  4007,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp4.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp5, err := core.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_ShowPartitions,
+				MsgID:     4008,
+				Timestamp: 4008,
+				SourceID:  4008,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp5.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		st, err = core.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreateIndex,
+				MsgID:     4009,
+				Timestamp: 4009,
+				SourceID:  4009,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp6, err := core.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DescribeIndex,
+				MsgID:     4010,
+				Timestamp: 4010,
+				SourceID:  4010,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp6.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		st, err = core.DropIndex(ctx, &milvuspb.DropIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DropIndex,
+				MsgID:     4011,
+				Timestamp: 4011,
+				SourceID:  4011,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp7, err := core.DescribeSegment(ctx, &milvuspb.DescribeSegmentRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DescribeSegment,
+				MsgID:     4012,
+				Timestamp: 4012,
+				SourceID:  4012,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp7.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		rsp8, err := core.ShowSegments(ctx, &milvuspb.ShowSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_ShowSegments,
+				MsgID:     4013,
+				Timestamp: 4013,
+				SourceID:  4013,
+			},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp8.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+	})
 }
