@@ -55,6 +55,8 @@ func TestEventWriter(t *testing.T) {
 	err = insertEvent.AddInt32ToPayload([]int32{1})
 	assert.NotNil(t, err)
 	buffer := new(bytes.Buffer)
+	insertEvent.SetStartTimestamp(100)
+	insertEvent.SetEndTimestamp(200)
 	err = insertEvent.Write(buffer)
 	assert.Nil(t, err)
 	length, err = insertEvent.GetMemoryUsageInBytes()
