@@ -14,6 +14,7 @@
 #include "server/ValidationUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
+#include "server/MetaWrapper.h"
 
 #include <memory>
 #include <unordered_map>
@@ -36,7 +37,7 @@ CountEntitiesReq::OnExecute() {
     try {
         std::string hdr = "CountEntitiesReq(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
-
+        row_count_ = MetaWrapper::GetInstance().CountCollection(collection_name_);
 
         rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {

@@ -31,6 +31,9 @@ class MetaWrapper {
   Status
   SyncMeta();
 
+  int64_t
+  CountCollection(const std::string& collection_name);
+
  private:
   bool IsCollectionMetaKey(const std::string &key);
 

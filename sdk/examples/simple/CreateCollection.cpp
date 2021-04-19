@@ -18,7 +18,7 @@ int main(int argc , char**argv) {
   client.Connect(connect_param);
 
   milvus::Status stat;
-  const std::string collectin_name = "collection0";
+  const std::string collectin_name = "collection1";
 
   // Create
   milvus::FieldPtr field_ptr1 = std::make_shared<milvus::Field>();
