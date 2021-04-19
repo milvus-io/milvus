@@ -1,10 +1,8 @@
 package reader
 
 import (
-	"errors"
 	"fmt"
 	"log"
-	"strconv"
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -12,7 +10,7 @@ import (
 
 type insertNode struct {
 	BaseNode
-	segmentsMap *map[int64]*Segment
+	container *container
 }
 
 type InsertData struct {
@@ -62,7 +60,7 @@ func (iNode *insertNode) Operate(in []*Msg) []*Msg {
 
 	// 2. do preInsert
 	for segmentID := range insertData.insertRecords {
-		var targetSegment, err = iNode.getSegmentBySegmentID(segmentID)
+		var targetSegment, err = (*iNode.container).getSegmentByID(segmentID)
 		if err != nil {
 			log.Println("preInsert failed")
 			// TODO: add error handling
@@ -89,18 +87,8 @@ func (iNode *insertNode) Operate(in []*Msg) []*Msg {
 	return []*Msg{&res}
 }
 
-func (iNode *insertNode) getSegmentBySegmentID(segmentID int64) (*Segment, error) {
-	targetSegment, ok := (*iNode.segmentsMap)[segmentID]
-
-	if !ok {
-		return nil, errors.New("cannot found segment with id = " + strconv.FormatInt(segmentID, 10))
-	}
-
-	return targetSegment, nil
-}
-
 func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *sync.WaitGroup) {
-	var targetSegment, err = iNode.getSegmentBySegmentID(segmentID)
+	var targetSegment, err = (*iNode.container).getSegmentByID(segmentID)
 	if err != nil {
 		log.Println("cannot find segment:", segmentID)
 		// TODO: add error handling
@@ -123,13 +111,13 @@ func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *syn
 	wg.Done()
 }
 
-func newInsertNode(segmentsMap *map[int64]*Segment) *insertNode {
+func newInsertNode(container *container) *insertNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &insertNode{
-		BaseNode:    baseNode,
-		segmentsMap: segmentsMap,
+		BaseNode:  baseNode,
+		container: container,
 	}
 }
