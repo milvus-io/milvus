@@ -21,7 +21,7 @@
 | AllocTimestamp     | allocate a batch of consecutive timestamps                   |
 | AllocID            | allocate a batch of consecutive IDs                          |
 | AssignSegmentID    | assign segment id to insert rows (master determines which segment these rows belong to) |
-|                    |                                                              |
+| GetSysConfigs      | get system configurations                                    |
 |                    |                                                              |
 
 
@@ -335,9 +335,13 @@ message QueryNodeStats {
 
 
 ```go
+type assignment struct {
+	MemSize    int64
+	AssignTime time.Time
+}
+
 type segmentStatus struct {
-  NumRows int64
-  MemSize int64
+  assignments []*assignment
 }
 
 type collectionStatus struct {
@@ -349,19 +353,65 @@ type SegmentManagement struct {
   collStatus map[UniqueID]*collectionStatus
 }
 
-func (segMgr *SegmentManagement) Start() error
-func (segMgr *SegmentManagement) Close() error
-
-func NewSegmentManagement(ctx context.Context, statsStream *MsgStream) *SegmentManagement
+func NewSegmentManagement(ctx context.Context) *SegmentManagement
 ```
 
 
 
 ###### 10.7.1 Assign Segment ID to Inserted Rows
 
+Master receives *AssignSegIDRequest* which contains a list of *SegIDRequest(count, channelID, collectionName, partitionTag)* from Proxy. Segment Manager will assign the opened segments or open a new segment if there is no enough space, and Segment Manager will record the allocated space which can be reallocated after a expire duration.
+
 ```go
-func (segMgr *SegmentManagement) AssignSegmentID(collID UniqueID, count int64) (UniqueID, error)
+func (segMgr *SegmentManager) AssignSegmentID(segIDReq []*internalpb.SegIDRequest) ([]*internalpb.SegIDAssignment, error)
+
 ```
 
 
+
+#### 10.8 System Config
+
+```protobuf
+// examples of keys:
+// "/pulsar/ip"
+// "/pulsar/port"
+// examples of key_prefixes:
+// "/proxy"
+// "/msg_stream/insert"
+
+message SysConfigRequest {
+	repeated string keys = 1;
+	repeated string key_prefixes = 2;
+}
+
+message SysConfigResponse {
+	repeated string keys = 1;
+	repeated string values = 2;
+}
+```
+
+
+
+```go
+type SysConfig struct {
+  etcdKV *etcd
+  etcdPathPrefix string
+}
+
+func (conf *SysConfig) InitFromFile(filePath string) (error)
+func (conf *SysConfig) GetByPrefix(keyPrefix string) ([]string, error)
+func (conf *SysConfig) Get(keys []string) ([]string, error)
+```
+
+
+
+configuration examples in etcd:
+
+```
+key: root_path/config/master/address
+value: "localhost"
+
+key: root_path/config/proxy/timezone
+value: "UTC+8"
+```
 
