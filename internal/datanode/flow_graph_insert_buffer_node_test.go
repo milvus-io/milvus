@@ -10,9 +10,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -34,18 +32,10 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 		ctx = context.Background()
 	}
 
-	ddChan := make(chan *ddlFlushSyncMsg, 10)
-	defer close(ddChan)
-	insertChan := make(chan *insertFlushSyncMsg, 10)
-	defer close(insertChan)
-
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
 	require.NoError(t, err)
 	Params.MetaRootPath = testPath
-	fService := newFlushSyncService(ctx, ddChan, insertChan)
-	assert.Equal(t, testPath, fService.metaTable.client.(*etcdkv.EtcdKV).GetPath("."))
-	go fService.start()
 
 	collMeta := newMeta()
 	schemaBlob := proto.MarshalTextString(collMeta.Schema)
@@ -56,7 +46,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	require.NoError(t, err)
 
 	// Params.FlushInsertBufSize = 2
-	iBNode := newInsertBufferNode(ctx, insertChan, replica)
+	iBNode := newInsertBufferNode(ctx, newMetaTable(), replica)
 	inMsg := genInsertMsg()
 	var iMsg flowgraph.Msg = &inMsg
 	iBNode.Operate([]*flowgraph.Msg{&iMsg})
@@ -148,7 +138,7 @@ func genInsertMsg() insertMsg {
 
 	var iMsg = &insertMsg{
 		insertMessages: make([]*msgstream.InsertMsg, 0),
-		flushMessages:  make([]*msgstream.FlushMsg, 0),
+		flushMessages:  make([]*flushMsg, 0),
 		timeRange: TimeRange{
 			timestampMin: timeRange.timestampMin,
 			timestampMax: timeRange.timestampMax,
@@ -203,25 +193,14 @@ func genInsertMsg() insertMsg {
 		iMsg.insertMessages = append(iMsg.insertMessages, msg)
 	}
 
-	var fmsg msgstream.FlushMsg = msgstream.FlushMsg{
-		BaseMsg: msgstream.BaseMsg{
-			HashValues: []uint32{
-				uint32(10),
-			},
-		},
-		FlushMsg: internalpb2.FlushMsg{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kFlush,
-				MsgID:     1,
-				Timestamp: 2000,
-				SourceID:  1,
-			},
-			SegmentID:    UniqueID(1),
-			CollectionID: UniqueID(1),
-			PartitionTag: "default",
-		},
+	fmsg := &flushMsg{
+		msgID:        1,
+		Timestamp:    2000,
+		segmentIDs:   []UniqueID{1},
+		collectionID: UniqueID(1),
 	}
-	iMsg.flushMessages = append(iMsg.flushMessages, &fmsg)
+
+	iMsg.flushMessages = append(iMsg.flushMessages, fmsg)
 	return *iMsg
 
 }

@@ -1,4 +1,4 @@
-
+// GOOSE TODO remove this proto file
 syntax = "proto3";
 
 package milvus.proto.service;

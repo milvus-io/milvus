@@ -20,11 +20,9 @@ func newDmInputNode(ctx context.Context) *flowgraph.InputNode {
 
 	insertStream := pulsarms.NewPulsarTtMsgStream(ctx, receiveBufSize)
 
-	// TODO could panic of nil pointer
 	insertStream.SetPulsarClient(msgStreamURL)
 	unmarshalDispatcher := util.NewUnmarshalDispatcher()
 
-	// TODO could panic of nil pointer
 	insertStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
 
 	var stream msgstream.MsgStream = insertStream

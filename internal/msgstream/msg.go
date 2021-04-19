@@ -105,6 +105,7 @@ func (it *InsertMsg) Unmarshal(input []byte) (TsMsg, error) {
 }
 
 /////////////////////////////////////////Flush//////////////////////////////////////////
+// GOOSE TODO remove this
 type FlushMsg struct {
 	BaseMsg
 	internalpb2.FlushMsg

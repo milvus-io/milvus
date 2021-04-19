@@ -21,7 +21,7 @@ type (
 		collectionRecords map[string][]metaOperateRecord
 		// TODO: use partition id
 		partitionRecords map[string][]metaOperateRecord
-		flushMessages    []*msgstream.FlushMsg
+		flushMessages    []*flushMsg
 		gcRecord         *gcRecord
 		timeRange        TimeRange
 	}
@@ -33,7 +33,7 @@ type (
 
 	insertMsg struct {
 		insertMessages []*msgstream.InsertMsg
-		flushMessages  []*msgstream.FlushMsg
+		flushMessages  []*flushMsg
 		gcRecord       *gcRecord
 		timeRange      TimeRange
 	}
@@ -50,6 +50,13 @@ type (
 
 	gcRecord struct {
 		collections []UniqueID
+	}
+
+	flushMsg struct {
+		msgID        UniqueID
+		Timestamp    Timestamp
+		segmentIDs   []UniqueID
+		collectionID UniqueID
 	}
 )
 

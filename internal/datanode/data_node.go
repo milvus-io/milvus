@@ -8,15 +8,17 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go"
 	"github.com/uber/jaeger-client-go/config"
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 type DataNode struct {
-	ctx              context.Context
-	DataNodeID       uint64
-	dataSyncService  *dataSyncService
-	flushSyncService *flushSyncService
-	metaService      *metaService
-	replica          collectionReplica
+	ctx             context.Context
+	DataNodeID      uint64
+	dataSyncService *dataSyncService
+	metaService     *metaService
+
+	replica collectionReplica
 
 	tracer opentracing.Tracer
 	closer io.Closer
@@ -31,19 +33,19 @@ func NewDataNode(ctx context.Context, dataNodeID uint64) *DataNode {
 	}
 
 	node := &DataNode{
-		ctx:              ctx,
-		DataNodeID:       dataNodeID,
-		dataSyncService:  nil,
-		flushSyncService: nil,
-		metaService:      nil,
-		replica:          replica,
+		ctx:             ctx,
+		DataNodeID:      dataNodeID,
+		dataSyncService: nil,
+		// metaService:     nil,
+		replica: replica,
 	}
 
 	return node
 }
 
-func Init() {
+func (node *DataNode) Init() error {
 	Params.Init()
+	return nil
 }
 
 func (node *DataNode) Start() error {
@@ -68,21 +70,34 @@ func (node *DataNode) Start() error {
 
 	// TODO GOOSE Init Size??
 	chanSize := 100
-	ddChan := make(chan *ddlFlushSyncMsg, chanSize)
-	insertChan := make(chan *insertFlushSyncMsg, chanSize)
+	flushChan := make(chan *flushMsg, chanSize)
 
-	node.flushSyncService = newFlushSyncService(node.ctx, ddChan, insertChan)
-	node.dataSyncService = newDataSyncService(node.ctx, ddChan, insertChan, node.replica)
+	node.dataSyncService = newDataSyncService(node.ctx, flushChan, node.replica)
 	node.metaService = newMetaService(node.ctx, node.replica)
 
 	go node.dataSyncService.start()
-	go node.flushSyncService.start()
+	// go node.flushSyncService.start()
 	node.metaService.start()
 
 	return nil
 }
 
-func (node *DataNode) Close() {
+func (node *DataNode) WatchDmChannels(in *datapb.WatchDmChannelRequest) error {
+	// GOOSE TODO: Implement me
+	return nil
+}
+
+func (node *DataNode) GetComponentStates() (*internalpb2.ComponentStates, error) {
+	// GOOSE TODO: Implement me
+	return nil, nil
+}
+
+func (node *DataNode) FlushSegments(in *datapb.FlushSegRequest) error {
+	// GOOSE TODO: Implement me
+	return nil
+}
+
+func (node *DataNode) Stop() error {
 	<-node.ctx.Done()
 
 	// close services
@@ -93,5 +108,6 @@ func (node *DataNode) Close() {
 	if node.closer != nil {
 		node.closer.Close()
 	}
+	return nil
 
 }

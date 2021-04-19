@@ -16,6 +16,7 @@ import (
 	oplog "github.com/opentracing/opentracing-go/log"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -38,14 +39,17 @@ type (
 
 	insertBufferNode struct {
 		BaseNode
-		insertBuffer                 *insertBuffer
-		minIOKV                      kv.Base
-		minioPrifex                  string
-		idAllocator                  *allocator.IDAllocator
-		outCh                        chan *insertFlushSyncMsg
-		pulsarDataNodeTimeTickStream msgstream.MsgStream
-		segmentStatisticsStream      msgstream.MsgStream
-		replica                      collectionReplica
+		insertBuffer *insertBuffer
+		replica      collectionReplica
+		flushMeta    *metaTable
+
+		minIOKV     kv.Base
+		minioPrefix string
+
+		idAllocator *allocator.IDAllocator
+
+		timeTickStream          msgstream.MsgStream
+		segmentStatisticsStream msgstream.MsgStream
 	}
 
 	insertBuffer struct {
@@ -101,11 +105,14 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 		// TODO: add error handling
 	}
 
+	// Updating segment statistics
 	uniqueSeg := make(map[UniqueID]bool)
 	for _, msg := range iMsg.insertMessages {
 		currentSegID := msg.GetSegmentID()
+		collName := msg.GetCollectionName()
+		partitionName := msg.GetPartitionName()
 		if !ibNode.replica.hasSegment(currentSegID) {
-			err := ibNode.replica.addSegment(currentSegID)
+			err := ibNode.replica.addSegment(currentSegID, collName, partitionName)
 			if err != nil {
 				log.Println("Error: add segment error")
 			}
@@ -164,7 +171,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 			continue
 		}
 
-		collectionID := collection.ID()
+		// collectionID := collection.ID() GOOSE TODO remove
 		collSchema := collection.schema
 		// 1.2 Get Fields
 		var pos int = 0 // Record position of blob
@@ -410,73 +417,12 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 		span.LogFields(oplog.String("generate binlogs", "generate binlogs"))
 		if ibNode.insertBuffer.full(currentSegID) {
 			log.Printf(". Insert Buffer full, auto flushing (%v) rows of data...", ibNode.insertBuffer.size(currentSegID))
-			// partitionTag -> partitionID
-			partitionTag := msg.GetPartitionName()
-			partitionID, err := typeutil.Hash32String(partitionTag)
+
+			err = ibNode.flushSegment(currentSegID, msg.GetPartitionName(), collection.ID())
 			if err != nil {
-				log.Println("partitionTag to partitionID wrong")
-				// TODO GOOSE add error handler
-			}
-			collMeta := &etcdpb.CollectionMeta{
-				Schema: collSchema,
-				ID:     collectionID,
-			}
-			inCodec := storage.NewInsertCodec(collMeta)
-
-			// buffer data to binlogs
-			binLogs, err := inCodec.Serialize(partitionID,
-				currentSegID, ibNode.insertBuffer.insertData[currentSegID])
-
-			if err != nil {
-				log.Println("generate binlog wrong: ", err)
-			}
-
-			// clear buffer
-			delete(ibNode.insertBuffer.insertData, currentSegID)
-			log.Println(".. Clearing buffer")
-
-			//   1.5.2 binLogs -> minIO/S3
-			collIDStr := strconv.FormatInt(collectionID, 10)
-			partitionIDStr := strconv.FormatInt(partitionID, 10)
-			segIDStr := strconv.FormatInt(currentSegID, 10)
-			keyPrefix := path.Join(ibNode.minioPrifex, collIDStr, partitionIDStr, segIDStr)
-
-			log.Printf(".. Saving (%v) binlogs to MinIO ...", len(binLogs))
-			for index, blob := range binLogs {
-				uid, err := ibNode.idAllocator.AllocOne()
-				if err != nil {
-					log.Println("Allocate Id failed")
-					// GOOSE TODO error handler
-				}
-
-				key := path.Join(keyPrefix, blob.Key, strconv.FormatInt(uid, 10))
-				err = ibNode.minIOKV.Save(key, string(blob.Value[:]))
-				if err != nil {
-					log.Println("Save to MinIO failed")
-					// GOOSE TODO error handler
-				}
-
-				fieldID, err := strconv.ParseInt(blob.Key, 10, 32)
-				if err != nil {
-					log.Println("string to fieldID wrong")
-					// GOOSE TODO error handler
-				}
-
-				inBinlogMsg := &insertFlushSyncMsg{
-					flushCompleted: false,
-					insertBinlogPathMsg: insertBinlogPathMsg{
-						ts:      iMsg.timeRange.timestampMax,
-						segID:   currentSegID,
-						fieldID: fieldID,
-						paths:   []string{key},
-					},
-				}
-
-				log.Println("... Appending binlog paths ...", index)
-				ibNode.outCh <- inBinlogMsg
+				log.Printf("flush segment (%v) fail: %v", currentSegID, err)
 			}
 		}
-		span.Finish()
 	}
 
 	if len(iMsg.insertMessages) > 0 {
@@ -491,96 +437,28 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 		}
 	}
 
-	// iMsg is Flush() msg from master
+	// iMsg is Flush() msg from dataservice
 	//   1. insertBuffer(not empty) -> binLogs -> minIO/S3
 	for _, msg := range iMsg.flushMessages {
-		currentSegID := msg.GetSegmentID()
-		flushTs := msg.Base.GetTimestamp()
-		partitionTag := msg.GetPartitionTag()
-		collectionID := msg.GetCollectionID()
-		log.Printf(". Receiving flush message segID(%v)...", currentSegID)
-
-		if ibNode.insertBuffer.size(currentSegID) > 0 {
-			log.Println(".. Buffer not empty, flushing ...")
-			collSchema, err := ibNode.getCollectionSchemaByID(collectionID)
-			if err != nil {
-				// GOOSE TODO add error handler
-				log.Println("aaa, Get meta wrong: ", err)
-			}
-			collMeta := &etcdpb.CollectionMeta{
-				Schema: collSchema,
-				ID:     collectionID,
-			}
-			inCodec := storage.NewInsertCodec(collMeta)
-
-			// partitionTag -> partitionID
-			partitionID, err := typeutil.Hash32String(partitionTag)
-			if err != nil {
-				// GOOSE TODO add error handler
-				log.Println("partitionTag to partitionID Wrong: ", err)
-			}
-
-			// buffer data to binlogs
-			binLogs, err := inCodec.Serialize(partitionID,
-				currentSegID, ibNode.insertBuffer.insertData[currentSegID])
-			if err != nil {
-				log.Println("generate binlog wrong: ", err)
-			}
-
-			// clear buffer
-			delete(ibNode.insertBuffer.insertData, currentSegID)
-
-			//   binLogs -> minIO/S3
-			collIDStr := strconv.FormatInt(collectionID, 10)
-			partitionIDStr := strconv.FormatInt(partitionID, 10)
-			segIDStr := strconv.FormatInt(currentSegID, 10)
-			keyPrefix := path.Join(ibNode.minioPrifex, collIDStr, partitionIDStr, segIDStr)
-
-			for _, blob := range binLogs {
-				uid, err := ibNode.idAllocator.AllocOne()
+		// flushTs := msg.Timestamp
+		for _, currentSegID := range msg.segmentIDs {
+			log.Printf(". Receiving flush message segID(%v)...", currentSegID)
+			if ibNode.insertBuffer.size(currentSegID) > 0 {
+				log.Println(".. Buffer not empty, flushing ...")
+				seg, err := ibNode.replica.getSegmentByID(currentSegID)
 				if err != nil {
-					log.Println("Allocate Id failed")
-					// GOOSE TODO error handler
+					log.Printf("flush segment fail: %v", err)
+					continue
 				}
 
-				key := path.Join(keyPrefix, blob.Key, strconv.FormatInt(uid, 10))
-				err = ibNode.minIOKV.Save(key, string(blob.Value[:]))
+				err = ibNode.flushSegment(currentSegID, seg.partitionName, seg.collectionID)
 				if err != nil {
-					log.Println("Save to MinIO failed")
-					// GOOSE TODO error handler
+					log.Printf("flush segment (%v) fail: %v", currentSegID, err)
+					continue
 				}
 
-				fieldID, err := strconv.ParseInt(blob.Key, 10, 32)
-				if err != nil {
-					log.Println("string to fieldID wrong")
-					// GOOSE TODO error handler
-				}
-
-				// Append binlogs
-				inBinlogMsg := &insertFlushSyncMsg{
-					flushCompleted: false,
-					insertBinlogPathMsg: insertBinlogPathMsg{
-						ts:      flushTs,
-						segID:   currentSegID,
-						fieldID: fieldID,
-						paths:   []string{key},
-					},
-				}
-				ibNode.outCh <- inBinlogMsg
 			}
 		}
-
-		// Flushed
-		log.Println(".. Flush finished ...")
-		inBinlogMsg := &insertFlushSyncMsg{
-			flushCompleted: true,
-			insertBinlogPathMsg: insertBinlogPathMsg{
-				ts:    flushTs,
-				segID: currentSegID,
-			},
-		}
-
-		ibNode.outCh <- inBinlogMsg
 	}
 
 	if err := ibNode.writeHardTimeTick(iMsg.timeRange.timestampMax); err != nil {
@@ -593,6 +471,67 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 	}
 
 	return []*Msg{&res}
+}
+
+func (ibNode *insertBufferNode) flushSegment(segID UniqueID, partitionName string, collID UniqueID) error {
+	// partitionName -> partitionID GOOSE TODO: remove this
+	partitionID, err := typeutil.Hash32String(partitionName)
+	if err != nil {
+		return errors.Errorf("partitionName to partitionID wrong, %v", err)
+	}
+
+	coll, err := ibNode.replica.getCollectionByID(collID)
+	if err != nil {
+		return errors.Errorf("Get collection by ID wrong, %v", err)
+	}
+
+	collMeta := &etcdpb.CollectionMeta{
+		Schema: coll.schema,
+		ID:     collID,
+	}
+
+	inCodec := storage.NewInsertCodec(collMeta)
+
+	// buffer data to binlogs
+	binLogs, err := inCodec.Serialize(partitionID,
+		segID, ibNode.insertBuffer.insertData[segID])
+
+	if err != nil {
+		return errors.Errorf("generate binlog wrong: %v", err)
+	}
+
+	// clear buffer
+	delete(ibNode.insertBuffer.insertData, segID)
+	log.Println(".. Clearing buffer")
+
+	//   1.5.2 binLogs -> minIO/S3
+	collIDStr := strconv.FormatInt(coll.ID(), 10)
+	partitionIDStr := strconv.FormatInt(partitionID, 10)
+	segIDStr := strconv.FormatInt(segID, 10)
+	keyPrefix := path.Join(ibNode.minioPrefix, collIDStr, partitionIDStr, segIDStr)
+
+	log.Printf(".. Saving (%v) binlogs to MinIO ...", len(binLogs))
+	for index, blob := range binLogs {
+		uid, err := ibNode.idAllocator.AllocOne()
+		if err != nil {
+			return errors.Errorf("Allocate Id failed, %v", err)
+		}
+
+		key := path.Join(keyPrefix, blob.Key, strconv.FormatInt(uid, 10))
+		err = ibNode.minIOKV.Save(key, string(blob.Value[:]))
+		if err != nil {
+			return errors.Errorf("Save to MinIO failed, %v", err)
+		}
+
+		fieldID, err := strconv.ParseInt(blob.Key, 10, 32)
+		if err != nil {
+			return errors.Errorf("string to fieldID wrong, %v", err)
+		}
+
+		log.Println("... Appending binlog paths ...", index)
+		ibNode.flushMeta.AppendSegBinlogPaths(segID, fieldID, []string{key})
+	}
+	return nil
 }
 
 func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
@@ -613,7 +552,7 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 		},
 	}
 	msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
-	return ibNode.pulsarDataNodeTimeTickStream.Produce(&msgPack)
+	return ibNode.timeTickStream.Produce(&msgPack)
 }
 
 func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID) error {
@@ -671,7 +610,8 @@ func (ibNode *insertBufferNode) getCollectionSchemaByName(collectionName string)
 	return ret.schema, nil
 }
 
-func newInsertBufferNode(ctx context.Context, outCh chan *insertFlushSyncMsg, replica collectionReplica) *insertBufferNode {
+func newInsertBufferNode(ctx context.Context,
+	flushMeta *metaTable, replica collectionReplica) *insertBufferNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -710,36 +650,29 @@ func newInsertBufferNode(ctx context.Context, outCh chan *insertFlushSyncMsg, re
 		panic(err)
 	}
 
-	// GOOSE TODO: Pulsar stream Start() ???
 	//input stream, data node time tick
 	wTt := pulsarms.NewPulsarMsgStream(ctx, 1024)
 	wTt.SetPulsarClient(Params.PulsarAddress)
 	wTt.CreatePulsarProducers([]string{Params.TimeTickChannelName})
 	var wTtMsgStream msgstream.MsgStream = wTt
-	// var wTtMsgStream pulsarms.PulsarMsgStream = *wTt
 	wTtMsgStream.Start()
-	// wTt.Start()
 
 	// update statistics channel
 	segS := pulsarms.NewPulsarMsgStream(ctx, Params.SegmentStatisticsBufSize)
 	segS.SetPulsarClient(Params.PulsarAddress)
 	segS.CreatePulsarProducers([]string{Params.SegmentStatisticsChannelName})
 	var segStatisticsMsgStream msgstream.MsgStream = segS
-	// var segStatisticsMsgStream pulsarms.PulsarMsgStream = segS
 	segStatisticsMsgStream.Start()
-	// segS.Start()
 
 	return &insertBufferNode{
-		BaseNode:                     baseNode,
-		insertBuffer:                 iBuffer,
-		minIOKV:                      minIOKV,
-		minioPrifex:                  minioPrefix,
-		idAllocator:                  idAllocator,
-		outCh:                        outCh,
-		pulsarDataNodeTimeTickStream: wTtMsgStream,
-		segmentStatisticsStream:      segStatisticsMsgStream,
-		// pulsarDataNodeTimeTickStream: wTt,
-		// segmentStatisticsStream:      segS,
-		replica: replica,
+		BaseNode:                baseNode,
+		insertBuffer:            iBuffer,
+		minIOKV:                 minIOKV,
+		minioPrefix:             minioPrefix,
+		idAllocator:             idAllocator,
+		timeTickStream:          wTtMsgStream,
+		segmentStatisticsStream: segStatisticsMsgStream,
+		replica:                 replica,
+		flushMeta:               flushMeta,
 	}
 }
