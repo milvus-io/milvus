@@ -10,20 +10,22 @@ import (
 )
 
 type dataSyncService struct {
-	ctx       context.Context
-	fg        *flowgraph.TimeTickedFlowGraph
-	flushChan chan *flushMsg
-	replica   collectionReplica
+	ctx         context.Context
+	fg          *flowgraph.TimeTickedFlowGraph
+	flushChan   chan *flushMsg
+	replica     collectionReplica
+	idAllocator allocator
 }
 
 func newDataSyncService(ctx context.Context, flushChan chan *flushMsg,
-	replica collectionReplica) *dataSyncService {
+	replica collectionReplica, alloc allocator) *dataSyncService {
 
 	return &dataSyncService{
-		ctx:       ctx,
-		fg:        nil,
-		flushChan: flushChan,
-		replica:   replica,
+		ctx:         ctx,
+		fg:          nil,
+		flushChan:   flushChan,
+		replica:     replica,
+		idAllocator: alloc,
 	}
 }
 
@@ -59,8 +61,8 @@ func (dsService *dataSyncService) initNodes() {
 
 	var filterDmNode Node = newFilteredDmNode()
 
-	var ddNode Node = newDDNode(dsService.ctx, mt, dsService.flushChan, dsService.replica)
-	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, mt, dsService.replica)
+	var ddNode Node = newDDNode(dsService.ctx, mt, dsService.flushChan, dsService.replica, dsService.idAllocator)
+	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, mt, dsService.replica, dsService.idAllocator)
 	var gcNode Node = newGCNode(dsService.replica)
 
 	dsService.fg.AddNode(&dmStreamNode)

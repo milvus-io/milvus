@@ -4,24 +4,23 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
-
-	"github.com/zilliztech/milvus-distributed/internal/datanode/factory"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func newReplica() collectionReplica {
 	collections := make([]*Collection, 0)
+	segments := make([]*Segment, 0)
 
 	var replica collectionReplica = &collectionReplicaImpl{
 		collections: collections,
+		segments:    segments,
 	}
 	return replica
 }
 
 func initTestReplicaMeta(t *testing.T, replica collectionReplica, collectionName string, collectionID UniqueID, segmentID UniqueID) {
-	Factory := &factory.MetaFactory{}
+	Factory := &MetaFactory{}
 	collectionMeta := Factory.CollectionMetaFactory(collectionID, collectionName)
 
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)

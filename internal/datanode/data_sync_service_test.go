@@ -10,7 +10,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zilliztech/milvus-distributed/internal/datanode/factory"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -35,10 +34,16 @@ func TestDataSyncService_Start(t *testing.T) {
 	// init data node
 	pulsarURL := Params.PulsarAddress
 
-	Factory := &factory.MetaFactory{}
+	Factory := &MetaFactory{}
 	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
-	node := NewDataNode(ctx, 0)
-	node.replica.addCollection(collMeta.ID, proto.MarshalTextString(collMeta.Schema))
+
+	chanSize := 100
+	flushChan := make(chan *flushMsg, chanSize)
+	replica := newReplica()
+	allocFactory := AllocatorFactory{}
+	sync := newDataSyncService(ctx, flushChan, replica, allocFactory)
+	sync.replica.addCollection(collMeta.ID, proto.MarshalTextString(collMeta.Schema))
+	go sync.start()
 
 	// test data generate
 	// GOOSE TODO orgnize
@@ -204,10 +209,6 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	// dataSync
 	Params.FlushInsertBufferSize = 1
-	node.dataSyncService = newDataSyncService(node.ctx, nil, node.replica)
-	go node.dataSyncService.start()
 
-	node.Stop()
-
-	<-ctx.Done()
+	sync.close()
 }

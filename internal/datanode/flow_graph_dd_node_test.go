@@ -15,7 +15,7 @@ import (
 
 func TestFlowGraphDDNode_Operate(t *testing.T) {
 	const ctxTimeInMillisecond = 2000
-	const closeWithDeadline = false
+	const closeWithDeadline = true
 	var ctx context.Context
 
 	if closeWithDeadline {
@@ -37,7 +37,8 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 
 	Params.FlushDdBufferSize = 4
 	replica := newReplica()
-	ddNode := newDDNode(ctx, newMetaTable(), inFlushCh, replica)
+	idFactory := AllocatorFactory{}
+	ddNode := newDDNode(ctx, newMetaTable(), inFlushCh, replica, idFactory)
 
 	colID := UniqueID(0)
 	colName := "col-test-0"

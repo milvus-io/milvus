@@ -15,7 +15,6 @@ import (
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
 
-	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
@@ -45,7 +44,7 @@ type (
 		minIOKV     kv.Base
 		minioPrefix string
 
-		idAllocator *allocator.IDAllocator
+		idAllocator allocator
 
 		timeTickStream          msgstream.MsgStream
 		segmentStatisticsStream msgstream.MsgStream
@@ -514,7 +513,7 @@ func (ibNode *insertBufferNode) flushSegment(segID UniqueID, partitionID UniqueI
 
 	log.Printf(".. Saving (%v) binlogs to MinIO ...", len(binLogs))
 	for index, blob := range binLogs {
-		uid, err := ibNode.idAllocator.AllocOne()
+		uid, err := ibNode.idAllocator.allocID()
 		if err != nil {
 			return errors.Errorf("Allocate Id failed, %v", err)
 		}
@@ -543,7 +542,7 @@ func (ibNode *insertBufferNode) completeFlush(segID UniqueID) error {
 			MsgType:   commonpb.MsgType_kSegmentFlushDone,
 			MsgID:     0, // GOOSE TODO
 			Timestamp: 0, // GOOSE TODO
-			SourceID:  Params.DataNodeID,
+			SourceID:  Params.NodeID,
 		},
 		SegmentID: segID,
 	}
@@ -572,7 +571,7 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 				MsgType:   commonpb.MsgType_kTimeTick,
 				MsgID:     0,  // GOOSE TODO
 				Timestamp: ts, // GOOSE TODO
-				SourceID:  Params.DataNodeID,
+				SourceID:  Params.NodeID,
 			},
 		},
 	}
@@ -597,7 +596,7 @@ func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID) error {
 			MsgType:   commonpb.MsgType_kSegmentStatistics,
 			MsgID:     UniqueID(0),  // GOOSE TODO
 			Timestamp: Timestamp(0), // GOOSE TODO
-			SourceID:  Params.DataNodeID,
+			SourceID:  Params.NodeID,
 		},
 		SegStats: statsUpdates,
 	}
@@ -623,8 +622,8 @@ func (ibNode *insertBufferNode) getCollectionSchemaByID(collectionID UniqueID) (
 	return ret.schema, nil
 }
 
-func newInsertBufferNode(ctx context.Context,
-	flushMeta *metaTable, replica collectionReplica) *insertBufferNode {
+func newInsertBufferNode(ctx context.Context, flushMeta *metaTable,
+	replica collectionReplica, alloc allocator) *insertBufferNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -654,42 +653,33 @@ func newInsertBufferNode(ctx context.Context,
 	}
 	minioPrefix := Params.InsertBinlogRootPath
 
-	idAllocator, err := allocator.NewIDAllocator(ctx, Params.MasterAddress)
-	if err != nil {
-		panic(err)
-	}
-	err = idAllocator.Start()
-	if err != nil {
-		panic(err)
-	}
-
 	//input stream, data node time tick
 	wTt := pulsarms.NewPulsarMsgStream(ctx, 1024)
 	wTt.SetPulsarClient(Params.PulsarAddress)
 	wTt.CreatePulsarProducers([]string{Params.TimeTickChannelName})
 	var wTtMsgStream msgstream.MsgStream = wTt
-	wTtMsgStream.Start() // GOOSE TODO remove
+	wTtMsgStream.Start()
 
 	// update statistics channel
-	segS := pulsarms.NewPulsarMsgStream(ctx, Params.SegmentStatisticsBufSize)
+	segS := pulsarms.NewPulsarMsgStream(ctx, 1024)
 	segS.SetPulsarClient(Params.PulsarAddress)
 	segS.CreatePulsarProducers([]string{Params.SegmentStatisticsChannelName})
 	var segStatisticsMsgStream msgstream.MsgStream = segS
-	segStatisticsMsgStream.Start() // GOOSE TODO remove
+	segStatisticsMsgStream.Start()
 
 	// segment flush completed channel
 	cf := pulsarms.NewPulsarMsgStream(ctx, 1024)
 	cf.SetPulsarClient(Params.PulsarAddress)
 	cf.CreatePulsarProducers([]string{Params.CompleteFlushChannelName})
 	var completeFlushStream msgstream.MsgStream = cf
-	completeFlushStream.Start() // GOOSE TODO remove
+	completeFlushStream.Start()
 
 	return &insertBufferNode{
 		BaseNode:                baseNode,
 		insertBuffer:            iBuffer,
 		minIOKV:                 minIOKV,
 		minioPrefix:             minioPrefix,
-		idAllocator:             idAllocator,
+		idAllocator:             alloc,
 		timeTickStream:          wTtMsgStream,
 		segmentStatisticsStream: segStatisticsMsgStream,
 		completeFlushStream:     completeFlushStream,

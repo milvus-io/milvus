@@ -16,7 +16,9 @@ type ParamTable struct {
 	paramtable.BaseTable
 
 	// === DataNode Internal Components Configs ===
-	DataNodeID              UniqueID
+	NodeID                  UniqueID
+	IP                      string // GOOSE TODO load from config file
+	Port                    int64
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
 	FlushInsertBufferSize   int32
@@ -25,8 +27,9 @@ type ParamTable struct {
 	DdBinlogRootPath        string
 
 	// === DataNode External Components Configs ===
-	// --- Master ---
-	MasterAddress string
+	// --- External Client Address ---
+	MasterAddress  string
+	ServiceAddress string // GOOSE TODO: init from config file
 
 	// --- Pulsar ---
 	PulsarAddress string
@@ -38,20 +41,20 @@ type ParamTable struct {
 	InsertPulsarBufSize  int64
 
 	// - dd channel -
-	DDChannelNames   []string
-	DDReceiveBufSize int64
-	DDPulsarBufSize  int64
+	DDChannelNames []string // GOOSE TODO, set after Init
+	// DDReceiveBufSize int64
+	// DDPulsarBufSize  int64
 
 	// - seg statistics channel -
-	SegmentStatisticsChannelName    string
-	SegmentStatisticsBufSize        int64
-	SegmentStatisticsUpdateInterval int //  GOOSE TODO remove
+	SegmentStatisticsChannelName string // GOOSE TODO, set after init
+	// SegmentStatisticsBufSize        int64
+	// SegmentStatisticsUpdateInterval int //  GOOSE TODO remove
 
 	// - timetick channel -
-	TimeTickChannelName string
+	TimeTickChannelName string // GOOSE TODO: set after init
 
 	// - complete flush channel -
-	CompleteFlushChannelName string
+	CompleteFlushChannelName string // GOOSE TODO: set after init
 
 	// - channel subname -
 	MsgChannelSubName string
@@ -82,7 +85,9 @@ func (p *ParamTable) Init() {
 	}
 
 	// === DataNode Internal Components Configs ===
-	p.initDataNodeID()
+	p.initNodeID()
+	p.initIP()
+	p.initPort()
 	p.initFlowGraphMaxQueueLength()
 	p.initFlowGraphMaxParallelism()
 	p.initFlushInsertBufferSize()
@@ -104,20 +109,20 @@ func (p *ParamTable) Init() {
 	p.initInsertPulsarBufSize()
 
 	// - dd channel -
-	p.initDDChannelNames()
-	p.initDDReceiveBufSize()
-	p.initDDPulsarBufSize()
+	// p.initDDChannelNames()
+	// p.initDDReceiveBufSize()
+	// p.initDDPulsarBufSize()
 
 	// - seg statistics channel -
-	p.initSegmentStatisticsChannelName()
-	p.initSegmentStatisticsBufSize()
-	p.initSegmentStatisticsUpdateInterval()
+	// p.initSegmentStatisticsChannelName()
+	// p.initSegmentStatisticsBufSize()
+	// p.initSegmentStatisticsUpdateInterval()
 
 	// - timetick channel -
-	p.initTimeTickChannelName()
+	// p.initTimeTickChannelName()
 
 	// - flush completed channel -
-	p.initCompleteFlushChannelName()
+	// p.initCompleteFlushChannelName()
 
 	// - channel subname -
 	p.initMsgChannelSubName()
@@ -141,7 +146,7 @@ func (p *ParamTable) Init() {
 }
 
 // ==== DataNode internal components configs ====
-func (p *ParamTable) initDataNodeID() {
+func (p *ParamTable) initNodeID() {
 	p.dataNodeIDList = p.DataNodeIDList()
 	dataNodeIDStr := os.Getenv("DATA_NODE_ID")
 	if dataNodeIDStr == "" {
@@ -156,7 +161,20 @@ func (p *ParamTable) initDataNodeID() {
 		panic(err)
 	}
 
-	p.DataNodeID = p.ParseInt64("_dataNodeID")
+	p.NodeID = p.ParseInt64("_dataNodeID")
+}
+
+func (p *ParamTable) initIP() {
+	addr, err := p.Load("dataNode.address")
+	if err != nil {
+		panic(err)
+	}
+	p.IP = addr
+}
+
+func (p *ParamTable) initPort() {
+	port := p.ParseInt64("dataNode.port")
+	p.Port = port
 }
 
 // ---- flowgraph configs ----
@@ -257,7 +275,7 @@ func (p *ParamTable) initInsertPulsarBufSize() {
 	p.InsertPulsarBufSize = p.ParseInt64("dataNode.msgStream.insert.pulsarBufSize")
 }
 
-// - dd channel -
+// - dd channel - GOOSE TODO: remove
 func (p *ParamTable) initDDChannelNames() {
 	prefix, err := p.Load("msgChannel.chanNamePrefix.dataDefinition")
 	if err != nil {
@@ -276,31 +294,31 @@ func (p *ParamTable) initDDChannelNames() {
 	p.DDChannelNames = ret
 }
 
-func (p *ParamTable) initDDReceiveBufSize() {
-	revBufSize, err := p.Load("dataNode.msgStream.dataDefinition.recvBufSize")
-	if err != nil {
-		panic(err)
-	}
-	bufSize, err := strconv.Atoi(revBufSize)
-	if err != nil {
-		panic(err)
-	}
-	p.DDReceiveBufSize = int64(bufSize)
-}
+// func (p *ParamTable) initDDReceiveBufSize() {
+//     revBufSize, err := p.Load("dataNode.msgStream.dataDefinition.recvBufSize")
+//     if err != nil {
+//         panic(err)
+//     }
+//     bufSize, err := strconv.Atoi(revBufSize)
+//     if err != nil {
+//         panic(err)
+//     }
+//     p.DDReceiveBufSize = int64(bufSize)
+// }
 
-func (p *ParamTable) initDDPulsarBufSize() {
-	pulsarBufSize, err := p.Load("dataNode.msgStream.dataDefinition.pulsarBufSize")
-	if err != nil {
-		panic(err)
-	}
-	bufSize, err := strconv.Atoi(pulsarBufSize)
-	if err != nil {
-		panic(err)
-	}
-	p.DDPulsarBufSize = int64(bufSize)
-}
+// func (p *ParamTable) initDDPulsarBufSize() {
+//     pulsarBufSize, err := p.Load("dataNode.msgStream.dataDefinition.pulsarBufSize")
+//     if err != nil {
+//         panic(err)
+//     }
+//     bufSize, err := strconv.Atoi(pulsarBufSize)
+//     if err != nil {
+//         panic(err)
+//     }
+//     p.DDPulsarBufSize = int64(bufSize)
+// }
 
-// - seg statistics channel -
+// - seg statistics channel - GOOSE TODO: remove
 func (p *ParamTable) initSegmentStatisticsChannelName() {
 
 	channelName, err := p.Load("msgChannel.chanNamePrefix.dataNodeSegStatistics")
@@ -311,28 +329,26 @@ func (p *ParamTable) initSegmentStatisticsChannelName() {
 	p.SegmentStatisticsChannelName = channelName
 }
 
-func (p *ParamTable) initSegmentStatisticsBufSize() {
-	p.SegmentStatisticsBufSize = p.ParseInt64("dataNode.msgStream.segStatistics.recvBufSize")
-}
+// func (p *ParamTable) initSegmentStatisticsBufSize() {
+//     p.SegmentStatisticsBufSize = p.ParseInt64("dataNode.msgStream.segStatistics.recvBufSize")
+// }
+//
+// func (p *ParamTable) initSegmentStatisticsUpdateInterval() {
+//     p.SegmentStatisticsUpdateInterval = p.ParseInt("dataNode.msgStream.segStatistics.updateInterval")
+// }
 
-func (p *ParamTable) initSegmentStatisticsUpdateInterval() {
-	p.SegmentStatisticsUpdateInterval = p.ParseInt("dataNode.msgStream.segStatistics.updateInterval")
-}
-
-// - flush completed channel -
-
+// - flush completed channel - GOOSE TODO: remove
 func (p *ParamTable) initCompleteFlushChannelName() {
-	// GOOSE TODO
 	p.CompleteFlushChannelName = "flush-completed"
 }
 
-// - Timetick channel -
+// - Timetick channel - GOOSE TODO: remove
 func (p *ParamTable) initTimeTickChannelName() {
 	channels, err := p.Load("msgChannel.chanNamePrefix.dataNodeTimeTick")
 	if err != nil {
 		panic(err)
 	}
-	p.TimeTickChannelName = channels + "-" + strconv.FormatInt(p.DataNodeID, 10)
+	p.TimeTickChannelName = channels + "-" + strconv.FormatInt(p.NodeID, 10)
 }
 
 // - msg channel subname -
@@ -341,7 +357,7 @@ func (p *ParamTable) initMsgChannelSubName() {
 	if err != nil {
 		log.Panic(err)
 	}
-	p.MsgChannelSubName = name + "-" + strconv.FormatInt(p.DataNodeID, 10)
+	p.MsgChannelSubName = name + "-" + strconv.FormatInt(p.NodeID, 10)
 }
 
 func (p *ParamTable) initDefaultPartitionName() {
@@ -431,8 +447,8 @@ func (p *ParamTable) initMinioBucketName() {
 }
 
 func (p *ParamTable) sliceIndex() int {
-	dataNodeID := p.DataNodeID
-	dataNodeIDList := p.DataNodeIDList()
+	dataNodeID := p.NodeID
+	dataNodeIDList := p.dataNodeIDList
 	for i := 0; i < len(dataNodeIDList); i++ {
 		if dataNodeID == dataNodeIDList[i] {
 			return i

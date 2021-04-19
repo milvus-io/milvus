@@ -4,51 +4,130 @@ import (
 	"context"
 	"io"
 	"log"
+	"time"
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go"
 	"github.com/uber/jaeger-client-go/config"
+
+	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
-type DataNode struct {
-	ctx             context.Context
-	DataNodeID      uint64
-	dataSyncService *dataSyncService
-	metaService     *metaService
+const (
+	RPCConnectionTimeout = 30 * time.Second
+)
 
-	replica collectionReplica
+type (
+	Inteface interface {
+		typeutil.Service
 
-	tracer opentracing.Tracer
-	closer io.Closer
-}
-
-func NewDataNode(ctx context.Context, dataNodeID uint64) *DataNode {
-
-	collections := make([]*Collection, 0)
-
-	var replica collectionReplica = &collectionReplicaImpl{
-		collections: collections,
+		GetComponentStates() (*internalpb2.ComponentStates, error)
+		WatchDmChannels(in *datapb.WatchDmChannelRequest) (*commonpb.Status, error)
+		FlushSegments(in *datapb.FlushSegRequest) (*commonpb.Status, error)
 	}
 
+	DataServiceInterface interface {
+		RegisterNode(req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error)
+	}
+
+	MasterServiceInterface interface {
+		AllocID(in *masterpb.IDRequest) (*masterpb.IDResponse, error)
+		ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
+		DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+	}
+
+	DataNode struct {
+		ctx    context.Context
+		NodeID UniqueID
+		Role   string
+		State  internalpb2.StateCode
+
+		dataSyncService *dataSyncService
+		metaService     *metaService
+
+		masterService MasterServiceInterface
+		dataService   DataServiceInterface
+
+		replica collectionReplica
+
+		tracer opentracing.Tracer
+		closer io.Closer
+	}
+)
+
+func NewDataNode(ctx context.Context, nodeID UniqueID, masterService MasterServiceInterface,
+	dataService DataServiceInterface) *DataNode {
+
+	Params.Init()
 	node := &DataNode{
 		ctx:             ctx,
-		DataNodeID:      dataNodeID,
+		NodeID:          nodeID,     // GOOSE TODO
+		Role:            "DataNode", // GOOSE TODO
+		State:           internalpb2.StateCode_INITIALIZING,
 		dataSyncService: nil,
-		// metaService:     nil,
-		replica: replica,
+		metaService:     nil,
+		masterService:   masterService,
+		dataService:     dataService,
+		replica:         nil,
 	}
 
 	return node
 }
 
 func (node *DataNode) Init() error {
-	Params.Init()
-	return nil
-}
 
-func (node *DataNode) Start() error {
+	req := &datapb.RegisterNodeRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_kNone, //GOOSE TODO
+			SourceID: node.NodeID,
+		},
+		Address: &commonpb.Address{
+			Ip:   Params.IP,
+			Port: Params.Port,
+		},
+	}
+
+	resp, err := node.dataService.RegisterNode(req)
+	if err != nil {
+		return errors.Errorf("Init failed: %v", err)
+	}
+
+	for _, kv := range resp.InitParams.StartParams {
+		log.Println(kv)
+		switch kv.Key {
+		case "DDChannelName":
+			Params.DDChannelNames = []string{kv.Value}
+		case "SegmentStatisticsChannelName":
+			Params.SegmentStatisticsChannelName = kv.Value
+		case "TimeTickChannelName":
+			Params.TimeTickChannelName = kv.Value
+		case "CompleteFlushChannelName":
+			Params.CompleteFlushChannelName = kv.Value
+		default:
+			return errors.Errorf("Invalid key: %v", kv.Key)
+		}
+
+	}
+
+	var replica collectionReplica = &collectionReplicaImpl{
+		collections: make([]*Collection, 0),
+		segments:    make([]*Segment, 0),
+	}
+
+	var alloc allocator = newAllocatorImpl(node.masterService)
+	chanSize := 100
+	flushChan := make(chan *flushMsg, chanSize)
+	node.dataSyncService = newDataSyncService(node.ctx, flushChan, replica, alloc)
+	node.metaService = newMetaService(node.ctx, replica)
+	node.replica = replica
+
+	// Opentracing
 	cfg := &config.Configuration{
 		ServiceName: "data_node",
 		Sampler: &config.SamplerConfig{
@@ -59,24 +138,22 @@ func (node *DataNode) Start() error {
 			LogSpans: true,
 		},
 	}
-
-	var err error
-	node.tracer, node.closer, err = cfg.NewTracer(config.Logger(jaeger.StdLogger))
+	tracer, closer, err := cfg.NewTracer(config.Logger(jaeger.StdLogger))
 	if err != nil {
-		log.Printf("ERROR: cannot init Jaeger: %v\n", err)
-	} else {
-		opentracing.SetGlobalTracer(node.tracer)
+		return errors.Errorf("ERROR: cannot init Jaeger: %v\n", err)
 	}
+	node.tracer = tracer
+	node.closer = closer
 
-	// TODO GOOSE Init Size??
-	chanSize := 100
-	flushChan := make(chan *flushMsg, chanSize)
+	opentracing.SetGlobalTracer(node.tracer)
 
-	node.dataSyncService = newDataSyncService(node.ctx, flushChan, node.replica)
-	node.metaService = newMetaService(node.ctx, node.replica)
+	node.State = internalpb2.StateCode_HEALTHY
+	return nil
+}
+
+func (node *DataNode) Start() error {
 
 	go node.dataSyncService.start()
-	// go node.flushSyncService.start()
 	node.metaService.start()
 
 	return nil
@@ -88,8 +165,16 @@ func (node *DataNode) WatchDmChannels(in *datapb.WatchDmChannelRequest) error {
 }
 
 func (node *DataNode) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	// GOOSE TODO: Implement me
-	return nil, nil
+	states := &internalpb2.ComponentStates{
+		State: &internalpb2.ComponentInfo{
+			NodeID:    Params.NodeID,
+			Role:      node.Role,
+			StateCode: node.State,
+		},
+		SubcomponentStates: make([]*internalpb2.ComponentInfo, 0),
+		Status:             &commonpb.Status{},
+	}
+	return states, nil
 }
 
 func (node *DataNode) FlushSegments(in *datapb.FlushSegRequest) error {

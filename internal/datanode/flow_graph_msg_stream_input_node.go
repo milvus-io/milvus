@@ -35,18 +35,14 @@ func newDmInputNode(ctx context.Context) *flowgraph.InputNode {
 }
 
 func newDDInputNode(ctx context.Context) *flowgraph.InputNode {
-	receiveBufSize := Params.DDReceiveBufSize
-	pulsarBufSize := Params.DDPulsarBufSize
-
-	msgStreamURL := Params.PulsarAddress
 
 	consumeChannels := Params.DDChannelNames
 	consumeSubName := Params.MsgChannelSubName
 
-	ddStream := pulsarms.NewPulsarTtMsgStream(ctx, receiveBufSize)
-	ddStream.SetPulsarClient(msgStreamURL)
+	ddStream := pulsarms.NewPulsarTtMsgStream(ctx, 1024)
+	ddStream.SetPulsarClient(Params.PulsarAddress)
 	unmarshalDispatcher := util.NewUnmarshalDispatcher()
-	ddStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
+	ddStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, 1024)
 
 	var stream msgstream.MsgStream = ddStream
 
