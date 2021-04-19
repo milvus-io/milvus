@@ -33,6 +33,7 @@ where `command`, `server type`, and `flags` are:
 * `datanode`
 * `indexservice`
 * `indexnode`
+* `standalone`
 
 `flags`: Specifies optional flags. For example, you can use the `-f` or `--config` flags to specify the configuration file.
 
