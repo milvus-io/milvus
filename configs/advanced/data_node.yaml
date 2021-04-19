@@ -30,10 +30,6 @@ dataNode:
       recvBufSize: 1024 # msgPack chan buffer size
       pulsarBufSize: 1024 # pulsar chan buffer size
 
-    segStatistics:
-      recvBufSize: 64
-      updateInterval: 1000 # milliseconds
-
   flush:
     # max buffer size to flush
     insertBufSize: 32000 # number of rows

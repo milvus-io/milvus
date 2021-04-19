@@ -1,11 +1,8 @@
 dataservice:
   nodeID: 14040
-  address: "127.0.0.1"
-  port: 13333
   segment:
     size: 512 # MB
     sizeFactor: 0.75
-    defaultSizePerRecord: 1024
     IDAssignExpiration: 2000 # ms
   insertChannelNum: 2
   dataNodeNum: 1

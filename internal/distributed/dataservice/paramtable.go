@@ -45,7 +45,7 @@ func (pt *ParamTable) LoadFromEnv() {
 }
 
 func (pt *ParamTable) initPort() {
-	pt.Port = pt.ParseInt("dataservice.port")
+	pt.Port = pt.ParseInt("dataService.port")
 }
 
 func (pt *ParamTable) initMasterAddress() {
