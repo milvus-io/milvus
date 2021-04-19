@@ -41,7 +41,7 @@ type collectionReplica interface {
 	getCollectionByID(collectionID UniqueID) (*Collection, error)
 	getCollectionByName(collectionName string) (*Collection, error)
 	hasCollection(collectionID UniqueID) bool
-	getVecFieldsByCollectionID(collectionID UniqueID) (map[int64]string, error)
+	getVecFieldsByCollectionID(collectionID UniqueID) ([]int64, error)
 
 	// partition
 	// Partition tags in different collections are not unique,
@@ -175,7 +175,7 @@ func (colReplica *collectionReplicaImpl) hasCollection(collectionID UniqueID) bo
 	return false
 }
 
-func (colReplica *collectionReplicaImpl) getVecFieldsByCollectionID(collectionID UniqueID) (map[int64]string, error) {
+func (colReplica *collectionReplicaImpl) getVecFieldsByCollectionID(collectionID UniqueID) ([]int64, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 
@@ -184,10 +184,10 @@ func (colReplica *collectionReplicaImpl) getVecFieldsByCollectionID(collectionID
 		return nil, err
 	}
 
-	vecFields := make(map[int64]string)
+	vecFields := make([]int64, 0)
 	for _, field := range col.Schema().Fields {
 		if field.DataType == schemapb.DataType_VECTOR_BINARY || field.DataType == schemapb.DataType_VECTOR_FLOAT {
-			vecFields[field.FieldID] = field.Name
+			vecFields = append(vecFields, field.FieldID)
 		}
 	}
 

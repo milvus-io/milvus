@@ -781,7 +781,7 @@ TEST(CApiTest, LoadIndexInfo) {
     status = AppendIndexParam(c_load_index_info, index_param_key2.data(), index_param_value2.data());
     assert(status.error_code == Success);
     std::string field_name = "field0";
-    status = AppendFieldInfo(c_load_index_info, field_name.data(), 0);
+    status = AppendFieldInfo(c_load_index_info, 0);
     assert(status.error_code == Success);
     status = AppendIndex(c_load_index_info, c_binary_set);
     assert(status.error_code == Success);
@@ -937,7 +937,7 @@ TEST(CApiTest, UpdateSegmentIndex_Without_Predicate) {
     AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(c_load_index_info, "fakevec", 100);
+    AppendFieldInfo(c_load_index_info, 100);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     status = UpdateSegmentIndex(segment, c_load_index_info);
@@ -1074,7 +1074,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
     AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(c_load_index_info, "fakevec", 100);
+    AppendFieldInfo(c_load_index_info, 100);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     status = UpdateSegmentIndex(segment, c_load_index_info);
@@ -1211,7 +1211,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Term) {
     AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(c_load_index_info, "fakevec", 100);
+    AppendFieldInfo(c_load_index_info, 100);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     status = UpdateSegmentIndex(segment, c_load_index_info);
@@ -1350,7 +1350,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Range) {
     AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(c_load_index_info, "fakevec", 100);
+    AppendFieldInfo(c_load_index_info, 100);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     status = UpdateSegmentIndex(segment, c_load_index_info);
@@ -1488,7 +1488,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
     AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(c_load_index_info, "fakevec", 100);
+    AppendFieldInfo(c_load_index_info, 100);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     status = UpdateSegmentIndex(segment, c_load_index_info);
@@ -1665,7 +1665,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
     AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(c_load_index_info, "fakevec", 100);
+    AppendFieldInfo(c_load_index_info, 100);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     auto load_index_info = (LoadIndexInfo*)c_load_index_info;
