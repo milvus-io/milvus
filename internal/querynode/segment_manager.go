@@ -3,7 +3,7 @@ package querynode
 import (
 	"context"
 	"errors"
-	"fmt"
+	"unsafe"
 
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
@@ -58,7 +58,7 @@ func newSegmentManager(ctx context.Context, replica collectionReplica, loadIndex
 	}
 }
 
-func (s *segmentManager) loadSegment(segmentID UniqueID, fieldIDs *[]int64) error {
+func (s *segmentManager) loadSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, fieldIDs *[]int64) error {
 	insertBinlogPathRequest := &datapb.InsertBinlogPathRequest{
 		SegmentID: segmentID,
 	}
@@ -70,6 +70,12 @@ func (s *segmentManager) loadSegment(segmentID UniqueID, fieldIDs *[]int64) erro
 
 	if len(pathResponse.FieldIDs) != len(pathResponse.Paths) {
 		return errors.New("illegal InsertBinlogPathsResponse")
+	}
+
+	// create segment
+	err = s.replica.addSegment(segmentID, partitionID, collectionID, segTypeSealed)
+	if err != nil {
+		return err
 	}
 
 	containsFunc := func(s []int64, e int64) bool {
@@ -110,26 +116,34 @@ func (s *segmentManager) loadSegment(segmentID UniqueID, fieldIDs *[]int64) erro
 		}
 
 		for _, value := range insertData.Data {
+			var numRows int
+			var data interface{}
+
 			switch fieldData := value.(type) {
 			case storage.BoolFieldData:
-				numRows := fieldData.NumRows
-				data := fieldData.Data
-				fmt.Println(numRows, data, fieldID)
-				// TODO: s.replica.addSegment()
+				numRows = fieldData.NumRows
+				data = fieldData.Data
 			case storage.Int8FieldData:
-				// TODO: s.replica.addSegment()
+				numRows = fieldData.NumRows
+				data = fieldData.Data
 			case storage.Int16FieldData:
-				// TODO: s.replica.addSegment()
+				numRows = fieldData.NumRows
+				data = fieldData.Data
 			case storage.Int32FieldData:
-				// TODO: s.replica.addSegment()
+				numRows = fieldData.NumRows
+				data = fieldData.Data
 			case storage.Int64FieldData:
-				// TODO: s.replica.addSegment()
+				numRows = fieldData.NumRows
+				data = fieldData.Data
 			case storage.FloatFieldData:
-				// TODO: s.replica.addSegment()
+				numRows = fieldData.NumRows
+				data = fieldData.Data
 			case storage.DoubleFieldData:
-				// TODO: s.replica.addSegment()
+				numRows = fieldData.NumRows
+				data = fieldData.Data
 			case storage.StringFieldData:
-				// TODO: s.replica.addSegment()
+				numRows = fieldData.NumRows
+				data = fieldData.Data
 			case storage.FloatVectorFieldData:
 				// segment to be loaded doesn't need vector field,
 				// so we ignore the type of vector field data
@@ -138,6 +152,17 @@ func (s *segmentManager) loadSegment(segmentID UniqueID, fieldIDs *[]int64) erro
 				continue
 			default:
 				return errors.New("unexpected field data type")
+			}
+
+			segment, err := s.replica.getSegmentByID(segmentID)
+			if err != nil {
+				// TODO: return or continue?
+				return err
+			}
+			err = segment.segmentLoadFieldData(fieldID, numRows, unsafe.Pointer(&data))
+			if err != nil {
+				// TODO: return or continue?
+				return err
 			}
 		}
 	}
@@ -153,23 +178,17 @@ func (s *segmentManager) loadIndex(segmentID UniqueID, indexID UniqueID) error {
 	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
 		return err
 	}
-	targetSegment, err := s.replica.getSegmentByID(segmentID)
-	if err != nil {
-		return err
-	}
 
 	// get vector field ids from schema to load index
-	vecFieldIDs, err := s.replica.getVecFieldIDsBySegmentID(segmentID)
+	vecFieldIDs, err := s.replica.getVecFieldsBySegmentID(segmentID)
 	if err != nil {
 		return err
 	}
-	for _, vecFieldID := range vecFieldIDs {
-		targetIndexParam, ok := targetSegment.indexParam[vecFieldID]
-		if !ok {
-			return errors.New(fmt.Sprint("cannot found index params in segment ", segmentID, " with field = ", vecFieldID))
-		}
+	for id, name := range vecFieldIDs {
+		var targetIndexParam indexParam
+		// TODO: get index param from master
 		// non-blocking send
-		go s.sendLoadIndex(pathResponse.IndexFilePaths, segmentID, vecFieldID, "", targetIndexParam)
+		go s.sendLoadIndex(pathResponse.IndexFilePaths, segmentID, id, name, targetIndexParam)
 	}
 
 	return nil

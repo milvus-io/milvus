@@ -295,10 +295,27 @@ func (node *QueryNode) WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*com
 
 func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.Status, error) {
 	// TODO: support db
+	partitionID := in.PartitionID
+	collectionID := in.CollectionID
 	fieldIDs := in.FieldIDs
+	// TODO: interim solution
+	if len(fieldIDs) == 0 {
+		collection, err := node.replica.getCollectionByID(collectionID)
+		if err != nil {
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			}
+			return status, err
+		}
+		fieldIDs = make([]int64, 0)
+		for _, field := range collection.Schema().Fields {
+			fieldIDs = append(fieldIDs, field.FieldID)
+		}
+	}
 	for _, segmentID := range in.SegmentIDs {
-		indexID := UniqueID(0) // TODO: ???
-		err := node.segManager.loadSegment(segmentID, &fieldIDs)
+		indexID := UniqueID(0) // TODO: get index id from master
+		err := node.segManager.loadSegment(segmentID, partitionID, collectionID, &fieldIDs)
 		if err != nil {
 			// TODO: return or continue?
 			status := &commonpb.Status{

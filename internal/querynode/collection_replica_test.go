@@ -226,7 +226,7 @@ func TestCollectionReplica_addSegment(t *testing.T) {
 	const segmentNum = 3
 	tag := "default"
 	for i := 0; i < segmentNum; i++ {
-		err := node.replica.addSegment(UniqueID(i), tag, collectionID)
+		err := node.replica.addSegment2(UniqueID(i), tag, collectionID, segTypeGrowing)
 		assert.NoError(t, err)
 		targetSeg, err := node.replica.getSegmentByID(UniqueID(i))
 		assert.NoError(t, err)
@@ -246,7 +246,7 @@ func TestCollectionReplica_removeSegment(t *testing.T) {
 	tag := "default"
 
 	for i := 0; i < segmentNum; i++ {
-		err := node.replica.addSegment(UniqueID(i), tag, collectionID)
+		err := node.replica.addSegment2(UniqueID(i), tag, collectionID, segTypeGrowing)
 		assert.NoError(t, err)
 		targetSeg, err := node.replica.getSegmentByID(UniqueID(i))
 		assert.NoError(t, err)
@@ -268,7 +268,7 @@ func TestCollectionReplica_getSegmentByID(t *testing.T) {
 	tag := "default"
 
 	for i := 0; i < segmentNum; i++ {
-		err := node.replica.addSegment(UniqueID(i), tag, collectionID)
+		err := node.replica.addSegment2(UniqueID(i), tag, collectionID, segTypeGrowing)
 		assert.NoError(t, err)
 		targetSeg, err := node.replica.getSegmentByID(UniqueID(i))
 		assert.NoError(t, err)
@@ -288,7 +288,7 @@ func TestCollectionReplica_hasSegment(t *testing.T) {
 	tag := "default"
 
 	for i := 0; i < segmentNum; i++ {
-		err := node.replica.addSegment(UniqueID(i), tag, collectionID)
+		err := node.replica.addSegment2(UniqueID(i), tag, collectionID, segTypeGrowing)
 		assert.NoError(t, err)
 		targetSeg, err := node.replica.getSegmentByID(UniqueID(i))
 		assert.NoError(t, err)

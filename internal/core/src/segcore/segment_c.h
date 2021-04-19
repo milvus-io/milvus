@@ -26,8 +26,9 @@ extern "C" {
 typedef void* CSegmentInterface;
 typedef void* CQueryResult;
 
+//////////////////////////////    common interfaces    //////////////////////////////
 CSegmentInterface
-NewSegment(CCollection collection, uint64_t segment_id, int seg_type);
+NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
 
 void
 DeleteSegment(CSegmentInterface segment);
@@ -35,9 +36,27 @@ DeleteSegment(CSegmentInterface segment);
 void
 DeleteQueryResult(CQueryResult query_result);
 
-//////////////////////////////////////////////////////////////////
+CStatus
+Search(CSegmentInterface c_segment,
+       CPlan plan,
+       CPlaceholderGroup* placeholder_groups,
+       uint64_t* timestamps,
+       int num_groups,
+       CQueryResult* result);
 
-// interface for growing segment
+CStatus
+FillTargetEntry(CSegmentInterface c_segment, CPlan c_plan, CQueryResult result);
+
+int64_t
+GetMemoryUsageInBytes(CSegmentInterface c_segment);
+
+int64_t
+GetRowCount(CSegmentInterface c_segment);
+
+int64_t
+GetDeletedCount(CSegmentInterface c_segment);
+
+//////////////////////////////    interfaces for growing segment    //////////////////////////////
 CStatus
 Insert(CSegmentInterface c_segment,
        int64_t reserved_offset,
@@ -64,23 +83,13 @@ Delete(CSegmentInterface c_segment,
 int64_t
 PreDelete(CSegmentInterface c_segment, int64_t size);
 
-// common interface
+//////////////////////////////    interfaces for growing segment    //////////////////////////////
 CStatus
-Search(CSegmentInterface c_segment,
-       CPlan plan,
-       CPlaceholderGroup* placeholder_groups,
-       uint64_t* timestamps,
-       int num_groups,
-       CQueryResult* result);
+LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_info);
 
-// common interface
-CStatus
-FillTargetEntry(CSegmentInterface c_segment, CPlan c_plan, CQueryResult result);
-
-// deprecated
+//////////////////////////////    deprecated interfaces    //////////////////////////////
 CStatus
 UpdateSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info);
-//////////////////////////////////////////////////////////////////
 
 // deprecated
 int
@@ -93,20 +102,6 @@ BuildIndex(CCollection c_collection, CSegmentInterface c_segment);
 // deprecated
 bool
 IsOpened(CSegmentInterface c_segment);
-
-// common interface
-int64_t
-GetMemoryUsageInBytes(CSegmentInterface c_segment);
-
-//////////////////////////////////////////////////////////////////
-
-// common interface
-int64_t
-GetRowCount(CSegmentInterface c_segment);
-
-// ???
-int64_t
-GetDeletedCount(CSegmentInterface c_segment);
 
 #ifdef __cplusplus
 }
