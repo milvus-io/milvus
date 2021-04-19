@@ -148,6 +148,9 @@ type Core struct {
 	//TODO, call index builder's client to build index, return build id
 	BuildIndexReq func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair) (typeutil.UniqueID, error)
 
+	//TODO, proxy service interface, notify proxy service to drop collection
+	InvalidateCollectionMetaCache func(dbName string, collectionName string) error
+
 	// put create index task into this chan
 	indexTaskQueue chan *CreateIndexTask
 
@@ -228,6 +231,9 @@ func (c *Core) checkInit() error {
 	if c.BuildIndexReq == nil {
 		return errors.Errorf("BuildIndexReq is nil")
 	}
+	if c.InvalidateCollectionMetaCache == nil {
+		return errors.Errorf("InvalidateCollectionMetaCache is nil")
+	}
 	if c.indexTaskQueue == nil {
 		return errors.Errorf("indexTaskQueue is nil")
 	}
@@ -254,13 +260,15 @@ func (c *Core) startDdScheduler() {
 				task.Notify(err)
 				break
 			}
-			if ts <= c.lastDdTimeStamp {
+			if !task.IgnoreTimeStamp() && ts <= c.lastDdTimeStamp {
 				task.Notify(errors.Errorf("input timestamp = %d, last dd time stamp = %d", ts, c.lastDdTimeStamp))
 				break
 			}
 			err = task.Execute()
 			task.Notify(err)
-			c.lastDdTimeStamp = ts
+			if ts > c.lastDdTimeStamp {
+				c.lastDdTimeStamp = ts
+			}
 		}
 	}
 }
@@ -523,8 +531,14 @@ func (c *Core) setMsgStreams() error {
 						segInfoMsg, ok := segm.(*ms.SegmentInfoMsg)
 						if ok {
 							c.DataServiceSegmentChan <- segInfoMsg.Segment
+						} else {
+							flushMsg, ok := segm.(*ms.SegmentFlushCompletedMsg)
+							if ok {
+								c.DataNodeSegmentFlushCompletedChan <- flushMsg.SegmentFlushCompletedMsg.SegmentID
+							} else {
+								log.Printf("receiver unexpected msg from data service stream, value = %v", segm)
+							}
 						}
-						//TODO, if data node flush
 					}
 				}
 			}
