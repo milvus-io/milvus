@@ -29,11 +29,6 @@ HasCollectionReq::Create(const ContextPtr& context, const std::string& collectio
 
 Status
 HasCollectionReq::OnExecute() {
-    try {
-        std::string hdr = "HasCollectionReq(collection=" + collection_name_ + ")";
-        TimeRecorderAuto rc(hdr);
-
-        STATUS_CHECK(ValidateCollectionName(collection_name_));
 
     return Status::OK();
 }

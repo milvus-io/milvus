@@ -22,10 +22,12 @@ add_subdirectory( tracing )
 add_subdirectory( utils )
 add_subdirectory( config )
 add_subdirectory( query )
+add_subdirectory( db ) # target milvus_engine
 add_subdirectory( log )
 add_subdirectory( server )
 
 set(link_lib
+	milvus_engine
         config
 	query
         utils
@@ -44,6 +46,10 @@ set( GRPC_LIB   libprotobuf
                 grpc++
                 )
 
+set( BOOST_LIB  libboost_system.a
+                libboost_filesystem.a
+                libboost_serialization.a
+                )
 
 set( THIRD_PARTY_LIBS   
                         yaml-cpp 
@@ -55,6 +61,7 @@ target_link_libraries( server
                 PUBLIC ${link_lib}
                 tracing
                 ${THIRD_PARTY_LIBS}
+                ${BOOST_LIB}
                        )
 
 # **************************** Get&Print Include Directories ****************************

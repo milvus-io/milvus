@@ -37,11 +37,6 @@ GetCollectionInfoReq::Create(const ContextPtr& context, const std::string& colle
 
 Status
 GetCollectionInfoReq::OnExecute() {
-    try {
-        std::string hdr = "GetCollectionInfoReq(collection=" + collection_name_ + ")";
-        TimeRecorderAuto rc(hdr);
-
-        STATUS_CHECK(ValidateCollectionName(collection_name_));
 
 
     return Status::OK();

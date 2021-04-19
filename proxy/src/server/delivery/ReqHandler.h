@@ -85,14 +85,14 @@ class ReqHandler {
     Status
     GetEntityByID(const ContextPtr& context, const std::string& collection_name, const engine::IDNumbers& ids,
                   std::vector<std::string>& field_names, std::vector<bool>& valid_row,
-                  engine::snapshot::FieldElementMappings& field_mappings, engine::DataChunkPtr& data_chunk);
+                   engine::DataChunkPtr& data_chunk);
 
     Status
     DeleteEntityByID(const ContextPtr& context, const std::string& collection_name, const engine::IDNumbers& ids);
 
     Status
     Search(const ContextPtr& context, const query::QueryPtr& query_ptr, const milvus::json& json_params,
-           engine::snapshot::FieldElementMappings& collection_mappings, engine::QueryResultPtr& result);
+            engine::QueryResultPtr& result);
 
     Status
     ListIDInSegment(const ContextPtr& context, const std::string& collection_name, int64_t segment_id,

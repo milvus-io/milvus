@@ -31,10 +31,6 @@ LoadCollectionReq::Create(const ContextPtr& context, const std::string& collecti
 
 Status
 LoadCollectionReq::OnExecute() {
-    try {
-        std::string hdr = "LoadCollectionReq(collection=" + collection_name_ + ")";
-        TimeRecorderAuto rc(hdr);
-
     
     return Status::OK();
 }

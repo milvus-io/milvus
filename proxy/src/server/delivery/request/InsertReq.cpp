@@ -46,14 +46,7 @@ InsertReq::Create(const ContextPtr& context, const std::string& collection_name,
 Status
 InsertReq::OnExecute() {
     LOG_SERVER_INFO_ << LogOut("[%s][%ld] ", "insert", 0) << "Execute InsertReq.";
-    try {
-        std::string hdr = "InsertReq(table=" + collection_name_ + ", partition_name=" + partition_name_ + ")";
-        TimeRecorder rc(hdr);
 
-        if (chunk_data_.empty()) {
-            return Status{SERVER_INVALID_ARGUMENT,
-                          "The vector field is empty, Make sure you have entered vector records"};
-        }
 
     return Status::OK();
 }

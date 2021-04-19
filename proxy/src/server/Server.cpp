@@ -19,7 +19,7 @@
 #include <unordered_map>
 
 #include "config/ServerConfig.h"
-
+#include "tracing/TracerUtil.h"
 #include "log/LogMgr.h"
 // #include "scheduler/SchedInst.h"
 #include "server/grpc_impl/GrpcServer.h"
@@ -237,8 +237,8 @@ Server::Start() {
                          << std::string(15, '*') << "Config in memory" << std::string(15, '*') << "\n\n"
                          << ConfigMgr::GetInstance().Dump();
 
-        server::Metrics::GetInstance().Init();
-        server::SystemInfo::GetInstance().Init();
+        // server::Metrics::GetInstance().Init();
+        // server::SystemInfo::GetInstance().Init();
 
         return StartService();
     } catch (std::exception& ex) {
@@ -282,7 +282,7 @@ Server::Stop() {
 Status
 Server::StartService() {
     Status stat;
-    stat = engine::KnowhereResource::Initialize();
+    // stat = engine::KnowhereResource::Initialize();
     if (!stat.ok()) {
         LOG_SERVER_ERROR_ << "KnowhereResource initialize fail: " << stat.message();
         goto FAIL;

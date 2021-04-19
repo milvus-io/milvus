@@ -28,12 +28,6 @@ DropCollectionReq::Create(const ContextPtr& context, const std::string& collecti
 
 Status
 DropCollectionReq::OnExecute() {
-    try {
-        std::string hdr = "DropCollectionReq(collection=" + collection_name_ + ")";
-        TimeRecorder rc(hdr);
-
-        STATUS_CHECK(ValidateCollectionName(collection_name_));
-
 
     return Status::OK();
 }

@@ -36,12 +36,6 @@ HasPartitionReq::Create(const ContextPtr& context, const std::string& collection
 
 Status
 HasPartitionReq::OnExecute() {
-    try {
-        std::string hdr = "HasPartitionReq(collection=" + collection_name_ + " tag=" + partition_tag_ + ")";
-        TimeRecorderAuto rc(hdr);
-
-        has_partition_ = false;
-
 
     return Status::OK();
 }

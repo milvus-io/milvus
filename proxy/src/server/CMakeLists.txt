@@ -20,12 +20,14 @@ set( GRPC_SERVICE_FILES ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
 aux_source_directory( ${MILVUS_ENGINE_SRC}/server                   SERVER_SERVICE_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/server/init              SERVER_INIT_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/server/delivery/request  DELIVERY_REQUEST_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/server/delivery/strategy DELIVERY_STRATEGY_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/server/delivery          DELIVERY_FILES )
 
 set( SERVER_FILES     ${SERVER_INIT_FILES}
                       ${SERVER_SERVICE_FILES}
                       ${SERVER_INIT_FILES}
                       ${DELIVERY_REQUEST_FILES}
+                      ${DELIVERY_STRATEGY_FILES}
                       ${DELIVERY_FILES}
                       )
 
