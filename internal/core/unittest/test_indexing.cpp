@@ -242,8 +242,8 @@ TEST(Indexing, BinaryBruteForce) {
     int64_t dim = 512;
     auto result_count = topk * num_queries;
     auto schema = std::make_shared<Schema>();
-    schema->AddField("vecbin", DataType::VECTOR_BINARY, dim, MetricType::METRIC_Jaccard);
-    schema->AddField("age", DataType::INT64);
+    schema->AddDebugField("vecbin", DataType::VECTOR_BINARY, dim, MetricType::METRIC_Jaccard);
+    schema->AddDebugField("age", DataType::INT64);
     auto dataset = DataGen(schema, N, 10);
     auto bin_vec = dataset.get_col<uint8_t>(0);
     auto query_data = 1024 * dim / 8 + bin_vec.data();

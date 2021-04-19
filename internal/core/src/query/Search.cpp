@@ -57,9 +57,7 @@ FloatSearch(const segcore::SegmentSmallIndex& segment,
 
     // step 2.1: get meta
     // step 2.2: get which vector field to search
-    auto vecfield_offset_opt = schema.get_offset(info.field_id_);
-    Assert(vecfield_offset_opt.has_value());
-    auto vecfield_offset = vecfield_offset_opt.value();
+    auto vecfield_offset = info.field_offset_;
     auto& field = schema[vecfield_offset];
 
     Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
@@ -154,9 +152,7 @@ BinarySearch(const segcore::SegmentSmallIndex& segment,
 
     // step 2.1: get meta
     // step 2.2: get which vector field to search
-    auto vecfield_offset_opt = schema.get_offset(info.field_id_);
-    Assert(vecfield_offset_opt.has_value());
-    auto vecfield_offset = vecfield_offset_opt.value();
+    auto vecfield_offset = info.field_offset_;
     auto& field = schema[vecfield_offset];
 
     Assert(field.get_data_type() == DataType::VECTOR_BINARY);

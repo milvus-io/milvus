@@ -12,7 +12,6 @@
 #pragma once
 
 #include "common/Schema.h"
-#include "IndexMeta.h"
 #include <string>
 #include <memory>
 
@@ -31,18 +30,12 @@ class Collection {
         return schema_;
     }
 
-    IndexMetaPtr&
-    get_index() {
-        return index_;
-    }
-
     const std::string&
     get_collection_name() {
         return collection_name_;
     }
 
  private:
-    IndexMetaPtr index_;
     std::string collection_name_;
     std::string schema_proto_;
     SchemaPtr schema_;

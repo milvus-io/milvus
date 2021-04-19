@@ -206,11 +206,7 @@ Close(CSegmentBase c_segment) {
 
 int
 BuildIndex(CCollection c_collection, CSegmentBase c_segment) {
-    auto collection = (milvus::segcore::Collection*)c_collection;
-    auto segment = (milvus::segcore::SegmentBase*)c_segment;
-
-    auto status = segment->BuildIndex(collection->get_index());
-    return status.code();
+    PanicInfo("unimplemented");
 }
 
 bool

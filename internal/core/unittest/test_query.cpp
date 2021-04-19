@@ -72,13 +72,13 @@ TEST(Query, ShowExecutor) {
     using namespace milvus;
     auto node = std::make_unique<FloatVectorANNS>();
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     int64_t num_queries = 100L;
     auto raw_data = DataGen(schema, num_queries);
     auto& info = node->query_info_;
     info.metric_type_ = "L2";
     info.topK_ = 20;
-    info.field_id_ = "fakevec";
+    info.field_offset_ = FieldOffset(1000);
     node->predicate_ = std::nullopt;
     ShowPlanNodeVisitor show_visitor;
     PlanNodePtr base(node.release());
@@ -113,7 +113,7 @@ TEST(Query, DSL) {
 })";
 
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
 
     auto plan = CreatePlan(*schema, dsl_string);
     auto res = shower.call_child(*plan->plan_node_);
@@ -159,7 +159,7 @@ TEST(Query, ParsePlaceholderGroup) {
 })";
 
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     auto plan = CreatePlan(*schema, dsl_string);
     int64_t num_queries = 100000;
     int dim = 16;
@@ -172,8 +172,8 @@ TEST(Query, ExecWithPredicate) {
     using namespace milvus::query;
     using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
-    schema->AddField("age", DataType::FLOAT);
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("age", DataType::FLOAT);
     std::string dsl = R"({
         "bool": {
             "must": [
@@ -263,8 +263,8 @@ TEST(Query, ExecTerm) {
     using namespace milvus::query;
     using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
-    schema->AddField("age", DataType::FLOAT);
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("age", DataType::FLOAT);
     std::string dsl = R"({
         "bool": {
             "must": [
@@ -316,8 +316,8 @@ TEST(Query, ExecEmpty) {
     using namespace milvus::query;
     using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
-    schema->AddField("age", DataType::FLOAT);
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("age", DataType::FLOAT);
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     std::string dsl = R"({
         "bool": {
             "must": [
@@ -361,8 +361,8 @@ TEST(Query, ExecWithoutPredicate) {
     using namespace milvus::query;
     using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
-    schema->AddField("age", DataType::FLOAT);
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("age", DataType::FLOAT);
     std::string dsl = R"({
         "bool": {
             "must": [
@@ -466,7 +466,7 @@ TEST(Indexing, InnerProduct) {
             ]
         }
     })";
-    schema->AddField("normalized", DataType::VECTOR_FLOAT, dim, MetricType::METRIC_INNER_PRODUCT);
+    schema->AddDebugField("normalized", DataType::VECTOR_FLOAT, dim, MetricType::METRIC_INNER_PRODUCT);
     auto dataset = DataGen(schema, N);
     auto segment = CreateSegment(schema);
     auto plan = CreatePlan(*schema, dsl);
@@ -571,8 +571,8 @@ TEST(Query, ExecWithPredicateBinary) {
     using namespace milvus::query;
     using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_BINARY, 512, MetricType::METRIC_Jaccard);
-    schema->AddField("age", DataType::FLOAT);
+    schema->AddDebugField("fakevec", DataType::VECTOR_BINARY, 512, MetricType::METRIC_Jaccard);
+    schema->AddDebugField("age", DataType::FLOAT);
     std::string dsl = R"({
         "bool": {
             "must": [

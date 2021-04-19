@@ -30,8 +30,8 @@ TEST(Sealed, without_predicate) {
     auto dim = 16;
     auto topK = 5;
     auto metric_type = MetricType::METRIC_L2;
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
-    schema->AddField("age", DataType::FLOAT);
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    schema->AddDebugField("age", DataType::FLOAT);
     std::string dsl = R"({
         "bool": {
             "must": [
@@ -127,8 +127,8 @@ TEST(Sealed, with_predicate) {
     auto dim = 16;
     auto topK = 5;
     auto metric_type = MetricType::METRIC_L2;
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
-    schema->AddField("counter", DataType::INT64);
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    schema->AddDebugField("counter", DataType::INT64);
     std::string dsl = R"({
         "bool": {
             "must": [

@@ -71,3 +71,46 @@ For better throughput, Milvus allows asynchronous state synchronization between 
 #### 1.5 Stream and Time
 
 In order to boost throughput, we model Milvus as a stream-driven system. 
+
+
+
+#### 1.6 System Model
+
+```go
+type Service interface {
+  Init()
+  Start()
+  Stop()
+  GetServiceStates() (ServiceStates, error)
+  GetTimeTickChannel() (string, error)
+  GetStatisticsChannel() (string, error)
+} 
+```
+
+
+
+* *State*
+
+```go
+type StateCode = int
+
+const (
+  INITIALIZING StateCode = 0
+  HEALTHY StateCode = 1
+  ABNORMAL StateCode = 2
+)
+
+type NodeStates struct {
+  NodeID UniqueID
+  Role string
+  StateCode StateCode
+  ExtraInfo KeyValuePair
+}
+
+type ServiceStates struct {
+  StateCode StateCode
+  NodeStates []NodeStates
+  ExtraInfo KeyValuePair
+}
+```
+

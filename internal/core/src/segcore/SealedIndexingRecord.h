@@ -31,27 +31,27 @@ using SealedIndexingEntryPtr = std::unique_ptr<SealedIndexingEntry>;
 
 struct SealedIndexingRecord {
     void
-    add_entry(int64_t field_offset, SealedIndexingEntryPtr&& ptr) {
+    add_entry(FieldOffset field_offset, SealedIndexingEntryPtr&& ptr) {
         std::unique_lock lck(mutex_);
         entries_[field_offset] = std::move(ptr);
     }
 
     const SealedIndexingEntry*
-    get_entry(int64_t field_offset) const {
+    get_entry(FieldOffset field_offset) const {
         std::shared_lock lck(mutex_);
         AssertInfo(entries_.count(field_offset), "field_offset not found");
         return entries_.at(field_offset).get();
     }
 
     bool
-    test_readiness(int64_t field_offset) const {
+    is_ready(FieldOffset field_offset) const {
         std::shared_lock lck(mutex_);
         return entries_.count(field_offset);
     }
 
  private:
     // field_offset -> SealedIndexingEntry
-    std::map<int64_t, SealedIndexingEntryPtr> entries_;
+    std::map<FieldOffset, SealedIndexingEntryPtr> entries_;
     mutable std::shared_mutex mutex_;
 };
 }  // namespace milvus::segcore

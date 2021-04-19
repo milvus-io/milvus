@@ -286,6 +286,7 @@ class TestIndexBase:
         res = connect.search(collection, query)
         assert len(res) == nq
 
+    @pytest.mark.skip("test_create_index_multithread_ip")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     @pytest.mark.level(2)
     def test_create_index_multithread_ip(self, connect, collection, args):
