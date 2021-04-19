@@ -469,5 +469,9 @@ func (p *ParamTable) initLogCfg() {
 	if err != nil {
 		panic(err)
 	}
-	p.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("querynode-%d.log", p.QueryNodeID))
+	if len(rootPath) != 0 {
+		p.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("querynode-%d.log", p.QueryNodeID))
+	} else {
+		p.Log.File.Filename = ""
+	}
 }

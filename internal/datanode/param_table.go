@@ -311,5 +311,9 @@ func (p *ParamTable) initLogCfg() {
 	if err != nil {
 		panic(err)
 	}
-	p.Log.File.Filename = path.Join(rootPath, "datanode-"+strconv.FormatInt(p.NodeID, 10)+".log")
+	if len(rootPath) != 0 {
+		p.Log.File.Filename = path.Join(rootPath, "datanode-"+strconv.FormatInt(p.NodeID, 10)+".log")
+	} else {
+		p.Log.File.Filename = ""
+	}
 }

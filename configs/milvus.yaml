@@ -78,7 +78,7 @@ dataNode:
 log:
   level: debug
   file:
-    rootPath: /tmp/milvus
+    rootPath: ""
     maxSize: 300 # MB
     maxAge: 10 # day
     maxBackups: 20

@@ -203,5 +203,9 @@ func (p *ParamTable) initLogCfg() {
 	if err != nil {
 		panic(err)
 	}
-	p.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("masterservice-%d.log", p.NodeID))
+	if len(rootPath) != 0 {
+		p.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("masterservice-%d.log", p.NodeID))
+	} else {
+		p.Log.File.Filename = ""
+	}
 }
