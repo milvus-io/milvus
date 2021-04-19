@@ -63,7 +63,7 @@ type Master struct {
 	startCallbacks []func()
 	closeCallbacks []func()
 
-	segmentManager   *SegmentManager
+	segmentManager   SegmentManager
 	segmentAssigner  *SegmentAssigner
 	statProcessor    *StatsProcessor
 	segmentStatusMsg ms.MsgStream

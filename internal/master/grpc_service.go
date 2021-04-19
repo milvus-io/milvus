@@ -50,6 +50,7 @@ func (s *Master) DropCollection(ctx context.Context, in *internalpb.DropCollecti
 			mt:  s.metaTable,
 			cv:  make(chan error),
 		},
+		segManager: s.segmentManager,
 	}
 
 	response := &commonpb.Status{
