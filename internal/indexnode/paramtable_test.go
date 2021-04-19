@@ -16,11 +16,6 @@ func TestParamTable_Address(t *testing.T) {
 	fmt.Println(address)
 }
 
-func TestParamTable_Port(t *testing.T) {
-	port := Params.Port
-	assert.Equal(t, port, 31000)
-}
-
 func TestParamTable_MetaRootPath(t *testing.T) {
 	path := Params.MetaRootPath
 	assert.Equal(t, path, "by-dev/meta")
