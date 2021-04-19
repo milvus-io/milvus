@@ -335,6 +335,7 @@ func (ms *PulsarMsgStream) receiveMsg(consumer Consumer) {
 			if !ok {
 				return
 			}
+			consumer.Ack(pulsarMsg)
 			headerMsg := commonpb.MsgHeader{}
 			err := proto.Unmarshal(pulsarMsg.Payload(), &headerMsg)
 			if err != nil {
@@ -430,6 +431,7 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 				msgLen := len(consumer.Chan())
 				for i := 0; i < msgLen; i++ {
 					msg := <-consumer.Chan()
+					consumer.Ack(msg)
 					pulsarMsgBuffer = append(pulsarMsgBuffer, msg)
 				}
 			}
