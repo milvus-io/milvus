@@ -28,7 +28,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
             const float* query_data,
             int64_t num_queries,
             Timestamp timestamp,
-            const faiss::BitsetView& bitset,
+            std::optional<const BitmapSimple*> bitmap_opt,
             QueryResult& results);
 
 Status
@@ -37,6 +37,6 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
              const uint8_t* query_data,
              int64_t num_queries,
              Timestamp timestamp,
-             const faiss::BitsetView& bitset,
+             std::optional<const BitmapSimple*> bitmaps_opt,
              QueryResult& results);
 }  // namespace milvus::query

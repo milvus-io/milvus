@@ -4,7 +4,7 @@ option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/int
 
 import "common.proto";
 
-enum MsgType2 {
+enum MsgType {
   kNone = 0;
   /* Definition Requests: collection */
   kCreateCollection = 100;
@@ -78,7 +78,7 @@ message StringList {
 }
 
 message MsgBase {
-  MsgType2 msg_type = 1;
+  MsgType msg_type = 1;
   int64  msgID = 2;
   uint64 timestamp = 3;
   int64 sourceID = 4;

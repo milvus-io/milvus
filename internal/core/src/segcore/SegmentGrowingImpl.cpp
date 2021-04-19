@@ -299,16 +299,4 @@ SegmentGrowingImpl::LoadIndexing(const LoadIndexInfo& info) {
     return Status::OK();
 }
 
-SpanBase
-SegmentGrowingImpl::chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) const {
-    auto vec = get_insert_record().get_base_entity(field_offset);
-    return vec->get_span_base(chunk_id);
-}
-
-int64_t
-SegmentGrowingImpl::get_safe_num_chunk() const {
-    auto size = get_insert_record().ack_responder_.GetAck();
-    return upper_div(size, chunk_size_);
-}
-
 }  // namespace milvus::segcore

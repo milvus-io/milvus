@@ -112,7 +112,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     int64_t
-    get_safe_num_chunk() const override;
+    get_num_chunk() const override {
+        PanicInfo("unimplemented");
+    }
 
     Status
     LoadIndexing(const LoadIndexInfo& info) override;
@@ -137,7 +139,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
  protected:
     SpanBase
-    chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) const override;
+    chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) const override {
+        PanicInfo("unimplemented");
+    }
 
  private:
     int64_t chunk_size_;

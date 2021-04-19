@@ -23,7 +23,6 @@
 #include "utils/tools.h"
 #include <boost/container/vector.hpp>
 #include "common/Types.h"
-#include "common/Span.h"
 
 namespace milvus::segcore {
 
@@ -83,9 +82,6 @@ class VectorBase {
     virtual void
     set_data_raw(ssize_t element_offset, void* source, ssize_t element_count) = 0;
 
-    virtual SpanBase
-    get_span_base(int64_t chunk_id) const = 0;
-
     int64_t
     get_chunk_size() const {
         return chunk_size_;
@@ -108,9 +104,6 @@ class ConcurrentVectorImpl : public VectorBase {
     ConcurrentVectorImpl&
     operator=(const ConcurrentVectorImpl&) = delete;
 
-    using TraitType =
-        std::conditional_t<is_scalar, Type, std::conditional_t<std::is_same_v<Type, float>, FloatVector, BinaryVector>>;
-
  public:
     explicit ConcurrentVectorImpl(ssize_t dim, int64_t chunk_size) : VectorBase(chunk_size), Dim(is_scalar ? 1 : dim) {
         Assert(is_scalar ? dim == 1 : dim != 1);
@@ -120,25 +113,6 @@ class ConcurrentVectorImpl : public VectorBase {
     grow_to_at_least(int64_t element_count) override {
         auto chunk_count = upper_div(element_count, chunk_size_);
         chunks_.emplace_to_at_least(chunk_count, Dim * chunk_size_);
-    }
-
-    Span<TraitType>
-    get_span(int64_t chunk_id) const {
-        auto& chunk = get_chunk(chunk_id);
-        if constexpr (is_scalar) {
-            return Span<TraitType>(chunk.data(), chunk_size_);
-        } else if constexpr (std::is_same_v<Type, int64_t> || std::is_same_v<Type, int>) {
-            // only for testing
-            PanicInfo("unimplemented");
-        } else {
-            static_assert(std::is_same_v<typename TraitType::embedded_type, Type>);
-            return Span<TraitType>(chunk.data(), chunk_size_, Dim);
-        }
-    }
-
-    SpanBase
-    get_span_base(int64_t chunk_id) const override {
-        return get_span(chunk_id);
     }
 
     void
@@ -232,10 +206,23 @@ class ConcurrentVectorImpl : public VectorBase {
 template <typename Type>
 class ConcurrentVector : public ConcurrentVectorImpl<Type, true> {
  public:
-    static_assert(std::is_fundamental_v<Type>);
     explicit ConcurrentVector(int64_t chunk_size)
         : ConcurrentVectorImpl<Type, true>::ConcurrentVectorImpl(1, chunk_size) {
     }
+};
+
+class VectorTrait {};
+
+class FloatVector : public VectorTrait {
+ public:
+    using embedded_type = float;
+    static constexpr auto metric_type = DataType::VECTOR_FLOAT;
+};
+
+class BinaryVector : public VectorTrait {
+ public:
+    using embedded_type = uint8_t;
+    static constexpr auto metric_type = DataType::VECTOR_BINARY;
 };
 
 template <>

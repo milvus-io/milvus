@@ -13,8 +13,6 @@
 #include <type_traits>
 #include "common/Types.h"
 #include <cassert>
-#include "VectorTrait.h"
-
 namespace milvus {
 // type erasure to work around virtual restriction
 class SpanBase {
@@ -88,8 +86,14 @@ class Span<T, typename std::enable_if_t<std::is_fundamental_v<T>>> {
     const int64_t row_count_;
 };
 
+namespace segcore {
+class VectorTrait;
+class FloatVector;
+class BinaryVector;
+}  // namespace segcore
+
 template <typename VectorType>
-class Span<VectorType, typename std::enable_if_t<std::is_base_of_v<VectorTrait, VectorType>>> {
+class Span<VectorType, typename std::enable_if_t<std::is_base_of_v<segcore::VectorTrait, VectorType>>> {
  public:
     using embedded_type = typename VectorType::embedded_type;
 

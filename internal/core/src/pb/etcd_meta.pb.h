@@ -540,6 +540,7 @@ class CollectionMeta :
   enum : int {
     kSegmentIDsFieldNumber = 4,
     kPartitionTagsFieldNumber = 5,
+    kPartitionIDsFieldNumber = 6,
     kSchemaFieldNumber = 2,
     kIDFieldNumber = 1,
     kCreateTimeFieldNumber = 3,
@@ -572,6 +573,17 @@ class CollectionMeta :
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& partition_tags() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_partition_tags();
 
+  // repeated int64 partitionIDs = 6;
+  int partitionids_size() const;
+  void clear_partitionids();
+  ::PROTOBUF_NAMESPACE_ID::int64 partitionids(int index) const;
+  void set_partitionids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_partitionids(::PROTOBUF_NAMESPACE_ID::int64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+      partitionids() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+      mutable_partitionids();
+
   // .milvus.proto.schema.CollectionSchema schema = 2;
   bool has_schema() const;
   void clear_schema();
@@ -598,6 +610,8 @@ class CollectionMeta :
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > segmentids_;
   mutable std::atomic<int> _segmentids_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> partition_tags_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > partitionids_;
+  mutable std::atomic<int> _partitionids_cached_byte_size_;
   ::milvus::proto::schema::CollectionSchema* schema_;
   ::PROTOBUF_NAMESPACE_ID::int64 id_;
   ::PROTOBUF_NAMESPACE_ID::uint64 create_time_;
@@ -1597,6 +1611,36 @@ inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
 CollectionMeta::mutable_partition_tags() {
   // @@protoc_insertion_point(field_mutable_list:milvus.proto.etcd.CollectionMeta.partition_tags)
   return &partition_tags_;
+}
+
+// repeated int64 partitionIDs = 6;
+inline int CollectionMeta::partitionids_size() const {
+  return partitionids_.size();
+}
+inline void CollectionMeta::clear_partitionids() {
+  partitionids_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 CollectionMeta::partitionids(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.CollectionMeta.partitionIDs)
+  return partitionids_.Get(index);
+}
+inline void CollectionMeta::set_partitionids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  partitionids_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.CollectionMeta.partitionIDs)
+}
+inline void CollectionMeta::add_partitionids(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  partitionids_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.etcd.CollectionMeta.partitionIDs)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+CollectionMeta::partitionids() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.etcd.CollectionMeta.partitionIDs)
+  return partitionids_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+CollectionMeta::mutable_partitionids() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.etcd.CollectionMeta.partitionIDs)
+  return &partitionids_;
 }
 
 // -------------------------------------------------------------------

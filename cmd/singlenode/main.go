@@ -14,9 +14,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/indexnode"
+	"github.com/zilliztech/milvus-distributed/internal/indexbuilder"
 	"github.com/zilliztech/milvus-distributed/internal/master"
-	"github.com/zilliztech/milvus-distributed/internal/proxynode"
+	"github.com/zilliztech/milvus-distributed/internal/proxy"
 	"github.com/zilliztech/milvus-distributed/internal/querynode"
 	"github.com/zilliztech/milvus-distributed/internal/writenode"
 )
@@ -62,10 +62,10 @@ func InitMaster(cpuprofile *string, wg *sync.WaitGroup) {
 
 func InitProxy(wg *sync.WaitGroup) {
 	defer wg.Done()
-	proxynode.Init()
-	fmt.Println("ProxyID is", proxynode.Params.ProxyID())
+	proxy.Init()
+	fmt.Println("ProxyID is", proxy.Params.ProxyID())
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := proxynode.CreateProxy(ctx)
+	svr, err := proxy.CreateProxy(ctx)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}
@@ -138,9 +138,9 @@ func InitQueryNode(wg *sync.WaitGroup) {
 
 func InitIndexBuilder(wg *sync.WaitGroup) {
 	defer wg.Done()
-	indexnode.Init()
+	indexbuilder.Init()
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := indexnode.CreateBuilder(ctx)
+	svr, err := indexbuilder.CreateBuilder(ctx)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}

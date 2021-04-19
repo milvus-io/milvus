@@ -44,7 +44,7 @@ master:
   address: localhost
   port: 53100
 
-proxyNode:
+proxy:
   address: localhost
   port: 19530
 

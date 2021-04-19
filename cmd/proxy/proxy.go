@@ -8,15 +8,15 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/zilliztech/milvus-distributed/internal/proxynode"
+	"github.com/zilliztech/milvus-distributed/internal/proxy"
 	"go.uber.org/zap"
 )
 
 func main() {
-	proxynode.Init()
-	fmt.Println("ProxyID is", proxynode.Params.ProxyID())
+	proxy.Init()
+	fmt.Println("ProxyID is", proxy.Params.ProxyID())
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := proxynode.CreateProxy(ctx)
+	svr, err := proxy.CreateProxy(ctx)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}

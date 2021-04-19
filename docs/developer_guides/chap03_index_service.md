@@ -26,7 +26,7 @@ type IndexService interface {
 
 ```go
 type RegisterNodeRequest struct {
-  MsgBase
+  RequestBase
   Address string
   Port int64
 }
