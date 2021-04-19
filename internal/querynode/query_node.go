@@ -32,7 +32,16 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
-type Node = typeutil.QueryNodeInterface
+type Node interface {
+	typeutil.Component
+
+	AddQueryChannel(in *queryPb.AddQueryChannelsRequest) (*commonpb.Status, error)
+	RemoveQueryChannel(in *queryPb.RemoveQueryChannelsRequest) (*commonpb.Status, error)
+	WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error)
+	LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.Status, error)
+	ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error)
+}
+
 type QueryService = typeutil.QueryServiceInterface
 
 type QueryNode struct {
@@ -60,6 +69,7 @@ type QueryNode struct {
 	closer io.Closer
 
 	// clients
+	queryClient QueryServiceInterface
 	indexClient IndexServiceInterface
 	dataClient  DataServiceInterface
 }
@@ -107,33 +117,77 @@ func NewQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
 	return node
 }
 
+func NewQueryNodeWithoutID(ctx context.Context) *QueryNode {
+	ctx1, cancel := context.WithCancel(ctx)
+	node := &QueryNode{
+		queryNodeLoopCtx:    ctx1,
+		queryNodeLoopCancel: cancel,
+
+		dataSyncService: nil,
+		metaService:     nil,
+		searchService:   nil,
+		statsService:    nil,
+		segManager:      nil,
+	}
+
+	var err error
+	cfg := &config.Configuration{
+		ServiceName: "query_node",
+		Sampler: &config.SamplerConfig{
+			Type:  "const",
+			Param: 1,
+		},
+	}
+	node.tracer, node.closer, err = cfg.NewTracer()
+	if err != nil {
+		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
+	}
+	opentracing.SetGlobalTracer(node.tracer)
+
+	segmentsMap := make(map[int64]*Segment)
+	collections := make([]*Collection, 0)
+
+	tSafe := newTSafe()
+
+	node.replica = &collectionReplicaImpl{
+		collections: collections,
+		segments:    segmentsMap,
+
+		tSafe: tSafe,
+	}
+	node.stateCode.Store(internalpb2.StateCode_INITIALIZING)
+	return node
+}
+
 // TODO: delete this and call node.Init()
 func Init() {
 	Params.Init()
 }
 
 func (node *QueryNode) Init() error {
+	Params.Init()
+	return nil
+}
+
+func (node *QueryNode) Start() error {
 	registerReq := &queryPb.RegisterNodeRequest{
 		Address: &commonpb.Address{
 			Ip:   Params.QueryNodeIP,
 			Port: Params.QueryNodePort,
 		},
 	}
-	var client QueryService // TODO: init interface
-	response, err := client.RegisterNode(registerReq)
+
+	response, err := node.queryClient.RegisterNode(registerReq)
 	if err != nil {
 		panic(err)
 	}
 	if response.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
 		panic(response.Status.Reason)
 	}
-	// TODO: use response.initParams
 
-	Params.Init()
-	return nil
-}
+	Params.QueryNodeID = response.InitParams.NodeID
+	fmt.Println("QueryNodeID is", Params.QueryNodeID)
 
-func (node *QueryNode) Start() error {
 	if node.indexClient == nil {
 		log.Println("WARN: null index service detected")
 	}
@@ -186,6 +240,14 @@ func (node *QueryNode) Stop() error {
 	if node.closer != nil {
 		node.closer.Close()
 	}
+	return nil
+}
+
+func (node *QueryNode) SetQueryService(query QueryServiceInterface) error {
+	if query == nil {
+		return errors.New("query index service interface")
+	}
+	node.queryClient = query
 	return nil
 }
 

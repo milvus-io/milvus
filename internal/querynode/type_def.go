@@ -3,6 +3,7 @@ package querynode
 import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
@@ -14,6 +15,10 @@ type DSL = string
 type TimeRange struct {
 	timestampMin Timestamp
 	timestampMax Timestamp
+}
+
+type QueryServiceInterface interface {
+	RegisterNode(req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error)
 }
 
 type DataServiceInterface interface {

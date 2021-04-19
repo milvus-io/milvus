@@ -40,18 +40,18 @@ services:
     networks:
       - milvus
 
-  indexbuilder:
-    image: ${TARGET_REPO}/indexbuilder:${TARGET_TAG}
+  queryservice:
+    image: ${TARGET_REPO}/queryservice:${TARGET_TAG}
     build:
       context: ../../../
-      dockerfile: build/docker/deploy/indexbuilder/DockerFile
+      dockerfile: build/docker/deploy/queryservice/DockerFile
       cache_from:
-        - ${SOURCE_REPO}/indexbuilder:${SOURCE_TAG}
+        - ${SOURCE_REPO}/queryservice:${SOURCE_TAG}
     environment:
-      MASTER_ADDRESS: ${MASTER_ADDRESS}
+      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       ETCD_ADDRESS: ${ETCD_ADDRESS}
+      MASTER_ADDRESS: ${MASTER_ADDRESS}
       MINIO_ADDRESS: ${MINIO_ADDRESS}
-
     networks:
       - milvus
 
