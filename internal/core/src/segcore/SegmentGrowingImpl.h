@@ -125,6 +125,45 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return 0;
     }
 
+    template <typename T>
+    void
+    bulk_subscript_impl(const VectorBase& vec_raw, const int64_t* seg_offsets, int64_t count, void* output_raw) const {
+        static_assert(IsScalar<T>);
+        auto vec_ptr = dynamic_cast<const ConcurrentVector<T>*>(&vec_raw);
+        Assert(vec_ptr);
+        auto& vec = *vec_ptr;
+        auto output = reinterpret_cast<T*>(output_raw);
+        for (int64_t i = 0; i < count; ++i) {
+            auto offset = seg_offsets[i];
+            output[i] = offset == -1 ? -1 : vec[offset];
+        }
+    }
+
+    void
+    bulk_subscript(SystemFieldType system_type,
+                   const int64_t* seg_offsets,
+                   int64_t count,
+                   void* output) const override {
+        switch (system_type) {
+            case SystemFieldType::Timestamp:
+                PanicInfo("timestamp unsupported");
+            case SystemFieldType::RowId:
+                bulk_subscript_impl<int64_t>(this->record_.uids_, seg_offsets, count, output);
+                break;
+            default:
+                PanicInfo("unknown subscript fields");
+        }
+    }
+
+    void
+    bulk_subscript(FieldOffset field_offset, const int64_t* seg_offsets, int64_t count, void* output) const override {
+        // TODO: support more types
+        auto vec_ptr = record_.get_base_entity(field_offset);
+        auto data_type = schema_->operator[](field_offset).get_data_type();
+        Assert(data_type == DataType::INT64);
+        bulk_subscript_impl<int64_t>(*vec_ptr, seg_offsets, count, output);
+    }
+
     int64_t
     num_chunk_data() const override;
 
@@ -145,9 +184,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
  public:
     std::shared_ptr<DeletedRecord::TmpBitmap>
     get_deleted_bitmap(int64_t del_barrier, Timestamp query_timestamp, int64_t insert_barrier, bool force = false);
-
-    void
-    FillTargetEntry(const query::Plan* Plan, QueryResult& results) const override;
 
  protected:
     SpanBase

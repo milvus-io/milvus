@@ -17,10 +17,10 @@ class SystemPropertyImpl : public SystemProperty {
  public:
     [[nodiscard]] bool
     SystemFieldVerify(const FieldName& field_name, FieldId field_id) const override {
-        if (!name_to_types_.count(field_name)) {
+        if (!IsSystem(field_name)) {
             return false;
         }
-        if (!id_to_types_.count(field_id)) {
+        if (!IsSystem(field_id)) {
             return false;
         }
         auto left_id = name_to_types_.at(field_name);
@@ -30,14 +30,24 @@ class SystemPropertyImpl : public SystemProperty {
 
     SystemFieldType
     GetSystemFieldType(FieldName field_name) const override {
-        Assert(name_to_types_.count(field_name));
+        Assert(IsSystem(field_name));
         return name_to_types_.at(field_name);
     }
 
     SystemFieldType
     GetSystemFieldType(FieldId field_id) const override {
-        Assert(id_to_types_.count(field_id));
+        Assert(IsSystem(field_id));
         return id_to_types_.at(field_id);
+    }
+
+    bool
+    IsSystem(FieldId field_id) const override {
+        return id_to_types_.count(field_id);
+    }
+
+    bool
+    IsSystem(FieldName field_name) const override {
+        return name_to_types_.count(field_name);
     }
 
     friend const SystemProperty&

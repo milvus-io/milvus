@@ -29,7 +29,7 @@ struct GeneratedData {
     RowBasedRawData raw_;
     template <typename T>
     auto
-    get_col(int index) {
+    get_col(int index) const {
         auto& target = cols_.at(index);
         std::vector<T> ret(target.size() / sizeof(T));
         memcpy(ret.data(), target.data(), target.size());
@@ -152,6 +152,14 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
             }
             case engine::DataType::FLOAT: {
                 vector<float> data(N);
+                for (auto& x : data) {
+                    x = distr(er);
+                }
+                insert_cols(data);
+                break;
+            }
+            case engine::DataType::DOUBLE: {
+                vector<double> data(N);
                 for (auto& x : data) {
                     x = distr(er);
                 }

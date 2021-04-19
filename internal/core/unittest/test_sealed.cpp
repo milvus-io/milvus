@@ -216,6 +216,32 @@ TEST(Sealed, with_predicate) {
     }
 }
 
+void
+SealedLoader(const GeneratedData& dataset, SegmentSealed& seg) {
+    // TODO
+    auto row_count = dataset.row_ids_.size();
+    {
+        LoadFieldDataInfo info;
+        info.blob = dataset.row_ids_.data();
+        info.row_count = dataset.row_ids_.size();
+        info.field_id = 0;  // field id for RowId
+        seg.LoadFieldData(info);
+    }
+    int field_offset = 0;
+    for (auto& meta : seg.get_schema().get_fields()) {
+        if (meta.is_vector()) {
+            ++field_offset;
+            continue;
+        }
+        LoadFieldDataInfo info;
+        info.field_id = meta.get_id().get();
+        info.row_count = row_count;
+        info.blob = dataset.cols_[field_offset].data();
+        seg.LoadFieldData(info);
+        ++field_offset;
+    }
+}
+
 TEST(Sealed, LoadFieldData) {
     auto dim = 16;
     auto topK = 5;
@@ -223,13 +249,12 @@ TEST(Sealed, LoadFieldData) {
     auto metric_type = MetricType::METRIC_L2;
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
-    auto counter_id = schema->AddDebugField("counter", DataType::INT64);
+    schema->AddDebugField("counter", DataType::INT64);
+    schema->AddDebugField("double", DataType::DOUBLE);
+
     auto dataset = DataGen(schema, N);
 
     auto fakevec = dataset.get_col<float>(0);
-
-    auto counter = dataset.get_col<int64_t>(1);
-    auto indexing = std::make_shared<knowhere::IVF>();
 
     auto conf = knowhere::Config{{knowhere::meta::DIM, dim},
                                  {knowhere::meta::TOPK, topK},
@@ -238,21 +263,27 @@ TEST(Sealed, LoadFieldData) {
                                  {knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
                                  {knowhere::meta::DEVICEID, 0}};
     auto database = knowhere::GenDataset(N, dim, fakevec.data());
+    auto indexing = std::make_shared<knowhere::IVF>();
     indexing->Train(database, conf);
     indexing->AddWithoutIds(database, conf);
 
     auto segment = CreateSealedSegment(schema);
-    LoadFieldDataInfo field_info;
-    field_info.field_id = counter_id.get();
-    field_info.row_count = N;
-    field_info.blob = counter.data();
-    segment->LoadFieldData(field_info);
-
-    LoadIndexInfo vec_info;
-    vec_info.field_id = fakevec_id.get();
-    vec_info.field_name = "fakevec";
-    vec_info.index = indexing;
-    vec_info.index_params["metric_type"] = milvus::knowhere::Metric::L2;
-    segment->LoadIndex(vec_info);
-    int i = 1 + 1;
+    SealedLoader(dataset, *segment);
+    {
+        LoadIndexInfo vec_info;
+        vec_info.field_id = fakevec_id.get();
+        vec_info.field_name = "fakevec";
+        vec_info.index = indexing;
+        vec_info.index_params["metric_type"] = milvus::knowhere::Metric::L2;
+        segment->LoadIndex(vec_info);
+    }
+    ASSERT_EQ(segment->num_chunk_data(), 1);
+    auto chunk_span1 = segment->chunk_data<int64_t>(FieldOffset(1), 0);
+    auto chunk_span2 = segment->chunk_data<double>(FieldOffset(2), 0);
+    auto ref1 = dataset.get_col<int64_t>(1);
+    auto ref2 = dataset.get_col<double>(2);
+    for (int i = 0; i < N; ++i) {
+        ASSERT_EQ(chunk_span1[i], ref1[i]);
+        ASSERT_EQ(chunk_span2[i], ref2[i]);
+    }
 }

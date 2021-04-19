@@ -16,13 +16,14 @@
 #include "common/Span.h"
 #include "IndexingEntry.h"
 #include <knowhere/index/vector_index/VecIndex.h>
+#include "common/SystemProperty.h"
 
 namespace milvus::segcore {
 
 class SegmentInterface {
  public:
-    virtual void
-    FillTargetEntry(const query::Plan* Plan, QueryResult& results) const = 0;
+    void
+    FillTargetEntry(const query::Plan* plan, QueryResult& results) const;
 
     virtual QueryResult
     Search(const query::Plan* Plan,
@@ -40,6 +41,13 @@ class SegmentInterface {
     get_schema() const = 0;
 
     virtual ~SegmentInterface() = default;
+
+ protected:
+    virtual void
+    bulk_subscript(SystemFieldType system_type, const int64_t* seg_offsets, int64_t count, void* output) const = 0;
+
+    virtual void
+    bulk_subscript(FieldOffset field_offset, const int64_t* seg_offsets, int64_t count, void* output) const = 0;
 };
 
 // internal API for DSL calculation
