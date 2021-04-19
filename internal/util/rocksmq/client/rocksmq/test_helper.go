@@ -15,13 +15,14 @@ func newConsumerName() string {
 	return fmt.Sprintf("my-consumer-%v", time.Now().Nanosecond())
 }
 
-func newMockRocksMQ() *RocksMQ {
-	return &server.RocksMQ{}
+func newMockRocksMQ() server.RocksMQ {
+	var rocksmq server.RocksMQ
+	return rocksmq
 }
 
 func newMockClient() *client {
 	client, _ := newClient(ClientOptions{
-		server: newMockRocksMQ(),
+		Server: newMockRocksMQ(),
 	})
 	return client
 }

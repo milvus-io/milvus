@@ -7,11 +7,12 @@ import (
 type RocksMQ = server.RocksMQ
 
 func NewClient(options ClientOptions) (Client, error) {
+	options.Server = server.Rmq
 	return newClient(options)
 }
 
 type ClientOptions struct {
-	server *RocksMQ
+	Server RocksMQ
 }
 
 type Client interface {

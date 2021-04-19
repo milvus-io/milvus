@@ -9,14 +9,8 @@ import (
 	rocksdbkv "github.com/zilliztech/milvus-distributed/internal/kv/rocksdb"
 )
 
-var Rmq *RocksMQ
+var Rmq *rocksmq
 var once sync.Once
-
-type Consumer struct {
-	GroupName   string
-	ChannelName string
-	MsgMutex    chan struct{}
-}
 
 func InitRmq(rocksdbName string, idAllocator allocator.GIDAllocator) error {
 	var err error
