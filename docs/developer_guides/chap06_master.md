@@ -12,102 +12,20 @@ type Client interface {
   CreateCollection(req CreateCollectionRequest) error
   DropCollection(req DropCollectionRequest) error
   HasCollection(req HasCollectionRequest) (bool, error)
-  DescribeCollection(req DescribeCollectionRequest) (CollectionDescriptionResponse, error)
-  GetCollectionStatistics(req CollectionStatsRequest) (CollectionStatsResponse, error)
-  ShowCollections(req ShowCollectionRequest) (ShowCollectionResponse, error)
-  
+  DescribeCollection(req DescribeCollectionRequest) (CollectionDescription, error)
+  ShowCollections(req ShowCollectionRequest) ([]string, error)
   CreatePartition(req CreatePartitionRequest) error
   DropPartition(req DropPartitionRequest) error
   HasPartition(req HasPartitionRequest) (bool, error)
-  GetPartitionStatistics(req PartitionStatsRequest) (PartitionStatsResponse, error)
-  ShowPartitions(req ShowPartitionRequest) (ShowPartitionResponse, error)
-  
-  CreateIndex(req CreateIndexRequest) error
-  DescribeIndex(DescribeIndexRequest) (DescribeIndexResponse, error)
-  
+  DescribePartition(req DescribePartitionRequest) (PartitionDescription, error)
+  ShowPartitions(req ShowPartitionRequest) ([]string, error)
   AllocTimestamp(req TsoRequest) (TsoResponse, error)
   AllocID(req IDRequest) (IDResponse, error)
-  
   GetDdChannel() (string, error)
   GetTimeTickChannel() (string, error)
   GetStatsChannel() (string, error)
 }
 ```
-
-
-
-* *DescribeCollection*
-
-```go
-type DescribeCollectionRequest struct {
-  CollectionName string
-}
-
-type CollectionDescriptionResponse struct {
-  Schema CollectionSchema
-}
-```
-
-* *GetCollectionStatistics*
-
-```go
-type CollectionStatsRequest struct {
-  CollectionName string
-}
-
-type CollectionStatsResponse struct {
-  Stats []KeyValuePair
-}
-```
-
-* *ShowCollections*
-
-```go
-type ShowCollectionResponse struct {
-  CollectionNames []string
-}
-```
-
-* *GetPartitionStatistics*
-
-```go
-type PartitionStatsRequest struct {
-  CollectionName string
-  PartitionTag string
-}
-
-type PartitionStatsResponse struct {
-  Stats []KeyValuePair
-}
-```
-
-* *ShowPartitions*
-
-```go
-type ShowPartitionResponse struct {
-  PartitionTags []string
-}
-```
-
-* *DescribeIndex*
-
-```go
-type DescribeIndexRequest struct {
-  CollectionName string
-  FieldName string
-}
-
-type IndexDescription struct {
-  IndexName string
-  params []KeyValuePair
-}
-
-type DescribeIndexResponse struct {
-  IndexDescriptions []IndexDescription
-}
-```
-
-
 
 
 
