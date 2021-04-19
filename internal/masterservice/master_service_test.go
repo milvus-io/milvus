@@ -18,6 +18,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
@@ -77,6 +78,21 @@ func (d *dataMock) GetInsertBinlogPaths(req *datapb.InsertBinlogPathRequest) (*d
 		rst.Paths = append(rst.Paths, path)
 	}
 	return rst, nil
+}
+
+type queryMock struct {
+	collID []typeutil.UniqueID
+	mutex  sync.Mutex
+}
+
+func (q *queryMock) ReleaseCollection(req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	q.collID = append(q.collID, req.CollectionID)
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		Reason:    "",
+	}, nil
 }
 
 func (d *dataMock) GetSegmentInfoChannel() (*milvuspb.StringResponse, error) {
@@ -161,6 +177,13 @@ func TestMasterService(t *testing.T) {
 		mutex:     sync.Mutex{},
 	}
 	err = core.SetIndexService(im)
+	assert.Nil(t, err)
+
+	qm := &queryMock{
+		collID: nil,
+		mutex:  sync.Mutex{},
+	}
+	err = core.SetQueryService(qm)
 	assert.Nil(t, err)
 
 	err = core.Init()
@@ -767,6 +790,12 @@ func TestMasterService(t *testing.T) {
 		collArray := pm.GetCollArray()
 		assert.Equal(t, len(collArray), 1)
 		assert.Equal(t, collArray[0], "testColl")
+
+		time.Sleep(time.Millisecond * 100)
+		qm.mutex.Lock()
+		assert.Equal(t, len(qm.collID), 1)
+		assert.Equal(t, qm.collID[0], collMeta.ID)
+		qm.mutex.Unlock()
 
 		req = &milvuspb.DropCollectionRequest{
 			Base: &commonpb.MsgBase{

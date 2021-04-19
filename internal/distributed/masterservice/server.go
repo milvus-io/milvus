@@ -97,6 +97,14 @@ func (s *GrpcServer) SetIndexService(p cms.IndexServiceInterface) error {
 	return c.SetIndexService(p)
 }
 
+func (s *GrpcServer) SetQueryService(q cms.QueryServiceInterface) error {
+	c, ok := s.core.(*cms.Core)
+	if !ok {
+		return errors.Errorf("set query service failed")
+	}
+	return c.SetQueryService(q)
+}
+
 func (s *GrpcServer) GetComponentStatesRPC(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
 	return s.core.GetComponentStates()
 }
