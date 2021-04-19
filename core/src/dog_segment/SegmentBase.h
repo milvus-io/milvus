@@ -70,7 +70,7 @@ class SegmentBase {
     LoadRawData(std::string_view field_name, const char* blob, int64_t blob_size) = 0;
 
     virtual Status
-    BuildIndex() = 0;
+    BuildIndex(IndexMetaPtr index_meta) = 0;
 
     virtual int64_t
     GetMemoryUsageInBytes() = 0;
@@ -89,7 +89,7 @@ class SegmentBase {
 using SegmentBasePtr = std::unique_ptr<SegmentBase>;
 
 SegmentBasePtr
-CreateSegment(SchemaPtr schema, IndexMetaPtr index_meta);
+CreateSegment(SchemaPtr schema);
 
 }  // namespace dog_segment
 }  // namespace milvus

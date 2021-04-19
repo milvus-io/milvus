@@ -190,6 +190,7 @@ class Collection :
   enum : int {
     kSegmentIdsFieldNumber = 5,
     kPartitionTagsFieldNumber = 6,
+    kIndexesFieldNumber = 7,
     kNameFieldNumber = 2,
     kSchemaFieldNumber = 3,
     kIdFieldNumber = 1,
@@ -222,6 +223,17 @@ class Collection :
   void add_partition_tags(const char* value, size_t size);
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& partition_tags() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_partition_tags();
+
+  // repeated .milvus.grpc.IndexParam indexes = 7;
+  int indexes_size() const;
+  void clear_indexes();
+  ::milvus::grpc::IndexParam* mutable_indexes(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::IndexParam >*
+      mutable_indexes();
+  const ::milvus::grpc::IndexParam& indexes(int index) const;
+  ::milvus::grpc::IndexParam* add_indexes();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::IndexParam >&
+      indexes() const;
 
   // string name = 2;
   void clear_name();
@@ -260,6 +272,7 @@ class Collection :
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 > segment_ids_;
   mutable std::atomic<int> _segment_ids_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> partition_tags_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::IndexParam > indexes_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr name_;
   ::milvus::grpc::Schema* schema_;
   ::PROTOBUF_NAMESPACE_ID::uint64 id_;
@@ -383,6 +396,7 @@ class Segment :
 
   enum : int {
     kPartitionTagFieldNumber = 3,
+    kCollectionNameFieldNumber = 8,
     kSegmentIdFieldNumber = 1,
     kCollectionIdFieldNumber = 2,
     kChannelStartFieldNumber = 4,
@@ -400,6 +414,17 @@ class Segment :
   std::string* mutable_partition_tag();
   std::string* release_partition_tag();
   void set_allocated_partition_tag(std::string* partition_tag);
+
+  // string collection_name = 8;
+  void clear_collection_name();
+  const std::string& collection_name() const;
+  void set_collection_name(const std::string& value);
+  void set_collection_name(std::string&& value);
+  void set_collection_name(const char* value);
+  void set_collection_name(const char* value, size_t size);
+  std::string* mutable_collection_name();
+  std::string* release_collection_name();
+  void set_allocated_collection_name(std::string* collection_name);
 
   // uint64 segment_id = 1;
   void clear_segment_id();
@@ -437,6 +462,7 @@ class Segment :
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr partition_tag_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::PROTOBUF_NAMESPACE_ID::uint64 segment_id_;
   ::PROTOBUF_NAMESPACE_ID::uint64 collection_id_;
   ::PROTOBUF_NAMESPACE_ID::int32 channel_start_;
@@ -821,6 +847,33 @@ Collection::mutable_partition_tags() {
   return &partition_tags_;
 }
 
+// repeated .milvus.grpc.IndexParam indexes = 7;
+inline int Collection::indexes_size() const {
+  return indexes_.size();
+}
+inline ::milvus::grpc::IndexParam* Collection::mutable_indexes(int index) {
+  // @@protoc_insertion_point(field_mutable:masterpb.Collection.indexes)
+  return indexes_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::IndexParam >*
+Collection::mutable_indexes() {
+  // @@protoc_insertion_point(field_mutable_list:masterpb.Collection.indexes)
+  return &indexes_;
+}
+inline const ::milvus::grpc::IndexParam& Collection::indexes(int index) const {
+  // @@protoc_insertion_point(field_get:masterpb.Collection.indexes)
+  return indexes_.Get(index);
+}
+inline ::milvus::grpc::IndexParam* Collection::add_indexes() {
+  // @@protoc_insertion_point(field_add:masterpb.Collection.indexes)
+  return indexes_.Add();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::IndexParam >&
+Collection::indexes() const {
+  // @@protoc_insertion_point(field_list:masterpb.Collection.indexes)
+  return indexes_;
+}
+
 // -------------------------------------------------------------------
 
 // Segment
@@ -958,6 +1011,57 @@ inline void Segment::set_close_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value) 
   
   close_timestamp_ = value;
   // @@protoc_insertion_point(field_set:masterpb.Segment.close_timestamp)
+}
+
+// string collection_name = 8;
+inline void Segment::clear_collection_name() {
+  collection_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& Segment::collection_name() const {
+  // @@protoc_insertion_point(field_get:masterpb.Segment.collection_name)
+  return collection_name_.GetNoArena();
+}
+inline void Segment::set_collection_name(const std::string& value) {
+  
+  collection_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:masterpb.Segment.collection_name)
+}
+inline void Segment::set_collection_name(std::string&& value) {
+  
+  collection_name_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:masterpb.Segment.collection_name)
+}
+inline void Segment::set_collection_name(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  collection_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:masterpb.Segment.collection_name)
+}
+inline void Segment::set_collection_name(const char* value, size_t size) {
+  
+  collection_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:masterpb.Segment.collection_name)
+}
+inline std::string* Segment::mutable_collection_name() {
+  
+  // @@protoc_insertion_point(field_mutable:masterpb.Segment.collection_name)
+  return collection_name_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* Segment::release_collection_name() {
+  // @@protoc_insertion_point(field_release:masterpb.Segment.collection_name)
+  
+  return collection_name_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void Segment::set_allocated_collection_name(std::string* collection_name) {
+  if (collection_name != nullptr) {
+    
+  } else {
+    
+  }
+  collection_name_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), collection_name);
+  // @@protoc_insertion_point(field_set_allocated:masterpb.Segment.collection_name)
 }
 
 // -------------------------------------------------------------------

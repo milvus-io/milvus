@@ -66,5 +66,66 @@ Watch::Service::~Service() {
 }
 
 
+static const char* KV_method_names[] = {
+  "/etcdserverpb.KV/Range",
+};
+
+std::unique_ptr< KV::Stub> KV::NewStub(const std::shared_ptr< ::grpc::ChannelInterface>& channel, const ::grpc::StubOptions& options) {
+  (void)options;
+  std::unique_ptr< KV::Stub> stub(new KV::Stub(channel));
+  return stub;
+}
+
+KV::Stub::Stub(const std::shared_ptr< ::grpc::ChannelInterface>& channel)
+  : channel_(channel), rpcmethod_Range_(KV_method_names[0], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  {}
+
+::grpc::Status KV::Stub::Range(::grpc::ClientContext* context, const ::etcdserverpb::RangeRequest& request, ::etcdserverpb::RangeResponse* response) {
+  return ::grpc::internal::BlockingUnaryCall(channel_.get(), rpcmethod_Range_, context, request, response);
+}
+
+void KV::Stub::experimental_async::Range(::grpc::ClientContext* context, const ::etcdserverpb::RangeRequest* request, ::etcdserverpb::RangeResponse* response, std::function<void(::grpc::Status)> f) {
+  ::grpc_impl::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_Range_, context, request, response, std::move(f));
+}
+
+void KV::Stub::experimental_async::Range(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::etcdserverpb::RangeResponse* response, std::function<void(::grpc::Status)> f) {
+  ::grpc_impl::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_Range_, context, request, response, std::move(f));
+}
+
+void KV::Stub::experimental_async::Range(::grpc::ClientContext* context, const ::etcdserverpb::RangeRequest* request, ::etcdserverpb::RangeResponse* response, ::grpc::experimental::ClientUnaryReactor* reactor) {
+  ::grpc_impl::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_Range_, context, request, response, reactor);
+}
+
+void KV::Stub::experimental_async::Range(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::etcdserverpb::RangeResponse* response, ::grpc::experimental::ClientUnaryReactor* reactor) {
+  ::grpc_impl::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_Range_, context, request, response, reactor);
+}
+
+::grpc::ClientAsyncResponseReader< ::etcdserverpb::RangeResponse>* KV::Stub::AsyncRangeRaw(::grpc::ClientContext* context, const ::etcdserverpb::RangeRequest& request, ::grpc::CompletionQueue* cq) {
+  return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::etcdserverpb::RangeResponse>::Create(channel_.get(), cq, rpcmethod_Range_, context, request, true);
+}
+
+::grpc::ClientAsyncResponseReader< ::etcdserverpb::RangeResponse>* KV::Stub::PrepareAsyncRangeRaw(::grpc::ClientContext* context, const ::etcdserverpb::RangeRequest& request, ::grpc::CompletionQueue* cq) {
+  return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::etcdserverpb::RangeResponse>::Create(channel_.get(), cq, rpcmethod_Range_, context, request, false);
+}
+
+KV::Service::Service() {
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      KV_method_names[0],
+      ::grpc::internal::RpcMethod::NORMAL_RPC,
+      new ::grpc::internal::RpcMethodHandler< KV::Service, ::etcdserverpb::RangeRequest, ::etcdserverpb::RangeResponse>(
+          std::mem_fn(&KV::Service::Range), this)));
+}
+
+KV::Service::~Service() {
+}
+
+::grpc::Status KV::Service::Range(::grpc::ServerContext* context, const ::etcdserverpb::RangeRequest* request, ::etcdserverpb::RangeResponse* response) {
+  (void) context;
+  (void) request;
+  (void) response;
+  return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+}
+
+
 }  // namespace etcdserverpb
 

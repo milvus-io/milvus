@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"encoding/gob"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 type SegmentStats struct {
@@ -45,10 +43,10 @@ type Segment struct {
 	CollectionName string `json:"collection_name"`
 }
 
-func NewSegment(id uuid.UUID, collectioID uuid.UUID, cName string, ptag string, chStart int, chEnd int, openTime time.Time, closeTime time.Time) Segment {
+func NewSegment(id uint64, collectioID uint64, cName string, ptag string, chStart int, chEnd int, openTime time.Time, closeTime time.Time) Segment {
 	return Segment{
-		SegmentID:      uint64(id.ID()),
-		CollectionID:   uint64(id.ID()),
+		SegmentID:      id,
+		CollectionID:   collectioID,
 		CollectionName: cName,
 		PartitionTag:   ptag,
 		ChannelStart:   chStart,

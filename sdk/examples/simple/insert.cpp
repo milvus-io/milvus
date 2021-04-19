@@ -15,17 +15,19 @@
 #include <string>
 #include <iostream>
 
-#include "examples/utils/Utils.h"
+#include "utils/Utils.h"
 
 #include "grpc/ClientProxy.h"
 #include "interface/ConnectionImpl.h"
-#include "ip.h"
+#include "utils/TimeRecorder.h"
 
 const int N = 100;
 const int DIM = 16;
+const int LOOP = 10;
 
 const milvus::FieldValue GetData() {
   milvus::FieldValue value_map;
+
   std::vector<int32_t> int32_data;
   for (int i = 0; i < N; i++) {
     int32_data.push_back(i);
@@ -46,15 +48,29 @@ const milvus::FieldValue GetData() {
 
 int
 main(int argc, char* argv[]) {
-  auto client = milvus::ConnectionImpl();
-  milvus::ConnectParam connect_param;
-  connect_param.ip_address = IP;
-  connect_param.port = "19530";
-  client.Connect(connect_param);
-  std::vector <int64_t> ids_array;
-  auto data = GetData();
-  for (int64_t i = 0; i < N; i++) {
-    ids_array.push_back(i);
-  }
-  auto status = client.Insert("collection1", "tag01", data, ids_array);
+  TestParameters parameters = milvus_sdk::Utils::ParseTestParameters(argc, argv);
+    if (!parameters.is_valid){
+    return 0;
+   }
+
+    auto client = milvus::ConnectionImpl();
+    milvus::ConnectParam connect_param;
+    connect_param.ip_address = parameters.address_.empty() ? "127.0.0.1":parameters.address_;
+    connect_param.port = parameters.port_.empty() ? "19530":parameters.port_ ;
+    client.Connect(connect_param);
+    std::vector<int64_t> ids_array;
+    auto data = GetData();
+    for (int64_t i = 0; i < N; i++) {
+        ids_array.push_back(i);
+    }
+
+    milvus_sdk::TimeRecorder insert("insert");
+    for (int j = 0; j < LOOP; ++j) {
+        auto status = client.Insert("collection1", "tag01", data, ids_array);
+        if (!status.ok()){
+            return -1;
+        }
+    }
+
+    return 0;
 }

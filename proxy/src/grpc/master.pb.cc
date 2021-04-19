@@ -15,6 +15,7 @@
 #include <google/protobuf/wire_format.h>
 // @@protoc_insertion_point(includes)
 #include <google/protobuf/port_def.inc>
+extern PROTOBUF_INTERNAL_EXPORT_message_2eproto ::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<2> scc_info_IndexParam_message_2eproto;
 extern PROTOBUF_INTERNAL_EXPORT_message_2eproto ::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<1> scc_info_Schema_message_2eproto;
 namespace masterpb {
 class CollectionDefaultTypeInternal {
@@ -41,9 +42,10 @@ static void InitDefaultsscc_info_Collection_master_2eproto() {
   ::masterpb::Collection::InitAsDefaultInstance();
 }
 
-::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<1> scc_info_Collection_master_2eproto =
-    {{ATOMIC_VAR_INIT(::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase::kUninitialized), 1, InitDefaultsscc_info_Collection_master_2eproto}, {
-      &scc_info_Schema_message_2eproto.base,}};
+::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<2> scc_info_Collection_master_2eproto =
+    {{ATOMIC_VAR_INIT(::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase::kUninitialized), 2, InitDefaultsscc_info_Collection_master_2eproto}, {
+      &scc_info_Schema_message_2eproto.base,
+      &scc_info_IndexParam_message_2eproto.base,}};
 
 static void InitDefaultsscc_info_Segment_master_2eproto() {
   GOOGLE_PROTOBUF_VERIFY_VERSION;
@@ -89,6 +91,7 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_master_2eproto::offsets[] PROT
   PROTOBUF_FIELD_OFFSET(::masterpb::Collection, create_time_),
   PROTOBUF_FIELD_OFFSET(::masterpb::Collection, segment_ids_),
   PROTOBUF_FIELD_OFFSET(::masterpb::Collection, partition_tags_),
+  PROTOBUF_FIELD_OFFSET(::masterpb::Collection, indexes_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::masterpb::Segment, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -101,6 +104,7 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_master_2eproto::offsets[] PROT
   PROTOBUF_FIELD_OFFSET(::masterpb::Segment, channel_end_),
   PROTOBUF_FIELD_OFFSET(::masterpb::Segment, open_timestamp_),
   PROTOBUF_FIELD_OFFSET(::masterpb::Segment, close_timestamp_),
+  PROTOBUF_FIELD_OFFSET(::masterpb::Segment, collection_name_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::masterpb::SegmentStat, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -112,8 +116,8 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_master_2eproto::offsets[] PROT
 };
 static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
   { 0, -1, sizeof(::masterpb::Collection)},
-  { 11, -1, sizeof(::masterpb::Segment)},
-  { 23, -1, sizeof(::masterpb::SegmentStat)},
+  { 12, -1, sizeof(::masterpb::Segment)},
+  { 25, -1, sizeof(::masterpb::SegmentStat)},
 };
 
 static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
@@ -124,19 +128,22 @@ static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] =
 
 const char descriptor_table_protodef_master_2eproto[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) =
   "\n\014master.proto\022\010masterpb\032\rmessage.proto\""
-  "\215\001\n\nCollection\022\n\n\002id\030\001 \001(\004\022\014\n\004name\030\002 \001(\t"
+  "\267\001\n\nCollection\022\n\n\002id\030\001 \001(\004\022\014\n\004name\030\002 \001(\t"
   "\022#\n\006schema\030\003 \001(\0132\023.milvus.grpc.Schema\022\023\n"
   "\013create_time\030\004 \001(\004\022\023\n\013segment_ids\030\005 \003(\004\022"
-  "\026\n\016partition_tags\030\006 \003(\t\"\250\001\n\007Segment\022\022\n\ns"
-  "egment_id\030\001 \001(\004\022\025\n\rcollection_id\030\002 \001(\004\022\025"
-  "\n\rpartition_tag\030\003 \001(\t\022\025\n\rchannel_start\030\004"
-  " \001(\005\022\023\n\013channel_end\030\005 \001(\005\022\026\n\016open_timest"
-  "amp\030\006 \001(\004\022\027\n\017close_timestamp\030\007 \001(\004\"K\n\013Se"
-  "gmentStat\022\022\n\nsegment_id\030\001 \001(\004\022\023\n\013memory_"
-  "size\030\002 \001(\004\022\023\n\013memory_rate\030\003 \001(\0022I\n\006Maste"
-  "r\022\?\n\020CreateCollection\022\024.milvus.grpc.Mapp"
-  "ing\032\023.milvus.grpc.Status\"\000B\010Z\006masterb\006pr"
-  "oto3"
+  "\026\n\016partition_tags\030\006 \003(\t\022(\n\007indexes\030\007 \003(\013"
+  "2\027.milvus.grpc.IndexParam\"\301\001\n\007Segment\022\022\n"
+  "\nsegment_id\030\001 \001(\004\022\025\n\rcollection_id\030\002 \001(\004"
+  "\022\025\n\rpartition_tag\030\003 \001(\t\022\025\n\rchannel_start"
+  "\030\004 \001(\005\022\023\n\013channel_end\030\005 \001(\005\022\026\n\016open_time"
+  "stamp\030\006 \001(\004\022\027\n\017close_timestamp\030\007 \001(\004\022\027\n\017"
+  "collection_name\030\010 \001(\t\"K\n\013SegmentStat\022\022\n\n"
+  "segment_id\030\001 \001(\004\022\023\n\013memory_size\030\002 \001(\004\022\023\n"
+  "\013memory_rate\030\003 \001(\0022\210\001\n\006Master\022\?\n\020CreateC"
+  "ollection\022\024.milvus.grpc.Mapping\032\023.milvus"
+  ".grpc.Status\"\000\022=\n\013CreateIndex\022\027.milvus.g"
+  "rpc.IndexParam\032\023.milvus.grpc.Status\"\000B\010Z"
+  "\006masterb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_master_2eproto_deps[1] = {
   &::descriptor_table_message_2eproto,
@@ -149,7 +156,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_mas
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_master_2eproto_once;
 static bool descriptor_table_master_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_master_2eproto = {
-  &descriptor_table_master_2eproto_initialized, descriptor_table_protodef_master_2eproto, "master.proto", 524,
+  &descriptor_table_master_2eproto_initialized, descriptor_table_protodef_master_2eproto, "master.proto", 655,
   &descriptor_table_master_2eproto_once, descriptor_table_master_2eproto_sccs, descriptor_table_master_2eproto_deps, 3, 1,
   schemas, file_default_instances, TableStruct_master_2eproto::offsets,
   file_level_metadata_master_2eproto, 3, file_level_enum_descriptors_master_2eproto, file_level_service_descriptors_master_2eproto,
@@ -180,6 +187,9 @@ void Collection::clear_schema() {
   }
   schema_ = nullptr;
 }
+void Collection::clear_indexes() {
+  indexes_.Clear();
+}
 Collection::Collection()
   : ::PROTOBUF_NAMESPACE_ID::Message(), _internal_metadata_(nullptr) {
   SharedCtor();
@@ -189,7 +199,8 @@ Collection::Collection(const Collection& from)
   : ::PROTOBUF_NAMESPACE_ID::Message(),
       _internal_metadata_(nullptr),
       segment_ids_(from.segment_ids_),
-      partition_tags_(from.partition_tags_) {
+      partition_tags_(from.partition_tags_),
+      indexes_(from.indexes_) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
   name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   if (!from.name().empty()) {
@@ -241,6 +252,7 @@ void Collection::Clear() {
 
   segment_ids_.Clear();
   partition_tags_.Clear();
+  indexes_.Clear();
   name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   if (GetArenaNoVirtual() == nullptr && schema_ != nullptr) {
     delete schema_;
@@ -308,6 +320,18 @@ const char* Collection::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID:
             CHK_(ptr);
             if (!ctx->DataAvailable(ptr)) break;
           } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 50);
+        } else goto handle_unusual;
+        continue;
+      // repeated .milvus.grpc.IndexParam indexes = 7;
+      case 7:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 58)) {
+          ptr -= 1;
+          do {
+            ptr += 1;
+            ptr = ctx->ParseMessage(add_indexes(), ptr);
+            CHK_(ptr);
+            if (!ctx->DataAvailable(ptr)) break;
+          } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 58);
         } else goto handle_unusual;
         continue;
       default: {
@@ -424,6 +448,17 @@ bool Collection::MergePartialFromCodedStream(
         break;
       }
 
+      // repeated .milvus.grpc.IndexParam indexes = 7;
+      case 7: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (58 & 0xFF)) {
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadMessage(
+                input, add_indexes()));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
       default: {
       handle_unusual:
         if (tag == 0) {
@@ -498,6 +533,15 @@ void Collection::SerializeWithCachedSizes(
       6, this->partition_tags(i), output);
   }
 
+  // repeated .milvus.grpc.IndexParam indexes = 7;
+  for (unsigned int i = 0,
+      n = static_cast<unsigned int>(this->indexes_size()); i < n; i++) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteMessageMaybeToArray(
+      7,
+      this->indexes(static_cast<int>(i)),
+      output);
+  }
+
   if (_internal_metadata_.have_unknown_fields()) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFields(
         _internal_metadata_.unknown_fields(), output);
@@ -562,6 +606,14 @@ void Collection::SerializeWithCachedSizes(
       WriteStringToArray(6, this->partition_tags(i), target);
   }
 
+  // repeated .milvus.grpc.IndexParam indexes = 7;
+  for (unsigned int i = 0,
+      n = static_cast<unsigned int>(this->indexes_size()); i < n; i++) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessageToArray(
+        7, this->indexes(static_cast<int>(i)), target);
+  }
+
   if (_internal_metadata_.have_unknown_fields()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields(), target);
@@ -604,6 +656,17 @@ size_t Collection::ByteSizeLong() const {
   for (int i = 0, n = this->partition_tags_size(); i < n; i++) {
     total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
       this->partition_tags(i));
+  }
+
+  // repeated .milvus.grpc.IndexParam indexes = 7;
+  {
+    unsigned int count = static_cast<unsigned int>(this->indexes_size());
+    total_size += 1UL * count;
+    for (unsigned int i = 0; i < count; i++) {
+      total_size +=
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          this->indexes(static_cast<int>(i)));
+    }
   }
 
   // string name = 2;
@@ -663,6 +726,7 @@ void Collection::MergeFrom(const Collection& from) {
 
   segment_ids_.MergeFrom(from.segment_ids_);
   partition_tags_.MergeFrom(from.partition_tags_);
+  indexes_.MergeFrom(from.indexes_);
   if (from.name().size() > 0) {
 
     name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.name_);
@@ -701,6 +765,7 @@ void Collection::InternalSwap(Collection* other) {
   _internal_metadata_.Swap(&other->_internal_metadata_);
   segment_ids_.InternalSwap(&other->segment_ids_);
   partition_tags_.InternalSwap(CastToBase(&other->partition_tags_));
+  CastToBase(&indexes_)->InternalSwap(CastToBase(&other->indexes_));
   name_.Swap(&other->name_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
   swap(schema_, other->schema_);
@@ -734,6 +799,10 @@ Segment::Segment(const Segment& from)
   if (!from.partition_tag().empty()) {
     partition_tag_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.partition_tag_);
   }
+  collection_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (!from.collection_name().empty()) {
+    collection_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.collection_name_);
+  }
   ::memcpy(&segment_id_, &from.segment_id_,
     static_cast<size_t>(reinterpret_cast<char*>(&close_timestamp_) -
     reinterpret_cast<char*>(&segment_id_)) + sizeof(close_timestamp_));
@@ -743,6 +812,7 @@ Segment::Segment(const Segment& from)
 void Segment::SharedCtor() {
   ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_Segment_master_2eproto.base);
   partition_tag_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  collection_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   ::memset(&segment_id_, 0, static_cast<size_t>(
       reinterpret_cast<char*>(&close_timestamp_) -
       reinterpret_cast<char*>(&segment_id_)) + sizeof(close_timestamp_));
@@ -755,6 +825,7 @@ Segment::~Segment() {
 
 void Segment::SharedDtor() {
   partition_tag_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  collection_name_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
 
 void Segment::SetCachedSize(int size) const {
@@ -773,6 +844,7 @@ void Segment::Clear() {
   (void) cached_has_bits;
 
   partition_tag_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  collection_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   ::memset(&segment_id_, 0, static_cast<size_t>(
       reinterpret_cast<char*>(&close_timestamp_) -
       reinterpret_cast<char*>(&segment_id_)) + sizeof(close_timestamp_));
@@ -833,6 +905,13 @@ const char* Segment::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::in
       case 7:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 56)) {
           close_timestamp_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // string collection_name = 8;
+      case 8:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 66)) {
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_collection_name(), ptr, ctx, "masterpb.Segment.collection_name");
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
@@ -959,6 +1038,21 @@ bool Segment::MergePartialFromCodedStream(
         break;
       }
 
+      // string collection_name = 8;
+      case 8: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (66 & 0xFF)) {
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
+                input, this->mutable_collection_name()));
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+            this->collection_name().data(), static_cast<int>(this->collection_name().length()),
+            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
+            "masterpb.Segment.collection_name"));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
       default: {
       handle_unusual:
         if (tag == 0) {
@@ -1026,6 +1120,16 @@ void Segment::SerializeWithCachedSizes(
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(7, this->close_timestamp(), output);
   }
 
+  // string collection_name = 8;
+  if (this->collection_name().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->collection_name().data(), static_cast<int>(this->collection_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "masterpb.Segment.collection_name");
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
+      8, this->collection_name(), output);
+  }
+
   if (_internal_metadata_.have_unknown_fields()) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFields(
         _internal_metadata_.unknown_fields(), output);
@@ -1080,6 +1184,17 @@ void Segment::SerializeWithCachedSizes(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(7, this->close_timestamp(), target);
   }
 
+  // string collection_name = 8;
+  if (this->collection_name().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->collection_name().data(), static_cast<int>(this->collection_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "masterpb.Segment.collection_name");
+    target =
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
+        8, this->collection_name(), target);
+  }
+
   if (_internal_metadata_.have_unknown_fields()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields(), target);
@@ -1106,6 +1221,13 @@ size_t Segment::ByteSizeLong() const {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
         this->partition_tag());
+  }
+
+  // string collection_name = 8;
+  if (this->collection_name().size() > 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->collection_name());
   }
 
   // uint64 segment_id = 1;
@@ -1181,6 +1303,10 @@ void Segment::MergeFrom(const Segment& from) {
 
     partition_tag_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.partition_tag_);
   }
+  if (from.collection_name().size() > 0) {
+
+    collection_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.collection_name_);
+  }
   if (from.segment_id() != 0) {
     set_segment_id(from.segment_id());
   }
@@ -1223,6 +1349,8 @@ void Segment::InternalSwap(Segment* other) {
   using std::swap;
   _internal_metadata_.Swap(&other->_internal_metadata_);
   partition_tag_.Swap(&other->partition_tag_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+    GetArenaNoVirtual());
+  collection_name_.Swap(&other->collection_name_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
   swap(segment_id_, other->segment_id_);
   swap(collection_id_, other->collection_id_);

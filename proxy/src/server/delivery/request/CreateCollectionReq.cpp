@@ -13,32 +13,30 @@
 // #include "db/Utils.h"
 #include "server/ValidationUtil.h"
 #include "utils/Log.h"
-#include "utils/TimeRecorder.h"
+#include "server/MetaWrapper.h"
 
 #include <set>
 
 namespace milvus {
 namespace server {
 
-CreateCollectionReq::CreateCollectionReq(const ContextPtr& context, const std::string& collection_name,
-                                         FieldsType& fields, milvus::json& extra_params)
+CreateCollectionReq::CreateCollectionReq(const ContextPtr &context, const ::milvus::grpc::Mapping *request)
     : BaseReq(context, ReqType::kCreateCollection),
-      collection_name_(collection_name),
-      fields_(fields),
-      extra_params_(extra_params) {
+      request_(request) {
 }
 
 BaseReqPtr
-CreateCollectionReq::Create(const ContextPtr& context, const std::string& collection_name, FieldsType& fields,
-                            milvus::json& extra_params) {
-    return std::shared_ptr<BaseReq>(new CreateCollectionReq(context, collection_name, fields, extra_params));
+CreateCollectionReq::Create(const ContextPtr &context, const ::milvus::grpc::Mapping *request) {
+    return std::shared_ptr<BaseReq>(new CreateCollectionReq(context, request));
 }
 
 Status
 CreateCollectionReq::OnExecute() {
-
-
-    return Status::OK();
+    auto status = MetaWrapper::GetInstance().MetaClient()->CreateCollection(*request_);
+    if (status.ok()){
+      status = MetaWrapper::GetInstance().SyncMeta();
+    }
+    return status;
 }
 
 }  // namespace server

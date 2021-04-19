@@ -13,7 +13,7 @@ NewSegment(CPartition partition, unsigned long segment_id) {
   auto p = (milvus::dog_segment::Partition*)partition;
 
   // TODO: remove hard code null index ptr
-  auto segment = milvus::dog_segment::CreateSegment(p->get_schema(), nullptr);
+  auto segment = milvus::dog_segment::CreateSegment(p->get_schema());
 
   // TODO: delete print
   std::cout << "create segment " << segment_id << std::endl;
@@ -165,7 +165,7 @@ Close(CSegmentBase c_segment) {
 int
 BuildIndex(CSegmentBase c_segment) {
     auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
-    auto status = segment->BuildIndex();
+    auto status = segment->BuildIndex(nullptr);
     return status.code();
 }
 
@@ -175,6 +175,13 @@ IsOpened(CSegmentBase c_segment) {
   auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
   auto status = segment->get_state();
   return status == milvus::dog_segment::SegmentBase::SegmentState::Open;
+}
+
+long int
+GetMemoryUsageInBytes(CSegmentBase c_segment) {
+  auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
+  auto mem_size = segment->GetMemoryUsageInBytes();
+  return mem_size;
 }
 
 //////////////////////////////////////////////////////////////////

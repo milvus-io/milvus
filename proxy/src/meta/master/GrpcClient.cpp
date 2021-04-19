@@ -20,7 +20,7 @@ Status GrpcClient::CreateCollection(const milvus::grpc::Mapping &mapping) {
   ::grpc::Status grpc_status = stub_->CreateCollection(&context, mapping, &response);
 
   if (!grpc_status.ok()) {
-    std::cerr << "CreateHybridCollection gRPC failed!" << std::endl;
+    std::cerr << "CreateHybridCollection gRPC failed!" << grpc_status.error_message() << std::endl;
     return Status(grpc_status.error_code(), grpc_status.error_message());
   }
 
