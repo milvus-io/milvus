@@ -1,7 +1,9 @@
 package reader
 
 import (
+	"log"
 	"strconv"
+	"strings"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
@@ -15,6 +17,10 @@ var Params ParamTable
 func (p *ParamTable) Init() {
 	p.BaseTable.Init()
 	err := p.LoadYaml("advanced/query_node.yaml")
+	if err != nil {
+		panic(err)
+	}
+	err = p.LoadYaml("advanced/channel.yaml")
 	if err != nil {
 		panic(err)
 	}
@@ -192,4 +198,112 @@ func (p *ParamTable) etcdRootPath() string {
 		panic(err)
 	}
 	return etcdRootPath
+}
+
+func (p *ParamTable) insertChannelNames() []string {
+	ch, err := p.Load("msgChannel.chanNamePrefix.insert")
+	if err != nil {
+		log.Fatal(err)
+	}
+	channelRange, err := p.Load("msgChannel.channelRange.insert")
+	if err != nil {
+		panic(err)
+	}
+
+	chanRange := strings.Split(channelRange, ",")
+	if len(chanRange) != 2 {
+		panic("Illegal channel range num")
+	}
+	channelBegin, err := strconv.Atoi(chanRange[0])
+	if err != nil {
+		panic(err)
+	}
+	channelEnd, err := strconv.Atoi(chanRange[1])
+	if err != nil {
+		panic(err)
+	}
+	if channelBegin < 0 || channelEnd < 0 {
+		panic("Illegal channel range value")
+	}
+	if channelBegin > channelEnd {
+		panic("Illegal channel range value")
+	}
+
+	channels := make([]string, channelEnd-channelBegin)
+	for i := 0; i < channelEnd-channelBegin; i++ {
+		channels[i] = ch + "-" + strconv.Itoa(channelBegin+i)
+	}
+	return channels
+}
+
+func (p *ParamTable) searchChannelNames() []string {
+	ch, err := p.Load("msgChannel.chanNamePrefix.search")
+	if err != nil {
+		log.Fatal(err)
+	}
+	channelRange, err := p.Load("msgChannel.channelRange.search")
+	if err != nil {
+		panic(err)
+	}
+
+	chanRange := strings.Split(channelRange, ",")
+	if len(chanRange) != 2 {
+		panic("Illegal channel range num")
+	}
+	channelBegin, err := strconv.Atoi(chanRange[0])
+	if err != nil {
+		panic(err)
+	}
+	channelEnd, err := strconv.Atoi(chanRange[1])
+	if err != nil {
+		panic(err)
+	}
+	if channelBegin < 0 || channelEnd < 0 {
+		panic("Illegal channel range value")
+	}
+	if channelBegin > channelEnd {
+		panic("Illegal channel range value")
+	}
+
+	channels := make([]string, channelEnd-channelBegin)
+	for i := 0; i < channelEnd-channelBegin; i++ {
+		channels[i] = ch + "-" + strconv.Itoa(channelBegin+i)
+	}
+	return channels
+}
+
+func (p *ParamTable) searchResultChannelNames() []string {
+	ch, err := p.Load("msgChannel.chanNamePrefix.search")
+	if err != nil {
+		log.Fatal(err)
+	}
+	channelRange, err := p.Load("msgChannel.channelRange.search")
+	if err != nil {
+		panic(err)
+	}
+
+	chanRange := strings.Split(channelRange, ",")
+	if len(chanRange) != 2 {
+		panic("Illegal channel range num")
+	}
+	channelBegin, err := strconv.Atoi(chanRange[0])
+	if err != nil {
+		panic(err)
+	}
+	channelEnd, err := strconv.Atoi(chanRange[1])
+	if err != nil {
+		panic(err)
+	}
+	if channelBegin < 0 || channelEnd < 0 {
+		panic("Illegal channel range value")
+	}
+	if channelBegin > channelEnd {
+		panic("Illegal channel range value")
+	}
+
+	channels := make([]string, channelEnd-channelBegin)
+	for i := 0; i < channelEnd-channelBegin; i++ {
+		channels[i] = ch + "-" + strconv.Itoa(channelBegin+i)
+	}
+	return channels
 }
