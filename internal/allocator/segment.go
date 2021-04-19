@@ -210,7 +210,7 @@ func (sa *SegIDAssigner) syncSegments() {
 	}
 
 	if err != nil {
-		log.Panic("syncID Failed!!!!!")
+		log.Println("syncSemgnet Failed!!!!!")
 		return
 	}
 }

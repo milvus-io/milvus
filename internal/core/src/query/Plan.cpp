@@ -24,18 +24,22 @@ namespace milvus::query {
 
 static std::unique_ptr<VectorPlanNode>
 ParseVecNode(Plan* plan, const Json& out_body) {
+    Assert(out_body.is_object());
     // TODO add binary info
     auto vec_node = std::make_unique<FloatVectorANNS>();
     Assert(out_body.size() == 1);
     auto iter = out_body.begin();
     std::string field_name = iter.key();
     auto& vec_info = iter.value();
+    Assert(vec_info.is_object());
     auto topK = vec_info["topk"];
+    AssertInfo(topK > 0, "topK must greater than 0");
+    AssertInfo(topK < 16384, "topK is too large");
     vec_node->query_info_.topK_ = topK;
-    vec_node->query_info_.metric_type_ = vec_info["metric_type"];
-    vec_node->query_info_.search_params_ = vec_info["params"];
+    vec_node->query_info_.metric_type_ = vec_info.at("metric_type");
+    vec_node->query_info_.search_params_ = vec_info.at("params");
     vec_node->query_info_.field_id_ = field_name;
-    vec_node->placeholder_tag_ = vec_info["query"];
+    vec_node->placeholder_tag_ = vec_info.at("query");
     auto tag = vec_node->placeholder_tag_;
     AssertInfo(!plan->tag2field_.count(tag), "duplicated placeholder tag");
     plan->tag2field_.emplace(tag, field_name);
@@ -56,6 +60,8 @@ to_lower(const std::string& raw) {
     return data;
 }
 
+template <class...>
+constexpr std::false_type always_false{};
 template <typename T>
 std::unique_ptr<Expr>
 ParseRangeNodeImpl(const Schema& schema, const std::string& field_name, const Json& body) {
@@ -63,11 +69,19 @@ ParseRangeNodeImpl(const Schema& schema, const std::string& field_name, const Js
     auto data_type = schema[field_name].get_data_type();
     expr->data_type_ = data_type;
     expr->field_id_ = field_name;
+    Assert(body.is_object());
     for (auto& item : body.items()) {
         auto op_name = to_lower(item.key());
 
         AssertInfo(RangeExpr::mapping_.count(op_name), "op(" + op_name + ") not found");
         auto op = RangeExpr::mapping_.at(op_name);
+        if constexpr (std::is_integral_v<T>) {
+            Assert(item.value().is_number_integer());
+        } else if constexpr (std::is_floating_point_v<T>) {
+            Assert(item.value().is_number());
+        } else {
+            static_assert(always_false<T>, "unsupported type");
+        }
         T value = item.value();
         expr->conditions_.emplace_back(op, value);
     }
@@ -83,8 +97,10 @@ ParseRangeNode(const Schema& schema, const Json& out_body) {
     auto data_type = schema[field_name].get_data_type();
     Assert(!field_is_vector(data_type));
     switch (data_type) {
-        case DataType::BOOL:
-            return ParseRangeNodeImpl<bool>(schema, field_name, body);
+        case DataType::BOOL: {
+            PanicInfo("bool is not supported in Range node");
+            // return ParseRangeNodeImpl<bool>(schema, field_name, body);
+        }
         case DataType::INT8:
             return ParseRangeNodeImpl<int8_t>(schema, field_name, body);
         case DataType::INT16:
@@ -109,16 +125,17 @@ CreatePlanImplNaive(const Schema& schema, const std::string& dsl_str) {
     nlohmann::json vec_pack;
     std::optional<std::unique_ptr<Expr>> predicate;
 
-    auto& bool_dsl = dsl["bool"];
+    auto& bool_dsl = dsl.at("bool");
     if (bool_dsl.contains("must")) {
-        auto& packs = bool_dsl["must"];
+        auto& packs = bool_dsl.at("must");
+        Assert(packs.is_array());
         for (auto& pack : packs) {
             if (pack.contains("vector")) {
-                auto& out_body = pack["vector"];
+                auto& out_body = pack.at("vector");
                 plan->plan_node_ = ParseVecNode(plan.get(), out_body);
             } else if (pack.contains("range")) {
                 AssertInfo(!predicate, "unsupported complex DSL");
-                auto& out_body = pack["range"];
+                auto& out_body = pack.at("range");
                 predicate = ParseRangeNode(schema, out_body);
             } else {
                 PanicInfo("unsupported node");
@@ -126,7 +143,7 @@ CreatePlanImplNaive(const Schema& schema, const std::string& dsl_str) {
         }
         AssertInfo(plan->plan_node_, "vector node not found");
     } else if (bool_dsl.contains("vector")) {
-        auto& out_body = bool_dsl["vector"];
+        auto& out_body = bool_dsl.at("vector");
         plan->plan_node_ = ParseVecNode(plan.get(), out_body);
         Assert(plan->plan_node_);
     } else {
