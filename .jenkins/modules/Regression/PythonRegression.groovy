@@ -25,6 +25,7 @@ timeout(time: "${regressionTimeout}", unit: 'MINUTES') {
                                    --namespace ${env.HELM_RELEASE_NAMESPACE} ${env.HELM_RELEASE_NAME} ."
                 } else {
                     helmCMD = "helm install --wait --timeout 300s \
+                                   --set standalone.enabled=true \
                                    --set image.all.repository=${env.TARGET_REPO}/milvus-distributed \
                                    --set image.all.tag=${env.TARGET_TAG} \
                                    --set image.all.pullPolicy=Always \
@@ -49,9 +50,9 @@ timeout(time: "${regressionTimeout}", unit: 'MINUTES') {
                 sh "python3 -m pip install --no-cache-dir -r requirements.txt"
                 if (isTimeTriggeredBuild) {
                     echo "This is Cron Job!"
-                    sh "pytest --tags=0331 -n 2 --ip ${env.HELM_RELEASE_NAME}-milvus-ha.${env.HELM_RELEASE_NAMESPACE}.svc.cluster.local"
+                    sh "pytest --tags=0331 -n 4 --ip ${env.HELM_RELEASE_NAME}-milvus-ha.${env.HELM_RELEASE_NAMESPACE}.svc.cluster.local"
                 } else {
-                    sh "pytest --tags=smoke -n 2 --ip ${env.HELM_RELEASE_NAME}-milvus-ha.${env.HELM_RELEASE_NAMESPACE}.svc.cluster.local"
+                    sh "pytest --tags=smoke -n 4 --ip ${env.HELM_RELEASE_NAME}-milvus-ha.${env.HELM_RELEASE_NAMESPACE}.svc.cluster.local"
                 }
             }
         } catch (exc) {
@@ -63,7 +64,6 @@ timeout(time: "${regressionTimeout}", unit: 'MINUTES') {
                 def componentLabels = "release=${env.HELM_RELEASE_NAME}"
                 def namespace = "${env.HELM_RELEASE_NAMESPACE}"
                 def artifactsPath = "${env.DEV_TEST_ARTIFACTS_PATH}"
-
 
                 sh "mkdir -p $artifactsPath"
                 sh "for pod in \$(kubectl get pod -n $namespace -l ${milvusLabels} -o jsonpath='{range.items[*]}{.metadata.name} '); do kubectl logs --all-containers -n $namespace \$pod > $artifactsPath/\$pod.log; done"
