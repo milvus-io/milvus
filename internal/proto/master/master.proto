@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+option go_package="github.com/czs007/suvlim/internal/proto/master";
+
+import "internal/proto/message/message.proto";
+
+message Collection {
+  uint64 id=1;
+  string name=2;
+  milvus.grpc.Schema schema=3;
+  uint64 create_time=4;
+  repeated uint64 segment_ids=5;
+  repeated string partition_tags=6;
+  repeated milvus.grpc.IndexParam indexes=7;
+}
+
+enum SegmentStatus {
+    OPENED = 0;
+    CLOSED = 1;
+    INDEXING = 2;
+    INDEXED = 3;
+}
+
+message Segment {
+  uint64 segment_id=1;
+  uint64 collection_id =2;
+  string partition_tag=3;
+  int32 channel_start=4;
+  int32 channel_end=5;
+  uint64 open_timestamp=6;
+  uint64 close_timestamp=7;
+  string collection_name=8;
+  SegmentStatus status=9;
+  int64 rows=10;
+}
+
+message SegmentStat {
+  uint64 segment_id=1;
+  uint64 memory_size=2;
+  float memory_rate=3;
+  SegmentStatus status=4;
+  int64 rows=5;
+}
+
+service Master {
+  rpc CreateCollection(milvus.grpc.Mapping) returns (milvus.grpc.Status){}
+  rpc CreateIndex(milvus.grpc.IndexParam) returns (milvus.grpc.Status) {}
+}
