@@ -13,7 +13,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -72,26 +71,22 @@ type Master struct {
 
 	//grpc server
 	grpcServer *grpc.Server
+	grpcErr    chan error
 
-	// chans
-	ssChan chan internalpb.SegmentStats
-
-	grpcErr chan error
-
-	kvBase    *kv.EtcdKV
-	scheduler *ddRequestScheduler
-	mt        *metaTable
-	tsmp      *timeSyncMsgProducer
+	kvBase               *kv.EtcdKV
+	scheduler            *ddRequestScheduler
+	metaTable            *metaTable
+	timesSyncMsgProducer *timeSyncMsgProducer
 
 	// tso ticker
-	tsTicker *time.Ticker
+	tsoTicker *time.Ticker
 
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
 
-	segmentMgr *SegmentManager
-	statsMs    ms.MsgStream
+	segmentMgr       *SegmentManager
+	segmentStatusMsg ms.MsgStream
 
 	//id allocator
 	idAllocator *GlobalIDAllocator
@@ -128,7 +123,7 @@ func CreateServer(ctx context.Context, opt *Option) (*Master, error) {
 	}
 
 	//timeSyncMsgProducer
-	tsmp, err := NewTimeSyncMsgProducer(ctx)
+	tsMsgProducer, err := NewTimeSyncMsgProducer(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +133,7 @@ func CreateServer(ctx context.Context, opt *Option) (*Master, error) {
 	pulsarProxyStream.Start()
 	var proxyStream ms.MsgStream = pulsarProxyStream
 	proxyTimeTickBarrier := newSoftTimeTickBarrier(ctx, &proxyStream, opt.ProxyIDs, opt.SoftTTBInterval)
-	tsmp.SetProxyTtBarrier(proxyTimeTickBarrier)
+	tsMsgProducer.SetProxyTtBarrier(proxyTimeTickBarrier)
 
 	pulsarWriteStream := ms.NewPulsarMsgStream(ctx, 1024) //output stream
 	pulsarWriteStream.SetPulsarClient(opt.PulsarAddr)
@@ -146,17 +141,17 @@ func CreateServer(ctx context.Context, opt *Option) (*Master, error) {
 	pulsarWriteStream.Start()
 	var writeStream ms.MsgStream = pulsarWriteStream
 	writeTimeTickBarrier := newHardTimeTickBarrier(ctx, &writeStream, opt.WriteIDs)
-	tsmp.SetWriteNodeTtBarrier(writeTimeTickBarrier)
+	tsMsgProducer.SetWriteNodeTtBarrier(writeTimeTickBarrier)
 
 	pulsarDMStream := ms.NewPulsarMsgStream(ctx, 1024) //input stream
 	pulsarDMStream.SetPulsarClient(opt.PulsarAddr)
 	pulsarDMStream.CreatePulsarProducers(opt.PulsarDMChannels)
-	tsmp.SetDMSyncStream(pulsarDMStream)
+	tsMsgProducer.SetDMSyncStream(pulsarDMStream)
 
 	pulsarK2SStream := ms.NewPulsarMsgStream(ctx, 1024) //input stream
 	pulsarK2SStream.SetPulsarClient(opt.PulsarAddr)
 	pulsarK2SStream.CreatePulsarProducers(opt.PulsarK2SChannels)
-	tsmp.SetK2sSyncStream(pulsarK2SStream)
+	tsMsgProducer.SetK2sSyncStream(pulsarK2SStream)
 
 	// stats msg stream
 	statsMs := ms.NewPulsarMsgStream(ctx, 1024)
@@ -165,14 +160,13 @@ func CreateServer(ctx context.Context, opt *Option) (*Master, error) {
 	statsMs.Start()
 
 	m := &Master{
-		ctx:            ctx,
-		startTimestamp: time.Now().Unix(),
-		kvBase:         newKVBase(opt.KVRootPath, opt.EtcdAddr),
-		mt:             metakv,
-		tsmp:           tsmp,
-		ssChan:         make(chan internalpb.SegmentStats, 10),
-		grpcErr:        make(chan error),
-		statsMs:        statsMs,
+		ctx:                  ctx,
+		startTimestamp:       time.Now().Unix(),
+		kvBase:               newKVBase(opt.KVRootPath, opt.EtcdAddr),
+		metaTable:            metakv,
+		timesSyncMsgProducer: tsMsgProducer,
+		grpcErr:              make(chan error),
+		segmentStatusMsg:     statsMs,
 	}
 
 	//init idAllocator
@@ -270,7 +264,7 @@ func (s *Master) startServerLoop(ctx context.Context, grpcPort int64) error {
 	//go s.Se
 
 	s.serverLoopWg.Add(1)
-	if err := s.tsmp.Start(); err != nil {
+	if err := s.timesSyncMsgProducer.Start(); err != nil {
 		return err
 	}
 
@@ -294,7 +288,7 @@ func (s *Master) startServerLoop(ctx context.Context, grpcPort int64) error {
 }
 
 func (s *Master) stopServerLoop() {
-	s.tsmp.Close()
+	s.timesSyncMsgProducer.Close()
 	s.serverLoopWg.Done()
 
 	if s.grpcServer != nil {
@@ -340,13 +334,13 @@ func (s *Master) grpcLoop(grpcPort int64) {
 
 func (s *Master) tsLoop() {
 	defer s.serverLoopWg.Done()
-	s.tsTicker = time.NewTicker(UpdateTimestampStep)
-	defer s.tsTicker.Stop()
+	s.tsoTicker = time.NewTicker(UpdateTimestampStep)
+	defer s.tsoTicker.Stop()
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 	for {
 		select {
-		case <-s.tsTicker.C:
+		case <-s.tsoTicker.C:
 			if err := s.tsoAllocator.UpdateTSO(); err != nil {
 				log.Println("failed to update timestamp", err)
 				return
@@ -392,13 +386,13 @@ func (s *Master) tasksExecutionLoop() {
 
 func (s *Master) segmentStatisticsLoop() {
 	defer s.serverLoopWg.Done()
-	defer s.statsMs.Close()
+	defer s.segmentStatusMsg.Close()
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 
 	for {
 		select {
-		case msg := <-s.statsMs.Chan():
+		case msg := <-s.segmentStatusMsg.Chan():
 			err := s.segmentMgr.HandleQueryNodeMsgPack(msg)
 			if err != nil {
 				log.Println(err)
