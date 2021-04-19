@@ -59,9 +59,11 @@ AppendIndexParam(CLoadIndexInfo c_load_index_info, const char* c_index_key, cons
 }
 
 CStatus
-AppendFieldInfo(CLoadIndexInfo c_load_index_info, int64_t field_id) {
+AppendFieldInfo(CLoadIndexInfo c_load_index_info, const char* c_field_name, int64_t field_id) {
     try {
         auto load_index_info = (LoadIndexInfo*)c_load_index_info;
+        std::string field_name(c_field_name);
+        load_index_info->field_name = field_name;
         load_index_info->field_id = field_id;
 
         auto status = CStatus();
@@ -95,6 +97,7 @@ AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
         load_index_info->index =
             milvus::knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_params["index_type"], mode);
         load_index_info->index->Load(*binary_set);
+
         auto status = CStatus();
         status.error_code = Success;
         status.error_msg = "";

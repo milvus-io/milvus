@@ -23,16 +23,18 @@ type (
 		channelNum int
 	}
 	dataNodeCluster struct {
-		mu       sync.RWMutex
-		finishCh chan struct{}
-		nodes    []*dataNode
+		mu                sync.RWMutex
+		finishCh          chan struct{}
+		nodes             []*dataNode
+		watchedCollection map[UniqueID]bool
 	}
 )
 
 func newDataNodeCluster(finishCh chan struct{}) *dataNodeCluster {
 	return &dataNodeCluster{
-		finishCh: finishCh,
-		nodes:    make([]*dataNode, 0),
+		finishCh:          finishCh,
+		nodes:             make([]*dataNode, 0),
+		watchedCollection: make(map[UniqueID]bool),
 	}
 }
 
@@ -49,7 +51,7 @@ func (c *dataNodeCluster) Register(dataNode *dataNode) {
 
 func (c *dataNodeCluster) checkDataNodeNotExist(ip string, port int64) bool {
 	for _, node := range c.nodes {
-		if node.address.ip == ip || node.address.port == port {
+		if node.address.ip == ip && node.address.port == port {
 			return false
 		}
 	}
@@ -70,12 +72,25 @@ func (c *dataNodeCluster) GetNodeIDs() []int64 {
 	return ret
 }
 
-func (c *dataNodeCluster) WatchInsertChannels(groups []channelGroup) {
+func (c *dataNodeCluster) WatchInsertChannels(collectionID UniqueID, channels []string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.watchedCollection[collectionID] {
+		return
+	}
 	sort.Slice(c.nodes, func(i, j int) bool { return c.nodes[i].channelNum < c.nodes[j].channelNum })
+	var groups [][]string
+	if len(channels) < len(c.nodes) {
+		groups = make([][]string, len(channels))
+	} else {
+		groups = make([][]string, len(c.nodes))
+	}
+	length := len(groups)
+	for i, channel := range channels {
+		groups[i%length] = append(groups[i%length], channel)
+	}
 	for i, group := range groups {
-		_, err := c.nodes[i%len(c.nodes)].client.WatchDmChannels(&datapb.WatchDmChannelRequest{
+		resp, err := c.nodes[i].client.WatchDmChannels(&datapb.WatchDmChannelRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kDescribeCollection,
 				MsgID:     -1, // todo
@@ -88,7 +103,13 @@ func (c *dataNodeCluster) WatchInsertChannels(groups []channelGroup) {
 			log.Println(err.Error())
 			continue
 		}
+		if resp.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			log.Println(resp.Reason)
+			continue
+		}
+		c.nodes[i].channelNum += len(group)
 	}
+	c.watchedCollection[collectionID] = true
 }
 
 func (c *dataNodeCluster) GetDataNodeStates() ([]*internalpb2.ComponentInfo, error) {
@@ -124,4 +145,13 @@ func (c *dataNodeCluster) ShutDownClients() {
 			continue
 		}
 	}
+}
+
+// Clear only for test
+func (c *dataNodeCluster) Clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.finishCh = make(chan struct{})
+	c.nodes = make([]*dataNode, 0)
+	c.watchedCollection = make(map[UniqueID]bool)
 }

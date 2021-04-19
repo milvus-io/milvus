@@ -137,7 +137,7 @@ message SegmentInfo {
   int64 segmentID = 1;
   int64 collectionID = 2;
   int64 partitionID = 3;
-  repeated string insert_channels = 4;
+  string insert_channel = 4;
   uint64 open_time = 5;
   uint64 sealed_time = 6;
   uint64 flushed_time = 7;

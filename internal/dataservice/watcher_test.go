@@ -52,7 +52,7 @@ func TestDataNodeTTWatcher(t *testing.T) {
 		segID, err := allocator.allocID()
 		segmentIDs[i] = segID
 		assert.Nil(t, err)
-		segmentInfo, err := BuildSegment(id, 100, segID, []string{"channel" + strconv.Itoa(i)})
+		segmentInfo, err := BuildSegment(id, 100, segID, "channel"+strconv.Itoa(i))
 		assert.Nil(t, err)
 		err = meta.AddSegment(segmentInfo)
 		assert.Nil(t, err)
@@ -64,7 +64,7 @@ func TestDataNodeTTWatcher(t *testing.T) {
 		}
 	}
 
-	time.Sleep(time.Duration(Params.SegIDAssignExpiration) * time.Millisecond)
+	time.Sleep(time.Duration(Params.SegIDAssignExpiration+1000) * time.Millisecond)
 	for i, c := range cases {
 		if c.allocation && !c.expired {
 			_, _, _, err := segAllocator.AllocSegment(id, 100, "channel"+strconv.Itoa(i), 100)

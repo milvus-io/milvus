@@ -54,7 +54,7 @@ type (
 		sealed         bool
 		lastExpireTime Timestamp
 		allocations    []*allocation
-		channelGroup   channelGroup
+		insertChannel  string
 	}
 	allocation struct {
 		rowNums    int
@@ -100,7 +100,7 @@ func (allocator *segmentAllocatorImpl) OpenSegment(segmentInfo *datapb.SegmentIn
 		total:          totalRows,
 		sealed:         false,
 		lastExpireTime: 0,
-		channelGroup:   segmentInfo.InsertChannels,
+		insertChannel:  segmentInfo.InsertChannel,
 	}
 	return nil
 }
@@ -112,7 +112,7 @@ func (allocator *segmentAllocatorImpl) AllocSegment(collectionID UniqueID,
 
 	for _, segStatus := range allocator.segments {
 		if segStatus.sealed || segStatus.collectionID != collectionID || segStatus.partitionID != partitionID ||
-			!segStatus.channelGroup.Contains(channelName) {
+			segStatus.insertChannel != channelName {
 			continue
 		}
 		var success bool

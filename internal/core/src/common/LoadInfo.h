@@ -16,6 +16,7 @@
 #include "knowhere/index/vector_index/VecIndex.h"
 
 struct LoadIndexInfo {
+    std::string field_name;
     int64_t field_id;
     std::map<std::string, std::string> index_params;
     milvus::knowhere::VecIndexPtr index;

@@ -1,10 +1,13 @@
 package dataservice
 
 import (
+	"log"
 	"math"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -27,7 +30,7 @@ func TestAllocSegment(t *testing.T) {
 	assert.Nil(t, err)
 	id, err := mockAllocator.allocID()
 	assert.Nil(t, err)
-	segmentInfo, err := BuildSegment(collID, 100, id, []string{"c1", "c2"})
+	segmentInfo, err := BuildSegment(collID, 100, id, "c1")
 	assert.Nil(t, err)
 	err = meta.AddSegment(segmentInfo)
 	assert.Nil(t, err)
@@ -80,7 +83,7 @@ func TestSealSegment(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		id, err := mockAllocator.allocID()
 		assert.Nil(t, err)
-		segmentInfo, err := BuildSegment(collID, 100, id, []string{"c" + strconv.Itoa(i)})
+		segmentInfo, err := BuildSegment(collID, 100, id, "c"+strconv.Itoa(i))
 		assert.Nil(t, err)
 		err = meta.AddSegment(segmentInfo)
 		assert.Nil(t, err)
@@ -115,21 +118,32 @@ func TestExpireSegment(t *testing.T) {
 	assert.Nil(t, err)
 	id, err := mockAllocator.allocID()
 	assert.Nil(t, err)
-	segmentInfo, err := BuildSegment(collID, 100, id, []string{"c1", "c2"})
+	segmentInfo, err := BuildSegment(collID, 100, id, "c1")
 	assert.Nil(t, err)
 	err = meta.AddSegment(segmentInfo)
 	assert.Nil(t, err)
 	err = segAllocator.OpenSegment(segmentInfo)
 	assert.Nil(t, err)
 
-	id1, _, _, err := segAllocator.AllocSegment(collID, 100, "c1", 10)
+	id1, _, et, err := segAllocator.AllocSegment(collID, 100, "c1", 10)
+	ts2, _ := tsoutil.ParseTS(et)
+	log.Printf("physical ts: %s", ts2.String())
 	assert.Nil(t, err)
-	time.Sleep(time.Duration(Params.SegIDAssignExpiration) * time.Millisecond)
+
 	ts, err := mockAllocator.allocTimestamp()
+	assert.Nil(t, err)
+	t1, _ := tsoutil.ParseTS(ts)
+	log.Printf("before ts: %s", t1.String())
+	time.Sleep(time.Duration(Params.SegIDAssignExpiration+1000) * time.Millisecond)
+	ts, err = mockAllocator.allocTimestamp()
 	assert.Nil(t, err)
 	err = segAllocator.ExpireAllocations(ts)
 	assert.Nil(t, err)
 	expired, err := segAllocator.IsAllocationsExpired(id1, ts)
+	if et > ts {
+		tsPhy, _ := tsoutil.ParseTS(ts)
+		log.Printf("ts %s", tsPhy.String())
+	}
 	assert.Nil(t, err)
 	assert.True(t, expired)
 	assert.EqualValues(t, 0, len(segAllocator.segments[id1].allocations))
