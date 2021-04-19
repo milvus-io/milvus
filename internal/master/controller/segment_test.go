@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/master/kv"
+	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -19,7 +19,7 @@ func newKvBase() kv.Base {
 		Endpoints:   []string{etcdAddr},
 		DialTimeout: 5 * time.Second,
 	})
-	kvbase := kv.NewEtcdKVBase(cli, conf.Config.Etcd.Rootpath)
+	kvbase := kv.NewEtcdKV(cli, conf.Config.Etcd.Rootpath)
 	return kvbase
 }
 

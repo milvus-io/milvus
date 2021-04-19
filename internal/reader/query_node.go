@@ -15,10 +15,11 @@ import "C"
 
 import (
 	"context"
-	"github.com/zilliztech/milvus-distributed/internal/master/kv"
+	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/msgclient"
 	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"time"
 )
 
 type InsertData struct {
@@ -90,7 +91,7 @@ type QueryNode struct {
 	deletePreprocessData DeletePreprocessData
 	deleteData           DeleteData
 	insertData           InsertData
-	kvBase               *kv.EtcdKVBase
+	kvBase               *kv.EtcdKV
 	msgCounter           *MsgCounter
 	InsertLogs           []InsertLog
 }
