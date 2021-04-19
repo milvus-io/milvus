@@ -15,8 +15,9 @@ import "C"
 
 import (
 	"context"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/msgclient"
@@ -211,10 +212,6 @@ func (node *QueryNode) QueryNodeDataInit() {
 }
 
 func (node *QueryNode) NewCollection(collectionID int64, collectionName string, schemaConfig string) *Collection {
-	/*
-		void
-		UpdateIndexes(CCollection c_collection, const char *index_string);
-	*/
 	cName := C.CString(collectionName)
 	cSchema := C.CString(schemaConfig)
 	collection := C.NewCollection(cName, cSchema)

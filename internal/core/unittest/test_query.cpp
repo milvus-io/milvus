@@ -42,5 +42,4 @@ TEST(Query, Naive) {
         ]
     }
 })";
-
 }

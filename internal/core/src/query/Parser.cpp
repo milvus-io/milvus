@@ -3,8 +3,8 @@
 #include "Parser.h"
 
 namespace milvus::wtf {
-using google::protobuf::RepeatedPtrField;
 using google::protobuf::RepeatedField;
+using google::protobuf::RepeatedPtrField;
 #if 0
 #if 0
 void
@@ -52,7 +52,7 @@ CopyRowRecords(const RepeatedPtrField<proto::service::PlaceholderValue>& grpc_re
 
 Status
 ProcessLeafQueryJson(const milvus::json& query_json, query_old::BooleanQueryPtr& query, std::string& field_name) {
-    #if 0
+#if 0
     if (query_json.contains("term")) {
         auto leaf_query = std::make_shared<query_old::LeafQuery>();
         auto term_query = std::make_shared<query_old::TermQuery>();
@@ -86,7 +86,7 @@ ProcessLeafQueryJson(const milvus::json& query_json, query_old::BooleanQueryPtr&
     } else {
         return Status{SERVER_INVALID_ARGUMENT, "Leaf query get wrong key"};
     }
-    #endif
+#endif
     return Status::OK();
 }
 
@@ -94,7 +94,7 @@ Status
 ProcessBooleanQueryJson(const milvus::json& query_json,
                         query_old::BooleanQueryPtr& boolean_query,
                         query_old::QueryPtr& query_ptr) {
-                            #if 0
+#if 0
     if (query_json.empty()) {
         return Status{SERVER_INVALID_ARGUMENT, "BoolQuery is null"};
     }
@@ -167,7 +167,7 @@ ProcessBooleanQueryJson(const milvus::json& query_json,
             return Status{SERVER_INVALID_DSL_PARAMETER, msg};
         }
     }
-    #endif
+#endif
     return Status::OK();
 }
 
@@ -176,7 +176,7 @@ DeserializeJsonToBoolQuery(const google::protobuf::RepeatedPtrField<::milvus::gr
      const std::string& dsl_string,
      query_old::BooleanQueryPtr& boolean_query,
      query_old::QueryPtr& query_ptr) {
-         #if 0
+#if 0
     try {
         milvus::json dsl_json = json::parse(dsl_string);
 
@@ -236,24 +236,24 @@ DeserializeJsonToBoolQuery(const google::protobuf::RepeatedPtrField<::milvus::gr
     } catch (std::exception& e) {
         return Status(SERVER_INVALID_DSL_PARAMETER, e.what());
     }
-    #endif
+#endif
     return Status::OK();
 }
 
 #endif
-query_old::QueryPtr tester(proto::service::Query* request) {
+query_old::QueryPtr
+Transformer(proto::service::Query* request) {
     query_old::BooleanQueryPtr boolean_query = std::make_shared<query_old::BooleanQuery>();
     query_old::QueryPtr query_ptr = std::make_shared<query_old::Query>();
-    #if 0
+#if 0
     query_ptr->collection_id = request->collection_name();
     auto status = DeserializeJsonToBoolQuery(request->placeholders(), request->dsl(), boolean_query, query_ptr);
     status = query_old::ValidateBooleanQuery(boolean_query);
     query_old::GeneralQueryPtr general_query = std::make_shared<query_old::GeneralQuery>();
     query_old::GenBinaryQuery(boolean_query, general_query->bin);
     query_ptr->root = general_query;
-    #endif
+#endif
     return query_ptr;
 }
-
 
 }  // namespace milvus::wtf

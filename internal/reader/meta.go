@@ -164,19 +164,7 @@ func (node *QueryNode) processSegmentModify(id string, value string) {
 }
 
 func (node *QueryNode) processCollectionModify(id string, value string) {
-	// println("Modify Collection: ", id)
-	collection, err := collection.JSON2Collection(value)
-	if err != nil {
-		println("error of json 2 collection")
-		println(err.Error())
-	}
-	// printCollectionStruct(collection)
-
-	goCollection := node.GetCollectionByID(collection.ID)
-	if goCollection != nil {
-		node.UpdateIndexes(goCollection, &collection.GrpcMarshalString)
-	}
-
+	println("Modify Collection: ", id)
 }
 
 func (node *QueryNode) processModify(key string, msg string) {

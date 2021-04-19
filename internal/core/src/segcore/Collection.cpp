@@ -2,7 +2,6 @@
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "pb/etcd_meta.pb.h"
-#include "pb/message.pb.h"
 #include <google/protobuf/text_format.h>
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <cstring>
@@ -14,7 +13,7 @@ Collection::Collection(std::string& collection_name, std::string& schema)
     parse();
     index_ = nullptr;
 }
-
+#if 0
 void
 Collection::AddIndex(const grpc::IndexParam& index_param) {
     auto& index_name = index_param.index_name();
@@ -109,6 +108,7 @@ Collection::CreateIndex(std::string& index_config) {
     //     AddIndex(index);
     // }
 }
+#endif
 
 void
 Collection::parse() {
