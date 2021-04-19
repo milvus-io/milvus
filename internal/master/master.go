@@ -181,7 +181,7 @@ func CreateServer(ctx context.Context) (*Master, error) {
 	m.scheduler.SetDDMsgStream(pulsarDDStream)
 	m.scheduler.SetIDAllocator(func() (UniqueID, error) { return m.idAllocator.AllocOne() })
 
-	flushClient, err := writerclient.NewWriterClient(Params.EtcdAddress, Params.MetaRootPath, Params.WriteNodeSegKvSubPath, pulsarDDStream)
+	flushClient, err := writerclient.NewWriterClient(Params.EtcdAddress, kvRootPath, Params.WriteNodeSegKvSubPath, pulsarDDStream)
 	if err != nil {
 		return nil, err
 	}

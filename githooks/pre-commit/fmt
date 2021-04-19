@@ -1,5 +1,9 @@
 #! /bin/bash
 
-export GO_DIFF_FILES=$(git diff --name-only --diff-filter=d HEAD "*.go")
+GO_DIFF_FILES=""
+
+while read -r line; do
+   export GO_DIFF_FILES="$GO_DIFF_FILES $line"
+done <<< "$(git diff --name-only --diff-filter=d HEAD "*.go")"
 
 make fmt
