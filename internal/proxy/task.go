@@ -69,7 +69,16 @@ func (it *InsertTask) Execute() error {
 		Msgs:    make([]*msgstream.TsMsg, 1),
 	}
 	msgPack.Msgs[0] = &tsMsg
-	it.manipulationMsgStream.Produce(msgPack)
+	err := it.manipulationMsgStream.Produce(msgPack)
+	it.result = &servicepb.IntegerRangeResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+	}
+	if err != nil {
+		it.result.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		it.result.Status.Reason = err.Error()
+	}
 	return nil
 }
 
@@ -78,7 +87,6 @@ func (it *InsertTask) PostExecute() error {
 }
 
 func (it *InsertTask) WaitToFinish() error {
-	defer it.cancel()
 	for {
 		select {
 		case err := <-it.done:
@@ -146,7 +154,6 @@ func (cct *CreateCollectionTask) PostExecute() error {
 }
 
 func (cct *CreateCollectionTask) WaitToFinish() error {
-	defer cct.cancel()
 	for {
 		select {
 		case err := <-cct.done:
@@ -214,7 +221,6 @@ func (dct *DropCollectionTask) PostExecute() error {
 }
 
 func (dct *DropCollectionTask) WaitToFinish() error {
-	defer dct.cancel()
 	for {
 		select {
 		case err := <-dct.done:
@@ -287,7 +293,6 @@ func (qt *QueryTask) PostExecute() error {
 }
 
 func (qt *QueryTask) WaitToFinish() error {
-	defer qt.cancel()
 	for {
 		select {
 		case err := <-qt.done:
@@ -300,7 +305,6 @@ func (qt *QueryTask) WaitToFinish() error {
 }
 
 func (qt *QueryTask) Notify(err error) {
-	defer qt.cancel()
 	defer func() {
 		qt.done <- err
 	}()
@@ -414,7 +418,6 @@ func (hct *HasCollectionTask) PostExecute() error {
 }
 
 func (hct *HasCollectionTask) WaitToFinish() error {
-	defer hct.cancel()
 	for {
 		select {
 		case err := <-hct.done:
@@ -484,7 +487,6 @@ func (dct *DescribeCollectionTask) PostExecute() error {
 }
 
 func (dct *DescribeCollectionTask) WaitToFinish() error {
-	defer dct.cancel()
 	for {
 		select {
 		case err := <-dct.done:
@@ -554,7 +556,6 @@ func (sct *ShowCollectionsTask) PostExecute() error {
 }
 
 func (sct *ShowCollectionsTask) WaitToFinish() error {
-	defer sct.cancel()
 	for {
 		select {
 		case err := <-sct.done:

@@ -178,12 +178,16 @@ func (p *Proxy) queryResultLoop() {
 				return
 			}
 			log.Print("Consume message from query result stream...")
+			log.Printf("message pack: %v", msgPack)
 			if msgPack == nil {
 				continue
 			}
 			tsMsg := msgPack.Msgs[0]
 			searchResultMsg, _ := (*tsMsg).(*msgstream.SearchResultMsg)
 			reqID := searchResultMsg.GetReqID()
+			log.Printf("ts msg: %v", tsMsg)
+			log.Printf("search result message: %v", searchResultMsg)
+			log.Printf("req id: %v", reqID)
 			_, ok = queryResultBuf[reqID]
 			if !ok {
 				queryResultBuf[reqID] = make([]*internalpb.SearchResult, 0)
@@ -193,8 +197,10 @@ func (p *Proxy) queryResultLoop() {
 				// TODO: use the number of query node instead
 				t := p.taskSch.getTaskByReqID(reqID)
 				qt := t.(*QueryTask)
-				qt.resultBuf <- queryResultBuf[reqID]
-				delete(queryResultBuf, reqID)
+				if qt != nil {
+					qt.resultBuf <- queryResultBuf[reqID]
+					delete(queryResultBuf, reqID)
+				}
 			}
 		case <-p.proxyLoopCtx.Done():
 			log.Print("proxy server is closed ...")
