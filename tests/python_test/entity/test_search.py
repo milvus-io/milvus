@@ -574,7 +574,7 @@ class TestSearchBase:
         # TODO:
         # assert res[1]._distances[0] >= 1 - gen_inaccuracy(res[1]._distances[0])
 
-    @pytest.mark.tag("0331")
+    @pytest.mark.tags("0331")
     @pytest.mark.level(2)
     def test_search_without_connect(self, dis_connect, collection):
         '''
@@ -585,7 +585,7 @@ class TestSearchBase:
         with pytest.raises(Exception) as e:
             res = dis_connect.search(collection, default_query)
 
-    @pytest.mark.tag("0331")
+    @pytest.mark.tags("0331")
     def test_search_collection_not_existed(self, connect):
         '''
         target: search collection not existed
@@ -1026,7 +1026,7 @@ class TestSearchDSL(object):
         assert len(res) == nq
         assert len(res[0]) == default_top_k
 
-    @pytest.mark.tag("0331")
+    @pytest.mark.tags("0331")
     def test_query_wrong_format(self, connect, collection):
         '''
         method: build query without must expr, with wrong expr name
