@@ -16,8 +16,14 @@ import (
 )
 
 type (
-	UniqueID       = typeutil.UniqueID
-	Timestamp      = typeutil.Timestamp
+	UniqueID           = typeutil.UniqueID
+	Timestamp          = typeutil.Timestamp
+	errSegmentNotFound struct {
+		segmentID UniqueID
+	}
+	errCollectionNotFound struct {
+		collectionID UniqueID
+	}
 	collectionInfo struct {
 		ID         UniqueID
 		Schema     *schemapb.CollectionSchema
@@ -33,7 +39,23 @@ type (
 	}
 )
 
-func newMetaTable(kv kv.TxnBase, allocator allocator) (*meta, error) {
+func newErrSegmentNotFound(segmentID UniqueID) errSegmentNotFound {
+	return errSegmentNotFound{segmentID: segmentID}
+}
+
+func (err errSegmentNotFound) Error() string {
+	return fmt.Sprintf("segment %d not found", err.segmentID)
+}
+
+func newErrCollectionNotFound(collectionID UniqueID) errCollectionNotFound {
+	return errCollectionNotFound{collectionID: collectionID}
+}
+
+func (err errCollectionNotFound) Error() string {
+	return fmt.Sprintf("collection %d not found", err.collectionID)
+}
+
+func newMeta(kv kv.TxnBase, allocator allocator) (*meta, error) {
 	mt := &meta{
 		client:      kv,
 		collID2Info: make(map[UniqueID]*collectionInfo),
@@ -80,7 +102,7 @@ func (meta *meta) DropCollection(collID UniqueID) error {
 	defer meta.ddLock.Unlock()
 
 	if _, ok := meta.collID2Info[collID]; !ok {
-		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collID, 10))
+		return newErrCollectionNotFound(collID)
 	}
 	delete(meta.collID2Info, collID)
 	return nil
@@ -98,7 +120,7 @@ func (meta *meta) GetCollection(collectionID UniqueID) (*collectionInfo, error) 
 
 	collectionInfo, ok := meta.collID2Info[collectionID]
 	if !ok {
-		return nil, fmt.Errorf("collection %d not found", collectionID)
+		return nil, newErrCollectionNotFound(collectionID)
 	}
 	return collectionInfo, nil
 }
@@ -119,9 +141,10 @@ func (meta *meta) BuildSegment(collectionID UniqueID, partitionID UniqueID, chan
 		PartitionID:    partitionID,
 		InsertChannels: channelRange,
 		OpenTime:       ts,
-		CloseTime:      0,
+		SealedTime:     0,
 		NumRows:        0,
 		MemSize:        0,
+		State:          datapb.SegmentState_SegmentGrowing,
 	}, nil
 }
 
@@ -156,7 +179,7 @@ func (meta *meta) DropSegment(segmentID UniqueID) error {
 	meta.ddLock.Unlock()
 
 	if _, ok := meta.segID2Info[segmentID]; !ok {
-		return fmt.Errorf("segment %d not found", segmentID)
+		return newErrSegmentNotFound(segmentID)
 	}
 	delete(meta.segID2Info, segmentID)
 	return nil
@@ -168,23 +191,52 @@ func (meta *meta) GetSegment(segID UniqueID) (*datapb.SegmentInfo, error) {
 
 	segmentInfo, ok := meta.segID2Info[segID]
 	if !ok {
-		return nil, errors.Errorf("GetSegmentByID:can't find segment id = %d", segID)
+		return nil, newErrSegmentNotFound(segID)
 	}
 	return segmentInfo, nil
 }
 
-func (meta *meta) CloseSegment(segID UniqueID, closeTs Timestamp) error {
+func (meta *meta) SealSegment(segID UniqueID) error {
 	meta.ddLock.Lock()
 	defer meta.ddLock.Unlock()
 
 	segInfo, ok := meta.segID2Info[segID]
 	if !ok {
-		return errors.Errorf("DropSegment:can't find segment id = " + strconv.FormatInt(segID, 10))
+		return newErrSegmentNotFound(segID)
 	}
 
-	segInfo.CloseTime = closeTs
+	ts, err := meta.allocator.allocTimestamp()
+	if err != nil {
+		return err
+	}
+	segInfo.SealedTime = ts
+	segInfo.State = datapb.SegmentState_SegmentSealed
 
-	err := meta.saveSegmentInfo(segInfo)
+	err = meta.saveSegmentInfo(segInfo)
+	if err != nil {
+		_ = meta.reloadFromKV()
+		return err
+	}
+	return nil
+}
+
+func (meta *meta) FlushSegment(segID UniqueID) error {
+	meta.ddLock.Lock()
+	defer meta.ddLock.Unlock()
+
+	segInfo, ok := meta.segID2Info[segID]
+	if !ok {
+		return newErrSegmentNotFound(segID)
+	}
+
+	ts, err := meta.allocator.allocTimestamp()
+	if err != nil {
+		return err
+	}
+	segInfo.FlushedTime = ts
+	segInfo.State = datapb.SegmentState_SegmentFlushed
+
+	err = meta.saveSegmentInfo(segInfo)
 	if err != nil {
 		_ = meta.reloadFromKV()
 		return err
@@ -205,13 +257,13 @@ func (meta *meta) GetSegmentsByCollectionID(collectionID UniqueID) []UniqueID {
 	return ret
 }
 
-func (meta *meta) GetSegmentsByPartitionID(partitionID UniqueID) []UniqueID {
+func (meta *meta) GetSegmentsByCollectionAndPartitionID(collectionID, partitionID UniqueID) []UniqueID {
 	meta.ddLock.RLock()
 	defer meta.ddLock.RUnlock()
 
 	ret := make([]UniqueID, 0)
 	for _, info := range meta.segID2Info {
-		if info.PartitionID == partitionID {
+		if info.CollectionID == collectionID && info.PartitionID == partitionID {
 			ret = append(ret, info.SegmentID)
 		}
 	}
@@ -223,7 +275,7 @@ func (meta *meta) AddPartition(collectionID UniqueID, partitionID UniqueID) erro
 	defer meta.ddLock.Unlock()
 	coll, ok := meta.collID2Info[collectionID]
 	if !ok {
-		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collectionID, 10))
+		return newErrCollectionNotFound(collectionID)
 	}
 
 	for _, t := range coll.partitions {
@@ -241,7 +293,7 @@ func (meta *meta) DropPartition(collID UniqueID, partitionID UniqueID) error {
 
 	collection, ok := meta.collID2Info[collID]
 	if !ok {
-		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collID, 10))
+		return newErrCollectionNotFound(collID)
 	}
 
 	idx := -1

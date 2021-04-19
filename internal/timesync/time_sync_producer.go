@@ -3,6 +3,7 @@ package timesync
 import (
 	"context"
 	"log"
+	"sync"
 
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -10,77 +11,77 @@ import (
 )
 
 type MsgProducer struct {
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
 	ttBarrier TimeTickBarrier
-
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	watchers []TimeTickWatcher
+	watchers  []TimeTickWatcher
 }
 
-func NewTimeSyncMsgProducer(ctx context.Context, ttBarrier TimeTickBarrier, watchers ...TimeTickWatcher) (*MsgProducer, error) {
-	childCtx, cancelFunc := context.WithCancel(ctx)
+func NewTimeSyncMsgProducer(ttBarrier TimeTickBarrier, watchers ...TimeTickWatcher) (*MsgProducer, error) {
 	return &MsgProducer{
-		ctx:       childCtx,
-		cancel:    cancelFunc,
 		ttBarrier: ttBarrier,
 		watchers:  watchers,
 	}, nil
 }
 
 func (producer *MsgProducer) broadcastMsg() {
+	defer producer.wg.Done()
 	for {
 		select {
 		case <-producer.ctx.Done():
 			log.Printf("broadcast context done, exit")
+			return
 		default:
-			tt, err := producer.ttBarrier.GetTimeTick()
-			if err != nil {
-				log.Printf("broadcast get time tick error")
-			}
-			baseMsg := ms.BaseMsg{
-				BeginTimestamp: tt,
-				EndTimestamp:   tt,
-				HashValues:     []uint32{0},
-			}
-			timeTickResult := internalpb2.TimeTickMsg{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_kTimeTick,
-					MsgID:     0,
-					Timestamp: tt,
-					SourceID:  0,
-				},
-			}
-			timeTickMsg := &ms.TimeTickMsg{
-				BaseMsg:     baseMsg,
-				TimeTickMsg: timeTickResult,
-			}
-			for _, watcher := range producer.watchers {
-				watcher.Watch(timeTickMsg)
-			}
+		}
+		tt, err := producer.ttBarrier.GetTimeTick()
+		if err != nil {
+			log.Printf("broadcast get time tick error")
+		}
+		baseMsg := ms.BaseMsg{
+			BeginTimestamp: tt,
+			EndTimestamp:   tt,
+			HashValues:     []uint32{0},
+		}
+		timeTickResult := internalpb2.TimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kTimeTick,
+				MsgID:     0,
+				Timestamp: tt,
+				SourceID:  0,
+			},
+		}
+		timeTickMsg := &ms.TimeTickMsg{
+			BaseMsg:     baseMsg,
+			TimeTickMsg: timeTickResult,
+		}
+		for _, watcher := range producer.watchers {
+			watcher.Watch(timeTickMsg)
 		}
 	}
 }
 
-func (producer *MsgProducer) Start() error {
-	err := producer.ttBarrier.Start()
-	if err != nil {
-		return err
-	}
-
+func (producer *MsgProducer) Start(ctx context.Context) {
+	producer.ctx, producer.cancel = context.WithCancel(ctx)
+	producer.wg.Add(2 + len(producer.watchers))
+	go producer.startTTBarrier()
 	for _, watcher := range producer.watchers {
-		watcher.Start()
+		go producer.startWatcher(watcher)
 	}
-
 	go producer.broadcastMsg()
+}
 
-	return nil
+func (producer *MsgProducer) startTTBarrier() {
+	defer producer.wg.Done()
+	producer.ttBarrier.StartBackgroundLoop(producer.ctx)
+}
+
+func (producer *MsgProducer) startWatcher(watcher TimeTickWatcher) {
+	defer producer.wg.Done()
+	watcher.StartBackgroundLoop(producer.ctx)
 }
 
 func (producer *MsgProducer) Close() {
 	producer.cancel()
-	producer.ttBarrier.Close()
-	for _, watcher := range producer.watchers {
-		watcher.Close()
-	}
+	producer.wg.Wait()
 }
