@@ -72,14 +72,14 @@ pipeline {
                 axes {
                     axis {
                         name 'REGRESSION_SERVICE_NAME'
-                        values 'regression', 'regression_0331'
+                        values 'regression_0331'
                     }
                 }
                 environment {
                     DOCKER_COMPOSE_PROJECT_NAME = "${PROJECT_NAME}-${SEMVER}-${env.BUILD_NUMBER}".replaceAll("\\.", "-").replaceAll("_", "-")
                 }
                 agent {
-                    label "${REGRESSION_SERVICE_NAME}"
+                    label 'performance'
                 }
                 stages {
                     stage('Test') {
