@@ -1,0 +1,70 @@
+
+syntax = "proto3";
+
+package milvus.proto.service;
+option go_package="github.com/zilliztech/milvus-distributed/internal/proto/indexbuilderpb";
+import "common.proto";
+
+enum IndexStatus {
+    NONE = 0;
+    UNISSUED = 1;
+    INPROGRESS = 2;
+    FINISHED = 3;
+}
+
+message BuildIndexRequest {
+    repeated string data_paths=2;
+    repeated common.KeyValuePair type_params = 3;
+    repeated common.KeyValuePair index_params = 4;
+}
+
+message BuildIndexResponse {
+    common.Status status = 1;
+    int64 indexID = 2;
+}
+
+
+message GetIndexFilePathsRequest {
+    int64 indexID = 1;
+}
+
+message GetIndexFilePathsResponse {
+    common.Status status = 1;
+    int64 indexID = 2;
+    repeated string index_file_paths=3;
+}
+
+message DescribleIndexRequest {
+    int64 indexID = 1;
+}
+
+message DescribleIndexResponse {
+    common.Status status = 1;
+    IndexStatus index_status =2;
+    int64 indexID = 3;
+    repeated string index_file_paths=4;
+    uint64 enque_time = 5;
+    uint64 schedule_time = 6;
+    uint64 build_complete_time = 7;
+}
+
+
+message IndexMeta {
+    IndexStatus status =1;
+    int64   indexID = 2;
+    BuildIndexRequest req = 3;
+}
+
+service IndexBuildService {
+    /**
+     * @brief This method is used to create collection
+     *
+     * @param CollectionSchema, use to provide collection information to be created.
+     *
+     * @return Status
+     */
+    rpc BuildIndex(BuildIndexRequest) returns (BuildIndexResponse){}
+    rpc DescribeIndex(DescribleIndexRequest) returns (DescribleIndexResponse){}
+    rpc GetIndexFilePaths(GetIndexFilePathsRequest) returns (GetIndexFilePathsResponse){}
+
+}

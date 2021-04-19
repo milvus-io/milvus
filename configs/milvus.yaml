@@ -47,3 +47,7 @@ proxy:
 
 queryNode:
   gracefulTime: 5000 #ms
+
+indexBuilder:
+    address: localhost
+    port: 310310
