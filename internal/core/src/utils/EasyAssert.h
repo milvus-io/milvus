@@ -13,3 +13,8 @@ EasyAssertInfo(
 
 #define AssertInfo(expr, info) milvus::impl::EasyAssertInfo(bool(expr), #expr, __FILE__, __LINE__, (info))
 #define Assert(expr) AssertInfo((expr), "")
+#define PanicInfo(info)                                                      \
+    do {                                                                     \
+        milvus::impl::EasyAssertInfo(false, (info), __FILE__, __LINE__, ""); \
+        __builtin_unreachable();                                             \
+    } while (0)

@@ -94,7 +94,7 @@ Status
 ProcessBooleanQueryJson(const milvus::json& query_json,
                         query_old::BooleanQueryPtr& boolean_query,
                         query_old::QueryPtr& query_ptr) {
-#if 0
+#if 1
     if (query_json.empty()) {
         return Status{SERVER_INVALID_ARGUMENT, "BoolQuery is null"};
     }
@@ -176,7 +176,7 @@ DeserializeJsonToBoolQuery(const google::protobuf::RepeatedPtrField<::milvus::gr
      const std::string& dsl_string,
      query_old::BooleanQueryPtr& boolean_query,
      query_old::QueryPtr& query_ptr) {
-#if 0
+#if 1
     try {
         milvus::json dsl_json = json::parse(dsl_string);
 

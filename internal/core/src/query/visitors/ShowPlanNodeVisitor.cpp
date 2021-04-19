@@ -42,15 +42,17 @@ ShowPlanNodeVisitor::visit(FloatVectorANNS& node) {
     Json json_body{
         {"node_type", "FloatVectorANNS"},    //
         {"metric_type", info.metric_type_},  //
-        {"dim", info.dim_},                  //
-        {"field_id_", info.field_id_},       //
-        {"num_queries", info.num_queries_},  //
-        {"topK", info.topK_},  //
+        // {"dim", info.dim_},                      //
+        {"field_id_", info.field_id_},               //
+        {"num_queries", info.num_queries_},          //
+        {"topK", info.topK_},                        //
+        {"search_params", info.search_params_},      //
+        {"placeholder_tag", node.placeholder_tag_},  //
     };
     if (node.predicate_.has_value()) {
-        AssertInfo(false, "unimplemented");
+        PanicInfo("unimplemented");
     } else {
-        // json_body["predicate"] = "nullopt";
+        json_body["predicate"] = "nullopt";
     }
     ret_ = json_body;
 }

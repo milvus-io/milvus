@@ -236,7 +236,7 @@ get_barrier(const RecordType& record, Timestamp timestamp) {
 }
 
 Status
-SegmentNaive::QueryImpl(query::QueryPtr query_info, Timestamp timestamp, QueryResult& result) {
+SegmentNaive::QueryImpl(query::QueryDeprecatedPtr query_info, Timestamp timestamp, QueryResult& result) {
     auto ins_barrier = get_barrier(record_, timestamp);
     auto del_barrier = get_barrier(deleted_record_, timestamp);
     auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier, true);
@@ -332,7 +332,7 @@ merge_into(int64_t queries,
 }
 
 Status
-SegmentNaive::QueryBruteForceImpl(query::QueryPtr query_info, Timestamp timestamp, QueryResult& results) {
+SegmentNaive::QueryBruteForceImpl(query::QueryDeprecatedPtr query_info, Timestamp timestamp, QueryResult& results) {
     auto ins_barrier = get_barrier(record_, timestamp);
     auto del_barrier = get_barrier(deleted_record_, timestamp);
     auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
@@ -390,7 +390,7 @@ SegmentNaive::QueryBruteForceImpl(query::QueryPtr query_info, Timestamp timestam
 }
 
 Status
-SegmentNaive::QuerySlowImpl(query::QueryPtr query_info, Timestamp timestamp, QueryResult& result) {
+SegmentNaive::QuerySlowImpl(query::QueryDeprecatedPtr query_info, Timestamp timestamp, QueryResult& result) {
     auto ins_barrier = get_barrier(record_, timestamp);
     auto del_barrier = get_barrier(deleted_record_, timestamp);
     auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
@@ -458,12 +458,12 @@ SegmentNaive::QuerySlowImpl(query::QueryPtr query_info, Timestamp timestamp, Que
 }
 
 Status
-SegmentNaive::QueryDeprecated(query::QueryPtr query_info, Timestamp timestamp, QueryResult& result) {
+SegmentNaive::QueryDeprecated(query::QueryDeprecatedPtr query_info, Timestamp timestamp, QueryResult& result) {
     // TODO: enable delete
     // TODO: enable index
     // TODO: remove mock
     if (query_info == nullptr) {
-        query_info = std::make_shared<query::Query>();
+        query_info = std::make_shared<query::QueryDeprecated>();
         query_info->field_name = "fakevec";
         query_info->topK = 10;
         query_info->num_queries = 1;

@@ -45,7 +45,16 @@ class SegmentNaive : public SegmentBase {
 
     // query contains metadata of
     Status
-    QueryDeprecated(query::QueryPtr query_info, Timestamp timestamp, QueryResult& results) override;
+    QueryDeprecated(query::QueryDeprecatedPtr query_info, Timestamp timestamp, QueryResult& results) override;
+
+    virtual Status
+    Search(const query::Plan* Plan,
+           const query::PlaceholderGroup* placeholder_groups[],
+           const Timestamp timestamps[],
+           int num_groups,
+           QueryResult& results) override {
+        PanicInfo("unimplemented");
+    }
 
     // stop receive insert requests
     // will move data to immutable vector or something
@@ -105,13 +114,13 @@ class SegmentNaive : public SegmentBase {
     get_deleted_bitmap(int64_t del_barrier, Timestamp query_timestamp, int64_t insert_barrier, bool force = false);
 
     Status
-    QueryImpl(query::QueryPtr query, Timestamp timestamp, QueryResult& results);
+    QueryImpl(query::QueryDeprecatedPtr query, Timestamp timestamp, QueryResult& results);
 
     Status
-    QuerySlowImpl(query::QueryPtr query, Timestamp timestamp, QueryResult& results);
+    QuerySlowImpl(query::QueryDeprecatedPtr query, Timestamp timestamp, QueryResult& results);
 
     Status
-    QueryBruteForceImpl(query::QueryPtr query, Timestamp timestamp, QueryResult& results);
+    QueryBruteForceImpl(query::QueryDeprecatedPtr query, Timestamp timestamp, QueryResult& results);
 
     template <typename Type>
     knowhere::IndexPtr

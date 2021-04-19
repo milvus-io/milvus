@@ -8,8 +8,7 @@
 
 namespace milvus::segcore {
 
-Collection::Collection(const std::string& collection_proto)
-    : collection_proto_(collection_proto) {
+Collection::Collection(const std::string& collection_proto) : collection_proto_(collection_proto) {
     parse();
     index_ = nullptr;
 }

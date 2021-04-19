@@ -9,8 +9,11 @@
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include <faiss/utils/distances.h>
+#include "query/generated/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentSmallIndex.h"
 #include "query/PlanNode.h"
+#include "query/PlanImpl.h"
+#include "segcore/Reduce.h"
 
 namespace milvus::segcore {
 
@@ -217,46 +220,11 @@ get_barrier(const RecordType& record, Timestamp timestamp) {
     return beg;
 }
 
-static void
-merge_into(int64_t queries,
-           int64_t topk,
-           float* distances,
-           int64_t* uids,
-           const float* new_distances,
-           const int64_t* new_uids) {
-    for (int64_t qn = 0; qn < queries; ++qn) {
-        auto base = qn * topk;
-        auto src2_dis = distances + base;
-        auto src2_uids = uids + base;
-
-        auto src1_dis = new_distances + base;
-        auto src1_uids = new_uids + base;
-
-        std::vector<float> buf_dis(topk);
-        std::vector<int64_t> buf_uids(topk);
-
-        auto it1 = 0;
-        auto it2 = 0;
-
-        for (auto buf = 0; buf < topk; ++buf) {
-            if (src1_dis[it1] <= src2_dis[it2]) {
-                buf_dis[buf] = src1_dis[it1];
-                buf_uids[buf] = src1_uids[it1];
-                ++it1;
-            } else {
-                buf_dis[buf] = src2_dis[it2];
-                buf_uids[buf] = src2_uids[it2];
-                ++it2;
-            }
-        }
-        std::copy_n(buf_dis.data(), topk, src2_dis);
-        std::copy_n(buf_uids.data(), topk, src2_uids);
-    }
-}
-
-
 Status
-SegmentSmallIndex::QueryBruteForceImpl(const query::QueryInfo& info, const float* query_data, Timestamp timestamp, QueryResult& results) {
+SegmentSmallIndex::QueryBruteForceImpl(const query::QueryInfo& info,
+                                       const float* query_data,
+                                       Timestamp timestamp,
+                                       QueryResult& results) {
     // step 1: binary search to find the barrier of the snapshot
     auto ins_barrier = get_barrier(record_, timestamp);
     auto del_barrier = get_barrier(deleted_record_, timestamp);
@@ -282,7 +250,6 @@ SegmentSmallIndex::QueryBruteForceImpl(const query::QueryInfo& info, const float
     auto num_queries = info.num_queries_;
     auto total_count = topK * num_queries;
     // TODO: optimize
-
 
     // step 3: small indexing search
     std::vector<int64_t> final_uids(total_count, -1);
@@ -333,12 +300,12 @@ SegmentSmallIndex::QueryBruteForceImpl(const query::QueryInfo& info, const float
 }
 
 Status
-SegmentSmallIndex::QueryDeprecated(query::QueryPtr query_info, Timestamp timestamp, QueryResult& result) {
+SegmentSmallIndex::QueryDeprecated(query::QueryDeprecatedPtr query_info, Timestamp timestamp, QueryResult& result) {
     // TODO: enable delete
     // TODO: enable index
     // TODO: remove mock
     if (query_info == nullptr) {
-        query_info = std::make_shared<query::Query>();
+        query_info = std::make_shared<query::QueryDeprecated>();
         query_info->field_name = "fakevec";
         query_info->topK = 10;
         query_info->num_queries = 1;
@@ -353,12 +320,14 @@ SegmentSmallIndex::QueryDeprecated(query::QueryPtr query_info, Timestamp timesta
     }
     int64_t inferred_dim = query_info->query_raw_data.size() / query_info->num_queries;
     // TODO
-    query::QueryInfo info {
+    query::QueryInfo info{
         query_info->num_queries,
-        inferred_dim,
         query_info->topK,
         query_info->field_name,
-        "L2"
+        "L2",
+        nlohmann::json{
+            {"nprobe", 10},
+        },
     };
     return QueryBruteForceImpl(info, query_info->query_raw_data.data(), timestamp, result);
 }
@@ -481,6 +450,17 @@ SegmentSmallIndex::GetMemoryUsageInBytes() {
     int64_t del_n = (deleted_record_.reserved + DefaultElementPerChunk - 1) & ~(DefaultElementPerChunk - 1);
     total_bytes += del_n * (16 * 2);
     return total_bytes;
+}
+
+Status
+SegmentSmallIndex::Search(const query::Plan* Plan,
+                          const query::PlaceholderGroup** placeholder_groups,
+                          const Timestamp* timestamps,
+                          int num_groups,
+                          QueryResult& results) {
+    Assert(num_groups == 1);
+    query::ExecPlanNodeVisitor visitor(*this, timestamps[0], *placeholder_groups[0]);
+    PanicInfo("unimplemented");
 }
 
 }  // namespace milvus::segcore

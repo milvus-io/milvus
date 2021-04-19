@@ -71,7 +71,14 @@ class SegmentSmallIndex : public SegmentBase {
 
     // query contains metadata of
     Status
-    QueryDeprecated(query::QueryPtr query_info, Timestamp timestamp, QueryResult& results) override;
+    QueryDeprecated(query::QueryDeprecatedPtr query_info, Timestamp timestamp, QueryResult& results) override;
+
+    Status
+    Search(const query::Plan* Plan,
+           const query::PlaceholderGroup* placeholder_groups[],
+           const Timestamp timestamps[],
+           int num_groups,
+           QueryResult& results) override;
 
     // stop receive insert requests
     // will move data to immutable vector or something
