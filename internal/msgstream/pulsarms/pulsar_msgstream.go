@@ -747,7 +747,7 @@ func checkTimeTickMsg(msg map[Consumer]Timestamp,
 	for consumer := range msg {
 		mu.RLock()
 		v := msg[consumer]
-		mu.Unlock()
+		mu.RUnlock()
 		if v != maxTime {
 			isChannelReady[consumer] = false
 		} else {

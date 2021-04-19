@@ -134,10 +134,7 @@ func (s *Server) Start() error {
 		return err
 	}
 	s.statsHandler = newStatsHandler(s.meta)
-	s.segAllocator, err = newSegmentAllocator(s.meta, s.allocator)
-	if err != nil {
-		return err
-	}
+	s.segAllocator = newSegmentAllocator(s.meta, s.allocator)
 	s.ddHandler = newDDHandler(s.meta, s.segAllocator)
 	s.initSegmentInfoChannel()
 	if err = s.loadMetaFromMaster(); err != nil {

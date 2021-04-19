@@ -183,7 +183,7 @@ func (meta *meta) UpdateSegment(segmentInfo *datapb.SegmentInfo) error {
 
 func (meta *meta) DropSegment(segmentID UniqueID) error {
 	meta.ddLock.Lock()
-	meta.ddLock.Unlock()
+	defer meta.ddLock.Unlock()
 
 	if _, ok := meta.segID2Info[segmentID]; !ok {
 		return newErrSegmentNotFound(segmentID)
