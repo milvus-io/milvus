@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"sync/atomic"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
@@ -139,7 +141,7 @@ func (node *DataNode) Init() error {
 	case <-time.After(RPCConnectionTimeout):
 		return errors.New("Get DmChannels failed in 30 seconds")
 	case <-node.watchDm:
-		log.Println("insert channel names set")
+		log.Debug("insert channel names set")
 	}
 
 	for _, kv := range resp.InitParams.StartParams {
@@ -209,7 +211,7 @@ func (node *DataNode) WatchDmChannels(in *datapb.WatchDmChannelRequest) (*common
 }
 
 func (node *DataNode) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	log.Println("DataNode current state:", node.State.Load())
+	log.Debug("DataNode current state", zap.Any("State", node.State.Load()))
 	states := &internalpb2.ComponentStates{
 		State: &internalpb2.ComponentInfo{
 			NodeID:    Params.NodeID,

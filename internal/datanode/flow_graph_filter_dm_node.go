@@ -2,9 +2,11 @@ package datanode
 
 import (
 	"context"
-	"log"
 	"math"
 
+	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -20,22 +22,21 @@ func (fdmNode *filterDmNode) Name() string {
 }
 
 func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
-	//fmt.Println("Do filterDmNode operation")
 
 	if len(in) != 2 {
-		log.Println("Invalid operate message input in filterDmNode, input length = ", len(in))
+		log.Error("Invalid operate message input in filterDmNode", zap.Int("input length", len(in)))
 		// TODO: add error handling
 	}
 
 	msgStreamMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
-		log.Println("type assertion failed for MsgStreamMsg")
+		log.Error("type assertion failed for MsgStreamMsg")
 		// TODO: add error handling
 	}
 
 	ddMsg, ok := in[1].(*ddMsg)
 	if !ok {
-		log.Println("type assertion failed for ddMsg")
+		log.Error("type assertion failed for ddMsg")
 		// TODO: add error handling
 	}
 
@@ -63,7 +64,7 @@ func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, cont
 		// case commonpb.MsgType_kDelete:
 		// dmMsg.deleteMessages = append(dmMsg.deleteMessages, (*msg).(*msgstream.DeleteTask))
 		default:
-			log.Println("Non supporting message type:", msg.Type())
+			log.Error("Not supporting message type", zap.Any("Type", msg.Type()))
 		}
 	}
 
@@ -75,7 +76,7 @@ func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, cont
 
 func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg) *msgstream.InsertMsg {
 	// No dd record, do all insert requests.
-	records, ok := fdmNode.ddMsg.collectionRecords[msg.CollectionName]
+	records, ok := fdmNode.ddMsg.collectionRecords[msg.CollectionID]
 	if !ok {
 		return msg
 	}
@@ -88,7 +89,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	// Filter insert requests before last record.
 	if len(msg.RowIDs) != len(msg.Timestamps) || len(msg.RowIDs) != len(msg.RowData) {
 		// TODO: what if the messages are misaligned? Here, we ignore those messages and print error
-		log.Println("Error, misaligned messages detected")
+		log.Error("misaligned messages detected")
 		return nil
 	}
 	tmpTimestamps := make([]Timestamp, 0)

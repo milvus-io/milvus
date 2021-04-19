@@ -18,13 +18,11 @@ type (
 	}
 
 	ddMsg struct {
-		// TODO: use collection id
-		collectionRecords map[string][]metaOperateRecord
-		// TODO: use partition id
-		partitionRecords map[string][]metaOperateRecord
-		flushMessages    []*flushMsg
-		gcRecord         *gcRecord
-		timeRange        TimeRange
+		collectionRecords map[UniqueID][]*metaOperateRecord
+		partitionRecords  map[UniqueID][]*metaOperateRecord
+		flushMessages     []*flushMsg
+		gcRecord          *gcRecord
+		timeRange         TimeRange
 	}
 
 	metaOperateRecord struct {

@@ -4,27 +4,27 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
+	"strconv"
 	"sync"
 	"time"
 
-	"log"
-	"net"
-	"strconv"
-
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go/config"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	dn "github.com/zilliztech/milvus-distributed/internal/datanode"
 	dsc "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice/client"
 	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-
-	"google.golang.org/grpc"
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 )
 
 type Server struct {
@@ -64,11 +64,11 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Printf("DataNode GrpcServer:failed to listen: %v", err)
+		log.Warn("GrpcServer failed to listen", zap.Error(err))
 		s.grpcErrChan <- err
 		return
 	}
-	log.Println("DataNode:: addr:", addr)
+	log.Debug("DataNode address", zap.String("address", addr))
 
 	s.grpcServer = grpc.NewServer()
 	datapb.RegisterDataNodeServer(s.grpcServer, s)
@@ -78,7 +78,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {
-		log.Println("DataNode Start Grpc Failed!!!!")
+		log.Warn("DataNode Start Grpc Failed!")
 		s.grpcErrChan <- err
 	}
 
@@ -97,12 +97,12 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Println("data node init done ...")
+	log.Debug("data node init done ...")
 
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Println("data node start done ...")
+	log.Debug("data node start done ...")
 	return nil
 }
 
@@ -131,7 +131,7 @@ func (s *Server) init() error {
 	Params.LoadFromEnv()
 	Params.LoadFromArgs()
 
-	log.Println("DataNode, port:", Params.Port)
+	log.Debug("DataNode port", zap.Int("port", Params.Port))
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
@@ -141,8 +141,8 @@ func (s *Server) init() error {
 	}
 
 	// --- Master Server Client ---
-	log.Println("Master service address:", Params.MasterAddress)
-	log.Println("Init master service client ...")
+	log.Debug("Master service address", zap.String("address", Params.MasterAddress))
+	log.Debug("Init master service client ...")
 	masterClient, err := msc.NewClient(Params.MasterAddress, 20*time.Second)
 	if err != nil {
 		panic(err)
@@ -166,8 +166,8 @@ func (s *Server) init() error {
 	}
 
 	// --- Data Server Client ---
-	log.Println("Data service address: ", Params.DataServiceAddress)
-	log.Println("DataNode Init data service client ...")
+	log.Debug("Data service address", zap.String("address", Params.DataServiceAddress))
+	log.Debug("DataNode Init data service client ...")
 	dataService := dsc.NewClient(Params.DataServiceAddress)
 	if err = dataService.Init(); err != nil {
 		panic(err)
@@ -206,7 +206,7 @@ func (s *Server) init() error {
 	s.closer = closer
 
 	if err := s.impl.Init(); err != nil {
-		log.Println("impl init error: ", err)
+		log.Warn("impl init error: ", zap.Error(err))
 		return err
 	}
 	return nil

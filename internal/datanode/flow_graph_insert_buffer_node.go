@@ -4,21 +4,23 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"log"
 	"path"
 	"strconv"
 	"unsafe"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/storage"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	"github.com/zilliztech/milvus-distributed/internal/storage"
 )
 
 const (
@@ -86,16 +88,15 @@ func (ibNode *insertBufferNode) Name() string {
 }
 
 func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
-	// log.Println("=========== insert buffer Node Operating")
 
 	if len(in) != 1 {
-		log.Println("Error: Invalid operate message input in insertBuffertNode, input length = ", len(in))
+		log.Error("Invalid operate message input in insertBufferNode", zap.Int("input length", len(in)))
 		// TODO: add error handling
 	}
 
 	iMsg, ok := in[0].(*insertMsg)
 	if !ok {
-		log.Println("Error: type assertion failed for insertMsg")
+		log.Error("type assertion failed for insertMsg")
 		// TODO: add error handling
 	}
 
@@ -109,20 +110,20 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 		if !ibNode.replica.hasSegment(currentSegID) {
 			err := ibNode.replica.addSegment(currentSegID, collID, partitionID, msg.GetChannelID())
 			if err != nil {
-				log.Println("Error: add segment error", err)
+				log.Error("add segment wrong", zap.Error(err))
 			}
 		}
 
 		if !ibNode.flushMeta.hasSegmentFlush(currentSegID) {
 			err := ibNode.flushMeta.addSegmentFlush(currentSegID)
 			if err != nil {
-				log.Println("Error: add segment flush meta error", err)
+				log.Error("add segment flush meta wrong", zap.Error(err))
 			}
 		}
 
 		err := ibNode.replica.updateStatistics(currentSegID, int64(len(msg.RowIDs)))
 		if err != nil {
-			log.Println("Error: update Segment Row number wrong, ", err)
+			log.Error("update Segment Row number wrong", zap.Error(err))
 		}
 
 		if _, ok := uniqueSeg[currentSegID]; !ok {
@@ -138,11 +139,11 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 	if len(segIDs) > 0 {
 		switch {
 		case iMsg.startPositions == nil || len(iMsg.startPositions) <= 0:
-			log.Println("Warning: insert Msg StartPosition empty")
+			log.Error("insert Msg StartPosition empty")
 		default:
 			err := ibNode.updateSegStatistics(segIDs, iMsg.startPositions[0])
 			if err != nil {
-				log.Println("Error: update segment statistics error, ", err)
+				log.Error("update segment statistics error", zap.Error(err))
 			}
 		}
 	}
@@ -151,7 +152,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 	// 1. iMsg -> buffer
 	for _, msg := range iMsg.insertMessages {
 		if len(msg.RowIDs) != len(msg.Timestamps) || len(msg.RowIDs) != len(msg.RowData) {
-			log.Println("Error: misaligned messages detected")
+			log.Error("misaligned messages detected")
 			continue
 		}
 		currentSegID := msg.GetSegmentID()
@@ -168,7 +169,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 		collection, err := ibNode.replica.getCollectionByID(collectionID)
 		if err != nil {
 			// GOOSE TODO add error handler
-			log.Println("bbb, Get meta wrong:", err)
+			log.Error("Get meta wrong:", zap.Error(err))
 			continue
 		}
 
@@ -183,13 +184,14 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 					if t.Key == "dim" {
 						dim, err = strconv.Atoi(t.Value)
 						if err != nil {
-							log.Println("strconv wrong")
+							log.Error("strconv wrong")
 						}
 						break
 					}
 				}
 				if dim <= 0 {
-					log.Println("invalid dim")
+					log.Error("invalid dim")
+					continue
 					// TODO: add error handling
 				}
 
@@ -210,7 +212,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 						var v float32
 						buf := bytes.NewBuffer(blob.GetValue()[pos+offset:])
 						if err := binary.Read(buf, binary.LittleEndian, &v); err != nil {
-							log.Println("binary.read float32 err:", err)
+							log.Error("binary.read float32 wrong", zap.Error(err))
 						}
 						fieldData.Data = append(fieldData.Data, v)
 						offset += int(unsafe.Sizeof(*(&v)))
@@ -225,13 +227,13 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 					if t.Key == "dim" {
 						dim, err = strconv.Atoi(t.Value)
 						if err != nil {
-							log.Println("strconv wrong")
+							log.Error("strconv wrong")
 						}
 						break
 					}
 				}
 				if dim <= 0 {
-					log.Println("invalid dim")
+					log.Error("invalid dim")
 					// TODO: add error handling
 				}
 
@@ -266,7 +268,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 				for _, blob := range msg.RowData {
 					buf := bytes.NewReader(blob.GetValue()[pos:])
 					if err := binary.Read(buf, binary.LittleEndian, &v); err != nil {
-						log.Println("binary.Read bool failed:", err)
+						log.Error("binary.Read bool wrong", zap.Error(err))
 					}
 					fieldData.Data = append(fieldData.Data, v)
 
@@ -287,7 +289,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 				for _, blob := range msg.RowData {
 					buf := bytes.NewReader(blob.GetValue()[pos:])
 					if err := binary.Read(buf, binary.LittleEndian, &v); err != nil {
-						log.Println("binary.Read int8 failed:", err)
+						log.Error("binary.Read int8 wrong", zap.Error(err))
 					}
 					fieldData.Data = append(fieldData.Data, v)
 				}
@@ -307,7 +309,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 				for _, blob := range msg.RowData {
 					buf := bytes.NewReader(blob.GetValue()[pos:])
 					if err := binary.Read(buf, binary.LittleEndian, &v); err != nil {
-						log.Println("binary.Read int16 failed:", err)
+						log.Error("binary.Read int16 wrong", zap.Error(err))
 					}
 					fieldData.Data = append(fieldData.Data, v)
 				}
@@ -327,7 +329,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 				for _, blob := range msg.RowData {
 					buf := bytes.NewReader(blob.GetValue()[pos:])
 					if err := binary.Read(buf, binary.LittleEndian, &v); err != nil {
-						log.Println("binary.Read int32 failed:", err)
+						log.Error("binary.Read int32 wrong", zap.Error(err))
 					}
 					fieldData.Data = append(fieldData.Data, v)
 				}
@@ -357,7 +359,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 					for _, blob := range msg.RowData {
 						buf := bytes.NewBuffer(blob.GetValue()[pos:])
 						if err := binary.Read(buf, binary.LittleEndian, &v); err != nil {
-							log.Println("binary.Read int64 failed:", err)
+							log.Error("binary.Read int64 wrong", zap.Error(err))
 						}
 						fieldData.Data = append(fieldData.Data, v)
 					}
@@ -378,7 +380,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 				for _, blob := range msg.RowData {
 					buf := bytes.NewBuffer(blob.GetValue()[pos:])
 					if err := binary.Read(buf, binary.LittleEndian, &v); err != nil {
-						log.Println("binary.Read float32 failed:", err)
+						log.Error("binary.Read float32 wrong", zap.Error(err))
 					}
 					fieldData.Data = append(fieldData.Data, v)
 				}
@@ -398,7 +400,7 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 				for _, blob := range msg.RowData {
 					buf := bytes.NewBuffer(blob.GetValue()[pos:])
 					if err := binary.Read(buf, binary.LittleEndian, &v); err != nil {
-						log.Println("binary.Read float64 failed:", err)
+						log.Error("binary.Read float64 wrong", zap.Error(err))
 					}
 					fieldData.Data = append(fieldData.Data, v)
 				}
@@ -414,24 +416,24 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 		// 1.4 if full
 		//   1.4.1 generate binlogs
 		if ibNode.insertBuffer.full(currentSegID) {
-			log.Printf(". Insert Buffer full, auto flushing (%v) rows of data...", ibNode.insertBuffer.size(currentSegID))
+			log.Debug(". Insert Buffer full, auto flushing ", zap.Int32("num of rows", ibNode.insertBuffer.size(currentSegID)))
 
 			err = ibNode.flushSegment(currentSegID, msg.GetPartitionID(), collection.GetID())
 			if err != nil {
-				log.Printf("flush segment (%v) fail: %v", currentSegID, err)
+				log.Error("flush segment fail", zap.Int64("segmentID", currentSegID), zap.Error(err))
 			}
 		}
 	}
 
 	if len(iMsg.insertMessages) > 0 {
-		log.Println("---insert buffer status---")
+		log.Debug("---insert buffer status---")
 		var stopSign int = 0
 		for k := range ibNode.insertBuffer.insertData {
 			if stopSign >= 10 {
-				log.Printf("......")
+				log.Debug("......")
 				break
 			}
-			log.Printf("seg(%v) buffer size = (%v)", k, ibNode.insertBuffer.size(k))
+			log.Debug("seg buffer status", zap.Int64("segmentID", k), zap.Int32("buffer size", ibNode.insertBuffer.size(k)))
 			stopSign++
 		}
 	}
@@ -440,31 +442,31 @@ func (ibNode *insertBufferNode) Operate(ctx context.Context, in []Msg) ([]Msg, c
 	//   1. insertBuffer(not empty) -> binLogs -> minIO/S3
 	for _, msg := range iMsg.flushMessages {
 		for _, currentSegID := range msg.segmentIDs {
-			log.Printf(". Receiving flush message segID(%v)...", currentSegID)
+			log.Debug(". Receiving flush message", zap.Int64("segmentID", currentSegID))
 			if ibNode.insertBuffer.size(currentSegID) > 0 {
-				log.Println(".. Buffer not empty, flushing ...")
+				log.Debug(".. Buffer not empty, flushing ...")
 				seg, err := ibNode.replica.getSegmentByID(currentSegID)
 				if err != nil {
-					log.Printf("flush segment fail: %v", err)
+					log.Error("flush segment fail", zap.Error(err))
 					continue
 				}
 
 				err = ibNode.flushSegment(currentSegID, seg.partitionID, seg.collectionID)
 				if err != nil {
-					log.Printf("flush segment (%v) fail: %v", currentSegID, err)
+					log.Error("flush segment fail", zap.Int64("segmentID", currentSegID), zap.Error(err))
 					continue
 				}
 			}
 			err := ibNode.completeFlush(currentSegID)
 			if err != nil {
-				log.Println(err)
+				log.Error("complete flush wrong", zap.Error(err))
 			}
-			log.Println("Flush completed")
+			log.Debug("Flush completed")
 		}
 	}
 
 	if err := ibNode.writeHardTimeTick(iMsg.timeRange.timestampMax); err != nil {
-		log.Printf("Error: send hard time tick into pulsar channel failed, %s\n", err.Error())
+		log.Error("send hard time tick into pulsar channel failed", zap.Error(err))
 	}
 
 	var res Msg = &gcMsg{
@@ -499,7 +501,7 @@ func (ibNode *insertBufferNode) flushSegment(segID UniqueID, partitionID UniqueI
 
 	// clear buffer
 	delete(ibNode.insertBuffer.insertData, segID)
-	log.Println(".. Clearing buffer")
+	log.Debug(".. Clearing buffer")
 
 	//   1.5.2 binLogs -> minIO/S3
 	collIDStr := strconv.FormatInt(collID, 10)
@@ -507,7 +509,7 @@ func (ibNode *insertBufferNode) flushSegment(segID UniqueID, partitionID UniqueI
 	segIDStr := strconv.FormatInt(segID, 10)
 	keyPrefix := path.Join(ibNode.minioPrefix, collIDStr, partitionIDStr, segIDStr)
 
-	log.Printf(".. Saving (%v) binlogs to MinIO ...", len(binLogs))
+	log.Debug(".. Saving binlogs to MinIO ...", zap.Int("number", len(binLogs)))
 	for index, blob := range binLogs {
 		uid, err := ibNode.idAllocator.allocID()
 		if err != nil {
@@ -525,7 +527,7 @@ func (ibNode *insertBufferNode) flushSegment(segID UniqueID, partitionID UniqueI
 			return errors.Errorf("string to fieldID wrong, %v", err)
 		}
 
-		log.Println("... Appending binlog paths ...", index)
+		log.Debug("... Appending binlog paths ...", zap.Int("number", index))
 		ibNode.flushMeta.AppendSegBinlogPaths(segID, fieldID, []string{key})
 	}
 	return nil
@@ -575,12 +577,12 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 }
 
 func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID, currentPosition *internalpb2.MsgPosition) error {
-	log.Println("Updating segments statistics...")
+	log.Debug("Updating segments statistics...")
 	statsUpdates := make([]*internalpb2.SegmentStatisticsUpdates, 0, len(segIDs))
 	for _, segID := range segIDs {
 		updates, err := ibNode.replica.getSegmentStatisticsUpdates(segID)
 		if err != nil {
-			log.Println("Error get segment", segID, "statistics updates", err)
+			log.Error("get segment statistics updates wrong", zap.Int64("segmentID", segID), zap.Error(err))
 			continue
 		}
 		updates.StartPosition.Timestamp = currentPosition.GetTimestamp()
