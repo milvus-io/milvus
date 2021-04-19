@@ -192,7 +192,7 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 		return errors.New("nil producer in msg stream")
 	}
 	reBucketValues := make([][]int32, len(tsMsgs))
-	for channelID, tsMsg := range tsMsgs {
+	for idx, tsMsg := range tsMsgs {
 		hashValues := tsMsg.HashKeys()
 		bucketValues := make([]int32, len(hashValues))
 		for index, hashValue := range hashValues {
@@ -203,12 +203,12 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 				if channelIDInt >= int64(len(ms.producers)) {
 					return errors.New("Failed to produce pulsar msg to unKnow channel")
 				}
-				bucketValues[index] = int32(channelIDInt)
+				bucketValues[index] = int32(hashValue % uint32(len(ms.producers)))
 				continue
 			}
 			bucketValues[index] = int32(hashValue % uint32(len(ms.producers)))
 		}
-		reBucketValues[channelID] = bucketValues
+		reBucketValues[idx] = bucketValues
 	}
 
 	var result map[int32]*MsgPack

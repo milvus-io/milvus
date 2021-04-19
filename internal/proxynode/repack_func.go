@@ -23,7 +23,8 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 
 	channelCountMap := make(map[UniqueID]map[int32]uint32)    //  reqID --> channelID to count
 	channelMaxTSMap := make(map[UniqueID]map[int32]Timestamp) //  reqID --> channelID to max Timestamp
-	reqSchemaMap := make(map[UniqueID][]string)
+	reqSchemaMap := make(map[UniqueID][]UniqueID)             //  reqID --> channelID [2]UniqueID {CollectionID, PartitionID}
+	channelNamesMap := make(map[UniqueID][]string)            // collectionID --> channelNames
 
 	for i, request := range tsMsgs {
 		if request.Type() != commonpb.MsgType_kInsert {
@@ -54,7 +55,7 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 		}
 
 		if _, ok := reqSchemaMap[reqID]; !ok {
-			reqSchemaMap[reqID] = []string{insertRequest.CollectionName, insertRequest.PartitionName}
+			reqSchemaMap[reqID] = []UniqueID{insertRequest.CollectionID, insertRequest.PartitionID}
 		}
 
 		for idx, channelID := range keys {
@@ -68,6 +69,22 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 			}
 		}
 
+		collID := insertRequest.CollectionID
+		if _, ok := channelNamesMap[collID]; !ok {
+			channelNames, err := globalInsertChannelsMap.getInsertChannels(collID)
+			if err != nil {
+				return nil, err
+			}
+			channelNamesMap[collID] = channelNames
+		}
+	}
+
+	var getChannelName = func(collID UniqueID, channelID int32) string {
+		if _, ok := channelNamesMap[collID]; !ok {
+			return ""
+		}
+		names := channelNamesMap[collID]
+		return names[channelID]
 	}
 
 	reqSegCountMap := make(map[UniqueID]map[int32]map[UniqueID]uint32)
@@ -77,14 +94,18 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 			reqSegCountMap[reqID] = make(map[int32]map[UniqueID]uint32)
 		}
 		schema := reqSchemaMap[reqID]
-		collName, partitionTag := schema[0], schema[1]
+		collID, partitionID := schema[0], schema[1]
 		for channelID, count := range countInfo {
 			ts, ok := channelMaxTSMap[reqID][channelID]
 			if !ok {
 				ts = typeutil.ZeroTimestamp
 				log.Println("Warning: did not get max Timstamp!")
 			}
-			mapInfo, err := segIDAssigner.GetSegmentID(collName, partitionTag, channelID, count, ts)
+			channelName := getChannelName(collID, channelID)
+			if channelName == "" {
+				return nil, errors.New("ProxyNode, repack_func, can not found channelName")
+			}
+			mapInfo, err := segIDAssigner.GetSegmentID(collID, partitionID, channelName, count, ts)
 			if err != nil {
 				return nil, err
 			}
@@ -156,7 +177,9 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 		keys := hashKeys[i]
 		reqID := insertRequest.Base.MsgID
 		collectionName := insertRequest.CollectionName
-		partitionTag := insertRequest.PartitionName
+		collectionID := insertRequest.CollectionID
+		partitionID := insertRequest.PartitionID
+		partitionName := insertRequest.PartitionName
 		proxyID := insertRequest.Base.SourceID
 		for index, key := range keys {
 			ts := insertRequest.Timestamps[index]
@@ -175,13 +198,16 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 					Timestamp: ts,
 					SourceID:  proxyID,
 				},
+				CollectionID:   collectionID,
+				PartitionID:    partitionID,
 				CollectionName: collectionName,
-				PartitionName:  partitionTag,
+				PartitionName:  partitionName,
 				SegmentID:      segmentID,
-				ChannelID:      strconv.FormatInt(int64(key), 10),
-				Timestamps:     []uint64{ts},
-				RowIDs:         []int64{rowID},
-				RowData:        []*commonpb.Blob{row},
+				// todo rename to ChannelName
+				ChannelID:  strconv.FormatInt(int64(key), 10),
+				Timestamps: []uint64{ts},
+				RowIDs:     []int64{rowID},
+				RowData:    []*commonpb.Blob{row},
 			}
 			insertMsg := &msgstream.InsertMsg{
 				InsertRequest: sliceRequest,
