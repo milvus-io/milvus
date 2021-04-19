@@ -22,12 +22,38 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/master/id"
 	"github.com/zilliztech/milvus-distributed/internal/master/informer"
 	masterParams "github.com/zilliztech/milvus-distributed/internal/master/paramtable"
+	"github.com/zilliztech/milvus-distributed/internal/master/timesync"
 	"github.com/zilliztech/milvus-distributed/internal/master/tso"
+	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 // Server is the pd server.
+
+type Option struct {
+	KVRootPath   string
+	MetaRootPath string
+	EtcdAddr     []string
+
+	PulsarAddr string
+
+	////softTimeTickBarrier
+	ProxyIDs            []typeutil.UniqueID
+	PulsarProxyChannels []string //TimeTick
+	PulsarProxySubName  string
+	SoftTTBInterval     Timestamp //Physical Time + Logical Time
+
+	//hardTimeTickBarrier
+	WriteIDs            []typeutil.UniqueID
+	PulsarWriteChannels []string
+	PulsarWriteSubName  string
+
+	PulsarDMChannels  []string
+	PulsarK2SChannels []string
+}
+
 type Master struct {
 	// Server state.
 	isServing int64
@@ -54,6 +80,7 @@ type Master struct {
 	kvBase    *kv.EtcdKV
 	scheduler *ddRequestScheduler
 	mt        *metaTable
+	tsmp      timesync.MsgProducer
 
 	// tso ticker
 	tsTicker *time.Ticker
@@ -89,25 +116,57 @@ func Init() {
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(ctx context.Context, kvRootPath, metaRootPath string, etcdAddr []string) (*Master, error) {
+func CreateServer(ctx context.Context, opt *Option) (*Master, error) {
 	//Init(etcdAddr, kvRootPath)
 
-	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: etcdAddr})
+	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: opt.EtcdAddr})
 	if err != nil {
 		return nil, err
 	}
-	etcdkv := kv.NewEtcdKV(etcdClient, metaRootPath)
+	etcdkv := kv.NewEtcdKV(etcdClient, opt.MetaRootPath)
 	metakv, err := NewMetaTable(etcdkv)
 	if err != nil {
 		return nil, err
 	}
 
+	//timeSyncMsgProducer
+	tsmp, err := timesync.NewTimeSyncMsgProducer(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pulsarProxyStream := ms.NewPulsarMsgStream(ctx, 1024) //output stream
+	pulsarProxyStream.SetPulsarCient(opt.PulsarAddr)
+	pulsarProxyStream.CreatePulsarConsumers(opt.PulsarProxyChannels, opt.PulsarProxySubName, ms.NewUnmarshalDispatcher(), 1024)
+	pulsarProxyStream.Start()
+	var proxyStream ms.MsgStream = pulsarProxyStream
+	proxyTimeTickBarrier := timesync.NewSoftTimeTickBarrier(ctx, &proxyStream, opt.ProxyIDs, opt.SoftTTBInterval)
+	tsmp.SetProxyTtBarrier(proxyTimeTickBarrier)
+
+	pulsarWriteStream := ms.NewPulsarMsgStream(ctx, 1024) //output stream
+	pulsarWriteStream.SetPulsarCient(opt.PulsarAddr)
+	pulsarWriteStream.CreatePulsarConsumers(opt.PulsarWriteChannels, opt.PulsarWriteSubName, ms.NewUnmarshalDispatcher(), 1024)
+	pulsarWriteStream.Start()
+	var writeStream ms.MsgStream = pulsarWriteStream
+	writeTimeTickBarrier := timesync.NewHardTimeTickBarrier(ctx, &writeStream, opt.WriteIDs)
+	tsmp.SetWriteNodeTtBarrier(writeTimeTickBarrier)
+
+	pulsarDMStream := ms.NewPulsarMsgStream(ctx, 1024) //input stream
+	pulsarDMStream.SetPulsarCient(opt.PulsarAddr)
+	pulsarDMStream.CreatePulsarProducers(opt.PulsarDMChannels)
+	tsmp.SetDMSyncStream(pulsarDMStream)
+
+	pulsarK2SStream := ms.NewPulsarMsgStream(ctx, 1024) //input stream
+	pulsarK2SStream.SetPulsarCient(opt.PulsarAddr)
+	pulsarK2SStream.CreatePulsarProducers(opt.PulsarK2SChannels)
+	tsmp.SetK2sSyncStream(pulsarK2SStream)
+
 	m := &Master{
 		ctx:            ctx,
 		startTimestamp: time.Now().Unix(),
-		kvBase:         newKVBase(kvRootPath, etcdAddr),
+		kvBase:         newKVBase(opt.KVRootPath, opt.EtcdAddr),
 		scheduler:      NewDDRequestScheduler(),
 		mt:             metakv,
+		tsmp:           tsmp,
 		ssChan:         make(chan internalpb.SegmentStats, 10),
 		grpcErr:        make(chan error),
 		pc:             informer.NewPulsarClient(),
@@ -190,6 +249,11 @@ func (s *Master) startServerLoop(ctx context.Context, grpcPort int64) error {
 	//go s.Se
 
 	s.serverLoopWg.Add(1)
+	if err := s.tsmp.Start(); err != nil {
+		return err
+	}
+
+	s.serverLoopWg.Add(1)
 	go s.grpcLoop(grpcPort)
 
 	if err := <-s.grpcErr; err != nil {
@@ -209,6 +273,9 @@ func (s *Master) startServerLoop(ctx context.Context, grpcPort int64) error {
 }
 
 func (s *Master) stopServerLoop() {
+	s.tsmp.Close()
+	s.serverLoopWg.Done()
+
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
 		log.Printf("server is closed, exit grpc server")

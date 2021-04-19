@@ -11,6 +11,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"google.golang.org/grpc"
 )
@@ -30,7 +31,23 @@ func TestMaster_CreateCollection(t *testing.T) {
 	_, err = etcdCli.Delete(ctx, "/test/root", clientv3.WithPrefix())
 	assert.Nil(t, err)
 
-	svr, err := CreateServer(ctx, "/test/root/kv", "/test/root/meta", []string{etcdAddr})
+	opt := Option{
+		KVRootPath:          "/test/root/kv",
+		MetaRootPath:        "/test/root/meta",
+		EtcdAddr:            []string{etcdAddr},
+		PulsarAddr:          "pulsar://localhost:6650",
+		ProxyIDs:            []typeutil.UniqueID{1, 2},
+		PulsarProxyChannels: []string{"proxy1", "proxy2"},
+		PulsarProxySubName:  "proxyTopics",
+		SoftTTBInterval:     300,
+		WriteIDs:            []typeutil.UniqueID{3, 4},
+		PulsarWriteChannels: []string{"write3", "write4"},
+		PulsarWriteSubName:  "writeTopics",
+		PulsarDMChannels:    []string{"dm0", "dm1"},
+		PulsarK2SChannels:   []string{"k2s0", "k2s1"},
+	}
+
+	svr, err := CreateServer(ctx, &opt)
 	assert.Nil(t, err)
 	err = svr.Run(10001)
 	assert.Nil(t, err)
