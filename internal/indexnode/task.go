@@ -33,12 +33,18 @@ type task interface {
 	WaitToFinish() error
 	Notify(err error)
 	OnEnqueue() error
+	SetError(err error)
 }
 
 type BaseTask struct {
 	done chan error
 	ctx  context.Context
 	id   UniqueID
+	err  error
+}
+
+func (bt *BaseTask) SetError(err error) {
+	bt.err = err
 }
 
 func (bt *BaseTask) ID() UniqueID {
@@ -101,15 +107,16 @@ func (it *IndexBuildTask) PreExecute(ctx context.Context) error {
 
 func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 	log.Println("PostExecute...")
-	var err error
+
 	defer func() {
-		if err != nil {
+		if it.err != nil {
 			it.Rollback()
 		}
 	}()
 
 	if it.serviceClient == nil {
-		err = errors.New("IndexBuildTask, serviceClient is nil")
+		err := errors.New("IndexBuildTask, serviceClient is nil")
+		log.Println("[IndexBuildTask][PostExecute] serviceClient is nil")
 		return err
 	}
 
@@ -121,6 +128,9 @@ func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 		NodeID:         it.nodeID,
 		IndexFilePaths: it.savePaths,
 	}
+	if it.err != nil {
+		nty.Status.ErrorCode = commonpb.ErrorCode_BUILD_INDEX_ERROR
+	}
 
 	resp, err := it.serviceClient.NotifyBuildIndex(ctx, nty)
 	if err != nil {
@@ -131,6 +141,7 @@ func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 	if resp.ErrorCode != commonpb.ErrorCode_SUCCESS {
 		err = errors.New(resp.Reason)
 	}
+	log.Println("[IndexBuildTask][PostExecute] err", err)
 	return err
 }
 

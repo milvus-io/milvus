@@ -315,9 +315,12 @@ func (i *ServiceImpl) NotifyBuildIndex(ctx context.Context, nty *indexpb.BuildIn
 	ret := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 	}
+	log.Println("[IndexService][NotifyBuildIndex]", nty.String())
 	if err := i.metaTable.NotifyBuildIndex(nty); err != nil {
 		ret.ErrorCode = commonpb.ErrorCode_BUILD_INDEX_ERROR
 		ret.Reason = err.Error()
+		log.Println("[IndexService][NotifyBuildIndex][metaTable][NotifyBuildIndex]", err)
+
 	}
 	i.nodeClients.IncPriority(nty.NodeID, -1)
 	return ret, nil
