@@ -16,7 +16,8 @@ MsgClientV2::MsgClientV2(int64_t client_id,
                          const std::string &service_url,
                          const uint32_t mut_parallelism,
                          const pulsar::ClientConfiguration &config)
-    : client_id_(client_id), service_url_(service_url), mut_parallelism_(mut_parallelism) {}
+    : client_id_(client_id), service_url_(service_url), mut_parallelism_(mut_parallelism) {
+}
 
 Status MsgClientV2::Init(const std::string &insert_delete,
                          const std::string &search,
@@ -35,16 +36,17 @@ Status MsgClientV2::Init(const std::string &insert_delete,
   time_sync_producer_ = std::make_shared<MsgProducer>(pulsar_client, time_sync);
 
   for (auto i = 0; i < mut_parallelism_; i++) {
-//    std::string topic = insert_delete + "-" + std::to_string(i);
+    std::string insert_or_delete_topic = insert_delete + "-" + std::to_string(i);
     paralle_mut_producers_.emplace_back(std::make_shared<MsgProducer>(pulsar_client,
-                                                                      insert_delete,
+                                                                      insert_or_delete_topic,
                                                                       producerConfiguration));
   }
   //create pulsar consumer
   std::string subscribe_name = std::to_string(CommonUtil::RandomUINT64());
   consumer_ = std::make_shared<MsgConsumer>(pulsar_client, search_result + subscribe_name);
 
-  auto result = consumer_->subscribe(search_result);
+  std::string search_topic = search_result + "-" + std::to_string(config.proxy_id());
+  auto result = consumer_->subscribe(search_topic);
   if (result != pulsar::Result::ResultOk) {
     return Status(SERVER_UNEXPECTED_ERROR,
                   "Pulsar message client init occur error, " + std::string(pulsar::strResult(result)));
@@ -53,7 +55,7 @@ Status MsgClientV2::Init(const std::string &insert_delete,
 }
 
 int64_t GetQueryNodeNum() {
-  return config.query_node_num();
+  return config.master.query_node_num();
 }
 
 Status
@@ -161,10 +163,11 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
                                                                 uint64_t timestamp)> &segment_id) {
   // may have retry policy?
   auto row_count = request.rows_data_size();
-  auto stats = std::vector<Status>(ParallelNum);
-  std::atomic_uint64_t msg_sended = 0;
   auto topic_num = config.pulsar.topicnum();
-#pragma omp parallel for default(none), shared(row_count, request, timestamp, stats, segment_id, msg_sended, topic_num), num_threads(ParallelNum)
+  auto stats = std::vector<Status>(topic_num);
+  std::atomic_uint64_t msg_sended = 0;
+
+#pragma omp parallel for default(none), shared(row_count, request, timestamp, stats, segment_id, msg_sended, topic_num), num_threads(topic_num)
   for (auto i = 0; i < row_count; i++) {
     milvus::grpc::InsertOrDeleteMsg mut_msg;
     int this_thread = omp_get_thread_num();
@@ -211,10 +214,11 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::DeleteByIDParam &request,
                                                                 uint64_t channel_id,
                                                                 uint64_t timestamp)> &segment_id) {
   auto row_count = request.id_array_size();
-  auto stats = std::vector<Status>(ParallelNum);
+  auto topicnum = config.pulsar.topicnum();
+  auto stats = std::vector<Status>(topicnum);
   std::atomic_uint64_t msg_sended = 0;
 
-#pragma omp parallel for default(none), shared( request, timestamp, stats, segment_id, msg_sended, row_count), num_threads(ParallelNum)
+#pragma omp parallel for default(none), shared( request, timestamp, stats, segment_id, msg_sended, row_count, topicnum), num_threads(topicnum)
   for (auto i = 0; i < row_count; i++) {
     milvus::grpc::InsertOrDeleteMsg mut_msg;
     mut_msg.set_op(milvus::grpc::OpType::DELETE);
@@ -223,7 +227,7 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::DeleteByIDParam &request,
     mut_msg.set_collection_name(request.collection_name());
     mut_msg.set_timestamp(timestamp);
     uint64_t uid = request.id_array(i);
-    auto channel_id = makeHash(&uid, sizeof(uint64_t)) % 1024;
+    auto channel_id = makeHash(&uid, sizeof(uint64_t)) % topicnum;
     mut_msg.set_segment_id(segment_id(request.collection_name(), channel_id, timestamp));
 
     int this_thread = omp_get_thread_num();
@@ -253,7 +257,7 @@ Status MsgClientV2::SendQueryMessage(const milvus::grpc::SearchParam &request, u
   search_msg.set_collection_name(request.collection_name());
   search_msg.set_uid(query_id);
   //TODO: get client id from master
-  search_msg.set_client_id(1);
+  search_msg.set_client_id(client_id_);
   search_msg.set_timestamp(timestamp);
   search_msg.set_dsl(request.dsl());
 

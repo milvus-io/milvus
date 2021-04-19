@@ -615,9 +615,9 @@ SegmentNaive::GetMemoryUsageInBytes() {
             total_bytes += vec_ptr->IndexSize();
         }
     }
-    int64_t ins_n = (record_.reserved + DefaultElementPerChunk - 1) & (DefaultElementPerChunk - 1);
+    int64_t ins_n = (record_.reserved + DefaultElementPerChunk - 1) & ~(DefaultElementPerChunk - 1);
     total_bytes += ins_n * (schema_->get_total_sizeof() + 16 + 1);
-    int64_t del_n = (deleted_record_.reserved + DefaultElementPerChunk - 1) & (DefaultElementPerChunk - 1);
+    int64_t del_n = (deleted_record_.reserved + DefaultElementPerChunk - 1) & ~(DefaultElementPerChunk - 1);
     total_bytes += del_n * (16 * 2);
     return total_bytes;
 }

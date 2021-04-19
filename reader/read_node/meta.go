@@ -104,6 +104,7 @@ func (node *QueryNode) processSegmentCreate(id string, value string) {
 	}
 	printSegmentStruct(segment)
 
+	// TODO: fix this after channel range config finished
 	//if !isSegmentChannelRangeInQueryNodeChannelRange(segment) {
 	//	return
 	//}
@@ -117,7 +118,6 @@ func (node *QueryNode) processSegmentCreate(id string, value string) {
 			newSegment := partition.NewSegment(newSegmentID)
 			newSegment.SegmentStatus = SegmentOpened
 			newSegment.SegmentCloseTime = segment.CloseTimeStamp
-			partition.OpenedSegments = append(partition.OpenedSegments, newSegment)
 			node.SegmentsMap[newSegmentID] = newSegment
 		}
 	}
@@ -147,6 +147,7 @@ func (node *QueryNode) processSegmentModify(id string, value string) {
 	}
 	printSegmentStruct(segment)
 
+	// TODO: fix this after channel range config finished
 	//if !isSegmentChannelRangeInQueryNodeChannelRange(segment) {
 	//	return
 	//}

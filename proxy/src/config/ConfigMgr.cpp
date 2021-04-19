@@ -70,11 +70,8 @@ ConfigMgr::ConfigMgr() {
     config_list_ = {
 
         /* general */
-        {"timezone",
-         CreateStringConfig("timezone", false, &config.timezone.value, "UTC+8", nullptr, nullptr)},
-
-        {"query_node_num", CreateIntegerConfig("query_node_num", false, 0, 1023, &config.query_node_num.value,
-                                            1, nullptr, nullptr)},
+        {"timezone", CreateStringConfig("timezone", false, &config.timezone.value, "UTC+8", nullptr, nullptr)},
+        {"proxy_id", CreateIntegerConfig("proxy_id", false, 0, 1024, &config.proxy_id.value, 0, nullptr, nullptr)},
 
         /* network */
         {"network.address", CreateStringConfig("network.address", false, &config.network.address.value,
@@ -90,13 +87,13 @@ ConfigMgr::ConfigMgr() {
                                                   6650, nullptr, nullptr)},
         {"pulsar.topicnum", CreateIntegerConfig("pulsar.topicnum", false, 0, 1024, &config.pulsar.topicnum.value,
                                             1024, nullptr, nullptr)},
-        {"pulsar.nodenum", CreateIntegerConfig("pulsar.nodenum", false, 0, 1024, &config.pulsar.nodenum.value,
-                                                1, nullptr, nullptr)},
         /* master */
         {"master.address", CreateStringConfig("master.address", false, &config.master.address.value,
                                               "localhost", nullptr, nullptr)},
         {"master.port", CreateIntegerConfig("master.port", false, 0, 65535, &config.master.port.value,
                                             53100, nullptr, nullptr)},
+        {"master.querynodenum", CreateIntegerConfig("master.querynodenum", false, 0, 1023, &config.master.query_node_num.value,
+                                                    2, nullptr, nullptr)},
 
         /* etcd */
         {"etcd.address", CreateStringConfig("etcd.address", false, &config.etcd.address.value, "localhost", nullptr,
