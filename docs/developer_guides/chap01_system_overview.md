@@ -78,9 +78,9 @@ In order to boost throughput, we model Milvus as a stream-driven system.
 
 ```go
 type Component interface {
-  Init()
-  Start()
-  Stop()
+  Init() error
+  Start() error
+  Stop() error
   GetComponentStates() (ComponentStates, error)
   GetTimeTickChannel() (string, error)
   GetStatisticsChannel() (string, error)

@@ -46,15 +46,15 @@ type IndexService struct {
 type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
-func (i *IndexService) Init() {
+func (i *IndexService) Init() error {
 	panic("implement me")
 }
 
-func (i *IndexService) Start() {
+func (i *IndexService) Start() error {
 	panic("implement me")
 }
 
-func (i *IndexService) Stop() {
+func (i *IndexService) Stop() error {
 	panic("implement me")
 }
 
@@ -149,7 +149,7 @@ func (i *IndexService) GetIndexStates(req *indexpb.IndexStatesRequest) (*indexpb
 	return ret, nil
 }
 
-func (i *IndexService) GetIndexFilePaths(req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {
+func (i *IndexService) GetIndexFilePaths(req *indexpb.IndexFilePathRequest) (*indexpb.IndexFilePathsResponse, error) {
 	panic("implement me")
 }
 

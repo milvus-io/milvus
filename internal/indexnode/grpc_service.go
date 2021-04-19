@@ -74,25 +74,16 @@ func (b *Builder) GetIndexStates(ctx context.Context, request *indexpb.IndexStat
 	return ret, nil
 }
 
-func (b *Builder) GetIndexFilePaths(ctx context.Context, request *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {
+func (b *Builder) GetIndexFilePaths(ctx context.Context, request *indexpb.IndexFilePathRequest) (*indexpb.IndexFilePathsResponse, error) {
 	ret := &indexpb.IndexFilePathsResponse{
-		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
+		Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
+		IndexID: request.IndexID,
 	}
-	var filePathInfos []*indexpb.IndexFilePathInfo
-	for _, indexID := range request.IndexIDs {
-		filePathInfo := &indexpb.IndexFilePathInfo{
-			Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
-			IndexID: indexID,
-		}
-
-		filePaths, err := b.metaTable.GetIndexFilePaths(indexID)
-		if err != nil {
-			filePathInfo.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
-			filePathInfo.Status.Reason = err.Error()
-		}
-		filePathInfo.IndexFilePaths = filePaths
-		filePathInfos = append(filePathInfos, filePathInfo)
+	filePaths, err := b.metaTable.GetIndexFilePaths(request.IndexID)
+	if err != nil {
+		ret.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		ret.Status.Reason = err.Error()
 	}
-	ret.FilePaths = filePathInfos
+	ret.IndexFilePaths = filePaths
 	return ret, nil
 }
