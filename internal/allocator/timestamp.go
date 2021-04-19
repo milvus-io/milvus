@@ -2,7 +2,6 @@ package allocator
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"time"
 
@@ -54,7 +53,6 @@ func (ta *TimestampAllocator) checkFunc(timeout bool) bool {
 }
 
 func (ta *TimestampAllocator) syncTs() {
-	fmt.Println("sync TS")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	req := &internalpb.TsoRequest{
 		PeerID: 1,
@@ -62,7 +60,6 @@ func (ta *TimestampAllocator) syncTs() {
 		Count:  ta.countPerRPC,
 	}
 	resp, err := ta.masterClient.AllocTimestamp(ctx, req)
-	log.Printf("resp: %v", resp)
 
 	cancel()
 	if err != nil {
@@ -77,7 +74,6 @@ func (ta *TimestampAllocator) processFunc(req request) error {
 	tsoRequest := req.(*tsoRequest)
 	tsoRequest.timestamp = ta.lastTsBegin
 	ta.lastTsBegin++
-	fmt.Println("process tso")
 	return nil
 }
 
@@ -95,7 +91,6 @@ func (ta *TimestampAllocator) Alloc(count uint32) ([]Timestamp, error) {
 	}
 	req.count = count
 	ta.reqs <- req
-	fmt.Println("YYYYY ", len(ta.reqs))
 	req.Wait()
 
 	if !req.IsValid() {

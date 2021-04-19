@@ -64,24 +64,24 @@ func TestMetaService_getSegmentObjId(t *testing.T) {
 }
 
 func TestMetaService_isCollectionObj(t *testing.T) {
-	var key = "by-dev/collection/collection0"
+	var key = "by-dev/meta/collection/collection0"
 	var b1 = isCollectionObj(key)
 
 	assert.Equal(t, b1, true)
 
-	key = "by-dev/segment/segment0"
+	key = "by-dev/meta/segment/segment0"
 	var b2 = isCollectionObj(key)
 
 	assert.Equal(t, b2, false)
 }
 
 func TestMetaService_isSegmentObj(t *testing.T) {
-	var key = "by-dev/segment/segment0"
+	var key = "by-dev/meta/segment/segment0"
 	var b1 = isSegmentObj(key)
 
 	assert.Equal(t, b1, true)
 
-	key = "by-dev/collection/collection0"
+	key = "by-dev/meta/collection/collection0"
 	var b2 = isSegmentObj(key)
 
 	assert.Equal(t, b2, false)
@@ -120,8 +120,9 @@ func TestMetaService_isSegmentChannelRangeInQueryNodeChannelRange(t *testing.T) 
 func TestMetaService_printCollectionStruct(t *testing.T) {
 	collectionName := "collection0"
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -131,8 +132,9 @@ func TestMetaService_printCollectionStruct(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -142,7 +144,8 @@ func TestMetaService_printCollectionStruct(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: collectionName,
+		Name:   collectionName,
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -228,8 +231,9 @@ func TestMetaService_processSegmentCreate(t *testing.T) {
 
 	collectionName := "collection0"
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -239,8 +243,9 @@ func TestMetaService_processSegmentCreate(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -250,7 +255,8 @@ func TestMetaService_processSegmentCreate(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: collectionName,
+		Name:   collectionName,
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -295,7 +301,7 @@ func TestMetaService_processCreate(t *testing.T) {
 	node := NewQueryNode(ctx, 0)
 	node.metaService = newMetaService(ctx, node.replica)
 
-	key1 := "by-dev/collection/0"
+	key1 := "by-dev/meta/collection/0"
 	msg1 := `schema: <
 				name: "test"
 				fields: <
@@ -327,7 +333,7 @@ func TestMetaService_processCreate(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
-	key2 := "by-dev/segment/0"
+	key2 := "by-dev/meta/segment/0"
 	msg2 := `partition_tag: "default"
 				channel_start: 0
 				channel_end: 1
@@ -351,8 +357,9 @@ func TestMetaService_processSegmentModify(t *testing.T) {
 
 	collectionName := "collection0"
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -362,8 +369,9 @@ func TestMetaService_processSegmentModify(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -373,7 +381,8 @@ func TestMetaService_processSegmentModify(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: collectionName,
+		Name:   collectionName,
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -529,7 +538,7 @@ func TestMetaService_processModify(t *testing.T) {
 	node := NewQueryNode(ctx, 0)
 	node.metaService = newMetaService(ctx, node.replica)
 
-	key1 := "by-dev/collection/0"
+	key1 := "by-dev/meta/collection/0"
 	msg1 := `schema: <
 				name: "test"
 				fields: <
@@ -576,7 +585,7 @@ func TestMetaService_processModify(t *testing.T) {
 	hasPartition = (*node.replica).hasPartition(UniqueID(0), "p3")
 	assert.Equal(t, hasPartition, false)
 
-	key2 := "by-dev/segment/0"
+	key2 := "by-dev/meta/segment/0"
 	msg2 := `partition_tag: "p1"
 				channel_start: 0
 				channel_end: 1
@@ -656,8 +665,9 @@ func TestMetaService_processSegmentDelete(t *testing.T) {
 
 	collectionName := "collection0"
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -667,8 +677,9 @@ func TestMetaService_processSegmentDelete(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -678,7 +689,8 @@ func TestMetaService_processSegmentDelete(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: collectionName,
+		Name:   collectionName,
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -772,7 +784,7 @@ func TestMetaService_processDelete(t *testing.T) {
 	node := NewQueryNode(ctx, 0)
 	node.metaService = newMetaService(ctx, node.replica)
 
-	key1 := "by-dev/collection/0"
+	key1 := "by-dev/meta/collection/0"
 	msg1 := `schema: <
 				name: "test"
 				fields: <
@@ -804,7 +816,7 @@ func TestMetaService_processDelete(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
-	key2 := "by-dev/segment/0"
+	key2 := "by-dev/meta/segment/0"
 	msg2 := `partition_tag: "default"
 				channel_start: 0
 				channel_end: 1

@@ -1,0 +1,45 @@
+version: '3.5'
+
+services:
+  master:
+    image: master
+    build:
+      context: ../../../
+      dockerfile: build/docker/deploy/master/DockerFile
+    environment: 
+      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
+      ETCD_ADDRESS: ${ETCD_ADDRESS}
+      MASTER_ADDRESS: ${MASTER_ADDRESS}
+    networks: 
+      - milvus
+    ports:
+      - "53100:53100"
+
+  proxy:
+    image: proxy
+    build:
+      context: ../../../
+      dockerfile: build/docker/deploy/proxy/DockerFile
+    environment: 
+      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
+      ETCD_ADDRESS: ${ETCD_ADDRESS}
+      MASTER_ADDRESS: ${MASTER_ADDRESS}
+    ports:
+      - "19530:19530"
+    networks: 
+      - milvus
+
+  querynode:
+    image: querynode
+    build:
+      context: ../../../
+      dockerfile: build/docker/deploy/querynode/DockerFile
+    environment: 
+      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
+      ETCD_ADDRESS: ${ETCD_ADDRESS}
+      MASTER_ADDRESS: ${MASTER_ADDRESS}
+    networks:
+      - milvus
+
+networks:
+  milvus:

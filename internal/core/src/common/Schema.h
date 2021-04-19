@@ -16,6 +16,8 @@
 #include <string>
 #include <unordered_map>
 #include <memory>
+#include <pb/schema.pb.h>
+#include <optional>
 
 namespace milvus {
 
@@ -37,6 +39,11 @@ class Schema {
         total_sizeof_ += field_sizeof;
     }
 
+    void
+    set_auto_id(bool is_auto_id) {
+        is_auto_id_ = is_auto_id;
+    }
+
     auto
     begin() {
         return fields_.begin();
@@ -46,6 +53,13 @@ class Schema {
     end() {
         return fields_.end();
     }
+
+ public:
+    bool
+    get_is_auto_id() const {
+        return is_auto_id_;
+    }
+
     auto
     begin() const {
         return fields_.begin();
@@ -100,6 +114,15 @@ class Schema {
         return (*this)[offset];
     }
 
+    std::optional<int>
+    get_primary_key_offset() const {
+        return primary_key_offset_opt_;
+    }
+
+ public:
+    static std::shared_ptr<Schema>
+    ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto);
+
  private:
     // this is where data holds
     std::vector<FieldMeta> fields_;
@@ -109,6 +132,8 @@ class Schema {
     std::unordered_map<std::string, int> offsets_;
     std::vector<int> sizeof_infos_;
     int total_sizeof_ = 0;
+    bool is_auto_id_ = true;
+    std::optional<int> primary_key_offset_opt_;
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;

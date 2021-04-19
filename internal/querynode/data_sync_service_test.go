@@ -38,8 +38,9 @@ func TestDataSyncService_Start(t *testing.T) {
 	// init meta
 	collectionName := "collection0"
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -49,8 +50,9 @@ func TestDataSyncService_Start(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -60,7 +62,8 @@ func TestDataSyncService_Start(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: collectionName,
+		Name:   collectionName,
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
