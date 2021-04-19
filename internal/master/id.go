@@ -9,7 +9,7 @@ type GlobalIDAllocator struct {
 	allocator Allocator
 }
 
-func NewGlobalIDAllocator(key string, base kv.TxnBase) *GlobalIDAllocator {
+func NewGlobalIDAllocator(key string, base kv.Base) *GlobalIDAllocator {
 	return &GlobalIDAllocator{
 		allocator: NewGlobalTSOAllocator(key, base),
 	}

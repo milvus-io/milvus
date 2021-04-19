@@ -1,4 +1,4 @@
-package etcdkv
+package kv
 
 import (
 	"context"

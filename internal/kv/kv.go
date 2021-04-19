@@ -8,11 +8,6 @@ type Base interface {
 	MultiSave(kvs map[string]string) error
 	Remove(key string) error
 	MultiRemove(keys []string) error
-
-	Close()
-}
-
-type TxnBase interface {
-	Base
 	MultiSaveAndRemove(saves map[string]string, removals []string) error
+	Close()
 }

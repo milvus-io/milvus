@@ -364,7 +364,7 @@ func (sched *TaskScheduler) queryResultLoop() {
 	unmarshal := msgstream.NewUnmarshalDispatcher()
 	queryResultMsgStream := msgstream.NewPulsarMsgStream(sched.ctx, Params.MsgStreamSearchResultBufSize())
 	queryResultMsgStream.SetPulsarClient(Params.PulsarAddress())
-	queryResultMsgStream.CreatePulsarConsumers(Params.searchResultChannelNames(),
+	queryResultMsgStream.CreatePulsarConsumers(Params.SearchResultChannelNames(),
 		Params.ProxySubName(),
 		unmarshal,
 		Params.MsgStreamSearchResultPulsarBufSize())

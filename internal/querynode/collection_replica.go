@@ -31,7 +31,7 @@ import (
  * is up-to-date.
  */
 type collectionReplica interface {
-	getTSafe() *tSafe
+	getTSafe() tSafe
 
 	// collection
 	getCollectionNum() int
@@ -68,11 +68,11 @@ type collectionReplicaImpl struct {
 	collections []*Collection
 	segments    map[UniqueID]*Segment
 
-	tSafe *tSafe
+	tSafe tSafe
 }
 
 //----------------------------------------------------------------------------------------------------- tSafe
-func (colReplica *collectionReplicaImpl) getTSafe() *tSafe {
+func (colReplica *collectionReplicaImpl) getTSafe() tSafe {
 	return colReplica.tSafe
 }
 
