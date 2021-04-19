@@ -883,7 +883,7 @@ class TestSearchBase:
 
         for i in range(threads_num):
             milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
-            t = TestThread(target=search, args=(milvus,))
+            t = MyThread(target=search, args=(milvus,))
             threads.append(t)
             t.start()
             time.sleep(0.2)
@@ -918,7 +918,7 @@ class TestSearchBase:
             assert res[0]._distances[0] < epsilon
 
         for i in range(threads_num):
-            t = TestThread(target=search, args=(milvus,))
+            t = MyThread(target=search, args=(milvus,))
             threads.append(t)
             t.start()
             time.sleep(0.2)

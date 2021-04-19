@@ -989,19 +989,19 @@ def compare_list_elements(_first, _second):
     return True
 
 
-class TestThread(threading.Thread):
+class MyThread(threading.Thread):
     def __init__(self, target, args=()):
         threading.Thread.__init__(self, target=target, args=args)
 
     def run(self):
         self.exc = None
         try:
-            super(TestThread, self).run()
+            super(MyThread, self).run()
         except BaseException as e:
             self.exc = e
             logging.error(traceback.format_exc())
 
     def join(self):
-        super(TestThread, self).join()
+        super(MyThread, self).join()
         if self.exc:
             raise self.exc

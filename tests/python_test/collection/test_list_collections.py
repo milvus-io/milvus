@@ -91,7 +91,7 @@ class TestListCollections:
             assert collection_name in connect.list_collections()
 
         for i in range(threads_num):
-            t = TestThread(target=_list)
+            t = MyThread(target=_list)
             threads.append(t)
             t.start()
             time.sleep(0.2)
