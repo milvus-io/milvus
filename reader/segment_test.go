@@ -23,10 +23,10 @@ func TestSegmentInsert(t *testing.T) {
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
-	ids :=[] uint64{1, 2, 3}
+	ids :=[] int64{1, 2, 3}
 	timestamps :=[] uint64 {0, 0, 0}
 
-	var _, err = SegmentInsert(segment, &ids, &timestamps, nil)
+	var err = segment.SegmentInsert(&ids, &timestamps, nil, 0, 0)
 	assert.NoError(t, err)
 
 	partition.DeleteSegment(segment)
@@ -40,10 +40,10 @@ func TestSegmentDelete(t *testing.T) {
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
-	ids :=[] uint64{1, 2, 3}
+	ids :=[] int64{1, 2, 3}
 	timestamps :=[] uint64 {0, 0, 0}
 
-	var _, err = SegmentDelete(segment, &ids, &timestamps)
+	var err = segment.SegmentDelete(&ids, &timestamps, 0, 0)
 	assert.NoError(t, err)
 
 	partition.DeleteSegment(segment)
@@ -57,13 +57,13 @@ func TestSegmentSearch(t *testing.T) {
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
-	ids :=[] uint64{1, 2, 3}
+	ids :=[] int64{1, 2, 3}
 	timestamps :=[] uint64 {0, 0, 0}
 
-	var _, insertErr = SegmentInsert(segment, &ids, &timestamps, nil)
+	var insertErr = segment.SegmentInsert(&ids, &timestamps, nil, 0, 0)
 	assert.NoError(t, insertErr)
 
-	var searchRes, searchErr = SegmentSearch(segment, "fake query string", &timestamps, nil)
+	var searchRes, searchErr = segment.SegmentSearch("fake query string", timestamps[0], nil)
 	assert.NoError(t, searchErr)
 	fmt.Println(searchRes)
 
@@ -106,10 +106,10 @@ func TestSegment_GetRowCount(t *testing.T) {
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
-	ids :=[] uint64{1, 2, 3}
+	ids :=[] int64{1, 2, 3}
 	timestamps :=[] uint64 {0, 0, 0}
 
-	var _, err = SegmentInsert(segment, &ids, &timestamps, nil)
+	var err = segment.SegmentInsert(&ids, &timestamps, nil, 0, 0)
 	assert.NoError(t, err)
 
 	var rowCount = segment.GetRowCount()
@@ -126,54 +126,15 @@ func TestSegment_GetDeletedCount(t *testing.T) {
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
-	ids :=[] uint64{1, 2, 3}
+	ids :=[] int64{1, 2, 3}
 	timestamps :=[] uint64 {0, 0, 0}
 
-	var _, err = SegmentDelete(segment, &ids, &timestamps)
+	var err = segment.SegmentDelete(&ids, &timestamps, 0, 0)
 	assert.NoError(t, err)
 
 	var deletedCount = segment.GetDeletedCount()
 	// TODO: assert.Equal(t, deletedCount, len(ids))
 	assert.Equal(t, deletedCount, int64(0))
-
-	partition.DeleteSegment(segment)
-	collection.DeletePartition(partition)
-	node.DeleteCollection(collection)
-}
-
-func TestSegment_TimestampGetterAndSetter(t *testing.T) {
-	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection("collection0", "fake schema")
-	var partition = collection.NewPartition("partition0")
-	var segment = partition.NewSegment(0)
-
-	const MinTimestamp = 100
-	const MaxTimestamp = 200
-
-	segment.SetMinTimestamp(MinTimestamp)
-	var minTimestamp = segment.GetMinTimestamp()
-	assert.Equal(t, minTimestamp, uint64(MinTimestamp))
-
-	segment.SetMaxTimestamp(MaxTimestamp)
-	var maxTimestamp = segment.GetMaxTimestamp()
-	assert.Equal(t, maxTimestamp, uint64(MaxTimestamp))
-
-	partition.DeleteSegment(segment)
-	collection.DeletePartition(partition)
-	node.DeleteCollection(collection)
-}
-
-func TestSegment_SegmentIDGetterAndSetter(t *testing.T) {
-	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection("collection0", "fake schema")
-	var partition = collection.NewPartition("partition0")
-	var segment = partition.NewSegment(0)
-
-	const SegmentID = 1
-
-	segment.SetSegmentID(SegmentID)
-	var segmentID = segment.GetSegmentID()
-	assert.Equal(t, segmentID, uint64(SegmentID))
 
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)

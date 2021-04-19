@@ -2,7 +2,7 @@ package reader
 
 import (
 	"fmt"
-	msgpb "github.com/czs007/suvlim/pkg/message"
+	msgPb "github.com/czs007/suvlim/pkg/message"
 	"strconv"
 )
 
@@ -18,24 +18,24 @@ func getResultTopicByClientId(clientId int64) string {
 	return "result-topic/partition-" + strconv.FormatInt(clientId, 10)
 }
 
-func publishResult(ids *ResultEntityIds, clientId int64) msgpb.Status {
+func publishResult(ids *ResultEntityIds, clientId int64) msgPb.Status {
 	// TODO: Pulsar publish
 	var resultTopic = getResultTopicByClientId(clientId)
 	fmt.Println(resultTopic)
-	return msgpb.Status{ErrorCode: msgpb.ErrorCode_SUCCESS}
+	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
 }
 
-func publishSearchResult(searchResults *[]*SearchResult, clientId int64) msgpb.Status {
+func publishSearchResult(searchResults *SearchResult, clientId int64) msgPb.Status {
 	// TODO: Pulsar publish
 	var resultTopic = getResultTopicByClientId(clientId)
 	fmt.Println(resultTopic)
-	return msgpb.Status{ErrorCode: msgpb.ErrorCode_SUCCESS}
+	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
 }
 
-func publicStatistic(statisticTopic string) msgpb.Status {
+func publicStatistic(statisticTopic string) msgPb.Status {
 	// TODO: get statistic info
 	// getStatisticInfo()
 	// var info = getStatisticInfo()
 	// TODO: Pulsar publish
-	return msgpb.Status{ErrorCode: msgpb.ErrorCode_SUCCESS}
+	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
 }

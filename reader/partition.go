@@ -20,7 +20,7 @@ type Partition struct {
 	ClosedSegments []*Segment
 }
 
-func (p *Partition) NewSegment(segmentId uint64) *Segment {
+func (p *Partition) NewSegment(segmentId int64) *Segment {
 	segmentPtr := C.NewSegment(p.PartitionPtr, C.ulong(segmentId))
 
 	var newSegment = &Segment{SegmentPtr: segmentPtr, SegmentId: segmentId}
