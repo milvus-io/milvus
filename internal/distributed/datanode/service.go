@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	dn "github.com/zilliztech/milvus-distributed/internal/datanode"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -74,7 +75,10 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) Stop() error {
-	return s.core.Stop()
+	err := s.core.Stop()
+	s.cancel()
+	s.grpcServer.GracefulStop()
+	return err
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
@@ -86,6 +90,12 @@ func (s *Server) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelR
 }
 
 func (s *Server) FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) (*commonpb.Status, error) {
+	if s.core.State != internalpb2.StateCode_HEALTHY {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    "DataNode isn't healthy.",
+		}, errors.Errorf("DataNode is not ready yet")
+	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 	}, s.core.FlushSegments(in)

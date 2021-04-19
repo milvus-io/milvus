@@ -7,23 +7,19 @@ import (
 	"os/signal"
 	"syscall"
 
-	grpcqueryservice "github.com/zilliztech/milvus-distributed/internal/distributed/queryservice"
-	"github.com/zilliztech/milvus-distributed/internal/queryservice"
+	distributed "github.com/zilliztech/milvus-distributed/cmd/distributed/components"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	svr := grpcqueryservice.NewServer(ctx)
-
-	if err := svr.Init(); err != nil {
+	svr, err := distributed.NewQueryService(ctx)
+	if err != nil {
 		panic(err)
 	}
 
-	log.Printf("query service address : %s", queryservice.Params.Address)
-
-	if err := svr.Start(); err != nil {
+	if err := svr.Run(); err != nil {
 		panic(err)
 	}
 
@@ -35,5 +31,8 @@ func main() {
 		syscall.SIGQUIT)
 	sig := <-sc
 	log.Printf("Got %s signal to exit", sig.String())
-	_ = svr.Stop()
+
+	if err := svr.Stop(); err != nil {
+		panic(err)
+	}
 }

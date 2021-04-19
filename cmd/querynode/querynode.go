@@ -7,16 +7,20 @@ import (
 	"os/signal"
 	"syscall"
 
-	"go.uber.org/zap"
-
-	grpcquerynode "github.com/zilliztech/milvus-distributed/internal/distributed/querynode"
+	distributed "github.com/zilliztech/milvus-distributed/cmd/distributed/components"
 )
 
 func main() {
-	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
-	svr := grpcquerynode.NewServer(ctx)
-	if err := svr.Init(); err != nil {
+	defer cancel()
+
+	svr, err := distributed.NewQueryNode(ctx)
+
+	if err != nil {
+		panic(err)
+	}
+
+	if err = svr.Run(); err != nil {
 		panic(err)
 	}
 
@@ -27,30 +31,10 @@ func main() {
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
 
-	var sig os.Signal
-	go func() {
-		sig = <-sc
-		cancel()
-	}()
-
-	if err := svr.Start(); err != nil {
-		panic(err)
-	}
-
-	<-ctx.Done()
-	log.Print("Got signal to exit", zap.String("signal", sig.String()))
+	sig := <-sc
+	log.Print("Got signal to exit", sig.String())
 
 	if err := svr.Stop(); err != nil {
 		panic(err)
 	}
-	switch sig {
-	case syscall.SIGTERM:
-		exit(0)
-	default:
-		exit(1)
-	}
-}
-
-func exit(code int) {
-	os.Exit(code)
 }

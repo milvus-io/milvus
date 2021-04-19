@@ -2,6 +2,7 @@ package grpcqueryserviceclient
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
@@ -14,30 +15,76 @@ import (
 
 type Client struct {
 	grpcClient querypb.QueryServiceClient
+	conn       *grpc.ClientConn
+
+	addr    string
+	timeout time.Duration
+	retry   int
+}
+
+func NewClient(address string, timeout time.Duration) (*Client, error) {
+
+	return &Client{
+		grpcClient: nil,
+		conn:       nil,
+		addr:       address,
+		timeout:    timeout,
+		retry:      3,
+	}, nil
 }
 
 func (c *Client) Init() error {
-	panic("implement me")
+	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+	defer cancel()
+
+	var err error
+	for i := 0; i < c.retry; i++ {
+		if c.conn, err = grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock()); err != nil {
+			break
+		}
+	}
+
+	if err != nil {
+		return err
+	}
+
+	c.grpcClient = querypb.NewQueryServiceClient(c.conn)
+	log.Printf("connected to queryService, queryService=%s", c.addr)
+	return nil
 }
 
 func (c *Client) Start() error {
-	panic("implement me")
+	return nil
 }
 
 func (c *Client) Stop() error {
-	panic("implement me")
+	return c.conn.Close()
 }
 
 func (c *Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	panic("implement me")
+	return c.grpcClient.GetComponentStates(context.Background(), &commonpb.Empty{})
 }
 
 func (c *Client) GetTimeTickChannel() (string, error) {
-	panic("implement me")
+	resp, err := c.grpcClient.GetTimeTickChannel(context.Background(), &commonpb.Empty{})
+	if err != nil {
+		return "", err
+	}
+	if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return "", errors.New(resp.Status.Reason)
+	}
+	return resp.Value, nil
 }
 
 func (c *Client) GetStatisticsChannel() (string, error) {
-	panic("implement me")
+	resp, err := c.grpcClient.GetStatisticsChannel(context.Background(), &commonpb.Empty{})
+	if err != nil {
+		return "", err
+	}
+	if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return "", errors.New(resp.Status.Reason)
+	}
+	return resp.Value, nil
 }
 
 func (c *Client) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
@@ -74,18 +121,4 @@ func (c *Client) CreateQueryChannel() (*querypb.CreateQueryChannelResponse, erro
 
 func (c *Client) GetPartitionStates(req *querypb.PartitionStatesRequest) (*querypb.PartitionStatesResponse, error) {
 	return c.grpcClient.GetPartitionStates(context.TODO(), req)
-}
-
-func NewClient(address string) *Client {
-	ctx1, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	conn, err := grpc.DialContext(ctx1, address, grpc.WithInsecure(), grpc.WithBlock())
-	if err != nil {
-		log.Printf("connect to queryService failed, error= %v", err)
-	}
-	log.Printf("connected to queryService, queryService=%s", address)
-
-	return &Client{
-		grpcClient: querypb.NewQueryServiceClient(conn),
-	}
 }
