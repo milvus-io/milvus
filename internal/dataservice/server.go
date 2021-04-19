@@ -246,7 +246,7 @@ func (s *Server) loadMetaFromMaster() error {
 			log.Error("show partitions error", zap.String("collectionName", collectionName), zap.Int64("collectionID", collection.CollectionID), zap.Error(err))
 			continue
 		}
-		err = s.meta.AddCollection(&collectionInfo{
+		err = s.meta.AddCollection(&datapb.CollectionInfo{
 			ID:         collection.CollectionID,
 			Schema:     collection.Schema,
 			Partitions: partitions.PartitionIDs,
@@ -615,7 +615,7 @@ func (s *Server) loadCollectionFromMaster(ctx context.Context, collectionID int6
 	if err = VerifyResponse(resp, err); err != nil {
 		return err
 	}
-	collInfo := &collectionInfo{
+	collInfo := &datapb.CollectionInfo{
 		ID:     resp.CollectionID,
 		Schema: resp.Schema,
 	}
@@ -797,14 +797,14 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 		resp.Status.Reason = "data service is not healthy"
 		return resp, nil
 	}
-	infos := make([]*datapb.SegmentInfo, len(req.SegmentIDs))
-	for i, id := range req.SegmentIDs {
-		segmentInfo, err := s.meta.GetSegment(id)
+	infos := make([]*datapb.SegmentInfo, 0, len(req.SegmentIDs))
+	for _, id := range req.SegmentIDs {
+		info, err := s.meta.GetSegment(id)
 		if err != nil {
 			resp.Status.Reason = err.Error()
 			return resp, nil
 		}
-		infos[i] = proto.Clone(segmentInfo).(*datapb.SegmentInfo)
+		infos = append(infos, info)
 	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.Infos = infos

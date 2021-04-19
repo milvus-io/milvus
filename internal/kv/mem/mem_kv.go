@@ -116,6 +116,7 @@ func (kv *MemoryKV) LoadWithPrefix(key string) ([]string, []string, error) {
 
 	keys := make([]string, 0)
 	values := make([]string, 0)
+
 	kv.tree.Ascend(func(i btree.Item) bool {
 		if strings.HasPrefix(i.(memoryKVItem).key, key) {
 			keys = append(keys, i.(memoryKVItem).key)
@@ -134,4 +135,22 @@ func (kv *MemoryKV) MultiRemoveWithPrefix(keys []string) error {
 }
 func (kv *MemoryKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
 	panic("not implement")
+}
+
+func (kv *MemoryKV) RemoveWithPrefix(key string) error {
+	kv.Lock()
+	defer kv.Unlock()
+
+	keys := make([]btree.Item, 0)
+
+	kv.tree.Ascend(func(i btree.Item) bool {
+		if strings.HasPrefix(i.(memoryKVItem).key, key) {
+			keys = append(keys, i.(memoryKVItem))
+		}
+		return true
+	})
+	for _, item := range keys {
+		kv.tree.Delete(item)
+	}
+	return nil
 }

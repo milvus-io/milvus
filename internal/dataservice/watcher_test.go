@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -29,7 +31,7 @@ func TestDataNodeTTWatcher(t *testing.T) {
 
 	id, err := allocator.allocID()
 	assert.Nil(t, err)
-	err = meta.AddCollection(&collectionInfo{
+	err = meta.AddCollection(&datapb.CollectionInfo{
 		Schema: schema,
 		ID:     id,
 	})

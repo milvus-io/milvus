@@ -543,17 +543,17 @@ func (mt *metaTable) AddSegment(seg *datapb.SegmentInfo) error {
 	}
 	exist = false
 	for _, segID := range partMeta.SegmentIDs {
-		if segID == seg.SegmentID {
+		if segID == seg.ID {
 			exist = true
 		}
 	}
 	if exist {
-		return fmt.Errorf("segment id = %d exist", seg.SegmentID)
+		return fmt.Errorf("segment id = %d exist", seg.ID)
 	}
-	partMeta.SegmentIDs = append(partMeta.SegmentIDs, seg.SegmentID)
+	partMeta.SegmentIDs = append(partMeta.SegmentIDs, seg.ID)
 	mt.partitionID2Meta[seg.PartitionID] = partMeta
-	mt.segID2CollID[seg.SegmentID] = seg.CollectionID
-	mt.segID2PartitionID[seg.SegmentID] = seg.PartitionID
+	mt.segID2CollID[seg.ID] = seg.CollectionID
+	mt.segID2PartitionID[seg.ID] = seg.PartitionID
 	k := fmt.Sprintf("%s/%d/%d", PartitionMetaPrefix, seg.CollectionID, seg.PartitionID)
 	v := proto.MarshalTextString(&partMeta)
 

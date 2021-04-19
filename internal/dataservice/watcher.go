@@ -102,7 +102,7 @@ func (watcher *dataNodeTimeTickWatcher) handleTimeTickMsg(msg *msgstream.TimeTic
 				log.Error("set segment state error", zap.Int64("segmentID", id), zap.Error(err))
 				continue
 			}
-			collID, segID := sInfo.CollectionID, sInfo.SegmentID
+			collID, segID := sInfo.CollectionID, sInfo.ID
 			coll2Segs[collID] = append(coll2Segs[collID], segID)
 			watcher.allocator.DropSegment(ctx, id)
 		}

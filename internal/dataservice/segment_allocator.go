@@ -90,8 +90,8 @@ func (allocator *segmentAllocator) OpenSegment(ctx context.Context, segmentInfo 
 	defer sp.Finish()
 	allocator.mu.Lock()
 	defer allocator.mu.Unlock()
-	if _, ok := allocator.segments[segmentInfo.SegmentID]; ok {
-		return fmt.Errorf("segment %d already exist", segmentInfo.SegmentID)
+	if _, ok := allocator.segments[segmentInfo.ID]; ok {
+		return fmt.Errorf("segment %d already exist", segmentInfo.ID)
 	}
 	totalRows, err := allocator.estimateTotalRows(segmentInfo.CollectionID)
 	if err != nil {
@@ -99,10 +99,10 @@ func (allocator *segmentAllocator) OpenSegment(ctx context.Context, segmentInfo 
 	}
 	log.Debug("dataservice: estimateTotalRows: ",
 		zap.Int64("CollectionID", segmentInfo.CollectionID),
-		zap.Int64("SegmentID", segmentInfo.SegmentID),
+		zap.Int64("SegmentID", segmentInfo.ID),
 		zap.Int("Rows", totalRows))
-	allocator.segments[segmentInfo.SegmentID] = &segmentStatus{
-		id:             segmentInfo.SegmentID,
+	allocator.segments[segmentInfo.ID] = &segmentStatus{
+		id:             segmentInfo.ID,
 		collectionID:   segmentInfo.CollectionID,
 		partitionID:    segmentInfo.PartitionID,
 		total:          totalRows,

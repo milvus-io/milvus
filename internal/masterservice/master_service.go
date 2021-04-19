@@ -289,7 +289,7 @@ func (c *Core) startDataServiceSegmentLoop() {
 				//what if master add segment failed, but data service success?
 				log.Warn("add segment info meta table failed ", zap.String("error", err.Error()))
 			} else {
-				log.Debug("add segment", zap.Int64("collection id", seg.CollectionID), zap.Int64("partition id", seg.PartitionID), zap.Int64("segment id", seg.SegmentID))
+				log.Debug("add segment", zap.Int64("collection id", seg.CollectionID), zap.Int64("partition id", seg.PartitionID), zap.Int64("segment id", seg.ID))
 			}
 		}
 	}

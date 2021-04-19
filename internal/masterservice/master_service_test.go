@@ -563,7 +563,7 @@ func TestMasterService(t *testing.T) {
 		assert.Zero(t, len(part.SegmentIDs))
 
 		seg := &datapb.SegmentInfo{
-			SegmentID:    1000,
+			ID:           1000,
 			CollectionID: coll.ID,
 			PartitionID:  part.PartitionID,
 		}
@@ -722,7 +722,7 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, len(part.SegmentIDs), 1)
 
 		seg := &datapb.SegmentInfo{
-			SegmentID:    1001,
+			ID:           1001,
 			CollectionID: coll.ID,
 			PartitionID:  part.PartitionID,
 		}

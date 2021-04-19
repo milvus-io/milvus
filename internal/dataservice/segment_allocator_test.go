@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 
 	"github.com/stretchr/testify/assert"
@@ -24,7 +26,7 @@ func TestAllocSegment(t *testing.T) {
 	schema := newTestSchema()
 	collID, err := mockAllocator.allocID()
 	assert.Nil(t, err)
-	err = meta.AddCollection(&collectionInfo{
+	err = meta.AddCollection(&datapb.CollectionInfo{
 		ID:     collID,
 		Schema: schema,
 	})
@@ -75,7 +77,7 @@ func TestSealSegment(t *testing.T) {
 	schema := newTestSchema()
 	collID, err := mockAllocator.allocID()
 	assert.Nil(t, err)
-	err = meta.AddCollection(&collectionInfo{
+	err = meta.AddCollection(&datapb.CollectionInfo{
 		ID:     collID,
 		Schema: schema,
 	})
@@ -90,7 +92,7 @@ func TestSealSegment(t *testing.T) {
 		assert.Nil(t, err)
 		err = segAllocator.OpenSegment(ctx, segmentInfo)
 		assert.Nil(t, err)
-		lastSegID = segmentInfo.SegmentID
+		lastSegID = segmentInfo.ID
 	}
 
 	err = segAllocator.SealSegment(ctx, lastSegID)
@@ -112,7 +114,7 @@ func TestExpireSegment(t *testing.T) {
 	schema := newTestSchema()
 	collID, err := mockAllocator.allocID()
 	assert.Nil(t, err)
-	err = meta.AddCollection(&collectionInfo{
+	err = meta.AddCollection(&datapb.CollectionInfo{
 		ID:     collID,
 		Schema: schema,
 	})
