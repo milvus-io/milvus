@@ -10,6 +10,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -71,10 +74,22 @@ type segmentAllocator struct {
 	segmentThresholdFactor float64
 	mu                     sync.RWMutex
 	allocator              allocatorInterface
+	segmentInfoStream      msgstream.MsgStream
 }
 
-func newSegmentAllocator(meta *meta, allocator allocatorInterface) *segmentAllocator {
-	segmentAllocator := &segmentAllocator{
+type Option struct {
+	apply func(alloc *segmentAllocator)
+}
+
+func WithSegmentStream(stream msgstream.MsgStream) Option {
+	return Option{
+		apply: func(alloc *segmentAllocator) {
+			alloc.segmentInfoStream = stream
+		},
+	}
+}
+func newSegmentAllocator(meta *meta, allocator allocatorInterface, opts ...Option) *segmentAllocator {
+	alloc := &segmentAllocator{
 		mt:                     meta,
 		segments:               make(map[UniqueID]*segmentStatus),
 		segmentExpireDuration:  Params.SegIDAssignExpiration,
@@ -82,7 +97,10 @@ func newSegmentAllocator(meta *meta, allocator allocatorInterface) *segmentAlloc
 		segmentThresholdFactor: Params.SegmentSizeFactor,
 		allocator:              allocator,
 	}
-	return segmentAllocator
+	for _, opt := range opts {
+		opt.apply(alloc)
+	}
+	return alloc
 }
 
 func (allocator *segmentAllocator) OpenSegment(ctx context.Context, segmentInfo *datapb.SegmentInfo) error {
@@ -93,6 +111,10 @@ func (allocator *segmentAllocator) OpenSegment(ctx context.Context, segmentInfo 
 	if _, ok := allocator.segments[segmentInfo.ID]; ok {
 		return fmt.Errorf("segment %d already exist", segmentInfo.ID)
 	}
+	return allocator.open(segmentInfo)
+}
+
+func (allocator *segmentAllocator) open(segmentInfo *datapb.SegmentInfo) error {
 	totalRows, err := allocator.estimateTotalRows(segmentInfo.CollectionID)
 	if err != nil {
 		return err
@@ -139,7 +161,24 @@ func (allocator *segmentAllocator) AllocSegment(ctx context.Context, collectionI
 		return
 	}
 
-	err = newErrRemainInSufficient(requestRows)
+	var segStatus *segmentStatus
+	segStatus, err = allocator.openNewSegment(ctx, collectionID, partitionID, channelName)
+	if err != nil {
+		return
+	}
+	var success bool
+	success, err = allocator.alloc(segStatus, requestRows)
+	if err != nil {
+		return
+	}
+	if !success {
+		err = newErrRemainInSufficient(requestRows)
+		return
+	}
+
+	segID = segStatus.id
+	retCount = requestRows
+	expireTime = segStatus.lastExpireTime
 	return
 }
 
@@ -174,6 +213,48 @@ func (allocator *segmentAllocator) alloc(segStatus *segmentStatus, numRows int) 
 	})
 
 	return true, nil
+}
+
+func (allocator *segmentAllocator) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string) (*segmentStatus, error) {
+	sp, _ := trace.StartSpanFromContext(ctx)
+	defer sp.Finish()
+	id, err := allocator.allocator.allocID()
+	if err != nil {
+		return nil, err
+	}
+	segmentInfo, err := BuildSegment(collectionID, partitionID, id, channelName)
+	if err != nil {
+		return nil, err
+	}
+	if err = allocator.mt.AddSegment(segmentInfo); err != nil {
+		return nil, err
+	}
+	if err = allocator.open(segmentInfo); err != nil {
+		return nil, err
+	}
+	infoMsg := &msgstream.SegmentInfoMsg{
+		BaseMsg: msgstream.BaseMsg{
+			HashValues: []uint32{0},
+		},
+		SegmentMsg: datapb.SegmentMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_SegmentInfo,
+				MsgID:     0,
+				Timestamp: 0,
+				SourceID:  Params.NodeID,
+			},
+			Segment: segmentInfo,
+		},
+	}
+	msgPack := &msgstream.MsgPack{
+		Msgs: []msgstream.TsMsg{infoMsg},
+	}
+	if allocator.segmentInfoStream != nil {
+		if err = allocator.segmentInfoStream.Produce(msgPack); err != nil {
+			return nil, err
+		}
+	}
+	return allocator.segments[segmentInfo.ID], nil
 }
 
 func (allocator *segmentAllocator) estimateTotalRows(collectionID UniqueID) (int, error) {
