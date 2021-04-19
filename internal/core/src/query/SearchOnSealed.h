@@ -18,7 +18,7 @@
 namespace milvus::query {
 
 aligned_vector<uint8_t>
-AssembleNegBitmap(const BitmapSimple& bitmap_simple);
+AssembleNegBitset(const BitsetSimple& bitmap_simple);
 
 void
 SearchOnSealed(const Schema& schema,

@@ -20,20 +20,6 @@
 #include "query/SearchOnIndex.h"
 
 namespace milvus::query {
-
-static faiss::ConcurrentBitsetPtr
-create_bitmap_view(std::optional<const BitmapSimple*> bitmaps_opt, int64_t chunk_id) {
-    if (!bitmaps_opt.has_value()) {
-        return nullptr;
-    }
-    auto& bitmaps = *bitmaps_opt.value();
-    auto src_vec = ~bitmaps.at(chunk_id);
-    auto dst = std::make_shared<faiss::ConcurrentBitset>(src_vec.size());
-    auto iter = reinterpret_cast<BitmapChunk::block_type*>(dst->mutable_data());
-    boost::to_block_range(src_vec, iter);
-    return dst;
-}
-
 Status
 FloatSearch(const segcore::SegmentGrowingImpl& segment,
             const query::QueryInfo& info,

@@ -17,32 +17,34 @@
 #include <knowhere/index/vector_index/VecIndex.h>
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include <boost_ext/dynamic_bitset_ext.hpp>
 
 namespace milvus::query {
 
 // negate bitset, and merge them into one
 aligned_vector<uint8_t>
-AssembleNegBitmap(const BitmapSimple& bitmap_simple) {
+AssembleNegBitset(const BitsetSimple& bitset_simple) {
     int64_t N = 0;
 
-    for (auto& bitmap : bitmap_simple) {
-        N += bitmap.size();
+    for (auto& bitset : bitset_simple) {
+        N += bitset.size();
     }
-    aligned_vector<uint8_t> result(upper_align(upper_div(N, 8), sizeof(BitmapChunk::block_type)));
+    aligned_vector<uint8_t> result(upper_align(upper_div(N, 8), 64));
 
     auto acc_byte_count = 0;
-    for (auto& bitmap_raw : bitmap_simple) {
-        auto bitmap = ~bitmap_raw;
-        auto size = bitmap.size();
+    for (auto& bitset : bitset_simple) {
+        auto size = bitset.size();
         Assert(size % 8 == 0);
         auto byte_count = size / 8;
-
-        auto iter = reinterpret_cast<BitmapChunk::block_type*>(result.data() + acc_byte_count);
-        boost::to_block_range(bitmap, iter);
-
+        auto src_ptr = boost_ext::get_data(bitset);
+        memcpy(result.data() + acc_byte_count, src_ptr, byte_count);
         acc_byte_count += byte_count;
     }
 
+    // revert the bitset
+    for (int64_t i = 0; i < result.size(); ++i) {
+        result[i] = ~result[i];
+    }
     return result;
 }
 
