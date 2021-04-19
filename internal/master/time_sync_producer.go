@@ -15,7 +15,8 @@ type timeSyncMsgProducer struct {
 	//hardTimeTickBarrier
 	writeNodeTtBarrier TimeTickBarrier
 
-	dmSyncStream  ms.MsgStream // insert & delete
+	ddSyncStream  ms.MsgStream // insert & delete
+	dmSyncStream  ms.MsgStream
 	k2sSyncStream ms.MsgStream
 
 	ctx    context.Context
@@ -34,6 +35,9 @@ func (syncMsgProducer *timeSyncMsgProducer) SetProxyTtBarrier(proxyTtBarrier Tim
 func (syncMsgProducer *timeSyncMsgProducer) SetWriteNodeTtBarrier(writeNodeTtBarrier TimeTickBarrier) {
 	syncMsgProducer.writeNodeTtBarrier = writeNodeTtBarrier
 }
+func (syncMsgProducer *timeSyncMsgProducer) SetDDSyncStream(ddSync ms.MsgStream) {
+	syncMsgProducer.ddSyncStream = ddSync
+}
 
 func (syncMsgProducer *timeSyncMsgProducer) SetDMSyncStream(dmSync ms.MsgStream) {
 	syncMsgProducer.dmSyncStream = dmSync
@@ -43,7 +47,7 @@ func (syncMsgProducer *timeSyncMsgProducer) SetK2sSyncStream(k2sSync ms.MsgStrea
 	syncMsgProducer.k2sSyncStream = k2sSync
 }
 
-func (syncMsgProducer *timeSyncMsgProducer) broadcastMsg(barrier TimeTickBarrier, stream ms.MsgStream) error {
+func (syncMsgProducer *timeSyncMsgProducer) broadcastMsg(barrier TimeTickBarrier, streams []ms.MsgStream) error {
 	for {
 		select {
 		case <-syncMsgProducer.ctx.Done():
@@ -72,7 +76,9 @@ func (syncMsgProducer *timeSyncMsgProducer) broadcastMsg(barrier TimeTickBarrier
 				TimeTickMsg: timeTickResult,
 			}
 			msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
-			err = stream.Broadcast(&msgPack)
+			for _, stream := range streams {
+				err = stream.Broadcast(&msgPack)
+			}
 			if err != nil {
 				return err
 			}
@@ -91,16 +97,17 @@ func (syncMsgProducer *timeSyncMsgProducer) Start() error {
 		return err
 	}
 
-	go syncMsgProducer.broadcastMsg(syncMsgProducer.proxyTtBarrier, syncMsgProducer.dmSyncStream)
-	go syncMsgProducer.broadcastMsg(syncMsgProducer.writeNodeTtBarrier, syncMsgProducer.k2sSyncStream)
+	go syncMsgProducer.broadcastMsg(syncMsgProducer.proxyTtBarrier, []ms.MsgStream{syncMsgProducer.dmSyncStream, syncMsgProducer.ddSyncStream})
+	go syncMsgProducer.broadcastMsg(syncMsgProducer.writeNodeTtBarrier, []ms.MsgStream{syncMsgProducer.k2sSyncStream})
 
 	return nil
 }
 
 func (syncMsgProducer *timeSyncMsgProducer) Close() {
-	syncMsgProducer.proxyTtBarrier.Close()
-	syncMsgProducer.writeNodeTtBarrier.Close()
+	syncMsgProducer.ddSyncStream.Close()
 	syncMsgProducer.dmSyncStream.Close()
 	syncMsgProducer.k2sSyncStream.Close()
 	syncMsgProducer.cancel()
+	syncMsgProducer.proxyTtBarrier.Close()
+	syncMsgProducer.writeNodeTtBarrier.Close()
 }

@@ -11,7 +11,6 @@
 
 #pragma once
 #include <string_view>
-#include <exception>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -21,11 +20,7 @@ namespace milvus::impl {
 void
 EasyAssertInfo(
     bool value, std::string_view expr_str, std::string_view filename, int lineno, std::string_view extra_info);
-
-[[noreturn]] void
-ThrowWithTrace(const std::exception& exception);
-
-}  // namespace milvus::impl
+}
 
 #define AssertInfo(expr, info) milvus::impl::EasyAssertInfo(bool(expr), #expr, __FILE__, __LINE__, (info))
 #define Assert(expr) AssertInfo((expr), "")

@@ -271,7 +271,7 @@ func (s *Master) HasPartition(ctx context.Context, in *internalpb.HasPartitionRe
 		return &servicepb.BoolResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
+				Reason:    "WaitToFinish failed",
 			},
 			Value: t.(*hasPartitionTask).hasPartition,
 		}, nil
@@ -357,6 +357,43 @@ func (s *Master) ShowPartitions(ctx context.Context, in *internalpb.ShowPartitio
 	}
 
 	return t.(*showPartitionTask).stringListResponse, nil
+}
+
+func (s *Master) GetSysConfigs(ctx context.Context, in *internalpb.SysConfigRequest) (*servicepb.SysConfigResponse, error) {
+	var t task = &getSysConfigsTask{
+		req:      in,
+		configkv: s.kvBase,
+		baseTask: baseTask{
+			sch: s.scheduler,
+			mt:  s.metaTable,
+			cv:  make(chan error),
+		},
+		keys:   []string{},
+		values: []string{},
+	}
+
+	response := &servicepb.SysConfigResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+		},
+	}
+
+	var err = s.scheduler.Enqueue(t)
+	if err != nil {
+		response.Status.Reason = "Enqueue failed: " + err.Error()
+		return response, nil
+	}
+
+	err = t.WaitToFinish(ctx)
+	if err != nil {
+		response.Status.Reason = "Get System Config failed: " + err.Error()
+		return response, nil
+	}
+
+	response.Keys = t.(*getSysConfigsTask).keys
+	response.Values = t.(*getSysConfigsTask).values
+	response.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
+	return response, nil
 }
 
 //----------------------------------------Internal GRPC Service--------------------------------

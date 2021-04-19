@@ -29,7 +29,7 @@ func createPlan(col Collection, dsl string) (*Plan, error) {
 	if errorCode != 0 {
 		errorMsg := C.GoString(status.error_msg)
 		defer C.free(unsafe.Pointer(status.error_msg))
-		return nil, errors.New("Create plan failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+		return nil, errors.New("Insert failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}
 
 	var newPlan = &Plan{cPlan: cPlan}
@@ -60,7 +60,7 @@ func parserPlaceholderGroup(plan *Plan, placeHolderBlob []byte) (*PlaceholderGro
 	if errorCode != 0 {
 		errorMsg := C.GoString(status.error_msg)
 		defer C.free(unsafe.Pointer(status.error_msg))
-		return nil, errors.New("Parser placeholder group failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+		return nil, errors.New("Insert failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}
 
 	var newPlaceholderGroup = &PlaceholderGroup{cPlaceholderGroup: cPlaceholderGroup}

@@ -25,17 +25,14 @@ DeleteMarshaledHits(CMarshaledHits c_marshaled_hits);
 int
 MergeInto(int64_t num_queries, int64_t topk, float* distances, int64_t* uids, float* new_distances, int64_t* new_uids);
 
-CStatus
-ReduceQueryResults(CQueryResult* query_results, int64_t num_segments, bool* is_selected);
+CQueryResult
+ReduceQueryResults(CQueryResult* query_results, int64_t num_segments);
 
-CStatus
-ReorganizeQueryResults(CMarshaledHits* c_marshaled_hits,
+CMarshaledHits
+ReorganizeQueryResults(CQueryResult query_result,
+                       CPlan c_plan,
                        CPlaceholderGroup* c_placeholder_groups,
-                       int64_t num_groups,
-                       CQueryResult* c_search_results,
-                       bool* is_selected,
-                       int64_t num_segments,
-                       CPlan c_plan);
+                       int64_t num_groups);
 
 int64_t
 GetHitsBlobSize(CMarshaledHits c_marshaled_hits);

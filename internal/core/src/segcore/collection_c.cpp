@@ -19,9 +19,6 @@ NewCollection(const char* collection_proto) {
 
     auto collection = std::make_unique<milvus::segcore::Collection>(proto);
 
-    // TODO: delete print
-    std::cout << "create collection " << collection->get_collection_name() << std::endl;
-
     return (void*)collection.release();
 }
 

@@ -54,7 +54,7 @@ func (ia *IDAllocator) syncID() {
 
 	cancel()
 	if err != nil {
-		log.Println("syncID Failed!!!!!")
+		log.Panic("syncID Failed!!!!!")
 		return
 	}
 	ia.idStart = resp.GetID()

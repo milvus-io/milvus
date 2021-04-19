@@ -91,7 +91,7 @@ func (it *InsertTask) PreExecute() error {
 func (it *InsertTask) Execute() error {
 	collectionName := it.BaseInsertTask.CollectionName
 	if !globalMetaCache.Hit(collectionName) {
-		err := globalMetaCache.Sync(collectionName)
+		err := globalMetaCache.Update(collectionName)
 		if err != nil {
 			return err
 		}
@@ -103,20 +103,17 @@ func (it *InsertTask) Execute() error {
 	autoID := description.Schema.AutoID
 	var rowIDBegin UniqueID
 	var rowIDEnd UniqueID
-	rowNums := len(it.BaseInsertTask.RowData)
-	rowIDBegin, rowIDEnd, _ = it.rowIDAllocator.Alloc(uint32(rowNums))
-	it.BaseInsertTask.RowIDs = make([]UniqueID, rowNums)
-	for i := rowIDBegin; i < rowIDEnd; i++ {
-		offset := i - rowIDBegin
-		it.BaseInsertTask.RowIDs[offset] = i
-	}
-
-	if autoID {
+	if autoID || true {
 		if it.HashValues == nil || len(it.HashValues) == 0 {
 			it.HashValues = make([]uint32, 0)
 		}
-		for _, rowID := range it.RowIDs {
-			hashValue, _ := typeutil.Hash32Int64(rowID)
+		rowNums := len(it.BaseInsertTask.RowData)
+		rowIDBegin, rowIDEnd, _ = it.rowIDAllocator.Alloc(uint32(rowNums))
+		it.BaseInsertTask.RowIDs = make([]UniqueID, rowNums)
+		for i := rowIDBegin; i < rowIDEnd; i++ {
+			offset := i - rowIDBegin
+			it.BaseInsertTask.RowIDs[offset] = i
+			hashValue, _ := typeutil.Hash32Int64(i)
 			it.HashValues = append(it.HashValues, hashValue)
 		}
 	}
@@ -129,7 +126,6 @@ func (it *InsertTask) Execute() error {
 	}
 	msgPack.Msgs[0] = tsMsg
 	err = it.manipulationMsgStream.Produce(msgPack)
-
 	it.result = &servicepb.IntegerRangeResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -356,7 +352,7 @@ func (qt *QueryTask) SetTs(ts Timestamp) {
 func (qt *QueryTask) PreExecute() error {
 	collectionName := qt.query.CollectionName
 	if !globalMetaCache.Hit(collectionName) {
-		err := globalMetaCache.Sync(collectionName)
+		err := globalMetaCache.Update(collectionName)
 		if err != nil {
 			return err
 		}
@@ -609,9 +605,14 @@ func (dct *DescribeCollectionTask) PreExecute() error {
 }
 
 func (dct *DescribeCollectionTask) Execute() error {
+	if !globalMetaCache.Hit(dct.CollectionName.CollectionName) {
+		err := globalMetaCache.Update(dct.CollectionName.CollectionName)
+		if err != nil {
+			return err
+		}
+	}
 	var err error
-	dct.result, err = dct.masterClient.DescribeCollection(dct.ctx, &dct.DescribeCollectionRequest)
-	globalMetaCache.Update(dct.CollectionName.CollectionName, dct.result)
+	dct.result, err = globalMetaCache.Get(dct.CollectionName.CollectionName)
 	return err
 }
 

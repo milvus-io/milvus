@@ -139,7 +139,7 @@ func (ss *searchService) receiveSearchMsg() {
 				err := ss.search(msg)
 				if err != nil {
 					log.Println(err)
-					err = ss.publishFailedSearchResult(msg, err.Error())
+					err = ss.publishFailedSearchResult(msg)
 					if err != nil {
 						log.Println("publish FailedSearchResult failed, error message: ", err)
 					}
@@ -191,7 +191,7 @@ func (ss *searchService) doUnsolvedMsgSearch() {
 				err := ss.search(msg)
 				if err != nil {
 					log.Println(err)
-					err = ss.publishFailedSearchResult(msg, err.Error())
+					err = ss.publishFailedSearchResult(msg)
 					if err != nil {
 						log.Println("publish FailedSearchResult failed, error message: ", err)
 					}
@@ -238,7 +238,6 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	placeholderGroups = append(placeholderGroups, placeholderGroup)
 
 	searchResults := make([]*SearchResult, 0)
-	matchedSegments := make([]*Segment, 0)
 
 	for _, partitionTag := range partitionTags {
 		hasPartition := (*ss.replica).hasPartition(collectionID, partitionTag)
@@ -258,7 +257,6 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 				return err
 			}
 			searchResults = append(searchResults, searchResult)
-			matchedSegments = append(matchedSegments, segment)
 		}
 	}
 
@@ -284,20 +282,8 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 		return nil
 	}
 
-	inReduced := make([]bool, len(searchResults))
-	numSegment := int64(len(searchResults))
-	err = reduceSearchResults(searchResults, numSegment, inReduced)
-	if err != nil {
-		return err
-	}
-	err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
-	if err != nil {
-		return err
-	}
-	marshaledHits, err := reorganizeQueryResults(plan, placeholderGroups, searchResults, numSegment, inReduced)
-	if err != nil {
-		return err
-	}
+	reducedSearchResult := reduceSearchResults(searchResults, int64(len(searchResults)))
+	marshaledHits := reducedSearchResult.reorganizeQueryResults(plan, placeholderGroups)
 	hitsBlob, err := marshaledHits.getHitsBlob()
 	if err != nil {
 		return err
@@ -305,12 +291,12 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 
 	var offset int64 = 0
 	for index := range placeholderGroups {
-		hitBlobSizePeerQuery, err := marshaledHits.hitBlobSizeInGroup(int64(index))
+		hitBolbSizePeerQuery, err := marshaledHits.hitBlobSizeInGroup(int64(index))
 		if err != nil {
 			return err
 		}
 		hits := make([][]byte, 0)
-		for _, len := range hitBlobSizePeerQuery {
+		for _, len := range hitBolbSizePeerQuery {
 			hits = append(hits, hitsBlob[offset:offset+len])
 			//test code to checkout marshaled hits
 			//marshaledHit := hitsBlob[offset:offset+len]
@@ -343,6 +329,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	}
 
 	deleteSearchResults(searchResults)
+	deleteSearchResults([]*SearchResult{reducedSearchResult})
 	deleteMarshaledHits(marshaledHits)
 	plan.delete()
 	placeholderGroup.delete()
@@ -359,7 +346,7 @@ func (ss *searchService) publishSearchResult(msg msgstream.TsMsg) error {
 	return nil
 }
 
-func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg, errMsg string) error {
+func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg) error {
 	msgPack := msgstream.MsgPack{}
 	searchMsg, ok := msg.(*msgstream.SearchMsg)
 	if !ok {
@@ -367,7 +354,7 @@ func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg, errMsg s
 	}
 	var results = internalpb.SearchResult{
 		MsgType:         internalpb.MsgType_kSearchResult,
-		Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR, Reason: errMsg},
+		Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
 		ReqID:           searchMsg.ReqID,
 		ProxyID:         searchMsg.ProxyID,
 		QueryNodeID:     searchMsg.ProxyID,

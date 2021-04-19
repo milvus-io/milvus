@@ -163,7 +163,7 @@ func (pt *ParamTable) convertRangeToSlice(rangeStr, sep string) []int {
 		panic(err)
 	}
 	var ret []int
-	for i := start; i < end; i++ {
+	for i := start; i <= end; i++ {
 		ret = append(ret, i)
 	}
 	return ret

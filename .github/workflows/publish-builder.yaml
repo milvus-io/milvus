@@ -6,12 +6,12 @@ on:
   push:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
-      - 'build/docker/env/**'
+      - 'build/docker/**'
       - '.github/workflows/publish-builder.yaml'
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
-      - 'build/docker/env/**'
+      - 'build/docker/**'
       - '.github/workflows/publish-builder.yaml'
 
 jobs:

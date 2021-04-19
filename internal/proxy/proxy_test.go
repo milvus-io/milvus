@@ -119,31 +119,13 @@ func createCollection(t *testing.T, name string) {
 		Name:        name,
 		Description: "no description",
 		AutoID:      true,
-		Fields:      make([]*schemapb.FieldSchema, 2),
+		Fields:      make([]*schemapb.FieldSchema, 1),
 	}
 	fieldName := "Field1"
 	req.Fields[0] = &schemapb.FieldSchema{
 		Name:        fieldName,
 		Description: "no description",
 		DataType:    schemapb.DataType_INT32,
-	}
-	fieldName = "vec"
-	req.Fields[1] = &schemapb.FieldSchema{
-		Name:        fieldName,
-		Description: "vector",
-		DataType:    schemapb.DataType_VECTOR_FLOAT,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "16",
-			},
-		},
-		IndexParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "metric_type",
-				Value: "L2",
-			},
-		},
 	}
 	resp, err := proxyClient.CreateCollection(ctx, req)
 	assert.Nil(t, err)
@@ -157,7 +139,7 @@ func dropCollection(t *testing.T, name string) {
 	}
 	resp, err := proxyClient.DropCollection(ctx, req)
 	assert.Nil(t, err)
-	msg := "Drop Collection " + name + " should succeed! err :" + resp.Reason
+	msg := "Drop Collection " + name + " should succeed!"
 	assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_SUCCESS, msg)
 }
 
@@ -170,7 +152,6 @@ func TestProxy_CreateCollection(t *testing.T) {
 		go func(group *sync.WaitGroup) {
 			defer group.Done()
 			createCollection(t, collectionName)
-			dropCollection(t, collectionName)
 		}(&wg)
 	}
 	wg.Wait()
@@ -184,11 +165,9 @@ func TestProxy_HasCollection(t *testing.T) {
 		wg.Add(1)
 		go func(group *sync.WaitGroup) {
 			defer group.Done()
-			createCollection(t, collectionName)
 			has := hasCollection(t, collectionName)
 			msg := "Should has Collection " + collectionName
 			assert.Equal(t, has, true, msg)
-			dropCollection(t, collectionName)
 		}(&wg)
 	}
 	wg.Wait()
@@ -203,7 +182,6 @@ func TestProxy_DescribeCollection(t *testing.T) {
 		wg.Add(1)
 		go func(group *sync.WaitGroup) {
 			defer group.Done()
-			createCollection(t, collectionName)
 			has := hasCollection(t, collectionName)
 			if has {
 				resp, err := proxyClient.DescribeCollection(ctx, &servicepb.CollectionName{CollectionName: collectionName})
@@ -213,7 +191,6 @@ func TestProxy_DescribeCollection(t *testing.T) {
 				msg := "Describe Collection " + strconv.Itoa(i) + " should succeed!"
 				assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS, msg)
 				t.Logf("Describe Collection %v: %v", i, resp)
-				dropCollection(t, collectionName)
 			}
 		}(&wg)
 	}
@@ -229,7 +206,6 @@ func TestProxy_ShowCollections(t *testing.T) {
 		wg.Add(1)
 		go func(group *sync.WaitGroup) {
 			defer group.Done()
-			createCollection(t, collectionName)
 			has := hasCollection(t, collectionName)
 			if has {
 				resp, err := proxyClient.ShowCollections(ctx, &commonpb.Empty{})
@@ -239,7 +215,6 @@ func TestProxy_ShowCollections(t *testing.T) {
 				msg := "Show collections " + strconv.Itoa(i) + " should succeed!"
 				assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS, msg)
 				t.Logf("Show collections %v: %v", i, resp)
-				dropCollection(t, collectionName)
 			}
 		}(&wg)
 	}
@@ -271,7 +246,6 @@ func TestProxy_Insert(t *testing.T) {
 				}
 				msg := "Insert into Collection " + strconv.Itoa(i) + " should succeed!"
 				assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS, msg)
-				dropCollection(t, collectionName)
 			}
 		}(&wg)
 	}
@@ -334,7 +308,6 @@ func TestProxy_Search(t *testing.T) {
 		queryWg.Add(1)
 		go func(group *sync.WaitGroup) {
 			defer group.Done()
-			//createCollection(t, collectionName)
 			has := hasCollection(t, collectionName)
 			if !has {
 				createCollection(t, collectionName)
@@ -342,7 +315,6 @@ func TestProxy_Search(t *testing.T) {
 			resp, err := proxyClient.Search(ctx, req)
 			t.Logf("response of search collection %v: %v", i, resp)
 			assert.Nil(t, err)
-			dropCollection(t, collectionName)
 		}(&queryWg)
 	}
 
@@ -356,9 +328,9 @@ func TestProxy_Search(t *testing.T) {
 func TestProxy_AssignSegID(t *testing.T) {
 	collectionName := "CreateCollection1"
 	createCollection(t, collectionName)
-	testNum := 1
+	testNum := 4
 	for i := 0; i < testNum; i++ {
-		segID, err := proxyServer.segAssigner.GetSegmentID(collectionName, Params.defaultPartitionTag(), int32(i), 200000)
+		segID, err := proxyServer.segAssigner.GetSegmentID(collectionName, "default", int32(i), 200000)
 		assert.Nil(t, err)
 		fmt.Println("segID", segID)
 	}
@@ -373,7 +345,6 @@ func TestProxy_DropCollection(t *testing.T) {
 		wg.Add(1)
 		go func(group *sync.WaitGroup) {
 			defer group.Done()
-			createCollection(t, collectionName)
 			has := hasCollection(t, collectionName)
 			if has {
 				dropCollection(t, collectionName)
@@ -386,14 +357,27 @@ func TestProxy_DropCollection(t *testing.T) {
 func TestProxy_PartitionGRPC(t *testing.T) {
 	var wg sync.WaitGroup
 	collName := "collPartTest"
-	createCollection(t, collName)
+	filedName := "collPartTestF1"
+	collReq := &schemapb.CollectionSchema{
+		Name: collName,
+		Fields: []*schemapb.FieldSchema{
+			&schemapb.FieldSchema{
+				Name:        filedName,
+				Description: "",
+				DataType:    schemapb.DataType_VECTOR_FLOAT,
+			},
+		},
+	}
+	st, err := proxyClient.CreateCollection(ctx, collReq)
+	assert.Nil(t, err)
+	assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
 	for i := 0; i < testNum; i++ {
 		wg.Add(1)
 		i := i
 		go func() {
 			defer wg.Done()
-			tag := fmt.Sprintf("partition_%d", i)
+			tag := fmt.Sprintf("partition-%d", i)
 			preq := &servicepb.PartitionName{
 				CollectionName: collName,
 				Tag:            tag,
@@ -429,7 +413,6 @@ func TestProxy_PartitionGRPC(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	dropCollection(t, collName)
 }
 
 func TestMain(m *testing.M) {

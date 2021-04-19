@@ -18,7 +18,6 @@ const (
 )
 
 func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.IntegerRangeResponse, error) {
-	log.Println("insert into: ", in.CollectionName)
 	it := &InsertTask{
 		Condition: NewTaskCondition(ctx),
 		BaseInsertTask: BaseInsertTask{
@@ -77,7 +76,6 @@ func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.
 }
 
 func (p *Proxy) CreateCollection(ctx context.Context, req *schemapb.CollectionSchema) (*commonpb.Status, error) {
-	log.Println("create collection: ", req)
 	cct := &CreateCollectionTask{
 		Condition: NewTaskCondition(ctx),
 		CreateCollectionRequest: internalpb.CreateCollectionRequest{
@@ -119,7 +117,6 @@ func (p *Proxy) CreateCollection(ctx context.Context, req *schemapb.CollectionSc
 }
 
 func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.QueryResult, error) {
-	log.Println("search: ", req.CollectionName, req.Dsl)
 	qt := &QueryTask{
 		Condition: NewTaskCondition(ctx),
 		SearchRequest: internalpb.SearchRequest{
@@ -167,7 +164,6 @@ func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.Qu
 }
 
 func (p *Proxy) DropCollection(ctx context.Context, req *servicepb.CollectionName) (*commonpb.Status, error) {
-	log.Println("drop collection: ", req)
 	dct := &DropCollectionTask{
 		Condition: NewTaskCondition(ctx),
 		DropCollectionRequest: internalpb.DropCollectionRequest{
@@ -208,7 +204,6 @@ func (p *Proxy) DropCollection(ctx context.Context, req *servicepb.CollectionNam
 }
 
 func (p *Proxy) HasCollection(ctx context.Context, req *servicepb.CollectionName) (*servicepb.BoolResponse, error) {
-	log.Println("has collection: ", req)
 	hct := &HasCollectionTask{
 		Condition: NewTaskCondition(ctx),
 		HasCollectionRequest: internalpb.HasCollectionRequest{
@@ -253,7 +248,6 @@ func (p *Proxy) HasCollection(ctx context.Context, req *servicepb.CollectionName
 }
 
 func (p *Proxy) DescribeCollection(ctx context.Context, req *servicepb.CollectionName) (*servicepb.CollectionDescription, error) {
-	log.Println("describe collection: ", req)
 	dct := &DescribeCollectionTask{
 		Condition: NewTaskCondition(ctx),
 		DescribeCollectionRequest: internalpb.DescribeCollectionRequest{
@@ -298,7 +292,6 @@ func (p *Proxy) DescribeCollection(ctx context.Context, req *servicepb.Collectio
 }
 
 func (p *Proxy) ShowCollections(ctx context.Context, req *commonpb.Empty) (*servicepb.StringListResponse, error) {
-	log.Println("show collections")
 	sct := &ShowCollectionsTask{
 		Condition: NewTaskCondition(ctx),
 		ShowCollectionRequest: internalpb.ShowCollectionRequest{
@@ -342,7 +335,6 @@ func (p *Proxy) ShowCollections(ctx context.Context, req *commonpb.Empty) (*serv
 }
 
 func (p *Proxy) CreatePartition(ctx context.Context, in *servicepb.PartitionName) (*commonpb.Status, error) {
-	log.Println("create partition", in)
 	cpt := &CreatePartitionTask{
 		Condition: NewTaskCondition(ctx),
 		CreatePartitionRequest: internalpb.CreatePartitionRequest{
@@ -388,7 +380,6 @@ func (p *Proxy) CreatePartition(ctx context.Context, in *servicepb.PartitionName
 }
 
 func (p *Proxy) DropPartition(ctx context.Context, in *servicepb.PartitionName) (*commonpb.Status, error) {
-	log.Println("drop partition: ", in)
 	dpt := &DropPartitionTask{
 		Condition: NewTaskCondition(ctx),
 		DropPartitionRequest: internalpb.DropPartitionRequest{
@@ -435,7 +426,6 @@ func (p *Proxy) DropPartition(ctx context.Context, in *servicepb.PartitionName) 
 }
 
 func (p *Proxy) HasPartition(ctx context.Context, in *servicepb.PartitionName) (*servicepb.BoolResponse, error) {
-	log.Println("has partition: ", in)
 	hpt := &HasPartitionTask{
 		Condition: NewTaskCondition(ctx),
 		HasPartitionRequest: internalpb.HasPartitionRequest{
@@ -488,7 +478,6 @@ func (p *Proxy) HasPartition(ctx context.Context, in *servicepb.PartitionName) (
 }
 
 func (p *Proxy) DescribePartition(ctx context.Context, in *servicepb.PartitionName) (*servicepb.PartitionDescription, error) {
-	log.Println("describe partition: ", in)
 	dpt := &DescribePartitionTask{
 		Condition: NewTaskCondition(ctx),
 		DescribePartitionRequest: internalpb.DescribePartitionRequest{
@@ -543,7 +532,6 @@ func (p *Proxy) DescribePartition(ctx context.Context, in *servicepb.PartitionNa
 }
 
 func (p *Proxy) ShowPartitions(ctx context.Context, req *servicepb.CollectionName) (*servicepb.StringListResponse, error) {
-	log.Println("show partitions: ", req)
 	spt := &ShowPartitionsTask{
 		Condition: NewTaskCondition(ctx),
 		ShowPartitionRequest: internalpb.ShowPartitionRequest{
