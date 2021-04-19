@@ -20,6 +20,7 @@
 #include <random>
 
 const int TOP_K = 10;
+const int LOOP = 1000;
 
 int main(int argc , char**argv) {
   TestParameters parameters = milvus_sdk::Utils::ParseTestParameters(argc, argv);
@@ -34,9 +35,9 @@ int main(int argc , char**argv) {
   client.Connect(connect_param);
   std::vector<int64_t> ids_array;
   std::vector<std::string> partition_list;
-  partition_list.emplace_back("partition-1");
-  partition_list.emplace_back("partition-2");
-  partition_list.emplace_back("partition-3");
+  partition_list.emplace_back("default");
+//  partition_list.emplace_back("partition-2");
+//  partition_list.emplace_back("partition-3");
 
   milvus::VectorParam vectorParam;
   std::vector<milvus::VectorData> vector_records;
@@ -65,10 +66,13 @@ int main(int argc , char**argv) {
   vectorParam.vector_records = vector_records;
 
   milvus::TopKQueryResult result;
-
   milvus_sdk::TimeRecorder test_search("search");
-  auto status = client.Search("collection0", partition_list, "dsl", vectorParam, result);
+  for (int k = 0; k < LOOP; ++k) {
+      test_search.Start();
+      auto status = client.Search("collection0", partition_list, "dsl", vectorParam, result);
+      test_search.End();
+  }
+  test_search.Print(LOOP);
 
-    return 0;
+  return 0;
 }
-
