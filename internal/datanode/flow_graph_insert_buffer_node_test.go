@@ -52,7 +52,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	iBNode := newInsertBufferNode(ctx, newBinlogMeta(), replica, msFactory)
 	inMsg := genInsertMsg()
 	var iMsg flowgraph.Msg = &inMsg
-	iBNode.Operate(ctx, []flowgraph.Msg{iMsg})
+	iBNode.Operate([]flowgraph.Msg{iMsg})
 }
 
 func genInsertMsg() insertMsg {

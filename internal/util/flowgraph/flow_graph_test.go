@@ -68,43 +68,43 @@ func (a *nodeA) Name() string {
 	return "NodeA"
 }
 
-func (a *nodeA) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
-	return append(in, in...), nil
+func (a *nodeA) Operate(in []Msg) []Msg {
+	return append(in, in...)
 }
 
 func (b *nodeB) Name() string {
 	return "NodeB"
 }
 
-func (b *nodeB) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
+func (b *nodeB) Operate(in []Msg) []Msg {
 	messages := make([]*intMsg, 0)
 	for _, msg := range msg2IntMsg(in) {
 		messages = append(messages, &intMsg{
 			num: math.Pow(msg.num, 2),
 		})
 	}
-	return intMsg2Msg(messages), nil
+	return intMsg2Msg(messages)
 }
 
 func (c *nodeC) Name() string {
 	return "NodeC"
 }
 
-func (c *nodeC) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
+func (c *nodeC) Operate(in []Msg) []Msg {
 	messages := make([]*intMsg, 0)
 	for _, msg := range msg2IntMsg(in) {
 		messages = append(messages, &intMsg{
 			num: math.Sqrt(msg.num),
 		})
 	}
-	return intMsg2Msg(messages), nil
+	return intMsg2Msg(messages)
 }
 
 func (d *nodeD) Name() string {
 	return "NodeD"
 }
 
-func (d *nodeD) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
+func (d *nodeD) Operate(in []Msg) []Msg {
 	messages := make([]*intMsg, 0)
 	outLength := len(in) / 2
 	inMessages := msg2IntMsg(in)
@@ -117,7 +117,7 @@ func (d *nodeD) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) 
 	d.d = messages[0].num
 	d.resChan <- d.d
 	fmt.Println("flow graph result:", d.d)
-	return intMsg2Msg(messages), nil
+	return intMsg2Msg(messages)
 }
 
 func sendMsgFromCmd(ctx context.Context, fg *TimeTickedFlowGraph) {
@@ -129,12 +129,8 @@ func sendMsgFromCmd(ctx context.Context, fg *TimeTickedFlowGraph) {
 			time.Sleep(time.Millisecond * time.Duration(500))
 			var num = float64(rand.Int() % 100)
 			var msg Msg = &intMsg{num: num}
-			var msgWithContext = &MsgWithCtx{
-				ctx: ctx,
-				msg: msg,
-			}
 			a := nodeA{}
-			fg.nodeCtx[a.Name()].inputChannels[0] <- msgWithContext
+			fg.nodeCtx[a.Name()].inputChannels[0] <- msg
 			fmt.Println("send number", num, "to node", a.Name())
 			res, ok := receiveResult(ctx, fg)
 			if !ok {
@@ -254,7 +250,7 @@ func TestTimeTickedFlowGraph_Start(t *testing.T) {
 
 	// init node A
 	nodeCtxA := fg.nodeCtx[a.Name()]
-	nodeCtxA.inputChannels = []chan *MsgWithCtx{make(chan *MsgWithCtx, 10)}
+	nodeCtxA.inputChannels = []chan Msg{make(chan Msg, 10)}
 
 	go fg.Start()
 

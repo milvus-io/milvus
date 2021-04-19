@@ -91,7 +91,7 @@ func (sService *statsService) publicStatistic(fieldStats []*internalpb.FieldStat
 	var msgPack = msgstream.MsgPack{
 		Msgs: []msgstream.TsMsg{msg},
 	}
-	err := sService.statsStream.Produce(context.TODO(), &msgPack)
+	err := sService.statsStream.Produce(&msgPack)
 	if err != nil {
 		log.Error(err.Error())
 	}

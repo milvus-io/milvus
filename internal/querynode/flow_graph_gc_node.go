@@ -1,7 +1,7 @@
 package querynode
 
 import (
-	"context"
+	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 
 	"go.uber.org/zap"
 
@@ -17,7 +17,7 @@ func (gcNode *gcNode) Name() string {
 	return "gcNode"
 }
 
-func (gcNode *gcNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
+func (gcNode *gcNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//log.Debug("Do gcNode operation")
 
 	if len(in) != 1 {
@@ -51,7 +51,7 @@ func (gcNode *gcNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Con
 	//	}
 	//}
 
-	return nil, ctx
+	return nil
 }
 
 func newGCNode(replica ReplicaInterface) *gcNode {

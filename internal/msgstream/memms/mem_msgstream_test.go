@@ -101,7 +101,7 @@ func TestStream_GlobalMmq_Func(t *testing.T) {
 	if err != nil {
 		log.Fatalf("global mmq produce error = %v", err)
 	}
-	cm, _ := consumerStreams[0].Consume()
+	cm := consumerStreams[0].Consume()
 	assert.Equal(t, cm, &msg, "global mmq consume error")
 
 	err = Mmq.Broadcast(&msg)
@@ -109,7 +109,7 @@ func TestStream_GlobalMmq_Func(t *testing.T) {
 		log.Fatalf("global mmq broadcast error = %v", err)
 	}
 	for _, cs := range consumerStreams {
-		cm, _ := cs.Consume()
+		cm := cs.Consume()
 		assert.Equal(t, cm, &msg, "global mmq consume error")
 	}
 
@@ -142,12 +142,12 @@ func TestStream_MemMsgStream_Produce(t *testing.T) {
 	msgPack := msgstream.MsgPack{}
 	var hashValue uint32 = 2
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Search, 1, hashValue))
-	err := produceStream.Produce(context.Background(), &msgPack)
+	err := produceStream.Produce(&msgPack)
 	if err != nil {
 		log.Fatalf("new msgstream error = %v", err)
 	}
 
-	msg, _ := consumerStreams[hashValue].Consume()
+	msg := consumerStreams[hashValue].Consume()
 	if msg == nil {
 		log.Fatalf("msgstream consume error")
 	}
@@ -167,13 +167,13 @@ func TestStream_MemMsgStream_BroadCast(t *testing.T) {
 
 	msgPack := msgstream.MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Search, 1, 100))
-	err := produceStream.Broadcast(context.Background(), &msgPack)
+	err := produceStream.Broadcast(&msgPack)
 	if err != nil {
 		log.Fatalf("new msgstream error = %v", err)
 	}
 
 	for _, consumer := range consumerStreams {
-		msg, _ := consumer.Consume()
+		msg := consumer.Consume()
 		if msg == nil {
 			log.Fatalf("msgstream consume error")
 		}

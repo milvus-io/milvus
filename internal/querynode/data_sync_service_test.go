@@ -1,7 +1,6 @@
 package querynode
 
 import (
-	"context"
 	"encoding/binary"
 	"math"
 	"testing"
@@ -16,8 +15,6 @@ import (
 
 // NOTE: start pulsar before test
 func TestDataSyncService_Start(t *testing.T) {
-	ctx := context.Background()
-
 	collectionID := UniqueID(0)
 
 	node := newQueryNodeMock()
@@ -127,10 +124,10 @@ func TestDataSyncService_Start(t *testing.T) {
 	var insertMsgStream msgstream.MsgStream = insertStream
 	insertMsgStream.Start()
 
-	err = insertMsgStream.Produce(ctx, &msgPack)
+	err = insertMsgStream.Produce(&msgPack)
 	assert.NoError(t, err)
 
-	err = insertMsgStream.Broadcast(ctx, &timeTickMsgPack)
+	err = insertMsgStream.Broadcast(&timeTickMsgPack)
 	assert.NoError(t, err)
 
 	// dataSync

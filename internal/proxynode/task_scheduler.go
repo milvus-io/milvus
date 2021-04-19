@@ -302,7 +302,7 @@ func (sched *TaskScheduler) getTaskByReqID(collMeta UniqueID) task {
 }
 
 func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
-	span, ctx := trace.StartSpanFromContext(t.Ctx(),
+	span, ctx := trace.StartSpanFromContext(t.TraceCtx(),
 		opentracing.Tags{
 			"Type": t.Name(),
 			"ID":   t.ID(),
@@ -409,6 +409,8 @@ func (sched *TaskScheduler) queryResultLoop() {
 				continue
 			}
 			for _, tsMsg := range msgPack.Msgs {
+				sp, ctx := trace.StartSpanFromContext(tsMsg.TraceCtx())
+				tsMsg.SetTraceCtx(ctx)
 				searchResultMsg, _ := tsMsg.(*msgstream.SearchResultMsg)
 				reqID := searchResultMsg.Base.MsgID
 				reqIDStr := strconv.FormatInt(reqID, 10)
@@ -443,6 +445,7 @@ func (sched *TaskScheduler) queryResultLoop() {
 						// log.Printf("task with reqID %v is nil", reqID)
 					}
 				}
+				sp.Finish()
 			}
 		case <-sched.ctx.Done():
 			log.Debug("proxynode server is closed ...")

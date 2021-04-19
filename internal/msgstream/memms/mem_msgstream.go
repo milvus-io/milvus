@@ -94,7 +94,7 @@ func (mms *MemMsgStream) AsConsumer(channels []string, groupName string) {
 	}
 }
 
-func (mms *MemMsgStream) Produce(ctx context.Context, pack *msgstream.MsgPack) error {
+func (mms *MemMsgStream) Produce(pack *msgstream.MsgPack) error {
 	tsMsgs := pack.Msgs
 	if len(tsMsgs) <= 0 {
 		log.Printf("Warning: Receive empty msgPack")
@@ -150,7 +150,7 @@ func (mms *MemMsgStream) Produce(ctx context.Context, pack *msgstream.MsgPack) e
 	return nil
 }
 
-func (mms *MemMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) error {
+func (mms *MemMsgStream) Broadcast(msgPack *msgstream.MsgPack) error {
 	for _, channelName := range mms.producers {
 		err := Mmq.Produce(channelName, msgPack)
 		if err != nil {
@@ -161,18 +161,18 @@ func (mms *MemMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) error 
 	return nil
 }
 
-func (mms *MemMsgStream) Consume() (*msgstream.MsgPack, context.Context) {
+func (mms *MemMsgStream) Consume() *msgstream.MsgPack {
 	for {
 		select {
 		case cm, ok := <-mms.receiveBuf:
 			if !ok {
 				log.Println("buf chan closed")
-				return nil, nil
+				return nil
 			}
-			return cm, nil
+			return cm
 		case <-mms.ctx.Done():
 			log.Printf("context closed")
-			return nil, nil
+			return nil
 		}
 	}
 }

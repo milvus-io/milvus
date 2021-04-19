@@ -132,7 +132,6 @@ func getInsertTask(reqID msgstream.UniqueID, hashValue uint32) msgstream.TsMsg {
 }
 
 func TestStream_task_Insert(t *testing.T) {
-	ctx := context.Background()
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	producerChannels := []string{"insert1", "insert2"}
 	consumerChannels := []string{"insert1", "insert2"}
@@ -155,13 +154,13 @@ func TestStream_task_Insert(t *testing.T) {
 	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
 
-	err := inputStream.Produce(ctx, &msgPack)
+	err := inputStream.Produce(&msgPack)
 	if err != nil {
 		log.Fatalf("produce error = %v", err)
 	}
 	receiveCount := 0
 	for {
-		result, _ := outputStream.Consume()
+		result := outputStream.Consume()
 		if len(result.Msgs) > 0 {
 			msgs := result.Msgs
 			for _, v := range msgs {

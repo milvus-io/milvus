@@ -1,14 +1,15 @@
 package querynode
 
 import (
-	"context"
 	"fmt"
 
-	"go.uber.org/zap"
-
+	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
+	"go.uber.org/zap"
 )
 
 type filterDmNode struct {
@@ -21,7 +22,7 @@ func (fdmNode *filterDmNode) Name() string {
 	return "fdmNode"
 }
 
-func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
+func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//log.Debug("Do filterDmNode operation")
 
 	if len(in) != 1 {
@@ -36,7 +37,14 @@ func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, cont
 	}
 
 	if msgStreamMsg == nil {
-		return []Msg{}, ctx
+		return []Msg{}
+	}
+
+	var spans []opentracing.Span
+	for _, msg := range msgStreamMsg.TsMessages() {
+		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		spans = append(spans, sp)
+		msg.SetTraceCtx(ctx)
 	}
 
 	var iMsg = insertMsg{
@@ -61,11 +69,16 @@ func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, cont
 	}
 
 	var res Msg = &iMsg
-
-	return []Msg{res}, ctx
+	for _, sp := range spans {
+		sp.Finish()
+	}
+	return []Msg{res}
 }
 
 func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg) *msgstream.InsertMsg {
+	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+	msg.SetTraceCtx(ctx)
+	defer sp.Finish()
 	// check if collection and partition exist
 	collection := fdmNode.replica.hasCollection(msg.CollectionID)
 	partition := fdmNode.replica.hasPartition(msg.PartitionID)

@@ -307,7 +307,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 			return
 		default:
 		}
-		msgPack, _ := statsStream.Consume()
+		msgPack := statsStream.Consume()
 		for _, msg := range msgPack.Msgs {
 			statistics, ok := msg.(*msgstream.SegmentStatisticsMsg)
 			if !ok {
@@ -338,7 +338,7 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 			return
 		default:
 		}
-		msgPack, _ := flushStream.Consume()
+		msgPack := flushStream.Consume()
 		for _, msg := range msgPack.Msgs {
 			if msg.Type() != commonpb.MsgType_SegmentFlushDone {
 				continue
@@ -368,7 +368,7 @@ func (s *Server) startDDChannel(ctx context.Context) {
 			return
 		default:
 		}
-		msgPack, ctx := ddStream.Consume()
+		msgPack := ddStream.Consume()
 		for _, msg := range msgPack.Msgs {
 			if err := s.ddHandler.HandleDDMsg(ctx, msg); err != nil {
 				log.Error("handle dd msg error", zap.Error(err))
@@ -622,10 +622,10 @@ func (s *Server) openNewSegment(ctx context.Context, collectionID UniqueID, part
 			Segment: segmentInfo,
 		},
 	}
-	msgPack := &msgstream.MsgPack{
+	msgPack := msgstream.MsgPack{
 		Msgs: []msgstream.TsMsg{infoMsg},
 	}
-	if err = s.segmentInfoStream.Produce(ctx, msgPack); err != nil {
+	if err = s.segmentInfoStream.Produce(&msgPack); err != nil {
 		return err
 	}
 	return nil

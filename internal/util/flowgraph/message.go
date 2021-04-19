@@ -1,6 +1,8 @@
 package flowgraph
 
-import "github.com/zilliztech/milvus-distributed/internal/msgstream"
+import (
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+)
 
 type Msg interface {
 	TimeTick() Timestamp

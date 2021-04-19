@@ -1038,16 +1038,16 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, 
 	var ddMsgStream msgstream.MsgStream = ddStream
 	ddMsgStream.Start()
 
-	err = insertMsgStream.Produce(ctx, &msgPack)
+	err = insertMsgStream.Produce(&msgPack)
 	if err != nil {
 		return err
 	}
 
-	err = insertMsgStream.Broadcast(ctx, &timeTickMsgPack)
+	err = insertMsgStream.Broadcast(&timeTickMsgPack)
 	if err != nil {
 		return err
 	}
-	err = ddMsgStream.Broadcast(ctx, &timeTickMsgPack)
+	err = ddMsgStream.Broadcast(&timeTickMsgPack)
 	if err != nil {
 		return err
 	}
@@ -1104,11 +1104,11 @@ func sentTimeTick(ctx context.Context) error {
 	var ddMsgStream msgstream.MsgStream = ddStream
 	ddMsgStream.Start()
 
-	err = insertMsgStream.Broadcast(ctx, &timeTickMsgPack)
+	err = insertMsgStream.Broadcast(&timeTickMsgPack)
 	if err != nil {
 		return err
 	}
-	err = ddMsgStream.Broadcast(ctx, &timeTickMsgPack)
+	err = ddMsgStream.Broadcast(&timeTickMsgPack)
 	if err != nil {
 		return err
 	}

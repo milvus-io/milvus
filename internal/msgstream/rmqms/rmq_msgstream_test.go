@@ -239,7 +239,7 @@ func initRmqTtStream(producerChannels []string,
 func receiveMsg(outputStream msgstream.MsgStream, msgCount int) {
 	receiveCount := 0
 	for {
-		result, _ := outputStream.Consume()
+		result := outputStream.Consume()
 		if len(result.Msgs) > 0 {
 			msgs := result.Msgs
 			for _, v := range msgs {
@@ -254,7 +254,6 @@ func receiveMsg(outputStream msgstream.MsgStream, msgCount int) {
 }
 
 func TestStream_RmqMsgStream_Insert(t *testing.T) {
-	ctx := context.Background()
 	producerChannels := []string{"insert1", "insert2"}
 	consumerChannels := []string{"insert1", "insert2"}
 	consumerGroupName := "InsertGroup"
@@ -266,7 +265,7 @@ func TestStream_RmqMsgStream_Insert(t *testing.T) {
 	rocksdbName := "/tmp/rocksmq_insert"
 	etcdKV := initRmq(rocksdbName)
 	inputStream, outputStream := initRmqStream(producerChannels, consumerChannels, consumerGroupName)
-	err := inputStream.Produce(ctx, &msgPack)
+	err := inputStream.Produce(&msgPack)
 	if err != nil {
 		log.Fatalf("produce error = %v", err)
 	}
@@ -276,7 +275,6 @@ func TestStream_RmqMsgStream_Insert(t *testing.T) {
 }
 
 func TestStream_RmqMsgStream_Delete(t *testing.T) {
-	ctx := context.Background()
 	producerChannels := []string{"delete"}
 	consumerChannels := []string{"delete"}
 	consumerSubName := "subDelete"
@@ -287,7 +285,7 @@ func TestStream_RmqMsgStream_Delete(t *testing.T) {
 	rocksdbName := "/tmp/rocksmq_delete"
 	etcdKV := initRmq(rocksdbName)
 	inputStream, outputStream := initRmqStream(producerChannels, consumerChannels, consumerSubName)
-	err := inputStream.Produce(ctx, &msgPack)
+	err := inputStream.Produce(&msgPack)
 	if err != nil {
 		log.Fatalf("produce error = %v", err)
 	}
@@ -296,7 +294,6 @@ func TestStream_RmqMsgStream_Delete(t *testing.T) {
 }
 
 func TestStream_RmqMsgStream_Search(t *testing.T) {
-	ctx := context.Background()
 	producerChannels := []string{"search"}
 	consumerChannels := []string{"search"}
 	consumerSubName := "subSearch"
@@ -308,7 +305,7 @@ func TestStream_RmqMsgStream_Search(t *testing.T) {
 	rocksdbName := "/tmp/rocksmq_search"
 	etcdKV := initRmq(rocksdbName)
 	inputStream, outputStream := initRmqStream(producerChannels, consumerChannels, consumerSubName)
-	err := inputStream.Produce(ctx, &msgPack)
+	err := inputStream.Produce(&msgPack)
 	if err != nil {
 		log.Fatalf("produce error = %v", err)
 	}
@@ -317,8 +314,6 @@ func TestStream_RmqMsgStream_Search(t *testing.T) {
 }
 
 func TestStream_RmqMsgStream_SearchResult(t *testing.T) {
-	ctx := context.Background()
-
 	producerChannels := []string{"searchResult"}
 	consumerChannels := []string{"searchResult"}
 	consumerSubName := "subSearchResult"
@@ -330,7 +325,7 @@ func TestStream_RmqMsgStream_SearchResult(t *testing.T) {
 	rocksdbName := "/tmp/rocksmq_searchresult"
 	etcdKV := initRmq(rocksdbName)
 	inputStream, outputStream := initRmqStream(producerChannels, consumerChannels, consumerSubName)
-	err := inputStream.Produce(ctx, &msgPack)
+	err := inputStream.Produce(&msgPack)
 	if err != nil {
 		log.Fatalf("produce error = %v", err)
 	}
@@ -339,7 +334,6 @@ func TestStream_RmqMsgStream_SearchResult(t *testing.T) {
 }
 
 func TestStream_RmqMsgStream_TimeTick(t *testing.T) {
-	ctx := context.Background()
 	producerChannels := []string{"timeTick"}
 	consumerChannels := []string{"timeTick"}
 	consumerSubName := "subTimeTick"
@@ -351,7 +345,7 @@ func TestStream_RmqMsgStream_TimeTick(t *testing.T) {
 	rocksdbName := "/tmp/rocksmq_timetick"
 	etcdKV := initRmq(rocksdbName)
 	inputStream, outputStream := initRmqStream(producerChannels, consumerChannels, consumerSubName)
-	err := inputStream.Produce(ctx, &msgPack)
+	err := inputStream.Produce(&msgPack)
 	if err != nil {
 		log.Fatalf("produce error = %v", err)
 	}
@@ -360,7 +354,6 @@ func TestStream_RmqMsgStream_TimeTick(t *testing.T) {
 }
 
 func TestStream_RmqMsgStream_BroadCast(t *testing.T) {
-	ctx := context.Background()
 	producerChannels := []string{"insert1", "insert2"}
 	consumerChannels := []string{"insert1", "insert2"}
 	consumerSubName := "subInsert"
@@ -372,7 +365,7 @@ func TestStream_RmqMsgStream_BroadCast(t *testing.T) {
 	rocksdbName := "/tmp/rocksmq_broadcast"
 	etcdKV := initRmq(rocksdbName)
 	inputStream, outputStream := initRmqStream(producerChannels, consumerChannels, consumerSubName)
-	err := inputStream.Broadcast(ctx, &msgPack)
+	err := inputStream.Broadcast(&msgPack)
 	if err != nil {
 		log.Fatalf("produce error = %v", err)
 	}
@@ -381,8 +374,6 @@ func TestStream_RmqMsgStream_BroadCast(t *testing.T) {
 }
 
 func TestStream_RmqMsgStream_RepackFunc(t *testing.T) {
-	ctx := context.Background()
-
 	producerChannels := []string{"insert1", "insert2"}
 	consumerChannels := []string{"insert1", "insert2"}
 	consumerSubName := "subInsert"
@@ -394,7 +385,7 @@ func TestStream_RmqMsgStream_RepackFunc(t *testing.T) {
 	rocksdbName := "/tmp/rocksmq_repackfunc"
 	etcdKV := initRmq(rocksdbName)
 	inputStream, outputStream := initRmqStream(producerChannels, consumerChannels, consumerSubName, repackFunc)
-	err := inputStream.Produce(ctx, &msgPack)
+	err := inputStream.Produce(&msgPack)
 	if err != nil {
 		log.Fatalf("produce error = %v", err)
 	}
@@ -403,8 +394,6 @@ func TestStream_RmqMsgStream_RepackFunc(t *testing.T) {
 }
 
 func TestStream_PulsarTtMsgStream_Insert(t *testing.T) {
-	ctx := context.Background()
-
 	producerChannels := []string{"insert1", "insert2"}
 	consumerChannels := []string{"insert1", "insert2"}
 	consumerSubName := "subInsert"
@@ -423,15 +412,15 @@ func TestStream_PulsarTtMsgStream_Insert(t *testing.T) {
 	etcdKV := initRmq(rocksdbName)
 	inputStream, outputStream := initRmqTtStream(producerChannels, consumerChannels, consumerSubName)
 
-	err := inputStream.Broadcast(ctx, &msgPack0)
+	err := inputStream.Broadcast(&msgPack0)
 	if err != nil {
 		log.Fatalf("broadcast error = %v", err)
 	}
-	err = inputStream.Produce(ctx, &msgPack1)
+	err = inputStream.Produce(&msgPack1)
 	if err != nil {
 		log.Fatalf("produce error = %v", err)
 	}
-	err = inputStream.Broadcast(ctx, &msgPack2)
+	err = inputStream.Broadcast(&msgPack2)
 	if err != nil {
 		log.Fatalf("broadcast error = %v", err)
 	}

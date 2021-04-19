@@ -1,7 +1,7 @@
 package datanode
 
 import (
-	"context"
+	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 
 	"go.uber.org/zap"
 
@@ -17,7 +17,7 @@ func (gcNode *gcNode) Name() string {
 	return "gcNode"
 }
 
-func (gcNode *gcNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
+func (gcNode *gcNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	if len(in) != 1 {
 		log.Error("Invalid operate message input in gcNode", zap.Int("input length", len(in)))
@@ -31,7 +31,7 @@ func (gcNode *gcNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Con
 	}
 
 	if gcMsg == nil {
-		return []Msg{}, ctx
+		return []Msg{}
 	}
 
 	// drop collections
@@ -42,7 +42,7 @@ func (gcNode *gcNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Con
 		}
 	}
 
-	return nil, ctx
+	return nil
 }
 
 func newGCNode(replica Replica) *gcNode {

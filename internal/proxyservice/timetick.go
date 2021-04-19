@@ -55,7 +55,7 @@ func (tt *TimeTick) Start() error {
 					log.Debug("proxyservice", zap.Stringer("msg type", msg.Type()))
 				}
 				for _, channel := range tt.channels {
-					err = channel.Broadcast(tt.ctx, &msgPack)
+					err = channel.Broadcast(&msgPack)
 					if err != nil {
 						log.Error("proxyservice", zap.String("send time tick error", err.Error()))
 					}

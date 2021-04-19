@@ -1,15 +1,16 @@
 package datanode
 
 import (
-	"context"
 	"math"
 
-	"go.uber.org/zap"
-
+	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
+	"go.uber.org/zap"
 )
 
 type filterDmNode struct {
@@ -21,7 +22,7 @@ func (fdmNode *filterDmNode) Name() string {
 	return "fdmNode"
 }
 
-func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
+func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	if len(in) != 2 {
 		log.Error("Invalid operate message input in filterDmNode", zap.Int("input length", len(in)))
@@ -41,7 +42,13 @@ func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, cont
 	}
 
 	if msgStreamMsg == nil || ddMsg == nil {
-		return []Msg{}, ctx
+		return []Msg{}
+	}
+	var spans []opentracing.Span
+	for _, msg := range msgStreamMsg.TsMessages() {
+		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		spans = append(spans, sp)
+		msg.SetTraceCtx(ctx)
 	}
 
 	fdmNode.ddMsg = ddMsg
@@ -77,11 +84,18 @@ func (fdmNode *filterDmNode) Operate(ctx context.Context, in []Msg) ([]Msg, cont
 	iMsg.endPositions = append(iMsg.endPositions, msgStreamMsg.EndPositions()...)
 	iMsg.gcRecord = ddMsg.gcRecord
 	var res Msg = &iMsg
-	return []Msg{res}, ctx
+	for _, sp := range spans {
+		sp.Finish()
+	}
+	return []Msg{res}
 }
 
 func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg) *msgstream.InsertMsg {
 	// No dd record, do all insert requests.
+	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+	msg.SetTraceCtx(ctx)
+	defer sp.Finish()
+
 	records, ok := fdmNode.ddMsg.collectionRecords[msg.CollectionID]
 	if !ok {
 		return msg

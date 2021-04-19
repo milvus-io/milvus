@@ -97,7 +97,7 @@ func (ttBarrier *softTimeTickBarrier) Start() {
 			return
 		default:
 		}
-		ttmsgs, _ := ttBarrier.ttStream.Consume()
+		ttmsgs := ttBarrier.ttStream.Consume()
 		if len(ttmsgs.Msgs) > 0 {
 			for _, timetickmsg := range ttmsgs.Msgs {
 				ttmsg := timetickmsg.(*ms.TimeTickMsg)
@@ -161,7 +161,7 @@ func (ttBarrier *hardTimeTickBarrier) Start() {
 				return
 			default:
 			}
-			ttmsgs, _ := ttBarrier.ttStream.Consume()
+			ttmsgs := ttBarrier.ttStream.Consume()
 			if len(ttmsgs.Msgs) > 0 {
 				log.Debug("receive tt msg")
 				for _, timetickmsg := range ttmsgs.Msgs {

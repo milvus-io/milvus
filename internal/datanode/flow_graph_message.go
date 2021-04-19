@@ -11,55 +11,53 @@ type (
 	MsgStreamMsg = flowgraph.MsgStreamMsg
 )
 
-type (
-	key2SegMsg struct {
-		tsMessages []msgstream.TsMsg
-		timeRange  TimeRange
-	}
+type key2SegMsg struct {
+	tsMessages []msgstream.TsMsg
+	timeRange  TimeRange
+}
 
-	ddMsg struct {
-		collectionRecords map[UniqueID][]*metaOperateRecord
-		partitionRecords  map[UniqueID][]*metaOperateRecord
-		flushMessages     []*flushMsg
-		gcRecord          *gcRecord
-		timeRange         TimeRange
-	}
+type ddMsg struct {
+	collectionRecords map[UniqueID][]*metaOperateRecord
+	partitionRecords  map[UniqueID][]*metaOperateRecord
+	flushMessages     []*flushMsg
+	gcRecord          *gcRecord
+	timeRange         TimeRange
+}
 
-	metaOperateRecord struct {
-		createOrDrop bool // create: true, drop: false
-		timestamp    Timestamp
-	}
+type metaOperateRecord struct {
+	createOrDrop bool // create: true, drop: false
+	timestamp    Timestamp
+}
 
-	insertMsg struct {
-		insertMessages []*msgstream.InsertMsg
-		flushMessages  []*flushMsg
-		gcRecord       *gcRecord
-		timeRange      TimeRange
-		startPositions []*internalpb.MsgPosition
-		endPositions   []*internalpb.MsgPosition
-	}
+type insertMsg struct {
+	insertMessages []*msgstream.InsertMsg
+	flushMessages  []*flushMsg
+	gcRecord       *gcRecord
+	timeRange      TimeRange
+	startPositions []*internalpb.MsgPosition
+	endPositions   []*internalpb.MsgPosition
+}
 
-	deleteMsg struct {
-		deleteMessages []*msgstream.DeleteMsg
-		timeRange      TimeRange
-	}
+type deleteMsg struct {
+	deleteMessages []*msgstream.DeleteMsg
+	timeRange      TimeRange
+}
 
-	gcMsg struct {
-		gcRecord  *gcRecord
-		timeRange TimeRange
-	}
+type gcMsg struct {
+	gcRecord  *gcRecord
+	timeRange TimeRange
+}
 
-	gcRecord struct {
-		collections []UniqueID
-	}
+type gcRecord struct {
+	collections []UniqueID
+}
 
-	flushMsg struct {
-		msgID        UniqueID
-		timestamp    Timestamp
-		segmentIDs   []UniqueID
-		collectionID UniqueID
-	}
-)
+type flushMsg struct {
+	msgID        UniqueID
+	timestamp    Timestamp
+	segmentIDs   []UniqueID
+	collectionID UniqueID
+}
 
 func (ksMsg *key2SegMsg) TimeTick() Timestamp {
 	return ksMsg.timeRange.timestampMax

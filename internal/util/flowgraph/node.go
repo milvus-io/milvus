@@ -6,16 +6,13 @@ import (
 	"log"
 	"sync"
 	"time"
-
-	"github.com/opentracing/opentracing-go"
-	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
 
 type Node interface {
 	Name() string
 	MaxQueueLength() int32
 	MaxParallelism() int32
-	Operate(ctx context.Context, in []Msg) ([]Msg, context.Context)
+	Operate(in []Msg) []Msg
 	IsInputNode() bool
 }
 
@@ -26,18 +23,13 @@ type BaseNode struct {
 
 type nodeCtx struct {
 	node                   Node
-	inputChannels          []chan *MsgWithCtx
+	inputChannels          []chan Msg
 	inputMessages          []Msg
 	downstream             []*nodeCtx
 	downstreamInputChanIdx map[string]int
 
 	NumActiveTasks    int64
 	NumCompletedTasks int64
-}
-
-type MsgWithCtx struct {
-	ctx context.Context
-	msg Msg
 }
 
 func (nodeCtx *nodeCtx) Start(ctx context.Context, wg *sync.WaitGroup) {
@@ -60,17 +52,13 @@ func (nodeCtx *nodeCtx) Start(ctx context.Context, wg *sync.WaitGroup) {
 			// inputs from inputsMessages for Operate
 			inputs := make([]Msg, 0)
 
-			var msgCtx context.Context
 			var res []Msg
-			var sp opentracing.Span
 			if !nodeCtx.node.IsInputNode() {
-				msgCtx = nodeCtx.collectInputMessages(ctx)
+				nodeCtx.collectInputMessages(ctx)
 				inputs = nodeCtx.inputMessages
 			}
 			n := nodeCtx.node
-			res, msgCtx = n.Operate(msgCtx, inputs)
-			sp, msgCtx = trace.StartSpanFromContext(msgCtx)
-			sp.SetTag("node name", n.Name())
+			res = n.Operate(inputs)
 
 			downstreamLength := len(nodeCtx.downstreamInputChanIdx)
 			if len(nodeCtx.downstream) < downstreamLength {
@@ -84,10 +72,9 @@ func (nodeCtx *nodeCtx) Start(ctx context.Context, wg *sync.WaitGroup) {
 			w := sync.WaitGroup{}
 			for i := 0; i < downstreamLength; i++ {
 				w.Add(1)
-				go nodeCtx.downstream[i].ReceiveMsg(msgCtx, &w, res[i], nodeCtx.downstreamInputChanIdx[nodeCtx.downstream[i].node.Name()])
+				go nodeCtx.downstream[i].ReceiveMsg(&w, res[i], nodeCtx.downstreamInputChanIdx[nodeCtx.downstream[i].node.Name()])
 			}
 			w.Wait()
-			sp.Finish()
 		}
 	}
 }
@@ -99,18 +86,14 @@ func (nodeCtx *nodeCtx) Close() {
 	}
 }
 
-func (nodeCtx *nodeCtx) ReceiveMsg(ctx context.Context, wg *sync.WaitGroup, msg Msg, inputChanIdx int) {
-	sp, ctx := trace.StartSpanFromContext(ctx)
-	defer sp.Finish()
-	nodeCtx.inputChannels[inputChanIdx] <- &MsgWithCtx{ctx: ctx, msg: msg}
+func (nodeCtx *nodeCtx) ReceiveMsg(wg *sync.WaitGroup, msg Msg, inputChanIdx int) {
+	nodeCtx.inputChannels[inputChanIdx] <- msg
 	//fmt.Println((*nodeCtx.node).Name(), "receive to input channel ", inputChanIdx)
 
 	wg.Done()
 }
 
-func (nodeCtx *nodeCtx) collectInputMessages(exitCtx context.Context) context.Context {
-	var opts []opentracing.StartSpanOption
-
+func (nodeCtx *nodeCtx) collectInputMessages(exitCtx context.Context) {
 	inputsNum := len(nodeCtx.inputChannels)
 	nodeCtx.inputMessages = make([]Msg, inputsNum)
 
@@ -121,27 +104,15 @@ func (nodeCtx *nodeCtx) collectInputMessages(exitCtx context.Context) context.Co
 		channel := nodeCtx.inputChannels[i]
 		select {
 		case <-exitCtx.Done():
-			return nil
-		case msgWithCtx, ok := <-channel:
+			return
+		case msg, ok := <-channel:
 			if !ok {
 				// TODO: add status
 				log.Println("input channel closed")
-				return nil
+				return
 			}
-			nodeCtx.inputMessages[i] = msgWithCtx.msg
-			if msgWithCtx.ctx != nil {
-				sp, _ := trace.StartSpanFromContext(msgWithCtx.ctx)
-				opts = append(opts, opentracing.ChildOf(sp.Context()))
-				sp.Finish()
-			}
+			nodeCtx.inputMessages[i] = msg
 		}
-	}
-
-	var ctx context.Context
-	var sp opentracing.Span
-	if len(opts) != 0 {
-		sp, ctx = trace.StartSpanFromContext(context.Background(), opts...)
-		defer sp.Finish()
 	}
 
 	// timeTick alignment check
@@ -169,7 +140,7 @@ func (nodeCtx *nodeCtx) collectInputMessages(exitCtx context.Context) context.Co
 							log.Println("input channel closed")
 							return
 						}
-						nodeCtx.inputMessages[i] = msg.msg
+						nodeCtx.inputMessages[i] = msg
 					}
 				}
 			}
@@ -183,7 +154,6 @@ func (nodeCtx *nodeCtx) collectInputMessages(exitCtx context.Context) context.Co
 		}
 
 	}
-	return ctx
 }
 
 func (node *BaseNode) MaxQueueLength() int32 {
