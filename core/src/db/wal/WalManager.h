@@ -50,21 +50,12 @@ class WalManager {
     GetNextRecovery(MXLogRecord& record);
 
     /*
-    ErrorCode
-    GetNextEntityRecovery(MXLogRecord& record);
-*/
-    /*
      * Get next record
      * @param record[out]: record
      * @retval error_code
      */
     ErrorCode
     GetNextRecord(MXLogRecord& record);
-
-    /*
-    ErrorCode
-    GetNextEntityRecord(MXLogRecord& record);
-    */
 
     /*
      * Create collection
@@ -83,14 +74,6 @@ class WalManager {
     uint64_t
     CreatePartition(const std::string& collection_id, const std::string& partition_tag);
 
-    /*
-     * Create hybrid collection
-     * @param collection_id: collection id
-     * @retval lsn
-    uint64_t
-    CreateHybridCollection(const std::string& collection_id);
-
-     */
     /*
      * Drop collection
      * @param collection_id: collection id
@@ -160,23 +143,9 @@ class WalManager {
      * @param collection_id: collection id
      * @param partition_tag: partition tag
      * @param vector_ids: vector ids
-     * @param vectors: vectors
-     * @param attrs: attributes
-    template <typename T>
-    bool
-    InsertEntities(const std::string& collection_id, const std::string& partition_tag,
-                   const milvus::engine::IDNumbers& entity_ids, const std::vector<T>& vectors,
-                   const std::unordered_map<std::string, uint64_t>& attr_nbytes,
-                   const std::unordered_map<std::string, std::vector<uint8_t>>& attrs);
-
-     */
-    /*
-     * Insert
-     * @param collection_id: collection id
-     * @param vector_ids: vector ids
      */
     bool
-    DeleteById(const std::string& collection_id, const IDNumbers& vector_ids);
+    DeleteById(const std::string& collection_id, const std::string& partition_tag, const IDNumbers& vector_ids);
 
     /*
      * Get flush lsn

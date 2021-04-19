@@ -1003,13 +1003,6 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
 }
 
 Status
-DBImpl::DeleteVector(const std::string& collection_id, IDNumber vector_id) {
-    IDNumbers ids;
-    ids.push_back(vector_id);
-    return DeleteVectors(collection_id, "", ids);
-}
-
-Status
 DBImpl::DeleteVectors(const std::string& collection_id, const std::string& partition_tag, IDNumbers vector_ids) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
@@ -1017,7 +1010,7 @@ DBImpl::DeleteVectors(const std::string& collection_id, const std::string& parti
 
     Status status;
     if (options_.wal_enable_) {
-        wal_mgr_->DeleteById(collection_id, vector_ids);
+        wal_mgr_->DeleteById(collection_id, partition_tag, vector_ids);
         swn_wal_.Notify();
     } else {
         wal::MXLogRecord record;
