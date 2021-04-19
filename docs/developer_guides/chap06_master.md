@@ -359,8 +359,8 @@ Master
 message TenantMeta {
   uint64 id = 1;
   uint64 num_query_nodes = 2;
-  repeated string insert_channel_ids = 3;
-  string query_channel_id = 4;
+  repeated string insert_channel_names = 3;
+  string query_channel_name = 4;
 }
 ```
 
@@ -370,7 +370,7 @@ message TenantMeta {
 message ProxyMeta {
   uint64 id = 1;
   common.Address address = 2;
-  repeated string result_channel_ids = 3;
+  repeated string result_channel_names = 3;
 }
 ```
 
@@ -598,7 +598,7 @@ func NewSegmentManagement(ctx context.Context) *SegmentManagement
 
 ###### 10.7.1 Assign Segment ID to Inserted Rows
 
-Master receives *AssignSegIDRequest* which contains a list of *SegIDRequest(count, channelID, collectionName, partitionName)* from Proxy. Segment Manager will assign the opened segments or open a new segment if there is no enough space, and Segment Manager will record the allocated space which can be reallocated after a expire duration.
+Master receives *AssignSegIDRequest* which contains a list of *SegIDRequest(count, channelName, collectionName, partitionName)* from Proxy. Segment Manager will assign the opened segments or open a new segment if there is no enough space, and Segment Manager will record the allocated space which can be reallocated after a expire duration.
 
 ```go
 func (segMgr *SegmentManager) AssignSegmentID(segIDReq []*internalpb.SegIDRequest) ([]*internalpb.SegIDAssignment, error)

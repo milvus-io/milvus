@@ -58,7 +58,7 @@ type RegisterNodeResponse struct {
 ```go
 type SegIDRequest struct {
   Count uint32
-  ChannelID string
+  ChannelName string
 	CollectionID UniqueID
   PartitionID UniqueID
 }
@@ -70,7 +70,7 @@ type AssignSegIDRequest struct {
 
 type SegIDAssignment struct {
   SegmentID UniqueID
-  ChannelID string
+  ChannelName string
   Count uint32
 	CollectionID UniqueID
   PartitionID UniqueID
@@ -170,9 +170,9 @@ type DataNode interface {
   Service
   
   WatchDmChannels(req WatchDmChannelRequest) error
-  //WatchDdChannel(channelID string) error
-  //SetTimeTickChannel(channelID string) error
-  //SetStatsChannel(channelID string) error
+  //WatchDdChannel(channelName string) error
+  //SetTimeTickChannel(channelName string) error
+  //SetStatsChannel(channelName string) error
   
   FlushSegments(req FlushSegRequest) error
 }
@@ -185,7 +185,7 @@ type DataNode interface {
 ```go
 type WatchDmChannelRequest struct {
   RequestBase
-  InsertChannelIDs []string
+  InsertChannelNames []string
 }
 ```
 
