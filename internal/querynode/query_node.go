@@ -18,7 +18,6 @@ import (
 	"io"
 
 	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go"
 	"github.com/uber/jaeger-client-go/config"
 	"google.golang.org/grpc"
 
@@ -89,11 +88,8 @@ func newQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
 			Type:  "const",
 			Param: 1,
 		},
-		Reporter: &config.ReporterConfig{
-			LogSpans: true,
-		},
 	}
-	q.tracer, q.closer, err = cfg.NewTracer(config.Logger(jaeger.StdLogger))
+	q.tracer, q.closer, err = cfg.NewTracer()
 	if err != nil {
 		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
 	}
