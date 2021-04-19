@@ -33,7 +33,6 @@ type ParamTable struct {
 	// segment
 	SegmentSize           float64
 	SegmentSizeFactor     float64
-	DefaultRecordSize     int64
 	SegIDAssignExpiration int64
 
 	InsertChannelPrefixName     string
@@ -72,7 +71,6 @@ func (p *ParamTable) Init() {
 
 		p.initSegmentSize()
 		p.initSegmentSizeFactor()
-		p.initDefaultRecordSize()
 		p.initSegIDAssignExpiration()
 		p.initInsertChannelPrefixName()
 		p.initInsertChannelNum()
@@ -137,10 +135,6 @@ func (p *ParamTable) initSegmentSize() {
 
 func (p *ParamTable) initSegmentSizeFactor() {
 	p.SegmentSizeFactor = p.ParseFloat("dataservice.segment.sizeFactor")
-}
-
-func (p *ParamTable) initDefaultRecordSize() {
-	p.DefaultRecordSize = p.ParseInt64("dataservice.segment.defaultSizePerRecord")
 }
 
 func (p *ParamTable) initSegIDAssignExpiration() {
