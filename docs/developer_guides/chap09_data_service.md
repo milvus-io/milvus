@@ -25,7 +25,6 @@ type DataService interface {
   GetInsertChannels(ctx context.Context, req *datapb.InsertChannelRequest) (*internalpb2.StringList, error)
   GetCollectionStatistics(ctx context.Context, req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error)
   GetPartitionStatistics(ctx context.Context, req *datapb.PartitionStatsRequest) (*datapb.PartitionStatsResponse, error)
-  GetCount(ctx context.Context, req *datapb.CollectionCountRequest) (*datapb.CollectionCountResponse, error)
   GetSegmentInfo(ctx context.Context, req *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error)
 }
 ```
@@ -205,21 +204,6 @@ type PartitionStatsRequest struct {
 type PartitionStatsResponse struct {
   Stats  []*commonpb.KeyValuePair
   Status *commonpb.Status
-}
-```
-
-* *GetCount*
-
-```go
-type CollectionCountRequest struct {
-  Base         *commonpb.MsgBase
-  DbID         UniqueID
-  CollectionID UniqueID
-}
-
-type CollectionCountResponse struct {
-  Status *commonpb.Status
-  Count  int64
 }
 ```
 

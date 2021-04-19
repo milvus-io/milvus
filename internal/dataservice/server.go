@@ -749,26 +749,6 @@ func (s *Server) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringRes
 	}, nil
 }
 
-func (s *Server) GetCount(ctx context.Context, req *datapb.CollectionCountRequest) (*datapb.CollectionCountResponse, error) {
-	resp := &datapb.CollectionCountResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-		},
-	}
-	if !s.checkStateIsHealthy() {
-		resp.Status.Reason = "data service is not healthy"
-		return resp, nil
-	}
-	nums, err := s.meta.GetNumRowsOfCollection(req.CollectionID)
-	if err != nil {
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
-	resp.Count = nums
-	resp.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
-	return resp, nil
-}
-
 func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error) {
 	resp := &datapb.SegmentInfoResponse{
 		Status: &commonpb.Status{
