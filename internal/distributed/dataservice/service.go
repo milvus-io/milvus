@@ -4,16 +4,20 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/logutil"
+
+	"go.uber.org/zap"
+
 	"google.golang.org/grpc"
 
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go/config"
@@ -83,12 +87,12 @@ func (s *Server) init() error {
 		return err
 	}
 
-	log.Println("DataService:: MasterServicAddr:", Params.MasterAddress)
+	log.Debug("master address", zap.String("address", Params.MasterAddress))
 	client, err := msc.NewClient(Params.MasterAddress, 10*time.Second)
 	if err != nil {
 		panic(err)
 	}
-	log.Println("master client create complete")
+	log.Debug("master client create complete")
 	if err = client.Init(); err != nil {
 		panic(err)
 	}
@@ -107,20 +111,20 @@ func (s *Server) init() error {
 
 	dataservice.Params.Init()
 	if err := s.impl.Init(); err != nil {
-		log.Println("impl init error: ", err)
+		log.Error("impl init error", zap.Error(err))
 		return err
 	}
 	return nil
 }
 
 func (s *Server) startGrpcLoop(grpcPort int) {
-
+	defer logutil.LogPanic()
 	defer s.wg.Done()
 
-	log.Println("network port: ", grpcPort)
+	log.Debug("network port", zap.Int("port", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
-		log.Printf("GrpcServer:failed to listen: %v", err)
+		log.Error("grpc server failed to listen error", zap.Error(err))
 		s.grpcErrChan <- err
 		return
 	}
@@ -171,7 +175,7 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Println("dataservice init done ...")
+	log.Debug("dataservice init done ...")
 
 	if err := s.start(); err != nil {
 		return err

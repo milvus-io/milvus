@@ -8,9 +8,10 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/zilliztech/milvus-distributed/internal/logutil"
+
 	"github.com/zilliztech/milvus-distributed/cmd/distributed/components"
 	ds "github.com/zilliztech/milvus-distributed/internal/dataservice"
-	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/rmqms"
@@ -135,7 +136,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			var err error
 			// Init data service params
 			ds.Params.Init()
-			log.SetupLogger(&ds.Params.Log)
+			logutil.SetupLogger(&ds.Params.Log)
 			dataService, err = components.NewDataService(ctx, factory)
 			if err != nil {
 				panic(err)

@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/logutil"
+
 	"github.com/golang/protobuf/proto"
 	grpcdatanodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/datanode/client"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
@@ -317,6 +319,7 @@ func (s *Server) startServerLoop() {
 }
 
 func (s *Server) startStatsChannel(ctx context.Context) {
+	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 	statsStream, _ := s.msFactory.NewMsgStream(ctx)
 	statsStream.AsConsumer([]string{Params.StatisticsChannelName}, Params.DataServiceSubscriptionName)
@@ -345,6 +348,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 }
 
 func (s *Server) startSegmentFlushChannel(ctx context.Context) {
+	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 	flushStream, _ := s.msFactory.NewMsgStream(ctx)
 	flushStream.AsConsumer([]string{Params.SegmentInfoChannelName}, Params.DataServiceSubscriptionName)

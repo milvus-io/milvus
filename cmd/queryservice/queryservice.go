@@ -6,6 +6,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/zilliztech/milvus-distributed/internal/logutil"
+
 	"go.uber.org/zap"
 
 	distributed "github.com/zilliztech/milvus-distributed/cmd/distributed/components"
@@ -19,7 +21,7 @@ func main() {
 	defer cancel()
 
 	queryservice.Params.Init()
-	log.SetupLogger(&queryservice.Params.Log)
+	logutil.SetupLogger(&queryservice.Params.Log)
 	defer func() {
 		if err := log.Sync(); err != nil {
 			panic(err)

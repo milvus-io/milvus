@@ -2,9 +2,11 @@ package timesync
 
 import (
 	"context"
-	"log"
 	"sync"
 
+	"github.com/zilliztech/milvus-distributed/internal/logutil"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -26,17 +28,18 @@ func NewTimeSyncMsgProducer(ttBarrier TimeTickBarrier, watchers ...TimeTickWatch
 }
 
 func (producer *MsgProducer) broadcastMsg() {
+	defer logutil.LogPanic()
 	defer producer.wg.Done()
 	for {
 		select {
 		case <-producer.ctx.Done():
-			log.Printf("broadcast context done, exit")
+			log.Debug("broadcast context done, exit")
 			return
 		default:
 		}
 		tt, err := producer.ttBarrier.GetTimeTick()
 		if err != nil {
-			log.Printf("broadcast get time tick error")
+			log.Debug("broadcast get time tick error")
 		}
 		baseMsg := ms.BaseMsg{
 			BeginTimestamp: tt,
@@ -71,6 +74,7 @@ func (producer *MsgProducer) Start(ctx context.Context) {
 }
 
 func (producer *MsgProducer) startWatcher(watcher TimeTickWatcher) {
+	defer logutil.LogPanic()
 	defer producer.wg.Done()
 	watcher.StartBackgroundLoop(producer.ctx)
 }
