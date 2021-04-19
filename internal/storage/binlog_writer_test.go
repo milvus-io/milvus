@@ -10,11 +10,10 @@ import (
 )
 
 func TestBinlogWriterReader(t *testing.T) {
-	binlogWriter, err := NewInsertBinlogWriter(schemapb.DataType_Int32, 10, 20, 30, 40)
+	binlogWriter := NewInsertBinlogWriter(schemapb.DataType_Int32, 10, 20, 30, 40)
 	binlogWriter.SetStartTimeStamp(1000)
 	binlogWriter.SetEndTimeStamp(2000)
 	defer binlogWriter.Close()
-	assert.Nil(t, err)
 	eventWriter, err := binlogWriter.NextInsertEventWriter()
 	assert.Nil(t, err)
 	err = eventWriter.AddInt32ToPayload([]int32{1, 2, 3})

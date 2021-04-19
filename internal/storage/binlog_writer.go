@@ -204,11 +204,8 @@ func (writer *DDLBinlogWriter) NextDropPartitionEventWriter() (*dropPartitionEve
 	return event, nil
 }
 
-func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID, segmentID, FieldID int64) (*InsertBinlogWriter, error) {
-	descriptorEvent, err := newDescriptorEvent()
-	if err != nil {
-		return nil, err
-	}
+func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID, segmentID, FieldID int64) *InsertBinlogWriter {
+	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType
 	descriptorEvent.CollectionID = collectionID
 	descriptorEvent.PartitionID = partitionID
@@ -222,13 +219,10 @@ func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 			eventWriters:    make([]EventWriter, 0),
 			buffer:          nil,
 		},
-	}, nil
-}
-func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID int64) (*DeleteBinlogWriter, error) {
-	descriptorEvent, err := newDescriptorEvent()
-	if err != nil {
-		return nil, err
 	}
+}
+func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID int64) *DeleteBinlogWriter {
+	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType
 	descriptorEvent.CollectionID = collectionID
 	return &DeleteBinlogWriter{
@@ -239,13 +233,10 @@ func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID int64) (*Del
 			eventWriters:    make([]EventWriter, 0),
 			buffer:          nil,
 		},
-	}, nil
-}
-func NewDDLBinlogWriter(dataType schemapb.DataType, collectionID int64) (*DDLBinlogWriter, error) {
-	descriptorEvent, err := newDescriptorEvent()
-	if err != nil {
-		return nil, err
 	}
+}
+func NewDDLBinlogWriter(dataType schemapb.DataType, collectionID int64) *DDLBinlogWriter {
+	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType
 	descriptorEvent.CollectionID = collectionID
 	return &DDLBinlogWriter{
@@ -256,5 +247,5 @@ func NewDDLBinlogWriter(dataType schemapb.DataType, collectionID int64) (*DDLBin
 			eventWriters:    make([]EventWriter, 0),
 			buffer:          nil,
 		},
-	}, nil
+	}
 }

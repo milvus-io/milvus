@@ -48,16 +48,16 @@ func readDescriptorEventHeader(buffer io.Reader) (*descriptorEventHeader, error)
 	return header, nil
 }
 
-func newDescriptorEventHeader() (*descriptorEventHeader, error) {
+func newDescriptorEventHeader() *descriptorEventHeader {
 	header := descriptorEventHeader{
 		Timestamp: tsoutil.ComposeTS(time.Now().UnixNano()/int64(time.Millisecond), 0),
 		TypeCode:  DescriptorEventType,
 		ServerID:  ServerID,
 	}
-	return &header, nil
+	return &header
 }
 
-func newEventHeader(eventTypeCode EventTypeCode) (*eventHeader, error) {
+func newEventHeader(eventTypeCode EventTypeCode) *eventHeader {
 	return &eventHeader{
 		baseEventHeader: baseEventHeader{
 			Timestamp:    tsoutil.ComposeTS(time.Now().UnixNano()/int64(time.Millisecond), 0),
@@ -66,5 +66,5 @@ func newEventHeader(eventTypeCode EventTypeCode) (*eventHeader, error) {
 			EventLength:  -1,
 			NextPosition: -1,
 		},
-	}, nil
+	}
 }

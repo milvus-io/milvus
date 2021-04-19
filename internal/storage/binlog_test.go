@@ -1,7 +1,9 @@
 package storage
 
 import (
+	"bytes"
 	"encoding/binary"
+	"fmt"
 	"testing"
 	"time"
 	"unsafe"
@@ -12,8 +14,7 @@ import (
 )
 
 func TestInsertBinlog(t *testing.T) {
-	w, err := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
-	assert.Nil(t, err)
+	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
 
 	e1, err := w.NextInsertEventWriter()
 	assert.Nil(t, err)
@@ -272,8 +273,7 @@ func TestInsertBinlog(t *testing.T) {
 }
 
 func TestDeleteBinlog(t *testing.T) {
-	w, err := NewDeleteBinlogWriter(schemapb.DataType_Int64, 50)
-	assert.Nil(t, err)
+	w := NewDeleteBinlogWriter(schemapb.DataType_Int64, 50)
 
 	e1, err := w.NextDeleteEventWriter()
 	assert.Nil(t, err)
@@ -532,8 +532,7 @@ func TestDeleteBinlog(t *testing.T) {
 }
 
 func TestDDLBinlog1(t *testing.T) {
-	w, err := NewDDLBinlogWriter(schemapb.DataType_Int64, 50)
-	assert.Nil(t, err)
+	w := NewDDLBinlogWriter(schemapb.DataType_Int64, 50)
 
 	e1, err := w.NextCreateCollectionEventWriter()
 	assert.Nil(t, err)
@@ -792,8 +791,7 @@ func TestDDLBinlog1(t *testing.T) {
 }
 
 func TestDDLBinlog2(t *testing.T) {
-	w, err := NewDDLBinlogWriter(schemapb.DataType_Int64, 50)
-	assert.Nil(t, err)
+	w := NewDDLBinlogWriter(schemapb.DataType_Int64, 50)
 
 	e1, err := w.NextCreatePartitionEventWriter()
 	assert.Nil(t, err)
@@ -1049,4 +1047,244 @@ func TestDDLBinlog2(t *testing.T) {
 	assert.False(t, ok)
 	assert.Equal(t, ed2.StartTimestamp, Timestamp(300))
 	assert.Equal(t, ed2.EndTimestamp, Timestamp(400))
+}
+
+func TestNewBinlogReaderError(t *testing.T) {
+	data := []byte{}
+	reader, err := NewBinlogReader(data)
+	assert.Nil(t, reader)
+	assert.NotNil(t, err)
+
+	data = []byte{0, 0, 0, 0}
+	reader, err = NewBinlogReader(data)
+	assert.Nil(t, reader)
+	assert.NotNil(t, err)
+
+	buffer := new(bytes.Buffer)
+	err = binary.Write(buffer, binary.LittleEndian, int32(MagicNumber))
+	assert.Nil(t, err)
+	data = buffer.Bytes()
+
+	reader, err = NewBinlogReader(data)
+	assert.Nil(t, reader)
+	assert.NotNil(t, err)
+
+	err = binary.Write(buffer, binary.LittleEndian, int32(555))
+	assert.Nil(t, err)
+	data = buffer.Bytes()
+
+	reader, err = NewBinlogReader(data)
+	assert.Nil(t, reader)
+	assert.NotNil(t, err)
+
+	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
+
+	w.SetStartTimeStamp(1000)
+	w.SetEndTimeStamp(2000)
+
+	e1, err := w.NextInsertEventWriter()
+	assert.Nil(t, err)
+	err = e1.AddDataToPayload([]int64{1, 2, 3})
+	assert.Nil(t, err)
+	err = e1.AddDataToPayload([]int32{4, 5, 6})
+	assert.NotNil(t, err)
+	err = e1.AddDataToPayload([]int64{4, 5, 6})
+	assert.Nil(t, err)
+	e1.SetStartTimestamp(100)
+	e1.SetEndTimestamp(200)
+
+	_, err = w.GetBuffer()
+	assert.NotNil(t, err)
+	err = w.Close()
+	assert.Nil(t, err)
+
+	buf, err := w.GetBuffer()
+	assert.Nil(t, err)
+
+	reader, err = NewBinlogReader(buf)
+	assert.Nil(t, err)
+	reader.Close()
+
+	event1, err := reader.NextEventReader()
+	assert.Nil(t, event1)
+	assert.NotNil(t, err)
+
+	err = reader.Close()
+	assert.Nil(t, err)
+}
+
+func TestNewBinlogWriterTsError(t *testing.T) {
+	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
+
+	_, err := w.GetBuffer()
+	assert.NotNil(t, err)
+	err = w.Close()
+	assert.NotNil(t, err)
+
+	w.SetStartTimeStamp(1000)
+	_, err = w.GetBuffer()
+	assert.NotNil(t, err)
+	err = w.Close()
+	assert.NotNil(t, err)
+
+	w.SetEndTimeStamp(2000)
+	_, err = w.GetBuffer()
+	assert.NotNil(t, err)
+	err = w.Close()
+	assert.Nil(t, err)
+
+	_, err = w.GetBuffer()
+	assert.Nil(t, err)
+
+}
+
+func TestInsertBinlogWriterCloseError(t *testing.T) {
+	insertWriter := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
+	e1, err := insertWriter.NextInsertEventWriter()
+	assert.Nil(t, err)
+	err = e1.AddDataToPayload([]int64{1, 2, 3})
+	assert.Nil(t, err)
+	e1.SetStartTimestamp(100)
+	e1.SetEndTimestamp(200)
+	insertWriter.SetStartTimeStamp(1000)
+	insertWriter.SetEndTimeStamp(2000)
+	err = insertWriter.Close()
+	assert.Nil(t, err)
+	assert.NotNil(t, insertWriter.buffer)
+	insertEventWriter, err := insertWriter.NextInsertEventWriter()
+	assert.Nil(t, insertEventWriter)
+	assert.NotNil(t, err)
+
+}
+
+func TestDeleteBinlogWriteCloseError(t *testing.T) {
+	deleteWriter := NewDeleteBinlogWriter(schemapb.DataType_Int64, 10)
+	e1, err := deleteWriter.NextDeleteEventWriter()
+	assert.Nil(t, err)
+	err = e1.AddDataToPayload([]int64{1, 2, 3})
+	assert.Nil(t, err)
+	e1.SetStartTimestamp(100)
+	e1.SetEndTimestamp(200)
+	deleteWriter.SetStartTimeStamp(1000)
+	deleteWriter.SetEndTimeStamp(2000)
+	err = deleteWriter.Close()
+	assert.Nil(t, err)
+	assert.NotNil(t, deleteWriter.buffer)
+	deleteEventWriter, err := deleteWriter.NextDeleteEventWriter()
+	assert.Nil(t, deleteEventWriter)
+	assert.NotNil(t, err)
+}
+
+func TestDDBinlogWriteCloseError(t *testing.T) {
+	ddBinlogWriter := NewDDLBinlogWriter(schemapb.DataType_Int64, 10)
+	e1, err := ddBinlogWriter.NextCreateCollectionEventWriter()
+	assert.Nil(t, err)
+	err = e1.AddDataToPayload([]int64{1, 2, 3})
+	assert.Nil(t, err)
+	e1.SetStartTimestamp(100)
+	e1.SetEndTimestamp(200)
+
+	ddBinlogWriter.SetStartTimeStamp(1000)
+	ddBinlogWriter.SetEndTimeStamp(2000)
+	err = ddBinlogWriter.Close()
+	assert.Nil(t, err)
+	assert.NotNil(t, ddBinlogWriter.buffer)
+
+	createCollectionEventWriter, err := ddBinlogWriter.NextCreateCollectionEventWriter()
+	assert.Nil(t, createCollectionEventWriter)
+	assert.NotNil(t, err)
+
+	dropCollectionEventWriter, err := ddBinlogWriter.NextDropCollectionEventWriter()
+	assert.Nil(t, dropCollectionEventWriter)
+	assert.NotNil(t, err)
+
+	createPartitionEventWriter, err := ddBinlogWriter.NextCreatePartitionEventWriter()
+	assert.Nil(t, createPartitionEventWriter)
+	assert.NotNil(t, err)
+
+	dropPartitionEventWriter, err := ddBinlogWriter.NextDropPartitionEventWriter()
+	assert.Nil(t, dropPartitionEventWriter)
+	assert.NotNil(t, err)
+
+}
+
+type testEvent struct {
+	PayloadWriterInterface
+	finishError           bool
+	writeError            bool
+	getMemoryError        bool
+	getPayloadLengthError bool
+	releasePayloadError   bool
+}
+
+func (e *testEvent) Finish() error {
+	if e.finishError {
+		return fmt.Errorf("finish error")
+	}
+	return nil
+}
+
+func (e *testEvent) Close() error {
+	return nil
+}
+
+func (e *testEvent) Write(buffer *bytes.Buffer) error {
+	if e.writeError {
+		return fmt.Errorf("write error")
+	}
+	return nil
+}
+
+func (e *testEvent) GetMemoryUsageInBytes() (int32, error) {
+	if e.getMemoryError {
+		return -1, fmt.Errorf("getMemory error")
+	}
+	return 0, nil
+}
+func (e *testEvent) GetPayloadLengthFromWriter() (int, error) {
+	if e.getPayloadLengthError {
+		return -1, fmt.Errorf("getPayloadLength error")
+	}
+	return 0, nil
+}
+
+func (e *testEvent) ReleasePayloadWriter() error {
+	if e.releasePayloadError {
+		return fmt.Errorf("releasePayload error")
+	}
+	return nil
+}
+
+func (e *testEvent) SetOffset(offset int32) {
+
+}
+
+var _ EventWriter = (*testEvent)(nil)
+
+func TestWriterListError(t *testing.T) {
+	insertWriter := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
+	errorEvent := &testEvent{}
+	insertWriter.eventWriters = append(insertWriter.eventWriters, errorEvent)
+	insertWriter.SetStartTimeStamp(1000)
+	insertWriter.SetEndTimeStamp(2000)
+	errorEvent.releasePayloadError = true
+	err := insertWriter.Close()
+	assert.NotNil(t, err)
+	insertWriter.buffer = nil
+	errorEvent.getPayloadLengthError = true
+	err = insertWriter.Close()
+	assert.NotNil(t, err)
+	insertWriter.buffer = nil
+	errorEvent.getMemoryError = true
+	err = insertWriter.Close()
+	assert.NotNil(t, err)
+	insertWriter.buffer = nil
+	errorEvent.writeError = true
+	err = insertWriter.Close()
+	assert.NotNil(t, err)
+	insertWriter.buffer = nil
+	errorEvent.finishError = true
+	err = insertWriter.Close()
+	assert.NotNil(t, err)
+
 }

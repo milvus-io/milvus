@@ -177,22 +177,16 @@ type dropPartitionEventWriter struct {
 	dropPartitionEventData
 }
 
-func newDescriptorEvent() (*descriptorEvent, error) {
-	header, err := newDescriptorEventHeader()
-	if err != nil {
-		return nil, err
-	}
-	data, err := newDescriptorEventData()
-	if err != nil {
-		return nil, err
-	}
+func newDescriptorEvent() *descriptorEvent {
+	header := newDescriptorEventHeader()
+	data := newDescriptorEventData()
 	header.EventLength = header.GetMemoryUsageInBytes() + data.GetMemoryUsageInBytes()
 	header.NextPosition = int32(binary.Size(MagicNumber)) + header.EventLength
 	data.HeaderLength = int8(binary.Size(eventHeader{}))
 	return &descriptorEvent{
 		descriptorEventHeader: *header,
 		descriptorEventData:   *data,
-	}, err
+	}
 }
 
 func newInsertEventWriter(dataType schemapb.DataType) (*insertEventWriter, error) {
@@ -200,14 +194,8 @@ func newInsertEventWriter(dataType schemapb.DataType) (*insertEventWriter, error
 	if err != nil {
 		return nil, err
 	}
-	header, err := newEventHeader(InsertEventType)
-	if err != nil {
-		return nil, err
-	}
-	data, err := newInsertEventData()
-	if err != nil {
-		return nil, err
-	}
+	header := newEventHeader(InsertEventType)
+	data := newInsertEventData()
 
 	writer := &insertEventWriter{
 		baseEventWriter: baseEventWriter{
@@ -228,14 +216,8 @@ func newDeleteEventWriter(dataType schemapb.DataType) (*deleteEventWriter, error
 	if err != nil {
 		return nil, err
 	}
-	header, err := newEventHeader(DeleteEventType)
-	if err != nil {
-		return nil, err
-	}
-	data, err := newDeleteEventData()
-	if err != nil {
-		return nil, err
-	}
+	header := newEventHeader(DeleteEventType)
+	data := newDeleteEventData()
 	writer := &deleteEventWriter{
 		baseEventWriter: baseEventWriter{
 			eventHeader:            *header,
@@ -258,14 +240,8 @@ func newCreateCollectionEventWriter(dataType schemapb.DataType) (*createCollecti
 	if err != nil {
 		return nil, err
 	}
-	header, err := newEventHeader(CreateCollectionEventType)
-	if err != nil {
-		return nil, err
-	}
-	data, err := newCreateCollectionEventData()
-	if err != nil {
-		return nil, err
-	}
+	header := newEventHeader(CreateCollectionEventType)
+	data := newCreateCollectionEventData()
 
 	writer := &createCollectionEventWriter{
 		baseEventWriter: baseEventWriter{
@@ -289,14 +265,8 @@ func newDropCollectionEventWriter(dataType schemapb.DataType) (*dropCollectionEv
 	if err != nil {
 		return nil, err
 	}
-	header, err := newEventHeader(DropCollectionEventType)
-	if err != nil {
-		return nil, err
-	}
-	data, err := newDropCollectionEventData()
-	if err != nil {
-		return nil, err
-	}
+	header := newEventHeader(DropCollectionEventType)
+	data := newDropCollectionEventData()
 	writer := &dropCollectionEventWriter{
 		baseEventWriter: baseEventWriter{
 			eventHeader:            *header,
@@ -319,14 +289,8 @@ func newCreatePartitionEventWriter(dataType schemapb.DataType) (*createPartition
 	if err != nil {
 		return nil, err
 	}
-	header, err := newEventHeader(CreatePartitionEventType)
-	if err != nil {
-		return nil, err
-	}
-	data, err := newCreatePartitionEventData()
-	if err != nil {
-		return nil, err
-	}
+	header := newEventHeader(CreatePartitionEventType)
+	data := newCreatePartitionEventData()
 
 	writer := &createPartitionEventWriter{
 		baseEventWriter: baseEventWriter{
@@ -350,14 +314,8 @@ func newDropPartitionEventWriter(dataType schemapb.DataType) (*dropPartitionEven
 	if err != nil {
 		return nil, err
 	}
-	header, err := newEventHeader(DropPartitionEventType)
-	if err != nil {
-		return nil, err
-	}
-	data, err := newDropPartitionEventData()
-	if err != nil {
-		return nil, err
-	}
+	header := newEventHeader(DropPartitionEventType)
+	data := newDropPartitionEventData()
 	writer := &dropPartitionEventWriter{
 		baseEventWriter: baseEventWriter{
 			eventHeader:            *header,

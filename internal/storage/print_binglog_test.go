@@ -16,8 +16,7 @@ import (
 )
 
 func TestPrintBinlogFilesInt64(t *testing.T) {
-	w, err := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
-	assert.Nil(t, err)
+	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
 
 	curTS := time.Now().UnixNano() / int64(time.Millisecond)
 
@@ -300,6 +299,7 @@ func TestPrintBinlogFiles(t *testing.T) {
 		err = fd.Close()
 		assert.Nil(t, err)
 	}
+	binlogFiles = append(binlogFiles, "test")
 
 	PrintBinlogFiles(binlogFiles)
 }
