@@ -3,9 +3,10 @@ package proxy
 import (
 	"context"
 	"errors"
+	"github.com/gogo/protobuf/proto"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"log"
 
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -14,7 +15,7 @@ import (
 
 func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.IntegerRangeResponse, error) {
 	it := &InsertTask{
-		baseInsertTask: baseInsertTask{
+		BaseInsertTask: BaseInsertTask{
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: in.HashKeys,
 			},
@@ -53,10 +54,70 @@ func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.
 }
 
 func (p *Proxy) CreateCollection(ctx context.Context, req *schemapb.CollectionSchema) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: 0,
-		Reason:    "",
-	}, nil
+	cct := &CreateCollectionTask{
+		CreateCollectionRequest: internalpb.CreateCollectionRequest{
+			MsgType: internalpb.MsgType_kCreateCollection,
+			Schema:  &commonpb.Blob{},
+			// TODO: req_id, timestamp, proxy_id
+		},
+		masterClient: p.masterClient,
+		done:         make(chan error),
+		resultChan:   make(chan *commonpb.Status),
+	}
+	schemaBytes, _ := proto.Marshal(req)
+	cct.CreateCollectionRequest.Schema.Value = schemaBytes
+	cct.ctx, cct.cancel = context.WithCancel(ctx)
+	defer cct.cancel()
+
+	var t task = cct
+	p.taskSch.DdQueue.Enqueue(&t)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Print("create collection timeout!")
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "create collection timeout!",
+			}, errors.New("create collection timeout!")
+		case result := <-cct.resultChan:
+			return result, nil
+		}
+	}
+}
+
+func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.QueryResult, error) {
+	qt := &QueryTask{
+		SearchRequest: internalpb.SearchRequest{
+			MsgType: internalpb.MsgType_kSearch,
+			Query:   &commonpb.Blob{},
+			// TODO: req_id, proxy_id, timestamp, result_channel_id
+		},
+		queryMsgStream: p.queryMsgStream,
+		done:           make(chan error),
+		resultBuf:      make(chan []*internalpb.SearchResult),
+		resultChan:     make(chan *servicepb.QueryResult),
+	}
+	qt.ctx, qt.cancel = context.WithCancel(ctx)
+	queryBytes, _ := proto.Marshal(req)
+	qt.SearchRequest.Query.Value = queryBytes
+	defer qt.cancel()
+
+	var t task = qt
+	p.taskSch.DqQueue.Enqueue(&t)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Print("query timeout!")
+			return &servicepb.QueryResult{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+					Reason:    "query timeout!",
+				},
+			}, errors.New("query timeout!")
+		case result := <-qt.resultChan:
+			return result, nil
+		}
+	}
 }
 
 func (p *Proxy) DropCollection(ctx context.Context, req *servicepb.CollectionName) (*commonpb.Status, error) {

@@ -2,7 +2,6 @@ package tso
 
 import (
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/kv/mockkv"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"os"
@@ -10,18 +9,10 @@ import (
 	"time"
 )
 
-var GTsoAllocator *GlobalTSOAllocator
+var GTsoAllocator Allocator
 
 func TestMain(m *testing.M) {
-	GTsoAllocator = &GlobalTSOAllocator{
-		timestampOracle: &timestampOracle{
-			kvBase:        mockkv.NewEtcdKV(),
-			rootPath:      conf.Config.Etcd.Rootpath,
-			saveInterval:  3 * time.Second,
-			maxResetTSGap: func() time.Duration { return 3 * time.Second },
-			key:           "tso",
-		},
-	}
+	GTsoAllocator = NewGlobalTSOAllocator("timestamp", mockkv.NewEtcdKV())
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }

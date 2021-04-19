@@ -46,7 +46,6 @@ type atomicObject struct {
 
 // timestampOracle is used to maintain the logic of tso.
 type timestampOracle struct {
-	rootPath string
 	key      string
 	kvBase   kv.KVBase
 

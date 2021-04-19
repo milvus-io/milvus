@@ -1,22 +1,12 @@
-// Copyright 2020 TiKV Project Authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// See the License for the specific language governing permissions and
-// limitations under the License.
 
 package id
 
 import (
+	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/master/tso"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
+
 
 type UniqueID = typeutil.UniqueID
 
@@ -25,8 +15,16 @@ type GlobalIdAllocator struct {
 	allocator tso.Allocator
 }
 
-var allocator GlobalIdAllocator = GlobalIdAllocator{
-	allocator: tso.NewGlobalTSOAllocator("idTimestamp"),
+var allocator *GlobalIdAllocator
+
+func InitGlobalIdAllocator(key string, base kv.KVBase){
+	allocator = NewGlobalIdAllocator(key, base)
+}
+
+func NewGlobalIdAllocator(key string, base kv.KVBase) * GlobalIdAllocator{
+	return &GlobalIdAllocator{
+		allocator: tso.NewGlobalTSOAllocator( key, base),
+	}
 }
 
 // Initialize will initialize the created global TSO allocator.
