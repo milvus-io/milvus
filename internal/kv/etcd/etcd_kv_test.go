@@ -1,11 +1,11 @@
-package kv_test
+package etcdkv_test
 
 import (
 	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -28,7 +28,7 @@ func TestEtcdKV_Load(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	rootPath := "/etcd/test/root"
-	etcdKV := kv.NewEtcdKV(cli, rootPath)
+	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
 
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("")
@@ -86,7 +86,7 @@ func TestEtcdKV_MultiSave(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	rootPath := "/etcd/test/root"
-	etcdKV := kv.NewEtcdKV(cli, rootPath)
+	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
 
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("")
@@ -117,7 +117,7 @@ func TestEtcdKV_Remove(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	rootPath := "/etcd/test/root"
-	etcdKV := kv.NewEtcdKV(cli, rootPath)
+	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
 
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("")
@@ -188,7 +188,7 @@ func TestEtcdKV_MultiSaveAndRemove(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	rootPath := "/etcd/test/root"
-	etcdKV := kv.NewEtcdKV(cli, rootPath)
+	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
 
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("")

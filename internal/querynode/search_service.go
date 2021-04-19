@@ -4,11 +4,9 @@ import "C"
 import (
 	"context"
 	"errors"
-	"fmt"
+	"github.com/golang/protobuf/proto"
 	"log"
 	"sync"
-
-	"github.com/golang/protobuf/proto"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -21,7 +19,7 @@ type searchService struct {
 	wait   sync.WaitGroup
 	cancel context.CancelFunc
 
-	replica      collectionReplica
+	replica      *collectionReplica
 	tSafeWatcher *tSafeWatcher
 
 	serviceableTime      Timestamp
@@ -29,14 +27,13 @@ type searchService struct {
 
 	msgBuffer             chan msgstream.TsMsg
 	unsolvedMsg           []msgstream.TsMsg
-	searchMsgStream       msgstream.MsgStream
-	searchResultMsgStream msgstream.MsgStream
-	queryNodeID           UniqueID
+	searchMsgStream       *msgstream.MsgStream
+	searchResultMsgStream *msgstream.MsgStream
 }
 
 type ResultEntityIds []UniqueID
 
-func newSearchService(ctx context.Context, replica collectionReplica) *searchService {
+func newSearchService(ctx context.Context, replica *collectionReplica) *searchService {
 	receiveBufSize := Params.searchReceiveBufSize()
 	pulsarBufSize := Params.searchPulsarBufSize()
 
@@ -72,15 +69,14 @@ func newSearchService(ctx context.Context, replica collectionReplica) *searchSer
 		replica:      replica,
 		tSafeWatcher: newTSafeWatcher(),
 
-		searchMsgStream:       inputStream,
-		searchResultMsgStream: outputStream,
-		queryNodeID:           Params.QueryNodeID(),
+		searchMsgStream:       &inputStream,
+		searchResultMsgStream: &outputStream,
 	}
 }
 
 func (ss *searchService) start() {
-	ss.searchMsgStream.Start()
-	ss.searchResultMsgStream.Start()
+	(*ss.searchMsgStream).Start()
+	(*ss.searchResultMsgStream).Start()
 	ss.register()
 	ss.wait.Add(2)
 	go ss.receiveSearchMsg()
@@ -89,24 +85,20 @@ func (ss *searchService) start() {
 }
 
 func (ss *searchService) close() {
-	if ss.searchMsgStream != nil {
-		ss.searchMsgStream.Close()
-	}
-	if ss.searchResultMsgStream != nil {
-		ss.searchResultMsgStream.Close()
-	}
+	(*ss.searchMsgStream).Close()
+	(*ss.searchResultMsgStream).Close()
 	ss.cancel()
 }
 
 func (ss *searchService) register() {
-	tSafe := ss.replica.getTSafe()
-	tSafe.registerTSafeWatcher(ss.tSafeWatcher)
+	tSafe := (*(ss.replica)).getTSafe()
+	(*tSafe).registerTSafeWatcher(ss.tSafeWatcher)
 }
 
 func (ss *searchService) waitNewTSafe() Timestamp {
 	// block until dataSyncService updating tSafe
 	ss.tSafeWatcher.hasUpdate()
-	timestamp := ss.replica.getTSafe().get()
+	timestamp := (*(*ss.replica).getTSafe()).get()
 	return timestamp
 }
 
@@ -130,7 +122,7 @@ func (ss *searchService) receiveSearchMsg() {
 		case <-ss.ctx.Done():
 			return
 		default:
-			msgPack := ss.searchMsgStream.Consume()
+			msgPack := (*ss.searchMsgStream).Consume()
 			if msgPack == nil || len(msgPack.Msgs) <= 0 {
 				continue
 			}
@@ -227,7 +219,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	}
 	collectionName := query.CollectionName
 	partitionTags := query.PartitionTags
-	collection, err := ss.replica.getCollectionByName(collectionName)
+	collection, err := (*ss.replica).getCollectionByName(collectionName)
 	if err != nil {
 		return err
 	}
@@ -249,14 +241,14 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	matchedSegments := make([]*Segment, 0)
 
 	for _, partitionTag := range partitionTags {
-		hasPartition := ss.replica.hasPartition(collectionID, partitionTag)
+		hasPartition := (*ss.replica).hasPartition(collectionID, partitionTag)
 		if !hasPartition {
 			return errors.New("search Failed, invalid partitionTag")
 		}
 	}
 
 	for _, partitionTag := range partitionTags {
-		partition, _ := ss.replica.getPartitionByTag(collectionID, partitionTag)
+		partition, _ := (*ss.replica).getPartitionByTag(collectionID, partitionTag)
 		for _, segment := range partition.segments {
 			//fmt.Println("dsl = ", dsl)
 
@@ -276,13 +268,13 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
 			ReqID:           searchMsg.ReqID,
 			ProxyID:         searchMsg.ProxyID,
-			QueryNodeID:     ss.queryNodeID,
+			QueryNodeID:     searchMsg.ProxyID,
 			Timestamp:       searchTimestamp,
 			ResultChannelID: searchMsg.ResultChannelID,
 			Hits:            nil,
 		}
 		searchResultMsg := &msgstream.SearchResultMsg{
-			BaseMsg:      msgstream.BaseMsg{HashValues: []uint32{uint32(searchMsg.ResultChannelID)}},
+			BaseMsg:      msgstream.BaseMsg{HashValues: []uint32{0}},
 			SearchResult: results,
 		}
 		err = ss.publishSearchResult(searchResultMsg)
@@ -341,7 +333,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 			Hits:            hits,
 		}
 		searchResultMsg := &msgstream.SearchResultMsg{
-			BaseMsg:      msgstream.BaseMsg{HashValues: []uint32{uint32(searchMsg.ResultChannelID)}},
+			BaseMsg:      msgstream.BaseMsg{HashValues: []uint32{0}},
 			SearchResult: results,
 		}
 		err = ss.publishSearchResult(searchResultMsg)
@@ -358,10 +350,9 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 }
 
 func (ss *searchService) publishSearchResult(msg msgstream.TsMsg) error {
-	fmt.Println("Public SearchResult", msg.HashKeys())
 	msgPack := msgstream.MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, msg)
-	err := ss.searchResultMsgStream.Produce(&msgPack)
+	err := (*ss.searchResultMsgStream).Produce(&msgPack)
 	if err != nil {
 		return err
 	}
@@ -386,11 +377,11 @@ func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg, errMsg s
 	}
 
 	tsMsg := &msgstream.SearchResultMsg{
-		BaseMsg:      msgstream.BaseMsg{HashValues: []uint32{uint32(searchMsg.ResultChannelID)}},
+		BaseMsg:      msgstream.BaseMsg{HashValues: []uint32{0}},
 		SearchResult: results,
 	}
 	msgPack.Msgs = append(msgPack.Msgs, tsMsg)
-	err := ss.searchResultMsgStream.Produce(&msgPack)
+	err := (*ss.searchResultMsgStream).Produce(&msgPack)
 	if err != nil {
 		return err
 	}

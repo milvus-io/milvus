@@ -1,7 +1,6 @@
 package master
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -38,7 +37,7 @@ func TestParamTable_KVRootPath(t *testing.T) {
 func TestParamTable_TopicNum(t *testing.T) {
 	Params.Init()
 	num := Params.TopicNum
-	fmt.Println("TopicNum:", num)
+	assert.Equal(t, num, 1)
 }
 
 func TestParamTable_SegmentSize(t *testing.T) {
@@ -80,7 +79,7 @@ func TestParamTable_SegIDAssignExpiration(t *testing.T) {
 func TestParamTable_QueryNodeNum(t *testing.T) {
 	Params.Init()
 	num := Params.QueryNodeNum
-	fmt.Println("QueryNodeNum", num)
+	assert.Equal(t, num, 1)
 }
 
 func TestParamTable_QueryNodeStatsChannelName(t *testing.T) {
@@ -132,7 +131,8 @@ func TestParamTable_WriteNodeTimeTickChannelNames(t *testing.T) {
 func TestParamTable_InsertChannelNames(t *testing.T) {
 	Params.Init()
 	names := Params.InsertChannelNames
-	assert.Equal(t, Params.TopicNum, len(names))
+	assert.Equal(t, len(names), 1)
+	assert.Equal(t, names[0], "insert-0")
 }
 
 func TestParamTable_K2SChannelNames(t *testing.T) {
