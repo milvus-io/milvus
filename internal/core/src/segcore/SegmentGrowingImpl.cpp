@@ -188,9 +188,10 @@ SegmentGrowingImpl::do_insert(int64_t reserved_begin,
         // NOTE: this must be the last step, cannot be put above
         uid2offset_.insert(std::make_pair(row_id, reserved_begin + i));
     }
-
     record_.ack_responder_.AddSegment(reserved_begin, reserved_begin + size);
-    indexing_record_.UpdateResourceAck(record_.ack_responder_.GetAck() / size_per_chunk_, record_);
+    if (!debug_disable_small_index_) {
+        indexing_record_.UpdateResourceAck(record_.ack_responder_.GetAck() / size_per_chunk_, record_);
+    }
 }
 
 Status

@@ -225,6 +225,9 @@ type QueryNode interface {
   LoadSegments(req LoadSegmentRequest) error
   ReleaseSegments(req ReleaseSegmentRequest) error
   //DescribeParition(req DescribeParitionRequest) (PartitionDescriptions, error)
+
+  ReleaseCollection(req ReleaseCollectionRequest) error
+  ReleasePartitions(req ReleasePartitionRequest) error
 }
 ```
 
