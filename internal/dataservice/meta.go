@@ -5,8 +5,6 @@ import (
 	"strconv"
 	"sync"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 
@@ -21,8 +19,9 @@ type (
 	UniqueID       = typeutil.UniqueID
 	Timestamp      = typeutil.Timestamp
 	collectionInfo struct {
-		ID     UniqueID
-		Schema *schemapb.CollectionSchema
+		ID         UniqueID
+		Schema     *schemapb.CollectionSchema
+		partitions []UniqueID
 	}
 	meta struct {
 		client      kv.TxnBase                       // client of a reliable kv service, i.e. etcd client
@@ -84,16 +83,6 @@ func (meta *meta) DropCollection(collID UniqueID) error {
 		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collID, 10))
 	}
 	delete(meta.collID2Info, collID)
-	for id, segment := range meta.segID2Info {
-		if segment.CollectionID != collID {
-			continue
-		}
-		delete(meta.segID2Info, id)
-		if err := meta.removeSegmentInfo(id); err != nil {
-			log.Printf("remove segment info failed, %s", err.Error())
-			_ = meta.reloadFromKV()
-		}
-	}
 	return nil
 }
 
@@ -102,6 +91,16 @@ func (meta *meta) HasCollection(collID UniqueID) bool {
 	defer meta.ddLock.RUnlock()
 	_, ok := meta.collID2Info[collID]
 	return ok
+}
+func (meta *meta) GetCollection(collectionID UniqueID) (*collectionInfo, error) {
+	meta.ddLock.RLock()
+	defer meta.ddLock.RUnlock()
+
+	collectionInfo, ok := meta.collID2Info[collectionID]
+	if !ok {
+		return nil, fmt.Errorf("collection %d not found", collectionID)
+	}
+	return collectionInfo, nil
 }
 
 func (meta *meta) BuildSegment(collectionID UniqueID, partitionID UniqueID, channelRange []string) (*datapb.SegmentInfo, error) {
@@ -152,6 +151,17 @@ func (meta *meta) UpdateSegment(segmentInfo *datapb.SegmentInfo) error {
 	return nil
 }
 
+func (meta *meta) DropSegment(segmentID UniqueID) error {
+	meta.ddLock.Lock()
+	meta.ddLock.Unlock()
+
+	if _, ok := meta.segID2Info[segmentID]; !ok {
+		return fmt.Errorf("segment %d not found", segmentID)
+	}
+	delete(meta.segID2Info, segmentID)
+	return nil
+}
+
 func (meta *meta) GetSegment(segID UniqueID) (*datapb.SegmentInfo, error) {
 	meta.ddLock.RLock()
 	defer meta.ddLock.RUnlock()
@@ -182,15 +192,72 @@ func (meta *meta) CloseSegment(segID UniqueID, closeTs Timestamp) error {
 	return nil
 }
 
-func (meta *meta) GetCollection(collectionID UniqueID) (*collectionInfo, error) {
+func (meta *meta) GetSegmentsByCollectionID(collectionID UniqueID) []UniqueID {
 	meta.ddLock.RLock()
 	defer meta.ddLock.RUnlock()
 
-	collectionInfo, ok := meta.collID2Info[collectionID]
-	if !ok {
-		return nil, fmt.Errorf("collection %d not found", collectionID)
+	ret := make([]UniqueID, 0)
+	for _, info := range meta.segID2Info {
+		if info.CollectionID == collectionID {
+			ret = append(ret, info.SegmentID)
+		}
 	}
-	return collectionInfo, nil
+	return ret
+}
+
+func (meta *meta) GetSegmentsByPartitionID(partitionID UniqueID) []UniqueID {
+	meta.ddLock.RLock()
+	defer meta.ddLock.RUnlock()
+
+	ret := make([]UniqueID, 0)
+	for _, info := range meta.segID2Info {
+		if info.PartitionID == partitionID {
+			ret = append(ret, info.SegmentID)
+		}
+	}
+	return ret
+}
+
+func (meta *meta) AddPartition(collectionID UniqueID, partitionID UniqueID) error {
+	meta.ddLock.Lock()
+	defer meta.ddLock.Unlock()
+	coll, ok := meta.collID2Info[collectionID]
+	if !ok {
+		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collectionID, 10))
+	}
+
+	for _, t := range coll.partitions {
+		if t == partitionID {
+			return errors.Errorf("partition %d already exists.", partitionID)
+		}
+	}
+	coll.partitions = append(coll.partitions, partitionID)
+	return nil
+}
+
+func (meta *meta) DropPartition(collID UniqueID, partitionID UniqueID) error {
+	meta.ddLock.Lock()
+	defer meta.ddLock.Unlock()
+
+	collection, ok := meta.collID2Info[collID]
+	if !ok {
+		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collID, 10))
+	}
+
+	idx := -1
+	for i, id := range collection.partitions {
+		if partitionID == id {
+			idx = i
+			break
+		}
+	}
+
+	if idx == -1 {
+		return fmt.Errorf("cannot find partition id %d", partitionID)
+	}
+
+	collection.partitions = append(collection.partitions[:idx], collection.partitions[idx+1:]...)
+	return nil
 }
 
 func (meta *meta) saveSegmentInfo(segmentInfo *datapb.SegmentInfo) error {

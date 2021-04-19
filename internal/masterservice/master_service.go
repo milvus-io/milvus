@@ -11,6 +11,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -25,7 +26,7 @@ import (
 //  datapb(data_service)
 //  indexpb(index_service)
 //  milvuspb -> servicepb
-//  masterpb2 -> masterpb (master_service)
+//  masterpb2 -> masterpb （master_service)
 
 type InitParams struct {
 	ProxyTimeTickChannel string
@@ -52,10 +53,12 @@ type Interface interface {
 	DropCollection(in *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
 	HasCollection(in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
 	DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+	GetCollectionStatistics(in *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error)
 	ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
 	CreatePartition(in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
 	DropPartition(in *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
 	HasPartition(in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
+	GetPartitionStatistics(in *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error)
 	ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
 
 	//index builder service
@@ -120,16 +123,16 @@ type Core struct {
 	SendTimeTick func(t typeutil.Timestamp) error
 
 	//TODO, send create collection into dd channel
-	DdCreateCollectionReq func(req *internalpb2.CreateCollectionRequest) error
+	DdCreateCollectionReq func(req *CreateCollectionReqTask) error
 
 	//TODO, send drop collection into dd channel, and notify the proxy to delete this collection
-	DdDropCollectionReq func(req *internalpb2.DropCollectionRequest) error
+	DdDropCollectionReq func(req *DropCollectionReqTask) error
 
 	//TODO, send create partition into dd channel
-	DdCreatePartitionReq func(req *internalpb2.CreatePartitionRequest) error
+	DdCreatePartitionReq func(req *CreatePartitionReqTask) error
 
 	//TODO, send drop partition into dd channel
-	DdDropPartitionReq func(req *internalpb2.DropPartitionRequest) error
+	DdDropPartitionReq func(req *DropPartitionReqTask) error
 
 	//dd request scheduler
 	ddReqQueue      chan reqTask //dd request will be push into this chan
@@ -145,6 +148,9 @@ type Core struct {
 	initOnce  sync.Once
 	startOnce sync.Once
 	isInit    atomic.Value
+
+	//TODO, get segment meta by segment id, from data service by grpc
+	GetSegmentMeta func(id typeutil.UniqueID) (*etcdpb.SegmentMeta, error)
 }
 
 // --------------------- function --------------------------
@@ -186,6 +192,9 @@ func (c *Core) checkInit() error {
 	}
 	if c.ddReqQueue == nil {
 		return errors.Errorf("ddReqQueue is nil")
+	}
+	if c.GetSegmentMeta == nil {
+		return errors.Errorf("GetSegmentMeta is nil")
 	}
 	if c.DdCreateCollectionReq == nil {
 		return errors.Errorf("DdCreateCollectionReq is nil")
@@ -449,6 +458,36 @@ func (c *Core) DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milv
 	return t.Rsp, nil
 }
 
+func (c *Core) GetCollectionStatistics(in *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error) {
+	t := &CollectionStatsReqTask{
+		baseReqTask: baseReqTask{
+			cv:   make(chan error),
+			core: c,
+		},
+		Req: in,
+		Rsp: &milvuspb.CollectionStatsResponse{
+			Stats:  nil,
+			Status: nil,
+		},
+	}
+	c.ddReqQueue <- t
+	err := t.WaitToFinish()
+	if err != nil {
+		return &milvuspb.CollectionStatsResponse{
+			Stats: nil,
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "GetCollectionStatistics failed: " + err.Error(),
+			},
+		}, nil
+	}
+	t.Rsp.Status = &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		Reason:    "",
+	}
+	return t.Rsp, nil
+}
+
 func (c *Core) ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
 	t := &ShowCollectionReqTask{
 		baseReqTask: baseReqTask{
@@ -549,6 +588,36 @@ func (c *Core) HasPartition(in *milvuspb.HasPartitionRequest) (*milvuspb.BoolRes
 		},
 		Value: t.HasPartition,
 	}, nil
+}
+
+func (c *Core) GetPartitionStatistics(in *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error) {
+	t := &PartitionStatsReqTask{
+		baseReqTask: baseReqTask{
+			cv:   make(chan error),
+			core: c,
+		},
+		Req: in,
+		Rsp: &milvuspb.PartitionStatsResponse{
+			Stats:  nil,
+			Status: nil,
+		},
+	}
+	c.ddReqQueue <- t
+	err := t.WaitToFinish()
+	if err != nil {
+		return &milvuspb.PartitionStatsResponse{
+			Stats: nil,
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "GetPartitionStatistics failed: " + err.Error(),
+			},
+		}, nil
+	}
+	t.Rsp.Status = &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		Reason:    "",
+	}
+	return t.Rsp, nil
 }
 
 func (c *Core) ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {

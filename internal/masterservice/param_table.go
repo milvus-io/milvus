@@ -23,6 +23,6 @@ type ParamTable struct {
 	DdChannel            string
 	StatisticsChannel    string
 
-	MaxPartitionNum      int64
-	DefaultPartitionName string
+	MaxPartitionNum     int64
+	DefaultPartitionTag string
 }
