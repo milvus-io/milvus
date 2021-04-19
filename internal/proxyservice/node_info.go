@@ -18,11 +18,10 @@ type NodeInfo struct {
 }
 
 type GlobalNodeInfoTable struct {
-	mtx             sync.RWMutex
-	nodeIDs         []UniqueID
-	infos           map[UniqueID]*NodeInfo
-	createClientMtx sync.RWMutex
-	// lazy creating, so len(ProxyNodes) <= len(infos)
+	mu      sync.RWMutex
+	infos   map[UniqueID]*NodeInfo
+	nodeIDs []UniqueID
+	// lazy creating, so len(clients) <= len(infos)
 	ProxyNodes map[UniqueID]types.ProxyNode
 }
 
@@ -33,8 +32,8 @@ func (table *GlobalNodeInfoTable) randomPick() UniqueID {
 }
 
 func (table *GlobalNodeInfoTable) Pick() (*NodeInfo, error) {
-	table.mtx.RLock()
-	defer table.mtx.RUnlock()
+	table.mu.RLock()
+	defer table.mu.RUnlock()
 
 	if len(table.nodeIDs) <= 0 || len(table.infos) <= 0 {
 		return nil, errors.New("no available server node")
@@ -51,8 +50,8 @@ func (table *GlobalNodeInfoTable) Pick() (*NodeInfo, error) {
 }
 
 func (table *GlobalNodeInfoTable) Register(id UniqueID, info *NodeInfo) error {
-	table.mtx.Lock()
-	defer table.mtx.Unlock()
+	table.mu.Lock()
+	defer table.mu.Unlock()
 
 	_, ok := table.infos[id]
 	if !ok {
@@ -94,10 +93,10 @@ func (table *GlobalNodeInfoTable) createClients() error {
 }
 
 func (table *GlobalNodeInfoTable) ReleaseAllClients() error {
-	table.createClientMtx.Lock()
+	table.mu.Lock()
 	log.Println("get write lock")
 	defer func() {
-		table.createClientMtx.Unlock()
+		table.mu.Unlock()
 		log.Println("release write lock")
 	}()
 
@@ -114,11 +113,8 @@ func (table *GlobalNodeInfoTable) ReleaseAllClients() error {
 }
 
 func (table *GlobalNodeInfoTable) ObtainAllClients() (map[UniqueID]types.ProxyNode, error) {
-	table.mtx.RLock()
-	defer table.mtx.RUnlock()
-
-	table.createClientMtx.Lock()
-	defer table.createClientMtx.Unlock()
+	table.mu.RLock()
+	defer table.mu.RUnlock()
 
 	err := table.createClients()
 
