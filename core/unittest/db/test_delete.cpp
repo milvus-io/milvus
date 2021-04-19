@@ -63,7 +63,7 @@ BuildVectors(uint64_t n, milvus::engine::VectorsData& vectors) {
 }
 }  // namespace
 
-TEST_F(DeleteTest, delete_in_mem) {
+TEST_F(DeleteTest, DELETE_IN_MEM) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -132,7 +132,7 @@ TEST_F(DeleteTest, delete_in_mem) {
     }
 }
 
-TEST_F(DeleteTest, delete_on_disk) {
+TEST_F(DeleteTest, DELETE_ON_DISK) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -207,7 +207,7 @@ TEST_F(DeleteTest, delete_on_disk) {
     }
 }
 
-TEST_F(DeleteTest, delete_multiple_times) {
+TEST_F(DeleteTest, DELETE_MULTIPLE_TIMES) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -276,7 +276,7 @@ TEST_F(DeleteTest, delete_multiple_times) {
     }
 }
 
-TEST_F(DeleteTest, delete_before_create_index) {
+TEST_F(DeleteTest, DELETE_BEFORE_CREATE_INDEX) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     collection_info.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_IVFFLAT;
     auto stat = db_->CreateCollection(collection_info);
@@ -358,7 +358,7 @@ TEST_F(DeleteTest, delete_before_create_index) {
     }
 }
 
-TEST_F(DeleteTest, delete_with_index) {
+TEST_F(DeleteTest, DELETE_WITH_INDEX) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     collection_info.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_IVFFLAT;
     auto stat = db_->CreateCollection(collection_info);
@@ -441,7 +441,7 @@ TEST_F(DeleteTest, delete_with_index) {
     }
 }
 
-TEST_F(DeleteTest, delete_multiple_times_with_index) {
+TEST_F(DeleteTest, DELETE_MULTIPLE_TIMES_WITH_INDEX) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -525,7 +525,7 @@ TEST_F(DeleteTest, delete_multiple_times_with_index) {
     }
 }
 
-TEST_F(DeleteTest, delete_single_vector) {
+TEST_F(DeleteTest, DELETE_SINGLE_VECTOR) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -568,7 +568,7 @@ TEST_F(DeleteTest, delete_single_vector) {
     ASSERT_TRUE(result_ids.empty() || (result_ids[0] == -1));
 }
 
-TEST_F(DeleteTest, delete_add_create_index) {
+TEST_F(DeleteTest, DELETE_ADD_CREATE_INDEX) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -638,7 +638,7 @@ TEST_F(DeleteTest, delete_add_create_index) {
     ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
 }
 
-TEST_F(DeleteTest, delete_add_auto_flush) {
+TEST_F(DeleteTest, DELETE_ADD_AUTO_FLUSH) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -711,7 +711,7 @@ TEST_F(DeleteTest, delete_add_auto_flush) {
     ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
 }
 
-TEST_F(CompactTest, compact_basic) {
+TEST_F(CompactTest, COMPACT_BASIC) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
@@ -768,7 +768,7 @@ TEST_F(CompactTest, compact_basic) {
     ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
 }
 
-TEST_F(CompactTest, compact_with_index) {
+TEST_F(CompactTest, COMPACT_WITH_INDEX) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     collection_info.index_file_size_ = milvus::engine::KB;
     collection_info.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_IVFSQ8;
@@ -859,7 +859,7 @@ TEST_F(CompactTest, compact_with_index) {
     }
 }
 
-TEST_F(CompactTest, compact_non_existing_table) {
+TEST_F(CompactTest, COMPACT_NON_EXISTING_TABLE) {
     auto status = db_->Compact(dummy_context_, "non_existing_table");
     ASSERT_FALSE(status.ok());
 }

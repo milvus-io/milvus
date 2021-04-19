@@ -1220,6 +1220,7 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
     stat = db_->CreatePartition(collection_info.collection_id_, partition_name, partition_tag);
     ASSERT_TRUE(stat.ok());
 
+    // verify empty id return error
     std::vector<milvus::engine::VectorsData> vectors;
     std::vector<int64_t> empty_array;
     stat = db_->GetVectorsByID(collection_info, "", empty_array, vectors);
@@ -1227,9 +1228,18 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
 
     stat = db_->InsertVectors(collection_info.collection_id_, partition_tag, qxb);
     ASSERT_TRUE(stat.ok());
-
     db_->Flush(collection_info.collection_id_);
 
+    // verify empty id return error
+    stat = db_->GetVectorsByID(collection_info, "", empty_array, vectors);
+    ASSERT_FALSE(stat.ok());
+
+    // verify non-exist collection return error
+    milvus::engine::meta::CollectionSchema collection_non_exist;
+    stat = db_->GetVectorsByID(collection_non_exist, "", empty_array, vectors);
+    ASSERT_FALSE(stat.ok());
+
+    // verify search from whole collection return correct vector
     stat = db_->GetVectorsByID(collection_info, "", qxb.id_array_, vectors);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(vectors.size(), qxb.id_array_.size());
@@ -1239,8 +1249,25 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
         ASSERT_FLOAT_EQ(vectors[0].float_data_[i], qxb.float_data_[i]);
     }
 
+    // verify search from partition return correct vector
+    vectors.clear();
+    stat = db_->GetVectorsByID(collection_info, partition_tag, qxb.id_array_, vectors);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(vectors.size(), qxb.id_array_.size());
+    ASSERT_EQ(vectors[0].float_data_.size(), COLLECTION_DIM);
+
+    for (int64_t i = 0; i < COLLECTION_DIM; i++) {
+        ASSERT_FLOAT_EQ(vectors[0].float_data_[i], qxb.float_data_[i]);
+    }
+
+    // verify search from non-exist partition return error
+    stat = db_->GetVectorsByID(collection_info, "ABC", qxb.id_array_, vectors);
+    ASSERT_FALSE(stat.ok());
+
+    // verify invalid id return ok, and return empty result
+    vectors.clear();
     std::vector<int64_t> invalid_array = {-1, -1};
-    stat = db_->GetVectorsByID(collection_info, "", empty_array, vectors);
+    stat = db_->GetVectorsByID(collection_info, "", invalid_array, vectors);
     ASSERT_TRUE(stat.ok());
     for (auto& vector : vectors) {
         ASSERT_EQ(vector.vector_count_, 0);

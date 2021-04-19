@@ -1024,6 +1024,7 @@ DBImpl::DeleteVectors(const std::string& collection_id, const std::string& parti
         record.lsn = 0;  // need to get from meta ?
         record.type = wal::MXLogType::Delete;
         record.collection_id = collection_id;
+        record.partition_tag = partition_tag;
         record.ids = vector_ids.data();
         record.length = vector_ids.size();
 
@@ -1313,6 +1314,11 @@ DBImpl::GetVectorsByID(const engine::meta::CollectionSchema& collection, const s
                        const IDNumbers& id_array, std::vector<engine::VectorsData>& vectors) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
+    }
+
+    if (id_array.empty()) {
+        LOG_ENGINE_DEBUG_ << "No id specified to get vector by id";
+        return Status(DB_ERROR, "No id specified");
     }
 
     meta::FilesHolder files_holder;
@@ -2529,16 +2535,30 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
         }
 
         case wal::MXLogType::Delete: {
-            std::vector<meta::CollectionSchema> partition_array;
-            status = meta_ptr_->ShowPartitions(record.collection_id, partition_array);
-            if (!status.ok()) {
-                return status;
-            }
+            // If no partition tag specified, will delete from all partitions under this collection
+            // including the collection itself. Else only delete from the specified partiion.
+            // If the specified partition is not found, return error.
+            std::vector<std::string> collection_ids;
+            if (record.partition_tag.empty()) {
+                std::vector<meta::CollectionSchema> partition_array;
+                status = meta_ptr_->ShowPartitions(record.collection_id, partition_array);
+                if (!status.ok()) {
+                    return status;
+                }
 
-            std::vector<std::string> collection_ids{record.collection_id};
-            for (auto& partition : partition_array) {
-                auto& partition_collection_id = partition.collection_id_;
-                collection_ids.emplace_back(partition_collection_id);
+                collection_ids.push_back(record.collection_id);
+                for (auto& partition : partition_array) {
+                    auto& partition_collection_id = partition.collection_id_;
+                    collection_ids.emplace_back(partition_collection_id);
+                }
+            } else {
+                std::string target_collection_name;
+                status = GetPartitionByTag(record.collection_id, record.partition_tag, target_collection_name);
+                if (!status.ok()) {
+                    LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << status.message();
+                    return status;
+                }
+                collection_ids.push_back(target_collection_name);
             }
 
             if (record.length == 1) {
