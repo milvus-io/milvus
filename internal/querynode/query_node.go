@@ -19,10 +19,6 @@ import (
 	"io"
 	"sync/atomic"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-
-	queryserviceimpl "github.com/zilliztech/milvus-distributed/internal/queryservice"
-
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go/config"
 
@@ -31,11 +27,11 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	queryPb "github.com/zilliztech/milvus-distributed/internal/proto/querypb"
+	queryserviceimpl "github.com/zilliztech/milvus-distributed/internal/queryservice"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type Node interface {
-	typeutil.Service
-
 	GetComponentStates() (*internalpb2.ComponentStates, error)
 	GetTimeTickChannel() (string, error)
 	GetStatisticsChannel() (string, error)
@@ -45,10 +41,11 @@ type Node interface {
 	WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error)
 	LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.Status, error)
 	ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error)
-	GetPartitionState(in *queryPb.PartitionStatesRequest) (*queryPb.PartitionStatesResponse, error)
 }
 
 type QueryNode struct {
+	typeutil.Service
+
 	queryNodeLoopCtx    context.Context
 	queryNodeLoopCancel context.CancelFunc
 
@@ -71,12 +68,7 @@ type QueryNode struct {
 	closer io.Closer
 }
 
-func NewQueryNode(ctx context.Context, queryNodeID uint64) Node {
-	var node Node = newQueryNode(ctx, queryNodeID)
-	return node
-}
-
-func newQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
+func NewQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
 	ctx1, cancel := context.WithCancel(ctx)
 	node := &QueryNode{
 		queryNodeLoopCtx:    ctx1,
@@ -383,10 +375,5 @@ func (node *QueryNode) ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*comm
 			return status, err
 		}
 	}
-	return nil, nil
-}
-
-func (node *QueryNode) GetPartitionState(in *queryPb.PartitionStatesRequest) (*queryPb.PartitionStatesResponse, error) {
-	// TODO: implement
 	return nil, nil
 }
