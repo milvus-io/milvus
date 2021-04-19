@@ -93,7 +93,7 @@ func (node *NodeImpl) waitForServiceReady(service Component, serviceName string)
 		return nil
 	}
 	// wait for 10 seconds
-	err := retry.Retry(10, time.Millisecond*200, checkFunc)
+	err := retry.Retry(10, time.Second, checkFunc)
 	if err != nil {
 		errMsg := fmt.Sprintf("ProxyNode wait for %s ready failed", serviceName)
 		return errors.New(errMsg)
