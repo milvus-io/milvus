@@ -130,9 +130,9 @@ build-go: build-cpp
 	@echo "Building singlenode ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/singlenode $(PWD)/cmd/singlenode/main.go 1>/dev/null
 	@echo "Building distributed indexservice ..."
-	@mkdir -p $(INSTALL_PATH)/distributed && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/distributed/indexservice $(PWD)/cmd/distributed/indexservice/main.go 1>/dev/null
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/indexservice $(PWD)/cmd/distributed/indexservice/main.go 1>/dev/null
 	@echo "Building distributed indexnode ..."
-	@mkdir -p $(INSTALL_PATH)/distributed && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/distributed/indexnode $(PWD)/cmd/distributed/indexnode/main.go 1>/dev/null
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/indexnode $(PWD)/cmd/distributed/indexnode/main.go 1>/dev/null
 
 
 build-cpp:
@@ -175,6 +175,8 @@ install: all
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/proxyservice $(GOPATH)/bin/proxyservice
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/writenode $(GOPATH)/bin/writenode
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/singlenode $(GOPATH)/bin/singlenode
+	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/indexservice $(GOPATH)/bin/indexservice
+	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/indexnode $(GOPATH)/bin/indexnode
 	@mkdir -p $(LIBRARY_PATH) && cp -f $(PWD)/internal/core/output/lib/* $(LIBRARY_PATH)
 	@echo "Installation successful."
 
@@ -190,3 +192,5 @@ clean:
 	@rm -rf $(GOPATH)/bin/querynode
 	@rm -rf $(GOPATH)/bin/writenode
 	@rm -rf $(GOPATH)/bin/singlenode
+	@rm -rf $(GOPATH)/bin/indexservice
+	@rm -rf $(GOPATH)/bin/indexnode

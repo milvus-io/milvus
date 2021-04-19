@@ -25,26 +25,6 @@ type Server struct {
 	loopWg       sync.WaitGroup
 }
 
-func NewGrpcServer(ctx context.Context) *Server {
-	ctx1, cancel := context.WithCancel(ctx)
-	indexServiceClient := serviceclient.NewClient(indexnode.Params.ServiceAddress)
-
-	node, err := indexnode.CreateIndexNode(ctx1)
-	if err != nil {
-		defer cancel()
-		return nil
-	}
-
-	node.SetServiceClient(indexServiceClient)
-
-	return &Server{
-		loopCtx:      ctx1,
-		loopCancel:   cancel,
-		node:         node,
-		serverClient: indexServiceClient,
-	}
-}
-
 func (s *Server) registerNode() error {
 
 	log.Printf("Registering node. IP = %s, Port = %d", indexnode.Params.NodeIP, indexnode.Params.NodePort)
@@ -132,11 +112,6 @@ func Init() error {
 	return nil
 }
 
-func CreateIndexNode(ctx context.Context) (*Server, error) {
-
-	return NewGrpcServer(ctx), nil
-}
-
 func (s *Server) Start() error {
 	return s.startIndexNode()
 }
@@ -153,6 +128,25 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexCmd) (*commonpb.Status, error) {
-	log.Println("distributed build index")
 	return s.node.BuildIndex(req)
+}
+
+func NewGrpcServer(ctx context.Context) (*Server, error) {
+	ctx1, cancel := context.WithCancel(ctx)
+	indexServiceClient := serviceclient.NewClient(indexnode.Params.ServiceAddress)
+
+	node, err := indexnode.CreateIndexNode(ctx1)
+	if err != nil {
+		defer cancel()
+		return nil, err
+	}
+
+	node.SetServiceClient(indexServiceClient)
+
+	return &Server{
+		loopCtx:      ctx1,
+		loopCancel:   cancel,
+		node:         node,
+		serverClient: indexServiceClient,
+	}, nil
 }
