@@ -102,4 +102,8 @@ service Master {
     rpc AllocID(internal.IDRequest) returns (internal.IDResponse) {}
 
     rpc AssignSegmentID(internal.AssignSegIDRequest) returns (internal.AssignSegIDResponse) {}
+
+    rpc CreateIndex(internal.CreateIndexRequest) returns (common.Status) {}
+    rpc DescribeIndex(internal.DescribeIndexRequest) returns (service.DescribeIndexResponse) {}
+    rpc DescribeIndexProgress(internal.DescribeIndexProgressRequest) returns (service.BoolResponse) {}
 }

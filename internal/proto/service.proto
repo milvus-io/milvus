@@ -105,4 +105,31 @@ service MilvusService {
      * @return QueryResult
      */
     rpc Search(Query) returns (QueryResult) {}
+
+    /**
+     * @brief This method is used to build index by collection in sync mode.
+     *
+     * @param IndexParam, index paramters.
+     *
+     * @return Status
+     */
+    rpc CreateIndex(IndexParam) returns (common.Status) {}
+
+    /**
+     * @brief This method is used to describe index
+     *
+     * @param IndexParam, target index.
+     *
+     * @return IndexParam
+     */
+    rpc DescribeIndex(IndexParam) returns (DescribeIndexResponse) {}
+
+    /**
+     * @brief This method is used to query index building progress
+     *
+     * @param IndexParam, target index.
+     *
+     * @return IndexParam
+     */
+    rpc DescribeIndexProgress(IndexParam) returns (BoolResponse) {}
 }

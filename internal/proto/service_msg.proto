@@ -162,3 +162,34 @@ message QueryResult {
     repeated bytes hits = 2;
 }
 
+
+/**
+ * @brief Index params
+ * @collection_name: target collection
+ * @field_name: target field
+ * @index_name: a name for index provided by user, unique within this field
+ * @extra_params: index parameters in json format
+ *    for vector field:
+ *        extra_params["index_type"] = one of the values: FLAT, IVF_LAT, IVF_SQ8, NSGMIX, IVFSQ8H,
+ *                                                        PQ, HNSW, HNSW_SQ8NM, ANNOY
+ *        extra_params["metric_type"] = one of the values: L2, IP, HAMMING, JACCARD, TANIMOTO
+ *                                                         SUBSTRUCTURE, SUPERSTRUCTURE
+ *        extra_params["params"] = extra parameters for index, for example ivflat: {nlist: 2048}
+ *    for structured field:
+ *        extra_params["index_type"] = one of the values: SORTED
+ */
+ message IndexParam {
+    string collection_name = 2;
+    string field_name = 3;
+    string index_name = 4;
+    repeated common.KeyValuePair extra_params = 5;
+}
+
+message DescribeIndexResponse {
+    common.Status status = 1;
+    string collection_name = 2;
+    string field_name = 3;
+    string index_name = 4;
+    repeated common.KeyValuePair extra_params = 5;
+}
+

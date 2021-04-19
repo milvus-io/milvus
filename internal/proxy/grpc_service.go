@@ -593,3 +593,15 @@ func (p *Proxy) ShowPartitions(ctx context.Context, req *servicepb.CollectionNam
 	}
 	return spt.result, nil
 }
+
+func (p *Proxy) CreateIndex(ctx context.Context, indexParam *servicepb.IndexParam) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (p *Proxy) DescribeIndex(context.Context, *servicepb.IndexParam) (*servicepb.DescribeIndexResponse, error) {
+	return nil, nil
+}
+
+func (p *Proxy) DescribeIndexProgress(context.Context, *servicepb.IndexParam) (*servicepb.BoolResponse, error) {
+	return nil, nil
+}
