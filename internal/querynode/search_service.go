@@ -139,10 +139,10 @@ func (ss *searchService) receiveSearchMsg() {
 				err := ss.search(msg)
 				if err != nil {
 					log.Println("search Failed, error msg type: ", msg.Type())
-				}
-				err = ss.publishFailedSearchResult(msg)
-				if err != nil {
-					log.Println("publish FailedSearchResult failed, error message: ", err)
+					err = ss.publishFailedSearchResult(msg)
+					if err != nil {
+						log.Println("publish FailedSearchResult failed, error message: ", err)
+					}
 				}
 			}
 			log.Println("ReceiveSearchMsg, do search done, num of searchMsg = ", len(searchMsg))
@@ -191,10 +191,10 @@ func (ss *searchService) doUnsolvedMsgSearch() {
 				err := ss.search(msg)
 				if err != nil {
 					log.Println("search Failed, error msg type: ", msg.Type())
-				}
-				err = ss.publishFailedSearchResult(msg)
-				if err != nil {
-					log.Println("publish FailedSearchResult failed, error message: ", err)
+					err = ss.publishFailedSearchResult(msg)
+					if err != nil {
+						log.Println("publish FailedSearchResult failed, error message: ", err)
+					}
 				}
 			}
 			log.Println("doUnsolvedMsgSearch, do search done, num of searchMsg = ", len(searchMsg))
@@ -251,12 +251,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	}
 
 	if len(searchResults) <= 0 {
-		log.Println("search Failed, invalid partitionTag")
-		err = ss.publishFailedSearchResult(msg)
-		if err != nil {
-			log.Println("publish FailedSearchResult failed, error message: ", err)
-		}
-		return err
+		return errors.New("search Failed, invalid partitionTag")
 	}
 
 	reducedSearchResult := reduceSearchResults(searchResults, int64(len(searchResults)))

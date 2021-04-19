@@ -397,6 +397,7 @@ func (qt *QueryTask) PostExecute() error {
 					hits[i][j] = &servicepb.Hits{}
 					err := proto.Unmarshal(bs, hits[i][j])
 					if err != nil {
+						log.Println("unmarshal error")
 						return err
 					}
 				}
@@ -437,6 +438,7 @@ func (qt *QueryTask) PostExecute() error {
 				}
 				reducedHitsBs, err := proto.Marshal(reducedHits)
 				if err != nil {
+					log.Println("marshal error")
 					return err
 				}
 				qt.result.Hits = append(qt.result.Hits, reducedHitsBs)
