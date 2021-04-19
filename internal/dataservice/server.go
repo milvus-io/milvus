@@ -106,7 +106,6 @@ func CreateServer(ctx context.Context) (*Server, error) {
 		registerFinishCh: ch,
 		cluster:          newDataNodeCluster(ch),
 	}
-	s.state.Store(internalpb2.StateCode_INITIALIZING)
 	return s, nil
 }
 
@@ -115,6 +114,7 @@ func (s *Server) SetMasterClient(masterClient MasterClient) {
 }
 
 func (s *Server) Init() error {
+	s.state.Store(internalpb2.StateCode_INITIALIZING)
 	return nil
 }
 
