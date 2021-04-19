@@ -16,6 +16,41 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
+type PayloadWriterInterface interface {
+	AddDataToPayload(msgs interface{}, dim ...int) error
+	AddBoolToPayload(msgs []bool) error
+	AddInt8ToPayload(msgs []int8) error
+	AddInt16ToPayload(msgs []int16) error
+	AddInt32ToPayload(msgs []int32) error
+	AddInt64ToPayload(msgs []int64) error
+	AddFloatToPayload(msgs []float32) error
+	AddDoubleToPayload(msgs []float64) error
+	AddOneStringToPayload(msgs string) error
+	AddBinaryVectorToPayload(binVec []byte, dim int) error
+	AddFloatVectorToPayload(binVec []float32, dim int) error
+	FinishPayloadWriter() error
+	GetPayloadBufferFromWriter() ([]byte, error)
+	GetPayloadLengthFromWriter() (int, error)
+	ReleasePayloadWriter() error
+	Close() error
+}
+
+type PayloadReaderInterface interface {
+	GetDataFromPayload(idx ...int) (interface{}, int, error)
+	GetBoolFromPayload() ([]bool, error)
+	GetInt8FromPayload() ([]int8, error)
+	GetInt16FromPayload() ([]int16, error)
+	GetInt32FromPayload() ([]int32, error)
+	GetInt64FromPayload() ([]int64, error)
+	GetFloatFromPayload() ([]float32, error)
+	GetDoubleFromPayload() ([]float64, error)
+	GetOneStringFromPayload(idx int) (string, error)
+	GetBinaryVectorFromPayload() ([]byte, int, error)
+	GetFloatVectorFromPayload() ([]float32, int, error)
+	GetPayloadLengthFromReader() (int, error)
+	ReleasePayloadReader() error
+	Close() error
+}
 type (
 	PayloadWriter struct {
 		payloadWriterPtr C.CPayloadWriter
