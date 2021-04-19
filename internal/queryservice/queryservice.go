@@ -756,10 +756,7 @@ func (qs *QueryService) watchDmChannels(dbID UniqueID, collectionID UniqueID) er
 func (qs *QueryService) shuffleChannelsToQueryNode(dmChannels []string) map[int64][]string {
 	maxNumChannels := 0
 	for _, node := range qs.queryNodes {
-		numChannels := 0
-		for _, chs := range node.getChannels2Col() {
-			numChannels += len(chs)
-		}
+		numChannels := node.getNumChannels()
 		if numChannels > maxNumChannels {
 			maxNumChannels = numChannels
 		}
@@ -771,7 +768,7 @@ func (qs *QueryService) shuffleChannelsToQueryNode(dmChannels []string) map[int6
 		lastOffset := offset
 		if !loopAll {
 			for id, node := range qs.queryNodes {
-				if len(node.segments) >= maxNumChannels {
+				if node.getSegmentsLength() >= maxNumChannels {
 					continue
 				}
 				if _, ok := res[id]; !ok {
@@ -804,10 +801,7 @@ func (qs *QueryService) shuffleChannelsToQueryNode(dmChannels []string) map[int6
 func (qs *QueryService) shuffleSegmentsToQueryNode(segmentIDs []UniqueID) map[int64][]UniqueID {
 	maxNumSegments := 0
 	for _, node := range qs.queryNodes {
-		numSegments := 0
-		for _, ids := range node.segments {
-			numSegments += len(ids)
-		}
+		numSegments := node.getNumSegments()
 		if numSegments > maxNumSegments {
 			maxNumSegments = numSegments
 		}
@@ -828,7 +822,7 @@ func (qs *QueryService) shuffleSegmentsToQueryNode(segmentIDs []UniqueID) map[in
 		lastOffset := offset
 		if !loopAll {
 			for id, node := range qs.queryNodes {
-				if len(node.segments) >= maxNumSegments {
+				if node.getSegmentsLength() >= maxNumSegments {
 					continue
 				}
 				if _, ok := res[id]; !ok {
