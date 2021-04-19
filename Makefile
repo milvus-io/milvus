@@ -64,12 +64,12 @@ build-go:
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/querynode $(PWD)/cmd/querynode/query_node.go 1>/dev/null
 
 build-cpp:
-	@(env bash $(PWD)/scripts/core_build.sh)
-	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release)
+	@(env bash $(PWD)/scripts/core_build.sh -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
 
 build-cpp-with-unittest:
-	@(env bash $(PWD)/scripts/core_build.sh -u)
-	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release)
+	@(env bash $(PWD)/scripts/core_build.sh -u -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
 
 # Runs the tests.
 unittest: test-cpp test-go

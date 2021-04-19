@@ -24,7 +24,7 @@ VecIndexingEntry::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const Vector
 
     auto source = dynamic_cast<const ConcurrentVector<FloatVector>*>(vec_base);
     Assert(source);
-    auto chunk_size = source->num_chunk();
+    auto chunk_size = source->chunk_size();
     assert(ack_end <= chunk_size);
     auto conf = get_build_conf();
     data_.grow_to_at_least(ack_end);
@@ -87,7 +87,7 @@ void
 ScalarIndexingEntry<T>::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) {
     auto source = dynamic_cast<const ConcurrentVector<T>*>(vec_base);
     Assert(source);
-    auto chunk_size = source->num_chunk();
+    auto chunk_size = source->chunk_size();
     assert(ack_end <= chunk_size);
     data_.grow_to_at_least(ack_end);
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {

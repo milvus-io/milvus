@@ -27,7 +27,7 @@ create_bitmap_view(std::optional<const BitmapSimple*> bitmaps_opt, int64_t chunk
         return nullptr;
     }
     auto& bitmaps = *bitmaps_opt.value();
-    auto src_vec = ~bitmaps.at(chunk_id);
+    auto& src_vec = bitmaps.at(chunk_id);
     auto dst = std::make_shared<faiss::ConcurrentBitset>(src_vec.size());
     auto iter = reinterpret_cast<BitmapChunk::block_type*>(dst->mutable_data());
 

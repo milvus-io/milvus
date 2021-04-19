@@ -38,6 +38,8 @@ pipeline {
                 PULSAR_ADDRESS = "pulsar://127.0.0.1:6650"
                 ETCD_ADDRESS = "127.0.0.1:2379"
                 CCACHE_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/milvus-distributed/ccache"
+                THIRDPARTY_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/milvus-distributed/thirdparty"
+                CUSTOM_THIRDPARTY_PATH = "${WORKSPACE}/3rdparty_download"
             }
             steps {
                 container('build-env') {

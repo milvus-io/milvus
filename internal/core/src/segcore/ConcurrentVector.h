@@ -196,7 +196,7 @@ class ConcurrentVectorImpl : public VectorBase {
     }
 
     ssize_t
-    num_chunk() const {
+    chunk_size() const {
         return chunks_.size();
     }
 

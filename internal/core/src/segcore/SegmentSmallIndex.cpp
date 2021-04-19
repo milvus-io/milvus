@@ -241,10 +241,10 @@ SegmentSmallIndex::BuildVecIndexImpl(const IndexMeta::Entry& entry) {
     auto entities = record_.get_entity<FloatVector>(offset);
 
     std::vector<knowhere::DatasetPtr> datasets;
-    for (int chunk_id = 0; chunk_id < uids.num_chunk(); ++chunk_id) {
+    for (int chunk_id = 0; chunk_id < uids.chunk_size(); ++chunk_id) {
         auto entities_chunk = entities->get_chunk(chunk_id).data();
-        int64_t count = chunk_id == uids.num_chunk() - 1 ? record_.reserved - chunk_id * DefaultElementPerChunk
-                                                         : DefaultElementPerChunk;
+        int64_t count = chunk_id == uids.chunk_size() - 1 ? record_.reserved - chunk_id * DefaultElementPerChunk
+                                                          : DefaultElementPerChunk;
         datasets.push_back(knowhere::GenDataset(count, dim, entities_chunk));
     }
     for (auto& ds : datasets) {
