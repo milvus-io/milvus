@@ -55,7 +55,7 @@ func combKey(channelName string, id UniqueID) (string, error) {
 }
 
 type ProducerMessage struct {
-	payload []byte
+	Payload []byte
 }
 
 type ConsumerMessage struct {
@@ -111,7 +111,7 @@ func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*RocksMQ, erro
 
 func NewProducerMessage(data []byte) *ProducerMessage {
 	return &ProducerMessage{
-		payload: data,
+		Payload: data,
 	}
 }
 
@@ -229,7 +229,7 @@ func (rmq *RocksMQ) Produce(channelName string, messages []ProducerMessage) erro
 			return err
 		}
 
-		batch.Put([]byte(key), messages[i].payload)
+		batch.Put([]byte(key), messages[i].Payload)
 	}
 
 	err = rmq.store.Write(gorocksdb.NewDefaultWriteOptions(), batch)

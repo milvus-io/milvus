@@ -12,7 +12,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	rocksmq "github.com/zilliztech/milvus-distributed/internal/util/rocksmq"
+	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
@@ -71,18 +71,18 @@ func newRmqMsgStream(ctx context.Context, receiveBufSize int64, rmqBufSize int64
 	return stream, nil
 }
 
-func (ms *RmqMsgStream) Start() {
+func (rms *RmqMsgStream) Start() {
 }
 
-func (ms *RmqMsgStream) Close() {
-	ms.streamCancel()
+func (rms *RmqMsgStream) Close() {
+	rms.streamCancel()
 
-	for _, producer := range ms.producers {
+	for _, producer := range rms.producers {
 		if producer != "" {
 			_ = rocksmq.Rmq.DestroyChannel(producer)
 		}
 	}
-	for _, consumer := range ms.consumers {
+	for _, consumer := range rms.consumers {
 		_ = rocksmq.Rmq.DestroyConsumerGroup(consumer.GroupName, consumer.ChannelName)
 		close(consumer.MsgMutex)
 	}
@@ -92,15 +92,15 @@ type propertiesReaderWriter struct {
 	ppMap map[string]string
 }
 
-func (ms *RmqMsgStream) SetRepackFunc(repackFunc RepackFunc) {
-	ms.repackFunc = repackFunc
+func (rms *RmqMsgStream) SetRepackFunc(repackFunc RepackFunc) {
+	rms.repackFunc = repackFunc
 }
 
-func (ms *RmqMsgStream) AsProducer(channels []string) {
+func (rms *RmqMsgStream) AsProducer(channels []string) {
 	for _, channel := range channels {
 		err := rocksmq.Rmq.CreateChannel(channel)
 		if err == nil {
-			ms.producers = append(ms.producers, channel)
+			rms.producers = append(rms.producers, channel)
 		} else {
 			errMsg := "Failed to create producer " + channel + ", error = " + err.Error()
 			panic(errMsg)
@@ -108,31 +108,31 @@ func (ms *RmqMsgStream) AsProducer(channels []string) {
 	}
 }
 
-func (ms *RmqMsgStream) AsConsumer(channels []string, groupName string) {
+func (rms *RmqMsgStream) AsConsumer(channels []string, groupName string) {
 	for _, channelName := range channels {
 		consumer, err := rocksmq.Rmq.CreateConsumerGroup(groupName, channelName)
 		if err == nil {
-			consumer.MsgMutex = make(chan struct{}, ms.rmqBufSize)
+			consumer.MsgMutex = make(chan struct{}, rms.rmqBufSize)
 			//consumer.MsgMutex <- struct{}{}
-			ms.consumers = append(ms.consumers, *consumer)
-			ms.consumerChannels = append(ms.consumerChannels, channelName)
-			ms.consumerReflects = append(ms.consumerReflects, reflect.SelectCase{
+			rms.consumers = append(rms.consumers, *consumer)
+			rms.consumerChannels = append(rms.consumerChannels, channelName)
+			rms.consumerReflects = append(rms.consumerReflects, reflect.SelectCase{
 				Dir:  reflect.SelectRecv,
 				Chan: reflect.ValueOf(consumer.MsgMutex),
 			})
-			ms.wait.Add(1)
-			go ms.receiveMsg(*consumer)
+			rms.wait.Add(1)
+			go rms.receiveMsg(*consumer)
 		}
 	}
 }
 
-func (ms *RmqMsgStream) Produce(ctx context.Context, pack *msgstream.MsgPack) error {
+func (rms *RmqMsgStream) Produce(ctx context.Context, pack *msgstream.MsgPack) error {
 	tsMsgs := pack.Msgs
 	if len(tsMsgs) <= 0 {
 		log.Printf("Warning: Receive empty msgPack")
 		return nil
 	}
-	if len(ms.producers) <= 0 {
+	if len(rms.producers) <= 0 {
 		return errors.New("nil producer in msg stream")
 	}
 	reBucketValues := make([][]int32, len(tsMsgs))
@@ -144,21 +144,21 @@ func (ms *RmqMsgStream) Produce(ctx context.Context, pack *msgstream.MsgPack) er
 				searchResult := tsMsg.(*msgstream.SearchResultMsg)
 				channelID := searchResult.ResultChannelID
 				channelIDInt, _ := strconv.ParseInt(channelID, 10, 64)
-				if channelIDInt >= int64(len(ms.producers)) {
+				if channelIDInt >= int64(len(rms.producers)) {
 					return errors.New("Failed to produce rmq msg to unKnow channel")
 				}
 				bucketValues[index] = int32(channelIDInt)
 				continue
 			}
-			bucketValues[index] = int32(hashValue % uint32(len(ms.producers)))
+			bucketValues[index] = int32(hashValue % uint32(len(rms.producers)))
 		}
 		reBucketValues[channelID] = bucketValues
 	}
 
 	var result map[int32]*msgstream.MsgPack
 	var err error
-	if ms.repackFunc != nil {
-		result, err = ms.repackFunc(tsMsgs, reBucketValues)
+	if rms.repackFunc != nil {
+		result, err = rms.repackFunc(tsMsgs, reBucketValues)
 	} else {
 		msgType := (tsMsgs[0]).Type()
 		switch msgType {
@@ -187,7 +187,7 @@ func (ms *RmqMsgStream) Produce(ctx context.Context, pack *msgstream.MsgPack) er
 			msg := make([]rocksmq.ProducerMessage, 0)
 			msg = append(msg, *rocksmq.NewProducerMessage(m))
 
-			if err := rocksmq.Rmq.Produce(ms.producers[k], msg); err != nil {
+			if err := rocksmq.Rmq.Produce(rms.producers[k], msg); err != nil {
 				return err
 			}
 		}
@@ -195,8 +195,8 @@ func (ms *RmqMsgStream) Produce(ctx context.Context, pack *msgstream.MsgPack) er
 	return nil
 }
 
-func (ms *RmqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) error {
-	producerLen := len(ms.producers)
+func (rms *RmqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) error {
+	producerLen := len(rms.producers)
 	for _, v := range msgPack.Msgs {
 		mb, err := v.Marshal(v)
 		if err != nil {
@@ -210,7 +210,7 @@ func (ms *RmqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) error {
 		msg = append(msg, *rocksmq.NewProducerMessage(m))
 
 		for i := 0; i < producerLen; i++ {
-			if err := rocksmq.Rmq.Produce(ms.producers[i], msg); err != nil {
+			if err := rocksmq.Rmq.Produce(rms.producers[i], msg); err != nil {
 				return err
 			}
 		}
@@ -218,16 +218,16 @@ func (ms *RmqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) error {
 	return nil
 }
 
-func (ms *RmqMsgStream) Consume() (*msgstream.MsgPack, context.Context) {
+func (rms *RmqMsgStream) Consume() (*msgstream.MsgPack, context.Context) {
 	for {
 		select {
-		case cm, ok := <-ms.receiveBuf:
+		case cm, ok := <-rms.receiveBuf:
 			if !ok {
 				log.Println("buf chan closed")
 				return nil, nil
 			}
 			return cm, nil
-		case <-ms.ctx.Done():
+		case <-rms.ctx.Done():
 			log.Printf("context closed")
 			return nil, nil
 		}
@@ -238,12 +238,12 @@ func (ms *RmqMsgStream) Consume() (*msgstream.MsgPack, context.Context) {
 receiveMsg func is used to solve search timeout problem
 which is caused by selectcase
 */
-func (ms *RmqMsgStream) receiveMsg(consumer rocksmq.Consumer) {
-	defer ms.wait.Done()
+func (rms *RmqMsgStream) receiveMsg(consumer rocksmq.Consumer) {
+	defer rms.wait.Done()
 
 	for {
 		select {
-		case <-ms.ctx.Done():
+		case <-rms.ctx.Done():
 			return
 		case _, ok := <-consumer.MsgMutex:
 			if !ok {
@@ -266,7 +266,7 @@ func (ms *RmqMsgStream) receiveMsg(consumer rocksmq.Consumer) {
 					log.Printf("Failed to unmar`shal message header, error = %v", err)
 					continue
 				}
-				tsMsg, err := ms.unmarshal.Unmarshal(rmqMsg.Payload, headerMsg.Base.MsgType)
+				tsMsg, err := rms.unmarshal.Unmarshal(rmqMsg.Payload, headerMsg.Base.MsgType)
 				if err != nil {
 					log.Printf("Failed to unmarshal tsMsg, error = %v", err)
 					continue
@@ -276,24 +276,24 @@ func (ms *RmqMsgStream) receiveMsg(consumer rocksmq.Consumer) {
 
 			if len(tsMsgList) > 0 {
 				msgPack := util.MsgPack{Msgs: tsMsgList}
-				ms.receiveBuf <- &msgPack
+				rms.receiveBuf <- &msgPack
 			}
 		}
 	}
 }
 
-func (ms *RmqMsgStream) Chan() <-chan *msgstream.MsgPack {
-	return ms.receiveBuf
+func (rms *RmqMsgStream) Chan() <-chan *msgstream.MsgPack {
+	return rms.receiveBuf
 }
 
-func (ms *RmqMsgStream) Seek(offset *msgstream.MsgPosition) error {
-	for i := 0; i < len(ms.consumers); i++ {
-		if ms.consumers[i].ChannelName == offset.ChannelName {
+func (rms *RmqMsgStream) Seek(offset *msgstream.MsgPosition) error {
+	for i := 0; i < len(rms.consumers); i++ {
+		if rms.consumers[i].ChannelName == offset.ChannelName {
 			messageID, err := strconv.ParseInt(offset.MsgID, 10, 64)
 			if err != nil {
 				return err
 			}
-			err = rocksmq.Rmq.Seek(ms.consumers[i].GroupName, ms.consumers[i].ChannelName, messageID)
+			err = rocksmq.Rmq.Seek(rms.consumers[i].GroupName, rms.consumers[i].ChannelName, messageID)
 			if err != nil {
 				return err
 			}
@@ -325,64 +325,64 @@ func newRmqTtMsgStream(ctx context.Context, receiveBufSize int64, rmqBufSize int
 	}, nil
 }
 
-func (ms *RmqTtMsgStream) AsConsumer(channels []string,
+func (rtms *RmqTtMsgStream) AsConsumer(channels []string,
 	groupName string) {
 	for _, channelName := range channels {
 		consumer, err := rocksmq.Rmq.CreateConsumerGroup(groupName, channelName)
 		if err != nil {
 			panic(err.Error())
 		}
-		consumer.MsgMutex = make(chan struct{}, ms.rmqBufSize)
+		consumer.MsgMutex = make(chan struct{}, rtms.rmqBufSize)
 		//consumer.MsgMutex <- struct{}{}
-		ms.consumers = append(ms.consumers, *consumer)
-		ms.consumerChannels = append(ms.consumerChannels, consumer.ChannelName)
-		ms.consumerReflects = append(ms.consumerReflects, reflect.SelectCase{
+		rtms.consumers = append(rtms.consumers, *consumer)
+		rtms.consumerChannels = append(rtms.consumerChannels, consumer.ChannelName)
+		rtms.consumerReflects = append(rtms.consumerReflects, reflect.SelectCase{
 			Dir:  reflect.SelectRecv,
 			Chan: reflect.ValueOf(consumer.MsgMutex),
 		})
 	}
 }
 
-func (ms *RmqTtMsgStream) Start() {
-	ms.wait = &sync.WaitGroup{}
-	if ms.consumers != nil {
-		ms.wait.Add(1)
-		go ms.bufMsgPackToChannel()
+func (rtms *RmqTtMsgStream) Start() {
+	rtms.wait = &sync.WaitGroup{}
+	if rtms.consumers != nil {
+		rtms.wait.Add(1)
+		go rtms.bufMsgPackToChannel()
 	}
 }
 
-func (ms *RmqTtMsgStream) bufMsgPackToChannel() {
-	defer ms.wait.Done()
-	ms.unsolvedBuf = make(map[rocksmq.Consumer][]TsMsg)
+func (rtms *RmqTtMsgStream) bufMsgPackToChannel() {
+	defer rtms.wait.Done()
+	rtms.unsolvedBuf = make(map[rocksmq.Consumer][]TsMsg)
 	isChannelReady := make(map[rocksmq.Consumer]bool)
 	eofMsgTimeStamp := make(map[rocksmq.Consumer]Timestamp)
 
 	for {
 		select {
-		case <-ms.ctx.Done():
+		case <-rtms.ctx.Done():
 			return
 		default:
 			wg := sync.WaitGroup{}
 			findMapMutex := sync.RWMutex{}
-			ms.consumerLock.Lock()
-			for _, consumer := range ms.consumers {
+			rtms.consumerLock.Lock()
+			for _, consumer := range rtms.consumers {
 				if isChannelReady[consumer] {
 					continue
 				}
 				wg.Add(1)
-				go ms.findTimeTick(consumer, eofMsgTimeStamp, &wg, &findMapMutex)
+				go rtms.findTimeTick(consumer, eofMsgTimeStamp, &wg, &findMapMutex)
 			}
 			wg.Wait()
 			timeStamp, ok := checkTimeTickMsg(eofMsgTimeStamp, isChannelReady, &findMapMutex)
-			ms.consumerLock.Unlock()
-			if !ok || timeStamp <= ms.lastTimeStamp {
+			rtms.consumerLock.Unlock()
+			if !ok || timeStamp <= rtms.lastTimeStamp {
 				//log.Printf("All timeTick's timestamps are inconsistent")
 				continue
 			}
 			timeTickBuf := make([]TsMsg, 0)
 			msgPositions := make([]*msgstream.MsgPosition, 0)
-			ms.unsolvedMutex.Lock()
-			for consumer, msgs := range ms.unsolvedBuf {
+			rtms.unsolvedMutex.Lock()
+			for consumer, msgs := range rtms.unsolvedBuf {
 				if len(msgs) == 0 {
 					continue
 				}
@@ -399,7 +399,7 @@ func (ms *RmqTtMsgStream) bufMsgPackToChannel() {
 						tempBuffer = append(tempBuffer, v)
 					}
 				}
-				ms.unsolvedBuf[consumer] = tempBuffer
+				rtms.unsolvedBuf[consumer] = tempBuffer
 
 				if len(tempBuffer) > 0 {
 					msgPositions = append(msgPositions, &msgstream.MsgPosition{
@@ -415,29 +415,29 @@ func (ms *RmqTtMsgStream) bufMsgPackToChannel() {
 					})
 				}
 			}
-			ms.unsolvedMutex.Unlock()
+			rtms.unsolvedMutex.Unlock()
 
 			msgPack := MsgPack{
-				BeginTs:        ms.lastTimeStamp,
+				BeginTs:        rtms.lastTimeStamp,
 				EndTs:          timeStamp,
 				Msgs:           timeTickBuf,
 				StartPositions: msgPositions,
 			}
 
-			ms.receiveBuf <- &msgPack
-			ms.lastTimeStamp = timeStamp
+			rtms.receiveBuf <- &msgPack
+			rtms.lastTimeStamp = timeStamp
 		}
 	}
 }
 
-func (ms *RmqTtMsgStream) findTimeTick(consumer rocksmq.Consumer,
+func (rtms *RmqTtMsgStream) findTimeTick(consumer rocksmq.Consumer,
 	eofMsgMap map[rocksmq.Consumer]Timestamp,
 	wg *sync.WaitGroup,
 	findMapMutex *sync.RWMutex) {
 	defer wg.Done()
 	for {
 		select {
-		case <-ms.ctx.Done():
+		case <-rtms.ctx.Done():
 			return
 		case _, ok := <-consumer.MsgMutex:
 			if !ok {
@@ -460,7 +460,7 @@ func (ms *RmqTtMsgStream) findTimeTick(consumer rocksmq.Consumer,
 					log.Printf("Failed to unmarshal message header, error = %v", err)
 					continue
 				}
-				tsMsg, err := ms.unmarshal.Unmarshal(rmqMsg.Payload, headerMsg.Base.MsgType)
+				tsMsg, err := rtms.unmarshal.Unmarshal(rmqMsg.Payload, headerMsg.Base.MsgType)
 				if err != nil {
 					log.Printf("Failed to unmarshal tsMsg, error = %v", err)
 					continue
@@ -471,9 +471,9 @@ func (ms *RmqTtMsgStream) findTimeTick(consumer rocksmq.Consumer,
 					MsgID:       strconv.Itoa(int(rmqMsg.MsgID)),
 				})
 
-				ms.unsolvedMutex.Lock()
-				ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
-				ms.unsolvedMutex.Unlock()
+				rtms.unsolvedMutex.Lock()
+				rtms.unsolvedBuf[consumer] = append(rtms.unsolvedBuf[consumer], tsMsg)
+				rtms.unsolvedMutex.Unlock()
 
 				if headerMsg.Base.MsgType == commonpb.MsgType_TimeTick {
 					findMapMutex.Lock()
@@ -487,12 +487,12 @@ func (ms *RmqTtMsgStream) findTimeTick(consumer rocksmq.Consumer,
 	}
 }
 
-func (ms *RmqTtMsgStream) Seek(mp *msgstream.MsgPosition) error {
+func (rtms *RmqTtMsgStream) Seek(mp *msgstream.MsgPosition) error {
 	var consumer rocksmq.Consumer
 	var msgID UniqueID
-	for index, channel := range ms.consumerChannels {
+	for index, channel := range rtms.consumerChannels {
 		if filepath.Base(channel) == filepath.Base(mp.ChannelName) {
-			consumer = ms.consumers[index]
+			consumer = rtms.consumers[index]
 			if len(mp.MsgID) == 0 {
 				msgID = -1
 				break
@@ -512,8 +512,8 @@ func (ms *RmqTtMsgStream) Seek(mp *msgstream.MsgPosition) error {
 	if msgID == -1 {
 		return nil
 	}
-	ms.unsolvedMutex.Lock()
-	ms.unsolvedBuf[consumer] = make([]TsMsg, 0)
+	rtms.unsolvedMutex.Lock()
+	rtms.unsolvedBuf[consumer] = make([]TsMsg, 0)
 
 	// When rmq seek is called, msgMutex can't be used before current msgs all consumed, because
 	// new msgMutex is not generated. So just try to consume msgs
@@ -531,7 +531,7 @@ func (ms *RmqTtMsgStream) Seek(mp *msgstream.MsgPosition) error {
 				log.Printf("Failed to unmarshal message header, error = %v", err)
 				return err
 			}
-			tsMsg, err := ms.unmarshal.Unmarshal(rmqMsg[0].Payload, headerMsg.Base.MsgType)
+			tsMsg, err := rtms.unmarshal.Unmarshal(rmqMsg[0].Payload, headerMsg.Base.MsgType)
 			if err != nil {
 				log.Printf("Failed to unmarshal tsMsg, error = %v", err)
 				return err
@@ -539,7 +539,7 @@ func (ms *RmqTtMsgStream) Seek(mp *msgstream.MsgPosition) error {
 
 			if headerMsg.Base.MsgType == commonpb.MsgType_TimeTick {
 				if tsMsg.BeginTs() >= mp.Timestamp {
-					ms.unsolvedMutex.Unlock()
+					rtms.unsolvedMutex.Unlock()
 					return nil
 				}
 				continue
@@ -549,7 +549,7 @@ func (ms *RmqTtMsgStream) Seek(mp *msgstream.MsgPosition) error {
 					ChannelName: filepath.Base(consumer.ChannelName),
 					MsgID:       strconv.Itoa(int(rmqMsg[0].MsgID)),
 				})
-				ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
+				rtms.unsolvedBuf[consumer] = append(rtms.unsolvedBuf[consumer], tsMsg)
 			}
 		}
 	}
@@ -557,7 +557,7 @@ func (ms *RmqTtMsgStream) Seek(mp *msgstream.MsgPosition) error {
 
 	//for {
 	//	select {
-	//	case <-ms.ctx.Done():
+	//	case <-rtms.ctx.Done():
 	//		return nil
 	//	case num, ok := <-consumer.MsgNum:
 	//		if !ok {
@@ -575,14 +575,14 @@ func (ms *RmqTtMsgStream) Seek(mp *msgstream.MsgPosition) error {
 	//			if err != nil {
 	//				log.Printf("Failed to unmarshal message header, error = %v", err)
 	//			}
-	//			tsMsg, err := ms.unmarshal.Unmarshal(rmqMsg[j].Payload, headerMsg.Base.MsgType)
+	//			tsMsg, err := rtms.unmarshal.Unmarshal(rmqMsg[j].Payload, headerMsg.Base.MsgType)
 	//			if err != nil {
 	//				log.Printf("Failed to unmarshal tsMsg, error = %v", err)
 	//			}
 	//
 	//			if headerMsg.Base.MsgType == commonpb.MsgType_kTimeTick {
 	//				if tsMsg.BeginTs() >= mp.Timestamp {
-	//					ms.unsolvedMutex.Unlock()
+	//					rtms.unsolvedMutex.Unlock()
 	//					return nil
 	//				}
 	//				continue
@@ -592,7 +592,7 @@ func (ms *RmqTtMsgStream) Seek(mp *msgstream.MsgPosition) error {
 	//					ChannelName: filepath.Base(consumer.ChannelName),
 	//					MsgID:       strconv.Itoa(int(rmqMsg[j].MsgID)),
 	//				})
-	//				ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
+	//				rtms.unsolvedBuf[consumer] = append(rtms.unsolvedBuf[consumer], tsMsg)
 	//			}
 	//		}
 	//	}
