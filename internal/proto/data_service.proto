@@ -82,8 +82,8 @@ message SegmentStateInfo {
   uint64 create_time = 3;
   uint64 sealed_time = 4;
   uint64 flushed_time = 5;
-  repeated internal.MsgPosition start_positions = 6;
-  repeated internal.MsgPosition end_positions = 7;
+  internal.MsgPosition start_position = 6;
+  internal.MsgPosition end_position = 7;
   common.Status status = 8;
 }
 
@@ -145,8 +145,8 @@ message SegmentInfo {
   int64 num_rows = 8;
   int64 mem_size = 9;
   common.SegmentState state = 10;
-  repeated internal.MsgPosition start_position = 11;
-  repeated internal.MsgPosition end_position = 12;
+  internal.MsgPosition start_position = 11;
+  internal.MsgPosition end_position = 12;
 }
 
 message SegmentMsg{

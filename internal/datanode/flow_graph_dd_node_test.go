@@ -139,7 +139,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 		DropPartitionRequest: dropPartitionReq,
 	}
 
-	replica.addSegment(1, collID, partitionID, make([]*internalpb2.MsgPosition, 0))
+	replica.addSegment(1, collID, partitionID, "insert-01")
 	inFlushCh <- &flushMsg{
 		msgID:        5,
 		timestamp:    5,

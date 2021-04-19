@@ -21,8 +21,7 @@ type collectionReplica interface {
 	hasCollection(collectionID UniqueID) bool
 
 	// segment
-	addSegment(segmentID UniqueID, collID UniqueID, partitionID UniqueID,
-		positions []*internalpb2.MsgPosition) error
+	addSegment(segmentID UniqueID, collID UniqueID, partitionID UniqueID, channelName string) error
 	removeSegment(segmentID UniqueID) error
 	hasSegment(segmentID UniqueID) bool
 	updateStatistics(segmentID UniqueID, numRows int64) error
@@ -32,16 +31,16 @@ type collectionReplica interface {
 
 type (
 	Segment struct {
-		segmentID      UniqueID
-		collectionID   UniqueID
-		partitionID    UniqueID
-		numRows        int64
-		memorySize     int64
-		isNew          bool
-		createTime     Timestamp // not using
-		endTime        Timestamp // not using
-		startPositions []*internalpb2.MsgPosition
-		endPositions   []*internalpb2.MsgPosition // not using
+		segmentID     UniqueID
+		collectionID  UniqueID
+		partitionID   UniqueID
+		numRows       int64
+		memorySize    int64
+		isNew         bool
+		createTime    Timestamp // not using
+		endTime       Timestamp // not using
+		startPosition *internalpb2.MsgPosition
+		endPosition   *internalpb2.MsgPosition // not using
 	}
 
 	collectionReplicaImpl struct {
@@ -74,21 +73,28 @@ func (colReplica *collectionReplicaImpl) getSegmentByID(segmentID UniqueID) (*Se
 	return nil, errors.Errorf("Cannot find segment, id = %v", segmentID)
 }
 
-func (colReplica *collectionReplicaImpl) addSegment(segmentID UniqueID, collID UniqueID,
-	partitionID UniqueID, positions []*internalpb2.MsgPosition) error {
+func (colReplica *collectionReplicaImpl) addSegment(
+	segmentID UniqueID,
+	collID UniqueID,
+	partitionID UniqueID,
+	channelName string) error {
 
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 	log.Println("Add Segment", segmentID)
 
+	position := &internalpb2.MsgPosition{
+		ChannelName: channelName,
+	}
+
 	seg := &Segment{
-		segmentID:      segmentID,
-		collectionID:   collID,
-		partitionID:    partitionID,
-		isNew:          true,
-		createTime:     0,
-		startPositions: positions,
-		endPositions:   make([]*internalpb2.MsgPosition, 0),
+		segmentID:     segmentID,
+		collectionID:  collID,
+		partitionID:   partitionID,
+		isNew:         true,
+		createTime:    0,
+		startPosition: position,
+		endPosition:   new(internalpb2.MsgPosition),
 	}
 	colReplica.segments = append(colReplica.segments, seg)
 	return nil
@@ -151,7 +157,7 @@ func (colReplica *collectionReplicaImpl) getSegmentStatisticsUpdates(segmentID U
 			}
 
 			if ele.isNew {
-				updates.StartPositions = ele.startPositions
+				updates.StartPosition = ele.startPosition
 				ele.isNew = false
 			}
 			return updates, nil

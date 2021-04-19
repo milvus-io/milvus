@@ -5,7 +5,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 func initTestReplicaMeta(t *testing.T, replica collectionReplica, collectionName string, collectionID UniqueID, segmentID UniqueID) {
@@ -112,7 +111,7 @@ func TestReplica_Segment(t *testing.T) {
 		replica := newReplica()
 		assert.False(t, replica.hasSegment(0))
 
-		err := replica.addSegment(0, 1, 2, make([]*internalpb2.MsgPosition, 0))
+		err := replica.addSegment(0, 1, 2, "insert-01")
 		assert.NoError(t, err)
 		assert.True(t, replica.hasSegment(0))
 

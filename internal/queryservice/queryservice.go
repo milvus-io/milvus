@@ -318,14 +318,14 @@ func (qs *QueryService) LoadPartitions(req *querypb.LoadPartitionRequest) (*comm
 			segmentID := state.SegmentID
 			segmentStates[segmentID] = state
 			var flatChannelName string
-			channelNames := make([]string, 0)
-			for i, str := range state.StartPositions {
-				flatChannelName += str.ChannelName
-				channelNames = append(channelNames, str.ChannelName)
-				if i+1 < len(state.StartPositions) {
-					flatChannelName += "/"
-				}
-			}
+			// channelNames := make([]string, 0)
+			// for i, str := range state.StartPositions {
+			//     flatChannelName += str.ChannelName
+			//     channelNames = append(channelNames, str.ChannelName)
+			//     if i+1 < len(state.StartPositions) {
+			//         flatChannelName += "/"
+			//     }
+			// }
 			if flatChannelName == "" {
 				log.Fatal("segmentState's channel name is empty")
 			}
@@ -365,8 +365,8 @@ func (qs *QueryService) LoadPartitions(req *querypb.LoadPartitionRequest) (*comm
 				if channels == node.insertChannels {
 					statesID := id2segs[i][len(id2segs[i])-1]
 					//TODO :: should be start position
-					position := segmentStates[statesID-1].StartPositions
-					segmentStates[statesID].StartPositions = position
+					// position := segmentStates[statesID-1].StartPositions
+					// segmentStates[statesID].StartPositions = position
 					loadSegmentRequest := &querypb.LoadSegmentRequest{
 						CollectionID:     collectionID,
 						PartitionID:      partitionID,
