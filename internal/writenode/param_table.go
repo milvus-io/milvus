@@ -12,6 +12,7 @@ type ParamTable struct {
 	paramtable.BaseTable
 
 	PulsarAddress string
+	MasterAddress string
 
 	WriteNodeID                  UniqueID
 	WriteNodeNum                 int
@@ -35,8 +36,19 @@ type ParamTable struct {
 	DefaultPartitionTag string
 	SliceIndex          int
 
-	EtcdAddress  string
-	MetaRootPath string
+	EtcdAddress          string
+	MetaRootPath         string
+	MinioAddress         string
+	MinioAccessKeyID     string
+	MinioSecretAccessKey string
+	MinioUseSSL          bool
+	MinioBucketName      string
+
+	FlushInsertBufSize int
+	FlushDdBufSize     int
+
+	InsertLogRootPath string
+	DdLogRootPath     string
 }
 
 var Params ParamTable
@@ -62,9 +74,12 @@ func (p *ParamTable) Init() {
 		panic(err)
 	}
 
+	p.initMasterAddress()
 	p.initPulsarAddress()
 	p.initEtcdAddress()
 	p.initMetaRootPath()
+	p.initInsertLogRootPath()
+	p.initDdLogRootPath()
 
 	p.initWriteNodeID()
 	p.initWriteNodeNum()
@@ -85,6 +100,15 @@ func (p *ParamTable) Init() {
 	p.initDDChannelNames()
 	p.initDDReceiveBufSize()
 	p.initDDPulsarBufSize()
+
+	p.initMinioAddress()
+	p.initMinioAccessKeyID()
+	p.initMinioSecretAccessKey()
+	p.initMinioUseSSL()
+	p.initMinioBucketName()
+
+	p.initFlushInsertBufSize()
+	p.initFlushDdBufSize()
 }
 
 func (p *ParamTable) initWriteNodeID() {
@@ -105,6 +129,14 @@ func (p *ParamTable) initPulsarAddress() {
 		panic(err)
 	}
 	p.PulsarAddress = url
+}
+
+func (p *ParamTable) initMasterAddress() {
+	addr, err := p.Load("_MasterAddress")
+	if err != nil {
+		panic(err)
+	}
+	p.MasterAddress = addr
 }
 
 func (p *ParamTable) initInsertChannelRange() {
@@ -265,4 +297,84 @@ func (p *ParamTable) initMetaRootPath() {
 		panic(err)
 	}
 	p.MetaRootPath = rootPath + "/" + subPath
+}
+
+func (p *ParamTable) initInsertLogRootPath() {
+	rootPath, err := p.Load("etcd.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	p.InsertLogRootPath = rootPath + "/insert_log"
+}
+
+func (p *ParamTable) initDdLogRootPath() {
+	rootPath, err := p.Load("etcd.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	p.DdLogRootPath = rootPath + "/data_definition_log"
+}
+
+func (p *ParamTable) initMinioAddress() {
+	endpoint, err := p.Load("_MinioAddress")
+	if err != nil {
+		panic(err)
+	}
+	p.MinioAddress = endpoint
+}
+
+func (p *ParamTable) initMinioAccessKeyID() {
+	keyID, err := p.Load("minio.accessKeyID")
+	if err != nil {
+		panic(err)
+	}
+	p.MinioAccessKeyID = keyID
+}
+
+func (p *ParamTable) initMinioSecretAccessKey() {
+	key, err := p.Load("minio.secretAccessKey")
+	if err != nil {
+		panic(err)
+	}
+	p.MinioSecretAccessKey = key
+}
+
+func (p *ParamTable) initMinioUseSSL() {
+	usessl, err := p.Load("minio.useSSL")
+	if err != nil {
+		panic(err)
+	}
+	p.MinioUseSSL, _ = strconv.ParseBool(usessl)
+}
+
+func (p *ParamTable) initMinioBucketName() {
+	bucketName, err := p.Load("minio.bucketName")
+	if err != nil {
+		panic(err)
+	}
+	p.MinioBucketName = bucketName
+}
+
+func (p *ParamTable) initFlushInsertBufSize() {
+	sizeStr, err := p.Load("writenode.flush.insertBufSize")
+	if err != nil {
+		panic(err)
+	}
+
+	p.FlushInsertBufSize, err = strconv.Atoi(sizeStr)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (p *ParamTable) initFlushDdBufSize() {
+	sizeStr, err := p.Load("writenode.flush.ddBufSize")
+	if err != nil {
+		panic(err)
+	}
+
+	p.FlushDdBufSize, err = strconv.Atoi(sizeStr)
+	if err != nil {
+		panic(err)
+	}
 }

@@ -66,4 +66,44 @@ func TestParamTable_WriteNode(t *testing.T) {
 		name := Params.WriteNodeTimeTickChannelName
 		assert.Equal(t, name, "writeNodeTimeTick")
 	})
+
+	t.Run("Test minioAccessKeyID", func(t *testing.T) {
+		id := Params.MinioAccessKeyID
+		assert.Equal(t, id, "minioadmin")
+	})
+
+	t.Run("Test minioSecretAccessKey", func(t *testing.T) {
+		id := Params.MinioSecretAccessKey
+		assert.Equal(t, id, "minioadmin")
+	})
+
+	t.Run("Test MinioUseSSL", func(t *testing.T) {
+		id := Params.MinioUseSSL
+		assert.Equal(t, id, false)
+	})
+
+	t.Run("Test MinioBucketName", func(t *testing.T) {
+		name := Params.MinioBucketName
+		assert.Equal(t, name, "A-bucket")
+	})
+
+	t.Run("Test FlushInsertBufSize", func(t *testing.T) {
+		name := Params.FlushInsertBufSize
+		assert.Equal(t, name, 20)
+	})
+
+	t.Run("Test FlushDdBufSize", func(t *testing.T) {
+		name := Params.FlushDdBufSize
+		assert.Equal(t, name, 20)
+	})
+
+	t.Run("Test InsertLogRootPath", func(t *testing.T) {
+		name := Params.InsertLogRootPath
+		assert.Equal(t, name, "by-dev/insert_log")
+	})
+
+	t.Run("Test DdLogRootPath", func(t *testing.T) {
+		name := Params.DdLogRootPath
+		assert.Equal(t, name, "by-dev/data_definition_log")
+	})
 }

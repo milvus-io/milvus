@@ -41,7 +41,7 @@ func (dsService *dataSyncService) initNodes() {
 
 	var ddNode Node = newDDNode()
 	var filterDmNode Node = newFilteredDmNode()
-	var insertBufferNode Node = newInsertBufferNode()
+	var insertBufferNode Node = newInsertBufferNode(dsService.ctx)
 
 	dsService.fg.AddNode(&dmStreamNode)
 	dsService.fg.AddNode(&ddStreamNode)

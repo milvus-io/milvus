@@ -1,6 +1,7 @@
 package typeutil
 
 import (
+	"log"
 	"testing"
 	"unsafe"
 
@@ -28,4 +29,21 @@ func TestHash32_Uint64(t *testing.T) {
 
 	t.Log(h2)
 	assert.Equal(t, h, h2)
+}
+
+func TestHash32_String(t *testing.T) {
+	var u string = "ok"
+	h, err := Hash32String(u)
+	assert.Nil(t, err)
+
+	t.Log(h)
+	log.Println(h)
+
+	b := []byte(u)
+	h2, err := Hash32Bytes(b)
+	assert.Nil(t, err)
+	log.Println(h2)
+
+	assert.Equal(t, uint32(h), h2)
+
 }

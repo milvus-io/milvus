@@ -29,6 +29,7 @@ minio:
   accessKeyID: minioadmin
   secretAccessKey: minioadmin
   useSSL: false
+  bucketName: "A-bucket"
 
 pulsar:
   address: localhost
