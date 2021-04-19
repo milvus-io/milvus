@@ -1,8 +1,6 @@
 package dataservice
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
@@ -16,28 +14,7 @@ func newStatsHandler(meta *meta) *statsHandler {
 	}
 }
 
-func (handler *statsHandler) HandleQueryNodeStats(msgPack *msgstream.MsgPack) error {
-	for _, msg := range msgPack.Msgs {
-		statsMsg, ok := msg.(*msgstream.QueryNodeStatsMsg)
-		if !ok {
-			return errors.Errorf("Type of message is not QueryNodeSegStatsMsg")
-		}
-
-		for _, segStat := range statsMsg.GetSegStats() {
-			if err := handler.handleSegmentStat(segStat); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
-func (handler *statsHandler) handleSegmentStat(segStats *internalpb2.SegmentStats) error {
-	if !segStats.GetRecentlyModified() {
-		return nil
-	}
-
+func (handler *statsHandler) HandleSegmentStat(segStats *internalpb2.SegmentStatisticsUpdates) error {
 	segMeta, err := handler.meta.GetSegment(segStats.SegmentID)
 	if err != nil {
 		return err

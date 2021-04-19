@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"time"
+	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
@@ -49,6 +49,9 @@ type (
 	Timestamp = typeutil.Timestamp
 	Server    struct {
 		ctx              context.Context
+		serverLoopCtx    context.Context
+		serverLoopCancel context.CancelFunc
+		serverLoopWg     sync.WaitGroup
 		state            internalpb2.StateCode
 		client           *etcdkv.EtcdKV
 		meta             *meta
@@ -61,10 +64,11 @@ type (
 		registerFinishCh chan struct{}
 		masterClient     *masterservice.GrpcClient
 		ttMsgStream      msgstream.MsgStream
+		ddChannelName    string
 	}
 )
 
-func CreateServer(ctx context.Context) (*Server, error) {
+func CreateServer(ctx context.Context, client *masterservice.GrpcClient) (*Server, error) {
 	ch := make(chan struct{})
 	return &Server{
 		ctx:              ctx,
@@ -72,6 +76,7 @@ func CreateServer(ctx context.Context) (*Server, error) {
 		insertChannelMgr: newInsertChannelManager(),
 		registerFinishCh: ch,
 		cluster:          newDataNodeCluster(ch),
+		masterClient:     client,
 	}, nil
 }
 
@@ -81,9 +86,6 @@ func (s *Server) Init() error {
 }
 
 func (s *Server) Start() error {
-	if err := s.connectMaster(); err != nil {
-		return err
-	}
 	s.allocator = newAllocatorImpl(s.masterClient)
 	if err := s.initMeta(); err != nil {
 		return err
@@ -95,31 +97,17 @@ func (s *Server) Start() error {
 	}
 	s.segAllocator = segAllocator
 	s.waitDataNodeRegister()
+
 	if err = s.loadMetaFromMaster(); err != nil {
 		return err
 	}
 	if err = s.initMsgProducer(); err != nil {
 		return err
 	}
+
+	s.startServerLoop()
 	s.state = internalpb2.StateCode_HEALTHY
 	log.Println("start success")
-	return nil
-}
-
-func (s *Server) connectMaster() error {
-	log.Println("connecting to master")
-	master, err := masterservice.NewGrpcClient(Params.MasterAddress, 30*time.Second)
-	if err != nil {
-		return err
-	}
-	if err = master.Init(nil); err != nil {
-		return err
-	}
-	if err = master.Start(); err != nil {
-		return err
-	}
-	s.masterClient = master
-	log.Println("connect to master success")
 	return nil
 }
 
@@ -144,7 +132,6 @@ func (s *Server) waitDataNodeRegister() {
 }
 
 func (s *Server) initMsgProducer() error {
-	// todo ttstream and peerids
 	s.ttMsgStream = pulsarms.NewPulsarTtMsgStream(s.ctx, 1024)
 	s.ttMsgStream.Start()
 	timeTickBarrier := timesync.NewHardTimeTickBarrier(s.ttMsgStream, s.cluster.GetNodeIDs())
@@ -157,6 +144,37 @@ func (s *Server) initMsgProducer() error {
 	s.msgProducer.Start(s.ctx)
 	return nil
 }
+
+func (s *Server) startServerLoop() {
+	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
+	s.serverLoopWg.Add(1)
+	go s.startStatsChannel(s.serverLoopCtx)
+}
+
+func (s *Server) startStatsChannel(ctx context.Context) {
+	defer s.serverLoopWg.Done()
+	statsStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
+	statsStream.Start()
+	defer statsStream.Close()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		msgPack := statsStream.Consume()
+		for _, msg := range msgPack.Msgs {
+			statistics := msg.(*msgstream.SegmentStatisticsMsg)
+			for _, stat := range statistics.SegStats {
+				if err := s.statsHandler.HandleSegmentStat(stat); err != nil {
+					log.Println(err.Error())
+					continue
+				}
+			}
+		}
+	}
+}
+
 func (s *Server) loadMetaFromMaster() error {
 	log.Println("loading collection meta from master")
 	collections, err := s.masterClient.ShowCollections(&milvuspb.ShowCollectionRequest{
@@ -218,7 +236,13 @@ func (s *Server) loadMetaFromMaster() error {
 func (s *Server) Stop() error {
 	s.ttMsgStream.Close()
 	s.msgProducer.Close()
+	s.stopServerLoop()
 	return nil
+}
+
+func (s *Server) stopServerLoop() {
+	s.serverLoopCancel()
+	s.serverLoopWg.Wait()
 }
 
 func (s *Server) GetComponentStates() (*internalpb2.ComponentStates, error) {
@@ -261,13 +285,31 @@ func (s *Server) GetStatisticsChannel() (*milvuspb.StringResponse, error) {
 }
 
 func (s *Server) RegisterNode(req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
-	s.cluster.Register(req.Address.Ip, req.Address.Port, req.Base.SourceID)
-	// add init params
-	return &datapb.RegisterNodeResponse{
+	ret := &datapb.RegisterNodeResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 		},
-	}, nil
+	}
+	s.cluster.Register(req.Address.Ip, req.Address.Port, req.Base.SourceID)
+	if len(s.ddChannelName) == 0 {
+		resp, err := s.masterClient.GetDdChannel(nil)
+		if err != nil {
+			ret.Status.Reason = err.Error()
+			return ret, err
+		}
+		s.ddChannelName = resp.Value
+	}
+	ret.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
+	ret.InitParams = &internalpb2.InitParams{
+		NodeID: Params.NodeID,
+		StartParams: []*commonpb.KeyValuePair{
+			{Key: "DDChannelName", Value: s.ddChannelName},
+			{Key: "SegmentStatisticsChannelName", Value: Params.StatisticsChannelName},
+			{Key: "TimeTickChannelName", Value: Params.TimeTickChannelName},
+			{Key: "CompleteFlushChannelName", Value: Params.SegmentChannelName},
+		},
+	}
+	return ret, nil
 }
 
 func (s *Server) Flush(req *datapb.FlushRequest) (*commonpb.Status, error) {

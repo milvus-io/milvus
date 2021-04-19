@@ -4,6 +4,9 @@ import (
 	"context"
 	"log"
 	"net"
+	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
 
 	"google.golang.org/grpc"
 
@@ -17,17 +20,21 @@ import (
 )
 
 type Service struct {
-	server     *dataservice.Server
-	ctx        context.Context
-	cancel     context.CancelFunc
-	grpcServer *grpc.Server
+	server       *dataservice.Server
+	ctx          context.Context
+	cancel       context.CancelFunc
+	grpcServer   *grpc.Server
+	masterClient *masterservice.GrpcClient
 }
 
 func NewGrpcService() {
 	s := &Service{}
 	var err error
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	s.server, err = dataservice.CreateServer(s.ctx)
+	if err = s.connectMaster(); err != nil {
+		log.Fatal("connect to master" + err.Error())
+	}
+	s.server, err = dataservice.CreateServer(s.ctx, s.masterClient)
 	if err != nil {
 		log.Fatalf("create server error: %s", err.Error())
 		return
@@ -45,6 +52,22 @@ func NewGrpcService() {
 	}
 }
 
+func (s *Service) connectMaster() error {
+	log.Println("connecting to master")
+	master, err := masterservice.NewGrpcClient("localhost:10101", 30*time.Second) // todo address
+	if err != nil {
+		return err
+	}
+	if err = master.Init(nil); err != nil {
+		return err
+	}
+	if err = master.Start(); err != nil {
+		return err
+	}
+	s.masterClient = master
+	log.Println("connect to master success")
+	return nil
+}
 func (s *Service) Init() error {
 	return s.server.Init()
 }
