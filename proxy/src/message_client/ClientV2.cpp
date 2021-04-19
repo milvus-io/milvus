@@ -8,9 +8,7 @@
 namespace milvus::message_client {
 
 MsgClientV2 &MsgClientV2::GetInstance() {
-  // TODO: do not hardcode pulsar message configure and init
   std::string pulsar_server_addr(std::string {"pulsar://"} + config.pulsar.address() + ":" + std::to_string(config.pulsar.port()));
-// "pulsar://localhost:6650"
 
   int64_t client_id = 0;
   static MsgClientV2 msg_client(client_id, pulsar_server_addr);
@@ -144,11 +142,8 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request, uin
   milvus::grpc::InsertOrDeleteMsg mut_msg;
   for (auto i = 0; i < row_count; i++) {
     mut_msg.set_op(milvus::grpc::OpType::INSERT);
-    mut_msg.set_uid(GetUniqueQId());
+    mut_msg.set_uid(request.entity_id_array(i));
     mut_msg.set_client_id(client_id_);
-    // TODO: add channel id
-    auto channel_id = 0;
-    mut_msg.set_channel_id(channel_id);
     mut_msg.set_timestamp(timestamp);
     mut_msg.set_collection_name(request.collection_name());
     mut_msg.set_partition_tag(request.partition_tag());
