@@ -10,6 +10,9 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 )
 
+type TimeTickHandler interface {
+	GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error)
+}
 type Service interface {
 	Init() error
 	Start() error
@@ -18,7 +21,6 @@ type Service interface {
 
 type Component interface {
 	GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
-	GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 }
 

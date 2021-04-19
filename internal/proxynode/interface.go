@@ -67,7 +67,7 @@ type ProxyServiceClient interface {
 	GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
 }
 
-type ProxyNode interface {
+type Service interface {
 	typeutil.Service
 
 	InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)

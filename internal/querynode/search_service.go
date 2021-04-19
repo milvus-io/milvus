@@ -23,7 +23,7 @@ type searchService struct {
 	wait   sync.WaitGroup
 	cancel context.CancelFunc
 
-	replica      collectionReplica
+	replica      ReplicaInterface
 	tSafeWatcher *tSafeWatcher
 
 	serviceableTimeMutex sync.Mutex // guards serviceableTime
@@ -38,7 +38,7 @@ type searchService struct {
 
 type ResultEntityIds []UniqueID
 
-func newSearchService(ctx context.Context, replica collectionReplica, factory msgstream.Factory) *searchService {
+func newSearchService(ctx context.Context, replica ReplicaInterface, factory msgstream.Factory) *searchService {
 	receiveBufSize := Params.SearchReceiveBufSize
 
 	searchStream, _ := factory.NewMsgStream(ctx)

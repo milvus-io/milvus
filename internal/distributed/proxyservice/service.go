@@ -30,7 +30,7 @@ type Server struct {
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
 
-	impl *proxyservice.ServiceImpl
+	impl *proxyservice.ProxyService
 
 	tracer opentracing.Tracer
 	closer io.Closer
@@ -60,7 +60,7 @@ func NewServer(ctx1 context.Context, factory msgstream.Factory) (*Server, error)
 	}
 	opentracing.SetGlobalTracer(server.tracer)
 
-	server.impl, err = proxyservice.NewServiceImpl(server.ctx, factory)
+	server.impl, err = proxyservice.NewProxyService(server.ctx, factory)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 }
 
 func (s *Server) start() error {
-	log.Println("proxy ServiceImpl start ...")
+	log.Println("proxy ProxyService start ...")
 	if err := s.impl.Start(); err != nil {
 		return err
 	}

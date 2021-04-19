@@ -10,10 +10,10 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
-type ServiceImpl struct {
+type ProxyService struct {
 	allocator NodeIDAllocator
 	sched     *TaskScheduler
-	tick      TimeTick
+	tick      *TimeTick
 	nodeInfos *GlobalNodeInfoTable
 	stateCode internalpb2.StateCode
 
@@ -27,10 +27,10 @@ type ServiceImpl struct {
 	msFactory msgstream.Factory
 }
 
-func NewServiceImpl(ctx context.Context, factory msgstream.Factory) (*ServiceImpl, error) {
+func NewProxyService(ctx context.Context, factory msgstream.Factory) (*ProxyService, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
-	s := &ServiceImpl{
+	s := &ProxyService{
 		ctx:       ctx1,
 		cancel:    cancel,
 		msFactory: factory,

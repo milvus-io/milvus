@@ -55,7 +55,7 @@ type QueryNode struct {
 	QueryNodeID UniqueID
 	stateCode   atomic.Value
 
-	replica collectionReplica
+	replica ReplicaInterface
 
 	// internal services
 	dataSyncService *dataSyncService
@@ -88,7 +88,7 @@ func NewQueryNode(ctx context.Context, queryNodeID UniqueID, factory msgstream.F
 		msFactory: factory,
 	}
 
-	node.replica = newCollectionReplicaImpl()
+	node.replica = newCollectionReplica()
 	node.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
 	return node
 }
@@ -107,7 +107,7 @@ func NewQueryNodeWithoutID(ctx context.Context, factory msgstream.Factory) *Quer
 		msFactory: factory,
 	}
 
-	node.replica = newCollectionReplicaImpl()
+	node.replica = newCollectionReplica()
 	node.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
 
 	return node

@@ -21,11 +21,11 @@ const (
 	reqTimeoutInterval = time.Second * 10
 )
 
-func (node *NodeImpl) UpdateStateCode(code internalpb2.StateCode) {
+func (node *ProxyNode) UpdateStateCode(code internalpb2.StateCode) {
 	node.stateCode.Store(code)
 }
 
-func (node *NodeImpl) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+func (node *ProxyNode) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	collectionName := request.CollectionName
 	globalMetaCache.RemoveCollection(ctx, collectionName) // no need to return error, though collection may be not cached
 	return &commonpb.Status{
@@ -34,7 +34,7 @@ func (node *NodeImpl) InvalidateCollectionMetaCache(ctx context.Context, request
 	}, nil
 }
 
-func (node *NodeImpl) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
+func (node *ProxyNode) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	log.Println("create collection: ", request)
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
@@ -66,7 +66,7 @@ func (node *NodeImpl) CreateCollection(ctx context.Context, request *milvuspb.Cr
 	return cct.result, nil
 }
 
-func (node *NodeImpl) DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+func (node *ProxyNode) DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	log.Println("drop collection: ", request)
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
@@ -97,7 +97,7 @@ func (node *NodeImpl) DropCollection(ctx context.Context, request *milvuspb.Drop
 	return dct.result, nil
 }
 
-func (node *NodeImpl) HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
+func (node *ProxyNode) HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	log.Println("has collection: ", request)
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
@@ -132,7 +132,7 @@ func (node *NodeImpl) HasCollection(ctx context.Context, request *milvuspb.HasCo
 	return hct.result, nil
 }
 
-func (node *NodeImpl) LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
+func (node *ProxyNode) LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
 	log.Println("load collection: ", request)
 	//ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	//defer cancel()
@@ -163,7 +163,7 @@ func (node *NodeImpl) LoadCollection(ctx context.Context, request *milvuspb.Load
 	return lct.result, nil
 }
 
-func (node *NodeImpl) ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+func (node *ProxyNode) ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	log.Println("release collection: ", request)
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
@@ -194,7 +194,7 @@ func (node *NodeImpl) ReleaseCollection(ctx context.Context, request *milvuspb.R
 	return rct.result, nil
 }
 
-func (node *NodeImpl) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+func (node *ProxyNode) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	log.Println("describe collection: ", request)
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
@@ -229,7 +229,7 @@ func (node *NodeImpl) DescribeCollection(ctx context.Context, request *milvuspb.
 	return dct.result, nil
 }
 
-func (node *NodeImpl) GetCollectionStatistics(ctx context.Context, request *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error) {
+func (node *ProxyNode) GetCollectionStatistics(ctx context.Context, request *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error) {
 	log.Println("get collection statistics")
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
@@ -263,7 +263,7 @@ func (node *NodeImpl) GetCollectionStatistics(ctx context.Context, request *milv
 	return g.result, nil
 }
 
-func (node *NodeImpl) ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
+func (node *ProxyNode) ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
 	log.Println("show collections")
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
@@ -297,7 +297,7 @@ func (node *NodeImpl) ShowCollections(ctx context.Context, request *milvuspb.Sho
 	return sct.result, nil
 }
 
-func (node *NodeImpl) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
+func (node *ProxyNode) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	log.Println("create partition", request)
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
@@ -326,7 +326,7 @@ func (node *NodeImpl) CreatePartition(ctx context.Context, request *milvuspb.Cre
 	return cpt.result, nil
 }
 
-func (node *NodeImpl) DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
+func (node *ProxyNode) DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	log.Println("drop partition: ", request)
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
@@ -356,7 +356,7 @@ func (node *NodeImpl) DropPartition(ctx context.Context, request *milvuspb.DropP
 	return dpt.result, nil
 }
 
-func (node *NodeImpl) HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
+func (node *ProxyNode) HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	log.Println("has partition: ", request)
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
@@ -392,7 +392,7 @@ func (node *NodeImpl) HasPartition(ctx context.Context, request *milvuspb.HasPar
 	return hpt.result, nil
 }
 
-func (node *NodeImpl) LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitonRequest) (*commonpb.Status, error) {
+func (node *ProxyNode) LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitonRequest) (*commonpb.Status, error) {
 	log.Println("load partitions: ", request)
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
@@ -423,7 +423,7 @@ func (node *NodeImpl) LoadPartitions(ctx context.Context, request *milvuspb.Load
 	return lpt.result, nil
 }
 
-func (node *NodeImpl) ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionRequest) (*commonpb.Status, error) {
+func (node *ProxyNode) ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionRequest) (*commonpb.Status, error) {
 	log.Println("load partitions: ", request)
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
@@ -454,11 +454,11 @@ func (node *NodeImpl) ReleasePartitions(ctx context.Context, request *milvuspb.R
 	return rpt.result, nil
 }
 
-func (node *NodeImpl) GetPartitionStatistics(ctx context.Context, request *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error) {
+func (node *ProxyNode) GetPartitionStatistics(ctx context.Context, request *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error) {
 	panic("implement me")
 }
 
-func (node *NodeImpl) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
+func (node *ProxyNode) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
 	log.Println("show partitions: ", request)
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
@@ -493,7 +493,7 @@ func (node *NodeImpl) ShowPartitions(ctx context.Context, request *milvuspb.Show
 	return spt.result, nil
 }
 
-func (node *NodeImpl) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
+func (node *ProxyNode) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	log.Println("create index for: ", request)
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
@@ -523,7 +523,7 @@ func (node *NodeImpl) CreateIndex(ctx context.Context, request *milvuspb.CreateI
 	return cit.result, nil
 }
 
-func (node *NodeImpl) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
+func (node *ProxyNode) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	log.Println("Describe index for: ", request)
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
@@ -557,7 +557,7 @@ func (node *NodeImpl) DescribeIndex(ctx context.Context, request *milvuspb.Descr
 	return dit.result, nil
 }
 
-func (node *NodeImpl) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
+func (node *ProxyNode) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
 	log.Println("Drop index for: ", request)
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
@@ -584,7 +584,7 @@ func (node *NodeImpl) DropIndex(ctx context.Context, request *milvuspb.DropIndex
 	return dit.result, nil
 }
 
-func (node *NodeImpl) GetIndexState(ctx context.Context, request *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error) {
+func (node *ProxyNode) GetIndexState(ctx context.Context, request *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error) {
 	// log.Println("Describe index progress for: ", request)
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
@@ -619,7 +619,7 @@ func (node *NodeImpl) GetIndexState(ctx context.Context, request *milvuspb.Index
 	return dipt.result, nil
 }
 
-func (node *NodeImpl) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.InsertResponse, error) {
+func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.InsertResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
 
@@ -671,7 +671,7 @@ func (node *NodeImpl) Insert(ctx context.Context, request *milvuspb.InsertReques
 	return it.result, nil
 }
 
-func (node *NodeImpl) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
 
@@ -713,7 +713,7 @@ func (node *NodeImpl) Search(ctx context.Context, request *milvuspb.SearchReques
 	return qt.result, nil
 }
 
-func (node *NodeImpl) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error) {
+func (node *ProxyNode) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error) {
 	log.Println("AA Flush collections: ", request.CollectionNames)
 	ctx, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
@@ -743,11 +743,11 @@ func (node *NodeImpl) Flush(ctx context.Context, request *milvuspb.FlushRequest)
 	return ft.result, nil
 }
 
-func (node *NodeImpl) GetDdChannel(ctx context.Context, request *commonpb.Empty) (*milvuspb.StringResponse, error) {
+func (node *ProxyNode) GetDdChannel(ctx context.Context, request *commonpb.Empty) (*milvuspb.StringResponse, error) {
 	panic("implement me")
 }
 
-func (node *NodeImpl) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.PersistentSegmentInfoRequest) (*milvuspb.PersistentSegmentInfoResponse, error) {
+func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.PersistentSegmentInfoRequest) (*milvuspb.PersistentSegmentInfoResponse, error) {
 	resp := &milvuspb.PersistentSegmentInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -794,7 +794,7 @@ func (node *NodeImpl) GetPersistentSegmentInfo(ctx context.Context, req *milvusp
 	return resp, nil
 }
 
-func (node *NodeImpl) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.QuerySegmentInfoRequest) (*milvuspb.QuerySegmentInfoResponse, error) {
+func (node *ProxyNode) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.QuerySegmentInfoRequest) (*milvuspb.QuerySegmentInfoResponse, error) {
 	resp := &milvuspb.QuerySegmentInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -839,7 +839,7 @@ func (node *NodeImpl) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.Que
 	return resp, nil
 }
 
-func (node *NodeImpl) getSegmentsOfCollection(ctx context.Context, dbName string, collectionName string) ([]UniqueID, error) {
+func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName string, collectionName string) ([]UniqueID, error) {
 	describeCollectionResponse, err := node.masterClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_kDescribeCollection,
@@ -898,7 +898,7 @@ func (node *NodeImpl) getSegmentsOfCollection(ctx context.Context, dbName string
 	return ret, nil
 }
 
-func (node *NodeImpl) RegisterLink(request *commonpb.Empty) (*milvuspb.RegisterLinkResponse, error) {
+func (node *ProxyNode) RegisterLink(request *commonpb.Empty) (*milvuspb.RegisterLinkResponse, error) {
 	code := node.stateCode.Load().(internalpb2.StateCode)
 	if code != internalpb2.StateCode_HEALTHY {
 		return &milvuspb.RegisterLinkResponse{

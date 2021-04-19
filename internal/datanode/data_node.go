@@ -157,7 +157,7 @@ func (node *DataNode) Init() error {
 
 	replica := newReplica()
 
-	var alloc allocator = newAllocatorImpl(node.masterService)
+	var alloc allocatorInterface = newAllocator(node.masterService)
 
 	chanSize := 100
 	node.flushChan = make(chan *flushMsg, chanSize)

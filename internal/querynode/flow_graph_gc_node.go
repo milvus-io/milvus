@@ -10,7 +10,7 @@ import (
 
 type gcNode struct {
 	baseNode
-	replica collectionReplica
+	replica ReplicaInterface
 }
 
 func (gcNode *gcNode) Name() string {
@@ -54,7 +54,7 @@ func (gcNode *gcNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Con
 	return nil, ctx
 }
 
-func newGCNode(replica collectionReplica) *gcNode {
+func newGCNode(replica ReplicaInterface) *gcNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 

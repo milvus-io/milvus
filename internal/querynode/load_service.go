@@ -161,7 +161,7 @@ func (s *loadService) loadSegmentInternal(collectionID UniqueID, partitionID Uni
 	return nil
 }
 
-func newLoadService(ctx context.Context, masterClient MasterServiceInterface, dataClient DataServiceInterface, indexClient IndexServiceInterface, replica collectionReplica, dmStream msgstream.MsgStream) *loadService {
+func newLoadService(ctx context.Context, masterClient MasterServiceInterface, dataClient DataServiceInterface, indexClient IndexServiceInterface, replica ReplicaInterface, dmStream msgstream.MsgStream) *loadService {
 	ctx1, cancel := context.WithCancel(ctx)
 
 	segLoader := newSegmentLoader(ctx1, masterClient, indexClient, dataClient, replica, dmStream)

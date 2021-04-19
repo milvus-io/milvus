@@ -13,7 +13,7 @@ import (
 
 type serviceTimeNode struct {
 	baseNode
-	replica           collectionReplica
+	replica           ReplicaInterface
 	timeTickMsgStream msgstream.MsgStream
 }
 
@@ -71,7 +71,7 @@ func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {
 	return stNode.timeTickMsgStream.Produce(context.TODO(), &msgPack)
 }
 
-func newServiceTimeNode(ctx context.Context, replica collectionReplica, factory msgstream.Factory) *serviceTimeNode {
+func newServiceTimeNode(ctx context.Context, replica ReplicaInterface, factory msgstream.Factory) *serviceTimeNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 

@@ -10,22 +10,15 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
-type (
-	TimeTick interface {
-		Start() error
-		Close()
-	}
+type TimeTick struct {
+	ttBarrier TimeTickBarrier
+	channels  []msgstream.MsgStream
+	wg        sync.WaitGroup
+	ctx       context.Context
+	cancel    context.CancelFunc
+}
 
-	TimeTickImpl struct {
-		ttBarrier TimeTickBarrier
-		channels  []msgstream.MsgStream
-		wg        sync.WaitGroup
-		ctx       context.Context
-		cancel    context.CancelFunc
-	}
-)
-
-func (tt *TimeTickImpl) Start() error {
+func (tt *TimeTick) Start() error {
 	log.Println("start time tick ...")
 	tt.wg.Add(1)
 	go func() {
@@ -81,7 +74,7 @@ func (tt *TimeTickImpl) Start() error {
 	return nil
 }
 
-func (tt *TimeTickImpl) Close() {
+func (tt *TimeTick) Close() {
 	for _, channel := range tt.channels {
 		channel.Close()
 	}
@@ -90,7 +83,7 @@ func (tt *TimeTickImpl) Close() {
 	tt.wg.Wait()
 }
 
-func newTimeTick(ctx context.Context, ttBarrier TimeTickBarrier, channels ...msgstream.MsgStream) TimeTick {
+func newTimeTick(ctx context.Context, ttBarrier TimeTickBarrier, channels ...msgstream.MsgStream) *TimeTick {
 	ctx1, cancel := context.WithCancel(ctx)
-	return &TimeTickImpl{ctx: ctx1, cancel: cancel, ttBarrier: ttBarrier, channels: channels}
+	return &TimeTick{ctx: ctx1, cancel: cancel, ttBarrier: ttBarrier, channels: channels}
 }

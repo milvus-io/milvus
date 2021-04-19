@@ -18,10 +18,10 @@ type dataSyncService struct {
 	dmStream  msgstream.MsgStream
 	msFactory msgstream.Factory
 
-	replica collectionReplica
+	replica ReplicaInterface
 }
 
-func newDataSyncService(ctx context.Context, replica collectionReplica, factory msgstream.Factory) *dataSyncService {
+func newDataSyncService(ctx context.Context, replica ReplicaInterface, factory msgstream.Factory) *dataSyncService {
 	service := &dataSyncService{
 		ctx:       ctx,
 		fg:        nil,

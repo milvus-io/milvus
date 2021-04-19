@@ -7,22 +7,22 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 )
 
-type allocator interface {
+type allocatorInterface interface {
 	allocTimestamp() (Timestamp, error)
 	allocID() (UniqueID, error)
 }
 
-type allocatorImpl struct {
+type allocator struct {
 	masterClient MasterClient
 }
 
-func newAllocatorImpl(masterClient MasterClient) *allocatorImpl {
-	return &allocatorImpl{
+func newAllocator(masterClient MasterClient) *allocator {
+	return &allocator{
 		masterClient: masterClient,
 	}
 }
 
-func (allocator *allocatorImpl) allocTimestamp() (Timestamp, error) {
+func (allocator *allocator) allocTimestamp() (Timestamp, error) {
 	ctx := context.TODO()
 	resp, err := allocator.masterClient.AllocTimestamp(ctx, &masterpb.TsoRequest{
 		Base: &commonpb.MsgBase{
@@ -39,7 +39,7 @@ func (allocator *allocatorImpl) allocTimestamp() (Timestamp, error) {
 	return resp.Timestamp, nil
 }
 
-func (allocator *allocatorImpl) allocID() (UniqueID, error) {
+func (allocator *allocator) allocID() (UniqueID, error) {
 	ctx := context.TODO()
 	resp, err := allocator.masterClient.AllocID(ctx, &masterpb.IDRequest{
 		Base: &commonpb.MsgBase{

@@ -26,7 +26,7 @@ import (
 )
 
 type indexLoader struct {
-	replica collectionReplica
+	replica ReplicaInterface
 
 	fieldIndexes   map[string][]*internalpb2.IndexStats
 	fieldStatsChan chan []*internalpb2.FieldStats
@@ -389,7 +389,7 @@ func (loader *indexLoader) loadIndexDelayed(collectionID, segmentID UniqueID, in
 	return nil
 }
 
-func newIndexLoader(ctx context.Context, masterClient MasterServiceInterface, indexClient IndexServiceInterface, replica collectionReplica) *indexLoader {
+func newIndexLoader(ctx context.Context, masterClient MasterServiceInterface, indexClient IndexServiceInterface, replica ReplicaInterface) *indexLoader {
 	option := &minioKV.Option{
 		Address:           Params.MinioEndPoint,
 		AccessKeyID:       Params.MinioAccessKeyID,

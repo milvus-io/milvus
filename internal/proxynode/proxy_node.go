@@ -26,7 +26,7 @@ import (
 type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
-type NodeImpl struct {
+type ProxyNode struct {
 	ctx    context.Context
 	cancel func()
 	wg     sync.WaitGroup
@@ -59,10 +59,10 @@ type NodeImpl struct {
 	closeCallbacks []func()
 }
 
-func NewProxyNodeImpl(ctx context.Context, factory msgstream.Factory) (*NodeImpl, error) {
+func NewProxyNode(ctx context.Context, factory msgstream.Factory) (*ProxyNode, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
-	node := &NodeImpl{
+	node := &ProxyNode{
 		ctx:       ctx1,
 		cancel:    cancel,
 		msFactory: factory,
@@ -76,7 +76,7 @@ type Component interface {
 	GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
 }
 
-func (node *NodeImpl) waitForServiceReady(ctx context.Context, service Component, serviceName string) error {
+func (node *ProxyNode) waitForServiceReady(ctx context.Context, service Component, serviceName string) error {
 
 	checkFunc := func() error {
 		resp, err := service.GetComponentStates(ctx)
@@ -100,7 +100,7 @@ func (node *NodeImpl) waitForServiceReady(ctx context.Context, service Component
 	return nil
 }
 
-func (node *NodeImpl) Init() error {
+func (node *ProxyNode) Init() error {
 	// todo wait for proxyservice state changed to Healthy
 	ctx := context.Background()
 
@@ -211,10 +211,10 @@ func (node *NodeImpl) Init() error {
 
 	node.manipulationMsgStream, _ = node.msFactory.NewMsgStream(node.ctx)
 	node.manipulationMsgStream.AsProducer(Params.InsertChannelNames)
-	repackFuncImpl := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
+	repackFunc := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
 		return insertRepackFunc(tsMsgs, hashKeys, node.segAssigner, true)
 	}
-	node.manipulationMsgStream.SetRepackFunc(repackFuncImpl)
+	node.manipulationMsgStream.SetRepackFunc(repackFunc)
 	log.Println("create manipulation message stream ...")
 
 	node.sched, err = NewTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.msFactory)
@@ -227,7 +227,7 @@ func (node *NodeImpl) Init() error {
 	return nil
 }
 
-func (node *NodeImpl) Start() error {
+func (node *ProxyNode) Start() error {
 	err := InitMetaCache(node.masterClient)
 	if err != nil {
 		return err
@@ -269,7 +269,7 @@ func (node *NodeImpl) Start() error {
 	return nil
 }
 
-func (node *NodeImpl) Stop() error {
+func (node *ProxyNode) Stop() error {
 	node.cancel()
 
 	globalInsertChannelsMap.closeAllMsgStream()
@@ -291,35 +291,35 @@ func (node *NodeImpl) Stop() error {
 }
 
 // AddStartCallback adds a callback in the startServer phase.
-func (node *NodeImpl) AddStartCallback(callbacks ...func()) {
+func (node *ProxyNode) AddStartCallback(callbacks ...func()) {
 	node.startCallbacks = append(node.startCallbacks, callbacks...)
 }
 
-func (node *NodeImpl) lastTick() Timestamp {
+func (node *ProxyNode) lastTick() Timestamp {
 	return node.tick.LastTick()
 }
 
 // AddCloseCallback adds a callback in the Close phase.
-func (node *NodeImpl) AddCloseCallback(callbacks ...func()) {
+func (node *ProxyNode) AddCloseCallback(callbacks ...func()) {
 	node.closeCallbacks = append(node.closeCallbacks, callbacks...)
 }
 
-func (node *NodeImpl) SetMasterClient(cli MasterClient) {
+func (node *ProxyNode) SetMasterClient(cli MasterClient) {
 	node.masterClient = cli
 }
 
-func (node *NodeImpl) SetIndexServiceClient(cli IndexServiceClient) {
+func (node *ProxyNode) SetIndexServiceClient(cli IndexServiceClient) {
 	node.indexServiceClient = cli
 }
 
-func (node *NodeImpl) SetDataServiceClient(cli DataServiceClient) {
+func (node *ProxyNode) SetDataServiceClient(cli DataServiceClient) {
 	node.dataServiceClient = cli
 }
 
-func (node *NodeImpl) SetProxyServiceClient(cli ProxyServiceClient) {
+func (node *ProxyNode) SetProxyServiceClient(cli ProxyServiceClient) {
 	node.proxyServiceClient = cli
 }
 
-func (node *NodeImpl) SetQueryServiceClient(cli QueryServiceClient) {
+func (node *ProxyNode) SetQueryServiceClient(cli QueryServiceClient) {
 	node.queryServiceClient = cli
 }

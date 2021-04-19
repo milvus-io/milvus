@@ -29,7 +29,7 @@ const (
 type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
-type NodeImpl struct {
+type IndexNode struct {
 	stateCode internalpb2.StateCode
 
 	loopCtx    context.Context
@@ -48,9 +48,9 @@ type NodeImpl struct {
 	closer io.Closer
 }
 
-func NewNodeImpl(ctx context.Context) (*NodeImpl, error) {
+func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 	ctx1, cancel := context.WithCancel(ctx)
-	b := &NodeImpl{
+	b := &IndexNode{
 		loopCtx:    ctx1,
 		loopCancel: cancel,
 	}
@@ -62,7 +62,7 @@ func NewNodeImpl(ctx context.Context) (*NodeImpl, error) {
 	return b, nil
 }
 
-func (i *NodeImpl) Init() error {
+func (i *IndexNode) Init() error {
 	ctx := context.Background()
 	err := funcutil.WaitForComponentHealthy(ctx, i.serviceClient, "IndexService", 10, time.Second)
 
@@ -125,7 +125,7 @@ func (i *NodeImpl) Init() error {
 	return nil
 }
 
-func (i *NodeImpl) Start() error {
+func (i *IndexNode) Start() error {
 	i.sched.Start()
 
 	// Start callbacks
@@ -136,7 +136,7 @@ func (i *NodeImpl) Start() error {
 }
 
 // Close closes the server.
-func (i *NodeImpl) Stop() error {
+func (i *IndexNode) Stop() error {
 	if err := i.closer.Close(); err != nil {
 		return err
 	}
@@ -151,15 +151,15 @@ func (i *NodeImpl) Stop() error {
 	return nil
 }
 
-func (i *NodeImpl) UpdateStateCode(code internalpb2.StateCode) {
+func (i *IndexNode) UpdateStateCode(code internalpb2.StateCode) {
 	i.stateCode = code
 }
 
-func (i *NodeImpl) SetIndexServiceClient(serviceClient typeutil.IndexServiceInterface) {
+func (i *IndexNode) SetIndexServiceClient(serviceClient typeutil.IndexServiceInterface) {
 	i.serviceClient = serviceClient
 }
 
-func (i *NodeImpl) BuildIndex(ctx context.Context, request *indexpb.BuildIndexCmd) (*commonpb.Status, error) {
+func (i *IndexNode) BuildIndex(ctx context.Context, request *indexpb.BuildIndexCmd) (*commonpb.Status, error) {
 	t := &IndexBuildTask{
 		BaseTask: BaseTask{
 			ctx:  ctx,
@@ -185,7 +185,7 @@ func (i *NodeImpl) BuildIndex(ctx context.Context, request *indexpb.BuildIndexCm
 	return ret, nil
 }
 
-func (i *NodeImpl) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+func (i *IndexNode) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	i.sched.IndexBuildQueue.tryToRemoveUselessIndexBuildTask(request.IndexID)
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -194,16 +194,16 @@ func (i *NodeImpl) DropIndex(ctx context.Context, request *indexpb.DropIndexRequ
 }
 
 // AddStartCallback adds a callback in the startServer phase.
-func (i *NodeImpl) AddStartCallback(callbacks ...func()) {
+func (i *IndexNode) AddStartCallback(callbacks ...func()) {
 	i.startCallbacks = append(i.startCallbacks, callbacks...)
 }
 
 // AddCloseCallback adds a callback in the Close phase.
-func (i *NodeImpl) AddCloseCallback(callbacks ...func()) {
+func (i *IndexNode) AddCloseCallback(callbacks ...func()) {
 	i.closeCallbacks = append(i.closeCallbacks, callbacks...)
 }
 
-func (i *NodeImpl) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
+func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
 
 	stateInfo := &internalpb2.ComponentInfo{
 		NodeID:    Params.NodeID,
@@ -221,7 +221,7 @@ func (i *NodeImpl) GetComponentStates(ctx context.Context) (*internalpb2.Compone
 	return ret, nil
 }
 
-func (i *NodeImpl) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (i *IndexNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -229,7 +229,7 @@ func (i *NodeImpl) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResp
 	}, nil
 }
 
-func (i *NodeImpl) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,

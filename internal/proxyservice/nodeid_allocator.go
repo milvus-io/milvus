@@ -15,13 +15,13 @@ type NodeIDAllocator interface {
 	AllocOne() UniqueID
 }
 
-type NaiveNodeIDAllocatorImpl struct {
-	impl *allocator.IDAllocator
-	now  UniqueID
-	mtx  sync.Mutex
+type NaiveNodeIDAllocator struct {
+	allocator *allocator.IDAllocator
+	now       UniqueID
+	mtx       sync.Mutex
 }
 
-func (allocator *NaiveNodeIDAllocatorImpl) AllocOne() UniqueID {
+func (allocator *NaiveNodeIDAllocator) AllocOne() UniqueID {
 	allocator.mtx.Lock()
 	defer func() {
 		// allocator.now++
@@ -31,7 +31,7 @@ func (allocator *NaiveNodeIDAllocatorImpl) AllocOne() UniqueID {
 }
 
 func NewNodeIDAllocator() NodeIDAllocator {
-	return &NaiveNodeIDAllocatorImpl{
+	return &NaiveNodeIDAllocator{
 		now: 1,
 	}
 }

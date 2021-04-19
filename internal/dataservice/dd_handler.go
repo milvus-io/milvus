@@ -10,10 +10,10 @@ import (
 
 type ddHandler struct {
 	meta             *meta
-	segmentAllocator segmentAllocator
+	segmentAllocator segmentAllocatorInterface
 }
 
-func newDDHandler(meta *meta, allocator segmentAllocator) *ddHandler {
+func newDDHandler(meta *meta, allocator segmentAllocatorInterface) *ddHandler {
 	return &ddHandler{
 		meta:             meta,
 		segmentAllocator: allocator,

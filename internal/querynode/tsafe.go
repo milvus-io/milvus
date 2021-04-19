@@ -24,38 +24,38 @@ func (watcher *tSafeWatcher) hasUpdate() {
 	<-watcher.notifyChan
 }
 
-type tSafe interface {
+type tSafer interface {
 	get() Timestamp
 	set(t Timestamp)
 	registerTSafeWatcher(t *tSafeWatcher)
 }
 
-type tSafeImpl struct {
+type tSafe struct {
 	tSafeMu     sync.Mutex // guards all fields
 	tSafe       Timestamp
 	watcherList []*tSafeWatcher
 }
 
-func newTSafe() tSafe {
-	var t tSafe = &tSafeImpl{
+func newTSafe() tSafer {
+	var t tSafer = &tSafe{
 		watcherList: make([]*tSafeWatcher, 0),
 	}
 	return t
 }
 
-func (ts *tSafeImpl) registerTSafeWatcher(t *tSafeWatcher) {
+func (ts *tSafe) registerTSafeWatcher(t *tSafeWatcher) {
 	ts.tSafeMu.Lock()
 	defer ts.tSafeMu.Unlock()
 	ts.watcherList = append(ts.watcherList, t)
 }
 
-func (ts *tSafeImpl) get() Timestamp {
+func (ts *tSafe) get() Timestamp {
 	ts.tSafeMu.Lock()
 	defer ts.tSafeMu.Unlock()
 	return ts.tSafe
 }
 
-func (ts *tSafeImpl) set(t Timestamp) {
+func (ts *tSafe) set(t Timestamp) {
 	ts.tSafeMu.Lock()
 	defer ts.tSafeMu.Unlock()
 
