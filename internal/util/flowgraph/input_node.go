@@ -2,7 +2,6 @@ package flowgraph
 
 import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"log"
 )
 
 type InputNode struct {
@@ -25,15 +24,7 @@ func (inNode *InputNode) InStream() *msgstream.MsgStream {
 
 // empty input and return one *Msg
 func (inNode *InputNode) Operate(in []*Msg) []*Msg {
-	//fmt.Println("Do InputNode operation")
-
 	msgPack := (*inNode.inStream).Consume()
-
-	// TODO: add status
-	if msgPack == nil {
-		log.Println("null msg pack")
-		return nil
-	}
 
 	var msgStreamMsg Msg = &MsgStreamMsg{
 		tsMessages:   msgPack.Msgs,
