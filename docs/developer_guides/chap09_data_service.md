@@ -163,6 +163,24 @@ type InsertChannelRequest struct {
 
 
 
+#### 8.2 Insert Channel
+
+```go
+type InsertRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  PartitionName string
+  DbID UniqueID
+  CollectionID UniqueID
+  PartitionID UniqueID
+  RowData []Blob
+  HashKeys []uint32
+}
+```
+
+
+
 #### 8.2 Data Node Interface
 
 ```go

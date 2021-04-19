@@ -242,25 +242,75 @@ type IDResponse struct {
 
 
 
-#### 10.1 Interfaces (RPC)
+#### 10.2 Dd (Data definitions) Channel
 
-| RPC                | description                                                  |
-| :----------------- | ------------------------------------------------------------ |
-| CreateCollection   | create a collection base on schema statement                 |
-| DropCollection     | drop a collection                                            |
-| HasCollection      | whether or not a collection exists                           |
-| DescribeCollection | show a collection's schema and its descriptive statistics    |
-| ShowCollections    | list all collections                                         |
-| CreatePartition    | create a partition                                           |
-| DropPartition      | drop a partition                                             |
-| HasPartition       | whether or not a partition exists                            |
-| DescribePartition  | show a partition's name and its descriptive statistics       |
-| ShowPartitions     | list a collection's all partitions                           |
-| AllocTimestamp     | allocate a batch of consecutive timestamps                   |
-| AllocID            | allocate a batch of consecutive IDs                          |
-| AssignSegmentID    | assign segment id to insert rows (master determines which segment these rows belong to) |
-| GetSysConfigs      | get system configurations                                    |
-|                    |                                                              |
+* *CreateCollection*
+
+```go
+type CreateCollectionRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  DbID UniqueID
+  CollectionID UniqueID
+  Schema []bytes
+}
+```
+
+* *DropCollection*
+
+```go
+type DropCollectionRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  DbID UniqueID
+  CollectionID UniqueID
+}
+```
+
+* *CreatePartition*
+
+```go
+type CreatePartitionRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  PartitionName string
+  DbID UniqueID
+  CollectionID UniqueID
+  PartitionID UniqueID
+}
+```
+
+* *DropPartition*
+
+```go
+type DropPartitionRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  PartitionName string
+  DbID UniqueID
+  CollectionID UniqueID
+  PartitionID UniqueID
+}
+```
+
+* *CreateIndex*
+
+```go
+type CreateIndexRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  FieldName string
+  DbID UniqueID
+  CollectionID UniqueID
+  FieldID int64
+  Params [] KeyValuePair
+}
+```
 
 
 

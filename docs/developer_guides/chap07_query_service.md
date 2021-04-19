@@ -168,6 +168,24 @@ type CreateQueryChannelResponse struct {
 
 
 
+#### 8.2 Query Channel
+
+```go
+type SearchRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  PartitionNames []string
+  DbID UniqueID
+  CollectionID UniqueID
+  PartitionIDs []UniqueID
+  Dsl string
+  PlaceholderGroup []byte
+}
+```
+
+
+
 #### 8.2 Query Node Interface
 
 ```go
