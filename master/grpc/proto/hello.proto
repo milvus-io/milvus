@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+option go_package = "master";
+
+package milvus;
+
+message HelloRequest{
+string name = 1;
+}
+
+message HelloReply{
+string msg = 1;
+}
+
+service HelloService{
+    rpc SayHello (HelloRequest) returns (HelloReply){}
+}
