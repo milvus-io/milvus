@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"io"
+	"log"
 	"sync/atomic"
 
 	"github.com/opentracing/opentracing-go"
@@ -57,6 +58,10 @@ type QueryNode struct {
 	//opentracing
 	tracer opentracing.Tracer
 	closer io.Closer
+
+	// clients
+	indexClient IndexServiceInterface
+	dataClient  DataServiceInterface
 }
 
 func NewQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
@@ -129,6 +134,14 @@ func (node *QueryNode) Init() error {
 }
 
 func (node *QueryNode) Start() error {
+	if node.indexClient == nil {
+		log.Println("WARN: null index service detected")
+	}
+
+	if node.dataClient == nil {
+		log.Println("WARN: null data service detected")
+	}
+
 	// todo add connectMaster logic
 	// init services and manager
 	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica)
@@ -136,7 +149,7 @@ func (node *QueryNode) Start() error {
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 	node.loadIndexService = newLoadIndexService(node.queryNodeLoopCtx, node.replica)
 	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, node.loadIndexService.fieldStatsChan)
-	node.segManager = newSegmentManager(node.queryNodeLoopCtx, node.replica, node.dataSyncService.dmStream, node.loadIndexService.loadIndexReqChan)
+	node.segManager = newSegmentManager(node.queryNodeLoopCtx, node.dataClient, node.indexClient, node.replica, node.dataSyncService.dmStream, node.loadIndexService.loadIndexReqChan)
 
 	// start services
 	go node.dataSyncService.start()
@@ -173,6 +186,22 @@ func (node *QueryNode) Stop() error {
 	if node.closer != nil {
 		node.closer.Close()
 	}
+	return nil
+}
+
+func (node *QueryNode) SetIndexService(index IndexServiceInterface) error {
+	if index == nil {
+		return errors.New("null index service interface")
+	}
+	node.indexClient = index
+	return nil
+}
+
+func (node *QueryNode) SetDataService(data DataServiceInterface) error {
+	if data == nil {
+		return errors.New("null data service interface")
+	}
+	node.dataClient = data
 	return nil
 }
 

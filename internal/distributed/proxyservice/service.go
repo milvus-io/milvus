@@ -31,6 +31,7 @@ func CreateProxyServiceServer() (*Server, error) {
 func (s *Server) Init() error {
 	s.ctx = context.Background()
 	Params.Init()
+	proxyservice.Params.Init()
 	s.impl, _ = proxyservice.CreateProxyService(s.ctx)
 	s.impl.Init()
 	return nil

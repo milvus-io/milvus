@@ -7,6 +7,7 @@ import (
 )
 
 type UniqueID = typeutil.UniqueID
+type Timestamp = typeutil.Timestamp
 
 type NodeIDAllocator interface {
 	AllocOne() UniqueID

@@ -92,6 +92,7 @@ func (tt *timeTick) tick() error {
 	} else {
 		//log.Printf("proxynode send time tick message")
 	}
+	//log.Println("send current tick: ", tt.currentTick)
 	tt.tickLock.Lock()
 	defer tt.tickLock.Unlock()
 	tt.lastTick = tt.currentTick

@@ -112,12 +112,11 @@ func CreateServer(ctx context.Context) (*Master, error) {
 	if err != nil {
 		return nil, err
 	}
-	pulsarProxyStream := pulsarms.NewPulsarMsgStream(ctx, 1024) //output stream
-	pulsarProxyStream.SetPulsarClient(pulsarAddr)
-	pulsarProxyStream.CreatePulsarConsumers(Params.ProxyTimeTickChannelNames, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), 1024)
-	pulsarProxyStream.Start()
-	var proxyStream ms.MsgStream = pulsarProxyStream
-	proxyTimeTickBarrier := newSoftTimeTickBarrier(ctx, &proxyStream, Params.ProxyIDList, Params.SoftTimeTickBarrierInterval)
+	pulsarProxyServiceStream := pulsarms.NewPulsarMsgStream(ctx, 1024) //output stream
+	pulsarProxyServiceStream.SetPulsarClient(pulsarAddr)
+	pulsarProxyServiceStream.CreatePulsarConsumers(Params.ProxyServiceTimeTickChannelNames, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), 1024)
+	pulsarProxyServiceStream.Start()
+	proxyTimeTickBarrier := newProxyServiceTimeTickBarrier(ctx, pulsarProxyServiceStream)
 	tsMsgProducer.SetProxyTtBarrier(proxyTimeTickBarrier)
 
 	pulsarWriteStream := pulsarms.NewPulsarMsgStream(ctx, 1024) //output stream

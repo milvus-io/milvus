@@ -79,6 +79,21 @@ func (qs *QueryService) Stop() error {
 	return nil
 }
 
+//func (qs *QueryService) SetDataService(p querynode.DataServiceInterface) error {
+//	for k, v := range qs.queryNodeClient {
+//		v.Set
+//	}
+//	return c.SetDataService(p)
+//}
+//
+//func (qs *QueryService) SetIndexService(p querynode.IndexServiceInterface) error {
+//	c, ok := s.core.(*cms.Core)
+//	if !ok {
+//		return errors.Errorf("set index service failed")
+//	}
+//	return c.SetIndexService(p)
+//}
+
 func (qs *QueryService) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	serviceComponentInfo := &internalpb2.ComponentInfo{
 		NodeID:    Params.QueryServiceID,
