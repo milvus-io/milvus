@@ -24,7 +24,7 @@ type segmentLoader struct {
 
 	dataService types.DataService
 
-	kv kv.Base // minio kv
+	kv kv.BaseKV // minio kv
 
 	indexLoader *indexLoader
 }

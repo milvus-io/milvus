@@ -51,10 +51,10 @@ type GlobalTSOAllocator struct {
 }
 
 // NewGlobalTSOAllocator creates a new global TSO allocator.
-func NewGlobalTSOAllocator(key string, kvBase kv.TxnBase) *GlobalTSOAllocator {
+func NewGlobalTSOAllocator(key string, txnKV kv.TxnKV) *GlobalTSOAllocator {
 	return &GlobalTSOAllocator{
 		tso: &timestampOracle{
-			kvBase:        kvBase,
+			txnKV:         txnKV,
 			saveInterval:  3 * time.Second,
 			maxResetTSGap: func() time.Duration { return 3 * time.Second },
 			key:           key,

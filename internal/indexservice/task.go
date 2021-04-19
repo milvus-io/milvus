@@ -65,7 +65,7 @@ type IndexAddTask struct {
 	indexBuildID      UniqueID
 	idAllocator       *allocator.GlobalIDAllocator
 	buildQueue        TaskQueue
-	kv                kv.Base
+	kv                kv.BaseKV
 	builderClient     types.IndexNode
 	nodeClients       *PriorityQueue
 	buildClientNodeID UniqueID

@@ -25,7 +25,7 @@ type errCollectionNotFound struct {
 }
 type meta struct {
 	sync.RWMutex
-	client      kv.TxnBase                          // client of a reliable kv service, i.e. etcd client
+	client      kv.TxnKV                            // client of a reliable kv service, i.e. etcd client
 	collections map[UniqueID]*datapb.CollectionInfo // collection id to collection info
 	segments    map[UniqueID]*datapb.SegmentInfo    // segment id to segment info
 }
@@ -46,7 +46,7 @@ func (err errCollectionNotFound) Error() string {
 	return fmt.Sprintf("collection %d not found", err.collectionID)
 }
 
-func newMeta(kv kv.TxnBase) (*meta, error) {
+func newMeta(kv kv.TxnKV) (*meta, error) {
 	mt := &meta{
 		client:      kv,
 		collections: make(map[UniqueID]*datapb.CollectionInfo),

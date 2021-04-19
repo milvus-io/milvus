@@ -26,13 +26,13 @@ import (
 )
 
 type metaTable struct {
-	client            kv.TxnBase                     // client of a reliable kv service, i.e. etcd client
+	client            kv.TxnKV                       // client of a reliable kv service, i.e. etcd client
 	indexBuildID2Meta map[UniqueID]indexpb.IndexMeta // index build id to index meta
 
 	lock sync.RWMutex
 }
 
-func NewMetaTable(kv kv.TxnBase) (*metaTable, error) {
+func NewMetaTable(kv kv.TxnKV) (*metaTable, error) {
 	mt := &metaTable{
 		client: kv,
 		lock:   sync.RWMutex{},

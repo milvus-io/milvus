@@ -56,7 +56,7 @@ func combKey(channelName string, id UniqueID) (string, error) {
 
 type rocksmq struct {
 	store       *gorocksdb.DB
-	kv          kv.Base
+	kv          kv.BaseKV
 	idAllocator allocator.GIDAllocator
 	channelMu   map[string]*sync.Mutex
 
