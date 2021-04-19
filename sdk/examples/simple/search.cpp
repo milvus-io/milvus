@@ -20,7 +20,7 @@
 const int TOP_K = 10;
 const int LOOP = 1000;
 const int DIM = 128;
-
+std::default_random_engine eng(42);
 
 const milvus::VectorParam 
 get_vector_param() {
@@ -28,7 +28,6 @@ get_vector_param() {
   milvus::VectorParam vectorParam;
   std::vector<milvus::VectorData> vector_records;
 
-  std::default_random_engine eng(42);
   std::normal_distribution<float> dis(0, 1);
  
   for (int j = 0; j < 1; ++j) {

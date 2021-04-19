@@ -21,18 +21,18 @@
 #include "utils/TimeRecorder.h"
 #include <random>
 
-const int N = 200000;
+const int N = 6000000;
 const int DIM = 128;
-const int LOOP = 100;
+const int LOOP = 2000;
 int ID_START = 0;
+std::default_random_engine eng(42);
 
-int generate_ids(std::vector<int64_t> & ids_array, int count);
+void generate_ids(std::vector<int64_t> & ids_array, int count);
 
-int generate_ids(std::vector<int64_t>& ids_array, int count) {
+void generate_ids(std::vector<int64_t>& ids_array, int count) {
   for (int i = 0; i < count; i++) {
     ids_array.push_back(ID_START++);
   }
-  return 0;
 }
 
 const milvus::FieldValue GetData(int count) {
@@ -44,7 +44,6 @@ const milvus::FieldValue GetData(int count) {
     int32_data.push_back(ID_START++);
   }
 
-  std::default_random_engine eng(42);
   std::normal_distribution<float> dis(0, 1);
   std::vector<milvus::VectorData> vector_data;
   for (int i = 0; i < count; i++) {

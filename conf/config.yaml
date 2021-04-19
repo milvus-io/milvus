@@ -14,7 +14,7 @@ master:
   port: 53100
   pulsarmoniterinterval: 1
   pulsartopic: "monitor-topic"
-  segmentthreshole: 104857600
+  segmentthreshole: 1073741824
   proxyidlist: [0]
   querynodenum: 1
   writenodenum: 1

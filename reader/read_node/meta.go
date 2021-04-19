@@ -95,7 +95,7 @@ func (node *QueryNode) processCollectionCreate(id string, value string) {
 		println("error of json 2 collection")
 		println(err.Error())
 	}
-	printCollectionStruct(collection)
+	//printCollectionStruct(collection)
 	newCollection := node.NewCollection(collection.ID, collection.Name, collection.GrpcMarshalString)
 	for _, partitionTag := range collection.PartitionTags {
 		newCollection.NewPartition(partitionTag)
@@ -109,7 +109,7 @@ func (node *QueryNode) processSegmentCreate(id string, value string) {
 		println("error of json 2 segment")
 		println(err.Error())
 	}
-	printSegmentStruct(segment)
+	//printSegmentStruct(segment)
 
 	if !isSegmentChannelRangeInQueryNodeChannelRange(segment) {
 		return
