@@ -650,8 +650,9 @@ func TestMasterService(t *testing.T) {
 		rsp, err := core.DescribeIndex(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
-		assert.Equal(t, len(rsp.IndexDescriptions), 1)
-		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, Params.DefaultIndexName)
+		assert.Equal(t, len(rsp.IndexDescriptions), 2)
+		idxNames := []string{rsp.IndexDescriptions[0].IndexName, rsp.IndexDescriptions[1].IndexName}
+		assert.ElementsMatch(t, idxNames, []string{"testColl_index_100", Params.DefaultIndexName})
 	})
 
 	t.Run("flush segment", func(t *testing.T) {
