@@ -98,7 +98,7 @@ func (t *createCollectionTask) Execute() error {
 		return errors.New("save collection failed")
 	}
 
-	t.mt.collMeta[collectionId] = collection
+	t.mt.collId2Meta[collectionId] = collection
 
 	_ = t.Notify()
 	return nil
@@ -141,7 +141,7 @@ func (t *dropCollectionTask) Execute() error {
 		return errors.New("save collection failed")
 	}
 
-	delete(t.mt.collMeta, collectionId)
+	delete(t.mt.collId2Meta, collectionId)
 
 	_ = t.Notify()
 	return nil
@@ -244,7 +244,7 @@ func (t *showCollectionsTask) Execute() error {
 	}
 
 	collections := make([]string, 0)
-	for _, collection := range t.mt.collMeta {
+	for _, collection := range t.mt.collId2Meta {
 		collections = append(collections, collection.Schema.Name)
 	}
 
