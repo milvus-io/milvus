@@ -119,7 +119,8 @@ func (node *QueryNode) InitQueryNodeCollection() {
 	node.Collections = append(node.Collections, collection)
 	var partition, _ = collection.NewPartition("partition1")
 	collection.Partitions = append(collection.Partitions, partition)
-	var segment, _ = partition.NewSegment()
+	// TODO: add segment id
+	var segment, _ = partition.NewSegment(0)
 	partition.Segments = append(partition.Segments, segment)
 }
 
@@ -128,10 +129,11 @@ func (node *QueryNode) SegmentsManagement() {
 	for _, collection := range node.Collections {
 		for _, partition := range collection.Partitions {
 			for _, segment := range partition.Segments {
+				// TODO: check segment status
 				if timeSync >= segment.SegmentCloseTime {
 					segment.Close()
 					// TODO: add atomic segment id
-					var newSegment, _ = partition.NewSegment()
+					var newSegment, _ = partition.NewSegment(0)
 					newSegment.SegmentCloseTime = timeSync + SegmentLifetime
 					partition.Segments = append(partition.Segments, newSegment)
 				}
