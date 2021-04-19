@@ -2,7 +2,6 @@
 #include "common/Schema.h"
 #include "ConcurrentVector.h"
 #include "AckResponder.h"
-#include "segcore/Record.h"
 
 namespace milvus::segcore {
 struct InsertRecord {

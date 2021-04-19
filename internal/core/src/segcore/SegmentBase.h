@@ -52,7 +52,10 @@ class SegmentBase {
     virtual Status
     Delete(int64_t reserved_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) = 0;
 
- public:
+    // query contains metadata of
+    virtual Status
+    QueryDeprecated(query::QueryDeprecatedPtr query, Timestamp timestamp, QueryResult& results) = 0;
+
     virtual Status
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup* placeholder_groups[],

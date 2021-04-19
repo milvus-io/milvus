@@ -37,5 +37,6 @@ class AckResponder {
     std::shared_mutex mutex_;
     std::set<int64_t> acks_ = {0};
     std::atomic<int64_t> minimum_ = 0;
+    // std::atomic<int64_t> maximum_ = 0;
 };
 }  // namespace milvus::segcore
