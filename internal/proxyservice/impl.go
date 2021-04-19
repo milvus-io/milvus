@@ -110,6 +110,8 @@ func (s *ProxyService) Init() error {
 
 	serviceTimeTickMsgStream, _ := s.msFactory.NewTtMsgStream(s.ctx)
 	serviceTimeTickMsgStream.AsProducer([]string{Params.ServiceTimeTickChannel})
+	// FIXME(wxyu): use log.Debug instead
+	log.Println("proxyservice AsProducer: ", []string{Params.ServiceTimeTickChannel})
 	log.Println("create service time tick producer channel: ", []string{Params.ServiceTimeTickChannel})
 
 	channels := make([]string, Params.InsertChannelNum)
@@ -119,11 +121,14 @@ func (s *ProxyService) Init() error {
 	}
 	insertTickMsgStream, _ := s.msFactory.NewMsgStream(s.ctx)
 	insertTickMsgStream.AsProducer(channels)
+	// FIXME(wxyu): use log.Debug instead
+	log.Println("proxyservice AsProducer: ", channels)
 	log.Println("create insert time tick producer channel: ", channels)
 
 	nodeTimeTickMsgStream, _ := s.msFactory.NewMsgStream(s.ctx)
 	nodeTimeTickMsgStream.AsConsumer(Params.NodeTimeTickChannel,
 		"proxyservicesub") // TODO: add config
+	log.Println("proxynode AsConsumer: ", Params.NodeTimeTickChannel, " : ", "proxyservicesub")
 	log.Println("create node time tick consumer channel: ", Params.NodeTimeTickChannel)
 
 	ttBarrier := newSoftTimeTickBarrier(s.ctx, nodeTimeTickMsgStream, []UniqueID{1}, 10)

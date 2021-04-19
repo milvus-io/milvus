@@ -81,6 +81,7 @@ func newServiceTimeNode(ctx context.Context, replica ReplicaInterface, factory m
 
 	timeTimeMsgStream, _ := factory.NewMsgStream(ctx)
 	timeTimeMsgStream.AsProducer([]string{Params.QueryTimeTickChannelName})
+	log.Debug("querynode AsProducer: " + Params.QueryTimeTickChannelName)
 
 	return &serviceTimeNode{
 		baseNode:          baseNode,

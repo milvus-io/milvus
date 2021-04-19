@@ -184,6 +184,8 @@ func (node *ProxyNode) Init() error {
 
 	node.queryMsgStream, _ = node.msFactory.NewMsgStream(node.ctx)
 	node.queryMsgStream.AsProducer(Params.SearchChannelNames)
+	// FIXME(wxyu): use log.Debug instead
+	log.Println("proxynode AsProducer: ", Params.SearchChannelNames)
 	log.Println("create query message stream ...")
 
 	masterAddr := Params.MasterAddress
@@ -211,6 +213,8 @@ func (node *ProxyNode) Init() error {
 
 	node.manipulationMsgStream, _ = node.msFactory.NewMsgStream(node.ctx)
 	node.manipulationMsgStream.AsProducer(Params.InsertChannelNames)
+	// FIXME(wxyu): use log.Debug instead
+	log.Println("proxynode AsProducer: ", Params.InsertChannelNames)
 	repackFunc := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
 		return insertRepackFunc(tsMsgs, hashKeys, node.segAssigner, true)
 	}

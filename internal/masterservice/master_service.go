@@ -454,6 +454,7 @@ func (c *Core) setMsgStreams() error {
 
 	proxyTimeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
 	proxyTimeTickStream.AsConsumer([]string{Params.ProxyTimeTickChannel}, Params.MsgChannelSubName)
+	log.Debug("master AsConsumer: " + Params.ProxyTimeTickChannel + " : " + Params.MsgChannelSubName)
 	proxyTimeTickStream.Start()
 
 	// master time tick channel
@@ -462,6 +463,7 @@ func (c *Core) setMsgStreams() error {
 	}
 	timeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
 	timeTickStream.AsProducer([]string{Params.TimeTickChannel})
+	log.Debug("masterservice AsProducer: " + Params.TimeTickChannel)
 
 	// master dd channel
 	if Params.DdChannel == "" {
@@ -469,6 +471,7 @@ func (c *Core) setMsgStreams() error {
 	}
 	ddStream, _ := c.msFactory.NewMsgStream(c.ctx)
 	ddStream.AsProducer([]string{Params.DdChannel})
+	log.Debug("masterservice AsProducer: " + Params.DdChannel)
 
 	c.SendTimeTick = func(t typeutil.Timestamp) error {
 		msgPack := ms.MsgPack{}
@@ -602,6 +605,7 @@ func (c *Core) setMsgStreams() error {
 	}
 	dataServiceStream, _ := c.msFactory.NewMsgStream(c.ctx)
 	dataServiceStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, Params.MsgChannelSubName)
+	log.Debug("master AsConsumer: " + Params.DataServiceSegmentChannel + " : " + Params.MsgChannelSubName)
 	dataServiceStream.Start()
 	c.DataServiceSegmentChan = make(chan *datapb.SegmentInfo, 1024)
 	c.DataNodeSegmentFlushCompletedChan = make(chan typeutil.UniqueID, 1024)

@@ -655,18 +655,21 @@ func newInsertBufferNode(ctx context.Context, flushMeta *metaTable,
 	//input stream, data node time tick
 	wTt, _ := factory.NewMsgStream(ctx)
 	wTt.AsProducer([]string{Params.TimeTickChannelName})
+	log.Debug("datanode AsProducer: " + Params.TimeTickChannelName)
 	var wTtMsgStream msgstream.MsgStream = wTt
 	wTtMsgStream.Start()
 
 	// update statistics channel
 	segS, _ := factory.NewMsgStream(ctx)
 	segS.AsProducer([]string{Params.SegmentStatisticsChannelName})
+	log.Debug("datanode AsProducer: " + Params.SegmentStatisticsChannelName)
 	var segStatisticsMsgStream msgstream.MsgStream = segS
 	segStatisticsMsgStream.Start()
 
 	// segment flush completed channel
 	cf, _ := factory.NewMsgStream(ctx)
 	cf.AsProducer([]string{Params.CompleteFlushChannelName})
+	log.Debug("datanode AsProducer: " + Params.CompleteFlushChannelName)
 	var completeFlushStream msgstream.MsgStream = cf
 	completeFlushStream.Start()
 

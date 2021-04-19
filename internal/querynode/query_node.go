@@ -15,6 +15,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync/atomic"
 
 	"errors"
@@ -301,10 +302,12 @@ func (node *QueryNode) AddQueryChannel(in *queryPb.AddQueryChannelsRequest) (*co
 	consumeChannels := []string{in.RequestChannelID}
 	consumeSubName := Params.MsgChannelSubName
 	node.searchService.searchMsgStream.AsConsumer(consumeChannels, consumeSubName)
+	log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
 
 	// add result channel
 	producerChannels := []string{in.ResultChannelID}
 	node.searchService.searchResultMsgStream.AsProducer(producerChannels)
+	log.Debug("querynode AsProducer: " + strings.Join(producerChannels, ", "))
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -391,6 +394,7 @@ func (node *QueryNode) WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*com
 	consumeChannels := in.ChannelIDs
 	consumeSubName := Params.MsgChannelSubName
 	node.dataSyncService.dmStream.AsConsumer(consumeChannels, consumeSubName)
+	log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
