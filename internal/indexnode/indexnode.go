@@ -11,6 +11,7 @@ import (
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
@@ -23,6 +24,8 @@ type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
 type IndexNode struct {
+	state internalpb2.StateCode
+
 	loopCtx    context.Context
 	loopCancel func()
 
@@ -161,4 +164,30 @@ func (i *IndexNode) BuildIndex(request *indexpb.BuildIndexCmd) (*commonpb.Status
 		return ret, nil
 	}
 	return ret, nil
+}
+
+func (i *IndexNode) GetComponentStates() (*internalpb2.ComponentStates, error) {
+
+	stateInfo := &internalpb2.ComponentInfo{
+		NodeID:    Params.NodeID,
+		Role:      "IndexNode",
+		StateCode: i.state,
+	}
+
+	ret := &internalpb2.ComponentStates{
+		State:              stateInfo,
+		SubcomponentStates: nil, // todo add subcomponents states
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+	}
+	return ret, nil
+}
+
+func (i *IndexNode) GetTimeTickChannel() (string, error) {
+	return "", nil
+}
+
+func (i *IndexNode) GetStatisticsChannel() (string, error) {
+	return "", nil
 }

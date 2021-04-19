@@ -80,13 +80,14 @@ verifiers: getdeps cppcheck fmt static-check ruleguard
 
 master: build-cpp
 	@echo "Building each component's binary to './bin'"
-	@echo "Building master ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="0" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/master $(PWD)/cmd/master/main.go 1>/dev/null
+	@echo "Building masterservice ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/masterservice $(PWD)/cmd/masterservice/main.go 1>/dev/null
+
 
 # Builds various components locally.
 proxynode: build-cpp
 	@echo "Building each component's binary to './bin'"
-	@echo "Building proxy ..."
+	@echo "Building proxy node ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="0" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/proxynode $(PWD)/cmd/proxy/node/proxy_node.go 1>/dev/null
 
 # Builds various components locally.
@@ -94,6 +95,7 @@ querynode: build-cpp
 	@echo "Building each component's binary to './bin'"
 	@echo "Building query node ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/querynode $(PWD)/cmd/querynode/query_node.go 1>/dev/null
+
 
 # Builds various components locally.
 writenode: build-cpp
@@ -110,8 +112,13 @@ datanode: build-cpp
 # Builds various components locally.
 indexnode: build-cpp
 	@echo "Building each component's binary to './bin'"
-	@echo "Building indexbuilder ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/indexbuilder $(PWD)/cmd/indexbuilder/indexbuilder.go 1>/dev/null
+	@echo "Building distributed indexnode ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/distributed/indexnode $(PWD)/cmd/distributed/indexnode/main.go 1>/dev/null
+
+indexservice: build-cpp
+	@echo "Building each component's binary to './bin'"
+	@echo "Building distributed indexservice ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/distributed/indexservice $(PWD)/cmd/distributed/indexservice/main.go 1>/dev/null
 
 
 # Builds various components locally.

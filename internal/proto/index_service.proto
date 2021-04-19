@@ -6,6 +6,7 @@ option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/ind
 
 import "common.proto";
 import "internal.proto";
+import "milvus.proto";
 
 
 message RegisterNodeRequest {
@@ -93,6 +94,10 @@ service IndexService {
   rpc GetIndexStates(IndexStatesRequest) returns (IndexStatesResponse) {}
   rpc GetIndexFilePaths(IndexFilePathsRequest) returns (IndexFilePathsResponse){}
   rpc NotifyBuildIndex(BuildIndexNotification) returns (common.Status) {}
+
+  rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
+  rpc GetTimeTickChannel(common.Empty) returns(milvus.StringResponse) {}
+  rpc GetStatisticsChannel(common.Empty) returns(milvus.StringResponse){}
 }
 
 
@@ -106,4 +111,7 @@ service IndexNode {
    */
   rpc BuildIndex(BuildIndexCmd) returns (common.Status){}
 
+  rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
+  rpc GetTimeTickChannel(common.Empty) returns(milvus.StringResponse) {}
+  rpc GetStatisticsChannel(common.Empty) returns(milvus.StringResponse){}
 }
