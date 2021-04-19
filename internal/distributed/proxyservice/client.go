@@ -49,10 +49,6 @@ func (c *Client) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMe
 }
 
 func (c *Client) GetTimeTickChannel() (string, error) {
-	err := c.tryConnect()
-	if err != nil {
-		return "", err
-	}
 	response, err := c.proxyServiceClient.GetTimeTickChannel(c.ctx, &commonpb.Empty{})
 	if err != nil {
 		return "", err
@@ -61,10 +57,6 @@ func (c *Client) GetTimeTickChannel() (string, error) {
 }
 
 func (c *Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	err := c.tryConnect()
-	if err != nil {
-		return nil, err
-	}
 	return c.proxyServiceClient.GetComponentStates(c.ctx, &commonpb.Empty{})
 }
 

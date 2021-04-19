@@ -35,7 +35,7 @@ func (tt *TimeTickImpl) Start() error {
 			select {
 			case <-tt.ctx.Done():
 				log.Println("time tick loop was canceled by context!")
-				return
+				break
 			default:
 				current, err := tt.ttBarrier.GetTimeTick()
 				if err != nil {
