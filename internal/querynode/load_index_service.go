@@ -107,17 +107,28 @@ func (lis *loadIndexService) start() {
 					log.Println("type assertion failed for LoadIndexMsg")
 					continue
 				}
-				/* TODO: debug
-				// 1. use msg's index paths to get index bytes
-				indexBuffer := lis.loadIndex(indexMsg.IndexPaths)
-				// 2. use index bytes and index path to update segment
-				err := lis.updateSegmentIndex(indexBuffer, indexMsg.IndexPaths, indexMsg.SegmentID)
-				if err != nil {
-					log.Println(err)
-					continue
-				}
-				*/
-				// 3. update segment index stats
+				//// 1. use msg's index paths to get index bytes
+				//var indexBuffer [][]byte
+				//var err error
+				//fn := func() error {
+				//	indexBuffer, err = lis.loadIndex(indexMsg.IndexPaths)
+				//	if err != nil {
+				//		return err
+				//	}
+				//	return nil
+				//}
+				//err = msgstream.Retry(5, time.Millisecond*200, fn)
+				//if err != nil {
+				//	log.Println(err)
+				//	continue
+				//}
+				//// 2. use index bytes and index path to update segment
+				//err = lis.updateSegmentIndex(indexBuffer, indexMsg)
+				//if err != nil {
+				//	log.Println(err)
+				//	continue
+				//}
+				//3. update segment index stats
 				err := lis.updateSegmentIndexStats(indexMsg)
 				if err != nil {
 					log.Println(err)
@@ -216,7 +227,7 @@ func (lis *loadIndexService) updateSegmentIndexStats(indexMsg *msgstream.LoadInd
 	return nil
 }
 
-func (lis *loadIndexService) loadIndex(indexPath []string) [][]byte {
+func (lis *loadIndexService) loadIndex(indexPath []string) ([][]byte, error) {
 	index := make([][]byte, 0)
 
 	for _, path := range indexPath {
@@ -224,13 +235,12 @@ func (lis *loadIndexService) loadIndex(indexPath []string) [][]byte {
 		binarySetKey := filepath.Base(path)
 		indexPiece, err := (*lis.client).Load(binarySetKey)
 		if err != nil {
-			log.Println(err)
-			return nil
+			return nil, err
 		}
 		index = append(index, []byte(indexPiece))
 	}
 
-	return index
+	return index, nil
 }
 
 func (lis *loadIndexService) updateSegmentIndex(bytesIndex [][]byte, loadIndexMsg *msgstream.LoadIndexMsg) error {
@@ -239,21 +249,22 @@ func (lis *loadIndexService) updateSegmentIndex(bytesIndex [][]byte, loadIndexMs
 		return err
 	}
 
-	loadIndexInfo, err := NewLoadIndexInfo()
+	loadIndexInfo, err := newLoadIndexInfo()
+	defer deleteLoadIndexInfo(loadIndexInfo)
 	if err != nil {
 		return err
 	}
-	err = loadIndexInfo.AppendFieldInfo(loadIndexMsg.FieldName, loadIndexMsg.FieldID)
+	err = loadIndexInfo.appendFieldInfo(loadIndexMsg.FieldName, loadIndexMsg.FieldID)
 	if err != nil {
 		return err
 	}
 	for _, indexParam := range loadIndexMsg.IndexParams {
-		err = loadIndexInfo.AppendIndexParam(indexParam.Key, indexParam.Value)
+		err = loadIndexInfo.appendIndexParam(indexParam.Key, indexParam.Value)
 		if err != nil {
 			return err
 		}
 	}
-	err = loadIndexInfo.AppendIndex(bytesIndex, loadIndexMsg.IndexPaths)
+	err = loadIndexInfo.appendIndex(bytesIndex, loadIndexMsg.IndexPaths)
 	if err != nil {
 		return err
 	}
