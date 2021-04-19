@@ -12,16 +12,18 @@ type dataSyncService struct {
 	fg         *flowgraph.TimeTickedFlowGraph
 	ddChan     chan *ddlFlushSyncMsg
 	insertChan chan *insertFlushSyncMsg
+	replica    collectionReplica
 }
 
 func newDataSyncService(ctx context.Context,
-	ddChan chan *ddlFlushSyncMsg, insertChan chan *insertFlushSyncMsg) *dataSyncService {
+	ddChan chan *ddlFlushSyncMsg, insertChan chan *insertFlushSyncMsg, replica collectionReplica) *dataSyncService {
 
 	return &dataSyncService{
 		ctx:        ctx,
 		fg:         nil,
 		ddChan:     ddChan,
 		insertChan: insertChan,
+		replica:    replica,
 	}
 }
 
@@ -46,8 +48,8 @@ func (dsService *dataSyncService) initNodes() {
 
 	var filterDmNode Node = newFilteredDmNode()
 
-	var ddNode Node = newDDNode(dsService.ctx, dsService.ddChan)
-	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, dsService.insertChan)
+	var ddNode Node = newDDNode(dsService.ctx, dsService.ddChan, dsService.replica)
+	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, dsService.insertChan, dsService.replica)
 
 	dsService.fg.AddNode(&dmStreamNode)
 	dsService.fg.AddNode(&ddStreamNode)

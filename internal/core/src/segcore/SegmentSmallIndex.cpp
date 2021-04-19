@@ -349,18 +349,11 @@ SegmentSmallIndex::FillTargetEntry(const query::Plan* plan, QueryResult& results
     Assert(results.result_offsets_.size() == size);
     Assert(results.row_data_.size() == 0);
 
-    // TODO: deprecate
-    results.result_ids_.clear();
-    results.result_ids_.resize(size);
-
     if (plan->schema_.get_is_auto_id()) {
         auto& uids = record_.uids_;
         for (int64_t i = 0; i < size; ++i) {
             auto seg_offset = results.internal_seg_offsets_[i];
             auto row_id = seg_offset == -1 ? -1 : uids[seg_offset];
-
-            // TODO: deprecate
-            results.result_ids_[i] = row_id;
 
             std::vector<char> blob(sizeof(row_id));
             memcpy(blob.data(), &row_id, sizeof(row_id));
@@ -376,9 +369,6 @@ SegmentSmallIndex::FillTargetEntry(const query::Plan* plan, QueryResult& results
         for (int64_t i = 0; i < size; ++i) {
             auto seg_offset = results.internal_seg_offsets_[i];
             auto row_id = seg_offset == -1 ? -1 : uids->operator[](seg_offset);
-
-            // TODO: deprecate
-            results.result_ids_[i] = row_id;
 
             std::vector<char> blob(sizeof(row_id));
             memcpy(blob.data(), &row_id, sizeof(row_id));

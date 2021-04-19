@@ -14,10 +14,10 @@
 #include "segcore/reduce_c.h"
 
 #include "segcore/Reduce.h"
-#include "utils/Types.h"
+#include "common/Types.h"
 #include "pb/service_msg.pb.h"
 
-using SearchResult = milvus::engine::QueryResult;
+using SearchResult = milvus::QueryResult;
 
 int
 MergeInto(int64_t num_queries, int64_t topk, float* distances, int64_t* uids, float* new_distances, int64_t* new_uids) {

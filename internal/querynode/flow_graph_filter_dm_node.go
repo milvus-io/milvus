@@ -2,7 +2,6 @@ package querynode
 
 import (
 	"log"
-	"math"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -60,7 +59,6 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 		}
 	}
 
-	iMsg.gcRecord = ddMsg.gcRecord
 	var res Msg = &iMsg
 	return []*Msg{&res}
 }
@@ -83,35 +81,17 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		log.Println("Error, misaligned messages detected")
 		return nil
 	}
-
 	tmpTimestamps := make([]Timestamp, 0)
 	tmpRowIDs := make([]int64, 0)
 	tmpRowData := make([]*commonpb.Blob, 0)
-
-	// calculate valid time range
-	timeBegin := Timestamp(0)
-	timeEnd := Timestamp(math.MaxUint64)
-	for _, record := range records {
-		if record.createOrDrop && timeBegin < record.timestamp {
-			timeBegin = record.timestamp
-		}
-		if !record.createOrDrop && timeEnd > record.timestamp {
-			timeEnd = record.timestamp
-		}
-	}
-
+	targetTimestamp := records[len(records)-1].timestamp
 	for i, t := range msg.Timestamps {
-		if t >= timeBegin && t <= timeEnd {
+		if t >= targetTimestamp {
 			tmpTimestamps = append(tmpTimestamps, t)
 			tmpRowIDs = append(tmpRowIDs, msg.RowIDs[i])
 			tmpRowData = append(tmpRowData, msg.RowData[i])
 		}
 	}
-
-	if len(tmpRowIDs) <= 0 {
-		return nil
-	}
-
 	msg.Timestamps = tmpTimestamps
 	msg.RowIDs = tmpRowIDs
 	msg.RowData = tmpRowData

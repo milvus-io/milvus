@@ -48,7 +48,7 @@ type SegmentDescription struct {
 	CloseTime Timestamp
 }
 
-func (c *Client) FlushSegment(segmentID UniqueID) error {
+func (c *Client) FlushSegment(segmentID UniqueID, collectionID UniqueID, partitionTag string, timestamp Timestamp) error {
 	baseMsg := msgstream.BaseMsg{
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
@@ -56,9 +56,11 @@ func (c *Client) FlushSegment(segmentID UniqueID) error {
 	}
 
 	flushMsg := internalPb.FlushMsg{
-		MsgType:   internalPb.MsgType_kFlush,
-		SegmentID: segmentID,
-		Timestamp: Timestamp(0),
+		MsgType:      internalPb.MsgType_kFlush,
+		SegmentID:    segmentID,
+		CollectionID: collectionID,
+		PartitionTag: partitionTag,
+		Timestamp:    timestamp,
 	}
 
 	fMsg := &msgstream.FlushMsg{

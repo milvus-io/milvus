@@ -11,9 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
-
 	minioKV "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -38,16 +35,17 @@ type loadIndexService struct {
 func newLoadIndexService(ctx context.Context, replica collectionReplica) *loadIndexService {
 	ctx1, cancel := context.WithCancel(ctx)
 
-	// init minio
-	minioClient, err := minio.New(Params.MinioEndPoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(Params.MinioAccessKeyID, Params.MinioSecretAccessKey, ""),
-		Secure: Params.MinioUseSSLStr,
-	})
-	if err != nil {
-		panic(err)
+	option := &minioKV.Option{
+		Address:           Params.MinioEndPoint,
+		AccessKeyID:       Params.MinioAccessKeyID,
+		SecretAccessKeyID: Params.MinioSecretAccessKey,
+		UseSSL:            Params.MinioUseSSLStr,
+		CreateBucket:      true,
+		BucketName:        Params.MinioBucketName,
 	}
 
-	MinioKV, err := minioKV.NewMinIOKV(ctx1, minioClient, Params.MinioBucketName)
+	// TODO: load bucketName from config
+	MinioKV, err := minioKV.NewMinIOKV(ctx1, option)
 	if err != nil {
 		panic(err)
 	}

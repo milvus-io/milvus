@@ -83,5 +83,10 @@ services:
     networks:
       - milvus
 
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    networks:
+      - milvus
+
 networks:
   milvus:
