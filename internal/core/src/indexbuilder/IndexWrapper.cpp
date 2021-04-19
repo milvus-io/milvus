@@ -19,7 +19,6 @@
 #include "utils/EasyAssert.h"
 #include "IndexWrapper.h"
 #include "indexbuilder/utils.h"
-#include "index/knowhere/knowhere/index/vector_index/ConfAdapterMgr.h"
 
 namespace milvus {
 namespace indexbuilder {
@@ -30,10 +29,10 @@ IndexWrapper::IndexWrapper(const char* serialized_type_params, const char* seria
 
     parse();
 
-    auto index_mode = get_index_mode();
-    auto index_type = get_index_type();
-    auto metric_type = get_metric_type();
-    AssertInfo(!is_unsupported(index_type, metric_type), index_type + " doesn't support metric: " + metric_type);
+    std::map<std::string, knowhere::IndexMode> mode_map = {{"CPU", knowhere::IndexMode::MODE_CPU},
+                                                           {"GPU", knowhere::IndexMode::MODE_GPU}};
+    auto mode = get_config_by_name<std::string>("index_mode");
+    auto index_mode = mode.has_value() ? mode_map[mode.value()] : knowhere::IndexMode::MODE_CPU;
 
     index_ = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(get_index_type(), index_mode);
     Assert(index_ != nullptr);
@@ -155,11 +154,6 @@ IndexWrapper::dim() {
 void
 IndexWrapper::BuildWithoutIds(const knowhere::DatasetPtr& dataset) {
     auto index_type = get_index_type();
-    auto index_mode = get_index_mode();
-    config_[knowhere::meta::ROWS] = dataset->Get<int64_t>(knowhere::meta::ROWS);
-    auto conf_adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
-    AssertInfo(conf_adapter->CheckTrain(config_, index_mode), "something wrong in index parameters!");
-
     if (is_in_need_id_list(index_type)) {
         PanicInfo(std::string(index_type) + " doesn't support build without ids yet!");
     }
@@ -179,11 +173,6 @@ IndexWrapper::BuildWithoutIds(const knowhere::DatasetPtr& dataset) {
 void
 IndexWrapper::BuildWithIds(const knowhere::DatasetPtr& dataset) {
     Assert(dataset->data().find(milvus::knowhere::meta::IDS) != dataset->data().end());
-    auto index_type = get_index_type();
-    auto index_mode = get_index_mode();
-    config_[knowhere::meta::ROWS] = dataset->Get<int64_t>(knowhere::meta::ROWS);
-    auto conf_adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
-    AssertInfo(conf_adapter->CheckTrain(config_, index_mode), "something wrong in index parameters!");
     //    index_->Train(dataset, config_);
     //    index_->Add(dataset, config_);
     index_->BuildAll(dataset, config_);
@@ -272,31 +261,6 @@ IndexWrapper::get_index_type() {
     // the index_type of all ivf-based index will change to ivf flat after loaded
     auto type = get_config_by_name<std::string>("index_type");
     return type.has_value() ? type.value() : knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
-}
-
-std::string
-IndexWrapper::get_metric_type() {
-    auto type = get_config_by_name<std::string>(knowhere::Metric::TYPE);
-    if (type.has_value()) {
-        return type.value();
-    } else {
-        auto index_type = get_index_type();
-        if (is_in_bin_list(index_type)) {
-            return knowhere::Metric::JACCARD;
-        } else {
-            return knowhere::Metric::L2;
-        }
-    }
-}
-
-knowhere::IndexMode
-IndexWrapper::get_index_mode() {
-    static std::map<std::string, knowhere::IndexMode> mode_map = {
-        {"CPU", knowhere::IndexMode::MODE_CPU},
-        {"GPU", knowhere::IndexMode::MODE_GPU},
-    };
-    auto mode = get_config_by_name<std::string>("index_mode");
-    return mode.has_value() ? mode_map[mode.value()] : knowhere::IndexMode::MODE_CPU;
 }
 
 std::unique_ptr<IndexWrapper::QueryResult>

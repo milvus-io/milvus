@@ -526,6 +526,8 @@ func TestStream_PulsarTtMsgStream_Insert(t *testing.T) {
 		log.Fatalf("broadcast error = %v", err)
 	}
 	receiveMsg(outputStream, len(msgPack1.Msgs))
+	outputTtStream := (*outputStream).(*PulsarTtMsgStream)
+	fmt.Printf("timestamp = %v", outputTtStream.lastTimeStamp)
 	(*inputStream).Close()
 	(*outputStream).Close()
 }

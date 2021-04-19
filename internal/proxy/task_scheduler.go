@@ -14,7 +14,7 @@ import (
 
 type TaskQueue interface {
 	utChan() <-chan int
-	UTEmpty() bool
+	utEmpty() bool
 	utFull() bool
 	addUnissuedTask(t task) error
 	FrontUnissuedTask() task
@@ -44,9 +44,7 @@ func (queue *BaseTaskQueue) utChan() <-chan int {
 	return queue.utBufChan
 }
 
-func (queue *BaseTaskQueue) UTEmpty() bool {
-	queue.utLock.Lock()
-	defer queue.utLock.Unlock()
+func (queue *BaseTaskQueue) utEmpty() bool {
 	return queue.unissuedTasks.Len() == 0
 }
 
@@ -318,7 +316,7 @@ func (sched *TaskScheduler) definitionLoop() {
 		case <-sched.ctx.Done():
 			return
 		case <-sched.DdQueue.utChan():
-			if !sched.DdQueue.UTEmpty() {
+			if !sched.DdQueue.utEmpty() {
 				t := sched.scheduleDdTask()
 				sched.processTask(t, sched.DdQueue)
 			}
@@ -333,7 +331,7 @@ func (sched *TaskScheduler) manipulationLoop() {
 		case <-sched.ctx.Done():
 			return
 		case <-sched.DmQueue.utChan():
-			if !sched.DmQueue.UTEmpty() {
+			if !sched.DmQueue.utEmpty() {
 				t := sched.scheduleDmTask()
 				go sched.processTask(t, sched.DmQueue)
 			}
@@ -350,7 +348,7 @@ func (sched *TaskScheduler) queryLoop() {
 			return
 		case <-sched.DqQueue.utChan():
 			log.Print("scheduler receive query request ...")
-			if !sched.DqQueue.UTEmpty() {
+			if !sched.DqQueue.utEmpty() {
 				t := sched.scheduleDqTask()
 				go sched.processTask(t, sched.DqQueue)
 			} else {

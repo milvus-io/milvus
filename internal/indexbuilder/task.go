@@ -2,7 +2,6 @@ package indexbuilder
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"strconv"
 	"time"
@@ -172,12 +171,10 @@ func (it *IndexBuildTask) Execute() error {
 		indexParams[key] = value
 	}
 
-	fmt.Println("before NewCIndex ..........................")
 	it.index, err = NewCIndex(typeParams, indexParams)
 	if err != nil {
 		return err
 	}
-	fmt.Println("after NewCIndex ..........................")
 
 	getKeyByPathNaive := func(path string) string {
 		// splitElements := strings.Split(path, "/")
@@ -226,7 +223,6 @@ func (it *IndexBuildTask) Execute() error {
 
 	for _, value := range insertData.Data {
 		// TODO: BinaryVectorFieldData
-		fmt.Println("before build index ..................................")
 		floatVectorFieldData, fOk := value.(*storage.FloatVectorFieldData)
 		if fOk {
 			err = it.index.BuildFloatVecIndexWithoutIds(floatVectorFieldData.Data)
@@ -242,15 +238,12 @@ func (it *IndexBuildTask) Execute() error {
 				return err
 			}
 		}
-		fmt.Println("after build index ..................................")
 
 		if !fOk && !bOk {
 			return errors.New("we expect FloatVectorFieldData or BinaryVectorFieldData")
 		}
 
-		fmt.Println("before serialize .............................................")
 		indexBlobs, err := it.index.Serialize()
-		fmt.Println("after serialize .............................................")
 		if err != nil {
 			return err
 		}

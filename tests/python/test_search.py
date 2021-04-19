@@ -255,7 +255,6 @@ class TestSearchBase:
             assert res2[0][0].id == res[0][1].id
             assert res2[0][0].entity.get("int64") == res[0][1].entity.get("int64")
 
-    # Pass
     @pytest.mark.skip("search_after_index")
     @pytest.mark.level(2)
     def test_search_after_index(self, connect, collection, get_simple_index, get_top_k, get_nq):
@@ -303,8 +302,6 @@ class TestSearchBase:
         assert len(res) == nq
         assert len(res[0]) == default_top_k
 
-    # pass
-    # should fix, 336 assert fail, insert data don't have partitionTag, But search data have
     @pytest.mark.skip("search_index_partition")
     @pytest.mark.level(2)
     def test_search_index_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
@@ -336,7 +333,6 @@ class TestSearchBase:
             res = connect.search(collection, query, partition_tags=[default_tag])
             assert len(res) == nq
 
-    # PASS
     @pytest.mark.skip("search_index_partition_B")
     @pytest.mark.level(2)
     def test_search_index_partition_B(self, connect, collection, get_simple_index, get_top_k, get_nq):
@@ -387,7 +383,6 @@ class TestSearchBase:
             assert len(res) == nq
             assert len(res[0]) == 0
 
-    # PASS
     @pytest.mark.skip("search_index_partitions")
     @pytest.mark.level(2)
     def test_search_index_partitions(self, connect, collection, get_simple_index, get_top_k):
@@ -422,7 +417,6 @@ class TestSearchBase:
             assert res[0]._distances[0] > epsilon
             assert res[1]._distances[0] > epsilon
 
-    # Pass
     @pytest.mark.skip("search_index_partitions_B")
     @pytest.mark.level(2)
     def test_search_index_partitions_B(self, connect, collection, get_simple_index, get_top_k):
@@ -457,7 +451,7 @@ class TestSearchBase:
             assert res[0]._distances[0] < epsilon
             assert res[1]._distances[0] < epsilon
 
-    # pass
+    #
     # test for ip metric
     #
     # TODO: reopen after we supporting ip flat
@@ -483,7 +477,6 @@ class TestSearchBase:
             with pytest.raises(Exception) as e:
                 res = connect.search(collection, query)
 
-    # PASS
     @pytest.mark.skip("search_ip_after_index")
     @pytest.mark.level(2)
     def test_search_ip_after_index(self, connect, collection, get_simple_index, get_top_k, get_nq):
@@ -513,7 +506,6 @@ class TestSearchBase:
             assert check_id_result(res[0], ids[0])
             assert res[0]._distances[0] >= 1 - gen_inaccuracy(res[0]._distances[0])
 
-    # should fix, nq not correct
     @pytest.mark.skip("search_ip_index_partition")
     @pytest.mark.level(2)
     def test_search_ip_index_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
@@ -547,7 +539,6 @@ class TestSearchBase:
             res = connect.search(collection, query, partition_tags=[default_tag])
             assert len(res) == nq
 
-    # PASS
     @pytest.mark.skip("search_ip_index_partitions")
     @pytest.mark.level(2)
     def test_search_ip_index_partitions(self, connect, collection, get_simple_index, get_top_k):
@@ -627,8 +618,7 @@ class TestSearchBase:
         res = connect.search(collection, query)
         assert abs(np.sqrt(res[0]._distances[0]) - min(distance_0, distance_1)) <= gen_inaccuracy(res[0]._distances[0])
 
-    # Pass
-    @pytest.mark.skip("test_search_distance_l2_after_index")
+    @pytest.mark.skip("search_distance_l2_after_index")
     def test_search_distance_l2_after_index(self, connect, id_collection, get_simple_index):
         '''
         target: search collection, and check the result: distance
@@ -682,7 +672,6 @@ class TestSearchBase:
         res = connect.search(collection, query)
         assert abs(res[0]._distances[0] - max(distance_0, distance_1)) <= epsilon
 
-    # Pass
     @pytest.mark.skip("search_distance_ip_after_index")
     def test_search_distance_ip_after_index(self, connect, id_collection, get_simple_index):
         '''
@@ -953,7 +942,6 @@ class TestSearchBase:
                 assert res[i]._distances[0] < epsilon
                 assert res[i]._distances[1] > epsilon
 
-    # should fix
     @pytest.mark.skip("query_entities_with_field_less_than_top_k")
     def test_query_entities_with_field_less_than_top_k(self, connect, id_collection):
         """
@@ -1753,7 +1741,7 @@ class TestSearchInvalid(object):
     def get_search_params(self, request):
         yield request.param
 
-    # Pass
+    # TODO: reopen after we supporting create index
     @pytest.mark.skip("search_with_invalid_params")
     @pytest.mark.level(2)
     def test_search_with_invalid_params(self, connect, collection, get_simple_index, get_search_params):
@@ -1775,7 +1763,7 @@ class TestSearchInvalid(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    # pass
+    # TODO: reopen after we supporting binary type
     @pytest.mark.skip("search_with_invalid_params_binary")
     @pytest.mark.level(2)
     def test_search_with_invalid_params_binary(self, connect, binary_collection):
@@ -1795,7 +1783,6 @@ class TestSearchInvalid(object):
         with pytest.raises(Exception) as e:
             res = connect.search(binary_collection, query)
 
-    # Pass
     @pytest.mark.skip("search_with_empty_params")
     @pytest.mark.level(2)
     def test_search_with_empty_params(self, connect, collection, args, get_simple_index):
