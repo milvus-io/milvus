@@ -19,7 +19,17 @@ reader:
       maxParallelism: 1024
 
   msgStream:
-    dm:
+    dm: # TODO: rm dm
+      #streamBufSize: 1024 # msgPack chan buffer size
+      recvBufSize: 1024 # msgPack chan buffer size
+      pulsarBufSize: 1024 # pulsar chan buffer size
+    insert:
+      #streamBufSize: 1024 # msgPack chan buffer size
+      recvBufSize: 1024 # msgPack chan buffer size
+      pulsarBufSize: 1024 # pulsar chan buffer size
+
+    delete:
+      #streamBufSize: 1024 # msgPack chan buffer size
       recvBufSize: 1024 # msgPack chan buffer size
       pulsarBufSize: 1024 # pulsar chan buffer size
 

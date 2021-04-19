@@ -9,10 +9,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
-
-type Timestamp = typeutil.Timestamp
 
 type createCollectionTask struct {
 	baseTask
@@ -69,7 +66,7 @@ func (t *createCollectionTask) Execute() error {
 		return err
 	}
 
-	collectionID, err := allocGlobalID()
+	collectionID, err := t.sch.globalIDAllocator()
 	if err != nil {
 		return err
 	}

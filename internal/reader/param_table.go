@@ -14,7 +14,7 @@ var Params ParamTable
 
 func (p *ParamTable) Init() {
 	p.BaseTable.Init()
-	err := p.LoadYaml("advanced/reader.yaml")
+	err := p.LoadYaml("advanced/query_node.yaml")
 	if err != nil {
 		panic(err)
 	}
@@ -40,6 +40,7 @@ func (p *ParamTable) queryNodeID() int {
 	return id
 }
 
+// TODO: func (p *ParamTable) DmChannelRange() []int {
 func (p *ParamTable) topicStart() int {
 	topicStart, err := p.Load("reader.topicstart")
 	if err != nil {
@@ -104,6 +105,7 @@ func (p *ParamTable) flowGraphMaxParallelism() int32 {
 }
 
 // msgStream
+// TODO: func (p *ParamTable) insertStreamBufSize() int64
 func (p *ParamTable) dmReceiveBufSize() int64 {
 	revBufSize, err := p.Load("reader.msgStream.dm.recvBufSize")
 	if err != nil {
