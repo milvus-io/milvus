@@ -54,7 +54,7 @@ type ProducerMessage struct {
 }
 
 type ConsumerMessage struct {
-	msgID   UniqueID
+	MsgID   UniqueID
 	Payload []byte
 }
 
@@ -299,7 +299,7 @@ func (rmq *RocksMQ) Consume(groupName string, channelName string, n int) ([]Cons
 			return nil, err
 		}
 		msg := ConsumerMessage{
-			msgID:   msgID,
+			MsgID:   msgID,
 			Payload: val.Data(),
 		}
 		consumerMessage = append(consumerMessage, msg)
@@ -314,7 +314,7 @@ func (rmq *RocksMQ) Consume(groupName string, channelName string, n int) ([]Cons
 		return consumerMessage, nil
 	}
 
-	newID := consumerMessage[len(consumerMessage)-1].msgID
+	newID := consumerMessage[len(consumerMessage)-1].MsgID
 	err = rmq.Seek(groupName, channelName, newID)
 	if err != nil {
 		return nil, err
