@@ -31,6 +31,7 @@ enum ReqType {
 
     /* System Control */
     kTimeTick = 1200;
+    kTimeSync = 1201;
 }
 
 enum PeerRole {
@@ -193,7 +194,7 @@ message SearchResult {
 }
 
 
-message TimeSyncMsg {
+message TimeTickMsg {
     int64 peer_id = 1;
     uint64 timestamp = 2;
 }
