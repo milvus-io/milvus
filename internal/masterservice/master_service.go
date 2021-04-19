@@ -1202,7 +1202,7 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 		zap.String("collection", in.CollectionName))
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		log.Error("ShowPartitionRequest failed: master is not healthy", zap.String("role", Params.RoleName),
+		log.Debug("ShowPartitionRequest failed: master is not healthy", zap.String("role", Params.RoleName),
 			zap.Int64("msgID", in.Base.MsgID), zap.String("state", internalpb.StateCode_name[int32(code)]))
 		return &milvuspb.ShowPartitionsResponse{
 			Status: &commonpb.Status{
@@ -1228,7 +1228,7 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 	c.ddReqQueue <- t
 	err := t.WaitToFinish()
 	if err != nil {
-		log.Error("ShowPartitionsRequest failed", zap.String("role", Params.RoleName), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
+		log.Debug("ShowPartitionsRequest failed", zap.String("role", Params.RoleName), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &milvuspb.ShowPartitionsResponse{
 			PartitionNames: nil,
 			Status: &commonpb.Status{

@@ -431,6 +431,7 @@ github.com/protocolbuffers/protobuf v3.15.3+incompatible h1:5WExaSYHEGvU73sVHvqe
 github.com/protocolbuffers/protobuf v3.15.4+incompatible h1:Blv4dGFGqHXX+r5Tqoc1ziXPMDElqZ+/ryYcE4bddN4=
 github.com/protocolbuffers/protobuf v3.15.5+incompatible h1:NsnktN0DZ4i7hXZ6HPFH395SptFlMVhSc8XuhkiOwzI=
 github.com/protocolbuffers/protobuf v3.15.6+incompatible h1:xDkn9XF/5pyO6v3GKpwIm7GFUIQj1cQcPuWnWsG9664=
+github.com/protocolbuffers/protobuf v3.15.8+incompatible h1:6bDGveAnRWndINAC3CCKj1BLbRYJ+MBYKXus+Lz0eiY=
 github.com/rogpeppe/fastuuid v0.0.0-20150106093220-6724a57986af h1:gu+uRPtBe88sKxUCEXRoeCvVG90TJmwhiqRpvdhQFng=
 github.com/rogpeppe/fastuuid v0.0.0-20150106093220-6724a57986af/go.mod h1:XWv6SoW27p1b0cqNHllgS5HIMJraePCO15w5zCzIWYg=
 github.com/rogpeppe/go-internal v1.3.0 h1:RR9dF3JtopPvtkroDZuVD7qquD0bnHlKSqaQhgwt8yk=

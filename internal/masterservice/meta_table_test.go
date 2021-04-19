@@ -6,14 +6,118 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"github.com/zilliztech/milvus-distributed/internal/kv"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
 )
+
+type mockTestKV struct {
+	kv.TxnBase
+
+	loadWithPrefix        func(key string) ([]string, []string, error)
+	save                  func(key, value string) error
+	multiSave             func(kvs map[string]string) error
+	multiRemoveWithPrefix func(keys []string) error
+}
+
+func (m *mockTestKV) LoadWithPrefix(key string) ([]string, []string, error) {
+	return m.loadWithPrefix(key)
+}
+
+func (m *mockTestKV) Save(key, value string) error {
+	return m.save(key, value)
+}
+
+func (m *mockTestKV) MultiSave(kvs map[string]string) error {
+	return m.multiSave(kvs)
+}
+
+func (m *mockTestKV) MultiRemoveWithPrefix(keys []string) error {
+	return m.multiRemoveWithPrefix(keys)
+}
+
+func Test_MockKV(t *testing.T) {
+	k1 := &mockTestKV{}
+	prefix := make(map[string][]string)
+	k1.loadWithPrefix = func(key string) ([]string, []string, error) {
+		if val, ok := prefix[key]; ok {
+			return nil, val, nil
+		}
+		return nil, nil, fmt.Errorf("error test")
+	}
+
+	_, err := NewMetaTable(k1)
+	assert.NotNil(t, err)
+
+	prefix[TenantMetaPrefix] = []string{"true"}
+	_, err = NewMetaTable(k1)
+	assert.NotNil(t, err)
+
+	prefix[TenantMetaPrefix] = []string{proto.MarshalTextString(&pb.TenantMeta{})}
+	_, err = NewMetaTable(k1)
+	assert.NotNil(t, err)
+
+	prefix[ProxyMetaPrefix] = []string{"true"}
+	_, err = NewMetaTable(k1)
+	assert.NotNil(t, err)
+
+	prefix[ProxyMetaPrefix] = []string{proto.MarshalTextString(&pb.ProxyMeta{})}
+	_, err = NewMetaTable(k1)
+	assert.NotNil(t, err)
+
+	prefix[CollectionMetaPrefix] = []string{"true"}
+	_, err = NewMetaTable(k1)
+	assert.NotNil(t, err)
+
+	prefix[CollectionMetaPrefix] = []string{proto.MarshalTextString(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{}})}
+	_, err = NewMetaTable(k1)
+	assert.NotNil(t, err)
+
+	prefix[PartitionMetaPrefix] = []string{"true"}
+	_, err = NewMetaTable(k1)
+	assert.NotNil(t, err)
+
+	prefix[PartitionMetaPrefix] = []string{proto.MarshalTextString(&pb.PartitionInfo{})}
+	_, err = NewMetaTable(k1)
+	assert.NotNil(t, err)
+
+	prefix[SegmentIndexMetaPrefix] = []string{"true"}
+	_, err = NewMetaTable(k1)
+	assert.NotNil(t, err)
+
+	prefix[SegmentIndexMetaPrefix] = []string{proto.MarshalTextString(&pb.SegmentIndexInfo{})}
+	_, err = NewMetaTable(k1)
+	assert.NotNil(t, err)
+
+	prefix[SegmentIndexMetaPrefix] = []string{proto.MarshalTextString(&pb.SegmentIndexInfo{}), proto.MarshalTextString(&pb.SegmentIndexInfo{})}
+	_, err = NewMetaTable(k1)
+	assert.NotNil(t, err)
+
+	prefix[IndexMetaPrefix] = []string{"true"}
+	_, err = NewMetaTable(k1)
+	assert.NotNil(t, err)
+
+	prefix[IndexMetaPrefix] = []string{proto.MarshalTextString(&pb.IndexInfo{})}
+	m1, err := NewMetaTable(k1)
+	assert.Nil(t, err)
+
+	k1.save = func(key, value string) error {
+		return fmt.Errorf("error test")
+	}
+
+	err = m1.AddTenant(&pb.TenantMeta{})
+	assert.NotNil(t, err)
+
+	err = m1.AddProxy(&pb.ProxyMeta{})
+	assert.NotNil(t, err)
+}
 
 func TestMetaTable(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
@@ -280,4 +384,62 @@ func TestMetaTable(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	/////////////////////////// these tests should run at last, it only used to hit the error lines ////////////////////////
+	mockKV := &mockTestKV{}
+	mt.client = mockKV
+
+	t.Run("add collection failed", func(t *testing.T) {
+		mockKV.loadWithPrefix = func(key string) ([]string, []string, error) {
+			return nil, nil, nil
+		}
+		mockKV.multiSave = func(kvs map[string]string) error {
+			return fmt.Errorf("error test")
+		}
+		collInfo.PartitionIDs = nil
+		err := mt.AddCollection(collInfo, partInfo, idxInfo)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("delete collection failed", func(t *testing.T) {
+		mockKV.multiSave = func(kvs map[string]string) error {
+			return nil
+		}
+		mockKV.multiRemoveWithPrefix = func(keys []string) error {
+			return fmt.Errorf("error test")
+		}
+		collInfo.PartitionIDs = nil
+		err := mt.AddCollection(collInfo, partInfo, idxInfo)
+		assert.Nil(t, err)
+		mt.partitionID2Meta = make(map[typeutil.UniqueID]pb.PartitionInfo)
+		mt.indexID2Meta = make(map[int64]pb.IndexInfo)
+		err = mt.DeleteCollection(collInfo.ID)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("get collection failed", func(t *testing.T) {
+		mockKV.save = func(key, value string) error {
+			return nil
+		}
+
+		collInfo.PartitionIDs = nil
+		err := mt.AddCollection(collInfo, partInfo, idxInfo)
+		assert.Nil(t, err)
+
+		seg := &datapb.SegmentInfo{
+			ID:           100,
+			CollectionID: 1,
+			PartitionID:  10,
+		}
+		assert.Nil(t, mt.AddSegment(seg))
+
+		mt.collID2Meta = make(map[int64]pb.CollectionInfo)
+		_, err = mt.GetCollectionByName(collInfo.Schema.Name)
+		assert.NotNil(t, err)
+		_, err = mt.GetCollectionBySegmentID(seg.ID)
+		assert.NotNil(t, err)
+
+		mt.segID2CollID = make(map[int64]int64)
+		_, err = mt.GetCollectionBySegmentID(seg.ID)
+		assert.NotNil(t, err)
+	})
 }
