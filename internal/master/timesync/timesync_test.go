@@ -250,6 +250,7 @@ func TestTt_SoftTtBarrierGetTimeTickClose(t *testing.T) {
 		sttbarrier01.Close()
 	}()
 
+	wg1.Wait()
 	ts, err = sttbarrier01.GetTimeTick()
 	assert.NotNil(t, err)
 	assert.Equal(t, Timestamp(0), ts)
@@ -279,15 +280,16 @@ func TestTt_SoftTtBarrierGetTimeTickCancel(t *testing.T) {
 	require.NotNil(t, sttbarrier)
 
 	sttbarrier.Start()
+	var wg sync.WaitGroup
+	wg.Add(1)
 
 	go func() {
-		time.Sleep(10 * time.Millisecond)
+		defer wg.Done()
 		cancel()
-		time.Sleep(10 * time.Millisecond)
-		sttbarrier.Close()
+		time.Sleep(100 * time.Millisecond)
 	}()
 
-	time.Sleep(20 * time.Millisecond)
+	wg.Wait()
 
 	ts, err := sttbarrier.GetTimeTick()
 	assert.NotNil(t, err)

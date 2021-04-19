@@ -45,7 +45,7 @@ func (ttBarrier *softTimeTickBarrier) GetTimeTick() (Timestamp, error) {
 			ttBarrier.lastTt = ts
 
 		default:
-			if isEmpty {
+			if isEmpty || ttBarrier.closed {
 				continue
 			}
 			return ttBarrier.lastTt, nil
