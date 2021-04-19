@@ -47,6 +47,7 @@ func (c *GrpcClient) Init() error {
 		return err
 	}
 	c.grpcClient = masterpb.NewMasterServiceClient(c.conn)
+	cms.Params.Init()
 	return nil
 }
 

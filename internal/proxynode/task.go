@@ -116,21 +116,21 @@ func (it *InsertTask) Execute() error {
 	span.SetTag("start time", it.BeginTs())
 	collectionName := it.BaseInsertTask.CollectionName
 	span.LogFields(oplog.String("collection_name", collectionName))
-	if !globalMetaCache.Hit(collectionName) {
-		err := globalMetaCache.Sync(collectionName)
-		if err != nil {
-			span.LogFields(oplog.Error(err))
-			span.Finish()
-			return err
-		}
-	}
-	description, err := globalMetaCache.Get(collectionName)
-	if err != nil || description == nil {
-		span.LogFields(oplog.Error(err))
-		span.Finish()
+	collSchema, err := globalMetaCache.GetCollectionSchema(collectionName)
+	if err != nil {
 		return err
 	}
-	autoID := description.Schema.AutoID
+	autoID := collSchema.AutoID
+	collID, err := globalMetaCache.GetCollectionID(collectionName)
+	if err != nil {
+		return err
+	}
+	it.CollectionID = collID
+	partitionID, err := globalMetaCache.GetPartitionID(collectionName, it.PartitionName)
+	if err != nil {
+		return err
+	}
+	it.PartitionID = partitionID
 	span.LogFields(oplog.Bool("auto_id", autoID))
 	var rowIDBegin UniqueID
 	var rowIDEnd UniqueID
@@ -174,7 +174,7 @@ func (it *InsertTask) Execute() error {
 
 	msgPack.Msgs[0] = tsMsg
 
-	stream, err := globalInsertChannelsMap.getInsertMsgStream(description.CollectionID)
+	stream, err := globalInsertChannelsMap.getInsertMsgStream(collID)
 	if err != nil {
 		collectionInsertChannels, err := it.dataServiceClient.GetInsertChannels(&datapb.InsertChannelRequest{
 			Base: &commonpb.MsgBase{
@@ -184,17 +184,17 @@ func (it *InsertTask) Execute() error {
 				SourceID:  Params.ProxyID,
 			},
 			DbID:         0, // todo
-			CollectionID: description.CollectionID,
+			CollectionID: collID,
 		})
 		if err != nil {
 			return err
 		}
-		err = globalInsertChannelsMap.createInsertMsgStream(description.CollectionID, collectionInsertChannels)
+		err = globalInsertChannelsMap.createInsertMsgStream(collID, collectionInsertChannels)
 		if err != nil {
 			return err
 		}
 	}
-	stream, err = globalInsertChannelsMap.getInsertMsgStream(description.CollectionID)
+	stream, err = globalInsertChannelsMap.getInsertMsgStream(collID)
 	if err != nil {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
 		it.result.Status.Reason = err.Error()
@@ -332,11 +332,7 @@ func (cct *CreateCollectionTask) Execute() error {
 		return err
 	}
 	if cct.result.ErrorCode == commonpb.ErrorCode_SUCCESS {
-		err = globalMetaCache.Sync(cct.CollectionName)
-		if err != nil {
-			return err
-		}
-		desc, err := globalMetaCache.Get(cct.CollectionName)
+		collID, err := globalMetaCache.GetCollectionID(cct.CollectionName)
 		if err != nil {
 			return err
 		}
@@ -348,12 +344,12 @@ func (cct *CreateCollectionTask) Execute() error {
 				SourceID:  Params.ProxyID,
 			},
 			DbID:         0, // todo
-			CollectionID: desc.CollectionID,
+			CollectionID: collID,
 		})
 		if err != nil {
 			return err
 		}
-		err = globalInsertChannelsMap.createInsertMsgStream(desc.CollectionID, collectionInsertChannels)
+		err = globalInsertChannelsMap.createInsertMsgStream(collID, collectionInsertChannels)
 		if err != nil {
 			return err
 		}
@@ -417,17 +413,20 @@ func (dct *DropCollectionTask) Execute() error {
 	var err error
 	dct.result, err = dct.masterClient.DropCollection(dct.DropCollectionRequest)
 	if dct.result.ErrorCode == commonpb.ErrorCode_SUCCESS {
-		_ = globalMetaCache.Sync(dct.CollectionName)
-		desc, _ := globalMetaCache.Get(dct.CollectionName)
-		_ = globalInsertChannelsMap.closeInsertMsgStream(desc.CollectionID)
+		collID, err := globalMetaCache.GetCollectionID(dct.CollectionName)
+		if err != nil {
+			return err
+		}
+		err = globalInsertChannelsMap.closeInsertMsgStream(collID)
+		if err != nil {
+			return err
+		}
 	}
 	return err
 }
 
 func (dct *DropCollectionTask) PostExecute() error {
-	if globalMetaCache.Hit(dct.CollectionName) {
-		return globalMetaCache.Remove(dct.CollectionName)
-	}
+	globalMetaCache.RemoveCollection(dct.CollectionName)
 	return nil
 }
 
@@ -480,15 +479,7 @@ func (st *SearchTask) PreExecute() error {
 	span.SetTag("start time", st.BeginTs())
 
 	collectionName := st.query.CollectionName
-	if !globalMetaCache.Hit(collectionName) {
-		err := globalMetaCache.Sync(collectionName)
-		if err != nil {
-			span.LogFields(oplog.Error(err))
-			span.Finish()
-			return err
-		}
-	}
-	_, err := globalMetaCache.Get(collectionName)
+	_, err := globalMetaCache.GetCollectionID(collectionName)
 	if err != nil { // err is not nil if collection not exists
 		span.LogFields(oplog.Error(err))
 		span.Finish()
@@ -823,8 +814,7 @@ func (dct *DescribeCollectionTask) Execute() error {
 	if err != nil {
 		return err
 	}
-	err = globalMetaCache.Update(dct.CollectionName, dct.result)
-	return err
+	return nil
 }
 
 func (dct *DescribeCollectionTask) PostExecute() error {
@@ -1177,7 +1167,10 @@ func (spt *ShowPartitionsTask) PreExecute() error {
 func (spt *ShowPartitionsTask) Execute() error {
 	var err error
 	spt.result, err = spt.masterClient.ShowPartitions(spt.ShowPartitionRequest)
-	return err
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (spt *ShowPartitionsTask) PostExecute() error {

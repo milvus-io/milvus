@@ -244,11 +244,14 @@ func (node *NodeImpl) Init() error {
 }
 
 func (node *NodeImpl) Start() error {
+	err := InitMetaCache(node.masterClient)
+	if err != nil {
+		return err
+	}
+	log.Println("init global meta cache ...")
+
 	initGlobalInsertChannelsMap(node)
 	log.Println("init global insert channels map ...")
-
-	initGlobalMetaCache(node.ctx, node)
-	log.Println("init global meta cache ...")
 
 	node.manipulationMsgStream.Start()
 	log.Println("start manipulation message stream ...")

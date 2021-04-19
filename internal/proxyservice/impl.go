@@ -266,6 +266,7 @@ func (s *ServiceImpl) InvalidateCollectionMetaCache(request *proxypb.InvalidateC
 	t := &InvalidateCollectionMetaCacheTask{
 		request:   request,
 		Condition: NewTaskCondition(ctx),
+		nodeInfos: s.nodeInfos,
 	}
 
 	var err error
