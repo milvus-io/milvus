@@ -18,7 +18,8 @@ import (
 func TestSearch_Search(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
-	ctx, _ := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 
@@ -114,7 +115,7 @@ func TestSearch_Search(t *testing.T) {
 		queryRawData = append(queryRawData, float32(i))
 	}
 
-	var queryJson = "{\"field_name\":\"fakevec\",\"num_queries\":1,\"topK\":10}"
+	var queryJSON = "{\"field_name\":\"fakevec\",\"num_queries\":1,\"topK\":10}"
 	searchMsg1 := msgPb.SearchMsg{
 		CollectionName: "collection0",
 		Records: &msgPb.VectorRowRecord{
@@ -125,7 +126,7 @@ func TestSearch_Search(t *testing.T) {
 		Timestamp:    uint64(0),
 		ClientId:     int64(0),
 		ExtraParams:  nil,
-		Json:         []string{queryJson},
+		Json:         []string{queryJSON},
 	}
 	searchMessages := []*msgPb.SearchMsg{&searchMsg1}
 

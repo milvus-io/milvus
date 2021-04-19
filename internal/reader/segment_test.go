@@ -23,7 +23,7 @@ func TestSegment_ConstructorAndDestructor(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, segment.SegmentID, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Destruct collection, partition and segment
@@ -49,7 +49,7 @@ func TestSegment_SegmentInsert(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, segment.SegmentID, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
@@ -107,7 +107,7 @@ func TestSegment_SegmentDelete(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, segment.SegmentID, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
@@ -145,7 +145,7 @@ func TestSegment_SegmentSearch(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, segment.SegmentID, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
@@ -183,7 +183,7 @@ func TestSegment_SegmentSearch(t *testing.T) {
 	//assert.NoError(t, err)
 
 	// 6. Do search
-	var queryJson = "{\"field_name\":\"fakevec\",\"num_queries\":1,\"topK\":10}"
+	var queryJSON = "{\"field_name\":\"fakevec\",\"num_queries\":1,\"topK\":10}"
 	var queryRawData = make([]float32, 0)
 	for i := 0; i < 16; i++ {
 		queryRawData = append(queryRawData, float32(i))
@@ -191,7 +191,7 @@ func TestSegment_SegmentSearch(t *testing.T) {
 	var vectorRecord = msgPb.VectorRowRecord{
 		FloatData: queryRawData,
 	}
-	query := node.QueryJson2Info(&queryJson)
+	query := node.QueryJSON2Info(&queryJSON)
 	var searchRes, searchErr = segment.SegmentSearch(query, timestamps[N/2], &vectorRecord)
 	assert.NoError(t, searchErr)
 	fmt.Println(searchRes)
@@ -219,7 +219,7 @@ func TestSegment_SegmentPreInsert(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, segment.SegmentID, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Do PreInsert
@@ -249,7 +249,7 @@ func TestSegment_SegmentPreDelete(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, segment.SegmentID, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Do PreDelete
@@ -321,7 +321,7 @@ func TestSegment_GetRowCount(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, segment.SegmentID, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
@@ -383,7 +383,7 @@ func TestSegment_GetDeletedCount(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, segment.SegmentID, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
@@ -426,7 +426,7 @@ func TestSegment_GetMemSize(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, segment.SegmentID, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
@@ -496,7 +496,7 @@ func TestSegment_RealSchemaTest(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, segment.SegmentID, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps

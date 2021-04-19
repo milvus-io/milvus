@@ -1,8 +1,9 @@
 package reader
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"log"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
 
 type filteredDmNode struct {

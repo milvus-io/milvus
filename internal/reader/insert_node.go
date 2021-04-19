@@ -79,7 +79,7 @@ func (iNode *insertNode) getSegmentBySegmentID(segmentID int64) (*Segment, error
 func (iNode *insertNode) insert(segmentID int64, wg *sync.WaitGroup) {
 	var targetSegment, err = iNode.getSegmentBySegmentID(segmentID)
 	if err != nil {
-		log.Println("insert failed")
+		log.Println("cannot find segment:", segmentID)
 		// TODO: add error handling
 		return
 	}
@@ -90,8 +90,13 @@ func (iNode *insertNode) insert(segmentID int64, wg *sync.WaitGroup) {
 	offsets := iNode.insertMsg.insertData.insertOffset[segmentID]
 
 	err = targetSegment.SegmentInsert(offsets, &ids, &timestamps, &records)
-	fmt.Println("Do insert done, len = ", len(iNode.insertMsg.insertData.insertIDs[segmentID]))
+	if err != nil {
+		log.Println("insert failed")
+		// TODO: add error handling
+		return
+	}
 
+	fmt.Println("Do insert done, len = ", len(iNode.insertMsg.insertData.insertIDs[segmentID]))
 	wg.Done()
 }
 

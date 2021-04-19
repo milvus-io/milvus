@@ -103,7 +103,6 @@ func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 			}
 		}
 	}
-	wg.Done()
 }
 
 func (node *QueryNode) RunSearch(wg *sync.WaitGroup) {
@@ -129,5 +128,4 @@ func (node *QueryNode) RunSearch(wg *sync.WaitGroup) {
 		default:
 		}
 	}
-	wg.Done()
 }
