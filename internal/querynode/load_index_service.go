@@ -26,7 +26,6 @@ type loadIndexService struct {
 	fieldIndexes   map[string][]*internalpb2.IndexStats
 	fieldStatsChan chan []*internalpb2.FieldStats
 
-	loadIndexReqChan   chan []msgstream.TsMsg
 	loadIndexMsgStream msgstream.MsgStream
 
 	queryNodeID UniqueID
@@ -66,9 +65,6 @@ func newLoadIndexService(ctx context.Context, replica collectionReplica) *loadIn
 
 	var stream msgstream.MsgStream = loadIndexStream
 
-	// init index load requests channel size by message receive buffer size
-	indexLoadChanSize := receiveBufSize
-
 	return &loadIndexService{
 		ctx:    ctx1,
 		cancel: cancel,
@@ -78,14 +74,15 @@ func newLoadIndexService(ctx context.Context, replica collectionReplica) *loadIn
 		fieldIndexes:   make(map[string][]*internalpb2.IndexStats),
 		fieldStatsChan: make(chan []*internalpb2.FieldStats, 1),
 
-		loadIndexReqChan:   make(chan []msgstream.TsMsg, indexLoadChanSize),
 		loadIndexMsgStream: stream,
 
 		queryNodeID: Params.QueryNodeID,
 	}
 }
 
-func (lis *loadIndexService) consume() {
+func (lis *loadIndexService) start() {
+	lis.loadIndexMsgStream.Start()
+
 	for {
 		select {
 		case <-lis.ctx.Done():
@@ -96,21 +93,7 @@ func (lis *loadIndexService) consume() {
 				log.Println("null msg pack")
 				continue
 			}
-			lis.loadIndexReqChan <- messages.Msgs
-		}
-	}
-}
-
-func (lis *loadIndexService) start() {
-	lis.loadIndexMsgStream.Start()
-	go lis.consume()
-
-	for {
-		select {
-		case <-lis.ctx.Done():
-			return
-		case messages := <-lis.loadIndexReqChan:
-			for _, msg := range messages {
+			for _, msg := range messages.Msgs {
 				err := lis.execute(msg)
 				if err != nil {
 					log.Println(err)

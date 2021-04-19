@@ -348,10 +348,6 @@ func (rmq *RocksMQ) Consume(groupName string, channelName string, n int) ([]Cons
 		return nil, err
 	}
 
-	if len(consumerMessage) == 0 {
-		return consumerMessage, nil
-	}
-
 	newID := consumerMessage[len(consumerMessage)-1].msgID
 	err = rmq.Seek(groupName, channelName, newID)
 	if err != nil {

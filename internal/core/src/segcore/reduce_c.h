@@ -16,7 +16,7 @@ extern "C" {
 #include <stdbool.h>
 #include <stdint.h>
 #include "segcore/segment_c.h"
-#include "common/type_c.h"
+#include "common/status_c.h"
 
 typedef void* CMarshaledHits;
 
