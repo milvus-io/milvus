@@ -1,59 +1,70 @@
 timeout(time: 60, unit: 'MINUTES') {
-    try {
-        if ("${REGRESSION_SERVICE_NAME}" == "regression_distributed") {
-            sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} up -d pulsar'
-        }
-        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} up -d etcd'
-        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} up -d minio'
-        dir ('build/docker/deploy') {
-            sh 'docker pull ${TARGET_REPO}/milvus-distributed:${TARGET_TAG}'
-            if ("${REGRESSION_SERVICE_NAME}" == "regression_distributed") {
-                sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} up -d master'
-                sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} up -d indexservice'
-                sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} up -d indexnode'
-                sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} up -d proxyservice'
-                sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} up -d dataservice'
-                sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} up -d queryservice'
-                sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} run -e DATA_NODE_ID=3 -d datanode'
-                sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} up -d proxynode'
-                sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} run -e QUERY_NODE_ID=1 -d querynode'
-                sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} run -e QUERY_NODE_ID=2 -d querynode'
-            } else {
-                sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} up -d standalone'
-            }
-        }
+    container('deploy-env') {
+        dir ('milvus-helm-chart') {
+            sh " helm version && \
+                 helm repo add stable https://kubernetes.oss-cn-hangzhou.aliyuncs.com/charts && \
+                 helm repo add bitnami https://charts.bitnami.com/bitnami && \
+                 helm repo add minio https://helm.min.io/ && \
+                 helm repo update"
 
-        dir ('build/docker/test') {
-            sh 'docker pull ${SOURCE_REPO}/pytest:${SOURCE_TAG} || true'
-            sh 'docker-compose build --force-rm ${REGRESSION_SERVICE_NAME}'
-            sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} run --rm ${REGRESSION_SERVICE_NAME}'
-            try {
-                withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
-                    sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${DOKCER_REGISTRY_URL}'
-                    sh 'docker-compose push ${REGRESSION_SERVICE_NAME} || true'
+            def milvusHelmURL = "https://github.com/zilliztech/milvus-helm-charts.git"
+            checkout([$class: 'GitSCM', branches: [[name: "${env.HELM_BRANCH}"]], userRemoteConfigs: [[url: "${milvusHelmURL}"]]])
+
+            dir ('charts/milvus-ha') {
+                sh script: "kubectl create namespace ${env.HELM_RELEASE_NAMESPACE}", returnStatus: true
+
+                def helmCMD = ""
+                if ("${REGRESSION_SERVICE_TYPE}" == "distributed") {
+                    helmCMD = "helm install --wait --timeout 300s \
+                                   --set standalone.enabled=false \
+                                   --set image.all.repository=${env.TARGET_REPO}/milvus-distributed \
+                                   --set image.all.tag=${env.TARGET_TAG} \
+                                   --set image.all.pullPolicy=Always \
+                                   --set logsPersistence.enabled=true \
+                                   --set logsPersistence.mountPath=/milvus-distributed/logs \
+                                   --namespace ${env.HELM_RELEASE_NAMESPACE} ${env.HELM_RELEASE_NAME} ."
+                } else {
+                    helmCMD = "helm install --wait --timeout 300s \
+                                   --set image.all.repository=${env.TARGET_REPO}/milvus-distributed \
+                                   --set image.all.tag=${env.TARGET_TAG} \
+                                   --set image.all.pullPolicy=Always \
+                                   --set logsPersistence.enabled=true \
+                                   --set logsPersistence.mountPath=/milvus-distributed/logs \
+                                   --namespace ${env.HELM_RELEASE_NAMESPACE} ${env.HELM_RELEASE_NAME} ."
                 }
-            } catch (exc) {
-                throw exc
-            } finally {
-                sh 'docker logout ${DOKCER_REGISTRY_URL}'
+
+                try {
+                    sh "${helmCMD}"
+                } catch (exc) {
+                    def helmStatusCMD = "helm get manifest -n ${env.HELM_RELEASE_NAMESPACE} ${env.HELM_RELEASE_NAME} | kubectl describe -n ${env.HELM_RELEASE_NAMESPACE} -f - && \
+                                         helm status -n ${env.HELM_RELEASE_NAMESPACE} ${env.HELM_RELEASE_NAME}"
+                    sh script: helmStatusCMD, returnStatus: true
+                    throw exc
+                }
             }
         }
-    } catch(exc) {
-        throw exc
-    } finally {
-        dir ('build/docker/deploy') {
-            sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} ps -a | tail -n +3 | awk \'{ print $1 }\' | ( while read arg; do docker logs -t $arg > $arg.log 2>&1; done )'
-            archiveArtifacts artifacts: "**.log", allowEmptyArchive: true
-            sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} down --rmi all -v || true'
-        }
-        if ("${REGRESSION_SERVICE_NAME}" == "regression_distributed") {
-            sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} rm -f -s -v pulsar'
-        }
-        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} rm -f -s -v etcd'
-        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} rm -f -s -v minio'
-        dir ('build/docker/test') {
-            sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} run --rm ${REGRESSION_SERVICE_NAME} /bin/bash -c "find . -name \'__pycache__\' | xargs rm -rf && find . -name \'.pytest_cache\' | xargs rm -rf"'
-            sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME}-${REGRESSION_SERVICE_NAME} down --rmi all -v || true'
+    }
+
+    container('test-env') {
+        try {
+            dir ('tests/python_test') {
+                sh "pytest --tags=0331 --ip ${env.HELM_RELEASE_NAME}-milvus-ha.${env.HELM_RELEASE_NAMESPACE}.svc.cluster.local"
+            }
+        } catch (exc) {
+            echo 'PyTest Regression Failed !'
+            throw exc
+        } finally {
+            container('deploy-env') {
+                def labels = ""
+                if ("${REGRESSION_SERVICE_TYPE}" == "distributed") {
+                    labels = "app.kubernetes.io/instance=${env.HELM_RELEASE_NAME},component=proxyservice"
+                } else {
+                    labels = "app.kubernetes.io/instance=${env.HELM_RELEASE_NAME},component=standalone"
+                }
+                sh "mkdir -p ${env.DEV_TEST_ARTIFACTS_PATH}"
+                sh "kubectl cp -n ${env.HELM_RELEASE_NAMESPACE} \$(kubectl get pod -n ${env.HELM_RELEASE_NAMESPACE} -l ${labels} -o jsonpath='{range.items[0]}{.metadata.name}'):logs ${env.DEV_TEST_ARTIFACTS_PATH}"
+                archiveArtifacts artifacts: "${env.DEV_TEST_ARTIFACTS_PATH}/**", allowEmptyArchive: true
+            }
         }
     }
 }

@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: milvus
+    componet: test-env
+spec:
+  containers:
+  - name: test-env
+    image: milvusdb/pytest:20210310-5ea22d7
+    command:
+    - cat
+    tty: true
+    resources:
+      limits:
+        memory: "8Gi"
+        cpu: "4.0"
+      requests:
+        memory: "4Gi"
+        cpu: "2.0"
+  - name: deploy-env
+    image: registry.zilliz.com/library/helm3:v0.1
+    command:
+    - cat
+    tty: true
+    volumeMounts:
+    - name: kubeconf
+      mountPath: /root/.kube/
+      readOnly: true
+  volumes:
+  - name: kubeconf
+    secret:
+      secretName: test-cluster-config
+  tolerations:
+  - key: dedicated
+    operator: Equal
+    value: milvus
+    effect: NoSchedule
