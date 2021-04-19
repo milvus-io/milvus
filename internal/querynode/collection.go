@@ -16,6 +16,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"go.uber.org/zap"
+	"unsafe"
 )
 
 type Collection struct {
@@ -62,6 +63,7 @@ func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Co
 		id:            collectionID,
 		schema:        schema,
 	}
+	C.free(unsafe.Pointer(cSchemaBlob))
 
 	log.Debug("create collection", zap.Int64("collectionID", collectionID))
 

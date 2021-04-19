@@ -4,14 +4,14 @@ go 1.15
 
 require (
 	github.com/HdrHistogram/hdrhistogram-go v1.0.1 // indirect
-	github.com/apache/pulsar-client-go v0.1.1
+	github.com/apache/pulsar-client-go v0.4.0
 	github.com/apache/thrift/lib/go/thrift v0.0.0-20210120171102-e27e82c46ba4
 	github.com/facebookgo/ensure v0.0.0-20200202191622-63f1cf65ac4c // indirect
 	github.com/facebookgo/stack v0.0.0-20160209184415-751773369052 // indirect
 	github.com/facebookgo/subset v0.0.0-20200203212716-c811ad88dec4 // indirect
 	github.com/frankban/quicktest v1.10.2 // indirect
 	github.com/go-basic/ipv4 v1.0.0
-	github.com/gogo/protobuf v1.3.1
+	github.com/gogo/protobuf v1.3.2
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
 	github.com/golang/mock v1.3.1
 	github.com/golang/protobuf v1.4.2
@@ -39,7 +39,6 @@ require (
 	golang.org/x/lint v0.0.0-20200302205851-738671d3881b // indirect
 	golang.org/x/net v0.0.0-20201202161906-c7110b5ffcbb
 	golang.org/x/time v0.0.0-20191024005414-555d28b269f0 // indirect
-	golang.org/x/tools v0.0.0-20200825202427-b303f430e36d // indirect
 	google.golang.org/genproto v0.0.0-20200122232147-0452cf42e150 // indirect
 	google.golang.org/grpc v1.31.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
