@@ -27,6 +27,7 @@ NewSegment(CCollection collection, uint64_t segment_id) {
 
     auto segment = milvus::segcore::CreateGrowingSegment(col->get_schema());
 
+    // TODO: delete print
     std::cout << "create segment " << segment_id << std::endl;
     return (void*)segment.release();
 }
@@ -35,6 +36,7 @@ void
 DeleteSegment(CSegmentBase segment) {
     auto s = (milvus::segcore::SegmentGrowing*)segment;
 
+    // TODO: delete print
     std::cout << "delete segment " << std::endl;
     delete s;
 }
@@ -76,12 +78,17 @@ Insert(CSegmentBase c_segment,
         status.error_msg = strdup(e.what());
         return status;
     }
+
+    // TODO: delete print
+    // std::cout << "do segment insert, sizeof_per_row = " << sizeof_per_row << std::endl;
 }
 
 int64_t
 PreInsert(CSegmentBase c_segment, int64_t size) {
     auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
 
+    // TODO: delete print
+    // std::cout << "PreInsert segment " << std::endl;
     return segment->PreInsert(size);
 }
 
@@ -109,6 +116,8 @@ int64_t
 PreDelete(CSegmentBase c_segment, int64_t size) {
     auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
 
+    // TODO: delete print
+    // std::cout << "PreDelete segment " << std::endl;
     return segment->PreDelete(size);
 }
 

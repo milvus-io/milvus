@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "SearchOnGrowing.h"
+#include "Search.h"
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include "segcore/Reduce.h"
@@ -65,6 +65,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
     auto topK = info.topK_;
     auto total_count = topK * num_queries;
     auto metric_type = GetMetricType(info.metric_type_);
+    // TODO: optimize
 
     // step 3: small indexing search
     // std::vector<int64_t> final_uids(total_count, -1);
@@ -76,9 +77,10 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
     const auto& indexing_entry = indexing_record.get_vec_entry(vecfield_offset);
     auto search_conf = indexing_entry.get_search_conf(topK);
 
+    // TODO: use sub_qr
     for (int chunk_id = 0; chunk_id < max_indexed_id; ++chunk_id) {
         auto chunk_size = indexing_entry.get_chunk_size();
-        auto indexing = indexing_entry.get_indexing(chunk_id);
+        auto indexing = indexing_entry.get_vec_indexing(chunk_id);
 
         auto sub_view = BitsetSubView(bitset, chunk_id * chunk_size, chunk_size);
         auto sub_qr = SearchOnIndex(query_dataset, *indexing, search_conf, sub_view);
@@ -194,39 +196,5 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
 
     return Status::OK();
 }
-
-// TODO: refactor and merge this into one
-template <typename VectorType>
-void
-SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
-                const query::QueryInfo& info,
-                const EmbeddedType<VectorType>* query_data,
-                int64_t num_queries,
-                Timestamp timestamp,
-                const faiss::BitsetView& bitset,
-                QueryResult& results) {
-    static_assert(IsVector<VectorType>);
-    if constexpr (std::is_same_v<VectorType, FloatVector>) {
-        FloatSearch(segment, info, query_data, num_queries, timestamp, bitset, results);
-    } else {
-        BinarySearch(segment, info, query_data, num_queries, timestamp, bitset, results);
-    }
-}
-template void
-SearchOnGrowing<FloatVector>(const segcore::SegmentGrowingImpl& segment,
-                             const query::QueryInfo& info,
-                             const EmbeddedType<FloatVector>* query_data,
-                             int64_t num_queries,
-                             Timestamp timestamp,
-                             const faiss::BitsetView& bitset,
-                             QueryResult& results);
-template void
-SearchOnGrowing<BinaryVector>(const segcore::SegmentGrowingImpl& segment,
-                              const query::QueryInfo& info,
-                              const EmbeddedType<BinaryVector>* query_data,
-                              int64_t num_queries,
-                              Timestamp timestamp,
-                              const faiss::BitsetView& bitset,
-                              QueryResult& results);
 
 }  // namespace milvus::query

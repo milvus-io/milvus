@@ -83,14 +83,26 @@ type RocksMQ struct {
 	//tsoTicker *time.Ticker
 }
 
-func NewRocksMQ() *RocksMQ {
-	mkv := memkv.NewMemoryKV()
-	// mstore, _ :=
-	rmq := &RocksMQ{
-		// store: mstore,
-		kv: mkv,
+func NewRocksMQ(name string) (*RocksMQ, error) {
+	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
+	bbto.SetBlockCache(gorocksdb.NewLRUCache(3 << 30))
+	opts := gorocksdb.NewDefaultOptions()
+	opts.SetBlockBasedTableFactory(bbto)
+	opts.SetCreateIfMissing(true)
+	opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(FixedChannelNameLen + 1))
+
+	db, err := gorocksdb.OpenDb(opts, name)
+	if err != nil {
+		return nil, err
 	}
-	return rmq
+
+	mkv := memkv.NewMemoryKV()
+
+	rmq := &RocksMQ{
+		store: db,
+		kv:    mkv,
+	}
+	return rmq, nil
 }
 
 //func (rmq *RocksMQ) startServerLoop(ctx context.Context) error {
@@ -217,7 +229,7 @@ func (rmq *RocksMQ) CreateConsumerGroup(groupName string, channelName string) er
 	if rmq.checkKeyExist(key) {
 		return errors.New("ConsumerGroup " + groupName + " already exists.")
 	}
-	err := rmq.kv.Save(key, "0")
+	err := rmq.kv.Save(key, "-1")
 	if err != nil {
 		return err
 	}
@@ -285,7 +297,60 @@ func (rmq *RocksMQ) Produce(channelName string, messages []ProducerMessage) erro
 }
 
 func (rmq *RocksMQ) Consume(groupName string, channelName string, n int) ([]ConsumerMessage, error) {
-	return nil, nil
+	metaKey := groupName + "/" + channelName + "/current_id"
+	currentID, err := rmq.kv.Load(metaKey)
+	if err != nil {
+		return nil, err
+	}
+
+	readOpts := gorocksdb.NewDefaultReadOptions()
+	readOpts.SetPrefixSameAsStart(true)
+	iter := rmq.store.NewIterator(readOpts)
+	defer iter.Close()
+
+	consumerMessage := make([]ConsumerMessage, 0, n)
+
+	fixChanName, err := fixChannelName(channelName)
+	if err != nil {
+		return nil, err
+	}
+	dataKey := fixChanName + "/" + currentID
+
+	// msgID is "-1" means this is the first consume operation
+	if currentID == "-1" {
+		iter.SeekToFirst()
+	} else {
+		iter.Seek([]byte(dataKey))
+	}
+
+	offset := 0
+	for ; iter.Valid() && offset < n; iter.Next() {
+		key := iter.Key()
+		val := iter.Value()
+		offset++
+		msgID, err := strconv.ParseInt(string(key.Data())[FixedChannelNameLen+1:], 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		msg := ConsumerMessage{
+			msgID:   msgID,
+			payload: val.Data(),
+		}
+		consumerMessage = append(consumerMessage, msg)
+		key.Free()
+		val.Free()
+	}
+	if err := iter.Err(); err != nil {
+		return nil, err
+	}
+
+	newID := consumerMessage[len(consumerMessage)-1].msgID
+	err = rmq.Seek(groupName, channelName, newID)
+	if err != nil {
+		return nil, err
+	}
+
+	return consumerMessage, nil
 }
 
 func (rmq *RocksMQ) Seek(groupName string, channelName string, msgID UniqueID) error {

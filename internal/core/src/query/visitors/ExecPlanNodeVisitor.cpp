@@ -16,7 +16,7 @@
 #include "query/generated/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "query/generated/ExecExprVisitor.h"
-#include "query/SearchOnGrowing.h"
+#include "query/Search.h"
 #include "query/SearchOnSealed.h"
 
 namespace milvus::query {
@@ -46,11 +46,6 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
     }
 
  private:
-    template <typename VectorType>
-    void
-    VectorVisitorImpl(VectorPlanNode& node);
-
- private:
     // std::optional<RetType> ret_;
     const segcore::SegmentGrowing& segment_;
     Timestamp timestamp_;
@@ -61,16 +56,15 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
 }  // namespace impl
 #endif
 
-template <typename VectorType>
 void
-ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
+ExecPlanNodeVisitor::visit(FloatVectorANNS& node) {
     // TODO: optimize here, remove the dynamic cast
     assert(!ret_.has_value());
     auto segment = dynamic_cast<const segcore::SegmentGrowingImpl*>(&segment_);
     AssertInfo(segment, "support SegmentSmallIndex Only");
     RetType ret;
     auto& ph = placeholder_group_.at(0);
-    auto src_data = ph.get_blob<EmbeddedType<VectorType>>();
+    auto src_data = ph.get_blob<float>();
     auto num_queries = ph.num_of_queries_;
 
     aligned_vector<uint8_t> bitset_holder;
@@ -86,20 +80,39 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
         SearchOnSealed(segment->get_schema(), sealed_indexing, node.query_info_, src_data, num_queries, timestamp_,
                        view, ret);
     } else {
-        SearchOnGrowing<VectorType>(*segment, node.query_info_, src_data, num_queries, timestamp_, view, ret);
+        FloatSearch(*segment, node.query_info_, src_data, num_queries, timestamp_, view, ret);
     }
 
     ret_ = ret;
 }
 
 void
-ExecPlanNodeVisitor::visit(FloatVectorANNS& node) {
-    VectorVisitorImpl<FloatVector>(node);
-}
-
-void
 ExecPlanNodeVisitor::visit(BinaryVectorANNS& node) {
-    VectorVisitorImpl<BinaryVector>(node);
+    // TODO: optimize here, remove the dynamic cast
+    assert(!ret_.has_value());
+    auto segment = dynamic_cast<const segcore::SegmentGrowingImpl*>(&segment_);
+    AssertInfo(segment, "support SegmentSmallIndex Only");
+    RetType ret;
+    auto& ph = placeholder_group_.at(0);
+    auto src_data = ph.get_blob<uint8_t>();
+    auto num_queries = ph.num_of_queries_;
+
+    aligned_vector<uint8_t> bitset_holder;
+    BitsetView view;
+    if (node.predicate_.has_value()) {
+        ExecExprVisitor::RetType expr_ret = ExecExprVisitor(*segment).call_child(*node.predicate_.value());
+        bitset_holder = AssembleNegBitmap(expr_ret);
+        view = BitsetView(bitset_holder.data(), bitset_holder.size() * 8);
+    }
+
+    auto& sealed_indexing = segment->get_sealed_indexing_record();
+    if (sealed_indexing.is_ready(node.query_info_.field_offset_)) {
+        SearchOnSealed(segment->get_schema(), sealed_indexing, node.query_info_, src_data, num_queries, timestamp_,
+                       view, ret);
+    } else {
+        BinarySearch(*segment, node.query_info_, src_data, num_queries, timestamp_, view, ret);
+    }
+    ret_ = ret;
 }
 
 }  // namespace milvus::query

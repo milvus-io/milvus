@@ -40,6 +40,7 @@ struct UnaryExpr : Expr {
     ExprPtr child_;
 };
 
+// TODO: not enabled in sprint 1
 struct BoolUnaryExpr : UnaryExpr {
     enum class OpType { LogicalNot };
     OpType op_type_;
@@ -49,6 +50,7 @@ struct BoolUnaryExpr : UnaryExpr {
     accept(ExprVisitor&) override;
 };
 
+// TODO: not enabled in sprint 1
 struct BoolBinaryExpr : BinaryExpr {
     // Note: bitA - bitB == bitA & ~bitB, alias to LogicalMinus
     enum class OpType { LogicalAnd, LogicalOr, LogicalXor, LogicalMinus };
