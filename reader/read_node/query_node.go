@@ -259,6 +259,7 @@ func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 			assert.NotEqual(nil, 0, timeRange.timestampMax)
 
 			if msgLen[0] == 0 && len(node.buffer.InsertDeleteBuffer) <= 0 {
+				node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
 				continue
 			}
 

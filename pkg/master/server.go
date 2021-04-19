@@ -75,6 +75,7 @@ func ComputeCloseTime(ss mock.SegmentStats, kvbase kv.Base) error {
 			return err
 		}
 		seg.CloseTimeStamp = uint64(currentTime.Add(time.Duration(sec) * time.Second).Unix())
+		fmt.Println("memRate = ", memRate, ",sec = ", sec ,",Close time = ", seg.CloseTimeStamp)
 		updateData, err := mock.Segment2JSON(*seg)
 		if err != nil {
 			return err
