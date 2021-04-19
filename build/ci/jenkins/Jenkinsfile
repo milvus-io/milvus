@@ -84,7 +84,6 @@ pipeline {
                 }
                 environment {
                     HELM_BRANCH = "main"
-                    PYMILVUS_VERSION = "0.0.42"
                     HELM_RELEASE_NAMESPACE = "dev"
                     HELM_RELEASE_NAME = "${PROJECT_NAME}-${SEMVER}-${env.BUILD_NUMBER}-${REGRESSION_SERVICE_TYPE}".replaceAll("\\.", "-").replaceAll("_", "-").toLowerCase()
                     DEV_TEST_ARTIFACTS_PATH = "artifacts"
