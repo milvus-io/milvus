@@ -1,58 +1,54 @@
 ## Entrypoint
 
-Usage:
+### Syntax
 
-- Command line arguments
+Use the following syntax to run `milvus-distributed` commands from your terminal window:
 
-  - ```shell
-    $ ./milvus-distributed --help
-    usage: main [<flags>]
-    
-    Milvus
-    
-    Flags:
-          --help               Show context-sensitive help (also try --help-long and --help-man).
-      -m, --master             Run master service
-      -M, --msgstream-service  Run msgstream service
-      -p, --proxy-service      Run proxy service
-      -P, --proxy-node         Run proxy node
-      -q, --query-service      Run query service
-      -Q, --query-node         Run query node
-      -d, --data-service       Run data service
-      -D, --data-node          Run data node
-      -i, --index-service      Run index service
-      -I, --index-node         Run index node
-    
-    
-    # Startup master and proxy in a container
-    $ ./milvus-distributed --master --proxy
-    ```
+```shell
+milvus-distributed [command] [server type] [flags]
+```
 
-- environment variables
+Example:
 
-  - ```
-    $ export ENABLE_MASTER=1
-    $ export ENABLE_PROXY=1
-    $ ./milvus-distributed
-    ```
+```bash
+$ MILVUS_CONF_PATH=/path/to/milvus-distributed/configs milvus-distributed run master
+```
 
-  - ```shell
-    $ ENABLE_MASTER=1 ENABLE_PROXY=1 ./milvus-distributed
-    ```
 
-- docker-compose
+<br/></br>
+where `command`, `server type`, and `flags` are:
+<br/></br>
 
-  - ```yaml
-      milvus-master:
-        image: milvusdb/milvus-distributed:latest
-        environment: 
-          - master=1
-      
-      milvus-proxy:
-        image: milvusdb/milvus-distributed:latest
-        environment: 
-          - proxy=1
-    ```
+`command`: Specifies the operation that you want to perform on server, for example `run`, `status`, `stop`
 
-    
+`server type`: Specifies the server type, `server type` are:
 
+* `master`
+* `msgstream`
+* `proxyservice`
+* `proxynode`
+* `queryservice`
+* `querynode`
+* `dataservice`
+* `datanode`
+* `indexservice`
+* `indexnode`
+
+`flags`: Specifies optional flags. For example, you can use the `-f` or `--config` flags to specify the configuration file.
+
+> Getting help
+> You can get help for CLI tool using the `--help` flag, or `-h` for short.
+> ```shell
+> $ milvus-distributed run master --help
+> ```
+
+
+### Environment
+
+
+The table below lists the environment variables that you can use to configure the `milvus-distributed` tool.
+
+
+|  Variable  | Description | Default |
+| :-----:| :----: | :----: |
+| MILVUS_CONF_PATH | Milvus configuration path | `/milvus-distributed/configs` |
