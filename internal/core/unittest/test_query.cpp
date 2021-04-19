@@ -259,6 +259,58 @@ TEST(Query, ExecWithPredicate) {
 ])");
     ASSERT_EQ(json.dump(2), ref.dump(2));
 }
+TEST(Query, ExecTerm) {
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    auto schema = std::make_shared<Schema>();
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddField("age", DataType::FLOAT);
+    std::string dsl = R"({
+        "bool": {
+            "must": [
+            {
+                "term": {
+                    "age": {
+                        "values": []
+                    }
+                }
+            },
+            {
+                "vector": {
+                    "fakevec": {
+                        "metric_type": "L2",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 5
+                    }
+                }
+            }
+            ]
+        }
+    })";
+    int64_t N = 1000 * 1000;
+    auto dataset = DataGen(schema, N);
+    auto segment = std::make_unique<SegmentSmallIndex>(schema);
+    segment->PreInsert(N);
+    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+
+    auto plan = CreatePlan(*schema, dsl);
+    auto num_queries = 3;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    QueryResult qr;
+    Timestamp time = 1000000;
+    std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
+    segment->Search(plan.get(), ph_group_arr.data(), &time, 1, qr);
+    std::vector<std::vector<std::string>> results;
+    int topk = 5;
+    auto json = QueryResultToJson(qr);
+    ASSERT_EQ(qr.num_queries_, num_queries);
+    ASSERT_EQ(qr.topK_, topk);
+    // for(auto x: )
+}
 
 TEST(Query, ExecWithoutPredicate) {
     using namespace milvus::query;
