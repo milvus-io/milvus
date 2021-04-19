@@ -5,6 +5,7 @@
 #include "pb/message.pb.h"
 #include <google/protobuf/text_format.h>
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
+#include <cstring>
 
 namespace milvus::segcore {
 
@@ -132,7 +133,7 @@ Collection::parse() {
         int dim = 16;
         for (const auto& type_param : type_params) {
             if (type_param.key() == "dim") {
-                // dim = type_param.value();
+                dim = strtoll(type_param.value().c_str(), nullptr, 10);
             }
         }
         std::cout << "add Field, name :" << child.name() << ", datatype :" << child.data_type() << ", dim :" << dim

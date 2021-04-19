@@ -8,6 +8,7 @@ set(MILVUS_TEST_FILES
         test_concurrent_vector.cpp
         test_c_api.cpp
         test_indexing.cpp
+        test_query.cpp
         )
 add_executable(all_tests
         ${MILVUS_TEST_FILES}
