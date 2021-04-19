@@ -1186,6 +1186,7 @@ class DescribeCollectionRequest :
     kDbNameFieldNumber = 2,
     kCollectionNameFieldNumber = 3,
     kBaseFieldNumber = 1,
+    kCollectionIDFieldNumber = 4,
   };
   // string db_name = 2;
   void clear_db_name();
@@ -1217,6 +1218,11 @@ class DescribeCollectionRequest :
   ::milvus::proto::common::MsgBase* mutable_base();
   void set_allocated_base(::milvus::proto::common::MsgBase* base);
 
+  // int64 collectionID = 4;
+  void clear_collectionid();
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid() const;
+  void set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.DescribeCollectionRequest)
  private:
   class _Internal;
@@ -1225,6 +1231,7 @@ class DescribeCollectionRequest :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::milvus::proto::common::MsgBase* base_;
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -8908,6 +8915,20 @@ inline void DescribeCollectionRequest::set_allocated_collection_name(std::string
   }
   collection_name_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), collection_name);
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.DescribeCollectionRequest.collection_name)
+}
+
+// int64 collectionID = 4;
+inline void DescribeCollectionRequest::clear_collectionid() {
+  collectionid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 DescribeCollectionRequest::collectionid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.DescribeCollectionRequest.collectionID)
+  return collectionid_;
+}
+inline void DescribeCollectionRequest::set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  collectionid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeCollectionRequest.collectionID)
 }
 
 // -------------------------------------------------------------------
