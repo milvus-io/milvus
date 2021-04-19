@@ -1,5 +1,6 @@
 #include "ClientV2.h"
 #include "pulsar/Result.h"
+#include "PartitionPolicy.h"
 
 namespace {
 int64_t gen_channe_id(int64_t uid) {
@@ -26,11 +27,17 @@ Status MsgClientV2::Init(const std::string &insert_delete,
         const std::string &time_sync,
         const std::string &search_by_id,
         const std::string &search_result) {
+  //create pulsar client
   auto pulsar_client = std::make_shared<MsgClient>(service_url_);
-  insert_delete_producer_ = std::make_shared<MsgProducer>(pulsar_client, insert_delete);
-  search_producer_ = std::make_shared<MsgProducer>(pulsar_client, search);
-  search_by_id_producer_ = std::make_shared<MsgProducer>(pulsar_client, search_by_id);
+  //create pulsar producer
+  ProducerConfiguration producerConfiguration;
+  producerConfiguration.setPartitionsRoutingMode(ProducerConfiguration::CustomPartition);
+  producerConfiguration.setMessageRouter(std::make_shared<PartitionPolicy>());
+  insert_delete_producer_ = std::make_shared<MsgProducer>(pulsar_client, insert_delete, producerConfiguration);
+  search_producer_ = std::make_shared<MsgProducer>(pulsar_client, search, producerConfiguration);
+  search_by_id_producer_ = std::make_shared<MsgProducer>(pulsar_client, search_by_id, producerConfiguration);
   time_sync_producer_ = std::make_shared<MsgProducer>(pulsar_client, time_sync);
+  //create pulsar consumer
   consumer_ = std::make_shared<MsgConsumer>(pulsar_client, search_result);
 
   auto result = consumer_->subscribe(search_result);

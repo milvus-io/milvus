@@ -9,11 +9,17 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <fiu/fiu-local.h>
 
-#include "config/ServerConfig.h"
+#include "easyloggingpp/easylogging++.h"
 
-TEST(ServerConfigTest, parse_invalid_devices) {
-    auto collections = milvus::ParseGPUDevices("gpu0,gpu1");
-    ASSERT_EQ(collections.size(), 0);
+INITIALIZE_EASYLOGGINGPP
+
+int
+main(int argc, char** argv) {
+    fiu_init(0);
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
 }

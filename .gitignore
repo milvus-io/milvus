@@ -23,11 +23,11 @@ cmake-build-release
 cmake_build
 
 # proxy
+proxy/milvus
 proxy/cmake_build
 proxy/cmake-build-debug
 proxy/thirdparty/grpc-src
 proxy/thirdparty/grpc-build
-proxy/milvus/
 proxy/milvus/*
 proxy/suvlim/
 proxy/suvlim/*
