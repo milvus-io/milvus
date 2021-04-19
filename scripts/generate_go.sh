@@ -62,8 +62,8 @@ function collect() {
 # official go code ship with the crate, so we need to generate it manually.
 cd ${ROOT_DIR}/proto
 
-PB_FILES=()
-GRPC_FILES=("message.proto" "pdpb.proto" "metapb.proto")
+PB_FILES=("message.proto")
+GRPC_FILES=("pdpb.proto" "metapb.proto")
 ALL_FILES=("${PB_FILES[@]}")
 ALL_FILES+=("${GRPC_FILES[@]}")
 

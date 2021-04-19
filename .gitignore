@@ -26,19 +26,19 @@ cmake_build
 proxy/milvus
 proxy/cmake_build
 proxy/cmake-build-debug
+proxy/cmake-build-release
+proxy/cmake_build_release
 proxy/thirdparty/grpc-src
 proxy/thirdparty/grpc-build
 proxy/milvus/*
 proxy/suvlim/
 proxy/suvlim/*
 
-proxy-go/proxy-go
-
 # sdk
 sdk/cmake_build
 sdk/cmake-build-debug
 sdk/cmake-build-release
-
+sdk/cmake_build_release
 
 # Compiled source
 *.a
