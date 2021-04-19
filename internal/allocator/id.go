@@ -2,7 +2,6 @@ package allocator
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"time"
 
@@ -46,7 +45,6 @@ func NewIDAllocator(ctx context.Context, masterAddr string) (*IDAllocator, error
 }
 
 func (ia *IDAllocator) syncID() bool {
-	fmt.Println("syncID")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	req := &internalpb.IDRequest{
 		PeerID: ia.PeerID,

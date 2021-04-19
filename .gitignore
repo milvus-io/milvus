@@ -60,3 +60,4 @@ cwrapper_build
 **/compile_commands.json
 **/.lint
 typescript
+**/.pytest_cache/

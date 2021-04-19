@@ -89,7 +89,7 @@ func TestParamTable_WriteNode(t *testing.T) {
 
 	t.Run("Test FlushInsertBufSize", func(t *testing.T) {
 		name := Params.FlushInsertBufSize
-		assert.Equal(t, name, 20)
+		assert.Equal(t, name, 500)
 	})
 
 	t.Run("Test FlushDdBufSize", func(t *testing.T) {
