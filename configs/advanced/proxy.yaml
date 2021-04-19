@@ -11,3 +11,18 @@
 
 proxy:
   timeTickInterval: 200 # ms
+
+  msgStream:
+    insert:
+      #streamBufSize: 1024 # msgPack chan buffer size
+      bufSize: 1024 # msgPack chan buffer size
+
+    search:
+      bufSize: 512
+
+    searchResult:
+      recvBufSize: 1024 # msgPack chan buffer size
+      pulsarBufSize: 1024 # pulsar chan buffer size
+
+    timeTick:
+      bufSize: 512

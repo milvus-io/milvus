@@ -363,18 +363,13 @@ func (sched *TaskScheduler) queryResultLoop() {
 	defer sched.wg.Done()
 
 	// TODO: use config instead
-	pulsarAddress := "pulsar://localhost:6650"
-	bufSize := int64(1000)
-	queryResultChannels := []string{"QueryResult"}
-	queryResultSubName := "QueryResultSubject"
 	unmarshal := msgstream.NewUnmarshalDispatcher()
-
-	queryResultMsgStream := msgstream.NewPulsarMsgStream(sched.ctx, bufSize)
-	queryResultMsgStream.SetPulsarClient(pulsarAddress)
-	queryResultMsgStream.CreatePulsarConsumers(queryResultChannels,
-		queryResultSubName,
+	queryResultMsgStream := msgstream.NewPulsarMsgStream(sched.ctx, Params.MsgStreamSearchResultBufSize())
+	queryResultMsgStream.SetPulsarClient(Params.PulsarAddress())
+	queryResultMsgStream.CreatePulsarConsumers(Params.SearchResultChannelNames(),
+		Params.ProxySubName(),
 		unmarshal,
-		bufSize)
+		Params.MsgStreamSearchResultPulsarBufSize())
 
 	queryResultMsgStream.Start()
 	defer queryResultMsgStream.Close()
