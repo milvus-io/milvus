@@ -14,6 +14,8 @@ import (
 
 var Params paramtable.BaseTable
 
+type Timestamp = msgstream.Timestamp
+
 func newInsertMsgUnmarshal(input []byte) (msgstream.TsMsg, error) {
 	insertRequest := internalpb2.InsertRequest{}
 	err := proto.Unmarshal(input, &insertRequest)
@@ -27,25 +29,32 @@ func newInsertMsgUnmarshal(input []byte) (msgstream.TsMsg, error) {
 }
 
 func TestStream_unmarshal_Insert(t *testing.T) {
-	//pulsarAddress, _ := Params.Load("_PulsarAddress")
-	//producerChannels := []string{"insert1", "insert2"}
-	//consumerChannels := []string{"insert1", "insert2"}
-	//consumerSubName := "subInsert"
-
 	msgPack := msgstream.MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, GetTsMsg(commonpb.MsgType_kInsert, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, GetTsMsg(commonpb.MsgType_kInsert, 3, 3))
+	insertMsg := &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{
+			BeginTimestamp: 0,
+			EndTimestamp:   0,
+			HashValues:     []uint32{1},
+		},
+		InsertRequest: internalpb2.InsertRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kInsert,
+				MsgID:     1,
+				Timestamp: 11,
+				SourceID:  1,
+			},
+			CollectionName: "Collection",
+			PartitionName:  "Partition",
+			SegmentID:      1,
+			ChannelID:      "0",
+			Timestamps:     []Timestamp{uint64(1)},
+			RowIDs:         []int64{1},
+			RowData:        []*commonpb.Blob{{}},
+		},
+	}
+	msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 
-	//inputStream := pulsarms.NewPulsarMsgStream(context.Background(), 100)
-	//inputStream.SetPulsarClient(pulsarAddress)
-	//inputStream.CreatePulsarProducers(producerChannels)
-	//inputStream.Start()
-
-	//outputStream := pulsarms.NewPulsarMsgStream(context.Background(), 100)
-	//outputStream.SetPulsarClient(pulsarAddress)
 	unmarshalDispatcher := NewUnmarshalDispatcher()
-
-	//add a new unmarshall func for msgType kInsert
 	unmarshalDispatcher.AddMsgTemplate(commonpb.MsgType_kInsert, newInsertMsgUnmarshal)
 
 	for _, v := range msgPack.Msgs {
@@ -58,28 +67,4 @@ func TestStream_unmarshal_Insert(t *testing.T) {
 		assert.Nil(t, err)
 		fmt.Println("msg type: ", msg.Type(), ", msg value: ", msg, "msg tag: ")
 	}
-
-	//outputStream.CreatePulsarConsumers(consumerChannels, consumerSubName, unmarshalDispatcher, 100)
-	//outputStream.Start()
-
-	//err := inputStream.Produce(&msgPack)
-	//if err != nil {
-	//	log.Fatalf("produce error = %v", err)
-	//}
-	//receiveCount := 0
-	//for {
-	//	result := (*outputStream).Consume()
-	//	if len(result.Msgs) > 0 {
-	//		msgs := result.Msgs
-	//		for _, v := range msgs {
-	//			receiveCount++
-	//			fmt.Println("msg type: ", v.Type(), ", msg value: ", v, "msg tag: ")
-	//		}
-	//	}
-	//	if receiveCount >= len(msgPack.Msgs) {
-	//		break
-	//	}
-	//}
-	//inputStream.Close()
-	//outputStream.Close()
 }

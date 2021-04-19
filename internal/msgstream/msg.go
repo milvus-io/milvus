@@ -20,6 +20,8 @@ type TsMsg interface {
 	HashKeys() []uint32
 	Marshal(TsMsg) ([]byte, error)
 	Unmarshal([]byte) (TsMsg, error)
+	Position() *MsgPosition
+	SetPosition(*MsgPosition)
 }
 
 type BaseMsg struct {
@@ -27,6 +29,7 @@ type BaseMsg struct {
 	BeginTimestamp Timestamp
 	EndTimestamp   Timestamp
 	HashValues     []uint32
+	MsgPosition    *MsgPosition
 }
 
 func (bm *BaseMsg) BeginTs() Timestamp {
@@ -39,6 +42,14 @@ func (bm *BaseMsg) EndTs() Timestamp {
 
 func (bm *BaseMsg) HashKeys() []uint32 {
 	return bm.HashValues
+}
+
+func (bm *BaseMsg) Position() *MsgPosition {
+	return bm.MsgPosition
+}
+
+func (bm *BaseMsg) SetPosition(position *MsgPosition) {
+	bm.MsgPosition = position
 }
 
 /////////////////////////////////////////Insert//////////////////////////////////////////

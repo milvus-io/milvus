@@ -2,6 +2,10 @@ package typeutil
 
 import (
 	"encoding/binary"
+	"fmt"
+	"reflect"
+
+	"github.com/apache/pulsar-client-go/pulsar"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 )
@@ -36,4 +40,29 @@ func Uint64ToBytes(v uint64) []byte {
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, v)
 	return b
+}
+
+func PulsarMsgIDToString(messageID pulsar.MessageID) string {
+	return string(messageID.Serialize())
+}
+
+func StringToPulsarMsgID(msgString string) (pulsar.MessageID, error) {
+	return pulsar.DeserializeMessageID([]byte(msgString))
+}
+
+func SliceRemoveDuplicate(a interface{}) (ret []interface{}) {
+	if reflect.TypeOf(a).Kind() != reflect.Slice {
+		fmt.Printf("input is not slice but %T\n", a)
+		return ret
+	}
+
+	va := reflect.ValueOf(a)
+	for i := 0; i < va.Len(); i++ {
+		if i > 0 && reflect.DeepEqual(va.Index(i-1).Interface(), va.Index(i).Interface()) {
+			continue
+		}
+		ret = append(ret, va.Index(i).Interface())
+	}
+
+	return ret
 }

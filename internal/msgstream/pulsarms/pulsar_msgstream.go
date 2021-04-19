@@ -3,6 +3,7 @@ package pulsarms
 import (
 	"context"
 	"log"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -14,10 +15,13 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/opentracing/opentracing-go/ext"
 	oplog "github.com/opentracing/opentracing-go/log"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type TsMsg = msgstream.TsMsg
@@ -30,24 +34,33 @@ type IntPrimaryKey = msgstream.IntPrimaryKey
 type TimeTickMsg = msgstream.TimeTickMsg
 type QueryNodeStatsMsg = msgstream.QueryNodeStatsMsg
 type RepackFunc = msgstream.RepackFunc
+type Consumer = pulsar.Consumer
+type Producer = pulsar.Producer
 
 type PulsarMsgStream struct {
-	ctx          context.Context
-	client       *pulsar.Client
-	producers    []*pulsar.Producer
-	consumers    []*pulsar.Consumer
-	repackFunc   RepackFunc
-	unmarshal    *util.UnmarshalDispatcher
-	receiveBuf   chan *MsgPack
-	wait         *sync.WaitGroup
-	streamCancel func()
+	ctx              context.Context
+	client           pulsar.Client
+	producers        []Producer
+	consumers        []Consumer
+	consumerChannels []string
+	repackFunc       RepackFunc
+	unmarshal        *util.UnmarshalDispatcher
+	receiveBuf       chan *MsgPack
+	wait             *sync.WaitGroup
+	streamCancel     func()
 }
 
 func NewPulsarMsgStream(ctx context.Context, receiveBufSize int64) *PulsarMsgStream {
 	streamCtx, streamCancel := context.WithCancel(ctx)
+	producers := make([]Producer, 0)
+	consumers := make([]Consumer, 0)
+	consumerChannels := make([]string, 0)
 	stream := &PulsarMsgStream{
-		ctx:          streamCtx,
-		streamCancel: streamCancel,
+		ctx:              streamCtx,
+		streamCancel:     streamCancel,
+		producers:        producers,
+		consumers:        consumers,
+		consumerChannels: consumerChannels,
 	}
 	stream.receiveBuf = make(chan *MsgPack, receiveBufSize)
 	return stream
@@ -58,20 +71,21 @@ func (ms *PulsarMsgStream) SetPulsarClient(address string) {
 	if err != nil {
 		log.Printf("Set pulsar client failed, error = %v", err)
 	}
-	ms.client = &client
+	ms.client = client
 }
 
 func (ms *PulsarMsgStream) CreatePulsarProducers(channels []string) {
 	for i := 0; i < len(channels); i++ {
 		fn := func() error {
-			pp, err := (*ms.client).CreateProducer(pulsar.ProducerOptions{Topic: channels[i]})
+			pp, err := ms.client.CreateProducer(pulsar.ProducerOptions{Topic: channels[i]})
 			if err != nil {
 				return err
 			}
 			if pp == nil {
 				return errors.New("pulsar is not ready, producer is nil")
 			}
-			ms.producers = append(ms.producers, &pp)
+
+			ms.producers = append(ms.producers, pp)
 			return nil
 		}
 		err := util.Retry(10, time.Millisecond*200, fn)
@@ -90,7 +104,7 @@ func (ms *PulsarMsgStream) CreatePulsarConsumers(channels []string,
 	for i := 0; i < len(channels); i++ {
 		fn := func() error {
 			receiveChannel := make(chan pulsar.ConsumerMessage, pulsarBufSize)
-			pc, err := (*ms.client).Subscribe(pulsar.ConsumerOptions{
+			pc, err := ms.client.Subscribe(pulsar.ConsumerOptions{
 				Topic:                       channels[i],
 				SubscriptionName:            subName,
 				Type:                        pulsar.KeyShared,
@@ -103,7 +117,8 @@ func (ms *PulsarMsgStream) CreatePulsarConsumers(channels []string,
 			if pc == nil {
 				return errors.New("pulsar is not ready, consumer is nil")
 			}
-			ms.consumers = append(ms.consumers, &pc)
+
+			ms.consumers = append(ms.consumers, pc)
 			return nil
 		}
 		err := util.Retry(10, time.Millisecond*200, fn)
@@ -131,16 +146,16 @@ func (ms *PulsarMsgStream) Close() {
 
 	for _, producer := range ms.producers {
 		if producer != nil {
-			(*producer).Close()
+			producer.Close()
 		}
 	}
 	for _, consumer := range ms.consumers {
 		if consumer != nil {
-			(*consumer).Close()
+			consumer.Close()
 		}
 	}
 	if ms.client != nil {
-		(*ms.client).Close()
+		ms.client.Close()
 	}
 }
 
@@ -204,11 +219,11 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 		msgType := (tsMsgs[0]).Type()
 		switch msgType {
 		case commonpb.MsgType_kInsert:
-			result, err = msgstream.InsertRepackFunc(tsMsgs, reBucketValues)
+			result, err = util.InsertRepackFunc(tsMsgs, reBucketValues)
 		case commonpb.MsgType_kDelete:
-			result, err = msgstream.DeleteRepackFunc(tsMsgs, reBucketValues)
+			result, err = util.DeleteRepackFunc(tsMsgs, reBucketValues)
 		default:
-			result, err = msgstream.DefaultRepackFunc(tsMsgs, reBucketValues)
+			result, err = util.DefaultRepackFunc(tsMsgs, reBucketValues)
 		}
 	}
 	if err != nil {
@@ -253,7 +268,7 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 				child.LogFields(oplog.String("inject success", "inject success"))
 			}
 
-			if _, err := (*ms.producers[k]).Send(
+			if _, err := ms.producers[k].Send(
 				context.Background(),
 				msg,
 			); err != nil {
@@ -308,7 +323,7 @@ func (ms *PulsarMsgStream) Broadcast(msgPack *MsgPack) error {
 			child.LogFields(oplog.String("inject success", "inject success"))
 		}
 		for i := 0; i < producerLen; i++ {
-			if _, err := (*ms.producers[i]).Send(
+			if _, err := ms.producers[i].Send(
 				context.Background(),
 				msg,
 			); err != nil {
@@ -347,7 +362,7 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 
 	cases := make([]reflect.SelectCase, len(ms.consumers))
 	for i := 0; i < len(ms.consumers); i++ {
-		ch := (*ms.consumers[i]).Chan()
+		ch := ms.consumers[i].Chan()
 		cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ch)}
 	}
 
@@ -372,7 +387,7 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 					log.Printf("type assertion failed, not consumer message type")
 					continue
 				}
-				(*ms.consumers[chosen]).AckID(pulsarMsg.ID())
+				ms.consumers[chosen].AckID(pulsarMsg.ID())
 
 				headerMsg := commonpb.MsgHeader{}
 				err := proto.Unmarshal(pulsarMsg.Payload(), &headerMsg)
@@ -406,7 +421,7 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 
 				noMoreMessage := true
 				for i := 0; i < len(ms.consumers); i++ {
-					if len((*ms.consumers[i]).Chan()) > 0 {
+					if len(ms.consumers[i].Chan()) > 0 {
 						noMoreMessage = false
 					}
 				}
@@ -428,10 +443,27 @@ func (ms *PulsarMsgStream) Chan() <-chan *MsgPack {
 	return ms.receiveBuf
 }
 
+func (ms *PulsarMsgStream) Seek(mp *internalpb2.MsgPosition) error {
+	for index, channel := range ms.consumerChannels {
+		if channel == mp.ChannelName {
+			messageID, err := typeutil.StringToPulsarMsgID(mp.MsgID)
+			if err != nil {
+				return err
+			}
+			err = ms.consumers[index].Seek(messageID)
+			if err != nil {
+				return err
+			}
+			return nil
+		}
+	}
+
+	return errors.New("msgStream seek fail")
+}
+
 type PulsarTtMsgStream struct {
 	PulsarMsgStream
-	inputBuf      []TsMsg
-	unsolvedBuf   []TsMsg
+	unsolvedBuf   map[Consumer][]TsMsg
 	lastTimeStamp Timestamp
 }
 
@@ -457,12 +489,14 @@ func (ms *PulsarTtMsgStream) Start() {
 
 func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 	defer ms.wait.Done()
-	ms.unsolvedBuf = make([]TsMsg, 0)
-	ms.inputBuf = make([]TsMsg, 0)
-	isChannelReady := make([]bool, len(ms.consumers))
-	eofMsgTimeStamp := make(map[int]Timestamp)
+	ms.unsolvedBuf = make(map[Consumer][]TsMsg)
+	isChannelReady := make(map[Consumer]bool)
+	eofMsgTimeStamp := make(map[Consumer]Timestamp)
 	spans := make(map[Timestamp]opentracing.Span)
 	ctxs := make(map[Timestamp]context.Context)
+	for _, consumer := range ms.consumers {
+		ms.unsolvedBuf[consumer] = make([]TsMsg, 0)
+	}
 	for {
 		select {
 		case <-ms.ctx.Done():
@@ -471,50 +505,72 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 			wg := sync.WaitGroup{}
 			mu := sync.Mutex{}
 			findMapMutex := sync.RWMutex{}
-			for i := 0; i < len(ms.consumers); i++ {
-				if isChannelReady[i] {
+			for _, consumer := range ms.consumers {
+				if isChannelReady[consumer] {
 					continue
 				}
 				wg.Add(1)
-				go ms.findTimeTick(i, eofMsgTimeStamp, &wg, &mu, &findMapMutex)
+				go ms.findTimeTick(consumer, eofMsgTimeStamp, &wg, &mu, &findMapMutex)
 			}
 			wg.Wait()
-			timeStamp, ok := msgstream.CheckTimeTickMsg(eofMsgTimeStamp, isChannelReady, &findMapMutex)
+			timeStamp, ok := checkTimeTickMsg(eofMsgTimeStamp, isChannelReady, &findMapMutex)
 			if !ok || timeStamp <= ms.lastTimeStamp {
-				log.Printf("All timeTick's timestamps are inconsistent")
+				//log.Printf("All timeTick's timestamps are inconsistent")
 				continue
 			}
 
 			timeTickBuf := make([]TsMsg, 0)
-			ms.inputBuf = append(ms.inputBuf, ms.unsolvedBuf...)
-			ms.unsolvedBuf = ms.unsolvedBuf[:0]
-			for _, v := range ms.inputBuf {
-				var ctx context.Context
-				var span opentracing.Span
-				if v.Type() == commonpb.MsgType_kInsert {
-					if _, ok := spans[v.BeginTs()]; !ok {
-						span, ctx = opentracing.StartSpanFromContext(v.GetMsgContext(), "after find time tick")
-						ctxs[v.BeginTs()] = ctx
-						spans[v.BeginTs()] = span
+			msgPositions := make([]*internalpb2.MsgPosition, 0)
+			for consumer, msgs := range ms.unsolvedBuf {
+				tempBuffer := make([]TsMsg, 0)
+				var timeTickMsg TsMsg
+				for _, v := range msgs {
+					if v.Type() == commonpb.MsgType_kTimeTick {
+						timeTickMsg = v
+						continue
+					}
+					var ctx context.Context
+					var span opentracing.Span
+					if v.Type() == commonpb.MsgType_kInsert {
+						if _, ok := spans[v.BeginTs()]; !ok {
+							span, ctx = opentracing.StartSpanFromContext(v.GetMsgContext(), "after find time tick")
+							ctxs[v.BeginTs()] = ctx
+							spans[v.BeginTs()] = span
+						}
+					}
+					if v.EndTs() <= timeStamp {
+						timeTickBuf = append(timeTickBuf, v)
+						if v.Type() == commonpb.MsgType_kInsert {
+							v.SetMsgContext(ctxs[v.BeginTs()])
+							spans[v.BeginTs()].Finish()
+							delete(spans, v.BeginTs())
+						}
+					} else {
+						tempBuffer = append(tempBuffer, v)
 					}
 				}
-				if v.EndTs() <= timeStamp {
-					timeTickBuf = append(timeTickBuf, v)
-					if v.Type() == commonpb.MsgType_kInsert {
-						v.SetMsgContext(ctxs[v.BeginTs()])
-						spans[v.BeginTs()].Finish()
-						delete(spans, v.BeginTs())
-					}
+				ms.unsolvedBuf[consumer] = tempBuffer
+
+				if len(tempBuffer) > 0 {
+					msgPositions = append(msgPositions, &internalpb2.MsgPosition{
+						ChannelName: tempBuffer[0].Position().ChannelName,
+						MsgID:       tempBuffer[0].Position().MsgID,
+						Timestamp:   timeStamp,
+					})
 				} else {
-					ms.unsolvedBuf = append(ms.unsolvedBuf, v)
+					msgPositions = append(msgPositions, &internalpb2.MsgPosition{
+						ChannelName: timeTickMsg.Position().ChannelName,
+						MsgID:       timeTickMsg.Position().MsgID,
+						Timestamp:   timeStamp,
+					})
 				}
 			}
-			ms.inputBuf = ms.inputBuf[:0]
 
 			msgPack := MsgPack{
-				BeginTs: ms.lastTimeStamp,
-				EndTs:   timeStamp,
-				Msgs:    timeTickBuf,
+				BeginTs:        ms.lastTimeStamp,
+				EndTs:          timeStamp,
+				Msgs:           timeTickBuf,
+				StartPositions: msgPositions,
 			}
 
 			ms.receiveBuf <- &msgPack
@@ -523,8 +579,8 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 	}
 }
 
-func (ms *PulsarTtMsgStream) findTimeTick(channelIndex int,
-	eofMsgMap map[int]Timestamp,
+func (ms *PulsarTtMsgStream) findTimeTick(consumer Consumer,
+	eofMsgMap map[Consumer]Timestamp,
 	wg *sync.WaitGroup,
 	mu *sync.Mutex,
 	findMapMutex *sync.RWMutex) {
@@ -533,12 +589,12 @@ func (ms *PulsarTtMsgStream) findTimeTick(channelIndex int,
 		select {
 		case <-ms.ctx.Done():
 			return
-		case pulsarMsg, ok := <-(*ms.consumers[channelIndex]).Chan():
+		case pulsarMsg, ok := <-consumer.Chan():
 			if !ok {
 				log.Printf("consumer closed!")
 				return
 			}
-			(*ms.consumers[channelIndex]).Ack(pulsarMsg)
+			consumer.Ack(pulsarMsg)
 
 			headerMsg := commonpb.MsgHeader{}
 			err := proto.Unmarshal(pulsarMsg.Payload(), &headerMsg)
@@ -553,6 +609,11 @@ func (ms *PulsarTtMsgStream) findTimeTick(channelIndex int,
 			if err != nil {
 				log.Printf("Failed to unmarshal, error = %v", err)
 			}
+			// set pulsar info to tsMsg
+			tsMsg.SetPosition(&msgstream.MsgPosition{
+				ChannelName: pulsarMsg.Topic(),
+				MsgID:       typeutil.PulsarMsgIDToString(pulsarMsg.ID()),
+			})
 
 			if tsMsg.Type() == commonpb.MsgType_kInsert {
 				tracer := opentracing.GlobalTracer()
@@ -571,15 +632,139 @@ func (ms *PulsarTtMsgStream) findTimeTick(channelIndex int,
 				span.Finish()
 			}
 
+			mu.Lock()
+			ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
+			mu.Unlock()
+
 			if headerMsg.Base.MsgType == commonpb.MsgType_kTimeTick {
 				findMapMutex.Lock()
-				eofMsgMap[channelIndex] = tsMsg.(*TimeTickMsg).Base.Timestamp
+				eofMsgMap[consumer] = tsMsg.(*TimeTickMsg).Base.Timestamp
 				findMapMutex.Unlock()
 				return
 			}
-			mu.Lock()
-			ms.inputBuf = append(ms.inputBuf, tsMsg)
-			mu.Unlock()
 		}
 	}
 }
+
+func (ms *PulsarTtMsgStream) Seek(mp *internalpb2.MsgPosition) error {
+	for index, channel := range ms.consumerChannels {
+		if filepath.Base(channel) == filepath.Base(mp.ChannelName) {
+			messageID, err := typeutil.StringToPulsarMsgID(mp.MsgID)
+			if err != nil {
+				return err
+			}
+			consumer := ms.consumers[index]
+			err = (consumer).Seek(messageID)
+			if err != nil {
+				return err
+			}
+
+			for {
+				select {
+				case <-ms.ctx.Done():
+					return nil
+				case pulsarMsg, ok := <-consumer.Chan():
+					if !ok {
+						return errors.New("consumer closed")
+					}
+					consumer.Ack(pulsarMsg)
+
+					headerMsg := commonpb.MsgHeader{}
+					err := proto.Unmarshal(pulsarMsg.Payload(), &headerMsg)
+					if err != nil {
+						log.Printf("Failed to unmarshal msgHeader, error = %v", err)
+					}
+					unMarshalFunc := (*ms.unmarshal).TempMap[headerMsg.Base.MsgType]
+					if unMarshalFunc == nil {
+						panic("null unMarshalFunc for " + headerMsg.Base.MsgType.String() + " msg type")
+					}
+					tsMsg, err := unMarshalFunc(pulsarMsg.Payload())
+					if err != nil {
+						log.Printf("Failed to unmarshal pulsarMsg, error = %v", err)
+					}
+					if tsMsg.Type() == commonpb.MsgType_kTimeTick {
+						if tsMsg.BeginTs() >= mp.Timestamp {
+							return nil
+						}
+						continue
+					}
+					if tsMsg.BeginTs() > mp.Timestamp {
+						ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
+					}
+				}
+			}
+		}
+	}
+
+	return errors.New("msgStream seek fail")
+}
+
+func checkTimeTickMsg(msg map[Consumer]Timestamp,
+	isChannelReady map[Consumer]bool,
+	mu *sync.RWMutex) (Timestamp, bool) {
+	checkMap := make(map[Timestamp]int)
+	var maxTime Timestamp = 0
+	for _, v := range msg {
+		checkMap[v]++
+		if v > maxTime {
+			maxTime = v
+		}
+	}
+	if len(checkMap) <= 1 {
+		for consumer := range msg {
+			isChannelReady[consumer] = false
+		}
+		return maxTime, true
+	}
+	for consumer := range msg {
+		mu.RLock()
+		v := msg[consumer]
+		mu.Unlock()
+		if v != maxTime {
+			isChannelReady[consumer] = false
+		} else {
+			isChannelReady[consumer] = true
+		}
+	}
+
+	return 0, false
+}
+
+//TODO test InMemMsgStream
+/*
+type InMemMsgStream struct {
+	buffer chan *MsgPack
+}
+
+func (ms *InMemMsgStream) Start() {}
+func (ms *InMemMsgStream) Close() {}
+
+func (ms *InMemMsgStream) ProduceOne(msg TsMsg) error {
+	msgPack := MsgPack{}
+	msgPack.BeginTs = msg.BeginTs()
+	msgPack.EndTs = msg.EndTs()
+	msgPack.Msgs = append(msgPack.Msgs, msg)
+	buffer <- &msgPack
+	return nil
+}
+
+func (ms *InMemMsgStream) Produce(msgPack *MsgPack) error {
+	buffer <- msgPack
+	return nil
+}
+
+func (ms *InMemMsgStream) Broadcast(msgPack *MsgPack) error {
+	return ms.Produce(msgPack)
+}
+
+func (ms *InMemMsgStream) Consume() *MsgPack {
+	select {
+	case msgPack := <-ms.buffer:
+		return msgPack
+	}
+}
+
+func (ms *InMemMsgStream) Chan() <- chan *MsgPack {
+	return buffer
+}
+*/
