@@ -101,11 +101,12 @@ enum MsgType {
 
     /* System Control */
     kTimeTick = 1200;
-    kQueryNodeStats = 1201;
+    kQueryNodeStats = 1201; // GOOSE TODO: Remove kQueryNodeStats
     kLoadIndex = 1202;
     kRequestID = 1203;
     kRequestTSO = 1204;
     kAllocateSegment = 1205;
+    kSegmentStatistics = 1206;
 }
 
 message MsgBase {

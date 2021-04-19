@@ -67,7 +67,7 @@ func genTestCollectionMeta(collectionName string, collectionID UniqueID) *etcdpb
 	return &collectionMeta
 }
 
-func initTestMeta(t *testing.T, replica collectionReplica, collectionName string, collectionID UniqueID, segmentID UniqueID) {
+func initTestReplicaMeta(t *testing.T, replica collectionReplica, collectionName string, collectionID UniqueID, segmentID UniqueID) {
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
 
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
@@ -87,18 +87,18 @@ func initTestMeta(t *testing.T, replica collectionReplica, collectionName string
 //----------------------------------------------------------------------------------------------------- collection
 func TestCollectionReplica_getCollectionNum(t *testing.T) {
 	replica := newReplica()
-	initTestMeta(t, replica, "collection0", 0, 0)
+	initTestReplicaMeta(t, replica, "collection0", 0, 0)
 	assert.Equal(t, replica.getCollectionNum(), 1)
 }
 
 func TestCollectionReplica_addCollection(t *testing.T) {
 	replica := newReplica()
-	initTestMeta(t, replica, "collection0", 0, 0)
+	initTestReplicaMeta(t, replica, "collection0", 0, 0)
 }
 
 func TestCollectionReplica_removeCollection(t *testing.T) {
 	replica := newReplica()
-	initTestMeta(t, replica, "collection0", 0, 0)
+	initTestReplicaMeta(t, replica, "collection0", 0, 0)
 	assert.Equal(t, replica.getCollectionNum(), 1)
 
 	err := replica.removeCollection(0)
@@ -110,7 +110,7 @@ func TestCollectionReplica_getCollectionByID(t *testing.T) {
 	replica := newReplica()
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	initTestMeta(t, replica, collectionName, collectionID, 0)
+	initTestReplicaMeta(t, replica, collectionName, collectionID, 0)
 	targetCollection, err := replica.getCollectionByID(collectionID)
 	assert.NoError(t, err)
 	assert.NotNil(t, targetCollection)
@@ -122,7 +122,7 @@ func TestCollectionReplica_getCollectionByName(t *testing.T) {
 	replica := newReplica()
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	initTestMeta(t, replica, collectionName, collectionID, 0)
+	initTestReplicaMeta(t, replica, collectionName, collectionID, 0)
 
 	targetCollection, err := replica.getCollectionByName(collectionName)
 	assert.NoError(t, err)
@@ -136,7 +136,7 @@ func TestCollectionReplica_hasCollection(t *testing.T) {
 	replica := newReplica()
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	initTestMeta(t, replica, collectionName, collectionID, 0)
+	initTestReplicaMeta(t, replica, collectionName, collectionID, 0)
 
 	hasCollection := replica.hasCollection(collectionID)
 	assert.Equal(t, hasCollection, true)
@@ -149,6 +149,6 @@ func TestCollectionReplica_freeAll(t *testing.T) {
 	replica := newReplica()
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	initTestMeta(t, replica, collectionName, collectionID, 0)
+	initTestReplicaMeta(t, replica, collectionName, collectionID, 0)
 
 }

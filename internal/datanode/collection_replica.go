@@ -1,11 +1,11 @@
 package datanode
 
 import (
-	"fmt"
-	"strconv"
+	"log"
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 type collectionReplica interface {
@@ -17,17 +17,100 @@ type collectionReplica interface {
 	getCollectionByID(collectionID UniqueID) (*Collection, error)
 	getCollectionByName(collectionName string) (*Collection, error)
 	hasCollection(collectionID UniqueID) bool
-	getSegmentStatistics() // GOOSE TODO
+
+	// segment
+	addSegment(segmentID UniqueID) error
+	removeSegment(segmentID UniqueID) error
+	hasSegment(segmentID UniqueID) bool
+	updateSegmentRowNums(segmentID UniqueID, numRows int64) error
+	getSegmentStatisticsUpdates(segmentID UniqueID) (*internalpb2.SegmentStatisticsUpdates, error)
 }
 
-type collectionReplicaImpl struct {
-	mu          sync.RWMutex
-	collections []*Collection
-}
+type (
+	Segment struct {
+		segmentID  UniqueID
+		numRows    int64
+		memorySize int64
+	}
+
+	collectionReplicaImpl struct {
+		mu          sync.RWMutex
+		collections []*Collection
+		segments    []*Segment
+	}
+)
 
 //----------------------------------------------------------------------------------------------------- collection
-func (colReplica *collectionReplicaImpl) getSegmentStatistics() {
-	// GOOSE TODO
+
+func (colReplica *collectionReplicaImpl) addSegment(segmentID UniqueID) error {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+	log.Println("Add Segment", segmentID)
+	seg := &Segment{
+		segmentID: segmentID,
+	}
+	colReplica.segments = append(colReplica.segments, seg)
+	return nil
+}
+
+func (colReplica *collectionReplicaImpl) removeSegment(segmentID UniqueID) error {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	for index, ele := range colReplica.segments {
+		if ele.segmentID == segmentID {
+			log.Println("Removing segment:", segmentID)
+			numOfSegs := len(colReplica.segments)
+			colReplica.segments[index] = colReplica.segments[numOfSegs-1]
+			colReplica.segments = colReplica.segments[:numOfSegs-1]
+			return nil
+		}
+	}
+	return errors.Errorf("Error, there's no segment %v", segmentID)
+}
+
+func (colReplica *collectionReplicaImpl) hasSegment(segmentID UniqueID) bool {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	for _, ele := range colReplica.segments {
+		if ele.segmentID == segmentID {
+			return true
+		}
+	}
+	return false
+}
+
+func (colReplica *collectionReplicaImpl) updateSegmentRowNums(segmentID UniqueID, numRows int64) error {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	for _, ele := range colReplica.segments {
+		if ele.segmentID == segmentID {
+			log.Printf("updating segment(%v) row nums: (%v)", segmentID, numRows)
+			ele.memorySize = 0
+			ele.numRows += numRows
+			return nil
+		}
+	}
+	return errors.Errorf("Error, there's no segment %v", segmentID)
+}
+
+func (colReplica *collectionReplicaImpl) getSegmentStatisticsUpdates(segmentID UniqueID) (*internalpb2.SegmentStatisticsUpdates, error) {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	for _, ele := range colReplica.segments {
+		if ele.segmentID == segmentID {
+			updates := &internalpb2.SegmentStatisticsUpdates{
+				SegmentID:  segmentID,
+				MemorySize: ele.memorySize,
+				NumRows:    ele.numRows,
+			}
+			return updates, nil
+		}
+	}
+	return nil, errors.Errorf("Error, there's no segment %v", segmentID)
 }
 
 func (colReplica *collectionReplicaImpl) getCollectionNum() int {
@@ -43,13 +126,13 @@ func (colReplica *collectionReplicaImpl) addCollection(collectionID UniqueID, sc
 
 	var newCollection = newCollection(collectionID, schemaBlob)
 	colReplica.collections = append(colReplica.collections, newCollection)
-	fmt.Println("yyy, create collection: ", newCollection.Name())
+	log.Println("Create collection: ", newCollection.Name())
 
 	return nil
 }
 
 func (colReplica *collectionReplicaImpl) removeCollection(collectionID UniqueID) error {
-	fmt.Println("drop collection:", collectionID)
+	// GOOSE TODO: optimize
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
@@ -58,7 +141,7 @@ func (colReplica *collectionReplicaImpl) removeCollection(collectionID UniqueID)
 		if col.ID() != collectionID {
 			tmpCollections = append(tmpCollections, col)
 		} else {
-			fmt.Println("yyy, drop collection name: ", col.Name())
+			log.Println("Drop collection : ", col.Name())
 		}
 	}
 	colReplica.collections = tmpCollections
@@ -74,8 +157,7 @@ func (colReplica *collectionReplicaImpl) getCollectionByID(collectionID UniqueID
 			return collection, nil
 		}
 	}
-
-	return nil, errors.New("cannot find collection, id = " + strconv.FormatInt(collectionID, 10))
+	return nil, errors.Errorf("cannot find collection, id = %v", collectionID)
 }
 
 func (colReplica *collectionReplicaImpl) getCollectionByName(collectionName string) (*Collection, error) {
@@ -88,7 +170,7 @@ func (colReplica *collectionReplicaImpl) getCollectionByName(collectionName stri
 		}
 	}
 
-	return nil, errors.New("Cannot found collection: " + collectionName)
+	return nil, errors.Errorf("Cannot found collection: %v", collectionName)
 }
 
 func (colReplica *collectionReplicaImpl) hasCollection(collectionID UniqueID) bool {

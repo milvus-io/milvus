@@ -43,9 +43,9 @@ type ParamTable struct {
 	DDPulsarBufSize  int64
 
 	// - seg statistics channel -
-	SegmentStatisticsChannelName     string
-	SegmentStatisticsBufSize         int64
-	SegmentStatisticsPublishInterval int
+	SegmentStatisticsChannelName    string
+	SegmentStatisticsBufSize        int64
+	SegmentStatisticsUpdateInterval int //  GOOSE TODO remove
 
 	// - timetick channel -
 	TimeTickChannelName string
@@ -108,7 +108,7 @@ func (p *ParamTable) Init() {
 	// - seg statistics channel -
 	p.initSegmentStatisticsChannelName()
 	p.initSegmentStatisticsBufSize()
-	p.initSegmentStatisticsPublishInterval()
+	p.initSegmentStatisticsUpdateInterval()
 
 	// - timetick channel -
 	p.initTimeTickChannelName()
@@ -309,8 +309,8 @@ func (p *ParamTable) initSegmentStatisticsBufSize() {
 	p.SegmentStatisticsBufSize = p.ParseInt64("dataNode.msgStream.segStatistics.recvBufSize")
 }
 
-func (p *ParamTable) initSegmentStatisticsPublishInterval() {
-	p.SegmentStatisticsPublishInterval = p.ParseInt("dataNode.msgStream.segStatistics.publishInterval")
+func (p *ParamTable) initSegmentStatisticsUpdateInterval() {
+	p.SegmentStatisticsUpdateInterval = p.ParseInt("dataNode.msgStream.segStatistics.updateInterval")
 }
 
 // - Timetick channel -

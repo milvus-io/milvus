@@ -20,7 +20,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
-func TestFlowGraphInputBufferNode_Operate(t *testing.T) {
+func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	const ctxTimeInMillisecond = 2000
 	const closeWithDeadline = false
 	var ctx context.Context

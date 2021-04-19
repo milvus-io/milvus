@@ -23,7 +23,6 @@ import (
 
 // NOTE: start pulsar before test
 func TestDataSyncService_Start(t *testing.T) {
-	newMeta()
 	const ctxTimeInMillisecond = 2000
 	const closeWithDeadline = true
 	var ctx context.Context
@@ -39,7 +38,9 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	// init data node
 	pulsarURL := Params.PulsarAddress
+	collMeta := newMeta()
 	node := NewDataNode(ctx, 0)
+	node.replica.addCollection(collMeta.ID, proto.MarshalTextString(collMeta.Schema))
 
 	// test data generate
 	// GOOSE TODO orgnize
@@ -204,8 +205,8 @@ func TestDataSyncService_Start(t *testing.T) {
 	assert.NoError(t, err)
 
 	// dataSync
-	replica := newReplica()
-	node.dataSyncService = newDataSyncService(node.ctx, nil, nil, replica)
+	// replica := newReplica()
+	node.dataSyncService = newDataSyncService(node.ctx, nil, nil, node.replica)
 	go node.dataSyncService.start()
 
 	node.Close()
