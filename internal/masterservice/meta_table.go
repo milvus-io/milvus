@@ -695,7 +695,7 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, in
 
 func (mt *metaTable) GetIndexByName(collName string, fieldName string, indexName string) ([]pb.IndexInfo, error) {
 	mt.ddLock.RLock()
-	mt.ddLock.RUnlock()
+	defer mt.ddLock.RUnlock()
 
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
@@ -746,7 +746,7 @@ func (mt *metaTable) GetIndexByName(collName string, fieldName string, indexName
 
 func (mt *metaTable) GetIndexByID(indexID typeutil.UniqueID) (*pb.IndexInfo, error) {
 	mt.ddLock.RLock()
-	mt.ddLock.RUnlock()
+	defer mt.ddLock.RUnlock()
 
 	indexInfo, ok := mt.indexID2Meta[indexID]
 	if !ok {
