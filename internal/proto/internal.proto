@@ -10,7 +10,6 @@ enum StateCode {
   ABNORMAL = 2;
 }
 
-
 message ComponentInfo {
   int64  nodeID = 1;
   string role = 2;
