@@ -1,6 +1,7 @@
 package master
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,6 +15,9 @@ func TestMetaTable_Collection(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:2379"}})
 	assert.Nil(t, err)
 	etcd_kv := kv.NewEtcdKV(cli, "/etcd/test/root")
+
+	_, err = cli.Delete(context.TODO(), "/etcd/test/root", clientv3.WithPrefix())
+	assert.Nil(t, err)
 
 	meta, err := NewMetaTable(etcd_kv)
 	assert.Nil(t, err)
@@ -133,6 +137,9 @@ func TestMetaTable_DeletePartition(t *testing.T) {
 	assert.Nil(t, err)
 	etcd_kv := kv.NewEtcdKV(cli, "/etcd/test/root")
 
+	_, err = cli.Delete(context.TODO(), "/etcd/test/root", clientv3.WithPrefix())
+	assert.Nil(t, err)
+
 	meta, err := NewMetaTable(etcd_kv)
 	assert.Nil(t, err)
 	defer meta.client.Close()
@@ -210,6 +217,9 @@ func TestMetaTable_Segment(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:2379"}})
 	assert.Nil(t, err)
 	etcd_kv := kv.NewEtcdKV(cli, "/etcd/test/root")
+
+	_, err = cli.Delete(context.TODO(), "/etcd/test/root", clientv3.WithPrefix())
+	assert.Nil(t, err)
 
 	meta, err := NewMetaTable(etcd_kv)
 	assert.Nil(t, err)
