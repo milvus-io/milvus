@@ -1,15 +1,19 @@
-package querynodeimp
+package querynode
 
 import (
 	"context"
 	"log"
 
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
 type dataSyncService struct {
 	ctx context.Context
 	fg  *flowgraph.TimeTickedFlowGraph
+
+	dmStream msgstream.MsgStream
+	ddStream msgstream.MsgStream
 
 	replica collectionReplica
 }
@@ -40,8 +44,8 @@ func (dsService *dataSyncService) initNodes() {
 
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 
-	var dmStreamNode node = newDmInputNode(dsService.ctx)
-	var ddStreamNode node = newDDInputNode(dsService.ctx)
+	var dmStreamNode node = dsService.newDmInputNode(dsService.ctx)
+	var ddStreamNode node = dsService.newDDInputNode(dsService.ctx)
 
 	var filterDmNode node = newFilteredDmNode()
 	var ddNode node = newDDNode(dsService.replica)

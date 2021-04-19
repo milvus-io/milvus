@@ -1,4 +1,3 @@
-# TODO
 set(MILVUS_QUERY_SRCS
         deprecated/BinaryQuery.cpp
         generated/PlanNode.cpp
@@ -10,7 +9,7 @@ set(MILVUS_QUERY_SRCS
         visitors/VerifyPlanNodeVisitor.cpp
         visitors/VerifyExprVisitor.cpp
         Plan.cpp
-        Search.cpp
+        SearchOnGrowing.cpp
         SearchOnSealed.cpp
         SearchOnIndex.cpp
         SearchBruteForce.cpp

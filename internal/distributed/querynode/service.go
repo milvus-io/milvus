@@ -8,17 +8,17 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
-	querynodeimp "github.com/zilliztech/milvus-distributed/internal/querynode"
+	"github.com/zilliztech/milvus-distributed/internal/querynode"
 )
 
 type Server struct {
 	grpcServer *grpc.Server
-	node       querynodeimp.Node
+	node       querynode.Node
 }
 
 func NewServer(ctx context.Context, queryNodeID uint64) *Server {
 	return &Server{
-		node: querynodeimp.NewQueryNode(ctx, queryNodeID),
+		node: querynode.NewQueryNode(ctx, queryNodeID),
 	}
 }
 

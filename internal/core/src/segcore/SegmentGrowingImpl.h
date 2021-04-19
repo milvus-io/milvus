@@ -39,8 +39,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     int64_t
     PreInsert(int64_t size) override;
 
-    // TODO: originally, id should be put into data_chunk
-    // TODO: Is it ok to put them the other side?
     Status
     Insert(int64_t reserved_offset,
            int64_t size,
@@ -93,6 +91,22 @@ class SegmentGrowingImpl : public SegmentGrowing {
     const Schema&
     get_schema() const override {
         return *schema_;
+    }
+
+    // return count of index that has index, i.e., [0, num_chunk_index) have built index
+    int64_t
+    num_chunk_index_safe(FieldOffset field_offset) const final {
+        return indexing_record_.get_finished_ack();
+    }
+
+    const knowhere::Index*
+    chunk_index_impl(FieldOffset field_offset, int64_t chunk_id) const final {
+        return indexing_record_.get_entry(field_offset).get_indexing(chunk_id);
+    }
+
+    int64_t
+    chunk_size() const final {
+        return chunk_size_;
     }
 
  public:

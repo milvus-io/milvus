@@ -1,4 +1,4 @@
-package querynodeimp
+package querynode
 
 type deleteNode struct {
 	baseNode

@@ -1,4 +1,4 @@
-package querynodeimp
+package querynode
 
 type key2SegNode struct {
 	baseNode

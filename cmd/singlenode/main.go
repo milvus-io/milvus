@@ -17,7 +17,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/indexnode"
 	"github.com/zilliztech/milvus-distributed/internal/master"
 	"github.com/zilliztech/milvus-distributed/internal/proxynode"
-	querynodeimp "github.com/zilliztech/milvus-distributed/internal/querynode"
+	"github.com/zilliztech/milvus-distributed/internal/querynode"
 	"github.com/zilliztech/milvus-distributed/internal/writenode"
 )
 
@@ -101,11 +101,11 @@ func InitProxy(wg *sync.WaitGroup) {
 
 func InitQueryNode(wg *sync.WaitGroup) {
 	defer wg.Done()
-	querynodeimp.Init()
-	fmt.Println("QueryNodeID is", querynodeimp.Params.QueryNodeID)
+	querynode.Init()
+	fmt.Println("QueryNodeID is", querynode.Params.QueryNodeID)
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
-	svr := querynodeimp.NewQueryNode(ctx, 0)
+	svr := querynode.NewQueryNode(ctx, 0)
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,

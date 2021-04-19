@@ -1,4 +1,4 @@
-package querynodeimp
+package querynode
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
-func newDmInputNode(ctx context.Context) *flowgraph.InputNode {
+func (dsService *dataSyncService) newDmInputNode(ctx context.Context) *flowgraph.InputNode {
 	receiveBufSize := Params.InsertReceiveBufSize
 	pulsarBufSize := Params.InsertPulsarBufSize
 
@@ -22,6 +22,7 @@ func newDmInputNode(ctx context.Context) *flowgraph.InputNode {
 	insertStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
 
 	var stream msgstream.MsgStream = insertStream
+	dsService.dmStream = stream
 
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
@@ -30,7 +31,7 @@ func newDmInputNode(ctx context.Context) *flowgraph.InputNode {
 	return node
 }
 
-func newDDInputNode(ctx context.Context) *flowgraph.InputNode {
+func (dsService *dataSyncService) newDDInputNode(ctx context.Context) *flowgraph.InputNode {
 	receiveBufSize := Params.DDReceiveBufSize
 	pulsarBufSize := Params.DDPulsarBufSize
 
@@ -45,6 +46,7 @@ func newDDInputNode(ctx context.Context) *flowgraph.InputNode {
 	ddStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
 
 	var stream msgstream.MsgStream = ddStream
+	dsService.ddStream = stream
 
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
