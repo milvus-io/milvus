@@ -92,7 +92,6 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
 
         final_qr.merge(sub_qr);
     }
-    using segcore::FloatVector;
     auto vec_ptr = record.get_entity<FloatVector>(vecfield_offset);
 
     // step 4: brute force search where small indexing is unavailable
@@ -165,7 +164,6 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
     // TODO: use QuerySubResult instead
     query::dataset::BinaryQueryDataset query_dataset{metric_type, num_queries, topK, dim, query_data};
 
-    using segcore::BinaryVector;
     auto vec_ptr = record.get_entity<BinaryVector>(vecfield_offset);
 
     auto max_indexed_id = 0;
