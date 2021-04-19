@@ -60,6 +60,7 @@ class TestListCollections:
         assert collection_name not in connect.list_collections()
 
     # TODO: make sure to run this case in the end
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     @pytest.mark.tags("0331")
     def test_list_collections_no_collection(self, connect):
