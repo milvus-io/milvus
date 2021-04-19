@@ -2,6 +2,7 @@ package S3_driver
 
 import (
 	"context"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/zilliztech/milvus-distributed/internal/storage/internal/minio/codec"
@@ -115,25 +116,25 @@ func (s *S3Driver) GetRow(ctx context.Context, key Key, timestamp Timestamp) (Va
 	}
 
 	keys, values, err := s.driver.Scan(ctx, append(key, byte('_')), minioKey, 1, false)
-	if values == nil || keys == nil{
+	if values == nil || keys == nil {
 		return nil, err
 	}
 
 	_, _, suffix, err := codec.MvccDecode(keys[0])
-	if err != nil{
+	if err != nil {
 		return nil, err
 	}
-	if suffix == "delete"{
+	if suffix == "delete" {
 		return nil, nil
 	}
 
 	return values[0], err
 }
-func (s *S3Driver) GetRows(ctx context.Context, keys []Key, timestamps []Timestamp) ([]Value, error){
+func (s *S3Driver) GetRows(ctx context.Context, keys []Key, timestamps []Timestamp) ([]Value, error) {
 	var values []Value
-	for i, key := range keys{
+	for i, key := range keys {
 		value, err := s.GetRow(ctx, key, timestamps[i])
-		if err!= nil{
+		if err != nil {
 			return nil, err
 		}
 		values = append(values, value)
@@ -141,32 +142,32 @@ func (s *S3Driver) GetRows(ctx context.Context, keys []Key, timestamps []Timesta
 	return values, nil
 }
 
-func (s *S3Driver) PutRow(ctx context.Context, key Key, value Value, segment string, timestamp Timestamp) error{
+func (s *S3Driver) PutRow(ctx context.Context, key Key, value Value, segment string, timestamp Timestamp) error {
 	minioKey, err := codec.MvccEncode(key, timestamp, segment)
-	if err != nil{
+	if err != nil {
 		return err
 	}
 	err = s.driver.Put(ctx, minioKey, value)
 	return err
 }
-func (s *S3Driver) PutRows(ctx context.Context, keys []Key, values []Value, segments []string, timestamps []Timestamp) error{
+func (s *S3Driver) PutRows(ctx context.Context, keys []Key, values []Value, segments []string, timestamps []Timestamp) error {
 	maxThread := 100
 	batchSize := 1
 	keysLength := len(keys)
 
-	if keysLength / batchSize > maxThread {
+	if keysLength/batchSize > maxThread {
 		batchSize = keysLength / maxThread
 	}
 
 	batchNums := keysLength / batchSize
 
-	if keysLength % batchSize != 0 {
-		batchNums = keysLength / batchSize + 1
+	if keysLength%batchSize != 0 {
+		batchNums = keysLength/batchSize + 1
 	}
 
 	errCh := make(chan error)
 	f := func(ctx2 context.Context, keys2 []Key, values2 []Value, segments2 []string, timestamps2 []Timestamp) {
-		for i := 0; i < len(keys2); i++{
+		for i := 0; i < len(keys2); i++ {
 			err := s.PutRow(ctx2, keys2[i], values2[i], segments2[i], timestamps2[i])
 			errCh <- err
 		}
@@ -183,19 +184,19 @@ func (s *S3Driver) PutRows(ctx context.Context, keys []Key, values []Value, segm
 	}
 
 	for i := 0; i < len(keys); i++ {
-		if err := <- errCh; err != nil {
+		if err := <-errCh; err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *S3Driver) GetSegments(ctx context.Context, key Key, timestamp Timestamp) ([]string, error){
+func (s *S3Driver) GetSegments(ctx context.Context, key Key, timestamp Timestamp) ([]string, error) {
 	keyEnd, err := codec.MvccEncode(key, timestamp, "")
-	if err != nil{
+	if err != nil {
 		return nil, err
 	}
-	keys, _, err := s.driver.Scan(ctx, append(key, byte('_')), keyEnd, -1,true)
+	keys, _, err := s.driver.Scan(ctx, append(key, byte('_')), keyEnd, -1, true)
 	if err != nil {
 		return nil, err
 	}
@@ -219,9 +220,9 @@ func (s *S3Driver) GetSegments(ctx context.Context, key Key, timestamp Timestamp
 	return segments, err
 }
 
-func (s *S3Driver) DeleteRow(ctx context.Context, key Key, timestamp Timestamp) error{
+func (s *S3Driver) DeleteRow(ctx context.Context, key Key, timestamp Timestamp) error {
 	minioKey, err := codec.MvccEncode(key, timestamp, "delete")
-	if err != nil{
+	if err != nil {
 		return err
 	}
 	value := []byte("0")
@@ -229,24 +230,24 @@ func (s *S3Driver) DeleteRow(ctx context.Context, key Key, timestamp Timestamp) 
 	return err
 }
 
-func (s *S3Driver) DeleteRows(ctx context.Context, keys []Key, timestamps []Timestamp) error{
+func (s *S3Driver) DeleteRows(ctx context.Context, keys []Key, timestamps []Timestamp) error {
 	maxThread := 100
 	batchSize := 1
 	keysLength := len(keys)
 
-	if keysLength / batchSize > maxThread {
+	if keysLength/batchSize > maxThread {
 		batchSize = keysLength / maxThread
 	}
 
 	batchNums := keysLength / batchSize
 
-	if keysLength % batchSize != 0 {
-		batchNums = keysLength / batchSize + 1
+	if keysLength%batchSize != 0 {
+		batchNums = keysLength/batchSize + 1
 	}
 
 	errCh := make(chan error)
 	f := func(ctx2 context.Context, keys2 []Key, timestamps2 []Timestamp) {
-		for i := 0; i < len(keys2); i++{
+		for i := 0; i < len(keys2); i++ {
 			err := s.DeleteRow(ctx2, keys2[i], timestamps2[i])
 			errCh <- err
 		}
@@ -263,14 +264,14 @@ func (s *S3Driver) DeleteRows(ctx context.Context, keys []Key, timestamps []Time
 	}
 
 	for i := 0; i < len(keys); i++ {
-		if err := <- errCh; err != nil {
+		if err := <-errCh; err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *S3Driver) PutLog(ctx context.Context, key Key, value Value, timestamp Timestamp, channel int) error{
+func (s *S3Driver) PutLog(ctx context.Context, key Key, value Value, timestamp Timestamp, channel int) error {
 	logKey := codec.LogEncode(key, timestamp, channel)
 	err := s.driver.Put(ctx, logKey, value)
 	return err
@@ -283,12 +284,12 @@ func (s *S3Driver) GetLog(ctx context.Context, start Timestamp, end Timestamp, c
 	}
 
 	var resultValues []Value
-	for i, key := range keys{
+	for i, key := range keys {
 		_, ts, channel, err := codec.LogDecode(string(key))
 		if err != nil {
 			return nil, err
 		}
-		if ts >= start && ts <= end  {
+		if ts >= start && ts <= end {
 			for j := 0; j < len(channels); j++ {
 				if channel == channels[j] {
 					resultValues = append(resultValues, values[i])
@@ -300,32 +301,32 @@ func (s *S3Driver) GetLog(ctx context.Context, start Timestamp, end Timestamp, c
 	return resultValues, nil
 }
 
-func (s *S3Driver) GetSegmentIndex(ctx context.Context, segment string) (SegmentIndex, error){
+func (s *S3Driver) GetSegmentIndex(ctx context.Context, segment string) (SegmentIndex, error) {
 
 	return s.driver.Get(ctx, codec.SegmentEncode(segment, "index"))
 }
 
-func (s *S3Driver) PutSegmentIndex(ctx context.Context, segment string, index SegmentIndex) error{
+func (s *S3Driver) PutSegmentIndex(ctx context.Context, segment string, index SegmentIndex) error {
 
 	return s.driver.Put(ctx, codec.SegmentEncode(segment, "index"), index)
 }
 
-func (s *S3Driver) DeleteSegmentIndex(ctx context.Context, segment string) error{
+func (s *S3Driver) DeleteSegmentIndex(ctx context.Context, segment string) error {
 
 	return s.driver.Delete(ctx, codec.SegmentEncode(segment, "index"))
 }
 
-func (s *S3Driver) GetSegmentDL(ctx context.Context, segment string) (SegmentDL, error){
+func (s *S3Driver) GetSegmentDL(ctx context.Context, segment string) (SegmentDL, error) {
 
 	return s.driver.Get(ctx, codec.SegmentEncode(segment, "DL"))
 }
 
-func (s *S3Driver) PutSegmentDL(ctx context.Context, segment string, log SegmentDL) error{
+func (s *S3Driver) PutSegmentDL(ctx context.Context, segment string, log SegmentDL) error {
 
 	return s.driver.Put(ctx, codec.SegmentEncode(segment, "DL"), log)
 }
 
-func (s *S3Driver) DeleteSegmentDL(ctx context.Context, segment string) error{
+func (s *S3Driver) DeleteSegmentDL(ctx context.Context, segment string) error {
 
 	return s.driver.Delete(ctx, codec.SegmentEncode(segment, "DL"))
 }

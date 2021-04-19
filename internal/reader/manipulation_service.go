@@ -3,10 +3,11 @@ package reader
 import (
 	"context"
 	"fmt"
-	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 	"log"
 	"sync"
+
+	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
 type manipulationService struct {

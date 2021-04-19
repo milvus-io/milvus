@@ -3,15 +3,16 @@ package reader
 import (
 	"context"
 	"encoding/binary"
-	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/msgclient"
-	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"math"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/msgclient"
+	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 )
 
 func TestInsertAndDelete_MessagesPreprocess(t *testing.T) {

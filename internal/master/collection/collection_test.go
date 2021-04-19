@@ -3,8 +3,9 @@ package collection
 import (
 	"testing"
 	"time"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+
 	"github.com/stretchr/testify/assert"
+	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
 var (

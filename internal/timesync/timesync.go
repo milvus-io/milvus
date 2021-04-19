@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/golang/protobuf/proto"
 )
 
 type InsertLog struct {

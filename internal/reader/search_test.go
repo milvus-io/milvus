@@ -3,14 +3,15 @@ package reader
 import (
 	"context"
 	"encoding/binary"
-	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/msgclient"
-	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"math"
 	"strconv"
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/msgclient"
+	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 )
 
 // NOTE: start pulsar before test

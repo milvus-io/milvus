@@ -2,8 +2,9 @@ package reader
 
 import (
 	"context"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	msgpb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 )
 
@@ -23,8 +24,7 @@ func (node *QueryNode) PublishSearchResult(results *msgpb.QueryResult) commonpb.
 }
 
 func (node *QueryNode) PublishFailedSearchResult() commonpb.Status {
-	var results = msgpb.QueryResult{
-	}
+	var results = msgpb.QueryResult{}
 
 	var ctx = context.Background()
 

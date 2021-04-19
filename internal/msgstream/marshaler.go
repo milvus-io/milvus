@@ -59,7 +59,7 @@ func (im *InsertMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
 func (im *InsertMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
 	insertRequest := internalPb.InsertRequest{}
 	err := proto.Unmarshal(input, &insertRequest)
-	insertTask := InsertTask{InsertRequest:insertRequest}
+	insertTask := InsertTask{InsertRequest: insertRequest}
 
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
@@ -85,7 +85,7 @@ func (dm *DeleteMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
 func (dm *DeleteMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
 	deleteRequest := internalPb.DeleteRequest{}
 	err := proto.Unmarshal(input, &deleteRequest)
-	deleteTask := DeleteTask{DeleteRequest:deleteRequest}
+	deleteTask := DeleteTask{DeleteRequest: deleteRequest}
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
 	}
@@ -160,7 +160,7 @@ func (tm *TimeSyncMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
 func (tm *TimeSyncMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
 	timeSyncMsg := internalPb.TimeSyncMsg{}
 	err := proto.Unmarshal(input, &timeSyncMsg)
-	timeSyncTask := TimeSyncTask{TimeSyncMsg:timeSyncMsg}
+	timeSyncTask := TimeSyncTask{TimeSyncMsg: timeSyncMsg}
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
 	}

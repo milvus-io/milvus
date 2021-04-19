@@ -17,16 +17,15 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/master/tso"
 )
 
-
 // GlobalTSOAllocator is the global single point TSO allocator.
 type GlobalIdAllocator struct {
 	allocator tso.Allocator
 }
 
-func NewGlobalIdAllocator() *GlobalIdAllocator {
-	return &GlobalIdAllocator{
-		allocator: tso.NewGlobalTSOAllocator("idTimestamp"),
-	}
+//func getID
+
+var allocator GlobalIdAllocator = GlobalIdAllocator{
+	allocator: tso.NewGlobalTSOAllocator("idTimestamp"),
 }
 
 // Initialize will initialize the created global TSO allocator.
@@ -36,9 +35,9 @@ func (gia *GlobalIdAllocator) Initialize() error {
 
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
-func (gia *GlobalIdAllocator) Generate(count uint32) (int64, int64, error) {
-	timestamp, err:= gia.allocator.GenerateTSO(count)
-	if err != nil{
+func (gia *GlobalIdAllocator) Alloc(count uint32) (int64, int64, error) {
+	timestamp, err := gia.allocator.GenerateTSO(count)
+	if err != nil {
 		return 0, 0, err
 	}
 	idStart := int64(timestamp)
@@ -46,3 +45,19 @@ func (gia *GlobalIdAllocator) Generate(count uint32) (int64, int64, error) {
 	return idStart, idEnd, nil
 }
 
+func (gia *GlobalIdAllocator) AllocOne() (int64, error) {
+	timestamp, err := gia.allocator.GenerateTSO(1)
+	if err != nil {
+		return 0, err
+	}
+	idStart := int64(timestamp)
+	return idStart, nil
+}
+
+func AllocOne() (int64, error) {
+	return allocator.AllocOne()
+}
+
+func Alloc(count uint32) (int64, int64, error) {
+	return allocator.Alloc(count)
+}

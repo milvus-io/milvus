@@ -5,9 +5,9 @@ import (
 	"crypto/md5"
 	"flag"
 	"fmt"
+	"github.com/pivotal-golang/bytefmt"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
 	"github.com/zilliztech/milvus-distributed/internal/storage/type"
-	"github.com/pivotal-golang/bytefmt"
 	"log"
 	"math/rand"
 	"os"
@@ -31,14 +31,13 @@ var logFile *os.File
 var store storagetype.Store
 var wg sync.WaitGroup
 
-
 func runSet() {
 	for time.Now().Before(endTime) {
 		num := atomic.AddInt32(&keyNum, 1)
 		key := []byte(fmt.Sprint("key", num))
 		for ver := 1; ver <= numVersion; ver++ {
 			atomic.AddInt32(&counter, 1)
-			err := store.PutRow(context.Background(), key, valueData,"empty" ,uint64(ver))
+			err := store.PutRow(context.Background(), key, valueData, "empty", uint64(ver))
 			if err != nil {
 				log.Fatalf("Error setting key %s, %s", key, err.Error())
 				//atomic.AddInt32(&setCount, -1)
@@ -61,7 +60,7 @@ func runBatchSet() {
 		}
 		for ver := 1; ver <= numVersion; ver++ {
 			atomic.AddInt32(&counter, 1)
-			err := store.PutRows(context.Background(), keys, batchValueData, batchSuffix,versions)
+			err := store.PutRows(context.Background(), keys, batchValueData, batchSuffix, versions)
 			if err != nil {
 				log.Fatalf("Error setting batch keys %s %s", keys, err.Error())
 				//atomic.AddInt32(&batchSetCount, -1)
@@ -71,7 +70,6 @@ func runBatchSet() {
 	setFinish = time.Now()
 	wg.Done()
 }
-
 
 func runGet() {
 	for time.Now().Before(endTime) {
@@ -105,8 +103,8 @@ func runBatchGet() {
 		start := end - int32(batchOpSize)
 		keys := totalKeys[start:end]
 		versions := make([]uint64, batchOpSize)
-		for i, _ := range versions{
-			versions[i]= uint64(numVersion)
+		for i, _ := range versions {
+			versions[i] = uint64(numVersion)
 		}
 		atomic.AddInt32(&counter, 1)
 		_, err := store.GetRows(context.Background(), keys, versions)
@@ -153,8 +151,8 @@ func runBatchDelete() {
 		keys := totalKeys[start:end]
 		atomic.AddInt32(&counter, 1)
 		versions := make([]uint64, batchOpSize)
-		for i, _ := range versions{
-			versions[i]= uint64(numVersion)
+		for i, _ := range versions {
+			versions[i] = uint64(numVersion)
 		}
 		err := store.DeleteRows(context.Background(), keys, versions)
 		if err != nil {
@@ -239,7 +237,7 @@ func main() {
 		setTime := setFinish.Sub(startTime).Seconds()
 		bps := float64(uint64(counter)*valueSize*uint64(batchOpSize)) / setTime
 		fmt.Fprint(logFile, fmt.Sprintf("Loop %d: BATCH PUT time %.1f secs, batchs = %d, kv pairs = %d, speed = %sB/sec, %.1f operations/sec, %.1f kv/sec.\n",
-			loop, setTime, counter, counter*int32(batchOpSize), bytefmt.ByteSize(uint64(bps)), float64(counter)/setTime, float64(counter * int32(batchOpSize))/setTime))
+			loop, setTime, counter, counter*int32(batchOpSize), bytefmt.ByteSize(uint64(bps)), float64(counter)/setTime, float64(counter*int32(batchOpSize))/setTime))
 
 		// Record all test keys
 		//totalKeyCount = keyNum

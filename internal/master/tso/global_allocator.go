@@ -14,12 +14,13 @@
 package tso
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
-	"go.etcd.io/etcd/clientv3"
 	"strconv"
 	"sync/atomic"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
+	"go.etcd.io/etcd/clientv3"
 
 	"github.com/pingcap/log"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
@@ -62,14 +63,14 @@ func NewGlobalTSOAllocator(key string) Allocator {
 		DialTimeout: 5 * time.Second,
 	})
 
-	var saveInterval time.Duration = 3 *time.Second
+	var saveInterval time.Duration = 3 * time.Second
 	return &GlobalTSOAllocator{
 		timestampOracle: &timestampOracle{
 			client:        client,
 			rootPath:      conf.Config.Etcd.Rootpath,
 			saveInterval:  saveInterval,
-			maxResetTSGap: func() time.Duration { return 3 *time.Second},
-			key: key,
+			maxResetTSGap: func() time.Duration { return 3 * time.Second },
+			key:           key,
 		},
 	}
 }

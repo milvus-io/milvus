@@ -5,21 +5,20 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/master/collection"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	"github.com/zilliztech/milvus-distributed/internal/allocator"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
-	"github.com/zilliztech/milvus-distributed/internal/master/segment"
-)
+	"github.com/zilliztech/milvus-distributed/internal/master/id"
 
-var IdAllocator *allocator.IdAllocator = allocator.NewIdAllocator()
+	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/master/collection"
+	"github.com/zilliztech/milvus-distributed/internal/master/segment"
+	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+)
 
 func CollectionController(ch chan *schemapb.CollectionSchema, kvbase kv.Base, errch chan error) {
 	for collectionMeta := range ch {
-		sID := IdAllocator.AllocOne()
-		cID := IdAllocator.AllocOne()
-		s2ID := IdAllocator.AllocOne()
+		sID, _ := id.AllocOne()
+		cID, _ := id.AllocOne()
+		s2ID, _ := id.AllocOne()
 		fieldMetas := []*schemapb.FieldSchema{}
 		if collectionMeta.Fields != nil {
 			fieldMetas = collectionMeta.Fields
@@ -55,8 +54,8 @@ func CollectionController(ch chan *schemapb.CollectionSchema, kvbase kv.Base, er
 }
 
 func WriteCollection2Datastore(collectionMeta *schemapb.CollectionSchema, kvbase kv.Base) error {
-	sID := IdAllocator.AllocOne()
-	cID := IdAllocator.AllocOne()
+	sID, _ := id.AllocOne()
+	cID, _ := id.AllocOne()
 	fieldMetas := []*schemapb.FieldSchema{}
 	if collectionMeta.Fields != nil {
 		fieldMetas = collectionMeta.Fields

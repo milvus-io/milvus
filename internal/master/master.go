@@ -3,6 +3,14 @@ package master
 import (
 	"context"
 	"fmt"
+	"log"
+	"math/rand"
+	"net"
+	"strconv"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
@@ -12,13 +20,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"google.golang.org/grpc"
-	"log"
-	"math/rand"
-	"net"
-	"strconv"
-	"sync"
-	"sync/atomic"
-	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/master/tso"
 	"go.etcd.io/etcd/clientv3"

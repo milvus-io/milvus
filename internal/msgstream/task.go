@@ -2,15 +2,16 @@ package msgstream
 
 import (
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	. "github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type MsgType uint32
 
 const (
-	kInsert         MsgType = 400
-	kDelete         MsgType = 401
-	kSearch         MsgType = 500
-	kSearchResult   MsgType = 1000
+	kInsert       MsgType = 400
+	kDelete       MsgType = 401
+	kSearch       MsgType = 500
+	kSearchResult MsgType = 1000
 
 	kSegmentStatics MsgType = 1100
 	kTimeTick       MsgType = 1200
@@ -166,11 +167,11 @@ func (srt SearchResultTask) SetTs(ts Timestamp) {
 	srt.Timestamp = uint64(ts)
 }
 
-func (srt SearchResultTask)  BeginTs() Timestamp {
+func (srt SearchResultTask) BeginTs() Timestamp {
 	return Timestamp(srt.Timestamp)
 }
 
-func (srt SearchResultTask)  EndTs() Timestamp {
+func (srt SearchResultTask) EndTs() Timestamp {
 	return Timestamp(srt.Timestamp)
 }
 
@@ -196,7 +197,7 @@ func (tst TimeSyncTask) BeginTs() Timestamp {
 	return Timestamp(tst.Timestamp)
 }
 
-func (tst TimeSyncTask)  EndTs() Timestamp {
+func (tst TimeSyncTask) EndTs() Timestamp {
 	return Timestamp(tst.Timestamp)
 }
 
@@ -207,7 +208,6 @@ func (tst TimeSyncTask) Type() MsgType {
 func (tst TimeSyncTask) HashKeys() []int32 {
 	return tst.HashValues
 }
-
 
 ///////////////////////////////////////////Key2Seg//////////////////////////////////////////
 //type Key2SegTask struct {

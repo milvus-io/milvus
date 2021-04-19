@@ -3,16 +3,17 @@ package storage
 import (
 	"context"
 	"errors"
+
 	S3Driver "github.com/zilliztech/milvus-distributed/internal/storage/internal/S3"
 	minIODriver "github.com/zilliztech/milvus-distributed/internal/storage/internal/minio"
 	tikvDriver "github.com/zilliztech/milvus-distributed/internal/storage/internal/tikv"
-	"github.com/zilliztech/milvus-distributed/internal/storage/type"
+	storagetype "github.com/zilliztech/milvus-distributed/internal/storage/type"
 )
 
 func NewStore(ctx context.Context, driver storagetype.DriverType) (storagetype.Store, error) {
 	var err error
 	var store storagetype.Store
-	switch driver{
+	switch driver {
 	case storagetype.TIKVDriver:
 		store, err = tikvDriver.NewTikvStore(ctx)
 		if err != nil {
@@ -27,7 +28,7 @@ func NewStore(ctx context.Context, driver storagetype.DriverType) (storagetype.S
 		}
 		return store, nil
 	case storagetype.S3DRIVER:
-		store , err = S3Driver.NewS3Driver(ctx)
+		store, err = S3Driver.NewS3Driver(ctx)
 		if err != nil {
 			//panic(err.Error())
 			return nil, err

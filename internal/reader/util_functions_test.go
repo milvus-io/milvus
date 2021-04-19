@@ -2,12 +2,13 @@ package reader
 
 import (
 	"context"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/msgclient"
-	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/msgclient"
+	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 
 	"github.com/stretchr/testify/assert"
 )

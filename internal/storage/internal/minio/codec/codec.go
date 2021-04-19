@@ -46,7 +46,7 @@ func MvccDecode(key []byte) (string, uint64, string, error) {
 func LogEncode(key []byte, ts uint64, channel int) []byte {
 	suffix := string(key) + "_" + fmt.Sprintf("%d", channel)
 	logKey, err := MvccEncode([]byte("log"), ts, suffix)
-	if err != nil{
+	if err != nil {
 		return nil
 	}
 	return logKey

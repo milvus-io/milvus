@@ -5,18 +5,18 @@ import (
 	"flag"
 	"fmt"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/storage"
 	"github.com/zilliztech/milvus-distributed/internal/msgclient"
+	"github.com/zilliztech/milvus-distributed/internal/storage"
 	"github.com/zilliztech/milvus-distributed/internal/writer"
 	"log"
 	"strconv"
 )
 
 func main() {
-    var yamlFile string
+	var yamlFile string
 	flag.StringVar(&yamlFile, "yaml", "", "yaml file")
 	flag.Parse()
-    // flag.Usage()
+	// flag.Usage()
 	fmt.Println("yaml file: ", yamlFile)
 	conf.LoadConfig(yamlFile)
 
@@ -63,7 +63,7 @@ func main() {
 
 			if wn.MsgCounter.InsertCounter/CountInsertMsgBaseline != BaselineCounter {
 				wn.WriteWriterLog()
-				BaselineCounter = wn.MsgCounter.InsertCounter/CountInsertMsgBaseline
+				BaselineCounter = wn.MsgCounter.InsertCounter / CountInsertMsgBaseline
 			}
 
 			if msgLength > 0 {

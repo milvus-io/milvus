@@ -7,11 +7,11 @@ import (
 	"strconv"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	msgpb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/zilliztech/milvus-distributed/internal/timesync"
-	"github.com/golang/protobuf/proto"
 )
 
 type MessageType int

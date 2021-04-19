@@ -1,8 +1,9 @@
 package reader
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestQueryNodeTime_UpdateReadTimeSync(t *testing.T) {

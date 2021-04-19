@@ -38,7 +38,7 @@ type insertMsg struct {
 
 type deletePreprocessMsg struct {
 	deletePreprocessData DeletePreprocessData
-	timeRange  TimeRange
+	timeRange            TimeRange
 }
 
 type deleteMsg struct {
@@ -47,7 +47,7 @@ type deleteMsg struct {
 }
 
 type serviceTimeMsg struct {
-	timeRange  TimeRange
+	timeRange TimeRange
 }
 
 type InsertData struct {

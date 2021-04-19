@@ -3,10 +3,11 @@ package minio_driver
 import (
 	"bytes"
 	"context"
+	"io"
+
+	"github.com/minio/minio-go/v7"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	. "github.com/zilliztech/milvus-distributed/internal/storage/type"
-	"github.com/minio/minio-go/v7"
-	"io"
 )
 
 var bucketName = conf.Config.Writer.Bucket
@@ -32,7 +33,7 @@ func (s *minioStore) Get(ctx context.Context, key Key) (Value, error) {
 		return nil, err
 	}
 
-	size := 256*1024
+	size := 256 * 1024
 	buf := make([]byte, size)
 	n, err := object.Read(buf)
 	if err != nil && err != io.EOF {
@@ -49,9 +50,9 @@ func (s *minioStore) GetByPrefix(ctx context.Context, prefix Key, keyOnly bool) 
 
 	for object := range objects {
 		objectsKeys = append(objectsKeys, []byte(object.Key))
-		if !keyOnly{
+		if !keyOnly {
 			value, err := s.Get(ctx, []byte(object.Key))
-			if err != nil{
+			if err != nil {
 				return nil, nil, err
 			}
 			objectsValues = append(objectsValues, value)
@@ -62,11 +63,11 @@ func (s *minioStore) GetByPrefix(ctx context.Context, prefix Key, keyOnly bool) 
 
 }
 
-func (s *minioStore) Scan(ctx context.Context, keyStart Key, keyEnd Key, limit int, keyOnly bool) ([]Key, []Value, error){
+func (s *minioStore) Scan(ctx context.Context, keyStart Key, keyEnd Key, limit int, keyOnly bool) ([]Key, []Value, error) {
 	var keys []Key
 	var values []Value
 	limitCount := uint(limit)
-	for object := range s.client.ListObjects(ctx, bucketName, minio.ListObjectsOptions{Prefix:  string(keyStart)}) {
+	for object := range s.client.ListObjects(ctx, bucketName, minio.ListObjectsOptions{Prefix: string(keyStart)}) {
 		if object.Key >= string(keyEnd) {
 			keys = append(keys, []byte(object.Key))
 			if !keyOnly {
@@ -77,7 +78,7 @@ func (s *minioStore) Scan(ctx context.Context, keyStart Key, keyEnd Key, limit i
 				values = append(values, value)
 			}
 			limitCount--
-			if limitCount <= 0{
+			if limitCount <= 0 {
 				break
 			}
 		}
@@ -91,18 +92,18 @@ func (s *minioStore) Delete(ctx context.Context, key Key) error {
 	return err
 }
 
-func (s *minioStore) DeleteByPrefix(ctx context.Context, prefix Key) error{
+func (s *minioStore) DeleteByPrefix(ctx context.Context, prefix Key) error {
 	objectsCh := make(chan minio.ObjectInfo)
 
 	go func() {
 		defer close(objectsCh)
 
-		for object := range s.client.ListObjects(ctx, bucketName, minio.ListObjectsOptions{Prefix:  string(prefix)}){
+		for object := range s.client.ListObjects(ctx, bucketName, minio.ListObjectsOptions{Prefix: string(prefix)}) {
 			objectsCh <- object
 		}
 	}()
 
-	for rErr := range s.client.RemoveObjects(ctx, bucketName, objectsCh, minio.RemoveObjectsOptions{GovernanceBypass: true}){
+	for rErr := range s.client.RemoveObjects(ctx, bucketName, objectsCh, minio.RemoveObjectsOptions{GovernanceBypass: true}) {
 		if rErr.Err != nil {
 			return rErr.Err
 		}
@@ -116,14 +117,14 @@ func (s *minioStore) DeleteRange(ctx context.Context, keyStart Key, keyEnd Key) 
 	go func() {
 		defer close(objectsCh)
 
-		for object := range s.client.ListObjects(ctx, bucketName, minio.ListObjectsOptions{Prefix:  string(keyStart)}){
+		for object := range s.client.ListObjects(ctx, bucketName, minio.ListObjectsOptions{Prefix: string(keyStart)}) {
 			if object.Key <= string(keyEnd) {
 				objectsCh <- object
 			}
 		}
 	}()
 
-	for rErr := range s.client.RemoveObjects(ctx, bucketName, objectsCh, minio.RemoveObjectsOptions{GovernanceBypass: true}){
+	for rErr := range s.client.RemoveObjects(ctx, bucketName, objectsCh, minio.RemoveObjectsOptions{GovernanceBypass: true}) {
 		if rErr.Err != nil {
 			return rErr.Err
 		}

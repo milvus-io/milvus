@@ -2,17 +2,13 @@ package master
 
 import (
 	"context"
+	"time"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/master/id"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
-	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-	"io"
-	"log"
-	"time"
 )
 
 const slowThreshold = 5 * time.Millisecond
@@ -340,38 +336,43 @@ func (s *Master) ShowPartitions(ctx context.Context, in *internalpb.ShowPartitio
 	return t.(*showPartitionTask).stringListResponse, nil
 }
 
-
 //----------------------------------------Internal GRPC Service--------------------------------
 
-// Tso implements gRPC PDServer.
-func (s *Master) Tso(stream masterpb.Master_TsoServer) error {
-	for {
-		request, err := stream.Recv()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return errors.WithStack(err)
-		}
-		start := time.Now()
+func (s *Master) AllocTimestamp(ctx context.Context, request *internalpb.TsoRequest) (*internalpb.TsoResponse, error) {
+	count := request.GetCount()
+	ts, err := s.tsoAllocator.GenerateTSO(count)
 
-		count := request.GetCount()
-		ts, err := s.tsoAllocator.GenerateTSO(count)
-		if err != nil {
-			return status.Errorf(codes.Unknown, err.Error())
-		}
-
-		elapsed := time.Since(start)
-		if elapsed > slowThreshold {
-			log.Println("get timestamp too slow", zap.Duration("cost", elapsed))
-		}
-		response := &internalpb.TsoResponse{
-			Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
-			Timestamp: ts,
-			Count:     count,
-		}
-		if err := stream.Send(response); err != nil {
-			return errors.WithStack(err)
-		}
+	if err != nil {
+		return &internalpb.TsoResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
+		}, err
 	}
+
+	response := &internalpb.TsoResponse{
+		Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
+		Timestamp: ts,
+		Count:     count,
+	}
+
+	return response, nil
+}
+
+func (s *Master) AllocId(ctx context.Context, request *internalpb.IdRequest) (*internalpb.IdResponse, error) {
+	panic("implement me")
+	count := request.GetCount()
+	ts, err := id.AllocOne()
+
+	if err != nil {
+		return &internalpb.IdResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
+		}, err
+	}
+
+	response := &internalpb.IdResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
+		Id:     ts,
+		Count:  count,
+	}
+
+	return response, nil
 }

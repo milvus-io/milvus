@@ -14,12 +14,13 @@
 package tso
 
 import (
-	"go.uber.org/zap"
 	"log"
 	"path"
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/util/etcdutil"
@@ -49,7 +50,7 @@ type atomicObject struct {
 type timestampOracle struct {
 	client   *clientv3.Client
 	rootPath string
-	key string
+	key      string
 	// TODO: remove saveInterval
 	saveInterval  time.Duration
 	maxResetTSGap func() time.Duration
@@ -75,11 +76,11 @@ func (t *timestampOracle) loadTimestamp() (time.Time, error) {
 
 // save timestamp, if lastTs is 0, we think the timestamp doesn't exist, so create it,
 // otherwise, update it.
-func (t *timestampOracle) saveTimestamp( ts time.Time) error {
+func (t *timestampOracle) saveTimestamp(ts time.Time) error {
 	key := t.getTimestampPath()
 	data := typeutil.Uint64ToBytes(uint64(ts.UnixNano()))
 	err := errors.New("")
-	println("%v,%v",key, data)
+	println("%v,%v", key, data)
 	//resp, err := leadership.LeaderTxn().
 	//	Then(clientv3.OpPut(key, string(data))).
 	//	Commit()
@@ -127,7 +128,7 @@ func (t *timestampOracle) SyncTimestamp() error {
 }
 
 // ResetUserTimestamp update the physical part with specified tso.
-func (t *timestampOracle) ResetUserTimestamp( tso uint64) error {
+func (t *timestampOracle) ResetUserTimestamp(tso uint64) error {
 	//if !leadership.Check() {
 	//	return errors.New("Setup timestamp failed, lease expired")
 	//}
@@ -145,7 +146,7 @@ func (t *timestampOracle) ResetUserTimestamp( tso uint64) error {
 	}
 
 	save := next.Add(t.saveInterval)
-	if err := t.saveTimestamp( save); err != nil {
+	if err := t.saveTimestamp(save); err != nil {
 		return err
 	}
 	update := &atomicObject{
@@ -194,7 +195,7 @@ func (t *timestampOracle) UpdateTimestamp() error {
 	// The time window needs to be updated and saved to etcd.
 	if typeutil.SubTimeByWallClock(t.lastSavedTime.Load().(time.Time), next) <= updateTimestampGuard {
 		save := next.Add(t.saveInterval)
-		if err := t.saveTimestamp( save); err != nil {
+		if err := t.saveTimestamp(save); err != nil {
 			return err
 		}
 	}

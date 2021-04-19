@@ -5,16 +5,17 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	msgpb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/zilliztech/milvus-distributed/internal/storage"
-	storagetype "github.com/zilliztech/milvus-distributed/internal/storage/type"
-	"github.com/zilliztech/milvus-distributed/internal/msgclient"
 	"log"
 	"os"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/msgclient"
+	msgpb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/storage"
+	storagetype "github.com/zilliztech/milvus-distributed/internal/storage/type"
 )
 
 type SegmentIdInfo struct {

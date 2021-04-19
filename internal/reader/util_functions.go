@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	log "github.com/apache/pulsar/pulsar-client-go/logutil"
 	"os"
 	"strconv"
 	"time"
+
+	log "github.com/apache/pulsar/pulsar-client-go/logutil"
 )
 
 // Function `GetSegmentByEntityId` should return entityIDs, timestamps and segmentIDs

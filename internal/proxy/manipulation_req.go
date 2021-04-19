@@ -2,14 +2,15 @@ package proxy
 
 import (
 	"fmt"
+	"log"
+	"sync"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-	"log"
-	"sync"
 )
 
 type manipulationReq struct {
@@ -65,8 +66,8 @@ func (req *manipulationReq) PostExecute() commonpb.Status { // send into pulsar
 func (req *manipulationReq) WaitToFinish() commonpb.Status { // wait until send into pulsar
 	req.wg.Wait()
 
-	for _, stat := range req.stats{
-		if stat.ErrorCode != commonpb.ErrorCode_SUCCESS{
+	for _, stat := range req.stats {
+		if stat.ErrorCode != commonpb.ErrorCode_SUCCESS {
 			return stat
 		}
 	}

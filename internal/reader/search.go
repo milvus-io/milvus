@@ -2,9 +2,10 @@ package reader
 
 import (
 	"fmt"
+	"sort"
+
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"sort"
 )
 
 func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {

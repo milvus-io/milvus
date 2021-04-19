@@ -1,10 +1,11 @@
 package kv
 
 import (
-	"github.com/stretchr/testify/assert"
-	"go.etcd.io/etcd/clientv3"
 	"path"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"go.etcd.io/etcd/clientv3"
 )
 
 func TestEtcdKV_Load(t *testing.T) {

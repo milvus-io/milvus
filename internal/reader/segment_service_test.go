@@ -2,11 +2,12 @@ package reader
 
 import (
 	"context"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/msgclient"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/msgclient"
 )
 
 //func TestSegmentManagement_SegmentsManagement(t *testing.T) {
