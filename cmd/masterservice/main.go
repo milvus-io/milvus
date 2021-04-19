@@ -31,15 +31,31 @@ func main() {
 	}
 	log.Printf("master service address : %s:%d", ms.Params.Address, ms.Params.Port)
 
+	cnt := 0
+
 	psc.Params.Init()
 	log.Printf("proxy service address : %s", psc.Params.NetworkAddress())
-	//proxyService := psc.NewClient(ctx, psc.Params.NetworkAddress())
+	proxyService := psc.NewClient(psc.Params.NetworkAddress())
 
-	//TODO, test proxy service GetComponentStates, before set
+	for cnt = 0; cnt < reTryCnt; cnt++ {
+		pxStates, err := proxyService.GetComponentStates()
+		if err != nil {
+			log.Printf("get state from proxy service, retry count = %d, error = %s", cnt, err.Error())
+			continue
+		}
+		if pxStates.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			log.Printf("get state from proxy service, retry count = %d, error = %s", cnt, pxStates.Status.Reason)
+			continue
+		}
+		if pxStates.State.StateCode != internalpb2.StateCode_INITIALIZING && pxStates.State.StateCode != internalpb2.StateCode_HEALTHY {
+			continue
+		}
+		break
+	}
 
-	//if err = svr.SetProxyService(proxyService); err != nil {
-	//	panic(err)
-	//}
+	if err = svr.SetProxyService(proxyService); err != nil {
+		panic(err)
+	}
 
 	ds.Params.Init()
 	log.Printf("data service address : %s:%d", ds.Params.Address, ds.Params.Port)
@@ -50,7 +66,6 @@ func main() {
 	if err = dataService.Start(); err != nil {
 		panic(err)
 	}
-	cnt := 0
 	for cnt = 0; cnt < reTryCnt; cnt++ {
 		dsStates, err := dataService.GetComponentStates()
 		if err != nil {
@@ -93,5 +108,7 @@ func main() {
 		syscall.SIGQUIT)
 	sig := <-sc
 	log.Printf("Got %s signal to exit", sig.String())
+	_ = indexService.Stop()
+	_ = dataService.Stop()
 	_ = svr.Stop()
 }

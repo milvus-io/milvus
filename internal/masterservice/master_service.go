@@ -37,7 +37,7 @@ import (
 
 type ProxyServiceInterface interface {
 	GetTimeTickChannel() (string, error)
-	InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
+	InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) error
 }
 
 type DataServiceInterface interface {
@@ -582,7 +582,7 @@ func (c *Core) SetProxyService(s ProxyServiceInterface) error {
 	Params.ProxyTimeTickChannel = rsp
 
 	c.InvalidateCollectionMetaCache = func(ts typeutil.Timestamp, dbName string, collectionName string) error {
-		status, err := s.InvalidateCollectionMetaCache(&proxypb.InvalidateCollMetaCacheRequest{
+		err := s.InvalidateCollectionMetaCache(&proxypb.InvalidateCollMetaCacheRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   0, //TODO,MsgType
 				MsgID:     0,
@@ -594,9 +594,6 @@ func (c *Core) SetProxyService(s ProxyServiceInterface) error {
 		})
 		if err != nil {
 			return err
-		}
-		if status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-			return errors.Errorf("InvalidateCollectionMetaCache failed, error = %s", status.Reason)
 		}
 		return nil
 	}
