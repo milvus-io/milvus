@@ -173,10 +173,13 @@ TEST_F(DeleteTest, DELETE_ON_DISK) {
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());
 
+    milvus::engine::IDNumbers delete_ids;
+    delete_ids.reserve(search_vectors.size());
     for (auto& kv : search_vectors) {
-        stat = db_->DeleteVector(collection_info.collection_id_, kv.first);
-        ASSERT_TRUE(stat.ok());
+        delete_ids.push_back(kv.first);
     }
+    stat = db_->DeleteVectors(collection_info.collection_id_, "", delete_ids);
+    ASSERT_TRUE(stat.ok());
 
     stat = db_->Flush();
     ASSERT_TRUE(stat.ok());

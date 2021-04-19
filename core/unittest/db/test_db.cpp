@@ -556,9 +556,6 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     stat = db_->Flush();
     ASSERT_FALSE(stat.ok());
 
-    stat = db_->DeleteVector(collection_info.collection_id_, 0);
-    ASSERT_FALSE(stat.ok());
-
     milvus::engine::IDNumbers ids_to_delete{0};
     stat = db_->DeleteVectors(collection_info.collection_id_, "", ids_to_delete);
     ASSERT_FALSE(stat.ok());

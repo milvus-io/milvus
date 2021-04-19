@@ -608,7 +608,7 @@ TEST(WalTest, MANAGER_TEST) {
     ASSERT_TRUE(manager->Insert(table_id_2, "", ids, data_byte));
 
     // table1 delete
-    ASSERT_TRUE(manager->DeleteById(table_id_1, ids));
+    ASSERT_TRUE(manager->DeleteById(table_id_1, "", ids));
 
     // table3 create and insert
     std::string table_id_3 = "table3";
@@ -692,8 +692,8 @@ TEST(WalTest, MANAGER_SAME_NAME_COLLECTION) {
     // command
     ASSERT_TRUE(manager->Insert(table_id_1, "", ids, data_byte));
     ASSERT_TRUE(manager->Insert(table_id_2, "", ids, data_byte));
-    ASSERT_TRUE(manager->DeleteById(table_id_1, ids));
-    ASSERT_TRUE(manager->DeleteById(table_id_2, ids));
+    ASSERT_TRUE(manager->DeleteById(table_id_1, "", ids));
+    ASSERT_TRUE(manager->DeleteById(table_id_2, "", ids));
 
     // re-create collection
     manager->DropCollection(table_id_1);
