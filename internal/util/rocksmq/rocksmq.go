@@ -247,8 +247,8 @@ func (rmq *RocksMQ) Produce(channelName string, messages []ProducerMessage) erro
 	}
 
 	for _, consumer := range rmq.notify[channelName] {
-		if consumer.MsgNum != nil {
-			consumer.MsgNum <- msgLen
+		if consumer.MsgMutex != nil {
+			consumer.MsgMutex <- struct{}{}
 		}
 	}
 	return nil
@@ -308,6 +308,7 @@ func (rmq *RocksMQ) Consume(groupName string, channelName string, n int) ([]Cons
 		return nil, err
 	}
 
+	// When already consume to last mes, an empty slice will be returned
 	if len(consumerMessage) == 0 {
 		return consumerMessage, nil
 	}
