@@ -292,3 +292,12 @@ service MilvusService {
 
   rpc GetDdChannel(common.Empty) returns (StringResponse) {}
 }
+
+message RegisterLinkResponse {
+  common.Address address = 1;
+  common.Status status = 2;
+}
+
+service ProxyService {
+  rpc RegisterLink(common.Empty) returns (RegisterLinkResponse) {}
+}

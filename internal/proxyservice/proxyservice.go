@@ -1,54 +1,31 @@
 package proxyservice
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
+	"context"
+	"math/rand"
+	"time"
 )
 
-type ProxyService struct {
-	// implement Service
+type ServiceImpl struct {
+	allocator NodeIDAllocator
+	sched     *TaskScheduler
+	nodeInfos *GlobalNodeInfoTable
 
-	//nodeClients [] .Interface
-	// factory method
-
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
-func (s ProxyService) Init() error {
-	panic("implement me")
-}
+func CreateProxyService(ctx context.Context) (ProxyService, error) {
+	rand.Seed(time.Now().UnixNano())
+	ctx1, cancel := context.WithCancel(ctx)
+	s := &ServiceImpl{
+		ctx:    ctx1,
+		cancel: cancel,
+	}
 
-func (s ProxyService) Start() error {
-	panic("implement me")
-}
+	s.allocator = NewNodeIDAllocator()
+	s.sched = NewTaskScheduler(ctx1)
+	s.nodeInfos = NewGlobalNodeInfoTable()
 
-func (s ProxyService) Stop() error {
-	panic("implement me")
-}
-
-func (s ProxyService) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	panic("implement me")
-}
-
-func (s ProxyService) GetTimeTickChannel() (string, error) {
-	panic("implement me")
-}
-
-func (s ProxyService) GetStatisticsChannel() (string, error) {
-	panic("implement me")
-}
-
-func (s ProxyService) RegisterLink() (proxypb.RegisterLinkResponse, error) {
-	panic("implement me")
-}
-
-func (s ProxyService) RegisterNode(request proxypb.RegisterNodeRequest) (proxypb.RegisterNodeResponse, error) {
-	panic("implement me")
-}
-
-func (s ProxyService) InvalidateCollectionMetaCache(request proxypb.InvalidateCollMetaCacheRequest) error {
-	panic("implement me")
-}
-
-func NewProxyServiceImpl() interface{} {
-	return &ProxyService{}
+	return s, nil
 }

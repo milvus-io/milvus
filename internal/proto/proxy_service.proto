@@ -14,10 +14,7 @@ message RegisterNodeRequest {
 
 message RegisterNodeResponse {
   internal.InitParams init_params = 1;
-}
-
-message RegisterLinkResponse {
-  common.Address address = 1;
+  common.Status status = 2;
 }
 
 message InvalidateCollMetaCacheRequest {
@@ -27,7 +24,6 @@ message InvalidateCollMetaCacheRequest {
 }
 
 service ProxyService {
-  rpc RegisterLink(common.Empty) returns (RegisterLinkResponse) {}
   rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
   rpc InvalidateCollectionMetaCache(InvalidateCollMetaCacheRequest) returns (common.Status) {}
 }

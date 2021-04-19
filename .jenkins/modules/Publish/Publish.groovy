@@ -21,6 +21,10 @@ dir ('build/docker/deploy') {
             sh 'docker-compose build --force-rm indexbuilder'
             sh 'docker-compose push indexbuilder'
 
+            sh 'docker pull ${SOURCE_REPO}/proxyservice:${SOURCE_TAG} || true'
+            sh 'docker-compose build --force-rm proxyservice'
+            sh 'docker-compose push proxyservice'
+
             sh 'docker pull ${SOURCE_REPO}/proxynode:${SOURCE_TAG} || true'
             sh 'docker-compose build --force-rm proxynode'
             sh 'docker-compose push proxynode'

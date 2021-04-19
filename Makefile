@@ -113,6 +113,8 @@ build-go: build-cpp
 	@echo "Building each component's binary to './bin'"
 	@echo "Building master ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="0" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/master $(PWD)/cmd/master/main.go 1>/dev/null
+	@echo "Building proxy service ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="0" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/proxyservice $(PWD)/cmd/proxy/service/proxy_service.go 1>/dev/null
 	@echo "Building proxy node ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="0" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/proxynode $(PWD)/cmd/proxy/node/proxy_node.go 1>/dev/null
 	@echo "Building query node ..."
@@ -166,6 +168,7 @@ install: all
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/querynode $(GOPATH)/bin/querynode
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/master $(GOPATH)/bin/master
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/proxynode $(GOPATH)/bin/proxynode
+	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/proxyservice $(GOPATH)/bin/proxyservice
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/writenode $(GOPATH)/bin/writenode
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/indexbuilder $(GOPATH)/bin/indexbuilder
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/singlenode $(GOPATH)/bin/singlenode
@@ -180,6 +183,7 @@ clean:
 	@rm -rf lib/
 	@rm -rf $(GOPATH)/bin/master
 	@rm -rf $(GOPATH)/bin/proxynode
+	@rm -rf $(GOPATH)/bin/proxyservice
 	@rm -rf $(GOPATH)/bin/querynode
 	@rm -rf $(GOPATH)/bin/writenode
 	@rm -rf $(GOPATH)/bin/indexbuilder

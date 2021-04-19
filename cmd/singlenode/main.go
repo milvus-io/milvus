@@ -16,7 +16,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/indexnode"
 	"github.com/zilliztech/milvus-distributed/internal/master"
-	proxynodeimpl "github.com/zilliztech/milvus-distributed/internal/proxynode"
+	"github.com/zilliztech/milvus-distributed/internal/proxynode"
 	"github.com/zilliztech/milvus-distributed/internal/querynode"
 	"github.com/zilliztech/milvus-distributed/internal/writenode"
 )
@@ -62,10 +62,10 @@ func InitMaster(cpuprofile *string, wg *sync.WaitGroup) {
 
 func InitProxy(wg *sync.WaitGroup) {
 	defer wg.Done()
-	//proxynodeimpl.Init()
-	//fmt.Println("ProxyID is", proxynodeimpl.Params.ProxyID())
+	//proxynode.Init()
+	//fmt.Println("ProxyID is", proxynode.Params.ProxyID())
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := proxynodeimpl.CreateProxyNodeImpl(ctx)
+	svr, err := proxynode.CreateProxyNodeImpl(ctx)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}
@@ -220,9 +220,13 @@ func main() {
 	wg.Add(1)
 	go InitMaster(cpuprofile, &wg)
 	time.Sleep(time.Second * 1)
+	wg.Add(1)
 	go InitProxy(&wg)
+	wg.Add(1)
 	go InitQueryNode(&wg)
+	wg.Add(1)
 	go InitIndexBuilder(&wg)
+	wg.Add(1)
 	go InitWriteNode(&wg)
 	wg.Wait()
 }
