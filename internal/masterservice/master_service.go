@@ -319,6 +319,8 @@ func (c *Core) startDataServiceSegmentLoop() {
 			} else if err := c.MetaTable.AddSegment(seg); err != nil {
 				//what if master add segment failed, but data service success?
 				log.Printf("add segment info meta table failed ")
+			} else {
+				log.Printf("add segment, collection id = %d, partition id = %d, segment id = %d", seg.CollectionID, seg.PartitionID, seg.SegmentID)
 			}
 		}
 	}
@@ -338,6 +340,8 @@ func (c *Core) startCreateIndexLoop() {
 			}
 			if err := t.BuildIndex(); err != nil {
 				log.Printf("create index failed, error = %s", err.Error())
+			} else {
+				log.Printf("create index,index name = %s, field name = %s, segment id = %d", t.indexName, t.fieldSchema.Name, t.segmentID)
 			}
 		}
 	}
@@ -680,6 +684,9 @@ func (c *Core) Init() error {
 		initError = c.setMsgStreams()
 		c.isInit.Store(true)
 	})
+	if initError == nil {
+		log.Printf("Master service State Code = %s", internalpb2.StateCode_name[int32(internalpb2.StateCode_INITIALIZING)])
+	}
 	return initError
 }
 
@@ -699,6 +706,7 @@ func (c *Core) Start() error {
 		go c.startSegmentFlushCompletedLoop()
 		c.stateCode.Store(internalpb2.StateCode_HEALTHY)
 	})
+	log.Printf("Master service State Code = %s", internalpb2.StateCode_name[int32(internalpb2.StateCode_HEALTHY)])
 	return nil
 }
 
@@ -710,6 +718,8 @@ func (c *Core) Stop() error {
 
 func (c *Core) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
+	log.Printf("GetComponentStates : %s", internalpb2.StateCode_name[int32(code)])
+
 	return &internalpb2.ComponentStates{
 		State: &internalpb2.ComponentInfo{
 			NodeID:    int64(Params.NodeID),
@@ -752,6 +762,7 @@ func (c *Core) CreateCollection(in *milvuspb.CreateCollectionRequest) (*commonpb
 			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
 		}, nil
 	}
+	log.Printf("CreateCollection : %s", in.CollectionName)
 	t := &CreateCollectionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -771,7 +782,6 @@ func (c *Core) CreateCollection(in *milvuspb.CreateCollectionRequest) (*commonpb
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 		Reason:    "",
 	}, nil
-
 }
 
 func (c *Core) DropCollection(in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
@@ -782,6 +792,7 @@ func (c *Core) DropCollection(in *milvuspb.DropCollectionRequest) (*commonpb.Sta
 			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
 		}, nil
 	}
+	log.Printf("DropCollection : %s", in.CollectionName)
 	t := &DropCollectionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -814,6 +825,7 @@ func (c *Core) HasCollection(in *milvuspb.HasCollectionRequest) (*milvuspb.BoolR
 			Value: false,
 		}, nil
 	}
+	log.Printf("HasCollection : %s", in.CollectionName)
 	t := &HasCollectionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -854,6 +866,7 @@ func (c *Core) DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milv
 			CollectionID: 0,
 		}, nil
 	}
+	log.Printf("DescribeCollection : %s", in.CollectionName)
 	t := &DescribeCollectionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -891,6 +904,7 @@ func (c *Core) ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.Sh
 			CollectionNames: nil,
 		}, nil
 	}
+	log.Printf("ShowCollections : %s", in.DbName)
 	t := &ShowCollectionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -927,6 +941,7 @@ func (c *Core) CreatePartition(in *milvuspb.CreatePartitionRequest) (*commonpb.S
 			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
 		}, nil
 	}
+	log.Printf("CreatePartition : %s - %s", in.CollectionName, in.PartitionName)
 	t := &CreatePartitionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -956,6 +971,7 @@ func (c *Core) DropPartition(in *milvuspb.DropPartitionRequest) (*commonpb.Statu
 			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
 		}, nil
 	}
+	log.Printf("DropPartition : %s - %s", in.CollectionName, in.PartitionName)
 	t := &DropPartitionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -988,6 +1004,7 @@ func (c *Core) HasPartition(in *milvuspb.HasPartitionRequest) (*milvuspb.BoolRes
 			Value: false,
 		}, nil
 	}
+	log.Printf("HasPartition : %s - %s", in.CollectionName, in.PartitionName)
 	t := &HasPartitionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -1028,6 +1045,7 @@ func (c *Core) ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.Show
 			PartitionIDs:   nil,
 		}, nil
 	}
+	log.Printf("ShowPartitions : %s", in.CollectionName)
 	t := &ShowPartitionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -1065,6 +1083,7 @@ func (c *Core) CreateIndex(in *milvuspb.CreateIndexRequest) (*commonpb.Status, e
 			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
 		}, nil
 	}
+	log.Printf("CreateIndex : %s - %s ", in.CollectionName, in.FieldName)
 	t := &CreateIndexReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -1097,6 +1116,7 @@ func (c *Core) DescribeIndex(in *milvuspb.DescribeIndexRequest) (*milvuspb.Descr
 			IndexDescriptions: nil,
 		}, nil
 	}
+	log.Printf("DescribeIndex : %s - %s", in.CollectionName, in.FieldName)
 	t := &DescribeIndexReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -1137,6 +1157,7 @@ func (c *Core) DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.D
 			IndexID: 0,
 		}, nil
 	}
+	log.Printf("DescribeSegment : %d - %d", in.CollectionID, in.SegmentID)
 	t := &DescribeSegmentReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -1177,6 +1198,7 @@ func (c *Core) ShowSegments(in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegm
 			SegmentIDs: nil,
 		}, nil
 	}
+	log.Printf("ShowSegments : %d - %d", in.CollectionID, in.PartitionID)
 	t := &ShowSegmentReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -1218,6 +1240,7 @@ func (c *Core) AllocTimestamp(in *masterpb.TsoRequest) (*masterpb.TsoResponse, e
 			Count:     0,
 		}, nil
 	}
+	log.Printf("AllocTimestamp : %d", ts)
 	return &masterpb.TsoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -1240,6 +1263,7 @@ func (c *Core) AllocID(in *masterpb.IDRequest) (*masterpb.IDResponse, error) {
 			Count: in.Count,
 		}, nil
 	}
+	log.Printf("AllocID : %d", start)
 	return &masterpb.IDResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
