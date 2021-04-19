@@ -5,9 +5,7 @@ set(SEGCORE_FILES
         IndexMeta.cpp
         ConcurrentVector.cpp
         Collection.cpp
-        Partition.cpp
         collection_c.cpp
-        partition_c.cpp
         segment_c.cpp
         SegmentBase.cpp
         IndexingEntry.cpp

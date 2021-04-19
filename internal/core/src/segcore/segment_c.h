@@ -3,7 +3,7 @@ extern "C" {
 #endif
 
 #include <stdbool.h>
-#include "partition_c.h"
+#include "collection_c.h"
 
 typedef void* CSegmentBase;
 
@@ -14,7 +14,7 @@ typedef struct CQueryInfo {
 } CQueryInfo;
 
 CSegmentBase
-NewSegment(CPartition partition, unsigned long segment_id);
+NewSegment(CCollection collection, unsigned long segment_id);
 
 void
 DeleteSegment(CSegmentBase segment);

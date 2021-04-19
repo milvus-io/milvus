@@ -1,15 +1,13 @@
+#include <iostream>
 #include "collection_c.h"
 #include "Collection.h"
 
 CCollection
-NewCollection(const char* collection_name, const char* schema_conf) {
-    auto name = std::string(collection_name);
-    auto conf = std::string(schema_conf);
+NewCollection(const char* collection_proto) {
+    auto proto = std::string(collection_proto);
 
-    auto collection = std::make_unique<milvus::segcore::Collection>(name, conf);
+    auto collection = std::make_unique<milvus::segcore::Collection>(proto);
 
-    // TODO: delete print
-    std::cout << "create collection " << collection_name << std::endl;
     return (void*)collection.release();
 }
 

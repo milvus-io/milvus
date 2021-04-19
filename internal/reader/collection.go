@@ -7,7 +7,6 @@ package reader
 #cgo LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
 
 #include "collection_c.h"
-#include "partition_c.h"
 #include "segment_c.h"
 
 */
@@ -39,9 +38,8 @@ func newCollection(collMeta *etcdpb.CollectionMeta, collMetaBlob string) *Collec
 		CCollection
 		newCollection(const char* schema_conf);
 	*/
-	cTmp := C.CString("tmp")
 	cCollMetaBlob := C.CString(collMetaBlob)
-	collection := C.NewCollection(cTmp, cCollMetaBlob)
+	collection := C.NewCollection(cCollMetaBlob)
 
 	var newCollection = &Collection{collectionPtr: collection, meta: collMeta}
 

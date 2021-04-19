@@ -1,13 +1,13 @@
 #pragma once
 
-#include "segcore/Partition.h"
 #include "SegmentDefs.h"
+#include "IndexMeta.h"
 
 namespace milvus::segcore {
 
 class Collection {
  public:
-    explicit Collection(std::string& collection_name, std::string& schema);
+    explicit Collection(const std::string& collection_proto);
 
     void
     parse();
@@ -23,7 +23,7 @@ class Collection {
         return index_;
     }
 
-    std::string&
+    const std::string&
     get_collection_name() {
         return collection_name_;
     }
@@ -31,7 +31,7 @@ class Collection {
  private:
     IndexMetaPtr index_;
     std::string collection_name_;
-    std::string schema_json_;
+    std::string collection_proto_;
     SchemaPtr schema_;
 };
 

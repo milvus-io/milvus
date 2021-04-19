@@ -3,16 +3,15 @@
 #include "SegmentBase.h"
 #include "Collection.h"
 #include "segment_c.h"
-#include "Partition.h"
 #include <knowhere/index/vector_index/VecIndex.h>
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 
 CSegmentBase
-NewSegment(CPartition partition, unsigned long segment_id) {
-    auto p = (milvus::segcore::Partition*)partition;
+NewSegment(CCollection collection, unsigned long segment_id) {
+    auto col = (milvus::segcore::Collection*)collection;
 
-    auto segment = milvus::segcore::CreateSegment(p->get_schema());
+    auto segment = milvus::segcore::CreateSegment(col->get_schema());
 
     // TODO: delete print
     std::cout << "create segment " << segment_id << std::endl;

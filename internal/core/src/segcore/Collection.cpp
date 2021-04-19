@@ -8,8 +8,8 @@
 
 namespace milvus::segcore {
 
-Collection::Collection(std::string& collection_name, std::string& schema)
-    : collection_name_(collection_name), schema_json_(schema) {
+Collection::Collection(const std::string& collection_proto)
+    : collection_proto_(collection_proto) {
     parse();
     index_ = nullptr;
 }
@@ -112,7 +112,7 @@ Collection::CreateIndex(std::string& index_config) {
 
 void
 Collection::parse() {
-    if (schema_json_.empty()) {
+    if (collection_proto_.empty()) {
         std::cout << "WARN: Use default schema" << std::endl;
         auto schema = std::make_shared<Schema>();
         schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
@@ -122,11 +122,16 @@ Collection::parse() {
     }
 
     milvus::proto::etcd::CollectionMeta collection_meta;
-    auto suc = google::protobuf::TextFormat::ParseFromString(schema_json_, &collection_meta);
+    auto suc = google::protobuf::TextFormat::ParseFromString(collection_proto_, &collection_meta);
 
     if (!suc) {
         std::cerr << "unmarshal schema string failed" << std::endl;
     }
+
+    collection_name_ = collection_meta.schema().name();
+    // TODO: delete print
+    std::cout << "create collection " << collection_meta.schema().name() << std::endl;
+
     auto schema = std::make_shared<Schema>();
     for (const milvus::proto::schema::FieldSchema& child : collection_meta.schema().fields()) {
         const auto& type_params = child.type_params();
