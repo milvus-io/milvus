@@ -13,6 +13,10 @@ FROM alpine:3.12.1
 
 COPY ./bin/proxynode /milvus-distributed/bin/proxynode
 
+COPY ./lib/ /milvus-distributed/lib/
+
+ENV LD_LIBRARY_PATH=/milvus-distributed/lib:$LD_LIBRARY_PATH:/usr/lib
+
 COPY ./configs/ /milvus-distributed/configs/
 
 WORKDIR /milvus-distributed/

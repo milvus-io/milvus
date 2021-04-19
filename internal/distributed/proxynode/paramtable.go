@@ -49,6 +49,11 @@ func (pt *ParamTable) LoadFromEnv() {
 		pt.MasterAddress = masterAddress
 	}
 
+	proxyServiceAddress := os.Getenv("PROXY_SERVICE_ADDRESS")
+	if proxyServiceAddress != "" {
+		pt.ProxyServiceAddress = proxyServiceAddress
+	}
+
 	indexServiceAddress := os.Getenv("INDEX_SERVICE_ADDRESS")
 	if indexServiceAddress != "" {
 		pt.IndexServerAddress = indexServiceAddress
