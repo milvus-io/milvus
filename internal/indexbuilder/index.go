@@ -123,30 +123,13 @@ func NewCIndex(typeParams, indexParams map[string]string) (Index, error) {
 	}
 	indexParamsStr := proto.MarshalTextString(protoIndexParams)
 
-	//print := func(param []byte) {
-	//	for i, c := range param {
-	//		fmt.Print(c)
-	//		fmt.Print(", ")
-	//		if i % 25 == 0 {
-	//			fmt.Println()
-	//		}
-	//	}
-	//	fmt.Println()
-	//}
-	//print(typeParamsStr)
-	//fmt.Println("len(typeParamsStr): ", len(typeParamsStr))
-	//print(indexParamsStr)
-	//fmt.Println("len(indexParamsStr): ", len(indexParamsStr))
-
 	typeParamsPointer := C.CString(typeParamsStr)
 	indexParamsPointer := C.CString(indexParamsStr)
 
 	/*
 		CIndex
 		CreateIndex(const char* serialized_type_params,
-					int64_t type_params_size,
-					const char* serialized_index_params
-					int64_t index_params_size);
+					const char* serialized_index_params);
 	*/
 	return &CIndex{
 		indexPtr: C.CreateIndex(typeParamsPointer, indexParamsPointer),

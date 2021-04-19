@@ -130,7 +130,7 @@ func ValidateDimension(dim int64, isBinary bool) error {
 }
 
 func ValidateVectorFieldMetricType(field *schemapb.FieldSchema) error {
-	if (field.DataType != schemapb.DataType_VECTOR_FLOAT) && (field.DataType != schemapb.DataType_VECTOR_BINARY) {
+	if field.DataType != schemapb.DataType_VECTOR_FLOAT {
 		return nil
 	}
 	for _, params := range field.IndexParams {

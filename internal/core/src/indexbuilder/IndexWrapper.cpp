@@ -25,8 +25,6 @@ namespace indexbuilder {
 IndexWrapper::IndexWrapper(const char* serialized_type_params, const char* serialized_index_params) {
     type_params_ = std::string(serialized_type_params);
     index_params_ = std::string(serialized_index_params);
-    //    std::cout << "type_params_.size(): " << type_params_.size() << std::endl;
-    //    std::cout << "index_params_.size(): " << index_params_.size() << std::endl;
 
     parse();
 
