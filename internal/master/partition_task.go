@@ -191,12 +191,10 @@ func (t *showPartitionTask) Execute() error {
 		return errors.New("null request")
 	}
 
-	collMeta, err := t.mt.GetCollectionByName(t.req.CollectionName.CollectionName)
-	if err != nil {
-		return err
-	}
 	partitions := make([]string, 0)
-	partitions = append(partitions, collMeta.PartitionTags...)
+	for _, collection := range t.mt.collID2Meta {
+		partitions = append(partitions, collection.PartitionTags...)
+	}
 
 	stringListResponse := servicepb.StringListResponse{
 		Status: &commonpb.Status{

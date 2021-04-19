@@ -9,7 +9,7 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-queryNode:
+reader:
   stats:
     publishInterval: 1000 # milliseconds
 
@@ -19,6 +19,10 @@ queryNode:
       maxParallelism: 1024
 
   msgStream:
+    dm: # TODO: rm dm
+      #streamBufSize: 1024 # msgPack chan buffer size
+      recvBufSize: 1024 # msgPack chan buffer size
+      pulsarBufSize: 1024 # pulsar chan buffer size
     insert:
       #streamBufSize: 1024 # msgPack chan buffer size
       recvBufSize: 1024 # msgPack chan buffer size
