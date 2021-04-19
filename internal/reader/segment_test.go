@@ -661,8 +661,13 @@ func TestSegment_segmentSearch(t *testing.T) {
 	for _, pg := range placeholderGroups {
 		numQueries += pg.GetNumOfQuery()
 	}
+	resultIds := make([]IntPrimaryKey, topK*numQueries)
+	resultDistances := make([]float32, topK*numQueries)
+	for i := range resultDistances {
+		resultDistances[i] = math.MaxFloat32
+	}
 
-	_, err = segment.segmentSearch(cPlan, placeholderGroups, []Timestamp{searchTimestamp}, numQueries, topK)
+	err = segment.segmentSearch(cPlan, placeholderGroups, []Timestamp{searchTimestamp}, resultIds, resultDistances, numQueries, topK)
 	assert.NoError(t, err)
 }
 

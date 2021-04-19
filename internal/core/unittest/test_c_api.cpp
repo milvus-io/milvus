@@ -6,6 +6,7 @@
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
 #include "pb/service_msg.pb.h"
+#include "segcore/reduce_c.h"
 
 #include <chrono>
 namespace chrono = std::chrono;
@@ -511,3 +512,32 @@ TEST(CApiTest, GetRowCountTest) {
 //    DeleteCollection(collection);
 //    DeleteSegment(segment);
 //}
+
+TEST(CApiTest, MergeInto) {
+    std::vector<int64_t> uids;
+    std::vector<float> distance;
+
+    std::vector<int64_t> new_uids;
+    std::vector<float> new_distance;
+
+    int64_t num_queries = 1;
+    int64_t topk = 2;
+
+    uids.push_back(1);
+    uids.push_back(2);
+    distance.push_back(5);
+    distance.push_back(1000);
+
+    new_uids.push_back(3);
+    new_uids.push_back(4);
+    new_distance.push_back(2);
+    new_distance.push_back(6);
+
+    auto res = MergeInto(num_queries, topk, distance.data(), uids.data(), new_distance.data(), new_uids.data());
+
+    ASSERT_EQ(res, 0);
+    ASSERT_EQ(uids[0], 3);
+    ASSERT_EQ(distance[0], 2);
+    ASSERT_EQ(uids[1], 1);
+    ASSERT_EQ(distance[1], 5);
+}

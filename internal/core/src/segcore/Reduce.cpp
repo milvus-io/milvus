@@ -1,8 +1,11 @@
 #include <cstdint>
 #include <vector>
 #include <algorithm>
+
+#include "Reduce.h"
+
 namespace milvus::segcore {
-void
+Status
 merge_into(int64_t queries,
            int64_t topk,
            float* distances,
@@ -37,5 +40,6 @@ merge_into(int64_t queries,
         std::copy_n(buf_dis.data(), topk, src2_dis);
         std::copy_n(buf_uids.data(), topk, src2_uids);
     }
+    return Status::OK();
 }
 }  // namespace milvus::segcore

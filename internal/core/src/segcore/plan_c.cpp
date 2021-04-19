@@ -20,8 +20,8 @@ ParsePlaceholderGroup(CPlan c_plan, void* placeholder_group_blob, long int blob_
 }
 
 long int
-GetNumOfQueries(CPlaceholderGroup placeholderGroup) {
-    auto res = milvus::query::GetNumOfQueries((milvus::query::PlaceholderGroup*)placeholderGroup);
+GetNumOfQueries(CPlaceholderGroup placeholder_group) {
+    auto res = milvus::query::GetNumOfQueries((milvus::query::PlaceholderGroup*)placeholder_group);
 
     return res;
 }
@@ -41,8 +41,8 @@ DeletePlan(CPlan cPlan) {
 }
 
 void
-DeletePlaceholderGroup(CPlaceholderGroup cPlaceholderGroup) {
-    auto placeHolderGroup = (milvus::query::PlaceholderGroup*)cPlaceholderGroup;
-    delete placeHolderGroup;
+DeletePlaceholderGroup(CPlaceholderGroup cPlaceholder_group) {
+    auto placeHolder_group = (milvus::query::PlaceholderGroup*)cPlaceholder_group;
+    delete placeHolder_group;
     std::cout << "delete placeholder" << std::endl;
 }

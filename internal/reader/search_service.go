@@ -6,7 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"sort"
+	"math"
+	"sync"
 
 	"github.com/golang/protobuf/proto"
 
@@ -17,8 +18,11 @@ import (
 )
 
 type searchService struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx         context.Context
+	wait        sync.WaitGroup
+	cancel      context.CancelFunc
+	msgBuffer   chan msgstream.TsMsg
+	unsolvedMsg []msgstream.TsMsg
 
 	replica      *collectionReplica
 	tSafeWatcher *tSafeWatcher
@@ -28,11 +32,6 @@ type searchService struct {
 }
 
 type ResultEntityIds []UniqueID
-
-type SearchResult struct {
-	ResultIds       []UniqueID
-	ResultDistances []float32
-}
 
 func newSearchService(ctx context.Context, replica *collectionReplica) *searchService {
 	receiveBufSize := Params.searchReceiveBufSize()
@@ -58,9 +57,13 @@ func newSearchService(ctx context.Context, replica *collectionReplica) *searchSe
 	var outputStream msgstream.MsgStream = searchResultStream
 
 	searchServiceCtx, searchServiceCancel := context.WithCancel(ctx)
+	msgBuffer := make(chan msgstream.TsMsg, receiveBufSize)
+	unsolvedMsg := make([]msgstream.TsMsg, 0)
 	return &searchService{
-		ctx:    searchServiceCtx,
-		cancel: searchServiceCancel,
+		ctx:         searchServiceCtx,
+		cancel:      searchServiceCancel,
+		msgBuffer:   msgBuffer,
+		unsolvedMsg: unsolvedMsg,
 
 		replica:      replica,
 		tSafeWatcher: newTSafeWatcher(),
@@ -73,27 +76,10 @@ func newSearchService(ctx context.Context, replica *collectionReplica) *searchSe
 func (ss *searchService) start() {
 	(*ss.searchMsgStream).Start()
 	(*ss.searchResultMsgStream).Start()
-
-	go func() {
-		for {
-			select {
-			case <-ss.ctx.Done():
-				return
-			default:
-				msgPack := (*ss.searchMsgStream).Consume()
-				if msgPack == nil || len(msgPack.Msgs) <= 0 {
-					continue
-				}
-				// TODO: add serviceTime check
-				err := ss.search(msgPack.Msgs)
-				if err != nil {
-					fmt.Println("search Failed")
-					ss.publishFailedSearchResult()
-				}
-				fmt.Println("Do search done")
-			}
-		}
-	}()
+	ss.wait.Add(2)
+	go ss.receiveSearchMsg()
+	go ss.startSearchService()
+	ss.wait.Wait()
 }
 
 func (ss *searchService) close() {
@@ -114,12 +100,68 @@ func (ss *searchService) waitNewTSafe() Timestamp {
 	return timestamp
 }
 
-func (ss *searchService) search(searchMessages []msgstream.TsMsg) error {
-
-	type SearchResult struct {
-		ResultID       int64
-		ResultDistance float32
+func (ss *searchService) receiveSearchMsg() {
+	defer ss.wait.Done()
+	for {
+		select {
+		case <-ss.ctx.Done():
+			return
+		default:
+			msgPack := (*ss.searchMsgStream).Consume()
+			if msgPack == nil || len(msgPack.Msgs) <= 0 {
+				continue
+			}
+			for i := range msgPack.Msgs {
+				ss.msgBuffer <- msgPack.Msgs[i]
+				//fmt.Println("receive a search msg")
+			}
+		}
 	}
+}
+
+func (ss *searchService) startSearchService() {
+	defer ss.wait.Done()
+	for {
+		select {
+		case <-ss.ctx.Done():
+			return
+		default:
+			serviceTimestamp := (*(*ss.replica).getTSafe()).get()
+			searchMsg := make([]msgstream.TsMsg, 0)
+			tempMsg := make([]msgstream.TsMsg, 0)
+			tempMsg = append(tempMsg, ss.unsolvedMsg...)
+			ss.unsolvedMsg = ss.unsolvedMsg[:0]
+			for _, msg := range tempMsg {
+				if msg.BeginTs() > serviceTimestamp {
+					searchMsg = append(searchMsg, msg)
+					continue
+				}
+				ss.unsolvedMsg = append(ss.unsolvedMsg, msg)
+			}
+
+			msgBufferLength := len(ss.msgBuffer)
+			for i := 0; i < msgBufferLength; i++ {
+				msg := <-ss.msgBuffer
+				if msg.BeginTs() > serviceTimestamp {
+					searchMsg = append(searchMsg, msg)
+					continue
+				}
+				ss.unsolvedMsg = append(ss.unsolvedMsg, msg)
+			}
+			if len(searchMsg) <= 0 {
+				continue
+			}
+			err := ss.search(searchMsg)
+			if err != nil {
+				fmt.Println("search Failed")
+				ss.publishFailedSearchResult()
+			}
+			fmt.Println("Do search done")
+		}
+	}
+}
+
+func (ss *searchService) search(searchMessages []msgstream.TsMsg) error {
 	// TODO:: cache map[dsl]plan
 	// TODO: reBatched search requests
 	for _, msg := range searchMessages {
@@ -129,8 +171,6 @@ func (ss *searchService) search(searchMessages []msgstream.TsMsg) error {
 		}
 
 		searchTimestamp := searchMsg.Timestamp
-
-		// TODO:: add serviceable time
 		var queryBlob = searchMsg.Query.Value
 		query := servicepb.Query{}
 		err := proto.Unmarshal(queryBlob, &query)
@@ -162,9 +202,11 @@ func (ss *searchService) search(searchMessages []msgstream.TsMsg) error {
 		for _, pg := range placeholderGroups {
 			numQueries += pg.GetNumOfQuery()
 		}
-		var searchResults = make([][]SearchResult, numQueries)
-		for i := 0; i < int(numQueries); i++ {
-			searchResults[i] = make([]SearchResult, 0)
+
+		resultIds := make([]IntPrimaryKey, topK*numQueries)
+		resultDistances := make([]float32, topK*numQueries)
+		for i := range resultDistances {
+			resultDistances[i] = math.MaxFloat32
 		}
 
 		// 3. Do search in all segments
@@ -174,42 +216,27 @@ func (ss *searchService) search(searchMessages []msgstream.TsMsg) error {
 				return err
 			}
 			for _, segment := range partition.segments {
-				res, err := segment.segmentSearch(plan, placeholderGroups, []Timestamp{searchTimestamp}, numQueries, topK)
+				err := segment.segmentSearch(plan,
+					placeholderGroups,
+					[]Timestamp{searchTimestamp},
+					resultIds,
+					resultDistances,
+					numQueries,
+					topK)
 				if err != nil {
 					return err
 				}
-				for i := 0; int64(i) < numQueries; i++ {
-					for j := int64(i) * topK; j < int64(i+1)*topK; j++ {
-						searchResults[i] = append(searchResults[i], SearchResult{
-							ResultID:       res.ResultIds[j],
-							ResultDistance: res.ResultDistances[j],
-						})
-					}
-				}
 			}
 		}
 
-		// 4. Reduce results
-		// TODO::reduce in c++ merge_into func
-		for _, temp := range searchResults {
-			sort.Slice(temp, func(i, j int) bool {
-				return temp[i].ResultDistance < temp[j].ResultDistance
-			})
-		}
-
-		for i, tmp := range searchResults {
-			if int64(len(tmp)) > topK {
-				searchResults[i] = searchResults[i][:topK]
-			}
-		}
-
+		// 4. return results
 		hits := make([]*servicepb.Hits, 0)
-		for _, value := range searchResults {
+		for i := int64(0); i < numQueries; i++ {
 			hit := servicepb.Hits{}
 			score := servicepb.Score{}
-			for j := 0; int64(j) < topK; j++ {
-				hit.IDs = append(hit.IDs, value[j].ResultID)
-				score.Values = append(score.Values, value[j].ResultDistance)
+			for j := i * topK; j < (i+1)*topK; j++ {
+				hit.IDs = append(hit.IDs, resultIds[j])
+				score.Values = append(score.Values, resultDistances[j])
 			}
 			hit.Scores = append(hit.Scores, &score)
 			hits = append(hits, &hit)

@@ -2,8 +2,11 @@
 #include <cstdint>
 #include <vector>
 #include <algorithm>
+
+#include "utils/Status.h"
+
 namespace milvus::segcore {
-void
+Status
 merge_into(int64_t num_queries,
            int64_t topk,
            float* distances,

@@ -9,6 +9,7 @@ package reader
 #include "collection_c.h"
 #include "segment_c.h"
 #include "plan_c.h"
+#include "reduce_c.h"
 
 */
 import "C"
@@ -178,14 +179,24 @@ func (s *Segment) segmentDelete(offset int64, entityIDs *[]UniqueID, timestamps 
 	return nil
 }
 
-func (s *Segment) segmentSearch(plan *Plan, placeHolderGroups []*PlaceholderGroup, timestamp []Timestamp, numQueries int64, topK int64) (*SearchResult, error) {
+func (s *Segment) segmentSearch(plan *Plan,
+	placeHolderGroups []*PlaceholderGroup,
+	timestamp []Timestamp,
+	resultIds []IntPrimaryKey,
+	resultDistances []float32,
+	numQueries int64,
+	topK int64) error {
 	/*
-		void* Search(void* plan, void* placeholder_groups, uint64_t* timestamps, int num_groups, long int* result_ids,
-		       float* result_distances)
+		void* Search(void* plan,
+			void* placeholder_groups,
+			uint64_t* timestamps,
+			int num_groups,
+			long int* result_ids,
+			float* result_distances);
 	*/
 
-	resultIds := make([]IntPrimaryKey, topK*numQueries)
-	resultDistances := make([]float32, topK*numQueries)
+	newResultIds := make([]IntPrimaryKey, topK*numQueries)
+	NewResultDistances := make([]float32, topK*numQueries)
 	cPlaceholderGroups := make([]C.CPlaceholderGroup, 0)
 	for _, pg := range placeHolderGroups {
 		cPlaceholderGroups = append(cPlaceholderGroups, (*pg).cPlaceholderGroup)
@@ -194,16 +205,22 @@ func (s *Segment) segmentSearch(plan *Plan, placeHolderGroups []*PlaceholderGrou
 	var cTimestamp = (*C.ulong)(&timestamp[0])
 	var cResultIds = (*C.long)(&resultIds[0])
 	var cResultDistances = (*C.float)(&resultDistances[0])
+	var cNewResultIds = (*C.long)(&newResultIds[0])
+	var cNewResultDistances = (*C.float)(&NewResultDistances[0])
 	var cPlaceHolder = (*C.CPlaceholderGroup)(&cPlaceholderGroups[0])
 	var cNumGroups = C.int(len(placeHolderGroups))
 
-	var status = C.Search(s.segmentPtr, plan.cPlan, cPlaceHolder, cTimestamp, cNumGroups, cResultIds, cResultDistances)
-
+	var status = C.Search(s.segmentPtr, plan.cPlan, cPlaceHolder, cTimestamp, cNumGroups, cNewResultIds, cNewResultDistances)
 	if status != 0 {
-		return nil, errors.New("search failed, error code = " + strconv.Itoa(int(status)))
+		return errors.New("search failed, error code = " + strconv.Itoa(int(status)))
 	}
 
-	//fmt.Println("search Result---- Ids =", resultIds, ", Distances =", resultDistances)
-
-	return &SearchResult{ResultIds: resultIds, ResultDistances: resultDistances}, nil
+	cNumQueries := C.long(numQueries)
+	cTopK := C.long(topK)
+	// reduce search result
+	status = C.MergeInto(cNumQueries, cTopK, cResultDistances, cResultIds, cNewResultDistances, cNewResultIds)
+	if status != 0 {
+		return errors.New("merge search result failed, error code = " + strconv.Itoa(int(status)))
+	}
+	return nil
 }
