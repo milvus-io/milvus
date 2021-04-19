@@ -2,6 +2,9 @@ package storage
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	ms "github.com/zilliztech/milvus-distributed/internal/master"
@@ -17,8 +20,26 @@ type (
 )
 
 type Blob struct {
-	key   string
-	value []byte
+	Key   string
+	Value []byte
+}
+
+type BlobList []*Blob
+
+func (s BlobList) Len() int {
+	return len(s)
+}
+
+func (s BlobList) Less(i, j int) bool {
+	leftValues := strings.Split(s[i].Key, "/")
+	rightValues := strings.Split(s[j].Key, "/")
+	left, _ := strconv.ParseInt(leftValues[len(leftValues)-1], 0, 10)
+	right, _ := strconv.ParseInt(rightValues[len(rightValues)-1], 0, 10)
+	return left < right
+}
+
+func (s BlobList) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
 }
 
 func NewBlob(key string, value []byte) *Blob {
@@ -26,11 +47,11 @@ func NewBlob(key string, value []byte) *Blob {
 }
 
 func (b Blob) GetKey() string {
-	return b.key
+	return b.Key
 }
 
 func (b Blob) GetValue() []byte {
-	return b.value
+	return b.Value
 }
 
 type Base struct {
@@ -113,7 +134,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 	if !ok {
 		return nil, errors.New("data doesn't contains timestamp field")
 	}
-	ts := timeFieldData.(Int64FieldData).Data
+	ts := timeFieldData.(*Int64FieldData).Data
 
 	for _, field := range insertCodec.Schema.Schema.Fields {
 		singleData := data.Data[field.FieldID]
@@ -129,30 +150,30 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		eventWriter.SetEndTimestamp(typeutil.Timestamp(ts[len(ts)-1]))
 		switch field.DataType {
 		case schemapb.DataType_BOOL:
-			err = eventWriter.AddBoolToPayload(singleData.(BoolFieldData).Data)
+			err = eventWriter.AddBoolToPayload(singleData.(*BoolFieldData).Data)
 		case schemapb.DataType_INT8:
-			err = eventWriter.AddInt8ToPayload(singleData.(Int8FieldData).Data)
+			err = eventWriter.AddInt8ToPayload(singleData.(*Int8FieldData).Data)
 		case schemapb.DataType_INT16:
-			err = eventWriter.AddInt16ToPayload(singleData.(Int16FieldData).Data)
+			err = eventWriter.AddInt16ToPayload(singleData.(*Int16FieldData).Data)
 		case schemapb.DataType_INT32:
-			err = eventWriter.AddInt32ToPayload(singleData.(Int32FieldData).Data)
+			err = eventWriter.AddInt32ToPayload(singleData.(*Int32FieldData).Data)
 		case schemapb.DataType_INT64:
-			err = eventWriter.AddInt64ToPayload(singleData.(Int64FieldData).Data)
+			err = eventWriter.AddInt64ToPayload(singleData.(*Int64FieldData).Data)
 		case schemapb.DataType_FLOAT:
-			err = eventWriter.AddFloatToPayload(singleData.(FloatFieldData).Data)
+			err = eventWriter.AddFloatToPayload(singleData.(*FloatFieldData).Data)
 		case schemapb.DataType_DOUBLE:
-			err = eventWriter.AddDoubleToPayload(singleData.(DoubleFieldData).Data)
+			err = eventWriter.AddDoubleToPayload(singleData.(*DoubleFieldData).Data)
 		case schemapb.DataType_STRING:
-			for _, singleString := range singleData.(StringFieldData).Data {
+			for _, singleString := range singleData.(*StringFieldData).Data {
 				err = eventWriter.AddOneStringToPayload(singleString)
 				if err != nil {
 					return nil, err
 				}
 			}
 		case schemapb.DataType_VECTOR_BINARY:
-			err = eventWriter.AddBinaryVectorToPayload(singleData.(BinaryVectorFieldData).Data, singleData.(BinaryVectorFieldData).Dim)
+			err = eventWriter.AddBinaryVectorToPayload(singleData.(*BinaryVectorFieldData).Data, singleData.(*BinaryVectorFieldData).Dim)
 		case schemapb.DataType_VECTOR_FLOAT:
-			err = eventWriter.AddFloatVectorToPayload(singleData.(FloatVectorFieldData).Data, singleData.(FloatVectorFieldData).Dim)
+			err = eventWriter.AddFloatVectorToPayload(singleData.(*FloatVectorFieldData).Data, singleData.(*FloatVectorFieldData).Dim)
 		default:
 			return nil, errors.Errorf("undefined data type %d", field.DataType)
 		}
@@ -176,8 +197,8 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		}
 		blobKey := fmt.Sprintf("%d", field.FieldID)
 		blobs = append(blobs, &Blob{
-			key:   blobKey,
-			value: buffer,
+			Key:   blobKey,
+			Value: buffer,
 		})
 
 	}
@@ -191,12 +212,16 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 	readerClose := func(reader *BinlogReader) func() error {
 		return func() error { return reader.Close() }
 	}
-	var resultData InsertData
+
+	var blobList BlobList = blobs
+	sort.Sort(blobList)
+
 	var pID UniqueID
 	var sID UniqueID
+	resultData := &InsertData{}
 	resultData.Data = make(map[FieldID]FieldData)
-	for _, blob := range blobs {
-		binlogReader, err := NewBinlogReader(blob.value)
+	for _, blob := range blobList {
+		binlogReader, err := NewBinlogReader(blob.Value)
 		if err != nil {
 			return -1, -1, nil, err
 		}
@@ -206,150 +231,187 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 
 		dataType := binlogReader.PayloadDataType
 		fieldID := binlogReader.FieldID
-		switch dataType {
-		case schemapb.DataType_BOOL:
-			var boolFieldData BoolFieldData
+		for {
 			eventReader, err := binlogReader.NextEventReader()
 			if err != nil {
 				return -1, -1, nil, err
 			}
-			boolFieldData.Data, err = eventReader.GetBoolFromPayload()
-			if err != nil {
-				return -1, -1, nil, err
+			if eventReader == nil {
+				break
 			}
-			boolFieldData.NumRows = len(boolFieldData.Data)
-			resultData.Data[fieldID] = boolFieldData
-			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
-		case schemapb.DataType_INT8:
-			var int8FieldData Int8FieldData
-			eventReader, err := binlogReader.NextEventReader()
-			if err != nil {
-				return -1, -1, nil, err
-			}
-			int8FieldData.Data, err = eventReader.GetInt8FromPayload()
-			if err != nil {
-				return -1, -1, nil, err
-			}
-			int8FieldData.NumRows = len(int8FieldData.Data)
-			resultData.Data[fieldID] = int8FieldData
-			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
-		case schemapb.DataType_INT16:
-			var int16FieldData Int16FieldData
-			eventReader, err := binlogReader.NextEventReader()
-			if err != nil {
-				return -1, -1, nil, err
-			}
-			int16FieldData.Data, err = eventReader.GetInt16FromPayload()
-			if err != nil {
-				return -1, -1, nil, err
-			}
-			int16FieldData.NumRows = len(int16FieldData.Data)
-			resultData.Data[fieldID] = int16FieldData
-			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
-		case schemapb.DataType_INT32:
-			var int32FieldData Int32FieldData
-			eventReader, err := binlogReader.NextEventReader()
-			if err != nil {
-				return -1, -1, nil, err
-			}
-			int32FieldData.Data, err = eventReader.GetInt32FromPayload()
-			if err != nil {
-				return -1, -1, nil, err
-			}
-			int32FieldData.NumRows = len(int32FieldData.Data)
-			resultData.Data[fieldID] = int32FieldData
-			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
-		case schemapb.DataType_INT64:
-			var int64FieldData Int64FieldData
-			eventReader, err := binlogReader.NextEventReader()
-			if err != nil {
-				return -1, -1, nil, err
-			}
-			int64FieldData.Data, err = eventReader.GetInt64FromPayload()
-			if err != nil {
-				return -1, -1, nil, err
-			}
-			int64FieldData.NumRows = len(int64FieldData.Data)
-			resultData.Data[fieldID] = int64FieldData
-			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
-		case schemapb.DataType_FLOAT:
-			var floatFieldData FloatFieldData
-			eventReader, err := binlogReader.NextEventReader()
-			if err != nil {
-				return -1, -1, nil, err
-			}
-			floatFieldData.Data, err = eventReader.GetFloatFromPayload()
-			if err != nil {
-				return -1, -1, nil, err
-			}
-			floatFieldData.NumRows = len(floatFieldData.Data)
-			resultData.Data[fieldID] = floatFieldData
-			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
-		case schemapb.DataType_DOUBLE:
-			var doubleFieldData DoubleFieldData
-			eventReader, err := binlogReader.NextEventReader()
-			if err != nil {
-				return -1, -1, nil, err
-			}
-			doubleFieldData.Data, err = eventReader.GetDoubleFromPayload()
-			if err != nil {
-				return -1, -1, nil, err
-			}
-			doubleFieldData.NumRows = len(doubleFieldData.Data)
-			resultData.Data[fieldID] = doubleFieldData
-			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
-		case schemapb.DataType_STRING:
-			var stringFieldData StringFieldData
-			eventReader, err := binlogReader.NextEventReader()
-			if err != nil {
-				return -1, -1, nil, err
-			}
-			length, err := eventReader.GetPayloadLengthFromReader()
-			stringFieldData.NumRows = length
-			if err != nil {
-				return -1, -1, nil, err
-			}
-			for i := 0; i < length; i++ {
-				singleString, err := eventReader.GetOneStringFromPayload(i)
+			switch dataType {
+			case schemapb.DataType_BOOL:
+				if resultData.Data[fieldID] == nil {
+					resultData.Data[fieldID] = &BoolFieldData{}
+				}
+				boolFieldData := resultData.Data[fieldID].(*BoolFieldData)
+				singleData, err := eventReader.GetBoolFromPayload()
 				if err != nil {
 					return -1, -1, nil, err
 				}
-				stringFieldData.Data = append(stringFieldData.Data, singleString)
+				boolFieldData.Data = append(boolFieldData.Data, singleData...)
+				length, err := eventReader.GetPayloadLengthFromReader()
+				if err != nil {
+					return -1, -1, nil, err
+				}
+				boolFieldData.NumRows += length
+				resultData.Data[fieldID] = boolFieldData
+			case schemapb.DataType_INT8:
+				if resultData.Data[fieldID] == nil {
+					resultData.Data[fieldID] = &Int8FieldData{}
+				}
+				int8FieldData := resultData.Data[fieldID].(*Int8FieldData)
+				singleData, err := eventReader.GetInt8FromPayload()
+				if err != nil {
+					return -1, -1, nil, err
+				}
+				int8FieldData.Data = append(int8FieldData.Data, singleData...)
+				length, err := eventReader.GetPayloadLengthFromReader()
+				if err != nil {
+					return -1, -1, nil, err
+				}
+				int8FieldData.NumRows += length
+				resultData.Data[fieldID] = int8FieldData
+			case schemapb.DataType_INT16:
+				if resultData.Data[fieldID] == nil {
+					resultData.Data[fieldID] = &Int16FieldData{}
+				}
+				int16FieldData := resultData.Data[fieldID].(*Int16FieldData)
+				singleData, err := eventReader.GetInt16FromPayload()
+				if err != nil {
+					return -1, -1, nil, err
+				}
+				int16FieldData.Data = append(int16FieldData.Data, singleData...)
+				length, err := eventReader.GetPayloadLengthFromReader()
+				if err != nil {
+					return -1, -1, nil, err
+				}
+				int16FieldData.NumRows += length
+				resultData.Data[fieldID] = int16FieldData
+			case schemapb.DataType_INT32:
+				if resultData.Data[fieldID] == nil {
+					resultData.Data[fieldID] = &Int32FieldData{}
+				}
+				int32FieldData := resultData.Data[fieldID].(*Int32FieldData)
+				singleData, err := eventReader.GetInt32FromPayload()
+				if err != nil {
+					return -1, -1, nil, err
+				}
+				int32FieldData.Data = append(int32FieldData.Data, singleData...)
+				length, err := eventReader.GetPayloadLengthFromReader()
+				if err != nil {
+					return -1, -1, nil, err
+				}
+				int32FieldData.NumRows += length
+				resultData.Data[fieldID] = int32FieldData
+			case schemapb.DataType_INT64:
+				if resultData.Data[fieldID] == nil {
+					resultData.Data[fieldID] = &Int64FieldData{}
+				}
+				int64FieldData := resultData.Data[fieldID].(*Int64FieldData)
+				singleData, err := eventReader.GetInt64FromPayload()
+				if err != nil {
+					return -1, -1, nil, err
+				}
+				int64FieldData.Data = append(int64FieldData.Data, singleData...)
+				length, err := eventReader.GetPayloadLengthFromReader()
+				if err != nil {
+					return -1, -1, nil, err
+				}
+				int64FieldData.NumRows += length
+				resultData.Data[fieldID] = int64FieldData
+			case schemapb.DataType_FLOAT:
+				if resultData.Data[fieldID] == nil {
+					resultData.Data[fieldID] = &FloatFieldData{}
+				}
+				floatFieldData := resultData.Data[fieldID].(*FloatFieldData)
+				singleData, err := eventReader.GetFloatFromPayload()
+				if err != nil {
+					return -1, -1, nil, err
+				}
+				floatFieldData.Data = append(floatFieldData.Data, singleData...)
+				length, err := eventReader.GetPayloadLengthFromReader()
+				if err != nil {
+					return -1, -1, nil, err
+				}
+				floatFieldData.NumRows += length
+				resultData.Data[fieldID] = floatFieldData
+			case schemapb.DataType_DOUBLE:
+				if resultData.Data[fieldID] == nil {
+					resultData.Data[fieldID] = &DoubleFieldData{}
+				}
+				doubleFieldData := resultData.Data[fieldID].(*DoubleFieldData)
+				singleData, err := eventReader.GetDoubleFromPayload()
+				if err != nil {
+					return -1, -1, nil, err
+				}
+				doubleFieldData.Data = append(doubleFieldData.Data, singleData...)
+				length, err := eventReader.GetPayloadLengthFromReader()
+				if err != nil {
+					return -1, -1, nil, err
+				}
+				doubleFieldData.NumRows += length
+				resultData.Data[fieldID] = doubleFieldData
+			case schemapb.DataType_STRING:
+				if resultData.Data[fieldID] == nil {
+					resultData.Data[fieldID] = &StringFieldData{}
+				}
+				stringFieldData := resultData.Data[fieldID].(*StringFieldData)
+				length, err := eventReader.GetPayloadLengthFromReader()
+				if err != nil {
+					return -1, -1, nil, err
+				}
+				stringFieldData.NumRows += length
+				for i := 0; i < length; i++ {
+					singleString, err := eventReader.GetOneStringFromPayload(i)
+					if err != nil {
+						return -1, -1, nil, err
+					}
+					stringFieldData.Data = append(stringFieldData.Data, singleString)
+				}
+				resultData.Data[fieldID] = stringFieldData
+			case schemapb.DataType_VECTOR_BINARY:
+				if resultData.Data[fieldID] == nil {
+					resultData.Data[fieldID] = &BinaryVectorFieldData{}
+				}
+				binaryVectorFieldData := resultData.Data[fieldID].(*BinaryVectorFieldData)
+				var singleData []byte
+				singleData, binaryVectorFieldData.Dim, err = eventReader.GetBinaryVectorFromPayload()
+				if err != nil {
+					return -1, -1, nil, err
+				}
+				binaryVectorFieldData.Data = append(binaryVectorFieldData.Data, singleData...)
+				length, err := eventReader.GetPayloadLengthFromReader()
+				if err != nil {
+					return -1, -1, nil, err
+				}
+				binaryVectorFieldData.NumRows += length
+				resultData.Data[fieldID] = binaryVectorFieldData
+			case schemapb.DataType_VECTOR_FLOAT:
+				if resultData.Data[fieldID] == nil {
+					resultData.Data[fieldID] = &FloatVectorFieldData{}
+				}
+				floatVectorFieldData := resultData.Data[fieldID].(*FloatVectorFieldData)
+				var singleData []float32
+				singleData, floatVectorFieldData.Dim, err = eventReader.GetFloatVectorFromPayload()
+				if err != nil {
+					return -1, -1, nil, err
+				}
+				floatVectorFieldData.Data = append(floatVectorFieldData.Data, singleData...)
+				length, err := eventReader.GetPayloadLengthFromReader()
+				if err != nil {
+					return -1, -1, nil, err
+				}
+				floatVectorFieldData.NumRows += length
+				resultData.Data[fieldID] = floatVectorFieldData
+			default:
+				return -1, -1, nil, errors.Errorf("undefined data type %d", dataType)
 			}
-			resultData.Data[fieldID] = stringFieldData
-			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
-		case schemapb.DataType_VECTOR_BINARY:
-			var binaryVectorFieldData BinaryVectorFieldData
-			eventReader, err := binlogReader.NextEventReader()
-			if err != nil {
-				return -1, -1, nil, err
-			}
-			binaryVectorFieldData.Data, binaryVectorFieldData.Dim, err = eventReader.GetBinaryVectorFromPayload()
-			if err != nil {
-				return -1, -1, nil, err
-			}
-			binaryVectorFieldData.NumRows = len(binaryVectorFieldData.Data)
-			resultData.Data[fieldID] = binaryVectorFieldData
-			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
-		case schemapb.DataType_VECTOR_FLOAT:
-			var floatVectorFieldData FloatVectorFieldData
-			eventReader, err := binlogReader.NextEventReader()
-			if err != nil {
-				return -1, -1, nil, err
-			}
-			floatVectorFieldData.Data, floatVectorFieldData.Dim, err = eventReader.GetFloatVectorFromPayload()
-			if err != nil {
-				return -1, -1, nil, err
-			}
-			floatVectorFieldData.NumRows = len(floatVectorFieldData.Data) / 8
-			resultData.Data[fieldID] = floatVectorFieldData
-			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
-		default:
-			return -1, -1, nil, errors.Errorf("undefined data type %d", dataType)
 		}
+		insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
 	}
 
-	return pID, sID, &resultData, nil
+	return pID, sID, resultData, nil
 }
 
 func (insertCodec *InsertCodec) Close() error {
@@ -436,8 +498,8 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 		return nil, err
 	}
 	blobs = append(blobs, &Blob{
-		key:   "",
-		value: buffer,
+		Key:   "",
+		Value: buffer,
 	})
 
 	writer, err = NewDDLBinlogWriter(schemapb.DataType_INT64, dataDefinitionCodec.Schema.ID)
@@ -470,8 +532,8 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 		return nil, err
 	}
 	blobs = append(blobs, &Blob{
-		key:   "",
-		value: buffer,
+		Key:   "",
+		Value: buffer,
 	})
 
 	return blobs, nil
@@ -487,37 +549,35 @@ func (dataDefinitionCodec *DataDefinitionCodec) Deserialize(blobs []*Blob) (ts [
 	}
 	var requestsStrings []string
 	var resultTs []Timestamp
-	for _, blob := range blobs {
-		binlogReader, err := NewBinlogReader(blob.value)
+
+	var blobList BlobList = blobs
+	sort.Sort(blobList)
+
+	for _, blob := range blobList {
+		binlogReader, err := NewBinlogReader(blob.Value)
 		if err != nil {
 			return nil, nil, err
 		}
 		dataType := binlogReader.PayloadDataType
 
-		switch dataType {
-		case schemapb.DataType_INT64:
+		for {
 			eventReader, err := binlogReader.NextEventReader()
 			if err != nil {
 				return nil, nil, err
 			}
-			int64Ts, err := eventReader.GetInt64FromPayload()
-			if err != nil {
-				return nil, nil, err
+			if eventReader == nil {
+				break
 			}
-			for _, singleTs := range int64Ts {
-				resultTs = append(resultTs, Timestamp(singleTs))
-			}
-			dataDefinitionCodec.readerCloseFunc = append(dataDefinitionCodec.readerCloseFunc, readerClose(binlogReader))
-		case schemapb.DataType_STRING:
-			binlogReader, err := NewBinlogReader(blob.value)
-			if err != nil {
-				return nil, nil, err
-			}
-			eventReader, err := binlogReader.NextEventReader()
-			if err != nil {
-				return nil, nil, err
-			}
-			for eventReader != nil {
+			switch dataType {
+			case schemapb.DataType_INT64:
+				int64Ts, err := eventReader.GetInt64FromPayload()
+				if err != nil {
+					return nil, nil, err
+				}
+				for _, singleTs := range int64Ts {
+					resultTs = append(resultTs, Timestamp(singleTs))
+				}
+			case schemapb.DataType_STRING:
 				length, err := eventReader.GetPayloadLengthFromReader()
 				if err != nil {
 					return nil, nil, err
@@ -529,14 +589,10 @@ func (dataDefinitionCodec *DataDefinitionCodec) Deserialize(blobs []*Blob) (ts [
 					}
 					requestsStrings = append(requestsStrings, singleString)
 				}
-				eventReader, err = binlogReader.NextEventReader()
-				if err != nil {
-					return nil, nil, err
-				}
 			}
-			dataDefinitionCodec.readerCloseFunc = append(dataDefinitionCodec.readerCloseFunc, readerClose(binlogReader))
 		}
 
+		dataDefinitionCodec.readerCloseFunc = append(dataDefinitionCodec.readerCloseFunc, readerClose(binlogReader))
 	}
 
 	return resultTs, requestsStrings, nil

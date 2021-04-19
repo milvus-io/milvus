@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -23,6 +24,13 @@ func TestInsertCodec(t *testing.T) {
 				Description: "schema",
 				AutoID:      true,
 				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      0,
+						Name:         "row_id",
+						IsPrimaryKey: false,
+						Description:  "row_id",
+						DataType:     schemapb.DataType_INT64,
+					},
 					{
 						FieldID:      1,
 						Name:         "Ts",
@@ -108,63 +116,155 @@ func TestInsertCodec(t *testing.T) {
 		base,
 		make([]func() error, 0),
 	}
-	insertData := &InsertData{
+	insertDataFirst := &InsertData{
 		Data: map[int64]FieldData{
-			1: Int64FieldData{
+			0: &Int64FieldData{
 				NumRows: 2,
-				Data:    []int64{1, 2},
+				Data:    []int64{3, 4},
 			},
-			100: BoolFieldData{
+			1: &Int64FieldData{
+				NumRows: 2,
+				Data:    []int64{3, 4},
+			},
+			100: &BoolFieldData{
 				NumRows: 2,
 				Data:    []bool{true, false},
 			},
-			101: Int8FieldData{
+			101: &Int8FieldData{
 				NumRows: 2,
-				Data:    []int8{1, 2},
+				Data:    []int8{3, 4},
 			},
-			102: Int16FieldData{
+			102: &Int16FieldData{
 				NumRows: 2,
-				Data:    []int16{1, 2},
+				Data:    []int16{3, 4},
 			},
-			103: Int32FieldData{
+			103: &Int32FieldData{
 				NumRows: 2,
-				Data:    []int32{1, 2},
+				Data:    []int32{3, 4},
 			},
-			104: Int64FieldData{
+			104: &Int64FieldData{
 				NumRows: 2,
-				Data:    []int64{1, 2},
+				Data:    []int64{3, 4},
 			},
-			105: FloatFieldData{
+			105: &FloatFieldData{
 				NumRows: 2,
-				Data:    []float32{1, 2},
+				Data:    []float32{3, 4},
 			},
-			106: DoubleFieldData{
+			106: &DoubleFieldData{
 				NumRows: 2,
-				Data:    []float64{1, 2},
+				Data:    []float64{3, 4},
 			},
-			107: StringFieldData{
+			107: &StringFieldData{
 				NumRows: 2,
-				Data:    []string{"1", "2"},
+				Data:    []string{"3", "4"},
 			},
-			108: BinaryVectorFieldData{
-				NumRows: 8,
-				Data:    []byte{0, 255, 0, 1, 0, 1, 0, 1},
+			108: &BinaryVectorFieldData{
+				NumRows: 2,
+				Data:    []byte{0, 255},
 				Dim:     8,
 			},
-			109: FloatVectorFieldData{
-				NumRows: 1,
-				Data:    []float32{0, 1, 2, 3, 4, 5, 6, 7},
+			109: &FloatVectorFieldData{
+				NumRows: 2,
+				Data:    []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
 				Dim:     8,
 			},
 		},
 	}
-	blobs, err := insertCodec.Serialize(1, 1, insertData)
+
+	insertDataSecond := &InsertData{
+		Data: map[int64]FieldData{
+			0: &Int64FieldData{
+				NumRows: 2,
+				Data:    []int64{1, 2},
+			},
+			1: &Int64FieldData{
+				NumRows: 2,
+				Data:    []int64{1, 2},
+			},
+			100: &BoolFieldData{
+				NumRows: 2,
+				Data:    []bool{true, false},
+			},
+			101: &Int8FieldData{
+				NumRows: 2,
+				Data:    []int8{1, 2},
+			},
+			102: &Int16FieldData{
+				NumRows: 2,
+				Data:    []int16{1, 2},
+			},
+			103: &Int32FieldData{
+				NumRows: 2,
+				Data:    []int32{1, 2},
+			},
+			104: &Int64FieldData{
+				NumRows: 2,
+				Data:    []int64{1, 2},
+			},
+			105: &FloatFieldData{
+				NumRows: 2,
+				Data:    []float32{1, 2},
+			},
+			106: &DoubleFieldData{
+				NumRows: 2,
+				Data:    []float64{1, 2},
+			},
+			107: &StringFieldData{
+				NumRows: 2,
+				Data:    []string{"1", "2"},
+			},
+			108: &BinaryVectorFieldData{
+				NumRows: 2,
+				Data:    []byte{0, 255},
+				Dim:     8,
+			},
+			109: &FloatVectorFieldData{
+				NumRows: 2,
+				Data:    []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+				Dim:     8,
+			},
+		},
+	}
+	firstBlobs, err := insertCodec.Serialize(1, 1, insertDataFirst)
 	assert.Nil(t, err)
-	partitionID, segmentID, resultData, err := insertCodec.Deserialize(blobs)
+	for _, blob := range firstBlobs {
+		blob.Key = fmt.Sprintf("1/insert_log/2/3/4/5/%d", 100)
+	}
+	secondBlobs, err := insertCodec.Serialize(1, 1, insertDataSecond)
 	assert.Nil(t, err)
-	assert.Equal(t, partitionID, int64(1))
-	assert.Equal(t, segmentID, int64(1))
-	assert.Equal(t, resultData, insertData)
+	for _, blob := range secondBlobs {
+		blob.Key = fmt.Sprintf("1/insert_log/2/3/4/5/%d", 99)
+	}
+	resultBlobs := append(firstBlobs, secondBlobs...)
+	partitionID, segmentID, resultData, err := insertCodec.Deserialize(resultBlobs)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), partitionID)
+	assert.Equal(t, int64(1), segmentID)
+	assert.Equal(t, 4, resultData.Data[0].(*Int64FieldData).NumRows)
+	assert.Equal(t, 4, resultData.Data[1].(*Int64FieldData).NumRows)
+	assert.Equal(t, 4, resultData.Data[100].(*BoolFieldData).NumRows)
+	assert.Equal(t, 4, resultData.Data[101].(*Int8FieldData).NumRows)
+	assert.Equal(t, 4, resultData.Data[102].(*Int16FieldData).NumRows)
+	assert.Equal(t, 4, resultData.Data[103].(*Int32FieldData).NumRows)
+	assert.Equal(t, 4, resultData.Data[104].(*Int64FieldData).NumRows)
+	assert.Equal(t, 4, resultData.Data[105].(*FloatFieldData).NumRows)
+	assert.Equal(t, 4, resultData.Data[106].(*DoubleFieldData).NumRows)
+	assert.Equal(t, 4, resultData.Data[107].(*StringFieldData).NumRows)
+	assert.Equal(t, 4, resultData.Data[108].(*BinaryVectorFieldData).NumRows)
+	assert.Equal(t, 4, resultData.Data[109].(*FloatVectorFieldData).NumRows)
+	assert.Equal(t, []int64{1, 2, 3, 4}, resultData.Data[0].(*Int64FieldData).Data)
+	assert.Equal(t, []int64{1, 2, 3, 4}, resultData.Data[1].(*Int64FieldData).Data)
+	assert.Equal(t, []bool{true, false, true, false}, resultData.Data[100].(*BoolFieldData).Data)
+	assert.Equal(t, []int8{1, 2, 3, 4}, resultData.Data[101].(*Int8FieldData).Data)
+	assert.Equal(t, []int16{1, 2, 3, 4}, resultData.Data[102].(*Int16FieldData).Data)
+	assert.Equal(t, []int32{1, 2, 3, 4}, resultData.Data[103].(*Int32FieldData).Data)
+	assert.Equal(t, []int64{1, 2, 3, 4}, resultData.Data[104].(*Int64FieldData).Data)
+	assert.Equal(t, []float32{1, 2, 3, 4}, resultData.Data[105].(*FloatFieldData).Data)
+	assert.Equal(t, []float64{1, 2, 3, 4}, resultData.Data[106].(*DoubleFieldData).Data)
+	assert.Equal(t, []string{"1", "2", "3", "4"}, resultData.Data[107].(*StringFieldData).Data)
+	assert.Equal(t, []byte{0, 255, 0, 255}, resultData.Data[108].(*BinaryVectorFieldData).Data)
+	assert.Equal(t, []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+		resultData.Data[109].(*FloatVectorFieldData).Data)
 	assert.Nil(t, insertCodec.Close())
 }
 func TestDDCodec(t *testing.T) {
@@ -240,6 +340,9 @@ func TestDDCodec(t *testing.T) {
 	}
 	blobs, err := dataDefinitionCodec.Serialize(ts, ddRequests, eventTypeCodes)
 	assert.Nil(t, err)
+	for _, blob := range blobs {
+		blob.Key = fmt.Sprintf("1/data_definition/3/4/5/%d", 99)
+	}
 	resultTs, resultRequests, err := dataDefinitionCodec.Deserialize(blobs)
 	assert.Nil(t, err)
 	assert.Equal(t, resultTs, ts)

@@ -501,7 +501,6 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_service_5fmsg_2eproto::offsets
   ~0u,  // no _weak_field_map_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::service::IndexParam, collection_name_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::service::IndexParam, field_name_),
-  PROTOBUF_FIELD_OFFSET(::milvus::proto::service::IndexParam, index_name_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::service::IndexParam, extra_params_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::service::DescribeIndexResponse, _internal_metadata_),
@@ -532,7 +531,7 @@ static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOB
   { 105, -1, sizeof(::milvus::proto::service::Hits)},
   { 113, -1, sizeof(::milvus::proto::service::QueryResult)},
   { 120, -1, sizeof(::milvus::proto::service::IndexParam)},
-  { 129, -1, sizeof(::milvus::proto::service::DescribeIndexResponse)},
+  { 128, -1, sizeof(::milvus::proto::service::DescribeIndexResponse)},
 };
 
 static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
@@ -596,19 +595,18 @@ const char descriptor_table_protodef_service_5fmsg_2eproto[] PROTOBUF_SECTION_VA
   " \003(\t\"5\n\004Hits\022\013\n\003IDs\030\001 \003(\003\022\020\n\010row_data\030\002 "
   "\003(\014\022\016\n\006scores\030\003 \003(\002\"H\n\013QueryResult\022+\n\006st"
   "atus\030\001 \001(\0132\033.milvus.proto.common.Status\022"
-  "\014\n\004hits\030\002 \003(\014\"\206\001\n\nIndexParam\022\027\n\017collecti"
-  "on_name\030\002 \001(\t\022\022\n\nfield_name\030\003 \001(\t\022\022\n\nind"
-  "ex_name\030\004 \001(\t\0227\n\014extra_params\030\005 \003(\0132!.mi"
-  "lvus.proto.common.KeyValuePair\"\276\001\n\025Descr"
-  "ibeIndexResponse\022+\n\006status\030\001 \001(\0132\033.milvu"
-  "s.proto.common.Status\022\027\n\017collection_name"
-  "\030\002 \001(\t\022\022\n\nfield_name\030\003 \001(\t\022\022\n\nindex_name"
-  "\030\004 \001(\t\0227\n\014extra_params\030\005 \003(\0132!.milvus.pr"
-  "oto.common.KeyValuePair*@\n\017PlaceholderTy"
-  "pe\022\010\n\004NONE\020\000\022\021\n\rVECTOR_BINARY\020d\022\020\n\014VECTO"
-  "R_FLOAT\020eBCZAgithub.com/zilliztech/milvu"
-  "s-distributed/internal/proto/servicepbb\006"
-  "proto3"
+  "\014\n\004hits\030\002 \003(\014\"r\n\nIndexParam\022\027\n\017collectio"
+  "n_name\030\001 \001(\t\022\022\n\nfield_name\030\002 \001(\t\0227\n\014extr"
+  "a_params\030\003 \003(\0132!.milvus.proto.common.Key"
+  "ValuePair\"\276\001\n\025DescribeIndexResponse\022+\n\006s"
+  "tatus\030\001 \001(\0132\033.milvus.proto.common.Status"
+  "\022\027\n\017collection_name\030\002 \001(\t\022\022\n\nfield_name\030"
+  "\003 \001(\t\022\022\n\nindex_name\030\004 \001(\t\0227\n\014extra_param"
+  "s\030\005 \003(\0132!.milvus.proto.common.KeyValuePa"
+  "ir*@\n\017PlaceholderType\022\010\n\004NONE\020\000\022\021\n\rVECTO"
+  "R_BINARY\020d\022\020\n\014VECTOR_FLOAT\020eBCZAgithub.c"
+  "om/zilliztech/milvus-distributed/interna"
+  "l/proto/servicepbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_service_5fmsg_2eproto_deps[2] = {
   &::descriptor_table_common_2eproto,
@@ -637,7 +635,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_ser
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_service_5fmsg_2eproto_once;
 static bool descriptor_table_service_5fmsg_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_service_5fmsg_2eproto = {
-  &descriptor_table_service_5fmsg_2eproto_initialized, descriptor_table_protodef_service_5fmsg_2eproto, "service_msg.proto", 2046,
+  &descriptor_table_service_5fmsg_2eproto_initialized, descriptor_table_protodef_service_5fmsg_2eproto, "service_msg.proto", 2025,
   &descriptor_table_service_5fmsg_2eproto_once, descriptor_table_service_5fmsg_2eproto_sccs, descriptor_table_service_5fmsg_2eproto_deps, 18, 2,
   schemas, file_default_instances, TableStruct_service_5fmsg_2eproto::offsets,
   file_level_metadata_service_5fmsg_2eproto, 18, file_level_enum_descriptors_service_5fmsg_2eproto, file_level_service_descriptors_service_5fmsg_2eproto,
@@ -6393,10 +6391,6 @@ IndexParam::IndexParam(const IndexParam& from)
   if (!from.field_name().empty()) {
     field_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.field_name_);
   }
-  index_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-  if (!from.index_name().empty()) {
-    index_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.index_name_);
-  }
   // @@protoc_insertion_point(copy_constructor:milvus.proto.service.IndexParam)
 }
 
@@ -6404,7 +6398,6 @@ void IndexParam::SharedCtor() {
   ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_IndexParam_service_5fmsg_2eproto.base);
   collection_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   field_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-  index_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
 
 IndexParam::~IndexParam() {
@@ -6415,7 +6408,6 @@ IndexParam::~IndexParam() {
 void IndexParam::SharedDtor() {
   collection_name_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   field_name_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-  index_name_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
 
 void IndexParam::SetCachedSize(int size) const {
@@ -6436,7 +6428,6 @@ void IndexParam::Clear() {
   extra_params_.Clear();
   collection_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   field_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-  index_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   _internal_metadata_.Clear();
 }
 
@@ -6448,37 +6439,30 @@ const char* IndexParam::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID:
     ptr = ::PROTOBUF_NAMESPACE_ID::internal::ReadTag(ptr, &tag);
     CHK_(ptr);
     switch (tag >> 3) {
-      // string collection_name = 2;
-      case 2:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 18)) {
+      // string collection_name = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 10)) {
           ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_collection_name(), ptr, ctx, "milvus.proto.service.IndexParam.collection_name");
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // string field_name = 3;
-      case 3:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 26)) {
+      // string field_name = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 18)) {
           ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_field_name(), ptr, ctx, "milvus.proto.service.IndexParam.field_name");
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // string index_name = 4;
-      case 4:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 34)) {
-          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_index_name(), ptr, ctx, "milvus.proto.service.IndexParam.index_name");
-          CHK_(ptr);
-        } else goto handle_unusual;
-        continue;
-      // repeated .milvus.proto.common.KeyValuePair extra_params = 5;
-      case 5:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 42)) {
+      // repeated .milvus.proto.common.KeyValuePair extra_params = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 26)) {
           ptr -= 1;
           do {
             ptr += 1;
             ptr = ctx->ParseMessage(add_extra_params(), ptr);
             CHK_(ptr);
             if (!ctx->DataAvailable(ptr)) break;
-          } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 42);
+          } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 26);
         } else goto handle_unusual;
         continue;
       default: {
@@ -6511,9 +6495,9 @@ bool IndexParam::MergePartialFromCodedStream(
     tag = p.first;
     if (!p.second) goto handle_unusual;
     switch (::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::GetTagFieldNumber(tag)) {
-      // string collection_name = 2;
-      case 2: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (18 & 0xFF)) {
+      // string collection_name = 1;
+      case 1: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (10 & 0xFF)) {
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
                 input, this->mutable_collection_name()));
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
@@ -6526,9 +6510,9 @@ bool IndexParam::MergePartialFromCodedStream(
         break;
       }
 
-      // string field_name = 3;
-      case 3: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (26 & 0xFF)) {
+      // string field_name = 2;
+      case 2: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (18 & 0xFF)) {
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
                 input, this->mutable_field_name()));
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
@@ -6541,24 +6525,9 @@ bool IndexParam::MergePartialFromCodedStream(
         break;
       }
 
-      // string index_name = 4;
-      case 4: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (34 & 0xFF)) {
-          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
-                input, this->mutable_index_name()));
-          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-            this->index_name().data(), static_cast<int>(this->index_name().length()),
-            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
-            "milvus.proto.service.IndexParam.index_name"));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      // repeated .milvus.proto.common.KeyValuePair extra_params = 5;
-      case 5: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (42 & 0xFF)) {
+      // repeated .milvus.proto.common.KeyValuePair extra_params = 3;
+      case 3: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (26 & 0xFF)) {
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadMessage(
                 input, add_extra_params()));
         } else {
@@ -6594,41 +6563,31 @@ void IndexParam::SerializeWithCachedSizes(
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // string collection_name = 2;
+  // string collection_name = 1;
   if (this->collection_name().size() > 0) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
       this->collection_name().data(), static_cast<int>(this->collection_name().length()),
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
       "milvus.proto.service.IndexParam.collection_name");
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
-      2, this->collection_name(), output);
+      1, this->collection_name(), output);
   }
 
-  // string field_name = 3;
+  // string field_name = 2;
   if (this->field_name().size() > 0) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
       this->field_name().data(), static_cast<int>(this->field_name().length()),
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
       "milvus.proto.service.IndexParam.field_name");
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
-      3, this->field_name(), output);
+      2, this->field_name(), output);
   }
 
-  // string index_name = 4;
-  if (this->index_name().size() > 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->index_name().data(), static_cast<int>(this->index_name().length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "milvus.proto.service.IndexParam.index_name");
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
-      4, this->index_name(), output);
-  }
-
-  // repeated .milvus.proto.common.KeyValuePair extra_params = 5;
+  // repeated .milvus.proto.common.KeyValuePair extra_params = 3;
   for (unsigned int i = 0,
       n = static_cast<unsigned int>(this->extra_params_size()); i < n; i++) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteMessageMaybeToArray(
-      5,
+      3,
       this->extra_params(static_cast<int>(i)),
       output);
   }
@@ -6646,7 +6605,7 @@ void IndexParam::SerializeWithCachedSizes(
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // string collection_name = 2;
+  // string collection_name = 1;
   if (this->collection_name().size() > 0) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
       this->collection_name().data(), static_cast<int>(this->collection_name().length()),
@@ -6654,10 +6613,10 @@ void IndexParam::SerializeWithCachedSizes(
       "milvus.proto.service.IndexParam.collection_name");
     target =
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
-        2, this->collection_name(), target);
+        1, this->collection_name(), target);
   }
 
-  // string field_name = 3;
+  // string field_name = 2;
   if (this->field_name().size() > 0) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
       this->field_name().data(), static_cast<int>(this->field_name().length()),
@@ -6665,26 +6624,15 @@ void IndexParam::SerializeWithCachedSizes(
       "milvus.proto.service.IndexParam.field_name");
     target =
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
-        3, this->field_name(), target);
+        2, this->field_name(), target);
   }
 
-  // string index_name = 4;
-  if (this->index_name().size() > 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->index_name().data(), static_cast<int>(this->index_name().length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "milvus.proto.service.IndexParam.index_name");
-    target =
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
-        4, this->index_name(), target);
-  }
-
-  // repeated .milvus.proto.common.KeyValuePair extra_params = 5;
+  // repeated .milvus.proto.common.KeyValuePair extra_params = 3;
   for (unsigned int i = 0,
       n = static_cast<unsigned int>(this->extra_params_size()); i < n; i++) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessageToArray(
-        5, this->extra_params(static_cast<int>(i)), target);
+        3, this->extra_params(static_cast<int>(i)), target);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -6708,7 +6656,7 @@ size_t IndexParam::ByteSizeLong() const {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // repeated .milvus.proto.common.KeyValuePair extra_params = 5;
+  // repeated .milvus.proto.common.KeyValuePair extra_params = 3;
   {
     unsigned int count = static_cast<unsigned int>(this->extra_params_size());
     total_size += 1UL * count;
@@ -6719,25 +6667,18 @@ size_t IndexParam::ByteSizeLong() const {
     }
   }
 
-  // string collection_name = 2;
+  // string collection_name = 1;
   if (this->collection_name().size() > 0) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
         this->collection_name());
   }
 
-  // string field_name = 3;
+  // string field_name = 2;
   if (this->field_name().size() > 0) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
         this->field_name());
-  }
-
-  // string index_name = 4;
-  if (this->index_name().size() > 0) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-        this->index_name());
   }
 
   int cached_size = ::PROTOBUF_NAMESPACE_ID::internal::ToCachedSize(total_size);
@@ -6776,10 +6717,6 @@ void IndexParam::MergeFrom(const IndexParam& from) {
 
     field_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.field_name_);
   }
-  if (from.index_name().size() > 0) {
-
-    index_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.index_name_);
-  }
 }
 
 void IndexParam::CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) {
@@ -6807,8 +6744,6 @@ void IndexParam::InternalSwap(IndexParam* other) {
   collection_name_.Swap(&other->collection_name_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
   field_name_.Swap(&other->field_name_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
-    GetArenaNoVirtual());
-  index_name_.Swap(&other->index_name_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
 }
 

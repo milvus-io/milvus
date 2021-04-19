@@ -595,14 +595,12 @@ func (p *Proxy) ShowPartitions(ctx context.Context, req *servicepb.CollectionNam
 }
 
 func (p *Proxy) CreateIndex(ctx context.Context, indexParam *servicepb.IndexParam) (*commonpb.Status, error) {
-	log.Println("create index: ", indexParam.IndexName)
 	cit := &CreateIndexTask{
 		Condition: NewTaskCondition(ctx),
 		CreateIndexRequest: internalpb.CreateIndexRequest{
 			MsgType:        internalpb.MsgType_kCreateIndex,
 			CollectionName: indexParam.CollectionName,
 			FieldName:      indexParam.FieldName,
-			IndexName:      indexParam.IndexName,
 			ExtraParams:    indexParam.ExtraParams,
 		},
 		masterClient: p.masterClient,
