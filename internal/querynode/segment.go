@@ -25,7 +25,8 @@ import (
 type indexParam = map[string]string
 
 type Segment struct {
-	segmentPtr   C.CSegmentBase
+	segmentPtr   C.CSegmentInterface
+	segmentType  C.enum_SegmentType
 	segmentID    UniqueID
 	partitionTag string // TODO: use partitionID
 	collectionID UniqueID
@@ -58,11 +59,14 @@ func (s *Segment) GetRecentlyModified() bool {
 //-------------------------------------------------------------------------------------- constructor and destructor
 func newSegment(collection *Collection, segmentID int64, partitionTag string, collectionID UniqueID) *Segment {
 	/*
-		CSegmentBase
-		newSegment(CPartition partition, unsigned long segment_id);
+		CSegmentInterface
+		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
 	*/
 	initIndexParam := make(map[int64]indexParam)
-	segmentPtr := C.NewSegment(collection.collectionPtr, C.ulong(segmentID))
+	// TODO: replace by param
+	//var segmentType C.enum_SegmentType = C.Growing
+	var segmentType C.int = 1
+	segmentPtr := C.NewSegment(collection.collectionPtr, C.ulong(segmentID), segmentType)
 	var newSegment = &Segment{
 		segmentPtr:   segmentPtr,
 		segmentID:    segmentID,
@@ -77,7 +81,7 @@ func newSegment(collection *Collection, segmentID int64, partitionTag string, co
 func deleteSegment(segment *Segment) {
 	/*
 		void
-		deleteSegment(CSegmentBase segment);
+		deleteSegment(CSegmentInterface segment);
 	*/
 	cPtr := segment.segmentPtr
 	C.DeleteSegment(cPtr)
@@ -87,7 +91,7 @@ func deleteSegment(segment *Segment) {
 func (s *Segment) getRowCount() int64 {
 	/*
 		long int
-		getRowCount(CSegmentBase c_segment);
+		getRowCount(CSegmentInterface c_segment);
 	*/
 	var rowCount = C.GetRowCount(s.segmentPtr)
 	return int64(rowCount)
@@ -96,7 +100,7 @@ func (s *Segment) getRowCount() int64 {
 func (s *Segment) getDeletedCount() int64 {
 	/*
 		long int
-		getDeletedCount(CSegmentBase c_segment);
+		getDeletedCount(CSegmentInterface c_segment);
 	*/
 	var deletedCount = C.GetDeletedCount(s.segmentPtr)
 	return int64(deletedCount)
@@ -105,7 +109,7 @@ func (s *Segment) getDeletedCount() int64 {
 func (s *Segment) getMemSize() int64 {
 	/*
 		long int
-		GetMemoryUsageInBytes(CSegmentBase c_segment);
+		GetMemoryUsageInBytes(CSegmentInterface c_segment);
 	*/
 	var memoryUsageInBytes = C.GetMemoryUsageInBytes(s.segmentPtr)
 
@@ -116,7 +120,7 @@ func (s *Segment) getMemSize() int64 {
 func (s *Segment) segmentPreInsert(numOfRecords int) int64 {
 	/*
 		long int
-		PreInsert(CSegmentBase c_segment, long int size);
+		PreInsert(CSegmentInterface c_segment, long int size);
 	*/
 	var offset = C.PreInsert(s.segmentPtr, C.long(int64(numOfRecords)))
 
@@ -126,7 +130,7 @@ func (s *Segment) segmentPreInsert(numOfRecords int) int64 {
 func (s *Segment) segmentPreDelete(numOfRecords int) int64 {
 	/*
 		long int
-		PreDelete(CSegmentBase c_segment, long int size);
+		PreDelete(CSegmentInterface c_segment, long int size);
 	*/
 	var offset = C.PreDelete(s.segmentPtr, C.long(int64(numOfRecords)))
 
@@ -137,7 +141,7 @@ func (s *Segment) segmentPreDelete(numOfRecords int) int64 {
 func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps *[]Timestamp, records *[]*commonpb.Blob) error {
 	/*
 		CStatus
-		Insert(CSegmentBase c_segment,
+		Insert(CSegmentInterface c_segment,
 		           long int reserved_offset,
 		           signed long int size,
 		           const long* primary_keys,
@@ -190,7 +194,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 func (s *Segment) segmentDelete(offset int64, entityIDs *[]UniqueID, timestamps *[]Timestamp) error {
 	/*
 		CStatus
-		Delete(CSegmentBase c_segment,
+		Delete(CSegmentInterface c_segment,
 		           long int reserved_offset,
 		           long size,
 		           const long* primary_keys,

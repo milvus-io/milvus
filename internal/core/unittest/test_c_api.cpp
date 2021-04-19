@@ -52,7 +52,7 @@ TEST(CApiTest, GetCollectionNameTest) {
 TEST(CApiTest, SegmentTest) {
     auto schema_tmp_conf = "";
     auto collection = NewCollection(schema_tmp_conf);
-    auto segment = NewSegment(collection, 0);
+    auto segment = NewSegment(collection, 0, 1);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -60,7 +60,7 @@ TEST(CApiTest, SegmentTest) {
 TEST(CApiTest, InsertTest) {
     auto schema_tmp_conf = "";
     auto collection = NewCollection(schema_tmp_conf);
-    auto segment = NewSegment(collection, 0);
+    auto segment = NewSegment(collection, 0, 1);
 
     std::vector<char> raw_data;
     std::vector<uint64_t> timestamps;
@@ -95,7 +95,7 @@ TEST(CApiTest, InsertTest) {
 TEST(CApiTest, DeleteTest) {
     auto schema_tmp_conf = "";
     auto collection = NewCollection(schema_tmp_conf);
-    auto segment = NewSegment(collection, 0);
+    auto segment = NewSegment(collection, 0, 1);
 
     long delete_row_ids[] = {100000, 100001, 100002};
     unsigned long delete_timestamps[] = {0, 0, 0};
@@ -112,7 +112,7 @@ TEST(CApiTest, DeleteTest) {
 TEST(CApiTest, SearchTest) {
     auto schema_tmp_conf = "";
     auto collection = NewCollection(schema_tmp_conf);
-    auto segment = NewSegment(collection, 0);
+    auto segment = NewSegment(collection, 0, 1);
 
     std::vector<char> raw_data;
     std::vector<uint64_t> timestamps;
@@ -201,7 +201,7 @@ TEST(CApiTest, SearchTest) {
 // TEST(CApiTest, BuildIndexTest) {
 //    auto schema_tmp_conf = "";
 //    auto collection = NewCollection(schema_tmp_conf);
-//    auto segment = NewSegment(collection, 0);
+//    auto segment = NewSegment(collection, 0, 1);
 //
 //    std::vector<char> raw_data;
 //    std::vector<uint64_t> timestamps;
@@ -285,7 +285,7 @@ TEST(CApiTest, SearchTest) {
 TEST(CApiTest, IsOpenedTest) {
     auto schema_tmp_conf = "";
     auto collection = NewCollection(schema_tmp_conf);
-    auto segment = NewSegment(collection, 0);
+    auto segment = NewSegment(collection, 0, 1);
 
     auto is_opened = IsOpened(segment);
     assert(is_opened);
@@ -297,7 +297,7 @@ TEST(CApiTest, IsOpenedTest) {
 TEST(CApiTest, CloseTest) {
     auto schema_tmp_conf = "";
     auto collection = NewCollection(schema_tmp_conf);
-    auto segment = NewSegment(collection, 0);
+    auto segment = NewSegment(collection, 0, 1);
 
     auto status = Close(segment);
     assert(status == 0);
@@ -309,7 +309,7 @@ TEST(CApiTest, CloseTest) {
 TEST(CApiTest, GetMemoryUsageInBytesTest) {
     auto schema_tmp_conf = "";
     auto collection = NewCollection(schema_tmp_conf);
-    auto segment = NewSegment(collection, 0);
+    auto segment = NewSegment(collection, 0, 1);
 
     auto old_memory_usage_size = GetMemoryUsageInBytes(segment);
     std::cout << "old_memory_usage_size = " << old_memory_usage_size << std::endl;
@@ -428,7 +428,7 @@ generate_index(
 // TEST(CApiTest, TestSearchPreference) {
 //    auto schema_tmp_conf = "";
 //    auto collection = NewCollection(schema_tmp_conf);
-//    auto segment = NewSegment(collection, 0);
+//    auto segment = NewSegment(collection, 0, 1);
 //
 //    auto beg = chrono::high_resolution_clock::now();
 //    auto next = beg;
@@ -547,7 +547,7 @@ generate_index(
 TEST(CApiTest, GetDeletedCountTest) {
     auto schema_tmp_conf = "";
     auto collection = NewCollection(schema_tmp_conf);
-    auto segment = NewSegment(collection, 0);
+    auto segment = NewSegment(collection, 0, 1);
 
     long delete_row_ids[] = {100000, 100001, 100002};
     unsigned long delete_timestamps[] = {0, 0, 0};
@@ -568,7 +568,7 @@ TEST(CApiTest, GetDeletedCountTest) {
 TEST(CApiTest, GetRowCountTest) {
     auto schema_tmp_conf = "";
     auto collection = NewCollection(schema_tmp_conf);
-    auto segment = NewSegment(collection, 0);
+    auto segment = NewSegment(collection, 0, 1);
 
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
@@ -592,7 +592,7 @@ TEST(CApiTest, GetRowCountTest) {
 //        "\u003e\ncreate_time: 1600416765\nsegment_ids: 6873737669791618215\npartition_tags: \"default\"\n";
 //
 //    auto collection = NewCollection(schema_string.data());
-//    auto segment = NewSegment(collection, 0);
+//    auto segment = NewSegment(collection, 0, 1);
 //    DeleteCollection(collection);
 //    DeleteSegment(segment);
 //}
@@ -629,7 +629,7 @@ TEST(CApiTest, MergeInto) {
 TEST(CApiTest, Reduce) {
     auto schema_tmp_conf = "";
     auto collection = NewCollection(schema_tmp_conf);
-    auto segment = NewSegment(collection, 0);
+    auto segment = NewSegment(collection, 0, 1);
 
     std::vector<char> raw_data;
     std::vector<uint64_t> timestamps;
@@ -845,7 +845,7 @@ TEST(CApiTest, UpdateSegmentIndex_Without_Predicate) {
     std::string schema_string = generate_collection_shema("L2", "16", false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, 0);
+    auto segment = NewSegment(collection, 0, 1);
 
     auto N = 1000 * 1000;
     auto dataset = DataGen(schema, N);
@@ -970,7 +970,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
     std::string schema_string = generate_collection_shema("L2", "16", false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, 0);
+    auto segment = NewSegment(collection, 0, 1);
 
     auto N = 1000 * 1000;
     auto dataset = DataGen(schema, N);
@@ -1108,7 +1108,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Term) {
     std::string schema_string = generate_collection_shema("L2", "16", false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, 0);
+    auto segment = NewSegment(collection, 0, 1);
 
     auto N = 1000 * 1000;
     auto dataset = DataGen(schema, N);
@@ -1245,7 +1245,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Range) {
     std::string schema_string = generate_collection_shema("JACCARD", "16", true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, 0);
+    auto segment = NewSegment(collection, 0, 1);
 
     auto N = 1000 * 1000;
     auto dataset = DataGen(schema, N);
@@ -1384,7 +1384,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
     std::string schema_string = generate_collection_shema("JACCARD", "16", true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, 0);
+    auto segment = NewSegment(collection, 0, 1);
 
     auto N = 1000 * 1000;
     auto dataset = DataGen(schema, N);

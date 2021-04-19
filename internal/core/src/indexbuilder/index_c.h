@@ -28,7 +28,7 @@ extern "C" {
 
 #include <stdint.h>
 #include "segcore/collection_c.h"
-#include "common/status_c.h"
+#include "common/type_c.h"
 
 typedef void* CIndex;
 typedef void* CIndexQueryResult;
