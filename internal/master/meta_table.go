@@ -1,8 +1,13 @@
 package master
 
 import (
+	"fmt"
 	"strconv"
 	"sync"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
@@ -11,16 +16,18 @@ import (
 )
 
 type metaTable struct {
-	client        kv.TxnBase                     // client of a reliable kv service, i.e. etcd client
-	tenantID2Meta map[UniqueID]pb.TenantMeta     // tenant id to tenant meta
-	proxyID2Meta  map[UniqueID]pb.ProxyMeta      // proxy id to proxy meta
-	collID2Meta   map[UniqueID]pb.CollectionMeta // collection id to collection meta
-	collName2ID   map[string]UniqueID            // collection name to collection id
-	segID2Meta    map[UniqueID]pb.SegmentMeta    // segment id to segment meta
+	client           kv.TxnBase                       // client of a reliable kv service, i.e. etcd client
+	tenantID2Meta    map[UniqueID]pb.TenantMeta       // tenant id to tenant meta
+	proxyID2Meta     map[UniqueID]pb.ProxyMeta        // proxy id to proxy meta
+	collID2Meta      map[UniqueID]pb.CollectionMeta   // collection id to collection meta
+	collName2ID      map[string]UniqueID              // collection name to collection id
+	segID2Meta       map[UniqueID]pb.SegmentMeta      // segment id to segment meta
+	segID2IndexMetas map[UniqueID][]pb.FieldIndexMeta // segment id to array of field index meta
 
 	tenantLock sync.RWMutex
 	proxyLock  sync.RWMutex
 	ddLock     sync.RWMutex
+	indexLock  sync.RWMutex
 }
 
 func NewMetaTable(kv kv.TxnBase) (*metaTable, error) {
@@ -44,6 +51,7 @@ func (mt *metaTable) reloadFromKV() error {
 	mt.collID2Meta = make(map[UniqueID]pb.CollectionMeta)
 	mt.collName2ID = make(map[string]UniqueID)
 	mt.segID2Meta = make(map[UniqueID]pb.SegmentMeta)
+	mt.segID2IndexMetas = make(map[UniqueID][]pb.FieldIndexMeta)
 
 	_, values, err := mt.client.LoadWithPrefix("tenant")
 	if err != nil {
@@ -102,6 +110,19 @@ func (mt *metaTable) reloadFromKV() error {
 		mt.segID2Meta[segmentMeta.SegmentID] = segmentMeta
 	}
 
+	_, values, err = mt.client.LoadWithPrefix("indexmeta")
+	if err != nil {
+		return err
+	}
+
+	for _, v := range values {
+		indexMeta := pb.FieldIndexMeta{}
+		err = proto.UnmarshalText(v, &indexMeta)
+		if err != nil {
+			return err
+		}
+		mt.segID2IndexMetas[indexMeta.SegmentID] = append(mt.segID2IndexMetas[indexMeta.SegmentID], indexMeta)
+	}
 	return nil
 }
 
@@ -234,6 +255,13 @@ func (mt *metaTable) DeleteCollection(collID UniqueID) error {
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
+	}
+
+	// remove index meta
+	for _, v := range collMeta.SegmentIDs {
+		if err := mt.removeSegmentIndexMeta(v); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -446,8 +474,8 @@ func (mt *metaTable) DeleteSegment(segID UniqueID) error {
 		_ = mt.reloadFromKV()
 		return err
 	}
-	return nil
 
+	return mt.removeSegmentIndexMeta(segID)
 }
 func (mt *metaTable) CloseSegment(segID UniqueID, closeTs Timestamp) error {
 	mt.ddLock.Lock()
@@ -465,5 +493,129 @@ func (mt *metaTable) CloseSegment(segID UniqueID, closeTs Timestamp) error {
 		_ = mt.reloadFromKV()
 		return err
 	}
+	return nil
+}
+
+func (mt *metaTable) AddFieldIndexMeta(meta *pb.FieldIndexMeta) error {
+	mt.indexLock.Lock()
+	defer mt.indexLock.Unlock()
+
+	segID := meta.SegmentID
+	if _, ok := mt.segID2IndexMetas[segID]; !ok {
+		mt.segID2IndexMetas[segID] = make([]pb.FieldIndexMeta, 0)
+	}
+	for _, v := range mt.segID2IndexMetas[segID] {
+		if v.FieldID == meta.FieldID && v.IndexType == meta.IndexType && typeutil.CompareIndexParams(v.IndexParams, meta.IndexParams) {
+			return fmt.Errorf("segment %d field id %d's index meta already exist", segID, meta.FieldID)
+		}
+	}
+	mt.segID2IndexMetas[segID] = append(mt.segID2IndexMetas[segID], *meta)
+	err := mt.saveFieldIndexMetaToEtcd(meta)
+	if err != nil {
+		_ = mt.reloadFromKV()
+		return err
+	}
+	return nil
+}
+
+func (mt *metaTable) saveFieldIndexMetaToEtcd(meta *pb.FieldIndexMeta) error {
+	key := "/indexmeta/" + strconv.FormatInt(meta.SegmentID, 10) + strconv.FormatInt(meta.FieldID, 10) + strconv.FormatInt(meta.IndexID, 10)
+	marshaledMeta := proto.MarshalTextString(meta)
+	return mt.client.Save(key, marshaledMeta)
+}
+
+func (mt *metaTable) DeleteFieldIndexMeta(segID UniqueID, fieldID UniqueID, indexType string, indexParams []*commonpb.KeyValuePair) error {
+	mt.indexLock.Lock()
+	defer mt.indexLock.Unlock()
+
+	if _, ok := mt.segID2IndexMetas[segID]; !ok {
+		return fmt.Errorf("can not find index meta of segment %d", segID)
+	}
+
+	for i, v := range mt.segID2IndexMetas[segID] {
+		if v.FieldID == fieldID && v.IndexType == indexType && typeutil.CompareIndexParams(v.IndexParams, indexParams) {
+			mt.segID2IndexMetas[segID] = append(mt.segID2IndexMetas[segID][:i], mt.segID2IndexMetas[segID][i+1:]...)
+			err := mt.deleteFieldIndexMetaToEtcd(segID, fieldID, v.IndexID)
+			if err != nil {
+				_ = mt.reloadFromKV()
+				return err
+			}
+			return nil
+		}
+	}
+
+	return fmt.Errorf("can not find index meta of field %d", fieldID)
+}
+
+func (mt *metaTable) deleteFieldIndexMetaToEtcd(segID UniqueID, fieldID UniqueID, indexID UniqueID) error {
+	key := "/indexmeta/" + strconv.FormatInt(segID, 10) + strconv.FormatInt(fieldID, 10) + strconv.FormatInt(indexID, 10)
+	return mt.client.Remove(key)
+}
+
+func (mt *metaTable) HasFieldIndexMeta(segID UniqueID, fieldID UniqueID, indexType string, indexParams []*commonpb.KeyValuePair) (bool, error) {
+	mt.indexLock.RLock()
+	defer mt.indexLock.RUnlock()
+
+	if _, ok := mt.segID2IndexMetas[segID]; !ok {
+		return false, nil
+	}
+
+	for _, v := range mt.segID2IndexMetas[segID] {
+		if v.FieldID == fieldID && v.IndexType == indexType && typeutil.CompareIndexParams(v.IndexParams, indexParams) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (mt *metaTable) UpdateFieldIndexMeta(meta *pb.FieldIndexMeta) error {
+	mt.indexLock.Lock()
+	defer mt.indexLock.Unlock()
+
+	segID := meta.SegmentID
+	if _, ok := mt.segID2IndexMetas[segID]; !ok {
+		mt.segID2IndexMetas[segID] = make([]pb.FieldIndexMeta, 0)
+	}
+	for i, v := range mt.segID2IndexMetas[segID] {
+		if v.FieldID == meta.FieldID && v.IndexType == meta.IndexType && typeutil.CompareIndexParams(v.IndexParams, meta.IndexParams) {
+			mt.segID2IndexMetas[segID][i] = *meta
+			err := mt.deleteFieldIndexMetaToEtcd(segID, v.FieldID, v.IndexID)
+			if err != nil {
+				_ = mt.reloadFromKV()
+				return err
+			}
+			err = mt.saveFieldIndexMetaToEtcd(meta)
+			if err != nil {
+				_ = mt.reloadFromKV()
+				return err
+			}
+			return nil
+		}
+	}
+
+	mt.segID2IndexMetas[segID] = append(mt.segID2IndexMetas[segID], *meta)
+	err := mt.saveFieldIndexMetaToEtcd(meta)
+	if err != nil {
+		_ = mt.reloadFromKV()
+		return err
+	}
+	return nil
+}
+
+func (mt *metaTable) removeSegmentIndexMeta(segID UniqueID) error {
+	mt.indexLock.Lock()
+	defer mt.indexLock.Unlock()
+
+	delete(mt.segID2IndexMetas, segID)
+	keys, _, err := mt.client.LoadWithPrefix("indexmeta/" + strconv.FormatInt(segID, 10))
+	if err != nil {
+		_ = mt.reloadFromKV()
+		return err
+	}
+	if err = mt.client.MultiRemove(keys); err != nil {
+		_ = mt.reloadFromKV()
+		return err
+	}
+
 	return nil
 }

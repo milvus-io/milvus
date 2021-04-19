@@ -2,6 +2,7 @@ syntax = "proto3";
 package milvus.proto.etcd;
 option go_package="github.com/zilliztech/milvus-distributed/internal/proto/etcdpb";
 
+import "index_builder.proto";
 import "common.proto";
 import "schema.proto";
 
@@ -28,6 +29,10 @@ message CollectionMeta {
   repeated string partition_tags=5;
 }
 
+message FieldBinlogFiles {
+  int64 fieldID = 1;
+  repeated string binlog_files = 2;
+}
 
 message SegmentMeta {
   int64 segmentID=1;
@@ -39,4 +44,15 @@ message SegmentMeta {
   uint64 close_time=7;
   int64 num_rows=8;
   int64 mem_size=9;
+  repeated FieldBinlogFiles binlog_file_paths = 10;
+}
+
+message FieldIndexMeta {
+  int64 segmentID = 1;
+  int64 fieldID = 2;
+  string index_type = 3;
+  int64 indexID = 4;
+  repeated common.KeyValuePair index_params = 5;
+  service.IndexStatus status = 6;
+  repeated string index_file_paths = 7;
 }

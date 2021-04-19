@@ -6,6 +6,11 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/golang/protobuf/proto"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/indexbuilderpb"
+
 	"github.com/stretchr/testify/assert"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
@@ -410,4 +415,95 @@ func TestMetaTable_AddPartition_Limit(t *testing.T) {
 	}
 	err = meta.AddPartition(100, "partition_limit")
 	assert.NotNil(t, err)
+}
+
+func TestMetaTable_LoadIndexMetaFromKv(t *testing.T) {
+	Init()
+	etcdAddr := Params.EtcdAddress
+
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	assert.Nil(t, err)
+	kv := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
+
+	_, err = cli.Delete(context.TODO(), "/etcd/test/root", clientv3.WithPrefix())
+	assert.Nil(t, err)
+
+	meta := pb.FieldIndexMeta{
+		SegmentID:      1,
+		FieldID:        100,
+		IndexType:      "type1",
+		IndexID:        1000,
+		IndexParams:    []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}},
+		Status:         indexbuilderpb.IndexStatus_FINISHED,
+		IndexFilePaths: []string{"path1"},
+	}
+	marshalRes := proto.MarshalTextString(&meta)
+	err = kv.Save("/indexmeta/"+strconv.FormatInt(meta.SegmentID, 10)+strconv.FormatInt(meta.FieldID, 10)+strconv.FormatInt(meta.IndexID, 10), marshalRes)
+	assert.Nil(t, err)
+
+	metaTable, err := NewMetaTable(kv)
+	assert.Nil(t, err)
+	res, err := metaTable.HasFieldIndexMeta(1, 100, "type1", []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}})
+	assert.Nil(t, err)
+	assert.True(t, res)
+}
+
+func TestMetaTable_IndexMeta(t *testing.T) {
+	Init()
+	etcdAddr := Params.EtcdAddress
+
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	assert.Nil(t, err)
+	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
+
+	_, err = cli.Delete(context.TODO(), "/etcd/test/root", clientv3.WithPrefix())
+	assert.Nil(t, err)
+
+	meta, err := NewMetaTable(etcdKV)
+	assert.Nil(t, err)
+
+	err = meta.AddFieldIndexMeta(&pb.FieldIndexMeta{
+		SegmentID:      1,
+		FieldID:        100,
+		IndexType:      "type1",
+		IndexID:        1000,
+		IndexParams:    []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}},
+		Status:         indexbuilderpb.IndexStatus_INPROGRESS,
+		IndexFilePaths: []string{},
+	})
+	assert.Nil(t, err)
+	err = meta.AddFieldIndexMeta(&pb.FieldIndexMeta{
+		SegmentID:      1,
+		FieldID:        100,
+		IndexType:      "type1",
+		IndexID:        1000,
+		IndexParams:    []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}},
+		Status:         indexbuilderpb.IndexStatus_INPROGRESS,
+		IndexFilePaths: []string{},
+	})
+	assert.NotNil(t, err)
+
+	res, err := meta.HasFieldIndexMeta(1, 100, "type1", []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}})
+	assert.Nil(t, err)
+	assert.True(t, res)
+	res, err = meta.HasFieldIndexMeta(1, 100, "type2", []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}})
+	assert.Nil(t, err)
+	assert.False(t, res)
+
+	err = meta.UpdateFieldIndexMeta(&pb.FieldIndexMeta{
+		SegmentID:      1,
+		FieldID:        100,
+		IndexType:      "type1",
+		IndexID:        1000,
+		IndexParams:    []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}},
+		Status:         indexbuilderpb.IndexStatus_FINISHED,
+		IndexFilePaths: []string{},
+	})
+	assert.Nil(t, err)
+	assert.EqualValues(t, indexbuilderpb.IndexStatus_FINISHED, meta.segID2IndexMetas[1][0].Status)
+	err = meta.DeleteFieldIndexMeta(1, 100, "type1", []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}})
+	assert.Nil(t, err)
+	res, err = meta.HasFieldIndexMeta(1, 100, "type1", []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}})
+	assert.Nil(t, err)
+	assert.False(t, res)
 }
