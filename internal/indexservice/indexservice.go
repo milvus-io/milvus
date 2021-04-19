@@ -133,29 +133,29 @@ func (i *IndexService) BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.Buil
 }
 
 func (i *IndexService) GetIndexStates(req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
-	var indexStates []*indexpb.IndexInfo
-	for _, indexID := range req.IndexID {
-		indexState := &indexpb.IndexInfo{
-			IndexID: indexID,
-			State:   commonpb.IndexState_NONE,
-			Reason:  "",
-		}
-		meta, ok := i.metaTable.indexID2Meta[indexID]
-		if !ok {
-			indexState.State = commonpb.IndexState_NONE
-			indexState.Reason = "index does not exists with ID = " + strconv.FormatInt(indexID, 10)
-		} else {
-			indexState.State = meta.State
-		}
-		indexStates = append(indexStates, indexState)
-	}
+
 	ret := &indexpb.IndexStatesResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 			Reason:    "",
 		},
-		States: indexStates,
+		State:   commonpb.IndexState_FINISHED,
+		IndexID: req.IndexID,
 	}
+
+	meta, ok := i.metaTable.indexID2Meta[req.IndexID]
+	if !ok {
+		ret.Status = &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_BUILD_INDEX_ERROR,
+			Reason:    "index does not exists with ID = " + strconv.FormatInt(req.IndexID, 10),
+		}
+		ret.State = commonpb.IndexState_NONE
+
+		return ret, errors.Errorf("index already exists with ID = " + strconv.FormatInt(req.IndexID, 10))
+	}
+
+	ret.State = meta.State
+	ret.IndexID = meta.IndexID
 
 	return ret, nil
 }

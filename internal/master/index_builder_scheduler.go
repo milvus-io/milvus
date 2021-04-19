@@ -110,11 +110,11 @@ func (scheduler *IndexBuildScheduler) describe() error {
 			indexID := channelInfo.id
 			indexBuildInfo := channelInfo.info
 			for {
-				description, err := scheduler.client.GetIndexStates([]UniqueID{channelInfo.id})
+				description, err := scheduler.client.GetIndexStates(channelInfo.id)
 				if err != nil {
 					return err
 				}
-				if description.States[0].State == commonpb.IndexState_FINISHED {
+				if description.State == commonpb.IndexState_FINISHED {
 					log.Printf("build index for segment %d field %d is finished", indexBuildInfo.segmentID, indexBuildInfo.fieldID)
 					filePaths, err := scheduler.client.GetIndexFilePaths(indexID)
 					if err != nil {
@@ -167,7 +167,7 @@ func (scheduler *IndexBuildScheduler) describe() error {
 						FieldID:     indexBuildInfo.fieldID,
 						IndexID:     indexID,
 						IndexParams: channelInfo.indexParams,
-						State:       description.States[0].State,
+						State:       description.State,
 					})
 					if err != nil {
 						return err

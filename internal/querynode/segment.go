@@ -22,13 +22,21 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
 
+const (
+	segTypeInvalid = C.Invalid
+	segTypeGrowing = C.Growing
+	segTypeSealed  = C.Sealed
+)
+
+type segmentType = C.SegmentType
 type indexParam = map[string]string
 
 type Segment struct {
 	segmentPtr   C.CSegmentInterface
-	segmentType  C.enum_SegmentType
+	segmentType  C.SegmentType
 	segmentID    UniqueID
 	partitionTag string // TODO: use partitionID
+	partitionID  UniqueID
 	collectionID UniqueID
 	lastMemSize  int64
 	lastRowCount int64
@@ -40,8 +48,13 @@ type Segment struct {
 	indexParam map[int64]indexParam
 }
 
+//-------------------------------------------------------------------------------------- common interfaces
 func (s *Segment) ID() UniqueID {
 	return s.segmentID
+}
+
+func (s *Segment) Type() segmentType {
+	return s.segmentType
 }
 
 func (s *Segment) SetRecentlyModified(modify bool) {
@@ -56,21 +69,35 @@ func (s *Segment) GetRecentlyModified() bool {
 	return s.recentlyModified
 }
 
-//-------------------------------------------------------------------------------------- constructor and destructor
-func newSegment(collection *Collection, segmentID int64, partitionTag string, collectionID UniqueID) *Segment {
+func newSegment2(collection *Collection, segmentID int64, partitionTag string, collectionID UniqueID, segType segmentType) *Segment {
 	/*
 		CSegmentInterface
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
 	*/
 	initIndexParam := make(map[int64]indexParam)
-	// TODO: replace by param
-	//var segmentType C.enum_SegmentType = C.Growing
-	var segmentType C.int = 1
-	segmentPtr := C.NewSegment(collection.collectionPtr, C.ulong(segmentID), segmentType)
+	segmentPtr := C.NewSegment(collection.collectionPtr, C.ulong(segmentID), segType)
 	var newSegment = &Segment{
 		segmentPtr:   segmentPtr,
 		segmentID:    segmentID,
 		partitionTag: partitionTag,
+		collectionID: collectionID,
+		indexParam:   initIndexParam,
+	}
+
+	return newSegment
+}
+
+func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, collectionID UniqueID, segType segmentType) *Segment {
+	/*
+		CSegmentInterface
+		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
+	*/
+	initIndexParam := make(map[int64]indexParam)
+	segmentPtr := C.NewSegment(collection.collectionPtr, C.ulong(segmentID), segType)
+	var newSegment = &Segment{
+		segmentPtr:   segmentPtr,
+		segmentID:    segmentID,
+		partitionID:  partitionID,
 		collectionID: collectionID,
 		indexParam:   initIndexParam,
 	}
@@ -87,7 +114,6 @@ func deleteSegment(segment *Segment) {
 	C.DeleteSegment(cPtr)
 }
 
-//-------------------------------------------------------------------------------------- stats functions
 func (s *Segment) getRowCount() int64 {
 	/*
 		long int
@@ -114,108 +140,6 @@ func (s *Segment) getMemSize() int64 {
 	var memoryUsageInBytes = C.GetMemoryUsageInBytes(s.segmentPtr)
 
 	return int64(memoryUsageInBytes)
-}
-
-//-------------------------------------------------------------------------------------- preDm functions
-func (s *Segment) segmentPreInsert(numOfRecords int) int64 {
-	/*
-		long int
-		PreInsert(CSegmentInterface c_segment, long int size);
-	*/
-	var offset = C.PreInsert(s.segmentPtr, C.long(int64(numOfRecords)))
-
-	return int64(offset)
-}
-
-func (s *Segment) segmentPreDelete(numOfRecords int) int64 {
-	/*
-		long int
-		PreDelete(CSegmentInterface c_segment, long int size);
-	*/
-	var offset = C.PreDelete(s.segmentPtr, C.long(int64(numOfRecords)))
-
-	return int64(offset)
-}
-
-//-------------------------------------------------------------------------------------- dm & search functions
-func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps *[]Timestamp, records *[]*commonpb.Blob) error {
-	/*
-		CStatus
-		Insert(CSegmentInterface c_segment,
-		           long int reserved_offset,
-		           signed long int size,
-		           const long* primary_keys,
-		           const unsigned long* timestamps,
-		           void* raw_data,
-		           int sizeof_per_row,
-		           signed long int count);
-	*/
-	// Blobs to one big blob
-	var numOfRow = len(*entityIDs)
-	var sizeofPerRow = len((*records)[0].Value)
-
-	assert.Equal(nil, numOfRow, len(*records))
-
-	var rawData = make([]byte, numOfRow*sizeofPerRow)
-	var copyOffset = 0
-	for i := 0; i < len(*records); i++ {
-		copy(rawData[copyOffset:], (*records)[i].Value)
-		copyOffset += sizeofPerRow
-	}
-
-	var cOffset = C.long(offset)
-	var cNumOfRows = C.long(numOfRow)
-	var cEntityIdsPtr = (*C.long)(&(*entityIDs)[0])
-	var cTimestampsPtr = (*C.ulong)(&(*timestamps)[0])
-	var cSizeofPerRow = C.int(sizeofPerRow)
-	var cRawDataVoidPtr = unsafe.Pointer(&rawData[0])
-
-	var status = C.Insert(s.segmentPtr,
-		cOffset,
-		cNumOfRows,
-		cEntityIdsPtr,
-		cTimestampsPtr,
-		cRawDataVoidPtr,
-		cSizeofPerRow,
-		cNumOfRows)
-
-	errorCode := status.error_code
-
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("Insert failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
-	}
-
-	s.SetRecentlyModified(true)
-	return nil
-}
-
-func (s *Segment) segmentDelete(offset int64, entityIDs *[]UniqueID, timestamps *[]Timestamp) error {
-	/*
-		CStatus
-		Delete(CSegmentInterface c_segment,
-		           long int reserved_offset,
-		           long size,
-		           const long* primary_keys,
-		           const unsigned long* timestamps);
-	*/
-	var cOffset = C.long(offset)
-	var cSize = C.long(len(*entityIDs))
-	var cEntityIdsPtr = (*C.long)(&(*entityIDs)[0])
-	var cTimestampsPtr = (*C.ulong)(&(*timestamps)[0])
-
-	var status = C.Delete(s.segmentPtr, cOffset, cSize, cEntityIdsPtr, cTimestampsPtr)
-
-	errorCode := status.error_code
-
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("Delete failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
-	}
-
-	return nil
 }
 
 func (s *Segment) segmentSearch(plan *Plan,
@@ -317,4 +241,139 @@ func (s *Segment) matchIndexParam(fieldID int64, indexParamKv []*commonpb.KeyVal
 		matchCount++
 	}
 	return paramSize == matchCount
+}
+
+//-------------------------------------------------------------------------------------- interfaces for growing segment
+func (s *Segment) segmentPreInsert(numOfRecords int) int64 {
+	/*
+		long int
+		PreInsert(CSegmentInterface c_segment, long int size);
+	*/
+	var offset = C.PreInsert(s.segmentPtr, C.long(int64(numOfRecords)))
+
+	return int64(offset)
+}
+
+func (s *Segment) segmentPreDelete(numOfRecords int) int64 {
+	/*
+		long int
+		PreDelete(CSegmentInterface c_segment, long int size);
+	*/
+	var offset = C.PreDelete(s.segmentPtr, C.long(int64(numOfRecords)))
+
+	return int64(offset)
+}
+
+func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps *[]Timestamp, records *[]*commonpb.Blob) error {
+	/*
+		CStatus
+		Insert(CSegmentInterface c_segment,
+		           long int reserved_offset,
+		           signed long int size,
+		           const long* primary_keys,
+		           const unsigned long* timestamps,
+		           void* raw_data,
+		           int sizeof_per_row,
+		           signed long int count);
+	*/
+	// Blobs to one big blob
+	var numOfRow = len(*entityIDs)
+	var sizeofPerRow = len((*records)[0].Value)
+
+	assert.Equal(nil, numOfRow, len(*records))
+
+	var rawData = make([]byte, numOfRow*sizeofPerRow)
+	var copyOffset = 0
+	for i := 0; i < len(*records); i++ {
+		copy(rawData[copyOffset:], (*records)[i].Value)
+		copyOffset += sizeofPerRow
+	}
+
+	var cOffset = C.long(offset)
+	var cNumOfRows = C.long(numOfRow)
+	var cEntityIdsPtr = (*C.long)(&(*entityIDs)[0])
+	var cTimestampsPtr = (*C.ulong)(&(*timestamps)[0])
+	var cSizeofPerRow = C.int(sizeofPerRow)
+	var cRawDataVoidPtr = unsafe.Pointer(&rawData[0])
+
+	var status = C.Insert(s.segmentPtr,
+		cOffset,
+		cNumOfRows,
+		cEntityIdsPtr,
+		cTimestampsPtr,
+		cRawDataVoidPtr,
+		cSizeofPerRow,
+		cNumOfRows)
+
+	errorCode := status.error_code
+
+	if errorCode != 0 {
+		errorMsg := C.GoString(status.error_msg)
+		defer C.free(unsafe.Pointer(status.error_msg))
+		return errors.New("Insert failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	}
+
+	s.SetRecentlyModified(true)
+	return nil
+}
+
+func (s *Segment) segmentDelete(offset int64, entityIDs *[]UniqueID, timestamps *[]Timestamp) error {
+	/*
+		CStatus
+		Delete(CSegmentInterface c_segment,
+		           long int reserved_offset,
+		           long size,
+		           const long* primary_keys,
+		           const unsigned long* timestamps);
+	*/
+	var cOffset = C.long(offset)
+	var cSize = C.long(len(*entityIDs))
+	var cEntityIdsPtr = (*C.long)(&(*entityIDs)[0])
+	var cTimestampsPtr = (*C.ulong)(&(*timestamps)[0])
+
+	var status = C.Delete(s.segmentPtr, cOffset, cSize, cEntityIdsPtr, cTimestampsPtr)
+
+	errorCode := status.error_code
+
+	if errorCode != 0 {
+		errorMsg := C.GoString(status.error_msg)
+		defer C.free(unsafe.Pointer(status.error_msg))
+		return errors.New("Delete failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	}
+
+	return nil
+}
+
+//-------------------------------------------------------------------------------------- interfaces for sealed segment
+func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int, data unsafe.Pointer) error {
+	/*
+		CStatus
+		LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_info);
+	*/
+	if s.segmentType != segTypeSealed {
+		return errors.New("illegal segment type when loading field data")
+	}
+
+	/*
+		struct CLoadFieldDataInfo {
+		    int64_t field_id;
+		    void* blob;
+		    int64_t row_count;
+		};
+	*/
+	loadInfo := C.CLoadFieldDataInfo{
+		field_id:  C.int64_t(fieldID),
+		blob:      data,
+		row_count: C.int64_t(rowCount),
+	}
+
+	var status = C.LoadFieldData(s.segmentPtr, loadInfo)
+	errorCode := status.error_code
+	if errorCode != 0 {
+		errorMsg := C.GoString(status.error_msg)
+		defer C.free(unsafe.Pointer(status.error_msg))
+		return errors.New("LoadFieldData failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	}
+
+	return nil
 }

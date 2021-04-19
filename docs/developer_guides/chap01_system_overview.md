@@ -81,7 +81,7 @@ type Component interface {
   Init()
   Start()
   Stop()
-  GetServiceStates() (ServiceStates, error)
+  GetComponentStates() (ComponentStates, error)
   GetTimeTickChannel() (string, error)
   GetStatisticsChannel() (string, error)
 } 
@@ -100,17 +100,16 @@ const (
   ABNORMAL StateCode = 2
 )
 
-type NodeStates struct {
+type ComponentInfo struct {
   NodeID UniqueID
   Role string
   StateCode StateCode
   ExtraInfo KeyValuePair
 }
 
-type ServiceStates struct {
-  StateCode StateCode
-  NodeStates []NodeStates
-  ExtraInfo KeyValuePair
+type ComponentStates struct {
+  States ComponentInfo
+  SubcomponentStates []ComponentInfo
 }
 ```
 

@@ -14,23 +14,17 @@ message RegisterNodeRequest {
 }
 
 message RegisterNodeResponse {
-  common.Status status = 1;
-  internal.InitParams init_params = 2;
+  internal.InitParams init_params = 1;
 }
 
 message IndexStatesRequest {
-  repeated int64 indexID = 1;
-}
-
-message IndexInfo {
-  common.IndexState state = 1;
-  int64 indexID = 2;
-  string Reason = 3;
+  int64  indexID = 1;
 }
 
 message IndexStatesResponse {
   common.Status status = 1;
-  repeated IndexInfo states = 2;
+  common.IndexState state = 2;
+  int64 indexID = 3;
 }
 
 message BuildIndexRequest {
