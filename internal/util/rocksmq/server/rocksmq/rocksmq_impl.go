@@ -203,6 +203,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) error 
 	}
 
 	err = rmq.store.Write(gorocksdb.NewDefaultWriteOptions(), batch)
+	batch.Destroy()
 	if err != nil {
 		log.Debug("RocksMQ: write batch failed")
 		return err
