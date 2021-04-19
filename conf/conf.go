@@ -71,6 +71,7 @@ type Writer struct {
 	Parallelism        int
 	TopicStart         int
 	TopicEnd           int
+	Bucket             string
 }
 
 type ServerConfig struct {
