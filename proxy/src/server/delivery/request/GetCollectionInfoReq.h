@@ -21,18 +21,19 @@ namespace server {
 
 class GetCollectionInfoReq : public BaseReq {
  public:
-  static BaseReqPtr
-  Create(const ContextPtr& context, const ::milvus::grpc::CollectionName *request, ::milvus::grpc::Mapping& response);
+    static BaseReqPtr
+    Create(const ContextPtr& context, const std::string& collection_name, CollectionSchema& collection_schema);
 
  protected:
-  GetCollectionInfoReq(const ContextPtr& context, const ::milvus::grpc::CollectionName *request, ::milvus::grpc::Mapping& response);
+    GetCollectionInfoReq(const ContextPtr& context, const std::string& collection_name,
+                         CollectionSchema& collection_schema);
 
-  Status
-  OnExecute() override;
+    Status
+    OnExecute() override;
 
  private:
-  const std::string collection_name_;
-  ::milvus::grpc::Mapping &collection_schema_;
+    const std::string collection_name_;
+    CollectionSchema& collection_schema_;
 };
 
 }  // namespace server

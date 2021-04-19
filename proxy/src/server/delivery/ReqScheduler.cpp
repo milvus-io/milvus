@@ -160,10 +160,13 @@ ReqScheduler::PutToQueue(const BaseReqPtr& req_ptr) {
 
 int64_t ReqScheduler::GetLatestDeliveredReqTime() {
   std::lock_guard lock(time_syc_mtx_);
-  if (!sending_){
-    latest_req_time_ = TSOracle::GetInstance().GetTimeStamp();
+  if (sending_){
+    return latest_req_time_;
   }
-  return latest_req_time_;
+  auto ts =  TSOracle::GetInstance().GetTimeStamp();
+  latest_req_time_ = ts;
+  assert(ts != 0);
+  return ts;
 }
 
 void ReqScheduler::UpdateLatestDeliveredReqTime(int64_t time) {

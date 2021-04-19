@@ -15,21 +15,15 @@
 #include "include/MilvusApi.h"
 #include "grpc/ClientProxy.h"
 #include "interface/ConnectionImpl.h"
-#include "utils/TimeRecorder.h"
-#include "utils/Utils.h"
+#include "ip.h"
 
 const int TOP_K = 10;
 
 int main(int argc , char**argv) {
-  TestParameters parameters = milvus_sdk::Utils::ParseTestParameters(argc, argv);
-  if (!parameters.is_valid){
-    return 0;
-   }
-
   auto client = milvus::ConnectionImpl();
   milvus::ConnectParam connect_param;
-  connect_param.ip_address = parameters.address_.empty() ? "127.0.0.1":parameters.address_;
-  connect_param.port = parameters.port_.empty() ? "19530":parameters.port_ ;
+  connect_param.ip_address = IP;
+  connect_param.port = "19530";
   client.Connect(connect_param);
   std::vector<int64_t> ids_array;
   std::vector<std::string> partition_list;
@@ -62,9 +56,13 @@ int main(int argc , char**argv) {
 
   milvus::TopKQueryResult result;
 
-  milvus_sdk::TimeRecorder test_search("search");
+
+  auto t1 = std::chrono::high_resolution_clock::now();
   auto status = client.Search("collection1", partition_list, "dsl", vectorParam, result);
 
-    return 0;
-}
+  auto t2 = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
 
+  std::cout << "Query run time: " << duration/1000.0 << "ms" << std::endl;
+  return 0;
+}

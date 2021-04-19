@@ -18,7 +18,6 @@
 #include "server/delivery/request/DeleteEntityByIDReq.h"
 #include "src/server/delivery/ReqScheduler.h"
 #include "server/MessageWrapper.h"
-#include "server/MetaWrapper.h"
 
 #include <memory>
 #include <string>
@@ -44,12 +43,7 @@ DeleteEntityByIDReq::Create(const ContextPtr& context, const ::milvus::grpc::Del
 Status
 DeleteEntityByIDReq::OnExecute() {
   auto &msg_client = MessageWrapper::GetInstance().MessageClient();
-  auto segment_id = [](const std::string &collection_name,
-                       uint64_t channel_id,
-                       uint64_t timestamp) {
-    return MetaWrapper::GetInstance().AskSegmentId(collection_name, channel_id, timestamp);
-  };
-  Status status = msg_client->SendMutMessage(*request_, timestamp_, segment_id);
+  Status status = msg_client->SendMutMessage(*request_, timestamp_);
   return status;
 }
 

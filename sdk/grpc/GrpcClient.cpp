@@ -37,19 +37,19 @@ GrpcClient::~GrpcClient() = default;
 
 Status
 GrpcClient::CreateCollection(const milvus::grpc::Mapping& mapping) {
-    ClientContext context;
-    ::milvus::grpc::Status response;
-    ::grpc::Status grpc_status = stub_->CreateCollection(&context, mapping, &response);
-
-    if (!grpc_status.ok()) {
-        std::cerr << "CreateHybridCollection gRPC failed!" << std::endl;
-        return Status(StatusCode::RPCFailed, grpc_status.error_message());
-    }
-
-    if (response.error_code() != grpc::SUCCESS) {
-        std::cerr << response.reason() << std::endl;
-        return Status(StatusCode::ServerFailed, response.reason());
-    }
+//    ClientContext context;
+//    ::milvus::grpc::Status response;
+//    ::grpc::Status grpc_status = stub_->CreateCollection(&context, mapping, &response);
+//
+//    if (!grpc_status.ok()) {
+//        std::cerr << "CreateHybridCollection gRPC failed!" << std::endl;
+//        return Status(StatusCode::RPCFailed, grpc_status.error_message());
+//    }
+//
+//    if (response.error_code() != grpc::SUCCESS) {
+//        std::cerr << response.reason() << std::endl;
+//        return Status(StatusCode::ServerFailed, response.reason());
+//    }
     return Status::OK();
 }
 

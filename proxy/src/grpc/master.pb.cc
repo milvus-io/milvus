@@ -101,7 +101,6 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_master_2eproto::offsets[] PROT
   PROTOBUF_FIELD_OFFSET(::masterpb::Segment, channel_end_),
   PROTOBUF_FIELD_OFFSET(::masterpb::Segment, open_timestamp_),
   PROTOBUF_FIELD_OFFSET(::masterpb::Segment, close_timestamp_),
-  PROTOBUF_FIELD_OFFSET(::masterpb::Segment, collection_name_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::masterpb::SegmentStat, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -114,7 +113,7 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_master_2eproto::offsets[] PROT
 static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
   { 0, -1, sizeof(::masterpb::Collection)},
   { 11, -1, sizeof(::masterpb::Segment)},
-  { 24, -1, sizeof(::masterpb::SegmentStat)},
+  { 23, -1, sizeof(::masterpb::SegmentStat)},
 };
 
 static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
@@ -128,16 +127,16 @@ const char descriptor_table_protodef_master_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "\215\001\n\nCollection\022\n\n\002id\030\001 \001(\004\022\014\n\004name\030\002 \001(\t"
   "\022#\n\006schema\030\003 \001(\0132\023.milvus.grpc.Schema\022\023\n"
   "\013create_time\030\004 \001(\004\022\023\n\013segment_ids\030\005 \003(\004\022"
-  "\026\n\016partition_tags\030\006 \003(\t\"\301\001\n\007Segment\022\022\n\ns"
+  "\026\n\016partition_tags\030\006 \003(\t\"\250\001\n\007Segment\022\022\n\ns"
   "egment_id\030\001 \001(\004\022\025\n\rcollection_id\030\002 \001(\004\022\025"
   "\n\rpartition_tag\030\003 \001(\t\022\025\n\rchannel_start\030\004"
   " \001(\005\022\023\n\013channel_end\030\005 \001(\005\022\026\n\016open_timest"
-  "amp\030\006 \001(\004\022\027\n\017close_timestamp\030\007 \001(\004\022\027\n\017co"
-  "llection_name\030\010 \001(\t\"K\n\013SegmentStat\022\022\n\nse"
-  "gment_id\030\001 \001(\004\022\023\n\013memory_size\030\002 \001(\004\022\023\n\013m"
-  "emory_rate\030\003 \001(\0022I\n\006Master\022\?\n\020CreateColl"
-  "ection\022\024.milvus.grpc.Mapping\032\023.milvus.gr"
-  "pc.Status\"\000B\010Z\006masterb\006proto3"
+  "amp\030\006 \001(\004\022\027\n\017close_timestamp\030\007 \001(\004\"K\n\013Se"
+  "gmentStat\022\022\n\nsegment_id\030\001 \001(\004\022\023\n\013memory_"
+  "size\030\002 \001(\004\022\023\n\013memory_rate\030\003 \001(\0022I\n\006Maste"
+  "r\022\?\n\020CreateCollection\022\024.milvus.grpc.Mapp"
+  "ing\032\023.milvus.grpc.Status\"\000B\010Z\006masterb\006pr"
+  "oto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_master_2eproto_deps[1] = {
   &::descriptor_table_message_2eproto,
@@ -150,7 +149,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_mas
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_master_2eproto_once;
 static bool descriptor_table_master_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_master_2eproto = {
-  &descriptor_table_master_2eproto_initialized, descriptor_table_protodef_master_2eproto, "master.proto", 549,
+  &descriptor_table_master_2eproto_initialized, descriptor_table_protodef_master_2eproto, "master.proto", 524,
   &descriptor_table_master_2eproto_once, descriptor_table_master_2eproto_sccs, descriptor_table_master_2eproto_deps, 3, 1,
   schemas, file_default_instances, TableStruct_master_2eproto::offsets,
   file_level_metadata_master_2eproto, 3, file_level_enum_descriptors_master_2eproto, file_level_service_descriptors_master_2eproto,
@@ -735,10 +734,6 @@ Segment::Segment(const Segment& from)
   if (!from.partition_tag().empty()) {
     partition_tag_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.partition_tag_);
   }
-  collection_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-  if (!from.collection_name().empty()) {
-    collection_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.collection_name_);
-  }
   ::memcpy(&segment_id_, &from.segment_id_,
     static_cast<size_t>(reinterpret_cast<char*>(&close_timestamp_) -
     reinterpret_cast<char*>(&segment_id_)) + sizeof(close_timestamp_));
@@ -748,7 +743,6 @@ Segment::Segment(const Segment& from)
 void Segment::SharedCtor() {
   ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_Segment_master_2eproto.base);
   partition_tag_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-  collection_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   ::memset(&segment_id_, 0, static_cast<size_t>(
       reinterpret_cast<char*>(&close_timestamp_) -
       reinterpret_cast<char*>(&segment_id_)) + sizeof(close_timestamp_));
@@ -761,7 +755,6 @@ Segment::~Segment() {
 
 void Segment::SharedDtor() {
   partition_tag_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-  collection_name_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
 
 void Segment::SetCachedSize(int size) const {
@@ -780,7 +773,6 @@ void Segment::Clear() {
   (void) cached_has_bits;
 
   partition_tag_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-  collection_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   ::memset(&segment_id_, 0, static_cast<size_t>(
       reinterpret_cast<char*>(&close_timestamp_) -
       reinterpret_cast<char*>(&segment_id_)) + sizeof(close_timestamp_));
@@ -841,13 +833,6 @@ const char* Segment::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::in
       case 7:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 56)) {
           close_timestamp_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
-          CHK_(ptr);
-        } else goto handle_unusual;
-        continue;
-      // string collection_name = 8;
-      case 8:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 66)) {
-          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_collection_name(), ptr, ctx, "masterpb.Segment.collection_name");
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
@@ -974,21 +959,6 @@ bool Segment::MergePartialFromCodedStream(
         break;
       }
 
-      // string collection_name = 8;
-      case 8: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (66 & 0xFF)) {
-          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
-                input, this->mutable_collection_name()));
-          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-            this->collection_name().data(), static_cast<int>(this->collection_name().length()),
-            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
-            "masterpb.Segment.collection_name"));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
       default: {
       handle_unusual:
         if (tag == 0) {
@@ -1056,16 +1026,6 @@ void Segment::SerializeWithCachedSizes(
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(7, this->close_timestamp(), output);
   }
 
-  // string collection_name = 8;
-  if (this->collection_name().size() > 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->collection_name().data(), static_cast<int>(this->collection_name().length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "masterpb.Segment.collection_name");
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
-      8, this->collection_name(), output);
-  }
-
   if (_internal_metadata_.have_unknown_fields()) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFields(
         _internal_metadata_.unknown_fields(), output);
@@ -1120,17 +1080,6 @@ void Segment::SerializeWithCachedSizes(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(7, this->close_timestamp(), target);
   }
 
-  // string collection_name = 8;
-  if (this->collection_name().size() > 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->collection_name().data(), static_cast<int>(this->collection_name().length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "masterpb.Segment.collection_name");
-    target =
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
-        8, this->collection_name(), target);
-  }
-
   if (_internal_metadata_.have_unknown_fields()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields(), target);
@@ -1157,13 +1106,6 @@ size_t Segment::ByteSizeLong() const {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
         this->partition_tag());
-  }
-
-  // string collection_name = 8;
-  if (this->collection_name().size() > 0) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-        this->collection_name());
   }
 
   // uint64 segment_id = 1;
@@ -1239,10 +1181,6 @@ void Segment::MergeFrom(const Segment& from) {
 
     partition_tag_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.partition_tag_);
   }
-  if (from.collection_name().size() > 0) {
-
-    collection_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.collection_name_);
-  }
   if (from.segment_id() != 0) {
     set_segment_id(from.segment_id());
   }
@@ -1285,8 +1223,6 @@ void Segment::InternalSwap(Segment* other) {
   using std::swap;
   _internal_metadata_.Swap(&other->_internal_metadata_);
   partition_tag_.Swap(&other->partition_tag_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
-    GetArenaNoVirtual());
-  collection_name_.Swap(&other->collection_name_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
   swap(segment_id_, other->segment_id_);
   swap(collection_id_, other->collection_id_);

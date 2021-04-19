@@ -77,18 +77,12 @@ func (s *Segment) Close() error {
 	}
 
 	// Build index after closing segment
-	// go s.buildIndex()
+	s.buildIndex()
 	return nil
 }
 
 func (s *Segment) GetMemSize() uint64 {
-	/*C.GetMemoryUsageInBytes
-	long int
-	GetMemoryUsageInBytes(CSegmentBase c_segment);
-	*/
-	var memoryUsageInBytes = C.GetMemoryUsageInBytes(s.SegmentPtr)
-
-	return uint64(memoryUsageInBytes)
+	return 100000
 }
 
 ////////////////////////////////////////////////////////////////////////////

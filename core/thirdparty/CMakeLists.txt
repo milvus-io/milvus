@@ -46,5 +46,3 @@ endif()
 if ( MILVUS_WITH_OPENTRACING )
     add_subdirectory( opentracing )
 endif()
-
-add_subdirectory( protobuf )
