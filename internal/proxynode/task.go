@@ -116,6 +116,7 @@ func (it *InsertTask) EndTs() Timestamp {
 }
 
 func (it *InsertTask) OnEnqueue() error {
+	it.BaseInsertTask.InsertRequest.Base = &commonpb.MsgBase{}
 	return nil
 }
 
@@ -514,6 +515,7 @@ func (st *SearchTask) SetTs(ts Timestamp) {
 }
 
 func (st *SearchTask) OnEnqueue() error {
+	st.Base = &commonpb.MsgBase{}
 	return nil
 }
 

@@ -66,6 +66,8 @@ func NewProxyNode(ctx context.Context, factory msgstream.Factory) (*ProxyNode, e
 		msFactory: factory,
 	}
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
+	log.Debug("proxynode",
+		zap.Any("state of proxynode", internalpb.StateCode_Abnormal))
 	return node, nil
 
 }
@@ -237,6 +239,8 @@ func (node *ProxyNode) Start() error {
 	}
 
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
+	log.Debug("proxynode",
+		zap.Any("state of proxynode", internalpb.StateCode_Healthy))
 	log.Debug("proxy node is healthy ...")
 
 	return nil

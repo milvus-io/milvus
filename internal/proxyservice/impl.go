@@ -136,9 +136,12 @@ func (s *ProxyService) Init() error {
 }
 
 func (s *ProxyService) Start() error {
-	s.stateCode = internalpb.StateCode_Healthy
 	s.sched.Start()
 	log.Debug("start scheduler ...")
+	defer func() {
+		s.UpdateStateCode(internalpb.StateCode_Healthy)
+		log.Debug("proxyservice", zap.Any("state of proxyservice", internalpb.StateCode_Healthy))
+	}()
 	return s.tick.Start()
 }
 
@@ -230,6 +233,9 @@ func (s *ProxyService) RegisterLink(ctx context.Context) (*milvuspb.RegisterLink
 }
 
 func (s *ProxyService) RegisterNode(ctx context.Context, request *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error) {
+	log.Debug("proxyservice receive RegisterNode request",
+		zap.String("ip", request.Address.Ip),
+		zap.Int64("port", request.Address.Port))
 
 	t := &RegisterNodeTask{
 		ctx:         ctx,
@@ -268,7 +274,9 @@ func (s *ProxyService) RegisterNode(ctx context.Context, request *proxypb.Regist
 }
 
 func (s *ProxyService) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	log.Debug("InvalidateCollectionMetaCache")
+	log.Debug("proxyservice receive InvalidateCollectionMetaCache request",
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
 
 	t := &InvalidateCollectionMetaCacheTask{
 		ctx:       ctx,

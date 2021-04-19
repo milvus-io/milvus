@@ -5,6 +5,10 @@ import (
 	"math/rand"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
+
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -39,7 +43,8 @@ func NewProxyService(ctx context.Context, factory msgstream.Factory) (*ProxyServ
 	s.allocator = NewNodeIDAllocator()
 	s.sched = NewTaskScheduler(ctx1)
 	s.nodeInfos = NewGlobalNodeInfoTable()
-	s.stateCode = internalpb.StateCode_Abnormal
+	s.UpdateStateCode(internalpb.StateCode_Abnormal)
+	log.Debug("proxyservice", zap.Any("state of proxyservice: ", internalpb.StateCode_Abnormal))
 
 	return s, nil
 }
