@@ -19,6 +19,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
@@ -204,7 +205,7 @@ func (ppRW *propertiesReaderWriter) ForeachKey(handler func(key, val string) err
 	return nil
 }
 
-func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
+func (ms *PulsarMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
 	tsMsgs := msgPack.Msgs
 	if len(tsMsgs) <= 0 {
 		log.Debug("Warning: Receive empty msgPack")
@@ -263,20 +264,26 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 				return err
 			}
 
-			msg := &pulsar.ProducerMessage{Payload: m}
+			msg := &pulsar.ProducerMessage{Payload: m, Properties: map[string]string{}}
+
+			sp, spanCtx := trace.MsgSpanFromCtx(ctx, v.Msgs[i])
+			trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
 
 			if _, err := ms.producers[k].Send(
-				context.Background(),
+				spanCtx,
 				msg,
 			); err != nil {
+				trace.LogError(sp, err)
+				sp.Finish()
 				return err
 			}
+			sp.Finish()
 		}
 	}
 	return nil
 }
 
-func (ms *PulsarMsgStream) Broadcast(msgPack *MsgPack) error {
+func (ms *PulsarMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) error {
 	producerLen := len(ms.producers)
 	for _, v := range msgPack.Msgs {
 		mb, err := v.Marshal(v)
@@ -289,15 +296,22 @@ func (ms *PulsarMsgStream) Broadcast(msgPack *MsgPack) error {
 			return err
 		}
 
-		msg := &pulsar.ProducerMessage{Payload: m}
+		msg := &pulsar.ProducerMessage{Payload: m, Properties: map[string]string{}}
+
+		sp, spanCtx := trace.MsgSpanFromCtx(ctx, v)
+		trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
+
 		for i := 0; i < producerLen; i++ {
 			if _, err := ms.producers[i].Send(
-				context.Background(),
+				spanCtx,
 				msg,
 			); err != nil {
+				trace.LogError(sp, err)
+				sp.Finish()
 				return err
 			}
 		}
+		sp.Finish()
 	}
 	return nil
 }

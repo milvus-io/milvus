@@ -66,7 +66,7 @@ func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {
 		},
 	}
 	msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
-	return stNode.timeTickMsgStream.Produce(&msgPack)
+	return stNode.timeTickMsgStream.Produce(context.TODO(), &msgPack)
 }
 
 func newServiceTimeNode(ctx context.Context, replica collectionReplica, factory msgstream.Factory) *serviceTimeNode {

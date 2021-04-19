@@ -2,6 +2,8 @@ package grpcdatanode
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -11,6 +13,8 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 
+	"github.com/opentracing/opentracing-go"
+	"github.com/uber/jaeger-client-go/config"
 	dn "github.com/zilliztech/milvus-distributed/internal/datanode"
 	dsc "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice/client"
 	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
@@ -35,6 +39,8 @@ type Server struct {
 
 	masterService *msc.GrpcClient
 	dataService   *dsc.Client
+
+	closer io.Closer
 }
 
 func New(ctx context.Context, factory msgstream.Factory) (*Server, error) {
@@ -101,13 +107,15 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) Stop() error {
+	if err := s.closer.Close(); err != nil {
+		return err
+	}
 	s.cancel()
-	var err error
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
 	}
 
-	err = s.impl.Stop()
+	err := s.impl.Stop()
 	if err != nil {
 		return err
 	}
@@ -181,6 +189,21 @@ func (s *Server) init() error {
 
 	s.impl.NodeID = dn.Params.NodeID
 	s.impl.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
+
+	// TODO
+	cfg := &config.Configuration{
+		ServiceName: fmt.Sprintf("data_node_%d", s.impl.NodeID),
+		Sampler: &config.SamplerConfig{
+			Type:  "const",
+			Param: 1,
+		},
+	}
+	tracer, closer, err := cfg.NewTracer()
+	if err != nil {
+		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
+	}
+	opentracing.SetGlobalTracer(tracer)
+	s.closer = closer
 
 	if err := s.impl.Init(); err != nil {
 		log.Println("impl init error: ", err)

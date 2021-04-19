@@ -12,6 +12,9 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 
+	"github.com/opentracing/opentracing-go"
+	"github.com/uber/jaeger-client-go/config"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 
@@ -129,6 +132,21 @@ func (node *NodeImpl) Init() error {
 	if err != nil {
 		return err
 	}
+
+	// TODO
+	cfg := &config.Configuration{
+		ServiceName: fmt.Sprintf("proxy_node_%d", Params.ProxyID),
+		Sampler: &config.SamplerConfig{
+			Type:  "const",
+			Param: 1,
+		},
+	}
+	tracer, closer, err := cfg.NewTracer()
+	if err != nil {
+		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
+	}
+	opentracing.SetGlobalTracer(tracer)
+	node.closer = closer
 
 	// wait for dataservice state changed to Healthy
 	if node.dataServiceClient != nil {
@@ -270,6 +288,9 @@ func (node *NodeImpl) Start() error {
 }
 
 func (node *NodeImpl) Stop() error {
+	if err := node.closer.Close(); err != nil {
+		return err
+	}
 	node.cancel()
 
 	globalInsertChannelsMap.closeAllMsgStream()

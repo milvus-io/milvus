@@ -2,6 +2,8 @@ package grpcmasterservice
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log"
 	"strconv"
 	"time"
@@ -15,6 +17,8 @@ import (
 	qsc "github.com/zilliztech/milvus-distributed/internal/distributed/queryservice/client"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 
+	"github.com/opentracing/opentracing-go"
+	"github.com/uber/jaeger-client-go/config"
 	cms "github.com/zilliztech/milvus-distributed/internal/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -44,6 +48,8 @@ type Server struct {
 	connectDataService  bool
 	connectIndexService bool
 	connectQueryService bool
+
+	closer io.Closer
 }
 
 func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
@@ -60,7 +66,21 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		connectQueryService: true,
 	}
 
-	var err error
+	//TODO
+	cfg := &config.Configuration{
+		ServiceName: "proxy_service",
+		Sampler: &config.SamplerConfig{
+			Type:  "const",
+			Param: 1,
+		},
+	}
+	tracer, closer, err := cfg.NewTracer()
+	if err != nil {
+		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
+	}
+	opentracing.SetGlobalTracer(tracer)
+	s.closer = closer
+
 	s.core, err = cms.NewCore(s.ctx, factory)
 	if err != nil {
 		return nil, err
@@ -81,6 +101,7 @@ func (s *Server) Run() error {
 
 func (s *Server) init() error {
 	Params.Init()
+
 	log.Println("init params done")
 
 	err := s.startGrpc()
@@ -202,6 +223,9 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() error {
+	if err := s.closer.Close(); err != nil {
+		return err
+	}
 	if s.proxyService != nil {
 		_ = s.proxyService.Stop()
 	}

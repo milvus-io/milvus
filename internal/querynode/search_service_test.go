@@ -19,6 +19,8 @@ import (
 )
 
 func TestSearch_Search(t *testing.T) {
+	ctx := context.Background()
+
 	node := newQueryNodeMock()
 	initTestMeta(t, node, 0, 0)
 
@@ -104,7 +106,7 @@ func TestSearch_Search(t *testing.T) {
 	searchStream, _ := msFactory.NewMsgStream(node.queryNodeLoopCtx)
 	searchStream.AsProducer(searchProducerChannels)
 	searchStream.Start()
-	err = searchStream.Produce(&msgPackSearch)
+	err = searchStream.Produce(ctx, &msgPackSearch)
 	assert.NoError(t, err)
 
 	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica, msFactory)
@@ -198,12 +200,12 @@ func TestSearch_Search(t *testing.T) {
 	var ddMsgStream msgstream.MsgStream = ddStream
 	ddMsgStream.Start()
 
-	err = insertMsgStream.Produce(&msgPack)
+	err = insertMsgStream.Produce(ctx, &msgPack)
 	assert.NoError(t, err)
 
-	err = insertMsgStream.Broadcast(&timeTickMsgPack)
+	err = insertMsgStream.Broadcast(ctx, &timeTickMsgPack)
 	assert.NoError(t, err)
-	err = ddMsgStream.Broadcast(&timeTickMsgPack)
+	err = ddMsgStream.Broadcast(ctx, &timeTickMsgPack)
 	assert.NoError(t, err)
 
 	// dataSync
@@ -216,6 +218,7 @@ func TestSearch_Search(t *testing.T) {
 }
 
 func TestSearch_SearchMultiSegments(t *testing.T) {
+	ctx := context.Background()
 	pulsarURL := Params.PulsarAddress
 	const receiveBufSize = 1024
 
@@ -301,7 +304,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	searchStream, _ := msFactory.NewMsgStream(node.queryNodeLoopCtx)
 	searchStream.AsProducer(searchProducerChannels)
 	searchStream.Start()
-	err = searchStream.Produce(&msgPackSearch)
+	err = searchStream.Produce(ctx, &msgPackSearch)
 	assert.NoError(t, err)
 
 	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica, msFactory)
@@ -399,12 +402,12 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	var ddMsgStream msgstream.MsgStream = ddStream
 	ddMsgStream.Start()
 
-	err = insertMsgStream.Produce(&msgPack)
+	err = insertMsgStream.Produce(ctx, &msgPack)
 	assert.NoError(t, err)
 
-	err = insertMsgStream.Broadcast(&timeTickMsgPack)
+	err = insertMsgStream.Broadcast(ctx, &timeTickMsgPack)
 	assert.NoError(t, err)
-	err = ddMsgStream.Broadcast(&timeTickMsgPack)
+	err = ddMsgStream.Broadcast(ctx, &timeTickMsgPack)
 	assert.NoError(t, err)
 
 	// dataSync

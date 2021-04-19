@@ -125,7 +125,7 @@ func (ms *RmqMsgStream) AsConsumer(channels []string, groupName string) {
 	}
 }
 
-func (ms *RmqMsgStream) Produce(pack *msgstream.MsgPack) error {
+func (ms *RmqMsgStream) Produce(ctx context.Context, pack *msgstream.MsgPack) error {
 	tsMsgs := pack.Msgs
 	if len(tsMsgs) <= 0 {
 		log.Printf("Warning: Receive empty msgPack")
@@ -185,6 +185,7 @@ func (ms *RmqMsgStream) Produce(pack *msgstream.MsgPack) error {
 			}
 			msg := make([]rocksmq.ProducerMessage, 0)
 			msg = append(msg, *rocksmq.NewProducerMessage(m))
+
 			if err := rocksmq.Rmq.Produce(ms.producers[k], msg); err != nil {
 				return err
 			}
@@ -193,7 +194,7 @@ func (ms *RmqMsgStream) Produce(pack *msgstream.MsgPack) error {
 	return nil
 }
 
-func (ms *RmqMsgStream) Broadcast(msgPack *MsgPack) error {
+func (ms *RmqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) error {
 	producerLen := len(ms.producers)
 	for _, v := range msgPack.Msgs {
 		mb, err := v.Marshal(v)

@@ -59,7 +59,7 @@ func (tt *TimeTickImpl) Start() error {
 				}
 				msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
 				for _, channel := range tt.channels {
-					err = channel.Broadcast(&msgPack)
+					err = channel.Broadcast(tt.ctx, &msgPack)
 					if err != nil {
 						log.Println("send time tick error: ", err)
 					}

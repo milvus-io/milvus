@@ -487,10 +487,10 @@ func (c *Core) setMsgStreams() error {
 			TimeTickMsg: timeTickResult,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
-		if err := timeTickStream.Broadcast(&msgPack); err != nil {
+		if err := timeTickStream.Broadcast(c.ctx, &msgPack); err != nil {
 			return err
 		}
-		if err := ddStream.Broadcast(&msgPack); err != nil {
+		if err := ddStream.Broadcast(c.ctx, &msgPack); err != nil {
 			return err
 		}
 		return nil
@@ -508,7 +508,7 @@ func (c *Core) setMsgStreams() error {
 			CreateCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(&msgPack); err != nil {
+		if err := ddStream.Broadcast(c.ctx, &msgPack); err != nil {
 			return err
 		}
 		return nil
@@ -526,7 +526,7 @@ func (c *Core) setMsgStreams() error {
 			DropCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(&msgPack); err != nil {
+		if err := ddStream.Broadcast(c.ctx, &msgPack); err != nil {
 			return err
 		}
 		return nil
@@ -544,7 +544,7 @@ func (c *Core) setMsgStreams() error {
 			CreatePartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(&msgPack); err != nil {
+		if err := ddStream.Broadcast(c.ctx, &msgPack); err != nil {
 			return err
 		}
 		return nil
@@ -562,7 +562,7 @@ func (c *Core) setMsgStreams() error {
 			DropPartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(&msgPack); err != nil {
+		if err := ddStream.Broadcast(c.ctx, &msgPack); err != nil {
 			return err
 		}
 		return nil

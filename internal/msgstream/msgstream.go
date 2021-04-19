@@ -30,8 +30,8 @@ type MsgStream interface {
 	AsConsumer(channels []string, subName string)
 	SetRepackFunc(repackFunc RepackFunc)
 
-	Produce(*MsgPack) error
-	Broadcast(*MsgPack) error
+	Produce(context.Context, *MsgPack) error
+	Broadcast(context.Context, *MsgPack) error
 	Consume() *MsgPack
 	Seek(offset *MsgPosition) error
 }

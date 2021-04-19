@@ -2,6 +2,8 @@ package grpcdataserviceclient
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log"
 	"net"
 	"strconv"
@@ -12,6 +14,8 @@ import (
 
 	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
 
+	"github.com/opentracing/opentracing-go"
+	"github.com/uber/jaeger-client-go/config"
 	"github.com/zilliztech/milvus-distributed/internal/dataservice"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -31,10 +35,12 @@ type Server struct {
 	impl         *dataservice.Server
 	grpcServer   *grpc.Server
 	masterClient *msc.GrpcClient
+
+	closer io.Closer
 }
 
 func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
-
+	var err error
 	ctx1, cancel := context.WithCancel(ctx)
 
 	s := &Server{
@@ -43,7 +49,21 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		grpcErrChan: make(chan error),
 	}
 
-	var err error
+	// TODO
+	cfg := &config.Configuration{
+		ServiceName: "data_service",
+		Sampler: &config.SamplerConfig{
+			Type:  "const",
+			Param: 1,
+		},
+	}
+	tracer, closer, err := cfg.NewTracer()
+	if err != nil {
+		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
+	}
+	opentracing.SetGlobalTracer(tracer)
+	s.closer = closer
+
 	s.impl, err = dataservice.CreateServer(s.ctx, factory)
 	if err != nil {
 		return nil, err
@@ -120,9 +140,11 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() error {
-
-	s.cancel()
 	var err error
+	if err = s.closer.Close(); err != nil {
+		return err
+	}
+	s.cancel()
 
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()

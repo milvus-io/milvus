@@ -550,7 +550,7 @@ func (ibNode *insertBufferNode) completeFlush(segID UniqueID) error {
 	}
 
 	msgPack.Msgs = append(msgPack.Msgs, msg)
-	return ibNode.completeFlushStream.Produce(&msgPack)
+	return ibNode.completeFlushStream.Produce(context.TODO(), &msgPack)
 }
 
 func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
@@ -571,7 +571,7 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 		},
 	}
 	msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
-	return ibNode.timeTickStream.Produce(&msgPack)
+	return ibNode.timeTickStream.Produce(context.TODO(), &msgPack)
 }
 
 func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID, currentPosition *internalpb2.MsgPosition) error {
@@ -608,7 +608,7 @@ func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID, currentPo
 	var msgPack = msgstream.MsgPack{
 		Msgs: []msgstream.TsMsg{msg},
 	}
-	return ibNode.segmentStatisticsStream.Produce(&msgPack)
+	return ibNode.segmentStatisticsStream.Produce(context.TODO(), &msgPack)
 }
 
 func (ibNode *insertBufferNode) getCollectionSchemaByID(collectionID UniqueID) (*schemapb.CollectionSchema, error) {

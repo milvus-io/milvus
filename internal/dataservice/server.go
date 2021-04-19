@@ -619,7 +619,7 @@ func (s *Server) openNewSegment(collectionID UniqueID, partitionID UniqueID, cha
 	msgPack := &msgstream.MsgPack{
 		Msgs: []msgstream.TsMsg{infoMsg},
 	}
-	if err = s.segmentInfoStream.Produce(msgPack); err != nil {
+	if err = s.segmentInfoStream.Produce(s.ctx, msgPack); err != nil {
 		return err
 	}
 	return nil

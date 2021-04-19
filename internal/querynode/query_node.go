@@ -19,6 +19,8 @@ import (
 	"log"
 	"sync/atomic"
 
+	"github.com/opentracing/opentracing-go"
+	"github.com/uber/jaeger-client-go/config"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
@@ -86,6 +88,20 @@ func NewQueryNode(ctx context.Context, queryNodeID UniqueID, factory msgstream.F
 
 		msFactory: factory,
 	}
+
+	cfg := &config.Configuration{
+		ServiceName: fmt.Sprintf("query_node_%d", node.QueryNodeID),
+		Sampler: &config.SamplerConfig{
+			Type:  "const",
+			Param: 1,
+		},
+	}
+	tracer, closer, err := cfg.NewTracer()
+	if err != nil {
+		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
+	}
+	opentracing.SetGlobalTracer(tracer)
+	node.closer = closer
 
 	node.replica = newCollectionReplicaImpl()
 	node.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
@@ -194,6 +210,9 @@ func (node *QueryNode) Start() error {
 }
 
 func (node *QueryNode) Stop() error {
+	if err := node.closer.Close(); err != nil {
+		return err
+	}
 	node.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
 	node.queryNodeLoopCancel()
 
