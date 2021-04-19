@@ -3,7 +3,8 @@ module github.com/zilliztech/milvus-distributed
 go 1.15
 
 require (
-	github.com/apache/pulsar-client-go v0.3.0
+	github.com/apache/pulsar-client-go v0.1.1
+	github.com/apache/thrift/lib/go/thrift v0.0.0-20210120171102-e27e82c46ba4
 	github.com/facebookgo/ensure v0.0.0-20200202191622-63f1cf65ac4c // indirect
 	github.com/facebookgo/stack v0.0.0-20160209184415-751773369052 // indirect
 	github.com/facebookgo/subset v0.0.0-20200203212716-c811ad88dec4 // indirect
@@ -11,6 +12,7 @@ require (
 	github.com/go-basic/ipv4 v1.0.0
 	github.com/gogo/protobuf v1.3.1
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
+	github.com/golang/mock v1.3.1
 	github.com/golang/protobuf v1.4.2
 	github.com/google/btree v1.0.0
 	github.com/klauspost/compress v1.10.11 // indirect

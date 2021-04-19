@@ -4,8 +4,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/apache/pulsar-client-go/pulsar/log"
-
 	"go.uber.org/zap/zapcore"
 
 	etcd "go.etcd.io/etcd/clientv3"
@@ -77,51 +75,6 @@ func (w *zapWrapper) V(l int) bool {
 		zapLevel = 5
 	}
 	return w.logger.Core().Enabled(zapcore.Level(zapLevel))
-}
-
-func (w *zapWrapper) SubLogger(fields log.Fields) log.Logger {
-	return w.WithFields(fields).(log.Logger)
-}
-
-func (w *zapWrapper) WithFields(fields log.Fields) log.Entry {
-	if len(fields) == 0 {
-		return w
-	}
-	kv := make([]interface{}, 0, 2*len(fields))
-	for k, v := range fields {
-		kv = append(kv, k, v)
-	}
-	return &zapWrapper{
-		logger: w.logger.Sugar().With(kv...).Desugar(),
-	}
-}
-
-func (w *zapWrapper) WithField(name string, value interface{}) log.Entry {
-	return &zapWrapper{
-		logger: w.logger.Sugar().With(name, value).Desugar(),
-	}
-}
-
-func (w *zapWrapper) WithError(err error) log.Entry {
-	return &zapWrapper{
-		logger: w.logger.Sugar().With("error", err).Desugar(),
-	}
-}
-
-func (w *zapWrapper) Debug(args ...interface{}) {
-	w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Debug(args...)
-}
-
-func (w *zapWrapper) Warn(args ...interface{}) {
-	w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Warn(args...)
-}
-
-func (w *zapWrapper) Debugf(format string, args ...interface{}) {
-	w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Debugf(format, args...)
-}
-
-func (w *zapWrapper) Warnf(format string, args ...interface{}) {
-	w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Warnf(format, args...)
 }
 
 var once sync.Once
