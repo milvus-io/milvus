@@ -33,7 +33,7 @@ func TestTimeTick(t *testing.T) {
 	tt := timeTick{
 		interval:             200,
 		pulsarProducer:       producer,
-		peerID:               1,
+		peerID:              1,
 		ctx:                  ctx,
 		areRequestsDelivered: func(ts Timestamp) bool { return true },
 	}

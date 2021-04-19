@@ -1,11 +1,12 @@
+
 package id
 
 import (
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/master/tso"
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
+
 
 type UniqueID = typeutil.UniqueID
 
@@ -16,18 +17,13 @@ type GlobalIdAllocator struct {
 
 var allocator *GlobalIdAllocator
 
-func Init() {
-	InitGlobalIdAllocator("idTimestamp", tsoutil.NewTSOKVBase("gid"))
-}
-
-func InitGlobalIdAllocator(key string, base kv.KVBase) {
+func InitGlobalIdAllocator(key string, base kv.KVBase){
 	allocator = NewGlobalIdAllocator(key, base)
-	allocator.Initialize()
 }
 
-func NewGlobalIdAllocator(key string, base kv.KVBase) *GlobalIdAllocator {
+func NewGlobalIdAllocator(key string, base kv.KVBase) * GlobalIdAllocator{
 	return &GlobalIdAllocator{
-		allocator: tso.NewGlobalTSOAllocator(key, base),
+		allocator: tso.NewGlobalTSOAllocator( key, base),
 	}
 }
 

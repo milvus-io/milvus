@@ -21,7 +21,7 @@ master:
 
 etcd:
   address: localhost
-  port: 2379
+  port: 12379
   rootpath: by-dev
   segthreshold: 10000
 

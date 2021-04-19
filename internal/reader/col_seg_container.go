@@ -77,9 +77,9 @@ func (container *ColSegContainer) getCollectionByName(collectionName string) (*C
 }
 
 //----------------------------------------------------------------------------------------------------- partition
-func (container *ColSegContainer) addPartition(collection *Collection, partitionTag string) (*Partition, error) {
+func (container *ColSegContainer) addPartition(collection *Collection, partitionTag string) error {
 	if collection == nil {
-		return nil, errors.New("null collection")
+		return errors.New("null collection")
 	}
 
 	var newPartition = newPartition(partitionTag)
@@ -87,11 +87,11 @@ func (container *ColSegContainer) addPartition(collection *Collection, partition
 	for _, col := range container.collections {
 		if col.Name() == collection.Name() {
 			*col.Partitions() = append(*col.Partitions(), newPartition)
-			return newPartition, nil
+			return nil
 		}
 	}
 
-	return nil, errors.New("cannot find collection, name = " + collection.Name())
+	return errors.New("cannot find collection, name = " + collection.Name())
 }
 
 func (container *ColSegContainer) removePartition(partition *Partition) error {
@@ -138,13 +138,13 @@ func (container *ColSegContainer) getPartitionByTag(partitionTag string) (*Parti
 }
 
 //----------------------------------------------------------------------------------------------------- segment
-func (container *ColSegContainer) addSegment(collection *Collection, partition *Partition, segmentID int64) (*Segment, error) {
+func (container *ColSegContainer) addSegment(collection *Collection, partition *Partition, segmentID int64) error {
 	if collection == nil {
-		return nil, errors.New("null collection")
+		return errors.New("null collection")
 	}
 
 	if partition == nil {
-		return nil, errors.New("null partition")
+		return errors.New("null partition")
 	}
 
 	var newSegment = newSegment(collection, segmentID)
@@ -155,13 +155,13 @@ func (container *ColSegContainer) addSegment(collection *Collection, partition *
 			for _, p := range *col.Partitions() {
 				if p.Tag() == partition.Tag() {
 					*p.Segments() = append(*p.Segments(), newSegment)
-					return newSegment, nil
+					return nil
 				}
 			}
 		}
 	}
 
-	return nil, errors.New("cannot find collection or segment")
+	return errors.New("cannot find collection or segment")
 }
 
 func (container *ColSegContainer) removeSegment(segment *Segment) error {

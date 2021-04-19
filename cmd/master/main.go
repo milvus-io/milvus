@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 
 	"github.com/zilliztech/milvus-distributed/internal/conf"
@@ -25,11 +24,7 @@ func main() {
 
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
-	etcdAddr := conf.Config.Etcd.Address
-	etcdAddr += ":"
-	etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)
-
-	svr, err := master.CreateServer(ctx, conf.Config.Etcd.Rootpath, conf.Config.Etcd.Rootpath, conf.Config.Etcd.Rootpath, []string{etcdAddr})
+	svr, err := master.CreateServer(ctx)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}
@@ -47,9 +42,7 @@ func main() {
 		cancel()
 	}()
 
-	grpcPort := int64(conf.Config.Master.Port)
-
-	if err := svr.Run(grpcPort); err != nil {
+	if err := svr.Run(); err != nil {
 		log.Fatal("run server failed", zap.Error(err))
 	}
 

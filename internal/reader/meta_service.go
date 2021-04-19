@@ -3,7 +3,7 @@ package reader
 import (
 	"context"
 	"fmt"
-	"github.com/golang/protobuf/proto"
+	"github.com/gogo/protobuf/proto"
 	"log"
 	"path"
 	"reflect"
@@ -144,7 +144,7 @@ func (mService *metaService) processCollectionCreate(id string, value string) {
 	if col != nil {
 		newCollection := mService.container.addCollection(col, value)
 		for _, partitionTag := range col.PartitionTags {
-			_, err := mService.container.addPartition(newCollection, partitionTag)
+			err := mService.container.addPartition(newCollection, partitionTag)
 			if err != nil {
 				log.Println(err)
 			}
@@ -174,7 +174,7 @@ func (mService *metaService) processSegmentCreate(id string, value string) {
 				return
 			}
 			if partition != nil {
-				_, err = mService.container.addSegment(col, partition, seg.SegmentId)
+				err = mService.container.addSegment(col, partition, seg.SegmentId)
 				if err != nil {
 					log.Println(err)
 					return
