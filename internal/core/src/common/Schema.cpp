@@ -11,8 +11,10 @@
 
 #include "common/Schema.h"
 #include <google/protobuf/text_format.h>
+#include <boost/algorithm/string/case_conv.hpp>
 #include <boost/lexical_cast.hpp>
 #include "common/SystemProperty.h"
+#include <optional>
 
 namespace milvus {
 
@@ -57,17 +59,15 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         if (datatype_is_vector(data_type)) {
             auto type_map = RepeatedKeyValToMap(child.type_params());
             auto index_map = RepeatedKeyValToMap(child.index_params());
-            if (!index_map.count("metric_type")) {
-                auto default_metric_type =
-                    data_type == DataType::VECTOR_FLOAT ? MetricType::METRIC_L2 : MetricType::METRIC_Jaccard;
-                index_map["metric_type"] = MetricTypeToName(default_metric_type);
-            }
 
             AssertInfo(type_map.count("dim"), "dim not found");
             auto dim = boost::lexical_cast<int64_t>(type_map.at("dim"));
-            AssertInfo(index_map.count("metric_type"), "index not found");
-            auto metric_type = GetMetricType(index_map.at("metric_type"));
-            schema->AddField(name, field_id, data_type, dim, metric_type);
+            if (!index_map.count("metric_type")) {
+                schema->AddField(name, field_id, data_type, dim, std::nullopt);
+            } else {
+                auto metric_type = GetMetricType(index_map.at("metric_type"));
+                schema->AddField(name, field_id, data_type, dim, metric_type);
+            }
         } else {
             schema->AddField(name, field_id, data_type);
         }
