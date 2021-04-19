@@ -2,12 +2,12 @@ package proxyservice
 
 import (
 	"context"
+	"errors"
 	"log"
 	"math"
 	"sync"
 	"sync/atomic"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
@@ -54,16 +54,16 @@ func (ttBarrier *softTimeTickBarrier) AddPeer(peerID UniqueID) error {
 func (ttBarrier *softTimeTickBarrier) GetTimeTick() (Timestamp, error) {
 	select {
 	case <-ttBarrier.ctx.Done():
-		return 0, errors.Errorf("[GetTimeTick] closed.")
+		return 0, errors.New("getTimeTick closed")
 	case ts, ok := <-ttBarrier.outTt:
 		if !ok {
-			return 0, errors.Errorf("[GetTimeTick] closed.")
+			return 0, errors.New("getTimeTick closed")
 		}
 		num := len(ttBarrier.outTt)
 		for i := 0; i < num; i++ {
 			ts, ok = <-ttBarrier.outTt
 			if !ok {
-				return 0, errors.Errorf("[GetTimeTick] closed.")
+				return 0, errors.New("getTimeTick closed")
 			}
 		}
 		atomic.StoreInt64(&(ttBarrier.lastTt), int64(ts))

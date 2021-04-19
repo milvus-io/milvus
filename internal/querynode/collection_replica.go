@@ -12,12 +12,14 @@ package querynode
 */
 import "C"
 import (
+	"fmt"
 	"strconv"
 	"sync"
 
+	"errors"
+
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -96,7 +98,7 @@ func (colReplica *collectionReplicaImpl) addCollection(collectionID UniqueID, sc
 	defer colReplica.mu.Unlock()
 
 	if ok := colReplica.hasCollectionPrivate(collectionID); ok {
-		return errors.New("collection has been existed, id = " + strconv.FormatInt(collectionID, 10))
+		return fmt.Errorf("collection has been existed, id %d", collectionID)
 	}
 
 	var newCollection = newCollection(collectionID, schema)
@@ -138,7 +140,7 @@ func (colReplica *collectionReplicaImpl) getCollectionByID(collectionID UniqueID
 func (colReplica *collectionReplicaImpl) getCollectionByIDPrivate(collectionID UniqueID) (*Collection, error) {
 	collection, ok := colReplica.collections[collectionID]
 	if !ok {
-		return nil, errors.New("cannot find collection, id = " + strconv.FormatInt(collectionID, 10))
+		return nil, fmt.Errorf("cannot find collection, id = %d", collectionID)
 	}
 
 	return collection, nil
@@ -190,7 +192,7 @@ func (colReplica *collectionReplicaImpl) getVecFieldIDsByCollectionID(collection
 	}
 
 	if len(vecFields) <= 0 {
-		return nil, errors.New("no vector field in collection " + strconv.FormatInt(collectionID, 10))
+		return nil, fmt.Errorf("no vector field in collection %d", collectionID)
 	}
 
 	return vecFields, nil
@@ -223,7 +225,7 @@ func (colReplica *collectionReplicaImpl) getFieldsByCollectionIDPrivate(collecti
 	}
 
 	if len(collection.Schema().Fields) <= 0 {
-		return nil, errors.New("no field in collection " + strconv.FormatInt(collectionID, 10))
+		return nil, fmt.Errorf("no field in collection %d", collectionID)
 	}
 
 	return collection.Schema().Fields, nil
@@ -286,7 +288,7 @@ func (colReplica *collectionReplicaImpl) getPartitionByID(partitionID UniqueID) 
 func (colReplica *collectionReplicaImpl) getPartitionByIDPrivate(partitionID UniqueID) (*Partition, error) {
 	partition, ok := colReplica.partitions[partitionID]
 	if !ok {
-		return nil, errors.New("cannot find partition, id = " + strconv.FormatInt(partitionID, 10))
+		return nil, fmt.Errorf("cannot find partition, id = %d", partitionID)
 	}
 
 	return partition, nil

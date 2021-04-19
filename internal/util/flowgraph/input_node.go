@@ -4,8 +4,9 @@ import (
 	"context"
 	"log"
 
+	"errors"
+
 	"github.com/opentracing/opentracing-go"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )

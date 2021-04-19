@@ -13,7 +13,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 )
 
@@ -319,7 +318,7 @@ func (meta *meta) AddPartition(collectionID UniqueID, partitionID UniqueID) erro
 
 	for _, t := range coll.Partitions {
 		if t == partitionID {
-			return errors.Errorf("partition %d already exists.", partitionID)
+			return fmt.Errorf("partition %d already exists", partitionID)
 		}
 	}
 	coll.Partitions = append(coll.Partitions, partitionID)

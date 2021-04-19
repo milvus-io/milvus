@@ -3,7 +3,7 @@ package proxynode
 import (
 	"context"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"errors"
 )
 
 type Condition interface {

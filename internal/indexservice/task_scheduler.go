@@ -3,9 +3,10 @@ package indexservice
 import (
 	"container/list"
 	"context"
-	"errors"
 	"log"
 	"sync"
+
+	"errors"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 

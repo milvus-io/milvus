@@ -1,7 +1,8 @@
 package datanode
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"errors"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
@@ -27,7 +28,7 @@ func (c *Collection) GetSchema() *schemapb.CollectionSchema {
 
 func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) (*Collection, error) {
 	if schema == nil {
-		return nil, errors.Errorf("Invalid schema")
+		return nil, errors.New("invalid schema")
 	}
 
 	var newCollection = &Collection{

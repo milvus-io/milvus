@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"errors"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 

@@ -2,9 +2,11 @@ package storage
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"errors"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
@@ -277,7 +279,7 @@ func newDescriptorEventData() (*descriptorEventData, error) {
 	for i := DescriptorEventType; i < EventTypeEnd; i++ {
 		size := getEventFixPartSize(i)
 		if size == -1 {
-			return nil, errors.Errorf("undefined event type %d", i)
+			return nil, fmt.Errorf("undefined event type %d", i)
 		}
 		data.PostHeaderLengths = append(data.PostHeaderLengths, uint8(size))
 	}

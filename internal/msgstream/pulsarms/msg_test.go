@@ -2,10 +2,11 @@ package pulsarms
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"testing"
+
+	"errors"
 
 	"github.com/golang/protobuf/proto"
 
@@ -51,7 +52,7 @@ func newRepackFunc(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msg
 	result := make(map[int32]*msgstream.MsgPack)
 	for i, request := range tsMsgs {
 		if request.Type() != commonpb.MsgType_kInsert {
-			return nil, errors.New(string("msg's must be Insert"))
+			return nil, errors.New("msg's must be Insert")
 		}
 		insertRequest := request.(*InsertTask).InsertRequest
 		keys := hashKeys[i]
@@ -62,7 +63,7 @@ func newRepackFunc(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msg
 		keysLen := len(keys)
 
 		if keysLen != timestampLen || keysLen != rowIDLen || keysLen != rowDataLen {
-			return nil, errors.New(string("the length of hashValue, timestamps, rowIDs, RowData are not equal"))
+			return nil, errors.New("the length of hashValue, timestamps, rowIDs, RowData are not equal")
 		}
 		for index, key := range keys {
 			_, ok := result[key]

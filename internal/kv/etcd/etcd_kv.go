@@ -2,11 +2,11 @@ package etcdkv
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"path"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -62,7 +62,7 @@ func (kv *EtcdKV) Load(key string) (string, error) {
 		return "", err
 	}
 	if resp.Count <= 0 {
-		return "", errors.Errorf("there is no value on key = %s", key)
+		return "", fmt.Errorf("there is no value on key = %s", key)
 	}
 
 	return string(resp.Kvs[0].Value), nil
@@ -107,7 +107,7 @@ func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error) {
 	}
 	if len(invalid) != 0 {
 		log.Printf("MultiLoad: there are invalid keys: %s", invalid)
-		err = errors.Errorf("there are invalid keys: %s", invalid)
+		err = fmt.Errorf("there are invalid keys: %s", invalid)
 		return result, err
 	}
 	return result, nil

@@ -1,10 +1,12 @@
 package proxynode
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"errors"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
@@ -120,11 +122,10 @@ func ValidateFieldName(fieldName string) error {
 
 func ValidateDimension(dim int64, isBinary bool) error {
 	if dim <= 0 || dim > Params.MaxDimension {
-		return errors.New("invalid dimension: " + strconv.FormatInt(dim, 10) + ". should be in range 1 ~ " +
-			strconv.FormatInt(Params.MaxDimension, 10) + ".")
+		return fmt.Errorf("invalid dimension: %d. should be in range 1 ~ %d", dim, Params.MaxDimension)
 	}
 	if isBinary && dim%8 != 0 {
-		return errors.New("invalid dimension: " + strconv.FormatInt(dim, 10) + ". should be multiple of 8.")
+		return fmt.Errorf("invalid dimension: %d. should be multiple of 8. ", dim)
 	}
 	return nil
 }
@@ -158,7 +159,7 @@ func ValidatePrimaryKey(coll *schemapb.CollectionSchema) error {
 	if coll.AutoID {
 		for _, field := range coll.Fields {
 			if field.IsPrimaryKey {
-				return errors.Errorf("collection %s is auto id, so filed %s should not defined as primary key", coll.Name, field.Name)
+				return fmt.Errorf("collection %s is auto id, so filed %s should not defined as primary key", coll.Name, field.Name)
 			}
 		}
 		return nil
@@ -167,16 +168,16 @@ func ValidatePrimaryKey(coll *schemapb.CollectionSchema) error {
 	for i, field := range coll.Fields {
 		if field.IsPrimaryKey {
 			if idx != -1 {
-				return errors.Errorf("there are more than one primary key, filed name = %s, %s", coll.Fields[idx].Name, field.Name)
+				return fmt.Errorf("there are more than one primary key, filed name = %s, %s", coll.Fields[idx].Name, field.Name)
 			}
 			if field.DataType != schemapb.DataType_INT64 {
-				return errors.Errorf("the data type of primary key should be int64")
+				return errors.New("the data type of primary key should be int64")
 			}
 			idx = i
 		}
 	}
 	if idx == -1 {
-		return errors.Errorf("primay key is undefined")
+		return errors.New("primay key is undefined")
 	}
 	return nil
 }

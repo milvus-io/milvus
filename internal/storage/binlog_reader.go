@@ -3,9 +3,10 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"strconv"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"errors"
 )
 
 type BinlogReader struct {
@@ -36,8 +37,7 @@ func (reader *BinlogReader) readMagicNumber() (int32, error) {
 		return -1, err
 	}
 	if reader.magicNumber != MagicNumber {
-		return -1, errors.New("parse magic number failed, expected: " + strconv.Itoa(int(MagicNumber)) +
-			", actual: " + strconv.Itoa(int(reader.magicNumber)))
+		return -1, fmt.Errorf("parse magic number failed, expected: %s, actual: %s", strconv.Itoa(int(MagicNumber)), strconv.Itoa(int(reader.magicNumber)))
 	}
 
 	return reader.magicNumber, nil

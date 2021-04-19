@@ -1,12 +1,12 @@
 package datanode
 
 import (
+	"fmt"
 	"path"
 	"strconv"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 )
@@ -72,7 +72,7 @@ func (mt *metaTable) CompleteFlush(segmentID UniqueID) error {
 	defer mt.lock.Unlock()
 	meta, ok := mt.segID2FlushMeta[segmentID]
 	if !ok {
-		return errors.Errorf("segment not exists with ID = %v", segmentID)
+		return fmt.Errorf("segment not exists with ID = %v", segmentID)
 	}
 	meta.IsFlushed = true
 
@@ -132,7 +132,7 @@ func (mt *metaTable) checkFlushComplete(segmentID UniqueID) (bool, error) {
 	defer mt.lock.RUnlock()
 	meta, ok := mt.segID2FlushMeta[segmentID]
 	if !ok {
-		return false, errors.Errorf("segment not exists with ID = %v", segmentID)
+		return false, fmt.Errorf("segment not exists with ID = %v", segmentID)
 	}
 	return meta.IsFlushed, nil
 }
@@ -142,7 +142,7 @@ func (mt *metaTable) getSegBinlogPaths(segmentID UniqueID) (map[int64][]string, 
 	defer mt.lock.RUnlock()
 	meta, ok := mt.segID2FlushMeta[segmentID]
 	if !ok {
-		return nil, errors.Errorf("segment not exists with ID = %v", segmentID)
+		return nil, fmt.Errorf("segment not exists with ID = %v", segmentID)
 	}
 	ret := make(map[int64][]string)
 	for _, field := range meta.Fields {
@@ -211,7 +211,7 @@ func (mt *metaTable) getDDLBinlogPaths(collID UniqueID) (map[UniqueID][]string, 
 	defer mt.lock.RUnlock()
 	meta, ok := mt.collID2DdlMeta[collID]
 	if !ok {
-		return nil, errors.Errorf("collection not exists with ID = %v", collID)
+		return nil, fmt.Errorf("collection not exists with ID = %v", collID)
 	}
 	ret := make(map[UniqueID][]string)
 	ret[meta.CollectionID] = meta.BinlogPaths

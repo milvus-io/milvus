@@ -7,7 +7,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
@@ -65,7 +64,7 @@ func (mService *metaService) getCollectionNames(ctx context.Context) ([]string, 
 
 	response, err := mService.masterClient.ShowCollections(ctx, req)
 	if err != nil {
-		return nil, errors.Errorf("Get collection names from master service wrong: %v", err)
+		return nil, fmt.Errorf("Get collection names from master service wrong: %v", err)
 	}
 	return response.GetCollectionNames(), nil
 }
@@ -85,12 +84,12 @@ func (mService *metaService) createCollection(ctx context.Context, name string) 
 
 	response, err := mService.masterClient.DescribeCollection(ctx, req)
 	if err != nil {
-		return errors.Errorf("Describe collection %v from master service wrong: %v", name, err)
+		return fmt.Errorf("Describe collection %v from master service wrong: %v", name, err)
 	}
 
 	err = mService.replica.addCollection(response.GetCollectionID(), response.GetSchema())
 	if err != nil {
-		return errors.Errorf("Add collection %v into collReplica wrong: %v", name, err)
+		return fmt.Errorf("Add collection %v into collReplica wrong: %v", name, err)
 	}
 
 	return nil

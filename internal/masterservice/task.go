@@ -1,12 +1,12 @@
 package masterservice
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
@@ -37,10 +37,10 @@ func (bt *baseReqTask) Notify(err error) {
 func (bt *baseReqTask) WaitToFinish() error {
 	select {
 	case <-bt.core.ctx.Done():
-		return errors.Errorf("context done")
+		return errors.New("context done")
 	case err, ok := <-bt.cv:
 		if !ok {
-			return errors.Errorf("notify chan closed")
+			return errors.New("notify chan closed")
 		}
 		return err
 	}
@@ -71,7 +71,7 @@ func (t *CreateCollectionReqTask) Execute() error {
 	}
 
 	if t.Req.CollectionName != schema.Name {
-		return errors.Errorf("collection name = %s, schema.Name=%s", t.Req.CollectionName, schema.Name)
+		return fmt.Errorf("collection name = %s, schema.Name=%s", t.Req.CollectionName, schema.Name)
 	}
 
 	for idx, field := range schema.Fields {
@@ -544,7 +544,7 @@ func (t *DescribeSegmentReqTask) Execute() error {
 		}
 	}
 	if !exist {
-		return errors.Errorf("segment id %d not belong to collection id %d", t.Req.SegmentID, t.Req.CollectionID)
+		return fmt.Errorf("segment id %d not belong to collection id %d", t.Req.SegmentID, t.Req.CollectionID)
 	}
 	//TODO, get filed_id and index_name from request
 	segIdxInfo, err := t.core.MetaTable.GetSegmentIndexInfoByID(t.Req.SegmentID, -1, "")
@@ -587,7 +587,7 @@ func (t *ShowSegmentReqTask) Execute() error {
 		}
 	}
 	if !exist {
-		return errors.Errorf("partition id = %d not belong to collection id = %d", t.Req.PartitionID, t.Req.CollectionID)
+		return fmt.Errorf("partition id = %d not belong to collection id = %d", t.Req.PartitionID, t.Req.CollectionID)
 	}
 	partMeta, err := t.core.MetaTable.GetPartitionByID(t.Req.PartitionID)
 	if err != nil {
@@ -630,7 +630,7 @@ func (t *CreateIndexReqTask) Execute() error {
 		return err
 	}
 	if field.DataType != schemapb.DataType_VECTOR_FLOAT && field.DataType != schemapb.DataType_VECTOR_BINARY {
-		return errors.Errorf("field name = %s, data type = %s", t.Req.FieldName, schemapb.DataType_name[int32(field.DataType)])
+		return fmt.Errorf("field name = %s, data type = %s", t.Req.FieldName, schemapb.DataType_name[int32(field.DataType)])
 	}
 	for _, seg := range segIDs {
 		task := CreateIndexTask{
@@ -708,7 +708,7 @@ func (t *DropIndexReqTask) Execute() error {
 		return nil
 	}
 	if len(info) != 1 {
-		return errors.Errorf("len(index) = %d", len(info))
+		return fmt.Errorf("len(index) = %d", len(info))
 	}
 	err = t.core.DropIndexReq(info[0].IndexID)
 	if err != nil {

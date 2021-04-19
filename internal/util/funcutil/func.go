@@ -3,11 +3,12 @@ package funcutil
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"strconv"
 	"time"
+
+	"errors"
 
 	"github.com/go-basic/ipv4"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"

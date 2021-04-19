@@ -2,9 +2,10 @@ package allocator
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
+
+	"errors"
 )
 
 const (

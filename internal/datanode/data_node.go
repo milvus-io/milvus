@@ -9,7 +9,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"errors"
+
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -128,7 +129,7 @@ func (node *DataNode) Init() error {
 
 	resp, err := node.dataService.RegisterNode(ctx, req)
 	if err != nil {
-		return errors.Errorf("Register node failed: %v", err)
+		return fmt.Errorf("Register node failed: %v", err)
 	}
 
 	select {
@@ -149,7 +150,7 @@ func (node *DataNode) Init() error {
 		case "CompleteFlushChannelName":
 			Params.CompleteFlushChannelName = kv.Value
 		default:
-			return errors.Errorf("Invalid key: %v", kv.Key)
+			return fmt.Errorf("Invalid key: %v", kv.Key)
 		}
 
 	}

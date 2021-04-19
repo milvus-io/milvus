@@ -1,12 +1,12 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"syscall"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
@@ -71,7 +71,7 @@ func printBinlogFile(filename string) error {
 	fmt.Printf("\tEndTimestamp: %v\n", physical)
 	dataTypeName, ok := schemapb.DataType_name[int32(r.descriptorEvent.descriptorEventData.PayloadDataType)]
 	if !ok {
-		return errors.Errorf("undefine data type %d", r.descriptorEvent.descriptorEventData.PayloadDataType)
+		return fmt.Errorf("undefine data type %d", r.descriptorEvent.descriptorEventData.PayloadDataType)
 	}
 	fmt.Printf("\tPayloadDataType: %v\n", dataTypeName)
 	fmt.Printf("\tPostHeaderLengths: %v\n", r.descriptorEvent.descriptorEventData.PostHeaderLengths)
@@ -95,7 +95,7 @@ func printBinlogFile(filename string) error {
 		case InsertEventType:
 			evd, ok := event.eventData.(*insertEventData)
 			if !ok {
-				return errors.Errorf("incorrect event data type")
+				return errors.New("incorrect event data type")
 			}
 			fmt.Printf("event %d insert event:\n", eventNum)
 			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
@@ -108,7 +108,7 @@ func printBinlogFile(filename string) error {
 		case DeleteEventType:
 			evd, ok := event.eventData.(*deleteEventData)
 			if !ok {
-				return errors.Errorf("incorrect event data type")
+				return errors.New("incorrect event data type")
 			}
 			fmt.Printf("event %d delete event:\n", eventNum)
 			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
@@ -121,7 +121,7 @@ func printBinlogFile(filename string) error {
 		case CreateCollectionEventType:
 			evd, ok := event.eventData.(*createCollectionEventData)
 			if !ok {
-				return errors.Errorf("incorrect event data type")
+				return errors.New("incorrect event data type")
 			}
 			fmt.Printf("event %d create collection event:\n", eventNum)
 			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
@@ -134,7 +134,7 @@ func printBinlogFile(filename string) error {
 		case DropCollectionEventType:
 			evd, ok := event.eventData.(*dropCollectionEventData)
 			if !ok {
-				return errors.Errorf("incorrect event data type")
+				return errors.New("incorrect event data type")
 			}
 			fmt.Printf("event %d drop collection event:\n", eventNum)
 			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
@@ -147,7 +147,7 @@ func printBinlogFile(filename string) error {
 		case CreatePartitionEventType:
 			evd, ok := event.eventData.(*createPartitionEventData)
 			if !ok {
-				return errors.Errorf("incorrect event data type")
+				return errors.New("incorrect event data type")
 			}
 			fmt.Printf("event %d create partition event:\n", eventNum)
 			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
@@ -160,7 +160,7 @@ func printBinlogFile(filename string) error {
 		case DropPartitionEventType:
 			evd, ok := event.eventData.(*dropPartitionEventData)
 			if !ok {
-				return errors.Errorf("incorrect event data type")
+				return errors.New("incorrect event data type")
 			}
 			fmt.Printf("event %d drop partition event:\n", eventNum)
 			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
@@ -171,7 +171,7 @@ func printBinlogFile(filename string) error {
 				return err
 			}
 		default:
-			return errors.Errorf("undefined event typd %d\n", event.eventHeader.TypeCode)
+			return fmt.Errorf("undefined event typd %d", event.eventHeader.TypeCode)
 		}
 		eventNum++
 	}
@@ -280,7 +280,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 			fmt.Println()
 		}
 	default:
-		return errors.Errorf("undefined data type")
+		return errors.New("undefined data type")
 	}
 	return nil
 }
@@ -333,11 +333,11 @@ func printDDLPayloadValues(eventType EventTypeCode, colType schemapb.DataType, r
 				}
 				fmt.Printf("\t\t%d : drop partition: %v\n", i, req)
 			default:
-				return errors.Errorf("undefined ddl event type %d", eventType)
+				return fmt.Errorf("undefined ddl event type %d", eventType)
 			}
 		}
 	default:
-		return errors.Errorf("undefined data type")
+		return errors.New("undefined data type")
 	}
 	return nil
 }

@@ -12,7 +12,8 @@ import (
 
 	"go.etcd.io/etcd/clientv3"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"errors"
+
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"

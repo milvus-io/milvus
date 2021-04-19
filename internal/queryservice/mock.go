@@ -2,8 +2,9 @@ package queryservice
 
 import (
 	"context"
-	"errors"
 	"strconv"
+
+	"errors"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"

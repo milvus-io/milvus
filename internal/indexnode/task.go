@@ -6,12 +6,13 @@ import (
 	"log"
 	"strconv"
 
+	"errors"
+
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"

@@ -10,9 +10,10 @@ package querynode
 */
 import "C"
 import (
-	"errors"
 	"strconv"
 	"unsafe"
+
+	"errors"
 )
 
 type SearchResult struct {

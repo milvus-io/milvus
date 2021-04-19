@@ -9,9 +9,10 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 
+	"errors"
+
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go/config"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"

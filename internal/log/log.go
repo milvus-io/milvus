@@ -14,9 +14,10 @@
 package log
 
 import (
-	"errors"
 	"os"
 	"sync/atomic"
+
+	"errors"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"

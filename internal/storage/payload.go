@@ -11,7 +11,8 @@ import "C"
 import (
 	"unsafe"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"errors"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
@@ -158,7 +159,7 @@ func (w *PayloadWriter) AddDataToPayload(msgs interface{}, dim ...int) error {
 func (w *PayloadWriter) AddBoolToPayload(msgs []bool) error {
 	length := len(msgs)
 	if length <= 0 {
-		return errors.Errorf("can't add empty msgs into payload")
+		return errors.New("can't add empty msgs into payload")
 	}
 
 	cMsgs := (*C.bool)(unsafe.Pointer(&msgs[0]))
@@ -178,7 +179,7 @@ func (w *PayloadWriter) AddBoolToPayload(msgs []bool) error {
 func (w *PayloadWriter) AddInt8ToPayload(msgs []int8) error {
 	length := len(msgs)
 	if length <= 0 {
-		return errors.Errorf("can't add empty msgs into payload")
+		return errors.New("can't add empty msgs into payload")
 	}
 	cMsgs := (*C.int8_t)(unsafe.Pointer(&msgs[0]))
 	cLength := C.int(length)
@@ -197,7 +198,7 @@ func (w *PayloadWriter) AddInt8ToPayload(msgs []int8) error {
 func (w *PayloadWriter) AddInt16ToPayload(msgs []int16) error {
 	length := len(msgs)
 	if length <= 0 {
-		return errors.Errorf("can't add empty msgs into payload")
+		return errors.New("can't add empty msgs into payload")
 	}
 
 	cMsgs := (*C.int16_t)(unsafe.Pointer(&msgs[0]))
@@ -217,7 +218,7 @@ func (w *PayloadWriter) AddInt16ToPayload(msgs []int16) error {
 func (w *PayloadWriter) AddInt32ToPayload(msgs []int32) error {
 	length := len(msgs)
 	if length <= 0 {
-		return errors.Errorf("can't add empty msgs into payload")
+		return errors.New("can't add empty msgs into payload")
 	}
 
 	cMsgs := (*C.int32_t)(unsafe.Pointer(&msgs[0]))
@@ -237,7 +238,7 @@ func (w *PayloadWriter) AddInt32ToPayload(msgs []int32) error {
 func (w *PayloadWriter) AddInt64ToPayload(msgs []int64) error {
 	length := len(msgs)
 	if length <= 0 {
-		return errors.Errorf("can't add empty msgs into payload")
+		return errors.New("can't add empty msgs into payload")
 	}
 
 	cMsgs := (*C.int64_t)(unsafe.Pointer(&msgs[0]))
@@ -257,7 +258,7 @@ func (w *PayloadWriter) AddInt64ToPayload(msgs []int64) error {
 func (w *PayloadWriter) AddFloatToPayload(msgs []float32) error {
 	length := len(msgs)
 	if length <= 0 {
-		return errors.Errorf("can't add empty msgs into payload")
+		return errors.New("can't add empty msgs into payload")
 	}
 
 	cMsgs := (*C.float)(unsafe.Pointer(&msgs[0]))
@@ -277,7 +278,7 @@ func (w *PayloadWriter) AddFloatToPayload(msgs []float32) error {
 func (w *PayloadWriter) AddDoubleToPayload(msgs []float64) error {
 	length := len(msgs)
 	if length <= 0 {
-		return errors.Errorf("can't add empty msgs into payload")
+		return errors.New("can't add empty msgs into payload")
 	}
 
 	cMsgs := (*C.double)(unsafe.Pointer(&msgs[0]))

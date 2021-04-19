@@ -7,9 +7,10 @@ import (
 	"log"
 	"time"
 
+	"errors"
+
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"

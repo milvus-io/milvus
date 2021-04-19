@@ -3,9 +3,10 @@ package indexnode
 import (
 	"container/list"
 	"context"
-	"errors"
 	"log"
 	"sync"
+
+	"errors"
 
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"

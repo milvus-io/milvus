@@ -1,6 +1,7 @@
 package masterservice
 
 import (
+	"fmt"
 	"path"
 	"strconv"
 	"sync"
@@ -8,7 +9,8 @@ import (
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"errors"
+
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -179,17 +181,17 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 	defer mt.ddLock.Unlock()
 
 	if len(part.SegmentIDs) != 0 {
-		return errors.Errorf("segment should be empty when creating collection")
+		return errors.New("segment should be empty when creating collection")
 	}
 
 	if len(coll.PartitionIDs) != 0 {
-		return errors.Errorf("partitions should be empty when creating collection")
+		return errors.New("partitions should be empty when creating collection")
 	}
 	if _, ok := mt.collName2ID[coll.Schema.Name]; ok {
-		return errors.Errorf("collection %s exist", coll.Schema.Name)
+		return fmt.Errorf("collection %s exist", coll.Schema.Name)
 	}
 	if len(coll.FieldIndexes) != len(idx) {
-		return errors.Errorf("incorrect index id when creating collection")
+		return fmt.Errorf("incorrect index id when creating collection")
 	}
 
 	coll.PartitionIDs = append(coll.PartitionIDs, part.PartitionID)
@@ -227,7 +229,7 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID) error {
 
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
-		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collID, 10))
+		return fmt.Errorf("can't find collection. id = %d", collID)
 	}
 
 	metaKeys := []string{path.Join(CollectionMetaPrefix, strconv.FormatInt(collID, 10))}
@@ -283,7 +285,7 @@ func (mt *metaTable) GetCollectionByID(collectionID typeutil.UniqueID) (*pb.Coll
 
 	col, ok := mt.collID2Meta[collectionID]
 	if !ok {
-		return nil, errors.Errorf("can't find collection id : %d", collectionID)
+		return nil, fmt.Errorf("can't find collection id : %d", collectionID)
 	}
 	colCopy := proto.Clone(&col)
 
@@ -296,11 +298,11 @@ func (mt *metaTable) GetCollectionByName(collectionName string) (*pb.CollectionI
 
 	vid, ok := mt.collName2ID[collectionName]
 	if !ok {
-		return nil, errors.Errorf("can't find collection: " + collectionName)
+		return nil, fmt.Errorf("can't find collection: " + collectionName)
 	}
 	col, ok := mt.collID2Meta[vid]
 	if !ok {
-		return nil, errors.Errorf("can't find collection: " + collectionName)
+		return nil, fmt.Errorf("can't find collection: " + collectionName)
 	}
 	colCopy := proto.Clone(&col)
 	return colCopy.(*pb.CollectionInfo), nil
@@ -312,11 +314,11 @@ func (mt *metaTable) GetCollectionBySegmentID(segID typeutil.UniqueID) (*pb.Coll
 
 	vid, ok := mt.segID2CollID[segID]
 	if !ok {
-		return nil, errors.Errorf("segment id %d not belong to any collection", segID)
+		return nil, fmt.Errorf("segment id %d not belong to any collection", segID)
 	}
 	col, ok := mt.collID2Meta[vid]
 	if !ok {
-		return nil, errors.Errorf("can't find collection id: %d", vid)
+		return nil, fmt.Errorf("can't find collection id: %d", vid)
 	}
 	colCopy := proto.Clone(&col)
 	return colCopy.(*pb.CollectionInfo), nil
@@ -338,12 +340,12 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	defer mt.ddLock.Unlock()
 	coll, ok := mt.collID2Meta[collID]
 	if !ok {
-		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collID, 10))
+		return fmt.Errorf("can't find collection. id = %d", collID)
 	}
 
 	// number of partition tags (except _default) should be limited to 4096 by default
 	if int64(len(coll.PartitionIDs)) > Params.MaxPartitionNum {
-		return errors.New("maximum partition's number should be limit to " + strconv.FormatInt(Params.MaxPartitionNum, 10))
+		return fmt.Errorf("maximum partition's number should be limit to %d", Params.MaxPartitionNum)
 	}
 	for _, t := range coll.PartitionIDs {
 		part, ok := mt.partitionID2Meta[t]
@@ -352,10 +354,10 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 			continue
 		}
 		if part.PartitionName == partitionName {
-			return errors.Errorf("partition name = %s already exists", partitionName)
+			return fmt.Errorf("partition name = %s already exists", partitionName)
 		}
 		if part.PartitionID == partitionID {
-			return errors.Errorf("partition id = %d already exists", partitionID)
+			return fmt.Errorf("partition id = %d already exists", partitionID)
 		}
 	}
 	partMeta := pb.PartitionInfo{
@@ -411,7 +413,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
-		return 0, errors.Errorf("can't find collection id = " + strconv.FormatInt(collID, 10))
+		return 0, fmt.Errorf("can't find collection id = %d", collID)
 	}
 
 	// check tag exists
@@ -433,7 +435,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 
 	}
 	if !exist {
-		return 0, errors.New("partition " + partitionName + " does not exist")
+		return 0, fmt.Errorf("partition %s does not exist", partitionName)
 	}
 	delete(mt.partitionID2Meta, partMeta.PartitionID)
 	collMeta.PartitionIDs = pd
@@ -473,7 +475,7 @@ func (mt *metaTable) GetPartitionByID(partitionID typeutil.UniqueID) (pb.Partiti
 	defer mt.ddLock.RUnlock()
 	partMeta, ok := mt.partitionID2Meta[partitionID]
 	if !ok {
-		return pb.PartitionInfo{}, errors.Errorf("partition id = %d not exist", partitionID)
+		return pb.PartitionInfo{}, fmt.Errorf("partition id = %d not exist", partitionID)
 	}
 	return partMeta, nil
 }
@@ -483,11 +485,11 @@ func (mt *metaTable) AddSegment(seg *datapb.SegmentInfo) error {
 	defer mt.ddLock.Unlock()
 	collMeta, ok := mt.collID2Meta[seg.CollectionID]
 	if !ok {
-		return errors.Errorf("can't find collection id = " + strconv.FormatInt(seg.CollectionID, 10))
+		return fmt.Errorf("can't find collection id = %d", seg.CollectionID)
 	}
 	partMeta, ok := mt.partitionID2Meta[seg.PartitionID]
 	if !ok {
-		return errors.Errorf("can't find partition id = " + strconv.FormatInt(seg.PartitionID, 10))
+		return fmt.Errorf("can't find partition id = %d", seg.PartitionID)
 	}
 	exist := false
 	for _, partID := range collMeta.PartitionIDs {
@@ -497,7 +499,7 @@ func (mt *metaTable) AddSegment(seg *datapb.SegmentInfo) error {
 		}
 	}
 	if !exist {
-		return errors.Errorf("partition id = %d, not belong to collection id = %d", seg.PartitionID, seg.CollectionID)
+		return fmt.Errorf("partition id = %d, not belong to collection id = %d", seg.PartitionID, seg.CollectionID)
 	}
 	exist = false
 	for _, segID := range partMeta.SegmentIDs {
@@ -506,7 +508,7 @@ func (mt *metaTable) AddSegment(seg *datapb.SegmentInfo) error {
 		}
 	}
 	if exist {
-		return errors.Errorf("segment id = %d exist", seg.SegmentID)
+		return fmt.Errorf("segment id = %d exist", seg.SegmentID)
 	}
 	partMeta.SegmentIDs = append(partMeta.SegmentIDs, seg.SegmentID)
 	mt.partitionID2Meta[seg.PartitionID] = partMeta
@@ -531,16 +533,16 @@ func (mt *metaTable) AddIndex(seg *pb.SegmentIndexInfo) error {
 	} else {
 		_, ok := (*segIdxMap)[seg.IndexID]
 		if ok {
-			return errors.Errorf("index id = %d exist", seg.IndexID)
+			return fmt.Errorf("index id = %d exist", seg.IndexID)
 		}
 	}
 	collID, ok := mt.segID2CollID[seg.SegmentID]
 	if !ok {
-		return errors.Errorf("segment id = %d not belong to any collection", seg.SegmentID)
+		return fmt.Errorf("segment id = %d not belong to any collection", seg.SegmentID)
 	}
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
-		return errors.Errorf("collection id = %d not found", collID)
+		return fmt.Errorf("collection id = %d not found", collID)
 	}
 	exist := false
 	for _, i := range collMeta.FieldIndexes {
@@ -550,7 +552,7 @@ func (mt *metaTable) AddIndex(seg *pb.SegmentIndexInfo) error {
 		}
 	}
 	if !exist {
-		return errors.Errorf("index id = %d not found", seg.IndexID)
+		return fmt.Errorf("index id = %d not found", seg.IndexID)
 	}
 
 	(*(mt.segID2IndexMeta[seg.SegmentID]))[seg.IndexID] = *seg
@@ -571,11 +573,11 @@ func (mt *metaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
-		return 0, false, errors.Errorf("collection name = %s not exist", collName)
+		return 0, false, fmt.Errorf("collection name = %s not exist", collName)
 	}
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
-		return 0, false, errors.Errorf("collection name  = %s not has meta", collName)
+		return 0, false, fmt.Errorf("collection name  = %s not has meta", collName)
 	}
 	fieldSch, err := mt.unlockGetFieldSchema(collName, fieldName)
 	if err != nil {
@@ -646,10 +648,10 @@ func (mt *metaTable) GetSegmentIndexInfoByID(segID typeutil.UniqueID, filedID in
 
 	segIdxMap, ok := mt.segID2IndexMeta[segID]
 	if !ok {
-		return pb.SegmentIndexInfo{}, errors.Errorf("segment id %d not has any index", segID)
+		return pb.SegmentIndexInfo{}, fmt.Errorf("segment id %d not has any index", segID)
 	}
 	if len(*segIdxMap) == 0 {
-		return pb.SegmentIndexInfo{}, errors.Errorf("segment id %d not has any index", segID)
+		return pb.SegmentIndexInfo{}, fmt.Errorf("segment id %d not has any index", segID)
 	}
 
 	if filedID == -1 && idxName == "" { // return default index
@@ -673,7 +675,7 @@ func (mt *metaTable) GetSegmentIndexInfoByID(segID typeutil.UniqueID, filedID in
 			}
 		}
 	}
-	return pb.SegmentIndexInfo{}, errors.Errorf("can't find index name = %s on segment = %d, with filed id = %d", idxName, segID, filedID)
+	return pb.SegmentIndexInfo{}, fmt.Errorf("can't find index name = %s on segment = %d, with filed id = %d", idxName, segID, filedID)
 }
 
 func (mt *metaTable) GetFieldSchema(collName string, fieldName string) (schemapb.FieldSchema, error) {
@@ -686,11 +688,11 @@ func (mt *metaTable) GetFieldSchema(collName string, fieldName string) (schemapb
 func (mt *metaTable) unlockGetFieldSchema(collName string, fieldName string) (schemapb.FieldSchema, error) {
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
-		return schemapb.FieldSchema{}, errors.Errorf("collection %s not found", collName)
+		return schemapb.FieldSchema{}, fmt.Errorf("collection %s not found", collName)
 	}
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
-		return schemapb.FieldSchema{}, errors.Errorf("collection %s not found", collName)
+		return schemapb.FieldSchema{}, fmt.Errorf("collection %s not found", collName)
 	}
 
 	for _, field := range collMeta.Schema.Fields {
@@ -698,7 +700,7 @@ func (mt *metaTable) unlockGetFieldSchema(collName string, fieldName string) (sc
 			return *field, nil
 		}
 	}
-	return schemapb.FieldSchema{}, errors.Errorf("collection %s doesn't have filed %s", collName, fieldName)
+	return schemapb.FieldSchema{}, fmt.Errorf("collection %s doesn't have filed %s", collName, fieldName)
 }
 
 //return true/false
@@ -737,11 +739,11 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
-		return nil, schemapb.FieldSchema{}, errors.Errorf("collection %s not found", collName)
+		return nil, schemapb.FieldSchema{}, fmt.Errorf("collection %s not found", collName)
 	}
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
-		return nil, schemapb.FieldSchema{}, errors.Errorf("collection %s not found", collName)
+		return nil, schemapb.FieldSchema{}, fmt.Errorf("collection %s not found", collName)
 	}
 	fieldSchema, err := mt.unlockGetFieldSchema(collName, fieldName)
 	if err != nil {
@@ -755,7 +757,7 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 			if f.FiledID == fieldSchema.FieldID {
 				existInfo, ok = mt.indexID2Meta[f.IndexID]
 				if !ok {
-					return nil, schemapb.FieldSchema{}, errors.Errorf("index id = %d not found", f.IndexID)
+					return nil, schemapb.FieldSchema{}, fmt.Errorf("index id = %d not found", f.IndexID)
 				}
 
 				// (collMeta.IndexNames[i] == indexName)
@@ -822,11 +824,11 @@ func (mt *metaTable) GetIndexByName(collName string, fieldName string, indexName
 
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
-		return nil, errors.Errorf("collection %s not found", collName)
+		return nil, fmt.Errorf("collection %s not found", collName)
 	}
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
-		return nil, errors.Errorf("collection %s not found", collName)
+		return nil, fmt.Errorf("collection %s not found", collName)
 	}
 	fieldSchema, err := mt.GetFieldSchema(collName, fieldName)
 	if err != nil {
@@ -838,7 +840,7 @@ func (mt *metaTable) GetIndexByName(collName string, fieldName string, indexName
 		if idx.FiledID == fieldSchema.FieldID {
 			idxInfo, ok := mt.indexID2Meta[idx.IndexID]
 			if !ok {
-				return nil, errors.Errorf("index id = %d not found", idx.IndexID)
+				return nil, fmt.Errorf("index id = %d not found", idx.IndexID)
 			}
 			if indexName == "" || idxInfo.IndexName == indexName {
 				rstIndex = append(rstIndex, idxInfo)
@@ -854,7 +856,7 @@ func (mt *metaTable) GetIndexByID(indexID typeutil.UniqueID) (*pb.IndexInfo, err
 
 	indexInfo, ok := mt.indexID2Meta[indexID]
 	if !ok {
-		return nil, errors.New("cannot find index, id =" + strconv.FormatInt(indexID, 10))
+		return nil, fmt.Errorf("cannot find index, id = %d", indexID)
 	}
 	return &indexInfo, nil
 }

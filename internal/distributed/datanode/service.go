@@ -2,6 +2,7 @@ package grpcdatanode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -19,7 +20,6 @@ import (
 	dsc "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice/client"
 	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -235,7 +235,7 @@ func (s *Server) FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) 
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "DataNode isn't healthy.",
-		}, errors.Errorf("DataNode is not ready yet")
+		}, errors.New("DataNode is not ready yet")
 	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,

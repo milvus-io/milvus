@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"path"
 	"strconv"
 	"unsafe"
 
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/log"
@@ -481,7 +481,7 @@ func (ibNode *insertBufferNode) flushSegment(segID UniqueID, partitionID UniqueI
 
 	collSch, err := ibNode.getCollectionSchemaByID(collID)
 	if err != nil {
-		return errors.Errorf("Get collection by ID wrong, %v", err)
+		return fmt.Errorf("Get collection by ID wrong, %v", err)
 	}
 
 	collMeta := &etcdpb.CollectionMeta{
@@ -496,7 +496,7 @@ func (ibNode *insertBufferNode) flushSegment(segID UniqueID, partitionID UniqueI
 		segID, ibNode.insertBuffer.insertData[segID])
 
 	if err != nil {
-		return errors.Errorf("generate binlog wrong: %v", err)
+		return fmt.Errorf("generate binlog wrong: %v", err)
 	}
 
 	// clear buffer
@@ -513,18 +513,18 @@ func (ibNode *insertBufferNode) flushSegment(segID UniqueID, partitionID UniqueI
 	for index, blob := range binLogs {
 		uid, err := ibNode.idAllocator.allocID()
 		if err != nil {
-			return errors.Errorf("Allocate Id failed, %v", err)
+			return fmt.Errorf("Allocate Id failed, %v", err)
 		}
 
 		key := path.Join(keyPrefix, blob.Key, strconv.FormatInt(uid, 10))
 		err = ibNode.minIOKV.Save(key, string(blob.Value[:]))
 		if err != nil {
-			return errors.Errorf("Save to MinIO failed, %v", err)
+			return fmt.Errorf("Save to MinIO failed, %v", err)
 		}
 
 		fieldID, err := strconv.ParseInt(blob.Key, 10, 32)
 		if err != nil {
-			return errors.Errorf("string to fieldID wrong, %v", err)
+			return fmt.Errorf("string to fieldID wrong, %v", err)
 		}
 
 		log.Debug("... Appending binlog paths ...", zap.Int("number", index))

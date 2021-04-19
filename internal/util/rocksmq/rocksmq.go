@@ -1,13 +1,15 @@
 package rocksmq
 
 import (
+	"fmt"
 	"strconv"
 	"sync"
+
+	"errors"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 
 	"github.com/tecbot/gorocksdb"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
@@ -165,7 +167,7 @@ func (rmq *RocksMQ) DestroyChannel(channelName string) error {
 func (rmq *RocksMQ) CreateConsumerGroup(groupName string, channelName string) (*Consumer, error) {
 	key := groupName + "/" + channelName + "/current_id"
 	if rmq.checkKeyExist(key) {
-		return nil, errors.New("ConsumerGroup " + groupName + " already exists.")
+		return nil, fmt.Errorf("ConsumerGroup %s already exists", groupName)
 	}
 	err := rmq.kv.Save(key, DefaultMessageID)
 	if err != nil {
@@ -323,7 +325,7 @@ func (rmq *RocksMQ) Seek(groupName string, channelName string, msgID UniqueID) e
 	/* Step I: Check if key exists */
 	key := groupName + "/" + channelName + "/current_id"
 	if !rmq.checkKeyExist(key) {
-		return errors.New("ConsumerGroup " + groupName + ", channel " + channelName + " not exists.")
+		return fmt.Errorf("ConsumerGroup %s, channel %s not exists", groupName, channelName)
 	}
 
 	storeKey, err := combKey(channelName, msgID)

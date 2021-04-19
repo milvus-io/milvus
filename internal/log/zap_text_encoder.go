@@ -654,7 +654,7 @@ func (enc *textEncoder) encodeError(f zapcore.Field) {
 		verbose := fmt.Sprintf("%+v", e)
 		if verbose != basic {
 			// This is a rich error type, like those produced by
-			// github.com/pkg/errors.
+			// errors.
 			enc.beginQuoteFiled()
 			enc.AddString(f.Key+"Verbose", verbose)
 			enc.endQuoteFiled()
