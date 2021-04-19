@@ -2,6 +2,7 @@
 
 ## Appendix A. Basic Components
 
+// TODO
 #### A.1 Watchdog
 
 ``` go
@@ -72,6 +73,7 @@ etcd:
 
 #### A.4 Time Ticked Flow Graph
 
+//TODO
 ###### A.4.1 Flow Graph States
 
 ```go
@@ -87,14 +89,7 @@ type flowGraphStates struct {
 ```go
 type Msg interface {
   TimeTick() Timestamp
-  SkipThisTick() bool
-  DownStreamNodeIdx() int32
 }
-```
-
-```go
-type SkipTickMsg struct {}
-func (msg *SkipTickMsg) SkipThisTick() bool // always return true
 ```
 
 ###### A.4.3 Node
@@ -104,8 +99,8 @@ type Node interface {
   Name() string
   MaxQueueLength() int32
   MaxParallelism() int32
-  SetPipelineStates(states *flowGraphStates)
-  Operate([]*Msg) []*Msg
+  Operate(ctx context.Context, in []Msg) ([]Msg, context.Context)
+  IsInputNode() bool
 }
 ```
 
@@ -113,28 +108,28 @@ type Node interface {
 
 ```go
 type baseNode struct {
-  Name string
   maxQueueLength int32
   maxParallelism int32
-  graphStates *flowGraphStates
 }
 func (node *baseNode) MaxQueueLength() int32
 func (node *baseNode) MaxParallelism() int32
 func (node *baseNode) SetMaxQueueLength(n int32)
 func (node *baseNode) SetMaxParallelism(n int32)
-func (node *baseNode) SetPipelineStates(states *flowGraphStates)
+func (node *BaseNode) IsInputNode() bool
 ```
 
 ###### A.4.4 Flow Graph
 
 ```go
 type nodeCtx struct {
-  node *Node
-  inputChans [](*chan *Msg)
-  outputChans [](*chan *Msg)
-  inputMsgs [](*Msg List)
-  downstreams []*nodeCtx
-  skippedTick Timestamp
+  node                   Node
+  inputChannels          []chan *MsgWithCtx
+  inputMessages          []Msg
+  downstream             []*nodeCtx
+  downstreamInputChanIdx map[string]int
+  
+  NumActiveTasks    int64
+  NumCompletedTasks int64
 }
 
 func (nodeCtx *nodeCtx) Start(ctx context.Context) error
@@ -144,11 +139,11 @@ func (nodeCtx *nodeCtx) Start(ctx context.Context) error
 
 ```go
 type TimeTickedFlowGraph struct {
-  states *flowGraphStates
-  nodeCtx map[string]*nodeCtx
+  ctx     context.Context
+  nodeCtx map[NodeName]*nodeCtx
 }
 
-func (*pipeline TimeTickedFlowGraph) AddNode(node *Node)
+func (*pipeline TimeTickedFlowGraph) AddNode(node Node)
 func (*pipeline TimeTickedFlowGraph) SetEdges(nodeName string, in []string, out []string)
 func (*pipeline TimeTickedFlowGraph) Start() error
 func (*pipeline TimeTickedFlowGraph) Close() error
@@ -161,14 +156,31 @@ func NewTimeTickedFlowGraph(ctx context.Context) *TimeTickedFlowGraph
 #### A.5 ID Allocator
 
 ```go
-type IdAllocator struct {
+type IDAllocator struct {
+  Allocator
+  
+  masterAddress string
+  masterConn    *grpc.ClientConn
+  masterClient  masterpb.MasterServiceClient
+  
+  countPerRPC uint32
+  
+  idStart UniqueID
+  idEnd   UniqueID
+  
+  PeerID UniqueID
 }
 
-func (allocator *IdAllocator) Start() error
-func (allocator *IdAllocator) Close() error
-func (allocator *IdAllocator) Alloc(count uint32) ([]int64, error)
+func (ia *IDAllocator) Start() error
+func (ia *IDAllocator) connectMaster() error
+func (ia *IDAllocator) syncID() bool
+func (ia *IDAllocator) checkSyncFunc(timeout bool) bool
+func (ia *IDAllocator) pickCanDoFunc()
+func (ia *IDAllocator) processFunc(req Request) error
+func (ia *IDAllocator) AllocOne() (UniqueID, error)
+func (ia *IDAllocator) Alloc(count uint32) (UniqueID, UniqueID, error)
 
-func NewIdAllocator(ctx context.Context) *IdAllocator
+func NewIDAllocator(ctx context.Context, masterAddr string) (*IDAllocator, error)
 ```
 
 
@@ -217,17 +229,22 @@ type Timestamp uint64
 
 ```go
 type timestampOracle struct {
-  client *etcd.Client // client of a reliable meta service, i.e. etcd client
-  rootPath string // this timestampOracle's working root path on the reliable kv service
-  saveInterval uint64
-  lastSavedTime uint64
-  tso Timestamp // monotonically increasing timestamp
+  key    string
+  kvBase kv.TxnBase
+  
+  saveInterval  time.Duration
+  maxResetTSGap func() time.Duration
+  
+  TSO           unsafe.Pointer
+  lastSavedTime atomic.Value
 }
 
-func (tso *timestampOracle) GetTimestamp(count uint32) ([]Timestamp, error)
-
-func (tso *timestampOracle) saveTimestamp() error
-func (tso *timestampOracle) loadTimestamp() error
+func (t *timestampOracle) InitTimestamp() error
+func (t *timestampOracle) ResetUserTimestamp(tso uint64) error
+func (t *timestampOracle) saveTimestamp(ts time.time) error
+func (t *timestampOracle) loadTimestamp() (time.time, error)
+func (t *timestampOracle) UpdateTimestamp() error
+func (t *timestampOracle) ResetTimestamp()
 ```
 
 
@@ -235,13 +252,30 @@ func (tso *timestampOracle) loadTimestamp() error
 ###### A.6.3 Timestamp Allocator
 
 ```go
-type TimestampAllocator struct {}
+type TimestampAllocator struct {
+  Allocator
+  
+  masterAddress string
+  masterConn    *grpc.ClientConn
+  masterClient  masterpb.MasterServiceClient
+  
+  countPerRPC uint32
+  lastTsBegin Timestamp
+  lastTsEnd   Timestamp
+  PeerID      UniqueID
+}
 
-func (allocator *TimestampAllocator) Start() error
-func (allocator *TimestampAllocator) Close() error
-func (allocator *TimestampAllocator) Alloc(count uint32) ([]Timestamp, error)
+func (ta *TimestampAllocator) Start() error
+func (ta *TimestampAllocator) connectMaster() error
+func (ta *TimestampAllocator) syncID() bool
+func (ta *TimestampAllocator) checkSyncFunc(timeout bool) bool
+func (ta *TimestampAllocator) pickCanDoFunc()
+func (ta *TimestampAllocator) processFunc(req Request) error
+func (ta *TimestampAllocator) AllocOne() (UniqueID, error)
+func (ta *TimestampAllocator) Alloc(count uint32) (UniqueID, UniqueID, error)
+func (ta *TimestampAllocator) ClearCache()
 
-func NewTimestampAllocator() *TimestampAllocator
+func NewTimestampAllocator(ctx context.Context, masterAddr string) (*TimestampAllocator, error)
 ```
 
 
@@ -259,29 +293,31 @@ func NewTimestampAllocator() *TimestampAllocator
 ###### A.7.1 KV Base
 
 ```go
-type KVBase interface {
-	Load(key string) (string, error)
-    MultiLoad(keys []string) ([]string, error)
-	Save(key, value string) error
-    MultiSave(kvs map[string]string) error
-	Remove(key string) error
-
-    MultiRemove(keys []string) error
-    MultiSaveAndRemove(saves map[string]string, removals []string) error
-
-	Watch(key string) clientv3.WatchChan
-	WatchWithPrefix(key string) clientv3.WatchChan
-	LoadWithPrefix(key string) ( []string, []string, error)
+type Base interface {
+  Load(key string) (string, error)
+  MultiLoad(keys []string) ([]string, error)
+  LoadWithPrefix(key string) ([]string, []string, error)
+  Save(key, value string) error
+  MultiSave(kvs map[string]string) error
+  Remove(key string) error
+  MultiRemove(keys []string) error
+  
+  Close()
 }
 ```
 
-* *MultiLoad(keys []string)* Load multiple kv pairs. Loads are done transactional.
-* *MultiSave(kvs map[string]string)* Save multiple kv pairs. Saves are done transactional.
-* *MultiRemove(keys []string)* Remove multiple kv pairs. Removals are done transactional.
+###### A.7.2 Txn Base
+
+```go
+type TxnBase interface {
+  Base
+  MultiSaveAndRemove(saves map[string]string, removals []string) error
+}
+```
 
 
 
-###### A.7.2 Etcd KV
+###### A.7.3 Etcd KV
 
 ```go
 type EtcdKV struct {
@@ -289,8 +325,23 @@ type EtcdKV struct {
 	rootPath string
 }
 
+func (kv *EtcdKV) Close()
+func (kv *EtcdKV) GetPath(key string) string
+func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error)
+func (kv *EtcdKV) Load(key string) (string, error)
+func (kv *EtcdKV) GetCount(key string) (int64, error)
+func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error)
+func (kv *EtcdKV) Save(key, value string) error
+func (kv *EtcdKV) MultiSave(kvs map[string]string) error
+func (kv *EtcdKV) RemoveWithPrefix(prefix string) error
+func (kv *EtcdKV) Remove(key string) error
+func (kv *EtcdKV) MultiRemove(keys []string) error
+func (kv *EtcdKV) MultiSaveAndRemove(saves map[string]string, removals []string) error
+func (kv *EtcdKV) Watch(key string) clientv3.WatchChan
+func (kv *EtcdKV) WatchWithPrefix(key string) clientv3.WatchChan
+
 func NewEtcdKV(etcdAddr string, rootPath string) *EtcdKV
 ```
 
-EtcdKV implements all *KVBase* interfaces.
+EtcdKV implements all *TxnBase* interfaces.
 

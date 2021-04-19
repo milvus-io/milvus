@@ -158,8 +158,7 @@ func (i *NodeImpl) SetIndexServiceClient(serviceClient typeutil.IndexServiceInte
 	i.serviceClient = serviceClient
 }
 
-func (i *NodeImpl) BuildIndex(request *indexpb.BuildIndexCmd) (*commonpb.Status, error) {
-	ctx := context.Background()
+func (i *NodeImpl) BuildIndex(ctx context.Context, request *indexpb.BuildIndexCmd) (*commonpb.Status, error) {
 	t := &IndexBuildTask{
 		BaseTask: BaseTask{
 			ctx:  ctx,
@@ -185,7 +184,7 @@ func (i *NodeImpl) BuildIndex(request *indexpb.BuildIndexCmd) (*commonpb.Status,
 	return ret, nil
 }
 
-func (i *NodeImpl) DropIndex(request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+func (i *NodeImpl) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	i.sched.IndexBuildQueue.tryToRemoveUselessIndexBuildTask(request.IndexID)
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -203,7 +202,7 @@ func (i *NodeImpl) AddCloseCallback(callbacks ...func()) {
 	i.closeCallbacks = append(i.closeCallbacks, callbacks...)
 }
 
-func (i *NodeImpl) GetComponentStates() (*internalpb2.ComponentStates, error) {
+func (i *NodeImpl) GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error) {
 
 	stateInfo := &internalpb2.ComponentInfo{
 		NodeID:    Params.NodeID,
@@ -221,7 +220,7 @@ func (i *NodeImpl) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	return ret, nil
 }
 
-func (i *NodeImpl) GetTimeTickChannel() (*milvuspb.StringResponse, error) {
+func (i *NodeImpl) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -229,7 +228,7 @@ func (i *NodeImpl) GetTimeTickChannel() (*milvuspb.StringResponse, error) {
 	}, nil
 }
 
-func (i *NodeImpl) GetStatisticsChannel() (*milvuspb.StringResponse, error) {
+func (i *NodeImpl) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,

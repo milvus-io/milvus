@@ -22,6 +22,7 @@ type Component interface {
 	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 }
 
+// TODO
 type IndexNodeInterface interface {
 	Service
 	Component

@@ -13,15 +13,12 @@
 ```go
 type IndexService interface {
   Service
-  RegisterNode(RegisterNodeRequest) (RegisterNodeResponse, error)
-  BuildIndex(BuildIndexRequest) (BuildIndexResponse, error)
-  GetIndexStates(IndexStatesRequest) (IndexStatesResponse, error)
-  GetIndexFilePaths(IndexFilePathRequest) (IndexFilePathsResponse, error)
-  DropIndex(DropIndexRequest) (Status, error)
-  GetTimeTickChannel() (StringResponse, error)
-  GetStatisticsChannel() (StringResponse, error)
-  NotifyTaskState(TaskStateNotification) error
-
+  Component
+  RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error)
+  BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error)
+  GetIndexStates(ctx context.Context, req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error)
+  GetIndexFilePaths(ctx context.Context, req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error)
+  NotifyBuildIndex(ctx context.Context, nty *indexpb.BuildIndexNotification) (*commonpb.Status, error)
 }
 ```
 
@@ -30,43 +27,53 @@ type IndexService interface {
 * *RegisterNode*
 
 ```go
-type RegisterNodeRequest struct {
-  MsgBase
-  Address string
+type MsgBase struct {
+  MsgType   MsgType
+  MsgID     UniqueID
+  Timestamp uint64
+  SourceID  UniqueID
+}
+
+type Address struct {
+  Ip   string
   Port int64
 }
 
+type RegisterNodeRequest struct {
+  Base    *commonpb.MsgBase
+  Address *commonpb.Address
+}
+
+type InitParams struct {
+  NodeID      UniqueID
+  StartParams []*commonpb.KeyValuePair
+}
+
 type RegisterNodeResponse struct {
-  //InitParams
+  InitParams *internalpb2.InitParams
+  Status     *commonpb.Status
 }
 ```
 
 * *BuildIndex*
 
 ```go
+type KeyValuePair struct {
+  Key   string
+  Value string
+}
+
 type BuildIndexRequest struct {
-  DataPaths []string
-  TypeParams map[string]string
-  IndexParams map[string]string
+  IndexName   string
+  IndexID     UniqueID
+  DataPaths   []string
+  TypeParams  []*commonpb.KeyValuePair
+  IndexParams []*commonpb.KeyValuePair
 }
 
 type BuildIndexResponse struct {
-  IndexID UniqueID
-}
-```
-
-
-```go
-type BuildIndexCmd struct {
-  IndexID UniqueID
-  Req BuildIndexRequest
-}
-
-type TaskStateNotification struct {
-  IndexID UniqueID
-  IndexState IndexState
-  IndexFilePaths []string
-  FailReason  string
+  Status       *commonpb.Status
+  IndexBuildID UniqueID
 }
 ```
 
@@ -74,42 +81,62 @@ type TaskStateNotification struct {
 
 ```go
 type IndexStatesRequest struct {
-	IndexID UniqueID 
+  IndexBuildIDs []UniqueID
 }
 
 enum IndexState {
-    NONE = 0;
-    UNISSUED = 1;
-    INPROGRESS = 2;
-    FINISHED = 3;
+  NONE       = 0;
+  UNISSUED   = 1;
+  INPROGRESS = 2;
+  FINISHED   = 3;
+  FAILED     = 4;
+  DELETED    = 5;
+}
+
+type IndexInfo struct {
+  State        commonpb.IndexState
+  IndexBuildID UniqueID
+  IndexID      UniqueID
+  IndexName    string
+  Reason       string
 }
 
 type IndexStatesResponse struct {
-	ID                UniqueID
-	State            IndexState
-	//EnqueueTime       time.Time
-	//ScheduleTime      time.Time
-	//BuildCompleteTime time.Time
+  Status *commonpb.Status
+  States []*IndexInfo
 }
+
+
 ```
 
 * *GetIndexFilePaths*
 
 ```go
 type IndexFilePathRequest struct {
-  IndexID UniqueID
+  IndexBuildIDs []UniqueID
+}
+
+type IndexFilePathInfo struct {
+  Status         *commonpb.Status
+  IndexBuildID   UniqueID
+  IndexFilePaths []string
 }
 
 type IndexFilePathsResponse struct {
-  FilePaths []string
+  Status    *commonpb.Status
+  FilePaths []*IndexFilePathInfo
 }
+
 ```
 
-* *DropIndex*
+* *NotifyBuildIndex*
 
 ```go
-type DropIndexRequest struct {
-    IndexID UniqueID
+type BuildIndexNotification struct {
+  Status         *commonpb.Status
+  IndexBuildID   UniqueID
+  IndexFilePaths []string
+  NodeID         UniqueID
 }
 ```
 
@@ -120,10 +147,39 @@ type DropIndexRequest struct {
 ```go
 type IndexNode interface {
   Service
-//  SetTimeTickChannel(channelName string) error
-//  SetStatsChannel(channelName string) error
-  
-  BuildIndex(req BuildIndexCmd) error
+  Component
+  BuildIndex(ctx context.Context, req *indexpb.BuildIndexCmd) (*commonpb.Status, error)
+  DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
 }
 ```
 
+* *BuildIndex*
+
+```go
+
+type KeyValuePair struct {
+  Key   string
+  Value string
+}
+
+type BuildIndexRequest struct {
+  IndexName   string
+  IndexID     UniqueID
+  DataPaths   []string
+  TypeParams  []*commonpb.KeyValuePair
+  IndexParams []*commonpb.KeyValuePair
+}
+
+type BuildIndexCmd struct {
+  IndexBuildID UniqueID
+  Req          *BuildIndexRequest
+}
+```
+
+* *DropIndex*
+
+```go
+type DropIndexRequest struct {
+  IndexID UniqueID
+}
+```

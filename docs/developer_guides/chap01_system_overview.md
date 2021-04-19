@@ -77,39 +77,46 @@ In order to boost throughput, we model Milvus as a stream-driven system.
 #### 1.6 System Model
 
 ```go
-type Component interface {
+type Service interface {
   Init() error
   Start() error
   Stop() error
-  GetComponentStates() (ComponentStates, error)
-  GetTimeTickChannel() (string, error)
-  GetStatisticsChannel() (string, error)
+}
+```
+
+```go
+
+type Component interface {
+  GetComponentStates(ctx context.Context) (*internalpb2.ComponentStates, error)
+  GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error)
+  GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 } 
 ```
 
-
-
-* *State*
+* *GetComponentStates*
 
 ```go
+
 type StateCode = int
 
 const (
   INITIALIZING StateCode = 0
-  HEALTHY StateCode = 1
-  ABNORMAL StateCode = 2
+  HEALTHY StateCode      = 1
+  ABNORMAL StateCode     = 2
 )
 
 type ComponentInfo struct {
-  NodeID UniqueID
-  Role string
+  NodeID    UniqueID
+  Role      string
   StateCode StateCode
-  ExtraInfo KeyValuePair
+  ExtraInfo []*commonpb.KeyValuePair
 }
 
 type ComponentStates struct {
-  States ComponentInfo
-  SubcomponentStates []ComponentInfo
+  State                *ComponentInfo 
+  SubcomponentStates   []*ComponentInfo
+  Status               *commonpb.Status
 }
+
 ```
 

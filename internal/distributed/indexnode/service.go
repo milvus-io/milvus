@@ -143,23 +143,23 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexCmd) (*commonpb.Status, error) {
-	return s.impl.BuildIndex(req)
+	return s.impl.BuildIndex(ctx, req)
 }
 
 func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	return s.impl.DropIndex(request)
+	return s.impl.DropIndex(ctx, request)
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	return s.impl.GetComponentStates()
+	return s.impl.GetComponentStates(ctx)
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.impl.GetTimeTickChannel()
+	return s.impl.GetTimeTickChannel(ctx)
 }
 
 func (s *Server) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.impl.GetStatisticsChannel()
+	return s.impl.GetStatisticsChannel(ctx)
 }
 
 func NewServer(ctx context.Context) (*Server, error) {
