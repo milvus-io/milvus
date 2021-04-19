@@ -1,5 +1,14 @@
 package reader
 
+/*
+
+#cgo CFLAGS: -I../core/include
+
+#cgo LDFLAGS: -L../core/lib -lmilvus_dog_segment -Wl,-rpath=../core/lib
+
+#include "segment_c.h"
+
+*/
 import "C"
 import (
 	"errors"
@@ -14,9 +23,9 @@ type Segment struct {
 	SegmentCloseTime uint64
 }
 
-func (p *Partition) NewSegment() (*Segment, error) {
+func (p *Partition) NewSegment(segmentId uint64) (*Segment, error) {
 	// TODO: add segment id
-	segmentPtr, status := C.CreateSegment(p.PartitionPtr)
+	segmentPtr, status := C.SegmentBaseInit(p.PartitionPtr)
 
 	if status != 0 {
 		return nil, errors.New("create segment failed")
