@@ -11,8 +11,6 @@ import (
 	"unsafe"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
@@ -610,20 +608,17 @@ func newInsertBufferNode(ctx context.Context, outCh chan *insertFlushSyncMsg) *i
 	kvClient := etcdkv.NewEtcdKV(cli, MetaRootPath)
 
 	// MinIO
-	minioendPoint := Params.MinioAddress
-	miniioAccessKeyID := Params.MinioAccessKeyID
-	miniioSecretAccessKey := Params.MinioSecretAccessKey
-	minioUseSSL := Params.MinioUseSSL
-	minioBucketName := Params.MinioBucketName
 
-	minioClient, err := minio.New(minioendPoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(miniioAccessKeyID, miniioSecretAccessKey, ""),
-		Secure: minioUseSSL,
-	})
-	if err != nil {
-		panic(err)
+	option := &miniokv.Option{
+		Address:           Params.MinioAddress,
+		AccessKeyID:       Params.MinioAccessKeyID,
+		SecretAccessKeyID: Params.MinioSecretAccessKey,
+		UseSSL:            Params.MinioUseSSL,
+		CreateBucket:      true,
+		BucketName:        Params.MinioBucketName,
 	}
-	minIOKV, err := miniokv.NewMinIOKV(ctx, minioClient, minioBucketName)
+
+	minIOKV, err := miniokv.NewMinIOKV(ctx, option)
 	if err != nil {
 		panic(err)
 	}

@@ -2,11 +2,15 @@ package miniokv
 
 import (
 	"context"
+	"fmt"
+
 	"io"
 	"log"
 	"strings"
 
 	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 )
 
 type MinIOKV struct {
@@ -15,24 +19,46 @@ type MinIOKV struct {
 	bucketName  string
 }
 
-// NewMinIOKV creates a new MinIO kv.
-func NewMinIOKV(ctx context.Context, client *minio.Client, bucketName string) (*MinIOKV, error) {
+type Option struct {
+	Address           string
+	AccessKeyID       string
+	BucketName        string
+	SecretAccessKeyID string
+	UseSSL            bool
+	CreateBucket      bool // when bucket not existed, create it
+}
 
-	bucketExists, err := client.BucketExists(ctx, bucketName)
+func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
+	minIOClient, err := minio.New(option.Address, &minio.Options{
+		Creds:  credentials.NewStaticV4(option.AccessKeyID, option.SecretAccessKeyID, ""),
+		Secure: option.UseSSL,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	if !bucketExists {
-		err = client.MakeBucket(ctx, bucketName, minio.MakeBucketOptions{})
-		if err != nil {
-			return nil, err
+	bucketExists, err := minIOClient.BucketExists(ctx, option.BucketName)
+	if err != nil {
+		return nil, err
+	}
+
+	if option.CreateBucket {
+		if !bucketExists {
+			err = minIOClient.MakeBucket(ctx, option.BucketName, minio.MakeBucketOptions{})
+			if err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		if !bucketExists {
+			return nil, errors.New(fmt.Sprintf("Bucket %s not Existed.", option.BucketName))
 		}
 	}
+
 	return &MinIOKV{
 		ctx:         ctx,
-		minioClient: client,
-		bucketName:  bucketName,
+		minioClient: minIOClient,
+		bucketName:  option.BucketName,
 	}, nil
 }
 

@@ -24,10 +24,8 @@ target_link_libraries(all_tests
         gtest_main
         milvus_segcore
         milvus_indexbuilder
-        knowhere
         log
         pthread
-        milvus_utils
         )
 
 install (TARGETS all_tests DESTINATION unittest)

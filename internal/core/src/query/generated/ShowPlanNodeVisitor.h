@@ -20,7 +20,7 @@
 #include "PlanNodeVisitor.h"
 
 namespace milvus::query {
-class ShowPlanNodeVisitor : PlanNodeVisitor {
+class ShowPlanNodeVisitor : public PlanNodeVisitor {
  public:
     void
     visit(FloatVectorANNS& node) override;
