@@ -50,7 +50,4 @@ func TestParamTable(t *testing.T) {
 
 	assert.NotEqual(t, Params.DefaultIndexName, "")
 	t.Logf("default index name = %s", Params.DefaultIndexName)
-
-	assert.NotZero(t, Params.Timeout)
-	t.Logf("master timeout = %d", Params.Timeout)
 }

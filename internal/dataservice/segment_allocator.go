@@ -2,7 +2,6 @@ package dataservice
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"sync"
 	"time"
@@ -41,7 +40,7 @@ type segmentAllocator interface {
 	// ExpireAllocations check all allocations' expire time and remove the expired allocation.
 	ExpireAllocations(timeTick Timestamp) error
 	// SealAllSegments get all opened segment ids of collection. return success and failed segment ids
-	SealAllSegments(collectionID UniqueID) (bool, []UniqueID)
+	SealAllSegments(collectionID UniqueID)
 	// IsAllocationsExpired check all allocations of segment expired.
 	IsAllocationsExpired(segmentID UniqueID, ts Timestamp) (bool, error)
 }
@@ -208,9 +207,6 @@ func (allocator *segmentAllocatorImpl) SealSegment(segmentID UniqueID) error {
 	if !ok {
 		return nil
 	}
-	if err := allocator.mt.SealSegment(segmentID); err != nil {
-		return err
-	}
 	status.sealed = true
 	return nil
 }
@@ -246,23 +242,15 @@ func (allocator *segmentAllocatorImpl) IsAllocationsExpired(segmentID UniqueID, 
 	return status.lastExpireTime <= ts, nil
 }
 
-func (allocator *segmentAllocatorImpl) SealAllSegments(collectionID UniqueID) (bool, []UniqueID) {
+func (allocator *segmentAllocatorImpl) SealAllSegments(collectionID UniqueID) {
 	allocator.mu.Lock()
 	defer allocator.mu.Unlock()
-	failed := make([]UniqueID, 0)
-	success := true
 	for _, status := range allocator.segments {
 		if status.collectionID == collectionID {
 			if status.sealed {
 				continue
 			}
-			if err := allocator.mt.SealSegment(status.id); err != nil {
-				log.Printf("seal segment error: %s", err.Error())
-				failed = append(failed, status.id)
-				success = false
-			}
 			status.sealed = true
 		}
 	}
-	return success, failed
 }

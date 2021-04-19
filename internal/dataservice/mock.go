@@ -12,7 +12,7 @@ import (
 
 func newMemoryMeta(allocator allocator) (*meta, error) {
 	memoryKV := memkv.NewMemoryKV()
-	return newMeta(memoryKV, allocator)
+	return newMeta(memoryKV)
 }
 
 type MockAllocator struct {

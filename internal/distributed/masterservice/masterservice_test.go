@@ -1,7 +1,6 @@
 package masterservice
 
 import (
-	"context"
 	"fmt"
 	"math/rand"
 	"regexp"
@@ -27,7 +26,7 @@ func TestGrpcService(t *testing.T) {
 	//cms.Params.Address = "127.0.0.1"
 	cms.Params.Port = (randVal % 100) + 10000
 
-	svr, err := NewGrpcServer(context.Background())
+	svr, err := NewGrpcServer()
 	assert.Nil(t, err)
 
 	// cms.Params.NodeID = 0
