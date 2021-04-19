@@ -3,8 +3,7 @@ package writer
 import (
 	"context"
 	"github.com/czs007/suvlim/pulsar/schema"
-	"github.com/czs007/suvlim/storage/pkg"
-	"github.com/czs007/suvlim/storage/pkg/types"
+	"github.com/czs007/suvlim/writer/mock"
 	"strconv"
 )
 
@@ -18,7 +17,7 @@ type writeNode struct {
 	segmentCloseTime     uint64
 	nextSegmentId        string
 	nextSegmentCloseTime uint64
-	kvStore              *types.Store
+	KvStore              *mock.TikvStore
 	timeSyncTable        *writeNodeTimeSync
 }
 
@@ -28,14 +27,13 @@ func NewWriteNode(ctx context.Context,
 	nextSegmentId string,
 	nextCloseSegmentTime uint64,
 	timeSync uint64) (*writeNode, error) {
-	ctx = context.Background()
-	store, err := storage.NewStore(ctx, "TIKV")
+	store, err := mock.NewTikvStore()
 	writeTableTimeSync := &writeNodeTimeSync{deleteTimeSync: timeSync, insertTimeSync: timeSync}
 	if err != nil {
 		return nil, err
 	}
 	return &writeNode{
-		kvStore:              store,
+		KvStore:              store,
 		openSegmentId:        openSegmentId,
 		nextSegmentId:        nextSegmentId,
 		segmentCloseTime:     closeTime,
@@ -44,7 +42,7 @@ func NewWriteNode(ctx context.Context,
 	}, nil
 }
 
-func (s *writeNode) InsertBatchData(ctx context.Context, data []schema.InsertMsg, timeSync uint64) error {
+func (s *writeNode) InsertBatchData(ctx context.Context, data []*schema.InsertMsg, timeSync uint64) error {
 	var i int
 	var storeKey string
 
@@ -64,12 +62,12 @@ func (s *writeNode) InsertBatchData(ctx context.Context, data []schema.InsertMsg
 		s.segmentCloseTime = s.nextSegmentCloseTime
 	}
 
-	err := (*s.kvStore).PutRows(ctx, keys, binaryData, s.openSegmentId, timeStamps)
+	err := (*s.KvStore).PutRows(ctx, keys, binaryData, s.openSegmentId, timeStamps)
 	s.UpdateInsertTimeSync(timeSync)
 	return err
 }
 
-func (s *writeNode) DeleteBatchData(ctx context.Context, data []schema.DeleteMsg, timeSync uint64) error {
+func (s *writeNode) DeleteBatchData(ctx context.Context, data []*schema.DeleteMsg, timeSync uint64) error {
 	var i int
 	var storeKey string
 
@@ -82,9 +80,9 @@ func (s *writeNode) DeleteBatchData(ctx context.Context, data []schema.DeleteMsg
 		timeStamps = append(timeStamps, data[i].Timestamp)
 	}
 
-	//TODO:Get segment id for delete data and deliver those message to specify topic
-
-	err := (*s.kvStore).DeleteRows(ctx, keys, timeStamps)
+	segments := (*s.KvStore).GetSegment(ctx, keys)
+	mock.DeliverSegmentIds(keys, segments)
+	err := (*s.KvStore).DeleteRows(ctx, keys, timeStamps)
 	s.UpdateDeleteTimeSync(timeSync)
 	return err
 }
