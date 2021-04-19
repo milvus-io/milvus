@@ -28,6 +28,7 @@ type ParamTable struct {
 func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
+		pt.initPort()
 		pt.initMasterAddress()
 		pt.initIndexServiceAddress()
 		pt.initDataServiceAddress()
@@ -92,4 +93,9 @@ func (pt *ParamTable) initQueryServiceAddress() {
 		panic(err)
 	}
 	pt.QueryServiceAddress = ret
+}
+
+func (pt *ParamTable) initPort() {
+	port := pt.ParseInt("queryNode.port")
+	pt.QueryNodePort = port
 }

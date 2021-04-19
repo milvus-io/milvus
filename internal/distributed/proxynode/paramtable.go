@@ -78,7 +78,7 @@ func (pt *ParamTable) LoadFromEnv() {
 
 func (pt *ParamTable) initParams() {
 	pt.initPoxyServicePort()
-
+	pt.initPort()
 	pt.initProxyServiceAddress()
 	pt.initMasterAddress()
 	pt.initIndexServerAddress()
@@ -181,4 +181,9 @@ func (pt *ParamTable) initQueryServiceAddress() {
 		panic(err)
 	}
 	pt.QueryServiceAddress = addr + ":" + port
+}
+
+func (pt *ParamTable) initPort() {
+	port := pt.ParseInt("proxyNode.port")
+	pt.Port = port
 }

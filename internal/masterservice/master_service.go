@@ -108,7 +108,7 @@ type Core struct {
 		Segment Flush Watcher, monitor if segment has flushed into disk
 
 		IndexService Interface:
-		indexBuilder Sch, tell index service to build index
+		IndexService Sch, tell index service to build index
 	*/
 
 	MetaTable *metaTable

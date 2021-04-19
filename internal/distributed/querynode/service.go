@@ -57,7 +57,9 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 func (s *Server) init() error {
 
 	Params.Init()
-	Params.QueryNodePort = funcutil.GetAvailablePort()
+	if !funcutil.CheckPortAvailable(Params.QueryNodePort) {
+		Params.QueryNodePort = funcutil.GetAvailablePort()
+	}
 	Params.LoadFromEnv()
 	Params.LoadFromArgs()
 
