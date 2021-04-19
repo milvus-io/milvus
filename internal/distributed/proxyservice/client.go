@@ -44,9 +44,9 @@ func (c *Client) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMe
 	return err
 }
 
-func NewClient(ctx context.Context, address string) *Client {
+func NewClient(address string) *Client {
 	return &Client{
 		address: address,
-		ctx:     ctx,
+		ctx:     context.Background(),
 	}
 }
