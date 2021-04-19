@@ -14,14 +14,10 @@ master:
   port: 53100
   pulsarmoniterinterval: 1
   pulsartopic: "monitor-topic"
-  defaultSizePerRecord: 1024
-  minimumAssignSize: 1048576
-  segmentThreshold: 536870912
-  segmentExpireDuration: 2000
+  segmentthreshold: 1073741824
   proxyidlist: [0]
   querynodenum: 1
   writenodenum: 1
-  statsChannels: "statistic"
 
 etcd:
   address: localhost

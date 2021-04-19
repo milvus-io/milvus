@@ -174,7 +174,7 @@ func TestSegmentManagement_SegmentStatisticService(t *testing.T) {
 	producerChannels := []string{"statistic"}
 
 	statsStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
-	statsStream.SetPulsarClient(pulsarURL)
+	statsStream.SetPulsarCient(pulsarURL)
 	statsStream.CreatePulsarProducers(producerChannels)
 
 	var statsMsgStream msgstream.MsgStream = statsStream

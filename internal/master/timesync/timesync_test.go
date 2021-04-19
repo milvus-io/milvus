@@ -38,13 +38,13 @@ func initPulsarStream(pulsarAddress string,
 
 	// set input stream
 	inputStream := ms.NewPulsarMsgStream(context.Background(), 100)
-	inputStream.SetPulsarClient(pulsarAddress)
+	inputStream.SetPulsarCient(pulsarAddress)
 	inputStream.CreatePulsarProducers(producerChannels)
 	var input ms.MsgStream = inputStream
 
 	// set output stream
 	outputStream := ms.NewPulsarMsgStream(context.Background(), 100)
-	outputStream.SetPulsarClient(pulsarAddress)
+	outputStream.SetPulsarCient(pulsarAddress)
 	unmarshalDispatcher := ms.NewUnmarshalDispatcher()
 	outputStream.CreatePulsarConsumers(consumerChannels, consumerSubName, unmarshalDispatcher, 100)
 	outputStream.Start()

@@ -449,7 +449,7 @@ func (mt *metaTable) DeleteSegment(segID UniqueID) error {
 	return nil
 
 }
-func (mt *metaTable) CloseSegment(segID UniqueID, closeTs Timestamp, numRows int64, memSize int64) error {
+func (mt *metaTable) CloseSegment(segID UniqueID, closeTs Timestamp, numRows int64) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -460,7 +460,6 @@ func (mt *metaTable) CloseSegment(segID UniqueID, closeTs Timestamp, numRows int
 
 	segMeta.CloseTime = closeTs
 	segMeta.NumRows = numRows
-	segMeta.MemSize = memSize
 
 	err := mt.saveSegmentMeta(&segMeta)
 	if err != nil {

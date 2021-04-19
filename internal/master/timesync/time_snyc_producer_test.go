@@ -42,7 +42,7 @@ func initTestPulsarStream(ctx context.Context, pulsarAddress string,
 
 	// set input stream
 	inputStream := ms.NewPulsarMsgStream(ctx, 100)
-	inputStream.SetPulsarClient(pulsarAddress)
+	inputStream.SetPulsarCient(pulsarAddress)
 	inputStream.CreatePulsarProducers(producerChannels)
 	for _, opt := range opts {
 		inputStream.SetRepackFunc(opt)
@@ -51,7 +51,7 @@ func initTestPulsarStream(ctx context.Context, pulsarAddress string,
 
 	// set output stream
 	outputStream := ms.NewPulsarMsgStream(ctx, 100)
-	outputStream.SetPulsarClient(pulsarAddress)
+	outputStream.SetPulsarCient(pulsarAddress)
 	unmarshalDispatcher := ms.NewUnmarshalDispatcher()
 	outputStream.CreatePulsarConsumers(consumerChannels, consumerSubName, unmarshalDispatcher, 100)
 	var output ms.MsgStream = outputStream
