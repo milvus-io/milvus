@@ -14,7 +14,7 @@ import (
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := grpcproxyservice.CreateProxyServiceServer()
+	svr, err := grpcproxyservice.NewServer()
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}
@@ -32,12 +32,8 @@ func main() {
 		cancel()
 	}()
 
-	if err := svr.Init(); err != nil {
+	if err := svr.Run(); err != nil {
 		log.Fatal("init server failed", zap.Error(err))
-	}
-
-	if err := svr.Start(); err != nil {
-		log.Fatal("run server failed", zap.Error(err))
 	}
 
 	<-ctx.Done()

@@ -83,6 +83,7 @@ func (s *ServiceImpl) fillNodeInitParams() error {
 }
 
 func (s *ServiceImpl) Init() error {
+
 	err := s.fillNodeInitParams()
 	if err != nil {
 		return err
@@ -102,7 +103,7 @@ func (s *ServiceImpl) Init() error {
 	ttBarrier := newSoftTimeTickBarrier(s.ctx, nodeTimeTickMsgStream, []UniqueID{0}, 10)
 	s.tick = newTimeTick(s.ctx, ttBarrier, serviceTimeTickMsgStream)
 
-	s.state.State.StateCode = internalpb2.StateCode_HEALTHY
+	s.stateCode = internalpb2.StateCode_HEALTHY
 
 	return nil
 }
@@ -119,7 +120,24 @@ func (s *ServiceImpl) Stop() error {
 }
 
 func (s *ServiceImpl) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	return s.state, nil
+	stateInfo := &internalpb2.ComponentInfo{
+		NodeID:    UniqueID(0),
+		Role:      "ProxyService",
+		StateCode: s.stateCode,
+	}
+
+	ret := &internalpb2.ComponentStates{
+		State:              stateInfo,
+		SubcomponentStates: nil, // todo add subcomponents states
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+	}
+	return ret, nil
+}
+
+func (s *ServiceImpl) UpdateStateCode(code internalpb2.StateCode) {
+	s.stateCode = code
 }
 
 func (s *ServiceImpl) GetTimeTickChannel() (string, error) {

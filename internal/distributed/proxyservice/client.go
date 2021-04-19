@@ -2,14 +2,14 @@ package grpcproxyservice
 
 import (
 	"context"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"time"
 
 	"google.golang.org/grpc"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 )
 
 type Client struct {
@@ -18,41 +18,40 @@ type Client struct {
 	ctx                context.Context
 }
 
-func (c *Client) tryConnect() error {
-	if c.proxyServiceClient != nil {
+func (c *Client) Init() error {
+	connectGrpcFunc := func() error {
+		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock())
+		if err != nil {
+			return err
+		}
+		c.proxyServiceClient = proxypb.NewProxyServiceClient(conn)
 		return nil
 	}
-	conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock())
+	err := retry.Retry(10, time.Millisecond*200, connectGrpcFunc)
 	if err != nil {
 		return err
 	}
-	c.proxyServiceClient = proxypb.NewProxyServiceClient(conn)
+	return nil
+}
+
+func (c *Client) Start() error {
+	return nil
+}
+
+func (c *Client) Stop() error {
 	return nil
 }
 
 func (c *Client) RegisterNode(request *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error) {
-	err := c.tryConnect()
-	if err != nil {
-		return nil, err
-	}
 	return c.proxyServiceClient.RegisterNode(c.ctx, request)
 }
 
 func (c *Client) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) error {
-	var err error
-	err = c.tryConnect()
-	if err != nil {
-		return err
-	}
-	_, err = c.proxyServiceClient.InvalidateCollectionMetaCache(c.ctx, request)
+	_, err := c.proxyServiceClient.InvalidateCollectionMetaCache(c.ctx, request)
 	return err
 }
 
 func (c *Client) GetTimeTickChannel() (string, error) {
-	err := c.tryConnect()
-	if err != nil {
-		return "", err
-	}
 	response, err := c.proxyServiceClient.GetTimeTickChannel(c.ctx, &commonpb.Empty{})
 	if err != nil {
 		return "", err
@@ -61,11 +60,11 @@ func (c *Client) GetTimeTickChannel() (string, error) {
 }
 
 func (c *Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	err := c.tryConnect()
-	if err != nil {
-		return nil, err
-	}
 	return c.proxyServiceClient.GetComponentStates(c.ctx, &commonpb.Empty{})
+}
+
+func (c *Client) GetStatisticsChannel() (string, error) {
+	return "", nil
 }
 
 func NewClient(address string) *Client {

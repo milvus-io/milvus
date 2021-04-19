@@ -8,6 +8,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
+
+	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -32,17 +38,20 @@ type NodeImpl struct {
 	ip         string
 	port       int
 
-	masterClient       MasterClientInterface
+	stateCode internalpb2.StateCode
+
+	masterClient       MasterClient
 	indexServiceClient IndexServiceClient
-	queryServiceClient QueryServiceClient
 	dataServiceClient  DataServiceClient
+	proxyServiceClient ProxyServiceClient
+	queryServiceClient QueryServiceClient
 
 	sched *TaskScheduler
 	tick  *timeTick
 
 	idAllocator  *allocator.IDAllocator
 	tsoAllocator *allocator.TimestampAllocator
-	segAssigner  *allocator.SegIDAssigner
+	segAssigner  *SegIDAssigner
 
 	manipulationMsgStream *pulsarms.PulsarMsgStream
 	queryMsgStream        *pulsarms.PulsarMsgStream
@@ -55,7 +64,7 @@ type NodeImpl struct {
 	closeCallbacks []func()
 }
 
-func CreateProxyNodeImpl(ctx context.Context) (*NodeImpl, error) {
+func NewProxyNodeImpl(ctx context.Context) (*NodeImpl, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	node := &NodeImpl{
@@ -64,42 +73,110 @@ func CreateProxyNodeImpl(ctx context.Context) (*NodeImpl, error) {
 	}
 
 	return node, nil
+
+}
+
+type Component interface {
+	GetComponentStates() (*internalpb2.ComponentStates, error)
+}
+
+func (node *NodeImpl) waitForServiceReady(service Component, serviceName string) error {
+
+	checkFunc := func() error {
+		resp, err := service.GetComponentStates()
+		if err != nil {
+			return err
+		}
+		if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			return errors.New(resp.Status.Reason)
+		}
+		if resp.State.StateCode != internalpb2.StateCode_HEALTHY {
+			return errors.New("")
+		}
+		return nil
+	}
+	// wait for 10 seconds
+	err := retry.Retry(10, time.Second, checkFunc)
+	if err != nil {
+		errMsg := fmt.Sprintf("ProxyNode wait for %s ready failed", serviceName)
+		return errors.New(errMsg)
+	}
+	return nil
 }
 
 func (node *NodeImpl) Init() error {
-	//Params.Init()
 
-	var err error
+	// todo wait for proxyservice state changed to Healthy
 
-	err = node.masterClient.Init()
-	if err != nil {
-		return err
-	}
-	err = node.indexServiceClient.Init()
-	if err != nil {
-		return err
-	}
-	err = node.queryServiceClient.Init()
-	if err != nil {
-		return err
-	}
-	err = node.dataServiceClient.Init()
+	err := node.waitForServiceReady(node.proxyServiceClient, "ProxyService")
 	if err != nil {
 		return err
 	}
 
-	Params.SearchChannelNames, err = node.queryServiceClient.GetSearchChannelNames()
+	request := &proxypb.RegisterNodeRequest{
+		Address: &commonpb.Address{
+			Ip:   Params.IP,
+			Port: int64(Params.NetworkPort),
+		},
+	}
+
+	response, err := node.proxyServiceClient.RegisterNode(request)
 	if err != nil {
 		return err
 	}
-	Params.SearchResultChannelNames, err = node.queryServiceClient.GetSearchResultChannelNames()
+	if response.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return errors.New(response.Status.Reason)
+	}
+
+	err = Params.LoadConfigFromInitParams(response.InitParams)
 	if err != nil {
 		return err
 	}
-	Params.InsertChannelNames, err = node.dataServiceClient.GetInsertChannelNames()
-	if err != nil {
-		return err
+
+	// wait for dataservice state changed to Healthy
+	if node.dataServiceClient != nil {
+		err = node.waitForServiceReady(node.dataServiceClient, "DataService")
+		if err != nil {
+			return err
+		}
 	}
+
+	// wait for queryservice state changed to Healthy
+	if node.queryServiceClient != nil {
+		err = node.waitForServiceReady(node.queryServiceClient, "QueryService")
+		if err != nil {
+			return err
+		}
+	}
+
+	// wait for indexservice state changed to Healthy
+	if node.indexServiceClient != nil {
+		err = node.waitForServiceReady(node.indexServiceClient, "IndexService")
+		if err != nil {
+			return err
+		}
+	}
+
+	if node.queryServiceClient != nil {
+		resp, err := node.queryServiceClient.CreateQueryChannel()
+		if err != nil {
+			return err
+		}
+		if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			return errors.New(resp.Status.Reason)
+		}
+
+		Params.SearchChannelNames = []string{resp.RequestChannel}
+		Params.SearchResultChannelNames = []string{resp.ResultChannel}
+	}
+
+	node.UpdateStateCode(internalpb2.StateCode_HEALTHY)
+
+	// todo
+	//Params.InsertChannelNames, err = node.dataServiceClient.GetInsertChannels()
+	//if err != nil {
+	//	return err
+	//}
 
 	cfg := &config.Configuration{
 		ServiceName: "proxynode",
@@ -136,7 +213,7 @@ func (node *NodeImpl) Init() error {
 	node.tsoAllocator = tsoAllocator
 	node.tsoAllocator.PeerID = Params.ProxyID
 
-	segAssigner, err := allocator.NewSegIDAssigner(node.ctx, masterAddr, node.lastTick)
+	segAssigner, err := NewSegIDAssigner(node.ctx, node.dataServiceClient, node.lastTick)
 	if err != nil {
 		panic(err)
 	}
@@ -162,23 +239,6 @@ func (node *NodeImpl) Init() error {
 }
 
 func (node *NodeImpl) Start() error {
-	var err error
-	err = node.masterClient.Start()
-	if err != nil {
-		return err
-	}
-	err = node.indexServiceClient.Start()
-	if err != nil {
-		return err
-	}
-	err = node.queryServiceClient.Start()
-	if err != nil {
-		return err
-	}
-	err = node.dataServiceClient.Start()
-	if err != nil {
-		return err
-	}
 	initGlobalMetaCache(node.ctx, node)
 	node.manipulationMsgStream.Start()
 	node.queryMsgStream.Start()
@@ -206,23 +266,6 @@ func (node *NodeImpl) Stop() error {
 	node.manipulationMsgStream.Close()
 	node.queryMsgStream.Close()
 	node.tick.Close()
-	var err error
-	err = node.dataServiceClient.Stop()
-	if err != nil {
-		return err
-	}
-	err = node.queryServiceClient.Stop()
-	if err != nil {
-		return err
-	}
-	err = node.indexServiceClient.Stop()
-	if err != nil {
-		return err
-	}
-	err = node.masterClient.Stop()
-	if err != nil {
-		return err
-	}
 
 	node.wg.Wait()
 
@@ -252,4 +295,24 @@ func (node *NodeImpl) lastTick() Timestamp {
 // AddCloseCallback adds a callback in the Close phase.
 func (node *NodeImpl) AddCloseCallback(callbacks ...func()) {
 	node.closeCallbacks = append(node.closeCallbacks, callbacks...)
+}
+
+func (node *NodeImpl) SetMasterClient(cli MasterClient) {
+	node.masterClient = cli
+}
+
+func (node *NodeImpl) SetIndexServiceClient(cli IndexServiceClient) {
+	node.indexServiceClient = cli
+}
+
+func (node *NodeImpl) SetDataServiceClient(cli DataServiceClient) {
+	node.dataServiceClient = cli
+}
+
+func (node *NodeImpl) SetProxyServiceClient(cli ProxyServiceClient) {
+	node.proxyServiceClient = cli
+}
+
+func (node *NodeImpl) SetQueryServiceClient(cli QueryServiceClient) {
+	node.queryServiceClient = cli
 }

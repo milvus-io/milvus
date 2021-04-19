@@ -9,7 +9,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	cms "github.com/zilliztech/milvus-distributed/internal/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -226,14 +225,4 @@ func (s *GrpcServer) DescribeSegment(ctx context.Context, in *milvuspb.DescribeS
 
 func (s *GrpcServer) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error) {
 	return s.core.ShowSegments(in)
-}
-
-//TODO, move to query node
-func (s *GrpcServer) GetIndexState(ctx context.Context, request *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error) {
-	panic("implement me")
-}
-
-//TODO, move to data service
-func (s *GrpcServer) AssignSegmentID(ctx context.Context, request *datapb.AssignSegIDRequest) (*datapb.AssignSegIDResponse, error) {
-	panic("implement me")
 }

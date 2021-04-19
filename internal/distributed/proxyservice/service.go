@@ -3,85 +3,106 @@ package grpcproxyservice
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"strconv"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
-
 	"github.com/zilliztech/milvus-distributed/internal/proxyservice"
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 	"google.golang.org/grpc"
 )
 
 type Server struct {
-	ctx        context.Context
-	wg         sync.WaitGroup
-	impl       proxyservice.ProxyService
-	grpcServer *grpc.Server
+	ctx context.Context
+	wg  sync.WaitGroup
+
+	grpcServer  *grpc.Server
+	grpcErrChan chan error
+
+	impl *proxyservice.ServiceImpl
 }
 
-func (s *Server) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	channel, err := s.impl.GetTimeTickChannel()
-	if err != nil {
-		return &milvuspb.StringResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			},
-			Value: "",
-		}, nil
+func NewServer() (*Server, error) {
+
+	server := &Server{
+		ctx:         context.Background(),
+		grpcErrChan: make(chan error),
 	}
-	return &milvuspb.StringResponse{
-		Value: channel,
-	}, nil
+
+	var err error
+	server.impl, err = proxyservice.NewServiceImpl(server.ctx)
+	if err != nil {
+		return nil, err
+	}
+	return server, err
 }
 
-func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	return s.impl.GetComponentStates()
-}
+func (s *Server) Run() error {
 
-func CreateProxyServiceServer() (*Server, error) {
-	return &Server{}, nil
-}
+	if err := s.init(); err != nil {
+		return err
+	}
 
-func (s *Server) Init() error {
-	s.ctx = context.Background()
-	Params.Init()
-	proxyservice.Params.Init()
-	s.impl, _ = proxyservice.CreateProxyService(s.ctx)
-	s.impl.Init()
+	if err := s.start(); err != nil {
+		return err
+	}
 	return nil
 }
 
-func (s *Server) Start() error {
-	fmt.Println("proxy service start ...")
+func (s *Server) init() error {
+	Params.Init()
+	proxyservice.Params.Init()
+
 	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.startGrpcLoop(Params.ServicePort)
+	// wait for grpc server loop start
+	if err := <-s.grpcErrChan; err != nil {
+		return err
+	}
+	s.impl.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
 
-		// TODO: use config
-		fmt.Println("network port: ", Params.NetworkPort())
-		lis, err := net.Listen("tcp", ":"+strconv.Itoa(Params.NetworkPort()))
-		if err != nil {
-			panic(err)
-		}
+	if err := s.impl.Init(); err != nil {
+		return err
+	}
+	return nil
+}
 
-		s.grpcServer = grpc.NewServer()
-		proxypb.RegisterProxyServiceServer(s.grpcServer, s)
-		milvuspb.RegisterProxyServiceServer(s.grpcServer, s)
-		if err = s.grpcServer.Serve(lis); err != nil {
-			panic(err)
-		}
-	}()
+func (s *Server) startGrpcLoop(grpcPort int) {
 
-	s.impl.Start()
+	defer s.wg.Done()
 
+	fmt.Println("network port: ", grpcPort)
+	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
+	if err != nil {
+		log.Printf("GrpcServer:failed to listen: %v", err)
+		s.grpcErrChan <- err
+		return
+	}
+
+	ctx, cancel := context.WithCancel(s.ctx)
+	defer cancel()
+
+	s.grpcServer = grpc.NewServer()
+	proxypb.RegisterProxyServiceServer(s.grpcServer, s)
+	milvuspb.RegisterProxyServiceServer(s.grpcServer, s)
+
+	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
+	if err := s.grpcServer.Serve(lis); err != nil {
+		s.grpcErrChan <- err
+	}
+
+}
+
+func (s *Server) start() error {
+	fmt.Println("proxy ServiceImpl start ...")
+	if err := s.impl.Start(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -104,4 +125,24 @@ func (s *Server) RegisterNode(ctx context.Context, request *proxypb.RegisterNode
 
 func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	return &commonpb.Status{}, s.impl.InvalidateCollectionMetaCache(request)
+}
+
+func (s *Server) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
+	channel, err := s.impl.GetTimeTickChannel()
+	if err != nil {
+		return &milvuspb.StringResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+			Value: "",
+		}, nil
+	}
+	return &milvuspb.StringResponse{
+		Value: channel,
+	}, nil
+}
+
+func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
+	return s.impl.GetComponentStates()
 }

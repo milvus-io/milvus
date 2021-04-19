@@ -6,7 +6,6 @@ option go_package="github.com/zilliztech/milvus-distributed/internal/proto/maste
 import "common.proto";
 import "milvus.proto";
 import "internal.proto";
-import "data_service.proto";
 
 message IDRequest {
     common.MsgBase base = 1;
@@ -109,13 +108,9 @@ service MasterService {
 
     rpc CreateIndex(milvus.CreateIndexRequest) returns (common.Status) {}
     rpc DescribeIndex(milvus.DescribeIndexRequest) returns (milvus.DescribeIndexResponse) {}
-    rpc GetIndexState(milvus.IndexStateRequest) returns (milvus.IndexStateResponse) {}
 
     rpc AllocTimestamp(TsoRequest) returns (TsoResponse) {}
     rpc AllocID(IDRequest) returns (IDResponse) {}
-
-    // todo move to data service
-    rpc AssignSegmentID(data.AssignSegIDRequest) returns (data.AssignSegIDResponse) {}
 
     rpc GetComponentStatesRPC(common.Empty) returns (internal.ComponentStates) {}
 

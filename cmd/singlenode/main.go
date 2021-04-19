@@ -65,7 +65,7 @@ func InitProxy(wg *sync.WaitGroup) {
 	//proxynode.Init()
 	//fmt.Println("ProxyID is", proxynode.Params.ProxyID())
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := proxynode.CreateProxyNodeImpl(ctx)
+	svr, err := proxynode.NewProxyNodeImpl(ctx)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}

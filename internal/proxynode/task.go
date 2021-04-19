@@ -188,7 +188,7 @@ func (it *InsertTask) PostExecute() error {
 type CreateCollectionTask struct {
 	Condition
 	*milvuspb.CreateCollectionRequest
-	masterClient MasterClientInterface
+	masterClient MasterClient
 	result       *commonpb.Status
 	ctx          context.Context
 	schema       *schemapb.CollectionSchema
@@ -303,7 +303,7 @@ func (cct *CreateCollectionTask) PostExecute() error {
 type DropCollectionTask struct {
 	Condition
 	*milvuspb.DropCollectionRequest
-	masterClient MasterClientInterface
+	masterClient MasterClient
 	result       *commonpb.Status
 	ctx          context.Context
 }
@@ -645,7 +645,7 @@ func (st *SearchTask) PostExecute() error {
 type HasCollectionTask struct {
 	Condition
 	*milvuspb.HasCollectionRequest
-	masterClient MasterClientInterface
+	masterClient MasterClient
 	result       *milvuspb.BoolResponse
 	ctx          context.Context
 }
@@ -702,7 +702,7 @@ func (hct *HasCollectionTask) PostExecute() error {
 type DescribeCollectionTask struct {
 	Condition
 	*milvuspb.DescribeCollectionRequest
-	masterClient MasterClientInterface
+	masterClient MasterClient
 	result       *milvuspb.DescribeCollectionResponse
 	ctx          context.Context
 }
@@ -763,7 +763,7 @@ func (dct *DescribeCollectionTask) PostExecute() error {
 type ShowCollectionsTask struct {
 	Condition
 	*milvuspb.ShowCollectionRequest
-	masterClient MasterClientInterface
+	masterClient MasterClient
 	result       *milvuspb.ShowCollectionResponse
 	ctx          context.Context
 }
@@ -817,7 +817,7 @@ func (sct *ShowCollectionsTask) PostExecute() error {
 type CreatePartitionTask struct {
 	Condition
 	*milvuspb.CreatePartitionRequest
-	masterClient MasterClientInterface
+	masterClient MasterClient
 	result       *commonpb.Status
 	ctx          context.Context
 }
@@ -880,7 +880,7 @@ func (cpt *CreatePartitionTask) PostExecute() error {
 type DropPartitionTask struct {
 	Condition
 	*milvuspb.DropPartitionRequest
-	masterClient MasterClientInterface
+	masterClient MasterClient
 	result       *commonpb.Status
 	ctx          context.Context
 }
@@ -943,7 +943,7 @@ func (dpt *DropPartitionTask) PostExecute() error {
 type HasPartitionTask struct {
 	Condition
 	*milvuspb.HasPartitionRequest
-	masterClient MasterClientInterface
+	masterClient MasterClient
 	result       *milvuspb.BoolResponse
 	ctx          context.Context
 }
@@ -1059,7 +1059,7 @@ func (hpt *HasPartitionTask) PostExecute() error {
 type ShowPartitionsTask struct {
 	Condition
 	*milvuspb.ShowPartitionRequest
-	masterClient MasterClientInterface
+	masterClient MasterClient
 	result       *milvuspb.ShowPartitionResponse
 	ctx          context.Context
 }
@@ -1116,7 +1116,7 @@ func (spt *ShowPartitionsTask) PostExecute() error {
 type CreateIndexTask struct {
 	Condition
 	*milvuspb.CreateIndexRequest
-	masterClient MasterClientInterface
+	masterClient MasterClient
 	result       *commonpb.Status
 	ctx          context.Context
 }
@@ -1179,7 +1179,7 @@ func (cit *CreateIndexTask) PostExecute() error {
 type DescribeIndexTask struct {
 	Condition
 	*milvuspb.DescribeIndexRequest
-	masterClient MasterClientInterface
+	masterClient MasterClient
 	result       *milvuspb.DescribeIndexResponse
 	ctx          context.Context
 }

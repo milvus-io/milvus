@@ -1,25 +1,33 @@
 package proxynode
 
 import (
+	"bytes"
 	"log"
-	"net"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/spf13/cast"
+	"github.com/spf13/viper"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
+)
+
+const (
+	StartParamsKey = "START_PARAMS"
 )
 
 type ParamTable struct {
 	paramtable.BaseTable
 
-	NetworkPort                        int
-	NetworkAddress                     string
-	ProxyServiceAddress                string
-	MasterAddress                      string
-	PulsarAddress                      string
-	IndexServerAddress                 string
+	NetworkPort    int
+	IP             string
+	NetworkAddress string
+
+	MasterAddress string
+	PulsarAddress string
+
 	QueryNodeNum                       int
 	QueryNodeIDList                    []UniqueID
 	ProxyID                            UniqueID
@@ -45,15 +53,152 @@ type ParamTable struct {
 
 var Params ParamTable
 
+func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb2.InitParams) error {
+	pt.ProxyID = initParams.NodeID
+
+	config := viper.New()
+	config.SetConfigType("yaml")
+	for _, pair := range initParams.StartParams {
+		if pair.Key == StartParamsKey {
+			err := config.ReadConfig(bytes.NewBuffer([]byte(pair.Value)))
+			if err != nil {
+				return err
+			}
+			break
+		}
+	}
+
+	for _, key := range config.AllKeys() {
+		val := config.Get(key)
+		str, err := cast.ToStringE(val)
+		if err != nil {
+			switch val := val.(type) {
+			case []interface{}:
+				str = str[:0]
+				for _, v := range val {
+					ss, err := cast.ToStringE(v)
+					if err != nil {
+						log.Panic(err)
+					}
+					if len(str) == 0 {
+						str = ss
+					} else {
+						str = str + "," + ss
+					}
+				}
+
+			default:
+				log.Panicf("undefine config type, key=%s", key)
+			}
+		}
+		err = pt.Save(key, str)
+		if err != nil {
+			panic(err)
+		}
+
+	}
+
+	pt.initParams()
+	//
+	//pulsarPort := config.GetString(PulsarPort)
+	//pulsarHost := config.GetString(PulsarHost)
+	//pt.PulsarAddress = pulsarHost + ":" + pulsarPort
+	//
+	//
+	//queryNodeIDList := config.GetString(QueryNodeIDList)
+	//pt.QueryNodeIDList = nil
+	//queryNodeIDs := strings.Split(queryNodeIDList, ",")
+	//for _, queryNodeID := range queryNodeIDs {
+	//	v, err := strconv.Atoi(queryNodeID)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	pt.QueryNodeIDList = append(pt.QueryNodeIDList, typeutil.UniqueID(v))
+	//}
+	//pt.QueryNodeNum = len(pt.QueryNodeIDList)
+	//
+	//timeTickInterval := config.GetString(TimeTickInterval)
+	//interval, err := strconv.Atoi(timeTickInterval)
+	//if err != nil {
+	//	return err
+	//}
+	//pt.TimeTickInterval = time.Duration(interval) * time.Millisecond
+	//
+	//subName := config.GetString(SubName)
+	//pt.ProxySubName = subName
+	//
+	//timeTickChannelNames := config.GetString(TimeTickChannelNames)
+	//pt.ProxyTimeTickChannelNames = []string{timeTickChannelNames}
+	//
+	//msgStreamInsertBufSizeStr := config.GetString(MsgStreamInsertBufSize)
+	//msgStreamInsertBufSize, err := strconv.Atoi(msgStreamInsertBufSizeStr)
+	//if err != nil {
+	//	return err
+	//}
+	//pt.MsgStreamInsertBufSize = int64(msgStreamInsertBufSize)
+	//
+	//msgStreamSearchBufSizeStr := config.GetString(MsgStreamSearchBufSize)
+	//msgStreamSearchBufSize, err := strconv.Atoi(msgStreamSearchBufSizeStr)
+	//if err != nil {
+	//	return err
+	//}
+	//pt.MsgStreamSearchBufSize = int64(msgStreamSearchBufSize)
+	//
+	//msgStreamSearchResultBufSizeStr := config.GetString(MsgStreamSearchResultBufSize)
+	//msgStreamSearchResultBufSize, err := strconv.Atoi(msgStreamSearchResultBufSizeStr)
+	//if err != nil {
+	//	return err
+	//}
+	//pt.MsgStreamSearchResultBufSize = int64(msgStreamSearchResultBufSize)
+	//
+	//msgStreamSearchResultPulsarBufSizeStr := config.GetString(MsgStreamSearchResultPulsarBufSize)
+	//msgStreamSearchResultPulsarBufSize, err := strconv.Atoi(msgStreamSearchResultPulsarBufSizeStr)
+	//if err != nil {
+	//	return err
+	//}
+	//pt.MsgStreamSearchResultPulsarBufSize = int64(msgStreamSearchResultPulsarBufSize)
+	//
+	//msgStreamTimeTickBufSizeStr := config.GetString(MsgStreamTimeTickBufSize)
+	//msgStreamTimeTickBufSize, err := strconv.Atoi(msgStreamTimeTickBufSizeStr)
+	//if err != nil {
+	//	return err
+	//}
+	//pt.MsgStreamTimeTickBufSize = int64(msgStreamTimeTickBufSize)
+	//
+	//maxNameLengthStr := config.GetString(MaxNameLength)
+	//maxNameLength, err := strconv.Atoi(maxNameLengthStr)
+	//if err != nil {
+	//	return err
+	//}
+	//pt.MaxNameLength = int64(maxNameLength)
+	//
+	//maxFieldNumStr := config.GetString(MaxFieldNum)
+	//maxFieldNum, err := strconv.Atoi(maxFieldNumStr)
+	//if err != nil {
+	//	return err
+	//}
+	//pt.MaxFieldNum = int64(maxFieldNum)
+	//
+	//maxDimensionStr := config.GetString(MaxDimension)
+	//maxDimension, err := strconv.Atoi(maxDimensionStr)
+	//if err != nil {
+	//	return err
+	//}
+	//pt.MaxDimension = int64(maxDimension)
+	//
+	//defaultPartitionTag := config.GetString(DefaultPartitionTag)
+	//pt.DefaultPartitionTag = defaultPartitionTag
+
+	return nil
+}
+
 func (pt *ParamTable) Init() {
 	pt.BaseTable.Init()
+	pt.initParams()
+}
 
-	pt.initNetworkPort()
-	pt.initNetworkAddress()
-	pt.initProxyServiceAddress()
-	pt.initMasterAddress()
+func (pt *ParamTable) initParams() {
 	pt.initPulsarAddress()
-	pt.initIndexServerAddress()
 	pt.initQueryNodeIDList()
 	pt.initQueryNodeNum()
 	pt.initProxyID()
@@ -77,103 +222,12 @@ func (pt *ParamTable) Init() {
 	pt.initDefaultPartitionTag()
 }
 
-func (pt *ParamTable) initNetworkPort() {
-	pt.NetworkPort = pt.ParseInt("proxyNode.port")
-}
-
-func (pt *ParamTable) initNetworkAddress() {
-	addr, err := pt.Load("proxyNode.address")
-	if err != nil {
-		panic(err)
-	}
-
-	hostName, _ := net.LookupHost(addr)
-	if len(hostName) <= 0 {
-		if ip := net.ParseIP(addr); ip == nil {
-			panic("invalid ip proxyNode.address")
-		}
-	}
-
-	port, err := pt.Load("proxyNode.port")
-	if err != nil {
-		panic(err)
-	}
-	_, err = strconv.Atoi(port)
-	if err != nil {
-		panic(err)
-	}
-
-	pt.NetworkAddress = addr + ":" + port
-}
-
-func (pt *ParamTable) initProxyServiceAddress() {
-	addressFromEnv := os.Getenv("PROXY_SERVICE_ADDRESS")
-	if len(addressFromEnv) > 0 {
-		pt.ProxyServiceAddress = addressFromEnv
-	}
-
-	addr, err := pt.Load("proxyService.address")
-	if err != nil {
-		panic(err)
-	}
-
-	hostName, _ := net.LookupHost(addr)
-	if len(hostName) <= 0 {
-		if ip := net.ParseIP(addr); ip == nil {
-			panic("invalid ip proxyService.address")
-		}
-	}
-
-	port, err := pt.Load("proxyService.port")
-	if err != nil {
-		panic(err)
-	}
-	_, err = strconv.Atoi(port)
-	if err != nil {
-		panic(err)
-	}
-	pt.ProxyServiceAddress = addr + ":" + port
-}
-
-func (pt *ParamTable) initMasterAddress() {
-	ret, err := pt.Load("_MasterAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.MasterAddress = ret
-}
-
 func (pt *ParamTable) initPulsarAddress() {
 	ret, err := pt.Load("_PulsarAddress")
 	if err != nil {
 		panic(err)
 	}
 	pt.PulsarAddress = ret
-}
-
-func (pt *ParamTable) initIndexServerAddress() {
-	addr, err := pt.Load("indexServer.address")
-	if err != nil {
-		panic(err)
-	}
-
-	hostName, _ := net.LookupHost(addr)
-	if len(hostName) <= 0 {
-		if ip := net.ParseIP(addr); ip == nil {
-			panic("invalid ip indexServer.address")
-		}
-	}
-
-	port, err := pt.Load("indexServer.port")
-	if err != nil {
-		panic(err)
-	}
-	_, err = strconv.Atoi(port)
-	if err != nil {
-		panic(err)
-	}
-
-	pt.IndexServerAddress = addr + ":" + port
 }
 
 func (pt *ParamTable) initQueryNodeNum() {

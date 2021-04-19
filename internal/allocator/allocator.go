@@ -3,192 +3,151 @@ package allocator
 import (
 	"context"
 	"errors"
-	"log"
 	"sync"
 	"time"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
-	"google.golang.org/grpc"
 )
 
 const (
 	maxConcurrentRequests = 10000
 )
 
-type request interface {
+type Request interface {
 	Wait()
 	Notify(error)
 	IsValid() bool
 }
 
-type baseRequest struct {
-	done  chan error
-	valid bool
+type BaseRequest struct {
+	Done  chan error
+	Valid bool
 }
 
-func (req *baseRequest) Wait() {
-	err := <-req.done
-	req.valid = err == nil
+func (req *BaseRequest) Wait() {
+	err := <-req.Done
+	req.Valid = err == nil
 }
 
-func (req *baseRequest) IsValid() bool {
-	return req.valid
+func (req *BaseRequest) IsValid() bool {
+	return req.Valid
 }
 
-func (req *baseRequest) Notify(err error) {
-	req.done <- err
+func (req *BaseRequest) Notify(err error) {
+	req.Done <- err
 }
 
-type idRequest struct {
-	baseRequest
+type IDRequest struct {
+	BaseRequest
 	id    UniqueID
 	count uint32
 }
 
-type tsoRequest struct {
-	baseRequest
+type TSORequest struct {
+	BaseRequest
 	timestamp Timestamp
 	count     uint32
 }
 
-type segRequest struct {
-	baseRequest
-	count         uint32
-	colName       string
-	partitionName string
-	collID        UniqueID
-	partitionID   UniqueID
-	segInfo       map[UniqueID]uint32
-	channelID     int32
-	timestamp     Timestamp
+type SyncRequest struct {
+	BaseRequest
 }
 
-type syncRequest struct {
-	baseRequest
-}
-
-type tickerChan interface {
+type TickerChan interface {
 	Chan() <-chan time.Time
 	Close()
 	Init()
 	Reset()
 }
 
-type emptyTicker struct {
+type EmptyTicker struct {
 	tChan <-chan time.Time
 }
 
-func (t *emptyTicker) Chan() <-chan time.Time {
+func (t *EmptyTicker) Chan() <-chan time.Time {
 	return t.tChan
 }
 
-func (t *emptyTicker) Init() {
+func (t *EmptyTicker) Init() {
 }
 
-func (t *emptyTicker) Reset() {
+func (t *EmptyTicker) Reset() {
 }
 
-func (t *emptyTicker) Close() {
+func (t *EmptyTicker) Close() {
 }
 
-type ticker struct {
+type Ticker struct {
 	ticker         *time.Ticker
-	updateInterval time.Duration //
+	UpdateInterval time.Duration //
 }
 
-func (t *ticker) Init() {
-	t.ticker = time.NewTicker(t.updateInterval)
+func (t *Ticker) Init() {
+	t.ticker = time.NewTicker(t.UpdateInterval)
 }
 
-func (t *ticker) Reset() {
-	t.ticker.Reset(t.updateInterval)
+func (t *Ticker) Reset() {
+	t.ticker.Reset(t.UpdateInterval)
 }
 
-func (t *ticker) Close() {
+func (t *Ticker) Close() {
 	t.ticker.Stop()
 }
 
-func (t *ticker) Chan() <-chan time.Time {
+func (t *Ticker) Chan() <-chan time.Time {
 	return t.ticker.C
 }
 
 type Allocator struct {
-	reqs chan request
+	Ctx        context.Context
+	CancelFunc context.CancelFunc
 
-	wg     sync.WaitGroup
-	ctx    context.Context
-	cancel context.CancelFunc
+	wg sync.WaitGroup
 
-	masterAddress string
-	masterConn    *grpc.ClientConn
-	masterClient  masterpb.MasterServiceClient
-	countPerRPC   uint32
+	Reqs      chan Request
+	ToDoReqs  []Request
+	CanDoReqs []Request
+	SyncReqs  []Request
 
-	toDoReqs  []request
-	canDoReqs []request
-	syncReqs  []request
+	TChan         TickerChan
+	ForceSyncChan chan Request
 
-	tChan         tickerChan
-	forceSyncChan chan request
+	SyncFunc    func() bool
+	ProcessFunc func(req Request) error
 
-	syncFunc    func() bool
-	processFunc func(req request) error
-
-	checkSyncFunc func(timeout bool) bool
-	pickCanDoFunc func()
+	CheckSyncFunc func(timeout bool) bool
+	PickCanDoFunc func()
 }
 
 func (ta *Allocator) Start() error {
-	connectMasterFn := func() error {
-		return ta.connectMaster()
-	}
-	err := Retry(10, time.Millisecond*200, connectMasterFn)
-	if err != nil {
-		panic("connect to master failed")
-	}
-	ta.tChan.Init()
+	ta.TChan.Init()
 	ta.wg.Add(1)
 	go ta.mainLoop()
 	return nil
 }
 
-func (ta *Allocator) connectMaster() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	conn, err := grpc.DialContext(ctx, ta.masterAddress, grpc.WithInsecure(), grpc.WithBlock())
-	if err != nil {
-		log.Printf("Connect to master failed, error= %v", err)
-		return err
-	}
-	log.Printf("Connected to master, master_addr=%s", ta.masterAddress)
-	ta.masterConn = conn
-	ta.masterClient = masterpb.NewMasterServiceClient(conn)
-	return nil
-}
-
-func (ta *Allocator) init() {
-	ta.forceSyncChan = make(chan request, maxConcurrentRequests)
+func (ta *Allocator) Init() {
+	ta.ForceSyncChan = make(chan Request, maxConcurrentRequests)
+	ta.Reqs = make(chan Request, maxConcurrentRequests)
 }
 
 func (ta *Allocator) mainLoop() {
 	defer ta.wg.Done()
 
-	loopCtx, loopCancel := context.WithCancel(ta.ctx)
+	loopCtx, loopCancel := context.WithCancel(ta.Ctx)
 	defer loopCancel()
 
 	for {
 		select {
 
-		case first := <-ta.forceSyncChan:
-			ta.syncReqs = append(ta.syncReqs, first)
-			pending := len(ta.forceSyncChan)
+		case first := <-ta.ForceSyncChan:
+			ta.SyncReqs = append(ta.SyncReqs, first)
+			pending := len(ta.ForceSyncChan)
 			for i := 0; i < pending; i++ {
-				ta.syncReqs = append(ta.syncReqs, <-ta.forceSyncChan)
+				ta.SyncReqs = append(ta.SyncReqs, <-ta.ForceSyncChan)
 			}
 			ta.sync(true)
 			ta.finishSyncRequest()
 
-		case <-ta.tChan.Chan():
+		case <-ta.TChan.Chan():
 			ta.pickCanDo()
 			ta.finishRequest()
 			if ta.sync(true) {
@@ -197,11 +156,11 @@ func (ta *Allocator) mainLoop() {
 			}
 			ta.failRemainRequest()
 
-		case first := <-ta.reqs:
-			ta.toDoReqs = append(ta.toDoReqs, first)
-			pending := len(ta.reqs)
+		case first := <-ta.Reqs:
+			ta.ToDoReqs = append(ta.ToDoReqs, first)
+			pending := len(ta.Reqs)
 			for i := 0; i < pending; i++ {
-				ta.toDoReqs = append(ta.toDoReqs, <-ta.reqs)
+				ta.ToDoReqs = append(ta.ToDoReqs, <-ta.Reqs)
 			}
 			ta.pickCanDo()
 			ta.finishRequest()
@@ -219,78 +178,78 @@ func (ta *Allocator) mainLoop() {
 }
 
 func (ta *Allocator) pickCanDo() {
-	if ta.pickCanDoFunc == nil {
+	if ta.PickCanDoFunc == nil {
 		return
 	}
-	ta.pickCanDoFunc()
+	ta.PickCanDoFunc()
 }
 
 func (ta *Allocator) sync(timeout bool) bool {
-	if ta.syncFunc == nil || ta.checkSyncFunc == nil {
-		ta.canDoReqs = ta.toDoReqs
-		ta.toDoReqs = ta.toDoReqs[0:0]
+	if ta.SyncFunc == nil || ta.CheckSyncFunc == nil {
+		ta.CanDoReqs = ta.ToDoReqs
+		ta.ToDoReqs = ta.ToDoReqs[0:0]
 		return true
 	}
-	if !timeout && len(ta.toDoReqs) == 0 {
+	if !timeout && len(ta.ToDoReqs) == 0 {
 		return false
 	}
-	if !ta.checkSyncFunc(timeout) {
+	if !ta.CheckSyncFunc(timeout) {
 		return false
 	}
 
-	ret := ta.syncFunc()
+	ret := ta.SyncFunc()
 
 	if !timeout {
-		ta.tChan.Reset()
+		ta.TChan.Reset()
 	}
 	return ret
 }
 
 func (ta *Allocator) finishSyncRequest() {
-	for _, req := range ta.syncReqs {
+	for _, req := range ta.SyncReqs {
 		if req != nil {
 			req.Notify(nil)
 		}
 	}
-	ta.syncReqs = ta.syncReqs[0:0]
+	ta.SyncReqs = ta.SyncReqs[0:0]
 }
 
 func (ta *Allocator) failRemainRequest() {
-	for _, req := range ta.toDoReqs {
+	for _, req := range ta.ToDoReqs {
 		if req != nil {
 			req.Notify(errors.New("failed: unexpected error"))
 		}
 	}
-	ta.toDoReqs = []request{}
+	ta.ToDoReqs = []Request{}
 }
 
 func (ta *Allocator) finishRequest() {
-	for _, req := range ta.canDoReqs {
+	for _, req := range ta.CanDoReqs {
 		if req != nil {
-			err := ta.processFunc(req)
+			err := ta.ProcessFunc(req)
 			req.Notify(err)
 		}
 	}
-	ta.canDoReqs = []request{}
+	ta.CanDoReqs = []Request{}
 }
 
 func (ta *Allocator) revokeRequest(err error) {
-	n := len(ta.reqs)
+	n := len(ta.Reqs)
 	for i := 0; i < n; i++ {
-		req := <-ta.reqs
+		req := <-ta.Reqs
 		req.Notify(err)
 	}
 }
 
 func (ta *Allocator) Close() {
-	ta.cancel()
+	ta.CancelFunc()
 	ta.wg.Wait()
-	ta.tChan.Close()
+	ta.TChan.Close()
 	ta.revokeRequest(errors.New("closing"))
 }
 
 func (ta *Allocator) CleanCache() {
-	req := &syncRequest{baseRequest: baseRequest{done: make(chan error), valid: false}}
-	ta.forceSyncChan <- req
+	req := &SyncRequest{BaseRequest: BaseRequest{Done: make(chan error), Valid: false}}
+	ta.ForceSyncChan <- req
 	req.Wait()
 }

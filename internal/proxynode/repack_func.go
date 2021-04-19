@@ -9,7 +9,6 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
-	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -17,7 +16,7 @@ import (
 
 func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 	hashKeys [][]int32,
-	segIDAssigner *allocator.SegIDAssigner,
+	segIDAssigner *SegIDAssigner,
 	together bool) (map[int32]*msgstream.MsgPack, error) {
 
 	result := make(map[int32]*msgstream.MsgPack)

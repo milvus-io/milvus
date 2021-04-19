@@ -2,37 +2,45 @@ package grpcproxynode
 
 import (
 	"context"
-
-	"google.golang.org/grpc"
+	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
+	"google.golang.org/grpc"
 )
 
 type Client struct {
-	client  proxypb.ProxyNodeServiceClient
-	address string
-	ctx     context.Context
+	grpcClient proxypb.ProxyNodeServiceClient
+	address    string
+	ctx        context.Context
 }
 
-func (c *Client) tryConnect() error {
-	if c.client != nil {
+func (c *Client) Init() error {
+	connectGrpcFunc := func() error {
+		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock())
+		if err != nil {
+			return err
+		}
+		c.grpcClient = proxypb.NewProxyServiceClient(conn)
 		return nil
 	}
-	conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock())
+	err := retry.Retry(10, time.Millisecond*200, connectGrpcFunc)
 	if err != nil {
 		return err
 	}
-	c.client = proxypb.NewProxyNodeServiceClient(conn)
+	return nil
+}
+
+func (c *Client) Start() error {
+	return nil
+}
+
+func (c *Client) Stop() error {
 	return nil
 }
 
 func (c *Client) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) error {
-	var err error
-	err = c.tryConnect()
-	if err != nil {
-		return err
-	}
-	_, err = c.client.InvalidateCollectionMetaCache(c.ctx, request)
+	_, err := c.grpcClient.InvalidateCollectionMetaCache(c.ctx, request)
 	return err
 }
 

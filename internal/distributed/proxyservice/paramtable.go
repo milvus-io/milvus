@@ -9,19 +9,28 @@ import (
 
 type ParamTable struct {
 	paramtable.BaseTable
+
+	ServiceAddress string
+	ServicePort    int
 }
 
 var Params ParamTable
 
 func (pt *ParamTable) Init() {
 	pt.BaseTable.Init()
+	pt.initParams()
 }
 
-func (pt *ParamTable) NetworkPort() int {
-	return pt.ParseInt("proxyService.port")
+func (pt *ParamTable) initParams() {
+	pt.initServicePort()
+	pt.initServiceAddress()
 }
 
-func (pt *ParamTable) NetworkAddress() string {
+func (pt *ParamTable) initServicePort() {
+	pt.ServicePort = pt.ParseInt("proxyService.port")
+}
+
+func (pt *ParamTable) initServiceAddress() {
 	addr, err := pt.Load("proxyService.address")
 	if err != nil {
 		panic(err)
@@ -42,5 +51,5 @@ func (pt *ParamTable) NetworkAddress() string {
 	if err != nil {
 		panic(err)
 	}
-	return addr + ":" + port
+	pt.ServiceAddress = addr + ":" + port
 }
