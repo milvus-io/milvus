@@ -32,7 +32,7 @@ func main() {
 	etcdPort, _ := gparams.GParams.Load("etcd.port")
 	etcdAddr := etcdAddress + ":" + etcdPort
 	etcdRootPath, _ := gparams.GParams.Load("etcd.rootpath")
-	svr, err := master.CreateServer(ctx, etcdRootPath, etcdRootPath, etcdRootPath, []string{etcdAddr})
+	svr, err := master.CreateServer(ctx, etcdRootPath, etcdRootPath, []string{etcdAddr})
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}

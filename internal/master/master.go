@@ -72,15 +72,15 @@ func newKVBase(kvRoot string, etcdAddr []string) *kv.EtcdKV {
 	return kvBase
 }
 
-func Init() {
+func Init(etcdAddr []string, rootPath string) {
 	rand.Seed(time.Now().UnixNano())
-	id.Init()
-	tso.Init()
+	id.Init(etcdAddr, rootPath)
+	tso.Init(etcdAddr, rootPath)
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(ctx context.Context, kvRootPath string, metaRootPath, tsoRootPath string, etcdAddr []string) (*Master, error) {
-	Init()
+func CreateServer(ctx context.Context, kvRootPath, metaRootPath string, etcdAddr []string) (*Master, error) {
+	Init(etcdAddr, kvRootPath)
 
 	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: etcdAddr})
 	if err != nil {

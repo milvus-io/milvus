@@ -16,8 +16,8 @@ type GlobalIDAllocator struct {
 
 var allocator *GlobalIDAllocator
 
-func Init() {
-	InitGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase("gid"))
+func Init(etcdAddr []string, rootPath string) {
+	InitGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(etcdAddr, rootPath, "gid"))
 }
 
 func InitGlobalIDAllocator(key string, base kvutil.Base) {
