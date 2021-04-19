@@ -179,19 +179,24 @@ func batchKeys(keys []Key) [][]Key {
 	return batches
 }
 
-func (s *TikvStore) GetRows(ctx context.Context, keys []Key, timestamp Timestamp) ([]Value, error) {
+func (s *TikvStore) GetRows(ctx context.Context, keys []Key, timestamps []Timestamp) ([]Value, error) {
+	if len(keys) != len(timestamps) {
+		return nil, errors.New("the len of keys is not equal to the len of timestamps")
+	}
+
 	batches := batchKeys(keys)
 	ch := make(chan kvPair, len(keys))
 	ctx, cancel := context.WithCancel(ctx)
-	for _, b := range batches {
+	for n, b := range batches {
 		batch := b
+		numBatch := n
 		go func() {
-			for _, key := range batch {
+			for i, key := range batch {
 				select {
 				case <-ctx.Done():
 					return
 				default:
-					v, err := s.GetRow(ctx, key, timestamp)
+					v, err := s.GetRow(ctx, key, timestamps[numBatch*batchSize+i])
 					ch <- kvPair{
 						key:   key,
 						value: v,
@@ -225,14 +230,17 @@ func (s *TikvStore) PutRow(ctx context.Context, key Key, value Value, segment st
 	return s.put(ctx, key, value, timestamp, segment)
 }
 
-func (s *TikvStore) PutRows(ctx context.Context, keys []Key, values []Value, segment string, timestamp Timestamp) error {
+func (s *TikvStore) PutRows(ctx context.Context, keys []Key, values []Value, segment string, timestamps []Timestamp) error {
 	if len(keys) != len(values) {
 		return errors.New("the len of keys is not equal to the len of values")
+	}
+	if len(keys) != len(timestamps) {
+		return errors.New("the len of keys is not equal to the len of timestamps")
 	}
 
 	encodedKeys := make([]Key, len(keys))
 	for i, key := range keys {
-		encodedKeys[i] = EncodeKey(key, timestamp, segment)
+		encodedKeys[i] = EncodeKey(key, timestamps[i], segment)
 	}
 	return s.engine.BatchPut(ctx, encodedKeys, values)
 }
@@ -342,6 +350,31 @@ func (s *TikvStore) PutSegmentDL(ctx context.Context, segment string, log Segmen
 
 func (s *TikvStore) DeleteSegmentDL(ctx context.Context, segment string) error {
 	return s.engine.Delete(ctx, EncodeSegment([]byte(segment), SegmentDLMark))
+}
+
+func (s *TikvStore) GetSegments(ctx context.Context, key Key, timestamp Timestamp) ([]string, error) {
+	keys, _, err := s.engine.GetByPrefix(ctx, EncodeDelimiter(key, Delimiter), true)
+	if err != nil {
+		return nil, err
+	}
+	segmentsSet := map[string]bool{}
+	for _, key := range keys {
+		_, ts, segment, err := DecodeKey(key)
+		if err != nil {
+			panic("must no error")
+		}
+		if ts <= timestamp {
+			segmentsSet[segment] = true
+		}
+	}
+
+	var segments []string
+	for k, v := range segmentsSet {
+		if v == true {
+			segments = append(segments, k)
+		}
+	}
+	return segments, err
 }
 
 func (s *TikvStore) Close() error {

@@ -33,7 +33,8 @@
 
 #include "GrpcRequestHandler.h"
 #include "config/ServerConfig.h"
-#include "grpc/gen-milvus/milvus.grpc.pb.h"
+#include "server/hello/HelloService.h"
+#include "server/hello/ReportAddress.h"
 // #include "server/DBWrapper.h"
 #include "server/grpc_impl/interceptor/SpanInterceptor.h"
 #include "utils/Log.h"
@@ -95,6 +96,17 @@ GrpcServer::StartService() {
 
     builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
+
+    HelloService helloService;
+    builder.RegisterService(&helloService);
+    // report address to mmaster
+    auto reportClient = new ReportClient(::grpc::CreateChannel("192.168.2.28:50051",
+                                                             ::grpc::InsecureChannelCredentials()));
+    auto status = reportClient->ReportAddress();
+    delete(reportClient);
+    if (!status.ok()){
+        return Status(milvus::DB_ERROR, "");
+    }
 
     // Add gRPC interceptor
     using InterceptorI = ::grpc::experimental::ServerInterceptorFactoryInterface;

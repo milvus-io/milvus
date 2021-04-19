@@ -18,9 +18,6 @@ include_directories(${MILVUS_THIRDPARTY_SRC})
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
-include_directories(${pulsar_ROOT}/build/include)
-link_directories(${pulsar_ROOT}/build/lib)
-
 add_subdirectory( tracing )
 add_subdirectory( utils )
 add_subdirectory( config )
@@ -63,7 +60,7 @@ set( THIRD_PARTY_LIBS
 target_link_libraries( server
                 PUBLIC ${link_lib}
                 tracing
-				libpulsar
+				pulsarStatic
                 ${THIRD_PARTY_LIBS}
                 ${BOOST_LIB}
                        )
@@ -80,6 +77,8 @@ set( SERVER_LIBS server )
 
 add_executable( milvus_server   ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
                                 )
+target_include_directories(server PUBLIC ${PROJECT_BINARY_DIR}/thirdparty/pulsar-client-cpp/pulsar-client-cpp-src/pulsar-client-cpp/include)
+
 
 target_link_libraries( milvus_server PRIVATE ${SERVER_LIBS} )
 install( TARGETS milvus_server DESTINATION bin )

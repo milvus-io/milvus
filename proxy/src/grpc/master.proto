@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package master;
+
+// The greeting service definition.
+service Greeter {
+  // receive a grpc_server address and set to etcd.
+  rpc ReportAddress (Request) returns (Reply) {}
+
+  // send a grpc_server address to client
+  rpc GetAddress (EmptyRequest) returns (Request) {}
+}
+
+// The request message containing the user's name.
+message Request {
+  string address = 1;
+}
+
+message EmptyRequest {
+
+}
+
+// The response message containing the greetings
+message Reply {
+  bool status = 1;
+}

@@ -15,6 +15,10 @@ set( GRPC_SERVICE_FILES ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
                         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.pb.cc
                         ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.grpc.pb.cc
                         ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
+                        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/hello.grpc.pb.cc
+                        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/hello.pb.cc
+                        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/master.grpc.pb.cc
+                        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/master.pb.cc
                         )
 
 aux_source_directory( ${MILVUS_ENGINE_SRC}/server                   SERVER_SERVICE_FILES )

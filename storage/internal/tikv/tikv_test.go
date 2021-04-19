@@ -121,7 +121,8 @@ func TestTikvStore_BatchRow(t *testing.T) {
 	size := 0
 	var testKeys []Key
 	var testValues []Value
-	var segments []string
+	var segment = "test"
+	var timestamps []Timestamp
 	for i := 0; size/store.engine.conf.Raw.MaxBatchPutSize < 1; i++ {
 		key := fmt.Sprint("key", i)
 		size += len(key)
@@ -129,18 +130,23 @@ func TestTikvStore_BatchRow(t *testing.T) {
 		value := fmt.Sprint("value", i)
 		size += len(value)
 		testValues = append(testValues, []byte(value))
-		segments = append(segments, "test")
 		v, err := store.GetRow(ctx, Key(key), math.MaxUint64)
 		assert.Nil(t, v)
 		assert.Nil(t, err)
 	}
 
 	// Batch put rows
-	err := store.PutRows(ctx, testKeys, testValues, segments, 1)
+	for range testKeys {
+		timestamps = append(timestamps, 1)
+	}
+	err := store.PutRows(ctx, testKeys, testValues, segment, timestamps)
 	assert.Nil(t, err)
 
 	// Batch get rows
-	checkValues, err := store.GetRows(ctx, testKeys, 2)
+	for i, _ := range timestamps {
+		timestamps[i] = 2
+	}
+	checkValues, err := store.GetRows(ctx, testKeys, timestamps)
 	assert.NotNil(t, checkValues)
 	assert.Nil(t, err)
 	assert.Equal(t, len(checkValues), len(testValues))
@@ -152,7 +158,10 @@ func TestTikvStore_BatchRow(t *testing.T) {
 	err = store.DeleteRows(ctx, testKeys, math.MaxUint64)
 	assert.Nil(t, err)
 	// Ensure all test row is deleted
-	checkValues, err = store.GetRows(ctx, testKeys, math.MaxUint64)
+	for i, _ := range timestamps {
+		timestamps[i] = math.MaxUint64
+	}
+	checkValues, err = store.GetRows(ctx, testKeys, timestamps)
 	assert.Nil(t, err)
 	for _, value := range checkValues {
 		assert.Nil(t, value)
@@ -160,6 +169,33 @@ func TestTikvStore_BatchRow(t *testing.T) {
 
 	// Clean test data
 	err = store.engine.DeleteByPrefix(ctx, Key("key"))
+	assert.Nil(t, err)
+}
+
+func TestTikvStore_GetSegments(t *testing.T) {
+	ctx := context.Background()
+	key := Key("key")
+
+	// Put rows
+	err := store.PutRow(ctx, key, Value{0}, "a", 1)
+	assert.Nil(t, err)
+	err = store.PutRow(ctx, key, Value{0}, "a", 2)
+	assert.Nil(t, err)
+	err = store.PutRow(ctx, key, Value{0}, "c", 3)
+	assert.Nil(t, err)
+
+	// Get segments
+	segs, err := store.GetSegments(ctx, key, 2)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(segs))
+	assert.Equal(t, "a", segs[0])
+
+	segs, err = store.GetSegments(ctx, key, 3)
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(segs))
+
+	// Clean test data
+	err = store.engine.DeleteByPrefix(ctx, key)
 	assert.Nil(t, err)
 }
 
@@ -198,10 +234,10 @@ func TestTikvStore_SegmentIndex(t *testing.T) {
 	assert.Nil(t, err)
 
 	// Get segment index
-	index , err := store.GetSegmentIndex(ctx, "segment0")
+	index, err := store.GetSegmentIndex(ctx, "segment0")
 	assert.Nil(t, err)
 	assert.Equal(t, []byte("index0"), index)
-	index , err = store.GetSegmentIndex(ctx, "segment1")
+	index, err = store.GetSegmentIndex(ctx, "segment1")
 	assert.Nil(t, err)
 	assert.Equal(t, []byte("index1"), index)
 
@@ -210,7 +246,7 @@ func TestTikvStore_SegmentIndex(t *testing.T) {
 	assert.Nil(t, err)
 	err = store.DeleteSegmentIndex(ctx, "segment1")
 	assert.Nil(t, err)
-	index , err = store.GetSegmentIndex(ctx, "segment0")
+	index, err = store.GetSegmentIndex(ctx, "segment0")
 	assert.Nil(t, err)
 	assert.Nil(t, index)
 }
@@ -225,10 +261,10 @@ func TestTikvStore_DeleteSegmentDL(t *testing.T) {
 	assert.Nil(t, err)
 
 	// Get segment delete log
-	index , err := store.GetSegmentDL(ctx, "segment0")
+	index, err := store.GetSegmentDL(ctx, "segment0")
 	assert.Nil(t, err)
 	assert.Equal(t, []byte("index0"), index)
-	index , err = store.GetSegmentDL(ctx, "segment1")
+	index, err = store.GetSegmentDL(ctx, "segment1")
 	assert.Nil(t, err)
 	assert.Equal(t, []byte("index1"), index)
 
@@ -237,7 +273,7 @@ func TestTikvStore_DeleteSegmentDL(t *testing.T) {
 	assert.Nil(t, err)
 	err = store.DeleteSegmentDL(ctx, "segment1")
 	assert.Nil(t, err)
-	index , err = store.GetSegmentDL(ctx, "segment0")
+	index, err = store.GetSegmentDL(ctx, "segment0")
 	assert.Nil(t, err)
 	assert.Nil(t, index)
 }
