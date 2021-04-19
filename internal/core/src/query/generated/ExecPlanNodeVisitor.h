@@ -14,7 +14,7 @@
 // DO NOT EDIT
 #include "utils/Json.h"
 #include "query/PlanImpl.h"
-#include "segcore/SegmentBase.h"
+#include "segcore/SegmentGrowing.h"
 #include <utility>
 #include "PlanNodeVisitor.h"
 
@@ -29,7 +29,9 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
 
  public:
     using RetType = QueryResult;
-    ExecPlanNodeVisitor(segcore::SegmentBase& segment, Timestamp timestamp, const PlaceholderGroup& placeholder_group)
+    ExecPlanNodeVisitor(const segcore::SegmentGrowing& segment,
+                        Timestamp timestamp,
+                        const PlaceholderGroup& placeholder_group)
         : segment_(segment), timestamp_(timestamp), placeholder_group_(placeholder_group) {
     }
     // using RetType = nlohmann::json;
@@ -46,7 +48,7 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
 
  private:
     // std::optional<RetType> ret_;
-    segcore::SegmentBase& segment_;
+    const segcore::SegmentGrowing& segment_;
     Timestamp timestamp_;
     const PlaceholderGroup& placeholder_group_;
 

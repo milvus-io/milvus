@@ -22,7 +22,7 @@
 #include "AckResponder.h"
 #include "SealedIndexingRecord.h"
 #include "ConcurrentVector.h"
-#include "segcore/SegmentBase.h"
+#include "segcore/SegmentGrowing.h"
 #include "query/deprecated/GeneralQuery.h"
 #include "utils/Status.h"
 #include "segcore/DeletedRecord.h"
@@ -34,7 +34,7 @@
 
 namespace milvus::segcore {
 
-class SegmentSmallIndex : public SegmentBase {
+class SegmentGrowingImpl : public SegmentGrowing {
  public:
     int64_t
     PreInsert(int64_t size) override;
@@ -55,12 +55,11 @@ class SegmentSmallIndex : public SegmentBase {
     Status
     Delete(int64_t reserverd_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) override;
 
-    Status
+    QueryResult
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup* placeholder_groups[],
            const Timestamp timestamps[],
-           int num_groups,
-           QueryResult& results) override;
+           int64_t num_groups) const override;
 
     // stop receive insert requests
     // will move data to immutable vector or something
@@ -68,7 +67,7 @@ class SegmentSmallIndex : public SegmentBase {
     Close() override;
 
     int64_t
-    GetMemoryUsageInBytes() override;
+    GetMemoryUsageInBytes() const override;
 
  public:
     const InsertRecord&
@@ -92,7 +91,7 @@ class SegmentSmallIndex : public SegmentBase {
     }
 
     const Schema&
-    get_schema() const {
+    get_schema() const override {
         return *schema_;
     }
 
@@ -112,14 +111,19 @@ class SegmentSmallIndex : public SegmentBase {
         return 0;
     }
 
+    int64_t
+    get_num_chunk() const override {
+        PanicInfo("unimplemented");
+    }
+
     Status
     LoadIndexing(const LoadIndexInfo& info) override;
 
  public:
-    friend std::unique_ptr<SegmentBase>
-    CreateSegment(SchemaPtr schema, int64_t chunk_size);
+    friend std::unique_ptr<SegmentGrowing>
+    CreateGrowingSegment(SchemaPtr schema, int64_t chunk_size);
 
-    explicit SegmentSmallIndex(SchemaPtr schema, int64_t chunk_size)
+    explicit SegmentGrowingImpl(SchemaPtr schema, int64_t chunk_size)
         : chunk_size_(chunk_size),
           schema_(std::move(schema)),
           record_(*schema_, chunk_size),
@@ -130,8 +134,14 @@ class SegmentSmallIndex : public SegmentBase {
     std::shared_ptr<DeletedRecord::TmpBitmap>
     get_deleted_bitmap(int64_t del_barrier, Timestamp query_timestamp, int64_t insert_barrier, bool force = false);
 
-    Status
-    FillTargetEntry(const query::Plan* Plan, QueryResult& results) override;
+    void
+    FillTargetEntry(const query::Plan* Plan, QueryResult& results) const override;
+
+ protected:
+    SpanBase
+    chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) const override {
+        PanicInfo("unimplemented");
+    }
 
  private:
     int64_t chunk_size_;

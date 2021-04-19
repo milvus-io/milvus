@@ -35,7 +35,7 @@ create_bitmap_view(std::optional<const BitmapSimple*> bitmaps_opt, int64_t chunk
 }
 
 Status
-FloatSearch(const segcore::SegmentSmallIndex& segment,
+FloatSearch(const segcore::SegmentGrowingImpl& segment,
             const query::QueryInfo& info,
             const float* query_data,
             int64_t num_queries,
@@ -129,7 +129,7 @@ FloatSearch(const segcore::SegmentSmallIndex& segment,
 }
 
 Status
-BinarySearch(const segcore::SegmentSmallIndex& segment,
+BinarySearch(const segcore::SegmentGrowingImpl& segment,
              const query::QueryInfo& info,
              const uint8_t* query_data,
              int64_t num_queries,

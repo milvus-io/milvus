@@ -13,8 +13,10 @@ set(MILVUS_TEST_FILES
         test_bitmap.cpp 
         test_binary.cpp
         test_index_wrapper.cpp
+        test_common.cpp
         test_sealed.cpp
         test_reduce.cpp
+        test_interface.cpp
         )
 add_executable(all_tests
         ${MILVUS_TEST_FILES}

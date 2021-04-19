@@ -20,7 +20,7 @@
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include <faiss/utils/distances.h>
 #include "query/generated/ExecPlanNodeVisitor.h"
-#include "segcore/SegmentSmallIndex.h"
+#include "segcore/SegmentGrowingImpl.h"
 #include "query/PlanNode.h"
 #include "query/PlanImpl.h"
 #include "segcore/Reduce.h"
@@ -29,22 +29,22 @@
 namespace milvus::segcore {
 
 int64_t
-SegmentSmallIndex::PreInsert(int64_t size) {
+SegmentGrowingImpl::PreInsert(int64_t size) {
     auto reserved_begin = record_.reserved.fetch_add(size);
     return reserved_begin;
 }
 
 int64_t
-SegmentSmallIndex::PreDelete(int64_t size) {
+SegmentGrowingImpl::PreDelete(int64_t size) {
     auto reserved_begin = deleted_record_.reserved.fetch_add(size);
     return reserved_begin;
 }
 
 auto
-SegmentSmallIndex::get_deleted_bitmap(int64_t del_barrier,
-                                      Timestamp query_timestamp,
-                                      int64_t insert_barrier,
-                                      bool force) -> std::shared_ptr<DeletedRecord::TmpBitmap> {
+SegmentGrowingImpl::get_deleted_bitmap(int64_t del_barrier,
+                                       Timestamp query_timestamp,
+                                       int64_t insert_barrier,
+                                       bool force) -> std::shared_ptr<DeletedRecord::TmpBitmap> {
     auto old = deleted_record_.get_lru_entry();
 
     if (!force || old->bitmap_ptr->count() == insert_barrier) {
@@ -113,11 +113,11 @@ SegmentSmallIndex::get_deleted_bitmap(int64_t del_barrier,
 }
 
 Status
-SegmentSmallIndex::Insert(int64_t reserved_begin,
-                          int64_t size,
-                          const int64_t* uids_raw,
-                          const Timestamp* timestamps_raw,
-                          const RowBasedRawData& entities_raw) {
+SegmentGrowingImpl::Insert(int64_t reserved_begin,
+                           int64_t size,
+                           const int64_t* uids_raw,
+                           const Timestamp* timestamps_raw,
+                           const RowBasedRawData& entities_raw) {
     Assert(entities_raw.count == size);
     // step 1: check schema if valid
     if (entities_raw.sizeof_per_row != schema_->get_total_sizeof()) {
@@ -184,10 +184,10 @@ SegmentSmallIndex::Insert(int64_t reserved_begin,
 }
 
 Status
-SegmentSmallIndex::Delete(int64_t reserved_begin,
-                          int64_t size,
-                          const int64_t* uids_raw,
-                          const Timestamp* timestamps_raw) {
+SegmentGrowingImpl::Delete(int64_t reserved_begin,
+                           int64_t size,
+                           const int64_t* uids_raw,
+                           const Timestamp* timestamps_raw) {
     std::vector<std::tuple<Timestamp, idx_t>> ordering;
     ordering.resize(size);
     // #pragma omp parallel for
@@ -216,7 +216,7 @@ SegmentSmallIndex::Delete(int64_t reserved_begin,
 }
 
 Status
-SegmentSmallIndex::Close() {
+SegmentGrowingImpl::Close() {
     if (this->record_.reserved != this->record_.ack_responder_.GetAck()) {
         PanicInfo("insert not ready");
     }
@@ -228,7 +228,7 @@ SegmentSmallIndex::Close() {
 }
 
 int64_t
-SegmentSmallIndex::GetMemoryUsageInBytes() {
+SegmentGrowingImpl::GetMemoryUsageInBytes() const {
     int64_t total_bytes = 0;
     int64_t ins_n = upper_align(record_.reserved, chunk_size_);
     total_bytes += ins_n * (schema_->get_total_sizeof() + 16 + 1);
@@ -237,19 +237,19 @@ SegmentSmallIndex::GetMemoryUsageInBytes() {
     return total_bytes;
 }
 
-Status
-SegmentSmallIndex::Search(const query::Plan* plan,
-                          const query::PlaceholderGroup** placeholder_groups,
-                          const Timestamp* timestamps,
-                          int num_groups,
-                          QueryResult& results) {
+QueryResult
+SegmentGrowingImpl::Search(const query::Plan* plan,
+                           const query::PlaceholderGroup** placeholder_groups,
+                           const Timestamp* timestamps,
+                           int64_t num_groups) const {
     Assert(num_groups == 1);
     query::ExecPlanNodeVisitor visitor(*this, timestamps[0], *placeholder_groups[0]);
-    results = visitor.get_moved_result(*plan->plan_node_);
-    return Status::OK();
+    auto results = visitor.get_moved_result(*plan->plan_node_);
+    return results;
 }
-Status
-SegmentSmallIndex::FillTargetEntry(const query::Plan* plan, QueryResult& results) {
+
+void
+SegmentGrowingImpl::FillTargetEntry(const query::Plan* plan, QueryResult& results) const {
     AssertInfo(plan, "empty plan");
     auto size = results.result_distances_.size();
     Assert(results.internal_seg_offsets_.size() == size);
@@ -282,11 +282,10 @@ SegmentSmallIndex::FillTargetEntry(const query::Plan* plan, QueryResult& results
             results.row_data_.emplace_back(std::move(blob));
         }
     }
-    return Status::OK();
 }
 
 Status
-SegmentSmallIndex::LoadIndexing(const LoadIndexInfo& info) {
+SegmentGrowingImpl::LoadIndexing(const LoadIndexInfo& info) {
     auto field_offset = schema_->get_offset(FieldName(info.field_name));
 
     Assert(info.index_params.count("metric_type"));
