@@ -13,7 +13,7 @@ try {
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d queryservice'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} run -e QUERY_NODE_ID=1 -d querynode'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} run -e QUERY_NODE_ID=2 -d querynode'
-        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} run -e WRITE_NODE_ID=3 -d writenode'
+        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} run -e DATA_NODE_ID=3 -d datanode'
     }
 
     dir ('build/docker/test') {

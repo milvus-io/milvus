@@ -17,6 +17,7 @@ import (
 )
 
 const retry = 10
+const interval = 200
 
 func main() {
 
@@ -47,7 +48,14 @@ func main() {
 
 	var cnt int
 	for cnt = 0; cnt < retry; cnt++ {
+		time.Sleep(time.Duration(cnt*interval) * time.Millisecond)
+		if cnt != 0 {
+			log.Println("Master service isn't ready ...")
+			log.Printf("Retrying getting master service's states in ... %v ms", interval)
+		}
+
 		msStates, err := masterClient.GetComponentStates()
+
 		if err != nil {
 			continue
 		}
@@ -60,7 +68,7 @@ func main() {
 		break
 	}
 	if cnt >= retry {
-		panic("Connect to master service failed")
+		panic("Master service isn't ready")
 	}
 
 	if err := svr.SetMasterServiceInterface(masterClient); err != nil {
@@ -91,7 +99,7 @@ func main() {
 		break
 	}
 	if cnt >= retry {
-		panic("Connect to data service failed")
+		panic("Data service isn't ready")
 	}
 
 	if err := svr.SetDataServiceInterface(dataService); err != nil {
