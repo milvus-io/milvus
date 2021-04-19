@@ -274,36 +274,14 @@ func (node *QueryNode) AddQueryChannel(in *queryPb.AddQueryChannelsRequest) (*co
 		return status, errors.New(errMsg)
 	}
 
-	searchStream, ok := node.searchService.searchMsgStream.(*pulsarms.PulsarMsgStream)
-	if !ok {
-		errMsg := "type assertion failed for search message stream"
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    errMsg,
-		}
-
-		return status, errors.New(errMsg)
-	}
-
-	resultStream, ok := node.searchService.searchResultMsgStream.(*pulsarms.PulsarMsgStream)
-	if !ok {
-		errMsg := "type assertion failed for search result message stream"
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    errMsg,
-		}
-
-		return status, errors.New(errMsg)
-	}
-
 	// add request channel
 	consumeChannels := []string{in.RequestChannelID}
 	consumeSubName := Params.MsgChannelSubName
-	searchStream.AsConsumer(consumeChannels, consumeSubName)
+	node.searchService.searchMsgStream.AsConsumer(consumeChannels, consumeSubName)
 
 	// add result channel
 	producerChannels := []string{in.ResultChannelID}
-	resultStream.AsProducer(producerChannels)
+	node.searchService.searchResultMsgStream.AsProducer(producerChannels)
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,

@@ -2,6 +2,7 @@ package components
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -18,7 +19,6 @@ import (
 	ms "github.com/zilliztech/milvus-distributed/internal/masterservice"
 	qs "github.com/zilliztech/milvus-distributed/internal/queryservice"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
@@ -91,119 +91,134 @@ func NewQueryNode(ctx context.Context, factory msgstream.Factory) (*QueryNode, e
 	addr := fmt.Sprintf("%s:%d", ms.Params.Address, ms.Params.Port)
 	log.Println("Master service address:", addr)
 	log.Println("Init master service client ...")
-	masterService, err := msc.NewGrpcClient(addr, 20*time.Second)
-	if err != nil {
-		panic(err)
-	}
+	var masterService *msc.GrpcClient = nil
+	if QueryMock {
+		svr.SetMasterService(&qns.MasterServiceMock{Count: 0})
+	} else {
+		masterService, err = msc.NewGrpcClient(addr, 20*time.Second)
+		if err != nil {
+			panic(err)
+		}
 
-	if err = masterService.Init(); err != nil {
-		panic(err)
-	}
+		if err = masterService.Init(); err != nil {
+			panic(err)
+		}
 
-	if err = masterService.Start(); err != nil {
-		panic(err)
-	}
+		if err = masterService.Start(); err != nil {
+			panic(err)
+		}
 
-	ticker := time.NewTicker(interval * time.Millisecond)
-	tctx, tcancel := context.WithTimeout(ctx, 10*interval*time.Millisecond)
-	defer func() {
-		ticker.Stop()
-		tcancel()
-	}()
+		ticker := time.NewTicker(interval * time.Millisecond)
+		tctx, tcancel := context.WithTimeout(ctx, 10*interval*time.Millisecond)
+		defer func() {
+			ticker.Stop()
+			tcancel()
+		}()
 
-	for {
-		var states *internalpb2.ComponentStates
-		select {
-		case <-ticker.C:
-			states, err = masterService.GetComponentStates()
-			if err != nil {
-				continue
+		for {
+			var states *internalpb2.ComponentStates
+			select {
+			case <-ticker.C:
+				states, err = masterService.GetComponentStates()
+				if err != nil {
+					continue
+				}
+			case <-tctx.Done():
+				return nil, errors.New("master client connect timeout")
 			}
-		case <-tctx.Done():
-			return nil, errors.New("master client connect timeout")
+			if states.State.StateCode == internalpb2.StateCode_HEALTHY {
+				break
+			}
 		}
-		if states.State.StateCode == internalpb2.StateCode_HEALTHY {
-			break
-		}
-	}
 
-	if err := svr.SetMasterService(masterService); err != nil {
-		panic(err)
+		if err := svr.SetMasterService(masterService); err != nil {
+			panic(err)
+		}
 	}
 
 	// --- IndexService ---
 	is.Params.Init()
 	log.Println("Index service address:", is.Params.Address)
-	indexService := isc.NewClient(is.Params.Address)
+	var indexService *isc.Client = nil
+	if QueryMock {
+		svr.SetIndexService(&qns.IndexServiceMock{Count: 0})
+	} else {
+		indexService = isc.NewClient(is.Params.Address)
 
-	if err := indexService.Init(); err != nil {
-		panic(err)
-	}
+		if err := indexService.Init(); err != nil {
+			panic(err)
+		}
 
-	if err := indexService.Start(); err != nil {
-		panic(err)
-	}
+		if err := indexService.Start(); err != nil {
+			panic(err)
+		}
 
-	ticker = time.NewTicker(interval * time.Millisecond)
-	tctx, tcancel = context.WithTimeout(ctx, 10*interval*time.Millisecond)
-	defer func() {
-		ticker.Stop()
-		tcancel()
-	}()
+		ticker := time.NewTicker(interval * time.Millisecond)
+		tctx, tcancel := context.WithTimeout(ctx, 10*interval*time.Millisecond)
+		defer func() {
+			ticker.Stop()
+			tcancel()
+		}()
 
-	for {
-		var states *internalpb2.ComponentStates
-		select {
-		case <-ticker.C:
-			states, err = indexService.GetComponentStates()
-			if err != nil {
-				continue
+		for {
+			var states *internalpb2.ComponentStates
+			select {
+			case <-ticker.C:
+				states, err = indexService.GetComponentStates()
+				if err != nil {
+					continue
+				}
+			case <-tctx.Done():
+				return nil, errors.New("Index service client connect timeout")
 			}
-		case <-tctx.Done():
-			return nil, errors.New("Index service client connect timeout")
+			if states.State.StateCode == internalpb2.StateCode_HEALTHY {
+				break
+			}
 		}
-		if states.State.StateCode == internalpb2.StateCode_HEALTHY {
-			break
-		}
-	}
 
-	if err := svr.SetIndexService(indexService); err != nil {
-		panic(err)
+		if err := svr.SetIndexService(indexService); err != nil {
+			panic(err)
+		}
 	}
 
 	// --- DataService ---
 	ds.Params.Init()
 	log.Printf("Data service address: %s:%d", ds.Params.Address, ds.Params.Port)
 	log.Println("Init data service client ...")
-	dataService := dsc.NewClient(fmt.Sprintf("%s:%d", ds.Params.Address, ds.Params.Port))
-	if err = dataService.Init(); err != nil {
-		panic(err)
-	}
-	if err = dataService.Start(); err != nil {
-		panic(err)
-	}
+	var dataService *dsc.Client = nil
+	if QueryMock {
+		svr.SetDataService(&qns.DataServiceMock{Count: 0})
+	} else {
+		dataService = dsc.NewClient(fmt.Sprintf("%s:%d", ds.Params.Address, ds.Params.Port))
+		if err = dataService.Init(); err != nil {
+			panic(err)
+		}
+		if err = dataService.Start(); err != nil {
+			panic(err)
+		}
 
-	for cnt = 0; cnt < retry; cnt++ {
-		dsStates, err := dataService.GetComponentStates()
-		if err != nil {
-			log.Printf("retry cout = %d, error = %s", cnt, err.Error())
-			continue
+		for cnt = 0; cnt < retry; cnt++ {
+			dsStates, err := dataService.GetComponentStates()
+			if err != nil {
+				log.Printf("retry cout = %d, error = %s", cnt, err.Error())
+				continue
+			}
+			if dsStates.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+				log.Printf("retry cout = %d, error = %s", cnt, err.Error())
+				continue
+			}
+			if dsStates.State.StateCode != internalpb2.StateCode_INITIALIZING && dsStates.State.StateCode != internalpb2.StateCode_HEALTHY {
+				continue
+			}
+			break
 		}
-		if dsStates.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-			log.Printf("retry cout = %d, error = %s", cnt, err.Error())
-			continue
+		if cnt >= retry {
+			panic("Data service isn't ready")
 		}
-		if dsStates.State.StateCode != internalpb2.StateCode_INITIALIZING && dsStates.State.StateCode != internalpb2.StateCode_HEALTHY {
-			continue
-		}
-		break
-	}
-	if cnt >= retry {
-		panic("Data service isn't ready")
-	}
 
-	if err := svr.SetDataService(dataService); err != nil {
-		panic(err)
+		if err := svr.SetDataService(dataService); err != nil {
+			panic(err)
+		}
 	}
 
 	return &QueryNode{
@@ -231,9 +246,11 @@ func (q *QueryNode) Run() error {
 }
 
 func (q *QueryNode) Stop() error {
-	_ = q.dataService.Stop()
-	_ = q.masterService.Stop()
+	if !QueryMock {
+		_ = q.dataService.Stop()
+		_ = q.masterService.Stop()
+		_ = q.indexService.Stop()
+	}
 	_ = q.queryService.Stop()
-	_ = q.indexService.Stop()
 	return q.svr.Stop()
 }

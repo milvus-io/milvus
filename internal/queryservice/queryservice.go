@@ -161,6 +161,7 @@ func (qs *QueryService) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb
 
 func (qs *QueryService) ShowCollections(req *querypb.ShowCollectionRequest) (*querypb.ShowCollectionResponse, error) {
 	dbID := req.DbID
+	fmt.Println("show collection start, dbID = ", dbID)
 	collections, err := qs.replica.getCollections(dbID)
 	collectionIDs := make([]UniqueID, 0)
 	for _, collection := range collections {
@@ -174,6 +175,7 @@ func (qs *QueryService) ShowCollections(req *querypb.ShowCollectionRequest) (*qu
 			},
 		}, err
 	}
+	fmt.Println("show collection end")
 	return &querypb.ShowCollectionResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -392,6 +394,7 @@ func (qs *QueryService) LoadPartitions(req *querypb.LoadPartitionRequest) (*comm
 			return fn(err), err
 		}
 		for _, state := range resp.States {
+			fmt.Println("segment ", state.SegmentID, " 's state is ", state.StartPosition)
 			segmentID := state.SegmentID
 			segmentStates[segmentID] = state
 			channelName := state.StartPosition.ChannelName
@@ -501,7 +504,22 @@ func (qs *QueryService) CreateQueryChannel() (*querypb.CreateQueryChannelRespons
 	allocatedQueryChannel := "query-" + strconv.FormatInt(int64(channelID), 10)
 	allocatedQueryResultChannel := "queryResult-" + strconv.FormatInt(int64(channelID), 10)
 
-	//TODO:: query node watch query channels
+	addQueryChannelsRequest := &querypb.AddQueryChannelsRequest{
+		RequestChannelID: allocatedQueryChannel,
+		ResultChannelID:  allocatedQueryResultChannel,
+	}
+	for _, node := range qs.queryNodes {
+		_, err := node.AddQueryChannel(addQueryChannelsRequest)
+		if err != nil {
+			return &querypb.CreateQueryChannelResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+					Reason:    err.Error(),
+				},
+			}, err
+		}
+	}
+
 	return &querypb.CreateQueryChannelResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,

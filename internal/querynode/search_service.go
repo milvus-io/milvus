@@ -40,16 +40,15 @@ type ResultEntityIds []UniqueID
 func newSearchService(ctx context.Context, replica collectionReplica, factory msgstream.Factory) *searchService {
 	receiveBufSize := Params.SearchReceiveBufSize
 
-	consumeChannels := Params.SearchChannelNames
-	consumeSubName := Params.MsgChannelSubName
 	searchStream, _ := factory.NewMsgStream(ctx)
-	searchStream.AsConsumer(consumeChannels, consumeSubName)
-	var inputStream msgstream.MsgStream = searchStream
-
-	producerChannels := Params.SearchResultChannelNames
 	searchResultStream, _ := factory.NewMsgStream(ctx)
-	searchResultStream.AsProducer(producerChannels)
-	var outputStream msgstream.MsgStream = searchResultStream
+
+	// query node doesn't need to consumer any search or search result channel actively.
+	//consumeChannels := Params.SearchChannelNames
+	//consumeSubName := Params.MsgChannelSubName
+	//searchStream.AsConsumer(consumeChannels, consumeSubName)
+	//producerChannels := Params.SearchResultChannelNames
+	//searchResultStream.AsProducer(producerChannels)
 
 	searchServiceCtx, searchServiceCancel := context.WithCancel(ctx)
 	msgBuffer := make(chan msgstream.TsMsg, receiveBufSize)
@@ -64,8 +63,8 @@ func newSearchService(ctx context.Context, replica collectionReplica, factory ms
 		replica:      replica,
 		tSafeWatcher: newTSafeWatcher(),
 
-		searchMsgStream:       inputStream,
-		searchResultMsgStream: outputStream,
+		searchMsgStream:       searchStream,
+		searchResultMsgStream: searchResultStream,
 		queryNodeID:           Params.QueryNodeID,
 	}
 }
