@@ -17,10 +17,10 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ENV DEBIAN_FRONTEND noninteractive
 
-RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 clang-format-10 && \
+RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 && \
     wget -qO- "https://cmake.org/files/v3.14/cmake-3.14.3-Linux-x86_64.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
     apt-get update && apt-get install -y --no-install-recommends \
-    g++ gcc gfortran git make ccache libssl-dev zlib1g-dev libboost-regex-dev libboost-program-options-dev libboost-system-dev libboost-filesystem-dev libboost-serialization-dev python3-dev libboost-python-dev libcurl4-openssl-dev libtbb-dev clang-format-7 clang-tidy-7 lcov && \
+    g++ gcc gfortran git make ccache libssl-dev zlib1g-dev libboost-regex-dev libboost-program-options-dev libboost-system-dev libboost-filesystem-dev libboost-serialization-dev python3-dev libboost-python-dev libcurl4-openssl-dev libtbb-dev clang-format-10 clang-tidy-10 lcov && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
 RUN wget https://github.com/xianyi/OpenBLAS/archive/v0.3.9.tar.gz && \
     tar zxvf v0.3.9.tar.gz && cd OpenBLAS-0.3.9 && \
     make TARGET=CORE2 DYNAMIC_ARCH=1 DYNAMIC_OLDER=1 USE_THREAD=0 USE_OPENMP=0 FC=gfortran CC=gcc COMMON_OPT="-O3 -g -fPIC" FCOMMON_OPT="-O3 -g -fPIC -frecursive" NMAX="NUM_THREADS=128" LIBPREFIX="libopenblas" LAPACKE="NO_LAPACKE=1" INTERFACE64=0 NO_STATIC=1 && \
-    make PREFIX=/usr install && \
+    make PREFIX=/usr NO_STATIC=1 install && \
     cd .. && rm -rf OpenBLAS-0.3.9 && rm v0.3.9.tar.gz
 ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/lib"
 
@@ -39,7 +39,10 @@ ENV GO111MODULE on
 ENV PATH $GOPATH/bin:$GOROOT/bin:$PATH
 RUN mkdir -p /usr/local/go && wget -qO- "https://golang.org/dl/go1.15.2.linux-amd64.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
     mkdir -p "$GOPATH/src" "$GOPATH/src/github.com/zilliztech" "$GOPATH/bin" && \
-    go get github.com/golang/protobuf/protoc-gen-go@v1.3.2 && chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)
+    go get github.com/golang/protobuf/protoc-gen-go@v1.3.2 && chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR) && \
+    mkdir -p ${GOPATH}/bin && \
+    (curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ${GOPATH}/bin v1.27.0) && \
+    export GO111MODULE=off && go get github.com/quasilyte/go-ruleguard/...
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-server gdb gdbserver && \
