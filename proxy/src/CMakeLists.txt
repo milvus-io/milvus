@@ -62,6 +62,7 @@ target_link_libraries( server
                 PUBLIC ${link_lib}
                 tracing
 				pulsarStatic
+				message_client_cpp
                 ${THIRD_PARTY_LIBS}
                 ${BOOST_LIB}
                        )

@@ -99,7 +99,7 @@ GrpcServer::StartService() {
 
     HelloService helloService;
     builder.RegisterService(&helloService);
-    // report address to mmaster
+    // report address to master
     auto reportClient = new ReportClient(::grpc::CreateChannel("192.168.2.28:50051",
                                                              ::grpc::InsecureChannelCredentials()));
     auto status = reportClient->ReportAddress();

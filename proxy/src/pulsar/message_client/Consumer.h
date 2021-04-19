@@ -3,6 +3,7 @@
 #include "pulsar/Consumer.h"
 #include "Client.h"
 
+namespace milvus {
 namespace message_client {
 
 enum ConsumerType {
@@ -17,7 +18,7 @@ using ConsumerConfiguration = pulsar::ConsumerConfiguration;
 
 class MsgConsumer{
 public:
-  MsgConsumer(std::shared_ptr<message_client::MsgClient> &client, std::string consumer_name,
+  MsgConsumer(std::shared_ptr<pulsar::Client> &client, std::string consumer_name,
           const pulsar::ConsumerConfiguration conf = ConsumerConfiguration());
 
   Result subscribe(const std::string& topic);
@@ -33,9 +34,10 @@ public:
 
 private:
   Consumer consumer_;
-  std::shared_ptr<MsgClient> client_;
+  std::shared_ptr<pulsar::Client> client_;
   ConsumerConfiguration config_;
   std::string subscription_name_;
 };
 
+}
 }

@@ -1,3 +1,5 @@
+// Not used now, please using suvlim.proto
+
 syntax = "proto3";
 
 import "status.proto";

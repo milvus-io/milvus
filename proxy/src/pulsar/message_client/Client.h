@@ -3,6 +3,7 @@
 #include "pulsar/Client.h"
 #include "pulsar/ClientConfiguration.h"
 
+namespace milvus {
 namespace message_client {
 
 using Result = pulsar::Result;
@@ -21,4 +22,5 @@ private:
   int64_t client_id_;
 };
 
+}
 }
