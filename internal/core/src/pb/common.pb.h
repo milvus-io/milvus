@@ -184,6 +184,8 @@ enum MsgType : int {
   kHasPartition = 202,
   kDescribePartition = 203,
   kShowPartitions = 204,
+  kShowSegment = 250,
+  kDescribeSegment = 251,
   kCreateIndex = 300,
   kDescribeIndex = 301,
   kInsert = 400,

@@ -183,6 +183,11 @@ message DDLFlushMeta {
     repeated string binlog_paths = 2;
 }
 
+message SegmentFlushCompletedMsg {
+  common.MsgBase base = 1;
+  int64 segmentID = 2;
+}
+
 service DataService {
 
    rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
