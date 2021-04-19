@@ -42,12 +42,12 @@ type showPartitionTask struct {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *createPartitionTask) Type() internalpb.ReqType {
+func (t *createPartitionTask) Type() internalpb.MsgType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0
 	}
-	return t.req.ReqType
+	return t.req.MsgType
 }
 
 func (t *createPartitionTask) Ts() (Timestamp, error) {
@@ -91,12 +91,12 @@ func (t *createPartitionTask) Execute() error {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *dropPartitionTask) Type() internalpb.ReqType {
+func (t *dropPartitionTask) Type() internalpb.MsgType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0
 	}
-	return t.req.ReqType
+	return t.req.MsgType
 }
 
 func (t *dropPartitionTask) Ts() (Timestamp, error) {
@@ -143,12 +143,12 @@ func (t *dropPartitionTask) Execute() error {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *hasPartitionTask) Type() internalpb.ReqType {
+func (t *hasPartitionTask) Type() internalpb.MsgType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0
 	}
-	return t.req.ReqType
+	return t.req.MsgType
 }
 
 func (t *hasPartitionTask) Ts() (Timestamp, error) {
@@ -178,12 +178,12 @@ func (t *hasPartitionTask) Execute() error {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *describePartitionTask) Type() internalpb.ReqType {
+func (t *describePartitionTask) Type() internalpb.MsgType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0
 	}
-	return t.req.ReqType
+	return t.req.MsgType
 }
 
 func (t *describePartitionTask) Ts() (Timestamp, error) {
@@ -215,12 +215,12 @@ func (t *describePartitionTask) Execute() error {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *showPartitionTask) Type() internalpb.ReqType {
+func (t *showPartitionTask) Type() internalpb.MsgType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0
 	}
-	return t.req.ReqType
+	return t.req.MsgType
 }
 
 func (t *showPartitionTask) Ts() (Timestamp, error) {

@@ -6,13 +6,21 @@ import (
 	"log"
 	"sync"
 
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
 type manipulationService struct {
-	ctx context.Context
-	fg  *flowgraph.TimeTickedFlowGraph
+	ctx       context.Context
+	fg        *flowgraph.TimeTickedFlowGraph
+	msgStream *msgstream.PulsarMsgStream
+}
+
+func (dmService *manipulationService) Start() {
+	dmService.initNodes()
+	go dmService.fg.Start()
+	dmService.consumeFromMsgStream()
 }
 
 func (dmService *manipulationService) initNodes() {
@@ -85,7 +93,32 @@ func (dmService *manipulationService) initNodes() {
 		log.Fatal("set edges failed in node:", serviceTimeNode.Name())
 	}
 
+	err = dmService.fg.SetStartNode(msgStreamNode.Name())
+	if err != nil {
+		log.Fatal("set start node failed")
+	}
+
 	// TODO: add top nodes's initialization
+}
+
+func (dmService *manipulationService) consumeFromMsgStream() {
+	for {
+		select {
+		case <-dmService.ctx.Done():
+			log.Println("service stop")
+			return
+		default:
+			msgPack := dmService.msgStream.Consume()
+			var msgStreamMsg Msg = &msgStreamMsg{
+				tsMessages: msgPack.Msgs,
+				timeRange: TimeRange{
+					timestampMin: Timestamp(msgPack.BeginTs),
+					timestampMax: Timestamp(msgPack.EndTs),
+				},
+			}
+			dmService.fg.Input(&msgStreamMsg)
+		}
+	}
 }
 
 func (node *QueryNode) MessagesPreprocess(insertDeleteMessages []*msgPb.InsertOrDeleteMsg, timeRange TimeRange) msgPb.Status {
@@ -116,7 +149,7 @@ func (node *QueryNode) MessagesPreprocess(insertDeleteMessages []*msgPb.InsertOr
 				}
 				node.insertData.insertIDs[msg.SegmentId] = append(node.insertData.insertIDs[msg.SegmentId], msg.Uid)
 				node.insertData.insertTimestamps[msg.SegmentId] = append(node.insertData.insertTimestamps[msg.SegmentId], msg.Timestamp)
-				node.insertData.insertRecords[msg.SegmentId] = append(node.insertData.insertRecords[msg.SegmentId], msg.RowsData.Blob)
+				// node.insertData.insertRecords[msg.SegmentID] = append(node.insertData.insertRecords[msg.SegmentID], msg.RowsData.Blob)
 			} else if msg.Op == msgPb.OpType_DELETE {
 				var r = DeleteRecord{
 					entityID:  msg.Uid,
@@ -170,7 +203,7 @@ func (node *QueryNode) MessagesPreprocess(insertDeleteMessages []*msgPb.InsertOr
 				}
 				node.insertData.insertIDs[msg.SegmentId] = append(node.insertData.insertIDs[msg.SegmentId], msg.Uid)
 				node.insertData.insertTimestamps[msg.SegmentId] = append(node.insertData.insertTimestamps[msg.SegmentId], msg.Timestamp)
-				node.insertData.insertRecords[msg.SegmentId] = append(node.insertData.insertRecords[msg.SegmentId], msg.RowsData.Blob)
+				// node.insertData.insertRecords[msg.SegmentID] = append(node.insertData.insertRecords[msg.SegmentID], msg.RowsData.Blob)
 			} else if msg.Op == msgPb.OpType_DELETE {
 				var r = DeleteRecord{
 					entityID:  msg.Uid,

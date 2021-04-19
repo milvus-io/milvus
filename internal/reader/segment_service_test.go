@@ -44,7 +44,8 @@ import (
 func TestSegmentManagement_SegmentStatistic(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
-	ctx, _ := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 	pulsarAddr := "pulsar://"
@@ -73,7 +74,8 @@ func TestSegmentManagement_SegmentStatisticService(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), d)
+	ctx, cancel := context.WithDeadline(context.Background(), d)
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 	pulsarAddr := "pulsar://"

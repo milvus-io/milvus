@@ -15,7 +15,7 @@ import (
 )
 
 type BaseRequest interface {
-	Type() internalpb.ReqType
+	Type() internalpb.MsgType
 	PreExecute() commonpb.Status
 	Execute() commonpb.Status
 	PostExecute() commonpb.Status

@@ -15,7 +15,7 @@ func TestQueryNodeTime_UpdateReadTimeSync(t *testing.T) {
 		TSOTimeSync:     uint64(4),
 	}
 
-	queryNodeTimeSync.UpdateReadTimeSync()
+	queryNodeTimeSync.updateReadTimeSync()
 
 	assert.Equal(t, queryNodeTimeSync.ReadTimeSyncMin, uint64(1))
 }
@@ -33,15 +33,15 @@ func TestQueryNodeTime_UpdateSearchTimeSync(t *testing.T) {
 		timestampMin: 0,
 		timestampMax: 1,
 	}
-	queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
+	queryNodeTimeSync.updateSearchServiceTime(timeRange)
 
 	assert.Equal(t, queryNodeTimeSync.ServiceTimeSync, uint64(1))
 }
 
 func TestQueryNodeTime_UpdateTSOTimeSync(t *testing.T) {
-	// TODO: add UpdateTSOTimeSync test
+	// TODO: add updateTSOTimeSync test
 }
 
 func TestQueryNodeTime_UpdateWriteTimeSync(t *testing.T) {
-	// TODO: add UpdateWriteTimeSync test
+	// TODO: add updateWriteTimeSync test
 }

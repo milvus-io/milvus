@@ -5,15 +5,16 @@ import (
 	"crypto/md5"
 	"flag"
 	"fmt"
-	"github.com/pivotal-golang/bytefmt"
-	"github.com/zilliztech/milvus-distributed/internal/storage"
-	"github.com/zilliztech/milvus-distributed/internal/storage/type"
 	"log"
 	"math/rand"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/pivotal-golang/bytefmt"
+	"github.com/zilliztech/milvus-distributed/internal/storage"
+	storagetype "github.com/zilliztech/milvus-distributed/internal/storage/type"
 )
 
 // Global variables

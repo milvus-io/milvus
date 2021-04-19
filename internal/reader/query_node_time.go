@@ -1,34 +1,34 @@
 package reader
 
 type QueryNodeTime struct {
-	ReadTimeSyncMin uint64
-	ReadTimeSyncMax uint64
-	WriteTimeSync   uint64
-	ServiceTimeSync uint64
-	TSOTimeSync     uint64
+	ReadTimeSyncMin Timestamp
+	ReadTimeSyncMax Timestamp
+	WriteTimeSync   Timestamp
+	ServiceTimeSync Timestamp
+	TSOTimeSync     Timestamp
 }
 
 type TimeRange struct {
-	timestampMin uint64
-	timestampMax uint64
+	timestampMin Timestamp
+	timestampMax Timestamp
 }
 
-func (t *QueryNodeTime) UpdateReadTimeSync() {
+func (t *QueryNodeTime) updateReadTimeSync() {
 	t.ReadTimeSyncMin = t.ReadTimeSyncMax
 	// TODO: Add time sync
 	t.ReadTimeSyncMax = 1
 }
 
-func (t *QueryNodeTime) UpdateWriteTimeSync() {
+func (t *QueryNodeTime) updateWriteTimeSync() {
 	// TODO: Add time sync
 	t.WriteTimeSync = 0
 }
 
-func (t *QueryNodeTime) UpdateSearchTimeSync(timeRange TimeRange) {
+func (t *QueryNodeTime) updateSearchServiceTime(timeRange TimeRange) {
 	t.ServiceTimeSync = timeRange.timestampMax
 }
 
-func (t *QueryNodeTime) UpdateTSOTimeSync() {
+func (t *QueryNodeTime) updateTSOTimeSync() {
 	// TODO: Add time sync
 	t.TSOTimeSync = 0
 }
