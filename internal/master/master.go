@@ -27,36 +27,6 @@ type (
 	Timestamp = typeutil.Timestamp
 )
 
-type Option struct {
-	KVRootPath   string
-	MetaRootPath string
-	EtcdAddr     []string
-
-	PulsarAddr string
-
-	////softTimeTickBarrier
-	ProxyIDs            []typeutil.UniqueID
-	PulsarProxyChannels []string //TimeTick
-	PulsarProxySubName  string
-	SoftTTBInterval     Timestamp //Physical Time + Logical Time
-
-	//hardTimeTickBarrier
-	WriteIDs            []typeutil.UniqueID
-	PulsarWriteChannels []string
-	PulsarWriteSubName  string
-
-	PulsarDMChannels  []string
-	PulsarK2SChannels []string
-
-	DefaultRecordSize     int64
-	MinimumAssignSize     int64
-	SegmentThreshold      float64
-	SegmentExpireDuration int64
-	NumOfChannel          int
-	NumOfQueryNode        int
-	StatsChannels         string
-}
-
 type Master struct {
 	// Server state.
 	isServing int64
@@ -105,18 +75,22 @@ func newKVBase(kvRoot string, etcdAddr []string) *kv.EtcdKV {
 
 func Init() {
 	rand.Seed(time.Now().UnixNano())
-	Params.InitParamTable()
+	Params.Init()
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(ctx context.Context, opt *Option) (*Master, error) {
+func CreateServer(ctx context.Context) (*Master, error) {
 	//Init(etcdAddr, kvRootPath)
+	etcdAddress := Params.EtcdAddress
+	metaRootPath := Params.EtcdRootPath
+	kvRootPath := Params.EtcdRootPath
+	pulsarAddr := Params.PulsarAddress
 
-	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: opt.EtcdAddr})
+	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
 	if err != nil {
 		return nil, err
 	}
-	etcdkv := kv.NewEtcdKV(etcdClient, opt.MetaRootPath)
+	etcdkv := kv.NewEtcdKV(etcdClient, metaRootPath)
 	metakv, err := NewMetaTable(etcdkv)
 	if err != nil {
 		return nil, err
@@ -128,41 +102,41 @@ func CreateServer(ctx context.Context, opt *Option) (*Master, error) {
 		return nil, err
 	}
 	pulsarProxyStream := ms.NewPulsarMsgStream(ctx, 1024) //output stream
-	pulsarProxyStream.SetPulsarClient(opt.PulsarAddr)
-	pulsarProxyStream.CreatePulsarConsumers(opt.PulsarProxyChannels, opt.PulsarProxySubName, ms.NewUnmarshalDispatcher(), 1024)
+	pulsarProxyStream.SetPulsarClient(pulsarAddr)
+	pulsarProxyStream.CreatePulsarConsumers(Params.ProxyTimeTickChannelNames, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
 	pulsarProxyStream.Start()
 	var proxyStream ms.MsgStream = pulsarProxyStream
-	proxyTimeTickBarrier := newSoftTimeTickBarrier(ctx, &proxyStream, opt.ProxyIDs, opt.SoftTTBInterval)
+	proxyTimeTickBarrier := newSoftTimeTickBarrier(ctx, &proxyStream, Params.ProxyIDList, Params.SoftTimeTickBarrierInterval)
 	tsMsgProducer.SetProxyTtBarrier(proxyTimeTickBarrier)
 
 	pulsarWriteStream := ms.NewPulsarMsgStream(ctx, 1024) //output stream
-	pulsarWriteStream.SetPulsarClient(opt.PulsarAddr)
-	pulsarWriteStream.CreatePulsarConsumers(opt.PulsarWriteChannels, opt.PulsarWriteSubName, ms.NewUnmarshalDispatcher(), 1024)
+	pulsarWriteStream.SetPulsarClient(pulsarAddr)
+	pulsarWriteStream.CreatePulsarConsumers(Params.WriteNodeTimeTickChannelNames, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
 	pulsarWriteStream.Start()
 	var writeStream ms.MsgStream = pulsarWriteStream
-	writeTimeTickBarrier := newHardTimeTickBarrier(ctx, &writeStream, opt.WriteIDs)
+	writeTimeTickBarrier := newHardTimeTickBarrier(ctx, &writeStream, Params.WriteNodeIDList)
 	tsMsgProducer.SetWriteNodeTtBarrier(writeTimeTickBarrier)
 
 	pulsarDMStream := ms.NewPulsarMsgStream(ctx, 1024) //input stream
-	pulsarDMStream.SetPulsarClient(opt.PulsarAddr)
-	pulsarDMStream.CreatePulsarProducers(opt.PulsarDMChannels)
+	pulsarDMStream.SetPulsarClient(pulsarAddr)
+	pulsarDMStream.CreatePulsarProducers(Params.InsertChannelNames)
 	tsMsgProducer.SetDMSyncStream(pulsarDMStream)
 
 	pulsarK2SStream := ms.NewPulsarMsgStream(ctx, 1024) //input stream
-	pulsarK2SStream.SetPulsarClient(opt.PulsarAddr)
-	pulsarK2SStream.CreatePulsarProducers(opt.PulsarK2SChannels)
+	pulsarK2SStream.SetPulsarClient(pulsarAddr)
+	pulsarK2SStream.CreatePulsarProducers(Params.K2SChannelNames)
 	tsMsgProducer.SetK2sSyncStream(pulsarK2SStream)
 
 	// stats msg stream
 	statsMs := ms.NewPulsarMsgStream(ctx, 1024)
-	statsMs.SetPulsarClient(opt.PulsarAddr)
-	statsMs.CreatePulsarConsumers([]string{opt.StatsChannels}, "SegmentStats", ms.NewUnmarshalDispatcher(), 1024)
+	statsMs.SetPulsarClient(pulsarAddr)
+	statsMs.CreatePulsarConsumers([]string{Params.QueryNodeStatsChannelName}, "SegmentStats", ms.NewUnmarshalDispatcher(), 1024)
 	statsMs.Start()
 
 	m := &Master{
 		ctx:                  ctx,
 		startTimestamp:       time.Now().Unix(),
-		kvBase:               newKVBase(opt.KVRootPath, opt.EtcdAddr),
+		kvBase:               newKVBase(kvRootPath, []string{etcdAddress}),
 		metaTable:            metakv,
 		timesSyncMsgProducer: tsMsgProducer,
 		grpcErr:              make(chan error),
@@ -170,19 +144,19 @@ func CreateServer(ctx context.Context, opt *Option) (*Master, error) {
 	}
 
 	//init idAllocator
-	m.idAllocator = NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(opt.EtcdAddr, opt.KVRootPath, "gid"))
+	m.idAllocator = NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{etcdAddress}, kvRootPath, "gid"))
 	if err := m.idAllocator.Initialize(); err != nil {
 		return nil, err
 	}
 
 	//init tsoAllocator
-	m.tsoAllocator = NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase(opt.EtcdAddr, opt.KVRootPath, "tso"))
+	m.tsoAllocator = NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase([]string{etcdAddress}, kvRootPath, "tso"))
 	if err := m.tsoAllocator.Initialize(); err != nil {
 		return nil, err
 	}
 
 	m.scheduler = NewDDRequestScheduler(func() (UniqueID, error) { return m.idAllocator.AllocOne() })
-	m.segmentMgr = NewSegmentManager(metakv, opt,
+	m.segmentMgr = NewSegmentManager(metakv,
 		func() (UniqueID, error) { return m.idAllocator.AllocOne() },
 		func() (Timestamp, error) { return m.tsoAllocator.AllocOne() },
 	)

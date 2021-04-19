@@ -21,36 +21,45 @@ func TestMaster_CreateCollection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
 
-	etcdAddr := Params.EtcdAddress()
+	etcdAddr := Params.EtcdAddress
 	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	_, err = etcdCli.Delete(ctx, "/test/root", clientv3.WithPrefix())
 	assert.Nil(t, err)
 
-	opt := Option{
-		KVRootPath:            "/test/root/kv",
-		MetaRootPath:          "/test/root/meta",
-		EtcdAddr:              []string{etcdAddr},
-		PulsarAddr:            Params.PulsarAddress(),
-		ProxyIDs:              []typeutil.UniqueID{1, 2},
-		PulsarProxyChannels:   []string{"proxy1", "proxy2"},
-		PulsarProxySubName:    "proxyTopics",
-		SoftTTBInterval:       300,
-		WriteIDs:              []typeutil.UniqueID{3, 4},
-		PulsarWriteChannels:   []string{"write3", "write4"},
-		PulsarWriteSubName:    "writeTopics",
-		PulsarDMChannels:      []string{"dm0", "dm1"},
-		PulsarK2SChannels:     []string{"k2s0", "k2s1"},
+	Params = ParamTable{
+		Address: Params.Address,
+		Port:    Params.Port,
+
+		EtcdAddress:   Params.EtcdAddress,
+		EtcdRootPath:  "/test/root",
+		PulsarAddress: Params.PulsarAddress,
+
+		ProxyIDList:     []typeutil.UniqueID{1, 2},
+		WriteNodeIDList: []typeutil.UniqueID{3, 4},
+
+		TopicNum:                    5,
+		QueryNodeNum:                3,
+		SoftTimeTickBarrierInterval: 300,
+
+		// segment
+		SegmentSize:           536870912 / 1024 / 1024,
+		SegmentSizeFactor:     0.75,
 		DefaultRecordSize:     1024,
-		MinimumAssignSize:     1048576,
-		SegmentThreshold:      536870912,
-		SegmentExpireDuration: 2000,
-		NumOfChannel:          5,
-		NumOfQueryNode:        3,
-		StatsChannels:         "statistic",
+		MinSegIDAssignCnt:     1048576 / 1024,
+		MaxSegIDAssignCnt:     Params.MaxSegIDAssignCnt,
+		SegIDAssignExpiration: 2000,
+
+		// msgChannel
+		ProxyTimeTickChannelNames:     []string{"proxy1", "proxy2"},
+		WriteNodeTimeTickChannelNames: []string{"write3", "write4"},
+		InsertChannelNames:            []string{"dm0", "dm1"},
+		K2SChannelNames:               []string{"k2s0", "k2s1"},
+		QueryNodeStatsChannelName:     "statistic",
+		MsgChannelSubName:             Params.MsgChannelSubName,
 	}
 
-	svr, err := CreateServer(ctx, &opt)
+	svr, err := CreateServer(ctx)
 	assert.Nil(t, err)
 	err = svr.Run(10001)
 	assert.Nil(t, err)

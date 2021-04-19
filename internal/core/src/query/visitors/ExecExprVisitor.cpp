@@ -1,6 +1,7 @@
 #include "segcore/SegmentSmallIndex.h"
 #include <optional>
 #include "query/ExprImpl.h"
+#include "boost/dynamic_bitset.hpp"
 #include "query/generated/ExecExprVisitor.h"
 
 namespace milvus::query {
@@ -10,7 +11,7 @@ namespace milvus::query {
 namespace impl {
 class ExecExprVisitor : ExprVisitor {
  public:
-    using RetType = std::vector<std::vector<bool>>;
+    using RetType = std::deque<boost::dynamic_bitset<>>;
     explicit ExecExprVisitor(segcore::SegmentSmallIndex& segment) : segment_(segment) {
     }
     RetType
@@ -66,7 +67,7 @@ ExecExprVisitor::ExecRangeVisitorImpl(RangeExprImpl<T>& expr, Func func) -> RetT
     auto& field_meta = schema[field_offset];
     auto vec_ptr = records.get_scalar_entity<T>(field_offset);
     auto& vec = *vec_ptr;
-    std::vector<std::vector<bool>> results(vec.chunk_size());
+    RetType results(vec.chunk_size());
     for (auto chunk_id = 0; chunk_id < vec.chunk_size(); ++chunk_id) {
         auto& result = results[chunk_id];
         result.resize(segcore::DefaultElementPerChunk);

@@ -67,7 +67,7 @@ class IndexingRecord {
 
     // concurrent
     int64_t
-    get_finished_ack() {
+    get_finished_ack() const {
         return finished_ack_.GetAck();
     }
 

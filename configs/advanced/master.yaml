@@ -15,6 +15,7 @@ master:
   segment:
     # old name: segmentThreshold: 536870912
     size: 512 # MB
+    sizeFactor: 0.75
     defaultSizePerRecord: 1024
     minIDAssignCnt: 1024
     maxIDAssignCnt: 16384
