@@ -1775,7 +1775,7 @@ class TestSearchInvalid(object):
 
     # #1463
     @pytest.mark.level(2)
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags(CaseLabel.tags_0331)
     def test_search_with_invalid_params(self, connect, collection, get_simple_index, get_search_params):
         '''
         target: test search function, with the wrong nprobe
