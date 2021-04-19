@@ -197,6 +197,7 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
       mut_msg.set_segment_id(segment_id(request.collection_name(), channel_id, timestamp));
       mut_msg.mutable_rows_data()->CopyFrom(request.rows_data(i));
       mut_msg.mutable_extra_params()->CopyFrom(request.extra_params());
+      mut_msg.set_channel_id(channel_id);
 
       auto callback = [&stats, &msg_sended, this_thread](Result result, const pulsar::MessageId &messageId) {
         msg_sended += 1;
@@ -204,7 +205,7 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
           stats[this_thread] = Status(DB_ERROR, pulsar::strResult(result));
         }
       };
-      paralle_mut_producers_[this_thread]->sendAsync(mut_msg, callback);
+      paralle_mut_producers_[channel_id]->sendAsync(mut_msg, callback);
     }
     catch (const std::exception &e) {
       msg_sended += 1;
