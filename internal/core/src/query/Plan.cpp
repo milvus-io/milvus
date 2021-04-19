@@ -194,12 +194,9 @@ Parser::ParseVecNode(const Json& out_body) {
     auto topK = vec_info["topk"];
     AssertInfo(topK > 0, "topK must greater than 0");
     AssertInfo(topK < 16384, "topK is too large");
-
-    auto field_offset_opt = schema.get_offset(field_name);
-    AssertInfo(field_offset_opt.has_value(), "field_name(" + field_name + ") not found");
+    auto field_meta = schema.operator[](field_name);
 
     auto vec_node = [&]() -> std::unique_ptr<VectorPlanNode> {
-        auto field_meta = schema.operator[](field_name);
         auto data_type = field_meta.get_data_type();
         if (data_type == DataType::VECTOR_FLOAT) {
             return std::make_unique<FloatVectorANNS>();
@@ -211,7 +208,6 @@ Parser::ParseVecNode(const Json& out_body) {
     vec_node->query_info_.metric_type_ = vec_info.at("metric_type");
     vec_node->query_info_.search_params_ = vec_info.at("params");
     vec_node->query_info_.field_id_ = field_name;
-    vec_node->query_info_.field_offset_ = field_offset_opt.value();
     vec_node->placeholder_tag_ = vec_info.at("query");
     auto tag = vec_node->placeholder_tag_;
     AssertInfo(!tag2field_.count(tag), "duplicated placeholder tag");

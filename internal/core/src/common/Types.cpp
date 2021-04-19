@@ -22,7 +22,7 @@ namespace milvus {
 
 using boost::algorithm::to_lower_copy;
 namespace Metric = knowhere::Metric;
-static const auto metric_bimap = [] {
+static auto map = [] {
     boost::bimap<std::string, MetricType> mapping;
     using pos = boost::bimap<std::string, MetricType>::value_type;
     mapping.insert(pos(to_lower_copy(std::string(Metric::L2)), MetricType::METRIC_L2));
@@ -38,15 +38,8 @@ static const auto metric_bimap = [] {
 MetricType
 GetMetricType(const std::string& type_name) {
     auto real_name = to_lower_copy(type_name);
-    AssertInfo(metric_bimap.left.count(real_name), "metric type not found: (" + type_name + ")");
-    return metric_bimap.left.at(real_name);
-}
-
-std::string
-MetricTypeToName(MetricType metric_type) {
-    AssertInfo(metric_bimap.right.count(metric_type),
-               "metric_type enum(" + std::to_string((int)metric_type) + ") not found");
-    return metric_bimap.right.at(metric_type);
+    AssertInfo(map.left.count(real_name), "metric type not found: (" + type_name + ")");
+    return map.left.at(real_name);
 }
 
 }  // namespace milvus
