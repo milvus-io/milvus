@@ -97,6 +97,19 @@ func TestMetaTable(t *testing.T) {
 	}
 
 	t.Run("add collection", func(t *testing.T) {
+		partInfo.SegmentIDs = []int64{100}
+		err = mt.AddCollection(collInfo, partInfo, idxInfo)
+		assert.NotNil(t, err)
+		partInfo.SegmentIDs = []int64{}
+
+		collInfo.PartitionIDs = []int64{100}
+		err = mt.AddCollection(collInfo, partInfo, idxInfo)
+		assert.NotNil(t, err)
+		collInfo.PartitionIDs = []int64{}
+
+		err = mt.AddCollection(collInfo, partInfo, nil)
+		assert.NotNil(t, err)
+
 		err = mt.AddCollection(collInfo, partInfo, idxInfo)
 		assert.Nil(t, err)
 
@@ -104,6 +117,11 @@ func TestMetaTable(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, collMeta.PartitionIDs[0], int64(10))
 		assert.Equal(t, len(collMeta.PartitionIDs), 1)
+		assert.True(t, mt.HasCollection(collInfo.ID))
+
+		field, err := mt.GetFieldSchema("testColl", "field110")
+		assert.Nil(t, err)
+		assert.Equal(t, field.FieldID, collInfo.Schema.Fields[0].FieldID)
 	})
 
 	t.Run("add segment", func(t *testing.T) {
@@ -215,6 +233,22 @@ func TestMetaTable(t *testing.T) {
 		assert.Zero(t, len(idx))
 	})
 
+	t.Run("reload meta", func(t *testing.T) {
+		te := pb.TenantMeta{
+			ID: 100,
+		}
+		err := mt.AddTenant(&te)
+		assert.Nil(t, err)
+		po := pb.ProxyMeta{
+			ID: 101,
+		}
+		err = mt.AddProxy(&po)
+		assert.Nil(t, err)
+
+		_, err = NewMetaTable(ekv)
+		assert.Nil(t, err)
+	})
+
 	t.Run("drop index", func(t *testing.T) {
 		idx, ok, err := mt.DropIndex("testColl", "field110", "field110")
 		assert.Nil(t, err)
@@ -237,6 +271,13 @@ func TestMetaTable(t *testing.T) {
 		_, err = mt.GetSegmentIndexInfoByID(100, -1, "")
 		assert.NotNil(t, err)
 
+	})
+
+	t.Run("drop collection", func(t *testing.T) {
+		err := mt.DeleteCollection(2)
+		assert.NotNil(t, err)
+		err = mt.DeleteCollection(1)
+		assert.Nil(t, err)
 	})
 
 }

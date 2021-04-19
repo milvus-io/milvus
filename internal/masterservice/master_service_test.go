@@ -10,6 +10,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
@@ -22,6 +23,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/types"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"go.etcd.io/etcd/clientv3"
 )
 
 type proxyMock struct {
@@ -1475,4 +1477,169 @@ func TestMasterService(t *testing.T) {
 		assert.NotEqual(t, rsp8.Status.ErrorCode, commonpb.ErrorCode_Success)
 
 	})
+
+	t.Run("alloc_error", func(t *testing.T) {
+		core.idAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+			return 0, 0, fmt.Errorf("id allocator error test")
+		}
+		core.tsoAllocator = func(count uint32) (typeutil.Timestamp, error) {
+			return 0, fmt.Errorf("tso allcoator error test")
+		}
+		r1 := &masterpb.AllocTimestampRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Undefined,
+				MsgID:     5000,
+				Timestamp: 5000,
+				SourceID:  5000,
+			},
+			Count: 1,
+		}
+		p1, err := core.AllocTimestamp(ctx, r1)
+		assert.Nil(t, err)
+		assert.NotEqual(t, p1.Status.ErrorCode, commonpb.ErrorCode_Success)
+
+		r2 := &masterpb.AllocIDRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Undefined,
+				MsgID:     3001,
+				Timestamp: 3001,
+				SourceID:  3001,
+			},
+			Count: 1,
+		}
+		p2, err := core.AllocID(ctx, r2)
+		assert.Nil(t, err)
+		assert.NotEqual(t, p2.Status.ErrorCode, commonpb.ErrorCode_Success)
+	})
+}
+
+func TestCheckInit(t *testing.T) {
+	c, err := NewCore(context.Background(), nil)
+	assert.Nil(t, err)
+
+	err = c.Start()
+	assert.NotNil(t, err)
+
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.MetaTable = &metaTable{}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.idAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+		return 0, 0, nil
+	}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.idAllocatorUpdate = func() error {
+		return nil
+	}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.tsoAllocator = func(count uint32) (typeutil.Timestamp, error) {
+		return 0, nil
+	}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.tsoAllocatorUpdate = func() error {
+		return nil
+	}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.etcdCli = &clientv3.Client{}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.metaKV = &etcdkv.EtcdKV{}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.kvBase = &etcdkv.EtcdKV{}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.ProxyTimeTickChan = make(chan typeutil.Timestamp)
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.ddReqQueue = make(chan reqTask)
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.DdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest) error {
+		return nil
+	}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.DdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest) error {
+		return nil
+	}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.DdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest) error {
+		return nil
+	}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.DdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest) error {
+		return nil
+	}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.DataServiceSegmentChan = make(chan *datapb.SegmentInfo)
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.GetBinlogFilePathsFromDataServiceReq = func(segID, fieldID typeutil.UniqueID) ([]string, error) {
+		return []string{}, nil
+	}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.GetNumRowsReq = func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
+		return 0, nil
+	}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.BuildIndexReq = func(ctx context.Context, binlog []string, typeParams, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error) {
+		return 0, nil
+	}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.DropIndexReq = func(ctx context.Context, indexID typeutil.UniqueID) error {
+		return nil
+	}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.InvalidateCollectionMetaCache = func(ctx context.Context, ts typeutil.Timestamp, dbName, collectionName string) error {
+		return nil
+	}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.indexTaskQueue = make(chan *CreateIndexTask)
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.DataNodeSegmentFlushCompletedChan = make(chan int64)
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.ReleaseCollection = func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID) error {
+		return nil
+	}
+	err = c.checkInit()
+	assert.Nil(t, err)
 }

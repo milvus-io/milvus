@@ -38,9 +38,9 @@ func (bt *baseReqTask) Notify(err error) {
 func (bt *baseReqTask) WaitToFinish() error {
 	select {
 	case <-bt.core.ctx.Done():
-		return fmt.Errorf("core context done, %s", bt.core.ctx.Err().Error())
+		return fmt.Errorf("core context done, %w", bt.core.ctx.Err())
 	case <-bt.ctx.Done():
-		return fmt.Errorf("request context done, %s", bt.ctx.Err().Error())
+		return fmt.Errorf("request context done, %w", bt.ctx.Err())
 	case err, ok := <-bt.cv:
 		if !ok {
 			return fmt.Errorf("notify chan closed")
@@ -103,7 +103,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	}
 	schema.Fields = append(schema.Fields, rowIDField, timeStampField)
 
-	collID, err := t.core.idAllocator.AllocOne()
+	collID, _, err := t.core.idAllocator(1)
 	if err != nil {
 		return err
 	}
@@ -111,7 +111,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	partitionID, err := t.core.idAllocator.AllocOne()
+	partitionID, _, err := t.core.idAllocator(1)
 	if err != nil {
 		return err
 	}
@@ -412,7 +412,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	partitionID, err := t.core.idAllocator.AllocOne()
+	partitionID, _, err := t.core.idAllocator(1)
 	if err != nil {
 		return err
 	}
@@ -711,7 +711,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("create index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
 	indexName := Params.DefaultIndexName //TODO, get name from request
-	indexID, err := t.core.idAllocator.AllocOne()
+	indexID, _, err := t.core.idAllocator(1)
 	if err != nil {
 		return err
 	}
