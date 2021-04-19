@@ -13,11 +13,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
-const (
-	Ts  = "ts"
-	DDL = "ddl"
-)
-
 type (
 	UniqueID  = typeutil.UniqueID
 	FieldID   = typeutil.UniqueID
@@ -57,6 +52,13 @@ func (b Blob) GetKey() string {
 
 func (b Blob) GetValue() []byte {
 	return b.Value
+}
+
+type Base struct {
+	Version  int
+	CommitID int
+	TenantID UniqueID
+	Schema   *etcdpb.CollectionMeta
 }
 
 type FieldData interface{}
@@ -120,12 +122,8 @@ type InsertData struct {
 // Blob key example:
 // ${tenant}/insert_log/${collection_id}/${partition_id}/${segment_id}/${field_id}/${log_idx}
 type InsertCodec struct {
-	Schema          *etcdpb.CollectionMeta
+	Base
 	readerCloseFunc []func() error
-}
-
-func NewInsertCodec(schema *etcdpb.CollectionMeta) *InsertCodec {
-	return &InsertCodec{Schema: schema}
 }
 
 func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID UniqueID, data *InsertData) ([]*Blob, error) {
@@ -427,58 +425,19 @@ func (insertCodec *InsertCodec) Close() error {
 }
 
 // Blob key example:
-// ${tenant}/data_definition_log/${collection_id}/ts/${log_idx}
-// ${tenant}/data_definition_log/${collection_id}/ddl/${log_idx}
+// ${tenant}/data_definition_log/${collection_id}/${field_type}/${log_idx}
 type DataDefinitionCodec struct {
-	collectionID    int64
+	Base
 	readerCloseFunc []func() error
 }
 
-func NewDataDefinitionCodec(collectionID int64) *DataDefinitionCodec {
-	return &DataDefinitionCodec{collectionID: collectionID}
-}
-
 func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequests []string, eventTypes []EventTypeCode) ([]*Blob, error) {
-	writer, err := NewDDLBinlogWriter(schemapb.DataType_INT64, dataDefinitionCodec.collectionID)
+	writer, err := NewDDLBinlogWriter(schemapb.DataType_STRING, dataDefinitionCodec.Schema.ID)
 	if err != nil {
 		return nil, err
 	}
 
 	var blobs []*Blob
-
-	eventWriter, err := writer.NextCreateCollectionEventWriter()
-	if err != nil {
-		return nil, err
-	}
-	var int64Ts []int64
-	for _, singleTs := range ts {
-		int64Ts = append(int64Ts, int64(singleTs))
-	}
-	err = eventWriter.AddInt64ToPayload(int64Ts)
-	if err != nil {
-		return nil, err
-	}
-	eventWriter.SetStartTimestamp(ts[0])
-	eventWriter.SetEndTimestamp(ts[len(ts)-1])
-	writer.SetStartTimeStamp(ts[0])
-	writer.SetEndTimeStamp(ts[len(ts)-1])
-	err = writer.Close()
-	if err != nil {
-		return nil, err
-	}
-	buffer, err := writer.GetBuffer()
-	if err != nil {
-		return nil, err
-	}
-	blobs = append(blobs, &Blob{
-		Key:   Ts,
-		Value: buffer,
-	})
-
-	writer, err = NewDDLBinlogWriter(schemapb.DataType_STRING, dataDefinitionCodec.collectionID)
-	if err != nil {
-		return nil, err
-	}
 
 	for pos, req := range ddRequests {
 		switch eventTypes[pos] {
@@ -534,12 +493,46 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 	if err != nil {
 		return nil, err
 	}
+	buffer, err := writer.GetBuffer()
+	if err != nil {
+		return nil, err
+	}
+	blobs = append(blobs, &Blob{
+		Key:   "",
+		Value: buffer,
+	})
+
+	writer, err = NewDDLBinlogWriter(schemapb.DataType_INT64, dataDefinitionCodec.Schema.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	eventWriter, err := writer.NextCreateCollectionEventWriter()
+	if err != nil {
+		return nil, err
+	}
+	var int64Ts []int64
+	for _, singleTs := range ts {
+		int64Ts = append(int64Ts, int64(singleTs))
+	}
+	err = eventWriter.AddInt64ToPayload(int64Ts)
+	if err != nil {
+		return nil, err
+	}
+	eventWriter.SetStartTimestamp(ts[0])
+	eventWriter.SetEndTimestamp(ts[len(ts)-1])
+	writer.SetStartTimeStamp(ts[0])
+	writer.SetEndTimeStamp(ts[len(ts)-1])
+	err = writer.Close()
+	if err != nil {
+		return nil, err
+	}
 	buffer, err = writer.GetBuffer()
 	if err != nil {
 		return nil, err
 	}
 	blobs = append(blobs, &Blob{
-		Key:   DDL,
+		Key:   "",
 		Value: buffer,
 	})
 
@@ -627,10 +620,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Close() error {
 //func (indexCodec *IndexCodec) Deserialize(blobs []*Blob) ([]*Blob, error) {}
 
 type IndexCodec struct {
-}
-
-func NewIndexCodec() *IndexCodec {
-	return &IndexCodec{}
+	Base
 }
 
 func (indexCodec *IndexCodec) Serialize(blobs []*Blob) ([]*Blob, error) {

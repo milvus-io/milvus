@@ -5,6 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+
 	"github.com/stretchr/testify/assert"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexbuilderpb"
@@ -33,6 +36,23 @@ func TestPersistenceScheduler(t *testing.T) {
 	meta, err := NewMetaTable(etcdKV)
 	assert.Nil(t, err)
 	defer meta.client.Close()
+
+	err = meta.AddCollection(&etcdpb.CollectionMeta{
+		ID: 1,
+		Schema: &schemapb.CollectionSchema{
+			Name: "testcoll",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 1},
+				{FieldID: 100},
+			},
+		},
+	})
+	assert.Nil(t, err)
+	err = meta.AddSegment(&etcdpb.SegmentMeta{
+		SegmentID:    1,
+		CollectionID: 1,
+	})
+	assert.Nil(t, err)
 
 	//Init scheduler
 	indexLoadSch := NewIndexLoadScheduler(ctx, loadIndexClient, meta)

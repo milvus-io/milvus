@@ -5,6 +5,10 @@ import (
 	"log"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexbuilderpb"
 )
@@ -15,8 +19,9 @@ type IndexBuildInfo struct {
 	binlogFilePath []string
 }
 type IndexBuildChannelInfo struct {
-	id   UniqueID
-	info *IndexBuildInfo
+	id          UniqueID
+	info        *IndexBuildInfo
+	indexParams []*commonpb.KeyValuePair
 }
 
 type IndexBuildScheduler struct {
@@ -47,14 +52,43 @@ func NewIndexBuildScheduler(ctx context.Context, client BuildIndexClient, metaTa
 
 func (scheduler *IndexBuildScheduler) schedule(info interface{}) error {
 	indexBuildInfo := info.(*IndexBuildInfo)
-	indexID, err := scheduler.client.BuildIndexWithoutID(indexBuildInfo.binlogFilePath, nil, nil)
+	segMeta, err := scheduler.metaTable.GetSegmentByID(indexBuildInfo.segmentID)
+	if err != nil {
+		return err
+	}
+
+	// parse index params
+	indexParams, err := scheduler.metaTable.GetFieldIndexParams(segMeta.CollectionID, indexBuildInfo.fieldID)
+	if err != nil {
+		return err
+	}
+	indexParamsMap := make(map[string]string)
+	for _, kv := range indexParams {
+		indexParamsMap[kv.Key] = kv.Value
+	}
+
+	indexID, err := scheduler.client.BuildIndexWithoutID(indexBuildInfo.binlogFilePath, nil, indexParamsMap)
 	log.Printf("build index for segment %d field %d", indexBuildInfo.segmentID, indexBuildInfo.fieldID)
 	if err != nil {
 		return err
 	}
+
+	err = scheduler.metaTable.AddFieldIndexMeta(&etcdpb.FieldIndexMeta{
+		SegmentID:   indexBuildInfo.segmentID,
+		FieldID:     indexBuildInfo.fieldID,
+		IndexID:     indexID,
+		IndexParams: indexParams,
+		Status:      indexbuilderpb.IndexStatus_NONE,
+	})
+	if err != nil {
+		log.Printf("WARNING: " + err.Error())
+		//return err
+	}
+
 	scheduler.indexDescribe <- &IndexBuildChannelInfo{
-		id:   indexID,
-		info: indexBuildInfo,
+		id:          indexID,
+		info:        indexBuildInfo,
+		indexParams: indexParams,
 	}
 	return nil
 }
@@ -100,7 +134,18 @@ func (scheduler *IndexBuildScheduler) describe() error {
 						fieldName:      fieldName,
 						indexFilePaths: filePaths,
 					}
-					//TODO: Save data to meta table
+					// Save data to meta table
+					err = scheduler.metaTable.UpdateFieldIndexMeta(&etcdpb.FieldIndexMeta{
+						SegmentID:      indexBuildInfo.segmentID,
+						FieldID:        indexBuildInfo.fieldID,
+						IndexID:        indexID,
+						IndexParams:    channelInfo.indexParams,
+						Status:         indexbuilderpb.IndexStatus_FINISHED,
+						IndexFilePaths: filePaths,
+					})
+					if err != nil {
+						return err
+					}
 
 					err = scheduler.indexLoadSch.Enqueue(info)
 					log.Printf("build index for segment %d field %d enqueue load index", indexBuildInfo.segmentID, indexBuildInfo.fieldID)
@@ -108,6 +153,18 @@ func (scheduler *IndexBuildScheduler) describe() error {
 						return err
 					}
 					log.Printf("build index for segment %d field %d finished", indexBuildInfo.segmentID, indexBuildInfo.fieldID)
+				} else {
+					// save status to meta table
+					err = scheduler.metaTable.UpdateFieldIndexMeta(&etcdpb.FieldIndexMeta{
+						SegmentID:   indexBuildInfo.segmentID,
+						FieldID:     indexBuildInfo.fieldID,
+						IndexID:     indexID,
+						IndexParams: channelInfo.indexParams,
+						Status:      description.Status,
+					})
+					if err != nil {
+						return err
+					}
 				}
 				time.Sleep(1 * time.Second)
 			}
