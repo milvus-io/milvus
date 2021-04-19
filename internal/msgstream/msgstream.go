@@ -42,18 +42,18 @@ type PulsarMsgStream struct {
 	repackFunc     RepackFunc
 	unmarshal      *UnmarshalDispatcher
 	receiveBuf     chan *MsgPack
-	receiveBufSize int64
 	wait           *sync.WaitGroup
 	streamCancel   func()
 }
 
 func NewPulsarMsgStream(ctx context.Context, receiveBufSize int64) *PulsarMsgStream {
 	streamCtx, streamCancel := context.WithCancel(ctx)
-	return &PulsarMsgStream{
+	stream := &PulsarMsgStream{
 		ctx:            streamCtx,
 		streamCancel:   streamCancel,
-		receiveBufSize: receiveBufSize,
 	}
+	stream.receiveBuf = make(chan *MsgPack, receiveBufSize)
+	return stream
 }
 
 func (ms *PulsarMsgStream) SetPulsarCient(address string) {
@@ -215,7 +215,6 @@ func (ms *PulsarMsgStream) Consume() *MsgPack {
 
 func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 	defer ms.wait.Done()
-	ms.receiveBuf = make(chan *MsgPack, ms.receiveBufSize)
 	for {
 		select {
 		case <-ms.ctx.Done():
@@ -271,8 +270,8 @@ func NewPulsarTtMsgStream(ctx context.Context, receiveBufSize int64) *PulsarTtMs
 	pulsarMsgStream := PulsarMsgStream{
 		ctx:            streamCtx,
 		streamCancel:   streamCancel,
-		receiveBufSize: receiveBufSize,
 	}
+	pulsarMsgStream.receiveBuf = make(chan *MsgPack, receiveBufSize)
 	return &PulsarTtMsgStream{
 		PulsarMsgStream: pulsarMsgStream,
 	}
@@ -288,7 +287,6 @@ func (ms *PulsarTtMsgStream) Start() {
 
 func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 	defer ms.wait.Done()
-	ms.receiveBuf = make(chan *MsgPack, ms.receiveBufSize)
 	ms.unsolvedBuf = make([]*TsMsg, 0)
 	ms.inputBuf = make([]*TsMsg, 0)
 	for {

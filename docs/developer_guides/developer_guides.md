@@ -1169,14 +1169,15 @@ type softTimeTickBarrier struct {
   minTtInterval Timestamp
   lastTt Timestamp
   outTt chan Timestamp
-  ttStream *MsgStream
+  ttStream MsgStream
   ctx context.Context
 }
 
 func (ttBarrier *softTimeTickBarrier) GetTimeTick() (Timestamp,error)
 func (ttBarrier *softTimeTickBarrier) Start() error
+func (ttBarrier *softTimeTickBarrier) Close()
 
-func newSoftTimeTickBarrier(ctx context.Context, ttStream *MsgStream, peerIds []UniqueId, minTtInterval Timestamp) *softTimeTickBarrier
+func NewSoftTimeTickBarrier(ctx context.Context, ttStream *MsgStream, peerIds []UniqueID, minTtInterval Timestamp) *softTimeTickBarrier
 ```
 
 
@@ -1189,14 +1190,15 @@ func newSoftTimeTickBarrier(ctx context.Context, ttStream *MsgStream, peerIds []
 type hardTimeTickBarrier struct {
   peer2Tt map[UniqueId]List
   outTt chan Timestamp
-  ttStream *MsgStream
+  ttStream MsgStream
   ctx context.Context
 }
 
 func (ttBarrier *hardTimeTickBarrier) GetTimeTick() (Timestamp,error)
 func (ttBarrier *hardTimeTickBarrier) Start() error
+func (ttBarrier *hardTimeTickBarrier) Close()
 
-func newHardTimeTickBarrier(ctx context.Context, ttStream *MsgStream, peerIds []UniqueId) *softTimeTickBarrier
+func NewHardTimeTickBarrier(ctx context.Context, ttStream *MsgStream, peerIds []UniqueID) *hardTimeTickBarrier
 ```
 
 
@@ -1210,6 +1212,7 @@ func newHardTimeTickBarrier(ctx context.Context, ttStream *MsgStream, peerIds []
 type TimeTickBarrier interface {
 	GetTimeTick() (Timestamp,error)
 	Start() error
+    Close()
 }
 
 type timeSyncMsgProducer struct {

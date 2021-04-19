@@ -11,7 +11,7 @@ import (
 
 type BaseTaskQueue struct {
 	unissuedTasks *list.List
-	activeTasks   map[Timestamp]task
+	activeTasks   map[Timestamp]*task
 	utLock        sync.Mutex
 	atLock        sync.Mutex
 }
@@ -24,23 +24,23 @@ func (queue *BaseTaskQueue) Empty() bool {
 	return queue.unissuedTasks.Len() <= 0 && len(queue.activeTasks) <= 0
 }
 
-func (queue *BaseTaskQueue) AddUnissuedTask(t task) {
+func (queue *BaseTaskQueue) AddUnissuedTask(t *task) {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 	queue.unissuedTasks.PushBack(t)
 }
 
-func (queue *BaseTaskQueue) FrontUnissuedTask() task {
+func (queue *BaseTaskQueue) FrontUnissuedTask() *task {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 	if queue.unissuedTasks.Len() <= 0 {
 		log.Fatal("sorry, but the unissued task list is empty!")
 		return nil
 	}
-	return queue.unissuedTasks.Front().Value.(task)
+	return queue.unissuedTasks.Front().Value.(*task)
 }
 
-func (queue *BaseTaskQueue) PopUnissuedTask() task {
+func (queue *BaseTaskQueue) PopUnissuedTask() *task {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 	if queue.unissuedTasks.Len() <= 0 {
@@ -48,13 +48,13 @@ func (queue *BaseTaskQueue) PopUnissuedTask() task {
 		return nil
 	}
 	ft := queue.unissuedTasks.Front()
-	return queue.unissuedTasks.Remove(ft).(task)
+	return queue.unissuedTasks.Remove(ft).(*task)
 }
 
-func (queue *BaseTaskQueue) AddActiveTask(t task) {
+func (queue *BaseTaskQueue) AddActiveTask(t *task) {
 	queue.atLock.Lock()
 	defer queue.atLock.Lock()
-	ts := t.EndTs()
+	ts := (*t).EndTs()
 	_, ok := queue.activeTasks[ts]
 	if ok {
 		log.Fatalf("task with timestamp %v already in active task list!", ts)
@@ -62,7 +62,7 @@ func (queue *BaseTaskQueue) AddActiveTask(t task) {
 	queue.activeTasks[ts] = t
 }
 
-func (queue *BaseTaskQueue) PopActiveTask(ts Timestamp) task {
+func (queue *BaseTaskQueue) PopActiveTask(ts Timestamp) *task {
 	queue.atLock.Lock()
 	defer queue.atLock.Lock()
 	t, ok := queue.activeTasks[ts]
@@ -74,19 +74,19 @@ func (queue *BaseTaskQueue) PopActiveTask(ts Timestamp) task {
 	return nil
 }
 
-func (queue *BaseTaskQueue) getTaskByReqId(reqId UniqueID) task {
+func (queue *BaseTaskQueue) getTaskByReqId(reqId UniqueID) *task {
 	queue.utLock.Lock()
 	defer queue.utLock.Lock()
 	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
-		if e.Value.(task).Id() == reqId {
-			return e.Value.(task)
+		if (*(e.Value.(*task))).Id() == reqId {
+			return e.Value.(*task)
 		}
 	}
 
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
 	for ats := range queue.activeTasks {
-		if queue.activeTasks[ats].Id() == reqId {
+		if (*(queue.activeTasks[ats])).Id() == reqId {
 			return queue.activeTasks[ats]
 		}
 	}
@@ -98,7 +98,7 @@ func (queue *BaseTaskQueue) TaskDoneTest(ts Timestamp) bool {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
-		if e.Value.(task).EndTs() >= ts {
+		if (*(e.Value.(*task))).EndTs() >= ts {
 			return false
 		}
 	}
@@ -114,20 +114,20 @@ func (queue *BaseTaskQueue) TaskDoneTest(ts Timestamp) bool {
 	return true
 }
 
-type DdTaskQueue struct {
+type ddTaskQueue struct {
 	BaseTaskQueue
 	lock sync.Mutex
 }
 
-type DmTaskQueue struct {
+type dmTaskQueue struct {
 	BaseTaskQueue
 }
 
-type DqTaskQueue struct {
+type dqTaskQueue struct {
 	BaseTaskQueue
 }
 
-func (queue *DdTaskQueue) Enqueue(t task) error {
+func (queue *ddTaskQueue) Enqueue(t *task) error {
 	queue.lock.Lock()
 	defer queue.lock.Unlock()
 	// TODO: set Ts, ReqId, ProxyId
@@ -135,49 +135,22 @@ func (queue *DdTaskQueue) Enqueue(t task) error {
 	return nil
 }
 
-func (queue *DmTaskQueue) Enqueue(t task) error {
+func (queue *dmTaskQueue) Enqueue(t *task) error {
 	// TODO: set Ts, ReqId, ProxyId
 	queue.AddUnissuedTask(t)
 	return nil
 }
 
-func (queue *DqTaskQueue) Enqueue(t task) error {
+func (queue *dqTaskQueue) Enqueue(t *task) error {
 	// TODO: set Ts, ReqId, ProxyId
 	queue.AddUnissuedTask(t)
 	return nil
-}
-
-func NewDdTaskQueue() *DdTaskQueue {
-	return &DdTaskQueue{
-		BaseTaskQueue: BaseTaskQueue{
-			unissuedTasks: list.New(),
-			activeTasks:   make(map[Timestamp]task),
-		},
-	}
-}
-
-func NewDmTaskQueue() *DmTaskQueue {
-	return &DmTaskQueue{
-		BaseTaskQueue: BaseTaskQueue{
-			unissuedTasks: list.New(),
-			activeTasks:   make(map[Timestamp]task),
-		},
-	}
-}
-
-func NewDqTaskQueue() *DqTaskQueue {
-	return &DqTaskQueue{
-		BaseTaskQueue: BaseTaskQueue{
-			unissuedTasks: list.New(),
-			activeTasks:   make(map[Timestamp]task),
-		},
-	}
 }
 
 type TaskScheduler struct {
-	DdQueue *DdTaskQueue
-	DmQueue *DmTaskQueue
-	DqQueue *DqTaskQueue
+	DdQueue *ddTaskQueue
+	DmQueue *dmTaskQueue
+	DqQueue *dqTaskQueue
 
 	idAllocator  *allocator.IdAllocator
 	tsoAllocator *allocator.TimestampAllocator
@@ -192,9 +165,6 @@ func NewTaskScheduler(ctx context.Context,
 	tsoAllocator *allocator.TimestampAllocator) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &TaskScheduler{
-		DdQueue:      NewDdTaskQueue(),
-		DmQueue:      NewDmTaskQueue(),
-		DqQueue:      NewDqTaskQueue(),
 		idAllocator:  idAllocator,
 		tsoAllocator: tsoAllocator,
 		ctx:          ctx1,
@@ -204,19 +174,19 @@ func NewTaskScheduler(ctx context.Context,
 	return s, nil
 }
 
-func (sched *TaskScheduler) scheduleDdTask() task {
+func (sched *TaskScheduler) scheduleDdTask() *task {
 	return sched.DdQueue.PopUnissuedTask()
 }
 
-func (sched *TaskScheduler) scheduleDmTask() task {
+func (sched *TaskScheduler) scheduleDmTask() *task {
 	return sched.DmQueue.PopUnissuedTask()
 }
 
-func (sched *TaskScheduler) scheduleDqTask() task {
+func (sched *TaskScheduler) scheduleDqTask() *task {
 	return sched.DqQueue.PopUnissuedTask()
 }
 
-func (sched *TaskScheduler) getTaskByReqId(reqId UniqueID) task {
+func (sched *TaskScheduler) getTaskByReqId(reqId UniqueID) *task {
 	if t := sched.DdQueue.getTaskByReqId(reqId); t != nil {
 		return t
 	}
@@ -241,22 +211,22 @@ func (sched *TaskScheduler) definitionLoop() {
 		//sched.DdQueue.atLock.Lock()
 		t := sched.scheduleDdTask()
 
-		err := t.PreExecute()
+		err := (*t).PreExecute()
 		if err != nil {
 			return
 		}
-		err = t.Execute()
+		err = (*t).Execute()
 		if err != nil {
 			log.Printf("execute definition task failed, error = %v", err)
 		}
-		t.Notify(err)
+		(*t).Notify(err)
 
 		sched.DdQueue.AddActiveTask(t)
 
-		t.WaitToFinish()
-		t.PostExecute()
+		(*t).WaitToFinish()
+		(*t).PostExecute()
 
-		sched.DdQueue.PopActiveTask(t.EndTs())
+		sched.DdQueue.PopActiveTask((*t).EndTs())
 	}
 }
 
@@ -272,27 +242,27 @@ func (sched *TaskScheduler) manipulationLoop() {
 		sched.DmQueue.atLock.Lock()
 		t := sched.scheduleDmTask()
 
-		if err := t.PreExecute(); err != nil {
+		if err := (*t).PreExecute(); err != nil {
 			return
 		}
 
 		go func() {
-			err := t.Execute()
+			err := (*t).Execute()
 			if err != nil {
 				log.Printf("execute manipulation task failed, error = %v", err)
 			}
-			t.Notify(err)
+			(*t).Notify(err)
 		}()
 
 		sched.DmQueue.AddActiveTask(t)
 		sched.DmQueue.atLock.Unlock()
 
 		go func() {
-			t.WaitToFinish()
-			t.PostExecute()
+			(*t).WaitToFinish()
+			(*t).PostExecute()
 
 			// remove from active list
-			sched.DmQueue.PopActiveTask(t.EndTs())
+			sched.DmQueue.PopActiveTask((*t).EndTs())
 		}()
 	}
 }
@@ -309,27 +279,27 @@ func (sched *TaskScheduler) queryLoop() {
 		sched.DqQueue.atLock.Lock()
 		t := sched.scheduleDqTask()
 
-		if err := t.PreExecute(); err != nil {
+		if err := (*t).PreExecute(); err != nil {
 			return
 		}
 
 		go func() {
-			err := t.Execute()
+			err := (*t).Execute()
 			if err != nil {
 				log.Printf("execute query task failed, error = %v", err)
 			}
-			t.Notify(err)
+			(*t).Notify(err)
 		}()
 
 		sched.DqQueue.AddActiveTask(t)
 		sched.DqQueue.atLock.Unlock()
 
 		go func() {
-			t.WaitToFinish()
-			t.PostExecute()
+			(*t).WaitToFinish()
+			(*t).PostExecute()
 
 			// remove from active list
-			sched.DqQueue.PopActiveTask(t.EndTs())
+			sched.DqQueue.PopActiveTask((*t).EndTs())
 		}()
 	}
 }
