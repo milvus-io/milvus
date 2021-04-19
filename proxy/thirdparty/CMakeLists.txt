@@ -52,3 +52,8 @@ if ( MILVUS_WITH_OPENTRACING )
     add_subdirectory( opentracing )
 endif()
 
+
+# ****************************** Thirdparty pulsar-client-cpp ***************************************
+if ( MILVUS_WITH_PULSAR )
+    add_subdirectory(pulsar-client-cpp)
+endif()

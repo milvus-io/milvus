@@ -72,6 +72,7 @@ define_option(MILVUS_WITH_OPENTRACING "Build with Opentracing" ON)
 
 define_option(MILVUS_WITH_YAMLCPP "Build with yaml-cpp library" ON)
 
+define_option(MILVUS_WITH_PULSAR "Build with pulsar-client" ON)
 
 #----------------------------------------------------------------------
 set_option_category("Test and benchmark")
