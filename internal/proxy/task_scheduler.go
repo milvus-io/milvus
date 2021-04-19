@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"container/list"
+	"context"
 	"log"
 	"sync"
 )
@@ -64,10 +65,10 @@ func (queue *baseTaskQueue) PopUnissuedTask() *task {
 func (queue *baseTaskQueue) AddActiveTask(t *task) {
 	queue.atLock.Lock()
 	defer queue.atLock.Lock()
-	ts := (*t).GetTs()
+	ts := (*t).EndTs()
 	_, ok := queue.activeTasks[ts]
 	if ok {
-		log.Fatalf("task with timestamp %d already in active task list!", ts)
+		log.Fatalf("task with timestamp %v already in active task list!", ts)
 	}
 	queue.activeTasks[ts] = t
 }
@@ -88,7 +89,7 @@ func (queue *baseTaskQueue) TaskDoneTest(ts Timestamp) bool {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
-		if (*(e.Value.(*task))).GetTs() >= ts {
+		if (*(e.Value.(*task))).EndTs() >= ts {
 			return false
 		}
 	}
@@ -124,100 +125,93 @@ func (queue *dqTaskQueue) Enqueue(t *task) error {
 	return nil
 }
 
-type taskScheduler struct {
+type TaskScheduler struct {
 	DdQueue *ddTaskQueue
 	DmQueue *dmTaskQueue
 	DqQueue *dqTaskQueue
 
 	// tsAllocator, ReqIdAllocator
+	wg     sync.WaitGroup
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
-func (sched *taskScheduler) scheduleDdTask() *task {
+func (sched *TaskScheduler) scheduleDdTask() *task {
 	return sched.DdQueue.PopUnissuedTask()
 }
 
-func (sched *taskScheduler) scheduleDmTask() *task {
+func (sched *TaskScheduler) scheduleDmTask() *task {
 	return sched.DmQueue.PopUnissuedTask()
 }
 
-func (sched *taskScheduler) scheduleDqTask() *task {
+func (sched *TaskScheduler) scheduleDqTask() *task {
 	return sched.DqQueue.PopUnissuedTask()
 }
 
-func (sched *taskScheduler) Start() error {
-	go func() {
-		for {
-			if sched.DdQueue.Empty() {
-				continue
-			}
-			t := sched.scheduleDdTask()
-			if err := (*t).PreExecute(); err != nil {
-				return
-			}
-			if err := (*t).Execute(); err != nil {
-				return
-			}
-			if err := (*t).PostExecute(); err != nil {
-				return
-			}
-			if err := (*t).WaitToFinish(); err != nil {
-				return
-			}
-			if err := (*t).Notify(); err != nil {
-				return
-			}
+func (sched *TaskScheduler) definitionLoop() {
+	defer sched.wg.Done()
+	defer sched.cancel()
+}
+
+func (sched *TaskScheduler) manipulationLoop() {
+	defer sched.wg.Done()
+	defer sched.cancel()
+
+	for {
+		if sched.DmQueue.Empty() {
+			continue
 		}
-	}()
-	go func() {
-		for {
-			if sched.DdQueue.Empty() {
-				continue
-			}
-			t := sched.scheduleDmTask()
-			if err := (*t).PreExecute(); err != nil {
-				return
-			}
-			if err := (*t).Execute(); err != nil {
-				return
-			}
-			if err := (*t).PostExecute(); err != nil {
-				return
-			}
-			if err := (*t).WaitToFinish(); err != nil {
-				return
-			}
-			if err := (*t).Notify(); err != nil {
-				return
-			}
+
+		sched.DmQueue.atLock.Lock()
+		t := sched.scheduleDmTask()
+
+		if err := (*t).PreExecute(); err != nil {
+			return
 		}
-	}()
-	go func() {
-		for {
-			if sched.DdQueue.Empty() {
-				continue
+
+		go func() {
+			err := (*t).Execute()
+			if err != nil {
+				log.Printf("execute manipulation task failed, error = %v", err)
 			}
-			t := sched.scheduleDqTask()
-			if err := (*t).PreExecute(); err != nil {
-				return
-			}
-			if err := (*t).Execute(); err != nil {
-				return
-			}
-			if err := (*t).PostExecute(); err != nil {
-				return
-			}
-			if err := (*t).WaitToFinish(); err != nil {
-				return
-			}
-			if err := (*t).Notify(); err != nil {
-				return
-			}
-		}
-	}()
+			(*t).Notify(err)
+		}()
+
+		sched.DmQueue.AddActiveTask(t)
+		sched.DmQueue.atLock.Unlock()
+
+		go func() {
+			(*t).WaitToFinish()
+			(*t).PostExecute()
+
+			// remove from active list
+			sched.DmQueue.PopActiveTask((*t).EndTs())
+		}()
+	}
+}
+
+func (sched *TaskScheduler) queryLoop() {
+	defer sched.wg.Done()
+	defer sched.cancel()
+}
+
+func (sched *TaskScheduler) Start(ctx context.Context) error {
+	sched.ctx, sched.cancel = context.WithCancel(ctx)
+	sched.wg.Add(3)
+
+	go sched.definitionLoop()
+	go sched.manipulationLoop()
+	go sched.queryLoop()
+
 	return nil
 }
 
-func (sched *taskScheduler) TaskDoneTest(ts Timestamp) bool {
+func (sched *TaskScheduler) Close() {
+	sched.cancel()
+	sched.wg.Wait()
+}
+
+func (sched *TaskScheduler) TaskDoneTest(ts Timestamp) bool {
 	ddTaskDone := sched.DdQueue.TaskDoneTest(ts)
 	dmTaskDone := sched.DmQueue.TaskDoneTest(ts)
 	dqTaskDone := sched.DqQueue.TaskDoneTest(ts)

@@ -14,7 +14,7 @@ type msgStreamMsg struct {
 }
 
 type dmMsg struct {
-	insertMessages []*msgstream.InsertTask
+	insertMessages []*msgstream.InsertMsg
 	// TODO: add delete message support
 	// deleteMessages []*msgstream.DeleteTask
 	timeRange TimeRange
@@ -30,7 +30,7 @@ type schemaUpdateMsg struct {
 }
 
 type filteredDmMsg struct {
-	insertMessages []*msgstream.InsertTask
+	insertMessages []*msgstream.InsertMsg
 	// TODO: add delete message support
 	// deleteMessages []*msgstream.DeleteTask
 	timeRange TimeRange

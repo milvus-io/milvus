@@ -62,7 +62,7 @@ func TestManipulationService_Start(t *testing.T) {
 	insertMessages := make([]*msgstream.TsMsg, 0)
 
 	for i := 0; i < msgLength; i++ {
-		var msg msgstream.TsMsg = &msgstream.InsertTask{
+		var msg msgstream.TsMsg = &msgstream.InsertMsg{
 			InsertRequest: internalPb.InsertRequest{
 				ReqId:          int64(0),
 				CollectionName: "collection0",

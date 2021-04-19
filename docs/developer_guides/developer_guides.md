@@ -429,9 +429,6 @@ func NewUnmarshalDispatcher() *UnmarshalDispatcher
 ```
 
 
-
-
-
 #### 5.4 Time Ticked Flow Graph
 
 ###### 5.4.1 Flow Graph States
@@ -547,8 +544,10 @@ type KVBase interface {
 	Save(key, value string) error
     MultiSave(kvs map[string]string) error
 	Remove(key string) error
+
     MultiRemove(keys []string) error
     MultiSaveAndRemove(saves map[string]string, removals []string) error
+
 	Watch(key string) clientv3.WatchChan
 	WatchWithPrefix(key string) clientv3.WatchChan
 	LoadWithPrefix(key string) ( []string, []string, error)
@@ -1205,7 +1204,6 @@ func newHardTimeTickBarrier(ctx context.Context, ttStream *MsgStream, peerIds []
 ###### 10.5.1 Time Synchronization Message Producer
 
 <img src="./figs/time_sync_msg_producer.png" width=700>
-
 
 
  ```go
