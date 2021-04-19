@@ -1,12 +1,12 @@
 package proxynode
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
-	"errors"
-
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
@@ -147,7 +147,7 @@ func ValidateDuplicatedFieldName(fields []*schemapb.FieldSchema) error {
 	for _, field := range fields {
 		_, ok := names[field.Name]
 		if ok {
-			return errors.New("duplicated filed name")
+			return errors.New("duplicated field name")
 		}
 		names[field.Name] = true
 	}
@@ -159,7 +159,7 @@ func ValidatePrimaryKey(coll *schemapb.CollectionSchema) error {
 	if coll.AutoID {
 		for _, field := range coll.Fields {
 			if field.IsPrimaryKey {
-				return fmt.Errorf("collection %s is auto id, so filed %s should not defined as primary key", coll.Name, field.Name)
+				return fmt.Errorf("collection %s is auto id, so field %s should not defined as primary key", coll.Name, field.Name)
 			}
 		}
 		return nil
@@ -168,7 +168,7 @@ func ValidatePrimaryKey(coll *schemapb.CollectionSchema) error {
 	for i, field := range coll.Fields {
 		if field.IsPrimaryKey {
 			if idx != -1 {
-				return fmt.Errorf("there are more than one primary key, filed name = %s, %s", coll.Fields[idx].Name, field.Name)
+				return fmt.Errorf("there are more than one primary key, field name = %s, %s", coll.Fields[idx].Name, field.Name)
 			}
 			if field.DataType != schemapb.DataType_INT64 {
 				return errors.New("the data type of primary key should be int64")
@@ -179,5 +179,133 @@ func ValidatePrimaryKey(coll *schemapb.CollectionSchema) error {
 	if idx == -1 {
 		return errors.New("primay key is undefined")
 	}
+	return nil
+}
+
+func RepeatedKeyValToMap(kvPairs []*commonpb.KeyValuePair) (map[string]string, error) {
+	resMap := make(map[string]string)
+	for _, kv := range kvPairs {
+		_, ok := resMap[kv.Key]
+		if ok {
+			return nil, fmt.Errorf("duplicated param key: %s", kv.Key)
+		}
+		resMap[kv.Key] = kv.Value
+	}
+	return resMap, nil
+}
+
+func isVector(dataType schemapb.DataType) (bool, error) {
+	switch dataType {
+	case schemapb.DataType_BOOL, schemapb.DataType_INT8,
+		schemapb.DataType_INT16, schemapb.DataType_INT32,
+		schemapb.DataType_INT64,
+		schemapb.DataType_FLOAT, schemapb.DataType_DOUBLE:
+		return false, nil
+
+	case schemapb.DataType_VECTOR_FLOAT, schemapb.DataType_VECTOR_BINARY:
+		return true, nil
+	}
+
+	return false, fmt.Errorf("invalid data type: %d", dataType)
+}
+
+func ValidateMetricType(dataType schemapb.DataType, metricTypeStrRaw string) error {
+	metricTypeStr := strings.ToUpper(metricTypeStrRaw)
+	switch metricTypeStr {
+	case "L2", "IP":
+		if dataType == schemapb.DataType_VECTOR_FLOAT {
+			return nil
+		}
+	case "JACCARD", "HAMMING", "TANIMOTO", "SUBSTRUCTURE", "SUBPERSTURCTURE":
+		if dataType == schemapb.DataType_VECTOR_BINARY {
+			return nil
+		}
+	}
+	return fmt.Errorf("data_type %s mismatch with metric_type %s", dataType.String(), metricTypeStrRaw)
+}
+
+func ValidateSchema(coll *schemapb.CollectionSchema) error {
+	autoID := coll.AutoID
+	primaryIdx := -1
+	idMap := make(map[int64]int)    // fieldId -> idx
+	nameMap := make(map[string]int) // name -> idx
+	for idx, field := range coll.Fields {
+		// check system field
+		if field.FieldID < 100 {
+			// System Fields, not injected yet
+			return fmt.Errorf("FieldID(%d) that is less than 100 is reserved for system fields: %s", field.FieldID, field.Name)
+		}
+
+		// primary key detector
+		if field.IsPrimaryKey {
+			if autoID {
+				return fmt.Errorf("autoId forbids primary key")
+			} else if primaryIdx != -1 {
+				return fmt.Errorf("there are more than one primary key, field name = %s, %s", coll.Fields[primaryIdx].Name, field.Name)
+			}
+			if field.DataType != schemapb.DataType_INT64 {
+				return fmt.Errorf("type of primary key shoule be int64")
+			}
+			primaryIdx = idx
+		}
+		// check unique
+		elemIdx, ok := idMap[field.FieldID]
+		if ok {
+			return fmt.Errorf("duplicate field ids: %d", coll.Fields[elemIdx].FieldID)
+		}
+		idMap[field.FieldID] = idx
+		elemIdx, ok = nameMap[field.Name]
+		if ok {
+			return fmt.Errorf("duplicate field names: %s", coll.Fields[elemIdx].Name)
+		}
+		nameMap[field.Name] = idx
+
+		isVec, err3 := isVector(field.DataType)
+		if err3 != nil {
+			return err3
+		}
+
+		if isVec {
+			indexKv, err1 := RepeatedKeyValToMap(field.IndexParams)
+			if err1 != nil {
+				return err1
+			}
+			typeKv, err2 := RepeatedKeyValToMap(field.TypeParams)
+			if err2 != nil {
+				return err2
+			}
+			dimStr, ok := typeKv["dim"]
+			if !ok {
+				return fmt.Errorf("dim not found in type_params for vector field %s(%d)", field.Name, field.FieldID)
+			}
+			dim, err := strconv.Atoi(dimStr)
+			if err != nil || dim < 0 {
+				return fmt.Errorf("invalid dim; %s", dimStr)
+			}
+
+			metricTypeStr, ok := indexKv["metric_type"]
+			if ok {
+				err4 := ValidateMetricType(field.DataType, metricTypeStr)
+				if err4 != nil {
+					return err4
+				}
+			} else {
+				// in C++, default type will be specified
+				// do nothing
+			}
+		} else {
+			if len(field.IndexParams) != 0 {
+				return fmt.Errorf("index params is not empty for scalar field: %s(%d)", field.Name, field.FieldID)
+			}
+			if len(field.TypeParams) != 0 {
+				return fmt.Errorf("type params is not empty for scalar field: %s(%d)", field.Name, field.FieldID)
+			}
+		}
+	}
+
+	if !autoID && primaryIdx == -1 {
+		return fmt.Errorf("primary key is required for non autoid mode")
+	}
+
 	return nil
 }

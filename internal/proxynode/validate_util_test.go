@@ -8,6 +8,14 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
+func TestMain(m *testing.M) {
+	Params.Init()
+	Params.MaxNameLength = 255
+	Params.MaxFieldNum = 64
+	Params.MaxDimension = 32768
+	m.Run()
+}
+
 func TestValidateCollectionName(t *testing.T) {
 	assert.Nil(t, ValidateCollectionName("abc"))
 	assert.Nil(t, ValidateCollectionName("_123abc"))
@@ -141,36 +149,216 @@ func TestValidatePrimaryKey(t *testing.T) {
 	}
 	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
 		Name:         "f1",
+		FieldID:      100,
 		IsPrimaryKey: false,
 		Description:  "",
-		DataType:     0,
+		DataType:     1,
 		TypeParams:   nil,
 		IndexParams:  nil,
 	})
-	assert.Nil(t, ValidatePrimaryKey(&coll))
+	assert.Nil(t, ValidateSchema(&coll))
 	pf := &schemapb.FieldSchema{
 		Name:         "f2",
+		FieldID:      101,
 		IsPrimaryKey: true,
 		Description:  "",
-		DataType:     0,
+		DataType:     1,
 		TypeParams:   nil,
 		IndexParams:  nil,
 	}
 	coll.Fields = append(coll.Fields, pf)
-	assert.NotNil(t, ValidatePrimaryKey(&coll))
+	assert.NotNil(t, ValidateSchema(&coll))
 	coll.AutoID = false
-	assert.NotNil(t, ValidatePrimaryKey(&coll))
+	assert.NotNil(t, ValidateSchema(&coll))
 	pf.DataType = schemapb.DataType_BOOL
-	assert.NotNil(t, ValidatePrimaryKey(&coll))
+	assert.NotNil(t, ValidateSchema(&coll))
 	pf.DataType = schemapb.DataType_INT64
-	assert.Nil(t, ValidatePrimaryKey(&coll))
+	assert.Nil(t, ValidateSchema(&coll))
 	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
 		Name:         "",
+		FieldID:      102,
 		IsPrimaryKey: true,
 		Description:  "",
-		DataType:     0,
+		DataType:     1,
 		TypeParams:   nil,
 		IndexParams:  nil,
 	})
-	assert.NotNil(t, ValidatePrimaryKey(&coll))
+	assert.NotNil(t, ValidateSchema(&coll))
+}
+
+func TestValidateSchema(t *testing.T) {
+	coll := &schemapb.CollectionSchema{
+		Name:        "coll1",
+		Description: "",
+		AutoID:      false,
+		Fields:      nil,
+	}
+	assert.NotNil(t, ValidateSchema(coll))
+
+	pf1 := &schemapb.FieldSchema{
+		Name:         "f1",
+		FieldID:      100,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_INT64,
+		TypeParams:   nil,
+		IndexParams:  nil,
+	}
+	coll.Fields = append(coll.Fields, pf1)
+	assert.NotNil(t, ValidateSchema(coll))
+
+	pf1.IsPrimaryKey = true
+	assert.Nil(t, ValidateSchema(coll))
+
+	pf1.DataType = schemapb.DataType_INT32
+	assert.NotNil(t, ValidateSchema(coll))
+
+	pf1.DataType = schemapb.DataType_INT64
+	assert.Nil(t, ValidateSchema(coll))
+
+	pf2 := &schemapb.FieldSchema{
+		Name:         "f2",
+		FieldID:      101,
+		IsPrimaryKey: true,
+		Description:  "",
+		DataType:     schemapb.DataType_INT64,
+		TypeParams:   nil,
+		IndexParams:  nil,
+	}
+	coll.Fields = append(coll.Fields, pf2)
+	assert.NotNil(t, ValidateSchema(coll))
+
+	pf2.IsPrimaryKey = false
+	assert.Nil(t, ValidateSchema(coll))
+
+	pf2.Name = "f1"
+	assert.NotNil(t, ValidateSchema(coll))
+	pf2.Name = "f2"
+	assert.Nil(t, ValidateSchema(coll))
+
+	pf2.FieldID = 100
+	assert.NotNil(t, ValidateSchema(coll))
+
+	pf2.FieldID = 101
+	assert.Nil(t, ValidateSchema(coll))
+
+	pf2.DataType = -1
+	assert.NotNil(t, ValidateSchema(coll))
+
+	pf2.DataType = schemapb.DataType_VECTOR_FLOAT
+	assert.NotNil(t, ValidateSchema(coll))
+
+	pf2.DataType = schemapb.DataType_INT64
+	assert.Nil(t, ValidateSchema(coll))
+
+	tp3Good := []*commonpb.KeyValuePair{
+		{
+			Key:   "dim",
+			Value: "128",
+		},
+	}
+
+	tp3Bad1 := []*commonpb.KeyValuePair{
+		{
+			Key:   "dim",
+			Value: "asdfa",
+		},
+	}
+
+	tp3Bad2 := []*commonpb.KeyValuePair{
+		{
+			Key:   "dim",
+			Value: "-1",
+		},
+	}
+
+	tp3Bad3 := []*commonpb.KeyValuePair{
+		{
+			Key:   "dimX",
+			Value: "128",
+		},
+	}
+
+	tp3Bad4 := []*commonpb.KeyValuePair{
+		{
+			Key:   "dim",
+			Value: "128",
+		},
+		{
+			Key:   "dim",
+			Value: "64",
+		},
+	}
+
+	ip3Good := []*commonpb.KeyValuePair{
+		{
+			Key:   "metric_type",
+			Value: "IP",
+		},
+	}
+
+	ip3Bad1 := []*commonpb.KeyValuePair{
+		{
+			Key:   "metric_type",
+			Value: "JACCARD",
+		},
+	}
+
+	ip3Bad2 := []*commonpb.KeyValuePair{
+		{
+			Key:   "metric_type",
+			Value: "xxxxxx",
+		},
+	}
+
+	ip3Bad3 := []*commonpb.KeyValuePair{
+		{
+			Key:   "metric_type",
+			Value: "L2",
+		},
+		{
+			Key:   "metric_type",
+			Value: "IP",
+		},
+	}
+
+	pf3 := &schemapb.FieldSchema{
+		Name:         "f3",
+		FieldID:      102,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
+		TypeParams:   tp3Good,
+		IndexParams:  ip3Good,
+	}
+
+	coll.Fields = append(coll.Fields, pf3)
+	assert.Nil(t, ValidateSchema(coll))
+
+	pf3.TypeParams = tp3Bad1
+	assert.NotNil(t, ValidateSchema(coll))
+
+	pf3.TypeParams = tp3Bad2
+	assert.NotNil(t, ValidateSchema(coll))
+
+	pf3.TypeParams = tp3Bad3
+	assert.NotNil(t, ValidateSchema(coll))
+
+	pf3.TypeParams = tp3Bad4
+	assert.NotNil(t, ValidateSchema(coll))
+
+	pf3.TypeParams = tp3Good
+	assert.Nil(t, ValidateSchema(coll))
+
+	pf3.IndexParams = ip3Bad1
+	assert.NotNil(t, ValidateSchema(coll))
+
+	pf3.IndexParams = ip3Bad2
+	assert.NotNil(t, ValidateSchema(coll))
+
+	pf3.IndexParams = ip3Bad3
+	assert.NotNil(t, ValidateSchema(coll))
+
+	pf3.IndexParams = ip3Good
+	assert.Nil(t, ValidateSchema(coll))
 }
