@@ -41,10 +41,6 @@ func (pt *ParamTable) LoadFromEnv() {
 	}
 
 	Params.IP = funcutil.GetLocalIP()
-	host := os.Getenv("INDEX_NODE_HOST")
-	if len(host) > 0 {
-		Params.IP = host
-	}
 }
 
 func (pt *ParamTable) initParams() {
@@ -54,7 +50,7 @@ func (pt *ParamTable) initParams() {
 
 // todo remove and use load from env
 func (pt *ParamTable) initIndexServerAddress() {
-	addr, err := pt.Load("indexServer.address")
+	addr, err := pt.Load("indexService.address")
 	if err != nil {
 		panic(err)
 	}
@@ -66,7 +62,7 @@ func (pt *ParamTable) initIndexServerAddress() {
 		}
 	}
 
-	port, err := pt.Load("indexServer.port")
+	port, err := pt.Load("indexService.port")
 	if err != nil {
 		panic(err)
 	}

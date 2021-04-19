@@ -66,7 +66,7 @@ func (s *Server) start() error {
 	if err := s.impl.Start(); err != nil {
 		return err
 	}
-	log.Println("indexServer started")
+	log.Println("indexService started")
 	return nil
 }
 

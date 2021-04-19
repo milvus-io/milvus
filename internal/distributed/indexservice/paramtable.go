@@ -31,11 +31,11 @@ func (pt *ParamTable) initParams() {
 }
 
 func (pt *ParamTable) initServicePort() {
-	pt.ServicePort = pt.ParseInt("indexServer.port")
+	pt.ServicePort = pt.ParseInt("indexService.port")
 }
 
 func (pt *ParamTable) initServiceAddress() {
-	addr, err := pt.Load("indexServer.address")
+	addr, err := pt.Load("indexService.address")
 	if err != nil {
 		panic(err)
 	}
@@ -47,7 +47,7 @@ func (pt *ParamTable) initServiceAddress() {
 		}
 	}
 
-	port, err := pt.Load("indexServer.port")
+	port, err := pt.Load("indexService.port")
 	if err != nil {
 		panic(err)
 	}
