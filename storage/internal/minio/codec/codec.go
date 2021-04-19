@@ -17,7 +17,7 @@ func MvccDecode(key string) (string, uint64, string, error) {
 	suffixIndex := 0
 	TSIndex := 0
 	undersCount := 0
-	for i := len(key) - 1; i < 0; i++ {
+	for i := len(key) - 1; i > 0; i-- {
 		if key[i] == '_' {
 			undersCount++
 			if undersCount == 1 {
@@ -35,6 +35,7 @@ func MvccDecode(key string) (string, uint64, string, error) {
 
 	var TS uint64
 	_, err := fmt.Sscanf(key[TSIndex:suffixIndex-1], "%x", &TS)
+	TS = ^TS
 	if err != nil {
 		return "", 0, "", err
 	}
@@ -43,12 +44,17 @@ func MvccDecode(key string) (string, uint64, string, error) {
 }
 
 func LogEncode(key []byte, ts uint64, channel int) []byte {
-	return []byte("log_" + string(ts) + "_" + string(key) + "_" + string(channel))
+	suffix := string(key) + "_" + fmt.Sprintf("%d", channel)
+	logKey, err := MvccEncode([]byte("log"), ts, suffix)
+	if err != nil{
+		return nil
+	}
+	return logKey
 }
 
 func LogDecode(logKey string) (string, uint64, int, error) {
 	if len(logKey) < 16 {
-		return nil, 0, 0, errors.New("insufficient bytes to decode value")
+		return "", 0, 0, errors.New("insufficient bytes to decode value")
 	}
 
 	channelIndex := 0
@@ -56,7 +62,7 @@ func LogDecode(logKey string) (string, uint64, int, error) {
 	TSIndex := 0
 	undersCount := 0
 
-	for i := len(logKey) - 1; i < 0; i++ {
+	for i := len(logKey) - 1; i > 0; i-- {
 		if logKey[i] == '_' {
 			undersCount++
 			if undersCount == 1 {
@@ -71,7 +77,7 @@ func LogDecode(logKey string) (string, uint64, int, error) {
 			}
 		}
 	}
-	if channelIndex == 0 || TSIndex == 0 || keyIndex == 0 {
+	if channelIndex == 0 || TSIndex == 0 || keyIndex == 0 || logKey[:TSIndex-1] != "log" {
 		return "", 0, 0, errors.New("key is wrong formatted")
 	}
 
@@ -81,10 +87,15 @@ func LogDecode(logKey string) (string, uint64, int, error) {
 	if err != nil {
 		return "", 0, 0, err
 	}
+	TS = ^TS
 
-	_, err = fmt.Sscanf(logKey[channelIndex:len(logKey)-1], "%d", &channel)
+	_, err = fmt.Sscanf(logKey[channelIndex:], "%d", &channel)
 	if err != nil {
 		return "", 0, 0, err
 	}
 	return logKey[keyIndex : channelIndex-1], TS, channel, nil
+}
+
+func SegmentEncode(segment string, suffix string) []byte {
+	return []byte(segment + "_" + suffix)
 }

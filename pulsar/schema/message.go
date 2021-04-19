@@ -1,5 +1,7 @@
 package schema
 
+import "bytes"
+
 type ErrorCode int32
 
 const (
@@ -31,10 +33,11 @@ const (
 
 type Status struct {
 	Error_code ErrorCode
-	Reason string
+	Reason     string
 }
 
 type DataType int32
+
 const (
 	NONE         DataType = 0
 	BOOL         DataType = 1
@@ -50,10 +53,10 @@ const (
 )
 
 type AttrRecord struct {
-	Int32Value  []int32
-	Int64Value  []int64
-	FloatValue  []float32
-	DoubleValue []float64
+	Int32Value  int32
+	Int64Value  int64
+	FloatValue  float32
+	DoubleValue float64
 }
 
 type VectorRowRecord struct {
@@ -68,7 +71,7 @@ type VectorRecord struct {
 type FieldValue struct {
 	FieldName    string
 	Type         DataType
-	AttrRecord   *AttrRecord            //what's the diff with VectorRecord
+	AttrRecord   *AttrRecord //what's the diff with VectorRecord
 	VectorRecord *VectorRecord
 }
 
@@ -78,62 +81,72 @@ type VectorParam struct {
 }
 
 type OpType int
+
 const (
-	Insert      OpType = 0
-	Delete      OpType = 1
-	Search      OpType = 2
-	TimeSync    OpType = 3
-	Key2Seg     OpType = 4
-	Statistics  OpType = 5
+	Insert     OpType = 0
+	Delete     OpType = 1
+	Search     OpType = 2
+	TimeSync   OpType = 3
+	Key2Seg    OpType = 4
+	Statistics OpType = 5
 )
 
 type Message interface {
 	GetType() OpType
+	Serialization() []byte
+	Deserialization(serializationData []byte)
 }
 
 type InsertMsg struct {
 	CollectionName string
-	Fields []*FieldValue
-	EntityId int64
-	PartitionTag string
-	Timestamp int64
-	ClientId int64
-	MsgType OpType
+	Fields         []*FieldValue
+	EntityId       int64
+	PartitionTag   string
+	Timestamp      uint64
+	ClientId       int64
+	MsgType        OpType
 }
 
 type DeleteMsg struct {
 	CollectionName string
-	EntityId int64
-	Timestamp int64
-	ClientId int64
-	MsgType OpType
+	EntityId       int64
+	Timestamp      int64
+	ClientId       int64
+	MsgType        OpType
 }
 
 type SearchMsg struct {
 	CollectionName string
-	PartitionTag string
-	VectorParam *VectorParam
-	Timestamp int64
-	ClientId int64
-	MsgType OpType
+	PartitionTag   string
+	VectorParam    *VectorParam
+	Timestamp      int64
+	ClientId       int64
+	MsgType        OpType
 }
 
 type TimeSyncMsg struct {
-	ClientId int64
+	ClientId  int64
 	Timestamp int64
-	MsgType OpType
+	MsgType   OpType
 }
 
 type Key2SegMsg struct {
 	EntityId int64
 	Segments []string
-	MsgType OpType
+	MsgType  OpType
 }
-
-
 
 func (ims *InsertMsg) GetType() OpType {
 	return ims.MsgType
+}
+
+func (ims *InsertMsg) Serialization() []byte {
+	var serialization_data bytes.Buffer
+	return serialization_data.Bytes()
+}
+
+func (ims *InsertMsg) Deserialization(serializationData []byte) {
+
 }
 
 func (dms *DeleteMsg) GetType() OpType {
@@ -151,6 +164,3 @@ func (tms *TimeSyncMsg) GetType() OpType {
 func (kms *Key2SegMsg) GetType() OpType {
 	return kms.MsgType
 }
-
-
-

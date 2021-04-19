@@ -3,6 +3,8 @@ module github.com/czs007/suvlim
 go 1.14
 
 require (
+	code.cloudfoundry.org/bytefmt v0.0.0-20200131002437-cf55d5288a48 // indirect
+	github.com/onsi/ginkgo v1.14.0 // indirect
 	github.com/BurntSushi/toml v0.3.1
 	github.com/golang/protobuf v1.4.2
 	github.com/minio/minio-go/v7 v7.0.5

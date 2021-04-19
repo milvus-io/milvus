@@ -225,16 +225,14 @@ func (s *TikvStore) PutRow(ctx context.Context, key Key, value Value, segment st
 	return s.put(ctx, key, value, timestamp, segment)
 }
 
-func (s *TikvStore) PutRows(ctx context.Context, keys []Key, values []Value, segments []string, timestamp Timestamp) error {
+func (s *TikvStore) PutRows(ctx context.Context, keys []Key, values []Value, segment string, timestamp Timestamp) error {
 	if len(keys) != len(values) {
 		return errors.New("the len of keys is not equal to the len of values")
 	}
-	if len(keys) != len(segments) {
-		return errors.New("the len of keys is not equal to the len of segments")
-	}
+
 	encodedKeys := make([]Key, len(keys))
 	for i, key := range keys {
-		encodedKeys[i] = EncodeKey(key, timestamp, segments[i])
+		encodedKeys[i] = EncodeKey(key, timestamp, segment)
 	}
 	return s.engine.BatchPut(ctx, encodedKeys, values)
 }
