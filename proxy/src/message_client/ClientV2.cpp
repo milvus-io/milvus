@@ -7,8 +7,6 @@
 #include <omp.h>
 #include <numeric>
 #include <algorithm>
-#include <unistd.h>
-#include "nlohmann/json.hpp"
 #include "log/Log.h"
 
 namespace milvus::message_client {
@@ -28,15 +26,7 @@ Status MsgClientV2::Init(const std::string &insert_delete,
                          const std::string &search_by_id,
                          const std::string &search_result) {
   //create pulsar client
-  std::shared_ptr<MsgClient> pulsar_client;
-  if (config.pulsar.authentication) {
-      pulsar::ClientConfiguration clientConfig;
-      clientConfig.setAuth(pulsar::AuthToken::createWithToken(config.pulsar.token.value));
-      pulsar_client = std::make_shared<MsgClient>(service_url_, clientConfig);
-  } else {
-      pulsar_client = std::make_shared<MsgClient>(service_url_);
-  }
-
+  auto pulsar_client = std::make_shared<MsgClient>(service_url_);
   //create pulsar producer
   ProducerConfiguration producerConfiguration;
   producerConfiguration.setPartitionsRoutingMode(ProducerConfiguration::CustomPartition);
@@ -177,11 +167,7 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
                                    const std::function<uint64_t(const std::string &collection_name,
                                                                 uint64_t channel_id,
                                                                 uint64_t timestamp)> &segment_id) {
-  const uint64_t num_records_log = 100 * 10000;
-  static uint64_t num_inserted = 0;
-  static uint64_t size_inserted = 0;
   using stdclock = std::chrono::high_resolution_clock;
-  static stdclock::duration time_cost;
   auto start = stdclock::now();
   // may have retry policy?
   auto row_count = request.rows_data_size();
@@ -200,14 +186,11 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
     mut_msg.set_collection_name(request.collection_name());
     mut_msg.set_partition_tag(request.partition_tag());
     uint64_t uid = request.entity_id_array(i);
-    // auto channel_id = makeHash(&uid, sizeof(uint64_t)) % topic_num;
-    //TODO:: don't prove the correction
-    auto channel_id = this_thread;
+    auto channel_id = makeHash(&uid, sizeof(uint64_t)) % topic_num;
     try {
       mut_msg.set_segment_id(segment_id(request.collection_name(), channel_id, timestamp));
       mut_msg.mutable_rows_data()->CopyFrom(request.rows_data(i));
       mut_msg.mutable_extra_params()->CopyFrom(request.extra_params());
-      mut_msg.set_channel_id(channel_id);
 
       auto callback = [&stats, &msg_sended, this_thread](Result result, const pulsar::MessageId &messageId) {
         msg_sended += 1;
@@ -215,7 +198,7 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
           stats[this_thread] = Status(DB_ERROR, pulsar::strResult(result));
         }
       };
-      paralle_mut_producers_[channel_id]->sendAsync(mut_msg, callback);
+      paralle_mut_producers_[this_thread]->sendAsync(mut_msg, callback);
     }
     catch (const std::exception &e) {
       msg_sended += 1;
@@ -226,35 +209,10 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
   }
 
   auto end = stdclock::now();
-  time_cost += (end - start);
-  num_inserted += row_count;
-  size_inserted += request.ByteSize();
-  if (num_inserted >= num_records_log) {
-//    char buff[128];
-//    auto r = getcwd(buff, 128);
-    auto path = std::string("/tmp");
-    std::ofstream file(path + "/proxy2pulsar.benchmark", std::fstream::app);
-    nlohmann::json json;
-    json["InsertTime"] = milvus::CommonUtil::TimeToString(start);
-    json["DurationInMilliseconds"] = std::chrono::duration_cast<std::chrono::milliseconds>(time_cost).count();
-    json["SizeInMB"] =  size_inserted / 1024.0 / 1024.0;
-    json["ThroughputInMB"] = double(size_inserted) / std::chrono::duration_cast<std::chrono::milliseconds>(time_cost).count() * 1000 / 1024.0 / 1024;
-    json["NumRecords"] = num_inserted;
-    file << json.dump() << std::endl;
-    /*
-    file << "[" << milvus::CommonUtil::TimeToString(start) << "]"
-        << " Insert " << num_inserted << " records, "
-         << "size:" << size_inserted / 1024.0 / 1024.0 << "M, "
-         << "cost" << std::chrono::duration_cast<std::chrono::milliseconds>(time_cost).count() / 1000.0 << "s, "
-         << "throughput: "
-         << double(size_inserted) / std::chrono::duration_cast<std::chrono::milliseconds>(time_cost).count() * 1000 / 1024.0
-             / 1024
-         << "M/s" << std::endl;
-         */
-    time_cost = stdclock::duration(0);
-    num_inserted = 0;
-    size_inserted = 0;
-  }
+  auto data_size = request.ByteSize();
+  LOG_SERVER_INFO_ << "InsertReq Batch size:" << data_size / 1024.0 / 1024.0 << "M, "
+                   << "throughput: " << data_size / std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() * 1000 / 1024.0 / 1024
+                   << "M/s";
 
   for (auto &stat : stats) {
     if (!stat.ok()) {
@@ -301,9 +259,7 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::DeleteByIDParam &request,
   auto end = stdclock::now();
   auto data_size = request.ByteSize();
   LOG_SERVER_INFO_ << "InsertReq Batch size:" << data_size / 1024.0 / 1024.0 << "M, "
-                   << "throughput: "
-                   << data_size / std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() * 1000
-                       / 1024.0 / 1024
+                   << "throughput: " << data_size / std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() * 1000 / 1024.0 / 1024
                    << "M/s";
 
   for (auto &stat : stats) {

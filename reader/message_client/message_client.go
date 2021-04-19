@@ -42,7 +42,11 @@ type MessageClient struct {
 }
 
 func (mc *MessageClient) GetTimeNow() uint64 {
-	return mc.timestampBatchEnd
+	msg, ok := <-mc.timeSyncCfg.TimeSync()
+	if !ok {
+		fmt.Println("cnn't get data from timesync chan")
+	}
+	return msg.Timestamp
 }
 
 func (mc *MessageClient) TimeSyncStart() uint64 {
@@ -138,20 +142,7 @@ func (mc *MessageClient) createConsumer(topicName string) pulsar.Consumer {
 }
 
 func (mc *MessageClient) createClient(url string) pulsar.Client {
-	if conf.Config.Pulsar.Authentication {
-		// create client with Authentication
-		client, err := pulsar.NewClient(pulsar.ClientOptions{
-			URL: url,
-			Authentication: pulsar.NewAuthenticationToken(conf.Config.Pulsar.Token),
-		})
-
-		if err != nil {
-			log.Fatal(err)
-		}
-		return client
-	}
-
-	// create client without Authentication
+	// create client
 	client, err := pulsar.NewClient(pulsar.ClientOptions{
 		URL: url,
 	})
@@ -170,23 +161,8 @@ func (mc *MessageClient) InitClient(url string) {
 	//create producer
 	mc.searchResultProducers = make(map[int64]pulsar.Producer)
 	proxyIdList := conf.Config.Master.ProxyIdList
-
-	searchResultTopicName := "SearchResult-"
-	searchTopicName := "Search"
-	key2SegTopicName := "Key2Seg"
-	timeSyncTopicName := "TimeSync"
-	insertOrDeleteTopicName := "InsertOrDelete-"
-
-	if conf.Config.Pulsar.Authentication {
-		searchResultTopicName = "SearchResult-" + conf.Config.Pulsar.User + "-"
-		searchTopicName = "Search-" + conf.Config.Pulsar.User
-		key2SegTopicName = "Key2Seg-" + conf.Config.Pulsar.User
-		// timeSyncTopicName = "TimeSync-" + conf.Config.Pulsar.User
-		insertOrDeleteTopicName = "InsertOrDelete-" + conf.Config.Pulsar.User + "-"
-	}
-
 	for _, key := range proxyIdList{
-		topic := searchResultTopicName
+		topic := "SearchResult-"
 		topic = topic + strconv.Itoa(int(key))
 		mc.searchResultProducers[key] = mc.creatProducer(topic)
 	}
@@ -195,8 +171,8 @@ func (mc *MessageClient) InitClient(url string) {
 	mc.segmentsStatisticProducer = mc.creatProducer(SegmentsStatisticTopicName)
 
 	//create consumer
-	mc.searchConsumer = mc.createConsumer(searchTopicName)
-	mc.key2segConsumer = mc.createConsumer(key2SegTopicName)
+	mc.searchConsumer = mc.createConsumer("Search")
+	mc.key2segConsumer = mc.createConsumer("Key2Seg")
 
 	// init channel
 	mc.searchChan = make(chan *msgpb.SearchMsg, conf.Config.Reader.SearchChanSize)
@@ -206,11 +182,11 @@ func (mc *MessageClient) InitClient(url string) {
 	mc.Key2SegMsg = make([]*msgpb.Key2SegMsg, 0)
 
 	//init timesync
-	timeSyncTopic := timeSyncTopicName
+	timeSyncTopic := "TimeSync"
 	timeSyncSubName := "reader" + strconv.Itoa(mc.MessageClientID)
 	readTopics := make([]string, 0)
 	for i := conf.Config.Reader.TopicStart; i < conf.Config.Reader.TopicEnd; i++ {
-		str := insertOrDeleteTopicName
+		str := "ManipulationReqMsg-"
 		str = str + strconv.Itoa(i)
 		readTopics = append(readTopics, str)
 	}
@@ -228,7 +204,6 @@ func (mc *MessageClient) InitClient(url string) {
 		log.Fatal(err)
 	}
 	mc.timeSyncCfg = timeSync.(*timesync.ReaderTimeSyncCfg)
-	mc.timeSyncCfg.RoleType = timesync.Reader
 
 	mc.timestampBatchStart = 0
 	mc.timestampBatchEnd = 0

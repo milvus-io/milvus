@@ -1,4 +1,4 @@
-package readertimesync
+package proxy_node
 
 import (
 	"context"
@@ -19,8 +19,8 @@ type ReaderTimeSync interface {
 	Start() error
 	Close()
 	TimeSync() <-chan TimeSyncMsg
-	InsertOrDelete() <-chan *pb.InsertOrDeleteMsg
-	IsInsertDeleteChanFull() bool
+	ManipulationReqMsg() <-chan *pb.ManipulationReqMsg
+	IsManipulationReqMsgChanFull() bool
 }
 
 type TimeSyncMsg struct {
@@ -31,14 +31,15 @@ type TimeSyncMsg struct {
 type ReaderTimeSyncOption func(*ReaderTimeSyncCfg)
 
 type ReaderTimeSyncCfg struct {
+	pulsarAddr   string
 	pulsarClient pulsar.Client
 
 	timeSyncConsumer pulsar.Consumer
 	readerConsumer   pulsar.Consumer
 	readerProducer   []pulsar.Producer
 
-	timesyncMsgChan    chan TimeSyncMsg
-	insertOrDeleteChan chan *pb.InsertOrDeleteMsg //output insert or delete msg
+	timesyncMsgChan        chan TimeSyncMsg
+	manipulationReqMsgChan chan *pb.ManipulationReqMsg //output insert or delete msg
 
 	readStopFlagClientId int64
 	interval             int64
@@ -71,11 +72,11 @@ func NewReaderTimeSync(
 	readStopFlagClientId int64,
 	opts ...ReaderTimeSyncOption,
 ) (ReaderTimeSync, error) {
-	pulsarAddr := "pulsar://"
-	pulsarAddr += conf.Config.Pulsar.Address
-	pulsarAddr += ":"
-	pulsarAddr += strconv.FormatInt(int64(conf.Config.Pulsar.Port), 10)
-	interval := int64(conf.Config.Timesync.Interval)
+	//pulsarAddr := "pulsar://"
+	//pulsarAddr += conf.Config.Pulsar.Address
+	//pulsarAddr += ":"
+	//pulsarAddr += strconv.FormatInt(int64(conf.Config.Pulsar.Port), 10)
+	//interval := int64(conf.Config.Timesync.Interval)
 
 	//check if proxyId has duplication
 	if len(proxyIdList) == 0 {
@@ -90,11 +91,24 @@ func NewReaderTimeSync(
 		}
 	}
 	r := &ReaderTimeSyncCfg{
-		interval:    interval,
+		//interval:    interval,
 		proxyIdList: proxyIdList,
 	}
 	for _, opt := range opts {
 		opt(r)
+	}
+	if r.interval == 0 {
+		r.interval = int64(conf.Config.Timesync.Interval)
+		if r.interval == 0 {
+			return nil, fmt.Errorf("interval is unsetted")
+		}
+	}
+	if len(r.pulsarAddr) == 0 {
+		pulsarAddr := "pulsar://"
+		pulsarAddr += conf.Config.Pulsar.Address
+		pulsarAddr += ":"
+		pulsarAddr += strconv.FormatInt(int64(conf.Config.Pulsar.Port), 10)
+		r.pulsarAddr = pulsarAddr
 	}
 
 	//check if read topic is empty
@@ -111,11 +125,11 @@ func NewReaderTimeSync(
 	r.readStopFlagClientId = readStopFlagClientId
 
 	r.timesyncMsgChan = make(chan TimeSyncMsg, len(readTopics)*r.readerQueueSize)
-	r.insertOrDeleteChan = make(chan *pb.InsertOrDeleteMsg, len(readTopics)*r.readerQueueSize)
+	r.manipulationReqMsgChan = make(chan *pb.ManipulationReqMsg, len(readTopics)*r.readerQueueSize)
 	r.revTimesyncFromReader = make(map[uint64]int)
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 
-	client, err := pulsar.NewClient(pulsar.ClientOptions{URL: pulsarAddr})
+	client, err := pulsar.NewClient(pulsar.ClientOptions{URL: r.pulsarAddr})
 	if err != nil {
 		return nil, fmt.Errorf("connect pulsar failed, %v", err)
 	}
@@ -171,8 +185,8 @@ func (r *ReaderTimeSyncCfg) Start() error {
 	return r.ctx.Err()
 }
 
-func (r *ReaderTimeSyncCfg) InsertOrDelete() <-chan *pb.InsertOrDeleteMsg {
-	return r.insertOrDeleteChan
+func (r *ReaderTimeSyncCfg) ManipulationReqMsg() <-chan *pb.ManipulationReqMsg {
+	return r.manipulationReqMsgChan
 }
 
 func (r *ReaderTimeSyncCfg) TimeSync() <-chan TimeSyncMsg {
@@ -183,8 +197,8 @@ func (r *ReaderTimeSyncCfg) TimeSyncChanLen() int {
 	return len(r.timesyncMsgChan)
 }
 
-func (r *ReaderTimeSyncCfg) IsInsertDeleteChanFull() bool {
-	return len(r.insertOrDeleteChan) == len(r.readerProducer)*r.readerQueueSize
+func (r *ReaderTimeSyncCfg) IsManipulationReqMsgChanFull() bool {
+	return len(r.manipulationReqMsgChan) == len(r.readerProducer)*r.readerQueueSize
 }
 
 func (r *ReaderTimeSyncCfg) alignTimeSync(ts []*pb.TimeSyncMsg) []*pb.TimeSyncMsg {
@@ -273,7 +287,7 @@ func (r *ReaderTimeSyncCfg) startTimeSync() {
 		}
 		tsm = tsm[:0]
 		//send timestamp flag to reader channel
-		msg := pb.InsertOrDeleteMsg{Timestamp: ts, ClientId: r.readStopFlagClientId}
+		msg := pb.ManipulationReqMsg{Timestamp: ts, ProxyId: r.readStopFlagClientId}
 		payload, err := proto.Marshal(&msg)
 		if err != nil {
 			//TODO log error
@@ -289,8 +303,8 @@ func (r *ReaderTimeSyncCfg) startTimeSync() {
 	}
 }
 
-func (r *ReaderTimeSyncCfg) isReadStopFlag(imsg *pb.InsertOrDeleteMsg) bool {
-	return imsg.ClientId < ReadStopFlagEnd
+func (r *ReaderTimeSyncCfg) isReadStopFlag(imsg *pb.ManipulationReqMsg) bool {
+	return imsg.ProxyId < ReadStopFlagEnd
 }
 
 func (r *ReaderTimeSyncCfg) startReadTopics() {
@@ -306,14 +320,14 @@ func (r *ReaderTimeSyncCfg) startReadTopics() {
 				log.Printf("reader consumer closed")
 			}
 			msg := cm.Message
-			var imsg pb.InsertOrDeleteMsg
+			var imsg pb.ManipulationReqMsg
 			if err := proto.Unmarshal(msg.Payload(), &imsg); err != nil {
 				//TODO, log error
 				log.Printf("unmarshal InsertOrDeleteMsg error %v", err)
 				break
 			}
 			if r.isReadStopFlag(&imsg) { //timestamp flag
-				if imsg.ClientId == r.readStopFlagClientId {
+				if imsg.ProxyId == r.readStopFlagClientId {
 					gval := r.revTimesyncFromReader[imsg.Timestamp]
 					gval++
 					if gval >= len(r.readerProducer) {
@@ -328,11 +342,11 @@ func (r *ReaderTimeSyncCfg) startReadTopics() {
 					}
 				}
 			} else {
-				if r.IsInsertDeleteChanFull() {
+				if r.IsManipulationReqMsgChanFull() {
 					log.Printf("WARN :  Insert or delete chan is full ...")
 				}
 				tsm.NumRecorders++
-				r.insertOrDeleteChan <- &imsg
+				r.manipulationReqMsgChan <- &imsg
 			}
 			r.readerConsumer.AckID(msg.ID())
 		}
@@ -342,5 +356,17 @@ func (r *ReaderTimeSyncCfg) startReadTopics() {
 func WithReaderQueueSize(size int) ReaderTimeSyncOption {
 	return func(r *ReaderTimeSyncCfg) {
 		r.readerQueueSize = size
+	}
+}
+
+func WithPulsarAddress(addr string) ReaderTimeSyncOption {
+	return func(r *ReaderTimeSyncCfg) {
+		r.pulsarAddr = addr
+	}
+}
+
+func WithInterval(interval int64) ReaderTimeSyncOption {
+	return func(r *ReaderTimeSyncCfg) {
+		r.interval = interval
 	}
 }
