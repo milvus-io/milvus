@@ -1820,7 +1820,7 @@ class TestSearchInvalid(object):
 
     # #1464
     @pytest.mark.level(2)
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_search_with_empty_params(self, connect, collection, args, get_simple_index):
         '''
         target: test search function, with empty search params
@@ -1840,8 +1840,7 @@ class TestSearchInvalid(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    # #1439
-    @pytest.mark.tags("fail")
+    @pytest.mark.tags(CaseLabel.tags_0331, CaseLabel.tags_l1, CaseLabel.tags_smoke)
     def test_search_with_empty_vectors(self, connect, collection):
         """
         target: test search function, with empty search vectors
