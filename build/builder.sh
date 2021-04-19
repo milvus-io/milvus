@@ -15,6 +15,7 @@ fi
 
 if [ "${1-}" = "gdbserver" ]; then
     mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-gdbserver-cache"
+    mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-gdbserver-home"
     chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
 
     docker-compose pull --ignore-pull-failures gdbserver
@@ -22,6 +23,11 @@ if [ "${1-}" = "gdbserver" ]; then
         docker-compose build gdbserver
     fi
     docker-compose up -d gdbserver
+    exit 0
+fi
+
+if [ "${1-}" = "down" ]; then
+    docker-compose down
     exit 0
 fi
 

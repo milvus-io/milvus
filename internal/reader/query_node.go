@@ -33,9 +33,13 @@ func NewQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
 	segmentsMap := make(map[int64]*Segment)
 	collections := make([]*Collection, 0)
 
+	tSafe := newTSafe()
+
 	var replica collectionReplica = &collectionReplicaImpl{
 		collections: collections,
 		segments:    segmentsMap,
+
+		tSafe: tSafe,
 	}
 
 	return &QueryNode{
