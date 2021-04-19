@@ -8,6 +8,7 @@ import (
 	"github.com/czs007/suvlim/writer/message_client"
 	"github.com/czs007/suvlim/writer/write_node"
 	"log"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -46,12 +47,20 @@ func main() {
 
 	const Debug = true
 	const MB = 1024 * 1024
-	const timeInterval = time.Second * 5
+	const timeInterval = time.Second * 2
 	const CountMsgNum = 10000 * 10
 
 	if Debug {
 		var shouldBenchmark = false
 		var start time.Time
+		var LogRecords int64
+		var logFlag int64
+		var logString = ""
+		logFile, err := os.OpenFile("writenode.benchmark", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0777)
+		defer logFile.Close()
+		if err != nil {
+			log.Fatalf("Prepare log file error, " + err.Error())
+		}
 
 		for {
 			if ctx.Err() != nil {
@@ -59,8 +68,10 @@ func main() {
 			}
 			msgLength := wn.MessageClient.PrepareBatchMsg()
 			// wait until first 100,000 rows are successfully wrote
-			if wn.MsgCounter.InsertCounter >= CountMsgNum {
+			if wn.MsgCounter.InsertCounter >= CountMsgNum && shouldBenchmark == false {
 				shouldBenchmark = true
+				wn.MsgCounter.InsertCounter = 0
+				wn.MsgCounter.InsertedRecordSize = 0
 				start = time.Now()
 			}
 			if msgLength > 0 {
@@ -69,12 +80,20 @@ func main() {
 			}
 			// Test insert time
 			// ignore if less than 1000 records per time interval
-			if shouldBenchmark && wn.MsgCounter.InsertCounter > 1000{
+			if shouldBenchmark && wn.MsgCounter.InsertCounter > 1000 {
+				LogRecords += msgCounter.InsertCounter
 				timeSince := time.Since(start)
 				if timeSince >= timeInterval {
 					speed := wn.MsgCounter.InsertedRecordSize / timeInterval.Seconds() / MB
-					fmt.Println("============> Insert", wn.MsgCounter.InsertCounter,"records, cost:" , timeSince, "speed:", speed, "M/s", "<============")
+					logString = fmt.Sprintln("============> Insert", wn.MsgCounter.InsertCounter, "records, cost:", timeSince, "speed:", speed, "M/s", "<============")
+					newFlag := LogRecords / (10000 * 100)
+					if newFlag != logFlag {
+						logFlag = newFlag
+						fmt.Fprintln(logFile, logString)
+						logString = ""
+					}
 					wn.MsgCounter.InsertCounter = 0
+					wn.MsgCounter.InsertedRecordSize = 0
 					start = time.Now()
 				}
 			}
