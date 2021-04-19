@@ -91,17 +91,11 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 
-	exist := false
 	for indexBuildID, meta := range mt.indexBuildID2Meta {
 		if meta.Req.IndexID == indexID {
 			meta.State = commonpb.IndexState_DELETED
 			mt.indexBuildID2Meta[indexBuildID] = meta
-			exist = true
 		}
-	}
-
-	if !exist {
-		return errors.New("index not exists")
 	}
 
 	return nil
