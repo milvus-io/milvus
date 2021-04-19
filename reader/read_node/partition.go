@@ -16,7 +16,8 @@ import "C"
 type Partition struct {
 	PartitionPtr   C.CPartition
 	PartitionName  string
-	Segments []*Segment
+	OpenedSegments []*Segment
+	ClosedSegments []*Segment
 }
 
 func (p *Partition) NewSegment(segmentId int64) *Segment {
@@ -27,7 +28,7 @@ func (p *Partition) NewSegment(segmentId int64) *Segment {
 	segmentPtr := C.NewSegment(p.PartitionPtr, C.ulong(segmentId))
 
 	var newSegment = &Segment{SegmentPtr: segmentPtr, SegmentId: segmentId}
-	p.Segments = append(p.Segments, newSegment)
+	p.OpenedSegments = append(p.OpenedSegments, newSegment)
 	return newSegment
 }
 
