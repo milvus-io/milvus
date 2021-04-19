@@ -29,11 +29,13 @@ type Server struct {
 }
 
 func (s *Server) Init() {
-	indexservice.Params.Init()
+	log.Println("initing params ...")
+	Params.Init()
 }
 
 func (s *Server) Start() error {
 	s.Init()
+	log.Println("stringing indexserver ...")
 	return s.startIndexServer()
 }
 
@@ -62,6 +64,20 @@ func (s *Server) RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequ
 func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
 
 	return s.server.BuildIndex(req)
+	//indexID := int64(0)
+	//request := &indexpb.BuildIndexCmd{
+	//	IndexID: indexID,
+	//	Req:     req,
+	//}
+	//
+	//indexNodeClient := grpcindexnode.NewClient()
+	//
+	//status, err := indexNodeClient.BuildIndex(request)
+	//response := &indexpb.BuildIndexResponse{
+	//	Status:  status,
+	//	IndexID: indexID,
+	//}
+	//return response, err
 }
 
 func (s *Server) GetIndexStates(ctx context.Context, req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
@@ -79,6 +95,8 @@ func (s *Server) NotifyBuildIndex(ctx context.Context, nty *indexpb.BuildIndexNo
 	return s.server.NotifyBuildIndex(nty)
 }
 
+//varindex
+
 func NewServer() *Server {
 
 	return &Server{
@@ -91,7 +109,7 @@ func (s *Server) grpcLoop() {
 	defer s.loopWg.Done()
 
 	log.Println("Starting start IndexServer")
-	lis, err := net.Listen("tcp", ":"+strconv.Itoa(indexservice.Params.Port))
+	lis, err := net.Listen("tcp", ":"+strconv.Itoa(Params.Port))
 	if err != nil {
 		log.Fatalf("IndexServer grpc server fatal error=%v", err)
 	}
@@ -103,14 +121,18 @@ func (s *Server) grpcLoop() {
 	if err = s.grpcServer.Serve(lis); err != nil {
 		log.Fatalf("IndexServer grpc server fatal error=%v", err)
 	}
+	log.Println("IndexServer grpc server starting...")
 }
 
 func (s *Server) startIndexServer() error {
 	s.loopWg.Add(1)
 	go s.grpcLoop()
-	log.Println("IndexServer grpc server start successfully")
 
 	return nil
+}
+
+func Init() {
+	Params.Init()
 }
 
 func CreateIndexServer(ctx context.Context) (*Server, error) {

@@ -1,4 +1,4 @@
-package indexnode
+package grpcindexservice
 
 import (
 	"net"
@@ -12,6 +12,8 @@ type ParamTable struct {
 
 	Address string
 	Port    int
+
+	NodeID int64
 
 	MasterAddress string
 
@@ -42,7 +44,7 @@ func (pt *ParamTable) Init() {
 }
 
 func (pt *ParamTable) initAddress() {
-	addr, err := pt.Load("indexBuilder.address")
+	addr, err := pt.Load("indexServer.address")
 	if err != nil {
 		panic(err)
 	}
@@ -54,7 +56,7 @@ func (pt *ParamTable) initAddress() {
 		}
 	}
 
-	port, err := pt.Load("indexBuilder.port")
+	port, err := pt.Load("indexServer.port")
 	if err != nil {
 		panic(err)
 	}
@@ -67,7 +69,7 @@ func (pt *ParamTable) initAddress() {
 }
 
 func (pt *ParamTable) initPort() {
-	pt.Port = pt.ParseInt("indexBuilder.port")
+	pt.Port = pt.ParseInt("indexServer.port")
 }
 
 func (pt *ParamTable) initEtcdAddress() {

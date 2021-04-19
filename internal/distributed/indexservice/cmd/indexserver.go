@@ -18,13 +18,14 @@ import (
 	"os/signal"
 	"syscall"
 
-	grpcindexnode "github.com/zilliztech/milvus-distributed/internal/distributed/indexnode"
+	grpcindexserver "github.com/zilliztech/milvus-distributed/internal/distributed/indexservice"
 	"go.uber.org/zap"
 )
 
 func main() {
+	grpcindexserver.Init()
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := grpcindexnode.CreateIndexNode(ctx)
+	svr, err := grpcindexserver.CreateIndexServer(ctx)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}

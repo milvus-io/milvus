@@ -8,9 +8,7 @@ import (
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
-	grpcindexnodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/indexnode/client"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/indexnode"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -24,7 +22,7 @@ import (
 type IndexService struct {
 	// implement Service
 
-	nodeClients []indexnode.Interface
+	//nodeClients [] .Interface
 	// factory method
 	loopCtx    context.Context
 	loopCancel func()
@@ -101,11 +99,6 @@ func (i *IndexService) RegisterNode(req *indexpb.RegisterNodeRequest) (*indexpb.
 
 	i.nodeNum++
 
-	nodeAddress := req.Address.Ip + ":" + strconv.FormatInt(req.Address.Port, 10)
-	log.Println(nodeAddress)
-	nodeClient := grpcindexnodeclient.NewClient(nodeAddress)
-	i.nodeClients = append(i.nodeClients, nodeClient)
-
 	return &indexpb.RegisterNodeResponse{
 		InitParams: &internalpb2.InitParams{
 			NodeID:      nodeID,
@@ -115,19 +108,28 @@ func (i *IndexService) RegisterNode(req *indexpb.RegisterNodeRequest) (*indexpb.
 }
 
 func (i *IndexService) BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
-
-	//TODO: Allocator ID
-	indexID := int64(0)
-	nodeClient := i.nodeClients[0]
-	request := &indexpb.BuildIndexCmd{
-		IndexID: indexID,
-		Req:     req,
-	}
-	status, err := nodeClient.BuildIndex(request)
-	return &indexpb.BuildIndexResponse{
-		Status:  status,
-		IndexID: indexID,
-	}, err
+	//TODO: Multiple indexes will build at same time.
+	//ctx := context.Background()
+	//indexNodeClient := indexnode.NewIndexNode(ctx, rand.Int63n(i.nodeNum))
+	//
+	////TODO: Allocator index ID
+	//indexID := int64(0)
+	//
+	//request := &indexpb.BuildIndexCmd{
+	//	IndexID: indexID,
+	//	Req:     req,
+	//}
+	//
+	//status, err := indexNodeClient.BuildIndex(request)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//
+	//return &indexpb.BuildIndexResponse{
+	//	Status:  status,
+	//	IndexID: indexID,
+	//}, nil
+	return nil, nil
 }
 
 func (i *IndexService) GetIndexStates(req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {

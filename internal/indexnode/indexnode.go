@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/indexservice"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
@@ -41,8 +43,8 @@ type IndexNode struct {
 	startCallbacks []func()
 	closeCallbacks []func()
 
-	indexNodeID int64
-	//serviceClient indexservice.Interface // method factory
+	indexNodeID   int64
+	serviceClient indexservice.Interface // method factory
 }
 
 func (i *IndexNode) Init() {
@@ -70,25 +72,58 @@ func (i *IndexNode) GetStatisticsChannel() (string, error) {
 }
 
 func (i *IndexNode) BuildIndex(req *indexpb.BuildIndexCmd) (*commonpb.Status, error) {
+	//TODO: build index in index node
+	ctx := context.Background()
+	t := NewIndexAddTask()
+	t.req = req.Req
+	t.idAllocator = i.idAllocator
+	t.buildQueue = i.sched.IndexBuildQueue
+	t.table = i.metaTable
+	t.kv = i.kv
+	var cancel func()
+	t.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
 
-	log.Println("Create index with indexID=", req.IndexID)
-	return &commonpb.Status{
+	fn := func() error {
+		select {
+		case <-ctx.Done():
+			return errors.New("insert timeout")
+		default:
+			return i.sched.IndexAddQueue.Enqueue(t)
+		}
+	}
+	ret := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 		Reason:    "",
-	}, nil
+	}
+
+	err := fn()
+	if err != nil {
+		ret.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		ret.Reason = err.Error()
+		return ret, nil
+	}
+
+	err = t.WaitToFinish()
+	if err != nil {
+		ret.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		ret.Reason = err.Error()
+		return ret, nil
+	}
+	return ret, nil
 }
 
 func CreateIndexNode(ctx context.Context) (*IndexNode, error) {
 	return &IndexNode{}, nil
 }
 
-func NewIndexNode(ctx context.Context, nodeID int64) *IndexNode {
+func NewIndexNode(ctx context.Context, indexID int64) *IndexNode {
 	ctx1, cancel := context.WithCancel(ctx)
 	in := &IndexNode{
 		loopCtx:    ctx1,
 		loopCancel: cancel,
 
-		indexNodeID: nodeID,
+		indexNodeID: indexID,
 	}
 
 	return in

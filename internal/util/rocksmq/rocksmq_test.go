@@ -3,6 +3,7 @@ package rocksmq
 import (
 	"os"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -36,6 +37,10 @@ func TestRocksMQ(t *testing.T) {
 	assert.Nil(t, err)
 
 	channelName := "channel_a"
+	err = rmq.CreateChannel(channelName)
+	assert.Nil(t, err)
+	defer rmq.DestroyChannel(channelName)
+
 	msgA := "a_message"
 	pMsgs := make([]ProducerMessage, 1)
 	pMsgA := ProducerMessage{payload: []byte(msgA)}
@@ -54,7 +59,7 @@ func TestRocksMQ(t *testing.T) {
 	err = rmq.Produce(channelName, pMsgs)
 	assert.Nil(t, err)
 
-	groupName := "query_node"
+	groupName := "test_group"
 	_ = rmq.DestroyConsumerGroup(groupName, channelName)
 	err = rmq.CreateConsumerGroup(groupName, channelName)
 	assert.Nil(t, err)
@@ -89,6 +94,10 @@ func TestRocksMQ_Loop(t *testing.T) {
 
 	loopNum := 100
 	channelName := "channel_test"
+	err = rmq.CreateChannel(channelName)
+	assert.Nil(t, err)
+	defer rmq.DestroyChannel(channelName)
+
 	// Produce one message once
 	for i := 0; i < loopNum; i++ {
 		msg := "message_" + strconv.Itoa(i)
@@ -133,57 +142,62 @@ func TestRocksMQ_Loop(t *testing.T) {
 	assert.Equal(t, len(cMsgs), 0)
 }
 
-//func TestRocksMQ_Goroutines(t *testing.T) {
-//	master.Init()
-//
-//	etcdAddr := master.Params.EtcdAddress
-//	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
-//	assert.Nil(t, err)
-//	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
-//	defer etcdKV.Close()
-//	idAllocator := master.NewGlobalIDAllocator("dummy", etcdKV)
-//	_ = idAllocator.Initialize()
-//
-//	name := "/tmp/rocksmq"
-//	defer os.RemoveAll(name)
-//	rmq, err := NewRocksMQ(name, idAllocator)
-//	assert.Nil(t, err)
-//
-//	loopNum := 100
-//	channelName := "channel_test"
-//	// Produce two message in each goroutine
-//	var wg sync.WaitGroup
-//	wg.Add(1)
-//	for i := 0; i < loopNum/2; i++ {
-//		go func() {
-//			wg.Add(2)
-//			msg_0 := "message_" + strconv.Itoa(i)
-//			msg_1 := "message_" + strconv.Itoa(i+1)
-//			pMsg_0 := ProducerMessage{payload: []byte(msg_0)}
-//			pMsg_1 := ProducerMessage{payload: []byte(msg_1)}
-//			pMsgs := make([]ProducerMessage, 2)
-//			pMsgs[0] = pMsg_0
-//			pMsgs[1] = pMsg_1
-//
-//			err := rmq.Produce(channelName, pMsgs)
-//			assert.Nil(t, err)
-//		}()
-//	}
-//
-//	groupName := "test_group"
-//	_ = rmq.DestroyConsumerGroup(groupName, channelName)
-//	err = rmq.CreateConsumerGroup(groupName, channelName)
-//	assert.Nil(t, err)
-//	// Consume one message in each goroutine
-//	for i := 0; i < loopNum; i++ {
-//		go func() {
-//			wg.Done()
-//			cMsgs, err := rmq.Consume(groupName, channelName, 1)
-//			fmt.Println(string(cMsgs[0].payload))
-//			assert.Nil(t, err)
-//			assert.Equal(t, len(cMsgs), 1)
-//		}()
-//	}
-//	wg.Done()
-//	wg.Wait()
-//}
+func TestRocksMQ_Goroutines(t *testing.T) {
+	master.Init()
+
+	etcdAddr := master.Params.EtcdAddress
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	assert.Nil(t, err)
+	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
+	defer etcdKV.Close()
+	idAllocator := master.NewGlobalIDAllocator("dummy", etcdKV)
+	_ = idAllocator.Initialize()
+
+	name := "/tmp/rocksmq_2"
+	defer os.RemoveAll(name)
+	rmq, err := NewRocksMQ(name, idAllocator)
+	assert.Nil(t, err)
+
+	loopNum := 100
+	channelName := "channel_test"
+	err = rmq.CreateChannel(channelName)
+	assert.Nil(t, err)
+	defer rmq.DestroyChannel(channelName)
+
+	// Produce two message in each goroutine
+	msgChan := make(chan string, loopNum)
+	var wg sync.WaitGroup
+	for i := 0; i < loopNum; i += 2 {
+		go func(i int, group *sync.WaitGroup, mq *RocksMQ) {
+			group.Add(2)
+			msg0 := "message_" + strconv.Itoa(i)
+			msg1 := "message_" + strconv.Itoa(i+1)
+			pMsg0 := ProducerMessage{payload: []byte(msg0)}
+			pMsg1 := ProducerMessage{payload: []byte(msg1)}
+			pMsgs := make([]ProducerMessage, 2)
+			pMsgs[0] = pMsg0
+			pMsgs[1] = pMsg1
+
+			err := mq.Produce(channelName, pMsgs)
+			assert.Nil(t, err)
+			msgChan <- msg0
+			msgChan <- msg1
+		}(i, &wg, rmq)
+	}
+
+	groupName := "test_group"
+	_ = rmq.DestroyConsumerGroup(groupName, channelName)
+	err = rmq.CreateConsumerGroup(groupName, channelName)
+	assert.Nil(t, err)
+	// Consume one message in each goroutine
+	for i := 0; i < loopNum; i++ {
+		go func(group *sync.WaitGroup, mq *RocksMQ) {
+			defer group.Done()
+			<-msgChan
+			cMsgs, err := mq.Consume(groupName, channelName, 1)
+			assert.Nil(t, err)
+			assert.Equal(t, len(cMsgs), 1)
+		}(&wg, rmq)
+	}
+	wg.Wait()
+}
