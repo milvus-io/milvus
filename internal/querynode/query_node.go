@@ -403,55 +403,64 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	fieldIDs := in.FieldIDs
 	schema := in.Schema
 
+	fmt.Println("query node load segment ,info = ", in)
+
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+	}
 	hasCollection := node.replica.hasCollection(collectionID)
 	hasPartition := node.replica.hasPartition(partitionID)
 	if !hasCollection {
 		err := node.replica.addCollection(collectionID, schema)
 		if err != nil {
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			}
+			status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+			status.Reason = err.Error()
 			return status, err
 		}
 	}
 	if !hasPartition {
 		err := node.replica.addPartition(collectionID, partitionID)
 		if err != nil {
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			}
+			status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+			status.Reason = err.Error()
 			return status, err
 		}
 	}
 	err := node.replica.enablePartition(partitionID)
 	if err != nil {
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    err.Error(),
-		}
+		status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		status.Reason = err.Error()
+		return status, err
+	}
+
+	if len(segmentIDs) == 0 {
+		return status, nil
+	}
+
+	if len(in.SegmentIDs) != len(in.SegmentStates) {
+		err := errors.New("len(segmentIDs) should equal to len(segmentStates)")
+		status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		status.Reason = err.Error()
 		return status, err
 	}
 
 	// segments are ordered before LoadSegments calling
+	var position *internalpb2.MsgPosition = nil
 	for i, state := range in.SegmentStates {
-		if state.State == commonpb.SegmentState_SegmentGrowing {
-			position := state.StartPosition
-			err := node.loadService.segLoader.seekSegment(position)
-			if err != nil {
-				status := &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-					Reason:    err.Error(),
+		thisPosition := state.StartPosition
+		if state.State <= commonpb.SegmentState_SegmentGrowing {
+			if position == nil {
+				position = &internalpb2.MsgPosition{
+					ChannelName: thisPosition.ChannelName,
 				}
-				return status, err
 			}
 			segmentIDs = segmentIDs[:i]
 			break
 		}
+		position = state.StartPosition
 	}
 
-	err = node.loadService.loadSegment(collectionID, partitionID, segmentIDs, fieldIDs)
+	err = node.dataSyncService.seekSegment(position)
 	if err != nil {
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -459,9 +468,14 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 		}
 		return status, err
 	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
-	}, nil
+
+	err = node.loadService.loadSegment(collectionID, partitionID, segmentIDs, fieldIDs)
+	if err != nil {
+		status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		status.Reason = err.Error()
+		return status, err
+	}
+	return status, nil
 }
 
 func (node *QueryNode) ReleaseCollection(in *queryPb.ReleaseCollectionRequest) (*commonpb.Status, error) {

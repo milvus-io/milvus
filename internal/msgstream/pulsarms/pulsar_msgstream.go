@@ -721,11 +721,16 @@ func (ms *PulsarTtMsgStream) Seek(mp *internalpb2.MsgPosition) error {
 	var messageID MessageID
 	for index, channel := range ms.consumerChannels {
 		if filepath.Base(channel) == filepath.Base(mp.ChannelName) {
+			consumer = ms.consumers[index]
+			if len(mp.MsgID) == 0 {
+				// TODO:: collection should has separate channels; otherwise will consume redundant msg
+				messageID = pulsar.EarliestMessageID()
+				break
+			}
 			seekMsgID, err := typeutil.StringToPulsarMsgID(mp.MsgID)
 			if err != nil {
 				return err
 			}
-			consumer = ms.consumers[index]
 			messageID = seekMsgID
 			break
 		}
@@ -735,6 +740,9 @@ func (ms *PulsarTtMsgStream) Seek(mp *internalpb2.MsgPosition) error {
 		err := (consumer).Seek(messageID)
 		if err != nil {
 			return err
+		}
+		if messageID == nil {
+			return nil
 		}
 
 		ms.unsolvedMutex.Lock()
