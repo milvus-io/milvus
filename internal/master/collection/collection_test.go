@@ -13,26 +13,26 @@ var (
 	name       = "test-segment"
 	createTime = time.Now()
 	schema     = []*schemapb.FieldSchema{}
-	sIds       = []UniqueID{111111, 222222}
+	sIDs       = []UniqueID{111111, 222222}
 	ptags      = []string{"default", "test"}
 )
 
 func TestNewCollection(t *testing.T) {
 	assert := assert.New(t)
-	c := NewCollection(cid, name, createTime, schema, sIds, ptags)
+	c := NewCollection(cid, name, createTime, schema, sIDs, ptags)
 	assert.Equal(cid, c.ID)
 	assert.Equal(name, c.Name)
 	for k, v := range schema {
 		assert.Equal(v.Name, c.Schema[k].FieldName)
 		assert.Equal(v.DataType, c.Schema[k].Type)
 	}
-	assert.Equal(sIds, c.SegmentIDs)
+	assert.Equal(sIDs, c.SegmentIDs)
 	assert.Equal(ptags, c.PartitionTags)
 }
 
 func TestGrpcMarshal(t *testing.T) {
 	assert := assert.New(t)
-	c := NewCollection(cid, name, createTime, schema, sIds, ptags)
+	c := NewCollection(cid, name, createTime, schema, sIDs, ptags)
 	newc := GrpcMarshal(&c)
 	assert.NotEqual("", newc.GrpcMarshalString)
 }

@@ -74,11 +74,11 @@ func (queue *BaseTaskQueue) PopActiveTask(ts Timestamp) task {
 	return nil
 }
 
-func (queue *BaseTaskQueue) getTaskByReqId(reqId UniqueID) task {
+func (queue *BaseTaskQueue) getTaskByReqID(reqId UniqueID) task {
 	queue.utLock.Lock()
 	defer queue.utLock.Lock()
 	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
-		if e.Value.(task).Id() == reqId {
+		if e.Value.(task).ID() == reqId {
 			return e.Value.(task)
 		}
 	}
@@ -86,7 +86,7 @@ func (queue *BaseTaskQueue) getTaskByReqId(reqId UniqueID) task {
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
 	for ats := range queue.activeTasks {
-		if queue.activeTasks[ats].Id() == reqId {
+		if queue.activeTasks[ats].ID() == reqId {
 			return queue.activeTasks[ats]
 		}
 	}
@@ -179,7 +179,7 @@ type TaskScheduler struct {
 	DmQueue *DmTaskQueue
 	DqQueue *DqTaskQueue
 
-	idAllocator  *allocator.IdAllocator
+	idAllocator  *allocator.IDAllocator
 	tsoAllocator *allocator.TimestampAllocator
 
 	wg     sync.WaitGroup
@@ -188,7 +188,7 @@ type TaskScheduler struct {
 }
 
 func NewTaskScheduler(ctx context.Context,
-	idAllocator *allocator.IdAllocator,
+	idAllocator *allocator.IDAllocator,
 	tsoAllocator *allocator.TimestampAllocator) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &TaskScheduler{
@@ -216,14 +216,14 @@ func (sched *TaskScheduler) scheduleDqTask() task {
 	return sched.DqQueue.PopUnissuedTask()
 }
 
-func (sched *TaskScheduler) getTaskByReqId(reqId UniqueID) task {
-	if t := sched.DdQueue.getTaskByReqId(reqId); t != nil {
+func (sched *TaskScheduler) getTaskByReqID(reqID UniqueID) task {
+	if t := sched.DdQueue.getTaskByReqID(reqID); t != nil {
 		return t
 	}
-	if t := sched.DmQueue.getTaskByReqId(reqId); t != nil {
+	if t := sched.DmQueue.getTaskByReqID(reqID); t != nil {
 		return t
 	}
-	if t := sched.DqQueue.getTaskByReqId(reqId); t != nil {
+	if t := sched.DqQueue.getTaskByReqID(reqID); t != nil {
 		return t
 	}
 	return nil

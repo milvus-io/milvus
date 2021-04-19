@@ -19,12 +19,12 @@ type schemaUpdateMsg struct {
 
 type insertMsg struct {
 	insertMessages []*msgstream.InsertMsg
-	timeRange TimeRange
+	timeRange      TimeRange
 }
 
 type deleteMsg struct {
 	deleteMessages []*msgstream.DeleteMsg
-	timeRange TimeRange
+	timeRange      TimeRange
 }
 
 type serviceTimeMsg struct {

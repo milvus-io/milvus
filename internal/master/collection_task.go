@@ -74,7 +74,7 @@ func (t *createCollectionTask) Execute() error {
 		return err
 	}
 
-	collectionId, err := allocGlobalId()
+	collectionID, err := allocGlobalId()
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func (t *createCollectionTask) Execute() error {
 	}
 
 	collection := etcdpb.CollectionMeta{
-		Id:         collectionId,
+		ID:         collectionID,
 		Schema:     &schema,
 		CreateTime: ts,
 		// TODO: initial segment?
@@ -124,14 +124,14 @@ func (t *dropCollectionTask) Execute() error {
 		return err
 	}
 
-	collectionId := collectionMeta.Id
+	collectionID := collectionMeta.ID
 
-	err = (*t.kvBase).Remove(collectionMetaPrefix + strconv.FormatInt(collectionId, 10))
+	err = (*t.kvBase).Remove(collectionMetaPrefix + strconv.FormatInt(collectionID, 10))
 	if err != nil {
 		return err
 	}
 
-	delete(t.mt.collId2Meta, collectionId)
+	delete(t.mt.collID2Meta, collectionID)
 
 	return nil
 }
@@ -227,7 +227,7 @@ func (t *showCollectionsTask) Execute() error {
 	}
 
 	collections := make([]string, 0)
-	for _, collection := range t.mt.collId2Meta {
+	for _, collection := range t.mt.collID2Meta {
 		collections = append(collections, collection.Schema.Name)
 	}
 

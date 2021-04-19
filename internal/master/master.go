@@ -3,7 +3,6 @@ package master
 import (
 	"context"
 	"fmt"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"log"
 	"math/rand"
 	"net"
@@ -12,20 +11,20 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/master/id"
-	"github.com/zilliztech/milvus-distributed/internal/master/tso"
-
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
-	"github.com/zilliztech/milvus-distributed/internal/master/controller"
-	"github.com/zilliztech/milvus-distributed/internal/master/informer"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
+	"go.etcd.io/etcd/clientv3"
 	"google.golang.org/grpc"
 
-	"go.etcd.io/etcd/clientv3"
+	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/master/controller"
+	"github.com/zilliztech/milvus-distributed/internal/master/id"
+	"github.com/zilliztech/milvus-distributed/internal/master/informer"
+	"github.com/zilliztech/milvus-distributed/internal/master/tso"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 )
 
 // Server is the pd server.
@@ -58,12 +57,12 @@ type Master struct {
 	closeCallbacks []func()
 }
 
-func newKVBase(kv_root string, etcdAddr []string) *kv.EtcdKV {
+func newKVBase(kvRoot string, etcdAddr []string) *kv.EtcdKV {
 	cli, _ := clientv3.New(clientv3.Config{
 		Endpoints:   etcdAddr,
 		DialTimeout: 5 * time.Second,
 	})
-	kvBase := kv.NewEtcdKV(cli, kv_root)
+	kvBase := kv.NewEtcdKV(cli, kvRoot)
 	return kvBase
 }
 
@@ -265,7 +264,8 @@ func (s *Master) pulsarLoop() {
 
 func (s *Master) tasksExecutionLoop() {
 	defer s.serverLoopWg.Done()
-	ctx, _ := context.WithCancel(s.serverLoopCtx)
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
 
 	for {
 		select {

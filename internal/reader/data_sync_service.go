@@ -39,6 +39,11 @@ func (dsService *dataSyncService) start() {
 	dsService.fg.Start()
 }
 
+func (dsService *dataSyncService) close() {
+	dsService.fg.Close()
+	(*dsService.dmStream).Close()
+}
+
 func (dsService *dataSyncService) initNodes() {
 	// TODO: add delete pipeline support
 

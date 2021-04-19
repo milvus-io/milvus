@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	servicePb "github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
-	"log"
 )
 
 type searchService struct {
@@ -61,7 +62,7 @@ func (ss *searchService) start() {
 
 	producerChannels := []string{"searchResult"}
 
-	searchResultStream := msgstream.NewPulsarMsgStream(context.Background(), receiveBufSize)
+	searchResultStream := msgstream.NewPulsarMsgStream(ss.ctx, receiveBufSize)
 	searchResultStream.SetPulsarCient(ss.pulsarURL)
 	searchResultStream.CreatePulsarProducers(producerChannels)
 

@@ -1,17 +1,15 @@
-
-
 package kv
 
 import (
-	"github.com/google/btree"
 	"sync"
+
+	"github.com/google/btree"
 )
 
 type MemoryKV struct {
 	sync.RWMutex
 	tree *btree.BTree
 }
-
 
 // NewMemoryKV returns an in-memory kvBase for testing.
 func NewMemoryKV() *MemoryKV {
@@ -24,12 +22,9 @@ type memoryKVItem struct {
 	key, value string
 }
 
-
 func (s memoryKVItem) Less(than btree.Item) bool {
 	return s.key < than.(memoryKVItem).key
 }
-
-
 
 func (kv *MemoryKV) Load(key string) (string, error) {
 	kv.RLock()
@@ -72,12 +67,11 @@ func (kv *MemoryKV) Remove(key string) error {
 	return nil
 }
 
-
 func (kv *MemoryKV) MultiLoad(keys []string) ([]string, error) {
 	kv.RLock()
 	defer kv.RUnlock()
 	result := make([]string, 0, len(keys))
-	for _,key := range keys {
+	for _, key := range keys {
 		item := kv.tree.Get(memoryKVItem{key, ""})
 		result = append(result, item.(memoryKVItem).value)
 	}
@@ -101,7 +95,6 @@ func (kv *MemoryKV) MultiRemove(keys []string) error {
 	}
 	return nil
 }
-
 
 func (kv *MemoryKV) MultiSaveAndRemove(saves map[string]string, removals []string) error {
 	kv.Lock()

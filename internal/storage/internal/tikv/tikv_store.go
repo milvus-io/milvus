@@ -1,4 +1,4 @@
-package tikv_driver
+package tikvdriver
 
 import (
 	"context"
@@ -191,6 +191,8 @@ func (s *TikvStore) GetRows(ctx context.Context, keys []Key, timestamps []Timest
 	batches := batchKeys(keys)
 	ch := make(chan kvPair, len(keys))
 	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	for n, b := range batches {
 		batch := b
 		numBatch := n
@@ -322,6 +324,9 @@ func (s *TikvStore) GetLog(ctx context.Context, start Timestamp, end Timestamp, 
 		}
 		slice := strings.Split(suffix, string(DelimiterPlusOne))
 		channel, err := strconv.Atoi(slice[len(slice)-1])
+		if err != nil {
+			panic(err)
+		}
 		for _, item := range channels {
 			if item == channel {
 				logs = append(logs, log)
@@ -374,7 +379,7 @@ func (s *TikvStore) GetSegments(ctx context.Context, key Key, timestamp Timestam
 
 	var segments []string
 	for k, v := range segmentsSet {
-		if v == true {
+		if v {
 			segments = append(segments, k)
 		}
 	}

@@ -2,9 +2,9 @@ package reader
 
 import (
 	"context"
-	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
 func newDmInputNode(ctx context.Context, pulsarURL string) *flowgraph.InputNode {

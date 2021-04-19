@@ -113,6 +113,7 @@ func TestMinioDriver_Segment(t *testing.T) {
 
 	segmentIndex, err := client.GetSegmentIndex(ctx, "segmentA")
 	assert.Equal(t, "This is segmentA's index!", string(segmentIndex))
+	assert.Nil(t, err)
 
 	err = client.DeleteSegmentIndex(ctx, "segmentA")
 	assert.Nil(t, err)

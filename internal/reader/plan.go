@@ -20,12 +20,11 @@ func (ss *searchService) Plan(queryBlob string) *plan {
 		CPlaceholderGroup* ParserPlaceholderGroup(const char* placeholders_blob)
 	*/
 
-
 	/*
-		long int GetNumOfQuery(CPlaceholderGroup* placeholder_group)
+			long int GetNumOfQuery(CPlaceholderGroup* placeholder_group)
 
-	    long int GetTopK(CPlan* plan)
-	 */
+		    long int GetTopK(CPlan* plan)
+	*/
 
 	return nil
 }

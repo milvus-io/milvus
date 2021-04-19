@@ -10,35 +10,35 @@ import (
 type UniqueID = typeutil.UniqueID
 
 // GlobalTSOAllocator is the global single point TSO allocator.
-type GlobalIdAllocator struct {
+type GlobalIDAllocator struct {
 	allocator tso.Allocator
 }
 
-var allocator *GlobalIdAllocator
+var allocator *GlobalIDAllocator
 
 func Init() {
-	InitGlobalIdAllocator("idTimestamp", tsoutil.NewTSOKVBase("gid"))
+	InitGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase("gid"))
 }
 
-func InitGlobalIdAllocator(key string, base kv.KVBase) {
-	allocator = NewGlobalIdAllocator(key, base)
+func InitGlobalIDAllocator(key string, base kv.Base) {
+	allocator = NewGlobalIDAllocator(key, base)
 	allocator.Initialize()
 }
 
-func NewGlobalIdAllocator(key string, base kv.KVBase) *GlobalIdAllocator {
-	return &GlobalIdAllocator{
+func NewGlobalIDAllocator(key string, base kv.Base) *GlobalIDAllocator {
+	return &GlobalIDAllocator{
 		allocator: tso.NewGlobalTSOAllocator(key, base),
 	}
 }
 
 // Initialize will initialize the created global TSO allocator.
-func (gia *GlobalIdAllocator) Initialize() error {
+func (gia *GlobalIDAllocator) Initialize() error {
 	return gia.allocator.Initialize()
 }
 
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
-func (gia *GlobalIdAllocator) Alloc(count uint32) (UniqueID, UniqueID, error) {
+func (gia *GlobalIDAllocator) Alloc(count uint32) (UniqueID, UniqueID, error) {
 	timestamp, err := gia.allocator.GenerateTSO(count)
 	if err != nil {
 		return 0, 0, err
@@ -48,7 +48,7 @@ func (gia *GlobalIdAllocator) Alloc(count uint32) (UniqueID, UniqueID, error) {
 	return idStart, idEnd, nil
 }
 
-func (gia *GlobalIdAllocator) AllocOne() (UniqueID, error) {
+func (gia *GlobalIDAllocator) AllocOne() (UniqueID, error) {
 	timestamp, err := gia.allocator.GenerateTSO(1)
 	if err != nil {
 		return 0, err

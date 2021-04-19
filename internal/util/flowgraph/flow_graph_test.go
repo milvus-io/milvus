@@ -174,7 +174,9 @@ func receiveResult(ctx context.Context, fg *TimeTickedFlowGraph) (float64, bool)
 
 func TestTimeTickedFlowGraph_Start(t *testing.T) {
 	duration := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), duration)
+	ctx, cancel := context.WithDeadline(context.Background(), duration)
+	defer cancel()
+
 	fg := NewTimeTickedFlowGraph(ctx)
 
 	var a Node = &nodeA{

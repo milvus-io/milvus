@@ -15,6 +15,8 @@ import (
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	var yamlFile string
 	flag.StringVar(&yamlFile, "yaml", "", "yaml file")
 	flag.Parse()

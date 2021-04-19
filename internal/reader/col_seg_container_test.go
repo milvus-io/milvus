@@ -2,12 +2,13 @@ package reader
 
 import (
 	"context"
+	"testing"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	"testing"
 )
 
 //----------------------------------------------------------------------------------------------------- collection
@@ -46,7 +47,7 @@ func TestColSegContainer_addCollection(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIds:    []UniqueID{0},
@@ -59,7 +60,7 @@ func TestColSegContainer_addCollection(t *testing.T) {
 	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 	assert.Equal(t, len(node.container.collections), 1)
 }
 
@@ -98,7 +99,7 @@ func TestColSegContainer_removeCollection(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIds:    []UniqueID{0},
@@ -111,7 +112,7 @@ func TestColSegContainer_removeCollection(t *testing.T) {
 	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 	assert.Equal(t, len(node.container.collections), 1)
 
 	err := node.container.removeCollection(collection)
@@ -154,7 +155,7 @@ func TestColSegContainer_getCollectionByID(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIds:    []UniqueID{0},
@@ -167,14 +168,14 @@ func TestColSegContainer_getCollectionByID(t *testing.T) {
 	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 	assert.Equal(t, len(node.container.collections), 1)
 
 	targetCollection, err := node.container.getCollectionByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.NotNil(t, targetCollection)
 	assert.Equal(t, targetCollection.meta.Schema.Name, "collection0")
-	assert.Equal(t, targetCollection.meta.Id, UniqueID(0))
+	assert.Equal(t, targetCollection.meta.ID, UniqueID(0))
 }
 
 func TestColSegContainer_getCollectionByName(t *testing.T) {
@@ -212,7 +213,7 @@ func TestColSegContainer_getCollectionByName(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIds:    []UniqueID{0},
@@ -225,14 +226,14 @@ func TestColSegContainer_getCollectionByName(t *testing.T) {
 	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 	assert.Equal(t, len(node.container.collections), 1)
 
 	targetCollection, err := node.container.getCollectionByName("collection0")
 	assert.NoError(t, err)
 	assert.NotNil(t, targetCollection)
 	assert.Equal(t, targetCollection.meta.Schema.Name, "collection0")
-	assert.Equal(t, targetCollection.meta.Id, UniqueID(0))
+	assert.Equal(t, targetCollection.meta.ID, UniqueID(0))
 }
 
 //----------------------------------------------------------------------------------------------------- partition
@@ -271,7 +272,7 @@ func TestColSegContainer_addPartition(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIds:    []UniqueID{0},
@@ -284,7 +285,7 @@ func TestColSegContainer_addPartition(t *testing.T) {
 	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 	assert.Equal(t, len(node.container.collections), 1)
 
 	for _, tag := range collectionMeta.PartitionTags {
@@ -329,7 +330,7 @@ func TestColSegContainer_removePartition(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIds:    []UniqueID{0},
@@ -342,7 +343,7 @@ func TestColSegContainer_removePartition(t *testing.T) {
 	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 	assert.Equal(t, len(node.container.collections), 1)
 
 	for _, tag := range collectionMeta.PartitionTags {
@@ -389,7 +390,7 @@ func TestColSegContainer_getPartitionByTag(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIds:    []UniqueID{0},
@@ -402,7 +403,7 @@ func TestColSegContainer_getPartitionByTag(t *testing.T) {
 	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 	assert.Equal(t, len(node.container.collections), 1)
 
 	for _, tag := range collectionMeta.PartitionTags {
@@ -452,7 +453,7 @@ func TestColSegContainer_addSegment(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIds:    []UniqueID{0},
@@ -465,7 +466,7 @@ func TestColSegContainer_addSegment(t *testing.T) {
 	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 	assert.Equal(t, len(node.container.collections), 1)
 
 	partition, err := node.container.addPartition(collection, collectionMeta.PartitionTags[0])
@@ -514,7 +515,7 @@ func TestColSegContainer_removeSegment(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIds:    []UniqueID{0},
@@ -527,7 +528,7 @@ func TestColSegContainer_removeSegment(t *testing.T) {
 	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 	assert.Equal(t, len(node.container.collections), 1)
 
 	partition, err := node.container.addPartition(collection, collectionMeta.PartitionTags[0])
@@ -578,7 +579,7 @@ func TestColSegContainer_getSegmentByID(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIds:    []UniqueID{0},
@@ -591,7 +592,7 @@ func TestColSegContainer_getSegmentByID(t *testing.T) {
 	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 	assert.Equal(t, len(node.container.collections), 1)
 
 	partition, err := node.container.addPartition(collection, collectionMeta.PartitionTags[0])
@@ -643,7 +644,7 @@ func TestColSegContainer_hasSegment(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIds:    []UniqueID{0},
@@ -656,7 +657,7 @@ func TestColSegContainer_hasSegment(t *testing.T) {
 	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 	assert.Equal(t, len(node.container.collections), 1)
 
 	partition, err := node.container.addPartition(collection, collectionMeta.PartitionTags[0])

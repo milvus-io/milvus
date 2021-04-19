@@ -5,10 +5,11 @@ package internalpb
 
 import (
 	fmt "fmt"
+	math "math"
+
 	proto "github.com/golang/protobuf/proto"
 	commonpb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	servicepb "github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
-	math "math"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -126,7 +127,7 @@ func (PeerRole) EnumDescriptor() ([]byte, []int) {
 }
 
 type IdRequest struct {
-	PeerId               int64    `protobuf:"varint,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	PeerId               int64    `protobuf:"varint,1,opt,name=peerID,json=peerId,proto3" json:"peerID,omitempty"`
 	Role                 PeerRole `protobuf:"varint,2,opt,name=role,proto3,enum=milvus.proto.internal.PeerRole" json:"role,omitempty"`
 	Count                uint32   `protobuf:"varint,3,opt,name=count,proto3" json:"count,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
@@ -182,7 +183,7 @@ func (m *IdRequest) GetCount() uint32 {
 
 type IdResponse struct {
 	Status               *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	Id                   int64            `protobuf:"varint,2,opt,name=id,proto3" json:"id,omitempty"`
+	ID                   int64            `protobuf:"varint,2,opt,name=id,proto3" json:"id,omitempty"`
 	Count                uint32           `protobuf:"varint,3,opt,name=count,proto3" json:"count,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
 	XXX_unrecognized     []byte           `json:"-"`
@@ -223,7 +224,7 @@ func (m *IdResponse) GetStatus() *commonpb.Status {
 
 func (m *IdResponse) GetId() int64 {
 	if m != nil {
-		return m.Id
+		return m.ID
 	}
 	return 0
 }
@@ -236,7 +237,7 @@ func (m *IdResponse) GetCount() uint32 {
 }
 
 type TsoRequest struct {
-	PeerId               int64    `protobuf:"varint,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	PeerId               int64    `protobuf:"varint,1,opt,name=peerID,json=peerId,proto3" json:"peerID,omitempty"`
 	Role                 PeerRole `protobuf:"varint,2,opt,name=role,proto3,enum=milvus.proto.internal.PeerRole" json:"role,omitempty"`
 	Count                uint32   `protobuf:"varint,3,opt,name=count,proto3" json:"count,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
@@ -347,7 +348,7 @@ func (m *TsoResponse) GetCount() uint32 {
 
 type CreateCollectionRequest struct {
 	MsgType              MsgType        `protobuf:"varint,1,opt,name=msg_type,json=msgType,proto3,enum=milvus.proto.internal.MsgType" json:"msg_type,omitempty"`
-	ReqId                int64          `protobuf:"varint,2,opt,name=req_id,json=reqId,proto3" json:"req_id,omitempty"`
+	ReqId                int64          `protobuf:"varint,2,opt,name=req_id,json=reqID,proto3" json:"req_id,omitempty"`
 	Timestamp            uint64         `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	ProxyId              int64          `protobuf:"varint,4,opt,name=proxy_id,json=proxyId,proto3" json:"proxy_id,omitempty"`
 	Schema               *commonpb.Blob `protobuf:"bytes,5,opt,name=schema,proto3" json:"schema,omitempty"`
@@ -388,7 +389,7 @@ func (m *CreateCollectionRequest) GetMsgType() MsgType {
 	return MsgType_kNone
 }
 
-func (m *CreateCollectionRequest) GetReqId() int64 {
+func (m *CreateCollectionRequest) GetReqID() int64 {
 	if m != nil {
 		return m.ReqId
 	}
@@ -418,7 +419,7 @@ func (m *CreateCollectionRequest) GetSchema() *commonpb.Blob {
 
 type DropCollectionRequest struct {
 	MsgType              MsgType                   `protobuf:"varint,1,opt,name=msg_type,json=msgType,proto3,enum=milvus.proto.internal.MsgType" json:"msg_type,omitempty"`
-	ReqId                int64                     `protobuf:"varint,2,opt,name=req_id,json=reqId,proto3" json:"req_id,omitempty"`
+	ReqId                int64                     `protobuf:"varint,2,opt,name=req_id,json=reqID,proto3" json:"req_id,omitempty"`
 	Timestamp            uint64                    `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	ProxyId              int64                     `protobuf:"varint,4,opt,name=proxy_id,json=proxyId,proto3" json:"proxy_id,omitempty"`
 	CollectionName       *servicepb.CollectionName `protobuf:"bytes,5,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
@@ -459,7 +460,7 @@ func (m *DropCollectionRequest) GetMsgType() MsgType {
 	return MsgType_kNone
 }
 
-func (m *DropCollectionRequest) GetReqId() int64 {
+func (m *DropCollectionRequest) GetReqID() int64 {
 	if m != nil {
 		return m.ReqId
 	}
@@ -489,7 +490,7 @@ func (m *DropCollectionRequest) GetCollectionName() *servicepb.CollectionName {
 
 type HasCollectionRequest struct {
 	MsgType              MsgType                   `protobuf:"varint,1,opt,name=msg_type,json=msgType,proto3,enum=milvus.proto.internal.MsgType" json:"msg_type,omitempty"`
-	ReqId                int64                     `protobuf:"varint,2,opt,name=req_id,json=reqId,proto3" json:"req_id,omitempty"`
+	ReqId                int64                     `protobuf:"varint,2,opt,name=req_id,json=reqID,proto3" json:"req_id,omitempty"`
 	Timestamp            uint64                    `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	ProxyId              int64                     `protobuf:"varint,4,opt,name=proxy_id,json=proxyId,proto3" json:"proxy_id,omitempty"`
 	CollectionName       *servicepb.CollectionName `protobuf:"bytes,5,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
@@ -530,7 +531,7 @@ func (m *HasCollectionRequest) GetMsgType() MsgType {
 	return MsgType_kNone
 }
 
-func (m *HasCollectionRequest) GetReqId() int64 {
+func (m *HasCollectionRequest) GetReqID() int64 {
 	if m != nil {
 		return m.ReqId
 	}
@@ -560,7 +561,7 @@ func (m *HasCollectionRequest) GetCollectionName() *servicepb.CollectionName {
 
 type DescribeCollectionRequest struct {
 	MsgType              MsgType                   `protobuf:"varint,1,opt,name=msg_type,json=msgType,proto3,enum=milvus.proto.internal.MsgType" json:"msg_type,omitempty"`
-	ReqId                int64                     `protobuf:"varint,2,opt,name=req_id,json=reqId,proto3" json:"req_id,omitempty"`
+	ReqId                int64                     `protobuf:"varint,2,opt,name=req_id,json=reqID,proto3" json:"req_id,omitempty"`
 	Timestamp            uint64                    `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	ProxyId              int64                     `protobuf:"varint,4,opt,name=proxy_id,json=proxyId,proto3" json:"proxy_id,omitempty"`
 	CollectionName       *servicepb.CollectionName `protobuf:"bytes,5,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
@@ -601,7 +602,7 @@ func (m *DescribeCollectionRequest) GetMsgType() MsgType {
 	return MsgType_kNone
 }
 
-func (m *DescribeCollectionRequest) GetReqId() int64 {
+func (m *DescribeCollectionRequest) GetReqID() int64 {
 	if m != nil {
 		return m.ReqId
 	}
@@ -631,7 +632,7 @@ func (m *DescribeCollectionRequest) GetCollectionName() *servicepb.CollectionNam
 
 type ShowCollectionRequest struct {
 	MsgType              MsgType  `protobuf:"varint,1,opt,name=msg_type,json=msgType,proto3,enum=milvus.proto.internal.MsgType" json:"msg_type,omitempty"`
-	ReqId                int64    `protobuf:"varint,2,opt,name=req_id,json=reqId,proto3" json:"req_id,omitempty"`
+	ReqId                int64    `protobuf:"varint,2,opt,name=req_id,json=reqID,proto3" json:"req_id,omitempty"`
 	Timestamp            uint64   `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	ProxyId              int64    `protobuf:"varint,4,opt,name=proxy_id,json=proxyId,proto3" json:"proxy_id,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
@@ -671,7 +672,7 @@ func (m *ShowCollectionRequest) GetMsgType() MsgType {
 	return MsgType_kNone
 }
 
-func (m *ShowCollectionRequest) GetReqId() int64 {
+func (m *ShowCollectionRequest) GetReqID() int64 {
 	if m != nil {
 		return m.ReqId
 	}
@@ -694,7 +695,7 @@ func (m *ShowCollectionRequest) GetProxyId() int64 {
 
 type CreatePartitionRequest struct {
 	MsgType              MsgType                  `protobuf:"varint,1,opt,name=msg_type,json=msgType,proto3,enum=milvus.proto.internal.MsgType" json:"msg_type,omitempty"`
-	ReqId                int64                    `protobuf:"varint,2,opt,name=req_id,json=reqId,proto3" json:"req_id,omitempty"`
+	ReqId                int64                    `protobuf:"varint,2,opt,name=req_id,json=reqID,proto3" json:"req_id,omitempty"`
 	Timestamp            uint64                   `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	ProxyId              int64                    `protobuf:"varint,4,opt,name=proxy_id,json=proxyId,proto3" json:"proxy_id,omitempty"`
 	PartitionName        *servicepb.PartitionName `protobuf:"bytes,5,opt,name=partition_name,json=partitionName,proto3" json:"partition_name,omitempty"`
@@ -735,7 +736,7 @@ func (m *CreatePartitionRequest) GetMsgType() MsgType {
 	return MsgType_kNone
 }
 
-func (m *CreatePartitionRequest) GetReqId() int64 {
+func (m *CreatePartitionRequest) GetReqID() int64 {
 	if m != nil {
 		return m.ReqId
 	}
@@ -765,7 +766,7 @@ func (m *CreatePartitionRequest) GetPartitionName() *servicepb.PartitionName {
 
 type DropPartitionRequest struct {
 	MsgType              MsgType                  `protobuf:"varint,1,opt,name=msg_type,json=msgType,proto3,enum=milvus.proto.internal.MsgType" json:"msg_type,omitempty"`
-	ReqId                int64                    `protobuf:"varint,2,opt,name=req_id,json=reqId,proto3" json:"req_id,omitempty"`
+	ReqId                int64                    `protobuf:"varint,2,opt,name=req_id,json=reqID,proto3" json:"req_id,omitempty"`
 	Timestamp            uint64                   `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	ProxyId              int64                    `protobuf:"varint,4,opt,name=proxy_id,json=proxyId,proto3" json:"proxy_id,omitempty"`
 	PartitionName        *servicepb.PartitionName `protobuf:"bytes,5,opt,name=partition_name,json=partitionName,proto3" json:"partition_name,omitempty"`
@@ -806,7 +807,7 @@ func (m *DropPartitionRequest) GetMsgType() MsgType {
 	return MsgType_kNone
 }
 
-func (m *DropPartitionRequest) GetReqId() int64 {
+func (m *DropPartitionRequest) GetReqID() int64 {
 	if m != nil {
 		return m.ReqId
 	}
@@ -836,7 +837,7 @@ func (m *DropPartitionRequest) GetPartitionName() *servicepb.PartitionName {
 
 type HasPartitionRequest struct {
 	MsgType              MsgType                  `protobuf:"varint,1,opt,name=msg_type,json=msgType,proto3,enum=milvus.proto.internal.MsgType" json:"msg_type,omitempty"`
-	ReqId                int64                    `protobuf:"varint,2,opt,name=req_id,json=reqId,proto3" json:"req_id,omitempty"`
+	ReqId                int64                    `protobuf:"varint,2,opt,name=req_id,json=reqID,proto3" json:"req_id,omitempty"`
 	Timestamp            uint64                   `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	ProxyId              int64                    `protobuf:"varint,4,opt,name=proxy_id,json=proxyId,proto3" json:"proxy_id,omitempty"`
 	PartitionName        *servicepb.PartitionName `protobuf:"bytes,5,opt,name=partition_name,json=partitionName,proto3" json:"partition_name,omitempty"`
@@ -877,7 +878,7 @@ func (m *HasPartitionRequest) GetMsgType() MsgType {
 	return MsgType_kNone
 }
 
-func (m *HasPartitionRequest) GetReqId() int64 {
+func (m *HasPartitionRequest) GetReqID() int64 {
 	if m != nil {
 		return m.ReqId
 	}
@@ -907,7 +908,7 @@ func (m *HasPartitionRequest) GetPartitionName() *servicepb.PartitionName {
 
 type DescribePartitionRequest struct {
 	MsgType              MsgType                  `protobuf:"varint,1,opt,name=msg_type,json=msgType,proto3,enum=milvus.proto.internal.MsgType" json:"msg_type,omitempty"`
-	ReqId                int64                    `protobuf:"varint,2,opt,name=req_id,json=reqId,proto3" json:"req_id,omitempty"`
+	ReqId                int64                    `protobuf:"varint,2,opt,name=req_id,json=reqID,proto3" json:"req_id,omitempty"`
 	Timestamp            uint64                   `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	ProxyId              int64                    `protobuf:"varint,4,opt,name=proxy_id,json=proxyId,proto3" json:"proxy_id,omitempty"`
 	PartitionName        *servicepb.PartitionName `protobuf:"bytes,5,opt,name=partition_name,json=partitionName,proto3" json:"partition_name,omitempty"`
@@ -948,7 +949,7 @@ func (m *DescribePartitionRequest) GetMsgType() MsgType {
 	return MsgType_kNone
 }
 
-func (m *DescribePartitionRequest) GetReqId() int64 {
+func (m *DescribePartitionRequest) GetReqID() int64 {
 	if m != nil {
 		return m.ReqId
 	}
@@ -978,7 +979,7 @@ func (m *DescribePartitionRequest) GetPartitionName() *servicepb.PartitionName {
 
 type ShowPartitionRequest struct {
 	MsgType              MsgType                   `protobuf:"varint,1,opt,name=msg_type,json=msgType,proto3,enum=milvus.proto.internal.MsgType" json:"msg_type,omitempty"`
-	ReqId                int64                     `protobuf:"varint,2,opt,name=req_id,json=reqId,proto3" json:"req_id,omitempty"`
+	ReqId                int64                     `protobuf:"varint,2,opt,name=req_id,json=reqID,proto3" json:"req_id,omitempty"`
 	Timestamp            uint64                    `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	ProxyId              int64                     `protobuf:"varint,4,opt,name=proxy_id,json=proxyId,proto3" json:"proxy_id,omitempty"`
 	CollectionName       *servicepb.CollectionName `protobuf:"bytes,5,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
@@ -1019,7 +1020,7 @@ func (m *ShowPartitionRequest) GetMsgType() MsgType {
 	return MsgType_kNone
 }
 
-func (m *ShowPartitionRequest) GetReqId() int64 {
+func (m *ShowPartitionRequest) GetReqID() int64 {
 	if m != nil {
 		return m.ReqId
 	}
@@ -1049,7 +1050,7 @@ func (m *ShowPartitionRequest) GetCollectionName() *servicepb.CollectionName {
 
 type InsertRequest struct {
 	MsgType              MsgType          `protobuf:"varint,1,opt,name=msg_type,json=msgType,proto3,enum=milvus.proto.internal.MsgType" json:"msg_type,omitempty"`
-	ReqId                int64            `protobuf:"varint,2,opt,name=req_id,json=reqId,proto3" json:"req_id,omitempty"`
+	ReqId                int64            `protobuf:"varint,2,opt,name=req_id,json=reqID,proto3" json:"req_id,omitempty"`
 	CollectionName       string           `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
 	PartitionTag         string           `protobuf:"bytes,4,opt,name=partition_tag,json=partitionTag,proto3" json:"partition_tag,omitempty"`
 	SegmentId            int64            `protobuf:"varint,5,opt,name=segment_id,json=segmentId,proto3" json:"segment_id,omitempty"`
@@ -1095,7 +1096,7 @@ func (m *InsertRequest) GetMsgType() MsgType {
 	return MsgType_kNone
 }
 
-func (m *InsertRequest) GetReqId() int64 {
+func (m *InsertRequest) GetReqID() int64 {
 	if m != nil {
 		return m.ReqId
 	}
@@ -1160,7 +1161,7 @@ func (m *InsertRequest) GetRowData() []*commonpb.Blob {
 
 type DeleteRequest struct {
 	MsgType              MsgType  `protobuf:"varint,1,opt,name=msg_type,json=msgType,proto3,enum=milvus.proto.internal.MsgType" json:"msg_type,omitempty"`
-	ReqId                int64    `protobuf:"varint,2,opt,name=req_id,json=reqId,proto3" json:"req_id,omitempty"`
+	ReqId                int64    `protobuf:"varint,2,opt,name=req_id,json=reqID,proto3" json:"req_id,omitempty"`
 	CollectionName       string   `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
 	ChannelId            int64    `protobuf:"varint,4,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
 	ProxyId              int64    `protobuf:"varint,5,opt,name=proxy_id,json=proxyId,proto3" json:"proxy_id,omitempty"`
@@ -1203,7 +1204,7 @@ func (m *DeleteRequest) GetMsgType() MsgType {
 	return MsgType_kNone
 }
 
-func (m *DeleteRequest) GetReqId() int64 {
+func (m *DeleteRequest) GetReqID() int64 {
 	if m != nil {
 		return m.ReqId
 	}
@@ -1247,7 +1248,7 @@ func (m *DeleteRequest) GetPrimaryKeys() []int64 {
 
 type SearchRequest struct {
 	MsgType              MsgType        `protobuf:"varint,1,opt,name=msg_type,json=msgType,proto3,enum=milvus.proto.internal.MsgType" json:"msg_type,omitempty"`
-	ReqId                int64          `protobuf:"varint,2,opt,name=req_id,json=reqId,proto3" json:"req_id,omitempty"`
+	ReqId                int64          `protobuf:"varint,2,opt,name=req_id,json=reqID,proto3" json:"req_id,omitempty"`
 	ProxyId              int64          `protobuf:"varint,3,opt,name=proxy_id,json=proxyId,proto3" json:"proxy_id,omitempty"`
 	Timestamp            uint64         `protobuf:"varint,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	ResultChannelId      int64          `protobuf:"varint,5,opt,name=result_channel_id,json=resultChannelId,proto3" json:"result_channel_id,omitempty"`
@@ -1289,7 +1290,7 @@ func (m *SearchRequest) GetMsgType() MsgType {
 	return MsgType_kNone
 }
 
-func (m *SearchRequest) GetReqId() int64 {
+func (m *SearchRequest) GetReqID() int64 {
 	if m != nil {
 		return m.ReqId
 	}
@@ -1327,7 +1328,7 @@ func (m *SearchRequest) GetQuery() *commonpb.Blob {
 type SearchResult struct {
 	MsgType              MsgType           `protobuf:"varint,1,opt,name=msg_type,json=msgType,proto3,enum=milvus.proto.internal.MsgType" json:"msg_type,omitempty"`
 	Status               *commonpb.Status  `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
-	ReqId                int64             `protobuf:"varint,3,opt,name=req_id,json=reqId,proto3" json:"req_id,omitempty"`
+	ReqId                int64             `protobuf:"varint,3,opt,name=req_id,json=reqID,proto3" json:"req_id,omitempty"`
 	ProxyId              int64             `protobuf:"varint,4,opt,name=proxy_id,json=proxyId,proto3" json:"proxy_id,omitempty"`
 	QueryNodeId          int64             `protobuf:"varint,5,opt,name=query_node_id,json=queryNodeId,proto3" json:"query_node_id,omitempty"`
 	Timestamp            uint64            `protobuf:"varint,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
@@ -1377,7 +1378,7 @@ func (m *SearchResult) GetStatus() *commonpb.Status {
 	return nil
 }
 
-func (m *SearchResult) GetReqId() int64 {
+func (m *SearchResult) GetReqID() int64 {
 	if m != nil {
 		return m.ReqId
 	}
@@ -1421,7 +1422,7 @@ func (m *SearchResult) GetHits() []*servicepb.Hits {
 
 type TimeTickMsg struct {
 	MsgType              MsgType  `protobuf:"varint,1,opt,name=msg_type,json=msgType,proto3,enum=milvus.proto.internal.MsgType" json:"msg_type,omitempty"`
-	PeerId               int64    `protobuf:"varint,2,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	PeerId               int64    `protobuf:"varint,2,opt,name=peerID,json=peerId,proto3" json:"peerID,omitempty"`
 	Timestamp            uint64   `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
@@ -1546,7 +1547,7 @@ func (m *Key2Seg) GetSegmentIds() []int64 {
 }
 
 type Key2SegMsg struct {
-	ReqId                int64      `protobuf:"varint,1,opt,name=req_id,json=reqId,proto3" json:"req_id,omitempty"`
+	ReqId                int64      `protobuf:"varint,1,opt,name=req_id,json=reqID,proto3" json:"req_id,omitempty"`
 	Key2Seg              []*Key2Seg `protobuf:"bytes,2,rep,name=key2seg,proto3" json:"key2seg,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}   `json:"-"`
 	XXX_unrecognized     []byte     `json:"-"`
@@ -1578,7 +1579,7 @@ func (m *Key2SegMsg) XXX_DiscardUnknown() {
 
 var xxx_messageInfo_Key2SegMsg proto.InternalMessageInfo
 
-func (m *Key2SegMsg) GetReqId() int64 {
+func (m *Key2SegMsg) GetReqID() int64 {
 	if m != nil {
 		return m.ReqId
 	}

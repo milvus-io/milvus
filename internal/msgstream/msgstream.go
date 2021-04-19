@@ -2,15 +2,15 @@ package msgstream
 
 import (
 	"context"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"log"
 	"sync"
 
+	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
+
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	commonPb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-
-	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
@@ -37,22 +37,22 @@ type MsgStream interface {
 }
 
 type PulsarMsgStream struct {
-	ctx            context.Context
-	client         *pulsar.Client
-	producers      []*pulsar.Producer
-	consumers      []*pulsar.Consumer
-	repackFunc     RepackFunc
-	unmarshal      *UnmarshalDispatcher
-	receiveBuf     chan *MsgPack
-	wait           *sync.WaitGroup
-	streamCancel   func()
+	ctx          context.Context
+	client       *pulsar.Client
+	producers    []*pulsar.Producer
+	consumers    []*pulsar.Consumer
+	repackFunc   RepackFunc
+	unmarshal    *UnmarshalDispatcher
+	receiveBuf   chan *MsgPack
+	wait         *sync.WaitGroup
+	streamCancel func()
 }
 
 func NewPulsarMsgStream(ctx context.Context, receiveBufSize int64) *PulsarMsgStream {
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	stream := &PulsarMsgStream{
-		ctx:            streamCtx,
-		streamCancel:   streamCancel,
+		ctx:          streamCtx,
+		streamCancel: streamCancel,
 	}
 	stream.receiveBuf = make(chan *MsgPack, receiveBufSize)
 	return stream
@@ -271,8 +271,8 @@ type PulsarTtMsgStream struct {
 func NewPulsarTtMsgStream(ctx context.Context, receiveBufSize int64) *PulsarTtMsgStream {
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	pulsarMsgStream := PulsarMsgStream{
-		ctx:            streamCtx,
-		streamCancel:   streamCancel,
+		ctx:          streamCtx,
+		streamCancel: streamCancel,
 	}
 	pulsarMsgStream.receiveBuf = make(chan *MsgPack, receiveBufSize)
 	return &PulsarTtMsgStream{
@@ -410,16 +410,16 @@ func insertRepackFunc(tsMsgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, 
 			}
 
 			sliceRequest := internalPb.InsertRequest{
-				MsgType: internalPb.MsgType_kInsert,
-				ReqId: insertRequest.ReqId,
+				MsgType:        internalPb.MsgType_kInsert,
+				ReqId:          insertRequest.ReqId,
 				CollectionName: insertRequest.CollectionName,
-				PartitionTag: insertRequest.PartitionTag,
-				SegmentId: insertRequest.SegmentId,
-				ChannelId: insertRequest.ChannelId,
-				ProxyId: insertRequest.ProxyId,
-				Timestamps: []uint64{insertRequest.Timestamps[index]},
-				RowIds: []int64{insertRequest.RowIds[index]},
-				RowData: []*commonPb.Blob{insertRequest.RowData[index]},
+				PartitionTag:   insertRequest.PartitionTag,
+				SegmentId:      insertRequest.SegmentId,
+				ChannelId:      insertRequest.ChannelId,
+				ProxyId:        insertRequest.ProxyId,
+				Timestamps:     []uint64{insertRequest.Timestamps[index]},
+				RowIds:         []int64{insertRequest.RowIds[index]},
+				RowData:        []*commonPb.Blob{insertRequest.RowData[index]},
 			}
 
 			var msg TsMsg = &InsertMsg{
@@ -457,13 +457,13 @@ func deleteRepackFunc(tsMsgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, 
 			}
 
 			sliceRequest := internalPb.DeleteRequest{
-				MsgType: internalPb.MsgType_kDelete,
-				ReqId: deleteRequest.ReqId,
+				MsgType:        internalPb.MsgType_kDelete,
+				ReqId:          deleteRequest.ReqId,
 				CollectionName: deleteRequest.CollectionName,
-				ChannelId: deleteRequest.ChannelId,
-				ProxyId: deleteRequest.ProxyId,
-				Timestamps: []uint64{deleteRequest.Timestamps[index]},
-				PrimaryKeys: []int64{deleteRequest.PrimaryKeys[index]},
+				ChannelId:      deleteRequest.ChannelId,
+				ProxyId:        deleteRequest.ProxyId,
+				Timestamps:     []uint64{deleteRequest.Timestamps[index]},
+				PrimaryKeys:    []int64{deleteRequest.PrimaryKeys[index]},
 			}
 
 			var msg TsMsg = &DeleteMsg{

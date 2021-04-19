@@ -71,13 +71,13 @@ func (t *createPartitionTask) Execute() error {
 
 	collectionMeta.PartitionTags = append(collectionMeta.PartitionTags, partitionName.Tag)
 
-	collectionJson, err := json.Marshal(&collectionMeta)
+	collectionJSON, err := json.Marshal(&collectionMeta)
 	if err != nil {
 		return err
 	}
 
-	collectionId := collectionMeta.Id
-	err = (*t.kvBase).Save(partitionMetaPrefix+strconv.FormatInt(collectionId, 10), string(collectionJson))
+	collectionID := collectionMeta.ID
+	err = (*t.kvBase).Save(partitionMetaPrefix+strconv.FormatInt(collectionID, 10), string(collectionJSON))
 	if err != nil {
 		return err
 	}
@@ -113,18 +113,18 @@ func (t *dropPartitionTask) Execute() error {
 		return err
 	}
 
-	err = t.mt.DeletePartition(collectionMeta.Id, partitionName.Tag)
+	err = t.mt.DeletePartition(collectionMeta.ID, partitionName.Tag)
 	if err != nil {
 		return err
 	}
 
-	collectionJson, err := json.Marshal(&collectionMeta)
+	collectionJSON, err := json.Marshal(&collectionMeta)
 	if err != nil {
 		return err
 	}
 
-	collectionId := collectionMeta.Id
-	err = (*t.kvBase).Save(partitionMetaPrefix+strconv.FormatInt(collectionId, 10), string(collectionJson))
+	collectionID := collectionMeta.ID
+	err = (*t.kvBase).Save(partitionMetaPrefix+strconv.FormatInt(collectionID, 10), string(collectionJSON))
 	if err != nil {
 		return err
 	}
@@ -160,7 +160,7 @@ func (t *hasPartitionTask) Execute() error {
 		return err
 	}
 
-	t.hasPartition = t.mt.HasPartition(collectionMeta.Id, partitionName.Tag)
+	t.hasPartition = t.mt.HasPartition(collectionMeta.ID, partitionName.Tag)
 
 	return nil
 }
@@ -222,10 +222,8 @@ func (t *showPartitionTask) Execute() error {
 	}
 
 	partitions := make([]string, 0)
-	for _, collection := range t.mt.collId2Meta {
-		for _, partition := range collection.PartitionTags {
-			partitions = append(partitions, partition)
-		}
+	for _, collection := range t.mt.collID2Meta {
+		partitions = append(partitions, collection.PartitionTags...)
 	}
 
 	stringListResponse := servicepb.StringListResponse{

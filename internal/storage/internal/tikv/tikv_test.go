@@ -1,4 +1,4 @@
-package tikv_driver
+package tikvdriver
 
 import (
 	"bytes"
@@ -42,12 +42,14 @@ func TestTikvEngine_Prefix(t *testing.T) {
 	// Get by prefix
 	ks, _, err := engine.GetByPrefix(ctx, prefix, true)
 	assert.Equal(t, 2, len(ks))
+	assert.Nil(t, err)
 
 	// Delete by prefix
 	err = engine.DeleteByPrefix(ctx, prefix)
 	assert.Nil(t, err)
 	ks, _, err = engine.GetByPrefix(ctx, prefix, true)
 	assert.Equal(t, 0, len(ks))
+	assert.Nil(t, err)
 
 	//Test large amount keys
 	num := engine.conf.Raw.MaxScanLimit + 1
@@ -104,14 +106,16 @@ func TestTikvStore_Row(t *testing.T) {
 
 	// Delete a row
 	err = store.DeleteRow(ctx, key, 4)
-	assert.Nil(t, nil)
+	assert.Nil(t, err)
 	v, err = store.GetRow(ctx, key, 5)
 	assert.Nil(t, err)
 	assert.Nil(t, v)
 
 	// Clear test data
 	err = store.engine.DeleteByPrefix(ctx, key)
+	assert.Nil(t, err)
 	k, va, err := store.engine.GetByPrefix(ctx, key, false)
+	assert.Nil(t, err)
 	assert.Nil(t, k)
 	assert.Nil(t, va)
 }
@@ -146,7 +150,7 @@ func TestTikvStore_BatchRow(t *testing.T) {
 	assert.Nil(t, err)
 
 	// Batch get rows
-	for i, _ := range timestamps {
+	for i := range timestamps {
 		timestamps[i] = 2
 	}
 	checkValues, err := store.GetRows(ctx, testKeys, timestamps)
@@ -158,13 +162,13 @@ func TestTikvStore_BatchRow(t *testing.T) {
 	}
 
 	// Delete all test rows
-	for i, _ := range timestamps {
+	for i := range timestamps {
 		timestamps[i] = math.MaxUint64
 	}
 	err = store.DeleteRows(ctx, testKeys, timestamps)
 	assert.Nil(t, err)
 	// Ensure all test row is deleted
-	for i, _ := range timestamps {
+	for i := range timestamps {
 		timestamps[i] = math.MaxUint64
 	}
 	checkValues, err = store.GetRows(ctx, testKeys, timestamps)
@@ -218,6 +222,9 @@ func TestTikvStore_Log(t *testing.T) {
 
 	// Check log
 	log, err := store.GetLog(ctx, 0, 2, []int{1, 2})
+	if err != nil {
+		panic(err)
+	}
 	sort.Slice(log, func(i, j int) bool {
 		return bytes.Compare(log[i], log[j]) == -1
 	})

@@ -50,7 +50,7 @@ func GrpcMarshal(c *Collection) *Collection {
 	}
 	pbSchema.Fields = schemaSlice
 	grpcCollection := &etcdpb.CollectionMeta{
-		Id:            c.ID,
+		ID:            c.ID,
 		Schema:        pbSchema,
 		CreateTime:    c.CreateTime,
 		SegmentIds:    c.SegmentIDs,
@@ -62,16 +62,14 @@ func GrpcMarshal(c *Collection) *Collection {
 }
 
 func NewCollection(id UniqueID, name string, createTime time.Time,
-	schema []*schemapb.FieldSchema, sIds []UniqueID, ptags []string) Collection {
+	schema []*schemapb.FieldSchema, sIDs []UniqueID, ptags []string) Collection {
 
 	segementIDs := []UniqueID{}
 	newSchema := []FieldMeta{}
 	for _, v := range schema {
 		newSchema = append(newSchema, FieldMeta{FieldName: v.Name, Type: v.DataType, DIM: 16})
 	}
-	for _, sid := range sIds {
-		segementIDs = append(segementIDs, sid)
-	}
+	segementIDs = append(segementIDs, sIDs...)
 	return Collection{
 		ID:            id,
 		Name:          name,

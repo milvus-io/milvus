@@ -2,12 +2,13 @@ package reader
 
 import (
 	"context"
+	"testing"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	"testing"
 )
 
 func TestCollection_Partitions(t *testing.T) {
@@ -45,7 +46,7 @@ func TestCollection_Partitions(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIds:    []UniqueID{0},
@@ -58,7 +59,7 @@ func TestCollection_Partitions(t *testing.T) {
 	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 	assert.Equal(t, len(node.container.collections), 1)
 
 	for _, tag := range collectionMeta.PartitionTags {
@@ -101,7 +102,7 @@ func TestCollection_newCollection(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIds:    []UniqueID{0},
@@ -113,7 +114,7 @@ func TestCollection_newCollection(t *testing.T) {
 
 	collection := newCollection(&collectionMeta, collectionMetaBlob)
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 }
 
 func TestCollection_deleteCollection(t *testing.T) {
@@ -147,7 +148,7 @@ func TestCollection_deleteCollection(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIds:    []UniqueID{0},
@@ -159,7 +160,7 @@ func TestCollection_deleteCollection(t *testing.T) {
 
 	collection := newCollection(&collectionMeta, collectionMetaBlob)
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 
 	deleteCollection(collection)
 }

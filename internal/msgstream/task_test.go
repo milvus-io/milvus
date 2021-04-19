@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	commonPb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"log"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
+
+	commonPb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 

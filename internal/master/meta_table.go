@@ -15,12 +15,12 @@ import (
 type UniqueID = typeutil.UniqueID
 
 type metaTable struct {
-	client        *kv.EtcdKV                       // client of a reliable kv service, i.e. etcd client
-	tenantId2Meta map[UniqueID]pb.TenantMeta     // tenant id to tenant meta
-	proxyId2Meta  map[UniqueID]pb.ProxyMeta      // proxy id to proxy meta
-	collId2Meta   map[UniqueID]pb.CollectionMeta // collection id to collection meta
-	collName2Id   map[string]UniqueID            // collection name to collection id
-	segId2Meta    map[UniqueID]pb.SegmentMeta    // segment id to segment meta
+	client        *kv.EtcdKV                     // client of a reliable kv service, i.e. etcd client
+	tenantID2Meta map[UniqueID]pb.TenantMeta     // tenant id to tenant meta
+	proxyID2Meta  map[UniqueID]pb.ProxyMeta      // proxy id to proxy meta
+	collID2Meta   map[UniqueID]pb.CollectionMeta // collection id to collection meta
+	collName2ID   map[string]UniqueID            // collection name to collection id
+	segID2Meta    map[UniqueID]pb.SegmentMeta    // segment id to segment meta
 
 	tenantLock sync.RWMutex
 	proxyLock  sync.RWMutex
@@ -43,11 +43,11 @@ func NewMetaTable(kv *kv.EtcdKV) (*metaTable, error) {
 
 func (mt *metaTable) reloadFromKV() error {
 
-	mt.tenantId2Meta = make(map[UniqueID]pb.TenantMeta)
-	mt.proxyId2Meta = make(map[UniqueID]pb.ProxyMeta)
-	mt.collId2Meta = make(map[UniqueID]pb.CollectionMeta)
-	mt.collName2Id = make(map[string]UniqueID)
-	mt.segId2Meta = make(map[UniqueID]pb.SegmentMeta)
+	mt.tenantID2Meta = make(map[UniqueID]pb.TenantMeta)
+	mt.proxyID2Meta = make(map[UniqueID]pb.ProxyMeta)
+	mt.collID2Meta = make(map[UniqueID]pb.CollectionMeta)
+	mt.collName2ID = make(map[string]UniqueID)
+	mt.segID2Meta = make(map[UniqueID]pb.SegmentMeta)
 
 	_, values, err := mt.client.LoadWithPrefix("tenant")
 	if err != nil {
@@ -55,12 +55,12 @@ func (mt *metaTable) reloadFromKV() error {
 	}
 
 	for _, value := range values {
-		tenant_meta := pb.TenantMeta{}
-		err := proto.Unmarshal([]byte(value), &tenant_meta)
+		tenantMeta := pb.TenantMeta{}
+		err := proto.Unmarshal([]byte(value), &tenantMeta)
 		if err != nil {
 			return err
 		}
-		mt.tenantId2Meta[tenant_meta.Id] = tenant_meta
+		mt.tenantID2Meta[tenantMeta.ID] = tenantMeta
 	}
 
 	_, values, err = mt.client.LoadWithPrefix("proxy")
@@ -69,12 +69,12 @@ func (mt *metaTable) reloadFromKV() error {
 	}
 
 	for _, value := range values {
-		proxy_meta := pb.ProxyMeta{}
-		err = proto.Unmarshal([]byte(value), &proxy_meta)
+		proxyMeta := pb.ProxyMeta{}
+		err = proto.Unmarshal([]byte(value), &proxyMeta)
 		if err != nil {
 			return err
 		}
-		mt.proxyId2Meta[proxy_meta.Id] = proxy_meta
+		mt.proxyID2Meta[proxyMeta.ID] = proxyMeta
 	}
 
 	_, values, err = mt.client.LoadWithPrefix("collection")
@@ -83,13 +83,13 @@ func (mt *metaTable) reloadFromKV() error {
 	}
 
 	for _, value := range values {
-		collection_meta := pb.CollectionMeta{}
-		err = proto.Unmarshal([]byte(value), &collection_meta)
+		collectionMeta := pb.CollectionMeta{}
+		err = proto.Unmarshal([]byte(value), &collectionMeta)
 		if err != nil {
 			return err
 		}
-		mt.collId2Meta[collection_meta.Id] = collection_meta
-		mt.collName2Id[collection_meta.Schema.Name] = collection_meta.Id
+		mt.collID2Meta[collectionMeta.ID] = collectionMeta
+		mt.collName2ID[collectionMeta.Schema.Name] = collectionMeta.ID
 	}
 
 	_, values, err = mt.client.LoadWithPrefix("segment")
@@ -98,12 +98,12 @@ func (mt *metaTable) reloadFromKV() error {
 	}
 
 	for _, value := range values {
-		segment_meta := pb.SegmentMeta{}
-		err = proto.Unmarshal([]byte(value), &segment_meta)
+		segmentMeta := pb.SegmentMeta{}
+		err = proto.Unmarshal([]byte(value), &segmentMeta)
 		if err != nil {
 			return err
 		}
-		mt.segId2Meta[segment_meta.SegmentId] = segment_meta
+		mt.segID2Meta[segmentMeta.SegmentId] = segmentMeta
 	}
 
 	return nil
@@ -111,43 +111,43 @@ func (mt *metaTable) reloadFromKV() error {
 
 // mt.ddLock.Lock() before call this function
 func (mt *metaTable) saveCollectionMeta(coll *pb.CollectionMeta) error {
-	coll_bytes, err := proto.Marshal(coll)
+	collBytes, err := proto.Marshal(coll)
 	if err != nil {
 		return err
 	}
-	mt.collId2Meta[coll.Id] = *coll
-	mt.collName2Id[coll.Schema.Name] = coll.Id
-	return mt.client.Save("/collection/"+strconv.FormatInt(coll.Id, 10), string(coll_bytes))
+	mt.collID2Meta[coll.ID] = *coll
+	mt.collName2ID[coll.Schema.Name] = coll.ID
+	return mt.client.Save("/collection/"+strconv.FormatInt(coll.ID, 10), string(collBytes))
 }
 
 // mt.ddLock.Lock() before call this function
 func (mt *metaTable) saveSegmentMeta(seg *pb.SegmentMeta) error {
-	seg_bytes, err := proto.Marshal(seg)
+	segBytes, err := proto.Marshal(seg)
 	if err != nil {
 		return err
 	}
 
-	mt.segId2Meta[seg.SegmentId] = *seg
+	mt.segID2Meta[seg.SegmentId] = *seg
 
-	return mt.client.Save("/segment/"+strconv.FormatInt(seg.SegmentId, 10), string(seg_bytes))
+	return mt.client.Save("/segment/"+strconv.FormatInt(seg.SegmentId, 10), string(segBytes))
 }
 
 // mt.ddLock.Lock() before call this function
-func (mt *metaTable) deleteSegmentMeta(segId UniqueID) error {
-	_, ok := mt.segId2Meta[segId]
+func (mt *metaTable) deleteSegmentMeta(segID UniqueID) error {
+	_, ok := mt.segID2Meta[segID]
 
 	if ok {
-		delete(mt.segId2Meta, segId)
+		delete(mt.segID2Meta, segID)
 	}
 
-	return mt.client.Remove("/segment/" + strconv.FormatInt(segId, 10))
+	return mt.client.Remove("/segment/" + strconv.FormatInt(segID, 10))
 }
 
 // mt.ddLock.Lock() before call this function
-func (mt *metaTable) saveCollectionAndDeleteSegmentsMeta(coll *pb.CollectionMeta, segIds []UniqueID) error {
-	segIdStrs := make([]string, 0, len(segIds))
-	for _, segId := range segIds {
-		segIdStrs = append(segIdStrs, "/segment/"+strconv.FormatInt(segId, 10))
+func (mt *metaTable) saveCollectionAndDeleteSegmentsMeta(coll *pb.CollectionMeta, segIDs []UniqueID) error {
+	segIDStrs := make([]string, 0, len(segIDs))
+	for _, segID := range segIDs {
+		segIDStrs = append(segIDStrs, "/segment/"+strconv.FormatInt(segID, 10))
 	}
 
 	kvs := make(map[string]string)
@@ -156,75 +156,75 @@ func (mt *metaTable) saveCollectionAndDeleteSegmentsMeta(coll *pb.CollectionMeta
 		return err
 	}
 
-	kvs["/collection/"+strconv.FormatInt(coll.Id, 10)] = string(collStrs)
+	kvs["/collection/"+strconv.FormatInt(coll.ID, 10)] = string(collStrs)
 
-	for _, segId := range segIds {
-		_, ok := mt.segId2Meta[segId]
+	for _, segID := range segIDs {
+		_, ok := mt.segID2Meta[segID]
 
 		if ok {
-			delete(mt.segId2Meta, segId)
+			delete(mt.segID2Meta, segID)
 		}
 	}
 
-	mt.collId2Meta[coll.Id] = *coll
+	mt.collID2Meta[coll.ID] = *coll
 
-	return mt.client.MultiSaveAndRemove(kvs, segIdStrs)
+	return mt.client.MultiSaveAndRemove(kvs, segIDStrs)
 }
 
 // mt.ddLock.Lock() before call this function
 func (mt *metaTable) saveCollectionsAndSegmentsMeta(coll *pb.CollectionMeta, seg *pb.SegmentMeta) error {
-	kvs := make(map[string]string, 0)
-	coll_bytes, err := proto.Marshal(coll)
+	kvs := make(map[string]string)
+	collBytes, err := proto.Marshal(coll)
 	if err != nil {
 		return err
 	}
-	kvs["/collection/"+strconv.FormatInt(coll.Id, 10)] = string(coll_bytes)
+	kvs["/collection/"+strconv.FormatInt(coll.ID, 10)] = string(collBytes)
 
-	mt.collId2Meta[coll.Id] = *coll
-	mt.collName2Id[coll.Schema.Name] = coll.Id
+	mt.collID2Meta[coll.ID] = *coll
+	mt.collName2ID[coll.Schema.Name] = coll.ID
 
-	seg_bytes, err := proto.Marshal(seg)
+	segBytes, err := proto.Marshal(seg)
 	if err != nil {
 		return err
 	}
-	kvs["/segment/"+strconv.FormatInt(seg.SegmentId, 10)] = string(seg_bytes)
+	kvs["/segment/"+strconv.FormatInt(seg.SegmentId, 10)] = string(segBytes)
 
-	mt.segId2Meta[seg.SegmentId] = *seg
+	mt.segID2Meta[seg.SegmentId] = *seg
 
 	return mt.client.MultiSave(kvs)
 }
 
 // mt.ddLock.Lock() before call this function
-func (mt *metaTable) deleteCollectionsAndSegmentsMeta(collId UniqueID, segIds []UniqueID) error {
-	collIdStr := "/collection/" + strconv.FormatInt(collId, 10)
+func (mt *metaTable) deleteCollectionsAndSegmentsMeta(collID UniqueID, segIDs []UniqueID) error {
+	collIDStr := "/collection/" + strconv.FormatInt(collID, 10)
 
-	totalIdStrs := make([]string, 0, 1+len(segIds))
-	totalIdStrs = append(totalIdStrs, collIdStr)
-	for _, singleId := range segIds {
-		totalIdStrs = append(totalIdStrs, "/segment/"+strconv.FormatInt(singleId, 10))
+	totalIDStrs := make([]string, 0, 1+len(segIDs))
+	totalIDStrs = append(totalIDStrs, collIDStr)
+	for _, singleID := range segIDs {
+		totalIDStrs = append(totalIDStrs, "/segment/"+strconv.FormatInt(singleID, 10))
 	}
 
-	coll_meta, ok := mt.collId2Meta[collId]
+	collMeta, ok := mt.collID2Meta[collID]
 
 	if ok {
-		delete(mt.collId2Meta, collId)
+		delete(mt.collID2Meta, collID)
 	}
 
-	_, ok = mt.collName2Id[coll_meta.Schema.Name]
+	_, ok = mt.collName2ID[collMeta.Schema.Name]
 
 	if ok {
-		delete(mt.collName2Id, coll_meta.Schema.Name)
+		delete(mt.collName2ID, collMeta.Schema.Name)
 	}
 
-	for _, segId := range segIds {
-		_, ok := mt.segId2Meta[segId]
+	for _, segID := range segIDs {
+		_, ok := mt.segID2Meta[segID]
 
 		if ok {
-			delete(mt.segId2Meta, segId)
+			delete(mt.segID2Meta, segID)
 		}
 	}
 
-	return mt.client.MultiRemove(totalIdStrs)
+	return mt.client.MultiRemove(totalIDStrs)
 }
 
 func (mt *metaTable) AddCollection(coll *pb.CollectionMeta) error {
@@ -236,7 +236,7 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionMeta) error {
 	if len(coll.PartitionTags) != 0 {
 		return errors.Errorf("segment should be empty when creating collection")
 	}
-	_, ok := mt.collName2Id[coll.Schema.Name]
+	_, ok := mt.collName2ID[coll.Schema.Name]
 	if ok {
 		return errors.Errorf("collection alread exists with name = " + coll.Schema.Name)
 	}
@@ -248,16 +248,16 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionMeta) error {
 	return nil
 }
 
-func (mt *metaTable) DeleteCollection(collId UniqueID) error {
+func (mt *metaTable) DeleteCollection(collID UniqueID) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	coll_meta, ok := mt.collId2Meta[collId]
+	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
-		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collId, 10))
+		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collID, 10))
 	}
 
-	err := mt.deleteCollectionsAndSegmentsMeta(collId, coll_meta.SegmentIds)
+	err := mt.deleteCollectionsAndSegmentsMeta(collID, collMeta.SegmentIds)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -265,37 +265,34 @@ func (mt *metaTable) DeleteCollection(collId UniqueID) error {
 	return nil
 }
 
-func (mt *metaTable) HasCollection(collId UniqueID) bool {
+func (mt *metaTable) HasCollection(collID UniqueID) bool {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
-	_, ok := mt.collId2Meta[collId]
-	if !ok {
-		return false
-	}
-	return true
+	_, ok := mt.collID2Meta[collID]
+	return ok
 }
 
 func (mt *metaTable) GetCollectionByName(collectionName string) (*pb.CollectionMeta, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
-	vid, ok := mt.collName2Id[collectionName]
+	vid, ok := mt.collName2ID[collectionName]
 	if !ok {
 		return nil, errors.Errorf("can't find collection: " + collectionName)
 	}
-	col, ok := mt.collId2Meta[vid]
+	col, ok := mt.collID2Meta[vid]
 	if !ok {
 		return nil, errors.Errorf("can't find collection: " + collectionName)
 	}
 	return &col, nil
 }
 
-func (mt *metaTable) AddPartition(collId UniqueID, tag string) error {
+func (mt *metaTable) AddPartition(collID UniqueID, tag string) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-	coll, ok := mt.collId2Meta[collId]
+	coll, ok := mt.collID2Meta[collID]
 	if !ok {
-		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collId, 10))
+		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collID, 10))
 	}
 
 	for _, t := range coll.PartitionTags {
@@ -313,10 +310,10 @@ func (mt *metaTable) AddPartition(collId UniqueID, tag string) error {
 	return nil
 }
 
-func (mt *metaTable) HasPartition(collId UniqueID, tag string) bool {
+func (mt *metaTable) HasPartition(collID UniqueID, tag string) bool {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
-	col, ok := mt.collId2Meta[collId]
+	col, ok := mt.collID2Meta[collID]
 	if !ok {
 		return false
 	}
@@ -328,42 +325,42 @@ func (mt *metaTable) HasPartition(collId UniqueID, tag string) bool {
 	return false
 }
 
-func (mt *metaTable) DeletePartition(collId UniqueID, tag string) error {
+func (mt *metaTable) DeletePartition(collID UniqueID, tag string) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	coll_meta, ok := mt.collId2Meta[collId]
+	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
-		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collId, 10))
+		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collID, 10))
 	}
 
-	pt := make([]string, 0, len(coll_meta.PartitionTags))
-	for _, t := range coll_meta.PartitionTags {
+	pt := make([]string, 0, len(collMeta.PartitionTags))
+	for _, t := range collMeta.PartitionTags {
 		if t != tag {
 			pt = append(pt, t)
 		}
 	}
-	if len(pt) == len(coll_meta.PartitionTags) {
+	if len(pt) == len(collMeta.PartitionTags) {
 		return nil
 	}
 
-	to_delete_seg := make([]UniqueID, 0, len(coll_meta.SegmentIds))
-	seg := make([]UniqueID, 0, len(coll_meta.SegmentIds))
-	for _, s := range coll_meta.SegmentIds {
-		sm, ok := mt.segId2Meta[s]
+	toDeleteSeg := make([]UniqueID, 0, len(collMeta.SegmentIds))
+	seg := make([]UniqueID, 0, len(collMeta.SegmentIds))
+	for _, s := range collMeta.SegmentIds {
+		sm, ok := mt.segID2Meta[s]
 		if !ok {
 			return errors.Errorf("can't find segment id = %d", s)
 		}
 		if sm.PartitionTag != tag {
 			seg = append(seg, s)
 		} else {
-			to_delete_seg = append(to_delete_seg, s)
+			toDeleteSeg = append(toDeleteSeg, s)
 		}
 	}
-	coll_meta.PartitionTags = pt
-	coll_meta.SegmentIds = seg
+	collMeta.PartitionTags = pt
+	collMeta.SegmentIds = seg
 
-	err := mt.saveCollectionAndDeleteSegmentsMeta(&coll_meta, to_delete_seg)
+	err := mt.saveCollectionAndDeleteSegmentsMeta(&collMeta, toDeleteSeg)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -374,10 +371,10 @@ func (mt *metaTable) DeletePartition(collId UniqueID, tag string) error {
 func (mt *metaTable) AddSegment(seg *pb.SegmentMeta) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-	collId := seg.CollectionId
-	coll_meta := mt.collId2Meta[collId]
-	coll_meta.SegmentIds = append(coll_meta.SegmentIds, seg.SegmentId)
-	err := mt.saveCollectionsAndSegmentsMeta(&coll_meta, seg)
+	collID := seg.CollectionId
+	collMeta := mt.collID2Meta[collID]
+	collMeta.SegmentIds = append(collMeta.SegmentIds, seg.SegmentId)
+	err := mt.saveCollectionsAndSegmentsMeta(&collMeta, seg)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -385,38 +382,38 @@ func (mt *metaTable) AddSegment(seg *pb.SegmentMeta) error {
 	return nil
 }
 
-func (mt *metaTable) GetSegmentById(segId UniqueID) (*pb.SegmentMeta, error) {
+func (mt *metaTable) GetSegmentByID(segID UniqueID) (*pb.SegmentMeta, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
-	sm, ok := mt.segId2Meta[segId]
+	sm, ok := mt.segID2Meta[segID]
 	if !ok {
-		return nil, errors.Errorf("can't find segment id = %d", segId)
+		return nil, errors.Errorf("can't find segment id = %d", segID)
 	}
 	return &sm, nil
 }
 
-func (mt *metaTable) DeleteSegment(segId UniqueID) error {
+func (mt *metaTable) DeleteSegment(segID UniqueID) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	seg_meta, ok := mt.segId2Meta[segId]
+	segMeta, ok := mt.segID2Meta[segID]
 	if !ok {
-		return errors.Errorf("can't find segment. id = " + strconv.FormatInt(segId, 10))
+		return errors.Errorf("can't find segment. id = " + strconv.FormatInt(segID, 10))
 	}
 
-	coll_meta, ok := mt.collId2Meta[seg_meta.CollectionId]
+	collMeta, ok := mt.collID2Meta[segMeta.CollectionId]
 	if !ok {
-		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(seg_meta.CollectionId, 10))
+		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(segMeta.CollectionId, 10))
 	}
 
-	for i := 0; i < len(coll_meta.SegmentIds); i++ {
-		if coll_meta.SegmentIds[i] == segId {
-			coll_meta.SegmentIds = append(coll_meta.SegmentIds[:i], coll_meta.SegmentIds[i+1:]...)
+	for i := 0; i < len(collMeta.SegmentIds); i++ {
+		if collMeta.SegmentIds[i] == segID {
+			collMeta.SegmentIds = append(collMeta.SegmentIds[:i], collMeta.SegmentIds[i+1:]...)
 		}
 	}
 
-	err := mt.saveCollectionAndDeleteSegmentsMeta(&coll_meta, []UniqueID{segId})
+	err := mt.saveCollectionAndDeleteSegmentsMeta(&collMeta, []UniqueID{segID})
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -424,19 +421,19 @@ func (mt *metaTable) DeleteSegment(segId UniqueID) error {
 	return nil
 
 }
-func (mt *metaTable) CloseSegment(segId UniqueID, closeTs Timestamp, num_rows int64) error {
+func (mt *metaTable) CloseSegment(segID UniqueID, closeTs Timestamp, numRows int64) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	seg_meta, ok := mt.segId2Meta[segId]
+	segMeta, ok := mt.segID2Meta[segID]
 	if !ok {
-		return errors.Errorf("can't find segment id = " + strconv.FormatInt(segId, 10))
+		return errors.Errorf("can't find segment id = " + strconv.FormatInt(segID, 10))
 	}
 
-	seg_meta.CloseTime = closeTs
-	seg_meta.NumRows = num_rows
+	segMeta.CloseTime = closeTs
+	segMeta.NumRows = numRows
 
-	err := mt.saveSegmentMeta(&seg_meta)
+	err := mt.saveSegmentMeta(&segMeta)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err

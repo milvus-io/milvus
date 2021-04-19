@@ -3,13 +3,14 @@ package reader
 import (
 	"context"
 	"fmt"
-	"github.com/golang/protobuf/proto"
 	"log"
 	"path"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/golang/protobuf/proto"
 
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/kv"

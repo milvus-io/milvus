@@ -3,10 +3,11 @@ package proxy
 import (
 	"context"
 	"errors"
-	"github.com/golang/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"log"
 
+	"github.com/golang/protobuf/proto"
+
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -44,7 +45,7 @@ func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    "insert timeout!",
 			},
-		}, errors.New("insert timeout!")
+		}, errors.New("insert timeout")
 	case result := <-it.resultChan:
 		return result, nil
 	}
@@ -73,7 +74,7 @@ func (p *Proxy) CreateCollection(ctx context.Context, req *schemapb.CollectionSc
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "create collection timeout!",
-		}, errors.New("create collection timeout!")
+		}, errors.New("create collection timeout")
 	case result := <-cct.resultChan:
 		return result, nil
 	}
@@ -105,7 +106,7 @@ func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.Qu
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    "query timeout!",
 			},
-		}, errors.New("query timeout!")
+		}, errors.New("query timeout")
 	case result := <-qt.resultChan:
 		return result, nil
 	}
@@ -132,7 +133,7 @@ func (p *Proxy) DropCollection(ctx context.Context, req *servicepb.CollectionNam
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "create collection timeout!",
-		}, errors.New("create collection timeout!")
+		}, errors.New("create collection timeout")
 	case result := <-dct.resultChan:
 		return result, nil
 	}
@@ -162,7 +163,7 @@ func (p *Proxy) HasCollection(ctx context.Context, req *servicepb.CollectionName
 				Reason:    "has collection timeout!",
 			},
 			Value: false,
-		}, errors.New("has collection timeout!")
+		}, errors.New("has collection timeout")
 	case result := <-hct.resultChan:
 		return result, nil
 	}
@@ -191,7 +192,7 @@ func (p *Proxy) DescribeCollection(ctx context.Context, req *servicepb.Collectio
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    "describe collection timeout!",
 			},
-		}, errors.New("describe collection timeout!")
+		}, errors.New("describe collection timeout")
 	case result := <-dct.resultChan:
 		return result, nil
 	}
@@ -219,7 +220,7 @@ func (p *Proxy) ShowCollections(ctx context.Context, req *commonpb.Empty) (*serv
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    "show collections timeout!",
 			},
-		}, errors.New("show collections timeout!")
+		}, errors.New("show collections timeout")
 	case result := <-sct.resultChan:
 		return result, nil
 	}

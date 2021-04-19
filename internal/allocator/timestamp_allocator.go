@@ -46,13 +46,13 @@ func (ta *TimestampAllocator) syncTs() {
 	req := &internalpb.TsoRequest{
 		PeerId: 1,
 		Role:   internalpb.PeerRole_Proxy,
-		Count:  ta.countPerRpc,
+		Count:  ta.countPerRPC,
 	}
 	resp, err := ta.masterClient.AllocTimestamp(ctx, req)
 
 	cancel()
 	if err != nil {
-		log.Panic("syncId Failed!!!!!")
+		log.Panic("syncID Failed!!!!!")
 		return
 	}
 	ta.lastTsBegin = resp.GetTimestamp()

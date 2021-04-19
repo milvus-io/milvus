@@ -21,7 +21,7 @@ type MasterConfig struct {
 	PulsarMoniterInterval int32
 	PulsarTopic           string
 	SegmentThreshole      float32
-	ProxyIdList           []UniqueID
+	ProxyIDList           []UniqueID
 	QueryNodeNum          int
 	WriteNodeNum          int
 }
@@ -56,7 +56,7 @@ type PulsarConfig struct {
 
 type ProxyConfig struct {
 	Timezone         string `yaml:"timezone"`
-	ProxyId          int    `yaml:"proxy_id"`
+	ProxyID          int    `yaml:"proxy_id"`
 	NumReaderNodes   int    `yaml:"numReaderNodes"`
 	TosSaveInterval  int    `yaml:"tsoSaveInterval"`
 	TimeTickInterval int    `yaml:"timeTickInterval"`
@@ -87,7 +87,7 @@ type ProxyConfig struct {
 }
 
 type Reader struct {
-	ClientId        int
+	ClientID        int
 	StopFlag        int64
 	ReaderQueueSize int
 	SearchChanSize  int
@@ -97,10 +97,10 @@ type Reader struct {
 }
 
 type Writer struct {
-	ClientId           int
+	ClientID           int
 	StopFlag           int64
 	ReaderQueueSize    int
-	SearchByIdChanSize int
+	SearchByIDChanSize int
 	Parallelism        int
 	TopicStart         int
 	TopicEnd           int

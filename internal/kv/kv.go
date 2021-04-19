@@ -1,6 +1,6 @@
 package kv
 
-type KVBase interface {
+type Base interface {
 	Load(key string) (string, error)
 	MultiLoad(keys []string) ([]string, error)
 	LoadWithPrefix(key string) ([]string, []string, error)

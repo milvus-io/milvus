@@ -42,15 +42,14 @@ func Init() {
 	InitGlobalTsoAllocator("timestamp", tsoutil.NewTSOKVBase("tso"))
 }
 
-func InitGlobalTsoAllocator(key string, base kv.KVBase) {
+func InitGlobalTsoAllocator(key string, base kv.Base) {
 	allocator = NewGlobalTSOAllocator(key, base)
 	allocator.Initialize()
 }
 
 // NewGlobalTSOAllocator creates a new global TSO allocator.
-func NewGlobalTSOAllocator(key string, kvBase kv.KVBase) *GlobalTSOAllocator {
-
-	var saveInterval time.Duration = 3 * time.Second
+func NewGlobalTSOAllocator(key string, kvBase kv.Base) *GlobalTSOAllocator {
+	var saveInterval = 3 * time.Second
 	return &GlobalTSOAllocator{
 		tso: &timestampOracle{
 			kvBase:        kvBase,
@@ -79,7 +78,7 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
 func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
-	var physical, logical int64 = 0, 0
+	var physical, logical int64
 	if count == 0 {
 		return 0, errors.New("tso count should be positive")
 	}
