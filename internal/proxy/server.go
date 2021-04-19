@@ -156,6 +156,7 @@ func (s *proxyServer) DeleteByID(ctx context.Context, req *pb.DeleteByIDParam) (
 	}
 	if len(mReqMsg.PrimaryKeys) > 1 {
 		mReq := &manipulationReq{
+			stats: make([]commonpb.Status, 1),
 			msgs:  append([]*pb.ManipulationReqMsg{}, &mReqMsg),
 			proxy: s,
 		}
@@ -222,10 +223,10 @@ func (s *proxyServer) Insert(ctx context.Context, req *servicepb.RowBatch) (*ser
 
 	// TODO: alloc manipulation request id
 	mReq := manipulationReq{
-		Status: commonpb.Status{},
-		msgs:   make([]*pb.ManipulationReqMsg, len(msgMap)),
-		wg:     sync.WaitGroup{},
-		proxy:  s,
+		stats: make([]commonpb.Status, len(msgMap)),
+		msgs:  make([]*pb.ManipulationReqMsg, len(msgMap)),
+		wg:    sync.WaitGroup{},
+		proxy: s,
 	}
 	for _, v := range msgMap {
 		mReq.msgs = append(mReq.msgs, v)
