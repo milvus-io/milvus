@@ -31,6 +31,7 @@ default_float_vec_field_name = "float_vector"
 default_binary_vec_field_name = "binary_vector"
 default_partition_name = "_default"
 default_tag = "1970_01_01"
+row_count = "row_count"
 
 # TODO:
 # TODO: disable RHNSW_SQ/PQ in 0.11.0
@@ -43,6 +44,7 @@ all_index_types = [
     "HNSW",
     # "NSG",
     "ANNOY",
+    "RHNSW_FLAT",
     "RHNSW_PQ",
     "RHNSW_SQ",
     "BIN_FLAT",
@@ -54,10 +56,11 @@ default_index_params = [
     {"nlist": 128},
     {"nlist": 128},
     # {"nlist": 128},
-    {"nlist": 128, "m": 16},
+    {"nlist": 128, "m": 16, "nbits": 8},
     {"M": 48, "efConstruction": 500},
     # {"search_length": 50, "out_degree": 40, "candidate_pool_size": 100, "knng": 50},
     {"n_trees": 50},
+    {"M": 48, "efConstruction": 500},
     {"M": 48, "efConstruction": 500, "PQM": 64},
     {"M": 48, "efConstruction": 500},
     {"nlist": 128},
