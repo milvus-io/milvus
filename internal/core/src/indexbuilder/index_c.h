@@ -47,7 +47,7 @@ char*
 SerializeToSlicedBuffer(CIndex index, int32_t* buffer_size);
 
 void
-LoadFromSlicedBuffer(CIndex index, const char* serialized_sliced_blob_buffer);
+LoadFromSlicedBuffer(CIndex index, const char* serialized_sliced_blob_buffer, int32_t size);
 
 #ifdef __cplusplus
 };

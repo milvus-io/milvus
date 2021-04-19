@@ -18,14 +18,11 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexcgopb"
+	"github.com/zilliztech/milvus-distributed/internal/storage"
 )
 
 // TODO: use storage.Blob instead later
-// type Blob = storage.Blob
-type Blob struct {
-	Key   string
-	Value []byte
-}
+type Blob = storage.Blob
 
 type Index interface {
 	Serialize() ([]*Blob, error)
@@ -75,9 +72,9 @@ func (index *CIndex) Load(blobs []*Blob) error {
 
 	/*
 		void
-		LoadFromSlicedBuffer(CIndex index, const char* serialized_sliced_blob_buffer);
+		LoadFromSlicedBuffer(CIndex index, const char* serialized_sliced_blob_buffer, int32_t size);
 	*/
-	C.LoadFromSlicedBuffer(index.indexPtr, (*C.char)(unsafe.Pointer(&datas[0])))
+	C.LoadFromSlicedBuffer(index.indexPtr, (*C.char)(unsafe.Pointer(&datas[0])), (C.int32_t)(len(datas)))
 	return nil
 }
 
