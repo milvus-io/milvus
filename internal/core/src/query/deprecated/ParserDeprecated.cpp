@@ -11,7 +11,7 @@
 
 #include <iostream>
 #include <random>
-#include "Parser.h"
+#include "ParserDeprecated.h"
 
 namespace milvus::wtf {
 using google::protobuf::RepeatedField;

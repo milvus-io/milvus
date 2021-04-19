@@ -19,11 +19,175 @@
 #include <vector>
 #include <memory>
 #include <boost/align/aligned_allocator.hpp>
+#include <boost/algorithm/string.hpp>
 
 namespace milvus::query {
 
-static std::unique_ptr<VectorPlanNode>
-ParseVecNode(Plan* plan, const Json& out_body) {
+/// initialize RangeExpr::mapping_
+const std::map<std::string, RangeExpr::OpType> RangeExpr::mapping_ = {
+    {"lt", OpType::LessThan},    {"le", OpType::LessEqual},    {"lte", OpType::LessEqual},
+    {"gt", OpType::GreaterThan}, {"ge", OpType::GreaterEqual}, {"gte", OpType::GreaterEqual},
+    {"eq", OpType::Equal},       {"ne", OpType::NotEqual},
+};
+
+// static inline std::string
+// to_lower(const std::string& raw) {
+//    auto data = raw;
+//    std::transform(data.begin(), data.end(), data.begin(), [](unsigned char c) { return std::tolower(c); });
+//    return data;
+//}
+
+class Parser {
+ public:
+    static std::unique_ptr<Plan>
+    CreatePlan(const Schema& schema, const std::string& dsl_str) {
+        return Parser(schema).CreatePlanImpl(dsl_str);
+    }
+
+ private:
+    std::unique_ptr<Plan>
+    CreatePlanImpl(const std::string& dsl_str);
+
+    explicit Parser(const Schema& schema) : schema(schema) {
+    }
+
+    std::unique_ptr<VectorPlanNode>
+    ParseVecNode(const Json& out_body);
+
+    template <typename T>
+    std::unique_ptr<Expr>
+    ParseRangeNodeImpl(const std::string& field_name, const Json& body);
+
+    template <typename T>
+    std::unique_ptr<Expr>
+    ParseTermNodeImpl(const std::string& field_name, const Json& body);
+
+    std::unique_ptr<Expr>
+    ParseRangeNode(const Json& out_body);
+
+    std::unique_ptr<Expr>
+    ParseTermNode(const Json& out_body);
+
+ private:
+    const Schema& schema;
+    std::map<std::string, FieldId> tag2field_;  // PlaceholderName -> FieldId
+};
+
+std::unique_ptr<Expr>
+Parser::ParseRangeNode(const Json& out_body) {
+    Assert(out_body.is_object());
+    Assert(out_body.size() == 1);
+    auto out_iter = out_body.begin();
+    auto field_name = out_iter.key();
+    auto body = out_iter.value();
+    auto data_type = schema[field_name].get_data_type();
+    Assert(!field_is_vector(data_type));
+
+    switch (data_type) {
+        case DataType::BOOL: {
+            return ParseRangeNodeImpl<bool>(field_name, body);
+        }
+        case DataType::INT8:
+            return ParseRangeNodeImpl<int8_t>(field_name, body);
+        case DataType::INT16:
+            return ParseRangeNodeImpl<int16_t>(field_name, body);
+        case DataType::INT32:
+            return ParseRangeNodeImpl<int32_t>(field_name, body);
+        case DataType::INT64:
+            return ParseRangeNodeImpl<int64_t>(field_name, body);
+        case DataType::FLOAT:
+            return ParseRangeNodeImpl<float>(field_name, body);
+        case DataType::DOUBLE:
+            return ParseRangeNodeImpl<double>(field_name, body);
+        default:
+            PanicInfo("unsupported");
+    }
+}
+
+std::unique_ptr<Plan>
+Parser::CreatePlanImpl(const std::string& dsl_str) {
+    auto plan = std::make_unique<Plan>(schema);
+    auto dsl = nlohmann::json::parse(dsl_str);
+    nlohmann::json vec_pack;
+    std::optional<std::unique_ptr<Expr>> predicate;
+    // top level
+    auto& bool_dsl = dsl.at("bool");
+    if (bool_dsl.contains("must")) {
+        auto& packs = bool_dsl.at("must");
+        Assert(packs.is_array());
+        for (auto& pack : packs) {
+            if (pack.contains("vector")) {
+                auto& out_body = pack.at("vector");
+                plan->plan_node_ = ParseVecNode(out_body);
+            } else if (pack.contains("term")) {
+                AssertInfo(!predicate, "unsupported complex DSL");
+                auto& out_body = pack.at("term");
+                predicate = ParseTermNode(out_body);
+            } else if (pack.contains("range")) {
+                AssertInfo(!predicate, "unsupported complex DSL");
+                auto& out_body = pack.at("range");
+                predicate = ParseRangeNode(out_body);
+            } else {
+                PanicInfo("unsupported node");
+            }
+        }
+        AssertInfo(plan->plan_node_, "vector node not found");
+    } else if (bool_dsl.contains("vector")) {
+        auto& out_body = bool_dsl.at("vector");
+        plan->plan_node_ = ParseVecNode(out_body);
+        Assert(plan->plan_node_);
+    } else {
+        PanicInfo("Unsupported DSL");
+    }
+    plan->plan_node_->predicate_ = std::move(predicate);
+    plan->tag2field_ = std::move(tag2field_);
+    // TODO: target_entry parser
+    // if schema autoid is true,
+    //     prepend target_entries_ with row_id
+    // else
+    //     with primary_key
+    //
+    return plan;
+}
+
+std::unique_ptr<Expr>
+Parser::ParseTermNode(const Json& out_body) {
+    Assert(out_body.size() == 1);
+    auto out_iter = out_body.begin();
+    auto field_name = out_iter.key();
+    auto body = out_iter.value();
+    auto data_type = schema[field_name].get_data_type();
+    Assert(!field_is_vector(data_type));
+    switch (data_type) {
+        case DataType::BOOL: {
+            return ParseTermNodeImpl<bool>(field_name, body);
+        }
+        case DataType::INT8: {
+            return ParseTermNodeImpl<int8_t>(field_name, body);
+        }
+        case DataType::INT16: {
+            return ParseTermNodeImpl<int16_t>(field_name, body);
+        }
+        case DataType::INT32: {
+            return ParseTermNodeImpl<int32_t>(field_name, body);
+        }
+        case DataType::INT64: {
+            return ParseTermNodeImpl<int64_t>(field_name, body);
+        }
+        case DataType::FLOAT: {
+            return ParseTermNodeImpl<float>(field_name, body);
+        }
+        case DataType::DOUBLE: {
+            return ParseTermNodeImpl<double>(field_name, body);
+        }
+        default: {
+            PanicInfo("unsupported data_type");
+        }
+    }
+}
+
+std::unique_ptr<VectorPlanNode>
+Parser::ParseVecNode(const Json& out_body) {
     Assert(out_body.is_object());
     // TODO add binary info
     Assert(out_body.size() == 1);
@@ -35,7 +199,7 @@ ParseVecNode(Plan* plan, const Json& out_body) {
     auto topK = vec_info["topk"];
     AssertInfo(topK > 0, "topK must greater than 0");
     AssertInfo(topK < 16384, "topK is too large");
-    auto field_meta = plan->schema_.operator[](field_name);
+    auto field_meta = schema.operator[](field_name);
 
     auto vec_node = [&]() -> std::unique_ptr<VectorPlanNode> {
         auto data_type = field_meta.get_data_type();
@@ -51,58 +215,14 @@ ParseVecNode(Plan* plan, const Json& out_body) {
     vec_node->query_info_.field_id_ = field_name;
     vec_node->placeholder_tag_ = vec_info.at("query");
     auto tag = vec_node->placeholder_tag_;
-    AssertInfo(!plan->tag2field_.count(tag), "duplicated placeholder tag");
-    plan->tag2field_.emplace(tag, field_name);
+    AssertInfo(!tag2field_.count(tag), "duplicated placeholder tag");
+    tag2field_.emplace(tag, field_name);
     return vec_node;
 }
 
-/// initialize RangeExpr::mapping_
-const std::map<std::string, RangeExpr::OpType> RangeExpr::mapping_ = {
-    {"lt", OpType::LessThan},    {"le", OpType::LessEqual},    {"lte", OpType::LessEqual},
-    {"gt", OpType::GreaterThan}, {"ge", OpType::GreaterEqual}, {"gte", OpType::GreaterEqual},
-    {"eq", OpType::Equal},       {"ne", OpType::NotEqual},
-};
-
-static inline std::string
-to_lower(const std::string& raw) {
-    auto data = raw;
-    std::transform(data.begin(), data.end(), data.begin(), [](unsigned char c) { return std::tolower(c); });
-    return data;
-}
-
 template <typename T>
 std::unique_ptr<Expr>
-ParseRangeNodeImpl(const Schema& schema, const std::string& field_name, const Json& body) {
-    auto expr = std::make_unique<RangeExprImpl<T>>();
-    auto data_type = schema[field_name].get_data_type();
-    expr->data_type_ = data_type;
-    expr->field_id_ = field_name;
-    Assert(body.is_object());
-    for (auto& item : body.items()) {
-        auto op_name = to_lower(item.key());
-
-        AssertInfo(RangeExpr::mapping_.count(op_name), "op(" + op_name + ") not found");
-        auto op = RangeExpr::mapping_.at(op_name);
-        if constexpr (std::is_same_v<T, bool>) {
-            Assert(item.value().is_boolean());
-        } else if constexpr (std::is_integral_v<T>) {
-            Assert(item.value().is_number_integer());
-        } else if constexpr (std::is_floating_point_v<T>) {
-            Assert(item.value().is_number());
-        } else {
-            static_assert(always_false<T>, "unsupported type");
-            __builtin_unreachable();
-        }
-        T value = item.value();
-        expr->conditions_.emplace_back(op, value);
-    }
-    std::sort(expr->conditions_.begin(), expr->conditions_.end());
-    return expr;
-}
-
-template <typename T>
-std::unique_ptr<Expr>
-ParseTermNodeImpl(const Schema& schema, const std::string& field_name, const Json& body) {
+Parser::ParseTermNodeImpl(const std::string& field_name, const Json& body) {
     auto expr = std::make_unique<TermExprImpl<T>>();
     auto data_type = schema[field_name].get_data_type();
     Assert(body.is_object());
@@ -128,121 +248,39 @@ ParseTermNodeImpl(const Schema& schema, const std::string& field_name, const Jso
     return expr;
 }
 
+template <typename T>
 std::unique_ptr<Expr>
-ParseRangeNode(const Schema& schema, const Json& out_body) {
-    Assert(out_body.is_object());
-    Assert(out_body.size() == 1);
-    auto out_iter = out_body.begin();
-    auto field_name = out_iter.key();
-    auto body = out_iter.value();
+Parser::ParseRangeNodeImpl(const std::string& field_name, const Json& body) {
+    auto expr = std::make_unique<RangeExprImpl<T>>();
     auto data_type = schema[field_name].get_data_type();
-    Assert(!field_is_vector(data_type));
+    expr->data_type_ = data_type;
+    expr->field_id_ = field_name;
+    Assert(body.is_object());
+    for (auto& item : body.items()) {
+        auto op_name = boost::algorithm::to_lower_copy(std::string(item.key()));
 
-    switch (data_type) {
-        case DataType::BOOL: {
-            return ParseRangeNodeImpl<bool>(schema, field_name, body);
+        AssertInfo(RangeExpr::mapping_.count(op_name), "op(" + op_name + ") not found");
+        auto op = RangeExpr::mapping_.at(op_name);
+        if constexpr (std::is_same_v<T, bool>) {
+            Assert(item.value().is_boolean());
+        } else if constexpr (std::is_integral_v<T>) {
+            Assert(item.value().is_number_integer());
+        } else if constexpr (std::is_floating_point_v<T>) {
+            Assert(item.value().is_number());
+        } else {
+            static_assert(always_false<T>, "unsupported type");
+            __builtin_unreachable();
         }
-        case DataType::INT8:
-            return ParseRangeNodeImpl<int8_t>(schema, field_name, body);
-        case DataType::INT16:
-            return ParseRangeNodeImpl<int16_t>(schema, field_name, body);
-        case DataType::INT32:
-            return ParseRangeNodeImpl<int32_t>(schema, field_name, body);
-        case DataType::INT64:
-            return ParseRangeNodeImpl<int64_t>(schema, field_name, body);
-        case DataType::FLOAT:
-            return ParseRangeNodeImpl<float>(schema, field_name, body);
-        case DataType::DOUBLE:
-            return ParseRangeNodeImpl<double>(schema, field_name, body);
-        default:
-            PanicInfo("unsupported");
+        T value = item.value();
+        expr->conditions_.emplace_back(op, value);
     }
-}
-
-static std::unique_ptr<Expr>
-ParseTermNode(const Schema& schema, const Json& out_body) {
-    Assert(out_body.size() == 1);
-    auto out_iter = out_body.begin();
-    auto field_name = out_iter.key();
-    auto body = out_iter.value();
-    auto data_type = schema[field_name].get_data_type();
-    Assert(!field_is_vector(data_type));
-    switch (data_type) {
-        case DataType::BOOL: {
-            return ParseTermNodeImpl<bool>(schema, field_name, body);
-        }
-        case DataType::INT8: {
-            return ParseTermNodeImpl<int8_t>(schema, field_name, body);
-        }
-        case DataType::INT16: {
-            return ParseTermNodeImpl<int16_t>(schema, field_name, body);
-        }
-        case DataType::INT32: {
-            return ParseTermNodeImpl<int32_t>(schema, field_name, body);
-        }
-        case DataType::INT64: {
-            return ParseTermNodeImpl<int64_t>(schema, field_name, body);
-        }
-        case DataType::FLOAT: {
-            return ParseTermNodeImpl<float>(schema, field_name, body);
-        }
-        case DataType::DOUBLE: {
-            return ParseTermNodeImpl<double>(schema, field_name, body);
-        }
-        default: {
-            PanicInfo("unsupported data_type");
-        }
-    }
-}
-
-static std::unique_ptr<Plan>
-CreatePlanImplNaive(const Schema& schema, const std::string& dsl_str) {
-    auto plan = std::make_unique<Plan>(schema);
-    auto dsl = nlohmann::json::parse(dsl_str);
-    nlohmann::json vec_pack;
-    std::optional<std::unique_ptr<Expr>> predicate;
-
-    auto& bool_dsl = dsl.at("bool");
-    if (bool_dsl.contains("must")) {
-        auto& packs = bool_dsl.at("must");
-        Assert(packs.is_array());
-        for (auto& pack : packs) {
-            if (pack.contains("vector")) {
-                auto& out_body = pack.at("vector");
-                plan->plan_node_ = ParseVecNode(plan.get(), out_body);
-            } else if (pack.contains("term")) {
-                AssertInfo(!predicate, "unsupported complex DSL");
-                auto& out_body = pack.at("term");
-                predicate = ParseTermNode(schema, out_body);
-            } else if (pack.contains("range")) {
-                AssertInfo(!predicate, "unsupported complex DSL");
-                auto& out_body = pack.at("range");
-                predicate = ParseRangeNode(schema, out_body);
-            } else {
-                PanicInfo("unsupported node");
-            }
-        }
-        AssertInfo(plan->plan_node_, "vector node not found");
-    } else if (bool_dsl.contains("vector")) {
-        auto& out_body = bool_dsl.at("vector");
-        plan->plan_node_ = ParseVecNode(plan.get(), out_body);
-        Assert(plan->plan_node_);
-    } else {
-        PanicInfo("Unsupported DSL");
-    }
-    plan->plan_node_->predicate_ = std::move(predicate);
-    // TODO: target_entry parser
-    // if schema autoid is true,
-    //     prepend target_entries_ with row_id
-    // else
-    //     with primary_key
-    //
-    return plan;
+    std::sort(expr->conditions_.begin(), expr->conditions_.end());
+    return expr;
 }
 
 std::unique_ptr<Plan>
 CreatePlan(const Schema& schema, const std::string& dsl_str) {
-    auto plan = CreatePlanImplNaive(schema, dsl_str);
+    auto plan = Parser::CreatePlan(schema, dsl_str);
     return plan;
 }
 
