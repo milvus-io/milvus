@@ -37,10 +37,6 @@ StorageChecker::CheckStoragePermission() {
         return Status(SERVER_UNEXPECTED_ERROR, err_msg);
     }
 
-    if (config.cluster.enable() && config.cluster.role() == ClusterRole::RO) {
-        return Status::OK();
-    }
-
     /* Check db directory write permission */
     const std::string& primary_path = config.storage.path();
 
@@ -51,20 +47,6 @@ StorageChecker::CheckStoragePermission() {
         LOG_SERVER_FATAL_ << err_msg;
         std::cerr << err_msg << std::endl;
         return Status(SERVER_UNEXPECTED_ERROR, err_msg);
-    }
-
-    /* Check wal directory write permission */
-    if (config.wal.enable()) {
-        const std::string& wal_path = config.wal.path();
-
-        ret = access(wal_path.c_str(), F_OK | R_OK | W_OK);
-        if (0 != ret) {
-            std::string err_msg = " Access WAL storage path " + wal_path + " fail. " + strerror(errno) +
-                                  "(code: " + std::to_string(errno) + ")";
-            LOG_SERVER_FATAL_ << err_msg;
-            std::cerr << err_msg << std::endl;
-            return Status(SERVER_UNEXPECTED_ERROR, err_msg);
-        }
     }
 
     return Status::OK();

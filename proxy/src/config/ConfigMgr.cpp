@@ -13,7 +13,7 @@
 #include <cstring>
 #include <limits>
 #include <unordered_map>
-
+#include<iostream>
 #include "config/ConfigMgr.h"
 #include "config/ServerConfig.h"
 
@@ -71,17 +71,9 @@ ConfigMgr::ConfigMgr() {
         /* version */
         {"version", CreateStringConfig("version", false, &config.version.value, "unknown", nullptr, nullptr)},
 
-        /* cluster */
-        {"cluster.enable",
-         CreateBoolConfig("cluster.enable", false, &config.cluster.enable.value, false, nullptr, nullptr)},
-        {"cluster.role", CreateEnumConfig("cluster.role", false, &ClusterRoleMap, &config.cluster.role.value,
-                                          ClusterRole::RW, nullptr, nullptr)},
-
         /* general */
         {"general.timezone",
          CreateStringConfig("general.timezone", false, &config.general.timezone.value, "UTC+8", nullptr, nullptr)},
-        {"general.meta_uri", CreateStringConfig("general.meta_uri", false, &config.general.meta_uri.value,
-                                                "sqlite://:@:/", nullptr, nullptr)},
 
         /* network */
         {"network.bind.address", CreateStringConfig("network.bind.address", false, &config.network.bind.address.value,
@@ -93,6 +85,13 @@ ConfigMgr::ConfigMgr() {
         {"network.http.port", CreateIntegerConfig("network.http.port", false, 0, 65535, &config.network.http.port.value,
                                                   19121, nullptr, nullptr)},
 
+        
+        /* pulsar */
+        {"pulsar.address", CreateStringConfig("pulsar.address", false, &config.pulsar.address.value,
+                                                    "localhost", nullptr, nullptr)},
+        {"pulsar.port", CreateIntegerConfig("pulsar.port", false, 0, 65535, &config.pulsar.port.value,
+                                                  6650, nullptr, nullptr)},
+
         /* storage */
         {"storage.path",
          CreateStringConfig("storage.path", false, &config.storage.path.value, "/var/lib/milvus", nullptr, nullptr)},
@@ -100,15 +99,6 @@ ConfigMgr::ConfigMgr() {
          CreateIntegerConfig("storage.auto_flush_interval", true, 0, std::numeric_limits<int64_t>::max(),
                              &config.storage.auto_flush_interval.value, 1, nullptr, nullptr)},
 
-        /* wal */
-        {"wal.enable", CreateBoolConfig("wal.enable", false, &config.wal.enable.value, true, nullptr, nullptr)},
-        {"wal.recovery_error_ignore",
-         CreateBoolConfig("wal.recovery_error_ignore", false, &config.wal.recovery_error_ignore.value, false, nullptr,
-                          nullptr)},
-        {"wal.buffer_size", CreateSizeConfig("wal.buffer_size", false, 64 * MB, 4096 * MB,
-                                             &config.wal.buffer_size.value, 256 * MB, nullptr, nullptr)},
-        {"wal.path",
-         CreateStringConfig("wal.path", false, &config.wal.path.value, "/var/lib/milvus/wal", nullptr, nullptr)},
 
         /* cache */
         {"cache.cache_size", CreateSizeConfig("cache.cache_size", true, 0, std::numeric_limits<int64_t>::max(),
@@ -124,21 +114,6 @@ ConfigMgr::ConfigMgr() {
         {"cache.preload_collection", CreateStringConfig("cache.preload_collection", false,
                                                         &config.cache.preload_collection.value, "", nullptr, nullptr)},
 
-        /* gpu */
-        {"gpu.enable", CreateBoolConfig("gpu.enable", false, &config.gpu.enable.value, false, nullptr, nullptr)},
-        {"gpu.cache_size", CreateSizeConfig("gpu.cache_size", true, 0, std::numeric_limits<int64_t>::max(),
-                                            &config.gpu.cache_size.value, 1 * GB, nullptr, nullptr)},
-        {"gpu.cache_threshold", CreateFloatingConfig("gpu.cache_threshold", false, 0.0, 1.0,
-                                                     &config.gpu.cache_threshold.value, 0.7, nullptr, nullptr)},
-        {"gpu.gpu_search_threshold",
-         CreateIntegerConfig("gpu.gpu_search_threshold", true, 0, std::numeric_limits<int64_t>::max(),
-                             &config.gpu.gpu_search_threshold.value, 1000, nullptr, nullptr)},
-        {"gpu.search_devices",
-         CreateStringConfig("gpu.search_devices", false, &config.gpu.search_devices.value, "gpu0", nullptr, nullptr)},
-        {"gpu.build_index_devices",
-         CreateStringConfig("gpu.build_index_devices", false, &config.gpu.build_index_devices.value, "gpu0", nullptr,
-                            nullptr)},
-
         /* log */
         {"logs.level", CreateStringConfig("logs.level", false, &config.logs.level.value, "debug", nullptr, nullptr)},
         {"logs.trace.enable",
@@ -149,14 +124,6 @@ ConfigMgr::ConfigMgr() {
                                                     &config.logs.max_log_file_size.value, 1024 * MB, nullptr, nullptr)},
         {"logs.log_rotate_num", CreateIntegerConfig("logs.log_rotate_num", false, 0, 1024,
                                                     &config.logs.log_rotate_num.value, 0, nullptr, nullptr)},
-
-        /* metric */
-        {"metric.enable",
-         CreateBoolConfig("metric.enable", false, &config.metric.enable.value, false, nullptr, nullptr)},
-        {"metric.address",
-         CreateStringConfig("metric.address", false, &config.metric.address.value, "127.0.0.1", nullptr, nullptr)},
-        {"metric.port",
-         CreateIntegerConfig("metric.port", false, 1024, 65535, &config.metric.port.value, 9091, nullptr, nullptr)},
 
         /* tracing */
         {"tracing.json_config_path", CreateStringConfig("tracing.json_config_path", false,
@@ -193,17 +160,19 @@ void
 ConfigMgr::Load(const std::string& path) {
     /* load from milvus.yaml */
     auto yaml = YAML::LoadFile(path);
-
     /* make it flattened */
     std::unordered_map<std::string, std::string> flattened;
     Flatten(yaml, flattened, "");
-
     /* update config */
     for (auto& it : flattened) Set(it.first, it.second, false);
 }
 
 void
 ConfigMgr::Set(const std::string& name, const std::string& value, bool update) {
+    if (config_list_.find(name) == config_list_.end()){
+        std::cout<<"Config "<< name << " not found!"<<std::endl;
+        return;
+    }
     try {
         auto& config = config_list_.at(name);
         std::unique_lock<std::mutex> lock(GetConfigMutex());

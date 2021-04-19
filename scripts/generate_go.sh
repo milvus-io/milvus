@@ -1,14 +1,36 @@
 #!/usr/bin/env bash
-
 SCRIPTS_DIR=$(dirname "$0")
+protoc=protoc
+
+while getopts "p:h" arg; do
+  case $arg in
+  p)
+    protoc=$(readlink -f "${OPTARG}")
+    ;;
+    h) # help
+    echo "
+
+parameter:
+-p: protoc path default("protoc")
+-h: help
+
+usage:
+./build.sh -p protoc [-h]
+                "
+    exit 0
+    ;;
+  ?)
+    echo "ERROR! unknown argument"
+    exit 1
+    ;;
+  esac
+done
+
+
 ROOT_DIR=$SCRIPTS_DIR/..
 source $SCRIPTS_DIR/common.sh
 
-#protoc=protoc
-protoc=${ROOT_DIR}/proxy/cmake_build/thirdparty/grpc/grpc-build/third_party/protobuf/protoc
-
 push $SCRIPTS_DIR/..
-KVPROTO_ROOT=`pwd`
 pop
 
 PROGRAM=$(basename "$0")
@@ -20,7 +42,6 @@ if [ -z $GOPATH ]; then
 fi
 
 GO_PREFIX_PATH=github.com/czs007/suvlim/pkg
-#export PATH=$KVPROTO_ROOT/_tools/bin:$GOPATH/bin:$PATH
 
 function collect() {
     file=$(basename $1)
@@ -35,7 +56,7 @@ function collect() {
 
 # Although eraftpb.proto is copying from raft-rs, however there is no
 # official go code ship with the crate, so we need to generate it manually.
-cd ../proto
+cd ${ROOT_DIR}/proto
 
 PB_FILES=("message.proto")
 GRPC_FILES=("pdpb.proto" "metapb.proto")
