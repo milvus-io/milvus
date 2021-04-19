@@ -10,7 +10,6 @@ import (
 	"log"
 	"os"
 	"strconv"
-	"sync"
 	"time"
 )
 
@@ -25,7 +24,6 @@ func main() {
 	//TODO::close client / consumer/ producer
 
 	mc.ReceiveMessage()
-	wg := sync.WaitGroup{}
 	ctx := context.Background()
 	kv, err := storage.NewStore(ctx, conf.Config.Storage.Driver)
 	// TODO:: if err != nil, should retry link
@@ -75,7 +73,7 @@ func main() {
 				start = time.Now()
 			}
 			if msgLength > 0 {
-				wn.DoWriteNode(ctx, &wg)
+				wn.DoWriteNode(ctx)
 				fmt.Println("write node do a batch message, storage len: ", msgLength)
 			}
 			// Test insert time
@@ -107,7 +105,7 @@ func main() {
 		}
 		msgLength := wn.MessageClient.PrepareBatchMsg()
 		if msgLength > 0 {
-			wn.DoWriteNode(ctx, &wg)
+			wn.DoWriteNode(ctx)
 			fmt.Println("write node do a batch message, storage len: ", msgLength)
 		}
 	}

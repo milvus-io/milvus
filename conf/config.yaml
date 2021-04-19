@@ -54,6 +54,7 @@ writer:
   stopflag: -2
   readerqueuesize: 10000
   searchbyidchansize: 10000
+  parallelism: 100
   topicstart: 0
   topicend: 128
 

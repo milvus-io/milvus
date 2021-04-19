@@ -68,6 +68,7 @@ type Writer struct {
 	StopFlag           int64
 	ReaderQueueSize    int
 	SearchByIdChanSize int
+	Parallelism        int
 	TopicStart         int
 	TopicEnd           int
 }
