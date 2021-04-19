@@ -12,7 +12,6 @@ using engine::QueryResult;
 
 int
 TestABI();
-
 class SegmentBase {
  public:
     // definitions
@@ -78,6 +77,25 @@ class SegmentBase {
 
  public:
     // getter and setter
+    Timestamp get_time_begin() {
+        return time_begin_;
+    }
+    void set_time_begin(Timestamp time_begin) {
+        this->time_begin_ = time_begin;
+    }
+    Timestamp get_time_end() {
+        return time_end_; 
+    }
+    void set_time_end(Timestamp time_end) {
+        this->time_end_ = time_end;
+    }
+    uint64_t get_segment_id(uint64_t segment_id) {
+        return segment_id_;
+    }
+    uint64_t set_segment_id(uint64_t segment_id) {
+        this->segment_id_ = segment_id;
+    }
+
  private:
     Timestamp time_begin_;
     Timestamp time_end_;

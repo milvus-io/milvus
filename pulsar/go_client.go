@@ -4,7 +4,7 @@ import (
 	"context"
 	"github.com/apache/pulsar/pulsar-client-go/pulsar"
 	"log"
-	"suvlim/pulsar/schema"
+	"github.com/czs007/suvlim/pulsar/schema"
 	"sync"
 )
 
