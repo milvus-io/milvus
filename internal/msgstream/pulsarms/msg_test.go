@@ -164,7 +164,11 @@ func TestStream_task_Insert(t *testing.T) {
 			msgs := result.Msgs
 			for _, v := range msgs {
 				receiveCount++
-				fmt.Println("msg type: ", v.Type(), ", msg value: ", v, "msg tag: ", v.(*InsertTask).Tag)
+				// variable v could be type of '*msgstream.TimeTickMsg', here need to check
+				// if type conversation is successful
+				if task, ok := v.(*InsertTask); ok {
+					fmt.Println("msg type: ", v.Type(), ", msg value: ", v, "msg tag: ", task.Tag)
+				}
 			}
 		}
 		if receiveCount >= len(msgPack.Msgs) {

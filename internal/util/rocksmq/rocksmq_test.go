@@ -1,10 +1,12 @@
 package rocksmq
 
 import (
+	"log"
 	"os"
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
@@ -202,4 +204,68 @@ func TestRocksMQ_Goroutines(t *testing.T) {
 		}(&wg, rmq)
 	}
 	wg.Wait()
+}
+
+/**
+	This test is aim to measure RocksMq throughout.
+	Hardware:
+		CPU   Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz
+        Disk  SSD
+
+    Test with 1,000,000 message, result is as follow:
+	  	Produce: 190000 message / s
+		Consume: 90000 message / s
+*/
+func TestRocksMQ_Throughout(t *testing.T) {
+	etcdAddr := os.Getenv("ETCD_ADDRESS")
+	if etcdAddr == "" {
+		etcdAddr = "localhost:2379"
+	}
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	assert.Nil(t, err)
+	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
+	defer etcdKV.Close()
+	idAllocator := NewGlobalIDAllocator("dummy", etcdKV)
+	_ = idAllocator.Initialize()
+
+	name := "/tmp/rocksmq_3"
+	defer os.RemoveAll(name)
+	rmq, err := NewRocksMQ(name, idAllocator)
+	assert.Nil(t, err)
+
+	channelName := "channel_throughout_test"
+	err = rmq.CreateChannel(channelName)
+	assert.Nil(t, err)
+	defer rmq.DestroyChannel(channelName)
+
+	entityNum := 1000000
+
+	pt0 := time.Now().UnixNano() / int64(time.Millisecond)
+	for i := 0; i < entityNum; i++ {
+		msg := "message_" + strconv.Itoa(i)
+		pMsg := ProducerMessage{payload: []byte(msg)}
+		assert.Nil(t, idAllocator.UpdateID())
+		err := rmq.Produce(channelName, []ProducerMessage{pMsg})
+		assert.Nil(t, err)
+	}
+	pt1 := time.Now().UnixNano() / int64(time.Millisecond)
+	pDuration := pt1 - pt0
+	log.Printf("Total produce %d item, cost %v ms, throughout %v / s", entityNum, pDuration, int64(entityNum)*1000/pDuration)
+
+	groupName := "test_throughout_group"
+	_ = rmq.DestroyConsumerGroup(groupName, channelName)
+	_, err = rmq.CreateConsumerGroup(groupName, channelName)
+	assert.Nil(t, err)
+	defer rmq.DestroyConsumerGroup(groupName, channelName)
+
+	// Consume one message in each goroutine
+	ct0 := time.Now().UnixNano() / int64(time.Millisecond)
+	for i := 0; i < entityNum; i++ {
+		cMsgs, err := rmq.Consume(groupName, channelName, 1)
+		assert.Nil(t, err)
+		assert.Equal(t, len(cMsgs), 1)
+	}
+	ct1 := time.Now().UnixNano() / int64(time.Millisecond)
+	cDuration := ct1 - ct0
+	log.Printf("Total consume %d item, cost %v ms, throughout %v / s", entityNum, cDuration, int64(entityNum)*1000/cDuration)
 }
