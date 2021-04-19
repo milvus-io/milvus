@@ -36,7 +36,6 @@ type Segment struct {
 	segmentPtr C.CSegmentInterface
 
 	segmentID    UniqueID
-	partitionTag string // TODO: use partitionID
 	partitionID  UniqueID
 	collectionID UniqueID
 	lastMemSize  int64
@@ -79,25 +78,6 @@ func (s *Segment) getType() segmentType {
 	s.typeMu.Lock()
 	defer s.typeMu.Unlock()
 	return s.segmentType
-}
-
-func newSegment2(collection *Collection, segmentID int64, partitionTag string, collectionID UniqueID, segType segmentType) *Segment {
-	/*
-		CSegmentInterface
-		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
-	*/
-	initIndexParam := make(map[int64]indexParam)
-	segmentPtr := C.NewSegment(collection.collectionPtr, C.ulong(segmentID), segType)
-	var newSegment = &Segment{
-		segmentPtr:   segmentPtr,
-		segmentType:  segType,
-		segmentID:    segmentID,
-		partitionTag: partitionTag,
-		collectionID: collectionID,
-		indexParam:   initIndexParam,
-	}
-
-	return newSegment
 }
 
 func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, collectionID UniqueID, segType segmentType) *Segment {

@@ -165,8 +165,3 @@ func TestParamTable_ddChannelName(t *testing.T) {
 	contains := strings.Contains(names[0], "data-definition-0")
 	assert.Equal(t, contains, true)
 }
-
-func TestParamTable_defaultPartitionTag(t *testing.T) {
-	tag := Params.DefaultPartitionTag
-	assert.Equal(t, tag, "_default")
-}

@@ -19,27 +19,18 @@ type dataSyncService struct {
 
 func newDataSyncService(ctx context.Context, flushChan chan *flushMsg,
 	replica collectionReplica, alloc allocator) *dataSyncService {
-	service := &dataSyncService{
+
+	return &dataSyncService{
 		ctx:         ctx,
 		fg:          nil,
 		flushChan:   flushChan,
 		replica:     replica,
 		idAllocator: alloc,
 	}
-	return service
-}
-
-func (dsService *dataSyncService) init() {
-	if len(Params.InsertChannelNames) == 0 {
-		log.Println("InsertChannels not readly, init datasync service failed")
-		return
-	}
-
-	dsService.initNodes()
 }
 
 func (dsService *dataSyncService) start() {
-	log.Println("Data Sync Service Start Successfully")
+	dsService.initNodes()
 	dsService.fg.Start()
 }
 
@@ -69,6 +60,7 @@ func (dsService *dataSyncService) initNodes() {
 	var ddStreamNode Node = newDDInputNode(dsService.ctx)
 
 	var filterDmNode Node = newFilteredDmNode()
+
 	var ddNode Node = newDDNode(dsService.ctx, mt, dsService.flushChan, dsService.replica, dsService.idAllocator)
 	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, mt, dsService.replica, dsService.idAllocator)
 	var gcNode Node = newGCNode(dsService.replica)

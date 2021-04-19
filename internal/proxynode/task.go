@@ -1,12 +1,16 @@
 package proxynode
 
 import (
+	"context"
 	"errors"
 	"log"
 	"math"
 	"strconv"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+
+	"github.com/opentracing/opentracing-go"
+	oplog "github.com/opentracing/opentracing-go/log"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
@@ -41,6 +45,7 @@ type InsertTask struct {
 	Condition
 	dataServiceClient DataServiceClient
 	result            *milvuspb.InsertResponse
+	ctx               context.Context
 	rowIDAllocator    *allocator.IDAllocator
 }
 
@@ -82,12 +87,21 @@ func (it *InsertTask) PreExecute() error {
 	it.Base.MsgType = commonpb.MsgType_kInsert
 	it.Base.SourceID = Params.ProxyID
 
+	span, ctx := opentracing.StartSpanFromContext(it.ctx, "InsertTask preExecute")
+	defer span.Finish()
+	it.ctx = ctx
+	span.SetTag("hash keys", it.Base.MsgID)
+	span.SetTag("start time", it.BeginTs())
 	collectionName := it.BaseInsertTask.CollectionName
 	if err := ValidateCollectionName(collectionName); err != nil {
+		span.LogFields(oplog.Error(err))
+		span.Finish()
 		return err
 	}
 	partitionTag := it.BaseInsertTask.PartitionName
 	if err := ValidatePartitionTag(partitionTag, true); err != nil {
+		span.LogFields(oplog.Error(err))
+		span.Finish()
 		return err
 	}
 
@@ -95,7 +109,13 @@ func (it *InsertTask) PreExecute() error {
 }
 
 func (it *InsertTask) Execute() error {
+	span, ctx := opentracing.StartSpanFromContext(it.ctx, "InsertTask Execute")
+	defer span.Finish()
+	it.ctx = ctx
+	span.SetTag("hash keys", it.Base.MsgID)
+	span.SetTag("start time", it.BeginTs())
 	collectionName := it.BaseInsertTask.CollectionName
+	span.LogFields(oplog.String("collection_name", collectionName))
 	collSchema, err := globalMetaCache.GetCollectionSchema(collectionName)
 	if err != nil {
 		return err
@@ -106,24 +126,19 @@ func (it *InsertTask) Execute() error {
 		return err
 	}
 	it.CollectionID = collID
-	var partitionID UniqueID
-	if len(it.PartitionName) > 0 {
-		partitionID, err = globalMetaCache.GetPartitionID(collectionName, it.PartitionName)
-		if err != nil {
-			return err
-		}
-	} else {
-		partitionID, err = globalMetaCache.GetPartitionID(collectionName, Params.DefaultPartitionTag)
-		if err != nil {
-			return err
-		}
+	partitionID, err := globalMetaCache.GetPartitionID(collectionName, it.PartitionName)
+	if err != nil {
+		return err
 	}
 	it.PartitionID = partitionID
+	span.LogFields(oplog.Bool("auto_id", autoID))
 	var rowIDBegin UniqueID
 	var rowIDEnd UniqueID
 	rowNums := len(it.BaseInsertTask.RowData)
 	rowIDBegin, rowIDEnd, _ = it.rowIDAllocator.Alloc(uint32(rowNums))
-
+	span.LogFields(oplog.Int("rowNums", rowNums),
+		oplog.Int("rowIDBegin", int(rowIDBegin)),
+		oplog.Int("rowIDEnd", int(rowIDEnd)))
 	it.BaseInsertTask.RowIDs = make([]UniqueID, rowNums)
 	for i := rowIDBegin; i < rowIDEnd; i++ {
 		offset := i - rowIDBegin
@@ -146,7 +161,8 @@ func (it *InsertTask) Execute() error {
 		EndTs:   it.EndTs(),
 		Msgs:    make([]msgstream.TsMsg, 1),
 	}
-	tsMsg.SetMsgContext(it.Ctx())
+	tsMsg.SetMsgContext(ctx)
+	span.LogFields(oplog.String("send msg", "send msg"))
 
 	it.result = &milvuspb.InsertResponse{
 		Status: &commonpb.Status{
@@ -182,6 +198,7 @@ func (it *InsertTask) Execute() error {
 	if err != nil {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
 		it.result.Status.Reason = err.Error()
+		span.LogFields(oplog.Error(err))
 		return err
 	}
 
@@ -189,6 +206,7 @@ func (it *InsertTask) Execute() error {
 	if err != nil {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
 		it.result.Status.Reason = err.Error()
+		span.LogFields(oplog.Error(err))
 		return err
 	}
 
@@ -196,6 +214,8 @@ func (it *InsertTask) Execute() error {
 }
 
 func (it *InsertTask) PostExecute() error {
+	span, _ := opentracing.StartSpanFromContext(it.ctx, "InsertTask postExecute")
+	defer span.Finish()
 	return nil
 }
 
@@ -205,6 +225,7 @@ type CreateCollectionTask struct {
 	masterClient      MasterClient
 	dataServiceClient DataServiceClient
 	result            *commonpb.Status
+	ctx               context.Context
 	schema            *schemapb.CollectionSchema
 }
 
@@ -345,6 +366,7 @@ type DropCollectionTask struct {
 	*milvuspb.DropCollectionRequest
 	masterClient MasterClient
 	result       *commonpb.Status
+	ctx          context.Context
 }
 
 func (dct *DropCollectionTask) OnEnqueue() error {
@@ -413,6 +435,7 @@ type SearchTask struct {
 	queryMsgStream *pulsarms.PulsarMsgStream
 	resultBuf      chan []*internalpb2.SearchResults
 	result         *milvuspb.SearchResults
+	ctx            context.Context
 	query          *milvuspb.SearchRequest
 }
 
@@ -448,52 +471,52 @@ func (st *SearchTask) PreExecute() error {
 	st.Base.MsgType = commonpb.MsgType_kSearch
 	st.Base.SourceID = Params.ProxyID
 
+	span, ctx := opentracing.StartSpanFromContext(st.ctx, "SearchTask preExecute")
+	defer span.Finish()
+	st.ctx = ctx
+	span.SetTag("hash keys", st.Base.MsgID)
+	span.SetTag("start time", st.BeginTs())
+
 	collectionName := st.query.CollectionName
 	_, err := globalMetaCache.GetCollectionID(collectionName)
 	if err != nil { // err is not nil if collection not exists
+		span.LogFields(oplog.Error(err))
+		span.Finish()
 		return err
 	}
 
 	if err := ValidateCollectionName(st.query.CollectionName); err != nil {
+		span.LogFields(oplog.Error(err))
+		span.Finish()
 		return err
 	}
 
 	for _, tag := range st.query.PartitionNames {
 		if err := ValidatePartitionTag(tag, false); err != nil {
+			span.LogFields(oplog.Error(err))
+			span.Finish()
 			return err
 		}
 	}
 	st.Base.MsgType = commonpb.MsgType_kSearch
 	queryBytes, err := proto.Marshal(st.query)
 	if err != nil {
+		span.LogFields(oplog.Error(err))
+		span.Finish()
 		return err
 	}
 	st.Query = &commonpb.Blob{
 		Value: queryBytes,
 	}
-
-	st.ResultChannelID = Params.SearchResultChannelNames[0]
-	st.DbID = 0 // todo
-	collectionID, err := globalMetaCache.GetCollectionID(collectionName)
-	if err != nil { // err is not nil if collection not exists
-		return err
-	}
-	st.CollectionID = collectionID
-	st.PartitionIDs = make([]UniqueID, 0)
-	for _, partitionName := range st.query.PartitionNames {
-		partitionID, err := globalMetaCache.GetPartitionID(collectionName, partitionName)
-		if err != nil {
-			return err
-		}
-		st.PartitionIDs = append(st.PartitionIDs, partitionID)
-	}
-	st.Dsl = st.query.Dsl
-	st.PlaceholderGroup = st.query.PlaceholderGroup
-
 	return nil
 }
 
 func (st *SearchTask) Execute() error {
+	span, ctx := opentracing.StartSpanFromContext(st.ctx, "SearchTask Execute")
+	defer span.Finish()
+	st.ctx = ctx
+	span.SetTag("hash keys", st.Base.MsgID)
+	span.SetTag("start time", st.BeginTs())
 	var tsMsg msgstream.TsMsg = &msgstream.SearchMsg{
 		SearchRequest: st.SearchRequest,
 		BaseMsg: msgstream.BaseMsg{
@@ -507,24 +530,32 @@ func (st *SearchTask) Execute() error {
 		EndTs:   st.Base.Timestamp,
 		Msgs:    make([]msgstream.TsMsg, 1),
 	}
-	tsMsg.SetMsgContext(st.Ctx())
+	tsMsg.SetMsgContext(ctx)
 	msgPack.Msgs[0] = tsMsg
 	err := st.queryMsgStream.Produce(msgPack)
 	log.Printf("[NodeImpl] length of searchMsg: %v", len(msgPack.Msgs))
 	if err != nil {
+		span.LogFields(oplog.Error(err))
+		span.Finish()
 		log.Printf("[NodeImpl] send search request failed: %v", err)
 	}
 	return err
 }
 
 func (st *SearchTask) PostExecute() error {
+	span, _ := opentracing.StartSpanFromContext(st.ctx, "SearchTask postExecute")
+	defer span.Finish()
+	span.SetTag("hash keys", st.Base.MsgID)
+	span.SetTag("start time", st.BeginTs())
 	for {
 		select {
-		case <-st.Ctx().Done():
+		case <-st.ctx.Done():
 			log.Print("SearchTask: wait to finish failed, timeout!, taskID:", st.ID())
+			span.LogFields(oplog.String("wait to finish failed, timeout", "wait to finish failed, timeout"))
 			return errors.New("SearchTask:wait to finish failed, timeout:" + strconv.FormatInt(st.ID(), 10))
 		case searchResults := <-st.resultBuf:
 			// fmt.Println("searchResults: ", searchResults)
+			span.LogFields(oplog.String("receive result", "receive result"))
 			filterSearchResult := make([]*internalpb2.SearchResults, 0)
 			var filterReason string
 			for _, partialSearchResult := range searchResults {
@@ -553,6 +584,7 @@ func (st *SearchTask) PostExecute() error {
 						Reason:    filterReason,
 					},
 				}
+				span.LogFields(oplog.Error(errors.New(filterReason)))
 				return errors.New(filterReason)
 			}
 
@@ -661,6 +693,7 @@ func (st *SearchTask) PostExecute() error {
 				reducedHitsBs, err := proto.Marshal(reducedHits)
 				if err != nil {
 					log.Println("marshal error")
+					span.LogFields(oplog.Error(err))
 					return err
 				}
 				st.result.Hits = append(st.result.Hits, reducedHitsBs)
@@ -675,6 +708,7 @@ type HasCollectionTask struct {
 	*milvuspb.HasCollectionRequest
 	masterClient MasterClient
 	result       *milvuspb.BoolResponse
+	ctx          context.Context
 }
 
 func (hct *HasCollectionTask) OnEnqueue() error {
@@ -731,6 +765,7 @@ type DescribeCollectionTask struct {
 	*milvuspb.DescribeCollectionRequest
 	masterClient MasterClient
 	result       *milvuspb.DescribeCollectionResponse
+	ctx          context.Context
 }
 
 func (dct *DescribeCollectionTask) OnEnqueue() error {
@@ -790,6 +825,7 @@ type GetCollectionsStatisticsTask struct {
 	*milvuspb.CollectionStatsRequest
 	dataServiceClient DataServiceClient
 	result            *milvuspb.CollectionStatsResponse
+	ctx               context.Context
 }
 
 func (g *GetCollectionsStatisticsTask) ID() UniqueID {
@@ -865,6 +901,7 @@ type ShowCollectionsTask struct {
 	*milvuspb.ShowCollectionRequest
 	masterClient MasterClient
 	result       *milvuspb.ShowCollectionResponse
+	ctx          context.Context
 }
 
 func (sct *ShowCollectionsTask) OnEnqueue() error {
@@ -918,6 +955,7 @@ type CreatePartitionTask struct {
 	*milvuspb.CreatePartitionRequest
 	masterClient MasterClient
 	result       *commonpb.Status
+	ctx          context.Context
 }
 
 func (cpt *CreatePartitionTask) OnEnqueue() error {
@@ -980,6 +1018,7 @@ type DropPartitionTask struct {
 	*milvuspb.DropPartitionRequest
 	masterClient MasterClient
 	result       *commonpb.Status
+	ctx          context.Context
 }
 
 func (dpt *DropPartitionTask) OnEnqueue() error {
@@ -1042,6 +1081,7 @@ type HasPartitionTask struct {
 	*milvuspb.HasPartitionRequest
 	masterClient MasterClient
 	result       *milvuspb.BoolResponse
+	ctx          context.Context
 }
 
 func (hpt *HasPartitionTask) OnEnqueue() error {
@@ -1098,11 +1138,66 @@ func (hpt *HasPartitionTask) PostExecute() error {
 	return nil
 }
 
+//type DescribePartitionTask struct {
+//	Condition
+//	internalpb.DescribePartitionRequest
+//	masterClient masterpb.MasterServiceClient
+//	result       *milvuspb.PartitionDescription
+//	ctx          context.Context
+//}
+//
+//func (dpt *DescribePartitionTask) ID() UniqueID {
+//	return dpt.ReqID
+//}
+//
+//func (dpt *DescribePartitionTask) SetID(uid UniqueID) {
+//	dpt.ReqID = uid
+//}
+//
+//func (dpt *DescribePartitionTask) Type() commonpb.MsgType {
+//	return dpt.MsgType
+//}
+//
+//func (dpt *DescribePartitionTask) BeginTs() Timestamp {
+//	return dpt.Timestamp
+//}
+//
+//func (dpt *DescribePartitionTask) EndTs() Timestamp {
+//	return dpt.Timestamp
+//}
+//
+//func (dpt *DescribePartitionTask) SetTs(ts Timestamp) {
+//	dpt.Timestamp = ts
+//}
+//
+//func (dpt *DescribePartitionTask) PreExecute() error {
+//	collName, partitionTag := dpt.PartitionName.CollectionName, dpt.PartitionName.Tag
+//
+//	if err := ValidateCollectionName(collName); err != nil {
+//		return err
+//	}
+//
+//	if err := ValidatePartitionTag(partitionTag, true); err != nil {
+//		return err
+//	}
+//	return nil
+//}
+//
+//func (dpt *DescribePartitionTask) Execute() (err error) {
+//	dpt.result, err = dpt.masterClient.DescribePartition(dpt.ctx, &dpt.DescribePartitionRequest)
+//	return err
+//}
+//
+//func (dpt *DescribePartitionTask) PostExecute() error {
+//	return nil
+//}
+
 type ShowPartitionsTask struct {
 	Condition
 	*milvuspb.ShowPartitionRequest
 	masterClient MasterClient
 	result       *milvuspb.ShowPartitionResponse
+	ctx          context.Context
 }
 
 func (spt *ShowPartitionsTask) OnEnqueue() error {
@@ -1162,6 +1257,7 @@ type CreateIndexTask struct {
 	*milvuspb.CreateIndexRequest
 	masterClient MasterClient
 	result       *commonpb.Status
+	ctx          context.Context
 }
 
 func (cit *CreateIndexTask) OnEnqueue() error {
@@ -1224,6 +1320,7 @@ type DescribeIndexTask struct {
 	*milvuspb.DescribeIndexRequest
 	masterClient MasterClient
 	result       *milvuspb.DescribeIndexResponse
+	ctx          context.Context
 }
 
 func (dit *DescribeIndexTask) OnEnqueue() error {
@@ -1287,6 +1384,7 @@ type GetIndexStateTask struct {
 	*milvuspb.IndexStateRequest
 	indexServiceClient IndexServiceClient
 	result             *milvuspb.IndexStateResponse
+	ctx                context.Context
 }
 
 func (dipt *GetIndexStateTask) OnEnqueue() error {
@@ -1359,6 +1457,7 @@ type FlushTask struct {
 	*milvuspb.FlushRequest
 	dataServiceClient DataServiceClient
 	result            *commonpb.Status
+	ctx               context.Context
 }
 
 func (ft *FlushTask) OnEnqueue() error {
@@ -1397,34 +1496,23 @@ func (ft *FlushTask) PreExecute() error {
 }
 
 func (ft *FlushTask) Execute() error {
-	for _, collName := range ft.CollectionNames {
-		collID, err := globalMetaCache.GetCollectionID(collName)
-		if err != nil {
-			return err
-		}
-		flushReq := &datapb.FlushRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kFlush,
-				MsgID:     ft.Base.MsgID,
-				Timestamp: ft.Base.Timestamp,
-				SourceID:  ft.Base.SourceID,
-			},
-			DbID:         0,
-			CollectionID: collID,
-		}
-		var status *commonpb.Status
-		status, err = ft.dataServiceClient.Flush(flushReq)
-		if err != nil {
-			return nil
-		}
-		if status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-			return errors.New(status.Reason)
-		}
+	var err error
+	collID, err := globalMetaCache.GetCollectionID(ft.CollectionName)
+	if err != nil {
+		return err
 	}
-	ft.result = &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
+	flushReq := &datapb.FlushRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kFlush,
+			MsgID:     ft.Base.MsgID,
+			Timestamp: ft.Base.Timestamp,
+			SourceID:  ft.Base.SourceID,
+		},
+		DbID:         0,
+		CollectionID: collID,
 	}
-	return nil
+	ft.result, err = ft.dataServiceClient.Flush(flushReq)
+	return err
 }
 
 func (ft *FlushTask) PostExecute() error {

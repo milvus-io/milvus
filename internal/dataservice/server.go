@@ -85,6 +85,7 @@ type (
 		segAllocator      segmentAllocator
 		statsHandler      *statsHandler
 		ddHandler         *ddHandler
+		insertChannelMgr  *insertChannelManager
 		allocator         allocator
 		cluster           *dataNodeCluster
 		msgProducer       *timesync.MsgProducer
@@ -94,7 +95,6 @@ type (
 		k2sMsgStream      msgstream.MsgStream
 		ddChannelName     string
 		segmentInfoStream msgstream.MsgStream
-		insertChannels    []string
 	}
 )
 
@@ -103,21 +103,12 @@ func CreateServer(ctx context.Context) (*Server, error) {
 	ch := make(chan struct{})
 	s := &Server{
 		ctx:              ctx,
+		insertChannelMgr: newInsertChannelManager(),
 		registerFinishCh: ch,
 		cluster:          newDataNodeCluster(ch),
 	}
-	s.insertChannels = s.getInsertChannels()
 	s.state.Store(internalpb2.StateCode_INITIALIZING)
 	return s, nil
-}
-
-func (s *Server) getInsertChannels() []string {
-	channels := make([]string, Params.InsertChannelNum)
-	var i int64 = 0
-	for ; i < Params.InsertChannelNum; i++ {
-		channels[i] = Params.InsertChannelPrefixName + strconv.FormatInt(i, 10)
-	}
-	return channels
 }
 
 func (s *Server) SetMasterClient(masterClient MasterClient) {
@@ -146,7 +137,6 @@ func (s *Server) Start() error {
 	}
 	s.startServerLoop()
 	s.waitDataNodeRegister()
-	s.cluster.WatchInsertChannels(s.insertChannels)
 	if err = s.initMsgProducer(); err != nil {
 		return err
 	}
@@ -685,7 +675,16 @@ func (s *Server) GetInsertBinlogPaths(req *datapb.InsertBinlogPathRequest) (*dat
 }
 
 func (s *Server) GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, error) {
-	return s.insertChannels, nil
+	if !s.checkStateIsHealthy() {
+		return nil, errors.New("server is initializing")
+	}
+	channels, err := s.insertChannelMgr.GetChannels(req.CollectionID)
+	if err != nil {
+		return nil, err
+	}
+
+	s.cluster.WatchInsertChannels(req.CollectionID, channels)
+	return channels, nil
 }
 
 func (s *Server) GetCollectionStatistics(req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error) {

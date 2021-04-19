@@ -239,7 +239,6 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 		return errors.New("unmarshal query failed")
 	}
 	collectionID := searchMsg.CollectionID
-	partitionTagsInQuery := query.PartitionNames
 	collection, err := ss.replica.getCollectionByID(collectionID)
 	if err != nil {
 		span.LogFields(oplog.Error(err))
@@ -263,29 +262,30 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	searchResults := make([]*SearchResult, 0)
 	matchedSegments := make([]*Segment, 0)
 
-	//fmt.Println("search msg's partitionTag = ", partitionTagsInQuery)
+	//fmt.Println("search msg's partitionID = ", partitionIDsInQuery)
 
-	var partitionTagsInCol []string
+	var partitionIDsInCol []UniqueID
 	for _, partition := range collection.partitions {
-		partitionTag := partition.partitionTag
-		partitionTagsInCol = append(partitionTagsInCol, partitionTag)
+		partitionID := partition.ID()
+		partitionIDsInCol = append(partitionIDsInCol, partitionID)
 	}
-	var searchPartitionTag []string
-	if len(partitionTagsInQuery) == 0 {
-		searchPartitionTag = partitionTagsInCol
+	var searchPartitionIDs []UniqueID
+	partitionIDsInQuery := searchMsg.PartitionIDs
+	if len(partitionIDsInQuery) == 0 {
+		searchPartitionIDs = partitionIDsInCol
 	} else {
-		for _, tag := range partitionTagsInCol {
-			for _, toMatchTag := range partitionTagsInQuery {
-				re := regexp.MustCompile("^" + toMatchTag + "$")
-				if re.MatchString(tag) {
-					searchPartitionTag = append(searchPartitionTag, tag)
+		for _, id := range partitionIDsInCol {
+			for _, toMatchID := range partitionIDsInQuery {
+				re := regexp.MustCompile("^" + strconv.FormatInt(toMatchID, 10) + "$")
+				if re.MatchString(strconv.FormatInt(id, 10)) {
+					searchPartitionIDs = append(searchPartitionIDs, id)
 				}
 			}
 		}
 	}
 
-	for _, partitionTag := range searchPartitionTag {
-		partition, _ := ss.replica.getPartitionByTag(collectionID, partitionTag)
+	for _, partitionID := range searchPartitionIDs {
+		partition, _ := ss.replica.getPartitionByID(collectionID, partitionID)
 		for _, segment := range partition.segments {
 			//fmt.Println("dsl = ", dsl)
 

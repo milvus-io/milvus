@@ -43,17 +43,14 @@ type collectionReplica interface {
 	getVecFieldsByCollectionID(collectionID UniqueID) ([]int64, error)
 
 	// partition
-	// Partition tags in different collections are not unique,
-	// so partition api should specify the target collection.
+	// TODO: remove collection ID, add a `map[partitionID]partition` to replica implement
 	getPartitionNum(collectionID UniqueID) (int, error)
-	addPartition2(collectionID UniqueID, partitionTag string) error
 	addPartition(collectionID UniqueID, partitionID UniqueID) error
-	removePartition(collectionID UniqueID, partitionTag string) error
-	addPartitionsByCollectionMeta(colMeta *etcdpb.CollectionMeta) error
-	removePartitionsByCollectionMeta(colMeta *etcdpb.CollectionMeta) error
-	getPartitionByTag(collectionID UniqueID, partitionTag string) (*Partition, error)
+	removePartition(collectionID UniqueID, partitionID UniqueID) error
+	addPartitionsByCollectionMeta(colMeta *etcdpb.CollectionInfo) error
+	removePartitionsByCollectionMeta(colMeta *etcdpb.CollectionInfo) error
 	getPartitionByID(collectionID UniqueID, partitionID UniqueID) (*Partition, error)
-	hasPartition(collectionID UniqueID, partitionTag string) bool
+	hasPartition(collectionID UniqueID, partitionID UniqueID) bool
 	enablePartitionDM(collectionID UniqueID, partitionID UniqueID) error
 	disablePartitionDM(collectionID UniqueID, partitionID UniqueID) error
 	getEnablePartitionDM(collectionID UniqueID, partitionID UniqueID) (bool, error)
@@ -61,7 +58,6 @@ type collectionReplica interface {
 	// segment
 	getSegmentNum() int
 	getSegmentStatistics() []*internalpb2.SegmentStats
-	addSegment2(segmentID UniqueID, partitionTag string, collectionID UniqueID, segType segmentType) error
 	addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, segType segmentType) error
 	removeSegment(segmentID UniqueID) error
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
@@ -197,21 +193,6 @@ func (colReplica *collectionReplicaImpl) getPartitionNum(collectionID UniqueID) 
 	return len(collection.partitions), nil
 }
 
-func (colReplica *collectionReplicaImpl) addPartition2(collectionID UniqueID, partitionTag string) error {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-
-	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
-	if err != nil {
-		return err
-	}
-
-	var newPartition = newPartition2(partitionTag)
-
-	*collection.Partitions() = append(*collection.Partitions(), newPartition)
-	return nil
-}
-
 func (colReplica *collectionReplicaImpl) addPartition(collectionID UniqueID, partitionID UniqueID) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
@@ -227,14 +208,14 @@ func (colReplica *collectionReplicaImpl) addPartition(collectionID UniqueID, par
 	return nil
 }
 
-func (colReplica *collectionReplicaImpl) removePartition(collectionID UniqueID, partitionTag string) error {
+func (colReplica *collectionReplicaImpl) removePartition(collectionID UniqueID, partitionID UniqueID) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
-	return colReplica.removePartitionPrivate(collectionID, partitionTag)
+	return colReplica.removePartitionPrivate(collectionID, partitionID)
 }
 
-func (colReplica *collectionReplicaImpl) removePartitionPrivate(collectionID UniqueID, partitionTag string) error {
+func (colReplica *collectionReplicaImpl) removePartitionPrivate(collectionID UniqueID, partitionID UniqueID) error {
 	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		return err
@@ -242,7 +223,7 @@ func (colReplica *collectionReplicaImpl) removePartitionPrivate(collectionID Uni
 
 	var tmpPartitions = make([]*Partition, 0)
 	for _, p := range *collection.Partitions() {
-		if p.Tag() == partitionTag {
+		if p.ID() == partitionID {
 			for _, s := range *p.Segments() {
 				deleteSegment(colReplica.segments[s.ID()])
 				delete(colReplica.segments, s.ID())
@@ -257,30 +238,30 @@ func (colReplica *collectionReplicaImpl) removePartitionPrivate(collectionID Uni
 }
 
 // deprecated
-func (colReplica *collectionReplicaImpl) addPartitionsByCollectionMeta(colMeta *etcdpb.CollectionMeta) error {
+func (colReplica *collectionReplicaImpl) addPartitionsByCollectionMeta(colMeta *etcdpb.CollectionInfo) error {
 	if !colReplica.hasCollection(colMeta.ID) {
 		err := errors.New("Cannot find collection, id = " + strconv.FormatInt(colMeta.ID, 10))
 		return err
 	}
-	pToAdd := make([]string, 0)
-	for _, partitionTag := range colMeta.PartitionTags {
-		if !colReplica.hasPartition(colMeta.ID, partitionTag) {
-			pToAdd = append(pToAdd, partitionTag)
+	pToAdd := make([]UniqueID, 0)
+	for _, partitionID := range colMeta.PartitionIDs {
+		if !colReplica.hasPartition(colMeta.ID, partitionID) {
+			pToAdd = append(pToAdd, partitionID)
 		}
 	}
 
-	for _, tag := range pToAdd {
-		err := colReplica.addPartition2(colMeta.ID, tag)
+	for _, id := range pToAdd {
+		err := colReplica.addPartition(colMeta.ID, id)
 		if err != nil {
 			log.Println(err)
 		}
-		fmt.Println("add partition: ", tag)
+		fmt.Println("add partition: ", id)
 	}
 
 	return nil
 }
 
-func (colReplica *collectionReplicaImpl) removePartitionsByCollectionMeta(colMeta *etcdpb.CollectionMeta) error {
+func (colReplica *collectionReplicaImpl) removePartitionsByCollectionMeta(colMeta *etcdpb.CollectionInfo) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
@@ -289,35 +270,28 @@ func (colReplica *collectionReplicaImpl) removePartitionsByCollectionMeta(colMet
 		return err
 	}
 
-	pToDel := make([]string, 0)
+	pToDel := make([]UniqueID, 0)
 	for _, partition := range col.partitions {
 		hasPartition := false
-		for _, tag := range colMeta.PartitionTags {
-			if partition.partitionTag == tag {
+		for _, id := range colMeta.PartitionIDs {
+			if partition.ID() == id {
 				hasPartition = true
 			}
 		}
 		if !hasPartition {
-			pToDel = append(pToDel, partition.partitionTag)
+			pToDel = append(pToDel, partition.ID())
 		}
 	}
 
-	for _, tag := range pToDel {
-		err := colReplica.removePartitionPrivate(col.ID(), tag)
+	for _, id := range pToDel {
+		err := colReplica.removePartitionPrivate(col.ID(), id)
 		if err != nil {
 			log.Println(err)
 		}
-		fmt.Println("delete partition: ", tag)
+		fmt.Println("delete partition: ", id)
 	}
 
 	return nil
-}
-
-func (colReplica *collectionReplicaImpl) getPartitionByTag(collectionID UniqueID, partitionTag string) (*Partition, error) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-
-	return colReplica.getPartitionByTagPrivate(collectionID, partitionTag)
 }
 
 func (colReplica *collectionReplicaImpl) getPartitionByID(collectionID UniqueID, partitionID UniqueID) (*Partition, error) {
@@ -325,21 +299,6 @@ func (colReplica *collectionReplicaImpl) getPartitionByID(collectionID UniqueID,
 	defer colReplica.mu.RUnlock()
 
 	return colReplica.getPartitionByIDPrivate(collectionID, partitionID)
-}
-
-func (colReplica *collectionReplicaImpl) getPartitionByTagPrivate(collectionID UniqueID, partitionTag string) (*Partition, error) {
-	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, p := range *collection.Partitions() {
-		if p.Tag() == partitionTag {
-			return p, nil
-		}
-	}
-
-	return nil, errors.New("cannot find partition, tag = " + partitionTag)
 }
 
 func (colReplica *collectionReplicaImpl) getPartitionByIDPrivate(collectionID UniqueID, partitionID UniqueID) (*Partition, error) {
@@ -357,7 +316,7 @@ func (colReplica *collectionReplicaImpl) getPartitionByIDPrivate(collectionID Un
 	return nil, errors.New("cannot find partition, id = " + strconv.FormatInt(partitionID, 10))
 }
 
-func (colReplica *collectionReplicaImpl) hasPartition(collectionID UniqueID, partitionTag string) bool {
+func (colReplica *collectionReplicaImpl) hasPartition(collectionID UniqueID, partitionID UniqueID) bool {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 
@@ -368,7 +327,7 @@ func (colReplica *collectionReplicaImpl) hasPartition(collectionID UniqueID, par
 	}
 
 	for _, p := range *collection.Partitions() {
-		if p.Tag() == partitionTag {
+		if p.ID() == partitionID {
 			return true
 		}
 	}
@@ -444,28 +403,6 @@ func (colReplica *collectionReplicaImpl) getSegmentStatistics() []*internalpb2.S
 	}
 
 	return statisticData
-}
-
-func (colReplica *collectionReplicaImpl) addSegment2(segmentID UniqueID, partitionTag string, collectionID UniqueID, segType segmentType) error {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-
-	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
-	if err != nil {
-		return err
-	}
-
-	partition, err2 := colReplica.getPartitionByTagPrivate(collectionID, partitionTag)
-	if err2 != nil {
-		return err2
-	}
-
-	var newSegment = newSegment2(collection, segmentID, partitionTag, collectionID, segType)
-
-	colReplica.segments[segmentID] = newSegment
-	*partition.Segments() = append(*partition.Segments(), newSegment)
-
-	return nil
 }
 
 func (colReplica *collectionReplicaImpl) addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, segType segmentType) error {

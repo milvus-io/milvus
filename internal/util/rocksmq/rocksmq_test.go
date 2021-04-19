@@ -66,13 +66,13 @@ func TestRocksMQ(t *testing.T) {
 	cMsgs, err := rmq.Consume(groupName, channelName, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, len(cMsgs), 1)
-	assert.Equal(t, string(cMsgs[0].Payload), "a_message")
+	assert.Equal(t, string(cMsgs[0].payload), "a_message")
 
 	cMsgs, err = rmq.Consume(groupName, channelName, 2)
 	assert.Nil(t, err)
 	assert.Equal(t, len(cMsgs), 2)
-	assert.Equal(t, string(cMsgs[0].Payload), "b_message")
-	assert.Equal(t, string(cMsgs[1].Payload), "c_message")
+	assert.Equal(t, string(cMsgs[0].payload), "b_message")
+	assert.Equal(t, string(cMsgs[1].payload), "c_message")
 }
 
 func TestRocksMQ_Loop(t *testing.T) {
@@ -127,15 +127,15 @@ func TestRocksMQ_Loop(t *testing.T) {
 	cMsgs, err := rmq.Consume(groupName, channelName, loopNum)
 	assert.Nil(t, err)
 	assert.Equal(t, len(cMsgs), loopNum)
-	assert.Equal(t, string(cMsgs[0].Payload), "message_"+strconv.Itoa(0))
-	assert.Equal(t, string(cMsgs[loopNum-1].Payload), "message_"+strconv.Itoa(loopNum-1))
+	assert.Equal(t, string(cMsgs[0].payload), "message_"+strconv.Itoa(0))
+	assert.Equal(t, string(cMsgs[loopNum-1].payload), "message_"+strconv.Itoa(loopNum-1))
 
 	// Consume one message once
 	for i := 0; i < loopNum; i++ {
 		oneMsgs, err := rmq.Consume(groupName, channelName, 1)
 		assert.Nil(t, err)
 		assert.Equal(t, len(oneMsgs), 1)
-		assert.Equal(t, string(oneMsgs[0].Payload), "message_"+strconv.Itoa(i+loopNum))
+		assert.Equal(t, string(oneMsgs[0].payload), "message_"+strconv.Itoa(i+loopNum))
 	}
 
 	cMsgs, err = rmq.Consume(groupName, channelName, 1)
