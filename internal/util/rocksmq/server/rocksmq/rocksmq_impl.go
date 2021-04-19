@@ -134,8 +134,21 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 		log.Debug("RocksMQ: remove " + endKey + " failed.")
 		return err
 	}
+	log.Debug("DestroyTopic: " + topicName)
 
 	return nil
+}
+
+func (rmq *rocksmq) ExistConsumerGroup(topicName, groupName string) (bool, *Consumer) {
+	key := groupName + "/" + topicName + "/current_id"
+	if rmq.checkKeyExist(key) {
+		for _, con := range rmq.consumers[topicName] {
+			if con.GroupName == groupName {
+				return true, con
+			}
+		}
+	}
+	return false, nil
 }
 
 func (rmq *rocksmq) CreateConsumerGroup(topicName, groupName string) error {
@@ -170,6 +183,14 @@ func (rmq *rocksmq) DestroyConsumerGroup(topicName, groupName string) error {
 		log.Debug("RocksMQ: remove " + key + " failed.")
 		return err
 	}
+	for index, con := range rmq.consumers[topicName] {
+		if con.GroupName == groupName {
+			rmq.consumers[topicName] = append(rmq.consumers[topicName][:index],
+				rmq.consumers[topicName][index+1:]...)
+		}
+	}
+
+	log.Debug("DestroyConsumerGroup: " + topicName + "+" + groupName)
 
 	return nil
 }
