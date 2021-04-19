@@ -4,14 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
 	"log"
 	"path"
 	"strconv"
 	"unsafe"
-
-	"github.com/opentracing/opentracing-go"
-	oplog "github.com/opentracing/opentracing-go/log"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
@@ -100,23 +96,12 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 	// iMsg is insertMsg
 	// 1. iMsg -> buffer
 	for _, msg := range iMsg.insertMessages {
-		ctx := msg.GetMsgContext()
-		var span opentracing.Span
-		if ctx != nil {
-			span, _ = opentracing.StartSpanFromContext(ctx, fmt.Sprintf("insert buffer node, start time = %d", msg.BeginTs()))
-		} else {
-			span = opentracing.StartSpan(fmt.Sprintf("insert buffer node, start time = %d", msg.BeginTs()))
-		}
-		span.SetTag("hash keys", msg.HashKeys())
-		span.SetTag("start time", msg.BeginTs())
-		span.SetTag("end time", msg.EndTs())
 		if len(msg.RowIDs) != len(msg.Timestamps) || len(msg.RowIDs) != len(msg.RowData) {
 			log.Println("Error: misaligned messages detected")
 			continue
 		}
 		currentSegID := msg.GetSegmentID()
 		collectionName := msg.GetCollectionName()
-		span.LogFields(oplog.Int("segment id", int(currentSegID)))
 
 		idata, ok := ibNode.insertBuffer.insertData[currentSegID]
 		if !ok {
@@ -124,21 +109,6 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 				Data: make(map[UniqueID]storage.FieldData),
 			}
 		}
-
-		// Timestamps
-		_, ok = idata.Data[1].(*storage.Int64FieldData)
-		if !ok {
-			idata.Data[1] = &storage.Int64FieldData{
-				Data:    []int64{},
-				NumRows: 0,
-			}
-		}
-		tsData := idata.Data[1].(*storage.Int64FieldData)
-		for _, ts := range msg.Timestamps {
-			tsData.Data = append(tsData.Data, int64(ts))
-		}
-		tsData.NumRows += len(msg.Timestamps)
-		span.LogFields(oplog.Int("tsData numRows", tsData.NumRows))
 
 		// 1.1 Get CollectionMeta from etcd
 		collection, err := ibNode.replica.getCollectionByName(collectionName)
@@ -388,11 +358,9 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 
 		// 1.3 store in buffer
 		ibNode.insertBuffer.insertData[currentSegID] = idata
-		span.LogFields(oplog.String("store in buffer", "store in buffer"))
 
 		// 1.4 if full
 		//   1.4.1 generate binlogs
-		span.LogFields(oplog.String("generate binlogs", "generate binlogs"))
 		if ibNode.insertBuffer.full(currentSegID) {
 			log.Printf(". Insert Buffer full, auto flushing (%v) rows of data...", ibNode.insertBuffer.size(currentSegID))
 			// partitionTag -> partitionID
@@ -461,7 +429,6 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 				ibNode.outCh <- inBinlogMsg
 			}
 		}
-		span.Finish()
 	}
 
 	if len(iMsg.insertMessages) > 0 {

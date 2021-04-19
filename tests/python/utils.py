@@ -55,7 +55,7 @@ default_index_params = [
     {"nlist": 128},
     {"nlist": 128},
     {"nlist": 128},
-    {"nlist": 128, "m": 16},
+    {"nlist": 128, "m": 16, "nbits": 8},
     {"M": 48, "efConstruction": 500},
     # {"search_length": 50, "out_degree": 40, "candidate_pool_size": 100, "knng": 50},
     {"n_trees": 50},
@@ -281,9 +281,9 @@ def gen_entities(nb, is_normal=False):
 def gen_entities_new(nb, is_normal=False):
     vectors = gen_vectors(nb, default_dim, is_normal)
     entities = [
-        {"name": "int64", "values": [i for i in range(nb)]},
-        {"name": "float", "values": [float(i) for i in range(nb)]},
-        {"name": default_float_vec_field_name, "values": vectors}
+        {"name": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
+        {"name": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(nb)]},
+        {"name": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "values": vectors}
     ]
     return entities
 

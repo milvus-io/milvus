@@ -57,14 +57,8 @@ lint:tools/bin/revive
 	@echo "Running $@ check"
 	@tools/bin/revive -formatter friendly -config tools/check/revive.toml ./...
 
-get-rocksdb:
-	@go env -w CGO_CFLAGS="-I$(PWD)/internal/kv/rocksdb/cwrapper/output/include"
-	@go env -w CGO_LDFLAGS="-L$(PWD)/internal/kv/rocksdb/cwrapper/output/lib -l:librocksdb.a -lstdc++ -lm -lz"
-	@(env bash $(PWD)/internal/kv/rocksdb/cwrapper/build.sh)
-	@go get github.com/tecbot/gorocksdb
-
 #TODO: Check code specifications by golangci-lint
-static-check:get-rocksdb
+static-check:
 	@echo "Running $@ check"
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint cache clean
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./internal/...
@@ -112,7 +106,7 @@ build-cpp-with-unittest:
 unittest: test-cpp test-go
 
 #TODO: proxy master query node writer's unittest
-test-go:get-rocksdb
+test-go:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
 
@@ -133,7 +127,6 @@ install: all
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/master $(GOPATH)/bin/master
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/proxy $(GOPATH)/bin/proxy
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/writenode $(GOPATH)/bin/writenode
-	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/indexbuilder $(GOPATH)/bin/indexbuilder
 	@mkdir -p $(LIBRARY_PATH) && cp -f $(PWD)/internal/core/output/lib/* $(LIBRARY_PATH)
 	@echo "Installation successful."
 
@@ -141,10 +134,7 @@ clean:
 	@echo "Cleaning up all the generated files"
 	@find . -name '*.test' | xargs rm -fv
 	@find . -name '*~' | xargs rm -fv
-	@rm -rf bin/
-	@rm -rf lib/
-	@rm -rf $(GOPATH)/bin/master
-	@rm -rf $(GOPATH)/bin/proxy
-	@rm -rf $(GOPATH)/bin/querynode
-	@rm -rf $(GOPATH)/bin/writenode
-	@rm -rf $(GOPATH)/bin/indexbuilder
+	@rm -rvf querynode
+	@rm -rvf master
+	@rm -rvf proxy
+	@rm -rvf writenode

@@ -65,19 +65,3 @@ type IndexFilePaths struct {
 }
 ```
 
-
-
-#### 8.3 Index Node
-
-```go
-type IndexNode interface {
-  Start() error
-  Close() error
-  
-  SetTimeTickChannel(channelID string) error
-  SetStatsChannel(channelID string) error
-  
-  BuildIndex(req BuildIndexRequest) (BuildIndexResponse, error)
-}
-```
-
