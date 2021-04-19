@@ -360,7 +360,7 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 
 func (s *Server) startDDChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
-	ddStream := pulsarms.NewPulsarTtMsgStream(ctx, 1024)
+	ddStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
 	ddStream.SetPulsarClient(Params.PulsarAddress)
 	ddStream.CreatePulsarConsumers([]string{s.ddChannelName}, Params.DataServiceSubscriptionName, util.NewUnmarshalDispatcher(), 1024)
 	ddStream.Start()
