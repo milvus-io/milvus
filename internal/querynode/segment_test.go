@@ -20,8 +20,9 @@ import (
 //-------------------------------------------------------------------------------------- constructor and destructor
 func TestSegment_newSegment(t *testing.T) {
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -31,8 +32,9 @@ func TestSegment_newSegment(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -42,7 +44,8 @@ func TestSegment_newSegment(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -72,8 +75,9 @@ func TestSegment_newSegment(t *testing.T) {
 
 func TestSegment_deleteSegment(t *testing.T) {
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -83,8 +87,9 @@ func TestSegment_deleteSegment(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -94,7 +99,8 @@ func TestSegment_deleteSegment(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -126,8 +132,9 @@ func TestSegment_deleteSegment(t *testing.T) {
 //-------------------------------------------------------------------------------------- stats functions
 func TestSegment_getRowCount(t *testing.T) {
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -137,8 +144,9 @@ func TestSegment_getRowCount(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -148,7 +156,8 @@ func TestSegment_getRowCount(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -211,8 +220,9 @@ func TestSegment_getRowCount(t *testing.T) {
 
 func TestSegment_getDeletedCount(t *testing.T) {
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -222,8 +232,9 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -233,7 +244,8 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -302,8 +314,9 @@ func TestSegment_getDeletedCount(t *testing.T) {
 
 func TestSegment_getMemSize(t *testing.T) {
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -313,8 +326,9 @@ func TestSegment_getMemSize(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -324,7 +338,8 @@ func TestSegment_getMemSize(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -388,8 +403,9 @@ func TestSegment_getMemSize(t *testing.T) {
 //-------------------------------------------------------------------------------------- dm & search functions
 func TestSegment_segmentInsert(t *testing.T) {
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -399,8 +415,9 @@ func TestSegment_segmentInsert(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -410,7 +427,8 @@ func TestSegment_segmentInsert(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -469,8 +487,9 @@ func TestSegment_segmentInsert(t *testing.T) {
 
 func TestSegment_segmentDelete(t *testing.T) {
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -480,8 +499,9 @@ func TestSegment_segmentDelete(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -491,7 +511,8 @@ func TestSegment_segmentDelete(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -559,8 +580,9 @@ func TestSegment_segmentSearch(t *testing.T) {
 	defer cancel()
 
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -570,8 +592,9 @@ func TestSegment_segmentSearch(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -581,7 +604,8 @@ func TestSegment_segmentSearch(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -683,8 +707,9 @@ func TestSegment_segmentSearch(t *testing.T) {
 //-------------------------------------------------------------------------------------- preDm functions
 func TestSegment_segmentPreInsert(t *testing.T) {
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -694,8 +719,9 @@ func TestSegment_segmentPreInsert(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -705,7 +731,8 @@ func TestSegment_segmentPreInsert(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -759,8 +786,9 @@ func TestSegment_segmentPreInsert(t *testing.T) {
 
 func TestSegment_segmentPreDelete(t *testing.T) {
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -770,8 +798,9 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -781,7 +810,8 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},

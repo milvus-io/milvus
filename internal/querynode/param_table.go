@@ -199,12 +199,16 @@ func (p *ParamTable) etcdAddress() string {
 	return etcdAddress
 }
 
-func (p *ParamTable) etcdRootPath() string {
-	etcdRootPath, err := p.Load("etcd.rootpath")
+func (p *ParamTable) metaRootPath() string {
+	rootPath, err := p.Load("etcd.rootPath")
 	if err != nil {
 		panic(err)
 	}
-	return etcdRootPath
+	subPath, err := p.Load("etcd.metaSubPath")
+	if err != nil {
+		panic(err)
+	}
+	return rootPath + "/" + subPath
 }
 
 func (p *ParamTable) gracefulTime() int64 {

@@ -19,8 +19,9 @@ func TestCollectionReplica_getCollectionNum(t *testing.T) {
 
 	collectionName := "collection0"
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -30,8 +31,9 @@ func TestCollectionReplica_getCollectionNum(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -41,7 +43,8 @@ func TestCollectionReplica_getCollectionNum(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: collectionName,
+		Name:   collectionName,
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -72,8 +75,9 @@ func TestCollectionReplica_addCollection(t *testing.T) {
 
 	collectionName := "collection0"
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -83,8 +87,9 @@ func TestCollectionReplica_addCollection(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -94,7 +99,8 @@ func TestCollectionReplica_addCollection(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: collectionName,
+		Name:   collectionName,
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -130,8 +136,9 @@ func TestCollectionReplica_removeCollection(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -141,8 +148,9 @@ func TestCollectionReplica_removeCollection(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -152,7 +160,8 @@ func TestCollectionReplica_removeCollection(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: collectionName,
+		Name:   collectionName,
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -192,8 +201,9 @@ func TestCollectionReplica_getCollectionByID(t *testing.T) {
 
 	collectionName := "collection0"
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -203,8 +213,9 @@ func TestCollectionReplica_getCollectionByID(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -214,7 +225,8 @@ func TestCollectionReplica_getCollectionByID(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -256,8 +268,9 @@ func TestCollectionReplica_getCollectionByName(t *testing.T) {
 
 	collectionName := "collection0"
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -267,8 +280,9 @@ func TestCollectionReplica_getCollectionByName(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -278,7 +292,8 @@ func TestCollectionReplica_getCollectionByName(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -320,8 +335,9 @@ func TestCollectionReplica_hasCollection(t *testing.T) {
 
 	collectionName := "collection0"
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -331,8 +347,9 @@ func TestCollectionReplica_hasCollection(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -342,7 +359,8 @@ func TestCollectionReplica_hasCollection(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: collectionName,
+		Name:   collectionName,
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -378,8 +396,9 @@ func TestCollectionReplica_getPartitionNum(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -389,8 +408,9 @@ func TestCollectionReplica_getPartitionNum(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -400,7 +420,8 @@ func TestCollectionReplica_getPartitionNum(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -449,8 +470,9 @@ func TestCollectionReplica_addPartition(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -460,8 +482,9 @@ func TestCollectionReplica_addPartition(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -471,7 +494,8 @@ func TestCollectionReplica_addPartition(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -517,8 +541,9 @@ func TestCollectionReplica_removePartition(t *testing.T) {
 	collectionID := UniqueID(0)
 	partitionTag := "default"
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -528,8 +553,9 @@ func TestCollectionReplica_removePartition(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -539,7 +565,8 @@ func TestCollectionReplica_removePartition(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -586,8 +613,9 @@ func TestCollectionReplica_addPartitionsByCollectionMeta(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -597,8 +625,9 @@ func TestCollectionReplica_addPartitionsByCollectionMeta(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -608,7 +637,8 @@ func TestCollectionReplica_addPartitionsByCollectionMeta(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -659,8 +689,9 @@ func TestCollectionReplica_removePartitionsByCollectionMeta(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -670,8 +701,9 @@ func TestCollectionReplica_removePartitionsByCollectionMeta(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -681,7 +713,8 @@ func TestCollectionReplica_removePartitionsByCollectionMeta(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -732,8 +765,9 @@ func TestCollectionReplica_getPartitionByTag(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -743,8 +777,9 @@ func TestCollectionReplica_getPartitionByTag(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -754,7 +789,8 @@ func TestCollectionReplica_getPartitionByTag(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -800,8 +836,9 @@ func TestCollectionReplica_hasPartition(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -811,8 +848,9 @@ func TestCollectionReplica_hasPartition(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -822,7 +860,8 @@ func TestCollectionReplica_hasPartition(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -867,8 +906,9 @@ func TestCollectionReplica_addSegment(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -878,8 +918,9 @@ func TestCollectionReplica_addSegment(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -889,7 +930,8 @@ func TestCollectionReplica_addSegment(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -938,8 +980,9 @@ func TestCollectionReplica_removeSegment(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -949,8 +992,9 @@ func TestCollectionReplica_removeSegment(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -960,7 +1004,8 @@ func TestCollectionReplica_removeSegment(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -1011,8 +1056,9 @@ func TestCollectionReplica_getSegmentByID(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -1022,8 +1068,9 @@ func TestCollectionReplica_getSegmentByID(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -1033,7 +1080,8 @@ func TestCollectionReplica_getSegmentByID(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -1082,8 +1130,9 @@ func TestCollectionReplica_hasSegment(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -1093,8 +1142,9 @@ func TestCollectionReplica_hasSegment(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -1104,7 +1154,8 @@ func TestCollectionReplica_hasSegment(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -1157,8 +1208,9 @@ func TestCollectionReplica_freeAll(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -1168,8 +1220,9 @@ func TestCollectionReplica_freeAll(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -1179,7 +1232,8 @@ func TestCollectionReplica_freeAll(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name:   "collection0",
+		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
