@@ -41,7 +41,7 @@ type loadIndex struct {
 }
 
 func (loader *indexLoader) doLoadIndex(wg *sync.WaitGroup) {
-	collectionIDs, _, segmentIDs := loader.replica.getSealedSegmentsBySegmentType(segTypeSealed)
+	collectionIDs, _, segmentIDs := loader.replica.getSegmentsBySegmentType(segTypeSealed)
 	if len(collectionIDs) <= 0 {
 		wg.Done()
 		return
@@ -51,16 +51,17 @@ func (loader *indexLoader) doLoadIndex(wg *sync.WaitGroup) {
 		// we don't need index id yet
 		_, buildID, err := loader.getIndexInfo(collectionIDs[i], segmentIDs[i])
 		if err != nil {
-			indexPaths, err := loader.getIndexPaths(buildID)
-			if err != nil {
-				log.Println(err)
-				continue
-			}
-			err = loader.loadIndexDelayed(collectionIDs[i], segmentIDs[i], indexPaths)
-			if err != nil {
-				log.Println(err)
-				continue
-			}
+			log.Println(err)
+			continue
+		}
+		indexPaths, err := loader.getIndexPaths(buildID)
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+		err = loader.loadIndexDelayed(collectionIDs[i], segmentIDs[i], indexPaths)
+		if err != nil {
+			log.Println(err)
 		}
 	}
 	// sendQueryNodeStats

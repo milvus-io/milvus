@@ -12,6 +12,7 @@ package querynode
 */
 import "C"
 import (
+	"log"
 	"strconv"
 	"sync"
 	"unsafe"
@@ -23,13 +24,13 @@ import (
 )
 
 const (
-	segTypeInvalid  = C.Invalid
-	segTypeGrowing  = C.Growing
-	segTypeSealed   = C.Sealed
-	segTypeIndexing = C.Indexing
+	segTypeInvalid  = 0
+	segTypeGrowing  = 1
+	segTypeSealed   = 2
+	segTypeIndexing = 3
 )
 
-type segmentType = C.SegmentType
+type segmentType = int
 type indexParam = map[string]string
 
 type Segment struct {
@@ -45,7 +46,7 @@ type Segment struct {
 	recentlyModified bool
 
 	typeMu      sync.Mutex // guards builtIndex
-	segmentType C.SegmentType
+	segmentType int
 
 	paramMutex sync.RWMutex // guards index
 	indexParam map[int64]indexParam
@@ -112,7 +113,20 @@ func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, c
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
 	*/
 	initIndexParam := make(map[int64]indexParam)
-	segmentPtr := C.NewSegment(collection.collectionPtr, C.ulong(segmentID), segType)
+	var segmentPtr C.CSegmentInterface
+	switch segType {
+	case segTypeInvalid:
+		log.Println("illegal segment type when create segment")
+		return nil
+	case segTypeSealed:
+		segmentPtr = C.NewSegment(collection.collectionPtr, C.ulong(segmentID), C.Sealed)
+	case segTypeGrowing:
+		segmentPtr = C.NewSegment(collection.collectionPtr, C.ulong(segmentID), C.Growing)
+	default:
+		log.Println("illegal segment type when create segment")
+		return nil
+	}
+
 	var newSegment = &Segment{
 		segmentPtr:   segmentPtr,
 		segmentType:  segType,

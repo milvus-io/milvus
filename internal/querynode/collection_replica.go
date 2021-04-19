@@ -60,8 +60,8 @@ type collectionReplica interface {
 	getSegmentNum() int
 
 	getSegmentStatistics() []*internalpb2.SegmentStats
-	getEnabledSealedSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID)
-	getSealedSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID)
+	getEnabledSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID)
+	getSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID)
 	replaceGrowingSegmentBySealedSegment(segment *Segment) error
 
 	getTSafe() tSafe
@@ -458,7 +458,7 @@ func (colReplica *collectionReplicaImpl) getSegmentStatistics() []*internalpb2.S
 	return statisticData
 }
 
-func (colReplica *collectionReplicaImpl) getEnabledSealedSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID) {
+func (colReplica *collectionReplicaImpl) getEnabledSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 
@@ -487,7 +487,7 @@ func (colReplica *collectionReplicaImpl) getEnabledSealedSegmentsBySegmentType(s
 	return targetCollectionIDs, targetPartitionIDs, targetSegmentIDs
 }
 
-func (colReplica *collectionReplicaImpl) getSealedSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID) {
+func (colReplica *collectionReplicaImpl) getSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 
@@ -513,7 +513,7 @@ func (colReplica *collectionReplicaImpl) replaceGrowingSegmentBySealedSegment(se
 		return errors.New("unexpected segment type")
 	}
 	targetSegment, err := colReplica.getSegmentByIDPrivate(segment.ID())
-	if err != nil && targetSegment != nil {
+	if err == nil && targetSegment != nil {
 		if targetSegment.segmentType != segTypeGrowing {
 			// target segment has been a sealed segment
 			return nil
@@ -521,7 +521,7 @@ func (colReplica *collectionReplicaImpl) replaceGrowingSegmentBySealedSegment(se
 		deleteSegment(targetSegment)
 	}
 
-	targetSegment = segment
+	colReplica.segments[segment.ID()] = segment
 	return nil
 }
 
