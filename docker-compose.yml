@@ -15,7 +15,7 @@ services:
       context: .
       dockerfile: build/docker/env/cpu/ubuntu${UBUNTU}/Dockerfile
       cache_from:
-        - ${REPO}:${ARCH}-ubuntu${UBUNTU}-${DATE_VERSION}
+        - ${REPO}:${ARCH}-ubuntu${UBUNTU}-${LATEST_DATE_VERSION}
     shm_size: 2G
     environment:
       <<: *ccache
@@ -33,7 +33,7 @@ services:
       context: .
       dockerfile: build/docker/env/cpu/ubuntu${UBUNTU}/Dockerfile
       cache_from:
-        - ${REPO}:${ARCH}-ubuntu${UBUNTU}-${DATE_VERSION}
+        - ${REPO}:${ARCH}-ubuntu${UBUNTU}-${LATEST_DATE_VERSION}
     security_opt: # options needed for gdb debugging
       - seccomp:unconfined
       - apparmor:unconfined
