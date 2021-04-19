@@ -320,7 +320,7 @@ func startProxy(pt pulsar.Producer, ptid int64, pr1 pulsar.Producer, prid1 int64
 			t.Fatalf("send msg error %v", err)
 		}
 
-		log.Printf("send msg id = [ %d %d ], timestamp = %d", prid1, prid2, timestamp)
+		//log.Printf("send msg id = [ %d %d ], timestamp = %d", prid1, prid2, timestamp)
 
 		if i%20 == 0 {
 			tm := pb.TimeSyncMsg{Peer_Id: ptid, Timestamp: timestamp << 18}
@@ -331,7 +331,7 @@ func startProxy(pt pulsar.Producer, ptid int64, pr1 pulsar.Producer, prid1 int64
 			if _, err := pt.Send(context.Background(), &pulsar.ProducerMessage{Payload: tb}); err != nil {
 				t.Fatalf("send msg error %v", err)
 			}
-			log.Printf("send timestamp id = %d, timestamp = %d", ptid, timestamp)
+			//log.Printf("send timestamp id = %d, timestamp = %d", ptid, timestamp)
 		}
 	}
 }
