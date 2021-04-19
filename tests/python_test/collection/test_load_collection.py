@@ -36,7 +36,7 @@ class TestLoadCollection:
     def get_binary_index(self, request, connect):
         return request.param
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_load_collection_after_index(self, connect, collection, get_simple_index):
         '''
         target: test load collection, after index created
@@ -73,7 +73,7 @@ class TestLoadCollection:
             connect.load_collection(binary_collection)
             connect.release_collection(binary_collection)
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_load_empty_collection(self, connect, collection):
         '''
         target: test load collection
@@ -129,7 +129,7 @@ class TestLoadCollection:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "describe collection failed: can't find collection: %s" % collection_name
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_release_collection_not_load(self, connect, collection):
         """
         target: test release collection without load
@@ -141,7 +141,7 @@ class TestLoadCollection:
         connect.flush([collection])
         connect.release_collection(collection)
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_load_collection_after_load_release(self, connect, collection):
         ids = connect.insert(collection, default_entities)
         assert len(ids) == default_nb
@@ -184,7 +184,7 @@ class TestLoadCollection:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "describe collection failed: can't find collection: %s" % collection_name
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_release_collection_after_drop(self, connect, collection):
         """
         target: test release collection after drop
@@ -204,7 +204,7 @@ class TestLoadCollection:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "describe collection failed: can't find collection: %s" % collection
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_load_collection_without_flush(self, connect, collection):
         """
         target: test load collection without flush
@@ -223,7 +223,7 @@ class TestLoadCollection:
         expected: raise exception
         """
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_load_collection_release_part_partitions(self, connect, collection):
         """
         target: test release part partitions after load collection
@@ -261,7 +261,7 @@ class TestLoadCollection:
         with pytest.raises(Exception) as e:
             connect.search(collection, default_single_query)
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_load_partitions_release_collection(self, connect, collection):
         """
         target: test release collection after load partitions
@@ -281,7 +281,7 @@ class TestLoadCollection:
 
 class TestReleaseAdvanced:
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_release_collection_during_searching(self, connect, collection):
         """
         target: test release collection during searching
@@ -318,7 +318,7 @@ class TestReleaseAdvanced:
         with pytest.raises(Exception):
             res = connect.search(collection, default_single_query)
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_release_collection_during_searching_A(self, connect, collection):
         """
         target: test release collection during searching
@@ -466,7 +466,7 @@ class TestLoadPartition:
         else:
             pytest.skip("Skip index Temporary")
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_load_partition_after_index(self, connect, collection, get_simple_index):
         '''
         target: test load collection, after index created
@@ -485,7 +485,7 @@ class TestLoadPartition:
         assert len(res[0]) == default_top_k
 
     @pytest.mark.level(2)
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_load_partition_after_index_binary(self, connect, binary_collection, get_binary_index):
         '''
         target: test load binary_collection, after index created
@@ -506,7 +506,7 @@ class TestLoadPartition:
                 connect.create_index(binary_collection, default_binary_vec_field_name, get_binary_index)
             connect.load_partitions(binary_collection, [default_tag])
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_load_empty_partition(self, connect, collection):
         '''
         target: test load collection
@@ -544,7 +544,7 @@ class TestLoadPartition:
             dis_connect.release_partitions(collection, [default_tag])
 
     @pytest.mark.level(2)
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_load_partition_not_existed(self, connect, collection):
         partition_name = gen_unique_str(uid)
         try:
@@ -556,7 +556,7 @@ class TestLoadPartition:
             assert message == "partitionID of partitionName:%s can not be find" % partition_name
 
     @pytest.mark.level(2)
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_release_partition_not_existed(self, connect, collection):
         partition_name = gen_unique_str(uid)
         try:
@@ -567,7 +567,7 @@ class TestLoadPartition:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "partitionID of partitionName:%s can not be find" % partition_name
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_release_partition_not_load(self, connect, collection):
         """
         target: test release collection without load
@@ -606,7 +606,7 @@ class TestLoadPartition:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "partitionID of partitionName:%s can not be find" % default_tag
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_release_partition_after_drop(self, connect, collection):
         """
         target: test release collection after drop
@@ -627,7 +627,7 @@ class TestLoadPartition:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "partitionID of partitionName:%s can not be find" % default_tag
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_load_release_after_collection_drop(self, connect, collection):
         """
         target: test release collection after drop

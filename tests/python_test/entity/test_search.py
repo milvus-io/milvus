@@ -145,7 +145,7 @@ class TestSearchBase:
     def get_nq(self, request):
         yield request.param
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_search_flat(self, connect, collection, get_top_k, get_nq):
         '''
         target: test basic search function, all the search params is correct, change top-k value
@@ -610,7 +610,7 @@ class TestSearchBase:
         with pytest.raises(Exception) as e:
             res = connect.search(collection_name, default_query)
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_search_distance_l2(self, connect, collection):
         '''
         target: search collection, and check the result: distance
@@ -662,7 +662,7 @@ class TestSearchBase:
         # TODO:
         # assert abs(np.sqrt(res[0]._distances[0]) - min_distance) <= tmp_epsilon
 
-    # @pytest.mark.tags("0331")
+    # @pytest.mark.tags("0331", "l1")
     @pytest.mark.level(2)
     def test_search_distance_ip(self, connect, collection):
         '''
@@ -719,7 +719,7 @@ class TestSearchBase:
         # TODO:
         # assert abs(res[0]._distances[0] - max_distance) <= tmp_epsilon
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_search_distance_jaccard_flat_index(self, connect, binary_collection):
         '''
         target: search binary_collection, and check the result: distance
@@ -1005,7 +1005,7 @@ class TestSearchDSL(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_query_no_vector_term_only(self, connect, collection):
         '''
         method: build query without vector only term
@@ -1019,7 +1019,7 @@ class TestSearchDSL(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_query_no_vector_range_only(self, connect, collection):
         '''
         method: build query without vector only range
@@ -1033,7 +1033,7 @@ class TestSearchDSL(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_query_vector_only(self, connect, collection):
         entities, ids = init_data(connect, collection)
         connect.load_collection(collection)
@@ -1041,7 +1041,7 @@ class TestSearchDSL(object):
         assert len(res) == nq
         assert len(res[0]) == default_top_k
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_query_wrong_format(self, connect, collection):
         '''
         method: build query without must expr, with wrong expr name
@@ -1055,7 +1055,7 @@ class TestSearchDSL(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_query_empty(self, connect, collection):
         '''
         method: search with empty query
@@ -1186,7 +1186,7 @@ class TestSearchDSL(object):
         assert len(res) == nq
         assert len(res[0]) == 0
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_query_complex_dsl(self, connect, collection):
         '''
         method: query with complicated dsl
@@ -1294,7 +1294,7 @@ class TestSearchDSL(object):
     """
 
     # TODO
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_query_range_key_error(self, connect, collection):
         '''
         method: build query with range key error
@@ -1381,7 +1381,7 @@ class TestSearchDSL(object):
         assert len(res) == nq
         assert len(res[0]) == default_top_k
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_query_range_one_field_not_existed(self, connect, collection):
         '''
         method: build query with two fields ranges, one of fields not existed
@@ -1620,7 +1620,7 @@ class TestSearchDSLBools(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_query_should_only_term(self, connect, collection):
         '''
         method: build query without must, with should.term instead
@@ -1631,7 +1631,7 @@ class TestSearchDSLBools(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_query_should_only_vector(self, connect, collection):
         '''
         method: build query without must, with should.vector instead
@@ -1742,7 +1742,7 @@ class TestSearchInvalid(object):
             res = connect.search(collection, default_query, fields=fields)
 
     @pytest.mark.level(1)
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_search_with_not_existed_field(self, connect, collection):
         fields = [gen_unique_str("field_name")]
         with pytest.raises(Exception) as e:
@@ -1760,7 +1760,7 @@ class TestSearchInvalid(object):
         yield request.param
 
     @pytest.mark.level(1)
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_search_with_invalid_top_k(self, connect, collection, get_top_k):
         '''
         target: test search function, with the wrong top_k

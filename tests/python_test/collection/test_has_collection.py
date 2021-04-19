@@ -17,7 +17,7 @@ class TestHasCollection:
       The following cases are used to test `has_collection` function
     ******************************************************************
     """
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_has_collection(self, connect, collection):
         '''
         target: test if the created collection existed
@@ -37,7 +37,7 @@ class TestHasCollection:
         with pytest.raises(Exception) as e:
             assert dis_connect.has_collection(collection)
 
-    @pytest.mark.tags("0331")
+    @pytest.mark.tags("0331", "l1")
     def test_has_collection_not_existed(self, connect):
         '''
         target: test if collection not created
