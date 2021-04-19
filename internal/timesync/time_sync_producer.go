@@ -63,17 +63,11 @@ func (producer *MsgProducer) broadcastMsg() {
 
 func (producer *MsgProducer) Start(ctx context.Context) {
 	producer.ctx, producer.cancel = context.WithCancel(ctx)
-	producer.wg.Add(2 + len(producer.watchers))
-	go producer.startTTBarrier()
+	producer.wg.Add(1 + len(producer.watchers))
 	for _, watcher := range producer.watchers {
 		go producer.startWatcher(watcher)
 	}
 	go producer.broadcastMsg()
-}
-
-func (producer *MsgProducer) startTTBarrier() {
-	defer producer.wg.Done()
-	producer.ttBarrier.StartBackgroundLoop(producer.ctx)
 }
 
 func (producer *MsgProducer) startWatcher(watcher TimeTickWatcher) {
