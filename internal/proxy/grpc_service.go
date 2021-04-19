@@ -36,6 +36,9 @@ func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.
 		manipulationMsgStream: p.manipulationMsgStream,
 		rowIDAllocator:        p.idAllocator,
 	}
+	if len(it.PartitionTag) <= 0 {
+		it.PartitionTag = Params.defaultPartitionTag()
+	}
 
 	var cancel func()
 	it.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
@@ -82,9 +85,8 @@ func (p *Proxy) CreateCollection(ctx context.Context, req *schemapb.CollectionSc
 			Schema:  &commonpb.Blob{},
 		},
 		masterClient: p.masterClient,
+		schema:       req,
 	}
-	schemaBytes, _ := proto.Marshal(req)
-	cct.CreateCollectionRequest.Schema.Value = schemaBytes
 	var cancel func()
 	cct.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
@@ -125,6 +127,7 @@ func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.Qu
 		},
 		queryMsgStream: p.queryMsgStream,
 		resultBuf:      make(chan []*internalpb.SearchResult),
+		query:          req,
 	}
 	var cancel func()
 	qt.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)

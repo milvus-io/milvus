@@ -18,6 +18,7 @@
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include <cstdint>
+#include <boost/concept_check.hpp>
 
 CSegmentBase
 NewSegment(CCollection collection, uint64_t segment_id) {
@@ -39,9 +40,15 @@ DeleteSegment(CSegmentBase segment) {
     delete s;
 }
 
+void
+DeleteQueryResult(CQueryResult query_result) {
+    auto res = (milvus::segcore::QueryResult*)query_result;
+    delete res;
+}
+
 //////////////////////////////////////////////////////////////////
 
-int
+CStatus
 Insert(CSegmentBase c_segment,
        int64_t reserved_offset,
        int64_t size,
@@ -57,11 +64,22 @@ Insert(CSegmentBase c_segment,
     dataChunk.sizeof_per_row = sizeof_per_row;
     dataChunk.count = count;
 
-    auto res = segment->Insert(reserved_offset, size, row_ids, timestamps, dataChunk);
+    try {
+        auto res = segment->Insert(reserved_offset, size, row_ids, timestamps, dataChunk);
+
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::runtime_error& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedException;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
 
     // TODO: delete print
     // std::cout << "do segment insert, sizeof_per_row = " << sizeof_per_row << std::endl;
-    return res.code();
 }
 
 int64_t
@@ -73,13 +91,24 @@ PreInsert(CSegmentBase c_segment, int64_t size) {
     return segment->PreInsert(size);
 }
 
-int
+CStatus
 Delete(
     CSegmentBase c_segment, int64_t reserved_offset, int64_t size, const int64_t* row_ids, const uint64_t* timestamps) {
     auto segment = (milvus::segcore::SegmentBase*)c_segment;
 
-    auto res = segment->Delete(reserved_offset, size, row_ids, timestamps);
-    return res.code();
+    try {
+        auto res = segment->Delete(reserved_offset, size, row_ids, timestamps);
+
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::runtime_error& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedException;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
 }
 
 int64_t
@@ -91,30 +120,39 @@ PreDelete(CSegmentBase c_segment, int64_t size) {
     return segment->PreDelete(size);
 }
 
-int
+CStatus
 Search(CSegmentBase c_segment,
        CPlan c_plan,
        CPlaceholderGroup* c_placeholder_groups,
        uint64_t* timestamps,
        int num_groups,
-       int64_t* result_ids,
-       float* result_distances) {
+       CQueryResult* result) {
     auto segment = (milvus::segcore::SegmentBase*)c_segment;
     auto plan = (milvus::query::Plan*)c_plan;
     std::vector<const milvus::query::PlaceholderGroup*> placeholder_groups;
     for (int i = 0; i < num_groups; ++i) {
         placeholder_groups.push_back((const milvus::query::PlaceholderGroup*)c_placeholder_groups[i]);
     }
-    milvus::segcore::QueryResult query_result;
 
-    auto res = segment->Search(plan, placeholder_groups.data(), timestamps, num_groups, query_result);
+    auto query_result = std::make_unique<milvus::segcore::QueryResult>();
+
+    auto status = CStatus();
+    try {
+        auto res = segment->Search(plan, placeholder_groups.data(), timestamps, num_groups, *query_result);
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::runtime_error& e) {
+        status.error_code = UnexpectedException;
+        status.error_msg = strdup(e.what());
+    }
+    *result = query_result.release();
 
     // result_ids and result_distances have been allocated memory in goLang,
     // so we don't need to malloc here.
-    memcpy(result_ids, query_result.result_ids_.data(), query_result.get_row_count() * sizeof(int64_t));
-    memcpy(result_distances, query_result.result_distances_.data(), query_result.get_row_count() * sizeof(float));
+    // memcpy(result_ids, query_result.result_ids_.data(), query_result.get_row_count() * sizeof(long int));
+    // memcpy(result_distances, query_result.result_distances_.data(), query_result.get_row_count() * sizeof(float));
 
-    return res.code();
+    return status;
 }
 
 //////////////////////////////////////////////////////////////////
