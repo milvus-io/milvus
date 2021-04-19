@@ -47,7 +47,7 @@ func (s *loadService) close() {
 }
 
 func (s *loadService) loadSegmentActively(wg *sync.WaitGroup) {
-	collectionIDs, partitionIDs, segmentIDs := s.segLoader.replica.getSegmentsBySegmentType(segmentTypeGrowing)
+	collectionIDs, partitionIDs, segmentIDs := s.segLoader.replica.getSegmentsToLoadBySegmentType(segmentTypeGrowing)
 	if len(collectionIDs) <= 0 {
 		wg.Done()
 		return
@@ -87,6 +87,11 @@ func (s *loadService) loadSegment(collectionID UniqueID, partitionID UniqueID, s
 	}
 	for _, segmentID := range segmentIDs {
 		err := s.segLoader.replica.addSegment(segmentID, partitionID, collectionID, segmentTypeGrowing)
+		if err != nil {
+			log.Warn(err.Error())
+			continue
+		}
+		err = s.segLoader.replica.setSegmentEnableLoadBinLog(segmentID, true)
 		if err != nil {
 			log.Warn(err.Error())
 			continue

@@ -82,7 +82,8 @@ TEST(CApiTest, InsertTest) {
 
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
-    auto offset = PreInsert(segment, N);
+    int64_t offset;
+    PreInsert(segment, N, &offset);
 
     auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
 
@@ -134,7 +135,8 @@ TEST(CApiTest, SearchTest) {
 
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
-    auto offset = PreInsert(segment, N);
+    int64_t offset;
+    PreInsert(segment, N, &offset);
 
     auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
     ASSERT_EQ(ins_res.error_code, Success);
@@ -334,7 +336,9 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
 
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
-    auto offset = PreInsert(segment, N);
+//    auto offset = PreInsert(segment, N);
+    int64_t offset;
+    PreInsert(segment, N, &offset);
 
     auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
 
@@ -574,7 +578,9 @@ TEST(CApiTest, GetRowCountTest) {
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
-    auto offset = PreInsert(segment, N);
+//    auto offset = PreInsert(segment, N);
+    int64_t offset;
+    PreInsert(segment, N, &offset);
     auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
     assert(res.error_code == Success);
 
@@ -652,8 +658,9 @@ TEST(CApiTest, Reduce) {
 
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
-    auto offset = PreInsert(segment, N);
-
+//    auto offset = PreInsert(segment, N);
+    int64_t offset;
+    PreInsert(segment, N, &offset);
     auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
     assert(ins_res.error_code == Success);
 
@@ -853,7 +860,8 @@ TEST(CApiTest, UpdateSegmentIndex_Without_Predicate) {
     auto vec_col = dataset.get_col<float>(0);
     auto query_ptr = vec_col.data() + 420000 * DIM;
 
-    PreInsert(segment, N);
+    int64_t offset;
+    PreInsert(segment, N, &offset);
     auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
@@ -978,7 +986,8 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
     auto vec_col = dataset.get_col<float>(0);
     auto query_ptr = vec_col.data() + 420000 * DIM;
 
-    PreInsert(segment, N);
+    int64_t offset;
+    PreInsert(segment, N, &offset);
     auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
@@ -1116,7 +1125,8 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Term) {
     auto vec_col = dataset.get_col<float>(0);
     auto query_ptr = vec_col.data() + 420000 * DIM;
 
-    PreInsert(segment, N);
+    int64_t offset;
+    PreInsert(segment, N, &offset);
     auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
@@ -1253,7 +1263,8 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Range) {
     auto vec_col = dataset.get_col<uint8_t>(0);
     auto query_ptr = vec_col.data() + 420000 * DIM / 8;
 
-    PreInsert(segment, N);
+    int64_t offset;
+    PreInsert(segment, N, &offset);
     auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
@@ -1392,7 +1403,8 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
     auto vec_col = dataset.get_col<uint8_t>(0);
     auto query_ptr = vec_col.data() + 420000 * DIM / 8;
 
-    PreInsert(segment, N);
+    int64_t offset;
+    PreInsert(segment, N, &offset);
     auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);

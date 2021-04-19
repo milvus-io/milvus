@@ -172,11 +172,21 @@ Insert(CSegmentInterface c_segment,
     }
 }
 
-int64_t
-PreInsert(CSegmentInterface c_segment, int64_t size) {
-    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
-
-    return segment->PreInsert(size);
+CStatus
+PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset) {
+    try {
+        auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
+        *offset = segment->PreInsert(size);
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedException;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
 }
 
 CStatus

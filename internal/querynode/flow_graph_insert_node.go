@@ -50,10 +50,6 @@ func (iNode *insertNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.
 
 	// 1. hash insertMessages to insertData
 	for _, task := range iMsg.insertMessages {
-		insertData.insertIDs[task.SegmentID] = append(insertData.insertIDs[task.SegmentID], task.RowIDs...)
-		insertData.insertTimestamps[task.SegmentID] = append(insertData.insertTimestamps[task.SegmentID], task.Timestamps...)
-		insertData.insertRecords[task.SegmentID] = append(insertData.insertRecords[task.SegmentID], task.RowData...)
-
 		// check if segment exists, if not, create this segment
 		if !iNode.replica.hasSegment(task.SegmentID) {
 			err := iNode.replica.addSegment(task.SegmentID, task.PartitionID, task.CollectionID, segmentTypeGrowing)
@@ -62,6 +58,19 @@ func (iNode *insertNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.
 				continue
 			}
 		}
+
+		segment, err := iNode.replica.getSegmentByID(task.SegmentID)
+		if err != nil {
+			log.Error(err.Error())
+			continue
+		}
+		if segment.enableLoadBinLog {
+			continue
+		}
+
+		insertData.insertIDs[task.SegmentID] = append(insertData.insertIDs[task.SegmentID], task.RowIDs...)
+		insertData.insertTimestamps[task.SegmentID] = append(insertData.insertTimestamps[task.SegmentID], task.Timestamps...)
+		insertData.insertRecords[task.SegmentID] = append(insertData.insertRecords[task.SegmentID], task.RowData...)
 	}
 
 	// 2. do preInsert
@@ -74,7 +83,10 @@ func (iNode *insertNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.
 
 		var numOfRecords = len(insertData.insertRecords[segmentID])
 		if targetSegment != nil {
-			var offset = targetSegment.segmentPreInsert(numOfRecords)
+			offset, err := targetSegment.segmentPreInsert(numOfRecords)
+			if err != nil {
+				log.Error(err.Error())
+			}
 			insertData.insertOffset[segmentID] = offset
 		}
 	}
@@ -96,6 +108,10 @@ func (iNode *insertNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.
 
 func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *sync.WaitGroup) {
 	var targetSegment, err = iNode.replica.getSegmentByID(segmentID)
+	if targetSegment.segmentType != segmentTypeGrowing || targetSegment.enableLoadBinLog {
+		wg.Done()
+		return
+	}
 	if err != nil {
 		log.Error("cannot find segment:", zap.Int64("segmentID", segmentID))
 		// TODO: add error handling
