@@ -21,27 +21,31 @@ func (gcNode *gcNode) Operate(in []*Msg) []*Msg {
 		// TODO: add error handling
 	}
 
-	gcMsg, ok := (*in[0]).(*gcMsg)
+	_, ok := (*in[0]).(*gcMsg)
 	if !ok {
 		log.Println("type assertion failed for gcMsg")
 		// TODO: add error handling
 	}
 
-	// drop collections
-	for _, collectionID := range gcMsg.gcRecord.collections {
-		err := gcNode.replica.removeCollection(collectionID)
-		if err != nil {
-			log.Println(err)
-		}
-	}
+	// Use `releasePartition` and `releaseCollection`,
+	// because if we drop collections or partitions here, query service doesn't know this behavior,
+	// which would lead the wrong result of `showCollections` or `showPartition`
 
-	// drop partitions
-	for _, partition := range gcMsg.gcRecord.partitions {
-		err := gcNode.replica.removePartition(partition.collectionID, partition.partitionTag)
-		if err != nil {
-			log.Println(err)
-		}
-	}
+	//// drop collections
+	//for _, collectionID := range gcMsg.gcRecord.collections {
+	//	err := gcNode.replica.removeCollection(collectionID)
+	//	if err != nil {
+	//		log.Println(err)
+	//	}
+	//}
+	//
+	//// drop partitions
+	//for _, partition := range gcMsg.gcRecord.partitions {
+	//	err := gcNode.replica.removePartition(partition.collectionID, partition.partitionID)
+	//	if err != nil {
+	//		log.Println(err)
+	//	}
+	//}
 
 	return nil
 }

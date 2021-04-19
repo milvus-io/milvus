@@ -61,8 +61,6 @@ func TestSearch_Search(t *testing.T) {
 	}
 
 	query := milvuspb.SearchRequest{
-		CollectionName:   "collection0",
-		PartitionNames:   []string{"default"},
 		Dsl:              dslString,
 		PlaceholderGroup: placeGroupByte,
 	}
@@ -137,12 +135,12 @@ func TestSearch_Search(t *testing.T) {
 					Timestamp: uint64(10 + 1000),
 					SourceID:  0,
 				},
-				CollectionID:  UniqueID(0),
-				PartitionName: "default",
-				SegmentID:     int64(0),
-				ChannelID:     "0",
-				Timestamps:    []uint64{uint64(i + 1000)},
-				RowIDs:        []int64{int64(i)},
+				CollectionID: UniqueID(0),
+				PartitionID:  defaultPartitionID,
+				SegmentID:    int64(0),
+				ChannelID:    "0",
+				Timestamps:   []uint64{uint64(i + 1000)},
+				RowIDs:       []int64{int64(i)},
 				RowData: []*commonpb.Blob{
 					{Value: rawData},
 				},
@@ -256,8 +254,6 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	}
 
 	query := milvuspb.SearchRequest{
-		CollectionName:   "collection0",
-		PartitionNames:   []string{"default"},
 		Dsl:              dslString,
 		PlaceholderGroup: placeGroupByte,
 	}
@@ -336,12 +332,12 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 					Timestamp: uint64(i + 1000),
 					SourceID:  0,
 				},
-				CollectionID:  UniqueID(0),
-				PartitionName: "default",
-				SegmentID:     int64(segmentID),
-				ChannelID:     "0",
-				Timestamps:    []uint64{uint64(i + 1000)},
-				RowIDs:        []int64{int64(i)},
+				CollectionID: UniqueID(0),
+				PartitionID:  defaultPartitionID,
+				SegmentID:    int64(segmentID),
+				ChannelID:    "0",
+				Timestamps:   []uint64{uint64(i + 1000)},
+				RowIDs:       []int64{int64(i)},
 				RowData: []*commonpb.Blob{
 					{Value: rawData},
 				},

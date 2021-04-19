@@ -19,6 +19,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -89,7 +90,7 @@ import (
 //				SourceID:  0,
 //			},
 //			CollectionID: UniqueID(collectionID),
-//			PartitionName:  "default",
+//			PartitionID:  defaultPartitionID,
 //			SegmentID:      segmentID,
 //			ChannelID:      "0",
 //			Timestamps:     timestamps,
@@ -173,8 +174,6 @@ import (
 //		log.Print("marshal placeholderGroup failed")
 //	}
 //	query := milvuspb.SearchRequest{
-//		CollectionName:   "collection0",
-//		PartitionNames:   []string{"default"},
 //		Dsl:              dslString,
 //		PlaceholderGroup: placeGroupByte,
 //	}
@@ -425,7 +424,7 @@ import (
 //				SourceID:  0,
 //			},
 //			CollectionID: UniqueID(collectionID),
-//			PartitionName:  "default",
+//			PartitionID:  defaultPartitionID,
 //			SegmentID:      segmentID,
 //			ChannelID:      "0",
 //			Timestamps:     timestamps,
@@ -498,8 +497,6 @@ import (
 //		log.Print("marshal placeholderGroup failed")
 //	}
 //	query := milvuspb.SearchRequest{
-//		CollectionName:   "collection0",
-//		PartitionNames:   []string{"default"},
 //		Dsl:              dslString,
 //		PlaceholderGroup: placeGroupByte,
 //	}
@@ -674,6 +671,72 @@ import (
 //}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
+func genETCDCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.CollectionMeta {
+	var fieldVec schemapb.FieldSchema
+	if isBinary {
+		fieldVec = schemapb.FieldSchema{
+			FieldID:      UniqueID(100),
+			Name:         "vec",
+			IsPrimaryKey: false,
+			DataType:     schemapb.DataType_VECTOR_BINARY,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: "128",
+				},
+			},
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "metric_type",
+					Value: "JACCARD",
+				},
+			},
+		}
+	} else {
+		fieldVec = schemapb.FieldSchema{
+			FieldID:      UniqueID(100),
+			Name:         "vec",
+			IsPrimaryKey: false,
+			DataType:     schemapb.DataType_VECTOR_FLOAT,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: "16",
+				},
+			},
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "metric_type",
+					Value: "L2",
+				},
+			},
+		}
+	}
+
+	fieldInt := schemapb.FieldSchema{
+		FieldID:      UniqueID(101),
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
+	}
+
+	schema := schemapb.CollectionSchema{
+		AutoID: true,
+		Fields: []*schemapb.FieldSchema{
+			&fieldVec, &fieldInt,
+		},
+	}
+
+	collectionMeta := etcdpb.CollectionMeta{
+		ID:           collectionID,
+		Schema:       &schema,
+		CreateTime:   Timestamp(0),
+		PartitionIDs: []UniqueID{defaultPartitionID},
+	}
+
+	return &collectionMeta
+}
+
 func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, keyPrefix string) ([]*internalpb2.StringList, []int64, error) {
 	const (
 		msgLength = 1000
@@ -725,7 +788,7 @@ func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID
 	}
 
 	// buffer data to binLogs
-	collMeta := genTestCollectionMeta(collectionID, false)
+	collMeta := genETCDCollectionMeta(collectionID, false)
 	collMeta.Schema.Fields = append(collMeta.Schema.Fields, &schemapb.FieldSchema{
 		FieldID:  0,
 		Name:     "uid",
@@ -870,7 +933,7 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 	return indexPaths, nil
 }
 
-func doInsert(ctx context.Context, collectionID UniqueID, partitionTag string, segmentID UniqueID) error {
+func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, segmentID UniqueID) error {
 	const msgLength = 1000
 	const DIM = 16
 
@@ -906,12 +969,12 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionTag string, s
 					Timestamp: uint64(i + 1000),
 					SourceID:  0,
 				},
-				CollectionID:  collectionID,
-				PartitionName: partitionTag,
-				SegmentID:     segmentID,
-				ChannelID:     "0",
-				Timestamps:    []uint64{uint64(i + 1000)},
-				RowIDs:        []int64{int64(i)},
+				CollectionID: collectionID,
+				PartitionID:  partitionID,
+				SegmentID:    segmentID,
+				ChannelID:    "0",
+				Timestamps:   []uint64{uint64(i + 1000)},
+				RowIDs:       []int64{int64(i)},
 				RowData: []*commonpb.Blob{
 					{Value: rawData},
 				},

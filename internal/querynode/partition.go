@@ -13,31 +13,17 @@ package querynode
 import "C"
 
 type Partition struct {
-	partitionTag string
-	id           UniqueID
-	segments     []*Segment
-	enableDM     bool
+	id       UniqueID
+	segments []*Segment
+	enableDM bool
 }
 
 func (p *Partition) ID() UniqueID {
 	return p.id
 }
 
-func (p *Partition) Tag() string {
-	return (*p).partitionTag
-}
-
 func (p *Partition) Segments() *[]*Segment {
 	return &(*p).segments
-}
-
-func newPartition2(partitionTag string) *Partition {
-	var newPartition = &Partition{
-		partitionTag: partitionTag,
-		enableDM:     false,
-	}
-
-	return newPartition
 }
 
 func newPartition(partitionID UniqueID) *Partition {
