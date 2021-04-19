@@ -1,6 +1,7 @@
 #include <cstring>
 
 #include "SegmentBase.h"
+#include "Collection.h"
 #include "segment_c.h"
 #include "Partition.h"
 #include <knowhere/index/vector_index/VecIndex.h>
@@ -162,9 +163,10 @@ Close(CSegmentBase c_segment) {
 }
 
 int
-BuildIndex(CSegmentBase c_segment) {
+BuildIndex(CCollection c_collection, CSegmentBase c_segment) {
+    auto collection = (milvus::dog_segment::Collection*)c_collection;
     auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
-    auto status = segment->BuildIndex(nullptr);
+    auto status = segment->BuildIndex(collection->get_index());
     return status.code();
 }
 
