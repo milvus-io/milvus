@@ -19,9 +19,9 @@ class MsgClientV2 {
               const std::string &search_result);
 
   // unpackage batch insert or delete request, and delivery message to pulsar per row
-  Status SendMutMessage(const milvus::grpc::InsertParam &request);
+  Status SendMutMessage(const milvus::grpc::InsertParam &request, uint64_t timestamp);
 
-  Status SendMutMessage(const milvus::grpc::DeleteByIDParam &request);
+  Status SendMutMessage(const milvus::grpc::DeleteByIDParam &request, uint64_t timestamp);
 
   //
   Status SendQueryMessage(const milvus::grpc::SearchParam &request);

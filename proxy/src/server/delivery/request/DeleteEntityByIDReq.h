@@ -37,9 +37,12 @@ class DeleteEntityByIDReq : public BaseReq {
     Status
     OnExecute() override;
 
+    Status
+    OnPostExecute() override;
+
+
  private:
    const ::milvus::grpc::DeleteByIDParam *request_;
-  Status OnPostExecute();
 };
 
 }  // namespace server

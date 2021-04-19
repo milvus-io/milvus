@@ -4,12 +4,6 @@
 #include "utils/CommonUtil.h"
 #include "config/ServerConfig.h"
 
-namespace {
-int64_t gen_channe_id(int64_t uid) {
-  // TODO: murmur3 hash from pulsar source code
-  return 0;
-}
-}
 
 namespace milvus::message_client {
 
@@ -142,7 +136,7 @@ milvus::grpc::QueryResult MsgClientV2::GetQueryResult(int64_t query_id) {
     return Aggregation(total_results[query_id]);
 }
 
-Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request) {
+Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request, uint64_t timestamp) {
   // may have retry policy?
   auto row_count = request.rows_data_size();
   // TODO: Get the segment from master
@@ -152,8 +146,10 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request) {
     mut_msg.set_op(milvus::grpc::OpType::INSERT);
     mut_msg.set_uid(GetUniqueQId());
     mut_msg.set_client_id(client_id_);
-    auto channel_id = gen_channe_id(request.entity_id_array(i));
+    // TODO: add channel id
+    auto channel_id = 0;
     mut_msg.set_channel_id(channel_id);
+    mut_msg.set_timestamp(timestamp);
     mut_msg.set_collection_name(request.collection_name());
     mut_msg.set_partition_tag(request.partition_tag());
     mut_msg.set_segment_id(segment);
@@ -169,7 +165,7 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request) {
   return Status::OK();
 }
 
-Status MsgClientV2::SendMutMessage(const milvus::grpc::DeleteByIDParam &request) {
+Status MsgClientV2::SendMutMessage(const milvus::grpc::DeleteByIDParam &request, uint64_t timestamp) {
   milvus::grpc::InsertOrDeleteMsg mut_msg;
   for (auto id: request.id_array()) {
     mut_msg.set_op(milvus::grpc::OpType::DELETE);
@@ -177,6 +173,7 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::DeleteByIDParam &request)
     mut_msg.set_client_id(client_id_);
     mut_msg.set_uid(id);
     mut_msg.set_collection_name(request.collection_name());
+    mut_msg.set_timestamp(timestamp);
 
     auto result = insert_delete_producer_->send(mut_msg);
     if (result != pulsar::ResultOk) {

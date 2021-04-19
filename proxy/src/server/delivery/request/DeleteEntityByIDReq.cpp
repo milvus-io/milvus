@@ -42,7 +42,7 @@ DeleteEntityByIDReq::Create(const ContextPtr& context, const ::milvus::grpc::Del
 Status
 DeleteEntityByIDReq::OnExecute() {
   auto &msg_client = message_client::MsgClientV2::GetInstance();
-  Status status = msg_client.SendMutMessage(*request_);
+  Status status = msg_client.SendMutMessage(*request_, timestamp_);
   return status;
 }
 

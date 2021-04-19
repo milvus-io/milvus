@@ -121,6 +121,11 @@ ReqScheduler::TakeToExecute(ReqQueuePtr req_queue) {
         }
 
         try {
+            if (req->type() == ReqType::kInsert || req->type() == ReqType::kDeleteEntityByID){
+              std::lock_guard lock(time_syc_mtx_);
+              sending_ = true;
+              req->SetTimestamp(TSOracle::GetInstance().GetTimeStamp());
+            }
             auto status = req->Execute();
             if (!status.ok()) {
                 LOG_SERVER_ERROR_ << "Req failed with code: " << status.ToString();
@@ -134,9 +139,6 @@ ReqScheduler::TakeToExecute(ReqQueuePtr req_queue) {
 Status
 ReqScheduler::PutToQueue(const BaseReqPtr& req_ptr) {
     std::lock_guard<std::mutex> lock(queue_mtx_);
-
-    auto &tso = TSOracle::GetInstance();
-    req_ptr->SetTimestamp(tso.GetTimeStamp());
 
     std::string group_name = req_ptr->req_group();
     if (req_groups_.count(group_name) > 0) {
@@ -156,12 +158,24 @@ ReqScheduler::PutToQueue(const BaseReqPtr& req_ptr) {
     return Status::OK();
 }
 
-int64_t ReqScheduler::GetLatestReqDeliveredTime() {
-  return latest_req_time_.load();
+int64_t ReqScheduler::GetLatestDeliveredReqTime() {
+  std::lock_guard lock(time_syc_mtx_);
+  if (sending_){
+    return latest_req_time_;
+  }
+  return TSOracle::GetInstance().GetTimeStamp();
 }
 
 void ReqScheduler::UpdateLatestDeliveredReqTime(int64_t time) {
-  latest_req_time_.store(time);
+  std::lock_guard lock(time_syc_mtx_);
+  // update pulsar synchronous time only if message has been sent to pulsar
+  assert(sending_);
+  sending_ = false;
+  latest_req_time_ = time;
+}
+
+uint64_t GetMessageTimeSyncTime(){
+  return ReqScheduler::GetInstance().GetLatestDeliveredReqTime();
 }
 
 }  // namespace server
