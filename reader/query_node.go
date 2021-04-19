@@ -4,8 +4,8 @@ import "C"
 import (
 	"errors"
 	"fmt"
-	"suvlim/pulsar"
-	"suvlim/pulsar/schema"
+	"github.com/czs007/suvlim/pulsar"
+	"github.com/czs007/suvlim/pulsar/schema"
 	"sync"
 	"time"
 )
@@ -51,30 +51,22 @@ func NewQueryNode(timeSync uint64) *QueryNode {
 // TODO: Schema
 type CollectionSchema string
 
-func (node *QueryNode) NewCollection(collectionName string, schema CollectionSchema) (*Collection, error) {
+func (node *QueryNode) NewCollection(collectionName string, schema CollectionSchema) *Collection {
 	cName := C.CString(collectionName)
 	cSchema := C.CString(schema)
-	collection, status := C.NewCollection(cName, cSchema)
-
-	if status != 0 {
-		return nil, errors.New("create collection failed")
-	}
+	collection := C.NewCollection(cName, cSchema)
 
 	var newCollection = &Collection{CollectionPtr: collection, CollectionName: collectionName}
 	node.Collections = append(node.Collections, newCollection)
 
-	return newCollection, nil
+	return newCollection
 }
 
-func (node *QueryNode) DeleteCollection(collection *Collection) error {
-	status := C.DeleteCollection(collection.CollectionPtr)
-
-	if status != 0 {
-		return errors.New("delete collection failed")
-	}
+func (node *QueryNode) DeleteCollection(collection *Collection) {
+	cPtr := collection.CollectionPtr
+	C.DeleteCollection(cPtr)
 
 	// TODO: remove from node.Collections
-	return nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -141,10 +133,10 @@ func (node *QueryNode) GetTimeSync() uint64 {
 func (node *QueryNode) InitQueryNodeCollection() {
 	// TODO: remove hard code, add collection creation request
 	// TODO: error handle
-	var newCollection, _ = node.NewCollection("collection1", "fakeSchema")
-	var newPartition, _ = newCollection.NewPartition("partition1")
+	var newCollection = node.NewCollection("collection1", "fakeSchema")
+	var newPartition = newCollection.NewPartition("partition1")
 	// TODO: add segment id
-	var _, _ = newPartition.NewSegment(0)
+	var _ = newPartition.NewSegment(0)
 }
 
 func (node *QueryNode) SegmentsManagement() {
@@ -156,7 +148,7 @@ func (node *QueryNode) SegmentsManagement() {
 				if timeSync >= segment.SegmentCloseTime {
 					segment.Close()
 					// TODO: add atomic segment id
-					var newSegment, _ = partition.NewSegment(0)
+					var newSegment = partition.NewSegment(0)
 					newSegment.SegmentCloseTime = timeSync + SegmentLifetime
 					partition.Segments = append(partition.Segments, newSegment)
 				}

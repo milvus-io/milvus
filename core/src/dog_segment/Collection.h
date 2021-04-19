@@ -20,6 +20,10 @@ public:
       return schema_;
     }
 
+    std::string& get_collection_name() {
+      return collection_name_;
+    }
+
 private:
     // TODO: add Index ptr
     // IndexPtr index_ = nullptr;

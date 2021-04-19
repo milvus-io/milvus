@@ -1,5 +1,14 @@
 package reader
 
+/*
+
+#cgo CFLAGS: -I../core/include
+
+#cgo LDFLAGS: -L../core/lib -lmilvus_dog_segment -Wl,-rpath=../core/lib
+
+#include "partition_c.h"
+
+*/
 import "C"
 import (
 	"errors"
@@ -11,29 +20,20 @@ type Collection struct {
 	Partitions []*Partition
 }
 
-func (c *Collection) NewPartition(partitionName string) (*Partition, error) {
+func (c *Collection) NewPartition(partitionName string) *Partition {
 	cName := C.CString(partitionName)
-	partitionPtr, status := C.NewPartition(c.CollectionPtr, cName)
-
-	if status != 0 {
-		return nil, errors.New("create partition failed")
-	}
+	partitionPtr := C.NewPartition(c.CollectionPtr, cName)
 
 	var newPartition = &Partition{PartitionPtr: partitionPtr, PartitionName: partitionName}
 	c.Partitions = append(c.Partitions, newPartition)
-	return newPartition, nil
+	return newPartition
 }
 
-func (c *Collection) DeletePartition(partitionName string) error {
-	cName := C.CString(partitionName)
-	status := C.DeletePartition(c.CollectionPtr, cName)
-
-	if status != 0 {
-		return errors.New("create partition failed")
-	}
+func (c *Collection) DeletePartition(partition *Partition) {
+	cPtr := partition.PartitionPtr
+	C.DeletePartition(cPtr)
 
 	// TODO: remove from c.Partitions
-	return nil
 }
 
 func (c *Collection) GetSegments() ([]*Segment, error) {

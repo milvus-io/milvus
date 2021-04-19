@@ -11,14 +11,14 @@ package reader
 */
 import "C"
 import (
-	"suvlim/pulsar/schema"
+	"github.com/czs007/suvlim/pulsar/schema"
 )
 
 const SegmentLifetime = 20000
 
 type Segment struct {
 	SegmentPtr *C.SegmentBase
-	SegmentId	int32
+	SegmentId	uint64
 	SegmentCloseTime uint64
 }
 

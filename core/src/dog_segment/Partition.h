@@ -13,6 +13,10 @@ public:
       return schema_;
     }
 
+    std::string& get_partition_name() {
+      return partition_name_;
+    }
+
 private:
     std::string partition_name_;
     SchemaPtr schema_;

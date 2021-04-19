@@ -1,0 +1,82 @@
+syntax = "proto3";
+package pdpb;
+
+import "metapb.proto";
+
+service PD {
+    rpc Tso(stream TsoRequest) returns (stream TsoResponse) {}
+    rpc AllocID(AllocIDRequest) returns (AllocIDResponse) {}
+    rpc Heartbeat(stream HeartbeatRequest) returns (stream HeartbeatResponse) {}
+}
+
+message Member {
+    // name is the name of the PD member.
+    string name = 1;
+    // member_id is the unique id of the PD member.
+    uint64 member_id = 2;
+    repeated string peer_urls = 3;
+    repeated string client_urls = 4;
+}
+
+message RequestHeader {
+    // cluster_id is the ID of the cluster which be sent to.
+    uint64 cluster_id = 1;
+}
+
+message ResponseHeader {
+    // cluster_id is the ID of the cluster which sent the response.
+    uint64 cluster_id = 1;
+    Error error = 2;
+}
+
+enum ErrorType {
+    OK = 0;
+    UNKNOWN = 1;
+    NOT_BOOTSTRAPPED = 2;
+    STORE_TOMBSTONE = 3;
+    ALREADY_BOOTSTRAPPED = 4;
+    INCOMPATIBLE_VERSION = 5;
+    REGION_NOT_FOUND = 6;
+}
+
+message Error {
+    ErrorType type = 1;
+    string message = 2;
+}
+
+message TsoRequest {
+    RequestHeader header = 1;
+
+    uint32 count = 2;
+}
+
+message Timestamp {
+    int64 physical = 1;
+    int64 logical = 2;
+}
+
+message TsoResponse {
+    ResponseHeader header = 1;
+
+    uint32 count = 2;
+    Timestamp timestamp = 3;
+}
+
+message AllocIDRequest {
+    RequestHeader header = 1;
+}
+
+message AllocIDResponse {
+    ResponseHeader header = 1;
+    uint64 id = 2;
+}
+
+message HeartbeatRequest {
+    RequestHeader header = 1;
+    metapb.Peer peer = 2;
+
+}
+
+message HeartbeatResponse {
+    ResponseHeader header = 1;
+}

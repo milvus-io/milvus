@@ -1,0 +1,29 @@
+syntax = "proto3";
+package metapb;
+
+
+message Cluster {
+    uint64 id = 1;
+    // max peer count for a region.
+    // pd will do the auto-balance if region peer count mismatches.
+    uint32 max_peer_count = 1024;
+    // more attributes......
+}
+
+enum PeerRole {
+
+    Master = 0;
+
+    Reader = 1;
+
+    Write = 2;
+
+    Proxyer = 3;
+
+}
+
+message Peer {
+    uint64 id = 1;
+    uint64 peer_id = 2;
+    PeerRole role = 3;
+}

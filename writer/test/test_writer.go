@@ -1,69 +1,57 @@
 package main
 
 import (
-	"container/list"
-	"fmt"
+	"context"
 	"github.com/czs007/suvlim/pulsar/schema"
+	"github.com/czs007/suvlim/writer"
 )
 
-func GetInsertMsg(entityId int64) *schema.InsertMsg {
+func GetInsertMsg(collectionName string, partitionTag string, entityId int64) *schema.InsertMsg {
 	return &schema.InsertMsg{
-		CollectionName: "collection",
-		PartitionTag:   "tag01",
-		EntityId:       entityId,
+		CollectionName: collectionName,
+		PartitionTag:   partitionTag,
+		SegmentId:      uint64(entityId / 100),
+		EntityId:       int64(entityId),
 		Timestamp:      uint64(entityId),
 		ClientId:       0,
 	}
 }
 
-func GetDeleteMsg(entityId int64) *schema.DeleteMsg {
+func GetDeleteMsg(collectionName string, entityId int64) *schema.DeleteMsg {
 	return &schema.DeleteMsg{
-		CollectionName: "collection",
+		CollectionName: collectionName,
 		EntityId:       entityId,
 		Timestamp:      uint64(entityId + 100),
 	}
 }
 
-//type example struct {
-//	id int
-//}
-//
-//type data struct {
-//	buffer *list.List
-//}
-
-//func GetExample(num int) []*example {
-//	var examples []*example
-//	i := 0
-//	for i = 0; i < num; i++ {
-//		examples = append(examples, &example{id: i})
-//	}
-//	return examples
-//}
-//
-//func GetValue(data *list.List, value []int) []int {
-//	for e := data.Front(); e != nil; e = e.Next() {
-//		value = append(value, e.Value.(*example).id)
-//	}
-//	return value
-//}
-
 func main() {
-	//ctx := context.Background()
-	deleteBuffer := list.New()
-	//insertBuffer := list.New()
-	deleteBuffer.PushBack(1)
-	deleteBuffer.PushBack(2)
-	var data []*list.Element
-	for e := deleteBuffer.Front(); e != nil; e = e.Next() {
-		if e.Value.(int) == 1 {
-			data = append(data, e)
-		}
+	ctx := context.Background()
+	var topics []string
+	topics = append(topics, "test")
+	topics = append(topics, "test1")
+	writerNode, _ := writer.NewWriteNode(ctx, "null", topics, 0)
+	var insertMsgs []*schema.InsertMsg
+	for i := 0; i < 120; i++ {
+		insertMsgs = append(insertMsgs, GetInsertMsg("collection0", "tag01", int64(i)))
 	}
-	fmt.Println(data[0].Value.(int))
-	//writeNode := writer.NewWriteNode(
-	//	ctx,
-	//	"",
-	//	)
-	//a := make(map[string]in)
+	//var wg sync.WaitGroup
+	writerNode.InsertBatchData(ctx, insertMsgs, 100)
+	data1 := writerNode.KvStore.GetData(ctx)
+	gtInsertBuffer := writerNode.GetInsertBuffer()
+	println(len(data1))
+	println(gtInsertBuffer.Len())
+	var insertMsgs2 []*schema.InsertMsg
+	for i := 120; i < 200; i++ {
+		insertMsgs2 = append(insertMsgs2, GetInsertMsg("collection0", "tag02", int64(i)))
+	}
+	writerNode.InsertBatchData(ctx, insertMsgs2, 200)
+	data2 := writerNode.KvStore.GetData(ctx)
+	println(len(data2))
+	var deleteMsgs []*schema.DeleteMsg
+	deleteMsgs = append(deleteMsgs, GetDeleteMsg("collection0", 2))
+	deleteMsgs = append(deleteMsgs, GetDeleteMsg("collection0", 120))
+	writerNode.DeleteBatchData(ctx, deleteMsgs, 200)
+	data3 := writerNode.KvStore.GetData(ctx)
+	println(len(data3))
 }
