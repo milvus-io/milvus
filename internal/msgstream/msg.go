@@ -78,6 +78,39 @@ func (it *InsertMsg) Unmarshal(input []byte) (TsMsg, error) {
 	return insertMsg, nil
 }
 
+/////////////////////////////////////////Flush//////////////////////////////////////////
+type FlushMsg struct {
+	BaseMsg
+	internalPb.FlushMsg
+}
+
+func (fl *FlushMsg) Type() MsgType {
+	return fl.GetMsgType()
+}
+
+func (fl *FlushMsg) Marshal(input TsMsg) ([]byte, error) {
+	flushMsgTask := input.(*FlushMsg)
+	flushMsg := &flushMsgTask.FlushMsg
+	mb, err := proto.Marshal(flushMsg)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (fl *FlushMsg) Unmarshal(input []byte) (TsMsg, error) {
+	flushMsg := internalPb.FlushMsg{}
+	err := proto.Unmarshal(input, &flushMsg)
+	if err != nil {
+		return nil, err
+	}
+	flushMsgTask := &FlushMsg{FlushMsg: flushMsg}
+	flushMsgTask.BeginTimestamp = flushMsgTask.Timestamp
+	flushMsgTask.EndTimestamp = flushMsgTask.Timestamp
+
+	return flushMsgTask, nil
+}
+
 /////////////////////////////////////////Delete//////////////////////////////////////////
 type DeleteMsg struct {
 	BaseMsg

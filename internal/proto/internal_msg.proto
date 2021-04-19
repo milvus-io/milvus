@@ -26,6 +26,7 @@ enum MsgType {
     /* Manipulation Requests */
     kInsert = 400;
     kDelete = 401;
+    kFlush = 402;
 
     /* Query */
     kSearch = 500;
@@ -259,6 +260,12 @@ message SearchResult {
 message TimeTickMsg {
     MsgType msg_type = 1;
     int64 peerID = 2;
+    uint64 timestamp = 3;
+}
+
+message FlushMsg {
+    MsgType msg_type = 1;
+    int64 segmentID = 2;
     uint64 timestamp = 3;
 }
 

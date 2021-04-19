@@ -24,6 +24,7 @@ type (
 
 	insertMsg struct {
 		insertMessages []*msgstream.InsertMsg
+		flushMessages  []*msgstream.FlushMsg
 		timeRange      TimeRange
 	}
 
