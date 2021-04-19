@@ -131,3 +131,15 @@ func (pq *PriorityQueue) PeekClient() (UniqueID, typeutil.IndexNodeInterface) {
 	}
 	return item.(*PQItem).key, item.(*PQItem).value
 }
+
+func (pq *PriorityQueue) PeekAllClients() []typeutil.IndexNodeInterface {
+	pq.lock.RLock()
+	defer pq.lock.RUnlock()
+
+	var ret []typeutil.IndexNodeInterface
+	for _, item := range pq.items {
+		ret = append(ret, item.value)
+	}
+
+	return ret
+}

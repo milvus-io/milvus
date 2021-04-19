@@ -32,10 +32,6 @@ type Server struct {
 	loopWg     sync.WaitGroup
 }
 
-func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	panic("implement me")
-}
-
 func (s *Server) Run() error {
 
 	if err := s.init(); err != nil {
@@ -101,6 +97,11 @@ func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest)
 func (s *Server) GetIndexStates(ctx context.Context, req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
 
 	return s.impl.GetIndexStates(req)
+}
+
+func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+
+	return s.impl.DropIndex(request)
 }
 
 func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {

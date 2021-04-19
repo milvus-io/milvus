@@ -119,6 +119,7 @@ service IndexNode {
    * @return Status
    */
   rpc BuildIndex(BuildIndexCmd) returns (common.Status){}
+  rpc DropIndex(DropIndexRequest) returns (common.Status) {}
 
   rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
   rpc GetTimeTickChannel(common.Empty) returns(milvus.StringResponse) {}

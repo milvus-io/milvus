@@ -61,6 +61,11 @@ func (c *Client) BuildIndex(req *indexpb.BuildIndexCmd) (*commonpb.Status, error
 	return c.grpcClient.BuildIndex(ctx, req)
 }
 
+func (c *Client) DropIndex(req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+	ctx := context.TODO()
+	return c.grpcClient.DropIndex(ctx, req)
+}
+
 func NewClient(nodeAddress string) (*Client, error) {
 
 	return &Client{

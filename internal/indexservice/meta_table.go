@@ -13,6 +13,7 @@ package indexservice
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"sync"
 
@@ -25,7 +26,7 @@ import (
 
 type metaTable struct {
 	client            kv.TxnBase                     // client of a reliable kv service, i.e. etcd client
-	indexBuildID2Meta map[UniqueID]indexpb.IndexMeta // index id to index meta
+	indexBuildID2Meta map[UniqueID]indexpb.IndexMeta // index build id to index meta
 
 	lock sync.RWMutex
 }
@@ -86,12 +87,35 @@ func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequ
 	return mt.saveIndexMeta(meta)
 }
 
+func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+
+	exist := false
+	for indexBuildID, meta := range mt.indexBuildID2Meta {
+		if meta.Req.IndexID == indexID {
+			meta.State = commonpb.IndexState_DELETED
+			mt.indexBuildID2Meta[indexBuildID] = meta
+			exist = true
+		}
+	}
+
+	if !exist {
+		return errors.New("index not exists")
+	}
+
+	return nil
+}
+
 func (mt *metaTable) NotifyBuildIndex(nty *indexpb.BuildIndexNotification) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 	indexBuildID := nty.IndexBuildID
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
+		return errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexBuildID, 10))
+	}
+	if meta.State == commonpb.IndexState_DELETED {
 		return errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexBuildID, 10))
 	}
 
@@ -117,6 +141,9 @@ func (mt *metaTable) GetIndexState(indexBuildID UniqueID) (*indexpb.IndexInfo, e
 	if !ok {
 		return ret, errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexBuildID, 10))
 	}
+	if meta.State == commonpb.IndexState_DELETED {
+		return ret, errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexBuildID, 10))
+	}
 	ret.IndexID = meta.Req.IndexID
 	ret.IndexName = meta.Req.IndexName
 	ret.Reason = meta.FailReason
@@ -134,8 +161,41 @@ func (mt *metaTable) GetIndexFilePathInfo(indexBuildID UniqueID) (*indexpb.Index
 	if !ok {
 		return nil, errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexBuildID, 10))
 	}
+	if meta.State == commonpb.IndexState_DELETED {
+		return nil, errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexBuildID, 10))
+	}
 	ret.IndexFilePaths = meta.IndexFilePaths
 	return ret, nil
+}
+
+func (mt *metaTable) removeIndexFile(indexID UniqueID) {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+
+	for _, meta := range mt.indexBuildID2Meta {
+		if meta.Req.IndexID == indexID {
+			err := mt.client.MultiRemove(meta.IndexFilePaths)
+			if err != nil {
+				log.Println("remove index file err: ", err)
+			}
+		}
+	}
+}
+
+func (mt *metaTable) removeMeta(indexID UniqueID) {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+
+	indexBuildIDToRemove := make([]UniqueID, 0)
+	for indexBuildID, meta := range mt.indexBuildID2Meta {
+		if meta.Req.IndexID == indexID {
+			indexBuildIDToRemove = append(indexBuildIDToRemove, indexBuildID)
+		}
+	}
+
+	for _, indexBuildID := range indexBuildIDToRemove {
+		delete(mt.indexBuildID2Meta, indexBuildID)
+	}
 }
 
 func (mt *metaTable) DeleteIndex(indexBuildID UniqueID) error {
