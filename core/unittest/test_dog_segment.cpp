@@ -26,14 +26,16 @@
 // #include "segment/SegmentWriter.h"
 // #include "src/dog_segment/SegmentBase.h"
 // #include "utils/Json.h"
+#include <random>
+#include <gtest/gtest.h>
 #include "dog_segment/SegmentBase.h"
 using std::cin;
 using std::cout;
 using std::endl;
 
-using SegmentVisitor = milvus::engine::SegmentVisitor;
+// using SegmentVisitor = milvus::engine::SegmentVisitor;
 
-namespace {
+// namespace {
 // milvus::Status
 // CreateCollection(std::shared_ptr<DB> db, const std::string& collection_name, const LSN_TYPE& lsn) {
 //     CreateCollectionContext context;
@@ -73,7 +75,7 @@ namespace {
 // }
 // }  // namespace
 
-TEST_F(DogSegmentTest, TestABI) {
+TEST(DogSegmentTest, TestABI) {
     using namespace milvus::engine;
     using namespace milvus::dog_segment;
     ASSERT_EQ(TestABI(), 42);
@@ -135,7 +137,7 @@ TEST_F(DogSegmentTest, TestABI) {
 
 
 
-TEST_F(DogSegmentTest, MockTest) {
+TEST(DogSegmentTest, MockTest) {
     using namespace milvus::dog_segment;
     using namespace milvus::engine;
     auto schema = std::make_shared<Schema>();
