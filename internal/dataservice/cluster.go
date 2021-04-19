@@ -41,7 +41,7 @@ func newDataNodeCluster(finishCh chan struct{}) *dataNodeCluster {
 func (c *dataNodeCluster) Register(ip string, port int64, id int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.checkDataNodeNotExist(ip, port) {
+	if c.checkDataNodeNotExist(ip, port) {
 		c.nodes = append(c.nodes, &dataNode{
 			id: id,
 			address: struct {
@@ -50,9 +50,9 @@ func (c *dataNodeCluster) Register(ip string, port int64, id int64) {
 			}{ip: ip, port: port},
 			channelNum: 0,
 		})
-	}
-	if len(c.nodes) == Params.DataNodeNum {
-		close(c.finishCh)
+		if len(c.nodes) == Params.DataNodeNum {
+			close(c.finishCh)
+		}
 	}
 }
 
