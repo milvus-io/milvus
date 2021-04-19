@@ -652,9 +652,9 @@ func (s *Server) GetInsertBinlogPaths(req *datapb.InsertBinlogPathRequest) (*dat
 	}
 	fields := make([]UniqueID, len(flushMeta.Fields))
 	paths := make([]*internalpb2.StringList, len(flushMeta.Fields))
-	for _, field := range flushMeta.Fields {
-		fields = append(fields, field.FieldID)
-		paths = append(paths, &internalpb2.StringList{Values: field.BinlogPaths})
+	for i, field := range flushMeta.Fields {
+		fields[i] = field.FieldID
+		paths[i] = &internalpb2.StringList{Values: field.BinlogPaths}
 	}
 	resp.FieldIDs = fields
 	resp.Paths = paths
@@ -674,7 +674,7 @@ func (s *Server) GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, 
 		return nil, err
 	}
 
-	channels := make([]string, Params.InsertChannelNumPerCollection)
+	channels := make([]string, 0)
 	for _, group := range channelGroups {
 		channels = append(channels, group...)
 	}

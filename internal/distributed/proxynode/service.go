@@ -47,10 +47,10 @@ type Server struct {
 	indexServiceClient  *grpcindexserviceclient.Client
 }
 
-func NewServer() (*Server, error) {
+func NewServer(ctx context.Context) (*Server, error) {
 
 	server := &Server{
-		ctx:         context.Background(),
+		ctx:         ctx,
 		grpcErrChan: make(chan error),
 	}
 
@@ -123,7 +123,7 @@ func (s *Server) init() error {
 	}()
 
 	s.wg.Add(1)
-	s.startGrpcLoop(Params.Port)
+	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
 	err = <-s.grpcErrChan
 	if err != nil {

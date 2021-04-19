@@ -1,26 +1,16 @@
 package datanode
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
-	"go.etcd.io/etcd/clientv3"
+	memkv "github.com/zilliztech/milvus-distributed/internal/kv/mem"
 )
 
-func TestMetaTable_all(t *testing.T) {
+func TestMetaTable_SegmentFlush(t *testing.T) {
 
-	etcdAddr := Params.EtcdAddress
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
-	require.NoError(t, err)
-	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/meta/root")
-
-	_, err = cli.Delete(context.TODO(), "/etcd/test/meta/root", clientv3.WithPrefix())
-	require.NoError(t, err)
-
-	meta, err := NewMetaTable(etcdKV)
+	kvMock := memkv.NewMemoryKV()
+	meta, err := NewMetaTable(kvMock)
 	assert.NoError(t, err)
 	defer meta.client.Close()
 
@@ -65,27 +55,6 @@ func TestMetaTable_all(t *testing.T) {
 			ret)
 	})
 
-	t.Run("TestMetaTable_AppendDDLBinlogPaths", func(t *testing.T) {
-
-		collID2Paths := map[UniqueID][]string{
-			301: {"a", "b", "c"},
-			302: {"c", "b", "a"},
-		}
-
-		for collID, dataPaths := range collID2Paths {
-			for _, dp := range dataPaths {
-				err = meta.AppendDDLBinlogPaths(collID, []string{dp})
-				assert.Nil(t, err)
-			}
-		}
-
-		for k, v := range collID2Paths {
-			ret, err := meta.getDDLBinlogPaths(k)
-			assert.Nil(t, err)
-			assert.Equal(t, map[UniqueID][]string{k: v}, ret)
-		}
-	})
-
 	t.Run("TestMetaTable_CompleteFlush", func(t *testing.T) {
 
 		var segmentID UniqueID = 401
@@ -104,4 +73,38 @@ func TestMetaTable_all(t *testing.T) {
 		assert.Equal(t, true, ret)
 	})
 
+}
+
+func TestMetaTable_DDLFlush(t *testing.T) {
+	kvMock := memkv.NewMemoryKV()
+	meta, err := NewMetaTable(kvMock)
+	assert.NoError(t, err)
+	defer meta.client.Close()
+
+	t.Run("TestMetaTable_AppendDDLBinlogPaths", func(t *testing.T) {
+
+		assert.False(t, meta.hasDDLFlushMeta(301))
+		assert.False(t, meta.hasDDLFlushMeta(302))
+
+		collID2Paths := map[UniqueID][]string{
+			301: {"a", "b", "c"},
+			302: {"c", "b", "a"},
+		}
+
+		for collID, dataPaths := range collID2Paths {
+			for _, dp := range dataPaths {
+				err = meta.AppendDDLBinlogPaths(collID, []string{dp})
+				assert.Nil(t, err)
+			}
+		}
+
+		for k, v := range collID2Paths {
+			ret, err := meta.getDDLBinlogPaths(k)
+			assert.Nil(t, err)
+			assert.Equal(t, map[UniqueID][]string{k: v}, ret)
+		}
+
+		assert.True(t, meta.hasDDLFlushMeta(301))
+		assert.True(t, meta.hasDDLFlushMeta(302))
+	})
 }

@@ -5,22 +5,29 @@ go 1.15
 require (
 	code.cloudfoundry.org/bytefmt v0.0.0-20200131002437-cf55d5288a48 // indirect
 	github.com/HdrHistogram/hdrhistogram-go v1.0.1 // indirect
+	github.com/akamensky/argparse v1.2.2
 	github.com/apache/pulsar-client-go v0.1.1
 	github.com/apache/thrift v0.13.0
 	github.com/aws/aws-sdk-go v1.30.8 // indirect
 	github.com/coreos/etcd v3.3.25+incompatible // indirect
 	github.com/cznic/mathutil v0.0.0-20181122101859-297441e03548 // indirect
+	github.com/facebookgo/ensure v0.0.0-20200202191622-63f1cf65ac4c // indirect
+	github.com/facebookgo/stack v0.0.0-20160209184415-751773369052 // indirect
+	github.com/facebookgo/subset v0.0.0-20200203212716-c811ad88dec4 // indirect
 	github.com/frankban/quicktest v1.10.2 // indirect
 	github.com/fsnotify/fsnotify v1.4.9 // indirect
 	github.com/go-basic/ipv4 v1.0.0
+	github.com/go-kit/kit v0.9.0
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
 	github.com/golang/mock v1.3.1
 	github.com/golang/protobuf v1.3.2
 	github.com/google/btree v1.0.0
+	github.com/ilyakaznacheev/cleanenv v1.2.5
 	github.com/klauspost/compress v1.10.11 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/minio/minio-go/v7 v7.0.5
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
+	github.com/oklog/run v1.1.0
 	github.com/onsi/ginkgo v1.12.1 // indirect
 	github.com/onsi/gomega v1.10.0 // indirect
 	github.com/opentracing/opentracing-go v1.2.0
@@ -29,11 +36,12 @@ require (
 	github.com/pingcap/errors v0.11.4 // indirect
 	github.com/pingcap/log v0.0.0-20200828042413-fce0951f1463 // indirect
 	github.com/pivotal-golang/bytefmt v0.0.0-20200131002437-cf55d5288a48 // indirect
+	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.5.1 // indirect
-	github.com/prometheus/common v0.10.0 // indirect
+	github.com/prometheus/common v0.10.0
 	github.com/prometheus/procfs v0.1.3 // indirect
 	github.com/quasilyte/go-ruleguard v0.2.1 // indirect
-	github.com/sirupsen/logrus v1.6.0
+	github.com/sirupsen/logrus v1.6.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/spf13/cast v1.3.0
 	github.com/spf13/viper v1.7.1
@@ -54,6 +62,7 @@ require (
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 	google.golang.org/genproto v0.0.0-20200122232147-0452cf42e150 // indirect
 	google.golang.org/grpc v1.31.0
+	gopkg.in/alecthomas/kingpin.v2 v2.2.6
 	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
 	gopkg.in/yaml.v2 v2.3.0 // indirect
 	honnef.co/go/tools v0.0.1-2020.1.4 // indirect

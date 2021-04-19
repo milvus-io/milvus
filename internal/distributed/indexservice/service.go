@@ -9,6 +9,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 
 	"github.com/zilliztech/milvus-distributed/internal/indexservice"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -21,17 +22,120 @@ type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
 type Server struct {
-	server typeutil.IndexServiceInterface
+	impl *indexservice.ServiceImpl
 
-	grpcServer *grpc.Server
+	grpcServer  *grpc.Server
+	grpcErrChan chan error
 
 	loopCtx    context.Context
 	loopCancel func()
 	loopWg     sync.WaitGroup
 }
 
+func (s *Server) Run() error {
+
+	if err := s.init(); err != nil {
+		return err
+	}
+
+	if err := s.start(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Server) init() error {
+	Params.Init()
+	indexservice.Params.Init()
+
+	s.loopWg.Add(1)
+	go s.startGrpcLoop(Params.ServicePort)
+	// wait for grpc impl loop start
+	if err := <-s.grpcErrChan; err != nil {
+		return err
+	}
+	s.impl.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
+
+	if err := s.impl.Init(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Server) start() error {
+	if err := s.impl.Start(); err != nil {
+		return err
+	}
+	log.Println("indexServer started")
+	return nil
+}
+
+func (s *Server) Stop() error {
+	if s.impl != nil {
+		s.impl.Stop()
+	}
+
+	s.loopCancel()
+	if s.grpcServer != nil {
+		s.grpcServer.GracefulStop()
+	}
+
+	s.loopWg.Wait()
+	return nil
+}
+
+func (s *Server) RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
+
+	return s.impl.RegisterNode(req)
+}
+
+func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
+
+	return s.impl.BuildIndex(req)
+}
+
+func (s *Server) GetIndexStates(ctx context.Context, req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
+
+	return s.impl.GetIndexStates(req)
+}
+
+func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {
+
+	return s.impl.GetIndexFilePaths(req)
+}
+
+func (s *Server) NotifyBuildIndex(ctx context.Context, nty *indexpb.BuildIndexNotification) (*commonpb.Status, error) {
+
+	return s.impl.NotifyBuildIndex(nty)
+}
+
+func (s *Server) startGrpcLoop(grpcPort int) {
+
+	defer s.loopWg.Done()
+
+	log.Println("network port: ", grpcPort)
+	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
+	if err != nil {
+		log.Printf("GrpcServer:failed to listen: %v", err)
+		s.grpcErrChan <- err
+		return
+	}
+
+	ctx, cancel := context.WithCancel(s.loopCtx)
+	defer cancel()
+
+	s.grpcServer = grpc.NewServer()
+	indexpb.RegisterIndexServiceServer(s.grpcServer, s)
+
+	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
+	if err := s.grpcServer.Serve(lis); err != nil {
+		s.grpcErrChan <- err
+	}
+
+}
+
 func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	return s.server.GetComponentStates()
+	return s.impl.GetComponentStates()
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
@@ -40,7 +144,7 @@ func (s *Server) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) 
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		},
 	}
-	channel, err := s.server.GetTimeTickChannel()
+	channel, err := s.impl.GetTimeTickChannel()
 	if err != nil {
 		resp.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
 		resp.Status.Reason = err.Error()
@@ -57,7 +161,7 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		},
 	}
-	channel, err := s.server.GetStatisticsChannel()
+	channel, err := s.impl.GetStatisticsChannel()
 	if err != nil {
 		resp.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
 		resp.Status.Reason = err.Error()
@@ -67,88 +171,19 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty
 	return resp, nil
 }
 
-func Init() error {
-	indexservice.Params.Init()
-	return nil
-}
-
-func (s *Server) Start() error {
-	return s.startIndexServer()
-}
-
-func (s *Server) Stop() error {
-	s.server.Stop()
-	s.loopCancel()
-	if s.grpcServer != nil {
-		s.grpcServer.GracefulStop()
-	}
-
-	s.loopWg.Wait()
-	return nil
-}
-
-func (s *Server) RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
-
-	return s.server.RegisterNode(req)
-}
-
-func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
-
-	return s.server.BuildIndex(req)
-}
-
-func (s *Server) GetIndexStates(ctx context.Context, req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
-
-	return s.server.GetIndexStates(req)
-}
-
-func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {
-
-	return s.server.GetIndexFilePaths(req)
-}
-
-func (s *Server) NotifyBuildIndex(ctx context.Context, nty *indexpb.BuildIndexNotification) (*commonpb.Status, error) {
-
-	return s.server.NotifyBuildIndex(nty)
-}
-
-func (s *Server) grpcLoop() {
-	defer s.loopWg.Done()
-
-	lis, err := net.Listen("tcp", ":"+strconv.Itoa(indexservice.Params.Port))
-	if err != nil {
-		log.Fatalf("IndexServer grpc server fatal error=%v", err)
-	}
-
-	s.grpcServer = grpc.NewServer()
-	indexpb.RegisterIndexServiceServer(s.grpcServer, s)
-
-	if err = s.grpcServer.Serve(lis); err != nil {
-		log.Fatalf("IndexServer grpc server fatal error=%v", err)
-	}
-}
-
-func (s *Server) startIndexServer() error {
-	s.loopWg.Add(1)
-	go s.grpcLoop()
-	log.Println("IndexServer grpc server start successfully")
-
-	return s.server.Start()
-}
-
 func NewServer(ctx context.Context) (*Server, error) {
 
 	ctx1, cancel := context.WithCancel(ctx)
-	serverImp, err := indexservice.CreateIndexService(ctx)
+	serverImp, err := indexservice.NewServiceImpl(ctx)
 	if err != nil {
 		defer cancel()
 		return nil, err
 	}
 	s := &Server{
-		loopCtx:    ctx1,
-		loopCancel: cancel,
-
-		server: serverImp,
+		loopCtx:     ctx1,
+		loopCancel:  cancel,
+		impl:        serverImp,
+		grpcErrChan: make(chan error),
 	}
 
 	return s, nil

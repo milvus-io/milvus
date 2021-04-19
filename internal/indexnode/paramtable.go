@@ -1,24 +1,27 @@
 package indexnode
 
 import (
-	"net"
-	"os"
+	"bytes"
+	"log"
 	"strconv"
 
+	"github.com/spf13/cast"
+	"github.com/spf13/viper"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
+)
+
+const (
+	StartParamsKey = "START_PARAMS"
 )
 
 type ParamTable struct {
 	paramtable.BaseTable
 
+	IP      string
 	Address string
 	Port    int
-
-	NodeAddress    string
-	NodeIP         string
-	NodePort       int
-	ServiceAddress string
-	ServicePort    int
 
 	NodeID int64
 
@@ -38,12 +41,11 @@ var Params ParamTable
 
 func (pt *ParamTable) Init() {
 	pt.BaseTable.Init()
-	pt.initAddress()
-	pt.initPort()
-	pt.initIndexServerAddress()
-	pt.initIndexServerPort()
+	pt.initParams()
+}
+
+func (pt *ParamTable) initParams() {
 	pt.initEtcdAddress()
-	pt.initMasterAddress()
 	pt.initMetaRootPath()
 	pt.initMinIOAddress()
 	pt.initMinIOAccessKeyID()
@@ -52,69 +54,53 @@ func (pt *ParamTable) Init() {
 	pt.initMinioBucketName()
 }
 
-func (pt *ParamTable) initAddress() {
-	addr, err := pt.Load("indexServer.address")
-	if err != nil {
-		panic(err)
-	}
+func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb2.InitParams) error {
+	pt.NodeID = initParams.NodeID
 
-	hostName, _ := net.LookupHost(addr)
-	if len(hostName) <= 0 {
-		if ip := net.ParseIP(addr); ip == nil {
-			panic("invalid ip indexBuilder.address")
+	config := viper.New()
+	config.SetConfigType("yaml")
+	for _, pair := range initParams.StartParams {
+		if pair.Key == StartParamsKey {
+			err := config.ReadConfig(bytes.NewBuffer([]byte(pair.Value)))
+			if err != nil {
+				return err
+			}
+			break
 		}
 	}
 
-	port, err := pt.Load("indexServer.port")
-	if err != nil {
-		panic(err)
-	}
-	_, err = strconv.Atoi(port)
-	if err != nil {
-		panic(err)
-	}
-
-	pt.Address = addr + ":" + port
-}
-
-func (pt *ParamTable) initPort() {
-	pt.Port = pt.ParseInt("indexServer.port")
-}
-
-func (pt *ParamTable) initIndexServerAddress() {
-	//TODO: save IndexService address in paramtable kv?
-	serviceAddr := os.Getenv("INDEX_SERVICE_ADDRESS")
-	if serviceAddr == "" {
-		addr, err := pt.Load("indexServer.address")
+	for _, key := range config.AllKeys() {
+		val := config.Get(key)
+		str, err := cast.ToStringE(val)
 		if err != nil {
-			panic(err)
-		}
+			switch val := val.(type) {
+			case []interface{}:
+				str = str[:0]
+				for _, v := range val {
+					ss, err := cast.ToStringE(v)
+					if err != nil {
+						log.Panic(err)
+					}
+					if len(str) == 0 {
+						str = ss
+					} else {
+						str = str + "," + ss
+					}
+				}
 
-		hostName, _ := net.LookupHost(addr)
-		if len(hostName) <= 0 {
-			if ip := net.ParseIP(addr); ip == nil {
-				panic("invalid ip indexServer.address")
+			default:
+				log.Panicf("undefine config type, key=%s", key)
 			}
 		}
-
-		port, err := pt.Load("indexServer.port")
-		if err != nil {
-			panic(err)
-		}
-		_, err = strconv.Atoi(port)
+		err = pt.Save(key, str)
 		if err != nil {
 			panic(err)
 		}
 
-		pt.ServiceAddress = addr + ":" + port
-		return
 	}
 
-	pt.ServiceAddress = serviceAddr
-}
-
-func (pt ParamTable) initIndexServerPort() {
-	pt.ServicePort = pt.ParseInt("indexServer.port")
+	pt.initParams()
+	return nil
 }
 
 func (pt *ParamTable) initEtcdAddress() {
@@ -135,14 +121,6 @@ func (pt *ParamTable) initMetaRootPath() {
 		panic(err)
 	}
 	pt.MetaRootPath = rootPath + "/" + subPath
-}
-
-func (pt *ParamTable) initMasterAddress() {
-	ret, err := pt.Load("_MasterAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.MasterAddress = ret
 }
 
 func (pt *ParamTable) initMinIOAddress() {

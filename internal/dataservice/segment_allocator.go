@@ -84,6 +84,8 @@ func newSegmentAllocator(meta *meta, allocator allocator) (*segmentAllocatorImpl
 }
 
 func (allocator *segmentAllocatorImpl) OpenSegment(segmentInfo *datapb.SegmentInfo) error {
+	allocator.mu.Lock()
+	defer allocator.mu.Unlock()
 	if _, ok := allocator.segments[segmentInfo.SegmentID]; ok {
 		return fmt.Errorf("segment %d already exist", segmentInfo.SegmentID)
 	}

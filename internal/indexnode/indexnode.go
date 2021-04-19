@@ -3,7 +3,6 @@ package indexnode
 import (
 	"context"
 	"log"
-	"math/rand"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
@@ -12,6 +11,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
@@ -23,8 +23,8 @@ const (
 type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
-type IndexNode struct {
-	state internalpb2.StateCode
+type NodeImpl struct {
+	stateCode internalpb2.StateCode
 
 	loopCtx    context.Context
 	loopCancel func()
@@ -40,16 +40,49 @@ type IndexNode struct {
 	closeCallbacks []func()
 }
 
-func Init() {
-	rand.Seed(time.Now().UnixNano())
-	Params.Init()
-}
-
-func CreateIndexNode(ctx context.Context) (*IndexNode, error) {
+func NewNodeImpl(ctx context.Context) (*NodeImpl, error) {
 	ctx1, cancel := context.WithCancel(ctx)
-	b := &IndexNode{
+	b := &NodeImpl{
 		loopCtx:    ctx1,
 		loopCancel: cancel,
+	}
+	var err error
+	b.sched, err = NewTaskScheduler(b.loopCtx, b.kv)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+func (i *NodeImpl) Init() error {
+	log.Println("AAAAAAAAAAAAAAAAA", i.serviceClient)
+	err := funcutil.WaitForComponentReady(i.serviceClient, "IndexService", 10, time.Second)
+	log.Println("BBBBBBBBB", i.serviceClient)
+
+	if err != nil {
+		return err
+	}
+	request := &indexpb.RegisterNodeRequest{
+		Base: nil,
+		Address: &commonpb.Address{
+			Ip:   Params.IP,
+			Port: int64(Params.Port),
+		},
+	}
+
+	resp, err2 := i.serviceClient.RegisterNode(request)
+	if err2 != nil {
+		log.Printf("Index NodeImpl connect to IndexService failed, error= %v", err)
+		return err2
+	}
+
+	if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return errors.New(resp.Status.Reason)
+	}
+
+	err = Params.LoadConfigFromInitParams(resp.InitParams)
+	if err != nil {
+		return err
 	}
 
 	connectMinIOFn := func() error {
@@ -62,73 +95,55 @@ func CreateIndexNode(ctx context.Context) (*IndexNode, error) {
 			CreateBucket:      true,
 		}
 		var err error
-		b.kv, err = miniokv.NewMinIOKV(b.loopCtx, option)
+		i.kv, err = miniokv.NewMinIOKV(i.loopCtx, option)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
 
-	err := retry.Retry(10, time.Millisecond*200, connectMinIOFn)
+	err = retry.Retry(10, time.Millisecond*200, connectMinIOFn)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	b.sched, err = NewTaskScheduler(b.loopCtx, b.kv)
-	if err != nil {
-		return nil, err
-	}
+	i.UpdateStateCode(internalpb2.StateCode_HEALTHY)
 
-	return b, nil
-}
-
-// AddStartCallback adds a callback in the startServer phase.
-func (i *IndexNode) AddStartCallback(callbacks ...func()) {
-	i.startCallbacks = append(i.startCallbacks, callbacks...)
-}
-
-// AddCloseCallback adds a callback in the Close phase.
-func (i *IndexNode) AddCloseCallback(callbacks ...func()) {
-	i.closeCallbacks = append(i.closeCallbacks, callbacks...)
-}
-
-func (i *IndexNode) Init() error {
 	return nil
 }
 
-func (i *IndexNode) Start() error {
+func (i *NodeImpl) Start() error {
 	i.sched.Start()
 
 	// Start callbacks
 	for _, cb := range i.startCallbacks {
 		cb()
 	}
-
 	return nil
-}
-
-func (i *IndexNode) stopIndexNodeLoop() {
-	i.loopCancel()
-
-	i.sched.Close()
 }
 
 // Close closes the server.
-func (i *IndexNode) Stop() error {
-	i.stopIndexNodeLoop()
-
+func (i *NodeImpl) Stop() error {
+	i.loopCancel()
+	if i.sched != nil {
+		i.sched.Close()
+	}
 	for _, cb := range i.closeCallbacks {
 		cb()
 	}
-	log.Print("IndexNode  closed.")
+	log.Print("NodeImpl  closed.")
 	return nil
 }
 
-func (i *IndexNode) SetServiceClient(serviceClient typeutil.IndexServiceInterface) {
+func (i *NodeImpl) UpdateStateCode(code internalpb2.StateCode) {
+	i.stateCode = code
+}
+
+func (i *NodeImpl) SetIndexServiceClient(serviceClient typeutil.IndexServiceInterface) {
 	i.serviceClient = serviceClient
 }
 
-func (i *IndexNode) BuildIndex(request *indexpb.BuildIndexCmd) (*commonpb.Status, error) {
+func (i *NodeImpl) BuildIndex(request *indexpb.BuildIndexCmd) (*commonpb.Status, error) {
 	t := newIndexBuildTask()
 	t.cmd = request
 	t.kv = i.kv
@@ -166,12 +181,22 @@ func (i *IndexNode) BuildIndex(request *indexpb.BuildIndexCmd) (*commonpb.Status
 	return ret, nil
 }
 
-func (i *IndexNode) GetComponentStates() (*internalpb2.ComponentStates, error) {
+// AddStartCallback adds a callback in the startServer phase.
+func (i *NodeImpl) AddStartCallback(callbacks ...func()) {
+	i.startCallbacks = append(i.startCallbacks, callbacks...)
+}
+
+// AddCloseCallback adds a callback in the Close phase.
+func (i *NodeImpl) AddCloseCallback(callbacks ...func()) {
+	i.closeCallbacks = append(i.closeCallbacks, callbacks...)
+}
+
+func (i *NodeImpl) GetComponentStates() (*internalpb2.ComponentStates, error) {
 
 	stateInfo := &internalpb2.ComponentInfo{
 		NodeID:    Params.NodeID,
-		Role:      "IndexNode",
-		StateCode: i.state,
+		Role:      "NodeImpl",
+		StateCode: i.stateCode,
 	}
 
 	ret := &internalpb2.ComponentStates{
@@ -184,10 +209,10 @@ func (i *IndexNode) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	return ret, nil
 }
 
-func (i *IndexNode) GetTimeTickChannel() (string, error) {
+func (i *NodeImpl) GetTimeTickChannel() (string, error) {
 	return "", nil
 }
 
-func (i *IndexNode) GetStatisticsChannel() (string, error) {
+func (i *NodeImpl) GetStatisticsChannel() (string, error) {
 	return "", nil
 }

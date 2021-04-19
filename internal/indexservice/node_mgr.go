@@ -10,13 +10,13 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
-func (i *IndexService) removeNode(nodeID UniqueID) {
+func (i *ServiceImpl) removeNode(nodeID UniqueID) {
 	i.nodeLock.Lock()
 	defer i.nodeLock.Unlock()
 	i.nodeClients.Remove(nodeID)
 }
 
-func (i *IndexService) addNode(nodeID UniqueID, req *indexpb.RegisterNodeRequest) error {
+func (i *ServiceImpl) addNode(nodeID UniqueID, req *indexpb.RegisterNodeRequest) error {
 	i.nodeLock.Lock()
 	defer i.nodeLock.Unlock()
 
@@ -40,7 +40,7 @@ func (i *IndexService) addNode(nodeID UniqueID, req *indexpb.RegisterNodeRequest
 	return nil
 }
 
-func (i *IndexService) prepareNodeInitParams() []*commonpb.KeyValuePair {
+func (i *ServiceImpl) prepareNodeInitParams() []*commonpb.KeyValuePair {
 	var params []*commonpb.KeyValuePair
 	params = append(params, &commonpb.KeyValuePair{Key: "minio.address", Value: Params.MinIOAddress})
 	params = append(params, &commonpb.KeyValuePair{Key: "minio.accessKeyID", Value: Params.MinIOAccessKeyID})
@@ -50,7 +50,7 @@ func (i *IndexService) prepareNodeInitParams() []*commonpb.KeyValuePair {
 	return params
 }
 
-func (i *IndexService) RegisterNode(req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
+func (i *ServiceImpl) RegisterNode(req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
 	ret := &indexpb.RegisterNodeResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -59,7 +59,7 @@ func (i *IndexService) RegisterNode(req *indexpb.RegisterNodeRequest) (*indexpb.
 
 	nodeID, err := i.idAllocator.AllocOne()
 	if err != nil {
-		ret.Status.Reason = "IndexService:RegisterNode Failed to acquire NodeID"
+		ret.Status.Reason = "ServiceImpl:RegisterNode Failed to acquire NodeID"
 		return ret, nil
 	}
 

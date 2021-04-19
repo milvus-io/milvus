@@ -27,10 +27,10 @@ type Server struct {
 	impl *proxyservice.ServiceImpl
 }
 
-func NewServer() (*Server, error) {
+func NewServer(ctx context.Context) (*Server, error) {
 
 	server := &Server{
-		ctx:         context.Background(),
+		ctx:         ctx,
 		grpcErrChan: make(chan error),
 	}
 
@@ -59,7 +59,7 @@ func (s *Server) init() error {
 	proxyservice.Params.Init()
 
 	s.wg.Add(1)
-	s.startGrpcLoop(Params.ServicePort)
+	go s.startGrpcLoop(Params.ServicePort)
 	// wait for grpc server loop start
 	if err := <-s.grpcErrChan; err != nil {
 		return err
