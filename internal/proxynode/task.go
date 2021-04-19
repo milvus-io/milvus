@@ -397,17 +397,14 @@ func (dct *DropCollectionTask) Execute() error {
 	if err != nil {
 		return err
 	}
-
-	dct.result, err = dct.masterClient.DropCollection(dct.DropCollectionRequest)
-	if err != nil {
-		return err
+	dct.result, _ = dct.masterClient.DropCollection(dct.DropCollectionRequest)
+	if dct.result.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return errors.New(dct.result.Reason)
 	}
-
 	err = globalInsertChannelsMap.closeInsertMsgStream(collID)
 	if err != nil {
 		return err
 	}
-
 	return nil
 }
 

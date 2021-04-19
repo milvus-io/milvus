@@ -146,14 +146,14 @@ func (node *QueryNode) Start() error {
 	// init services and manager
 	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica)
 	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica)
-	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
+	//node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 	node.loadService = newLoadService(node.queryNodeLoopCtx, node.masterClient, node.dataClient, node.indexClient, node.replica, node.dataSyncService.dmStream)
 	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, node.loadService.segLoader.indexLoader.fieldStatsChan)
 
 	// start services
 	go node.dataSyncService.start()
 	go node.searchService.start()
-	go node.metaService.start()
+	//go node.metaService.start()
 	go node.loadService.start()
 	go node.statsService.start()
 
