@@ -311,10 +311,9 @@ func (s *Server) checkMasterIsHealthy() error {
 
 func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
-	s.serverLoopWg.Add(3)
+	s.serverLoopWg.Add(2)
 	go s.startStatsChannel(s.serverLoopCtx)
 	go s.startSegmentFlushChannel(s.serverLoopCtx)
-	go s.startDDChannel(s.serverLoopCtx)
 }
 
 func (s *Server) startStatsChannel(ctx context.Context) {
@@ -545,6 +544,12 @@ func (s *Server) AssignSegmentID(req *datapb.AssignSegIDRequest) (*datapb.Assign
 		return resp, nil
 	}
 	for _, r := range req.SegIDRequests {
+		if !s.meta.HasCollection(r.CollectionID) {
+			if err := s.loadCollectionFromMaster(r.CollectionID); err != nil {
+				log.Error("load collection from master error", zap.Int64("collectionID", r.CollectionID), zap.Error(err))
+				continue
+			}
+		}
 		result := &datapb.SegIDAssignment{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -585,6 +590,25 @@ func (s *Server) AssignSegmentID(req *datapb.AssignSegIDRequest) (*datapb.Assign
 		resp.SegIDAssignments = append(resp.SegIDAssignments, result)
 	}
 	return resp, nil
+}
+
+func (s *Server) loadCollectionFromMaster(collectionID int64) error {
+	resp, err := s.masterClient.DescribeCollection(&milvuspb.DescribeCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_kDescribeCollection,
+			SourceID: Params.NodeID,
+		},
+		DbName:       "",
+		CollectionID: collectionID,
+	})
+	if err = VerifyResponse(resp, err); err != nil {
+		return err
+	}
+	collInfo := &collectionInfo{
+		ID:     resp.CollectionID,
+		Schema: resp.Schema,
+	}
+	return s.meta.AddCollection(collInfo)
 }
 
 func (s *Server) openNewSegment(collectionID UniqueID, partitionID UniqueID, channelName string) error {
