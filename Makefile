@@ -113,6 +113,10 @@ indexservice: build-cpp
 	@echo "Building distributed indexservice ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/indexservice $(PWD)/cmd/indexservice/main.go 1>/dev/null
 
+singlenode: build-cpp
+	@echo "Building singlenode ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/singlenode $(PWD)/cmd/singlenode/main.go 1>/dev/null
+
 
 # Builds various components locally.
 build-go: build-cpp
