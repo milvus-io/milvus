@@ -104,7 +104,7 @@ func runBatchGet() {
 		start := end - int32(batchOpSize)
 		keys := totalKeys[start:end]
 		versions := make([]uint64, batchOpSize)
-		for i, _ := range versions {
+		for i := range versions {
 			versions[i] = uint64(numVersion)
 		}
 		atomic.AddInt32(&counter, 1)
@@ -152,7 +152,7 @@ func runBatchDelete() {
 		keys := totalKeys[start:end]
 		atomic.AddInt32(&counter, 1)
 		versions := make([]uint64, batchOpSize)
-		for i, _ := range versions {
+		for i := range versions {
 			versions[i] = uint64(numVersion)
 		}
 		err := store.DeleteRows(context.Background(), keys, versions)
@@ -199,8 +199,7 @@ func main() {
 
 	// Echo the parameters
 	log.Printf("Benchmark log will write to file %s\n", logFile.Name())
-	fmt.Fprint(logFile, fmt.Sprintf("Parameters: duration=%d, threads=%d, loops=%d, valueSize=%s, batchSize=%d, versions=%d\n", durationSecs, threads, loops, sizeArg, batchOpSize, numVersion))
-
+	fmt.Fprintf(logFile, "Parameters: duration=%d, threads=%d, loops=%d, valueSize=%s, batchSize=%d, versions=%d\n", durationSecs, threads, loops, sizeArg, batchOpSize, numVersion)
 	// Init test data
 	valueData = make([]byte, valueSize)
 	rand.Read(valueData)
@@ -237,9 +236,8 @@ func main() {
 
 		setTime := setFinish.Sub(startTime).Seconds()
 		bps := float64(uint64(counter)*valueSize*uint64(batchOpSize)) / setTime
-		fmt.Fprint(logFile, fmt.Sprintf("Loop %d: BATCH PUT time %.1f secs, batchs = %d, kv pairs = %d, speed = %sB/sec, %.1f operations/sec, %.1f kv/sec.\n",
-			loop, setTime, counter, counter*int32(batchOpSize), bytefmt.ByteSize(uint64(bps)), float64(counter)/setTime, float64(counter*int32(batchOpSize))/setTime))
-
+		fmt.Fprintf(logFile, "Loop %d: BATCH PUT time %.1f secs, batchs = %d, kv pairs = %d, speed = %sB/sec, %.1f operations/sec, %.1f kv/sec.\n",
+			loop, setTime, counter, counter*int32(batchOpSize), bytefmt.ByteSize(uint64(bps)), float64(counter)/setTime, float64(counter*int32(batchOpSize))/setTime)
 		// Record all test keys
 		//totalKeyCount = keyNum
 		//totalKeys = make([][]byte, totalKeyCount)

@@ -1,7 +1,7 @@
 package msgstream
 
 import (
-	"github.com/gogo/protobuf/proto"
+	"github.com/golang/protobuf/proto"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
@@ -62,6 +62,19 @@ func (it *InsertMsg) Unmarshal(input []byte) (*TsMsg, error) {
 	if err != nil {
 		return nil, err
 	}
+	for _, timestamp := range insertMsg.Timestamps {
+		it.BeginTimestamp = timestamp
+		it.EndTimestamp = timestamp
+		break
+	}
+	for _, timestamp := range insertMsg.Timestamps {
+		if timestamp > it.EndTimestamp {
+			it.EndTimestamp = timestamp
+		}
+		if timestamp < it.BeginTimestamp {
+			it.BeginTimestamp = timestamp
+		}
+	}
 	var tsMsg TsMsg = insertMsg
 	return &tsMsg, nil
 }
@@ -93,6 +106,19 @@ func (dt *DeleteMsg) Unmarshal(input []byte) (*TsMsg, error) {
 
 	if err != nil {
 		return nil, err
+	}
+	for _, timestamp := range deleteMsg.Timestamps {
+		dt.BeginTimestamp = timestamp
+		dt.EndTimestamp = timestamp
+		break
+	}
+	for _, timestamp := range deleteMsg.Timestamps {
+		if timestamp > dt.EndTimestamp {
+			dt.EndTimestamp = timestamp
+		}
+		if timestamp < dt.BeginTimestamp {
+			dt.BeginTimestamp = timestamp
+		}
 	}
 	var tsMsg TsMsg = deleteMsg
 	return &tsMsg, nil
@@ -126,6 +152,8 @@ func (st *SearchMsg) Unmarshal(input []byte) (*TsMsg, error) {
 	if err != nil {
 		return nil, err
 	}
+	st.BeginTimestamp = searchMsg.Timestamp
+	st.EndTimestamp = searchMsg.Timestamp
 	var tsMsg TsMsg = searchMsg
 	return &tsMsg, nil
 }
@@ -158,6 +186,8 @@ func (srt *SearchResultMsg) Unmarshal(input []byte) (*TsMsg, error) {
 	if err != nil {
 		return nil, err
 	}
+	srt.BeginTimestamp = searchResultMsg.Timestamp
+	srt.EndTimestamp = searchResultMsg.Timestamp
 	var tsMsg TsMsg = searchResultMsg
 	return &tsMsg, nil
 }
@@ -190,6 +220,8 @@ func (tst *TimeTickMsg) Unmarshal(input []byte) (*TsMsg, error) {
 	if err != nil {
 		return nil, err
 	}
+	tst.BeginTimestamp = timeTick.Timestamp
+	tst.EndTimestamp = timeTick.Timestamp
 	var tsMsg TsMsg = timeTick
 	return &tsMsg, nil
 }

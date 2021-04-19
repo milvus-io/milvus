@@ -28,20 +28,16 @@ func TestTimeTick(t *testing.T) {
 
 	ctx, _ := context.WithTimeout(context.Background(), 4*time.Second)
 
-	var curTs Timestamp
-	curTs = 0
+	//var curTs Timestamp
+	//curTs = 0
 	tt := timeTick{
 		interval:             200,
 		pulsarProducer:       producer,
-		peer_id:              1,
+		peerID:              1,
 		ctx:                  ctx,
 		areRequestsDelivered: func(ts Timestamp) bool { return true },
-		getTimestamp: func() (Timestamp, error) {
-			curTs = curTs + 100
-			return curTs, nil
-		},
 	}
-	tt.Restart()
+	tt.Start()
 
 	ctx2, _ := context.WithTimeout(context.Background(), time.Second*2)
 	isbreak := false

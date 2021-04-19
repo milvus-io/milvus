@@ -5,7 +5,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/gogo/protobuf/proto"
+	"github.com/golang/protobuf/proto"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 
 	"github.com/apache/pulsar-client-go/pulsar"

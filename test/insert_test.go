@@ -31,7 +31,7 @@ type Timestamp = typeutil.Timestamp
 
 func TestInsert(t *testing.T) {
 	// TODO: fix test
-	return
+	//return
 	//ctx := context.Background()
 	//var topics []string
 	//topics = append(topics, "test")

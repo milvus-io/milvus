@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/zilliztech/milvus-distributed/internal/master/mock"
+	mockmaster "github.com/zilliztech/milvus-distributed/internal/master/mock"
 	"go.uber.org/zap"
 )
 
