@@ -30,7 +30,7 @@ enum ReqType {
     kSearch = 500;
 
     /* System Control */
-    kTimeTick = 1200
+    kTimeTick = 1200;
 }
 
 enum PeerRole {
@@ -45,11 +45,6 @@ enum PeerRole {
 
 }
 
-message TimestampMsg {
-    int64 physical = 1;
-    int64 logical = 2;
-}
-
 message TsoRequest {
     int64 peer_id = 1;	
     PeerRole role = 2;
@@ -58,7 +53,7 @@ message TsoRequest {
 
 message TsoResponse {
     common.Status status = 1;
-    TimestampMsg timestamp = 2;
+    uint64 timestamp = 2;
     uint32 count = 3;
 }
 

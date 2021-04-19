@@ -3,10 +3,10 @@ package proxy
 import (
 	"context"
 	"github.com/apache/pulsar-client-go/pulsar"
-	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"testing"
 	"time"
 )
@@ -28,17 +28,17 @@ func TestTimeTick(t *testing.T) {
 
 	ctx, _ := context.WithTimeout(context.Background(), 4*time.Second)
 
-	var curTs Timestamp
+	var curTs typeutil.Timestamp
 	curTs = 0
 	tt := timeTick{
 		interval:             200,
 		pulsarProducer:       producer,
 		peer_id:              1,
 		ctx:                  ctx,
-		areRequestsDelivered: func(ts Timestamp) bool { return true },
-		getTimestamp: func() (Timestamp, commonpb.Status) {
+		areRequestsDelivered: func(ts typeutil.Timestamp) bool { return true },
+		getTimestamp: func() (typeutil.Timestamp, error) {
 			curTs = curTs + 100
-			return curTs, commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
+			return curTs, nil
 		},
 	}
 	tt.Restart()

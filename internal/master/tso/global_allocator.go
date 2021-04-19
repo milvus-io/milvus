@@ -14,14 +14,16 @@
 package tso
 
 import (
+	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"go.etcd.io/etcd/clientv3"
+	"strconv"
 	"sync/atomic"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"github.com/pingcap/log"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -38,7 +40,7 @@ type Allocator interface {
 	SetTSO(tso uint64) error
 	// GenerateTSO is used to generate a given number of TSOs.
 	// Make sure you have initialized the TSO allocator before calling.
-	GenerateTSO(count uint32) (internalpb.TimestampMsg, error)
+	GenerateTSO(count uint32) (uint64, error)
 	// Reset is used to reset the TSO allocator.
 	Reset()
 }
@@ -49,13 +51,25 @@ type GlobalTSOAllocator struct {
 }
 
 // NewGlobalTSOAllocator creates a new global TSO allocator.
-func NewGlobalTSOAllocator(client   *clientv3.Client, rootPath string, saveInterval time.Duration, maxResetTSGap func() time.Duration) Allocator {
+func NewGlobalTSOAllocator(key string) Allocator {
+
+	etcdAddr := conf.Config.Etcd.Address
+	etcdAddr += ":"
+	etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)
+
+	client, _ := clientv3.New(clientv3.Config{
+		Endpoints:   []string{etcdAddr},
+		DialTimeout: 5 * time.Second,
+	})
+
+	var saveInterval time.Duration = 3 *time.Second
 	return &GlobalTSOAllocator{
 		timestampOracle: &timestampOracle{
 			client:        client,
-			rootPath:      rootPath,
+			rootPath:      conf.Config.Etcd.Rootpath,
 			saveInterval:  saveInterval,
-			maxResetTSGap: maxResetTSGap,
+			maxResetTSGap: func() time.Duration { return 3 *time.Second},
+			key: key,
 		},
 	}
 }
@@ -77,11 +91,10 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
 
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
-func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (internalpb.TimestampMsg, error) {
-	var resp internalpb.TimestampMsg
-
+func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
+	var physical, logical int64 = 0, 0
 	if count == 0 {
-		return resp, errors.New("tso count should be positive")
+		return 0, errors.New("tso count should be positive")
 	}
 
 	maxRetryCount := 10
@@ -95,18 +108,17 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (internalpb.TimestampMs
 			continue
 		}
 
-		resp.Physical = current.physical.UnixNano() / int64(time.Millisecond)
-		resp.Logical = atomic.AddInt64(&current.logical, int64(count))
-		if resp.Logical >= maxLogical {
+		physical = current.physical.UnixNano() / int64(time.Millisecond)
+		logical = atomic.AddInt64(&current.logical, int64(count))
+		if logical >= maxLogical {
 			log.Error("logical part outside of max logical interval, please check ntp time",
-				zap.Reflect("response", resp),
 				zap.Int("retry-count", i))
 			time.Sleep(UpdateTimestampStep)
 			continue
 		}
-		return resp, nil
+		return tsoutil.ComposeTS(physical, logical), nil
 	}
-	return resp, errors.New("can not get timestamp")
+	return 0, errors.New("can not get timestamp")
 }
 
 // Reset is used to reset the TSO allocator.

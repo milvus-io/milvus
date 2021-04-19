@@ -73,9 +73,9 @@ func (s *proxyServer) restartQueryRoutine(buf_size int) error {
 			case <-s.ctx.Done():
 				return
 			case qm := <-s.reqSch.queryChan:
-				ts, st := s.getTimestamp(1)
-				if st.ErrorCode != commonpb.ErrorCode_SUCCESS {
-					log.Printf("get time stamp failed, error code = %d, msg = %s", st.ErrorCode, st.Reason)
+				ts, err := s.getTimestamp(1)
+				if err != nil {
+					log.Printf("get time stamp failed")
 					break
 				}
 				qm.Timestamp = uint64(ts[0])

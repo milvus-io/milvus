@@ -367,7 +367,7 @@ func (s *Master) Tso(stream masterpb.Master_TsoServer) error {
 		}
 		response := &internalpb.TsoResponse{
 			Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
-			Timestamp: &ts,
+			Timestamp: ts,
 			Count:     count,
 		}
 		if err := stream.Send(response); err != nil {

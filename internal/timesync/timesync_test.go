@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/golang/protobuf/proto"
 )
@@ -49,17 +50,17 @@ func TestAlignTimeSync(t *testing.T) {
 		proxyIdList: []int64{1, 2, 3},
 		interval:    200,
 	}
-	ts := []*pb.TimeSyncMsg{
+	ts := []*internalpb.TimeSyncMsg{
 		{
-			Peer_Id:   1,
+			PeerId:   1,
 			Timestamp: toTimestamp(5),
 		},
 		{
-			Peer_Id:   3,
+			PeerId:   3,
 			Timestamp: toTimestamp(15),
 		},
 		{
-			Peer_Id:   2,
+			PeerId:   2,
 			Timestamp: toTimestamp(20),
 		},
 	}
@@ -68,7 +69,7 @@ func TestAlignTimeSync(t *testing.T) {
 		t.Fatalf("proxyIdList should be : 1 2 3")
 	}
 	for i := 0; i < len(r.proxyIdList); i++ {
-		if r.proxyIdList[i] != ts[i].Peer_Id {
+		if r.proxyIdList[i] != ts[i].PeerId {
 			t.Fatalf("Align falied")
 		}
 	}
@@ -80,17 +81,17 @@ func TestAlignTimeSync2(t *testing.T) {
 		proxyIdList: []int64{1, 2, 3},
 		interval:    200,
 	}
-	ts := []*pb.TimeSyncMsg{
+	ts := []*internalpb.TimeSyncMsg{
 		{
-			Peer_Id:   1,
+			PeerId:   1,
 			Timestamp: toTimestamp(5),
 		},
 		{
-			Peer_Id:   3,
+			PeerId:   3,
 			Timestamp: toTimestamp(150),
 		},
 		{
-			Peer_Id:   2,
+			PeerId:   2,
 			Timestamp: toTimestamp(20),
 		},
 	}
@@ -98,7 +99,7 @@ func TestAlignTimeSync2(t *testing.T) {
 	if len(r.proxyIdList) != 3 {
 		t.Fatalf("proxyIdList should be : 1 2 3")
 	}
-	if len(ts) != 1 || ts[0].Peer_Id != 2 {
+	if len(ts) != 1 || ts[0].PeerId != 2 {
 		t.Fatalf("align failed")
 	}
 
@@ -109,25 +110,25 @@ func TestAlignTimeSync3(t *testing.T) {
 		proxyIdList: []int64{1, 2, 3},
 		interval:    200,
 	}
-	ts := []*pb.TimeSyncMsg{
+	ts := []*internalpb.TimeSyncMsg{
 		{
-			Peer_Id:   1,
+			PeerId:   1,
 			Timestamp: toTimestamp(5),
 		},
 		{
-			Peer_Id:   1,
+			PeerId:   1,
 			Timestamp: toTimestamp(5),
 		},
 		{
-			Peer_Id:   1,
+			PeerId:   1,
 			Timestamp: toTimestamp(5),
 		},
 		{
-			Peer_Id:   3,
+			PeerId:   3,
 			Timestamp: toTimestamp(15),
 		},
 		{
-			Peer_Id:   2,
+			PeerId:   2,
 			Timestamp: toTimestamp(20),
 		},
 	}
@@ -136,7 +137,7 @@ func TestAlignTimeSync3(t *testing.T) {
 		t.Fatalf("proxyIdList should be : 1 2 3")
 	}
 	for i := 0; i < len(r.proxyIdList); i++ {
-		if r.proxyIdList[i] != ts[i].Peer_Id {
+		if r.proxyIdList[i] != ts[i].PeerId {
 			t.Fatalf("Align falied")
 		}
 	}
@@ -147,17 +148,17 @@ func TestAlignTimeSync4(t *testing.T) {
 		proxyIdList: []int64{1},
 		interval:    200,
 	}
-	ts := []*pb.TimeSyncMsg{
+	ts := []*internalpb.TimeSyncMsg{
 		{
-			Peer_Id:   1,
+			PeerId:   1,
 			Timestamp: toTimestamp(15),
 		},
 		{
-			Peer_Id:   1,
+			PeerId:   1,
 			Timestamp: toTimestamp(25),
 		},
 		{
-			Peer_Id:   1,
+			PeerId:   1,
 			Timestamp: toTimestamp(35),
 		},
 	}
@@ -178,25 +179,25 @@ func TestAlignTimeSync5(t *testing.T) {
 		proxyIdList: []int64{1, 2, 3},
 		interval:    200,
 	}
-	ts := []*pb.TimeSyncMsg{
+	ts := []*internalpb.TimeSyncMsg{
 		{
-			Peer_Id:   1,
+			PeerId:   1,
 			Timestamp: toTimestamp(5),
 		},
 		{
-			Peer_Id:   1,
+			PeerId:   1,
 			Timestamp: toTimestamp(5),
 		},
 		{
-			Peer_Id:   1,
+			PeerId:   1,
 			Timestamp: toTimestamp(5),
 		},
 		{
-			Peer_Id:   3,
+			PeerId:   3,
 			Timestamp: toTimestamp(15),
 		},
 		{
-			Peer_Id:   3,
+			PeerId:   3,
 			Timestamp: toTimestamp(20),
 		},
 	}

@@ -17,6 +17,7 @@ import "time"
 
 // ZeroTime is a zero time.
 var ZeroTime = time.Time{}
+var ZeroTimestamp = Timestamp(0)
 
 // ParseTimestamp returns a timestamp for a given byte slice.
 func ParseTimestamp(data []byte) (time.Time, error) {

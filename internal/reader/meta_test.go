@@ -7,8 +7,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/master/collection"
 	"github.com/zilliztech/milvus-distributed/internal/master/segment"
 	"github.com/zilliztech/milvus-distributed/internal/msgclient"
-	"github.com/zilliztech/milvus-distributed/internal/proto/master"
-	messagePb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"log"
 	"math"
 	"sync"
@@ -76,15 +75,14 @@ func TestMeta_isSegmentChannelRangeInQueryNodeChannelRange(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	var s = segment.Segment{
-		SegmentID:      uint64(0),
-		CollectionID:   uint64(0),
+		SegmentID:      int64(0),
+		CollectionID:   int64(0),
 		PartitionTag:   "partition0",
 		ChannelStart:   0,
 		ChannelEnd:     128,
 		OpenTimeStamp:  uint64(0),
 		CloseTimeStamp: uint64(math.MaxUint64),
 		CollectionName: "collection0",
-		Status:         master.SegmentStatus_OPENED,
 		Rows:           int64(0),
 	}
 
@@ -92,15 +90,14 @@ func TestMeta_isSegmentChannelRangeInQueryNodeChannelRange(t *testing.T) {
 	assert.Equal(t, b, true)
 
 	s = segment.Segment{
-		SegmentID:      uint64(0),
-		CollectionID:   uint64(0),
+		SegmentID:      int64(0),
+		CollectionID:   int64(0),
 		PartitionTag:   "partition0",
 		ChannelStart:   128,
 		ChannelEnd:     256,
 		OpenTimeStamp:  uint64(0),
 		CloseTimeStamp: uint64(math.MaxUint64),
 		CollectionName: "collection0",
-		Status:         master.SegmentStatus_OPENED,
 		Rows:           int64(0),
 	}
 
@@ -111,31 +108,30 @@ func TestMeta_isSegmentChannelRangeInQueryNodeChannelRange(t *testing.T) {
 func TestMeta_PrintCollectionStruct(t *testing.T) {
 	var age = collection.FieldMeta{
 		FieldName: "age",
-		Type:      messagePb.DataType_INT32,
+		Type:      schemapb.DataType_INT32,
 		DIM:       int64(1),
 	}
 
 	var vec = collection.FieldMeta{
 		FieldName: "vec",
-		Type:      messagePb.DataType_VECTOR_FLOAT,
+		Type:      schemapb.DataType_VECTOR_FLOAT,
 		DIM:       int64(16),
 	}
 
 	var fieldMetas = []collection.FieldMeta{age, vec}
 
 	var c = collection.Collection{
-		ID:         uint64(0),
+		ID:         int64(0),
 		Name:       "collection0",
 		CreateTime: uint64(0),
 		Schema:     fieldMetas,
-		SegmentIDs: []uint64{
+		SegmentIDs: []int64{
 			0, 1, 2,
 		},
 		PartitionTags: []string{
 			"partition0",
 		},
 		GrpcMarshalString: "",
-		IndexParam:        nil,
 	}
 
 	printCollectionStruct(&c)
@@ -143,15 +139,14 @@ func TestMeta_PrintCollectionStruct(t *testing.T) {
 
 func TestMeta_PrintSegmentStruct(t *testing.T) {
 	var s = segment.Segment{
-		SegmentID:      uint64(0),
-		CollectionID:   uint64(0),
+		SegmentID:      int64(0),
+		CollectionID:   int64(0),
 		PartitionTag:   "partition0",
 		ChannelStart:   128,
 		ChannelEnd:     256,
 		OpenTimeStamp:  uint64(0),
 		CloseTimeStamp: uint64(math.MaxUint64),
 		CollectionName: "collection0",
-		Status:         master.SegmentStatus_OPENED,
 		Rows:           int64(0),
 	}
 
@@ -200,7 +195,7 @@ func TestMeta_ProcessSegmentCreate(t *testing.T) {
 		"\"open_timestamp\":1603360439,\"close_timestamp\":70368744177663," +
 		"\"collection_name\":\"test\",\"segment_status\":0,\"rows\":0}"
 
-	c := node.NewCollection(uint64(0), "test", "")
+	c := node.NewCollection(int64(0), "test", "")
 	c.NewPartition("default")
 
 	node.processSegmentCreate(id, value)
@@ -266,7 +261,7 @@ func TestMeta_ProcessSegmentModify(t *testing.T) {
 		"\"open_timestamp\":1603360439,\"close_timestamp\":70368744177663," +
 		"\"collection_name\":\"test\",\"segment_status\":0,\"rows\":0}"
 
-	var c = node.NewCollection(uint64(0), "test", "")
+	var c = node.NewCollection(int64(0), "test", "")
 	c.NewPartition("default")
 
 	node.processSegmentCreate(id, value)
@@ -418,7 +413,7 @@ func TestMeta_ProcessSegmentDelete(t *testing.T) {
 		"\"open_timestamp\":1603360439,\"close_timestamp\":70368744177663," +
 		"\"collection_name\":\"test\",\"segment_status\":0,\"rows\":0}"
 
-	c := node.NewCollection(uint64(0), "test", "")
+	c := node.NewCollection(int64(0), "test", "")
 	c.NewPartition("default")
 
 	node.processSegmentCreate(id, value)

@@ -44,7 +44,7 @@ type proxyServer struct {
 	resultGroup   string
 	numReaderNode int
 	proxyId       int64
-	getTimestamp  func(count uint32) ([]Timestamp, commonpb.Status)
+	getTimestamp  func(count uint32) ([]typeutil.Timestamp, error)
 	client        *etcd.Client
 	ctx           context.Context
 	wg            sync.WaitGroup

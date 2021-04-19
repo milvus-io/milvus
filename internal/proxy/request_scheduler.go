@@ -1,18 +1,21 @@
 package proxy
 
-import "sync"
+import (
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"sync"
+)
 
 type requestScheduler struct {
 	//definitions requestQueue
 
 	//manipulations requestQueue
 	manipulationsChan chan *manipulationReq // manipulation queue
-	mTimestamp        Timestamp
+	mTimestamp        typeutil.Timestamp
 	mTimestampMux     sync.Mutex
 
 	//queries requestQueue
 	queryChan     chan *queryReq
-	qTimestamp    Timestamp
+	qTimestamp    typeutil.Timestamp
 	qTimestampMux sync.Mutex
 }
 
@@ -21,7 +24,7 @@ type requestScheduler struct {
 // bit_1 = 1: select manipulation queue
 // bit_2 = 1: select query queue
 // example: if mode = 3, then both definition and manipulation queues are selected
-func (rs *requestScheduler) AreRequestsDelivered(ts Timestamp, selection uint32) bool {
+func (rs *requestScheduler) AreRequestsDelivered(ts typeutil.Timestamp, selection uint32) bool {
 	r1 := func() bool {
 		if selection&uint32(2) == 0 {
 			return true

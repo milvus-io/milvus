@@ -3,7 +3,6 @@ package msgstream
 import (
 	"context"
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/zilliztech/milvus-distributed/internal/msgclient"
 	commonPb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"log"
 	"sync"
@@ -201,7 +200,7 @@ func (ms *PulsarTtMsgStream) findTimeTick(ctx context.Context,
 			(*ms.consumers[channelIndex]).Ack(pulsarMsg)
 			tsMsg, status := (*ms.msgUnmarshaler).Unmarshal(pulsarMsg.Payload())
 			// TODO:: Find the EOF
-			if (*tsMsg).Type() == msgclient.kTimeTick {
+			if (*tsMsg).Type() == kTimeTick {
 				eofMsgMap[channelIndex] = (*tsMsg).Ts()
 				break
 			}
