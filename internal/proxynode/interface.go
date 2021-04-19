@@ -22,6 +22,7 @@ type MasterClient interface {
 	ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
 	CreateIndex(in *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
 	DescribeIndex(in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
+	ShowSegments(in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error)
 }
 
 type IndexServiceClient interface {
@@ -51,6 +52,7 @@ type DataServiceClient interface {
 	GetCollectionStatistics(req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error)
 
 	GetComponentStates() (*internalpb2.ComponentStates, error)
+	GetSegmentInfo(req *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error)
 }
 
 type ProxyServiceClient interface {

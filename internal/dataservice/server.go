@@ -50,6 +50,7 @@ type DataService interface {
 	GetPartitionStatistics(req *datapb.PartitionStatsRequest) (*datapb.PartitionStatsResponse, error)
 	GetComponentStates() (*internalpb2.ComponentStates, error)
 	GetCount(req *datapb.CollectionCountRequest) (*datapb.CollectionCountResponse, error)
+	GetSegmentInfo(req *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error)
 }
 
 type MasterClient interface {
@@ -728,6 +729,10 @@ func (s *Server) GetCount(req *datapb.CollectionCountRequest) (*datapb.Collectio
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 		},
 	}
+	if !s.checkStateIsHealthy() {
+		resp.Status.Reason = "data service is not healthy"
+		return resp, nil
+	}
 	nums, err := s.meta.GetNumRowsOfCollection(req.CollectionID)
 	if err != nil {
 		resp.Status.Reason = err.Error()
@@ -735,5 +740,29 @@ func (s *Server) GetCount(req *datapb.CollectionCountRequest) (*datapb.Collectio
 	}
 	resp.Count = nums
 	resp.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
+	return resp, nil
+}
+
+func (s *Server) GetSegmentInfo(req *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error) {
+	resp := &datapb.SegmentInfoResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+		},
+	}
+	if !s.checkStateIsHealthy() {
+		resp.Status.Reason = "data service is not healthy"
+		return resp, nil
+	}
+	infos := make([]*datapb.SegmentInfo, len(req.SegmentIDs))
+	for i, id := range req.SegmentIDs {
+		segmentInfo, err := s.meta.GetSegment(id)
+		if err != nil {
+			resp.Status.Reason = err.Error()
+			return resp, nil
+		}
+		infos[i] = segmentInfo
+	}
+	resp.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
+	resp.Infos = infos
 	return resp, nil
 }

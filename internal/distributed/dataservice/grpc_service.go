@@ -25,7 +25,7 @@ type Service struct {
 }
 
 func (s *Service) GetSegmentInfo(ctx context.Context, request *datapb.SegmentInfoRequest) (*datapb.SegmentInfoResponse, error) {
-	panic("implement me")
+	return s.server.GetSegmentInfo(request)
 }
 
 func NewGrpcService(ctx context.Context) *Service {
