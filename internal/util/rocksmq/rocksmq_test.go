@@ -61,7 +61,7 @@ func TestRocksMQ(t *testing.T) {
 
 	groupName := "test_group"
 	_ = rmq.DestroyConsumerGroup(groupName, channelName)
-	err = rmq.CreateConsumerGroup(groupName, channelName)
+	_, err = rmq.CreateConsumerGroup(groupName, channelName)
 	assert.Nil(t, err)
 	cMsgs, err := rmq.Consume(groupName, channelName, 1)
 	assert.Nil(t, err)
@@ -122,7 +122,7 @@ func TestRocksMQ_Loop(t *testing.T) {
 	// Consume loopNum message once
 	groupName := "test_group"
 	_ = rmq.DestroyConsumerGroup(groupName, channelName)
-	err = rmq.CreateConsumerGroup(groupName, channelName)
+	_, err = rmq.CreateConsumerGroup(groupName, channelName)
 	assert.Nil(t, err)
 	cMsgs, err := rmq.Consume(groupName, channelName, loopNum)
 	assert.Nil(t, err)
@@ -189,7 +189,7 @@ func TestRocksMQ_Goroutines(t *testing.T) {
 
 	groupName := "test_group"
 	_ = rmq.DestroyConsumerGroup(groupName, channelName)
-	err = rmq.CreateConsumerGroup(groupName, channelName)
+	_, err = rmq.CreateConsumerGroup(groupName, channelName)
 	assert.Nil(t, err)
 	// Consume one message in each goroutine
 	for i := 0; i < loopNum; i++ {

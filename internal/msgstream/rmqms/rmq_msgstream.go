@@ -42,18 +42,24 @@ type RmqMsgStream struct {
 	receiveBuf chan *msgstream.MsgPack
 	wait       *sync.WaitGroup
 	// tso ticker
-	streamCancel func()
+	streamCancel     func()
+	rmqBufSize       int64
+	consumerReflects []reflect.SelectCase
 }
 
-func newRmqMsgStream(ctx context.Context, receiveBufSize int64,
+func newRmqMsgStream(ctx context.Context, receiveBufSize int64, rmqBufSize int64,
 	unmarshal msgstream.UnmarshalDispatcher) (*RmqMsgStream, error) {
+
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	receiveBuf := make(chan *msgstream.MsgPack, receiveBufSize)
+	consumerReflects := make([]reflect.SelectCase, 0)
 	stream := &RmqMsgStream{
-		ctx:          streamCtx,
-		receiveBuf:   receiveBuf,
-		unmarshal:    unmarshal,
-		streamCancel: streamCancel,
+		ctx:              streamCtx,
+		receiveBuf:       receiveBuf,
+		unmarshal:        unmarshal,
+		streamCancel:     streamCancel,
+		rmqBufSize:       rmqBufSize,
+		consumerReflects: consumerReflects,
 	}
 
 	return stream, nil
@@ -68,6 +74,17 @@ func (ms *RmqMsgStream) Start() {
 }
 
 func (ms *RmqMsgStream) Close() {
+	ms.streamCancel()
+
+	for _, producer := range ms.producers {
+		if producer != "" {
+			_ = rocksmq.Rmq.DestroyChannel(producer)
+		}
+	}
+	for _, consumer := range ms.consumers {
+		_ = rocksmq.Rmq.DestroyConsumerGroup(consumer.GroupName, consumer.ChannelName)
+		close(consumer.MsgNum)
+	}
 }
 
 type propertiesReaderWriter struct {
@@ -85,16 +102,22 @@ func (ms *RmqMsgStream) AsProducer(channels []string) {
 			errMsg := "Failed to create producer " + channel + ", error = " + err.Error()
 			panic(errMsg)
 		}
+		ms.producers = append(ms.producers, channel)
 	}
 }
 
 func (ms *RmqMsgStream) AsConsumer(channels []string, groupName string) {
 	for _, channelName := range channels {
-		if err := rocksmq.Rmq.CreateConsumerGroup(groupName, channelName); err != nil {
+		consumer, err := rocksmq.Rmq.CreateConsumerGroup(groupName, channelName)
+		if err != nil {
 			panic(err.Error())
 		}
-		msgNum := make(chan int)
-		ms.consumers = append(ms.consumers, rocksmq.Consumer{GroupName: groupName, ChannelName: channelName, MsgNum: msgNum})
+		consumer.MsgNum = make(chan int, ms.rmqBufSize)
+		ms.consumers = append(ms.consumers, *consumer)
+		ms.consumerReflects = append(ms.consumerReflects, reflect.SelectCase{
+			Dir:  reflect.SelectRecv,
+			Chan: reflect.ValueOf(consumer.MsgNum),
+		})
 	}
 }
 
@@ -240,12 +263,6 @@ func (ms *RmqMsgStream) Consume() *msgstream.MsgPack {
 func (ms *RmqMsgStream) bufMsgPackToChannel() {
 	defer ms.wait.Done()
 
-	cases := make([]reflect.SelectCase, len(ms.consumers))
-	for i := 0; i < len(ms.consumers); i++ {
-		ch := ms.consumers[i].MsgNum
-		cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ch)}
-	}
-
 	for {
 		select {
 		case <-ms.ctx.Done():
@@ -255,7 +272,7 @@ func (ms *RmqMsgStream) bufMsgPackToChannel() {
 			tsMsgList := make([]msgstream.TsMsg, 0)
 
 			for {
-				chosen, value, ok := reflect.Select(cases)
+				chosen, value, ok := reflect.Select(ms.consumerReflects)
 				if !ok {
 					log.Printf("channel closed")
 					return
