@@ -91,7 +91,7 @@ func (it *InsertTask) PreExecute() error {
 func (it *InsertTask) Execute() error {
 	collectionName := it.BaseInsertTask.CollectionName
 	if !globalMetaCache.Hit(collectionName) {
-		err := globalMetaCache.Update(collectionName)
+		err := globalMetaCache.Sync(collectionName)
 		if err != nil {
 			return err
 		}
@@ -309,7 +309,9 @@ func (dct *DropCollectionTask) Execute() error {
 }
 
 func (dct *DropCollectionTask) PostExecute() error {
-	globalMetaCache.Remove(dct.CollectionName.CollectionName)
+	if globalMetaCache.Hit(dct.CollectionName.CollectionName) {
+		return globalMetaCache.Remove(dct.CollectionName.CollectionName)
+	}
 	return nil
 }
 
@@ -350,7 +352,7 @@ func (qt *QueryTask) SetTs(ts Timestamp) {
 func (qt *QueryTask) PreExecute() error {
 	collectionName := qt.query.CollectionName
 	if !globalMetaCache.Hit(collectionName) {
-		err := globalMetaCache.Update(collectionName)
+		err := globalMetaCache.Sync(collectionName)
 		if err != nil {
 			return err
 		}
@@ -482,13 +484,7 @@ func (qt *QueryTask) PostExecute() error {
 					// check if distance is valid, `invalid` here means very very big,
 					// in this process, distance here is the smallest, so the rest of distance are all invalid
 					if hits[choice][i].Scores[choiceOffset] >= float32(math.MaxFloat32) {
-						qt.result = &servicepb.QueryResult{
-							Status: &commonpb.Status{
-								ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-								Reason:    "topk in dsl greater than the row nums of collection",
-							},
-						}
-						return nil
+						break
 					}
 					reducedHits.IDs = append(reducedHits.IDs, hits[choice][i].IDs[choiceOffset])
 					if hits[choice][i].RowData != nil && len(hits[choice][i].RowData) > 0 {
@@ -609,14 +605,9 @@ func (dct *DescribeCollectionTask) PreExecute() error {
 }
 
 func (dct *DescribeCollectionTask) Execute() error {
-	if !globalMetaCache.Hit(dct.CollectionName.CollectionName) {
-		err := globalMetaCache.Update(dct.CollectionName.CollectionName)
-		if err != nil {
-			return err
-		}
-	}
 	var err error
-	dct.result, err = globalMetaCache.Get(dct.CollectionName.CollectionName)
+	dct.result, err = dct.masterClient.DescribeCollection(dct.ctx, &dct.DescribeCollectionRequest)
+	globalMetaCache.Update(dct.CollectionName.CollectionName, dct.result)
 	return err
 }
 

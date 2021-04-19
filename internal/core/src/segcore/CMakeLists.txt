@@ -17,7 +17,7 @@ add_library(milvus_segcore SHARED
         )
 
 target_link_libraries(milvus_segcore
-        tbb utils pthread knowhere log milvus_proto
+        tbb milvus_utils pthread knowhere log milvus_proto
         dl backtrace
         milvus_common
         milvus_query

@@ -17,8 +17,8 @@ set(UTILS_FILES
     EasyAssert.cpp
 )
 
-add_library( utils STATIC ${UTILS_FILES} )
+add_library( milvus_utils STATIC ${UTILS_FILES} )
 
-target_link_libraries(utils
+target_link_libraries(milvus_utils
         libboost_filesystem.a
         libboost_system.a)

@@ -139,7 +139,7 @@ func (ss *searchService) receiveSearchMsg() {
 				err := ss.search(msg)
 				if err != nil {
 					log.Println(err)
-					err = ss.publishFailedSearchResult(msg)
+					err = ss.publishFailedSearchResult(msg, err.Error())
 					if err != nil {
 						log.Println("publish FailedSearchResult failed, error message: ", err)
 					}
@@ -191,7 +191,7 @@ func (ss *searchService) doUnsolvedMsgSearch() {
 				err := ss.search(msg)
 				if err != nil {
 					log.Println(err)
-					err = ss.publishFailedSearchResult(msg)
+					err = ss.publishFailedSearchResult(msg, err.Error())
 					if err != nil {
 						log.Println("publish FailedSearchResult failed, error message: ", err)
 					}
@@ -240,10 +240,14 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	searchResults := make([]*SearchResult, 0)
 
 	for _, partitionTag := range partitionTags {
-		partition, err := (*ss.replica).getPartitionByTag(collectionID, partitionTag)
-		if err != nil {
-			return err
+		hasPartition := (*ss.replica).hasPartition(collectionID, partitionTag)
+		if !hasPartition {
+			return errors.New("search Failed, invalid partitionTag")
 		}
+	}
+
+	for _, partitionTag := range partitionTags {
+		partition, _ := (*ss.replica).getPartitionByTag(collectionID, partitionTag)
 		for _, segment := range partition.segments {
 			//fmt.Println("dsl = ", dsl)
 
@@ -257,7 +261,25 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	}
 
 	if len(searchResults) <= 0 {
-		return errors.New("search Failed, invalid partitionTag")
+		var results = internalpb.SearchResult{
+			MsgType:         internalpb.MsgType_kSearchResult,
+			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
+			ReqID:           searchMsg.ReqID,
+			ProxyID:         searchMsg.ProxyID,
+			QueryNodeID:     searchMsg.ProxyID,
+			Timestamp:       searchTimestamp,
+			ResultChannelID: searchMsg.ResultChannelID,
+			Hits:            nil,
+		}
+		searchResultMsg := &msgstream.SearchResultMsg{
+			BaseMsg:      msgstream.BaseMsg{HashValues: []uint32{0}},
+			SearchResult: results,
+		}
+		err = ss.publishSearchResult(searchResultMsg)
+		if err != nil {
+			return err
+		}
+		return nil
 	}
 
 	reducedSearchResult := reduceSearchResults(searchResults, int64(len(searchResults)))
@@ -324,7 +346,7 @@ func (ss *searchService) publishSearchResult(msg msgstream.TsMsg) error {
 	return nil
 }
 
-func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg) error {
+func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg, errMsg string) error {
 	msgPack := msgstream.MsgPack{}
 	searchMsg, ok := msg.(*msgstream.SearchMsg)
 	if !ok {
@@ -332,7 +354,7 @@ func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg) error {
 	}
 	var results = internalpb.SearchResult{
 		MsgType:         internalpb.MsgType_kSearchResult,
-		Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
+		Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR, Reason: errMsg},
 		ReqID:           searchMsg.ReqID,
 		ProxyID:         searchMsg.ProxyID,
 		QueryNodeID:     searchMsg.ProxyID,
