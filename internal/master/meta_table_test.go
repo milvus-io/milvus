@@ -7,22 +7,20 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+	masterParams "github.com/zilliztech/milvus-distributed/internal/master/paramtable"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 	"go.etcd.io/etcd/clientv3"
 )
 
 func TestMetaTable_Collection(t *testing.T) {
-	err := gparams.GParams.LoadYaml("config.yaml")
+	Init()
+
+	etcdAddr, err := masterParams.Params.EtcdAddress()
 	if err != nil {
 		panic(err)
 	}
-	etcdPort, err := gparams.GParams.Load("etcd.port")
-	if err != nil {
-		panic(err)
-	}
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcdPort}})
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
 
@@ -151,16 +149,14 @@ func TestMetaTable_Collection(t *testing.T) {
 }
 
 func TestMetaTable_DeletePartition(t *testing.T) {
-	err := gparams.GParams.LoadYaml("config.yaml")
-	if err != nil {
-		panic(err)
-	}
-	etcdPort, err := gparams.GParams.Load("etcd.port")
+	Init()
+
+	etcdAddr, err := masterParams.Params.EtcdAddress()
 	if err != nil {
 		panic(err)
 	}
 
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcdPort}})
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
 
@@ -241,16 +237,14 @@ func TestMetaTable_DeletePartition(t *testing.T) {
 }
 
 func TestMetaTable_Segment(t *testing.T) {
-	err := gparams.GParams.LoadYaml("config.yaml")
-	if err != nil {
-		panic(err)
-	}
-	etcdPort, err := gparams.GParams.Load("etcd.port")
+	Init()
+
+	etcdAddr, err := masterParams.Params.EtcdAddress()
 	if err != nil {
 		panic(err)
 	}
 
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcdPort}})
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
 
@@ -322,16 +316,14 @@ func TestMetaTable_Segment(t *testing.T) {
 }
 
 func TestMetaTable_UpdateSegment(t *testing.T) {
-	err := gparams.GParams.LoadYaml("config.yaml")
-	if err != nil {
-		panic(err)
-	}
-	etcdPort, err := gparams.GParams.Load("etcd.port")
+	Init()
+
+	etcdAddr, err := masterParams.Params.EtcdAddress()
 	if err != nil {
 		panic(err)
 	}
 
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:" + etcdPort}})
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
 

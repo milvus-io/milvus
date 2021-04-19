@@ -13,6 +13,12 @@ type DriverType = string
 type SegmentIndex = []byte
 type SegmentDL = []byte
 
+type Option struct {
+	Type        DriverType
+	TikvAddress string
+	BucketName  string
+}
+
 const (
 	MinIODriver DriverType = "MinIO"
 	TIKVDriver  DriverType = "TIKV"

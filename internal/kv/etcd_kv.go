@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	requestTimeout = 10 * time.Second
+	RequestTimeout = 10 * time.Second
 )
 
 type EtcdKV struct {
@@ -31,10 +31,14 @@ func (kv *EtcdKV) Close() {
 	kv.client.Close()
 }
 
+func (kv *EtcdKV) GetPath(key string) string {
+	return path.Join(kv.rootPath, key)
+}
+
 func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	key = path.Join(kv.rootPath, key)
 	log.Printf("LoadWithPrefix %s", key)
-	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(), clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
@@ -51,7 +55,7 @@ func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 
 func (kv *EtcdKV) Load(key string) (string, error) {
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 	resp, err := kv.client.Get(ctx, key)
 	if err != nil {
@@ -70,7 +74,7 @@ func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error) {
 		ops = append(ops, clientv3.OpGet(path.Join(kv.rootPath, keyLoad)))
 	}
 
-	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 	resp, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
 	if err != nil {
@@ -99,7 +103,7 @@ func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error) {
 
 func (kv *EtcdKV) Save(key, value string) error {
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 	_, err := kv.client.Put(ctx, key, value)
 	return err
@@ -111,16 +115,25 @@ func (kv *EtcdKV) MultiSave(kvs map[string]string) error {
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
 	}
 
-	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
 	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
 	return err
 }
 
+func (kv *EtcdKV) RemoveWithPrefix(prefix string) error {
+	key := path.Join(kv.rootPath, prefix)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+
+	_, err := kv.client.Delete(ctx, key, clientv3.WithPrefix())
+	return err
+}
+
 func (kv *EtcdKV) Remove(key string) error {
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
 	_, err := kv.client.Delete(ctx, key)
@@ -133,7 +146,7 @@ func (kv *EtcdKV) MultiRemove(keys []string) error {
 		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, key)))
 	}
 
-	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
 	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
@@ -151,7 +164,7 @@ func (kv *EtcdKV) MultiSaveAndRemove(saves map[string]string, removals []string)
 	}
 
 	log.Printf("MultiSaveAndRemove")
-	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
 	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()

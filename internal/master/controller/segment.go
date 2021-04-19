@@ -8,28 +8,22 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/master/collection"
 	"github.com/zilliztech/milvus-distributed/internal/master/id"
+	masterParams "github.com/zilliztech/milvus-distributed/internal/master/paramtable"
 	"github.com/zilliztech/milvus-distributed/internal/master/segment"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 )
 
 func ComputeCloseTime(ss internalpb.SegmentStats, kvbase *kv.EtcdKV) error {
-	masterSegmentThreshole, err := gparams.GParams.Load("master.segmentthreshole")
-	if err != nil {
-		panic(err)
-	}
-	segmentThreshole, err := strconv.ParseFloat(masterSegmentThreshole, 32)
-	if err != nil {
-		panic(err)
-	}
-	if int(ss.MemorySize) > int(segmentThreshole*0.8) {
+	masterParams.Params.InitParamTable()
+	segmentThreshold := masterParams.Params.SegmentThreshold()
+	if int(ss.MemorySize) > int(segmentThreshold*0.8) {
 		currentTime := time.Now()
 		//memRate := int(ss.MemoryRate)
 		memRate := 1 // to do
 		if memRate == 0 {
 			memRate = 1
 		}
-		sec := int(segmentThreshole*0.2) / memRate
+		sec := int(segmentThreshold*0.2) / memRate
 		data, err := kvbase.Load("segment/" + strconv.Itoa(int(ss.SegmentID)))
 		if err != nil {
 			return err

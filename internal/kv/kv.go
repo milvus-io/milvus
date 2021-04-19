@@ -1,4 +1,4 @@
-package kvutil
+package kv
 
 type Base interface {
 	Load(key string) (string, error)

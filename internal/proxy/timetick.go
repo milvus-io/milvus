@@ -3,18 +3,13 @@ package proxy
 import (
 	"context"
 	"log"
-	"strconv"
 	"sync"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-
+	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-
-	"github.com/apache/pulsar-client-go/pulsar"
 )
 
 type tickCheckFunc = func(Timestamp) bool
@@ -53,10 +48,11 @@ func newTimeTick(ctx context.Context,
 
 	bufSize := int64(1000)
 	t.tickMsgStream = msgstream.NewPulsarMsgStream(t.ctx, bufSize)
-	pulsarAddress := "pulsar://"
-	pulsarAddress += conf.Config.Pulsar.Address
-	pulsarAddress += ":"
-	pulsarAddress += strconv.FormatInt(int64(conf.Config.Pulsar.Port), 10)
+	pulsarAddress, err := Params.PulsarAddress()
+	if err != nil {
+		panic(err)
+	}
+	pulsarAddress = "pulsar://" + pulsarAddress
 
 	producerChannels := []string{"timeTick"}
 	t.tickMsgStream.SetPulsarCient(pulsarAddress)

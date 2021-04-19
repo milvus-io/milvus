@@ -1,4 +1,4 @@
-package kvutil
+package kv
 
 import (
 	"sync"

@@ -7,17 +7,13 @@ import (
 	"syscall"
 
 	"github.com/zilliztech/milvus-distributed/internal/reader"
-	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err := gparams.GParams.LoadYaml("config.yaml")
-	if err != nil {
-		panic(err)
-	}
+	reader.Init()
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
@@ -31,10 +27,8 @@ func main() {
 		sig = <-sc
 		cancel()
 	}()
-	pulsarAddr, _ := gparams.GParams.Load("pulsar.address")
-	pulsarPort, _ := gparams.GParams.Load("pulsar.port")
-	pulsarAddr += ":" + pulsarPort
-	reader.StartQueryNode(ctx, pulsarAddr)
+	pulsarAddress, _ := reader.Params.PulsarAddress()
+	reader.StartQueryNode(ctx, pulsarAddress)
 
 	switch sig {
 	case syscall.SIGTERM:

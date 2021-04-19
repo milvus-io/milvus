@@ -7,29 +7,23 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	masterParams "github.com/zilliztech/milvus-distributed/internal/master/paramtable"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
-	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 	"go.etcd.io/etcd/clientv3"
 	"google.golang.org/grpc"
 )
 
 func TestMaster_CollectionTask(t *testing.T) {
-	err := gparams.GParams.LoadYaml("config.yaml")
-	if err != nil {
-		panic(err)
-	}
+	Init()
+
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
 
-	etcdPort, err := gparams.GParams.Load("etcd.port")
-	if err != nil {
-		panic(err)
-	}
-	etcdAddr := "127.0.0.1:" + etcdPort
+	etcdAddr, _ := masterParams.Params.EtcdAddress()
 
 	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)

@@ -188,7 +188,9 @@ func main() {
 	if valueSize, err = bytefmt.ToBytes(sizeArg); err != nil {
 		log.Fatalf("Invalid -z argument for object size: %v", err)
 	}
-	store, err = storage.NewStore(context.Background(), storeType)
+	var option = storagetype.Option{TikvAddress: "localhost:2379", Type: storeType, BucketName: "zilliz-hz"}
+
+	store, err = storage.NewStore(context.Background(), option)
 	if err != nil {
 		log.Fatalf("Error when creating storage " + err.Error())
 	}

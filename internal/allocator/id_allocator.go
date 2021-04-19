@@ -4,10 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strconv"
 	"time"
-
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -22,10 +19,7 @@ type IDAllocator struct {
 	idEnd   UniqueID
 }
 
-func NewIDAllocator(ctx context.Context) (*IDAllocator, error) {
-	masterAddr := conf.Config.Etcd.Address
-	masterAddr += ":"
-	masterAddr += strconv.FormatInt(int64(conf.Config.Master.Port), 10)
+func NewIDAllocator(ctx context.Context, masterAddr string) (*IDAllocator, error) {
 
 	ctx1, cancel := context.WithCancel(ctx)
 	a := &IDAllocator{

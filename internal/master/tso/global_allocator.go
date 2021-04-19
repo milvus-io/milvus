@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/util/kvutil"
+	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.uber.org/zap"
@@ -41,13 +41,13 @@ func Init(etcdAddr []string, rootPath string) {
 	InitGlobalTsoAllocator("timestamp", tsoutil.NewTSOKVBase(etcdAddr, rootPath, "tso"))
 }
 
-func InitGlobalTsoAllocator(key string, base kvutil.Base) {
+func InitGlobalTsoAllocator(key string, base kv.Base) {
 	allocator = NewGlobalTSOAllocator(key, base)
 	allocator.Initialize()
 }
 
 // NewGlobalTSOAllocator creates a new global TSO allocator.
-func NewGlobalTSOAllocator(key string, kvBase kvutil.Base) *GlobalTSOAllocator {
+func NewGlobalTSOAllocator(key string, kvBase kv.Base) *GlobalTSOAllocator {
 	var saveInterval = 3 * time.Second
 	return &GlobalTSOAllocator{
 		tso: &timestampOracle{

@@ -2,37 +2,26 @@ package main
 
 import (
 	"context"
-	"flag"
 	"log"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 
 	"github.com/zilliztech/milvus-distributed/internal/master"
-	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
+	masterParams "github.com/zilliztech/milvus-distributed/internal/master/paramtable"
 	"go.uber.org/zap"
 )
 
 func main() {
+	master.Init()
 
-	var yamlFile string
-	flag.StringVar(&yamlFile, "yaml", "", "yaml file")
-	flag.Parse()
-	// flag.Usage()
-	log.Println("yaml file: ", yamlFile)
-
-	err := gparams.GParams.LoadYaml(yamlFile)
-	if err != nil {
-		panic(err)
-	}
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
-	etcdAddress, _ := gparams.GParams.Load("etcd.address")
-	etcdPort, _ := gparams.GParams.Load("etcd.port")
-	etcdAddr := etcdAddress + ":" + etcdPort
-	etcdRootPath, _ := gparams.GParams.Load("etcd.rootpath")
-	svr, err := master.CreateServer(ctx, etcdRootPath, etcdRootPath, []string{etcdAddr})
+
+	etcdAddress, _ := masterParams.Params.EtcdAddress()
+	etcdRootPath, _ := masterParams.Params.EtcdRootPath()
+
+	svr, err := master.CreateServer(ctx, etcdRootPath, etcdRootPath, []string{etcdAddress})
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}
@@ -50,13 +39,7 @@ func main() {
 		cancel()
 	}()
 
-	masterPort, _ := gparams.GParams.Load("master.port")
-	grpcPort, err := strconv.ParseInt(masterPort, 10, 64)
-	if err != nil {
-		panic(err)
-	}
-
-	if err := svr.Run(grpcPort); err != nil {
+	if err := svr.Run(int64(masterParams.Params.Port())); err != nil {
 		log.Fatal("run server failed", zap.Error(err))
 	}
 

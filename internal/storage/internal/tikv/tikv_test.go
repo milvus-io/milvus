@@ -17,9 +17,10 @@ import (
 
 //var store TikvStore
 var store *TikvStore
+var option = Option{TikvAddress: "localhost:2379"}
 
 func TestMain(m *testing.M) {
-	store, _ = NewTikvStore(context.Background())
+	store, _ = NewTikvStore(context.Background(), option)
 	exitCode := m.Run()
 	_ = store.Close()
 	os.Exit(exitCode)
