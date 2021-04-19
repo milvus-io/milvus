@@ -257,6 +257,7 @@ SegmentSmallIndex::BuildVecIndexImpl(const IndexMeta::Entry& entry) {
 Status
 SegmentSmallIndex::BuildIndex(IndexMetaPtr remote_index_meta) {
     if (remote_index_meta == nullptr) {
+        PanicInfo("deprecated");
         std::cout << "WARN: Null index ptr is detected, use default index" << std::endl;
 
         int dim = 0;
@@ -285,12 +286,10 @@ SegmentSmallIndex::BuildIndex(IndexMetaPtr remote_index_meta) {
                              knowhere::IndexMode::MODE_CPU, conf);
         remote_index_meta = index_meta;
     }
-
     if (record_.ack_responder_.GetAck() < 1024 * 4) {
         return Status(SERVER_BUILD_INDEX_ERROR, "too few elements");
     }
-    AssertInfo(false, "unimplemented");
-    return Status::OK();
+    PanicInfo("unimplemented");
 #if 0
     index_meta_ = remote_index_meta;
     for (auto& [index_name, entry] : index_meta_->get_entries()) {
@@ -350,11 +349,19 @@ SegmentSmallIndex::FillTargetEntry(const query::Plan* plan, QueryResult& results
     Assert(results.result_offsets_.size() == size);
     Assert(results.row_data_.size() == 0);
 
+    // TODO: deprecate
+    results.result_ids_.clear();
+    results.result_ids_.resize(size);
+
     if (plan->schema_.get_is_auto_id()) {
         auto& uids = record_.uids_;
         for (int64_t i = 0; i < size; ++i) {
             auto seg_offset = results.internal_seg_offsets_[i];
             auto row_id = seg_offset == -1 ? -1 : uids[seg_offset];
+
+            // TODO: deprecate
+            results.result_ids_[i] = row_id;
+
             std::vector<char> blob(sizeof(row_id));
             memcpy(blob.data(), &row_id, sizeof(row_id));
             results.row_data_.emplace_back(std::move(blob));
@@ -369,11 +376,31 @@ SegmentSmallIndex::FillTargetEntry(const query::Plan* plan, QueryResult& results
         for (int64_t i = 0; i < size; ++i) {
             auto seg_offset = results.internal_seg_offsets_[i];
             auto row_id = seg_offset == -1 ? -1 : uids->operator[](seg_offset);
+
+            // TODO: deprecate
+            results.result_ids_[i] = row_id;
+
             std::vector<char> blob(sizeof(row_id));
             memcpy(blob.data(), &row_id, sizeof(row_id));
             results.row_data_.emplace_back(std::move(blob));
         }
     }
+    return Status::OK();
+}
+
+Status
+SegmentSmallIndex::LoadIndexing(const LoadIndexInfo& info) {
+    auto field_offset_opt = schema_->get_offset(info.field_name);
+    AssertInfo(field_offset_opt.has_value(), "field name(" + info.field_name + ") not found");
+
+    Assert(info.index_params.count("metric_type"));
+    auto metric_type_str = info.index_params.at("metric_type");
+    auto entry = std::make_unique<SealedIndexingEntry>();
+
+    entry->metric_type_ = GetMetricType(metric_type_str);
+    entry->indexing_ = info.index;
+
+    sealed_indexing_record_.add_entry(field_offset_opt.value(), std::move(entry));
     return Status::OK();
 }
 

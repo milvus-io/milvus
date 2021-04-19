@@ -458,13 +458,15 @@ TEST(Query, FillSegment) {
     QueryResult result;
     segment->Search(plan.get(), groups.data(), timestamps.data(), 1, result);
 
-    // TODO: deprecated result_ids_
-    ASSERT_EQ(result.result_ids_, result.internal_seg_offsets_);
     auto topk = 5;
     auto num_queries = 10;
 
     result.result_offsets_.resize(topk * num_queries);
     segment->FillTargetEntry(plan.get(), result);
+
+    // TODO: deprecated result_ids_
+    ASSERT_EQ(result.result_ids_, result.internal_seg_offsets_);
+
     auto ans = result.row_data_;
     ASSERT_EQ(ans.size(), topk * num_queries);
     int64_t std_index = 0;

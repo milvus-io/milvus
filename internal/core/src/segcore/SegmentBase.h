@@ -19,6 +19,7 @@
 
 #include "query/deprecated/GeneralQuery.h"
 #include "query/Plan.h"
+#include "common/LoadIndex.h"
 
 namespace milvus {
 namespace segcore {
@@ -78,6 +79,9 @@ class SegmentBase {
     // stop receive insert requests
     virtual Status
     Close() = 0;
+
+    virtual Status
+    LoadIndexing(const LoadIndexInfo& info) = 0;
 
     //    // to make all data inserted visible
     //    // maybe a no-op?
