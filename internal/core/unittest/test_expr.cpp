@@ -177,7 +177,7 @@ TEST(Expr, TestRange) {
 
     auto seg_promote = dynamic_cast<SegmentSmallIndex*>(seg.get());
     ExecExprVisitor visitor(*seg_promote);
-    for (auto [clause, ref_func]: testcases) {
+    for (auto [clause, ref_func] : testcases) {
         auto loc = dsl_string_tmp.find("@@@@");
         auto dsl_string = dsl_string_tmp;
         dsl_string.replace(loc, 4, clause);
@@ -192,8 +192,7 @@ TEST(Expr, TestRange) {
 
             auto val = age_col[i];
             auto ref = !ref_func(val);
-            ASSERT_EQ(ans, ref) << clause << "@" << i
-                                << "!!" << val;
+            ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
         }
     }
 }
