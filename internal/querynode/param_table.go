@@ -1,11 +1,13 @@
 package querynode
 
 import (
-	"log"
+	"fmt"
 	"os"
+	"path"
 	"strconv"
 	"sync"
 
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
 
@@ -60,6 +62,8 @@ type ParamTable struct {
 	GracefulTime      int64
 	MsgChannelSubName string
 	SliceIndex        int
+
+	Log log.Config
 }
 
 var Params ParamTable
@@ -129,6 +133,8 @@ func (p *ParamTable) Init() {
 		p.initStatsPublishInterval()
 		//p.initStatsChannelName()
 		p.initStatsReceiveBufSize()
+
+		p.initLogCfg()
 	})
 }
 
@@ -152,7 +158,7 @@ func (p *ParamTable) initQueryNodeNum() {
 func (p *ParamTable) initQueryTimeTickChannelName() {
 	ch, err := p.Load("msgChannel.chanNamePrefix.queryTimeTick")
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
 	}
 	p.QueryTimeTickChannelName = ch
 }
@@ -322,7 +328,7 @@ func (p *ParamTable) initInsertChannelNames() {
 
 	prefix, err := p.Load("msgChannel.chanNamePrefix.insert")
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
 	}
 	prefix += "-"
 	channelRange, err := p.Load("msgChannel.channelRange.insert")
@@ -347,7 +353,7 @@ func (p *ParamTable) initInsertChannelNames() {
 func (p *ParamTable) initSearchChannelNames() {
 	prefix, err := p.Load("msgChannel.chanNamePrefix.search")
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
 	}
 	prefix += "-"
 	channelRange, err := p.Load("msgChannel.channelRange.search")
@@ -367,7 +373,7 @@ func (p *ParamTable) initSearchChannelNames() {
 func (p *ParamTable) initSearchResultChannelNames() {
 	prefix, err := p.Load("msgChannel.chanNamePrefix.searchResult")
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
 	}
 	prefix += "-"
 	channelRange, err := p.Load("msgChannel.channelRange.searchResult")
@@ -388,7 +394,7 @@ func (p *ParamTable) initMsgChannelSubName() {
 	// TODO: subName = namePrefix + "-" + queryNodeID, queryNodeID is assigned by master
 	name, err := p.Load("msgChannel.subNamePrefix.queryNodeSubNamePrefix")
 	if err != nil {
-		log.Panic(err)
+		log.Error(err.Error())
 	}
 	queryNodeIDStr, err := p.Load("_QueryNodeID")
 	if err != nil {
@@ -433,4 +439,35 @@ func (p *ParamTable) initSliceIndex() {
 		}
 	}
 	p.SliceIndex = -1
+}
+
+func (p *ParamTable) initLogCfg() {
+	p.Log = log.Config{}
+	format, err := p.Load("log.format")
+	if err != nil {
+		panic(err)
+	}
+	p.Log.Format = format
+	level, err := p.Load("log.level")
+	if err != nil {
+		panic(err)
+	}
+	p.Log.Level = level
+	devStr, err := p.Load("log.dev")
+	if err != nil {
+		panic(err)
+	}
+	dev, err := strconv.ParseBool(devStr)
+	if err != nil {
+		panic(err)
+	}
+	p.Log.Development = dev
+	p.Log.File.MaxSize = p.ParseInt("log.file.maxSize")
+	p.Log.File.MaxBackups = p.ParseInt("log.file.maxBackups")
+	p.Log.File.MaxDays = p.ParseInt("log.file.maxAge")
+	rootPath, err := p.Load("log.file.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	p.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("querynode-%d.log", p.QueryNodeID))
 }

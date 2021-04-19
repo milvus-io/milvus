@@ -2,10 +2,11 @@ package querynode
 
 import (
 	"context"
-	"log"
 
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
 
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
@@ -21,16 +22,16 @@ func (ddNode *ddNode) Name() string {
 }
 
 func (ddNode *ddNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
-	//fmt.Println("Do filterDmNode operation")
+	//log.Debug("Do filterDmNode operation")
 
 	if len(in) != 1 {
-		log.Println("Invalid operate message input in ddNode, input length = ", len(in))
+		log.Error("Invalid operate message input in ddNode", zap.Int("input length", len(in)))
 		// TODO: add error handling
 	}
 
 	msMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
-		log.Println("type assertion failed for MsgStreamMsg")
+		log.Error("type assertion failed for MsgStreamMsg")
 		// TODO: add error handling
 	}
 
@@ -81,21 +82,21 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 
 	hasCollection := ddNode.replica.hasCollection(collectionID)
 	if hasCollection {
-		log.Println("collection already exists, id = ", collectionID)
+		log.Debug("collection already exists", zap.Int64("collectionID", collectionID))
 		return
 	}
 
 	var schema schemapb.CollectionSchema
 	err := proto.Unmarshal(msg.Schema, &schema)
 	if err != nil {
-		log.Println(err)
+		log.Error(err.Error())
 		return
 	}
 
 	// add collection
 	err = ddNode.replica.addCollection(collectionID, &schema)
 	if err != nil {
-		log.Println(err)
+		log.Error(err.Error())
 		return
 	}
 
@@ -103,7 +104,7 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 	// TODO: allocate default partition id in master
 	err = ddNode.replica.addPartition(collectionID, UniqueID(2021))
 	if err != nil {
-		log.Println(err)
+		log.Error(err.Error())
 		return
 	}
 
@@ -132,7 +133,7 @@ func (ddNode *ddNode) createPartition(msg *msgstream.CreatePartitionMsg) {
 
 	err := ddNode.replica.addPartition(collectionID, partitionID)
 	if err != nil {
-		log.Println(err)
+		log.Error(err.Error())
 		return
 	}
 

@@ -2,8 +2,10 @@ package querynode
 
 import (
 	"context"
-	"log"
 
+	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -20,25 +22,25 @@ func (stNode *serviceTimeNode) Name() string {
 }
 
 func (stNode *serviceTimeNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
-	//fmt.Println("Do serviceTimeNode operation")
+	//log.Debug("Do serviceTimeNode operation")
 
 	if len(in) != 1 {
-		log.Println("Invalid operate message input in serviceTimeNode, input length = ", len(in))
+		log.Error("Invalid operate message input in serviceTimeNode, input length = ", zap.Int("input node", len(in)))
 		// TODO: add error handling
 	}
 
 	serviceTimeMsg, ok := in[0].(*serviceTimeMsg)
 	if !ok {
-		log.Println("type assertion failed for serviceTimeMsg")
+		log.Error("type assertion failed for serviceTimeMsg")
 		// TODO: add error handling
 	}
 
 	// update service time
 	stNode.replica.getTSafe().set(serviceTimeMsg.timeRange.timestampMax)
-	//fmt.Println("update tSafe to:", getPhysicalTime(serviceTimeMsg.timeRange.timestampMax))
+	//log.Debug("update tSafe to:", getPhysicalTime(serviceTimeMsg.timeRange.timestampMax))
 
 	if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {
-		log.Printf("Error: send time tick into pulsar channel failed, %s\n", err.Error())
+		log.Error("Error: send time tick into pulsar channel failed", zap.Error(err))
 	}
 
 	var res Msg = &gcMsg{

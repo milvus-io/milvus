@@ -15,10 +15,12 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync/atomic"
 
+	"go.uber.org/zap"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/rmqms"
@@ -146,18 +148,18 @@ func (node *QueryNode) Init() error {
 		}
 	}
 
-	fmt.Println("QueryNodeID is", Params.QueryNodeID)
+	log.Debug("", zap.Int64("QueryNodeID", Params.QueryNodeID))
 
 	if node.masterClient == nil {
-		log.Println("WARN: null master service detected")
+		log.Error("null master service detected")
 	}
 
 	if node.indexClient == nil {
-		log.Println("WARN: null index service detected")
+		log.Error("null index service detected")
 	}
 
 	if node.dataClient == nil {
-		log.Println("WARN: null data service detected")
+		log.Error("null data service detected")
 	}
 
 	return nil
@@ -403,7 +405,7 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	fieldIDs := in.FieldIDs
 	schema := in.Schema
 
-	fmt.Println("query node load segment ,info = ", in)
+	log.Debug("query node load segment", zap.String("loadSegmentRequest", fmt.Sprintln(in)))
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,

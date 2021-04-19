@@ -11,7 +11,11 @@ package querynode
 
 */
 import "C"
-import "fmt"
+import (
+	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
+)
 
 type Partition struct {
 	collectionID UniqueID
@@ -45,6 +49,6 @@ func newPartition(collectionID UniqueID, partitionID UniqueID) *Partition {
 		enable:       false,
 	}
 
-	fmt.Println("create partition", partitionID)
+	log.Debug("create partition", zap.Int64("partitionID", partitionID))
 	return newPartition
 }

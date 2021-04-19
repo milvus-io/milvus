@@ -2,7 +2,6 @@ package components
 
 import (
 	"context"
-	"log"
 
 	grpcqueryservice "github.com/zilliztech/milvus-distributed/internal/distributed/queryservice"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -29,7 +28,6 @@ func (qs *QueryService) Run() error {
 	if err := qs.svr.Run(); err != nil {
 		panic(err)
 	}
-	log.Println("QueryService successfully started ...")
 	return nil
 }
 

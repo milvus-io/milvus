@@ -13,7 +13,9 @@ package querynode
 import "C"
 import (
 	"github.com/golang/protobuf/proto"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	"go.uber.org/zap"
 )
 
 type Collection struct {
@@ -61,6 +63,8 @@ func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Co
 		schema:        schema,
 	}
 
+	log.Debug("create collection", zap.Int64("collectionID", collectionID))
+
 	return newCollection
 }
 
@@ -71,4 +75,10 @@ func deleteCollection(collection *Collection) {
 	*/
 	cPtr := collection.collectionPtr
 	C.DeleteCollection(cPtr)
+
+	collection.collectionPtr = nil
+
+	log.Debug("delete collection", zap.Int64("collectionID", collection.ID()))
+
+	collection = nil
 }

@@ -3,18 +3,20 @@ package querynode
 import (
 	"context"
 	"fmt"
-	"log"
 	"path"
 	"reflect"
 	"strings"
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
+
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
-	"go.etcd.io/etcd/clientv3"
 )
 
 const (
@@ -60,11 +62,11 @@ func (mService *metaService) start() {
 	// init from meta
 	err := mService.loadCollections()
 	if err != nil {
-		log.Fatal("metaService loadCollections failed")
+		log.Error("metaService loadCollections failed")
 	}
 	err = mService.loadSegments()
 	if err != nil {
-		log.Fatal("metaService loadSegments failed")
+		log.Error("metaService loadSegments failed")
 	}
 }
 
@@ -111,7 +113,7 @@ func printCollectionStruct(obj *etcdpb.CollectionInfo) {
 		if typeOfS.Field(i).Name == "GrpcMarshalString" {
 			continue
 		}
-		fmt.Printf("Field: %s\tValue: %v\n", typeOfS.Field(i).Name, v.Field(i).Interface())
+		log.Debug("Field", zap.String("field name", typeOfS.Field(i).Name), zap.String("field", fmt.Sprintln(v.Field(i).Interface())))
 	}
 }
 
@@ -121,24 +123,22 @@ func printSegmentStruct(obj *datapb.SegmentInfo) {
 	typeOfS := v.Type()
 
 	for i := 0; i < v.NumField(); i++ {
-		fmt.Printf("Field: %s\tValue: %v\n", typeOfS.Field(i).Name, v.Field(i).Interface())
+		log.Debug("Field", zap.String("field name", typeOfS.Field(i).Name), zap.String("field", fmt.Sprintln(v.Field(i).Interface())))
 	}
 }
 
 func (mService *metaService) processCollectionCreate(id string, value string) {
-	//println(fmt.Sprintf("Create Collection:$%s$", id))
-
 	col := mService.collectionUnmarshal(value)
 	if col != nil {
 		schema := col.Schema
 		err := mService.replica.addCollection(col.ID, schema)
 		if err != nil {
-			log.Println(err)
+			log.Error(err.Error())
 		}
 		for _, partitionID := range col.PartitionIDs {
 			err = mService.replica.addPartition(col.ID, partitionID)
 			if err != nil {
-				log.Println(err)
+				log.Error(err.Error())
 			}
 		}
 	}
@@ -154,7 +154,7 @@ func (mService *metaService) processSegmentCreate(id string, value string) {
 		// TODO: get partition id from segment meta
 		err := mService.replica.addSegment(seg.SegmentID, seg.PartitionID, seg.CollectionID, segTypeGrowing)
 		if err != nil {
-			log.Println(err)
+			log.Error(err.Error())
 			return
 		}
 	}
@@ -206,7 +206,7 @@ func (mService *metaService) collectionUnmarshal(value string) *etcdpb.Collectio
 	col := etcdpb.CollectionInfo{}
 	err := proto.UnmarshalText(value, &col)
 	if err != nil {
-		log.Println(err)
+		log.Error(err.Error())
 		return nil
 	}
 	return &col
@@ -215,7 +215,7 @@ func (mService *metaService) collectionUnmarshal(value string) *etcdpb.Collectio
 func (mService *metaService) collectionMarshal(col *etcdpb.CollectionInfo) string {
 	value := proto.MarshalTextString(col)
 	if value == "" {
-		log.Println("marshal collection failed")
+		log.Error("marshal collection failed")
 		return ""
 	}
 	return value
@@ -225,7 +225,7 @@ func (mService *metaService) segmentUnmarshal(value string) *datapb.SegmentInfo 
 	seg := datapb.SegmentInfo{}
 	err := proto.UnmarshalText(value, &seg)
 	if err != nil {
-		log.Println(err)
+		log.Error(err.Error())
 		return nil
 	}
 	return &seg
@@ -234,7 +234,7 @@ func (mService *metaService) segmentUnmarshal(value string) *datapb.SegmentInfo 
 func (mService *metaService) segmentMarshal(seg *etcdpb.SegmentMeta) string {
 	value := proto.MarshalTextString(seg)
 	if value == "" {
-		log.Println("marshal segment failed")
+		log.Error("marshal segment failed")
 		return ""
 	}
 	return value

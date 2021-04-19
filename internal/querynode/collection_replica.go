@@ -12,11 +12,13 @@ package querynode
 */
 import "C"
 import (
-	"fmt"
 	"strconv"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
@@ -392,7 +394,7 @@ func (colReplica *collectionReplicaImpl) removeSegment(segmentID UniqueID) error
 }
 
 func (colReplica *collectionReplicaImpl) removeSegmentPrivate(segmentID UniqueID) error {
-	fmt.Println("remove segment", segmentID)
+	log.Debug("remove segment", zap.Int64("segmentID", segmentID))
 	segment, err := colReplica.getSegmentByIDPrivate(segmentID)
 	if err != nil {
 		return err

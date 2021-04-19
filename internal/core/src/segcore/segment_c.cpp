@@ -43,7 +43,7 @@ NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type) {
             std::cout << "invalid segment type" << std::endl;
     }
 
-    std::cout << "create segment " << segment_id << std::endl;
+    // std::cout << "create segment " << segment_id << std::endl;
     return (void*)segment.release();
 }
 
@@ -52,7 +52,7 @@ DeleteSegment(CSegmentInterface c_segment) {
     // TODO: use dynamic cast, and return c status
     auto s = (milvus::segcore::SegmentInterface*)c_segment;
 
-    std::cout << "delete segment " << std::endl;
+    // std::cout << "delete segment " << std::endl;
     delete s;
 }
 
@@ -219,8 +219,6 @@ LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_in
         auto load_info =
             LoadFieldDataInfo{load_field_data_info.field_id, load_field_data_info.blob, load_field_data_info.row_count};
         segment->LoadFieldData(load_info);
-        std::cout << "load field done, field_id = " << load_info.field_id << ", row count = " << load_info.row_count
-                  << std::endl;
         auto status = CStatus();
         status.error_code = Success;
         status.error_msg = "";

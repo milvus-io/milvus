@@ -2,10 +2,11 @@ package querynode
 
 import (
 	"context"
-	"fmt"
-	"log"
 	"sync"
 
+	"go.uber.org/zap"
+
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
 
@@ -27,16 +28,16 @@ func (iNode *insertNode) Name() string {
 }
 
 func (iNode *insertNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.Context) {
-	// fmt.Println("Do insertNode operation")
+	//log.Debug("Do insertNode operation")
 
 	if len(in) != 1 {
-		log.Println("Invalid operate message input in insertNode, input length = ", len(in))
+		log.Error("Invalid operate message input in insertNode", zap.Int("input length", len(in)))
 		// TODO: add error handling
 	}
 
 	iMsg, ok := in[0].(*insertMsg)
 	if !ok {
-		log.Println("type assertion failed for insertMsg")
+		log.Error("type assertion failed for insertMsg")
 		// TODO: add error handling
 	}
 
@@ -57,7 +58,7 @@ func (iNode *insertNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.
 		if !iNode.replica.hasSegment(task.SegmentID) {
 			err := iNode.replica.addSegment(task.SegmentID, task.PartitionID, task.CollectionID, segTypeGrowing)
 			if err != nil {
-				log.Println(err)
+				log.Error(err.Error())
 				continue
 			}
 		}
@@ -67,7 +68,7 @@ func (iNode *insertNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.
 	for segmentID := range insertData.insertRecords {
 		var targetSegment, err = iNode.replica.getSegmentByID(segmentID)
 		if err != nil {
-			log.Println("preInsert failed")
+			log.Error("preInsert failed")
 			// TODO: add error handling
 		}
 
@@ -96,7 +97,7 @@ func (iNode *insertNode) Operate(ctx context.Context, in []Msg) ([]Msg, context.
 func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *sync.WaitGroup) {
 	var targetSegment, err = iNode.replica.getSegmentByID(segmentID)
 	if err != nil {
-		log.Println("cannot find segment:", segmentID)
+		log.Error("cannot find segment:", zap.Int64("segmentID", segmentID))
 		// TODO: add error handling
 		wg.Done()
 		return
@@ -109,13 +110,13 @@ func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *syn
 
 	err = targetSegment.segmentInsert(offsets, &ids, &timestamps, &records)
 	if err != nil {
-		log.Println(err)
+		log.Error(err.Error())
 		// TODO: add error handling
 		wg.Done()
 		return
 	}
 
-	fmt.Println("Do insert done, len = ", len(insertData.insertIDs[segmentID]))
+	log.Debug("Do insert done", zap.Int("len", len(insertData.insertIDs[segmentID])))
 	wg.Done()
 }
 

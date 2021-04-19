@@ -2,11 +2,9 @@ package querynode
 
 import (
 	"context"
-	"fmt"
-	"log"
-	"strconv"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -51,7 +49,6 @@ func (sService *statsService) start() {
 	sService.statsStream.Start()
 
 	// start service
-	fmt.Println("do segments statistic in ", strconv.Itoa(sleepTimeInterval), "ms")
 	for {
 		select {
 		case <-sService.ctx.Done():
@@ -94,6 +91,6 @@ func (sService *statsService) publicStatistic(fieldStats []*internalpb2.FieldSta
 	}
 	err := sService.statsStream.Produce(context.TODO(), &msgPack)
 	if err != nil {
-		log.Println(err)
+		log.Error(err.Error())
 	}
 }
