@@ -31,7 +31,7 @@ TEST(Sealed, without_predicate) {
     auto dim = 16;
     auto topK = 5;
     auto metric_type = MetricType::METRIC_L2;
-    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto fake_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     schema->AddDebugField("age", DataType::FLOAT);
     std::string dsl = R"({
         "bool": {
@@ -106,7 +106,7 @@ TEST(Sealed, without_predicate) {
 
     LoadIndexInfo load_info;
     load_info.field_name = "fakevec";
-    load_info.field_id = 42;
+    load_info.field_id = fake_id.get();
     load_info.index = indexing;
     load_info.index_params["metric_type"] = "L2";
 
@@ -128,7 +128,7 @@ TEST(Sealed, with_predicate) {
     auto dim = 16;
     auto topK = 5;
     auto metric_type = MetricType::METRIC_L2;
-    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto fake_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     schema->AddDebugField("counter", DataType::INT64);
     std::string dsl = R"({
         "bool": {
@@ -199,7 +199,7 @@ TEST(Sealed, with_predicate) {
 
     LoadIndexInfo load_info;
     load_info.field_name = "fakevec";
-    load_info.field_id = 42;
+    load_info.field_id = fake_id.get();
     load_info.index = indexing;
     load_info.index_params["metric_type"] = "L2";
 

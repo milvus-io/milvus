@@ -212,6 +212,7 @@ func (t *DescribeCollectionReqTask) Execute() error {
 		return err
 	}
 	t.Rsp.Schema = proto.Clone(coll.Schema).(*schemapb.CollectionSchema)
+	t.Rsp.CollectionID = coll.ID
 	var newField []*schemapb.FieldSchema
 	for _, field := range t.Rsp.Schema.Fields {
 		if field.FieldID >= StartOfUserFieldID {
@@ -368,9 +369,12 @@ func (t *ShowPartitionReqTask) Ts() (typeutil.Timestamp, error) {
 }
 
 func (t *ShowPartitionReqTask) Execute() error {
-	coll, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
+	coll, err := t.core.MetaTable.GetCollectionByID(t.Req.CollectionID)
 	if err != nil {
 		return err
+	}
+	if coll.Schema.Name != t.Req.CollectionName {
+		return errors.Errorf("collection %s not exist", t.Req.CollectionName)
 	}
 	for _, partID := range coll.PartitionIDs {
 		partMeta, err := t.core.MetaTable.GetPartitionByID(partID)
@@ -476,6 +480,9 @@ func (t *CreateIndexReqTask) Execute() error {
 	segIDs, field, err := t.core.MetaTable.GetNotIndexedSegments(t.Req.CollectionName, t.Req.FieldName, t.Req.ExtraParams)
 	if err != nil {
 		return err
+	}
+	if field.DataType != schemapb.DataType_VECTOR_FLOAT && field.DataType != schemapb.DataType_VECTOR_BINARY {
+		return errors.Errorf("field name = %s, data type = %s", t.Req.FieldName, schemapb.DataType_name[int32(field.DataType)])
 	}
 	for _, seg := range segIDs {
 		task := CreateIndexTask{
