@@ -377,7 +377,7 @@ func (mt *metaTable) DeletePartition(collID UniqueID, tag string) error {
 	for _, s := range collMeta.SegmentIDs {
 		sm, ok := mt.segID2Meta[s]
 		if !ok {
-			return errors.Errorf("can't find segment id = %d", s)
+			return errors.Errorf("DeletePartition:can't find segment id = %d", s)
 		}
 		if sm.PartitionTag != tag {
 			seg = append(seg, s)
@@ -444,7 +444,7 @@ func (mt *metaTable) GetSegmentByID(segID UniqueID) (*pb.SegmentMeta, error) {
 
 	sm, ok := mt.segID2Meta[segID]
 	if !ok {
-		return nil, errors.Errorf("can't find segment id = %d", segID)
+		return nil, errors.Errorf("GetSegmentByID:can't find segment id = %d", segID)
 	}
 	return &sm, nil
 }
@@ -455,7 +455,7 @@ func (mt *metaTable) DeleteSegment(segID UniqueID) error {
 
 	segMeta, ok := mt.segID2Meta[segID]
 	if !ok {
-		return errors.Errorf("can't find segment. id = " + strconv.FormatInt(segID, 10))
+		return errors.Errorf("DeleteSegment:can't find segment. id = " + strconv.FormatInt(segID, 10))
 	}
 
 	collMeta, ok := mt.collID2Meta[segMeta.CollectionID]
@@ -483,7 +483,7 @@ func (mt *metaTable) CloseSegment(segID UniqueID, closeTs Timestamp) error {
 
 	segMeta, ok := mt.segID2Meta[segID]
 	if !ok {
-		return errors.Errorf("can't find segment id = " + strconv.FormatInt(segID, 10))
+		return errors.Errorf("CloseSegment:can't find segment id = " + strconv.FormatInt(segID, 10))
 	}
 
 	segMeta.CloseTime = closeTs

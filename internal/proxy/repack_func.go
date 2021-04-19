@@ -4,6 +4,8 @@ import (
 	"log"
 	"sort"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -18,7 +20,8 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 
 	result := make(map[int32]*msgstream.MsgPack)
 
-	channelCountMap := make(map[UniqueID]map[int32]uint32) //  reqID --> channelID to count
+	channelCountMap := make(map[UniqueID]map[int32]uint32)    //  reqID --> channelID to count
+	channelMaxTSMap := make(map[UniqueID]map[int32]Timestamp) //  reqID --> channelID to max Timestamp
 	reqSchemaMap := make(map[UniqueID][]string)
 
 	for i, request := range tsMsgs {
@@ -45,12 +48,23 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 			channelCountMap[reqID] = make(map[int32]uint32)
 		}
 
+		if _, ok := channelMaxTSMap[reqID]; !ok {
+			channelMaxTSMap[reqID] = make(map[int32]Timestamp)
+		}
+
 		if _, ok := reqSchemaMap[reqID]; !ok {
 			reqSchemaMap[reqID] = []string{insertRequest.CollectionName, insertRequest.PartitionTag}
 		}
 
-		for _, channelID := range keys {
+		for idx, channelID := range keys {
 			channelCountMap[reqID][channelID]++
+			if _, ok := channelMaxTSMap[reqID][channelID]; !ok {
+				channelMaxTSMap[reqID][channelID] = typeutil.ZeroTimestamp
+			}
+			ts := insertRequest.Timestamps[idx]
+			if channelMaxTSMap[reqID][channelID] < ts {
+				channelMaxTSMap[reqID][channelID] = ts
+			}
 		}
 
 	}
@@ -64,7 +78,12 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 		schema := reqSchemaMap[reqID]
 		collName, partitionTag := schema[0], schema[1]
 		for channelID, count := range countInfo {
-			mapInfo, err := segIDAssigner.GetSegmentID(collName, partitionTag, channelID, count)
+			ts, ok := channelMaxTSMap[reqID][channelID]
+			if !ok {
+				ts = typeutil.ZeroTimestamp
+				log.Println("Warning: did not get max Timstamp!")
+			}
+			mapInfo, err := segIDAssigner.GetSegmentID(collName, partitionTag, channelID, count, ts)
 			if err != nil {
 				return nil, err
 			}

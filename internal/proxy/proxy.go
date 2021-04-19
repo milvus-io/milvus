@@ -69,18 +69,21 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 		return nil, err
 	}
 	p.idAllocator = idAllocator
+	p.idAllocator.PeerID = Params.ProxyID()
 
 	tsoAllocator, err := allocator.NewTimestampAllocator(p.proxyLoopCtx, masterAddr)
 	if err != nil {
 		return nil, err
 	}
 	p.tsoAllocator = tsoAllocator
+	p.tsoAllocator.PeerID = Params.ProxyID()
 
-	segAssigner, err := allocator.NewSegIDAssigner(p.proxyLoopCtx, masterAddr)
+	segAssigner, err := allocator.NewSegIDAssigner(p.proxyLoopCtx, masterAddr, p.lastTick)
 	if err != nil {
 		panic(err)
 	}
 	p.segAssigner = segAssigner
+	p.segAssigner.PeerID = Params.ProxyID()
 
 	p.manipulationMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, Params.MsgStreamInsertBufSize())
 	p.manipulationMsgStream.SetPulsarClient(pulsarAddress)
@@ -103,6 +106,10 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 // AddStartCallback adds a callback in the startServer phase.
 func (p *Proxy) AddStartCallback(callbacks ...func()) {
 	p.startCallbacks = append(p.startCallbacks, callbacks...)
+}
+
+func (p *Proxy) lastTick() Timestamp {
+	return p.tick.LastTick()
 }
 
 func (p *Proxy) startProxy() error {
