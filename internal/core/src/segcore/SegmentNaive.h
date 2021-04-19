@@ -20,8 +20,6 @@
 namespace milvus::segcore {
 class SegmentNaive : public SegmentBase {
  public:
-    virtual ~SegmentNaive() = default;
-
     // SegmentBase(std::shared_ptr<FieldsInfo> collection);
 
     int64_t
@@ -47,7 +45,7 @@ class SegmentNaive : public SegmentBase {
     Status
     QueryDeprecated(query::QueryDeprecatedPtr query_info, Timestamp timestamp, QueryResult& results) override;
 
-    virtual Status
+    Status
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup* placeholder_groups[],
            const Timestamp timestamps[],
@@ -106,7 +104,7 @@ class SegmentNaive : public SegmentBase {
     friend std::unique_ptr<SegmentBase>
     CreateSegment(SchemaPtr schema);
 
-    explicit SegmentNaive(SchemaPtr schema) : schema_(schema), record_(*schema) {
+    explicit SegmentNaive(const SchemaPtr& schema) : schema_(schema), record_(*schema) {
     }
 
  private:

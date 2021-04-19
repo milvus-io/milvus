@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
 type insertNode struct {
@@ -126,6 +127,9 @@ func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *syn
 }
 
 func newInsertNode(replica *collectionReplica) *insertNode {
+	maxQueueLength := flowgraph.Params.FlowGraphMaxQueueLength()
+	maxParallelism := flowgraph.Params.FlowGraphMaxParallelism()
+
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)

@@ -46,9 +46,12 @@ func (inNode *InputNode) Operate(in []*Msg) []*Msg {
 }
 
 func NewInputNode(inStream *msgstream.MsgStream, nodeName string) *InputNode {
+	maxQueueLength := Params.FlowGraphMaxQueueLength()
+	maxParallelism := Params.FlowGraphMaxParallelism()
+
 	baseNode := BaseNode{}
-	baseNode.SetMaxQueueLength(MaxQueueLength)
-	baseNode.SetMaxParallelism(MaxParallelism)
+	baseNode.SetMaxQueueLength(maxQueueLength)
+	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &InputNode{
 		BaseNode: baseNode,
