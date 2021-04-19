@@ -4,14 +4,14 @@
 
 
 
-// TODO
+// TODO remove?
 #### 8.2 Message Stream Service API
 
 ```go
 type Client interface {
-  CreateChannels(req CreateChannelRequest) (CreateChannelResponse, error)
-  DestoryChannels(req DestoryChannelRequest) error
-  DescribeChannels(req DescribeChannelRequest) (DescribeChannelResponse, error)
+	CreateChannels(req CreateChannelRequest) (CreateChannelResponse, error)
+	DestoryChannels(req DestoryChannelRequest) error
+	DescribeChannels(req DescribeChannelRequest) (DescribeChannelResponse, error)
 }
 ```
 
@@ -19,19 +19,19 @@ type Client interface {
 
 ```go
 type OwnerDescription struct {
-  Role string
-  Address string
-  //Token string
-  DescriptionText string
+	Role string
+	Address string
+	//Token string
+	DescriptionText string
 }
 
 type CreateChannelRequest struct {
-  OwnerDescription OwnerDescription
-  NumChannels int
+	OwnerDescription OwnerDescription
+	NumChannels int
 }
 
 type CreateChannelResponse struct {
-  ChannelNames []string
+	ChannelNames []string
 }
 ```
 
@@ -39,7 +39,7 @@ type CreateChannelResponse struct {
 
 ```go
 type DestoryChannelRequest struct {
-  ChannelNames []string
+	ChannelNames []string
 }
 ```
 
@@ -49,16 +49,16 @@ type DestoryChannelRequest struct {
 
 ```go
 type DescribeChannelRequest struct {
-  ChannelNames []string
+	ChannelNames []string
 }
 
 type ChannelDescription struct {
-  ChannelName string
-  Owner OwnerDescription
+	ChannelName string
+	Owner OwnerDescription
 }
 
 type DescribeChannelResponse struct {
-  Descriptions []ChannelDescription
+	Descriptions []ChannelDescription
 }
 ```
 
@@ -78,83 +78,85 @@ type DescribeChannelResponse struct {
 // Msg
 
 type MsgType uint32
-const {
-  MsgType_kNone MsgType = 0
-  // Definition Requests: collection
-  MsgType_kCreateCollection   MsgType = 100
-  MsgType_kDropCollection     MsgType = 101
-  MsgType_kHasCollection      MsgType = 102
-  MsgType_kDescribeCollection MsgType = 103
-  MsgType_kShowCollections    MsgType = 104
-  MsgType_kGetSysConfigs      MsgType = 105
-  MsgType_kLoadCollection     MsgType = 106
-  MsgType_kReleaseCollection  MsgType = 107
-  // Definition Requests: partition
-  MsgType_kCreatePartition   MsgType = 200
-  MsgType_kDropPartition     MsgType = 201
-  MsgType_kHasPartition      MsgType = 202
-  MsgType_kDescribePartition MsgType = 203
-  MsgType_kShowPartitions    MsgType = 204
-  MsgType_kLoadPartition     MsgType = 205
-  MsgType_kReleasePartition  MsgType = 206
-  // Define Requests: segment
-  MsgType_kShowSegment     MsgType = 250
-  MsgType_kDescribeSegment MsgType = 251
-  // Definition Requests: Index
-  MsgType_kCreateIndex   MsgType = 300
-  MsgType_kDescribeIndex MsgType = 301
-  MsgType_kDropIndex     MsgType = 302
-  // Manipulation Requests
-  MsgType_kInsert MsgType = 400
-  MsgType_kDelete MsgType = 401
-  MsgType_kFlush  MsgType = 402
-  // Query
-  MsgType_kSearch                  MsgType = 500
-  MsgType_kSearchResult            MsgType = 501
-  MsgType_kGetIndexState           MsgType = 502
-  MsgType_kGetCollectionStatistics MsgType = 503
-  MsgType_kGetPartitionStatistics  MsgType = 504
-  // Data Service
-  MsgType_kSegmentInfo MsgType = 600
-  // System Control
-  MsgType_kTimeTick          MsgType = 1200
-  MsgType_kQueryNodeStats    MsgType = 1201
-  MsgType_kLoadIndex         MsgType = 1202
-  MsgType_kRequestID         MsgType = 1203
-  MsgType_kRequestTSO        MsgType = 1204
-  MsgType_kAllocateSegment   MsgType = 1205
-  MsgType_kSegmentStatistics MsgType = 1206
-  MsgType_kSegmentFlushDone  MsgType = 1207
-}
+const (
+	MsgType_Undefined MsgType = 0
+	// DEFINITION REQUESTS: COLLECTION
+	MsgType_CreateCollection   MsgType = 100
+	MsgType_DropCollection     MsgType = 101
+	MsgType_HasCollection      MsgType = 102
+	MsgType_DescribeCollection MsgType = 103
+	MsgType_ShowCollections    MsgType = 104
+	MsgType_GetSystemConfigs   MsgType = 105
+	MsgType_LoadCollection     MsgType = 106
+	MsgType_ReleaseCollection  MsgType = 107
+	// DEFINITION REQUESTS: PARTITION
+	MsgType_CreatePartition   MsgType = 200
+	MsgType_DropPartition     MsgType = 201
+	MsgType_HasPartition      MsgType = 202
+	MsgType_DescribePartition MsgType = 203
+	MsgType_ShowPartitions    MsgType = 204
+	MsgType_LoadPartitions    MsgType = 205
+	MsgType_ReleasePartitions MsgType = 206
+	// DEFINE REQUESTS: SEGMENT
+	MsgType_ShowSegments    MsgType = 250
+	MsgType_DescribeSegment MsgType = 251
+	// DEFINITION REQUESTS: INDEX
+	MsgType_CreateIndex   MsgType = 300
+	MsgType_DescribeIndex MsgType = 301
+	MsgType_DropIndex     MsgType = 302
+	// MANIPULATION REQUESTS
+	MsgType_Insert MsgType = 400
+	MsgType_Delete MsgType = 401
+	MsgType_Flush  MsgType = 402
+	// QUERY
+	MsgType_Search                  MsgType = 500
+	MsgType_SearchResult            MsgType = 501
+	MsgType_GetIndexState           MsgType = 502
+	MsgType_GetCollectionStatistics MsgType = 503
+	MsgType_GetPartitionStatistics  MsgType = 504
+	// DATA SERVICE
+	MsgType_SegmentInfo MsgType = 600
+	// SYSTEM CONTROL
+	MsgType_TimeTick          MsgType = 1200
+	MsgType_QueryNodeStats    MsgType = 1201
+	MsgType_LoadIndex         MsgType = 1202
+	MsgType_RequestID         MsgType = 1203
+	MsgType_RequestTSO        MsgType = 1204
+	MsgType_AllocateSegment   MsgType = 1205
+	MsgType_SegmentStatistics MsgType = 1206
+	MsgType_SegmentFlushDone  MsgType = 1207
+)
 
 type MsgPosition struct{
-  ChannelName string
-  MsgID       string
-  Timestamp   uint64
+	ChannelName string
+	MsgID       []byte
+	MsgGroup    string
+	Timestamp   uint64
 }
 
 type MsgPack struct {
-  BeginTs        Timestamp
-  EndTs          Timestamp
-  Msgs           []TsMsg
-  StartPositions []*MsgPosition
-  endPositions   []*MsgPosition
+	BeginTs        Timestamp
+	EndTs          Timestamp
+	Msgs           []TsMsg
+	StartPositions []*MsgPosition
+	EndPositions   []*MsgPosition
 }
 
 type TsMsg interface {
-  ID() UniqueID
-  BeginTs() Timestamp
-  EndTs() Timestamp
-  Type() MsgType
-  HashKeys() []uint32
-  Marshal(TsMsg) (MarshalType, error)
-  Unmarshal(MarshalType) (TsMsg, error)
-  Position() *MsgPosition
-  SetPosition(*MsgPosition)
+	TraceCtx() context.Context
+	SetTraceCtx(ctx context.Context)
+	ID() UniqueID
+	BeginTs() Timestamp
+	EndTs() Timestamp
+	Type() MsgType
+	HashKeys() []uint32
+	Marshal(TsMsg) (MarshalType, error)
+	Unmarshal(MarshalType) (TsMsg, error)
+	Position() *MsgPosition
+	SetPosition(*MsgPosition)
 }
 
-
-type RepackFunc(msgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error)
+type RepackFunc func(msgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error)
 ```
 
 
@@ -166,12 +168,12 @@ type RepackFunc(msgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error)
 type UnmarshalFunc func(interface{}) (TsMsg, error)
 
 type UnmarshalDispatcher interface {
-  Unmarshal(input interface{}, msgType commonpb.MsgType) (TsMsg, error)
-  AddMsgTemplate(msgType commonpb.MsgType, unmarshalFunc UnmarshalFunc)
+	Unmarshal(input interface{}, msgType commonpb.MsgType) (TsMsg, error)
+	AddMsgTemplate(msgType commonpb.MsgType, unmarshalFunc UnmarshalFunc)
 }
 
 type UnmarshalDispatcherFactory interface {
-    NewUnmarshalDispatcher() *UnmarshalDispatcher
+		NewUnmarshalDispatcher() *UnmarshalDispatcher
 }
 
 // Proto & Mem Implementation
@@ -191,23 +193,23 @@ func (mudf *MemUDFactory) NewUnmarshalDispatcher() *UnmarshalDispatcher
 
 // Interface
 type MsgStream interface {
-  Start()
-  Close()
-  Chan() <-chan *MsgPack
-  AsProducer(channels []string)
-  AsConsumer(channels []string, subName string)
-  SetRepackFunc(repackFunc RepackFunc)
-  
-  Produce(context.Context, *MsgPack) error
-  Broadcast(context.Context, *MsgPack) error
-  Consume() (*MsgPack, context.Context)
-  Seek(offset *MsgPosition) error
+	Start()
+	Close()
+	Chan() <-chan *MsgPack
+	AsProducer(channels []string)
+	AsConsumer(channels []string, subName string)
+	SetRepackFunc(repackFunc RepackFunc)
+	
+	Produce(context.Context, *MsgPack) error
+	Broadcast(context.Context, *MsgPack) error
+	Consume() (*MsgPack, context.Context)
+	Seek(offset *MsgPosition) error
 }
 
 type MsgStreamFactory interface {
-  SetParams(params map[string]interface{}) error
-  NewMsgStream(ctx context.Context) (MsgStream, error)
-  NewTtMsgStream(ctx context.Context) (MsgStream, error)
+	SetParams(params map[string]interface{}) error
+	NewMsgStream(ctx context.Context) (MsgStream, error)
+	NewTtMsgStream(ctx context.Context) (MsgStream, error)
 }
 
 //TODO
@@ -229,21 +231,21 @@ func (rmsf *RmqMsgStreamFactory) NewTtMsgStream() *MsgStream
 // PulsarMsgStream
 
 type PulsarMsgStream struct {
-  ctx              context.Context
-  client           pulsar.Client
-  producers        []Producer
-  consumers        []Consumer
-  consumerChannels []string
-  repackFunc       RepackFunc
-  unmarshal        UnmarshalDispatcher
-  receiveBuf       chan *MsgPack
-  wait             *sync.WaitGroup
-  streamCancel     func()
-  pulsarBufSize    int64
-  consumerLock     *sync.Mutex
-  consumerReflects []reflect.SelectCase
-  
-  scMap *sync.Map
+	ctx							context.Context
+	client					 pulsar.Client
+	producers				[]Producer
+	consumers				[]Consumer
+	consumerChannels []string
+	repackFunc			 RepackFunc
+	unmarshal				UnmarshalDispatcher
+	receiveBuf			 chan *MsgPack
+	wait						 *sync.WaitGroup
+	streamCancel		 func()
+	pulsarBufSize		int64
+	consumerLock		 *sync.Mutex
+	consumerReflects []reflect.SelectCase
+	
+	scMap *sync.Map
 }
 
 func (ms *PulsarMsgStream) Start() error
@@ -260,14 +262,14 @@ func NewPulsarMsgStream(ctx context.Context, pulsarAddr string, bufferSize int64
 
 
 type PulsarTtMsgStream struct {
-  client      *pulsar.Client
-  repackFunc  RepackFunc
-  producers   []*pulsar.Producer
-  consumers   []*pulsar.Consumer
-  unmarshal   *UnmarshalDispatcher
-  inputBuf    []*TsMsg
-  unsolvedBuf []*TsMsg
-  msgPacks    []*MsgPack
+	client			*pulsar.Client
+	repackFunc	RepackFunc
+	producers	 []*pulsar.Producer
+	consumers	 []*pulsar.Consumer
+	unmarshal	 *UnmarshalDispatcher
+	inputBuf		[]*TsMsg
+	unsolvedBuf []*TsMsg
+	msgPacks		[]*MsgPack
 }
 
 func (ms *PulsarTtMsgStream) Start() error
@@ -285,12 +287,12 @@ func NewPulsarTtMsgStream(ctx context.Context, pulsarAddr string, bufferSize int
 // RmqMsgStream
 
 type RmqMsgStream struct {
-    client     *rockermq.RocksMQ
-    repackFunc RepackFunc
-    producers  []string
-    consumers  []string
-    subName    string
-    unmarshal  *UnmarshalDispatcher
+		client		 *rockermq.RocksMQ
+		repackFunc RepackFunc
+		producers	[]string
+		consumers	[]string
+		subName		string
+		unmarshal	*UnmarshalDispatcher
 }
 
 func (ms *RmqMsgStream) Start() error
@@ -306,12 +308,12 @@ func (ms *RmqMsgStream) SetRepackFunc(repackFunc RepackFunc)
 func NewRmqMsgStream(ctx context.Context) *RmqMsgStream
 
 type RmqTtMsgStream struct {
-    client     *rockermq.RocksMQ
-    repackFunc RepackFunc
-    producers  []string
-    consumers  []string
-    subName    string
-    unmarshal  *UnmarshalDispatcher
+		client		 *rockermq.RocksMQ
+		repackFunc RepackFunc
+		producers	[]string
+		consumers	[]string
+		subName		string
+		unmarshal	*UnmarshalDispatcher
 }
 
 func (ms *RmqTtMsgStream) Start() error
@@ -339,13 +341,13 @@ RocksMQ is a RocksDB-based messaging/streaming library.
 // All the following UniqueIDs are 64-bit integer, which is combined with timestamp and increasing number
 
 type ProducerMessage struct {
-  payload []byte
-} 
+	payload []byte
+}
 
 type ConsumerMessage struct {
-  msgID   UniqueID
-  payload []byte
-} 
+	msgID	 UniqueID
+	payload []byte
+}
 
 type IDAllocator interface {
 	Alloc(count uint32) (UniqueID, UniqueID, error)
@@ -355,11 +357,11 @@ type IDAllocator interface {
 
 // Every collection has its RocksMQ
 type RocksMQ struct {
-    store       *gorocksdb.DB
-	kv          kv.Base
+		store			 *gorocksdb.DB
+	kv					kv.Base
 	idAllocator IDAllocator
-	produceMu   sync.Mutex
-	consumeMu   sync.Mutex
+	produceMu	 sync.Mutex
+	consumeMu	 sync.Mutex
 }
 
 func (rmq *RocksMQ) CreateChannel(channelName string) error

@@ -10,11 +10,11 @@
 
 ```go
 type ProxyService interface {
-  Component
-  Service
-  RegisterLink(ctx context.Context) (*milvuspb.RegisterLinkResponse, error)
-  RegisterNode(ctx context.Context, request *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error)
-  InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
+	Component
+	TimeTickProvider
+
+	RegisterNode(ctx context.Context, request *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error)
+	InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
 }
 ```
 
@@ -23,24 +23,10 @@ type ProxyService interface {
 ```go
 
 type MsgBase struct {
-  MsgType   MsgType
-  MsgID     UniqueID
-  Timestamp uint64
-  SourceID  UniqueID
-}
-```
-
-* *RegisterLink*
-
-```go
-type Address struct {
-  Ip   string
-  Port int64
-}
-
-type RegisterLinkResponse struct {
-  Address *commonpb.Address
-  Status  *commonpb.Status
+	MsgType   MsgType
+	MsgID     UniqueID
+	Timestamp uint64
+	SourceID  UniqueID
 }
 ```
 
@@ -48,24 +34,24 @@ type RegisterLinkResponse struct {
 
 ```go
 type Address struct {
-  Ip   string
-  Port int64
+	Ip   string
+	Port int64
 }
 
 type RegisterNodeRequest struct {
-  Base    *commonpb.MsgBase
-  Address string
-  Port    int64
+	Base    *commonpb.MsgBase
+	Address string
+	Port    int64
 }
 
 type InitParams struct {
-  NodeID      UniqueID
-  StartParams []*commonpb.KeyValuePair
+	NodeID      UniqueID
+	StartParams []*commonpb.KeyValuePair
 }
 
 type RegisterNodeResponse struct {
-  InitParams *internalpb2.InitParams
-  Status     *commonpb.Status
+	InitParams *internalpb.InitParams
+	Status     *commonpb.Status
 }
 ```
 
@@ -73,56 +59,73 @@ type RegisterNodeResponse struct {
 
 ```go
 type InvalidateCollMetaCacheRequest struct {
-  Base           *commonpb.MsgBase
-  DbName         string
-  CollectionName string
+	Base           *commonpb.MsgBase
+	DbName         string
+	CollectionName string
 }
 ```
 
 
 
-#### 6.0 Proxy Node Interface
+#### 6.1 Proxy Node Interface
 
 ```go
 type ProxyNode interface {
-  Service
-  
-  InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
-  
-  CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
-  DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
-  HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
-  LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error)
-  ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error)
-  DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
-  GetCollectionStatistics(ctx context.Context, request *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error)
-  ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
-  
-  CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
-  DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
-  HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
-  LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitonRequest) (*commonpb.Status, error)
-  ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionRequest) (*commonpb.Status, error)
-  GetPartitionStatistics(ctx context.Context, request *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error)
-  ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
-  
-  CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
-  DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
-  GetIndexState(ctx context.Context, request *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error)
-  DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error)
-  
-  Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.InsertResponse, error)
-  Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error)
-  Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error)
-  
-  GetDdChannel(ctx context.Context, request *commonpb.Empty) (*milvuspb.StringResponse, error)
-  
-  GetQuerySegmentInfo(ctx context.Context, req *milvuspb.QuerySegmentInfoRequest) (*milvuspb.QuerySegmentInfoResponse, error)
-  GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.PersistentSegmentInfoRequest) (*milvuspb.PersistentSegmentInfoResponse, error)
+	Component
+	
+	InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
 }
 ```
 
+* *InvalidateCollectionMetaCache*
 
+```go
+type InvalidateCollMetaCacheRequest struct {
+	Base           *commonpb.MsgBase
+	DbName         string
+	CollectionName string
+}
+```
+
+#### 6.2 Milvus Service Interface
+
+ProxyNode also implements Milvus Service interface to receive client grpc call.
+
+```go
+type MilvusService interface {
+	CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
+	DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
+	HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
+	LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error)
+	ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error)
+	DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+	GetCollectionStatistics(ctx context.Context, request *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error)
+	ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
+	
+	CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
+	DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
+	HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
+	LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitonRequest) (*commonpb.Status, error)
+	ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionRequest) (*commonpb.Status, error)
+	GetPartitionStatistics(ctx context.Context, request *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error)
+	ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
+	
+	CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
+	DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
+	GetIndexState(ctx context.Context, request *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error)
+	DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error)
+	
+	Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.InsertResponse, error)
+	Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error)
+	Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error)
+	
+	GetDdChannel(ctx context.Context, request *commonpb.Empty) (*milvuspb.StringResponse, error)
+	
+	GetQuerySegmentInfo(ctx context.Context, req *milvuspb.QuerySegmentInfoRequest) (*milvuspb.QuerySegmentInfoResponse, error)
+	GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.PersistentSegmentInfoRequest) (*milvuspb.PersistentSegmentInfoResponse, error)
+}
+}
+```
 
 * *CreateCollection*
 
@@ -140,9 +143,9 @@ See *Master API* for detailed definitions.
 
 ```go
 type LoadCollectionRequest struct {
-  Base           *commonpb.MsgBase
-  DbName         string
-  CollectionName string
+	Base           *commonpb.MsgBase
+	DbName         string
+	CollectionName string
 }
 ```
 
@@ -150,9 +153,9 @@ type LoadCollectionRequest struct {
 
 ```go
 type ReleaseCollectionRequest struct {
-  Base           *commonpb.MsgBase
-  DbName         string
-  CollectionName string
+	Base           *commonpb.MsgBase
+	DbName         string
+	CollectionName string
 }
 ```
 
@@ -184,18 +187,18 @@ See *Master API* for detailed definitions.
 
 ```go
 type CollectionSchema struct {
-  Name        string
-  Description string
-  AutoID      bool
-  Fields      []*FieldSchema
+	Name        string
+	Description string
+	AutoID      bool
+	Fields      []*FieldSchema
 }
 
 type LoadPartitonRequest struct {
-  Base         *commonpb.MsgBase
-  DbID         UniqueID
-  CollectionID UniqueID
-  PartitionIDs []UniqueID
-  Schema       *schemapb.CollectionSchema
+	Base         *commonpb.MsgBase
+	DbID         UniqueID
+	CollectionID UniqueID
+	PartitionIDs []UniqueID
+	Schema       *schemapb.CollectionSchema
 }
 ```
 
@@ -203,10 +206,10 @@ type LoadPartitonRequest struct {
 
 ```go
 type ReleasePartitionRequest struct {
-  Base           *commonpb.MsgBase
-  DbName         string
-  CollectionName string
-  PartitionNames []string
+	Base           *commonpb.MsgBase
+	DbName         string
+	CollectionName string
+	PartitionNames []string
 }
 ```
 
@@ -234,18 +237,18 @@ See *Master API* for detailed definitions.
 
 ```go
 type InsertRequest struct {
-  Base           *commonpb.MsgBase
-  DbName         string
-  CollectionName string
-  PartitionName  string
-  RowData        []Blob
-  HashKeys       []uint32
+	Base           *commonpb.MsgBase
+	DbName         string
+	CollectionName string
+	PartitionName  string
+	RowData        []Blob
+	HashKeys       []uint32
 }
 
 type InsertResponse struct {
-  Status     *commonpb.Status
-  RowIDBegin int64
-  RowIDEnd   int64
+	Status     *commonpb.Status
+	RowIDBegin int64
+	RowIDEnd   int64
 }
 ```
 
@@ -253,17 +256,17 @@ type InsertResponse struct {
 
 ```go
 type SearchRequest struct {
-  Base             *commonpb.MsgBase
-  DbName           string
-  CollectionName   string
-  PartitionNames   []string
-  Dsl              string
-  PlaceholderGroup []byte
+	Base             *commonpb.MsgBase
+	DbName           string
+	CollectionName   string
+	PartitionNames   []string
+	Dsl              string
+	PlaceholderGroup []byte
 }
 
 type SearchResults struct {
-  Status commonpb.Status
-  Hits   byte
+	Status commonpb.Status
+	Hits   byte
 }
 ```
 
@@ -271,9 +274,9 @@ type SearchResults struct {
 
 ```go
 type FlushRequest struct {
-  Base           *commonpb.MsgBase
-  DbName         string
-  CollectionName string
+	Base           *commonpb.MsgBase
+	DbName         string
+	CollectionName string
 }
 ```
 
@@ -282,35 +285,35 @@ type FlushRequest struct {
 
 ```go
 type PersistentSegmentInfoRequest  struct{
-  Base           *commonpb.MsgBase
-  DbName         string
-  CollectionName string
+	Base           *commonpb.MsgBase
+	DbName         string
+	CollectionName string
 }
 
 type SegmentState int32
 
 const (
-  SegmentState_SegmentNone     SegmentState = 0
-  SegmentState_SegmentNotExist SegmentState = 1
-  SegmentState_SegmentGrowing  SegmentState = 2
-  SegmentState_SegmentSealed   SegmentState = 3
-  SegmentState_SegmentFlushed  SegmentState = 4
+	SegmentState_SegmentNone     SegmentState = 0
+	SegmentState_SegmentNotExist SegmentState = 1
+	SegmentState_SegmentGrowing  SegmentState = 2
+	SegmentState_SegmentSealed   SegmentState = 3
+	SegmentState_SegmentFlushed  SegmentState = 4
 )
 
 type PersistentSegmentInfo struct {
-  SegmentID    UniqueID
-  CollectionID UniqueID
-  PartitionID  UniqueID
-  OpenTime     Timestamp
-  SealedTime   Timestamp
-  FlushedTime  Timestamp
-  NumRows      int64
-  MemSize      int64
-  State        SegmentState
+	SegmentID    UniqueID
+	CollectionID UniqueID
+	PartitionID  UniqueID
+	OpenTime     Timestamp
+	SealedTime   Timestamp
+	FlushedTime  Timestamp
+	NumRows      int64
+	MemSize      int64
+	State        SegmentState
 }
 
 type PersistentSegmentInfoResponse  struct{
-  infos []*milvuspb.SegmentInfo
+	infos []*milvuspb.SegmentInfo
 }
 
 ```
@@ -319,36 +322,36 @@ type PersistentSegmentInfoResponse  struct{
 
 ```go
 type Proxy struct {
-  ctx    context.Context
-  cancel func()
-  wg     sync.WaitGroup
-  
-  initParams *internalpb2.InitParams
-  ip         string
-  port       int
-  
-  stateCode internalpb2.StateCode
-  
-  masterClient       MasterClient
-  indexServiceClient IndexServiceClient
-  dataServiceClient  DataServiceClient
-  proxyServiceClient ProxyServiceClient
-  queryServiceClient QueryServiceClient
-  
-  sched *TaskScheduler
-  tick  *timeTick
-  
-  idAllocator  *allocator.IDAllocator
-  tsoAllocator *allocator.TimestampAllocator
-  segAssigner  *SegIDAssigner
-  
-  manipulationMsgStream msgstream.MsgStream
-  queryMsgStream        msgstream.MsgStream
-  msFactory             msgstream.Factory
-  
-  // Add callback functions at different stages
-  startCallbacks []func()
-  closeCallbacks []func()
+	ctx    context.Context
+	cancel func()
+	wg     sync.WaitGroup
+	
+	initParams *internalpb.InitParams
+	ip         string
+	port       int
+	
+	stateCode internalpb.StateCode
+	
+	masterClient       MasterClient
+	indexServiceClient IndexServiceClient
+	dataServiceClient  DataServiceClient
+	proxyServiceClient ProxyServiceClient
+	queryServiceClient QueryServiceClient
+	
+	sched *TaskScheduler
+	tick  *timeTick
+	
+	idAllocator  *allocator.IDAllocator
+	tsoAllocator *allocator.TimestampAllocator
+	segAssigner  *SegIDAssigner
+	
+	manipulationMsgStream msgstream.MsgStream
+	queryMsgStream        msgstream.MsgStream
+	msFactory             msgstream.Factory
+	
+	// Add callback functions at different stages
+	startCallbacks []func()
+	closeCallbacks []func()
 }
 
 func (node *NodeImpl) Init() error
@@ -371,56 +374,61 @@ func NewProxyNodeImpl(ctx context.Context, factory msgstream.Factory) (*NodeImpl
 
 ```go
 type GlobalParamsTable struct {
-  paramtable.BaseTable
-  
-  NetworkPort    int
-  IP             string
-  NetworkAddress string
-  
-  MasterAddress string
-  PulsarAddress string
-  
-  QueryNodeNum                       int
-  QueryNodeIDList                    []UniqueID
-  ProxyID                            UniqueID
-  TimeTickInterval                   time.Duration
-  InsertChannelNames                 []string
-  DeleteChannelNames                 []string
-  K2SChannelNames                    []string
-  SearchChannelNames                 []string
-  SearchResultChannelNames           []string
-  ProxySubName                       string
-  ProxyTimeTickChannelNames          []string
-  DataDefinitionChannelNames         []string
-  MsgStreamInsertBufSize             int64
-  MsgStreamSearchBufSize             int64
-  MsgStreamSearchResultBufSize       int64
-  MsgStreamSearchResultPulsarBufSize int64
-  MsgStreamTimeTickBufSize           int64
-  MaxNameLength                      int64
-  MaxFieldNum                        int64
-  MaxDimension                       int64
-  DefaultPartitionTag                string
-  DefaultIndexName                   string
+	paramtable.BaseTable
+	
+	NetworkPort    int
+	IP             string
+	NetworkAddress string
+	
+	MasterAddress string
+	PulsarAddress string
+	
+	QueryNodeNum                       int
+	QueryNodeIDList                    []UniqueID
+	ProxyID                            UniqueID
+	TimeTickInterval                   time.Duration
+	InsertChannelNames                 []string
+	DeleteChannelNames                 []string
+	K2SChannelNames                    []string
+	SearchChannelNames                 []string
+	SearchResultChannelNames           []string
+	ProxySubName                       string
+	ProxyTimeTickChannelNames          []string
+	DataDefinitionChannelNames         []string
+	MsgStreamInsertBufSize             int64
+	MsgStreamSearchBufSize             int64
+	MsgStreamSearchResultBufSize       int64
+	MsgStreamSearchResultPulsarBufSize int64
+	MsgStreamTimeTickBufSize           int64
+	MaxNameLength                      int64
+	MaxFieldNum                        int64
+	MaxDimension                       int64
+	DefaultPartitionTag                string
+	DefaultIndexName                   string
 }
 
 var Params ParamTable
 ```
 
 
-
-
-
 #### 6.2 Task
 
 ``` go
 type task interface {
-  Id() int64	// return ReqId
-  PreExecute(ctx context.Context) error
-  Execute(ctx context.Context) error
-  PostExecute(ctx context.Context) error
-  WaitToFinish() error
-  Notify() error
+	TraceCtx() context.Context
+	ID() UniqueID       // return ReqID
+	SetID(uid UniqueID) // set ReqID
+	Name() string
+	Type() commonpb.MsgType
+	BeginTs() Timestamp
+	EndTs() Timestamp
+	SetTs(ts Timestamp)
+	OnEnqueue() error
+	PreExecute(ctx context.Context) error
+	Execute(ctx context.Context) error
+	PostExecute(ctx context.Context) error
+	WaitToFinish() error
+	Notify(err error)
 }
 ```
 
@@ -430,30 +438,30 @@ type task interface {
 
 ```go
 type TaskQueue interface {
-  utChan() <-chan int
-  UTEmpty() bool
-  utFull() bool
-  addUnissuedTask(t task) error
-  FrontUnissuedTask() task
-  PopUnissuedTask() task
-  AddActiveTask(t task)
-  PopActiveTask(ts Timestamp) task
-  getTaskByReqID(reqID UniqueID) task
-  TaskDoneTest(ts Timestamp) bool
-  Enqueue(t task) error
+	utChan() <-chan int
+	UTEmpty() bool
+	utFull() bool
+	addUnissuedTask(t task) error
+	FrontUnissuedTask() task
+	PopUnissuedTask() task
+	AddActiveTask(t task)
+	PopActiveTask(ts Timestamp) task
+	getTaskByReqID(reqID UniqueID) task
+	TaskDoneTest(ts Timestamp) bool
+	Enqueue(t task) error
 }
 
 type baseTaskQueue struct {
-  unissuedTasks *list.List
-  activeTasks   map[Timestamp]task
-  utLock        sync.Mutex
-  atLock        sync.Mutex
-  
-  maxTaskNum int64
-  
-  utBufChan chan int
-  
-  sched *TaskScheduler
+	unissuedTasks *list.List
+	activeTasks   map[Timestamp]task
+	utLock        sync.Mutex
+	atLock        sync.Mutex
+	
+	maxTaskNum int64
+	
+	utBufChan chan int
+	
+	sched *TaskScheduler
 }
 ```
 
@@ -467,8 +475,8 @@ type baseTaskQueue struct {
 
 ```go
 type ddTaskQueue struct {
-  baseTaskQueue
-  lock sync.Mutex
+	baseTaskQueue
+	lock sync.Mutex
 }
 func (queue *ddTaskQueue) Enqueue(task *task) error
 
@@ -483,7 +491,7 @@ Data definition tasks (i.e. *CreateCollectionTask*) will be put into *DdTaskQueu
 
 ```go
 type dmTaskQueue struct {
-  baseTaskQueue
+	baseTaskQueue
 }
 func (queue *dmTaskQueue) Enqueue(task *task) error
 
@@ -500,7 +508,7 @@ If a *insertTask* is enqueued, *Enqueue(task \*task)* will set *Ts*, *ReqId*, *P
 
 ```go
 type dqTaskQueue struct {
-  baseTaskQueue
+	baseTaskQueue
 }
 func (queue *dqTaskQueue) Enqueue(task *task) error
 
@@ -515,18 +523,18 @@ Queries will be put into *DqTaskQueue*.
 
 ``` go
 type taskScheduler struct {
-  DdQueue TaskQueue
-  DmQueue TaskQueue
-  DqQueue TaskQueue
-  
-  idAllocator  *allocator.IDAllocator
-  tsoAllocator *allocator.TimestampAllocator
-  
-  wg     sync.WaitGroup
-  ctx    context.Context
-  cancel context.CancelFunc
-  
-  msFactory msgstream.Factory
+	DdQueue TaskQueue
+	DmQueue TaskQueue
+	DqQueue TaskQueue
+	
+	idAllocator  *allocator.IDAllocator
+	tsoAllocator *allocator.TimestampAllocator
+	
+	wg     sync.WaitGroup
+	ctx    context.Context
+	cancel context.CancelFunc
+	
+	msFactory msgstream.Factory
 }
 
 func (sched *taskScheduler) scheduleDdTask() *task
@@ -565,13 +573,13 @@ func (sched *taskScheduler) heartbeat()
 
 // protobuf
 message taskSchedulerHeartbeat {
-  string id
-  uint64 dd_queue_length
-  uint64 dm_queue_length
-  uint64 dq_queue_length
-  uint64 num_dd_done
-  uint64 num_dm_done
-  uint64 num_dq_done
+	string id
+	uint64 dd_queue_length
+	uint64 dm_queue_length
+	uint64 dq_queue_length
+	uint64 num_dd_done
+	uint64 num_dm_done
+	uint64 num_dq_done
 }
 ```
 
@@ -584,17 +592,17 @@ message taskSchedulerHeartbeat {
 
 ``` go
 type timeTick struct {
-  lastTick Timestamp
-  currentTick Timestamp
-  wallTick Timestamp
-  tickStep Timestamp
-  syncInterval Timestamp
-  
-  tsAllocator *TimestampAllocator
-  scheduler *taskScheduler
-  ttStream *MessageStream
-  
-  ctx context.Context
+	lastTick Timestamp
+	currentTick Timestamp
+	wallTick Timestamp
+	tickStep Timestamp
+	syncInterval Timestamp
+	
+	tsAllocator *TimestampAllocator
+	scheduler *taskScheduler
+	ttStream *MessageStream
+	
+	ctx context.Context
 }
 
 func (tt *timeTick) Start() error
