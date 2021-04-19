@@ -1625,6 +1625,11 @@ func (lct *LoadCollectionTask) Execute() (err error) {
 	if err != nil {
 		return err
 	}
+	collSchema, err := globalMetaCache.GetCollectionSchema(lct.CollectionName)
+	if err != nil {
+		return err
+	}
+
 	request := &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_kLoadCollection,
@@ -1634,6 +1639,7 @@ func (lct *LoadCollectionTask) Execute() (err error) {
 		},
 		DbID:         0,
 		CollectionID: collID,
+		Schema:       collSchema,
 	}
 	lct.result, err = lct.queryserviceClient.LoadCollection(request)
 	return err
@@ -1770,6 +1776,10 @@ func (lpt *LoadPartitionTask) Execute() (err error) {
 	if err != nil {
 		return err
 	}
+	collSchema, err := globalMetaCache.GetCollectionSchema(lpt.CollectionName)
+	if err != nil {
+		return err
+	}
 	for _, partitionName := range lpt.PartitionNames {
 		partitionID, err := globalMetaCache.GetPartitionID(lpt.CollectionName, partitionName)
 		if err != nil {
@@ -1787,6 +1797,7 @@ func (lpt *LoadPartitionTask) Execute() (err error) {
 		DbID:         0,
 		CollectionID: collID,
 		PartitionIDs: partitionIDs,
+		Schema:       collSchema,
 	}
 	lpt.result, err = lpt.queryserviceClient.LoadPartitions(request)
 	return err
