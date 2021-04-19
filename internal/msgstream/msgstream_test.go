@@ -85,17 +85,17 @@ func getTsMsg(msgType MsgType, reqId int64, hashValue int32) *TsMsg {
 			SearchResult: searchResult,
 		}
 		tsMsg = searchResultMsg
-	case kTimeSync:
+	case KTimeSync:
 		timeSyncResult := internalPb.TimeTickMsg{
 			PeerId:    reqId,
 			Timestamp: 1,
 		}
-		timeSyncMsg := TimeSyncTask{
+		timeSyncMsg := TimeTickMsg{
 			HashValues:  []int32{hashValue},
 			TimeTickMsg: timeSyncResult,
 		}
 		tsMsg = timeSyncMsg
-	case kTimeTick:
+	case KTimeTick:
 		insertRequest := internalPb.InsertRequest{
 			ReqType:        internalPb.ReqType_kTimeTick,
 			ReqId:          reqId,
@@ -236,9 +236,9 @@ func TestStream_BroadCast(t *testing.T) {
 	consumerSubName := "subInsert"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(kTimeTick, 0, 0))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(kTimeTick, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KTimeTick, 0, 0))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KTimeTick, 3, 3))
 
 	//run stream
-	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, kInsert, kInsert)
+	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, KInsert, KInsert)
 }
