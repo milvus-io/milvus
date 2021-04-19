@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 
@@ -43,7 +44,7 @@ func Uint64ToBytes(v uint64) []byte {
 }
 
 func PulsarMsgIDToString(messageID pulsar.MessageID) string {
-	return string(messageID.Serialize())
+	return strings.ToValidUTF8(string(messageID.Serialize()), "")
 }
 
 func StringToPulsarMsgID(msgString string) (pulsar.MessageID, error) {

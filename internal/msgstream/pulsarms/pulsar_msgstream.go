@@ -611,7 +611,7 @@ func (ms *PulsarTtMsgStream) findTimeTick(consumer Consumer,
 			}
 			// set pulsar info to tsMsg
 			tsMsg.SetPosition(&msgstream.MsgPosition{
-				ChannelName: pulsarMsg.Topic(),
+				ChannelName: filepath.Base(pulsarMsg.Topic()),
 				MsgID:       typeutil.PulsarMsgIDToString(pulsarMsg.ID()),
 			})
 

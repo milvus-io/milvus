@@ -46,10 +46,9 @@ type QueryService struct {
 
 	dataServiceClient   DataServiceInterface
 	masterServiceClient MasterServiceInterface
-	queryNodes          []*queryNode
-	//TODO:: nodeID use UniqueID
-	numRegisterNode uint64
-	numQueryChannel uint64
+	queryNodes          []*queryNodeInfo
+	numRegisterNode     uint64
+	numQueryChannel     uint64
 
 	stateCode  atomic.Value
 	isInit     atomic.Value
@@ -115,31 +114,26 @@ func (qs *QueryService) GetStatisticsChannel() (string, error) {
 func (qs *QueryService) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
 	fmt.Println("register query node =", req.Address)
 	// TODO:: add mutex
-	allocatedID := qs.numRegisterNode
-	qs.numRegisterNode++
-
-	if allocatedID > Params.QueryNodeNum {
-		log.Fatal("allocated queryNodeID should lower than Params.QueryNodeNum")
-	}
+	allocatedID := uint64(len(qs.queryNodes))
 
 	registerNodeAddress := req.Address.Ip + ":" + strconv.FormatInt(req.Address.Port, 10)
-	var node *queryNode
+	var node *queryNodeInfo
 	if qs.enableGrpc {
 		client := nodeclient.NewClient(registerNodeAddress)
-		node = &queryNode{
+		node = &queryNodeInfo{
 			client: client,
 			nodeID: allocatedID,
 		}
 	} else {
 		client := querynode.NewQueryNode(qs.loopCtx, allocatedID)
-		node = &queryNode{
+		node = &queryNodeInfo{
 			client: client,
 			nodeID: allocatedID,
 		}
 	}
 	qs.queryNodes = append(qs.queryNodes, node)
 
-	// TODO:: watch dm channels
+	//TODO::return init params to queryNode
 	return &querypb.RegisterNodeResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -152,9 +146,18 @@ func (qs *QueryService) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb
 
 func (qs *QueryService) ShowCollections(req *querypb.ShowCollectionRequest) (*querypb.ShowCollectionResponse, error) {
 	dbID := req.DbID
-	collectionIDs, err := qs.replica.getCollectionIDs(dbID)
+	collections, err := qs.replica.getCollections(dbID)
+	collectionIDs := make([]UniqueID, 0)
+	for _, collection := range collections {
+		collectionIDs = append(collectionIDs, collection.id)
+	}
 	if err != nil {
-		return nil, err
+		return &querypb.ShowCollectionResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+		}, err
 	}
 	return &querypb.ShowCollectionResponse{
 		Status: &commonpb.Status{
@@ -167,13 +170,23 @@ func (qs *QueryService) ShowCollections(req *querypb.ShowCollectionRequest) (*qu
 func (qs *QueryService) LoadCollection(req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
 	dbID := req.DbID
 	collectionID := req.CollectionID
-	qs.replica.loadCollection(dbID, collectionID)
-
 	fn := func(err error) *commonpb.Status {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    err.Error(),
+		if err != nil {
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			}
 		}
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		}
+	}
+	collection, err := qs.replica.loadCollection(dbID, collectionID)
+	if err != nil {
+		return fn(err), err
+	}
+	if collection == nil {
+		return fn(nil), nil
 	}
 
 	// get partitionIDs
@@ -189,7 +202,7 @@ func (qs *QueryService) LoadCollection(req *querypb.LoadCollectionRequest) (*com
 		return fn(err), err
 	}
 	if showPartitionResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-		log.Fatal("show partition fail, v%", showPartitionResponse.Status.Reason)
+		return showPartitionResponse.Status, err
 	}
 	partitionIDs := showPartitionResponse.PartitionIDs
 
@@ -208,15 +221,24 @@ func (qs *QueryService) LoadCollection(req *querypb.LoadCollectionRequest) (*com
 func (qs *QueryService) ReleaseCollection(req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	dbID := req.DbID
 	collectionID := req.CollectionID
-	partitionsIDs, err := qs.replica.getPartitionIDs(dbID, collectionID)
+	partitions, err := qs.replica.getPartitions(dbID, collectionID)
 	if err != nil {
-		log.Fatal("get partition ids error")
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, err
 	}
+
+	partitionIDs := make([]UniqueID, 0)
+	for _, partition := range partitions {
+		partitionIDs = append(partitionIDs, partition.id)
+	}
+
 	releasePartitionRequest := &querypb.ReleasePartitionRequest{
 		Base:         req.Base,
 		DbID:         dbID,
 		CollectionID: collectionID,
-		PartitionIDs: partitionsIDs,
+		PartitionIDs: partitionIDs,
 	}
 
 	status, err := qs.ReleasePartitions(releasePartitionRequest)
@@ -227,9 +249,18 @@ func (qs *QueryService) ReleaseCollection(req *querypb.ReleaseCollectionRequest)
 func (qs *QueryService) ShowPartitions(req *querypb.ShowPartitionRequest) (*querypb.ShowPartitionResponse, error) {
 	dbID := req.DbID
 	collectionID := req.CollectionID
-	partitionIDs, err := qs.replica.getPartitionIDs(dbID, collectionID)
+	partitions, err := qs.replica.getPartitions(dbID, collectionID)
+	partitionIDs := make([]UniqueID, 0)
+	for _, partition := range partitions {
+		partitionIDs = append(partitionIDs, partition.id)
+	}
 	if err != nil {
-		return nil, err
+		return &querypb.ShowPartitionResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+		}, err
 	}
 	return &querypb.ShowPartitionResponse{
 		Status: &commonpb.Status{
@@ -237,14 +268,14 @@ func (qs *QueryService) ShowPartitions(req *querypb.ShowPartitionRequest) (*quer
 		},
 		PartitionIDs: partitionIDs,
 	}, nil
-
 }
 
 func (qs *QueryService) LoadPartitions(req *querypb.LoadPartitionRequest) (*commonpb.Status, error) {
+	//TODO::suggest different partitions have different dm channel
 	dbID := req.DbID
 	collectionID := req.CollectionID
 	partitionIDs := req.PartitionIDs
-	qs.replica.loadPartitions(dbID, collectionID, partitionIDs)
+	qs.replica.loadPartition(dbID, collectionID, partitionIDs[0])
 	fn := func(err error) *commonpb.Status {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -333,6 +364,9 @@ func (qs *QueryService) LoadPartitions(req *querypb.LoadPartitionRequest) (*comm
 			for key, node := range qs.queryNodes {
 				if channels == node.insertChannels {
 					statesID := id2segs[i][len(id2segs[i])-1]
+					//TODO :: should be start position
+					position := segmentStates[statesID-1].StartPositions
+					segmentStates[statesID].StartPositions = position
 					loadSegmentRequest := &querypb.LoadSegmentRequest{
 						CollectionID:     collectionID,
 						PartitionID:      partitionID,
@@ -359,10 +393,18 @@ func (qs *QueryService) ReleasePartitions(req *querypb.ReleasePartitionRequest) 
 	partitionIDs := req.PartitionIDs
 	segmentIDs := make([]UniqueID, 0)
 	for _, partitionID := range partitionIDs {
-		res, err := qs.replica.getSegmentIDs(dbID, collectionID, partitionID)
+		segments, err := qs.replica.getSegments(dbID, collectionID, partitionID)
 		if err != nil {
-			log.Fatal("get segment ids error")
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			}, err
 		}
+		res := make([]UniqueID, 0)
+		for _, segment := range segments {
+			res = append(res, segment.id)
+		}
+
 		segmentIDs = append(segmentIDs, res...)
 	}
 	releaseSegmentRequest := &querypb.ReleaseSegmentRequest{
@@ -421,7 +463,7 @@ func (qs *QueryService) GetPartitionStates(req *querypb.PartitionStatesRequest) 
 }
 
 func NewQueryService(ctx context.Context) (*QueryService, error) {
-	nodes := make([]*queryNode, 0)
+	nodes := make([]*queryNodeInfo, 0)
 	ctx1, cancel := context.WithCancel(ctx)
 	replica := newMetaReplica()
 	service := &QueryService{

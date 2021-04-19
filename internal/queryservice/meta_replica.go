@@ -1,20 +1,17 @@
 package queryservice
 
 import (
-	"log"
-
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 )
 
 type metaReplica interface {
-	getCollectionIDs(dbID UniqueID) ([]UniqueID, error)
-	getPartitionIDs(dbID UniqueID, collectionID UniqueID) ([]UniqueID, error)
-	getCollection(dbID UniqueID, collectionID UniqueID) *collection
-	getSegmentIDs(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) ([]UniqueID, error)
-	loadCollection(dbID UniqueID, collectionID UniqueID)
-	loadPartitions(dbID UniqueID, collectionID UniqueID, partitionIDs []UniqueID)
-	updatePartitionState(dbID UniqueID, collectionID UniqueID, partitionID UniqueID, state querypb.PartitionState)
+	getCollections(dbID UniqueID) ([]*collection, error)
+	getPartitions(dbID UniqueID, collectionID UniqueID) ([]*partition, error)
+	getSegments(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) ([]*segment, error)
+	loadCollection(dbID UniqueID, collectionID UniqueID) (*collection, error)
+	loadPartition(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) (*partition, error)
+	updatePartitionState(dbID UniqueID, collectionID UniqueID, partitionID UniqueID, state querypb.PartitionState) error
 	getPartitionStates(dbID UniqueID, collectionID UniqueID, partitionIDs []UniqueID) ([]*querypb.PartitionStates, error)
 }
 
@@ -50,150 +47,137 @@ func newMetaReplica() metaReplica {
 	}
 }
 
-func (mp *metaReplicaImpl) addCollection(dbID UniqueID, collectionID UniqueID) {
-	partitions := make(map[UniqueID]*partition)
-	node2channel := make(map[int][]string)
-	newCollection := &collection{
-		id:           collectionID,
-		partitions:   partitions,
-		node2channel: node2channel,
-	}
-	mp.db2collections[dbID] = append(mp.db2collections[dbID], newCollection)
-}
-
-func (mp *metaReplicaImpl) addPartition(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) {
-	collections := mp.db2collections[dbID]
-	for _, collection := range collections {
-		if collection.id == collectionID {
-			partitions := collection.partitions
-			segments := make(map[UniqueID]*segment)
-			partitions[partitionID] = &partition{
-				id:       partitionID,
-				state:    querypb.PartitionState_NotPresent,
-				segments: segments,
-			}
-			return
+func (mp *metaReplicaImpl) addCollection(dbID UniqueID, collectionID UniqueID) (*collection, error) {
+	if _, ok := mp.db2collections[dbID]; ok {
+		partitions := make(map[UniqueID]*partition)
+		node2channel := make(map[int][]string)
+		newCollection := &collection{
+			id:           collectionID,
+			partitions:   partitions,
+			node2channel: node2channel,
 		}
+		mp.db2collections[dbID] = append(mp.db2collections[dbID], newCollection)
+		return newCollection, nil
 	}
-	log.Fatal("can't find collection when add partition")
+	return nil, errors.New("can't find dbID when add collection")
 }
 
-func (mp *metaReplicaImpl) getCollection(dbID UniqueID, collectionID UniqueID) *collection {
-	for _, id := range mp.dbID {
-		if id == dbID {
-			collections := mp.db2collections[id]
-			for _, collection := range collections {
-				if collection.id == collectionID {
-					return collection
-				}
-			}
-			return nil
-		}
-	}
-	return nil
-}
-
-func (mp *metaReplicaImpl) getCollectionIDs(dbID UniqueID) ([]UniqueID, error) {
+func (mp *metaReplicaImpl) addPartition(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) (*partition, error) {
 	if collections, ok := mp.db2collections[dbID]; ok {
-		collectionIDs := make([]UniqueID, 0)
 		for _, collection := range collections {
-			collectionIDs = append(collectionIDs, collection.id)
+			if collection.id == collectionID {
+				partitions := collection.partitions
+				segments := make(map[UniqueID]*segment)
+				partition := &partition{
+					id:       partitionID,
+					state:    querypb.PartitionState_NotPresent,
+					segments: segments,
+				}
+				partitions[partitionID] = partition
+				return partition, nil
+			}
 		}
-		return collectionIDs, nil
 	}
-
-	return nil, errors.New("can't find collection in queryService")
+	return nil, errors.New("can't find collection when add partition")
 }
 
-func (mp *metaReplicaImpl) getPartitionIDs(dbID UniqueID, collectionID UniqueID) ([]UniqueID, error) {
+func (mp *metaReplicaImpl) getCollections(dbID UniqueID) ([]*collection, error) {
+	if collections, ok := mp.db2collections[dbID]; ok {
+		return collections, nil
+	}
+
+	return nil, errors.New("can't find collectionID")
+}
+
+func (mp *metaReplicaImpl) getPartitions(dbID UniqueID, collectionID UniqueID) ([]*partition, error) {
 	if collections, ok := mp.db2collections[dbID]; ok {
 		for _, collection := range collections {
 			if collectionID == collection.id {
-				partitions := collection.partitions
-				partitionIDs := make([]UniqueID, 0)
-				for _, partition := range partitions {
-					partitionIDs = append(partitionIDs, partition.id)
+				partitions := make([]*partition, 0)
+				for _, partition := range collection.partitions {
+					partitions = append(partitions, partition)
 				}
-				return partitionIDs, nil
+				return partitions, nil
 			}
 		}
 	}
 
-	return nil, errors.New("can't find partitions in queryService")
+	return nil, errors.New("can't find partitionIDs")
 }
 
-func (mp *metaReplicaImpl) getSegmentIDs(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) ([]UniqueID, error) {
-	segmentIDs := make([]UniqueID, 0)
+func (mp *metaReplicaImpl) getSegments(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) ([]*segment, error) {
 	if collections, ok := mp.db2collections[dbID]; ok {
 		for _, collection := range collections {
 			if collectionID == collection.id {
 				if partition, ok := collection.partitions[partitionID]; ok {
+					segments := make([]*segment, 0)
 					for _, segment := range partition.segments {
-						segmentIDs = append(segmentIDs, segment.id)
+						segments = append(segments, segment)
 					}
+					return segments, nil
 				}
 			}
 		}
 	}
-	return segmentIDs, nil
+	return nil, errors.New("can't find segmentID")
 }
 
-func (mp *metaReplicaImpl) loadCollection(dbID UniqueID, collectionID UniqueID) {
-	collectionIDs, err := mp.getCollectionIDs(dbID)
-	if err != nil {
-		mp.addCollection(dbID, collectionID)
-		return
-	}
-	for _, id := range collectionIDs {
-		if collectionID == id {
-			return
+func (mp *metaReplicaImpl) loadCollection(dbID UniqueID, collectionID UniqueID) (*collection, error) {
+	var res *collection = nil
+	if collections, err := mp.getCollections(dbID); err == nil {
+		for _, collection := range collections {
+			if collectionID == collection.id {
+				return res, nil
+			}
+		}
+	} else {
+		res, err = mp.addCollection(dbID, collectionID)
+		if err != nil {
+			return nil, err
 		}
 	}
-	mp.addCollection(dbID, collectionID)
+	return res, nil
 }
 
-func (mp *metaReplicaImpl) loadPartitions(dbID UniqueID, collectionID UniqueID, partitionIDs []UniqueID) {
+func (mp *metaReplicaImpl) loadPartition(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) (*partition, error) {
 	var collection *collection = nil
+	var partition *partition = nil
+	var err error
 	for _, col := range mp.db2collections[dbID] {
 		if col.id == collectionID {
 			collection = col
 		}
 	}
 	if collection == nil {
-		mp.addCollection(dbID, collectionID)
-		for _, col := range mp.db2collections[dbID] {
-			if col.id == collectionID {
-				collection = col
-			}
+		collection, err = mp.addCollection(dbID, collectionID)
+		if err != nil {
+			return partition, err
 		}
 	}
-	for _, partitionID := range partitionIDs {
-		match := false
-		for _, partition := range collection.partitions {
-			if partition.id == partitionID {
-				match = true
-				continue
-			}
+	if _, ok := collection.partitions[partitionID]; !ok {
+		partition, err = mp.addPartition(dbID, collectionID, partitionID)
+		if err != nil {
+			return partition, err
 		}
-		if !match {
-			mp.addPartition(dbID, collectionID, partitionID)
-		}
+		return partition, nil
 	}
+
+	return nil, nil
 }
 
 func (mp *metaReplicaImpl) updatePartitionState(dbID UniqueID,
 	collectionID UniqueID,
 	partitionID UniqueID,
-	state querypb.PartitionState) {
+	state querypb.PartitionState) error {
 	for _, collection := range mp.db2collections[dbID] {
 		if collection.id == collectionID {
 			if partition, ok := collection.partitions[partitionID]; ok {
 				partition.state = state
-				return
+				return nil
 			}
 		}
 	}
-	log.Fatal("update partition state fail")
+	return errors.New("update partition state fail")
 }
 
 func (mp *metaReplicaImpl) getPartitionStates(dbID UniqueID,

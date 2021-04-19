@@ -140,6 +140,8 @@ func (ddNode *ddNode) createPartition(msg *msgstream.CreatePartitionMsg) {
 	partitionName := msg.PartitionName
 
 	err := ddNode.replica.addPartition2(collectionID, partitionName)
+	// TODO:: add partition by partitionID
+	//err := ddNode.replica.addPartition(collectionID, msg.PartitionID)
 	if err != nil {
 		log.Println(err)
 		return
