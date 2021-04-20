@@ -1,13 +1,13 @@
 ---
-name: Feature request
-about: Suggest an idea for this project
+name: "\U0001F680 Feature request"
+about: Suggest an idea for Milvus
 title: ''
 labels: ''
 assignees: ''
 
 ---
 
-**Please state your issue using the following template in English.**
+**Please state your issue using the following template and, most importantly, in English.**
 
 **Is your feature request related to a problem? Please describe.**
 A clear and concise description of what the problem is. E.g. I wish I could use Milvus to do [...]
