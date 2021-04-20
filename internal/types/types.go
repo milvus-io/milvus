@@ -83,6 +83,7 @@ type IndexService interface {
 
 type MasterService interface {
 	Component
+	TimeTickProvider
 
 	//DDL request
 	CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
@@ -109,6 +110,17 @@ type MasterService interface {
 	ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
 
 	GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error)
+}
+
+// MasterComponent is used by grpc server of master service
+type MasterComponent interface {
+	MasterService
+
+	UpdateStateCode(internalpb.StateCode)
+	SetProxyService(context.Context, ProxyService) error
+	SetDataService(context.Context, DataService) error
+	SetIndexService(IndexService) error
+	SetQueryService(QueryService) error
 }
 
 type ProxyNode interface {
