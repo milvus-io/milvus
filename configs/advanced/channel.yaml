@@ -15,16 +15,12 @@ msgChannel:
     dataDefinition: "data-definition"
     masterTimeTick: "master-timetick"
     masterStatistics: "master-statistics"
-    insert: "insert"
-    delete: "delete"
     search: "search"
     searchResult: "searchResult"
     k2s: "k2s"
     proxyTimeTick: "proxyTimeTick"
     proxyServiceTimeTick: "proxyServiceTimeTick"
-    dataNodeTimeTick: "dataNodeTimeTick"
     queryTimeTick: "queryTimeTick"
-    dataNodeSegStatistics: "dataNodeSegStatistics"
     queryNodeStats: "query-node-stats"
     # cmd for loadIndex, flush, etc...
     cmd: "cmd"
@@ -43,9 +39,6 @@ msgChannel:
 
   # default channel range [0, 1)
   channelRange:
-    insert: [0, 2]
-    delete: [0, 1]
-    dataDefinition: [0,1]
     k2s: [0, 1]
     search: [0, 1]
     searchResult: [0, 1]

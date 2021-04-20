@@ -47,13 +47,10 @@ type ParamTable struct {
 	MinioBucketName      string
 
 	// dm
-	InsertChannelNames   []string
-	InsertChannelRange   []int
 	InsertReceiveBufSize int64
 	InsertPulsarBufSize  int64
 
 	// dd
-	DDChannelNames   []string
 	DDReceiveBufSize int64
 	DDPulsarBufSize  int64
 
@@ -124,12 +121,9 @@ func (p *ParamTable) Init() {
 		p.initFlowGraphMaxQueueLength()
 		p.initFlowGraphMaxParallelism()
 
-		p.initInsertChannelNames()
-		p.initInsertChannelRange()
 		p.initInsertReceiveBufSize()
 		p.initInsertPulsarBufSize()
 
-		p.initDDChannelNames()
 		p.initDDReceiveBufSize()
 		p.initDDPulsarBufSize()
 
@@ -229,14 +223,6 @@ func (p *ParamTable) initPulsarAddress() {
 	p.PulsarAddress = url
 }
 
-func (p *ParamTable) initInsertChannelRange() {
-	insertChannelRange, err := p.Load("msgChannel.channelRange.insert")
-	if err != nil {
-		panic(err)
-	}
-	p.InsertChannelRange = paramtable.ConvertRangeToIntRange(insertChannelRange, ",")
-}
-
 // advanced params
 // stats
 func (p *ParamTable) initStatsPublishInterval() {
@@ -325,32 +311,6 @@ func (p *ParamTable) initGracefulTime() {
 	p.GracefulTime = p.ParseInt64("queryNode.gracefulTime")
 }
 
-func (p *ParamTable) initInsertChannelNames() {
-
-	prefix, err := p.Load("msgChannel.chanNamePrefix.insert")
-	if err != nil {
-		log.Error(err.Error())
-	}
-	prefix += "-"
-	channelRange, err := p.Load("msgChannel.channelRange.insert")
-	if err != nil {
-		panic(err)
-	}
-	channelIDs := paramtable.ConvertRangeToIntSlice(channelRange, ",")
-
-	var ret []string
-	for _, ID := range channelIDs {
-		ret = append(ret, prefix+strconv.Itoa(ID))
-	}
-	sep := len(channelIDs) / p.QueryNodeNum
-	index := p.SliceIndex
-	if index == -1 {
-		panic("queryNodeID not Match with Config")
-	}
-	start := index * sep
-	p.InsertChannelNames = ret[start : start+sep]
-}
-
 func (p *ParamTable) initSearchChannelNames() {
 	prefix, err := p.Load("msgChannel.chanNamePrefix.search")
 	if err != nil {
@@ -410,24 +370,6 @@ func (p *ParamTable) initStatsChannelName() {
 		panic(err)
 	}
 	p.StatsChannelName = channels
-}
-
-func (p *ParamTable) initDDChannelNames() {
-	prefix, err := p.Load("msgChannel.chanNamePrefix.dataDefinition")
-	if err != nil {
-		panic(err)
-	}
-	//prefix += "-"
-	//iRangeStr, err := p.Load("msgChannel.channelRange.dataDefinition")
-	//if err != nil {
-	//	panic(err)
-	//}
-	//channelIDs := paramtable.ConvertRangeToIntSlice(iRangeStr, ",")
-	//var ret []string
-	//for _, ID := range channelIDs {
-	//	ret = append(ret, prefix+strconv.Itoa(ID))
-	//}
-	p.DDChannelNames = []string{prefix}
 }
 
 func (p *ParamTable) initSliceIndex() {
