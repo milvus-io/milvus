@@ -15,9 +15,12 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Feature
 -   \#1434 Storage: enabling s3 storage support (implemented by Unisinsight)
+-   \#4564 Allow GetEntityByID in a specified partition
+-   \#4806 Allow DeleteEntityByID in a specified partition
+-   \#4905 Allow the collection to be released from the cache
 
 ## Improvement
--   \#4756 Improve the performance of get_vectors_by_id
+-   \#4756 Improve the performance of GetEntityByID
 -   \#4856 Upgrade hnswlib to v0.5.0
 -   \#4958 Improve the performance of IVF index training 
 
