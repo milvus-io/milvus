@@ -50,7 +50,7 @@ func makeNewChannelNames(names []string, suffix string) []string {
 
 func refreshChannelNames() {
 	Params.DDChannelNames = []string{"datanode-test"}
-	Params.SegmentStatisticsChannelName = "segtment-statistics"
+	Params.SegmentStatisticsChannelName = "segment-statistics"
 	Params.CompleteFlushChannelName = "flush-completed"
 	Params.InsertChannelNames = []string{"intsert-a-1", "insert-b-1"}
 	Params.TimeTickChannelName = "hard-timetick"
@@ -339,57 +339,42 @@ func GenRowData() (rawData []byte) {
 	return
 }
 
-// n: number of TsinsertMsgs to generate
+func (df *DataFactory) GenMsgStreamInsertMsg(idx int) *msgstream.InsertMsg {
+	var msg = &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{
+			HashValues: []uint32{uint32(idx)},
+		},
+		InsertRequest: internalpb.InsertRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Insert,
+				MsgID:     0, // GOOSE TODO
+				Timestamp: Timestamp(idx + 1000),
+				SourceID:  0,
+			},
+			CollectionName: "col1", // GOOSE TODO
+			PartitionName:  "default",
+			SegmentID:      1,   // GOOSE TODO
+			ChannelID:      "0", // GOOSE TODO
+			Timestamps:     []Timestamp{Timestamp(idx + 1000)},
+			RowIDs:         []UniqueID{UniqueID(idx)},
+			RowData:        []*commonpb.Blob{{Value: df.rawData}},
+		},
+	}
+	return msg
+}
+
 func (df *DataFactory) GetMsgStreamTsInsertMsgs(n int) (inMsgs []msgstream.TsMsg) {
 	for i := 0; i < n; i++ {
-		var msg msgstream.TsMsg = &msgstream.InsertMsg{
-			BaseMsg: msgstream.BaseMsg{
-				HashValues: []uint32{uint32(i)},
-			},
-			InsertRequest: internalpb.InsertRequest{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_Insert,
-					MsgID:     0, // GOOSE TODO
-					Timestamp: Timestamp(i + 1000),
-					SourceID:  0,
-				},
-				CollectionName: "col1", // GOOSE TODO
-				PartitionName:  "default",
-				SegmentID:      1,   // GOOSE TODO
-				ChannelID:      "0", // GOOSE TODO
-				Timestamps:     []Timestamp{Timestamp(i + 1000)},
-				RowIDs:         []UniqueID{UniqueID(i)},
-				RowData:        []*commonpb.Blob{{Value: df.rawData}},
-			},
-		}
-		inMsgs = append(inMsgs, msg)
+		var msg = df.GenMsgStreamInsertMsg(i)
+		var tsMsg msgstream.TsMsg = msg
+		inMsgs = append(inMsgs, tsMsg)
 	}
 	return
 }
 
-// n: number of insertMsgs to generate
 func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (inMsgs []*msgstream.InsertMsg) {
 	for i := 0; i < n; i++ {
-		var msg = &msgstream.InsertMsg{
-			BaseMsg: msgstream.BaseMsg{
-				HashValues: []uint32{uint32(i)},
-			},
-			InsertRequest: internalpb.InsertRequest{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_Insert,
-					MsgID:     0, // GOOSE TODO
-					Timestamp: Timestamp(i + 1000),
-					SourceID:  0,
-				},
-				CollectionName: "col1", // GOOSE TODO
-				PartitionName:  "default",
-				SegmentID:      1,   // GOOSE TODO
-				ChannelID:      "0", // GOOSE TODO
-				Timestamps:     []Timestamp{Timestamp(i + 1000)},
-				RowIDs:         []UniqueID{UniqueID(i)},
-				RowData:        []*commonpb.Blob{{Value: df.rawData}},
-			},
-		}
+		var msg = df.GenMsgStreamInsertMsg(i)
 		inMsgs = append(inMsgs, msg)
 	}
 	return
