@@ -17,7 +17,6 @@ import (
 	"encoding/binary"
 	"math"
 	"math/rand"
-	"os"
 	"strconv"
 	"sync"
 	"testing"
@@ -26,6 +25,7 @@ import (
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
+	"github.com/stretchr/testify/assert"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	memkv "github.com/zilliztech/milvus-distributed/internal/kv/mem"
 	"github.com/zilliztech/milvus-distributed/internal/log"
@@ -33,12 +33,58 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/types"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
+
+const ctxTimeInMillisecond = 5000
+const debug = false
+
+func newDataNodeMock() *DataNode {
+	var ctx context.Context
+
+	if debug {
+		ctx = context.Background()
+	} else {
+		var cancel context.CancelFunc
+		d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
+		ctx, cancel = context.WithDeadline(context.Background(), d)
+		go func() {
+			<-ctx.Done()
+			cancel()
+		}()
+	}
+
+	msFactory := msgstream.NewPmsFactory()
+	node := NewDataNode(ctx, msFactory)
+	replica := newReplica()
+
+	ms := &MasterServiceFactory{
+		ID:             0,
+		collectionID:   1,
+		collectionName: "collection-1",
+	}
+	node.SetMasterServiceInterface(ms)
+
+	ds := &DataServiceFactory{}
+	node.SetDataServiceInterface(ds)
+
+	var alloc allocatorInterface = NewAllocatorFactory(100)
+
+	chanSize := 100
+	flushChan := make(chan *flushMsg, chanSize)
+	node.flushChan = flushChan
+	node.dataSyncService = newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory)
+	node.dataSyncService.init()
+	node.metaService = newMetaService(node.ctx, replica, node.masterService)
+	node.replica = replica
+
+	return node
+}
 
 func makeNewChannelNames(names []string, suffix string) []string {
 	var ret []string
@@ -57,14 +103,6 @@ func refreshChannelNames() {
 	suffix := "-test-data-node" + strconv.FormatInt(rand.Int63n(100), 10)
 	Params.DDChannelNames = makeNewChannelNames(Params.DDChannelNames, suffix)
 	Params.InsertChannelNames = makeNewChannelNames(Params.InsertChannelNames, suffix)
-}
-
-func TestMain(m *testing.M) {
-	Params.Init()
-
-	refreshChannelNames()
-	exitCode := m.Run()
-	os.Exit(exitCode)
 }
 
 func newBinlogMeta() *binlogMeta {
@@ -120,6 +158,10 @@ type MasterServiceFactory struct {
 	ID             UniqueID
 	collectionName string
 	collectionID   UniqueID
+}
+
+type DataServiceFactory struct {
+	types.DataService
 }
 
 func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionName string) *etcdpb.CollectionMeta {
@@ -427,6 +469,7 @@ func (m *MasterServiceFactory) ShowCollections(ctx context.Context, in *milvuspb
 	return resp, nil
 
 }
+
 func (m *MasterServiceFactory) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	f := MetaFactory{}
 	meta := f.CollectionMetaFactory(m.collectionID, m.collectionName)
@@ -446,4 +489,64 @@ func (m *MasterServiceFactory) GetComponentStates(ctx context.Context) (*interna
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}, nil
+}
+
+func TestDataNode(t *testing.T) {
+	Params.Init()
+	refreshChannelNames()
+
+	node := newDataNodeMock()
+	node.Start()
+
+	t.Run("Test WatchDmChannels", func(t *testing.T) {
+		channelNames := Params.InsertChannelNames
+
+		req := &datapb.WatchDmChannelsRequest{
+			ChannelNames: channelNames,
+		}
+		_, err1 := node.WatchDmChannels(node.ctx, req)
+		assert.Error(t, err1)
+
+		node.UpdateStateCode(internalpb.StateCode_Initializing)
+		_, err2 := node.WatchDmChannels(node.ctx, req)
+		assert.Error(t, err2)
+
+		Params.InsertChannelNames = []string{}
+		status, err3 := node.WatchDmChannels(node.ctx, req)
+		assert.NoError(t, err3)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+
+		Params.InsertChannelNames = channelNames
+	})
+
+	t.Run("Test GetComponentStates", func(t *testing.T) {
+		stat, err := node.GetComponentStates(node.ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, stat.Status.ErrorCode)
+	})
+
+	t.Run("Test FlushSegments", func(t *testing.T) {
+		req := &datapb.FlushSegmentsRequest{
+			Base:         &commonpb.MsgBase{},
+			DbID:         0,
+			CollectionID: 1,
+			SegmentIDs:   []int64{0, 1},
+		}
+		status, err := node.FlushSegments(node.ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	})
+
+	t.Run("Test GetTimeTickChannel", func(t *testing.T) {
+		_, err := node.GetTimeTickChannel(node.ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Test GetStatisticsChannel", func(t *testing.T) {
+		_, err := node.GetStatisticsChannel(node.ctx)
+		assert.NoError(t, err)
+	})
+
+	<-node.ctx.Done()
+	node.Stop()
 }
