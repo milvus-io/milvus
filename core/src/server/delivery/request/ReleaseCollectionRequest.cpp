@@ -63,12 +63,8 @@ ReleaseCollectionRequest::OnExecute() {
             }
         }
 
-        // step 2: force load collection data into cache
-        // load each segment and insert into cache even cache capacity is not enough
+        // step 2: release collection data from cache
         status = DBWrapper::DB()->ReleaseCollection(context_, collection_name_, partition_tags_);
-        fiu_do_on("ReleaseCollectionRequest.OnExecute.preload_collection_fail",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-        fiu_do_on("ReleaseCollectionRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
             return status;
         }
