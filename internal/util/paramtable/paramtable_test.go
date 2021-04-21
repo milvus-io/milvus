@@ -110,7 +110,4 @@ func TestGlobalParamsTable_LoadYaml(t *testing.T) {
 	assert.Nil(t, err)
 	_, err = Params.Load("pulsar.port")
 	assert.Nil(t, err)
-	_, err = Params.Load("msgChannel.channelRange.insert")
-	assert.Nil(t, err)
-
 }

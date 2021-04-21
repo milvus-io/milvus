@@ -20,10 +20,10 @@ import (
 
 func TestDataNodeClusterRegister(t *testing.T) {
 	Params.Init()
-	Params.DataNodeNum = 3
 	cluster := newDataNodeCluster()
-	ids := make([]int64, 0, Params.DataNodeNum)
-	for i := 0; i < Params.DataNodeNum; i++ {
+	dataNodeNum := 3
+	ids := make([]int64, 0, dataNodeNum)
+	for i := 0; i < dataNodeNum; i++ {
 		c := newMockDataNodeClient(int64(i))
 		err := c.Init()
 		assert.Nil(t, err)
@@ -40,18 +40,18 @@ func TestDataNodeClusterRegister(t *testing.T) {
 		})
 		ids = append(ids, int64(i))
 	}
-	assert.EqualValues(t, Params.DataNodeNum, cluster.GetNumOfNodes())
+	assert.EqualValues(t, dataNodeNum, cluster.GetNumOfNodes())
 	assert.EqualValues(t, ids, cluster.GetNodeIDs())
 	states, err := cluster.GetDataNodeStates(context.TODO())
 	assert.Nil(t, err)
-	assert.EqualValues(t, Params.DataNodeNum, len(states))
+	assert.EqualValues(t, dataNodeNum, len(states))
 	for _, s := range states {
 		assert.EqualValues(t, internalpb.StateCode_Healthy, s.StateCode)
 	}
 	cluster.ShutDownClients()
 	states, err = cluster.GetDataNodeStates(context.TODO())
 	assert.Nil(t, err)
-	assert.EqualValues(t, Params.DataNodeNum, len(states))
+	assert.EqualValues(t, dataNodeNum, len(states))
 	for _, s := range states {
 		assert.EqualValues(t, internalpb.StateCode_Abnormal, s.StateCode)
 	}
@@ -59,7 +59,7 @@ func TestDataNodeClusterRegister(t *testing.T) {
 
 func TestWatchChannels(t *testing.T) {
 	Params.Init()
-	Params.DataNodeNum = 3
+	dataNodeNum := 3
 	cases := []struct {
 		collectionID UniqueID
 		channels     []string
@@ -73,7 +73,7 @@ func TestWatchChannels(t *testing.T) {
 
 	cluster := newDataNodeCluster()
 	for _, c := range cases {
-		for i := 0; i < Params.DataNodeNum; i++ {
+		for i := 0; i < dataNodeNum; i++ {
 			c := newMockDataNodeClient(int64(i))
 			err := c.Init()
 			assert.Nil(t, err)
