@@ -51,12 +51,6 @@ func TestDataSyncService_Start(t *testing.T) {
 		}
 		records = append(records, blob)
 	}
-
-	timeRange := TimeRange{
-		timestampMin: 0,
-		timestampMax: math.MaxUint64,
-	}
-
 	// messages generate
 	insertMessages := make([]msgstream.TsMsg, 0)
 	for i := 0; i < msgLength; i++ {
@@ -88,12 +82,6 @@ func TestDataSyncService_Start(t *testing.T) {
 		insertMessages = append(insertMessages, msg)
 	}
 
-	msgPack := msgstream.MsgPack{
-		BeginTs: timeRange.timestampMin,
-		EndTs:   timeRange.timestampMax,
-		Msgs:    insertMessages,
-	}
-
 	// generate timeTick
 	timeTickMsgPack := msgstream.MsgPack{}
 	baseMsg := msgstream.BaseMsg{
@@ -117,7 +105,6 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	// pulsar produce
 	const receiveBufSize = 1024
-	insertChannels := Params.InsertChannelNames
 	pulsarURL := Params.PulsarAddress
 
 	msFactory := msgstream.NewPmsFactory()
@@ -127,18 +114,6 @@ func TestDataSyncService_Start(t *testing.T) {
 		"pulsarBufSize":  1024}
 	err := msFactory.SetParams(m)
 	assert.Nil(t, err)
-
-	insertStream, _ := msFactory.NewMsgStream(node.queryNodeLoopCtx)
-	insertStream.AsProducer(insertChannels)
-
-	var insertMsgStream msgstream.MsgStream = insertStream
-	insertMsgStream.Start()
-
-	err = insertMsgStream.Produce(&msgPack)
-	assert.NoError(t, err)
-
-	err = insertMsgStream.Broadcast(&timeTickMsgPack)
-	assert.NoError(t, err)
 
 	// dataSync
 	node.dataSyncServices[collectionID] = newDataSyncService(node.queryNodeLoopCtx, node.replica, msFactory, collectionID)
