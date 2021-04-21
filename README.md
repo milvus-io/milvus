@@ -30,24 +30,24 @@ See [Milvus install guide](https://www.milvus.io/docs/install_milvus.md) to inst
 
 ### Try example programs
 
-Try an example program with Milvus using [Python](https://www.milvus.io/docs/example_code.md), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), [Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/master/sdk/examples).
+Try an example program with Milvus using [Python](https://github.com/milvus-io/pymilvus/tree/1.0/examples), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/1.0/examples), [Go](https://github.com/milvus-io/milvus-sdk-go/tree/1.0/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/1.0/sdk/examples).
 
 ## Supported clients
 
--   [Go](https://github.com/milvus-io/milvus-sdk-go)
--   [Python](https://github.com/milvus-io/pymilvus)
--   [Java](https://github.com/milvus-io/milvus-sdk-java)
--   [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
--   [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
+-   [Go](https://github.com/milvus-io/milvus-sdk-go/tree/1.0)
+-   [Python](https://github.com/milvus-io/pymilvus/tree/1.0)
+-   [Java](https://github.com/milvus-io/milvus-sdk-java/tree/1.0)
+-   [C++](https://github.com/milvus-io/milvus/tree/1.0/sdk)
+-   [RESTful API](https://github.com/milvus-io/milvus/tree/1.0/core/src/server/web_impl)
 -   [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) (Contributed by [arkie](https://www.arkie.cn/))
 
 ## Application scenarios
 
-You can use Milvus to build intelligent systems in a variety of AI application scenarios. See [Milvus Scenarios](https://milvus.io/scenarios) for live demos. You can also see [Milvus Bootcamp](https://github.com/milvus-io/bootcamp) for detailed solutions and application scenarios.
+You can use Milvus to build intelligent systems in a variety of AI application scenarios. See [Milvus Scenarios](https://milvus.io/scenarios) for live demos. You can also see [Milvus Bootcamp]https://github.com/milvus-io/bootcamp/tree/1.0) for detailed solutions and application scenarios.
 
 ## Benchmark
 
-See our [test reports](https://github.com/milvus-io/milvus/tree/master/docs) for more information about performance benchmarking of different indexes in Milvus.
+See our [test reports](https://github.com/milvus-io/milvus/tree/1.0/docs) for more information about performance benchmarking of different indexes in Milvus.
 
 ## Roadmap
 
