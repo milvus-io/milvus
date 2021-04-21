@@ -33,6 +33,7 @@ constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8;
+constexpr int32_t NLIST = 2048;
 constexpr int32_t PARTITION_COUNT = 5;
 constexpr int32_t TARGET_PARTITION = 3;
 
@@ -53,7 +54,7 @@ BuildPartitionParam(int32_t index) {
 
 milvus::IndexParam
 BuildIndexParam() {
-    JSON json_params = {{"nlist", 16384}};
+    JSON json_params = {{"nlist", NLIST}};
     milvus::IndexParam index_param = {COLLECTION_NAME, INDEX_TYPE, json_params.dump()};
     return index_param;
 }

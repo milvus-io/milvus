@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "include/MilvusApi.h"
-#include "include/BooleanQuery.h"
 #include "examples/utils/TimeRecorder.h"
 #include "examples/utils/Utils.h"
 #include "examples/simple/src/ClientTest.h"
@@ -34,7 +33,7 @@ constexpr int64_t NPROBE = 32;
 constexpr int64_t SEARCH_TARGET = BATCH_ENTITY_COUNT / 2;  // change this value, result is different
 constexpr int64_t ADD_ENTITY_LOOP = 5;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFFLAT;
-constexpr int32_t NLIST = 16384;
+constexpr int32_t NLIST = 2048;
 
 void
 PrintEntity(const std::string& tag, const milvus::Entity& entity) {

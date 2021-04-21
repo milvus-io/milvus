@@ -26,7 +26,7 @@ struct TestParameters {
     // collection parameters, only works when collection_name_ is empty
     int64_t index_type_ = (int64_t)milvus::IndexType::IVFSQ8; // sq8
     int64_t index_file_size_ = 1024; // 1024 MB
-    int64_t nlist_ = 16384;
+    int64_t nlist_ = 2048;
     int64_t metric_type_ = (int64_t)milvus::MetricType::L2; // L2
     int64_t dimensions_ = 128;
     int64_t row_count_ = 1; // 1 million
