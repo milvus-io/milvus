@@ -365,7 +365,7 @@ func GenRowData() (rawData []byte) {
 	rawData = append(rawData, bfloat32.Bytes()...)
 
 	// float64
-	var datafloat64 float64 = 2.2
+	var datafloat64 = 2.2
 	bfloat64 := new(bytes.Buffer)
 	if err := binary.Write(bfloat64, binary.LittleEndian, datafloat64); err != nil {
 		panic(err)
