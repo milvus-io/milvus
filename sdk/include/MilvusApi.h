@@ -16,13 +16,19 @@
 #include <unordered_map>
 #include <vector>
 
-#include "BooleanQuery.h"
-#include "Field.h"
 #include "Status.h"
 
 /** \brief Milvus SDK namespace
  */
 namespace milvus {
+
+/**
+ * @brief Entity inserted, currently each entity represent a vector
+ */
+struct Entity {
+    std::vector<float> float_data;     ///< Vector raw float data
+    std::vector<uint8_t> binary_data;  ///< Vector raw binary data
+};
 
 /**
  * @brief Index Type
@@ -112,18 +118,6 @@ struct PartitionParam {
 };
 
 using PartitionTagList = std::vector<std::string>;
-
-struct HMapping {
-    std::string collection_name;
-    std::vector<FieldPtr> numerica_fields;
-    std::vector<VectorFieldPtr> vector_fields;
-};
-
-struct HEntity {
-    int64_t row_num;
-    std::unordered_map<std::string, std::vector<int8_t>> numerica_value;
-    std::unordered_map<std::string, std::vector<Entity>> vector_value;
-};
 
 /**
  * @brief SDK main class
@@ -574,20 +568,6 @@ class Connection {
      */
     virtual Status
     Compact(const std::string& collection_name) = 0;
-
-    /*******************************New Interface**********************************/
-
-    virtual Status
-    CreateHybridCollection(const HMapping& mapping) = 0;
-
-    virtual Status
-    InsertEntity(const std::string& collection_name, const std::string& partition_tag, HEntity& entities,
-                 std::vector<uint64_t>& id_array) = 0;
-
-    virtual Status
-    HybridSearch(const std::string& collection_name, const std::vector<std::string>& partition_list,
-                 BooleanQueryPtr& boolean_query, const std::string& extra_params,
-                 TopKQueryResult& topk_query_result) = 0;
 };
 
 }  // namespace milvus
