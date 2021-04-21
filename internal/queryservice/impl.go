@@ -178,12 +178,10 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 			return status, err
 		}
 	}
-	loadCtx, cancel := context.WithTimeout(qs.loopCtx, 30*time.Second)
 	loadCollectionTask := &LoadCollectionTask{
 		BaseTask: BaseTask{
-			ctx:       loadCtx,
-			cancel:    cancel,
-			Condition: NewTaskCondition(loadCtx),
+			ctx:       qs.loopCtx,
+			Condition: NewTaskCondition(qs.loopCtx),
 		},
 		LoadCollectionRequest: req,
 		masterService:         qs.masterServiceClient,
@@ -283,12 +281,10 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 		return status, err
 	}
 
-	releaseCtx, cancel := context.WithTimeout(qs.loopCtx, 30*time.Second)
 	loadPartitionTask := &LoadPartitionTask{
 		BaseTask: BaseTask{
-			ctx:       releaseCtx,
-			cancel:    cancel,
-			Condition: NewTaskCondition(releaseCtx),
+			ctx:       qs.loopCtx,
+			Condition: NewTaskCondition(qs.loopCtx),
 		},
 		LoadPartitionsRequest: req,
 		masterService:         qs.masterServiceClient,
