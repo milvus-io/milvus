@@ -15,10 +15,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
 var gTestIDAllocator *GlobalIDAllocator

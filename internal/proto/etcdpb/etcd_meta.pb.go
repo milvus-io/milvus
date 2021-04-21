@@ -6,8 +6,8 @@ package etcdpb
 import (
 	fmt "fmt"
 	proto "github.com/golang/protobuf/proto"
-	commonpb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	schemapb "github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	commonpb "github.com/milvus-io/milvus/internal/proto/commonpb"
+	schemapb "github.com/milvus-io/milvus/internal/proto/schemapb"
 	math "math"
 )
 

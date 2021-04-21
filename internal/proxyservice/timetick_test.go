@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
 func TestTimeTick_Start(t *testing.T) {

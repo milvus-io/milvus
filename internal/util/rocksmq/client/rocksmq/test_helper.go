@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"time"
 
-	server "github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
+	server "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 )
 
 func newTopicName() string {

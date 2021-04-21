@@ -15,8 +15,8 @@ import (
 	"container/heap"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/types"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/types"
 )
 
 // An Item is something we manage in a priority queue.

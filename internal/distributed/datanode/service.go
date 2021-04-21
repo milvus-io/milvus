@@ -27,19 +27,19 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	dn "github.com/zilliztech/milvus-distributed/internal/datanode"
-	dsc "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice/client"
-	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
+	dn "github.com/milvus-io/milvus/internal/datanode"
+	dsc "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
+	msc "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
 
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-	"github.com/zilliztech/milvus-distributed/internal/types"
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-	"github.com/zilliztech/milvus-distributed/internal/util/trace"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
 type Server struct {

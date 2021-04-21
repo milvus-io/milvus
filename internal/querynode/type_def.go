@@ -12,7 +12,7 @@
 package querynode
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 const rowIDFieldID = 0

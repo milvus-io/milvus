@@ -11,7 +11,7 @@
 
 package datanode
 
-import "github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
+import "github.com/milvus-io/milvus/internal/util/flowgraph"
 
 type (
 	Node      = flowgraph.Node

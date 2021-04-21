@@ -16,8 +16,8 @@ import (
 	"strconv"
 	"testing"
 
-	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
-	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
+	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"github.com/stretchr/testify/assert"
 )

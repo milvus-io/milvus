@@ -12,8 +12,8 @@
 package flowgraph
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type Timestamp = typeutil.Timestamp

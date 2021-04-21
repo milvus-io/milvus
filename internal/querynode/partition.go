@@ -25,7 +25,7 @@ import "C"
 import (
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/milvus-io/milvus/internal/log"
 )
 
 type Partition struct {

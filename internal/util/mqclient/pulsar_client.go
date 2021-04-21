@@ -17,7 +17,7 @@ import (
 	"unsafe"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 )
 

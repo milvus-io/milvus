@@ -15,7 +15,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 
 	"github.com/stretchr/testify/assert"
 )

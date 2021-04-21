@@ -14,7 +14,7 @@ package msgstream
 import (
 	"errors"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 )
 
 type UnmarshalFunc func(interface{}) (TsMsg, error)

@@ -24,11 +24,11 @@ services:
       ETCD_ADDRESS: ${ETCD_ADDRESS}
       MINIO_ADDRESS: ${MINIO_ADDRESS}
     volumes: &ubuntu-volumes
-      - .:/go/src/github.com/zilliztech/milvus-distributed:delegated
+      - .:/go/src/github.com/milvus-io/milvus:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-ccache:/ccache:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-go-mod:/go/pkg/mod:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-vscode-extensions:/home/milvus/.vscode-server/extensions:delegated
-    working_dir: "/go/src/github.com/zilliztech/milvus-distributed"
+    working_dir: "/go/src/github.com/milvus-io/milvus"
     # Command
     command: &ubuntu-command >
       /bin/bash -c "

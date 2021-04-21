@@ -14,8 +14,8 @@ package components
 import (
 	"context"
 
-	grpcproxyservice "github.com/zilliztech/milvus-distributed/internal/distributed/proxyservice"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	grpcproxyservice "github.com/milvus-io/milvus/internal/distributed/proxyservice"
+	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
 type ProxyService struct {

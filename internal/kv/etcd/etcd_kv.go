@@ -17,7 +17,7 @@ import (
 	"path"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 
 	"go.etcd.io/etcd/clientv3"

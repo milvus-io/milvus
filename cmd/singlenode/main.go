@@ -14,9 +14,9 @@ package main
 import (
 	"os"
 
-	"github.com/zilliztech/milvus-distributed/cmd/distributed/roles"
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/logutil"
+	"github.com/milvus-io/milvus/cmd/distributed/roles"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/logutil"
 )
 
 func initRoles(roles *roles.MilvusRoles) {

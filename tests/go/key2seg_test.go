@@ -3,7 +3,7 @@ package test
 import (
 	"testing"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type UniqueID = typeutil.UniqueID

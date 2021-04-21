@@ -14,7 +14,7 @@ package querynode
 import (
 	"context"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
 func (dsService *dataSyncService) newDmInputNode(ctx context.Context) *flowgraph.InputNode {

@@ -14,7 +14,7 @@ package mqclient
 import (
 	"context"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq/client/rocksmq"
+	"github.com/milvus-io/milvus/internal/util/rocksmq/client/rocksmq"
 )
 
 type rmqProducer struct {

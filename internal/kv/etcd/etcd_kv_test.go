@@ -16,8 +16,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
-	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"go.etcd.io/etcd/clientv3"
 )
 

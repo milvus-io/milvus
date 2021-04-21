@@ -32,10 +32,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/indexcgopb"
-	"github.com/zilliztech/milvus-distributed/internal/storage"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/indexcgopb"
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 // TODO: use storage.Blob instead later

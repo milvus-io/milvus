@@ -23,7 +23,7 @@ package querynode
 */
 import "C"
 import (
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 )
 
 type IndexConfig struct{}

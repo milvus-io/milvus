@@ -17,8 +17,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 func isAlpha(c uint8) bool {

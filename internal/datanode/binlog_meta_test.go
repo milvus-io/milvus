@@ -17,7 +17,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	memkv "github.com/zilliztech/milvus-distributed/internal/kv/mem"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 )
 
 func TestMetaTable_Basic(t *testing.T) {

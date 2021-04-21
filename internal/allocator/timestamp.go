@@ -18,12 +18,12 @@ import (
 
 	"go.uber.org/zap"
 
-	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
-	"github.com/zilliztech/milvus-distributed/internal/types"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	msc "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/masterpb"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type Timestamp = typeutil.Timestamp

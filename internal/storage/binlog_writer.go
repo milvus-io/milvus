@@ -17,7 +17,7 @@ import (
 
 	"errors"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 const (
