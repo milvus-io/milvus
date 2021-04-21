@@ -13,15 +13,11 @@ package etcdkv
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"math/rand"
 	"path"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/util/performance"
 	"go.uber.org/zap"
 
 	"go.etcd.io/etcd/clientv3"
@@ -42,7 +38,6 @@ func NewEtcdKV(client *clientv3.Client, rootPath string) *EtcdKV {
 		client:   client,
 		rootPath: rootPath,
 	}
-	//go kv.performanceTest(false, 16<<20)
 	return kv
 }
 
@@ -85,18 +80,6 @@ func (kv *EtcdKV) Load(key string) (string, error) {
 	}
 
 	return string(resp.Kvs[0].Value), nil
-}
-
-func (kv *EtcdKV) GetCount(key string) (int64, error) {
-	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Get(ctx, key)
-	if err != nil {
-		return -1, err
-	}
-
-	return resp.Count, nil
 }
 
 func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error) {
@@ -204,13 +187,13 @@ func (kv *EtcdKV) MultiSaveAndRemove(saves map[string]string, removals []string)
 
 func (kv *EtcdKV) Watch(key string) clientv3.WatchChan {
 	key = path.Join(kv.rootPath, key)
-	rch := kv.client.Watch(context.Background(), key)
+	rch := kv.client.Watch(context.Background(), key, clientv3.WithCreatedNotify())
 	return rch
 }
 
 func (kv *EtcdKV) WatchWithPrefix(key string) clientv3.WatchChan {
 	key = path.Join(kv.rootPath, key)
-	rch := kv.client.Watch(context.Background(), key, clientv3.WithPrefix())
+	rch := kv.client.Watch(context.Background(), key, clientv3.WithPrefix(), clientv3.WithCreatedNotify())
 	return rch
 }
 
@@ -244,48 +227,4 @@ func (kv *EtcdKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals
 
 	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
 	return err
-}
-
-type Case struct {
-	Name      string
-	BlockSize int     // unit: byte
-	Speed     float64 // unit: MB/s
-}
-
-type Test struct {
-	Name  string
-	Cases []Case
-}
-
-func (kv *EtcdKV) performanceTest(toFile bool, totalBytes int) {
-	r := rand.Int()
-	results := Test{Name: "etcd performance"}
-	for i := 0; i < 10; i += 2 {
-		data := performance.GenerateData(2*1024, float64(9-i))
-		startT := time.Now()
-		for j := 0; j < totalBytes/(len(data)); j++ {
-			kv.Save(fmt.Sprintf("performance-rand%d-test-%d-%d", r, i, j), data)
-		}
-		tc := time.Since(startT)
-		results.Cases = append(results.Cases, Case{Name: "write", BlockSize: len(data), Speed: 16.0 / tc.Seconds()})
-
-		startT = time.Now()
-		for j := 0; j < totalBytes/(len(data)); j++ {
-			kv.Load(fmt.Sprintf("performance-rand%d-test-%d-%d", r, i, j))
-		}
-		tc = time.Since(startT)
-		results.Cases = append(results.Cases, Case{Name: "read", BlockSize: len(data), Speed: 16.0 / tc.Seconds()})
-	}
-	kv.RemoveWithPrefix(fmt.Sprintf("performance-rand%d", r))
-	mb, err := json.Marshal(results)
-	if err != nil {
-		return
-	}
-	log.Debug(string(mb))
-	if toFile {
-		err = ioutil.WriteFile(fmt.Sprintf("./%d", r), mb, 0644)
-		if err != nil {
-			return
-		}
-	}
 }

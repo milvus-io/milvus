@@ -301,3 +301,43 @@ func TestEtcdKV_MultiSaveAndRemoveWithPrefix(t *testing.T) {
 	assert.Equal(t, v[0], "v1")
 	assert.Equal(t, v[1], "v2")
 }
+
+func TestEtcdKV_Watch(t *testing.T) {
+	etcdAddr, err := Params.Load("_EtcdAddress")
+	if err != nil {
+		panic(err)
+	}
+
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	assert.Nil(t, err)
+	rootPath := "/etcd/test/root"
+	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
+
+	defer etcdKV.Close()
+	defer etcdKV.RemoveWithPrefix("")
+
+	ch := etcdKV.Watch("x/abc/1")
+	resp := <-ch
+
+	assert.True(t, resp.Created)
+}
+
+func TestEtcdKV_WatchPrefix(t *testing.T) {
+	etcdAddr, err := Params.Load("_EtcdAddress")
+	if err != nil {
+		panic(err)
+	}
+
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	assert.Nil(t, err)
+	rootPath := "/etcd/test/root"
+	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
+
+	defer etcdKV.Close()
+	defer etcdKV.RemoveWithPrefix("")
+
+	ch := etcdKV.WatchWithPrefix("x")
+	resp := <-ch
+
+	assert.True(t, resp.Created)
+}
