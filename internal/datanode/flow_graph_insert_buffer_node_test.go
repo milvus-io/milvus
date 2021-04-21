@@ -19,10 +19,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {

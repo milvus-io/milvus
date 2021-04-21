@@ -16,8 +16,8 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSizeofStruct(t *testing.T) {

@@ -15,9 +15,9 @@ import (
 	"context"
 	"io"
 
-	"github.com/opentracing/opentracing-go"
 	msc "github.com/milvus-io/milvus/internal/distributed/masterservice"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/opentracing/opentracing-go"
 )
 
 type MasterService struct {

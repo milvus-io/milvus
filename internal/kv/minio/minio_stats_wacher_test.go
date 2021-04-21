@@ -16,8 +16,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMinioStats(t *testing.T) {

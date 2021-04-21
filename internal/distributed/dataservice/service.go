@@ -26,8 +26,6 @@ import (
 
 	"google.golang.org/grpc"
 
-	otgrpc "github.com/opentracing-contrib/go-grpc"
-	"github.com/opentracing/opentracing-go"
 	"github.com/milvus-io/milvus/internal/dataservice"
 	msc "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
 	"github.com/milvus-io/milvus/internal/log"
@@ -35,6 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	otgrpc "github.com/opentracing-contrib/go-grpc"
+	"github.com/opentracing/opentracing-go"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"

@@ -14,10 +14,10 @@ package masterservice
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestEqualKeyPairArray(t *testing.T) {

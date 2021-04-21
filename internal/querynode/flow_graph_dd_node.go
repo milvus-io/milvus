@@ -13,8 +13,8 @@ package querynode
 
 import (
 	"github.com/golang/protobuf/proto"
-	"github.com/opentracing/opentracing-go"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"

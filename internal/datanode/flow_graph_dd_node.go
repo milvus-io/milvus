@@ -22,7 +22,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
-	"github.com/opentracing/opentracing-go"
 	"github.com/milvus-io/milvus/internal/kv"
 	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
@@ -32,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/opentracing/opentracing-go"
 )
 
 type ddNode struct {

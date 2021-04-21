@@ -25,7 +25,6 @@ import (
 	grpcmasterserviceclient "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/stretchr/testify/assert"
 	cms "github.com/milvus-io/milvus/internal/masterservice"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -34,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestGrpcService(t *testing.T) {

@@ -18,8 +18,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/stretchr/testify/assert"
 )
 
 var gTestTsoAllocator *GlobalTSOAllocator

@@ -20,10 +20,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/allocator"
 
-	"github.com/tecbot/gorocksdb"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/tecbot/gorocksdb"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 )

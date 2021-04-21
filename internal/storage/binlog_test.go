@@ -19,9 +19,9 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestInsertBinlog(t *testing.T) {

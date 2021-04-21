@@ -24,14 +24,13 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	otgrpc "github.com/opentracing-contrib/go-grpc"
 	grpcdataserviceclient "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
 	grpcindexserviceclient "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
 	grpcmasterserviceclient "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
 	grpcproxyserviceclient "github.com/milvus-io/milvus/internal/distributed/proxyservice/client"
 	grpcqueryserviceclient "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
+	otgrpc "github.com/opentracing-contrib/go-grpc"
 
-	"github.com/opentracing/opentracing-go"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -41,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxynode"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/opentracing/opentracing-go"
 )
 
 const (

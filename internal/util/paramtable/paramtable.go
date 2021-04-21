@@ -21,10 +21,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 
-	"github.com/spf13/cast"
-	"github.com/spf13/viper"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/spf13/cast"
+	"github.com/spf13/viper"
 )
 
 type UniqueID = typeutil.UniqueID

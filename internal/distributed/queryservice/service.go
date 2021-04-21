@@ -20,8 +20,6 @@ import (
 	"sync"
 	"time"
 
-	otgrpc "github.com/opentracing-contrib/go-grpc"
-	"github.com/opentracing/opentracing-go"
 	dsc "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
 	msc "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
 	"github.com/milvus-io/milvus/internal/log"
@@ -30,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	otgrpc "github.com/opentracing-contrib/go-grpc"
+	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 

@@ -13,8 +13,8 @@ package dataservice
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/stretchr/testify/assert"
 	"golang.org/x/net/context"
 )
 

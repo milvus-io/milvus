@@ -15,9 +15,9 @@ import (
 	"strings"
 	"testing"
 
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 )
 
 func TestMetaTable_Basic(t *testing.T) {

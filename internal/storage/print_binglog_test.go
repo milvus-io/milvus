@@ -18,12 +18,12 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/stretchr/testify/assert"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestPrintBinlogFilesInt64(t *testing.T) {

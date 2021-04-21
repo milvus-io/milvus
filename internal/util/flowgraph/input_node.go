@@ -12,9 +12,9 @@
 package flowgraph
 
 import (
-	"github.com/opentracing/opentracing-go"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/opentracing/opentracing-go"
 )
 
 type InputNode struct {

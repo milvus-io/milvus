@@ -14,8 +14,8 @@ package rocksdbkv_test
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestRocksdbKV(t *testing.T) {

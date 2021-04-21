@@ -15,9 +15,9 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/stretchr/testify/assert"
 )
 
 func genIndexBinarySet() ([][]byte, error) {

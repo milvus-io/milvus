@@ -21,8 +21,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/allocator"
 
-	"github.com/stretchr/testify/assert"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/clientv3"
 )
 

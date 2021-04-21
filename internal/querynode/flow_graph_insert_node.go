@@ -15,11 +15,11 @@ import (
 	"context"
 	"sync"
 
-	"github.com/opentracing/opentracing-go"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 )
 

@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/minio/minio-go/v7"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 )
 
