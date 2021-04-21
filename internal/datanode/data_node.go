@@ -180,7 +180,7 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 		return status, errors.New(status.GetReason())
 
 	case len(Params.InsertChannelNames) != 0:
-		status.Reason = fmt.Sprintf("DataNode has %d already set insert channels!", node.NodeID)
+		status.Reason = fmt.Sprintf("DataNode %d has already set insert channels!", node.NodeID)
 		return status, errors.New(status.GetReason())
 
 	default:
