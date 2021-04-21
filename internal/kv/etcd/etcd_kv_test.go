@@ -301,6 +301,7 @@ func TestEtcdKV_MultiSaveAndRemoveWithPrefix(t *testing.T) {
 	assert.Equal(t, v[0], "v1")
 	assert.Equal(t, v[1], "v2")
 }
+<<<<<<< HEAD
 
 func TestEtcdKV_Watch(t *testing.T) {
 	etcdAddr, err := Params.Load("_EtcdAddress")
@@ -341,3 +342,5 @@ func TestEtcdKV_WatchPrefix(t *testing.T) {
 
 	assert.True(t, resp.Created)
 }
+=======
+>>>>>>> upstream/master

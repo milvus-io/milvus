@@ -69,9 +69,13 @@ func (w *EtcdStatsWatcher) StartBackgroundLoop(ctx context.Context) {
 			}
 			t := 0
 			for _, event := range e.Events {
+<<<<<<< HEAD
 				if event.Kv.Version == 1 {
 					t += len(event.Kv.Key) + len(event.Kv.Value)
 				}
+=======
+				t += len(event.Kv.Key) + len(event.Kv.Value)
+>>>>>>> upstream/master
 			}
 			w.mu.Lock()
 			w.size += t
@@ -87,7 +91,10 @@ func (w *EtcdStatsWatcher) GetSize() int {
 	return w.size
 }
 
+<<<<<<< HEAD
 /*
+=======
+>>>>>>> upstream/master
 func (w *EtcdStatsWatcher) GetStartTime() time.Time {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -100,4 +107,7 @@ func (w *EtcdStatsWatcher) Reset() {
 	w.size = 0
 	w.startTime = time.Now()
 }
+<<<<<<< HEAD
 */
+=======
+>>>>>>> upstream/master

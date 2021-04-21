@@ -13,9 +13,13 @@ package etcdkv
 
 import (
 	"context"
+<<<<<<< HEAD
 	"math/rand"
 	"testing"
 	"time"
+=======
+	"testing"
+>>>>>>> upstream/master
 
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
@@ -23,7 +27,10 @@ import (
 )
 
 func TestEtcdStatsWatcher(t *testing.T) {
+<<<<<<< HEAD
 	rand.Seed(time.Now().UnixNano())
+=======
+>>>>>>> upstream/master
 	var p paramtable.BaseTable
 	p.Init()
 	addr, err := p.Load("_EtcdAddress")
@@ -47,16 +54,21 @@ func TestEtcdStatsWatcher(t *testing.T) {
 
 	<-startCh
 
+<<<<<<< HEAD
 	key := make([]byte, 1)
 	rand.Read(key)
 
 	_, err = cli.Put(context.TODO(), string(key), string([]byte{65, 65, 65}))
+=======
+	_, err = cli.Put(context.TODO(), string([]byte{65}), string([]byte{65, 65, 65}))
+>>>>>>> upstream/master
 	assert.Nil(t, err)
 	<-receiveCh
 	size := w.GetSize()
 	assert.EqualValues(t, 4, size)
 
 }
+<<<<<<< HEAD
 
 func TestEtcdStatsWatcherDone(t *testing.T) {
 	var p paramtable.BaseTable
@@ -84,3 +96,5 @@ func TestEtcdStatsWatcherDone(t *testing.T) {
 	<-startCh
 	cancel()
 }
+=======
+>>>>>>> upstream/master
