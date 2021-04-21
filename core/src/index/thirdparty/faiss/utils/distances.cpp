@@ -1033,12 +1033,16 @@ void elkan_L2_sse (
             return (i > j) ? data[j + i * (i - 1) / 2] : data[i + j * (j - 1) / 2];
         };
 
-#pragma omp parallel for
-        for (size_t i = j0 + 1; i < j1; i++) {
-            const float *y_i = y + i * d;
-            for (size_t j = j0; j < i; j++) {
-                const float *y_j = y + j * d;
-                Y(i, j) = fvec_L2sqr(y_i, y_j, d);
+#pragma omp parallel
+        {
+            int nt = omp_get_num_threads();
+            int rank = omp_get_thread_num();
+            for (size_t i = j0 + 1 + rank; i < j1; i += nt) {
+                const float *y_i = y + i * d;
+                for (size_t j = j0; j < i; j++) {
+                    const float *y_j = y + j * d;
+                    Y(i, j) = fvec_L2sqr(y_i, y_j, d);
+                }
             }
         }
 
