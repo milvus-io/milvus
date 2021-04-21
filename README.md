@@ -1,4 +1,4 @@
-![Milvuslogo](https://github.com/milvus-io/docs/blob/master/v0.9.1/assets/milvus_logo.png)
+![Milvuslogo](https://github.com/milvus-io/docs/blob/master/v1.0.0/assets/milvus_logo.png)
 [![Slack](https://img.shields.io/badge/Join-Slack-orange)](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ)
 ![GitHub](https://img.shields.io/github/license/milvus-io/milvus)
 ![Docker pulls](https://img.shields.io/docker/pulls/milvusdb/milvus)
@@ -16,9 +16,9 @@ As an open source vector similarity search engine, Milvus is easy-to-use, highly
 
 The following is Milvus architecture:
 
-![arch](https://github.com/milvus-io/docs/blob/master/v0.10.5/assets/milvus_arch.png)
+![arch](https://github.com/milvus-io/docs/blob/master/v1.0.0/assets/milvus_arch.png)
 
-For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/overview.md). See Milvus [release notes](https://www.milvus.io/docs/release_notes.md) to keep up-to-date with its releases and updates.
+For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/v1.0.0/overview.md). See Milvus [release notes](https://www.milvus.io/docs/v1.0.0/release_notes.md) to keep up-to-date with its releases and updates.
 
 Milvus is an incubation-stage project at [LF AI & Data Foundation](https://lfaidata.foundation/).
 
@@ -26,28 +26,28 @@ Milvus is an incubation-stage project at [LF AI & Data Foundation](https://lfaid
 
 ### Install Milvus
 
-See [Milvus install guide](https://www.milvus.io/docs/install_milvus.md) to install Milvus using Docker. To install Milvus from source code, see [build from source](INSTALL.md).
+See [Milvus install guide](https://www.milvus.io/docs/v1.0.0/install_milvus.md) to install Milvus using Docker. To install Milvus from source code, see [build from source](INSTALL.md).
 
 ### Try example programs
 
-Try an example program with Milvus using [Python](https://www.milvus.io/docs/example_code.md), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), [Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/master/sdk/examples).
+Try an example program with Milvus using [Python](https://github.com/milvus-io/pymilvus/tree/1.0/examples), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/1.0/examples), [Go](https://github.com/milvus-io/milvus-sdk-go/tree/1.0/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/1.0/sdk/examples).
 
 ## Supported clients
 
--   [Go](https://github.com/milvus-io/milvus-sdk-go)
--   [Python](https://github.com/milvus-io/pymilvus)
--   [Java](https://github.com/milvus-io/milvus-sdk-java)
--   [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
--   [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
+-   [Go](https://github.com/milvus-io/milvus-sdk-go/tree/1.0)
+-   [Python](https://github.com/milvus-io/pymilvus/tree/1.0)
+-   [Java](https://github.com/milvus-io/milvus-sdk-java/tree/1.0)
+-   [C++](https://github.com/milvus-io/milvus/tree/1.0/sdk)
+-   [RESTful API](https://github.com/milvus-io/milvus/tree/1.0/core/src/server/web_impl)
 -   [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) (Contributed by [arkie](https://www.arkie.cn/))
 
 ## Application scenarios
 
-You can use Milvus to build intelligent systems in a variety of AI application scenarios. See [Milvus Scenarios](https://milvus.io/scenarios) for live demos. You can also see [Milvus Bootcamp](https://github.com/milvus-io/bootcamp) for detailed solutions and application scenarios.
+You can use Milvus to build intelligent systems in a variety of AI application scenarios. See [Milvus Scenarios](https://milvus.io/scenarios) for live demos. You can also see [Milvus Bootcamp](https://github.com/milvus-io/bootcamp/tree/1.0) for detailed solutions and application scenarios.
 
 ## Benchmark
 
-See our [test reports](https://github.com/milvus-io/milvus/tree/master/docs) for more information about performance benchmarking of different indexes in Milvus.
+See our [test reports](https://github.com/milvus-io/milvus/tree/1.0/docs) for more information about performance benchmarking of different indexes in Milvus.
 
 ## Roadmap
 

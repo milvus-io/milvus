@@ -1,7 +1,5 @@
-
-![Milvuslogo](https://github.com/milvus-io/docs/blob/master/v0.9.1/assets/milvus_logo.png)
+![Milvuslogo](https://github.com/milvus-io/docs/blob/master/v1.0.0/assets/milvus_logo.png)
 [![Slack](https://img.shields.io/badge/Join-Slack-orange)](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ)
-
 ![GitHub](https://img.shields.io/github/license/milvus-io/milvus)
 ![Docker pulls](https://img.shields.io/docker/pulls/milvusdb/milvus)
 
@@ -21,9 +19,9 @@ Milvus 是一款开源的特征向量相似度搜索引擎，具有使用方便�
 
 Milvus 的架构如下：
 
-![arch](https://github.com/milvus-io/docs/blob/master/v0.10.5/assets/milvus_arch.png)
+![arch](https://github.com/milvus-io/docs/blob/master/v1.0.0/assets/milvus_arch.png)
 
-若要了解 Milvus 详细介绍和整体架构，请访问 [Milvus 简介](https://www.milvus.io/docs/overview.md)。你可以通过 [版本发布说明](https://www.milvus.io/docs/release_notes.md) 获取最新版本的功能和更新。
+若要了解 Milvus 详细介绍和整体架构，请访问 [Milvus 简介](https://www.milvus.io/docs/v1.0.0/overview.md)。你可以通过 [版本发布说明](https://www.milvus.io/docs/v1.0.0/release_notes.md) 获取最新版本的功能和更新。
 
 Milvus是一个 [LF AI & Data 基金会](https://lfaidata.foundation/)的孵化项目。获取更多，请访问[lfai.foundation](https://lfaidata.foundation/)。
 
@@ -31,28 +29,28 @@ Milvus是一个 [LF AI & Data 基金会](https://lfaidata.foundation/)的孵化�
 
 ### 安装 Milvus
 
-请参阅 [Milvus 安装指南](https://www.milvus.io/docs/install_milvus.md) 使用 Docker 容器安装 Milvus。若要基于源码编译，请访问 [源码安装](INSTALL.md)。
+请参阅 [Milvus 安装指南](https://www.milvus.io/docs/v1.0.0/install_milvus.md) 使用 Docker 容器安装 Milvus。若要基于源码编译，请访问 [源码安装](INSTALL.md)。
 
 ### 尝试示例代码
 
-你可以尝试用 [Python](https://www.milvus.io/docs/example_code.md)，[Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)，[Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples)，或者 [C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples) 运行 Milvus 示例代码。
+你可以尝试用 [Python](https://github.com/milvus-io/pymilvus/tree/1.0/examples)，[Java](https://github.com/milvus-io/milvus-sdk-java/tree/1.0/examples)，[Go](https://github.com/milvus-io/milvus-sdk-go/tree/1.0/examples)，或者 [C++](https://github.com/milvus-io/milvus/tree/1.0/sdk/examples) 运行 Milvus 示例代码。
 
 ## 支持的客户端
 
--   [Go](https://github.com/milvus-io/milvus-sdk-go)
--   [Python](https://github.com/milvus-io/pymilvus)
--   [Java](https://github.com/milvus-io/milvus-sdk-java)
--   [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
--   [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
+-   [Go](https://github.com/milvus-io/milvus-sdk-go/tree/1.0)
+-   [Python](https://github.com/milvus-io/pymilvus/tree/1.0)
+-   [Java](https://github.com/milvus-io/milvus-sdk-java/tree/1.0)
+-   [C++](https://github.com/milvus-io/milvus/tree/1.0/sdk)
+-   [RESTful API](https://github.com/milvus-io/milvus/tree/1.0/core/src/server/web_impl)
 -   [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) (由 [arkie](https://www.arkie.cn/) 提供)
 
 ## 应用场景
 
-Milvus 可以应用于多种 AI 场景。你可以访问 [Milvus 应用场景](https://milvus.io/scenarios) 体验在线场景展示。你也可以访问 [Milvus 训练营](https://github.com/milvus-io/bootcamp) 了解更详细的应用场景和解决方案。
+Milvus 可以应用于多种 AI 场景。你可以访问 [Milvus 应用场景](https://milvus.io/scenarios) 体验在线场景展示。你也可以访问 [Milvus 训练营](https://github.com/milvus-io/bootcamp/tree/1.0) 了解更详细的应用场景和解决方案。
 
 ## 性能基准测试
 
-关于 Milvus 性能基准的更多信息，请参考[测试报告](https://github.com/milvus-io/milvus/tree/master/docs)。
+关于 Milvus 性能基准的更多信息，请参考[测试报告](https://github.com/milvus-io/milvus/tree/1.0/docs)。
 
 ## 路线图
 
@@ -72,7 +70,7 @@ Milvus 可以应用于多种 AI 场景。你可以访问 [Milvus 应用场景](h
 
 ## 加入 Milvus 技术交流微信群
 
-![qrcode](https://github.com/milvus-io/docs/blob/v0.7.0/assets/qrcode.png)
+![qrcode](https://github.com/milvus-io/docs/blob/master/v1.0.0/assets/qrcode.png)
 
 ## 相关链接
 
