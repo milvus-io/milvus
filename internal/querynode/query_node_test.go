@@ -44,11 +44,8 @@ func setup() {
 	Params.Init()
 	//Params.QueryNodeID = 1
 	Params.initQueryTimeTickChannelName()
-	Params.initSearchResultChannelNames()
 	Params.initStatsChannelName()
-	Params.initSearchChannelNames()
 	Params.MetaRootPath = "/etcd/test/root/querynode"
-
 }
 
 func genTestCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.CollectionInfo {
@@ -198,8 +195,6 @@ func refreshChannelNames() {
 	suffix := "-test-query-node" + strconv.FormatInt(rand.Int63n(1000000), 10)
 	Params.DDChannelNames = makeNewChannelNames(Params.DDChannelNames, suffix)
 	Params.InsertChannelNames = makeNewChannelNames(Params.InsertChannelNames, suffix)
-	Params.SearchChannelNames = makeNewChannelNames(Params.SearchChannelNames, suffix)
-	Params.SearchResultChannelNames = makeNewChannelNames(Params.SearchResultChannelNames, suffix)
 	Params.StatsChannelName = Params.StatsChannelName + suffix
 }
 

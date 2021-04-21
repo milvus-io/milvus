@@ -137,18 +137,6 @@ func TestParamTable_insertChannelNames(t *testing.T) {
 	assert.Equal(t, contains, true)
 }
 
-func TestParamTable_searchChannelNames(t *testing.T) {
-	names := Params.SearchChannelNames
-	assert.Equal(t, len(names), 1)
-	contains := strings.Contains(names[0], "search-0")
-	assert.Equal(t, contains, true)
-}
-
-func TestParamTable_searchResultChannelNames(t *testing.T) {
-	names := Params.SearchResultChannelNames
-	assert.NotNil(t, names)
-}
-
 func TestParamTable_msgChannelSubName(t *testing.T) {
 	name := Params.MsgChannelSubName
 	expectName := fmt.Sprintf("queryNode-%d", Params.QueryNodeID)

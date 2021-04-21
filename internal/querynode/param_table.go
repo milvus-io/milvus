@@ -58,8 +58,6 @@ type ParamTable struct {
 	DDPulsarBufSize  int64
 
 	// search
-	SearchChannelNames         []string
-	SearchResultChannelNames   []string
 	SearchReceiveBufSize       int64
 	SearchPulsarBufSize        int64
 	SearchResultReceiveBufSize int64
@@ -133,8 +131,6 @@ func (p *ParamTable) Init() {
 		p.initDDReceiveBufSize()
 		p.initDDPulsarBufSize()
 
-		//p.initSearchChannelNames()
-		//p.initSearchResultChannelNames()
 		p.initSearchReceiveBufSize()
 		p.initSearchPulsarBufSize()
 		p.initSearchResultReceiveBufSize()
@@ -349,46 +345,6 @@ func (p *ParamTable) initInsertChannelNames() {
 	}
 	start := index * sep
 	p.InsertChannelNames = ret[start : start+sep]
-}
-
-func (p *ParamTable) initSearchChannelNames() {
-	prefix, err := p.Load("msgChannel.chanNamePrefix.search")
-	if err != nil {
-		log.Error(err.Error())
-	}
-	prefix += "-"
-	channelRange, err := p.Load("msgChannel.channelRange.search")
-	if err != nil {
-		panic(err)
-	}
-
-	channelIDs := paramtable.ConvertRangeToIntSlice(channelRange, ",")
-
-	var ret []string
-	for _, ID := range channelIDs {
-		ret = append(ret, prefix+strconv.Itoa(ID))
-	}
-	p.SearchChannelNames = ret
-}
-
-func (p *ParamTable) initSearchResultChannelNames() {
-	prefix, err := p.Load("msgChannel.chanNamePrefix.searchResult")
-	if err != nil {
-		log.Error(err.Error())
-	}
-	prefix += "-"
-	channelRange, err := p.Load("msgChannel.channelRange.searchResult")
-	if err != nil {
-		panic(err)
-	}
-
-	channelIDs := paramtable.ConvertRangeToIntSlice(channelRange, ",")
-
-	var ret []string
-	for _, ID := range channelIDs {
-		ret = append(ret, prefix+strconv.Itoa(ID))
-	}
-	p.SearchResultChannelNames = ret
 }
 
 func (p *ParamTable) initMsgChannelSubName() {
