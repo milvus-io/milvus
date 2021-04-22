@@ -17,19 +17,6 @@ dataNode:
       maxQueueLength: 1024
       maxParallelism: 1024
 
-  msgStream:
-    dataDefinition:
-      recvBufSize: 64 # msgPack chan buffer size
-      pulsarBufSize: 64 # pulsar chan buffer size
-
-    insert:
-      recvBufSize: 1024 # msgPack chan buffer size
-      pulsarBufSize: 1024 # pulsar chan buffer size
-
-    delete:
-      recvBufSize: 1024 # msgPack chan buffer size
-      pulsarBufSize: 1024 # pulsar chan buffer size
-
   flush:
     # max buffer size to flush
     insertBufSize: 32000 # number of rows
