@@ -399,8 +399,8 @@ func (sched *TaskScheduler) queryResultLoop() {
 	defer sched.wg.Done()
 
 	queryResultMsgStream, _ := sched.msFactory.NewQueryMsgStream(sched.ctx)
-	queryResultMsgStream.AsConsumer(Params.SearchResultChannelNames, Params.ProxySubName)
-	log.Debug("proxynode", zap.Strings("search result channel names", Params.SearchResultChannelNames))
+	queryResultMsgStream.AsConsumer(Params.QueryResultChannelNames, Params.ProxySubName)
+	log.Debug("proxynode", zap.Strings("search result channel names", Params.QueryResultChannelNames))
 	log.Debug("proxynode", zap.String("proxySubName", Params.ProxySubName))
 	queryNodeNum := Params.QueryNodeNum
 

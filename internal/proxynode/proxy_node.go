@@ -145,8 +145,8 @@ func (node *ProxyNode) Init() error {
 			return errors.New(resp.Status.Reason)
 		}
 
-		Params.SearchChannelNames = []string{resp.RequestChannel}
-		Params.SearchResultChannelNames = []string{resp.ResultChannel}
+		Params.QueryChannelNames = []string{resp.RequestChannel}
+		Params.QueryResultChannelNames = []string{resp.ResultChannel}
 	}
 
 	// todo
@@ -165,9 +165,9 @@ func (node *ProxyNode) Init() error {
 	}
 
 	node.queryMsgStream, _ = node.msFactory.NewQueryMsgStream(node.ctx)
-	node.queryMsgStream.AsProducer(Params.SearchChannelNames)
+	node.queryMsgStream.AsProducer(Params.QueryChannelNames)
 	// FIXME(wxyu): use log.Debug instead
-	log.Debug("proxynode", zap.Strings("proxynode AsProducer:", Params.SearchChannelNames))
+	log.Debug("proxynode", zap.Strings("proxynode AsProducer:", Params.QueryChannelNames))
 	log.Debug("create query message stream ...")
 
 	masterAddr := Params.MasterAddress
