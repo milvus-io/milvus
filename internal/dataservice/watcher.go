@@ -107,10 +107,6 @@ func (watcher *dataNodeTimeTickWatcher) handleTimeTickMsg(msg *msgstream.TimeTic
 				log.Error("get segment from meta error", zap.Int64("segmentID", id), zap.Error(err))
 				continue
 			}
-			if err = watcher.meta.SetSegmentState(id, commonpb.SegmentState_Sealed); err != nil {
-				log.Error("set segment state error", zap.Int64("segmentID", id), zap.Error(err))
-				continue
-			}
 			collID, segID := sInfo.CollectionID, sInfo.ID
 			coll2Segs[collID] = append(coll2Segs[collID], segID)
 			watcher.allocator.DropSegment(ctx, id)
