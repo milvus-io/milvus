@@ -18,12 +18,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
 func GetPulsarConfig(protocol, ip, port, url string) (map[string]interface{}, error) {

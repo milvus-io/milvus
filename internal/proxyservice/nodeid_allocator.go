@@ -14,8 +14,8 @@ package proxyservice
 import (
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/allocator"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type UniqueID = typeutil.UniqueID

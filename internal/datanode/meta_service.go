@@ -18,12 +18,12 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/types"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/types"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
 type metaService struct {

@@ -24,9 +24,9 @@ import (
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 const (

@@ -14,8 +14,8 @@ package components
 import (
 	"context"
 
-	grpcproxynode "github.com/zilliztech/milvus-distributed/internal/distributed/proxynode"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	grpcproxynode "github.com/milvus-io/milvus/internal/distributed/proxynode"
+	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
 type ProxyNode struct {

@@ -11,8 +11,8 @@
 package dataservice
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"go.uber.org/zap"
 )
 

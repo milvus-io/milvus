@@ -19,11 +19,11 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/cmd/distributed/components"
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/logutil"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proxynode"
+	"github.com/milvus-io/milvus/cmd/distributed/components"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/logutil"
+	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proxynode"
 )
 
 func main() {

@@ -14,7 +14,7 @@ package proxyservice
 import (
 	"testing"
 
-	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 )
 

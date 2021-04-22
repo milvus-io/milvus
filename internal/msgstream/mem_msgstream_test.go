@@ -16,9 +16,9 @@ import (
 	"log"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 func mGetTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {

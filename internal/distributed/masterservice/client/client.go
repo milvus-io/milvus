@@ -15,12 +15,12 @@ import (
 	"context"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/masterpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"google.golang.org/grpc"
 )
 

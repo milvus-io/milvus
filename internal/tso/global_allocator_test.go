@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 )
 
 var gTestTsoAllocator *GlobalTSOAllocator

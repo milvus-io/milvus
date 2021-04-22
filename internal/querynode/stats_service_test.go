@@ -14,8 +14,8 @@ package querynode
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
 // NOTE: start pulsar before test

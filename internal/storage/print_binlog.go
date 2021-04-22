@@ -18,9 +18,9 @@ import (
 	"syscall"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
 func PrintBinlogFiles(fileList []string) error {

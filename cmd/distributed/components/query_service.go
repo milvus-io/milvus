@@ -14,8 +14,8 @@ package components
 import (
 	"context"
 
-	grpcqueryservice "github.com/zilliztech/milvus-distributed/internal/distributed/queryservice"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	grpcqueryservice "github.com/milvus-io/milvus/internal/distributed/queryservice"
+	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
 type QueryService struct {

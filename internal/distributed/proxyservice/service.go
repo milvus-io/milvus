@@ -21,17 +21,17 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/proxyservice"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/trace"
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
-	"github.com/zilliztech/milvus-distributed/internal/proxyservice"
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 	"google.golang.org/grpc"
 )
 

@@ -22,11 +22,11 @@ import (
 	"io"
 	"strings"
 
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/performance"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/util/performance"
-	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 	"go.uber.org/zap"
 )
 

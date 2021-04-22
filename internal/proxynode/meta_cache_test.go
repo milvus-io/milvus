@@ -15,13 +15,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zilliztech/milvus-distributed/internal/types"
+	"github.com/milvus-io/milvus/internal/types"
 
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type MockMasterClientInterface struct {

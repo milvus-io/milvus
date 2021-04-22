@@ -11,7 +11,7 @@
 
 package rocksmq
 
-import server "github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
+import server "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 
 type SubscriptionInitialPosition int
 type UniqueID = server.UniqueID

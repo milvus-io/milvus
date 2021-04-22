@@ -15,11 +15,11 @@ import (
 	"sync"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/milvus-io/milvus/internal/kv"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
 const (

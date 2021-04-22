@@ -12,7 +12,7 @@
 package flowgraph
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
 type Msg interface {

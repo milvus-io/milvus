@@ -19,12 +19,12 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
-	"github.com/zilliztech/milvus-distributed/internal/allocator"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
 
 type TaskQueue interface {

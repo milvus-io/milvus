@@ -1,4 +1,4 @@
-module github.com/zilliztech/milvus-distributed
+module github.com/milvus-io/milvus
 
 go 1.15
 

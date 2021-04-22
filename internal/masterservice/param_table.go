@@ -17,8 +17,8 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 var Params ParamTable

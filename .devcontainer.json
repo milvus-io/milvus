@@ -3,7 +3,7 @@
     "dockerComposeFile": ["./docker-compose-devcontainer.yml"],
     "service": "ubuntu",
     "initializeCommand": "scripts/devcontainer.sh && docker-compose -f docker-compose-devcontainer.yml down || true",
-    "workspaceFolder": "/go/src/github.com/zilliztech/milvus-distributed",
+    "workspaceFolder": "/go/src/github.com/milvus-io/milvus",
     "shutdownAction": "stopCompose",
     "remoteEnv": { "GOPROXY": "https://goproxy.cn" },
     "extensions": [

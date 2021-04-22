@@ -18,10 +18,10 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/msgstream"
 	"go.uber.org/zap"
 )
 

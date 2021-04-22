@@ -15,11 +15,11 @@ import (
 	"context"
 	"time"
 
-	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
-	"github.com/zilliztech/milvus-distributed/internal/util/retry"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"go.etcd.io/etcd/clientv3"
 
 	"go.uber.org/zap"

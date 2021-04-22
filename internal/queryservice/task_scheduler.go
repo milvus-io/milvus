@@ -20,9 +20,9 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/trace"
 	oplog "github.com/opentracing/opentracing-go/log"
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
 
 type TaskQueue interface {

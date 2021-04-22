@@ -21,23 +21,23 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/allocator"
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	"github.com/zilliztech/milvus-distributed/internal/types"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 const (

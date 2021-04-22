@@ -19,12 +19,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/spf13/cast"
 	"github.com/spf13/viper"
-	memkv "github.com/zilliztech/milvus-distributed/internal/kv/mem"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type UniqueID = typeutil.UniqueID

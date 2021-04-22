@@ -14,8 +14,8 @@ package typeutil
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
 
 func TestCompareIndexParams(t *testing.T) {

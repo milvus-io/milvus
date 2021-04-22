@@ -22,18 +22,18 @@ import (
 
 	"go.uber.org/zap"
 
+	grpcindexserviceclient "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
+	"github.com/milvus-io/milvus/internal/indexnode"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/trace"
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
-	grpcindexserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/indexservice/client"
-	"github.com/zilliztech/milvus-distributed/internal/indexnode"
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-	"github.com/zilliztech/milvus-distributed/internal/types"
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 	"google.golang.org/grpc"
 )
 

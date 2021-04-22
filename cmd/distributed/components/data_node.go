@@ -14,9 +14,9 @@ package components
 import (
 	"context"
 
-	grpcdatanode "github.com/zilliztech/milvus-distributed/internal/distributed/datanode"
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	grpcdatanode "github.com/milvus-io/milvus/internal/distributed/datanode"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
 type DataNode struct {

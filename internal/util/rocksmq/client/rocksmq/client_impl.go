@@ -15,8 +15,8 @@ import (
 	"context"
 	"reflect"
 
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	server "github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
+	"github.com/milvus-io/milvus/internal/log"
+	server "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 )
 
 type client struct {

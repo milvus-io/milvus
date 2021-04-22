@@ -20,26 +20,26 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/logutil"
+	"github.com/milvus-io/milvus/internal/logutil"
 
 	"go.uber.org/zap"
 
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/internal/dataservice"
+	msc "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/trace"
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
-	"github.com/zilliztech/milvus-distributed/internal/dataservice"
-	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/types"
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
 type Server struct {

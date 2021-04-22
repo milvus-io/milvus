@@ -19,14 +19,14 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/zilliztech/milvus-distributed/internal/logutil"
+	"github.com/milvus-io/milvus/internal/logutil"
 
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/log"
+	ms "github.com/milvus-io/milvus/internal/msgstream"
 )
 
 type (

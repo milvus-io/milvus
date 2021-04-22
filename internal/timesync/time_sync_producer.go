@@ -15,13 +15,13 @@ import (
 	"context"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/logutil"
+	"github.com/milvus-io/milvus/internal/logutil"
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/log"
+	ms "github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
 type MsgProducer struct {

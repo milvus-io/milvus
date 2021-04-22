@@ -17,14 +17,14 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	"github.com/zilliztech/milvus-distributed/internal/types"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type Cache interface {

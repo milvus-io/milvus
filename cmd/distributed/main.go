@@ -18,7 +18,7 @@ import (
 	"path"
 	"syscall"
 
-	"github.com/zilliztech/milvus-distributed/cmd/distributed/roles"
+	"github.com/milvus-io/milvus/cmd/distributed/roles"
 )
 
 func run(serverType, runtTimeDir string) error {

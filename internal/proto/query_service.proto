@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package milvus.proto.query;
 
-option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/querypb";
+option go_package = "github.com/milvus-io/milvus/internal/proto/querypb";
 
 import "common.proto";
 import "milvus.proto";

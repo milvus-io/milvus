@@ -14,7 +14,7 @@ package grpcdataserviceclient
 import (
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 type ParamTable struct {

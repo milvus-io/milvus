@@ -16,8 +16,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
 func TestBinlogWriterReader(t *testing.T) {

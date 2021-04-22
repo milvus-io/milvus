@@ -14,8 +14,8 @@ package components
 import (
 	"context"
 
-	grpcdataserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	grpcdataserviceclient "github.com/milvus-io/milvus/internal/distributed/dataservice"
+	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
 type DataService struct {

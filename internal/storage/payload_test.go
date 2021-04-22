@@ -15,9 +15,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
 func TestPayload_ReaderandWriter(t *testing.T) {

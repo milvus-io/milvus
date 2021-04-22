@@ -11,7 +11,7 @@
 
 package typeutil
 
-import "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+import "github.com/milvus-io/milvus/internal/proto/commonpb"
 
 func CompareIndexParams(indexParam1 []*commonpb.KeyValuePair, indexParam2 []*commonpb.KeyValuePair) bool {
 	if indexParam1 == nil && indexParam2 == nil {

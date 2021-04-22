@@ -17,9 +17,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 func TestQueryService_Init(t *testing.T) {
