@@ -80,11 +80,17 @@ func TestGetInsertChannels(t *testing.T) {
 }
 
 func TestAssignSegmentID(t *testing.T) {
+	const collID = 100
+	const collIDInvalid = 101
+	const partID = 0
+	const channel0 = "channel0"
+	const channel1 = "channel1"
+
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
 	svr.meta.AddCollection(&datapb.CollectionInfo{
-		ID:         0,
+		ID:         collID,
 		Schema:     schema,
 		Partitions: []int64{},
 	})
@@ -93,17 +99,17 @@ func TestAssignSegmentID(t *testing.T) {
 	maxCount := int(Params.SegmentSize * 1024 * 1024 / float64(recordSize))
 
 	cases := []struct {
-		Description  string
 		CollectionID UniqueID
 		PartitionID  UniqueID
 		ChannelName  string
 		Count        uint32
-		IsSuccess    bool
+		Success    	 bool
+		Description  string
 	}{
-		{"assign segment normally", 0, 0, "channel0", 1000, true},
-		{"assign segment with unexisted collection", 1, 0, "channel0", 1000, false},
-		{"assign with max count", 0, 0, "channel0", uint32(maxCount), true},
-		{"assign with max uint32 count", 0, 0, "channel1", math.MaxUint32, false},
+		{collID, partID, channel0, 1000, true, "assign segment normally"},
+		{collIDInvalid, partID, channel0, 1000, false, "assign segment with invalid collection"},
+		{collID, partID, channel0, uint32(maxCount), true, "assign with max count"},
+		{collID, partID, channel1, math.MaxUint32, false, "assign with max uint32 count"},
 	}
 
 	for _, test := range cases {
@@ -123,7 +129,7 @@ func TestAssignSegmentID(t *testing.T) {
 			assert.Nil(t, err)
 			assert.EqualValues(t, 1, len(resp.SegIDAssignments))
 			assign := resp.SegIDAssignments[0]
-			if test.IsSuccess {
+			if test.Success {
 				assert.EqualValues(t, commonpb.ErrorCode_Success, assign.Status.ErrorCode)
 				assert.EqualValues(t, test.CollectionID, assign.CollectionID)
 				assert.EqualValues(t, test.PartitionID, assign.PartitionID)
