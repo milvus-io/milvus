@@ -19,10 +19,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/milvus-io/milvus/internal/allocator"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/stretchr/testify/assert"
-	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"go.etcd.io/etcd/clientv3"
 )
 

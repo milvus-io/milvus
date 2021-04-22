@@ -16,8 +16,8 @@ import (
 	"io"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type baseEventHeader struct {

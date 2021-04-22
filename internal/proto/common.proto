@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 package milvus.proto.common;
-option go_package="github.com/zilliztech/milvus-distributed/internal/proto/commonpb";
+option go_package="github.com/milvus-io/milvus/internal/proto/commonpb";
 
 
 enum ErrorCode {

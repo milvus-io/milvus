@@ -22,15 +22,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/clientv3"
 
-	"github.com/zilliztech/milvus-distributed/internal/allocator"
-	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-	"github.com/zilliztech/milvus-distributed/internal/util/mqclient"
-	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
-	client "github.com/zilliztech/milvus-distributed/internal/util/rocksmq/client/rocksmq"
-	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
+	"github.com/milvus-io/milvus/internal/allocator"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/mqclient"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+	client "github.com/milvus-io/milvus/internal/util/rocksmq/client/rocksmq"
+	"github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 )
 
 var Params paramtable.BaseTable

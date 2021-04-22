@@ -14,8 +14,8 @@ package grpcproxynode
 import (
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 type ParamTable struct {

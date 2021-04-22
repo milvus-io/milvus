@@ -12,9 +12,9 @@
 package allocator
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/kv"
-	"github.com/zilliztech/milvus-distributed/internal/tso"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/tso"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type GIDAllocator interface {

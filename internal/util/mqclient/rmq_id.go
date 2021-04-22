@@ -14,7 +14,7 @@ package mqclient
 import (
 	"encoding/binary"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
+	"github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 )
 
 type rmqID struct {

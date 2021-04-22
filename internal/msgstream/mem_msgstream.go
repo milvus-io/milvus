@@ -18,7 +18,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 )
 
 type MemMsgStream struct {

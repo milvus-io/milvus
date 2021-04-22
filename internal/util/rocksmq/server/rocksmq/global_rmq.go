@@ -15,9 +15,9 @@ import (
 	"os"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/milvus-io/milvus/internal/allocator"
 
-	rocksdbkv "github.com/zilliztech/milvus-distributed/internal/kv/rocksdb"
+	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 )
 
 var Rmq *rocksmq

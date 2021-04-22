@@ -179,9 +179,9 @@ const char descriptor_table_protodef_index_5fcgo_5fmsg_2eproto[] PROTOBUF_SECTIO
   "ms\0221\n\006params\030\001 \003(\0132!.milvus.proto.common"
   ".KeyValuePair\"$\n\006Binary\022\013\n\003key\030\001 \001(\t\022\r\n\005"
   "value\030\002 \001(\014\"9\n\tBinarySet\022,\n\005datas\030\001 \003(\0132"
-  "\035.milvus.proto.indexcgo.BinaryBDZBgithub"
-  ".com/zilliztech/milvus-distributed/inter"
-  "nal/proto/indexcgopbb\006proto3"
+  "\035.milvus.proto.indexcgo.BinaryB7Z5github"
+  ".com/milvus-io/milvus/internal/proto/ind"
+  "excgopbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_index_5fcgo_5fmsg_2eproto_deps[1] = {
   &::descriptor_table_common_2eproto,
@@ -196,7 +196,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_ind
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_index_5fcgo_5fmsg_2eproto_once;
 static bool descriptor_table_index_5fcgo_5fmsg_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_index_5fcgo_5fmsg_2eproto = {
-  &descriptor_table_index_5fcgo_5fmsg_2eproto_initialized, descriptor_table_protodef_index_5fcgo_5fmsg_2eproto, "index_cgo_msg.proto", 428,
+  &descriptor_table_index_5fcgo_5fmsg_2eproto_initialized, descriptor_table_protodef_index_5fcgo_5fmsg_2eproto, "index_cgo_msg.proto", 415,
   &descriptor_table_index_5fcgo_5fmsg_2eproto_once, descriptor_table_index_5fcgo_5fmsg_2eproto_sccs, descriptor_table_index_5fcgo_5fmsg_2eproto_deps, 5, 1,
   schemas, file_default_instances, TableStruct_index_5fcgo_5fmsg_2eproto::offsets,
   file_level_metadata_index_5fcgo_5fmsg_2eproto, 5, file_level_enum_descriptors_index_5fcgo_5fmsg_2eproto, file_level_service_descriptors_index_5fcgo_5fmsg_2eproto,

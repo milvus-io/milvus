@@ -15,12 +15,12 @@ import (
 	"os"
 	"testing"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq/client/rocksmq"
-	rocksmq1 "github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
+	"github.com/milvus-io/milvus/internal/util/rocksmq/client/rocksmq"
+	rocksmq1 "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 )
 
 var Params paramtable.BaseTable

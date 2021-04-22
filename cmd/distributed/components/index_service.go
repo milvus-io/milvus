@@ -14,7 +14,7 @@ package components
 import (
 	"context"
 
-	grpcindexserver "github.com/zilliztech/milvus-distributed/internal/distributed/indexservice"
+	grpcindexserver "github.com/milvus-io/milvus/internal/distributed/indexservice"
 )
 
 type IndexService struct {

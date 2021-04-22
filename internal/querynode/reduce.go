@@ -27,7 +27,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/milvus-io/milvus/internal/log"
 )
 
 type SearchResult struct {

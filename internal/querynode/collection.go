@@ -24,8 +24,8 @@ package querynode
 import "C"
 import (
 	"github.com/golang/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"go.uber.org/zap"
 	"unsafe"
 )

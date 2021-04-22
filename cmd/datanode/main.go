@@ -17,15 +17,15 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/zilliztech/milvus-distributed/internal/logutil"
+	"github.com/milvus-io/milvus/internal/logutil"
 
 	"go.uber.org/zap"
 
-	dn "github.com/zilliztech/milvus-distributed/internal/datanode"
+	dn "github.com/milvus-io/milvus/internal/datanode"
 
-	distributed "github.com/zilliztech/milvus-distributed/cmd/distributed/components"
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	distributed "github.com/milvus-io/milvus/cmd/distributed/components"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
 func main() {

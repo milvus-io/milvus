@@ -19,7 +19,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
 func TestPlan_Plan(t *testing.T) {

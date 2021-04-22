@@ -14,7 +14,7 @@ package typeutil
 import (
 	"strconv"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {

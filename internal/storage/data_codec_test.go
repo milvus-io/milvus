@@ -15,9 +15,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
 func TestInsertCodec(t *testing.T) {

@@ -11,7 +11,7 @@
 
 package indexservice
 
-import "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+import "github.com/milvus-io/milvus/internal/proto/commonpb"
 
 func CompareAddress(a *commonpb.Address, b *commonpb.Address) bool {
 	if a == b {

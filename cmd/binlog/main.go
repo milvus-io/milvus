@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/zilliztech/milvus-distributed/internal/storage"
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 func main() {

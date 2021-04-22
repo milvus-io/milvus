@@ -23,13 +23,13 @@ package grpcqueryserviceclient
 //	"github.com/golang/protobuf/proto"
 //	"github.com/stretchr/testify/assert"
 //
-//	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-//	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
-//	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-//	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-//	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-//	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
-//	qs "github.com/zilliztech/milvus-distributed/internal/queryservice"
+//	"github.com/milvus-io/milvus/internal/msgstream"
+//	"github.com/milvus-io/milvus/internal/msgstream/pulsarms"
+//	"github.com/milvus-io/milvus/internal/proto/commonpb"
+//	"github.com/milvus-io/milvus/internal/proto/internalpb"
+//	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+//	"github.com/milvus-io/milvus/internal/proto/querypb"
+//	qs "github.com/milvus-io/milvus/internal/queryservice"
 //)
 //
 //const (

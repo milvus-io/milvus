@@ -14,8 +14,8 @@ package components
 import (
 	"context"
 
-	grpcquerynode "github.com/zilliztech/milvus-distributed/internal/distributed/querynode"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
+	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
 type QueryNode struct {

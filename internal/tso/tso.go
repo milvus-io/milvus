@@ -32,10 +32,10 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/pkg/errors"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 const (

@@ -15,9 +15,9 @@ import (
 	"context"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
-	"github.com/zilliztech/milvus-distributed/internal/util/trace"
 )
 
 type taskScheduler struct {

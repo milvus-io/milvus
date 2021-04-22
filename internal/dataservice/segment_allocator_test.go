@@ -18,9 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 
 	"github.com/stretchr/testify/assert"
 )

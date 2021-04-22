@@ -1,7 +1,7 @@
 syntax = "proto3";
 package milvus.proto.milvus;
 
-option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/milvuspb";
+option go_package = "github.com/milvus-io/milvus/internal/proto/milvuspb";
 
 import "common.proto";
 import "schema.proto";

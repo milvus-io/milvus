@@ -17,16 +17,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
 func ttStreamProduceLoop(ctx context.Context, ttStream msgstream.MsgStream, durationInterval time.Duration, sourceID int64) {

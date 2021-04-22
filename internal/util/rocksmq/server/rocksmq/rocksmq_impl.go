@@ -18,14 +18,14 @@ import (
 
 	"errors"
 
-	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/milvus-io/milvus/internal/allocator"
 
+	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/tecbot/gorocksdb"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
-	memkv "github.com/zilliztech/milvus-distributed/internal/kv/mem"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 )
 
 type UniqueID = typeutil.UniqueID

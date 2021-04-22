@@ -19,14 +19,14 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/kv"
-	minioKV "github.com/zilliztech/milvus-distributed/internal/kv/minio"
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/storage"
-	"github.com/zilliztech/milvus-distributed/internal/types"
+	"github.com/milvus-io/milvus/internal/kv"
+	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/types"
 )
 
 // segmentLoader is only responsible for loading the field data from binlog

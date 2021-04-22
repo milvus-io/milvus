@@ -15,10 +15,10 @@ import (
 	"context"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/milvus-io/milvus/internal/util/mqclient"
+	"github.com/milvus-io/milvus/internal/util/rocksmq/client/rocksmq"
+	rocksmqserver "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 	"github.com/mitchellh/mapstructure"
-	"github.com/zilliztech/milvus-distributed/internal/util/mqclient"
-	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq/client/rocksmq"
-	rocksmqserver "github.com/zilliztech/milvus-distributed/internal/util/rocksmq/server/rocksmq"
 )
 
 type PmsFactory struct {

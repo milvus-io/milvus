@@ -15,7 +15,7 @@ import (
 	"path"
 	"time"
 
-	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"go.etcd.io/etcd/clientv3"
 )
 

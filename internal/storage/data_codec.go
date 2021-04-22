@@ -20,10 +20,10 @@ import (
 
 	"errors"
 
-	ms "github.com/zilliztech/milvus-distributed/internal/masterservice"
-	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	ms "github.com/milvus-io/milvus/internal/masterservice"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 const (

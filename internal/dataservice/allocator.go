@@ -13,10 +13,10 @@ package dataservice
 import (
 	"context"
 
-	"github.com/zilliztech/milvus-distributed/internal/types"
+	"github.com/milvus-io/milvus/internal/types"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/masterpb"
 )
 
 type allocatorInterface interface {

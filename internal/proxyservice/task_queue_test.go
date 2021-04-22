@@ -18,8 +18,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/log"
 )
 
 func TestBaseTaskQueue_Enqueue(t *testing.T) {

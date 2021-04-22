@@ -11,15 +11,15 @@
 package dataservice
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/log"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/util/trace"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/trace"
 	"go.uber.org/zap"
 
 	"golang.org/x/net/context"
 
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
 type proxyTimeTickWatcher struct {

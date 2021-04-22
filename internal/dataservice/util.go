@@ -13,7 +13,7 @@ package dataservice
 import (
 	"errors"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 )
 
 type Response interface {

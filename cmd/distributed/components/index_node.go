@@ -14,7 +14,7 @@ package components
 import (
 	"context"
 
-	grpcindexnode "github.com/zilliztech/milvus-distributed/internal/distributed/indexnode"
+	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
 )
 
 type IndexNode struct {

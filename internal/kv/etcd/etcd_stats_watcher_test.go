@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 	"go.etcd.io/etcd/clientv3"
 )
 

@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/log"
+	"github.com/milvus-io/milvus/internal/log"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
