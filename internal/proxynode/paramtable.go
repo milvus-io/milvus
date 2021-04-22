@@ -50,8 +50,8 @@ type ParamTable struct {
 	ProxyID                            UniqueID
 	TimeTickInterval                   time.Duration
 	K2SChannelNames                    []string
-	QueryChannelNames                  []string
-	QueryResultChannelNames            []string
+	SearchChannelNames                 []string
+	SearchResultChannelNames           []string
 	ProxySubName                       string
 	ProxyTimeTickChannelNames          []string
 	MsgStreamInsertBufSize             int64

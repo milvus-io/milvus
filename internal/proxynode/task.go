@@ -563,7 +563,7 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 		Value: queryBytes,
 	}
 
-	st.ResultChannelID = Params.QueryResultChannelNames[0]
+	st.ResultChannelID = Params.SearchResultChannelNames[0]
 	st.DbID = 0 // todo
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil { // err is not nil if collection not exists

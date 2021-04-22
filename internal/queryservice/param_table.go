@@ -41,9 +41,9 @@ type ParamTable struct {
 	Log      log.Config
 	RoleName string
 
-	// query
-	QueryChannelName       string
-	QueryResultChannelName string
+	// search
+	SearchChannelName       string
+	SearchResultChannelName string
 }
 
 var Params ParamTable
@@ -74,8 +74,8 @@ func (p *ParamTable) Init() {
 		p.initTimeTickChannelName()
 		p.initQueryServiceAddress()
 		p.initRoleName()
-		p.initQueryChannelName()
-		p.initQueryResultChannelName()
+		p.initSearchChannelName()
+		p.initSearchResultChannelName()
 	})
 }
 
@@ -147,20 +147,20 @@ func (p *ParamTable) initRoleName() {
 	p.RoleName = fmt.Sprintf("%s-%d", "QueryService", p.NodeID)
 }
 
-func (p *ParamTable) initQueryChannelName() {
-	channelName, err := p.Load("msgChannel.chanNamePrefix.query")
+func (p *ParamTable) initSearchChannelName() {
+	channelName, err := p.Load("msgChannel.chanNamePrefix.search")
 	if err != nil {
 		log.Error(err.Error())
 	}
 
-	p.QueryChannelName = channelName
+	p.SearchChannelName = channelName
 }
 
-func (p *ParamTable) initQueryResultChannelName() {
-	channelName, err := p.Load("msgChannel.chanNamePrefix.queryResult")
+func (p *ParamTable) initSearchResultChannelName() {
+	channelName, err := p.Load("msgChannel.chanNamePrefix.searchResult")
 	if err != nil {
 		log.Error(err.Error())
 	}
 
-	p.QueryResultChannelName = channelName
+	p.SearchResultChannelName = channelName
 }

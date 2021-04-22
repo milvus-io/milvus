@@ -402,10 +402,10 @@ func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.Rele
 
 func (qs *QueryService) CreateQueryChannel(ctx context.Context) (*querypb.CreateQueryChannelResponse, error) {
 	channelID := len(qs.queryChannels)
-	queryPrefix := Params.QueryChannelName
-	queryResultPrefix := Params.QueryResultChannelName
-	allocatedQueryChannel := queryPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
-	allocatedQueryResultChannel := queryResultPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
+	searchPrefix := Params.SearchChannelName
+	searchResultPrefix := Params.SearchResultChannelName
+	allocatedQueryChannel := searchPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
+	allocatedQueryResultChannel := searchResultPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
 
 	qs.qcMutex.Lock()
 	qs.queryChannels = append(qs.queryChannels, &queryChannelInfo{
