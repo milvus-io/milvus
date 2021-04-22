@@ -395,10 +395,6 @@ type GlobalParamsTable struct {
 	ProxySubName                       string
 	ProxyTimeTickChannelNames          []string
 	DataDefinitionChannelNames         []string
-	MsgStreamInsertBufSize             int64
-	MsgStreamSearchBufSize             int64
-	MsgStreamSearchResultBufSize       int64
-	MsgStreamSearchResultPulsarBufSize int64
 	MsgStreamTimeTickBufSize           int64
 	MaxNameLength                      int64
 	MaxFieldNum                        int64
