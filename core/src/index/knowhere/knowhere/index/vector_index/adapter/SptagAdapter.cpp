@@ -22,7 +22,7 @@ ConvertToMetadataSet(const DatasetPtr& dataset_ptr) {
     auto p_id = new int64_t[elems];
     for (int64_t i = 0; i < elems; ++i) p_id[i] = i;
 
-    auto p_offset = new int64_t[(elems + 1)];
+    auto p_offset = new int64_t[elems + 1];
     for (int64_t i = 0; i <= elems; ++i) p_offset[i] = i * 8;
 
     std::shared_ptr<SPTAG::MetadataSet> metaset(
