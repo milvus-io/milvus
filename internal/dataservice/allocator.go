@@ -38,7 +38,7 @@ func (allocator *allocator) allocTimestamp() (Timestamp, error) {
 	ctx := context.TODO()
 	resp, err := allocator.masterClient.AllocTimestamp(ctx, &masterpb.AllocTimestampRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_ShowCollections,
+			MsgType:   commonpb.MsgType_RequestTSO,
 			MsgID:     -1, // todo add msg id
 			Timestamp: 0,  // todo
 			SourceID:  Params.NodeID,
@@ -55,7 +55,7 @@ func (allocator *allocator) allocID() (UniqueID, error) {
 	ctx := context.TODO()
 	resp, err := allocator.masterClient.AllocID(ctx, &masterpb.AllocIDRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_ShowCollections,
+			MsgType:   commonpb.MsgType_RequestID,
 			MsgID:     -1, // todo add msg id
 			Timestamp: 0,  // todo
 			SourceID:  Params.NodeID,
