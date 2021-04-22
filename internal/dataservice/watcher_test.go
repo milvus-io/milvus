@@ -134,7 +134,7 @@ func TestWatcher(t *testing.T) {
 
 		// check flushed segments been removed from segAllocator
 		for i, c := range cases {
-			_, ok := segAllocator.segments[segIDs[i]]
+			ok := segAllocator.HasSegment(ctx, segIDs[i])
 			assert.EqualValues(t, !c.expected, ok)
 		}
 	})

@@ -321,6 +321,15 @@ func (allocator *segmentAllocator) SealSegment(ctx context.Context, segmentID Un
 	return nil
 }
 
+func (allocator *segmentAllocator) HasSegment(ctx context.Context, segmentID UniqueID) bool {
+	sp, _ := trace.StartSpanFromContext(ctx)
+	defer sp.Finish()
+	allocator.mu.Lock()
+	defer allocator.mu.Unlock()
+	_, ok := allocator.segments[segmentID]
+	return ok
+}
+
 func (allocator *segmentAllocator) DropSegment(ctx context.Context, segmentID UniqueID) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
