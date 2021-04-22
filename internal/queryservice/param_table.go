@@ -40,6 +40,10 @@ type ParamTable struct {
 
 	Log      log.Config
 	RoleName string
+
+	// query
+	QueryChannelName       string
+	QueryResultChannelName string
 }
 
 var Params ParamTable
@@ -70,6 +74,8 @@ func (p *ParamTable) Init() {
 		p.initTimeTickChannelName()
 		p.initQueryServiceAddress()
 		p.initRoleName()
+		p.initQueryChannelName()
+		p.initQueryResultChannelName()
 	})
 }
 
@@ -139,4 +145,22 @@ func (p *ParamTable) initQueryServiceAddress() {
 
 func (p *ParamTable) initRoleName() {
 	p.RoleName = fmt.Sprintf("%s-%d", "QueryService", p.NodeID)
+}
+
+func (p *ParamTable) initQueryChannelName() {
+	channelName, err := p.Load("msgChannel.chanNamePrefix.query")
+	if err != nil {
+		log.Error(err.Error())
+	}
+
+	p.QueryChannelName = channelName
+}
+
+func (p *ParamTable) initQueryResultChannelName() {
+	channelName, err := p.Load("msgChannel.chanNamePrefix.queryResult")
+	if err != nil {
+		log.Error(err.Error())
+	}
+
+	p.QueryResultChannelName = channelName
 }

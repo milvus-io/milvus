@@ -59,9 +59,8 @@ type ProxyNode struct {
 	tsoAllocator *allocator.TimestampAllocator
 	segAssigner  *SegIDAssigner
 
-	manipulationMsgStream msgstream.MsgStream
-	queryMsgStream        msgstream.MsgStream
-	msFactory             msgstream.Factory
+	queryMsgStream msgstream.MsgStream
+	msFactory      msgstream.Factory
 
 	// Add callback functions at different stages
 	startCallbacks []func()
@@ -194,15 +193,6 @@ func (node *ProxyNode) Init() error {
 	node.segAssigner = segAssigner
 	node.segAssigner.PeerID = Params.ProxyID
 
-	node.manipulationMsgStream, _ = node.msFactory.NewMsgStream(node.ctx)
-	node.manipulationMsgStream.AsProducer(Params.InsertChannelNames)
-	log.Debug("proxynode", zap.Strings("proxynode AsProducer", Params.InsertChannelNames))
-	repackFunc := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
-		return insertRepackFunc(tsMsgs, hashKeys, node.segAssigner, true)
-	}
-	node.manipulationMsgStream.SetRepackFunc(repackFunc)
-	log.Debug("create manipulation message stream ...")
-
 	node.sched, err = NewTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.msFactory)
 	if err != nil {
 		return err
@@ -222,9 +212,6 @@ func (node *ProxyNode) Start() error {
 
 	initGlobalInsertChannelsMap(node)
 	log.Debug("init global insert channels map ...")
-
-	node.manipulationMsgStream.Start()
-	log.Debug("start manipulation message stream ...")
 
 	node.queryMsgStream.Start()
 	log.Debug("start query message stream ...")
@@ -265,7 +252,6 @@ func (node *ProxyNode) Stop() error {
 	node.idAllocator.Close()
 	node.segAssigner.Close()
 	node.sched.Close()
-	node.manipulationMsgStream.Close()
 	node.queryMsgStream.Close()
 	node.tick.Close()
 

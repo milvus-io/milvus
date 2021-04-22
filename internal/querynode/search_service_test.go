@@ -138,44 +138,6 @@ func sendSearchRequest(ctx context.Context, DIM int) error {
 	return err
 }
 
-func sendTimeTick(ctx context.Context) error {
-	// init message stream
-	msFactory, err := newMessageStreamFactory()
-	if err != nil {
-		return err
-	}
-
-	// generate timeTick
-	timeTickMsgPack := msgstream.MsgPack{}
-	baseMsg := msgstream.BaseMsg{
-		BeginTimestamp: Timestamp(20),
-		EndTimestamp:   Timestamp(20),
-		HashValues:     []uint32{0},
-	}
-	timeTickResult := internalpb.TimeTickMsg{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_TimeTick,
-			MsgID:     0,
-			Timestamp: Timestamp(20),
-			SourceID:  0,
-		},
-	}
-	timeTickMsg := &msgstream.TimeTickMsg{
-		BaseMsg:     baseMsg,
-		TimeTickMsg: timeTickResult,
-	}
-	timeTickMsgPack.Msgs = append(timeTickMsgPack.Msgs, timeTickMsg)
-
-	// produce timeTick message
-	insertChannels := Params.InsertChannelNames
-	insertStream, _ := msFactory.NewMsgStream(ctx)
-	insertStream.AsProducer(insertChannels)
-	insertStream.Start()
-
-	err = insertStream.Broadcast(&timeTickMsgPack)
-	return err
-}
-
 func TestSearch_Search(t *testing.T) {
 	const N = 10000
 	const DIM = 16
