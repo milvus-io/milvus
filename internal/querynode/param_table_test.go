@@ -66,11 +66,6 @@ func TestParamTable_minio(t *testing.T) {
 	})
 }
 
-func TestParamTable_insertChannelRange(t *testing.T) {
-	channelRange := Params.InsertChannelRange
-	assert.Equal(t, 2, len(channelRange))
-}
-
 func TestParamTable_statsServiceTimeInterval(t *testing.T) {
 	interval := Params.StatsPublishInterval
 	assert.Equal(t, 1000, interval)
@@ -126,17 +121,6 @@ func TestParamTable_flowGraphMaxParallelism(t *testing.T) {
 	assert.Equal(t, int32(1024), maxParallelism)
 }
 
-func TestParamTable_insertChannelNames(t *testing.T) {
-	names := Params.InsertChannelNames
-	channelRange := Params.InsertChannelRange
-	num := channelRange[1] - channelRange[0]
-	num = num / Params.QueryNodeNum
-	assert.Equal(t, num, len(names))
-	start := num * Params.SliceIndex
-	contains := strings.Contains(names[0], fmt.Sprintf("insert-%d", channelRange[start]))
-	assert.Equal(t, contains, true)
-}
-
 func TestParamTable_searchChannelNames(t *testing.T) {
 	names := Params.SearchChannelNames
 	assert.Equal(t, len(names), 1)
@@ -164,10 +148,4 @@ func TestParamTable_statsChannelName(t *testing.T) {
 func TestParamTable_metaRootPath(t *testing.T) {
 	path := Params.MetaRootPath
 	fmt.Println(path)
-}
-
-func TestParamTable_ddChannelName(t *testing.T) {
-	names := Params.DDChannelNames
-	contains := strings.Contains(names[0], "data-definition")
-	assert.Equal(t, contains, true)
 }

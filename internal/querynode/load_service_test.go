@@ -958,11 +958,6 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, 
 	binary.LittleEndian.PutUint32(bs, 1)
 	rawData = append(rawData, bs...)
 
-	timeRange := TimeRange{
-		timestampMin: 0,
-		timestampMax: math.MaxUint64,
-	}
-
 	// messages generate
 	insertMessages := make([]msgstream.TsMsg, 0)
 	for i := 0; i < msgLength; i++ {
@@ -993,12 +988,6 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, 
 		insertMessages = append(insertMessages, msg)
 	}
 
-	msgPack := msgstream.MsgPack{
-		BeginTs: timeRange.timestampMin,
-		EndTs:   timeRange.timestampMax,
-		Msgs:    insertMessages,
-	}
-
 	// generate timeTick
 	timeTickMsgPack := msgstream.MsgPack{}
 	baseMsg := msgstream.BaseMsg{
@@ -1022,8 +1011,6 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, 
 
 	// pulsar produce
 	const receiveBufSize = 1024
-	insertChannels := Params.InsertChannelNames
-	ddChannels := Params.DDChannelNames
 
 	msFactory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
@@ -1035,93 +1022,6 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, 
 		return err
 	}
 
-	insertStream, _ := msFactory.NewMsgStream(ctx)
-	insertStream.AsProducer(insertChannels)
-	insertStream.AsConsumer(insertChannels, Params.MsgChannelSubName)
-
-	ddStream, _ := msFactory.NewMsgStream(ctx)
-	ddStream.AsProducer(ddChannels)
-
-	var insertMsgStream msgstream.MsgStream = insertStream
-	insertMsgStream.Start()
-
-	var ddMsgStream msgstream.MsgStream = ddStream
-	ddMsgStream.Start()
-
-	err = insertMsgStream.Produce(&msgPack)
-	if err != nil {
-		return err
-	}
-
-	err = insertMsgStream.Broadcast(&timeTickMsgPack)
-	if err != nil {
-		return err
-	}
-	err = ddMsgStream.Broadcast(&timeTickMsgPack)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func sentTimeTick(ctx context.Context) error {
-	timeTickMsgPack := msgstream.MsgPack{}
-	baseMsg := msgstream.BaseMsg{
-		BeginTimestamp: 1500,
-		EndTimestamp:   2000,
-		HashValues:     []uint32{0},
-	}
-	timeTickResult := internalpb.TimeTickMsg{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_TimeTick,
-			MsgID:     0,
-			Timestamp: math.MaxUint64,
-			SourceID:  0,
-		},
-	}
-	timeTickMsg := &msgstream.TimeTickMsg{
-		BaseMsg:     baseMsg,
-		TimeTickMsg: timeTickResult,
-	}
-	timeTickMsgPack.Msgs = append(timeTickMsgPack.Msgs, timeTickMsg)
-
-	// pulsar produce
-	const receiveBufSize = 1024
-	insertChannels := Params.InsertChannelNames
-	ddChannels := Params.DDChannelNames
-
-	msFactory := msgstream.NewPmsFactory()
-	m := map[string]interface{}{
-		"receiveBufSize": receiveBufSize,
-		"pulsarAddress":  Params.PulsarAddress,
-		"pulsarBufSize":  1024}
-	err := msFactory.SetParams(m)
-	if err != nil {
-		return err
-	}
-
-	insertStream, _ := msFactory.NewMsgStream(ctx)
-	insertStream.AsProducer(insertChannels)
-	insertStream.AsConsumer(insertChannels, Params.MsgChannelSubName)
-
-	ddStream, _ := msFactory.NewMsgStream(ctx)
-	ddStream.AsProducer(ddChannels)
-
-	var insertMsgStream msgstream.MsgStream = insertStream
-	insertMsgStream.Start()
-
-	var ddMsgStream msgstream.MsgStream = ddStream
-	ddMsgStream.Start()
-
-	err = insertMsgStream.Broadcast(&timeTickMsgPack)
-	if err != nil {
-		return err
-	}
-	err = ddMsgStream.Broadcast(&timeTickMsgPack)
-	if err != nil {
-		return err
-	}
 	return nil
 }
 

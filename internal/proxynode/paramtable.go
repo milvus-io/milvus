@@ -49,14 +49,11 @@ type ParamTable struct {
 	QueryNodeIDList                    []UniqueID
 	ProxyID                            UniqueID
 	TimeTickInterval                   time.Duration
-	InsertChannelNames                 []string
-	DeleteChannelNames                 []string
 	K2SChannelNames                    []string
 	SearchChannelNames                 []string
 	SearchResultChannelNames           []string
 	ProxySubName                       string
 	ProxyTimeTickChannelNames          []string
-	DataDefinitionChannelNames         []string
 	MsgStreamInsertBufSize             int64
 	MsgStreamSearchBufSize             int64
 	MsgStreamSearchResultBufSize       int64
@@ -148,14 +145,11 @@ func (pt *ParamTable) initParams() {
 	pt.initQueryNodeIDList()
 	pt.initQueryNodeNum()
 	pt.initTimeTickInterval()
-	pt.initInsertChannelNames()
-	pt.initDeleteChannelNames()
 	pt.initK2SChannelNames()
 	pt.initSearchChannelNames()
 	pt.initSearchResultChannelNames()
 	pt.initProxySubName()
 	pt.initProxyTimeTickChannelNames()
-	pt.initDataDefinitionChannelNames()
 	pt.initMsgStreamInsertBufSize()
 	pt.initMsgStreamSearchBufSize()
 	pt.initMsgStreamSearchResultBufSize()
@@ -211,43 +205,6 @@ func (pt *ParamTable) initTimeTickInterval() {
 		panic(err)
 	}
 	pt.TimeTickInterval = time.Duration(interval) * time.Millisecond
-}
-
-func (pt *ParamTable) initInsertChannelNames() {
-	prefix, err := pt.Load("msgChannel.chanNamePrefix.insert")
-	if err != nil {
-		panic(err)
-	}
-	prefix += "-"
-	iRangeStr, err := pt.Load("msgChannel.channelRange.insert")
-	if err != nil {
-		panic(err)
-	}
-	channelIDs := paramtable.ConvertRangeToIntSlice(iRangeStr, ",")
-	var ret []string
-	for _, ID := range channelIDs {
-		ret = append(ret, prefix+strconv.Itoa(ID))
-	}
-
-	pt.InsertChannelNames = ret
-}
-
-func (pt *ParamTable) initDeleteChannelNames() {
-	prefix, err := pt.Load("msgChannel.chanNamePrefix.delete")
-	if err != nil {
-		panic(err)
-	}
-	prefix += "-"
-	dRangeStr, err := pt.Load("msgChannel.channelRange.delete")
-	if err != nil {
-		panic(err)
-	}
-	channelIDs := paramtable.ConvertRangeToIntSlice(dRangeStr, ",")
-	var ret []string
-	for _, ID := range channelIDs {
-		ret = append(ret, prefix+strconv.Itoa(ID))
-	}
-	pt.DeleteChannelNames = ret
 }
 
 func (pt *ParamTable) initK2SChannelNames() {
@@ -319,15 +276,6 @@ func (pt *ParamTable) initProxyTimeTickChannelNames() {
 	}
 	prefix += "-0"
 	pt.ProxyTimeTickChannelNames = []string{prefix}
-}
-
-func (pt *ParamTable) initDataDefinitionChannelNames() {
-	prefix, err := pt.Load("msgChannel.chanNamePrefix.dataDefinition")
-	if err != nil {
-		panic(err)
-	}
-	prefix += "-0"
-	pt.DataDefinitionChannelNames = []string{prefix}
 }
 
 func (pt *ParamTable) initMsgStreamInsertBufSize() {

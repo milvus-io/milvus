@@ -42,7 +42,7 @@ func TestRegisterNode(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.EqualValues(t, Params.DataNodeNum, svr.cluster.GetNumOfNodes())
+		assert.EqualValues(t, 1, svr.cluster.GetNumOfNodes())
 		assert.EqualValues(t, []int64{1000}, svr.cluster.GetNodeIDs())
 	})
 
@@ -342,7 +342,6 @@ func TestGetSegmentStates(t *testing.T) {
 
 func newTestServer(t *testing.T) *Server {
 	Params.Init()
-	Params.DataNodeNum = 1
 	var err error
 	factory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
