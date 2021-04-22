@@ -1,0 +1,25 @@
+pull_request_rules:
+  - name: add auto-merge label if the title does not contain “[WIP]”
+    conditions:
+      - base=master
+      - -title~=(?i)\[wip\]
+    actions:
+      label:
+        add:
+          - "PR | automerge"
+
+  - name: automatic merge for master when ci passed and the title does not contain “[WIP]”
+    conditions:
+      - base=master
+      - -title~=(?i)\[wip\]
+      - "label=PR | automerge"
+      - "#approved-reviews-by>=1"
+      - "#review-requested=0"
+      - "#changes-requested-reviews-by=0"
+      - "status-success=DCO"
+      - "status-success=continuous-integration/jenkins/pr-merge"
+      - "status-success=AMD64 Ubuntu 18.04"
+    actions:
+      merge:
+        method: squash
+
