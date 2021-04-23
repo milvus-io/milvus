@@ -103,7 +103,7 @@ func TestAssignSegmentID(t *testing.T) {
 		PartitionID  UniqueID
 		ChannelName  string
 		Count        uint32
-		Success    	 bool
+		Success      bool
 		Description  string
 	}{
 		{collID, partID, channel0, 1000, true, "assign segment normally"},
