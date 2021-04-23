@@ -80,6 +80,20 @@ TEST_P(HNSWTest, HNSW_basic) {
     auto result = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result, nq, k);
     ReleaseQueryResult(result);
+
+    // case: k > nb
+    const int64_t new_rows = 6;
+    base_dataset->Set(milvus::knowhere::meta::ROWS, new_rows);
+    index_->Train(base_dataset, conf);
+    index_->AddWithoutIds(base_dataset, conf);
+    auto result2 = index_->Query(query_dataset, conf, nullptr);
+    auto res_ids = result2->Get<int64_t*>(milvus::knowhere::meta::IDS);
+    for (int64_t i = 0; i < nq; i++) {
+        for (int64_t j = new_rows; j < k; j++) {
+            ASSERT_EQ(res_ids[i * k + j], -1);
+        }
+    }
+    ReleaseQueryResult(result2);
 }
 
 TEST_P(HNSWTest, HNSW_delete) {

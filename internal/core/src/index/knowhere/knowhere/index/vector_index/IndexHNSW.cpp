@@ -83,8 +83,6 @@ IndexHNSW::Load(const BinarySet& index_binary) {
         }
         //         LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Load finished, show statistics:";
         //         LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
-
-        normalize = index_->metric_type_ == 1;  // 1 == InnerProduct
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
@@ -102,7 +100,6 @@ IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
             space = new hnswlib::L2Space(dim);
         } else if (metric_type == Metric::IP) {
             space = new hnswlib::InnerProductSpace(dim);
-            normalize = true;
         } else {
             KNOWHERE_THROW_MSG("Metric type not supported: " + metric_type);
         }
@@ -142,7 +139,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
-    GET_TENSOR_DATA(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
 
     size_t k = config[meta::TOPK].get<int64_t>();
     size_t id_size = sizeof(int64_t) * k;
@@ -159,44 +156,39 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
     }
 
     index_->setEf(config[IndexParams::ef].get<int64_t>());
-
-    using P = std::pair<float, int64_t>;
-    auto compare = [](const P& v1, const P& v2) { return v1.first < v2.first; };
+    bool transform = (index_->metric_type_ == 1);  // InnerProduct: 1
 
     std::chrono::high_resolution_clock::time_point query_start, query_end;
     query_start = std::chrono::high_resolution_clock::now();
 
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
-        std::vector<P> ret;
-        const float* single_query = reinterpret_cast<const float*>(p_data) + i * Dim();
-
+        auto single_query = (float*)p_data + i * dim;
+        std::priority_queue<std::pair<float, hnswlib::labeltype>> rst;
         if (STATISTICS_LEVEL >= 3) {
-            ret = index_->searchKnn(single_query, k, compare, bitset, query_stats[i]);
+            rst = index_->searchKnn(single_query, k, bitset, query_stats[i]);
         } else {
             auto dummy_stat = hnswlib::StatisticsInfo();
-            ret = index_->searchKnn(single_query, k, compare, bitset, dummy_stat);
+            rst = index_->searchKnn(single_query, k, bitset, dummy_stat);
         }
+        size_t rst_size = rst.size();
 
-        while (ret.size() < k) {
-            ret.emplace_back(std::make_pair(-1, -1));
+        auto p_single_dis = p_dist + i * k;
+        auto p_single_id = p_id + i * k;
+        size_t idx = rst_size - 1;
+        while (!rst.empty()) {
+            auto& it = rst.top();
+            p_single_dis[idx] = transform ? (1 - it.first) : it.first;
+            p_single_id[idx] = it.second;
+            rst.pop();
+            idx--;
         }
-        std::vector<float> dist;
-        std::vector<int64_t> ids;
+        MapOffsetToUid(p_single_id, rst_size);
 
-        if (normalize) {
-            std::transform(ret.begin(), ret.end(), std::back_inserter(dist),
-                           [](const std::pair<float, int64_t>& e) { return float(1 - e.first); });
-        } else {
-            std::transform(ret.begin(), ret.end(), std::back_inserter(dist),
-                           [](const std::pair<float, int64_t>& e) { return e.first; });
+        for (idx = rst_size; idx < k; idx++) {
+            p_single_dis[idx] = float(1.0 / 0.0);
+            p_single_id[idx] = -1;
         }
-        std::transform(ret.begin(), ret.end(), std::back_inserter(ids),
-                       [](const std::pair<float, int64_t>& e) { return e.second; });
-
-        MapOffsetToUid(ids.data(), ids.size());
-        memcpy(p_dist + i * k, dist.data(), dist_size);
-        memcpy(p_id + i * k, ids.data(), id_size);
     }
     query_end = std::chrono::high_resolution_clock::now();
 
