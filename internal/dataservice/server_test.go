@@ -351,23 +351,28 @@ func TestChannel(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 
-	genMsg := func(msgType commonpb.MsgType, t Timestamp) *msgstream.SegmentInfoMsg {
-		return &msgstream.SegmentInfoMsg{
-			BaseMsg: msgstream.BaseMsg{
-				HashValues:     []uint32{0},
-			},
-			SegmentMsg: datapb.SegmentMsg{
-				Base: &commonpb.MsgBase{
-					MsgType:   msgType,
-					MsgID:     0,
-					Timestamp: t,
-					SourceID:  0,
-				},
-			},
-		}
-	}
-
 	t.Run("Test StatsChannel", func(t *testing.T) {
+		stats := &internalpb.SegmentStatisticsUpdates{
+			SegmentID: 0,
+			NumRows: 100,
+		}
+		genMsg := func(msgType commonpb.MsgType, t Timestamp) *msgstream.SegmentStatisticsMsg {
+			return &msgstream.SegmentStatisticsMsg{
+				BaseMsg: msgstream.BaseMsg{
+					HashValues: []uint32{0},
+				},
+				SegmentStatistics: internalpb.SegmentStatistics{
+					Base: &commonpb.MsgBase{
+						MsgType:   msgType,
+						MsgID:     0,
+						Timestamp: t,
+						SourceID:  0,
+					},
+					SegStats: []*internalpb.SegmentStatisticsUpdates{stats},
+				},
+			}
+		}
+
 		statsStream, _ := svr.msFactory.NewMsgStream(svr.ctx)
 		statsStream.AsProducer([]string{Params.StatisticsChannelName})
 
@@ -381,6 +386,23 @@ func TestChannel(t *testing.T) {
 	})
 
 	t.Run("Test SegmentFlushChannel", func(t *testing.T) {
+		genMsg := func(msgType commonpb.MsgType, t Timestamp) *msgstream.FlushCompletedMsg {
+			return &msgstream.FlushCompletedMsg{
+				BaseMsg: msgstream.BaseMsg{
+					HashValues: []uint32{0},
+				},
+				SegmentFlushCompletedMsg: internalpb.SegmentFlushCompletedMsg{
+					Base: &commonpb.MsgBase{
+						MsgType:   msgType,
+						MsgID:     0,
+						Timestamp: t,
+						SourceID:  0,
+					},
+					SegmentID: 0,
+				},
+			}
+		}
+
 		statsStream, _ := svr.msFactory.NewMsgStream(svr.ctx)
 		statsStream.AsProducer([]string{Params.SegmentInfoChannelName})
 
@@ -394,6 +416,22 @@ func TestChannel(t *testing.T) {
 	})
 
 	t.Run("Test ProxyTimeTickChannel", func(t *testing.T) {
+		genMsg := func(msgType commonpb.MsgType, t Timestamp) *msgstream.TimeTickMsg {
+			return &msgstream.TimeTickMsg{
+				BaseMsg: msgstream.BaseMsg{
+					HashValues: []uint32{0},
+				},
+				TimeTickMsg: internalpb.TimeTickMsg{
+					Base: &commonpb.MsgBase{
+						MsgType:   msgType,
+						MsgID:     0,
+						Timestamp: t,
+						SourceID:  0,
+					},
+				},
+			}
+		}
+
 		timeTickStream, _ := svr.msFactory.NewMsgStream(svr.ctx)
 		timeTickStream.AsProducer([]string{Params.ProxyTimeTickChannelName})
 
