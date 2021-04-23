@@ -45,25 +45,21 @@ type ParamTable struct {
 	MasterAddress string
 	PulsarAddress string
 
-	QueryNodeNum                       int
-	QueryNodeIDList                    []UniqueID
-	ProxyID                            UniqueID
-	TimeTickInterval                   time.Duration
-	K2SChannelNames                    []string
-	SearchChannelNames                 []string
-	SearchResultChannelNames           []string
-	ProxySubName                       string
-	ProxyTimeTickChannelNames          []string
-	MsgStreamInsertBufSize             int64
-	MsgStreamSearchBufSize             int64
-	MsgStreamSearchResultBufSize       int64
-	MsgStreamSearchResultPulsarBufSize int64
-	MsgStreamTimeTickBufSize           int64
-	MaxNameLength                      int64
-	MaxFieldNum                        int64
-	MaxDimension                       int64
-	DefaultPartitionName               string
-	DefaultIndexName                   string
+	QueryNodeNum              int
+	QueryNodeIDList           []UniqueID
+	ProxyID                   UniqueID
+	TimeTickInterval          time.Duration
+	K2SChannelNames           []string
+	SearchChannelNames        []string
+	SearchResultChannelNames  []string
+	ProxySubName              string
+	ProxyTimeTickChannelNames []string
+	MsgStreamTimeTickBufSize  int64
+	MaxNameLength             int64
+	MaxFieldNum               int64
+	MaxDimension              int64
+	DefaultPartitionName      string
+	DefaultIndexName          string
 
 	PulsarMaxMessageSize int
 	Log                  log.Config
@@ -148,10 +144,6 @@ func (pt *ParamTable) initParams() {
 	pt.initK2SChannelNames()
 	pt.initProxySubName()
 	pt.initProxyTimeTickChannelNames()
-	pt.initMsgStreamInsertBufSize()
-	pt.initMsgStreamSearchBufSize()
-	pt.initMsgStreamSearchResultBufSize()
-	pt.initMsgStreamSearchResultPulsarBufSize()
 	pt.initMsgStreamTimeTickBufSize()
 	pt.initMaxNameLength()
 	pt.initMaxFieldNum()
@@ -238,22 +230,6 @@ func (pt *ParamTable) initProxyTimeTickChannelNames() {
 	}
 	prefix += "-0"
 	pt.ProxyTimeTickChannelNames = []string{prefix}
-}
-
-func (pt *ParamTable) initMsgStreamInsertBufSize() {
-	pt.MsgStreamInsertBufSize = pt.ParseInt64("proxyNode.msgStream.insert.bufSize")
-}
-
-func (pt *ParamTable) initMsgStreamSearchBufSize() {
-	pt.MsgStreamSearchBufSize = pt.ParseInt64("proxyNode.msgStream.search.bufSize")
-}
-
-func (pt *ParamTable) initMsgStreamSearchResultBufSize() {
-	pt.MsgStreamSearchResultBufSize = pt.ParseInt64("proxyNode.msgStream.searchResult.recvBufSize")
-}
-
-func (pt *ParamTable) initMsgStreamSearchResultPulsarBufSize() {
-	pt.MsgStreamSearchResultPulsarBufSize = pt.ParseInt64("proxyNode.msgStream.searchResult.pulsarBufSize")
 }
 
 func (pt *ParamTable) initMsgStreamTimeTickBufSize() {
