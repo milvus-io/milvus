@@ -81,7 +81,6 @@ func (watcher *dataNodeTimeTickWatcher) StartBackgroundLoop(ctx context.Context)
 		case msg := <-watcher.msgQueue:
 			if err := watcher.handleTimeTickMsg(msg); err != nil {
 				log.Error("handle time tick error", zap.Error(err))
-				continue
 			}
 		}
 	}

@@ -25,9 +25,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestDataNodeTTWatcher(t *testing.T) {
-	ctx := context.Background()
+func TestWatcher(t *testing.T) {
+	const collID = UniqueID(0)
+	const partID = UniqueID(100)
+
 	Params.Init()
+
 	cluster := newDataNodeCluster()
 	defer cluster.ShutDownClients()
 	schema := newTestSchema()
@@ -36,75 +39,103 @@ func TestDataNodeTTWatcher(t *testing.T) {
 	assert.Nil(t, err)
 	segAllocator := newSegmentAllocator(meta, allocator)
 	assert.Nil(t, err)
-	watcher := newDataNodeTimeTickWatcher(meta, segAllocator, cluster)
 
-	id, err := allocator.allocID()
-	assert.Nil(t, err)
-	err = meta.AddCollection(&datapb.CollectionInfo{
+	collInfo := &datapb.CollectionInfo{
 		Schema: schema,
-		ID:     id,
-	})
-	assert.Nil(t, err)
-
-	cases := []struct {
-		sealed     bool
-		allocation bool
-		expired    bool
-		expected   bool
-	}{
-		{false, false, true, false},
-		{false, true, true, false},
-		{false, true, false, false},
-		{true, false, true, true},
-		{true, true, false, false},
-		{true, true, true, true},
+		ID:     collID,
 	}
 
-	segmentIDs := make([]UniqueID, len(cases))
-	for i, c := range cases {
-		segID, err := allocator.allocID()
-		segmentIDs[i] = segID
-		assert.Nil(t, err)
-		segmentInfo, err := BuildSegment(id, 100, segID, "channel"+strconv.Itoa(i))
-		assert.Nil(t, err)
-		err = meta.AddSegment(segmentInfo)
-		assert.Nil(t, err)
-		err = segAllocator.OpenSegment(ctx, segmentInfo)
-		assert.Nil(t, err)
-		if c.allocation && c.expired {
-			_, _, _, err := segAllocator.AllocSegment(ctx, id, 100, "channel"+strconv.Itoa(i), 100)
-			assert.Nil(t, err)
-		}
-	}
+	t.Run("Test ProxyTimeTickWatcher", func(t *testing.T) {
+		proxyWatcher := newProxyTimeTickWatcher(segAllocator)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go proxyWatcher.StartBackgroundLoop(ctx)
 
-	time.Sleep(time.Duration(Params.SegIDAssignExpiration+1000) * time.Millisecond)
-	for i, c := range cases {
-		if c.allocation && !c.expired {
-			_, _, _, err := segAllocator.AllocSegment(ctx, id, 100, "channel"+strconv.Itoa(i), 100)
-			assert.Nil(t, err)
-		}
-		if c.sealed {
-			err := segAllocator.SealSegment(ctx, segmentIDs[i])
-			assert.Nil(t, err)
-		}
-	}
-	ts, err := allocator.allocTimestamp()
-	assert.Nil(t, err)
-
-	err = watcher.handleTimeTickMsg(&msgstream.TimeTickMsg{
-		BaseMsg: msgstream.BaseMsg{
-			HashValues: []uint32{0},
-		},
-		TimeTickMsg: internalpb.TimeTickMsg{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_TimeTick,
-				Timestamp: ts,
+		msg := &msgstream.TimeTickMsg{
+			TimeTickMsg: internalpb.TimeTickMsg{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_TimeTick,
+					Timestamp: 100,
+				},
 			},
-		},
+		}
+		proxyWatcher.Watch(msg)
+		time.Sleep(time.Second)
 	})
-	assert.Nil(t, err)
-	for i, c := range cases {
-		_, ok := segAllocator.segments[segmentIDs[i]]
-		assert.EqualValues(t, !c.expected, ok)
-	}
+
+	t.Run("Test DataNodeTimeTickWatcher", func(t *testing.T) {
+		datanodeWatcher := newDataNodeTimeTickWatcher(meta, segAllocator, cluster)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go datanodeWatcher.StartBackgroundLoop(ctx)
+
+		err = meta.AddCollection(collInfo)
+		assert.Nil(t, err)
+
+		cases := []struct {
+			sealed     bool
+			allocation bool
+			expired    bool
+			expected   bool
+		}{
+			{false, false, true, false},
+			{false, true, true, false},
+			{false, true, false, false},
+			{true, false, true, true},
+			{true, true, false, false},
+			{true, true, true, true},
+		}
+
+		segIDs := make([]UniqueID, len(cases))
+		for i, c := range cases {
+			segID, err := allocator.allocID()
+			assert.Nil(t, err)
+			segIDs[i] = segID
+			segInfo, err := BuildSegment(collID, partID, segID, "channel"+strconv.Itoa(i))
+			assert.Nil(t, err)
+			err = meta.AddSegment(segInfo)
+			assert.Nil(t, err)
+			err = segAllocator.OpenSegment(ctx, segInfo)
+			assert.Nil(t, err)
+			if c.allocation && c.expired {
+				_, _, _, err := segAllocator.AllocSegment(ctx, collID, partID, "channel"+strconv.Itoa(i), 100)
+				assert.Nil(t, err)
+			}
+		}
+
+		time.Sleep(time.Duration(Params.SegIDAssignExpiration+1000) * time.Millisecond)
+		for i, c := range cases {
+			if c.allocation && !c.expired {
+				_, _, _, err := segAllocator.AllocSegment(ctx, collID, partID, "channel"+strconv.Itoa(i), 100)
+				assert.Nil(t, err)
+			}
+			if c.sealed {
+				err := segAllocator.SealSegment(ctx, segIDs[i])
+				assert.Nil(t, err)
+			}
+		}
+		ts, err := allocator.allocTimestamp()
+		assert.Nil(t, err)
+
+		ttMsg := &msgstream.TimeTickMsg{
+			BaseMsg: msgstream.BaseMsg{
+				HashValues: []uint32{0},
+			},
+			TimeTickMsg: internalpb.TimeTickMsg{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_TimeTick,
+					Timestamp: ts,
+				},
+			},
+		}
+		datanodeWatcher.Watch(ttMsg)
+
+		time.Sleep(time.Second)
+
+		// check flushed segments been removed from segAllocator
+		for i, c := range cases {
+			ok := segAllocator.HasSegment(ctx, segIDs[i])
+			assert.EqualValues(t, !c.expected, ok)
+		}
+	})
 }
