@@ -54,7 +54,7 @@ type Server struct {
 	serverLoopCancel context.CancelFunc
 	serverLoopWg     sync.WaitGroup
 	state            atomic.Value
-	client           *etcdkv.EtcdKV
+	kvClient         *etcdkv.EtcdKV
 	meta             *meta
 	segAllocator     segmentAllocatorInterface
 	statsHandler     *statsHandler
@@ -153,9 +153,8 @@ func (s *Server) initMeta() error {
 		if err != nil {
 			return err
 		}
-		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
-		s.client = etcdKV
-		s.meta, err = newMeta(etcdKV)
+		s.kvClient = etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+		s.meta, err = newMeta(s.kvClient)
 		if err != nil {
 			return err
 		}
@@ -422,7 +421,7 @@ func (s *Server) Stop() error {
 
 // CleanMeta only for test
 func (s *Server) CleanMeta() error {
-	return s.client.RemoveWithPrefix("")
+	return s.kvClient.RemoveWithPrefix("")
 }
 
 func (s *Server) stopServerLoop() {
@@ -732,7 +731,7 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 		},
 	}
 	p := path.Join(Params.SegmentFlushMetaPath, strconv.FormatInt(req.SegmentID, 10))
-	_, values, err := s.client.LoadWithPrefix(p)
+	_, values, err := s.kvClient.LoadWithPrefix(p)
 	if err != nil {
 		resp.Status.Reason = err.Error()
 		return resp, nil
