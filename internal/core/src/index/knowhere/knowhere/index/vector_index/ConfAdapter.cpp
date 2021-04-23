@@ -27,6 +27,7 @@ namespace knowhere {
 
 static const int64_t MIN_NBITS = 1;
 static const int64_t MAX_NBITS = 16;
+static const int64_t DEFAULT_NBITS = 8;
 static const int64_t MIN_NLIST = 1;
 static const int64_t MAX_NLIST = 65536;
 static const int64_t MIN_NPROBE = 1;
@@ -91,7 +92,7 @@ ConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode m
 
 int64_t
 MatchNlist(int64_t size, int64_t nlist) {
-    const int64_t MIN_POINTS_PER_CENTROID = 40;
+    const int64_t MIN_POINTS_PER_CENTROID = 39;
 
     if (nlist * MIN_POINTS_PER_CENTROID > size) {
         // nlist is too large, adjust to a proper value
@@ -146,9 +147,7 @@ IVFConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMod
 
 bool
 IVFSQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    const int64_t DEFAULT_NBITS = 8;
     oricfg[knowhere::IndexParams::nbits] = DEFAULT_NBITS;
-
     return IVFConfAdapter::CheckTrain(oricfg, mode);
 }
 
@@ -161,7 +160,7 @@ IVFPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     CheckIntByRange(knowhere::IndexParams::nbits, MIN_NBITS, MAX_NBITS);
 
     auto rows = oricfg[knowhere::meta::ROWS].get<int64_t>();
-    auto nbits = oricfg[knowhere::IndexParams::nbits].get<int64_t>();
+    auto nbits = oricfg.count(IndexParams::nbits) ? oricfg[IndexParams::nbits].get<int64_t>() : DEFAULT_NBITS;
     oricfg[knowhere::IndexParams::nbits] = MatchNbits(rows, nbits);
 
     auto m = oricfg[knowhere::IndexParams::m].get<int64_t>();
