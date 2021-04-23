@@ -94,7 +94,7 @@ ConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode m
 
 int64_t
 MatchNlist(int64_t size, int64_t nlist) {
-    const int64_t MIN_POINTS_PER_CENTROID = 40;
+    const int64_t MIN_POINTS_PER_CENTROID = 39;
 
     if (nlist * MIN_POINTS_PER_CENTROID > size) {
         // nlist is too large, adjust to a proper value
