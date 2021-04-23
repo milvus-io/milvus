@@ -15,11 +15,3 @@ Fixes #
 **What this PR does / why we need it:**
 
 Not Available
-
-**Special notes for your reviewer:**
-
-Not Available
-
-**Additional documentation (e.g. design docs, usage docs, etc.):**
-
-Not Available
