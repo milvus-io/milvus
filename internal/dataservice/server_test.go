@@ -354,7 +354,7 @@ func TestChannel(t *testing.T) {
 	t.Run("Test StatsChannel", func(t *testing.T) {
 		stats := &internalpb.SegmentStatisticsUpdates{
 			SegmentID: 0,
-			NumRows: 100,
+			NumRows:   100,
 		}
 		genMsg := func(msgType commonpb.MsgType, t Timestamp) *msgstream.SegmentStatisticsMsg {
 			return &msgstream.SegmentStatisticsMsg{
