@@ -40,5 +40,3 @@ msgChannel:
   # default channel range [0, 1)
   channelRange:
     k2s: [0, 1]
-    search: [0, 1]
-    searchResult: [0, 1]

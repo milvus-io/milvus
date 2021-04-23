@@ -146,8 +146,6 @@ func (pt *ParamTable) initParams() {
 	pt.initQueryNodeNum()
 	pt.initTimeTickInterval()
 	pt.initK2SChannelNames()
-	pt.initSearchChannelNames()
-	pt.initSearchResultChannelNames()
 	pt.initProxySubName()
 	pt.initProxyTimeTickChannelNames()
 	pt.initMsgStreamInsertBufSize()
@@ -223,42 +221,6 @@ func (pt *ParamTable) initK2SChannelNames() {
 		ret = append(ret, prefix+strconv.Itoa(ID))
 	}
 	pt.K2SChannelNames = ret
-}
-
-func (pt *ParamTable) initSearchChannelNames() {
-	prefix, err := pt.Load("msgChannel.chanNamePrefix.search")
-	if err != nil {
-		panic(err)
-	}
-	prefix += "-"
-	sRangeStr, err := pt.Load("msgChannel.channelRange.search")
-	if err != nil {
-		panic(err)
-	}
-	channelIDs := paramtable.ConvertRangeToIntSlice(sRangeStr, ",")
-	var ret []string
-	for _, ID := range channelIDs {
-		ret = append(ret, prefix+strconv.Itoa(ID))
-	}
-	pt.SearchChannelNames = ret
-}
-
-func (pt *ParamTable) initSearchResultChannelNames() {
-	prefix, err := pt.Load("msgChannel.chanNamePrefix.searchResult")
-	if err != nil {
-		panic(err)
-	}
-	prefix += "-"
-	sRangeStr, err := pt.Load("msgChannel.channelRange.searchResult")
-	if err != nil {
-		panic(err)
-	}
-	channelIDs := paramtable.ConvertRangeToIntSlice(sRangeStr, ",")
-	var ret []string
-	for _, ID := range channelIDs {
-		ret = append(ret, prefix+strconv.Itoa(ID))
-	}
-	pt.SearchResultChannelNames = ret
 }
 
 func (pt *ParamTable) initProxySubName() {

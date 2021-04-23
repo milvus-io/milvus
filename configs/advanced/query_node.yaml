@@ -19,31 +19,9 @@ queryNode:
       maxParallelism: 1024
 
   msgStream:
-    insert:
-      recvBufSize: 1024 # msgPack chan buffer size
-      pulsarBufSize: 1024 # pulsar chan buffer size
-
-    dataDefinition:
-      recvBufSize: 64 # msgPack chan buffer size
-      pulsarBufSize: 64 # pulsar chan buffer size
-
-    delete:
-      recvBufSize: 1024 # msgPack chan buffer size
-      pulsarBufSize: 1024 # pulsar chan buffer size
-
     search:
       recvBufSize: 512
       pulsarBufSize: 512
 
     searchResult:
-      recvBufSize: 64
-
-    stats:
-      recvBufSize: 64
-
-    loadIndex:
-      recvBufSize: 512
-      pulsarBufSize: 512
-
-    timeTick:
       recvBufSize: 64

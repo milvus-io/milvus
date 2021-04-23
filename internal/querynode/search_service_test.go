@@ -62,7 +62,7 @@ func sendSearchRequest(ctx context.Context, DIM int) error {
 	if err != nil {
 		return err
 	}
-	searchProducerChannels := Params.SearchChannelNames
+	searchProducerChannels := []string{"test-query"}
 
 	searchStream, _ := msFactory.NewMsgStream(ctx)
 	searchStream.AsProducer(searchProducerChannels)

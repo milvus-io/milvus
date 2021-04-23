@@ -29,12 +29,11 @@ type ParamTable struct {
 	ETCDAddress   string
 	MetaRootPath  string
 
-	QueryNodeIP                 string
-	QueryNodePort               int64
-	QueryNodeID                 UniqueID
-	QueryNodeNum                int
-	QueryTimeTickChannelName    string
-	QueryTimeTickReceiveBufSize int64
+	QueryNodeIP              string
+	QueryNodePort            int64
+	QueryNodeID              UniqueID
+	QueryNodeNum             int
+	QueryTimeTickChannelName string
 
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
@@ -46,17 +45,7 @@ type ParamTable struct {
 	MinioUseSSLStr       bool
 	MinioBucketName      string
 
-	// dm
-	InsertReceiveBufSize int64
-	InsertPulsarBufSize  int64
-
-	// dd
-	DDReceiveBufSize int64
-	DDPulsarBufSize  int64
-
 	// search
-	SearchChannelNames         []string
-	SearchResultChannelNames   []string
 	SearchReceiveBufSize       int64
 	SearchPulsarBufSize        int64
 	SearchResultReceiveBufSize int64
@@ -64,7 +53,6 @@ type ParamTable struct {
 	// stats
 	StatsPublishInterval int
 	StatsChannelName     string
-	StatsReceiveBufSize  int64
 
 	GracefulTime      int64
 	MsgChannelSubName string
@@ -102,7 +90,6 @@ func (p *ParamTable) Init() {
 		p.initQueryNodeID()
 		p.initQueryNodeNum()
 		//p.initQueryTimeTickChannelName()
-		p.initQueryTimeTickReceiveBufSize()
 
 		p.initMinioEndPoint()
 		p.initMinioAccessKeyID()
@@ -121,21 +108,12 @@ func (p *ParamTable) Init() {
 		p.initFlowGraphMaxQueueLength()
 		p.initFlowGraphMaxParallelism()
 
-		p.initInsertReceiveBufSize()
-		p.initInsertPulsarBufSize()
-
-		p.initDDReceiveBufSize()
-		p.initDDPulsarBufSize()
-
-		//p.initSearchChannelNames()
-		//p.initSearchResultChannelNames()
 		p.initSearchReceiveBufSize()
 		p.initSearchPulsarBufSize()
 		p.initSearchResultReceiveBufSize()
 
 		p.initStatsPublishInterval()
 		//p.initStatsChannelName()
-		p.initStatsReceiveBufSize()
 
 		p.initLogCfg()
 	})
@@ -164,10 +142,6 @@ func (p *ParamTable) initQueryTimeTickChannelName() {
 		log.Error(err.Error())
 	}
 	p.QueryTimeTickChannelName = ch
-}
-
-func (p *ParamTable) initQueryTimeTickReceiveBufSize() {
-	p.QueryTimeTickReceiveBufSize = p.ParseInt64("queryNode.msgStream.timeTick.recvBufSize")
 }
 
 // ---------------------------------------------------------- minio
@@ -239,38 +213,6 @@ func (p *ParamTable) initFlowGraphMaxParallelism() {
 }
 
 // msgStream
-func (p *ParamTable) initInsertReceiveBufSize() {
-	p.InsertReceiveBufSize = p.ParseInt64("queryNode.msgStream.insert.recvBufSize")
-}
-
-func (p *ParamTable) initInsertPulsarBufSize() {
-	p.InsertPulsarBufSize = p.ParseInt64("queryNode.msgStream.insert.pulsarBufSize")
-}
-
-func (p *ParamTable) initDDReceiveBufSize() {
-	revBufSize, err := p.Load("queryNode.msgStream.dataDefinition.recvBufSize")
-	if err != nil {
-		panic(err)
-	}
-	bufSize, err := strconv.Atoi(revBufSize)
-	if err != nil {
-		panic(err)
-	}
-	p.DDReceiveBufSize = int64(bufSize)
-}
-
-func (p *ParamTable) initDDPulsarBufSize() {
-	pulsarBufSize, err := p.Load("queryNode.msgStream.dataDefinition.pulsarBufSize")
-	if err != nil {
-		panic(err)
-	}
-	bufSize, err := strconv.Atoi(pulsarBufSize)
-	if err != nil {
-		panic(err)
-	}
-	p.DDPulsarBufSize = int64(bufSize)
-}
-
 func (p *ParamTable) initSearchReceiveBufSize() {
 	p.SearchReceiveBufSize = p.ParseInt64("queryNode.msgStream.search.recvBufSize")
 }
@@ -281,10 +223,6 @@ func (p *ParamTable) initSearchPulsarBufSize() {
 
 func (p *ParamTable) initSearchResultReceiveBufSize() {
 	p.SearchResultReceiveBufSize = p.ParseInt64("queryNode.msgStream.searchResult.recvBufSize")
-}
-
-func (p *ParamTable) initStatsReceiveBufSize() {
-	p.StatsReceiveBufSize = p.ParseInt64("queryNode.msgStream.stats.recvBufSize")
 }
 
 func (p *ParamTable) initETCDAddress() {
@@ -309,46 +247,6 @@ func (p *ParamTable) initMetaRootPath() {
 
 func (p *ParamTable) initGracefulTime() {
 	p.GracefulTime = p.ParseInt64("queryNode.gracefulTime")
-}
-
-func (p *ParamTable) initSearchChannelNames() {
-	prefix, err := p.Load("msgChannel.chanNamePrefix.search")
-	if err != nil {
-		log.Error(err.Error())
-	}
-	prefix += "-"
-	channelRange, err := p.Load("msgChannel.channelRange.search")
-	if err != nil {
-		panic(err)
-	}
-
-	channelIDs := paramtable.ConvertRangeToIntSlice(channelRange, ",")
-
-	var ret []string
-	for _, ID := range channelIDs {
-		ret = append(ret, prefix+strconv.Itoa(ID))
-	}
-	p.SearchChannelNames = ret
-}
-
-func (p *ParamTable) initSearchResultChannelNames() {
-	prefix, err := p.Load("msgChannel.chanNamePrefix.searchResult")
-	if err != nil {
-		log.Error(err.Error())
-	}
-	prefix += "-"
-	channelRange, err := p.Load("msgChannel.channelRange.searchResult")
-	if err != nil {
-		panic(err)
-	}
-
-	channelIDs := paramtable.ConvertRangeToIntSlice(channelRange, ",")
-
-	var ret []string
-	for _, ID := range channelIDs {
-		ret = append(ret, prefix+strconv.Itoa(ID))
-	}
-	p.SearchResultChannelNames = ret
 }
 
 func (p *ParamTable) initMsgChannelSubName() {

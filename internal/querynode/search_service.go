@@ -20,7 +20,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"go.uber.org/zap"
 	"strconv"
-	"strings"
 )
 
 type searchService struct {
@@ -38,17 +37,9 @@ type searchService struct {
 }
 
 func newSearchService(ctx context.Context, replica ReplicaInterface, factory msgstream.Factory) *searchService {
+	// query node doesn't need to consumer any search or search result channel actively.
 	searchStream, _ := factory.NewQueryMsgStream(ctx)
 	searchResultStream, _ := factory.NewQueryMsgStream(ctx)
-
-	// query node doesn't need to consumer any search or search result channel actively.
-	consumeChannels := Params.SearchChannelNames
-	consumeSubName := Params.MsgChannelSubName
-	searchStream.AsConsumer(consumeChannels, consumeSubName)
-	log.Debug("query node AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
-	producerChannels := Params.SearchResultChannelNames
-	searchResultStream.AsProducer(producerChannels)
-	log.Debug("query node AsProducer: " + strings.Join(producerChannels, ", "))
 
 	searchServiceCtx, searchServiceCancel := context.WithCancel(ctx)
 	return &searchService{

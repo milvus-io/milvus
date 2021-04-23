@@ -36,11 +36,6 @@ func TestParamTable_QueryNode(t *testing.T) {
 		ch := Params.QueryTimeTickChannelName
 		assert.Equal(t, ch, "queryTimeTick")
 	})
-
-	t.Run("Test time tick ReceiveBufSize", func(t *testing.T) {
-		size := Params.QueryTimeTickReceiveBufSize
-		assert.Equal(t, size, int64(64))
-	})
 }
 
 func TestParamTable_minio(t *testing.T) {
@@ -71,21 +66,6 @@ func TestParamTable_statsServiceTimeInterval(t *testing.T) {
 	assert.Equal(t, 1000, interval)
 }
 
-func TestParamTable_statsMsgStreamReceiveBufSize(t *testing.T) {
-	bufSize := Params.StatsReceiveBufSize
-	assert.Equal(t, int64(64), bufSize)
-}
-
-func TestParamTable_insertMsgStreamReceiveBufSize(t *testing.T) {
-	bufSize := Params.InsertReceiveBufSize
-	assert.Equal(t, int64(1024), bufSize)
-}
-
-func TestParamTable_ddMsgStreamReceiveBufSize(t *testing.T) {
-	bufSize := Params.DDReceiveBufSize
-	assert.Equal(t, bufSize, int64(64))
-}
-
 func TestParamTable_searchMsgStreamReceiveBufSize(t *testing.T) {
 	bufSize := Params.SearchReceiveBufSize
 	assert.Equal(t, int64(512), bufSize)
@@ -101,16 +81,6 @@ func TestParamTable_searchPulsarBufSize(t *testing.T) {
 	assert.Equal(t, int64(512), bufSize)
 }
 
-func TestParamTable_insertPulsarBufSize(t *testing.T) {
-	bufSize := Params.InsertPulsarBufSize
-	assert.Equal(t, int64(1024), bufSize)
-}
-
-func TestParamTable_ddPulsarBufSize(t *testing.T) {
-	bufSize := Params.DDPulsarBufSize
-	assert.Equal(t, bufSize, int64(64))
-}
-
 func TestParamTable_flowGraphMaxQueueLength(t *testing.T) {
 	length := Params.FlowGraphMaxQueueLength
 	assert.Equal(t, int32(1024), length)
@@ -119,18 +89,6 @@ func TestParamTable_flowGraphMaxQueueLength(t *testing.T) {
 func TestParamTable_flowGraphMaxParallelism(t *testing.T) {
 	maxParallelism := Params.FlowGraphMaxParallelism
 	assert.Equal(t, int32(1024), maxParallelism)
-}
-
-func TestParamTable_searchChannelNames(t *testing.T) {
-	names := Params.SearchChannelNames
-	assert.Equal(t, len(names), 1)
-	contains := strings.Contains(names[0], "search-0")
-	assert.Equal(t, contains, true)
-}
-
-func TestParamTable_searchResultChannelNames(t *testing.T) {
-	names := Params.SearchResultChannelNames
-	assert.NotNil(t, names)
 }
 
 func TestParamTable_msgChannelSubName(t *testing.T) {
