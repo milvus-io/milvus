@@ -46,6 +46,8 @@ type ParamTable struct {
 	MinioBucketName      string
 
 	// search
+	SearchChannelName          string
+	SearchResultChannelName    string
 	SearchReceiveBufSize       int64
 	SearchPulsarBufSize        int64
 	SearchResultReceiveBufSize int64

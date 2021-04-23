@@ -140,6 +140,10 @@ func (node *QueryNode) Init() error {
 			Params.StatsChannelName = kv.Value
 		case "TimeTickChannelName":
 			Params.QueryTimeTickChannelName = kv.Value
+		case "SearchChannelName":
+			Params.SearchChannelName = kv.Value
+		case "SearchResultChannelName":
+			Params.SearchResultChannelName = kv.Value
 		default:
 			return fmt.Errorf("Invalid key: %v", kv.Key)
 		}
