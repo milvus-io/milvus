@@ -14,6 +14,7 @@ import (
 	"context"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -353,9 +354,6 @@ func TestChannel(t *testing.T) {
 	genMsg := func(msgType commonpb.MsgType, t Timestamp) *msgstream.SegmentInfoMsg {
 		return &msgstream.SegmentInfoMsg{
 			BaseMsg: msgstream.BaseMsg{
-				Ctx:            svr.ctx,
-				BeginTimestamp: t,
-				EndTimestamp:   t,
 				HashValues:     []uint32{0},
 			},
 			SegmentMsg: datapb.SegmentMsg{
@@ -370,11 +368,29 @@ func TestChannel(t *testing.T) {
 	}
 
 	t.Run("Test StatsChannel", func(t *testing.T) {
+		statsStream, _ := svr.msFactory.NewMsgStream(svr.ctx)
+		statsStream.AsProducer([]string{Params.StatisticsChannelName})
 
+		msgPack := msgstream.MsgPack{}
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentStatistics, 123))
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentInfo, 234))
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentStatistics, 345))
+		err := statsStream.Produce(&msgPack)
+		assert.Nil(t, err)
+		time.Sleep(time.Second)
 	})
 
 	t.Run("Test SegmentFlushChannel", func(t *testing.T) {
+		statsStream, _ := svr.msFactory.NewMsgStream(svr.ctx)
+		statsStream.AsProducer([]string{Params.SegmentInfoChannelName})
 
+		msgPack := msgstream.MsgPack{}
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentFlushDone, 123))
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentInfo, 234))
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentFlushDone, 345))
+		err := statsStream.Produce(&msgPack)
+		assert.Nil(t, err)
+		time.Sleep(time.Second)
 	})
 
 	t.Run("Test ProxyTimeTickChannel", func(t *testing.T) {
@@ -382,11 +398,12 @@ func TestChannel(t *testing.T) {
 		timeTickStream.AsProducer([]string{Params.ProxyTimeTickChannelName})
 
 		msgPack := msgstream.MsgPack{}
-		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_TimeTick, 100))
-		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_RequestID, 200))
-		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_TimeTick, 300))
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_TimeTick, 123))
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentInfo, 234))
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_TimeTick, 345))
 		err := timeTickStream.Produce(&msgPack)
 		assert.Nil(t, err)
+		time.Sleep(time.Second)
 	})
 }
 

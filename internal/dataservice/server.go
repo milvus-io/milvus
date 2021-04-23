@@ -328,11 +328,12 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 			continue
 		}
 		for _, msg := range msgPack.Msgs {
-			statistics, ok := msg.(*msgstream.SegmentStatisticsMsg)
-			if !ok {
-				log.Error("receive unknown type msg from stats channel", zap.Stringer("msgType", msg.Type()))
+			if msg.Type() != commonpb.MsgType_SegmentStatistics{
+				log.Warn("receive unknown msg from segment statistics channel", zap.Stringer("msgType", msg.Type()))
+				continue
 			}
-			for _, stat := range statistics.SegStats {
+			ssMsg := msg.(*msgstream.SegmentStatisticsMsg)
+			for _, stat := range ssMsg.SegStats {
 				if err := s.statsHandler.HandleSegmentStat(stat); err != nil {
 					log.Error("handle segment stat error", zap.Int64("segmentID", stat.SegmentID), zap.Error(err))
 					continue
@@ -363,13 +364,14 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 		}
 		for _, msg := range msgPack.Msgs {
 			if msg.Type() != commonpb.MsgType_SegmentFlushDone {
+				log.Warn("receive unknown msg from segment flush channel", zap.Stringer("msgType", msg.Type()))
 				continue
 			}
-			realMsg := msg.(*msgstream.FlushCompletedMsg)
-			err := s.meta.FlushSegment(realMsg.SegmentID, realMsg.BeginTimestamp)
-			log.Debug("dataservice flushed segment", zap.Any("segmentID", realMsg.SegmentID), zap.Error(err))
+			fcMsg := msg.(*msgstream.FlushCompletedMsg)
+			err := s.meta.FlushSegment(fcMsg.SegmentID, fcMsg.BeginTimestamp)
+			log.Debug("dataservice flushed segment", zap.Any("segmentID", fcMsg.SegmentID), zap.Error(err))
 			if err != nil {
-				log.Error("get segment from meta error", zap.Int64("segmentID", realMsg.SegmentID), zap.Error(err))
+				log.Error("get segment from meta error", zap.Int64("segmentID", fcMsg.SegmentID), zap.Error(err))
 				continue
 			}
 		}
@@ -399,9 +401,9 @@ func (s *Server) startProxyServiceTimeTickLoop(ctx context.Context) {
 				log.Warn("receive unknown msg from proxy service timetick", zap.Stringer("msgType", msg.Type()))
 				continue
 			}
-			tMsg := msg.(*msgstream.TimeTickMsg)
+			ttMsg := msg.(*msgstream.TimeTickMsg)
 			traceCtx := context.TODO()
-			if err := s.segAllocator.ExpireAllocations(traceCtx, tMsg.Base.Timestamp); err != nil {
+			if err := s.segAllocator.ExpireAllocations(traceCtx, ttMsg.Base.Timestamp); err != nil {
 				log.Error("expire allocations error", zap.Error(err))
 			}
 		}
