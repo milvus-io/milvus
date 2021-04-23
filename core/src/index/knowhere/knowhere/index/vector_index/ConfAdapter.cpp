@@ -199,7 +199,7 @@ IVFPQConfAdapter::IsValidForGPU(int64_t dimension, int64_t m, int64_t nbits) {
     return (std::find(std::begin(support_subquantizer), std::end(support_subquantizer), m) !=
             support_subquantizer.end()) &&
            (std::find(std::begin(support_dim_per_subquantizer), std::end(support_dim_per_subquantizer), sub_dim) !=
-            support_dim_per_subquantizer.end());
+            support_dim_per_subquantizer.end() && (nbits == 8));
 }
 
 bool
