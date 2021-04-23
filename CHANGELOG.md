@@ -13,6 +13,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#4908 GPU cache will not be cleaned up in time after the collection is dropped
 -   \#4933 Milvus waste time during building index for small segment
 -   \#5008 Randomly crash during continuous and concurrent delete, insert and search
+-   \#5010 IVF_PQ failed to query on GPU if 'nbits' doesn't equal to 8
 
 ## Feature
 -   \#1434 Storage: enabling s3 storage support (implemented by Unisinsight)
