@@ -37,8 +37,8 @@ Try an example program with Milvus using [Python](https://www.milvus.io/docs/exa
 -   [Go](https://github.com/milvus-io/milvus-sdk-go)
 -   [Python](https://github.com/milvus-io/pymilvus)
 -   [Java](https://github.com/milvus-io/milvus-sdk-java)
--   [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
--   [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
+-   [C++](https://github.com/milvus-io/milvus/tree/1.x/sdk)
+-   [RESTful API](https://github.com/milvus-io/milvus/tree/1.x/core/src/server/web_impl)
 -   [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) (Contributed by [arkie](https://www.arkie.cn/))
 
 ## Application scenarios
