@@ -1098,12 +1098,16 @@ void elkan_L2_sse (
             return (i > j) ? data[j + i * (i - 1) / 2] : data[i + j * (j - 1) / 2];
         };
 
-#pragma omp parallel for
-        for (size_t i = j0 + 1; i < j1; i++) {
-            const float *y_i = y + i * d;
-            for (size_t j = j0; j < i; j++) {
-                const float *y_j = y + j * d;
-                Y(i, j) = sqrt(fvec_L2sqr(y_i, y_j, d));
+#pragma omp parallel
+        {
+            int nt = omp_get_num_threads();
+            int rank = omp_get_thread_num();
+            for (size_t i = j0 + 1 + rank; i < j1; i += nt) {
+                const float *y_i = y + i * d;
+                for (size_t j = j0; j < i; j++) {
+                    const float *y_j = y + j * d;
+                    Y(i, j) = fvec_L2sqr(y_i, y_j, d);
+                }
             }
         }
 
@@ -1112,18 +1116,22 @@ void elkan_L2_sse (
             const float *x_i = x + i * d;
 
             int64_t ids_i = j0;
-            float val_i = sqrt(fvec_L2sqr(x_i, y + j0 * d, d));
-            float val_i_2 = val_i * 2;
+            float val_i = fvec_L2sqr(x_i, y + j0 * d, d);
+            float val_i_time_4 = val_i * 4;
             for (size_t j = j0 + 1; j < j1; j++) {
-                if (val_i_2 <= Y(ids_i, j)) {
+                if (val_i_time_4 <= Y(ids_i, j)) {
                     continue;
                 }
                 const float *y_j = y + j * d;
-                float disij = sqrt(fvec_L2sqr(x_i, y_j, d));
+                float disij = fvec_L2sqr(x_i, y_j, d / 2);
+                if (disij >= val_i) {
+                    continue;
+                }
+                disij += fvec_L2sqr(x_i + d / 2, y_j + d / 2, d - d / 2);
                 if (disij < val_i) {
                     ids_i = j;
                     val_i = disij;
-                    val_i_2 = val_i * 2;
+                    val_i_time_4 = val_i * 4;
                 }
             }
 
