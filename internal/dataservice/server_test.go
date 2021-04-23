@@ -99,17 +99,17 @@ func TestAssignSegmentID(t *testing.T) {
 	maxCount := int(Params.SegmentSize * 1024 * 1024 / float64(recordSize))
 
 	cases := []struct {
+		Description  string
 		CollectionID UniqueID
 		PartitionID  UniqueID
 		ChannelName  string
 		Count        uint32
 		Success      bool
-		Description  string
 	}{
-		{collID, partID, channel0, 1000, true, "assign segment normally"},
-		{collIDInvalid, partID, channel0, 1000, false, "assign segment with invalid collection"},
-		{collID, partID, channel0, uint32(maxCount), true, "assign with max count"},
-		{collID, partID, channel1, math.MaxUint32, false, "assign with max uint32 count"},
+		{"assign segment normally", collID, partID, channel0, 1000, true},
+		{"assign segment with invalid collection", collIDInvalid, partID, channel0, 1000, false},
+		{"assign with max count", collID, partID, channel0, uint32(maxCount), true},
+		{"assign with max uint32 count", collID, partID, channel1, math.MaxUint32, false},
 	}
 
 	for _, test := range cases {
@@ -344,6 +344,50 @@ func TestGetSegmentStates(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestChannel(t *testing.T) {
+	svr := newTestServer(t)
+	defer closeTestServer(t, svr)
+
+	genMsg := func(msgType commonpb.MsgType, t Timestamp) *msgstream.SegmentInfoMsg {
+		return &msgstream.SegmentInfoMsg{
+			BaseMsg: msgstream.BaseMsg{
+				Ctx:            svr.ctx,
+				BeginTimestamp: t,
+				EndTimestamp:   t,
+				HashValues:     []uint32{0},
+			},
+			SegmentMsg: datapb.SegmentMsg{
+				Base: &commonpb.MsgBase{
+					MsgType:   msgType,
+					MsgID:     0,
+					Timestamp: t,
+					SourceID:  0,
+				},
+			},
+		}
+	}
+
+	t.Run("Test StatsChannel", func(t *testing.T) {
+
+	})
+
+	t.Run("Test SegmentFlushChannel", func(t *testing.T) {
+
+	})
+
+	t.Run("Test ProxyTimeTickChannel", func(t *testing.T) {
+		timeTickStream, _ := svr.msFactory.NewMsgStream(svr.ctx)
+		timeTickStream.AsProducer([]string{Params.ProxyTimeTickChannelName})
+
+		msgPack := msgstream.MsgPack{}
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_TimeTick, 100))
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_RequestID, 200))
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_TimeTick, 300))
+		err := timeTickStream.Produce(&msgPack)
+		assert.Nil(t, err)
+	})
 }
 
 func newTestServer(t *testing.T) *Server {
