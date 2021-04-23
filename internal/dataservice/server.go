@@ -379,10 +379,10 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 func (s *Server) startProxyServiceTimeTickLoop(ctx context.Context) {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
-	flushStream, _ := s.msFactory.NewMsgStream(ctx)
-	flushStream.AsConsumer([]string{Params.ProxyTimeTickChannelName}, Params.DataServiceSubscriptionName)
-	flushStream.Start()
-	defer flushStream.Close()
+	timeTickStream, _ := s.msFactory.NewMsgStream(ctx)
+	timeTickStream.AsConsumer([]string{Params.ProxyTimeTickChannelName}, Params.DataServiceSubscriptionName)
+	timeTickStream.Start()
+	defer timeTickStream.Close()
 	for {
 		select {
 		case <-ctx.Done():
@@ -390,7 +390,7 @@ func (s *Server) startProxyServiceTimeTickLoop(ctx context.Context) {
 			return
 		default:
 		}
-		msgPack := flushStream.Consume()
+		msgPack := timeTickStream.Consume()
 		if msgPack == nil {
 			continue
 		}
