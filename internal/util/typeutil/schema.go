@@ -57,3 +57,8 @@ func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 	}
 	return res, nil
 }
+
+type SchemaHelper struct {
+	schema *schemapb.CollectionSchema
+
+}

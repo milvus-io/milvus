@@ -1,0 +1,57 @@
+syntax = "proto3";
+package milvus.proto.plan;
+
+option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/planpb";
+import "schema.proto";
+
+message GenericValue {
+  oneof val {
+    bool bool_val = 1;
+    int64 int64_val = 2;
+    double float_val = 3;
+  };
+}
+
+
+message QueryInfo {
+  int64 topk = 1;
+  int64 field_id = 2;
+  string metric_type = 3;
+  string search_params = 4;
+}
+
+message RangeExpr {
+  int64 field_id = 1;
+  schema.DataType data_type = 2;
+  enum OpType {
+    Invalid = 0;
+    GreaterThan = 1;
+    GreaterEqual = 2;
+    LessThan = 3;
+    LessEqual = 4;
+    Equal = 5;
+    NotEqual = 6;
+  };
+  repeated OpType ops = 3;
+  repeated GenericValue values = 4;
+}
+
+message Expr {
+  oneof expr {
+    RangeExpr range_expr = 1;
+  };
+}
+
+message VectorANNS {
+  bool is_binary = 1;
+
+  Expr predicates = 2;
+  QueryInfo query_info = 3;
+  string placeholder_tag = 4;  // always be "$0"
+}
+
+message PlanNode {
+  oneof node {
+    VectorANNS vector_anns = 1;
+  }
+}
