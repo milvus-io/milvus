@@ -54,7 +54,7 @@ type Server struct {
 	serverLoopCancel context.CancelFunc
 	serverLoopWg     sync.WaitGroup
 	state            atomic.Value
-	client           *etcdkv.EtcdKV
+	kvClient         *etcdkv.EtcdKV
 	meta             *meta
 	segAllocator     segmentAllocatorInterface
 	statsHandler     *statsHandler
@@ -153,9 +153,8 @@ func (s *Server) initMeta() error {
 		if err != nil {
 			return err
 		}
-		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
-		s.client = etcdKV
-		s.meta, err = newMeta(etcdKV)
+		s.kvClient = etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+		s.meta, err = newMeta(s.kvClient)
 		if err != nil {
 			return err
 		}
@@ -329,11 +328,12 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 			continue
 		}
 		for _, msg := range msgPack.Msgs {
-			statistics, ok := msg.(*msgstream.SegmentStatisticsMsg)
-			if !ok {
-				log.Error("receive unknown type msg from stats channel", zap.Stringer("msgType", msg.Type()))
+			if msg.Type() != commonpb.MsgType_SegmentStatistics {
+				log.Warn("receive unknown msg from segment statistics channel", zap.Stringer("msgType", msg.Type()))
+				continue
 			}
-			for _, stat := range statistics.SegStats {
+			ssMsg := msg.(*msgstream.SegmentStatisticsMsg)
+			for _, stat := range ssMsg.SegStats {
 				if err := s.statsHandler.HandleSegmentStat(stat); err != nil {
 					log.Error("handle segment stat error", zap.Int64("segmentID", stat.SegmentID), zap.Error(err))
 					continue
@@ -364,13 +364,14 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 		}
 		for _, msg := range msgPack.Msgs {
 			if msg.Type() != commonpb.MsgType_SegmentFlushDone {
+				log.Warn("receive unknown msg from segment flush channel", zap.Stringer("msgType", msg.Type()))
 				continue
 			}
-			realMsg := msg.(*msgstream.FlushCompletedMsg)
-			err := s.meta.FlushSegment(realMsg.SegmentID, realMsg.BeginTimestamp)
-			log.Debug("dataservice flushed segment", zap.Any("segmentID", realMsg.SegmentID), zap.Error(err))
+			fcMsg := msg.(*msgstream.FlushCompletedMsg)
+			err := s.meta.FlushSegment(fcMsg.SegmentID, fcMsg.BeginTimestamp)
+			log.Debug("dataservice flushed segment", zap.Any("segmentID", fcMsg.SegmentID), zap.Error(err))
 			if err != nil {
-				log.Error("get segment from meta error", zap.Int64("segmentID", realMsg.SegmentID), zap.Error(err))
+				log.Error("get segment from meta error", zap.Int64("segmentID", fcMsg.SegmentID), zap.Error(err))
 				continue
 			}
 		}
@@ -380,10 +381,10 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 func (s *Server) startProxyServiceTimeTickLoop(ctx context.Context) {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
-	flushStream, _ := s.msFactory.NewMsgStream(ctx)
-	flushStream.AsConsumer([]string{Params.ProxyTimeTickChannelName}, Params.DataServiceSubscriptionName)
-	flushStream.Start()
-	defer flushStream.Close()
+	timeTickStream, _ := s.msFactory.NewMsgStream(ctx)
+	timeTickStream.AsConsumer([]string{Params.ProxyTimeTickChannelName}, Params.DataServiceSubscriptionName)
+	timeTickStream.Start()
+	defer timeTickStream.Close()
 	for {
 		select {
 		case <-ctx.Done():
@@ -391,7 +392,7 @@ func (s *Server) startProxyServiceTimeTickLoop(ctx context.Context) {
 			return
 		default:
 		}
-		msgPack := flushStream.Consume()
+		msgPack := timeTickStream.Consume()
 		if msgPack == nil {
 			continue
 		}
@@ -400,9 +401,9 @@ func (s *Server) startProxyServiceTimeTickLoop(ctx context.Context) {
 				log.Warn("receive unknown msg from proxy service timetick", zap.Stringer("msgType", msg.Type()))
 				continue
 			}
-			tMsg := msg.(*msgstream.TimeTickMsg)
+			ttMsg := msg.(*msgstream.TimeTickMsg)
 			traceCtx := context.TODO()
-			if err := s.segAllocator.ExpireAllocations(traceCtx, tMsg.Base.Timestamp); err != nil {
+			if err := s.segAllocator.ExpireAllocations(traceCtx, ttMsg.Base.Timestamp); err != nil {
 				log.Error("expire allocations error", zap.Error(err))
 			}
 		}
@@ -422,7 +423,7 @@ func (s *Server) Stop() error {
 
 // CleanMeta only for test
 func (s *Server) CleanMeta() error {
-	return s.client.RemoveWithPrefix("")
+	return s.kvClient.RemoveWithPrefix("")
 }
 
 func (s *Server) stopServerLoop() {
@@ -732,7 +733,7 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 		},
 	}
 	p := path.Join(Params.SegmentFlushMetaPath, strconv.FormatInt(req.SegmentID, 10))
-	_, values, err := s.client.LoadWithPrefix(p)
+	_, values, err := s.kvClient.LoadWithPrefix(p)
 	if err != nil {
 		resp.Status.Reason = err.Error()
 		return resp, nil

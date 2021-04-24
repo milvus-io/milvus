@@ -14,6 +14,7 @@ import (
 	"context"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -80,11 +81,17 @@ func TestGetInsertChannels(t *testing.T) {
 }
 
 func TestAssignSegmentID(t *testing.T) {
+	const collID = 100
+	const collIDInvalid = 101
+	const partID = 0
+	const channel0 = "channel0"
+	const channel1 = "channel1"
+
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
 	svr.meta.AddCollection(&datapb.CollectionInfo{
-		ID:         0,
+		ID:         collID,
 		Schema:     schema,
 		Partitions: []int64{},
 	})
@@ -98,12 +105,12 @@ func TestAssignSegmentID(t *testing.T) {
 		PartitionID  UniqueID
 		ChannelName  string
 		Count        uint32
-		IsSuccess    bool
+		Success      bool
 	}{
-		{"assign segment normally", 0, 0, "channel0", 1000, true},
-		{"assign segment with unexisted collection", 1, 0, "channel0", 1000, false},
-		{"assign with max count", 0, 0, "channel0", uint32(maxCount), true},
-		{"assign with max uint32 count", 0, 0, "channel1", math.MaxUint32, false},
+		{"assign segment normally", collID, partID, channel0, 1000, true},
+		{"assign segment with invalid collection", collIDInvalid, partID, channel0, 1000, false},
+		{"assign with max count", collID, partID, channel0, uint32(maxCount), true},
+		{"assign with max uint32 count", collID, partID, channel1, math.MaxUint32, false},
 	}
 
 	for _, test := range cases {
@@ -123,7 +130,7 @@ func TestAssignSegmentID(t *testing.T) {
 			assert.Nil(t, err)
 			assert.EqualValues(t, 1, len(resp.SegIDAssignments))
 			assign := resp.SegIDAssignments[0]
-			if test.IsSuccess {
+			if test.Success {
 				assert.EqualValues(t, commonpb.ErrorCode_Success, assign.Status.ErrorCode)
 				assert.EqualValues(t, test.CollectionID, assign.CollectionID)
 				assert.EqualValues(t, test.PartitionID, assign.PartitionID)
@@ -338,6 +345,117 @@ func TestGetSegmentStates(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestChannel(t *testing.T) {
+	svr := newTestServer(t)
+	defer closeTestServer(t, svr)
+
+	t.Run("Test StatsChannel", func(t *testing.T) {
+		const segID = 0
+		const rowNum = int64(100)
+
+		segInfo := &datapb.SegmentInfo{
+			ID: segID,
+		}
+		err := svr.meta.AddSegment(segInfo)
+		assert.Nil(t, err)
+
+		stats := &internalpb.SegmentStatisticsUpdates{
+			SegmentID: segID,
+			NumRows:   rowNum,
+		}
+		genMsg := func(msgType commonpb.MsgType, t Timestamp) *msgstream.SegmentStatisticsMsg {
+			return &msgstream.SegmentStatisticsMsg{
+				BaseMsg: msgstream.BaseMsg{
+					HashValues: []uint32{0},
+				},
+				SegmentStatistics: internalpb.SegmentStatistics{
+					Base: &commonpb.MsgBase{
+						MsgType:   msgType,
+						MsgID:     0,
+						Timestamp: t,
+						SourceID:  0,
+					},
+					SegStats: []*internalpb.SegmentStatisticsUpdates{stats},
+				},
+			}
+		}
+
+		statsStream, _ := svr.msFactory.NewMsgStream(svr.ctx)
+		statsStream.AsProducer([]string{Params.StatisticsChannelName})
+
+		msgPack := msgstream.MsgPack{}
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentStatistics, 123))
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentInfo, 234))
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentStatistics, 345))
+		err = statsStream.Produce(&msgPack)
+		assert.Nil(t, err)
+		time.Sleep(time.Second)
+
+		segInfo, err = svr.meta.GetSegment(segID)
+		assert.Nil(t, err)
+		assert.Equal(t, rowNum, segInfo.NumRows)
+	})
+
+	t.Run("Test SegmentFlushChannel", func(t *testing.T) {
+		genMsg := func(msgType commonpb.MsgType, t Timestamp) *msgstream.FlushCompletedMsg {
+			return &msgstream.FlushCompletedMsg{
+				BaseMsg: msgstream.BaseMsg{
+					HashValues: []uint32{0},
+				},
+				SegmentFlushCompletedMsg: internalpb.SegmentFlushCompletedMsg{
+					Base: &commonpb.MsgBase{
+						MsgType:   msgType,
+						MsgID:     0,
+						Timestamp: t,
+						SourceID:  0,
+					},
+					SegmentID: 0,
+				},
+			}
+		}
+
+		statsStream, _ := svr.msFactory.NewMsgStream(svr.ctx)
+		statsStream.AsProducer([]string{Params.SegmentInfoChannelName})
+
+		msgPack := msgstream.MsgPack{}
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentFlushDone, 123))
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentInfo, 234))
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentFlushDone, 345))
+		err := statsStream.Produce(&msgPack)
+		assert.Nil(t, err)
+		time.Sleep(time.Second)
+	})
+
+	t.Run("Test ProxyTimeTickChannel", func(t *testing.T) {
+		genMsg := func(msgType commonpb.MsgType, t Timestamp) *msgstream.TimeTickMsg {
+			return &msgstream.TimeTickMsg{
+				BaseMsg: msgstream.BaseMsg{
+					HashValues: []uint32{0},
+				},
+				TimeTickMsg: internalpb.TimeTickMsg{
+					Base: &commonpb.MsgBase{
+						MsgType:   msgType,
+						MsgID:     0,
+						Timestamp: t,
+						SourceID:  0,
+					},
+				},
+			}
+		}
+
+		timeTickStream, _ := svr.msFactory.NewMsgStream(svr.ctx)
+		timeTickStream.AsProducer([]string{Params.ProxyTimeTickChannelName})
+
+		msgPack := msgstream.MsgPack{}
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_TimeTick, 123))
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentInfo, 234))
+		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_TimeTick, 345))
+		err := timeTickStream.Produce(&msgPack)
+		assert.Nil(t, err)
+		time.Sleep(time.Second)
+	})
 }
 
 func newTestServer(t *testing.T) *Server {
