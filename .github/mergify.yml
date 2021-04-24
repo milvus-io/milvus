@@ -34,3 +34,20 @@ pull_request_rules:
     actions:
       merge:
         method: squash
+
+  - name: Use the title and body from the pull request itself as the commit message
+    conditions:
+      - base=master
+      - -title~=(?i)\[wip\]
+      - "label=PR | message from pull request"
+      - "#approved-reviews-by>=1"
+      - "approved-reviews-by=czs007"
+      - "#changes-requested-reviews-by=0"
+      - "status-success=DCO"
+      - "status-success=continuous-integration/jenkins/pr-merge"
+      - "status-success=AMD64 Ubuntu 18.04"
+    actions:
+      merge:
+        method: squash
+        commit_message: title+body
+
