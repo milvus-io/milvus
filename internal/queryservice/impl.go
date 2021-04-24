@@ -112,11 +112,11 @@ func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterN
 	qs.qcMutex.Lock()
 	for _, queryChannel := range qs.queryChannels {
 		startParams = append(startParams, &commonpb.KeyValuePair{
-			Key:   "QueryChannelName",
+			Key:   "SearchChannelName",
 			Value: queryChannel.requestChannel,
 		})
 		startParams = append(startParams, &commonpb.KeyValuePair{
-			Key:   "QueryResultChannelName",
+			Key:   "SearchResultChannelName",
 			Value: queryChannel.responseChannel,
 		})
 	}
