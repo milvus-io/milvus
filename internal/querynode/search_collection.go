@@ -121,9 +121,13 @@ func (s *searchCollection) getServiceableTime() Timestamp {
 
 func (s *searchCollection) setServiceableTime(t Timestamp) {
 	s.serviceableTimeMutex.Lock()
-	// hard code graceful time to 1 second
-	// TODO: use config to set graceful time
-	s.serviceableTime = t + 1000*1000*1000
+	gracefulTimeInMilliSecond := Params.GracefulTime
+	if gracefulTimeInMilliSecond > 0 {
+		gracefulTime := tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)
+		s.serviceableTime = t + gracefulTime
+	} else {
+		s.serviceableTime = t
+	}
 	s.serviceableTimeMutex.Unlock()
 }
 

@@ -52,7 +52,7 @@ proxyService:
   port: 21122
 
 queryNode:
-  gracefulTime: 5000 # ms, for search
+  gracefulTime: 1000 # ms, for search
   port: 21123
 
 indexService:
