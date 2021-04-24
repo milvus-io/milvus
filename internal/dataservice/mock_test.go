@@ -118,6 +118,10 @@ func newMockMasterService() *mockMasterService {
 	return &mockMasterService{}
 }
 
+func (m *mockMasterService) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return nil, nil
+}
+
 func (m *mockMasterService) Init() error {
 	return nil
 }

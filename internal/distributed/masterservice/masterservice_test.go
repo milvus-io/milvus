@@ -23,6 +23,7 @@ import (
 	"time"
 
 	grpcmasterserviceclient "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
+	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/golang/protobuf/proto"
 	cms "github.com/milvus-io/milvus/internal/masterservice"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -77,7 +79,8 @@ func TestGrpcService(t *testing.T) {
 	assert.Nil(t, err)
 	svr.masterService.UpdateStateCode(internalpb.StateCode_Initializing)
 
-	core := svr.masterService
+	core, ok := (svr.masterService).(*cms.Core)
+	assert.True(t, ok)
 	err = core.Init()
 	assert.Nil(t, err)
 
@@ -168,6 +171,52 @@ func TestGrpcService(t *testing.T) {
 
 	err = cli.Start()
 	assert.Nil(t, err)
+
+	t.Run("get component states", func(t *testing.T) {
+		req := &internalpb.GetComponentStatesRequest{}
+		rsp, err := svr.GetComponentStates(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
+	})
+
+	t.Run("get time tick channel", func(t *testing.T) {
+		req := &internalpb.GetTimeTickChannelRequest{}
+		rsp, err := svr.GetTimeTickChannel(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
+	})
+
+	t.Run("get statistics channel", func(t *testing.T) {
+		req := &internalpb.GetStatisticsChannelRequest{}
+		rsp, err := svr.GetStatisticsChannel(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
+	})
+
+	t.Run("get dd channel", func(t *testing.T) {
+		req := &internalpb.GetDdChannelRequest{}
+		rsp, err := svr.GetDdChannel(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
+	})
+
+	t.Run("alloc time stamp", func(t *testing.T) {
+		req := &masterpb.AllocTimestampRequest{
+			Count: 1,
+		}
+		rsp, err := svr.AllocTimestamp(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
+	})
+
+	t.Run("alloc id", func(t *testing.T) {
+		req := &masterpb.AllocIDRequest{
+			Count: 1,
+		}
+		rsp, err := svr.AllocID(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
+	})
 
 	t.Run("create collection", func(t *testing.T) {
 		schema := schemapb.CollectionSchema{
@@ -657,4 +706,158 @@ func TestGrpcService(t *testing.T) {
 
 	err = svr.Stop()
 	assert.Nil(t, err)
+}
+
+type mockCore struct {
+	types.MasterComponent
+}
+
+func (m *mockCore) UpdateStateCode(internalpb.StateCode) {
+}
+func (m *mockCore) SetProxyService(context.Context, types.ProxyService) error {
+	return nil
+}
+func (m *mockCore) SetDataService(context.Context, types.DataService) error {
+	return nil
+}
+func (m *mockCore) SetIndexService(types.IndexService) error {
+	return nil
+}
+
+func (m *mockCore) SetQueryService(types.QueryService) error {
+	return nil
+}
+
+func (m *mockCore) Init() error {
+	return nil
+}
+
+func (m *mockCore) Start() error {
+	return nil
+}
+
+func (m *mockCore) Stop() error {
+	return fmt.Errorf("stop error")
+}
+
+type mockProxy struct {
+	types.ProxyService
+}
+
+func (m *mockProxy) Init() error {
+	return nil
+}
+func (m *mockProxy) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	return &internalpb.ComponentStates{
+		State: &internalpb.ComponentInfo{
+			StateCode: internalpb.StateCode_Healthy,
+		},
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		SubcomponentStates: []*internalpb.ComponentInfo{
+			{
+				StateCode: internalpb.StateCode_Healthy,
+			},
+		},
+	}, nil
+}
+func (m *mockProxy) Stop() error {
+	return fmt.Errorf("stop error")
+}
+
+type mockDataService struct {
+	types.DataService
+}
+
+func (m *mockDataService) Init() error {
+	return nil
+}
+func (m *mockDataService) Start() error {
+	return nil
+}
+func (m *mockDataService) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	return &internalpb.ComponentStates{
+		State: &internalpb.ComponentInfo{
+			StateCode: internalpb.StateCode_Healthy,
+		},
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		SubcomponentStates: []*internalpb.ComponentInfo{
+			{
+				StateCode: internalpb.StateCode_Healthy,
+			},
+		},
+	}, nil
+}
+func (m *mockDataService) Stop() error {
+	return fmt.Errorf("stop error")
+}
+
+type mockIndex struct {
+	types.IndexService
+}
+
+func (m *mockIndex) Init() error {
+	return nil
+}
+
+func (m *mockIndex) Stop() error {
+	return fmt.Errorf("stop error")
+}
+
+type mockQuery struct {
+	types.QueryService
+}
+
+func (m *mockQuery) Init() error {
+	return nil
+}
+
+func (m *mockQuery) Start() error {
+	return nil
+}
+
+func (m *mockQuery) Stop() error {
+	return fmt.Errorf("stop error")
+}
+
+func TestRun(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	svr := Server{
+		masterService:       &mockCore{},
+		ctx:                 ctx,
+		cancel:              cancel,
+		grpcErrChan:         make(chan error),
+		connectDataService:  true,
+		connectProxyService: true,
+		connectIndexService: true,
+		connectQueryService: true,
+	}
+	Params.Port = 1000000
+	err := svr.Run()
+	assert.NotNil(t, err)
+	assert.EqualError(t, err, "listen tcp: address 1000000: invalid port")
+
+	svr.newProxyServiceClient = func(s string) types.ProxyService {
+		return &mockProxy{}
+	}
+	svr.newDataServiceClient = func(s string) types.DataService {
+		return &mockDataService{}
+	}
+	svr.newIndexServiceClient = func(s string) types.IndexService {
+		return &mockIndex{}
+	}
+	svr.newQueryServiceClient = func(s string) (types.QueryService, error) {
+		return &mockQuery{}, nil
+	}
+
+	Params.Port = rand.Int()%100 + 10000
+	err = svr.Run()
+	assert.Nil(t, err)
+
+	err = svr.Stop()
+	assert.Nil(t, err)
+
 }
