@@ -352,9 +352,18 @@ func TestChannel(t *testing.T) {
 	defer closeTestServer(t, svr)
 
 	t.Run("Test StatsChannel", func(t *testing.T) {
+		const segID = 0
+		const rowNum = int64(100)
+
+		segInfo := &datapb.SegmentInfo{
+			ID: segID,
+		}
+		err := svr.meta.AddSegment(segInfo)
+		assert.Nil(t, err)
+
 		stats := &internalpb.SegmentStatisticsUpdates{
-			SegmentID: 0,
-			NumRows:   100,
+			SegmentID: segID,
+			NumRows:   rowNum,
 		}
 		genMsg := func(msgType commonpb.MsgType, t Timestamp) *msgstream.SegmentStatisticsMsg {
 			return &msgstream.SegmentStatisticsMsg{
@@ -380,9 +389,13 @@ func TestChannel(t *testing.T) {
 		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentStatistics, 123))
 		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentInfo, 234))
 		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentStatistics, 345))
-		err := statsStream.Produce(&msgPack)
+		err = statsStream.Produce(&msgPack)
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
+
+		segInfo, err = svr.meta.GetSegment(segID)
+		assert.Nil(t, err)
+		assert.Equal(t, rowNum, segInfo.NumRows)
 	})
 
 	t.Run("Test SegmentFlushChannel", func(t *testing.T) {

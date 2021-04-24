@@ -328,7 +328,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 			continue
 		}
 		for _, msg := range msgPack.Msgs {
-			if msg.Type() != commonpb.MsgType_SegmentStatistics{
+			if msg.Type() != commonpb.MsgType_SegmentStatistics {
 				log.Warn("receive unknown msg from segment statistics channel", zap.Stringer("msgType", msg.Type()))
 				continue
 			}
