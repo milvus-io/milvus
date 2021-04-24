@@ -164,7 +164,6 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_plan_2eproto::offsets[] PROTOB
   ~0u,  // no _oneof_case_
   ~0u,  // no _weak_field_map_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::QueryInfo, topk_),
-  PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::QueryInfo, field_id_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::QueryInfo, metric_type_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::QueryInfo, search_params_),
   ~0u,  // no _has_bits_
@@ -189,6 +188,7 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_plan_2eproto::offsets[] PROTOB
   ~0u,  // no _oneof_case_
   ~0u,  // no _weak_field_map_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::VectorANNS, is_binary_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::VectorANNS, field_id_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::VectorANNS, predicates_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::VectorANNS, query_info_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::VectorANNS, placeholder_tag_),
@@ -203,9 +203,9 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_plan_2eproto::offsets[] PROTOB
 static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
   { 0, -1, sizeof(::milvus::proto::plan::GenericValue)},
   { 9, -1, sizeof(::milvus::proto::plan::QueryInfo)},
-  { 18, -1, sizeof(::milvus::proto::plan::RangeExpr)},
-  { 27, -1, sizeof(::milvus::proto::plan::Expr)},
-  { 34, -1, sizeof(::milvus::proto::plan::VectorANNS)},
+  { 17, -1, sizeof(::milvus::proto::plan::RangeExpr)},
+  { 26, -1, sizeof(::milvus::proto::plan::Expr)},
+  { 33, -1, sizeof(::milvus::proto::plan::VectorANNS)},
   { 43, -1, sizeof(::milvus::proto::plan::PlanNode)},
 };
 
@@ -222,22 +222,22 @@ const char descriptor_table_protodef_plan_2eproto[] PROTOBUF_SECTION_VARIABLE(pr
   "\n\nplan.proto\022\021milvus.proto.plan\032\014schema."
   "proto\"S\n\014GenericValue\022\022\n\010bool_val\030\001 \001(\010H"
   "\000\022\023\n\tint64_val\030\002 \001(\003H\000\022\023\n\tfloat_val\030\003 \001("
-  "\001H\000B\005\n\003val\"W\n\tQueryInfo\022\014\n\004topk\030\001 \001(\003\022\020\n"
-  "\010field_id\030\002 \001(\003\022\023\n\013metric_type\030\003 \001(\t\022\025\n\r"
-  "search_params\030\004 \001(\t\"\242\002\n\tRangeExpr\022\020\n\010fie"
-  "ld_id\030\001 \001(\003\0220\n\tdata_type\030\002 \001(\0162\035.milvus."
-  "proto.schema.DataType\0220\n\003ops\030\003 \003(\0162#.mil"
-  "vus.proto.plan.RangeExpr.OpType\022/\n\006value"
-  "s\030\004 \003(\0132\037.milvus.proto.plan.GenericValue"
-  "\"n\n\006OpType\022\013\n\007Invalid\020\000\022\017\n\013GreaterThan\020\001"
-  "\022\020\n\014GreaterEqual\020\002\022\014\n\010LessThan\020\003\022\r\n\tLess"
-  "Equal\020\004\022\t\n\005Equal\020\005\022\014\n\010NotEqual\020\006\"B\n\004Expr"
-  "\0222\n\nrange_expr\030\001 \001(\0132\034.milvus.proto.plan"
-  ".RangeExprH\000B\006\n\004expr\"\227\001\n\nVectorANNS\022\021\n\ti"
-  "s_binary\030\001 \001(\010\022+\n\npredicates\030\002 \001(\0132\027.mil"
-  "vus.proto.plan.Expr\0220\n\nquery_info\030\003 \001(\0132"
+  "\001H\000B\005\n\003val\"E\n\tQueryInfo\022\014\n\004topk\030\001 \001(\003\022\023\n"
+  "\013metric_type\030\003 \001(\t\022\025\n\rsearch_params\030\004 \001("
+  "\t\"\242\002\n\tRangeExpr\022\020\n\010field_id\030\001 \001(\003\0220\n\tdat"
+  "a_type\030\002 \001(\0162\035.milvus.proto.schema.DataT"
+  "ype\0220\n\003ops\030\003 \003(\0162#.milvus.proto.plan.Ran"
+  "geExpr.OpType\022/\n\006values\030\004 \003(\0132\037.milvus.p"
+  "roto.plan.GenericValue\"n\n\006OpType\022\013\n\007Inva"
+  "lid\020\000\022\017\n\013GreaterThan\020\001\022\020\n\014GreaterEqual\020\002"
+  "\022\014\n\010LessThan\020\003\022\r\n\tLessEqual\020\004\022\t\n\005Equal\020\005"
+  "\022\014\n\010NotEqual\020\006\"B\n\004Expr\0222\n\nrange_expr\030\001 \001"
+  "(\0132\034.milvus.proto.plan.RangeExprH\000B\006\n\004ex"
+  "pr\"\251\001\n\nVectorANNS\022\021\n\tis_binary\030\001 \001(\010\022\020\n\010"
+  "field_id\030\002 \001(\003\022+\n\npredicates\030\003 \001(\0132\027.mil"
+  "vus.proto.plan.Expr\0220\n\nquery_info\030\004 \001(\0132"
   "\034.milvus.proto.plan.QueryInfo\022\027\n\017placeho"
-  "lder_tag\030\004 \001(\t\"H\n\010PlanNode\0224\n\013vector_ann"
+  "lder_tag\030\005 \001(\t\"H\n\010PlanNode\0224\n\013vector_ann"
   "s\030\001 \001(\0132\035.milvus.proto.plan.VectorANNSH\000"
   "B\006\n\004nodeB@Z>github.com/zilliztech/milvus"
   "-distributed/internal/proto/planpbb\006prot"
@@ -713,9 +713,7 @@ QueryInfo::QueryInfo(const QueryInfo& from)
   if (!from.search_params().empty()) {
     search_params_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.search_params_);
   }
-  ::memcpy(&topk_, &from.topk_,
-    static_cast<size_t>(reinterpret_cast<char*>(&field_id_) -
-    reinterpret_cast<char*>(&topk_)) + sizeof(field_id_));
+  topk_ = from.topk_;
   // @@protoc_insertion_point(copy_constructor:milvus.proto.plan.QueryInfo)
 }
 
@@ -723,9 +721,7 @@ void QueryInfo::SharedCtor() {
   ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_QueryInfo_plan_2eproto.base);
   metric_type_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   search_params_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-  ::memset(&topk_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&field_id_) -
-      reinterpret_cast<char*>(&topk_)) + sizeof(field_id_));
+  topk_ = PROTOBUF_LONGLONG(0);
 }
 
 QueryInfo::~QueryInfo() {
@@ -755,9 +751,7 @@ void QueryInfo::Clear() {
 
   metric_type_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   search_params_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-  ::memset(&topk_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&field_id_) -
-      reinterpret_cast<char*>(&topk_)) + sizeof(field_id_));
+  topk_ = PROTOBUF_LONGLONG(0);
   _internal_metadata_.Clear();
 }
 
@@ -773,13 +767,6 @@ const char* QueryInfo::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::
       case 1:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 8)) {
           topk_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
-          CHK_(ptr);
-        } else goto handle_unusual;
-        continue;
-      // int64 field_id = 2;
-      case 2:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16)) {
-          field_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
@@ -834,19 +821,6 @@ bool QueryInfo::MergePartialFromCodedStream(
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
                    ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
                  input, &topk_)));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      // int64 field_id = 2;
-      case 2: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (16 & 0xFF)) {
-
-          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
-                 input, &field_id_)));
         } else {
           goto handle_unusual;
         }
@@ -915,11 +889,6 @@ void QueryInfo::SerializeWithCachedSizes(
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(1, this->topk(), output);
   }
 
-  // int64 field_id = 2;
-  if (this->field_id() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(2, this->field_id(), output);
-  }
-
   // string metric_type = 3;
   if (this->metric_type().size() > 0) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
@@ -956,11 +925,6 @@ void QueryInfo::SerializeWithCachedSizes(
   // int64 topk = 1;
   if (this->topk() != 0) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(1, this->topk(), target);
-  }
-
-  // int64 field_id = 2;
-  if (this->field_id() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(2, this->field_id(), target);
   }
 
   // string metric_type = 3;
@@ -1027,13 +991,6 @@ size_t QueryInfo::ByteSizeLong() const {
         this->topk());
   }
 
-  // int64 field_id = 2;
-  if (this->field_id() != 0) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
-        this->field_id());
-  }
-
   int cached_size = ::PROTOBUF_NAMESPACE_ID::internal::ToCachedSize(total_size);
   SetCachedSize(cached_size);
   return total_size;
@@ -1072,9 +1029,6 @@ void QueryInfo::MergeFrom(const QueryInfo& from) {
   if (from.topk() != 0) {
     set_topk(from.topk());
   }
-  if (from.field_id() != 0) {
-    set_field_id(from.field_id());
-  }
 }
 
 void QueryInfo::CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) {
@@ -1103,7 +1057,6 @@ void QueryInfo::InternalSwap(QueryInfo* other) {
   search_params_.Swap(&other->search_params_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
   swap(topk_, other->topk_);
-  swap(field_id_, other->field_id_);
 }
 
 ::PROTOBUF_NAMESPACE_ID::Metadata QueryInfo::GetMetadata() const {
@@ -1907,7 +1860,9 @@ VectorANNS::VectorANNS(const VectorANNS& from)
   } else {
     query_info_ = nullptr;
   }
-  is_binary_ = from.is_binary_;
+  ::memcpy(&field_id_, &from.field_id_,
+    static_cast<size_t>(reinterpret_cast<char*>(&is_binary_) -
+    reinterpret_cast<char*>(&field_id_)) + sizeof(is_binary_));
   // @@protoc_insertion_point(copy_constructor:milvus.proto.plan.VectorANNS)
 }
 
@@ -1954,7 +1909,9 @@ void VectorANNS::Clear() {
     delete query_info_;
   }
   query_info_ = nullptr;
-  is_binary_ = false;
+  ::memset(&field_id_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&is_binary_) -
+      reinterpret_cast<char*>(&field_id_)) + sizeof(is_binary_));
   _internal_metadata_.Clear();
 }
 
@@ -1973,23 +1930,30 @@ const char* VectorANNS::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID:
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // .milvus.proto.plan.Expr predicates = 2;
+      // int64 field_id = 2;
       case 2:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 18)) {
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16)) {
+          field_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // .milvus.proto.plan.Expr predicates = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 26)) {
           ptr = ctx->ParseMessage(mutable_predicates(), ptr);
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // .milvus.proto.plan.QueryInfo query_info = 3;
-      case 3:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 26)) {
+      // .milvus.proto.plan.QueryInfo query_info = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 34)) {
           ptr = ctx->ParseMessage(mutable_query_info(), ptr);
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // string placeholder_tag = 4;
-      case 4:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 34)) {
+      // string placeholder_tag = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 42)) {
           ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_placeholder_tag(), ptr, ctx, "milvus.proto.plan.VectorANNS.placeholder_tag");
           CHK_(ptr);
         } else goto handle_unusual;
@@ -2037,9 +2001,22 @@ bool VectorANNS::MergePartialFromCodedStream(
         break;
       }
 
-      // .milvus.proto.plan.Expr predicates = 2;
+      // int64 field_id = 2;
       case 2: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (18 & 0xFF)) {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (16 & 0xFF)) {
+
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                 input, &field_id_)));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // .milvus.proto.plan.Expr predicates = 3;
+      case 3: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (26 & 0xFF)) {
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadMessage(
                input, mutable_predicates()));
         } else {
@@ -2048,9 +2025,9 @@ bool VectorANNS::MergePartialFromCodedStream(
         break;
       }
 
-      // .milvus.proto.plan.QueryInfo query_info = 3;
-      case 3: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (26 & 0xFF)) {
+      // .milvus.proto.plan.QueryInfo query_info = 4;
+      case 4: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (34 & 0xFF)) {
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadMessage(
                input, mutable_query_info()));
         } else {
@@ -2059,9 +2036,9 @@ bool VectorANNS::MergePartialFromCodedStream(
         break;
       }
 
-      // string placeholder_tag = 4;
-      case 4: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (34 & 0xFF)) {
+      // string placeholder_tag = 5;
+      case 5: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (42 & 0xFF)) {
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
                 input, this->mutable_placeholder_tag()));
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
@@ -2106,26 +2083,31 @@ void VectorANNS::SerializeWithCachedSizes(
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBool(1, this->is_binary(), output);
   }
 
-  // .milvus.proto.plan.Expr predicates = 2;
+  // int64 field_id = 2;
+  if (this->field_id() != 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(2, this->field_id(), output);
+  }
+
+  // .milvus.proto.plan.Expr predicates = 3;
   if (this->has_predicates()) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteMessageMaybeToArray(
-      2, _Internal::predicates(this), output);
+      3, _Internal::predicates(this), output);
   }
 
-  // .milvus.proto.plan.QueryInfo query_info = 3;
+  // .milvus.proto.plan.QueryInfo query_info = 4;
   if (this->has_query_info()) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteMessageMaybeToArray(
-      3, _Internal::query_info(this), output);
+      4, _Internal::query_info(this), output);
   }
 
-  // string placeholder_tag = 4;
+  // string placeholder_tag = 5;
   if (this->placeholder_tag().size() > 0) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
       this->placeholder_tag().data(), static_cast<int>(this->placeholder_tag().length()),
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
       "milvus.proto.plan.VectorANNS.placeholder_tag");
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
-      4, this->placeholder_tag(), output);
+      5, this->placeholder_tag(), output);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -2146,21 +2128,26 @@ void VectorANNS::SerializeWithCachedSizes(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBoolToArray(1, this->is_binary(), target);
   }
 
-  // .milvus.proto.plan.Expr predicates = 2;
+  // int64 field_id = 2;
+  if (this->field_id() != 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(2, this->field_id(), target);
+  }
+
+  // .milvus.proto.plan.Expr predicates = 3;
   if (this->has_predicates()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessageToArray(
-        2, _Internal::predicates(this), target);
+        3, _Internal::predicates(this), target);
   }
 
-  // .milvus.proto.plan.QueryInfo query_info = 3;
+  // .milvus.proto.plan.QueryInfo query_info = 4;
   if (this->has_query_info()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessageToArray(
-        3, _Internal::query_info(this), target);
+        4, _Internal::query_info(this), target);
   }
 
-  // string placeholder_tag = 4;
+  // string placeholder_tag = 5;
   if (this->placeholder_tag().size() > 0) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
       this->placeholder_tag().data(), static_cast<int>(this->placeholder_tag().length()),
@@ -2168,7 +2155,7 @@ void VectorANNS::SerializeWithCachedSizes(
       "milvus.proto.plan.VectorANNS.placeholder_tag");
     target =
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
-        4, this->placeholder_tag(), target);
+        5, this->placeholder_tag(), target);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -2192,25 +2179,32 @@ size_t VectorANNS::ByteSizeLong() const {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // string placeholder_tag = 4;
+  // string placeholder_tag = 5;
   if (this->placeholder_tag().size() > 0) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
         this->placeholder_tag());
   }
 
-  // .milvus.proto.plan.Expr predicates = 2;
+  // .milvus.proto.plan.Expr predicates = 3;
   if (this->has_predicates()) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
         *predicates_);
   }
 
-  // .milvus.proto.plan.QueryInfo query_info = 3;
+  // .milvus.proto.plan.QueryInfo query_info = 4;
   if (this->has_query_info()) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
         *query_info_);
+  }
+
+  // int64 field_id = 2;
+  if (this->field_id() != 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
+        this->field_id());
   }
 
   // bool is_binary = 1;
@@ -2255,6 +2249,9 @@ void VectorANNS::MergeFrom(const VectorANNS& from) {
   if (from.has_query_info()) {
     mutable_query_info()->::milvus::proto::plan::QueryInfo::MergeFrom(from.query_info());
   }
+  if (from.field_id() != 0) {
+    set_field_id(from.field_id());
+  }
   if (from.is_binary() != 0) {
     set_is_binary(from.is_binary());
   }
@@ -2285,6 +2282,7 @@ void VectorANNS::InternalSwap(VectorANNS* other) {
     GetArenaNoVirtual());
   swap(predicates_, other->predicates_);
   swap(query_info_, other->query_info_);
+  swap(field_id_, other->field_id_);
   swap(is_binary_, other->is_binary_);
 }
 

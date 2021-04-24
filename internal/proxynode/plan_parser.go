@@ -8,9 +8,29 @@ import (
 	"strings"
 )
 
-func parseQueryExpr(schema *schemapb.CollectionSchema, exprStr string) (*planpb.Expr, error){
+func getField(schema *schemapb.CollectionSchema, fieldName string) (field *schemapb.FieldSchema, err error) {
+	// TODO: use schema helper
+	for _, fieldIter := range schema.Fields {
+		if fieldIter.GetName() == fieldName {
+			field = fieldIter
+			break
+		}
+	}
+	if field == nil {
+		return nil, errors.New("field not found")
+	}
+	return field, nil
+}
+
+
+func parseQueryExpr(schema *schemapb.CollectionSchema, exprStrNullable *string) (*planpb.Expr, error){
 	// TODO: handle more cases
 	// TODO: currently just A > 3
+	if exprStrNullable == nil {
+		return nil, nil
+	}
+	exprStr := *exprStrNullable
+
 	tmps := strings.Split(exprStr, ">")
 	if len(tmps) != 2 {
 		return nil, errors.New("unsupported yet")
@@ -26,16 +46,10 @@ func parseQueryExpr(schema *schemapb.CollectionSchema, exprStr string) (*planpb.
 	fieldValue := &planpb.GenericValue{
 		Val:  &planpb.GenericValue_Int64Val{Int64Val: tmpValue},
 	}
-	// TODO: use schema helper
-	var field *schemapb.FieldSchema
-	for _, fieldIter := range schema.Fields {
-		if fieldIter.GetName() == fieldName {
-			field = fieldIter
-			break
-		}
-	}
-	if field == nil {
-		return nil, errors.New("field not found")
+
+	field, err := getField(schema, fieldName)
+	if err != nil {
+		return nil, err
 	}
 
 	expr := &planpb.Expr{
@@ -51,11 +65,17 @@ func parseQueryExpr(schema *schemapb.CollectionSchema, exprStr string) (*planpb.
 	return expr, nil
 }
 
-func CreateQueryPlan(schema *schemapb.CollectionSchema, exprStr string, queryInfo *planpb.QueryInfo) (*planpb.PlanNode, error){
-	expr, err := parseQueryExpr(schema, exprStr)
+func CreateQueryPlan(schema *schemapb.CollectionSchema, exprStrNullable *string, vectorFieldName string, queryInfo *planpb.QueryInfo) (*planpb.PlanNode, error){
+	expr, err := parseQueryExpr(schema, exprStrNullable)
 	if err != nil {
 		return nil, err
 	}
+	vectorField, err := getField(schema, vectorFieldName)
+	if err != nil {
+		return nil, err
+	}
+	fieldID := vectorField.FieldID
+
 	planNode := &planpb.PlanNode{
 		Node: &planpb.PlanNode_VectorAnns{
 			VectorAnns: &planpb.VectorANNS{
@@ -63,6 +83,7 @@ func CreateQueryPlan(schema *schemapb.CollectionSchema, exprStr string, queryInf
 				Predicates: expr,
 				QueryInfo: queryInfo,
 				PlaceholderTag: "$0",
+				FieldId: fieldID,
 			},
 		},
 	}

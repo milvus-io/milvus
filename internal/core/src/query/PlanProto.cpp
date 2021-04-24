@@ -44,10 +44,13 @@ PlanNodePtr
 PlanNodeFromProto(const Schema& schema, const planpb::PlanNode& plan_node_proto) {
     // TODO: add more buffs
     Assert(plan_node_proto.has_vector_anns());
-    auto& anns = plan_node_proto.vector_anns();
-    AssertInfo(anns.is_binary() == false, "unimplemented");
-    auto expr = ExprFromProto(schema, anns.predicates());
-    planpb::QueryInfo query_info;
+    auto& anns_proto = plan_node_proto.vector_anns();
+    AssertInfo(anns_proto.is_binary() == false, "unimplemented");
+    auto expr = ExprFromProto(schema, anns_proto.predicates());
+    auto& query_info_proto = anns_proto.query_info();
+
+    QueryInfo query_info;
+    return nullptr;
 }
 
 }  // namespace milvus::query

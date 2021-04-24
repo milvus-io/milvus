@@ -36,11 +36,14 @@ func TestParsePlanNode_Naive(t *testing.T) {
 	schema := newTestSchema()
 	queryInfo := &planpb.QueryInfo{
 		Topk: 10,
-		FieldId: 101,
 		MetricType: "L2",
 		SearchParams: "{\"nprobe\": 10}",
 	}
-	planProto, err := CreateQueryPlan(schema, exprStr, queryInfo)
+
+	// Note: use pointer to string to represent nullable string
+	// TODO: change it to better solution
+	planProto, err := CreateQueryPlan(schema, &exprStr, "vectorField", queryInfo)
+
 	assert.Nil(t, err)
 	dbgStr := proto.MarshalTextString(planProto)
 	println(dbgStr)

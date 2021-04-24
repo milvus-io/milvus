@@ -414,7 +414,6 @@ class QueryInfo :
     kMetricTypeFieldNumber = 3,
     kSearchParamsFieldNumber = 4,
     kTopkFieldNumber = 1,
-    kFieldIdFieldNumber = 2,
   };
   // string metric_type = 3;
   void clear_metric_type();
@@ -443,11 +442,6 @@ class QueryInfo :
   ::PROTOBUF_NAMESPACE_ID::int64 topk() const;
   void set_topk(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // int64 field_id = 2;
-  void clear_field_id();
-  ::PROTOBUF_NAMESPACE_ID::int64 field_id() const;
-  void set_field_id(::PROTOBUF_NAMESPACE_ID::int64 value);
-
   // @@protoc_insertion_point(class_scope:milvus.proto.plan.QueryInfo)
  private:
   class _Internal;
@@ -456,7 +450,6 @@ class QueryInfo :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr metric_type_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr search_params_;
   ::PROTOBUF_NAMESPACE_ID::int64 topk_;
-  ::PROTOBUF_NAMESPACE_ID::int64 field_id_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_plan_2eproto;
 };
@@ -928,12 +921,13 @@ class VectorANNS :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kPlaceholderTagFieldNumber = 4,
-    kPredicatesFieldNumber = 2,
-    kQueryInfoFieldNumber = 3,
+    kPlaceholderTagFieldNumber = 5,
+    kPredicatesFieldNumber = 3,
+    kQueryInfoFieldNumber = 4,
+    kFieldIdFieldNumber = 2,
     kIsBinaryFieldNumber = 1,
   };
-  // string placeholder_tag = 4;
+  // string placeholder_tag = 5;
   void clear_placeholder_tag();
   const std::string& placeholder_tag() const;
   void set_placeholder_tag(const std::string& value);
@@ -944,7 +938,7 @@ class VectorANNS :
   std::string* release_placeholder_tag();
   void set_allocated_placeholder_tag(std::string* placeholder_tag);
 
-  // .milvus.proto.plan.Expr predicates = 2;
+  // .milvus.proto.plan.Expr predicates = 3;
   bool has_predicates() const;
   void clear_predicates();
   const ::milvus::proto::plan::Expr& predicates() const;
@@ -952,13 +946,18 @@ class VectorANNS :
   ::milvus::proto::plan::Expr* mutable_predicates();
   void set_allocated_predicates(::milvus::proto::plan::Expr* predicates);
 
-  // .milvus.proto.plan.QueryInfo query_info = 3;
+  // .milvus.proto.plan.QueryInfo query_info = 4;
   bool has_query_info() const;
   void clear_query_info();
   const ::milvus::proto::plan::QueryInfo& query_info() const;
   ::milvus::proto::plan::QueryInfo* release_query_info();
   ::milvus::proto::plan::QueryInfo* mutable_query_info();
   void set_allocated_query_info(::milvus::proto::plan::QueryInfo* query_info);
+
+  // int64 field_id = 2;
+  void clear_field_id();
+  ::PROTOBUF_NAMESPACE_ID::int64 field_id() const;
+  void set_field_id(::PROTOBUF_NAMESPACE_ID::int64 value);
 
   // bool is_binary = 1;
   void clear_is_binary();
@@ -973,6 +972,7 @@ class VectorANNS :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr placeholder_tag_;
   ::milvus::proto::plan::Expr* predicates_;
   ::milvus::proto::plan::QueryInfo* query_info_;
+  ::PROTOBUF_NAMESPACE_ID::int64 field_id_;
   bool is_binary_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_plan_2eproto;
@@ -1252,20 +1252,6 @@ inline void QueryInfo::set_topk(::PROTOBUF_NAMESPACE_ID::int64 value) {
   // @@protoc_insertion_point(field_set:milvus.proto.plan.QueryInfo.topk)
 }
 
-// int64 field_id = 2;
-inline void QueryInfo::clear_field_id() {
-  field_id_ = PROTOBUF_LONGLONG(0);
-}
-inline ::PROTOBUF_NAMESPACE_ID::int64 QueryInfo::field_id() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.plan.QueryInfo.field_id)
-  return field_id_;
-}
-inline void QueryInfo::set_field_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
-  
-  field_id_ = value;
-  // @@protoc_insertion_point(field_set:milvus.proto.plan.QueryInfo.field_id)
-}
-
 // string metric_type = 3;
 inline void QueryInfo::clear_metric_type() {
   metric_type_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
@@ -1532,7 +1518,21 @@ inline void VectorANNS::set_is_binary(bool value) {
   // @@protoc_insertion_point(field_set:milvus.proto.plan.VectorANNS.is_binary)
 }
 
-// .milvus.proto.plan.Expr predicates = 2;
+// int64 field_id = 2;
+inline void VectorANNS::clear_field_id() {
+  field_id_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 VectorANNS::field_id() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.VectorANNS.field_id)
+  return field_id_;
+}
+inline void VectorANNS::set_field_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  field_id_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.VectorANNS.field_id)
+}
+
+// .milvus.proto.plan.Expr predicates = 3;
 inline bool VectorANNS::has_predicates() const {
   return this != internal_default_instance() && predicates_ != nullptr;
 }
@@ -1583,7 +1583,7 @@ inline void VectorANNS::set_allocated_predicates(::milvus::proto::plan::Expr* pr
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.plan.VectorANNS.predicates)
 }
 
-// .milvus.proto.plan.QueryInfo query_info = 3;
+// .milvus.proto.plan.QueryInfo query_info = 4;
 inline bool VectorANNS::has_query_info() const {
   return this != internal_default_instance() && query_info_ != nullptr;
 }
@@ -1634,7 +1634,7 @@ inline void VectorANNS::set_allocated_query_info(::milvus::proto::plan::QueryInf
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.plan.VectorANNS.query_info)
 }
 
-// string placeholder_tag = 4;
+// string placeholder_tag = 5;
 inline void VectorANNS::clear_placeholder_tag() {
   placeholder_tag_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }

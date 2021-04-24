@@ -15,7 +15,6 @@ message GenericValue {
 
 message QueryInfo {
   int64 topk = 1;
-  int64 field_id = 2;
   string metric_type = 3;
   string search_params = 4;
 }
@@ -44,10 +43,10 @@ message Expr {
 
 message VectorANNS {
   bool is_binary = 1;
-
-  Expr predicates = 2;
-  QueryInfo query_info = 3;
-  string placeholder_tag = 4;  // always be "$0"
+  int64 field_id = 2;
+  Expr predicates = 3;
+  QueryInfo query_info = 4;
+  string placeholder_tag = 5;  // always be "$0"
 }
 
 message PlanNode {
