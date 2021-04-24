@@ -10,24 +10,24 @@
 /githooks/               @jeffoverflow
 /internal/*              @czs007
 /internal/core/          @GuoRentong @shengjun1985
-/internal/datanode/      @sunby
-/internal/dataservice/   @sunby
+/internal/datanode/      @sunby @neza2017 @czs007
+/internal/dataservice/   @sunby @neza2017 @czs007
 /internal/distributed/*  @czs007 @neza2017
-/internal/distributed/datanode/       @sunby
-/internal/distributed/dataservice/    @sunby 
-/internal/distributed/indexnode/      @czs007
-/internal/distributed/indexservice/   @czs007
-/internal/distributed/masterservice/  @neza2017
-/internal/distributed/proxynode/      @czs007
-/internal/distributed/proxyservice/   @czs007
-/internal/distributed/querynode/      @xige-16
-/internal/distributed/queryservice/   @xige-16
-/internal/kv/            @czs007 @scsven
-/internal/log/           @sunby
-/internal/masterservice/ @neza2017
-/internal/msgstream/     @xige-16 @scsven
-/internal/querynode/     @xige-16
-/internal/queryservice/  @xige-16
-/internal/storage/       @neza2017 @sunby
+/internal/distributed/datanode/       @sunby @neza2017 @czs007
+/internal/distributed/dataservice/    @sunby  @neza2017 @czs007
+/internal/distributed/indexnode/      @czs007 @neza2017
+/internal/distributed/indexservice/   @czs007 @neza2017
+/internal/distributed/masterservice/  @neza2017 @czs007
+/internal/distributed/proxynode/      @czs007 @neza2017
+/internal/distributed/proxyservice/   @czs007 @neza2017
+/internal/distributed/querynode/      @xige-16 @neza2017 @czs007
+/internal/distributed/queryservice/   @xige-16 @neza2017 @czs007
+/internal/kv/            @czs007 @scsven @neza2017
+/internal/log/           @sunby @neza2017 @czs007
+/internal/masterservice/ @neza2017 @czs007
+/internal/msgstream/     @xige-16 @scsven @neza2017 @czs007
+/internal/querynode/     @xige-16 @neza2017 @czs007
+/internal/queryservice/  @xige-16 @neza2017 @czs007
+/internal/storage/       @neza2017 @sunby @czs007
 /internal/util/          @neza2017 @czs007 @xige-16 @scsven
 /tests/                  @test-team
