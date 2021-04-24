@@ -11,15 +11,6 @@ services:
     networks:
       - milvus
 
-  pulsar:
-    image: apachepulsar/pulsar:latest
-    command: bin/pulsar standalone
-    ports:
-      - "6650:6650"
-      - "18080:8080"
-    networks:
-      - milvus
-
   minio:
     image: minio/minio:RELEASE.2020-12-03T00-03-10Z
     ports:
@@ -48,14 +39,12 @@ services:
     image: ${TARGET_DOCKER_IMAGE}
     command: ["/milvus-distributed/bin/singlenode"]
     environment:
-      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       ETCD_ADDRESS: ${ETCD_ADDRESS}
       MINIO_ADDRESS: ${MINIO_ADDRESS}
     ports:
       - "19530:19530"
     depends_on:
       - "etcd"
-      - "pulsar"
       - "minio"
       - "jaeger"
     networks:
