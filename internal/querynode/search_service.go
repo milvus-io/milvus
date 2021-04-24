@@ -40,13 +40,13 @@ func newSearchService(ctx context.Context, replica ReplicaInterface, factory msg
 	searchStream, _ := factory.NewQueryMsgStream(ctx)
 	searchResultStream, _ := factory.NewQueryMsgStream(ctx)
 
-	if Params.SearchChannelName != "" && Params.SearchResultChannelName != "" {
+	if len(Params.SearchChannelNames) > 0 && len(Params.SearchResultChannelNames) > 0 {
 		// query node need to consumer search channels and produce search result channels when init.
-		consumeChannels := []string{Params.SearchChannelName}
+		consumeChannels := Params.SearchChannelNames
 		consumeSubName := Params.MsgChannelSubName
 		searchStream.AsConsumer(consumeChannels, consumeSubName)
 		log.Debug("query node AsConsumer", zap.Any("searchChannels", consumeChannels), zap.Any("consumeSubName", consumeSubName))
-		producerChannels := []string{Params.SearchResultChannelName}
+		producerChannels := Params.SearchResultChannelNames
 		searchResultStream.AsProducer(producerChannels)
 		log.Debug("query node AsProducer", zap.Any("searchResultChannels", producerChannels))
 	}
