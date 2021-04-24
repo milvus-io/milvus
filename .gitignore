@@ -72,3 +72,7 @@ gtags.conf
 
 # Delve generated file
 **/__debug_bin
+
+# go-codecov
+coverage.txt
+profile.out
