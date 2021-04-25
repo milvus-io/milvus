@@ -289,6 +289,8 @@ message SearchRequest {
   string dsl = 5;
   // serialized `PlaceholderGroup`
   bytes placeholder_group = 6;
+  common.DslType dsl_type = 7;
+  repeated common.KeyValuePair search_params = 8;
 }
 
 message Hits {

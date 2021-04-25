@@ -133,6 +133,10 @@ message MsgBase {
     int64 sourceID = 4;
 }
 
+enum DslType {
+    Dsl = 0;
+    BoolExprV1 = 1;
+}
 
 // Don't Modify This. @czs
 message MsgHeader {

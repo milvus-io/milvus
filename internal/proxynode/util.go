@@ -13,6 +13,8 @@ package proxynode
 
 import (
 	"encoding/json"
+	"errors"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"io/ioutil"
 	"net/http"
 	"strconv"
@@ -91,4 +93,14 @@ func CheckStrByValues(params map[string]string, key string, container []string) 
 	}
 
 	return funcutil.SliceContain(container, value)
+}
+
+func GetAttrByKeyFromRepeatedKV(key string, kvs []*commonpb.KeyValuePair) (string, error) {
+	for _, kv := range kvs {
+		if kv.Key == key {
+			return kv.Value, nil
+		}
+	}
+
+	return "", errors.New("key " + key + " not found")
 }

@@ -257,6 +257,31 @@ inline bool MsgType_Parse(
   return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<MsgType>(
     MsgType_descriptor(), name, value);
 }
+enum DslType : int {
+  Dsl = 0,
+  BoolExprV1 = 1,
+  DslType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
+  DslType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
+};
+bool DslType_IsValid(int value);
+constexpr DslType DslType_MIN = Dsl;
+constexpr DslType DslType_MAX = BoolExprV1;
+constexpr int DslType_ARRAYSIZE = DslType_MAX + 1;
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* DslType_descriptor();
+template<typename T>
+inline const std::string& DslType_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, DslType>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function DslType_Name.");
+  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
+    DslType_descriptor(), enum_t_value);
+}
+inline bool DslType_Parse(
+    const std::string& name, DslType* value) {
+  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<DslType>(
+    DslType_descriptor(), name, value);
+}
 // ===================================================================
 
 class Status :
@@ -1580,6 +1605,11 @@ template <> struct is_proto_enum< ::milvus::proto::common::MsgType> : ::std::tru
 template <>
 inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::MsgType>() {
   return ::milvus::proto::common::MsgType_descriptor();
+}
+template <> struct is_proto_enum< ::milvus::proto::common::DslType> : ::std::true_type {};
+template <>
+inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::DslType>() {
+  return ::milvus::proto::common::DslType_descriptor();
 }
 
 PROTOBUF_NAMESPACE_CLOSE

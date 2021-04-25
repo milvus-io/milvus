@@ -21,6 +21,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/planpb"
+
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"go.uber.org/zap"
@@ -45,6 +47,10 @@ const (
 	CreateCollectionTaskName        = "CreateCollectionTask"
 	DropCollectionTaskName          = "DropCollectionTask"
 	SearchTaskName                  = "SearchTask"
+	AnnsFieldKey                    = "anns_field"
+	TopKKey                         = "topk"
+	MetricTypeKey                   = "metric_type"
+	SearchParamsKey                 = "params"
 	HasCollectionTaskName           = "HasCollectionTask"
 	DescribeCollectionTaskName      = "DescribeCollectionTask"
 	GetCollectionStatisticsTaskName = "GetCollectionStatisticsTask"
@@ -555,6 +561,54 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 		}
 	}
 	st.Base.MsgType = commonpb.MsgType_Search
+
+	var dsl string
+	dsl = st.query.Dsl
+	if st.query.GetDslType() == commonpb.DslType_BoolExprV1 {
+		schema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
+		if err != nil { // err is not nil if collection not exists
+			return err
+		}
+
+		annsField, err := GetAttrByKeyFromRepeatedKV(AnnsFieldKey, st.query.SearchParams)
+		if err != nil {
+			return errors.New(AnnsFieldKey + " not found in search_params")
+		}
+
+		topKStr, err := GetAttrByKeyFromRepeatedKV(TopKKey, st.query.SearchParams)
+		if err != nil {
+			return errors.New(TopKKey + " not found in search_params")
+		}
+		topK, err := strconv.Atoi(topKStr)
+		if err != nil {
+			return errors.New(TopKKey + " " + topKStr + " is not invalid")
+		}
+
+		metricType, err := GetAttrByKeyFromRepeatedKV(MetricTypeKey, st.query.SearchParams)
+		if err != nil {
+			return errors.New(MetricTypeKey + " not found in search_params")
+		}
+
+		searchParams, err := GetAttrByKeyFromRepeatedKV(SearchParamsKey, st.query.SearchParams)
+		if err != nil {
+			return errors.New(SearchParamsKey + " not found in search_params")
+		}
+
+		queryInfo := &planpb.QueryInfo{
+			Topk:         int64(topK),
+			MetricType:   metricType,
+			SearchParams: searchParams,
+		}
+
+		plan, err := CreateQueryPlan(schema, &st.query.Dsl, annsField, queryInfo)
+		if err != nil {
+			return errors.New("invalid expression: " + st.query.Dsl)
+		}
+
+		dsl = proto.MarshalTextString(plan)
+		st.query.Dsl = dsl
+	}
+
 	queryBytes, err := proto.Marshal(st.query)
 	if err != nil {
 		return err
@@ -600,7 +654,7 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	st.Dsl = st.query.Dsl
+	st.Dsl = dsl
 	st.PlaceholderGroup = st.query.PlaceholderGroup
 
 	return nil

@@ -6400,11 +6400,13 @@ class SearchRequest :
 
   enum : int {
     kPartitionNamesFieldNumber = 4,
+    kSearchParamsFieldNumber = 8,
     kDbNameFieldNumber = 2,
     kCollectionNameFieldNumber = 3,
     kDslFieldNumber = 5,
     kPlaceholderGroupFieldNumber = 6,
     kBaseFieldNumber = 1,
+    kDslTypeFieldNumber = 7,
   };
   // repeated string partition_names = 4;
   int partition_names_size() const;
@@ -6422,6 +6424,17 @@ class SearchRequest :
   void add_partition_names(const char* value, size_t size);
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& partition_names() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_partition_names();
+
+  // repeated .milvus.proto.common.KeyValuePair search_params = 8;
+  int search_params_size() const;
+  void clear_search_params();
+  ::milvus::proto::common::KeyValuePair* mutable_search_params(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >*
+      mutable_search_params();
+  const ::milvus::proto::common::KeyValuePair& search_params(int index) const;
+  ::milvus::proto::common::KeyValuePair* add_search_params();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >&
+      search_params() const;
 
   // string db_name = 2;
   void clear_db_name();
@@ -6475,17 +6488,24 @@ class SearchRequest :
   ::milvus::proto::common::MsgBase* mutable_base();
   void set_allocated_base(::milvus::proto::common::MsgBase* base);
 
+  // .milvus.proto.common.DslType dsl_type = 7;
+  void clear_dsl_type();
+  ::milvus::proto::common::DslType dsl_type() const;
+  void set_dsl_type(::milvus::proto::common::DslType value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.SearchRequest)
  private:
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> partition_names_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair > search_params_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr dsl_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr placeholder_group_;
   ::milvus::proto::common::MsgBase* base_;
+  int dsl_type_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -13910,6 +13930,47 @@ inline void SearchRequest::set_allocated_placeholder_group(std::string* placehol
   }
   placeholder_group_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), placeholder_group);
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.SearchRequest.placeholder_group)
+}
+
+// .milvus.proto.common.DslType dsl_type = 7;
+inline void SearchRequest::clear_dsl_type() {
+  dsl_type_ = 0;
+}
+inline ::milvus::proto::common::DslType SearchRequest::dsl_type() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.SearchRequest.dsl_type)
+  return static_cast< ::milvus::proto::common::DslType >(dsl_type_);
+}
+inline void SearchRequest::set_dsl_type(::milvus::proto::common::DslType value) {
+  
+  dsl_type_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.SearchRequest.dsl_type)
+}
+
+// repeated .milvus.proto.common.KeyValuePair search_params = 8;
+inline int SearchRequest::search_params_size() const {
+  return search_params_.size();
+}
+inline ::milvus::proto::common::KeyValuePair* SearchRequest::mutable_search_params(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.SearchRequest.search_params)
+  return search_params_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >*
+SearchRequest::mutable_search_params() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.SearchRequest.search_params)
+  return &search_params_;
+}
+inline const ::milvus::proto::common::KeyValuePair& SearchRequest::search_params(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.SearchRequest.search_params)
+  return search_params_.Get(index);
+}
+inline ::milvus::proto::common::KeyValuePair* SearchRequest::add_search_params() {
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.SearchRequest.search_params)
+  return search_params_.Add();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >&
+SearchRequest::search_params() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.SearchRequest.search_params)
+  return search_params_;
 }
 
 // -------------------------------------------------------------------

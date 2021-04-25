@@ -1,13 +1,13 @@
 package proxynode
 
 import (
+	"testing"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
-
 
 func newTestSchema() *schemapb.CollectionSchema {
 	return &schemapb.CollectionSchema{
@@ -25,7 +25,7 @@ func newTestSchema() *schemapb.CollectionSchema {
 func TestParseQueryExpr_Naive(t *testing.T) {
 	exprStr := "int64Field > 3"
 	schema := newTestSchema()
-	exprProto, err := parseQueryExpr(schema, exprStr)
+	exprProto, err := parseQueryExpr(schema, &exprStr)
 	assert.Nil(t, err)
 	str := proto.MarshalTextString(exprProto)
 	println(str)
@@ -35,8 +35,8 @@ func TestParsePlanNode_Naive(t *testing.T) {
 	exprStr := "int64Field > 3"
 	schema := newTestSchema()
 	queryInfo := &planpb.QueryInfo{
-		Topk: 10,
-		MetricType: "L2",
+		Topk:         10,
+		MetricType:   "L2",
 		SearchParams: "{\"nprobe\": 10}",
 	}
 
