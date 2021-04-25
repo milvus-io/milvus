@@ -42,7 +42,7 @@ jobs:
           docker build -t milvusdb/pytest:${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} .
           docker tag milvusdb/pytest:${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} milvusdb/pytest:latest
       - name: Docker Push
-        if: success() && github.event_name == 'push' && github.repository == 'zilliztech/milvus-distributed'
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
         shell: bash
         run: |

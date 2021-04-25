@@ -47,7 +47,7 @@ jobs:
           DATE_VERSION=${{ steps.extracter.outputs.version }} docker-compose build ubuntu
           DATE_VERSION=latest docker-compose build ubuntu
       - name: Docker Push
-        if: success() && github.event_name == 'push' && github.repository == 'zilliztech/milvus-distributed'
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
         shell: bash
         run: |

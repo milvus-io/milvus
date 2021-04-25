@@ -46,7 +46,7 @@ services:
 
   master:
     image: ${TARGET_DOCKER_IMAGE}
-    command: ["/milvus-distributed/bin/milvus", "run", "master"]
+    command: ["/milvus/bin/milvus", "run", "master"]
     environment:
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       ETCD_ADDRESS: ${ETCD_ADDRESS}
@@ -64,7 +64,7 @@ services:
 
   proxyservice:
     image: ${TARGET_DOCKER_IMAGE}
-    command: ["/milvus-distributed/bin/milvus", "run", "proxyservice"]
+    command: ["/milvus/bin/milvus", "run", "proxyservice"]
     environment:
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
     depends_on:
@@ -77,7 +77,7 @@ services:
 
   proxynode:
     image: ${TARGET_DOCKER_IMAGE}
-    command: ["/milvus-distributed/bin/milvus", "run", "proxynode"]
+    command: ["/milvus/bin/milvus", "run", "proxynode"]
     environment:
       ETCD_ADDRESS: ${ETCD_ADDRESS}
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
@@ -96,7 +96,7 @@ services:
 
   queryservice:
     image: ${TARGET_DOCKER_IMAGE}
-    command: ["/milvus-distributed/bin/milvus", "run", "queryservice"]
+    command: ["/milvus/bin/milvus", "run", "queryservice"]
     environment:
       MASTER_ADDRESS: ${MASTER_ADDRESS}
       DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
@@ -110,7 +110,7 @@ services:
 
   querynode:
     image: ${TARGET_DOCKER_IMAGE}
-    command: ["/milvus-distributed/bin/milvus", "run", "querynode"]
+    command: ["/milvus/bin/milvus", "run", "querynode"]
     environment:
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       MASTER_ADDRESS: ${MASTER_ADDRESS}
@@ -126,7 +126,7 @@ services:
 
   indexservice:
     image: ${TARGET_DOCKER_IMAGE}
-    command: ["/milvus-distributed/bin/milvus", "run", "indexservice"]
+    command: ["/milvus/bin/milvus", "run", "indexservice"]
     environment:
       MASTER_ADDRESS: ${MASTER_ADDRESS}
       ETCD_ADDRESS: ${ETCD_ADDRESS}
@@ -141,7 +141,7 @@ services:
 
   indexnode:
     image: ${TARGET_DOCKER_IMAGE}
-    command: ["/milvus-distributed/bin/milvus", "run", "indexnode"]
+    command: ["/milvus/bin/milvus", "run", "indexnode"]
     environment:
       INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
       MINIO_ADDRESS: ${MINIO_ADDRESS}
@@ -153,7 +153,7 @@ services:
 
   dataservice:
     image: ${TARGET_DOCKER_IMAGE}
-    command: ["/milvus-distributed/bin/milvus", "run", "dataservice"]
+    command: ["/milvus/bin/milvus", "run", "dataservice"]
     environment:
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       ETCD_ADDRESS: ${ETCD_ADDRESS}
@@ -169,7 +169,7 @@ services:
 
   datanode:
     image: ${TARGET_DOCKER_IMAGE}
-    command: ["/milvus-distributed/bin/milvus", "run", "datanode"]
+    command: ["/milvus/bin/milvus", "run", "datanode"]
     environment:
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       ETCD_ADDRESS: ${ETCD_ADDRESS}

@@ -9,12 +9,12 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-FROM milvusdb/milvus-distributed-dev:amd64-ubuntu18.04-latest AS openblas
+FROM milvusdb/milvus-dev:amd64-ubuntu18.04-latest AS openblas
 
 #FROM alpine
 FROM ubuntu:bionic-20200921
 
-RUN apt-get update && apt-get install -y --no-install-recommends libtbb-dev gfortran && \
+RUN apt-get update && apt-get install -y --no-install-recommends libtbb-dev && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
@@ -23,17 +23,18 @@ COPY --from=openblas /usr/lib/libopenblas-r0.3.9.so /usr/lib/
 RUN ln -s /usr/lib/libopenblas-r0.3.9.so /usr/lib/libopenblas.so.0 && \
     ln -s /usr/lib/libopenblas.so.0 /usr/lib/libopenblas.so
 
-COPY ./bin/ /milvus-distributed/bin/
+COPY ./bin/ /milvus/bin/
 
-COPY ./configs/ /milvus-distributed/configs/
+COPY ./configs/ /milvus/configs/
 
-COPY ./lib/ /milvus-distributed/lib/
+COPY ./lib/ /milvus/lib/
 
-ENV LD_LIBRARY_PATH=/milvus-distributed/lib:$LD_LIBRARY_PATH:/usr/lib
+ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
 
 # Add Tini
 ADD https://github.com/krallin/tini/releases/download/v0.19.0/tini /tini
 RUN chmod +x /tini
 ENTRYPOINT ["/tini", "--"]
 
-WORKDIR /milvus-distributed/
+WORKDIR /milvus/
+

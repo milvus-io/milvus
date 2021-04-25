@@ -43,7 +43,7 @@ func initLogCfg() log.Config {
 
 	// FIXME(wxyu): Load from config files
 	//logCfg.File.Filename = ""
-	ciFileDir := "/milvus-distributed/logs/"
+	ciFileDir := "/milvus/logs/"
 	if _, err := os.Stat(ciFileDir); err == nil {
 		logCfg.File.Filename = ciFileDir + "singlenode.log"
 	} else {

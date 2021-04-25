@@ -135,7 +135,7 @@ func makeRuntimeDir(dir string) error {
 
 func main() {
 	if len(os.Args) < 3 {
-		_, _ = fmt.Fprint(os.Stderr, "usage: milvus-distributed [command] [server type] [flags]\n")
+		_, _ = fmt.Fprint(os.Stderr, "usage: milvus [command] [server type] [flags]\n")
 		return
 	}
 	command := os.Args[1]
@@ -147,10 +147,10 @@ func main() {
 		os.Exit(-1)
 	}
 
-	runtimeDir := "/run/milvus-distributed"
+	runtimeDir := "/run/milvus"
 	if err := makeRuntimeDir(runtimeDir); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "set runtime dir at : %s failed, set it to /tmp/milvus-distributed directory\n", runtimeDir)
-		runtimeDir = "/tmp/milvus-distributed"
+		_, _ = fmt.Fprintf(os.Stderr, "set runtime dir at : %s failed, set it to /tmp/milvus directory\n", runtimeDir)
+		runtimeDir = "/tmp/milvus"
 		if err = makeRuntimeDir(runtimeDir); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "create runtime director at : %s failed\n", runtimeDir)
 			os.Exit(-1)

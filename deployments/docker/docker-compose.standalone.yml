@@ -46,7 +46,7 @@ services:
 
   standalone:
     image: ${TARGET_DOCKER_IMAGE}
-    command: ["/milvus-distributed/bin/singlenode"]
+    command: ["/milvus/bin/singlenode"]
     environment:
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       ETCD_ADDRESS: ${ETCD_ADDRESS}

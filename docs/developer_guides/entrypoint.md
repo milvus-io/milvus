@@ -2,16 +2,16 @@
 
 ### Syntax
 
-Use the following syntax to run `milvus-distributed` commands from your terminal window:
+Use the following syntax to run `milvus` commands from your terminal window:
 
 ```shell
-milvus-distributed [command] [server type] [flags]
+milvus [command] [server type] [flags]
 ```
 
 Example:
 
 ```bash
-$ MILVUS_CONF_PATH=/path/to/milvus-distributed/configs milvus-distributed run master
+$ MILVUS_CONF_PATH=/path/to/milvus/configs milvus run master
 ```
 
 
@@ -40,16 +40,16 @@ where `command`, `server type`, and `flags` are:
 > Getting help
 > You can get help for CLI tool using the `--help` flag, or `-h` for short.
 > ```shell
-> $ milvus-distributed run master --help
+> $ milvus run master --help
 > ```
 
 
 ### Environment
 
 
-The table below lists the environment variables that you can use to configure the `milvus-distributed` tool.
+The table below lists the environment variables that you can use to configure the `milvus` tool.
 
 
 |  Variable  | Description | Default |
 | :-----:| :----: | :----: |
-| MILVUS_CONF_PATH | Milvus configuration path | `/milvus-distributed/configs` |
+| MILVUS_CONF_PATH | Milvus configuration path | `/milvus/configs` |
