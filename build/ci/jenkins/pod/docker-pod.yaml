@@ -21,28 +21,8 @@ spec:
     volumeMounts:
     - name: docker-graph-storage
       mountPath: /var/lib/docker
-    - name: docker-daemon
-      mountPath: /etc/docker
-  initContainers:
-  - name: docker-daemon-config
-    image: registry.zilliz.com/library/dind-compose:v0.1
-    command: ["sh", "-c"]
-    args:
-      - |
-        cat > "/etc/docker/daemon.json" <<EOF
-        {
-          "registry-mirrors": [
-            "https://hub-mirror.c.163.com",
-            "https://mirror.baidubce.com" ]
-        }
-        EOF
-    volumeMounts:
-    - name: docker-daemon
-      mountPath: /etc/docker
   volumes:
     - name: docker-graph-storage
-      emptyDir: {}
-    - name: docker-daemon
       emptyDir: {}
   tolerations:
   - key: dedicated
