@@ -13,13 +13,13 @@ try {
         sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${DOKCER_REGISTRY_URL}'
 
         sh 'docker pull registry.zilliz.com/milvus/openblas:latest || true'
-        sh "docker build -f build/docker/milvus/Dockerfile -t ${TARGET_REPO}:${TARGET_TAG} ."
-        sh "docker push ${TARGET_REPO}:${TARGET_TAG}"
+        sh "docker build -f build/docker/milvus/Dockerfile -t ${TARGET_REPO}/milvus:${TARGET_TAG} ."
+        sh "docker push ${TARGET_REPO}/milvus:${TARGET_TAG}"
     }
 } catch (exc) {
     throw exc
 } finally {
     sh 'docker logout ${DOKCER_REGISTRY_URL}'
     sh "docker rmi -f \$(docker images | grep '<none>' | awk '{print \$3}') || true"
-    sh "docker rmi ${TARGET_REPO}:${TARGET_TAG}"
+    sh "docker rmi ${TARGET_REPO}/milvus:${TARGET_TAG}"
 }
