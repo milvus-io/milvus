@@ -7,8 +7,7 @@ import threading
 from milvus import Milvus
 from mishards.connections import (
     ConnectionTopology,
-    ConnectionGroup,
-    version_supported
+    ConnectionGroup
 )
 from mishards.topology import StatusType
 from mishards import exceptions, settings
@@ -240,11 +239,3 @@ class TestConnection:
 
         ret = w1_2.can_retry
         assert ret == w1_2.connection.can_retry
-
-class TestVersion:
-    def test_version_supported(self):
-        settings.SERVER_VERSIONS = ['1.1.x']
-        assert version_supported('1.1')
-        assert version_supported('1.1.x')
-        assert version_supported('1.1.0')
-        assert not version_supported('1.0.0')
