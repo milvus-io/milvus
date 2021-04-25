@@ -42,6 +42,11 @@ class GrpcArgsParser(object):
 
     @classmethod
     @error_status
+    def parse_proto_ReleaseCollectionParam(cls, param):
+        return param.collection_name, list(param.partition_tag_array)
+
+    @classmethod
+    @error_status
     def parse_proto_FlushParam(cls, param):
         return list(param.collection_name_array)
 
@@ -114,16 +119,18 @@ class GrpcArgsParser(object):
     def parse_proto_DeleteByIDParam(cls, param):
         _collection_name = param.collection_name
         _id_array = list(param.id_array)
+        _partition_tag = param.partition_tag
 
-        return _collection_name, _id_array
+        return _collection_name, _id_array, _partition_tag
 
     @classmethod
     @error_status
     def parse_proto_VectorIdentity(cls, param):
         _collection_name = param.collection_name
         _ids = list(param.id_array)
+        _partition_tag = param.partition_tag
 
-        return _collection_name, _ids
+        return _collection_name, _ids, _partition_tag
 
     @classmethod
     @error_status

@@ -594,6 +594,24 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         return status_pb2.Status(error_code=_status.code,
                                  reason=_status.message)
 
+    def _release_collection(self, collection_name, partition_tags):
+        return self.router.connection().release_collection(collection_name, partition_tags)
+
+    @mark_grpc_method
+    def ReleaseCollection(self, request, context):
+        _status, _pack = Parser.parse_proto_ReleaseCollectionParam(request)
+
+        if not _status.OK():
+            return status_pb2.Status(error_code=_status.code,
+                                     reason=_status.message)
+
+        _collection_name, _partition_tags = _pack
+
+        logger.info('ReleaseCollection {} | {}'.format(_collection_name, _partition_tags))
+        _status = self._release_collection(_collection_name, _partition_tags)
+        return status_pb2.Status(error_code=_status.code,
+                                 reason=_status.message)
+
     def ReloadSegments(self, request, context):
         raise NotImplementedError("Not implemented in mishards")
 
@@ -627,8 +645,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         grpc_index.extra_params.add(key='params', value=ujson.dumps(_index_param._params))
         return grpc_index
 
-    def _get_vectors_by_id(self, collection_name, ids, metadata):
-        return self.router.connection(metadata=metadata).get_entity_by_id(collection_name, ids)
+    def _get_vectors_by_id(self, collection_name, ids, metadata, partition_tag):
+        return self.router.connection(metadata=metadata)\
+                .get_entity_by_id(collection_name, ids, partition_tag=partition_tag)
 
     @mark_grpc_method
     def GetVectorsByID(self, request, context):
@@ -639,9 +658,10 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         metadata = {'resp_class': milvus_pb2.VectorsData}
 
-        _collection_name, _ids = unpacks
-        logger.info('GetVectorByID {}'.format(_collection_name))
-        _status, vectors = self._get_vectors_by_id(_collection_name, _ids, metadata)
+        _collection_name, _ids, _partition_tag = unpacks
+        logger.info('GetVectorByID collection name: {}, partition tag: {}'
+                    .format(_collection_name, _partition_tag))
+        _status, vectors = self._get_vectors_by_id(_collection_name, _ids, metadata, _partition_tag)
         _rpc_status = status_pb2.Status(error_code=_status.code, reason=_status.message)
         if not vectors:
             return milvus_pb2.VectorsData(status=_rpc_status, )
@@ -683,8 +703,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             vector_id_array=ids
         )
 
-    def _delete_by_id(self, collection_name, id_array):
-        return self.router.connection().delete_entity_by_id(collection_name, id_array)
+    def _delete_by_id(self, collection_name, id_array, partition_tag):
+        return self.router.connection()\
+                .delete_entity_by_id(collection_name, id_array, partition_tag=partition_tag)
 
     @mark_grpc_method
     def DeleteByID(self, request, context):
@@ -695,9 +716,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             return status_pb2.Status(error_code=_status.code,
                                      reason=_status.message)
 
-        _collection_name, _ids = unpacks
+        _collection_name, _ids, _partition_tag = unpacks
         logger.info('DeleteByID {}'.format(_collection_name))
-        _status = self._delete_by_id(_collection_name, _ids)
+        _status = self._delete_by_id(_collection_name, _ids, _partition_tag)
 
         return status_pb2.Status(error_code=_status.code,
                                  reason=_status.message)
