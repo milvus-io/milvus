@@ -347,6 +347,47 @@ func TestGetSegmentStates(t *testing.T) {
 	}
 }
 
+func TestGetInsertBinlogPaths(t *testing.T) {
+	svr := newTestServer(t)
+	defer closeTestServer(t, svr)
+
+	req := &datapb.GetInsertBinlogPathsRequest{
+		SegmentID: 0,
+	}
+	resp, err := svr.GetInsertBinlogPaths(svr.ctx, req)
+	assert.Nil(t, err)
+	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+}
+
+func TestGetCollectionStatistics(t *testing.T) {
+	svr := newTestServer(t)
+	defer closeTestServer(t, svr)
+
+	req := &datapb.GetCollectionStatisticsRequest{
+		CollectionID: 0,
+	}
+	resp, err := svr.GetCollectionStatistics(svr.ctx, req)
+	assert.Nil(t, err)
+	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+}
+
+func TestGetSegmentInfo(t *testing.T) {
+	svr := newTestServer(t)
+	defer closeTestServer(t, svr)
+
+	segInfo := &datapb.SegmentInfo{
+		ID: 0,
+	}
+	err := svr.meta.AddSegment(segInfo)
+
+	req := &datapb.GetSegmentInfoRequest{
+		SegmentIDs: []int64{0},
+	}
+	resp, err := svr.GetSegmentInfo(svr.ctx, req)
+	assert.Nil(t, err)
+	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+}
+
 func TestChannel(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
