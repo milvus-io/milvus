@@ -36,14 +36,6 @@ services:
     networks:
       - milvus
 
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    ports:
-      - "6831:6831/udp"
-      - "16686:16686"
-    networks:
-      - milvus
-
   master:
     image: ${TARGET_DOCKER_IMAGE}
     command: ["/milvus-distributed/bin/milvus", "run", "master"]
@@ -58,7 +50,6 @@ services:
       - "etcd"
       - "pulsar"
       - "minio"
-      - "jaeger"
     networks:
       - milvus
 
@@ -71,7 +62,6 @@ services:
       - "etcd"
       - "pulsar"
       - "minio"
-      - "jaeger"
     networks:
       - milvus
 
@@ -104,7 +94,6 @@ services:
       - "etcd"
       - "pulsar"
       - "minio"
-      - "jaeger"
     networks:
       - milvus
 
@@ -135,7 +124,6 @@ services:
       - "etcd"
       - "pulsar"
       - "minio"
-      - "jaeger"
     networks:
       - milvus
 
@@ -163,7 +151,6 @@ services:
       - "etcd"
       - "pulsar"
       - "minio"
-      - "jaeger"
     networks:
       - milvus
 
