@@ -378,7 +378,7 @@ func TestGetSegmentInfo(t *testing.T) {
 	segInfo := &datapb.SegmentInfo{
 		ID: 0,
 	}
-	err := svr.meta.AddSegment(segInfo)
+	svr.meta.AddSegment(segInfo)
 
 	req := &datapb.GetSegmentInfoRequest{
 		SegmentIDs: []int64{0},
@@ -399,8 +399,7 @@ func TestChannel(t *testing.T) {
 		segInfo := &datapb.SegmentInfo{
 			ID: segID,
 		}
-		err := svr.meta.AddSegment(segInfo)
-		//assert.Nil(t, err)
+		svr.meta.AddSegment(segInfo)
 
 		stats := &internalpb.SegmentStatisticsUpdates{
 			SegmentID: segID,
@@ -432,7 +431,7 @@ func TestChannel(t *testing.T) {
 		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentStatistics, 123))
 		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentInfo, 234))
 		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentStatistics, 345))
-		err = statsStream.Produce(&msgPack)
+		err := statsStream.Produce(&msgPack)
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 
