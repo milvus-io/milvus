@@ -60,6 +60,9 @@ class CommonUtil {
 
     static void
     EraseFromCache(const std::string& item_key);
+
+    static Status
+    SetTimezoneEnv(const std::string& tz);
 };
 
 }  // namespace server

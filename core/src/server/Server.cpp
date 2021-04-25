@@ -36,6 +36,7 @@
 #include "src/version.h"
 //#include "storage/s3/S3ClientWrapper.h"
 #include "tracing/TracerUtil.h"
+#include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/LogUtil.h"
 #include "utils/SignalUtil.h"
@@ -171,7 +172,7 @@ Server::Start() {
         tracing_config_path.empty() ? tracing::TracerUtil::InitGlobal()
                                     : tracing::TracerUtil::InitGlobal(tracing_config_path);
 
-        /* log path is defined in Config file, so InitLog must be called after LoadConfig */
+        /* Set timezone */
         std::string time_zone;
         s = config.GetGeneralConfigTimezone(time_zone);
         if (!s.ok()) {
@@ -179,24 +180,9 @@ Server::Start() {
             return s;
         }
 
-        if (time_zone.length() == 3) {
-            time_zone = "CUT";
-        } else {
-            int time_bias = std::stoi(time_zone.substr(3, std::string::npos));
-            if (time_bias == 0) {
-                time_zone = "CUT";
-            } else if (time_bias > 0) {
-                time_zone = "CUT" + std::to_string(-time_bias);
-            } else {
-                time_zone = "CUT+" + std::to_string(-time_bias);
-            }
-        }
+        STATUS_CHECK(server::CommonUtil::SetTimezoneEnv(time_zone));
 
-        if (setenv("TZ", time_zone.c_str(), 1) != 0) {
-            return Status(SERVER_UNEXPECTED_ERROR, "Fail to setenv");
-        }
-        tzset();
-
+        /* Log path is defined in Config file, so InitLog must be called after LoadConfig */
         {
             std::unordered_map<std::string, int64_t> level_to_int{
                 {"debug", 5}, {"info", 4}, {"warning", 3}, {"error", 2}, {"fatal", 1},

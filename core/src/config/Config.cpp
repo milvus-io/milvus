@@ -1014,10 +1014,13 @@ Config::CheckGeneralConfigTimezone(const std::string& value) {
     } else {
         if (value.substr(0, 3) != "UTC") {
             return Status(SERVER_INVALID_ARGUMENT, "Invalid general.timezone: " + value);
-        } else {
-            if (!ValidationUtil::IsNumber(value.substr(4))) {
-                return Status(SERVER_INVALID_ARGUMENT, "Invalid general.timezone: " + value);
-            }
+        }
+
+        // valid input: UTC+8 or UTC+8:30 or UTC+08:30 or UTC-5 or UTC-5:30 or UTC-05:30
+        std::string time_offset = value.substr(3);
+        std::string pattern = "[+-]((\\d{1}|0\\d{1}|1\\d{1}|2[0-3])|((\\d{1}|0\\d{1}|1\\d{1}|2[0-3]):[0-5]\\d{1}))";
+        if (!server::StringHelpFunctions::IsRegexMatch(time_offset, pattern)) {
+            return Status(SERVER_UNEXPECTED_ERROR, "Invalid general.timezone: " + value);
         }
     }
     return Status::OK();
