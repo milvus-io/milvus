@@ -270,23 +270,18 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	defer sp.Finish()
 	searchMsg.SetTraceCtx(ctx)
 	searchTimestamp := searchMsg.Base.Timestamp
-	var queryBlob = searchMsg.Query.Value
-	query := milvuspb.SearchRequest{}
-	err := proto.Unmarshal(queryBlob, &query)
-	if err != nil {
-		return errors.New("unmarshal query failed")
-	}
+
 	collectionID := searchMsg.CollectionID
 	collection, err := s.replica.getCollectionByID(collectionID)
 	if err != nil {
 		return err
 	}
-	dsl := query.Dsl
+	dsl := searchMsg.Dsl
 	plan, err := createPlan(*collection, dsl)
 	if err != nil {
 		return err
 	}
-	searchRequestBlob := query.PlaceholderGroup
+	searchRequestBlob := searchMsg.PlaceholderGroup
 	searchReq, err := parseSearchRequest(plan, searchRequestBlob)
 	if err != nil {
 		return err
