@@ -10,7 +10,7 @@ from mishards.connections import (
     ConnectionGroup
 )
 from mishards.topology import StatusType
-from mishards import exceptions, settings
+from mishards import exceptions
 
 logger = logging.getLogger(__name__)
 
