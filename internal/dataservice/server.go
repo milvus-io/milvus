@@ -624,20 +624,20 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 	}, nil
 }
 
-func (s *Server) validateAllocRequest(collID UniqueID, partID UniqueID, channelName string) error {
-	if !s.meta.HasCollection(collID) {
-		return fmt.Errorf("can not find collection %d", collID)
-	}
-	if !s.meta.HasPartition(collID, partID) {
-		return fmt.Errorf("can not find partition %d", partID)
-	}
-	for _, name := range s.insertChannels {
-		if name == channelName {
-			return nil
-		}
-	}
-	return fmt.Errorf("can not find channel %s", channelName)
-}
+//func (s *Server) validateAllocRequest(collID UniqueID, partID UniqueID, channelName string) error {
+//	if !s.meta.HasCollection(collID) {
+//		return fmt.Errorf("can not find collection %d", collID)
+//	}
+//	if !s.meta.HasPartition(collID, partID) {
+//		return fmt.Errorf("can not find partition %d", partID)
+//	}
+//	for _, name := range s.insertChannels {
+//		if name == channelName {
+//			return nil
+//		}
+//	}
+//	return fmt.Errorf("can not find channel %s", channelName)
+//}
 
 func (s *Server) loadCollectionFromMaster(ctx context.Context, collectionID int64) error {
 	resp, err := s.masterClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
