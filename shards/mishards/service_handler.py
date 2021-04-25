@@ -185,9 +185,6 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                      reason=_status.message)
 
         _status, _collection_schema = unpacks
-        # if _status.error_code != 0:
-        #     logging.warning('[CreateCollection] collection schema error occurred: {}'.format(_status))
-        #     return _status
 
         logger.info('CreateCollection {}'.format(_collection_schema['collection_name']))
 
