@@ -14,6 +14,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path"
 	"syscall"
@@ -21,38 +22,30 @@ import (
 	"github.com/milvus-io/milvus/cmd/distributed/roles"
 )
 
-func run(serverType, runtTimeDir string) error {
-	fileName := serverType + ".pid"
-	_, err := os.Stat(path.Join(runtTimeDir, fileName))
-	var fd *os.File
-	if os.IsNotExist(err) {
-		if fd, err = os.OpenFile(path.Join(runtTimeDir, fileName), os.O_CREATE|os.O_WRONLY, 0664); err != nil {
-			return err
-		}
-		defer func() {
-			_ = syscall.Close(int(fd.Fd()))
-			_ = os.Remove(path.Join(runtTimeDir, fileName))
-		}()
-
-		if err := syscall.Flock(int(fd.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-			return err
-		}
-		_, _ = fd.WriteString(fmt.Sprintf("%d", os.Getpid()))
-
+func run(serverType, runtTimeDir, svrAliase string) error {
+	var fileName string
+	if len(svrAliase) != 0 {
+		fileName = fmt.Sprintf("%s-%s.pid", serverType, svrAliase)
 	} else {
-		if fd, err = os.OpenFile(path.Join(runtTimeDir, fileName), os.O_WRONLY, 0664); err != nil {
-			return fmt.Errorf("service %s is running, error  = %w", serverType, err)
-		}
-		if err := syscall.Flock(int(fd.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-			return fmt.Errorf("service %s is running, error = %w", serverType, err)
-		}
-		defer func() {
-			_ = syscall.Close(int(fd.Fd()))
-			_ = os.Remove(path.Join(runtTimeDir, fileName))
-		}()
-		fd.Truncate(0)
-		_, _ = fd.WriteString(fmt.Sprintf("%d", os.Getpid()))
+		fileName = serverType + ".pid"
 	}
+	var fd *os.File
+	var err error
+
+	if fd, err = os.OpenFile(path.Join(runtTimeDir, fileName), os.O_CREATE|os.O_RDWR, 0664); err != nil {
+		return fmt.Errorf("service %s is running, error  = %w", serverType, err)
+	}
+	fmt.Println("open pid file:", path.Join(runtTimeDir, fileName))
+	if err := syscall.Flock(int(fd.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return fmt.Errorf("service %s is running, error = %w", serverType, err)
+	}
+	fmt.Println("lock pid file")
+	defer func() {
+		_ = syscall.Close(int(fd.Fd()))
+		_ = os.Remove(path.Join(runtTimeDir, fileName))
+	}()
+	fd.Truncate(0)
+	_, _ = fd.WriteString(fmt.Sprintf("%d", os.Getpid()))
 
 	role := roles.MilvusRoles{}
 	switch serverType {
@@ -121,36 +114,36 @@ func makeRuntimeDir(dir string) error {
 	if !st.IsDir() {
 		return fmt.Errorf("%s is exist, but is not directory", dir)
 	}
-	tmpFile := path.Join(dir, "testTmp")
-
-	var fd *os.File
-
-	if fd, err = os.OpenFile(tmpFile, os.O_CREATE|os.O_WRONLY, 0664); err != nil {
+	tmpFile, err := ioutil.TempFile(dir, "tmp")
+	if err != nil {
 		return err
 	}
-	syscall.Close(int(fd.Fd()))
-	os.Remove(tmpFile)
+	fileName := tmpFile.Name()
+	tmpFile.Close()
+	os.Remove(fileName)
 	return nil
 }
 
 func main() {
 	if len(os.Args) < 3 {
-		_, _ = fmt.Fprint(os.Stderr, "usage: milvus-distributed [command] [server type] [flags]\n")
+		_, _ = fmt.Fprint(os.Stderr, "usage: milvus [command] [server type] [flags]\n")
 		return
 	}
 	command := os.Args[1]
 	serverType := os.Args[2]
 	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	//flags.BoolVar()
+
+	var svrAliase string
+	flags.StringVar(&svrAliase, "alias", "", "set aliase")
 
 	if err := flags.Parse(os.Args[3:]); err != nil {
 		os.Exit(-1)
 	}
 
-	runtimeDir := "/run/milvus-distributed"
+	runtimeDir := "/run/milvus"
 	if err := makeRuntimeDir(runtimeDir); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "set runtime dir at : %s failed, set it to /tmp/milvus-distributed directory\n", runtimeDir)
-		runtimeDir = "/tmp/milvus-distributed"
+		_, _ = fmt.Fprintf(os.Stderr, "set runtime dir at : %s failed, set it to /tmp/milvus directory\n", runtimeDir)
+		runtimeDir = "/tmp/milvus"
 		if err = makeRuntimeDir(runtimeDir); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "create runtime director at : %s failed\n", runtimeDir)
 			os.Exit(-1)
@@ -159,7 +152,7 @@ func main() {
 
 	switch command {
 	case "run":
-		if err := run(serverType, runtimeDir); err != nil {
+		if err := run(serverType, runtimeDir, svrAliase); err != nil {
 			panic(err)
 		}
 	case "stop":
