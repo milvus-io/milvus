@@ -36,14 +36,6 @@ services:
     networks:
       - milvus
 
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    ports:
-      - "6831:6831/udp"
-      - "16686:16686"
-    networks:
-      - milvus
-
   master:
     image: ${TARGET_DOCKER_IMAGE}
     command: ["/milvus-distributed/bin/milvus", "run", "master"]
@@ -58,7 +50,6 @@ services:
       - "etcd"
       - "pulsar"
       - "minio"
-      - "jaeger"
     networks:
       - milvus
 
@@ -71,7 +62,6 @@ services:
       - "etcd"
       - "pulsar"
       - "minio"
-      - "jaeger"
     networks:
       - milvus
 
@@ -82,7 +72,6 @@ services:
       ETCD_ADDRESS: ${ETCD_ADDRESS}
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       MASTER_ADDRESS: ${MASTER_ADDRESS}
-      PROXY_NODE_HOST: ${PROXY_NODE_HOST}
       PROXY_SERVICE_ADDRESS: ${PROXY_SERVICE_ADDRESS}
       INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
       DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
@@ -104,7 +93,6 @@ services:
       - "etcd"
       - "pulsar"
       - "minio"
-      - "jaeger"
     networks:
       - milvus
 
@@ -135,7 +123,6 @@ services:
       - "etcd"
       - "pulsar"
       - "minio"
-      - "jaeger"
     networks:
       - milvus
 
@@ -145,7 +132,6 @@ services:
     environment:
       INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
       MINIO_ADDRESS: ${MINIO_ADDRESS}
-      INDEX_NODE_HOST: ${INDEX_NODE_HOST}
     depends_on:
       - "indexservice"
     networks:
@@ -163,7 +149,6 @@ services:
       - "etcd"
       - "pulsar"
       - "minio"
-      - "jaeger"
     networks:
       - milvus
 
