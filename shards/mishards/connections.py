@@ -226,13 +226,9 @@ logger = logging.getLogger(__name__)
 
 def version_supported(version):
     version_pattern = lambda v : ".".join(v.split(".")[:2])
+    sv_patterns = {version_pattern(sv) for sv in settings.SERVER_VERSIONS}
 
-    sv_patterns = set()
-    for supported_version in settings.SERVER_VERSIONS:
-        sv_patterns.add(version_pattern(supported_version))
-
-    v_pattern = version_pattern(version)
-    return v_pattern in sv_patterns
+    return version_pattern(version) in sv_patterns
 
 
 class ConnectionGroup(topology.TopoGroup):
