@@ -13,6 +13,7 @@ pull_request_rules:
       - base=master
       - -title~=(?i)\[wip\]
       - "label=PR | automerge"
+      - "label!=PR | message from pull request"
       - "#approved-reviews-by>=1"
       - "#changes-requested-reviews-by=0"
       - "status-success=DCO"
