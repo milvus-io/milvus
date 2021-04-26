@@ -4,8 +4,8 @@ services:
   regression:
     image: milvusdb/pytest:latest
     volumes:
-      - ../..:/milvus-distributed:delegated
-    working_dir: "/milvus-distributed/tests/python_test"
+      - ../..:/milvus:delegated
+    working_dir: "/milvus/tests/python_test"
     networks:
       - milvus
 

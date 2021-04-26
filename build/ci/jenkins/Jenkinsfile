@@ -26,8 +26,8 @@ pipeline {
         PACKAGE_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/${PROJECT_NAME}/package/${PACKAGE_NAME}"
         DOCKER_CREDENTIALS_ID = "ba070c98-c8cc-4f7c-b657-897715f359fc"
         DOKCER_REGISTRY_URL = "registry.zilliz.com"
-        SOURCE_REPO = "${DOKCER_REGISTRY_URL}/milvus-distributed"
-        TARGET_REPO = "${DOKCER_REGISTRY_URL}/milvus-distributed"
+        SOURCE_REPO = "${DOKCER_REGISTRY_URL}/milvus"
+        TARGET_REPO = "${DOKCER_REGISTRY_URL}/milvus"
         SOURCE_TAG = "${CHANGE_TARGET ? CHANGE_TARGET : SEMVER}-${LOWER_BUILD_TYPE}"
         TARGET_TAG = "${SEMVER}-${LOWER_BUILD_TYPE}"
         DOCKER_BUILDKIT = 1
@@ -45,11 +45,11 @@ pipeline {
             environment {
                 PULSAR_ADDRESS = "pulsar://127.0.0.1:6650"
                 ETCD_ADDRESS = "127.0.0.1:2379"
-                CCACHE_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/milvus-distributed/ccache"
-                THIRDPARTY_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/milvus-distributed/thirdparty"
+                CCACHE_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/milvus/ccache"
+                THIRDPARTY_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/milvus/thirdparty"
                 CUSTOM_THIRDPARTY_PATH = "${WORKSPACE}/3rdparty_download"
-                GO_CACHE_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/milvus-distributed/go-cache"
-                GO_MOD_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/milvus-distributed/go-mod"
+                GO_CACHE_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/milvus/go-cache"
+                GO_MOD_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/milvus/go-mod"
             }
             steps {
                 container('build-env') {
@@ -84,7 +84,7 @@ pipeline {
                     }
                 }
                 environment {
-                    HELM_BRANCH = "2.0"
+                    HELM_BRANCH = "main"
                     HELM_RELEASE_NAMESPACE = "dev"
                     HELM_RELEASE_NAME = "${PROJECT_NAME}-${SEMVER}-${env.BUILD_NUMBER}-${REGRESSION_SERVICE_TYPE}".replaceAll("\\.", "-").replaceAll("_", "-").toLowerCase()
                     DEV_TEST_ARTIFACTS_PATH = "artifacts"
