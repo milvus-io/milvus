@@ -172,7 +172,7 @@ services:
       cache_from:
         - ${SOURCE_REPO}/milvus-distributed:${SOURCE_TAG}
     command:
-      - "/milvus-distributed/bin/singlenode"
+      - "/milvus-distributed/bin/standalone"
     environment:
       ETCD_ADDRESS: ${ETCD_ADDRESS}
       MINIO_ADDRESS: ${MINIO_ADDRESS}
