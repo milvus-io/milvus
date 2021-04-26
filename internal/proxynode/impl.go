@@ -883,7 +883,8 @@ func (node *ProxyNode) DropIndex(ctx context.Context, request *milvuspb.DropInde
 	return dit.result, nil
 }
 
-// GetIndexBuildProgress
+// GetIndexBuildProgress gets index build progress with filed_name and index_name.
+// The progress is percentage of indexd segments and unindexed segments.
 func (node *ProxyNode) GetIndexBuildProgress(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error) {
 	return nil, nil
 }

@@ -355,7 +355,8 @@ func (s *Server) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIn
 	return s.proxynode.DescribeIndex(ctx, request)
 }
 
-// GetIndexBuildProgress
+// GetIndexBuildProgress gets index build progress with filed_name and index_name.
+// The progress is percentage of indexd segments and unindexed segments.
 func (s *Server) GetIndexBuildProgress(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error) {
 	return s.proxynode.GetIndexBuildProgress(ctx, request)
 }
