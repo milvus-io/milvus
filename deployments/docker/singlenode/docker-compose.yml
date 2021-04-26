@@ -28,11 +28,11 @@ services:
       - milvus
 
   standalone:
-    image: ${TARGET_DOCKER_IMAGE}
-    command: ["/milvus-distributed/bin/singlenode"]
+    image: registry.zilliz.com/milvus-distributed/milvus-distributed:master-release
+    command: ["/milvus/bin/singlenode"]
     environment:
-      ETCD_ADDRESS: ${ETCD_ADDRESS}
-      MINIO_ADDRESS: ${MINIO_ADDRESS}
+      ETCD_ADDRESS: etcd:2379
+      MINIO_ADDRESS: minio:9000
     ports:
       - "19530:19530"
     depends_on:
