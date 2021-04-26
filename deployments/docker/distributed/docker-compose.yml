@@ -37,7 +37,7 @@ services:
       - milvus
 
   master:
-    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5020-release
+    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5051-release
     command: ["/milvus-distributed/bin/milvus", "run", "master"]
     environment:
       ETCD_ADDRESS: etcd:2379
@@ -54,7 +54,7 @@ services:
       - milvus
 
   proxyservice:
-    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5020-release
+    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5051-release
     command: ["/milvus-distributed/bin/milvus", "run", "proxyservice"]
     environment:
       PULSAR_ADDRESS: pulsar://pulsar:6650
@@ -66,7 +66,7 @@ services:
       - milvus
 
   proxynode:
-    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5020-release
+    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5051-release
     command: ["/milvus-distributed/bin/milvus", "run", "proxynode"]
     environment:
       ETCD_ADDRESS: etcd:2379
@@ -84,7 +84,7 @@ services:
       - milvus
 
   queryservice:
-    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5020-release
+    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5051-release
     command: ["/milvus-distributed/bin/milvus", "run", "queryservice"]
     environment:
       MASTER_ADDRESS: master:53100
@@ -97,7 +97,7 @@ services:
       - milvus
 
   querynode:
-    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5020-release
+    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5051-release
     command: ["/milvus-distributed/bin/milvus", "run", "querynode"]
     environment:
       MINIO_ADDRESS: minio:9000
@@ -113,7 +113,7 @@ services:
       - milvus
 
   indexservice:
-    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5020-release
+    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5051-release
     command: ["/milvus-distributed/bin/milvus", "run", "indexservice"]
     environment:
       ETCD_ADDRESS: etcd:2379
@@ -127,7 +127,7 @@ services:
       - milvus
 
   indexnode:
-    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5020-release
+    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5051-release
     command: ["/milvus-distributed/bin/milvus", "run", "indexnode"]
     environment:
       MINIO_ADDRESS: minio:9000
@@ -138,7 +138,7 @@ services:
       - milvus
 
   dataservice:
-    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5020-release
+    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5051-release
     command: ["/milvus-distributed/bin/milvus", "run", "dataservice"]
     environment:
       ETCD_ADDRESS: etcd:2379
@@ -153,7 +153,7 @@ services:
       - milvus
 
   datanode:
-    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5020-release
+    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5051-release
     command: ["/milvus-distributed/bin/milvus", "run", "datanode"]
     environment:
       ETCD_ADDRESS: etcd:2379

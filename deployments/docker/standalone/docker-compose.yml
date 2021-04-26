@@ -28,7 +28,7 @@ services:
       - milvus
 
   standalone:
-    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5020-release
+    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5051-release
     command: ["/milvus-distributed/bin/standalone"]
     environment:
       ETCD_ADDRESS: etcd:2379
