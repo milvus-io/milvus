@@ -45,9 +45,9 @@ func initLogCfg() log.Config {
 	//logCfg.File.Filename = ""
 	ciFileDir := "/milvus/logs/"
 	if _, err := os.Stat(ciFileDir); err == nil {
-		logCfg.File.Filename = ciFileDir + "singlenode.log"
+		logCfg.File.Filename = ciFileDir + "standalone.log"
 	} else {
-		logCfg.File.Filename = "/tmp/milvus/singlenode.log"
+		logCfg.File.Filename = "/tmp/milvus/standalone.log"
 	}
 	return logCfg
 }
@@ -56,7 +56,7 @@ func main() {
 	var roles roles.MilvusRoles
 	initRoles(&roles)
 	os.Setenv("QUERY_NODE_ID", "1")
-	os.Setenv("DEPLOY_MODE", "SINGLE_NODE")
+	os.Setenv("DEPLOY_MODE", "STANDALONE")
 
 	logCfg := initLogCfg()
 	logutil.SetupLogger(&logCfg)
