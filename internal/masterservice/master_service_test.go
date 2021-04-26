@@ -859,7 +859,7 @@ func TestMasterService(t *testing.T) {
 			FieldName:      "vector",
 			IndexName:      Params.DefaultIndexName,
 		}
-		idx, err := core.MetaTable.GetIndexByName("testColl", "vector", Params.DefaultIndexName)
+		idx, err := core.MetaTable.GetIndexByName("testColl", Params.DefaultIndexName)
 		assert.Nil(t, err)
 		assert.Equal(t, len(idx), 1)
 
@@ -872,7 +872,7 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, im.idxDropID[0], idx[0].IndexID)
 		im.mutex.Unlock()
 
-		idx, err = core.MetaTable.GetIndexByName("testColl", "vector", Params.DefaultIndexName)
+		idx, err = core.MetaTable.GetIndexByName("testColl", Params.DefaultIndexName)
 		assert.Nil(t, err)
 		assert.Equal(t, len(idx), 0)
 	})
