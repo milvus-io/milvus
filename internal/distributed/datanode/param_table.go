@@ -14,8 +14,10 @@ package grpcdatanode
 import (
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"go.uber.org/zap"
 )
 
 var Params ParamTable
@@ -49,8 +51,9 @@ func (pt *ParamTable) LoadFromEnv() {
 }
 
 func (pt *ParamTable) initPort() {
-	port := pt.ParseInt("dataNode.port")
+	port := funcutil.GetAvailablePort()
 	pt.Port = port
+	log.Info("DataNode", zap.Int("port", port))
 }
 
 func (pt *ParamTable) initMasterAddress() {

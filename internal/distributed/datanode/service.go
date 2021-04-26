@@ -150,18 +150,12 @@ func (s *Server) Stop() error {
 func (s *Server) init() error {
 	ctx := context.Background()
 	Params.Init()
-	if !funcutil.CheckPortAvailable(Params.Port) {
-		Params.Port = funcutil.GetAvailablePort()
-		log.Warn("DataNode init", zap.Any("Port", Params.Port))
-	}
 	Params.LoadFromEnv()
 	Params.LoadFromArgs()
 
 	dn.Params.Init()
 	dn.Params.Port = Params.Port
 	dn.Params.IP = Params.IP
-
-	log.Debug("DataNode port", zap.Int("port", Params.Port))
 
 	closer := trace.InitTracing(fmt.Sprintf("data_node ip: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer

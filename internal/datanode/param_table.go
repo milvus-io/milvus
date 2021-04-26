@@ -19,12 +19,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"go.uber.org/zap"
 )
 
 type ParamTable struct {
-	// === PRIVATE Configs ===
-	dataNodeIDList []UniqueID
-
 	paramtable.BaseTable
 
 	// === DataNode Internal Components Configs ===
@@ -126,21 +124,17 @@ func (p *ParamTable) Init() {
 
 // ==== DataNode internal components configs ====
 func (p *ParamTable) initNodeID() {
-	p.dataNodeIDList = p.DataNodeIDList()
 	dataNodeIDStr := os.Getenv("DATA_NODE_ID")
 	if dataNodeIDStr == "" {
-		if len(p.dataNodeIDList) <= 0 {
-			dataNodeIDStr = "0"
-		} else {
-			dataNodeIDStr = strconv.Itoa(int(p.dataNodeIDList[0]))
-		}
+		dataNodeIDStr = "1"
 	}
-	err := p.Save("_dataNodeID", dataNodeIDStr)
+
+	dnID, err := strconv.Atoi(dataNodeIDStr)
 	if err != nil {
 		panic(err)
 	}
 
-	p.NodeID = p.ParseInt64("_dataNodeID")
+	p.NodeID = UniqueID(dnID)
 }
 
 // ---- flowgraph configs ----
@@ -203,6 +197,7 @@ func (p *ParamTable) initMsgChannelSubName() {
 	if err != nil {
 		panic(err)
 	}
+	log.Error("datanode", zap.Int64("NodeID", p.NodeID))
 	p.MsgChannelSubName = name + "-" + strconv.FormatInt(p.NodeID, 10)
 }
 
@@ -281,17 +276,6 @@ func (p *ParamTable) initMinioBucketName() {
 		panic(err)
 	}
 	p.MinioBucketName = bucketName
-}
-
-func (p *ParamTable) sliceIndex() int {
-	dataNodeID := p.NodeID
-	dataNodeIDList := p.dataNodeIDList
-	for i := 0; i < len(dataNodeIDList); i++ {
-		if dataNodeID == dataNodeIDList[i] {
-			return i
-		}
-	}
-	return -1
 }
 
 func (p *ParamTable) initLogCfg() {
