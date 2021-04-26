@@ -5433,7 +5433,8 @@ class GetIndexBuildProgressResponse :
 
   enum : int {
     kStatusFieldNumber = 1,
-    kProgressFieldNumber = 2,
+    kIndexedRowsFieldNumber = 2,
+    kTotalRowsFieldNumber = 3,
   };
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
@@ -5443,10 +5444,15 @@ class GetIndexBuildProgressResponse :
   ::milvus::proto::common::Status* mutable_status();
   void set_allocated_status(::milvus::proto::common::Status* status);
 
-  // float progress = 2;
-  void clear_progress();
-  float progress() const;
-  void set_progress(float value);
+  // int64 indexed_rows = 2;
+  void clear_indexed_rows();
+  ::PROTOBUF_NAMESPACE_ID::int64 indexed_rows() const;
+  void set_indexed_rows(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // int64 total_rows = 3;
+  void clear_total_rows();
+  ::PROTOBUF_NAMESPACE_ID::int64 total_rows() const;
+  void set_total_rows(::PROTOBUF_NAMESPACE_ID::int64 value);
 
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.GetIndexBuildProgressResponse)
  private:
@@ -5454,7 +5460,8 @@ class GetIndexBuildProgressResponse :
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::milvus::proto::common::Status* status_;
-  float progress_;
+  ::PROTOBUF_NAMESPACE_ID::int64 indexed_rows_;
+  ::PROTOBUF_NAMESPACE_ID::int64 total_rows_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -13158,18 +13165,32 @@ inline void GetIndexBuildProgressResponse::set_allocated_status(::milvus::proto:
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.GetIndexBuildProgressResponse.status)
 }
 
-// float progress = 2;
-inline void GetIndexBuildProgressResponse::clear_progress() {
-  progress_ = 0;
+// int64 indexed_rows = 2;
+inline void GetIndexBuildProgressResponse::clear_indexed_rows() {
+  indexed_rows_ = PROTOBUF_LONGLONG(0);
 }
-inline float GetIndexBuildProgressResponse::progress() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetIndexBuildProgressResponse.progress)
-  return progress_;
+inline ::PROTOBUF_NAMESPACE_ID::int64 GetIndexBuildProgressResponse::indexed_rows() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetIndexBuildProgressResponse.indexed_rows)
+  return indexed_rows_;
 }
-inline void GetIndexBuildProgressResponse::set_progress(float value) {
+inline void GetIndexBuildProgressResponse::set_indexed_rows(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
-  progress_ = value;
-  // @@protoc_insertion_point(field_set:milvus.proto.milvus.GetIndexBuildProgressResponse.progress)
+  indexed_rows_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.GetIndexBuildProgressResponse.indexed_rows)
+}
+
+// int64 total_rows = 3;
+inline void GetIndexBuildProgressResponse::clear_total_rows() {
+  total_rows_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 GetIndexBuildProgressResponse::total_rows() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetIndexBuildProgressResponse.total_rows)
+  return total_rows_;
+}
+inline void GetIndexBuildProgressResponse::set_total_rows(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  total_rows_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.GetIndexBuildProgressResponse.total_rows)
 }
 
 // -------------------------------------------------------------------

@@ -238,7 +238,8 @@ message GetIndexBuildProgressRequest {
 
 message GetIndexBuildProgressResponse {
   common.Status status = 1;
-  float progress = 2;
+  int64 indexed_rows = 2;
+  int64 total_rows = 3;
 }
 
 message GetIndexStateRequest {
