@@ -883,9 +883,11 @@ func (node *ProxyNode) DropIndex(ctx context.Context, request *milvuspb.DropInde
 	return dit.result, nil
 }
 
+// GetIndexBuildProgress
 func (node *ProxyNode) GetIndexBuildProgress(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error) {
 	return nil, nil
 }
+
 func (node *ProxyNode) GetIndexState(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error) {
 	dipt := &GetIndexStateTask{
 		ctx:                  ctx,

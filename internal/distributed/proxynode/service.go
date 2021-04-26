@@ -354,6 +354,8 @@ func (s *Server) DropIndex(ctx context.Context, request *milvuspb.DropIndexReque
 func (s *Server) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	return s.proxynode.DescribeIndex(ctx, request)
 }
+
+// GetIndexBuildProgress
 func (s *Server) GetIndexBuildProgress(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error) {
 	return s.proxynode.GetIndexBuildProgress(ctx, request)
 }
