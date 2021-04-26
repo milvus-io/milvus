@@ -884,9 +884,57 @@ func (node *ProxyNode) DropIndex(ctx context.Context, request *milvuspb.DropInde
 }
 
 // GetIndexBuildProgress gets index build progress with filed_name and index_name.
-// The progress is percentage of indexd segments and unindexed segments.
+// IndexRows is the num of indexed rows. And TotalRows is the total number of segment rows.
 func (node *ProxyNode) GetIndexBuildProgress(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error) {
-	return nil, nil
+	gibpt := &GetIndexBuildProgressTask{
+		ctx:                          ctx,
+		Condition:                    NewTaskCondition(ctx),
+		GetIndexBuildProgressRequest: request,
+		indexService:                 node.indexService,
+		masterService:                node.masterService,
+	}
+
+	err := node.sched.DdQueue.Enqueue(gibpt)
+	if err != nil {
+		return &milvuspb.GetIndexBuildProgressResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	log.Debug("GetIndexBuildProgress",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("field", request.FieldName),
+		zap.String("index name", request.IndexName))
+	defer func() {
+		log.Debug("GetIndexBuildProgress Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.String("field", request.FieldName),
+			zap.String("index name", request.IndexName))
+	}()
+
+	err = gibpt.WaitToFinish()
+	if err != nil {
+		return &milvuspb.GetIndexBuildProgressResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	return gibpt.result, nil
 }
 
 func (node *ProxyNode) GetIndexState(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error) {
