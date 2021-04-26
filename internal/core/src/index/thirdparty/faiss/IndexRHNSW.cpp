@@ -266,16 +266,12 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
                 float * simi = distances + i * k;
                 dis->set_query(x + i * d);
 
-                maxheap_heapify (k, simi, idxi);
-
                 if (STATISTICS_LEVEL == 3)
                     hnsw.searchKnn(*dis, k, idxi, simi, query_stats[i], bitset);
                 else {
                     auto dummy_stat = RHNSWStatInfo();
                     hnsw.searchKnn(*dis, k, idxi, simi, dummy_stat, bitset);
                 }
-
-                maxheap_reorder (k, simi, idxi);
 
                 if (reconstruct_from_neighbors &&
                     reconstruct_from_neighbors->k_reorder != 0) {
@@ -634,8 +630,8 @@ IndexRHNSWSQ::IndexRHNSWSQ(int d, QuantizerType qtype, int M,
                          MetricType metric):
     IndexRHNSW (new IndexScalarQuantizer (d, qtype, metric), M)
 {
-    is_trained = false;
     own_fields = true;
+    is_trained = false;
 }
 
 IndexRHNSWSQ::IndexRHNSWSQ() {}

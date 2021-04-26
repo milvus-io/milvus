@@ -379,7 +379,7 @@ static void write_RHNSW (const RHNSW *rhnsw, IOWriter *f) {
     WRITEANDCHECK (rhnsw->level0_links, rhnsw->level0_link_size * rhnsw->levels.size());
     for (auto i = 0; i < rhnsw->levels.size(); ++ i) {
         if (rhnsw->levels[i])
-            WRITEANDCHECK (rhnsw->linkLists[i], rhnsw->link_size * rhnsw->levels[i] + 1);
+            WRITEANDCHECK (rhnsw->linkLists[i], rhnsw->link_size * rhnsw->levels[i]);
     }
 }
 
