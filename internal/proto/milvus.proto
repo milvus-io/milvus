@@ -71,11 +71,6 @@ message StringResponse {
   string value = 2;
 }
 
-message FloatResponse {
-  common.Status status = 1;
-  float value = 2;
-}
-
 message DescribeCollectionRequest {
   common.MsgBase base = 1;
   string db_name = 2;
@@ -243,7 +238,7 @@ message GetIndexBuildProgressRequest {
 
 message GetIndexBuildProgressResponse {
   common.Status status = 1;
-  FloatResponse progress = 2;
+  float progress = 2;
 }
 
 message GetIndexStateRequest {

@@ -50,7 +50,7 @@ struct TableStruct_milvus_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[52]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[51]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -99,9 +99,6 @@ extern DropIndexRequestDefaultTypeInternal _DropIndexRequest_default_instance_;
 class DropPartitionRequest;
 class DropPartitionRequestDefaultTypeInternal;
 extern DropPartitionRequestDefaultTypeInternal _DropPartitionRequest_default_instance_;
-class FloatResponse;
-class FloatResponseDefaultTypeInternal;
-extern FloatResponseDefaultTypeInternal _FloatResponse_default_instance_;
 class FlushRequest;
 class FlushRequestDefaultTypeInternal;
 extern FlushRequestDefaultTypeInternal _FlushRequest_default_instance_;
@@ -233,7 +230,6 @@ template<> ::milvus::proto::milvus::DescribeSegmentResponse* Arena::CreateMaybeM
 template<> ::milvus::proto::milvus::DropCollectionRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::DropCollectionRequest>(Arena*);
 template<> ::milvus::proto::milvus::DropIndexRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::DropIndexRequest>(Arena*);
 template<> ::milvus::proto::milvus::DropPartitionRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::DropPartitionRequest>(Arena*);
-template<> ::milvus::proto::milvus::FloatResponse* Arena::CreateMaybeMessage<::milvus::proto::milvus::FloatResponse>(Arena*);
 template<> ::milvus::proto::milvus::FlushRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::FlushRequest>(Arena*);
 template<> ::milvus::proto::milvus::GetCollectionStatisticsRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::GetCollectionStatisticsRequest>(Arena*);
 template<> ::milvus::proto::milvus::GetCollectionStatisticsResponse* Arena::CreateMaybeMessage<::milvus::proto::milvus::GetCollectionStatisticsResponse>(Arena*);
@@ -1086,147 +1082,6 @@ class StringResponse :
 };
 // -------------------------------------------------------------------
 
-class FloatResponse :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.milvus.FloatResponse) */ {
- public:
-  FloatResponse();
-  virtual ~FloatResponse();
-
-  FloatResponse(const FloatResponse& from);
-  FloatResponse(FloatResponse&& from) noexcept
-    : FloatResponse() {
-    *this = ::std::move(from);
-  }
-
-  inline FloatResponse& operator=(const FloatResponse& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline FloatResponse& operator=(FloatResponse&& from) noexcept {
-    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
-      if (this != &from) InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return GetMetadataStatic().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return GetMetadataStatic().reflection;
-  }
-  static const FloatResponse& default_instance();
-
-  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
-  static inline const FloatResponse* internal_default_instance() {
-    return reinterpret_cast<const FloatResponse*>(
-               &_FloatResponse_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    5;
-
-  friend void swap(FloatResponse& a, FloatResponse& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(FloatResponse* other) {
-    if (other == this) return;
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  inline FloatResponse* New() const final {
-    return CreateMaybeMessage<FloatResponse>(nullptr);
-  }
-
-  FloatResponse* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
-    return CreateMaybeMessage<FloatResponse>(arena);
-  }
-  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
-  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
-  void CopyFrom(const FloatResponse& from);
-  void MergeFrom(const FloatResponse& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  #else
-  bool MergePartialFromCodedStream(
-      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
-  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
-  void SerializeWithCachedSizes(
-      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
-  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
-      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
-  int GetCachedSize() const final { return _cached_size_.Get(); }
-
-  private:
-  inline void SharedCtor();
-  inline void SharedDtor();
-  void SetCachedSize(int size) const final;
-  void InternalSwap(FloatResponse* other);
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "milvus.proto.milvus.FloatResponse";
-  }
-  private:
-  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
-    return nullptr;
-  }
-  inline void* MaybeArenaPtr() const {
-    return nullptr;
-  }
-  public:
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
-  private:
-  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
-    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_milvus_2eproto);
-    return ::descriptor_table_milvus_2eproto.file_level_metadata[kIndexInFileMessages];
-  }
-
-  public:
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kStatusFieldNumber = 1,
-    kValueFieldNumber = 2,
-  };
-  // .milvus.proto.common.Status status = 1;
-  bool has_status() const;
-  void clear_status();
-  const ::milvus::proto::common::Status& status() const;
-  ::milvus::proto::common::Status* release_status();
-  ::milvus::proto::common::Status* mutable_status();
-  void set_allocated_status(::milvus::proto::common::Status* status);
-
-  // float value = 2;
-  void clear_value();
-  float value() const;
-  void set_value(float value);
-
-  // @@protoc_insertion_point(class_scope:milvus.proto.milvus.FloatResponse)
- private:
-  class _Internal;
-
-  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::milvus::proto::common::Status* status_;
-  float value_;
-  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  friend struct ::TableStruct_milvus_2eproto;
-};
-// -------------------------------------------------------------------
-
 class DescribeCollectionRequest :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.milvus.DescribeCollectionRequest) */ {
  public:
@@ -1269,7 +1124,7 @@ class DescribeCollectionRequest :
                &_DescribeCollectionRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    6;
+    5;
 
   friend void swap(DescribeCollectionRequest& a, DescribeCollectionRequest& b) {
     a.Swap(&b);
@@ -1436,7 +1291,7 @@ class DescribeCollectionResponse :
                &_DescribeCollectionResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    7;
+    6;
 
   friend void swap(DescribeCollectionResponse& a, DescribeCollectionResponse& b) {
     a.Swap(&b);
@@ -1587,7 +1442,7 @@ class LoadCollectionRequest :
                &_LoadCollectionRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    8;
+    7;
 
   friend void swap(LoadCollectionRequest& a, LoadCollectionRequest& b) {
     a.Swap(&b);
@@ -1747,7 +1602,7 @@ class ReleaseCollectionRequest :
                &_ReleaseCollectionRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    9;
+    8;
 
   friend void swap(ReleaseCollectionRequest& a, ReleaseCollectionRequest& b) {
     a.Swap(&b);
@@ -1907,7 +1762,7 @@ class GetCollectionStatisticsRequest :
                &_GetCollectionStatisticsRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    10;
+    9;
 
   friend void swap(GetCollectionStatisticsRequest& a, GetCollectionStatisticsRequest& b) {
     a.Swap(&b);
@@ -2067,7 +1922,7 @@ class GetCollectionStatisticsResponse :
                &_GetCollectionStatisticsResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    11;
+    10;
 
   friend void swap(GetCollectionStatisticsResponse& a, GetCollectionStatisticsResponse& b) {
     a.Swap(&b);
@@ -2214,7 +2069,7 @@ class ShowCollectionsRequest :
                &_ShowCollectionsRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    12;
+    11;
 
   friend void swap(ShowCollectionsRequest& a, ShowCollectionsRequest& b) {
     a.Swap(&b);
@@ -2361,7 +2216,7 @@ class ShowCollectionsResponse :
                &_ShowCollectionsResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    13;
+    12;
 
   friend void swap(ShowCollectionsResponse& a, ShowCollectionsResponse& b) {
     a.Swap(&b);
@@ -2514,7 +2369,7 @@ class CreatePartitionRequest :
                &_CreatePartitionRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    14;
+    13;
 
   friend void swap(CreatePartitionRequest& a, CreatePartitionRequest& b) {
     a.Swap(&b);
@@ -2687,7 +2542,7 @@ class DropPartitionRequest :
                &_DropPartitionRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    15;
+    14;
 
   friend void swap(DropPartitionRequest& a, DropPartitionRequest& b) {
     a.Swap(&b);
@@ -2860,7 +2715,7 @@ class HasPartitionRequest :
                &_HasPartitionRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    16;
+    15;
 
   friend void swap(HasPartitionRequest& a, HasPartitionRequest& b) {
     a.Swap(&b);
@@ -3033,7 +2888,7 @@ class LoadPartitionsRequest :
                &_LoadPartitionsRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    17;
+    16;
 
   friend void swap(LoadPartitionsRequest& a, LoadPartitionsRequest& b) {
     a.Swap(&b);
@@ -3212,7 +3067,7 @@ class ReleasePartitionsRequest :
                &_ReleasePartitionsRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    18;
+    17;
 
   friend void swap(ReleasePartitionsRequest& a, ReleasePartitionsRequest& b) {
     a.Swap(&b);
@@ -3391,7 +3246,7 @@ class GetPartitionStatisticsRequest :
                &_GetPartitionStatisticsRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    19;
+    18;
 
   friend void swap(GetPartitionStatisticsRequest& a, GetPartitionStatisticsRequest& b) {
     a.Swap(&b);
@@ -3564,7 +3419,7 @@ class GetPartitionStatisticsResponse :
                &_GetPartitionStatisticsResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    20;
+    19;
 
   friend void swap(GetPartitionStatisticsResponse& a, GetPartitionStatisticsResponse& b) {
     a.Swap(&b);
@@ -3711,7 +3566,7 @@ class ShowPartitionsRequest :
                &_ShowPartitionsRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    21;
+    20;
 
   friend void swap(ShowPartitionsRequest& a, ShowPartitionsRequest& b) {
     a.Swap(&b);
@@ -3878,7 +3733,7 @@ class ShowPartitionsResponse :
                &_ShowPartitionsResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    22;
+    21;
 
   friend void swap(ShowPartitionsResponse& a, ShowPartitionsResponse& b) {
     a.Swap(&b);
@@ -4045,7 +3900,7 @@ class DescribeSegmentRequest :
                &_DescribeSegmentRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    23;
+    22;
 
   friend void swap(DescribeSegmentRequest& a, DescribeSegmentRequest& b) {
     a.Swap(&b);
@@ -4193,7 +4048,7 @@ class DescribeSegmentResponse :
                &_DescribeSegmentResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    24;
+    23;
 
   friend void swap(DescribeSegmentResponse& a, DescribeSegmentResponse& b) {
     a.Swap(&b);
@@ -4348,7 +4203,7 @@ class ShowSegmentsRequest :
                &_ShowSegmentsRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    25;
+    24;
 
   friend void swap(ShowSegmentsRequest& a, ShowSegmentsRequest& b) {
     a.Swap(&b);
@@ -4496,7 +4351,7 @@ class ShowSegmentsResponse :
                &_ShowSegmentsResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    26;
+    25;
 
   friend void swap(ShowSegmentsResponse& a, ShowSegmentsResponse& b) {
     a.Swap(&b);
@@ -4644,7 +4499,7 @@ class CreateIndexRequest :
                &_CreateIndexRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    27;
+    26;
 
   friend void swap(CreateIndexRequest& a, CreateIndexRequest& b) {
     a.Swap(&b);
@@ -4830,7 +4685,7 @@ class DescribeIndexRequest :
                &_DescribeIndexRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    28;
+    27;
 
   friend void swap(DescribeIndexRequest& a, DescribeIndexRequest& b) {
     a.Swap(&b);
@@ -5016,7 +4871,7 @@ class IndexDescription :
                &_IndexDescription_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    29;
+    28;
 
   friend void swap(IndexDescription& a, IndexDescription& b) {
     a.Swap(&b);
@@ -5173,7 +5028,7 @@ class DescribeIndexResponse :
                &_DescribeIndexResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    30;
+    29;
 
   friend void swap(DescribeIndexResponse& a, DescribeIndexResponse& b) {
     a.Swap(&b);
@@ -5320,7 +5175,7 @@ class GetIndexBuildProgressRequest :
                &_GetIndexBuildProgressRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    31;
+    30;
 
   friend void swap(GetIndexBuildProgressRequest& a, GetIndexBuildProgressRequest& b) {
     a.Swap(&b);
@@ -5506,7 +5361,7 @@ class GetIndexBuildProgressResponse :
                &_GetIndexBuildProgressResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    32;
+    31;
 
   friend void swap(GetIndexBuildProgressResponse& a, GetIndexBuildProgressResponse& b) {
     a.Swap(&b);
@@ -5588,13 +5443,10 @@ class GetIndexBuildProgressResponse :
   ::milvus::proto::common::Status* mutable_status();
   void set_allocated_status(::milvus::proto::common::Status* status);
 
-  // .milvus.proto.milvus.FloatResponse progress = 2;
-  bool has_progress() const;
+  // float progress = 2;
   void clear_progress();
-  const ::milvus::proto::milvus::FloatResponse& progress() const;
-  ::milvus::proto::milvus::FloatResponse* release_progress();
-  ::milvus::proto::milvus::FloatResponse* mutable_progress();
-  void set_allocated_progress(::milvus::proto::milvus::FloatResponse* progress);
+  float progress() const;
+  void set_progress(float value);
 
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.GetIndexBuildProgressResponse)
  private:
@@ -5602,7 +5454,7 @@ class GetIndexBuildProgressResponse :
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::milvus::proto::common::Status* status_;
-  ::milvus::proto::milvus::FloatResponse* progress_;
+  float progress_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -5650,7 +5502,7 @@ class GetIndexStateRequest :
                &_GetIndexStateRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    33;
+    32;
 
   friend void swap(GetIndexStateRequest& a, GetIndexStateRequest& b) {
     a.Swap(&b);
@@ -5836,7 +5688,7 @@ class GetIndexStateResponse :
                &_GetIndexStateResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    34;
+    33;
 
   friend void swap(GetIndexStateResponse& a, GetIndexStateResponse& b) {
     a.Swap(&b);
@@ -5977,7 +5829,7 @@ class DropIndexRequest :
                &_DropIndexRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    35;
+    34;
 
   friend void swap(DropIndexRequest& a, DropIndexRequest& b) {
     a.Swap(&b);
@@ -6163,7 +6015,7 @@ class InsertRequest :
                &_InsertRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    36;
+    35;
 
   friend void swap(InsertRequest& a, InsertRequest& b) {
     a.Swap(&b);
@@ -6363,7 +6215,7 @@ class InsertResponse :
                &_InsertResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    37;
+    36;
 
   friend void swap(InsertResponse& a, InsertResponse& b) {
     a.Swap(&b);
@@ -6511,7 +6363,7 @@ class PlaceholderValue :
                &_PlaceholderValue_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    38;
+    37;
 
   friend void swap(PlaceholderValue& a, PlaceholderValue& b) {
     a.Swap(&b);
@@ -6674,7 +6526,7 @@ class PlaceholderGroup :
                &_PlaceholderGroup_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    39;
+    38;
 
   friend void swap(PlaceholderGroup& a, PlaceholderGroup& b) {
     a.Swap(&b);
@@ -6811,7 +6663,7 @@ class SearchRequest :
                &_SearchRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    40;
+    39;
 
   friend void swap(SearchRequest& a, SearchRequest& b) {
     a.Swap(&b);
@@ -7016,7 +6868,7 @@ class Hits :
                &_Hits_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    41;
+    40;
 
   friend void swap(Hits& a, Hits& b) {
     a.Swap(&b);
@@ -7187,7 +7039,7 @@ class SearchResults :
                &_SearchResults_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    42;
+    41;
 
   friend void swap(SearchResults& a, SearchResults& b) {
     a.Swap(&b);
@@ -7340,7 +7192,7 @@ class FlushRequest :
                &_FlushRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    43;
+    42;
 
   friend void swap(FlushRequest& a, FlushRequest& b) {
     a.Swap(&b);
@@ -7506,7 +7358,7 @@ class PersistentSegmentInfo :
                &_PersistentSegmentInfo_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    44;
+    43;
 
   friend void swap(PersistentSegmentInfo& a, PersistentSegmentInfo& b) {
     a.Swap(&b);
@@ -7693,7 +7545,7 @@ class GetPersistentSegmentInfoRequest :
                &_GetPersistentSegmentInfoRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    45;
+    44;
 
   friend void swap(GetPersistentSegmentInfoRequest& a, GetPersistentSegmentInfoRequest& b) {
     a.Swap(&b);
@@ -7853,7 +7705,7 @@ class GetPersistentSegmentInfoResponse :
                &_GetPersistentSegmentInfoResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    46;
+    45;
 
   friend void swap(GetPersistentSegmentInfoResponse& a, GetPersistentSegmentInfoResponse& b) {
     a.Swap(&b);
@@ -8000,7 +7852,7 @@ class QuerySegmentInfo :
                &_QuerySegmentInfo_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    47;
+    46;
 
   friend void swap(QuerySegmentInfo& a, QuerySegmentInfo& b) {
     a.Swap(&b);
@@ -8179,7 +8031,7 @@ class GetQuerySegmentInfoRequest :
                &_GetQuerySegmentInfoRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    48;
+    47;
 
   friend void swap(GetQuerySegmentInfoRequest& a, GetQuerySegmentInfoRequest& b) {
     a.Swap(&b);
@@ -8339,7 +8191,7 @@ class GetQuerySegmentInfoResponse :
                &_GetQuerySegmentInfoResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    49;
+    48;
 
   friend void swap(GetQuerySegmentInfoResponse& a, GetQuerySegmentInfoResponse& b) {
     a.Swap(&b);
@@ -8486,7 +8338,7 @@ class RegisterLinkRequest :
                &_RegisterLinkRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    50;
+    49;
 
   friend void swap(RegisterLinkRequest& a, RegisterLinkRequest& b) {
     a.Swap(&b);
@@ -8608,7 +8460,7 @@ class RegisterLinkResponse :
                &_RegisterLinkResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    51;
+    50;
 
   friend void swap(RegisterLinkResponse& a, RegisterLinkResponse& b) {
     a.Swap(&b);
@@ -9380,69 +9232,6 @@ inline void StringResponse::set_allocated_value(std::string* value) {
   }
   value_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.StringResponse.value)
-}
-
-// -------------------------------------------------------------------
-
-// FloatResponse
-
-// .milvus.proto.common.Status status = 1;
-inline bool FloatResponse::has_status() const {
-  return this != internal_default_instance() && status_ != nullptr;
-}
-inline const ::milvus::proto::common::Status& FloatResponse::status() const {
-  const ::milvus::proto::common::Status* p = status_;
-  // @@protoc_insertion_point(field_get:milvus.proto.milvus.FloatResponse.status)
-  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::common::Status*>(
-      &::milvus::proto::common::_Status_default_instance_);
-}
-inline ::milvus::proto::common::Status* FloatResponse::release_status() {
-  // @@protoc_insertion_point(field_release:milvus.proto.milvus.FloatResponse.status)
-  
-  ::milvus::proto::common::Status* temp = status_;
-  status_ = nullptr;
-  return temp;
-}
-inline ::milvus::proto::common::Status* FloatResponse::mutable_status() {
-  
-  if (status_ == nullptr) {
-    auto* p = CreateMaybeMessage<::milvus::proto::common::Status>(GetArenaNoVirtual());
-    status_ = p;
-  }
-  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.FloatResponse.status)
-  return status_;
-}
-inline void FloatResponse::set_allocated_status(::milvus::proto::common::Status* status) {
-  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
-  if (message_arena == nullptr) {
-    delete reinterpret_cast< ::PROTOBUF_NAMESPACE_ID::MessageLite*>(status_);
-  }
-  if (status) {
-    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
-    if (message_arena != submessage_arena) {
-      status = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
-          message_arena, status, submessage_arena);
-    }
-    
-  } else {
-    
-  }
-  status_ = status;
-  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.FloatResponse.status)
-}
-
-// float value = 2;
-inline void FloatResponse::clear_value() {
-  value_ = 0;
-}
-inline float FloatResponse::value() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.milvus.FloatResponse.value)
-  return value_;
-}
-inline void FloatResponse::set_value(float value) {
-  
-  value_ = value;
-  // @@protoc_insertion_point(field_set:milvus.proto.milvus.FloatResponse.value)
 }
 
 // -------------------------------------------------------------------
@@ -13369,55 +13158,18 @@ inline void GetIndexBuildProgressResponse::set_allocated_status(::milvus::proto:
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.GetIndexBuildProgressResponse.status)
 }
 
-// .milvus.proto.milvus.FloatResponse progress = 2;
-inline bool GetIndexBuildProgressResponse::has_progress() const {
-  return this != internal_default_instance() && progress_ != nullptr;
-}
+// float progress = 2;
 inline void GetIndexBuildProgressResponse::clear_progress() {
-  if (GetArenaNoVirtual() == nullptr && progress_ != nullptr) {
-    delete progress_;
-  }
-  progress_ = nullptr;
+  progress_ = 0;
 }
-inline const ::milvus::proto::milvus::FloatResponse& GetIndexBuildProgressResponse::progress() const {
-  const ::milvus::proto::milvus::FloatResponse* p = progress_;
+inline float GetIndexBuildProgressResponse::progress() const {
   // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetIndexBuildProgressResponse.progress)
-  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::milvus::FloatResponse*>(
-      &::milvus::proto::milvus::_FloatResponse_default_instance_);
-}
-inline ::milvus::proto::milvus::FloatResponse* GetIndexBuildProgressResponse::release_progress() {
-  // @@protoc_insertion_point(field_release:milvus.proto.milvus.GetIndexBuildProgressResponse.progress)
-  
-  ::milvus::proto::milvus::FloatResponse* temp = progress_;
-  progress_ = nullptr;
-  return temp;
-}
-inline ::milvus::proto::milvus::FloatResponse* GetIndexBuildProgressResponse::mutable_progress() {
-  
-  if (progress_ == nullptr) {
-    auto* p = CreateMaybeMessage<::milvus::proto::milvus::FloatResponse>(GetArenaNoVirtual());
-    progress_ = p;
-  }
-  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.GetIndexBuildProgressResponse.progress)
   return progress_;
 }
-inline void GetIndexBuildProgressResponse::set_allocated_progress(::milvus::proto::milvus::FloatResponse* progress) {
-  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
-  if (message_arena == nullptr) {
-    delete progress_;
-  }
-  if (progress) {
-    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
-    if (message_arena != submessage_arena) {
-      progress = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
-          message_arena, progress, submessage_arena);
-    }
-    
-  } else {
-    
-  }
-  progress_ = progress;
-  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.GetIndexBuildProgressResponse.progress)
+inline void GetIndexBuildProgressResponse::set_progress(float value) {
+  
+  progress_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.GetIndexBuildProgressResponse.progress)
 }
 
 // -------------------------------------------------------------------
@@ -16049,8 +15801,6 @@ inline void RegisterLinkResponse::set_allocated_status(::milvus::proto::common::
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
-// -------------------------------------------------------------------
-
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
