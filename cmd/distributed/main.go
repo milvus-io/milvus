@@ -22,10 +22,10 @@ import (
 	"github.com/milvus-io/milvus/cmd/distributed/roles"
 )
 
-func run(serverType, runtTimeDir, svrAliase string) error {
+func run(serverType, runtTimeDir, svrAlias string) error {
 	var fileName string
-	if len(svrAliase) != 0 {
-		fileName = fmt.Sprintf("%s-%s.pid", serverType, svrAliase)
+	if len(svrAlias) != 0 {
+		fileName = fmt.Sprintf("%s-%s.pid", serverType, svrAlias)
 	} else {
 		fileName = serverType + ".pid"
 	}
@@ -76,10 +76,10 @@ func run(serverType, runtTimeDir, svrAliase string) error {
 	return nil
 }
 
-func stop(serverType, runtimeDir, svrAliase string) error {
+func stop(serverType, runtimeDir, svrAlias string) error {
 	var fileName string
-	if len(svrAliase) != 0 {
-		fileName = fmt.Sprintf("%s-%s.pid", serverType, svrAliase)
+	if len(svrAlias) != 0 {
+		fileName = fmt.Sprintf("%s-%s.pid", serverType, svrAlias)
 	} else {
 		fileName = serverType + ".pid"
 	}
@@ -138,8 +138,8 @@ func main() {
 	serverType := os.Args[2]
 	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 
-	var svrAliase string
-	flags.StringVar(&svrAliase, "alias", "", "set aliase")
+	var svrAlias string
+	flags.StringVar(&svrAlias, "alias", "", "set aliase")
 
 	if err := flags.Parse(os.Args[3:]); err != nil {
 		os.Exit(-1)
@@ -157,11 +157,11 @@ func main() {
 
 	switch command {
 	case "run":
-		if err := run(serverType, runtimeDir, svrAliase); err != nil {
+		if err := run(serverType, runtimeDir, svrAlias); err != nil {
 			panic(err)
 		}
 	case "stop":
-		if err := stop(serverType, runtimeDir, svrAliase); err != nil {
+		if err := stop(serverType, runtimeDir, svrAlias); err != nil {
 			panic(err)
 		}
 	default:
