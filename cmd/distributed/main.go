@@ -76,8 +76,13 @@ func run(serverType, runtTimeDir, svrAliase string) error {
 	return nil
 }
 
-func stop(serverType, runtimeDir string) error {
-	fileName := serverType + ".pid"
+func stop(serverType, runtimeDir, svrAliase string) error {
+	var fileName string
+	if len(svrAliase) != 0 {
+		fileName = fmt.Sprintf("%s-%s.pid", serverType, svrAliase)
+	} else {
+		fileName = serverType + ".pid"
+	}
 	var err error
 	var fd *os.File
 	if fd, err = os.OpenFile(path.Join(runtimeDir, fileName), os.O_RDONLY, 0664); err != nil {
@@ -156,7 +161,7 @@ func main() {
 			panic(err)
 		}
 	case "stop":
-		if err := stop(serverType, runtimeDir); err != nil {
+		if err := stop(serverType, runtimeDir, svrAliase); err != nil {
 			panic(err)
 		}
 	default:
