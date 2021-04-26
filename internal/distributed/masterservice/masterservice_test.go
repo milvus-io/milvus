@@ -626,7 +626,7 @@ func TestGrpcService(t *testing.T) {
 			FieldName:      "vector",
 			IndexName:      cms.Params.DefaultIndexName,
 		}
-		idx, err := core.MetaTable.GetIndexByName("testColl", "vector", cms.Params.DefaultIndexName)
+		idx, err := core.MetaTable.GetIndexByName("testColl", cms.Params.DefaultIndexName)
 		assert.Nil(t, err)
 		assert.Equal(t, len(idx), 1)
 		rsp, err := cli.DropIndex(ctx, req)

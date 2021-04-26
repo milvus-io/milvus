@@ -781,7 +781,7 @@ func (t *DescribeIndexReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DescribeIndex {
 		return fmt.Errorf("describe index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	idx, err := t.core.MetaTable.GetIndexByName(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
+	idx, err := t.core.MetaTable.GetIndexByName(t.Req.CollectionName, t.Req.IndexName)
 	if err != nil {
 		return err
 	}
@@ -821,7 +821,7 @@ func (t *DropIndexReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DropIndex {
 		return fmt.Errorf("drop index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	info, err := t.core.MetaTable.GetIndexByName(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
+	info, err := t.core.MetaTable.GetIndexByName(t.Req.CollectionName, t.Req.IndexName)
 	if err != nil {
 		log.Warn("GetIndexByName failed,", zap.String("collection name", t.Req.CollectionName), zap.String("field name", t.Req.FieldName), zap.String("index name", t.Req.IndexName), zap.Error(err))
 		return err
