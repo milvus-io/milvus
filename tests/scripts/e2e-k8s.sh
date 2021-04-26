@@ -265,8 +265,8 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
   trace "setup kind registry" setup_kind_registry
   pushd "${ROOT}"
     source "${ROOT}/scripts/before-install.sh"
-    trace "build milvus" make install && exit 1
-    trace "build milvus image" docker build -f build/docker/milvus/Dockerfile -t "${MILVUS_IMAGE_REPO}":"${MILVUS_IMAGE_TAG}" .
+    trace "build milvus" "${ROOT}/build/builder.sh" /bin/bash -c "make install" && exit 1
+    trace "build milvus image" docker build -f "${ROOT}/build/docker/milvus/Dockerfile" -t "${MILVUS_IMAGE_REPO}":"${MILVUS_IMAGE_TAG}" .
     trace "push milvus image" docker push "${MILVUS_IMAGE_REPO}":"${MILVUS_IMAGE_TAG}"
   popd
 fi
