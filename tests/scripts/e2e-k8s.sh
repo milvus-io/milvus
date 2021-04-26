@@ -53,6 +53,10 @@ while (( "$#" )); do
     KIND_CONFIG=$2
     shift 2
     ;;
+    --build-command)
+    BUILD_COMMAND=$2
+    shift 2
+    ;;
     --install-extra-arg)
     INSTALL_EXTRA_ARG=$2
     shift 2
@@ -112,37 +116,39 @@ while (( "$#" )); do
 Usage:
   $0 [flags] [Arguments]
 
-    --node-image                Kubernetes in Docker (KinD) Node image.
+    --node-image                Kubernetes in Docker (KinD) Node image
                                 The image is a Docker image for running nested containers, systemd, and Kubernetes components.
                                 Node images can be found at https://github.com/kubernetes-sigs/kind/releases.
                                 Default: \"kindest/node:v1.20.2\"
 
     --kind-config               Config for enabling different Kubernetes features in KinD
 
+    --build-command             Specified build milvus command
+
     --install-extra-arg         Install Milvus Helm Chart extra configuration. (see https://github.com/zilliztech/milvus-helm-charts/blob/main/charts/milvus-ha/values.yaml)
                                 To override values in a chart, use either the '--values' flag and pass in a file or use the '--set' flag and pass configuration from the command line, to force a string value use '--set-string'.
                                 Refer: https://helm.sh/docs/helm/helm_install/#helm-install
 
-    --test-extra-arg            Run e2e test extra configuration.
+    --test-extra-arg            Run e2e test extra configuration
                                 For example, \"--tag=smoke\"
 
-    --topology                  KinD cluster topology of deployments.
+    --topology                  KinD cluster topology of deployments
                                 Provides three classes: \"SINGLE_CLUSTER\", \"MULTICLUSTER_SINGLE_NETWORK\", \"MULTICLUSTER\"
                                 Default: \"SINGLE_CLUSTER\"
 
-    --topology-config           KinD cluster topology configuration file.
+    --topology-config           KinD cluster topology configuration file
 
-    --skip-setup                Skip setup KinD cluster.
+    --skip-setup                Skip setup KinD cluster
 
-    --skip-install              Skip install Milvus Helm Chart.
+    --skip-install              Skip install Milvus Helm Chart
 
-    --skip-cleanup              Skip cleanup KinD cluster.
+    --skip-cleanup              Skip cleanup KinD cluster
 
-    --skip-build                Skip build Milvus image.
+    --skip-build                Skip build Milvus image
 
-    --skip-test                 Skip e2e test.
+    --skip-test                 Skip e2e test
 
-    --manual                    Manual Mode.
+    --manual                    Manual Mode
 
     -h or --help                Print help information
 
@@ -161,6 +167,8 @@ Use \"$0  --help\" for more information about a given command.
       ;;
   esac
 done
+
+export BUILD_COMMAND="${BUILD_COMMAND:-make install}"
 
 export MANUAL="${MANUAL:-}"
 
@@ -265,9 +273,9 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
   trace "setup kind registry" setup_kind_registry
   pushd "${ROOT}"
     source "${ROOT}/scripts/before-install.sh"
-    trace "build milvus" "${ROOT}/build/builder.sh" /bin/bash -c "make install" && exit 1
-    trace "build milvus image" docker build -f "${ROOT}/build/docker/milvus/Dockerfile" -t "${MILVUS_IMAGE_REPO}":"${MILVUS_IMAGE_TAG}" .
-    trace "push milvus image" docker push "${MILVUS_IMAGE_REPO}":"${MILVUS_IMAGE_TAG}"
+    trace "build milvus" "${ROOT}/build/builder.sh" /bin/bash -c "${BUILD_COMMAND}"
+    trace "build milvus image" docker build -f "${ROOT}/build/docker/milvus/Dockerfile" -t "${MILVUS_IMAGE_REPO}:${MILVUS_IMAGE_TAG}" .
+    trace "push milvus image" docker push "${MILVUS_IMAGE_REPO}:${MILVUS_IMAGE_TAG}"
   popd
 fi
 
