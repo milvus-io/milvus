@@ -924,30 +924,30 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 	return rstID, fieldSchema, nil
 }
 
-func (mt *metaTable) GetIndexByName(collName, indexName string) ([]pb.IndexInfo, error) {
+func (mt *metaTable) GetIndexByName(collName, indexName string) (pb.CollectionInfo, []pb.IndexInfo, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
-		return nil, fmt.Errorf("collection %s not found", collName)
+		return pb.CollectionInfo{}, nil, fmt.Errorf("collection %s not found", collName)
 	}
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
-		return nil, fmt.Errorf("collection %s not found", collName)
+		return pb.CollectionInfo{}, nil, fmt.Errorf("collection %s not found", collName)
 	}
 
 	rstIndex := make([]pb.IndexInfo, 0, len(collMeta.FieldIndexes))
 	for _, idx := range collMeta.FieldIndexes {
 		idxInfo, ok := mt.indexID2Meta[idx.IndexID]
 		if !ok {
-			return nil, fmt.Errorf("index id = %d not found", idx.IndexID)
+			return pb.CollectionInfo{}, nil, fmt.Errorf("index id = %d not found", idx.IndexID)
 		}
 		if indexName == "" || idxInfo.IndexName == indexName {
 			rstIndex = append(rstIndex, idxInfo)
 		}
 	}
-	return rstIndex, nil
+	return collMeta, rstIndex, nil
 }
 
 func (mt *metaTable) GetIndexByID(indexID typeutil.UniqueID) (*pb.IndexInfo, error) {
