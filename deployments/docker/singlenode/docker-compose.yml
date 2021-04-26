@@ -28,8 +28,8 @@ services:
       - milvus
 
   standalone:
-    image: registry.zilliz.com/milvus-distributed/milvus-distributed:PR-5020-release
-    command: ["/milvus-distributed/bin/singlenode"]
+    image: registry.zilliz.com/milvus-distributed/milvus-distributed:master-release
+    command: ["/milvus/bin/singlenode"]
     environment:
       ETCD_ADDRESS: etcd:2379
       MINIO_ADDRESS: minio:9000

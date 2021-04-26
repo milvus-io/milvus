@@ -3,7 +3,7 @@ kind: Pod
 metadata:
   name: build-env
   labels:
-    app: milvus-distributed
+    app: milvus
     componet: build-env
 spec:
   containers:
