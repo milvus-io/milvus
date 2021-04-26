@@ -8,12 +8,12 @@ metadata:
 spec:
   containers:
   - name: build-env
-    image: milvusdb/milvus-distributed-dev:amd64-ubuntu18.04-20210318-090357
+    image: milvusdb/milvus-dev:amd64-ubuntu18.04-20210426-055946
     env:
     - name: OS_NAME
       value: "ubuntu18.04"
     - name: BUILD_ENV_IMAGE_ID
-      value: "9272a80d2726d7cf79820772ad2e9257c5f34bf091759e6d5a64ca4373c97f4d"
+      value: "14fd5a2cff5485257e79421a119ece1d6613587c2336fc18c7a8d12c791db0ef"
     securityContext:
        runAsUser: 1000
        runAsGroup: 1000
