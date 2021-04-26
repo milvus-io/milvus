@@ -22,6 +22,8 @@ namespace milvus {
 namespace engine {
 namespace utils {
 
+extern const char* RAWDATA_INDEX_NAME;
+
 int64_t
 GetMicroSecTimeStamp();
 

@@ -384,10 +384,17 @@ DBImpl::GetCollectionInfo(const std::string& collection_id, std::string& collect
         size_t row_count = 0;
         milvus::engine::meta::SegmentsSchema& collection_files = files_holder.HoldFiles();
         for (auto& file : collection_files) {
+            // if the file file_id = segment_id, it must be a raw file, the index name is IDMAP
+            // else, it is an index file, use engine_type_ to mapping the name
+            std::string index_name = utils::RAWDATA_INDEX_NAME;
+            if (file.segment_id_ != file.file_id_) {
+                index_name = utils::GetIndexName(file.engine_type_);
+            }
+
             milvus::json json_segment;
             json_segment[JSON_SEGMENT_NAME] = file.segment_id_;
             json_segment[JSON_ROW_COUNT] = file.row_count_;
-            json_segment[JSON_INDEX_NAME] = utils::GetIndexName(file.engine_type_);
+            json_segment[JSON_INDEX_NAME] = index_name;
             json_segment[JSON_DATA_SIZE] = (int64_t)file.file_size_;
             json_segments.push_back(json_segment);
 
