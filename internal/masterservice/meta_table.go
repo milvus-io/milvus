@@ -833,12 +833,10 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 
 	var dupIdx typeutil.UniqueID = 0
 	for _, f := range collMeta.FieldIndexes {
-		if f.FiledID == fieldSchema.FieldID {
-			if info, ok := mt.indexID2Meta[f.IndexID]; ok {
-				if info.IndexName == idxInfo.IndexName {
-					dupIdx = info.IndexID
-					break
-				}
+		if info, ok := mt.indexID2Meta[f.IndexID]; ok {
+			if info.IndexName == idxInfo.IndexName {
+				dupIdx = info.IndexID
+				break
 			}
 		}
 	}
@@ -926,7 +924,7 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 	return rstID, fieldSchema, nil
 }
 
-func (mt *metaTable) GetIndexByName(collName string, fieldName string, indexName string) ([]pb.IndexInfo, error) {
+func (mt *metaTable) GetIndexByName(collName, indexName string) ([]pb.IndexInfo, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
@@ -938,21 +936,15 @@ func (mt *metaTable) GetIndexByName(collName string, fieldName string, indexName
 	if !ok {
 		return nil, fmt.Errorf("collection %s not found", collName)
 	}
-	fieldSchema, err := mt.unlockGetFieldSchema(collName, fieldName)
-	if err != nil {
-		return nil, err
-	}
 
 	rstIndex := make([]pb.IndexInfo, 0, len(collMeta.FieldIndexes))
 	for _, idx := range collMeta.FieldIndexes {
-		if idx.FiledID == fieldSchema.FieldID {
-			idxInfo, ok := mt.indexID2Meta[idx.IndexID]
-			if !ok {
-				return nil, fmt.Errorf("index id = %d not found", idx.IndexID)
-			}
-			if indexName == "" || idxInfo.IndexName == indexName {
-				rstIndex = append(rstIndex, idxInfo)
-			}
+		idxInfo, ok := mt.indexID2Meta[idx.IndexID]
+		if !ok {
+			return nil, fmt.Errorf("index id = %d not found", idx.IndexID)
+		}
+		if indexName == "" || idxInfo.IndexName == indexName {
+			rstIndex = append(rstIndex, idxInfo)
 		}
 	}
 	return rstIndex, nil

@@ -63,7 +63,7 @@ func (mr *MilvusRoles) EnvValue(env string) bool {
 }
 
 func (mr *MilvusRoles) Run(localMsg bool) {
-	closer := trace.InitTracing("singleNode")
+	closer := trace.InitTracing("standalone")
 	if closer != nil {
 		defer closer.Close()
 	}

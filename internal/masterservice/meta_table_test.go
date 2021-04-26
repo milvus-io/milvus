@@ -341,7 +341,7 @@ func TestMetaTable(t *testing.T) {
 	})
 
 	t.Run("get index by name", func(t *testing.T) {
-		idx, err := mt.GetIndexByName("testColl", "field110", "field110")
+		idx, err := mt.GetIndexByName("testColl", "field110")
 		assert.Nil(t, err)
 		assert.Equal(t, len(idx), 1)
 		assert.Equal(t, idx[0].IndexID, int64(10000))
@@ -357,9 +357,7 @@ func TestMetaTable(t *testing.T) {
 		}
 		assert.True(t, EqualKeyPairArray(idx[0].IndexParams, params))
 
-		_, err = mt.GetIndexByName("testColl", "field111", "idx200")
-		assert.NotNil(t, err)
-		idx, err = mt.GetIndexByName("testColl", "field110", "idx201")
+		idx, err = mt.GetIndexByName("testColl", "idx201")
 		assert.Nil(t, err)
 		assert.Zero(t, len(idx))
 	})
@@ -390,11 +388,11 @@ func TestMetaTable(t *testing.T) {
 		assert.Nil(t, err)
 		assert.False(t, ok)
 
-		idxs, err := mt.GetIndexByName("testColl", "field110", "field110")
+		idxs, err := mt.GetIndexByName("testColl", "field110")
 		assert.Nil(t, err)
 		assert.Zero(t, len(idxs))
 
-		idxs, err = mt.GetIndexByName("testColl", "field110", "field110-1")
+		idxs, err = mt.GetIndexByName("testColl", "field110-1")
 		assert.Nil(t, err)
 		assert.Equal(t, len(idxs), 1)
 		assert.Equal(t, idxs[0].IndexID, int64(2001))
@@ -963,7 +961,7 @@ func TestMetaTable(t *testing.T) {
 		assert.Nil(t, err)
 
 		mt.collName2ID["abc"] = 123
-		_, err = mt.GetIndexByName("abc", "def", "hij")
+		_, err = mt.GetIndexByName("abc", "hij")
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "collection abc not found")
 
@@ -980,7 +978,7 @@ func TestMetaTable(t *testing.T) {
 		err = mt.AddCollection(collInfo, partInfo, idxInfo)
 		assert.Nil(t, err)
 		mt.indexID2Meta = make(map[int64]pb.IndexInfo)
-		_, err = mt.GetIndexByName(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idxInfo[0].IndexName)
+		_, err = mt.GetIndexByName(collInfo.Schema.Name, idxInfo[0].IndexName)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("index id = %d not found", idxInfo[0].IndexID))
 
