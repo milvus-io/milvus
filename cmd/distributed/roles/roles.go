@@ -63,9 +63,11 @@ func (mr *MilvusRoles) EnvValue(env string) bool {
 }
 
 func (mr *MilvusRoles) Run(localMsg bool) {
-	closer := trace.InitTracing("standalone")
-	if closer != nil {
-		defer closer.Close()
+	if os.Getenv("DEPLOY_MODE") == "STANDALONE" {
+		closer := trace.InitTracing("standalone")
+		if closer != nil {
+			defer closer.Close()
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
