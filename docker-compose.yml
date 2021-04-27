@@ -13,7 +13,7 @@ services:
     # Build devcontainer
     build:
       context: .
-      dockerfile: build/docker/env/cpu/ubuntu${UBUNTU}/Dockerfile
+      dockerfile: build/docker/builder/cpu/ubuntu${UBUNTU}/Dockerfile
       cache_from:
         - ${REPO}:${ARCH}-ubuntu${UBUNTU}-${LATEST_DATE_VERSION}
     # user: {{ CURRENT_ID }}

@@ -60,7 +60,7 @@ RUN mkdir -p /home/milvus/.vscode-server/extensions \
         /home/milvus/.vscode-server-insiders/extensions \
     && chmod -R 777 /home/milvus
 
-COPY --chown=0:0 build/docker/env/entrypoint.sh /
+COPY --chown=0:0 build/docker/builder/entrypoint.sh /
 
 RUN wget -qO- "https://github.com/benesch/autouseradd/releases/download/1.2.0/autouseradd-1.2.0-amd64.tar.gz" | tar xz -C / --strip-components 1
 
