@@ -355,6 +355,12 @@ func (s *Server) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIn
 	return s.proxynode.DescribeIndex(ctx, request)
 }
 
+// GetIndexBuildProgress gets index build progress with filed_name and index_name.
+// IndexRows is the num of indexed rows. And TotalRows is the total number of segment rows.
+func (s *Server) GetIndexBuildProgress(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error) {
+	return s.proxynode.GetIndexBuildProgress(ctx, request)
+}
+
 func (s *Server) GetIndexState(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error) {
 	return s.proxynode.GetIndexState(ctx, request)
 }

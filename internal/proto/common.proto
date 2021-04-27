@@ -109,8 +109,9 @@ enum MsgType {
     Search = 500;
     SearchResult = 501;
     GetIndexState = 502;
-    GetCollectionStatistics = 503;
-    GetPartitionStatistics = 504;
+    GetIndexBuildProgress = 503;
+    GetCollectionStatistics = 504;
+    GetPartitionStatistics = 505;
 
     /* DATA SERVICE */
     SegmentInfo = 600;

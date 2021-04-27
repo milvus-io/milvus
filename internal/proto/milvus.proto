@@ -27,6 +27,7 @@ service MilvusService {
   rpc CreateIndex(CreateIndexRequest) returns (common.Status) {}
   rpc DescribeIndex(DescribeIndexRequest) returns (DescribeIndexResponse) {}
   rpc GetIndexState(GetIndexStateRequest) returns (GetIndexStateResponse) {}
+  rpc GetIndexBuildProgress(GetIndexBuildProgressRequest) returns (GetIndexBuildProgressResponse) {}
   rpc DropIndex(DropIndexRequest) returns (common.Status) {}
 
   rpc Insert(InsertRequest) returns (InsertResponse) {}
@@ -122,7 +123,6 @@ message CreatePartitionRequest {
   string collection_name = 3;
   string partition_name = 4;
 }
-
 
 message DropPartitionRequest {
   common.MsgBase base = 1;
@@ -227,6 +227,20 @@ message IndexDescription {
 message DescribeIndexResponse {
   common.Status status = 1;
   repeated IndexDescription index_descriptions = 2;
+}
+
+message GetIndexBuildProgressRequest {
+  common.MsgBase base = 1;
+  string db_name = 2 ;
+  string collection_name = 3;
+  string field_name = 4;
+  string index_name = 5;
+}
+
+message GetIndexBuildProgressResponse {
+  common.Status status = 1;
+  int64 indexed_rows = 2;
+  int64 total_rows = 3;
 }
 
 message GetIndexStateRequest {

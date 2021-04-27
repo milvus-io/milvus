@@ -883,6 +883,12 @@ func (node *ProxyNode) DropIndex(ctx context.Context, request *milvuspb.DropInde
 	return dit.result, nil
 }
 
+// GetIndexBuildProgress gets index build progress with filed_name and index_name.
+// IndexRows is the num of indexed rows. And TotalRows is the total number of segment rows.
+func (node *ProxyNode) GetIndexBuildProgress(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error) {
+	return nil, nil
+}
+
 func (node *ProxyNode) GetIndexState(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error) {
 	dipt := &GetIndexStateTask{
 		ctx:                  ctx,
