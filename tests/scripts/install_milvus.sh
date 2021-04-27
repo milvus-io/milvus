@@ -48,9 +48,9 @@ if [[ "${MILVUS_STANDALONE_ENABLED}" == "false" ]]; then
                                  --set image.all.repository="${MILVUS_IMAGE_REPO}" \
                                  --set image.all.tag="${MILVUS_IMAGE_TAG}" \
                                  --set image.all.pullPolicy="${MILVUS_PULL_POLICY:-Always}" \
-                                 --set standalone.enabled=${MILVUS_STANDALONE_ENABLED} \
-                                 --set proxynode.service.type=${MILVUS_SERVICE_TYPE} \
-                                 --namespace ${MILVUS_HELM_NAMESPACE} \
+                                 --set standalone.enabled="${MILVUS_STANDALONE_ENABLED}" \
+                                 --set proxynode.service.type="${MILVUS_SERVICE_TYPE}" \
+                                 --namespace "${MILVUS_HELM_NAMESPACE}" \
                                  "${MILVUS_HELM_RELEASE_NAME}" \
                                  ${@:-} "${TMP_DIR}/charts/milvus-ha"
 else
@@ -58,9 +58,9 @@ else
                                  --set image.all.repository="${MILVUS_IMAGE_REPO}" \
                                  --set image.all.tag="${MILVUS_IMAGE_TAG}" \
                                  --set image.all.pullPolicy="${MILVUS_PULL_POLICY:-Always}" \
-                                 --set standalone.enabled=${MILVUS_STANDALONE_ENABLED} \
-                                 --set standalone.service.type=${MILVUS_SERVICE_TYPE} \
-                                 --namespace ${MILVUS_HELM_NAMESPACE} \
+                                 --set standalone.enabled="${MILVUS_STANDALONE_ENABLED}" \
+                                 --set standalone.service.type="${MILVUS_SERVICE_TYPE}" \
+                                 --namespace "${MILVUS_HELM_NAMESPACE}" \
                                  "${MILVUS_HELM_RELEASE_NAME}" \
                                  ${@:-} "${TMP_DIR}/charts/milvus-ha"
 fi
