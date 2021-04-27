@@ -781,15 +781,21 @@ func (t *DescribeIndexReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DescribeIndex {
 		return fmt.Errorf("describe index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	idx, err := t.core.MetaTable.GetIndexByName(t.Req.CollectionName, t.Req.IndexName)
+	coll, idx, err := t.core.MetaTable.GetIndexByName(t.Req.CollectionName, t.Req.IndexName)
 	if err != nil {
 		return err
 	}
 	for _, i := range idx {
+		f, err := GetFieldSchemaByIndexID(&coll, typeutil.UniqueID(i.IndexID))
+		if err != nil {
+			log.Warn("get field schema by index id failed", zap.String("collection name", t.Req.CollectionName), zap.String("index name", t.Req.IndexName), zap.Error(err))
+			continue
+		}
 		desc := &milvuspb.IndexDescription{
 			IndexName: i.IndexName,
 			Params:    i.IndexParams,
 			IndexID:   i.IndexID,
+			FieldName: f.Name,
 		}
 		t.Rsp.IndexDescriptions = append(t.Rsp.IndexDescriptions, desc)
 	}
@@ -821,7 +827,7 @@ func (t *DropIndexReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DropIndex {
 		return fmt.Errorf("drop index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	info, err := t.core.MetaTable.GetIndexByName(t.Req.CollectionName, t.Req.IndexName)
+	_, info, err := t.core.MetaTable.GetIndexByName(t.Req.CollectionName, t.Req.IndexName)
 	if err != nil {
 		log.Warn("GetIndexByName failed,", zap.String("collection name", t.Req.CollectionName), zap.String("field name", t.Req.FieldName), zap.String("index name", t.Req.IndexName), zap.Error(err))
 		return err
