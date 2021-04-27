@@ -221,6 +221,7 @@ message IndexDescription {
   string index_name = 1;
   int64 indexID = 2;
   repeated common.KeyValuePair params = 3;
+  string field_name = 4;
 }
 
 message DescribeIndexResponse {

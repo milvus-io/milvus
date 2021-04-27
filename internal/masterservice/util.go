@@ -49,3 +49,20 @@ func GetFieldSchemaByID(coll *etcdpb.CollectionInfo, fieldID typeutil.UniqueID) 
 	}
 	return nil, fmt.Errorf("field id = %d not found", fieldID)
 }
+
+//GetFieldSchemaByIndexID return the field schema by it's index id
+func GetFieldSchemaByIndexID(coll *etcdpb.CollectionInfo, idxID typeutil.UniqueID) (*schemapb.FieldSchema, error) {
+	var fieldID typeutil.UniqueID
+	exist := false
+	for _, f := range coll.FieldIndexes {
+		if f.IndexID == idxID {
+			fieldID = f.FiledID
+			exist = true
+			break
+		}
+	}
+	if !exist {
+		return nil, fmt.Errorf("index id = %d is not attach to any field", idxID)
+	}
+	return GetFieldSchemaByID(coll, fieldID)
+}

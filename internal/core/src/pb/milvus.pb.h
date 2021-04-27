@@ -4936,6 +4936,7 @@ class IndexDescription :
   enum : int {
     kParamsFieldNumber = 3,
     kIndexNameFieldNumber = 1,
+    kFieldNameFieldNumber = 4,
     kIndexIDFieldNumber = 2,
   };
   // repeated .milvus.proto.common.KeyValuePair params = 3;
@@ -4960,6 +4961,17 @@ class IndexDescription :
   std::string* release_index_name();
   void set_allocated_index_name(std::string* index_name);
 
+  // string field_name = 4;
+  void clear_field_name();
+  const std::string& field_name() const;
+  void set_field_name(const std::string& value);
+  void set_field_name(std::string&& value);
+  void set_field_name(const char* value);
+  void set_field_name(const char* value, size_t size);
+  std::string* mutable_field_name();
+  std::string* release_field_name();
+  void set_allocated_field_name(std::string* field_name);
+
   // int64 indexID = 2;
   void clear_indexid();
   ::PROTOBUF_NAMESPACE_ID::int64 indexid() const;
@@ -4972,6 +4984,7 @@ class IndexDescription :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair > params_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr index_name_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr field_name_;
   ::PROTOBUF_NAMESPACE_ID::int64 indexid_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -12440,6 +12453,57 @@ inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common:
 IndexDescription::params() const {
   // @@protoc_insertion_point(field_list:milvus.proto.milvus.IndexDescription.params)
   return params_;
+}
+
+// string field_name = 4;
+inline void IndexDescription::clear_field_name() {
+  field_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& IndexDescription::field_name() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.IndexDescription.field_name)
+  return field_name_.GetNoArena();
+}
+inline void IndexDescription::set_field_name(const std::string& value) {
+  
+  field_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.IndexDescription.field_name)
+}
+inline void IndexDescription::set_field_name(std::string&& value) {
+  
+  field_name_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.milvus.IndexDescription.field_name)
+}
+inline void IndexDescription::set_field_name(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  field_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.IndexDescription.field_name)
+}
+inline void IndexDescription::set_field_name(const char* value, size_t size) {
+  
+  field_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.IndexDescription.field_name)
+}
+inline std::string* IndexDescription::mutable_field_name() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.IndexDescription.field_name)
+  return field_name_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* IndexDescription::release_field_name() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.IndexDescription.field_name)
+  
+  return field_name_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void IndexDescription::set_allocated_field_name(std::string* field_name) {
+  if (field_name != nullptr) {
+    
+  } else {
+    
+  }
+  field_name_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), field_name);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.IndexDescription.field_name)
 }
 
 // -------------------------------------------------------------------
