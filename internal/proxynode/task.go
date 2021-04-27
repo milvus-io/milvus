@@ -1772,11 +1772,9 @@ func (gibpt *GetIndexBuildProgressTask) OnEnqueue() error {
 }
 
 func (gibpt *GetIndexBuildProgressTask) PreExecute(ctx context.Context) error {
-	log.Debug("get index build progress pre execute", zap.String("get index states request", "get index states request"))
 	gibpt.Base.MsgType = commonpb.MsgType_GetIndexBuildProgress
 	gibpt.Base.SourceID = Params.ProxyID
 
-	log.Debug("get index build progress pre execute", zap.String("validate collection name", "validate collection name"))
 	if err := ValidateCollectionName(gibpt.CollectionName); err != nil {
 		return err
 	}
@@ -1790,7 +1788,6 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
-	log.Debug("get index build progress", zap.String("show partitions", "show partitions"))
 
 	showPartitionRequest := &milvuspb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
@@ -1812,7 +1809,6 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 		gibpt.IndexName = Params.DefaultIndexName
 	}
 
-	log.Debug("get index build progress", zap.String("describe index", "describe index"))
 	describeIndexReq := milvuspb.DescribeIndexRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DescribeIndex,
@@ -1839,13 +1835,11 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 			break
 		}
 	}
-	log.Debug("get index build progress", zap.String("index desc", "IndexDescriptions"))
 	if !foundIndexID {
 		return errors.New(fmt.Sprint("Can't found IndexID for indexName", gibpt.IndexName))
 	}
 
 	var allSegmentIDs []UniqueID
-	log.Debug("get index build progress", zap.String("show segments", "show segments"))
 	for _, partitionID := range partitions.PartitionIDs {
 		showSegmentsRequest := &milvuspb.ShowSegmentsRequest{
 			Base: &commonpb.MsgBase{
@@ -1872,7 +1866,6 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 	}
 
 	buildIndexMap := make(map[int64]int64)
-	log.Debug("get index build progress", zap.String("describe segment", "describe segment"))
 	for _, segmentID := range allSegmentIDs {
 		describeSegmentRequest := &milvuspb.DescribeSegmentRequest{
 			Base: &commonpb.MsgBase{
@@ -1896,7 +1889,6 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	log.Debug("get index build progress", zap.String("get index states request", "get index states request"))
 	states, err := gibpt.indexService.GetIndexStates(ctx, getIndexStatesRequest)
 	if err != nil {
 		return err
@@ -1915,8 +1907,6 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	log.Debug("get index build progress", zap.String("get index states request", "get index "))
-	log.Debug("get index build progress", zap.Any("segmentIDs", allSegmentIDs))
 	infoResp, err := gibpt.dataService.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_SegmentInfo,
@@ -1926,7 +1916,6 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 		},
 		SegmentIDs: allSegmentIDs,
 	})
-	log.Debug("get index build progress", zap.Any("infoResp", infoResp))
 	if err != nil {
 		return err
 	}
@@ -1940,8 +1929,6 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 			indexed += info.NumRows
 		}
 	}
-	log.Debug("get index build progress", zap.Any("total", total))
-	log.Debug("get index build progress", zap.Any("indexed", indexed))
 
 	gibpt.result = &milvuspb.GetIndexBuildProgressResponse{
 		Status: &commonpb.Status{
