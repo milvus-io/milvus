@@ -14,10 +14,10 @@
 
 ##### 硬件
 
-| 硬件名称 | 建议配置                                                                                               |
-| ---- | -------------------------------------------------------------------------------------------------- |
+| 硬件名称 | 建议配置                                                                                                |
+| ---- | --------------------------------------------------------------------------------------------------- |
 | CPU  | x86_64 平台<br> Intel CPU Sandy Bridge 或以上<br> CPU 指令集<br> _ SSE42<br> _ AVX<br> _ AVX2<br> _ AVX512 |
-| 内存   | 16 GB 或以上                                                                                          |
+| 内存   | 16 GB 或以上                                                                                           |
 
 ##### 软件
 
@@ -34,17 +34,19 @@
 
 ##### 检查 Docker 和 Docker Compose 状态
 
- 1) 确认 Docker Daemon 正在运行：
+  1. 确认 Docker Daemon 正在运行：
 
 ```shell
 $ docker info
 ```
 
 -   安装 Docker 步骤见 [Docker CE/EE 官方安装说明](https://docs.docker.com/get-docker/)进行安装
+
 -   如果无法正常打印 Docker 相关信息，请启动 Docker Daemon。
+
 -   要在没有 `root` 权限的情况下运行 Docker 命令，请创建 `docker` 组并添加用户，以运行：`sudo usermod -aG docker $USER`， 退出终端并重新登录，以使更改生效 ，详见 [使用非 root 用户管理 docker](https://docs.docker.com/install/linux/linux-postinstall/)。
 
-    2) 确认 Docker Compose 版本
+  2. 确认 Docker Compose 版本
 
 ```shell
 $ docker-compose version
