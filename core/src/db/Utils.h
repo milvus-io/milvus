@@ -42,6 +42,12 @@ Status
 DeleteSegment(const DBMetaOptions& options, meta::SegmentSchema& table_file);
 
 Status
+DeleteDirectory(const std::string& path);
+
+Status
+DeleteFile(const std::string& path);
+
+Status
 GetParentPath(const std::string& path, std::string& parent_path);
 
 bool

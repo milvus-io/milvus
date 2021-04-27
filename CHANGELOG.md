@@ -16,9 +16,9 @@ Please mark all change in change log and use the issue from GitHub
 -   \#5008 Randomly crash during continuous and concurrent delete, insert and search
 -   \#5010 IVF_PQ failed to query on GPU if 'nbits' doesn't equal to 8
 -   \#5050 Index type returned by get_collection_stats() is incorrect
+-   \#5063 Empty segment is serialized and crash milvus
 
 ## Feature
--   \#1434 Storage: enabling s3 storage support (implemented by Unisinsight)
 -   \#4564 Allow GetEntityByID in a specified partition
 -   \#4806 Allow DeleteEntityByID in a specified partition
 -   \#4905 Allow the collection to be released from the cache
