@@ -101,6 +101,9 @@ Status
 MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
     TimeRecorder recorder("MemTable::Serialize collection " + collection_id_);
 
+    // The ApplyDeletes() do two things
+    // 1. delete vectors from buffer
+    // 2. delete vectors from storage
     if (!doc_ids_to_delete_.empty() && apply_delete) {
         auto status = ApplyDeletes();
         if (!status.ok()) {
@@ -110,12 +113,29 @@ MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
 
     meta::SegmentsSchema update_files;
     for (auto mem_table_file = mem_table_file_list_.begin(); mem_table_file != mem_table_file_list_.end();) {
+        // For empty segment
+        if ((*mem_table_file)->Empty()) {
+            // Mark the empty segment as to_delete so that the meta system can remove it later
+            auto schema = (*mem_table_file)->GetSegmentSchema();
+            schema.file_type_ = meta::SegmentSchema::TO_DELETE;
+            update_files.push_back(schema);
+
+            std::lock_guard<std::mutex> lock(mutex_);
+            mem_table_file = mem_table_file_list_.erase(mem_table_file);
+            continue;
+        }
+
         auto status = (*mem_table_file)->Serialize(wal_lsn);
-        update_files.push_back((*mem_table_file)->GetSegmentSchema());
+        auto schema = (*mem_table_file)->GetSegmentSchema();
         if (!status.ok()) {
+            // mark the failed segment as to_delete so that the meta system can remove it later
+            schema.file_type_ = meta::SegmentSchema::TO_DELETE;
+            meta_->UpdateCollectionFile(schema);
             return status;
         }
 
+        // succeed, record the segment into meta by UpdateCollectionFiles()
+        update_files.push_back(schema);
         LOG_ENGINE_DEBUG_ << "Flushed segment " << (*mem_table_file)->GetSegmentId();
 
         {
@@ -130,6 +150,7 @@ MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
         return status;
     }
 
+    // Record WAL flag
     status = meta_->UpdateCollectionFlushLSN(collection_id_, wal_lsn);
     if (!status.ok()) {
         std::string err_msg = "Failed to write flush lsn to meta: " + status.ToString();
