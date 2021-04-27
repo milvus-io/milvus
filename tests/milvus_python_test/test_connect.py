@@ -87,7 +87,10 @@ class TestConnect:
         method: uri format and value are both correct
         expected: connected is True        
         '''
-        uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
+        if args["handler"] == "HTTP":
+            uri_value = "http://%s:%s" % (args["ip"], args["port"])
+        else:
+            uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
         milvus = get_milvus(args["ip"], args["port"], uri=uri_value, handler=args["handler"])
         # assert milvus.connected()
 
