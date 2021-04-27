@@ -215,7 +215,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		addr := ":" + strconv.Itoa(grpcPort)
 		lis, err = net.Listen("tcp", addr)
 		if err == nil {
-			Params.QueryNodePort = lis.Addr().(*net.TCPAddr).Port
+			qn.Params.QueryNodePort = int64(lis.Addr().(*net.TCPAddr).Port)
 		} else {
 			// set port=0 to get next available port
 			grpcPort = 0
