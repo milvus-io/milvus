@@ -1,54 +1,60 @@
 pull_request_rules:
-  - name: add auto-merge label if the title does not contain “[WIP]”
+  - name: Auto merge for code changed
     conditions:
       - base=master
-      - -title~=(?i)\[wip\]
-    actions:
-      label:
-        add:
-          - "PR | automerge"
-
-  - name: automatic merge for master when ci passed and the title does not contain “[WIP]”
-    conditions:
-      - base=master
-      - -title~=(?i)\[wip\]
-      - "label=PR | automerge"
-      - "label!=PR | message from pull request"
-      - "#approved-reviews-by>=1"
-      - "#changes-requested-reviews-by=0"
-      - "status-success=DCO"
+      - "status-success=Code Checker AMD64 Ubuntu 18.04"
+      - "status-success=Build and test AMD64 Ubuntu 18.04"
       - "status-success=continuous-integration/jenkins/pr-merge"
-      - "status-success=AMD64 Ubuntu 18.04"
-    actions:
-      merge:
-        method: squash
-
-  - name: automatic merge for master when document files changed only and the title does not contain “[WIP]”
-    conditions:
-      - base=master
-      - -title~=(?i)\[wip\]
-      - "label=PR | automerge"
       - "#approved-reviews-by>=1"
       - "#changes-requested-reviews-by=0"
-      - "status-success=DCO"
-      - -files~=\.(?!md|png)
-    actions:
-      merge:
-        method: squash
-
-  - name: Use the title and body from the pull request itself as the commit message
-    conditions:
-      - base=master
       - -title~=(?i)\[wip\]
-      - "label=PR | message from pull request"
-      - "#approved-reviews-by>=1"
-      - "approved-reviews-by=czs007"
-      - "#changes-requested-reviews-by=0"
+      - -body~=[^\n]{72,}
       - "status-success=DCO"
-      - "status-success=continuous-integration/jenkins/pr-merge"
-      - "status-success=AMD64 Ubuntu 18.04"
+      - -label=manual-merge
     actions:
       merge:
         method: squash
         commit_message: title+body
+
+  - name: Auto merge for document changed
+    conditions:
+      - base=master
+      - -files~=\.(?!md|png)
+      - "#approved-reviews-by>=1"
+      - "#changes-requested-reviews-by=0"
+      - -body~=[^\n]{72,}
+      - -title~=(?i)\[wip\]
+      - "status-success=DCO"
+      - -label=manual-merge
+    actions:
+      merge:
+        method: squash
+        commit_message: title+body
+
+  - name: Warn on width limit exceeded
+    conditions:
+      - base=master
+      - -body~=[^\n]{72,}
+    actions:
+        comment:
+            message: |
+                The pull request body line width exceeded limit. Could you fix it @{{author}}?
+
+  - name: Warn on conflict
+    conditions:
+      - base=master
+      - conflict
+    actions:
+        comment:
+            message: |
+                This pull request is now in conflicts. Could you fix it @{{author}}? 🙏
+
+  - name: Warn on DCO failed
+    conditions:
+      - base=master
+      - -status-success=DCO
+    actions:
+        comment:
+            message: |
+                DCO check failed. Could you fix it @{{author}}? 🙏
 
