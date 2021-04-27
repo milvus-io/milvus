@@ -1,0 +1,22 @@
+version: '3.5'
+
+services:
+  pytest:
+    image: ${REPO}:${TAG}
+    build:
+      context: ..
+      dockerfile: ./docker/Dockerfile
+      cache_from:
+        - ${REPO}:latest
+    shm_size: 2G
+    environment:
+      SERVICE_IP: ${SERVICE_IP}
+      SERVICE_PORT: ${SERVICE_PORT}
+    volumes:
+      - ../python_test:/pytest:delegated
+    working_dir: "/pytest"
+
+networks:
+  default:
+    external:
+      name: ${PRE_EXIST_NETWORK}

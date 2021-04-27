@@ -9,7 +9,7 @@ pushd "${toplevel}"
 
 if [ "${1-}" = "pull" ]; then
     docker-compose pull --ignore-pull-failures ubuntu
-    docker-compose pull --ignore-pull-failures gdbserver
+    # docker-compose pull --ignore-pull-failures gdbserver
     exit 0
 fi
 
