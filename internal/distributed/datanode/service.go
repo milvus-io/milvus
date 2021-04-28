@@ -72,18 +72,8 @@ func New(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	return s, nil
 }
 
-func (s *Server) startGrpcLoop(grpcPort int) {
+func (s *Server) startGrpcLoop(listener net.Listener) {
 	defer s.wg.Done()
-
-	addr := ":" + strconv.Itoa(grpcPort)
-
-	lis, err := net.Listen("tcp", addr)
-	if err != nil {
-		log.Warn("GrpcServer failed to listen", zap.Error(err))
-		s.grpcErrChan <- err
-		return
-	}
-	log.Debug("DataNode address", zap.String("address", addr))
 
 	tracer := opentracing.GlobalTracer()
 	s.grpcServer = grpc.NewServer(
@@ -99,7 +89,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	defer cancel()
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
-	if err := s.grpcServer.Serve(lis); err != nil {
+	if err := s.grpcServer.Serve(listener); err != nil {
 		log.Warn("DataNode Start Grpc Failed!")
 		s.grpcErrChan <- err
 	}
@@ -159,9 +149,11 @@ func (s *Server) init() error {
 
 	closer := trace.InitTracing(fmt.Sprintf("data_node ip: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer
+	addr := Params.IP + ":" + strconv.Itoa(Params.Port)
+	log.Debug("DataNode address", zap.String("address", addr))
 
 	s.wg.Add(1)
-	go s.startGrpcLoop(Params.Port)
+	go s.startGrpcLoop(Params.listener)
 	// wait for grpc server loop start
 	err := <-s.grpcErrChan
 	if err != nil {

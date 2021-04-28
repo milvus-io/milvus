@@ -19,7 +19,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"go.uber.org/zap"
 )
 
 type ParamTable struct {
@@ -197,7 +196,6 @@ func (p *ParamTable) initMsgChannelSubName() {
 	if err != nil {
 		panic(err)
 	}
-	log.Error("datanode", zap.Int64("NodeID", p.NodeID))
 	p.MsgChannelSubName = name + "-" + strconv.FormatInt(p.NodeID, 10)
 }
 
