@@ -12,7 +12,6 @@
 
 nodeID: # will be deprecated later
   queryNodeIDList: [1]
-  dataNodeIDList: [3]
 
 etcd:
   address: localhost

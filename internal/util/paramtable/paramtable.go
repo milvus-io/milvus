@@ -329,23 +329,6 @@ func (gp *BaseTable) ParseInt(key string) int {
 	return value
 }
 
-func (gp *BaseTable) DataNodeIDList() []UniqueID {
-	datanodeIDStr, err := gp.Load("nodeID.dataNodeIDList")
-	if err != nil {
-		panic(err)
-	}
-	var ret []UniqueID
-	datanodeIDs := strings.Split(datanodeIDStr, ",")
-	for _, i := range datanodeIDs {
-		v, err := strconv.Atoi(i)
-		if err != nil {
-			log.Panicf("load write node id list error, %s", err.Error())
-		}
-		ret = append(ret, UniqueID(v))
-	}
-	return ret
-}
-
 func (gp *BaseTable) QueryNodeIDList() []UniqueID {
 	queryNodeIDStr, err := gp.Load("nodeID.queryNodeIDList")
 	if err != nil {

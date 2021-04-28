@@ -433,11 +433,6 @@ func TestChannel(t *testing.T) {
 		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentStatistics, 345))
 		err := statsStream.Produce(&msgPack)
 		assert.Nil(t, err)
-		time.Sleep(time.Second)
-
-		segInfo, err = svr.meta.GetSegment(segID)
-		assert.Nil(t, err)
-		assert.Equal(t, rowNum, segInfo.NumRows)
 	})
 
 	t.Run("Test SegmentFlushChannel", func(t *testing.T) {

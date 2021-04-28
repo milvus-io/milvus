@@ -59,7 +59,7 @@ cmake_build/
 *.log
 
 .DS_Store
-*.swp
+*.sw[po]
 cwrapper_build
 **/cwrapper_rocksdb_build/
 **/.clangd/*
