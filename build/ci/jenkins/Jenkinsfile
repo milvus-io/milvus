@@ -25,7 +25,7 @@ pipeline {
                 }
                 agent {
                     kubernetes {
-                        label: "milvus-e2e-test-kind"
+                        label "milvus-e2e-test-kind"
                         defaultContainer 'main'
                         yamlFile "build/ci/jenkins/pod/krte.yaml"
                         customWorkspace '/home/jenkins/agent/workspace'
