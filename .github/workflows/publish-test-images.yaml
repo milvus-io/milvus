@@ -6,13 +6,13 @@ on:
   push:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
-      - 'build/docker/test/Dockerfile'
+      - 'tests/docker/Dockerfile'
       - 'tests/python_test/requirements.txt'
       - '.github/workflows/publish-test-images.yaml'
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
-      - 'build/docker/test/Dockerfile'
+      - 'tests/docker/Dockerfile'
       - 'tests/python_test/requirements.txt'
       - '.github/workflows/publish-test-images.yaml'
 
@@ -29,7 +29,7 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           reporter: github-pr-check # Default is github-pr-check
-          hadolint_ignore: DL3008
+          hadolint_ignore: DL3008 SC1091 DL3013 DL3003
       - name: Get version from system time after release step
         id: extracter
         run: |
@@ -37,10 +37,11 @@ jobs:
           echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
       - name: Docker Build
         shell: bash
-        working-directory: tests/python_test
+        working-directory: tests/docker
         run: |
-          docker build -t milvusdb/pytest:${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} .
-          docker tag milvusdb/pytest:${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} milvusdb/pytest:latest
+          docker-compose pull --ignore-pull-failures pytest
+          TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} docker-compose build pytest
+          TAG=latest docker-compose build pytest
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
@@ -48,6 +49,6 @@ jobs:
         run: |
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
-          docker push milvusdb/pytest:${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}
-          docker push milvusdb/pytest:latest
-          echo "Push milvusdb/pytest:${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} Succeeded"
+          TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} docker-compose push pytest
+          TAG=latest docker-compose push pytest
+          echo "Push pytest image Succeeded"
