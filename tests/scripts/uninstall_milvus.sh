@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # Copyright (C) 2019-2020 Zilliz. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
@@ -9,10 +11,13 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-FROM python:3.6.8-jessie
+set -e
+set -x
 
-COPY ./requirements.txt /requirements.txt
+MILVUS_HELM_RELEASE_NAME="${MILVUS_HELM_RELEASE_NAME:-milvus-testing}"
+MILVUS_HELM_NAMESPACE="${MILVUS_HELM_NAMESPACE:-default}"
 
-RUN python3 -m pip install --no-cache-dir -r /requirements.txt
+helm uninstall -n "${MILVUS_HELM_NAMESPACE}" "${MILVUS_HELM_RELEASE_NAME}"
 
-CMD ["tail", "-f", "/dev/null"]
+MILVUS_LABELS="app.kubernetes.io/instance=${MILVUS_HELM_RELEASE_NAME}"
+kubectl delete pvc -n "${MILVUS_HELM_NAMESPACE}" $(kubectl get pvc -n "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{range.items[*]}{.metadata.name} ')
