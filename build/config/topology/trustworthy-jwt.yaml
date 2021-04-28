@@ -4,11 +4,29 @@ apiVersion: kind.x-k8s.io/v1alpha4
 networking:
   ipFamily: "ipv4"
   kubeProxyMode: "iptables"
+  podSubnet: "10.245.0.0/16"
+  serviceSubnet: "10.246.0.0/16"
 nodes:
 - role: control-plane
 - role: worker
 - role: worker
 kubeadmConfigPatches:
+  - |
+    apiVersion: kubeadm.k8s.io/v1beta2
+    kind: JoinConfiguration
+    metadata:
+      name: config
+    nodeRegistration:
+      kubeletExtraArgs:
+        cgroup-root: "/kubelet"
+  - |
+    apiVersion: kubeadm.k8s.io/v1beta2
+    kind: InitConfiguration
+    metadata:
+      name: config
+    nodeRegistration:
+      kubeletExtraArgs:
+        cgroup-root: "/kubelet"
   - |
     apiVersion: kubeadm.k8s.io/v1beta2
     kind: ClusterConfiguration
