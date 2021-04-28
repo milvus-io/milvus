@@ -6,7 +6,7 @@ if [[ ! -x "$(command -v apt)" ]]; then
     libboost-serialization-dev python3-dev libboost-python-dev libcurl4-openssl-dev gfortran libtbb-dev
 elif [[ ! -x "$(command -v yum)" ]]; then
     sudo yum install -y epel-release centos-release-scl-rh \
-      && yum install -y make automake openssl-devel zlib-devel tbb-devel \
+      && sudo yum install -y make automake openssl-devel zlib-devel tbb-devel \
       libcurl-devel python3-devel boost-devel boost-python \
       devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran \
       llvm-toolset-7.0-clang llvm-toolset-7.0-clang-tools-extra
