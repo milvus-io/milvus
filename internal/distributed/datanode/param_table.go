@@ -53,7 +53,9 @@ func (pt *ParamTable) LoadFromEnv() {
 }
 
 func (pt *ParamTable) initPort() {
-	if listener, err := net.Listen("tcp", ":0"); err != nil {
+
+	listener, err := net.Listen("tcp", ":0")
+	if err != nil {
 		panic(err)
 	}
 
