@@ -53,15 +53,12 @@ func (pt *ParamTable) LoadFromEnv() {
 }
 
 func (pt *ParamTable) initPort() {
-	for attempts := 3; attempts > 0; attempts-- {
-		if listener, err := net.Listen("tcp", ":0"); err == nil {
-			pt.Port = listener.Addr().(*net.TCPAddr).Port
-			pt.listener = listener
-			break
-		}
-		log.Error("Cannot get available port", zap.Int("attempts left", attempts))
+	if listener, err := net.Listen("tcp", ":0"); err != nil {
+		panic(err)
 	}
 
+	pt.Port = listener.Addr().(*net.TCPAddr).Port
+	pt.listener = listener
 	log.Info("DataNode", zap.Int("port", pt.Port))
 }
 
