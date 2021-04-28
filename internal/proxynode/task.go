@@ -1612,13 +1612,7 @@ func (dit *DescribeIndexTask) PreExecute(ctx context.Context) error {
 	dit.Base.MsgType = commonpb.MsgType_DescribeIndex
 	dit.Base.SourceID = Params.ProxyID
 
-	collName, fieldName := dit.CollectionName, dit.FieldName
-
-	if err := ValidateCollectionName(collName); err != nil {
-		return err
-	}
-
-	if err := ValidateFieldName(fieldName); err != nil {
+	if err := ValidateCollectionName(dit.CollectionName); err != nil {
 		return err
 	}
 
