@@ -2,7 +2,7 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 1.1.0 (TBD)
+# Milvus 1.1.0 (2021-04-29)
 ## Bug
 -   \#4778 Failed to open vector index in mishards
 -   \#4797 Wrong results returned for merged different 'topk' queries
@@ -10,7 +10,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#4858 Milvus crashed when query for a large topk(>2048) on GPU Flat
 -   \#4862 Read-only node should not merge segments at startup
 -   \#4894 The capacity of bloom filter should be determined by the row count of its segment
--   \#4908 GPU cache will not be cleaned up in time after the collection is dropped
+-   \#4908 GPU cache not cleaned up after the collection is dropped
 -   \#4933 Milvus waste time during building index for small segment
 -   \#4952 Failed to set timezone like "UTC + 5:30"
 -   \#5008 Randomly crash during continuous and concurrent delete, insert and search
@@ -19,12 +19,12 @@ Please mark all change in change log and use the issue from GitHub
 -   \#5063 Empty segment is serialized and crash milvus
 
 ## Feature
--   \#4564 Allow GetEntityByID in a specified partition
--   \#4806 Allow DeleteEntityByID in a specified partition
--   \#4905 Allow the collection to be released from the cache
+-   \#4564 Allow get_entity_by_id() in a specified partition
+-   \#4806 Allow delete_entity_by_id() in a specified partition
+-   \#4905 Add API release_collection() to unload collection from the cache
 
 ## Improvement
--   \#4756 Improve the performance of GetEntityByID
+-   \#4756 Improve the performance of get_entity_by_id()
 -   \#4856 Upgrade hnswlib to v0.5.0
 -   \#4958 Improve the performance of IVF index training 
 
