@@ -867,6 +867,13 @@ def gen_binary_index():
     return index_params
 
 
+def gen_normal_expressions():
+    expressions = [
+        "int64 > 0",
+    ]
+    return expressions
+
+
 def get_search_param(index_type, metric_type="L2"):
     search_params = {"metric_type": metric_type}
     if index_type in ivf() or index_type in binary_support():
