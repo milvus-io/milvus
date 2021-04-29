@@ -34,6 +34,7 @@ set(MILVUS_TEST_FILES
         test_load.cpp
         init_gtest.cpp
         test_init.cpp
+        test_plan_proto.cpp
         )
 
 add_executable(all_tests

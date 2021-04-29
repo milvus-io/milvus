@@ -12,7 +12,7 @@
 get_property(PROTOC_EXCUTABLE GLOBAL PROPERTY PROTOC_EXCUTABLE )
 
 
-set(proto_file_names common.proto etcd_meta.proto schema.proto milvus.proto index_cgo_msg.proto)
+set(proto_file_names common.proto etcd_meta.proto schema.proto milvus.proto index_cgo_msg.proto plan.proto)
 
 set( PROTO_PATH          "${MILVUS_SOURCE_DIR}/../proto/" )
 
