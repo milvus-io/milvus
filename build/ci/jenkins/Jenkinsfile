@@ -39,6 +39,9 @@ pipeline {
                     DOCKER_BUILDKIT = 1
                     DOCKER_VOLUME_DIRECTORY = "/mnt/disk/.docker"
                     ARTIFACTS = "${env.WORKSPACE}/artifacts"
+                    DOCKER_CREDENTIALS_ID = "ba070c98-c8cc-4f7c-b657-897715f359fc"
+                    DOKCER_REGISTRY_URL = "registry.zilliz.com"
+                    TARGET_REPO = "${DOKCER_REGISTRY_URL}/milvus"
                 }
                 stages {
                     stage('Test') {
@@ -64,6 +67,27 @@ pipeline {
                     }
                 }
                 post {
+                    success {
+                        container('main') {
+                            script {
+                                if ( env.CHANGE_ID == null ){
+                                    def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
+                                    def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+
+                                    withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+                                        sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${DOKCER_REGISTRY_URL}'
+                                        sh """
+                                            docker tag localhost:5000/milvus:latest ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-${date}-${gitShortCommit}
+                                            docker tag localhost:5000/milvus:latest ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-latest
+                                            docker push ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-${date}-${gitShortCommit}
+                                            docker push ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-latest
+                                        """
+                                        sh 'docker logout ${DOKCER_REGISTRY_URL}'
+                                    }
+                                }
+                            }
+                        }
+                    }
                     always {
                         container('main') {
                             script {
