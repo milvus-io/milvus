@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: milvus-e2e
+spec:
+  containers:
+  - name: main
+    image: registry.zilliz.com/milvus/krte:v20210414-bd36693
+    env:
+    - name: DOCKER_IN_DOCKER_ENABLED
+      value: "true"
+    securityContext:
+      privileged: true
+    tty: true
+    args: ["cat"]
+    resources:
+      limits:
+        memory: 14Gi
+        ephemeral-storage: "20Gi"
+      requests:
+        cpu: "4"
+        memory: 8Gi
+        ephemeral-storage: "20Gi"
+    volumeMounts:
+    - mountPath: /docker-graph
+      name: docker-graph
+    - mountPath: /var/lib/docker
+      name: docker-root
+    - mountPath: /lib/modules
+      name: modules
+      readOnly: true
+    - mountPath: /sys/fs/cgroup
+      name: cgroup
+    - mountPath: /mnt/disk/.docker
+      name: build-cache
+      subPath: docker-volume
+  volumes:
+  - emptyDir: {}
+    name: docker-graph
+  - emptyDir: {}
+    name: docker-root
+  - hostPath:
+      path: /tmp/krte/cache
+      type: DirectoryOrCreate
+    name: build-cache
+  - hostPath:
+      path: /lib/modules
+      type: Directory
+    name: modules
+  - hostPath:
+      path: /sys/fs/cgroup
+      type: Directory
+    name: cgroup
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+            - key: app
+              operator: In
+              values:
+              - milvus-e2e
+          topologyKey: kubernetes.io/hostname

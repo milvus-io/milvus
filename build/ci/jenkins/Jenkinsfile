@@ -1,5 +1,4 @@
 #!/usr/bin/env groovy
-@Library('mpl') _
 
 String cron_timezone = "TZ=Asia/Shanghai"
 String cron_string = BRANCH_NAME == "r0.3-test" ? "50 20,22,0,2,4,6,11,16 * * * " : ""
@@ -12,103 +11,75 @@ pipeline {
     }
     options {
         timestamps()
+        timeout(time: 1, unit: 'HOURS')
         // parallelsAlwaysFailFast()
     }
-    environment {
-        PROJECT_NAME = "milvus"
-        SEMVER = "${BRANCH_NAME.contains('/') ? BRANCH_NAME.substring(BRANCH_NAME.lastIndexOf('/') + 1) : BRANCH_NAME}"
-        BUILD_TYPE = "Release"
-        LOWER_BUILD_TYPE = BUILD_TYPE.toLowerCase()
-        PACKAGE_VERSION = "${SEMVER}-${LOWER_BUILD_TYPE}"
-        PACKAGE_NAME = "${PROJECT_NAME}-${PACKAGE_VERSION}.tar.gz"
-        JFROG_CREDENTIALS_ID = "1a527823-d2b7-44fd-834b-9844350baf14"
-        JFROG_ARTFACTORY_URL = "http://192.168.1.201/artifactory/milvus"
-        PACKAGE_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/${PROJECT_NAME}/package/${PACKAGE_NAME}"
-        DOCKER_CREDENTIALS_ID = "ba070c98-c8cc-4f7c-b657-897715f359fc"
-        DOKCER_REGISTRY_URL = "registry.zilliz.com"
-        SOURCE_REPO = "${DOKCER_REGISTRY_URL}/milvus"
-        TARGET_REPO = "${DOKCER_REGISTRY_URL}/milvus"
-        SOURCE_TAG = "${CHANGE_TARGET ? CHANGE_TARGET : SEMVER}-${LOWER_BUILD_TYPE}"
-        TARGET_TAG = "${SEMVER}-${LOWER_BUILD_TYPE}"
-        DOCKER_BUILDKIT = 1
-    }
     stages {
-        stage ('Build and UnitTest') {
-            agent {
-                kubernetes {
-                    label "${env.PROJECT_NAME}-${SEMVER}-${env.BUILD_NUMBER}-build"
-                    defaultContainer 'build-env'
-                    customWorkspace '/home/jenkins/agent/workspace'
-                    yamlFile "build/ci/jenkins/pod/build-env.yaml"
-                }
-            }
-            environment {
-                PULSAR_ADDRESS = "pulsar://127.0.0.1:6650"
-                ETCD_ADDRESS = "127.0.0.1:2379"
-                CCACHE_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/milvus/ccache"
-                THIRDPARTY_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/milvus/thirdparty"
-                CUSTOM_THIRDPARTY_PATH = "${WORKSPACE}/3rdparty_download"
-                GO_CACHE_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/milvus/go-cache"
-                GO_MOD_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/milvus/go-mod"
-            }
-            steps {
-                container('build-env') {
-                    MPLModule('Build')
-                    MPLModule('Package')
-                    // MPLModule('UnitTest')
-                }
-            }
-        }
-
-        stage ('Publish Docker Images') {
-            agent {
-                kubernetes {
-                    label "${env.PROJECT_NAME}-${SEMVER}-${env.BUILD_NUMBER}-publish"
-                    defaultContainer 'publish-images'
-                    yamlFile "build/ci/jenkins/pod/docker-pod.yaml"
-                }
-            }
-            steps {
-                container('publish-images') {
-                    MPLModule('Publish')
-                }
-            }
-        }
-
-        stage ('Dev Test') {
+        stage ('E2E Test') {
             matrix {
                 axes {
                     axis {
-                        name 'REGRESSION_SERVICE_TYPE'
+                        name 'MILVUS_SERVER_TYPE'
                         values 'standalone', 'distributed'
                     }
                 }
-                environment {
-                    HELM_BRANCH = "2.0"
-                    HELM_RELEASE_NAMESPACE = "dev"
-                    HELM_RELEASE_NAME = "${PROJECT_NAME}-${SEMVER}-${env.BUILD_NUMBER}-${REGRESSION_SERVICE_TYPE}".replaceAll("\\.", "-").replaceAll("_", "-").toLowerCase()
-                    DEV_TEST_ARTIFACTS_PATH = "artifacts"
-                }
                 agent {
                     kubernetes {
-                        label "${env.PROJECT_NAME}-${SEMVER}-${env.BUILD_NUMBER}-${REGRESSION_SERVICE_TYPE}-devtest"
-                        defaultContainer 'test-env'
-                        yamlFile "build/ci/jenkins/pod/test-env.yaml"
+                        label "milvus-e2e-test-kind"
+                        defaultContainer 'main'
+                        yamlFile "build/ci/jenkins/pod/krte.yaml"
+                        customWorkspace '/home/jenkins/agent/workspace'
+                        // We allow this pod to remain active for a while, later jobs can
+                        // reuse cache in previous created nodes.
+                        idleMinutes 120
                     }
+                }
+                environment {
+                    IMAGE_REPO = "registry.zilliz.com/milvus"
+                    DOCKER_BUILDKIT = 1
+                    DOCKER_VOLUME_DIRECTORY = "/mnt/disk/.docker"
+                    ARTIFACTS = "${env.WORKSPACE}/artifacts"
                 }
                 stages {
                     stage('Test') {
                         steps {
-                            MPLModule('Python Regression')
+                            container('main') {
+                                dir ('tests/scripts') {
+                                    script {
+                                        def standaloneEnabled = "true"
+                                        if ("${MILVUS_SERVER_TYPE}" == "distributed") {
+                                            standaloneEnabled = "false"
+                                        }
+
+                                        if (isTimeTriggeredBuild()) {
+                                            echo "This is Cron Job!"
+                                            sh "MILVUS_STANDALONE_ENABLED=${standaloneEnabled} ./e2e-k8s.sh --node-image registry.zilliz.com/kindest/node:v1.20.2"
+                                        } else {
+                                            sh "MILVUS_STANDALONE_ENABLED=${standaloneEnabled} ./e2e-k8s.sh --node-image registry.zilliz.com/kindest/node:v1.20.2 --test-extra-arg \"--tags=smoke\""
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
                 post {
-                    cleanup {
-                        MPLModule('Cleanup Python Regression')
+                    always {
+                        container('main') {
+                            script {
+                                dir("${env.ARTIFACTS}") {
+                                    sh "tar -zcvf artifacts-milvus-${MILVUS_SERVER_TYPE}-e2e-kind.tar.gz ./kind --remove-files || true"
+                                    archiveArtifacts artifacts: "artifacts-milvus-${MILVUS_SERVER_TYPE}-e2e-kind.tar.gz", allowEmptyArchive: true
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
+}
+
+boolean isTimeTriggeredBuild() {
+    return (currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0) ? true : false;
 }
