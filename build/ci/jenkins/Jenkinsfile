@@ -67,8 +67,10 @@ pipeline {
                     always {
                         container('main') {
                             script {
-                                sh "tar -zcvf artifacts-${MILVUS_SERVER_TYPE}.tar.gz ${env.ARTIFACTS} --remove-files || true"
-                                archiveArtifacts artifacts: "artifacts-${MILVUS_SERVER_TYPE}.tar.gz", allowEmptyArchive: true
+                                dir("${env.ARTIFACTS}") {
+                                    sh "tar -zcvf artifacts-milvus-${MILVUS_SERVER_TYPE}-e2e-kind.tar.gz ./kind --remove-files || true"
+                                    archiveArtifacts artifacts: "artifacts-milvus-${MILVUS_SERVER_TYPE}-e2e-kind.tar.gz", allowEmptyArchive: true
+                                }
                             }
                         }
                     }
