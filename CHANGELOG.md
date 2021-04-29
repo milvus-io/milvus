@@ -2,7 +2,7 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 1.1.0 (TBD)
+# Milvus 1.1.0 (2021-04-29)
 ## Bug
 -   \#4778 Failed to open vector index in mishards
 -   \#4797 Wrong results returned for merged different 'topk' queries
@@ -19,9 +19,9 @@ Please mark all change in change log and use the issue from GitHub
 -   \#5063 Empty segment is serialized and crash milvus
 
 ## Feature
--   \#4564 Allow GetEntityByID in a specified partition
--   \#4806 Allow DeleteEntityByID in a specified partition
--   \#4905 Allow the collection to be released from the cache
+-   \#4564 Allow get_entity_by_id() in a specified partition
+-   \#4806 Allow delete_entity_by_id() in a specified partition
+-   \#4905 Add API release_collection() to unload collection from the cache
 
 ## Improvement
 -   \#4756 Improve the performance of GetEntityByID
