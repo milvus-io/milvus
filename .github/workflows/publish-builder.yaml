@@ -6,12 +6,12 @@ on:
   push:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
-      - 'build/docker/env/**'
+      - 'build/docker/builder/**'
       - '.github/workflows/publish-builder.yaml'
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
-      - 'build/docker/env/**'
+      - 'build/docker/builder/**'
       - '.github/workflows/publish-builder.yaml'
 
 jobs:
@@ -33,7 +33,7 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           reporter: github-pr-check # Default is github-pr-check
-          hadolint_ignore: DL3008
+          hadolint_ignore: DL3008 SC1091 DL3013 DL3003
       - name: Get version from system time after release step
         id: extracter
         run: echo "::set-output name=version::$(date +%Y%m%d-%H%M%S)"
@@ -47,7 +47,7 @@ jobs:
           DATE_VERSION=${{ steps.extracter.outputs.version }} docker-compose build ubuntu
           DATE_VERSION=latest docker-compose build ubuntu
       - name: Docker Push
-        if: success() && github.event_name == 'push' && github.repository == 'zilliztech/milvus-distributed'
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
         shell: bash
         run: |

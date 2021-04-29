@@ -23,6 +23,9 @@ func TestParamTable(t *testing.T) {
 	assert.NotEqual(t, Params.Port, 0)
 	t.Logf("DataNode Port:%d", Params.Port)
 
+	assert.NotNil(t, Params.listener)
+	t.Logf("DataNode Port:%d", Params.Port)
+
 	assert.NotEqual(t, Params.DataServiceAddress, "")
 	t.Logf("DataServiceAddress:%s", Params.DataServiceAddress)
 

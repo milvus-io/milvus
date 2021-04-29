@@ -113,19 +113,19 @@ func newSegmentAllocator(meta *meta, allocator allocatorInterface, opts ...Optio
 	return alloc
 }
 
-func (allocator *segmentAllocator) OpenSegment(ctx context.Context, segmentInfo *datapb.SegmentInfo) error {
+func (s *segmentAllocator) OpenSegment(ctx context.Context, segmentInfo *datapb.SegmentInfo) error {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
-	allocator.mu.Lock()
-	defer allocator.mu.Unlock()
-	if _, ok := allocator.segments[segmentInfo.ID]; ok {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.segments[segmentInfo.ID]; ok {
 		return fmt.Errorf("segment %d already exist", segmentInfo.ID)
 	}
-	return allocator.open(segmentInfo)
+	return s.open(segmentInfo)
 }
 
-func (allocator *segmentAllocator) open(segmentInfo *datapb.SegmentInfo) error {
-	totalRows, err := allocator.estimateTotalRows(segmentInfo.CollectionID)
+func (s *segmentAllocator) open(segmentInfo *datapb.SegmentInfo) error {
+	totalRows, err := s.estimateTotalRows(segmentInfo.CollectionID)
 	if err != nil {
 		return err
 	}
@@ -133,7 +133,7 @@ func (allocator *segmentAllocator) open(segmentInfo *datapb.SegmentInfo) error {
 		zap.Int64("CollectionID", segmentInfo.CollectionID),
 		zap.Int64("SegmentID", segmentInfo.ID),
 		zap.Int("Rows", totalRows))
-	allocator.segments[segmentInfo.ID] = &segmentStatus{
+	s.segments[segmentInfo.ID] = &segmentStatus{
 		id:             segmentInfo.ID,
 		collectionID:   segmentInfo.CollectionID,
 		partitionID:    segmentInfo.PartitionID,
@@ -145,20 +145,20 @@ func (allocator *segmentAllocator) open(segmentInfo *datapb.SegmentInfo) error {
 	return nil
 }
 
-func (allocator *segmentAllocator) AllocSegment(ctx context.Context, collectionID UniqueID,
+func (s *segmentAllocator) AllocSegment(ctx context.Context, collectionID UniqueID,
 	partitionID UniqueID, channelName string, requestRows int) (segID UniqueID, retCount int, expireTime Timestamp, err error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
-	allocator.mu.Lock()
-	defer allocator.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	for _, segStatus := range allocator.segments {
+	for _, segStatus := range s.segments {
 		if segStatus.sealed || segStatus.collectionID != collectionID || segStatus.partitionID != partitionID ||
 			segStatus.insertChannel != channelName {
 			continue
 		}
 		var success bool
-		success, err = allocator.alloc(segStatus, requestRows)
+		success, err = s.alloc(segStatus, requestRows)
 		if err != nil {
 			return
 		}
@@ -172,12 +172,12 @@ func (allocator *segmentAllocator) AllocSegment(ctx context.Context, collectionI
 	}
 
 	var segStatus *segmentStatus
-	segStatus, err = allocator.openNewSegment(ctx, collectionID, partitionID, channelName)
+	segStatus, err = s.openNewSegment(ctx, collectionID, partitionID, channelName)
 	if err != nil {
 		return
 	}
 	var success bool
-	success, err = allocator.alloc(segStatus, requestRows)
+	success, err = s.alloc(segStatus, requestRows)
 	if err != nil {
 		return
 	}
@@ -192,12 +192,12 @@ func (allocator *segmentAllocator) AllocSegment(ctx context.Context, collectionI
 	return
 }
 
-func (allocator *segmentAllocator) alloc(segStatus *segmentStatus, numRows int) (bool, error) {
+func (s *segmentAllocator) alloc(segStatus *segmentStatus, numRows int) (bool, error) {
 	totalOfAllocations := 0
 	for _, allocation := range segStatus.allocations {
 		totalOfAllocations += allocation.rowNums
 	}
-	segMeta, err := allocator.mt.GetSegment(segStatus.id)
+	segMeta, err := s.mt.GetSegment(segStatus.id)
 	if err != nil {
 		return false, err
 	}
@@ -209,12 +209,12 @@ func (allocator *segmentAllocator) alloc(segStatus *segmentStatus, numRows int) 
 		return false, nil
 	}
 
-	ts, err := allocator.allocator.allocTimestamp()
+	ts, err := s.allocator.allocTimestamp()
 	if err != nil {
 		return false, err
 	}
 	physicalTs, logicalTs := tsoutil.ParseTS(ts)
-	expirePhysicalTs := physicalTs.Add(time.Duration(allocator.segmentExpireDuration) * time.Millisecond)
+	expirePhysicalTs := physicalTs.Add(time.Duration(s.segmentExpireDuration) * time.Millisecond)
 	expireTs := tsoutil.ComposeTS(expirePhysicalTs.UnixNano()/int64(time.Millisecond), int64(logicalTs))
 	segStatus.lastExpireTime = expireTs
 	segStatus.allocations = append(segStatus.allocations, &allocation{
@@ -225,10 +225,10 @@ func (allocator *segmentAllocator) alloc(segStatus *segmentStatus, numRows int) 
 	return true, nil
 }
 
-func (allocator *segmentAllocator) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string) (*segmentStatus, error) {
+func (s *segmentAllocator) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string) (*segmentStatus, error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
-	id, err := allocator.allocator.allocID()
+	id, err := s.allocator.allocID()
 	if err != nil {
 		return nil, err
 	}
@@ -236,10 +236,10 @@ func (allocator *segmentAllocator) openNewSegment(ctx context.Context, collectio
 	if err != nil {
 		return nil, err
 	}
-	if err = allocator.mt.AddSegment(segmentInfo); err != nil {
+	if err = s.mt.AddSegment(segmentInfo); err != nil {
 		return nil, err
 	}
-	if err = allocator.open(segmentInfo); err != nil {
+	if err = s.open(segmentInfo); err != nil {
 		return nil, err
 	}
 	infoMsg := &msgstream.SegmentInfoMsg{
@@ -259,16 +259,16 @@ func (allocator *segmentAllocator) openNewSegment(ctx context.Context, collectio
 	msgPack := &msgstream.MsgPack{
 		Msgs: []msgstream.TsMsg{infoMsg},
 	}
-	if allocator.segmentInfoStream != nil {
-		if err = allocator.segmentInfoStream.Produce(msgPack); err != nil {
+	if s.segmentInfoStream != nil {
+		if err = s.segmentInfoStream.Produce(msgPack); err != nil {
 			return nil, err
 		}
 	}
-	return allocator.segments[segmentInfo.ID], nil
+	return s.segments[segmentInfo.ID], nil
 }
 
-func (allocator *segmentAllocator) estimateTotalRows(collectionID UniqueID) (int, error) {
-	collMeta, err := allocator.mt.GetCollection(collectionID)
+func (s *segmentAllocator) estimateTotalRows(collectionID UniqueID) (int, error) {
+	collMeta, err := s.mt.GetCollection(collectionID)
 	if err != nil {
 		return -1, err
 	}
@@ -276,19 +276,25 @@ func (allocator *segmentAllocator) estimateTotalRows(collectionID UniqueID) (int
 	if err != nil {
 		return -1, err
 	}
-	return int(allocator.segmentThreshold / float64(sizePerRecord)), nil
+	return int(s.segmentThreshold / float64(sizePerRecord)), nil
 }
 
-func (allocator *segmentAllocator) GetSealedSegments(ctx context.Context) ([]UniqueID, error) {
+func (s *segmentAllocator) GetSealedSegments(ctx context.Context) ([]UniqueID, error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
-	allocator.mu.Lock()
-	defer allocator.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	keys := make([]UniqueID, 0)
-	for _, segStatus := range allocator.segments {
+	for _, segStatus := range s.segments {
 		if !segStatus.sealed {
-			sealed, err := allocator.checkSegmentSealed(segStatus)
+			sealed, err := s.checkSegmentSealed(segStatus)
 			if err != nil {
+				return nil, err
+			}
+			if !sealed {
+				continue
+			}
+			if err := s.sealSegmentInMeta(segStatus.id); err != nil {
 				return nil, err
 			}
 			segStatus.sealed = sealed
@@ -300,50 +306,62 @@ func (allocator *segmentAllocator) GetSealedSegments(ctx context.Context) ([]Uni
 	return keys, nil
 }
 
-func (allocator *segmentAllocator) checkSegmentSealed(segStatus *segmentStatus) (bool, error) {
-	segMeta, err := allocator.mt.GetSegment(segStatus.id)
+func (s *segmentAllocator) checkSegmentSealed(segStatus *segmentStatus) (bool, error) {
+	segMeta, err := s.mt.GetSegment(segStatus.id)
 	if err != nil {
 		return false, err
 	}
-	return float64(segMeta.NumRows) >= allocator.segmentThresholdFactor*float64(segStatus.total), nil
+	return float64(segMeta.NumRows) >= s.segmentThresholdFactor*float64(segStatus.total), nil
 }
 
-func (allocator *segmentAllocator) SealSegment(ctx context.Context, segmentID UniqueID) error {
+func (s *segmentAllocator) SealSegment(ctx context.Context, segmentID UniqueID) error {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
-	allocator.mu.Lock()
-	defer allocator.mu.Unlock()
-	status, ok := allocator.segments[segmentID]
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	status, ok := s.segments[segmentID]
 	if !ok {
 		return nil
+	}
+
+	if err := s.sealSegmentInMeta(segmentID); err != nil {
+		return err
 	}
 	status.sealed = true
 	return nil
 }
 
-func (allocator *segmentAllocator) HasSegment(ctx context.Context, segmentID UniqueID) bool {
+func (s *segmentAllocator) HasSegment(ctx context.Context, segmentID UniqueID) bool {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
-	allocator.mu.Lock()
-	defer allocator.mu.Unlock()
-	_, ok := allocator.segments[segmentID]
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.segments[segmentID]
 	return ok
 }
 
-func (allocator *segmentAllocator) DropSegment(ctx context.Context, segmentID UniqueID) {
-	sp, _ := trace.StartSpanFromContext(ctx)
-	defer sp.Finish()
-	allocator.mu.Lock()
-	defer allocator.mu.Unlock()
-	delete(allocator.segments, segmentID)
+func (s *segmentAllocator) sealSegmentInMeta(id UniqueID) error {
+	ts, err := s.allocator.allocTimestamp()
+	if err != nil {
+		return err
+	}
+	return s.mt.SealSegment(id, ts)
 }
 
-func (allocator *segmentAllocator) ExpireAllocations(ctx context.Context, timeTick Timestamp) error {
+func (s *segmentAllocator) DropSegment(ctx context.Context, segmentID UniqueID) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
-	allocator.mu.Lock()
-	defer allocator.mu.Unlock()
-	for _, segStatus := range allocator.segments {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.segments, segmentID)
+}
+
+func (s *segmentAllocator) ExpireAllocations(ctx context.Context, timeTick Timestamp) error {
+	sp, _ := trace.StartSpanFromContext(ctx)
+	defer sp.Finish()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, segStatus := range s.segments {
 		for i := 0; i < len(segStatus.allocations); i++ {
 			if timeTick < segStatus.allocations[i].expireTime {
 				continue
@@ -358,24 +376,24 @@ func (allocator *segmentAllocator) ExpireAllocations(ctx context.Context, timeTi
 	return nil
 }
 
-func (allocator *segmentAllocator) IsAllocationsExpired(ctx context.Context, segmentID UniqueID, ts Timestamp) (bool, error) {
+func (s *segmentAllocator) IsAllocationsExpired(ctx context.Context, segmentID UniqueID, ts Timestamp) (bool, error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
-	allocator.mu.RLock()
-	defer allocator.mu.RUnlock()
-	status, ok := allocator.segments[segmentID]
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	status, ok := s.segments[segmentID]
 	if !ok {
 		return false, fmt.Errorf("segment %d not found", segmentID)
 	}
 	return status.lastExpireTime <= ts, nil
 }
 
-func (allocator *segmentAllocator) SealAllSegments(ctx context.Context, collectionID UniqueID) {
+func (s *segmentAllocator) SealAllSegments(ctx context.Context, collectionID UniqueID) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
-	allocator.mu.Lock()
-	defer allocator.mu.Unlock()
-	for _, status := range allocator.segments {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, status := range s.segments {
 		if status.collectionID == collectionID {
 			if status.sealed {
 				continue

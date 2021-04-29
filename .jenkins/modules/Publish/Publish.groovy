@@ -8,21 +8,18 @@ withCredentials([usernamePassword(credentialsId: "${env.JFROG_CREDENTIALS_ID}", 
 
 sh 'tar zxvf ${PACKAGE_NAME}'
 
-dir ('build/docker/deploy') {
-	try {
-        withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
-            sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${DOKCER_REGISTRY_URL}'
+try {
+    withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+        sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${DOKCER_REGISTRY_URL}'
 
-            sh 'docker pull registry.zilliz.com/milvus-distributed/milvus-distributed-dev:latest || true'
-            sh 'docker pull ${SOURCE_REPO}/milvus-distributed:${SOURCE_TAG} || true'
-            sh 'docker-compose build --force-rm master'
-            sh 'docker-compose push master'
-        }
-    } catch (exc) {
-        throw exc
-    } finally {
-        sh 'docker logout ${DOKCER_REGISTRY_URL}'
-        sh "docker rmi -f \$(docker images | grep '<none>' | awk '{print \$3}') || true"
-        sh 'docker-compose down --rmi all'
+        sh 'docker pull registry.zilliz.com/milvus/openblas:latest || true'
+        sh "docker build -f build/docker/milvus/Dockerfile -t ${TARGET_REPO}/milvus:${TARGET_TAG} ."
+        sh "docker push ${TARGET_REPO}/milvus:${TARGET_TAG}"
     }
+} catch (exc) {
+    throw exc
+} finally {
+    sh 'docker logout ${DOKCER_REGISTRY_URL}'
+    sh "docker rmi -f \$(docker images | grep '<none>' | awk '{print \$3}') || true"
+    sh "docker rmi ${TARGET_REPO}/milvus:${TARGET_TAG}"
 }

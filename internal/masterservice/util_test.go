@@ -68,3 +68,25 @@ func Test_GetFieldSchemaByID(t *testing.T) {
 	_, err = GetFieldSchemaByID(coll, 2)
 	assert.NotNil(t, err)
 }
+
+func Test_GetFieldSchemaByIndexID(t *testing.T) {
+	coll := &etcdpb.CollectionInfo{
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID: 1,
+				},
+			},
+		},
+		FieldIndexes: []*etcdpb.FieldIndexInfo{
+			{
+				FiledID: 1,
+				IndexID: 2,
+			},
+		},
+	}
+	_, err := GetFieldSchemaByIndexID(coll, 2)
+	assert.Nil(t, err)
+	_, err = GetFieldSchemaByIndexID(coll, 3)
+	assert.NotNil(t, err)
+}

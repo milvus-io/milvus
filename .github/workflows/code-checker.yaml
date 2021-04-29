@@ -30,7 +30,7 @@ on:
 
 jobs:
   ubuntu:
-    name: AMD64 Ubuntu ${{ matrix.ubuntu }}
+    name: Code Checker AMD64 Ubuntu ${{ matrix.ubuntu }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -59,7 +59,7 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           reporter: github-pr-check # Default is github-pr-check
-          hadolint_ignore: DL3008
+          hadolint_ignore: DL3008 SC1091 DL3013 DL3003
       - name: Code Check
         env:
           CHECK_BUILDER: "1"

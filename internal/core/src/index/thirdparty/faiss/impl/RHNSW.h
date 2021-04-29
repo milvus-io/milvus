@@ -222,7 +222,6 @@ struct RHNSW {
 
   std::priority_queue<Node, std::vector<Node>, CompareByFirst>
   search_layer (DistanceComputer& ptdis,
-                storage_idx_t pt_id,
                 storage_idx_t nearest,
                 int level);
 
@@ -233,10 +232,10 @@ struct RHNSW {
                      float d_nearest,
                      const BitsetView bitset = nullptr) const;
 
-  void make_connection(DistanceComputer& ptdis,
-                       storage_idx_t pt_id,
-                       std::priority_queue<Node, std::vector<Node>, CompareByFirst> &cand,
-                       int level);
+  int make_connection(DistanceComputer& ptdis,
+                      storage_idx_t pt_id,
+                      std::priority_queue<Node, std::vector<Node>, CompareByFirst> &cand,
+                      int level);
 
   void prune_neighbors(DistanceComputer& ptdis,
                        std::priority_queue<Node, std::vector<Node>, CompareByFirst> &cand,

@@ -218,22 +218,6 @@ func (meta *meta) GetSegment(segID UniqueID) (*datapb.SegmentInfo, error) {
 	return proto.Clone(segment).(*datapb.SegmentInfo), nil
 }
 
-func (meta *meta) OpenSegment(segmentID UniqueID, timetick Timestamp) error {
-	meta.Lock()
-	defer meta.Unlock()
-
-	segInfo, ok := meta.segments[segmentID]
-	if !ok {
-		return newErrSegmentNotFound(segmentID)
-	}
-
-	segInfo.OpenTime = timetick
-	if err := meta.saveSegmentInfo(segInfo); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (meta *meta) SealSegment(segID UniqueID, timetick Timestamp) error {
 	meta.Lock()
 	defer meta.Unlock()
@@ -244,6 +228,7 @@ func (meta *meta) SealSegment(segID UniqueID, timetick Timestamp) error {
 	}
 
 	segInfo.SealedTime = timetick
+	segInfo.State = commonpb.SegmentState_Sealed
 	if err := meta.saveSegmentInfo(segInfo); err != nil {
 		return err
 	}
@@ -260,21 +245,6 @@ func (meta *meta) FlushSegment(segID UniqueID, timetick Timestamp) error {
 	}
 	segInfo.FlushedTime = timetick
 	segInfo.State = commonpb.SegmentState_Flushed
-	if err := meta.saveSegmentInfo(segInfo); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (meta *meta) SetSegmentState(segmentID UniqueID, state commonpb.SegmentState) error {
-	meta.Lock()
-	defer meta.Unlock()
-
-	segInfo, ok := meta.segments[segmentID]
-	if !ok {
-		return newErrSegmentNotFound(segmentID)
-	}
-	segInfo.State = state
 	if err := meta.saveSegmentInfo(segInfo); err != nil {
 		return err
 	}
