@@ -7,26 +7,13 @@ toplevel=$(dirname "$(cd "$(dirname "${0}")"; pwd)")
 
 pushd "${toplevel}"
 
-if [ "${1-}" = "pull" ]; then
+if [[ "${1-}" == "pull" ]]; then
     docker-compose pull --ignore-pull-failures ubuntu
     # docker-compose pull --ignore-pull-failures gdbserver
     exit 0
 fi
 
-# if [ "${1-}" = "gdbserver" ]; then
-#     mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-gdbserver-home"
-#     chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
-#
-#     docker-compose pull --ignore-pull-failures gdbserver
-#     if [ "${CHECK_BUILDER:-}" == "1" ]; then
-#         DATE_VERSION=latest docker-compose pull --ignore-pull-failures gdbserver
-#         docker-compose build gdbserver
-#     fi
-#     docker-compose up -d gdbserver
-#     exit 0
-# fi
-
-if [ "${1-}" = "down" ]; then
+if [[ "${1-}" == "down" ]]; then
     docker-compose down
     exit 0
 fi
@@ -49,10 +36,15 @@ mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-go-mod"
 chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
 
 docker-compose pull --ignore-pull-failures ubuntu
-if [ "${CHECK_BUILDER:-}" == "1" ]; then
+if [[ "${CHECK_BUILDER:-}" == "1" ]]; then
     DATE_VERSION=latest docker-compose pull --ignore-pull-failures ubuntu
     docker-compose build ubuntu
 fi
-docker-compose run --rm -u "$uid:$gid" ubuntu "$@"
+
+if [[ "$(id -u)" != "0" ]]; then
+    docker-compose run --rm -u "$uid:$gid" ubuntu "$@"
+else
+    docker-compose run --rm --entrypoint "/tini --" ubuntu "$@"
+fi
 
 popd

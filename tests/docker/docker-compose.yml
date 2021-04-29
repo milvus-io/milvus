@@ -2,12 +2,12 @@ version: '3.5'
 
 services:
   pytest:
-    image: ${REPO}:${TAG}
+    image: ${IMAGE_REPO}/pytest:${IMAGE_TAG}
     build:
       context: ..
       dockerfile: ./docker/Dockerfile
       cache_from:
-        - ${REPO}:latest
+        - ${IMAGE_REPO}/pytest:latest
     shm_size: 2G
     environment:
       SERVICE_IP: ${SERVICE_IP}
