@@ -10,7 +10,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#4858 Milvus crashed when query for a large topk(>2048) on GPU Flat
 -   \#4862 Read-only node should not merge segments at startup
 -   \#4894 The capacity of bloom filter should be determined by the row count of its segment
--   \#4908 GPU cache will not be cleaned up in time after the collection is dropped
+-   \#4908 GPU cache not cleaned up after the collection is dropped
 -   \#4933 Milvus waste time during building index for small segment
 -   \#4952 Failed to set timezone like "UTC + 5:30"
 -   \#5008 Randomly crash during continuous and concurrent delete, insert and search
