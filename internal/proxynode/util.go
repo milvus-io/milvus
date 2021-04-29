@@ -13,16 +13,17 @@ package proxynode
 
 import (
 	"encoding/json"
+	"errors"
 	"io/ioutil"
 	"net/http"
 	"strconv"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
@@ -91,4 +92,14 @@ func CheckStrByValues(params map[string]string, key string, container []string) 
 	}
 
 	return funcutil.SliceContain(container, value)
+}
+
+func GetAttrByKeyFromRepeatedKV(key string, kvs []*commonpb.KeyValuePair) (string, error) {
+	for _, kv := range kvs {
+		if kv.Key == key {
+			return kv.Value, nil
+		}
+	}
+
+	return "", errors.New("key " + key + " not found")
 }

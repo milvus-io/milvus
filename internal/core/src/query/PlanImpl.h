@@ -52,6 +52,8 @@ struct Plan {
     std::unique_ptr<VectorPlanNode> plan_node_;
     std::map<std::string, FieldOffset> tag2field_;  // PlaceholderName -> FieldOffset
     std::vector<FieldOffset> target_entries_;
+    void
+    check_identical(Plan& other);
 
  public:
     std::optional<ExtractedPlanInfo> extra_info_opt_;
@@ -77,6 +79,8 @@ struct Placeholder {
         return reinterpret_cast<T*>(blob_.data());
     }
 };
+
+using PlanPtr = std::unique_ptr<Plan>;
 
 struct PlaceholderGroup : std::vector<Placeholder> {
     using std::vector<Placeholder>::vector;

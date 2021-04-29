@@ -20,16 +20,8 @@
 namespace milvus::query {
 class PlanNodeVisitor;
 
-enum class PlanNodeType {
-    kInvalid = 0,
-    kScan,
-    kANNS,
-};
-
 // Base of all Nodes
 struct PlanNode {
-    PlanNodeType node_type;
-
  public:
     virtual ~PlanNode() = default;
     virtual void

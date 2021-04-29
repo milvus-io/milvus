@@ -33,6 +33,7 @@ mkdir -p proxypb
 mkdir -p indexpb
 mkdir -p datapb
 mkdir -p querypb
+mkdir -p planpb
 
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./commonpb common.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./schemapb schema.proto
@@ -49,5 +50,6 @@ ${protoc} --go_out=plugins=grpc,paths=source_relative:./proxypb proxy_service.pr
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./indexpb index_service.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./datapb data_service.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./querypb query_service.proto
+${protoc} --go_out=plugins=grpc,paths=source_relative:./planpb plan.proto
 
 popd
