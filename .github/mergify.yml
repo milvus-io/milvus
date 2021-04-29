@@ -34,7 +34,7 @@ pull_request_rules:
   - name: Warn on width limit exceeded
     conditions:
       - base=master
-      - -body~=[^\n]{72,}
+      - body~=[^\n]{72,}
     actions:
         comment:
             message: |
