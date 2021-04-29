@@ -20,11 +20,15 @@ import (
 func TestParamTable(t *testing.T) {
 	Params.Init()
 
+	Params.LoadFromEnv()
+	assert.NotEqual(t, Params.IP, "")
+	t.Logf("DataNode IP:%s", Params.IP)
+
 	assert.NotEqual(t, Params.Port, 0)
 	t.Logf("DataNode Port:%d", Params.Port)
 
 	assert.NotNil(t, Params.listener)
-	t.Logf("DataNode Port:%d", Params.Port)
+	t.Logf("DataNode listener:%d", Params.listener)
 
 	assert.NotEqual(t, Params.DataServiceAddress, "")
 	t.Logf("DataServiceAddress:%s", Params.DataServiceAddress)
