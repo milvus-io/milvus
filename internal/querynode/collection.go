@@ -52,7 +52,7 @@ func (c *Collection) addPartitionID(partitionID UniqueID) {
 func (c *Collection) removePartitionID(partitionID UniqueID) {
 	tmpIDs := make([]UniqueID, 0)
 	for _, id := range c.partitionIDs {
-		if id == partitionID {
+		if id != partitionID {
 			tmpIDs = append(tmpIDs, id)
 		}
 	}

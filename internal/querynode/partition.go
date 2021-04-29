@@ -46,7 +46,7 @@ func (p *Partition) addSegmentID(segmentID UniqueID) {
 func (p *Partition) removeSegmentID(segmentID UniqueID) {
 	tmpIDs := make([]UniqueID, 0)
 	for _, id := range p.segmentIDs {
-		if id == segmentID {
+		if id != segmentID {
 			tmpIDs = append(tmpIDs, id)
 		}
 	}
