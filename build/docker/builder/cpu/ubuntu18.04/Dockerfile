@@ -9,13 +9,7 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-FROM ubuntu:bionic-20200921
-
-# pipefail is enabled for proper error detection in the `wget | apt-key add`
-# step
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
-ENV DEBIAN_FRONTEND noninteractive
+FROM milvusdb/openblas:ubuntu18.04-20210428
 
 RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 && \
     wget -qO- "https://cmake.org/files/v3.14/cmake-3.14.3-Linux-x86_64.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
@@ -23,14 +17,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
     g++ gcc gfortran git make ccache libssl-dev zlib1g-dev libboost-regex-dev libboost-program-options-dev libboost-system-dev libboost-filesystem-dev libboost-serialization-dev python3-dev libboost-python-dev libcurl4-openssl-dev libtbb-dev clang-format-10 clang-tidy-10 lcov && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
-
-# Install OpenBlas Library
-RUN wget https://github.com/xianyi/OpenBLAS/archive/v0.3.9.tar.gz && \
-    tar zxvf v0.3.9.tar.gz && cd OpenBLAS-0.3.9 && \
-    make TARGET=CORE2 DYNAMIC_ARCH=1 DYNAMIC_OLDER=1 USE_THREAD=0 USE_OPENMP=0 FC=gfortran CC=gcc COMMON_OPT="-O3 -g -fPIC" FCOMMON_OPT="-O3 -g -fPIC -frecursive" NMAX="NUM_THREADS=128" LIBPREFIX="libopenblas" LAPACKE="NO_LAPACKE=1" INTERFACE64=0 NO_STATIC=1 && \
-    make PREFIX=/usr NO_STATIC=1 install && \
-    cd .. && rm -rf OpenBLAS-0.3.9 && rm v0.3.9.tar.gz
-ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/lib"
 
 # Install Go
 ENV GOPATH /go
