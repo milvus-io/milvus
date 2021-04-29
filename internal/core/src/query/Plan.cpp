@@ -18,11 +18,13 @@
 #include "pb/milvus.pb.h"
 #include <vector>
 #include <memory>
-#include <boost/align/aligned_allocator.hpp>
 #include <boost/algorithm/string.hpp>
 #include <algorithm>
 #include "query/generated/VerifyPlanNodeVisitor.h"
 #include "query/generated/ExtractInfoPlanNodeVisitor.h"
+#include <google/protobuf/text_format.h>
+#include "query/PlanProto.h"
+#include "query/generated/ShowPlanNodeVisitor.h"
 
 namespace milvus::query {
 
@@ -47,7 +49,7 @@ class Parser {
 
  private:
     std::unique_ptr<Plan>
-    CreatePlanImpl(const std::string& dsl_str);
+    CreatePlanImpl(const Json& dsl);
 
     explicit Parser(const Schema& schema) : schema(schema) {
     }
@@ -131,8 +133,7 @@ Parser::ParseRangeNode(const Json& out_body) {
 }
 
 std::unique_ptr<Plan>
-Parser::CreatePlanImpl(const std::string& dsl_str) {
-    auto dsl = Json::parse(dsl_str);
+Parser::CreatePlanImpl(const Json& dsl) {
     auto bool_dsl = dsl.at("bool");
     auto predicate = ParseAnyNode(bool_dsl);
     Assert(vector_node_opt_.has_value());
@@ -316,7 +317,17 @@ ParsePlaceholderGroup(const Plan* plan, const std::string& blob) {
 
 std::unique_ptr<Plan>
 CreatePlan(const Schema& schema, const std::string& dsl_str) {
-    auto plan = Parser(schema).CreatePlanImpl(dsl_str);
+    Json dsl;
+    try {
+        dsl = json::parse(dsl_str);
+    } catch (std::exception& e) {
+        // assume protobuf text format
+        proto::plan::PlanNode plan_node;
+        auto ok = google::protobuf::TextFormat::ParseFromString(dsl_str, &plan_node);
+        AssertInfo(ok, "Failed to parse");
+        return ProtoParser(schema).CreatePlan(plan_node);
+    }
+    auto plan = Parser(schema).CreatePlanImpl(dsl);
     return plan;
 }
 
@@ -466,6 +477,21 @@ GetTopK(const Plan* plan) {
 int64_t
 GetNumOfQueries(const PlaceholderGroup* group) {
     return group->at(0).num_of_queries_;
+}
+
+void
+Plan::check_identical(Plan& other) {
+    Assert(&schema_ == &other.schema_);
+    auto json = ShowPlanNodeVisitor().call_child(*this->plan_node_);
+    auto other_json = ShowPlanNodeVisitor().call_child(*other.plan_node_);
+    std::cout << json.dump(2) << std::endl << other_json.dump(2) << std::endl;
+    Assert(json.dump(2) == other_json.dump(2));
+    Assert(this->extra_info_opt_.has_value() == other.extra_info_opt_.has_value());
+    if (this->extra_info_opt_.has_value()) {
+        Assert(this->extra_info_opt_->involved_fields_ == other.extra_info_opt_->involved_fields_);
+    }
+    Assert(this->tag2field_ == other.tag2field_);
+    Assert(this->target_entries_ == other.target_entries_);
 }
 
 }  // namespace milvus::query

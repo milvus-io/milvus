@@ -3,10 +3,15 @@ package proxynode
 import (
 	"testing"
 
+	ant_ast "github.com/antonmedv/expr/ast"
+	ant_parser "github.com/antonmedv/expr/parser"
+
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/stretchr/testify/assert"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func newTestSchema() *schemapb.CollectionSchema {
@@ -24,7 +29,9 @@ func newTestSchema() *schemapb.CollectionSchema {
 
 func TestParseQueryExpr_Naive(t *testing.T) {
 	exprStr := "int64Field > 3"
-	schema := newTestSchema()
+	schemaPb := newTestSchema()
+	schema, err := typeutil.CreateSchemaHelper(schemaPb)
+	assert.Nil(t, err)
 	exprProto, err := parseQueryExpr(schema, &exprStr)
 	assert.Nil(t, err)
 	str := proto.MarshalTextString(exprProto)
@@ -47,4 +54,16 @@ func TestParsePlanNode_Naive(t *testing.T) {
 	assert.Nil(t, err)
 	dbgStr := proto.MarshalTextString(planProto)
 	println(dbgStr)
+}
+
+func TestExternalParser(t *testing.T) {
+	ast, err := ant_parser.Parse("!(1 < a < 2 or b in [1, 2, 3]) or (c < 3 and b > 5) or ")
+
+	var node ant_ast.Node = nil
+	if node == nil {
+		// TODO
+	}
+	assert.Nil(t, err)
+
+	println(ast.Node.Location().Column)
 }

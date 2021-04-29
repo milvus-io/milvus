@@ -19,9 +19,13 @@ message QueryInfo {
   string search_params = 4;
 }
 
-message RangeExpr {
+message ColumnInfo {
   int64 field_id = 1;
   schema.DataType data_type = 2;
+}
+
+message RangeExpr {
+  ColumnInfo column_info = 1;
   enum OpType {
     Invalid = 0;
     GreaterThan = 1;
@@ -31,13 +35,38 @@ message RangeExpr {
     Equal = 5;
     NotEqual = 6;
   };
-  repeated OpType ops = 3;
-  repeated GenericValue values = 4;
+  repeated OpType ops = 2;
+  repeated GenericValue values = 3;
+}
+
+message TermExpr {
+  ColumnInfo column_info = 1;
+  repeated GenericValue values = 2;
+}
+
+message UnaryExpr {
+  enum UnaryOp{
+    Invalid = 0;
+    Not = 1;
+  };
+  UnaryOp op = 1;
+  Expr child = 2;
+}
+
+message BinaryExpr {
+  enum BinaryOp {
+    Invalid = 0;
+    LogicalAnd = 1;
+    LogicalOr = 2;
+  }
 }
 
 message Expr {
   oneof expr {
     RangeExpr range_expr = 1;
+    TermExpr term_expr = 2;
+    UnaryExpr unary_expr = 3;
+    BinaryExpr binary_expr = 4;
   };
 }
 

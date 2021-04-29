@@ -14,17 +14,16 @@ package proxynode
 import (
 	"encoding/json"
 	"errors"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"io/ioutil"
 	"net/http"
 	"strconv"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
