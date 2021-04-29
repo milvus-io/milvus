@@ -24,7 +24,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#4905 Add API release_collection() to unload collection from the cache
 
 ## Improvement
--   \#4756 Improve the performance of GetEntityByID
+-   \#4756 Improve the performance of get_entity_by_id()
 -   \#4856 Upgrade hnswlib to v0.5.0
 -   \#4958 Improve the performance of IVF index training 
 
