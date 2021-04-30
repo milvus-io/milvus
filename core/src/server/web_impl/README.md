@@ -406,7 +406,7 @@ Creates a collection.
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -672,7 +672,7 @@ Updates the index type and nlist of a collection.
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -1107,7 +1107,7 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables/{table_name}/vectors</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections/{collection_name}/vectors</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -1179,7 +1179,7 @@ $ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/vectors" -H "a
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables/{table_name}/vectors</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections/{collection_name}/vectors</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -1237,7 +1237,7 @@ Inserts vectors to a collection.
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables/{table_name}/vectors</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections/{collection_name}/vectors</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -1613,37 +1613,37 @@ For detailed information about the parameters above, refer to [Milvus Indexes](h
 
 The RESTful API returns error messages as JSON text. Each type of error message has a specific error code.
 
-| Type                  | Code |
-| --------------------- | ---- |
-| SUCCESS               | 0    |
-| UNEXPECTED_ERROR      | 1    |
-| CONNECT_FAILED        | 2    |
-| PERMISSION_DENIED     | 3    |
-| TABLE_NOT_EXISTS      | 4    |
-| ILLEGAL_ARGUMENT      | 5    |
-| ILLEGAL_RANGE         | 6    |
-| ILLEGAL_DIMENSION     | 7    |
-| ILLEGAL_INDEX_TYPE    | 8    |
-| ILLEGAL_TABLE_NAME    | 9    |
-| ILLEGAL_TOPK          | 10   |
-| ILLEGAL_ROWRECORD     | 11   |
-| ILLEGAL_VECTOR_ID     | 12   |
-| ILLEGAL_SEARCH_RESULT | 13   |
-| FILE_NOT_FOUND        | 14   |
-| META_FAILED           | 15   |
-| CACHE_FAILED          | 16   |
-| CANNOT_CREATE_FOLDER  | 17   |
-| CANNOT_CREATE_FILE    | 18   |
-| CANNOT_DELETE_FOLDER  | 19   |
-| CANNOT_DELETE_FILE    | 20   |
-| BUILD_INDEX_ERROR     | 21   |
-| ILLEGAL_NLIST         | 22   |
-| ILLEGAL_METRIC_TYPE   | 23   |
-| OUT_OF_MEMORY         | 24   |
-| PATH_PARAM_LOSS       | 31   |
-| UNKNOWN_PATH          | 32   |
-| QUERY_PARAM_LOSS      | 33   |
-| BODY_FIELD_LOSS       | 34   |
-| ILLEGAL_BODY          | 35   |
-| BODY_PARSE_FAIL       | 36   |
-| ILLEGAL_QUERY_PARAM   | 37   |
+| Type                    | Code |
+| ----------------------- | ---- |
+| SUCCESS                 | 0    |
+| UNEXPECTED_ERROR        | 1    |
+| CONNECT_FAILED          | 2    |
+| PERMISSION_DENIED       | 3    |
+| COLLECTION_NOT_EXISTS   | 4    |
+| ILLEGAL_ARGUMENT        | 5    |
+| ILLEGAL_RANGE           | 6    |
+| ILLEGAL_DIMENSION       | 7    |
+| ILLEGAL_INDEX_TYPE      | 8    |
+| ILLEGAL_COLLECTION_NAME | 9    |
+| ILLEGAL_TOPK            | 10   |
+| ILLEGAL_ROWRECORD       | 11   |
+| ILLEGAL_VECTOR_ID       | 12   |
+| ILLEGAL_SEARCH_RESULT   | 13   |
+| FILE_NOT_FOUND          | 14   |
+| META_FAILED             | 15   |
+| CACHE_FAILED            | 16   |
+| CANNOT_CREATE_FOLDER    | 17   |
+| CANNOT_CREATE_FILE      | 18   |
+| CANNOT_DELETE_FOLDER    | 19   |
+| CANNOT_DELETE_FILE      | 20   |
+| BUILD_INDEX_ERROR       | 21   |
+| ILLEGAL_NLIST           | 22   |
+| ILLEGAL_METRIC_TYPE     | 23   |
+| OUT_OF_MEMORY           | 24   |
+| PATH_PARAM_LOSS         | 31   |
+| UNKNOWN_PATH            | 32   |
+| QUERY_PARAM_LOSS        | 33   |
+| BODY_FIELD_LOSS         | 34   |
+| ILLEGAL_BODY            | 35   |
+| BODY_PARSE_FAIL         | 36   |
+| ILLEGAL_QUERY_PARAM     | 37   |
