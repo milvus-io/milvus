@@ -687,11 +687,20 @@ class TestIndexBase:
         '''
         local_dim = vector_dim
         vectors = gen_vectors(nb, local_dim)
-        status, ids = connect.insert(collection, vectors)
+        collection_name = gen_unique_str()
+        param = {'collection_name': collection_name,
+                 'dimension': local_dim,
+                 'index_file_size': 1024,
+                 'metric_type': MetricType.L2}
+        connect.create_collection(param)
+        for i in range(3):
+            status, ids = connect.insert(collection_name, vectors)
+        connect.flush()
         index_type = IndexType.IVFLAT
         index_param =  {"nlist": NLIST}
-        status = connect.create_index(collection, index_type, index_param)
+        status = connect.create_index(collection_name, index_type, index_param)
         assert status.OK()
+        connect.drop_collection(collection_name)
 
 
 class TestIndexIP:
