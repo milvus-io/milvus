@@ -65,6 +65,10 @@ StackDeviceMemory::Stack::getSizeAvailable() const {
 char*
 StackDeviceMemory::Stack::getAlloc(size_t size,
                                    cudaStream_t stream) {
+  if (size == 0) {
+    return nullptr;
+  }
+
   if (size > (end_ - head_)) {
     // Too large for our stack
     DeviceScope s(device_);
@@ -133,6 +137,10 @@ void
 StackDeviceMemory::Stack::returnAlloc(char* p,
                                       size_t size,
                                       cudaStream_t stream) {
+  if (size == 0) {
+    return;
+  }
+
   if (p < start_ || p >= end_) {
     // This is not on our stack; it was a one-off allocation
     DeviceScope s(device_);
