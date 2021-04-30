@@ -1,17 +1,17 @@
-**What type of PR is this?**
+Explain the problem that this commit is solving. Focus on why you
+are making this change as opposed to how (the code explains that).
+Are there side effects or other unintuitive consequences of this
+change? Here's the place to explain them.
 
-- [ ] API-change
-- [ ] BUG
-- [ ] Improvement
-- [ ] Documentation
-- [ ] Feature
-- [ ] Test and CI
-- [ ] Code Refactoring
+Further paragraphs come after blank lines.
 
-**Which issue(s) this PR fixes:**
+ - Bullet points are okay, too
 
-Fixes #
+ - Typically a hyphen or asterisk is used for the bullet, preceded
+   by a single space, with blank lines in between, but conventions
+   vary here
 
-**What this PR does / why we need it:**
+Resolves: #<issue_id>, #<issue_id>
+See also: #<related_issue_or_pr_id>
 
-Not Available
+Signed-off-by: <username> <mail>
