@@ -1789,6 +1789,51 @@ class TestSearchInvalid(object):
             res = connect.search(collection, query)
 
 
+class TestSearchWithExpression(object):
+    @pytest.fixture(
+        scope="function",
+        params=[1, 10, 20],
+    )
+    def limit(self, request):
+        yield request.param
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_normal_expressions(),
+    )
+    def expression(self, request):
+        yield request.param
+
+    @pytest.fixture(
+        scope="function",
+        params=[
+            {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}},
+        ]
+    )
+    def index_param(self, request):
+        return request.param
+
+    @pytest.fixture(
+        scope="function",
+    )
+    def search_params(self):
+        return {"metric_type": "L2", "params": {"nprobe": 10}}
+
+    @pytest.mark.tags(CaseLabel.tags_smoke)
+    def test_search_with_expression(self, connect, collection, index_param, search_params, limit, expression):
+        entities, ids = init_data(connect, collection)
+        assert len(ids) == default_nb
+        connect.create_index(collection, default_float_vec_field_name, index_param)
+        connect.load_collection(collection)
+        nq = 10
+        query_data = entities[2]["values"][:nq]
+        res = connect.search_with_expression(collection, query_data, default_float_vec_field_name, search_params,
+                                             limit, expression)
+        assert len(res) == nq
+        for topk_results in res:
+            assert len(topk_results) <= limit
+
+
 def check_id_result(result, id):
     limit_in = 5
     ids = [entity.id for entity in result]
