@@ -96,6 +96,7 @@ SegcoreConfig::parse_from(const std::string& config_path) {
                 result.table_[metric_type] = conf;
             }
         }
+        return result;
     } catch (const SegcoreError& e) {
         // re-throw
         throw e;

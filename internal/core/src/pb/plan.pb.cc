@@ -15,9 +15,8 @@
 #include <google/protobuf/wire_format.h>
 // @@protoc_insertion_point(includes)
 #include <google/protobuf/port_def.inc>
-extern PROTOBUF_INTERNAL_EXPORT_plan_2eproto ::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<0> scc_info_BinaryExpr_plan_2eproto;
+extern PROTOBUF_INTERNAL_EXPORT_plan_2eproto ::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<2> scc_info_BinaryExpr_plan_2eproto;
 extern PROTOBUF_INTERNAL_EXPORT_plan_2eproto ::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<0> scc_info_ColumnInfo_plan_2eproto;
-extern PROTOBUF_INTERNAL_EXPORT_plan_2eproto ::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<3> scc_info_Expr_plan_2eproto;
 extern PROTOBUF_INTERNAL_EXPORT_plan_2eproto ::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<0> scc_info_GenericValue_plan_2eproto;
 extern PROTOBUF_INTERNAL_EXPORT_plan_2eproto ::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<0> scc_info_QueryInfo_plan_2eproto;
 extern PROTOBUF_INTERNAL_EXPORT_plan_2eproto ::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<2> scc_info_RangeExpr_plan_2eproto;
@@ -81,15 +80,29 @@ static void InitDefaultsscc_info_BinaryExpr_plan_2eproto() {
   GOOGLE_PROTOBUF_VERIFY_VERSION;
 
   {
+    void* ptr = &::milvus::proto::plan::_UnaryExpr_default_instance_;
+    new (ptr) ::milvus::proto::plan::UnaryExpr();
+    ::PROTOBUF_NAMESPACE_ID::internal::OnShutdownDestroyMessage(ptr);
+  }
+  {
     void* ptr = &::milvus::proto::plan::_BinaryExpr_default_instance_;
     new (ptr) ::milvus::proto::plan::BinaryExpr();
     ::PROTOBUF_NAMESPACE_ID::internal::OnShutdownDestroyMessage(ptr);
   }
+  {
+    void* ptr = &::milvus::proto::plan::_Expr_default_instance_;
+    new (ptr) ::milvus::proto::plan::Expr();
+    ::PROTOBUF_NAMESPACE_ID::internal::OnShutdownDestroyMessage(ptr);
+  }
+  ::milvus::proto::plan::UnaryExpr::InitAsDefaultInstance();
   ::milvus::proto::plan::BinaryExpr::InitAsDefaultInstance();
+  ::milvus::proto::plan::Expr::InitAsDefaultInstance();
 }
 
-::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<0> scc_info_BinaryExpr_plan_2eproto =
-    {{ATOMIC_VAR_INIT(::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase::kUninitialized), 0, InitDefaultsscc_info_BinaryExpr_plan_2eproto}, {}};
+::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<2> scc_info_BinaryExpr_plan_2eproto =
+    {{ATOMIC_VAR_INIT(::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase::kUninitialized), 2, InitDefaultsscc_info_BinaryExpr_plan_2eproto}, {
+      &scc_info_RangeExpr_plan_2eproto.base,
+      &scc_info_TermExpr_plan_2eproto.base,}};
 
 static void InitDefaultsscc_info_ColumnInfo_plan_2eproto() {
   GOOGLE_PROTOBUF_VERIFY_VERSION;
@@ -104,29 +117,6 @@ static void InitDefaultsscc_info_ColumnInfo_plan_2eproto() {
 
 ::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<0> scc_info_ColumnInfo_plan_2eproto =
     {{ATOMIC_VAR_INIT(::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase::kUninitialized), 0, InitDefaultsscc_info_ColumnInfo_plan_2eproto}, {}};
-
-static void InitDefaultsscc_info_Expr_plan_2eproto() {
-  GOOGLE_PROTOBUF_VERIFY_VERSION;
-
-  {
-    void* ptr = &::milvus::proto::plan::_UnaryExpr_default_instance_;
-    new (ptr) ::milvus::proto::plan::UnaryExpr();
-    ::PROTOBUF_NAMESPACE_ID::internal::OnShutdownDestroyMessage(ptr);
-  }
-  {
-    void* ptr = &::milvus::proto::plan::_Expr_default_instance_;
-    new (ptr) ::milvus::proto::plan::Expr();
-    ::PROTOBUF_NAMESPACE_ID::internal::OnShutdownDestroyMessage(ptr);
-  }
-  ::milvus::proto::plan::UnaryExpr::InitAsDefaultInstance();
-  ::milvus::proto::plan::Expr::InitAsDefaultInstance();
-}
-
-::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<3> scc_info_Expr_plan_2eproto =
-    {{ATOMIC_VAR_INIT(::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase::kUninitialized), 3, InitDefaultsscc_info_Expr_plan_2eproto}, {
-      &scc_info_RangeExpr_plan_2eproto.base,
-      &scc_info_TermExpr_plan_2eproto.base,
-      &scc_info_BinaryExpr_plan_2eproto.base,}};
 
 static void InitDefaultsscc_info_GenericValue_plan_2eproto() {
   GOOGLE_PROTOBUF_VERIFY_VERSION;
@@ -216,7 +206,7 @@ static void InitDefaultsscc_info_VectorANNS_plan_2eproto() {
 
 ::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<2> scc_info_VectorANNS_plan_2eproto =
     {{ATOMIC_VAR_INIT(::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase::kUninitialized), 2, InitDefaultsscc_info_VectorANNS_plan_2eproto}, {
-      &scc_info_Expr_plan_2eproto.base,
+      &scc_info_BinaryExpr_plan_2eproto.base,
       &scc_info_QueryInfo_plan_2eproto.base,}};
 
 static ::PROTOBUF_NAMESPACE_ID::Metadata file_level_metadata_plan_2eproto[10];
@@ -275,6 +265,9 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_plan_2eproto::offsets[] PROTOB
   ~0u,  // no _extensions_
   ~0u,  // no _oneof_case_
   ~0u,  // no _weak_field_map_
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::BinaryExpr, op_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::BinaryExpr, left_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::BinaryExpr, right_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::Expr, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -311,9 +304,9 @@ static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOB
   { 32, -1, sizeof(::milvus::proto::plan::TermExpr)},
   { 39, -1, sizeof(::milvus::proto::plan::UnaryExpr)},
   { 46, -1, sizeof(::milvus::proto::plan::BinaryExpr)},
-  { 51, -1, sizeof(::milvus::proto::plan::Expr)},
-  { 61, -1, sizeof(::milvus::proto::plan::VectorANNS)},
-  { 71, -1, sizeof(::milvus::proto::plan::PlanNode)},
+  { 54, -1, sizeof(::milvus::proto::plan::Expr)},
+  { 64, -1, sizeof(::milvus::proto::plan::VectorANNS)},
+  { 74, -1, sizeof(::milvus::proto::plan::PlanNode)},
 };
 
 static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
@@ -350,30 +343,32 @@ const char descriptor_table_protodef_plan_2eproto[] PROTOBUF_SECTION_VARIABLE(pr
   "aryExpr\0220\n\002op\030\001 \001(\0162$.milvus.proto.plan."
   "UnaryExpr.UnaryOp\022&\n\005child\030\002 \001(\0132\027.milvu"
   "s.proto.plan.Expr\"\037\n\007UnaryOp\022\013\n\007Invalid\020"
-  "\000\022\007\n\003Not\020\001\"D\n\nBinaryExpr\"6\n\010BinaryOp\022\013\n\007"
-  "Invalid\020\000\022\016\n\nLogicalAnd\020\001\022\r\n\tLogicalOr\020\002"
-  "\"\336\001\n\004Expr\0222\n\nrange_expr\030\001 \001(\0132\034.milvus.p"
-  "roto.plan.RangeExprH\000\0220\n\tterm_expr\030\002 \001(\013"
-  "2\033.milvus.proto.plan.TermExprH\000\0222\n\nunary"
-  "_expr\030\003 \001(\0132\034.milvus.proto.plan.UnaryExp"
-  "rH\000\0224\n\013binary_expr\030\004 \001(\0132\035.milvus.proto."
-  "plan.BinaryExprH\000B\006\n\004expr\"\251\001\n\nVectorANNS"
-  "\022\021\n\tis_binary\030\001 \001(\010\022\020\n\010field_id\030\002 \001(\003\022+\n"
-  "\npredicates\030\003 \001(\0132\027.milvus.proto.plan.Ex"
-  "pr\0220\n\nquery_info\030\004 \001(\0132\034.milvus.proto.pl"
-  "an.QueryInfo\022\027\n\017placeholder_tag\030\005 \001(\t\"H\n"
-  "\010PlanNode\0224\n\013vector_anns\030\001 \001(\0132\035.milvus."
-  "proto.plan.VectorANNSH\000B\006\n\004nodeB3Z1githu"
-  "b.com/milvus-io/milvus/internal/proto/pl"
-  "anpbb\006proto3"
+  "\000\022\007\n\003Not\020\001\"\307\001\n\nBinaryExpr\0222\n\002op\030\001 \001(\0162&."
+  "milvus.proto.plan.BinaryExpr.BinaryOp\022%\n"
+  "\004left\030\002 \001(\0132\027.milvus.proto.plan.Expr\022&\n\005"
+  "right\030\003 \001(\0132\027.milvus.proto.plan.Expr\"6\n\010"
+  "BinaryOp\022\013\n\007Invalid\020\000\022\016\n\nLogicalAnd\020\001\022\r\n"
+  "\tLogicalOr\020\002\"\336\001\n\004Expr\0222\n\nrange_expr\030\001 \001("
+  "\0132\034.milvus.proto.plan.RangeExprH\000\0220\n\tter"
+  "m_expr\030\002 \001(\0132\033.milvus.proto.plan.TermExp"
+  "rH\000\0222\n\nunary_expr\030\003 \001(\0132\034.milvus.proto.p"
+  "lan.UnaryExprH\000\0224\n\013binary_expr\030\004 \001(\0132\035.m"
+  "ilvus.proto.plan.BinaryExprH\000B\006\n\004expr\"\251\001"
+  "\n\nVectorANNS\022\021\n\tis_binary\030\001 \001(\010\022\020\n\010field"
+  "_id\030\002 \001(\003\022+\n\npredicates\030\003 \001(\0132\027.milvus.p"
+  "roto.plan.Expr\0220\n\nquery_info\030\004 \001(\0132\034.mil"
+  "vus.proto.plan.QueryInfo\022\027\n\017placeholder_"
+  "tag\030\005 \001(\t\"H\n\010PlanNode\0224\n\013vector_anns\030\001 \001"
+  "(\0132\035.milvus.proto.plan.VectorANNSH\000B\006\n\004n"
+  "odeB3Z1github.com/milvus-io/milvus/inter"
+  "nal/proto/planpbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_plan_2eproto_deps[1] = {
   &::descriptor_table_schema_2eproto,
 };
-static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_plan_2eproto_sccs[9] = {
+static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_plan_2eproto_sccs[8] = {
   &scc_info_BinaryExpr_plan_2eproto.base,
   &scc_info_ColumnInfo_plan_2eproto.base,
-  &scc_info_Expr_plan_2eproto.base,
   &scc_info_GenericValue_plan_2eproto.base,
   &scc_info_PlanNode_plan_2eproto.base,
   &scc_info_QueryInfo_plan_2eproto.base,
@@ -384,8 +379,8 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_pla
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_plan_2eproto_once;
 static bool descriptor_table_plan_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_plan_2eproto = {
-  &descriptor_table_plan_2eproto_initialized, descriptor_table_protodef_plan_2eproto, "plan.proto", 1412,
-  &descriptor_table_plan_2eproto_once, descriptor_table_plan_2eproto_sccs, descriptor_table_plan_2eproto_deps, 9, 1,
+  &descriptor_table_plan_2eproto_initialized, descriptor_table_protodef_plan_2eproto, "plan.proto", 1544,
+  &descriptor_table_plan_2eproto_once, descriptor_table_plan_2eproto_sccs, descriptor_table_plan_2eproto_deps, 8, 1,
   schemas, file_default_instances, TableStruct_plan_2eproto::offsets,
   file_level_metadata_plan_2eproto, 10, file_level_enum_descriptors_plan_2eproto, file_level_service_descriptors_plan_2eproto,
 };
@@ -2295,7 +2290,7 @@ UnaryExpr::UnaryExpr(const UnaryExpr& from)
 }
 
 void UnaryExpr::SharedCtor() {
-  ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_Expr_plan_2eproto.base);
+  ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_BinaryExpr_plan_2eproto.base);
   ::memset(&child_, 0, static_cast<size_t>(
       reinterpret_cast<char*>(&op_) -
       reinterpret_cast<char*>(&child_)) + sizeof(op_));
@@ -2314,7 +2309,7 @@ void UnaryExpr::SetCachedSize(int size) const {
   _cached_size_.Set(size);
 }
 const UnaryExpr& UnaryExpr::default_instance() {
-  ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&::scc_info_Expr_plan_2eproto.base);
+  ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&::scc_info_BinaryExpr_plan_2eproto.base);
   return *internal_default_instance();
 }
 
@@ -2578,11 +2573,25 @@ void UnaryExpr::InternalSwap(UnaryExpr* other) {
 // ===================================================================
 
 void BinaryExpr::InitAsDefaultInstance() {
+  ::milvus::proto::plan::_BinaryExpr_default_instance_._instance.get_mutable()->left_ = const_cast< ::milvus::proto::plan::Expr*>(
+      ::milvus::proto::plan::Expr::internal_default_instance());
+  ::milvus::proto::plan::_BinaryExpr_default_instance_._instance.get_mutable()->right_ = const_cast< ::milvus::proto::plan::Expr*>(
+      ::milvus::proto::plan::Expr::internal_default_instance());
 }
 class BinaryExpr::_Internal {
  public:
+  static const ::milvus::proto::plan::Expr& left(const BinaryExpr* msg);
+  static const ::milvus::proto::plan::Expr& right(const BinaryExpr* msg);
 };
 
+const ::milvus::proto::plan::Expr&
+BinaryExpr::_Internal::left(const BinaryExpr* msg) {
+  return *msg->left_;
+}
+const ::milvus::proto::plan::Expr&
+BinaryExpr::_Internal::right(const BinaryExpr* msg) {
+  return *msg->right_;
+}
 BinaryExpr::BinaryExpr()
   : ::PROTOBUF_NAMESPACE_ID::Message(), _internal_metadata_(nullptr) {
   SharedCtor();
@@ -2592,10 +2601,25 @@ BinaryExpr::BinaryExpr(const BinaryExpr& from)
   : ::PROTOBUF_NAMESPACE_ID::Message(),
       _internal_metadata_(nullptr) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
+  if (from.has_left()) {
+    left_ = new ::milvus::proto::plan::Expr(*from.left_);
+  } else {
+    left_ = nullptr;
+  }
+  if (from.has_right()) {
+    right_ = new ::milvus::proto::plan::Expr(*from.right_);
+  } else {
+    right_ = nullptr;
+  }
+  op_ = from.op_;
   // @@protoc_insertion_point(copy_constructor:milvus.proto.plan.BinaryExpr)
 }
 
 void BinaryExpr::SharedCtor() {
+  ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_BinaryExpr_plan_2eproto.base);
+  ::memset(&left_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&op_) -
+      reinterpret_cast<char*>(&left_)) + sizeof(op_));
 }
 
 BinaryExpr::~BinaryExpr() {
@@ -2604,6 +2628,8 @@ BinaryExpr::~BinaryExpr() {
 }
 
 void BinaryExpr::SharedDtor() {
+  if (this != internal_default_instance()) delete left_;
+  if (this != internal_default_instance()) delete right_;
 }
 
 void BinaryExpr::SetCachedSize(int size) const {
@@ -2621,6 +2647,15 @@ void BinaryExpr::Clear() {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
+  if (GetArenaNoVirtual() == nullptr && left_ != nullptr) {
+    delete left_;
+  }
+  left_ = nullptr;
+  if (GetArenaNoVirtual() == nullptr && right_ != nullptr) {
+    delete right_;
+  }
+  right_ = nullptr;
+  op_ = 0;
   _internal_metadata_.Clear();
 }
 
@@ -2632,7 +2667,30 @@ const char* BinaryExpr::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID:
     ptr = ::PROTOBUF_NAMESPACE_ID::internal::ReadTag(ptr, &tag);
     CHK_(ptr);
     switch (tag >> 3) {
+      // .milvus.proto.plan.BinaryExpr.BinaryOp op = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 8)) {
+          ::PROTOBUF_NAMESPACE_ID::uint64 val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          CHK_(ptr);
+          set_op(static_cast<::milvus::proto::plan::BinaryExpr_BinaryOp>(val));
+        } else goto handle_unusual;
+        continue;
+      // .milvus.proto.plan.Expr left = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 18)) {
+          ptr = ctx->ParseMessage(mutable_left(), ptr);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // .milvus.proto.plan.Expr right = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 26)) {
+          ptr = ctx->ParseMessage(mutable_right(), ptr);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
       default: {
+      handle_unusual:
         if ((tag & 7) == 4 || tag == 0) {
           ctx->SetLastTag(tag);
           goto success;
@@ -2660,12 +2718,53 @@ bool BinaryExpr::MergePartialFromCodedStream(
     ::std::pair<::PROTOBUF_NAMESPACE_ID::uint32, bool> p = input->ReadTagWithCutoffNoLastTag(127u);
     tag = p.first;
     if (!p.second) goto handle_unusual;
-  handle_unusual:
-    if (tag == 0) {
-      goto success;
+    switch (::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::GetTagFieldNumber(tag)) {
+      // .milvus.proto.plan.BinaryExpr.BinaryOp op = 1;
+      case 1: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (8 & 0xFF)) {
+          int value = 0;
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
+                   int, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_ENUM>(
+                 input, &value)));
+          set_op(static_cast< ::milvus::proto::plan::BinaryExpr_BinaryOp >(value));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // .milvus.proto.plan.Expr left = 2;
+      case 2: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (18 & 0xFF)) {
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadMessage(
+               input, mutable_left()));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // .milvus.proto.plan.Expr right = 3;
+      case 3: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (26 & 0xFF)) {
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadMessage(
+               input, mutable_right()));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      default: {
+      handle_unusual:
+        if (tag == 0) {
+          goto success;
+        }
+        DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SkipField(
+              input, tag, _internal_metadata_.mutable_unknown_fields()));
+        break;
+      }
     }
-    DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SkipField(
-          input, tag, _internal_metadata_.mutable_unknown_fields()));
   }
 success:
   // @@protoc_insertion_point(parse_success:milvus.proto.plan.BinaryExpr)
@@ -2683,6 +2782,24 @@ void BinaryExpr::SerializeWithCachedSizes(
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
+  // .milvus.proto.plan.BinaryExpr.BinaryOp op = 1;
+  if (this->op() != 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnum(
+      1, this->op(), output);
+  }
+
+  // .milvus.proto.plan.Expr left = 2;
+  if (this->has_left()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteMessageMaybeToArray(
+      2, _Internal::left(this), output);
+  }
+
+  // .milvus.proto.plan.Expr right = 3;
+  if (this->has_right()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteMessageMaybeToArray(
+      3, _Internal::right(this), output);
+  }
+
   if (_internal_metadata_.have_unknown_fields()) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFields(
         _internal_metadata_.unknown_fields(), output);
@@ -2695,6 +2812,26 @@ void BinaryExpr::SerializeWithCachedSizes(
   // @@protoc_insertion_point(serialize_to_array_start:milvus.proto.plan.BinaryExpr)
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
+
+  // .milvus.proto.plan.BinaryExpr.BinaryOp op = 1;
+  if (this->op() != 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
+      1, this->op(), target);
+  }
+
+  // .milvus.proto.plan.Expr left = 2;
+  if (this->has_left()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessageToArray(
+        2, _Internal::left(this), target);
+  }
+
+  // .milvus.proto.plan.Expr right = 3;
+  if (this->has_right()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessageToArray(
+        3, _Internal::right(this), target);
+  }
 
   if (_internal_metadata_.have_unknown_fields()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFieldsToArray(
@@ -2716,6 +2853,26 @@ size_t BinaryExpr::ByteSizeLong() const {
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
+
+  // .milvus.proto.plan.Expr left = 2;
+  if (this->has_left()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+        *left_);
+  }
+
+  // .milvus.proto.plan.Expr right = 3;
+  if (this->has_right()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+        *right_);
+  }
+
+  // .milvus.proto.plan.BinaryExpr.BinaryOp op = 1;
+  if (this->op() != 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->op());
+  }
 
   int cached_size = ::PROTOBUF_NAMESPACE_ID::internal::ToCachedSize(total_size);
   SetCachedSize(cached_size);
@@ -2744,6 +2901,15 @@ void BinaryExpr::MergeFrom(const BinaryExpr& from) {
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
+  if (from.has_left()) {
+    mutable_left()->::milvus::proto::plan::Expr::MergeFrom(from.left());
+  }
+  if (from.has_right()) {
+    mutable_right()->::milvus::proto::plan::Expr::MergeFrom(from.right());
+  }
+  if (from.op() != 0) {
+    set_op(from.op());
+  }
 }
 
 void BinaryExpr::CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) {
@@ -2767,6 +2933,9 @@ bool BinaryExpr::IsInitialized() const {
 void BinaryExpr::InternalSwap(BinaryExpr* other) {
   using std::swap;
   _internal_metadata_.Swap(&other->_internal_metadata_);
+  swap(left_, other->left_);
+  swap(right_, other->right_);
+  swap(op_, other->op_);
 }
 
 ::PROTOBUF_NAMESPACE_ID::Metadata BinaryExpr::GetMetadata() const {
@@ -2901,7 +3070,7 @@ Expr::Expr(const Expr& from)
 }
 
 void Expr::SharedCtor() {
-  ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_Expr_plan_2eproto.base);
+  ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_BinaryExpr_plan_2eproto.base);
   clear_has_expr();
 }
 
@@ -2920,7 +3089,7 @@ void Expr::SetCachedSize(int size) const {
   _cached_size_.Set(size);
 }
 const Expr& Expr::default_instance() {
-  ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&::scc_info_Expr_plan_2eproto.base);
+  ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&::scc_info_BinaryExpr_plan_2eproto.base);
   return *internal_default_instance();
 }
 

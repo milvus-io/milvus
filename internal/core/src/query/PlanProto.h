@@ -20,11 +20,26 @@ namespace milvus::query {
 
 class ProtoParser {
  public:
-    explicit ProtoParser(const Schema& schema) : schema(schema), involved_fields(schema.size()) {
+    explicit ProtoParser(const Schema& schema) : schema(schema) {
     }
 
+    //    ExprPtr
+    //    ExprFromProto(const proto::plan::Expr& expr_proto);
+
     ExprPtr
-    ExprFromProto(const proto::plan::Expr& expr_proto);
+    ParseRangeExpr(const proto::plan::RangeExpr& expr_pb);
+
+    ExprPtr
+    ParseTermExpr(const proto::plan::TermExpr& expr_pb);
+
+    ExprPtr
+    ParseUnaryExpr(const proto::plan::UnaryExpr& expr_pb);
+
+    ExprPtr
+    ParseBinaryExpr(const proto::plan::BinaryExpr& expr_pb);
+
+    ExprPtr
+    ParseExpr(const proto::plan::Expr& expr_pb);
 
     std::unique_ptr<VectorPlanNode>
     PlanNodeFromProto(const proto::plan::PlanNode& plan_node_proto);
@@ -34,7 +49,7 @@ class ProtoParser {
 
  private:
     const Schema& schema;
-    boost::dynamic_bitset<> involved_fields;
+    // boost::dynamic_bitset<> involved_fields;
 };
 
 }  // namespace milvus::query
