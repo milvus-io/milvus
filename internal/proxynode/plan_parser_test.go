@@ -1,9 +1,20 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
+
 package proxynode
 
 import (
+	"fmt"
 	"testing"
 
-	ant_ast "github.com/antonmedv/expr/ast"
 	ant_parser "github.com/antonmedv/expr/parser"
 
 	"github.com/golang/protobuf/proto"
@@ -15,20 +26,31 @@ import (
 )
 
 func newTestSchema() *schemapb.CollectionSchema {
+	fields := []*schemapb.FieldSchema{
+		{FieldID: 0, Name: "FieldID", IsPrimaryKey: false, Description: "field no.1", DataType: schemapb.DataType_Int64},
+	}
+
+	for name, value := range schemapb.DataType_value {
+		dataType := schemapb.DataType(value)
+		if !typeutil.IsIntergerType(dataType) && !typeutil.IsFloatingType(dataType) && !typeutil.IsVectorType(dataType) {
+			continue
+		}
+		newField := &schemapb.FieldSchema{
+			FieldID: int64(100 + value), Name: name + "Field", IsPrimaryKey: false, Description: "", DataType: dataType,
+		}
+		fields = append(fields, newField)
+	}
+
 	return &schemapb.CollectionSchema{
 		Name:        "test",
 		Description: "schema for test used",
 		AutoID:      true,
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 0, Name: "FieldID", IsPrimaryKey: false, Description: "field no.1", DataType: schemapb.DataType_Int64},
-			{FieldID: 101, Name: "vectorField", IsPrimaryKey: false, Description: "field no.2", DataType: schemapb.DataType_FloatVector},
-			{FieldID: 100, Name: "int64Field", IsPrimaryKey: false, Description: "field no.1", DataType: schemapb.DataType_Int64},
-		},
+		Fields:      fields,
 	}
 }
 
 func TestParseQueryExpr_Naive(t *testing.T) {
-	exprStr := "int64Field > 3"
+	exprStr := "Int64Field > 3"
 	schemaPb := newTestSchema()
 	schema, err := typeutil.CreateSchemaHelper(schemaPb)
 	assert.Nil(t, err)
@@ -39,7 +61,16 @@ func TestParseQueryExpr_Naive(t *testing.T) {
 }
 
 func TestParsePlanNode_Naive(t *testing.T) {
-	exprStr := "int64Field > 3"
+	// exprStr := "not (int64Field > 3)"
+	exprStrs := []string{
+		"not (Int64Field > 3)",
+		"not (3 > Int64Field)",
+		"Int64Field in [1, 2, 3]",
+		"Int64Field < 3 and (Int64Field > 2 || Int64Field == 1)",
+		"DoubleField in [1.0, 2, 3]",
+		"DoubleField in [1.0, 2, 3] && Int64Field < 3 or Int64Field > 2",
+	}
+
 	schema := newTestSchema()
 	queryInfo := &planpb.QueryInfo{
 		Topk:         10,
@@ -49,20 +80,19 @@ func TestParsePlanNode_Naive(t *testing.T) {
 
 	// Note: use pointer to string to represent nullable string
 	// TODO: change it to better solution
-	planProto, err := CreateQueryPlan(schema, &exprStr, "vectorField", queryInfo)
+	for offset, exprStr := range exprStrs {
+		fmt.Printf("case %d: %s\n", offset, exprStr)
+		planProto, err := CreateQueryPlan(schema, &exprStr, "FloatVectorField", queryInfo)
+		assert.Nil(t, err)
+		dbgStr := proto.MarshalTextString(planProto)
+		println(dbgStr)
+	}
 
-	assert.Nil(t, err)
-	dbgStr := proto.MarshalTextString(planProto)
-	println(dbgStr)
 }
 
 func TestExternalParser(t *testing.T) {
-	ast, err := ant_parser.Parse("!(1 < a < 2 or b in [1, 2, 3]) or (c < 3 and b > 5) or ")
-
-	var node ant_ast.Node = nil
-	if node == nil {
-		// TODO
-	}
+	ast, err := ant_parser.Parse("!(1 < a < 2 or b in [1, 2, 3]) or (c < 3 and b > 5)")
+	// NOTE: probe ast here via IDE
 	assert.Nil(t, err)
 
 	println(ast.Node.Location().Column)

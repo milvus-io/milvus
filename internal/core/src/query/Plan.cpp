@@ -484,7 +484,6 @@ Plan::check_identical(Plan& other) {
     Assert(&schema_ == &other.schema_);
     auto json = ShowPlanNodeVisitor().call_child(*this->plan_node_);
     auto other_json = ShowPlanNodeVisitor().call_child(*other.plan_node_);
-    std::cout << json.dump(2) << std::endl << other_json.dump(2) << std::endl;
     Assert(json.dump(2) == other_json.dump(2));
     Assert(this->extra_info_opt_.has_value() == other.extra_info_opt_.has_value());
     if (this->extra_info_opt_.has_value()) {

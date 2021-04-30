@@ -1,3 +1,14 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
+
 package proxynode
 
 import (
@@ -10,46 +21,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
-
-//func parseQueryExprNaive(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, error) {
-//	// TODO: handle more cases
-//	// TODO: currently just A > 3
-//
-//	tmps := strings.Split(exprStr, ">")
-//	if len(tmps) != 2 {
-//		return nil, errors.New("unsupported yet")
-//	}
-//	for i, str := range tmps {
-//		tmps[i] = strings.TrimSpace(str)
-//	}
-//	fieldName := tmps[0]
-//	tmpValue, err := strconv.ParseInt(tmps[1], 10, 64)
-//	if err != nil {
-//		return nil, err
-//	}
-//	fieldValue := &planpb.GenericValue{
-//		Val: &planpb.GenericValue_Int64Val{Int64Val: tmpValue},
-//	}
-//
-//	field, err := schema.GetFieldFromName(fieldName)
-//	if err != nil {
-//		return nil, err
-//	}
-//
-//	expr := &planpb.Expr{
-//		Expr: &planpb.Expr_RangeExpr{
-//			RangeExpr: &planpb.RangeExpr{
-//				ColumnInfo: &planpb.ColumnInfo{
-//					FieldId:  field.FieldID,
-//					DataType: field.DataType,
-//				},
-//				Ops:    []planpb.RangeExpr_OpType{planpb.RangeExpr_GreaterThan},
-//				Values: []*planpb.GenericValue{fieldValue},
-//			},
-//		},
-//	}
-//	return expr, nil
-//}
 
 func parseQueryExpr(schema *typeutil.SchemaHelper, exprStrNullable *string) (*planpb.Expr, error) {
 	if exprStrNullable == nil {
@@ -70,7 +41,7 @@ func parseQueryExprAdvanced(schema *typeutil.SchemaHelper, exprStr string) (*pla
 	}
 	context := ParserContext{schema}
 
-	return context.parseExpr(&ast.Node)
+	return context.handleExpr(&ast.Node)
 }
 
 func (context *ParserContext) createColumnInfo(field *schemapb.FieldSchema) *planpb.ColumnInfo {
@@ -80,9 +51,10 @@ func (context *ParserContext) createColumnInfo(field *schemapb.FieldSchema) *pla
 	}
 }
 
-func createSingleOps(opStr string, reverse bool) planpb.RangeExpr_OpType {
+func getCompareOpType(opStr string, reverse bool) planpb.RangeExpr_OpType {
 	type OpType = planpb.RangeExpr_OpType
 	var op planpb.RangeExpr_OpType
+
 	if !reverse {
 		switch opStr {
 		case "<":
@@ -121,27 +93,49 @@ func createSingleOps(opStr string, reverse bool) planpb.RangeExpr_OpType {
 	return op
 }
 
-func (context *ParserContext) handleCmpExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
-	idNode, leftOk := node.Left.(*ant_ast.IdentifierNode)
-	if !leftOk {
-		return nil, fmt.Errorf("compare require left to be identifier")
+func getLogicalOpType(opStr string) planpb.BinaryExpr_BinaryOp {
+	switch opStr {
+	case "&&", "and":
+		return planpb.BinaryExpr_LogicalAnd
+	case "||", "or":
+		return planpb.BinaryExpr_LogicalOr
+	default:
+		return planpb.BinaryExpr_Invalid
 	}
+}
+
+func (context *ParserContext) handleCmpExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
+	var idNode *ant_ast.IdentifierNode
+	var isReversed bool
+	var valueNode *ant_ast.Node
+	if idNodeLeft, leftOk := node.Left.(*ant_ast.IdentifierNode); leftOk {
+		idNode = idNodeLeft
+		isReversed = false
+		valueNode = &node.Right
+	} else if idNodeRight, rightOk := node.Right.(*ant_ast.IdentifierNode); rightOk {
+		idNode = idNodeRight
+		isReversed = true
+		valueNode = &node.Left
+	} else {
+		return nil, fmt.Errorf("compare expr has no identifier")
+	}
+
 	field, err := context.handleIdentifier(idNode)
 	if err != nil {
 		return nil, err
 	}
 
-	val, err := context.handleLeafValue(&node.Right, field.DataType)
+	val, err := context.handleLeafValue(valueNode, field.DataType)
 	if err != nil {
 		return nil, err
 	}
 
-	op := createSingleOps(node.Operator, false)
+	op := getCompareOpType(node.Operator, isReversed)
 	if op == planpb.RangeExpr_Invalid {
 		return nil, fmt.Errorf("invalid binary operator %s", node.Operator)
 	}
 
-	final := &planpb.Expr{
+	expr := &planpb.Expr{
 		Expr: &planpb.Expr_RangeExpr{
 			RangeExpr: &planpb.RangeExpr{
 				ColumnInfo: context.createColumnInfo(field),
@@ -150,15 +144,76 @@ func (context *ParserContext) handleCmpExpr(node *ant_ast.BinaryNode) (*planpb.E
 			},
 		},
 	}
-	return final, nil
+	return expr, nil
 }
 
 func (context *ParserContext) handleLogicalExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
-	return nil, fmt.Errorf("unimplemented")
+	op := getLogicalOpType(node.Operator)
+	if op == planpb.BinaryExpr_Invalid {
+		return nil, fmt.Errorf("invalid logical op(%s)", node.Operator)
+	}
+
+	leftExpr, err := context.handleExpr(&node.Left)
+	if err != nil {
+		return nil, err
+	}
+
+	rightExpr, err := context.handleExpr(&node.Right)
+	if err != nil {
+		return nil, err
+	}
+
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_BinaryExpr{
+			BinaryExpr: &planpb.BinaryExpr{
+				Op:    op,
+				Left:  leftExpr,
+				Right: rightExpr,
+			},
+		},
+	}
+	return expr, nil
+}
+
+func (context *ParserContext) handleArrayExpr(node *ant_ast.Node, dataType schemapb.DataType) ([]*planpb.GenericValue, error) {
+	arrayNode, ok2 := (*node).(*ant_ast.ArrayNode)
+	if !ok2 {
+		return nil, fmt.Errorf("right operand of the InExpr must be array")
+	}
+	var arr []*planpb.GenericValue
+	for _, element := range arrayNode.Nodes {
+		val, err := context.handleLeafValue(&element, dataType)
+		if err != nil {
+			return nil, err
+		}
+		arr = append(arr, val)
+	}
+	return arr, nil
 }
 
 func (context *ParserContext) handleInExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
-	return nil, fmt.Errorf("unimplemented")
+	idNode, ok := node.Left.(*ant_ast.IdentifierNode)
+	if !ok {
+		return nil, fmt.Errorf("left operand of the InExpr must be identifier")
+	}
+	field, err := context.handleIdentifier(idNode)
+	if err != nil {
+		return nil, err
+	}
+	arrayData, err := context.handleArrayExpr(&node.Right, field.DataType)
+	if err != nil {
+		return nil, err
+	}
+
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_TermExpr{
+			TermExpr: &planpb.TermExpr{
+				ColumnInfo: context.createColumnInfo(field),
+				Values:     arrayData,
+			},
+		},
+	}
+	return expr, nil
 }
 
 func (context *ParserContext) handleBinaryExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
@@ -166,16 +221,24 @@ func (context *ParserContext) handleBinaryExpr(node *ant_ast.BinaryNode) (*planp
 	switch node.Operator {
 	case "<", "<=", ">", ">=", "==", "!=":
 		return context.handleCmpExpr(node)
-	case "and", "or":
+	case "and", "or", "&&", "||":
 		return context.handleLogicalExpr(node)
 	case "in", "not in":
 		return context.handleInExpr(node)
 	}
-	return nil, fmt.Errorf("unimplemented")
+	return nil, fmt.Errorf("unsupported binary operator %s", node.Operator)
 }
 
-func (context *ParserContext) handleNotExpr(node *ant_ast.UnaryNode) (*planpb.Expr, error) {
-	return nil, fmt.Errorf("unimplemented")
+func (context *ParserContext) createNotExpr(childExpr *planpb.Expr) (*planpb.Expr, error) {
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_UnaryExpr{
+			UnaryExpr: &planpb.UnaryExpr{
+				Op:    planpb.UnaryExpr_Not,
+				Child: childExpr,
+			},
+		},
+	}
+	return expr, nil
 }
 
 func (context *ParserContext) handleLeafValue(nodeRaw *ant_ast.Node, dataType schemapb.DataType) (gv *planpb.GenericValue, err error) {
@@ -232,13 +295,17 @@ func (context *ParserContext) handleIdentifier(node *ant_ast.IdentifierNode) (*s
 func (context *ParserContext) handleUnaryExpr(node *ant_ast.UnaryNode) (*planpb.Expr, error) {
 	switch node.Operator {
 	case "!", "not":
-		return context.handleNotExpr(node)
+		subExpr, err := context.handleExpr(&node.Node)
+		if err != nil {
+			return nil, err
+		}
+		return context.createNotExpr(subExpr)
 	default:
 		return nil, fmt.Errorf("invalid unary operator(%s)", node.Operator)
 	}
 }
 
-func (context *ParserContext) parseExpr(nodeRaw *ant_ast.Node) (*planpb.Expr, error) {
+func (context *ParserContext) handleExpr(nodeRaw *ant_ast.Node) (*planpb.Expr, error) {
 	switch node := (*nodeRaw).(type) {
 	case *ant_ast.IdentifierNode,
 		*ant_ast.FloatNode,

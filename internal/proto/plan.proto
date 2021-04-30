@@ -59,6 +59,9 @@ message BinaryExpr {
     LogicalAnd = 1;
     LogicalOr = 2;
   }
+  BinaryOp op = 1;
+  Expr left = 2;
+  Expr right = 3;
 }
 
 message Expr {

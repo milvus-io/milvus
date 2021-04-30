@@ -1321,11 +1321,40 @@ class BinaryExpr :
 
   // accessors -------------------------------------------------------
 
+  enum : int {
+    kLeftFieldNumber = 2,
+    kRightFieldNumber = 3,
+    kOpFieldNumber = 1,
+  };
+  // .milvus.proto.plan.Expr left = 2;
+  bool has_left() const;
+  void clear_left();
+  const ::milvus::proto::plan::Expr& left() const;
+  ::milvus::proto::plan::Expr* release_left();
+  ::milvus::proto::plan::Expr* mutable_left();
+  void set_allocated_left(::milvus::proto::plan::Expr* left);
+
+  // .milvus.proto.plan.Expr right = 3;
+  bool has_right() const;
+  void clear_right();
+  const ::milvus::proto::plan::Expr& right() const;
+  ::milvus::proto::plan::Expr* release_right();
+  ::milvus::proto::plan::Expr* mutable_right();
+  void set_allocated_right(::milvus::proto::plan::Expr* right);
+
+  // .milvus.proto.plan.BinaryExpr.BinaryOp op = 1;
+  void clear_op();
+  ::milvus::proto::plan::BinaryExpr_BinaryOp op() const;
+  void set_op(::milvus::proto::plan::BinaryExpr_BinaryOp value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.plan.BinaryExpr)
  private:
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::milvus::proto::plan::Expr* left_;
+  ::milvus::proto::plan::Expr* right_;
+  int op_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_plan_2eproto;
 };
@@ -2367,6 +2396,122 @@ inline void UnaryExpr::set_allocated_child(::milvus::proto::plan::Expr* child) {
 // -------------------------------------------------------------------
 
 // BinaryExpr
+
+// .milvus.proto.plan.BinaryExpr.BinaryOp op = 1;
+inline void BinaryExpr::clear_op() {
+  op_ = 0;
+}
+inline ::milvus::proto::plan::BinaryExpr_BinaryOp BinaryExpr::op() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.BinaryExpr.op)
+  return static_cast< ::milvus::proto::plan::BinaryExpr_BinaryOp >(op_);
+}
+inline void BinaryExpr::set_op(::milvus::proto::plan::BinaryExpr_BinaryOp value) {
+  
+  op_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.BinaryExpr.op)
+}
+
+// .milvus.proto.plan.Expr left = 2;
+inline bool BinaryExpr::has_left() const {
+  return this != internal_default_instance() && left_ != nullptr;
+}
+inline void BinaryExpr::clear_left() {
+  if (GetArenaNoVirtual() == nullptr && left_ != nullptr) {
+    delete left_;
+  }
+  left_ = nullptr;
+}
+inline const ::milvus::proto::plan::Expr& BinaryExpr::left() const {
+  const ::milvus::proto::plan::Expr* p = left_;
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.BinaryExpr.left)
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::plan::Expr*>(
+      &::milvus::proto::plan::_Expr_default_instance_);
+}
+inline ::milvus::proto::plan::Expr* BinaryExpr::release_left() {
+  // @@protoc_insertion_point(field_release:milvus.proto.plan.BinaryExpr.left)
+  
+  ::milvus::proto::plan::Expr* temp = left_;
+  left_ = nullptr;
+  return temp;
+}
+inline ::milvus::proto::plan::Expr* BinaryExpr::mutable_left() {
+  
+  if (left_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::proto::plan::Expr>(GetArenaNoVirtual());
+    left_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.plan.BinaryExpr.left)
+  return left_;
+}
+inline void BinaryExpr::set_allocated_left(::milvus::proto::plan::Expr* left) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete left_;
+  }
+  if (left) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      left = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, left, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  left_ = left;
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.plan.BinaryExpr.left)
+}
+
+// .milvus.proto.plan.Expr right = 3;
+inline bool BinaryExpr::has_right() const {
+  return this != internal_default_instance() && right_ != nullptr;
+}
+inline void BinaryExpr::clear_right() {
+  if (GetArenaNoVirtual() == nullptr && right_ != nullptr) {
+    delete right_;
+  }
+  right_ = nullptr;
+}
+inline const ::milvus::proto::plan::Expr& BinaryExpr::right() const {
+  const ::milvus::proto::plan::Expr* p = right_;
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.BinaryExpr.right)
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::plan::Expr*>(
+      &::milvus::proto::plan::_Expr_default_instance_);
+}
+inline ::milvus::proto::plan::Expr* BinaryExpr::release_right() {
+  // @@protoc_insertion_point(field_release:milvus.proto.plan.BinaryExpr.right)
+  
+  ::milvus::proto::plan::Expr* temp = right_;
+  right_ = nullptr;
+  return temp;
+}
+inline ::milvus::proto::plan::Expr* BinaryExpr::mutable_right() {
+  
+  if (right_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::proto::plan::Expr>(GetArenaNoVirtual());
+    right_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.plan.BinaryExpr.right)
+  return right_;
+}
+inline void BinaryExpr::set_allocated_right(::milvus::proto::plan::Expr* right) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete right_;
+  }
+  if (right) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      right = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, right, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  right_ = right;
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.plan.BinaryExpr.right)
+}
 
 // -------------------------------------------------------------------
 
