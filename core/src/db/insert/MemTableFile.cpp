@@ -153,6 +153,15 @@ MemTableFile::IsFull() {
     return (GetMemLeft() < single_vector_mem_size);
 }
 
+bool
+MemTableFile::Empty() {
+    segment::SegmentPtr segment_ptr;
+    segment_writer_ptr_->GetSegment(segment_ptr);
+
+    auto uids = segment_ptr->vectors_ptr_->GetUids();
+    return uids.empty();
+}
+
 Status
 MemTableFile::Serialize(uint64_t wal_lsn) {
     int64_t size = GetCurrentMem();
