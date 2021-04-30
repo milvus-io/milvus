@@ -1,89 +1,160 @@
-![Milvuslogo](https://github.com/milvus-io/docs/blob/master/v0.9.1/assets/milvus_logo.png)
-[![Slack](https://img.shields.io/badge/Join-Slack-orange)](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ)
-![GitHub](https://img.shields.io/github/license/milvus-io/milvus)
-![Docker pulls](https://img.shields.io/docker/pulls/milvusdb/milvus)
-
-[![Build Status](http://internal.zilliz.com:18080/jenkins/job/milvus-ci/job/master/badge/icon)](http://internal.zilliz.com:18080/jenkins/job/milvus-ci/job/master/)
-[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3563/badge)](https://bestpractices.coreinfrastructure.org/projects/3563)
-[![codecov](https://codecov.io/gh/milvus-io/milvus/branch/master/graph/badge.svg)](https://codecov.io/gh/milvus-io/milvus)
-[![codebeat badge](https://codebeat.co/badges/e030a4f6-b126-4475-a938-4723d54ec3a7?style=plastic)](https://codebeat.co/projects/github-com-milvus-io-milvus-master)
-[![CodeFactor Grade](https://www.codefactor.io/repository/github/milvus-io/milvus/badge)](https://www.codefactor.io/repository/github/milvus-io/milvus)
-[![Codacy Badge](https://api.codacy.com/project/badge/Grade/c4bb2ccfb51b47f99e43bfd1705edd95)](https://app.codacy.com/gh/milvus-io/milvus?utm_source=github.com&utm_medium=referral&utm_content=milvus-io/milvus&utm_campaign=Badge_Grade_Dashboard)
-
-## What is Milvus
-
-As an open source vector database, Milvus is easy-to-use, highly reliable, robust, and blazing fast. Adopted by over 600 organizations and institutions worldwide, Milvus empowers applications in a variety of fields, including image processing, computer vision, natural language processing, voice recognition, recommender systems, drug discovery, and more. 
-
-The following is Milvus architecture:
-
-![arch](https://github.com/milvus-io/docs/blob/master/v0.10.5/assets/milvus_arch.png)
-
-For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/overview.md). See Milvus [release notes](https://www.milvus.io/docs/release_notes.md) to keep up-to-date with its releases and updates.
-
-Milvus is an incubation-stage project at [LF AI & Data Foundation](https://lfaidata.foundation/).
-
-## Get started
-
-### Install Milvus
-
-See [Milvus install guide](https://www.milvus.io/docs/install_milvus.md) to install Milvus using Docker. To install Milvus from source code, see [build from source](INSTALL.md).
-
-### Try example programs
-
-Try an example program with Milvus using [Python](https://www.milvus.io/docs/example_code.md), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), [Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/master/sdk/examples).
-
-## Supported clients
-
--   [Go](https://github.com/milvus-io/milvus-sdk-go)
--   [Python](https://github.com/milvus-io/pymilvus)
--   [Java](https://github.com/milvus-io/milvus-sdk-java)
--   [C++](https://github.com/milvus-io/milvus/tree/1.x/sdk)
--   [RESTful API](https://github.com/milvus-io/milvus/tree/1.x/core/src/server/web_impl)
--   [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) (Contributed by [arkie](https://www.arkie.cn/))
-
-## Application scenarios
-
-You can use Milvus to build intelligent systems in a variety of AI application scenarios. See [Milvus Scenarios](https://milvus.io/scenarios) for live demos. You can also see [Milvus Bootcamp](https://github.com/milvus-io/bootcamp) for detailed solutions and application scenarios.
-
-## Benchmark
-
-See our [test reports](https://github.com/milvus-io/milvus/tree/master/docs) for more information about performance benchmarking of different indexes in Milvus.
-
-## Roadmap
-
-To learn what's coming up soon in Milvus, read our [Roadmap](https://github.com/milvus-io/milvus/milestones).
-
-It is a Work in Progress, and is subject to reasonable adjustments when necessary. And we greatly appreciate any comments/requirements/suggestions regarding Milvus' roadmap.:clap:
-
-## Contribution guidelines
-
-Contributions are welcomed and greatly appreciated. Please read our [contribution guidelines](CONTRIBUTING.md) for detailed contribution workflow. This project adheres to the [code of conduct](CODE_OF_CONDUCT.md) of Milvus. You must abide by this code to participate.
-
-We use [GitHub issues](https://github.com/milvus-io/milvus/issues) to track issues and bugs. For general questions and public discussions, please join our community.
-
-## Join our community
-
-:heart:  To connect with other users and contributors, you can join our [Slack channel](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ).
-
-See our [community](https://github.com/milvus-io/community) repository to learn more about our governance and access more community resources.
+<center>
+<img src="https://zillizstorage.blob.core.windows.net/zilliz-assets/zilliz-assets/assets/small_v2_0_readme_33ea8d0e66.jpg" alt="milvus banner"width="960" height="540">
+</center>
 
 
-## Resources
 
--   [Milvus.io](https://www.milvus.io)
 
--   [Milvus FAQ](https://www.milvus.io/docs/faq/operational_faq.md)
 
--   [Milvus Medium](https://medium.com/@milvusio)
+<center>
+  <a href="https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ">
+        <img src="https://img.shields.io/badge/Join-Slack-orange" />
+  </a>
+        <img src="https://img.shields.io/github/license/milvus-io/milvus" />
+        <img src="https://img.shields.io/docker/pulls/milvusdb/milvus" />
+</center>
 
--   [Milvus CSDN](https://zilliz.blog.csdn.net/)
 
--   [Milvus Twitter](https://twitter.com/milvusio)
+<center>
+  <a href="http://internal.zilliz.com:18080/jenkins/job/milvus-ci/job/master/">
+        <img src="http://internal.zilliz.com:18080/jenkins/job/milvus-ci/job/master/badge/icon" />
+  </a>
+  <a href="https://bestpractices.coreinfrastructure.org/projects/3563">
+        <img src="https://bestpractices.coreinfrastructure.org/projects/3563/badge" />
+  </a>
+  <a href="https://codecov.io/gh/milvus-io/milvus">
+        <img src="https://codecov.io/gh/milvus-io/milvus/branch/master/graph/badge.svg" />
+  </a>
+  <a href="https://app.codacy.com/gh/milvus-io/milvus?utm_source=github.com&utm_medium=referral&utm_content=milvus-io/milvus&utm_campaign=Badge_Grade_Dashboard">
+        <img src="https://api.codacy.com/project/badge/Grade/c4bb2ccfb51b47f99e43bfd1705edd95" />
+  </a>
+</center>
 
--   [Milvus Facebook](https://www.facebook.com/io.milvus.5)
 
--   [Milvus design docs](DESIGN.md)
+
+
+<details>
+<summary>Take a quick look at our demos!</summary>
+  <table>
+  <tr>
+    <td width="30%">
+      <a href="https://zilliz.com/solutions">
+        <img src="https://zillizstorage.blob.core.windows.net/zilliz-assets/zilliz-assets/assets/image_search_59a64e4f22.gif" />
+      </a>
+    </td>
+    <td width="30%">
+<a href="https://zilliz.com/solutions">
+<img src="https://zillizstorage.blob.core.windows.net/zilliz-assets/zilliz-assets/assets/qa_df5ee7bd83.gif" />
+</a>
+    </td>
+    <td width="30%">
+<a href="https://zilliz.com/solutions">
+<img src="https://zillizstorage.blob.core.windows.net/zilliz-assets/zilliz-assets/assets/mole_search_76f8340572.gif" />
+</a>
+    </td>
+  </tr>
+  <tr>
+    <th>
+      <a href="https://zilliz.com/solutions">Image search</a>
+    </th>
+    <th>
+      <a href="https://zilliz.com/solutions">Chatbots</a>
+    </th>
+    <th>
+      <a href="https://zilliz.com/solutions">Chemical structure search</a>
+    </th>
+  </tr>
+</table>
+</details>
+
+
+Milvus is an AI-infused database geared towards (embedding) vector similarity search. Milvus is dedicated to lowering the bar for unstructured data search and providing a consistent user experience regardless of users' deployment environment. 
+
+Milvus was released under the open-source Apache License 2.0 in October 2019. It is currently an incubation-stage project under [LF AI & Data Foundation](https://lfaidata.foundation/). 
+
+- **Functionality-level Autoscaling**
+
+With the main functionalities implemented equivalent among nodes, Milvus is able to autoscale at the functionality level, providing the foundation for a more efficient resource scheduling. 
+
+- **Hybrid Search**
+
+In addition to vectors, basic numeric types, such as boolean, integer, floating-point number, etc, are introduced in Milvus. Search for data from hybrid fields are now supported in the Milvus collection.
+
+- **Combined Data Storage**
+
+Milvus has reinforced its support for both streaming and batch data persistence and for the adaptation of alternative message/storage engines, in response to users' increasing demand for high database throughput.
+
+- **Multiple Indexes in a Single Field**
+
+Milvus now supports multiple indexes in a single vector filed, and it decouples indexing from querying. Users are allowed to maintain multiple indexes simultaneously and switch flexibly among them according to their needs.
+
+> **IMPORTANT** The master branch is for the development of Milvus v2.0. On March 9th, 2021, we released Milvus v1.0 which is our first stable version of Milvus with long-term support. To try out Milvus v1.0, switch to [branch 1.0](https://github.com/milvus-io/milvus/tree/1.0).
+
+## Getting Started
+
+### To install a Milvus stand-alone
+
+See [Install Milvus Standalone]().
+
+### To install a Milvus cluster
+
+See [Install Milvus Cluster]().
+
+### Demos
+
+- [Image Search](https://zilliz.com/milvus-demos): Images made searchable. Instantaneously return the most similar images from a massive database.
+- [Chatbots](https://zilliz.com/milvus-demos): Interactive digital customer service that saves users time and businesses money.
+- [Chemical Structure Search](https://zilliz.com/milvus-demos): Blazing fast similarity search, substructure search, or superstructure search for a specified molecule.
+
+## Contributing
+
+Contributions to Milvus are welcome from everyone. See [Guidelines for Contributing](https://github.com/milvus-io/milvus/blob/master/CONTRIBUTING.md) for details on submitting patches and the contribution workflow. See our [community repository](https://github.com/milvus-io/community) to learn about our governance and access more community resources.
+
+## Documentation
+
+### Milvus Docs
+
+For documentation about Milvus, see [Milvus Docs](https://milvus.io/docs/overview.md).
+
+### SDK
+
+The implemented SDK and its API document are listed below:
+
+- [Python](https://github.com/milvus-io/pymilvus/tree/1.x)
+
+### Recommended Articles
+
+- [What is an embedding vector? Why and how does it contribute to the development of Machine Learning?](https://milvus.io/docs/v1.0.0/vector.md)
+- [What types of vector index does Milvus support? Which should I choose?](https://milvus.io/docs/v1.0.0/index.md)
+- [How does Milvus compare the distance between vectors?](https://milvus.io/docs/v1.0.0/metric.md)
+- You can learn more in [Milvus Server Configurations](https://milvus.io/docs/v1.0.0/milvus_config.md).
+
+## Contact
+
+Join the Milvus community on [Slack Channel](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ) to share your suggestions, advice, and questions with our engineer team. You can also ask for help at our [FAQ page](https://milvus.io/docs/v1.0.0/performance_faq.md).
+
+You can subscribe to our mailing lists at:
+
+- [Milvus Technical Steering Committee](https://lists.lfai.foundation/g/milvus-tsc)
+- [Milvus Technical Discussions](https://lists.lfai.foundation/g/milvus-technical-discuss)
+- [Milvus Announcement](https://lists.lfai.foundation/g/milvus-announce)
+
+and follow us on social media:
+
+- [Milvus Medium](https://medium.com/@milvusio)
+- [Milvus CSDN](https://zilliz.blog.csdn.net/)
+- [Milvus Twitter](https://twitter.com/milvusio)
+- [Milvus Facebook](https://www.facebook.com/io.milvus.5)
 
 ## License
 
-[Apache License 2.0](LICENSE)
+Milvus is licensed under the Apache License, Version 2.0. View a copy of the [License file](https://github.com/milvus-io/milvus/blob/master/LICENSE).
+
+## Acknowledgments
+
+Milvus adopts dependencies from the following:
+
+- Thank [FAISS](https://github.com/facebookresearch/faiss) for the excellent search library.
+- Thank [etcd](https://github.com/coreos/etcd) for providing some great open-source tools.
+- Thank [Pulsar](https://github.com/apache/pulsar) for its great distributed information pub/sub platform.
+- Thank [RocksDB](https://github.com/facebook/rocksdb) for the powerful storage engines.
