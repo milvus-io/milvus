@@ -92,13 +92,6 @@ Milvus now supports multiple indexes in a single vector filed, and it decouples 
 
 ## Getting Started
 
-### To install a Milvus stand-alone
-
-See [Install Milvus Standalone]().
-
-### To install a Milvus cluster
-
-See [Install Milvus Cluster]().
 
 ### Demos
 
