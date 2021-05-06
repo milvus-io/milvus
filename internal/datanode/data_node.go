@@ -99,7 +99,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 	return node
 }
 
-// Set master service's grpc client, error is returned if repeatedly set.
+// `SetMasterServiceInterface` sets master service's grpc client, error is returned if repeatedly set.
 func (node *DataNode) SetMasterServiceInterface(ms types.MasterService) error {
 	switch {
 	case ms == nil, node.masterService != nil:
@@ -110,7 +110,7 @@ func (node *DataNode) SetMasterServiceInterface(ms types.MasterService) error {
 	}
 }
 
-// Set data service's grpc client, error is returned if repeatedly set.
+// `SetDataServiceInterface` sets data service's grpc client, error is returned if repeatedly set.
 func (node *DataNode) SetDataServiceInterface(ds types.DataService) error {
 	switch {
 	case ds == nil, node.dataService != nil:
@@ -121,7 +121,7 @@ func (node *DataNode) SetDataServiceInterface(ds types.DataService) error {
 	}
 }
 
-// Suppose data service is in INITIALIZING state.
+// Init function supposes data service is in INITIALIZING state.
 //
 // In Init process, data node will register itself to data service with its node id
 // and address. Therefore, `SetDataServiceInterface()` must be called before this func.
@@ -272,7 +272,6 @@ func (node *DataNode) Stop() error {
 	return nil
 }
 
-// Not implemented yet
 func (node *DataNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
@@ -283,7 +282,6 @@ func (node *DataNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringR
 	}, nil
 }
 
-// Not implemented yet
 func (node *DataNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
