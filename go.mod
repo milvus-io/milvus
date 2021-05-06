@@ -6,7 +6,7 @@ require (
 	github.com/99designs/keyring v1.1.5 // indirect
 	github.com/HdrHistogram/hdrhistogram-go v1.0.1 // indirect
 	github.com/antonmedv/expr v1.8.9 // indirect
-	github.com/apache/pulsar-client-go v0.4.0 // indirect
+	github.com/apache/pulsar-client-go v0.4.0
 	github.com/beefsack/go-rate v0.0.0-20180408011153-efa7637bb9b6 // indirect
 	github.com/bmizerany/perks v0.0.0-20141205001514-d9a9656a3a4b // indirect
 	github.com/datadog/zstd v1.4.6-0.20200617134701-89f69fb7df32 // indirect
