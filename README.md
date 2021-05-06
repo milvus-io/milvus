@@ -1,5 +1,5 @@
 <center>
-<img src="https://zillizstorage.blob.core.windows.net/zilliz-assets/zilliz-assets/assets/small_v2_0_readme_33ea8d0e66.jpg" alt="milvus banner"width="960" height="540">
+<img src="https://zillizstorage.blob.core.windows.net/zilliz-assets/zilliz-assets/assets/readme_b829d6d8ed.png" alt="milvus banner">
 </center>
 
 
