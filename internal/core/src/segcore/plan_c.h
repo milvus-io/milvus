@@ -25,6 +25,9 @@ CStatus
 CreatePlan(CCollection col, const char* dsl, CPlan* res_plan);
 
 CStatus
+CreatePlanByExpr(CCollection col, const char* serialized_expr_plan, CPlan* res_plan);
+
+CStatus
 ParsePlaceholderGroup(CPlan plan,
                       void* placeholder_group_blob,
                       int64_t blob_size,
