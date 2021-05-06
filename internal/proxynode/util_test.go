@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/jarcoal/httpmock"
@@ -126,5 +128,31 @@ func TestCheckStrByValues(t *testing.T) {
 		if got := CheckStrByValues(test.params, test.key, test.container); got != test.want {
 			t.Errorf("CheckStrByValues(%v, %v, %v) = %v", test.params, test.key, test.container, test.want)
 		}
+	}
+}
+
+func TestGetAttrByKeyFromRepeatedKV(t *testing.T) {
+	kvs := []*commonpb.KeyValuePair{
+		{Key: "Key1", Value: "Value1"},
+		{Key: "Key2", Value: "Value2"},
+		{Key: "Key3", Value: "Value3"},
+	}
+
+	cases := []struct {
+		key      string
+		kvs      []*commonpb.KeyValuePair
+		value    string
+		errIsNil bool
+	}{
+		{"Key1", kvs, "Value1", true},
+		{"Key2", kvs, "Value2", true},
+		{"Key3", kvs, "Value3", true},
+		{"other", kvs, "", false},
+	}
+
+	for _, test := range cases {
+		value, err := GetAttrByKeyFromRepeatedKV(test.key, test.kvs)
+		assert.Equal(t, test.value, value)
+		assert.Equal(t, test.errIsNil, err == nil)
 	}
 }

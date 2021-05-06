@@ -41,7 +41,7 @@ struct UnaryExpr : Expr {
 };
 
 struct BoolUnaryExpr : UnaryExpr {
-    enum class OpType { LogicalNot };
+    enum class OpType { Invalid = 0, LogicalNot = 1 };
     OpType op_type_;
 
  public:
@@ -51,7 +51,7 @@ struct BoolUnaryExpr : UnaryExpr {
 
 struct BoolBinaryExpr : BinaryExpr {
     // Note: bitA - bitB == bitA & ~bitB, alias to LogicalMinus
-    enum class OpType { LogicalAnd, LogicalOr, LogicalXor, LogicalMinus };
+    enum class OpType { Invalid = 0, LogicalAnd = 1, LogicalOr = 2, LogicalXor = 3, LogicalMinus = 4 };
     OpType op_type_;
 
  public:
@@ -76,7 +76,15 @@ struct TermExpr : Expr {
 struct RangeExpr : Expr {
     FieldOffset field_offset_;
     DataType data_type_ = DataType::NONE;
-    enum class OpType { GreaterThan = 0, GreaterEqual = 1, LessThan = 2, LessEqual = 3, Equal, NotEqual };
+    enum class OpType {
+        Invalid = 0,
+        GreaterThan = 1,
+        GreaterEqual = 2,
+        LessThan = 3,
+        LessEqual = 4,
+        Equal = 5,
+        NotEqual = 6
+    };
     static const std::map<std::string, OpType> mapping_;  // op_name -> op
 
     // std::vector<std::tuple<OpType, std::any>> conditions_;

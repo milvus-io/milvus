@@ -27,6 +27,7 @@ set(MILVUS_QUERY_SRCS
         SearchOnIndex.cpp
         SearchBruteForce.cpp
         SubQueryResult.cpp
+        PlanProto.cpp
         )
 add_library(milvus_query ${MILVUS_QUERY_SRCS})
 target_link_libraries(milvus_query milvus_proto milvus_utils knowhere boost_bitset_ext)

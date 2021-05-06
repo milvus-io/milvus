@@ -36,8 +36,9 @@ func createPlan(col Collection, dsl string) (*Plan, error) {
 	var cPlan C.CPlan
 	status := C.CreatePlan(col.collectionPtr, cDsl, &cPlan)
 
-	if err := HandleCStatus(&status, "Create Plan failed"); err != nil {
-		return nil, err
+	err1 := HandleCStatus(&status, "Create Plan failed")
+	if err1 != nil {
+		return nil, err1
 	}
 
 	var newPlan = &Plan{cPlan: cPlan}

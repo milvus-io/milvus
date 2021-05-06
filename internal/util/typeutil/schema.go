@@ -12,6 +12,8 @@
 package typeutil
 
 import (
+	"errors"
+	"fmt"
 	"strconv"
 
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -56,4 +58,72 @@ func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 		}
 	}
 	return res, nil
+}
+
+type SchemaHelper struct {
+	schema     *schemapb.CollectionSchema
+	nameOffset map[string]int
+	idOffset   map[int64]int
+}
+
+func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error) {
+	if schema == nil {
+		return nil, errors.New("schema is nil")
+	}
+	schemaHelper := SchemaHelper{schema: schema, nameOffset: make(map[string]int), idOffset: make(map[int64]int)}
+	for offset, field := range schema.Fields {
+		if _, ok := schemaHelper.nameOffset[field.Name]; ok {
+			return nil, errors.New("duplicated fieldName: " + field.Name)
+		}
+		if _, ok := schemaHelper.idOffset[field.FieldID]; ok {
+			return nil, errors.New("duplicated fieldID: " + strconv.FormatInt(field.FieldID, 10))
+		}
+		schemaHelper.nameOffset[field.Name] = offset
+		schemaHelper.idOffset[field.FieldID] = offset
+	}
+	return &schemaHelper, nil
+}
+
+func (helper *SchemaHelper) GetFieldFromName(fieldName string) (*schemapb.FieldSchema, error) {
+	offset, ok := helper.nameOffset[fieldName]
+	if !ok {
+		return nil, fmt.Errorf("fieldName(%s) not found", fieldName)
+	}
+	return helper.schema.Fields[offset], nil
+}
+
+func (helper *SchemaHelper) GetFieldFromID(fieldID int64) (*schemapb.FieldSchema, error) {
+	offset, ok := helper.idOffset[fieldID]
+	if !ok {
+		return nil, fmt.Errorf("fieldName(%d) not found", fieldID)
+	}
+	return helper.schema.Fields[offset], nil
+}
+
+func IsVectorType(dataType schemapb.DataType) bool {
+	switch dataType {
+	case schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsIntergerType(dataType schemapb.DataType) bool {
+	switch dataType {
+	case schemapb.DataType_Int8, schemapb.DataType_Int16,
+		schemapb.DataType_Int32, schemapb.DataType_Int64:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsFloatingType(dataType schemapb.DataType) bool {
+	switch dataType {
+	case schemapb.DataType_Float, schemapb.DataType_Double:
+		return true
+	default:
+		return false
+	}
 }
