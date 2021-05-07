@@ -138,6 +138,34 @@ func TestRun(t *testing.T) {
 	err = dnServer.Run()
 	assert.Nil(t, err)
 
+	t.Run("get component states", func(t *testing.T) {
+		req := &internalpb.GetComponentStatesRequest{}
+		rsp, err := dnServer.GetComponentStates(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
+	})
+
+	t.Run("get statistics channel", func(t *testing.T) {
+		req := &internalpb.GetStatisticsChannelRequest{}
+		rsp, err := dnServer.GetStatisticsChannel(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
+	})
+
+	t.Run("watch dm channels", func(t *testing.T) {
+		req := &datapb.WatchDmChannelsRequest{}
+		_, err := dnServer.WatchDmChannels(ctx, req)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("flush segments", func(t *testing.T) {
+		req := &datapb.FlushSegmentsRequest{
+			Base: &commonpb.MsgBase{},
+		}
+		_, err := dnServer.FlushSegments(ctx, req)
+		assert.Nil(t, err)
+	})
+
 	err = dnServer.Stop()
 	assert.Nil(t, err)
 }
