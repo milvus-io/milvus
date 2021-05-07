@@ -277,7 +277,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 		return err
 	}
 	var plan *Plan
-	if searchMsg.IsExpr {
+	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := searchMsg.SerializedExprPlan
 		plan, err = createPlanByExpr(*collection, expr)
 		if err != nil {
@@ -324,7 +324,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 		searchPartitionIDs = partitionIDsInQuery
 	}
 
-	if searchMsg.IsExpr {
+	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		sp.LogFields(oplog.String("statistical time", "stats start"),
 			oplog.Object("nq", queryNum),
 			oplog.Object("expr", searchMsg.SerializedExprPlan))

@@ -604,7 +604,7 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 			return errors.New("invalid expression: " + st.query.Dsl)
 		}
 
-		st.SearchRequest.IsExpr = true
+		st.SearchRequest.DslType = commonpb.DslType_BoolExprV1
 		st.SearchRequest.SerializedExprPlan = proto.MarshalTextString(plan)
 	}
 

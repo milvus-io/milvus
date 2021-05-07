@@ -1028,7 +1028,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_Without_Predicate) {
 
     CQueryResult c_search_result_on_smallIndex;
     auto res_before_load_index =
-            Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
+        Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
@@ -1165,7 +1165,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
 
     CQueryResult c_search_result_on_smallIndex;
     auto res_before_load_index =
-            Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
+        Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
@@ -1656,7 +1656,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Term) {
 
     CQueryResult c_search_result_on_smallIndex;
     auto res_before_load_index =
-            Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
+        Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
@@ -1947,18 +1947,18 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Range) {
 
     CQueryResult c_search_result_on_smallIndex;
     auto res_before_load_index =
-            Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
+        Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
     ASSERT_TRUE(res_before_load_index.error_code == Success) << res_before_load_index.error_msg;
 
     // load index to segment
     auto conf = milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::IndexParams::nprobe, 10},
-            {milvus::knowhere::IndexParams::nlist, 100},
-            {milvus::knowhere::IndexParams::m, 4},
-            {milvus::knowhere::IndexParams::nbits, 8},
-            {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::JACCARD},
+        {milvus::knowhere::meta::DIM, DIM},
+        {milvus::knowhere::meta::TOPK, K},
+        {milvus::knowhere::IndexParams::nprobe, 10},
+        {milvus::knowhere::IndexParams::nlist, 100},
+        {milvus::knowhere::IndexParams::m, 4},
+        {milvus::knowhere::IndexParams::nbits, 8},
+        {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::JACCARD},
     };
 
     auto indexing = generate_index(vec_col.data(), conf, DIM, K, N, IndexEnum::INDEX_FAISS_BIN_IVFFLAT);
@@ -2296,18 +2296,18 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Term) {
 
     CQueryResult c_search_result_on_smallIndex;
     auto res_before_load_index =
-            Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
+        Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
     auto conf = milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::IndexParams::nprobe, 10},
-            {milvus::knowhere::IndexParams::nlist, 100},
-            {milvus::knowhere::IndexParams::m, 4},
-            {milvus::knowhere::IndexParams::nbits, 8},
-            {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::JACCARD},
+        {milvus::knowhere::meta::DIM, DIM},
+        {milvus::knowhere::meta::TOPK, K},
+        {milvus::knowhere::IndexParams::nprobe, 10},
+        {milvus::knowhere::IndexParams::nlist, 100},
+        {milvus::knowhere::IndexParams::m, 4},
+        {milvus::knowhere::IndexParams::nbits, 8},
+        {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::JACCARD},
     };
 
     auto indexing = generate_index(vec_col.data(), conf, DIM, K, N, IndexEnum::INDEX_FAISS_BIN_IVFFLAT);
@@ -2690,17 +2690,17 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     ++i;
 
     auto c_counter_field_data = CLoadFieldDataInfo{
-            101,
-            counter_col.data(),
-            N,
+        101,
+        counter_col.data(),
+        N,
     };
     status = LoadFieldData(segment, c_counter_field_data);
     assert(status.error_code == Success);
 
     auto c_id_field_data = CLoadFieldDataInfo{
-            0,
-            counter_col.data(),
-            N,
+        0,
+        counter_col.data(),
+        N,
     };
     status = LoadFieldData(segment, c_id_field_data);
     assert(status.error_code == Success);
