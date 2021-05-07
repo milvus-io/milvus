@@ -127,7 +127,8 @@ message SearchRequest {
   string dsl = 6;
   // serialized `PlaceholderGroup`
   bytes placeholder_group = 7;
-  common.Blob query = 8;
+  common.DslType dsl_type = 8;
+  string serialized_expr_plan = 9;
 }
 
 message SearchResults {

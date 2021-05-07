@@ -318,17 +318,17 @@ ParsePlaceholderGroup(const Plan* plan, const std::string& blob) {
 std::unique_ptr<Plan>
 CreatePlan(const Schema& schema, const std::string& dsl_str) {
     Json dsl;
-    try {
-        dsl = json::parse(dsl_str);
-    } catch (std::exception& e) {
-        // assume protobuf text format
-        proto::plan::PlanNode plan_node;
-        auto ok = google::protobuf::TextFormat::ParseFromString(dsl_str, &plan_node);
-        AssertInfo(ok, "Failed to parse");
-        return ProtoParser(schema).CreatePlan(plan_node);
-    }
+    dsl = json::parse(dsl_str);
     auto plan = Parser(schema).CreatePlanImpl(dsl);
     return plan;
+}
+
+std::unique_ptr<Plan>
+CreatePlanByExpr(const Schema& schema, const std::string& serialized_expr_plan) {
+    proto::plan::PlanNode plan_node;
+    auto ok = google::protobuf::TextFormat::ParseFromString(serialized_expr_plan, &plan_node);
+    AssertInfo(ok, "Failed to parse");
+    return ProtoParser(schema).CreatePlan(plan_node);
 }
 
 std::vector<ExprPtr>

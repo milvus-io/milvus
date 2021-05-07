@@ -25,6 +25,9 @@ struct PlaceholderGroup;
 std::unique_ptr<Plan>
 CreatePlan(const Schema& schema, const std::string& dsl);
 
+std::unique_ptr<Plan>
+CreatePlanByExpr(const Schema& schema, const std::string& serialized_expr_plan);
+
 std::unique_ptr<PlaceholderGroup>
 ParsePlaceholderGroup(const Plan* plan, const std::string& placeholder_group_blob);
 
