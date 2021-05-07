@@ -162,8 +162,9 @@ func TestRun(t *testing.T) {
 		req := &datapb.FlushSegmentsRequest{
 			Base: &commonpb.MsgBase{},
 		}
-		_, err := dnServer.FlushSegments(ctx, req)
+		rsp, err := dnServer.FlushSegments(ctx, req)
 		assert.Nil(t, err)
+		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_Success)
 	})
 
 	err = dnServer.Stop()
