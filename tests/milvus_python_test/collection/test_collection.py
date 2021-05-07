@@ -874,6 +874,55 @@ class TestCollection:
         assert status.OK()
 
     @pytest.mark.level(1)
+    def test_load_release_collection_partition(self, connect, collection):
+        partition_name = gen_unique_str()
+        status = connect.create_partition(collection, partition_name)
+        assert status.OK()
+        status, ids = connect.insert(collection, vectors, partition_tag=partition_name)
+        assert status.OK()
+        status = connect.load_collection(collection, partition_tags=[partition_name])
+        assert status.OK()
+        status = connect.release_collection(collection, partition_tags=[partition_name])
+        assert status.OK()
+
+    @pytest.mark.level(1)
+    def test_load_release_twice_collection_partition(self, connect, collection):
+        partition_name = gen_unique_str()
+        status = connect.create_partition(collection, partition_name)
+        assert status.OK()
+        status, ids = connect.insert(collection, vectors, partition_tag=partition_name)
+        assert status.OK()
+        status = connect.load_collection(collection, partition_tags=[partition_name])
+        assert status.OK()
+        for i in range(2):
+            status = connect.release_collection(collection, partition_tags=[partition_name])
+            assert status.OK()
+
+    @pytest.mark.level(1)
+    def test_load_release_load_collection_partition(self, connect, collection):
+        partition_name = gen_unique_str()
+        status = connect.create_partition(collection, partition_name)
+        assert status.OK()
+        status, ids = connect.insert(collection, vectors, partition_tag=partition_name)
+        assert status.OK()
+        status = connect.load_collection(collection, partition_tags=[partition_name])
+        assert status.OK()
+        status = connect.release_collection(collection, partition_tags=[partition_name])
+        assert status.OK()
+        status = connect.load_collection(collection, partition_tags=[partition_name])
+        assert status.OK()
+
+    @pytest.mark.level(1)
+    def test_not_load_release_collection_partition(self, connect, collection):
+        partition_name = gen_unique_str()
+        status = connect.create_partition(collection, partition_name)
+        assert status.OK()
+        status, ids = connect.insert(collection, vectors, partition_tag=partition_name)
+        assert status.OK()
+        status = connect.release_collection(collection, partition_tags=[partition_name])
+        assert status.OK()
+
+    @pytest.mark.level(1)
     def test_load_collection_partitions(self, connect, collection):
         partition_names = []
         for i in range(2):
