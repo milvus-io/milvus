@@ -81,7 +81,6 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     // TODO: add more buffs
     Assert(plan_node_proto.has_vector_anns());
     auto& anns_proto = plan_node_proto.vector_anns();
-    AssertInfo(anns_proto.is_binary() == false, "unimplemented");
     auto expr_opt = [&]() -> std::optional<ExprPtr> {
         if (!anns_proto.has_predicates()) {
             return std::nullopt;

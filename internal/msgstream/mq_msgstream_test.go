@@ -111,7 +111,6 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 				Timestamp: 11,
 				SourceID:  reqID,
 			},
-			Query:           nil,
 			ResultChannelID: "0",
 		}
 		searchMsg := &SearchMsg{

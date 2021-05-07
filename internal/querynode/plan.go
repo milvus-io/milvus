@@ -45,6 +45,21 @@ func createPlan(col Collection, dsl string) (*Plan, error) {
 	return newPlan, nil
 }
 
+func createPlanByExpr(col Collection, expr string) (*Plan, error) {
+	cExpr := C.CString(expr)
+	defer C.free(unsafe.Pointer(cExpr))
+	var cPlan C.CPlan
+	status := C.CreatePlanByExpr(col.collectionPtr, cExpr, &cPlan)
+
+	err1 := HandleCStatus(&status, "Create Plan by expr failed")
+	if err1 != nil {
+		return nil, err1
+	}
+
+	var newPlan = &Plan{cPlan: cPlan}
+	return newPlan, nil
+}
+
 func (plan *Plan) getTopK() int64 {
 	topK := C.GetTopK(plan.cPlan)
 	return int64(topK)

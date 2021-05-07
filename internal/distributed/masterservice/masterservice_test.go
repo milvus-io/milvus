@@ -835,6 +835,7 @@ func TestRun(t *testing.T) {
 		connectIndexService: true,
 		connectQueryService: true,
 	}
+	Params.Init()
 	Params.Port = 1000000
 	err := svr.Run()
 	assert.NotNil(t, err)

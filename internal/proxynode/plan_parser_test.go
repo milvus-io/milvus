@@ -97,3 +97,42 @@ func TestExternalParser(t *testing.T) {
 
 	println(ast.Node.Location().Column)
 }
+
+func TestExprPlan_Str(t *testing.T) {
+	fields := []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "fakevec", DataType: schemapb.DataType_FloatVector},
+		{FieldID: 101, Name: "age", DataType: schemapb.DataType_Int64},
+	}
+
+	schema := &schemapb.CollectionSchema{
+		Name:        "default-collection",
+		Description: "",
+		AutoID:      true,
+		Fields:      fields,
+	}
+
+	queryInfo := &planpb.QueryInfo{
+		Topk:         10,
+		MetricType:   "L2",
+		SearchParams: "{\"nprobe\": 10}",
+	}
+
+	// without filter
+	planProto, err := CreateQueryPlan(schema, nil, "fakevec", queryInfo)
+	assert.Nil(t, err)
+	dbgStr := proto.MarshalTextString(planProto)
+	println(dbgStr)
+
+	exprStrs := []string{
+		"age >= 420000 && age < 420010", // range
+		"age == 420000 || age == 420001 || age == 420002 || age == 420003 || age == 420004", // term
+	}
+
+	for offset, exprStr := range exprStrs {
+		fmt.Printf("case %d: %s\n", offset, exprStr)
+		planProto, err := CreateQueryPlan(schema, &exprStr, "fakevec", queryInfo)
+		assert.Nil(t, err)
+		dbgStr := proto.MarshalTextString(planProto)
+		println(dbgStr)
+	}
+}

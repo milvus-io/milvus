@@ -276,10 +276,19 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	if err != nil {
 		return err
 	}
-	dsl := searchMsg.Dsl
-	plan, err := createPlan(*collection, dsl)
-	if err != nil {
-		return err
+	var plan *Plan
+	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
+		expr := searchMsg.SerializedExprPlan
+		plan, err = createPlanByExpr(*collection, expr)
+		if err != nil {
+			return err
+		}
+	} else {
+		dsl := searchMsg.Dsl
+		plan, err = createPlan(*collection, dsl)
+		if err != nil {
+			return err
+		}
 	}
 	searchRequestBlob := searchMsg.PlaceholderGroup
 	searchReq, err := parseSearchRequest(plan, searchRequestBlob)
@@ -315,14 +324,21 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 		searchPartitionIDs = partitionIDsInQuery
 	}
 
-	sp.LogFields(oplog.String("statistical time", "stats start"), oplog.Object("nq", queryNum), oplog.Object("dsl", dsl))
+	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
+		sp.LogFields(oplog.String("statistical time", "stats start"),
+			oplog.Object("nq", queryNum),
+			oplog.Object("expr", searchMsg.SerializedExprPlan))
+	} else {
+		sp.LogFields(oplog.String("statistical time", "stats start"),
+			oplog.Object("nq", queryNum),
+			oplog.Object("dsl", searchMsg.Dsl))
+	}
 	for _, partitionID := range searchPartitionIDs {
 		segmentIDs, err := s.replica.getSegmentIDs(partitionID)
 		if err != nil {
 			return err
 		}
 		for _, segmentID := range segmentIDs {
-			//log.Debug("dsl = ", dsl)
 			segment, err := s.replica.getSegmentByID(segmentID)
 			if err != nil {
 				return err

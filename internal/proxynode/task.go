@@ -563,8 +563,6 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 	}
 	st.Base.MsgType = commonpb.MsgType_Search
 
-	var dsl string
-	dsl = st.query.Dsl
 	if st.query.GetDslType() == commonpb.DslType_BoolExprV1 {
 		schema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
 		if err != nil { // err is not nil if collection not exists
@@ -606,26 +604,18 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 			return errors.New("invalid expression: " + st.query.Dsl)
 		}
 
-		dsl = proto.MarshalTextString(plan)
-		st.query.Dsl = dsl
+		st.SearchRequest.DslType = commonpb.DslType_BoolExprV1
+		st.SearchRequest.SerializedExprPlan = proto.MarshalTextString(plan)
 	}
 
-	queryBytes, err := proto.Marshal(st.query)
-	if err != nil {
-		return err
-	}
-	st.Query = &commonpb.Blob{
-		Value: queryBytes,
-	}
-
-	st.ResultChannelID = Params.SearchResultChannelNames[0]
-	st.DbID = 0 // todo
+	st.SearchRequest.ResultChannelID = Params.SearchResultChannelNames[0]
+	st.SearchRequest.DbID = 0 // todo
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
-	st.CollectionID = collectionID
-	st.PartitionIDs = make([]UniqueID, 0)
+	st.SearchRequest.CollectionID = collectionID
+	st.SearchRequest.PartitionIDs = make([]UniqueID, 0)
 
 	partitionsMap, err := globalMetaCache.GetPartitions(ctx, collectionName)
 	if err != nil {
@@ -655,8 +645,8 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	st.Dsl = dsl
-	st.PlaceholderGroup = st.query.PlaceholderGroup
+	st.SearchRequest.Dsl = st.query.Dsl
+	st.SearchRequest.PlaceholderGroup = st.query.PlaceholderGroup
 
 	return nil
 }

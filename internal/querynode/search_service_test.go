@@ -101,19 +101,6 @@ func sendSearchRequest(ctx context.Context, DIM int) error {
 		return err
 	}
 
-	// generate searchRequest
-	searchReq := milvuspb.SearchRequest{
-		Dsl:              dslString,
-		PlaceholderGroup: placeGroupByte,
-	}
-	searchReqBytes, err := proto.Marshal(&searchReq)
-	if err != nil {
-		return err
-	}
-	blob := commonpb.Blob{
-		Value: searchReqBytes,
-	}
-
 	// generate searchMsg
 	searchMsg := &msgstream.SearchMsg{
 		BaseMsg: msgstream.BaseMsg{
@@ -126,8 +113,10 @@ func sendSearchRequest(ctx context.Context, DIM int) error {
 				Timestamp: Timestamp(10),
 				SourceID:  1,
 			},
-			ResultChannelID: "0",
-			Query:           &blob,
+			ResultChannelID:  "0",
+			Dsl:              dslString,
+			PlaceholderGroup: placeGroupByte,
+			DslType:          commonpb.DslType_Dsl,
 		},
 	}
 	msgPackSearch := msgstream.MsgPack{}
