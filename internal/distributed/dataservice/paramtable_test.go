@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package grpcdatanode
+package grpcdataserviceclient
 
 import (
 	"testing"
@@ -20,18 +20,8 @@ import (
 func TestParamTable(t *testing.T) {
 	Params.Init()
 
-	Params.LoadFromEnv()
-	assert.NotEqual(t, Params.IP, "")
-	t.Logf("DataNode IP:%s", Params.IP)
-
 	assert.NotEqual(t, Params.Port, 0)
-	t.Logf("DataNode Port:%d", Params.Port)
-
-	assert.NotNil(t, Params.listener)
-	t.Logf("DataNode listener:%d", Params.listener)
-
-	assert.NotEqual(t, Params.DataServiceAddress, "")
-	t.Logf("DataServiceAddress:%s", Params.DataServiceAddress)
+	t.Logf("DataService Port:%d", Params.Port)
 
 	assert.NotEqual(t, Params.MasterAddress, "")
 	t.Logf("MasterAddress:%s", Params.MasterAddress)

@@ -53,6 +53,8 @@ type Server struct {
 	grpcServer    *grpc.Server
 	masterService types.MasterService
 
+	newMasterServiceClient func(string) (types.MasterService, error)
+
 	closer io.Closer
 }
 
@@ -64,8 +66,10 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		ctx:         ctx1,
 		cancel:      cancel,
 		grpcErrChan: make(chan error),
+		newMasterServiceClient: func(s string) (types.MasterService, error) {
+			return msc.NewClient(s, 10*time.Second)
+		},
 	}
-
 	s.dataService, err = dataservice.CreateServer(s.ctx, factory)
 	if err != nil {
 		return nil, err
@@ -77,37 +81,37 @@ func (s *Server) init() error {
 	Params.Init()
 	Params.LoadFromEnv()
 
+	ctx := context.Background()
+
 	closer := trace.InitTracing("data_service")
 	s.closer = closer
 
-	s.wg.Add(1)
-	go s.startGrpcLoop(Params.Port)
-	// wait for grpc server loop start
-	if err := <-s.grpcErrChan; err != nil {
+	err := s.startGrpc()
+	if err != nil {
 		return err
 	}
 
-	log.Debug("master address", zap.String("address", Params.MasterAddress))
-	client, err := msc.NewClient(Params.MasterAddress, 10*time.Second)
-	if err != nil {
-		panic(err)
-	}
-	log.Debug("master client create complete")
-	if err = client.Init(); err != nil {
-		panic(err)
-	}
-	if err = client.Start(); err != nil {
-		panic(err)
-	}
 	s.dataService.UpdateStateCode(internalpb.StateCode_Initializing)
 
-	ctx := context.Background()
-	err = funcutil.WaitForComponentInitOrHealthy(ctx, client, "MasterService", 1000000, time.Millisecond*200)
+	if s.newMasterServiceClient != nil {
+		log.Debug("master service", zap.String("address", Params.MasterAddress))
+		masterServiceClient, err := s.newMasterServiceClient(Params.MasterAddress)
+		if err != nil {
+			panic(err)
+		}
+		log.Debug("master service client created")
 
-	if err != nil {
-		panic(err)
+		if err = masterServiceClient.Init(); err != nil {
+			panic(err)
+		}
+		if err = masterServiceClient.Start(); err != nil {
+			panic(err)
+		}
+		if err = funcutil.WaitForComponentInitOrHealthy(ctx, masterServiceClient, "MasterService", 1000000, 200*time.Millisecond); err != nil {
+			panic(err)
+		}
+		s.dataService.SetMasterClient(masterServiceClient)
 	}
-	s.dataService.SetMasterClient(client)
 
 	dataservice.Params.Init()
 	if err := s.dataService.Init(); err != nil {
@@ -115,6 +119,14 @@ func (s *Server) init() error {
 		return err
 	}
 	return nil
+}
+
+func (s *Server) startGrpc() error {
+	s.wg.Add(1)
+	go s.startGrpcLoop(Params.Port)
+	// wait for grpc server loop start
+	err := <-s.grpcErrChan
+	return err
 }
 
 func (s *Server) startGrpcLoop(grpcPort int) {
