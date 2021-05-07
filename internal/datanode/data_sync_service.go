@@ -58,7 +58,11 @@ func (dsService *dataSyncService) init() {
 
 func (dsService *dataSyncService) start() {
 	log.Debug("Data Sync Service Start Successfully")
-	dsService.fg.Start()
+	if dsService.fg != nil {
+		dsService.fg.Start()
+	} else {
+		log.Debug("Data Sync Service flowgraph nil")
+	}
 }
 
 func (dsService *dataSyncService) close() {

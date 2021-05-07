@@ -25,8 +25,7 @@ type DataNode struct {
 }
 
 func NewDataNode(ctx context.Context, factory msgstream.Factory) (*DataNode, error) {
-
-	svr, err := grpcdatanode.New(ctx, factory)
+	svr, err := grpcdatanode.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err
 	}

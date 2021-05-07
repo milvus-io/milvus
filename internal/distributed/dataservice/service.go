@@ -188,7 +188,6 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) Run() error {
-
 	if err := s.init(); err != nil {
 		return err
 	}
