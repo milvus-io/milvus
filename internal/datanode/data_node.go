@@ -99,7 +99,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 	return node
 }
 
-// `SetMasterServiceInterface` sets master service's grpc client, error is returned if repeatedly set.
+// SetMasterServiceInterface sets master service's grpc client, error is returned if repeatedly set.
 func (node *DataNode) SetMasterServiceInterface(ms types.MasterService) error {
 	switch {
 	case ms == nil, node.masterService != nil:
@@ -110,7 +110,7 @@ func (node *DataNode) SetMasterServiceInterface(ms types.MasterService) error {
 	}
 }
 
-// `SetDataServiceInterface` sets data service's grpc client, error is returned if repeatedly set.
+// SetDataServiceInterface sets data service's grpc client, error is returned if repeatedly set.
 func (node *DataNode) SetDataServiceInterface(ds types.DataService) error {
 	switch {
 	case ds == nil, node.dataService != nil:
