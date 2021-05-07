@@ -41,12 +41,13 @@ CreatePlan(CCollection c_col, const char* dsl, CPlan* res_plan) {
     }
 }
 
+// Note: serialized_expr_plan is of binary format
 CStatus
-CreatePlanByExpr(CCollection c_col, const char* serialized_expr_plan, CPlan* res_plan) {
+CreatePlanByExpr(CCollection c_col, const char* serialized_expr_plan, int64_t size, CPlan* res_plan) {
     auto col = (milvus::segcore::Collection*)c_col;
 
     try {
-        auto res = milvus::query::CreatePlanByExpr(*col->get_schema(), serialized_expr_plan);
+        auto res = milvus::query::CreatePlanByExpr(*col->get_schema(), serialized_expr_plan, size);
 
         auto status = CStatus();
         status.error_code = Success;

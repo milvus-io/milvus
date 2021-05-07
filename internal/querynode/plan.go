@@ -45,11 +45,9 @@ func createPlan(col Collection, dsl string) (*Plan, error) {
 	return newPlan, nil
 }
 
-func createPlanByExpr(col Collection, expr string) (*Plan, error) {
-	cExpr := C.CString(expr)
-	defer C.free(unsafe.Pointer(cExpr))
+func createPlanByExpr(col Collection, expr []byte) (*Plan, error) {
 	var cPlan C.CPlan
-	status := C.CreatePlanByExpr(col.collectionPtr, cExpr, &cPlan)
+	status := C.CreatePlanByExpr(col.collectionPtr, (*C.char)(unsafe.Pointer(&expr[0])), (C.int64_t)(len(expr)), &cPlan)
 
 	err1 := HandleCStatus(&status, "Create Plan by expr failed")
 	if err1 != nil {
