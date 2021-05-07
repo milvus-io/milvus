@@ -324,10 +324,10 @@ CreatePlan(const Schema& schema, const std::string& dsl_str) {
 }
 
 std::unique_ptr<Plan>
-CreatePlanByExpr(const Schema& schema, const std::string& serialized_expr_plan) {
+CreatePlanByExpr(const Schema& schema, const char* serialized_expr_plan, int64_t size) {
+    // Note: serialized_expr_plan is of binary format
     proto::plan::PlanNode plan_node;
-    auto ok = google::protobuf::TextFormat::ParseFromString(serialized_expr_plan, &plan_node);
-    AssertInfo(ok, "Failed to parse");
+    plan_node.ParseFromArray(serialized_expr_plan, size);
     return ProtoParser(schema).CreatePlan(plan_node);
 }
 
