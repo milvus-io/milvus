@@ -32,7 +32,7 @@ spec:
       terminationGracePeriodSeconds: 11
       containers:
       - name: mishards-ro-server
-        image: milvusdb/milvus:0.8.0-gpu-d041520-464400
+        image: milvusdb/milvus:1.1.0-gpu-d050721-5e559c
         imagePullPolicy: Always
         ports:
           - containerPort: 19530
