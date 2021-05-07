@@ -58,6 +58,7 @@ type Server struct {
 	closer io.Closer
 }
 
+// NewServer new data service grpc server
 func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	var err error
 	ctx1, cancel := context.WithCancel(ctx)

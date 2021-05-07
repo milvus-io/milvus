@@ -61,6 +61,7 @@ type Server struct {
 	closer io.Closer
 }
 
+// NewServer new data node grpc server
 func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	var s = &Server{
