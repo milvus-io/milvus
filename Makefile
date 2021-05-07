@@ -34,7 +34,7 @@ cppcheck:
 	@(env bash ${PWD}/scripts/core_build.sh -l)
 
 generated-proto-go:export protoc:=${PWD}/cmake_build/thirdparty/protobuf/protobuf-build/protoc
-generated-proto-go:
+generated-proto-go: build-cpp
 	@mkdir -p ${GOPATH}/bin
 	@which protoc-gen-go 1>/dev/null || (echo "Installing protoc-gen-go" && go get github.com/golang/protobuf/protoc-gen-go@v1.3.2)
 	@(env bash $(PWD)/scripts/proto_gen_go.sh)
