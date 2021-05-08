@@ -292,7 +292,7 @@ vector_anns: <
     "bool": {
         "must": [
             {
-                "should_not": [{
+                "must_not": [{
                     "range": {
                         "%1%": {
                             "GT": 3

@@ -70,9 +70,9 @@ class Parser {
     ParseShouldNode(const Json& body);
 
     ExprPtr
-    ParseShouldNotNode(const Json& body);
+    ParseMustNotNode(const Json& body);
 
-    // parse the value of "should"/"must"/"should_not" entry
+    // parse the value of "should"/"must"/"must_not" entry
     std::vector<ExprPtr>
     ParseItemList(const Json& body);
 
@@ -324,10 +324,10 @@ CreatePlan(const Schema& schema, const std::string& dsl_str) {
 }
 
 std::unique_ptr<Plan>
-CreatePlanByExpr(const Schema& schema, const std::string& serialized_expr_plan) {
+CreatePlanByExpr(const Schema& schema, const char* serialized_expr_plan, int64_t size) {
+    // Note: serialized_expr_plan is of binary format
     proto::plan::PlanNode plan_node;
-    auto ok = google::protobuf::TextFormat::ParseFromString(serialized_expr_plan, &plan_node);
-    AssertInfo(ok, "Failed to parse");
+    plan_node.ParseFromArray(serialized_expr_plan, size);
     return ProtoParser(schema).CreatePlan(plan_node);
 }
 
@@ -369,8 +369,8 @@ Parser::ParseAnyNode(const Json& out_body) {
         return ParseMustNode(body);
     } else if (key == "should") {
         return ParseShouldNode(body);
-    } else if (key == "should_not") {
-        return ParseShouldNotNode(body);
+    } else if (key == "must_not") {
+        return ParseMustNotNode(body);
     } else if (key == "range") {
         return ParseRangeNode(body);
     } else if (key == "term") {
@@ -448,7 +448,7 @@ Parser::ParseShouldNode(const Json& body) {
 }
 
 ExprPtr
-Parser::ParseShouldNotNode(const Json& body) {
+Parser::ParseMustNotNode(const Json& body) {
     auto item_list = ParseItemList(body);
     Assert(item_list.size() >= 1);
     auto merger = [](ExprPtr left, ExprPtr right) {

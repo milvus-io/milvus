@@ -8,6 +8,7 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
+#pragma once
 
 #include <memory>
 #include <string>
@@ -28,7 +29,7 @@
 #include "knowhere/index/vector_offset_index/gpu/IndexGPUIVF_NM.h"
 #endif
 
-int DEVICEID = 0;
+constexpr int DEVICEID = 0;
 constexpr int64_t DIM = 128;
 constexpr int64_t NB = 10000;
 constexpr int64_t NQ = 10;
@@ -37,7 +38,7 @@ constexpr int64_t PINMEM = 1024 * 1024 * 200;
 constexpr int64_t TEMPMEM = 1024 * 1024 * 300;
 constexpr int64_t RESNUM = 2;
 
-milvus::knowhere::IVFPtr
+inline milvus::knowhere::IVFPtr
 IndexFactory(const milvus::knowhere::IndexType& type, const milvus::knowhere::IndexMode mode) {
     if (mode == milvus::knowhere::IndexMode::MODE_CPU) {
         if (type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
@@ -71,7 +72,7 @@ IndexFactory(const milvus::knowhere::IndexType& type, const milvus::knowhere::In
     return nullptr;
 }
 
-milvus::knowhere::IVFNMPtr
+inline milvus::knowhere::IVFNMPtr
 IndexFactoryNM(const milvus::knowhere::IndexType& type, const milvus::knowhere::IndexMode mode) {
     if (mode == milvus::knowhere::IndexMode::MODE_CPU) {
         if (type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {

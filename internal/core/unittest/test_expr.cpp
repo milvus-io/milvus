@@ -472,7 +472,7 @@ TEST(Expr, TestSimpleDsl) {
     {
         Json dsl;
         Json sub_dsl;
-        sub_dsl["should_not"] = Json::array({get_item(0), get_item(1), get_item(2, 0), get_item(3)});
+        sub_dsl["must_not"] = Json::array({get_item(0), get_item(1), get_item(2, 0), get_item(3)});
         dsl["must"] = Json::array({sub_dsl, vec_dsl});
         testcases.emplace_back(dsl, [](int x) { return (x & 0b1111) != 0b1011; });
     }

@@ -605,7 +605,10 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 		}
 
 		st.SearchRequest.DslType = commonpb.DslType_BoolExprV1
-		st.SearchRequest.SerializedExprPlan = proto.MarshalTextString(plan)
+		st.SearchRequest.SerializedExprPlan, err = proto.Marshal(plan)
+		if err != nil {
+			return err
+		}
 	}
 
 	st.SearchRequest.ResultChannelID = Params.SearchResultChannelNames[0]

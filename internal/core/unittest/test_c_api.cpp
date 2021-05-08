@@ -26,6 +26,7 @@
 #include <common/LoadInfo.h>
 #include <utils/Types.h>
 #include <segcore/Collection.h>
+#include <pb/plan.pb.h>
 #include "test_utils/DataGen.h"
 
 namespace chrono = std::chrono;
@@ -59,6 +60,22 @@ get_default_schema_config() {
                                 >)";
     static std::string fake_conf = "";
     return conf.c_str();
+}
+
+std::vector<char>
+translate_text_plan_to_binary_plan(const char* text_plan) {
+    proto::plan::PlanNode plan_node;
+    auto ok = google::protobuf::TextFormat::ParseFromString(text_plan, &plan_node);
+    AssertInfo(ok, "Failed to parse");
+
+    std::string binary_plan;
+    plan_node.SerializeToString(&binary_plan);
+
+    std::vector<char> ret;
+    ret.resize(binary_plan.size());
+    std::memcpy(ret.data(), binary_plan.c_str(), binary_plan.size());
+
+    return ret;
 }
 
 TEST(CApiTest, CollectionTest) {
@@ -279,8 +296,8 @@ TEST(CApiTest, SearchTestWithExpr) {
     auto blob = raw_group.SerializeAsString();
 
     void* plan = nullptr;
-
-    auto status = CreatePlanByExpr(collection, serialized_expr_plan, &plan);
+    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -705,8 +722,8 @@ TEST(CApiTest, ReduceSearchWithExpr) {
     auto blob = raw_group.SerializeAsString();
 
     void* plan = nullptr;
-
-    auto status = CreatePlanByExpr(collection, serialized_expr_plan, &plan);
+    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -1015,7 +1032,8 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_Without_Predicate) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreatePlanByExpr(collection, serialized_expr_plan, &plan);
+    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -1303,7 +1321,8 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreatePlanByExpr(collection, serialized_expr_plan, &plan);
+    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -1643,7 +1662,8 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Term) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreatePlanByExpr(collection, serialized_expr_plan, &plan);
+    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -1934,7 +1954,8 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreatePlanByExpr(collection, serialized_expr_plan, &plan);
+    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -2283,7 +2304,8 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Term) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreatePlanByExpr(collection, serialized_expr_plan, &plan);
+    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -2629,7 +2651,8 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreatePlanByExpr(collection, serialized_expr_plan, &plan);
+    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;

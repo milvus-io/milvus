@@ -128,7 +128,7 @@ message SearchRequest {
   // serialized `PlaceholderGroup`
   bytes placeholder_group = 7;
   common.DslType dsl_type = 8;
-  string serialized_expr_plan = 9;
+  bytes serialized_expr_plan = 9;
 }
 
 message SearchResults {

@@ -20,7 +20,7 @@
 
 #include "unittest/utils.h"
 
-void
+static void
 gen_rand_data(int range, int n, int*& p) {
     srand((unsigned int)time(nullptr));
     p = (int*)malloc(n * sizeof(int));
@@ -30,7 +30,7 @@ gen_rand_data(int range, int n, int*& p) {
     }
 }
 
-void
+static void
 gen_rand_int64_data(int64_t range, int64_t n, int64_t*& p) {
     srand((int64_t)time(nullptr));
     p = (int64_t*)malloc(n * sizeof(int64_t));
@@ -40,7 +40,7 @@ gen_rand_int64_data(int64_t range, int64_t n, int64_t*& p) {
     }
 }
 
-void
+static void
 gen_rand_double_data(double range, int64_t n, double*& p) {
     std::uniform_real_distribution<double> unif(0, range);
     std::default_random_engine re;
