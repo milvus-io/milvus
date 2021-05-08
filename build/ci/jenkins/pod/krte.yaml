@@ -20,7 +20,7 @@ spec:
         ephemeral-storage: "20Gi"
       requests:
         cpu: "4"
-        memory: 8Gi
+        memory: 12Gi
         ephemeral-storage: "20Gi"
     volumeMounts:
     - mountPath: /docker-graph
