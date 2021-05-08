@@ -6,6 +6,7 @@
 
 
 
+
 <center>
   <a href="https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ">
         <img src="https://img.shields.io/badge/Join-Slack-orange" />
@@ -13,6 +14,7 @@
         <img src="https://img.shields.io/github/license/milvus-io/milvus" />
         <img src="https://img.shields.io/docker/pulls/milvusdb/milvus" />
 </center>
+
 
 
 <center>
@@ -33,8 +35,9 @@
 
 
 
+
 <details>
-<summary>Take a quick look at our demos!</summary>
+<summary>Click to take a quick look at our demos!</summary>
   <table>
   <tr>
     <td width="30%">
@@ -68,37 +71,41 @@
 </details>
 
 
-Milvus is an AI-infused database geared towards (embedding) vector similarity search. Milvus is dedicated to lowering the bar for unstructured data search and providing a consistent user experience regardless of users' deployment environment. 
+
+Milvus is an open-source vector database built to power AI applications and embedding similarity search. Milvus makes unstructured data search more accessible, and provides a consistent user experience regardless of the deployment environment.
 
 Milvus was released under the open-source Apache License 2.0 in October 2019. It is currently an incubation-stage project under [LF AI & Data Foundation](https://lfaidata.foundation/). 
 
-- **Functionality-level Autoscaling**
+- **Blazing Fast**
 
-With the main functionalities implemented equivalent among nodes, Milvus is able to autoscale at the functionality level, providing the foundation for a more efficient resource scheduling. 
+Average latency measured in milliseconds on ten million vector datasets.
 
-- **Hybrid Search**
+Supports CPU SIMD, GPU, and FPGA accelerations, fully utilizing available hardware resources to achieve cost efficiency.
 
-In addition to vectors, basic numeric types, such as boolean, integer, floating-point number, etc, are introduced in Milvus. Search for data from hybrid fields are now supported in the Milvus collection.
+- **Easy to Use**
 
-- **Combined Data Storage**
+Rich APIs designed for data science workflows.
 
-Milvus has reinforced its support for both streaming and batch data persistence and for the adaptation of alternative message/storage engines, in response to users' increasing demand for high database throughput.
+Consistent cross-platform UX from laptop, to local cluster, to cloud.
 
-- **Multiple Indexes in a Single Field**
+Embed real-time search and analytics into virtually any application. 
 
-Milvus now supports multiple indexes in a single vector filed, and it decouples indexing from querying. Users are allowed to maintain multiple indexes simultaneously and switch flexibly among them according to their needs.
+- **Stable and Resilient**
 
-> **IMPORTANT** The master branch is for the development of Milvus v2.0. On March 9th, 2021, we released Milvus v1.0 which is our first stable version of Milvus with long-term support. To try out Milvus v1.0, switch to [branch 1.0](https://github.com/milvus-io/milvus/tree/1.0).
+Milvus’ built-in replication and failover/failback features ensure data and applications can maintain business continuity in the event of a disruption.
+
+-  **High Elasticity**
+
+Component-level scalability makes it possible to only scale where necessary.
+
+- **Community Backed**
+
+With over 1,000 enterprise users, 5,000+ stars on GitHub, and an active open-source community, you’re not alone when you use Milvus.
+
+> **IMPORTANT** The master branch is for the development of Milvus v2.0. On March 9th, 2021, we released Milvus v1.0, the first stable version of Milvus with long-term support. To use Milvus v1.0, switch to [branch 1.0](https://github.com/milvus-io/milvus/tree/1.0).
 
 ## Getting Started
 
-### To install a Milvus stand-alone
-
-See [Install Milvus Standalone]().
-
-### To install a Milvus cluster
-
-See [Install Milvus Cluster]().
 
 ### Demos
 
@@ -118,28 +125,28 @@ For documentation about Milvus, see [Milvus Docs](https://milvus.io/docs/overvie
 
 ### SDK
 
-The implemented SDK and its API document are listed below:
+The implemented SDK and its API documentatation are listed below:
 
 - [Python](https://github.com/milvus-io/pymilvus/tree/1.x)
 
 ### Recommended Articles
 
 - [What is an embedding vector? Why and how does it contribute to the development of Machine Learning?](https://milvus.io/docs/v1.0.0/vector.md)
-- [What types of vector index does Milvus support? Which should I choose?](https://milvus.io/docs/v1.0.0/index.md)
+- [Which vector indexes does Milvus support? Which should I choose?](https://milvus.io/docs/v1.0.0/index.md)
 - [How does Milvus compare the distance between vectors?](https://milvus.io/docs/v1.0.0/metric.md)
 - You can learn more in [Milvus Server Configurations](https://milvus.io/docs/v1.0.0/milvus_config.md).
 
 ## Contact
 
-Join the Milvus community on [Slack Channel](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ) to share your suggestions, advice, and questions with our engineer team. You can also ask for help at our [FAQ page](https://milvus.io/docs/v1.0.0/performance_faq.md).
+Join the Milvus community on [Slack Channel](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ) to share your suggestions, advice, and questions with our engineering team. You can also submit questions to our [FAQ page](https://milvus.io/docs/v1.0.0/performance_faq.md).
 
-You can subscribe to our mailing lists at:
+Subscribe to our mailing lists:
 
 - [Milvus Technical Steering Committee](https://lists.lfai.foundation/g/milvus-tsc)
 - [Milvus Technical Discussions](https://lists.lfai.foundation/g/milvus-technical-discuss)
 - [Milvus Announcement](https://lists.lfai.foundation/g/milvus-announce)
 
-and follow us on social media:
+Follow us on social media:
 
 - [Milvus Medium](https://medium.com/@milvusio)
 - [Milvus CSDN](https://zilliz.blog.csdn.net/)
