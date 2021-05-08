@@ -15,6 +15,8 @@ import (
 	"context"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/timesync"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -24,7 +26,7 @@ import (
 )
 
 type TimeTick struct {
-	ttBarrier TimeTickBarrier
+	ttBarrier timesync.TimeTickBarrier
 	channels  []msgstream.MsgStream
 	wg        sync.WaitGroup
 	ctx       context.Context
@@ -79,10 +81,7 @@ func (tt *TimeTick) Start() error {
 		channel.Start()
 	}
 
-	err := tt.ttBarrier.Start()
-	if err != nil {
-		return err
-	}
+	tt.ttBarrier.Start()
 
 	return nil
 }
@@ -96,7 +95,7 @@ func (tt *TimeTick) Close() {
 	tt.wg.Wait()
 }
 
-func newTimeTick(ctx context.Context, ttBarrier TimeTickBarrier, channels ...msgstream.MsgStream) *TimeTick {
+func newTimeTick(ctx context.Context, ttBarrier timesync.TimeTickBarrier, channels ...msgstream.MsgStream) *TimeTick {
 	ctx1, cancel := context.WithCancel(ctx)
 	return &TimeTick{ctx: ctx1, cancel: cancel, ttBarrier: ttBarrier, channels: channels}
 }

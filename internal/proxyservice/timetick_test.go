@@ -17,9 +17,62 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/timesync"
+
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/stretchr/testify/assert"
 )
+
+func ttStreamProduceLoop(ctx context.Context, ttStream msgstream.MsgStream, durationInterval time.Duration, sourceID int64) {
+	log.Debug("ttStreamProduceLoop", zap.Any("durationInterval", durationInterval))
+	timer := time.NewTicker(durationInterval)
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+				ttMsgs := &msgstream.MsgPack{
+					BeginTs:        0,
+					EndTs:          0,
+					Msgs:           nil,
+					StartPositions: nil,
+					EndPositions:   nil,
+				}
+
+				currentT := uint64(time.Now().Nanosecond())
+				msg := &msgstream.TimeTickMsg{
+					BaseMsg: msgstream.BaseMsg{
+						Ctx:            ctx,
+						BeginTimestamp: 0,
+						EndTimestamp:   0,
+						HashValues:     nil,
+						MsgPosition:    nil,
+					},
+					TimeTickMsg: internalpb.TimeTickMsg{
+						Base: &commonpb.MsgBase{
+							MsgType:   0,
+							MsgID:     0,
+							Timestamp: currentT,
+							SourceID:  sourceID,
+						},
+					},
+				}
+
+				ttMsgs.Msgs = append(ttMsgs.Msgs, msg)
+
+				_ = ttStream.Produce(ttMsgs)
+				//log.Debug("ttStreamProduceLoop", zap.Any("Send", currentT))
+			}
+		}
+	}()
+}
 
 func TestTimeTick_Start(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -32,13 +85,13 @@ func TestTimeTick_Start(t *testing.T) {
 	minTtInterval := Timestamp(interval)
 
 	durationInterval := time.Duration(interval*int(math.Pow10(6))) >> 18
-	ttStreamProduceLoop(ctx, ttStream, durationInterval, int64(sourceID))
 
-	ttBarrier := newSoftTimeTickBarrier(ctx, ttStream, peerIds, minTtInterval)
+	ttBarrier := timesync.NewSoftTimeTickBarrier(ctx, ttStream, peerIds, minTtInterval)
 	channels := msgstream.NewSimpleMsgStream()
 
 	tick := newTimeTick(ctx, ttBarrier, channels)
 	err := tick.Start()
+	ttStreamProduceLoop(ctx, ttStream, durationInterval, int64(sourceID))
 	assert.Equal(t, nil, err)
 	defer tick.Close()
 }
@@ -54,13 +107,13 @@ func TestTimeTick_Close(t *testing.T) {
 	minTtInterval := Timestamp(interval)
 
 	durationInterval := time.Duration(interval*int(math.Pow10(6))) >> 18
-	ttStreamProduceLoop(ctx, ttStream, durationInterval, int64(sourceID))
 
-	ttBarrier := newSoftTimeTickBarrier(ctx, ttStream, peerIds, minTtInterval)
+	ttBarrier := timesync.NewSoftTimeTickBarrier(ctx, ttStream, peerIds, minTtInterval)
 	channels := msgstream.NewSimpleMsgStream()
 
 	tick := newTimeTick(ctx, ttBarrier, channels)
 	err := tick.Start()
+	ttStreamProduceLoop(ctx, ttStream, durationInterval, int64(sourceID))
 	assert.Equal(t, nil, err)
 	defer tick.Close()
 }

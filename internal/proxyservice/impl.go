@@ -20,6 +20,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/timesync"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -138,7 +140,7 @@ func (s *ProxyService) Init() error {
 		"proxyservicesub") // TODO: add config
 	log.Debug("proxyservice", zap.Strings("create node time tick consumer channel", Params.NodeTimeTickChannel))
 
-	ttBarrier := newSoftTimeTickBarrier(s.ctx, nodeTimeTickMsgStream, []UniqueID{1}, 10)
+	ttBarrier := timesync.NewSoftTimeTickBarrier(s.ctx, nodeTimeTickMsgStream, []UniqueID{1}, 10)
 	log.Debug("create soft time tick barrier ...")
 	s.tick = newTimeTick(s.ctx, ttBarrier, serviceTimeTickMsgStream, insertTickMsgStream)
 	log.Debug("create time tick ...")

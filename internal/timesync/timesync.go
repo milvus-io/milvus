@@ -42,11 +42,14 @@ type (
 
 	softTimeTickBarrier struct {
 		peer2LastTt   map[UniqueID]Timestamp
+		peerMtx       sync.RWMutex
 		minTtInterval Timestamp
 		lastTt        int64
 		outTt         chan Timestamp
 		ttStream      ms.MsgStream
 		ctx           context.Context
+		cancel        context.CancelFunc
+		wg            sync.WaitGroup
 	}
 
 	hardTimeTickBarrier struct {
@@ -62,21 +65,21 @@ type (
 
 func NewSoftTimeTickBarrier(ctx context.Context, ttStream ms.MsgStream, peerIds []UniqueID, minTtInterval Timestamp) *softTimeTickBarrier {
 	if len(peerIds) <= 0 {
-		log.Debug("[newSoftTimeTickBarrier] Error: peerIds is empty!")
-		return nil
+		log.Warn("[newSoftTimeTickBarrier] Warning: peerIds is empty!")
+		//return nil
 	}
 
 	sttbarrier := softTimeTickBarrier{}
 	sttbarrier.minTtInterval = minTtInterval
 	sttbarrier.ttStream = ttStream
 	sttbarrier.outTt = make(chan Timestamp, 1024)
+	sttbarrier.ctx, sttbarrier.cancel = context.WithCancel(ctx)
 	sttbarrier.peer2LastTt = make(map[UniqueID]Timestamp)
-	sttbarrier.ctx = ctx
 	for _, id := range peerIds {
 		sttbarrier.peer2LastTt[id] = Timestamp(0)
 	}
 	if len(peerIds) != len(sttbarrier.peer2LastTt) {
-		log.Debug("[newSoftTimeTickBarrier] Warning: there are duplicate peerIds!")
+		log.Warn("[newSoftTimeTickBarrier] Warning: there are duplicate peerIds!")
 	}
 
 	return &sttbarrier
@@ -103,38 +106,66 @@ func (ttBarrier *softTimeTickBarrier) GetTimeTick() (Timestamp, error) {
 }
 
 func (ttBarrier *softTimeTickBarrier) Start() {
-	for {
-		select {
-		case <-ttBarrier.ctx.Done():
-			log.Debug("[TtBarrierStart] shut down", zap.Error(ttBarrier.ctx.Err()))
-			return
-		default:
-		}
-		ttmsgs := ttBarrier.ttStream.Consume()
-		if len(ttmsgs.Msgs) > 0 {
-			for _, timetickmsg := range ttmsgs.Msgs {
-				ttmsg := timetickmsg.(*ms.TimeTickMsg)
-				oldT, ok := ttBarrier.peer2LastTt[ttmsg.Base.SourceID]
-				// log.Printf("[softTimeTickBarrier] peer(%d)=%d\n", ttmsg.PeerID, ttmsg.Timestamp)
+	ttBarrier.wg.Add(1)
+	go func() {
+		defer ttBarrier.wg.Done()
+		for {
+			select {
+			case <-ttBarrier.ctx.Done():
+				log.Warn("TtBarrierStart", zap.Error(ttBarrier.ctx.Err()))
+				return
 
-				if !ok {
-					log.Warn("[softTimeTickBarrier] peerID not exist", zap.Int64("peerID", ttmsg.Base.SourceID))
-					continue
-				}
-				if ttmsg.Base.Timestamp > oldT {
-					ttBarrier.peer2LastTt[ttmsg.Base.SourceID] = ttmsg.Base.Timestamp
+			case ttmsgs := <-ttBarrier.ttStream.Chan():
+				ttBarrier.peerMtx.RLock()
+				if len(ttmsgs.Msgs) > 0 {
+					for _, timetickmsg := range ttmsgs.Msgs {
+						ttmsg := timetickmsg.(*ms.TimeTickMsg)
+						oldT, ok := ttBarrier.peer2LastTt[ttmsg.Base.SourceID]
 
-					// get a legal Timestamp
-					ts := ttBarrier.minTimestamp()
-					lastTt := atomic.LoadInt64(&(ttBarrier.lastTt))
-					if lastTt != 0 && ttBarrier.minTtInterval > ts-Timestamp(lastTt) {
-						continue
+						if !ok {
+							log.Warn("softTimeTickBarrier", zap.Int64("peerID %d not exist", ttmsg.Base.SourceID))
+							continue
+						}
+						if ttmsg.Base.Timestamp > oldT {
+							ttBarrier.peer2LastTt[ttmsg.Base.SourceID] = ttmsg.Base.Timestamp
+
+							// get a legal Timestamp
+							ts := ttBarrier.minTimestamp()
+							lastTt := atomic.LoadInt64(&(ttBarrier.lastTt))
+							if lastTt != 0 && ttBarrier.minTtInterval > ts-Timestamp(lastTt) {
+								continue
+							}
+							ttBarrier.outTt <- ts
+						}
 					}
-					ttBarrier.outTt <- ts
 				}
+				ttBarrier.peerMtx.RUnlock()
 			}
 		}
+	}()
+
+	ttBarrier.ttStream.Start()
+}
+
+func (ttBarrier *softTimeTickBarrier) Close() {
+	ttBarrier.cancel()
+	ttBarrier.wg.Wait()
+	ttBarrier.ttStream.Close()
+}
+
+func (ttBarrier *softTimeTickBarrier) AddPeer(peerID UniqueID) error {
+	ttBarrier.peerMtx.Lock()
+	defer ttBarrier.peerMtx.Unlock()
+
+	_, ok := ttBarrier.peer2LastTt[peerID]
+	if ok {
+		log.Debug("softTimeTickBarrier.AddPeer", zap.Int64("no need to add duplicated peer", peerID))
+		return nil
 	}
+
+	ttBarrier.peer2LastTt[peerID] = 0
+
+	return nil
 }
 
 func (ttBarrier *softTimeTickBarrier) minTimestamp() Timestamp {
