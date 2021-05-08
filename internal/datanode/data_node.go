@@ -9,6 +9,9 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+// Package datanode implements data persistence logic.
+//
+// Data node persists definition language (ddl) strings and insert logs into persistent storage like minIO/S3.
 package datanode
 
 import (
@@ -37,6 +40,22 @@ const (
 	RPCConnectionTimeout = 30 * time.Second
 )
 
+// DataNode struct communicates with outside services and unioun all
+// services of data node.
+//
+// DataNode struct implements `types.Component`, `types.DataNode` interfaces.
+//  `dataSyncService` controls flowgraph in datanode.
+//  `metaService` initialize collections from master service when data node starts.
+//  `masterService` holds a grpc client of master service.
+//  `dataService` holds a grpc client of data service.
+//
+// `NodeID` is unique to each data node.
+//
+// `State` is current statement of this data node, indicating whether it's healthy.
+//
+// `flushChan` transfer flush messages from data service to flowgraph of data node.
+//
+// `replica` holds replications of persistent data, including collections and segments.
 type DataNode struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -59,6 +78,7 @@ type DataNode struct {
 	msFactory msgstream.Factory
 }
 
+// NewDataNode will return a DataNode with abnormal state.
 func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 	rand.Seed(time.Now().UnixNano())
 	ctx2, cancel2 := context.WithCancel(ctx)
@@ -79,6 +99,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 	return node
 }
 
+// SetMasterServiceInterface sets master service's grpc client, error is returned if repeatedly set.
 func (node *DataNode) SetMasterServiceInterface(ms types.MasterService) error {
 	switch {
 	case ms == nil, node.masterService != nil:
@@ -89,6 +110,7 @@ func (node *DataNode) SetMasterServiceInterface(ms types.MasterService) error {
 	}
 }
 
+// SetDataServiceInterface sets data service's grpc client, error is returned if repeatedly set.
 func (node *DataNode) SetDataServiceInterface(ds types.DataService) error {
 	switch {
 	case ds == nil, node.dataService != nil:
@@ -99,7 +121,16 @@ func (node *DataNode) SetDataServiceInterface(ds types.DataService) error {
 	}
 }
 
-// Suppose dataservice is in INITIALIZING
+// Init function supposes data service is in INITIALIZING state.
+//
+// In Init process, data node will register itself to data service with its node id
+// and address. Therefore, `SetDataServiceInterface()` must be called before this func.
+// Registering return several channel names data node need.
+//
+// After registering, data node will wait until data service calls `WatchDmChannels`
+// for `RPCConnectionTimeout` ms.
+//
+// At last, data node initializes its `dataSyncService` and `metaService`.
 func (node *DataNode) Init() error {
 	ctx := context.Background()
 
@@ -121,13 +152,6 @@ func (node *DataNode) Init() error {
 		return fmt.Errorf("Receive error when registering data node, msg: %s", resp.Status.Reason)
 	}
 
-	select {
-	case <-time.After(RPCConnectionTimeout):
-		return errors.New("Get DmChannels failed in 30 seconds")
-	case <-node.watchDm:
-		log.Debug("insert channel names set")
-	}
-
 	for _, kv := range resp.InitParams.StartParams {
 		switch kv.Key {
 		case "DDChannelName":
@@ -141,6 +165,13 @@ func (node *DataNode) Init() error {
 		default:
 			return fmt.Errorf("Invalid key: %v", kv.Key)
 		}
+	}
+
+	select {
+	case <-time.After(RPCConnectionTimeout):
+		return errors.New("Get DmChannels failed in 30 seconds")
+	case <-node.watchDm:
+		log.Debug("insert channel names set")
 	}
 
 	replica := newReplica()
@@ -158,6 +189,7 @@ func (node *DataNode) Init() error {
 	return nil
 }
 
+// Start `metaService` and `dataSyncService` and update state to HEALTHY
 func (node *DataNode) Start() error {
 	node.metaService.init()
 	go node.dataSyncService.start()
@@ -169,6 +201,7 @@ func (node *DataNode) UpdateStateCode(code internalpb.StateCode) {
 	node.State.Store(code)
 }
 
+// WatchDmChannels set insert channel names data node subscribs to.
 func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -205,6 +238,7 @@ func (node *DataNode) GetComponentStates(ctx context.Context) (*internalpb.Compo
 	return states, nil
 }
 
+// FlushSegments packs flush messages into flowgraph through flushChan.
 func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
 	log.Debug("FlushSegments ...", zap.Int("num", len(req.SegmentIDs)))
 	ids := make([]UniqueID, 0)

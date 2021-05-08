@@ -44,6 +44,7 @@ type Replica interface {
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 }
 
+// Segment is the data structure of segments in data node replica.
 type Segment struct {
 	segmentID    UniqueID
 	collectionID UniqueID
@@ -60,6 +61,8 @@ type Segment struct {
 	channelName   string
 }
 
+// CollectionSegmentReplica is the data replication of persistent data in datanode.
+// It implements `Replica` interface.
 type CollectionSegmentReplica struct {
 	mu          sync.RWMutex
 	segments    map[UniqueID]*Segment
@@ -89,6 +92,9 @@ func (replica *CollectionSegmentReplica) getSegmentByID(segmentID UniqueID) (*Se
 
 }
 
+// `addSegment` add a new segment into replica when data node see the segment
+// for the first time in insert channels. It sets the startPosition of a segment, and
+// flags `isNew=true`
 func (replica *CollectionSegmentReplica) addSegment(
 	segmentID UniqueID,
 	collID UniqueID,
@@ -179,6 +185,7 @@ func (replica *CollectionSegmentReplica) setEndPosition(segmentID UniqueID, endP
 	return fmt.Errorf("There's no segment %v", segmentID)
 }
 
+// `updateStatistics` updates the number of rows of a segment in replica.
 func (replica *CollectionSegmentReplica) updateStatistics(segmentID UniqueID, numRows int64) error {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
@@ -193,6 +200,9 @@ func (replica *CollectionSegmentReplica) updateStatistics(segmentID UniqueID, nu
 	return fmt.Errorf("There's no segment %v", segmentID)
 }
 
+// `getSegmentStatisticsUpdates` gives current segment's statistics updates.
+//  if the segment's flag `isNew` is true, updates will contain a valid start position.
+//  if the segment's flag `isFlushed` is true, updates will contain a valid end position.
 func (replica *CollectionSegmentReplica) getSegmentStatisticsUpdates(segmentID UniqueID) (*internalpb.SegmentStatisticsUpdates, error) {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()

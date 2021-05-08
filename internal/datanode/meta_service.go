@@ -26,6 +26,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
+// metaService initialize replica collections in data node from master service.
+// Initializing replica collections happens on data node starting. It depends on
+// a healthy master service and a valid master service grpc client.
 type metaService struct {
 	ctx          context.Context
 	replica      Replica

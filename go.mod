@@ -6,6 +6,9 @@ require (
 	github.com/HdrHistogram/hdrhistogram-go v1.0.1 // indirect
 	github.com/antonmedv/expr v1.8.9
 	github.com/apache/pulsar-client-go v0.4.0
+	github.com/beefsack/go-rate v0.0.0-20180408011153-efa7637bb9b6 // indirect
+	github.com/bmizerany/perks v0.0.0-20141205001514-d9a9656a3a4b // indirect
+	github.com/datadog/zstd v1.4.6-0.20200617134701-89f69fb7df32 // indirect
 	github.com/facebookgo/ensure v0.0.0-20200202191622-63f1cf65ac4c // indirect
 	github.com/facebookgo/stack v0.0.0-20160209184415-751773369052 // indirect
 	github.com/facebookgo/subset v0.0.0-20200203212716-c811ad88dec4 // indirect

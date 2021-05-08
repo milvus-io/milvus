@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
+// Collection stuct is the data structure of collections in data node replica.
 type Collection struct {
 	schema *schemapb.CollectionSchema
 	id     UniqueID
