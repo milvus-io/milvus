@@ -15,11 +15,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"github.com/prometheus/common/log"
+	"math/rand"
 	"testing"
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/prometheus/common/log"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -37,11 +38,12 @@ func BytesToInt(b []byte) int {
 	return int(tmp)
 }
 
-func Produce(t *testing.T, pc *pulsarClient, topic string, arr []int) {
-	ctx := context.Background()
+func Produce(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, arr []int) {
 	producer, err := pc.CreateProducer(ProducerOptions{Topic: topic})
 	assert.Nil(t, err)
 	assert.NotNil(t, producer)
+
+	log.Infof("Produce start")
 
 	for _, v := range arr {
 		msg := &ProducerMessage{
@@ -50,14 +52,14 @@ func Produce(t *testing.T, pc *pulsarClient, topic string, arr []int) {
 		}
 		err = producer.Send(ctx, msg)
 		assert.Nil(t, err)
-		log.Infof("SEND v = %d", v)
+		log.Infof("SND %d", v)
 	}
 
-	log.Infof("cydrain produce done")
+	log.Infof("Produce done")
 }
 
-// Consume1 will consume random messages and record the MessageID where it fails
-func Consume1(t *testing.T, ctx context.Context, pc *pulsarClient, topic string, subName string, c chan MessageID) {
+// Consume1 will consume random messages and record the last MessageID it received
+func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, c chan MessageID) {
 	consumer, err := pc.Subscribe(ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            subName,
@@ -67,37 +69,34 @@ func Consume1(t *testing.T, ctx context.Context, pc *pulsarClient, topic string,
 	})
 	assert.Nil(t, err)
 	assert.NotNil(t, consumer)
+	defer consumer.Close()
 
-	log.Infof("cydrain consume1 start")
+	log.Infof("Consume1 start")
 
-	i := 0
-	cnt := 3
-	for {
+	// get random number between 1 ~ 5
+	rand.Seed(time.Now().UnixNano())
+	cnt := 1 + rand.Int()%5
+
+	var msg ConsumerMessage
+	for i := 0; i < cnt; i++ {
 		select {
 		case <-ctx.Done():
-			log.Infof("channel closed")
+			log.Infof("Consume1 channel closed")
 			return
-		case msg := <-consumer.Chan():
-			if i < cnt {
-				//consumer.Ack(msg)
-				id := BytesToInt(msg.Payload())
-				log.Infof("RECV id = %d", id)
-				log.Info(msg.ID())
-			} else {
-				c <- msg.ID()
-				log.Infof("failout")
-				log.Info(msg.ID())
-				return
-			}
-			i++
+		case msg = <-consumer.Chan():
+			//consumer.Ack(msg)
+			v := BytesToInt(msg.Payload())
+			log.Infof("RECV v = %d", v)
 		}
 	}
+	c <- msg.ID()
 
-	log.Infof("cydrain consume1 done")
+	log.Infof("Consume1 randomly RECV %d messages", cnt)
+	log.Infof("Consume1 done")
 }
 
 // Consume2 will consume messages from specified MessageID
-func Consume2(t *testing.T, ctx context.Context, pc *pulsarClient, topic string, subName string, msgID MessageID) {
+func Consume2(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, msgID MessageID) {
 	consumer, err := pc.Subscribe(ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            subName,
@@ -107,26 +106,27 @@ func Consume2(t *testing.T, ctx context.Context, pc *pulsarClient, topic string,
 	})
 	assert.Nil(t, err)
 	assert.NotNil(t, consumer)
+	defer consumer.Close()
 
 	err = consumer.Seek(msgID)
 	assert.Nil(t, err)
 
-	log.Infof("cydrain consume2 start")
+	// skip the last received message
+	<-consumer.Chan()
+
+	log.Infof("Consume2 start")
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Infof("channel closed")
+			log.Infof("Consume2 channel closed")
 			return
 		case msg := <-consumer.Chan():
 			//consumer.Ack(msg)
-			id := BytesToInt(msg.Payload())
-			log.Infof("RECV id = %d", id)
-			log.Info(msg.ID())
+			v := BytesToInt(msg.Payload())
+			log.Infof("RECV v = %d", v)
 		}
 	}
-
-	log.Infof("cydrain consume2 done")
 }
 
 func TestPulsarClient(t *testing.T) {
@@ -138,26 +138,29 @@ func TestPulsarClient(t *testing.T) {
 
 	topic := "test"
 	subName := "subName"
-	arr := []int{123, 234, 345, 456, 567, 678, 789}
+	arr := []int{111, 222, 333, 444, 555, 666, 777}
 	c := make(chan MessageID)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	// launch consume1
-	go Consume1(t, ctx, pc, topic, subName, c)
-	time.Sleep(1*time.Second)
+	go Consume1(ctx, t, pc, topic, subName, c)
+	time.Sleep(1 * time.Second)
 
 	// launch produce
-	go Produce(t, pc, topic, arr)
-	time.Sleep(1*time.Second)
+	go Produce(ctx, t, pc, topic, arr)
+	time.Sleep(1 * time.Second)
 
-	msgID := <-c
-	log.Info(msgID)
+	// record the last received message id
+	lastMsgID := <-c
+	log.Info(lastMsgID)
 
-	// launch consume
-	go Consume2(t, ctx, pc, topic, subName, msgID)
-	time.Sleep(1*time.Second)
+	// launch consume2
+	go Consume2(ctx, t, pc, topic, subName, lastMsgID)
+	time.Sleep(1 * time.Second)
 
-	log.Infof("cydrain main done")
+	// stop Consume2
+	cancel()
+
+	log.Infof("main done")
 }
