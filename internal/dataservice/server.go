@@ -791,8 +791,19 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 }
 
 func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
-	// todo implement
-	return nil, nil
+	resp := &datapb.GetPartitionStatisticsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+	}
+	nums, err := s.meta.GetNumRowsOfPartition(req.CollectionID, req.PartitionID)
+	if err != nil {
+		resp.Status.Reason = err.Error()
+		return resp, nil
+	}
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
+	return resp, nil
 }
 
 func (s *Server) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
