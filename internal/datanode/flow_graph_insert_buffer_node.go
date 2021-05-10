@@ -98,6 +98,36 @@ func (ibNode *insertBufferNode) Name() string {
 	return "ibNode"
 }
 
+// UpdateReplica updates replica in mem for a given segment
+// 1. Add segment and start position if new
+// 2. Update segment row number
+// 3. Update stop position
+func (ibNode *insertBufferNode) UpdateReplica(
+	segID, collID, parID UniqueID,
+	chanName string, rowNum int,
+	startPos, endPos *internalpb.MsgPosition) error {
+
+	if !ibNode.replica.hasSegment(segID) {
+		err := ibNode.replica.addSegment(segID, collID, parID, chanName)
+		if err != nil {
+			log.Error("add segment wrong", zap.Error(err))
+			return err
+		}
+
+		ibNode.replica.setStartPosition(segID, startPos)
+	}
+
+	err := ibNode.replica.updateNumOfRows(segID, int64(rowNum))
+	if err != nil {
+		log.Error("update Segment Row number wrong", zap.Error(err))
+		return err
+	}
+
+	ibNode.replica.setEndPosition(segID, endPos)
+
+	return nil
+}
+
 func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	if len(in) != 1 {
@@ -122,59 +152,41 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		msg.SetTraceCtx(ctx)
 	}
 
-	// Updating segment statistics
-	uniqueSeg := make(map[UniqueID]int64)
+	uniqueSeg := make(map[UniqueID]int)
 	for _, msg := range iMsg.insertMessages {
 
 		currentSegID := msg.GetSegmentID()
 		collID := msg.GetCollectionID()
 		partitionID := msg.GetPartitionID()
+		chanName := msg.GetChannelID()
 
-		if !ibNode.replica.hasSegment(currentSegID) {
-			err := ibNode.replica.addSegment(currentSegID, collID, partitionID, msg.GetChannelID())
-			if err != nil {
-				log.Error("add segment wrong", zap.Error(err))
-			}
-
-			switch {
-			case iMsg.startPositions == nil || len(iMsg.startPositions) <= 0:
-				log.Error("insert Msg StartPosition empty")
-			default:
-				segment, err := ibNode.replica.getSegmentByID(currentSegID)
-				if err != nil {
-					log.Error("get segment wrong", zap.Error(err))
-				}
-				var startPosition *internalpb.MsgPosition = nil
-				for _, pos := range iMsg.startPositions {
-					if pos.ChannelName == segment.channelName {
-						startPosition = pos
-						break
-					}
-				}
-				if startPosition == nil {
-					log.Error("get position wrong", zap.Error(err))
-				} else {
-					ibNode.replica.setStartPosition(currentSegID, startPosition)
+		getPosition := func(channelName string, positions []*internalpb.MsgPosition) *internalpb.MsgPosition {
+			for _, pos := range positions {
+				if pos.GetChannelName() == channelName {
+					return pos
 				}
 			}
+			return nil
 		}
 
-		segNum := uniqueSeg[currentSegID]
-		uniqueSeg[currentSegID] = segNum + int64(len(msg.RowIDs))
-	}
+		startPos := getPosition(chanName, iMsg.startPositions)
+		endPos := getPosition(chanName, iMsg.endPositions)
 
-	segIDs := make([]UniqueID, 0, len(uniqueSeg))
-	for id, num := range uniqueSeg {
-		segIDs = append(segIDs, id)
-
-		err := ibNode.replica.updateStatistics(id, num)
-		if err != nil {
-			log.Error("update Segment Row number wrong", zap.Error(err))
+		if startPos == nil || endPos == nil {
+			log.Error("Nil start position or end position for insert message", zap.Int64("segmentID", currentSegID))
+			continue
 		}
+
+		ibNode.UpdateReplica(currentSegID, collID, partitionID, chanName, len(msg.GetRowIDs()), startPos, endPos)
+		uniqueSeg[currentSegID] = uniqueSeg[currentSegID] + 1
+	}
+	segIDsToUpdate := make([]UniqueID, 0, len(uniqueSeg))
+	for id, _ := range uniqueSeg {
+		segIDsToUpdate = append(segIDsToUpdate, id)
 	}
 
-	if len(segIDs) > 0 {
-		err := ibNode.updateSegStatistics(segIDs)
+	if len(segIDsToUpdate) > 0 {
+		err := ibNode.updateSegStatistics(segIDsToUpdate)
 		if err != nil {
 			log.Error("update segment statistics error", zap.Error(err))
 		}
@@ -444,26 +456,6 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 		// 1.3 store in buffer
 		ibNode.insertBuffer.insertData[currentSegID] = idata
-
-		switch {
-		case iMsg.endPositions == nil || len(iMsg.endPositions) <= 0:
-			log.Error("insert Msg EndPosition empty")
-		default:
-			segment, err := ibNode.replica.getSegmentByID(currentSegID)
-			if err != nil {
-				log.Error("get segment wrong", zap.Error(err))
-			}
-			var endPosition *internalpb.MsgPosition = nil
-			for _, pos := range iMsg.endPositions {
-				if pos.ChannelName == segment.channelName {
-					endPosition = pos
-				}
-			}
-			if endPosition == nil {
-				log.Error("get position wrong", zap.Error(err))
-			}
-			ibNode.replica.setEndPosition(currentSegID, endPosition)
-		}
 
 		// 1.4 if full, auto flush
 		if ibNode.insertBuffer.full(currentSegID) {

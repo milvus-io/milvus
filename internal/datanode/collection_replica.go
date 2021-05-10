@@ -33,13 +33,13 @@ type Replica interface {
 	hasCollection(collectionID UniqueID) bool
 
 	// segment
-	addSegment(segmentID UniqueID, collID UniqueID, partitionID UniqueID, channelName string) error
+	addSegment(segmentID, collID, partitionID UniqueID, channelName string) error
 	removeSegment(segmentID UniqueID) error
 	hasSegment(segmentID UniqueID) bool
 	setIsFlushed(segmentID UniqueID) error
 	setStartPosition(segmentID UniqueID, startPos *internalpb.MsgPosition) error
 	setEndPosition(segmentID UniqueID, endPos *internalpb.MsgPosition) error
-	updateStatistics(segmentID UniqueID, numRows int64) error
+	updateNumOfRows(segmentID UniqueID, numRows int64) error
 	getSegmentStatisticsUpdates(segmentID UniqueID) (*internalpb.SegmentStatisticsUpdates, error)
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 }
@@ -69,6 +69,8 @@ type CollectionSegmentReplica struct {
 	collections map[UniqueID]*Collection
 }
 
+var _ Replica = (*CollectionSegmentReplica)(nil)
+
 func newReplica() Replica {
 	segments := make(map[UniqueID]*Segment)
 	collections := make(map[UniqueID]*Collection)
@@ -96,18 +98,12 @@ func (replica *CollectionSegmentReplica) getSegmentByID(segmentID UniqueID) (*Se
 // for the first time in insert channels. It sets the startPosition of a segment, and
 // flags `isNew=true`
 func (replica *CollectionSegmentReplica) addSegment(
-	segmentID UniqueID,
-	collID UniqueID,
-	partitionID UniqueID,
+	segmentID, collID, partitionID UniqueID,
 	channelName string) error {
 
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
 	log.Debug("Add Segment", zap.Int64("Segment ID", segmentID))
-
-	position := &internalpb.MsgPosition{
-		ChannelName: channelName,
-	}
 
 	seg := &Segment{
 		segmentID:     segmentID,
@@ -115,7 +111,7 @@ func (replica *CollectionSegmentReplica) addSegment(
 		partitionID:   partitionID,
 		isFlushed:     false,
 		createTime:    0,
-		startPosition: position,
+		startPosition: new(internalpb.MsgPosition),
 		endPosition:   new(internalpb.MsgPosition),
 		channelName:   channelName,
 	}
@@ -185,8 +181,8 @@ func (replica *CollectionSegmentReplica) setEndPosition(segmentID UniqueID, endP
 	return fmt.Errorf("There's no segment %v", segmentID)
 }
 
-// `updateStatistics` updates the number of rows of a segment in replica.
-func (replica *CollectionSegmentReplica) updateStatistics(segmentID UniqueID, numRows int64) error {
+// `updateNumOfRows` updates the number of rows of a segment in replica.
+func (replica *CollectionSegmentReplica) updateNumOfRows(segmentID UniqueID, numRows int64) error {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
 

@@ -61,10 +61,33 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	iBNode := newInsertBufferNode(ctx, newBinlogMeta(), replica, msFactory)
-	inMsg := genInsertMsg()
-	var iMsg flowgraph.Msg = &inMsg
-	iBNode.Operate([]flowgraph.Msg{iMsg})
+	t.Run("InsertBufferNode Operating", func(t *testing.T) {
+		iBNode := newInsertBufferNode(ctx, newBinlogMeta(), replica, msFactory)
+		inMsg := genInsertMsg()
+		var iMsg flowgraph.Msg = &inMsg
+		iBNode.Operate([]flowgraph.Msg{iMsg})
+	})
+
+	t.Run("InsertBufferNode UpdateReplica", func(t *testing.T) {
+		iBNode := newInsertBufferNode(ctx, newBinlogMeta(), replica, msFactory)
+		err := iBNode.UpdateReplica(1, collMeta.ID, 1, "channel", 10, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+		assert.NoError(t, err)
+		seg, err := iBNode.replica.getSegmentByID(1)
+		assert.NoError(t, err)
+		assert.Equal(t, 10, seg.numRows)
+
+		err = iBNode.UpdateReplica(1, collMeta.ID, 1, "channel", 100, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+		assert.NoError(t, err)
+		seg, err = iBNode.replica.getSegmentByID(1)
+		assert.NoError(t, err)
+		assert.Equal(t, 110, seg.numRows)
+
+		err = iBNode.UpdateReplica(2, collMeta.ID, 1, "channel", 100, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+		assert.NoError(t, err)
+		seg, err = iBNode.replica.getSegmentByID(2)
+		assert.NoError(t, err)
+		assert.Equal(t, 100, seg.numRows)
+	})
 }
 
 func genInsertMsg() insertMsg {
@@ -105,5 +128,4 @@ func genInsertMsg() insertMsg {
 
 	iMsg.flushMessages = append(iMsg.flushMessages, fmsg)
 	return *iMsg
-
 }

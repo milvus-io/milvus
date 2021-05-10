@@ -111,7 +111,7 @@ func TestReplica_Collection(t *testing.T) {
 }
 
 func TestReplica_Segment(t *testing.T) {
-	t.Run("Test segment", func(t *testing.T) {
+	t.Run("test_segment_normal", func(t *testing.T) {
 		replica := newReplica()
 		assert.False(t, replica.hasSegment(0))
 
@@ -127,7 +127,7 @@ func TestReplica_Segment(t *testing.T) {
 
 		assert.Equal(t, int64(0), seg.numRows)
 
-		err = replica.updateStatistics(0, 100)
+		err = replica.updateNumOfRows(0, 100)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(100), seg.numRows)
 
@@ -154,7 +154,7 @@ func TestReplica_Segment(t *testing.T) {
 		assert.False(t, replica.hasSegment(0))
 	})
 
-	t.Run("Test errors", func(t *testing.T) {
+	t.Run("test_segment_error", func(t *testing.T) {
 		replica := newReplica()
 		require.False(t, replica.hasSegment(0))
 
@@ -173,7 +173,7 @@ func TestReplica_Segment(t *testing.T) {
 		err = replica.setEndPosition(0, nil)
 		assert.Error(t, err)
 
-		err = replica.updateStatistics(0, 0)
+		err = replica.updateNumOfRows(0, 0)
 		assert.Error(t, err)
 
 		update, err := replica.getSegmentStatisticsUpdates(0)

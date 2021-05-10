@@ -111,6 +111,7 @@ func newBinlogMeta() *binlogMeta {
 
 func clearEtcd(rootPath string) error {
 	etcdAddr := Params.EtcdAddress
+	log.Info("EtcdAddress", zap.String("add", etcdAddr))
 	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	if err != nil {
 		return err

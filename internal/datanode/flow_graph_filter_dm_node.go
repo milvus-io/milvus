@@ -65,14 +65,14 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	fdmNode.ddMsg = ddMsg
 
 	var iMsg = insertMsg{
-		insertMessages: make([]*msgstream.InsertMsg, 0),
-		flushMessages:  make([]*flushMsg, 0),
+		insertMessages: make([]*msgstream.InsertMsg, 0, len(msgStreamMsg.TsMessages())),
+		flushMessages:  make([]*flushMsg, 0, len(ddMsg.flushMessages)),
 		timeRange: TimeRange{
 			timestampMin: msgStreamMsg.TimestampMin(),
 			timestampMax: msgStreamMsg.TimestampMax(),
 		},
-		startPositions: make([]*internalpb.MsgPosition, 0),
-		endPositions:   make([]*internalpb.MsgPosition, 0),
+		startPositions: make([]*internalpb.MsgPosition, 0, len(msgStreamMsg.StartPositions())),
+		endPositions:   make([]*internalpb.MsgPosition, 0, len(msgStreamMsg.EndPositions())),
 	}
 
 	iMsg.flushMessages = append(iMsg.flushMessages, ddMsg.flushMessages...)
