@@ -14,7 +14,6 @@ import (
 	"context"
 	"log"
 	"math"
-	"strconv"
 	"testing"
 	"time"
 
@@ -41,15 +40,6 @@ func TestAllocSegment(t *testing.T) {
 		Schema: schema,
 	})
 	assert.Nil(t, err)
-	id, err := mockAllocator.allocID()
-	assert.Nil(t, err)
-	segmentInfo, err := BuildSegment(collID, 100, id, "c1")
-	assert.Nil(t, err)
-	err = meta.AddSegment(segmentInfo)
-	assert.Nil(t, err)
-	err = segAllocator.OpenSegment(ctx, segmentInfo)
-	assert.Nil(t, err)
-
 	cases := []struct {
 		collectionID UniqueID
 		partitionID  UniqueID
@@ -73,43 +63,6 @@ func TestAllocSegment(t *testing.T) {
 	}
 }
 
-func TestSealSegment(t *testing.T) {
-	ctx := context.Background()
-	Params.Init()
-	mockAllocator := newMockAllocator()
-	meta, err := newMemoryMeta(mockAllocator)
-	assert.Nil(t, err)
-	segAllocator := newSegmentAllocator(meta, mockAllocator)
-
-	schema := newTestSchema()
-	collID, err := mockAllocator.allocID()
-	assert.Nil(t, err)
-	err = meta.AddCollection(&datapb.CollectionInfo{
-		ID:     collID,
-		Schema: schema,
-	})
-	assert.Nil(t, err)
-	var lastSegID UniqueID
-	for i := 0; i < 10; i++ {
-		id, err := mockAllocator.allocID()
-		assert.Nil(t, err)
-		segmentInfo, err := BuildSegment(collID, 100, id, "c"+strconv.Itoa(i))
-		assert.Nil(t, err)
-		err = meta.AddSegment(segmentInfo)
-		assert.Nil(t, err)
-		err = segAllocator.OpenSegment(ctx, segmentInfo)
-		assert.Nil(t, err)
-		lastSegID = segmentInfo.ID
-	}
-
-	err = segAllocator.SealSegment(ctx, lastSegID)
-	assert.Nil(t, err)
-	segAllocator.SealAllSegments(ctx, collID)
-	sealedSegments, err := segAllocator.GetSealedSegments(ctx)
-	assert.Nil(t, err)
-	assert.EqualValues(t, 10, len(sealedSegments))
-}
-
 func TestExpireSegment(t *testing.T) {
 	ctx := context.Background()
 	Params.Init()
@@ -125,14 +78,6 @@ func TestExpireSegment(t *testing.T) {
 		ID:     collID,
 		Schema: schema,
 	})
-	assert.Nil(t, err)
-	id, err := mockAllocator.allocID()
-	assert.Nil(t, err)
-	segmentInfo, err := BuildSegment(collID, 100, id, "c1")
-	assert.Nil(t, err)
-	err = meta.AddSegment(segmentInfo)
-	assert.Nil(t, err)
-	err = segAllocator.OpenSegment(ctx, segmentInfo)
 	assert.Nil(t, err)
 
 	id1, _, et, err := segAllocator.AllocSegment(ctx, collID, 100, "c1", 10)

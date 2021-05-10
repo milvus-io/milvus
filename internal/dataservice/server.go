@@ -555,7 +555,12 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb
 			Reason:    "server is initializing",
 		}, nil
 	}
-	s.segAllocator.SealAllSegments(ctx, req.CollectionID)
+	if err := s.segAllocator.SealAllSegments(ctx, req.CollectionID); err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("Seal all segments error %s", err),
+		}, nil
+	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil

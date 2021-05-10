@@ -44,20 +44,16 @@ func (err errRemainInSufficient) Error() string {
 
 // segmentAllocator is used to allocate rows for segments and record the allocations.
 type segmentAllocatorInterface interface {
-	// OpenSegment add the segment to allocator and set it allocatable
-	OpenSegment(ctx context.Context, segmentInfo *datapb.SegmentInfo) error
 	// AllocSegment allocate rows and record the allocation.
 	AllocSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string, requestRows int) (UniqueID, int, Timestamp, error)
-	// GetSealedSegments get all sealed segment.
-	GetSealedSegments(ctx context.Context) ([]UniqueID, error)
-	// SealSegment set segment sealed, the segment will not be allocated anymore.
-	SealSegment(ctx context.Context, segmentID UniqueID) error
 	// DropSegment drop the segment from allocator.
 	DropSegment(ctx context.Context, segmentID UniqueID)
+	// SealAllSegments get all opened segment ids of collection. return success and failed segment ids
+	SealAllSegments(ctx context.Context, collectionID UniqueID) error
+	// GetSealedSegments get all sealed segment.
+	GetSealedSegments(ctx context.Context) ([]UniqueID, error)
 	// ExpireAllocations check all allocations' expire time and remove the expired allocation.
 	ExpireAllocations(ctx context.Context, timeTick Timestamp) error
-	// SealAllSegments get all opened segment ids of collection. return success and failed segment ids
-	SealAllSegments(ctx context.Context, collectionID UniqueID)
 	// IsAllocationsExpired check all allocations of segment expired.
 	IsAllocationsExpired(ctx context.Context, segmentID UniqueID, ts Timestamp) (bool, error)
 }
@@ -111,17 +107,6 @@ func newSegmentAllocator(meta *meta, allocator allocatorInterface, opts ...Optio
 		opt.apply(alloc)
 	}
 	return alloc
-}
-
-func (s *segmentAllocator) OpenSegment(ctx context.Context, segmentInfo *datapb.SegmentInfo) error {
-	sp, _ := trace.StartSpanFromContext(ctx)
-	defer sp.Finish()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.segments[segmentInfo.ID]; ok {
-		return fmt.Errorf("segment %d already exist", segmentInfo.ID)
-	}
-	return s.open(segmentInfo)
 }
 
 func (s *segmentAllocator) open(segmentInfo *datapb.SegmentInfo) error {
@@ -314,23 +299,6 @@ func (s *segmentAllocator) checkSegmentSealed(segStatus *segmentStatus) (bool, e
 	return float64(segMeta.NumRows) >= s.segmentThresholdFactor*float64(segStatus.total), nil
 }
 
-func (s *segmentAllocator) SealSegment(ctx context.Context, segmentID UniqueID) error {
-	sp, _ := trace.StartSpanFromContext(ctx)
-	defer sp.Finish()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	status, ok := s.segments[segmentID]
-	if !ok {
-		return nil
-	}
-
-	if err := s.sealSegmentInMeta(segmentID); err != nil {
-		return err
-	}
-	status.sealed = true
-	return nil
-}
-
 func (s *segmentAllocator) HasSegment(ctx context.Context, segmentID UniqueID) bool {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
@@ -388,7 +356,7 @@ func (s *segmentAllocator) IsAllocationsExpired(ctx context.Context, segmentID U
 	return status.lastExpireTime <= ts, nil
 }
 
-func (s *segmentAllocator) SealAllSegments(ctx context.Context, collectionID UniqueID) {
+func (s *segmentAllocator) SealAllSegments(ctx context.Context, collectionID UniqueID) error {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
 	s.mu.Lock()
@@ -398,7 +366,29 @@ func (s *segmentAllocator) SealAllSegments(ctx context.Context, collectionID Uni
 			if status.sealed {
 				continue
 			}
+			if err := s.sealSegmentInMeta(status.id); err != nil {
+				return err
+			}
 			status.sealed = true
 		}
 	}
+	return nil
+}
+
+// only for test
+func (s *segmentAllocator) SealSegment(ctx context.Context, segmentID UniqueID) error {
+	sp, _ := trace.StartSpanFromContext(ctx)
+	defer sp.Finish()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	status, ok := s.segments[segmentID]
+	if !ok {
+		return nil
+	}
+
+	if err := s.sealSegmentInMeta(segmentID); err != nil {
+		return err
+	}
+	status.sealed = true
+	return nil
 }

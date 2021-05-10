@@ -204,22 +204,8 @@ func TestFlush(t *testing.T) {
 		Partitions: []int64{},
 	})
 	assert.Nil(t, err)
-	segments := []struct {
-		id           UniqueID
-		collectionID UniqueID
-	}{
-		{1, 0},
-		{2, 0},
-	}
-	for _, segment := range segments {
-		err = svr.segAllocator.OpenSegment(context.TODO(), &datapb.SegmentInfo{
-			ID:           segment.id,
-			CollectionID: segment.collectionID,
-			PartitionID:  0,
-			State:        commonpb.SegmentState_Growing,
-		})
-		assert.Nil(t, err)
-	}
+	segID, _, _, err := svr.segAllocator.AllocSegment(context.TODO(), 0, 1, "channel-1", 1)
+	assert.Nil(t, err)
 	resp, err := svr.Flush(context.TODO(), &datapb.FlushRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Flush,
@@ -234,7 +220,8 @@ func TestFlush(t *testing.T) {
 	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	ids, err := svr.segAllocator.GetSealedSegments(context.TODO())
 	assert.Nil(t, err)
-	assert.ElementsMatch(t, ids, []UniqueID{1, 2})
+	assert.EqualValues(t, 1, len(ids))
+	assert.EqualValues(t, segID, ids[0])
 }
 
 func TestGetComponentStates(t *testing.T) {
