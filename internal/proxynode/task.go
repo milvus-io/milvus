@@ -54,6 +54,7 @@ const (
 	HasCollectionTaskName           = "HasCollectionTask"
 	DescribeCollectionTaskName      = "DescribeCollectionTask"
 	GetCollectionStatisticsTaskName = "GetCollectionStatisticsTask"
+	GetPartitionStatisticsTaskName  = "GetPartitionStatisticsTask"
 	ShowCollectionTaskName          = "ShowCollectionTask"
 	CreatePartitionTaskName         = "CreatePartitionTask"
 	DropPartitionTaskName           = "DropPartitionTask"
@@ -1076,7 +1077,7 @@ func (dct *DescribeCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type GetCollectionsStatisticsTask struct {
+type GetCollectionStatisticsTask struct {
 	Condition
 	*milvuspb.GetCollectionStatisticsRequest
 	ctx         context.Context
@@ -1084,50 +1085,50 @@ type GetCollectionsStatisticsTask struct {
 	result      *milvuspb.GetCollectionStatisticsResponse
 }
 
-func (g *GetCollectionsStatisticsTask) TraceCtx() context.Context {
+func (g *GetCollectionStatisticsTask) TraceCtx() context.Context {
 	return g.ctx
 }
 
-func (g *GetCollectionsStatisticsTask) ID() UniqueID {
+func (g *GetCollectionStatisticsTask) ID() UniqueID {
 	return g.Base.MsgID
 }
 
-func (g *GetCollectionsStatisticsTask) SetID(uid UniqueID) {
+func (g *GetCollectionStatisticsTask) SetID(uid UniqueID) {
 	g.Base.MsgID = uid
 }
 
-func (g *GetCollectionsStatisticsTask) Name() string {
+func (g *GetCollectionStatisticsTask) Name() string {
 	return GetCollectionStatisticsTaskName
 }
 
-func (g *GetCollectionsStatisticsTask) Type() commonpb.MsgType {
+func (g *GetCollectionStatisticsTask) Type() commonpb.MsgType {
 	return g.Base.MsgType
 }
 
-func (g *GetCollectionsStatisticsTask) BeginTs() Timestamp {
+func (g *GetCollectionStatisticsTask) BeginTs() Timestamp {
 	return g.Base.Timestamp
 }
 
-func (g *GetCollectionsStatisticsTask) EndTs() Timestamp {
+func (g *GetCollectionStatisticsTask) EndTs() Timestamp {
 	return g.Base.Timestamp
 }
 
-func (g *GetCollectionsStatisticsTask) SetTs(ts Timestamp) {
+func (g *GetCollectionStatisticsTask) SetTs(ts Timestamp) {
 	g.Base.Timestamp = ts
 }
 
-func (g *GetCollectionsStatisticsTask) OnEnqueue() error {
+func (g *GetCollectionStatisticsTask) OnEnqueue() error {
 	g.Base = &commonpb.MsgBase{}
 	return nil
 }
 
-func (g *GetCollectionsStatisticsTask) PreExecute(ctx context.Context) error {
+func (g *GetCollectionStatisticsTask) PreExecute(ctx context.Context) error {
 	g.Base.MsgType = commonpb.MsgType_GetCollectionStatistics
 	g.Base.SourceID = Params.ProxyID
 	return nil
 }
 
-func (g *GetCollectionsStatisticsTask) Execute(ctx context.Context) error {
+func (g *GetCollectionStatisticsTask) Execute(ctx context.Context) error {
 	collID, err := globalMetaCache.GetCollectionID(ctx, g.CollectionName)
 	if err != nil {
 		return err
@@ -1159,7 +1160,99 @@ func (g *GetCollectionsStatisticsTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (g *GetCollectionsStatisticsTask) PostExecute(ctx context.Context) error {
+func (g *GetCollectionStatisticsTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type GetPartitionStatisticsTask struct {
+	Condition
+	*milvuspb.GetPartitionStatisticsRequest
+	ctx         context.Context
+	dataService types.DataService
+	result      *milvuspb.GetPartitionStatisticsResponse
+}
+
+func (g *GetPartitionStatisticsTask) TraceCtx() context.Context {
+	return g.ctx
+}
+
+func (g *GetPartitionStatisticsTask) ID() UniqueID {
+	return g.Base.MsgID
+}
+
+func (g *GetPartitionStatisticsTask) SetID(uid UniqueID) {
+	g.Base.MsgID = uid
+}
+
+func (g *GetPartitionStatisticsTask) Name() string {
+	return GetPartitionStatisticsTaskName
+}
+
+func (g *GetPartitionStatisticsTask) Type() commonpb.MsgType {
+	return g.Base.MsgType
+}
+
+func (g *GetPartitionStatisticsTask) BeginTs() Timestamp {
+	return g.Base.Timestamp
+}
+
+func (g *GetPartitionStatisticsTask) EndTs() Timestamp {
+	return g.Base.Timestamp
+}
+
+func (g *GetPartitionStatisticsTask) SetTs(ts Timestamp) {
+	g.Base.Timestamp = ts
+}
+
+func (g *GetPartitionStatisticsTask) OnEnqueue() error {
+	g.Base = &commonpb.MsgBase{}
+	return nil
+}
+
+func (g *GetPartitionStatisticsTask) PreExecute(ctx context.Context) error {
+	g.Base.MsgType = commonpb.MsgType_GetPartitionStatistics
+	g.Base.SourceID = Params.ProxyID
+	return nil
+}
+
+func (g *GetPartitionStatisticsTask) Execute(ctx context.Context) error {
+	collID, err := globalMetaCache.GetCollectionID(ctx, g.CollectionName)
+	if err != nil {
+		return err
+	}
+	partitionID, err := globalMetaCache.GetPartitionID(ctx, g.CollectionName, g.PartitionName)
+	if err != nil {
+		return err
+	}
+	req := &datapb.GetPartitionStatisticsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_GetPartitionStatistics,
+			MsgID:     g.Base.MsgID,
+			Timestamp: g.Base.Timestamp,
+			SourceID:  g.Base.SourceID,
+		},
+		CollectionID: collID,
+		PartitionID:  partitionID,
+	}
+
+	result, _ := g.dataService.GetPartitionStatistics(ctx, req)
+	if result == nil {
+		return errors.New("get partition statistics resp is nil")
+	}
+	if result.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(result.Status.Reason)
+	}
+	g.result = &milvuspb.GetPartitionStatisticsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		Stats: result.Stats,
+	}
+	return nil
+}
+
+func (g *GetPartitionStatisticsTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 

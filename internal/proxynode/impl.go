@@ -360,7 +360,7 @@ func (node *ProxyNode) DescribeCollection(ctx context.Context, request *milvuspb
 }
 
 func (node *ProxyNode) GetCollectionStatistics(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
-	g := &GetCollectionsStatisticsTask{
+	g := &GetCollectionStatisticsTask{
 		ctx:                            ctx,
 		Condition:                      NewTaskCondition(ctx),
 		GetCollectionStatisticsRequest: request,
@@ -685,7 +685,52 @@ func (node *ProxyNode) ReleasePartitions(ctx context.Context, request *milvuspb.
 }
 
 func (node *ProxyNode) GetPartitionStatistics(ctx context.Context, request *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error) {
-	panic("implement me")
+	g := &GetPartitionStatisticsTask{
+		ctx:                           ctx,
+		Condition:                     NewTaskCondition(ctx),
+		GetPartitionStatisticsRequest: request,
+		dataService:                   node.dataService,
+	}
+
+	err := node.sched.DdQueue.Enqueue(g)
+	if err != nil {
+		return &milvuspb.GetPartitionStatisticsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	log.Debug("GetPartitionStatistics",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", request.Base.MsgID),
+		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("partition", request.PartitionName))
+	defer func() {
+		log.Debug("GetPartitionStatistics Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", request.Base.MsgID),
+			zap.Uint64("timestamp", request.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.String("partition", request.PartitionName))
+	}()
+
+	err = g.WaitToFinish()
+	if err != nil {
+		return &milvuspb.GetPartitionStatisticsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	return g.result, nil
 }
 
 func (node *ProxyNode) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
