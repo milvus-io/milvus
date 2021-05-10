@@ -13,16 +13,22 @@
 
 #include <memory>
 #include <string>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
-#include "BooleanQuery.h"
-#include "Field.h"
 #include "Status.h"
 
 /** \brief Milvus SDK namespace
  */
 namespace milvus {
+
+/**
+ * @brief Entity inserted, currently each entity represent a vector
+ */
+struct Entity {
+    std::vector<float> float_data;     ///< Vector raw float data
+    std::vector<uint8_t> binary_data;  ///< Vector raw binary data
+};
 
 /**
  * @brief Index Type
@@ -43,12 +49,12 @@ enum class IndexType {
 
 enum class MetricType {
     INVALID = 0,
-    L2 = 1,        // Euclidean Distance
-    IP = 2,        // Cosine Similarity
-    HAMMING = 3,   // Hamming Distance
-    JACCARD = 4,   // Jaccard Distance
-    TANIMOTO = 5,  // Tanimoto Distance
-    SUBSTRUCTURE = 6,   // Substructure Distance
+    L2 = 1,              // Euclidean Distance
+    IP = 2,              // Cosine Similarity
+    HAMMING = 3,         // Hamming Distance
+    JACCARD = 4,         // Jaccard Distance
+    TANIMOTO = 5,        // Tanimoto Distance
+    SUBSTRUCTURE = 6,    // Substructure Distance
     SUPERSTRUCTURE = 7,  // Superstructure Distance
 };
 
@@ -98,9 +104,9 @@ using TopKQueryResult = std::vector<QueryResult>;  ///< Topk query result
  *           ///< efConstruction range:[100, 500]
  */
 struct IndexParam {
-    std::string collection_name;        ///< Collection name for create index
-    IndexType index_type;               ///< Index type
-    std::string extra_params;           ///< Extra parameters according to different index type, must be json format
+    std::string collection_name;  ///< Collection name for create index
+    IndexType index_type;         ///< Index type
+    std::string extra_params;     ///< Extra parameters according to different index type, must be json format
 };
 
 /**
@@ -112,19 +118,6 @@ struct PartitionParam {
 };
 
 using PartitionTagList = std::vector<std::string>;
-
-
-struct HMapping {
-    std::string collection_name;
-    std::vector<FieldPtr> numerica_fields;
-    std::vector<VectorFieldPtr> vector_fields;
-};
-
-struct HEntity {
-    int64_t row_num;
-    std::unordered_map<std::string, std::vector<int8_t>> numerica_value;
-    std::unordered_map<std::string, std::vector<Entity>> vector_value;
-};
 
 /**
  * @brief SDK main class
@@ -322,10 +315,8 @@ class Connection {
      * @return Indicate if entity array are inserted successfully
      */
     virtual Status
-    Insert(const std::string& collection_name,
-           const std::string& partition_tag,
-           const std::vector<Entity>& entity_array,
-           std::vector<int64_t>& id_array) = 0;
+    Insert(const std::string& collection_name, const std::string& partition_tag,
+           const std::vector<Entity>& entity_array, std::vector<int64_t>& id_array) = 0;
 
     /**
      * @brief Get entity data by id
@@ -334,15 +325,15 @@ class Connection {
      * Return the first found entity if there are entities with duplicated id
      *
      * @param collection_name, target collection's name.
+     * @param partition_tag, target partition tag
      * @param id_array, target entities id array.
      * @param entities_data, returned entities data.
      *
      * @return Indicate if the operation is succeed.
      */
     virtual Status
-    GetEntityByID(const std::string& collection_name,
-                  const std::vector<int64_t>& id_array,
-                  std::vector<Entity>& entities_data) = 0;
+    GetEntityByID(const std::string& collection_name, const std::string& partition_tag,
+                  const std::vector<int64_t>& id_array, std::vector<Entity>& entities_data) = 0;
 
     /**
      * @brief List entity ids from a segment
@@ -357,8 +348,7 @@ class Connection {
      * @return Indicate if the operation is succeed.
      */
     virtual Status
-    ListIDInSegment(const std::string& collection_name,
-                    const std::string& segment_name,
+    ListIDInSegment(const std::string& collection_name, const std::string& segment_name,
                     std::vector<int64_t>& id_array) = 0;
 
     /**
@@ -385,8 +375,8 @@ class Connection {
      */
     virtual Status
     Search(const std::string& collection_name, const PartitionTagList& partition_tag_array,
-           const std::vector<Entity>& entity_array, int64_t topk,
-           const std::string& extra_params, TopKQueryResult& topk_query_result) = 0;
+           const std::vector<Entity>& entity_array, int64_t topk, const std::string& extra_params,
+           TopKQueryResult& topk_query_result) = 0;
 
     /**
      * @brief Get collection information
@@ -445,12 +435,14 @@ class Connection {
      * This method is used to delete entity by id.
      *
      * @param collection_name, target collection's name.
+     * @param partition_tag, target partition tag
      * @param id_array, entity id array to be deleted.
      *
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) = 0;
+    DeleteEntityByID(const std::string& collection_name, const std::string& partition_tag,
+                     const std::vector<int64_t>& id_array) = 0;
 
     /**
      * @brief Load collection from disk to memory
@@ -464,6 +456,19 @@ class Connection {
      */
     virtual Status
     LoadCollection(const std::string& collection_name, PartitionTagList& partition_tag_array) const = 0;
+
+    /**
+     * @brief Release collection from memory
+     *
+     * This method is used to release collection data from memory
+     *
+     * @param collection_name, target collection's name.
+     * @param partition_tag, target partitions tag.
+     *
+     * @return Indicate if this operation is successful.
+     */
+    virtual Status
+    ReleaseCollection(const std::string& collection_name, PartitionTagList& partition_tag_array) const = 0;
 
     /**
      * @brief Get index information
@@ -563,24 +568,6 @@ class Connection {
      */
     virtual Status
     Compact(const std::string& collection_name) = 0;
-
-    /*******************************New Interface**********************************/
-
-    virtual Status
-    CreateHybridCollection(const HMapping& mapping) = 0;
-
-    virtual Status
-    InsertEntity(const std::string& collection_name,
-                 const std::string& partition_tag,
-                 HEntity& entities,
-                 std::vector<uint64_t>& id_array) = 0;
-
-    virtual Status
-    HybridSearch(const std::string& collection_name,
-                 const std::vector<std::string>& partition_list,
-                 BooleanQueryPtr& boolean_query,
-                 const std::string& extra_params,
-                 TopKQueryResult& topk_query_result) = 0;
 };
 
 }  // namespace milvus

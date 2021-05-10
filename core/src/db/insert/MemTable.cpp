@@ -101,6 +101,9 @@ Status
 MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
     TimeRecorder recorder("MemTable::Serialize collection " + collection_id_);
 
+    // The ApplyDeletes() do two things
+    // 1. delete vectors from buffer
+    // 2. delete vectors from storage
     if (!doc_ids_to_delete_.empty() && apply_delete) {
         auto status = ApplyDeletes();
         if (!status.ok()) {
@@ -110,12 +113,29 @@ MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
 
     meta::SegmentsSchema update_files;
     for (auto mem_table_file = mem_table_file_list_.begin(); mem_table_file != mem_table_file_list_.end();) {
+        // For empty segment
+        if ((*mem_table_file)->Empty()) {
+            // Mark the empty segment as to_delete so that the meta system can remove it later
+            auto schema = (*mem_table_file)->GetSegmentSchema();
+            schema.file_type_ = meta::SegmentSchema::TO_DELETE;
+            update_files.push_back(schema);
+
+            std::lock_guard<std::mutex> lock(mutex_);
+            mem_table_file = mem_table_file_list_.erase(mem_table_file);
+            continue;
+        }
+
         auto status = (*mem_table_file)->Serialize(wal_lsn);
-        update_files.push_back((*mem_table_file)->GetSegmentSchema());
+        auto schema = (*mem_table_file)->GetSegmentSchema();
         if (!status.ok()) {
+            // mark the failed segment as to_delete so that the meta system can remove it later
+            schema.file_type_ = meta::SegmentSchema::TO_DELETE;
+            meta_->UpdateCollectionFile(schema);
             return status;
         }
 
+        // succeed, record the segment into meta by UpdateCollectionFiles()
+        update_files.push_back(schema);
         LOG_ENGINE_DEBUG_ << "Flushed segment " << (*mem_table_file)->GetSegmentId();
 
         {
@@ -130,6 +150,7 @@ MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
         return status;
     }
 
+    // Record WAL flag
     status = meta_->UpdateCollectionFlushLSN(collection_id_, wal_lsn);
     if (!status.ok()) {
         std::string err_msg = "Failed to write flush lsn to meta: " + status.ToString();
@@ -249,6 +270,8 @@ MemTable::ApplyDeletes() {
             break;
         }
 
+        segment::UidsPtr uids_ptr = nullptr;
+
         // Get all index that contains blacklist in cache
         std::vector<knowhere::VecIndexPtr> indexes;
         std::vector<faiss::ConcurrentBitsetPtr> blacklists;
@@ -268,17 +291,21 @@ MemTable::ApplyDeletes() {
                     indexes.emplace_back(nullptr);
                     blacklists.emplace_back(blacklist);
                 }
+
+                // load uids from cache
+                uids_ptr = index->GetUids();
             }
         }
 
         std::string segment_dir;
         utils::GetParentPath(file.location_, segment_dir);
-        segment::SegmentReader segment_reader(segment_dir);
-
-        std::vector<segment::doc_id_t> uids;
-        status = segment_reader.LoadUids(uids);
-        if (!status.ok()) {
-            break;
+        if (uids_ptr == nullptr) {
+            // load uids from disk
+            segment::SegmentReader segment_reader(segment_dir);
+            status = segment_reader.LoadUids(uids_ptr);
+            if (!status.ok()) {
+                return status;
+            }
         }
 
         segment::DeletedDocsPtr deleted_docs = std::make_shared<segment::DeletedDocs>();
@@ -292,10 +319,10 @@ MemTable::ApplyDeletes() {
         auto find_diff = std::chrono::duration<double>::zero();
         auto set_diff = std::chrono::duration<double>::zero();
 
-        for (size_t i = 0; i < uids.size(); ++i) {
+        for (size_t i = 0; i < uids_ptr->size(); ++i) {
             auto find_start = std::chrono::high_resolution_clock::now();
 
-            auto found = std::binary_search(ids_to_check.begin(), ids_to_check.end(), uids[i]);
+            auto found = std::binary_search(ids_to_check.begin(), ids_to_check.end(), (*uids_ptr)[i]);
 
             auto find_end = std::chrono::high_resolution_clock::now();
             find_diff += (find_end - find_start);
@@ -304,7 +331,7 @@ MemTable::ApplyDeletes() {
                 auto set_start = std::chrono::high_resolution_clock::now();
 
                 deleted_docs->AddDeletedDoc(i);
-                id_bloom_filter_ptr->Remove(uids[i]);
+                id_bloom_filter_ptr->Remove((*uids_ptr)[i]);
 
                 for (auto& blacklist : blacklists) {
                     blacklist->set(i);
@@ -314,7 +341,7 @@ MemTable::ApplyDeletes() {
             }
         }
 
-        LOG_ENGINE_DEBUG_ << "Finding " << ids_to_check.size() << " uids in " << uids.size() << " uids took "
+        LOG_ENGINE_DEBUG_ << "Finding " << ids_to_check.size() << " uids in " << uids_ptr->size() << " uids took "
                           << find_diff.count() << " s in total";
         LOG_ENGINE_DEBUG_ << "Setting deleted docs and bloom filter took " << set_diff.count() << " s in total";
 

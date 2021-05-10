@@ -623,36 +623,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(InsertEntity)
-
-    ENDPOINT("POST", "/hybrid_collections/{collection_name}/entities", InsertEntity, PATH(String, collection_name),
-             BODY_STRING(String, body)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/hybrid_collections/" + collection_name->std_str() +
-                        "/entities\'");
-        tr.RecordSection("Received request.");
-
-        auto ids_dto = VectorIdsDto::createShared();
-        WebRequestHandler handler = WebRequestHandler();
-
-        std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.InsertEntity(collection_name, body, ids_dto);
-        switch (status_dto->code->getValue()) {
-            case StatusCode::SUCCESS:
-                response = createDtoResponse(Status::CODE_201, ids_dto);
-                break;
-            case StatusCode::COLLECTION_NOT_EXISTS:
-                response = createDtoResponse(Status::CODE_404, status_dto);
-                break;
-            default:
-                response = createDtoResponse(Status::CODE_400, status_dto);
-        }
-
-        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
-                           ", reason = " + status_dto->message->std_str() + ". Total cost");
-
-        return response;
-    }
-
     ADD_CORS(VectorsOp)
 
     ENDPOINT("PUT", "/collections/{collection_name}/vectors", VectorsOp, PATH(String, collection_name),
@@ -736,29 +706,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
                            ", reason = " + status_dto->message->std_str() + ". Total cost");
 
-        return response;
-    }
-
-    ADD_CORS(CreateHybridCollection)
-
-    ENDPOINT("POST", "/hybrid_collections", CreateHybridCollection, BODY_STRING(String, body_str)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/hybrid_collections\'");
-        tr.RecordSection("Received request.");
-        WebRequestHandler handler = WebRequestHandler();
-
-        std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.CreateHybridCollection(body_str);
-        switch (status_dto->code->getValue()) {
-            case StatusCode::SUCCESS:
-                response = createDtoResponse(Status::CODE_201, status_dto);
-                break;
-            default:
-                response = createDtoResponse(Status::CODE_400, status_dto);
-        }
-
-        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
-                          ", reason = " + status_dto->message->std_str() + ". Total cost";
-        tr.ElapseFromBegin(ttr);
         return response;
     }
 

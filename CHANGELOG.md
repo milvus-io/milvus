@@ -2,23 +2,32 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 1.1.0 (TBD)
+# Milvus 1.1.0 (2021-04-29)
 ## Bug
--   \#4778 Fix failure to open vector index in mishards
--   \#4797 Fix wrong results of merged different 'topk' queries
--   \#4838 When an index created on the empty collection, the server will respond immediately
--   \#4858 Fix the crash when query for a large topk on GPU Flat
--   \#4862 Read-only nodes not to merge segments
+-   \#4778 Failed to open vector index in mishards
+-   \#4797 Wrong results returned for merged different 'topk' queries
+-   \#4838 When an index created on the empty collection, the server should respond immediately
+-   \#4858 Milvus crashed when query for a large topk(>2048) on GPU Flat
+-   \#4862 Read-only node should not merge segments at startup
 -   \#4894 The capacity of bloom filter should be determined by the row count of its segment
--   \#4908 GPU cache will not be cleaned up in time after the collection is dropped
+-   \#4908 GPU cache not cleaned up after the collection is dropped
 -   \#4933 Milvus waste time during building index for small segment
+-   \#4952 Failed to set timezone like "UTC + 5:30"
+-   \#5008 Randomly crash during continuous and concurrent delete, insert and search
+-   \#5010 IVF_PQ failed to query on GPU if 'nbits' doesn't equal to 8
+-   \#5050 Index type returned by get_collection_stats() is incorrect
+-   \#5063 Empty segment is serialized and crash milvus
+-   \#5078 Server crashed when creaing a GPU IVF index whose dimension is 2048/4086/8192
 
 ## Feature
--   \#1434 Storage: enabling s3 storage support (implemented by Unisinsight)
+-   \#4564 Allow get_entity_by_id() in a specified partition
+-   \#4806 Allow delete_entity_by_id() in a specified partition
+-   \#4905 Add API release_collection() to unload collection from the cache
 
 ## Improvement
--   \#4756 Improve the performance of get_vectors_by_id
+-   \#4756 Improve the performance of get_entity_by_id()
 -   \#4856 Upgrade hnswlib to v0.5.0
+-   \#4958 Improve the performance of IVF index training 
 
 # Milvus 1.0.0 (2021-03-09)
 ## Bug

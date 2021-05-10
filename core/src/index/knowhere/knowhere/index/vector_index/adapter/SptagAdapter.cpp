@@ -19,10 +19,10 @@ std::shared_ptr<SPTAG::MetadataSet>
 ConvertToMetadataSet(const DatasetPtr& dataset_ptr) {
     auto elems = dataset_ptr->Get<int64_t>(meta::ROWS);
 
-    auto p_id = new int64_t[sizeof(int64_t) * elems];
+    auto p_id = new int64_t[elems];
     for (int64_t i = 0; i < elems; ++i) p_id[i] = i;
 
-    auto p_offset = new int64_t[sizeof(int64_t) * (elems + 1)];
+    auto p_offset = new int64_t[elems + 1];
     for (int64_t i = 0; i <= elems; ++i) p_offset[i] = i * 8;
 
     std::shared_ptr<SPTAG::MetadataSet> metaset(

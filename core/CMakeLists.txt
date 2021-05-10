@@ -90,7 +90,7 @@ if (MILVUS_VERSION_MAJOR STREQUAL ""
         OR MILVUS_VERSION_MINOR STREQUAL ""
         OR MILVUS_VERSION_PATCH STREQUAL "")
     message(WARNING "Failed to determine Milvus version from git branch name")
-    set(MILVUS_VERSION "1.0.0")
+    set(MILVUS_VERSION "1.1.0")
 endif ()
 
 message(STATUS "Build version = ${MILVUS_VERSION}")
@@ -197,6 +197,7 @@ config_summary()
 add_subdirectory(src)
 
 if (BUILD_UNIT_TEST STREQUAL "ON")
+    add_compile_definitions("FIU_ENABLE")
     if (BUILD_COVERAGE STREQUAL "ON")
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
     endif ()

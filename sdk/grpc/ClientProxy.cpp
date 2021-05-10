@@ -17,7 +17,7 @@
 
 #include "grpc-gen/gen-milvus/milvus.grpc.pb.h"
 
-#define MILVUS_SDK_VERSION "0.10.0";
+#define MILVUS_SDK_VERSION "1.1.0";
 
 namespace milvus {
 
@@ -29,7 +29,7 @@ UriCheck(const std::string& uri) {
     return (index != std::string::npos);
 }
 
-template<typename T>
+template <typename T>
 void
 ConstructSearchParam(const std::string& collection_name, const std::vector<std::string>& partition_tag_array,
                      int64_t topk, const std::string& extra_params, T& search_param) {
@@ -276,13 +276,14 @@ ClientProxy::Insert(const std::string& collection_name, const std::string& parti
 }
 
 Status
-ClientProxy::GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
-                           std::vector<Entity>& entities_data) {
+ClientProxy::GetEntityByID(const std::string& collection_name, const std::string& partition_tag,
+                           const std::vector<int64_t>& id_array, std::vector<Entity>& entities_data) {
     try {
         entities_data.clear();
 
         ::milvus::grpc::VectorsIdentity vectors_identity;
         vectors_identity.set_collection_name(collection_name);
+        vectors_identity.set_partition_tag(partition_tag);
         for (auto id : id_array) {
             vectors_identity.add_id_array(id);
         }
@@ -436,10 +437,12 @@ ClientProxy::GetCollectionStats(const std::string& collection_name, std::string&
 }
 
 Status
-ClientProxy::DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) {
+ClientProxy::DeleteEntityByID(const std::string& collection_name, const std::string& partition_tag,
+                              const std::vector<int64_t>& id_array) {
     try {
         ::milvus::grpc::DeleteByIDParam delete_by_id_param;
         delete_by_id_param.set_collection_name(collection_name);
+        delete_by_id_param.set_partition_tag(partition_tag);
         for (auto id : id_array) {
             delete_by_id_param.add_id_array(id);
         }
@@ -459,6 +462,21 @@ ClientProxy::LoadCollection(const std::string& collection_name, PartitionTagList
             param.add_partition_tag_array(tag);
         }
         Status status = client_ptr_->LoadCollection(param);
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to preload collection: " + std::string(ex.what()));
+    }
+}
+
+Status
+ClientProxy::ReleaseCollection(const std::string& collection_name, PartitionTagList& partition_tag_array) const {
+    try {
+        ::milvus::grpc::PreloadCollectionParam param;
+        param.set_collection_name(collection_name);
+        for (auto& tag : partition_tag_array) {
+            param.add_partition_tag_array(tag);
+        }
+        Status status = client_ptr_->ReleaseCollection(param);
         return status;
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to preload collection: " + std::string(ex.what()));
@@ -581,200 +599,6 @@ ClientProxy::Compact(const std::string& collection_name) {
         return status;
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to compact collection: " + std::string(ex.what()));
-    }
-}
-
-/*******************************New Interface**********************************/
-
-Status
-ClientProxy::CreateHybridCollection(const HMapping& mapping) {
-    try {
-        ::milvus::grpc::Mapping grpc_mapping;
-        grpc_mapping.set_collection_name(mapping.collection_name);
-        for (auto field : mapping.numerica_fields) {
-            ::milvus::grpc::FieldParam* field_param = grpc_mapping.add_fields();
-            field_param->set_name(field->field_name);
-            field_param->mutable_type()->set_data_type((::milvus::grpc::DataType)field->field_type);
-            ::milvus::grpc::KeyValuePair* kv_pair = field_param->add_extra_params();
-            kv_pair->set_key("params");
-            kv_pair->set_value(field->extram_params);
-        }
-        for (auto field : mapping.vector_fields) {
-            ::milvus::grpc::FieldParam* field_param = grpc_mapping.add_fields();
-            field_param->set_name(field->field_name);
-            field_param->mutable_type()->set_data_type((::milvus::grpc::DataType)field->field_type);
-            field_param->mutable_type()->mutable_vector_param()->set_dimension(field->dimension);
-            ::milvus::grpc::KeyValuePair* kv_pair = field_param->add_extra_params();
-            kv_pair->set_key("params");
-            kv_pair->set_value(field->extram_params);
-        }
-        return client_ptr_->CreateHybridCollection(grpc_mapping);
-    } catch (std::exception& exception) {
-        return Status(StatusCode::UnknownError, "Failed to create collection: " + std::string(exception.what()));
-    }
-}
-
-void
-CopyVectorField(::milvus::grpc::RowRecord* target, const Entity& src) {
-    if (!src.float_data.empty()) {
-        auto vector_data = target->mutable_float_data();
-        vector_data->Resize(static_cast<int>(src.float_data.size()), 0.0);
-        memcpy(vector_data->mutable_data(), src.float_data.data(), src.float_data.size() * sizeof(float));
-    }
-
-    if (!src.binary_data.empty()) {
-        target->set_binary_data(src.binary_data.data(), src.binary_data.size());
-    }
-}
-
-Status
-ClientProxy::InsertEntity(const std::string& collection_name, const std::string& partition_tag, HEntity& entities,
-                          std::vector<uint64_t>& id_array) {
-    Status status;
-    try {
-        ::milvus::grpc::HInsertParam grpc_param;
-        grpc_param.set_collection_name(collection_name);
-        grpc_param.set_partition_tag(partition_tag);
-
-        std::vector<std::vector<int8_t>> numerica_data;
-        auto numerica_size = 0;
-
-        auto numerica_it = entities.numerica_value.begin();
-        auto grpc_entity = grpc_param.mutable_entities();
-        grpc_entity->set_row_num(entities.row_num);
-        for (; numerica_it != entities.numerica_value.end(); numerica_it++) {
-            auto name = grpc_entity->add_field_names();
-            *name = numerica_it->first;
-            auto size = numerica_it->second.size();
-            numerica_size += size;
-            numerica_data.emplace_back(numerica_it->second);
-        }
-
-        std::vector<int8_t> attr_data(numerica_size, 0);
-        size_t offset = 0;
-        for (auto data : numerica_data) {
-            memcpy(attr_data.data() + offset, data.data(), data.size());
-            offset += data.size();
-        }
-        grpc_entity->set_attr_records(attr_data.data(), numerica_size);
-
-        auto vector_it = entities.vector_value.begin();
-        for (; vector_it != entities.vector_value.end(); vector_it++) {
-            auto name = grpc_param.mutable_entities()->add_field_names();
-            *name = vector_it->first;
-            ::milvus::grpc::FieldValue* vector_field = grpc_param.mutable_entities()->add_result_values();
-            for (auto entity : vector_it->second) {
-                ::milvus::grpc::RowRecord* record = vector_field->mutable_vector_value()->add_value();
-                CopyVectorField(record, entity);
-            }
-        }
-
-        ::milvus::grpc::HEntityIDs entity_ids;
-        if (!id_array.empty()) {
-            auto row_ids = grpc_param.mutable_entity_id_array();
-            row_ids->Resize(static_cast<int>(id_array.size()), -1);
-            memcpy(row_ids->mutable_data(), id_array.data(), id_array.size() * sizeof(int64_t));
-            status = client_ptr_->InsertEntities(grpc_param, entity_ids);
-        } else {
-            status = client_ptr_->InsertEntities(grpc_param, entity_ids);
-            id_array.insert(id_array.end(), entity_ids.entity_id_array().begin(), entity_ids.entity_id_array().end());
-        }
-    } catch (std::exception& exception) {
-        return Status(StatusCode::UnknownError, "Failed to create collection: " + std::string(exception.what()));
-    }
-
-    return status;
-}
-
-void
-WriteQueryToProto(::milvus::grpc::GeneralQuery* general_query, BooleanQueryPtr boolean_query) {
-    if (!boolean_query->GetBooleanQueries().empty()) {
-        for (auto query : boolean_query->GetBooleanQueries()) {
-            auto grpc_boolean_query = general_query->mutable_boolean_query();
-            grpc_boolean_query->set_occur((::milvus::grpc::Occur)query->GetOccur());
-
-            for (auto leaf_query : query->GetLeafQueries()) {
-                auto grpc_query = grpc_boolean_query->add_general_query();
-                if (leaf_query->term_query_ptr != nullptr) {
-                    auto term_query = grpc_query->mutable_term_query();
-                    term_query->set_field_name(leaf_query->term_query_ptr->field_name);
-                    term_query->set_boost(leaf_query->query_boost);
-                    term_query->set_values(leaf_query->term_query_ptr->field_value.data(),
-                                           leaf_query->term_query_ptr->field_value.size());
-                }
-                if (leaf_query->range_query_ptr != nullptr) {
-                    auto range_query = grpc_query->mutable_range_query();
-                    range_query->set_boost(leaf_query->query_boost);
-                    range_query->set_field_name(leaf_query->range_query_ptr->field_name);
-                    for (auto com_expr : leaf_query->range_query_ptr->compare_expr) {
-                        auto grpc_com_expr = range_query->add_operand();
-                        grpc_com_expr->set_operand(com_expr.operand);
-                        grpc_com_expr->set_operator_((milvus::grpc::CompareOperator)com_expr.compare_operator);
-                    }
-                }
-                if (leaf_query->vector_query_ptr != nullptr) {
-                    auto vector_query = grpc_query->mutable_vector_query();
-                    vector_query->set_field_name(leaf_query->vector_query_ptr->field_name);
-                    vector_query->set_query_boost(leaf_query->query_boost);
-                    vector_query->set_topk(leaf_query->vector_query_ptr->topk);
-                    for (auto record : leaf_query->vector_query_ptr->query_vector) {
-                        ::milvus::grpc::RowRecord* row_record = vector_query->add_records();
-                        CopyRowRecord(row_record, record);
-                    }
-                    auto extra_param = vector_query->add_extra_params();
-                    extra_param->set_key(EXTRA_PARAM_KEY);
-                    extra_param->set_value(leaf_query->vector_query_ptr->extra_params);
-                }
-            }
-
-            if (!query->GetBooleanQueries().empty()) {
-                ::milvus::grpc::GeneralQuery* next_query = grpc_boolean_query->add_general_query();
-                WriteQueryToProto(next_query, query);
-            }
-        }
-    }
-}
-
-Status
-ClientProxy::HybridSearch(const std::string& collection_name, const std::vector<std::string>& partition_list,
-                          BooleanQueryPtr& boolean_query, const std::string& extra_params,
-                          TopKQueryResult& topk_query_result) {
-    try {
-        // convert boolean_query to proto
-        ::milvus::grpc::HSearchParam search_param;
-        search_param.set_collection_name(collection_name);
-        for (auto partition : partition_list) {
-            auto value = search_param.add_partition_tag_array();
-            *value = partition;
-        }
-        auto extra_param = search_param.add_extra_params();
-        extra_param->set_key("params");
-        extra_param->set_value(extra_params);
-        WriteQueryToProto(search_param.mutable_general_query(), boolean_query);
-
-        // step 2: search vectors
-        ::milvus::grpc::TopKQueryResult result;
-        Status status = client_ptr_->HybridSearch(search_param, result);
-
-        // step 3: convert result array
-        topk_query_result.reserve(result.row_num());
-        int64_t nq = result.row_num();
-        if (nq == 0) {
-            return status;
-        }
-        int64_t topk = result.ids().size() / nq;
-        for (int64_t i = 0; i < result.row_num(); i++) {
-            milvus::QueryResult one_result;
-            one_result.ids.resize(topk);
-            one_result.distances.resize(topk);
-            memcpy(one_result.ids.data(), result.ids().data() + topk * i, topk * sizeof(int64_t));
-            memcpy(one_result.distances.data(), result.distances().data() + topk * i, topk * sizeof(float));
-            topk_query_result.emplace_back(one_result);
-        }
-
-        return status;
-    } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Failed to search entities: " + std::string(ex.what()));
     }
 }
 

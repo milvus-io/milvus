@@ -217,20 +217,15 @@ constexpr int64_t GB = 1UL << 30;
 constexpr int32_t PORT_NUMBER_MIN = 1024;
 constexpr int32_t PORT_NUMBER_MAX = 65535;
 
-static const std::unordered_map<std::string, std::string> milvus_config_version_map({{"0.6.0", "0.1"},
-                                                                                     {"0.7.0", "0.2"},
-                                                                                     {"0.7.1", "0.2"},
-                                                                                     {"0.8.0", "0.3"},
-                                                                                     {"0.9.0", "0.4"},
-                                                                                     {"0.9.1", "0.4"},
-                                                                                     {"0.10.0", "0.5"},
-                                                                                     {"0.10.1", "0.5"},
-                                                                                     {"0.10.2", "0.5"},
-                                                                                     {"0.10.3", "0.5"},
-                                                                                     {"0.10.4", "0.5"},
-                                                                                     {"0.10.5", "0.5"},
-                                                                                     {"0.10.6", "0.5"},
-                                                                                     {"1.0.0", "0.5"}});
+/* server_version: config_version
+     {"0.6.x", "0.1"}
+     {"0.7.x", "0.2"}
+     {"0.8.x", "0.3"}
+     {"0.9.x", "0.4"}
+     {"0.10.x", "0.5"}
+     {"1.x.x", "0.5"}
+ */
+const char* SERVER_CONFIG_VERSION = "0.5";
 
 /////////////////////////////////////////////////////////////
 Config::Config() {
@@ -982,15 +977,12 @@ Config::CancelCallBack(const std::string& node, const std::string& sub_node, con
 ////////////////////////////////////////////////////////////////////////////////
 Status
 Config::CheckConfigVersion(const std::string& value) {
-    if (milvus_config_version_map.find(MILVUS_VERSION) != milvus_config_version_map.end()) {
-        bool exist_error = milvus_config_version_map.at(MILVUS_VERSION) != value;
-        fiu_do_on("check_config_version_fail", exist_error = true);
-        if (exist_error) {
-            std::string msg = "Invalid config version: " + value +
-                              ". Expected config version: " + milvus_config_version_map.at(MILVUS_VERSION);
-            LOG_SERVER_ERROR_ << msg;
-            return Status(SERVER_INVALID_ARGUMENT, msg);
-        }
+    bool exist_error = (value != SERVER_CONFIG_VERSION);
+    fiu_do_on("check_config_version_fail", exist_error = true);
+    if (exist_error) {
+        std::string msg = "Invalid config version: " + value + ". Expected config version: " + SERVER_CONFIG_VERSION;
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
 }
@@ -1022,10 +1014,13 @@ Config::CheckGeneralConfigTimezone(const std::string& value) {
     } else {
         if (value.substr(0, 3) != "UTC") {
             return Status(SERVER_INVALID_ARGUMENT, "Invalid general.timezone: " + value);
-        } else {
-            if (!ValidationUtil::IsNumber(value.substr(4))) {
-                return Status(SERVER_INVALID_ARGUMENT, "Invalid general.timezone: " + value);
-            }
+        }
+
+        // valid input: UTC+8 or UTC+8:30 or UTC+08:30 or UTC-5 or UTC-5:30 or UTC-05:30
+        std::string time_offset = value.substr(3);
+        std::string pattern = "[+-]((\\d{1}|0\\d{1}|1\\d{1}|2[0-3])|((\\d{1}|0\\d{1}|1\\d{1}|2[0-3]):[0-5]\\d{1}))";
+        if (!server::StringHelpFunctions::IsRegexMatch(time_offset, pattern)) {
+            return Status(SERVER_UNEXPECTED_ERROR, "Invalid general.timezone: " + value);
         }
     }
     return Status::OK();

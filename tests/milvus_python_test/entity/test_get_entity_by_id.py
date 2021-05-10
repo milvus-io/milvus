@@ -75,7 +75,7 @@ class TestGetBase:
         status, res = connect.get_entity_by_id(collection, ids)
         assert not status.OK()
 
-    def test_get_vector_partition(self, connect, collection):
+    def test_get_vector_with_partition(self, connect, collection):
         '''
         target: test.get_entity_by_id
         method: add vector, and get
@@ -93,6 +93,60 @@ class TestGetBase:
         assert status.OK()
         for i in range(length):
             assert_equal_vector(res[i], vectors[i])
+
+    def test_get_vector_from_partition(self, connect, collection):
+        '''
+        target: test.get_entity_by_id with partition params
+        method: add vector, and get
+        expected: status ok, vector returned
+        '''
+        vectors = gen_vectors(nb, dim)
+        status = connect.create_partition(collection, tag)
+        assert status.OK()
+        status, ids = connect.insert(collection, vectors, partition_tag=tag)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        length = 100
+        status, res = connect.get_entity_by_id(collection, ids[:length], partition_tag=tag)
+        assert status.OK()
+        for i in range(length):
+            assert_equal_vector(res[i], vectors[i])
+
+    def test_get_vector_from_partition_not_existed(self, connect, collection):
+        '''
+        target: test.get_entity_by_id with partition params, partition tag not existed
+        method: add vector, and get
+        expected: status not ok
+        '''
+        vectors = gen_vectors(nb, dim)
+        status = connect.create_partition(collection, tag)
+        assert status.OK()
+        status, ids = connect.insert(collection, vectors, partition_tag=tag)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        length = 100
+        tmp_tag = gen_unique_str()
+        status, res = connect.get_entity_by_id(collection, ids[:length], partition_tag=tmp_tag)
+        assert not status.OK()
+
+    def test_get_vector_from_partition_empty(self, connect, collection):
+        '''
+        target: test.get_entity_by_id with partition params
+        method: add vector, make sure no vector in partition, and get
+        expected: status not ok 
+        '''
+        vectors = gen_vectors(nb, dim)
+        status = connect.create_partition(collection, tag)
+        assert status.OK()
+        status, ids = connect.insert(collection, vectors)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        length = 100
+        status, res = connect.get_entity_by_id(collection, ids[:length], partition_tag=tag)
+        assert not status.OK()
 
     def test_get_vector_multi_same_ids(self, connect, collection):
         '''

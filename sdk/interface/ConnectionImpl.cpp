@@ -103,10 +103,9 @@ ConnectionImpl::Insert(const std::string& collection_name, const std::string& pa
 }
 
 Status
-ConnectionImpl::GetEntityByID(const std::string& collection_name,
-                              const std::vector<int64_t>& id_array,
-                              std::vector<Entity>& entities_data) {
-    return client_proxy_->GetEntityByID(collection_name, id_array, entities_data);
+ConnectionImpl::GetEntityByID(const std::string& collection_name, const std::string& partition_tag,
+                              const std::vector<int64_t>& id_array, std::vector<Entity>& entities_data) {
+    return client_proxy_->GetEntityByID(collection_name, partition_tag, id_array, entities_data);
 }
 
 Status
@@ -119,11 +118,7 @@ Status
 ConnectionImpl::Search(const std::string& collection_name, const PartitionTagList& partition_tag_array,
                        const std::vector<Entity>& entity_array, int64_t topk, const std::string& extra_params,
                        TopKQueryResult& topk_query_result) {
-    return client_proxy_->Search(collection_name,
-                                 partition_tag_array,
-                                 entity_array,
-                                 topk,
-                                 extra_params,
+    return client_proxy_->Search(collection_name, partition_tag_array, entity_array, topk, extra_params,
                                  topk_query_result);
 }
 
@@ -148,13 +143,19 @@ ConnectionImpl::GetCollectionStats(const std::string& collection_name, std::stri
 }
 
 Status
-ConnectionImpl::DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) {
-    return client_proxy_->DeleteEntityByID(collection_name, id_array);
+ConnectionImpl::DeleteEntityByID(const std::string& collection_name, const std::string& partition_tag,
+                                 const std::vector<int64_t>& id_array) {
+    return client_proxy_->DeleteEntityByID(collection_name, partition_tag, id_array);
 }
 
 Status
 ConnectionImpl::LoadCollection(const std::string& collection_name, PartitionTagList& partition_tag_array) const {
     return client_proxy_->LoadCollection(collection_name, partition_tag_array);
+}
+
+Status
+ConnectionImpl::ReleaseCollection(const std::string& collection_name, PartitionTagList& partition_tag_array) const {
+    return client_proxy_->ReleaseCollection(collection_name, partition_tag_array);
 }
 
 Status
@@ -195,30 +196,6 @@ ConnectionImpl::Flush(const std::vector<std::string>& collection_name_array) {
 Status
 ConnectionImpl::Compact(const std::string& collection_name) {
     return client_proxy_->Compact(collection_name);
-}
-
-/*******************************New Interface**********************************/
-
-Status
-ConnectionImpl::CreateHybridCollection(const HMapping& mapping) {
-    return client_proxy_->CreateHybridCollection(mapping);
-}
-
-Status
-ConnectionImpl::InsertEntity(const std::string& collection_name,
-                             const std::string& partition_tag,
-                             HEntity& entities,
-                             std::vector<uint64_t>& id_array) {
-    return client_proxy_->InsertEntity(collection_name, partition_tag, entities, id_array);
-}
-
-Status
-ConnectionImpl::HybridSearch(const std::string& collection_name,
-                             const std::vector<std::string>& partition_list,
-                             BooleanQueryPtr& boolean_query,
-                             const std::string& extra_params,
-                             TopKQueryResult& topk_query_result) {
-    return client_proxy_->HybridSearch(collection_name, partition_list, boolean_query, extra_params, topk_query_result);
 }
 
 }  // namespace milvus

@@ -35,16 +35,12 @@
 #include "server/delivery/request/InsertRequest.h"
 #include "server/delivery/request/PreloadCollectionRequest.h"
 #include "server/delivery/request/ReLoadSegmentsRequest.h"
+#include "server/delivery/request/ReleaseCollectionRequest.h"
 #include "server/delivery/request/SearchByIDRequest.h"
 #include "server/delivery/request/SearchRequest.h"
 #include "server/delivery/request/ShowCollectionInfoRequest.h"
 #include "server/delivery/request/ShowCollectionsRequest.h"
 #include "server/delivery/request/ShowPartitionsRequest.h"
-
-#include "server/delivery/hybrid_request/CreateHybridCollectionRequest.h"
-#include "server/delivery/hybrid_request/DescribeHybridCollectionRequest.h"
-#include "server/delivery/hybrid_request/HybridSearchRequest.h"
-#include "server/delivery/hybrid_request/InsertEntityRequest.h"
 
 namespace milvus {
 namespace server {
@@ -96,8 +92,9 @@ RequestHandler::Insert(const std::shared_ptr<Context>& context, const std::strin
 
 Status
 RequestHandler::GetVectorsByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                               const std::vector<int64_t>& ids, std::vector<engine::VectorsData>& vectors) {
-    BaseRequestPtr request_ptr = GetVectorsByIDRequest::Create(context, collection_name, ids, vectors);
+                               const std::string& partition_tag, const std::vector<int64_t>& ids,
+                               std::vector<engine::VectorsData>& vectors) {
+    BaseRequestPtr request_ptr = GetVectorsByIDRequest::Create(context, collection_name, partition_tag, ids, vectors);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -180,8 +177,8 @@ RequestHandler::Cmd(const std::shared_ptr<Context>& context, const std::string& 
 
 Status
 RequestHandler::DeleteByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                           const std::vector<int64_t>& vector_ids) {
-    BaseRequestPtr request_ptr = DeleteByIDRequest::Create(context, collection_name, vector_ids);
+                           const std::string& partition_tag, const std::vector<int64_t>& vector_ids) {
+    BaseRequestPtr request_ptr = DeleteByIDRequest::Create(context, collection_name, partition_tag, vector_ids);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -191,6 +188,15 @@ Status
 RequestHandler::PreloadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
                                   const std::vector<std::string>& partition_tags) {
     BaseRequestPtr request_ptr = PreloadCollectionRequest::Create(context, collection_name, partition_tags);
+    RequestScheduler::ExecRequest(request_ptr);
+
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::ReleaseCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                                  const std::vector<std::string>& partition_tags) {
+    BaseRequestPtr request_ptr = ReleaseCollectionRequest::Create(context, collection_name, partition_tags);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -270,59 +276,6 @@ Status
 RequestHandler::Compact(const std::shared_ptr<Context>& context, const std::string& collection_name,
                         double compact_threshold) {
     BaseRequestPtr request_ptr = CompactRequest::Create(context, collection_name, compact_threshold);
-    RequestScheduler::ExecRequest(request_ptr);
-
-    return request_ptr->status();
-}
-
-/*******************************************New Interface*********************************************/
-
-Status
-RequestHandler::CreateHybridCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                                       std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
-                                       std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
-                                       std::vector<std::pair<std::string, std::string>>& field_extra_params) {
-    BaseRequestPtr request_ptr = CreateHybridCollectionRequest::Create(context, collection_name, field_types,
-                                                                       vector_dimensions, field_extra_params);
-
-    RequestScheduler::ExecRequest(request_ptr);
-    return request_ptr->status();
-}
-
-Status
-RequestHandler::DescribeHybridCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                                         std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types) {
-    BaseRequestPtr request_ptr = DescribeHybridCollectionRequest::Create(context, collection_name, field_types);
-
-    RequestScheduler::ExecRequest(request_ptr);
-    return request_ptr->status();
-}
-
-Status
-RequestHandler::HasHybridCollection(const std::shared_ptr<Context>& context, std::string& collection_name,
-                                    bool& has_collection) {
-    return Status::OK();
-}
-
-Status
-RequestHandler::InsertEntity(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                             const std::string& partition_tag, uint64_t& row_num, std::vector<std::string>& field_names,
-                             std::vector<uint8_t>& attr_values,
-                             std::unordered_map<std::string, engine::VectorsData>& vector_datas) {
-    BaseRequestPtr request_ptr = InsertEntityRequest::Create(context, collection_name, partition_tag, row_num,
-                                                             field_names, attr_values, vector_datas);
-
-    RequestScheduler::ExecRequest(request_ptr);
-    return request_ptr->status();
-}
-
-Status
-RequestHandler::HybridSearch(const std::shared_ptr<Context>& context,
-                             context::HybridSearchContextPtr hybrid_search_context, const std::string& collection_name,
-                             std::vector<std::string>& partition_list, milvus::query::GeneralQueryPtr& general_query,
-                             TopKQueryResult& result) {
-    BaseRequestPtr request_ptr = HybridSearchRequest::Create(context, hybrid_search_context, collection_name,
-                                                             partition_list, general_query, result);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

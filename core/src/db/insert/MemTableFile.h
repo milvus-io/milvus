@@ -50,6 +50,9 @@ class MemTableFile : public server::CacheConfigHandler {
     bool
     IsFull();
 
+    bool
+    Empty();
+
     Status
     Serialize(uint64_t wal_lsn);
 

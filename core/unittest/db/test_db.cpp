@@ -26,6 +26,8 @@
 #include "db/IDGenerator.h"
 #include "db/meta/MetaConsts.h"
 #include "db/utils.h"
+#include <faiss/IndexFlat.h>
+#include "index/knowhere/knowhere/index/vector_index/IndexIDMAP.h"
 #include "utils/CommonUtil.h"
 
 namespace {
@@ -554,11 +556,8 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     stat = db_->Flush();
     ASSERT_FALSE(stat.ok());
 
-    stat = db_->DeleteVector(collection_info.collection_id_, 0);
-    ASSERT_FALSE(stat.ok());
-
     milvus::engine::IDNumbers ids_to_delete{0};
-    stat = db_->DeleteVectors(collection_info.collection_id_, ids_to_delete);
+    stat = db_->DeleteVectors(collection_info.collection_id_, "", ids_to_delete);
     ASSERT_FALSE(stat.ok());
 
     stat = db_->Compact(dummy_context_, collection_info.collection_id_);
@@ -566,7 +565,7 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
 
     std::vector<milvus::engine::VectorsData> vectors;
     std::vector<int64_t> id_array = {0};
-    stat = db_->GetVectorsByID(collection_info, id_array, vectors);
+    stat = db_->GetVectorsByID(collection_info, "", id_array, vectors);
     ASSERT_FALSE(stat.ok());
 
     std::vector<std::string> partition_tags;
@@ -1200,7 +1199,7 @@ TEST_F(DBTest2, GET_VECTOR_NON_EXISTING_COLLECTION) {
     std::vector<int64_t> id_array = {0};
     milvus::engine::meta::CollectionSchema collection_info;
     collection_info.collection_id_ = "non_existing";
-    auto status = db_->GetVectorsByID(collection_info, id_array, vectors);
+    auto status = db_->GetVectorsByID(collection_info, "", id_array, vectors);
     ASSERT_FALSE(status.ok());
 }
 
@@ -1218,17 +1217,27 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
     stat = db_->CreatePartition(collection_info.collection_id_, partition_name, partition_tag);
     ASSERT_TRUE(stat.ok());
 
+    // verify empty id return error
     std::vector<milvus::engine::VectorsData> vectors;
     std::vector<int64_t> empty_array;
-    stat = db_->GetVectorsByID(collection_info, empty_array, vectors);
+    stat = db_->GetVectorsByID(collection_info, "", empty_array, vectors);
     ASSERT_FALSE(stat.ok());
 
     stat = db_->InsertVectors(collection_info.collection_id_, partition_tag, qxb);
     ASSERT_TRUE(stat.ok());
-
     db_->Flush(collection_info.collection_id_);
 
-    stat = db_->GetVectorsByID(collection_info, qxb.id_array_, vectors);
+    // verify empty id return error
+    stat = db_->GetVectorsByID(collection_info, "", empty_array, vectors);
+    ASSERT_FALSE(stat.ok());
+
+    // verify non-exist collection return error
+    milvus::engine::meta::CollectionSchema collection_non_exist;
+    stat = db_->GetVectorsByID(collection_non_exist, "", empty_array, vectors);
+    ASSERT_FALSE(stat.ok());
+
+    // verify search from whole collection return correct vector
+    stat = db_->GetVectorsByID(collection_info, "", qxb.id_array_, vectors);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(vectors.size(), qxb.id_array_.size());
     ASSERT_EQ(vectors[0].float_data_.size(), COLLECTION_DIM);
@@ -1237,8 +1246,25 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_TEST) {
         ASSERT_FLOAT_EQ(vectors[0].float_data_[i], qxb.float_data_[i]);
     }
 
+    // verify search from partition return correct vector
+    vectors.clear();
+    stat = db_->GetVectorsByID(collection_info, partition_tag, qxb.id_array_, vectors);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(vectors.size(), qxb.id_array_.size());
+    ASSERT_EQ(vectors[0].float_data_.size(), COLLECTION_DIM);
+
+    for (int64_t i = 0; i < COLLECTION_DIM; i++) {
+        ASSERT_FLOAT_EQ(vectors[0].float_data_[i], qxb.float_data_[i]);
+    }
+
+    // verify search from non-exist partition return error
+    stat = db_->GetVectorsByID(collection_info, "ABC", qxb.id_array_, vectors);
+    ASSERT_FALSE(stat.ok());
+
+    // verify invalid id return ok, and return empty result
+    vectors.clear();
     std::vector<int64_t> invalid_array = {-1, -1};
-    stat = db_->GetVectorsByID(collection_info, empty_array, vectors);
+    stat = db_->GetVectorsByID(collection_info, "", invalid_array, vectors);
     ASSERT_TRUE(stat.ok());
     for (auto& vector : vectors) {
         ASSERT_EQ(vector.vector_count_, 0);
@@ -1265,7 +1291,7 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_INVALID_TEST) {
 
     std::vector<milvus::engine::VectorsData> vectors;
     std::vector<int64_t> empty_array;
-    stat = db_->GetVectorsByID(collection_info, empty_array, vectors);
+    stat = db_->GetVectorsByID(collection_info, "", empty_array, vectors);
     ASSERT_FALSE(stat.ok());
 
     stat = db_->InsertVectors(collection_info.collection_id_, partition_tag, qxb);
@@ -1275,7 +1301,7 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_INVALID_TEST) {
 
     milvus::cache::CpuCacheMgr::GetInstance()->ClearCache();
     fiu_enable("bloom_filter_nullptr", 1, NULL, 0);
-    stat = db_->GetVectorsByID(collection_info, qxb.id_array_, vectors);
+    stat = db_->GetVectorsByID(collection_info, "", qxb.id_array_, vectors);
     ASSERT_FALSE(stat.ok());
     fiu_disable("bloom_filter_nullptr");
 }
@@ -1312,6 +1338,17 @@ TEST_F(DBTest2, GET_VECTOR_IDS_TEST) {
     std::string default_segment = json["partitions"].at(0)["segments"].at(0)["name"];
     std::string partition_segment = json["partitions"].at(1)["segments"].at(0)["name"];
 
+    // add uids to cache
+    std::string cache_key = std::string(CONFIG_PATH) + "/tables/" + COLLECTION_NAME + "/" + default_segment + "/" +
+        default_segment;
+    milvus::knowhere::IDMAPPtr index = std::make_shared<milvus::knowhere::IDMAP>();
+    std::shared_ptr<milvus::engine::IDNumbers> uids = std::make_shared<milvus::engine::IDNumbers>(vector_1.id_array_);
+    index->SetUids(uids);
+    index->SetIndexSize(uids->size() * sizeof(milvus::engine::IDNumber));
+    index->index_ = std::make_shared<faiss::IndexFlat>(128);
+    index->index_->ntotal = 1000;
+    milvus::cache::CpuCacheMgr::GetInstance()->InsertItem(cache_key, index);
+
     milvus::engine::IDNumbers vector_ids;
     stat = db_->GetVectorIDs(COLLECTION_NAME, default_segment, vector_ids);
     ASSERT_TRUE(stat.ok());
@@ -1321,8 +1358,8 @@ TEST_F(DBTest2, GET_VECTOR_IDS_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(vector_ids.size(), BATCH_COUNT);
 
-    milvus::engine::IDNumbers ids_to_delete{0, 100, 999, 1000, 1500, 1888, 1999};
-    stat = db_->DeleteVectors(COLLECTION_NAME, ids_to_delete);
+    milvus::engine::IDNumbers ids_to_delete{0, 100, 998, 1001, 1500, 1501, 1999};
+    stat = db_->DeleteVectors(COLLECTION_NAME, "", ids_to_delete);
     ASSERT_TRUE(stat.ok());
 
     db_->Flush();
@@ -1330,10 +1367,17 @@ TEST_F(DBTest2, GET_VECTOR_IDS_TEST) {
     stat = db_->GetVectorIDs(COLLECTION_NAME, default_segment, vector_ids);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(vector_ids.size(), BATCH_COUNT - 3);
+    ASSERT_EQ(vector_ids.front(), 1);
+    ASSERT_EQ(vector_ids.back(), 999);
 
     stat = db_->GetVectorIDs(COLLECTION_NAME, partition_segment, vector_ids);
     ASSERT_TRUE(stat.ok());
-    //    ASSERT_EQ(vector_ids.size(), BATCH_COUNT - 4);
+    ASSERT_EQ(vector_ids.size(), BATCH_COUNT - 4);
+    ASSERT_EQ(vector_ids.front(), 1000);
+    ASSERT_EQ(vector_ids.back(), 1998);
+
+    // clear uids from cache
+    milvus::cache::CpuCacheMgr::GetInstance()->EraseItem(cache_key);
 }
 
 TEST_F(DBTest2, INSERT_DUPLICATE_ID) {

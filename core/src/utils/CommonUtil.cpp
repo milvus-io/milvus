@@ -278,6 +278,33 @@ CommonUtil::EraseFromCache(const std::string& item_key) {
         cache::GpuCacheMgr::GetInstance(gpu)->EraseItem(quantizer_key);
     }
 #endif
+
+#ifdef MILVUS_FPGA_VERSION
+    cache::FpgaCacheMgr::GetInstance()->EraseItem(item_key);
+    cache::FpgaCacheMgr::GetInstance()->EraseItem(item_key + cache::BloomFilter_Suffix);
+#endif
+}
+
+Status
+CommonUtil::SetTimezoneEnv(const std::string& time_zone) {
+    // the config ensure the time_zone format is: UTC+/-XX:XX
+    // here we change to CUT-/+XX:XX
+    std::string tz = "CUT";
+    if (time_zone.length() > 3) {
+        std::string sign = time_zone.substr(3, 1);
+        if (sign == "-") {
+            tz += time_zone.substr(4);
+        } else if (sign == "+") {
+            tz = tz + "-" + time_zone.substr(4);
+        }
+    }
+
+    if (setenv("TZ", tz.c_str(), 1) != 0) {
+        return Status(SERVER_UNEXPECTED_ERROR, "Fail to setenv");
+    }
+    tzset();
+
+    return Status::OK();
 }
 
 }  // namespace server

@@ -480,8 +480,8 @@ ExecutionEngineImpl::Load(bool to_cache) {
                         }
                     }
                     index_->SetBlacklist(concurrent_bitset_ptr);
-                    std::shared_ptr<std::vector<int64_t>> uids_ptr = std::make_shared<std::vector<int64_t>>();
-                    segment_reader_ptr->LoadUids(*uids_ptr);
+                    segment::UidsPtr uids_ptr = nullptr;
+                    segment_reader_ptr->LoadUids(uids_ptr);
                     index_->SetUids(uids_ptr);
                     LOG_ENGINE_DEBUG_ << "set uids " << index_->GetUids()->size() << " for index " << location_;
 
@@ -792,6 +792,13 @@ ExecutionEngineImpl::FpgaCache() {
     cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(index_);
     fpga_cache_mgr->InsertItem(location_, obj);
 #endif
+    return Status::OK();
+}
+
+Status
+ExecutionEngineImpl::ReleaseCache() {
+    LOG_ENGINE_DEBUG_ << "Release cache for file " << location_;
+    server::CommonUtil::EraseFromCache(location_);
     return Status::OK();
 }
 

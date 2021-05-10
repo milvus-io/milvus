@@ -94,7 +94,7 @@ ConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode m
 
 int64_t
 MatchNlist(int64_t size, int64_t nlist) {
-    const int64_t MIN_POINTS_PER_CENTROID = 40;
+    const int64_t MIN_POINTS_PER_CENTROID = 39;
 
     if (nlist * MIN_POINTS_PER_CENTROID > size) {
         // nlist is too large, adjust to a proper value
@@ -199,7 +199,8 @@ IVFPQConfAdapter::IsValidForGPU(int64_t dimension, int64_t m, int64_t nbits) {
     return (std::find(std::begin(support_subquantizer), std::end(support_subquantizer), m) !=
             support_subquantizer.end()) &&
            (std::find(std::begin(support_dim_per_subquantizer), std::end(support_dim_per_subquantizer), sub_dim) !=
-            support_dim_per_subquantizer.end());
+                support_dim_per_subquantizer.end() &&
+            (nbits == 8));
 }
 
 bool

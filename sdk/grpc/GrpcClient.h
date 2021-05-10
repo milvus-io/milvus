@@ -81,6 +81,9 @@ class GrpcClient {
     LoadCollection(grpc::PreloadCollectionParam& param);
 
     Status
+    ReleaseCollection(grpc::PreloadCollectionParam& param);
+
+    Status
     GetIndexInfo(grpc::CollectionName& collection_name, grpc::IndexParam& index_param);
 
     Status
@@ -106,16 +109,6 @@ class GrpcClient {
 
     Status
     Disconnect();
-
-    /*******************************New Interface**********************************/
-    Status
-    CreateHybridCollection(milvus::grpc::Mapping& mapping);
-
-    Status
-    InsertEntities(milvus::grpc::HInsertParam& entities, milvus::grpc::HEntityIDs& ids);
-
-    Status
-    HybridSearch(milvus::grpc::HSearchParam& search_param, milvus::grpc::TopKQueryResult& result);
 
  private:
     std::unique_ptr<grpc::MilvusService::Stub> stub_;

@@ -63,15 +63,12 @@ class ClientProxy : public Connection {
     CreateIndex(const IndexParam& index_param) override;
 
     Status
-    Insert(const std::string& collection_name,
-           const std::string& partition_tag,
-           const std::vector<Entity>& entity_array,
-           std::vector<int64_t>& id_array) override;
+    Insert(const std::string& collection_name, const std::string& partition_tag,
+           const std::vector<Entity>& entity_array, std::vector<int64_t>& id_array) override;
 
     Status
-    GetEntityByID(const std::string& collection_name,
-                  const std::vector<int64_t>& id_array,
-                  std::vector<Entity>& entities_data) override;
+    GetEntityByID(const std::string& collection_name, const std::string& partition_tag,
+                  const std::vector<int64_t>& id_array, std::vector<Entity>& entities_data) override;
 
     Status
     ListIDInSegment(const std::string& collection_name, const std::string& segment_name,
@@ -79,8 +76,8 @@ class ClientProxy : public Connection {
 
     Status
     Search(const std::string& collection_name, const std::vector<std::string>& partition_tag_array,
-           const std::vector<Entity>& entity_array, int64_t topk,
-           const std::string& extra_params, TopKQueryResult& topk_query_result) override;
+           const std::vector<Entity>& entity_array, int64_t topk, const std::string& extra_params,
+           TopKQueryResult& topk_query_result) override;
 
     Status
     GetCollectionInfo(const std::string& collection_name, CollectionParam& collection_param) override;
@@ -95,10 +92,14 @@ class ClientProxy : public Connection {
     GetCollectionStats(const std::string& collection_name, std::string& collection_stats) override;
 
     Status
-    DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) override;
+    DeleteEntityByID(const std::string& collection_name, const std::string& partition_tag,
+                     const std::vector<int64_t>& id_array) override;
 
     Status
     LoadCollection(const std::string& collection_name, PartitionTagList& partition_tag_array) const override;
+
+    Status
+    ReleaseCollection(const std::string& collection_name, PartitionTagList& partition_tag_array) const override;
 
     Status
     GetIndexInfo(const std::string& collection_name, IndexParam& index_param) const override;
@@ -123,24 +124,6 @@ class ClientProxy : public Connection {
 
     Status
     Compact(const std::string& collection_name) override;
-
-    /*******************************New Interface**********************************/
-
-    Status
-    CreateHybridCollection(const HMapping& mapping) override;
-
-    Status
-    InsertEntity(const std::string& collection_name,
-                 const std::string& partition_tag,
-                 HEntity& entities,
-                 std::vector<uint64_t>& id_array) override;
-
-    Status
-    HybridSearch(const std::string& collection_name,
-                 const std::vector<std::string>& partition_list,
-                 BooleanQueryPtr& boolean_query,
-                 const std::string& extra_params,
-                 TopKQueryResult& topk_query_result) override;
 
  private:
     std::shared_ptr<::grpc::Channel> channel_;

@@ -52,6 +52,18 @@ class TestIndexBase:
                 pytest.skip("ivfpq not support in GPU mode")
         return request.param
 
+    @pytest.fixture(
+        scope="function",
+        params=[
+            130,
+            1021,
+            2048,
+            4096
+        ],
+    )
+    def vector_dim(self, request):
+        yield request.param
+
     """
     ******************************************************************
       The following cases are used to test `create_index` function
@@ -665,6 +677,30 @@ class TestIndexBase:
             logging.getLogger().info(result)
             assert result._collection_name == collection
             assert result._index_type == IndexType.FLAT
+
+    @pytest.mark.timeout(BUILD_TIMEOUT)
+    def test_create_index_dim(self, connect, collection, vector_dim):
+        '''
+        target: test create index interface
+        method: create collection and add vectors in it, create index
+        expected: return code equals to 0, and search success
+        '''
+        local_dim = vector_dim
+        vectors = gen_vectors(nb, local_dim)
+        collection_name = gen_unique_str()
+        param = {'collection_name': collection_name,
+                 'dimension': local_dim,
+                 'index_file_size': 1024,
+                 'metric_type': MetricType.L2}
+        connect.create_collection(param)
+        for i in range(3):
+            status, ids = connect.insert(collection_name, vectors)
+        connect.flush()
+        index_type = IndexType.IVFLAT
+        index_param =  {"nlist": NLIST}
+        status = connect.create_index(collection_name, index_type, index_param)
+        assert status.OK()
+        connect.drop_collection(collection_name)
 
 
 class TestIndexIP:

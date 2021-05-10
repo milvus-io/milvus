@@ -199,21 +199,18 @@ MemManagerImpl::ToImmutable() {
 
 Status
 MemManagerImpl::EraseMemVector(const std::string& collection_id) {
-    {  // erase MemVector from rapid-insert cache
-        std::unique_lock<std::mutex> lock(mutex_);
-        mem_id_map_.erase(collection_id);
-    }
+    std::unique_lock<std::mutex> lock(mutex_);
+    // erase MemVector from rapid-insert cache
+    mem_id_map_.erase(collection_id);
 
-    {  // erase MemVector from serialize cache
-        std::unique_lock<std::mutex> lock(serialization_mtx_);
-        MemList temp_list;
-        for (auto& mem : immu_mem_list_) {
-            if (mem->GetTableId() != collection_id) {
-                temp_list.push_back(mem);
-            }
+    // erase MemVector from serialize cache
+    MemList temp_list;
+    for (auto& mem : immu_mem_list_) {
+        if (mem->GetTableId() != collection_id) {
+            temp_list.push_back(mem);
         }
-        immu_mem_list_.swap(temp_list);
     }
+    immu_mem_list_.swap(temp_list);
 
     return Status::OK();
 }
@@ -232,7 +229,7 @@ MemManagerImpl::GetCurrentMutableMem() {
 size_t
 MemManagerImpl::GetCurrentImmutableMem() {
     size_t total_mem = 0;
-    std::unique_lock<std::mutex> lock(serialization_mtx_);
+    std::unique_lock<std::mutex> lock(mutex_);
     for (auto& mem_table : immu_mem_list_) {
         total_mem += mem_table->GetCurrentMem();
     }

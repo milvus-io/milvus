@@ -5,8 +5,10 @@ import random
 import threading
 
 from milvus import Milvus
-from mishards.connections import (Connection,
-        ConnectionPool, ConnectionTopology, ConnectionGroup)
+from mishards.connections import (
+    ConnectionTopology,
+    ConnectionGroup
+)
 from mishards.topology import StatusType
 from mishards import exceptions
 

@@ -30,14 +30,18 @@ namespace milvus {
 namespace server {
 
 DeleteByIDRequest::DeleteByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                     const std::string& collection_name, const std::vector<int64_t>& vector_ids)
-    : BaseRequest(context, BaseRequest::kDeleteByID), collection_name_(collection_name), vector_ids_(vector_ids) {
+                                     const std::string& collection_name, const std::string& partition_tag,
+                                     const std::vector<int64_t>& vector_ids)
+    : BaseRequest(context, BaseRequest::kDeleteByID),
+      collection_name_(collection_name),
+      partition_tag_(partition_tag),
+      vector_ids_(vector_ids) {
 }
 
 BaseRequestPtr
 DeleteByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                          const std::vector<int64_t>& vector_ids) {
-    return std::shared_ptr<BaseRequest>(new DeleteByIDRequest(context, collection_name, vector_ids));
+                          const std::string& partition_tag, const std::vector<int64_t>& vector_ids) {
+    return std::shared_ptr<BaseRequest>(new DeleteByIDRequest(context, collection_name, partition_tag, vector_ids));
 }
 
 Status
@@ -78,7 +82,7 @@ DeleteByIDRequest::OnExecute() {
 
         rc.RecordSection("check validation");
 
-        status = DBWrapper::DB()->DeleteVectors(collection_name_, vector_ids_);
+        status = DBWrapper::DB()->DeleteVectors(collection_name_, partition_tag_, vector_ids_);
         if (!status.ok()) {
             return status;
         }

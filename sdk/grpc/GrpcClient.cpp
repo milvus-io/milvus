@@ -302,6 +302,24 @@ GrpcClient::LoadCollection(milvus::grpc::PreloadCollectionParam& param) {
 }
 
 Status
+GrpcClient::ReleaseCollection(milvus::grpc::PreloadCollectionParam& param) {
+    ClientContext context;
+    ::milvus::grpc::Status response;
+    ::grpc::Status grpc_status = stub_->ReleaseCollection(&context, param, &response);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "ReleaseCollection gRPC failed!" << std::endl;
+        return Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+
+    if (response.error_code() != grpc::SUCCESS) {
+        std::cerr << response.reason() << std::endl;
+        return Status(StatusCode::ServerFailed, response.reason());
+    }
+    return Status::OK();
+}
+
+Status
 GrpcClient::DeleteEntityByID(grpc::DeleteByIDParam& delete_by_id_param) {
     ClientContext context;
     ::milvus::grpc::Status response;
@@ -470,58 +488,6 @@ GrpcClient::Compact(milvus::grpc::CollectionName& collection_name) {
 Status
 GrpcClient::Disconnect() {
     stub_.release();
-    return Status::OK();
-}
-
-Status
-GrpcClient::CreateHybridCollection(milvus::grpc::Mapping& mapping) {
-    ClientContext context;
-    ::milvus::grpc::Status response;
-    ::grpc::Status grpc_status = stub_->CreateHybridCollection(&context, mapping, &response);
-
-    if (!grpc_status.ok()) {
-        std::cerr << "CreateHybridCollection gRPC failed!" << std::endl;
-        return Status(StatusCode::RPCFailed, grpc_status.error_message());
-    }
-
-    if (response.error_code() != grpc::SUCCESS) {
-        std::cerr << response.reason() << std::endl;
-        return Status(StatusCode::ServerFailed, response.reason());
-    }
-    return Status::OK();
-}
-
-Status
-GrpcClient::InsertEntities(milvus::grpc::HInsertParam& entities, milvus::grpc::HEntityIDs& ids) {
-    ClientContext context;
-    ::grpc::Status grpc_status = stub_->InsertEntity(&context, entities, &ids);
-
-    if (!grpc_status.ok()) {
-        std::cerr << "InsertEntities gRPC failed!" << std::endl;
-        return Status(StatusCode::RPCFailed, grpc_status.error_message());
-    }
-
-    if (ids.status().error_code() != grpc::SUCCESS) {
-        std::cerr << ids.status().reason() << std::endl;
-        return Status(StatusCode::ServerFailed, ids.status().reason());
-    }
-    return Status::OK();
-}
-
-Status
-GrpcClient::HybridSearch(milvus::grpc::HSearchParam& search_param, milvus::grpc::TopKQueryResult& result) {
-    ClientContext context;
-    ::grpc::Status grpc_status = stub_->HybridSearch(&context, search_param, &result);
-
-    if (!grpc_status.ok()) {
-        std::cerr << "HybridSearch gRPC failed!" << std::endl;
-        return Status(StatusCode::RPCFailed, grpc_status.error_message());
-    }
-
-    if (result.status().error_code() != grpc::SUCCESS) {
-        std::cerr << result.status().reason() << std::endl;
-        return Status(StatusCode::ServerFailed, result.status().reason());
-    }
     return Status::OK();
 }
 

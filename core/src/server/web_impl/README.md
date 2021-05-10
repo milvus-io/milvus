@@ -406,7 +406,7 @@ Creates a collection.
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -672,7 +672,7 @@ Updates the index type and nlist of a collection.
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -1107,7 +1107,7 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables/{table_name}/vectors</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections/{collection_name}/vectors</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -1179,12 +1179,13 @@ $ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/vectors" -H "a
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables/{table_name}/vectors</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections/{collection_name}/vectors</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
   "delete": {
-     "ids": [$string]
+     "ids": [$string],
+     "partition_tag": $string
   }
 }
 </code></pre> </td></tr>
@@ -1193,9 +1194,10 @@ $ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/vectors" -H "a
 
 ##### Body Parameters
 
-| Parameter | Description     | Required? |
-| --------- | --------------- | --------- |
-| ids       | IDs of vectors. | Yes       |
+| Parameter     | Description          | Required? |
+| ------------- | -------------------- | --------- |
+| ids           | IDs of vectors.      | Yes       |
+| partition_tag | partition of vectors | Yes       |
 
 ##### Query Parameters
 
@@ -1235,7 +1237,7 @@ Inserts vectors to a collection.
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables/{table_name}/vectors</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections/{collection_name}/vectors</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -1292,7 +1294,7 @@ $ curl -X POST "http://127.0.0.1:19121/collections/test_collection/vectors" -H "
 }
 ```
 
-### `/collections/{collection_name}/vectors?ids={vector_id_list}` (GET)
+### `/collections/{collection_name}/vectors?ids={vector_id_list}&partition_tag=$string` (GET)
 
 Obtain vectors by ID.
 
@@ -1311,6 +1313,7 @@ Obtain vectors by ID.
 | ----------------- | ------------------------------------- | --------- |
 | `collection_name` | Name of the collection.               | Yes       |
 | `vector_id_list`  | Vector id list, separated by commas.  | Yes       |
+| `partition_tag`   | Partition tag.                        | Yes       |
 
 #### Response
 
@@ -1526,6 +1529,46 @@ $ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json"
 { "code": 0, "message": "success" }
 ```
 
+#### Release a collection from memory
+
+##### Request
+
+<table>
+<tr><th>Request Component</th><th>Value</th></tr>
+<tr><td> Name</td><td><pre><code>/system/task</code></pre></td></tr>
+<tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
+<tr><td>Body</td><td><pre><code>
+{
+  "release": {
+     "collection_name": $string,
+     "partition_tags": [$string, $string]
+  }
+}
+</code></pre> </td></tr>
+<tr><td>Method</td><td>PUT</td></tr>
+</table>
+
+##### Response
+
+| Status code | Description                                                       |
+| ----------- | ----------------------------------------------------------------- |
+| 200         | The request is successful.                                        |
+| 400         | The request is incorrect. Refer to the error message for details. |
+
+##### Example
+
+###### Request
+
+```shell
+$ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json" -d "{\"release\": {\"collection_name\": \"test_collection\", \"partition_tags\": [\"part_1\", \"part_2\"]}}"
+```
+
+###### Response
+
+```json
+{ "code": 0, "message": "success" }
+```
+
 ## Index and search parameters
 
 For each index type, the RESTful API has specific index parameters and search parameters.
@@ -1570,37 +1613,37 @@ For detailed information about the parameters above, refer to [Milvus Indexes](h
 
 The RESTful API returns error messages as JSON text. Each type of error message has a specific error code.
 
-| Type                  | Code |
-| --------------------- | ---- |
-| SUCCESS               | 0    |
-| UNEXPECTED_ERROR      | 1    |
-| CONNECT_FAILED        | 2    |
-| PERMISSION_DENIED     | 3    |
-| TABLE_NOT_EXISTS      | 4    |
-| ILLEGAL_ARGUMENT      | 5    |
-| ILLEGAL_RANGE         | 6    |
-| ILLEGAL_DIMENSION     | 7    |
-| ILLEGAL_INDEX_TYPE    | 8    |
-| ILLEGAL_TABLE_NAME    | 9    |
-| ILLEGAL_TOPK          | 10   |
-| ILLEGAL_ROWRECORD     | 11   |
-| ILLEGAL_VECTOR_ID     | 12   |
-| ILLEGAL_SEARCH_RESULT | 13   |
-| FILE_NOT_FOUND        | 14   |
-| META_FAILED           | 15   |
-| CACHE_FAILED          | 16   |
-| CANNOT_CREATE_FOLDER  | 17   |
-| CANNOT_CREATE_FILE    | 18   |
-| CANNOT_DELETE_FOLDER  | 19   |
-| CANNOT_DELETE_FILE    | 20   |
-| BUILD_INDEX_ERROR     | 21   |
-| ILLEGAL_NLIST         | 22   |
-| ILLEGAL_METRIC_TYPE   | 23   |
-| OUT_OF_MEMORY         | 24   |
-| PATH_PARAM_LOSS       | 31   |
-| UNKNOWN_PATH          | 32   |
-| QUERY_PARAM_LOSS      | 33   |
-| BODY_FIELD_LOSS       | 34   |
-| ILLEGAL_BODY          | 35   |
-| BODY_PARSE_FAIL       | 36   |
-| ILLEGAL_QUERY_PARAM   | 37   |
+| Type                    | Code |
+| ----------------------- | ---- |
+| SUCCESS                 | 0    |
+| UNEXPECTED_ERROR        | 1    |
+| CONNECT_FAILED          | 2    |
+| PERMISSION_DENIED       | 3    |
+| COLLECTION_NOT_EXISTS   | 4    |
+| ILLEGAL_ARGUMENT        | 5    |
+| ILLEGAL_RANGE           | 6    |
+| ILLEGAL_DIMENSION       | 7    |
+| ILLEGAL_INDEX_TYPE      | 8    |
+| ILLEGAL_COLLECTION_NAME | 9    |
+| ILLEGAL_TOPK            | 10   |
+| ILLEGAL_ROWRECORD       | 11   |
+| ILLEGAL_VECTOR_ID       | 12   |
+| ILLEGAL_SEARCH_RESULT   | 13   |
+| FILE_NOT_FOUND          | 14   |
+| META_FAILED             | 15   |
+| CACHE_FAILED            | 16   |
+| CANNOT_CREATE_FOLDER    | 17   |
+| CANNOT_CREATE_FILE      | 18   |
+| CANNOT_DELETE_FOLDER    | 19   |
+| CANNOT_DELETE_FILE      | 20   |
+| BUILD_INDEX_ERROR       | 21   |
+| ILLEGAL_NLIST           | 22   |
+| ILLEGAL_METRIC_TYPE     | 23   |
+| OUT_OF_MEMORY           | 24   |
+| PATH_PARAM_LOSS         | 31   |
+| UNKNOWN_PATH            | 32   |
+| QUERY_PARAM_LOSS        | 33   |
+| BODY_FIELD_LOSS         | 34   |
+| ILLEGAL_BODY            | 35   |
+| BODY_PARSE_FAIL         | 36   |
+| ILLEGAL_QUERY_PARAM     | 37   |

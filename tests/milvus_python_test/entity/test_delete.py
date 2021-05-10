@@ -144,6 +144,63 @@ class TestDeleteBase:
         assert status.OK()
         assert res[0][0].id == ids[0]
 
+    def test_delete_vector_from_partition(self, connect, collection):
+        '''
+        target: test.get_entity_by_id with partition params
+        method: add vector, and delete 
+        expected: status ok
+        '''
+        vectors = gen_vectors(nb, dim)
+        status = connect.create_partition(collection, tag)
+        assert status.OK()
+        status, ids = connect.insert(collection, vectors, partition_tag=tag)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        length = 2 
+        status = connect.delete_entity_by_id(collection, ids[:length], partition_tag=tag)
+        assert status.OK()
+        status = connect.flush([collection])
+        status, res = connect.count_entities(collection)
+        assert status.OK()
+        assert res == nb-length
+
+    def test_delete_vector_from_partition_empty(self, connect, collection):
+        '''
+        target: test.get_entity_by_id with partition params
+        method: add vector, make sure no vector in partition, and delete 
+        expected: status ok
+        '''
+        vectors = gen_vectors(nb, dim)
+        status = connect.create_partition(collection, tag)
+        assert status.OK()
+        status, ids = connect.insert(collection, vectors)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        length = 1 
+        status = connect.delete_entity_by_id(collection, ids[:length], partition_tag=tag)
+        assert status.OK()
+
+    # TODO:
+    def _test_delete_vector_from_partition_not_existed(self, connect, collection):
+        '''
+        target: test.get_entity_by_id with partition params, partition tag not existed
+        method: add vector, and delete 
+        expected: status not
+        '''
+        vectors = gen_vectors(nb, dim)
+        status = connect.create_partition(collection, tag)
+        assert status.OK()
+        status, ids = connect.insert(collection, vectors, partition_tag=tag)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        length = 1
+        tmp_tag = gen_unique_str()
+        status = connect.delete_entity_by_id(collection, ids[:length], partition_tag=tmp_tag)
+        assert not status.OK()
+
     def test_delete_vector_collection_not_existed(self, connect, collection):
         '''
         target: test delete vector, params collection_name not existed
