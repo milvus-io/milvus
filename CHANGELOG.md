@@ -2,7 +2,7 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 1.1.0 (2021-04-29)
+# Milvus 1.1.0 (2021-05-07)
 ## Bug
 -   \#4778 Failed to open vector index in mishards
 -   \#4797 Wrong results returned for merged different 'topk' queries
@@ -17,12 +17,13 @@ Please mark all change in change log and use the issue from GitHub
 -   \#5010 IVF_PQ failed to query on GPU if 'nbits' doesn't equal to 8
 -   \#5050 Index type returned by get_collection_stats() is incorrect
 -   \#5063 Empty segment is serialized and crash milvus
--   \#5078 Server crashed when creaing a GPU IVF index whose dimension is 2048/4086/8192
+-   \#5078 Server crashed when creaing a GPU IVF index whose dimension is 2048/4096/8192
 
 ## Feature
 -   \#4564 Allow get_entity_by_id() in a specified partition
 -   \#4806 Allow delete_entity_by_id() in a specified partition
 -   \#4905 Add API release_collection() to unload collection from the cache
+-   \#5161 Enable Gpu cache 
 
 ## Improvement
 -   \#4756 Improve the performance of get_entity_by_id()
