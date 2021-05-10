@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package proxyservice
+package timesync
 
 import (
 	"context"
@@ -86,11 +86,10 @@ func TestSoftTimeTickBarrier_Start(t *testing.T) {
 	minTtInterval := Timestamp(interval)
 
 	durationInterval := time.Duration(interval*int(math.Pow10(6))) >> 18
-	ttStreamProduceLoop(ctx, ttStream, durationInterval, int64(sourceID))
 
-	ttBarrier := newSoftTimeTickBarrier(ctx, ttStream, peerIds, minTtInterval)
-	err := ttBarrier.Start()
-	assert.Equal(t, nil, err)
+	ttBarrier := NewSoftTimeTickBarrier(ctx, ttStream, peerIds, minTtInterval)
+	ttBarrier.Start()
+	ttStreamProduceLoop(ctx, ttStream, durationInterval, int64(sourceID))
 	defer ttBarrier.Close()
 }
 
@@ -105,11 +104,10 @@ func TestSoftTimeTickBarrier_Close(t *testing.T) {
 	minTtInterval := Timestamp(interval)
 
 	durationInterval := time.Duration(interval*int(math.Pow10(6))) >> 18
-	ttStreamProduceLoop(ctx, ttStream, durationInterval, int64(sourceID))
 
-	ttBarrier := newSoftTimeTickBarrier(ctx, ttStream, peerIds, minTtInterval)
-	err := ttBarrier.Start()
-	assert.Equal(t, nil, err)
+	ttBarrier := NewSoftTimeTickBarrier(ctx, ttStream, peerIds, minTtInterval)
+	ttBarrier.Start()
+	ttStreamProduceLoop(ctx, ttStream, durationInterval, int64(sourceID))
 	defer ttBarrier.Close()
 }
 
@@ -124,11 +122,10 @@ func TestSoftTimeTickBarrier_GetTimeTick(t *testing.T) {
 	minTtInterval := Timestamp(interval)
 
 	durationInterval := time.Duration(interval*int(math.Pow10(6))) >> 18
-	ttStreamProduceLoop(ctx, ttStream, durationInterval, int64(sourceID))
 
-	ttBarrier := newSoftTimeTickBarrier(ctx, ttStream, peerIds, minTtInterval)
-	err := ttBarrier.Start()
-	assert.Equal(t, nil, err)
+	ttBarrier := NewSoftTimeTickBarrier(ctx, ttStream, peerIds, minTtInterval)
+	ttBarrier.Start()
+	ttStreamProduceLoop(ctx, ttStream, durationInterval, int64(sourceID))
 	defer ttBarrier.Close()
 
 	num := 10
@@ -150,15 +147,14 @@ func TestSoftTimeTickBarrier_AddPeer(t *testing.T) {
 	minTtInterval := Timestamp(interval)
 
 	durationInterval := time.Duration(interval*int(math.Pow10(6))) >> 18
-	ttStreamProduceLoop(ctx, ttStream, durationInterval, int64(sourceID))
 
-	ttBarrier := newSoftTimeTickBarrier(ctx, ttStream, peerIds, minTtInterval)
-	err := ttBarrier.Start()
-	assert.Equal(t, nil, err)
+	ttBarrier := NewSoftTimeTickBarrier(ctx, ttStream, peerIds, minTtInterval)
+	ttBarrier.Start()
+	ttStreamProduceLoop(ctx, ttStream, durationInterval, int64(sourceID))
 	defer ttBarrier.Close()
 
 	newSourceID := UniqueID(2)
-	err = ttBarrier.AddPeer(newSourceID)
+	err := ttBarrier.AddPeer(newSourceID)
 	assert.Equal(t, nil, err)
 	ttStreamProduceLoop(ctx, ttStream, durationInterval, newSourceID)
 
@@ -167,37 +163,5 @@ func TestSoftTimeTickBarrier_AddPeer(t *testing.T) {
 		tick, err := ttBarrier.GetTimeTick()
 		assert.Equal(t, nil, err)
 		log.Debug("TestSoftTimeTickBarrier", zap.Any("GetTimeTick", tick))
-	}
-}
-
-func TestSoftTimeTickBarrier_TickChan(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	ttStream := msgstream.NewSimpleMsgStream()
-	sourceID := 1
-	peerIds := []UniqueID{UniqueID(sourceID)}
-	interval := 100
-	minTtInterval := Timestamp(interval)
-
-	durationInterval := time.Duration(interval*int(math.Pow10(6))) >> 18
-	ttStreamProduceLoop(ctx, ttStream, durationInterval, int64(sourceID))
-
-	ttBarrier := newSoftTimeTickBarrier(ctx, ttStream, peerIds, minTtInterval)
-	err := ttBarrier.Start()
-	assert.Equal(t, nil, err)
-	defer ttBarrier.Close()
-
-	duration := time.Second
-	timer := time.NewTimer(duration)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
-			return
-		case ts := <-ttBarrier.TickChan():
-			log.Debug("TestSoftTimeTickBarrier", zap.Any("GetTimeTick", ts))
-		}
 	}
 }
