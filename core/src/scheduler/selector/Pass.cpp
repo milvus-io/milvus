@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #ifdef MILVUS_GPU_VERSION
-#include "Pass.h"
+#include "src/scheduler/selector/Pass.h"
 #include <iostream>
 #include <string>
 #include <vector>
