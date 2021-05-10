@@ -16,10 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	"github.com/stretchr/testify/assert"
@@ -73,39 +72,28 @@ func TestWatcher(t *testing.T) {
 		assert.Nil(t, err)
 
 		cases := []struct {
-			sealed     bool
-			allocation bool
-			expired    bool
-			expected   bool
+			sealed   bool
+			expired  bool
+			expected bool
 		}{
-			{false, false, true, false},
-			{false, true, true, false},
-			{false, true, false, false},
-			{true, false, true, true},
-			{true, true, false, false},
-			{true, true, true, true},
+			{false, true, false},
+			{false, true, false},
+			{false, false, false},
+			{true, true, true},
+			{true, false, false},
+			{true, true, true},
 		}
 
-		segIDs := make([]UniqueID, len(cases))
-		for i, c := range cases {
-			segID, err := allocator.allocID()
+		segIDs := make([]UniqueID, 0)
+		for i := range cases {
+			segID, _, _, err := segAllocator.AllocSegment(ctx, collID, partID, "channel"+strconv.Itoa(i), 100)
 			assert.Nil(t, err)
-			segIDs[i] = segID
-			segInfo, err := BuildSegment(collID, partID, segID, "channel"+strconv.Itoa(i))
-			assert.Nil(t, err)
-			err = meta.AddSegment(segInfo)
-			assert.Nil(t, err)
-			err = segAllocator.OpenSegment(ctx, segInfo)
-			assert.Nil(t, err)
-			if c.allocation && c.expired {
-				_, _, _, err := segAllocator.AllocSegment(ctx, collID, partID, "channel"+strconv.Itoa(i), 100)
-				assert.Nil(t, err)
-			}
+			segIDs = append(segIDs, segID)
 		}
 
 		time.Sleep(time.Duration(Params.SegIDAssignExpiration+1000) * time.Millisecond)
 		for i, c := range cases {
-			if c.allocation && !c.expired {
+			if !c.expired {
 				_, _, _, err := segAllocator.AllocSegment(ctx, collID, partID, "channel"+strconv.Itoa(i), 100)
 				assert.Nil(t, err)
 			}
