@@ -48,8 +48,8 @@ const (
 
 	CreateCollectionMsgType = "CreateCollection"
 	DropCollectionMsgType   = "DropCollection"
-	CreatePartitionMsgType = "CreatePartition"
-	DropPartitionMsgType   = "DropPartition"
+	CreatePartitionMsgType  = "CreatePartition"
+	DropPartitionMsgType    = "DropPartition"
 )
 
 type metaTable struct {
