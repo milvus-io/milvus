@@ -239,8 +239,8 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 	if len(part.SegmentIDs) != 0 {
 		return errors.New("segment should be empty when creating collection")
 	}
-	if len(coll.PartitionIDs) != 1 {
-		return errors.New("should only contain _default partition when creating collection")
+	if len(coll.PartitionIDs) != 0 {
+		return errors.New("partitions should be empty when creating collection")
 	}
 	if _, ok := mt.collName2ID[coll.Schema.Name]; ok {
 		return fmt.Errorf("collection %s exist", coll.Schema.Name)
@@ -249,6 +249,7 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 		return fmt.Errorf("incorrect index id when creating collection")
 	}
 
+	coll.PartitionIDs = append(coll.PartitionIDs, part.PartitionID)
 	mt.collID2Meta[coll.ID] = *coll
 	mt.collName2ID[coll.Schema.Name] = coll.ID
 	mt.partitionID2Meta[part.PartitionID] = *part
@@ -270,12 +271,15 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 	}
 
 	// record ddmsg info and type
-	ddmsg, _ := json.Marshal(meta)
+	ddmsg, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
 	meta[DDMsgPrefix] = string(ddmsg)
 	meta[DDMsgTypePrefix] = CreateCollectionMsgType
 	meta[DDMsgFlagPrefix] = "false"
 
-	err := mt.client.MultiSave(meta)
+	err = mt.client.MultiSave(meta)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -330,14 +334,17 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID) error {
 	}
 
 	// record ddmsg info and type
-	ddmsg, _ := json.Marshal(collID)
+	ddmsg, err := json.Marshal(collID)
+	if err != nil {
+		return err
+	}
 	saveMeta := map[string]string{
 		DDMsgPrefix:     string(ddmsg),
 		DDMsgTypePrefix: DropCollectionMsgType,
 		DDMsgFlagPrefix: "false",
 	}
 
-	err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys)
+	err = mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -451,12 +458,15 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	meta := map[string]string{k1: v1, k2: v2}
 
 	// record ddmsg info and type
-	ddmsg, _ := json.Marshal(meta)
+	ddmsg, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
 	meta[DDMsgPrefix] = string(ddmsg)
 	meta[DDMsgTypePrefix] = CreatePartitionMsgType
 	meta[DDMsgFlagPrefix] = "false"
 
-	err := mt.client.MultiSave(meta)
+	err = mt.client.MultiSave(meta)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -540,12 +550,15 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	}
 
 	// record ddmsg info and type
-	ddmsg, _ := json.Marshal(collKV)
+	ddmsg, err := json.Marshal(collKV)
+	if err != nil {
+		return 0, err
+	}
 	collKV[DDMsgPrefix] = string(ddmsg)
 	collKV[DDMsgTypePrefix] = DropPartitionMsgType
 	collKV[DDMsgFlagPrefix] = "false"
 
-	err := mt.client.MultiSaveAndRemoveWithPrefix(collKV, delMetaKeys)
+	err = mt.client.MultiSaveAndRemoveWithPrefix(collKV, delMetaKeys)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return 0, err

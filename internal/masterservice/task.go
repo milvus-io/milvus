@@ -141,10 +141,6 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		SegmentIDs:    make([]typeutil.UniqueID, 0, 16),
 	}
 	idxInfo := make([]*etcdpb.IndexInfo, 0, 16)
-
-	// record _default partition ID in collection meta
-	collMeta.PartitionIDs = append(collMeta.PartitionIDs, partMeta.PartitionID)
-
 	/////////////////////// ignore index param from create_collection /////////////////////////
 	//for _, field := range schema.Fields {
 	//	if field.DataType == schemapb.DataType_VectorFloat || field.DataType == schemapb.DataType_VectorBinary {
