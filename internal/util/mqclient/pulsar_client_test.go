@@ -15,7 +15,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"go.uber.org/zap"
 	"math/rand"
 	"testing"
 	"time"
@@ -23,6 +22,7 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 func IntToBytes(n int) []byte {
