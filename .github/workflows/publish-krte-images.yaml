@@ -37,7 +37,8 @@ jobs:
         shell: bash
         working-directory: build/docker/krte
         run: |
-          TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} docker build --build-arg IMAGE_ARG="milvusdb/krte:$TAG" --build-arg GO_VERSION=1.15.8 -t "milvusdb/krte:$TAG" .
+          export TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}
+          docker build --build-arg IMAGE_ARG="milvusdb/krte:$TAG" --build-arg GO_VERSION=1.15.8 -t "milvusdb/krte:$TAG" .
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
@@ -45,5 +46,6 @@ jobs:
         run: |
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
-          TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} docker push "milvusdb/krte:$TAG"
+          export TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}
+          docker push "milvusdb/krte:$TAG"
           echo "Push krte image Succeeded"
