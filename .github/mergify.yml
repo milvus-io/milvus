@@ -8,6 +8,7 @@ pull_request_rules:
       - "#approved-reviews-by>=1"
       - "#changes-requested-reviews-by=0"
       - -title~=(?i)\[wip\]
+      - -label=do-not-merge/work-in-progress
       - -body~=[^\n]{72,}
       - "status-success=DCO"
       - -label=manual-merge
@@ -24,6 +25,7 @@ pull_request_rules:
       - "#changes-requested-reviews-by=0"
       - -body~=[^\n]{72,}
       - -title~=(?i)\[wip\]
+      - -label=do-not-merge/work-in-progress
       - "status-success=DCO"
       - -label=manual-merge
     actions:
