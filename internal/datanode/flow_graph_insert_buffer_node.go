@@ -181,7 +181,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		uniqueSeg[currentSegID] = uniqueSeg[currentSegID] + 1
 	}
 	segIDsToUpdate := make([]UniqueID, 0, len(uniqueSeg))
-	for id, _ := range uniqueSeg {
+	for id := range uniqueSeg {
 		segIDsToUpdate = append(segIDsToUpdate, id)
 	}
 
