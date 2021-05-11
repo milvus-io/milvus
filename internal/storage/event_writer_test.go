@@ -22,7 +22,7 @@ import (
 
 func TestSizeofStruct(t *testing.T) {
 	var buf bytes.Buffer
-	err := binary.Write(&buf, binary.LittleEndian, baseEventHeader{})
+	err := binary.Write(&buf, binlogEndian, baseEventHeader{})
 	assert.Nil(t, err)
 	s1 := binary.Size(baseEventHeader{})
 	s2 := binary.Size(&baseEventHeader{})
@@ -33,11 +33,16 @@ func TestSizeofStruct(t *testing.T) {
 
 	de := descriptorEventData{
 		DescriptorEventDataFixPart: DescriptorEventDataFixPart{},
+		StartPositionLen:           4,
+		StartPositionMsg:           []byte{1, 1, 1, 1},
+		EndPositionLen:             4,
+		EndPositionMsg:             []byte{1, 1, 1, 1},
 		PostHeaderLengths:          []uint8{0, 1, 2, 3},
 	}
+
 	err = de.Write(&buf)
 	assert.Nil(t, err)
-	s3 := binary.Size(de.DescriptorEventDataFixPart) + binary.Size(de.PostHeaderLengths)
+	s3 := binary.Size(de.DescriptorEventDataFixPart) + binary.Size(de.PostHeaderLengths) + binary.Size(de.StartPositionMsg) + binary.Size(de.EndPositionMsg) + binary.Size(de.StartPositionLen) + binary.Size(de.EndPositionLen)
 	assert.Equal(t, s3, buf.Len())
 }
 

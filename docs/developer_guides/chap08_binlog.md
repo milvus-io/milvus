@@ -62,11 +62,19 @@ Binlog file consists of 4 bytes magic number and a series of events. The first e
 |        +----------------------------+
 |        | segment_id       56 : 8    | segment id (schema column does not need)
 |        +----------------------------+
-|        | start_timestamp  64 : 1    | minimum timestamp allocated by master of all events in this file
+|        | start_timestamp  64 : 8    | minimum timestamp allocated by master of all events in this file
 |        +----------------------------+
-|        | end_timestamp    65 : 1    | maximum timestamp allocated by master of all events in this file
+|        | end_timestamp    72 : 8    | maximum timestamp allocated by master of all events in this file
 |        +----------------------------+
-|        | post-header      66 : n    | array of n bytes, one byte per event type that the server knows about
+|        | start_pos_len    80 : 4    | length of start position message
+|        +----------------------------+
+|        | start_pos_msg    84 : 8    | start position message
+|        +----------------------------+
+|        | end_pos_len      92 : 4    | length of end position message
+|        +----------------------------+
+|        | end_pos_msg      96 : 8    | end position message
+|        +----------------------------+
+|        | post-header      104 : n   | array of n bytes, one byte per event type that the server knows about
 |        | lengths for all            |
 |        | event types                |
 +=====================================+

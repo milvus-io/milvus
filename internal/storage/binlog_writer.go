@@ -98,7 +98,7 @@ func (writer *baseBinlogWriter) Close() error {
 
 	var offset int32
 	writer.buffer = new(bytes.Buffer)
-	if err := binary.Write(writer.buffer, binary.LittleEndian, int32(MagicNumber)); err != nil {
+	if err := binary.Write(writer.buffer, binlogEndian, int32(MagicNumber)); err != nil {
 		return err
 	}
 	if err := writer.descriptorEvent.Write(writer.buffer); err != nil {

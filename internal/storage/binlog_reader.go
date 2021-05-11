@@ -44,7 +44,7 @@ func (reader *BinlogReader) NextEventReader() (*EventReader, error) {
 }
 
 func (reader *BinlogReader) readMagicNumber() (int32, error) {
-	if err := binary.Read(reader.buffer, binary.LittleEndian, &reader.magicNumber); err != nil {
+	if err := binary.Read(reader.buffer, binlogEndian, &reader.magicNumber); err != nil {
 		return -1, err
 	}
 	if reader.magicNumber != MagicNumber {

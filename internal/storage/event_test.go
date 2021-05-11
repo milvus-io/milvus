@@ -70,97 +70,71 @@ func TestDescriptorEvent(t *testing.T) {
 	assert.GreaterOrEqual(t, nPos, int32(binary.Size(MagicNumber)+len(buffer)))
 	t.Logf("next position = %d", nPos)
 
-	binVersion := UnsafeReadInt16(buffer, binary.Size(eventHeader{}))
+	pos := binary.Size(eventHeader{})
+	binVersion := UnsafeReadInt16(buffer, pos)
 	assert.Equal(t, binVersion, int16(BinlogVersion))
-	svrVersion := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+int(unsafe.Sizeof(binVersion)))
+	pos += int(unsafe.Sizeof(binVersion))
+	svrVersion := UnsafeReadInt64(buffer, pos)
 	assert.Equal(t, svrVersion, int64(ServerVersion))
-	commitID := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+int(unsafe.Sizeof(binVersion))+int(unsafe.Sizeof(svrVersion)))
+	pos += int(unsafe.Sizeof(svrVersion))
+	commitID := UnsafeReadInt64(buffer, pos)
 	assert.Equal(t, commitID, int64(CommitID))
-	headLen := UnsafeReadInt8(buffer, binary.Size(eventHeader{})+
-		int(unsafe.Sizeof(binVersion))+
-		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(commitID)))
+	pos += int(unsafe.Sizeof(commitID))
+	headLen := UnsafeReadInt8(buffer, pos)
 	assert.Equal(t, headLen, int8(binary.Size(eventHeader{})))
+	pos += int(unsafe.Sizeof(headLen))
 	t.Logf("head len = %d", headLen)
-	collID := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
-		int(unsafe.Sizeof(binVersion))+
-		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(commitID))+
-		int(unsafe.Sizeof(headLen)))
+	collID := UnsafeReadInt64(buffer, pos)
 	assert.Equal(t, collID, int64(-1))
-	partID := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
-		int(unsafe.Sizeof(binVersion))+
-		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(commitID))+
-		int(unsafe.Sizeof(headLen))+
-		int(unsafe.Sizeof(collID)))
+	pos += int(unsafe.Sizeof(collID))
+	partID := UnsafeReadInt64(buffer, pos)
 	assert.Equal(t, partID, int64(-1))
-	segID := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
-		int(unsafe.Sizeof(binVersion))+
-		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(commitID))+
-		int(unsafe.Sizeof(headLen))+
-		int(unsafe.Sizeof(collID))+
-		int(unsafe.Sizeof(partID)))
+	pos += int(unsafe.Sizeof(partID))
+	segID := UnsafeReadInt64(buffer, pos)
 	assert.Equal(t, segID, int64(-1))
-	fieldID := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
-		int(unsafe.Sizeof(binVersion))+
-		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(commitID))+
-		int(unsafe.Sizeof(headLen))+
-		int(unsafe.Sizeof(collID))+
-		int(unsafe.Sizeof(partID))+
-		int(unsafe.Sizeof(segID)))
+	pos += int(unsafe.Sizeof(segID))
+	fieldID := UnsafeReadInt64(buffer, pos)
 	assert.Equal(t, fieldID, int64(-1))
-	startTs := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
-		int(unsafe.Sizeof(binVersion))+
-		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(commitID))+
-		int(unsafe.Sizeof(headLen))+
-		int(unsafe.Sizeof(collID))+
-		int(unsafe.Sizeof(partID))+
-		int(unsafe.Sizeof(segID))+
-		int(unsafe.Sizeof(fieldID)))
+	pos += int(unsafe.Sizeof(fieldID))
+	startTs := UnsafeReadInt64(buffer, pos)
 	assert.Equal(t, startTs, int64(0))
-	endTs := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
-		int(unsafe.Sizeof(binVersion))+
-		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(commitID))+
-		int(unsafe.Sizeof(headLen))+
-		int(unsafe.Sizeof(collID))+
-		int(unsafe.Sizeof(partID))+
-		int(unsafe.Sizeof(segID))+
-		int(unsafe.Sizeof(fieldID))+
-		int(unsafe.Sizeof(startTs)))
+	pos += int(unsafe.Sizeof(startTs))
+	endTs := UnsafeReadInt64(buffer, pos)
 	assert.Equal(t, endTs, int64(0))
-	colType := UnsafeReadInt32(buffer, binary.Size(eventHeader{})+
-		int(unsafe.Sizeof(binVersion))+
-		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(commitID))+
-		int(unsafe.Sizeof(headLen))+
-		int(unsafe.Sizeof(collID))+
-		int(unsafe.Sizeof(partID))+
-		int(unsafe.Sizeof(segID))+
-		int(unsafe.Sizeof(fieldID))+
-		int(unsafe.Sizeof(startTs))+
-		int(unsafe.Sizeof(endTs)))
+	pos += int(unsafe.Sizeof(endTs))
+	colType := UnsafeReadInt32(buffer, pos)
 	assert.Equal(t, colType, int32(-1))
+	pos += int(unsafe.Sizeof(colType))
 
-	postHeadOffset := binary.Size(eventHeader{}) +
-		int(unsafe.Sizeof(binVersion)) +
-		int(unsafe.Sizeof(svrVersion)) +
-		int(unsafe.Sizeof(commitID)) +
-		int(unsafe.Sizeof(headLen)) +
-		int(unsafe.Sizeof(collID)) +
-		int(unsafe.Sizeof(partID)) +
-		int(unsafe.Sizeof(segID)) +
-		int(unsafe.Sizeof(fieldID)) +
-		int(unsafe.Sizeof(startTs)) +
-		int(unsafe.Sizeof(endTs)) +
-		int(unsafe.Sizeof(colType))
+	// descriptor data start position len
+	sLen := UnsafeReadInt32(buffer, pos)
+	assert.Equal(t, int32(0), sLen)
+	pos += int(unsafe.Sizeof(sLen))
 
+	// descriptor data start position msg
+	sMsg := make([]byte, 0, sLen)
+	for i := 0; i < int(sLen); i++ {
+		sMsg = append(sMsg, buffer[pos])
+		pos++
+	}
+	assert.Equal(t, []byte{}, sMsg)
+
+	// descriptor data end position len
+	eLen := UnsafeReadInt32(buffer, pos)
+	assert.Equal(t, int32(0), eLen)
+	pos += int(unsafe.Sizeof(eLen))
+
+	// descriptor data end position msg
+	eMsg := make([]byte, 0, eLen)
+	for i := 0; i < int(eLen); i++ {
+		eMsg = append(eMsg, buffer[pos])
+		pos++
+	}
+	assert.Equal(t, []byte{}, eMsg)
+
+	postHeadOffset := pos
 	postHeadArray := buffer[postHeadOffset:]
-	for i := DescriptorEventType; i < EventTypeEnd; i++ {
+	for _, i := range EventTypes {
 		hen := postHeadArray[i-DescriptorEventType]
 		size := getEventFixPartSize(i)
 		assert.Equal(t, hen, uint8(size))
@@ -1244,13 +1218,13 @@ func TestReadFixPartError(t *testing.T) {
 	_, err = readDropPartitionEventDataFixPart(buf)
 	assert.NotNil(t, err)
 
-	_, err = readDescriptorEventData(buf)
+	_, err = readDescriptorEventData(buf, 0)
 	assert.NotNil(t, err)
 
 	event := newDescriptorEventData()
-	err = binary.Write(buf, binary.LittleEndian, event.DescriptorEventDataFixPart)
+	err = binary.Write(buf, binlogEndian, event.DescriptorEventDataFixPart)
 	assert.Nil(t, err)
-	_, err = readDescriptorEventData(buf)
+	_, err = readDescriptorEventData(buf, event.GetMemoryUsageInBytes())
 	assert.NotNil(t, err)
 
 	size := getEventFixPartSize(EventTypeCode(10))
@@ -1290,7 +1264,7 @@ func TestEventReaderError(t *testing.T) {
 		StartTimestamp: 1000,
 		EndTimestamp:   2000,
 	}
-	err = binary.Write(buf, binary.LittleEndian, insertData)
+	err = binary.Write(buf, binlogEndian, insertData)
 	assert.Nil(t, err)
 
 	r, err = newEventReader(schemapb.DataType_Int64, buf)

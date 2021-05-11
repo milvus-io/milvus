@@ -31,8 +31,20 @@ const (
 	DropCollectionEventType
 	CreatePartitionEventType
 	DropPartitionEventType
-	EventTypeEnd
 )
+
+// EventTypes are the set of all event types in binlog
+var EventTypes = []EventTypeCode{
+	DescriptorEventType,
+	InsertEventType,
+	DeleteEventType,
+	CreateCollectionEventType,
+	DropCollectionEventType,
+	CreatePartitionEventType,
+	DropPartitionEventType,
+}
+
+var binlogEndian = binary.LittleEndian
 
 func (code EventTypeCode) String() string {
 	codes := []string{"DescriptorEventType", "InsertEventType", "DeleteEventType", "CreateCollectionEventType", "DropCollectionEventType",
@@ -53,6 +65,8 @@ func (event *descriptorEvent) GetMemoryUsageInBytes() int32 {
 }
 
 func (event *descriptorEvent) Write(buffer io.Writer) error {
+	event.EventLength = event.GetMemoryUsageInBytes()
+	event.NextPosition = int32(binary.Size(MagicNumber)) + event.EventLength
 	if err := event.descriptorEventHeader.Write(buffer); err != nil {
 		return err
 	}
@@ -67,7 +81,7 @@ func ReadDescriptorEvent(buffer io.Reader) (*descriptorEvent, error) {
 	if err != nil {
 		return nil, err
 	}
-	data, err := readDescriptorEventData(buffer)
+	data, err := readDescriptorEventData(buffer, header.EventLength-header.GetMemoryUsageInBytes())
 	if err != nil {
 		return nil, err
 	}
@@ -120,9 +134,7 @@ func (writer *baseEventWriter) Write(buffer *bytes.Buffer) error {
 	if err != nil {
 		return err
 	}
-	if err := binary.Write(buffer, binary.LittleEndian, data); err != nil {
-		return err
-	}
+	buffer.Write(data)
 	return nil
 }
 
@@ -191,8 +203,6 @@ type dropPartitionEventWriter struct {
 func newDescriptorEvent() *descriptorEvent {
 	header := newDescriptorEventHeader()
 	data := newDescriptorEventData()
-	header.EventLength = header.GetMemoryUsageInBytes() + data.GetMemoryUsageInBytes()
-	header.NextPosition = int32(binary.Size(MagicNumber)) + header.EventLength
 	data.HeaderLength = int8(binary.Size(eventHeader{}))
 	return &descriptorEvent{
 		descriptorEventHeader: *header,

@@ -51,6 +51,8 @@ func TestInsertBinlog(t *testing.T) {
 
 	w.SetStartTimeStamp(1000)
 	w.SetEndTimeStamp(2000)
+	w.SetStartPositionMsg([]byte{1, 2, 3})
+	w.SetEndPositionMsg([]byte{1, 2, 3})
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -148,8 +150,34 @@ func TestInsertBinlog(t *testing.T) {
 	assert.Equal(t, schemapb.DataType(colType), schemapb.DataType_Int64)
 	pos += int(unsafe.Sizeof(colType))
 
+	// descriptor data start position len
+	sLen := UnsafeReadInt32(buf, pos)
+	assert.Equal(t, int32(3), sLen)
+	pos += int(unsafe.Sizeof(sLen))
+
+	// descriptor data start position msg
+	sMsg := make([]byte, 0, sLen)
+	for i := 0; i < int(sLen); i++ {
+		sMsg = append(sMsg, buf[pos])
+		pos++
+	}
+	assert.Equal(t, []byte{1, 2, 3}, sMsg)
+
+	// descriptor data end position len
+	eLen := UnsafeReadInt32(buf, pos)
+	assert.Equal(t, int32(3), eLen)
+	pos += int(unsafe.Sizeof(eLen))
+
+	// descriptor data end position msg
+	eMsg := make([]byte, 0, eLen)
+	for i := 0; i < int(eLen); i++ {
+		eMsg = append(eMsg, buf[pos])
+		pos++
+	}
+	assert.Equal(t, []byte{1, 2, 3}, eMsg)
+
 	//descriptor data, post header lengths
-	for i := DescriptorEventType; i < EventTypeEnd; i++ {
+	for _, i := range EventTypes {
 		size := getEventFixPartSize(i)
 		assert.Equal(t, uint8(size), buf[pos])
 		pos++
@@ -310,6 +338,8 @@ func TestDeleteBinlog(t *testing.T) {
 
 	w.SetStartTimeStamp(1000)
 	w.SetEndTimeStamp(2000)
+	w.SetStartPositionMsg([]byte{1, 2, 3})
+	w.SetEndPositionMsg([]byte{1, 2, 3})
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -407,8 +437,34 @@ func TestDeleteBinlog(t *testing.T) {
 	assert.Equal(t, schemapb.DataType(colType), schemapb.DataType_Int64)
 	pos += int(unsafe.Sizeof(colType))
 
+	// descriptor data start position len
+	sLen := UnsafeReadInt32(buf, pos)
+	assert.Equal(t, int32(3), sLen)
+	pos += int(unsafe.Sizeof(sLen))
+
+	// descriptor data start position msg
+	sMsg := make([]byte, 0, sLen)
+	for i := 0; i < int(sLen); i++ {
+		sMsg = append(sMsg, buf[pos])
+		pos++
+	}
+	assert.Equal(t, []byte{1, 2, 3}, sMsg)
+
+	// descriptor data end position len
+	eLen := UnsafeReadInt32(buf, pos)
+	assert.Equal(t, int32(3), eLen)
+	pos += int(unsafe.Sizeof(eLen))
+
+	// descriptor data end position msg
+	eMsg := make([]byte, 0, eLen)
+	for i := 0; i < int(eLen); i++ {
+		eMsg = append(eMsg, buf[pos])
+		pos++
+	}
+	assert.Equal(t, []byte{1, 2, 3}, eMsg)
+
 	//descriptor data, post header lengths
-	for i := DescriptorEventType; i < EventTypeEnd; i++ {
+	for _, i := range EventTypes {
 		size := getEventFixPartSize(i)
 		assert.Equal(t, uint8(size), buf[pos])
 		pos++
@@ -569,6 +625,8 @@ func TestDDLBinlog1(t *testing.T) {
 
 	w.SetStartTimeStamp(1000)
 	w.SetEndTimeStamp(2000)
+	w.SetStartPositionMsg([]byte{1, 2, 3})
+	w.SetEndPositionMsg([]byte{1, 2, 3})
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -666,8 +724,34 @@ func TestDDLBinlog1(t *testing.T) {
 	assert.Equal(t, schemapb.DataType(colType), schemapb.DataType_Int64)
 	pos += int(unsafe.Sizeof(colType))
 
+	// descriptor data start position len
+	sLen := UnsafeReadInt32(buf, pos)
+	assert.Equal(t, int32(3), sLen)
+	pos += int(unsafe.Sizeof(sLen))
+
+	// descriptor data start position msg
+	sMsg := make([]byte, 0, sLen)
+	for i := 0; i < int(sLen); i++ {
+		sMsg = append(sMsg, buf[pos])
+		pos++
+	}
+	assert.Equal(t, []byte{1, 2, 3}, sMsg)
+
+	// descriptor data end position len
+	eLen := UnsafeReadInt32(buf, pos)
+	assert.Equal(t, int32(3), eLen)
+	pos += int(unsafe.Sizeof(eLen))
+
+	// descriptor data end position msg
+	eMsg := make([]byte, 0, eLen)
+	for i := 0; i < int(eLen); i++ {
+		eMsg = append(eMsg, buf[pos])
+		pos++
+	}
+	assert.Equal(t, []byte{1, 2, 3}, eMsg)
+
 	//descriptor data, post header lengths
-	for i := DescriptorEventType; i < EventTypeEnd; i++ {
+	for _, i := range EventTypes {
 		size := getEventFixPartSize(i)
 		assert.Equal(t, uint8(size), buf[pos])
 		pos++
@@ -828,6 +912,8 @@ func TestDDLBinlog2(t *testing.T) {
 
 	w.SetStartTimeStamp(1000)
 	w.SetEndTimeStamp(2000)
+	w.SetStartPositionMsg([]byte{1, 2, 3})
+	w.SetEndPositionMsg([]byte{1, 2, 3})
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -925,8 +1011,34 @@ func TestDDLBinlog2(t *testing.T) {
 	assert.Equal(t, schemapb.DataType(colType), schemapb.DataType_Int64)
 	pos += int(unsafe.Sizeof(colType))
 
+	// descriptor data start position len
+	sLen := UnsafeReadInt32(buf, pos)
+	assert.Equal(t, int32(3), sLen)
+	pos += int(unsafe.Sizeof(sLen))
+
+	// descriptor data start position msg
+	sMsg := make([]byte, 0, sLen)
+	for i := 0; i < int(sLen); i++ {
+		sMsg = append(sMsg, buf[pos])
+		pos++
+	}
+	assert.Equal(t, []byte{1, 2, 3}, sMsg)
+
+	// descriptor data end position len
+	eLen := UnsafeReadInt32(buf, pos)
+	assert.Equal(t, int32(3), eLen)
+	pos += int(unsafe.Sizeof(eLen))
+
+	// descriptor data end position msg
+	eMsg := make([]byte, 0, eLen)
+	for i := 0; i < int(eLen); i++ {
+		eMsg = append(eMsg, buf[pos])
+		pos++
+	}
+	assert.Equal(t, []byte{1, 2, 3}, eMsg)
+
 	//descriptor data, post header lengths
-	for i := DescriptorEventType; i < EventTypeEnd; i++ {
+	for _, i := range EventTypes {
 		size := getEventFixPartSize(i)
 		assert.Equal(t, uint8(size), buf[pos])
 		pos++
@@ -1072,7 +1184,7 @@ func TestNewBinlogReaderError(t *testing.T) {
 	assert.NotNil(t, err)
 
 	buffer := new(bytes.Buffer)
-	err = binary.Write(buffer, binary.LittleEndian, int32(MagicNumber))
+	err = binary.Write(buffer, binlogEndian, int32(MagicNumber))
 	assert.Nil(t, err)
 	data = buffer.Bytes()
 
@@ -1080,7 +1192,7 @@ func TestNewBinlogReaderError(t *testing.T) {
 	assert.Nil(t, reader)
 	assert.NotNil(t, err)
 
-	err = binary.Write(buffer, binary.LittleEndian, int32(555))
+	err = binary.Write(buffer, binlogEndian, int32(555))
 	assert.Nil(t, err)
 	data = buffer.Bytes()
 

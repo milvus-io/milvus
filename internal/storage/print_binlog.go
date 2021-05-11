@@ -84,6 +84,10 @@ func printBinlogFile(filename string) error {
 	if !ok {
 		return fmt.Errorf("undefine data type %d", r.descriptorEvent.descriptorEventData.PayloadDataType)
 	}
+	fmt.Printf("\tStartPositionLen: %v\n", r.descriptorEvent.StartPositionLen)
+	fmt.Printf("\tStartPositionMsg: %v\n", r.descriptorEvent.StartPositionMsg)
+	fmt.Printf("\tEndPositionLen: %v\n", r.descriptorEvent.EndPositionLen)
+	fmt.Printf("\tEndPositionMsg: %v\n", r.descriptorEvent.EndPositionMsg)
 	fmt.Printf("\tPayloadDataType: %v\n", dataTypeName)
 	fmt.Printf("\tPostHeaderLengths: %v\n", r.descriptorEvent.descriptorEventData.PostHeaderLengths)
 	eventNum := 0
