@@ -13,6 +13,7 @@ package masterservice
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -403,6 +404,16 @@ func TestMasterService(t *testing.T) {
 		createMeta, err = core.MetaTable.GetCollectionByName("testColl-again")
 		assert.Nil(t, err)
 		assert.Equal(t, createMsg.CollectionID, createMeta.ID)
+
+		msgType, err := core.MetaTable.client.Load(DDMsgTypePrefix)
+		assert.Nil(t, err)
+		assert.Equal(t, CreateCollectionMsgType, msgType)
+
+		var meta map[string]string
+		metaStr, err := core.MetaTable.client.Load(DDMsgPrefix)
+		assert.Nil(t, err)
+		err = json.Unmarshal([]byte(metaStr), &meta)
+		assert.Nil(t, err)
 	})
 
 	t.Run("has collection", func(t *testing.T) {
@@ -524,6 +535,16 @@ func TestMasterService(t *testing.T) {
 
 		assert.Equal(t, 1, len(pm.GetCollArray()))
 		assert.Equal(t, "testColl", pm.GetCollArray()[0])
+
+		msgType, err := core.MetaTable.client.Load(DDMsgTypePrefix)
+		assert.Nil(t, err)
+		assert.Equal(t, CreatePartitionMsgType, msgType)
+
+		var meta map[string]string
+		metaStr, err := core.MetaTable.client.Load(DDMsgPrefix)
+		assert.Nil(t, err)
+		err = json.Unmarshal([]byte(metaStr), &meta)
+		assert.Nil(t, err)
 	})
 
 	t.Run("has partition", func(t *testing.T) {
@@ -913,6 +934,16 @@ func TestMasterService(t *testing.T) {
 
 		assert.Equal(t, 2, len(pm.GetCollArray()))
 		assert.Equal(t, "testColl", pm.GetCollArray()[1])
+
+		msgType, err := core.MetaTable.client.Load(DDMsgTypePrefix)
+		assert.Nil(t, err)
+		assert.Equal(t, DropPartitionMsgType, msgType)
+
+		var meta map[string]string
+		metaStr, err := core.MetaTable.client.Load(DDMsgPrefix)
+		assert.Nil(t, err)
+		err = json.Unmarshal([]byte(metaStr), &meta)
+		assert.Nil(t, err)
 	})
 
 	t.Run("drop collection", func(t *testing.T) {
@@ -966,6 +997,17 @@ func TestMasterService(t *testing.T) {
 		collArray = pm.GetCollArray()
 		assert.Equal(t, len(collArray), 3)
 		assert.Equal(t, collArray[2], "testColl")
+
+		msgType, err := core.MetaTable.client.Load(DDMsgTypePrefix)
+		assert.Nil(t, err)
+		assert.Equal(t, DropCollectionMsgType, msgType)
+
+		var collID typeutil.UniqueID
+		collIDByte, err := core.MetaTable.client.Load(DDMsgPrefix)
+		assert.Nil(t, err)
+		err = json.Unmarshal([]byte(collIDByte), &collID)
+		assert.Nil(t, err)
+		assert.Equal(t, collMeta.ID, collID)
 	})
 
 	t.Run("context_cancel", func(t *testing.T) {
