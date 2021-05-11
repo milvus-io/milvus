@@ -17,6 +17,23 @@ pull_request_rules:
         method: squash
         commit_message: title+body
 
+  - name: Auto merge for tests changed
+    conditions:
+      - base=master
+      - -files~=^(?!test[0-9]*).+
+      - "status-success=continuous-integration/jenkins/pr-merge"
+      - "#approved-reviews-by>=1"
+      - "#changes-requested-reviews-by=0"
+      - -title~=(?i)\[wip\]
+      - -label=do-not-merge/work-in-progress
+      - -body~=[^\n]{72,}
+      - "status-success=DCO"
+      - -label=manual-merge
+    actions:
+      merge:
+        method: squash
+        commit_message: title+body
+
   - name: Auto merge for document changed
     conditions:
       - base=master
