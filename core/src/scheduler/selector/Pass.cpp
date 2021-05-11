@@ -34,20 +34,19 @@ FindProperDevice(const std::vector<int64_t>& device_ids, const std::string& key)
 }
 
 ResourcePtr
-PickResource(const TaskPtr& task, const std::vector<int64_t>& device_ids, int64_t idx, std::string name) {
+PickResource(const TaskPtr& task, const std::vector<int64_t>& device_ids, int64_t& idx, std::string name) {
     auto search_task = std::static_pointer_cast<XSearchTask>(task);
     auto did = FindProperDevice(device_ids, search_task->GetLocation());
     ResourcePtr res_ptr = nullptr;
     if (did < 0) {
         LOG_SERVER_DEBUG_ << "No cache hit on gpu devices";
-        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] %s: nq >= gpu_search_threshold, specify gpu %d to search!", "search", 0,
-                                    name.c_str(), device_ids[idx]);
+        LOG_SERVER_DEBUG_ << LogOut("%s: nq >= gpu_search_threshold, specify gpu %d to search!", name.c_str(),
+                                    device_ids[idx]);
         res_ptr = scheduler::ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, (uint64_t)device_ids[idx]);
         idx = (idx + 1) % device_ids.size();
     } else {
         LOG_SERVER_DEBUG_ << LogOut("Gpu cache hit on device %d", did);
-        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] %s: nq >= gpu_search_threshold, specify gpu %d to search!", "search", 0,
-                                    name.c_str(), did);
+        LOG_SERVER_DEBUG_ << LogOut("%s: nq >= gpu_search_threshold, specify gpu %d to search!", name.c_str(), did);
         res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, (uint64_t)did);
     }
     return res_ptr;

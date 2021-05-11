@@ -2,6 +2,14 @@
 
 Please mark all change in change log and use the issue from GitHub
 
+# Milvus 1.1.1 (TBD)
+## Bug
+
+## Feature
+
+## Improvement
+-   \#5161 Enable Gpu cache 
+
 # Milvus 1.1.0 (2021-05-07)
 ## Bug
 -   \#4778 Failed to open vector index in mishards
@@ -23,7 +31,6 @@ Please mark all change in change log and use the issue from GitHub
 -   \#4564 Allow get_entity_by_id() in a specified partition
 -   \#4806 Allow delete_entity_by_id() in a specified partition
 -   \#4905 Add API release_collection() to unload collection from the cache
--   \#5161 Enable Gpu cache 
 
 ## Improvement
 -   \#4756 Improve the performance of get_entity_by_id()
