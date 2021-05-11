@@ -1,0 +1,5 @@
+pytest==5.3.4
+sklearn==0.0
+numpy==1.18.1
+pymilvus-orm==0.0.1
+git+https://github.com/Projectplace/pytest-tags
