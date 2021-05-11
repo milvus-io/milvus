@@ -1319,7 +1319,7 @@ Obtain vectors by ID.
 
 | Status code | Description                                                       |
 | ----------- | ----------------------------------------------------------------- |
-| 201         | Created                                                           |
+| 200         | The request is successful.                                        |
 | 400         | The request is incorrect. Refer to the error message for details. |
 | 404         | The required resource does not exist.                             |
 
