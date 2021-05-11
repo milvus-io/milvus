@@ -133,12 +133,18 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		PartitionIDs: make([]typeutil.UniqueID, 0, 16),
 		FieldIndexes: make([]*etcdpb.FieldIndexInfo, 0, 16),
 	}
+
+	// every collection has _default partition
 	partMeta := etcdpb.PartitionInfo{
 		PartitionName: Params.DefaultPartitionName,
 		PartitionID:   partitionID,
 		SegmentIDs:    make([]typeutil.UniqueID, 0, 16),
 	}
 	idxInfo := make([]*etcdpb.IndexInfo, 0, 16)
+
+	// record _default partition ID in collection meta
+	collMeta.PartitionIDs = append(collMeta.PartitionIDs, partMeta.PartitionID)
+
 	/////////////////////// ignore index param from create_collection /////////////////////////
 	//for _, field := range schema.Fields {
 	//	if field.DataType == schemapb.DataType_VectorFloat || field.DataType == schemapb.DataType_VectorBinary {
@@ -166,6 +172,9 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// schema is modified (add RowIDField and TimestampField),
+	// so need Marshal again
 	schemaBytes, err := proto.Marshal(&schema)
 	if err != nil {
 		return err
@@ -204,6 +213,9 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// Marking DDMsgFlagPrefix to true means ddMsg has been send successfully
+	t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
 
 	return nil
 }
@@ -268,6 +280,9 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 			log.Warn("ReleaseCollection failed", zap.String("error", err.Error()))
 		}
 	}()
+
+	// Marking DDMsgFlagPrefix to true means ddMsg has been send successfully
+	t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
 
 	return nil
 }
@@ -450,6 +465,9 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	// error doesn't matter here
 	_ = t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
+	// Marking DDMsgFlagPrefix to true means ddMsg has been send successfully
+	t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
+
 	return nil
 }
 
@@ -504,6 +522,10 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 
 	// error doesn't matter here
 	_ = t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
+
+	// Marking DDMsgFlagPrefix to true means ddMsg has been send successfully
+	t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
+
 	return nil
 }
 
