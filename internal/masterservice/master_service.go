@@ -13,6 +13,7 @@ package masterservice
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -138,6 +139,12 @@ type Core struct {
 	//isInit    atomic.Value
 
 	msFactory ms.Factory
+
+	session struct {
+		NodeName string
+		IP       string
+		LeaseID  clientv3.LeaseID
+	}
 }
 
 // --------------------- function --------------------------
@@ -788,6 +795,22 @@ func (c *Core) Init() error {
 		if err != nil {
 			return
 		}
+
+		ch, initError := c.RegisterService("masterservice", "localhost")
+		if err != nil {
+			return
+		}
+
+		go func() {
+			for {
+				select {
+				case _, ok := <-ch:
+					if ok {
+						log.Debug("lease continue")
+					}
+				}
+			}
+		}()
 
 		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{Params.EtcdAddress}, Params.KvRootPath, "gid"))
 		if initError = idAllocator.Initialize(); initError != nil {
@@ -1513,4 +1536,33 @@ func (c *Core) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*maste
 		ID:    start,
 		Count: in.Count,
 	}, nil
+}
+
+func (c *Core) RegisterService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+	respID, err := c.metaKV.Grant(5)
+	if err != nil {
+		fmt.Printf("grant error %s\n", err)
+		return nil, err
+	}
+	c.session.NodeName = nodeName
+	c.session.IP = ip
+	c.session.LeaseID = respID
+
+	sessionJson, err := json.Marshal(c.session)
+	if err != nil {
+		return nil, err
+	}
+
+	err = c.metaKV.SaveWithLease(fmt.Sprintf("/node/%s", nodeName), string(sessionJson), respID)
+	if err != nil {
+		fmt.Printf("put lease error %s\n", err)
+		return nil, err
+	}
+
+	ch, err := c.metaKV.KeepAlive(respID)
+	if err != nil {
+		fmt.Printf("keep alive error %s\n", err)
+		return nil, err
+	}
+	return ch, nil
 }

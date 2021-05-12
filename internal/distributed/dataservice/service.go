@@ -119,6 +119,7 @@ func (s *Server) init() error {
 		log.Error("dataService init error", zap.Error(err))
 		return err
 	}
+
 	return nil
 }
 

@@ -12,6 +12,7 @@ package dataservice
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -64,7 +65,12 @@ type Server struct {
 	masterClient     types.MasterService
 	ttMsgStream      msgstream.MsgStream
 	k2sMsgStream     msgstream.MsgStream
-	ddChannelMu      struct {
+	session          struct {
+		NodeName string
+		IP       string
+		LeaseID  clientv3.LeaseID
+	}
+	ddChannelMu struct {
 		sync.Mutex
 		name string
 	}
@@ -73,6 +79,8 @@ type Server struct {
 	msFactory            msgstream.Factory
 	ttBarrier            timesync.TimeTickBarrier
 	createDataNodeClient func(addr string) types.DataNode
+
+	sessions map[string]string
 }
 
 func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
@@ -104,6 +112,24 @@ func (s *Server) SetMasterClient(masterClient types.MasterService) {
 }
 
 func (s *Server) Init() error {
+	if err := s.initMeta(); err != nil {
+		return err
+	}
+
+	ch, err := s.RegisterService(fmt.Sprintf("dataservice-%d", Params.NodeID), "localhost:123456")
+	if err != nil {
+		return err
+	}
+	go func() {
+		for {
+			select {
+			case _, ok := <-ch:
+				if ok {
+					log.Debug("lease continue")
+				}
+			}
+		}
+	}()
 	return nil
 }
 
@@ -115,10 +141,6 @@ func (s *Server) Start() error {
 		"PulsarBufSize":  1024}
 	err = s.msFactory.SetParams(m)
 	if err != nil {
-		return err
-	}
-
-	if err = s.initMeta(); err != nil {
 		return err
 	}
 
@@ -837,4 +859,34 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.Infos = infos
 	return resp, nil
+}
+
+func (s *Server) RegisterService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+	respID, err := s.kvClient.Grant(5)
+	if err != nil {
+		fmt.Printf("grant error %s\n", err)
+		return nil, err
+	}
+	s.session.NodeName = nodeName
+	s.session.IP = ip
+	s.session.LeaseID = respID
+
+	sessionJson, err := json.Marshal(s.session)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.kvClient.SaveWithLease(fmt.Sprintf("/node/%s", nodeName), string(sessionJson), respID)
+	if err != nil {
+		fmt.Printf("put lease error %s\n", err)
+		return nil, err
+	}
+
+	ch, err := s.kvClient.KeepAlive(respID)
+	if err != nil {
+		fmt.Printf("keep alive error %s\n", err)
+		return nil, err
+	}
+	return ch, nil
+
 }

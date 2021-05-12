@@ -123,6 +123,14 @@ func (kv *EtcdKV) Save(key, value string) error {
 	return err
 }
 
+func (kv *EtcdKV) SaveWithLease(key, value string, id clientv3.LeaseID) error {
+	key = path.Join(kv.rootPath, key)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+	_, err := kv.client.Put(ctx, key, value, clientv3.WithLease(id))
+	return err
+}
+
 func (kv *EtcdKV) MultiSave(kvs map[string]string) error {
 	ops := make([]clientv3.Op, 0, len(kvs))
 	for key, value := range kvs {
@@ -187,13 +195,13 @@ func (kv *EtcdKV) MultiSaveAndRemove(saves map[string]string, removals []string)
 
 func (kv *EtcdKV) Watch(key string) clientv3.WatchChan {
 	key = path.Join(kv.rootPath, key)
-	rch := kv.client.Watch(context.Background(), key, clientv3.WithCreatedNotify())
+	rch := kv.client.Watch(context.Background(), key)
 	return rch
 }
 
 func (kv *EtcdKV) WatchWithPrefix(key string) clientv3.WatchChan {
 	key = path.Join(kv.rootPath, key)
-	rch := kv.client.Watch(context.Background(), key, clientv3.WithPrefix(), clientv3.WithCreatedNotify())
+	rch := kv.client.Watch(context.Background(), key, clientv3.WithPrefix())
 	return rch
 }
 
@@ -227,4 +235,17 @@ func (kv *EtcdKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals
 
 	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
 	return err
+}
+
+func (kv *EtcdKV) Grant(ttl int64) (id clientv3.LeaseID, err error) {
+	resp, err := kv.client.Grant(context.Background(), ttl)
+	return resp.ID, err
+}
+
+func (kv *EtcdKV) KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+	ch, err := kv.client.KeepAlive(context.Background(), id)
+	if err != nil {
+		return nil, err
+	}
+	return ch, nil
 }
