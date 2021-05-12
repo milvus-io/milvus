@@ -430,9 +430,6 @@ func TestMetaTable(t *testing.T) {
 		mockKV.multiSave = func(kvs map[string]string) error {
 			return nil
 		}
-		mockKV.multiRemoveWithPrefix = func(keys []string) error {
-			return fmt.Errorf("milti remove with prefix error")
-		}
 		mockKV.multiSaveAndRemoveWithPrefix = func(save map[string]string, keys []string) error {
 			return fmt.Errorf("milti save and remove with prefix error")
 		}
@@ -443,7 +440,7 @@ func TestMetaTable(t *testing.T) {
 		mt.indexID2Meta = make(map[int64]pb.IndexInfo)
 		err = mt.DeleteCollection(collInfo.ID)
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, "milti remove with prefix error")
+		assert.EqualError(t, err, "milti save and remove with prefix error")
 	})
 
 	t.Run("get collection failed", func(t *testing.T) {
