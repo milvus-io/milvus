@@ -13,6 +13,7 @@ package masterservice
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -24,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/masterpb"
@@ -403,6 +405,26 @@ func TestMasterService(t *testing.T) {
 		createMeta, err = core.MetaTable.GetCollectionByName("testColl-again")
 		assert.Nil(t, err)
 		assert.Equal(t, createMsg.CollectionID, createMeta.ID)
+
+		// check DDMsg type and info
+		msgType, err := core.MetaTable.client.Load(DDMsgTypePrefix)
+		assert.Nil(t, err)
+		assert.Equal(t, CreateCollectionMsgType, msgType)
+
+		var meta map[string]string
+		metaStr, err := core.MetaTable.client.Load(DDMsgPrefix)
+		assert.Nil(t, err)
+		err = json.Unmarshal([]byte(metaStr), &meta)
+		assert.Nil(t, err)
+
+		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, createMeta.ID)
+		v1 := meta[k1]
+		var collInfo etcdpb.CollectionInfo
+		err = proto.UnmarshalText(v1, &collInfo)
+		assert.Nil(t, err)
+		assert.Equal(t, createMeta.ID, collInfo.ID)
+		assert.Equal(t, createMeta.CreateTime, collInfo.CreateTime)
+		assert.Equal(t, createMeta.PartitionIDs[0], collInfo.PartitionIDs[0])
 	})
 
 	t.Run("has collection", func(t *testing.T) {
@@ -524,6 +546,34 @@ func TestMasterService(t *testing.T) {
 
 		assert.Equal(t, 1, len(pm.GetCollArray()))
 		assert.Equal(t, "testColl", pm.GetCollArray()[0])
+
+		// check DDMsg type and info
+		msgType, err := core.MetaTable.client.Load(DDMsgTypePrefix)
+		assert.Nil(t, err)
+		assert.Equal(t, CreatePartitionMsgType, msgType)
+
+		var meta map[string]string
+		metaStr, err := core.MetaTable.client.Load(DDMsgPrefix)
+		assert.Nil(t, err)
+		err = json.Unmarshal([]byte(metaStr), &meta)
+		assert.Nil(t, err)
+
+		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, collMeta.ID)
+		v1 := meta[k1]
+		var collInfo etcdpb.CollectionInfo
+		err = proto.UnmarshalText(v1, &collInfo)
+		assert.Nil(t, err)
+		assert.Equal(t, collMeta.ID, collInfo.ID)
+		assert.Equal(t, collMeta.CreateTime, collInfo.CreateTime)
+		assert.Equal(t, collMeta.PartitionIDs[0], collInfo.PartitionIDs[0])
+
+		k2 := fmt.Sprintf("%s/%d/%d", PartitionMetaPrefix, collMeta.ID, partMeta.PartitionID)
+		v2 := meta[k2]
+		var partInfo etcdpb.PartitionInfo
+		err = proto.UnmarshalText(v2, &partInfo)
+		assert.Nil(t, err)
+		assert.Equal(t, partMeta.PartitionName, partInfo.PartitionName)
+		assert.Equal(t, partMeta.PartitionID, partInfo.PartitionID)
 	})
 
 	t.Run("has partition", func(t *testing.T) {
@@ -913,6 +963,26 @@ func TestMasterService(t *testing.T) {
 
 		assert.Equal(t, 2, len(pm.GetCollArray()))
 		assert.Equal(t, "testColl", pm.GetCollArray()[1])
+
+		// check DDMsg type and info
+		msgType, err := core.MetaTable.client.Load(DDMsgTypePrefix)
+		assert.Nil(t, err)
+		assert.Equal(t, DropPartitionMsgType, msgType)
+
+		var meta map[string]string
+		metaStr, err := core.MetaTable.client.Load(DDMsgPrefix)
+		assert.Nil(t, err)
+		err = json.Unmarshal([]byte(metaStr), &meta)
+		assert.Nil(t, err)
+
+		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, collMeta.ID)
+		v1 := meta[k1]
+		var collInfo etcdpb.CollectionInfo
+		err = proto.UnmarshalText(v1, &collInfo)
+		assert.Nil(t, err)
+		assert.Equal(t, collMeta.ID, collInfo.ID)
+		assert.Equal(t, collMeta.CreateTime, collInfo.CreateTime)
+		assert.Equal(t, collMeta.PartitionIDs[0], collInfo.PartitionIDs[0])
 	})
 
 	t.Run("drop collection", func(t *testing.T) {
@@ -966,6 +1036,18 @@ func TestMasterService(t *testing.T) {
 		collArray = pm.GetCollArray()
 		assert.Equal(t, len(collArray), 3)
 		assert.Equal(t, collArray[2], "testColl")
+
+		// check DDMsg type and info
+		msgType, err := core.MetaTable.client.Load(DDMsgTypePrefix)
+		assert.Nil(t, err)
+		assert.Equal(t, DropCollectionMsgType, msgType)
+
+		var collID typeutil.UniqueID
+		collIDByte, err := core.MetaTable.client.Load(DDMsgPrefix)
+		assert.Nil(t, err)
+		err = json.Unmarshal([]byte(collIDByte), &collID)
+		assert.Nil(t, err)
+		assert.Equal(t, collMeta.ID, collID)
 	})
 
 	t.Run("context_cancel", func(t *testing.T) {
