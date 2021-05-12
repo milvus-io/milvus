@@ -28,7 +28,7 @@ if ! (helm uninstall -n "${MILVUS_HELM_NAMESPACE}" "${MILVUS_HELM_RELEASE_NAME}"
   echo "No existing Milvus cluster with name ${MILVUS_HELM_RELEASE_NAME}. Continue..."
 else
   MILVUS_LABELS="app.kubernetes.io/instance=${MILVUS_HELM_RELEASE_NAME}"
-  kubectl delete pvc -n "${MILVUS_HELM_NAMESPACE}" $(kubectl get pvc -n "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{range.items[*]}{.metadata.name} ')
+  kubectl delete pvc -n "${MILVUS_HELM_NAMESPACE}" $(kubectl get pvc -n "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{range.items[*]}{.metadata.name} ') || true
 fi
 
 if [[ "${TEST_ENV}" == "kind-metallb" ]]; then
