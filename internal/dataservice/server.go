@@ -79,8 +79,6 @@ type Server struct {
 	msFactory            msgstream.Factory
 	ttBarrier            timesync.TimeTickBarrier
 	createDataNodeClient func(addr string) types.DataNode
-
-	sessions map[string]string
 }
 
 func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
