@@ -31,4 +31,5 @@
 /internal/queryservice/  @xige-16 @neza2017 @czs007
 /internal/storage/       @neza2017 @sunby @czs007
 /internal/util/          @neza2017 @czs007 @xige-16 @scsven
-/tests/                  @sig-testing @yanliang567
+/tests/                  @del-zhenwu @yanliang567
+/tests20/                @del-zhenwu @yanliang567
