@@ -434,7 +434,7 @@ func TestMetaTable(t *testing.T) {
 			return fmt.Errorf("milti remove with prefix error")
 		}
 		mockKV.multiSaveAndRemoveWithPrefix = func(save map[string]string, keys []string) error {
-			return fmt.Errorf("milti remove with prefix error")
+			return fmt.Errorf("milti save and remove with prefix error")
 		}
 		collInfo.PartitionIDs = nil
 		err := mt.AddCollection(collInfo, partInfo, idxInfo)
