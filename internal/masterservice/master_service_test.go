@@ -406,18 +406,20 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, createMsg.CollectionID, createMeta.ID)
 
-		// check DDMsg type and info
-		msgType, err := core.MetaTable.client.Load(DDMsgTypePrefix)
+		// check DD operation info
+		ddOpStr, err := core.MetaTable.client.Load(DDMsgPrefix)
 		assert.Nil(t, err)
-		assert.Equal(t, CreateCollectionMsgType, msgType)
+		var ddOp DdOperation
+		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		assert.Nil(t, err)
+		assert.Equal(t, CreateCollectionMsgType, ddOp.Type)
+		assert.Equal(t, createMeta.ID, ddOp.CollectionID)
 
 		var meta map[string]string
-		metaStr, err := core.MetaTable.client.Load(DDMsgPrefix)
-		assert.Nil(t, err)
-		err = json.Unmarshal([]byte(metaStr), &meta)
+		err = json.Unmarshal([]byte(ddOp.Body), &meta)
 		assert.Nil(t, err)
 
-		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, createMeta.ID)
+		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, ddOp.CollectionID)
 		v1 := meta[k1]
 		var collInfo etcdpb.CollectionInfo
 		err = proto.UnmarshalText(v1, &collInfo)
@@ -547,18 +549,21 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, 1, len(pm.GetCollArray()))
 		assert.Equal(t, "testColl", pm.GetCollArray()[0])
 
-		// check DDMsg type and info
-		msgType, err := core.MetaTable.client.Load(DDMsgTypePrefix)
+		// check DD operation info
+		ddOpStr, err := core.MetaTable.client.Load(DDMsgPrefix)
 		assert.Nil(t, err)
-		assert.Equal(t, CreatePartitionMsgType, msgType)
+		var ddOp DdOperation
+		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		assert.Nil(t, err)
+		assert.Equal(t, CreatePartitionMsgType, ddOp.Type)
+		assert.Equal(t, collMeta.ID, ddOp.CollectionID)
+		assert.Equal(t, partMeta.PartitionID, ddOp.PartitionID)
 
 		var meta map[string]string
-		metaStr, err := core.MetaTable.client.Load(DDMsgPrefix)
-		assert.Nil(t, err)
-		err = json.Unmarshal([]byte(metaStr), &meta)
+		err = json.Unmarshal([]byte(ddOp.Body), &meta)
 		assert.Nil(t, err)
 
-		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, collMeta.ID)
+		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, ddOp.CollectionID)
 		v1 := meta[k1]
 		var collInfo etcdpb.CollectionInfo
 		err = proto.UnmarshalText(v1, &collInfo)
@@ -567,7 +572,7 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, collMeta.CreateTime, collInfo.CreateTime)
 		assert.Equal(t, collMeta.PartitionIDs[0], collInfo.PartitionIDs[0])
 
-		k2 := fmt.Sprintf("%s/%d/%d", PartitionMetaPrefix, collMeta.ID, partMeta.PartitionID)
+		k2 := fmt.Sprintf("%s/%d/%d", PartitionMetaPrefix, ddOp.CollectionID, ddOp.PartitionID)
 		v2 := meta[k2]
 		var partInfo etcdpb.PartitionInfo
 		err = proto.UnmarshalText(v2, &partInfo)
@@ -964,18 +969,21 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, 2, len(pm.GetCollArray()))
 		assert.Equal(t, "testColl", pm.GetCollArray()[1])
 
-		// check DDMsg type and info
-		msgType, err := core.MetaTable.client.Load(DDMsgTypePrefix)
+		// check DD operation info
+		ddOpStr, err := core.MetaTable.client.Load(DDMsgPrefix)
 		assert.Nil(t, err)
-		assert.Equal(t, DropPartitionMsgType, msgType)
+		var ddOp DdOperation
+		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		assert.Nil(t, err)
+		assert.Equal(t, DropPartitionMsgType, ddOp.Type)
+		assert.Equal(t, collMeta.ID, ddOp.CollectionID)
+		assert.Equal(t, dropPartID, ddOp.PartitionID)
 
 		var meta map[string]string
-		metaStr, err := core.MetaTable.client.Load(DDMsgPrefix)
-		assert.Nil(t, err)
-		err = json.Unmarshal([]byte(metaStr), &meta)
+		err = json.Unmarshal([]byte(ddOp.Body), &meta)
 		assert.Nil(t, err)
 
-		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, collMeta.ID)
+		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, ddOp.CollectionID)
 		v1 := meta[k1]
 		var collInfo etcdpb.CollectionInfo
 		err = proto.UnmarshalText(v1, &collInfo)
@@ -1037,15 +1045,17 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, len(collArray), 3)
 		assert.Equal(t, collArray[2], "testColl")
 
-		// check DDMsg type and info
-		msgType, err := core.MetaTable.client.Load(DDMsgTypePrefix)
+		// check DD operation info
+		ddOpStr, err := core.MetaTable.client.Load(DDMsgPrefix)
 		assert.Nil(t, err)
-		assert.Equal(t, DropCollectionMsgType, msgType)
+		var ddOp DdOperation
+		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		assert.Nil(t, err)
+		assert.Equal(t, DropCollectionMsgType, ddOp.Type)
+		assert.Equal(t, collMeta.ID, ddOp.CollectionID)
 
 		var collID typeutil.UniqueID
-		collIDByte, err := core.MetaTable.client.Load(DDMsgPrefix)
-		assert.Nil(t, err)
-		err = json.Unmarshal([]byte(collIDByte), &collID)
+		err = json.Unmarshal([]byte(ddOp.Body), &collID)
 		assert.Nil(t, err)
 		assert.Equal(t, collMeta.ID, collID)
 	})

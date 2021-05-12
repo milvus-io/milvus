@@ -51,6 +51,15 @@ import (
 
 // ------------------ struct -----------------------
 
+type DdOperation struct {
+	Base         *commonpb.MsgBase
+	Body         string
+	Type         string
+	CollectionID typeutil.UniqueID
+	PartitionID  typeutil.UniqueID
+	Send         bool
+}
+
 // master core
 type Core struct {
 	/*

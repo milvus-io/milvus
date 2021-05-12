@@ -270,14 +270,24 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 		meta[k] = v
 	}
 
-	// record ddmsg info and type
-	ddmsg, err := json.Marshal(meta)
+	// record dd operation
+	metaByte, err := json.Marshal(meta)
 	if err != nil {
 		return err
 	}
-	meta[DDMsgPrefix] = string(ddmsg)
-	meta[DDMsgTypePrefix] = CreateCollectionMsgType
-	meta[DDMsgFlagPrefix] = "false"
+	ddOp := DdOperation{
+		Base:         nil,
+		Body:         string(metaByte),
+		Type:         CreateCollectionMsgType,
+		CollectionID: coll.ID,
+		PartitionID:  0,
+		Send:         false,
+	}
+	ddOpByte, err := json.Marshal(ddOp)
+	if err != nil {
+		return err
+	}
+	meta[DDMsgPrefix] = string(ddOpByte)
 
 	err = mt.client.MultiSave(meta)
 	if err != nil {
@@ -333,15 +343,25 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID) error {
 		fmt.Sprintf("%s/%d", IndexMetaPrefix, collID),
 	}
 
-	// record ddmsg info and type
-	ddmsg, err := json.Marshal(collID)
+	// record dd operation
+	collIDByte, err := json.Marshal(collID)
+	if err != nil {
+		return err
+	}
+	ddOp := DdOperation{
+		Base:         nil,
+		Body:         string(collIDByte),
+		Type:         DropCollectionMsgType,
+		CollectionID: collID,
+		PartitionID:  0,
+		Send:         false,
+	}
+	ddOpByte, err := json.Marshal(ddOp)
 	if err != nil {
 		return err
 	}
 	saveMeta := map[string]string{
-		DDMsgPrefix:     string(ddmsg),
-		DDMsgTypePrefix: DropCollectionMsgType,
-		DDMsgFlagPrefix: "false",
+		DDMsgPrefix: string(ddOpByte),
 	}
 
 	err = mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys)
@@ -457,14 +477,24 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	v2 := proto.MarshalTextString(&partMeta)
 	meta := map[string]string{k1: v1, k2: v2}
 
-	// record ddmsg info and type
-	ddmsg, err := json.Marshal(meta)
+	// record dd operation
+	metaByte, err := json.Marshal(meta)
 	if err != nil {
 		return err
 	}
-	meta[DDMsgPrefix] = string(ddmsg)
-	meta[DDMsgTypePrefix] = CreatePartitionMsgType
-	meta[DDMsgFlagPrefix] = "false"
+	ddOp := DdOperation{
+		Base:         nil,
+		Body:         string(metaByte),
+		Type:         CreatePartitionMsgType,
+		CollectionID: collID,
+		PartitionID:  partitionID,
+		Send:         false,
+	}
+	ddOpByte, err := json.Marshal(ddOp)
+	if err != nil {
+		return err
+	}
+	meta[DDMsgPrefix] = string(ddOpByte)
 
 	err = mt.client.MultiSave(meta)
 	if err != nil {
@@ -540,7 +570,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 		}
 		delete(mt.segID2IndexMeta, segID)
 	}
-	collKV := map[string]string{path.Join(CollectionMetaPrefix, strconv.FormatInt(collID, 10)): proto.MarshalTextString(&collMeta)}
+	meta := map[string]string{path.Join(CollectionMetaPrefix, strconv.FormatInt(collID, 10)): proto.MarshalTextString(&collMeta)}
 	delMetaKeys := []string{
 		fmt.Sprintf("%s/%d/%d", PartitionMetaPrefix, collMeta.ID, partMeta.PartitionID),
 	}
@@ -549,16 +579,26 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 		delMetaKeys = append(delMetaKeys, k)
 	}
 
-	// record ddmsg info and type
-	ddmsg, err := json.Marshal(collKV)
+	// record dd operation
+	metaByte, err := json.Marshal(meta)
 	if err != nil {
 		return 0, err
 	}
-	collKV[DDMsgPrefix] = string(ddmsg)
-	collKV[DDMsgTypePrefix] = DropPartitionMsgType
-	collKV[DDMsgFlagPrefix] = "false"
+	ddOp := DdOperation{
+		Base:         nil,
+		Body:         string(metaByte),
+		Type:         DropPartitionMsgType,
+		CollectionID: collID,
+		PartitionID:  partMeta.PartitionID,
+		Send:         false,
+	}
+	ddOpByte, err := json.Marshal(ddOp)
+	if err != nil {
+		return 0, err
+	}
+	meta[DDMsgPrefix] = string(ddOpByte)
 
-	err = mt.client.MultiSaveAndRemoveWithPrefix(collKV, delMetaKeys)
+	err = mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetaKeys)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return 0, err
