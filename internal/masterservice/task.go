@@ -211,7 +211,10 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	}
 
 	// Marking DDMsgFlagPrefix to true means ddMsg has been send successfully
-	t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
+	err = t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -278,7 +281,10 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	}()
 
 	// Marking DDMsgFlagPrefix to true means ddMsg has been send successfully
-	t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
+	err = t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -462,7 +468,10 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	_ = t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
 	// Marking DDMsgFlagPrefix to true means ddMsg has been send successfully
-	t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
+	err = t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -520,7 +529,10 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	_ = t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
 	// Marking DDMsgFlagPrefix to true means ddMsg has been send successfully
-	t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
+	err = t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
