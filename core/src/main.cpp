@@ -29,8 +29,6 @@ print_help(const std::string& app_name) {
     std::cout << "  Options:" << std::endl;
     std::cout << "   -h --help                 Print this help." << std::endl;
     std::cout << "   -c --conf_file filename   Read configuration from the file." << std::endl;
-    std::cout << "   -d --daemon               Daemonize this application." << std::endl;
-    std::cout << "   -p --pid_file  filename   PID file used by daemonized app." << std::endl;
     std::cout << std::endl;
 }
 
@@ -102,16 +100,6 @@ main(int argc, char* argv[]) {
                 std::cout << "Loading configuration from: " << config_filename << std::endl;
                 break;
             }
-            case 'p': {
-                char* pid_filename_ptr = strdup(optarg);
-                pid_filename = pid_filename_ptr;
-                free(pid_filename_ptr);
-                std::cout << pid_filename << std::endl;
-                break;
-            }
-            case 'd':
-                start_daemonized = 1;
-                break;
             case 'h':
                 print_help(app_name);
                 return EXIT_SUCCESS;
@@ -132,7 +120,7 @@ main(int argc, char* argv[]) {
     signal(SIGUSR2, milvus::server::SignalUtil::HandleSignal);
     signal(SIGTERM, milvus::server::SignalUtil::HandleSignal);
 
-    server.Init(start_daemonized, pid_filename, config_filename);
+    server.Init(config_filename);
 
     s = server.Start();
     if (s.ok()) {
