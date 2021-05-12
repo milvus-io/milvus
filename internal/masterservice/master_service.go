@@ -13,6 +13,7 @@ package masterservice
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -405,6 +406,40 @@ func (c *Core) tsLoop() {
 		}
 	}
 }
+
+func (c *Core)SetDdOperationSend(t string) error {
+	// get DdOperation info
+	ddOpStr, err := c.MetaTable.client.Load(DDOperationPrefix)
+	if err != nil {
+		return err
+	}
+
+	// unpack DdOperation and set DdOperation.Send
+	var ddOp DdOperation
+	err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+	if err != nil {
+		return err
+	}
+	if t != ddOp.Type {
+		return fmt.Errorf("DdOperation type mis-match %s", ddOp.Type)
+	}
+	ddOp.Send = true
+
+	// pack DdOperation again
+	ddOpByte, err := json.Marshal(ddOp)
+	if err != nil {
+		return err
+	}
+
+	// save DdOperation info into etcd
+	err = c.MetaTable.client.Save(DDOperationPrefix, string(ddOpByte))
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (c *Core) setMsgStreams() error {
 	if Params.PulsarAddress == "" {
 		return fmt.Errorf("PulsarAddress is empty")

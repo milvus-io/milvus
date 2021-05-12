@@ -210,8 +210,8 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	// Marking DDMsgFlagPrefix to true means ddMsg has been send successfully
-	err = t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
+	// Update DDOperation in etcd
+	err = t.core.SetDdOperationSend(CreateCollectionDDType)
 	if err != nil {
 		return err
 	}
@@ -280,8 +280,8 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		}
 	}()
 
-	// Marking DDMsgFlagPrefix to true means ddMsg has been send successfully
-	err = t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
+	// Update DDOperation in etcd
+	err = t.core.SetDdOperationSend(DropCollectionDDType)
 	if err != nil {
 		return err
 	}
@@ -467,8 +467,8 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	// error doesn't matter here
 	_ = t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
-	// Marking DDMsgFlagPrefix to true means ddMsg has been send successfully
-	err = t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
+	// Update DDOperation in etcd
+	err = t.core.SetDdOperationSend(CreatePartitionDDType)
 	if err != nil {
 		return err
 	}
@@ -528,8 +528,8 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	// error doesn't matter here
 	_ = t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
-	// Marking DDMsgFlagPrefix to true means ddMsg has been send successfully
-	err = t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
+	// Update DDOperation in etcd
+	err = t.core.SetDdOperationSend(DropPartitionDDType)
 	if err != nil {
 		return err
 	}

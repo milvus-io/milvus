@@ -42,14 +42,12 @@ const (
 	SegmentIndexMetaPrefix = ComponentPrefix + "/segment-index"
 	IndexMetaPrefix        = ComponentPrefix + "/index"
 
-	DDMsgPrefix     = ComponentPrefix + "/dd-msg"
-	DDMsgTypePrefix = ComponentPrefix + "/dd-msg-type"
-	DDMsgFlagPrefix = ComponentPrefix + "/dd-msg-flag"
+	DDOperationPrefix = ComponentPrefix + "/dd-operation"
 
-	CreateCollectionMsgType = "CreateCollection"
-	DropCollectionMsgType   = "DropCollection"
-	CreatePartitionMsgType  = "CreatePartition"
-	DropPartitionMsgType    = "DropPartition"
+	CreateCollectionDDType = "CreateCollection"
+	DropCollectionDDType   = "DropCollection"
+	CreatePartitionDDType  = "CreatePartition"
+	DropPartitionDDType    = "DropPartition"
 )
 
 type metaTable struct {
@@ -278,7 +276,7 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 	ddOp := DdOperation{
 		Base:         nil,
 		Body:         string(metaByte),
-		Type:         CreateCollectionMsgType,
+		Type:         CreateCollectionDDType,
 		CollectionID: coll.ID,
 		PartitionID:  0,
 		Send:         false,
@@ -287,7 +285,7 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 	if err != nil {
 		return err
 	}
-	meta[DDMsgPrefix] = string(ddOpByte)
+	meta[DDOperationPrefix] = string(ddOpByte)
 
 	err = mt.client.MultiSave(meta)
 	if err != nil {
@@ -351,7 +349,7 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID) error {
 	ddOp := DdOperation{
 		Base:         nil,
 		Body:         string(collIDByte),
-		Type:         DropCollectionMsgType,
+		Type:         DropCollectionDDType,
 		CollectionID: collID,
 		PartitionID:  0,
 		Send:         false,
@@ -361,7 +359,7 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID) error {
 		return err
 	}
 	saveMeta := map[string]string{
-		DDMsgPrefix: string(ddOpByte),
+		DDOperationPrefix: string(ddOpByte),
 	}
 
 	err = mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys)
@@ -485,7 +483,7 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	ddOp := DdOperation{
 		Base:         nil,
 		Body:         string(metaByte),
-		Type:         CreatePartitionMsgType,
+		Type:         CreatePartitionDDType,
 		CollectionID: collID,
 		PartitionID:  partitionID,
 		Send:         false,
@@ -494,7 +492,7 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	if err != nil {
 		return err
 	}
-	meta[DDMsgPrefix] = string(ddOpByte)
+	meta[DDOperationPrefix] = string(ddOpByte)
 
 	err = mt.client.MultiSave(meta)
 	if err != nil {
@@ -587,7 +585,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	ddOp := DdOperation{
 		Base:         nil,
 		Body:         string(metaByte),
-		Type:         DropPartitionMsgType,
+		Type:         DropPartitionDDType,
 		CollectionID: collID,
 		PartitionID:  partMeta.PartitionID,
 		Send:         false,
@@ -596,7 +594,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	if err != nil {
 		return 0, err
 	}
-	meta[DDMsgPrefix] = string(ddOpByte)
+	meta[DDOperationPrefix] = string(ddOpByte)
 
 	err = mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetaKeys)
 	if err != nil {

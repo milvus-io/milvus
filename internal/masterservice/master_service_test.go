@@ -407,13 +407,14 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, createMsg.CollectionID, createMeta.ID)
 
 		// check DD operation info
-		ddOpStr, err := core.MetaTable.client.Load(DDMsgPrefix)
+		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
 		assert.Nil(t, err)
-		assert.Equal(t, CreateCollectionMsgType, ddOp.Type)
+		assert.Equal(t, CreateCollectionDDType, ddOp.Type)
 		assert.Equal(t, createMeta.ID, ddOp.CollectionID)
+		assert.Equal(t, true, ddOp.Send)
 
 		var meta map[string]string
 		err = json.Unmarshal([]byte(ddOp.Body), &meta)
@@ -550,14 +551,15 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, "testColl", pm.GetCollArray()[0])
 
 		// check DD operation info
-		ddOpStr, err := core.MetaTable.client.Load(DDMsgPrefix)
+		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
 		assert.Nil(t, err)
-		assert.Equal(t, CreatePartitionMsgType, ddOp.Type)
+		assert.Equal(t, CreatePartitionDDType, ddOp.Type)
 		assert.Equal(t, collMeta.ID, ddOp.CollectionID)
 		assert.Equal(t, partMeta.PartitionID, ddOp.PartitionID)
+		assert.Equal(t, true, ddOp.Send)
 
 		var meta map[string]string
 		err = json.Unmarshal([]byte(ddOp.Body), &meta)
@@ -970,14 +972,15 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, "testColl", pm.GetCollArray()[1])
 
 		// check DD operation info
-		ddOpStr, err := core.MetaTable.client.Load(DDMsgPrefix)
+		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
 		assert.Nil(t, err)
-		assert.Equal(t, DropPartitionMsgType, ddOp.Type)
+		assert.Equal(t, DropPartitionDDType, ddOp.Type)
 		assert.Equal(t, collMeta.ID, ddOp.CollectionID)
 		assert.Equal(t, dropPartID, ddOp.PartitionID)
+		assert.Equal(t, true, ddOp.Send)
 
 		var meta map[string]string
 		err = json.Unmarshal([]byte(ddOp.Body), &meta)
@@ -1046,13 +1049,14 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, collArray[2], "testColl")
 
 		// check DD operation info
-		ddOpStr, err := core.MetaTable.client.Load(DDMsgPrefix)
+		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
 		assert.Nil(t, err)
-		assert.Equal(t, DropCollectionMsgType, ddOp.Type)
+		assert.Equal(t, DropCollectionDDType, ddOp.Type)
 		assert.Equal(t, collMeta.ID, ddOp.CollectionID)
+		assert.Equal(t, true, ddOp.Send)
 
 		var collID typeutil.UniqueID
 		err = json.Unmarshal([]byte(ddOp.Body), &collID)
