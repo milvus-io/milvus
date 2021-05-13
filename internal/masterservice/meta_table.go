@@ -465,22 +465,25 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	return nil
 }
 
+func (mt *metaTable) getPartitionByName(collID typeutil.UniqueID, partitionName string) (pb.PartitionInfo, error) {
+	collMeta, ok := mt.collID2Meta[collID]
+	if !ok {
+		return pb.PartitionInfo{}, fmt.Errorf("can't find collection id = %d", collID)
+	}
+	for _, id := range collMeta.PartitionIDs {
+		partMeta, ok := mt.partitionID2Meta[id]
+		if ok && partMeta.PartitionName == partitionName {
+			return partMeta, nil
+		}
+	}
+	return pb.PartitionInfo{}, fmt.Errorf("partition %s does not exist", partitionName)
+}
+
 func (mt *metaTable) HasPartition(collID typeutil.UniqueID, partitionName string) bool {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
-	col, ok := mt.collID2Meta[collID]
-	if !ok {
-		return false
-	}
-	for _, partitionID := range col.PartitionIDs {
-		meta, ok := mt.partitionID2Meta[partitionID]
-		if ok {
-			if meta.PartitionName == partitionName {
-				return true
-			}
-		}
-	}
-	return false
+	_, err := mt.getPartitionByName(collID, partitionName)
+	return err == nil
 }
 
 func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName string) (typeutil.UniqueID, error) {
