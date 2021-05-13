@@ -12,7 +12,6 @@
 package masterservice
 
 import (
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -157,6 +156,11 @@ func TestMetaTable(t *testing.T) {
 	const segID2 = typeutil.UniqueID(101)
 	const fieldID = typeutil.UniqueID(110)
 
+	//var createCollectionReq = internalpb.CreateCollectionRequest{}
+	//var dropCollectionReq = internalpb.DropCollectionRequest{}
+	//var createPartitionReq = internalpb.CreatePartitionRequest{}
+	//var dropPartitionReq = internalpb.DropPartitionRequest{}
+
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
 	Params.Init()
@@ -268,63 +272,10 @@ func TestMetaTable(t *testing.T) {
 		field, err := mt.GetFieldSchema("testColl", "field110")
 		assert.Nil(t, err)
 		assert.Equal(t, field.FieldID, collInfo.Schema.Fields[0].FieldID)
-
-		// check DD operation info
-		ddOpStr, err := mt.client.Load(DDOperationPrefix)
-		assert.Nil(t, err)
-		var ddOp DdOperation
-		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
-		assert.Nil(t, err)
-		assert.Equal(t, CreateCollectionDDType, ddOp.Type)
-		assert.Equal(t, collMeta.ID, ddOp.CollectionID)
-
-		var meta map[string]string
-		err = json.Unmarshal([]byte(ddOp.Body), &meta)
-		assert.Nil(t, err)
-
-		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, ddOp.CollectionID)
-		v1 := meta[k1]
-		var collInfo pb.CollectionInfo
-		err = proto.UnmarshalText(v1, &collInfo)
-		assert.Nil(t, err)
-		assert.Equal(t, collMeta.ID, collInfo.ID)
-		assert.Equal(t, collMeta.CreateTime, collInfo.CreateTime)
-		assert.Equal(t, collMeta.PartitionIDs[0], collInfo.PartitionIDs[0])
 	})
 
 	t.Run("add partition", func(t *testing.T) {
 		assert.Nil(t, mt.AddPartition(collID, partInfo.PartitionName, partInfo.PartitionID))
-
-		// check DD operation info
-		ddOpStr, err := mt.client.Load(DDOperationPrefix)
-		assert.Nil(t, err)
-		var ddOp DdOperation
-		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
-		assert.Nil(t, err)
-		assert.Equal(t, CreatePartitionDDType, ddOp.Type)
-		assert.Equal(t, collInfo.ID, ddOp.CollectionID)
-		assert.Equal(t, partInfo.PartitionID, ddOp.PartitionID)
-
-		var meta map[string]string
-		err = json.Unmarshal([]byte(ddOp.Body), &meta)
-		assert.Nil(t, err)
-
-		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, ddOp.CollectionID)
-		v1 := meta[k1]
-		var collInfo pb.CollectionInfo
-		err = proto.UnmarshalText(v1, &collInfo)
-		assert.Nil(t, err)
-		assert.Equal(t, collInfo.ID, collInfo.ID)
-		assert.Equal(t, collInfo.CreateTime, collInfo.CreateTime)
-		assert.Equal(t, collInfo.PartitionIDs[0], collInfo.PartitionIDs[0])
-
-		k2 := fmt.Sprintf("%s/%d/%d", PartitionMetaPrefix, ddOp.CollectionID, ddOp.PartitionID)
-		v2 := meta[k2]
-		var partInfo pb.PartitionInfo
-		err = proto.UnmarshalText(v2, &partInfo)
-		assert.Nil(t, err)
-		assert.Equal(t, partInfo.PartitionName, partInfo.PartitionName)
-		assert.Equal(t, partInfo.PartitionID, partInfo.PartitionID)
 	})
 
 	t.Run("add segment", func(t *testing.T) {
@@ -477,29 +428,6 @@ func TestMetaTable(t *testing.T) {
 		id, err := mt.DeletePartition(collID, partInfo.PartitionName)
 		assert.Nil(t, err)
 		assert.Equal(t, partID, id)
-
-		// check DD operation info
-		ddOpStr, err := mt.client.Load(DDOperationPrefix)
-		assert.Nil(t, err)
-		var ddOp DdOperation
-		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
-		assert.Nil(t, err)
-		assert.Equal(t, DropPartitionDDType, ddOp.Type)
-		assert.Equal(t, collInfo.ID, ddOp.CollectionID)
-		assert.Equal(t, partInfo.PartitionID, ddOp.PartitionID)
-
-		var meta map[string]string
-		err = json.Unmarshal([]byte(ddOp.Body), &meta)
-		assert.Nil(t, err)
-
-		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, ddOp.CollectionID)
-		v1 := meta[k1]
-		var collInfo pb.CollectionInfo
-		err = proto.UnmarshalText(v1, &collInfo)
-		assert.Nil(t, err)
-		assert.Equal(t, collInfo.ID, collInfo.ID)
-		assert.Equal(t, collInfo.CreateTime, collInfo.CreateTime)
-		assert.Equal(t, collInfo.PartitionIDs[0], collInfo.PartitionIDs[0])
 	})
 
 	t.Run("drop collection", func(t *testing.T) {
@@ -507,15 +435,6 @@ func TestMetaTable(t *testing.T) {
 		assert.NotNil(t, err)
 		err = mt.DeleteCollection(collID)
 		assert.Nil(t, err)
-
-		// check DD operation info
-		ddOpStr, err := mt.client.Load(DDOperationPrefix)
-		assert.Nil(t, err)
-		var ddOp DdOperation
-		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
-		assert.Nil(t, err)
-		assert.Equal(t, DropCollectionDDType, ddOp.Type)
-		assert.Equal(t, collID, ddOp.CollectionID)
 	})
 
 	/////////////////////////// these tests should run at last, it only used to hit the error lines ////////////////////////

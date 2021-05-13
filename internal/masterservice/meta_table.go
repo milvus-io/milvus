@@ -479,6 +479,12 @@ func (mt *metaTable) getPartitionByName(collID typeutil.UniqueID, partitionName 
 	return pb.PartitionInfo{}, fmt.Errorf("partition %s does not exist", partitionName)
 }
 
+func (mt *metaTable) GetPartitionByName(collID typeutil.UniqueID, partitionName string) (pb.PartitionInfo, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	return mt.getPartitionByName(collID, partitionName)
+}
+
 func (mt *metaTable) HasPartition(collID typeutil.UniqueID, partitionName string) bool {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
