@@ -79,7 +79,7 @@ func (qs *QueryService) Init() error {
 		return err
 	}
 
-	ch, err := qs.RegisterService(fmt.Sprintf("queryservice-%d", Params.QueryServiceID), Params.Address)
+	ch, err := qs.registerService(fmt.Sprintf("queryservice-%d", Params.QueryServiceID), Params.Address)
 	if err != nil {
 		return err
 	}
@@ -143,7 +143,7 @@ func (qs *QueryService) SetDataService(dataService types.DataService) {
 	qs.dataServiceClient = dataService
 }
 
-func (qs *QueryService) RegisterService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+func (qs *QueryService) registerService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	respID, err := qs.etcdKV.Grant(5)
 	if err != nil {
 		fmt.Printf("grant error %s\n", err)

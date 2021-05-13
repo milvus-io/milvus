@@ -114,7 +114,7 @@ func (node *ProxyNode) Init() error {
 		return err
 	}
 
-	ch, err := node.RegisterService("proxynode", Params.NetworkAddress)
+	ch, err := node.registerService("proxynode", Params.NetworkAddress)
 	if err != nil {
 		return err
 	}
@@ -337,7 +337,7 @@ func (node *ProxyNode) SetQueryServiceClient(cli types.QueryService) {
 	node.queryService = cli
 }
 
-func (node *ProxyNode) RegisterService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+func (node *ProxyNode) registerService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	respID, err := node.etcdKV.Grant(5)
 	if err != nil {
 		fmt.Printf("grant error %s\n", err)

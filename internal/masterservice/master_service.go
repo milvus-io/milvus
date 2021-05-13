@@ -796,7 +796,7 @@ func (c *Core) Init() error {
 			return
 		}
 
-		ch, err := c.RegisterService("masterservice", "localhost")
+		ch, err := c.registerService("masterservice", "localhost")
 		if err != nil {
 			return
 		}
@@ -1535,7 +1535,7 @@ func (c *Core) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*maste
 	}, nil
 }
 
-func (c *Core) RegisterService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+func (c *Core) registerService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	respID, err := c.metaKV.Grant(5)
 	if err != nil {
 		fmt.Printf("grant error %s\n", err)

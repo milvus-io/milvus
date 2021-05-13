@@ -114,7 +114,7 @@ func (s *Server) Init() error {
 		return err
 	}
 
-	ch, err := s.RegisterService(fmt.Sprintf("dataservice-%d", Params.NodeID), "localhost:123456")
+	ch, err := s.registerService(fmt.Sprintf("dataservice-%d", Params.NodeID), "localhost:123456")
 	if err != nil {
 		return err
 	}
@@ -856,7 +856,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	return resp, nil
 }
 
-func (s *Server) RegisterService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+func (s *Server) registerService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	respID, err := s.kvClient.Grant(5)
 	if err != nil {
 		fmt.Printf("grant error %s\n", err)

@@ -102,7 +102,7 @@ func (i *IndexNode) Init() error {
 		return err
 	}
 
-	ch, err := i.RegisterService(fmt.Sprintf("indexnode-%d", Params.NodeID), Params.IP)
+	ch, err := i.registerService(fmt.Sprintf("indexnode-%d", Params.NodeID), Params.IP)
 	if err != nil {
 		return err
 	}
@@ -302,7 +302,7 @@ func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringR
 	}, nil
 }
 
-func (i *IndexNode) RegisterService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+func (i *IndexNode) registerService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	respID, err := i.etcdKV.Grant(5)
 	if err != nil {
 		fmt.Printf("grant error %s\n", err)

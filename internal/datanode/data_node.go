@@ -157,7 +157,7 @@ func (node *DataNode) Init() error {
 		return err
 	}
 
-	ch, err := node.RegisterService(fmt.Sprintf("datanode-%d", Params.NodeID), Params.IP)
+	ch, err := node.registerService(fmt.Sprintf("datanode-%d", Params.NodeID), Params.IP)
 	if err != nil {
 		return err
 	}
@@ -327,7 +327,7 @@ func (node *DataNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Strin
 	}, nil
 }
 
-func (node *DataNode) RegisterService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+func (node *DataNode) registerService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	respID, err := node.etcdKV.Grant(5)
 	if err != nil {
 		fmt.Printf("grant error %s\n", err)

@@ -113,7 +113,7 @@ func (i *IndexService) Init() error {
 		return err
 	}
 
-	ch, err := i.RegisterService("indexservice", Params.Address)
+	ch, err := i.registerService("indexservice", Params.Address)
 	if err != nil {
 		return err
 	}
@@ -438,7 +438,7 @@ func (i *IndexService) dropIndexLoop() {
 	}
 }
 
-func (i *IndexService) RegisterService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+func (i *IndexService) registerService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	respID, err := i.etcdKV.Grant(5)
 	if err != nil {
 		fmt.Printf("grant error %s\n", err)

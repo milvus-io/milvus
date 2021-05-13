@@ -123,6 +123,7 @@ func (kv *EtcdKV) Save(key, value string) error {
 	return err
 }
 
+// SaveWithLease is a function to put value in etcd with etcd lease options.
 func (kv *EtcdKV) SaveWithLease(key, value string, id clientv3.LeaseID) error {
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
@@ -237,11 +238,14 @@ func (kv *EtcdKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals
 	return err
 }
 
+// Grant creates a new lease implemented in etcd grant interface.
 func (kv *EtcdKV) Grant(ttl int64) (id clientv3.LeaseID, err error) {
 	resp, err := kv.client.Grant(context.Background(), ttl)
 	return resp.ID, err
 }
 
+// KeepAlive keeps the lease alive forever with leaseID.
+// Implemented in etcd interface.
 func (kv *EtcdKV) KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	ch, err := kv.client.KeepAlive(context.Background(), id)
 	if err != nil {

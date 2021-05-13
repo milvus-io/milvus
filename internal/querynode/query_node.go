@@ -140,7 +140,7 @@ func (node *QueryNode) Init() error {
 		return err
 	}
 
-	ch, err := node.RegisterService(fmt.Sprintf("querynode-%d", Params.QueryNodeID), Params.QueryNodeIP)
+	ch, err := node.registerService(fmt.Sprintf("querynode-%d", Params.QueryNodeID), Params.QueryNodeIP)
 	if err != nil {
 		return err
 	}
@@ -317,7 +317,7 @@ func (node *QueryNode) removeDataSyncService(collectionID UniqueID) {
 	delete(node.dataSyncServices, collectionID)
 }
 
-func (node *QueryNode) RegisterService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+func (node *QueryNode) registerService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	respID, err := node.etcdKV.Grant(5)
 	if err != nil {
 		fmt.Printf("grant error %s\n", err)
