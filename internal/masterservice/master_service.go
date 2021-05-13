@@ -23,12 +23,14 @@ import (
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	ms "github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/masterpb"
@@ -98,16 +100,16 @@ type Core struct {
 	SendTimeTick func(t typeutil.Timestamp) error
 
 	//setMsgStreams, send create collection into dd channel
-	DdCreateCollectionReq func(ctx context.Context, req *internalpb.CreateCollectionRequest) error
+	SendDdCreateCollectionReq func(ctx context.Context, req *internalpb.CreateCollectionRequest) error
 
 	//setMsgStreams, send drop collection into dd channel, and notify the proxy to delete this collection
-	DdDropCollectionReq func(ctx context.Context, req *internalpb.DropCollectionRequest) error
+	SendDdDropCollectionReq func(ctx context.Context, req *internalpb.DropCollectionRequest) error
 
 	//setMsgStreams, send create partition into dd channel
-	DdCreatePartitionReq func(ctx context.Context, req *internalpb.CreatePartitionRequest) error
+	SendDdCreatePartitionReq func(ctx context.Context, req *internalpb.CreatePartitionRequest) error
 
 	//setMsgStreams, send drop partition into dd channel
-	DdDropPartitionReq func(ctx context.Context, req *internalpb.DropPartitionRequest) error
+	SendDdDropPartitionReq func(ctx context.Context, req *internalpb.DropPartitionRequest) error
 
 	//setMsgStreams segment channel, receive segment info from data service, if master create segment
 	DataServiceSegmentChan chan *datapb.SegmentInfo
@@ -199,17 +201,17 @@ func (c *Core) checkInit() error {
 	if c.ddReqQueue == nil {
 		return fmt.Errorf("ddReqQueue is nil")
 	}
-	if c.DdCreateCollectionReq == nil {
-		return fmt.Errorf("DdCreateCollectionReq is nil")
+	if c.SendDdCreateCollectionReq == nil {
+		return fmt.Errorf("SendDdCreateCollectionReq is nil")
 	}
-	if c.DdDropCollectionReq == nil {
-		return fmt.Errorf("DdDropCollectionReq is nil")
+	if c.SendDdDropCollectionReq == nil {
+		return fmt.Errorf("SendDdDropCollectionReq is nil")
 	}
-	if c.DdCreatePartitionReq == nil {
-		return fmt.Errorf("DdCreatePartitionReq is nil")
+	if c.SendDdCreatePartitionReq == nil {
+		return fmt.Errorf("SendDdCreatePartitionReq is nil")
 	}
-	if c.DdDropPartitionReq == nil {
-		return fmt.Errorf("DdDropPartitionReq is nil")
+	if c.SendDdDropPartitionReq == nil {
+		return fmt.Errorf("SendDdDropPartitionReq is nil")
 	}
 	if c.DataServiceSegmentChan == nil {
 		return fmt.Errorf("DataServiceSegmentChan is nil")
@@ -407,7 +409,7 @@ func (c *Core) tsLoop() {
 	}
 }
 
-func (c *Core)SetDdOperationSend(t string) error {
+func (c *Core) setDdOperationSend(t string) error {
 	// get DdOperation info
 	ddOpStr, err := c.MetaTable.client.Load(DDOperationPrefix)
 	if err != nil {
@@ -513,7 +515,7 @@ func (c *Core) setMsgStreams() error {
 		return nil
 	}
 
-	c.DdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest) error {
+	c.SendDdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
 			Ctx:            ctx,
@@ -532,7 +534,7 @@ func (c *Core) setMsgStreams() error {
 		return nil
 	}
 
-	c.DdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest) error {
+	c.SendDdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
 			Ctx:            ctx,
@@ -551,7 +553,7 @@ func (c *Core) setMsgStreams() error {
 		return nil
 	}
 
-	c.DdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest) error {
+	c.SendDdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
 			Ctx:            ctx,
@@ -570,7 +572,7 @@ func (c *Core) setMsgStreams() error {
 		return nil
 	}
 
-	c.DdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest) error {
+	c.SendDdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
 			Ctx:            ctx,
@@ -865,6 +867,54 @@ func (c *Core) Init() error {
 	return initError
 }
 
+func (c *Core) reSendDdMsg() error {
+	ddOpStr, err := c.MetaTable.client.Load(DDOperationPrefix)
+	if err != nil {
+		return err
+	}
+	var ddOp DdOperation
+	err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+	if err != nil {
+		return err
+	}
+	if ddOp.Send {
+		log.Debug("DdOperation has already been send", zap.String("type", ddOp.Type))
+		return nil
+	}
+
+	var meta map[string]string
+	err = json.Unmarshal([]byte(ddOp.Body), &meta)
+	if err != nil {
+		return err
+	}
+
+	k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, ddOp.CollectionID)
+	v1 := meta[k1]
+	var collInfo etcdpb.CollectionInfo
+	err = proto.UnmarshalText(v1, &collInfo)
+	if err != nil {
+		return err
+	}
+
+	switch ddOp.Type {
+	case CreateCollectionDDType:
+	case DropCollectionDDType:
+	case CreatePartitionDDType:
+		k2 := fmt.Sprintf("%s/%d/%d", PartitionMetaPrefix, ddOp.CollectionID, ddOp.PartitionID)
+		v2 := meta[k2]
+		var partInfo etcdpb.PartitionInfo
+		err = proto.UnmarshalText(v2, &partInfo)
+		if err != nil {
+			return err
+		}
+	case DropPartitionDDType:
+	default:
+		return fmt.Errorf("Invalid DDOperation %s", ddOp.Type)
+	}
+
+	return nil
+}
+
 func (c *Core) Start() error {
 	if err := c.checkInit(); err != nil {
 		return err
@@ -875,6 +925,10 @@ func (c *Core) Start() error {
 	log.Debug("master", zap.String("time tick channel name", Params.TimeTickChannel))
 
 	c.startOnce.Do(func() {
+		//err := c.reSendDdMsg()
+		//if err != nil {
+		//	return err
+		//}
 		go c.startDdScheduler()
 		go c.startTimeTickLoop()
 		go c.startDataServiceSegmentLoop()

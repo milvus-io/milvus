@@ -94,28 +94,28 @@ func TestGrpcService(t *testing.T) {
 		return nil
 	}
 	createCollectionArray := make([]*internalpb.CreateCollectionRequest, 0, 16)
-	core.DdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest) error {
+	core.SendDdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest) error {
 		t.Logf("Create Colllection %s", req.CollectionName)
 		createCollectionArray = append(createCollectionArray, req)
 		return nil
 	}
 
 	dropCollectionArray := make([]*internalpb.DropCollectionRequest, 0, 16)
-	core.DdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest) error {
+	core.SendDdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest) error {
 		t.Logf("Drop Collection %s", req.CollectionName)
 		dropCollectionArray = append(dropCollectionArray, req)
 		return nil
 	}
 
 	createPartitionArray := make([]*internalpb.CreatePartitionRequest, 0, 16)
-	core.DdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest) error {
+	core.SendDdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest) error {
 		t.Logf("Create Partition %s", req.PartitionName)
 		createPartitionArray = append(createPartitionArray, req)
 		return nil
 	}
 
 	dropPartitionArray := make([]*internalpb.DropPartitionRequest, 0, 16)
-	core.DdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest) error {
+	core.SendDdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest) error {
 		t.Logf("Drop Partition %s", req.PartitionName)
 		dropPartitionArray = append(dropPartitionArray, req)
 		return nil

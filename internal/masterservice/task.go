@@ -185,7 +185,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		Schema:         schemaBytes,
 	}
 
-	err = t.core.DdCreateCollectionReq(ctx, &ddReq)
+	err = t.core.SendDdCreateCollectionReq(ctx, &ddReq)
 	if err != nil {
 		return err
 	}
@@ -205,13 +205,13 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		PartitionID:    partMeta.PartitionID,
 	}
 
-	err = t.core.DdCreatePartitionReq(ctx, &ddPart)
+	err = t.core.SendDdCreatePartitionReq(ctx, &ddPart)
 	if err != nil {
 		return err
 	}
 
 	// Update DDOperation in etcd
-	err = t.core.SetDdOperationSend(CreateCollectionDDType)
+	err = t.core.setDdOperationSend(CreateCollectionDDType)
 	if err != nil {
 		return err
 	}
@@ -268,7 +268,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		CollectionID:   collMeta.ID,
 	}
 
-	err = t.core.DdDropCollectionReq(ctx, &ddReq)
+	err = t.core.SendDdDropCollectionReq(ctx, &ddReq)
 	if err != nil {
 		return err
 	}
@@ -281,7 +281,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	}()
 
 	// Update DDOperation in etcd
-	err = t.core.SetDdOperationSend(DropCollectionDDType)
+	err = t.core.setDdOperationSend(DropCollectionDDType)
 	if err != nil {
 		return err
 	}
@@ -459,7 +459,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		PartitionID:    partitionID,
 	}
 
-	err = t.core.DdCreatePartitionReq(ctx, &ddReq)
+	err = t.core.SendDdCreatePartitionReq(ctx, &ddReq)
 	if err != nil {
 		return err
 	}
@@ -468,7 +468,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	_ = t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
 	// Update DDOperation in etcd
-	err = t.core.SetDdOperationSend(CreatePartitionDDType)
+	err = t.core.setDdOperationSend(CreatePartitionDDType)
 	if err != nil {
 		return err
 	}
@@ -520,7 +520,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		PartitionID:    partID,
 	}
 
-	err = t.core.DdDropPartitionReq(ctx, &ddReq)
+	err = t.core.SendDdDropPartitionReq(ctx, &ddReq)
 	if err != nil {
 		return err
 	}
@@ -529,7 +529,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	_ = t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
 	// Update DDOperation in etcd
-	err = t.core.SetDdOperationSend(DropPartitionDDType)
+	err = t.core.setDdOperationSend(DropPartitionDDType)
 	if err != nil {
 		return err
 	}
