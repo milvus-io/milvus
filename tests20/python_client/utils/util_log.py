@@ -1,9 +1,9 @@
 import logging
 
-from config.my_info import my_info
+from config.test_info import test_info
 
 
-class MyLog:
+class TestLog:
     def __init__(self, logger, log_file, log_err):
         self.logger = logger
         self.log_file = log_file
@@ -30,6 +30,6 @@ class MyLog:
 
 
 """All modules share this unified log"""
-test_log = my_info.test_log
-test_err = my_info.test_err
-my_log = MyLog('refactor_test', test_log, test_err).log
+log_info = test_info.log_info
+log_err = test_info.log_err
+test_log = TestLog('refactor_test', log_info, log_err).log

@@ -3,6 +3,7 @@ import pytest
 
 def pytest_addoption(parser):
     parser.addoption("--ip", action="store", default="localhost", help="service's ip")
+    parser.addoption("--host", action="store", default="localhost", help="service's ip")
     parser.addoption("--service", action="store", default="", help="service address")
     parser.addoption("--port", action="store", default=19530, help="service's port")
     parser.addoption("--http_port", action="store", default=19121, help="http's port")
@@ -14,6 +15,11 @@ def pytest_addoption(parser):
 @pytest.fixture
 def ip(request):
     return request.config.getoption("--ip")
+
+
+@pytest.fixture
+def host(request):
+    return request.config.getoption("--host")
 
 
 @pytest.fixture
