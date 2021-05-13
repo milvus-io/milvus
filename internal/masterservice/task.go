@@ -433,11 +433,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	partitionID, _, err := t.core.idAllocator(1)
-	if err != nil {
-		return err
-	}
-	err = t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partitionID)
+	partID, _, err := t.core.idAllocator(1)
 	if err != nil {
 		return err
 	}
@@ -449,7 +445,12 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		PartitionName:  t.Req.PartitionName,
 		DbID:           0, // todo, not used
 		CollectionID:   collMeta.ID,
-		PartitionID:    partitionID,
+		PartitionID:    partID,
+	}
+
+	err = t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, &ddReq)
+	if err != nil {
+		return err
 	}
 
 	err = t.core.SendDdCreatePartitionReq(ctx, &ddReq)

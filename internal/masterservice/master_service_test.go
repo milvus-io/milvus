@@ -561,26 +561,11 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, partMeta.PartitionID, ddOp.PartitionID)
 		assert.Equal(t, true, ddOp.Send)
 
-		var meta map[string]string
-		err = json.Unmarshal([]byte(ddOp.Body), &meta)
+		var ddReq = internalpb.CreatePartitionRequest{}
+		err = json.Unmarshal([]byte(ddOp.Body), &ddReq)
 		assert.Nil(t, err)
-
-		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, ddOp.CollectionID)
-		v1 := meta[k1]
-		var collInfo etcdpb.CollectionInfo
-		err = proto.UnmarshalText(v1, &collInfo)
-		assert.Nil(t, err)
-		assert.Equal(t, collMeta.ID, collInfo.ID)
-		assert.Equal(t, collMeta.CreateTime, collInfo.CreateTime)
-		assert.Equal(t, collMeta.PartitionIDs[0], collInfo.PartitionIDs[0])
-
-		k2 := fmt.Sprintf("%s/%d/%d", PartitionMetaPrefix, ddOp.CollectionID, ddOp.PartitionID)
-		v2 := meta[k2]
-		var partInfo etcdpb.PartitionInfo
-		err = proto.UnmarshalText(v2, &partInfo)
-		assert.Nil(t, err)
-		assert.Equal(t, partMeta.PartitionName, partInfo.PartitionName)
-		assert.Equal(t, partMeta.PartitionID, partInfo.PartitionID)
+		assert.Equal(t, collMeta.ID, ddReq.CollectionID)
+		assert.Equal(t, partMeta.PartitionID, ddReq.PartitionID)
 	})
 
 	t.Run("has partition", func(t *testing.T) {

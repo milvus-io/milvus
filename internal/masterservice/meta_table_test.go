@@ -159,7 +159,7 @@ func TestMetaTable(t *testing.T) {
 
 	//var createCollectionReq = internalpb.CreateCollectionRequest{}
 	var dropCollectionReq = internalpb.DropCollectionRequest{}
-	//var createPartitionReq = internalpb.CreatePartitionRequest{}
+	var createPartitionReq = internalpb.CreatePartitionRequest{}
 	var dropPartitionReq = internalpb.DropPartitionRequest{}
 
 	rand.Seed(time.Now().UnixNano())
@@ -276,7 +276,7 @@ func TestMetaTable(t *testing.T) {
 	})
 
 	t.Run("add partition", func(t *testing.T) {
-		assert.Nil(t, mt.AddPartition(collID, partInfo.PartitionName, partInfo.PartitionID))
+		assert.Nil(t, mt.AddPartition(collID, partInfo.PartitionName, partInfo.PartitionID, &createPartitionReq))
 	})
 
 	t.Run("add segment", func(t *testing.T) {
@@ -517,14 +517,14 @@ func TestMetaTable(t *testing.T) {
 		err = mt.AddCollection(collInfo, partInfo, idxInfo)
 		assert.Nil(t, err)
 
-		err = mt.AddPartition(2, "no-part", 22)
+		err = mt.AddPartition(2, "no-part", 22, &createPartitionReq)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "can't find collection. id = 2")
 
 		coll := mt.collID2Meta[collInfo.ID]
 		coll.PartitionIDs = make([]int64, Params.MaxPartitionNum)
 		mt.collID2Meta[coll.ID] = coll
-		err = mt.AddPartition(coll.ID, "no-part", 22)
+		err = mt.AddPartition(coll.ID, "no-part", 22, &createPartitionReq)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("maximum partition's number should be limit to %d", Params.MaxPartitionNum))
 
@@ -534,7 +534,7 @@ func TestMetaTable(t *testing.T) {
 		mockKV.multiSave = func(kvs map[string]string) error {
 			return fmt.Errorf("multi save error")
 		}
-		err = mt.AddPartition(coll.ID, "no-part", 22)
+		err = mt.AddPartition(coll.ID, "no-part", 22, &createPartitionReq)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "multi save error")
 
@@ -544,11 +544,11 @@ func TestMetaTable(t *testing.T) {
 		collInfo.PartitionIDs = nil
 		err = mt.AddCollection(collInfo, partInfo, idxInfo)
 		assert.Nil(t, err)
-		err = mt.AddPartition(coll.ID, partInfo.PartitionName, 22)
+		err = mt.AddPartition(coll.ID, partInfo.PartitionName, 22, &createPartitionReq)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("partition name = %s already exists", partInfo.PartitionName))
 
-		err = mt.AddPartition(coll.ID, "no-part", partInfo.PartitionID)
+		err = mt.AddPartition(coll.ID, "no-part", partInfo.PartitionID, &createPartitionReq)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("partition id = %d already exists", partInfo.PartitionID))
 	})

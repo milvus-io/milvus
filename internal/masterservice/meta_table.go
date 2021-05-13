@@ -410,7 +410,7 @@ func (mt *metaTable) ListCollections() ([]string, error) {
 	return colls, nil
 }
 
-func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID) error {
+func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, req *internalpb.CreatePartitionRequest) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	coll, ok := mt.collID2Meta[collID]
@@ -453,7 +453,7 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
-	ddOpStr, err := EncodeDdOperation(meta, CreatePartitionDDType, collID, partitionID)
+	ddOpStr, err := EncodeDdOperation(*req, CreatePartitionDDType, collID, partitionID)
 	if err != nil {
 		return err
 	}
