@@ -121,7 +121,7 @@ func (s *Server) Init() error {
 	go func() {
 		for {
 			for range ch {
-				log.Debug("lease continue")
+				//TODO process lesase response
 			}
 		}
 	}()

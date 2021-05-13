@@ -79,14 +79,14 @@ func (qs *QueryService) Init() error {
 		return err
 	}
 
-	ch, err := qs.RegisterService(fmt.Sprintf("querynode-%d", Params.QueryServiceID), Params.Address)
+	ch, err := qs.RegisterService(fmt.Sprintf("queryservice-%d", Params.QueryServiceID), Params.Address)
 	if err != nil {
 		return err
 	}
 	go func() {
 		for {
 			for range ch {
-				log.Debug("lease continue")
+				//TODO process lesase response
 			}
 		}
 	}()
