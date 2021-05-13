@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
@@ -159,7 +160,7 @@ func TestMetaTable(t *testing.T) {
 	//var createCollectionReq = internalpb.CreateCollectionRequest{}
 	//var dropCollectionReq = internalpb.DropCollectionRequest{}
 	//var createPartitionReq = internalpb.CreatePartitionRequest{}
-	//var dropPartitionReq = internalpb.DropPartitionRequest{}
+	var dropPartitionReq = internalpb.DropPartitionRequest{}
 
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
@@ -425,7 +426,7 @@ func TestMetaTable(t *testing.T) {
 	})
 
 	t.Run("drop partition", func(t *testing.T) {
-		id, err := mt.DeletePartition(collID, partInfo.PartitionName)
+		id, err := mt.DeletePartition(collID, partInfo.PartitionName, &dropPartitionReq)
 		assert.Nil(t, err)
 		assert.Equal(t, partID, id)
 	})
@@ -587,11 +588,11 @@ func TestMetaTable(t *testing.T) {
 		err = mt.AddCollection(collInfo, partInfo, idxInfo)
 		assert.Nil(t, err)
 
-		_, err = mt.DeletePartition(collInfo.ID, Params.DefaultPartitionName)
+		_, err = mt.DeletePartition(collInfo.ID, Params.DefaultPartitionName, &dropPartitionReq)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "default partition cannot be deleted")
 
-		_, err = mt.DeletePartition(collInfo.ID, "abc")
+		_, err = mt.DeletePartition(collInfo.ID, "abc", &dropPartitionReq)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "partition abc does not exist")
 
@@ -601,12 +602,12 @@ func TestMetaTable(t *testing.T) {
 		mockKV.multiSaveAndRemoveWithPrefix = func(saves map[string]string, removals []string) error {
 			return fmt.Errorf("multi save and remove with prefix error")
 		}
-		_, err = mt.DeletePartition(collInfo.ID, pm.PartitionName)
+		_, err = mt.DeletePartition(collInfo.ID, pm.PartitionName, &dropPartitionReq)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "multi save and remove with prefix error")
 
 		mt.collID2Meta = make(map[int64]pb.CollectionInfo)
-		_, err = mt.DeletePartition(collInfo.ID, "abc")
+		_, err = mt.DeletePartition(collInfo.ID, "abc", &dropPartitionReq)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("can't find collection id = %d", collInfo.ID))
 

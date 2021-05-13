@@ -501,11 +501,11 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DropPartition {
 		return fmt.Errorf("drop partition, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	coll, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
+	collInfo, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
 	if err != nil {
 		return err
 	}
-	partID, err := t.core.MetaTable.DeletePartition(coll.ID, t.Req.PartitionName)
+	partInfo, err := t.core.MetaTable.GetPartitionByName(collInfo.ID, t.Req.PartitionName)
 	if err != nil {
 		return err
 	}
@@ -516,8 +516,13 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		CollectionName: t.Req.CollectionName,
 		PartitionName:  t.Req.PartitionName,
 		DbID:           0, //todo,not used
-		CollectionID:   coll.ID,
-		PartitionID:    partID,
+		CollectionID:   collInfo.ID,
+		PartitionID:    partInfo.PartitionID,
+	}
+
+	_, err = t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, &ddReq)
+	if err != nil {
+		return err
 	}
 
 	err = t.core.SendDdDropPartitionReq(ctx, &ddReq)
@@ -529,12 +534,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	_ = t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
 	// Update DDOperation in etcd
-	err = t.core.setDdOperationSend(DropPartitionDDType)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return t.core.setDdOperationSend(DropPartitionDDType)
 }
 
 type HasPartitionReqTask struct {

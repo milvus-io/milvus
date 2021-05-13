@@ -982,18 +982,11 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, dropPartID, ddOp.PartitionID)
 		assert.Equal(t, true, ddOp.Send)
 
-		var meta map[string]string
-		err = json.Unmarshal([]byte(ddOp.Body), &meta)
+		var ddReq = internalpb.DropPartitionRequest{}
+		err = json.Unmarshal([]byte(ddOp.Body), &ddReq)
 		assert.Nil(t, err)
-
-		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, ddOp.CollectionID)
-		v1 := meta[k1]
-		var collInfo etcdpb.CollectionInfo
-		err = proto.UnmarshalText(v1, &collInfo)
-		assert.Nil(t, err)
-		assert.Equal(t, collMeta.ID, collInfo.ID)
-		assert.Equal(t, collMeta.CreateTime, collInfo.CreateTime)
-		assert.Equal(t, collMeta.PartitionIDs[0], collInfo.PartitionIDs[0])
+		assert.Equal(t, collMeta.ID, ddReq.CollectionID)
+		assert.Equal(t, dropPartID, ddReq.PartitionID)
 	})
 
 	t.Run("drop collection", func(t *testing.T) {

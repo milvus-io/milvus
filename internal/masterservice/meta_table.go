@@ -12,6 +12,7 @@
 package masterservice
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"strconv"
@@ -20,16 +21,14 @@ import (
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
-	"errors"
-
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 const (
@@ -492,7 +491,7 @@ func (mt *metaTable) HasPartition(collID typeutil.UniqueID, partitionName string
 	return err == nil
 }
 
-func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName string) (typeutil.UniqueID, error) {
+func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, req *internalpb.DropPartitionRequest) (typeutil.UniqueID, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -549,8 +548,9 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 		delMetaKeys = append(delMetaKeys, k)
 	}
 
-	// record dd operation
-	ddOpStr, err := EncodeDdOperation(meta, DropPartitionDDType, collID, partMeta.PartitionID)
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddOpStr, err := EncodeDdOperation(*req, DropPartitionDDType, collID, partMeta.PartitionID)
 	if err != nil {
 		return 0, err
 	}
