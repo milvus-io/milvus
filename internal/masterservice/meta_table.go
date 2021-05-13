@@ -230,6 +230,26 @@ func (mt *metaTable) AddProxy(po *pb.ProxyMeta) error {
 	return nil
 }
 
+func (mt *metaTable) encodeDdOperation(v interface{}, ddType string, collID typeutil.UniqueID, partID typeutil.UniqueID) (string, error){
+	vByte, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	ddOp := DdOperation{
+		Base:         nil,
+		Body:         string(vByte),
+		Type:         ddType,
+		CollectionID: collID,
+		PartitionID:  partID,
+		Send:         false,
+	}
+	ddOpByte, err := json.Marshal(ddOp)
+	if err != nil {
+		return "", err
+	}
+	return string(ddOpByte), nil
+}
+
 func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo, idx []*pb.IndexInfo) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
@@ -269,23 +289,11 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 	}
 
 	// record dd operation
-	metaByte, err := json.Marshal(meta)
+	ddOpStr, err := mt.encodeDdOperation(meta, CreateCollectionDDType, coll.ID, 0)
 	if err != nil {
 		return err
 	}
-	ddOp := DdOperation{
-		Base:         nil,
-		Body:         string(metaByte),
-		Type:         CreateCollectionDDType,
-		CollectionID: coll.ID,
-		PartitionID:  0,
-		Send:         false,
-	}
-	ddOpByte, err := json.Marshal(ddOp)
-	if err != nil {
-		return err
-	}
-	meta[DDOperationPrefix] = string(ddOpByte)
+	meta[DDOperationPrefix] = ddOpStr
 
 	err = mt.client.MultiSave(meta)
 	if err != nil {
@@ -342,24 +350,12 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID) error {
 	}
 
 	// record dd operation
-	collIDByte, err := json.Marshal(collID)
-	if err != nil {
-		return err
-	}
-	ddOp := DdOperation{
-		Base:         nil,
-		Body:         string(collIDByte),
-		Type:         DropCollectionDDType,
-		CollectionID: collID,
-		PartitionID:  0,
-		Send:         false,
-	}
-	ddOpByte, err := json.Marshal(ddOp)
+	ddOpStr, err := mt.encodeDdOperation(collID, DropCollectionDDType, collID, 0)
 	if err != nil {
 		return err
 	}
 	saveMeta := map[string]string{
-		DDOperationPrefix: string(ddOpByte),
+		DDOperationPrefix: ddOpStr,
 	}
 
 	err = mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys)
@@ -476,23 +472,11 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	meta := map[string]string{k1: v1, k2: v2}
 
 	// record dd operation
-	metaByte, err := json.Marshal(meta)
+	ddOpStr, err := mt.encodeDdOperation(meta, CreatePartitionDDType, collID, partitionID)
 	if err != nil {
 		return err
 	}
-	ddOp := DdOperation{
-		Base:         nil,
-		Body:         string(metaByte),
-		Type:         CreatePartitionDDType,
-		CollectionID: collID,
-		PartitionID:  partitionID,
-		Send:         false,
-	}
-	ddOpByte, err := json.Marshal(ddOp)
-	if err != nil {
-		return err
-	}
-	meta[DDOperationPrefix] = string(ddOpByte)
+	meta[DDOperationPrefix] = ddOpStr
 
 	err = mt.client.MultiSave(meta)
 	if err != nil {
@@ -578,23 +562,11 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	}
 
 	// record dd operation
-	metaByte, err := json.Marshal(meta)
+	ddOpStr, err := mt.encodeDdOperation(meta, DropPartitionDDType, collID, partMeta.PartitionID)
 	if err != nil {
 		return 0, err
 	}
-	ddOp := DdOperation{
-		Base:         nil,
-		Body:         string(metaByte),
-		Type:         DropPartitionDDType,
-		CollectionID: collID,
-		PartitionID:  partMeta.PartitionID,
-		Send:         false,
-	}
-	ddOpByte, err := json.Marshal(ddOp)
-	if err != nil {
-		return 0, err
-	}
-	meta[DDOperationPrefix] = string(ddOpByte)
+	meta[DDOperationPrefix] = ddOpStr
 
 	err = mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetaKeys)
 	if err != nil {
