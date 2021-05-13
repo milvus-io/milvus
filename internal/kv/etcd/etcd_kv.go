@@ -196,13 +196,13 @@ func (kv *EtcdKV) MultiSaveAndRemove(saves map[string]string, removals []string)
 
 func (kv *EtcdKV) Watch(key string) clientv3.WatchChan {
 	key = path.Join(kv.rootPath, key)
-	rch := kv.client.Watch(context.Background(), key)
+	rch := kv.client.Watch(context.Background(), key, clientv3.WithCreatedNotify())
 	return rch
 }
 
 func (kv *EtcdKV) WatchWithPrefix(key string) clientv3.WatchChan {
 	key = path.Join(kv.rootPath, key)
-	rch := kv.client.Watch(context.Background(), key, clientv3.WithPrefix())
+	rch := kv.client.Watch(context.Background(), key, clientv3.WithPrefix(), clientv3.WithCreatedNotify())
 	return rch
 }
 
