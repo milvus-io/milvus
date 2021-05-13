@@ -158,7 +158,7 @@ func TestMetaTable(t *testing.T) {
 	const fieldID = typeutil.UniqueID(110)
 
 	//var createCollectionReq = internalpb.CreateCollectionRequest{}
-	//var dropCollectionReq = internalpb.DropCollectionRequest{}
+	var dropCollectionReq = internalpb.DropCollectionRequest{}
 	//var createPartitionReq = internalpb.CreatePartitionRequest{}
 	var dropPartitionReq = internalpb.DropPartitionRequest{}
 
@@ -432,9 +432,9 @@ func TestMetaTable(t *testing.T) {
 	})
 
 	t.Run("drop collection", func(t *testing.T) {
-		err := mt.DeleteCollection(collIDInvalid)
+		err := mt.DeleteCollection(collIDInvalid, &dropCollectionReq)
 		assert.NotNil(t, err)
-		err = mt.DeleteCollection(collID)
+		err = mt.DeleteCollection(collID, &dropCollectionReq)
 		assert.Nil(t, err)
 	})
 
@@ -467,7 +467,7 @@ func TestMetaTable(t *testing.T) {
 		assert.Nil(t, err)
 		mt.partitionID2Meta = make(map[typeutil.UniqueID]pb.PartitionInfo)
 		mt.indexID2Meta = make(map[int64]pb.IndexInfo)
-		err = mt.DeleteCollection(collInfo.ID)
+		err = mt.DeleteCollection(collInfo.ID, &dropCollectionReq)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "milti save and remove with prefix error")
 	})

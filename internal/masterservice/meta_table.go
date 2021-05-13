@@ -266,7 +266,8 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 		meta[k] = v
 	}
 
-	// record dd operation
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
 	ddOpStr, err := EncodeDdOperation(meta, CreateCollectionDDType, coll.ID, 0)
 	if err != nil {
 		return err
@@ -282,7 +283,7 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 	return nil
 }
 
-func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID) error {
+func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, req *internalpb.DropCollectionRequest) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -327,8 +328,9 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID) error {
 		fmt.Sprintf("%s/%d", IndexMetaPrefix, collID),
 	}
 
-	// record dd operation
-	ddOpStr, err := EncodeDdOperation(collID, DropCollectionDDType, collID, 0)
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddOpStr, err := EncodeDdOperation(*req, DropCollectionDDType, collID, 0)
 	if err != nil {
 		return err
 	}
@@ -449,7 +451,8 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	v2 := proto.MarshalTextString(&partMeta)
 	meta := map[string]string{k1: v1, k2: v2}
 
-	// record dd operation
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
 	ddOpStr, err := EncodeDdOperation(meta, CreatePartitionDDType, collID, partitionID)
 	if err != nil {
 		return err

@@ -1051,10 +1051,10 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, collMeta.ID, ddOp.CollectionID)
 		assert.Equal(t, true, ddOp.Send)
 
-		var collID typeutil.UniqueID
-		err = json.Unmarshal([]byte(ddOp.Body), &collID)
+		var ddReq = internalpb.DropCollectionRequest{}
+		err = json.Unmarshal([]byte(ddOp.Body), &ddReq)
 		assert.Nil(t, err)
-		assert.Equal(t, collMeta.ID, collID)
+		assert.Equal(t, collMeta.ID, ddReq.CollectionID)
 	})
 
 	t.Run("context_cancel", func(t *testing.T) {

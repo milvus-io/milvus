@@ -249,16 +249,6 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName); err != nil {
-		return err
-	}
-
-	err = t.core.MetaTable.DeleteCollection(collMeta.ID)
-	if err != nil {
-		return err
-	}
-
-	//data service should drop segments , which belong to this collection, from the segment manager
 
 	ddReq := internalpb.DropCollectionRequest{
 		Base:           t.Req.Base,
@@ -266,6 +256,11 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		CollectionName: t.Req.CollectionName,
 		DbID:           0, //not used
 		CollectionID:   collMeta.ID,
+	}
+
+	err = t.core.MetaTable.DeleteCollection(collMeta.ID, &ddReq)
+	if err != nil {
+		return err
 	}
 
 	err = t.core.SendDdDropCollectionReq(ctx, &ddReq)
@@ -280,13 +275,11 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		}
 	}()
 
-	// Update DDOperation in etcd
-	err = t.core.setDdOperationSend(DropCollectionDDType)
-	if err != nil {
-		return err
-	}
+	// error doesn't matter here
+	t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
-	return nil
+	// Update DDOperation in etcd
+	return t.core.setDdOperationSend(DropCollectionDDType)
 }
 
 type HasCollectionReqTask struct {
@@ -465,15 +458,10 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	}
 
 	// error doesn't matter here
-	_ = t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
+	t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
 	// Update DDOperation in etcd
-	err = t.core.setDdOperationSend(CreatePartitionDDType)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return t.core.setDdOperationSend(CreatePartitionDDType)
 }
 
 type DropPartitionReqTask struct {
@@ -531,7 +519,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	}
 
 	// error doesn't matter here
-	_ = t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
+	t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
 	// Update DDOperation in etcd
 	return t.core.setDdOperationSend(DropPartitionDDType)
