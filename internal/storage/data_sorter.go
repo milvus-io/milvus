@@ -12,8 +12,6 @@
 package storage
 
 import (
-	"fmt"
-
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
@@ -76,8 +74,8 @@ func (ds *DataSorter) Swap(i, j int) {
 				data[i], data[i+dim] = data[i+dim], data[i]
 			}
 		default:
-			fmt.Errorf("undefined data type %d", field.DataType)
-			return
+			errMsg := "undefined data type " + string(field.DataType)
+			panic(errMsg)
 		}
 	}
 }
