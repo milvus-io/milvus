@@ -120,11 +120,8 @@ func (s *Server) Init() error {
 	}
 	go func() {
 		for {
-			select {
-			case _, ok := <-ch:
-				if ok {
-					log.Debug("lease continue")
-				}
+			for range ch {
+				log.Debug("lease continue")
 			}
 		}
 	}()
@@ -869,12 +866,12 @@ func (s *Server) RegisterService(nodeName string, ip string) (<-chan *clientv3.L
 	s.session.IP = ip
 	s.session.LeaseID = respID
 
-	sessionJson, err := json.Marshal(s.session)
+	sessionJSON, err := json.Marshal(s.session)
 	if err != nil {
 		return nil, err
 	}
 
-	err = s.kvClient.SaveWithLease(fmt.Sprintf("/node/%s", nodeName), string(sessionJson), respID)
+	err = s.kvClient.SaveWithLease(fmt.Sprintf("/node/%s", nodeName), string(sessionJSON), respID)
 	if err != nil {
 		fmt.Printf("put lease error %s\n", err)
 		return nil, err

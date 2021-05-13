@@ -120,11 +120,8 @@ func (node *ProxyNode) Init() error {
 	}
 	go func() {
 		for {
-			select {
-			case _, ok := <-ch:
-				if ok {
-					log.Debug("lease continue")
-				}
+			for range ch {
+				log.Debug("lease continue")
 			}
 		}
 	}()
@@ -350,12 +347,12 @@ func (node *ProxyNode) RegisterService(nodeName string, ip string) (<-chan *clie
 	node.session.IP = ip
 	node.session.LeaseID = respID
 
-	sessionJson, err := json.Marshal(node.session)
+	sessionJSON, err := json.Marshal(node.session)
 	if err != nil {
 		return nil, err
 	}
 
-	err = node.etcdKV.SaveWithLease(fmt.Sprintf("/node/%s", nodeName), string(sessionJson), respID)
+	err = node.etcdKV.SaveWithLease(fmt.Sprintf("/node/%s", nodeName), string(sessionJSON), respID)
 	if err != nil {
 		fmt.Printf("put lease error %s\n", err)
 		return nil, err

@@ -119,11 +119,8 @@ func (i *IndexService) Init() error {
 	}
 	go func() {
 		for {
-			select {
-			case _, ok := <-ch:
-				if ok {
-					log.Debug("lease continue")
-				}
+			for range ch {
+				log.Debug("lease continue")
 			}
 		}
 	}()
@@ -451,12 +448,12 @@ func (i *IndexService) RegisterService(nodeName string, ip string) (<-chan *clie
 	i.session.IP = ip
 	i.session.LeaseID = respID
 
-	sessionJson, err := json.Marshal(i.session)
+	sessionJSON, err := json.Marshal(i.session)
 	if err != nil {
 		return nil, err
 	}
 
-	err = i.etcdKV.SaveWithLease(fmt.Sprintf("/node/%s", nodeName), string(sessionJson), respID)
+	err = i.etcdKV.SaveWithLease(fmt.Sprintf("/node/%s", nodeName), string(sessionJSON), respID)
 	if err != nil {
 		fmt.Printf("put lease error %s\n", err)
 		return nil, err

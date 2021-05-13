@@ -796,18 +796,15 @@ func (c *Core) Init() error {
 			return
 		}
 
-		ch, initError := c.RegisterService("masterservice", "localhost")
+		ch, err := c.RegisterService("masterservice", "localhost")
 		if err != nil {
 			return
 		}
 
 		go func() {
 			for {
-				select {
-				case _, ok := <-ch:
-					if ok {
-						log.Debug("lease continue")
-					}
+				for range ch {
+					log.Debug("lease continue")
 				}
 			}
 		}()
@@ -1548,12 +1545,12 @@ func (c *Core) RegisterService(nodeName string, ip string) (<-chan *clientv3.Lea
 	c.session.IP = ip
 	c.session.LeaseID = respID
 
-	sessionJson, err := json.Marshal(c.session)
+	sessionJSON, err := json.Marshal(c.session)
 	if err != nil {
 		return nil, err
 	}
 
-	err = c.metaKV.SaveWithLease(fmt.Sprintf("/node/%s", nodeName), string(sessionJson), respID)
+	err = c.metaKV.SaveWithLease(fmt.Sprintf("/node/%s", nodeName), string(sessionJSON), respID)
 	if err != nil {
 		fmt.Printf("put lease error %s\n", err)
 		return nil, err
