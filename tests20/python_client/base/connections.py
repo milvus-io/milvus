@@ -6,7 +6,7 @@ import sys
 sys.path.append("..")
 from check.param_check import *
 from check.func_check import *
-from utils.util_log import my_log as log
+from utils.util_log import test_log as log
 from common.common_type import *
 
 

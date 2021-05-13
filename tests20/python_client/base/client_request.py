@@ -2,13 +2,13 @@ import pytest
 import sys
 
 sys.path.append("..")
-from base.Connections import ApiConnections
-from base.Collection import ApiCollection
-from base.Partition import ApiPartition
-from base.Index import ApiIndex
-from base.Utility import ApiUtility
+from base.connections import ApiConnections
+from base.collection import ApiCollection
+from base.partition import ApiPartition
+from base.index import ApiIndex
+from base.utility import ApiUtility
 
-from config.my_info import my_info
+from config.test_info import test_info
 from common.common_func import *
 from check.func_check import *
 
@@ -40,12 +40,12 @@ def func_req(_list, **kwargs):
 
 class ParamInfo:
     def __init__(self):
-        self.param_ip = ""
+        self.param_host = ""
         self.param_port = ""
         self.param_handler = ""
 
-    def prepare_param_info(self, ip, port, handler):
-        self.param_ip = ip
+    def prepare_param_info(self, host, port, handler):
+        self.param_host = host
         self.param_port = port
         self.param_handler = handler
 
@@ -82,13 +82,13 @@ class Base:
     @pytest.fixture(scope="module", autouse=True)
     def initialize_env(self, request):
         """ clean log before testing """
-        modify_file([my_info.test_log, my_info.test_err])
+        modify_file([test_info.log_info, test_info.log_err])
         log.info("[initialize_milvus] Log cleaned up, start testing...")
 
-        ip = request.config.getoption("--ip")
+        host = request.config.getoption("--host")
         port = request.config.getoption("--port")
         handler = request.config.getoption("--handler")
-        param_info.prepare_param_info(ip, port, handler)
+        param_info.prepare_param_info(host, port, handler)
 
 
 class ApiReq(Base):
@@ -97,9 +97,14 @@ class ApiReq(Base):
     Public methods that can be used to add cases.
     """
 
-    def func(self):
-        pass
+    def _connect(self):
+        """ Testing func """
+        self.connection.configure(check_res='', default={"host": "192.168.1.240", "port": "19530"})
+        res = self.connection.get_connection(alias='default')
+        return res
 
-    @staticmethod
-    def func_2():
-        pass
+    def _collection(self, name=get_unique_str, data=None, schema=None, check_res=None, **kwargs):
+        """ Testing func """
+        self._connect()
+        res = self.collection.collection_init(name=name, data=data, schema=schema, check_res=check_res, **kwargs)
+        return res
