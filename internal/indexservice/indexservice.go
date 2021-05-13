@@ -93,10 +93,9 @@ func NewIndexService(ctx context.Context) (*IndexService, error) {
 }
 
 func (i *IndexService) Init() error {
-	etcdAddress := Params.EtcdAddress
-	log.Debug("indexservice", zap.String("etcd address", etcdAddress))
+	log.Debug("indexservice", zap.String("etcd address", Params.EtcdAddress))
 	connectEtcdFn := func() error {
-		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
+		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
 		if err != nil {
 			return err
 		}
@@ -127,7 +126,7 @@ func (i *IndexService) Init() error {
 
 	//init idAllocator
 	kvRootPath := Params.KvRootPath
-	i.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{etcdAddress}, kvRootPath, "index_gid"))
+	i.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{Params.EtcdAddress}, kvRootPath, "index_gid"))
 	if err := i.idAllocator.Initialize(); err != nil {
 		return err
 	}

@@ -42,6 +42,9 @@ type ParamTable struct {
 
 	MasterAddress string
 
+	EtcdAddress  string
+	MetaRootPath string
+
 	MinIOAddress         string
 	MinIOAccessKeyID     string
 	MinIOSecretAccessKey string
@@ -68,6 +71,8 @@ func (pt *ParamTable) initParams() {
 	pt.initMinIOSecretAccessKey()
 	pt.initMinIOUseSSL()
 	pt.initMinioBucketName()
+	pt.initEtcdAddress()
+	pt.initMetaRootPath()
 }
 
 func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb.InitParams) error {
@@ -152,6 +157,26 @@ func (pt *ParamTable) initMinIOUseSSL() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func (pt *ParamTable) initEtcdAddress() {
+	addr, err := pt.Load("_EtcdAddress")
+	if err != nil {
+		panic(err)
+	}
+	pt.EtcdAddress = addr
+}
+
+func (pt *ParamTable) initMetaRootPath() {
+	rootPath, err := pt.Load("etcd.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	subPath, err := pt.Load("etcd.metaSubPath")
+	if err != nil {
+		panic(err)
+	}
+	pt.MetaRootPath = path.Join(rootPath, subPath)
 }
 
 func (pt *ParamTable) initMinioBucketName() {

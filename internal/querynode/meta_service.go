@@ -42,7 +42,7 @@ type metaService struct {
 }
 
 func newMetaService(ctx context.Context, replica ReplicaInterface) *metaService {
-	ETCDAddr := Params.ETCDAddress
+	ETCDAddr := Params.EtcdAddress
 	MetaRootPath := Params.MetaRootPath
 	var cli *clientv3.Client
 	var err error

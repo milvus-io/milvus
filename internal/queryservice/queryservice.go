@@ -67,11 +67,11 @@ type QueryService struct {
 
 func (qs *QueryService) Init() error {
 	connectEtcdFn := func() error {
-		etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{"localhost:2379"}, DialTimeout: 5 * time.Second})
+		etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second})
 		if err != nil {
 			return err
 		}
-		qs.etcdKV = etcdkv.NewEtcdKV(etcdCli, "by-dev/meta")
+		qs.etcdKV = etcdkv.NewEtcdKV(etcdCli, Params.MetaRootPath)
 		return nil
 	}
 	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)

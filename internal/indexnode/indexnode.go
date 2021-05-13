@@ -90,11 +90,11 @@ func (i *IndexNode) Init() error {
 	ctx := context.Background()
 
 	connectEtcdFn := func() error {
-		etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{"localhost:2379"}, DialTimeout: 5 * time.Second})
+		etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second})
 		if err != nil {
 			return err
 		}
-		i.etcdKV = etcdkv.NewEtcdKV(etcdCli, "by-dev/meta/")
+		i.etcdKV = etcdkv.NewEtcdKV(etcdCli, Params.MetaRootPath)
 		return nil
 	}
 	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)

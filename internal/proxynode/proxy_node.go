@@ -99,11 +99,11 @@ func (node *ProxyNode) Init() error {
 	ctx := context.Background()
 
 	connectEtcdFn := func() error {
-		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{"localhost:2379"}})
+		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
 		if err != nil {
 			return err
 		}
-		node.etcdKV = etcdkv.NewEtcdKV(etcdClient, "by-dev/meta")
+		node.etcdKV = etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
 		if err != nil {
 			return err
 		}
