@@ -12,6 +12,7 @@
 package masterservice
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -65,4 +66,23 @@ func GetFieldSchemaByIndexID(coll *etcdpb.CollectionInfo, idxID typeutil.UniqueI
 		return nil, fmt.Errorf("index id = %d is not attach to any field", idxID)
 	}
 	return GetFieldSchemaByID(coll, fieldID)
+}
+
+func EncodeDdOperation(v interface{}, ddType string, collID typeutil.UniqueID, partID typeutil.UniqueID) (string, error) {
+	vByte, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	ddOp := DdOperation{
+		Base:         nil,
+		Body:         string(vByte),
+		Type:         ddType,
+		CollectionID: collID,
+		PartitionID:  partID,
+	}
+	ddOpByte, err := json.Marshal(ddOp)
+	if err != nil {
+		return "", err
+	}
+	return string(ddOpByte), nil
 }

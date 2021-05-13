@@ -12,7 +12,6 @@
 package masterservice
 
 import (
-	"encoding/json"
 	"fmt"
 	"path"
 	"strconv"
@@ -230,25 +229,6 @@ func (mt *metaTable) AddProxy(po *pb.ProxyMeta) error {
 	return nil
 }
 
-func (mt *metaTable) encodeDdOperation(v interface{}, ddType string, collID typeutil.UniqueID, partID typeutil.UniqueID) (string, error) {
-	vByte, err := json.Marshal(v)
-	if err != nil {
-		return "", err
-	}
-	ddOp := DdOperation{
-		Base:         nil,
-		Body:         string(vByte),
-		Type:         ddType,
-		CollectionID: collID,
-		PartitionID:  partID,
-	}
-	ddOpByte, err := json.Marshal(ddOp)
-	if err != nil {
-		return "", err
-	}
-	return string(ddOpByte), nil
-}
-
 func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo, idx []*pb.IndexInfo) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
@@ -288,7 +268,7 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 	}
 
 	// record dd operation
-	ddOpStr, err := mt.encodeDdOperation(meta, CreateCollectionDDType, coll.ID, 0)
+	ddOpStr, err := EncodeDdOperation(meta, CreateCollectionDDType, coll.ID, 0)
 	if err != nil {
 		return err
 	}
@@ -349,7 +329,7 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID) error {
 	}
 
 	// record dd operation
-	ddOpStr, err := mt.encodeDdOperation(collID, DropCollectionDDType, collID, 0)
+	ddOpStr, err := EncodeDdOperation(collID, DropCollectionDDType, collID, 0)
 	if err != nil {
 		return err
 	}
@@ -471,7 +451,7 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	meta := map[string]string{k1: v1, k2: v2}
 
 	// record dd operation
-	ddOpStr, err := mt.encodeDdOperation(meta, CreatePartitionDDType, collID, partitionID)
+	ddOpStr, err := EncodeDdOperation(meta, CreatePartitionDDType, collID, partitionID)
 	if err != nil {
 		return err
 	}
@@ -561,7 +541,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	}
 
 	// record dd operation
-	ddOpStr, err := mt.encodeDdOperation(meta, DropPartitionDDType, collID, partMeta.PartitionID)
+	ddOpStr, err := EncodeDdOperation(meta, DropPartitionDDType, collID, partMeta.PartitionID)
 	if err != nil {
 		return 0, err
 	}
