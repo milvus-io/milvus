@@ -12,6 +12,7 @@
 package masterservice
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -147,6 +148,15 @@ func Test_MockKV(t *testing.T) {
 }
 
 func TestMetaTable(t *testing.T) {
+	const collID = typeutil.UniqueID(1)
+	const collIDInvalid = typeutil.UniqueID(2)
+	const partIDDefault = typeutil.UniqueID(10)
+	const partID = typeutil.UniqueID(20)
+	const partIDInvalid = typeutil.UniqueID(21)
+	const segID = typeutil.UniqueID(100)
+	const segID2 = typeutil.UniqueID(101)
+	const fieldID = typeutil.UniqueID(110)
+
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
 	Params.Init()
@@ -161,14 +171,14 @@ func TestMetaTable(t *testing.T) {
 	assert.Nil(t, err)
 
 	collInfo := &pb.CollectionInfo{
-		ID: 1,
+		ID: collID,
 		Schema: &schemapb.CollectionSchema{
 			Name:        "testColl",
 			Description: "",
 			AutoID:      false,
 			Fields: []*schemapb.FieldSchema{
 				{
-					FieldID:      110,
+					FieldID:      fieldID,
 					Name:         "field110",
 					IsPrimaryKey: false,
 					Description:  "",
@@ -198,16 +208,21 @@ func TestMetaTable(t *testing.T) {
 		},
 		FieldIndexes: []*pb.FieldIndexInfo{
 			{
-				FiledID: 110,
+				FiledID: fieldID,
 				IndexID: 10000,
 			},
 		},
 		CreateTime:   0,
 		PartitionIDs: nil,
 	}
+	partInfoDefault := &pb.PartitionInfo{
+		PartitionName: "_default",
+		PartitionID:   partIDDefault,
+		SegmentIDs:    nil,
+	}
 	partInfo := &pb.PartitionInfo{
 		PartitionName: "testPart",
-		PartitionID:   10,
+		PartitionID:   partID,
 		SegmentIDs:    nil,
 	}
 	idxInfo := []*pb.IndexInfo{
@@ -228,55 +243,112 @@ func TestMetaTable(t *testing.T) {
 	}
 
 	t.Run("add collection", func(t *testing.T) {
-		partInfo.SegmentIDs = []int64{100}
-		err = mt.AddCollection(collInfo, partInfo, idxInfo)
+		partInfoDefault.SegmentIDs = []int64{segID}
+		err = mt.AddCollection(collInfo, partInfoDefault, idxInfo)
 		assert.NotNil(t, err)
-		partInfo.SegmentIDs = []int64{}
+		partInfoDefault.SegmentIDs = []int64{}
 
-		collInfo.PartitionIDs = []int64{100}
-		err = mt.AddCollection(collInfo, partInfo, idxInfo)
+		collInfo.PartitionIDs = []int64{segID}
+		err = mt.AddCollection(collInfo, partInfoDefault, idxInfo)
 		assert.NotNil(t, err)
 		collInfo.PartitionIDs = []int64{}
 
-		err = mt.AddCollection(collInfo, partInfo, nil)
+		err = mt.AddCollection(collInfo, partInfoDefault, nil)
 		assert.NotNil(t, err)
 
-		err = mt.AddCollection(collInfo, partInfo, idxInfo)
+		err = mt.AddCollection(collInfo, partInfoDefault, idxInfo)
 		assert.Nil(t, err)
 
 		collMeta, err := mt.GetCollectionByName("testColl")
 		assert.Nil(t, err)
-		assert.Equal(t, collMeta.PartitionIDs[0], int64(10))
+		assert.Equal(t, collMeta.PartitionIDs[0], partIDDefault)
 		assert.Equal(t, len(collMeta.PartitionIDs), 1)
 		assert.True(t, mt.HasCollection(collInfo.ID))
 
 		field, err := mt.GetFieldSchema("testColl", "field110")
 		assert.Nil(t, err)
 		assert.Equal(t, field.FieldID, collInfo.Schema.Fields[0].FieldID)
+
+		// check DD operation info
+		ddOpStr, err := mt.client.Load(DDOperationPrefix)
+		assert.Nil(t, err)
+		var ddOp DdOperation
+		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		assert.Nil(t, err)
+		assert.Equal(t, CreateCollectionDDType, ddOp.Type)
+		assert.Equal(t, collMeta.ID, ddOp.CollectionID)
+
+		var meta map[string]string
+		err = json.Unmarshal([]byte(ddOp.Body), &meta)
+		assert.Nil(t, err)
+
+		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, ddOp.CollectionID)
+		v1 := meta[k1]
+		var collInfo pb.CollectionInfo
+		err = proto.UnmarshalText(v1, &collInfo)
+		assert.Nil(t, err)
+		assert.Equal(t, collMeta.ID, collInfo.ID)
+		assert.Equal(t, collMeta.CreateTime, collInfo.CreateTime)
+		assert.Equal(t, collMeta.PartitionIDs[0], collInfo.PartitionIDs[0])
+	})
+
+	t.Run("add partition", func(t *testing.T) {
+		assert.Nil(t, mt.AddPartition(collID, partInfo.PartitionName, partInfo.PartitionID))
+
+		// check DD operation info
+		ddOpStr, err := mt.client.Load(DDOperationPrefix)
+		assert.Nil(t, err)
+		var ddOp DdOperation
+		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		assert.Nil(t, err)
+		assert.Equal(t, CreatePartitionDDType, ddOp.Type)
+		assert.Equal(t, collInfo.ID, ddOp.CollectionID)
+		assert.Equal(t, partInfo.PartitionID, ddOp.PartitionID)
+
+		var meta map[string]string
+		err = json.Unmarshal([]byte(ddOp.Body), &meta)
+		assert.Nil(t, err)
+
+		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, ddOp.CollectionID)
+		v1 := meta[k1]
+		var collInfo pb.CollectionInfo
+		err = proto.UnmarshalText(v1, &collInfo)
+		assert.Nil(t, err)
+		assert.Equal(t, collInfo.ID, collInfo.ID)
+		assert.Equal(t, collInfo.CreateTime, collInfo.CreateTime)
+		assert.Equal(t, collInfo.PartitionIDs[0], collInfo.PartitionIDs[0])
+
+		k2 := fmt.Sprintf("%s/%d/%d", PartitionMetaPrefix, ddOp.CollectionID, ddOp.PartitionID)
+		v2 := meta[k2]
+		var partInfo pb.PartitionInfo
+		err = proto.UnmarshalText(v2, &partInfo)
+		assert.Nil(t, err)
+		assert.Equal(t, partInfo.PartitionName, partInfo.PartitionName)
+		assert.Equal(t, partInfo.PartitionID, partInfo.PartitionID)
 	})
 
 	t.Run("add segment", func(t *testing.T) {
 		seg := &datapb.SegmentInfo{
-			ID:           100,
-			CollectionID: 1,
-			PartitionID:  10,
+			ID:           segID,
+			CollectionID: collID,
+			PartitionID:  partID,
 		}
 		assert.Nil(t, mt.AddSegment(seg))
 		assert.NotNil(t, mt.AddSegment(seg))
-		seg.ID = 101
-		seg.CollectionID = 2
+		seg.ID = segID2
+		seg.CollectionID = collIDInvalid
 		assert.NotNil(t, mt.AddSegment(seg))
-		seg.CollectionID = 1
-		seg.PartitionID = 11
+		seg.CollectionID = collID
+		seg.PartitionID = partIDInvalid
 		assert.NotNil(t, mt.AddSegment(seg))
-		seg.PartitionID = 10
+		seg.PartitionID = partID
 		assert.Nil(t, mt.AddSegment(seg))
 	})
 
 	t.Run("add segment index", func(t *testing.T) {
 		seg := pb.SegmentIndexInfo{
-			SegmentID: 100,
-			FieldID:   110,
+			SegmentID: segID,
+			FieldID:   fieldID,
 			IndexID:   10000,
 			BuildID:   201,
 		}
@@ -318,7 +390,7 @@ func TestMetaTable(t *testing.T) {
 		seg, field, err := mt.GetNotIndexedSegments("testColl", "field110", idxInfo)
 		assert.Nil(t, err)
 		assert.Equal(t, len(seg), 1)
-		assert.Equal(t, seg[0], int64(101))
+		assert.Equal(t, seg[0], segID2)
 		assert.True(t, EqualKeyPairArray(field.TypeParams, tparams))
 
 		params = []*commonpb.KeyValuePair{
@@ -334,8 +406,8 @@ func TestMetaTable(t *testing.T) {
 		seg, field, err = mt.GetNotIndexedSegments("testColl", "field110", idxInfo)
 		assert.Nil(t, err)
 		assert.Equal(t, len(seg), 2)
-		assert.Equal(t, seg[0], int64(100))
-		assert.Equal(t, seg[1], int64(101))
+		assert.Equal(t, seg[0], segID)
+		assert.Equal(t, seg[1], segID2)
 		assert.True(t, EqualKeyPairArray(field.TypeParams, tparams))
 
 	})
@@ -397,16 +469,53 @@ func TestMetaTable(t *testing.T) {
 		assert.Equal(t, len(idxs), 1)
 		assert.Equal(t, idxs[0].IndexID, int64(2001))
 
-		_, err = mt.GetSegmentIndexInfoByID(100, -1, "")
+		_, err = mt.GetSegmentIndexInfoByID(segID, -1, "")
 		assert.NotNil(t, err)
+	})
 
+	t.Run("drop partition", func(t *testing.T) {
+		id, err := mt.DeletePartition(collID, partInfo.PartitionName)
+		assert.Nil(t, err)
+		assert.Equal(t, partID, id)
+
+		// check DD operation info
+		ddOpStr, err := mt.client.Load(DDOperationPrefix)
+		assert.Nil(t, err)
+		var ddOp DdOperation
+		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		assert.Nil(t, err)
+		assert.Equal(t, DropPartitionDDType, ddOp.Type)
+		assert.Equal(t, collInfo.ID, ddOp.CollectionID)
+		assert.Equal(t, partInfo.PartitionID, ddOp.PartitionID)
+
+		var meta map[string]string
+		err = json.Unmarshal([]byte(ddOp.Body), &meta)
+		assert.Nil(t, err)
+
+		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, ddOp.CollectionID)
+		v1 := meta[k1]
+		var collInfo pb.CollectionInfo
+		err = proto.UnmarshalText(v1, &collInfo)
+		assert.Nil(t, err)
+		assert.Equal(t, collInfo.ID, collInfo.ID)
+		assert.Equal(t, collInfo.CreateTime, collInfo.CreateTime)
+		assert.Equal(t, collInfo.PartitionIDs[0], collInfo.PartitionIDs[0])
 	})
 
 	t.Run("drop collection", func(t *testing.T) {
-		err := mt.DeleteCollection(2)
+		err := mt.DeleteCollection(collIDInvalid)
 		assert.NotNil(t, err)
-		err = mt.DeleteCollection(1)
+		err = mt.DeleteCollection(collID)
 		assert.Nil(t, err)
+
+		// check DD operation info
+		ddOpStr, err := mt.client.Load(DDOperationPrefix)
+		assert.Nil(t, err)
+		var ddOp DdOperation
+		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		assert.Nil(t, err)
+		assert.Equal(t, DropCollectionDDType, ddOp.Type)
+		assert.Equal(t, collID, ddOp.CollectionID)
 	})
 
 	/////////////////////////// these tests should run at last, it only used to hit the error lines ////////////////////////
@@ -454,8 +563,8 @@ func TestMetaTable(t *testing.T) {
 
 		seg := &datapb.SegmentInfo{
 			ID:           100,
-			CollectionID: 1,
-			PartitionID:  10,
+			CollectionID: collID,
+			PartitionID:  partID,
 		}
 		assert.Nil(t, mt.AddSegment(seg))
 
@@ -649,8 +758,8 @@ func TestMetaTable(t *testing.T) {
 
 		seg := &datapb.SegmentInfo{
 			ID:           100,
-			CollectionID: 1,
-			PartitionID:  10,
+			CollectionID: collID,
+			PartitionID:  partID,
 		}
 		assert.Nil(t, mt.AddSegment(seg))
 
@@ -793,8 +902,8 @@ func TestMetaTable(t *testing.T) {
 
 		segInfo := &datapb.SegmentInfo{
 			ID:           100,
-			CollectionID: 1,
-			PartitionID:  10,
+			CollectionID: collID,
+			PartitionID:  partID,
 		}
 		assert.Nil(t, mt.AddSegment(segInfo))
 		segIdx := &pb.SegmentIndexInfo{

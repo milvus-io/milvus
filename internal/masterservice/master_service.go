@@ -60,7 +60,6 @@ type DdOperation struct {
 	Type         string
 	CollectionID typeutil.UniqueID
 	PartitionID  typeutil.UniqueID
-	Send         bool
 }
 
 // master core
@@ -425,21 +424,9 @@ func (c *Core) setDdOperationSend(t string) error {
 	if t != ddOp.Type {
 		return fmt.Errorf("DdOperation type mis-match %s", ddOp.Type)
 	}
-	ddOp.Send = true
 
-	// pack DdOperation again
-	ddOpByte, err := json.Marshal(ddOp)
-	if err != nil {
-		return err
-	}
-
-	// save DdOperation info into etcd
-	err = c.MetaTable.client.Save(DDOperationPrefix, string(ddOpByte))
-	if err != nil {
-		return err
-	}
-
-	return nil
+	// remove DdOperation info
+	return c.MetaTable.client.Remove(DDOperationPrefix)
 }
 
 func (c *Core) setMsgStreams() error {
@@ -876,10 +863,6 @@ func (c *Core) reSendDdMsg() error {
 	err = json.Unmarshal([]byte(ddOpStr), &ddOp)
 	if err != nil {
 		return err
-	}
-	if ddOp.Send {
-		log.Debug("DdOperation has already been send", zap.String("type", ddOp.Type))
-		return nil
 	}
 
 	var meta map[string]string

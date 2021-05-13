@@ -230,7 +230,7 @@ func (mt *metaTable) AddProxy(po *pb.ProxyMeta) error {
 	return nil
 }
 
-func (mt *metaTable) encodeDdOperation(v interface{}, ddType string, collID typeutil.UniqueID, partID typeutil.UniqueID) (string, error){
+func (mt *metaTable) encodeDdOperation(v interface{}, ddType string, collID typeutil.UniqueID, partID typeutil.UniqueID) (string, error) {
 	vByte, err := json.Marshal(v)
 	if err != nil {
 		return "", err
@@ -241,7 +241,6 @@ func (mt *metaTable) encodeDdOperation(v interface{}, ddType string, collID type
 		Type:         ddType,
 		CollectionID: collID,
 		PartitionID:  partID,
-		Send:         false,
 	}
 	ddOpByte, err := json.Marshal(ddOp)
 	if err != nil {

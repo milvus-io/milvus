@@ -126,7 +126,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	collMeta := etcdpb.CollectionInfo{
+	collInfo := etcdpb.CollectionInfo{
 		ID:           collID,
 		Schema:       &schema,
 		CreateTime:   collTs,
@@ -135,7 +135,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	}
 
 	// every collection has _default partition
-	partMeta := etcdpb.PartitionInfo{
+	partInfo := etcdpb.PartitionInfo{
 		PartitionName: Params.DefaultPartitionName,
 		PartitionID:   partitionID,
 		SegmentIDs:    make([]typeutil.UniqueID, 0, 16),
@@ -164,7 +164,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	//	}
 	//}
 
-	err = t.core.MetaTable.AddCollection(&collMeta, &partMeta, idxInfo)
+	err = t.core.MetaTable.AddCollection(&collInfo, &partInfo, idxInfo)
 	if err != nil {
 		return err
 	}
@@ -201,8 +201,8 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		CollectionName: t.Req.CollectionName,
 		PartitionName:  Params.DefaultPartitionName,
 		DbID:           0, //TODO, not used
-		CollectionID:   collMeta.ID,
-		PartitionID:    partMeta.PartitionID,
+		CollectionID:   collInfo.ID,
+		PartitionID:    partInfo.PartitionID,
 	}
 
 	err = t.core.SendDdCreatePartitionReq(ctx, &ddPart)
