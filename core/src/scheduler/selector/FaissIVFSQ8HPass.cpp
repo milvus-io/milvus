@@ -58,12 +58,12 @@ FaissIVFSQ8HPass::Run(const TaskPtr& task) {
     if (!gpu_enable_) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFSQ8HPass: gpu disable, specify cpu to search!", "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-    } else if (search_job->topk() > milvus::server::GPU_QUERY_MAX_TOPK) {
+    } else if (search_job->topk() > server::GPU_QUERY_MAX_TOPK) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFSQ8HPass: topk > gpu_topk_threshold, specify cpu to search!",
                                     "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else if (search_job->extra_params()[knowhere::IndexParams::nprobe].get<int64_t>() >
-               milvus::server::GPU_QUERY_MAX_NPROBE) {
+               server::GPU_QUERY_MAX_NPROBE) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFSQ8HPass: nprobe > gpu_nprobe_threshold, specify cpu to search!",
                                     "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
@@ -73,10 +73,7 @@ FaissIVFSQ8HPass::Run(const TaskPtr& task) {
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
         hybrid = true;
     } else {
-        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFSQ8HPass: nq >= gpu_search_threshold, specify gpu %d to search!",
-                                    "search", 0, search_gpus_[idx_]);
-        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, search_gpus_[idx_]);
-        idx_ = (idx_ + 1) % search_gpus_.size();
+        res_ptr = PickResource(task, search_gpus_, idx_, "FaissIVFSQ8HPass");
     }
     auto label = std::make_shared<SpecResLabel>(res_ptr, hybrid);
     task->label() = label;

@@ -124,6 +124,8 @@ cache:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # enable               | Use GPU devices or not.                                    | Boolean    | false           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# cache.enable         | Enable cache index on GPU devices or not.                  | Boolean    | false           |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 # cache_size           | The size of GPU memory per card used for cache.            | String     | 1GB             |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # gpu_search_threshold | A Milvus performance tuning parameter. This value will be  | Integer    | 1000            |
@@ -144,6 +146,7 @@ cache:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 gpu:
   enable: @GPU_ENABLE@
+  cache.enable: false
   cache_size: 1GB
   gpu_search_threshold: 1000
   search_devices:

@@ -52,102 +52,12 @@ Server::GetInstance() {
 }
 
 void
-Server::Init(int64_t daemonized, const std::string& pid_filename, const std::string& config_filename) {
-    daemonized_ = daemonized;
-    pid_filename_ = pid_filename;
+Server::Init(const std::string& config_filename) {
     config_filename_ = config_filename;
-}
-
-void
-Server::Daemonize() {
-    if (daemonized_ == 0) {
-        return;
-    }
-
-    std::cout << "Milvus server run in daemonize mode";
-
-    pid_t pid = 0;
-
-    // Fork off the parent process
-    pid = fork();
-
-    // An error occurred
-    if (pid < 0) {
-        exit(EXIT_FAILURE);
-    }
-
-    // Success: terminate parent
-    if (pid > 0) {
-        exit(EXIT_SUCCESS);
-    }
-
-    // On success: The child process becomes session leader
-    if (setsid() < 0) {
-        exit(EXIT_FAILURE);
-    }
-
-    // Ignore signal sent from child to parent process
-    signal(SIGCHLD, SIG_IGN);
-
-    // Fork off for the second time
-    pid = fork();
-
-    // An error occurred
-    if (pid < 0) {
-        exit(EXIT_FAILURE);
-    }
-
-    // Terminate the parent
-    if (pid > 0) {
-        exit(EXIT_SUCCESS);
-    }
-
-    // Set new file permissions
-    umask(0);
-
-    // Change the working directory to root
-    int ret = chdir("/");
-    if (ret != 0) {
-        return;
-    }
-
-    // Close all open fd
-    for (int64_t fd = sysconf(_SC_OPEN_MAX); fd > 0; fd--) {
-        close(fd);
-    }
-
-    std::cout << "Redirect stdin/stdout/stderr to /dev/null";
-
-    // Redirect stdin/stdout/stderr to /dev/null
-    stdin = fopen("/dev/null", "r");
-    stdout = fopen("/dev/null", "w+");
-    stderr = fopen("/dev/null", "w+");
-    // Try to write PID of daemon to lockfile
-    if (!pid_filename_.empty()) {
-        pid_fd_ = open(pid_filename_.c_str(), O_RDWR | O_CREAT, 0640);
-        if (pid_fd_ < 0) {
-            std::cerr << "Can't open filename: " + pid_filename_ + ", Error: " + strerror(errno);
-            exit(EXIT_FAILURE);
-        }
-        if (lockf(pid_fd_, F_TLOCK, 0) < 0) {
-            std::cerr << "Can't lock filename: " + pid_filename_ + ", Error: " + strerror(errno);
-            exit(EXIT_FAILURE);
-        }
-
-        std::string pid_file_context = std::to_string(getpid());
-        ssize_t res = write(pid_fd_, pid_file_context.c_str(), pid_file_context.size());
-        if (res != 0) {
-            return;
-        }
-    }
 }
 
 Status
 Server::Start() {
-    if (daemonized_ != 0) {
-        Daemonize();
-    }
-
     try {
         /* Read config file */
         Status s = LoadConfig();
@@ -326,29 +236,6 @@ Server::Stop() {
         }
     }
 #endif
-
-    /* Unlock and close lockfile */
-    if (pid_fd_ != -1) {
-        int ret = lockf(pid_fd_, F_ULOCK, 0);
-        if (ret != 0) {
-            std::cerr << "ERROR: Can't lock file: " << strerror(errno) << std::endl;
-            exit(0);
-        }
-        ret = close(pid_fd_);
-        if (ret != 0) {
-            std::cerr << "ERROR: Can't close file: " << strerror(errno) << std::endl;
-            exit(0);
-        }
-    }
-
-    /* delete lockfile */
-    if (!pid_filename_.empty()) {
-        int ret = unlink(pid_filename_.c_str());
-        if (ret != 0) {
-            std::cerr << "ERROR: Can't unlink file: " << strerror(errno) << std::endl;
-            exit(0);
-        }
-    }
 
     StopService();
 
