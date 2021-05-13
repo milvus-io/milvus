@@ -1,6 +1,6 @@
 import pytest
-from base.ClientRequest import ApiReq
-from utils.util_log import my_log as log
+from base.client_request import ApiReq
+from utils.util_log import test_log as log
 from common.common_type import *
 
 

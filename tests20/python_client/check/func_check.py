@@ -1,4 +1,4 @@
-from utils.util_log import my_log as log
+from utils.util_log import test_log as log
 from common.common_type import *
 
 
@@ -18,7 +18,8 @@ class CheckFunc:
         check_result = True
 
         if self.check_res is None:
-            log.info("self.check_res is None, the response of API: %s" % self.res)
+            pass
+            # log.info("self.check_res is None, the response of API: %s" % self.res)
         elif self.check_res == cname_param_check:
             check_result = self.req_cname_check(self.res, self.func_name, self.params.get('collection_name'))
         elif self.check_res == pname_param_check:
