@@ -13,6 +13,7 @@ max_top_k = 16384
 max_partition_num = 4096  # 256
 default_segment_row_limit = 1000
 default_server_segment_row_limit = 1024 * 512
+default_alias = "default"
 default_int64_field = "int64"
 default_float_field = "float"
 default_float_vec_field_name = "float_vector"
@@ -49,6 +50,7 @@ structure_metrics = ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
 """ The name of the method used to check the result """
 cname_param_check = "cname_param_check"
 pname_param_check = "pname_param_check"
+collection_property_check = "collection_property_check"
 
 
 class CaseLabel:

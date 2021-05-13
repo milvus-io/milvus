@@ -1,4 +1,4 @@
-from pymilvus_orm import Connections
+from pymilvus_orm import connections
 from pymilvus_orm.types import DataType
 from pymilvus_orm.default_config import DefaultConfig
 import sys
@@ -37,7 +37,7 @@ def func_req(_list, **kwargs):
 
 class ApiConnections:
     def __init__(self):
-        self.connection = Connections()
+        self.connection = connections
 
     def configure(self, check_res=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
