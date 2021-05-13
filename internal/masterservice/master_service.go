@@ -55,7 +55,7 @@ import (
 // ------------------ struct -----------------------
 
 type DdOperation struct {
-	Body         string
+	Body         []byte
 	Type         string
 	CollectionID typeutil.UniqueID
 	PartitionID  typeutil.UniqueID

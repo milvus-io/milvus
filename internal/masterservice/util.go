@@ -74,7 +74,7 @@ func EncodeDdOperation(v interface{}, ddType string, collID typeutil.UniqueID, p
 		return "", err
 	}
 	ddOp := DdOperation{
-		Body:         string(vByte),
+		Body:         vByte,
 		Type:         ddType,
 		CollectionID: collID,
 		PartitionID:  partID,
