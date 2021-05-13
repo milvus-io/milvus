@@ -44,9 +44,12 @@ binary_metrics = ["JACCARD", "HAMMING", "TANIMOTO", "SUBSTRUCTURE", "SUPERSTRUCT
 structure_metrics = ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
 
 
-""" The name of the method used to check the result """
-cname_param_check = "cname_param_check"
-pname_param_check = "pname_param_check"
+class CheckParams:
+    """ The name of the method used to check the result """
+    cname_param_check = "collection_name_param_check"
+    pname_param_check = "partition_name_param_check"
+
+    list_count = "check_list_count"
 
 
 class CaseLabel:
