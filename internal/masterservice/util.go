@@ -68,6 +68,7 @@ func GetFieldSchemaByIndexID(coll *etcdpb.CollectionInfo, idxID typeutil.UniqueI
 	return GetFieldSchemaByID(coll, fieldID)
 }
 
+// EncodeDdOperation serialize DdOperation into string
 func EncodeDdOperation(v interface{}, v1 interface{}, ddType string, collID typeutil.UniqueID, partID typeutil.UniqueID) (string, error) {
 	vByte, err := json.Marshal(v)
 	if err != nil {
