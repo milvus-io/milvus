@@ -45,30 +45,32 @@ There're some problems I haven't thought of.
 
 ### 1. DataNode no longer interacts with Etcd except service registering.
 
-   **O1-1**. DataService rather than DataNode saves binlog paths into Etcd.
+   **O1-1**. DataService rather than DataNode saves binlog paths into Etcd. 1 Day
     
    ![datanode_design](graphs/datanode_design_01.jpg)
     
-   **O1-2**. DataNode registers itself to Etcd when started.
+   **O1-2**. DataNode registers itself to Etcd when started. 1 Day
     
 ### 2. DataNode gets start and end MsgPositions of all channels, and report to DataService after flushing.
 
-   **O2-1**. Set start and end positions while publishing ddl messages.
+   **O2-1**. Set start and end positions while publishing ddl messages. 0.5 Day
 
-   **O2-2**. [after **O4**]Get message positions in flowgraph and pass through nodes, report to DataService along with binlog paths. 
+   **O2-2**. [after **O4-1**] Get message positions in flowgraph and pass through nodes, report to DataService along with binlog paths. 1 Day
 
-   **O2-3**. [with **O1-1**]DataNode is no longer aware of whether if segment flushed, so SegmentFlushed messages should be sent by DataService.
+   **O2-3**. [with **O1-1**] DataNode is no longer aware of whether if segment flushed, so SegmentFlushed messages should be sent by DataService. 1 Day
 
 ### 3. DataNode recovery
 
-   **O3-1**. Flowgraph is initialized after DataService called WatchDmChannels, flowgraph is healthy if MasterService is available.
+   **O3-1**. Flowgraph is initialized after DataService called WatchDmChannels, flowgraph is healthy if MasterService is available. 2 Day
 
 ### 4. DataNode with collection with flowgraph with vchannel designs
 
 #### The winner
-  ![datanode_design](graphs/collection_flowgraph_ralation.png)
+  ![datanode_design](graphs/collection_flowgraph_relation.png)
 
   ![datanode_design](graphs/collection_flowgraph_1_n.png)
+
+  **O4-1.** DataNode scales flowgraph 2 Day
 
 #### The boring design
 
