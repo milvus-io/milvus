@@ -23,9 +23,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/logutil"
 
-	"github.com/golang/protobuf/proto"
+	// "google.golang.org/protobuf"
+
 	grpcdatanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -49,6 +51,12 @@ type (
 	UniqueID  = typeutil.UniqueID
 	Timestamp = typeutil.Timestamp
 )
+
+const (
+	replayPrefix = `dataservice_replay`
+	streamTmpl   = replayPrefix + "/%v"
+)
+
 type Server struct {
 	ctx              context.Context
 	serverLoopCtx    context.Context
@@ -332,6 +340,18 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 	statsStream, _ := s.msFactory.NewMsgStream(ctx)
 	statsStream.AsConsumer([]string{Params.StatisticsChannelName}, Params.DataServiceSubscriptionName)
 	log.Debug("dataservice AsConsumer: " + Params.StatisticsChannelName + " : " + Params.DataServiceSubscriptionName)
+	pos, err := s.loadStreamLastPos(streamTypeStats)
+	if err == nil {
+		err = statsStream.Seek(pos)
+		if err != nil {
+			log.Error("Failed to seek to last pos for statsStream",
+				zap.String("StatisChanName", Params.StatisticsChannelName),
+				zap.String("DataServiceSubscriptionName", Params.DataServiceSubscriptionName),
+				zap.Error(err))
+		}
+		// drop first pack since it's processed
+		_ = statsStream.Consume()
+	}
 	statsStream.Start()
 	defer statsStream.Close()
 	for {
@@ -356,6 +376,17 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 					continue
 				}
 			}
+			if ssMsg.MsgPosition != nil {
+				err = s.storeStreamPos(streamTypeStats, ssMsg.MsgPosition)
+				if err != nil {
+					log.Error("Fail to store current success pos for Stats stream",
+						zap.Stringer("pos", ssMsg.MsgPosition),
+						zap.Error(err))
+				}
+			} else {
+				log.Warn("Empty Msg Pos found ", zap.Int64("msgid", msg.ID()))
+			}
+
 		}
 	}
 }
@@ -366,6 +397,20 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 	flushStream, _ := s.msFactory.NewMsgStream(ctx)
 	flushStream.AsConsumer([]string{Params.SegmentInfoChannelName}, Params.DataServiceSubscriptionName)
 	log.Debug("dataservice AsConsumer: " + Params.SegmentInfoChannelName + " : " + Params.DataServiceSubscriptionName)
+
+	pos, err := s.loadStreamLastPos(streamTypeFlush)
+	if err == nil {
+		err = flushStream.Seek(pos)
+		if err != nil {
+			log.Error("Failed to seek to last pos for segment flush Stream",
+				zap.String("SegInfoChannelName", Params.SegmentInfoChannelName),
+				zap.String("DataServiceSubscriptionName", Params.DataServiceSubscriptionName),
+				zap.Error(err))
+		}
+		// drop first pack since it's processed
+		_ = flushStream.Consume()
+	}
+
 	flushStream.Start()
 	defer flushStream.Close()
 	for {
@@ -390,6 +435,17 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 			if err != nil {
 				log.Error("get segment from meta error", zap.Int64("segmentID", fcMsg.SegmentID), zap.Error(err))
 				continue
+			}
+			//store success pos
+			if fcMsg.MsgPosition != nil {
+				err = s.storeStreamPos(streamTypeStats, fcMsg.MsgPosition)
+				if err != nil {
+					log.Error("Fail to store current success pos for segment flush stream",
+						zap.Stringer("pos", fcMsg.MsgPosition),
+						zap.Error(err))
+				}
+			} else {
+				log.Warn("Empty Msg Pos found ", zap.Int64("msgid", msg.ID()))
 			}
 		}
 	}
@@ -884,4 +940,36 @@ func (s *Server) registerService(nodeName string, ip string) (<-chan *clientv3.L
 	}
 	return ch, nil
 
+}
+
+type StreamType int
+
+const (
+	_ StreamType = iota
+	streamTypeFlush
+	streamTypeStats
+	// streamttMsg ignored
+	// streamTimeTick will be deleted
+)
+
+// store current processed stream pos
+func (s *Server) storeStreamPos(st StreamType, pos *msgstream.MsgPosition) error {
+	val := proto.MarshalTextString(pos)
+	err := s.kvClient.Save(fmt.Sprintf(streamTmpl, st), val)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// load last successful pos with specified stream type
+func (s *Server) loadStreamLastPos(st StreamType) (pos *msgstream.MsgPosition, err error) {
+	var val string
+	pos = &msgstream.MsgPosition{}
+	val, err = s.kvClient.Load(fmt.Sprintf(streamTmpl, st))
+	if err != nil {
+		return
+	}
+	err = proto.UnmarshalText(val, pos)
+	return
 }
