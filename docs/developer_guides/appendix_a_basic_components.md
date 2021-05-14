@@ -53,9 +53,83 @@ type TimeTickProvider interface {
 ```
 
 
+#### A.2 Session
+###### ServerID
+
+The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/services/ServerID". The initial value is 0. When a service is registered, it is incremented by 1 and returned to the next registered service.
+
+###### Registeration
+
+- Registration is achieved through etcd's lease mechanism.
+
+- The service creates a lease with etcd and stores a key-value pair in etcd. If the lease expires or the service goes offline, etcd will delete the key-value pair. You can judge whether this service is avaliable through the key.
+
+- key: metaRootPath + "/services" + "/ServerName-ServerID"
+
+- value: json format
+  {
+	  "ServerID":ServerID //ServerID
+      "ServerName": ServerName // ServerName
+      "Address": ip:port // Address of service, including ip and port
+      "LeaseID": LeaseID // The ID of etcd lease
+  }
+
+- By obtaining the address, you can establish a connection with other services
+
+###### Discovery
+
+- All currently available services can be obtained by obtaining all the key-value pairs deposited during registration. If you want to get all the available nodes for a certain type of service, you can pass in the prefix of the corresponding key
+- Registeration time can be compared with ServerID for ServerID will increase according to time.
 
 
-#### A.2 Global Parameter Table
+
+###### Interface
+
+```go
+default_ttl = 10
+default_retry_times = 3
+
+type Session struct {
+    ServerID   int64
+    ServerName string
+    Address    string
+    LeaseID    clientv3.LeaseID
+}
+
+// GetServerID gets id from etcd with key: metaRootPath + "/services/ServerID"
+// Each server get ServerID and add one to ServerID
+GetServerID(){}
+
+// RegisterService registers the service to etcd so that other services
+// can find that the service is online and issue subsequent operations
+// RegisterService will save a key-value in etcd
+// key: metaRootPath + "/services" + "/ServerName-ServerID"
+// value: json format
+// {
+//     "ServerID": ServerID
+//     "ServerName": ServerName-ServerID // ServerName
+//     "Address": ip:port // Address of service, including ip and port
+//     "LeaseID": LeaseID // The ID of etcd lease
+// }
+// MetaRootPath is configurable in the config file.
+RegisterService(etcdKV etcdKV, serverName string, address string)(<-chan *clientv3.LeaseKeepAliveResponse, error)
+
+
+
+// ProcessKeepAliveResponse processes the response of etcd keepAlive interface
+// If keepAlive fails for unexpected error, it will retry for default_retry_times times
+ProcessKeepAliveResponse(ctx context, ch <-chan *clientv3.LeaseKeepAliveResponse)
+
+
+
+// GetAllSessions gets all the services registered in etcd.
+// This gets all the key with prefix metaRootPath + "/services/" + prefix
+// For general, "datanode" to get all datanodes
+GetSessions(prefix string) ([]session, error)
+```
+
+
+#### A.3 Global Parameter Table
 
 ``` go
 type BaseTable struct {
@@ -464,4 +538,5 @@ func (kv *RocksdbKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, remov
 ```
 
 RocksdbKV implements all *TxnKV* interfaces.h
+
 
