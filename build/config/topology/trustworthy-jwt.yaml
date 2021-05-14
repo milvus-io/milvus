@@ -8,10 +8,6 @@ networking:
   serviceSubnet: "10.248.0.0/16"
 nodes:
 - role: control-plane
-# Run etcd in a tmpfs (in RAM) for performance improvements
-  extraMounts:
-  - containerPath: /var/lib/etcd
-    hostPath: "/mnt/tmpfs/etcd"
 - role: worker
 - role: worker
 kubeadmConfigPatches:
@@ -42,6 +38,10 @@ kubeadmConfigPatches:
     scheduler:
       extraArgs:
         "v": "4"
+    etcd:
+      local:
+        # Run etcd in a tmpfs (in RAM) for performance improvements
+        dataDir: /tmp/kind-cluster-etcd
     apiServer:
       extraArgs:
         "v": "4"

@@ -32,8 +32,6 @@ spec:
       readOnly: true
     - mountPath: /sys/fs/cgroup
       name: cgroup
-    - mountPath: "/mnt/tmpfs/etcd"
-      name: "etcd-data-dir"
     - mountPath: /mnt/disk/.docker
       name: build-cache
       subPath: docker-volume
@@ -54,9 +52,6 @@ spec:
       path: /sys/fs/cgroup
       type: Directory
     name: cgroup
-  - emptyDir:
-      medium: "Memory"
-    name: "etcd-data-dir"
   affinity:
     podAntiAffinity:
       preferredDuringSchedulingIgnoredDuringExecution:
