@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/masterpb"
@@ -406,25 +405,27 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, createMsg.CollectionID, createMeta.ID)
 
-		// check DDMsg type and info
-		msgType, err := core.MetaTable.client.Load(DDMsgTypePrefix)
+		// check DD operation info
+		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix)
 		assert.Nil(t, err)
-		assert.Equal(t, CreateCollectionMsgType, msgType)
+		assert.Equal(t, "true", flag)
+		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix)
+		assert.Nil(t, err)
+		var ddOp DdOperation
+		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		assert.Nil(t, err)
+		assert.Equal(t, CreateCollectionDDType, ddOp.Type)
 
-		var meta map[string]string
-		metaStr, err := core.MetaTable.client.Load(DDMsgPrefix)
+		var ddCollReq = internalpb.CreateCollectionRequest{}
+		err = proto.UnmarshalText(ddOp.Body, &ddCollReq)
 		assert.Nil(t, err)
-		err = json.Unmarshal([]byte(metaStr), &meta)
-		assert.Nil(t, err)
+		assert.Equal(t, createMeta.ID, ddCollReq.CollectionID)
 
-		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, createMeta.ID)
-		v1 := meta[k1]
-		var collInfo etcdpb.CollectionInfo
-		err = proto.UnmarshalText(v1, &collInfo)
+		var ddPartReq = internalpb.CreatePartitionRequest{}
+		err = proto.UnmarshalText(ddOp.Body1, &ddPartReq)
 		assert.Nil(t, err)
-		assert.Equal(t, createMeta.ID, collInfo.ID)
-		assert.Equal(t, createMeta.CreateTime, collInfo.CreateTime)
-		assert.Equal(t, createMeta.PartitionIDs[0], collInfo.PartitionIDs[0])
+		assert.Equal(t, createMeta.ID, ddPartReq.CollectionID)
+		assert.Equal(t, createMeta.PartitionIDs[0], ddPartReq.PartitionID)
 	})
 
 	t.Run("has collection", func(t *testing.T) {
@@ -547,33 +548,22 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, 1, len(pm.GetCollArray()))
 		assert.Equal(t, "testColl", pm.GetCollArray()[0])
 
-		// check DDMsg type and info
-		msgType, err := core.MetaTable.client.Load(DDMsgTypePrefix)
+		// check DD operation info
+		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix)
 		assert.Nil(t, err)
-		assert.Equal(t, CreatePartitionMsgType, msgType)
+		assert.Equal(t, "true", flag)
+		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix)
+		assert.Nil(t, err)
+		var ddOp DdOperation
+		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		assert.Nil(t, err)
+		assert.Equal(t, CreatePartitionDDType, ddOp.Type)
 
-		var meta map[string]string
-		metaStr, err := core.MetaTable.client.Load(DDMsgPrefix)
+		var ddReq = internalpb.CreatePartitionRequest{}
+		err = proto.UnmarshalText(ddOp.Body, &ddReq)
 		assert.Nil(t, err)
-		err = json.Unmarshal([]byte(metaStr), &meta)
-		assert.Nil(t, err)
-
-		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, collMeta.ID)
-		v1 := meta[k1]
-		var collInfo etcdpb.CollectionInfo
-		err = proto.UnmarshalText(v1, &collInfo)
-		assert.Nil(t, err)
-		assert.Equal(t, collMeta.ID, collInfo.ID)
-		assert.Equal(t, collMeta.CreateTime, collInfo.CreateTime)
-		assert.Equal(t, collMeta.PartitionIDs[0], collInfo.PartitionIDs[0])
-
-		k2 := fmt.Sprintf("%s/%d/%d", PartitionMetaPrefix, collMeta.ID, partMeta.PartitionID)
-		v2 := meta[k2]
-		var partInfo etcdpb.PartitionInfo
-		err = proto.UnmarshalText(v2, &partInfo)
-		assert.Nil(t, err)
-		assert.Equal(t, partMeta.PartitionName, partInfo.PartitionName)
-		assert.Equal(t, partMeta.PartitionID, partInfo.PartitionID)
+		assert.Equal(t, collMeta.ID, ddReq.CollectionID)
+		assert.Equal(t, partMeta.PartitionID, ddReq.PartitionID)
 	})
 
 	t.Run("has partition", func(t *testing.T) {
@@ -964,25 +954,22 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, 2, len(pm.GetCollArray()))
 		assert.Equal(t, "testColl", pm.GetCollArray()[1])
 
-		// check DDMsg type and info
-		msgType, err := core.MetaTable.client.Load(DDMsgTypePrefix)
+		// check DD operation info
+		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix)
 		assert.Nil(t, err)
-		assert.Equal(t, DropPartitionMsgType, msgType)
+		assert.Equal(t, "true", flag)
+		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix)
+		assert.Nil(t, err)
+		var ddOp DdOperation
+		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		assert.Nil(t, err)
+		assert.Equal(t, DropPartitionDDType, ddOp.Type)
 
-		var meta map[string]string
-		metaStr, err := core.MetaTable.client.Load(DDMsgPrefix)
+		var ddReq = internalpb.DropPartitionRequest{}
+		err = proto.UnmarshalText(ddOp.Body, &ddReq)
 		assert.Nil(t, err)
-		err = json.Unmarshal([]byte(metaStr), &meta)
-		assert.Nil(t, err)
-
-		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, collMeta.ID)
-		v1 := meta[k1]
-		var collInfo etcdpb.CollectionInfo
-		err = proto.UnmarshalText(v1, &collInfo)
-		assert.Nil(t, err)
-		assert.Equal(t, collMeta.ID, collInfo.ID)
-		assert.Equal(t, collMeta.CreateTime, collInfo.CreateTime)
-		assert.Equal(t, collMeta.PartitionIDs[0], collInfo.PartitionIDs[0])
+		assert.Equal(t, collMeta.ID, ddReq.CollectionID)
+		assert.Equal(t, dropPartID, ddReq.PartitionID)
 	})
 
 	t.Run("drop collection", func(t *testing.T) {
@@ -1037,17 +1024,21 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, len(collArray), 3)
 		assert.Equal(t, collArray[2], "testColl")
 
-		// check DDMsg type and info
-		msgType, err := core.MetaTable.client.Load(DDMsgTypePrefix)
+		// check DD operation info
+		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix)
 		assert.Nil(t, err)
-		assert.Equal(t, DropCollectionMsgType, msgType)
+		assert.Equal(t, "true", flag)
+		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix)
+		assert.Nil(t, err)
+		var ddOp DdOperation
+		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		assert.Nil(t, err)
+		assert.Equal(t, DropCollectionDDType, ddOp.Type)
 
-		var collID typeutil.UniqueID
-		collIDByte, err := core.MetaTable.client.Load(DDMsgPrefix)
+		var ddReq = internalpb.DropCollectionRequest{}
+		err = proto.UnmarshalText(ddOp.Body, &ddReq)
 		assert.Nil(t, err)
-		err = json.Unmarshal([]byte(collIDByte), &collID)
-		assert.Nil(t, err)
-		assert.Equal(t, collMeta.ID, collID)
+		assert.Equal(t, collMeta.ID, ddReq.CollectionID)
 	})
 
 	t.Run("context_cancel", func(t *testing.T) {
@@ -1665,25 +1656,25 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.DdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest) error {
+	c.SendDdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest) error {
 		return nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.DdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest) error {
+	c.SendDdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest) error {
 		return nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.DdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest) error {
+	c.SendDdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest) error {
 		return nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.DdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest) error {
+	c.SendDdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest) error {
 		return nil
 	}
 	err = c.checkInit()
