@@ -26,6 +26,7 @@ import "C"
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -35,12 +36,15 @@ import (
 
 	"go.uber.org/zap"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/retry"
+	"go.etcd.io/etcd/clientv3"
 )
 
 type QueryNode struct {
@@ -65,6 +69,13 @@ type QueryNode struct {
 	queryService  types.QueryService
 	indexService  types.IndexService
 	dataService   types.DataService
+
+	etcdKV  *etcdkv.EtcdKV
+	session struct {
+		NodeName string
+		IP       string
+		LeaseID  clientv3.LeaseID
+	}
 
 	msFactory msgstream.Factory
 	scheduler *taskScheduler
@@ -115,6 +126,32 @@ func NewQueryNodeWithoutID(ctx context.Context, factory msgstream.Factory) *Quer
 
 func (node *QueryNode) Init() error {
 	ctx := context.Background()
+
+	connectEtcdFn := func() error {
+		etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second})
+		if err != nil {
+			return err
+		}
+		node.etcdKV = etcdkv.NewEtcdKV(etcdCli, Params.MetaRootPath)
+		return nil
+	}
+	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	if err != nil {
+		return err
+	}
+
+	ch, err := node.registerService(fmt.Sprintf("querynode-%d", Params.QueryNodeID), Params.QueryNodeIP)
+	if err != nil {
+		return err
+	}
+	go func() {
+		for {
+			for range ch {
+				//TODO process lesase response
+			}
+		}
+	}()
+
 	C.SegcoreInit()
 	registerReq := &queryPb.RegisterNodeRequest{
 		Base: &commonpb.MsgBase{
@@ -278,4 +315,33 @@ func (node *QueryNode) removeDataSyncService(collectionID UniqueID) {
 	node.dsServicesMu.Lock()
 	defer node.dsServicesMu.Unlock()
 	delete(node.dataSyncServices, collectionID)
+}
+
+func (node *QueryNode) registerService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+	respID, err := node.etcdKV.Grant(5)
+	if err != nil {
+		fmt.Printf("grant error %s\n", err)
+		return nil, err
+	}
+	node.session.NodeName = nodeName
+	node.session.IP = ip
+	node.session.LeaseID = respID
+
+	sessionJSON, err := json.Marshal(node.session)
+	if err != nil {
+		return nil, err
+	}
+
+	err = node.etcdKV.SaveWithLease(fmt.Sprintf("/node/%s", nodeName), string(sessionJSON), respID)
+	if err != nil {
+		fmt.Printf("put lease error %s\n", err)
+		return nil, err
+	}
+
+	ch, err := node.etcdKV.KeepAlive(respID)
+	if err != nil {
+		fmt.Printf("keep alive error %s\n", err)
+		return nil, err
+	}
+	return ch, nil
 }

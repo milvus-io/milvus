@@ -13,7 +13,9 @@ package proxynode
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -22,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -29,7 +32,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.etcd.io/etcd/clientv3"
 )
 
 type UniqueID = typeutil.UniqueID
@@ -62,6 +67,13 @@ type ProxyNode struct {
 	queryMsgStream msgstream.MsgStream
 	msFactory      msgstream.Factory
 
+	etcdKV  *etcdkv.EtcdKV
+	session struct {
+		NodeName string
+		IP       string
+		LeaseID  clientv3.LeaseID
+	}
+
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
@@ -86,7 +98,35 @@ func (node *ProxyNode) Init() error {
 	// todo wait for proxyservice state changed to Healthy
 	ctx := context.Background()
 
-	err := funcutil.WaitForComponentHealthy(ctx, node.proxyService, "ProxyService", 1000000, time.Millisecond*200)
+	connectEtcdFn := func() error {
+		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
+		if err != nil {
+			return err
+		}
+		node.etcdKV = etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	if err != nil {
+		return err
+	}
+
+	ch, err := node.registerService("proxynode", Params.NetworkAddress)
+	if err != nil {
+		return err
+	}
+	go func() {
+		for {
+			for range ch {
+				//TODO process lesase response
+			}
+		}
+	}()
+
+	err = funcutil.WaitForComponentHealthy(ctx, node.proxyService, "ProxyService", 1000000, time.Millisecond*200)
 	if err != nil {
 		return err
 	}
@@ -295,4 +335,33 @@ func (node *ProxyNode) SetProxyServiceClient(cli types.ProxyService) {
 
 func (node *ProxyNode) SetQueryServiceClient(cli types.QueryService) {
 	node.queryService = cli
+}
+
+func (node *ProxyNode) registerService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+	respID, err := node.etcdKV.Grant(5)
+	if err != nil {
+		fmt.Printf("grant error %s\n", err)
+		return nil, err
+	}
+	node.session.NodeName = nodeName
+	node.session.IP = ip
+	node.session.LeaseID = respID
+
+	sessionJSON, err := json.Marshal(node.session)
+	if err != nil {
+		return nil, err
+	}
+
+	err = node.etcdKV.SaveWithLease(fmt.Sprintf("/node/%s", nodeName), string(sessionJSON), respID)
+	if err != nil {
+		fmt.Printf("put lease error %s\n", err)
+		return nil, err
+	}
+
+	ch, err := node.etcdKV.KeepAlive(respID)
+	if err != nil {
+		fmt.Printf("keep alive error %s\n", err)
+		return nil, err
+	}
+	return ch, nil
 }
