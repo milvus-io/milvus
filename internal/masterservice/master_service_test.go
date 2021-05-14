@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/masterpb"
@@ -416,18 +415,16 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, createMeta.ID, ddOp.CollectionID)
 		assert.Equal(t, true, ddOp.Send)
 
-		var meta map[string]string
-		err = json.Unmarshal([]byte(ddOp.Body), &meta)
+		var ddCollReq = internalpb.CreateCollectionRequest{}
+		err = json.Unmarshal(ddOp.Body, &ddCollReq)
 		assert.Nil(t, err)
+		assert.Equal(t, createMeta.ID, ddCollReq.CollectionID)
 
-		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, ddOp.CollectionID)
-		v1 := meta[k1]
-		var collInfo etcdpb.CollectionInfo
-		err = proto.UnmarshalText(v1, &collInfo)
+		var ddPartReq = internalpb.CreatePartitionRequest{}
+		err = json.Unmarshal(ddOp.Body1, &ddPartReq)
 		assert.Nil(t, err)
-		assert.Equal(t, createMeta.ID, collInfo.ID)
-		assert.Equal(t, createMeta.CreateTime, collInfo.CreateTime)
-		assert.Equal(t, createMeta.PartitionIDs[0], collInfo.PartitionIDs[0])
+		assert.Equal(t, createMeta.ID, ddPartReq.CollectionID)
+		assert.Equal(t, createMeta.PartitionIDs[0], ddPartReq.PartitionID)
 	})
 
 	t.Run("has collection", func(t *testing.T) {

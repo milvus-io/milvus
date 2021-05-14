@@ -68,13 +68,18 @@ func GetFieldSchemaByIndexID(coll *etcdpb.CollectionInfo, idxID typeutil.UniqueI
 	return GetFieldSchemaByID(coll, fieldID)
 }
 
-func EncodeDdOperation(v interface{}, ddType string, collID typeutil.UniqueID, partID typeutil.UniqueID) (string, error) {
+func EncodeDdOperation(v interface{}, v1 interface{}, ddType string, collID typeutil.UniqueID, partID typeutil.UniqueID) (string, error) {
 	vByte, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	v1Byte, err := json.Marshal(v1)
 	if err != nil {
 		return "", err
 	}
 	ddOp := DdOperation{
 		Body:         vByte,
+		Body1:        v1Byte, // used for DdCreateCollection only
 		Type:         ddType,
 		CollectionID: collID,
 		PartitionID:  partID,

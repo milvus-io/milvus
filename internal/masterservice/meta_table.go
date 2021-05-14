@@ -228,7 +228,8 @@ func (mt *metaTable) AddProxy(po *pb.ProxyMeta) error {
 	return nil
 }
 
-func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo, idx []*pb.IndexInfo) error {
+func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo, idx []*pb.IndexInfo,
+	collReq *internalpb.CreateCollectionRequest, partReq *internalpb.CreatePartitionRequest) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -268,13 +269,15 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
-	ddOpStr, err := EncodeDdOperation(meta, CreateCollectionDDType, coll.ID, 0)
-	if err != nil {
-		return err
+	if collReq != nil && partReq != nil {
+		ddOpStr, err := EncodeDdOperation(*collReq, *partReq, CreateCollectionDDType, coll.ID, 0)
+		if err != nil {
+			return err
+		}
+		meta[DDOperationPrefix] = ddOpStr
 	}
-	meta[DDOperationPrefix] = ddOpStr
 
-	err = mt.client.MultiSave(meta)
+	err := mt.client.MultiSave(meta)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -328,17 +331,18 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, req *internalpb.
 		fmt.Sprintf("%s/%d", IndexMetaPrefix, collID),
 	}
 
+	var saveMeta = make(map[string]string)
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
-	ddOpStr, err := EncodeDdOperation(*req, DropCollectionDDType, collID, 0)
-	if err != nil {
-		return err
-	}
-	saveMeta := map[string]string{
-		DDOperationPrefix: ddOpStr,
+	if req != nil {
+		ddOpStr, err := EncodeDdOperation(*req, 0, DropCollectionDDType, collID, 0)
+		if err != nil {
+			return err
+		}
+		saveMeta[DDOperationPrefix] = ddOpStr
 	}
 
-	err = mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys)
+	err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -453,13 +457,15 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
-	ddOpStr, err := EncodeDdOperation(*req, CreatePartitionDDType, collID, partitionID)
-	if err != nil {
-		return err
+	if req != nil {
+		ddOpStr, err := EncodeDdOperation(*req, 0, CreatePartitionDDType, collID, partitionID)
+		if err != nil {
+			return err
+		}
+		meta[DDOperationPrefix] = ddOpStr
 	}
-	meta[DDOperationPrefix] = ddOpStr
 
-	err = mt.client.MultiSave(meta)
+	err := mt.client.MultiSave(meta)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -553,13 +559,15 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
-	ddOpStr, err := EncodeDdOperation(*req, DropPartitionDDType, collID, partMeta.PartitionID)
-	if err != nil {
-		return 0, err
+	if req != nil {
+		ddOpStr, err := EncodeDdOperation(*req, 0, DropPartitionDDType, collID, partMeta.PartitionID)
+		if err != nil {
+			return 0, err
+		}
+		meta[DDOperationPrefix] = ddOpStr
 	}
-	meta[DDOperationPrefix] = ddOpStr
 
-	err = mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetaKeys)
+	err := mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetaKeys)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return 0, err

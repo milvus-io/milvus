@@ -122,7 +122,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	partitionID, _, err := t.core.idAllocator(1)
+	partID, _, err := t.core.idAllocator(1)
 	if err != nil {
 		return err
 	}
@@ -137,7 +137,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	// every collection has _default partition
 	partInfo := etcdpb.PartitionInfo{
 		PartitionName: Params.DefaultPartitionName,
-		PartitionID:   partitionID,
+		PartitionID:   partID,
 		SegmentIDs:    make([]typeutil.UniqueID, 0, 16),
 	}
 	idxInfo := make([]*etcdpb.IndexInfo, 0, 16)
@@ -164,11 +164,6 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	//	}
 	//}
 
-	err = t.core.MetaTable.AddCollection(&collInfo, &partInfo, idxInfo)
-	if err != nil {
-		return err
-	}
-
 	// schema is modified (add RowIDField and TimestampField),
 	// so need Marshal again
 	schemaBytes, err := proto.Marshal(&schema)
@@ -176,7 +171,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	ddReq := internalpb.CreateCollectionRequest{
+	ddCollReq := internalpb.CreateCollectionRequest{
 		Base:           t.Req.Base,
 		DbName:         t.Req.DbName,
 		CollectionName: t.Req.CollectionName,
@@ -185,12 +180,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		Schema:         schemaBytes,
 	}
 
-	err = t.core.SendDdCreateCollectionReq(ctx, &ddReq)
-	if err != nil {
-		return err
-	}
-
-	ddPart := internalpb.CreatePartitionRequest{
+	ddPartReq := internalpb.CreatePartitionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_CreatePartition,
 			MsgID:     t.Req.Base.MsgID, //TODO, msg id
@@ -205,18 +195,22 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		PartitionID:    partInfo.PartitionID,
 	}
 
-	err = t.core.SendDdCreatePartitionReq(ctx, &ddPart)
+	err = t.core.MetaTable.AddCollection(&collInfo, &partInfo, idxInfo, &ddCollReq, &ddPartReq)
+	if err != nil {
+		return err
+	}
+
+	err = t.core.SendDdCreateCollectionReq(ctx, &ddCollReq)
+	if err != nil {
+		return err
+	}
+	err = t.core.SendDdCreatePartitionReq(ctx, &ddPartReq)
 	if err != nil {
 		return err
 	}
 
 	// Update DDOperation in etcd
-	err = t.core.setDdOperationSend(CreateCollectionDDType)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return t.core.setDdOperationSend(CreateCollectionDDType)
 }
 
 type DropCollectionReqTask struct {
