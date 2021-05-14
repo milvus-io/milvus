@@ -270,7 +270,7 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	if collReq != nil && partReq != nil {
-		ddOpStr, err := EncodeDdOperation(*collReq, *partReq, CreateCollectionDDType)
+		ddOpStr, err := EncodeDdOperation(collReq, partReq, CreateCollectionDDType)
 		if err != nil {
 			return err
 		}
@@ -335,7 +335,7 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, req *internalpb.
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	if req != nil {
-		ddOpStr, err := EncodeDdOperation(*req, 0, DropCollectionDDType)
+		ddOpStr, err := EncodeDdOperation(req, nil, DropCollectionDDType)
 		if err != nil {
 			return err
 		}
@@ -458,7 +458,7 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	if req != nil {
-		ddOpStr, err := EncodeDdOperation(*req, 0, CreatePartitionDDType)
+		ddOpStr, err := EncodeDdOperation(req, nil, CreatePartitionDDType)
 		if err != nil {
 			return err
 		}
@@ -560,7 +560,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	if req != nil {
-		ddOpStr, err := EncodeDdOperation(*req, 0, DropPartitionDDType)
+		ddOpStr, err := EncodeDdOperation(req, nil, DropPartitionDDType)
 		if err != nil {
 			return 0, err
 		}

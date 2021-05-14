@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -69,18 +70,12 @@ func GetFieldSchemaByIndexID(coll *etcdpb.CollectionInfo, idxID typeutil.UniqueI
 }
 
 // EncodeDdOperation serialize DdOperation into string
-func EncodeDdOperation(v interface{}, v1 interface{}, ddType string) (string, error) {
-	vByte, err := json.Marshal(v)
-	if err != nil {
-		return "", err
-	}
-	v1Byte, err := json.Marshal(v1)
-	if err != nil {
-		return "", err
-	}
+func EncodeDdOperation(m proto.Message, m1 proto.Message, ddType string) (string, error) {
+	mStr := proto.MarshalTextString(m)
+	m1Str := proto.MarshalTextString(m1)
 	ddOp := DdOperation{
-		Body:  vByte,
-		Body1: v1Byte, // used for DdCreateCollection only
+		Body:  mStr,
+		Body1: m1Str, // used for DdCreateCollection only
 		Type:  ddType,
 		Send:  false,
 	}

@@ -23,6 +23,7 @@ import (
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -54,10 +55,10 @@ import (
 
 // DdOperation used to save ddMsg into ETCD
 type DdOperation struct {
-	Body         []byte
-	Body1        []byte // used for DdCreateCollection only
-	Type         string
-	Send         bool
+	Body  string `json:"body"`
+	Body1 string `json:"body1"` // used for CreateCollectionReq only
+	Type  string `json:"type"`
+	Send  bool   `json:"send"`
 }
 
 // master core
@@ -897,12 +898,12 @@ func (c *Core) reSendDdMsg(ctx context.Context) error {
 	switch ddOp.Type {
 	case CreateCollectionDDType:
 		var ddCollReq = internalpb.CreateCollectionRequest{}
-		if err = json.Unmarshal(ddOp.Body, &ddCollReq); err != nil {
+		if err = proto.UnmarshalText(ddOp.Body, &ddCollReq); err != nil {
 			return err
 		}
 		// TODO: can optimize
 		var ddPartReq = internalpb.CreatePartitionRequest{}
-		if err = json.Unmarshal(ddOp.Body1, &ddPartReq); err != nil {
+		if err = proto.UnmarshalText(ddOp.Body1, &ddPartReq); err != nil {
 			return err
 		}
 		if err = c.SendDdCreateCollectionReq(ctx, &ddCollReq); err != nil {
@@ -913,7 +914,7 @@ func (c *Core) reSendDdMsg(ctx context.Context) error {
 		}
 	case DropCollectionDDType:
 		var ddReq = internalpb.DropCollectionRequest{}
-		if err = json.Unmarshal(ddOp.Body, &ddReq); err != nil {
+		if err = proto.UnmarshalText(ddOp.Body, &ddReq); err != nil {
 			return err
 		}
 		if err = c.SendDdDropCollectionReq(ctx, &ddReq); err != nil {
@@ -921,7 +922,7 @@ func (c *Core) reSendDdMsg(ctx context.Context) error {
 		}
 	case CreatePartitionDDType:
 		var ddReq = internalpb.CreatePartitionRequest{}
-		if err = json.Unmarshal(ddOp.Body, &ddReq); err != nil {
+		if err = proto.UnmarshalText(ddOp.Body, &ddReq); err != nil {
 			return err
 		}
 		if err = c.SendDdCreatePartitionReq(ctx, &ddReq); err != nil {
@@ -929,7 +930,7 @@ func (c *Core) reSendDdMsg(ctx context.Context) error {
 		}
 	case DropPartitionDDType:
 		var ddReq = internalpb.DropPartitionRequest{}
-		if err = json.Unmarshal(ddOp.Body, &ddReq); err != nil {
+		if err = proto.UnmarshalText(ddOp.Body, &ddReq); err != nil {
 			return err
 		}
 		if err = c.SendDdDropPartitionReq(ctx, &ddReq); err != nil {
