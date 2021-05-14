@@ -183,56 +183,6 @@ func (fl *FlushCompletedMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	return flushCompletedMsgTask, nil
 }
 
-/////////////////////////////////////////Flush//////////////////////////////////////////
-// GOOSE TODO remove this
-type FlushMsg struct {
-	BaseMsg
-	internalpb.FlushMsg
-}
-
-func (fl *FlushMsg) TraceCtx() context.Context {
-	return fl.BaseMsg.Ctx
-}
-
-func (fl *FlushMsg) SetTraceCtx(ctx context.Context) {
-	fl.BaseMsg.Ctx = ctx
-}
-
-func (fl *FlushMsg) ID() UniqueID {
-	return fl.Base.MsgID
-}
-
-func (fl *FlushMsg) Type() MsgType {
-	return fl.Base.MsgType
-}
-
-func (fl *FlushMsg) Marshal(input TsMsg) (MarshalType, error) {
-	flushMsgTask := input.(*FlushMsg)
-	flushMsg := &flushMsgTask.FlushMsg
-	mb, err := proto.Marshal(flushMsg)
-	if err != nil {
-		return nil, err
-	}
-	return mb, nil
-}
-
-func (fl *FlushMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	flushMsg := internalpb.FlushMsg{}
-	in, err := ConvertToByteArray(input)
-	if err != nil {
-		return nil, err
-	}
-	err = proto.Unmarshal(in, &flushMsg)
-	if err != nil {
-		return nil, err
-	}
-	flushMsgTask := &FlushMsg{FlushMsg: flushMsg}
-	flushMsgTask.BeginTimestamp = flushMsgTask.Base.Timestamp
-	flushMsgTask.EndTimestamp = flushMsgTask.Base.Timestamp
-
-	return flushMsgTask, nil
-}
-
 /////////////////////////////////////////Delete//////////////////////////////////////////
 type DeleteMsg struct {
 	BaseMsg
