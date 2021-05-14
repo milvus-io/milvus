@@ -267,10 +267,20 @@ func TestMetaTable(t *testing.T) {
 		field, err := mt.GetFieldSchema("testColl", "field110")
 		assert.Nil(t, err)
 		assert.Equal(t, field.FieldID, collInfo.Schema.Fields[0].FieldID)
+
+		// check DD operation flag
+		flag, err := mt.client.Load(DDMsgSendPrefix)
+		assert.Nil(t, err)
+		assert.Equal(t, "false", flag)
 	})
 
 	t.Run("add partition", func(t *testing.T) {
 		assert.Nil(t, mt.AddPartition(collID, partInfo.PartitionName, partInfo.PartitionID, ""))
+
+		// check DD operation flag
+		flag, err := mt.client.Load(DDMsgSendPrefix)
+		assert.Nil(t, err)
+		assert.Equal(t, "false", flag)
 	})
 
 	t.Run("add segment", func(t *testing.T) {
@@ -423,6 +433,11 @@ func TestMetaTable(t *testing.T) {
 		id, err := mt.DeletePartition(collID, partInfo.PartitionName, "")
 		assert.Nil(t, err)
 		assert.Equal(t, partID, id)
+
+		// check DD operation flag
+		flag, err := mt.client.Load(DDMsgSendPrefix)
+		assert.Nil(t, err)
+		assert.Equal(t, "false", flag)
 	})
 
 	t.Run("drop collection", func(t *testing.T) {
@@ -430,6 +445,11 @@ func TestMetaTable(t *testing.T) {
 		assert.NotNil(t, err)
 		err = mt.DeleteCollection(collID, "")
 		assert.Nil(t, err)
+
+		// check DD operation flag
+		flag, err := mt.client.Load(DDMsgSendPrefix)
+		assert.Nil(t, err)
+		assert.Equal(t, "false", flag)
 	})
 
 	/////////////////////////// these tests should run at last, it only used to hit the error lines ////////////////////////

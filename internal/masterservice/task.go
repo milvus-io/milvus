@@ -217,7 +217,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	}
 
 	// Update DDOperation in etcd
-	return t.core.setDdOperationSend(CreateCollectionDDType)
+	return t.core.setDdMsgSendFlag(true)
 }
 
 type DropCollectionReqTask struct {
@@ -287,7 +287,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
 	// Update DDOperation in etcd
-	return t.core.setDdOperationSend(DropCollectionDDType)
+	return t.core.setDdMsgSendFlag(true)
 }
 
 type HasCollectionReqTask struct {
@@ -477,7 +477,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
 	// Update DDOperation in etcd
-	return t.core.setDdOperationSend(CreatePartitionDDType)
+	return t.core.setDdMsgSendFlag(true)
 }
 
 type DropPartitionReqTask struct {
@@ -545,7 +545,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
 	// Update DDOperation in etcd
-	return t.core.setDdOperationSend(DropPartitionDDType)
+	return t.core.setDdMsgSendFlag(true)
 }
 
 type HasPartitionReqTask struct {

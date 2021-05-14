@@ -406,13 +406,15 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, createMsg.CollectionID, createMeta.ID)
 
 		// check DD operation info
+		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix)
+		assert.Nil(t, err)
+		assert.Equal(t, "true", flag)
 		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
 		assert.Nil(t, err)
 		assert.Equal(t, CreateCollectionDDType, ddOp.Type)
-		assert.Equal(t, true, ddOp.Send)
 
 		var ddCollReq = internalpb.CreateCollectionRequest{}
 		err = proto.UnmarshalText(ddOp.Body, &ddCollReq)
@@ -547,13 +549,15 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, "testColl", pm.GetCollArray()[0])
 
 		// check DD operation info
+		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix)
+		assert.Nil(t, err)
+		assert.Equal(t, "true", flag)
 		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
 		assert.Nil(t, err)
 		assert.Equal(t, CreatePartitionDDType, ddOp.Type)
-		assert.Equal(t, true, ddOp.Send)
 
 		var ddReq = internalpb.CreatePartitionRequest{}
 		err = proto.UnmarshalText(ddOp.Body, &ddReq)
@@ -951,13 +955,15 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, "testColl", pm.GetCollArray()[1])
 
 		// check DD operation info
+		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix)
+		assert.Nil(t, err)
+		assert.Equal(t, "true", flag)
 		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
 		assert.Nil(t, err)
 		assert.Equal(t, DropPartitionDDType, ddOp.Type)
-		assert.Equal(t, true, ddOp.Send)
 
 		var ddReq = internalpb.DropPartitionRequest{}
 		err = proto.UnmarshalText(ddOp.Body, &ddReq)
@@ -1019,13 +1025,15 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, collArray[2], "testColl")
 
 		// check DD operation info
+		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix)
+		assert.Nil(t, err)
+		assert.Equal(t, "true", flag)
 		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
 		assert.Nil(t, err)
 		assert.Equal(t, DropCollectionDDType, ddOp.Type)
-		assert.Equal(t, true, ddOp.Send)
 
 		var ddReq = internalpb.DropCollectionRequest{}
 		err = proto.UnmarshalText(ddOp.Body, &ddReq)

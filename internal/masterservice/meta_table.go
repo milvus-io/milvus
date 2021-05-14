@@ -40,6 +40,7 @@ const (
 	IndexMetaPrefix        = ComponentPrefix + "/index"
 
 	DDOperationPrefix = ComponentPrefix + "/dd-operation"
+	DDMsgSendPrefix   = ComponentPrefix + "/dd-msg-send"
 
 	CreateCollectionDDType = "CreateCollection"
 	DropCollectionDDType   = "DropCollection"
@@ -267,6 +268,7 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 
 	// save ddOpStr into etcd
 	meta[DDOperationPrefix] = ddOpStr
+	meta[DDMsgSendPrefix] = "false"
 
 	err := mt.client.MultiSave(meta)
 	if err != nil {
@@ -323,7 +325,10 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr string) 
 	}
 
 	// save ddOpStr into etcd
-	var saveMeta = map[string]string{DDOperationPrefix: ddOpStr}
+	var saveMeta = map[string]string{
+		DDOperationPrefix: ddOpStr,
+		DDMsgSendPrefix:   "false",
+	}
 
 	err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys)
 	if err != nil {
@@ -440,6 +445,7 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 
 	// save ddOpStr into etcd
 	meta[DDOperationPrefix] = ddOpStr
+	meta[DDMsgSendPrefix] = "false"
 
 	err := mt.client.MultiSave(meta)
 	if err != nil {
@@ -535,6 +541,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 
 	// save ddOpStr into etcd
 	meta[DDOperationPrefix] = ddOpStr
+	meta[DDMsgSendPrefix] = "false"
 
 	err := mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetaKeys)
 	if err != nil {

@@ -58,7 +58,6 @@ type DdOperation struct {
 	Body  string `json:"body"`
 	Body1 string `json:"body1"` // used for CreateCollectionReq only
 	Type  string `json:"type"`
-	Send  bool   `json:"send"`
 }
 
 // master core
@@ -413,33 +412,21 @@ func (c *Core) tsLoop() {
 	}
 }
 
-func (c *Core) setDdOperationSend(t string) error {
-	// get DdOperation info
-	ddOpStr, err := c.MetaTable.client.Load(DDOperationPrefix)
+func (c *Core) setDdMsgSendFlag(b bool) error {
+	flag, err := c.MetaTable.client.Load(DDMsgSendPrefix)
 	if err != nil {
 		return err
 	}
 
-	// unpack DdOperation and set DdOperation.Send
-	var ddOp DdOperation
-	if err = json.Unmarshal([]byte(ddOpStr), &ddOp); err != nil {
-		return err
-	}
-	if t != ddOp.Type {
-		return fmt.Errorf("DdOperation type mis-match %s", ddOp.Type)
+	if (b && flag == "true") || (!b && flag == "false") {
+		log.Debug("DdMsg send flag need not change", zap.String("flag", flag))
+		return nil
 	}
 
-	// mark Send flag
-	ddOp.Send = true
-
-	// pack DdOperation again
-	ddOpByte, err := json.Marshal(ddOp)
-	if err != nil {
-		return err
+	if b {
+		return c.MetaTable.client.Save(DDMsgSendPrefix, "true")
 	}
-
-	// save DdOperation info into etcd
-	return c.MetaTable.client.Save(DDOperationPrefix, string(ddOpByte))
+	return c.MetaTable.client.Save(DDMsgSendPrefix, "false")
 }
 
 func (c *Core) setMsgStreams() error {
@@ -881,6 +868,12 @@ func (c *Core) Init() error {
 }
 
 func (c *Core) reSendDdMsg(ctx context.Context) error {
+	flag, err := c.MetaTable.client.Load(DDMsgSendPrefix)
+	if err != nil || flag == "true" {
+		log.Debug("No un-successful DdMsg")
+		return nil
+	}
+
 	ddOpStr, err := c.MetaTable.client.Load(DDOperationPrefix)
 	if err != nil {
 		log.Debug("DdOperation key does not exist")
@@ -889,10 +882,6 @@ func (c *Core) reSendDdMsg(ctx context.Context) error {
 	var ddOp DdOperation
 	if err = json.Unmarshal([]byte(ddOpStr), &ddOp); err != nil {
 		return err
-	}
-	if ddOp.Send {
-		log.Debug("DdOperation has already been send", zap.String("type", ddOp.Type))
-		return nil
 	}
 
 	switch ddOp.Type {
@@ -941,7 +930,7 @@ func (c *Core) reSendDdMsg(ctx context.Context) error {
 	}
 
 	// Update DDOperation in etcd
-	return c.setDdOperationSend(ddOp.Type)
+	return c.setDdMsgSendFlag(true)
 }
 
 func (c *Core) Start() error {

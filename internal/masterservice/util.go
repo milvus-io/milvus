@@ -77,7 +77,6 @@ func EncodeDdOperation(m proto.Message, m1 proto.Message, ddType string) (string
 		Body:  mStr,
 		Body1: m1Str, // used for DdCreateCollection only
 		Type:  ddType,
-		Send:  false,
 	}
 	ddOpByte, err := json.Marshal(ddOp)
 	if err != nil {
