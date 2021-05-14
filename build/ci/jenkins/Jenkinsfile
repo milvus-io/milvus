@@ -31,7 +31,7 @@ pipeline {
                         customWorkspace '/home/jenkins/agent/workspace'
                         // We allow this pod to remain active for a while, later jobs can
                         // reuse cache in previous created nodes.
-                        // idleMinutes 120
+                        idleMinutes 120
                     }
                 }
                 environment {
@@ -94,6 +94,8 @@ pipeline {
                                 dir("${env.ARTIFACTS}") {
                                     sh "tar -zcvf artifacts-milvus-${MILVUS_SERVER_TYPE}-e2e-kind.tar.gz ./kind --remove-files || true"
                                     archiveArtifacts artifacts: "artifacts-milvus-${MILVUS_SERVER_TYPE}-e2e-kind.tar.gz", allowEmptyArchive: true
+                                    sh 'docker rm -f \$(docker network inspect -f \'{{ range \$key, \$value := .Containers }}{{ printf "%s " \$key}}{{ end }}\' kind) || true'
+                                    sh 'docker network rm kind || true'
                                 }
                             }
                         }
