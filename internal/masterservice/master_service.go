@@ -422,8 +422,7 @@ func (c *Core) setDdOperationSend(t string) error {
 
 	// unpack DdOperation and set DdOperation.Send
 	var ddOp DdOperation
-	err = json.Unmarshal([]byte(ddOpStr), &ddOp)
-	if err != nil {
+	if err = json.Unmarshal([]byte(ddOpStr), &ddOp); err != nil {
 		return err
 	}
 	if t != ddOp.Type {
@@ -440,12 +439,7 @@ func (c *Core) setDdOperationSend(t string) error {
 	}
 
 	// save DdOperation info into etcd
-	err = c.MetaTable.client.Save(DDOperationPrefix, string(ddOpByte))
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return c.MetaTable.client.Save(DDOperationPrefix, string(ddOpByte))
 }
 
 func (c *Core) setMsgStreams() error {
