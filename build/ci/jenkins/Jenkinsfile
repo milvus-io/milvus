@@ -35,7 +35,7 @@ pipeline {
                     }
                 }
                 environment {
-                    IMAGE_REPO = "registry.zilliz.com/milvus"
+                    IMAGE_REPO = "dockerhub-mirror-sh.zilliz.cc/milvusdb"
                     DOCKER_BUILDKIT = 1
                     DOCKER_VOLUME_DIRECTORY = "/mnt/disk/.docker"
                     ARTIFACTS = "${env.WORKSPACE}/artifacts"
