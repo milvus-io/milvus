@@ -3,10 +3,11 @@ from common.common_type import *
 
 
 class CheckFunc:
-    def __init__(self, res, func_name, check_res, **kwargs):
+    def __init__(self, res, func_name, check_res, check_params, **kwargs):
         self.res = res  # response of api request
         self.func_name = func_name
         self.check_res = check_res
+        self.check_params = check_params
         self.params = {}
 
         for key, value in kwargs.items():
@@ -20,12 +21,30 @@ class CheckFunc:
         if self.check_res is None:
             pass
             # log.info("self.check_res is None, the response of API: %s" % self.res)
-        elif self.check_res == cname_param_check:
+        elif self.check_res == CheckParams.cname_param_check:
             check_result = self.req_cname_check(self.res, self.func_name, self.params.get('collection_name'))
-        elif self.check_res == pname_param_check:
+        elif self.check_res == CheckParams.pname_param_check:
             check_result = self.req_pname_check(self.res, self.func_name, self.params.get('partition_tag'))
+        elif self.check_res == CheckParams.list_count and self.check_params is not None:
+            check_result = self.check_list_count(self.res, self.func_name, self.check_params)
 
         return check_result
+
+    @staticmethod
+    def check_list_count(res, func_name, params):
+        if not isinstance(res, list):
+            log.error("[CheckFunc] Response of API is not a list: %s" % str(res))
+            assert False
+
+        if func_name == "list_connections":
+            list_count = params.get("list_count", None)
+            if not str(list_count).isdigit():
+                log.error("[CheckFunc] Check param of list_count is not a number: %s" % str(list_count))
+                assert False
+
+            assert len(res) == int(list_count)
+
+        return True
 
     @staticmethod
     def req_cname_check(res, func_name, params):

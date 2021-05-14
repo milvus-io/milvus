@@ -16,9 +16,22 @@ class TestConnection(ApiReq):
         res_list = self.connection.list_connections()
         log.info(res_list)
 
-    def test_connection_kwargs_param_check(self):
+    def test_wt(self):
         res_configure = self.connection.configure(check_res='', default={"host": "192.168.1.240", "port": "19530"})
         log.info(res_configure)
-        res_list = self.connection.list_connections()
+        res_list, che = self.connection.list_connections(check_res='')
         log.info(res_list)
+        for i in res_list:
+            log.info("!" * 20)
+            log.info(self.connection.remove_connection(alias=i))
+        res_list = self.connection.list_connections(check_res='')
+        log.info(res_list)
+        log.info("!" * 20)
+        log.info(self.utility.list_collections())
+
+    def test_check_res(self):
+        self.connection.configure(check_res='', check_params=None, default={"host": "192.168.1.240", "port": "19530"})
+        self.connection.get_connection(alias='default')
+        self.connection.list_connections(check_res=CheckParams.list_count, check_params={"list_count": 1})
+
 
