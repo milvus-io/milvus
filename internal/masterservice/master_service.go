@@ -52,7 +52,7 @@ import (
 
 // ------------------ struct -----------------------
 
-// used to save ddMsg into ETCD
+// DdOperation used to save ddMsg into ETCD
 type DdOperation struct {
 	Body         []byte
 	Body1        []byte // used for DdCreateCollection only
