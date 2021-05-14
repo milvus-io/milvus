@@ -15,22 +15,22 @@ nodes:
 - role: worker
 - role: worker
 kubeadmConfigPatches:
-#   - |
-#     apiVersion: kubeadm.k8s.io/v1beta2
-#     kind: JoinConfiguration
-#     metadata:
-#       name: config
-#     nodeRegistration:
-#       kubeletExtraArgs:
-#         cgroup-root: "/kubelet"
-#   - |
-#     apiVersion: kubeadm.k8s.io/v1beta2
-#     kind: InitConfiguration
-#     metadata:
-#       name: config
-#     nodeRegistration:
-#       kubeletExtraArgs:
-#         cgroup-root: "/kubelet"
+  - |
+    apiVersion: kubeadm.k8s.io/v1beta2
+    kind: JoinConfiguration
+    metadata:
+      name: config
+    nodeRegistration:
+      kubeletExtraArgs:
+        cgroup-root: "/kubelet"
+  - |
+    apiVersion: kubeadm.k8s.io/v1beta2
+    kind: InitConfiguration
+    metadata:
+      name: config
+    nodeRegistration:
+      kubeletExtraArgs:
+        cgroup-root: "/kubelet"
   - |
     apiVersion: kubeadm.k8s.io/v1beta2
     kind: ClusterConfiguration
@@ -45,8 +45,6 @@ kubeadmConfigPatches:
     apiServer:
       extraArgs:
         "v": "4"
-        "service-account-issuer": "kubernetes.default.svc"
-        "service-account-signing-key-file": "/etc/kubernetes/pki/sa.key"
 containerdConfigPatches:
   - |-
     [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5000"]
