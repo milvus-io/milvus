@@ -5,12 +5,14 @@ import numpy as np
 from sklearn import preprocessing
 
 from pymilvus_orm.types import DataType
-from utils.util_log import my_log as log
+from utils.util_log import test_log as log
 from common.common_type import *
 
 
 """" Methods of processing data """
 l2 = lambda x, y: np.linalg.norm(np.array(x) - np.array(y))
+
+get_unique_str = "test_" + "".join(random.choice(string.ascii_letters + string.digits) for _ in range(8))
 
 
 def get_binary_default_fields(auto_id=True):
@@ -51,11 +53,6 @@ def get_entities(nb=default_nb, is_normal=False):
         {"name": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "values": vectors}
     ]
     return entities
-
-
-def get_unique_str(str_value="test_"):
-    prefix = "".join(random.choice(string.ascii_letters + string.digits) for _ in range(8))
-    return str_value + "_" + prefix
 
 
 def modify_file(file_name_list, input_content=""):
