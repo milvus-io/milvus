@@ -195,7 +195,14 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		PartitionID:    partInfo.PartitionID,
 	}
 
-	err = t.core.MetaTable.AddCollection(&collInfo, &partInfo, idxInfo, &ddCollReq, &ddPartReq)
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddOpStr, err := EncodeDdOperation(&ddCollReq, &ddPartReq, CreateCollectionDDType)
+	if err != nil {
+		return err
+	}
+
+	err = t.core.MetaTable.AddCollection(&collInfo, &partInfo, idxInfo, ddOpStr)
 	if err != nil {
 		return err
 	}
@@ -252,7 +259,14 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		CollectionID:   collMeta.ID,
 	}
 
-	err = t.core.MetaTable.DeleteCollection(collMeta.ID, &ddReq)
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddOpStr, err := EncodeDdOperation(&ddReq, nil, DropCollectionDDType)
+	if err != nil {
+		return err
+	}
+
+	err = t.core.MetaTable.DeleteCollection(collMeta.ID, ddOpStr)
 	if err != nil {
 		return err
 	}
@@ -442,7 +456,14 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		PartitionID:    partID,
 	}
 
-	err = t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, &ddReq)
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddOpStr, err := EncodeDdOperation(&ddReq, nil, CreatePartitionDDType)
+	if err != nil {
+		return err
+	}
+
+	err = t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, ddOpStr)
 	if err != nil {
 		return err
 	}
@@ -503,7 +524,14 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		PartitionID:    partInfo.PartitionID,
 	}
 
-	_, err = t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, &ddReq)
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddOpStr, err := EncodeDdOperation(&ddReq, nil, DropPartitionDDType)
+	if err != nil {
+		return err
+	}
+
+	_, err = t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, ddOpStr)
 	if err != nil {
 		return err
 	}

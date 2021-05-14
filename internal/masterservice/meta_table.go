@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -228,8 +227,7 @@ func (mt *metaTable) AddProxy(po *pb.ProxyMeta) error {
 	return nil
 }
 
-func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo, idx []*pb.IndexInfo,
-	collReq *internalpb.CreateCollectionRequest, partReq *internalpb.CreatePartitionRequest) error {
+func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo, idx []*pb.IndexInfo, ddOpStr string) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -267,15 +265,8 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 		meta[k] = v
 	}
 
-	// build DdOperation and save it into etcd, when ddmsg send fail,
-	// system can restore ddmsg from etcd and re-send
-	if collReq != nil && partReq != nil {
-		ddOpStr, err := EncodeDdOperation(collReq, partReq, CreateCollectionDDType)
-		if err != nil {
-			return err
-		}
-		meta[DDOperationPrefix] = ddOpStr
-	}
+	// save ddOpStr into etcd
+	meta[DDOperationPrefix] = ddOpStr
 
 	err := mt.client.MultiSave(meta)
 	if err != nil {
@@ -286,7 +277,7 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 	return nil
 }
 
-func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, req *internalpb.DropCollectionRequest) error {
+func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr string) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -331,16 +322,8 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, req *internalpb.
 		fmt.Sprintf("%s/%d", IndexMetaPrefix, collID),
 	}
 
-	var saveMeta = make(map[string]string)
-	// build DdOperation and save it into etcd, when ddmsg send fail,
-	// system can restore ddmsg from etcd and re-send
-	if req != nil {
-		ddOpStr, err := EncodeDdOperation(req, nil, DropCollectionDDType)
-		if err != nil {
-			return err
-		}
-		saveMeta[DDOperationPrefix] = ddOpStr
-	}
+	// save ddOpStr into etcd
+	var saveMeta = map[string]string{DDOperationPrefix: ddOpStr}
 
 	err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys)
 	if err != nil {
@@ -414,7 +397,7 @@ func (mt *metaTable) ListCollections() ([]string, error) {
 	return colls, nil
 }
 
-func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, req *internalpb.CreatePartitionRequest) error {
+func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, ddOpStr string) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	coll, ok := mt.collID2Meta[collID]
@@ -455,15 +438,8 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	v2 := proto.MarshalTextString(&partMeta)
 	meta := map[string]string{k1: v1, k2: v2}
 
-	// build DdOperation and save it into etcd, when ddmsg send fail,
-	// system can restore ddmsg from etcd and re-send
-	if req != nil {
-		ddOpStr, err := EncodeDdOperation(req, nil, CreatePartitionDDType)
-		if err != nil {
-			return err
-		}
-		meta[DDOperationPrefix] = ddOpStr
-	}
+	// save ddOpStr into etcd
+	meta[DDOperationPrefix] = ddOpStr
 
 	err := mt.client.MultiSave(meta)
 	if err != nil {
@@ -500,7 +476,7 @@ func (mt *metaTable) HasPartition(collID typeutil.UniqueID, partitionName string
 	return err == nil
 }
 
-func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, req *internalpb.DropPartitionRequest) (typeutil.UniqueID, error) {
+func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, ddOpStr string) (typeutil.UniqueID, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -557,15 +533,8 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 		delMetaKeys = append(delMetaKeys, k)
 	}
 
-	// build DdOperation and save it into etcd, when ddmsg send fail,
-	// system can restore ddmsg from etcd and re-send
-	if req != nil {
-		ddOpStr, err := EncodeDdOperation(req, nil, DropPartitionDDType)
-		if err != nil {
-			return 0, err
-		}
-		meta[DDOperationPrefix] = ddOpStr
-	}
+	// save ddOpStr into etcd
+	meta[DDOperationPrefix] = ddOpStr
 
 	err := mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetaKeys)
 	if err != nil {
