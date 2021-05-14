@@ -45,6 +45,8 @@ kubeadmConfigPatches:
     apiServer:
       extraArgs:
         "v": "4"
+        "service-account-issuer": "kubernetes.default.svc"
+        "service-account-signing-key-file": "/etc/kubernetes/pki/sa.key"
 containerdConfigPatches:
   - |-
     [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5000"]
