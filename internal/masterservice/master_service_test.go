@@ -412,7 +412,6 @@ func TestMasterService(t *testing.T) {
 		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
 		assert.Nil(t, err)
 		assert.Equal(t, CreateCollectionDDType, ddOp.Type)
-		assert.Equal(t, createMeta.ID, ddOp.CollectionID)
 		assert.Equal(t, true, ddOp.Send)
 
 		var ddCollReq = internalpb.CreateCollectionRequest{}
@@ -554,8 +553,6 @@ func TestMasterService(t *testing.T) {
 		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
 		assert.Nil(t, err)
 		assert.Equal(t, CreatePartitionDDType, ddOp.Type)
-		assert.Equal(t, collMeta.ID, ddOp.CollectionID)
-		assert.Equal(t, partMeta.PartitionID, ddOp.PartitionID)
 		assert.Equal(t, true, ddOp.Send)
 
 		var ddReq = internalpb.CreatePartitionRequest{}
@@ -960,8 +957,6 @@ func TestMasterService(t *testing.T) {
 		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
 		assert.Nil(t, err)
 		assert.Equal(t, DropPartitionDDType, ddOp.Type)
-		assert.Equal(t, collMeta.ID, ddOp.CollectionID)
-		assert.Equal(t, dropPartID, ddOp.PartitionID)
 		assert.Equal(t, true, ddOp.Send)
 
 		var ddReq = internalpb.DropPartitionRequest{}
@@ -1030,7 +1025,6 @@ func TestMasterService(t *testing.T) {
 		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
 		assert.Nil(t, err)
 		assert.Equal(t, DropCollectionDDType, ddOp.Type)
-		assert.Equal(t, collMeta.ID, ddOp.CollectionID)
 		assert.Equal(t, true, ddOp.Send)
 
 		var ddReq = internalpb.DropCollectionRequest{}

@@ -57,8 +57,6 @@ type DdOperation struct {
 	Body         []byte
 	Body1        []byte // used for DdCreateCollection only
 	Type         string
-	CollectionID typeutil.UniqueID
-	PartitionID  typeutil.UniqueID
 	Send         bool
 }
 
