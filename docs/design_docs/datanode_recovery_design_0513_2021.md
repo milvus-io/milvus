@@ -66,18 +66,19 @@ There're some problems I haven't thought of.
 ### 4. DataNode with collection with flowgraph with vchannel designs
 
 #### The winner
+  ![datanode_design](graphs/collection_flowgraph_ralation.png)
+
+  ![datanode_design](graphs/collection_flowgraph_1_n.png)
 
 #### The boring design
-
-     ![datanode_design](graphs/collection_flowgraph_ralation.jpg)
 
 • If collection:flowgraph = 1 : 1, datanode must have ability to scale flowgraph.
 
 ![datanode_design](graphs/collection_flowgraph_1_1.jpg)
 
-•** [Winner]** If collection:flowgraph = 1 : n, datanode must have ability to scale flowgraph. Vchannel of collection is scalable.
+•** [Winner]** If collection:flowgraph = 1 : n, flowgraph:vchannel = 1:1
 
-![datanode_design](graphs/collection_flowgraph_1_n.jpg)
+![datanode_design](graphs/collection_flowgraph_1_n.png)
 
 • If collection:flowgraph = n : 1, in the blue cases, datanode must have ability to scale flowgraph. In the brown cases, flowgraph must be able to scale channels.
 
