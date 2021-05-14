@@ -28,6 +28,7 @@ on:
       - docker-compose.yml
       - Makefile
       - '!**.md'
+      - '!build/ci/jenkins/**'
 
 jobs:
   ubuntu:
