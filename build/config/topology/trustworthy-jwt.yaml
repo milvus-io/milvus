@@ -4,8 +4,8 @@ apiVersion: kind.x-k8s.io/v1alpha4
 networking:
   ipFamily: "ipv4"
   kubeProxyMode: "iptables"
-  podSubnet: "10.245.0.0/16"
-  serviceSubnet: "10.246.0.0/16"
+  podSubnet: "10.247.0.0/16"
+  serviceSubnet: "10.248.0.0/16"
 nodes:
 - role: control-plane
 - role: worker
