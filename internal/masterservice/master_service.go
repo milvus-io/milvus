@@ -23,14 +23,12 @@ import (
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	ms "github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/masterpb"
@@ -869,14 +867,14 @@ func (c *Core) Init() error {
 	return initError
 }
 
-func (c *Core) reSendDdMsg() error {
+func (c *Core) reSendDdMsg(ctx context.Context) error {
 	ddOpStr, err := c.MetaTable.client.Load(DDOperationPrefix)
 	if err != nil {
-		return err
+		log.Debug("DdOperation key does not exist")
+		return nil
 	}
 	var ddOp DdOperation
-	err = json.Unmarshal([]byte(ddOpStr), &ddOp)
-	if err != nil {
+	if err = json.Unmarshal([]byte(ddOpStr), &ddOp); err != nil {
 		return err
 	}
 	if ddOp.Send {
@@ -884,37 +882,53 @@ func (c *Core) reSendDdMsg() error {
 		return nil
 	}
 
-	var meta map[string]string
-	err = json.Unmarshal([]byte(ddOp.Body), &meta)
-	if err != nil {
-		return err
-	}
-
-	k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, ddOp.CollectionID)
-	v1 := meta[k1]
-	var collInfo etcdpb.CollectionInfo
-	err = proto.UnmarshalText(v1, &collInfo)
-	if err != nil {
-		return err
-	}
-
 	switch ddOp.Type {
 	case CreateCollectionDDType:
+		var ddCollReq = internalpb.CreateCollectionRequest{}
+		if err = json.Unmarshal(ddOp.Body, &ddCollReq); err != nil {
+			return err
+		}
+		// TODO: can optimize
+		var ddPartReq = internalpb.CreatePartitionRequest{}
+		if err = json.Unmarshal(ddOp.Body1, &ddPartReq); err != nil {
+			return err
+		}
+		if err = c.SendDdCreateCollectionReq(ctx, &ddCollReq); err != nil {
+			return err
+		}
+		if err = c.SendDdCreatePartitionReq(ctx, &ddPartReq); err != nil {
+			return err
+		}
 	case DropCollectionDDType:
+		var ddReq = internalpb.DropCollectionRequest{}
+		if err = json.Unmarshal(ddOp.Body, &ddReq); err != nil {
+			return err
+		}
+		if err = c.SendDdDropCollectionReq(ctx, &ddReq); err != nil {
+			return err
+		}
 	case CreatePartitionDDType:
-		k2 := fmt.Sprintf("%s/%d/%d", PartitionMetaPrefix, ddOp.CollectionID, ddOp.PartitionID)
-		v2 := meta[k2]
-		var partInfo etcdpb.PartitionInfo
-		err = proto.UnmarshalText(v2, &partInfo)
-		if err != nil {
+		var ddReq = internalpb.CreatePartitionRequest{}
+		if err = json.Unmarshal(ddOp.Body, &ddReq); err != nil {
+			return err
+		}
+		if err = c.SendDdCreatePartitionReq(ctx, &ddReq); err != nil {
 			return err
 		}
 	case DropPartitionDDType:
+		var ddReq = internalpb.DropPartitionRequest{}
+		if err = json.Unmarshal(ddOp.Body, &ddReq); err != nil {
+			return err
+		}
+		if err = c.SendDdDropPartitionReq(ctx, &ddReq); err != nil {
+			return err
+		}
 	default:
-		return fmt.Errorf("Invalid DDOperation %s", ddOp.Type)
+		return fmt.Errorf("Invalid DdOperation %s", ddOp.Type)
 	}
 
-	return nil
+	// Update DDOperation in etcd
+	return c.setDdOperationSend(ddOp.Type)
 }
 
 func (c *Core) Start() error {
@@ -927,10 +941,9 @@ func (c *Core) Start() error {
 	log.Debug("master", zap.String("time tick channel name", Params.TimeTickChannel))
 
 	c.startOnce.Do(func() {
-		//err := c.reSendDdMsg()
-		//if err != nil {
-		//	return err
-		//}
+		if err := c.reSendDdMsg(c.ctx); err != nil {
+			return
+		}
 		go c.startDdScheduler()
 		go c.startTimeTickLoop()
 		go c.startDataServiceSegmentLoop()
