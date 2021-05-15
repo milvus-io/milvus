@@ -78,19 +78,18 @@ type Core struct {
 
 	MetaTable *metaTable
 	//id allocator
-	idAllocator       func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error)
-	idAllocatorUpdate func() error
+	IDAllocator       func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error)
+	IDAllocatorUpdate func() error
 
 	//tso allocator
-	tsoAllocator       func(count uint32) (typeutil.Timestamp, error)
-	tsoAllocatorUpdate func() error
+	TSOAllocator       func(count uint32) (typeutil.Timestamp, error)
+	TSOAllocatorUpdate func() error
 
 	//inner members
 	ctx     context.Context
 	cancel  context.CancelFunc
 	etcdCli *clientv3.Client
 	kvBase  *etcdkv.EtcdKV
-	metaKV  *etcdkv.EtcdKV
 
 	//setMsgStreams, receive time tick from proxy service time tick channel
 	ProxyTimeTickChan chan typeutil.Timestamp
@@ -176,23 +175,20 @@ func (c *Core) checkInit() error {
 	if c.MetaTable == nil {
 		return fmt.Errorf("MetaTable is nil")
 	}
-	if c.idAllocator == nil {
+	if c.IDAllocator == nil {
 		return fmt.Errorf("idAllocator is nil")
 	}
-	if c.idAllocatorUpdate == nil {
+	if c.IDAllocatorUpdate == nil {
 		return fmt.Errorf("idAllocatorUpdate is nil")
 	}
-	if c.tsoAllocator == nil {
+	if c.TSOAllocator == nil {
 		return fmt.Errorf("tsoAllocator is nil")
 	}
-	if c.tsoAllocatorUpdate == nil {
+	if c.TSOAllocatorUpdate == nil {
 		return fmt.Errorf("tsoAllocatorUpdate is nil")
 	}
 	if c.etcdCli == nil {
 		return fmt.Errorf("etcdCli is nil")
-	}
-	if c.metaKV == nil {
-		return fmt.Errorf("metaKV is nil")
 	}
 	if c.kvBase == nil {
 		return fmt.Errorf("kvBase is nil")
@@ -307,7 +303,7 @@ func (c *Core) startDataServiceSegmentLoop() {
 			}
 			if seg == nil {
 				log.Warn("segment from data service is nil")
-			} else if err := c.MetaTable.AddSegment(seg); err != nil {
+			} else if err := c.MetaTable.AddSegment(seg, seg.OpenTime); err != nil {
 				//what if master add segment failed, but data service success?
 				log.Warn("add segment info meta table failed ", zap.String("error", err.Error()))
 			} else {
@@ -370,11 +366,11 @@ func (c *Core) tsLoop() {
 	for {
 		select {
 		case <-tsoTicker.C:
-			if err := c.tsoAllocatorUpdate(); err != nil {
+			if err := c.TSOAllocatorUpdate(); err != nil {
 				log.Warn("failed to update timestamp: ", zap.Error(err))
 				continue
 			}
-			if err := c.idAllocatorUpdate(); err != nil {
+			if err := c.IDAllocatorUpdate(); err != nil {
 				log.Warn("failed to update id: ", zap.Error(err))
 				continue
 			}
@@ -387,7 +383,7 @@ func (c *Core) tsLoop() {
 }
 
 func (c *Core) setDdMsgSendFlag(b bool) error {
-	flag, err := c.MetaTable.client.Load(DDMsgSendPrefix)
+	flag, err := c.MetaTable.client.Load(DDMsgSendPrefix, 0)
 	if err != nil {
 		return err
 	}
@@ -396,11 +392,10 @@ func (c *Core) setDdMsgSendFlag(b bool) error {
 		log.Debug("DdMsg send flag need not change", zap.String("flag", flag))
 		return nil
 	}
-
 	if b {
-		return c.MetaTable.client.Save(DDMsgSendPrefix, "true")
+		return c.MetaTable.client.Save(DDMsgSendPrefix, "true", 0)
 	}
-	return c.MetaTable.client.Save(DDMsgSendPrefix, "false")
+	return c.MetaTable.client.Save(DDMsgSendPrefix, "false", 0)
 }
 
 func (c *Core) setMsgStreams() error {
@@ -659,7 +654,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 	log.Debug("data service segment", zap.String("channel name", Params.DataServiceSegmentChannel))
 
 	c.GetBinlogFilePathsFromDataServiceReq = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
-		ts, err := c.tsoAllocator(1)
+		ts, err := c.TSOAllocator(1)
 		if err != nil {
 			return nil, err
 		}
@@ -687,7 +682,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 	}
 
 	c.GetNumRowsReq = func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
-		ts, err := c.tsoAllocator(1)
+		ts, err := c.TSOAllocator(1)
 		if err != nil {
 			return 0, err
 		}
@@ -808,7 +803,11 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 		BuildID:     bldID,
 		EnableIndex: enableIdx,
 	}
-	err = c.MetaTable.AddIndex(&seg)
+	ts, err := c.TSOAllocator(1)
+	if err != nil {
+		return err
+	}
+	err = c.MetaTable.AddIndex(&seg, ts)
 	return err
 }
 
@@ -819,8 +818,11 @@ func (c *Core) Init() error {
 			if c.etcdCli, initError = clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second}); initError != nil {
 				return initError
 			}
-			c.metaKV = etcdkv.NewEtcdKV(c.etcdCli, Params.MetaRootPath)
-			if c.MetaTable, initError = NewMetaTable(c.metaKV); initError != nil {
+			ms, err := newMetaSnapshot(c.etcdCli, Params.MetaRootPath, TimestampPrefix, 1024)
+			if err != nil {
+				return err
+			}
+			if c.MetaTable, initError = NewMetaTable(ms); initError != nil {
 				return initError
 			}
 			c.kvBase = etcdkv.NewEtcdKV(c.etcdCli, Params.KvRootPath)
@@ -848,10 +850,10 @@ func (c *Core) Init() error {
 		if initError = idAllocator.Initialize(); initError != nil {
 			return
 		}
-		c.idAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+		c.IDAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 			return idAllocator.Alloc(count)
 		}
-		c.idAllocatorUpdate = func() error {
+		c.IDAllocatorUpdate = func() error {
 			return idAllocator.UpdateID()
 		}
 
@@ -859,10 +861,10 @@ func (c *Core) Init() error {
 		if initError = tsoAllocator.Initialize(); initError != nil {
 			return
 		}
-		c.tsoAllocator = func(count uint32) (typeutil.Timestamp, error) {
+		c.TSOAllocator = func(count uint32) (typeutil.Timestamp, error) {
 			return tsoAllocator.Alloc(count)
 		}
-		c.tsoAllocatorUpdate = func() error {
+		c.TSOAllocatorUpdate = func() error {
 			return tsoAllocator.UpdateTSO()
 		}
 
@@ -876,13 +878,13 @@ func (c *Core) Init() error {
 }
 
 func (c *Core) reSendDdMsg(ctx context.Context) error {
-	flag, err := c.MetaTable.client.Load(DDMsgSendPrefix)
+	flag, err := c.MetaTable.client.Load(DDMsgSendPrefix, 0)
 	if err != nil || flag == "true" {
 		log.Debug("No un-successful DdMsg")
 		return nil
 	}
 
-	ddOpStr, err := c.MetaTable.client.Load(DDOperationPrefix)
+	ddOpStr, err := c.MetaTable.client.Load(DDOperationPrefix, 0)
 	if err != nil {
 		log.Debug("DdOperation key does not exist")
 		return nil
@@ -1590,7 +1592,7 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 }
 
 func (c *Core) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
-	ts, err := c.tsoAllocator(in.Count)
+	ts, err := c.TSOAllocator(in.Count)
 	if err != nil {
 		log.Debug("AllocTimestamp failed", zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &masterpb.AllocTimestampResponse{
@@ -1614,7 +1616,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRe
 }
 
 func (c *Core) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
-	start, _, err := c.idAllocator(in.Count)
+	start, _, err := c.IDAllocator(in.Count)
 	if err != nil {
 		log.Debug("AllocID failed", zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &masterpb.AllocIDResponse{
@@ -1638,27 +1640,29 @@ func (c *Core) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*maste
 }
 
 func (c *Core) registerService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
-	respID, err := c.metaKV.Grant(5)
+	respID, err := c.etcdCli.Grant(c.ctx, 5)
 	if err != nil {
 		fmt.Printf("grant error %s\n", err)
 		return nil, err
 	}
 	c.session.NodeName = nodeName
 	c.session.IP = ip
-	c.session.LeaseID = respID
+	c.session.LeaseID = respID.ID
 
 	sessionJSON, err := json.Marshal(c.session)
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithTimeout(c.ctx, RequestTimeout)
+	defer cancel()
 
-	err = c.metaKV.SaveWithLease(fmt.Sprintf("/node/%s", nodeName), string(sessionJSON), respID)
+	_, err = c.etcdCli.Put(ctx, fmt.Sprintf("%s/node/%s", Params.MetaRootPath, nodeName), string(sessionJSON), clientv3.WithLease(respID.ID))
 	if err != nil {
 		fmt.Printf("put lease error %s\n", err)
 		return nil, err
 	}
 
-	ch, err := c.metaKV.KeepAlive(respID)
+	ch, err := c.etcdCli.KeepAlive(c.ctx, respID.ID)
 	if err != nil {
 		fmt.Printf("keep alive error %s\n", err)
 		return nil, err

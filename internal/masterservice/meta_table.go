@@ -19,8 +19,6 @@ import (
 	"sync"
 
 	"github.com/golang/protobuf/proto"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -28,6 +26,7 @@ import (
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 const (
@@ -41,6 +40,7 @@ const (
 
 	DDOperationPrefix = ComponentPrefix + "/dd-operation"
 	DDMsgSendPrefix   = ComponentPrefix + "/dd-msg-send"
+	TimestampPrefix   = ComponentPrefix + "/timestamp"
 
 	CreateCollectionDDType = "CreateCollection"
 	DropCollectionDDType   = "DropCollection"
@@ -49,7 +49,7 @@ const (
 )
 
 type metaTable struct {
-	client             kv.TxnKV                                                         // client of a reliable kv service, i.e. etcd client
+	client             kv.SnapShotKV                                                    // client of a reliable kv service, i.e. etcd client
 	tenantID2Meta      map[typeutil.UniqueID]pb.TenantMeta                              // tenant id to tenant meta
 	proxyID2Meta       map[typeutil.UniqueID]pb.ProxyMeta                               // proxy id to proxy meta
 	collID2Meta        map[typeutil.UniqueID]pb.CollectionInfo                          // collection_id -> meta
@@ -67,9 +67,9 @@ type metaTable struct {
 	ddLock     sync.RWMutex
 }
 
-func NewMetaTable(kv kv.TxnKV) (*metaTable, error) {
+func NewMetaTable(cli kv.SnapShotKV) (*metaTable, error) {
 	mt := &metaTable{
-		client:     kv,
+		client:     cli,
 		tenantLock: sync.RWMutex{},
 		proxyLock:  sync.RWMutex{},
 		ddLock:     sync.RWMutex{},
@@ -95,7 +95,7 @@ func (mt *metaTable) reloadFromKV() error {
 	mt.segID2PartitionID = make(map[typeutil.UniqueID]typeutil.UniqueID)
 	mt.flushedSegID = make(map[typeutil.UniqueID]bool)
 
-	_, values, err := mt.client.LoadWithPrefix(TenantMetaPrefix)
+	_, values, err := mt.client.LoadWithPrefix(TenantMetaPrefix, 0)
 	if err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func (mt *metaTable) reloadFromKV() error {
 		mt.tenantID2Meta[tenantMeta.ID] = tenantMeta
 	}
 
-	_, values, err = mt.client.LoadWithPrefix(ProxyMetaPrefix)
+	_, values, err = mt.client.LoadWithPrefix(ProxyMetaPrefix, 0)
 	if err != nil {
 		return err
 	}
@@ -123,7 +123,7 @@ func (mt *metaTable) reloadFromKV() error {
 		mt.proxyID2Meta[proxyMeta.ID] = proxyMeta
 	}
 
-	_, values, err = mt.client.LoadWithPrefix(CollectionMetaPrefix)
+	_, values, err = mt.client.LoadWithPrefix(CollectionMetaPrefix, 0)
 	if err != nil {
 		return err
 	}
@@ -141,7 +141,7 @@ func (mt *metaTable) reloadFromKV() error {
 		}
 	}
 
-	_, values, err = mt.client.LoadWithPrefix(PartitionMetaPrefix)
+	_, values, err = mt.client.LoadWithPrefix(PartitionMetaPrefix, 0)
 	if err != nil {
 		return err
 	}
@@ -164,7 +164,7 @@ func (mt *metaTable) reloadFromKV() error {
 		}
 	}
 
-	_, values, err = mt.client.LoadWithPrefix(SegmentIndexMetaPrefix)
+	_, values, err = mt.client.LoadWithPrefix(SegmentIndexMetaPrefix, 0)
 	if err != nil {
 		return err
 	}
@@ -184,7 +184,7 @@ func (mt *metaTable) reloadFromKV() error {
 		}
 	}
 
-	_, values, err = mt.client.LoadWithPrefix(IndexMetaPrefix)
+	_, values, err = mt.client.LoadWithPrefix(IndexMetaPrefix, 0)
 	if err != nil {
 		return err
 	}
@@ -200,35 +200,35 @@ func (mt *metaTable) reloadFromKV() error {
 	return nil
 }
 
-func (mt *metaTable) AddTenant(te *pb.TenantMeta) error {
+func (mt *metaTable) AddTenant(te *pb.TenantMeta, ts typeutil.Timestamp) error {
 	mt.tenantLock.Lock()
 	defer mt.tenantLock.Unlock()
 
 	k := fmt.Sprintf("%s/%d", TenantMetaPrefix, te.ID)
 	v := proto.MarshalTextString(te)
 
-	if err := mt.client.Save(k, v); err != nil {
+	if err := mt.client.Save(k, v, ts); err != nil {
 		return err
 	}
 	mt.tenantID2Meta[te.ID] = *te
 	return nil
 }
 
-func (mt *metaTable) AddProxy(po *pb.ProxyMeta) error {
+func (mt *metaTable) AddProxy(po *pb.ProxyMeta, ts typeutil.Timestamp) error {
 	mt.proxyLock.Lock()
 	defer mt.proxyLock.Unlock()
 
 	k := fmt.Sprintf("%s/%d", ProxyMetaPrefix, po.ID)
 	v := proto.MarshalTextString(po)
 
-	if err := mt.client.Save(k, v); err != nil {
+	if err := mt.client.Save(k, v, ts); err != nil {
 		return err
 	}
 	mt.proxyID2Meta[po.ID] = *po
 	return nil
 }
 
-func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo, idx []*pb.IndexInfo, ddOpStr string) error {
+func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo, idx []*pb.IndexInfo, ts typeutil.Timestamp, ddOpStr string) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -270,7 +270,7 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 	meta[DDOperationPrefix] = ddOpStr
 	meta[DDMsgSendPrefix] = "false"
 
-	err := mt.client.MultiSave(meta)
+	err := mt.client.MultiSave(meta, ts)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -279,7 +279,7 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 	return nil
 }
 
-func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr string) error {
+func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ts typeutil.Timestamp, ddOpStr string) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -330,7 +330,7 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr string) 
 		DDMsgSendPrefix:   "false",
 	}
 
-	err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys)
+	err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys, ts)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -339,40 +339,75 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr string) 
 	return nil
 }
 
-func (mt *metaTable) HasCollection(collID typeutil.UniqueID) bool {
+func (mt *metaTable) HasCollection(collID typeutil.UniqueID, ts typeutil.Timestamp) bool {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
-	_, ok := mt.collID2Meta[collID]
-	return ok
+	if ts == 0 {
+		_, ok := mt.collID2Meta[collID]
+		return ok
+	}
+	key := fmt.Sprintf("%s/%d", CollectionMetaPrefix, collID)
+	_, err := mt.client.Load(key, ts)
+	return err == nil
 }
 
-func (mt *metaTable) GetCollectionByID(collectionID typeutil.UniqueID) (*pb.CollectionInfo, error) {
+func (mt *metaTable) GetCollectionByID(collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*pb.CollectionInfo, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
-	col, ok := mt.collID2Meta[collectionID]
-	if !ok {
-		return nil, fmt.Errorf("can't find collection id : %d", collectionID)
+	if ts == 0 {
+		col, ok := mt.collID2Meta[collectionID]
+		if !ok {
+			return nil, fmt.Errorf("can't find collection id : %d", collectionID)
+		}
+		colCopy := proto.Clone(&col)
+		return colCopy.(*pb.CollectionInfo), nil
 	}
-	colCopy := proto.Clone(&col)
-
-	return colCopy.(*pb.CollectionInfo), nil
+	key := fmt.Sprintf("%s/%d", CollectionMetaPrefix, collectionID)
+	val, err := mt.client.Load(key, ts)
+	if err != nil {
+		return nil, err
+	}
+	colMeta := pb.CollectionInfo{}
+	err = proto.UnmarshalText(val, &colMeta)
+	if err != nil {
+		return nil, err
+	}
+	return &colMeta, nil
 }
 
-func (mt *metaTable) GetCollectionByName(collectionName string) (*pb.CollectionInfo, error) {
+func (mt *metaTable) GetCollectionByName(collectionName string, ts typeutil.Timestamp) (*pb.CollectionInfo, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
-	vid, ok := mt.collName2ID[collectionName]
-	if !ok {
-		return nil, fmt.Errorf("can't find collection: " + collectionName)
+	if ts == 0 {
+		vid, ok := mt.collName2ID[collectionName]
+		if !ok {
+			return nil, fmt.Errorf("can't find collection: " + collectionName)
+		}
+		col, ok := mt.collID2Meta[vid]
+		if !ok {
+			return nil, fmt.Errorf("can't find collection: " + collectionName)
+		}
+		colCopy := proto.Clone(&col)
+		return colCopy.(*pb.CollectionInfo), nil
 	}
-	col, ok := mt.collID2Meta[vid]
-	if !ok {
-		return nil, fmt.Errorf("can't find collection: " + collectionName)
+	_, vals, err := mt.client.LoadWithPrefix(CollectionMetaPrefix, ts)
+	if err != nil {
+		return nil, err
 	}
-	colCopy := proto.Clone(&col)
-	return colCopy.(*pb.CollectionInfo), nil
+	for _, val := range vals {
+		collMeta := pb.CollectionInfo{}
+		err = proto.UnmarshalText(val, &collMeta)
+		if err != nil {
+			log.Debug("unmarshal collection info failed", zap.Error(err))
+			continue
+		}
+		if collMeta.Schema.Name == collectionName {
+			return &collMeta, nil
+		}
+	}
+	return nil, fmt.Errorf("can't find collection: %s, at timestamp = %d", collectionName, ts)
 }
 
 func (mt *metaTable) GetCollectionBySegmentID(segID typeutil.UniqueID) (*pb.CollectionInfo, error) {
@@ -391,18 +426,34 @@ func (mt *metaTable) GetCollectionBySegmentID(segID typeutil.UniqueID) (*pb.Coll
 	return colCopy.(*pb.CollectionInfo), nil
 }
 
-func (mt *metaTable) ListCollections() ([]string, error) {
+func (mt *metaTable) ListCollections(ts typeutil.Timestamp) ([]string, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
-	colls := make([]string, 0, len(mt.collName2ID))
-	for name := range mt.collName2ID {
-		colls = append(colls, name)
+	if ts == 0 {
+		colls := make([]string, 0, len(mt.collName2ID))
+		for name := range mt.collName2ID {
+			colls = append(colls, name)
+		}
+		return colls, nil
+	}
+	_, vals, err := mt.client.LoadWithPrefix(CollectionMetaPrefix, ts)
+	if err != nil {
+		return nil, err
+	}
+	colls := make([]string, 0, len(vals))
+	for _, val := range vals {
+		collMeta := pb.CollectionInfo{}
+		err := proto.UnmarshalText(val, &collMeta)
+		if err != nil {
+			log.Debug("unmarshal collection info failed", zap.Error(err))
+		}
+		colls = append(colls, collMeta.Schema.Name)
 	}
 	return colls, nil
 }
 
-func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, ddOpStr string) error {
+func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, ts typeutil.Timestamp, ddOpStr string) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	coll, ok := mt.collID2Meta[collID]
@@ -447,7 +498,7 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	meta[DDOperationPrefix] = ddOpStr
 	meta[DDMsgSendPrefix] = "false"
 
-	err := mt.client.MultiSave(meta)
+	err := mt.client.MultiSave(meta, ts)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -455,34 +506,65 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	return nil
 }
 
-func (mt *metaTable) getPartitionByName(collID typeutil.UniqueID, partitionName string) (pb.PartitionInfo, error) {
-	collMeta, ok := mt.collID2Meta[collID]
-	if !ok {
-		return pb.PartitionInfo{}, fmt.Errorf("can't find collection id = %d", collID)
+func (mt *metaTable) getPartitionByName(collID typeutil.UniqueID, partitionName string, ts typeutil.Timestamp) (pb.PartitionInfo, error) {
+	if ts == 0 {
+		collMeta, ok := mt.collID2Meta[collID]
+		if !ok {
+			return pb.PartitionInfo{}, fmt.Errorf("can't find collection id = %d", collID)
+		}
+		for _, id := range collMeta.PartitionIDs {
+			partMeta, ok := mt.partitionID2Meta[id]
+			if ok && partMeta.PartitionName == partitionName {
+				return partMeta, nil
+			}
+		}
+		return pb.PartitionInfo{}, fmt.Errorf("partition %s does not exist", partitionName)
+	}
+	collKey := fmt.Sprintf("%s/%d", CollectionMetaPrefix, collID)
+	collVal, err := mt.client.Load(collKey, ts)
+	if err != nil {
+		return pb.PartitionInfo{}, err
+	}
+	collMeta := pb.CollectionMeta{}
+	err = proto.UnmarshalText(collVal, &collMeta)
+	if err != nil {
+		return pb.PartitionInfo{}, err
 	}
 	for _, id := range collMeta.PartitionIDs {
-		partMeta, ok := mt.partitionID2Meta[id]
-		if ok && partMeta.PartitionName == partitionName {
+		partKey := fmt.Sprintf("%s/%d/%d", PartitionMetaPrefix, collID, id)
+		partVal, err := mt.client.Load(partKey, ts)
+		if err != nil {
+			log.Debug("load partition meta failed", zap.String("collection name", collMeta.Schema.Name), zap.Int64("partition id", id))
+			continue
+		}
+		partMeta := pb.PartitionInfo{}
+		err = proto.UnmarshalText(partVal, &partMeta)
+		if err != nil {
+			log.Debug("unmarshal partition meta failed", zap.Error(err))
+			continue
+		}
+		if partMeta.PartitionName == partitionName {
 			return partMeta, nil
 		}
 	}
 	return pb.PartitionInfo{}, fmt.Errorf("partition %s does not exist", partitionName)
 }
 
-func (mt *metaTable) GetPartitionByName(collID typeutil.UniqueID, partitionName string) (pb.PartitionInfo, error) {
+func (mt *metaTable) GetPartitionByName(collID typeutil.UniqueID, partitionName string, ts typeutil.Timestamp) (pb.PartitionInfo, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
-	return mt.getPartitionByName(collID, partitionName)
+	return mt.getPartitionByName(collID, partitionName, ts)
 }
 
-func (mt *metaTable) HasPartition(collID typeutil.UniqueID, partitionName string) bool {
+func (mt *metaTable) HasPartition(collID typeutil.UniqueID, partitionName string, ts typeutil.Timestamp) bool {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
-	_, err := mt.getPartitionByName(collID, partitionName)
+	_, err := mt.getPartitionByName(collID, partitionName, ts)
 	return err == nil
+
 }
 
-func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, ddOpStr string) (typeutil.UniqueID, error) {
+func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, ts typeutil.Timestamp, ddOpStr string) (typeutil.UniqueID, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -543,7 +625,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	meta[DDOperationPrefix] = ddOpStr
 	meta[DDMsgSendPrefix] = "false"
 
-	err := mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetaKeys)
+	err := mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetaKeys, ts)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return 0, err
@@ -551,17 +633,31 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	return partMeta.PartitionID, nil
 }
 
-func (mt *metaTable) GetPartitionByID(partitionID typeutil.UniqueID) (pb.PartitionInfo, error) {
+func (mt *metaTable) GetPartitionByID(collID typeutil.UniqueID, partitionID typeutil.UniqueID, ts typeutil.Timestamp) (pb.PartitionInfo, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
-	partMeta, ok := mt.partitionID2Meta[partitionID]
-	if !ok {
-		return pb.PartitionInfo{}, fmt.Errorf("partition id = %d not exist", partitionID)
+	if ts == 0 {
+		partMeta, ok := mt.partitionID2Meta[partitionID]
+		if !ok {
+			return pb.PartitionInfo{}, fmt.Errorf("partition id = %d not exist", partitionID)
+		}
+		return partMeta, nil
 	}
-	return partMeta, nil
+	partKey := fmt.Sprintf("%s/%d/%d", PartitionMetaPrefix, collID, partitionID)
+	partVal, err := mt.client.Load(partKey, ts)
+	if err != nil {
+		return pb.PartitionInfo{}, err
+	}
+	partInfo := pb.PartitionInfo{}
+	err = proto.UnmarshalText(partVal, &partInfo)
+	if err != nil {
+		return pb.PartitionInfo{}, err
+	}
+	return partInfo, nil
+
 }
 
-func (mt *metaTable) AddSegment(seg *datapb.SegmentInfo) error {
+func (mt *metaTable) AddSegment(seg *datapb.SegmentInfo, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	collMeta, ok := mt.collID2Meta[seg.CollectionID]
@@ -598,7 +694,7 @@ func (mt *metaTable) AddSegment(seg *datapb.SegmentInfo) error {
 	k := fmt.Sprintf("%s/%d/%d", PartitionMetaPrefix, seg.CollectionID, seg.PartitionID)
 	v := proto.MarshalTextString(&partMeta)
 
-	err := mt.client.Save(k, v)
+	err := mt.client.Save(k, v, ts)
 
 	if err != nil {
 		_ = mt.reloadFromKV()
@@ -607,7 +703,7 @@ func (mt *metaTable) AddSegment(seg *datapb.SegmentInfo) error {
 	return nil
 }
 
-func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo) error {
+func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -653,7 +749,7 @@ func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo) error {
 	k := fmt.Sprintf("%s/%d/%d/%d/%d", SegmentIndexMetaPrefix, collID, segIdxInfo.IndexID, partID, segIdxInfo.SegmentID)
 	v := proto.MarshalTextString(segIdxInfo)
 
-	err := mt.client.Save(k, v)
+	err := mt.client.Save(k, v, ts)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -666,7 +762,7 @@ func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo) error {
 	return nil
 }
 
-func (mt *metaTable) DropIndex(collName, fieldName, indexName string) (typeutil.UniqueID, bool, error) {
+func (mt *metaTable) DropIndex(collName, fieldName, indexName string, ts typeutil.Timestamp) (typeutil.UniqueID, bool, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -734,7 +830,7 @@ func (mt *metaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 		fmt.Sprintf("%s/%d/%d", IndexMetaPrefix, collMeta.ID, dropIdxID),
 	}
 
-	err = mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMeta)
+	err = mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMeta, ts)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return 0, false, err
@@ -845,7 +941,7 @@ func (mt *metaTable) unlockIsSegmentIndexed(segID typeutil.UniqueID, fieldSchema
 }
 
 // return segment ids, type params, error
-func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, idxInfo *pb.IndexInfo) ([]typeutil.UniqueID, schemapb.FieldSchema, error) {
+func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, idxInfo *pb.IndexInfo, ts typeutil.Timestamp) ([]typeutil.UniqueID, schemapb.FieldSchema, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -913,7 +1009,7 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 			meta[k] = v
 		}
 
-		err = mt.client.MultiSave(meta)
+		err = mt.client.MultiSave(meta, ts)
 		if err != nil {
 			_ = mt.reloadFromKV()
 			return nil, schemapb.FieldSchema{}, err
@@ -936,7 +1032,7 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 				meta[k] = v
 			}
 
-			err = mt.client.MultiSave(meta)
+			err = mt.client.MultiSave(meta, ts)
 			if err != nil {
 				_ = mt.reloadFromKV()
 				return nil, schemapb.FieldSchema{}, err

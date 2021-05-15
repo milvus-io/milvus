@@ -215,6 +215,7 @@ func TestMasterService(t *testing.T) {
 		collArray: make([]string, 0, 16),
 		mutex:     sync.Mutex{},
 	}
+
 	err = core.SetProxyService(ctx, pm)
 	assert.Nil(t, err)
 
@@ -241,6 +242,13 @@ func TestMasterService(t *testing.T) {
 
 	err = core.Init()
 	assert.Nil(t, err)
+
+	var gtso uint64 = 0
+	core.TSOAllocator = func(c uint32) (uint64, error) {
+		gtso += uint64(c)
+		return gtso, nil
+
+	}
 
 	err = core.Start()
 	assert.Nil(t, err)
@@ -353,7 +361,7 @@ func TestMasterService(t *testing.T) {
 
 		createMsg, ok := (msg.Msgs[0]).(*msgstream.CreateCollectionMsg)
 		assert.True(t, ok)
-		createMeta, err := core.MetaTable.GetCollectionByName("testColl")
+		createMeta, err := core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		assert.Equal(t, createMsg.CollectionID, createMeta.ID)
 		assert.Equal(t, len(createMeta.PartitionIDs), 1)
@@ -402,15 +410,15 @@ func TestMasterService(t *testing.T) {
 		assert.True(t, ok)
 		createMsg, ok = (msg.Msgs[0]).(*msgstream.CreateCollectionMsg)
 		assert.True(t, ok)
-		createMeta, err = core.MetaTable.GetCollectionByName("testColl-again")
+		createMeta, err = core.MetaTable.GetCollectionByName("testColl-again", 0)
 		assert.Nil(t, err)
 		assert.Equal(t, createMsg.CollectionID, createMeta.ID)
 
 		// check DD operation info
-		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix)
+		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, "true", flag)
-		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix)
+		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
@@ -478,7 +486,7 @@ func TestMasterService(t *testing.T) {
 	})
 
 	t.Run("describe collection", func(t *testing.T) {
-		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
+		collMeta, err := core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		req := &milvuspb.DescribeCollectionRequest{
 			Base: &commonpb.MsgBase{
@@ -531,10 +539,10 @@ func TestMasterService(t *testing.T) {
 		status, err := core.CreatePartition(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
-		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
+		collMeta, err := core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.PartitionIDs), 2)
-		partMeta, err := core.MetaTable.GetPartitionByID(collMeta.PartitionIDs[1])
+		partMeta, err := core.MetaTable.GetPartitionByID(1, collMeta.PartitionIDs[1], 0)
 		assert.Nil(t, err)
 		assert.Equal(t, partMeta.PartitionName, "testPartition")
 
@@ -550,10 +558,10 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, "testColl", pm.GetCollArray()[0])
 
 		// check DD operation info
-		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix)
+		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, "true", flag)
-		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix)
+		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
@@ -586,7 +594,7 @@ func TestMasterService(t *testing.T) {
 	})
 
 	t.Run("show partition", func(t *testing.T) {
-		coll, err := core.MetaTable.GetCollectionByName("testColl")
+		coll, err := core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		req := &milvuspb.ShowPartitionsRequest{
 			Base: &commonpb.MsgBase{
@@ -607,10 +615,10 @@ func TestMasterService(t *testing.T) {
 	})
 
 	t.Run("show segment", func(t *testing.T) {
-		coll, err := core.MetaTable.GetCollectionByName("testColl")
+		coll, err := core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		partID := coll.PartitionIDs[1]
-		part, err := core.MetaTable.GetPartitionByID(partID)
+		part, err := core.MetaTable.GetPartitionByID(1, partID, 0)
 		assert.Nil(t, err)
 		assert.Zero(t, len(part.SegmentIDs))
 
@@ -643,7 +651,7 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 
-		part, err = core.MetaTable.GetPartitionByID(partID)
+		part, err = core.MetaTable.GetPartitionByID(1, partID, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, len(part.SegmentIDs), 1)
 
@@ -682,10 +690,11 @@ func TestMasterService(t *testing.T) {
 				},
 			},
 		}
-		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
+		collMeta, err := core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.FieldIndexes), 0)
 
+		gtso = 180
 		rsp, err := core.CreateIndex(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_Success)
@@ -693,7 +702,7 @@ func TestMasterService(t *testing.T) {
 		files := im.getFileArray()
 		assert.Equal(t, 3, len(files))
 		assert.ElementsMatch(t, files, []string{"file0-100", "file1-100", "file2-100"})
-		collMeta, err = core.MetaTable.GetCollectionByName("testColl")
+		collMeta, err = core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.FieldIndexes), 1)
 		idxMeta, err := core.MetaTable.GetIndexByID(collMeta.FieldIndexes[0].IndexID)
@@ -707,7 +716,7 @@ func TestMasterService(t *testing.T) {
 	})
 
 	t.Run("describe segment", func(t *testing.T) {
-		coll, err := core.MetaTable.GetCollectionByName("testColl")
+		coll, err := core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 
 		req := &milvuspb.DescribeSegmentRequest{
@@ -767,10 +776,10 @@ func TestMasterService(t *testing.T) {
 	})
 
 	t.Run("flush segment", func(t *testing.T) {
-		coll, err := core.MetaTable.GetCollectionByName("testColl")
+		coll, err := core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		partID := coll.PartitionIDs[1]
-		part, err := core.MetaTable.GetPartitionByID(partID)
+		part, err := core.MetaTable.GetPartitionByID(1, partID, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, len(part.SegmentIDs), 1)
 
@@ -799,11 +808,12 @@ func TestMasterService(t *testing.T) {
 			},
 		}
 		msgPack.Msgs = append(msgPack.Msgs, segMsg)
+		gtso = 200
 		err = dataServiceSegmentStream.Broadcast(&msgPack)
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 
-		part, err = core.MetaTable.GetPartitionByID(partID)
+		part, err = core.MetaTable.GetPartitionByID(1, partID, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, len(part.SegmentIDs), 2)
 
@@ -862,17 +872,18 @@ func TestMasterService(t *testing.T) {
 			},
 		}
 
-		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
+		collMeta, err := core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.FieldIndexes), 1)
 		oldIdx := collMeta.FieldIndexes[0].IndexID
 
+		gtso = 211
 		rsp, err := core.CreateIndex(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_Success)
 		time.Sleep(time.Second)
 
-		collMeta, err = core.MetaTable.GetCollectionByName("testColl")
+		collMeta, err = core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.FieldIndexes), 2)
 
@@ -892,9 +903,9 @@ func TestMasterService(t *testing.T) {
 		req := &milvuspb.DropIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DropIndex,
-				MsgID:     215,
-				Timestamp: 215,
-				SourceID:  215,
+				MsgID:     220,
+				Timestamp: 220,
+				SourceID:  220,
 			},
 			DbName:         "",
 			CollectionName: "testColl",
@@ -923,24 +934,24 @@ func TestMasterService(t *testing.T) {
 		req := &milvuspb.DropPartitionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DropPartition,
-				MsgID:     220,
-				Timestamp: 220,
-				SourceID:  220,
+				MsgID:     230,
+				Timestamp: 230,
+				SourceID:  230,
 			},
 			DbName:         "testDb",
 			CollectionName: "testColl",
 			PartitionName:  "testPartition",
 		}
-		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
+		collMeta, err := core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		dropPartID := collMeta.PartitionIDs[1]
 		status, err := core.DropPartition(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
-		collMeta, err = core.MetaTable.GetCollectionByName("testColl")
+		collMeta, err = core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.PartitionIDs), 1)
-		partMeta, err := core.MetaTable.GetPartitionByID(collMeta.PartitionIDs[0])
+		partMeta, err := core.MetaTable.GetPartitionByID(1, collMeta.PartitionIDs[0], 0)
 		assert.Nil(t, err)
 		assert.Equal(t, partMeta.PartitionName, Params.DefaultPartitionName)
 
@@ -956,10 +967,10 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, "testColl", pm.GetCollArray()[1])
 
 		// check DD operation info
-		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix)
+		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, "true", flag)
-		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix)
+		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
@@ -977,14 +988,14 @@ func TestMasterService(t *testing.T) {
 		req := &milvuspb.DropCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DropCollection,
-				MsgID:     230,
-				Timestamp: 230,
-				SourceID:  230,
+				MsgID:     240,
+				Timestamp: 240,
+				SourceID:  240,
 			},
 			DbName:         "testDb",
 			CollectionName: "testColl",
 		}
-		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
+		collMeta, err := core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		status, err := core.DropCollection(ctx, req)
 		assert.Nil(t, err)
@@ -1009,9 +1020,9 @@ func TestMasterService(t *testing.T) {
 		req = &milvuspb.DropCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DropCollection,
-				MsgID:     231,
-				Timestamp: 231,
-				SourceID:  231,
+				MsgID:     241,
+				Timestamp: 241,
+				SourceID:  241,
 			},
 			DbName:         "testDb",
 			CollectionName: "testColl",
@@ -1026,10 +1037,10 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, collArray[2], "testColl")
 
 		// check DD operation info
-		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix)
+		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, "true", flag)
-		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix)
+		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
@@ -1565,10 +1576,10 @@ func TestMasterService(t *testing.T) {
 	})
 
 	t.Run("alloc_error", func(t *testing.T) {
-		core.idAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+		core.IDAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 			return 0, 0, fmt.Errorf("id allocator error test")
 		}
-		core.tsoAllocator = func(count uint32) (typeutil.Timestamp, error) {
+		core.TSOAllocator = func(count uint32) (typeutil.Timestamp, error) {
 			return 0, fmt.Errorf("tso allcoator error test")
 		}
 		r1 := &masterpb.AllocTimestampRequest{
@@ -1613,35 +1624,31 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.idAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	c.IDAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		return 0, 0, nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.idAllocatorUpdate = func() error {
+	c.IDAllocatorUpdate = func() error {
 		return nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.tsoAllocator = func(count uint32) (typeutil.Timestamp, error) {
+	c.TSOAllocator = func(count uint32) (typeutil.Timestamp, error) {
 		return 0, nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.tsoAllocatorUpdate = func() error {
+	c.TSOAllocatorUpdate = func() error {
 		return nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
 	c.etcdCli = &clientv3.Client{}
-	err = c.checkInit()
-	assert.NotNil(t, err)
-
-	c.metaKV = &etcdkv.EtcdKV{}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 

@@ -114,7 +114,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	}
 	schema.Fields = append(schema.Fields, rowIDField, timeStampField)
 
-	collID, _, err := t.core.idAllocator(1)
+	collID, _, err := t.core.IDAllocator(1)
 	if err != nil {
 		return err
 	}
@@ -122,7 +122,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	partID, _, err := t.core.idAllocator(1)
+	partID, _, err := t.core.IDAllocator(1)
 	if err != nil {
 		return err
 	}
@@ -202,7 +202,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	err = t.core.MetaTable.AddCollection(&collInfo, &partInfo, idxInfo, ddOpStr)
+	err = t.core.MetaTable.AddCollection(&collInfo, &partInfo, idxInfo, t.Req.Base.Timestamp, ddOpStr)
 	if err != nil {
 		return err
 	}
@@ -246,7 +246,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("drop collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
 
-	collMeta, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
+	collMeta, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName, 0)
 	if err != nil {
 		return err
 	}
@@ -266,7 +266,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	err = t.core.MetaTable.DeleteCollection(collMeta.ID, ddOpStr)
+	err = t.core.MetaTable.DeleteCollection(collMeta.ID, t.Req.Base.Timestamp, ddOpStr)
 	if err != nil {
 		return err
 	}
@@ -316,7 +316,7 @@ func (t *HasCollectionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_HasCollection {
 		return fmt.Errorf("has collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	_, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
+	_, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName, 0)
 	if err == nil {
 		t.HasCollection = true
 	} else {
@@ -355,12 +355,12 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 	var err error
 
 	if t.Req.CollectionName != "" {
-		coll, err = t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
+		coll, err = t.core.MetaTable.GetCollectionByName(t.Req.CollectionName, 0)
 		if err != nil {
 			return err
 		}
 	} else {
-		coll, err = t.core.MetaTable.GetCollectionByID(t.Req.CollectionID)
+		coll, err = t.core.MetaTable.GetCollectionByID(t.Req.CollectionID, 0)
 		if err != nil {
 			return err
 		}
@@ -404,7 +404,7 @@ func (t *ShowCollectionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_ShowCollections {
 		return fmt.Errorf("show collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	coll, err := t.core.MetaTable.ListCollections()
+	coll, err := t.core.MetaTable.ListCollections(0)
 	if err != nil {
 		return err
 	}
@@ -437,11 +437,11 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_CreatePartition {
 		return fmt.Errorf("create partition, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	collMeta, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
+	collMeta, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName, 0)
 	if err != nil {
 		return err
 	}
-	partID, _, err := t.core.idAllocator(1)
+	partID, _, err := t.core.IDAllocator(1)
 	if err != nil {
 		return err
 	}
@@ -463,7 +463,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	err = t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, ddOpStr)
+	err = t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, t.Req.Base.Timestamp, ddOpStr)
 	if err != nil {
 		return err
 	}
@@ -505,11 +505,11 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DropPartition {
 		return fmt.Errorf("drop partition, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	collInfo, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
+	collInfo, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName, 0)
 	if err != nil {
 		return err
 	}
-	partInfo, err := t.core.MetaTable.GetPartitionByName(collInfo.ID, t.Req.PartitionName)
+	partInfo, err := t.core.MetaTable.GetPartitionByName(collInfo.ID, t.Req.PartitionName, 0)
 	if err != nil {
 		return err
 	}
@@ -531,7 +531,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	_, err = t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, ddOpStr)
+	_, err = t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, t.Req.Base.Timestamp, ddOpStr)
 	if err != nil {
 		return err
 	}
@@ -574,11 +574,11 @@ func (t *HasPartitionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_HasPartition {
 		return fmt.Errorf("has partition, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	coll, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
+	coll, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName, 0)
 	if err != nil {
 		return err
 	}
-	t.HasPartition = t.core.MetaTable.HasPartition(coll.ID, t.Req.PartitionName)
+	t.HasPartition = t.core.MetaTable.HasPartition(coll.ID, t.Req.PartitionName, 0)
 	return nil
 }
 
@@ -611,15 +611,15 @@ func (t *ShowPartitionReqTask) Execute(ctx context.Context) error {
 	var coll *etcdpb.CollectionInfo
 	var err error
 	if t.Req.CollectionName == "" {
-		coll, err = t.core.MetaTable.GetCollectionByID(t.Req.CollectionID)
+		coll, err = t.core.MetaTable.GetCollectionByID(t.Req.CollectionID, 0)
 	} else {
-		coll, err = t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
+		coll, err = t.core.MetaTable.GetCollectionByName(t.Req.CollectionName, 0)
 	}
 	if err != nil {
 		return err
 	}
 	for _, partID := range coll.PartitionIDs {
-		partMeta, err := t.core.MetaTable.GetPartitionByID(partID)
+		partMeta, err := t.core.MetaTable.GetPartitionByID(coll.ID, partID, 0)
 		if err != nil {
 			return err
 		}
@@ -655,7 +655,7 @@ func (t *DescribeSegmentReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DescribeSegment {
 		return fmt.Errorf("describe segment, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	coll, err := t.core.MetaTable.GetCollectionByID(t.Req.CollectionID)
+	coll, err := t.core.MetaTable.GetCollectionByID(t.Req.CollectionID, 0)
 	if err != nil {
 		return err
 	}
@@ -664,7 +664,7 @@ func (t *DescribeSegmentReqTask) Execute(ctx context.Context) error {
 		if exist {
 			break
 		}
-		partMeta, err := t.core.MetaTable.GetPartitionByID(partID)
+		partMeta, err := t.core.MetaTable.GetPartitionByID(coll.ID, partID, 0)
 		if err != nil {
 			return err
 		}
@@ -715,7 +715,7 @@ func (t *ShowSegmentReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_ShowSegments {
 		return fmt.Errorf("show segments, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	coll, err := t.core.MetaTable.GetCollectionByID(t.Req.CollectionID)
+	coll, err := t.core.MetaTable.GetCollectionByID(t.Req.CollectionID, 0)
 	if err != nil {
 		return err
 	}
@@ -729,7 +729,7 @@ func (t *ShowSegmentReqTask) Execute(ctx context.Context) error {
 	if !exist {
 		return fmt.Errorf("partition id = %d not belong to collection id = %d", t.Req.PartitionID, t.Req.CollectionID)
 	}
-	partMeta, err := t.core.MetaTable.GetPartitionByID(t.Req.PartitionID)
+	partMeta, err := t.core.MetaTable.GetPartitionByID(coll.ID, t.Req.PartitionID, 0)
 	if err != nil {
 		return err
 	}
@@ -763,7 +763,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("create index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
 	indexName := Params.DefaultIndexName //TODO, get name from request
-	indexID, _, err := t.core.idAllocator(1)
+	indexID, _, err := t.core.IDAllocator(1)
 	if err != nil {
 		return err
 	}
@@ -772,7 +772,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		IndexID:     indexID,
 		IndexParams: t.Req.ExtraParams,
 	}
-	segIDs, field, err := t.core.MetaTable.GetNotIndexedSegments(t.Req.CollectionName, t.Req.FieldName, idxInfo)
+	segIDs, field, err := t.core.MetaTable.GetNotIndexedSegments(t.Req.CollectionName, t.Req.FieldName, idxInfo, t.Req.Base.Timestamp)
 	if err != nil {
 		return err
 	}
@@ -877,6 +877,6 @@ func (t *DropIndexReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, _, err = t.core.MetaTable.DropIndex(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
+	_, _, err = t.core.MetaTable.DropIndex(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName, t.Req.Base.Timestamp)
 	return err
 }
