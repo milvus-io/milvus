@@ -9,29 +9,50 @@ from pymilvus_orm.schema import CollectionSchema, FieldSchema
 from utils.util_log import test_log as log
 from common.common_type import *
 
-
 """" Methods of processing data """
 l2 = lambda x, y: np.linalg.norm(np.array(x) - np.array(y))
 
 get_unique_str = "test_" + "".join(random.choice(string.ascii_letters + string.digits) for _ in range(8))
 
 
-def get_default_fields():
-    fields = []
-    int64_field = FieldSchema(name=default_int64_field, dtype=DataType.INT64, description="int64 type field")
-    float_field = FieldSchema(name=default_float_field, dtype=DataType.FLOAT, description="float type field")
-    float_vec_field = FieldSchema(name=default_float_vec_field_name, dtype=DataType.FLOAT_VECTOR, dim=128,
-                                  description="float_vector type field")
-    fields.append(int64_field)
-    fields.append(float_field)
-    fields.append(float_vec_field)
-    return fields
+def gen_int64_field(is_primary=False):
+    description = "int64 type field"
+    int64_field = FieldSchema(name=default_int64_field, dtype=DataType.INT64, description=description,
+                              is_primary=is_primary)
+    return int64_field
 
 
-def get_default_collection_schema():
-    fields = get_default_fields()
+def gen_float_field(is_primary=False):
+    description = "float type field"
+    float_field = FieldSchema(name=default_float_field, dtype=DataType.FLOAT, description=description,
+                              is_primary=is_primary)
+    return float_field
+
+
+def gen_float_vec_field(is_primary=False):
+    description = "float vector type field"
+    float_vec_field = FieldSchema(name=default_float_vec_field_name, dtype=DataType.FLOAT_VECTOR,
+                                  description=description, dim=default_dim, is_primary=is_primary)
+    return float_vec_field
+
+
+def gen_binary_vec_field(is_primary=False):
+    description = "binary vector type field"
+    binary_vec_field = FieldSchema(name=default_binary_vec_field_name, dtype=DataType.BINARY_VECTOR,
+                                   description=description, is_primary=is_primary)
+    return binary_vec_field
+
+
+def gen_default_collection_schema():
+    fields = [gen_int64_field(), gen_float_field(), gen_float_vec_field()]
     schema = CollectionSchema(fields=fields, description="default collection")
     return schema
+
+
+def gen_default_binary_collection_schema():
+    fields = [gen_int64_field(), gen_float_field(), gen_binary_vec_field()]
+    binary_schema = CollectionSchema(fields=fields, description="default binary collection")
+    return binary_schema
 
 
 def get_binary_default_fields(auto_id=True):

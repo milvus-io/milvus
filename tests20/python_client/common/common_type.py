@@ -24,8 +24,19 @@ row_count = "row_count"
 
 
 """" List of parameters used to pass """
-get_invalid_strs = [[], 1, [1, "2", 3], (1,), {1: 1}, None, "12-s", "12 s", "(mn)", "中文", "%$#",
-                    "a".join("a" for i in range(256))]
+get_invalid_strs = [
+    [],
+    1,
+    [1, "2", 3],
+    (1,),
+    {1: 1},
+    None,
+    "12-s",
+    "12 s",
+    "(mn)",
+    "中文",
+    "%$#",
+    "a".join("a" for i in range(256))]
 
 
 """ Specially defined list """
@@ -47,10 +58,12 @@ binary_metrics = ["JACCARD", "HAMMING", "TANIMOTO", "SUBSTRUCTURE", "SUPERSTRUCT
 structure_metrics = ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
 
 
-""" The name of the method used to check the result """
-cname_param_check = "cname_param_check"
-pname_param_check = "pname_param_check"
-collection_property_check = "collection_property_check"
+class CheckParams:
+    """ The name of the method used to check the result """
+    cname_param_check = "collection_name_param_check"
+    pname_param_check = "partition_name_param_check"
+    list_count = "check_list_count"
+    collection_property_check = "collection_property_check"
 
 
 class CaseLabel:
