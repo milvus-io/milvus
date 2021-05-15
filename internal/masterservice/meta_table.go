@@ -12,7 +12,7 @@
 package masterservice
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"strconv"
@@ -21,16 +21,13 @@ import (
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
-	"errors"
-
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 const (
@@ -42,14 +39,13 @@ const (
 	SegmentIndexMetaPrefix = ComponentPrefix + "/segment-index"
 	IndexMetaPrefix        = ComponentPrefix + "/index"
 
-	DDMsgPrefix     = ComponentPrefix + "/dd-msg"
-	DDMsgTypePrefix = ComponentPrefix + "/dd-msg-type"
-	DDMsgFlagPrefix = ComponentPrefix + "/dd-msg-flag"
+	DDOperationPrefix = ComponentPrefix + "/dd-operation"
+	DDMsgSendPrefix   = ComponentPrefix + "/dd-msg-send"
 
-	CreateCollectionMsgType = "CreateCollection"
-	DropCollectionMsgType   = "DropCollection"
-	CreatePartitionMsgType  = "CreatePartition"
-	DropPartitionMsgType    = "DropPartition"
+	CreateCollectionDDType = "CreateCollection"
+	DropCollectionDDType   = "DropCollection"
+	CreatePartitionDDType  = "CreatePartition"
+	DropPartitionDDType    = "DropPartition"
 )
 
 type metaTable struct {
@@ -232,7 +228,7 @@ func (mt *metaTable) AddProxy(po *pb.ProxyMeta) error {
 	return nil
 }
 
-func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo, idx []*pb.IndexInfo) error {
+func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo, idx []*pb.IndexInfo, ddOpStr string) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -270,16 +266,11 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 		meta[k] = v
 	}
 
-	// record ddmsg info and type
-	ddmsg, err := json.Marshal(meta)
-	if err != nil {
-		return err
-	}
-	meta[DDMsgPrefix] = string(ddmsg)
-	meta[DDMsgTypePrefix] = CreateCollectionMsgType
-	meta[DDMsgFlagPrefix] = "false"
+	// save ddOpStr into etcd
+	meta[DDOperationPrefix] = ddOpStr
+	meta[DDMsgSendPrefix] = "false"
 
-	err = mt.client.MultiSave(meta)
+	err := mt.client.MultiSave(meta)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -288,7 +279,7 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 	return nil
 }
 
-func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID) error {
+func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr string) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -333,18 +324,13 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID) error {
 		fmt.Sprintf("%s/%d", IndexMetaPrefix, collID),
 	}
 
-	// record ddmsg info and type
-	ddmsg, err := json.Marshal(collID)
-	if err != nil {
-		return err
-	}
-	saveMeta := map[string]string{
-		DDMsgPrefix:     string(ddmsg),
-		DDMsgTypePrefix: DropCollectionMsgType,
-		DDMsgFlagPrefix: "false",
+	// save ddOpStr into etcd
+	var saveMeta = map[string]string{
+		DDOperationPrefix: ddOpStr,
+		DDMsgSendPrefix:   "false",
 	}
 
-	err = mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys)
+	err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -416,7 +402,7 @@ func (mt *metaTable) ListCollections() ([]string, error) {
 	return colls, nil
 }
 
-func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID) error {
+func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, ddOpStr string) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	coll, ok := mt.collID2Meta[collID]
@@ -457,16 +443,11 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	v2 := proto.MarshalTextString(&partMeta)
 	meta := map[string]string{k1: v1, k2: v2}
 
-	// record ddmsg info and type
-	ddmsg, err := json.Marshal(meta)
-	if err != nil {
-		return err
-	}
-	meta[DDMsgPrefix] = string(ddmsg)
-	meta[DDMsgTypePrefix] = CreatePartitionMsgType
-	meta[DDMsgFlagPrefix] = "false"
+	// save ddOpStr into etcd
+	meta[DDOperationPrefix] = ddOpStr
+	meta[DDMsgSendPrefix] = "false"
 
-	err = mt.client.MultiSave(meta)
+	err := mt.client.MultiSave(meta)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -474,25 +455,34 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	return nil
 }
 
+func (mt *metaTable) getPartitionByName(collID typeutil.UniqueID, partitionName string) (pb.PartitionInfo, error) {
+	collMeta, ok := mt.collID2Meta[collID]
+	if !ok {
+		return pb.PartitionInfo{}, fmt.Errorf("can't find collection id = %d", collID)
+	}
+	for _, id := range collMeta.PartitionIDs {
+		partMeta, ok := mt.partitionID2Meta[id]
+		if ok && partMeta.PartitionName == partitionName {
+			return partMeta, nil
+		}
+	}
+	return pb.PartitionInfo{}, fmt.Errorf("partition %s does not exist", partitionName)
+}
+
+func (mt *metaTable) GetPartitionByName(collID typeutil.UniqueID, partitionName string) (pb.PartitionInfo, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	return mt.getPartitionByName(collID, partitionName)
+}
+
 func (mt *metaTable) HasPartition(collID typeutil.UniqueID, partitionName string) bool {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
-	col, ok := mt.collID2Meta[collID]
-	if !ok {
-		return false
-	}
-	for _, partitionID := range col.PartitionIDs {
-		meta, ok := mt.partitionID2Meta[partitionID]
-		if ok {
-			if meta.PartitionName == partitionName {
-				return true
-			}
-		}
-	}
-	return false
+	_, err := mt.getPartitionByName(collID, partitionName)
+	return err == nil
 }
 
-func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName string) (typeutil.UniqueID, error) {
+func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, ddOpStr string) (typeutil.UniqueID, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -540,7 +530,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 		}
 		delete(mt.segID2IndexMeta, segID)
 	}
-	collKV := map[string]string{path.Join(CollectionMetaPrefix, strconv.FormatInt(collID, 10)): proto.MarshalTextString(&collMeta)}
+	meta := map[string]string{path.Join(CollectionMetaPrefix, strconv.FormatInt(collID, 10)): proto.MarshalTextString(&collMeta)}
 	delMetaKeys := []string{
 		fmt.Sprintf("%s/%d/%d", PartitionMetaPrefix, collMeta.ID, partMeta.PartitionID),
 	}
@@ -549,16 +539,11 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 		delMetaKeys = append(delMetaKeys, k)
 	}
 
-	// record ddmsg info and type
-	ddmsg, err := json.Marshal(collKV)
-	if err != nil {
-		return 0, err
-	}
-	collKV[DDMsgPrefix] = string(ddmsg)
-	collKV[DDMsgTypePrefix] = DropPartitionMsgType
-	collKV[DDMsgFlagPrefix] = "false"
+	// save ddOpStr into etcd
+	meta[DDOperationPrefix] = ddOpStr
+	meta[DDMsgSendPrefix] = "false"
 
-	err = mt.client.MultiSaveAndRemoveWithPrefix(collKV, delMetaKeys)
+	err := mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetaKeys)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return 0, err

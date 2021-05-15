@@ -37,9 +37,12 @@ else
   MILVUS_SERVICE_TYPE="${MILVUS_SERVICE_TYPE:-ClusterIP}"
 fi
 
-TMP_DIR="$(mktemp -d)"
 
-git clone --depth=1 -b "${MILVUS_HELM_BRANCH:-main}" "${MILVUS_HELM_REPO}" "${TMP_DIR}"
+if [[ ! -d "${MILVUS_HELM_CHART_PATH:-}" ]]; then
+  TMP_DIR="$(mktemp -d)"
+  git clone --depth=1 -b "${MILVUS_HELM_BRANCH:-main}" "${MILVUS_HELM_REPO}" "${TMP_DIR}"
+  MILVUS_HELM_CHART_PATH="${TMP_DIR}/charts/milvus-ha"
+fi
 
 kubectl create namespace "${MILVUS_HELM_NAMESPACE}" || true
 
@@ -52,7 +55,7 @@ if [[ "${MILVUS_STANDALONE_ENABLED}" == "false" ]]; then
                                  --set proxynode.service.type="${MILVUS_SERVICE_TYPE}" \
                                  --namespace "${MILVUS_HELM_NAMESPACE}" \
                                  "${MILVUS_HELM_RELEASE_NAME}" \
-                                 ${@:-} "${TMP_DIR}/charts/milvus-ha"
+                                 ${@:-} "${MILVUS_HELM_CHART_PATH}"
 else
   helm install --wait --timeout "${MILVUS_INSTALL_TIMEOUT}" \
                                  --set image.all.repository="${MILVUS_IMAGE_REPO}" \
@@ -62,5 +65,5 @@ else
                                  --set standalone.service.type="${MILVUS_SERVICE_TYPE}" \
                                  --namespace "${MILVUS_HELM_NAMESPACE}" \
                                  "${MILVUS_HELM_RELEASE_NAME}" \
-                                 ${@:-} "${TMP_DIR}/charts/milvus-ha"
+                                 ${@:-} "${MILVUS_HELM_CHART_PATH}"
 fi

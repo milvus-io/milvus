@@ -13,7 +13,9 @@ package indexservice
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"math/rand"
 	"sync"
 	"time"
@@ -63,6 +65,13 @@ type IndexService struct {
 
 	nodeLock sync.RWMutex
 
+	etcdKV  *etcdkv.EtcdKV
+	session struct {
+		NodeName string
+		IP       string
+		LeaseID  clientv3.LeaseID
+	}
+
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
@@ -84,15 +93,14 @@ func NewIndexService(ctx context.Context) (*IndexService, error) {
 }
 
 func (i *IndexService) Init() error {
-	etcdAddress := Params.EtcdAddress
-	log.Debug("indexservice", zap.String("etcd address", etcdAddress))
+	log.Debug("indexservice", zap.String("etcd address", Params.EtcdAddress))
 	connectEtcdFn := func() error {
-		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
+		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
 		if err != nil {
 			return err
 		}
-		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
-		metakv, err := NewMetaTable(etcdKV)
+		i.etcdKV = etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+		metakv, err := NewMetaTable(i.etcdKV)
 		if err != nil {
 			return err
 		}
@@ -104,9 +112,21 @@ func (i *IndexService) Init() error {
 		return err
 	}
 
+	ch, err := i.registerService("indexservice", Params.Address)
+	if err != nil {
+		return err
+	}
+	go func() {
+		for {
+			for range ch {
+				//TODO process lesase response
+			}
+		}
+	}()
+
 	//init idAllocator
 	kvRootPath := Params.KvRootPath
-	i.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{etcdAddress}, kvRootPath, "index_gid"))
+	i.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{Params.EtcdAddress}, kvRootPath, "index_gid"))
 	if err := i.idAllocator.Initialize(); err != nil {
 		return err
 	}
@@ -415,4 +435,33 @@ func (i *IndexService) dropIndexLoop() {
 			}
 		}
 	}
+}
+
+func (i *IndexService) registerService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+	respID, err := i.etcdKV.Grant(5)
+	if err != nil {
+		fmt.Printf("grant error %s\n", err)
+		return nil, err
+	}
+	i.session.NodeName = nodeName
+	i.session.IP = ip
+	i.session.LeaseID = respID
+
+	sessionJSON, err := json.Marshal(i.session)
+	if err != nil {
+		return nil, err
+	}
+
+	err = i.etcdKV.SaveWithLease(fmt.Sprintf("/node/%s", nodeName), string(sessionJSON), respID)
+	if err != nil {
+		fmt.Printf("put lease error %s\n", err)
+		return nil, err
+	}
+
+	ch, err := i.etcdKV.KeepAlive(respID)
+	if err != nil {
+		fmt.Printf("keep alive error %s\n", err)
+		return nil, err
+	}
+	return ch, nil
 }

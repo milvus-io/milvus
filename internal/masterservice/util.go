@@ -12,8 +12,10 @@
 package masterservice
 
 import (
+	"encoding/json"
 	"fmt"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -65,4 +67,20 @@ func GetFieldSchemaByIndexID(coll *etcdpb.CollectionInfo, idxID typeutil.UniqueI
 		return nil, fmt.Errorf("index id = %d is not attach to any field", idxID)
 	}
 	return GetFieldSchemaByID(coll, fieldID)
+}
+
+// EncodeDdOperation serialize DdOperation into string
+func EncodeDdOperation(m proto.Message, m1 proto.Message, ddType string) (string, error) {
+	mStr := proto.MarshalTextString(m)
+	m1Str := proto.MarshalTextString(m1)
+	ddOp := DdOperation{
+		Body:  mStr,
+		Body1: m1Str, // used for DdCreateCollection only
+		Type:  ddType,
+	}
+	ddOpByte, err := json.Marshal(ddOp)
+	if err != nil {
+		return "", err
+	}
+	return string(ddOpByte), nil
 }

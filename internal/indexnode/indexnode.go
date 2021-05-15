@@ -13,7 +13,9 @@ package indexnode
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math/rand"
 	"time"
@@ -21,6 +23,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -29,7 +32,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.etcd.io/etcd/clientv3"
 )
 
 const (
@@ -55,6 +60,13 @@ type IndexNode struct {
 	startCallbacks []func()
 	closeCallbacks []func()
 
+	etcdKV  *etcdkv.EtcdKV
+	session struct {
+		NodeName string
+		IP       string
+		LeaseID  clientv3.LeaseID
+	}
+
 	closer io.Closer
 }
 
@@ -76,8 +88,33 @@ func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 
 func (i *IndexNode) Init() error {
 	ctx := context.Background()
-	err := funcutil.WaitForComponentHealthy(ctx, i.serviceClient, "IndexService", 1000000, time.Millisecond*200)
 
+	connectEtcdFn := func() error {
+		etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second})
+		if err != nil {
+			return err
+		}
+		i.etcdKV = etcdkv.NewEtcdKV(etcdCli, Params.MetaRootPath)
+		return nil
+	}
+	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	if err != nil {
+		return err
+	}
+
+	ch, err := i.registerService(fmt.Sprintf("indexnode-%d", Params.NodeID), Params.IP)
+	if err != nil {
+		return err
+	}
+	go func() {
+		for {
+			for range ch {
+				//TODO process lesase response
+			}
+		}
+	}()
+
+	err = funcutil.WaitForComponentHealthy(ctx, i.serviceClient, "IndexService", 1000000, time.Millisecond*200)
 	if err != nil {
 		return err
 	}
@@ -263,4 +300,33 @@ func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringR
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}, nil
+}
+
+func (i *IndexNode) registerService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+	respID, err := i.etcdKV.Grant(5)
+	if err != nil {
+		fmt.Printf("grant error %s\n", err)
+		return nil, err
+	}
+	i.session.NodeName = nodeName
+	i.session.IP = ip
+	i.session.LeaseID = respID
+
+	sessionJSON, err := json.Marshal(i.session)
+	if err != nil {
+		return nil, err
+	}
+
+	err = i.etcdKV.SaveWithLease(fmt.Sprintf("/node/%s", nodeName), string(sessionJSON), respID)
+	if err != nil {
+		fmt.Printf("put lease error %s\n", err)
+		return nil, err
+	}
+
+	ch, err := i.etcdKV.KeepAlive(respID)
+	if err != nil {
+		fmt.Printf("keep alive error %s\n", err)
+		return nil, err
+	}
+	return ch, nil
 }

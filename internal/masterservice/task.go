@@ -122,11 +122,11 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	partitionID, _, err := t.core.idAllocator(1)
+	partID, _, err := t.core.idAllocator(1)
 	if err != nil {
 		return err
 	}
-	collMeta := etcdpb.CollectionInfo{
+	collInfo := etcdpb.CollectionInfo{
 		ID:           collID,
 		Schema:       &schema,
 		CreateTime:   collTs,
@@ -135,9 +135,9 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	}
 
 	// every collection has _default partition
-	partMeta := etcdpb.PartitionInfo{
+	partInfo := etcdpb.PartitionInfo{
 		PartitionName: Params.DefaultPartitionName,
-		PartitionID:   partitionID,
+		PartitionID:   partID,
 		SegmentIDs:    make([]typeutil.UniqueID, 0, 16),
 	}
 	idxInfo := make([]*etcdpb.IndexInfo, 0, 16)
@@ -164,11 +164,6 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	//	}
 	//}
 
-	err = t.core.MetaTable.AddCollection(&collMeta, &partMeta, idxInfo)
-	if err != nil {
-		return err
-	}
-
 	// schema is modified (add RowIDField and TimestampField),
 	// so need Marshal again
 	schemaBytes, err := proto.Marshal(&schema)
@@ -176,7 +171,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	ddReq := internalpb.CreateCollectionRequest{
+	ddCollReq := internalpb.CreateCollectionRequest{
 		Base:           t.Req.Base,
 		DbName:         t.Req.DbName,
 		CollectionName: t.Req.CollectionName,
@@ -185,12 +180,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		Schema:         schemaBytes,
 	}
 
-	err = t.core.DdCreateCollectionReq(ctx, &ddReq)
-	if err != nil {
-		return err
-	}
-
-	ddPart := internalpb.CreatePartitionRequest{
+	ddPartReq := internalpb.CreatePartitionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_CreatePartition,
 			MsgID:     t.Req.Base.MsgID, //TODO, msg id
@@ -201,19 +191,33 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		CollectionName: t.Req.CollectionName,
 		PartitionName:  Params.DefaultPartitionName,
 		DbID:           0, //TODO, not used
-		CollectionID:   collMeta.ID,
-		PartitionID:    partMeta.PartitionID,
+		CollectionID:   collInfo.ID,
+		PartitionID:    partInfo.PartitionID,
 	}
 
-	err = t.core.DdCreatePartitionReq(ctx, &ddPart)
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddOpStr, err := EncodeDdOperation(&ddCollReq, &ddPartReq, CreateCollectionDDType)
 	if err != nil {
 		return err
 	}
 
-	// Marking DDMsgFlagPrefix to true means ddMsg has been send successfully
-	t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
+	err = t.core.MetaTable.AddCollection(&collInfo, &partInfo, idxInfo, ddOpStr)
+	if err != nil {
+		return err
+	}
 
-	return nil
+	err = t.core.SendDdCreateCollectionReq(ctx, &ddCollReq)
+	if err != nil {
+		return err
+	}
+	err = t.core.SendDdCreatePartitionReq(ctx, &ddPartReq)
+	if err != nil {
+		return err
+	}
+
+	// Update DDOperation in etcd
+	return t.core.setDdMsgSendFlag(true)
 }
 
 type DropCollectionReqTask struct {
@@ -246,16 +250,6 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName); err != nil {
-		return err
-	}
-
-	err = t.core.MetaTable.DeleteCollection(collMeta.ID)
-	if err != nil {
-		return err
-	}
-
-	//data service should drop segments , which belong to this collection, from the segment manager
 
 	ddReq := internalpb.DropCollectionRequest{
 		Base:           t.Req.Base,
@@ -265,7 +259,19 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		CollectionID:   collMeta.ID,
 	}
 
-	err = t.core.DdDropCollectionReq(ctx, &ddReq)
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddOpStr, err := EncodeDdOperation(&ddReq, nil, DropCollectionDDType)
+	if err != nil {
+		return err
+	}
+
+	err = t.core.MetaTable.DeleteCollection(collMeta.ID, ddOpStr)
+	if err != nil {
+		return err
+	}
+
+	err = t.core.SendDdDropCollectionReq(ctx, &ddReq)
 	if err != nil {
 		return err
 	}
@@ -277,10 +283,11 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		}
 	}()
 
-	// Marking DDMsgFlagPrefix to true means ddMsg has been send successfully
-	t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
+	// error doesn't matter here
+	t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
-	return nil
+	// Update DDOperation in etcd
+	return t.core.setDdMsgSendFlag(true)
 }
 
 type HasCollectionReqTask struct {
@@ -434,11 +441,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	partitionID, _, err := t.core.idAllocator(1)
-	if err != nil {
-		return err
-	}
-	err = t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partitionID)
+	partID, _, err := t.core.idAllocator(1)
 	if err != nil {
 		return err
 	}
@@ -450,21 +453,31 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		PartitionName:  t.Req.PartitionName,
 		DbID:           0, // todo, not used
 		CollectionID:   collMeta.ID,
-		PartitionID:    partitionID,
+		PartitionID:    partID,
 	}
 
-	err = t.core.DdCreatePartitionReq(ctx, &ddReq)
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddOpStr, err := EncodeDdOperation(&ddReq, nil, CreatePartitionDDType)
+	if err != nil {
+		return err
+	}
+
+	err = t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, ddOpStr)
+	if err != nil {
+		return err
+	}
+
+	err = t.core.SendDdCreatePartitionReq(ctx, &ddReq)
 	if err != nil {
 		return err
 	}
 
 	// error doesn't matter here
-	_ = t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
+	t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
-	// Marking DDMsgFlagPrefix to true means ddMsg has been send successfully
-	t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
-
-	return nil
+	// Update DDOperation in etcd
+	return t.core.setDdMsgSendFlag(true)
 }
 
 type DropPartitionReqTask struct {
@@ -492,11 +505,11 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DropPartition {
 		return fmt.Errorf("drop partition, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	coll, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
+	collInfo, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
 	if err != nil {
 		return err
 	}
-	partID, err := t.core.MetaTable.DeletePartition(coll.ID, t.Req.PartitionName)
+	partInfo, err := t.core.MetaTable.GetPartitionByName(collInfo.ID, t.Req.PartitionName)
 	if err != nil {
 		return err
 	}
@@ -507,22 +520,32 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		CollectionName: t.Req.CollectionName,
 		PartitionName:  t.Req.PartitionName,
 		DbID:           0, //todo,not used
-		CollectionID:   coll.ID,
-		PartitionID:    partID,
+		CollectionID:   collInfo.ID,
+		PartitionID:    partInfo.PartitionID,
 	}
 
-	err = t.core.DdDropPartitionReq(ctx, &ddReq)
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddOpStr, err := EncodeDdOperation(&ddReq, nil, DropPartitionDDType)
+	if err != nil {
+		return err
+	}
+
+	_, err = t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, ddOpStr)
+	if err != nil {
+		return err
+	}
+
+	err = t.core.SendDdDropPartitionReq(ctx, &ddReq)
 	if err != nil {
 		return err
 	}
 
 	// error doesn't matter here
-	_ = t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
+	t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
-	// Marking DDMsgFlagPrefix to true means ddMsg has been send successfully
-	t.core.MetaTable.client.Save(DDMsgFlagPrefix, "true")
-
-	return nil
+	// Update DDOperation in etcd
+	return t.core.setDdMsgSendFlag(true)
 }
 
 type HasPartitionReqTask struct {

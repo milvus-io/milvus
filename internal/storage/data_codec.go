@@ -146,6 +146,14 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		return nil, errors.New("data doesn't contains timestamp field")
 	}
 	ts := timeFieldData.(*Int64FieldData).Data
+	startTs := ts[0]
+	endTs := ts[len(ts)-1]
+
+	dataSorter := &DataSorter{
+		InsertCodec: insertCodec,
+		InsertData:  data,
+	}
+	sort.Sort(dataSorter)
 
 	for _, field := range insertCodec.Schema.Schema.Fields {
 		singleData := data.Data[field.FieldID]
@@ -154,8 +162,8 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		if err != nil {
 			return nil, err
 		}
-		eventWriter.SetStartTimestamp(typeutil.Timestamp(ts[0]))
-		eventWriter.SetEndTimestamp(typeutil.Timestamp(ts[len(ts)-1]))
+		eventWriter.SetStartTimestamp(typeutil.Timestamp(startTs))
+		eventWriter.SetEndTimestamp(typeutil.Timestamp(endTs))
 		switch field.DataType {
 		case schemapb.DataType_Bool:
 			err = eventWriter.AddBoolToPayload(singleData.(*BoolFieldData).Data)
@@ -188,8 +196,8 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		if err != nil {
 			return nil, err
 		}
-		writer.SetStartTimeStamp(typeutil.Timestamp(ts[0]))
-		writer.SetEndTimeStamp(typeutil.Timestamp(ts[len(ts)-1]))
+		writer.SetStartTimeStamp(typeutil.Timestamp(startTs))
+		writer.SetEndTimeStamp(typeutil.Timestamp(endTs))
 
 		err = writer.Close()
 		if err != nil {

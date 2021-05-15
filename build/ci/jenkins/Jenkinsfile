@@ -35,7 +35,7 @@ pipeline {
                     }
                 }
                 environment {
-                    IMAGE_REPO = "registry.zilliz.com/milvus"
+                    IMAGE_REPO = "dockerhub-mirror-sh.zilliz.cc/milvusdb"
                     DOCKER_BUILDKIT = 1
                     DOCKER_VOLUME_DIRECTORY = "/mnt/disk/.docker"
                     ARTIFACTS = "${env.WORKSPACE}/artifacts"
@@ -94,6 +94,8 @@ pipeline {
                                 dir("${env.ARTIFACTS}") {
                                     sh "tar -zcvf artifacts-milvus-${MILVUS_SERVER_TYPE}-e2e-kind.tar.gz ./kind --remove-files || true"
                                     archiveArtifacts artifacts: "artifacts-milvus-${MILVUS_SERVER_TYPE}-e2e-kind.tar.gz", allowEmptyArchive: true
+                                    sh 'docker rm -f \$(docker network inspect -f \'{{ range \$key, \$value := .Containers }}{{ printf "%s " \$key}}{{ end }}\' kind) || true'
+                                    sh 'docker network rm kind || true'
                                 }
                             }
                         }

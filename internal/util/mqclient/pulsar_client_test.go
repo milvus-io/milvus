@@ -19,8 +19,10 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/prometheus/common/log"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -43,7 +45,7 @@ func Produce(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, 
 	assert.Nil(t, err)
 	assert.NotNil(t, producer)
 
-	log.Infof("Produce start")
+	log.Info("Produce start")
 
 	for _, v := range arr {
 		msg := &ProducerMessage{
@@ -52,10 +54,10 @@ func Produce(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, 
 		}
 		err = producer.Send(ctx, msg)
 		assert.Nil(t, err)
-		log.Infof("SND %d", v)
+		log.Info("Pub", zap.Any("SND", v))
 	}
 
-	log.Infof("Produce done")
+	log.Info("Produce done")
 }
 
 // Consume1 will consume random messages and record the last MessageID it received
@@ -71,7 +73,7 @@ func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
-	log.Infof("Consume1 start")
+	log.Info("Consume1 start")
 
 	// get random number between 1 ~ 5
 	rand.Seed(time.Now().UnixNano())
@@ -81,18 +83,18 @@ func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 	for i := 0; i < cnt; i++ {
 		select {
 		case <-ctx.Done():
-			log.Infof("Consume1 channel closed")
+			log.Info("Consume1 channel closed")
 			return
 		case msg = <-consumer.Chan():
 			//consumer.Ack(msg)
 			v := BytesToInt(msg.Payload())
-			log.Infof("RECV v = %d", v)
+			log.Info("RECV", zap.Any("v", v))
 		}
 	}
 	c <- msg.ID()
 
-	log.Infof("Consume1 randomly RECV %d messages", cnt)
-	log.Infof("Consume1 done")
+	log.Info("Consume1 randomly RECV", zap.Any("number", cnt))
+	log.Info("Consume1 done")
 }
 
 // Consume2 will consume messages from specified MessageID
@@ -114,17 +116,17 @@ func Consume2(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 	// skip the last received message
 	<-consumer.Chan()
 
-	log.Infof("Consume2 start")
+	log.Info("Consume2 start")
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Infof("Consume2 channel closed")
+			log.Info("Consume2 channel closed")
 			return
 		case msg := <-consumer.Chan():
 			//consumer.Ack(msg)
 			v := BytesToInt(msg.Payload())
-			log.Infof("RECV v = %d", v)
+			log.Info("RECV", zap.Any("v", v))
 		}
 	}
 }
@@ -153,7 +155,7 @@ func TestPulsarClient(t *testing.T) {
 
 	// record the last received message id
 	lastMsgID := <-c
-	log.Info(lastMsgID)
+	log.Info("msg", zap.Any("lastMsgID", lastMsgID))
 
 	// launch consume2
 	go Consume2(ctx, t, pc, topic, subName, lastMsgID)
@@ -162,5 +164,5 @@ func TestPulsarClient(t *testing.T) {
 	// stop Consume2
 	cancel()
 
-	log.Infof("main done")
+	log.Info("main done")
 }
