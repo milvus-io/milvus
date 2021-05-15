@@ -1714,10 +1714,6 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.indexTaskQueue = make(chan *CreateIndexTask)
-	err = c.checkInit()
-	assert.NotNil(t, err)
-
 	c.DataNodeSegmentFlushCompletedChan = make(chan int64)
 	err = c.checkInit()
 	assert.NotNil(t, err)
