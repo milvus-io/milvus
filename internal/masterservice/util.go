@@ -85,6 +85,7 @@ func EncodeDdOperation(m proto.Message, m1 proto.Message, ddType string) (string
 	return string(ddOpByte), nil
 }
 
+// SegmentIndexInfoEqual return true if 2 SegmentIndexInfo are identical
 func SegmentIndexInfoEqual(info1 *etcdpb.SegmentIndexInfo, info2 *etcdpb.SegmentIndexInfo) bool {
 	return info1.SegmentID == info2.SegmentID &&
 		info1.FieldID == info2.FieldID &&
