@@ -777,7 +777,7 @@ func (c *Core) SetQueryService(s types.QueryService) error {
 	return nil
 }
 
-// BuildIndex
+// BuildIndex will check row num and call build index service
 func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, isFlush bool) error {
 	if c.MetaTable.IsSegmentIndexed(segID, field, idxInfo.IndexParams) {
 		return nil
@@ -789,7 +789,7 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 	var bldID typeutil.UniqueID
 	enableIdx := false
 	if rows < Params.MinSegmentSizeToEnableIndex {
-		log.Debug("num of is less than MinSegmentSizeToEnableIndex", zap.Int64("num rows", rows))
+		log.Debug("num of rows is less than MinSegmentSizeToEnableIndex", zap.Int64("num rows", rows))
 	} else {
 		binlogs, err := c.GetBinlogFilePathsFromDataServiceReq(segID, field.FieldID)
 		if err != nil {
