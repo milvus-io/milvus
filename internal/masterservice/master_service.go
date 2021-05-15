@@ -777,6 +777,7 @@ func (c *Core) SetQueryService(s types.QueryService) error {
 	return nil
 }
 
+// BuildIndex
 func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, isFlush bool) error {
 	if c.MetaTable.IsSegmentIndexed(segID, field, idxInfo.IndexParams) {
 		return nil
@@ -785,7 +786,7 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 	if err != nil {
 		return err
 	}
-	var bldID typeutil.UniqueID = 0
+	var bldID typeutil.UniqueID
 	enableIdx := false
 	if rows < Params.MinSegmentSizeToEnableIndex {
 		log.Debug("num of is less than MinSegmentSizeToEnableIndex", zap.Int64("num rows", rows))
