@@ -176,4 +176,5 @@ clean:
 	@find . -name '*~' | xargs rm -fv
 	@rm -rf bin/
 	@rm -rf lib/
-	@rm -rf $(GOPATH)/bin/*
+	@rm $(GOPATH)/bin/standalone
+	@rm $(GOPATH)/bin/milvus
