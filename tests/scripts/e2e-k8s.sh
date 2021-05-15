@@ -48,7 +48,7 @@ while (( "$#" )); do
       NODE_IMAGE=$2
       shift 2
     ;;
-    # Config for enabling different Kubernetes features in KinD (see prow/config{endpointslice.yaml,trustworthy-jwt.yaml}).
+    # Config for enabling different Kubernetes features in KinD (see build/config/topology/trustworthy-jwt.yaml).
     --kind-config)
     KIND_CONFIG=$2
     shift 2
