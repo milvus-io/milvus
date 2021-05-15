@@ -51,7 +51,8 @@ class GPUIVF : public IVF, public GPUIndex {
     LoadImpl(const BinarySet&, const IndexType&) override;
 
     void
-    QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&) override;
+    QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
+              faiss::ConcurrentBitsetPtr blacklist);
 };
 
 using GPUIVFPtr = std::shared_ptr<GPUIVF>;

@@ -47,12 +47,7 @@ class IVF : public VecIndex, public FaissBaseIndex {
     AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
-    Query(const DatasetPtr&, const Config&) override;
-
-#if 0
-    DatasetPtr
-    QueryById(const DatasetPtr& dataset, const Config& config) override;
-#endif
+    Query(const DatasetPtr& dataset_ptr, const Config& config, faiss::ConcurrentBitsetPtr blacklist) override;
 
     int64_t
     Count() override;
@@ -82,7 +77,8 @@ class IVF : public VecIndex, public FaissBaseIndex {
     GenParams(const Config&);
 
     virtual void
-    QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&);
+    QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
+              faiss::ConcurrentBitsetPtr blacklist);
 
     void
     SealImpl() override;

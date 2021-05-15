@@ -133,7 +133,8 @@ GPUIVF::LoadImpl(const BinarySet& binary_set, const IndexType& type) {
 }
 
 void
-GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
+GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
+                  faiss::ConcurrentBitsetPtr blacklist) {
     auto device_index = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_);
     fiu_do_on("GPUIVF.search_impl.invald_index", device_index = nullptr);
     if (device_index) {
@@ -145,8 +146,7 @@ GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int
         int64_t dim = device_index->d;
         for (int64_t i = 0; i < n; i += block_size) {
             int64_t search_size = (n - i > block_size) ? block_size : (n - i);
-            device_index->search(search_size, (float*)data + i * dim, k, distances + i * k, labels + i * k,
-                                 GetBlacklist());
+            device_index->search(search_size, (float*)data + i * dim, k, distances + i * k, labels + i * k, blacklist);
         }
     } else {
         KNOWHERE_THROW_MSG("Not a GpuIndexIVF type.");

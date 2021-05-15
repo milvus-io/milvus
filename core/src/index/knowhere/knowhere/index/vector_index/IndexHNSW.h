@@ -40,7 +40,7 @@ class IndexHNSW : public VecIndex {
     AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
-    Query(const DatasetPtr& dataset_ptr, const Config& config) override;
+    Query(const DatasetPtr& dataset_ptr, const Config& config, faiss::ConcurrentBitsetPtr blacklist) override;
 
     int64_t
     Count() override;
