@@ -37,6 +37,7 @@ pull_request_rules:
   - name: Auto merge for document changed
     conditions:
       - base=master
+      - -files~=^[^\.]+$
       - -files~=\.(?!md|png)
       - "#approved-reviews-by>=1"
       - "#changes-requested-reviews-by=0"
