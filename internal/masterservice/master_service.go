@@ -344,16 +344,25 @@ func (c *Core) startSegmentFlushCompletedLoop() {
 				}
 
 				fieldSch, err := GetFieldSchemaByID(coll, f.FiledID)
-				if err == nil {
-					task := &CreateIndexTask{
-						segmentID:         seg,
-						indexName:         idxInfo.IndexName,
-						indexID:           idxInfo.IndexID,
-						fieldSchema:       fieldSch,
-						indexParams:       idxInfo.IndexParams,
-						isFromFlushedChan: true,
-					}
-					c.BuildIndex(task)
+				if err != nil {
+					log.Warn("field schema not found", zap.Int64("field id", f.FiledID))
+					continue
+				}
+
+				task := &CreateIndexTask{
+					segmentID:         seg,
+					indexName:         idxInfo.IndexName,
+					indexID:           idxInfo.IndexID,
+					fieldSchema:       fieldSch,
+					indexParams:       idxInfo.IndexParams,
+					isFromFlushedChan: true,
+				}
+				if err = c.BuildIndex(task); err != nil {
+					log.Warn("create index failed", zap.String("error", err.Error()))
+				} else {
+					log.Debug("create index", zap.String("index name", task.indexName),
+						zap.String("field name", task.fieldSchema.Name),
+						zap.Int64("segment id", task.segmentID))
 				}
 			}
 		}

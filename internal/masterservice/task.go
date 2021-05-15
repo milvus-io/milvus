@@ -788,7 +788,13 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 			indexParams:       t.Req.ExtraParams,
 			isFromFlushedChan: false,
 		}
-		t.core.BuildIndex(task)
+		if err := t.core.BuildIndex(task); err != nil {
+			log.Warn("create index failed", zap.String("error", err.Error()))
+		} else {
+			log.Debug("create index", zap.String("index name", task.indexName),
+				zap.String("field name", task.fieldSchema.Name),
+				zap.Int64("segment id", task.segmentID))
+		}
 	}
 	return nil
 }
