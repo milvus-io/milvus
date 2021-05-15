@@ -15,7 +15,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -31,12 +30,14 @@ import (
 	ms "github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -322,17 +323,17 @@ func (c *Core) startSegmentFlushCompletedLoop() {
 		case <-c.ctx.Done():
 			log.Debug("close segment flush completed loop")
 			return
-		case seg, ok := <-c.DataNodeSegmentFlushCompletedChan:
+		case segID, ok := <-c.DataNodeSegmentFlushCompletedChan:
 			if !ok {
 				log.Debug("data node segment flush completed chan has closed, exit loop")
 			}
-			log.Debug("flush segment", zap.Int64("id", seg))
-			coll, err := c.MetaTable.GetCollectionBySegmentID(seg)
+			log.Debug("flush segment", zap.Int64("id", segID))
+			coll, err := c.MetaTable.GetCollectionBySegmentID(segID)
 			if err != nil {
 				log.Warn("GetCollectionBySegmentID error", zap.Error(err))
 				break
 			}
-			err = c.MetaTable.AddFlushedSegment(seg)
+			err = c.MetaTable.AddFlushedSegment(segID)
 			if err != nil {
 				log.Warn("AddFlushedSegment error", zap.Error(err))
 			}
@@ -349,20 +350,12 @@ func (c *Core) startSegmentFlushCompletedLoop() {
 					continue
 				}
 
-				task := &CreateIndexTask{
-					segmentID:         seg,
-					indexName:         idxInfo.IndexName,
-					indexID:           idxInfo.IndexID,
-					fieldSchema:       fieldSch,
-					indexParams:       idxInfo.IndexParams,
-					isFromFlushedChan: true,
-				}
-				if err = c.BuildIndex(task); err != nil {
-					log.Warn("create index failed", zap.String("error", err.Error()))
+				if err = c.BuildIndex(segID, fieldSch, idxInfo, true); err != nil {
+					log.Warn("build index failed", zap.String("error", err.Error()))
 				} else {
-					log.Debug("create index", zap.String("index name", task.indexName),
-						zap.String("field name", task.fieldSchema.Name),
-						zap.Int64("segment id", task.segmentID))
+					log.Debug("build index", zap.String("index name", idxInfo.IndexName),
+						zap.String("field name", fieldSch.Name),
+						zap.Int64("segment id", segID))
 				}
 			}
 		}
@@ -784,11 +777,11 @@ func (c *Core) SetQueryService(s types.QueryService) error {
 	return nil
 }
 
-func (c *Core) BuildIndex(t *CreateIndexTask) error {
-	if c.MetaTable.IsSegmentIndexed(t.segmentID, t.fieldSchema, t.indexParams) {
+func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, isFlush bool) error {
+	if c.MetaTable.IsSegmentIndexed(segID, field, idxInfo.IndexParams) {
 		return nil
 	}
-	rows, err := c.GetNumRowsReq(t.segmentID, t.isFromFlushedChan)
+	rows, err := c.GetNumRowsReq(segID, isFlush)
 	if err != nil {
 		return err
 	}
@@ -797,20 +790,20 @@ func (c *Core) BuildIndex(t *CreateIndexTask) error {
 	if rows < Params.MinSegmentSizeToEnableIndex {
 		log.Debug("num of is less than MinSegmentSizeToEnableIndex", zap.Int64("num rows", rows))
 	} else {
-		binlogs, err := c.GetBinlogFilePathsFromDataServiceReq(t.segmentID, t.fieldSchema.FieldID)
+		binlogs, err := c.GetBinlogFilePathsFromDataServiceReq(segID, field.FieldID)
 		if err != nil {
 			return err
 		}
-		bldID, err = c.BuildIndexReq(c.ctx, binlogs, t.fieldSchema.TypeParams, t.indexParams, t.indexID, t.indexName)
+		bldID, err = c.BuildIndexReq(c.ctx, binlogs, field.TypeParams, idxInfo.IndexParams, idxInfo.IndexID, idxInfo.IndexName)
 		if err != nil {
 			return err
 		}
 		enableIdx = true
 	}
 	seg := etcdpb.SegmentIndexInfo{
-		SegmentID:   t.segmentID,
-		FieldID:     t.fieldSchema.FieldID,
-		IndexID:     t.indexID,
+		SegmentID:   segID,
+		FieldID:     field.FieldID,
+		IndexID:     idxInfo.IndexID,
 		BuildID:     bldID,
 		EnableIndex: enableIdx,
 	}

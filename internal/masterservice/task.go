@@ -779,21 +779,13 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	if field.DataType != schemapb.DataType_FloatVector && field.DataType != schemapb.DataType_BinaryVector {
 		return fmt.Errorf("field name = %s, data type = %s", t.Req.FieldName, schemapb.DataType_name[int32(field.DataType)])
 	}
-	for _, seg := range segIDs {
-		task := &CreateIndexTask{
-			segmentID:         seg,
-			indexName:         idxInfo.IndexName,
-			indexID:           idxInfo.IndexID,
-			fieldSchema:       &field,
-			indexParams:       t.Req.ExtraParams,
-			isFromFlushedChan: false,
-		}
-		if err := t.core.BuildIndex(task); err != nil {
-			log.Warn("create index failed", zap.String("error", err.Error()))
+	for _, segID := range segIDs {
+		if err := t.core.BuildIndex(segID, &field, idxInfo, false); err != nil {
+			log.Warn("build index failed", zap.String("error", err.Error()))
 		} else {
-			log.Debug("create index", zap.String("index name", task.indexName),
-				zap.String("field name", task.fieldSchema.Name),
-				zap.Int64("segment id", task.segmentID))
+			log.Debug("build index", zap.String("index name", idxInfo.IndexName),
+				zap.String("field name", field.Name),
+				zap.Int64("segment id", segID))
 		}
 	}
 	return nil
@@ -888,13 +880,4 @@ func (t *DropIndexReqTask) Execute(ctx context.Context) error {
 	}
 	_, _, err = t.core.MetaTable.DropIndex(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
 	return err
-}
-
-type CreateIndexTask struct {
-	segmentID         typeutil.UniqueID
-	indexName         string
-	indexID           typeutil.UniqueID
-	fieldSchema       *schemapb.FieldSchema
-	indexParams       []*commonpb.KeyValuePair
-	isFromFlushedChan bool
 }
