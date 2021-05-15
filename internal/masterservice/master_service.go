@@ -351,7 +351,7 @@ func (c *Core) startSegmentFlushCompletedLoop() {
 				}
 
 				if err = c.BuildIndex(segID, fieldSch, idxInfo, true); err != nil {
-					log.Warn("build index failed", zap.String("error", err.Error()))
+					log.Error("build index fail", zap.String("error", err.Error()))
 				} else {
 					log.Debug("build index", zap.String("index name", idxInfo.IndexName),
 						zap.String("field name", fieldSch.Name),

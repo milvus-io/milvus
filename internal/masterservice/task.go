@@ -781,12 +781,11 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	}
 	for _, segID := range segIDs {
 		if err := t.core.BuildIndex(segID, &field, idxInfo, false); err != nil {
-			log.Warn("build index failed", zap.String("error", err.Error()))
-		} else {
-			log.Debug("build index", zap.String("index name", idxInfo.IndexName),
-				zap.String("field name", field.Name),
-				zap.Int64("segment id", segID))
+			return err
 		}
+		log.Debug("build index", zap.String("index name", idxInfo.IndexName),
+			zap.String("field name", field.Name),
+			zap.Int64("segment id", segID))
 	}
 	return nil
 }
