@@ -779,19 +779,13 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	if field.DataType != schemapb.DataType_FloatVector && field.DataType != schemapb.DataType_BinaryVector {
 		return fmt.Errorf("field name = %s, data type = %s", t.Req.FieldName, schemapb.DataType_name[int32(field.DataType)])
 	}
-	for _, seg := range segIDs {
-		task := CreateIndexTask{
-			ctx:               t.core.ctx,
-			core:              t.core,
-			segmentID:         seg,
-			indexName:         idxInfo.IndexName,
-			indexID:           idxInfo.IndexID,
-			fieldSchema:       &field,
-			indexParams:       t.Req.ExtraParams,
-			isFromFlushedChan: false,
+	for _, segID := range segIDs {
+		if err := t.core.BuildIndex(segID, &field, idxInfo, false); err != nil {
+			return err
 		}
-		t.core.indexTaskQueue <- &task
-		fmt.Println("create index task enqueue, segID = ", seg)
+		log.Debug("build index", zap.String("index name", idxInfo.IndexName),
+			zap.String("field name", field.Name),
+			zap.Int64("segment id", segID))
 	}
 	return nil
 }
@@ -884,50 +878,5 @@ func (t *DropIndexReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 	_, _, err = t.core.MetaTable.DropIndex(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
-	return err
-}
-
-type CreateIndexTask struct {
-	ctx               context.Context
-	core              *Core
-	segmentID         typeutil.UniqueID
-	indexName         string
-	indexID           typeutil.UniqueID
-	fieldSchema       *schemapb.FieldSchema
-	indexParams       []*commonpb.KeyValuePair
-	isFromFlushedChan bool
-}
-
-func (t *CreateIndexTask) BuildIndex() error {
-	if t.core.MetaTable.IsSegmentIndexed(t.segmentID, t.fieldSchema, t.indexParams) {
-		return nil
-	}
-	rows, err := t.core.GetNumRowsReq(t.segmentID, t.isFromFlushedChan)
-	if err != nil {
-		return err
-	}
-	var bldID typeutil.UniqueID = 0
-	enableIdx := false
-	if rows < Params.MinSegmentSizeToEnableIndex {
-		log.Debug("num of is less than MinSegmentSizeToEnableIndex", zap.Int64("num rows", rows))
-	} else {
-		binlogs, err := t.core.GetBinlogFilePathsFromDataServiceReq(t.segmentID, t.fieldSchema.FieldID)
-		if err != nil {
-			return err
-		}
-		bldID, err = t.core.BuildIndexReq(t.ctx, binlogs, t.fieldSchema.TypeParams, t.indexParams, t.indexID, t.indexName)
-		if err != nil {
-			return err
-		}
-		enableIdx = true
-	}
-	seg := etcdpb.SegmentIndexInfo{
-		SegmentID:   t.segmentID,
-		FieldID:     t.fieldSchema.FieldID,
-		IndexID:     t.indexID,
-		BuildID:     bldID,
-		EnableIndex: enableIdx,
-	}
-	err = t.core.MetaTable.AddIndex(&seg)
 	return err
 }
