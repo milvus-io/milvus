@@ -23,17 +23,18 @@ import (
 	"time"
 
 	grpcmasterserviceclient "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
-	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/golang/protobuf/proto"
 	cms "github.com/milvus-io/milvus/internal/masterservice"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 )
@@ -132,7 +133,7 @@ func TestGrpcService(t *testing.T) {
 
 	var binlogLock sync.Mutex
 	binlogPathArray := make([]string, 0, 16)
-	core.BuildIndexReq = func(ctx context.Context, binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error) {
+	core.BuildIndexReq = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
 		binlogLock.Lock()
 		defer binlogLock.Unlock()
 		binlogPathArray = append(binlogPathArray, binlog...)

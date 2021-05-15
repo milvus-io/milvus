@@ -121,7 +121,7 @@ type Core struct {
 	GetNumRowsReq                        func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error)
 
 	//call index builder's client to build index, return build id
-	BuildIndexReq func(ctx context.Context, binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error)
+	BuildIndexReq func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error)
 	DropIndexReq  func(ctx context.Context, indexID typeutil.UniqueID) error
 
 	//proxy service interface, notify proxy service to drop collection
@@ -720,13 +720,13 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 }
 
 func (c *Core) SetIndexService(s types.IndexService) error {
-	c.BuildIndexReq = func(ctx context.Context, binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error) {
+	c.BuildIndexReq = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
 		rsp, err := s.BuildIndex(ctx, &indexpb.BuildIndexRequest{
 			DataPaths:   binlog,
-			TypeParams:  typeParams,
-			IndexParams: indexParams,
-			IndexID:     indexID,
-			IndexName:   indexName,
+			TypeParams:  field.TypeParams,
+			IndexParams: idxInfo.IndexParams,
+			IndexID:     idxInfo.IndexID,
+			IndexName:   idxInfo.IndexName,
 		})
 		if err != nil {
 			return 0, err
@@ -794,7 +794,7 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 		if err != nil {
 			return err
 		}
-		bldID, err = c.BuildIndexReq(c.ctx, binlogs, field.TypeParams, idxInfo.IndexParams, idxInfo.IndexID, idxInfo.IndexName)
+		bldID, err = c.BuildIndexReq(c.ctx, binlogs, field, idxInfo)
 		if err != nil {
 			return err
 		}
