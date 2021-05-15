@@ -24,9 +24,13 @@ class TestCollectionParams(ApiReq):
     # #5224
     @pytest.mark.tags(CaseLabel.L3)
     def test_collection(self):
+        """
+        target: test collection with default schema
+        method: create collection with default schema
+        expected: assert collection property
+        """
         self._connect()
         c_name = get_unique_str
-        log.info(c_name)
         collection, _ = self.collection.collection_init(c_name, data=None, schema=default_schema)
         assert collection.name == c_name
         assert collection.description == default_schema.description
@@ -58,7 +62,7 @@ class TestCollectionParams(ApiReq):
         ex, check = self.collection.collection_init(c_name, schema=default_schema)
         assert "invalid" or "illegal" in str(ex)
 
-    # #5231
+    # #5231 TODO
     def test_collection_dup_name(self):
         """
         target: test collection with dup name
@@ -69,13 +73,27 @@ class TestCollectionParams(ApiReq):
         c_name = get_unique_str
         collection, _ = self.collection.collection_init(c_name, data=None, schema=default_schema)
         assert collection.name == c_name
-        dup_name = c_name
-        dup_collection, _ = self.collection.collection_init(dup_name)
-        assert dup_name, c_name in self.utility.list_collections()
+        dup_collection, _ = self.collection.collection_init(c_name)
+        assert c_name, c_name in self.utility.list_collections()
         assert collection.name == dup_collection.name
-        log.debug(collection.schema)
-        log.debug(dup_collection.schema)
+        # log.debug(collection.schema)
+        # log.debug(dup_collection.schema)
         # assert collection.schema == dup_collection.schema
+
+    def test_collection_dup_name_new_schema(self):
+        """
+        target: test collection with dup name and new schema
+        method: 1.create collection with default schema 2. collection with dup name and new schema
+        expected: raise exception
+        """
+        self._connect()
+        c_name = get_unique_str
+        collection, _ = self.collection.collection_init(c_name, data=None, schema=default_schema)
+        assert collection.name == c_name
+        fields = [gen_int64_field()]
+        schema = gen_collection_schema(fields=fields)
+        ex, _ = self.collection.collection_init(c_name, schema=schema)
+        assert "The collection already exist, but the schema isnot the same as the passed in" in str(ex)
 
 
 class TestCollectionOperation(ApiReq):

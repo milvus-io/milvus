@@ -49,6 +49,11 @@ def gen_default_collection_schema():
     return schema
 
 
+def gen_collection_schema(fields, description="collection", **kwargs):
+    schema = CollectionSchema(fields=fields, description=description, **kwargs)
+    return schema
+
+
 def gen_default_binary_collection_schema():
     fields = [gen_int64_field(), gen_float_field(), gen_binary_vec_field()]
     binary_schema = CollectionSchema(fields=fields, description="default binary collection")
