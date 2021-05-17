@@ -232,7 +232,7 @@ MemTable::ApplyDeletes() {
         utils::GetParentPath(file.location_, segment_dir);
 
         segment::SegmentReader segment_reader(segment_dir);
-        segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
+        segment_reader.LoadBloomFilter(id_bloom_filter_ptr, true);
 
         for (auto& id : doc_ids_to_delete_) {
             if (id_bloom_filter_ptr->Check(id)) {

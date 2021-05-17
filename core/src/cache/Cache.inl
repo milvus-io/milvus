@@ -66,6 +66,16 @@ Cache<ItemObj>::insert(const std::string& key, const ItemObj& item) {
 
 template <typename ItemObj>
 void
+Cache<ItemObj>::insert_if_not_exist(const std::string& key, const ItemObj& item) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (lru_.exists(key) == true) {
+        return ;
+    }
+    insert_internal(key, item);
+}
+
+template <typename ItemObj>
+void
 Cache<ItemObj>::erase(const std::string& key) {
     std::lock_guard<std::mutex> lock(mutex_);
     erase_internal(key);

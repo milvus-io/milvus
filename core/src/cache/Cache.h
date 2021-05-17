@@ -67,6 +67,9 @@ class Cache {
     insert(const std::string& key, const ItemObj& item);
 
     void
+    insert_if_not_exist(const std::string& key, const ItemObj& item);
+
+    void
     erase(const std::string& key);
 
     bool
