@@ -1,5 +1,6 @@
 from utils.util_log import test_log as log
 from common.common_type import *
+from pymilvus_orm import Collection
 
 
 class CheckFunc:
@@ -16,7 +17,7 @@ class CheckFunc:
         self.keys = self.params.keys()
 
     def run(self):
-        check_result = True
+        check_result = None
 
         if self.check_res is None:
             pass
@@ -28,6 +29,8 @@ class CheckFunc:
         elif self.check_res == CheckParams.list_count and self.check_params is not None:
             check_result = self.check_list_count(self.res, self.func_name, self.check_params)
 
+        elif self.check_res == CheckParams.collection_property_check:
+            check_result = self.req_collection_property_check(self.res, self.func_name, self.params)
         return check_result
 
     @staticmethod
@@ -156,3 +159,18 @@ class CheckFunc:
                 assert message == "Invalid partition tag: %s. The length of a partition tag must be less than 255 characters." % str(params)
 
         return True
+
+    @staticmethod
+    def req_collection_property_check(collection, func_name, params):
+        '''
+        :param collection
+        :return:
+        '''
+        exp_func_name = "collection_init"
+        if func_name != exp_func_name:
+            log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
+        if not isinstance(collection, Collection):
+            raise Exception("The result to check isn't collection type object")
+        assert collection.name == params["name"]
+        assert collection.description == params["schema"].description
+        assert collection.schema == params["schema"]

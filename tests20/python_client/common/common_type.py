@@ -13,6 +13,9 @@ max_top_k = 16384
 max_partition_num = 4096  # 256
 default_segment_row_limit = 1000
 default_server_segment_row_limit = 1024 * 512
+default_alias = "default"
+default_int64_field = "int64"
+default_float_field = "float"
 default_float_vec_field_name = "float_vector"
 default_binary_vec_field_name = "binary_vector"
 default_partition_name = "_default"
@@ -21,8 +24,19 @@ row_count = "row_count"
 
 
 """" List of parameters used to pass """
-get_invalid_strs = [[], 1, [1, "2", 3], (1,), {1: 1}, None, "12-s", "12 s", "(mn)", "中文", "%$#",
-                    "a".join("a" for i in range(256))]
+get_invalid_strs = [
+    [],
+    1,
+    [1, "2", 3],
+    (1,),
+    {1: 1},
+    None,
+    "12-s",
+    "12 s",
+    "(mn)",
+    "中文",
+    "%$#",
+    "a".join("a" for i in range(256))]
 
 
 """ Specially defined list """
@@ -48,8 +62,8 @@ class CheckParams:
     """ The name of the method used to check the result """
     cname_param_check = "collection_name_param_check"
     pname_param_check = "partition_name_param_check"
-
     list_count = "check_list_count"
+    collection_property_check = "collection_property_check"
 
 
 class CaseLabel:
