@@ -4,8 +4,8 @@ services:
   pytest:
     image: ${IMAGE_REPO}/pytest:${IMAGE_TAG}
     build:
-      context: ..
-      dockerfile: ./docker/Dockerfile
+      context: ../..
+      dockerfile: tests/docker/Dockerfile
       cache_from:
         - ${IMAGE_REPO}/pytest:latest
     shm_size: 2G
@@ -13,8 +13,8 @@ services:
       SERVICE_IP: ${SERVICE_IP}
       SERVICE_PORT: ${SERVICE_PORT}
     volumes:
-      - ../python_test:/pytest:delegated
-    working_dir: "/pytest"
+      - ../../:/milvus:delegated
+    working_dir: "/milvus"
 
 networks:
   default:
