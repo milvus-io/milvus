@@ -104,7 +104,7 @@ SegmentReader::LoadVectorIndex(const std::string& location, segment::VectorIndex
 }
 
 Status
-SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
+SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr, bool cache_force) {
     codec::DefaultCodec default_codec;
     try {
         // load id_bloom_filter from cache
@@ -117,7 +117,11 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
             default_codec.GetIdBloomFilterFormat()->read(fs_ptr_, id_bloom_filter_ptr);
 
             // add id_bloom_filter into cache
-            cache::CpuCacheMgr::GetInstance()->InsertItem(cache_key, id_bloom_filter_ptr);
+            if (cache_force) {
+                cache::CpuCacheMgr::GetInstance()->InsertItem(cache_key, id_bloom_filter_ptr);
+            } else {
+                cache::CpuCacheMgr::GetInstance()->InsertItemIfNotExist(cache_key, id_bloom_filter_ptr);
+            }
         }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load bloom filter: " + std::string(e.what());
