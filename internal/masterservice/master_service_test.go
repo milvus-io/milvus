@@ -342,6 +342,7 @@ func TestMasterService(t *testing.T) {
 			DbName:         "testDb",
 			CollectionName: "testColl",
 			Schema:         sbf,
+			ShardsNum:      4,
 		}
 		status, err := core.CreateCollection(ctx, req)
 		assert.Nil(t, err)
@@ -357,6 +358,8 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, createMsg.CollectionID, createMeta.ID)
 		assert.Equal(t, len(createMeta.PartitionIDs), 1)
+		assert.Equal(t, len(createMeta.VirtualChannelNames), 4)
+		assert.Equal(t, len(createMeta.PhysicalChannelNames), 4)
 
 		if len(msg.Msgs) == 2 {
 			createPart, ok := (msg.Msgs[1]).(*msgstream.CreatePartitionMsg)

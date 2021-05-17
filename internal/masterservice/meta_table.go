@@ -54,6 +54,7 @@ type metaTable struct {
 	proxyID2Meta       map[typeutil.UniqueID]pb.ProxyMeta                               // proxy id to proxy meta
 	collID2Meta        map[typeutil.UniqueID]pb.CollectionInfo                          // collection_id -> meta
 	collName2ID        map[string]typeutil.UniqueID                                     // collection name to collection id
+	collVChan2Chan     map[string]string                                                // collection virtual channel name to channel name
 	partitionID2Meta   map[typeutil.UniqueID]pb.PartitionInfo                           // collection_id/partition_id -> meta
 	segID2IndexMeta    map[typeutil.UniqueID]*map[typeutil.UniqueID]pb.SegmentIndexInfo // collection_id/index_id/partition_id/segment_id -> meta
 	indexID2Meta       map[typeutil.UniqueID]pb.IndexInfo                               // collection_id/index_id -> meta
@@ -264,6 +265,12 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 		k := fmt.Sprintf("%s/%d/%d", IndexMetaPrefix, coll.ID, i.IndexID)
 		v := proto.MarshalTextString(i)
 		meta[k] = v
+	}
+
+	shardsNum := len(coll.PhysicalChannelNames)
+	mt.collVChan2Chan = make(map[string]string)
+	for i := 0; i < shardsNum; i++ {
+		mt.collVChan2Chan[coll.VirtualChannelNames[i]] = coll.PhysicalChannelNames[i]
 	}
 
 	// save ddOpStr into etcd
