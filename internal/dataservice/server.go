@@ -348,10 +348,13 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 				zap.String("StatisChanName", Params.StatisticsChannelName),
 				zap.String("DataServiceSubscriptionName", Params.DataServiceSubscriptionName),
 				zap.Error(err))
-		} else {
-			// drop first pack since it's processed
-			_ = statsStream.Consume()
-		}
+		} //else {
+		// drop first pack since it's processed
+		// _ = statsStream.Consume()
+		//}
+
+		// cannot drop whole pack in case of multiple msgs in one pack
+		// redo the duplicated message using API's Idempotent
 	}
 	statsStream.Start()
 	defer statsStream.Close()
@@ -407,10 +410,13 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 				zap.String("SegInfoChannelName", Params.SegmentInfoChannelName),
 				zap.String("DataServiceSubscriptionName", Params.DataServiceSubscriptionName),
 				zap.Error(err))
-		} else {
-			// drop first pack since it's processed
-			_ = flushStream.Consume()
-		}
+		} //else {
+		// drop first pack since it's processed
+		// 	_ = flushStream.Consume()
+		// }
+
+		// cannot drop whole pack in case of multiple msgs in one pack
+		// redo the duplicated message using API's Idempotent
 	}
 
 	flushStream.Start()
