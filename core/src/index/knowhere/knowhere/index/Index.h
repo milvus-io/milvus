@@ -31,15 +31,20 @@ class Index : public milvus::cache::DataObj {
 
 using IndexPtr = std::shared_ptr<Index>;
 
-// todo: remove from knowhere
-class ToIndexData : public milvus::cache::DataObj {
+class Blacklist : public milvus::cache::DataObj {
  public:
-    explicit ToIndexData(int64_t size) : size_(size) {
+    explicit Blacklist() {
     }
 
- private:
-    int64_t size_ = 0;
+    int64_t
+    Size() override {
+        return (bitset_ != nullptr) ? 0 : bitset_->size();
+    }
+
+    faiss::ConcurrentBitsetPtr bitset_ = nullptr;
 };
+
+using BlacklistPtr = std::shared_ptr<Blacklist>;
 
 }  // namespace knowhere
 }  // namespace milvus

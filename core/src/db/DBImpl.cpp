@@ -574,7 +574,7 @@ DBImpl::ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::v
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
-
+#if 0 // todo
     meta::FilesHolder files_holder;
     std::vector<size_t> file_ids;
     for (auto& id : segment_ids) {
@@ -624,7 +624,7 @@ DBImpl::ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::v
             blacklist->set(i);
         }
     }
-
+#endif
     return Status::OK();
 }
 
@@ -1547,7 +1547,7 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
                         // Load raw vector
                         std::vector<uint8_t> raw_vector;
                         status =
-                            segment_reader.LoadVectors(offset * single_vector_bytes, single_vector_bytes, raw_vector);
+                            segment_reader.LoadsSingleVector(offset * single_vector_bytes, single_vector_bytes, raw_vector);
                         if (!status.ok()) {
                             LOG_ENGINE_ERROR_ << status.message();
                             return status;
