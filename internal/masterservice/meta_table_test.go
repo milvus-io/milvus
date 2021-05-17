@@ -302,15 +302,23 @@ func TestMetaTable(t *testing.T) {
 	})
 
 	t.Run("add segment index", func(t *testing.T) {
-		seg := pb.SegmentIndexInfo{
+		segIdxInfo := pb.SegmentIndexInfo{
 			SegmentID: segID,
 			FieldID:   fieldID,
 			IndexID:   10000,
 			BuildID:   201,
 		}
-		err := mt.AddIndex(&seg)
+		err := mt.AddIndex(&segIdxInfo)
 		assert.Nil(t, err)
-		assert.NotNil(t, mt.AddIndex(&seg))
+
+		// it's legal to add index twice
+		err = mt.AddIndex(&segIdxInfo)
+		assert.Nil(t, err)
+
+		segIdxInfo.BuildID = 202
+		err = mt.AddIndex(&segIdxInfo)
+		assert.NotNil(t, err)
+		assert.EqualError(t, err, fmt.Sprintf("index id = %d exist", segIdxInfo.IndexID))
 	})
 
 	t.Run("get not indexed segments", func(t *testing.T) {
@@ -697,30 +705,30 @@ func TestMetaTable(t *testing.T) {
 		}
 		assert.Nil(t, mt.AddSegment(seg))
 
-		idx := &pb.SegmentIndexInfo{
+		segIdxInfo := &pb.SegmentIndexInfo{
 			SegmentID: 100,
 			FieldID:   110,
 			IndexID:   10001,
 			BuildID:   201,
 		}
-		err = mt.AddIndex(idx)
+		err = mt.AddIndex(segIdxInfo)
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, fmt.Sprintf("index id = %d not found", idx.IndexID))
+		assert.EqualError(t, err, fmt.Sprintf("index id = %d not found", segIdxInfo.IndexID))
 
 		mt.segID2PartitionID = make(map[int64]int64)
-		err = mt.AddIndex(idx)
+		err = mt.AddIndex(segIdxInfo)
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, fmt.Sprintf("segment id = %d not belong to any partition", idx.SegmentID))
+		assert.EqualError(t, err, fmt.Sprintf("segment id = %d not belong to any partition", segIdxInfo.SegmentID))
 
 		mt.collID2Meta = make(map[int64]pb.CollectionInfo)
-		err = mt.AddIndex(idx)
+		err = mt.AddIndex(segIdxInfo)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("collection id = %d not found", collInfo.ID))
 
 		mt.segID2CollID = make(map[int64]int64)
-		err = mt.AddIndex(idx)
+		err = mt.AddIndex(segIdxInfo)
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, fmt.Sprintf("segment id = %d not belong to any collection", idx.SegmentID))
+		assert.EqualError(t, err, fmt.Sprintf("segment id = %d not belong to any collection", segIdxInfo.SegmentID))
 
 		err = mt.reloadFromKV()
 		assert.Nil(t, err)
@@ -730,11 +738,11 @@ func TestMetaTable(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Nil(t, mt.AddSegment(seg))
 
-		idx.IndexID = 10000
+		segIdxInfo.IndexID = 10000
 		mockKV.save = func(key, value string) error {
 			return fmt.Errorf("save error")
 		}
-		err = mt.AddIndex(idx)
+		err = mt.AddIndex(segIdxInfo)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "save error")
 	})

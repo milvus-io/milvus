@@ -607,47 +607,51 @@ func (mt *metaTable) AddSegment(seg *datapb.SegmentInfo) error {
 	return nil
 }
 
-func (mt *metaTable) AddIndex(seg *pb.SegmentIndexInfo) error {
+func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	collID, ok := mt.segID2CollID[seg.SegmentID]
+	collID, ok := mt.segID2CollID[segIdxInfo.SegmentID]
 	if !ok {
-		return fmt.Errorf("segment id = %d not belong to any collection", seg.SegmentID)
+		return fmt.Errorf("segment id = %d not belong to any collection", segIdxInfo.SegmentID)
 	}
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
 		return fmt.Errorf("collection id = %d not found", collID)
 	}
-	partID, ok := mt.segID2PartitionID[seg.SegmentID]
+	partID, ok := mt.segID2PartitionID[segIdxInfo.SegmentID]
 	if !ok {
-		return fmt.Errorf("segment id = %d not belong to any partition", seg.SegmentID)
+		return fmt.Errorf("segment id = %d not belong to any partition", segIdxInfo.SegmentID)
 	}
 	exist := false
-	for _, i := range collMeta.FieldIndexes {
-		if i.IndexID == seg.IndexID {
+	for _, fidx := range collMeta.FieldIndexes {
+		if fidx.IndexID == segIdxInfo.IndexID {
 			exist = true
 			break
 		}
 	}
 	if !exist {
-		return fmt.Errorf("index id = %d not found", seg.IndexID)
+		return fmt.Errorf("index id = %d not found", segIdxInfo.IndexID)
 	}
 
-	segIdxMap, ok := mt.segID2IndexMeta[seg.SegmentID]
+	segIdxMap, ok := mt.segID2IndexMeta[segIdxInfo.SegmentID]
 	if !ok {
-		idxMap := map[typeutil.UniqueID]pb.SegmentIndexInfo{seg.IndexID: *seg}
-		mt.segID2IndexMeta[seg.SegmentID] = &idxMap
+		idxMap := map[typeutil.UniqueID]pb.SegmentIndexInfo{segIdxInfo.IndexID: *segIdxInfo}
+		mt.segID2IndexMeta[segIdxInfo.SegmentID] = &idxMap
 	} else {
-		_, ok := (*segIdxMap)[seg.IndexID]
+		tmpInfo, ok := (*segIdxMap)[segIdxInfo.IndexID]
 		if ok {
-			return fmt.Errorf("index id = %d exist", seg.IndexID)
+			if SegmentIndexInfoEqual(segIdxInfo, &tmpInfo) {
+				log.Debug("Identical SegmentIndexInfo already exist", zap.Int64("IndexID", segIdxInfo.IndexID))
+				return nil
+			}
+			return fmt.Errorf("index id = %d exist", segIdxInfo.IndexID)
 		}
 	}
 
-	(*(mt.segID2IndexMeta[seg.SegmentID]))[seg.IndexID] = *seg
-	k := fmt.Sprintf("%s/%d/%d/%d/%d", SegmentIndexMetaPrefix, collID, seg.IndexID, partID, seg.SegmentID)
-	v := proto.MarshalTextString(seg)
+	(*(mt.segID2IndexMeta[segIdxInfo.SegmentID]))[segIdxInfo.IndexID] = *segIdxInfo
+	k := fmt.Sprintf("%s/%d/%d/%d/%d", SegmentIndexMetaPrefix, collID, segIdxInfo.IndexID, partID, segIdxInfo.SegmentID)
+	v := proto.MarshalTextString(segIdxInfo)
 
 	err := mt.client.Save(k, v)
 	if err != nil {
@@ -655,8 +659,8 @@ func (mt *metaTable) AddIndex(seg *pb.SegmentIndexInfo) error {
 		return err
 	}
 
-	if _, ok := mt.flushedSegID[seg.SegmentID]; !ok {
-		mt.flushedSegID[seg.SegmentID] = true
+	if _, ok := mt.flushedSegID[segIdxInfo.SegmentID]; !ok {
+		mt.flushedSegID[segIdxInfo.SegmentID] = true
 	}
 
 	return nil

@@ -30,12 +30,14 @@ import (
 	ms "github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -119,7 +121,7 @@ type Core struct {
 	GetNumRowsReq                        func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error)
 
 	//call index builder's client to build index, return build id
-	BuildIndexReq func(ctx context.Context, binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error)
+	BuildIndexReq func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error)
 	DropIndexReq  func(ctx context.Context, indexID typeutil.UniqueID) error
 
 	//proxy service interface, notify proxy service to drop collection
@@ -127,9 +129,6 @@ type Core struct {
 
 	//query service interface, notify query service to release collection
 	ReleaseCollection func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error
-
-	// put create index task into this chan
-	indexTaskQueue chan *CreateIndexTask
 
 	//dd request scheduler
 	ddReqQueue      chan reqTask //dd request will be push into this chan
@@ -234,9 +233,6 @@ func (c *Core) checkInit() error {
 	if c.InvalidateCollectionMetaCache == nil {
 		return fmt.Errorf("InvalidateCollectionMetaCache is nil")
 	}
-	if c.indexTaskQueue == nil {
-		return fmt.Errorf("indexTaskQueue is nil")
-	}
 	if c.DataNodeSegmentFlushCompletedChan == nil {
 		return fmt.Errorf("DataNodeSegmentFlushCompletedChan is nil")
 	}
@@ -321,44 +317,23 @@ func (c *Core) startDataServiceSegmentLoop() {
 	}
 }
 
-//create index loop
-func (c *Core) startCreateIndexLoop() {
-	for {
-		select {
-		case <-c.ctx.Done():
-			log.Debug("close create index loop")
-			return
-		case t, ok := <-c.indexTaskQueue:
-			if !ok {
-				log.Debug("index task chan has closed, exit loop")
-				return
-			}
-			if err := t.BuildIndex(); err != nil {
-				log.Warn("create index failed", zap.String("error", err.Error()))
-			} else {
-				log.Debug("create index", zap.String("index name", t.indexName), zap.String("field name", t.fieldSchema.Name), zap.Int64("segment id", t.segmentID))
-			}
-		}
-	}
-}
-
 func (c *Core) startSegmentFlushCompletedLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Debug("close segment flush completed loop")
 			return
-		case seg, ok := <-c.DataNodeSegmentFlushCompletedChan:
+		case segID, ok := <-c.DataNodeSegmentFlushCompletedChan:
 			if !ok {
 				log.Debug("data node segment flush completed chan has closed, exit loop")
 			}
-			log.Debug("flush segment", zap.Int64("id", seg))
-			coll, err := c.MetaTable.GetCollectionBySegmentID(seg)
+			log.Debug("flush segment", zap.Int64("id", segID))
+			coll, err := c.MetaTable.GetCollectionBySegmentID(segID)
 			if err != nil {
 				log.Warn("GetCollectionBySegmentID error", zap.Error(err))
 				break
 			}
-			err = c.MetaTable.AddFlushedSegment(seg)
+			err = c.MetaTable.AddFlushedSegment(segID)
 			if err != nil {
 				log.Warn("AddFlushedSegment error", zap.Error(err))
 			}
@@ -370,18 +345,17 @@ func (c *Core) startSegmentFlushCompletedLoop() {
 				}
 
 				fieldSch, err := GetFieldSchemaByID(coll, f.FiledID)
-				if err == nil {
-					t := &CreateIndexTask{
-						ctx:               c.ctx,
-						core:              c,
-						segmentID:         seg,
-						indexName:         idxInfo.IndexName,
-						indexID:           idxInfo.IndexID,
-						fieldSchema:       fieldSch,
-						indexParams:       idxInfo.IndexParams,
-						isFromFlushedChan: true,
-					}
-					c.indexTaskQueue <- t
+				if err != nil {
+					log.Warn("field schema not found", zap.Int64("field id", f.FiledID))
+					continue
+				}
+
+				if err = c.BuildIndex(segID, fieldSch, idxInfo, true); err != nil {
+					log.Error("build index fail", zap.String("error", err.Error()))
+				} else {
+					log.Debug("build index", zap.String("index name", idxInfo.IndexName),
+						zap.String("field name", fieldSch.Name),
+						zap.Int64("segment id", segID))
 				}
 			}
 		}
@@ -746,13 +720,13 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 }
 
 func (c *Core) SetIndexService(s types.IndexService) error {
-	c.BuildIndexReq = func(ctx context.Context, binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error) {
+	c.BuildIndexReq = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
 		rsp, err := s.BuildIndex(ctx, &indexpb.BuildIndexRequest{
 			DataPaths:   binlog,
-			TypeParams:  typeParams,
-			IndexParams: indexParams,
-			IndexID:     indexID,
-			IndexName:   indexName,
+			TypeParams:  field.TypeParams,
+			IndexParams: idxInfo.IndexParams,
+			IndexID:     idxInfo.IndexID,
+			IndexName:   idxInfo.IndexName,
 		})
 		if err != nil {
 			return 0, err
@@ -801,6 +775,41 @@ func (c *Core) SetQueryService(s types.QueryService) error {
 		return nil
 	}
 	return nil
+}
+
+// BuildIndex will check row num and call build index service
+func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, isFlush bool) error {
+	if c.MetaTable.IsSegmentIndexed(segID, field, idxInfo.IndexParams) {
+		return nil
+	}
+	rows, err := c.GetNumRowsReq(segID, isFlush)
+	if err != nil {
+		return err
+	}
+	var bldID typeutil.UniqueID
+	enableIdx := false
+	if rows < Params.MinSegmentSizeToEnableIndex {
+		log.Debug("num of rows is less than MinSegmentSizeToEnableIndex", zap.Int64("num rows", rows))
+	} else {
+		binlogs, err := c.GetBinlogFilePathsFromDataServiceReq(segID, field.FieldID)
+		if err != nil {
+			return err
+		}
+		bldID, err = c.BuildIndexReq(c.ctx, binlogs, field, idxInfo)
+		if err != nil {
+			return err
+		}
+		enableIdx = true
+	}
+	seg := etcdpb.SegmentIndexInfo{
+		SegmentID:   segID,
+		FieldID:     field.FieldID,
+		IndexID:     idxInfo.IndexID,
+		BuildID:     bldID,
+		EnableIndex: enableIdx,
+	}
+	err = c.MetaTable.AddIndex(&seg)
+	return err
 }
 
 func (c *Core) Init() error {
@@ -858,7 +867,6 @@ func (c *Core) Init() error {
 		}
 
 		c.ddReqQueue = make(chan reqTask, 1024)
-		c.indexTaskQueue = make(chan *CreateIndexTask, 1024)
 		initError = c.setMsgStreams()
 	})
 	if initError == nil {
@@ -949,7 +957,6 @@ func (c *Core) Start() error {
 		go c.startDdScheduler()
 		go c.startTimeTickLoop()
 		go c.startDataServiceSegmentLoop()
-		go c.startCreateIndexLoop()
 		go c.startSegmentFlushCompletedLoop()
 		go c.tsLoop()
 		c.stateCode.Store(internalpb.StateCode_Healthy)
