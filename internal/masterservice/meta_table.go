@@ -131,15 +131,19 @@ func (mt *metaTable) reloadFromKV() error {
 	}
 
 	for _, value := range values {
-		collectionInfo := pb.CollectionInfo{}
-		err = proto.UnmarshalText(value, &collectionInfo)
+		collInfo := pb.CollectionInfo{}
+		err = proto.UnmarshalText(value, &collInfo)
 		if err != nil {
 			return fmt.Errorf("MasterService UnmarshalText pb.CollectionInfo err:%w", err)
 		}
-		mt.collID2Meta[collectionInfo.ID] = collectionInfo
-		mt.collName2ID[collectionInfo.Schema.Name] = collectionInfo.ID
-		for _, partID := range collectionInfo.PartitionIDs {
-			mt.partitionID2CollID[partID] = collectionInfo.ID
+		mt.collID2Meta[collInfo.ID] = collInfo
+		mt.collName2ID[collInfo.Schema.Name] = collInfo.ID
+		for _, partID := range collInfo.PartitionIDs {
+			mt.partitionID2CollID[partID] = collInfo.ID
+		}
+		shardsNum := len(collInfo.VirtualChannelNames)
+		for i := 0; i < shardsNum; i++ {
+			mt.vChan2Chan[collInfo.VirtualChannelNames[i]] = collInfo.PhysicalChannelNames[i]
 		}
 	}
 
