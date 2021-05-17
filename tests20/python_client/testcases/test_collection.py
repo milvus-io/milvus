@@ -105,7 +105,7 @@ class TestCollectionParams(ApiReq):
         self._connect()
         c_name = get_unique_str
         collection, _ = self.collection.collection_init(c_name, data=None, schema=default_schema)
-        assert_default_collection
+        assert_default_collection(collection, c_name)
         fields = [gen_int64_field()]
         schema = gen_collection_schema(fields=fields)
         ex, _ = self.collection.collection_init(c_name, schema=schema)
