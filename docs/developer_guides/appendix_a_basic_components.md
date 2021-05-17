@@ -97,6 +97,8 @@ type Session struct {
     LeaseID    clientv3.LeaseID
 }
 
+// NewSession is a helper to build Session object.LeaseID will be assigned after
+// registeration.
 func NewSession(serverID int64, serverName, address string) *Session {}
 
 // GetServerID gets id from etcd with key: metaRootPath + "/services/id"

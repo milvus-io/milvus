@@ -43,8 +43,6 @@ func GetServerID(etcd *etcdkv.EtcdKV) (int64, error) {
 	return getServerIDWithKey(etcd, default_ID_key)
 }
 
-// GetServerID gets id from etcd with key: metaRootPath + key
-// Each server get ServerID and add one to id.
 func getServerIDWithKey(etcd *etcdkv.EtcdKV, key string) (int64, error) {
 	res := int64(-1)
 	getServerIDWithKeyFn := func() error {
