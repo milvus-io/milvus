@@ -33,5 +33,3 @@ class TestConnection(ApiReq):
         self.connection.configure(check_res='', check_params=None, default={"host": "192.168.1.240", "port": "19530"})
         self.connection.get_connection(alias='default')
         self.connection.list_connections(check_res=CheckParams.list_count, check_params={"list_count": 1})
-
-
