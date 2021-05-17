@@ -45,12 +45,12 @@ There're some problems I haven't thought of.
 
 ### 1. DataNode no longer interacts with Etcd except service registering
 
-#### **O1-1**. DataService rather than DataNode saves binlog paths into Etcd
+#### **O1-1** DataService rather than DataNode saves binlog paths into Etcd
     
    ![datanode_design](graphs/datanode_design_01.jpg)
 
 
-##### Auto-flush with manul-flush:
+##### Auto-flush with manul-flush
 
 Manul-flush means that the segment is sealed, and DataNode is told to flush by DataService. The completion of
 manul-flush requires ddl and insert data both flushed, and a flush completed message will be published to
@@ -105,7 +105,7 @@ message DDLFlushMeta {
 }
 ```
     
-#### **O1-2**. DataNode registers itself to Etcd when started
+#### **O1-2** DataNode registers itself to Etcd when started
     
 ### 2. DataNode gets start and end MsgPositions of all channels, and report to DataService after flushing
 
