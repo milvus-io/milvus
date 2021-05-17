@@ -14,6 +14,7 @@ ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 MILVUS_DIR="${ROOT_DIR}/internal/"
 echo $MILVUS_DIR
 
+go test -race -cover "${MILVUS_DIR}/util/session/..." -failfast
 go test -race -cover "${MILVUS_DIR}/kv/..." "${MILVUS_DIR}/tso/..." "${MILVUS_DIR}/allocator/..." -failfast
 # TODO: remove to distributed
 #go test -race -cover "${MILVUS_DIR}/proxynode/..." -failfast

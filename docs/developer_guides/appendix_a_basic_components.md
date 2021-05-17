@@ -86,15 +86,30 @@ The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/servic
 ###### Interface
 
 ```go
-const default_ttl = 10
-const default_retry_times = 3
-const default_ID_key = "services/id"
+const defaultIDKey = "services/id"
 
 type Session struct {
     ServerID   int64
     ServerName string
     Address    string
     LeaseID    clientv3.LeaseID
+}
+
+var (
+	globalServerID = int64(-1)
+)
+
+// GlobalTracer returns [singleton] ServerID.
+// Before SetGlobalTracerID, GlobalServerID() returns -1
+func GlobalServerID() int64 {
+	return globalServerID
+}
+
+// SetGlobalServerID sets the [singleton] ServerID. ServerID returned by
+// GlobalTracer(). Those who use GlobalServerID should call SetGlobalServerID()
+// as early as possible in main() before use ServerID.
+func SetGlobalServerID(id int64) {
+	globalServerID = id
 }
 
 // NewSession is a helper to build Session object.LeaseID will be assigned after

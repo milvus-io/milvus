@@ -85,6 +85,7 @@ func TestRegister(t *testing.T) {
 	}
 
 	sessions, err := GetSessions(etcdKV, "test")
+	assert.Nil(t, err)
 	assert.Equal(t, len(sessions), 10)
 	for i := 10; i < 10; i++ {
 		assert.Equal(t, sessions[i].ServerID, int64(i))
@@ -124,6 +125,7 @@ func TestKeepAlive(t *testing.T) {
 	assert.Equal(t, signal, true)
 
 	sessions, err := GetSessions(etcdKV, "test")
+	assert.Nil(t, err)
 	assert.Equal(t, len(sessions), 1)
 	assert.Equal(t, sessions[0].ServerID, int64(0))
 }
