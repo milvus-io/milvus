@@ -62,6 +62,7 @@ message CreateCollectionRequest {
   int64 dbID = 4;
   int64 collectionID = 5;
   bytes schema = 6;
+  int32 shards_num = 7;
 }
 
 message DropCollectionRequest {
