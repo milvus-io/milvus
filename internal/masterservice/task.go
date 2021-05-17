@@ -82,6 +82,8 @@ func (t *CreateCollectionReqTask) IgnoreTimeStamp() bool {
 }
 
 func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
+	const defaultShardsNum = 2
+
 	if t.Type() != commonpb.MsgType_CreateCollection {
 		return fmt.Errorf("create collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
@@ -93,6 +95,12 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 
 	if t.Req.CollectionName != schema.Name {
 		return fmt.Errorf("collection name = %s, schema.Name=%s", t.Req.CollectionName, schema.Name)
+	}
+
+	if t.Req.ShardsNum <= 0 {
+		log.Debug("Set ShardsNum to default", zap.String("collection name", t.Req.CollectionName),
+			zap.Int32("defaultShardsNum", defaultShardsNum))
+		t.Req.ShardsNum = defaultShardsNum
 	}
 
 	for idx, field := range schema.Fields {
@@ -130,8 +138,8 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	chanNames := make([]string, t.Req.ShardsNum)
 	vchanNames := make([]string, t.Req.ShardsNum)
 	for i := int32(0); i < t.Req.ShardsNum; i++ {
-		chanNames[i] = fmt.Sprintf("%d_ch_%d", collID, i)
-		vchanNames[i] = fmt.Sprintf("%d_vch_%d", collID, i)
+		chanNames[i] = fmt.Sprintf("%s_%d_c%d", t.Req.CollectionName, collID, i)
+		vchanNames[i] = fmt.Sprintf("%s_%d_v%d", t.Req.CollectionName, collID, i)
 	}
 
 	collInfo := etcdpb.CollectionInfo{

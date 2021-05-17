@@ -54,7 +54,6 @@ type metaTable struct {
 	proxyID2Meta       map[typeutil.UniqueID]pb.ProxyMeta                               // proxy id to proxy meta
 	collID2Meta        map[typeutil.UniqueID]pb.CollectionInfo                          // collection_id -> meta
 	collName2ID        map[string]typeutil.UniqueID                                     // collection name to collection id
-	collVChan2Chan     map[string]string                                                // collection virtual channel name to channel name
 	partitionID2Meta   map[typeutil.UniqueID]pb.PartitionInfo                           // collection_id/partition_id -> meta
 	segID2IndexMeta    map[typeutil.UniqueID]*map[typeutil.UniqueID]pb.SegmentIndexInfo // collection_id/index_id/partition_id/segment_id -> meta
 	indexID2Meta       map[typeutil.UniqueID]pb.IndexInfo                               // collection_id/index_id -> meta
@@ -62,6 +61,7 @@ type metaTable struct {
 	segID2PartitionID  map[typeutil.UniqueID]typeutil.UniqueID                          // segment id -> partition id
 	flushedSegID       map[typeutil.UniqueID]bool                                       // flushed segment id
 	partitionID2CollID map[typeutil.UniqueID]typeutil.UniqueID                          // partition id -> collection id
+	vChan2Chan         map[string]string                                                // virtual channel name to physical channel name
 
 	tenantLock sync.RWMutex
 	proxyLock  sync.RWMutex
@@ -95,6 +95,7 @@ func (mt *metaTable) reloadFromKV() error {
 	mt.segID2CollID = make(map[typeutil.UniqueID]typeutil.UniqueID)
 	mt.segID2PartitionID = make(map[typeutil.UniqueID]typeutil.UniqueID)
 	mt.flushedSegID = make(map[typeutil.UniqueID]bool)
+	mt.vChan2Chan = make(map[string]string)
 
 	_, values, err := mt.client.LoadWithPrefix(TenantMetaPrefix)
 	if err != nil {
@@ -267,10 +268,9 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 		meta[k] = v
 	}
 
-	shardsNum := len(coll.PhysicalChannelNames)
-	mt.collVChan2Chan = make(map[string]string)
+	shardsNum := len(coll.VirtualChannelNames)
 	for i := 0; i < shardsNum; i++ {
-		mt.collVChan2Chan[coll.VirtualChannelNames[i]] = coll.PhysicalChannelNames[i]
+		mt.vChan2Chan[coll.VirtualChannelNames[i]] = coll.PhysicalChannelNames[i]
 	}
 
 	// save ddOpStr into etcd
@@ -324,6 +324,12 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr string) 
 		}
 		delete(mt.indexID2Meta, idxInfo.IndexID)
 	}
+
+	shardsNum := len(collMeta.VirtualChannelNames)
+	for i := 0; i < shardsNum; i++ {
+		delete(mt.vChan2Chan, collMeta.VirtualChannelNames[i])
+	}
+
 	delMetakeys := []string{
 		fmt.Sprintf("%s/%d", CollectionMetaPrefix, collID),
 		fmt.Sprintf("%s/%d", PartitionMetaPrefix, collID),
@@ -756,7 +762,7 @@ func (mt *metaTable) GetSegmentIndexInfoByID(segID typeutil.UniqueID, filedID in
 
 	_, ok := mt.flushedSegID[segID]
 	if !ok {
-		return pb.SegmentIndexInfo{}, fmt.Errorf("segment id %d hasn't flused, there is no index meta", segID)
+		return pb.SegmentIndexInfo{}, fmt.Errorf("segment id %d hasn't flushed, there is no index meta", segID)
 	}
 
 	segIdxMap, ok := mt.segID2IndexMeta[segID]
@@ -1012,4 +1018,16 @@ func (mt *metaTable) AddFlushedSegment(segID typeutil.UniqueID) error {
 	}
 	mt.flushedSegID[segID] = true
 	return nil
+}
+
+// GetChanNameByVirtualChan return physical channel name corresponding the virtual channel
+func (mt *metaTable) GetChanNameByVirtualChan(vname string) (string, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	chanName, ok := mt.vChan2Chan[vname]
+	if !ok {
+		return "", fmt.Errorf("cannot find virtual channel %s", vname)
+	}
+	return chanName, nil
 }
