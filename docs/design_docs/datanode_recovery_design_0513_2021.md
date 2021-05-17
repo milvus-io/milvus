@@ -43,15 +43,14 @@ There're some problems I haven't thought of.
 
 ## TODO
 
-### 1. DataNode no longer interacts with Etcd except service registering.
+### 1. DataNode no longer interacts with Etcd except service registering
 
-#### **O1-1**. DataService rather than DataNode saves binlog paths into Etcd.
+#### **O1-1**. DataService rather than DataNode saves binlog paths into Etcd
     
    ![datanode_design](graphs/datanode_design_01.jpg)
 
-**O1-1 Design:**
 
-**Auto-flush with manul-flush:**
+##### Auto-flush with manul-flush:
 
 Manul-flush means that the segment is sealed, and DataNode is told to flush by DataService. The completion of
 manul-flush requires ddl and insert data both flushed, and a flush completed message will be published to
@@ -61,7 +60,7 @@ Auto-flush means that the segment isn't sealed, but the buffer of insert/ddl dat
 DataNode automatically flushs these data. Those flushed binlogs' paths are buffered in DataNode, waiting for the next
 manul-flush and upload to DataServce together.
 
-**DataService RPC Design**
+##### DataService RPC Design
 
 ```proto
 rpc SaveBinlogPaths(SaveBinlogPathsRequest) returns (common.Status){}
@@ -84,9 +83,10 @@ message SaveBinlogPathsRequest {
  }
 ```
 
-**DataService Etcd Binlog Meta Design**
+##### DataService Etcd Binlog Meta Design
 
 The same as DataNode
+
 ```proto
 message FieldFlushMeta {
     int64 fieldID = 1;
@@ -105,9 +105,9 @@ message DDLFlushMeta {
 }
 ```
     
-#### **O1-2**. DataNode registers itself to Etcd when started.
+#### **O1-2**. DataNode registers itself to Etcd when started
     
-### 2. DataNode gets start and end MsgPositions of all channels, and report to DataService after flushing.
+### 2. DataNode gets start and end MsgPositions of all channels, and report to DataService after flushing
 
    **O2-1**. Set start and end positions while publishing ddl messages. 0.5 Day
 
