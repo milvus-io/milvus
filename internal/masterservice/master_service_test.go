@@ -498,7 +498,8 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 		assert.Equal(t, rsp.Schema.Name, "testColl")
 		assert.Equal(t, rsp.CollectionID, collMeta.ID)
-
+		assert.Equal(t, len(rsp.VirtualChannelNames), 4)
+		assert.Equal(t, len(rsp.PhysicalChannelNames), 4)
 	})
 
 	t.Run("show collection", func(t *testing.T) {
