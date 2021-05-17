@@ -65,7 +65,7 @@ TEST_P(SPTAGTest, sptag_basic) {
 
     index_->BuildAll(base_dataset, conf);
     // index_->Add(base_dataset, conf);
-    auto result = index_->Query(query_dataset, conf);
+    auto result = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result, nq, k);
     ReleaseQueryResult(result);
 
@@ -98,7 +98,7 @@ TEST_P(SPTAGTest, sptag_serialize) {
     auto binaryset = index_->Serialize();
     auto new_index = std::make_shared<milvus::knowhere::CPUSPTAGRNG>(IndexType);
     new_index->Load(binaryset);
-    auto result = new_index->Query(query_dataset, conf);
+    auto result = new_index->Query(query_dataset, conf, nullptr);
     AssertAnns(result, nq, k);
     PrintResult(result, nq, k);
     ReleaseQueryResult(result);
@@ -135,7 +135,7 @@ TEST_P(SPTAGTest, sptag_serialize) {
 
         auto new_index = std::make_shared<milvus::knowhere::CPUSPTAGRNG>(IndexType);
         new_index->Load(load_data_list);
-        auto result = new_index->Query(query_dataset, conf);
+        auto result = new_index->Query(query_dataset, conf, nullptr);
         AssertAnns(result, nq, k);
         PrintResult(result, nq, k);
         ReleaseQueryResult(result);

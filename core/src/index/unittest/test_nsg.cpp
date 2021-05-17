@@ -81,13 +81,13 @@ TEST_F(NSGInterfaceTest, basic_test) {
     // untrained index
     {
         ASSERT_ANY_THROW(index_->Serialize());
-        ASSERT_ANY_THROW(index_->Query(query_dataset, search_conf));
+        ASSERT_ANY_THROW(index_->Query(query_dataset, search_conf, nullptr));
         ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, search_conf));
     }
 
     train_conf[milvus::knowhere::meta::DEVICEID] = -1;
     index_->BuildAll(base_dataset, train_conf);
-    auto result = index_->Query(query_dataset, search_conf);
+    auto result = index_->Query(query_dataset, search_conf, nullptr);
     AssertAnns(result, nq, k);
     ReleaseQueryResult(result);
 
@@ -102,7 +102,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
     auto new_index_1 = std::make_shared<milvus::knowhere::NSG>(DEVICE_GPU0);
     train_conf[milvus::knowhere::meta::DEVICEID] = DEVICE_GPU0;
     new_index_1->BuildAll(base_dataset, train_conf);
-    auto new_result_1 = new_index_1->Query(query_dataset, search_conf);
+    auto new_result_1 = new_index_1->Query(query_dataset, search_conf, nullptr);
     AssertAnns(new_result_1, nq, k);
     ReleaseQueryResult(new_result_1);
 
@@ -115,7 +115,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
         fiu_disable("NSG.Load.throw_exception");
     }
 
-    auto new_result_2 = new_index_2->Query(query_dataset, search_conf);
+    auto new_result_2 = new_index_2->Query(query_dataset, search_conf, nullptr);
     AssertAnns(new_result_2, nq, k);
     ReleaseQueryResult(new_result_2);
 
@@ -144,7 +144,7 @@ TEST_F(NSGInterfaceTest, delete_test) {
     train_conf[milvus::knowhere::meta::DEVICEID] = DEVICE_GPU0;
     index_->BuildAll(base_dataset, train_conf);
 
-    auto result = index_->Query(query_dataset, search_conf);
+    auto result = index_->Query(query_dataset, search_conf, nullptr);
     AssertAnns(result, nq, k);
     auto I_before = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
 
@@ -156,8 +156,7 @@ TEST_F(NSGInterfaceTest, delete_test) {
     for (int i = 0; i < nq; i++) {
         bitset->set(i);
     }
-    index_->SetBlacklist(bitset);
-    auto result_after = index_->Query(query_dataset, search_conf);
+    auto result_after = index_->Query(query_dataset, search_conf, bitset);
     AssertAnns(result_after, nq, k, CheckMode::CHECK_NOT_EQUAL);
     auto I_after = result_after->Get<int64_t*>(milvus::knowhere::meta::IDS);
 
