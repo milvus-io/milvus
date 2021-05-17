@@ -43,9 +43,9 @@ def gen_binary_vec_field(is_primary=False):
     return binary_vec_field
 
 
-def gen_default_collection_schema():
+def gen_default_collection_schema(description=default_collection_desc, primary_field=None):
     fields = [gen_int64_field(), gen_float_field(), gen_float_vec_field()]
-    schema = CollectionSchema(fields=fields, description="default collection")
+    schema = CollectionSchema(fields=fields, description=description, primary_field=primary_field)
     return schema
 
 
