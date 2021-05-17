@@ -21,6 +21,7 @@ default_binary_vec_field_name = "binary_vector"
 default_partition_name = "_default"
 default_tag = "1970_01_01"
 row_count = "row_count"
+default_collection_desc = "default collection"
 
 
 """" List of parameters used to pass """

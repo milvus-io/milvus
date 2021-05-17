@@ -7,12 +7,28 @@ from common.common_func import *
 default_schema = gen_default_collection_schema()
 
 
+def assert_default_collection(collection, exp_name, exp_schema=default_schema, exp_num=0, exp_primary=None):
+    assert collection.name == exp_name
+    assert collection.description == exp_schema.description
+    assert collection.schema == default_schema
+    if exp_num == 0:
+        assert collection.is_empty
+    assert collection.num_entities == exp_num
+    if exp_primary is None:
+        assert collection.primary_field is None
+    else:
+        assert collection.primary_field == exp_primary
+
+
 class TestCollectionParams(ApiReq):
     """ Test case of collection interface """
 
     def teardown_method(self):
         if self.collection.collection is not None:
             self.collection.drop()
+
+    def setup_method(self):
+        pass
 
     @pytest.fixture(
         scope="function",
@@ -21,8 +37,8 @@ class TestCollectionParams(ApiReq):
     def get_invalid_string(self, request):
         yield request.param
 
-    # #5224
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="issue #5224")
     def test_collection(self):
         """
         target: test collection with default schema
@@ -32,14 +48,10 @@ class TestCollectionParams(ApiReq):
         self._connect()
         c_name = get_unique_str
         collection, _ = self.collection.collection_init(c_name, data=None, schema=default_schema)
-        assert collection.name == c_name
-        assert collection.description == default_schema.description
-        assert collection.schema == default_schema
-        assert collection.is_empty
-        assert collection.num_entities == 0
-        assert collection.primary_field is None
+        assert_default_collection(collection, c_name)
         assert c_name in self.utility.list_collections()
 
+    @pytest.mark.tags(CaseLabel.L0)
     def test_collection_empty_name(self):
         """
         target: test collection with empty name
@@ -51,6 +63,7 @@ class TestCollectionParams(ApiReq):
         ex, check = self.collection.collection_init(c_name, schema=default_schema)
         assert "value  is illegal" in str(ex)
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_collection_invalid_name(self, get_invalid_string):
         """
         target: test collection with invalid name
@@ -62,7 +75,8 @@ class TestCollectionParams(ApiReq):
         ex, check = self.collection.collection_init(c_name, schema=default_schema)
         assert "invalid" or "illegal" in str(ex)
 
-    # #5231 TODO
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="issue #5231 #5241")
     def test_collection_dup_name(self):
         """
         target: test collection with dup name
@@ -72,28 +86,47 @@ class TestCollectionParams(ApiReq):
         self._connect()
         c_name = get_unique_str
         collection, _ = self.collection.collection_init(c_name, data=None, schema=default_schema)
-        assert collection.name == c_name
+        assert_default_collection(collection, c_name)
         dup_collection, _ = self.collection.collection_init(c_name)
-        assert c_name, c_name in self.utility.list_collections()
+        assert_default_collection(dup_collection, c_name)
         assert collection.name == dup_collection.name
-        # log.debug(collection.schema)
-        # log.debug(dup_collection.schema)
-        # assert collection.schema == dup_collection.schema
+        assert collection.name in self.utility.list_collections()
+        assert collection.schema == dup_collection.schema
+        assert id(collection) == id(dup_collection)
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_collection_dup_name_new_schema(self):
         """
         target: test collection with dup name and new schema
-        method: 1.create collection with default schema 2. collection with dup name and new schema
+        method: 1.create collection with default schema
+                2. collection with dup name and new schema
         expected: raise exception
         """
         self._connect()
         c_name = get_unique_str
         collection, _ = self.collection.collection_init(c_name, data=None, schema=default_schema)
-        assert collection.name == c_name
+        assert_default_collection(collection, c_name)
         fields = [gen_int64_field()]
         schema = gen_collection_schema(fields=fields)
         ex, _ = self.collection.collection_init(c_name, schema=schema)
         assert "The collection already exist, but the schema isnot the same as the passed in" in str(ex)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_dup_name_new_primary(self):
+        """
+        target: test collection with dup name and new primary_field schema
+        method: 1.collection with default schema
+                2. collection with same fields and new primary_field schema
+        expected: raise exception
+        """
+        self._connect()
+        c_name = get_unique_str
+        collection, _ = self.collection.collection_init(c_name, schema=default_schema)
+        assert_default_collection(collection, c_name)
+        schema = gen_default_collection_schema(primary_field=default_int64_field)
+        ex, _ = self.collection.collection_init(c_name, schema=schema)
+        assert "The collection already exist, but the schema isnot the same as the passed in" in str(ex)
+        assert collection.primary_field is None
 
 
 class TestCollectionOperation(ApiReq):
