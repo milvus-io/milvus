@@ -99,7 +99,7 @@ class ApiReq(Base):
 
     def _connect(self):
         """ Testing func """
-        self.connection.configure(check_res='', default={"host": "192.168.1.242", "port": 19530})
+        self.connection.configure(check_res='', default={"host": "192.168.1.240", "port": 19530})
         res = self.connection.create_connection(alias='default')
         return res
 
