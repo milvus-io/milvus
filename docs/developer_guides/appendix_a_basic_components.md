@@ -86,8 +86,9 @@ The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/servic
 ###### Interface
 
 ```go
-default_ttl = 10
-default_retry_times = 3
+const default_ttl = 10
+const default_retry_times = 3
+const default_ID_key = "services/id"
 
 type Session struct {
     ServerID   int64
@@ -96,9 +97,11 @@ type Session struct {
     LeaseID    clientv3.LeaseID
 }
 
-// GetServerID gets id from etcd with key: metaRootPath + "/services/ServerID"
-// Each server get ServerID and add one to ServerID
-GetServerID(){}
+func NewSession(serverID int64, serverName, address string) *Session {}
+
+// GetServerID gets id from etcd with key: metaRootPath + "/services/id"
+// Each server get ServerID and add one to id.
+func GetServerID(etcd *etcdkv.EtcdKV) (int64, error) {}
 
 // RegisterService registers the service to etcd so that other services
 // can find that the service is online and issue subsequent operations
@@ -107,25 +110,27 @@ GetServerID(){}
 // value: json format
 // {
 //     "ServerID": ServerID
-//     "ServerName": ServerName-ServerID // ServerName
+//     "ServerName": ServerName // ServerName
 //     "Address": ip:port // Address of service, including ip and port
 //     "LeaseID": LeaseID // The ID of etcd lease
 // }
 // MetaRootPath is configurable in the config file.
-RegisterService(etcdKV etcdKV, serverName string, address string)(<-chan *clientv3.LeaseKeepAliveResponse, error)
-
-
+func RegisterService(etcdKV *etcdkv.EtcdKV, session *Session, ttl int64) (<-chan *clientv3.LeaseKeepAliveResponse, error) {}
 
 // ProcessKeepAliveResponse processes the response of etcd keepAlive interface
 // If keepAlive fails for unexpected error, it will retry for default_retry_times times
-ProcessKeepAliveResponse(ctx context, ch <-chan *clientv3.LeaseKeepAliveResponse)
-
+func ProcessKeepAliveResponse(ctx context.Context, ch <-chan *clientv3.LeaseKeepAliveResponse) (signal <-chan bool) {}
 
 
 // GetAllSessions gets all the services registered in etcd.
 // This gets all the key with prefix metaRootPath + "/services/" + prefix
 // For general, "datanode" to get all datanodes
-GetSessions(prefix string) ([]session, error)
+func GetSessions(etcdKV *etcdkv.EtcdKV, prefix string) ([]*Session, error) {}
+
+// WatchServices watch all events in etcd.
+// If a server register, a session will be sent to addChannel
+// If a server offline, a session will be sent to deleteChannel
+func WatchServices(ctx context.Context, etcdKV *etcdkv.EtcdKV, prefix string) (addChannel <-chan *Session, deleteChannel <-chan *Session) {}
 ```
 
 

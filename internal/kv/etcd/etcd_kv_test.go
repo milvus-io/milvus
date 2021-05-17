@@ -341,3 +341,30 @@ func TestEtcdKV_WatchPrefix(t *testing.T) {
 
 	assert.True(t, resp.Created)
 }
+
+func TestEtcdKV_CompareAndSwap(t *testing.T) {
+	etcdAddr, err := Params.Load("_EtcdAddress")
+	if err != nil {
+		panic(err)
+	}
+
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	assert.Nil(t, err)
+	rootPath := "/etcd/test/root"
+	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
+
+	defer etcdKV.Close()
+	defer etcdKV.RemoveWithPrefix("")
+
+	err = etcdKV.CompareVersionAndSwap("a/b/c", 0, "1")
+	assert.Nil(t, err)
+	value, err := etcdKV.Load("a/b/c")
+	assert.Nil(t, err)
+	assert.Equal(t, value, "1")
+	err = etcdKV.CompareVersionAndSwap("a/b/c", 0, "1")
+	assert.NotNil(t, err)
+	err = etcdKV.CompareValueAndSwap("a/b/c", "1", "2")
+	assert.Nil(t, err)
+	err = etcdKV.CompareValueAndSwap("a/b/c", "1", "2")
+	assert.NotNil(t, err)
+}
