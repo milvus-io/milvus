@@ -348,9 +348,10 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 				zap.String("StatisChanName", Params.StatisticsChannelName),
 				zap.String("DataServiceSubscriptionName", Params.DataServiceSubscriptionName),
 				zap.Error(err))
+		} else {
+			// drop first pack since it's processed
+			_ = statsStream.Consume()
 		}
-		// drop first pack since it's processed
-		_ = statsStream.Consume()
 	}
 	statsStream.Start()
 	defer statsStream.Close()
@@ -377,7 +378,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 				}
 			}
 			if ssMsg.MsgPosition != nil {
-				err = s.storeStreamPos(streamTypeStats, ssMsg.MsgPosition)
+				err := s.storeStreamPos(streamTypeStats, ssMsg.MsgPosition)
 				if err != nil {
 					log.Error("Fail to store current success pos for Stats stream",
 						zap.Stringer("pos", ssMsg.MsgPosition),
@@ -406,9 +407,10 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 				zap.String("SegInfoChannelName", Params.SegmentInfoChannelName),
 				zap.String("DataServiceSubscriptionName", Params.DataServiceSubscriptionName),
 				zap.Error(err))
+		} else {
+			// drop first pack since it's processed
+			_ = flushStream.Consume()
 		}
-		// drop first pack since it's processed
-		_ = flushStream.Consume()
 	}
 
 	flushStream.Start()
@@ -438,7 +440,7 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 			}
 			//store success pos
 			if fcMsg.MsgPosition != nil {
-				err = s.storeStreamPos(streamTypeStats, fcMsg.MsgPosition)
+				err = s.storeStreamPos(streamTypeFlush, fcMsg.MsgPosition)
 				if err != nil {
 					log.Error("Fail to store current success pos for segment flush stream",
 						zap.Stringer("pos", fcMsg.MsgPosition),
@@ -954,9 +956,11 @@ const (
 
 // store current processed stream pos
 func (s *Server) storeStreamPos(st StreamType, pos *msgstream.MsgPosition) error {
+	log.Debug("storing stream pos", zap.Int("streamtype", int(st)))
 	val := proto.MarshalTextString(pos)
 	err := s.kvClient.Save(fmt.Sprintf(streamTmpl, st), val)
 	if err != nil {
+		log.Error("Error Store Stream Pos", zap.Int("StreamType", int(st)), zap.Error(err))
 		return err
 	}
 	return nil
@@ -968,8 +972,10 @@ func (s *Server) loadStreamLastPos(st StreamType) (pos *msgstream.MsgPosition, e
 	pos = &msgstream.MsgPosition{}
 	val, err = s.kvClient.Load(fmt.Sprintf(streamTmpl, st))
 	if err != nil {
+		log.Error("Error Load Stream Pos", zap.Int("StreamType", int(st)), zap.Error(err))
 		return
 	}
 	err = proto.UnmarshalText(val, pos)
+	log.Debug("Last Pos Loaed", zap.Stringer("pos", pos))
 	return
 }
