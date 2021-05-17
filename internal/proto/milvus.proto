@@ -47,6 +47,7 @@ message CreateCollectionRequest {
   string collection_name = 3;
   // `schema` is the serialized `schema.CollectionSchema`
   bytes schema = 4;
+  int32 shards_num = 5;
 }
 
 message DropCollectionRequest {
@@ -82,6 +83,8 @@ message DescribeCollectionResponse {
   common.Status status = 1;
   schema.CollectionSchema schema = 2;
   int64 collectionID = 3;
+  repeated string virtual_channel_names = 4;
+  repeated string physical_channel_names = 5;
 }
 
 message LoadCollectionRequest {

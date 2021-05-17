@@ -82,6 +82,8 @@ func (t *CreateCollectionReqTask) IgnoreTimeStamp() bool {
 }
 
 func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
+	const defaultShardsNum = 2
+
 	if t.Type() != commonpb.MsgType_CreateCollection {
 		return fmt.Errorf("create collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
@@ -93,6 +95,12 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 
 	if t.Req.CollectionName != schema.Name {
 		return fmt.Errorf("collection name = %s, schema.Name=%s", t.Req.CollectionName, schema.Name)
+	}
+
+	if t.Req.ShardsNum <= 0 {
+		log.Debug("Set ShardsNum to default", zap.String("collection name", t.Req.CollectionName),
+			zap.Int32("defaultShardsNum", defaultShardsNum))
+		t.Req.ShardsNum = defaultShardsNum
 	}
 
 	for idx, field := range schema.Fields {
@@ -126,12 +134,22 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	vchanNames := make([]string, t.Req.ShardsNum)
+	chanNames := make([]string, t.Req.ShardsNum)
+	for i := int32(0); i < t.Req.ShardsNum; i++ {
+		vchanNames[i] = fmt.Sprintf("%s_%d_v%d", t.Req.CollectionName, collID, i)
+		chanNames[i] = fmt.Sprintf("%s_%d_c%d", t.Req.CollectionName, collID, i)
+	}
+
 	collInfo := etcdpb.CollectionInfo{
-		ID:           collID,
-		Schema:       &schema,
-		CreateTime:   collTs,
-		PartitionIDs: make([]typeutil.UniqueID, 0, 16),
-		FieldIndexes: make([]*etcdpb.FieldIndexInfo, 0, 16),
+		ID:                   collID,
+		Schema:               &schema,
+		CreateTime:           collTs,
+		PartitionIDs:         make([]typeutil.UniqueID, 0, 16),
+		FieldIndexes:         make([]*etcdpb.FieldIndexInfo, 0, 16),
+		VirtualChannelNames:  vchanNames,
+		PhysicalChannelNames: chanNames,
 	}
 
 	// every collection has _default partition
@@ -172,12 +190,14 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	}
 
 	ddCollReq := internalpb.CreateCollectionRequest{
-		Base:           t.Req.Base,
-		DbName:         t.Req.DbName,
-		CollectionName: t.Req.CollectionName,
-		DbID:           0, //TODO,not used
-		CollectionID:   collID,
-		Schema:         schemaBytes,
+		Base:                 t.Req.Base,
+		DbName:               t.Req.DbName,
+		CollectionName:       t.Req.CollectionName,
+		DbID:                 0, //TODO,not used
+		CollectionID:         collID,
+		Schema:               schemaBytes,
+		VirtualChannelNames:  vchanNames,
+		PhysicalChannelNames: chanNames,
 	}
 
 	ddPartReq := internalpb.CreatePartitionRequest{
@@ -351,23 +371,23 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DescribeCollection {
 		return fmt.Errorf("describe collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	var coll *etcdpb.CollectionInfo
+	var collInfo *etcdpb.CollectionInfo
 	var err error
 
 	if t.Req.CollectionName != "" {
-		coll, err = t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
+		collInfo, err = t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
 		if err != nil {
 			return err
 		}
 	} else {
-		coll, err = t.core.MetaTable.GetCollectionByID(t.Req.CollectionID)
+		collInfo, err = t.core.MetaTable.GetCollectionByID(t.Req.CollectionID)
 		if err != nil {
 			return err
 		}
 	}
 
-	t.Rsp.Schema = proto.Clone(coll.Schema).(*schemapb.CollectionSchema)
-	t.Rsp.CollectionID = coll.ID
+	t.Rsp.Schema = proto.Clone(collInfo.Schema).(*schemapb.CollectionSchema)
+	t.Rsp.CollectionID = collInfo.ID
 	var newField []*schemapb.FieldSchema
 	for _, field := range t.Rsp.Schema.Fields {
 		if field.FieldID >= StartOfUserFieldID {
@@ -375,6 +395,9 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 		}
 	}
 	t.Rsp.Schema.Fields = newField
+
+	t.Rsp.VirtualChannelNames = collInfo.VirtualChannelNames
+	t.Rsp.PhysicalChannelNames = collInfo.PhysicalChannelNames
 	return nil
 }
 

@@ -418,6 +418,7 @@ class CreateCollectionRequest :
     kCollectionNameFieldNumber = 3,
     kSchemaFieldNumber = 4,
     kBaseFieldNumber = 1,
+    kShardsNumFieldNumber = 5,
   };
   // string db_name = 2;
   void clear_db_name();
@@ -460,6 +461,11 @@ class CreateCollectionRequest :
   ::milvus::proto::common::MsgBase* mutable_base();
   void set_allocated_base(::milvus::proto::common::MsgBase* base);
 
+  // int32 shards_num = 5;
+  void clear_shards_num();
+  ::PROTOBUF_NAMESPACE_ID::int32 shards_num() const;
+  void set_shards_num(::PROTOBUF_NAMESPACE_ID::int32 value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.CreateCollectionRequest)
  private:
   class _Internal;
@@ -469,6 +475,7 @@ class CreateCollectionRequest :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr schema_;
   ::milvus::proto::common::MsgBase* base_;
+  ::PROTOBUF_NAMESPACE_ID::int32 shards_num_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -1362,10 +1369,46 @@ class DescribeCollectionResponse :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kVirtualChannelNamesFieldNumber = 4,
+    kPhysicalChannelNamesFieldNumber = 5,
     kStatusFieldNumber = 1,
     kSchemaFieldNumber = 2,
     kCollectionIDFieldNumber = 3,
   };
+  // repeated string virtual_channel_names = 4;
+  int virtual_channel_names_size() const;
+  void clear_virtual_channel_names();
+  const std::string& virtual_channel_names(int index) const;
+  std::string* mutable_virtual_channel_names(int index);
+  void set_virtual_channel_names(int index, const std::string& value);
+  void set_virtual_channel_names(int index, std::string&& value);
+  void set_virtual_channel_names(int index, const char* value);
+  void set_virtual_channel_names(int index, const char* value, size_t size);
+  std::string* add_virtual_channel_names();
+  void add_virtual_channel_names(const std::string& value);
+  void add_virtual_channel_names(std::string&& value);
+  void add_virtual_channel_names(const char* value);
+  void add_virtual_channel_names(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& virtual_channel_names() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_virtual_channel_names();
+
+  // repeated string physical_channel_names = 5;
+  int physical_channel_names_size() const;
+  void clear_physical_channel_names();
+  const std::string& physical_channel_names(int index) const;
+  std::string* mutable_physical_channel_names(int index);
+  void set_physical_channel_names(int index, const std::string& value);
+  void set_physical_channel_names(int index, std::string&& value);
+  void set_physical_channel_names(int index, const char* value);
+  void set_physical_channel_names(int index, const char* value, size_t size);
+  std::string* add_physical_channel_names();
+  void add_physical_channel_names(const std::string& value);
+  void add_physical_channel_names(std::string&& value);
+  void add_physical_channel_names(const char* value);
+  void add_physical_channel_names(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& physical_channel_names() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_physical_channel_names();
+
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
   void clear_status();
@@ -1392,6 +1435,8 @@ class DescribeCollectionResponse :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> virtual_channel_names_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> physical_channel_names_;
   ::milvus::proto::common::Status* status_;
   ::milvus::proto::schema::CollectionSchema* schema_;
   ::PROTOBUF_NAMESPACE_ID::int64 collectionid_;
@@ -8809,6 +8854,20 @@ inline void CreateCollectionRequest::set_allocated_schema(std::string* schema) {
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.CreateCollectionRequest.schema)
 }
 
+// int32 shards_num = 5;
+inline void CreateCollectionRequest::clear_shards_num() {
+  shards_num_ = 0;
+}
+inline ::PROTOBUF_NAMESPACE_ID::int32 CreateCollectionRequest::shards_num() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.CreateCollectionRequest.shards_num)
+  return shards_num_;
+}
+inline void CreateCollectionRequest::set_shards_num(::PROTOBUF_NAMESPACE_ID::int32 value) {
+  
+  shards_num_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.CreateCollectionRequest.shards_num)
+}
+
 // -------------------------------------------------------------------
 
 // DropCollectionRequest
@@ -9545,6 +9604,136 @@ inline void DescribeCollectionResponse::set_collectionid(::PROTOBUF_NAMESPACE_ID
   
   collectionid_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeCollectionResponse.collectionID)
+}
+
+// repeated string virtual_channel_names = 4;
+inline int DescribeCollectionResponse::virtual_channel_names_size() const {
+  return virtual_channel_names_.size();
+}
+inline void DescribeCollectionResponse::clear_virtual_channel_names() {
+  virtual_channel_names_.Clear();
+}
+inline const std::string& DescribeCollectionResponse::virtual_channel_names(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.DescribeCollectionResponse.virtual_channel_names)
+  return virtual_channel_names_.Get(index);
+}
+inline std::string* DescribeCollectionResponse::mutable_virtual_channel_names(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.DescribeCollectionResponse.virtual_channel_names)
+  return virtual_channel_names_.Mutable(index);
+}
+inline void DescribeCollectionResponse::set_virtual_channel_names(int index, const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeCollectionResponse.virtual_channel_names)
+  virtual_channel_names_.Mutable(index)->assign(value);
+}
+inline void DescribeCollectionResponse::set_virtual_channel_names(int index, std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeCollectionResponse.virtual_channel_names)
+  virtual_channel_names_.Mutable(index)->assign(std::move(value));
+}
+inline void DescribeCollectionResponse::set_virtual_channel_names(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  virtual_channel_names_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.DescribeCollectionResponse.virtual_channel_names)
+}
+inline void DescribeCollectionResponse::set_virtual_channel_names(int index, const char* value, size_t size) {
+  virtual_channel_names_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.DescribeCollectionResponse.virtual_channel_names)
+}
+inline std::string* DescribeCollectionResponse::add_virtual_channel_names() {
+  // @@protoc_insertion_point(field_add_mutable:milvus.proto.milvus.DescribeCollectionResponse.virtual_channel_names)
+  return virtual_channel_names_.Add();
+}
+inline void DescribeCollectionResponse::add_virtual_channel_names(const std::string& value) {
+  virtual_channel_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.DescribeCollectionResponse.virtual_channel_names)
+}
+inline void DescribeCollectionResponse::add_virtual_channel_names(std::string&& value) {
+  virtual_channel_names_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.DescribeCollectionResponse.virtual_channel_names)
+}
+inline void DescribeCollectionResponse::add_virtual_channel_names(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  virtual_channel_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.proto.milvus.DescribeCollectionResponse.virtual_channel_names)
+}
+inline void DescribeCollectionResponse::add_virtual_channel_names(const char* value, size_t size) {
+  virtual_channel_names_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.proto.milvus.DescribeCollectionResponse.virtual_channel_names)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+DescribeCollectionResponse::virtual_channel_names() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.DescribeCollectionResponse.virtual_channel_names)
+  return virtual_channel_names_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+DescribeCollectionResponse::mutable_virtual_channel_names() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.DescribeCollectionResponse.virtual_channel_names)
+  return &virtual_channel_names_;
+}
+
+// repeated string physical_channel_names = 5;
+inline int DescribeCollectionResponse::physical_channel_names_size() const {
+  return physical_channel_names_.size();
+}
+inline void DescribeCollectionResponse::clear_physical_channel_names() {
+  physical_channel_names_.Clear();
+}
+inline const std::string& DescribeCollectionResponse::physical_channel_names(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.DescribeCollectionResponse.physical_channel_names)
+  return physical_channel_names_.Get(index);
+}
+inline std::string* DescribeCollectionResponse::mutable_physical_channel_names(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.DescribeCollectionResponse.physical_channel_names)
+  return physical_channel_names_.Mutable(index);
+}
+inline void DescribeCollectionResponse::set_physical_channel_names(int index, const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeCollectionResponse.physical_channel_names)
+  physical_channel_names_.Mutable(index)->assign(value);
+}
+inline void DescribeCollectionResponse::set_physical_channel_names(int index, std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeCollectionResponse.physical_channel_names)
+  physical_channel_names_.Mutable(index)->assign(std::move(value));
+}
+inline void DescribeCollectionResponse::set_physical_channel_names(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  physical_channel_names_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.DescribeCollectionResponse.physical_channel_names)
+}
+inline void DescribeCollectionResponse::set_physical_channel_names(int index, const char* value, size_t size) {
+  physical_channel_names_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.DescribeCollectionResponse.physical_channel_names)
+}
+inline std::string* DescribeCollectionResponse::add_physical_channel_names() {
+  // @@protoc_insertion_point(field_add_mutable:milvus.proto.milvus.DescribeCollectionResponse.physical_channel_names)
+  return physical_channel_names_.Add();
+}
+inline void DescribeCollectionResponse::add_physical_channel_names(const std::string& value) {
+  physical_channel_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.DescribeCollectionResponse.physical_channel_names)
+}
+inline void DescribeCollectionResponse::add_physical_channel_names(std::string&& value) {
+  physical_channel_names_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.DescribeCollectionResponse.physical_channel_names)
+}
+inline void DescribeCollectionResponse::add_physical_channel_names(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  physical_channel_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.proto.milvus.DescribeCollectionResponse.physical_channel_names)
+}
+inline void DescribeCollectionResponse::add_physical_channel_names(const char* value, size_t size) {
+  physical_channel_names_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.proto.milvus.DescribeCollectionResponse.physical_channel_names)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+DescribeCollectionResponse::physical_channel_names() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.DescribeCollectionResponse.physical_channel_names)
+  return physical_channel_names_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+DescribeCollectionResponse::mutable_physical_channel_names() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.DescribeCollectionResponse.physical_channel_names)
+  return &physical_channel_names_;
 }
 
 // -------------------------------------------------------------------
