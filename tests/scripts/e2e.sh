@@ -63,7 +63,7 @@ pushd "${ROOT}/tests/docker"
   if [[ "${MANUAL:-}" == "true" ]]; then
     docker-compose up -d
   else
-    docker-compose run --rm pytest /bin/bash -c "python3 -m pip install --no-cache-dir -r requirements.txt && \
+    docker-compose run --rm pytest /bin/bash -c "cd tests/python_test/ && python3 -m pip install --no-cache-dir -r requirements.txt && \
                                                pytest -n ${PARALLEL_NUM} --ip ${SERVICE_IP} --port ${SERVICE_PORT} ${@:-}"
   fi
 popd
