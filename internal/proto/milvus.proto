@@ -83,8 +83,8 @@ message DescribeCollectionResponse {
   common.Status status = 1;
   schema.CollectionSchema schema = 2;
   int64 collectionID = 3;
-  repeated string physical_channel_names = 4;
-  repeated string virtual_channel_names = 5;
+  repeated string virtual_channel_names = 4;
+  repeated string physical_channel_names = 5;
 }
 
 message LoadCollectionRequest {

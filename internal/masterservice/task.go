@@ -135,11 +135,11 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	chanNames := make([]string, t.Req.ShardsNum)
 	vchanNames := make([]string, t.Req.ShardsNum)
+	chanNames := make([]string, t.Req.ShardsNum)
 	for i := int32(0); i < t.Req.ShardsNum; i++ {
-		chanNames[i] = fmt.Sprintf("%s_%d_c%d", t.Req.CollectionName, collID, i)
 		vchanNames[i] = fmt.Sprintf("%s_%d_v%d", t.Req.CollectionName, collID, i)
+		chanNames[i] = fmt.Sprintf("%s_%d_c%d", t.Req.CollectionName, collID, i)
 	}
 
 	collInfo := etcdpb.CollectionInfo{
@@ -148,8 +148,8 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		CreateTime:           collTs,
 		PartitionIDs:         make([]typeutil.UniqueID, 0, 16),
 		FieldIndexes:         make([]*etcdpb.FieldIndexInfo, 0, 16),
-		PhysicalChannelNames: chanNames,
 		VirtualChannelNames:  vchanNames,
+		PhysicalChannelNames: chanNames,
 	}
 
 	// every collection has _default partition
@@ -190,13 +190,14 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	}
 
 	ddCollReq := internalpb.CreateCollectionRequest{
-		Base:           t.Req.Base,
-		DbName:         t.Req.DbName,
-		CollectionName: t.Req.CollectionName,
-		DbID:           0, //TODO,not used
-		CollectionID:   collID,
-		Schema:         schemaBytes,
-		ShardsNum:      t.Req.ShardsNum,
+		Base:                 t.Req.Base,
+		DbName:               t.Req.DbName,
+		CollectionName:       t.Req.CollectionName,
+		DbID:                 0, //TODO,not used
+		CollectionID:         collID,
+		Schema:               schemaBytes,
+		VirtualChannelNames:  vchanNames,
+		PhysicalChannelNames: chanNames,
 	}
 
 	ddPartReq := internalpb.CreatePartitionRequest{
@@ -395,8 +396,8 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 	}
 	t.Rsp.Schema.Fields = newField
 
-	t.Rsp.PhysicalChannelNames = collInfo.PhysicalChannelNames
 	t.Rsp.VirtualChannelNames = collInfo.VirtualChannelNames
+	t.Rsp.PhysicalChannelNames = collInfo.PhysicalChannelNames
 	return nil
 }
 

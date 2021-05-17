@@ -286,8 +286,8 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_etcd_5fmeta_2eproto::offsets[]
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, create_time_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, partitionids_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, field_indexes_),
-  PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, physical_channel_names_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, virtual_channel_names_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, physical_channel_names_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::SegmentIndexInfo, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -389,8 +389,8 @@ const char descriptor_table_protodef_etcd_5fmeta_2eproto[] PROTOBUF_SECTION_VARI
   "vus.proto.schema.CollectionSchema\022\023\n\013cre"
   "ate_time\030\003 \001(\004\022\024\n\014partitionIDs\030\004 \003(\003\0228\n\r"
   "field_indexes\030\005 \003(\0132!.milvus.proto.etcd."
-  "FieldIndexInfo\022\036\n\026physical_channel_names"
-  "\030\006 \003(\t\022\035\n\025virtual_channel_names\030\007 \003(\t\"n\n"
+  "FieldIndexInfo\022\035\n\025virtual_channel_names\030"
+  "\006 \003(\t\022\036\n\026physical_channel_names\030\007 \003(\t\"n\n"
   "\020SegmentIndexInfo\022\021\n\tsegmentID\030\001 \001(\003\022\017\n\007"
   "fieldID\030\002 \001(\003\022\017\n\007indexID\030\003 \001(\003\022\017\n\007buildI"
   "D\030\004 \001(\003\022\024\n\014enable_index\030\005 \001(\010\"\252\001\n\016Collec"
@@ -2323,8 +2323,8 @@ CollectionInfo::CollectionInfo(const CollectionInfo& from)
       _internal_metadata_(nullptr),
       partitionids_(from.partitionids_),
       field_indexes_(from.field_indexes_),
-      physical_channel_names_(from.physical_channel_names_),
-      virtual_channel_names_(from.virtual_channel_names_) {
+      virtual_channel_names_(from.virtual_channel_names_),
+      physical_channel_names_(from.physical_channel_names_) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
   if (from.has_schema()) {
     schema_ = new ::milvus::proto::schema::CollectionSchema(*from.schema_);
@@ -2370,8 +2370,8 @@ void CollectionInfo::Clear() {
 
   partitionids_.Clear();
   field_indexes_.Clear();
-  physical_channel_names_.Clear();
   virtual_channel_names_.Clear();
+  physical_channel_names_.Clear();
   if (GetArenaNoVirtual() == nullptr && schema_ != nullptr) {
     delete schema_;
   }
@@ -2433,25 +2433,25 @@ const char* CollectionInfo::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE
           } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 42);
         } else goto handle_unusual;
         continue;
-      // repeated string physical_channel_names = 6;
+      // repeated string virtual_channel_names = 6;
       case 6:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 50)) {
           ptr -= 1;
           do {
             ptr += 1;
-            ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(add_physical_channel_names(), ptr, ctx, "milvus.proto.etcd.CollectionInfo.physical_channel_names");
+            ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(add_virtual_channel_names(), ptr, ctx, "milvus.proto.etcd.CollectionInfo.virtual_channel_names");
             CHK_(ptr);
             if (!ctx->DataAvailable(ptr)) break;
           } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 50);
         } else goto handle_unusual;
         continue;
-      // repeated string virtual_channel_names = 7;
+      // repeated string physical_channel_names = 7;
       case 7:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 58)) {
           ptr -= 1;
           do {
             ptr += 1;
-            ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(add_virtual_channel_names(), ptr, ctx, "milvus.proto.etcd.CollectionInfo.virtual_channel_names");
+            ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(add_physical_channel_names(), ptr, ctx, "milvus.proto.etcd.CollectionInfo.physical_channel_names");
             CHK_(ptr);
             if (!ctx->DataAvailable(ptr)) break;
           } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 58);
@@ -2551,25 +2551,9 @@ bool CollectionInfo::MergePartialFromCodedStream(
         break;
       }
 
-      // repeated string physical_channel_names = 6;
+      // repeated string virtual_channel_names = 6;
       case 6: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (50 & 0xFF)) {
-          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
-                input, this->add_physical_channel_names()));
-          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-            this->physical_channel_names(this->physical_channel_names_size() - 1).data(),
-            static_cast<int>(this->physical_channel_names(this->physical_channel_names_size() - 1).length()),
-            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
-            "milvus.proto.etcd.CollectionInfo.physical_channel_names"));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      // repeated string virtual_channel_names = 7;
-      case 7: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (58 & 0xFF)) {
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
                 input, this->add_virtual_channel_names()));
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
@@ -2577,6 +2561,22 @@ bool CollectionInfo::MergePartialFromCodedStream(
             static_cast<int>(this->virtual_channel_names(this->virtual_channel_names_size() - 1).length()),
             ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
             "milvus.proto.etcd.CollectionInfo.virtual_channel_names"));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // repeated string physical_channel_names = 7;
+      case 7: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (58 & 0xFF)) {
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
+                input, this->add_physical_channel_names()));
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+            this->physical_channel_names(this->physical_channel_names_size() - 1).data(),
+            static_cast<int>(this->physical_channel_names(this->physical_channel_names_size() - 1).length()),
+            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
+            "milvus.proto.etcd.CollectionInfo.physical_channel_names"));
         } else {
           goto handle_unusual;
         }
@@ -2646,24 +2646,24 @@ void CollectionInfo::SerializeWithCachedSizes(
       output);
   }
 
-  // repeated string physical_channel_names = 6;
-  for (int i = 0, n = this->physical_channel_names_size(); i < n; i++) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->physical_channel_names(i).data(), static_cast<int>(this->physical_channel_names(i).length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "milvus.proto.etcd.CollectionInfo.physical_channel_names");
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteString(
-      6, this->physical_channel_names(i), output);
-  }
-
-  // repeated string virtual_channel_names = 7;
+  // repeated string virtual_channel_names = 6;
   for (int i = 0, n = this->virtual_channel_names_size(); i < n; i++) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
       this->virtual_channel_names(i).data(), static_cast<int>(this->virtual_channel_names(i).length()),
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
       "milvus.proto.etcd.CollectionInfo.virtual_channel_names");
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteString(
-      7, this->virtual_channel_names(i), output);
+      6, this->virtual_channel_names(i), output);
+  }
+
+  // repeated string physical_channel_names = 7;
+  for (int i = 0, n = this->physical_channel_names_size(); i < n; i++) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->physical_channel_names(i).data(), static_cast<int>(this->physical_channel_names(i).length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.etcd.CollectionInfo.physical_channel_names");
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteString(
+      7, this->physical_channel_names(i), output);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -2717,24 +2717,24 @@ void CollectionInfo::SerializeWithCachedSizes(
         5, this->field_indexes(static_cast<int>(i)), target);
   }
 
-  // repeated string physical_channel_names = 6;
-  for (int i = 0, n = this->physical_channel_names_size(); i < n; i++) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->physical_channel_names(i).data(), static_cast<int>(this->physical_channel_names(i).length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "milvus.proto.etcd.CollectionInfo.physical_channel_names");
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      WriteStringToArray(6, this->physical_channel_names(i), target);
-  }
-
-  // repeated string virtual_channel_names = 7;
+  // repeated string virtual_channel_names = 6;
   for (int i = 0, n = this->virtual_channel_names_size(); i < n; i++) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
       this->virtual_channel_names(i).data(), static_cast<int>(this->virtual_channel_names(i).length()),
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
       "milvus.proto.etcd.CollectionInfo.virtual_channel_names");
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      WriteStringToArray(7, this->virtual_channel_names(i), target);
+      WriteStringToArray(6, this->virtual_channel_names(i), target);
+  }
+
+  // repeated string physical_channel_names = 7;
+  for (int i = 0, n = this->physical_channel_names_size(); i < n; i++) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->physical_channel_names(i).data(), static_cast<int>(this->physical_channel_names(i).length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.etcd.CollectionInfo.physical_channel_names");
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      WriteStringToArray(7, this->physical_channel_names(i), target);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -2784,20 +2784,20 @@ size_t CollectionInfo::ByteSizeLong() const {
     }
   }
 
-  // repeated string physical_channel_names = 6;
-  total_size += 1 *
-      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(this->physical_channel_names_size());
-  for (int i = 0, n = this->physical_channel_names_size(); i < n; i++) {
-    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-      this->physical_channel_names(i));
-  }
-
-  // repeated string virtual_channel_names = 7;
+  // repeated string virtual_channel_names = 6;
   total_size += 1 *
       ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(this->virtual_channel_names_size());
   for (int i = 0, n = this->virtual_channel_names_size(); i < n; i++) {
     total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
       this->virtual_channel_names(i));
+  }
+
+  // repeated string physical_channel_names = 7;
+  total_size += 1 *
+      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(this->physical_channel_names_size());
+  for (int i = 0, n = this->physical_channel_names_size(); i < n; i++) {
+    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+      this->physical_channel_names(i));
   }
 
   // .milvus.proto.schema.CollectionSchema schema = 2;
@@ -2850,8 +2850,8 @@ void CollectionInfo::MergeFrom(const CollectionInfo& from) {
 
   partitionids_.MergeFrom(from.partitionids_);
   field_indexes_.MergeFrom(from.field_indexes_);
-  physical_channel_names_.MergeFrom(from.physical_channel_names_);
   virtual_channel_names_.MergeFrom(from.virtual_channel_names_);
+  physical_channel_names_.MergeFrom(from.physical_channel_names_);
   if (from.has_schema()) {
     mutable_schema()->::milvus::proto::schema::CollectionSchema::MergeFrom(from.schema());
   }
@@ -2886,8 +2886,8 @@ void CollectionInfo::InternalSwap(CollectionInfo* other) {
   _internal_metadata_.Swap(&other->_internal_metadata_);
   partitionids_.InternalSwap(&other->partitionids_);
   CastToBase(&field_indexes_)->InternalSwap(CastToBase(&other->field_indexes_));
-  physical_channel_names_.InternalSwap(CastToBase(&other->physical_channel_names_));
   virtual_channel_names_.InternalSwap(CastToBase(&other->virtual_channel_names_));
+  physical_channel_names_.InternalSwap(CastToBase(&other->physical_channel_names_));
   swap(schema_, other->schema_);
   swap(id_, other->id_);
   swap(create_time_, other->create_time_);
