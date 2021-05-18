@@ -1,4 +1,4 @@
-package session
+package sessionutil
 
 import (
 	"context"
@@ -16,7 +16,8 @@ import (
 	"go.uber.org/zap"
 )
 
-const defaultIDKey = "services/id"
+const defaultServiceRoot = "/services/"
+const defaultIDKey = "id"
 const defaultRetryTimes = 30
 
 // Session is a struct to store service's session, including ServerID, ServerName,
@@ -65,10 +66,10 @@ func GetServerID(etcd *etcdkv.EtcdKV) (int64, error) {
 func getServerIDWithKey(etcd *etcdkv.EtcdKV, key string, retryTimes int) (int64, error) {
 	res := int64(-1)
 	getServerIDWithKeyFn := func() error {
-		value, err := etcd.Load(key)
+		value, err := etcd.Load(defaultServiceRoot + key)
 		log.Debug("session", zap.String("get serverid", value))
 		if err != nil {
-			err = etcd.CompareVersionAndSwap(key, 0, "1")
+			err = etcd.CompareVersionAndSwap(defaultServiceRoot+key, 0, "1")
 			if err != nil {
 				log.Debug("session", zap.Error(err))
 				return err
@@ -81,7 +82,7 @@ func getServerIDWithKey(etcd *etcdkv.EtcdKV, key string, retryTimes int) (int64,
 			log.Debug("session", zap.Error(err))
 			return err
 		}
-		err = etcd.CompareValueAndSwap(key, value,
+		err = etcd.CompareValueAndSwap(defaultServiceRoot+key, value,
 			strconv.FormatInt(valueInt+1, 10))
 		if err != nil {
 			log.Debug("session", zap.Error(err))
@@ -101,13 +102,15 @@ func getServerIDWithKey(etcd *etcdkv.EtcdKV, key string, retryTimes int) (int64,
 // key: metaRootPath + "/services" + "/ServerName-ServerID"
 // value: json format
 // {
-//     "ServerID": ServerID
-//     "ServerName": ServerName // ServerName
-//     "Address": ip:port // Address of service, including ip and port
-//     "LeaseID": LeaseID // The ID of etcd lease
+//     "ServerID": "ServerID",
+//     "ServerName": "ServerName",
+//     "Address": "ip:port",
+//     "LeaseID": "LeaseID",
 // }
 // MetaRootPath is configurable in the config file.
-func RegisterService(etcdKV *etcdkv.EtcdKV, session *Session, ttl int64) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+// Exclusive means whether this service can exist two at the same time, if so,
+// it is false. Otherwise, set it to true.
+func RegisterService(etcdKV *etcdkv.EtcdKV, exclusive bool, session *Session, ttl int64) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	respID, err := etcdKV.Grant(ttl)
 	if err != nil {
 		log.Error("register service", zap.Error(err))
@@ -120,10 +123,13 @@ func RegisterService(etcdKV *etcdkv.EtcdKV, session *Session, ttl int64) (<-chan
 		return nil, err
 	}
 
-	err = etcdKV.SaveWithLease(fmt.Sprintf("/services/%s-%d", session.ServerName, session.ServerID),
-		string(sessionJSON), respID)
+	key := defaultServiceRoot + session.ServerName
+	if !exclusive {
+		key = key + "-" + strconv.FormatInt(session.ServerID, 10)
+	}
+	err = etcdKV.CompareVersionAndSwap(key, 0, string(sessionJSON), clientv3.WithLease(respID))
 	if err != nil {
-		fmt.Printf("put lease error %s\n", err)
+		fmt.Printf("compare and swap error %s\n. maybe the key has registered", err)
 		return nil, err
 	}
 
@@ -165,7 +171,7 @@ func ProcessKeepAliveResponse(ctx context.Context, ch <-chan *clientv3.LeaseKeep
 // For general, "datanode" to get all datanodes
 func GetSessions(etcdKV *etcdkv.EtcdKV, prefix string) ([]*Session, error) {
 	sessions := make([]*Session, 0)
-	_, resValue, err := etcdKV.LoadWithPrefix("/services/" + prefix)
+	_, resValue, err := etcdKV.LoadWithPrefix(defaultServiceRoot + prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +192,7 @@ func GetSessions(etcdKV *etcdkv.EtcdKV, prefix string) ([]*Session, error) {
 func WatchServices(ctx context.Context, etcdKV *etcdkv.EtcdKV, prefix string) (addChannel <-chan *Session, deleteChannel <-chan *Session) {
 	addCh := make(chan *Session, 10)
 	deleteCh := make(chan *Session, 10)
-	rch := etcdKV.WatchWithPrefix("/services/" + prefix)
+	rch := etcdKV.WatchWithPrefix(defaultServiceRoot + prefix)
 	go func() {
 		for {
 			select {

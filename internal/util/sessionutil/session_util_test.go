@@ -1,4 +1,4 @@
-package session
+package sessionutil
 
 import (
 	"fmt"
@@ -78,7 +78,7 @@ func TestRegister(t *testing.T) {
 		id, err := GetServerID(etcdKV)
 		assert.Nil(t, err)
 		session := NewSession(id, "test", "localhost")
-		_, err = RegisterService(etcdKV, session, 10)
+		_, err = RegisterService(etcdKV, false, session, 10)
 		assert.Nil(t, err)
 		sessionReturn := <-addChannel
 		assert.Equal(t, sessionReturn, session)
@@ -94,6 +94,35 @@ func TestRegister(t *testing.T) {
 		sessionReturn := <-deletechannel
 		assert.Equal(t, sessionReturn, sessions[i])
 	}
+}
+
+func TestRegisterExclusive(t *testing.T) {
+	Params.Init()
+
+	etcdAddr, err := Params.Load("_EtcdAddress")
+	if err != nil {
+		panic(err)
+	}
+
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	assert.Nil(t, err)
+	rootPath := "/etcd/test/root"
+	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
+
+	defer etcdKV.Close()
+	defer etcdKV.RemoveWithPrefix("")
+
+	id, err := GetServerID(etcdKV)
+	assert.Nil(t, err)
+	session := NewSession(id, "test", "localhost")
+	_, err = RegisterService(etcdKV, true, session, 10)
+	assert.Nil(t, err)
+
+	id, err = GetServerID(etcdKV)
+	assert.Nil(t, err)
+	session = NewSession(id, "test", "helloworld")
+	_, err = RegisterService(etcdKV, true, session, 10)
+	assert.NotNil(t, err)
 }
 
 func TestKeepAlive(t *testing.T) {
@@ -117,7 +146,7 @@ func TestKeepAlive(t *testing.T) {
 	id, err := GetServerID(etcdKV)
 	assert.Nil(t, err)
 	session := NewSession(id, "test", "localhost")
-	ch, err := RegisterService(etcdKV, session, 10)
+	ch, err := RegisterService(etcdKV, false, session, 10)
 	assert.Nil(t, err)
 	aliveCh := ProcessKeepAliveResponse(ctx, ch)
 
