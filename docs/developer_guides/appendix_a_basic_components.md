@@ -61,23 +61,19 @@ The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/servic
 ###### Registeration
 
 - Registration is achieved through etcd's lease mechanism.
-
 - The service creates a lease with etcd and stores a key-value pair in etcd. If the lease expires or the service goes offline, etcd will delete the key-value pair. You can judge whether this service is avaliable through the key.
-
 - key: metaRootPath + "/services" + "/ServerName(-ServerID)(optional)"
-
 - value: json format
-```json
-{
-    "ServerID":ServerID //ServerID
-    "ServerName": ServerName // ServerName
-    "Address": ip:port // Address of service, including ip and port
-    "LeaseID": LeaseID // The ID of etcd lease
-}
-```
-
+  ```json
+  {
+      "ServerID":ServerID
+      "ServerName":ServerName
+      "Address":ip:port
+      "LeaseID":LeaseID"
+  }
+  ```
 - By obtaining the address, you can establish a connection with other services
-- If a service is exclusive, the key will not have ServerID. But ServerID still will be stored in value. 
+- If a service is exclusive, the key will not have **ServerID**. But **ServerID** still will be stored in value. 
 
 ###### Discovery
 
