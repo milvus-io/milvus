@@ -360,7 +360,7 @@ func TestGrpcService(t *testing.T) {
 	})
 
 	t.Run("describe collection", func(t *testing.T) {
-		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
+		collMeta, err := core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		req := &milvuspb.DescribeCollectionRequest{
 			Base: &commonpb.MsgBase{
@@ -411,10 +411,10 @@ func TestGrpcService(t *testing.T) {
 		status, err := cli.CreatePartition(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
-		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
+		collMeta, err := core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.PartitionIDs), 2)
-		partMeta, err := core.MetaTable.GetPartitionByID(collMeta.PartitionIDs[1])
+		partMeta, err := core.MetaTable.GetPartitionByID(1, collMeta.PartitionIDs[1], 0)
 		assert.Nil(t, err)
 		assert.Equal(t, partMeta.PartitionName, "testPartition")
 
@@ -440,7 +440,7 @@ func TestGrpcService(t *testing.T) {
 	})
 
 	t.Run("show partition", func(t *testing.T) {
-		coll, err := core.MetaTable.GetCollectionByName("testColl")
+		coll, err := core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		req := &milvuspb.ShowPartitionsRequest{
 			Base: &commonpb.MsgBase{
@@ -461,10 +461,10 @@ func TestGrpcService(t *testing.T) {
 	})
 
 	t.Run("show segment", func(t *testing.T) {
-		coll, err := core.MetaTable.GetCollectionByName("testColl")
+		coll, err := core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		partID := coll.PartitionIDs[1]
-		part, err := core.MetaTable.GetPartitionByID(partID)
+		part, err := core.MetaTable.GetPartitionByID(1, partID, 0)
 		assert.Nil(t, err)
 		assert.Zero(t, len(part.SegmentIDs))
 		seg := &datapb.SegmentInfo{
@@ -474,7 +474,7 @@ func TestGrpcService(t *testing.T) {
 		}
 		core.DataServiceSegmentChan <- seg
 		time.Sleep(time.Millisecond * 100)
-		part, err = core.MetaTable.GetPartitionByID(partID)
+		part, err = core.MetaTable.GetPartitionByID(1, partID, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, len(part.SegmentIDs), 1)
 
@@ -513,13 +513,13 @@ func TestGrpcService(t *testing.T) {
 				},
 			},
 		}
-		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
+		collMeta, err := core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.FieldIndexes), 0)
 		rsp, err := cli.CreateIndex(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_Success)
-		collMeta, err = core.MetaTable.GetCollectionByName("testColl")
+		collMeta, err = core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.FieldIndexes), 1)
 
@@ -535,7 +535,7 @@ func TestGrpcService(t *testing.T) {
 	})
 
 	t.Run("describe segment", func(t *testing.T) {
-		coll, err := core.MetaTable.GetCollectionByName("testColl")
+		coll, err := core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 
 		req := &milvuspb.DescribeSegmentRequest{
@@ -575,10 +575,10 @@ func TestGrpcService(t *testing.T) {
 	})
 
 	t.Run("flush segment", func(t *testing.T) {
-		coll, err := core.MetaTable.GetCollectionByName("testColl")
+		coll, err := core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		partID := coll.PartitionIDs[1]
-		part, err := core.MetaTable.GetPartitionByID(partID)
+		part, err := core.MetaTable.GetPartitionByID(1, partID, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, len(part.SegmentIDs), 1)
 		seg := &datapb.SegmentInfo{
@@ -588,7 +588,7 @@ func TestGrpcService(t *testing.T) {
 		}
 		core.DataServiceSegmentChan <- seg
 		time.Sleep(time.Millisecond * 100)
-		part, err = core.MetaTable.GetPartitionByID(partID)
+		part, err = core.MetaTable.GetPartitionByID(1, partID, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, len(part.SegmentIDs), 2)
 		core.DataNodeSegmentFlushCompletedChan <- 1001
@@ -656,10 +656,10 @@ func TestGrpcService(t *testing.T) {
 		status, err := cli.DropPartition(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_Success)
-		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
+		collMeta, err := core.MetaTable.GetCollectionByName("testColl", 0)
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.PartitionIDs), 1)
-		partMeta, err := core.MetaTable.GetPartitionByID(collMeta.PartitionIDs[0])
+		partMeta, err := core.MetaTable.GetPartitionByID(1, collMeta.PartitionIDs[0], 0)
 		assert.Nil(t, err)
 		assert.Equal(t, partMeta.PartitionName, cms.Params.DefaultPartitionName)
 		assert.Equal(t, 2, len(collectionMetaCache))
