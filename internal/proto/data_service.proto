@@ -29,6 +29,8 @@ service DataService {
   rpc GetPartitionStatistics(GetPartitionStatisticsRequest) returns (GetPartitionStatisticsResponse) {}
 
   rpc GetSegmentInfoChannel(GetSegmentInfoChannelRequest) returns (milvus.StringResponse){}
+
+  rpc SaveBinlogPaths(SaveBinlogPathsRequest) returns (common.Status){}
 }
 
 service DataNode {
@@ -232,4 +234,20 @@ message SegmentInfo {
   common.SegmentState state = 10;
   internal.MsgPosition start_position = 11;
   internal.MsgPosition end_position = 12;
+}
+
+message ID2PathList {                                                                                            
+  int64 ID = 1;                                                                                                
+  repeated string Paths = 2;                                                                                   
+}                                                                                                                
+
+message SaveBinlogPathsRequest {                                                                                 
+  common.MsgBase base = 1; 
+  int64 segmentID = 2;
+  int64 collectionID = 3;
+  ID2PathList field2BinlogPaths = 4;
+  ID2PathList coll2TsBinlogPaths = 5; 
+  ID2PathList coll2DdlBinlogPaths = 6;  
+  repeated internal.MsgPosition start_positions = 7;  
+  repeated internal.MsgPosition end_positions = 8; 
 }
