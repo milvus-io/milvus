@@ -17,7 +17,11 @@ import (
 )
 
 const defaultIDKey = "services/id"
+const defaultRetryTimes = 30
 
+// Session is a struct to store service's session, including ServerID, ServerName,
+// Address.
+// LeaseID will be assigned after registered in etcd.
 type Session struct {
 	ServerID   int64
 	ServerName string
@@ -39,14 +43,14 @@ func NewSession(serverID int64, serverName, address string) *Session {
 	}
 }
 
-// GlobalTracer returns [singleton] ServerID.
-// Before SetGlobalTracerID, GlobalServerID() returns -1
+// GlobalServerID returns [singleton] ServerID.
+// Before SetGlobalServerID, GlobalServerID() returns -1
 func GlobalServerID() int64 {
 	return globalServerID
 }
 
 // SetGlobalServerID sets the [singleton] ServerID. ServerID returned by
-// GlobalTracer(). Those who use GlobalServerID should call SetGlobalServerID()
+// GlobalServerID(). Those who use GlobalServerID should call SetGlobalServerID()
 // as early as possible in main() before use ServerID.
 func SetGlobalServerID(id int64) {
 	globalServerID = id
@@ -55,10 +59,10 @@ func SetGlobalServerID(id int64) {
 // GetServerID gets id from etcd with key: metaRootPath + "/services/id"
 // Each server get ServerID and add one to id.
 func GetServerID(etcd *etcdkv.EtcdKV) (int64, error) {
-	return getServerIDWithKey(etcd, defaultIDKey)
+	return getServerIDWithKey(etcd, defaultIDKey, defaultRetryTimes)
 }
 
-func getServerIDWithKey(etcd *etcdkv.EtcdKV, key string) (int64, error) {
+func getServerIDWithKey(etcd *etcdkv.EtcdKV, key string, retryTimes int) (int64, error) {
 	res := int64(-1)
 	getServerIDWithKeyFn := func() error {
 		value, err := etcd.Load(key)
@@ -87,7 +91,7 @@ func getServerIDWithKey(etcd *etcdkv.EtcdKV, key string) (int64, error) {
 		return nil
 	}
 
-	err := retry.Retry(30, time.Millisecond*200, getServerIDWithKeyFn)
+	err := retry.Retry(retryTimes, time.Millisecond*200, getServerIDWithKeyFn)
 	return res, err
 }
 
@@ -132,7 +136,7 @@ func RegisterService(etcdKV *etcdkv.EtcdKV, session *Session, ttl int64) (<-chan
 }
 
 // ProcessKeepAliveResponse processes the response of etcd keepAlive interface
-// If keepAlive fails for unexpected error, it will retry for default_retry_times times
+// If keepAlive fails for unexpected error, it will send a signal to the channel.
 func ProcessKeepAliveResponse(ctx context.Context, ch <-chan *clientv3.LeaseKeepAliveResponse) (signal <-chan bool) {
 	signalOut := make(chan bool)
 	go func() {
@@ -156,7 +160,7 @@ func ProcessKeepAliveResponse(ctx context.Context, ch <-chan *clientv3.LeaseKeep
 	return signalOut
 }
 
-// GetAllSessions gets all the services registered in etcd.
+// GetSessions gets all the services registered in etcd.
 // This gets all the key with prefix metaRootPath + "/services/" + prefix
 // For general, "datanode" to get all datanodes
 func GetSessions(etcdKV *etcdkv.EtcdKV, prefix string) ([]*Session, error) {

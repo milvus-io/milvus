@@ -257,7 +257,7 @@ func (kv *EtcdKV) KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliv
 	return ch, nil
 }
 
-// CompareAndSwap compares the existing value with compare, and if they are
+// CompareValueAndSwap compares the existing value with compare, and if they are
 // equal, the target is stored in etcd.
 func (kv *EtcdKV) CompareValueAndSwap(key, value, target string) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
@@ -278,8 +278,8 @@ func (kv *EtcdKV) CompareValueAndSwap(key, value, target string) error {
 	return nil
 }
 
-// CompareAndSwap compares the existing value with compare, and if they are
-// equal, the target is stored in etcd.
+// CompareVersionAndSwap compares the existing key-value's version with version, and if
+// they are equal, the target is stored in etcd.
 func (kv *EtcdKV) CompareVersionAndSwap(key string, version int64, target string) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
