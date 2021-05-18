@@ -373,14 +373,14 @@ func (s *Server) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*mas
 	return s.masterService.AllocID(ctx, in)
 }
 
+func (s *Server) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
+	return s.masterService.UpdateChannelTimeTick(ctx, in)
+}
+
 func (s *Server) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
 	return s.masterService.DescribeSegment(ctx, in)
 }
 
 func (s *Server) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
 	return s.masterService.ShowSegments(ctx, in)
-}
-
-func (s *Server) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
-	return s.masterService.UpdateChannelTimeTick(ctx, in)
 }
