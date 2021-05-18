@@ -61,8 +61,8 @@ type ParamTable struct {
 	// --- ETCD ---
 	EtcdAddress         string
 	MetaRootPath        string
-	SegFlushMetaSubPath string
-	DDLFlushMetaSubPath string
+	SegFlushMetaSubPath string // GOOSE TODO remove
+	DDLFlushMetaSubPath string // GOOSE TODO remove
 
 	// --- MinIO ---
 	MinioAddress         string
@@ -109,8 +109,8 @@ func (p *ParamTable) Init() {
 		// --- ETCD ---
 		p.initEtcdAddress()
 		p.initMetaRootPath()
-		p.initSegFlushMetaSubPath()
-		p.initDDLFlushMetaSubPath()
+		p.initSegFlushMetaSubPath() // GOOSE TODO remove
+		p.initDDLFlushMetaSubPath() // GOOSE TODO remove
 
 		// --- MinIO ---
 		p.initMinioAddress()
@@ -220,6 +220,7 @@ func (p *ParamTable) initMetaRootPath() {
 	p.MetaRootPath = path.Join(rootPath, subPath)
 }
 
+// GOOSE TODO remove
 func (p *ParamTable) initSegFlushMetaSubPath() {
 	subPath, err := p.Load("etcd.segFlushMetaSubPath")
 	if err != nil {
@@ -228,6 +229,7 @@ func (p *ParamTable) initSegFlushMetaSubPath() {
 	p.SegFlushMetaSubPath = subPath
 }
 
+// GOOSE TODO remove
 func (p *ParamTable) initDDLFlushMetaSubPath() {
 	subPath, err := p.Load("etcd.ddlFlushMetaSubPath")
 	if err != nil {
