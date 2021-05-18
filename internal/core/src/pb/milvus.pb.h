@@ -757,6 +757,7 @@ class HasCollectionRequest :
     kDbNameFieldNumber = 2,
     kCollectionNameFieldNumber = 3,
     kBaseFieldNumber = 1,
+    kTimeStampFieldNumber = 4,
   };
   // string db_name = 2;
   void clear_db_name();
@@ -788,6 +789,11 @@ class HasCollectionRequest :
   ::milvus::proto::common::MsgBase* mutable_base();
   void set_allocated_base(::milvus::proto::common::MsgBase* base);
 
+  // uint64 time_stamp = 4;
+  void clear_time_stamp();
+  ::PROTOBUF_NAMESPACE_ID::uint64 time_stamp() const;
+  void set_time_stamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.HasCollectionRequest)
  private:
   class _Internal;
@@ -796,6 +802,7 @@ class HasCollectionRequest :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::milvus::proto::common::MsgBase* base_;
+  ::PROTOBUF_NAMESPACE_ID::uint64 time_stamp_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -1206,6 +1213,7 @@ class DescribeCollectionRequest :
     kCollectionNameFieldNumber = 3,
     kBaseFieldNumber = 1,
     kCollectionIDFieldNumber = 4,
+    kTimeStampFieldNumber = 5,
   };
   // string db_name = 2;
   void clear_db_name();
@@ -1242,6 +1250,11 @@ class DescribeCollectionRequest :
   ::PROTOBUF_NAMESPACE_ID::int64 collectionid() const;
   void set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
+  // uint64 time_stamp = 5;
+  void clear_time_stamp();
+  ::PROTOBUF_NAMESPACE_ID::uint64 time_stamp() const;
+  void set_time_stamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.DescribeCollectionRequest)
  private:
   class _Internal;
@@ -1251,6 +1264,7 @@ class DescribeCollectionRequest :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::milvus::proto::common::MsgBase* base_;
   ::PROTOBUF_NAMESPACE_ID::int64 collectionid_;
+  ::PROTOBUF_NAMESPACE_ID::uint64 time_stamp_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -2187,6 +2201,7 @@ class ShowCollectionsRequest :
   enum : int {
     kDbNameFieldNumber = 2,
     kBaseFieldNumber = 1,
+    kTimeStampFieldNumber = 3,
   };
   // string db_name = 2;
   void clear_db_name();
@@ -2207,6 +2222,11 @@ class ShowCollectionsRequest :
   ::milvus::proto::common::MsgBase* mutable_base();
   void set_allocated_base(::milvus::proto::common::MsgBase* base);
 
+  // uint64 time_stamp = 3;
+  void clear_time_stamp();
+  ::PROTOBUF_NAMESPACE_ID::uint64 time_stamp() const;
+  void set_time_stamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.ShowCollectionsRequest)
  private:
   class _Internal;
@@ -2214,6 +2234,7 @@ class ShowCollectionsRequest :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
   ::milvus::proto::common::MsgBase* base_;
+  ::PROTOBUF_NAMESPACE_ID::uint64 time_stamp_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -9170,6 +9191,20 @@ inline void HasCollectionRequest::set_allocated_collection_name(std::string* col
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.HasCollectionRequest.collection_name)
 }
 
+// uint64 time_stamp = 4;
+inline void HasCollectionRequest::clear_time_stamp() {
+  time_stamp_ = PROTOBUF_ULONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::uint64 HasCollectionRequest::time_stamp() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.HasCollectionRequest.time_stamp)
+  return time_stamp_;
+}
+inline void HasCollectionRequest::set_time_stamp(::PROTOBUF_NAMESPACE_ID::uint64 value) {
+  
+  time_stamp_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.HasCollectionRequest.time_stamp)
+}
+
 // -------------------------------------------------------------------
 
 // BoolResponse
@@ -9496,6 +9531,20 @@ inline void DescribeCollectionRequest::set_collectionid(::PROTOBUF_NAMESPACE_ID:
   
   collectionid_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeCollectionRequest.collectionID)
+}
+
+// uint64 time_stamp = 5;
+inline void DescribeCollectionRequest::clear_time_stamp() {
+  time_stamp_ = PROTOBUF_ULONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::uint64 DescribeCollectionRequest::time_stamp() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.DescribeCollectionRequest.time_stamp)
+  return time_stamp_;
+}
+inline void DescribeCollectionRequest::set_time_stamp(::PROTOBUF_NAMESPACE_ID::uint64 value) {
+  
+  time_stamp_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeCollectionRequest.time_stamp)
 }
 
 // -------------------------------------------------------------------
@@ -10363,6 +10412,20 @@ inline void ShowCollectionsRequest::set_allocated_db_name(std::string* db_name) 
   }
   db_name_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), db_name);
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.ShowCollectionsRequest.db_name)
+}
+
+// uint64 time_stamp = 3;
+inline void ShowCollectionsRequest::clear_time_stamp() {
+  time_stamp_ = PROTOBUF_ULONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::uint64 ShowCollectionsRequest::time_stamp() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ShowCollectionsRequest.time_stamp)
+  return time_stamp_;
+}
+inline void ShowCollectionsRequest::set_time_stamp(::PROTOBUF_NAMESPACE_ID::uint64 value) {
+  
+  time_stamp_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShowCollectionsRequest.time_stamp)
 }
 
 // -------------------------------------------------------------------

@@ -60,6 +60,7 @@ message HasCollectionRequest {
   common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
+  uint64 time_stamp = 4;
 }
 
 message BoolResponse {
@@ -77,6 +78,7 @@ message DescribeCollectionRequest {
   string db_name = 2;
   string collection_name = 3;
   int64 collectionID = 4;
+  uint64 time_stamp = 5;
 }
 
 message DescribeCollectionResponse {
@@ -113,6 +115,7 @@ message GetCollectionStatisticsResponse {
 message ShowCollectionsRequest {
   common.MsgBase base = 1;
   string db_name = 2;
+  uint64 time_stamp = 3;
 }
 
 message ShowCollectionsResponse {

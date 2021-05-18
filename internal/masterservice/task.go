@@ -336,7 +336,7 @@ func (t *HasCollectionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_HasCollection {
 		return fmt.Errorf("has collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	_, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName, 0)
+	_, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName, t.Req.TimeStamp)
 	if err == nil {
 		t.HasCollection = true
 	} else {
@@ -375,12 +375,12 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 	var err error
 
 	if t.Req.CollectionName != "" {
-		collInfo, err = t.core.MetaTable.GetCollectionByName(t.Req.CollectionName, 0)
+		collInfo, err = t.core.MetaTable.GetCollectionByName(t.Req.CollectionName, t.Req.TimeStamp)
 		if err != nil {
 			return err
 		}
 	} else {
-		collInfo, err = t.core.MetaTable.GetCollectionByID(t.Req.CollectionID, 0)
+		collInfo, err = t.core.MetaTable.GetCollectionByID(t.Req.CollectionID, t.Req.TimeStamp)
 		if err != nil {
 			return err
 		}
@@ -427,7 +427,7 @@ func (t *ShowCollectionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_ShowCollections {
 		return fmt.Errorf("show collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	coll, err := t.core.MetaTable.ListCollections(0)
+	coll, err := t.core.MetaTable.ListCollections(t.Req.TimeStamp)
 	if err != nil {
 		return err
 	}

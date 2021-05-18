@@ -174,6 +174,7 @@ func TestMetaTable(t *testing.T) {
 
 	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
+	defer etcdCli.Close()
 	skv, err := newMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7, ftso)
 	assert.Nil(t, err)
 	assert.NotNil(t, skv)
@@ -1072,4 +1073,186 @@ func TestMetaTable(t *testing.T) {
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "segment id = 222 exist")
 	})
+}
+
+func TestMetaWithTimestamp(t *testing.T) {
+	rand.Seed(time.Now().UnixNano())
+	randVal := rand.Int()
+	Params.Init()
+	etcdAddr := Params.EtcdAddress
+	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
+
+	var tsoStart typeutil.Timestamp = 100
+	vtso := tsoStart
+	ftso := func() typeutil.Timestamp {
+		vtso++
+		return vtso
+	}
+
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	assert.Nil(t, err)
+	defer etcdCli.Close()
+
+	skv, err := newMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7, ftso)
+	assert.Nil(t, err)
+	assert.NotNil(t, skv)
+	mt, err := NewMetaTable(skv)
+	assert.Nil(t, err)
+
+	collInfo := &pb.CollectionInfo{
+		ID: 1,
+		Schema: &schemapb.CollectionSchema{
+			Name: "t1",
+		},
+	}
+
+	partInfo := &pb.PartitionInfo{
+		PartitionName: "p1",
+		PartitionID:   11,
+		SegmentIDs:    nil,
+	}
+	t1, err := mt.AddCollection(collInfo, partInfo, nil, "")
+	assert.Nil(t, err)
+
+	collInfo.ID = 2
+	collInfo.PartitionIDs = nil
+	collInfo.Schema.Name = "t2"
+	partInfo.PartitionID = 12
+	partInfo.PartitionName = "p2"
+
+	t2, err := mt.AddCollection(collInfo, partInfo, nil, "")
+	assert.Nil(t, err)
+
+	assert.True(t, mt.HasCollection(1, 0))
+	assert.True(t, mt.HasCollection(2, 0))
+
+	assert.True(t, mt.HasCollection(1, t2))
+	assert.True(t, mt.HasCollection(2, t2))
+
+	assert.True(t, mt.HasCollection(1, t1))
+	assert.False(t, mt.HasCollection(2, t1))
+
+	assert.False(t, mt.HasCollection(1, tsoStart))
+	assert.False(t, mt.HasCollection(2, tsoStart))
+
+	c1, err := mt.GetCollectionByID(1, 0)
+	assert.Nil(t, err)
+	c2, err := mt.GetCollectionByID(2, 0)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), c1.ID)
+	assert.Equal(t, int64(2), c2.ID)
+
+	c1, err = mt.GetCollectionByID(1, t2)
+	assert.Nil(t, err)
+	c2, err = mt.GetCollectionByID(2, t2)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), c1.ID)
+	assert.Equal(t, int64(2), c2.ID)
+
+	c1, err = mt.GetCollectionByID(1, t1)
+	assert.Nil(t, err)
+	c2, err = mt.GetCollectionByID(2, t1)
+	assert.NotNil(t, err)
+	assert.Equal(t, int64(1), c1.ID)
+
+	c1, err = mt.GetCollectionByID(1, tsoStart)
+	assert.NotNil(t, err)
+	c2, err = mt.GetCollectionByID(2, tsoStart)
+	assert.NotNil(t, err)
+
+	c1, err = mt.GetCollectionByName("t1", 0)
+	assert.Nil(t, err)
+	c2, err = mt.GetCollectionByName("t2", 0)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), c1.ID)
+	assert.Equal(t, int64(2), c2.ID)
+
+	c1, err = mt.GetCollectionByName("t1", t2)
+	assert.Nil(t, err)
+	c2, err = mt.GetCollectionByName("t2", t2)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), c1.ID)
+	assert.Equal(t, int64(2), c2.ID)
+
+	c1, err = mt.GetCollectionByName("t1", t1)
+	assert.Nil(t, err)
+	c2, err = mt.GetCollectionByName("t2", t1)
+	assert.NotNil(t, err)
+	assert.Equal(t, int64(1), c1.ID)
+
+	c1, err = mt.GetCollectionByName("t1", tsoStart)
+	assert.NotNil(t, err)
+	c2, err = mt.GetCollectionByName("t2", tsoStart)
+	assert.NotNil(t, err)
+
+	s1, err := mt.ListCollections(0)
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(s1))
+	assert.ElementsMatch(t, s1, []string{"t1", "t2"})
+
+	s1, err = mt.ListCollections(t2)
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(s1))
+	assert.ElementsMatch(t, s1, []string{"t1", "t2"})
+
+	s1, err = mt.ListCollections(t1)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(s1))
+	assert.ElementsMatch(t, s1, []string{"t1"})
+
+	s1, err = mt.ListCollections(tsoStart)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(s1))
+
+	p1, err := mt.GetPartitionByName(1, "p1", 0)
+	assert.Nil(t, err)
+	p2, err := mt.GetPartitionByName(2, "p2", 0)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(11), p1.PartitionID)
+	assert.Equal(t, int64(12), p2.PartitionID)
+	assert.Nil(t, err)
+
+	p1, err = mt.GetPartitionByName(1, "p1", t2)
+	assert.Nil(t, err)
+	p2, err = mt.GetPartitionByName(2, "p2", t2)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(11), p1.PartitionID)
+	assert.Equal(t, int64(12), p2.PartitionID)
+
+	p1, err = mt.GetPartitionByName(1, "p1", t1)
+	assert.Nil(t, err)
+	p2, err = mt.GetPartitionByName(2, "p2", t1)
+	assert.NotNil(t, err)
+	assert.Equal(t, int64(11), p1.PartitionID)
+
+	p1, err = mt.GetPartitionByName(1, "p1", tsoStart)
+	assert.NotNil(t, err)
+	p2, err = mt.GetPartitionByName(2, "p2", tsoStart)
+	assert.NotNil(t, err)
+
+	p1, err = mt.GetPartitionByID(1, 11, 0)
+	assert.Nil(t, err)
+	p2, err = mt.GetPartitionByID(2, 12, 0)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(11), p1.PartitionID)
+	assert.Equal(t, int64(12), p2.PartitionID)
+	assert.Nil(t, err)
+
+	p1, err = mt.GetPartitionByID(1, 11, t2)
+	assert.Nil(t, err)
+	p2, err = mt.GetPartitionByID(2, 12, t2)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(11), p1.PartitionID)
+	assert.Equal(t, int64(12), p2.PartitionID)
+
+	p1, err = mt.GetPartitionByID(1, 11, t1)
+	assert.Nil(t, err)
+	p2, err = mt.GetPartitionByID(2, 12, t1)
+	assert.NotNil(t, err)
+	assert.Equal(t, int64(11), p1.PartitionID)
+
+	p1, err = mt.GetPartitionByID(1, 11, tsoStart)
+	assert.NotNil(t, err)
+	p2, err = mt.GetPartitionByID(2, 12, tsoStart)
+	assert.NotNil(t, err)
 }
