@@ -49,7 +49,6 @@ There're some problems I haven't thought of.
     
    ![datanode_design](graphs/datanode_design_01.jpg)
 
-
 ##### Auto-flush with manul-flush
 
 Manul-flush means that the segment is sealed, and DataNode is told to flush by DataService. The completion of
