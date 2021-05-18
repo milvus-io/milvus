@@ -60,32 +60,32 @@ The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/servic
 
 ###### Registeration
 
-  * Registration is achieved through etcd's lease mechanism.
+* Registration is achieved through etcd's lease mechanism.
 
-  * The service creates a lease with etcd and stores a key-value pair in etcd. If the lease expires or the service goes offline, etcd will delete the key-value pair. You can judge whether this service is avaliable through the key.
+* The service creates a lease with etcd and stores a key-value pair in etcd. If the lease expires or the service goes offline, etcd will delete the key-value pair. You can judge whether this service is avaliable through the key.
 
-  * key: metaRootPath + "/services" + "/ServerName(-ServerID)(optional)"
+* key: metaRootPath + "/services" + "/ServerName(-ServerID)(optional)"
 
-  * value: json format
-    ```json
-    {
-        "ServerID": "ServerID",
-        "ServerName": "ServerName",
-        "Address": "ip:port",
-        "LeaseID": "LeaseID",
-    }
-    ```
+* value: json format
 
-  * By obtaining the address, you can establish a connection with other services
+  ```json
+  {
+    "ServerID": "ServerID",
+    "ServerName": "ServerName",
+    "Address": "ip:port",
+    "LeaseID": "LeaseID",
+  }
+  ```
 
-  * If a service is exclusive, the key will not have **ServerID**. But **ServerID** still will be stored in value. 
+* By obtaining the address, you can establish a connection with other services
+
+* If a service is exclusive, the key will not have **ServerID**. But **ServerID** still will be stored in value. 
 
 ###### Discovery
 
-  * All currently available services can be obtained by obtaining all the key-value pairs deposited during registration. If you want to get all the available nodes for a certain type of service, you can pass in the prefix of the corresponding key
+* All currently available services can be obtained by obtaining all the key-value pairs deposited during registration. If you want to get all the available nodes for a certain type of service, you can pass in the prefix of the corresponding key
 
-  * Registeration time can be compared with ServerID for ServerID will increase according to time.
-
+* Registeration time can be compared with ServerID for ServerID will increase according to time.
 
 
 ###### Interface
