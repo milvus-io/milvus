@@ -90,7 +90,6 @@ type Core struct {
 	cancel  context.CancelFunc
 	etcdCli *clientv3.Client
 	kvBase  *etcdkv.EtcdKV
-	metaKV  *etcdkv.EtcdKV
 
 	//setMsgStreams, receive time tick from proxy service time tick channel
 	ProxyTimeTickChan chan typeutil.Timestamp
@@ -190,9 +189,6 @@ func (c *Core) checkInit() error {
 	}
 	if c.etcdCli == nil {
 		return fmt.Errorf("etcdCli is nil")
-	}
-	if c.metaKV == nil {
-		return fmt.Errorf("metaKV is nil")
 	}
 	if c.kvBase == nil {
 		return fmt.Errorf("kvBase is nil")
@@ -307,7 +303,7 @@ func (c *Core) startDataServiceSegmentLoop() {
 			}
 			if seg == nil {
 				log.Warn("segment from data service is nil")
-			} else if err := c.MetaTable.AddSegment(seg); err != nil {
+			} else if _, err := c.MetaTable.AddSegment(seg); err != nil {
 				//what if master add segment failed, but data service success?
 				log.Warn("add segment info meta table failed ", zap.String("error", err.Error()))
 			} else {
@@ -387,7 +383,7 @@ func (c *Core) tsLoop() {
 }
 
 func (c *Core) setDdMsgSendFlag(b bool) error {
-	flag, err := c.MetaTable.client.Load(DDMsgSendPrefix)
+	flag, err := c.MetaTable.client.Load(DDMsgSendPrefix, 0)
 	if err != nil {
 		return err
 	}
@@ -398,9 +394,11 @@ func (c *Core) setDdMsgSendFlag(b bool) error {
 	}
 
 	if b {
-		return c.MetaTable.client.Save(DDMsgSendPrefix, "true")
+		_, err = c.MetaTable.client.Save(DDMsgSendPrefix, "true")
+		return err
 	}
-	return c.MetaTable.client.Save(DDMsgSendPrefix, "false")
+	_, err = c.MetaTable.client.Save(DDMsgSendPrefix, "false")
+	return err
 }
 
 func (c *Core) setMsgStreams() error {
@@ -808,7 +806,7 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 		BuildID:     bldID,
 		EnableIndex: enableIdx,
 	}
-	err = c.MetaTable.AddIndex(&seg)
+	_, err = c.MetaTable.AddIndex(&seg)
 	return err
 }
 
@@ -819,8 +817,23 @@ func (c *Core) Init() error {
 			if c.etcdCli, initError = clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second}); initError != nil {
 				return initError
 			}
-			c.metaKV = etcdkv.NewEtcdKV(c.etcdCli, Params.MetaRootPath)
-			if c.MetaTable, initError = NewMetaTable(c.metaKV); initError != nil {
+			tsAlloc := func() typeutil.Timestamp {
+				for {
+					var ts typeutil.Timestamp
+					var err error
+					if ts, err = c.tsoAllocator(1); err == nil {
+						return ts
+					}
+					time.Sleep(100 * time.Millisecond)
+					log.Debug("alloc time stamp error", zap.Error(err))
+				}
+			}
+			var ms *metaSnapshot
+			ms, initError = newMetaSnapshot(c.etcdCli, Params.MetaRootPath, TimestampPrefix, 1024, tsAlloc)
+			if initError != nil {
+				return initError
+			}
+			if c.MetaTable, initError = NewMetaTable(ms); initError != nil {
 				return initError
 			}
 			c.kvBase = etcdkv.NewEtcdKV(c.etcdCli, Params.KvRootPath)
@@ -876,13 +889,13 @@ func (c *Core) Init() error {
 }
 
 func (c *Core) reSendDdMsg(ctx context.Context) error {
-	flag, err := c.MetaTable.client.Load(DDMsgSendPrefix)
+	flag, err := c.MetaTable.client.Load(DDMsgSendPrefix, 0)
 	if err != nil || flag == "true" {
 		log.Debug("No un-successful DdMsg")
 		return nil
 	}
 
-	ddOpStr, err := c.MetaTable.client.Load(DDOperationPrefix)
+	ddOpStr, err := c.MetaTable.client.Load(DDOperationPrefix, 0)
 	if err != nil {
 		log.Debug("DdOperation key does not exist")
 		return nil
@@ -1638,27 +1651,29 @@ func (c *Core) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*maste
 }
 
 func (c *Core) registerService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
-	respID, err := c.metaKV.Grant(5)
+	respID, err := c.etcdCli.Grant(c.ctx, 5)
 	if err != nil {
 		fmt.Printf("grant error %s\n", err)
 		return nil, err
 	}
 	c.session.NodeName = nodeName
 	c.session.IP = ip
-	c.session.LeaseID = respID
+	c.session.LeaseID = respID.ID
 
 	sessionJSON, err := json.Marshal(c.session)
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithTimeout(c.ctx, RequestTimeout)
+	defer cancel()
 
-	err = c.metaKV.SaveWithLease(fmt.Sprintf("/node/%s", nodeName), string(sessionJSON), respID)
+	_, err = c.etcdCli.Put(ctx, fmt.Sprintf("%s/node/%s", Params.MetaRootPath, nodeName), string(sessionJSON), clientv3.WithLease(respID.ID))
 	if err != nil {
 		fmt.Printf("put lease error %s\n", err)
 		return nil, err
 	}
 
-	ch, err := c.metaKV.KeepAlive(respID)
+	ch, err := c.etcdCli.KeepAlive(c.ctx, respID.ID)
 	if err != nil {
 		fmt.Printf("keep alive error %s\n", err)
 		return nil, err
