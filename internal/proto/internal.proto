@@ -212,5 +212,5 @@ message MsgPosition {
 message ChannelTimeTickMsg {
   common.MsgBase base = 1;
   repeated string channelNames = 2;
-  repeated int64 timestamps = 3;
+  repeated uint64 timestamps = 3;
 }
