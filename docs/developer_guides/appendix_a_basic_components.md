@@ -66,10 +66,10 @@ The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/servic
 - value: json format
   ```json
   {
-      "ServerID":ServerID
-      "ServerName":ServerName
-      "Address":ip:port
-      "LeaseID":LeaseID"
+      "ServerID":"ServerID"
+      "ServerName":"ServerName"
+      "Address":"ip:port"
+      "LeaseID":"LeaseID"
   }
   ```
 - By obtaining the address, you can establish a connection with other services
