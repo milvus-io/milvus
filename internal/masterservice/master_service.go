@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/session"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -136,6 +137,11 @@ type Core struct {
 
 	//time tick loop
 	lastTimeTick typeutil.Timestamp
+
+	// record min timestamp for each channel
+	sendChannelTimeTick func(chanName string, ts typeutil.Timestamp) error
+	channelTimeTickMap  map[string]typeutil.Timestamp
+	proxyNodeMap        map[typeutil.UniqueID]bool
 
 	//states code
 	stateCode atomic.Value
@@ -865,6 +871,12 @@ func (c *Core) Init() error {
 		c.tsoAllocatorUpdate = func() error {
 			return tsoAllocator.UpdateTSO()
 		}
+
+		c.sendChannelTimeTick = func(chanName string, ts typeutil.Timestamp) error {
+			return nil
+		}
+		c.channelTimeTickMap = make(map[string]typeutil.Timestamp)
+		c.proxyNodeMap = make(map[typeutil.UniqueID]bool)
 
 		c.ddReqQueue = make(chan reqTask, 1024)
 		initError = c.setMsgStreams()
@@ -1668,6 +1680,51 @@ func (c *Core) registerService(nodeName string, ip string) (<-chan *clientv3.Lea
 
 // UpdateChannelTimeTick update timetick for each physical channel
 func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
+	proxyNodeSession, err := session.GetSessions(c.metaKV, "proxynode")
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "GetSessions fail, error: " + err.Error(),
+		}, err
+	}
+	proxyNodeNum := len(proxyNodeSession)
+
+	proxyNodeID := in.Base.SourceID
+
+	// update channelTimeTickMap to store min timestamp for each channel
+	chanNum := len(in.ChannelNames)
+	for i := 0; i < chanNum; i++ {
+		chanName := in.ChannelNames[i]
+		chanTs := in.Timestamps[i]
+		ts, ok := c.channelTimeTickMap[chanName]
+		if !ok || chanTs < ts {
+			c.channelTimeTickMap[chanName] = chanTs
+		}
+	}
+
+	// use proxyNodeMap to record active proxyNode
+	c.proxyNodeMap[proxyNodeID] = true
+
+	// have received msg from all proxyNodes
+	if proxyNodeNum == len(c.proxyNodeMap) {
+		timeTickMap := make(map[string]typeutil.Timestamp)
+		for k, v := range c.channelTimeTickMap {
+			timeTickMap[k] = v
+		}
+		go func() {
+			for cn, ts := range timeTickMap {
+				err = c.sendChannelTimeTick(cn, ts)
+				if err != nil {
+					log.Debug("send time tick failed", zap.String("channel name", cn), zap.Error(err))
+				}
+			}
+		}()
+
+		// clean maps
+		c.channelTimeTickMap = make(map[string]typeutil.Timestamp)
+		c.proxyNodeMap = make(map[typeutil.UniqueID]bool)
+	}
+
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
