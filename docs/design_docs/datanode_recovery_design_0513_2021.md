@@ -43,15 +43,70 @@ There're some problems I haven't thought of.
 
 ## TODO
 
-### 1. DataNode no longer interacts with Etcd except service registering.
+### 1. DataNode no longer interacts with Etcd except service registering
 
-   **O1-1**. DataService rather than DataNode saves binlog paths into Etcd. 1 Day
+#### **O1-1** DataService rather than DataNode saves binlog paths into Etcd
     
    ![datanode_design](graphs/datanode_design_01.jpg)
+
+##### Auto-flush with manul-flush
+
+Manul-flush means that the segment is sealed, and DataNode is told to flush by DataService. The completion of
+manul-flush requires ddl and insert data both flushed, and a flush completed message will be published to
+msgstream by DataService. In this case, not only do binlog paths need to be stored, but also msg-positions.
+
+Auto-flush means that the segment isn't sealed, but the buffer of insert/ddl data in DataNode is full,
+DataNode automatically flushs these data. Those flushed binlogs' paths are buffered in DataNode, waiting for the next
+manul-flush and upload to DataServce together.
+
+##### DataService RPC Design
+
+```proto
+rpc SaveBinlogPaths(SaveBinlogPathsRequest) returns (common.Status){}
+
+
+message ID2PathList {                                                                                            
+    int64 ID = 1;                                                                                                
+    repeated string Paths = 2;                                                                                   
+}                                                                                                                
+
+message SaveBinlogPathsRequest {                                                                                 
+    common.MsgBase base = 1; 
+    int64 segmentID = 2;
+    int64 collectionID = 3;
+    ID2PathList field2BinlogPaths = 4;
+    ID2PathList coll2TsBinlogPaths = 5; 
+    ID2PathList coll2DdlBinlogPaths = 6;  
+    repeated internal.MsgPosition start_positions = 7;  
+    repeated internal.MsgPosition end_positions = 8; 
+ }
+```
+
+##### DataService Etcd Binlog Meta Design
+
+The same as DataNode
+
+```proto
+message FieldFlushMeta {
+    int64 fieldID = 1;
+    repeated string binlog_paths = 2;
+}
+
+message SegmentFlushMeta{
+    int64 segmentID = 1;
+    bool is_flushed = 2;
+    repeated FieldFlushMeta fields = 5;
+}
+
+message DDLFlushMeta {
+    int64 collectionID = 1;
+    repeated string binlog_paths = 2;
+}
+```
     
-   **O1-2**. DataNode registers itself to Etcd when started. 1 Day
+#### **O1-2** DataNode registers itself to Etcd when started
     
-### 2. DataNode gets start and end MsgPositions of all channels, and report to DataService after flushing.
+### 2. DataNode gets start and end MsgPositions of all channels, and report to DataService after flushing
 
    **O2-1**. Set start and end positions while publishing ddl messages. 0.5 Day
 

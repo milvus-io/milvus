@@ -60,35 +60,43 @@ The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/servic
 
 ###### Registeration
 
-- Registration is achieved through etcd's lease mechanism.
+* Registration is achieved through etcd's lease mechanism.
 
-- The service creates a lease with etcd and stores a key-value pair in etcd. If the lease expires or the service goes offline, etcd will delete the key-value pair. You can judge whether this service is avaliable through the key.
+* The service creates a lease with etcd and stores a key-value pair in etcd. If the lease expires or the service goes offline, etcd will delete the key-value pair. You can judge whether this service is avaliable through the key.
 
-- key: metaRootPath + "/services" + "/ServerName-ServerID"
+* key: metaRootPath + "/services" + "/ServerName(-ServerID)(optional)"
 
-- value: json format
+* value: json format
+
+  ```json
   {
-	  "ServerID":ServerID //ServerID
-      "ServerName": ServerName // ServerName
-      "Address": ip:port // Address of service, including ip and port
-      "LeaseID": LeaseID // The ID of etcd lease
+    "ServerID": "ServerID",
+    "ServerName": "ServerName",
+    "Address": "ip:port",
+    "LeaseID": "LeaseID",
   }
+  ```
 
-- By obtaining the address, you can establish a connection with other services
+* By obtaining the address, you can establish a connection with other services
+
+* If a service is exclusive, the key will not have **ServerID**. But **ServerID** still will be stored in value. 
 
 ###### Discovery
 
-- All currently available services can be obtained by obtaining all the key-value pairs deposited during registration. If you want to get all the available nodes for a certain type of service, you can pass in the prefix of the corresponding key
-- Registeration time can be compared with ServerID for ServerID will increase according to time.
+* All currently available services can be obtained by obtaining all the key-value pairs deposited during registration. If you want to get all the available nodes for a certain type of service, you can pass in the prefix of the corresponding key
 
+* Registeration time can be compared with ServerID for ServerID will increase according to time.
 
 
 ###### Interface
 
 ```go
-default_ttl = 10
-default_retry_times = 3
+const defaultIDKey = "services/id"
+const defaultRetryTimes = 30
 
+// Session is a struct to store service's session, including ServerID, ServerName,
+// Address.
+// LeaseID will be assigned after registered in etcd.
 type Session struct {
     ServerID   int64
     ServerName string
@@ -96,36 +104,58 @@ type Session struct {
     LeaseID    clientv3.LeaseID
 }
 
-// GetServerID gets id from etcd with key: metaRootPath + "/services/ServerID"
-// Each server get ServerID and add one to ServerID
-GetServerID(){}
+var (
+	globalServerID = int64(-1)
+)
+
+// NewSession is a helper to build Session object.LeaseID will be assigned after
+// registeration.
+func NewSession(serverID int64, serverName, address string) *Session {}
+
+// GlobalServerID returns [singleton] ServerID.
+// Before SetGlobalServerID, GlobalServerID() returns -1
+func GlobalServerID() int64 {}
+
+// SetGlobalServerID sets the [singleton] ServerID. ServerID returned by
+// GlobalServerID(). Those who use GlobalServerID should call SetGlobalServerID()
+// as early as possible in main() before use ServerID.
+func SetGlobalServerID(id int64) {}
+
+// GetServerID gets id from etcd with key: metaRootPath + "/services/id"
+// Each server get ServerID and add one to id.
+func GetServerID(etcd *etcdkv.EtcdKV) (int64, error) {}
 
 // RegisterService registers the service to etcd so that other services
 // can find that the service is online and issue subsequent operations
 // RegisterService will save a key-value in etcd
-// key: metaRootPath + "/services" + "/ServerName-ServerID"
+// key: metaRootPath + "/services/" + "ServerName(-ServerID)(optional)"
 // value: json format
 // {
-//     "ServerID": ServerID
-//     "ServerName": ServerName-ServerID // ServerName
-//     "Address": ip:port // Address of service, including ip and port
-//     "LeaseID": LeaseID // The ID of etcd lease
+//     "ServerID": "ServerID",
+//     "ServerName": "ServerName",
+//     "Address": "ip:port",
+//     "LeaseID": "LeaseID",
 // }
 // MetaRootPath is configurable in the config file.
-RegisterService(etcdKV etcdKV, serverName string, address string)(<-chan *clientv3.LeaseKeepAliveResponse, error)
-
-
+// Exclusive means whether this service can exist two at the same time, if so,
+// it is false. Otherwise, set it to true and the key will not have ServerID.
+// But ServerID still will be stored in value.
+func RegisterService(etcdKV *etcdkv.EtcdKV, session *Session, ttl int64) (<-chan *clientv3.LeaseKeepAliveResponse, error) {}
 
 // ProcessKeepAliveResponse processes the response of etcd keepAlive interface
 // If keepAlive fails for unexpected error, it will retry for default_retry_times times
-ProcessKeepAliveResponse(ctx context, ch <-chan *clientv3.LeaseKeepAliveResponse)
-
+func ProcessKeepAliveResponse(ctx context.Context, ch <-chan *clientv3.LeaseKeepAliveResponse) (signal <-chan bool) {}
 
 
 // GetAllSessions gets all the services registered in etcd.
 // This gets all the key with prefix metaRootPath + "/services/" + prefix
 // For general, "datanode" to get all datanodes
-GetSessions(prefix string) ([]session, error)
+func GetSessions(etcdKV *etcdkv.EtcdKV, prefix string) ([]*Session, error) {}
+
+// WatchServices watch all events in etcd.
+// If a server register, a session will be sent to addChannel
+// If a server offline, a session will be sent to deleteChannel
+func WatchServices(ctx context.Context, etcdKV *etcdkv.EtcdKV, prefix string) (addChannel <-chan *Session, deleteChannel <-chan *Session) {}
 ```
 
 
