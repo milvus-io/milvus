@@ -102,10 +102,10 @@ func getServerIDWithKey(etcd *etcdkv.EtcdKV, key string, retryTimes int) (int64,
 // key: metaRootPath + "/services" + "/ServerName-ServerID"
 // value: json format
 // {
-//     "ServerID": ServerID
-//     "ServerName": ServerName // ServerName
-//     "Address": ip:port // Address of service, including ip and port
-//     "LeaseID": LeaseID // The ID of etcd lease
+//     "ServerID": "ServerID",
+//     "ServerName": "ServerName",
+//     "Address": "ip:port",
+//     "LeaseID": "LeaseID",
 // }
 // MetaRootPath is configurable in the config file.
 // Exclusive means whether this service can exist two at the same time, if so,

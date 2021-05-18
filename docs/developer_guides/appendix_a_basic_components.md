@@ -66,10 +66,10 @@ The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/servic
 - value: json format
   ```json
   {
-      "ServerID": "ServerID"
-      "ServerName": "ServerName"
-      "Address": "ip:port"
-      "LeaseID": "LeaseID"
+      "ServerID": "ServerID",
+      "ServerName": "ServerName",
+      "Address": "ip:port",
+      "LeaseID": "LeaseID",
   }
   ```
 - By obtaining the address, you can establish a connection with other services
@@ -125,10 +125,10 @@ func GetServerID(etcd *etcdkv.EtcdKV) (int64, error) {}
 // key: metaRootPath + "/services/" + "ServerName(-ServerID)(optional)"
 // value: json format
 // {
-//     "ServerID": ServerID
-//     "ServerName": ServerName // ServerName
-//     "Address": ip:port // Address of service, including ip and port
-//     "LeaseID": LeaseID // The ID of etcd lease
+//     "ServerID": "ServerID",
+//     "ServerName": "ServerName",
+//     "Address": "ip:port",
+//     "LeaseID": "LeaseID",
 // }
 // MetaRootPath is configurable in the config file.
 // Exclusive means whether this service can exist two at the same time, if so,
