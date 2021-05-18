@@ -254,6 +254,9 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 	if len(coll.FieldIndexes) != len(idx) {
 		return 0, fmt.Errorf("incorrect index id when creating collection")
 	}
+	if _, ok := mt.partitionID2Meta[part.PartitionID]; ok {
+		return 0, fmt.Errorf("partition id = %d exist", part.PartitionID)
+	}
 
 	coll.PartitionIDs = append(coll.PartitionIDs, part.PartitionID)
 	mt.collID2Meta[coll.ID] = *coll
@@ -460,7 +463,8 @@ func (mt *metaTable) ListCollections(ts typeutil.Timestamp) ([]string, error) {
 	}
 	_, vals, err := mt.client.LoadWithPrefix(CollectionMetaPrefix, ts)
 	if err != nil {
-		return nil, err
+		log.Debug("load with prefix error", zap.Uint64("timestamp", ts), zap.Error(err))
+		return []string{}, nil
 	}
 	colls := make([]string, 0, len(vals))
 	for _, val := range vals {
