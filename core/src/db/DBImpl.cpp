@@ -1502,7 +1502,7 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
         engine::utils::GetParentPath(file.location_, segment_dir);
         segment::SegmentReader segment_reader(segment_dir);
         segment::IdBloomFilterPtr id_bloom_filter_ptr;
-        auto status = segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
+        auto status = segment_reader.LoadBloomFilter(id_bloom_filter_ptr, false);
         if (!status.ok()) {
             return status;
         }

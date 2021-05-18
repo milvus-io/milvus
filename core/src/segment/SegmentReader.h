@@ -52,7 +52,7 @@ class SegmentReader {
     LoadVectorIndex(const std::string& location, segment::VectorIndexPtr& vector_index_ptr);
 
     Status
-    LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr);
+    LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr, bool cache_force);
 
     Status
     LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr);

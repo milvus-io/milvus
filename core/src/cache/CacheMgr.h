@@ -37,6 +37,9 @@ class CacheMgr {
     InsertItem(const std::string& key, const ItemObj& data);
 
     virtual void
+    InsertItemIfNotExist(const std::string& key, const ItemObj& data);
+
+    virtual void
     EraseItem(const std::string& key);
 
     virtual bool
