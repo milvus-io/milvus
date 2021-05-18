@@ -4,6 +4,7 @@ from utils.util_log import test_log as log
 from common.common_type import *
 from common.common_func import *
 
+prefix = "collection"
 default_schema = gen_default_collection_schema()
 
 
@@ -46,7 +47,7 @@ class TestCollectionParams(ApiReq):
         expected: assert collection property
         """
         self._connect()
-        c_name = get_unique_str
+        c_name = gen_unique_str(prefix)
         collection, _ = self.collection.collection_init(c_name, data=None, schema=default_schema)
         assert_default_collection(collection, c_name)
         assert c_name in self.utility.list_collections()
@@ -84,7 +85,7 @@ class TestCollectionParams(ApiReq):
         expected: collection properties consistent
         """
         self._connect()
-        c_name = get_unique_str
+        c_name = gen_unique_str(prefix)
         collection, _ = self.collection.collection_init(c_name, data=None, schema=default_schema)
         assert_default_collection(collection, c_name)
         dup_collection, _ = self.collection.collection_init(c_name)
@@ -103,7 +104,7 @@ class TestCollectionParams(ApiReq):
         expected: raise exception
         """
         self._connect()
-        c_name = get_unique_str
+        c_name = gen_unique_str(prefix)
         collection, _ = self.collection.collection_init(c_name, data=None, schema=default_schema)
         assert_default_collection(collection, c_name)
         fields = [gen_int64_field()]
@@ -120,7 +121,7 @@ class TestCollectionParams(ApiReq):
         expected: raise exception
         """
         self._connect()
-        c_name = get_unique_str
+        c_name = gen_unique_str(prefix)
         collection, _ = self.collection.collection_init(c_name, schema=default_schema)
         assert_default_collection(collection, c_name)
         schema = gen_default_collection_schema(primary_field=default_int64_field)
@@ -136,6 +137,8 @@ class TestCollectionOperation(ApiReq):
     ******************************************************************
     """
 
+    # #5237
+    @pytest.mark.tags(CaseLabel.L1)
     def test_collection_without_connection(self):
         """
         target: test collection without connection
@@ -143,10 +146,26 @@ class TestCollectionOperation(ApiReq):
         expected: raise exception
         """
         self._connect()
+        c_name = gen_unique_str(prefix)
         self.connection.remove_connection(default_alias)
         res_list = self.connection.list_connections()
-        assert len(res_list) == 0
-        c_name = get_unique_str
+        assert default_alias not in res_list
         ex, check = self.collection.collection_init(c_name, schema=default_schema)
-        assert "no connection" in str(ex)
-        assert self.collection is None
+        assert "There is no connection with alias '{}'".format(default_alias) in str(ex)
+        assert self.collection.collection is None
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_multi_create_drop(self):
+        """
+        target: test cycle creation and deletion of multiple collections
+        method: in a loop, collections are created and deleted sequentially
+        expected: no exception
+        """
+        self._connect()
+        c_num = 20
+        for i in range(c_num):
+            c_name = gen_unique_str(prefix)
+            collection, _ = self.collection.collection_init(c_name, schema=default_schema)
+            assert_default_collection(collection, c_name)
+            collection.drop()
+            assert c_name not in self.utility.list_collections()

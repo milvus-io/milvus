@@ -99,11 +99,11 @@ class ApiReq(Base):
 
     def _connect(self):
         """ Testing func """
-        self.connection.configure(check_res='', default={"host": "192.168.1.240", "port": 19530})
+        self.connection.configure(check_res='', default={"host": "172.28.255.155", "port": 19530})
         res = self.connection.create_connection(alias='default')
         return res
 
-    def _collection(self, name=get_unique_str, data=None, schema=None, check_res=None, **kwargs):
+    def _collection(self, name=gen_unique_str(), data=None, schema=None, check_res=None, **kwargs):
         """ Testing func """
         self._connect()
         res = self.collection.collection_init(name=name, data=data, schema=schema, check_res=check_res, **kwargs)

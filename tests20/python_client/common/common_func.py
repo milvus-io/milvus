@@ -12,7 +12,10 @@ from common.common_type import *
 """" Methods of processing data """
 l2 = lambda x, y: np.linalg.norm(np.array(x) - np.array(y))
 
-get_unique_str = "test_" + "".join(random.choice(string.ascii_letters + string.digits) for _ in range(8))
+
+def gen_unique_str(str_value=None):
+    prefix = "".join(random.choice(string.ascii_letters + string.digits) for _ in range(8))
+    return "test_" + prefix if str_value is None else str_value + "_" + prefix
 
 
 def gen_int64_field(is_primary=False):
