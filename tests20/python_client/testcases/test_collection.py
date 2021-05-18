@@ -11,7 +11,7 @@ default_schema = gen_default_collection_schema()
 def assert_default_collection(collection, exp_name, exp_schema=default_schema, exp_num=0, exp_primary=None):
     assert collection.name == exp_name
     assert collection.description == exp_schema.description
-    assert collection.schema == default_schema
+    assert collection.schema == exp_schema
     if exp_num == 0:
         assert collection.is_empty
     assert collection.num_entities == exp_num
@@ -25,7 +25,7 @@ class TestCollectionParams(ApiReq):
     """ Test case of collection interface """
 
     def teardown_method(self):
-        if self.collection.collection is not None:
+        if self.collection is not None and self.collection.collection is not None:
             self.collection.drop()
 
     def setup_method(self):
@@ -36,6 +36,15 @@ class TestCollectionParams(ApiReq):
         params=get_invalid_strs
     )
     def get_invalid_string(self, request):
+        yield request.param
+
+    @pytest.fixture(
+        scope="function",
+        params=get_invalid_strs
+    )
+    def get_invalid_schema(self, request):
+        if request.param is None:
+            pytest.skip("None schema is valid")
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -86,7 +95,7 @@ class TestCollectionParams(ApiReq):
         """
         self._connect()
         c_name = gen_unique_str(prefix)
-        collection, _ = self.collection.collection_init(c_name, data=None, schema=default_schema)
+        collection, _ = self.collection.collection_init(c_name, schema=default_schema)
         assert_default_collection(collection, c_name)
         dup_collection, _ = self.collection.collection_init(c_name)
         assert_default_collection(dup_collection, c_name)
@@ -128,6 +137,93 @@ class TestCollectionParams(ApiReq):
         ex, _ = self.collection.collection_init(c_name, schema=schema)
         assert "The collection already exist, but the schema isnot the same as the passed in" in str(ex)
         assert collection.primary_field is None
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_dup_name_new_dim(self):
+        """
+        target: test collection with dup name and new dim schema
+        method: 1. default schema 2. schema with new dim
+        expected: raise exception
+        """
+        self._connect()
+        c_name = gen_unique_str(prefix)
+        new_dim = 120
+        collection, _ = self.collection.collection_init(c_name, schema=default_schema)
+        assert_default_collection(collection, c_name)
+        schema = gen_default_collection_schema()
+        new_fields = gen_float_vec_field(dim=new_dim)
+        schema.fields[-1] = new_fields
+        ex, _ = self.collection.collection_init(c_name, schema=schema)
+        assert "The collection already exist, but the schema isnot the same as the passed in" in str(ex)
+        assert collection.primary_field is None
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_dup_name_invalid_schema(self, get_invalid_schema):
+        """
+        target: test collection with dup name and invalid schema
+        method: 1. default schema 2. invalid schema
+        expected: raise exception and
+        """
+        self._connect()
+        c_name = gen_unique_str(prefix)
+        collection, _ = self.collection.collection_init(c_name, schema=default_schema)
+        assert_default_collection(collection, c_name)
+        ex, _ = self.collection.collection_init(c_name, schema=get_invalid_schema)
+        assert_default_collection(collection, c_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #5231, #5241")
+    def test_collection_dup_name_same_schema(self):
+        """
+        target: test collection with dup name and same schema
+        method: dup name and same schema
+        expected: two collection object is available
+        """
+        self._connect()
+        c_name = gen_unique_str(prefix)
+        collection, _ = self.collection.collection_init(c_name, schema=default_schema)
+        assert_default_collection(collection, c_name)
+        dup_collection, _ = self.collection.collection_init(c_name, schema=default_schema)
+        assert_default_collection(dup_collection, c_name)
+        assert id(collection) == id(dup_collection)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_collection_none_schema(self):
+        """
+        target: test collection with none schema
+        method: create collection with none schema
+        expected: raise exception
+        """
+        self._connect()
+        c_name = gen_unique_str(prefix)
+        ex, _ = self.collection.collection_init(c_name, schema=None)
+        assert "Collection missing schema" in str(ex)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_collection_invalid_schema(self, get_invalid_schema):
+        """
+        target: test collection with invalid schema
+        method: create collection with non-CollectionSchema type schema
+        expected: raise exception
+        """
+        self._connect()
+        c_name = gen_unique_str(prefix)
+        ex, _ = self.collection.collection_init(c_name, schema=get_invalid_schema)
+        assert "schema type must be schema.CollectionSchema" in str(ex)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="issue #5285")
+    def test_collection_without_vectors(self):
+        """
+        target: test collection without vectors
+        method: create collection only with int field
+        expected: raise exception
+        """
+        self._connect()
+        c_name = gen_unique_str(prefix)
+        schema = gen_collection_schema([gen_int64_field()])
+        ex, _ = self.collection.collection_init(c_name, schema=schema)
+        assert "must" in str(ex)
 
 
 class TestCollectionOperation(ApiReq):

@@ -18,31 +18,27 @@ def gen_unique_str(str_value=None):
     return "test_" + prefix if str_value is None else str_value + "_" + prefix
 
 
-def gen_int64_field(is_primary=False):
-    description = "int64 type field"
+def gen_int64_field(is_primary=False, description=int_field_desc):
     int64_field = FieldSchema(name=default_int64_field, dtype=DataType.INT64, description=description,
                               is_primary=is_primary)
     return int64_field
 
 
-def gen_float_field(is_primary=False):
-    description = "float type field"
+def gen_float_field(is_primary=False, description=float_field_desc):
     float_field = FieldSchema(name=default_float_field, dtype=DataType.FLOAT, description=description,
                               is_primary=is_primary)
     return float_field
 
 
-def gen_float_vec_field(is_primary=False):
-    description = "float vector type field"
+def gen_float_vec_field(is_primary=False, dim=default_dim, description=float_vec_field_desc):
     float_vec_field = FieldSchema(name=default_float_vec_field_name, dtype=DataType.FLOAT_VECTOR,
-                                  description=description, dim=default_dim, is_primary=is_primary)
+                                  description=description, dim=dim, is_primary=is_primary)
     return float_vec_field
 
 
-def gen_binary_vec_field(is_primary=False):
-    description = "binary vector type field"
+def gen_binary_vec_field(is_primary=False, dim=default_dim, description=binary_vec_field_desc):
     binary_vec_field = FieldSchema(name=default_binary_vec_field_name, dtype=DataType.BINARY_VECTOR,
-                                   description=description, is_primary=is_primary)
+                                   description=description, dim=dim, is_primary=is_primary)
     return binary_vec_field
 
 
@@ -52,7 +48,7 @@ def gen_default_collection_schema(description=default_collection_desc, primary_f
     return schema
 
 
-def gen_collection_schema(fields, description="collection", **kwargs):
+def gen_collection_schema(fields, description=collection_desc, **kwargs):
     schema = CollectionSchema(fields=fields, description=description, **kwargs)
     return schema
 
