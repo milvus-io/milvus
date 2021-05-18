@@ -4,11 +4,12 @@ Please mark all change in change log and use the issue from GitHub
 
 # Milvus 1.1.1 (TBD)
 ## Bug
+-   \#4897 Query results contain some deleted ids
 
 ## Feature
 
 ## Improvement
--   \#5161 Enable Gpu cache 
+-   \#5161 Enable Gpu cache
 
 # Milvus 1.1.0 (2021-05-07)
 ## Bug
