@@ -380,3 +380,7 @@ func (s *Server) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegme
 func (s *Server) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
 	return s.masterService.ShowSegments(ctx, in)
 }
+
+func (s *Server) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
+	return s.masterService.UpdateChannelTimeTick(ctx, in)
+}

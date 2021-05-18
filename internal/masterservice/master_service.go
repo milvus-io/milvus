@@ -1665,3 +1665,11 @@ func (c *Core) registerService(nodeName string, ip string) (<-chan *clientv3.Lea
 	}
 	return ch, nil
 }
+
+// UpdateChannelTimeTick update timetick for each physical channel
+func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}

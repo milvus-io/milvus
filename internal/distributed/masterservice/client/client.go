@@ -148,6 +148,9 @@ func (c *GrpcClient) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimes
 func (c *GrpcClient) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
 	return c.grpcClient.AllocID(ctx, in)
 }
+func (c *GrpcClient) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
+	return c.grpcClient.UpdateChannelTimeTick(ctx, in)
+}
 
 //receiver time tick from proxy service, and put it into this channel
 func (c *GrpcClient) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
