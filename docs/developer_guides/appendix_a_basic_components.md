@@ -64,17 +64,20 @@ The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/servic
 
 - The service creates a lease with etcd and stores a key-value pair in etcd. If the lease expires or the service goes offline, etcd will delete the key-value pair. You can judge whether this service is avaliable through the key.
 
-- key: metaRootPath + "/services" + "/ServerName-ServerID"
+- key: metaRootPath + "/services" + "/ServerName(-ServerID)(optional)"
 
 - value: json format
-  {
-	  "ServerID":ServerID //ServerID
-      "ServerName": ServerName // ServerName
-      "Address": ip:port // Address of service, including ip and port
-      "LeaseID": LeaseID // The ID of etcd lease
-  }
+```json
+{
+    "ServerID":ServerID //ServerID
+    "ServerName": ServerName // ServerName
+    "Address": ip:port // Address of service, including ip and port
+    "LeaseID": LeaseID // The ID of etcd lease
+}
+```
 
 - By obtaining the address, you can establish a connection with other services
+- If a service is exclusive, the key will not have ServerID. But ServerID still will be stored in value. 
 
 ###### Discovery
 
@@ -123,7 +126,7 @@ func GetServerID(etcd *etcdkv.EtcdKV) (int64, error) {}
 // RegisterService registers the service to etcd so that other services
 // can find that the service is online and issue subsequent operations
 // RegisterService will save a key-value in etcd
-// key: metaRootPath + "/services" + "/ServerName-ServerID"
+// key: metaRootPath + "/services/" + "ServerName(-ServerID)(optional)"
 // value: json format
 // {
 //     "ServerID": ServerID
@@ -132,6 +135,9 @@ func GetServerID(etcd *etcdkv.EtcdKV) (int64, error) {}
 //     "LeaseID": LeaseID // The ID of etcd lease
 // }
 // MetaRootPath is configurable in the config file.
+// Exclusive means whether this service can exist two at the same time, if so,
+// it is false. Otherwise, set it to true and the key will not have ServerID.
+// But ServerID still will be stored in value.
 func RegisterService(etcdKV *etcdkv.EtcdKV, session *Session, ttl int64) (<-chan *clientv3.LeaseKeepAliveResponse, error) {}
 
 // ProcessKeepAliveResponse processes the response of etcd keepAlive interface

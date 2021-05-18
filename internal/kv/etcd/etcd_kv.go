@@ -259,7 +259,7 @@ func (kv *EtcdKV) KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliv
 
 // CompareValueAndSwap compares the existing value with compare, and if they are
 // equal, the target is stored in etcd.
-func (kv *EtcdKV) CompareValueAndSwap(key, value, target string) error {
+func (kv *EtcdKV) CompareValueAndSwap(key, value, target string, opts ...clientv3.OpOption) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 	resp, err := kv.client.Txn(ctx).If(
@@ -267,7 +267,7 @@ func (kv *EtcdKV) CompareValueAndSwap(key, value, target string) error {
 			clientv3.Value(path.Join(kv.rootPath, key)),
 			"=",
 			value)).
-		Then(clientv3.OpPut(path.Join(kv.rootPath, key), target)).Commit()
+		Then(clientv3.OpPut(path.Join(kv.rootPath, key), target, opts...)).Commit()
 	if err != nil {
 		return err
 	}
@@ -280,7 +280,7 @@ func (kv *EtcdKV) CompareValueAndSwap(key, value, target string) error {
 
 // CompareVersionAndSwap compares the existing key-value's version with version, and if
 // they are equal, the target is stored in etcd.
-func (kv *EtcdKV) CompareVersionAndSwap(key string, version int64, target string) error {
+func (kv *EtcdKV) CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 	resp, err := kv.client.Txn(ctx).If(
@@ -288,7 +288,7 @@ func (kv *EtcdKV) CompareVersionAndSwap(key string, version int64, target string
 			clientv3.Version(path.Join(kv.rootPath, key)),
 			"=",
 			version)).
-		Then(clientv3.OpPut(path.Join(kv.rootPath, key), target)).Commit()
+		Then(clientv3.OpPut(path.Join(kv.rootPath, key), target, opts...)).Commit()
 	if err != nil {
 		return err
 	}
