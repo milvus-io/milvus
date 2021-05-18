@@ -63,20 +63,22 @@ func (bm *binlogMeta) genKey(alloc bool, ids ...UniqueID) (key string, err error
 // SaveSegmentBinlogMetaTxn stores all fields' binlog paths of a segment in a transaction.
 // segment binlog etcd meta key:
 //   ${prefix}/${segmentID}/${fieldID}/${idx}
-func (bm *binlogMeta) SaveSegmentBinlogMetaTxn(segmentID UniqueID, field2Path map[UniqueID]string) error {
+func (bm *binlogMeta) SaveSegmentBinlogMetaTxn(segmentID UniqueID, field2Path map[UniqueID][]string) error {
 
-	etcdKey2binlogPath := make(map[string]string, len(field2Path))
-	for fieldID, p := range field2Path {
-		key, err := bm.genKey(true, segmentID, fieldID)
-		if err != nil {
-			return err
+	etcdKey2binlogPath := make(map[string]string)
+	for fieldID, paths := range field2Path {
+		for _, p := range paths {
+			key, err := bm.genKey(true, segmentID, fieldID)
+			if err != nil {
+				return err
+			}
+
+			binlogPath := proto.MarshalTextString(&datapb.SegmentFieldBinlogMeta{
+				FieldID:    fieldID,
+				BinlogPath: p,
+			})
+			etcdKey2binlogPath[path.Join(Params.SegFlushMetaSubPath, key)] = binlogPath
 		}
-
-		binlogPath := proto.MarshalTextString(&datapb.SegmentFieldBinlogMeta{
-			FieldID:    fieldID,
-			BinlogPath: p,
-		})
-		etcdKey2binlogPath[path.Join(Params.SegFlushMetaSubPath, key)] = binlogPath
 	}
 	return bm.client.MultiSave(etcdKey2binlogPath)
 }

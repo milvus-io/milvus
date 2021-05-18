@@ -63,10 +63,10 @@ func TestMetaTable_Basic(t *testing.T) {
 
 	t.Run("TestBasic_SaveSegmentBinlogMetaTxn", func(t *testing.T) {
 		segID := UniqueID(999999)
-		fieldID2Path := map[UniqueID]string{
-			100: "a",
-			200: "b",
-			300: "c",
+		fieldID2Path := map[UniqueID][]string{
+			100: []string{"a"},
+			200: []string{"b"},
+			300: []string{"c"},
 		}
 
 		err := meta.SaveSegmentBinlogMetaTxn(segID, fieldID2Path)
@@ -87,10 +87,10 @@ func TestMetaTable_Basic(t *testing.T) {
 		assert.Equal(t, 1, len(metas))
 		assert.Equal(t, "c", metas[0].GetBinlogPath())
 
-		fieldID2Path2 := map[UniqueID]string{
-			100: "aa",
-			200: "bb",
-			300: "cc",
+		fieldID2Path2 := map[UniqueID][]string{
+			100: []string{"aa"},
+			200: []string{"bb"},
+			300: []string{"cc"},
 		}
 
 		err = meta.SaveSegmentBinlogMetaTxn(segID, fieldID2Path2)
