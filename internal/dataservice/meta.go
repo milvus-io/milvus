@@ -177,6 +177,21 @@ func (meta *meta) UpdateSegmentStatistic(segment *datapb.SegmentInfo) error {
 	return nil
 }
 
+func (meta *meta) SetLastExpireTime(segmentID UniqueID, expireTs Timestamp) error {
+	meta.Lock()
+	defer meta.Unlock()
+	seg, ok := meta.segments[segmentID]
+	if !ok {
+		return newErrSegmentNotFound(segmentID)
+	}
+	seg.LastExpireTime = expireTs
+
+	if err := meta.saveSegmentInfo(seg); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (meta *meta) DropSegment(segmentID UniqueID) error {
 	meta.Lock()
 	defer meta.Unlock()
@@ -335,6 +350,19 @@ func (meta *meta) GetNumRowsOfPartition(collectionID UniqueID, partitionID Uniqu
 		}
 	}
 	return ret, nil
+}
+
+func (meta *meta) GetUnFlushedSegments() []*datapb.SegmentInfo {
+	meta.RLock()
+	defer meta.RUnlock()
+	segments := make([]*datapb.SegmentInfo, 0)
+	for _, info := range meta.segments {
+		if info.State != commonpb.SegmentState_Flushed {
+			cInfo := proto.Clone(info).(*datapb.SegmentInfo)
+			segments = append(segments, cInfo)
+		}
+	}
+	return segments
 }
 
 func (meta *meta) saveSegmentInfo(segment *datapb.SegmentInfo) error {

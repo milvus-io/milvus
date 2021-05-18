@@ -126,9 +126,8 @@ func (s *Server) Start() error {
 
 	s.allocator = newAllocator(s.masterClient)
 
+	s.startSegmentAllocator()
 	s.statsHandler = newStatsHandler(s.meta)
-	s.initSegmentInfoChannel()
-	s.segAllocator = newSegmentAllocator(s.meta, s.allocator, WithSegmentStream(s.segmentInfoStream))
 	if err = s.loadMetaFromMaster(); err != nil {
 		return err
 	}
@@ -139,6 +138,20 @@ func (s *Server) Start() error {
 	s.UpdateStateCode(internalpb.StateCode_Healthy)
 	log.Debug("start success")
 	return nil
+}
+
+func (s *Server) startSegmentAllocator() {
+	stream := s.initSegmentInfoChannel()
+	helper := createNewSegmentHelper(stream)
+	s.segAllocator = newSegmentAllocator(s.meta, s.allocator, withAllocHelper(helper))
+}
+
+func (s *Server) initSegmentInfoChannel() msgstream.MsgStream {
+	segmentInfoStream, _ := s.msFactory.NewMsgStream(s.ctx)
+	segmentInfoStream.AsProducer([]string{Params.SegmentInfoChannelName})
+	log.Debug("dataservice AsProducer: " + Params.SegmentInfoChannelName)
+	segmentInfoStream.Start()
+	return segmentInfoStream
 }
 
 func (s *Server) UpdateStateCode(code internalpb.StateCode) {
@@ -163,14 +176,6 @@ func (s *Server) initMeta() error {
 		return nil
 	}
 	return retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
-}
-
-func (s *Server) initSegmentInfoChannel() {
-	segmentInfoStream, _ := s.msFactory.NewMsgStream(s.ctx)
-	segmentInfoStream.AsProducer([]string{Params.SegmentInfoChannelName})
-	log.Debug("dataservice AsProducer: " + Params.SegmentInfoChannelName)
-	s.segmentInfoStream = segmentInfoStream
-	s.segmentInfoStream.Start()
 }
 
 func (s *Server) initMsgProducer() error {
@@ -314,10 +319,9 @@ func (s *Server) checkMasterIsHealthy() error {
 
 func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
-	s.serverLoopWg.Add(3)
+	s.serverLoopWg.Add(2)
 	go s.startStatsChannel(s.serverLoopCtx)
 	go s.startSegmentFlushChannel(s.serverLoopCtx)
-	go s.startProxyServiceTimeTickLoop(s.serverLoopCtx)
 }
 
 func (s *Server) startStatsChannel(ctx context.Context) {
@@ -434,45 +438,12 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 	}
 }
 
-func (s *Server) startProxyServiceTimeTickLoop(ctx context.Context) {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-	timeTickStream, _ := s.msFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.ProxyTimeTickChannelName}, Params.DataServiceSubscriptionName)
-	timeTickStream.Start()
-	defer timeTickStream.Close()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Debug("Proxy service timetick loop shut down")
-			return
-		default:
-		}
-		msgPack := timeTickStream.Consume()
-		if msgPack == nil {
-			continue
-		}
-		for _, msg := range msgPack.Msgs {
-			if msg.Type() != commonpb.MsgType_TimeTick {
-				log.Warn("receive unknown msg from proxy service timetick", zap.Stringer("msgType", msg.Type()))
-				continue
-			}
-			ttMsg := msg.(*msgstream.TimeTickMsg)
-			traceCtx := context.TODO()
-			if err := s.segAllocator.ExpireAllocations(traceCtx, ttMsg.Base.Timestamp); err != nil {
-				log.Error("expire allocations error", zap.Error(err))
-			}
-		}
-	}
-}
-
 func (s *Server) Stop() error {
 	s.cluster.ShutDownClients()
 	s.ttMsgStream.Close()
 	s.k2sMsgStream.Close()
 	s.ttBarrier.Close()
 	s.msgProducer.Close()
-	s.segmentInfoStream.Close()
 	s.stopServerLoop()
 	return nil
 }
@@ -656,7 +627,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 		//continue
 		//}
 
-		segmentID, retCount, expireTs, err := s.segAllocator.AllocSegment(ctx, r.CollectionID, r.PartitionID, r.ChannelName, int(r.Count))
+		segmentID, retCount, expireTs, err := s.segAllocator.AllocSegment(ctx, r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
 		if err != nil {
 			appendFailedAssignment(fmt.Sprintf("allocation of collection %d, partition %d, channel %s, count %d error:  %s",
 				r.CollectionID, r.PartitionID, r.ChannelName, r.Count, err.Error()))
