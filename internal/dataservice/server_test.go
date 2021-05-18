@@ -282,11 +282,7 @@ func TestGetSegmentStates(t *testing.T) {
 		CollectionID:  100,
 		PartitionID:   0,
 		InsertChannel: "",
-		OpenTime:      0,
-		SealedTime:    0,
-		FlushedTime:   0,
 		NumRows:       0,
-		MemSize:       0,
 		State:         commonpb.SegmentState_Growing,
 		StartPosition: &internalpb.MsgPosition{
 			ChannelName: "",

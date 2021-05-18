@@ -764,9 +764,6 @@ func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 		} else {
 			state.Status.ErrorCode = commonpb.ErrorCode_Success
 			state.State = segmentInfo.State
-			state.CreateTime = segmentInfo.OpenTime
-			state.SealedTime = segmentInfo.SealedTime
-			state.FlushedTime = segmentInfo.FlushedTime
 			state.StartPosition = segmentInfo.StartPosition
 			state.EndPosition = segmentInfo.EndPosition
 		}
