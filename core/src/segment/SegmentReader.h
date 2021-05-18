@@ -40,7 +40,7 @@ class SegmentReader {
     Load();
 
     Status
-    LoadsVectors(VectorsPtr &vectors_ptr);
+    LoadsVectors(VectorsPtr& vectors_ptr);
 
     Status
     LoadsSingleVector(off_t offset, size_t num_bytes, std::vector<uint8_t>& raw_vectors);

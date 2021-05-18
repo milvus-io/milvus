@@ -33,7 +33,7 @@ using IndexPtr = std::shared_ptr<Index>;
 
 class Blacklist : public milvus::cache::DataObj {
  public:
-    explicit Blacklist() {
+    Blacklist() {
     }
 
     int64_t

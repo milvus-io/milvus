@@ -55,7 +55,7 @@ SegmentReader::Load() {
 }
 
 Status
-SegmentReader::LoadsVectors(VectorsPtr &vectors_ptr) {
+SegmentReader::LoadsVectors(VectorsPtr& vectors_ptr) {
     codec::DefaultCodec default_codec;
     try {
         fs_ptr_->operation_ptr_->CreateDirectory();

@@ -10,6 +10,9 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Improvement
 -   \#5161 Enable Gpu cache
+-   \#5204 Improve IVF query on GPU when no entity deleted
+
+## Task
 
 # Milvus 1.1.0 (2021-05-07)
 ## Bug
