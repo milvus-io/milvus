@@ -54,7 +54,8 @@ func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	log.Debug("LoadWithPrefix ", zap.String("prefix", key))
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(), clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -103,12 +104,14 @@ func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error) {
 			result = append(result, "")
 		}
 		for _, ev := range rp.GetResponseRange().Kvs {
-			log.Debug("MultiLoad", zap.ByteString("key", ev.Key), zap.ByteString("value", ev.Value))
+			log.Debug("MultiLoad", zap.ByteString("key", ev.Key),
+				zap.ByteString("value", ev.Value))
 			result = append(result, string(ev.Value))
 		}
 	}
 	if len(invalid) != 0 {
-		log.Debug("MultiLoad: there are invalid keys", zap.Strings("keys", invalid))
+		log.Debug("MultiLoad: there are invalid keys",
+			zap.Strings("keys", invalid))
 		err = fmt.Errorf("there are invalid keys: %s", invalid)
 		return result, err
 	}
@@ -252,4 +255,46 @@ func (kv *EtcdKV) KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliv
 		return nil, err
 	}
 	return ch, nil
+}
+
+// CompareValueAndSwap compares the existing value with compare, and if they are
+// equal, the target is stored in etcd.
+func (kv *EtcdKV) CompareValueAndSwap(key, value, target string) error {
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+	resp, err := kv.client.Txn(ctx).If(
+		clientv3.Compare(
+			clientv3.Value(path.Join(kv.rootPath, key)),
+			"=",
+			value)).
+		Then(clientv3.OpPut(path.Join(kv.rootPath, key), target)).Commit()
+	if err != nil {
+		return err
+	}
+	if !resp.Succeeded {
+		return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key)
+	}
+
+	return nil
+}
+
+// CompareVersionAndSwap compares the existing key-value's version with version, and if
+// they are equal, the target is stored in etcd.
+func (kv *EtcdKV) CompareVersionAndSwap(key string, version int64, target string) error {
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+	resp, err := kv.client.Txn(ctx).If(
+		clientv3.Compare(
+			clientv3.Version(path.Join(kv.rootPath, key)),
+			"=",
+			version)).
+		Then(clientv3.OpPut(path.Join(kv.rootPath, key), target)).Commit()
+	if err != nil {
+		return err
+	}
+	if !resp.Succeeded {
+		return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key)
+	}
+
+	return nil
 }
