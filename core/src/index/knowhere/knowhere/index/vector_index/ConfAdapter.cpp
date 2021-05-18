@@ -175,7 +175,7 @@ IVFPQConfAdapter::CheckTrain(Config& oricfg, IndexMode& mode) {
             return true;
         }
         // else try CPU Mode
-        mode == IndexMode::MODE_CPU;
+        mode = IndexMode::MODE_CPU;
     }
 #endif
     return IsValidForCPU(dimension, m);

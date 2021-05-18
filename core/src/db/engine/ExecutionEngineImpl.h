@@ -125,6 +125,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
     HybridUnset() const;
 
  protected:
+    knowhere::BlacklistPtr blacklist_ = nullptr;
     knowhere::VecIndexPtr index_ = nullptr;
 #ifdef MILVUS_GPU_VERSION
     knowhere::VecIndexPtr index_reserve_ = nullptr;  // reserve the cpu index before copying it to gpu

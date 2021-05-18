@@ -37,7 +37,7 @@ BinaryIDMAP::Load(const BinarySet& index_binary) {
 }
 
 DatasetPtr
-BinaryIDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
+BinaryIDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, faiss::ConcurrentBitsetPtr blacklist) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -50,7 +50,7 @@ BinaryIDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     auto p_id = (int64_t*)malloc(p_id_size);
     auto p_dist = (float*)malloc(p_dist_size);
 
-    QueryImpl(rows, (uint8_t*)p_data, k, p_dist, p_id, config);
+    QueryImpl(rows, (uint8_t*)p_data, k, p_dist, p_id, config, blacklist);
     MapOffsetToUid(p_id, static_cast<size_t>(elems));
 
     auto ret_ds = std::make_shared<Dataset>();
@@ -107,13 +107,13 @@ BinaryIDMAP::GetRawVectors() {
 
 void
 BinaryIDMAP::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels,
-                       const Config& config) {
+                       const Config& config, faiss::ConcurrentBitsetPtr blacklist) {
     auto default_type = index_->metric_type;
     if (config.contains(Metric::TYPE))
         index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
 
     int32_t* i_distances = reinterpret_cast<int32_t*>(distances);
-    index_->search(n, (uint8_t*)data, k, i_distances, labels, GetBlacklist());
+    index_->search(n, (uint8_t*)data, k, i_distances, labels, blacklist);
 
     // if hamming, it need transform int32 to float
     if (index_->metric_type == faiss::METRIC_Hamming) {

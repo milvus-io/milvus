@@ -41,7 +41,7 @@ class VecIndex : public Index {
     AddWithoutIds(const DatasetPtr& dataset, const Config& config) = 0;
 
     virtual DatasetPtr
-    Query(const DatasetPtr& dataset, const Config& config) = 0;
+    Query(const DatasetPtr& dataset_ptr, const Config& config, faiss::ConcurrentBitsetPtr blacklist) = 0;
 
     virtual int64_t
     Dim() = 0;
@@ -57,18 +57,6 @@ class VecIndex : public Index {
     virtual IndexMode
     index_mode() const {
         return index_mode_;
-    }
-
-    faiss::ConcurrentBitsetPtr
-    GetBlacklist() {
-        std::unique_lock<std::mutex> lck(bitset_mutex_);
-        return bitset_;
-    }
-
-    void
-    SetBlacklist(faiss::ConcurrentBitsetPtr bitset_ptr) {
-        std::unique_lock<std::mutex> lck(bitset_mutex_);
-        bitset_ = std::move(bitset_ptr);
     }
 
     std::shared_ptr<std::vector<IDType>>
@@ -90,12 +78,6 @@ class VecIndex : public Index {
                 }
             }
         }
-    }
-
-    size_t
-    BlacklistSize() {
-        std::unique_lock<std::mutex> lck(bitset_mutex_);
-        return bitset_ ? bitset_->size() : 0;
     }
 
     size_t
@@ -122,7 +104,7 @@ class VecIndex : public Index {
 
     int64_t
     Size() override {
-        return BlacklistSize() + UidsSize() + IndexSize();
+        return UidsSize() + IndexSize();
     }
 
  protected:
@@ -130,11 +112,6 @@ class VecIndex : public Index {
     IndexMode index_mode_ = IndexMode::MODE_CPU;
     std::shared_ptr<std::vector<IDType>> uids_ = nullptr;
     int64_t index_size_ = -1;
-
- private:
-    // multi thread may access bitset_
-    std::mutex bitset_mutex_;
-    faiss::ConcurrentBitsetPtr bitset_ = nullptr;
 };
 
 using VecIndexPtr = std::shared_ptr<VecIndex>;

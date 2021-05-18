@@ -59,7 +59,8 @@ class MockVecIndex : public milvus::knowhere::VecIndex {
 
     virtual milvus::knowhere::DatasetPtr
     Query(const milvus::knowhere::DatasetPtr& dataset,
-          const milvus::knowhere::Config& cfg = milvus::knowhere::Config()) {
+          const milvus::knowhere::Config& cfg = milvus::knowhere::Config(),
+          faiss::ConcurrentBitsetPtr blacklist = nullptr) {
         return nullptr;
     }
 
