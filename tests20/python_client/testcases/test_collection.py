@@ -1,12 +1,12 @@
 import pytest
 from base.client_request import ApiReq
-from common.common_type import get_invalid_strs, CaseLabel, default_int64_field, default_alias
 from utils.util_log import test_log as log
-from common.common_func import gen_default_collection_schema, gen_unique_str, gen_collection_schema
-from common.common_func import gen_int64_field, gen_float_vec_field
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel
 
 prefix = "collection"
-default_schema = gen_default_collection_schema()
+default_schema = cf.gen_default_collection_schema()
 
 
 def assert_default_collection(collection, exp_name, exp_schema=default_schema, exp_num=0, exp_primary=None):
@@ -34,16 +34,16 @@ class TestCollectionParams(ApiReq):
 
     @pytest.fixture(
         scope="function",
-        params=get_invalid_strs
+        params=ct.get_invalid_strs
     )
     def get_invalid_string(self, request):
         yield request.param
 
     @pytest.fixture(
         scope="function",
-        params=get_invalid_strs
+        params=ct.get_invalid_strs
     )
-    def get_invalid_schema(self, request):
+    def get_invalid_schema_type(self, request):
         if request.param is None:
             pytest.skip("None schema is valid")
         yield request.param
@@ -57,7 +57,7 @@ class TestCollectionParams(ApiReq):
         expected: assert collection property
         """
         self._connect()
-        c_name = gen_unique_str(prefix)
+        c_name = cf.gen_unique_str(prefix)
         collection, _ = self.collection.collection_init(c_name, data=None, schema=default_schema)
         assert_default_collection(collection, c_name)
         assert c_name in self.utility.list_collections()
@@ -95,7 +95,7 @@ class TestCollectionParams(ApiReq):
         expected: collection properties consistent
         """
         self._connect()
-        c_name = gen_unique_str(prefix)
+        c_name = cf.gen_unique_str(prefix)
         collection, _ = self.collection.collection_init(c_name, schema=default_schema)
         assert_default_collection(collection, c_name)
         dup_collection, _ = self.collection.collection_init(c_name)
@@ -114,11 +114,11 @@ class TestCollectionParams(ApiReq):
         expected: raise exception
         """
         self._connect()
-        c_name = gen_unique_str(prefix)
+        c_name = cf.gen_unique_str(prefix)
         collection, _ = self.collection.collection_init(c_name, data=None, schema=default_schema)
         assert_default_collection(collection, c_name)
-        fields = [gen_int64_field()]
-        schema = gen_collection_schema(fields=fields)
+        fields = [cf.gen_int64_field()]
+        schema = cf.gen_collection_schema(fields=fields)
         ex, _ = self.collection.collection_init(c_name, schema=schema)
         assert "The collection already exist, but the schema isnot the same as the passed in" in str(ex)
 
@@ -131,10 +131,10 @@ class TestCollectionParams(ApiReq):
         expected: raise exception
         """
         self._connect()
-        c_name = gen_unique_str(prefix)
+        c_name = cf.gen_unique_str(prefix)
         collection, _ = self.collection.collection_init(c_name, schema=default_schema)
         assert_default_collection(collection, c_name)
-        schema = gen_default_collection_schema(primary_field=default_int64_field)
+        schema = cf.gen_default_collection_schema(primary_field=ct.default_int64_field)
         ex, _ = self.collection.collection_init(c_name, schema=schema)
         assert "The collection already exist, but the schema isnot the same as the passed in" in str(ex)
         assert collection.primary_field is None
@@ -147,29 +147,29 @@ class TestCollectionParams(ApiReq):
         expected: raise exception
         """
         self._connect()
-        c_name = gen_unique_str(prefix)
+        c_name = cf.gen_unique_str(prefix)
         new_dim = 120
         collection, _ = self.collection.collection_init(c_name, schema=default_schema)
         assert_default_collection(collection, c_name)
-        schema = gen_default_collection_schema()
-        new_fields = gen_float_vec_field(dim=new_dim)
+        schema = cf.gen_default_collection_schema()
+        new_fields = cf.gen_float_vec_field(dim=new_dim)
         schema.fields[-1] = new_fields
         ex, _ = self.collection.collection_init(c_name, schema=schema)
         assert "The collection already exist, but the schema isnot the same as the passed in" in str(ex)
         assert collection.primary_field is None
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_collection_dup_name_invalid_schema(self, get_invalid_schema):
+    def test_collection_dup_name_invalid_schema_type(self, get_invalid_schema_type):
         """
         target: test collection with dup name and invalid schema
         method: 1. default schema 2. invalid schema
         expected: raise exception and
         """
         self._connect()
-        c_name = gen_unique_str(prefix)
+        c_name = cf.gen_unique_str(prefix)
         collection, _ = self.collection.collection_init(c_name, schema=default_schema)
         assert_default_collection(collection, c_name)
-        ex, _ = self.collection.collection_init(c_name, schema=get_invalid_schema)
+        ex, _ = self.collection.collection_init(c_name, schema=get_invalid_schema_type)
         assert "schema type must be schema.CollectionSchema" in str(ex)
         assert_default_collection(collection, c_name)
 
@@ -182,7 +182,7 @@ class TestCollectionParams(ApiReq):
         expected: two collection object is available
         """
         self._connect()
-        c_name = gen_unique_str(prefix)
+        c_name = cf.gen_unique_str(prefix)
         collection, _ = self.collection.collection_init(c_name, schema=default_schema)
         assert_default_collection(collection, c_name)
         dup_collection, _ = self.collection.collection_init(c_name, schema=default_schema)
@@ -197,20 +197,20 @@ class TestCollectionParams(ApiReq):
         expected: raise exception
         """
         self._connect()
-        c_name = gen_unique_str(prefix)
+        c_name = cf.gen_unique_str(prefix)
         ex, _ = self.collection.collection_init(c_name, schema=None)
         assert "Collection missing schema" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_collection_invalid_schema(self, get_invalid_schema):
+    def test_collection_invalid_schema_type(self, get_invalid_schema_type):
         """
         target: test collection with invalid schema
         method: create collection with non-CollectionSchema type schema
         expected: raise exception
         """
         self._connect()
-        c_name = gen_unique_str(prefix)
-        ex, _ = self.collection.collection_init(c_name, schema=get_invalid_schema)
+        c_name = cf.gen_unique_str(prefix)
+        ex, _ = self.collection.collection_init(c_name, schema=get_invalid_schema_type)
         assert "schema type must be schema.CollectionSchema" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -222,8 +222,8 @@ class TestCollectionParams(ApiReq):
         expected: raise exception
         """
         self._connect()
-        c_name = gen_unique_str(prefix)
-        schema = gen_collection_schema([gen_int64_field()])
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_collection_schema([cf.gen_int64_field()])
         ex, _ = self.collection.collection_init(c_name, schema=schema)
         assert "must" in str(ex)
 
@@ -244,12 +244,12 @@ class TestCollectionOperation(ApiReq):
         expected: raise exception
         """
         self._connect()
-        c_name = gen_unique_str(prefix)
-        self.connection.remove_connection(default_alias)
+        c_name = cf.gen_unique_str(prefix)
+        self.connection.remove_connection(ct.default_alias)
         res_list = self.connection.list_connections()
-        assert default_alias not in res_list
+        assert ct.default_alias not in res_list
         ex, check = self.collection.collection_init(c_name, schema=default_schema)
-        assert "There is no connection with alias '{}'".format(default_alias) in str(ex)
+        assert "There is no connection with alias '{}'".format(ct.default_alias) in str(ex)
         assert self.collection.collection is None
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -262,7 +262,7 @@ class TestCollectionOperation(ApiReq):
         self._connect()
         c_num = 20
         for _ in range(c_num):
-            c_name = gen_unique_str(prefix)
+            c_name = cf.gen_unique_str(prefix)
             collection, _ = self.collection.collection_init(c_name, schema=default_schema)
             assert_default_collection(collection, c_name)
             collection.drop()
