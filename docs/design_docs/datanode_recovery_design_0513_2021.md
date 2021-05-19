@@ -63,12 +63,10 @@ manul-flush and upload to DataServce together.
 
 ```proto
 rpc SaveBinlogPaths(SaveBinlogPathsRequest) returns (common.Status){}
-
-
-message ID2PathList {                                                                                            
-    int64 ID = 1;                                                                                                
-    repeated string Paths = 2;                                                                                   
-}                                                                                                                
+message ID2PathList {
+    int64 ID = 1;
+    repeated string Paths = 2;
+}
 
 message SaveBinlogPathsRequest {                                                                                 
     common.MsgBase base = 1; 
@@ -87,20 +85,16 @@ message SaveBinlogPathsRequest {
 The same as DataNode
 
 ```proto
-message FieldFlushMeta {
-    int64 fieldID = 1;
-    repeated string binlog_paths = 2;
+// key: ${prefix}/${segmentID}/${fieldID}/${idx}
+message SegmentFieldBinlogMeta {
+    int64  fieldID = 1;
+    string binlog_path = 2;
 }
 
-message SegmentFlushMeta{
-    int64 segmentID = 1;
-    bool is_flushed = 2;
-    repeated FieldFlushMeta fields = 5;
-}
-
-message DDLFlushMeta {
-    int64 collectionID = 1;
-    repeated string binlog_paths = 2;
+// key: ${prefix}/${collectionID}/${idx}
+message DDLBinlogMeta {
+    string ddl_binlog_path = 1;
+    string ts_binlog_path = 2;
 }
 ```
     
