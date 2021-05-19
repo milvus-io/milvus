@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 package milvus.proto.schema;
-option go_package="github.com/milvus-io/milvus/internal/proto/schemapb";
+option go_package = "github.com/milvus-io/milvus/internal/proto/schemapb";
 
 import "common.proto";
 
@@ -53,11 +53,11 @@ message BoolArray {
 }
 
 message IntArray {
-  repeated int32 data= 1;
+  repeated int32 data = 1;
 }
 
 message LongArray {
-  repeated int64 data= 1;
+  repeated int64 data = 1;
 }
 
 message FloatArray {
@@ -74,26 +74,26 @@ message BytesArray {
 }
 
 message StringArray {
-  repeated string data= 1;
+  repeated string data = 1;
 }
 
 message ScalarField {
   oneof data {
-      BoolArray bool_data = 1;
-      IntArray int_data = 2;
-      LongArray long_data = 3;
-      FloatArray float_data = 4;
-      DoubleArray double_data = 5;
-      StringArray string_data = 6;
-      BytesArray bytes_data = 7;
+    BoolArray bool_data = 1;
+    IntArray int_data = 2;
+    LongArray long_data = 3;
+    FloatArray float_data = 4;
+    DoubleArray double_data = 5;
+    StringArray string_data = 6;
+    BytesArray bytes_data = 7;
   }
 }
 
 message VectorField {
   int64 dim = 1;
   oneof data {
-      FloatArray float_vector = 2;
-      bytes binary_vector = 3;
+    FloatArray float_vector = 2;
+    bytes binary_vector = 3;
   }
 }
 
@@ -101,14 +101,14 @@ message FieldData {
   DataType type = 1;
   string field_name = 2;
   oneof field {
-      ScalarField scalars = 3;
-      VectorField vectors = 4;
+    ScalarField scalars = 3;
+    VectorField vectors = 4;
   }
 }
 
 message IDs {
   oneof id_field {
-      LongArray int_id = 1;
-      StringArray str_id = 2;
+    LongArray int_id = 1;
+    StringArray str_id = 2;
   }
 }

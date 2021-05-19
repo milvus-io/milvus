@@ -64,7 +64,7 @@ message CreateCollectionRequest {
   int64 collectionID = 5;
   bytes schema = 6;
   repeated string virtualChannelNames = 7;
-  repeated string physicalChannelNames= 8;
+  repeated string physicalChannelNames = 8;
 }
 
 message DropCollectionRequest {
