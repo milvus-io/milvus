@@ -118,6 +118,10 @@ func (s *Server) Start() error {
 		return err
 	}
 
+	if err := s.initMeta(); err != nil {
+		return err
+	}
+
 	s.allocator = newAllocator(s.masterClient)
 
 	s.statsHandler = newStatsHandler(s.meta)
