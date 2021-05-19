@@ -1,5 +1,6 @@
 package sessionutil
 
+/*
 import (
 	"fmt"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"go.etcd.io/etcd/clientv3"
 	"golang.org/x/net/context"
 )
+
 
 var Params paramtable.BaseTable
 
@@ -158,3 +160,4 @@ func TestKeepAlive(t *testing.T) {
 	assert.Equal(t, len(sessions), 1)
 	assert.Equal(t, sessions[0].ServerID, int64(0))
 }
+*/

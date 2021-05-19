@@ -54,7 +54,7 @@ func NewSessionManager(ctx context.Context, etcdAddress string, etcdPath string,
 		ctx:      ctx,
 		etcdKV:   etcdKV,
 		Self:     self,
-		Sessions: make(map[string]*Session, 0),
+		Sessions: make(map[string]*Session),
 	}
 }
 
