@@ -261,7 +261,7 @@ class TestCollectionOperation(ApiReq):
         """
         self._connect()
         c_num = 20
-        for i in range(c_num):
+        for _ in range(c_num):
             c_name = gen_unique_str(prefix)
             collection, _ = self.collection.collection_init(c_name, schema=default_schema)
             assert_default_collection(collection, c_name)
