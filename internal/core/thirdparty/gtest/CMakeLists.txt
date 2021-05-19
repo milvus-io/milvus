@@ -14,7 +14,7 @@
 if ( DEFINED ENV{MILVUS_GTEST_URL} )
     set( GTEST_SOURCE_URL "$ENV{MILVUS_GTEST_URL}" )
 else()
-    set( GTEST_SOURCE_URL "https://gitee.com/quicksilver/googletest/repository/archive/release-${GTEST_VERSION}.zip" )
+    set( GTEST_SOURCE_URL "https://github.com/google/googletest/archive/release-${GTEST_VERSION}.zip" )
 endif()
 
 message( STATUS "Building gtest-${GTEST_VERSION} from source" )
