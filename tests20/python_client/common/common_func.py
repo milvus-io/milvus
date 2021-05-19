@@ -59,6 +59,33 @@ def gen_default_binary_collection_schema(description=ct.default_binary_desc, pri
     return binary_schema
 
 
+def gen_vectors(nb, dim):
+    vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
+    vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
+    return vectors.tolist()
+
+
+def gen_default_dataframe_data(nb=ct.default_nb):
+    import pandas as pd
+    int_values = pd.Series(data=[i for i in range(nb)])
+    float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
+    float_vec_values = gen_vectors(nb, ct.default_dim)
+    df = pd.DataFrame({
+        ct.default_int64_field: int_values,
+        ct.default_float_field: float_values,
+        ct.default_float_vec_field_name: float_vec_values
+    })
+    return df
+
+
+def gen_default_list_data(nb=ct.default_nb):
+    int_values = [i for i in range(nb)]
+    float_values = [float(i) for i in range(nb)]
+    float_vec_values = gen_vectors(nb, ct.default_dim)
+    data = [int_values, float_values, float_vec_values]
+    return data
+
+
 def gen_simple_index():
     index_params = []
     for i in range(len(ct.all_index_types)):

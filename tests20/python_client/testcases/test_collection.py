@@ -48,6 +48,12 @@ class TestCollectionParams(ApiReq):
             pytest.skip("None schema is valid")
         yield request.param
 
+    def _create_default_collection(self):
+        c_name = cf.gen_unique_str(prefix)
+        collection, _ = self.collection.collection_init(c_name, schema=default_schema)
+        assert_default_collection(collection, c_name)
+        return c_name, collection
+
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(reason="issue #5224")
     def test_collection(self):
@@ -114,9 +120,7 @@ class TestCollectionParams(ApiReq):
         expected: raise exception
         """
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        collection, _ = self.collection.collection_init(c_name, data=None, schema=default_schema)
-        assert_default_collection(collection, c_name)
+        c_name, collection = self._create_default_collection()
         fields = [cf.gen_int64_field()]
         schema = cf.gen_collection_schema(fields=fields)
         ex, _ = self.collection.collection_init(c_name, schema=schema)
@@ -131,9 +135,7 @@ class TestCollectionParams(ApiReq):
         expected: raise exception
         """
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        collection, _ = self.collection.collection_init(c_name, schema=default_schema)
-        assert_default_collection(collection, c_name)
+        c_name, collection = self._create_default_collection()
         schema = cf.gen_default_collection_schema(primary_field=ct.default_int64_field)
         ex, _ = self.collection.collection_init(c_name, schema=schema)
         assert "The collection already exist, but the schema isnot the same as the passed in" in str(ex)
@@ -147,10 +149,8 @@ class TestCollectionParams(ApiReq):
         expected: raise exception
         """
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
         new_dim = 120
-        collection, _ = self.collection.collection_init(c_name, schema=default_schema)
-        assert_default_collection(collection, c_name)
+        c_name, collection = self._create_default_collection()
         schema = cf.gen_default_collection_schema()
         new_fields = cf.gen_float_vec_field(dim=new_dim)
         schema.fields[-1] = new_fields
@@ -159,6 +159,7 @@ class TestCollectionParams(ApiReq):
         assert collection.primary_field is None
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #5304")
     def test_collection_dup_name_invalid_schema_type(self, get_invalid_schema_type):
         """
         target: test collection with dup name and invalid schema
@@ -166,9 +167,7 @@ class TestCollectionParams(ApiReq):
         expected: raise exception and
         """
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        collection, _ = self.collection.collection_init(c_name, schema=default_schema)
-        assert_default_collection(collection, c_name)
+        c_name, collection = self._create_default_collection()
         ex, _ = self.collection.collection_init(c_name, schema=get_invalid_schema_type)
         assert "schema type must be schema.CollectionSchema" in str(ex)
         assert_default_collection(collection, c_name)
@@ -182,12 +181,42 @@ class TestCollectionParams(ApiReq):
         expected: two collection object is available
         """
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        collection, _ = self.collection.collection_init(c_name, schema=default_schema)
-        assert_default_collection(collection, c_name)
+        c_name, collection = self._create_default_collection()
         dup_collection, _ = self.collection.collection_init(c_name, schema=default_schema)
         assert_default_collection(dup_collection, c_name)
         assert id(collection) == id(dup_collection)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #5302")
+    def test_collection_dup_name_none_schema_dataframe(self):
+        """
+        target: test collection with dup name and insert dataframe
+        method: create collection with dup name, none schema, dataframe
+        expected: two collection object is correct
+        """
+        self._connect()
+        nb = ct.default_nb
+        c_name, collection = self._create_default_collection()
+        df = cf.gen_default_dataframe_data(nb)
+        dup_collection, _ = self.collection.collection_init(c_name, schema=None, data=df)
+        assert_default_collection(dup_collection, c_name, exp_num=nb)
+        assert collection.num_entities == nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #5302")
+    def test_collection_dup_name_none_schema_data_list(self):
+        """
+        target: test collection with dup name and insert data (list-like)
+        method: create collection with dup name, none schema, data (list-like)
+        expected: two collection object is correct
+        """
+        self._connect()
+        nb = ct.default_nb
+        c_name, collection = self._create_default_collection()
+        data = cf.gen_default_dataframe_data(nb)
+        dup_collection, _ = self.collection.collection_init(c_name, schema=None, data=data)
+        assert_default_collection(dup_collection, c_name, exp_num=nb)
+        assert collection.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_collection_none_schema(self):
@@ -226,6 +255,36 @@ class TestCollectionParams(ApiReq):
         schema = cf.gen_collection_schema([cf.gen_int64_field()])
         ex, _ = self.collection.collection_init(c_name, schema=schema)
         assert "must" in str(ex)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="issue #5302")
+    def test_collection_with_dataframe(self):
+        """
+        target: test collection with dataframe data
+        method: create collection and insert with dataframe
+        expected: collection num entities equal to nb
+        """
+        self._connect()
+        nb = ct.default_nb
+        c_name = cf.gen_unique_str(prefix)
+        data = cf.gen_default_dataframe_data(nb)
+        collection, _ = self.collection.collection_init(c_name, schema=default_schema, data=data)
+        assert_default_collection(collection, c_name, exp_num=nb)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="issue #5302")
+    def test_collection_with_data_list(self):
+        """
+        target: test collection with data (list-like)
+        method: create collection with data (list-like)
+        expected: collection num entities equal to nb
+        """
+        self._connect()
+        nb = ct.default_nb
+        c_name = cf.gen_unique_str(prefix)
+        data = cf.gen_default_list_data(nb)
+        collection, _ = self.collection.collection_init(c_name, schema=default_schema, data=data)
+        assert_default_collection(collection, c_name, exp_num=nb)
 
 
 class TestCollectionOperation(ApiReq):
