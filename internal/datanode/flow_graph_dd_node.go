@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
@@ -36,11 +37,12 @@ import (
 
 type ddNode struct {
 	BaseNode
-	ddMsg     *ddMsg
-	ddRecords *ddRecords
-	ddBuffer  *ddBuffer
-	flushMap  *sync.Map
-	inFlushCh <-chan *flushMsg
+	ddMsg       *ddMsg
+	ddRecords   *ddRecords
+	ddBuffer    *ddBuffer
+	flushMap    *sync.Map
+	inFlushCh   <-chan *flushMsg
+	idAllocator allocatorInterface
 
 	kv         kv.BaseKV
 	replica    Replica
@@ -54,8 +56,7 @@ type ddData struct {
 }
 
 type ddBuffer struct {
-	ddData  map[UniqueID]*ddData // collection ID
-	maxSize int32
+	ddData map[UniqueID]*ddData // collection ID
 }
 
 type ddRecords struct {
@@ -63,20 +64,15 @@ type ddRecords struct {
 	partitionRecords  map[UniqueID]interface{}
 }
 
-func (d *ddBuffer) size() int32 {
+func (d *ddBuffer) size(collectionID UniqueID) int {
 	if d.ddData == nil || len(d.ddData) <= 0 {
 		return 0
 	}
 
-	var size int32 = 0
-	for _, data := range d.ddData {
-		size += int32(len(data.ddRequestString))
+	if data, ok := d.ddData[collectionID]; ok {
+		return len(data.ddRequestString)
 	}
-	return size
-}
-
-func (d *ddBuffer) full() bool {
-	return d.size() >= d.maxSize
+	return 0
 }
 
 func (ddNode *ddNode) Name() string {
@@ -142,16 +138,6 @@ func (ddNode *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		}
 	}
 
-	// generate binlog
-	if ddNode.ddBuffer.full() {
-		for k, v := range ddNode.ddBuffer.ddData {
-			ddNode.flushMap.Store(k, v)
-		}
-		ddNode.ddBuffer.ddData = make(map[UniqueID]*ddData)
-		log.Debug(". dd buffer full, auto flushing ...")
-		go flushTxn(ddNode.flushMap, ddNode.kv, ddNode.binlogMeta)
-	}
-
 	select {
 	case fmsg := <-ddNode.inFlushCh:
 		log.Debug(". receive flush message ...")
@@ -159,6 +145,19 @@ func (ddNode *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		for _, segID := range fmsg.segmentIDs {
 			if ddNode.replica.hasSegment(segID) {
 				localSegs = append(localSegs, segID)
+
+				seg, _ := ddNode.replica.getSegmentByID(segID)
+				collID := seg.collectionID
+				if ddNode.ddBuffer.size(collID) > 0 {
+					log.Debug(".. ddl buffer not empty, flushing ...")
+					ddNode.flushMap.Store(collID, ddNode.ddBuffer.ddData[collID])
+					delete(ddNode.ddBuffer.ddData, collID)
+
+					binlogMetaCh := make(chan *datapb.DDLBinlogMeta)
+					go flush(collID, ddNode.flushMap, ddNode.kv, ddNode.idAllocator, binlogMetaCh)
+					go ddNode.flushComplete(binlogMetaCh, collID)
+
+				}
 			}
 		}
 
@@ -167,20 +166,9 @@ func (ddNode *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			break
 		}
 
-		log.Debug(".. Segments exist, notifying insertbuffer ...")
+		log.Debug(".. notifying insertbuffer ...")
 		fmsg.segmentIDs = localSegs
 		ddNode.ddMsg.flushMessages = append(ddNode.ddMsg.flushMessages, fmsg)
-
-		if ddNode.ddBuffer.size() > 0 {
-			log.Debug(".. ddl buffer not empty, flushing ...")
-			for k, v := range ddNode.ddBuffer.ddData {
-				ddNode.flushMap.Store(k, v)
-			}
-			ddNode.ddBuffer.ddData = make(map[UniqueID]*ddData)
-
-			go flushTxn(ddNode.flushMap, ddNode.kv, ddNode.binlogMeta)
-
-		}
 
 	default:
 	}
@@ -193,78 +181,101 @@ func (ddNode *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	return []Msg{res}
 }
 
+func (ddNode *ddNode) flushComplete(binlogMetaCh <-chan *datapb.DDLBinlogMeta, collID UniqueID) {
+	binlogMeta := <-binlogMetaCh
+	if binlogMeta == nil {
+		return
+	}
+
+	log.Debug(".. Saving ddl binlog meta ...")
+	err := ddNode.binlogMeta.SaveDDLBinlogMetaTxn(collID, binlogMeta)
+	if err != nil {
+		log.Error("Save binlog meta to etcd Wrong", zap.Error(err))
+	}
+}
+
 /*
-flushTxn() will do the following:
+flush will
     generate binlogs for all buffer data in ddNode,
     store the generated binlogs to minIO/S3,
-    store the keys(paths to minIO/s3) of the binlogs to etcd.
+    store the keys(paths to minIO/s3) of the binlogs to etcd. todo remove
 
 The keys of the binlogs are generated as below:
-	${tenant}/data_definition_log/${collection_id}/ts/${log_idx}
-	${tenant}/data_definition_log/${collection_id}/ddl/${log_idx}
-
+    ${tenant}/data_definition_log/${collection_id}/ts/${log_idx}
+    ${tenant}/data_definition_log/${collection_id}/ddl/${log_idx}
 */
-func flushTxn(ddlData *sync.Map,
-	kv kv.BaseKV,
-	meta *binlogMeta) {
-	// generate binlog
+func flush(collID UniqueID, ddlData *sync.Map, kv kv.BaseKV, idAllocator allocatorInterface,
+	binlogMetaCh chan<- *datapb.DDLBinlogMeta) {
+	clearFn := func(isSuccess bool) {
+		if !isSuccess {
+			binlogMetaCh <- nil
+		}
+	}
+
 	ddCodec := &storage.DataDefinitionCodec{}
-	ddlData.Range(func(cID, d interface{}) bool {
+	d, ok := ddlData.LoadAndDelete(collID)
+	if !ok {
+		log.Error("Flush failed ... cannot load ddlData ..")
+		clearFn(false)
+		return
+	}
 
-		data := d.(*ddData)
-		collID := cID.(int64)
-		log.Debug(".. ddl flushing ...", zap.Int64("collectionID", collID), zap.Int("length", len(data.ddRequestString)))
-		binLogs, err := ddCodec.Serialize(data.timestamps, data.ddRequestString, data.eventTypes)
-		if err != nil || len(binLogs) != 2 {
-			log.Error("Codec Serialize wrong", zap.Error(err))
-			return false
-		}
+	data := d.(*ddData)
 
-		if len(data.ddRequestString) != len(data.timestamps) ||
-			len(data.timestamps) != len(data.eventTypes) {
-			log.Error("illegal ddBuffer, failed to save binlog")
-			return false
-		}
+	log.Debug(".. ddl flushing ...",
+		zap.Int64("collectionID", collID),
+		zap.Int("length", len(data.ddRequestString)))
 
-		kvs := make(map[string]string, 2)
-		tsIdx, err := meta.genKey(true)
-		if err != nil {
-			log.Error("Id allocate wrong", zap.Error(err))
-			return false
-		}
-		tsKey := path.Join(Params.DdlBinlogRootPath, strconv.FormatInt(collID, 10), binLogs[0].GetKey(), tsIdx)
-		kvs[tsKey] = string(binLogs[0].GetValue())
+	binLogs, err := ddCodec.Serialize(data.timestamps, data.ddRequestString, data.eventTypes)
+	if err != nil || len(binLogs) != 2 {
+		log.Error("Codec Serialize wrong", zap.Error(err))
+		clearFn(false)
+		return
+	}
 
-		ddlIdx, err := meta.genKey(true)
-		if err != nil {
-			log.Error("Id allocate wrong", zap.Error(err))
-			return false
-		}
-		ddlKey := path.Join(Params.DdlBinlogRootPath, strconv.FormatInt(collID, 10), binLogs[1].GetKey(), ddlIdx)
-		kvs[ddlKey] = string(binLogs[1].GetValue())
+	if len(data.ddRequestString) != len(data.timestamps) ||
+		len(data.timestamps) != len(data.eventTypes) {
+		log.Error("illegal ddBuffer, failed to save binlog")
+		clearFn(false)
+		return
+	}
 
-		// save ddl/ts binlog to minIO/s3
-		log.Debug(".. Saving ddl binlog to minIO/s3 ...")
-		err = kv.MultiSave(kvs)
-		if err != nil {
-			log.Error("Save to minIO/S3 Wrong", zap.Error(err))
-			_ = kv.MultiRemove([]string{tsKey, ddlKey})
-			return false
-		}
+	kvs := make(map[string]string, 2)
+	tsIdx, err := idAllocator.genKey(true)
+	if err != nil {
+		log.Error("Id allocate wrong", zap.Error(err))
+		clearFn(false)
+		return
+	}
+	tsKey := path.Join(Params.DdlBinlogRootPath, strconv.FormatInt(collID, 10), binLogs[0].GetKey(), tsIdx)
+	kvs[tsKey] = string(binLogs[0].GetValue())
 
-		log.Debug(".. Saving ddl binlog meta ...")
-		err = meta.SaveDDLBinlogMetaTxn(collID, tsKey, ddlKey)
-		if err != nil {
-			log.Error("Save binlog meta to etcd Wrong", zap.Error(err))
-			_ = kv.MultiRemove([]string{tsKey, ddlKey})
-			return false
-		}
+	ddlIdx, err := idAllocator.genKey(true)
+	if err != nil {
+		log.Error("Id allocate wrong", zap.Error(err))
+		clearFn(false)
+		return
+	}
+	ddlKey := path.Join(Params.DdlBinlogRootPath, strconv.FormatInt(collID, 10), binLogs[1].GetKey(), ddlIdx)
+	kvs[ddlKey] = string(binLogs[1].GetValue())
 
-		log.Debug(".. Clearing ddl flush buffer ...")
-		ddlData.Delete(collID)
-		return true
+	// save ddl/ts binlog to minIO/s3
+	log.Debug(".. Saving ddl binlog to minIO/s3 ...")
+	err = kv.MultiSave(kvs)
+	if err != nil {
+		log.Error("Save to minIO/S3 Wrong", zap.Error(err))
+		_ = kv.MultiRemove([]string{tsKey, ddlKey})
+		clearFn(false)
+		return
+	}
 
-	})
+	log.Debug(".. Clearing ddl flush buffer ...")
+	clearFn(true)
+	binlogMetaCh <- &datapb.DDLBinlogMeta{
+		DdlBinlogPath: ddlKey,
+		TsBinlogPath:  tsKey,
+	}
+
 	log.Debug(".. DDL flushing completed ...")
 }
 
@@ -439,8 +450,8 @@ func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
 		append(ddNode.ddBuffer.ddData[collectionID].eventTypes, storage.DropPartitionEventType)
 }
 
-func newDDNode(ctx context.Context, binlogMeta *binlogMeta,
-	inFlushCh <-chan *flushMsg, replica Replica) *ddNode {
+func newDDNode(ctx context.Context, binlogMeta *binlogMeta, inFlushCh <-chan *flushMsg,
+	replica Replica, idAllocator allocatorInterface) *ddNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -471,15 +482,14 @@ func newDDNode(ctx context.Context, binlogMeta *binlogMeta,
 		BaseNode:  baseNode,
 		ddRecords: ddRecords,
 		ddBuffer: &ddBuffer{
-			ddData:  make(map[UniqueID]*ddData),
-			maxSize: Params.FlushDdBufferSize,
+			ddData: make(map[UniqueID]*ddData),
 		},
 		inFlushCh: inFlushCh,
 
-		// idAllocator: alloc,
-		kv:         minioKV,
-		replica:    replica,
-		binlogMeta: binlogMeta,
-		flushMap:   &sync.Map{},
+		idAllocator: idAllocator,
+		kv:          minioKV,
+		replica:     replica,
+		binlogMeta:  binlogMeta,
+		flushMap:    &sync.Map{},
 	}
 }

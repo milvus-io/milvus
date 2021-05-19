@@ -134,16 +134,13 @@ func (bm *binlogMeta) getSegmentBinlogMeta(segmentID UniqueID) (metas []*datapb.
 // SaveDDLBinlogMetaTxn stores timestamp and ddl binlog path pair into etcd in a transaction.
 // ddl binlog meta key:
 //   ${prefix}/${collectionID}/${idx}
-func (bm *binlogMeta) SaveDDLBinlogMetaTxn(collID UniqueID, tsPath string, ddlPath string) error {
+func (bm *binlogMeta) SaveDDLBinlogMetaTxn(collID UniqueID, ddlBinlogMeta *datapb.DDLBinlogMeta) error {
 
 	uniqueKey, err := bm.genKey(true, collID)
 	if err != nil {
 		return err
 	}
-	binlogPathPair := proto.MarshalTextString(&datapb.DDLBinlogMeta{
-		DdlBinlogPath: ddlPath,
-		TsBinlogPath:  tsPath,
-	})
+	binlogPathPair := proto.MarshalTextString(ddlBinlogMeta)
 
 	return bm.client.Save(path.Join(Params.DDLFlushMetaSubPath, uniqueKey), binlogPathPair)
 }
