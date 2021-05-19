@@ -379,6 +379,10 @@ func (s *Server) Search(ctx context.Context, request *milvuspb.SearchRequest) (*
 	return s.proxynode.Search(ctx, request)
 }
 
+func (s *Server) Retrieve(ctx context.Context, request *milvuspb.RetrieveRequest) (*milvuspb.RetrieveResults, error) {
+	return s.proxynode.Retrieve(ctx, request)
+}
+
 func (s *Server) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error) {
 	return s.proxynode.Flush(ctx, request)
 }

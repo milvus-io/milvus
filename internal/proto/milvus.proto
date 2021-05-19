@@ -32,6 +32,7 @@ service MilvusService {
 
   rpc Insert(InsertRequest) returns (InsertResponse) {}
   rpc Search(SearchRequest) returns (SearchResults) {}
+  rpc Retrieve(RetrieveRequest) returns (RetrieveResults) {}
   rpc Flush(FlushRequest) returns (common.Status) {}
 
   rpc GetPersistentSegmentInfo(GetPersistentSegmentInfoRequest) returns (GetPersistentSegmentInfoResponse) {}
@@ -312,6 +313,21 @@ message SearchRequest {
   bytes placeholder_group = 6;
   common.DslType dsl_type = 7;
   repeated common.KeyValuePair search_params = 8;
+}
+
+message RetrieveRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  repeated string partition_names = 4;
+  schema.IDs ids = 5;
+  repeated string output_fields = 6;
+}
+
+message RetrieveResults {
+  common.Status status = 1;
+  schema.IDs ids = 2;
+  repeated schema.FieldData fields_data = 3;
 }
 
 message Hits {
