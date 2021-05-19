@@ -46,7 +46,7 @@ XBuildIndexTask::XBuildIndexTask(SegmentSchemaPtr file, TaskLabelPtr label)
 
         auto json = milvus::json::parse(file_->index_params_);
         to_index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, engine_type,
-                                                (MetricType)file_->metric_type_, json);
+                                                (MetricType)file_->metric_type_, json, file_->updated_time_);
     }
 }
 
@@ -62,7 +62,7 @@ XBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
         auto options = build_index_job->options();
         try {
             if (type == LoadType::DISK2CPU) {
-                stat = to_index_engine_->Load(options.insert_cache_immediately_);
+                stat = to_index_engine_->Load(false, options.insert_cache_immediately_);
                 type_str = "DISK2CPU";
             } else if (type == LoadType::CPU2GPU) {
                 stat = to_index_engine_->CopyToIndexFileToGpu(device_id);

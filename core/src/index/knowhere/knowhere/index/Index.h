@@ -38,9 +38,14 @@ class Blacklist : public milvus::cache::DataObj {
 
     int64_t
     Size() override {
-        return (bitset_ != nullptr) ? 0 : bitset_->size();
+        int64_t sz = sizeof(Blacklist);
+        if (bitset_) {
+            sz += bitset_->size();
+        }
+        return sz;
     }
 
+    int64_t time_stamp_ = -1;
     faiss::ConcurrentBitsetPtr bitset_ = nullptr;
 };
 

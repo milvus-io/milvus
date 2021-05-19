@@ -23,6 +23,7 @@ namespace cache {
 
 // Define cache key suffix
 extern const char* BloomFilter_Suffix;
+extern const char* Blacklist_Suffix;
 
 class CpuCacheMgr : public CacheMgr<DataObjPtr>, public server::CacheConfigHandler {
  private:

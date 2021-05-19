@@ -479,8 +479,8 @@ DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const
         }
 
         auto json = milvus::json::parse(file.index_params_);
-        ExecutionEnginePtr engine =
-            EngineFactory::Build(file.dimension_, file.location_, engine_type, (MetricType)file.metric_type_, json);
+        ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, engine_type,
+                                                         (MetricType)file.metric_type_, json, file.updated_time_);
         fiu_do_on("DBImpl.PreloadCollection.null_engine", engine = nullptr);
         if (engine == nullptr) {
             LOG_ENGINE_ERROR_ << "Invalid engine type";
@@ -552,8 +552,8 @@ DBImpl::ReleaseCollection(const std::shared_ptr<server::Context>& context, const
         }
 
         auto json = milvus::json::parse(file.index_params_);
-        ExecutionEnginePtr engine =
-            EngineFactory::Build(file.dimension_, file.location_, engine_type, (MetricType)file.metric_type_, json);
+        ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, engine_type,
+                                                         (MetricType)file.metric_type_, json, file.updated_time_);
 
         if (engine == nullptr) {
             LOG_ENGINE_ERROR_ << "Invalid engine type";
