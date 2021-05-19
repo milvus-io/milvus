@@ -17,11 +17,11 @@ I don't think it's necessary to auto-flush ddl anymore.
 
 ## Goals
 
-- Flowgraph knows about which segment/collection to concern.
-- DDNode update masPositions once it buffers ddl about the collection
-- DDNode won't auto flush
-- In manul-flush, a background flush-complete goroutinue waits for DDNode and InsertBufferNode both done flushing,
-waiting for both binlog paths.
+-  Flowgraph knows about which segment/collection to concern.
+-  DDNode update masPositions once it buffers ddl about the collection.
+-  DDNode won't auto flush.
+-  In manul-flush, a background flush-complete goroutinue waits for DDNode and InsertBufferNode both done
+flushing, waiting for both binlog paths.
 
 ## Detailed design
 
