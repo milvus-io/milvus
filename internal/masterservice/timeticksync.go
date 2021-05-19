@@ -13,6 +13,7 @@ package masterservice
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -36,6 +37,7 @@ type timetickSync struct {
 	delChan       <-chan *session.Session
 }
 
+// NewTimeTickSync create a new timetickSync
 func NewTimeTickSync(ctx context.Context, kv *etcdkv.EtcdKV, factory msgstream.Factory) (*timetickSync, error) {
 	const proxyNodePrefix = "proxynode"
 	pnSessions, err := session.GetSessions(kv, proxyNodePrefix)
@@ -48,6 +50,7 @@ func NewTimeTickSync(ctx context.Context, kv *etcdkv.EtcdKV, factory msgstream.F
 		msFactory:     factory,
 		proxyTimeTick: make(map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg),
 		sendChan:      make(chan map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg),
+		chanStream:    make(map[string]msgstream.MsgStream),
 	}
 	tss.addChan, tss.delChan = session.WatchServices(ctx, kv, proxyNodePrefix)
 	for _, pns := range pnSessions {
@@ -56,9 +59,8 @@ func NewTimeTickSync(ctx context.Context, kv *etcdkv.EtcdKV, factory msgstream.F
 	return &tss, nil
 }
 
-func (t *timetickSync) SendToChannel() {
-	t.lock.Lock()
-	defer t.lock.Unlock()
+// sendToChannel send all channels' timetick to sendChan
+func (t *timetickSync) sendToChannel() {
 	for _, v := range t.proxyTimeTick {
 		if v == nil {
 			return
@@ -73,18 +75,20 @@ func (t *timetickSync) SendToChannel() {
 	t.sendChan <- ptt
 }
 
-func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg) {
+// UpdateTimeTick check msg validation and send it to local channel
+func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg) error {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	_, ok := t.proxyTimeTick[in.Base.SourceID]
 	if !ok {
-		log.Debug("Skip ChannelTimeTickMsg from un-recognized proxy node",
-			zap.Int64("proxy node id", in.Base.SourceID))
+		return fmt.Errorf("Skip ChannelTimeTickMsg from un-recognized proxy node %d", in.Base.SourceID)
 	}
 	t.proxyTimeTick[in.Base.SourceID] = in
-	t.SendToChannel()
+	t.sendToChannel()
+	return nil
 }
 
+// StartWatch watch proxy node change and process all channels' timetick msg
 func (t *timetickSync) StartWatch() {
 	for {
 		select {
@@ -98,7 +102,7 @@ func (t *timetickSync) StartWatch() {
 		case pns := <-t.delChan:
 			t.lock.Lock()
 			delete(t.proxyTimeTick, pns.ServerID)
-			t.SendToChannel()
+			t.sendToChannel()
 			t.lock.Unlock()
 		case ptt, ok := <-t.sendChan:
 			if !ok {
@@ -128,6 +132,7 @@ func (t *timetickSync) StartWatch() {
 	}
 }
 
+// SendChannelTimeTick send each channel's min timetick to msg stream
 func (t *timetickSync) SendChannelTimeTick(chanName string, ts typeutil.Timestamp) error {
 	msgPack := msgstream.MsgPack{}
 	baseMsg := msgstream.BaseMsg{
@@ -150,10 +155,11 @@ func (t *timetickSync) SendChannelTimeTick(chanName string, ts typeutil.Timestam
 	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
 
 	// send timetick msg to msg stream
+	var err error
 	var stream msgstream.MsgStream
 	stream, ok := t.chanStream[chanName]
 	if !ok {
-		stream, err := t.msFactory.NewMsgStream(t.ctx)
+		stream, err = t.msFactory.NewMsgStream(t.ctx)
 		if err != nil {
 			return err
 		}

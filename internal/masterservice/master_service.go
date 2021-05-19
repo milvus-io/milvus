@@ -1673,7 +1673,21 @@ func (c *Core) registerService(nodeName string, ip string) (<-chan *clientv3.Lea
 }
 
 func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
-	c.chanTimeTick.UpdateTimeTick(in)
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}
+	if in.Base.MsgType != commonpb.MsgType_TimeTick {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = fmt.Sprintf("UpdateChannelTimeTick receive invalid message %d", in.Base.GetMsgType())
+		return status, nil
+	}
+	err := c.chanTimeTick.UpdateTimeTick(in)
+	if err != nil {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = err.Error()
+		return status, nil
+	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",

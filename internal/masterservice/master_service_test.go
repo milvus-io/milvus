@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/session"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/clientv3"
@@ -1414,6 +1415,65 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		_, err = core.GetStatisticsChannel(ctx)
 		assert.Nil(t, err)
+	})
+
+	t.Run("channel timetick", func(t *testing.T) {
+		const (
+			proxyNodeID0       = 100
+			proxyNodeID1       = 101
+			proxyNodeIDInvalid = 102
+			proxyNodeName0     = "proxynode_0"
+			proxyNodeName1     = "proxynode_1"
+			chanName0          = "c0"
+			chanName1          = "c1"
+			chanName2          = "c2"
+			ts0                = uint64(100)
+			ts1                = uint64(120)
+			ts2                = uint64(150)
+		)
+		s0 := session.NewSession(proxyNodeID0, proxyNodeName0, "")
+		s1 := session.NewSession(proxyNodeID1, proxyNodeName1, "")
+
+		session.RegisterService(core.metaKV, s0, 10)
+		session.RegisterService(core.metaKV, s1, 10)
+		time.Sleep(1 * time.Second)
+
+		msg0 := &internalpb.ChannelTimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_TimeTick,
+				SourceID: proxyNodeID0,
+			},
+			ChannelNames: []string{chanName0, chanName1},
+			Timestamps:   []uint64{ts0, ts2},
+		}
+		s, _ := core.UpdateChannelTimeTick(ctx, msg0)
+		assert.Equal(t, commonpb.ErrorCode_Success, s.ErrorCode)
+		time.Sleep(100 * time.Millisecond)
+
+		msg1 := &internalpb.ChannelTimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_TimeTick,
+				SourceID: proxyNodeID1,
+			},
+			ChannelNames: []string{chanName1, chanName2},
+			Timestamps:   []uint64{ts1, ts2},
+		}
+		s, _ = core.UpdateChannelTimeTick(ctx, msg1)
+		assert.Equal(t, commonpb.ErrorCode_Success, s.ErrorCode)
+		time.Sleep(100 * time.Millisecond)
+
+		msgInvalid := &internalpb.ChannelTimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_TimeTick,
+				SourceID: proxyNodeIDInvalid,
+			},
+		}
+		s, _ = core.UpdateChannelTimeTick(ctx, msgInvalid)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, s.ErrorCode)
+		time.Sleep(1 * time.Second)
+
+		assert.Equal(t, 2, len(core.chanTimeTick.proxyTimeTick))
+		assert.Equal(t, 3, len(core.chanTimeTick.chanStream))
 	})
 
 	err = core.Stop()
