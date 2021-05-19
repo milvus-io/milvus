@@ -856,6 +856,12 @@ func TestRun(t *testing.T) {
 	}
 
 	Params.Port = rand.Int()%100 + 10000
+
+	rand.Seed(time.Now().UnixNano())
+	randVal := rand.Int()
+	cms.Params.Init()
+	cms.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
+
 	err = svr.Run()
 	assert.Nil(t, err)
 
