@@ -106,7 +106,7 @@ func (dsService *dataSyncService) initNodes() {
 	var ddStreamNode Node = newDDInputNode(dsService.ctx, dsService.msFactory)
 
 	var filterDmNode Node = newFilteredDmNode()
-	var ddNode Node = newDDNode(dsService.ctx, mt, dsService.flushChan, dsService.replica)
+	var ddNode Node = newDDNode(dsService.ctx, mt, dsService.flushChan, dsService.replica, dsService.idAllocator)
 	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, mt, dsService.replica, dsService.msFactory, dsService.idAllocator)
 	var gcNode Node = newGCNode(dsService.replica)
 
