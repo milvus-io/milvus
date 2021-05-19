@@ -59,9 +59,10 @@ message BuildIndexRequest {
   int64 indexBuildID = 1;
   string index_name = 2;
   int64 indexID = 3;
-  repeated string data_paths = 4;
-  repeated common.KeyValuePair type_params = 5;
-  repeated common.KeyValuePair index_params = 6;
+  int64 version = 4;
+  repeated string data_paths = 5;
+  repeated common.KeyValuePair type_params = 6;
+  repeated common.KeyValuePair index_params = 7;
 }
 
 message BuildIndexResponse {
@@ -98,6 +99,8 @@ message IndexMeta {
   BuildIndexRequest req = 4;
   repeated string index_file_paths = 5;
   bool mark_deleted = 6;
+  string lease_key = 7;
+  int64 version = 8;
 }
 
 message DropIndexRequest {

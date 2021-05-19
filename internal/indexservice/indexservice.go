@@ -63,6 +63,8 @@ type IndexService struct {
 
 	metaTable *metaTable
 
+	nodeTasks *nodeTasks
+
 	nodeLock sync.RWMutex
 
 	etcdKV  *etcdkv.EtcdKV
@@ -87,6 +89,7 @@ func NewIndexService(ctx context.Context) (*IndexService, error) {
 		loopCtx:     ctx1,
 		loopCancel:  cancel,
 		nodeClients: &PriorityQueue{},
+		nodeTasks:   &nodeTasks{},
 	}
 
 	return i, nil
@@ -165,6 +168,9 @@ func (i *IndexService) Start() error {
 	i.loopWg.Add(1)
 	go i.dropIndexLoop()
 
+	i.loopWg.Add(1)
+	go i.assignmentTasksLoop()
+
 	i.sched.Start()
 	// Start callbacks
 	for _, cb := range i.startCallbacks {
@@ -236,6 +242,17 @@ func (i *IndexService) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRe
 		zap.Strings("DataPath = ", req.DataPaths),
 		zap.Any("TypeParams", req.TypeParams),
 		zap.Any("IndexParams", req.IndexParams))
+	hasIndex, indexBuildID := i.metaTable.hasSameReq(req)
+	if hasIndex {
+		log.Debug("IndexService", zap.Any("hasIndex true", indexBuildID))
+		return &indexpb.BuildIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+				Reason:    "already have same index",
+			},
+			IndexBuildID: indexBuildID,
+		}, nil
+	}
 	ret := &indexpb.BuildIndexResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -428,6 +445,7 @@ func (i *IndexService) dropIndexLoop() {
 		case <-timeTicker.C:
 			indexMetas := i.metaTable.getMarkDeleted(dropIndexLimit)
 			for j := 0; j < len(indexMetas); j++ {
+				// TODO: delete files corresponding to all versions
 				if err := i.kv.MultiRemove(indexMetas[j].IndexFilePaths); err != nil {
 					log.Debug("IndexService", zap.String("Remove index files error", err.Error()))
 				}
@@ -436,6 +454,52 @@ func (i *IndexService) dropIndexLoop() {
 		}
 	}
 }
+
+func (i *IndexService) assignmentTasksLoop() {
+	ctx, cancel := context.WithCancel(i.loopCtx)
+
+	defer cancel()
+	defer i.loopWg.Done()
+
+	timeTicker := time.NewTicker(durationInterval)
+	log.Debug("IndexService start assign tasks loop")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timeTicker.C:
+			tasks := i.metaTable.getToAssignedTasks()
+			for j := 0; j < len(tasks); j++ {
+				nodeID, builderClient, _ := i.nodeClients.PeekClient()
+				if builderClient == nil {
+					log.Debug("IndexService has no available IndexNode")
+				}
+				resp, err := builderClient.BuildIndex(ctx, tasks[j].Req)
+				if err != nil {
+					log.Debug("IndexService", zap.String("build index err", err.Error()))
+				}
+				if err := i.metaTable.BuildIndex(tasks[j].IndexBuildID, "leaseKey"); err != nil {
+					log.Debug("IndexService", zap.String("update meta table error", err.Error()))
+				}
+				if resp.ErrorCode != commonpb.ErrorCode_Success {
+					log.Debug("IndexService", zap.String("build index err", resp.Reason))
+				}
+				i.nodeClients.IncPriority(nodeID, 1)
+			}
+
+		}
+	}
+}
+
+// TODO: watch IndexNodes, and reassignment tasks
+//func (i *IndexService) ReassignmentTasks(indexBuildIDs []UniqueID) {
+//	for _, indexBuildID := range indexBuildIDs {
+//		if err := i.metaTable.MarkIndexAsUnissued(indexBuildID); err != nil {
+//			log.Debug("IndexService", zap.Any("Reassignment task failed, err =", err.Error()))
+//		}
+//	}
+//}
 
 func (i *IndexService) registerService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	respID, err := i.etcdKV.Grant(5)

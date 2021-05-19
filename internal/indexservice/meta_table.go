@@ -85,11 +85,13 @@ func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequ
 		State:        commonpb.IndexState_Unissued,
 		IndexBuildID: indexBuildID,
 		Req:          req,
+		LeaseKey:     "",
+		Version:      0,
 	}
 	return mt.saveIndexMeta(meta)
 }
 
-func (mt *metaTable) BuildIndex(indexBuildID UniqueID) error {
+func (mt *metaTable) BuildIndex(indexBuildID UniqueID, leaseKey string) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 	log.Debug("IndexService update index state")
@@ -103,6 +105,8 @@ func (mt *metaTable) BuildIndex(indexBuildID UniqueID) error {
 		return fmt.Errorf("can not update index state, index with ID = %d state is %d", indexBuildID, meta.State)
 	}
 	meta.State = commonpb.IndexState_InProgress
+	meta.LeaseKey = leaseKey
+	meta.Version = meta.Version + 1
 	return mt.saveIndexMeta(&meta)
 }
 
@@ -205,4 +209,101 @@ func (mt *metaTable) getMarkDeleted(limit int) []indexpb.IndexMeta {
 	}
 
 	return indexMetas
+}
+
+func (mt *metaTable) getToAssignedTasks() []indexpb.IndexMeta {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+
+	log.Debug("IndexService get unissued tasks")
+
+	var tasks []indexpb.IndexMeta
+	for _, meta := range mt.indexBuildID2Meta {
+		// TODO: lease Key not in IndexService watched lease keys
+		if meta.LeaseKey == "" {
+			tasks = append(tasks, meta)
+		}
+	}
+
+	return tasks
+}
+
+func compare2Array(arr1, arr2 interface{}) bool {
+	p1, ok := arr1.([]*commonpb.KeyValuePair)
+	if ok {
+		p2, ok1 := arr2.([]*commonpb.KeyValuePair)
+		if ok1 {
+			for _, param1 := range p1 {
+				sameParams := false
+				for _, param2 := range p2 {
+					if param1.Key == param2.Key && param1.Value == param2.Value {
+						sameParams = true
+					}
+				}
+				if !sameParams {
+					return false
+				}
+			}
+			return true
+		}
+		log.Error("indexservice", zap.Any("type error", "arr2 type should be commonpb.KeyValuePair"))
+		return false
+	}
+	v1, ok2 := arr1.([]string)
+	if ok2 {
+		v2, ok3 := arr2.([]string)
+		if ok3 {
+			for _, s1 := range v1 {
+				sameParams := false
+				for _, s2 := range v2 {
+					if s1 == s2 {
+						sameParams = true
+					}
+				}
+				if !sameParams {
+					return false
+				}
+			}
+			return true
+		}
+		log.Error("indexservice", zap.Any("type error", "arr2 type should be string array"))
+		return false
+	}
+	log.Error("indexservice", zap.Any("type error", "param type should be commonpb.KeyValuePair or string array"))
+	return false
+}
+
+func (mt *metaTable) hasSameReq(req *indexpb.BuildIndexRequest) (bool, UniqueID) {
+LOOP:
+	for _, meta := range mt.indexBuildID2Meta {
+		if meta.Req.IndexID == req.IndexID {
+			if len(meta.Req.DataPaths) != len(req.DataPaths) {
+				goto LOOP
+			}
+			if len(meta.Req.IndexParams) == len(req.IndexParams) && compare2Array(meta.Req.DataPaths, req.DataPaths) {
+				if !compare2Array(meta.Req.IndexParams, req.IndexParams) || !compare2Array(meta.Req.TypeParams, req.TypeParams) {
+					goto LOOP
+				}
+				return true, meta.IndexBuildID
+			}
+		}
+	}
+	return false, -1
+}
+
+type nodeTasks struct {
+	nodeID2Tasks map[string][]indexpb.IndexMeta
+}
+
+func (nt *nodeTasks) getTasksByLeaseKey(leaseKey string) ([]UniqueID, error) {
+	var taskIndexBuildIDs []UniqueID
+	tasks, ok := nt.nodeID2Tasks[leaseKey]
+	if !ok {
+		return nil, fmt.Errorf("lease key not exists with %s", leaseKey)
+	}
+	for _, task := range tasks {
+		taskIndexBuildIDs = append(taskIndexBuildIDs, task.IndexBuildID)
+	}
+
+	return taskIndexBuildIDs, nil
 }
