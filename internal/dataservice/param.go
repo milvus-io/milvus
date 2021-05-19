@@ -30,6 +30,9 @@ type ParamTable struct {
 	KvRootPath    string
 	PulsarAddress string
 
+	FlushStreamPosSubPath string
+	StatsStreamPosSubPath string
+
 	// segment
 	SegmentSize           float64
 	SegmentSizeFactor     float64
@@ -83,6 +86,9 @@ func (p *ParamTable) Init() {
 		p.initSegmentFlushMetaPath()
 		p.initLogCfg()
 		p.initProxyServiceTimeTickChannelName()
+
+		p.initFlushStreamPosSubPath()
+		p.initStatsStreamPosSubPath()
 	})
 }
 
@@ -256,4 +262,20 @@ func (p *ParamTable) initProxyServiceTimeTickChannelName() {
 		panic(err)
 	}
 	p.ProxyTimeTickChannelName = ch
+}
+
+func (p *ParamTable) initFlushStreamPosSubPath() {
+	subPath, err := p.Load("etcd.flushStreamPosSubPath")
+	if err != nil {
+		panic(err)
+	}
+	p.FlushStreamPosSubPath = subPath
+}
+
+func (p *ParamTable) initStatsStreamPosSubPath() {
+	subPath, err := p.Load("etcd.statsStreamPosSubPath")
+	if err != nil {
+		panic(err)
+	}
+	p.StatsStreamPosSubPath = subPath
 }
