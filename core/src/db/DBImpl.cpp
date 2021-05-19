@@ -479,8 +479,8 @@ DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const
         }
 
         auto json = milvus::json::parse(file.index_params_);
-        ExecutionEnginePtr engine =
-            EngineFactory::Build(file.dimension_, file.location_, engine_type, (MetricType)file.metric_type_, json);
+        ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, engine_type,
+                                                         (MetricType)file.metric_type_, json, file.updated_time_);
         fiu_do_on("DBImpl.PreloadCollection.null_engine", engine = nullptr);
         if (engine == nullptr) {
             LOG_ENGINE_ERROR_ << "Invalid engine type";
@@ -493,7 +493,7 @@ DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const
             fiu_do_on("DBImpl.PreloadCollection.engine_throw_exception", throw std::exception());
             std::string msg = "Pre-loaded file: " + file.file_id_ + " size: " + std::to_string(file.file_size_);
             TimeRecorderAuto rc_1(msg);
-            status = engine->Load(true);
+            status = engine->Load(false, true);
             if (!status.ok()) {
                 return status;
             }
@@ -552,8 +552,8 @@ DBImpl::ReleaseCollection(const std::shared_ptr<server::Context>& context, const
         }
 
         auto json = milvus::json::parse(file.index_params_);
-        ExecutionEnginePtr engine =
-            EngineFactory::Build(file.dimension_, file.location_, engine_type, (MetricType)file.metric_type_, json);
+        ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, engine_type,
+                                                         (MetricType)file.metric_type_, json, file.updated_time_);
 
         if (engine == nullptr) {
             LOG_ENGINE_ERROR_ << "Invalid engine type";

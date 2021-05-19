@@ -153,22 +153,24 @@ class CachedQuantizer : public cache::DataObj {
 #endif
 
 ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& location, EngineType index_type,
-                                         MetricType metric_type, const milvus::json& index_params)
+                                         MetricType metric_type, const milvus::json& index_params, int64_t time_stamp)
     : location_(location),
       dim_(dimension),
       index_type_(index_type),
       metric_type_(metric_type),
-      index_params_(index_params) {
+      index_params_(index_params),
+      time_stamp_(time_stamp) {
 }
 
 ExecutionEngineImpl::ExecutionEngineImpl(knowhere::VecIndexPtr index, const std::string& location,
                                          EngineType index_type, MetricType metric_type,
-                                         const milvus::json& index_params)
+                                         const milvus::json& index_params, int64_t time_stamp)
     : index_(std::move(index)),
       location_(location),
       index_type_(index_type),
       metric_type_(metric_type),
-      index_params_(index_params) {
+      index_params_(index_params),
+      time_stamp_(time_stamp) {
 }
 
 knowhere::IndexMode
@@ -381,18 +383,16 @@ ExecutionEngineImpl::Serialize() {
 }
 
 Status
-ExecutionEngineImpl::Load(bool to_cache) {
+ExecutionEngineImpl::Load(bool load_blacklist, bool to_cache) {
     std::string segment_dir;
-    segment::SegmentReaderPtr segment_reader_ptr = nullptr;
-    auto get_segment_reader = [&]() {
-        utils::GetParentPath(location_, segment_dir);
-        segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
-    };
+    utils::GetParentPath(location_, segment_dir);
+    auto segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
+    auto cpu_cache_mgr = cache::CpuCacheMgr::GetInstance();
 
-    index_ = std::static_pointer_cast<knowhere::VecIndex>(cache::CpuCacheMgr::GetInstance()->GetItem(location_));
+    // step 1: Load index
+    index_ = std::static_pointer_cast<knowhere::VecIndex>(cpu_cache_mgr->GetItem(location_));
     if (!index_) {
         // not in the cache
-        get_segment_reader();
         knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
 
         if (utils::IsRawIndexType((int32_t)index_type_)) {
@@ -463,31 +463,49 @@ ExecutionEngineImpl::Load(bool to_cache) {
         }
 
         if (to_cache) {
-            Cache();
+            cpu_cache_mgr->InsertItem(location_, index_);
         }
     }
 
-    if (!blacklist_) {
-        if (!segment_reader_ptr) {
-            get_segment_reader();
-        }
+    // step 2: Load blacklist
+    if (load_blacklist) {
+        auto blacklist_cache_key = segment_dir + cache::Blacklist_Suffix;
+        blacklist_ = std::static_pointer_cast<knowhere::Blacklist>(cpu_cache_mgr->GetItem(blacklist_cache_key));
 
-        segment::DeletedDocsPtr deleted_docs_ptr;
-        auto status = segment_reader_ptr->LoadDeletedDocs(deleted_docs_ptr);
-        if (!status.ok()) {
-            std::string msg = "Failed to load deleted docs from " + location_;
-            LOG_ENGINE_ERROR_ << msg;
-            return Status(DB_ERROR, msg);
-        }
-        auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
-
-        blacklist_ = std::make_shared<knowhere::Blacklist>();
-        if (!deleted_docs.empty()) {
-            auto concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(index_->Count());
-            for (auto& offset : deleted_docs) {
-                concurrent_bitset_ptr->set(offset);
+        bool cache_miss = true;
+        if (blacklist_ != nullptr) {
+            if (blacklist_->time_stamp_ == time_stamp_) {
+                cache_miss = false;
+            } else {
+                LOG_ENGINE_DEBUG_ << "Mismatched time stamp  " << blacklist_->time_stamp_ << " < " << time_stamp_;
             }
-            blacklist_->bitset_ = concurrent_bitset_ptr;
+        }
+
+        if (cache_miss) {
+            segment::DeletedDocsPtr deleted_docs_ptr;
+            auto status = segment_reader_ptr->LoadDeletedDocs(deleted_docs_ptr);
+            if (!status.ok()) {
+                std::string msg = "Failed to load deleted docs from " + location_;
+                LOG_ENGINE_ERROR_ << msg;
+                return Status(DB_ERROR, msg);
+            }
+            auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
+
+            blacklist_ = std::make_shared<knowhere::Blacklist>();
+            blacklist_->time_stamp_ = time_stamp_;
+            if (!deleted_docs.empty()) {
+                auto concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(index_->Count());
+                for (auto& offset : deleted_docs) {
+                    concurrent_bitset_ptr->set(offset);
+                }
+                blacklist_->bitset_ = concurrent_bitset_ptr;
+            }
+
+            LOG_ENGINE_DEBUG_ << "Finished loading blacklist_ deleted docs size " << deleted_docs.size();
+
+            if (to_cache) {
+                cpu_cache_mgr->InsertItem(blacklist_cache_key, blacklist_);
+            }
         }
     }
 
@@ -668,7 +686,8 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     LOG_ENGINE_DEBUG_ << "Set " << to_index->UidsSize() << "uids for " << location;
 
     LOG_ENGINE_DEBUG_ << "Finish build index: " << location;
-    return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, index_params_);
+    return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, index_params_,
+                                                 time_stamp_);
 }
 
 void
@@ -768,8 +787,15 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
 Status
 ExecutionEngineImpl::Cache() {
     auto cpu_cache_mgr = milvus::cache::CpuCacheMgr::GetInstance();
-    cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(index_);
-    cpu_cache_mgr->InsertItem(location_, obj);
+    if (index_) {
+        cpu_cache_mgr->InsertItem(location_, index_);
+    }
+
+    if (blacklist_) {
+        std::string segment_dir;
+        utils::GetParentPath(location_, segment_dir);
+        cpu_cache_mgr->InsertItem(segment_dir + cache::Blacklist_Suffix, blacklist_);
+    }
     return Status::OK();
 }
 

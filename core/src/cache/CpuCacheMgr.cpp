@@ -22,6 +22,7 @@ namespace milvus {
 namespace cache {
 
 const char* BloomFilter_Suffix = ".bloomfilter";
+const char* Blacklist_Suffix = ".blacklist";
 
 CpuCacheMgr::CpuCacheMgr() {
     // All config values have been checked in Config::ValidateConfig()
