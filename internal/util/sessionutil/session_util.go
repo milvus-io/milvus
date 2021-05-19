@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/coreos/etcd/mvcc/mvccpb"
@@ -42,7 +43,8 @@ type SessionManager struct {
 
 	Self     *Session
 	Sessions map[string]*Session
-	signal   <-chan bool
+
+	mu sync.RWMutex
 }
 
 func NewSessionManager(ctx context.Context, etcdAddress string, etcdPath string, self *Session) *SessionManager {
@@ -68,7 +70,7 @@ func (sm *SessionManager) Init() {
 	if err != nil {
 		panic(err)
 	}
-	sm.signal = sm.processKeepAliveResponse(ch)
+	sm.processKeepAliveResponse(ch)
 }
 
 // NewSession is a helper to build Session object.LeaseID will be assigned after
@@ -191,8 +193,7 @@ func (sm *SessionManager) registerService() (<-chan *clientv3.LeaseKeepAliveResp
 
 // ProcessKeepAliveResponse processes the response of etcd keepAlive interface
 // If keepAlive fails for unexpected error, it will send a signal to the channel.
-func (sm *SessionManager) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveResponse) (signal <-chan bool) {
-	signalOut := make(chan bool)
+func (sm *SessionManager) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveResponse) {
 	go func() {
 		for {
 			select {
@@ -201,17 +202,14 @@ func (sm *SessionManager) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeep
 				return
 			case resp, ok := <-ch:
 				if !ok {
-					signalOut <- false
+					panic("keepAlive with etcd failed")
 				}
-				if resp != nil {
-					signalOut <- true
-				} else {
-					signalOut <- false
+				if resp == nil {
+					panic("keepAlive with etcd failed")
 				}
 			}
 		}
 	}()
-	return signalOut
 }
 
 // GetSessions gets all the services registered in etcd.
@@ -228,8 +226,11 @@ func (sm *SessionManager) UpdateSessions(prefix string) (map[string]*Session, er
 		if err != nil {
 			return nil, err
 		}
+		sm.mu.Lock()
 		sm.Sessions[resKey[i]] = session
+		sm.mu.Unlock()
 	}
+
 	return sm.Sessions, nil
 }
 
@@ -262,11 +263,15 @@ func (sm *SessionManager) WatchServices(ctx context.Context, prefix string) {
 					case mvccpb.PUT:
 						log.Debug("watch services",
 							zap.Any("delete kv", ev.Kv))
+						sm.mu.Lock()
 						sm.Sessions[string(ev.Kv.Key)] = session
+						sm.mu.Unlock()
 					case mvccpb.DELETE:
 						log.Debug("watch services",
 							zap.Any("delete kv", ev.Kv))
+						sm.mu.Lock()
 						delete(sm.Sessions, string(ev.Kv.Key))
+						sm.mu.Unlock()
 					}
 				}
 
