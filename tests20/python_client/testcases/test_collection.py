@@ -1,8 +1,9 @@
 import pytest
 from base.client_request import ApiReq
+from common.common_type import get_invalid_strs, CaseLabel, default_int64_field, default_alias
 from utils.util_log import test_log as log
-from common.common_type import *
-from common.common_func import *
+from common.common_func import gen_default_collection_schema, gen_unique_str, gen_collection_schema
+from common.common_func import gen_int64_field, gen_float_vec_field
 
 prefix = "collection"
 default_schema = gen_default_collection_schema()
@@ -169,6 +170,7 @@ class TestCollectionParams(ApiReq):
         collection, _ = self.collection.collection_init(c_name, schema=default_schema)
         assert_default_collection(collection, c_name)
         ex, _ = self.collection.collection_init(c_name, schema=get_invalid_schema)
+        assert "schema type must be schema.CollectionSchema" in str(ex)
         assert_default_collection(collection, c_name)
 
     @pytest.mark.tags(CaseLabel.L1)

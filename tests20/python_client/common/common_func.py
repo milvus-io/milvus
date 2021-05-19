@@ -6,8 +6,12 @@ from sklearn import preprocessing
 
 from pymilvus_orm.types import DataType
 from pymilvus_orm.schema import CollectionSchema, FieldSchema
+
+from common.common_type import int_field_desc, float_field_desc, float_vec_field_desc, binary_vec_field_desc
+from common.common_type import default_nb, all_index_types, binary_support, default_index_params
+from common.common_type import default_int64_field, default_float_field, default_float_vec_field_name, default_binary_vec_field_name
+from common.common_type import default_dim, collection_desc, default_collection_desc, default_binary_desc
 from utils.util_log import test_log as log
-from common.common_type import *
 
 """" Methods of processing data """
 l2 = lambda x, y: np.linalg.norm(np.array(x) - np.array(y))
@@ -53,23 +57,10 @@ def gen_collection_schema(fields, description=collection_desc, **kwargs):
     return schema
 
 
-def gen_default_binary_collection_schema():
+def gen_default_binary_collection_schema(description=default_binary_desc, primary_field=None):
     fields = [gen_int64_field(), gen_float_field(), gen_binary_vec_field()]
-    binary_schema = CollectionSchema(fields=fields, description="default binary collection")
+    binary_schema = CollectionSchema(fields=fields, description=description, primary_field=primary_field)
     return binary_schema
-
-
-def get_binary_default_fields(auto_id=True):
-    default_fields = {
-        "fields": [
-            {"name": "int64", "type": DataType.INT64},
-            {"name": "float", "type": DataType.FLOAT},
-            {"name": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "params": {"dim": default_dim}}
-        ],
-        "segment_row_limit": default_segment_row_limit,
-        "auto_id": auto_id
-    }
-    return default_fields
 
 
 def gen_simple_index():
