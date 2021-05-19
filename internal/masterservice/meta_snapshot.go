@@ -313,7 +313,7 @@ func (ms *metaSnapshot) Load(key string, ts typeutil.Timestamp) (string, error) 
 	return string(resp.Kvs[0].Value), nil
 }
 
-func (ms *metaSnapshot) MultiSave(kvs map[string]string) (typeutil.Timestamp, error) {
+func (ms *metaSnapshot) MultiSave(kvs map[string]string, addition func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
 	ms.lock.Lock()
 	defer ms.lock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
@@ -321,9 +321,14 @@ func (ms *metaSnapshot) MultiSave(kvs map[string]string) (typeutil.Timestamp, er
 
 	ts := ms.timeAllactor()
 	strTs := strconv.FormatInt(int64(ts), 10)
-	ops := make([]clientv3.Op, 0, len(kvs)+1)
+	ops := make([]clientv3.Op, 0, len(kvs)+2)
 	for key, value := range kvs {
 		ops = append(ops, clientv3.OpPut(path.Join(ms.root, key), value))
+	}
+	if addition != nil {
+		if k, v, e := addition(ts); e == nil {
+			ops = append(ops, clientv3.OpPut(path.Join(ms.root, k), v))
+		}
 	}
 	ops = append(ops, clientv3.OpPut(path.Join(ms.root, ms.tsKey), strTs))
 	resp, err := ms.cli.Txn(ctx).If().Then(ops...).Commit()
@@ -370,7 +375,7 @@ func (ms *metaSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]str
 	return keys, values, nil
 }
 
-func (ms *metaSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) (typeutil.Timestamp, error) {
+func (ms *metaSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, addition func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
 	ms.lock.Lock()
 	defer ms.lock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
@@ -378,9 +383,14 @@ func (ms *metaSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, re
 
 	ts := ms.timeAllactor()
 	strTs := strconv.FormatInt(int64(ts), 10)
-	ops := make([]clientv3.Op, 0, len(saves)+len(removals)+1)
+	ops := make([]clientv3.Op, 0, len(saves)+len(removals)+2)
 	for key, value := range saves {
 		ops = append(ops, clientv3.OpPut(path.Join(ms.root, key), value))
+	}
+	if addition != nil {
+		if k, v, e := addition(ts); e == nil {
+			ops = append(ops, clientv3.OpPut(path.Join(ms.root, k), v))
+		}
 	}
 	for _, key := range removals {
 		ops = append(ops, clientv3.OpDelete(path.Join(ms.root, key)))
