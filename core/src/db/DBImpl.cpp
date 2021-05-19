@@ -493,7 +493,7 @@ DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const
             fiu_do_on("DBImpl.PreloadCollection.engine_throw_exception", throw std::exception());
             std::string msg = "Pre-loaded file: " + file.file_id_ + " size: " + std::to_string(file.file_size_);
             TimeRecorderAuto rc_1(msg);
-            status = engine->Load(true);
+            status = engine->Load(false, true);
             if (!status.ok()) {
                 return status;
             }
