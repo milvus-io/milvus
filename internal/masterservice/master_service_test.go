@@ -1581,10 +1581,10 @@ func TestMasterService(t *testing.T) {
 	})
 
 	t.Run("alloc_error", func(t *testing.T) {
-		core.idAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+		core.IDAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 			return 0, 0, fmt.Errorf("id allocator error test")
 		}
-		core.tsoAllocator = func(count uint32) (typeutil.Timestamp, error) {
+		core.TSOAllocator = func(count uint32) (typeutil.Timestamp, error) {
 			return 0, fmt.Errorf("tso allcoator error test")
 		}
 		r1 := &masterpb.AllocTimestampRequest{
@@ -1775,25 +1775,25 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.idAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	c.IDAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		return 0, 0, nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.idAllocatorUpdate = func() error {
+	c.IDAllocatorUpdate = func() error {
 		return nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.tsoAllocator = func(count uint32) (typeutil.Timestamp, error) {
+	c.TSOAllocator = func(count uint32) (typeutil.Timestamp, error) {
 		return 0, nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.tsoAllocatorUpdate = func() error {
+	c.TSOAllocatorUpdate = func() error {
 		return nil
 	}
 	err = c.checkInit()
