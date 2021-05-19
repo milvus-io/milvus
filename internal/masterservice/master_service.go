@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/milvus-io/milvus/internal/util/session"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -135,13 +134,11 @@ type Core struct {
 	ddReqQueue      chan reqTask //dd request will be push into this chan
 	lastDdTimeStamp typeutil.Timestamp
 
+	// channel timetick
+	chanTimeTick *timetickSync
+
 	//time tick loop
 	lastTimeTick typeutil.Timestamp
-
-	// record min timestamp for each channel
-	sendChannelTimeTick func(chanName string, ts typeutil.Timestamp) error
-	channelTimeTickMap  map[string]typeutil.Timestamp
-	proxyNodeMap        map[typeutil.UniqueID]bool
 
 	//states code
 	stateCode atomic.Value
@@ -420,16 +417,6 @@ func (c *Core) setMsgStreams() error {
 	//proxy time tick stream,
 	if Params.ProxyTimeTickChannel == "" {
 		return fmt.Errorf("ProxyTimeTickChannel is empty")
-	}
-
-	var err error
-	m := map[string]interface{}{
-		"PulsarAddress":  Params.PulsarAddress,
-		"ReceiveBufSize": 1024,
-		"PulsarBufSize":  1024}
-	err = c.msFactory.SetParams(m)
-	if err != nil {
-		return err
 	}
 
 	proxyTimeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
@@ -872,11 +859,17 @@ func (c *Core) Init() error {
 			return tsoAllocator.UpdateTSO()
 		}
 
-		c.sendChannelTimeTick = func(chanName string, ts typeutil.Timestamp) error {
-			return nil
+		m := map[string]interface{}{
+			"PulsarAddress":  Params.PulsarAddress,
+			"ReceiveBufSize": 1024,
+			"PulsarBufSize":  1024}
+		if initError = c.msFactory.SetParams(m); initError != nil {
+			return
 		}
-		c.channelTimeTickMap = make(map[string]typeutil.Timestamp)
-		c.proxyNodeMap = make(map[typeutil.UniqueID]bool)
+		c.chanTimeTick, initError = NewTimeTickSync(c.ctx, c.metaKV, c.msFactory)
+		if initError != nil {
+			return
+		}
 
 		c.ddReqQueue = make(chan reqTask, 1024)
 		initError = c.setMsgStreams()
@@ -971,6 +964,7 @@ func (c *Core) Start() error {
 		go c.startDataServiceSegmentLoop()
 		go c.startSegmentFlushCompletedLoop()
 		go c.tsLoop()
+		go c.chanTimeTick.StartWatch()
 		c.stateCode.Store(internalpb.StateCode_Healthy)
 	})
 	log.Debug("Master service", zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Healthy)]))
@@ -1676,57 +1670,4 @@ func (c *Core) registerService(nodeName string, ip string) (<-chan *clientv3.Lea
 		return nil, err
 	}
 	return ch, nil
-}
-
-// UpdateChannelTimeTick update timetick for each physical channel
-func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
-	proxyNodeSession, err := session.GetSessions(c.metaKV, "proxynode")
-	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "GetSessions fail, error: " + err.Error(),
-		}, err
-	}
-	proxyNodeNum := len(proxyNodeSession)
-
-	proxyNodeID := in.Base.SourceID
-
-	// update channelTimeTickMap to store min timestamp for each channel
-	chanNum := len(in.ChannelNames)
-	for i := 0; i < chanNum; i++ {
-		chanName := in.ChannelNames[i]
-		chanTs := in.Timestamps[i]
-		ts, ok := c.channelTimeTickMap[chanName]
-		if !ok || chanTs < ts {
-			c.channelTimeTickMap[chanName] = chanTs
-		}
-	}
-
-	// use proxyNodeMap to record active proxyNode
-	c.proxyNodeMap[proxyNodeID] = true
-
-	// have received msg from all proxyNodes
-	if proxyNodeNum == len(c.proxyNodeMap) {
-		timeTickMap := make(map[string]typeutil.Timestamp)
-		for k, v := range c.channelTimeTickMap {
-			timeTickMap[k] = v
-		}
-		go func() {
-			for cn, ts := range timeTickMap {
-				err = c.sendChannelTimeTick(cn, ts)
-				if err != nil {
-					log.Debug("send time tick failed", zap.String("channel name", cn), zap.Error(err))
-				}
-			}
-		}()
-
-		// clean maps
-		c.channelTimeTickMap = make(map[string]typeutil.Timestamp)
-		c.proxyNodeMap = make(map[typeutil.UniqueID]bool)
-	}
-
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
 }
