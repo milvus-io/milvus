@@ -217,12 +217,14 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
-	ddOpStr, err := EncodeDdOperation(&ddCollReq, &ddPartReq, CreateCollectionDDType)
-	if err != nil {
-		return err
+	ddOp := func(ts typeutil.Timestamp) (string, error) {
+		//TODO, NEZA2017
+		//ddCollReq.Base.Timestamp = ts
+		//ddPartReq.Base.Timestamp = ts
+		return EncodeDdOperation(&ddCollReq, &ddPartReq, CreateCollectionDDType)
 	}
 
-	_, err = t.core.MetaTable.AddCollection(&collInfo, &partInfo, idxInfo, ddOpStr)
+	_, err = t.core.MetaTable.AddCollection(&collInfo, &partInfo, idxInfo, ddOp)
 	if err != nil {
 		return err
 	}
@@ -281,12 +283,13 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
-	ddOpStr, err := EncodeDdOperation(&ddReq, nil, DropCollectionDDType)
-	if err != nil {
-		return err
+	ddOp := func(ts typeutil.Timestamp) (string, error) {
+		//TODO,NEZA2017
+		//ddReq.Base.Timestamp = ts
+		return EncodeDdOperation(&ddReq, nil, DropCollectionDDType)
 	}
 
-	_, err = t.core.MetaTable.DeleteCollection(collMeta.ID, ddOpStr)
+	_, err = t.core.MetaTable.DeleteCollection(collMeta.ID, ddOp)
 	if err != nil {
 		return err
 	}
@@ -481,12 +484,13 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
-	ddOpStr, err := EncodeDdOperation(&ddReq, nil, CreatePartitionDDType)
-	if err != nil {
-		return err
+	ddOp := func(ts typeutil.Timestamp) (string, error) {
+		//TODO,NEZA2017
+		//ddReq.Base.Timestamp = ts
+		return EncodeDdOperation(&ddReq, nil, CreatePartitionDDType)
 	}
 
-	_, err = t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, ddOpStr)
+	_, err = t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, ddOp)
 	if err != nil {
 		return err
 	}
@@ -549,12 +553,13 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
-	ddOpStr, err := EncodeDdOperation(&ddReq, nil, DropPartitionDDType)
-	if err != nil {
-		return err
+	ddOp := func(ts typeutil.Timestamp) (string, error) {
+		//TODO,NEZA2017
+		//ddReq.Base.Timestamp = ts
+		return EncodeDdOperation(&ddReq, nil, DropPartitionDDType)
 	}
 
-	_, _, err = t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, ddOpStr)
+	_, _, err = t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, ddOp)
 	if err != nil {
 		return err
 	}

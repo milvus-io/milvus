@@ -208,6 +208,20 @@ func (mt *metaTable) reloadFromKV() error {
 	return nil
 }
 
+func (mt *metaTable) getAdditionKV(op func(ts typeutil.Timestamp) (string, error), meta map[string]string) func(ts typeutil.Timestamp) (string, string, error) {
+	if op == nil {
+		return nil
+	}
+	meta[DDMsgSendPrefix] = "false"
+	return func(ts typeutil.Timestamp) (string, string, error) {
+		val, err := op(ts)
+		if err != nil {
+			return "", "", err
+		}
+		return DDOperationPrefix, val, nil
+	}
+}
+
 func (mt *metaTable) AddTenant(te *pb.TenantMeta) (typeutil.Timestamp, error) {
 	mt.tenantLock.Lock()
 	defer mt.tenantLock.Unlock()
@@ -238,7 +252,7 @@ func (mt *metaTable) AddProxy(po *pb.ProxyMeta) (typeutil.Timestamp, error) {
 	return ts, nil
 }
 
-func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo, idx []*pb.IndexInfo, ddOpStr string) (typeutil.Timestamp, error) {
+func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo, idx []*pb.IndexInfo, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -285,10 +299,8 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 	}
 
 	// save ddOpStr into etcd
-	meta[DDOperationPrefix] = ddOpStr
-	meta[DDMsgSendPrefix] = "false"
-
-	ts, err := mt.client.MultiSave(meta)
+	addition := mt.getAdditionKV(ddOpStr, meta)
+	ts, err := mt.client.MultiSave(meta, addition)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return 0, err
@@ -297,7 +309,7 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 	return ts, nil
 }
 
-func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr string) (typeutil.Timestamp, error) {
+func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -349,12 +361,9 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr string) 
 	}
 
 	// save ddOpStr into etcd
-	var saveMeta = map[string]string{
-		DDOperationPrefix: ddOpStr,
-		DDMsgSendPrefix:   "false",
-	}
-
-	ts, err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys)
+	var saveMeta = map[string]string{}
+	addition := mt.getAdditionKV(ddOpStr, saveMeta)
+	ts, err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys, addition)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return 0, err
@@ -478,7 +487,7 @@ func (mt *metaTable) ListCollections(ts typeutil.Timestamp) ([]string, error) {
 	return colls, nil
 }
 
-func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, ddOpStr string) (typeutil.Timestamp, error) {
+func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	coll, ok := mt.collID2Meta[collID]
@@ -520,10 +529,9 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	meta := map[string]string{k1: v1, k2: v2}
 
 	// save ddOpStr into etcd
-	meta[DDOperationPrefix] = ddOpStr
-	meta[DDMsgSendPrefix] = "false"
+	addition := mt.getAdditionKV(ddOpStr, meta)
 
-	ts, err := mt.client.MultiSave(meta)
+	ts, err := mt.client.MultiSave(meta, addition)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return 0, err
@@ -589,7 +597,7 @@ func (mt *metaTable) HasPartition(collID typeutil.UniqueID, partitionName string
 }
 
 //return timestamp, partitionid, error
-func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, ddOpStr string) (typeutil.Timestamp, typeutil.UniqueID, error) {
+func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, typeutil.UniqueID, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -647,10 +655,9 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	}
 
 	// save ddOpStr into etcd
-	meta[DDOperationPrefix] = ddOpStr
-	meta[DDMsgSendPrefix] = "false"
+	addition := mt.getAdditionKV(ddOpStr, meta)
 
-	ts, err := mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetaKeys)
+	ts, err := mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetaKeys, addition)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return 0, 0, err
@@ -856,7 +863,7 @@ func (mt *metaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 		fmt.Sprintf("%s/%d/%d", IndexMetaPrefix, collMeta.ID, dropIdxID),
 	}
 
-	ts, err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMeta)
+	ts, err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMeta, nil)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return 0, 0, false, err
@@ -1035,7 +1042,7 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 			meta[k] = v
 		}
 
-		_, err = mt.client.MultiSave(meta)
+		_, err = mt.client.MultiSave(meta, nil)
 		if err != nil {
 			_ = mt.reloadFromKV()
 			return nil, schemapb.FieldSchema{}, err
@@ -1058,7 +1065,7 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 				meta[k] = v
 			}
 
-			_, err = mt.client.MultiSave(meta)
+			_, err = mt.client.MultiSave(meta, nil)
 			if err != nil {
 				_ = mt.reloadFromKV()
 				return nil, schemapb.FieldSchema{}, err
