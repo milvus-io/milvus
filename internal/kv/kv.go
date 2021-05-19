@@ -11,6 +11,10 @@
 
 package kv
 
+import (
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+)
+
 type BaseKV interface {
 	Load(key string) (string, error)
 	MultiLoad(keys []string) ([]string, error)
@@ -29,4 +33,12 @@ type TxnKV interface {
 	MultiSaveAndRemove(saves map[string]string, removals []string) error
 	MultiRemoveWithPrefix(keys []string) error
 	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error
+}
+
+type SnapShotKV interface {
+	Save(key, value string) (typeutil.Timestamp, error)
+	Load(key string, ts typeutil.Timestamp) (string, error)
+	MultiSave(kvs map[string]string) (typeutil.Timestamp, error)
+	LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error)
+	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) (typeutil.Timestamp, error)
 }

@@ -13,6 +13,7 @@ package dataservice
 import (
 	"context"
 	"math"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -484,6 +485,177 @@ func TestChannel(t *testing.T) {
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 	})
+}
+
+func TestResumeChannel(t *testing.T) {
+	Params.Init()
+
+	segmentIDs := make([]int64, 0, 1000)
+
+	t.Run("Prepare Resume test set", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer svr.Stop()
+
+		i := int64(-1)
+		cnt := 0
+		for ; cnt < 1000; i-- {
+			svr.meta.RLock()
+			_, has := svr.meta.segments[i]
+			svr.meta.RUnlock()
+			if has {
+				continue
+			}
+			err := svr.meta.AddSegment(&datapb.SegmentInfo{
+				ID:           i,
+				CollectionID: -1,
+			})
+			assert.Nil(t, err)
+			segmentIDs = append(segmentIDs, i)
+			cnt++
+		}
+	})
+
+	t.Run("Test ResumeSegmentStatsChannel", func(t *testing.T) {
+		svr := newTestServer(t)
+
+		segRows := rand.Int63n(1000)
+
+		statsStream, _ := svr.msFactory.NewMsgStream(svr.ctx)
+		statsStream.AsProducer([]string{Params.StatisticsChannelName})
+		statsStream.Start()
+		defer statsStream.Close()
+
+		genMsg := func(msgType commonpb.MsgType, t Timestamp, stats *internalpb.SegmentStatisticsUpdates) *msgstream.SegmentStatisticsMsg {
+			return &msgstream.SegmentStatisticsMsg{
+				BaseMsg: msgstream.BaseMsg{
+					HashValues: []uint32{0},
+				},
+				SegmentStatistics: internalpb.SegmentStatistics{
+					Base: &commonpb.MsgBase{
+						MsgType:   msgType,
+						MsgID:     0,
+						Timestamp: t,
+						SourceID:  0,
+					},
+					SegStats: []*internalpb.SegmentStatisticsUpdates{stats},
+				},
+			}
+		}
+		ch := make(chan struct{})
+
+		go func() {
+			for _, segID := range segmentIDs {
+				stats := &internalpb.SegmentStatisticsUpdates{
+					SegmentID: segID,
+					NumRows:   segRows,
+				}
+
+				msgPack := msgstream.MsgPack{}
+				msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentStatistics, uint64(time.Now().Unix()), stats))
+
+				err := statsStream.Produce(&msgPack)
+				assert.Nil(t, err)
+				time.Sleep(time.Millisecond * 5)
+			}
+			ch <- struct{}{}
+		}()
+
+		time.Sleep(time.Second)
+
+		svr.Stop()
+		time.Sleep(time.Millisecond * 50)
+
+		svr = newTestServer(t)
+		defer svr.Stop()
+		<-ch
+
+		//wait for Server processing last messages
+		time.Sleep(time.Second)
+
+		svr.meta.RLock()
+		defer svr.meta.RUnlock()
+		for _, segID := range segmentIDs {
+			seg, has := svr.meta.segments[segID]
+			assert.True(t, has)
+			if has {
+				assert.Equal(t, segRows, seg.NumRows)
+			}
+		}
+	})
+
+	t.Run("Test ResumeSegmentFlushChannel", func(t *testing.T) {
+		genMsg := func(msgType commonpb.MsgType, t Timestamp, segID int64) *msgstream.FlushCompletedMsg {
+			return &msgstream.FlushCompletedMsg{
+				BaseMsg: msgstream.BaseMsg{
+					HashValues: []uint32{0},
+				},
+				SegmentFlushCompletedMsg: internalpb.SegmentFlushCompletedMsg{
+					Base: &commonpb.MsgBase{
+						MsgType:   msgType,
+						MsgID:     0,
+						Timestamp: t,
+						SourceID:  0,
+					},
+					SegmentID: segID,
+				},
+			}
+		}
+		svr := newTestServer(t)
+
+		ch := make(chan struct{})
+
+		segInfoStream, _ := svr.msFactory.NewMsgStream(svr.ctx)
+		segInfoStream.AsProducer([]string{Params.SegmentInfoChannelName})
+		segInfoStream.Start()
+		defer segInfoStream.Close()
+		go func() {
+			for _, segID := range segmentIDs {
+
+				msgPack := msgstream.MsgPack{}
+				msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentFlushDone, uint64(time.Now().Unix()), segID))
+
+				err := segInfoStream.Produce(&msgPack)
+				assert.Nil(t, err)
+				time.Sleep(time.Millisecond * 5)
+			}
+			ch <- struct{}{}
+		}()
+
+		time.Sleep(time.Millisecond * 50)
+		//stop current server, simulating server quit
+		svr.Stop()
+
+		time.Sleep(time.Second)
+		// start new test server as restarting
+		svr = newTestServer(t)
+		defer svr.Stop()
+		<-ch
+
+		//wait for Server processing last messages
+		time.Sleep(time.Second)
+
+		//ASSERT PART
+		svr.meta.RLock()
+		defer svr.meta.RUnlock()
+		for _, segID := range segmentIDs {
+			seg, has := svr.meta.segments[segID]
+			assert.True(t, has)
+			if has {
+				assert.Equal(t, seg.State, commonpb.SegmentState_Flushed)
+			}
+		}
+	})
+
+	t.Run("Clean up test segments", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+		var err error
+		for _, segID := range segmentIDs {
+			err = svr.meta.DropSegment(segID)
+			assert.Nil(t, err)
+		}
+	})
+
 }
 
 func newTestServer(t *testing.T) *Server {

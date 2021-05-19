@@ -31,7 +31,6 @@ type ParamTable struct {
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
 	FlushInsertBufferSize   int32
-	FlushDdBufferSize       int32
 	InsertBinlogRootPath    string
 	DdlBinlogRootPath       string
 	Log                     log.Config
@@ -61,8 +60,8 @@ type ParamTable struct {
 	// --- ETCD ---
 	EtcdAddress         string
 	MetaRootPath        string
-	SegFlushMetaSubPath string
-	DDLFlushMetaSubPath string
+	SegFlushMetaSubPath string // GOOSE TODO remove
+	DDLFlushMetaSubPath string // GOOSE TODO remove
 
 	// --- MinIO ---
 	MinioAddress         string
@@ -88,7 +87,6 @@ func (p *ParamTable) Init() {
 		p.initFlowGraphMaxQueueLength()
 		p.initFlowGraphMaxParallelism()
 		p.initFlushInsertBufferSize()
-		p.initFlushDdBufferSize()
 		p.initInsertBinlogRootPath()
 		p.initDdlBinlogRootPath()
 		p.initLogCfg()
@@ -109,8 +107,8 @@ func (p *ParamTable) Init() {
 		// --- ETCD ---
 		p.initEtcdAddress()
 		p.initMetaRootPath()
-		p.initSegFlushMetaSubPath()
-		p.initDDLFlushMetaSubPath()
+		p.initSegFlushMetaSubPath() // GOOSE TODO remove
+		p.initDDLFlushMetaSubPath() // GOOSE TODO remove
 
 		// --- MinIO ---
 		p.initMinioAddress()
@@ -148,10 +146,6 @@ func (p *ParamTable) initFlowGraphMaxParallelism() {
 // ---- flush configs ----
 func (p *ParamTable) initFlushInsertBufferSize() {
 	p.FlushInsertBufferSize = p.ParseInt32("datanode.flush.insertBufSize")
-}
-
-func (p *ParamTable) initFlushDdBufferSize() {
-	p.FlushDdBufferSize = p.ParseInt32("datanode.flush.ddBufSize")
 }
 
 func (p *ParamTable) initInsertBinlogRootPath() {
@@ -220,6 +214,7 @@ func (p *ParamTable) initMetaRootPath() {
 	p.MetaRootPath = path.Join(rootPath, subPath)
 }
 
+// GOOSE TODO remove
 func (p *ParamTable) initSegFlushMetaSubPath() {
 	subPath, err := p.Load("etcd.segFlushMetaSubPath")
 	if err != nil {
@@ -228,6 +223,7 @@ func (p *ParamTable) initSegFlushMetaSubPath() {
 	p.SegFlushMetaSubPath = subPath
 }
 
+// GOOSE TODO remove
 func (p *ParamTable) initDDLFlushMetaSubPath() {
 	subPath, err := p.Load("etcd.ddlFlushMetaSubPath")
 	if err != nil {

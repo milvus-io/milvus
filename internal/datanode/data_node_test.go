@@ -21,10 +21,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
-func TestDataNode(t *testing.T) {
+func TestMain(t *testing.M) {
 	Params.Init()
 	refreshChannelNames()
+}
 
+func TestDataNode(t *testing.T) {
 	node := newDataNodeMock()
 	node.Start()
 

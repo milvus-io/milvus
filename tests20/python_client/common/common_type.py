@@ -22,6 +22,12 @@ default_partition_name = "_default"
 default_tag = "1970_01_01"
 row_count = "row_count"
 default_collection_desc = "default collection"
+default_binary_desc = "default binary collection"
+collection_desc = "collection"
+int_field_desc = "int64 type field"
+float_field_desc = "float type field"
+float_vec_field_desc = "float vector type field"
+binary_vec_field_desc = "binary vector type field"
 
 
 """" List of parameters used to pass """

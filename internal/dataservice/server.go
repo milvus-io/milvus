@@ -12,7 +12,6 @@ package dataservice
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -65,12 +64,7 @@ type Server struct {
 	masterClient     types.MasterService
 	ttMsgStream      msgstream.MsgStream
 	k2sMsgStream     msgstream.MsgStream
-	session          struct {
-		NodeName string
-		IP       string
-		LeaseID  clientv3.LeaseID
-	}
-	ddChannelMu struct {
+	ddChannelMu      struct {
 		sync.Mutex
 		name string
 	}
@@ -110,21 +104,6 @@ func (s *Server) SetMasterClient(masterClient types.MasterService) {
 }
 
 func (s *Server) Init() error {
-	if err := s.initMeta(); err != nil {
-		return err
-	}
-
-	ch, err := s.registerService(fmt.Sprintf("dataservice-%d", Params.NodeID), "localhost:123456")
-	if err != nil {
-		return err
-	}
-	go func() {
-		for {
-			for range ch {
-				//TODO process lesase response
-			}
-		}
-	}()
 	return nil
 }
 
@@ -136,6 +115,10 @@ func (s *Server) Start() error {
 		"PulsarBufSize":  1024}
 	err = s.msFactory.SetParams(m)
 	if err != nil {
+		return err
+	}
+
+	if err := s.initMeta(); err != nil {
 		return err
 	}
 
@@ -332,6 +315,17 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 	statsStream, _ := s.msFactory.NewMsgStream(ctx)
 	statsStream.AsConsumer([]string{Params.StatisticsChannelName}, Params.DataServiceSubscriptionName)
 	log.Debug("dataservice AsConsumer: " + Params.StatisticsChannelName + " : " + Params.DataServiceSubscriptionName)
+	// try to restore last processed pos
+	pos, err := s.loadStreamLastPos(streamTypeStats)
+	if err == nil {
+		err = statsStream.Seek(pos)
+		if err != nil {
+			log.Error("Failed to seek to last pos for statsStream",
+				zap.String("StatisChanName", Params.StatisticsChannelName),
+				zap.String("DataServiceSubscriptionName", Params.DataServiceSubscriptionName),
+				zap.Error(err))
+		}
+	}
 	statsStream.Start()
 	defer statsStream.Close()
 	for {
@@ -356,6 +350,16 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 					continue
 				}
 			}
+			if ssMsg.MsgPosition != nil {
+				err := s.storeStreamPos(streamTypeStats, ssMsg.MsgPosition)
+				if err != nil {
+					log.Error("Fail to store current success pos for Stats stream",
+						zap.Stringer("pos", ssMsg.MsgPosition),
+						zap.Error(err))
+				}
+			} else {
+				log.Warn("Empty Msg Pos found ", zap.Int64("msgid", msg.ID()))
+			}
 		}
 	}
 }
@@ -366,6 +370,19 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 	flushStream, _ := s.msFactory.NewMsgStream(ctx)
 	flushStream.AsConsumer([]string{Params.SegmentInfoChannelName}, Params.DataServiceSubscriptionName)
 	log.Debug("dataservice AsConsumer: " + Params.SegmentInfoChannelName + " : " + Params.DataServiceSubscriptionName)
+
+	// try to restore last processed pos
+	pos, err := s.loadStreamLastPos(streamTypeFlush)
+	if err == nil {
+		err = flushStream.Seek(pos)
+		if err != nil {
+			log.Error("Failed to seek to last pos for segment flush Stream",
+				zap.String("SegInfoChannelName", Params.SegmentInfoChannelName),
+				zap.String("DataServiceSubscriptionName", Params.DataServiceSubscriptionName),
+				zap.Error(err))
+		}
+	}
+
 	flushStream.Start()
 	defer flushStream.Close()
 	for {
@@ -390,6 +407,17 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 			if err != nil {
 				log.Error("get segment from meta error", zap.Int64("segmentID", fcMsg.SegmentID), zap.Error(err))
 				continue
+			}
+
+			if fcMsg.MsgPosition != nil {
+				err = s.storeStreamPos(streamTypeFlush, fcMsg.MsgPosition)
+				if err != nil {
+					log.Error("Fail to store current success pos for segment flush stream",
+						zap.Stringer("pos", fcMsg.MsgPosition),
+						zap.Error(err))
+				}
+			} else {
+				log.Warn("Empty Msg Pos found ", zap.Int64("msgid", msg.ID()))
 			}
 		}
 	}
@@ -854,34 +882,4 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.Infos = infos
 	return resp, nil
-}
-
-func (s *Server) registerService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
-	respID, err := s.kvClient.Grant(5)
-	if err != nil {
-		fmt.Printf("grant error %s\n", err)
-		return nil, err
-	}
-	s.session.NodeName = nodeName
-	s.session.IP = ip
-	s.session.LeaseID = respID
-
-	sessionJSON, err := json.Marshal(s.session)
-	if err != nil {
-		return nil, err
-	}
-
-	err = s.kvClient.SaveWithLease(fmt.Sprintf("/node/%s", nodeName), string(sessionJSON), respID)
-	if err != nil {
-		fmt.Printf("put lease error %s\n", err)
-		return nil, err
-	}
-
-	ch, err := s.kvClient.KeepAlive(respID)
-	if err != nil {
-		fmt.Printf("keep alive error %s\n", err)
-		return nil, err
-	}
-	return ch, nil
-
 }

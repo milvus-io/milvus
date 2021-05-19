@@ -138,6 +138,24 @@ func TestReplica_Segment(t *testing.T) {
 		assert.NotNil(t, update.StartPosition)
 		assert.Nil(t, update.EndPosition)
 
+		f2p := map[UniqueID]string{
+			1: "a",
+			2: "b",
+		}
+
+		err = replica.bufferAutoFlushBinlogPaths(UniqueID(0), f2p)
+		assert.NoError(t, err)
+		r, err := replica.getBufferPaths(0)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []string{"a"}, r[1])
+		assert.ElementsMatch(t, []string{"b"}, r[2])
+		err = replica.bufferAutoFlushBinlogPaths(UniqueID(0), f2p)
+		assert.NoError(t, err)
+		r, err = replica.getBufferPaths(0)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []string{"a", "a"}, r[1])
+		assert.ElementsMatch(t, []string{"b", "b"}, r[2])
+
 		err = replica.setIsFlushed(0)
 		assert.NoError(t, err)
 		err = replica.setStartPosition(0, &internalpb.MsgPosition{})

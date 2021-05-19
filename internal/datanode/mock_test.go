@@ -17,6 +17,7 @@ import (
 	"encoding/binary"
 	"math"
 	"math/rand"
+	"path"
 	"strconv"
 	"sync"
 	"time"
@@ -111,6 +112,7 @@ func newBinlogMeta() *binlogMeta {
 
 func clearEtcd(rootPath string) error {
 	etcdAddr := Params.EtcdAddress
+	log.Info("etcd tests address", zap.String("address", etcdAddr))
 	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	if err != nil {
 		return err
@@ -421,6 +423,8 @@ type AllocatorFactory struct {
 	r *rand.Rand
 }
 
+var _ allocatorInterface = &AllocatorFactory{}
+
 func NewAllocatorFactory(id ...UniqueID) *AllocatorFactory {
 	f := &AllocatorFactory{
 		r: rand.New(rand.NewSource(time.Now().UnixNano())),
@@ -433,6 +437,24 @@ func (alloc *AllocatorFactory) allocID() (UniqueID, error) {
 	alloc.Lock()
 	defer alloc.Unlock()
 	return alloc.r.Int63n(1000000), nil
+}
+
+func (alloc *AllocatorFactory) genKey(isalloc bool, ids ...UniqueID) (key string, err error) {
+	if isalloc {
+		idx, err := alloc.allocID()
+		if err != nil {
+			return "", err
+		}
+		ids = append(ids, idx)
+	}
+
+	idStr := make([]string, len(ids))
+	for _, id := range ids {
+		idStr = append(idStr, strconv.FormatInt(id, 10))
+	}
+
+	key = path.Join(idStr...)
+	return
 }
 
 func (m *MasterServiceFactory) setID(id UniqueID) {
