@@ -90,7 +90,7 @@ func (s *Server) init() error {
 
 	dataservice.Params.Init()
 
-	self := sessionutil.NewSession("dataService", funcutil.GetLocalIP()+":"+strconv.Itoa(Params.Port), true)
+	self := sessionutil.NewSession("dataservice", funcutil.GetLocalIP()+":"+strconv.Itoa(Params.Port), true)
 	sm := sessionutil.NewSessionManager(ctx, dataservice.Params.EtcdAddress, dataservice.Params.MetaRootPath, self)
 	sm.Init()
 	sessionutil.SetGlobalSessionManager(sm)
