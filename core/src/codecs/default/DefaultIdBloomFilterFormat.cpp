@@ -114,7 +114,6 @@ DefaultIdBloomFilterFormat::write(const storage::FSHandlerPtr& fs_ptr,
     fs_ptr->writer_ptr_->write(&bloom_filter->bitmap->bytes, sizeof(bloom_filter->bitmap->bytes));
     fs_ptr->writer_ptr_->write(bloom_filter->bitmap->array, bloom_filter->bitmap->bytes);
     fs_ptr->writer_ptr_->close();
-    fs_ptr->operation_ptr_->CachePut(bloom_filter_file_path);
 }
 
 void
