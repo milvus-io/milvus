@@ -53,6 +53,10 @@ import (
 //  milvuspb -> milvuspb
 //  masterpb2 -> masterpb (master_service)
 
+//NEZA2017, DEBUG FLAG for milvus 2.0, this part should remove when milvus 2.0 release
+
+var SetDDTimeTimeByMaster bool = false
+
 // ------------------ struct -----------------------
 
 // DdOperation used to save ddMsg into ETCD
@@ -134,7 +138,8 @@ type Core struct {
 	lastDdTimeStamp typeutil.Timestamp
 
 	//time tick loop
-	lastTimeTick typeutil.Timestamp
+	lastTimeTick   typeutil.Timestamp
+	ddTimeTickChan chan typeutil.Timestamp
 
 	//states code
 	stateCode atomic.Value
@@ -262,23 +267,56 @@ func (c *Core) startDdScheduler() {
 }
 
 func (c *Core) startTimeTickLoop() {
-	for {
-		select {
-		case <-c.ctx.Done():
-			log.Debug("close master time tick loop")
-			return
-		case tt, ok := <-c.ProxyTimeTickChan:
-			if !ok {
-				log.Warn("proxyTimeTickStream is closed, exit time tick loop")
+	if SetDDTimeTimeByMaster {
+		ticker := time.NewTimer(time.Duration(Params.TimeTickInterval) * time.Millisecond)
+		for {
+			select {
+			case <-c.ctx.Done():
+				log.Debug("master context closed", zap.Error(c.ctx.Err()))
 				return
+			case ts, ok := <-c.ddTimeTickChan:
+				if !ok {
+					log.Debug("master dd timetick chan closed")
+					return
+				}
+				if ts > c.lastTimeTick {
+					if err := c.SendTimeTick(ts); err != nil {
+						log.Warn("master send time tick into dd and time_tick channel failed", zap.String("error", err.Error()))
+					} else {
+						c.lastTimeTick = ts
+					}
+				}
+			case <-ticker.C:
+				ts, err := c.tsoAllocator(1)
+				if err == nil && ts > c.lastTimeTick {
+					if err := c.SendTimeTick(ts); err != nil {
+						log.Warn("master send time tick into dd and time_tick channel failed", zap.String("error", err.Error()))
+					} else {
+						c.lastTimeTick = ts
+					}
+
+				}
 			}
-			if tt <= c.lastTimeTick {
-				log.Warn("master time tick go back", zap.Uint64("last time tick", c.lastTimeTick), zap.Uint64("input time tick ", tt))
+		}
+	} else {
+		for {
+			select {
+			case <-c.ctx.Done():
+				log.Debug("close master time tick loop")
+				return
+			case tt, ok := <-c.ProxyTimeTickChan:
+				if !ok {
+					log.Warn("proxyTimeTickStream is closed, exit time tick loop")
+					return
+				}
+				if tt <= c.lastTimeTick {
+					log.Warn("master time tick go back", zap.Uint64("last time tick", c.lastTimeTick), zap.Uint64("input time tick ", tt))
+				}
+				if err := c.SendTimeTick(tt); err != nil {
+					log.Warn("master send time tick into dd and time_tick channel failed", zap.String("error", err.Error()))
+				}
+				c.lastTimeTick = tt
 			}
-			if err := c.SendTimeTick(tt); err != nil {
-				log.Warn("master send time tick into dd and time_tick channel failed", zap.String("error", err.Error()))
-			}
-			c.lastTimeTick = tt
 		}
 	}
 }
@@ -861,6 +899,7 @@ func (c *Core) Init() error {
 		}
 
 		c.ddReqQueue = make(chan reqTask, 1024)
+		c.ddTimeTickChan = make(chan typeutil.Timestamp, 8)
 		initError = c.setMsgStreams()
 	})
 	if initError == nil {
