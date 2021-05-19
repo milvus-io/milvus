@@ -938,33 +938,3 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	resp.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }
-
-func (s *Server) registerService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
-	respID, err := s.kvClient.Grant(5)
-	if err != nil {
-		fmt.Printf("grant error %s\n", err)
-		return nil, err
-	}
-	s.session.NodeName = nodeName
-	s.session.IP = ip
-	s.session.LeaseID = respID
-
-	sessionJSON, err := json.Marshal(s.session)
-	if err != nil {
-		return nil, err
-	}
-
-	err = s.kvClient.SaveWithLease(fmt.Sprintf("/node/%s", nodeName), string(sessionJSON), respID)
-	if err != nil {
-		fmt.Printf("put lease error %s\n", err)
-		return nil, err
-	}
-
-	ch, err := s.kvClient.KeepAlive(respID)
-	if err != nil {
-		fmt.Printf("keep alive error %s\n", err)
-		return nil, err
-	}
-	return ch, nil
-
-}
