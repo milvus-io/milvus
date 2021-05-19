@@ -861,13 +861,6 @@ func TestRun(t *testing.T) {
 	randVal := rand.Int()
 	cms.Params.Init()
 	cms.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
-	cms.Params.KvRootPath = fmt.Sprintf("/%d/test/kv", randVal)
-	cms.Params.ProxyTimeTickChannel = fmt.Sprintf("proxyTimeTick%d", randVal)
-	cms.Params.MsgChannelSubName = fmt.Sprintf("msgChannel%d", randVal)
-	cms.Params.TimeTickChannel = fmt.Sprintf("timeTick%d", randVal)
-	cms.Params.DdChannel = fmt.Sprintf("ddChannel%d", randVal)
-	cms.Params.StatisticsChannel = fmt.Sprintf("stateChannel%d", randVal)
-	cms.Params.DataServiceSegmentChannel = fmt.Sprintf("segmentChannel%d", randVal)
 
 	err = svr.Run()
 	assert.Nil(t, err)
