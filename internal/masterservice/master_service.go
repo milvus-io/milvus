@@ -145,12 +145,6 @@ type Core struct {
 	//isInit    atomic.Value
 
 	msFactory ms.Factory
-
-	session struct {
-		NodeName string
-		IP       string
-		LeaseID  clientv3.LeaseID
-	}
 }
 
 // --------------------- function --------------------------
@@ -843,19 +837,6 @@ func (c *Core) Init() error {
 		if err != nil {
 			return
 		}
-
-		ch, err := c.registerService("masterservice", "localhost")
-		if err != nil {
-			return
-		}
-
-		go func() {
-			for {
-				for range ch {
-					//TODO process lesase response
-				}
-			}
-		}()
 
 		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{Params.EtcdAddress}, Params.KvRootPath, "gid"))
 		if initError = idAllocator.Initialize(); initError != nil {
@@ -1648,35 +1629,4 @@ func (c *Core) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*maste
 		ID:    start,
 		Count: in.Count,
 	}, nil
-}
-
-func (c *Core) registerService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
-	respID, err := c.etcdCli.Grant(c.ctx, 5)
-	if err != nil {
-		fmt.Printf("grant error %s\n", err)
-		return nil, err
-	}
-	c.session.NodeName = nodeName
-	c.session.IP = ip
-	c.session.LeaseID = respID.ID
-
-	sessionJSON, err := json.Marshal(c.session)
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(c.ctx, RequestTimeout)
-	defer cancel()
-
-	_, err = c.etcdCli.Put(ctx, fmt.Sprintf("%s/node/%s", Params.MetaRootPath, nodeName), string(sessionJSON), clientv3.WithLease(respID.ID))
-	if err != nil {
-		fmt.Printf("put lease error %s\n", err)
-		return nil, err
-	}
-
-	ch, err := c.etcdCli.KeepAlive(c.ctx, respID.ID)
-	if err != nil {
-		fmt.Printf("keep alive error %s\n", err)
-		return nil, err
-	}
-	return ch, nil
 }
