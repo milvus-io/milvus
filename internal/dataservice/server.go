@@ -8,11 +8,11 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
+
 package dataservice
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -65,12 +65,7 @@ type Server struct {
 	masterClient     types.MasterService
 	ttMsgStream      msgstream.MsgStream
 	k2sMsgStream     msgstream.MsgStream
-	session          struct {
-		NodeName string
-		IP       string
-		LeaseID  clientv3.LeaseID
-	}
-	ddChannelMu struct {
+	ddChannelMu      struct {
 		sync.Mutex
 		name string
 	}
@@ -110,21 +105,6 @@ func (s *Server) SetMasterClient(masterClient types.MasterService) {
 }
 
 func (s *Server) Init() error {
-	if err := s.initMeta(); err != nil {
-		return err
-	}
-
-	ch, err := s.registerService(fmt.Sprintf("dataservice-%d", Params.NodeID), "localhost:123456")
-	if err != nil {
-		return err
-	}
-	go func() {
-		for {
-			for range ch {
-				//TODO process lesase response
-			}
-		}
-	}()
 	return nil
 }
 
@@ -136,6 +116,10 @@ func (s *Server) Start() error {
 		"PulsarBufSize":  1024}
 	err = s.msFactory.SetParams(m)
 	if err != nil {
+		return err
+	}
+
+	if err := s.initMeta(); err != nil {
 		return err
 	}
 
