@@ -1169,6 +1169,10 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 	return qt.result, nil
 }
 
+func (node *ProxyNode) Retrieve(ctx context.Context, request *milvuspb.RetrieveRequest) (*milvuspb.RetrieveResults, error) {
+	return nil, nil
+}
+
 func (node *ProxyNode) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error) {
 	ft := &FlushTask{
 		ctx:          ctx,

@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	otgrpc "github.com/opentracing-contrib/go-grpc"
@@ -64,11 +65,17 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) init() error {
+	ctx := context.Background()
 	Params.Init()
 	indexservice.Params.Init()
 
 	closer := trace.InitTracing("index_service")
 	s.closer = closer
+
+	self := sessionutil.NewSession("indexservice", funcutil.GetLocalIP()+":"+strconv.Itoa(Params.ServicePort), true)
+	sm := sessionutil.NewSessionManager(ctx, indexservice.Params.EtcdAddress, indexservice.Params.MetaRootPath, self)
+	sm.Init()
+	sessionutil.SetGlobalSessionManager(sm)
 
 	s.loopWg.Add(1)
 	go s.startGrpcLoop(Params.ServicePort)

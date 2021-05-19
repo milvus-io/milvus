@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proxynode"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
 )
@@ -163,6 +164,11 @@ func (s *Server) init() error {
 			}
 		}
 	}()
+
+	self := sessionutil.NewSession("proxynode", funcutil.GetLocalIP()+":"+strconv.Itoa(Params.Port), false)
+	sm := sessionutil.NewSessionManager(ctx, proxynode.Params.EtcdAddress, proxynode.Params.MetaRootPath, self)
+	sm.Init()
+	sessionutil.SetGlobalSessionManager(sm)
 
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
@@ -371,6 +377,10 @@ func (s *Server) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*
 
 func (s *Server) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	return s.proxynode.Search(ctx, request)
+}
+
+func (s *Server) Retrieve(ctx context.Context, request *milvuspb.RetrieveRequest) (*milvuspb.RetrieveResults, error) {
+	return s.proxynode.Retrieve(ctx, request)
 }
 
 func (s *Server) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error) {

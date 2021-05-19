@@ -14,7 +14,7 @@
 if ( DEFINED ENV{MILVUS_GTEST_URL} )
     set( GTEST_SOURCE_URL "$ENV{MILVUS_GTEST_URL}" )
 else()
-    set( GTEST_SOURCE_URL "https://gitee.com/quicksilver/googletest/repository/archive/release-${GTEST_VERSION}.zip" )
+    set( GTEST_SOURCE_URL "https://github.com/google/googletest/archive/release-${GTEST_VERSION}.zip" )
 endif()
 
 message( STATUS "Building gtest-${GTEST_VERSION} from source" )
@@ -24,7 +24,7 @@ set( CMAKE_POLICY_DEFAULT_CMP0022 NEW ) # for googletest only
 FetchContent_Declare(
         googletest
         URL             ${GTEST_SOURCE_URL} 
-        URL_MD5         "f9137c5bc18b7d74027936f0f1bfa5c8"
+        URL_MD5         "ad6868782b5952b7476a7c1c72d5a714"
         SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/googletest-src
         BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/googletest-build
         DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH} )
