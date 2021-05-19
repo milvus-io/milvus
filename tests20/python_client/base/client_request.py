@@ -103,7 +103,7 @@ class ApiReq(Base):
         res = self.connection.create_connection(alias='default')
         return res
 
-    def _collection(self, name=get_unique_str, data=None, schema=None, check_res=None, **kwargs):
+    def _collection(self, name=gen_unique_str(), data=None, schema=None, check_res=None, **kwargs):
         """ Testing func """
         self._connect()
         res = self.collection.collection_init(name=name, data=data, schema=schema, check_res=check_res, **kwargs)
