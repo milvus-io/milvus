@@ -1671,3 +1671,11 @@ func (c *Core) registerService(nodeName string, ip string) (<-chan *clientv3.Lea
 	}
 	return ch, nil
 }
+
+func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
+	c.chanTimeTick.UpdateTimeTick(in)
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
