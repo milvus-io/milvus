@@ -112,6 +112,8 @@ enum MsgType {
     GetIndexBuildProgress = 503;
     GetCollectionStatistics = 504;
     GetPartitionStatistics = 505;
+    Retrieve = 506;
+    RetrieveResult = 507;
 
     /* DATA SERVICE */
     SegmentInfo = 600;

@@ -225,7 +225,7 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "StateNone\020\000\022\014\n\010Unissued\020\001\022\016\n\nInProgress\020"
   "\002\022\014\n\010Finished\020\003\022\n\n\006Failed\020\004*X\n\014SegmentSt"
   "ate\022\024\n\020SegmentStateNone\020\000\022\014\n\010NotExist\020\001\022"
-  "\013\n\007Growing\020\002\022\n\n\006Sealed\020\003\022\013\n\007Flushed\020\004*\226\006"
+  "\013\n\007Growing\020\002\022\n\n\006Sealed\020\003\022\013\n\007Flushed\020\004*\272\006"
   "\n\007MsgType\022\r\n\tUndefined\020\000\022\024\n\020CreateCollec"
   "tion\020d\022\022\n\016DropCollection\020e\022\021\n\rHasCollect"
   "ion\020f\022\026\n\022DescribeCollection\020g\022\023\n\017ShowCol"
@@ -241,14 +241,15 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "\013\n\006Search\020\364\003\022\021\n\014SearchResult\020\365\003\022\022\n\rGetIn"
   "dexState\020\366\003\022\032\n\025GetIndexBuildProgress\020\367\003\022"
   "\034\n\027GetCollectionStatistics\020\370\003\022\033\n\026GetPart"
-  "itionStatistics\020\371\003\022\020\n\013SegmentInfo\020\330\004\022\r\n\010"
-  "TimeTick\020\260\t\022\023\n\016QueryNodeStats\020\261\t\022\016\n\tLoad"
-  "Index\020\262\t\022\016\n\tRequestID\020\263\t\022\017\n\nRequestTSO\020\264"
-  "\t\022\024\n\017AllocateSegment\020\265\t\022\026\n\021SegmentStatis"
-  "tics\020\266\t\022\025\n\020SegmentFlushDone\020\267\t*\"\n\007DslTyp"
-  "e\022\007\n\003Dsl\020\000\022\016\n\nBoolExprV1\020\001B5Z3github.com"
-  "/milvus-io/milvus/internal/proto/commonp"
-  "bb\006proto3"
+  "itionStatistics\020\371\003\022\r\n\010Retrieve\020\372\003\022\023\n\016Ret"
+  "rieveResult\020\373\003\022\020\n\013SegmentInfo\020\330\004\022\r\n\010Time"
+  "Tick\020\260\t\022\023\n\016QueryNodeStats\020\261\t\022\016\n\tLoadInde"
+  "x\020\262\t\022\016\n\tRequestID\020\263\t\022\017\n\nRequestTSO\020\264\t\022\024\n"
+  "\017AllocateSegment\020\265\t\022\026\n\021SegmentStatistics"
+  "\020\266\t\022\025\n\020SegmentFlushDone\020\267\t*\"\n\007DslType\022\007\n"
+  "\003Dsl\020\000\022\016\n\nBoolExprV1\020\001B5Z3github.com/mil"
+  "vus-io/milvus/internal/proto/commonpbb\006p"
+  "roto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_common_2eproto_deps[1] = {
 };
@@ -263,7 +264,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_com
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_common_2eproto_once;
 static bool descriptor_table_common_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_common_2eproto = {
-  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 2009,
+  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 2045,
   &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 6, 0,
   schemas, file_default_instances, TableStruct_common_2eproto::offsets,
   file_level_metadata_common_2eproto, 6, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,
@@ -382,6 +383,8 @@ bool MsgType_IsValid(int value) {
     case 503:
     case 504:
     case 505:
+    case 506:
+    case 507:
     case 600:
     case 1200:
     case 1201:
