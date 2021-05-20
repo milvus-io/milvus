@@ -35,8 +35,8 @@ DiskOperation::CreateDirectory() {
     bool is_dir = boost::filesystem::is_directory(dir_path_);
     fiu_do_on("DiskOperation.CreateDirectory.is_directory", is_dir = false);
     if (!is_dir) {
-        auto ret = boost::filesystem::create_directory(dir_path_);
-        fiu_do_on("DiskOperation.CreateDirectory.create_directory", ret = false);
+        auto ret = boost::filesystem::create_directories(dir_path_);
+        fiu_do_on("DiskOperation.CreateDirectory.create_directories", ret = false);
         if (!ret) {
             std::string err_msg = "Failed to create directory: " + dir_path_;
             LOG_ENGINE_ERROR_ << err_msg;
