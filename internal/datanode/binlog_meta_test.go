@@ -107,29 +107,4 @@ func TestMetaTable_Basic(t *testing.T) {
 
 		assert.ElementsMatch(t, []string{"a", "b", "c", "aa", "bb", "cc"}, paths)
 	})
-
-	t.Run("TestBasic_SaveDDLBinlogMetaTxn", func(t *testing.T) {
-		collID := UniqueID(888888)
-		tsPath := "a/b/c"
-		ddlPath := "c/b/a"
-
-		err := meta.SaveDDLBinlogMetaTxn(collID, tsPath, ddlPath)
-		assert.NoError(t, err)
-
-		metas, err := meta.getDDLBinlogMete(collID)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(metas))
-		assert.Equal(t, "a/b/c", metas[0].GetTsBinlogPath())
-		assert.Equal(t, "c/b/a", metas[0].GetDdlBinlogPath())
-
-		err = meta.SaveDDLBinlogMetaTxn(collID, tsPath, ddlPath)
-		assert.NoError(t, err)
-
-		metas, err = meta.getDDLBinlogMete(collID)
-		assert.NoError(t, err)
-		assert.Equal(t, 2, len(metas))
-		assert.Equal(t, "a/b/c", metas[0].GetTsBinlogPath())
-		assert.Equal(t, "c/b/a", metas[0].GetDdlBinlogPath())
-	})
-
 }
