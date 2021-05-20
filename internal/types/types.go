@@ -120,7 +120,7 @@ type MasterComponent interface {
 	SetProxyService(context.Context, ProxyService) error
 	SetDataService(context.Context, DataService) error
 	SetIndexService(IndexService) error
-	SetQueryService(QueryService) error
+	SetQueryService(QueryService)
 }
 
 type ProxyNode interface {

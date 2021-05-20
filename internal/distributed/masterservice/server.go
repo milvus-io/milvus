@@ -200,9 +200,7 @@ func (s *Server) init() error {
 	if s.newQueryServiceClient != nil {
 		log.Debug("query service", zap.String("address", Params.QueryServiceAddress))
 		queryService := s.newQueryServiceClient(Params.QueryServiceAddress)
-		if err := s.masterService.SetQueryService(queryService); err != nil {
-			panic(err)
-		}
+		s.masterService.SetQueryService(queryService)
 		s.queryService = queryService
 	}
 	if err := s.masterService.Init(); err != nil {
