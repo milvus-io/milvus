@@ -234,10 +234,15 @@ DBImpl::CreateCollection(meta::CollectionSchema& collection_schema) {
     meta::CollectionSchema temp_schema = collection_schema;
     temp_schema.index_file_size_ *= MB;  // store as MB
     if (options_.wal_enable_) {
-        temp_schema.flush_lsn_ = wal_mgr_->CreateCollection(collection_schema.collection_id_);
+        temp_schema.flush_lsn_ = wal_mgr_->GetLastAppliedLsn();
     }
 
-    return meta_ptr_->CreateCollection(temp_schema);
+    auto status = meta_ptr_->CreateCollection(temp_schema);
+    if (options_.wal_enable_ && status.ok()) {
+        wal_mgr_->CreateCollection(collection_schema.collection_id_);
+    }
+
+    return status;
 }
 
 Status
@@ -655,11 +660,16 @@ DBImpl::CreatePartition(const std::string& collection_id, const std::string& par
 
     uint64_t lsn = 0;
     if (options_.wal_enable_) {
-        lsn = wal_mgr_->CreatePartition(collection_id, partition_tag);
+        lsn = wal_mgr_->GetLastAppliedLsn();
     } else {
         meta_ptr_->GetCollectionFlushLSN(collection_id, lsn);
     }
-    return meta_ptr_->CreatePartition(collection_id, partition_name, partition_tag, lsn);
+
+    auto status = meta_ptr_->CreatePartition(collection_id, partition_name, partition_tag, lsn);
+    if (options_.wal_enable_ && status.ok()) {
+        wal_mgr_->CreatePartition(collection_id, partition_tag);
+    }
+    return status;
 }
 
 Status
