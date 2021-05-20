@@ -89,16 +89,51 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 
 func (s *Server) setClient() {
 	s.newProxyServiceClient = func(s string) types.ProxyService {
-		return psc.NewClient(s)
+		client := psc.NewClient(s)
+		if err := client.Init(); err != nil {
+			panic(err)
+		}
+		if err := client.Start(); err != nil {
+			panic(err)
+		}
+		if err := funcutil.WaitForComponentInitOrHealthy(context.Background(), client, "ProxyService", 1000000, 200*time.Millisecond); err != nil {
+			panic(err)
+		}
+		return client
 	}
 	s.newDataServiceClient = func(s string) types.DataService {
-		return dsc.NewClient(s)
+		client := dsc.NewClient(s)
+		if err := client.Init(); err != nil {
+			panic(err)
+		}
+		if err := client.Start(); err != nil {
+			panic(err)
+		}
+		err := funcutil.WaitForComponentInitOrHealthy(context.Background(), client, "DataService", 1000000, 200*time.Millisecond)
+		if err != nil {
+			panic(err)
+		}
+		return client
 	}
 	s.newIndexServiceClient = func(s string) types.IndexService {
-		return isc.NewClient(s)
+		client := isc.NewClient(s)
+		if err := client.Init(); err != nil {
+			panic(err)
+		}
+		if err := client.Start(); err != nil {
+			panic(err)
+		}
+		return client
 	}
 	s.newQueryServiceClient = func(s string) types.QueryService {
-		return qsc.NewClient(s, 5*time.Second)
+		client := qsc.NewClient(s, 5*time.Second)
+		if err := client.Init(); err != nil {
+			panic(err)
+		}
+		if err := client.Start(); err != nil {
+			panic(err)
+		}
+		return client
 	}
 }
 
@@ -141,14 +176,7 @@ func (s *Server) init() error {
 	if s.newProxyServiceClient != nil {
 		log.Debug("proxy service", zap.String("address", Params.ProxyServiceAddress))
 		proxyService := s.newProxyServiceClient(Params.ProxyServiceAddress)
-		if err := proxyService.Init(); err != nil {
-			panic(err)
-		}
-		err := funcutil.WaitForComponentInitOrHealthy(ctx, proxyService, "ProxyService", 1000000, 200*time.Millisecond)
-		if err != nil {
-			panic(err)
-		}
-		if err = s.masterService.SetProxyService(ctx, proxyService); err != nil {
+		if err := s.masterService.SetProxyService(ctx, proxyService); err != nil {
 			panic(err)
 		}
 		s.proxyService = proxyService
@@ -156,17 +184,7 @@ func (s *Server) init() error {
 	if s.newDataServiceClient != nil {
 		log.Debug("data service", zap.String("address", Params.DataServiceAddress))
 		dataService := s.newDataServiceClient(Params.DataServiceAddress)
-		if err := dataService.Init(); err != nil {
-			panic(err)
-		}
-		if err := dataService.Start(); err != nil {
-			panic(err)
-		}
-		err := funcutil.WaitForComponentInitOrHealthy(ctx, dataService, "DataService", 1000000, 200*time.Millisecond)
-		if err != nil {
-			panic(err)
-		}
-		if err = s.masterService.SetDataService(ctx, dataService); err != nil {
+		if err := s.masterService.SetDataService(ctx, dataService); err != nil {
 			panic(err)
 		}
 		s.dataService = dataService
@@ -174,9 +192,6 @@ func (s *Server) init() error {
 	if s.newIndexServiceClient != nil {
 		log.Debug("index service", zap.String("address", Params.IndexServiceAddress))
 		indexService := s.newIndexServiceClient(Params.IndexServiceAddress)
-		if err := indexService.Init(); err != nil {
-			panic(err)
-		}
 		if err := s.masterService.SetIndexService(indexService); err != nil {
 			panic(err)
 		}
@@ -184,13 +199,7 @@ func (s *Server) init() error {
 	}
 	if s.newQueryServiceClient != nil {
 		queryService := s.newQueryServiceClient(Params.QueryServiceAddress)
-		if err = queryService.Init(); err != nil {
-			panic(err)
-		}
-		if err = queryService.Start(); err != nil {
-			panic(err)
-		}
-		if err = s.masterService.SetQueryService(queryService); err != nil {
+		if err := s.masterService.SetQueryService(queryService); err != nil {
 			panic(err)
 		}
 		s.queryService = queryService
