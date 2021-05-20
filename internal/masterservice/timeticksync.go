@@ -36,8 +36,7 @@ type timetickSync struct {
 	delChan       <-chan *sessionutil.Session
 }
 
-// NewTimeTickSync create a new timetickSync
-func NewTimeTickSync(ctx context.Context, factory msgstream.Factory) (*timetickSync, error) {
+func newTimeTickSync(ctx context.Context, factory msgstream.Factory) (*timetickSync, error) {
 	const proxyNodePrefix = "proxynode"
 	gm := sessionutil.GlobalSessionManager()
 	addChan, delChan := gm.WatchServices(ctx, proxyNodePrefix)
@@ -147,7 +146,7 @@ func (t *timetickSync) SendChannelTimeTick(chanName string, ts typeutil.Timestam
 			MsgType:   commonpb.MsgType_TimeTick,
 			MsgID:     0,
 			Timestamp: ts,
-			SourceID:  0,
+			SourceID:  int64(Params.NodeID),
 		},
 	}
 	timeTickMsg := &msgstream.TimeTickMsg{

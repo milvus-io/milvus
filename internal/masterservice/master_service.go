@@ -878,7 +878,7 @@ func (c *Core) Init() error {
 		if initError = c.msFactory.SetParams(m); initError != nil {
 			return
 		}
-		c.chanTimeTick, initError = NewTimeTickSync(c.ctx, c.msFactory)
+		c.chanTimeTick, initError = newTimeTickSync(c.ctx, c.msFactory)
 		if initError != nil {
 			return
 		}
@@ -1655,6 +1655,7 @@ func (c *Core) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*maste
 	}, nil
 }
 
+// UpdateChannelTimeTick used to handle ChannelTimeTickMsg
 func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,

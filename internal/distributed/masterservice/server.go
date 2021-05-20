@@ -383,6 +383,7 @@ func (s *Server) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*mas
 	return s.masterService.AllocID(ctx, in)
 }
 
+// UpdateChannelTimeTick used to handle ChannelTimeTickMsg
 func (s *Server) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
 	return s.masterService.UpdateChannelTimeTick(ctx, in)
 }
