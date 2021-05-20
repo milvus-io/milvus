@@ -63,7 +63,7 @@ type Server struct {
 	newProxyServiceClient func(string) types.ProxyService
 	newDataServiceClient  func(string) types.DataService
 	newIndexServiceClient func(string) types.IndexService
-	newQueryServiceClient func(string) (types.QueryService, error)
+	newQueryServiceClient func(string) types.QueryService
 
 	etcdKV *etcdkv.EtcdKV
 	signal <-chan bool
@@ -97,7 +97,7 @@ func (s *Server) setClient() {
 	s.newIndexServiceClient = func(s string) types.IndexService {
 		return isc.NewClient(s)
 	}
-	s.newQueryServiceClient = func(s string) (types.QueryService, error) {
+	s.newQueryServiceClient = func(s string) types.QueryService {
 		return qsc.NewClient(s, 5*time.Second)
 	}
 }
@@ -144,12 +144,10 @@ func (s *Server) init() error {
 		if err := proxyService.Init(); err != nil {
 			panic(err)
 		}
-
 		err := funcutil.WaitForComponentInitOrHealthy(ctx, proxyService, "ProxyService", 1000000, 200*time.Millisecond)
 		if err != nil {
 			panic(err)
 		}
-
 		if err = s.masterService.SetProxyService(ctx, proxyService); err != nil {
 			panic(err)
 		}
@@ -168,7 +166,6 @@ func (s *Server) init() error {
 		if err != nil {
 			panic(err)
 		}
-
 		if err = s.masterService.SetDataService(ctx, dataService); err != nil {
 			panic(err)
 		}
@@ -180,18 +177,13 @@ func (s *Server) init() error {
 		if err := indexService.Init(); err != nil {
 			panic(err)
 		}
-
 		if err := s.masterService.SetIndexService(indexService); err != nil {
 			panic(err)
-
 		}
 		s.indexService = indexService
 	}
 	if s.newQueryServiceClient != nil {
-		queryService, err := s.newQueryServiceClient(Params.QueryServiceAddress)
-		if err != nil {
-			panic(err)
-		}
+		queryService := s.newQueryServiceClient(Params.QueryServiceAddress)
 		if err = queryService.Init(); err != nil {
 			panic(err)
 		}

@@ -228,10 +228,7 @@ func (s *Server) init() error {
 
 	queryServiceAddr := Params.QueryServiceAddress
 	log.Debug("proxynode", zap.String("query server address", queryServiceAddr))
-	s.queryServiceClient, err = grpcqueryserviceclient.NewClient(queryServiceAddr, timeout)
-	if err != nil {
-		return err
-	}
+	s.queryServiceClient = grpcqueryserviceclient.NewClient(queryServiceAddr, timeout)
 	err = s.queryServiceClient.Init()
 	if err != nil {
 		return err
