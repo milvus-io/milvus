@@ -13,9 +13,7 @@ package indexservice
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"math/rand"
 	"strconv"
 	"sync"
@@ -68,13 +66,6 @@ type IndexService struct {
 
 	nodeLock sync.RWMutex
 
-	etcdKV  *etcdkv.EtcdKV
-	session struct {
-		NodeName string
-		IP       string
-		LeaseID  clientv3.LeaseID
-	}
-
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
@@ -103,30 +94,18 @@ func (i *IndexService) Init() error {
 		if err != nil {
 			return err
 		}
-		i.etcdKV = etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
-		metakv, err := NewMetaTable(i.etcdKV)
+		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+		metakv, err := NewMetaTable(etcdKV)
 		if err != nil {
 			return err
 		}
 		i.metaTable = metakv
-		return nil
+		return err
 	}
 	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
 	if err != nil {
 		return err
 	}
-
-	ch, err := i.registerService("indexservice", Params.Address)
-	if err != nil {
-		return err
-	}
-	go func() {
-		for {
-			for range ch {
-				//TODO process lesase response
-			}
-		}
-	}()
 
 	//init idAllocator
 	kvRootPath := Params.KvRootPath
@@ -167,7 +146,7 @@ func (i *IndexService) Start() error {
 	go i.tsLoop()
 
 	i.loopWg.Add(1)
-	go i.dropIndexLoop()
+	go i.recycleUnusedIndexFiles()
 
 	i.loopWg.Add(1)
 	go i.assignmentTasksLoop()
@@ -430,27 +409,36 @@ func (i *IndexService) tsLoop() {
 	}
 }
 
-func (i *IndexService) dropIndexLoop() {
+func (i *IndexService) recycleUnusedIndexFiles() {
 	ctx, cancel := context.WithCancel(i.loopCtx)
 
 	defer cancel()
 	defer i.loopWg.Done()
 
 	timeTicker := time.NewTicker(durationInterval)
+	log.Debug("IndexService start recycle unused index files loop")
 
-	log.Debug("IndexService start drop index loop")
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-timeTicker.C:
-			indexMetas := i.metaTable.getMarkDeleted(dropIndexLimit)
-			for j := 0; j < len(indexMetas); j++ {
-				// TODO: delete files corresponding to all versions
-				if err := i.kv.MultiRemove(indexMetas[j].IndexFilePaths); err != nil {
-					log.Debug("IndexService", zap.String("Remove index files error", err.Error()))
+			indexMetas := i.metaTable.getUnusedIndexFiles(dropIndexLimit)
+			for _, indexMeta := range indexMetas {
+				if indexMeta.MarkDeleted {
+					unusedIndexFilePathPrefix := strconv.Itoa(int(indexMeta.IndexBuildID))
+					if err := i.kv.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {
+						log.Debug("IndexService", zap.String("Remove index files error", err.Error()))
+					}
+					i.metaTable.DeleteIndex(indexMeta.IndexBuildID)
+				} else {
+					for j := 1; j < int(indexMeta.Version); j++ {
+						unusedIndexFilePathPrefix := strconv.Itoa(int(indexMeta.IndexBuildID)) + "/" + strconv.Itoa(j)
+						if err := i.kv.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {
+							log.Debug("IndexService", zap.String("Remove index files error", err.Error()))
+						}
+					}
 				}
-				i.metaTable.DeleteIndex(indexMetas[j].IndexBuildID)
 			}
 		}
 	}
@@ -501,45 +489,6 @@ func (i *IndexService) assignmentTasksLoop() {
 				}
 				i.nodeClients.IncPriority(nodeID, 1)
 			}
-
 		}
 	}
-}
-
-// TODO: watch IndexNodes, and reassignment tasks
-//func (i *IndexService) ReassignmentTasks(indexBuildIDs []UniqueID) {
-//	for _, indexBuildID := range indexBuildIDs {
-//		if err := i.metaTable.MarkIndexAsUnissued(indexBuildID); err != nil {
-//			log.Debug("IndexService", zap.Any("Reassignment task failed, err =", err.Error()))
-//		}
-//	}
-//}
-
-func (i *IndexService) registerService(nodeName string, ip string) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
-	respID, err := i.etcdKV.Grant(5)
-	if err != nil {
-		fmt.Printf("grant error %s\n", err)
-		return nil, err
-	}
-	i.session.NodeName = nodeName
-	i.session.IP = ip
-	i.session.LeaseID = respID
-
-	sessionJSON, err := json.Marshal(i.session)
-	if err != nil {
-		return nil, err
-	}
-
-	err = i.etcdKV.SaveWithLease(fmt.Sprintf("/node/%s", nodeName), string(sessionJSON), respID)
-	if err != nil {
-		fmt.Printf("put lease error %s\n", err)
-		return nil, err
-	}
-
-	ch, err := i.etcdKV.KeepAlive(respID)
-	if err != nil {
-		fmt.Printf("keep alive error %s\n", err)
-		return nil, err
-	}
-	return ch, nil
 }

@@ -311,7 +311,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 
 		getSavePathByKey := func(key string) string {
 			// TODO: fix me, use more reasonable method
-			return strconv.Itoa(int(it.req.IndexBuildID)) + "/" + strconv.Itoa(int(partitionID)) + "/" + strconv.Itoa(int(segmentID)) + "/" + strconv.Itoa(int(it.req.Version)) + "/" + key
+			return strconv.Itoa(int(it.req.IndexBuildID)) + "/" + strconv.Itoa(int(it.req.Version)) + "/" + strconv.Itoa(int(partitionID)) + "/" + strconv.Itoa(int(segmentID)) + "/" + key
 		}
 		saveBlob := func(path string, value []byte) error {
 			return it.kv.Save(path, string(value))

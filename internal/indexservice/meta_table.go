@@ -205,7 +205,7 @@ func (mt *metaTable) DeleteIndex(indexBuildID UniqueID) {
 	delete(mt.indexBuildID2Meta, indexBuildID)
 }
 
-func (mt *metaTable) getMarkDeleted(limit int) []indexpb.IndexMeta {
+func (mt *metaTable) getUnusedIndexFiles(limit int) []indexpb.IndexMeta {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 
@@ -213,7 +213,7 @@ func (mt *metaTable) getMarkDeleted(limit int) []indexpb.IndexMeta {
 
 	var indexMetas []indexpb.IndexMeta
 	for _, meta := range mt.indexBuildID2Meta {
-		if meta.MarkDeleted && meta.State == commonpb.IndexState_Finished {
+		if meta.State == commonpb.IndexState_Finished {
 			indexMetas = append(indexMetas, meta)
 		}
 		if len(indexMetas) >= limit {
