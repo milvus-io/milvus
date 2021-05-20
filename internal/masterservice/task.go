@@ -298,7 +298,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 
 	//notify query service to release collection
 	go func() {
-		if err = t.core.SendReleaseCollectionReq(t.core.ctx, t.Req.Base.Timestamp, 0, collMeta.ID); err != nil {
+		if err = t.core.CallReleaseCollectionService(t.core.ctx, t.Req.Base.Timestamp, 0, collMeta.ID); err != nil {
 			log.Warn("ReleaseCollection failed", zap.String("error", err.Error()))
 		}
 	}()
@@ -896,7 +896,7 @@ func (t *DropIndexReqTask) Execute(ctx context.Context) error {
 	if len(info) != 1 {
 		return fmt.Errorf("len(index) = %d", len(info))
 	}
-	err = t.core.SendDropIndexReq(ctx, info[0].IndexID)
+	err = t.core.CallDropIndexService(ctx, info[0].IndexID)
 	if err != nil {
 		return err
 	}

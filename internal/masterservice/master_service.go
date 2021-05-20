@@ -751,7 +751,7 @@ func (c *Core) SetIndexService(s types.IndexService) {
 	//return nil
 }
 
-func (c *Core) SendBuildIndexReq(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
+func (c *Core) CallBuildIndexService(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
 	if c.indexServiceClient == nil {
 		return 0, fmt.Errorf("indexServiceClient nil")
 	}
@@ -771,7 +771,7 @@ func (c *Core) SendBuildIndexReq(ctx context.Context, binlog []string, field *sc
 	return rsp.IndexBuildID, nil
 }
 
-func (c *Core) SendDropIndexReq(ctx context.Context, indexID typeutil.UniqueID) error {
+func (c *Core) CallDropIndexService(ctx context.Context, indexID typeutil.UniqueID) error {
 	if c.indexServiceClient == nil {
 		return fmt.Errorf("indexServiceClient nil")
 	}
@@ -812,7 +812,7 @@ func (c *Core) SetQueryService(s types.QueryService) {
 	//return nil
 }
 
-func (c *Core) SendReleaseCollectionReq(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
+func (c *Core) CallReleaseCollectionService(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
 	if c.queryServiceClient == nil {
 		return fmt.Errorf("queryServiceClient nil")
 	}
@@ -854,7 +854,7 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 		if err != nil {
 			return err
 		}
-		bldID, err = c.SendBuildIndexReq(c.ctx, binlogs, field, idxInfo)
+		bldID, err = c.CallBuildIndexService(c.ctx, binlogs, field, idxInfo)
 		if err != nil {
 			return err
 		}
