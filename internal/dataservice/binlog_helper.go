@@ -46,23 +46,7 @@ func (s *Server) SaveBinLogMetaTxn(meta map[string]string) error {
 	if s.kvClient == nil {
 		return errNilKvClient
 	}
-	err := s.kvClient.MultiSave(meta)
-	if err != nil {
-		s.RemoveBinLogMetaTxn(meta)
-	}
-	return err
-}
-
-//RemoveBinLogMetaTxn remove segment-field2Path, collection-tsPath/ddlPath from previus successful store
-func (s *Server) RemoveBinLogMetaTxn(meta map[string]string) error {
-	if s.kvClient == nil {
-		return errNilKvClient
-	}
-	keys := make([]string, 0, len(meta))
-	for k := range meta {
-		keys = append(keys, k)
-	}
-	return s.kvClient.MultiRemove(keys)
+	return s.kvClient.MultiSave(meta)
 }
 
 var (
