@@ -281,7 +281,7 @@ func TestPrintBinlogFiles(t *testing.T) {
 			},
 		},
 	}
-	firstBlobs, err := insertCodec.Serialize(1, 1, insertDataFirst)
+	firstBlobs, _, err := insertCodec.Serialize(1, 1, insertDataFirst)
 	assert.Nil(t, err)
 	var binlogFiles []string
 	for index, blob := range firstBlobs {
@@ -296,7 +296,7 @@ func TestPrintBinlogFiles(t *testing.T) {
 		err = fd.Close()
 		assert.Nil(t, err)
 	}
-	secondBlobs, err := insertCodec.Serialize(1, 1, insertDataSecond)
+	secondBlobs, _, err := insertCodec.Serialize(1, 1, insertDataSecond)
 	assert.Nil(t, err)
 	for index, blob := range secondBlobs {
 		blob.Key = fmt.Sprintf("1/insert_log/2/3/4/5/%d", 99)
