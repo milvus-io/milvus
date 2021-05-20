@@ -113,10 +113,10 @@ func TestUpdateSessions(t *testing.T) {
 
 	self := NewSession("test", "testAddr", false)
 	sm := NewSessionManager(ctx, etcdAddr, rootPath, self)
-	sm.WatchServices(ctx, "test")
 
 	err = sm.UpdateSessions("test")
 	assert.Nil(t, err)
+	sm.WatchServices(ctx, "test")
 
 	sessionManagers := make([]*SessionManager, 0)
 
@@ -136,15 +136,12 @@ func TestUpdateSessions(t *testing.T) {
 	}
 	wg.Wait()
 
-	assert.Equal(t, len(sm.GetSessions()), 10)
-
-	sessions := sm.GetSessions()
-	assert.Nil(t, err)
-	assert.Equal(t, len(sessions), 10)
+	assert.Equal(t, len(sm.GetSessions("test")), 10)
+	assert.Equal(t, len(sm.GetSessions("testt")), 0)
 
 	etcdKV.RemoveWithPrefix("")
 	assert.Eventually(t, func() bool {
-		return len(sm.GetSessions()) == 0
+		return len(sm.GetSessions("test")) == 0
 	}, 10*time.Second, 100*time.Millisecond)
 
 }
