@@ -35,6 +35,7 @@ import (
 type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
+
 type ProxyNode struct {
 	ctx    context.Context
 	cancel func()
@@ -56,7 +57,7 @@ type ProxyNode struct {
 	tick  *timeTick
 
 	idAllocator  *allocator.IDAllocator
-	tsoAllocator *allocator.TimestampAllocator
+	tsoAllocator *TimestampAllocator
 	segAssigner  *SegIDAssigner
 
 	queryMsgStream msgstream.MsgStream
@@ -178,12 +179,11 @@ func (node *ProxyNode) Init() error {
 	node.idAllocator = idAllocator
 	node.idAllocator.PeerID = Params.ProxyID
 
-	tsoAllocator, err := allocator.NewTimestampAllocator(node.ctx, masterAddr)
+	tsoAllocator, err := NewTimestampAllocator(node.masterService, Params.ProxyID)
 	if err != nil {
 		return err
 	}
 	node.tsoAllocator = tsoAllocator
-	node.tsoAllocator.PeerID = Params.ProxyID
 
 	segAssigner, err := NewSegIDAssigner(node.ctx, node.dataService, node.lastTick)
 	if err != nil {
@@ -221,9 +221,6 @@ func (node *ProxyNode) Start() error {
 	node.idAllocator.Start()
 	log.Debug("start id allocator ...")
 
-	node.tsoAllocator.Start()
-	log.Debug("start tso allocator ...")
-
 	node.segAssigner.Start()
 	log.Debug("start seg assigner ...")
 
@@ -247,7 +244,6 @@ func (node *ProxyNode) Stop() error {
 	node.cancel()
 
 	globalInsertChannelsMap.CloseAllMsgStream()
-	node.tsoAllocator.Close()
 	node.idAllocator.Close()
 	node.segAssigner.Close()
 	node.sched.Close()
