@@ -953,7 +953,6 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	msgPack := composeSegmentFlushMsgPack(req.SegmentID)
 	err = s.flushMsgStream.Produce(&msgPack)
 	if err != nil {
-		s.RemoveBinLogMetaTxn(meta) // removes bin log meta from store, like a rollback
 		resp.Reason = err.Error()
 		return resp, err
 	}
