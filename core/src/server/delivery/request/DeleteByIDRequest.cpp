@@ -64,7 +64,7 @@ DeleteByIDRequest::OnExecute() {
 
         // step 2: check collection and partition existence
         bool has_or_not;
-        DBWrapper::DB()->HasCollection(collection_name_, has_or_not);
+        DBWrapper::DB()->HasNativeCollection(collection_name_, has_or_not);
         if (!has_or_not) {
             return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
         }
