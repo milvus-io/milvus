@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -34,7 +35,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/session"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/clientv3"
@@ -245,6 +247,12 @@ func TestMasterService(t *testing.T) {
 	}
 	err = core.SetQueryService(qm)
 	assert.Nil(t, err)
+
+	// initialize master's session manager before core init
+	self := sessionutil.NewSession("masterservice", funcutil.GetLocalIP()+":"+strconv.Itoa(53100), true)
+	sm := sessionutil.NewSessionManager(ctx, Params.EtcdAddress, Params.MetaRootPath, self)
+	sm.Init()
+	sessionutil.SetGlobalSessionManager(sm)
 
 	err = core.Init()
 	assert.Nil(t, err)
@@ -1419,8 +1427,6 @@ func TestMasterService(t *testing.T) {
 
 	t.Run("channel timetick", func(t *testing.T) {
 		const (
-			proxyNodeID0       = 100
-			proxyNodeID1       = 101
 			proxyNodeIDInvalid = 102
 			proxyNodeName0     = "proxynode_0"
 			proxyNodeName1     = "proxynode_1"
@@ -1431,17 +1437,21 @@ func TestMasterService(t *testing.T) {
 			ts1                = uint64(120)
 			ts2                = uint64(150)
 		)
-		s0 := session.NewSession(proxyNodeID0, proxyNodeName0, "")
-		s1 := session.NewSession(proxyNodeID1, proxyNodeName1, "")
+		s0 := sessionutil.NewSession(proxyNodeName0, "", false)
+		s1 := sessionutil.NewSession(proxyNodeName1, "", false)
 
-		session.RegisterService(core.metaKV, s0, 10)
-		session.RegisterService(core.metaKV, s1, 10)
+		gm0 := sessionutil.NewSessionManager(ctx, Params.EtcdAddress, Params.MetaRootPath, s0)
+		gm1 := sessionutil.NewSessionManager(ctx, Params.EtcdAddress, Params.MetaRootPath, s1)
+
+		gm0.Init()
+		gm1.Init()
+
 		time.Sleep(1 * time.Second)
 
 		msg0 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_TimeTick,
-				SourceID: proxyNodeID0,
+				SourceID: gm0.Self.ServerID,
 			},
 			ChannelNames: []string{chanName0, chanName1},
 			Timestamps:   []uint64{ts0, ts2},
@@ -1453,7 +1463,7 @@ func TestMasterService(t *testing.T) {
 		msg1 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_TimeTick,
-				SourceID: proxyNodeID1,
+				SourceID: gm1.Self.ServerID,
 			},
 			ChannelNames: []string{chanName1, chanName2},
 			Timestamps:   []uint64{ts1, ts2},

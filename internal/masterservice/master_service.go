@@ -878,7 +878,7 @@ func (c *Core) Init() error {
 		if initError = c.msFactory.SetParams(m); initError != nil {
 			return
 		}
-		c.chanTimeTick, initError = NewTimeTickSync(c.ctx, c.metaKV, c.msFactory)
+		c.chanTimeTick, initError = NewTimeTickSync(c.ctx, c.msFactory)
 		if initError != nil {
 			return
 		}

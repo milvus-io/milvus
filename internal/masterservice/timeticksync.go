@@ -16,12 +16,11 @@ import (
 	"fmt"
 	"sync"
 
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/session"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
@@ -33,26 +32,29 @@ type timetickSync struct {
 	proxyTimeTick map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg
 	chanStream    map[string]msgstream.MsgStream
 	sendChan      chan map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg
-	addChan       <-chan *session.Session
-	delChan       <-chan *session.Session
+	addChan       <-chan *sessionutil.Session
+	delChan       <-chan *sessionutil.Session
 }
 
 // NewTimeTickSync create a new timetickSync
-func NewTimeTickSync(ctx context.Context, kv *etcdkv.EtcdKV, factory msgstream.Factory) (*timetickSync, error) {
+func NewTimeTickSync(ctx context.Context, factory msgstream.Factory) (*timetickSync, error) {
 	const proxyNodePrefix = "proxynode"
-	pnSessions, err := session.GetSessions(kv, proxyNodePrefix)
-	if err != nil {
-		return nil, err
-	}
+	gm := sessionutil.GlobalSessionManager()
+	addChan, delChan := gm.WatchServices(ctx, proxyNodePrefix)
+	gm.UpdateSessions(proxyNodePrefix)
+
 	tss := timetickSync{
 		lock:          sync.Mutex{},
 		ctx:           ctx,
 		msFactory:     factory,
 		proxyTimeTick: make(map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg),
-		sendChan:      make(chan map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg),
 		chanStream:    make(map[string]msgstream.MsgStream),
+		sendChan:      make(chan map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg),
+		addChan:       addChan,
+		delChan:       delChan,
 	}
-	tss.addChan, tss.delChan = session.WatchServices(ctx, kv, proxyNodePrefix)
+
+	pnSessions := gm.GetSessions(proxyNodePrefix)
 	for _, pns := range pnSessions {
 		tss.proxyTimeTick[pns.ServerID] = nil
 	}
