@@ -11,7 +11,6 @@ from base.utility import ApiUtility
 from config.test_info import test_info
 from utils.util_log import test_log as log
 from common import common_func as cf
-from common import common_type as ct
 
 
 def request_catch():
