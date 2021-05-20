@@ -65,11 +65,6 @@ type Server struct {
 	newIndexServiceClient func(string) types.IndexService
 	newQueryServiceClient func(string) (types.QueryService, error)
 
-	connectProxyService bool
-	connectDataService  bool
-	connectIndexService bool
-	connectQueryService bool
-
 	etcdKV *etcdkv.EtcdKV
 	signal <-chan bool
 
@@ -82,10 +77,6 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		ctx:                 ctx1,
 		cancel:              cancel,
 		grpcErrChan:         make(chan error),
-		connectDataService:  true,
-		connectProxyService: true,
-		connectIndexService: true,
-		connectQueryService: true,
 	}
 	s.setClient()
 	var err error
@@ -147,7 +138,7 @@ func (s *Server) init() error {
 
 	s.masterService.UpdateStateCode(internalpb.StateCode_Initializing)
 
-	if s.connectProxyService {
+	if s.newProxyServiceClient != nil {
 		log.Debug("proxy service", zap.String("address", Params.ProxyServiceAddress))
 		proxyService := s.newProxyServiceClient(Params.ProxyServiceAddress)
 		if err := proxyService.Init(); err != nil {
@@ -164,7 +155,7 @@ func (s *Server) init() error {
 		}
 		s.proxyService = proxyService
 	}
-	if s.connectDataService {
+	if s.newDataServiceClient != nil {
 		log.Debug("data service", zap.String("address", Params.DataServiceAddress))
 		dataService := s.newDataServiceClient(Params.DataServiceAddress)
 		if err := dataService.Init(); err != nil {
@@ -183,7 +174,7 @@ func (s *Server) init() error {
 		}
 		s.dataService = dataService
 	}
-	if s.connectIndexService {
+	if s.newIndexServiceClient != nil {
 		log.Debug("index service", zap.String("address", Params.IndexServiceAddress))
 		indexService := s.newIndexServiceClient(Params.IndexServiceAddress)
 		if err := indexService.Init(); err != nil {
@@ -196,7 +187,7 @@ func (s *Server) init() error {
 		}
 		s.indexService = indexService
 	}
-	if s.connectQueryService {
+	if s.newQueryServiceClient != nil {
 		queryService, err := s.newQueryServiceClient(Params.QueryServiceAddress)
 		if err != nil {
 			panic(err)

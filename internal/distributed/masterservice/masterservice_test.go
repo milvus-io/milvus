@@ -55,10 +55,6 @@ func TestGrpcService(t *testing.T) {
 	msFactory := msgstream.NewPmsFactory()
 	svr, err := NewServer(ctx, msFactory)
 	assert.Nil(t, err)
-	svr.connectQueryService = false
-	svr.connectProxyService = false
-	svr.connectIndexService = false
-	svr.connectDataService = false
 
 	cms.Params.Init()
 	cms.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
@@ -831,10 +827,6 @@ func TestRun(t *testing.T) {
 		ctx:                 ctx,
 		cancel:              cancel,
 		grpcErrChan:         make(chan error),
-		connectDataService:  true,
-		connectProxyService: true,
-		connectIndexService: true,
-		connectQueryService: true,
 	}
 	Params.Init()
 	Params.Port = 1000000
