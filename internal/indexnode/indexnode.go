@@ -67,6 +67,8 @@ type IndexNode struct {
 		LeaseID  clientv3.LeaseID
 	}
 
+	finishedTasks map[UniqueID]commonpb.IndexState
+
 	closer io.Closer
 }
 
@@ -190,11 +192,12 @@ func (i *IndexNode) SetIndexServiceClient(serviceClient types.IndexService) {
 	i.serviceClient = serviceClient
 }
 
-func (i *IndexNode) BuildIndex(ctx context.Context, request *indexpb.BuildIndexRequest) (*commonpb.Status, error) {
+func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	log.Debug("indexnode building index ...",
 		zap.Int64("IndexBuildID", request.IndexBuildID),
 		zap.String("Indexname", request.IndexName),
 		zap.Int64("IndexID", request.IndexID),
+		zap.Int64("Version", request.Version),
 		zap.Strings("DataPaths", request.DataPaths),
 		zap.Any("TypeParams", request.TypeParams),
 		zap.Any("IndexParams", request.IndexParams))
@@ -206,6 +209,7 @@ func (i *IndexNode) BuildIndex(ctx context.Context, request *indexpb.BuildIndexR
 		},
 		req:           request,
 		kv:            i.kv,
+		etcdKV:        i.etcdKV,
 		serviceClient: i.serviceClient,
 		nodeID:        Params.NodeID,
 	}
@@ -221,6 +225,7 @@ func (i *IndexNode) BuildIndex(ctx context.Context, request *indexpb.BuildIndexR
 		return ret, nil
 	}
 	log.Debug("indexnode", zap.Int64("indexnode successfully schedule with indexBuildID", request.IndexBuildID))
+
 	return ret, nil
 }
 

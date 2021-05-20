@@ -24,7 +24,7 @@ service IndexNode {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
-  rpc BuildIndex(BuildIndexRequest) returns (common.Status){}
+  rpc CreateIndex(CreateIndexRequest) returns (common.Status){}
   rpc DropIndex(DropIndexRequest) returns (common.Status) {}
 }
 
@@ -55,11 +55,21 @@ message GetIndexStatesResponse {
   repeated IndexInfo states = 2;
 }
 
-message BuildIndexRequest {
+message CreateIndexRequest {
   int64 indexBuildID = 1;
   string index_name = 2;
   int64 indexID = 3;
   int64 version = 4;
+  string meta_path = 5;
+  repeated string data_paths = 6;
+  repeated common.KeyValuePair type_params = 7;
+  repeated common.KeyValuePair index_params = 8;
+}
+
+message BuildIndexRequest {
+  int64 indexBuildID = 1;
+  string index_name = 2;
+  int64 indexID = 3;
   repeated string data_paths = 5;
   repeated common.KeyValuePair type_params = 6;
   repeated common.KeyValuePair index_params = 7;

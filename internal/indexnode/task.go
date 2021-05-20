@@ -17,9 +17,11 @@ import (
 	"runtime"
 	"strconv"
 
+	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -83,8 +85,9 @@ type IndexBuildTask struct {
 	BaseTask
 	index         Index
 	kv            kv.BaseKV
+	etcdKV        *etcdkv.EtcdKV
 	savePaths     []string
-	req           *indexpb.BuildIndexRequest
+	req           *indexpb.CreateIndexRequest
 	serviceClient types.IndexService
 	nodeID        UniqueID
 }
@@ -131,31 +134,29 @@ func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 
-	nty := &indexpb.NotifyBuildIndexRequest{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		IndexBuildID:   it.req.IndexBuildID,
-		NodeID:         it.nodeID,
-		IndexFilePaths: it.savePaths,
-	}
-	if it.err != nil {
-		nty.Status.ErrorCode = commonpb.ErrorCode_BuildIndexError
-	}
-
-	//TODO: write to etcd
-	ctx = context.TODO()
-	resp, err := it.serviceClient.NotifyBuildIndex(ctx, nty)
+	indexMeta := indexpb.IndexMeta{}
+	value, err := it.etcdKV.Load(it.req.MetaPath)
 	if err != nil {
-		log.Warn("indexnode", zap.String("error", err.Error()))
 		return err
 	}
-
-	if resp.ErrorCode != commonpb.ErrorCode_Success {
-		err = errors.New(resp.Reason)
-		log.Debug("indexnode", zap.String("[IndexBuildTask][PostExecute] err", err.Error()))
+	err = proto.UnmarshalText(value, &indexMeta)
+	if err != nil {
+		return err
 	}
-	return err
+	if indexMeta.Version >= it.req.Version {
+		log.Debug("IndexNode", zap.Any("Notify build index", "This version is not the latest version"))
+		return nil
+	}
+	indexMeta.IndexFilePaths = it.savePaths
+	indexMeta.State = commonpb.IndexState_Finished
+	if it.err != nil {
+		indexMeta.State = commonpb.IndexState_Failed
+	}
+	err = it.etcdKV.Save(it.req.MetaPath, proto.MarshalTextString(&indexMeta))
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (it *IndexBuildTask) Execute(ctx context.Context) error {
@@ -310,7 +311,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 
 		getSavePathByKey := func(key string) string {
 			// TODO: fix me, use more reasonable method
-			return strconv.Itoa(int(it.req.IndexBuildID)) + "/" + strconv.Itoa(int(partitionID)) + "/" + strconv.Itoa(int(segmentID)) + "/" + key
+			return strconv.Itoa(int(it.req.IndexBuildID)) + "/" + strconv.Itoa(int(partitionID)) + "/" + strconv.Itoa(int(segmentID)) + "/" + strconv.Itoa(int(it.req.Version)) + "/" + key
 		}
 		saveBlob := func(path string, value []byte) error {
 			return it.kv.Save(path, string(value))

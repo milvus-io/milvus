@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"sync"
 	"time"
 
@@ -470,16 +471,29 @@ func (i *IndexService) assignmentTasksLoop() {
 			return
 		case <-timeTicker.C:
 			tasks := i.metaTable.getToAssignedTasks()
-			for j := 0; j < len(tasks); j++ {
-				nodeID, builderClient, _ := i.nodeClients.PeekClient()
+			for _, task := range tasks {
+				nodeID, builderClient, leaseKey := i.nodeClients.PeekClient()
 				if builderClient == nil {
 					log.Debug("IndexService has no available IndexNode")
 				}
-				resp, err := builderClient.BuildIndex(ctx, tasks[j].Req)
+				req := &indexpb.CreateIndexRequest{
+					IndexBuildID: task.IndexBuildID,
+					IndexName:    task.Req.IndexName,
+					IndexID:      task.Req.IndexID,
+					Version:      task.Version + 1,
+					MetaPath:     "/indexes/" + strconv.FormatInt(task.IndexBuildID, 10),
+					DataPaths:    task.Req.DataPaths,
+					TypeParams:   task.Req.TypeParams,
+					IndexParams:  task.Req.IndexParams,
+				}
+				if err := i.metaTable.UpdateVersion(task.IndexBuildID); err != nil {
+					log.Debug("IndexService", zap.String("build index update version err", err.Error()))
+				}
+				resp, err := builderClient.CreateIndex(ctx, req)
 				if err != nil {
 					log.Debug("IndexService", zap.String("build index err", err.Error()))
 				}
-				if err := i.metaTable.BuildIndex(tasks[j].IndexBuildID, "leaseKey"); err != nil {
+				if err = i.metaTable.BuildIndex(task.IndexBuildID, leaseKey); err != nil {
 					log.Debug("IndexService", zap.String("update meta table error", err.Error()))
 				}
 				if resp.ErrorCode != commonpb.ErrorCode_Success {

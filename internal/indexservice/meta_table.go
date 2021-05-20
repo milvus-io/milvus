@@ -106,6 +106,19 @@ func (mt *metaTable) BuildIndex(indexBuildID UniqueID, leaseKey string) error {
 	}
 	meta.State = commonpb.IndexState_InProgress
 	meta.LeaseKey = leaseKey
+	return mt.saveIndexMeta(&meta)
+}
+
+func (mt *metaTable) UpdateVersion(indexBuildID UniqueID) error {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+	log.Debug("IndexService update index state")
+
+	meta, ok := mt.indexBuildID2Meta[indexBuildID]
+	if !ok {
+		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
+	}
+
 	meta.Version = meta.Version + 1
 	return mt.saveIndexMeta(&meta)
 }
