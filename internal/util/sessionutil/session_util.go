@@ -249,9 +249,9 @@ func (sm *SessionManager) GetSessions(prefix string) map[string]*Session {
 // sessions. If a server up, it will be add to sessions. But it won't get the
 // sessions startup before watch start.
 // UpdateSessions and WatchServices is recommended.
-func (sm *SessionManager) WatchServices(ctx context.Context, prefix string) (addChannel <-chan string, delChannel <-chan string) {
-	addCh := make(chan string, 10)
-	delCh := make(chan string, 10)
+func (sm *SessionManager) WatchServices(ctx context.Context, prefix string) (addChannel <-chan *Session, delChannel <-chan *Session) {
+	addCh := make(chan *Session, 10)
+	delCh := make(chan *Session, 10)
 	rch := sm.etcdKV.WatchWithPrefix(defaultServiceRoot + prefix)
 	go func() {
 		for {
@@ -274,12 +274,14 @@ func (sm *SessionManager) WatchServices(ctx context.Context, prefix string) (add
 							continue
 						}
 						sm.Sessions.Store(string(ev.Kv.Key), session)
-						addCh <- string(ev.Kv.Key)
+						addCh <- session
 					case mvccpb.DELETE:
 						log.Debug("watch services",
 							zap.Any("delete kv", ev.Kv))
-						sm.Sessions.Delete(string(ev.Kv.Key))
-						delCh <- string(ev.Kv.Key)
+						value, isloaded := sm.Sessions.LoadAndDelete(string(ev.Kv.Key))
+						if isloaded {
+							delCh <- value.(*Session)
+						}
 					}
 				}
 

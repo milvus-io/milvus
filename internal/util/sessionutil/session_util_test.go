@@ -116,7 +116,7 @@ func TestUpdateSessions(t *testing.T) {
 
 	err = sm.UpdateSessions("test")
 	assert.Nil(t, err)
-	sm.WatchServices(ctx, "test")
+	addCh, delCh := sm.WatchServices(ctx, "test")
 
 	sessionManagers := make([]*SessionManager, 0)
 
@@ -144,4 +144,17 @@ func TestUpdateSessions(t *testing.T) {
 		return len(sm.GetSessions("test")) == 0
 	}, 10*time.Second, 100*time.Millisecond)
 
+	addSessions := []*Session{}
+	for i := 0; i < 10; i++ {
+		session := <-addCh
+		addSessions = append(addSessions, session)
+	}
+	assert.Equal(t, len(addSessions), 10)
+
+	delSessions := []*Session{}
+	for i := 0; i < 10; i++ {
+		session := <-delCh
+		delSessions = append(delSessions, session)
+	}
+	assert.Equal(t, len(addSessions), 10)
 }
