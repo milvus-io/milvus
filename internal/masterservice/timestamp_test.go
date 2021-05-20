@@ -112,8 +112,7 @@ func BenchmarkAllocTimestamp(b *testing.B) {
 	err = core.SetDataService(ctx, &tbd{})
 	assert.Nil(b, err)
 
-	err = core.SetIndexService(&tbi{})
-	assert.Nil(b, err)
+	core.SetIndexService(&tbi{})
 
 	core.SetQueryService(&tbq{})
 

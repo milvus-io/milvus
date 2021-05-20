@@ -896,7 +896,7 @@ func (t *DropIndexReqTask) Execute(ctx context.Context) error {
 	if len(info) != 1 {
 		return fmt.Errorf("len(index) = %d", len(info))
 	}
-	err = t.core.DropIndexReq(ctx, info[0].IndexID)
+	err = t.core.SendDropIndexReq(ctx, info[0].IndexID)
 	if err != nil {
 		return err
 	}

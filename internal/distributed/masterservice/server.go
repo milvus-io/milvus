@@ -192,9 +192,7 @@ func (s *Server) init() error {
 	if s.newIndexServiceClient != nil {
 		log.Debug("index service", zap.String("address", Params.IndexServiceAddress))
 		indexService := s.newIndexServiceClient(Params.IndexServiceAddress)
-		if err := s.masterService.SetIndexService(indexService); err != nil {
-			panic(err)
-		}
+		s.masterService.SetIndexService(indexService)
 		s.indexService = indexService
 	}
 	if s.newQueryServiceClient != nil {

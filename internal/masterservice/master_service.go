@@ -120,8 +120,8 @@ type Core struct {
 	GetNumRowsReq                        func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error)
 
 	//call index builder's client to build index, return build id
-	BuildIndexReq func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error)
-	DropIndexReq  func(ctx context.Context, indexID typeutil.UniqueID) error
+	//BuildIndexReq func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error)
+	//DropIndexReq  func(ctx context.Context, indexID typeutil.UniqueID) error
 
 	//proxy service interface, notify proxy service to drop collection
 	InvalidateCollectionMetaCache func(ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error
@@ -219,12 +219,12 @@ func (c *Core) checkInit() error {
 	if c.GetNumRowsReq == nil {
 		return fmt.Errorf("GetNumRowsReq is nil")
 	}
-	if c.BuildIndexReq == nil {
-		return fmt.Errorf("BuildIndexReq is nil")
-	}
-	if c.DropIndexReq == nil {
-		return fmt.Errorf("DropIndexReq is nil")
-	}
+	//if c.BuildIndexReq == nil {
+	//	return fmt.Errorf("BuildIndexReq is nil")
+	//}
+	//if c.DropIndexReq == nil {
+	//	return fmt.Errorf("DropIndexReq is nil")
+	//}
 	if c.InvalidateCollectionMetaCache == nil {
 		return fmt.Errorf("InvalidateCollectionMetaCache is nil")
 	}
@@ -716,37 +716,74 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 	return nil
 }
 
-func (c *Core) SetIndexService(s types.IndexService) error {
-	c.BuildIndexReq = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
-		rsp, err := s.BuildIndex(ctx, &indexpb.BuildIndexRequest{
-			DataPaths:   binlog,
-			TypeParams:  field.TypeParams,
-			IndexParams: idxInfo.IndexParams,
-			IndexID:     idxInfo.IndexID,
-			IndexName:   idxInfo.IndexName,
-		})
-		if err != nil {
-			return 0, err
-		}
-		if rsp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return 0, fmt.Errorf("BuildIndex from index service failed, error = %s", rsp.Status.Reason)
-		}
-		return rsp.IndexBuildID, nil
-	}
+func (c *Core) SetIndexService(s types.IndexService) {
+	c.indexServiceClient = s
+	//c.BuildIndexReq = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
+	//	rsp, err := s.BuildIndex(ctx, &indexpb.BuildIndexRequest{
+	//		DataPaths:   binlog,
+	//		TypeParams:  field.TypeParams,
+	//		IndexParams: idxInfo.IndexParams,
+	//		IndexID:     idxInfo.IndexID,
+	//		IndexName:   idxInfo.IndexName,
+	//	})
+	//	if err != nil {
+	//		return 0, err
+	//	}
+	//	if rsp.Status.ErrorCode != commonpb.ErrorCode_Success {
+	//		return 0, fmt.Errorf("BuildIndex from index service failed, error = %s", rsp.Status.Reason)
+	//	}
+	//	return rsp.IndexBuildID, nil
+	//}
+	//
+	//c.DropIndexReq = func(ctx context.Context, indexID typeutil.UniqueID) error {
+	//	rsp, err := s.DropIndex(ctx, &indexpb.DropIndexRequest{
+	//		IndexID: indexID,
+	//	})
+	//	if err != nil {
+	//		return err
+	//	}
+	//	if rsp.ErrorCode != commonpb.ErrorCode_Success {
+	//		return fmt.Errorf(rsp.Reason)
+	//	}
+	//	return nil
+	//}
+	//
+	//return nil
+}
 
-	c.DropIndexReq = func(ctx context.Context, indexID typeutil.UniqueID) error {
-		rsp, err := s.DropIndex(ctx, &indexpb.DropIndexRequest{
-			IndexID: indexID,
-		})
-		if err != nil {
-			return err
-		}
-		if rsp.ErrorCode != commonpb.ErrorCode_Success {
-			return fmt.Errorf(rsp.Reason)
-		}
-		return nil
+func (c *Core) SendBuildIndexReq(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
+	if c.indexServiceClient == nil {
+		return 0, fmt.Errorf("indexServiceClient nil")
 	}
+	rsp, err := c.indexServiceClient.BuildIndex(ctx, &indexpb.BuildIndexRequest{
+		DataPaths:   binlog,
+		TypeParams:  field.TypeParams,
+		IndexParams: idxInfo.IndexParams,
+		IndexID:     idxInfo.IndexID,
+		IndexName:   idxInfo.IndexName,
+	})
+	if err != nil {
+		return 0, err
+	}
+	if rsp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return 0, fmt.Errorf("BuildIndex from index service failed, error = %s", rsp.Status.Reason)
+	}
+	return rsp.IndexBuildID, nil
+}
 
+func (c *Core) SendDropIndexReq(ctx context.Context, indexID typeutil.UniqueID) error {
+	if c.indexServiceClient == nil {
+		return fmt.Errorf("indexServiceClient nil")
+	}
+	rsp, err := c.indexServiceClient.DropIndex(ctx, &indexpb.DropIndexRequest{
+		IndexID: indexID,
+	})
+	if err != nil {
+		return err
+	}
+	if rsp.ErrorCode != commonpb.ErrorCode_Success {
+		return fmt.Errorf(rsp.Reason)
+	}
 	return nil
 }
 
@@ -817,7 +854,7 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 		if err != nil {
 			return err
 		}
-		bldID, err = c.BuildIndexReq(c.ctx, binlogs, field, idxInfo)
+		bldID, err = c.SendBuildIndexReq(c.ctx, binlogs, field, idxInfo)
 		if err != nil {
 			return err
 		}
