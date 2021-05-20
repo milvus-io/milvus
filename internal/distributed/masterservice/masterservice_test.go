@@ -15,7 +15,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -294,21 +293,21 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, createCollectionArray[1].Base.MsgType, commonpb.MsgType_CreateCollection)
 		assert.Equal(t, createCollectionArray[1].CollectionName, "testColl-again")
 
-		//time stamp go back
-		schema.Name = "testColl-goback"
-		sbf, err = proto.Marshal(&schema)
-		assert.Nil(t, err)
-		req.CollectionName = schema.Name
-		req.Schema = sbf
-		req.Base.MsgID = 103
-		req.Base.Timestamp = 103
-		req.Base.SourceID = 103
-		status, err = cli.CreateCollection(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
-		matched, err := regexp.MatchString("input timestamp = [0-9]+, last dd time stamp = [0-9]+", status.Reason)
-		assert.Nil(t, err)
-		assert.True(t, matched)
+		//time stamp go back, master response to add the timestamp, so the time tick will never go back
+		//schema.Name = "testColl-goback"
+		//sbf, err = proto.Marshal(&schema)
+		//assert.Nil(t, err)
+		//req.CollectionName = schema.Name
+		//req.Schema = sbf
+		//req.Base.MsgID = 103
+		//req.Base.Timestamp = 103
+		//req.Base.SourceID = 103
+		//status, err = cli.CreateCollection(ctx, req)
+		//assert.Nil(t, err)
+		//assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+		//matched, err := regexp.MatchString("input timestamp = [0-9]+, last dd time stamp = [0-9]+", status.Reason)
+		//assert.Nil(t, err)
+		//assert.True(t, matched)
 	})
 
 	t.Run("has collection", func(t *testing.T) {

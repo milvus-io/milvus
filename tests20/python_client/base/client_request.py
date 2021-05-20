@@ -9,8 +9,8 @@ from base.index import ApiIndex
 from base.utility import ApiUtility
 
 from config.test_info import test_info
-from common.common_func import *
-from check.func_check import *
+from utils.util_log import test_log as log
+from common import common_func as cf
 
 
 def request_catch():
@@ -82,7 +82,7 @@ class Base:
     @pytest.fixture(scope="module", autouse=True)
     def initialize_env(self, request):
         """ clean log before testing """
-        modify_file([test_info.log_info, test_info.log_err])
+        cf.modify_file([test_info.log_info, test_info.log_err])
         log.info("[initialize_milvus] Log cleaned up, start testing...")
 
         host = request.config.getoption("--host")
@@ -103,8 +103,10 @@ class ApiReq(Base):
         res = self.connection.create_connection(alias='default')
         return res
 
-    def _collection(self, name=gen_unique_str(), data=None, schema=None, check_res=None, **kwargs):
+    def _collection(self, name=None, data=None, schema=None, check_res=None, **kwargs):
         """ Testing func """
         self._connect()
-        res = self.collection.collection_init(name=name, data=data, schema=schema, check_res=check_res, **kwargs)
-        return res
+        name = cf.gen_unique_str("ApiReq") if name is None else name
+        schema = cf.gen_default_collection_schema() if schema is None else schema
+        collection = self.collection.collection_init(name=name, data=data, schema=schema, check_res=check_res, **kwargs)
+        return name, collection

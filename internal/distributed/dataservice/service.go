@@ -262,3 +262,8 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 func (s *Server) GetSegmentInfoChannel(ctx context.Context, req *datapb.GetSegmentInfoChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.dataService.GetSegmentInfoChannel(ctx)
 }
+
+//SaveBinlogPaths implement DataServiceServer, saves segment, collection binlog according to datanode request
+func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
+	return s.dataService.SaveBinlogPaths(ctx, req)
+}

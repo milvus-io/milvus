@@ -29,8 +29,6 @@ import (
 type reqTask interface {
 	Ctx() context.Context
 	Type() commonpb.MsgType
-	Ts() (typeutil.Timestamp, error)
-	IgnoreTimeStamp() bool
 	Execute(ctx context.Context) error
 	WaitToFinish() error
 	Notify(err error)
@@ -60,6 +58,26 @@ func (bt *baseReqTask) WaitToFinish() error {
 	}
 }
 
+type TimetickTask struct {
+	baseReqTask
+}
+
+func (t *TimetickTask) Ctx() context.Context {
+	return t.ctx
+}
+
+func (t *TimetickTask) Type() commonpb.MsgType {
+	return commonpb.MsgType_TimeTick
+}
+
+func (t *TimetickTask) Execute(ctx context.Context) error {
+	ts, err := t.core.TSOAllocator(1)
+	if err != nil {
+		return err
+	}
+	return t.core.SendTimeTick(ts)
+}
+
 type CreateCollectionReqTask struct {
 	baseReqTask
 	Req *milvuspb.CreateCollectionRequest
@@ -71,14 +89,6 @@ func (t *CreateCollectionReqTask) Ctx() context.Context {
 
 func (t *CreateCollectionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
-}
-
-func (t *CreateCollectionReqTask) Ts() (typeutil.Timestamp, error) {
-	return t.Req.Base.Timestamp, nil
-}
-
-func (t *CreateCollectionReqTask) IgnoreTimeStamp() bool {
-	return false
 }
 
 func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
@@ -122,15 +132,12 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	}
 	schema.Fields = append(schema.Fields, rowIDField, timeStampField)
 
-	collID, _, err := t.core.idAllocator(1)
+	collID, _, err := t.core.IDAllocator(1)
 	if err != nil {
 		return err
 	}
-	collTs, err := t.Ts()
-	if err != nil {
-		return err
-	}
-	partID, _, err := t.core.idAllocator(1)
+	collTs := t.Req.Base.Timestamp
+	partID, _, err := t.core.IDAllocator(1)
 	if err != nil {
 		return err
 	}
@@ -217,12 +224,15 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
-	ddOpStr, err := EncodeDdOperation(&ddCollReq, &ddPartReq, CreateCollectionDDType)
-	if err != nil {
-		return err
+	ddOp := func(ts typeutil.Timestamp) (string, error) {
+		if SetDDTimeTimeByMaster {
+			ddCollReq.Base.Timestamp = ts
+			ddPartReq.Base.Timestamp = ts
+		}
+		return EncodeDdOperation(&ddCollReq, &ddPartReq, CreateCollectionDDType)
 	}
 
-	_, err = t.core.MetaTable.AddCollection(&collInfo, &partInfo, idxInfo, ddOpStr)
+	ts, err := t.core.MetaTable.AddCollection(&collInfo, &partInfo, idxInfo, ddOp)
 	if err != nil {
 		return err
 	}
@@ -234,6 +244,10 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	err = t.core.SendDdCreatePartitionReq(ctx, &ddPartReq)
 	if err != nil {
 		return err
+	}
+
+	if SetDDTimeTimeByMaster {
+		t.core.SendTimeTick(ts)
 	}
 
 	// Update DDOperation in etcd
@@ -251,14 +265,6 @@ func (t *DropCollectionReqTask) Ctx() context.Context {
 
 func (t *DropCollectionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
-}
-
-func (t *DropCollectionReqTask) Ts() (typeutil.Timestamp, error) {
-	return t.Req.Base.Timestamp, nil
-}
-
-func (t *DropCollectionReqTask) IgnoreTimeStamp() bool {
-	return false
 }
 
 func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
@@ -281,12 +287,14 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
-	ddOpStr, err := EncodeDdOperation(&ddReq, nil, DropCollectionDDType)
-	if err != nil {
-		return err
+	ddOp := func(ts typeutil.Timestamp) (string, error) {
+		if SetDDTimeTimeByMaster {
+			ddReq.Base.Timestamp = ts
+		}
+		return EncodeDdOperation(&ddReq, nil, DropCollectionDDType)
 	}
 
-	_, err = t.core.MetaTable.DeleteCollection(collMeta.ID, ddOpStr)
+	ts, err := t.core.MetaTable.DeleteCollection(collMeta.ID, ddOp)
 	if err != nil {
 		return err
 	}
@@ -294,6 +302,10 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	err = t.core.SendDdDropCollectionReq(ctx, &ddReq)
 	if err != nil {
 		return err
+	}
+
+	if SetDDTimeTimeByMaster {
+		t.core.SendTimeTick(ts)
 	}
 
 	//notify query service to release collection
@@ -324,14 +336,6 @@ func (t *HasCollectionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
-func (t *HasCollectionReqTask) Ts() (typeutil.Timestamp, error) {
-	return t.Req.Base.Timestamp, nil
-}
-
-func (t *HasCollectionReqTask) IgnoreTimeStamp() bool {
-	return true
-}
-
 func (t *HasCollectionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_HasCollection {
 		return fmt.Errorf("has collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
@@ -357,14 +361,6 @@ func (t *DescribeCollectionReqTask) Ctx() context.Context {
 
 func (t *DescribeCollectionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
-}
-
-func (t *DescribeCollectionReqTask) Ts() (typeutil.Timestamp, error) {
-	return t.Req.Base.Timestamp, nil
-}
-
-func (t *DescribeCollectionReqTask) IgnoreTimeStamp() bool {
-	return true
 }
 
 func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
@@ -415,14 +411,6 @@ func (t *ShowCollectionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
-func (t *ShowCollectionReqTask) Ts() (typeutil.Timestamp, error) {
-	return t.Req.Base.Timestamp, nil
-}
-
-func (t *ShowCollectionReqTask) IgnoreTimeStamp() bool {
-	return true
-}
-
 func (t *ShowCollectionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_ShowCollections {
 		return fmt.Errorf("show collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
@@ -448,14 +436,6 @@ func (t *CreatePartitionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
-func (t *CreatePartitionReqTask) Ts() (typeutil.Timestamp, error) {
-	return t.Req.Base.Timestamp, nil
-}
-
-func (t *CreatePartitionReqTask) IgnoreTimeStamp() bool {
-	return false
-}
-
 func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_CreatePartition {
 		return fmt.Errorf("create partition, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
@@ -464,7 +444,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	partID, _, err := t.core.idAllocator(1)
+	partID, _, err := t.core.IDAllocator(1)
 	if err != nil {
 		return err
 	}
@@ -481,12 +461,14 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
-	ddOpStr, err := EncodeDdOperation(&ddReq, nil, CreatePartitionDDType)
-	if err != nil {
-		return err
+	ddOp := func(ts typeutil.Timestamp) (string, error) {
+		if SetDDTimeTimeByMaster {
+			ddReq.Base.Timestamp = ts
+		}
+		return EncodeDdOperation(&ddReq, nil, CreatePartitionDDType)
 	}
 
-	_, err = t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, ddOpStr)
+	ts, err := t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, ddOp)
 	if err != nil {
 		return err
 	}
@@ -494,6 +476,10 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	err = t.core.SendDdCreatePartitionReq(ctx, &ddReq)
 	if err != nil {
 		return err
+	}
+
+	if SetDDTimeTimeByMaster {
+		t.core.SendTimeTick(ts)
 	}
 
 	// error doesn't matter here
@@ -514,14 +500,6 @@ func (t *DropPartitionReqTask) Ctx() context.Context {
 
 func (t *DropPartitionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
-}
-
-func (t *DropPartitionReqTask) Ts() (typeutil.Timestamp, error) {
-	return t.Req.Base.Timestamp, nil
-}
-
-func (t *DropPartitionReqTask) IgnoreTimeStamp() bool {
-	return false
 }
 
 func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
@@ -549,12 +527,14 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
-	ddOpStr, err := EncodeDdOperation(&ddReq, nil, DropPartitionDDType)
-	if err != nil {
-		return err
+	ddOp := func(ts typeutil.Timestamp) (string, error) {
+		if SetDDTimeTimeByMaster {
+			ddReq.Base.Timestamp = ts
+		}
+		return EncodeDdOperation(&ddReq, nil, DropPartitionDDType)
 	}
 
-	_, _, err = t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, ddOpStr)
+	ts, _, err := t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, ddOp)
 	if err != nil {
 		return err
 	}
@@ -562,6 +542,10 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	err = t.core.SendDdDropPartitionReq(ctx, &ddReq)
 	if err != nil {
 		return err
+	}
+
+	if SetDDTimeTimeByMaster {
+		t.core.SendTimeTick(ts)
 	}
 
 	// error doesn't matter here
@@ -583,14 +567,6 @@ func (t *HasPartitionReqTask) Ctx() context.Context {
 
 func (t *HasPartitionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
-}
-
-func (t *HasPartitionReqTask) Ts() (typeutil.Timestamp, error) {
-	return t.Req.Base.Timestamp, nil
-}
-
-func (t *HasPartitionReqTask) IgnoreTimeStamp() bool {
-	return true
 }
 
 func (t *HasPartitionReqTask) Execute(ctx context.Context) error {
@@ -617,14 +593,6 @@ func (t *ShowPartitionReqTask) Ctx() context.Context {
 
 func (t *ShowPartitionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
-}
-
-func (t *ShowPartitionReqTask) Ts() (typeutil.Timestamp, error) {
-	return t.Req.Base.Timestamp, nil
-}
-
-func (t *ShowPartitionReqTask) IgnoreTimeStamp() bool {
-	return true
 }
 
 func (t *ShowPartitionReqTask) Execute(ctx context.Context) error {
@@ -664,14 +632,6 @@ func (t *DescribeSegmentReqTask) Ctx() context.Context {
 
 func (t *DescribeSegmentReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
-}
-
-func (t *DescribeSegmentReqTask) Ts() (typeutil.Timestamp, error) {
-	return t.Req.Base.Timestamp, nil
-}
-
-func (t *DescribeSegmentReqTask) IgnoreTimeStamp() bool {
-	return true
 }
 
 func (t *DescribeSegmentReqTask) Execute(ctx context.Context) error {
@@ -726,14 +686,6 @@ func (t *ShowSegmentReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
-func (t *ShowSegmentReqTask) Ts() (typeutil.Timestamp, error) {
-	return t.Req.Base.Timestamp, nil
-}
-
-func (t *ShowSegmentReqTask) IgnoreTimeStamp() bool {
-	return true
-}
-
 func (t *ShowSegmentReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_ShowSegments {
 		return fmt.Errorf("show segments, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
@@ -773,20 +725,12 @@ func (t *CreateIndexReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
-func (t *CreateIndexReqTask) Ts() (typeutil.Timestamp, error) {
-	return t.Req.Base.Timestamp, nil
-}
-
-func (t *CreateIndexReqTask) IgnoreTimeStamp() bool {
-	return false
-}
-
 func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_CreateIndex {
 		return fmt.Errorf("create index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
 	indexName := Params.DefaultIndexName //TODO, get name from request
-	indexID, _, err := t.core.idAllocator(1)
+	indexID, _, err := t.core.IDAllocator(1)
 	if err != nil {
 		return err
 	}
@@ -827,14 +771,6 @@ func (t *DescribeIndexReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
-func (t *DescribeIndexReqTask) Ts() (typeutil.Timestamp, error) {
-	return t.Req.Base.Timestamp, nil
-}
-
-func (t *DescribeIndexReqTask) IgnoreTimeStamp() bool {
-	return true
-}
-
 func (t *DescribeIndexReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DescribeIndex {
 		return fmt.Errorf("describe index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
@@ -871,14 +807,6 @@ func (t *DropIndexReqTask) Ctx() context.Context {
 
 func (t *DropIndexReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
-}
-
-func (t *DropIndexReqTask) Ts() (typeutil.Timestamp, error) {
-	return t.Req.Base.Timestamp, nil
-}
-
-func (t *DropIndexReqTask) IgnoreTimeStamp() bool {
-	return false
 }
 
 func (t *DropIndexReqTask) Execute(ctx context.Context) error {

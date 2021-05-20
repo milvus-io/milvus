@@ -8,6 +8,7 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
+
 package dataservice
 
 import (
@@ -881,5 +882,59 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.Infos = infos
+	return resp, nil
+}
+
+// SaveBinlogPaths implement DataServiceServer
+func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
+	resp := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+	if !s.checkStateIsHealthy() {
+		resp.Reason = "server is initializing"
+		return resp, nil
+	}
+
+	// check segment id & collection id matched
+	_, err := s.meta.GetCollection(req.GetCollectionID())
+	if err != nil {
+		log.Error("Failed to get collection info", zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
+		resp.Reason = err.Error()
+		return resp, err
+	}
+
+	segInfo, err := s.meta.GetSegment(req.GetSegmentID())
+	if err != nil {
+		log.Error("Failed to get segment info", zap.Int64("segmentID", req.GetSegmentID()), zap.Error(err))
+		resp.Reason = err.Error()
+		return resp, err
+	}
+	log.Debug("segment", zap.Int64("segment", segInfo.CollectionID))
+
+	meta := make(map[string]string)
+	fieldMeta, err := s.prepareField2PathMeta(req.SegmentID, req.Field2BinlogPaths)
+	if err != nil {
+		resp.Reason = err.Error()
+		return resp, err
+	}
+	for k, v := range fieldMeta {
+		meta[k] = v
+	}
+	ddlMeta, err := s.prepareDDLBinlogMeta(req.CollectionID,
+		req.GetColl2TsBinlogPaths(), req.GetColl2DdlBinlogPaths())
+	if err != nil {
+		resp.Reason = err.Error()
+		return resp, err
+	}
+	for k, v := range ddlMeta {
+		meta[k] = v
+	}
+	err = s.SaveBinLogMetaTxn(meta)
+	if err != nil {
+		resp.Reason = err.Error()
+		return resp, err
+	}
+
+	resp.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }

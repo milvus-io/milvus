@@ -47,21 +47,23 @@ type ParamTable struct {
 	MasterAddress string
 	PulsarAddress string
 
-	QueryNodeNum              int
-	QueryNodeIDList           []UniqueID
-	ProxyID                   UniqueID
-	TimeTickInterval          time.Duration
-	K2SChannelNames           []string
-	SearchChannelNames        []string
-	SearchResultChannelNames  []string
-	ProxySubName              string
-	ProxyTimeTickChannelNames []string
-	MsgStreamTimeTickBufSize  int64
-	MaxNameLength             int64
-	MaxFieldNum               int64
-	MaxDimension              int64
-	DefaultPartitionName      string
-	DefaultIndexName          string
+	QueryNodeNum               int
+	QueryNodeIDList            []UniqueID
+	ProxyID                    UniqueID
+	TimeTickInterval           time.Duration
+	K2SChannelNames            []string
+	SearchChannelNames         []string
+	SearchResultChannelNames   []string
+	RetrieveChannelNames       []string
+	RetrieveResultChannelNames []string
+	ProxySubName               string
+	ProxyTimeTickChannelNames  []string
+	MsgStreamTimeTickBufSize   int64
+	MaxNameLength              int64
+	MaxFieldNum                int64
+	MaxDimension               int64
+	DefaultPartitionName       string
+	DefaultIndexName           string
 
 	PulsarMaxMessageSize int
 	Log                  log.Config

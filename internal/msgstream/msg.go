@@ -342,6 +342,104 @@ func (srt *SearchResultMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	return searchResultMsg, nil
 }
 
+////////////////////////////////////////Retrieve/////////////////////////////////////////
+type RetrieveMsg struct {
+	BaseMsg
+	internalpb.RetrieveRequest
+}
+
+func (rm *RetrieveMsg) TraceCtx() context.Context {
+	return rm.BaseMsg.Ctx
+}
+
+func (rm *RetrieveMsg) SetTraceCtx(ctx context.Context) {
+	rm.BaseMsg.Ctx = ctx
+}
+
+func (rm *RetrieveMsg) ID() UniqueID {
+	return rm.Base.MsgID
+}
+
+func (rm *RetrieveMsg) Type() MsgType {
+	return rm.Base.MsgType
+}
+
+func (rm *RetrieveMsg) Marshal(input TsMsg) (MarshalType, error) {
+	retrieveTask := input.(*RetrieveMsg)
+	retrieveRequest := &retrieveTask.RetrieveRequest
+	mb, err := proto.Marshal(retrieveRequest)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (rm *RetrieveMsg) Unmarshal(input MarshalType) (TsMsg, error) {
+	retrieveRequest := internalpb.RetrieveRequest{}
+	in, err := ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &retrieveRequest)
+	if err != nil {
+		return nil, err
+	}
+	retrieveMsg := &RetrieveMsg{RetrieveRequest: retrieveRequest}
+	retrieveMsg.BeginTimestamp = retrieveMsg.Base.Timestamp
+	retrieveMsg.EndTimestamp = retrieveMsg.Base.Timestamp
+
+	return retrieveMsg, nil
+}
+
+//////////////////////////////////////RetrieveResult///////////////////////////////////////
+type RetrieveResultMsg struct {
+	BaseMsg
+	internalpb.RetrieveResults
+}
+
+func (rrm *RetrieveResultMsg) TraceCtx() context.Context {
+	return rrm.BaseMsg.Ctx
+}
+
+func (rrm *RetrieveResultMsg) SetTraceCtx(ctx context.Context) {
+	rrm.BaseMsg.Ctx = ctx
+}
+
+func (rrm *RetrieveResultMsg) ID() UniqueID {
+	return rrm.Base.MsgID
+}
+
+func (rrm *RetrieveResultMsg) Type() MsgType {
+	return rrm.Base.MsgType
+}
+
+func (rrm *RetrieveResultMsg) Marshal(input TsMsg) (MarshalType, error) {
+	retrieveResultTask := input.(*RetrieveResultMsg)
+	retrieveResultRequest := &retrieveResultTask.RetrieveResults
+	mb, err := proto.Marshal(retrieveResultRequest)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (rrm *RetrieveResultMsg) Unmarshal(input MarshalType) (TsMsg, error) {
+	retrieveResultRequest := internalpb.RetrieveResults{}
+	in, err := ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &retrieveResultRequest)
+	if err != nil {
+		return nil, err
+	}
+	retrieveResultMsg := &RetrieveResultMsg{RetrieveResults: retrieveResultRequest}
+	retrieveResultMsg.BeginTimestamp = retrieveResultMsg.Base.Timestamp
+	retrieveResultMsg.EndTimestamp = retrieveResultMsg.Base.Timestamp
+
+	return retrieveResultMsg, nil
+}
+
 /////////////////////////////////////////TimeTick//////////////////////////////////////////
 type TimeTickMsg struct {
 	BaseMsg

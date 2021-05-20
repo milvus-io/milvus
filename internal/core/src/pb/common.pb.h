@@ -227,6 +227,8 @@ enum MsgType : int {
   GetIndexBuildProgress = 503,
   GetCollectionStatistics = 504,
   GetPartitionStatistics = 505,
+  Retrieve = 506,
+  RetrieveResult = 507,
   SegmentInfo = 600,
   TimeTick = 1200,
   QueryNodeStats = 1201,
