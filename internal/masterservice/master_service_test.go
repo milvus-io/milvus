@@ -242,8 +242,7 @@ func TestMasterService(t *testing.T) {
 		collID: nil,
 		mutex:  sync.Mutex{},
 	}
-	err = core.SetQueryService(qm)
-	assert.Nil(t, err)
+	core.SetQueryService(qm)
 
 	err = core.Init()
 	assert.Nil(t, err)
@@ -1729,11 +1728,11 @@ func TestCheckInit(t *testing.T) {
 
 	c.DataNodeSegmentFlushCompletedChan = make(chan int64)
 	err = c.checkInit()
-	assert.NotNil(t, err)
-
-	c.ReleaseCollection = func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID) error {
-		return nil
-	}
-	err = c.checkInit()
+	//assert.NotNil(t, err)
+	//
+	//c.ReleaseCollection = func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID) error {
+	//	return nil
+	//}
+	//err = c.checkInit()
 	assert.Nil(t, err)
 }

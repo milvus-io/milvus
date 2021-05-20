@@ -298,7 +298,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 
 	//notify query service to release collection
 	go func() {
-		if err = t.core.ReleaseCollection(t.core.ctx, t.Req.Base.Timestamp, 0, collMeta.ID); err != nil {
+		if err = t.core.SendReleaseCollectionReq(t.core.ctx, t.Req.Base.Timestamp, 0, collMeta.ID); err != nil {
 			log.Warn("ReleaseCollection failed", zap.String("error", err.Error()))
 		}
 	}()

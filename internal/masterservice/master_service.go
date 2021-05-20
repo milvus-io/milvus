@@ -127,7 +127,12 @@ type Core struct {
 	InvalidateCollectionMetaCache func(ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error
 
 	//query service interface, notify query service to release collection
-	ReleaseCollection func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error
+	//ReleaseCollection func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error
+
+	proxyServiceClient types.ProxyService
+	dataServiceClient  types.DataService
+	indexServiceClient types.IndexService
+	queryServiceClient types.QueryService
 
 	//dd request scheduler
 	ddReqQueue      chan reqTask //dd request will be push into this chan
@@ -226,9 +231,9 @@ func (c *Core) checkInit() error {
 	if c.DataNodeSegmentFlushCompletedChan == nil {
 		return fmt.Errorf("DataNodeSegmentFlushCompletedChan is nil")
 	}
-	if c.ReleaseCollection == nil {
-		return fmt.Errorf("ReleaseCollection is nil")
-	}
+	//if c.ReleaseCollection == nil {
+	//	return fmt.Errorf("ReleaseCollection is nil")
+	//}
 	return nil
 }
 
@@ -745,26 +750,51 @@ func (c *Core) SetIndexService(s types.IndexService) error {
 	return nil
 }
 
-func (c *Core) SetQueryService(s types.QueryService) error {
-	c.ReleaseCollection = func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
-		req := &querypb.ReleaseCollectionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_ReleaseCollection,
-				MsgID:     0, //TODO, msg ID
-				Timestamp: ts,
-				SourceID:  int64(Params.NodeID),
-			},
-			DbID:         dbID,
-			CollectionID: collectionID,
-		}
-		rsp, err := s.ReleaseCollection(ctx, req)
-		if err != nil {
-			return err
-		}
-		if rsp.ErrorCode != commonpb.ErrorCode_Success {
-			return fmt.Errorf("ReleaseCollection from query service failed, error = %s", rsp.Reason)
-		}
-		return nil
+func (c *Core) SetQueryService(s types.QueryService) {
+	c.queryServiceClient = s
+	//c.ReleaseCollection = func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
+	//	req := &querypb.ReleaseCollectionRequest{
+	//		Base: &commonpb.MsgBase{
+	//			MsgType:   commonpb.MsgType_ReleaseCollection,
+	//			MsgID:     0, //TODO, msg ID
+	//			Timestamp: ts,
+	//			SourceID:  int64(Params.NodeID),
+	//		},
+	//		DbID:         dbID,
+	//		CollectionID: collectionID,
+	//	}
+	//	rsp, err := s.ReleaseCollection(ctx, req)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	if rsp.ErrorCode != commonpb.ErrorCode_Success {
+	//		return fmt.Errorf("ReleaseCollection from query service failed, error = %s", rsp.Reason)
+	//	}
+	//	return nil
+	//}
+	//return nil
+}
+
+func (c *Core) SendReleaseCollectionReq(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
+	if c.queryServiceClient == nil {
+		return fmt.Errorf("queryServiceClient nil")
+	}
+	req := &querypb.ReleaseCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_ReleaseCollection,
+			MsgID:     0, //TODO, msg ID
+			Timestamp: ts,
+			SourceID:  int64(Params.NodeID),
+		},
+		DbID:         dbID,
+		CollectionID: collectionID,
+	}
+	rsp, err := c.queryServiceClient.ReleaseCollection(ctx, req)
+	if err != nil {
+		return err
+	}
+	if rsp.ErrorCode != commonpb.ErrorCode_Success {
+		return fmt.Errorf("ReleaseCollection from query service failed, error = %s", rsp.Reason)
 	}
 	return nil
 }
