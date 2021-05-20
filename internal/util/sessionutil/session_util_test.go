@@ -1,8 +1,6 @@
 package sessionutil
 
 import (
-	"fmt"
-	"math/rand"
 	"sync"
 	"testing"
 	"time"
@@ -18,8 +16,6 @@ var Params paramtable.BaseTable
 
 func TestGetServerIDConcurrently(t *testing.T) {
 	ctx := context.Background()
-	rand.Seed(time.Now().UnixNano())
-	randVal := rand.Int()
 	Params.Init()
 
 	etcdAddr, err := Params.Load("_EtcdAddress")
@@ -29,8 +25,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
-	rootPath := fmt.Sprintf("/%d/test/meta", randVal)
-	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
+	etcdKV := etcdkv.NewEtcdKV(cli, "")
 
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("")
@@ -38,13 +33,12 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	var wg sync.WaitGroup
 	var muList sync.Mutex = sync.Mutex{}
 
-	self := NewSession("test", "testAddr", false)
-	sm := NewSessionManager(ctx, etcdAddr, rootPath, self)
+	s := NewSession(ctx, etcdAddr, "test", "testAddr", false)
 	res := make([]int64, 0)
 
 	getIDFunc := func() {
-		sm.checkIDExist()
-		id, err := sm.getServerID()
+		s.checkIDExist()
+		id, err := s.getServerID()
 		assert.Nil(t, err)
 		muList.Lock()
 		res = append(res, id)
@@ -65,8 +59,6 @@ func TestGetServerIDConcurrently(t *testing.T) {
 
 func TestInit(t *testing.T) {
 	ctx := context.Background()
-	rand.Seed(time.Now().UnixNano())
-	randVal := rand.Int()
 	Params.Init()
 
 	etcdAddr, err := Params.Load("_EtcdAddress")
@@ -76,23 +68,18 @@ func TestInit(t *testing.T) {
 
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
-	rootPath := fmt.Sprintf("/%d/test/meta", randVal)
-	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
+	etcdKV := etcdkv.NewEtcdKV(cli, "")
 
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("")
 
-	self := NewSession("test", "testAddr", false)
-	sm := NewSessionManager(ctx, etcdAddr, rootPath, self)
-	sm.Init()
-	assert.NotEqual(t, 0, sm.Self.LeaseID)
-	assert.NotEqual(t, 0, sm.Self.ServerID)
+	s := NewSession(ctx, etcdAddr, "test", "testAddr", false)
+	assert.NotEqual(t, 0, s.leaseID)
+	assert.NotEqual(t, 0, s.ServerID)
 }
 
 func TestUpdateSessions(t *testing.T) {
 	ctx := context.Background()
-	rand.Seed(time.Now().UnixNano())
-	randVal := rand.Int()
 	Params.Init()
 
 	etcdAddr, err := Params.Load("_EtcdAddress")
@@ -102,8 +89,7 @@ func TestUpdateSessions(t *testing.T) {
 
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
-	rootPath := fmt.Sprintf("/%d/test/meta", randVal)
-	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
+	etcdKV := etcdkv.NewEtcdKV(cli, "")
 
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("")
@@ -111,21 +97,20 @@ func TestUpdateSessions(t *testing.T) {
 	var wg sync.WaitGroup
 	var muList sync.Mutex = sync.Mutex{}
 
-	self := NewSession("test", "testAddr", false)
-	sm := NewSessionManager(ctx, etcdAddr, rootPath, self)
+	s := NewSession(ctx, etcdAddr, "test", "testAddr", false)
 
-	err = sm.UpdateSessions("test")
+	sessions, err := s.GetSessions("test")
 	assert.Nil(t, err)
-	addCh, delCh := sm.WatchServices(ctx, "test")
+	assert.Equal(t, len(sessions), 0)
+	addCh, delCh := s.WatchServices(ctx, "test")
 
-	sessionManagers := make([]*SessionManager, 0)
+	sList := []*Session{}
 
 	getIDFunc := func() {
-		service := NewSession("test", "testAddr", false)
-		singleManager := NewSessionManager(ctx, etcdAddr, rootPath, service)
-		singleManager.Init()
+		singleS := NewSession(ctx, etcdAddr, "test", "testAddr", false)
+		singleS.Init()
 		muList.Lock()
-		sessionManagers = append(sessionManagers, singleManager)
+		sList = append(sList, singleS)
 		muList.Unlock()
 		wg.Done()
 	}
@@ -137,13 +122,16 @@ func TestUpdateSessions(t *testing.T) {
 	wg.Wait()
 
 	assert.Eventually(t, func() bool {
-		return len(sm.GetSessions("test")) == 10
+		sessions, _ := s.GetSessions("test")
+		return len(sessions) == 10
 	}, 10*time.Second, 100*time.Millisecond)
-	assert.Equal(t, len(sm.GetSessions("testt")), 0)
+	notExistSessions, _ := s.GetSessions("testt")
+	assert.Equal(t, len(notExistSessions), 0)
 
 	etcdKV.RemoveWithPrefix("")
 	assert.Eventually(t, func() bool {
-		return len(sm.GetSessions("test")) == 0
+		sessions, _ := s.GetSessions("test")
+		return len(sessions) == 0
 	}, 10*time.Second, 100*time.Millisecond)
 
 	addSessions := []*Session{}
