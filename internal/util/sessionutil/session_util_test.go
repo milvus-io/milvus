@@ -136,7 +136,9 @@ func TestUpdateSessions(t *testing.T) {
 	}
 	wg.Wait()
 
-	assert.Equal(t, len(sm.GetSessions("test")), 10)
+	assert.Eventually(t, func() bool {
+		return len(sm.GetSessions("test")) == 10
+	}, 10*time.Second, 100*time.Millisecond)
 	assert.Equal(t, len(sm.GetSessions("testt")), 0)
 
 	etcdKV.RemoveWithPrefix("")
