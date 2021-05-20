@@ -58,7 +58,8 @@ class TestIndexBase:
         ids = connect.insert(collection, default_entities)
         connect.create_index(collection, field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
-            index = connect.describe_index(collection, field_name)
+            index = connect.describe_index(collection, "")
+            create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
@@ -94,7 +95,8 @@ class TestIndexBase:
         '''
         connect.create_index(collection, field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
-            index = connect.describe_index(collection, field_name)
+            index = connect.describe_index(collection, "")
+            create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -108,7 +110,8 @@ class TestIndexBase:
         ids = connect.insert(collection, default_entities, partition_tag=default_tag)
         connect.create_index(collection, field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
-            index = connect.describe_index(collection, field_name)
+            index = connect.describe_index(collection, "")
+            create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
@@ -124,7 +127,8 @@ class TestIndexBase:
         connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
-            index = connect.describe_index(collection, field_name)
+            index = connect.describe_index(collection, "")
+            create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
 
     def test_create_index_without_connect(self, dis_connect, collection):
@@ -147,7 +151,7 @@ class TestIndexBase:
         ids = connect.insert(collection, default_entities)
         connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
-        logging.getLogger().info(connect.describe_index(collection, field_name))
+        logging.getLogger().info(connect.describe_index(collection, ""))
         nq = get_nq
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
@@ -169,7 +173,8 @@ class TestIndexBase:
         def build(connect):
             connect.create_index(collection, field_name, default_index)
             if default_index["index_type"] != "FLAT":
-                index = connect.describe_index(collection, field_name)
+                index = connect.describe_index(collection, "")
+                create_target_index(default_index, field_name)
                 assert index == default_index
 
         threads_num = 8
@@ -209,7 +214,8 @@ class TestIndexBase:
         stats = connect.get_collection_stats(collection)
         assert stats["row_count"] == default_nb
         if get_simple_index["index_type"] != "FLAT":
-            index = connect.describe_index(collection, field_name)
+            index = connect.describe_index(collection, "")
+            create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
 
     @pytest.mark.level(2)
@@ -223,7 +229,8 @@ class TestIndexBase:
         connect.create_index(collection, field_name, get_simple_index)
         connect.create_index(collection, field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
-            index = connect.describe_index(collection, field_name)
+            index = connect.describe_index(collection, "")
+            create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
 
     @pytest.mark.level(2)
@@ -241,7 +248,7 @@ class TestIndexBase:
             connect.create_index(collection, field_name, index)
             connect.release_collection(collection)
             connect.load_collection(collection)
-        index = connect.describe_index(collection, field_name)
+        index = connect.describe_index(collection, "")
         # assert index == indexs[-1]
         assert not index    # FLAT is the last index_type, drop all indexes in server
 
@@ -260,7 +267,8 @@ class TestIndexBase:
             connect.create_index(collection, field_name, index)
             connect.release_collection(collection)
             connect.load_collection(collection)
-        index = connect.describe_index(collection, field_name)
+        index = connect.describe_index(collection, "")
+        create_target_index(indexs[-1], field_name)
         assert index == indexs[-1]
         # assert not index  # FLAT is the last index_type, drop all indexes in server
 
@@ -276,7 +284,8 @@ class TestIndexBase:
         get_simple_index["metric_type"] = "IP"
         connect.create_index(collection, field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
-            index = connect.describe_index(collection, field_name)
+            index = connect.describe_index(collection, "")
+            create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
@@ -290,7 +299,8 @@ class TestIndexBase:
         get_simple_index["metric_type"] = "IP"
         connect.create_index(collection, field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
-            index = connect.describe_index(collection, field_name)
+            index = connect.describe_index(collection, "")
+            create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -305,7 +315,8 @@ class TestIndexBase:
         get_simple_index["metric_type"] = "IP"
         connect.create_index(collection, field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
-            index = connect.describe_index(collection, field_name)
+            index = connect.describe_index(collection, "")
+            create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
@@ -322,7 +333,8 @@ class TestIndexBase:
         get_simple_index["metric_type"] = "IP"
         connect.create_index(collection, field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
-            index = connect.describe_index(collection, field_name)
+            index = connect.describe_index(collection, "")
+            create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
@@ -339,7 +351,7 @@ class TestIndexBase:
         get_simple_index["metric_type"] = metric_type
         connect.create_index(collection, field_name, get_simple_index)
         connect.load_collection(collection)
-        logging.getLogger().info(connect.describe_index(collection, field_name))
+        logging.getLogger().info(connect.describe_index(collection, ""))
         nq = get_nq
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
@@ -361,7 +373,8 @@ class TestIndexBase:
             default_index["metric_type"] = "IP"
             connect.create_index(collection, field_name, default_index)
             if default_index["index_type"] != "FLAT":
-                index = connect.describe_index(collection, field_name)
+                index = connect.describe_index(collection, "")
+                create_target_index(default_index, field_name)
                 assert index == default_index
 
         threads_num = 8
@@ -402,7 +415,8 @@ class TestIndexBase:
         stats = connect.get_collection_stats(collection)
         assert stats["row_count"] == default_nb
         if default_index["index_type"] != "FLAT":
-            index = connect.describe_index(collection, field_name)
+            index = connect.describe_index(collection, "")
+            create_target_index(default_index, field_name)
             assert index == default_index
 
     @pytest.mark.level(2)
@@ -417,7 +431,8 @@ class TestIndexBase:
         connect.create_index(collection, field_name, default_index)
         connect.create_index(collection, field_name, default_index)
         if default_index["index_type"] != "FLAT":
-            index = connect.describe_index(collection, field_name)
+            index = connect.describe_index(collection, "")
+            create_target_index(default_index, field_name)
             assert index == default_index
 
     @pytest.mark.level(2)
@@ -439,7 +454,7 @@ class TestIndexBase:
             connect.create_index(collection, field_name, index)
             connect.release_collection(collection)
             connect.load_collection(collection)
-        index = connect.describe_index(collection, field_name)
+        index = connect.describe_index(collection, "")
         # assert index == indexs[-1]
         assert not index
 
@@ -458,7 +473,7 @@ class TestIndexBase:
         # ids = connect.insert(collection, entities)
         connect.create_index(collection, field_name, get_simple_index)
         connect.drop_index(collection, field_name)
-        index = connect.describe_index(collection, field_name)
+        index = connect.describe_index(collection, "")
         assert not index
 
     @pytest.mark.level(2)
@@ -471,7 +486,7 @@ class TestIndexBase:
         connect.create_index(collection, field_name, get_simple_index)
         connect.drop_index(collection, field_name)
         connect.drop_index(collection, field_name)
-        index = connect.describe_index(collection, field_name)
+        index = connect.describe_index(collection, "")
         assert not index
 
     @pytest.mark.level(2)
@@ -527,7 +542,7 @@ class TestIndexBase:
         get_simple_index["metric_type"] = "IP"
         connect.create_index(collection, field_name, get_simple_index)
         connect.drop_index(collection, field_name)
-        index = connect.describe_index(collection, field_name)
+        index = connect.describe_index(collection, "")
         assert not index
 
     @pytest.mark.level(2)
@@ -541,7 +556,7 @@ class TestIndexBase:
         connect.create_index(collection, field_name, get_simple_index)
         connect.drop_index(collection, field_name)
         connect.drop_index(collection, field_name)
-        index = connect.describe_index(collection, field_name)
+        index = connect.describe_index(collection, "")
         assert not index
 
     @pytest.mark.level(2)
@@ -581,7 +596,8 @@ class TestIndexBase:
         PQ_index = {"index_type": "IVF_PQ", "params": {"nlist": 128, "m": 16}, "metric_type": "L2"}
         ids = connect.insert(collection, default_entities)
         connect.create_index(collection, field_name, PQ_index)
-        index = connect.describe_index(collection, field_name)
+        index = connect.describe_index(collection, "")
+        create_target_index(PQ_index, field_name)
         assert index == PQ_index
 
 
@@ -640,7 +656,8 @@ class TestIndexBinary:
         '''
         ids = connect.insert(binary_collection, default_binary_entities)
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
-        binary_index = connect.describe_index(binary_collection, binary_field_name)
+        binary_index = connect.describe_index(binary_collection, "")
+        create_target_index(get_jaccard_index, binary_field_name)
         assert binary_index == get_jaccard_index
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
@@ -654,7 +671,8 @@ class TestIndexBinary:
         connect.create_partition(binary_collection, default_tag)
         ids = connect.insert(binary_collection, default_binary_entities, partition_tag=default_tag)
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
-        binary_index = connect.describe_index(binary_collection, binary_field_name)
+        binary_index = connect.describe_index(binary_collection, "")
+        create_target_index(get_jaccard_index, binary_field_name)
         assert binary_index == get_jaccard_index
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
@@ -752,7 +770,7 @@ class TestIndexBinary:
         stats = connect.get_collection_stats(binary_collection)
         logging.getLogger().info(stats)
         connect.drop_index(binary_collection, binary_field_name)
-        binary_index = connect.describe_index(binary_collection, binary_field_name)
+        binary_index = connect.describe_index(binary_collection, "")
         assert not binary_index
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
@@ -767,7 +785,7 @@ class TestIndexBinary:
         connect.flush([binary_collection])
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
         connect.drop_index(binary_collection, binary_field_name)
-        binary_index = connect.describe_index(binary_collection, binary_field_name)
+        binary_index = connect.describe_index(binary_collection, "")
         assert not binary_index
 
 
