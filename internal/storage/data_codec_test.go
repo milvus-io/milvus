@@ -228,13 +228,13 @@ func TestInsertCodec(t *testing.T) {
 			},
 		},
 	}
-	firstBlobs, err := insertCodec.Serialize(1, 1, insertDataFirst)
+	firstBlobs, _, err := insertCodec.Serialize(1, 1, insertDataFirst)
 	assert.Nil(t, err)
 	for _, blob := range firstBlobs {
 		blob.Key = fmt.Sprintf("1/insert_log/2/3/4/5/%d", 100)
 		assert.Equal(t, blob.GetKey(), blob.Key)
 	}
-	secondBlobs, err := insertCodec.Serialize(1, 1, insertDataSecond)
+	secondBlobs, _, err := insertCodec.Serialize(1, 1, insertDataSecond)
 	assert.Nil(t, err)
 	for _, blob := range secondBlobs {
 		blob.Key = fmt.Sprintf("1/insert_log/2/3/4/5/%d", 99)
@@ -353,7 +353,7 @@ func TestIndexCodec(t *testing.T) {
 func TestTsError(t *testing.T) {
 	insertData := &InsertData{}
 	insertCodec := NewInsertCodec(nil)
-	blobs, err := insertCodec.Serialize(1, 1, insertData)
+	blobs, _, err := insertCodec.Serialize(1, 1, insertData)
 	assert.Nil(t, blobs)
 	assert.NotNil(t, err)
 }
@@ -410,7 +410,7 @@ func TestSchemaError(t *testing.T) {
 		},
 	}
 	insertCodec := NewInsertCodec(schema)
-	blobs, err := insertCodec.Serialize(1, 1, insertData)
+	blobs, _, err := insertCodec.Serialize(1, 1, insertData)
 	assert.Nil(t, blobs)
 	assert.NotNil(t, err)
 }
