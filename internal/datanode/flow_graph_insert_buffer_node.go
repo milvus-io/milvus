@@ -626,7 +626,7 @@ func flushSegment(collMeta *etcdpb.CollectionMeta, segID, partitionID, collID Un
 		}
 
 		// no error raise if alloc=false
-		k, err := idAllocator.genKey(false, collID, partitionID, segID, fieldID, logidx)
+		k, _ := idAllocator.genKey(false, collID, partitionID, segID, fieldID, logidx)
 
 		key := path.Join(Params.InsertBinlogRootPath, k)
 		paths = append(paths, key)
@@ -647,7 +647,7 @@ func flushSegment(collMeta *etcdpb.CollectionMeta, segID, partitionID, collID Un
 		logidx := field2Logidx[fieldID]
 
 		// no error raise if alloc=false
-		k, err := idAllocator.genKey(false, collID, partitionID, segID, fieldID, logidx)
+		k, _ := idAllocator.genKey(false, collID, partitionID, segID, fieldID, logidx)
 
 		key := path.Join(Params.StatsBinlogRootPath, k)
 		kvs[key] = string(blob.Value[:])
