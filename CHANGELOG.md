@@ -5,6 +5,7 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 1.1.1 (TBD)
 ## Bug
 -   \#4897 Query results contain some deleted ids
+-   \#5164 Exception should be raised if insert or delete entity on the none-existed partition
 -   \#5191 Mishards throw "index out of range" error after continually search/insert for a period of time
 
 ## Feature

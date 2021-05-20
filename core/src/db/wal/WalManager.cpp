@@ -164,8 +164,10 @@ WalManager::GetNextRecovery(MXLogRecord& record) {
         auto it_col = collections_.find(record.collection_id);
         if (it_col != collections_.end()) {
             auto it_part = it_col->second.find(record.partition_tag);
-            if (it_part->second.flush_lsn < record.lsn) {
-                break;
+            if (it_part != it_col->second.end()) {
+                if (it_part->second.flush_lsn < record.lsn) {
+                    break;
+                }
             }
         }
     }
@@ -215,8 +217,10 @@ WalManager::GetNextRecord(MXLogRecord& record) {
         auto it_col = collections_.find(record.collection_id);
         if (it_col != collections_.end()) {
             auto it_part = it_col->second.find(record.partition_tag);
-            if (it_part->second.flush_lsn < record.lsn) {
-                break;
+            if (it_part != it_col->second.end()) {
+                if (it_part->second.flush_lsn < record.lsn) {
+                    break;
+                }
             }
         }
     }

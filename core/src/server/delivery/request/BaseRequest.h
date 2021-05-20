@@ -209,6 +209,9 @@ class BaseRequest {
     std::string
     CollectionNotExistMsg(const std::string& collection_name);
 
+    std::string
+    PartitionNotExistMsg(const std::string& collection_name, const std::string& partition_tag);
+
  protected:
     const std::shared_ptr<milvus::server::Context> context_;
 

@@ -159,6 +159,15 @@ class WalManager {
     void
     RemoveOldFiles(uint64_t flushed_lsn);
 
+    /*
+     * Get the LSN of the last inserting or deleting operation
+     * @retval lsn
+     */
+    uint64_t
+    GetLastAppliedLsn() {
+        return last_applied_lsn_;
+    }
+
  private:
     WalManager
     operator=(WalManager&);

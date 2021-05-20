@@ -100,6 +100,14 @@ InsertRequest::OnExecute() {
             }
         }
 
+        if (!partition_tag_.empty()) {
+            bool has_or_not;
+            DBWrapper::DB()->HasPartition(collection_name_, partition_tag_, has_or_not);
+            if (!has_or_not) {
+                return Status(SERVER_INVALID_PARTITION_TAG, PartitionNotExistMsg(collection_name_, partition_tag_));
+            }
+        }
+
         // step 3: check collection flag
         // all user provide id, or all internal id
         bool user_provide_ids = !vectors_data_.id_array_.empty();
