@@ -5,7 +5,7 @@ services:
       image: mysql:5.7
       volumes:
         - ./mysqld.cnf:/etc/mysql/mysql.conf.d/mysqld.cnf
-        - ./metadata:/var/lib/mysql
+#        - ./metadata:/var/lib/mysql
       environment:
         MYSQL_ROOT_PASSWORD: 'milvusroot'
         MYSQL_DATABASE: 'milvus'
@@ -16,9 +16,9 @@ services:
         retries: 2
 
     milvus_wr:
-        runtime: nvidia
+#        runtime: nvidia
         restart: always
-        image: milvusdb/milvus:1.1.0-gpu-d050721-5e559c
+        image: milvusdb/milvus:1.1.0-cpu-d050721-5e559c
         volumes:
             - /tmp/milvus/db:/var/lib/milvus/db
             - ./wr_server.yml:/var/lib/milvus/conf/server_config.yaml
@@ -27,9 +27,9 @@ services:
               condition: service_healthy
 
     milvus_ro:
-        runtime: nvidia
+#        runtime: nvidia
         restart: always
-        image: milvusdb/milvus:1.1.0-gpu-d050721-5e559c
+        image: milvusdb/milvus:1.1.0-cpu-d050721-5e559c
         volumes:
             - /tmp/milvus/db:/var/lib/milvus/db
             - ./ro_server.yml:/var/lib/milvus/conf/server_config.yaml
