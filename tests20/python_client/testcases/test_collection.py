@@ -48,12 +48,6 @@ class TestCollectionParams(ApiReq):
             pytest.skip("None schema is valid")
         yield request.param
 
-    def _create_default_collection(self):
-        c_name = cf.gen_unique_str(prefix)
-        collection, _ = self.collection.collection_init(c_name, schema=default_schema)
-        assert_default_collection(collection, c_name)
-        return c_name, collection
-
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(reason="issue #5224")
     def test_collection(self):
@@ -101,8 +95,7 @@ class TestCollectionParams(ApiReq):
         expected: collection properties consistent
         """
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        collection, _ = self.collection.collection_init(c_name, schema=default_schema)
+        c_name, collection = self._collection()
         assert_default_collection(collection, c_name)
         dup_collection, _ = self.collection.collection_init(c_name)
         assert_default_collection(dup_collection, c_name)
@@ -120,7 +113,8 @@ class TestCollectionParams(ApiReq):
         expected: raise exception
         """
         self._connect()
-        c_name, collection = self._create_default_collection()
+        c_name, collection = self._collection()
+        assert_default_collection(collection, c_name)
         fields = [cf.gen_int64_field()]
         schema = cf.gen_collection_schema(fields=fields)
         ex, _ = self.collection.collection_init(c_name, schema=schema)
@@ -135,7 +129,8 @@ class TestCollectionParams(ApiReq):
         expected: raise exception
         """
         self._connect()
-        c_name, collection = self._create_default_collection()
+        c_name, collection = self._collection()
+        assert_default_collection(collection, c_name)
         schema = cf.gen_default_collection_schema(primary_field=ct.default_int64_field)
         ex, _ = self.collection.collection_init(c_name, schema=schema)
         assert "The collection already exist, but the schema isnot the same as the passed in" in str(ex)
@@ -150,7 +145,8 @@ class TestCollectionParams(ApiReq):
         """
         self._connect()
         new_dim = 120
-        c_name, collection = self._create_default_collection()
+        c_name, collection = self._collection()
+        assert_default_collection(collection, c_name)
         schema = cf.gen_default_collection_schema()
         new_fields = cf.gen_float_vec_field(dim=new_dim)
         schema.fields[-1] = new_fields
@@ -167,7 +163,8 @@ class TestCollectionParams(ApiReq):
         expected: raise exception and
         """
         self._connect()
-        c_name, collection = self._create_default_collection()
+        c_name, collection = self._collection()
+        assert_default_collection(collection, c_name)
         ex, _ = self.collection.collection_init(c_name, schema=get_invalid_schema_type)
         assert "schema type must be schema.CollectionSchema" in str(ex)
         assert_default_collection(collection, c_name)
@@ -181,7 +178,8 @@ class TestCollectionParams(ApiReq):
         expected: two collection object is available
         """
         self._connect()
-        c_name, collection = self._create_default_collection()
+        c_name, collection = self._collection()
+        assert_default_collection(collection, c_name)
         dup_collection, _ = self.collection.collection_init(c_name, schema=default_schema)
         assert_default_collection(dup_collection, c_name)
         assert id(collection) == id(dup_collection)
@@ -196,7 +194,8 @@ class TestCollectionParams(ApiReq):
         """
         self._connect()
         nb = ct.default_nb
-        c_name, collection = self._create_default_collection()
+        c_name, collection = self._collection()
+        assert_default_collection(collection, c_name)
         df = cf.gen_default_dataframe_data(nb)
         dup_collection, _ = self.collection.collection_init(c_name, schema=None, data=df)
         assert_default_collection(dup_collection, c_name, exp_num=nb)
@@ -212,7 +211,8 @@ class TestCollectionParams(ApiReq):
         """
         self._connect()
         nb = ct.default_nb
-        c_name, collection = self._create_default_collection()
+        c_name, collection = self._collection()
+        assert_default_collection(collection, c_name)
         data = cf.gen_default_dataframe_data(nb)
         dup_collection, _ = self.collection.collection_init(c_name, schema=None, data=data)
         assert_default_collection(dup_collection, c_name, exp_num=nb)
