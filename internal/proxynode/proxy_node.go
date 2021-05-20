@@ -35,7 +35,6 @@ import (
 type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
-
 type ProxyNode struct {
 	ctx    context.Context
 	cancel func()
