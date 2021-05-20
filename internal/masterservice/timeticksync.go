@@ -61,6 +61,7 @@ func newTimeTickSync(ctx context.Context, factory msgstream.Factory) (*timetickS
 }
 
 // sendToChannel send all channels' timetick to sendChan
+// lock is needed by the invoker
 func (t *timetickSync) sendToChannel() {
 	for _, v := range t.proxyTimeTick {
 		if v == nil {
@@ -155,6 +156,9 @@ func (t *timetickSync) SendChannelTimeTick(chanName string, ts typeutil.Timestam
 	}
 	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
 
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
 	// send timetick msg to msg stream
 	var err error
 	var stream msgstream.MsgStream
@@ -168,4 +172,18 @@ func (t *timetickSync) SendChannelTimeTick(chanName string, ts typeutil.Timestam
 		t.chanStream[chanName] = stream
 	}
 	return stream.Broadcast(&msgPack)
+}
+
+// GetProxyNodeNum return the num of detected proxy node
+func (t *timetickSync) GetProxyNodeNum() int {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	return len(t.proxyTimeTick)
+}
+
+// GetChanNum return the num of channel
+func (t *timetickSync) GetChanNum() int {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	return len(t.chanStream)
 }

@@ -1482,8 +1482,8 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, s.ErrorCode)
 		time.Sleep(1 * time.Second)
 
-		assert.Equal(t, 2, len(core.chanTimeTick.proxyTimeTick))
-		assert.Equal(t, 3, len(core.chanTimeTick.chanStream))
+		assert.Equal(t, 2, core.chanTimeTick.GetProxyNodeNum())
+		assert.Equal(t, 3, core.chanTimeTick.GetChanNum())
 	})
 
 	err = core.Stop()
