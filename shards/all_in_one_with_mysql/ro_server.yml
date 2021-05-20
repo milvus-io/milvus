@@ -141,7 +141,7 @@ cache:
 #                      | Must be in format gpux.                                    |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 gpu:
-  enable: true
+  enable: false
   cache_size: 1GB
   gpu_search_threshold: 1000
   search_devices:
