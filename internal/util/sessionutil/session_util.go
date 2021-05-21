@@ -197,7 +197,8 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 
 // ProcessKeepAliveResponse processes the response of etcd keepAlive interface
 // If keepAlive fails for unexpected error, it will send a signal to the channel.
-func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveResponse) {
+func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveResponse) (failChannel <-chan bool) {
+	failCh := make(chan bool)
 	go func() {
 		for {
 			select {
@@ -205,14 +206,15 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 				return
 			case resp, ok := <-ch:
 				if !ok {
-					panic("keepAlive with etcd failed")
+					failCh <- true
 				}
 				if resp == nil {
-					panic("keepAlive with etcd failed")
+					failCh <- true
 				}
 			}
 		}
 	}()
+	return failCh
 }
 
 // GetSessions will get all sessions registered in etcd.
