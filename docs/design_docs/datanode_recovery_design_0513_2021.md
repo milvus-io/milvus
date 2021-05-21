@@ -123,26 +123,30 @@ message DDLBinlogMeta {
 
   **O4-1.** DataNode scales flowgraph 2 Day
 
-Q. flowgraph pool?
+-  Change `WatchDmChannelsRequest` proto.
 
-**DM DD position should be the same**
-- Change `WatchDmChannelsRequest` proto.
 ``` proto
-message Vchannel {
-  int64 collectionID = 1;
-  string vchannel_name = 2;
-  internal.MsgPosition start_position = 3;
-  internal.MsgPosition end_position = 4;
+message PositionPair {
+  internal.MsgPosition start_position = 1;
+  internal.MsgPosition end_position = 2;
 }
+
+message VchannelPair {
+  int64 collectionID = 1;
+  string dml_vchannel_name = 2;
+  string ddl_vchannel_name = 3;
+  PositionPair ddl_position = 4;
+  PositionPair dml_position = 5;
+}
+
 
 message WatchDmChannelsRequest {
   common.MsgBase base = 1;
-  Vchannel ddl_channel = 2;
-  repeated Vchannel vchannels = 3;
+  repeated VchannelPair vchannels = 2;
 }
 ```
 
-- DataNode consists of multiple DataSyncService, each service controls one flowgraph.
+-  DataNode consists of multiple DataSyncService, each service controls one flowgraph.
 
 ```go
 // DataNode
