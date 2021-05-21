@@ -12,30 +12,45 @@
 package indexservice
 
 import (
+	"context"
 	"fmt"
+	"path"
 	"strconv"
 	"sync"
+	"time"
+
+	"go.etcd.io/etcd/clientv3"
 
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 
+const (
+	RequestTimeout = 10 * time.Second
+)
+
+type Meta struct {
+	indexMeta *indexpb.IndexMeta
+	reversion int64
+}
+
 type metaTable struct {
-	client            kv.TxnKV                       // client of a reliable kv service, i.e. etcd client
-	indexBuildID2Meta map[UniqueID]indexpb.IndexMeta // index build id to index meta
+	client            *clientv3.Client // client of a reliable kv service, i.e. etcd client
+	rootPath          string
+	indexBuildID2Meta map[UniqueID]Meta // index build id to index meta
 
 	lock sync.RWMutex
 }
 
-func NewMetaTable(kv kv.TxnKV) (*metaTable, error) {
+func NewMetaTable(kv *clientv3.Client, rootPath string) (*metaTable, error) {
 	mt := &metaTable{
-		client: kv,
-		lock:   sync.RWMutex{},
+		client:   kv,
+		rootPath: rootPath,
+		lock:     sync.RWMutex{},
 	}
 	err := mt.reloadFromKV()
 	if err != nil {
@@ -46,11 +61,19 @@ func NewMetaTable(kv kv.TxnKV) (*metaTable, error) {
 }
 
 func (mt *metaTable) reloadFromKV() error {
-	mt.indexBuildID2Meta = make(map[UniqueID]indexpb.IndexMeta)
-
-	_, values, err := mt.client.LoadWithPrefix("indexes")
+	mt.indexBuildID2Meta = make(map[UniqueID]Meta)
+	key := path.Join(mt.rootPath, "indexes")
+	log.Debug("LoadWithPrefix ", zap.String("prefix", key))
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+	resp, err := mt.client.Get(ctx, key, clientv3.WithPrefix(),
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
 		return err
+	}
+	values := make([]string, 0, resp.Count)
+	for _, kv := range resp.Kvs {
+		values = append(values, string(kv.Value))
 	}
 
 	for _, value := range values {
@@ -59,18 +82,31 @@ func (mt *metaTable) reloadFromKV() error {
 		if err != nil {
 			return fmt.Errorf("IndexService metaTable reloadFromKV UnmarshalText indexpb.IndexMeta err:%w", err)
 		}
-		mt.indexBuildID2Meta[indexMeta.IndexBuildID] = indexMeta
+		meta := &Meta{
+			indexMeta: &indexMeta,
+			reversion: resp.Header.Revision,
+		}
+		mt.indexBuildID2Meta[indexMeta.IndexBuildID] = *meta
 	}
 	return nil
 }
 
 // metaTable.lock.Lock() before call this function
-func (mt *metaTable) saveIndexMeta(meta *indexpb.IndexMeta) error {
-	value := proto.MarshalTextString(meta)
+func (mt *metaTable) saveIndexMeta(meta *Meta) error {
+	value := proto.MarshalTextString(meta.indexMeta)
 
-	mt.indexBuildID2Meta[meta.IndexBuildID] = *meta
+	key := path.Join(mt.rootPath, "/indexes/"+strconv.FormatInt(meta.indexMeta.IndexBuildID, 10))
+	log.Debug("LoadWithPrefix ", zap.String("prefix", key))
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+	resp, err := mt.client.Put(ctx, key, value)
+	if err != nil {
+		return err
+	}
+	meta.reversion = resp.Header.Revision
+	mt.indexBuildID2Meta[meta.indexMeta.IndexBuildID] = *meta
 
-	return mt.client.Save("/indexes/"+strconv.FormatInt(meta.IndexBuildID, 10), value)
+	return nil
 }
 
 func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequest) error {
@@ -81,12 +117,14 @@ func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequ
 	if ok {
 		return fmt.Errorf("index already exists with ID = %d", indexBuildID)
 	}
-	meta := &indexpb.IndexMeta{
-		State:        commonpb.IndexState_Unissued,
-		IndexBuildID: indexBuildID,
-		Req:          req,
-		LeaseKey:     "",
-		Version:      0,
+	meta := &Meta{
+		indexMeta: &indexpb.IndexMeta{
+			State:        commonpb.IndexState_Unissued,
+			IndexBuildID: indexBuildID,
+			Req:          req,
+			LeaseKey:     "",
+			Version:      0,
+		},
 	}
 	return mt.saveIndexMeta(meta)
 }
@@ -101,11 +139,10 @@ func (mt *metaTable) BuildIndex(indexBuildID UniqueID, leaseKey string) error {
 		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 
-	if meta.State != commonpb.IndexState_Unissued {
-		return fmt.Errorf("can not update index state, index with ID = %d state is %d", indexBuildID, meta.State)
+	if meta.indexMeta.State != commonpb.IndexState_Unissued {
+		return fmt.Errorf("can not set lease key, index with ID = %d state is %d", indexBuildID, meta.indexMeta.State)
 	}
-	meta.State = commonpb.IndexState_InProgress
-	meta.LeaseKey = leaseKey
+	meta.indexMeta.LeaseKey = leaseKey
 	return mt.saveIndexMeta(&meta)
 }
 
@@ -119,7 +156,7 @@ func (mt *metaTable) UpdateVersion(indexBuildID UniqueID) error {
 		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 
-	meta.Version = meta.Version + 1
+	meta.indexMeta.Version = meta.indexMeta.Version + 1
 	return mt.saveIndexMeta(&meta)
 }
 
@@ -129,36 +166,16 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 
 	log.Debug("indexservice", zap.Int64("mark index is deleted", indexID))
 
-	for indexBuildID, meta := range mt.indexBuildID2Meta {
-		if meta.Req.IndexID == indexID {
-			meta.MarkDeleted = true
-			mt.indexBuildID2Meta[indexBuildID] = meta
+	for _, meta := range mt.indexBuildID2Meta {
+		if meta.indexMeta.Req.IndexID == indexID {
+			meta.indexMeta.MarkDeleted = true
+			if err := mt.saveIndexMeta(&meta); err != nil {
+				log.Debug("IndexService", zap.Any("Meta table mark deleted err", err.Error()))
+			}
 		}
 	}
 
 	return nil
-}
-
-func (mt *metaTable) NotifyBuildIndex(nty *indexpb.NotifyBuildIndexRequest) error {
-	mt.lock.Lock()
-	defer mt.lock.Unlock()
-
-	log.Debug("indexservice", zap.Int64("notify build index", nty.IndexBuildID))
-	indexBuildID := nty.IndexBuildID
-	meta, ok := mt.indexBuildID2Meta[indexBuildID]
-	if !ok {
-		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
-	}
-
-	if nty.Status.ErrorCode != commonpb.ErrorCode_Success {
-		meta.State = commonpb.IndexState_Failed
-		meta.FailReason = nty.Status.Reason
-	} else {
-		meta.State = commonpb.IndexState_Finished
-		meta.IndexFilePaths = nty.IndexFilePaths
-	}
-
-	return mt.saveIndexMeta(&meta)
 }
 
 func (mt *metaTable) GetIndexState(indexBuildID UniqueID) (*indexpb.IndexInfo, error) {
@@ -171,13 +188,13 @@ func (mt *metaTable) GetIndexState(indexBuildID UniqueID) (*indexpb.IndexInfo, e
 	if !ok {
 		return ret, fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
-	if meta.MarkDeleted {
+	if meta.indexMeta.MarkDeleted {
 		return ret, fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
-	ret.IndexID = meta.Req.IndexID
-	ret.IndexName = meta.Req.IndexName
-	ret.Reason = meta.FailReason
-	ret.State = meta.State
+	ret.IndexID = meta.indexMeta.Req.IndexID
+	ret.IndexName = meta.indexMeta.Req.IndexName
+	ret.Reason = meta.indexMeta.FailReason
+	ret.State = meta.indexMeta.State
 	return ret, nil
 }
 
@@ -191,10 +208,10 @@ func (mt *metaTable) GetIndexFilePathInfo(indexBuildID UniqueID) (*indexpb.Index
 	if !ok {
 		return nil, fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
-	if meta.MarkDeleted {
+	if meta.indexMeta.MarkDeleted {
 		return nil, fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
-	ret.IndexFilePaths = meta.IndexFilePaths
+	ret.IndexFilePaths = meta.indexMeta.IndexFilePaths
 	return ret, nil
 }
 
@@ -205,35 +222,48 @@ func (mt *metaTable) DeleteIndex(indexBuildID UniqueID) {
 	delete(mt.indexBuildID2Meta, indexBuildID)
 }
 
-func (mt *metaTable) getUnusedIndexFiles(limit int) []indexpb.IndexMeta {
+func (mt *metaTable) updateRecycleState(indexBuildID UniqueID) error {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+
+	meta, ok := mt.indexBuildID2Meta[indexBuildID]
+	if !ok {
+		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
+	}
+
+	meta.indexMeta.Recycled = true
+	return mt.saveIndexMeta(&meta)
+}
+
+func (mt *metaTable) getUnusedIndexFiles(limit int) []Meta {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 
 	log.Debug("IndexService get mark deleted meta")
 
-	var indexMetas []indexpb.IndexMeta
+	var metas []Meta
 	for _, meta := range mt.indexBuildID2Meta {
-		if meta.State == commonpb.IndexState_Finished {
-			indexMetas = append(indexMetas, meta)
+		if meta.indexMeta.State == commonpb.IndexState_Finished && !meta.indexMeta.Recycled {
+			metas = append(metas, meta)
 		}
-		if len(indexMetas) >= limit {
-			return indexMetas
+		if len(metas) >= limit {
+			return metas
 		}
 	}
 
-	return indexMetas
+	return metas
 }
 
-func (mt *metaTable) getToAssignedTasks() []indexpb.IndexMeta {
+func (mt *metaTable) getToAssignedTasks() []Meta {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 
 	log.Debug("IndexService get unissued tasks")
 
-	var tasks []indexpb.IndexMeta
+	var tasks []Meta
 	for _, meta := range mt.indexBuildID2Meta {
 		// TODO: lease Key not in IndexService watched lease keys
-		if meta.LeaseKey == "" {
+		if meta.indexMeta.LeaseKey == "" {
 			tasks = append(tasks, meta)
 		}
 	}
@@ -289,15 +319,17 @@ func compare2Array(arr1, arr2 interface{}) bool {
 func (mt *metaTable) hasSameReq(req *indexpb.BuildIndexRequest) (bool, UniqueID) {
 LOOP:
 	for _, meta := range mt.indexBuildID2Meta {
-		if meta.Req.IndexID == req.IndexID {
-			if len(meta.Req.DataPaths) != len(req.DataPaths) {
+		if meta.indexMeta.Req.IndexID == req.IndexID {
+			if len(meta.indexMeta.Req.DataPaths) != len(req.DataPaths) {
 				goto LOOP
 			}
-			if len(meta.Req.IndexParams) == len(req.IndexParams) && compare2Array(meta.Req.DataPaths, req.DataPaths) {
-				if !compare2Array(meta.Req.IndexParams, req.IndexParams) || !compare2Array(meta.Req.TypeParams, req.TypeParams) {
+			if len(meta.indexMeta.Req.IndexParams) == len(req.IndexParams) &&
+				compare2Array(meta.indexMeta.Req.DataPaths, req.DataPaths) {
+				if !compare2Array(meta.indexMeta.Req.IndexParams, req.IndexParams) ||
+					!compare2Array(meta.indexMeta.Req.TypeParams, req.TypeParams) {
 					goto LOOP
 				}
-				return true, meta.IndexBuildID
+				return true, meta.indexMeta.IndexBuildID
 			}
 		}
 	}

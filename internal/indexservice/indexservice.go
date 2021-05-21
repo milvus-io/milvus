@@ -23,7 +23,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/kv"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -40,7 +39,7 @@ import (
 const (
 	reqTimeoutInterval = time.Second * 10
 	durationInterval   = time.Second * 10
-	dropIndexLimit     = 20
+	recycleIndexLimit  = 20
 )
 
 type IndexService struct {
@@ -94,8 +93,7 @@ func (i *IndexService) Init() error {
 		if err != nil {
 			return err
 		}
-		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
-		metakv, err := NewMetaTable(etcdKV)
+		metakv, err := NewMetaTable(etcdClient, Params.MetaRootPath)
 		if err != nil {
 			return err
 		}
@@ -367,27 +365,6 @@ func (i *IndexService) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIn
 	return ret, nil
 }
 
-func (i *IndexService) NotifyBuildIndex(ctx context.Context, nty *indexpb.NotifyBuildIndexRequest) (*commonpb.Status, error) {
-	log.Debug("IndexService",
-		zap.Int64("notify build index", nty.IndexBuildID),
-		zap.Strings("index file paths", nty.IndexFilePaths),
-		zap.Int64("node ID", nty.NodeID))
-	ret := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}
-	log.Debug("IndexService", zap.String("[IndexService][NotifyBuildIndex]", nty.String()))
-	if err := i.metaTable.NotifyBuildIndex(nty); err != nil {
-		ret.ErrorCode = commonpb.ErrorCode_BuildIndexError
-		ret.Reason = err.Error()
-		log.Debug("IndexService", zap.String("[IndexService][NotifyBuildIndex][metaTable][NotifyBuildIndex]", err.Error()))
-	}
-
-	log.Debug("IndexService", zap.Any("Index build completed with ID", nty.IndexBuildID))
-
-	i.nodeClients.IncPriority(nty.NodeID, -1)
-	return ret, nil
-}
-
 func (i *IndexService) tsLoop() {
 	tsoTicker := time.NewTicker(tso.UpdateTimestampStep)
 	defer tsoTicker.Stop()
@@ -423,20 +400,23 @@ func (i *IndexService) recycleUnusedIndexFiles() {
 		case <-ctx.Done():
 			return
 		case <-timeTicker.C:
-			indexMetas := i.metaTable.getUnusedIndexFiles(dropIndexLimit)
-			for _, indexMeta := range indexMetas {
-				if indexMeta.MarkDeleted {
-					unusedIndexFilePathPrefix := strconv.Itoa(int(indexMeta.IndexBuildID))
+			metas := i.metaTable.getUnusedIndexFiles(recycleIndexLimit)
+			for _, meta := range metas {
+				if meta.indexMeta.MarkDeleted {
+					unusedIndexFilePathPrefix := strconv.Itoa(int(meta.indexMeta.IndexBuildID))
 					if err := i.kv.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {
 						log.Debug("IndexService", zap.String("Remove index files error", err.Error()))
 					}
-					i.metaTable.DeleteIndex(indexMeta.IndexBuildID)
+					i.metaTable.DeleteIndex(meta.indexMeta.IndexBuildID)
 				} else {
-					for j := 1; j < int(indexMeta.Version); j++ {
-						unusedIndexFilePathPrefix := strconv.Itoa(int(indexMeta.IndexBuildID)) + "/" + strconv.Itoa(j)
+					for j := 1; j < int(meta.indexMeta.Version); j++ {
+						unusedIndexFilePathPrefix := strconv.Itoa(int(meta.indexMeta.IndexBuildID)) + "/" + strconv.Itoa(j)
 						if err := i.kv.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {
 							log.Debug("IndexService", zap.String("Remove index files error", err.Error()))
 						}
+					}
+					if err := i.metaTable.updateRecycleState(meta.indexMeta.IndexBuildID); err != nil {
+						log.Debug("IndexService", zap.String("Remove index files error", err.Error()))
 					}
 				}
 			}
@@ -465,23 +445,23 @@ func (i *IndexService) assignmentTasksLoop() {
 					log.Debug("IndexService has no available IndexNode")
 				}
 				req := &indexpb.CreateIndexRequest{
-					IndexBuildID: task.IndexBuildID,
-					IndexName:    task.Req.IndexName,
-					IndexID:      task.Req.IndexID,
-					Version:      task.Version + 1,
-					MetaPath:     "/indexes/" + strconv.FormatInt(task.IndexBuildID, 10),
-					DataPaths:    task.Req.DataPaths,
-					TypeParams:   task.Req.TypeParams,
-					IndexParams:  task.Req.IndexParams,
+					IndexBuildID: task.indexMeta.IndexBuildID,
+					IndexName:    task.indexMeta.Req.IndexName,
+					IndexID:      task.indexMeta.Req.IndexID,
+					Version:      task.indexMeta.Version + 1,
+					MetaPath:     "/indexes/" + strconv.FormatInt(task.indexMeta.IndexBuildID, 10),
+					DataPaths:    task.indexMeta.Req.DataPaths,
+					TypeParams:   task.indexMeta.Req.TypeParams,
+					IndexParams:  task.indexMeta.Req.IndexParams,
 				}
-				if err := i.metaTable.UpdateVersion(task.IndexBuildID); err != nil {
+				if err := i.metaTable.UpdateVersion(task.indexMeta.IndexBuildID); err != nil {
 					log.Debug("IndexService", zap.String("build index update version err", err.Error()))
 				}
 				resp, err := builderClient.CreateIndex(ctx, req)
 				if err != nil {
 					log.Debug("IndexService", zap.String("build index err", err.Error()))
 				}
-				if err = i.metaTable.BuildIndex(task.IndexBuildID, leaseKey); err != nil {
+				if err = i.metaTable.BuildIndex(task.indexMeta.IndexBuildID, leaseKey); err != nil {
 					log.Debug("IndexService", zap.String("update meta table error", err.Error()))
 				}
 				if resp.ErrorCode != commonpb.ErrorCode_Success {

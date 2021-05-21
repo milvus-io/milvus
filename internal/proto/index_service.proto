@@ -111,6 +111,7 @@ message IndexMeta {
   bool mark_deleted = 6;
   string lease_key = 7;
   int64 version = 8;
+  bool recycled = 9;
 }
 
 message DropIndexRequest {
