@@ -259,7 +259,7 @@ type TaskScheduler struct {
 	DqQueue TaskQueue
 
 	idAllocator  *allocator.IDAllocator
-	tsoAllocator *allocator.TimestampAllocator
+	tsoAllocator *TimestampAllocator
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -270,7 +270,7 @@ type TaskScheduler struct {
 
 func NewTaskScheduler(ctx context.Context,
 	idAllocator *allocator.IDAllocator,
-	tsoAllocator *allocator.TimestampAllocator,
+	tsoAllocator *TimestampAllocator,
 	factory msgstream.Factory) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &TaskScheduler{

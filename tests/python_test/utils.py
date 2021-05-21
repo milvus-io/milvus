@@ -68,6 +68,8 @@ default_index_params = [
     {"nlist": 128}
 ]
 
+def create_target_index(index,field_name):
+    index["field_name"]=field_name
 
 def index_cpu_not_support():
     return ["IVF_SQ8_HYBRID"]
@@ -1018,3 +1020,4 @@ class MyThread(threading.Thread):
 
 class CaseLabel:
     tags_smoke = "smoke"
+
