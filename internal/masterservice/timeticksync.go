@@ -38,6 +38,7 @@ type timetickSync struct {
 	sendChan      chan map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg
 }
 
+// ProxyNodeSessionPrefix used for etcd watch
 const ProxyNodeSessionPrefix = "session/proxynode"
 
 func newTimeTickSync(ctx context.Context, factory msgstream.Factory, cli *clientv3.Client) (*timetickSync, error) {
@@ -68,7 +69,6 @@ func newTimeTickSync(ctx context.Context, factory msgstream.Factory, cli *client
 		if _, ok := tss.proxyTimeTick[sess.ServerID]; !ok {
 			tss.proxyTimeTick[sess.ServerID] = nil
 		}
-
 	}
 
 	return &tss, nil
