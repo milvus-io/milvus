@@ -26,6 +26,8 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "")
+	_, err = cli.Delete(ctx, "/session", clientv3.WithPrefix())
+	assert.Nil(t, err)
 
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("")
@@ -69,6 +71,8 @@ func TestInit(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "")
+	_, err = cli.Delete(ctx, "/session", clientv3.WithPrefix())
+	assert.Nil(t, err)
 
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("")
@@ -90,6 +94,8 @@ func TestUpdateSessions(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "")
+	_, err = cli.Delete(ctx, "/session", clientv3.WithPrefix())
+	assert.Nil(t, err)
 
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("")
