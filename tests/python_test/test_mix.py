@@ -31,7 +31,8 @@ class TestMixBase:
         assert len(ids) == nb
         connect.flush([collection])
         connect.create_index(collection, default_float_vec_field_name, default_index)
-        index = connect.describe_index(collection, default_float_vec_field_name)
+        index = connect.describe_index(collection, "")
+        create_target_index(default_index, default_float_vec_field_name)
         assert index == default_index
         query, vecs = gen_query_vectors(default_float_vec_field_name, entities, default_top_k, nq)
         connect.load_collection(collection)

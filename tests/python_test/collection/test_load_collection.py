@@ -67,7 +67,8 @@ class TestLoadCollection:
                     connect.create_index(binary_collection, default_binary_vec_field_name, get_binary_index)
             else:
                 connect.create_index(binary_collection, default_binary_vec_field_name, get_binary_index)
-                index = connect.describe_index(binary_collection, default_binary_vec_field_name)
+                index = connect.describe_index(binary_collection, "")
+                create_target_index(get_binary_index, default_binary_vec_field_name)
                 assert index == get_binary_index
             connect.load_collection(binary_collection)
             connect.release_collection(binary_collection)
