@@ -536,13 +536,15 @@ func TestSaveBinlogPaths(t *testing.T) {
 				ID:    1,
 				Paths: []string{"/by-dev/test/0/1/2/1/Allo1", "/by-dev/test/0/1/2/1/Allo2"},
 			},
-			Coll2TsBinlogPaths: &datapb.ID2PathList{
-				ID:    0,
-				Paths: []string{"/by-dev/test/0/ts/Allo5", "/by-dev/test/0/ts/Allo8"},
-			},
-			Coll2DdlBinlogPaths: &datapb.ID2PathList{
-				ID:    0,
-				Paths: []string{"/by-dev/test/0/ddl/Allo7", "/by-dev/test/0/ddl/Allo9"},
+			DdlBinlogPaths: []*datapb.DDLBinlogMeta{
+				{
+					DdlBinlogPath: "/by-dev/test/0/ddl/Allo7",
+					TsBinlogPath:  "/by-dev/test/0/ts/Allo5",
+				},
+				{
+					DdlBinlogPath: "/by-dev/test/0/ddl/Allo9",
+					TsBinlogPath:  "/by-dev/test/0/ts/Allo8",
+				},
 			},
 		})
 		assert.Nil(t, err)
@@ -585,13 +587,15 @@ func TestSaveBinlogPaths(t *testing.T) {
 				ID:    1,
 				Paths: []string{"/by-dev/test/0/1/2/1/Allo1", "/by-dev/test/0/1/2/1/Allo2"},
 			},
-			Coll2TsBinlogPaths: &datapb.ID2PathList{
-				ID:    0,
-				Paths: []string{"/by-dev/test/0/ts/Allo5", "/by-dev/test/0/ts/Allo8"},
-			},
-			Coll2DdlBinlogPaths: &datapb.ID2PathList{
-				ID:    0,
-				Paths: []string{"/by-dev/test/0/ddl/Allo7", "/by-dev/test/0/ddl/Allo9"},
+			DdlBinlogPaths: []*datapb.DDLBinlogMeta{
+				{
+					DdlBinlogPath: "/by-dev/test/0/ddl/Allo7",
+					TsBinlogPath:  "/by-dev/test/0/ts/Allo5",
+				},
+				{
+					DdlBinlogPath: "/by-dev/test/0/ddl/Allo9",
+					TsBinlogPath:  "/by-dev/test/0/ts/Allo8",
+				},
 			},
 		})
 		assert.NotNil(t, err)

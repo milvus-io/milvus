@@ -25,6 +25,8 @@ etcd:
   collectionBinlogSubPath: dataservice/binlog/collection # Full Path = rootPath/metaSubPath/collectionBinglogSubPath
   flushStreamPosSubPath: dataservice/flushstream # Full path = rootPath/metaSubPath/flushStreamPosSubPath
   statsStreamPosSubPath: dataservice/statsstream # Full path = rootPath/metaSubPath/statsStreamPosSubPath
+  segmentDmlPosSubPath: dataservice/segmentdml # Full path = rootPath/metaSubPath/segmentDmlPosSubPath
+  segmentDdlPosSubPath: dataservice/segmentddl # Full path = rootPath/metaSubPath/segmentDdlPosSubPath
 
 minio:
   address: localhost

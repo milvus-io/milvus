@@ -907,13 +907,20 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	for k, v := range fieldMeta {
 		meta[k] = v
 	}
-	ddlMeta, err := s.prepareDDLBinlogMeta(req.CollectionID,
-		req.GetColl2TsBinlogPaths(), req.GetColl2DdlBinlogPaths())
+	ddlMeta, err := s.prepareDDLBinlogMeta(req.CollectionID, req.GetDdlBinlogPaths())
 	if err != nil {
 		resp.Reason = err.Error()
 		return resp, err
 	}
 	for k, v := range ddlMeta {
+		meta[k] = v
+	}
+	segmentPos, err := s.prepareSegmentPos(req.SegmentID, req.GetDmlPosition(), req.GetDdlPosition())
+	if err != nil {
+		resp.Reason = err.Error()
+		return resp, err
+	}
+	for k, v := range segmentPos {
 		meta[k] = v
 	}
 	// Save into k-v store
