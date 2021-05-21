@@ -33,7 +33,6 @@ func (handler *statsHandler) HandleSegmentStat(segStats *internalpb.SegmentStati
 	}
 
 	if segStats.StartPosition != nil {
-		segMeta.OpenTime = segStats.CreateTime
 		segMeta.StartPosition = segStats.StartPosition
 	}
 
@@ -41,9 +40,7 @@ func (handler *statsHandler) HandleSegmentStat(segStats *internalpb.SegmentStati
 		segMeta.EndPosition = segStats.EndPosition
 	}
 
-	segMeta.SealedTime = segStats.EndTime
 	segMeta.NumRows = segStats.NumRows
-	segMeta.MemSize = segStats.MemorySize
 	log.Debug("stats_handler update segment", zap.Any("segmentID", segMeta.ID), zap.Any("State", segMeta.State))
-	return handler.meta.UpdateSegment(segMeta)
+	return handler.meta.UpdateSegmentStatistic(segMeta)
 }

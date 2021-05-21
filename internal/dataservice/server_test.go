@@ -22,8 +22,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
+	"go.etcd.io/etcd/clientv3"
 )
 
 func TestRegisterNode(t *testing.T) {
@@ -205,7 +207,7 @@ func TestFlush(t *testing.T) {
 		Partitions: []int64{},
 	})
 	assert.Nil(t, err)
-	segID, _, _, err := svr.segAllocator.AllocSegment(context.TODO(), 0, 1, "channel-1", 1)
+	segID, _, expireTs, err := svr.segAllocator.AllocSegment(context.TODO(), 0, 1, "channel-1", 1)
 	assert.Nil(t, err)
 	resp, err := svr.Flush(context.TODO(), &datapb.FlushRequest{
 		Base: &commonpb.MsgBase{
@@ -219,7 +221,7 @@ func TestFlush(t *testing.T) {
 	})
 	assert.Nil(t, err)
 	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-	ids, err := svr.segAllocator.GetSealedSegments(context.TODO())
+	ids, err := svr.segAllocator.GetFlushableSegments(context.TODO(), expireTs)
 	assert.Nil(t, err)
 	assert.EqualValues(t, 1, len(ids))
 	assert.EqualValues(t, segID, ids[0])
@@ -282,11 +284,7 @@ func TestGetSegmentStates(t *testing.T) {
 		CollectionID:  100,
 		PartitionID:   0,
 		InsertChannel: "",
-		OpenTime:      0,
-		SealedTime:    0,
-		FlushedTime:   0,
 		NumRows:       0,
-		MemSize:       0,
 		State:         commonpb.SegmentState_Growing,
 		StartPosition: &internalpb.MsgPosition{
 			ChannelName: "",
@@ -529,19 +527,24 @@ func TestSaveBinlogPaths(t *testing.T) {
 	t.Run("Normal SaveRequest", func(t *testing.T) {
 		ctx := context.Background()
 		resp, err := svr.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+			Base: &commonpb.MsgBase{
+				Timestamp: uint64(time.Now().Unix()),
+			},
 			SegmentID:    2,
 			CollectionID: 0,
 			Field2BinlogPaths: &datapb.ID2PathList{
 				ID:    1,
 				Paths: []string{"/by-dev/test/0/1/2/1/Allo1", "/by-dev/test/0/1/2/1/Allo2"},
 			},
-			Coll2TsBinlogPaths: &datapb.ID2PathList{
-				ID:    0,
-				Paths: []string{"/by-dev/test/0/ts/Allo5", "/by-dev/test/0/ts/Allo8"},
-			},
-			Coll2DdlBinlogPaths: &datapb.ID2PathList{
-				ID:    0,
-				Paths: []string{"/by-dev/test/0/ddl/Allo7", "/by-dev/test/0/ddl/Allo9"},
+			DdlBinlogPaths: []*datapb.DDLBinlogMeta{
+				{
+					DdlBinlogPath: "/by-dev/test/0/ddl/Allo7",
+					TsBinlogPath:  "/by-dev/test/0/ts/Allo5",
+				},
+				{
+					DdlBinlogPath: "/by-dev/test/0/ddl/Allo9",
+					TsBinlogPath:  "/by-dev/test/0/ts/Allo8",
+				},
 			},
 		})
 		assert.Nil(t, err)
@@ -584,13 +587,15 @@ func TestSaveBinlogPaths(t *testing.T) {
 				ID:    1,
 				Paths: []string{"/by-dev/test/0/1/2/1/Allo1", "/by-dev/test/0/1/2/1/Allo2"},
 			},
-			Coll2TsBinlogPaths: &datapb.ID2PathList{
-				ID:    0,
-				Paths: []string{"/by-dev/test/0/ts/Allo5", "/by-dev/test/0/ts/Allo8"},
-			},
-			Coll2DdlBinlogPaths: &datapb.ID2PathList{
-				ID:    0,
-				Paths: []string{"/by-dev/test/0/ddl/Allo7", "/by-dev/test/0/ddl/Allo9"},
+			DdlBinlogPaths: []*datapb.DDLBinlogMeta{
+				{
+					DdlBinlogPath: "/by-dev/test/0/ddl/Allo7",
+					TsBinlogPath:  "/by-dev/test/0/ts/Allo5",
+				},
+				{
+					DdlBinlogPath: "/by-dev/test/0/ddl/Allo9",
+					TsBinlogPath:  "/by-dev/test/0/ts/Allo8",
+				},
 			},
 		})
 		assert.NotNil(t, err)
@@ -779,6 +784,12 @@ func newTestServer(t *testing.T) *Server {
 	}
 	err = factory.SetParams(m)
 	assert.Nil(t, err)
+
+	etcdCli, err := initEtcd(Params.EtcdAddress)
+	assert.Nil(t, err)
+	_, err = etcdCli.Delete(context.Background(), "/session", clientv3.WithPrefix())
+	assert.Nil(t, err)
+
 	svr, err := CreateServer(context.TODO(), factory)
 	assert.Nil(t, err)
 	ms := newMockMasterService()
@@ -804,4 +815,21 @@ func closeTestServer(t *testing.T, svr *Server) {
 	assert.Nil(t, err)
 	err = svr.CleanMeta()
 	assert.Nil(t, err)
+}
+
+func initEtcd(etcdAddress string) (*clientv3.Client, error) {
+	var etcdCli *clientv3.Client
+	connectEtcdFn := func() error {
+		etcd, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}, DialTimeout: 5 * time.Second})
+		if err != nil {
+			return err
+		}
+		etcdCli = etcd
+		return nil
+	}
+	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	if err != nil {
+		return nil, err
+	}
+	return etcdCli, nil
 }

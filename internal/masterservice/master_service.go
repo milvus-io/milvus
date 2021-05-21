@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -136,6 +137,9 @@ type Core struct {
 	//dd request scheduler
 	ddReqQueue chan reqTask //dd request will be push into this chan
 
+	// channel timetick
+	chanTimeTick *timetickSync
+
 	//time tick loop
 	lastTimeTick typeutil.Timestamp
 
@@ -146,6 +150,8 @@ type Core struct {
 	initOnce  sync.Once
 	startOnce sync.Once
 	//isInit    atomic.Value
+
+	session *sessionutil.Session
 
 	msFactory ms.Factory
 }
@@ -424,16 +430,6 @@ func (c *Core) setMsgStreams() error {
 	//proxy time tick stream,
 	if Params.ProxyTimeTickChannel == "" {
 		return fmt.Errorf("ProxyTimeTickChannel is empty")
-	}
-
-	var err error
-	m := map[string]interface{}{
-		"PulsarAddress":  Params.PulsarAddress,
-		"ReceiveBufSize": 1024,
-		"PulsarBufSize":  1024}
-	err = c.msFactory.SetParams(m)
-	if err != nil {
-		return err
 	}
 
 	proxyTimeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
@@ -825,6 +821,10 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 func (c *Core) Init() error {
 	var initError error = nil
 	c.initOnce.Do(func() {
+		c.session = sessionutil.NewSession(c.ctx, []string{Params.EtcdAddress}, typeutil.MasterServiceRole,
+			Params.Address, true)
+		c.session.Init()
+
 		connectEtcdFn := func() error {
 			if c.etcdCli, initError = clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second}); initError != nil {
 				return initError
@@ -876,6 +876,18 @@ func (c *Core) Init() error {
 		}
 		c.TSOAllocatorUpdate = func() error {
 			return tsoAllocator.UpdateTSO()
+		}
+
+		m := map[string]interface{}{
+			"PulsarAddress":  Params.PulsarAddress,
+			"ReceiveBufSize": 1024,
+			"PulsarBufSize":  1024}
+		if initError = c.msFactory.SetParams(m); initError != nil {
+			return
+		}
+		c.chanTimeTick, initError = newTimeTickSync(c.ctx, c.msFactory, c.etcdCli)
+		if initError != nil {
+			return
 		}
 
 		c.ddReqQueue = make(chan reqTask, 1024)
@@ -971,6 +983,7 @@ func (c *Core) Start() error {
 		go c.startDataServiceSegmentLoop()
 		go c.startSegmentFlushCompletedLoop()
 		go c.tsLoop()
+		go c.chanTimeTick.StartWatch()
 		c.stateCode.Store(internalpb.StateCode_Healthy)
 	})
 	log.Debug("Master service", zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Healthy)]))
@@ -1646,5 +1659,28 @@ func (c *Core) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*maste
 		},
 		ID:    start,
 		Count: in.Count,
+	}, nil
+}
+
+// UpdateChannelTimeTick used to handle ChannelTimeTickMsg
+func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}
+	if in.Base.MsgType != commonpb.MsgType_TimeTick {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = fmt.Sprintf("UpdateChannelTimeTick receive invalid message %d", in.Base.GetMsgType())
+		return status, nil
+	}
+	err := c.chanTimeTick.UpdateTimeTick(in)
+	if err != nil {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = err.Error()
+		return status, nil
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
 	}, nil
 }
