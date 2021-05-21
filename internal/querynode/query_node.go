@@ -204,9 +204,6 @@ func (node *QueryNode) Start() error {
 }
 
 func (node *QueryNode) Stop() error {
-	if node.session != nil {
-		node.session.Close()
-	}
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	node.queryNodeLoopCancel()
 

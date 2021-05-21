@@ -462,9 +462,6 @@ func (s *Server) startProxyServiceTimeTickLoop(ctx context.Context) {
 }
 
 func (s *Server) Stop() error {
-	if s.session != nil {
-		s.session.Close()
-	}
 	s.cluster.ShutDownClients()
 	s.ttMsgStream.Close()
 	s.k2sMsgStream.Close()
