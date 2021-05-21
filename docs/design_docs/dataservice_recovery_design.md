@@ -53,3 +53,15 @@ DataNode如果由于网络原因与etcd断开，应该重启服务发现，DataS
 
 DataService模块中，有些策略是可能频繁改变的，比如channel对DataNode的分配策略，可以是随机/顺序/平均/根据collection分散等等策略，比如检测到DataNode创建和下线，可能会不处理/balance/将下线节点的channel转移到其他节点等。比如segment allocation可能会根据文件大小/条数等来确定是否关闭。实现应该把这些策略相关抽出来，方便以后修改。
 
+
+
+### TODO:
+
+1. segment allocation信息持久化及恢复
+2. cluster信息（datanode及channel信息）改动+持久化及恢复
+3. channel与datanode分配策略实现（可选load balance）
+4. stats/segment flush channel记录位置及重启时seek 
+5. 服务注册与发现，以及对应事件的处理逻辑
+6. timetick channel的改动以及segment关闭逻辑改动
+7. datanode上报的binlog信息持久化及恢复 
+
