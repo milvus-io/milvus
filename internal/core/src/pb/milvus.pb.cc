@@ -1447,11 +1447,7 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_milvus_2eproto::offsets[] PROT
   PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::PersistentSegmentInfo, segmentid_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::PersistentSegmentInfo, collectionid_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::PersistentSegmentInfo, partitionid_),
-  PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::PersistentSegmentInfo, open_time_),
-  PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::PersistentSegmentInfo, sealed_time_),
-  PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::PersistentSegmentInfo, flushed_time_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::PersistentSegmentInfo, num_rows_),
-  PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::PersistentSegmentInfo, mem_size_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::PersistentSegmentInfo, state_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::GetPersistentSegmentInfoRequest, _internal_metadata_),
@@ -1555,13 +1551,13 @@ static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOB
   { 371, -1, sizeof(::milvus::proto::milvus::SearchResults)},
   { 378, -1, sizeof(::milvus::proto::milvus::FlushRequest)},
   { 386, -1, sizeof(::milvus::proto::milvus::PersistentSegmentInfo)},
-  { 400, -1, sizeof(::milvus::proto::milvus::GetPersistentSegmentInfoRequest)},
-  { 408, -1, sizeof(::milvus::proto::milvus::GetPersistentSegmentInfoResponse)},
-  { 415, -1, sizeof(::milvus::proto::milvus::QuerySegmentInfo)},
-  { 427, -1, sizeof(::milvus::proto::milvus::GetQuerySegmentInfoRequest)},
-  { 435, -1, sizeof(::milvus::proto::milvus::GetQuerySegmentInfoResponse)},
-  { 442, -1, sizeof(::milvus::proto::milvus::RegisterLinkRequest)},
-  { 447, -1, sizeof(::milvus::proto::milvus::RegisterLinkResponse)},
+  { 396, -1, sizeof(::milvus::proto::milvus::GetPersistentSegmentInfoRequest)},
+  { 404, -1, sizeof(::milvus::proto::milvus::GetPersistentSegmentInfoResponse)},
+  { 411, -1, sizeof(::milvus::proto::milvus::QuerySegmentInfo)},
+  { 423, -1, sizeof(::milvus::proto::milvus::GetQuerySegmentInfoRequest)},
+  { 431, -1, sizeof(::milvus::proto::milvus::GetQuerySegmentInfoResponse)},
+  { 438, -1, sizeof(::milvus::proto::milvus::RegisterLinkRequest)},
+  { 443, -1, sizeof(::milvus::proto::milvus::RegisterLinkResponse)},
 };
 
 static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
@@ -1769,12 +1765,10 @@ const char descriptor_table_protodef_milvus_2eproto[] PROTOBUF_SECTION_VARIABLE(
   ".milvus.proto.common.Status\022\014\n\004hits\030\002 \003("
   "\014\"e\n\014FlushRequest\022*\n\004base\030\001 \001(\0132\034.milvus"
   ".proto.common.MsgBase\022\017\n\007db_name\030\002 \001(\t\022\030"
-  "\n\020collection_names\030\003 \003(\t\"\351\001\n\025PersistentS"
+  "\n\020collection_names\030\003 \003(\t\"\231\001\n\025PersistentS"
   "egmentInfo\022\021\n\tsegmentID\030\001 \001(\003\022\024\n\014collect"
-  "ionID\030\002 \001(\003\022\023\n\013partitionID\030\003 \001(\003\022\021\n\topen"
-  "_time\030\004 \001(\004\022\023\n\013sealed_time\030\005 \001(\004\022\024\n\014flus"
-  "hed_time\030\006 \001(\004\022\020\n\010num_rows\030\007 \001(\003\022\020\n\010mem_"
-  "size\030\010 \001(\003\0220\n\005state\030\t \001(\0162!.milvus.proto"
+  "ionID\030\002 \001(\003\022\023\n\013partitionID\030\003 \001(\003\022\020\n\010num_"
+  "rows\030\004 \001(\003\0220\n\005state\030\005 \001(\0162!.milvus.proto"
   ".common.SegmentState\"u\n\037GetPersistentSeg"
   "mentInfoRequest\022*\n\004base\030\001 \001(\0132\034.milvus.p"
   "roto.common.MsgBase\022\016\n\006dbName\030\002 \001(\t\022\026\n\016c"
@@ -1935,7 +1929,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_mil
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_milvus_2eproto_once;
 static bool descriptor_table_milvus_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_milvus_2eproto = {
-  &descriptor_table_milvus_2eproto_initialized, descriptor_table_protodef_milvus_2eproto, "milvus.proto", 10023,
+  &descriptor_table_milvus_2eproto_initialized, descriptor_table_protodef_milvus_2eproto, "milvus.proto", 9943,
   &descriptor_table_milvus_2eproto_once, descriptor_table_milvus_2eproto_sccs, descriptor_table_milvus_2eproto_deps, 53, 2,
   schemas, file_default_instances, TableStruct_milvus_2eproto::offsets,
   file_level_metadata_milvus_2eproto, 53, file_level_enum_descriptors_milvus_2eproto, file_level_service_descriptors_milvus_2eproto,
@@ -21055,44 +21049,16 @@ const char* PersistentSegmentInfo::_InternalParse(const char* ptr, ::PROTOBUF_NA
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // uint64 open_time = 4;
+      // int64 num_rows = 4;
       case 4:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 32)) {
-          open_time_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
-          CHK_(ptr);
-        } else goto handle_unusual;
-        continue;
-      // uint64 sealed_time = 5;
-      case 5:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 40)) {
-          sealed_time_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
-          CHK_(ptr);
-        } else goto handle_unusual;
-        continue;
-      // uint64 flushed_time = 6;
-      case 6:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 48)) {
-          flushed_time_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
-          CHK_(ptr);
-        } else goto handle_unusual;
-        continue;
-      // int64 num_rows = 7;
-      case 7:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 56)) {
           num_rows_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // int64 mem_size = 8;
-      case 8:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 64)) {
-          mem_size_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
-          CHK_(ptr);
-        } else goto handle_unusual;
-        continue;
-      // .milvus.proto.common.SegmentState state = 9;
-      case 9:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 72)) {
+      // .milvus.proto.common.SegmentState state = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 40)) {
           ::PROTOBUF_NAMESPACE_ID::uint64 val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
           CHK_(ptr);
           set_state(static_cast<::milvus::proto::common::SegmentState>(val));
@@ -21167,48 +21133,9 @@ bool PersistentSegmentInfo::MergePartialFromCodedStream(
         break;
       }
 
-      // uint64 open_time = 4;
+      // int64 num_rows = 4;
       case 4: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (32 & 0xFF)) {
-
-          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
-                 input, &open_time_)));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      // uint64 sealed_time = 5;
-      case 5: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (40 & 0xFF)) {
-
-          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
-                 input, &sealed_time_)));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      // uint64 flushed_time = 6;
-      case 6: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (48 & 0xFF)) {
-
-          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
-                 input, &flushed_time_)));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      // int64 num_rows = 7;
-      case 7: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (56 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
                    ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
@@ -21219,22 +21146,9 @@ bool PersistentSegmentInfo::MergePartialFromCodedStream(
         break;
       }
 
-      // int64 mem_size = 8;
-      case 8: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (64 & 0xFF)) {
-
-          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
-                 input, &mem_size_)));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      // .milvus.proto.common.SegmentState state = 9;
-      case 9: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (72 & 0xFF)) {
+      // .milvus.proto.common.SegmentState state = 5;
+      case 5: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (40 & 0xFF)) {
           int value = 0;
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
                    int, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_ENUM>(
@@ -21288,35 +21202,15 @@ void PersistentSegmentInfo::SerializeWithCachedSizes(
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(3, this->partitionid(), output);
   }
 
-  // uint64 open_time = 4;
-  if (this->open_time() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(4, this->open_time(), output);
-  }
-
-  // uint64 sealed_time = 5;
-  if (this->sealed_time() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(5, this->sealed_time(), output);
-  }
-
-  // uint64 flushed_time = 6;
-  if (this->flushed_time() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(6, this->flushed_time(), output);
-  }
-
-  // int64 num_rows = 7;
+  // int64 num_rows = 4;
   if (this->num_rows() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(7, this->num_rows(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(4, this->num_rows(), output);
   }
 
-  // int64 mem_size = 8;
-  if (this->mem_size() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(8, this->mem_size(), output);
-  }
-
-  // .milvus.proto.common.SegmentState state = 9;
+  // .milvus.proto.common.SegmentState state = 5;
   if (this->state() != 0) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnum(
-      9, this->state(), output);
+      5, this->state(), output);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -21347,35 +21241,15 @@ void PersistentSegmentInfo::SerializeWithCachedSizes(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(3, this->partitionid(), target);
   }
 
-  // uint64 open_time = 4;
-  if (this->open_time() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(4, this->open_time(), target);
-  }
-
-  // uint64 sealed_time = 5;
-  if (this->sealed_time() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(5, this->sealed_time(), target);
-  }
-
-  // uint64 flushed_time = 6;
-  if (this->flushed_time() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(6, this->flushed_time(), target);
-  }
-
-  // int64 num_rows = 7;
+  // int64 num_rows = 4;
   if (this->num_rows() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(7, this->num_rows(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(4, this->num_rows(), target);
   }
 
-  // int64 mem_size = 8;
-  if (this->mem_size() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(8, this->mem_size(), target);
-  }
-
-  // .milvus.proto.common.SegmentState state = 9;
+  // .milvus.proto.common.SegmentState state = 5;
   if (this->state() != 0) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
-      9, this->state(), target);
+      5, this->state(), target);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -21420,42 +21294,14 @@ size_t PersistentSegmentInfo::ByteSizeLong() const {
         this->partitionid());
   }
 
-  // uint64 open_time = 4;
-  if (this->open_time() != 0) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::UInt64Size(
-        this->open_time());
-  }
-
-  // uint64 sealed_time = 5;
-  if (this->sealed_time() != 0) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::UInt64Size(
-        this->sealed_time());
-  }
-
-  // uint64 flushed_time = 6;
-  if (this->flushed_time() != 0) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::UInt64Size(
-        this->flushed_time());
-  }
-
-  // int64 num_rows = 7;
+  // int64 num_rows = 4;
   if (this->num_rows() != 0) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
         this->num_rows());
   }
 
-  // int64 mem_size = 8;
-  if (this->mem_size() != 0) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
-        this->mem_size());
-  }
-
-  // .milvus.proto.common.SegmentState state = 9;
+  // .milvus.proto.common.SegmentState state = 5;
   if (this->state() != 0) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->state());
@@ -21497,20 +21343,8 @@ void PersistentSegmentInfo::MergeFrom(const PersistentSegmentInfo& from) {
   if (from.partitionid() != 0) {
     set_partitionid(from.partitionid());
   }
-  if (from.open_time() != 0) {
-    set_open_time(from.open_time());
-  }
-  if (from.sealed_time() != 0) {
-    set_sealed_time(from.sealed_time());
-  }
-  if (from.flushed_time() != 0) {
-    set_flushed_time(from.flushed_time());
-  }
   if (from.num_rows() != 0) {
     set_num_rows(from.num_rows());
-  }
-  if (from.mem_size() != 0) {
-    set_mem_size(from.mem_size());
   }
   if (from.state() != 0) {
     set_state(from.state());
@@ -21541,11 +21375,7 @@ void PersistentSegmentInfo::InternalSwap(PersistentSegmentInfo* other) {
   swap(segmentid_, other->segmentid_);
   swap(collectionid_, other->collectionid_);
   swap(partitionid_, other->partitionid_);
-  swap(open_time_, other->open_time_);
-  swap(sealed_time_, other->sealed_time_);
-  swap(flushed_time_, other->flushed_time_);
   swap(num_rows_, other->num_rows_);
-  swap(mem_size_, other->mem_size_);
   swap(state_, other->state_);
 }
 

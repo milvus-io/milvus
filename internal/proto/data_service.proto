@@ -105,12 +105,9 @@ message GetSegmentStatesRequest {
 message SegmentStateInfo {
   int64 segmentID = 1;
   common.SegmentState state = 2;
-  uint64 create_time = 3;
-  uint64 sealed_time = 4;
-  uint64 flushed_time = 5;
-  internal.MsgPosition start_position = 6;
-  internal.MsgPosition end_position = 7;
-  common.Status status = 8;
+  internal.MsgPosition start_position = 3;
+  internal.MsgPosition end_position = 4;
+  common.Status status = 5;
 }
 
 message GetSegmentStatesResponse {
@@ -226,14 +223,10 @@ message SegmentInfo {
   int64 collectionID = 2;
   int64 partitionID = 3;
   string insert_channel = 4;
-  uint64 open_time = 5;
-  uint64 sealed_time = 6;
-  uint64 flushed_time = 7;
-  int64 num_rows = 8;
-  int64 mem_size = 9;
-  common.SegmentState state = 10;
-  internal.MsgPosition start_position = 11;
-  internal.MsgPosition end_position = 12;
+  int64 num_rows = 5;
+  common.SegmentState state = 6;
+  internal.MsgPosition start_position = 7;
+  internal.MsgPosition end_position = 8;
 }
 
 message ID2PathList {                                                                                            
