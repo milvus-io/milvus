@@ -31,6 +31,8 @@ type ParamTable struct {
 	KvRootPath              string
 	SegmentBinlogSubPath    string
 	CollectionBinlogSubPath string
+	SegmentDmlPosSubPath    string
+	SegmentDdlPosSubPath    string
 
 	// --- Pulsar ---
 	PulsarAddress string
@@ -97,6 +99,8 @@ func (p *ParamTable) Init() {
 
 		p.initFlushStreamPosSubPath()
 		p.initStatsStreamPosSubPath()
+		p.initSegmentDmlPosSubPath()
+		p.initSegmentDdlPosSubPath()
 	})
 }
 
@@ -303,4 +307,20 @@ func (p *ParamTable) initStatsStreamPosSubPath() {
 		panic(err)
 	}
 	p.StatsStreamPosSubPath = subPath
+}
+
+func (p *ParamTable) initSegmentDmlPosSubPath() {
+	subPath, err := p.Load("etcd.segmentDmlPosSubPath")
+	if err != nil {
+		panic(err)
+	}
+	p.SegmentDmlPosSubPath = subPath
+}
+
+func (p *ParamTable) initSegmentDdlPosSubPath() {
+	subPath, err := p.Load("etcd.segmentDdlPosSubPath")
+	if err != nil {
+		panic(err)
+	}
+	p.SegmentDdlPosSubPath = subPath
 }

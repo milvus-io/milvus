@@ -1813,25 +1813,71 @@ func (m *ID2PathList) GetPaths() []string {
 	return nil
 }
 
+type PositionPair struct {
+	StartPosition        *internalpb.MsgPosition `protobuf:"bytes,1,opt,name=start_position,json=startPosition,proto3" json:"start_position,omitempty"`
+	EndPosition          *internalpb.MsgPosition `protobuf:"bytes,2,opt,name=end_position,json=endPosition,proto3" json:"end_position,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}                `json:"-"`
+	XXX_unrecognized     []byte                  `json:"-"`
+	XXX_sizecache        int32                   `json:"-"`
+}
+
+func (m *PositionPair) Reset()         { *m = PositionPair{} }
+func (m *PositionPair) String() string { return proto.CompactTextString(m) }
+func (*PositionPair) ProtoMessage()    {}
+func (*PositionPair) Descriptor() ([]byte, []int) {
+	return fileDescriptor_3385cd32ad6cfe64, []int{33}
+}
+
+func (m *PositionPair) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_PositionPair.Unmarshal(m, b)
+}
+func (m *PositionPair) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_PositionPair.Marshal(b, m, deterministic)
+}
+func (m *PositionPair) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_PositionPair.Merge(m, src)
+}
+func (m *PositionPair) XXX_Size() int {
+	return xxx_messageInfo_PositionPair.Size(m)
+}
+func (m *PositionPair) XXX_DiscardUnknown() {
+	xxx_messageInfo_PositionPair.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_PositionPair proto.InternalMessageInfo
+
+func (m *PositionPair) GetStartPosition() *internalpb.MsgPosition {
+	if m != nil {
+		return m.StartPosition
+	}
+	return nil
+}
+
+func (m *PositionPair) GetEndPosition() *internalpb.MsgPosition {
+	if m != nil {
+		return m.EndPosition
+	}
+	return nil
+}
+
 type SaveBinlogPathsRequest struct {
-	Base                 *commonpb.MsgBase         `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	SegmentID            int64                     `protobuf:"varint,2,opt,name=segmentID,proto3" json:"segmentID,omitempty"`
-	CollectionID         int64                     `protobuf:"varint,3,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
-	Field2BinlogPaths    *ID2PathList              `protobuf:"bytes,4,opt,name=field2BinlogPaths,proto3" json:"field2BinlogPaths,omitempty"`
-	Coll2TsBinlogPaths   *ID2PathList              `protobuf:"bytes,5,opt,name=coll2TsBinlogPaths,proto3" json:"coll2TsBinlogPaths,omitempty"`
-	Coll2DdlBinlogPaths  *ID2PathList              `protobuf:"bytes,6,opt,name=coll2DdlBinlogPaths,proto3" json:"coll2DdlBinlogPaths,omitempty"`
-	StartPositions       []*internalpb.MsgPosition `protobuf:"bytes,7,rep,name=start_positions,json=startPositions,proto3" json:"start_positions,omitempty"`
-	EndPositions         []*internalpb.MsgPosition `protobuf:"bytes,8,rep,name=end_positions,json=endPositions,proto3" json:"end_positions,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}                  `json:"-"`
-	XXX_unrecognized     []byte                    `json:"-"`
-	XXX_sizecache        int32                     `json:"-"`
+	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	SegmentID            int64             `protobuf:"varint,2,opt,name=segmentID,proto3" json:"segmentID,omitempty"`
+	CollectionID         int64             `protobuf:"varint,3,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	Field2BinlogPaths    *ID2PathList      `protobuf:"bytes,4,opt,name=field2BinlogPaths,proto3" json:"field2BinlogPaths,omitempty"`
+	DdlBinlogPaths       []*DDLBinlogMeta  `protobuf:"bytes,5,rep,name=ddlBinlogPaths,proto3" json:"ddlBinlogPaths,omitempty"`
+	DmlPosition          *PositionPair     `protobuf:"bytes,6,opt,name=dml_position,json=dmlPosition,proto3" json:"dml_position,omitempty"`
+	DdlPosition          *PositionPair     `protobuf:"bytes,7,opt,name=ddl_position,json=ddlPosition,proto3" json:"ddl_position,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
+	XXX_unrecognized     []byte            `json:"-"`
+	XXX_sizecache        int32             `json:"-"`
 }
 
 func (m *SaveBinlogPathsRequest) Reset()         { *m = SaveBinlogPathsRequest{} }
 func (m *SaveBinlogPathsRequest) String() string { return proto.CompactTextString(m) }
 func (*SaveBinlogPathsRequest) ProtoMessage()    {}
 func (*SaveBinlogPathsRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{33}
+	return fileDescriptor_3385cd32ad6cfe64, []int{34}
 }
 
 func (m *SaveBinlogPathsRequest) XXX_Unmarshal(b []byte) error {
@@ -1880,30 +1926,23 @@ func (m *SaveBinlogPathsRequest) GetField2BinlogPaths() *ID2PathList {
 	return nil
 }
 
-func (m *SaveBinlogPathsRequest) GetColl2TsBinlogPaths() *ID2PathList {
+func (m *SaveBinlogPathsRequest) GetDdlBinlogPaths() []*DDLBinlogMeta {
 	if m != nil {
-		return m.Coll2TsBinlogPaths
+		return m.DdlBinlogPaths
 	}
 	return nil
 }
 
-func (m *SaveBinlogPathsRequest) GetColl2DdlBinlogPaths() *ID2PathList {
+func (m *SaveBinlogPathsRequest) GetDmlPosition() *PositionPair {
 	if m != nil {
-		return m.Coll2DdlBinlogPaths
+		return m.DmlPosition
 	}
 	return nil
 }
 
-func (m *SaveBinlogPathsRequest) GetStartPositions() []*internalpb.MsgPosition {
+func (m *SaveBinlogPathsRequest) GetDdlPosition() *PositionPair {
 	if m != nil {
-		return m.StartPositions
-	}
-	return nil
-}
-
-func (m *SaveBinlogPathsRequest) GetEndPositions() []*internalpb.MsgPosition {
-	if m != nil {
-		return m.EndPositions
+		return m.DdlPosition
 	}
 	return nil
 }
@@ -1942,6 +1981,7 @@ func init() {
 	proto.RegisterType((*CollectionInfo)(nil), "milvus.proto.data.CollectionInfo")
 	proto.RegisterType((*SegmentInfo)(nil), "milvus.proto.data.SegmentInfo")
 	proto.RegisterType((*ID2PathList)(nil), "milvus.proto.data.ID2PathList")
+	proto.RegisterType((*PositionPair)(nil), "milvus.proto.data.PositionPair")
 	proto.RegisterType((*SaveBinlogPathsRequest)(nil), "milvus.proto.data.SaveBinlogPathsRequest")
 }
 
