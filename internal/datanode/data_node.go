@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -69,6 +71,8 @@ type DataNode struct {
 
 	masterService types.MasterService
 	dataService   types.DataService
+
+	session *sessionutil.Session
 
 	flushChan chan<- *flushMsg
 	replica   Replica
@@ -133,6 +137,11 @@ func (node *DataNode) SetDataServiceInterface(ds types.DataService) error {
 // At last, data node initializes its `dataSyncService` and `metaService`.
 func (node *DataNode) Init() error {
 	ctx := context.Background()
+
+	node.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress}, typeutil.DataNodeRole,
+		Params.IP+":"+strconv.Itoa(Params.Port), false)
+	node.session.Init()
+
 	req := &datapb.RegisterNodeRequest{
 		Base: &commonpb.MsgBase{
 			SourceID: node.NodeID,

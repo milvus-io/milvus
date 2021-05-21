@@ -29,7 +29,6 @@ import (
 	isc "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
 	psc "github.com/milvus-io/milvus/internal/distributed/proxyservice/client"
 	qsc "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	cms "github.com/milvus-io/milvus/internal/masterservice"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -41,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
 // grpc wrapper
@@ -69,9 +67,6 @@ type Server struct {
 	connectDataService  bool
 	connectIndexService bool
 	connectQueryService bool
-
-	etcdKV *etcdkv.EtcdKV
-	signal <-chan bool
 
 	closer io.Closer
 }
@@ -126,6 +121,8 @@ func (s *Server) init() error {
 	Params.Init()
 
 	cms.Params.Init()
+	cms.Params.Address = Params.Address
+	cms.Params.Port = Params.Port
 	log.Debug("grpc init done ...")
 
 	ctx := context.Background()
@@ -134,11 +131,6 @@ func (s *Server) init() error {
 	s.closer = closer
 
 	log.Debug("init params done")
-
-	self := sessionutil.NewSession("masterservice", funcutil.GetLocalIP()+":"+strconv.Itoa(Params.Port), true)
-	sm := sessionutil.NewSessionManager(ctx, cms.Params.EtcdAddress, cms.Params.MetaRootPath, self)
-	sm.Init()
-	sessionutil.SetGlobalSessionManager(sm)
 
 	err := s.startGrpc()
 	if err != nil {

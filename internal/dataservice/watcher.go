@@ -22,41 +22,11 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
-type proxyTimeTickWatcher struct {
-	allocator segmentAllocatorInterface
-	msgQueue  chan *msgstream.TimeTickMsg
-}
 type dataNodeTimeTickWatcher struct {
 	meta      *meta
 	cluster   *dataNodeCluster
 	allocator segmentAllocatorInterface
 	msgQueue  chan *msgstream.TimeTickMsg
-}
-
-func newProxyTimeTickWatcher(allocator segmentAllocatorInterface) *proxyTimeTickWatcher {
-	return &proxyTimeTickWatcher{
-		allocator: allocator,
-		msgQueue:  make(chan *msgstream.TimeTickMsg, 1),
-	}
-}
-
-func (watcher *proxyTimeTickWatcher) StartBackgroundLoop(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			log.Debug("proxy time tick watcher closed")
-			return
-		case msg := <-watcher.msgQueue:
-			traceCtx := context.TODO()
-			if err := watcher.allocator.ExpireAllocations(traceCtx, msg.Base.Timestamp); err != nil {
-				log.Error("expire allocations error", zap.Error(err))
-			}
-		}
-	}
-}
-
-func (watcher *proxyTimeTickWatcher) Watch(msg *msgstream.TimeTickMsg) {
-	watcher.msgQueue <- msg
 }
 
 func newDataNodeTimeTickWatcher(meta *meta, allocator segmentAllocatorInterface, cluster *dataNodeCluster) *dataNodeTimeTickWatcher {
@@ -90,27 +60,20 @@ func (watcher *dataNodeTimeTickWatcher) handleTimeTickMsg(msg *msgstream.TimeTic
 	ctx := context.TODO()
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
-	segments, err := watcher.allocator.GetSealedSegments(ctx)
+	coll2Segs := make(map[UniqueID][]UniqueID)
+	segments, err := watcher.allocator.GetFlushableSegments(ctx, msg.Base.Timestamp)
 	if err != nil {
 		return err
 	}
-	coll2Segs := make(map[UniqueID][]UniqueID)
 	for _, id := range segments {
-		expired, err := watcher.allocator.IsAllocationsExpired(ctx, id, msg.Base.Timestamp)
+		sInfo, err := watcher.meta.GetSegment(id)
 		if err != nil {
-			log.Error("check allocations expired error", zap.Int64("segmentID", id), zap.Error(err))
+			log.Error("get segment from meta error", zap.Int64("segmentID", id), zap.Error(err))
 			continue
 		}
-		if expired {
-			sInfo, err := watcher.meta.GetSegment(id)
-			if err != nil {
-				log.Error("get segment from meta error", zap.Int64("segmentID", id), zap.Error(err))
-				continue
-			}
-			collID, segID := sInfo.CollectionID, sInfo.ID
-			coll2Segs[collID] = append(coll2Segs[collID], segID)
-			watcher.allocator.DropSegment(ctx, id)
-		}
+		collID, segID := sInfo.CollectionID, sInfo.ID
+		coll2Segs[collID] = append(coll2Segs[collID], segID)
+		watcher.allocator.DropSegment(ctx, id)
 	}
 	for collID, segIDs := range coll2Segs {
 		watcher.cluster.FlushSegment(&datapb.FlushSegmentsRequest{

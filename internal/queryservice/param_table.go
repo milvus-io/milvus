@@ -30,6 +30,7 @@ type ParamTable struct {
 	NodeID uint64
 
 	Address        string
+	Port           int
 	QueryServiceID UniqueID
 
 	// stats

@@ -50,8 +50,7 @@ func (s *Server) SaveBinLogMetaTxn(meta map[string]string) error {
 }
 
 var (
-	errNilID2Paths             = errors.New("nil ID2PathList")
-	errCollectionTsDdlNotMatch = errors.New("collection ts/ddl path not matched")
+	errNilID2Paths = errors.New("nil ID2PathList")
 )
 
 // prepareField2PathMeta parses fields2Paths ID2PathList
@@ -80,35 +79,22 @@ func (s *Server) prepareField2PathMeta(segID UniqueID, field2Paths *datapb.ID2Pa
 
 // prepareDDLBinlogMeta parses Coll2DdlBinlogPaths & Coll2TsBinlogPaths
 //		into key-value for kv store
-func (s *Server) prepareDDLBinlogMeta(collID UniqueID, tsPaths, ddlPaths *datapb.ID2PathList) (result map[string]string, err error) {
-	if tsPaths == nil || ddlPaths == nil {
+func (s *Server) prepareDDLBinlogMeta(collID UniqueID, ddlMetas []*datapb.DDLBinlogMeta) (result map[string]string, err error) {
+	if ddlMetas == nil {
 		return nil, errNilID2Paths
 	}
 
-	// tsPaths.ID & ddlPaths.ID ignored for now, datanode will change flowgraph filter in the future
-	// stores all provided paths now
-	// if tsPaths.ID != collID || ddlPaths.ID != collID {
-	// 	return nil, collectionIDNotMatchErr
-	// }
+	result = make(map[string]string, len(ddlMetas))
 
-	if len(tsPaths.GetPaths()) != len(ddlPaths.GetPaths()) {
-		return nil, errCollectionTsDdlNotMatch
-	}
-
-	result = make(map[string]string, len(tsPaths.GetPaths()))
-
-	for idx, tsPath := range tsPaths.GetPaths() {
-		// in range checked
-		ddlPath := ddlPaths.GetPaths()[idx]
-
+	for _, ddlMeta := range ddlMetas {
+		if ddlMeta == nil {
+			continue
+		}
 		uniqueKey, err := s.genKey(true, collID)
 		if err != nil {
 			return nil, err
 		}
-		binlogPathPair := proto.MarshalTextString(&datapb.DDLBinlogMeta{
-			DdlBinlogPath: ddlPath,
-			TsBinlogPath:  tsPath,
-		})
+		binlogPathPair := proto.MarshalTextString(ddlMeta)
 
 		result[path.Join(Params.CollectionBinlogSubPath, uniqueKey)] = binlogPathPair
 	}
@@ -185,4 +171,27 @@ func (s *Server) getDDLBinlogMeta(collID UniqueID) (metas []*datapb.DDLBinlogMet
 		metas = append(metas, m)
 	}
 	return
+}
+
+// prepareSegmentPos prepare segment flushed pos
+func (s *Server) prepareSegmentPos(segmentID UniqueID, dmlPos, ddlPos *datapb.PositionPair) (map[string]string, error) {
+	result := make(map[string]string, 2)
+	if dmlPos != nil {
+		key, err := s.genKey(false, segmentID)
+		if err != nil {
+			return nil, err
+		}
+		msPosPair := proto.MarshalTextString(dmlPos)
+		result[path.Join(Params.SegmentDmlPosSubPath, key)] = msPosPair
+	}
+	if ddlPos != nil {
+		key, err := s.genKey(false, segmentID)
+		if err != nil {
+			return nil, err
+		}
+		msPosPair := proto.MarshalTextString(ddlPos)
+		result[path.Join(Params.SegmentDmlPosSubPath, key)] = msPosPair
+	}
+
+	return map[string]string{}, nil
 }

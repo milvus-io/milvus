@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/indexservice"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/masterservice"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proxynode"
 	"github.com/milvus-io/milvus/internal/proxyservice"
 	"github.com/milvus-io/milvus/internal/querynode"
@@ -93,6 +94,8 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		if ms != nil {
 			defer ms.Stop()
 		}
+
+		metrics.RegisterMaster()
 	}
 
 	if mr.EnableProxyService {
@@ -115,6 +118,8 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		if ps != nil {
 			defer ps.Stop()
 		}
+
+		metrics.RegisterProxyService()
 	}
 
 	if mr.EnableProxyNode {
@@ -137,6 +142,8 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		if pn != nil {
 			defer pn.Stop()
 		}
+
+		metrics.RegisterProxyNode()
 	}
 
 	if mr.EnableQueryService {
@@ -159,6 +166,8 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		if qs != nil {
 			defer qs.Stop()
 		}
+
+		metrics.RegisterQueryService()
 	}
 
 	if mr.EnableQueryNode {
@@ -181,6 +190,8 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		if qn != nil {
 			defer qn.Stop()
 		}
+
+		metrics.RegisterQueryNode()
 	}
 
 	if mr.EnableDataService {
@@ -203,6 +214,8 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		if ds != nil {
 			defer ds.Stop()
 		}
+
+		metrics.RegisterDataService()
 	}
 
 	if mr.EnableDataNode {
@@ -225,6 +238,8 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		if dn != nil {
 			defer dn.Stop()
 		}
+
+		metrics.RegisterDataNode()
 	}
 
 	if mr.EnableIndexService {
@@ -246,6 +261,8 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		if is != nil {
 			defer is.Stop()
 		}
+
+		metrics.RegisterIndexService()
 	}
 
 	if mr.EnableIndexNode {
@@ -267,6 +284,8 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		if in != nil {
 			in.Stop()
 		}
+
+		metrics.RegisterIndexNode()
 	}
 
 	if mr.EnableMsgStreamService {
@@ -284,7 +303,11 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		if mss != nil {
 			defer mss.Stop()
 		}
+
+		metrics.RegisterMsgStreamService()
 	}
+
+	metrics.ServeHTTP()
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,

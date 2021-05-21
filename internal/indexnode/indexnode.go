@@ -16,6 +16,7 @@ import (
 	"errors"
 	"io"
 	"math/rand"
+	"strconv"
 	"time"
 
 	"go.uber.org/zap"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -47,7 +49,8 @@ type IndexNode struct {
 
 	sched *TaskScheduler
 
-	kv kv.BaseKV
+	kv      kv.BaseKV
+	session *sessionutil.Session
 
 	serviceClient types.IndexService // method factory
 
@@ -76,6 +79,9 @@ func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 
 func (i *IndexNode) Init() error {
 	ctx := context.Background()
+	i.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress}, typeutil.IndexNodeRole,
+		Params.IP+":"+strconv.Itoa(Params.Port), false)
+	i.session.Init()
 
 	err := funcutil.WaitForComponentHealthy(ctx, i.serviceClient, "IndexService", 1000000, time.Millisecond*200)
 	if err != nil {

@@ -284,3 +284,30 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Nil(t, err)
 	})
 }
+
+func TestGetUnFlushedSegments(t *testing.T) {
+	mockAllocator := newMockAllocator()
+	meta, err := newMemoryMeta(mockAllocator)
+	assert.Nil(t, err)
+	err = meta.AddSegment(&datapb.SegmentInfo{
+		ID:           0,
+		CollectionID: 0,
+		PartitionID:  0,
+		State:        commonpb.SegmentState_Growing,
+	})
+	assert.Nil(t, err)
+	err = meta.AddSegment(&datapb.SegmentInfo{
+		ID:           1,
+		CollectionID: 0,
+		PartitionID:  0,
+		State:        commonpb.SegmentState_Flushed,
+	})
+	assert.Nil(t, err)
+
+	segments := meta.GetUnFlushedSegments()
+	assert.Nil(t, err)
+
+	assert.EqualValues(t, 1, len(segments))
+	assert.EqualValues(t, 0, segments[0].ID)
+	assert.NotEqualValues(t, commonpb.SegmentState_Flushed, segments[0].State)
+}
