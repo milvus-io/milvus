@@ -1961,7 +1961,7 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.DataNodeSegmentFlushCompletedChan = make(chan int64)
+	c.DataNodeFlushedSegmentChan = make(chan *msgstream.MsgPack)
 	err = c.checkInit()
 	assert.NotNil(t, err)
 

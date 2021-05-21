@@ -113,12 +113,11 @@ type Core struct {
 	//setMsgStreams, send drop partition into dd channel
 	SendDdDropPartitionReq func(ctx context.Context, req *internalpb.DropPartitionRequest) error
 
-	//setMsgStreams segment channel, receive segment info from data service, if master create segment
-	//DataServiceSegmentChan chan *datapb.SegmentInfo
+	//setMsgStreams segment channel, receive msg from data service, if master create segment
 	DataServiceSegmentChan chan *ms.MsgPack
 
-	//setMsgStreams ,if segment flush completed, data node would put segment id into msg stream
-	DataNodeSegmentFlushCompletedChan chan typeutil.UniqueID
+	//setMsgStreams, if segment flush completed, data node would put segment msg into msg stream
+	DataNodeFlushedSegmentChan chan *ms.MsgPack
 
 	//get binlog file path from data service,
 	GetBinlogFilePathsFromDataServiceReq func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
@@ -212,9 +211,6 @@ func (c *Core) checkInit() error {
 	if c.SendDdDropPartitionReq == nil {
 		return fmt.Errorf("SendDdDropPartitionReq is nil")
 	}
-	if c.DataServiceSegmentChan == nil {
-		return fmt.Errorf("DataServiceSegmentChan is nil")
-	}
 	if c.GetBinlogFilePathsFromDataServiceReq == nil {
 		return fmt.Errorf("GetBinlogFilePathsFromDataServiceReq is nil")
 	}
@@ -230,8 +226,11 @@ func (c *Core) checkInit() error {
 	if c.InvalidateCollectionMetaCache == nil {
 		return fmt.Errorf("InvalidateCollectionMetaCache is nil")
 	}
-	if c.DataNodeSegmentFlushCompletedChan == nil {
-		return fmt.Errorf("DataNodeSegmentFlushCompletedChan is nil")
+	if c.DataServiceSegmentChan == nil {
+		return fmt.Errorf("DataServiceSegmentChan is nil")
+	}
+	if c.DataNodeFlushedSegmentChan == nil {
+		return fmt.Errorf("DataNodeFlushedSegmentChan is nil")
 	}
 	if c.ReleaseCollection == nil {
 		return fmt.Errorf("ReleaseCollection is nil")
@@ -312,19 +311,6 @@ func (c *Core) startDataServiceSegmentLoop() {
 		case <-c.ctx.Done():
 			log.Debug("close data service segment loop")
 			return
-		//case seg, ok := <-c.DataServiceSegmentChan:
-		//	if !ok {
-		//		log.Debug("data service segment is closed, exit loop")
-		//		return
-		//	}
-		//	if seg == nil {
-		//		log.Warn("segment from data service is nil")
-		//	} else if _, err := c.MetaTable.AddSegment(seg); err != nil {
-		//		//what if master add segment failed, but data service success?
-		//		log.Warn("add segment info meta table failed ", zap.String("error", err.Error()))
-		//	} else {
-		//		log.Debug("add segment", zap.Int64("collection id", seg.CollectionID), zap.Int64("partition id", seg.PartitionID), zap.Int64("segment id", seg.ID))
-		//	}
 		case segMsg, ok := <-c.DataServiceSegmentChan:
 			if !ok {
 				log.Debug("data service segment channel is closed, exit loop")
@@ -360,10 +346,17 @@ func (c *Core) startSegmentFlushCompletedLoop() {
 		case <-c.ctx.Done():
 			log.Debug("close segment flush completed loop")
 			return
-		case segID, ok := <-c.DataNodeSegmentFlushCompletedChan:
+		case segMsg, ok := <-c.DataNodeFlushedSegmentChan:
 			if !ok {
 				log.Debug("data node segment flush completed chan has closed, exit loop")
 			}
+			flushMsg, ok := segMsg.Msgs[0].(*ms.FlushCompletedMsg)
+			if !ok {
+				log.Warn("receive unexpected msg from data service stream")
+				continue
+			}
+			segID := flushMsg.SegmentID
+
 			log.Debug("flush segment", zap.Int64("id", segID))
 			coll, err := c.MetaTable.GetCollectionBySegmentID(segID)
 			if err != nil {
@@ -614,9 +607,8 @@ func (c *Core) setMsgStreams() error {
 	dataServiceStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, Params.MsgChannelSubName)
 	log.Debug("master AsConsumer: " + Params.DataServiceSegmentChannel + " : " + Params.MsgChannelSubName)
 	dataServiceStream.Start()
-	//c.DataServiceSegmentChan = make(chan *datapb.SegmentInfo, 1024)
 	c.DataServiceSegmentChan = make(chan *ms.MsgPack, 1024)
-	c.DataNodeSegmentFlushCompletedChan = make(chan typeutil.UniqueID, 1024)
+	c.DataNodeFlushedSegmentChan = make(chan *ms.MsgPack, 1024)
 
 	// receive segment info from msg stream
 	go func() {
@@ -632,19 +624,8 @@ func (c *Core) setMsgStreams() error {
 					_, ok := segMsg.Msgs[0].(*ms.SegmentInfoMsg)
 					if ok {
 						c.DataServiceSegmentChan <- segMsg
-					}
-					for _, segm := range segMsg.Msgs {
-						//segInfoMsg, ok := segm.(*ms.SegmentInfoMsg)
-						//if ok {
-						//	c.DataServiceSegmentChan <- segInfoMsg.Segment
-						//} else {
-							flushMsg, ok := segm.(*ms.FlushCompletedMsg)
-							if ok {
-								c.DataNodeSegmentFlushCompletedChan <- flushMsg.SegmentFlushCompletedMsg.SegmentID
-							} else {
-								log.Warn("receive unexpected msg from data service stream")
-							}
-						//}
+					} else {
+						c.DataNodeFlushedSegmentChan <- segMsg
 					}
 				}
 			}
