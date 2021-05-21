@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/timesync"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -69,6 +70,7 @@ type Server struct {
 		sync.Mutex
 		name string
 	}
+	session              *sessionutil.Session
 	segmentInfoStream    msgstream.MsgStream
 	flushMsgStream       msgstream.MsgStream
 	insertChannels       []string
@@ -106,6 +108,9 @@ func (s *Server) SetMasterClient(masterClient types.MasterService) {
 }
 
 func (s *Server) Init() error {
+	s.session = sessionutil.NewSession(s.ctx, []string{Params.EtcdAddress}, typeutil.DataServiceRole,
+		Params.IP, true)
+	s.session.Init()
 	return nil
 }
 

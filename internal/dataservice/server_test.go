@@ -22,8 +22,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
+	"go.etcd.io/etcd/clientv3"
 )
 
 func TestRegisterNode(t *testing.T) {
@@ -778,6 +780,12 @@ func newTestServer(t *testing.T) *Server {
 	}
 	err = factory.SetParams(m)
 	assert.Nil(t, err)
+
+	etcdCli, err := initEtcd(Params.EtcdAddress)
+	assert.Nil(t, err)
+	_, err = etcdCli.Delete(context.Background(), "/session", clientv3.WithPrefix())
+	assert.Nil(t, err)
+
 	svr, err := CreateServer(context.TODO(), factory)
 	assert.Nil(t, err)
 	ms := newMockMasterService()
@@ -803,4 +811,21 @@ func closeTestServer(t *testing.T, svr *Server) {
 	assert.Nil(t, err)
 	err = svr.CleanMeta()
 	assert.Nil(t, err)
+}
+
+func initEtcd(etcdAddress string) (*clientv3.Client, error) {
+	var etcdCli *clientv3.Client
+	connectEtcdFn := func() error {
+		etcd, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}, DialTimeout: 5 * time.Second})
+		if err != nil {
+			return err
+		}
+		etcdCli = etcd
+		return nil
+	}
+	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	if err != nil {
+		return nil, err
+	}
+	return etcdCli, nil
 }

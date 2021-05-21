@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
@@ -89,11 +88,8 @@ func (s *Server) init() error {
 	s.closer = closer
 
 	dataservice.Params.Init()
-
-	self := sessionutil.NewSession("dataservice", funcutil.GetLocalIP()+":"+strconv.Itoa(Params.Port), true)
-	sm := sessionutil.NewSessionManager(ctx, dataservice.Params.EtcdAddress, dataservice.Params.MetaRootPath, self)
-	sm.Init()
-	sessionutil.SetGlobalSessionManager(sm)
+	dataservice.Params.IP = Params.IP
+	dataservice.Params.Port = Params.Port
 
 	err := s.startGrpc()
 	if err != nil {

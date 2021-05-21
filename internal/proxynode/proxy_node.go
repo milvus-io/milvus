@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -59,6 +60,8 @@ type ProxyNode struct {
 	tsoAllocator *TimestampAllocator
 	segAssigner  *SegIDAssigner
 
+	session *sessionutil.Session
+
 	queryMsgStream msgstream.MsgStream
 	msFactory      msgstream.Factory
 
@@ -85,6 +88,10 @@ func NewProxyNode(ctx context.Context, factory msgstream.Factory) (*ProxyNode, e
 func (node *ProxyNode) Init() error {
 	// todo wait for proxyservice state changed to Healthy
 	ctx := context.Background()
+
+	node.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress}, typeutil.ProxyNodeRole,
+		Params.NetworkAddress, false)
+	node.session.Init()
 
 	err := funcutil.WaitForComponentHealthy(ctx, node.proxyService, "ProxyService", 1000000, time.Millisecond*200)
 	if err != nil {

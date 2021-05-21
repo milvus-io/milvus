@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
@@ -53,7 +54,8 @@ type IndexService struct {
 	loopCancel func()
 	loopWg     sync.WaitGroup
 
-	sched *TaskScheduler
+	sched   *TaskScheduler
+	session *sessionutil.Session
 
 	idAllocator *allocator.GlobalIDAllocator
 
@@ -85,6 +87,12 @@ func NewIndexService(ctx context.Context) (*IndexService, error) {
 
 func (i *IndexService) Init() error {
 	log.Debug("indexservice", zap.String("etcd address", Params.EtcdAddress))
+
+	ctx := context.Background()
+	i.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress}, typeutil.IndexServiceRole,
+		Params.Address, true)
+	i.session.Init()
+
 	connectEtcdFn := func() error {
 		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
 		if err != nil {

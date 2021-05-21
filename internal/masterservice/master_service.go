@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -149,6 +150,8 @@ type Core struct {
 	initOnce  sync.Once
 	startOnce sync.Once
 	//isInit    atomic.Value
+
+	session *sessionutil.Session
 
 	msFactory ms.Factory
 }
@@ -818,6 +821,10 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 func (c *Core) Init() error {
 	var initError error = nil
 	c.initOnce.Do(func() {
+		c.session = sessionutil.NewSession(c.ctx, []string{Params.EtcdAddress}, typeutil.MasterServiceRole,
+			Params.Address, true)
+		c.session.Init()
+
 		connectEtcdFn := func() error {
 			if c.etcdCli, initError = clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second}); initError != nil {
 				return initError
