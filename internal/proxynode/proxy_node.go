@@ -89,7 +89,7 @@ func (node *ProxyNode) Init() error {
 	// todo wait for proxyservice state changed to Healthy
 	ctx := context.Background()
 
-	node.session = sessionutil.NewSession(ctx, Params.EtcdAddress, typeutil.ProxyNodeRole,
+	node.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress}, typeutil.ProxyNodeRole,
 		Params.NetworkAddress, false)
 	node.session.Init()
 

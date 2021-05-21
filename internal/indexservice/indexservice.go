@@ -89,7 +89,7 @@ func (i *IndexService) Init() error {
 	log.Debug("indexservice", zap.String("etcd address", Params.EtcdAddress))
 
 	ctx := context.Background()
-	i.session = sessionutil.NewSession(ctx, Params.EtcdAddress, typeutil.IndexServiceRole,
+	i.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress}, typeutil.IndexServiceRole,
 		Params.Address, true)
 	i.session.Init()
 

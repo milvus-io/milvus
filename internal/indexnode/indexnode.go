@@ -79,7 +79,7 @@ func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 
 func (i *IndexNode) Init() error {
 	ctx := context.Background()
-	i.session = sessionutil.NewSession(ctx, Params.EtcdAddress, typeutil.IndexNodeRole,
+	i.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress}, typeutil.IndexNodeRole,
 		Params.IP+":"+strconv.Itoa(Params.Port), false)
 	i.session.Init()
 

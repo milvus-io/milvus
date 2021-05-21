@@ -138,7 +138,7 @@ func (node *DataNode) SetDataServiceInterface(ds types.DataService) error {
 func (node *DataNode) Init() error {
 	ctx := context.Background()
 
-	node.session = sessionutil.NewSession(ctx, Params.EtcdAddress, typeutil.DataNodeRole,
+	node.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress}, typeutil.DataNodeRole,
 		Params.IP+":"+strconv.Itoa(Params.Port), false)
 	node.session.Init()
 

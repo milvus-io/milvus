@@ -35,7 +35,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	var wg sync.WaitGroup
 	var muList sync.Mutex = sync.Mutex{}
 
-	s := NewSession(ctx, etcdAddr, "test", "testAddr", false)
+	s := NewSession(ctx, []string{etcdAddr}, "test", "testAddr", false)
 	res := make([]int64, 0)
 
 	getIDFunc := func() {
@@ -77,7 +77,7 @@ func TestInit(t *testing.T) {
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("")
 
-	s := NewSession(ctx, etcdAddr, "test", "testAddr", false)
+	s := NewSession(ctx, []string{etcdAddr}, "test", "testAddr", false)
 	assert.NotEqual(t, 0, s.leaseID)
 	assert.NotEqual(t, 0, s.ServerID)
 }
@@ -103,7 +103,7 @@ func TestUpdateSessions(t *testing.T) {
 	var wg sync.WaitGroup
 	var muList sync.Mutex = sync.Mutex{}
 
-	s := NewSession(ctx, etcdAddr, "test", "testAddr", false)
+	s := NewSession(ctx, []string{etcdAddr}, "test", "testAddr", false)
 
 	sessions, err := s.GetSessions("test")
 	assert.Nil(t, err)
@@ -113,7 +113,7 @@ func TestUpdateSessions(t *testing.T) {
 	sList := []*Session{}
 
 	getIDFunc := func() {
-		singleS := NewSession(ctx, etcdAddr, "test", "testAddr", false)
+		singleS := NewSession(ctx, []string{etcdAddr}, "test", "testAddr", false)
 		singleS.Init()
 		muList.Lock()
 		sList = append(sList, singleS)

@@ -821,7 +821,7 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 func (c *Core) Init() error {
 	var initError error = nil
 	c.initOnce.Do(func() {
-		c.session = sessionutil.NewSession(c.ctx, Params.EtcdAddress, typeutil.MasterServiceRole,
+		c.session = sessionutil.NewSession(c.ctx, []string{Params.EtcdAddress}, typeutil.MasterServiceRole,
 			Params.Address, true)
 		c.session.Init()
 

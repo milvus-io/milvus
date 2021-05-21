@@ -59,7 +59,7 @@ type QueryService struct {
 func (qs *QueryService) Init() error {
 	ctx := context.Background()
 
-	qs.session = sessionutil.NewSession(ctx, Params.EtcdAddress, typeutil.QueryServiceRole,
+	qs.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress}, typeutil.QueryServiceRole,
 		Params.Address, true)
 	qs.session.Init()
 	return nil

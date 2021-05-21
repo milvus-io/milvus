@@ -121,7 +121,7 @@ func NewQueryNodeWithoutID(ctx context.Context, factory msgstream.Factory) *Quer
 func (node *QueryNode) Init() error {
 	ctx := context.Background()
 
-	node.session = sessionutil.NewSession(ctx, Params.EtcdAddress, typeutil.QueryNodeRole,
+	node.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress}, typeutil.QueryNodeRole,
 		Params.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodePort, 10), false)
 	node.session.Init()
 

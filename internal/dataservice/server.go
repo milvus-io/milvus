@@ -107,7 +107,7 @@ func (s *Server) SetMasterClient(masterClient types.MasterService) {
 }
 
 func (s *Server) Init() error {
-	s.session = sessionutil.NewSession(s.ctx, Params.EtcdAddress, typeutil.DataServiceRole,
+	s.session = sessionutil.NewSession(s.ctx, []string{Params.EtcdAddress}, typeutil.DataServiceRole,
 		Params.IP, true)
 	s.session.Init()
 	return nil

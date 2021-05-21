@@ -26,18 +26,19 @@ const defaultTTL = 10
 // LeaseID will be assigned after registered in etcd.
 type Session struct {
 	ctx        context.Context
-	ServerID   int64
-	ServerName string
-	Address    string
-	Exclusive  bool
-	etcdCli    *clientv3.Client
-	leaseID    clientv3.LeaseID
-	cancel     context.CancelFunc
+	ServerID   int64  `json:"ServerID,omitempty"`
+	ServerName string `json:"ServerName,omitempty"`
+	Address    string `json:"Address,omitempty"`
+	Exclusive  bool   `json:"Exclusive,omitempty"`
+
+	etcdCli *clientv3.Client
+	leaseID clientv3.LeaseID
+	cancel  context.CancelFunc
 }
 
 // NewSession is a helper to build Session object.LeaseID will be assigned after
 // registeration.
-func NewSession(ctx context.Context, etcdAddress, serverName, address string, exclusive bool) *Session {
+func NewSession(ctx context.Context, etcdAddress []string, serverName, address string, exclusive bool) *Session {
 	ctx, cancel := context.WithCancel(ctx)
 	session := &Session{
 		ctx:        ctx,
@@ -48,7 +49,7 @@ func NewSession(ctx context.Context, etcdAddress, serverName, address string, ex
 	}
 
 	connectEtcdFn := func() error {
-		etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}, DialTimeout: 5 * time.Second})
+		etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdAddress, DialTimeout: 5 * time.Second})
 		if err != nil {
 			return err
 		}
