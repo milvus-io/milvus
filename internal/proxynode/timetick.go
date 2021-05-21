@@ -19,7 +19,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -35,7 +34,7 @@ type timeTick struct {
 
 	pulsarProducer pulsar.Producer
 
-	tsoAllocator  *allocator.TimestampAllocator
+	tsoAllocator  *TimestampAllocator
 	tickMsgStream msgstream.MsgStream
 	msFactory     msgstream.Factory
 
@@ -49,7 +48,7 @@ type timeTick struct {
 }
 
 func newTimeTick(ctx context.Context,
-	tsoAllocator *allocator.TimestampAllocator,
+	tsoAllocator *TimestampAllocator,
 	interval time.Duration,
 	checkFunc tickCheckFunc,
 	factory msgstream.Factory) *timeTick {
