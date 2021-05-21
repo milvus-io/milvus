@@ -13,16 +13,24 @@ package datanode
 
 import (
 	"context"
+	"fmt"
 	"math"
+	"path"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
@@ -106,4 +114,109 @@ func genInsertMsg() insertMsg {
 	iMsg.flushMessages = append(iMsg.flushMessages, fmsg)
 	return *iMsg
 
+}
+
+func TestFlushSegmentTxn(t *testing.T) {
+	idAllocMock := NewAllocatorFactory(1)
+	mockMinIO := memkv.NewMemoryKV()
+
+	segmentID, _ := idAllocMock.allocID()
+	partitionID, _ := idAllocMock.allocID()
+	collectionID, _ := idAllocMock.allocID()
+	fmt.Printf("generate segmentID, partitionID, collectionID: %v, %v, %v\n",
+		segmentID, partitionID, collectionID)
+
+	collMeta := genCollectionMeta(collectionID, "test_flush_segment_txn")
+	flushMap := sync.Map{}
+	flushMeta := newBinlogMeta()
+
+	finishCh := make(chan map[UniqueID]string)
+
+	insertData := &InsertData{
+		Data: make(map[storage.FieldID]storage.FieldData),
+	}
+	insertData.Data[0] = &storage.Int64FieldData{
+		NumRows: 10,
+		Data:    []int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
+	}
+	insertData.Data[1] = &storage.Int64FieldData{
+		NumRows: 10,
+		Data:    []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+	}
+	insertData.Data[107] = &storage.FloatFieldData{
+		NumRows: 10,
+		Data:    make([]float32, 10),
+	}
+	flushMap.Store(segmentID, insertData)
+
+	go func(wait <-chan map[UniqueID]string) {
+		field2Path := <-wait
+		assert.NotNil(t, field2Path)
+	}(finishCh)
+
+	flushSegment(collMeta,
+		segmentID,
+		partitionID,
+		collectionID,
+		&flushMap,
+		mockMinIO,
+		finishCh,
+		idAllocMock)
+
+	k, _ := flushMeta.genKey(false, collectionID, partitionID, segmentID, 0)
+	key := path.Join(Params.StatsBinlogRootPath, k)
+	_, values, _ := mockMinIO.LoadWithPrefix(key)
+	assert.Equal(t, len(values), 1)
+	assert.Equal(t, values[0], `{"max":9,"min":0}`)
+}
+
+func genCollectionMeta(collectionID UniqueID, collectionName string) *etcdpb.CollectionMeta {
+	sch := schemapb.CollectionSchema{
+		Name:        collectionName,
+		Description: "test collection by meta factory",
+		AutoID:      true,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:     0,
+				Name:        "RowID",
+				Description: "RowID field",
+				DataType:    schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "f0_tk1",
+						Value: "f0_tv1",
+					},
+				},
+			},
+			{
+				FieldID:     1,
+				Name:        "Timestamp",
+				Description: "Timestamp field",
+				DataType:    schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "f1_tk1",
+						Value: "f1_tv1",
+					},
+				},
+			},
+			{
+				FieldID:     107,
+				Name:        "float32_field",
+				Description: "field 107",
+				DataType:    schemapb.DataType_Float,
+				TypeParams:  []*commonpb.KeyValuePair{},
+				IndexParams: []*commonpb.KeyValuePair{},
+			},
+		},
+	}
+
+	collection := etcdpb.CollectionMeta{
+		ID:           collectionID,
+		Schema:       &sch,
+		CreateTime:   Timestamp(1),
+		SegmentIDs:   make([]UniqueID, 0),
+		PartitionIDs: []UniqueID{0},
+	}
+	return &collection
 }

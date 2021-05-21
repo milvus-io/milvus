@@ -596,7 +596,7 @@ func flushSegment(collMeta *etcdpb.CollectionMeta, segID, partitionID, collID Un
 		return
 	}
 
-	binLogs, err := inCodec.Serialize(partitionID, segID, data.(*InsertData))
+	binLogs, statsBinlogs, err := inCodec.Serialize(partitionID, segID, data.(*InsertData))
 	if err != nil {
 		log.Error("Flush failed ... cannot generate binlog ..", zap.Error(err))
 		clearFn(false)
@@ -607,6 +607,9 @@ func flushSegment(collMeta *etcdpb.CollectionMeta, segID, partitionID, collID Un
 	field2Path := make(map[UniqueID]string, len(binLogs))
 	kvs := make(map[string]string, len(binLogs))
 	paths := make([]string, 0, len(binLogs))
+	field2Logidx := make(map[UniqueID]UniqueID, len(binLogs))
+
+	// write insert binlog
 	for _, blob := range binLogs {
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
 		if err != nil {
@@ -615,17 +618,39 @@ func flushSegment(collMeta *etcdpb.CollectionMeta, segID, partitionID, collID Un
 			return
 		}
 
-		k, err := idAllocator.genKey(true, collID, partitionID, segID, fieldID)
+		logidx, err := idAllocator.allocID()
 		if err != nil {
 			log.Error("Flush failed ... cannot alloc ID ..", zap.Error(err))
 			clearFn(false)
 			return
 		}
 
+		// no error raise if alloc=false
+		k, _ := idAllocator.genKey(false, collID, partitionID, segID, fieldID, logidx)
+
 		key := path.Join(Params.InsertBinlogRootPath, k)
 		paths = append(paths, key)
 		kvs[key] = string(blob.Value[:])
 		field2Path[fieldID] = key
+		field2Logidx[fieldID] = logidx
+	}
+
+	// write stats binlog
+	for _, blob := range statsBinlogs {
+		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
+		if err != nil {
+			log.Error("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
+			clearFn(false)
+			return
+		}
+
+		logidx := field2Logidx[fieldID]
+
+		// no error raise if alloc=false
+		k, _ := idAllocator.genKey(false, collID, partitionID, segID, fieldID, logidx)
+
+		key := path.Join(Params.StatsBinlogRootPath, k)
+		kvs[key] = string(blob.Value[:])
 	}
 
 	err = kv.MultiSave(kvs)

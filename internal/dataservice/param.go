@@ -25,9 +25,14 @@ type ParamTable struct {
 
 	NodeID int64
 
-	EtcdAddress   string
-	MetaRootPath  string
-	KvRootPath    string
+	// --- ETCD ---
+	EtcdAddress             string
+	MetaRootPath            string
+	KvRootPath              string
+	SegmentBinlogSubPath    string
+	CollectionBinlogSubPath string
+
+	// --- Pulsar ---
 	PulsarAddress string
 
 	FlushStreamPosSubPath string
@@ -70,6 +75,9 @@ func (p *ParamTable) Init() {
 		p.initEtcdAddress()
 		p.initMetaRootPath()
 		p.initKvRootPath()
+		p.initSegmentBinlogSubPath()
+		p.initCollectionBinlogSubPath()
+
 		p.initPulsarAddress()
 
 		p.initSegmentSize()
@@ -135,6 +143,23 @@ func (p *ParamTable) initKvRootPath() {
 	}
 	p.KvRootPath = rootPath + "/" + subPath
 }
+
+func (p *ParamTable) initSegmentBinlogSubPath() {
+	subPath, err := p.Load("etcd.segmentBinlogSubPath")
+	if err != nil {
+		panic(err)
+	}
+	p.SegmentBinlogSubPath = subPath
+}
+
+func (p *ParamTable) initCollectionBinlogSubPath() {
+	subPath, err := p.Load("etcd.collectionBinlogSubPath")
+	if err != nil {
+		panic(err)
+	}
+	p.CollectionBinlogSubPath = subPath
+}
+
 func (p *ParamTable) initSegmentSize() {
 	p.SegmentSize = p.ParseFloat("dataservice.segment.size")
 }

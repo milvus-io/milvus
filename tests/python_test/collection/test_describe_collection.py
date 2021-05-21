@@ -69,7 +69,7 @@ class TestDescribeCollection:
     def test_describe_collection_after_index_created(self, connect, collection, get_simple_index):
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
-            index = connect.describe_index(collection, default_float_vec_field_name)
+            index = connect.describe_index(collection, "")
             assert index["index_type"] == get_simple_index["index_type"]
             assert index["metric_type"] == get_simple_index["metric_type"]
             assert index["params"] == get_simple_index["params"]

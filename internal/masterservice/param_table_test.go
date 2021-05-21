@@ -61,4 +61,7 @@ func TestParamTable(t *testing.T) {
 
 	assert.NotZero(t, Params.Timeout)
 	t.Logf("master timeout = %d", Params.Timeout)
+
+	assert.NotZero(t, Params.TimeTickInterval)
+	t.Logf("master timetickerInterval = %d", Params.TimeTickInterval)
 }

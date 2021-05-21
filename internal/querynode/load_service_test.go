@@ -810,7 +810,7 @@ func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID
 		DataType: schemapb.DataType_Int64,
 	})
 	inCodec := storage.NewInsertCodec(collMeta)
-	binLogs, err := inCodec.Serialize(partitionID, segmentID, insertData)
+	binLogs, _, err := inCodec.Serialize(partitionID, segmentID, insertData)
 
 	if err != nil {
 		return nil, nil, err

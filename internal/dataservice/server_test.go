@@ -487,6 +487,117 @@ func TestChannel(t *testing.T) {
 	})
 }
 
+func TestSaveBinlogPaths(t *testing.T) {
+	svr := newTestServer(t)
+	defer closeTestServer(t, svr)
+
+	collections := []struct {
+		ID         UniqueID
+		Partitions []int64
+	}{
+		{0, []int64{0, 1}},
+		{1, []int64{0, 1}},
+	}
+
+	for _, collection := range collections {
+		err := svr.meta.AddCollection(&datapb.CollectionInfo{
+			ID:         collection.ID,
+			Schema:     nil,
+			Partitions: collection.Partitions,
+		})
+		assert.Nil(t, err)
+	}
+
+	segments := []struct {
+		id           UniqueID
+		collectionID UniqueID
+		partitionID  UniqueID
+	}{
+		{0, 0, 0},
+		{1, 0, 0},
+		{2, 0, 1},
+		{3, 1, 1},
+	}
+	for _, segment := range segments {
+		err := svr.meta.AddSegment(&datapb.SegmentInfo{
+			ID:           segment.id,
+			CollectionID: segment.collectionID,
+			PartitionID:  segment.partitionID,
+		})
+		assert.Nil(t, err)
+	}
+	t.Run("Normal SaveRequest", func(t *testing.T) {
+		ctx := context.Background()
+		resp, err := svr.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+			SegmentID:    2,
+			CollectionID: 0,
+			Field2BinlogPaths: &datapb.ID2PathList{
+				ID:    1,
+				Paths: []string{"/by-dev/test/0/1/2/1/Allo1", "/by-dev/test/0/1/2/1/Allo2"},
+			},
+			Coll2TsBinlogPaths: &datapb.ID2PathList{
+				ID:    0,
+				Paths: []string{"/by-dev/test/0/ts/Allo5", "/by-dev/test/0/ts/Allo8"},
+			},
+			Coll2DdlBinlogPaths: &datapb.ID2PathList{
+				ID:    0,
+				Paths: []string{"/by-dev/test/0/ddl/Allo7", "/by-dev/test/0/ddl/Allo9"},
+			},
+		})
+		assert.Nil(t, err)
+		assert.EqualValues(t, resp.ErrorCode, commonpb.ErrorCode_Success)
+
+		metas, err := svr.getFieldBinlogMeta(2, 1)
+		assert.Nil(t, err)
+		if assert.EqualValues(t, 2, len(metas)) {
+			assert.EqualValues(t, 1, metas[0].FieldID)
+			assert.EqualValues(t, "/by-dev/test/0/1/2/1/Allo1", metas[0].BinlogPath)
+			assert.EqualValues(t, 1, metas[1].FieldID)
+			assert.EqualValues(t, "/by-dev/test/0/1/2/1/Allo2", metas[1].BinlogPath)
+		}
+
+		metas, err = svr.getSegmentBinlogMeta(2)
+		assert.Nil(t, err)
+		if assert.EqualValues(t, 2, len(metas)) {
+			assert.EqualValues(t, 1, metas[0].FieldID)
+			assert.EqualValues(t, "/by-dev/test/0/1/2/1/Allo1", metas[0].BinlogPath)
+			assert.EqualValues(t, 1, metas[1].FieldID)
+			assert.EqualValues(t, "/by-dev/test/0/1/2/1/Allo2", metas[1].BinlogPath)
+		}
+
+		collMetas, err := svr.getDDLBinlogMeta(0)
+		assert.Nil(t, err)
+		if assert.EqualValues(t, 2, len(collMetas)) {
+			assert.EqualValues(t, "/by-dev/test/0/ts/Allo5", collMetas[0].TsBinlogPath)
+			assert.EqualValues(t, "/by-dev/test/0/ddl/Allo7", collMetas[0].DdlBinlogPath)
+			assert.EqualValues(t, "/by-dev/test/0/ts/Allo8", collMetas[1].TsBinlogPath)
+			assert.EqualValues(t, "/by-dev/test/0/ddl/Allo9", collMetas[1].DdlBinlogPath)
+		}
+
+	})
+	t.Run("Abnormal SaveRequest", func(t *testing.T) {
+		ctx := context.Background()
+		resp, err := svr.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+			SegmentID:    10,
+			CollectionID: 5,
+			Field2BinlogPaths: &datapb.ID2PathList{
+				ID:    1,
+				Paths: []string{"/by-dev/test/0/1/2/1/Allo1", "/by-dev/test/0/1/2/1/Allo2"},
+			},
+			Coll2TsBinlogPaths: &datapb.ID2PathList{
+				ID:    0,
+				Paths: []string{"/by-dev/test/0/ts/Allo5", "/by-dev/test/0/ts/Allo8"},
+			},
+			Coll2DdlBinlogPaths: &datapb.ID2PathList{
+				ID:    0,
+				Paths: []string{"/by-dev/test/0/ddl/Allo7", "/by-dev/test/0/ddl/Allo9"},
+			},
+		})
+		assert.NotNil(t, err)
+		assert.EqualValues(t, resp.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	})
+}
+
 func TestResumeChannel(t *testing.T) {
 	Params.Init()
 
@@ -655,7 +766,6 @@ func TestResumeChannel(t *testing.T) {
 			assert.Nil(t, err)
 		}
 	})
-
 }
 
 func newTestServer(t *testing.T) *Server {

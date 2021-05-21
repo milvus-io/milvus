@@ -936,6 +936,138 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 	}
 }
 
+type RetrieveTask struct {
+	Condition
+	*internalpb.RetrieveRequest
+	ctx            context.Context
+	queryMsgStream msgstream.MsgStream
+	resultBuf      chan []*internalpb.RetrieveResults
+	result         *milvuspb.RetrieveResults
+	retrieve       *milvuspb.RetrieveRequest
+}
+
+func (rt *RetrieveTask) TraceCtx() context.Context {
+	return rt.ctx
+}
+
+func (rt *RetrieveTask) ID() UniqueID {
+	return rt.Base.MsgID
+}
+
+func (rt *RetrieveTask) SetID(uid UniqueID) {
+	rt.Base.MsgID = uid
+}
+
+func (rt *RetrieveTask) Name() string {
+	return RetrieveTaskName
+}
+
+func (rt *RetrieveTask) Type() commonpb.MsgType {
+	return rt.Base.MsgType
+}
+
+func (rt *RetrieveTask) BeginTs() Timestamp {
+	return rt.Base.Timestamp
+}
+
+func (rt *RetrieveTask) EndTs() Timestamp {
+	return rt.Base.Timestamp
+}
+
+func (rt *RetrieveTask) SetTs(ts Timestamp) {
+	rt.Base.Timestamp = ts
+}
+
+func (rt *RetrieveTask) OnEnqueue() error {
+	rt.Base.MsgType = commonpb.MsgType_Retrieve
+	return nil
+}
+
+func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
+	rt.Base.MsgType = commonpb.MsgType_Retrieve
+	rt.Base.SourceID = Params.ProxyID
+
+	collectionName := rt.retrieve.CollectionName
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	if err != nil {
+		return err
+	}
+
+	if err := ValidateCollectionName(rt.retrieve.CollectionName); err != nil {
+		return err
+	}
+
+	for _, tag := range rt.retrieve.PartitionNames {
+		if err := ValidatePartitionTag(tag, false); err != nil {
+			return err
+		}
+	}
+
+	rt.Base.MsgType = commonpb.MsgType_Retrieve
+	rt.Ids = rt.retrieve.Ids
+	rt.OutputFields = rt.retrieve.OutputFields
+
+	rt.ResultChannelID = Params.RetrieveChannelNames[0]
+	rt.DbID = 0 // todo(yukun)
+
+	rt.CollectionID = collectionID
+	rt.PartitionIDs = make([]UniqueID, 0)
+
+	partitionsMap, err := globalMetaCache.GetPartitions(ctx, collectionName)
+	if err != nil {
+		return err
+	}
+
+	partitionsRecord := make(map[UniqueID]bool)
+	for _, partitionName := range rt.retrieve.PartitionNames {
+		pattern := fmt.Sprintf("^%s$", partitionName)
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return errors.New("invalid partition names")
+		}
+		found := false
+		for name, pID := range partitionsMap {
+			if re.MatchString(name) {
+				if _, exist := partitionsRecord[pID]; !exist {
+					rt.PartitionIDs = append(rt.PartitionIDs, pID)
+					partitionsRecord[pID] = true
+				}
+				found = true
+			}
+		}
+		if !found {
+			errMsg := fmt.Sprintf("PartitonName: %s not found", partitionName)
+			return errors.New(errMsg)
+		}
+	}
+
+	return nil
+}
+
+func (rt *RetrieveTask) Execute(ctx context.Context) error {
+	var tsMsg msgstream.TsMsg = &msgstream.RetrieveMsg{
+		RetrieveRequest: *rt.RetrieveRequest,
+		BaseMsg: msgstream.BaseMsg{
+			Ctx:            ctx,
+			HashValues:     []uint32{uint32(Params.ProxyID)},
+			BeginTimestamp: rt.Base.Timestamp,
+			EndTimestamp:   rt.Base.Timestamp,
+		},
+	}
+	msgPack := msgstream.MsgPack{
+		BeginTs: rt.Base.Timestamp,
+		EndTs:   rt.Base.Timestamp,
+		Msgs:    make([]msgstream.TsMsg, 1),
+	}
+	msgPack.Msgs[0] = tsMsg
+	err := rt.queryMsgStream.Produce(&msgPack)
+	log.Debug("proxynode", zap.Int("length of retrieveMsg", len(msgPack.Msgs)))
+	if err != nil {
+		log.Debug("proxynode", zap.String("send retrieve request failed", err.Error()))
+	}
+	return err
+}
+
 type HasCollectionTask struct {
 	Condition
 	*milvuspb.HasCollectionRequest
