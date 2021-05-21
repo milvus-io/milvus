@@ -13,50 +13,66 @@ package masterservice
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 
+	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
+)
+
+const (
+	ProxyNodeSessionPrefix = "session/proxynode"
 )
 
 type timetickSync struct {
 	lock          sync.Mutex
 	ctx           context.Context
+	etcdCli       *clientv3.Client
 	msFactory     msgstream.Factory
 	proxyTimeTick map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg
 	chanStream    map[string]msgstream.MsgStream
 	sendChan      chan map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg
-	addChan       <-chan *sessionutil.Session
-	delChan       <-chan *sessionutil.Session
 }
 
-func newTimeTickSync(ctx context.Context, factory msgstream.Factory) (*timetickSync, error) {
-	const proxyNodePrefix = "proxynode"
-	gm := sessionutil.GlobalSessionManager()
-	addChan, delChan := gm.WatchServices(ctx, proxyNodePrefix)
-	gm.UpdateSessions(proxyNodePrefix)
-
+func newTimeTickSync(ctx context.Context, factory msgstream.Factory, cli *clientv3.Client) (*timetickSync, error) {
 	tss := timetickSync{
 		lock:          sync.Mutex{},
 		ctx:           ctx,
+		etcdCli:       cli,
 		msFactory:     factory,
 		proxyTimeTick: make(map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg),
 		chanStream:    make(map[string]msgstream.MsgStream),
 		sendChan:      make(chan map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg),
-		addChan:       addChan,
-		delChan:       delChan,
 	}
 
-	pnSessions := gm.GetSessions(proxyNodePrefix)
-	for _, pns := range pnSessions {
-		tss.proxyTimeTick[pns.ServerID] = nil
+	ctx2, cancel := context.WithTimeout(ctx, RequestTimeout)
+	defer cancel()
+
+	resp, err := cli.Get(ctx2, ProxyMetaPrefix, clientv3.WithPrefix())
+	if err != nil {
+		return nil, err
 	}
+	for _, v := range resp.Kvs {
+		var sess sessionutil.Session
+		err := json.Unmarshal(v.Value, &sess)
+		if err != nil {
+			log.Debug("unmarshal SvrSession failed", zap.Error(err))
+			continue
+		}
+		if _, ok := tss.proxyTimeTick[sess.ServerID]; !ok {
+			tss.proxyTimeTick[sess.ServerID] = nil
+		}
+
+	}
+
 	return &tss, nil
 }
 
@@ -92,20 +108,47 @@ func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg) error {
 
 // StartWatch watch proxy node change and process all channels' timetick msg
 func (t *timetickSync) StartWatch() {
+	rch := t.etcdCli.Watch(t.ctx, ProxyNodeSessionPrefix, clientv3.WithPrefix(), clientv3.WithCreatedNotify())
 	for {
 		select {
 		case <-t.ctx.Done():
 			log.Debug("timetickSync context done", zap.Error(t.ctx.Err()))
 			return
-		case pns := <-t.addChan:
-			t.lock.Lock()
-			t.proxyTimeTick[pns.ServerID] = nil
-			t.lock.Unlock()
-		case pns := <-t.delChan:
-			t.lock.Lock()
-			delete(t.proxyTimeTick, pns.ServerID)
-			t.sendToChannel()
-			t.lock.Unlock()
+		case wresp, ok := <-rch:
+			if !ok {
+				log.Debug("time tick sync watch etcd failed")
+			}
+			for _, ev := range wresp.Events {
+				switch ev.Type {
+				case mvccpb.PUT:
+					var sess sessionutil.Session
+					err := json.Unmarshal(ev.Kv.Value, &sess)
+					if err != nil {
+						log.Debug("watch proxy node, unmarshal failed", zap.Error(err))
+						continue
+					}
+					func() {
+						t.lock.Lock()
+						defer t.lock.Unlock()
+						t.proxyTimeTick[sess.ServerID] = nil
+					}()
+				case mvccpb.DELETE:
+					var sess sessionutil.Session
+					err := json.Unmarshal(ev.PrevKv.Value, &sess)
+					if err != nil {
+						log.Debug("watch proxy node, unmarshal failed", zap.Error(err))
+						continue
+					}
+					func() {
+						t.lock.Lock()
+						defer t.lock.Unlock()
+						if _, ok := t.proxyTimeTick[sess.ServerID]; ok {
+							delete(t.proxyTimeTick, sess.ServerID)
+							t.sendToChannel()
+						}
+					}()
+				}
+			}
 		case ptt, ok := <-t.sendChan:
 			if !ok {
 				log.Debug("timetickSync sendChan closed", zap.Error(t.ctx.Err()))
