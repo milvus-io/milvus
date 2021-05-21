@@ -219,6 +219,14 @@ func TestMasterService(t *testing.T) {
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
 
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second})
+	assert.Nil(t, err)
+	_, err = etcdCli.Delete(ctx, ProxyNodeSessionPrefix, clientv3.WithPrefix())
+	assert.Nil(t, err)
+	defer func() {
+		_, _ = etcdCli.Delete(ctx, ProxyNodeSessionPrefix, clientv3.WithPrefix())
+	}()
+
 	pm := &proxyMock{
 		randVal:   randVal,
 		collArray: make([]string, 0, 16),
@@ -1437,21 +1445,29 @@ func TestMasterService(t *testing.T) {
 			ts1                = uint64(120)
 			ts2                = uint64(150)
 		)
-		s0 := sessionutil.NewSession(proxyNodeName0, "", false)
-		s1 := sessionutil.NewSession(proxyNodeName1, "", false)
+		p1 := sessionutil.Session{
+			ServerID: 100,
+		}
 
-		gm0 := sessionutil.NewSessionManager(ctx, Params.EtcdAddress, Params.MetaRootPath, s0)
-		gm1 := sessionutil.NewSessionManager(ctx, Params.EtcdAddress, Params.MetaRootPath, s1)
+		p2 := sessionutil.Session{
+			ServerID: 101,
+		}
+		ctx2, cancel2 := context.WithTimeout(ctx, RequestTimeout)
+		defer cancel2()
+		s1, err := json.Marshal(&p1)
+		assert.Nil(t, err)
+		s2, err := json.Marshal(&p2)
+		assert.Nil(t, err)
 
-		gm0.Init()
-		gm1.Init()
-
-		time.Sleep(1 * time.Second)
+		_, err = core.etcdCli.Put(ctx2, ProxyNodeSessionPrefix+"-1", string(s1))
+		assert.Nil(t, err)
+		_, err = core.etcdCli.Put(ctx2, ProxyNodeSessionPrefix+"-2", string(s2))
+		assert.Nil(t, err)
 
 		msg0 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_TimeTick,
-				SourceID: gm0.Self.ServerID,
+				SourceID: 100,
 			},
 			ChannelNames: []string{chanName0, chanName1},
 			Timestamps:   []uint64{ts0, ts2},
@@ -1463,7 +1479,7 @@ func TestMasterService(t *testing.T) {
 		msg1 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_TimeTick,
-				SourceID: gm1.Self.ServerID,
+				SourceID: 101,
 			},
 			ChannelNames: []string{chanName1, chanName2},
 			Timestamps:   []uint64{ts1, ts2},

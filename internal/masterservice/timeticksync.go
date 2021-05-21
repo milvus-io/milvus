@@ -28,10 +28,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	ProxyNodeSessionPrefix = "session/proxynode"
-)
-
 type timetickSync struct {
 	lock          sync.Mutex
 	ctx           context.Context
@@ -41,6 +37,8 @@ type timetickSync struct {
 	chanStream    map[string]msgstream.MsgStream
 	sendChan      chan map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg
 }
+
+const ProxyNodeSessionPrefix = "session/proxynode"
 
 func newTimeTickSync(ctx context.Context, factory msgstream.Factory, cli *clientv3.Client) (*timetickSync, error) {
 	tss := timetickSync{
