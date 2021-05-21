@@ -525,6 +525,9 @@ func TestSaveBinlogPaths(t *testing.T) {
 	t.Run("Normal SaveRequest", func(t *testing.T) {
 		ctx := context.Background()
 		resp, err := svr.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+			Base: &commonpb.MsgBase{
+				Timestamp: uint64(time.Now().Unix()),
+			},
 			SegmentID:    2,
 			CollectionID: 0,
 			Field2BinlogPaths: &datapb.ID2PathList{
