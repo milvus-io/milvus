@@ -1,5 +1,7 @@
 # DataNode Recovery Design
 
+update: 5.21.2021, by [Goose](https://github.com/XuanYang-cn)
+
 ## Objectives
 
 DataNode is stateless. It does whatever DataService tells, so recovery is not a difficult thing for datanode.
@@ -68,15 +70,15 @@ message ID2PathList {
     repeated string Paths = 2;
 }
 
-message SaveBinlogPathsRequest {                                                                                 
-    common.MsgBase base = 1; 
+message SaveBinlogPathsRequest {
+    common.MsgBase base = 1;
     int64 segmentID = 2;
     int64 collectionID = 3;
     ID2PathList field2BinlogPaths = 4;
-    ID2PathList coll2TsBinlogPaths = 5; 
-    ID2PathList coll2DdlBinlogPaths = 6;  
-    repeated internal.MsgPosition start_positions = 7;  
-    repeated internal.MsgPosition end_positions = 8; 
+    ID2PathList coll2TsBinlogPaths = 5;
+    ID2PathList coll2DdlBinlogPaths = 6;
+    repeated internal.MsgPosition start_positions = 7;
+    repeated internal.MsgPosition end_positions = 8;
  }
 ```
 
@@ -120,6 +122,48 @@ message DDLBinlogMeta {
   ![datanode_design](graphs/collection_flowgraph_1_n.png)
 
   **O4-1.** DataNode scales flowgraph 2 Day
+
+Q. flowgraph pool?
+
+**DM DD position should be the same**
+- Change `WatchDmChannelsRequest` proto.
+``` proto
+message Vchannel {
+  int64 collectionID = 1;
+  string vchannel_name = 2;
+  internal.MsgPosition start_position = 3;
+  internal.MsgPosition end_position = 4;
+}
+
+message WatchDmChannelsRequest {
+  common.MsgBase base = 1;
+  Vchannel ddl_channel = 2;
+  repeated Vchannel vchannels = 3;
+}
+```
+
+- DataNode consists of multiple DataSyncService, each service controls one flowgraph.
+
+```go
+// DataNode
+type DataNode struct {
+    ...
+    coll2Sync map[UniqueID]*dataSyncService
+    ...
+}
+
+// DataSyncService
+type dataSyncService struct {
+	ctx          context.Context
+	fg           *flowgraph.TimeTickedFlowGraph
+	flushChan    <-chan *flushMsg
+	replica      Replica
+	idAllocator  allocatorInterface
+	msFactory    msgstream.Factory
+	collectionID UniqueID
+	segmentIDs   []UniqueID
+}
+```
 
 #### The boring design
 

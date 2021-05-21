@@ -1,6 +1,7 @@
 # DataNode DDL Flush Design
 
 update: 5.19.2021, by [Goose](https://github.com/XuanYang-cn)
+update: 5.21.2021, by [Goose](https://github.com/XuanYang-cn)
 
 ## Background
 
@@ -50,14 +51,19 @@ ${prefix}/${collectionID}/${segmentID}/${idx}
 ```
 
 ```
+message PositionPair {
+  internal.MsgPosition start_position = 1;
+  internal.MsgPosition end_position = 2;
+}
+
 message SaveBinlogPathsRequest {
     common.MsgBase base = 1;
     int64 segmentID = 2;
     int64 collectionID = 3;
     ID2PathList field2BinlogPaths = 4;
     repeated DDLBinlogMeta = 5;
-    repeated internal.MsgPosition start_positions = 7;
-    repeated internal.MsgPosition end_positions = 8; 
+    PositionPair dml_position = 6;
+    PositionPair ddl_position =7;
  }
 ```
 
