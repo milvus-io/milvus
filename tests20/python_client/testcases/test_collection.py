@@ -1,4 +1,5 @@
 import pytest
+from milvus import DataType
 from pymilvus_orm import FieldSchema
 
 from base.client_request import ApiReq
@@ -66,6 +67,24 @@ class TestCollectionParams(ApiReq):
         params=cf.gen_invalid_field_types()
     )
     def get_invalid_field_type(self, request):
+        yield request.param
+
+    @pytest.fixture(
+        scope="function",
+        params=cf.gen_all_type_fields()
+    )
+    def get_unsupported_primary_field(self, request):
+        if request.param.dtype == DataType.INT64:
+            pytest.skip("int64 type is valid primary key")
+        yield request.param
+
+    @pytest.fixture(
+        scope="function",
+        params=ct.get_invalid_strs.append(0)
+    )
+    def get_invalid_dim(self, request):
+        if request.param == 1:
+            request.param = 0
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -349,6 +368,49 @@ class TestCollectionParams(ApiReq):
         assert not has
 
     @pytest.mark.tags(CaseLabel.L0)
+    def test_collection_only_float_vector(self):
+        """
+        target: test collection just with float-vec field
+        method: create with float-vec fields
+        expected: no exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_collection_schema(fields=[cf.gen_float_vec_field()])
+        collection, _ = self.collection.collection_init(c_name, schema=schema)
+        assert_default_collection(collection, c_name, exp_schema=schema)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #5345")
+    def test_collection_multi_float_vectors(self):
+        """
+        target: test collection with multi float vectors
+        method: create collection with two float-vec fields
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        fields = [cf.gen_float_vec_field(), cf.gen_float_vec_field(name="tmp")]
+        schema = cf.gen_collection_schema(fields=fields)
+        ex, _ = self.collection.collection_init(c_name, schema=schema)
+        log.debug(ex)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #5345")
+    def test_collection_mix_vectors(self):
+        """
+        target: test collection with mix vectors
+        method: create with float and binary vec
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        fields = [cf.gen_float_vec_field(), cf.gen_binary_vec_field()]
+        schema = cf.gen_collection_schema(fields=fields)
+        ex, _ = self.collection.collection_init(c_name, schema=schema)
+        log.debug(ex)
+
+    @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(reason="issue #5285")
     def test_collection_without_vectors(self):
         """
@@ -361,6 +423,162 @@ class TestCollectionParams(ApiReq):
         schema = cf.gen_collection_schema([cf.gen_int64_field()])
         ex, _ = self.collection.collection_init(c_name, schema=schema)
         assert "must" in str(ex)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_collection_primary_field(self):
+        """
+        target: test collection with primary field
+        method: specify primary field
+        expected: collection.primary_field
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_default_collection_schema(primary_field=ct.default_int64_field)
+        collection, _ = self.collection.collection_init(c_name, schema=schema)
+        assert collection.primary_field.name == ct.default_int64_field
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_unsupported_primary_field(self, get_unsupported_primary_field):
+        """
+        target: test collection with unsupported parimary field type
+        method: specify non-int64 as primary field
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        field = get_unsupported_primary_field
+        schema = cf.gen_collection_schema(fields=[field], primary_field=field.name)
+        ex, _ = self.collection.collection_init(c_name, schema=schema)
+        assert "the data type of primary key should be int64" in str(ex)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_multi_primary_fields(self):
+        """
+        target: test collection with multi primary
+        method: collection with two primary fields
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        int_field = cf.gen_int64_field(is_primary=True)
+        float_vec_field = cf.gen_float_vec_field(is_primary=True)
+        schema = cf.gen_collection_schema(fields=[int_field, float_vec_field])
+        ex, _ = self.collection.collection_init(c_name, schema=schema)
+        assert "there are more than one primary key" in str(ex)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #5349")
+    def test_collection_primary_inconsistent(self):
+        """
+        target: test collection with different primary field setting
+        method: 1. set A field is_primary 2. set primary_field is B
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        int_field = cf.gen_int64_field(name="int", is_primary=True)
+        float_vec_field = cf.gen_float_vec_field(name="vec")
+        schema = cf.gen_collection_schema(fields=[int_field, float_vec_field], primary_field="vec")
+        ex, _ = self.collection.collection_init(c_name, schema=schema)
+        log.info(schema)
+        log.info(ex.primary_field.name)
+        assert "there are more than one primary key" in str(ex)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_field_primary_false(self):
+        """
+        target: test collection with primary false
+        method: define field with is_primary false
+        expected: no exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        int_field = cf.gen_int64_field(name="int")
+        float_vec_field = cf.gen_float_vec_field()
+        schema = cf.gen_collection_schema(fields=[int_field, float_vec_field])
+        collection, _ = self.collection.collection_init(c_name, schema=schema)
+        assert collection.primary_field is None
+        assert collection.schema.auto_id
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #5350")
+    def test_collection_field_invalid_primary(self, get_invalid_string):
+        """
+        target: test collection with invalid primary
+        method: define field with is_primary=non-bool
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        int_field = cf.gen_int64_field(name="int", is_primary=get_invalid_string)
+        float_vec_field = cf.gen_float_vec_field()
+        schema = cf.gen_collection_schema(fields=[int_field, float_vec_field])
+        ex, _ = self.collection.collection_init(c_name, schema=schema)
+        log.info(str(ex))
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_collection_vector_without_dim(self):
+        """
+        target: test collection without dimension
+        method: define vector field without dim
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        float_vec_field = FieldSchema(name=ct.default_float_vec_field_name, dtype=DataType.FLOAT_VECTOR)
+        schema = cf.gen_collection_schema(fields=[float_vec_field])
+        ex, _ = self.collection.collection_init(c_name, schema=schema)
+        assert "dimension is not defined in field type params" in str(ex)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_vector_invalid_dim(self, get_invalid_dim):
+        """
+        target: test collection with invalid dimension
+        method: define float-vec field with invalid dimension
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        float_vec_field = cf.gen_float_vec_field(dim=get_invalid_dim)
+        schema = cf.gen_collection_schema(fields=[float_vec_field])
+        ex, _ = self.collection.collection_init(c_name, schema=schema)
+        assert "dim must be of int" in str(ex)
+
+    @pytest.mark.parametrize("dim", [-1, 32769])
+    def test_collection_vector_out_bounds_dim(self, dim):
+        """
+        target: test collection with out of bounds dim
+        method: invalid dim -1 and 32759
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        float_vec_field = cf.gen_float_vec_field(dim=dim)
+        schema = cf.gen_collection_schema(fields=[float_vec_field])
+        ex, _ = self.collection.collection_init(c_name, schema=schema)
+        assert "invalid dimension: {}. should be in range 1 ~ 32768".format(dim) in str(ex)
+
+    def test_collection_binary_vector_invalid_dim(self):
+        """
+        target: test collection with invalid binary dim
+        method: collection
+        expected:
+        """
+        pass
+
+    def test_collection_non_vector_field_dim(self):
+        """
+        target: test collection with dim for non-vector field
+        method: define int64 field with dim
+        expected: no exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        int_field = FieldSchema(name="int", dtype=DataType.INT64, dim=ct.default_dim)
+        float_vec_field = cf.gen_float_vec_field()
+        schema = cf.gen_collection_schema(fields=[int_field, float_vec_field])
+        collection, _ = self.collection.collection_init(c_name, schema=schema)
+        assert_default_collection(collection, c_name, exp_schema=schema)
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(reason="issue #5302")
