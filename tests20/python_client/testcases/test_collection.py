@@ -11,8 +11,9 @@ prefix = "collection"
 default_schema = cf.gen_default_collection_schema()
 
 
-def assert_default_collection(collection, exp_name, exp_schema=default_schema, exp_num=0, exp_primary=None):
-    assert collection.name == exp_name
+def assert_default_collection(collection, exp_name=None, exp_schema=default_schema, exp_num=0, exp_primary=None):
+    if exp_name:
+        assert collection.name == exp_name
     assert collection.description == exp_schema.description
     assert collection.schema == exp_schema
     if exp_num == 0:
@@ -114,8 +115,9 @@ class TestCollectionParams(ApiReq):
         expected: collection properties consistent
         """
         self._connect()
-        c_name, collection = self._collection()
-        assert_default_collection(collection, c_name)
+        collection = self._collection()
+        c_name = collection.name
+        assert_default_collection(collection)
         dup_collection, _ = self.collection.collection_init(c_name)
         assert_default_collection(dup_collection, c_name)
         assert collection.name == dup_collection.name
@@ -132,8 +134,9 @@ class TestCollectionParams(ApiReq):
         expected: raise exception
         """
         self._connect()
-        c_name, collection = self._collection()
-        assert_default_collection(collection, c_name)
+        collection = self._collection()
+        c_name = collection.name
+        assert_default_collection(collection)
         fields = [cf.gen_int64_field()]
         schema = cf.gen_collection_schema(fields=fields)
         ex, _ = self.collection.collection_init(c_name, schema=schema)
@@ -148,8 +151,9 @@ class TestCollectionParams(ApiReq):
         expected: raise exception
         """
         self._connect()
-        c_name, collection = self._collection()
-        assert_default_collection(collection, c_name)
+        collection = self._collection()
+        c_name = collection.name
+        assert_default_collection(collection)
         schema = cf.gen_default_collection_schema(primary_field=ct.default_int64_field)
         ex, _ = self.collection.collection_init(c_name, schema=schema)
         assert "The collection already exist, but the schema isnot the same as the passed in" in str(ex)
@@ -164,8 +168,9 @@ class TestCollectionParams(ApiReq):
         """
         self._connect()
         new_dim = 120
-        c_name, collection = self._collection()
-        assert_default_collection(collection, c_name)
+        collection = self._collection()
+        c_name = collection.name
+        assert_default_collection(collection)
         schema = cf.gen_default_collection_schema()
         new_fields = cf.gen_float_vec_field(dim=new_dim)
         schema.fields[-1] = new_fields
@@ -182,8 +187,9 @@ class TestCollectionParams(ApiReq):
         expected: raise exception and
         """
         self._connect()
-        c_name, collection = self._collection()
-        assert_default_collection(collection, c_name)
+        collection = self._collection()
+        c_name = collection.name
+        assert_default_collection(collection)
         ex, _ = self.collection.collection_init(c_name, schema=get_invalid_type_schema)
         assert "schema type must be schema.CollectionSchema" in str(ex)
         assert_default_collection(collection, c_name)
@@ -197,8 +203,9 @@ class TestCollectionParams(ApiReq):
         expected: two collection object is available
         """
         self._connect()
-        c_name, collection = self._collection()
-        assert_default_collection(collection, c_name)
+        collection = self._collection()
+        c_name = collection.name
+        assert_default_collection(collection)
         dup_collection, _ = self.collection.collection_init(c_name, schema=default_schema)
         assert_default_collection(dup_collection, c_name)
         assert id(collection) == id(dup_collection)
@@ -213,8 +220,9 @@ class TestCollectionParams(ApiReq):
         """
         self._connect()
         nb = ct.default_nb
-        c_name, collection = self._collection()
-        assert_default_collection(collection, c_name)
+        collection = self._collection()
+        c_name = collection.name
+        assert_default_collection(collection)
         df = cf.gen_default_dataframe_data(nb)
         dup_collection, _ = self.collection.collection_init(c_name, schema=None, data=df)
         assert_default_collection(dup_collection, c_name, exp_num=nb)
@@ -230,8 +238,9 @@ class TestCollectionParams(ApiReq):
         """
         self._connect()
         nb = ct.default_nb
-        c_name, collection = self._collection()
-        assert_default_collection(collection, c_name)
+        collection = self._collection()
+        c_name = collection.name
+        assert_default_collection(collection)
         data = cf.gen_default_dataframe_data(nb)
         dup_collection, _ = self.collection.collection_init(c_name, schema=None, data=data)
         assert_default_collection(dup_collection, c_name, exp_num=nb)
@@ -433,12 +442,12 @@ class TestCollectionOperation(ApiReq):
         expected: collection dropped
         """
         self._connect()
-        c_name, collection = self._collection()
-        assert_default_collection(collection, c_name)
-        dup_collection, _ = self.collection.collection_init(c_name)
-        assert_default_collection(dup_collection, c_name)
+        collection = self._collection()
+        assert_default_collection(collection)
+        dup_collection, _ = self.collection.collection_init(collection.name)
+        assert_default_collection(dup_collection, collection.name)
         dup_collection.drop()
-        has, _ = self.utility.has_collection(c_name)
+        has, _ = self.utility.has_collection(collection.name)
         assert not has
         with pytest.raises(Exception, match="can't find collection"):
             collection.num_entities
