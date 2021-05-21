@@ -136,6 +136,9 @@ type Core struct {
 	//dd request scheduler
 	ddReqQueue chan reqTask //dd request will be push into this chan
 
+	// channel timetick
+	chanTimeTick *timetickSync
+
 	//time tick loop
 	lastTimeTick typeutil.Timestamp
 
@@ -424,16 +427,6 @@ func (c *Core) setMsgStreams() error {
 	//proxy time tick stream,
 	if Params.ProxyTimeTickChannel == "" {
 		return fmt.Errorf("ProxyTimeTickChannel is empty")
-	}
-
-	var err error
-	m := map[string]interface{}{
-		"PulsarAddress":  Params.PulsarAddress,
-		"ReceiveBufSize": 1024,
-		"PulsarBufSize":  1024}
-	err = c.msFactory.SetParams(m)
-	if err != nil {
-		return err
 	}
 
 	proxyTimeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
@@ -878,6 +871,18 @@ func (c *Core) Init() error {
 			return tsoAllocator.UpdateTSO()
 		}
 
+		m := map[string]interface{}{
+			"PulsarAddress":  Params.PulsarAddress,
+			"ReceiveBufSize": 1024,
+			"PulsarBufSize":  1024}
+		if initError = c.msFactory.SetParams(m); initError != nil {
+			return
+		}
+		c.chanTimeTick, initError = newTimeTickSync(c.ctx, c.msFactory, c.etcdCli)
+		if initError != nil {
+			return
+		}
+
 		c.ddReqQueue = make(chan reqTask, 1024)
 		initError = c.setMsgStreams()
 	})
@@ -971,6 +976,7 @@ func (c *Core) Start() error {
 		go c.startDataServiceSegmentLoop()
 		go c.startSegmentFlushCompletedLoop()
 		go c.tsLoop()
+		go c.chanTimeTick.StartWatch()
 		c.stateCode.Store(internalpb.StateCode_Healthy)
 	})
 	log.Debug("Master service", zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Healthy)]))
@@ -1646,5 +1652,28 @@ func (c *Core) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*maste
 		},
 		ID:    start,
 		Count: in.Count,
+	}, nil
+}
+
+// UpdateChannelTimeTick used to handle ChannelTimeTickMsg
+func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}
+	if in.Base.MsgType != commonpb.MsgType_TimeTick {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = fmt.Sprintf("UpdateChannelTimeTick receive invalid message %d", in.Base.GetMsgType())
+		return status, nil
+	}
+	err := c.chanTimeTick.UpdateTimeTick(in)
+	if err != nil {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = err.Error()
+		return status, nil
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
 	}, nil
 }

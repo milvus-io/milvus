@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -34,6 +35,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/clientv3"
@@ -215,6 +218,14 @@ func TestMasterService(t *testing.T) {
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
 
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second})
+	assert.Nil(t, err)
+	_, err = etcdCli.Delete(ctx, ProxyNodeSessionPrefix, clientv3.WithPrefix())
+	assert.Nil(t, err)
+	defer func() {
+		_, _ = etcdCli.Delete(ctx, ProxyNodeSessionPrefix, clientv3.WithPrefix())
+	}()
+
 	pm := &proxyMock{
 		randVal:   randVal,
 		collArray: make([]string, 0, 16),
@@ -243,6 +254,12 @@ func TestMasterService(t *testing.T) {
 	}
 	err = core.SetQueryService(qm)
 	assert.Nil(t, err)
+
+	// initialize master's session manager before core init
+	self := sessionutil.NewSession("masterservice", funcutil.GetLocalIP()+":"+strconv.Itoa(53100), true)
+	sm := sessionutil.NewSessionManager(ctx, Params.EtcdAddress, Params.MetaRootPath, self)
+	sm.Init()
+	sessionutil.SetGlobalSessionManager(sm)
 
 	err = core.Init()
 	assert.Nil(t, err)
@@ -1413,6 +1430,77 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		_, err = core.GetStatisticsChannel(ctx)
 		assert.Nil(t, err)
+	})
+
+	t.Run("channel timetick", func(t *testing.T) {
+		const (
+			proxyNodeIDInvalid = 102
+			proxyNodeName0     = "proxynode_0"
+			proxyNodeName1     = "proxynode_1"
+			chanName0          = "c0"
+			chanName1          = "c1"
+			chanName2          = "c2"
+			ts0                = uint64(100)
+			ts1                = uint64(120)
+			ts2                = uint64(150)
+		)
+		p1 := sessionutil.Session{
+			ServerID: 100,
+		}
+
+		p2 := sessionutil.Session{
+			ServerID: 101,
+		}
+		ctx2, cancel2 := context.WithTimeout(ctx, RequestTimeout)
+		defer cancel2()
+		s1, err := json.Marshal(&p1)
+		assert.Nil(t, err)
+		s2, err := json.Marshal(&p2)
+		assert.Nil(t, err)
+
+		_, err = core.etcdCli.Put(ctx2, ProxyNodeSessionPrefix+"-1", string(s1))
+		assert.Nil(t, err)
+		_, err = core.etcdCli.Put(ctx2, ProxyNodeSessionPrefix+"-2", string(s2))
+		assert.Nil(t, err)
+		time.Sleep(time.Second)
+
+		msg0 := &internalpb.ChannelTimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_TimeTick,
+				SourceID: 100,
+			},
+			ChannelNames: []string{chanName0, chanName1},
+			Timestamps:   []uint64{ts0, ts2},
+		}
+		s, _ := core.UpdateChannelTimeTick(ctx, msg0)
+		assert.Equal(t, commonpb.ErrorCode_Success, s.ErrorCode)
+		time.Sleep(100 * time.Millisecond)
+		t.Log(core.chanTimeTick.proxyTimeTick)
+
+		msg1 := &internalpb.ChannelTimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_TimeTick,
+				SourceID: 101,
+			},
+			ChannelNames: []string{chanName1, chanName2},
+			Timestamps:   []uint64{ts1, ts2},
+		}
+		s, _ = core.UpdateChannelTimeTick(ctx, msg1)
+		assert.Equal(t, commonpb.ErrorCode_Success, s.ErrorCode)
+		time.Sleep(100 * time.Millisecond)
+
+		msgInvalid := &internalpb.ChannelTimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_TimeTick,
+				SourceID: proxyNodeIDInvalid,
+			},
+		}
+		s, _ = core.UpdateChannelTimeTick(ctx, msgInvalid)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, s.ErrorCode)
+		time.Sleep(1 * time.Second)
+
+		assert.Equal(t, 2, core.chanTimeTick.GetProxyNodeNum())
+		assert.Equal(t, 3, core.chanTimeTick.GetChanNum())
 	})
 
 	err = core.Stop()
