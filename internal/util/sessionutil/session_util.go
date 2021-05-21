@@ -283,6 +283,7 @@ func (s *Session) WatchServices(prefix string) (addChannel <-chan *Session, delC
 	return addCh, delCh
 }
 
+// Close goroutines and etcd in session
 func (s *Session) Close() {
 	s.cancel()
 	s.etcdCli.Close()
