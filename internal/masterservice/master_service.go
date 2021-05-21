@@ -114,7 +114,8 @@ type Core struct {
 	SendDdDropPartitionReq func(ctx context.Context, req *internalpb.DropPartitionRequest) error
 
 	//setMsgStreams segment channel, receive segment info from data service, if master create segment
-	DataServiceSegmentChan chan *datapb.SegmentInfo
+	//DataServiceSegmentChan chan *datapb.SegmentInfo
+	DataServiceSegmentChan chan *ms.MsgPack
 
 	//setMsgStreams ,if segment flush completed, data node would put segment id into msg stream
 	DataNodeSegmentFlushCompletedChan chan typeutil.UniqueID
@@ -308,18 +309,43 @@ func (c *Core) startDataServiceSegmentLoop() {
 		case <-c.ctx.Done():
 			log.Debug("close data service segment loop")
 			return
-		case seg, ok := <-c.DataServiceSegmentChan:
+		//case seg, ok := <-c.DataServiceSegmentChan:
+		//	if !ok {
+		//		log.Debug("data service segment is closed, exit loop")
+		//		return
+		//	}
+		//	if seg == nil {
+		//		log.Warn("segment from data service is nil")
+		//	} else if _, err := c.MetaTable.AddSegment(seg); err != nil {
+		//		//what if master add segment failed, but data service success?
+		//		log.Warn("add segment info meta table failed ", zap.String("error", err.Error()))
+		//	} else {
+		//		log.Debug("add segment", zap.Int64("collection id", seg.CollectionID), zap.Int64("partition id", seg.PartitionID), zap.Int64("segment id", seg.ID))
+		//	}
+		case segMsg, ok := <-c.DataServiceSegmentChan:
 			if !ok {
-				log.Debug("data service segment is closed, exit loop")
+				log.Debug("data service segment channel is closed, exit loop")
 				return
 			}
-			if seg == nil {
-				log.Warn("segment from data service is nil")
-			} else if _, err := c.MetaTable.AddSegment(seg); err != nil {
+			var segInfos []*datapb.SegmentInfo
+			for _, msg := range segMsg.Msgs {
+				segInfoMsg, ok := msg.(*ms.SegmentInfoMsg)
+				if !ok {
+					log.Warn("receive unexpected msg from data service stream")
+				}
+				segInfos = append(segInfos, segInfoMsg.Segment)
+			}
+			startPosByte, err := json.Marshal(segMsg.StartPositions)
+			if err != nil {
+				log.Warn("json.Marshal fail", zap.String("err", err.Error()))
+			}
+			endPosByte, err := json.Marshal(segMsg.EndPositions)
+			if err != nil {
+				log.Warn("json.Marshal fail", zap.String("err", err.Error()))
+			}
+			if _, err := c.MetaTable.AddSegment(segInfos, string(startPosByte), string(endPosByte)); err != nil {
 				//what if master add segment failed, but data service success?
 				log.Warn("add segment info meta table failed ", zap.String("error", err.Error()))
-			} else {
-				log.Debug("add segment", zap.Int64("collection id", seg.CollectionID), zap.Int64("partition id", seg.PartitionID), zap.Int64("segment id", seg.ID))
 			}
 		}
 	}
@@ -595,7 +621,8 @@ func (c *Core) setMsgStreams() error {
 	dataServiceStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, Params.MsgChannelSubName)
 	log.Debug("master AsConsumer: " + Params.DataServiceSegmentChannel + " : " + Params.MsgChannelSubName)
 	dataServiceStream.Start()
-	c.DataServiceSegmentChan = make(chan *datapb.SegmentInfo, 1024)
+	//c.DataServiceSegmentChan = make(chan *datapb.SegmentInfo, 1024)
+	c.DataServiceSegmentChan = make(chan *ms.MsgPack, 1024)
 	c.DataNodeSegmentFlushCompletedChan = make(chan typeutil.UniqueID, 1024)
 
 	// receive segment info from msg stream
@@ -609,18 +636,22 @@ func (c *Core) setMsgStreams() error {
 					log.Warn("data service segment msg closed")
 				}
 				if len(segMsg.Msgs) > 0 {
+					_, ok := segMsg.Msgs[0].(*ms.SegmentInfoMsg)
+					if ok {
+						c.DataServiceSegmentChan <- segMsg
+					}
 					for _, segm := range segMsg.Msgs {
-						segInfoMsg, ok := segm.(*ms.SegmentInfoMsg)
-						if ok {
-							c.DataServiceSegmentChan <- segInfoMsg.Segment
-						} else {
+						//segInfoMsg, ok := segm.(*ms.SegmentInfoMsg)
+						//if ok {
+						//	c.DataServiceSegmentChan <- segInfoMsg.Segment
+						//} else {
 							flushMsg, ok := segm.(*ms.FlushCompletedMsg)
 							if ok {
 								c.DataNodeSegmentFlushCompletedChan <- flushMsg.SegmentFlushCompletedMsg.SegmentID
 							} else {
-								log.Debug("receive unexpected msg from data service stream", zap.Stringer("segment", segInfoMsg.SegmentMsg.Segment))
+								log.Warn("receive unexpected msg from data service stream")
 							}
-						}
+						//}
 					}
 				}
 			}

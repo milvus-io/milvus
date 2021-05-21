@@ -14,6 +14,7 @@ package masterservice
 import (
 	"errors"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"path"
 	"strconv"
 	"sync"
@@ -24,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -40,6 +40,9 @@ const (
 	IndexMetaPrefix        = ComponentPrefix + "/index"
 
 	TimestampPrefix = ComponentPrefix + "/timestamp"
+
+	MsgStartPositionPrefix = ComponentPrefix + "/msg-start-position"
+	MsgEndPositionPrefix   = ComponentPrefix + "/msg-end-position"
 
 	DDOperationPrefix = ComponentPrefix + "/dd-operation"
 	DDMsgSendPrefix   = ComponentPrefix + "/dd-msg-send"
@@ -689,45 +692,99 @@ func (mt *metaTable) GetPartitionByID(collID typeutil.UniqueID, partitionID type
 
 }
 
-func (mt *metaTable) AddSegment(seg *datapb.SegmentInfo) (typeutil.Timestamp, error) {
+//func (mt *metaTable) AddSegment(seg *datapb.SegmentInfo) (typeutil.Timestamp, error) {
+//	mt.ddLock.Lock()
+//	defer mt.ddLock.Unlock()
+//	collMeta, ok := mt.collID2Meta[seg.CollectionID]
+//	if !ok {
+//		return 0, fmt.Errorf("can't find collection id = %d", seg.CollectionID)
+//	}
+//	partMeta, ok := mt.partitionID2Meta[seg.PartitionID]
+//	if !ok {
+//		return 0, fmt.Errorf("can't find partition id = %d", seg.PartitionID)
+//	}
+//	exist := false
+//	for _, partID := range collMeta.PartitionIDs {
+//		if partID == seg.PartitionID {
+//			exist = true
+//			break
+//		}
+//	}
+//	if !exist {
+//		return 0, fmt.Errorf("partition id = %d, not belong to collection id = %d", seg.PartitionID, seg.CollectionID)
+//	}
+//	exist = false
+//	for _, segID := range partMeta.SegmentIDs {
+//		if segID == seg.ID {
+//			exist = true
+//		}
+//	}
+//	if exist {
+//		return 0, fmt.Errorf("segment id = %d exist", seg.ID)
+//	}
+//	partMeta.SegmentIDs = append(partMeta.SegmentIDs, seg.ID)
+//	mt.partitionID2Meta[seg.PartitionID] = partMeta
+//	mt.segID2CollID[seg.ID] = seg.CollectionID
+//	mt.segID2PartitionID[seg.ID] = seg.PartitionID
+//	k := fmt.Sprintf("%s/%d/%d", PartitionMetaPrefix, seg.CollectionID, seg.PartitionID)
+//	v := proto.MarshalTextString(&partMeta)
+//
+//	ts, err := mt.client.Save(k, v)
+//
+//	if err != nil {
+//		_ = mt.reloadFromKV()
+//		return 0, err
+//	}
+//	return ts, nil
+//}
+
+func (mt *metaTable) AddSegment(segInfos []*datapb.SegmentInfo, msgStartPos string, msgEndPos string) (typeutil.Timestamp, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-	collMeta, ok := mt.collID2Meta[seg.CollectionID]
-	if !ok {
-		return 0, fmt.Errorf("can't find collection id = %d", seg.CollectionID)
-	}
-	partMeta, ok := mt.partitionID2Meta[seg.PartitionID]
-	if !ok {
-		return 0, fmt.Errorf("can't find partition id = %d", seg.PartitionID)
-	}
-	exist := false
-	for _, partID := range collMeta.PartitionIDs {
-		if partID == seg.PartitionID {
-			exist = true
-			break
-		}
-	}
-	if !exist {
-		return 0, fmt.Errorf("partition id = %d, not belong to collection id = %d", seg.PartitionID, seg.CollectionID)
-	}
-	exist = false
-	for _, segID := range partMeta.SegmentIDs {
-		if segID == seg.ID {
-			exist = true
-		}
-	}
-	if exist {
-		return 0, fmt.Errorf("segment id = %d exist", seg.ID)
-	}
-	partMeta.SegmentIDs = append(partMeta.SegmentIDs, seg.ID)
-	mt.partitionID2Meta[seg.PartitionID] = partMeta
-	mt.segID2CollID[seg.ID] = seg.CollectionID
-	mt.segID2PartitionID[seg.ID] = seg.PartitionID
-	k := fmt.Sprintf("%s/%d/%d", PartitionMetaPrefix, seg.CollectionID, seg.PartitionID)
-	v := proto.MarshalTextString(&partMeta)
 
-	ts, err := mt.client.Save(k, v)
+	meta := make(map[string]string)
+	for _, segInfo := range segInfos {
+		collMeta, ok := mt.collID2Meta[segInfo.CollectionID]
+		if !ok {
+			return 0, fmt.Errorf("can't find collection id = %d", segInfo.CollectionID)
+		}
+		partMeta, ok := mt.partitionID2Meta[segInfo.PartitionID]
+		if !ok {
+			return 0, fmt.Errorf("can't find partition id = %d", segInfo.PartitionID)
+		}
+		exist := false
+		for _, partID := range collMeta.PartitionIDs {
+			if partID == segInfo.PartitionID {
+				exist = true
+				break
+			}
+		}
+		if !exist {
+			return 0, fmt.Errorf("partition id = %d, not belong to collection id = %d", segInfo.PartitionID, segInfo.CollectionID)
+		}
+		exist = false
+		for _, segID := range partMeta.SegmentIDs {
+			if segID == segInfo.ID {
+				exist = true
+			}
+		}
+		if exist {
+			return 0, fmt.Errorf("segment id = %d exist", segInfo.ID)
+		}
+		partMeta.SegmentIDs = append(partMeta.SegmentIDs, segInfo.ID)
+		mt.partitionID2Meta[segInfo.PartitionID] = partMeta
+		mt.segID2CollID[segInfo.ID] = segInfo.CollectionID
+		mt.segID2PartitionID[segInfo.ID] = segInfo.PartitionID
 
+		k := fmt.Sprintf("%s/%d/%d", PartitionMetaPrefix, segInfo.CollectionID, segInfo.PartitionID)
+		v := proto.MarshalTextString(&partMeta)
+		meta[k] = v
+	}
+
+	meta[MsgStartPositionPrefix] = msgStartPos
+	meta[MsgEndPositionPrefix] = msgEndPos
+
+	ts, err := mt.client.MultiSave(meta, nil)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return 0, err
