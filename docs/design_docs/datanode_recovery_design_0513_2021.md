@@ -121,9 +121,9 @@ message DDLBinlogMeta {
 
   ![datanode_design](graphs/collection_flowgraph_1_n.png)
 
-  **O4-1.** DataNode scales flowgraph 2 Day
+**O4-1.** DataNode scales flowgraph 2 Day
 
--  Change `WatchDmChannelsRequest` proto.
+Change `WatchDmChannelsRequest` proto.
 
 ``` proto
 message PositionPair {
@@ -146,7 +146,7 @@ message WatchDmChannelsRequest {
 }
 ```
 
--  DataNode consists of multiple DataSyncService, each service controls one flowgraph.
+DataNode consists of multiple DataSyncService, each service controls one flowgraph.
 
 ```go
 // DataNode
