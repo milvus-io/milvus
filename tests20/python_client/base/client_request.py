@@ -108,5 +108,6 @@ class ApiReq(Base):
         self._connect()
         name = cf.gen_unique_str("ApiReq") if name is None else name
         schema = cf.gen_default_collection_schema() if schema is None else schema
-        collection = self.collection.collection_init(name=name, data=data, schema=schema, check_res=check_res, **kwargs)
-        return name, collection
+        collection, _ = self.collection.collection_init(name=name, data=data, schema=schema, check_res=check_res, **kwargs)
+        assert name == collection.name
+        return collection

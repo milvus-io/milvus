@@ -1,4 +1,6 @@
 import pytest
+from pymilvus_orm import FieldSchema
+
 from base.client_request import ApiReq
 from utils.util_log import test_log as log
 from common import common_func as cf
@@ -9,8 +11,9 @@ prefix = "collection"
 default_schema = cf.gen_default_collection_schema()
 
 
-def assert_default_collection(collection, exp_name, exp_schema=default_schema, exp_num=0, exp_primary=None):
-    assert collection.name == exp_name
+def assert_default_collection(collection, exp_name=None, exp_schema=default_schema, exp_num=0, exp_primary=None):
+    if exp_name:
+        assert collection.name == exp_name
     assert collection.description == exp_schema.description
     assert collection.schema == exp_schema
     if exp_num == 0:
@@ -43,9 +46,26 @@ class TestCollectionParams(ApiReq):
         scope="function",
         params=ct.get_invalid_strs
     )
-    def get_invalid_schema_type(self, request):
+    def get_invalid_type_schema(self, request):
         if request.param is None:
             pytest.skip("None schema is valid")
+        yield request.param
+
+    @pytest.fixture(
+        scope="function",
+        params=ct.get_invalid_strs
+    )
+    def get_invalid_type_fields(self, request):
+        skip_param = []
+        if request.param == skip_param:
+            pytest.skip("skip []")
+        yield request.param
+
+    @pytest.fixture(
+        scope="function",
+        params=cf.gen_invalid_field_types()
+    )
+    def get_invalid_field_type(self, request):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -95,8 +115,9 @@ class TestCollectionParams(ApiReq):
         expected: collection properties consistent
         """
         self._connect()
-        c_name, collection = self._collection()
-        assert_default_collection(collection, c_name)
+        collection = self._collection()
+        c_name = collection.name
+        assert_default_collection(collection)
         dup_collection, _ = self.collection.collection_init(c_name)
         assert_default_collection(dup_collection, c_name)
         assert collection.name == dup_collection.name
@@ -113,8 +134,9 @@ class TestCollectionParams(ApiReq):
         expected: raise exception
         """
         self._connect()
-        c_name, collection = self._collection()
-        assert_default_collection(collection, c_name)
+        collection = self._collection()
+        c_name = collection.name
+        assert_default_collection(collection)
         fields = [cf.gen_int64_field()]
         schema = cf.gen_collection_schema(fields=fields)
         ex, _ = self.collection.collection_init(c_name, schema=schema)
@@ -129,8 +151,9 @@ class TestCollectionParams(ApiReq):
         expected: raise exception
         """
         self._connect()
-        c_name, collection = self._collection()
-        assert_default_collection(collection, c_name)
+        collection = self._collection()
+        c_name = collection.name
+        assert_default_collection(collection)
         schema = cf.gen_default_collection_schema(primary_field=ct.default_int64_field)
         ex, _ = self.collection.collection_init(c_name, schema=schema)
         assert "The collection already exist, but the schema isnot the same as the passed in" in str(ex)
@@ -145,8 +168,9 @@ class TestCollectionParams(ApiReq):
         """
         self._connect()
         new_dim = 120
-        c_name, collection = self._collection()
-        assert_default_collection(collection, c_name)
+        collection = self._collection()
+        c_name = collection.name
+        assert_default_collection(collection)
         schema = cf.gen_default_collection_schema()
         new_fields = cf.gen_float_vec_field(dim=new_dim)
         schema.fields[-1] = new_fields
@@ -156,16 +180,17 @@ class TestCollectionParams(ApiReq):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue #5304")
-    def test_collection_dup_name_invalid_schema_type(self, get_invalid_schema_type):
+    def test_collection_dup_name_invalid_schema_type(self, get_invalid_type_schema):
         """
         target: test collection with dup name and invalid schema
         method: 1. default schema 2. invalid schema
         expected: raise exception and
         """
         self._connect()
-        c_name, collection = self._collection()
-        assert_default_collection(collection, c_name)
-        ex, _ = self.collection.collection_init(c_name, schema=get_invalid_schema_type)
+        collection = self._collection()
+        c_name = collection.name
+        assert_default_collection(collection)
+        ex, _ = self.collection.collection_init(c_name, schema=get_invalid_type_schema)
         assert "schema type must be schema.CollectionSchema" in str(ex)
         assert_default_collection(collection, c_name)
 
@@ -178,8 +203,9 @@ class TestCollectionParams(ApiReq):
         expected: two collection object is available
         """
         self._connect()
-        c_name, collection = self._collection()
-        assert_default_collection(collection, c_name)
+        collection = self._collection()
+        c_name = collection.name
+        assert_default_collection(collection)
         dup_collection, _ = self.collection.collection_init(c_name, schema=default_schema)
         assert_default_collection(dup_collection, c_name)
         assert id(collection) == id(dup_collection)
@@ -194,8 +220,9 @@ class TestCollectionParams(ApiReq):
         """
         self._connect()
         nb = ct.default_nb
-        c_name, collection = self._collection()
-        assert_default_collection(collection, c_name)
+        collection = self._collection()
+        c_name = collection.name
+        assert_default_collection(collection)
         df = cf.gen_default_dataframe_data(nb)
         dup_collection, _ = self.collection.collection_init(c_name, schema=None, data=df)
         assert_default_collection(dup_collection, c_name, exp_num=nb)
@@ -211,8 +238,9 @@ class TestCollectionParams(ApiReq):
         """
         self._connect()
         nb = ct.default_nb
-        c_name, collection = self._collection()
-        assert_default_collection(collection, c_name)
+        collection = self._collection()
+        c_name = collection.name
+        assert_default_collection(collection)
         data = cf.gen_default_dataframe_data(nb)
         dup_collection, _ = self.collection.collection_init(c_name, schema=None, data=data)
         assert_default_collection(dup_collection, c_name, exp_num=nb)
@@ -231,7 +259,7 @@ class TestCollectionParams(ApiReq):
         assert "Collection missing schema" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_collection_invalid_schema_type(self, get_invalid_schema_type):
+    def test_collection_invalid_type_schema(self, get_invalid_type_schema):
         """
         target: test collection with invalid schema
         method: create collection with non-CollectionSchema type schema
@@ -239,8 +267,86 @@ class TestCollectionParams(ApiReq):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        ex, _ = self.collection.collection_init(c_name, schema=get_invalid_schema_type)
+        ex, _ = self.collection.collection_init(c_name, schema=get_invalid_type_schema)
         assert "schema type must be schema.CollectionSchema" in str(ex)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #5331")
+    def test_collection_invalid_type_fields(self, get_invalid_type_fields):
+        """
+        target: test collection with invalid fields type, non-list
+        method: create collection schema with non-list invalid fields
+        expected: exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        fields = get_invalid_type_fields
+        schema = cf.gen_collection_schema(fields=fields)
+        ex, _ = self.collection.collection_init(c_name, schema=schema)
+        log.error(str(ex))
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_invalid_field_name(self, get_invalid_string):
+        """
+        target: test collection with invalid field name
+        method: invalid string name
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        field = FieldSchema(name=get_invalid_string, dtype=5)
+        schema = cf.gen_collection_schema(fields=[field])
+        ex, _ = self.collection.collection_init(c_name, schema=schema)
+        message_one = "but expected one of: bytes, unicode"
+        message_two = "You should specify the name of field"
+        message_three = "Invalid field name"
+        assert message_one or message_two or message_three in str(ex)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #5317")
+    def test_collection_invalid_field_type(self, get_invalid_field_type):
+        """
+        target: test collection with invalid field type
+        method: invalid DataType
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        field = FieldSchema(name="test", dtype=get_invalid_field_type)
+        schema = cf.gen_collection_schema(fields=[field])
+        ex, _ = self.collection.collection_init(c_name, schema=schema)
+        assert "Field type must be of DataType" in str(ex)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="issue #5312")
+    def test_collection_empty_fields(self):
+        """
+        target: test collection with empty fields
+        method: create collection with fields = []
+        expected: exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_collection_schema(fields=[])
+        ex, _ = self.collection.collection_init(c_name, schema=schema)
+        # TODO assert
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_dup_field(self):
+        """
+        target: test collection with dup field name
+        method: Two FieldSchema have same name
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        field_one = cf.gen_int64_field()
+        field_two = cf.gen_int64_field()
+        schema = cf.gen_collection_schema(fields=[field_one, field_two])
+        ex, _ = self.collection.collection_init(c_name, schema=schema)
+        assert "duplicated field name" in str(ex)
+        has, _ = self.utility.has_collection(c_name)
+        assert not has
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(reason="issue #5285")
@@ -326,3 +432,22 @@ class TestCollectionOperation(ApiReq):
             assert_default_collection(collection, c_name)
             collection.drop()
             assert c_name not in self.utility.list_collections()
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_dup_name_drop(self):
+        """
+        target: test collection with dup name, and drop
+        method: 1. two dup name collection object
+                2. one object drop collection
+        expected: collection dropped
+        """
+        self._connect()
+        collection = self._collection()
+        assert_default_collection(collection)
+        dup_collection, _ = self.collection.collection_init(collection.name)
+        assert_default_collection(dup_collection, collection.name)
+        dup_collection.drop()
+        has, _ = self.utility.has_collection(collection.name)
+        assert not has
+        with pytest.raises(Exception, match="can't find collection"):
+            collection.num_entities

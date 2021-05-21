@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/stretchr/testify/assert"
 )
@@ -180,8 +181,7 @@ func TestMeta_Basic(t *testing.T) {
 
 		info0_0, err = meta.GetSegment(segID0_0)
 		assert.Nil(t, err)
-		assert.NotZero(t, info0_0.SealedTime)
-		assert.NotZero(t, info0_0.FlushedTime)
+		assert.EqualValues(t, commonpb.SegmentState_Flushed, info0_0.State)
 
 		err = meta.DropPartition(collID, partID0)
 		assert.Nil(t, err)
@@ -198,9 +198,6 @@ func TestMeta_Basic(t *testing.T) {
 		nums, err := meta.GetNumRowsOfCollection(collID)
 		assert.Nil(t, err)
 		assert.EqualValues(t, 0, nums)
-		memSize, err := meta.GetMemSizeOfCollection(collID)
-		assert.Nil(t, err)
-		assert.EqualValues(t, 0, memSize)
 
 		// add seg1 with 100 rows
 		segID0, err := mockAllocator.allocID()
@@ -208,28 +205,23 @@ func TestMeta_Basic(t *testing.T) {
 		segInfo0, err := BuildSegment(collID, partID0, segID0, channelName)
 		assert.Nil(t, err)
 		segInfo0.NumRows = rowCount0
-		segInfo0.MemSize = rowCount0 * dim * 4
 		err = meta.AddSegment(segInfo0)
 		assert.Nil(t, err)
 
 		// update seg1 to 300 rows
 		segInfo0.NumRows = rowCount1
-		segInfo0.MemSize = rowCount1 * dim * 4
-		err = meta.UpdateSegment(segInfo0)
+		err = meta.UpdateSegmentStatistic(segInfo0)
 		assert.Nil(t, err)
 
 		nums, err = meta.GetNumRowsOfCollection(collID)
 		assert.Nil(t, err)
 		assert.EqualValues(t, rowCount1, nums)
-		memSize, err = meta.GetMemSizeOfCollection(collID)
-		assert.Nil(t, err)
-		assert.EqualValues(t, rowCount1*dim*4, memSize)
 
 		// check update non-exist segment
 		segInfoNonExist := segInfo0
 		segInfoNonExist.ID, err = mockAllocator.allocID()
 		assert.Nil(t, err)
-		err = meta.UpdateSegment(segInfo0)
+		err = meta.UpdateSegmentStatistic(segInfo0)
 		assert.NotNil(t, err)
 
 		// add seg2 with 300 rows
@@ -238,7 +230,6 @@ func TestMeta_Basic(t *testing.T) {
 		segInfo1, err := BuildSegment(collID, partID0, segID1, channelName)
 		assert.Nil(t, err)
 		segInfo1.NumRows = rowCount1
-		segInfo1.MemSize = rowCount1 * dim * 4
 		err = meta.AddSegment(segInfo1)
 		assert.Nil(t, err)
 
@@ -249,9 +240,6 @@ func TestMeta_Basic(t *testing.T) {
 		nums, err = meta.GetNumRowsOfCollection(collID)
 		assert.Nil(t, err)
 		assert.EqualValues(t, (rowCount1 + rowCount1), nums)
-		memSize, err = meta.GetMemSizeOfCollection(collID)
-		assert.Nil(t, err)
-		assert.EqualValues(t, (rowCount1+rowCount1)*dim*4, memSize)
 	})
 
 	t.Run("Test Invalid", func(t *testing.T) {

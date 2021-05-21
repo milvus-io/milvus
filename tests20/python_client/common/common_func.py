@@ -18,27 +18,27 @@ def gen_unique_str(str_value=None):
     return "test_" + prefix if str_value is None else str_value + "_" + prefix
 
 
-def gen_int64_field(is_primary=False, description=ct.int_field_desc):
-    int64_field = FieldSchema(name=ct.default_int64_field, dtype=DataType.INT64, description=description,
-                              is_primary=is_primary)
+def gen_int64_field(name=ct.default_int64_field, is_primary=False, description=ct.int_field_desc):
+    int64_field = FieldSchema(name=name, dtype=DataType.INT64, description=description, is_primary=is_primary)
     return int64_field
 
 
-def gen_float_field(is_primary=False, description=ct.float_field_desc):
-    float_field = FieldSchema(name=ct.default_float_field, dtype=DataType.FLOAT, description=description,
-                              is_primary=is_primary)
+def gen_float_field(name=ct.default_float_field, is_primary=False, description=ct.float_field_desc):
+    float_field = FieldSchema(name=name, dtype=DataType.FLOAT, description=description, is_primary=is_primary)
     return float_field
 
 
-def gen_float_vec_field(is_primary=False, dim=ct.default_dim, description=ct.float_vec_field_desc):
-    float_vec_field = FieldSchema(name=ct.default_float_vec_field_name, dtype=DataType.FLOAT_VECTOR,
-                                  description=description, dim=dim, is_primary=is_primary)
+def gen_float_vec_field(name=ct.default_float_vec_field_name, is_primary=False, dim=ct.default_dim,
+                        description=ct.float_vec_field_desc):
+    float_vec_field = FieldSchema(name=name, dtype=DataType.FLOAT_VECTOR, description=description, dim=dim,
+                                  is_primary=is_primary)
     return float_vec_field
 
 
-def gen_binary_vec_field(is_primary=False, dim=ct.default_dim, description=ct.binary_vec_field_desc):
-    binary_vec_field = FieldSchema(name=ct.default_binary_vec_field_name, dtype=DataType.BINARY_VECTOR,
-                                   description=description, dim=dim, is_primary=is_primary)
+def gen_binary_vec_field(name=ct.default_binary_vec_field_name, is_primary=False, dim=ct.default_dim,
+                         description=ct.binary_vec_field_desc):
+    binary_vec_field = FieldSchema(name=name, dtype=DataType.BINARY_VECTOR, description=description, dim=dim,
+                                   is_primary=is_primary)
     return binary_vec_field
 
 
@@ -101,6 +101,19 @@ def get_vectors(num, dim, is_normal=True):
     vectors = [[random.random() for _ in range(dim)] for _ in range(num)]
     vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
     return vectors.tolist()
+
+
+def gen_invalid_field_types():
+    field_types = [
+        6,
+        1.0,
+        [[]],
+        {},
+        (),
+        "",
+        "a"
+    ]
+    return field_types
 
 
 def modify_file(file_name_list, input_content=""):

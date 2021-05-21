@@ -51,12 +51,6 @@ type IDRequest struct {
 	count uint32
 }
 
-type TSORequest struct {
-	BaseRequest
-	timestamp Timestamp
-	count     uint32
-}
-
 type SyncRequest struct {
 	BaseRequest
 }
