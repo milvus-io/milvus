@@ -73,6 +73,9 @@ func (qs *QueryService) Start() error {
 }
 
 func (qs *QueryService) Stop() error {
+	if qs.session != nil {
+		qs.session.Close()
+	}
 	qs.sched.Close()
 	log.Debug("close scheduler ...")
 	qs.loopCancel()

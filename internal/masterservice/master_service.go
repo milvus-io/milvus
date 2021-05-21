@@ -985,6 +985,9 @@ func (c *Core) Start() error {
 }
 
 func (c *Core) Stop() error {
+	if c.session != nil {
+		c.session.Close()
+	}
 	c.cancel()
 	c.stateCode.Store(internalpb.StateCode_Abnormal)
 	return nil

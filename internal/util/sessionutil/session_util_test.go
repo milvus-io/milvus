@@ -102,7 +102,7 @@ func TestUpdateSessions(t *testing.T) {
 	sessions, err := s.GetSessions("test")
 	assert.Nil(t, err)
 	assert.Equal(t, len(sessions), 0)
-	addCh, delCh := s.WatchServices(ctx, "test")
+	addCh, delCh := s.WatchServices("test")
 
 	sList := []*Session{}
 

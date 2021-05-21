@@ -32,16 +32,19 @@ type Session struct {
 	Exclusive  bool
 	etcdCli    *clientv3.Client
 	leaseID    clientv3.LeaseID
+	cancel     context.CancelFunc
 }
 
 // NewSession is a helper to build Session object.LeaseID will be assigned after
 // registeration.
 func NewSession(ctx context.Context, etcdAddress, serverName, address string, exclusive bool) *Session {
+	ctx, cancel := context.WithCancel(ctx)
 	session := &Session{
 		ctx:        ctx,
 		ServerName: serverName,
 		Address:    address,
 		Exclusive:  exclusive,
+		cancel:     cancel,
 	}
 
 	connectEtcdFn := func() error {
@@ -82,8 +85,7 @@ func (s *Session) getServerID() (int64, error) {
 }
 
 func (s *Session) checkIDExist() {
-	ctx := context.Background()
-	s.etcdCli.Txn(ctx).If(
+	s.etcdCli.Txn(s.ctx).If(
 		clientv3.Compare(
 			clientv3.Version(path.Join(defaultServiceRoot, defaultIDKey)),
 			"=",
@@ -93,10 +95,9 @@ func (s *Session) checkIDExist() {
 }
 
 func (s *Session) getServerIDWithKey(key string, retryTimes int) (int64, error) {
-	ctx := context.Background()
 	res := int64(0)
 	getServerIDWithKeyFn := func() error {
-		getResp, err := s.etcdCli.Get(ctx, defaultServiceRoot+key)
+		getResp, err := s.etcdCli.Get(s.ctx, path.Join(defaultServiceRoot, key))
 		if err != nil {
 			return nil
 		}
@@ -109,7 +110,7 @@ func (s *Session) getServerIDWithKey(key string, retryTimes int) (int64, error) 
 			log.Debug("session", zap.Error(err))
 			return err
 		}
-		txnResp, err := s.etcdCli.Txn(ctx).If(
+		txnResp, err := s.etcdCli.Txn(s.ctx).If(
 			clientv3.Compare(
 				clientv3.Value(path.Join(defaultServiceRoot, defaultIDKey)),
 				"=",
@@ -145,43 +146,50 @@ func (s *Session) getServerIDWithKey(key string, retryTimes int) (int64, error) 
 // Exclusive means whether this service can exist two at the same time, if so,
 // it is false. Otherwise, set it to true.
 func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, error) {
-	ctx := context.Background()
-	resp, err := s.etcdCli.Grant(ctx, defaultTTL)
+	var ch <-chan *clientv3.LeaseKeepAliveResponse
+	registerFn := func() error {
+		resp, err := s.etcdCli.Grant(s.ctx, defaultTTL)
+		if err != nil {
+			log.Error("register service", zap.Error(err))
+			return err
+		}
+		s.leaseID = resp.ID
+
+		sessionJSON, err := json.Marshal(s)
+		if err != nil {
+			return err
+		}
+
+		key := s.ServerName
+		if !s.Exclusive {
+			key = key + "-" + strconv.FormatInt(s.ServerID, 10)
+		}
+		txnResp, err := s.etcdCli.Txn(s.ctx).If(
+			clientv3.Compare(
+				clientv3.Version(path.Join(defaultServiceRoot, key)),
+				"=",
+				0)).
+			Then(clientv3.OpPut(path.Join(defaultServiceRoot, key), string(sessionJSON), clientv3.WithLease(resp.ID))).Commit()
+
+		if err != nil {
+			fmt.Printf("compare and swap error %s\n. maybe the key has registered", err)
+			return err
+		}
+
+		if !txnResp.Succeeded {
+			return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key)
+		}
+
+		ch, err = s.etcdCli.KeepAlive(s.ctx, resp.ID)
+		if err != nil {
+			fmt.Printf("keep alive error %s\n", err)
+			return err
+		}
+		return nil
+	}
+	err := retry.Retry(defaultRetryTimes, time.Millisecond*200, registerFn)
 	if err != nil {
-		log.Error("register service", zap.Error(err))
-		return nil, err
-	}
-	s.leaseID = resp.ID
-
-	sessionJSON, err := json.Marshal(s)
-	if err != nil {
-		return nil, err
-	}
-
-	key := s.ServerName
-	if !s.Exclusive {
-		key = key + "-" + strconv.FormatInt(s.ServerID, 10)
-	}
-	txnResp, err := s.etcdCli.Txn(ctx).If(
-		clientv3.Compare(
-			clientv3.Version(path.Join(defaultServiceRoot, key)),
-			"=",
-			0)).
-		Then(clientv3.OpPut(path.Join(defaultServiceRoot, key), string(sessionJSON), clientv3.WithLease(resp.ID))).Commit()
-
-	if err != nil {
-		fmt.Printf("compare and swap error %s\n. maybe the key has registered", err)
-		return nil, err
-	}
-
-	if !txnResp.Succeeded {
-		return nil, fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key)
-	}
-
-	ch, err := s.etcdCli.KeepAlive(ctx, resp.ID)
-	if err != nil {
-		fmt.Printf("keep alive error %s\n", err)
-		return nil, err
+		return ch, nil
 	}
 	return ch, nil
 }
@@ -211,8 +219,7 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 func (s *Session) GetSessions(prefix string) (map[string]*Session, error) {
 	res := make(map[string]*Session)
 	key := path.Join(defaultServiceRoot, prefix)
-	ctx := context.Background()
-	resp, err := s.etcdCli.Get(ctx, key, clientv3.WithPrefix(),
+	resp, err := s.etcdCli.Get(s.ctx, key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
 		return nil, err
@@ -232,14 +239,14 @@ func (s *Session) GetSessions(prefix string) (map[string]*Session, error) {
 // sessions.
 // If a server up, it will be add to addChannel.
 // If a server is offline, it will be add to delChannel.
-func (s *Session) WatchServices(ctx context.Context, prefix string) (addChannel <-chan *Session, delChannel <-chan *Session) {
+func (s *Session) WatchServices(prefix string) (addChannel <-chan *Session, delChannel <-chan *Session) {
 	addCh := make(chan *Session, 10)
 	delCh := make(chan *Session, 10)
-	rch := s.etcdCli.Watch(ctx, defaultServiceRoot+prefix, clientv3.WithPrefix(), clientv3.WithPrevKV())
+	rch := s.etcdCli.Watch(s.ctx, path.Join(defaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV())
 	go func() {
 		for {
 			select {
-			case <-ctx.Done():
+			case <-s.ctx.Done():
 				return
 			case wresp, ok := <-rch:
 				if !ok {
@@ -274,6 +281,11 @@ func (s *Session) WatchServices(ctx context.Context, prefix string) (addChannel 
 		}
 	}()
 	return addCh, delCh
+}
+
+func (s *Session) Close() {
+	s.cancel()
+	s.etcdCli.Close()
 }
 
 func initEtcd(etcdAddress string) (*clientv3.Client, error) {

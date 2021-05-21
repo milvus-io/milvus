@@ -163,6 +163,9 @@ func (i *IndexService) Start() error {
 }
 
 func (i *IndexService) Stop() error {
+	if i.session != nil {
+		i.session.Close()
+	}
 	i.loopCancel()
 	i.sched.Close()
 	for _, cb := range i.closeCallbacks {

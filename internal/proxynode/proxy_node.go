@@ -251,6 +251,9 @@ func (node *ProxyNode) Start() error {
 }
 
 func (node *ProxyNode) Stop() error {
+	if node.session != nil {
+		node.session.Close()
+	}
 	node.cancel()
 
 	globalInsertChannelsMap.CloseAllMsgStream()

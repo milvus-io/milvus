@@ -34,8 +34,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
+	"go.etcd.io/etcd/clientv3"
 )
 
 func TestGrpcService(t *testing.T) {
@@ -81,6 +83,12 @@ func TestGrpcService(t *testing.T) {
 
 	core, ok := (svr.masterService).(*cms.Core)
 	assert.True(t, ok)
+
+	etcdCli, err := initEtcd(cms.Params.EtcdAddress)
+	assert.Nil(t, err)
+	_, err = etcdCli.Delete(ctx, "/session", clientv3.WithPrefix())
+	assert.Nil(t, err)
+
 	err = core.Init()
 	assert.Nil(t, err)
 
@@ -861,10 +869,31 @@ func TestRun(t *testing.T) {
 	cms.Params.Init()
 	cms.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
 
+	etcdCli, err := initEtcd(cms.Params.EtcdAddress)
+	assert.Nil(t, err)
+	_, err = etcdCli.Delete(ctx, "/session", clientv3.WithPrefix())
+	assert.Nil(t, err)
 	err = svr.Run()
 	assert.Nil(t, err)
 
 	err = svr.Stop()
 	assert.Nil(t, err)
 
+}
+
+func initEtcd(etcdAddress string) (*clientv3.Client, error) {
+	var etcdCli *clientv3.Client
+	connectEtcdFn := func() error {
+		etcd, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}, DialTimeout: 5 * time.Second})
+		if err != nil {
+			return err
+		}
+		etcdCli = etcd
+		return nil
+	}
+	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	if err != nil {
+		return nil, err
+	}
+	return etcdCli, nil
 }

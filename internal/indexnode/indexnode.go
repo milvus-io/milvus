@@ -140,6 +140,9 @@ func (i *IndexNode) Start() error {
 
 // Close closes the server.
 func (i *IndexNode) Stop() error {
+	if i.session != nil {
+		i.session.Close()
+	}
 	i.loopCancel()
 	if i.sched != nil {
 		i.sched.Close()

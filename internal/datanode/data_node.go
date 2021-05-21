@@ -267,6 +267,9 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 }
 
 func (node *DataNode) Stop() error {
+	if node.session != nil {
+		node.session.Close()
+	}
 	node.cancel()
 
 	// close services
