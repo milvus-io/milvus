@@ -424,3 +424,21 @@ class TestCollectionOperation(ApiReq):
             collection.drop()
             assert c_name not in self.utility.list_collections()
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_dup_name_drop(self):
+        """
+        target: test collection with dup name, and drop
+        method: 1. two dup name collection object
+                2. one object drop collection
+        expected: collection dropped
+        """
+        self._connect()
+        c_name, collection = self._collection()
+        assert_default_collection(collection, c_name)
+        dup_collection, _ = self.collection.collection_init(c_name)
+        assert_default_collection(dup_collection, c_name)
+        dup_collection.drop()
+        has, _ = self.utility.has_collection(c_name)
+        assert not has
+        with pytest.raises(Exception, match="can't find collection"):
+            collection.num_entities
