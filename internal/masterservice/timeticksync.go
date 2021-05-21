@@ -48,7 +48,7 @@ func newTimeTickSync(ctx context.Context, factory msgstream.Factory, cli *client
 		msFactory:     factory,
 		proxyTimeTick: make(map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg),
 		chanStream:    make(map[string]msgstream.MsgStream),
-		sendChan:      make(chan map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg),
+		sendChan:      make(chan map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg, 16),
 	}
 
 	ctx2, cancel := context.WithTimeout(ctx, RequestTimeout)
@@ -81,6 +81,9 @@ func (t *timetickSync) sendToChannel() {
 		if v == nil {
 			return
 		}
+	}
+	if len(t.proxyTimeTick) == 0 {
+		return
 	}
 	// clear proxyTimeTick and send a clone
 	ptt := make(map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg)

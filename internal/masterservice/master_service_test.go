@@ -1463,6 +1463,7 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		_, err = core.etcdCli.Put(ctx2, ProxyNodeSessionPrefix+"-2", string(s2))
 		assert.Nil(t, err)
+		time.Sleep(time.Second)
 
 		msg0 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
@@ -1475,6 +1476,7 @@ func TestMasterService(t *testing.T) {
 		s, _ := core.UpdateChannelTimeTick(ctx, msg0)
 		assert.Equal(t, commonpb.ErrorCode_Success, s.ErrorCode)
 		time.Sleep(100 * time.Millisecond)
+		t.Log(core.chanTimeTick.proxyTimeTick)
 
 		msg1 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
