@@ -202,7 +202,6 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 		for {
 			select {
 			case <-s.ctx.Done():
-				log.Error("keep alive", zap.Error(errors.New("context done")))
 				return
 			case resp, ok := <-ch:
 				if !ok {
