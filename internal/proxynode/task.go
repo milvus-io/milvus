@@ -1068,6 +1068,75 @@ func (rt *RetrieveTask) Execute(ctx context.Context) error {
 	return err
 }
 
+func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
+	t0 := time.Now()
+	defer func() {
+		log.Debug("WaitAndPostExecute", zap.Any("time cost", time.Since(t0)))
+	}()
+	for {
+		select {
+		case <-rt.TraceCtx().Done():
+			log.Debug("proxynode", zap.Int64("Retrieve: wait to finish failed, timeout!, taskID:", rt.ID()))
+			return fmt.Errorf("RetrieveTask:wait to finish failed, timeout : %d", rt.ID())
+		case retrieveResults := <-rt.resultBuf:
+			retrieveResult := make([]*internalpb.RetrieveResults, 0)
+			var reason string
+			for _, partialRetrieveResult := range retrieveResults {
+				if partialRetrieveResult.Status.ErrorCode == commonpb.ErrorCode_Success {
+					retrieveResult = append(retrieveResult, partialRetrieveResult)
+				} else {
+					reason += partialRetrieveResult.Status.Reason + "\n"
+				}
+			}
+
+			availableQueryNodeNum := len(retrieveResult)
+			if availableQueryNodeNum <= 0 {
+				rt.result = &milvuspb.RetrieveResults{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_UnexpectedError,
+						Reason:    reason,
+					},
+				}
+				return errors.New(reason)
+			}
+
+			availableQueryNodeNum = 0
+			for _, partialRetrieveResult := range retrieveResult {
+				if partialRetrieveResult.Ids == nil {
+					reason += "ids is nil\n"
+					continue
+				} else {
+					intIds, intOk := partialRetrieveResult.Ids.IdField.(*schemapb.IDs_IntId)
+					strIds, strOk := partialRetrieveResult.Ids.IdField.(*schemapb.IDs_StrId)
+					if !intOk && !strOk {
+						reason += "ids is empty\n"
+						continue
+					}
+
+					if !intOk {
+						rt.result.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data = append(rt.result.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data, intIds.IntId.Data...)
+					} else {
+						rt.result.Ids.IdField.(*schemapb.IDs_StrId).StrId.Data = append(rt.result.Ids.IdField.(*schemapb.IDs_StrId).StrId.Data, strIds.StrId.Data...)
+					}
+
+				}
+				availableQueryNodeNum++
+			}
+
+			if availableQueryNodeNum <= 0 {
+				rt.result = &milvuspb.RetrieveResults{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_Success,
+						Reason:    reason,
+					},
+				}
+				return nil
+			}
+			return nil
+		}
+	}
+}
+
 type HasCollectionTask struct {
 	Condition
 	*milvuspb.HasCollectionRequest
