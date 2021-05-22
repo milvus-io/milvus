@@ -105,7 +105,3 @@ func (c *Client) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStates
 func (c *Client) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
 	return c.grpcClient.GetIndexFilePaths(ctx, req)
 }
-
-func (c *Client) NotifyBuildIndex(ctx context.Context, nty *indexpb.NotifyBuildIndexRequest) (*commonpb.Status, error) {
-	return c.grpcClient.NotifyBuildIndex(ctx, nty)
-}

@@ -337,18 +337,13 @@ LOOP:
 }
 
 type nodeTasks struct {
-	nodeID2Tasks map[string][]indexpb.IndexMeta
+	nodeID2Tasks map[string][]UniqueID
 }
 
-func (nt *nodeTasks) getTasksByLeaseKey(leaseKey string) ([]UniqueID, error) {
-	var taskIndexBuildIDs []UniqueID
-	tasks, ok := nt.nodeID2Tasks[leaseKey]
+func (nt *nodeTasks) getTasksByLeaseKey(leaseKey string) []UniqueID {
+	indexBuildIDs, ok := nt.nodeID2Tasks[leaseKey]
 	if !ok {
-		return nil, fmt.Errorf("lease key not exists with %s", leaseKey)
+		return nil
 	}
-	for _, task := range tasks {
-		taskIndexBuildIDs = append(taskIndexBuildIDs, task.IndexBuildID)
-	}
-
-	return taskIndexBuildIDs, nil
+	return indexBuildIDs
 }

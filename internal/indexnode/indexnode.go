@@ -16,7 +16,10 @@ import (
 	"errors"
 	"io"
 	"math/rand"
+	"strconv"
 	"time"
+
+	"github.com/golang/protobuf/proto"
 
 	"go.uber.org/zap"
 
@@ -199,19 +202,20 @@ func (i *IndexNode) DropIndex(ctx context.Context, request *indexpb.DropIndexReq
 	indexBuildIDs := i.sched.IndexBuildQueue.tryToRemoveUselessIndexBuildTask(request.IndexID)
 	log.Debug("IndexNode", zap.Any("The index of the IndexBuildIDs to be deleted", indexBuildIDs))
 	for _, indexBuildID := range indexBuildIDs {
-		nty := &indexpb.NotifyBuildIndexRequest{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			IndexBuildID:   indexBuildID,
-			NodeID:         Params.NodeID,
-			IndexFilePaths: []string{},
-		}
-		resp, err := i.serviceClient.NotifyBuildIndex(ctx, nty)
+		metaPath := "/indexes/" + strconv.FormatInt(indexBuildID, 10)
+		indexMeta := indexpb.IndexMeta{}
+		value, err := i.etcdKV.Load(metaPath)
 		if err != nil {
-			log.Warn("IndexNode", zap.String("DropIndex notify error", err.Error()))
-		} else if resp.ErrorCode != commonpb.ErrorCode_Success {
-			log.Warn("IndexNode", zap.String("DropIndex notify error reason", resp.Reason))
+			log.Debug("IndexNode", zap.Any("Drop index err", err.Error()))
+		}
+		err = proto.UnmarshalText(value, &indexMeta)
+		if err != nil {
+			log.Debug("IndexNode", zap.Any("Drop index err", err.Error()))
+		}
+		indexMeta.State = commonpb.IndexState_Finished
+		err = i.etcdKV.Save(metaPath, proto.MarshalTextString(&indexMeta))
+		if err != nil {
+			log.Debug("IndexNode", zap.Any("Drop index err", err.Error()))
 		}
 	}
 	return &commonpb.Status{

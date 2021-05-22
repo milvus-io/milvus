@@ -16,7 +16,6 @@ service IndexService {
   rpc BuildIndex(BuildIndexRequest) returns (BuildIndexResponse){}
   rpc GetIndexStates(GetIndexStatesRequest) returns (GetIndexStatesResponse) {}
   rpc GetIndexFilePaths(GetIndexFilePathsRequest) returns (GetIndexFilePathsResponse){}
-  rpc NotifyBuildIndex(NotifyBuildIndexRequest) returns (common.Status) {}
   rpc DropIndex(DropIndexRequest) returns (common.Status) {}
 }
 
@@ -78,13 +77,6 @@ message BuildIndexRequest {
 message BuildIndexResponse {
   common.Status status = 1;
   int64 indexBuildID = 2;
-}
-
-message NotifyBuildIndexRequest {
-  common.Status status = 1;
-  int64 indexBuildID = 2;
-  repeated string index_file_paths = 3;
-  int64 nodeID = 4;
 }
 
 message GetIndexFilePathsRequest {

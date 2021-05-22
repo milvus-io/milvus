@@ -19,6 +19,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -104,6 +107,11 @@ func (i *IndexService) Init() error {
 	if err != nil {
 		return err
 	}
+	ctx := context.Background()
+	self := sessionutil.NewSession("IndexService", funcutil.GetLocalIP()+":"+strconv.Itoa(Params.Port), true)
+	sm := sessionutil.NewSessionManager(ctx, Params.EtcdAddress, Params.MetaRootPath, self)
+	sm.Init()
+	sessionutil.SetGlobalSessionManager(sm)
 
 	//init idAllocator
 	kvRootPath := Params.KvRootPath
