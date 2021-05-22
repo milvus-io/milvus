@@ -89,9 +89,8 @@ func (node *ProxyNode) Init() error {
 	// todo wait for proxyservice state changed to Healthy
 	ctx := context.Background()
 
-	node.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress}, typeutil.ProxyNodeRole,
-		Params.NetworkAddress, false)
-	node.session.Init()
+	node.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress})
+	node.session.Init(typeutil.ProxyNodeRole, Params.NetworkAddress, false)
 
 	err := funcutil.WaitForComponentHealthy(ctx, node.proxyService, "ProxyService", 1000000, time.Millisecond*200)
 	if err != nil {
@@ -177,7 +176,7 @@ func (node *ProxyNode) Init() error {
 	log.Debug("create query message stream ...")
 
 	masterAddr := Params.MasterAddress
-	idAllocator, err := allocator.NewIDAllocator(node.ctx, masterAddr)
+	idAllocator, err := allocator.NewIDAllocator(node.ctx, masterAddr, []string{Params.EtcdAddress})
 
 	if err != nil {
 		return err

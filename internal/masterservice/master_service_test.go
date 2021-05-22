@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"path"
 	"sync"
 	"testing"
 	"time"
@@ -218,10 +219,10 @@ func TestMasterService(t *testing.T) {
 
 	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second})
 	assert.Nil(t, err)
-	_, err = etcdCli.Delete(ctx, ProxyNodeSessionPrefix, clientv3.WithPrefix())
+	_, err = etcdCli.Delete(ctx, sessionutil.DefaultServiceRoot, clientv3.WithPrefix())
 	assert.Nil(t, err)
 	defer func() {
-		_, _ = etcdCli.Delete(ctx, ProxyNodeSessionPrefix, clientv3.WithPrefix())
+		_, _ = etcdCli.Delete(ctx, sessionutil.DefaultServiceRoot, clientv3.WithPrefix())
 	}()
 
 	pm := &proxyMock{
@@ -252,14 +253,6 @@ func TestMasterService(t *testing.T) {
 	}
 	err = core.SetQueryService(qm)
 	assert.Nil(t, err)
-
-	//TODO initialize master's session manager before core init
-	/*
-		self := sessionutil.NewSession("masterservice", funcutil.GetLocalIP()+":"+strconv.Itoa(53100), true)
-		sm := sessionutil.NewSessionManager(ctx, Params.EtcdAddress, Params.MetaRootPath, self)
-		sm.Init()
-		sessionutil.SetGlobalSessionManager(sm)
-	*/
 
 	err = core.Init()
 	assert.Nil(t, err)
@@ -1458,9 +1451,9 @@ func TestMasterService(t *testing.T) {
 		s2, err := json.Marshal(&p2)
 		assert.Nil(t, err)
 
-		_, err = core.etcdCli.Put(ctx2, ProxyNodeSessionPrefix+"-1", string(s1))
+		_, err = core.etcdCli.Put(ctx2, path.Join(sessionutil.DefaultServiceRoot, typeutil.ProxyNodeRole)+"-1", string(s1))
 		assert.Nil(t, err)
-		_, err = core.etcdCli.Put(ctx2, ProxyNodeSessionPrefix+"-2", string(s2))
+		_, err = core.etcdCli.Put(ctx2, path.Join(sessionutil.DefaultServiceRoot, typeutil.ProxyNodeRole)+"-2", string(s2))
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 
