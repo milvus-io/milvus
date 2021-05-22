@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -52,6 +53,10 @@ import (
 //  indexpb(index_service)
 //  milvuspb -> milvuspb
 //  masterpb2 -> masterpb (master_service)
+
+//NEZA2017, DEBUG FLAG for milvus 2.0, this part should remove when milvus 2.0 release
+
+var SetDDTimeTimeByMaster bool = false
 
 // ------------------ struct -----------------------
 
@@ -78,12 +83,12 @@ type Core struct {
 
 	MetaTable *metaTable
 	//id allocator
-	idAllocator       func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error)
-	idAllocatorUpdate func() error
+	IDAllocator       func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error)
+	IDAllocatorUpdate func() error
 
 	//tso allocator
-	tsoAllocator       func(count uint32) (typeutil.Timestamp, error)
-	tsoAllocatorUpdate func() error
+	TSOAllocator       func(count uint32) (typeutil.Timestamp, error)
+	TSOAllocatorUpdate func() error
 
 	//inner members
 	ctx     context.Context
@@ -130,8 +135,10 @@ type Core struct {
 	ReleaseCollection func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error
 
 	//dd request scheduler
-	ddReqQueue      chan reqTask //dd request will be push into this chan
-	lastDdTimeStamp typeutil.Timestamp
+	ddReqQueue chan reqTask //dd request will be push into this chan
+
+	// channel timetick
+	chanTimeTick *timetickSync
 
 	//time tick loop
 	lastTimeTick typeutil.Timestamp
@@ -143,6 +150,8 @@ type Core struct {
 	initOnce  sync.Once
 	startOnce sync.Once
 	//isInit    atomic.Value
+
+	session *sessionutil.Session
 
 	msFactory ms.Factory
 }
@@ -169,16 +178,16 @@ func (c *Core) checkInit() error {
 	if c.MetaTable == nil {
 		return fmt.Errorf("MetaTable is nil")
 	}
-	if c.idAllocator == nil {
+	if c.IDAllocator == nil {
 		return fmt.Errorf("idAllocator is nil")
 	}
-	if c.idAllocatorUpdate == nil {
+	if c.IDAllocatorUpdate == nil {
 		return fmt.Errorf("idAllocatorUpdate is nil")
 	}
-	if c.tsoAllocator == nil {
+	if c.TSOAllocator == nil {
 		return fmt.Errorf("tsoAllocator is nil")
 	}
-	if c.tsoAllocatorUpdate == nil {
+	if c.TSOAllocatorUpdate == nil {
 		return fmt.Errorf("tsoAllocatorUpdate is nil")
 	}
 	if c.etcdCli == nil {
@@ -243,42 +252,57 @@ func (c *Core) startDdScheduler() {
 				log.Debug("dd chan is closed, exit task execution loop")
 				return
 			}
-			ts, err := task.Ts()
-			if err != nil {
-				task.Notify(err)
-				break
-			}
-			if !task.IgnoreTimeStamp() && ts <= c.lastDdTimeStamp {
-				task.Notify(fmt.Errorf("input timestamp = %d, last dd time stamp = %d", ts, c.lastDdTimeStamp))
-				break
-			}
-			err = task.Execute(task.Ctx())
+			err := task.Execute(task.Ctx())
 			task.Notify(err)
-			if ts > c.lastDdTimeStamp {
-				c.lastDdTimeStamp = ts
-			}
 		}
 	}
 }
 
 func (c *Core) startTimeTickLoop() {
-	for {
-		select {
-		case <-c.ctx.Done():
-			log.Debug("close master time tick loop")
-			return
-		case tt, ok := <-c.ProxyTimeTickChan:
-			if !ok {
-				log.Warn("proxyTimeTickStream is closed, exit time tick loop")
+	if SetDDTimeTimeByMaster {
+		ticker := time.NewTimer(time.Duration(Params.TimeTickInterval) * time.Millisecond)
+		cnt := 0
+		for {
+			select {
+			case <-c.ctx.Done():
+				log.Debug("master context closed", zap.Error(c.ctx.Err()))
 				return
+			case <-ticker.C:
+				if len(c.ddReqQueue) < 2 || cnt > 5 {
+					tt := &TimetickTask{
+						baseReqTask: baseReqTask{
+							ctx:  c.ctx,
+							cv:   make(chan error, 1),
+							core: c,
+						},
+					}
+					c.ddReqQueue <- tt
+					cnt = 0
+				} else {
+					cnt++
+				}
+
 			}
-			if tt <= c.lastTimeTick {
-				log.Warn("master time tick go back", zap.Uint64("last time tick", c.lastTimeTick), zap.Uint64("input time tick ", tt))
+		}
+	} else {
+		for {
+			select {
+			case <-c.ctx.Done():
+				log.Debug("close master time tick loop")
+				return
+			case tt, ok := <-c.ProxyTimeTickChan:
+				if !ok {
+					log.Warn("proxyTimeTickStream is closed, exit time tick loop")
+					return
+				}
+				if tt <= c.lastTimeTick {
+					log.Warn("master time tick go back", zap.Uint64("last time tick", c.lastTimeTick), zap.Uint64("input time tick ", tt))
+				}
+				if err := c.SendTimeTick(tt); err != nil {
+					log.Warn("master send time tick into dd and time_tick channel failed", zap.String("error", err.Error()))
+				}
+				c.lastTimeTick = tt
 			}
-			if err := c.SendTimeTick(tt); err != nil {
-				log.Warn("master send time tick into dd and time_tick channel failed", zap.String("error", err.Error()))
-			}
-			c.lastTimeTick = tt
 		}
 	}
 }
@@ -360,11 +384,11 @@ func (c *Core) tsLoop() {
 	for {
 		select {
 		case <-tsoTicker.C:
-			if err := c.tsoAllocatorUpdate(); err != nil {
+			if err := c.TSOAllocatorUpdate(); err != nil {
 				log.Warn("failed to update timestamp: ", zap.Error(err))
 				continue
 			}
-			if err := c.idAllocatorUpdate(); err != nil {
+			if err := c.IDAllocatorUpdate(); err != nil {
 				log.Warn("failed to update id: ", zap.Error(err))
 				continue
 			}
@@ -406,16 +430,6 @@ func (c *Core) setMsgStreams() error {
 	//proxy time tick stream,
 	if Params.ProxyTimeTickChannel == "" {
 		return fmt.Errorf("ProxyTimeTickChannel is empty")
-	}
-
-	var err error
-	m := map[string]interface{}{
-		"PulsarAddress":  Params.PulsarAddress,
-		"ReceiveBufSize": 1024,
-		"PulsarBufSize":  1024}
-	err = c.msFactory.SetParams(m)
-	if err != nil {
-		return err
 	}
 
 	proxyTimeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
@@ -651,7 +665,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 	log.Debug("data service segment", zap.String("channel name", Params.DataServiceSegmentChannel))
 
 	c.GetBinlogFilePathsFromDataServiceReq = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
-		ts, err := c.tsoAllocator(1)
+		ts, err := c.TSOAllocator(1)
 		if err != nil {
 			return nil, err
 		}
@@ -679,7 +693,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 	}
 
 	c.GetNumRowsReq = func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
-		ts, err := c.tsoAllocator(1)
+		ts, err := c.TSOAllocator(1)
 		if err != nil {
 			return 0, err
 		}
@@ -807,6 +821,10 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 func (c *Core) Init() error {
 	var initError error = nil
 	c.initOnce.Do(func() {
+		c.session = sessionutil.NewSession(c.ctx, []string{Params.EtcdAddress}, typeutil.MasterServiceRole,
+			Params.Address, true)
+		c.session.Init()
+
 		connectEtcdFn := func() error {
 			if c.etcdCli, initError = clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second}); initError != nil {
 				return initError
@@ -815,7 +833,7 @@ func (c *Core) Init() error {
 				for {
 					var ts typeutil.Timestamp
 					var err error
-					if ts, err = c.tsoAllocator(1); err == nil {
+					if ts, err = c.TSOAllocator(1); err == nil {
 						return ts
 					}
 					time.Sleep(100 * time.Millisecond)
@@ -842,10 +860,10 @@ func (c *Core) Init() error {
 		if initError = idAllocator.Initialize(); initError != nil {
 			return
 		}
-		c.idAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+		c.IDAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 			return idAllocator.Alloc(count)
 		}
-		c.idAllocatorUpdate = func() error {
+		c.IDAllocatorUpdate = func() error {
 			return idAllocator.UpdateID()
 		}
 
@@ -853,11 +871,23 @@ func (c *Core) Init() error {
 		if initError = tsoAllocator.Initialize(); initError != nil {
 			return
 		}
-		c.tsoAllocator = func(count uint32) (typeutil.Timestamp, error) {
+		c.TSOAllocator = func(count uint32) (typeutil.Timestamp, error) {
 			return tsoAllocator.Alloc(count)
 		}
-		c.tsoAllocatorUpdate = func() error {
+		c.TSOAllocatorUpdate = func() error {
 			return tsoAllocator.UpdateTSO()
+		}
+
+		m := map[string]interface{}{
+			"PulsarAddress":  Params.PulsarAddress,
+			"ReceiveBufSize": 1024,
+			"PulsarBufSize":  1024}
+		if initError = c.msFactory.SetParams(m); initError != nil {
+			return
+		}
+		c.chanTimeTick, initError = newTimeTickSync(c.ctx, c.msFactory, c.etcdCli)
+		if initError != nil {
+			return
 		}
 
 		c.ddReqQueue = make(chan reqTask, 1024)
@@ -953,6 +983,7 @@ func (c *Core) Start() error {
 		go c.startDataServiceSegmentLoop()
 		go c.startSegmentFlushCompletedLoop()
 		go c.tsLoop()
+		go c.chanTimeTick.StartWatch()
 		c.stateCode.Store(internalpb.StateCode_Healthy)
 	})
 	log.Debug("Master service", zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Healthy)]))
@@ -1584,7 +1615,7 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 }
 
 func (c *Core) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
-	ts, err := c.tsoAllocator(in.Count)
+	ts, err := c.TSOAllocator(in.Count)
 	if err != nil {
 		log.Debug("AllocTimestamp failed", zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &masterpb.AllocTimestampResponse{
@@ -1608,7 +1639,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRe
 }
 
 func (c *Core) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
-	start, _, err := c.idAllocator(in.Count)
+	start, _, err := c.IDAllocator(in.Count)
 	if err != nil {
 		log.Debug("AllocID failed", zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &masterpb.AllocIDResponse{
@@ -1628,5 +1659,28 @@ func (c *Core) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*maste
 		},
 		ID:    start,
 		Count: in.Count,
+	}, nil
+}
+
+// UpdateChannelTimeTick used to handle ChannelTimeTickMsg
+func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}
+	if in.Base.MsgType != commonpb.MsgType_TimeTick {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = fmt.Sprintf("UpdateChannelTimeTick receive invalid message %d", in.Base.GetMsgType())
+		return status, nil
+	}
+	err := c.chanTimeTick.UpdateTimeTick(in)
+	if err != nil {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = err.Error()
+		return status, nil
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
 	}, nil
 }

@@ -24,7 +24,6 @@ import (
 
 	grpcindexserviceclient "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
 	"github.com/milvus-io/milvus/internal/indexnode"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -32,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
@@ -44,9 +42,6 @@ type Server struct {
 
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
-
-	etcdKV *etcdkv.EtcdKV
-	signal <-chan bool
 
 	indexServiceClient types.IndexService
 	loopCtx            context.Context
@@ -100,7 +95,6 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 }
 
 func (s *Server) init() error {
-	ctx := context.Background()
 	var err error
 	Params.Init()
 	if !funcutil.CheckPortAvailable(Params.Port) {
@@ -119,11 +113,6 @@ func (s *Server) init() error {
 	s.closer = closer
 
 	Params.Address = Params.IP + ":" + strconv.FormatInt(int64(Params.Port), 10)
-
-	self := sessionutil.NewSession("indexnode", funcutil.GetLocalIP()+":"+strconv.Itoa(Params.Port), false)
-	sm := sessionutil.NewSessionManager(ctx, indexnode.Params.EtcdAddress, indexnode.Params.MetaRootPath, self)
-	sm.Init()
-	sessionutil.SetGlobalSessionManager(sm)
 
 	defer func() {
 		if err != nil {

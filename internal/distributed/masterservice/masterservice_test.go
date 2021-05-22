@@ -15,7 +15,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,8 +34,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
+	"go.etcd.io/etcd/clientv3"
 )
 
 func TestGrpcService(t *testing.T) {
@@ -82,6 +83,12 @@ func TestGrpcService(t *testing.T) {
 
 	core, ok := (svr.masterService).(*cms.Core)
 	assert.True(t, ok)
+
+	etcdCli, err := initEtcd(cms.Params.EtcdAddress)
+	assert.Nil(t, err)
+	_, err = etcdCli.Delete(ctx, "/session", clientv3.WithPrefix())
+	assert.Nil(t, err)
+
 	err = core.Init()
 	assert.Nil(t, err)
 
@@ -294,21 +301,21 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, createCollectionArray[1].Base.MsgType, commonpb.MsgType_CreateCollection)
 		assert.Equal(t, createCollectionArray[1].CollectionName, "testColl-again")
 
-		//time stamp go back
-		schema.Name = "testColl-goback"
-		sbf, err = proto.Marshal(&schema)
-		assert.Nil(t, err)
-		req.CollectionName = schema.Name
-		req.Schema = sbf
-		req.Base.MsgID = 103
-		req.Base.Timestamp = 103
-		req.Base.SourceID = 103
-		status, err = cli.CreateCollection(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
-		matched, err := regexp.MatchString("input timestamp = [0-9]+, last dd time stamp = [0-9]+", status.Reason)
-		assert.Nil(t, err)
-		assert.True(t, matched)
+		//time stamp go back, master response to add the timestamp, so the time tick will never go back
+		//schema.Name = "testColl-goback"
+		//sbf, err = proto.Marshal(&schema)
+		//assert.Nil(t, err)
+		//req.CollectionName = schema.Name
+		//req.Schema = sbf
+		//req.Base.MsgID = 103
+		//req.Base.Timestamp = 103
+		//req.Base.SourceID = 103
+		//status, err = cli.CreateCollection(ctx, req)
+		//assert.Nil(t, err)
+		//assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+		//matched, err := regexp.MatchString("input timestamp = [0-9]+, last dd time stamp = [0-9]+", status.Reason)
+		//assert.Nil(t, err)
+		//assert.True(t, matched)
 	})
 
 	t.Run("has collection", func(t *testing.T) {
@@ -862,10 +869,31 @@ func TestRun(t *testing.T) {
 	cms.Params.Init()
 	cms.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
 
+	etcdCli, err := initEtcd(cms.Params.EtcdAddress)
+	assert.Nil(t, err)
+	_, err = etcdCli.Delete(ctx, "/session", clientv3.WithPrefix())
+	assert.Nil(t, err)
 	err = svr.Run()
 	assert.Nil(t, err)
 
 	err = svr.Stop()
 	assert.Nil(t, err)
 
+}
+
+func initEtcd(etcdAddress string) (*clientv3.Client, error) {
+	var etcdCli *clientv3.Client
+	connectEtcdFn := func() error {
+		etcd, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}, DialTimeout: 5 * time.Second})
+		if err != nil {
+			return err
+		}
+		etcdCli = etcd
+		return nil
+	}
+	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	if err != nil {
+		return nil, err
+	}
+	return etcdCli, nil
 }

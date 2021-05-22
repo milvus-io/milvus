@@ -271,3 +271,7 @@ func (m *mockMasterService) GetDdChannel(ctx context.Context) (*milvuspb.StringR
 		Value: "ddchannel",
 	}, nil
 }
+
+func (m *mockMasterService) UpdateChannelTimeTick(ctx context.Context, req *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
+}

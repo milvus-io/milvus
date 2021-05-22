@@ -22,7 +22,6 @@ import (
 	"sync"
 	"time"
 
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
@@ -40,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
@@ -56,9 +54,6 @@ type Server struct {
 
 	masterService types.MasterService
 	dataService   types.DataService
-
-	etcdKV *etcdkv.EtcdKV
-	signal <-chan bool
 
 	newMasterServiceClient func(string) (types.MasterService, error)
 	newDataServiceClient   func(string) types.DataService
@@ -173,11 +168,6 @@ func (s *Server) init() error {
 	s.closer = closer
 	addr := Params.IP + ":" + strconv.Itoa(Params.Port)
 	log.Debug("DataNode address", zap.String("address", addr))
-
-	self := sessionutil.NewSession("datanode", funcutil.GetLocalIP()+":"+strconv.Itoa(Params.Port), false)
-	sm := sessionutil.NewSessionManager(ctx, dn.Params.EtcdAddress, dn.Params.MetaRootPath, self)
-	sm.Init()
-	sessionutil.SetGlobalSessionManager(sm)
 
 	err := s.startGrpc()
 	if err != nil {

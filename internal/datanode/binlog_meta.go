@@ -39,6 +39,10 @@ func NewBinlogMeta(kv kv.TxnKV, idAllocator allocatorInterface) (*binlogMeta, er
 	return mt, nil
 }
 
+func (bm *binlogMeta) allocID() (key UniqueID, err error) {
+	return bm.idAllocator.allocID()
+}
+
 // genKey gives a valid key string for lists of UniqueIDs:
 //  if alloc is true, the returned keys will have a generated-unique ID at the end.
 //  if alloc is false, the returned keys will only consist of provided ids.

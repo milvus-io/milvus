@@ -29,6 +29,9 @@ type ParamTable struct {
 
 	NodeID uint64
 
+	Address string
+	Port    int
+
 	PulsarAddress             string
 	EtcdAddress               string
 	MetaRootPath              string
@@ -45,7 +48,8 @@ type ParamTable struct {
 	DefaultIndexName            string
 	MinSegmentSizeToEnableIndex int64
 
-	Timeout int
+	Timeout          int
+	TimeTickInterval int
 
 	Log log.Config
 
@@ -79,6 +83,7 @@ func (p *ParamTable) Init() {
 		p.initDefaultIndexName()
 
 		p.initTimeout()
+		p.initTimeTickInterval()
 
 		p.initLogCfg()
 		p.initRoleName()
@@ -187,6 +192,10 @@ func (p *ParamTable) initDefaultIndexName() {
 
 func (p *ParamTable) initTimeout() {
 	p.Timeout = p.ParseInt("master.timeout")
+}
+
+func (p *ParamTable) initTimeTickInterval() {
+	p.TimeTickInterval = p.ParseInt("master.timeTickInterval")
 }
 
 func (p *ParamTable) initLogCfg() {

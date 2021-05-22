@@ -8,6 +8,7 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
+
 package dataservice
 
 import (
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/timesync"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -68,7 +70,9 @@ type Server struct {
 		sync.Mutex
 		name string
 	}
+	session              *sessionutil.Session
 	segmentInfoStream    msgstream.MsgStream
+	flushMsgStream       msgstream.MsgStream
 	insertChannels       []string
 	msFactory            msgstream.Factory
 	ttBarrier            timesync.TimeTickBarrier
@@ -104,6 +108,9 @@ func (s *Server) SetMasterClient(masterClient types.MasterService) {
 }
 
 func (s *Server) Init() error {
+	s.session = sessionutil.NewSession(s.ctx, []string{Params.EtcdAddress}, typeutil.DataServiceRole,
+		Params.IP, true)
+	s.session.Init()
 	return nil
 }
 
@@ -124,9 +131,8 @@ func (s *Server) Start() error {
 
 	s.allocator = newAllocator(s.masterClient)
 
+	s.startSegmentAllocator()
 	s.statsHandler = newStatsHandler(s.meta)
-	s.initSegmentInfoChannel()
-	s.segAllocator = newSegmentAllocator(s.meta, s.allocator, WithSegmentStream(s.segmentInfoStream))
 	if err = s.loadMetaFromMaster(); err != nil {
 		return err
 	}
@@ -137,6 +143,20 @@ func (s *Server) Start() error {
 	s.UpdateStateCode(internalpb.StateCode_Healthy)
 	log.Debug("start success")
 	return nil
+}
+
+func (s *Server) startSegmentAllocator() {
+	stream := s.initSegmentInfoChannel()
+	helper := createNewSegmentHelper(stream)
+	s.segAllocator = newSegmentAllocator(s.meta, s.allocator, withAllocHelper(helper))
+}
+
+func (s *Server) initSegmentInfoChannel() msgstream.MsgStream {
+	segmentInfoStream, _ := s.msFactory.NewMsgStream(s.ctx)
+	segmentInfoStream.AsProducer([]string{Params.SegmentInfoChannelName})
+	log.Debug("dataservice AsProducer: " + Params.SegmentInfoChannelName)
+	segmentInfoStream.Start()
+	return segmentInfoStream
 }
 
 func (s *Server) UpdateStateCode(code internalpb.StateCode) {
@@ -163,14 +183,6 @@ func (s *Server) initMeta() error {
 	return retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
 }
 
-func (s *Server) initSegmentInfoChannel() {
-	segmentInfoStream, _ := s.msFactory.NewMsgStream(s.ctx)
-	segmentInfoStream.AsProducer([]string{Params.SegmentInfoChannelName})
-	log.Debug("dataservice AsProducer: " + Params.SegmentInfoChannelName)
-	s.segmentInfoStream = segmentInfoStream
-	s.segmentInfoStream.Start()
-}
-
 func (s *Server) initMsgProducer() error {
 	var err error
 	if s.ttMsgStream, err = s.msFactory.NewMsgStream(s.ctx); err != nil {
@@ -193,6 +205,15 @@ func (s *Server) initMsgProducer() error {
 		return err
 	}
 	s.msgProducer.Start(s.ctx)
+	// segment flush stream
+	s.flushMsgStream, err = s.msFactory.NewMsgStream(s.ctx)
+	if err != nil {
+		return err
+	}
+	s.flushMsgStream.AsProducer([]string{Params.SegmentInfoChannelName})
+	log.Debug("dataservice AsProducer:" + Params.SegmentInfoChannelName)
+	s.flushMsgStream.Start()
+
 	return nil
 }
 
@@ -303,10 +324,9 @@ func (s *Server) checkMasterIsHealthy() error {
 
 func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
-	s.serverLoopWg.Add(3)
+	s.serverLoopWg.Add(2)
 	go s.startStatsChannel(s.serverLoopCtx)
 	go s.startSegmentFlushChannel(s.serverLoopCtx)
-	go s.startProxyServiceTimeTickLoop(s.serverLoopCtx)
 }
 
 func (s *Server) startStatsChannel(ctx context.Context) {
@@ -423,45 +443,12 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 	}
 }
 
-func (s *Server) startProxyServiceTimeTickLoop(ctx context.Context) {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-	timeTickStream, _ := s.msFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.ProxyTimeTickChannelName}, Params.DataServiceSubscriptionName)
-	timeTickStream.Start()
-	defer timeTickStream.Close()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Debug("Proxy service timetick loop shut down")
-			return
-		default:
-		}
-		msgPack := timeTickStream.Consume()
-		if msgPack == nil {
-			continue
-		}
-		for _, msg := range msgPack.Msgs {
-			if msg.Type() != commonpb.MsgType_TimeTick {
-				log.Warn("receive unknown msg from proxy service timetick", zap.Stringer("msgType", msg.Type()))
-				continue
-			}
-			ttMsg := msg.(*msgstream.TimeTickMsg)
-			traceCtx := context.TODO()
-			if err := s.segAllocator.ExpireAllocations(traceCtx, ttMsg.Base.Timestamp); err != nil {
-				log.Error("expire allocations error", zap.Error(err))
-			}
-		}
-	}
-}
-
 func (s *Server) Stop() error {
 	s.cluster.ShutDownClients()
 	s.ttMsgStream.Close()
 	s.k2sMsgStream.Close()
 	s.ttBarrier.Close()
 	s.msgProducer.Close()
-	s.segmentInfoStream.Close()
 	s.stopServerLoop()
 	return nil
 }
@@ -645,7 +632,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 		//continue
 		//}
 
-		segmentID, retCount, expireTs, err := s.segAllocator.AllocSegment(ctx, r.CollectionID, r.PartitionID, r.ChannelName, int(r.Count))
+		segmentID, retCount, expireTs, err := s.segAllocator.AllocSegment(ctx, r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
 		if err != nil {
 			appendFailedAssignment(fmt.Sprintf("allocation of collection %d, partition %d, channel %s, count %d error:  %s",
 				r.CollectionID, r.PartitionID, r.ChannelName, r.Count, err.Error()))
@@ -763,9 +750,6 @@ func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 		} else {
 			state.Status.ErrorCode = commonpb.ErrorCode_Success
 			state.State = segmentInfo.State
-			state.CreateTime = segmentInfo.OpenTime
-			state.SealedTime = segmentInfo.SealedTime
-			state.FlushedTime = segmentInfo.FlushedTime
 			state.StartPosition = segmentInfo.StartPosition
 			state.EndPosition = segmentInfo.EndPosition
 		}
@@ -882,4 +866,101 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.Infos = infos
 	return resp, nil
+}
+
+// SaveBinlogPaths implement DataServiceServer
+func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
+	resp := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+	if !s.checkStateIsHealthy() {
+		resp.Reason = "server is initializing"
+		return resp, nil
+	}
+	if s.flushMsgStream == nil {
+		resp.Reason = "flush msg stream nil"
+		return resp, nil
+	}
+
+	// check segment id & collection id matched
+	_, err := s.meta.GetCollection(req.GetCollectionID())
+	if err != nil {
+		log.Error("Failed to get collection info", zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
+		resp.Reason = err.Error()
+		return resp, err
+	}
+
+	segInfo, err := s.meta.GetSegment(req.GetSegmentID())
+	if err != nil {
+		log.Error("Failed to get segment info", zap.Int64("segmentID", req.GetSegmentID()), zap.Error(err))
+		resp.Reason = err.Error()
+		return resp, err
+	}
+	log.Debug("segment", zap.Int64("segment", segInfo.CollectionID))
+
+	meta := make(map[string]string)
+	fieldMeta, err := s.prepareField2PathMeta(req.SegmentID, req.Field2BinlogPaths)
+	if err != nil {
+		resp.Reason = err.Error()
+		return resp, err
+	}
+	for k, v := range fieldMeta {
+		meta[k] = v
+	}
+	ddlMeta, err := s.prepareDDLBinlogMeta(req.CollectionID, req.GetDdlBinlogPaths())
+	if err != nil {
+		resp.Reason = err.Error()
+		return resp, err
+	}
+	for k, v := range ddlMeta {
+		meta[k] = v
+	}
+	segmentPos, err := s.prepareSegmentPos(req.SegmentID, req.GetDmlPosition(), req.GetDdlPosition())
+	if err != nil {
+		resp.Reason = err.Error()
+		return resp, err
+	}
+	for k, v := range segmentPos {
+		meta[k] = v
+	}
+	// Save into k-v store
+	err = s.SaveBinLogMetaTxn(meta)
+	if err != nil {
+		resp.Reason = err.Error()
+		return resp, err
+	}
+	// write flush msg into segmentInfo/flush stream
+	msgPack := composeSegmentFlushMsgPack(req.SegmentID)
+	err = s.flushMsgStream.Produce(&msgPack)
+	if err != nil {
+		resp.Reason = err.Error()
+		return resp, err
+	}
+
+	resp.ErrorCode = commonpb.ErrorCode_Success
+	return resp, nil
+}
+
+func composeSegmentFlushMsgPack(segmentID UniqueID) msgstream.MsgPack {
+	msgPack := msgstream.MsgPack{
+		Msgs: make([]msgstream.TsMsg, 0, 1),
+	}
+	completeFlushMsg := internalpb.SegmentFlushCompletedMsg{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_SegmentFlushDone,
+			MsgID:     0, // TODO
+			Timestamp: 0, // TODO
+			SourceID:  Params.NodeID,
+		},
+		SegmentID: segmentID,
+	}
+	var msg msgstream.TsMsg = &msgstream.FlushCompletedMsg{
+		BaseMsg: msgstream.BaseMsg{
+			HashValues: []uint32{0},
+		},
+		SegmentFlushCompletedMsg: completeFlushMsg,
+	}
+
+	msgPack.Msgs = append(msgPack.Msgs, msg)
+	return msgPack
 }

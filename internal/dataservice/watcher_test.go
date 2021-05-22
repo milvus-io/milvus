@@ -44,24 +44,6 @@ func TestWatcher(t *testing.T) {
 		ID:     collID,
 	}
 
-	t.Run("Test ProxyTimeTickWatcher", func(t *testing.T) {
-		proxyWatcher := newProxyTimeTickWatcher(segAllocator)
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		go proxyWatcher.StartBackgroundLoop(ctx)
-
-		msg := &msgstream.TimeTickMsg{
-			TimeTickMsg: internalpb.TimeTickMsg{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_TimeTick,
-					Timestamp: 100,
-				},
-			},
-		}
-		proxyWatcher.Watch(msg)
-		time.Sleep(time.Second)
-	})
-
 	t.Run("Test DataNodeTimeTickWatcher", func(t *testing.T) {
 		datanodeWatcher := newDataNodeTimeTickWatcher(meta, segAllocator, cluster)
 		ctx, cancel := context.WithCancel(context.Background())

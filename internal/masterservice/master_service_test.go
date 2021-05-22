@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/clientv3"
@@ -106,9 +107,8 @@ func (d *dataMock) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInf
 		},
 		Infos: []*datapb.SegmentInfo{
 			{
-				FlushedTime: 100,
-				NumRows:     Params.MinSegmentSizeToEnableIndex,
-				State:       commonpb.SegmentState_Flushed,
+				NumRows: Params.MinSegmentSizeToEnableIndex,
+				State:   commonpb.SegmentState_Flushed,
 			},
 		},
 	}, nil
@@ -216,6 +216,14 @@ func TestMasterService(t *testing.T) {
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
 
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second})
+	assert.Nil(t, err)
+	_, err = etcdCli.Delete(ctx, ProxyNodeSessionPrefix, clientv3.WithPrefix())
+	assert.Nil(t, err)
+	defer func() {
+		_, _ = etcdCli.Delete(ctx, ProxyNodeSessionPrefix, clientv3.WithPrefix())
+	}()
+
 	pm := &proxyMock{
 		randVal:   randVal,
 		collArray: make([]string, 0, 16),
@@ -244,6 +252,14 @@ func TestMasterService(t *testing.T) {
 	}
 	err = core.SetQueryService(qm)
 	assert.Nil(t, err)
+
+	//TODO initialize master's session manager before core init
+	/*
+		self := sessionutil.NewSession("masterservice", funcutil.GetLocalIP()+":"+strconv.Itoa(53100), true)
+		sm := sessionutil.NewSessionManager(ctx, Params.EtcdAddress, Params.MetaRootPath, self)
+		sm.Init()
+		sessionutil.SetGlobalSessionManager(sm)
+	*/
 
 	err = core.Init()
 	assert.Nil(t, err)
@@ -1416,6 +1432,77 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	t.Run("channel timetick", func(t *testing.T) {
+		const (
+			proxyNodeIDInvalid = 102
+			proxyNodeName0     = "proxynode_0"
+			proxyNodeName1     = "proxynode_1"
+			chanName0          = "c0"
+			chanName1          = "c1"
+			chanName2          = "c2"
+			ts0                = uint64(100)
+			ts1                = uint64(120)
+			ts2                = uint64(150)
+		)
+		p1 := sessionutil.Session{
+			ServerID: 100,
+		}
+
+		p2 := sessionutil.Session{
+			ServerID: 101,
+		}
+		ctx2, cancel2 := context.WithTimeout(ctx, RequestTimeout)
+		defer cancel2()
+		s1, err := json.Marshal(&p1)
+		assert.Nil(t, err)
+		s2, err := json.Marshal(&p2)
+		assert.Nil(t, err)
+
+		_, err = core.etcdCli.Put(ctx2, ProxyNodeSessionPrefix+"-1", string(s1))
+		assert.Nil(t, err)
+		_, err = core.etcdCli.Put(ctx2, ProxyNodeSessionPrefix+"-2", string(s2))
+		assert.Nil(t, err)
+		time.Sleep(time.Second)
+
+		msg0 := &internalpb.ChannelTimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_TimeTick,
+				SourceID: 100,
+			},
+			ChannelNames: []string{chanName0, chanName1},
+			Timestamps:   []uint64{ts0, ts2},
+		}
+		s, _ := core.UpdateChannelTimeTick(ctx, msg0)
+		assert.Equal(t, commonpb.ErrorCode_Success, s.ErrorCode)
+		time.Sleep(100 * time.Millisecond)
+		t.Log(core.chanTimeTick.proxyTimeTick)
+
+		msg1 := &internalpb.ChannelTimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_TimeTick,
+				SourceID: 101,
+			},
+			ChannelNames: []string{chanName1, chanName2},
+			Timestamps:   []uint64{ts1, ts2},
+		}
+		s, _ = core.UpdateChannelTimeTick(ctx, msg1)
+		assert.Equal(t, commonpb.ErrorCode_Success, s.ErrorCode)
+		time.Sleep(100 * time.Millisecond)
+
+		msgInvalid := &internalpb.ChannelTimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_TimeTick,
+				SourceID: proxyNodeIDInvalid,
+			},
+		}
+		s, _ = core.UpdateChannelTimeTick(ctx, msgInvalid)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, s.ErrorCode)
+		time.Sleep(1 * time.Second)
+
+		assert.Equal(t, 2, core.chanTimeTick.GetProxyNodeNum())
+		assert.Equal(t, 3, core.chanTimeTick.GetChanNum())
+	})
+
 	err = core.Stop()
 	assert.Nil(t, err)
 	st, err := core.GetComponentStates(ctx)
@@ -1581,10 +1668,10 @@ func TestMasterService(t *testing.T) {
 	})
 
 	t.Run("alloc_error", func(t *testing.T) {
-		core.idAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+		core.IDAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 			return 0, 0, fmt.Errorf("id allocator error test")
 		}
-		core.tsoAllocator = func(count uint32) (typeutil.Timestamp, error) {
+		core.TSOAllocator = func(count uint32) (typeutil.Timestamp, error) {
 			return 0, fmt.Errorf("tso allcoator error test")
 		}
 		r1 := &masterpb.AllocTimestampRequest{
@@ -1615,6 +1702,152 @@ func TestMasterService(t *testing.T) {
 	})
 }
 
+func TestMasterService2(t *testing.T) {
+	const (
+		dbName   = "testDb"
+		collName = "testColl"
+		partName = "testPartition"
+	)
+	SetDDTimeTimeByMaster = true
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	msFactory := msgstream.NewPmsFactory()
+	Params.Init()
+	core, err := NewCore(ctx, msFactory)
+	assert.Nil(t, err)
+	randVal := rand.Int()
+
+	Params.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
+	Params.DdChannel = fmt.Sprintf("master-dd-%d", randVal)
+	Params.StatisticsChannel = fmt.Sprintf("master-statistics-%d", randVal)
+	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
+	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
+	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+
+	pm := &proxyMock{
+		randVal:   randVal,
+		collArray: make([]string, 0, 16),
+		mutex:     sync.Mutex{},
+	}
+	err = core.SetProxyService(ctx, pm)
+	assert.Nil(t, err)
+
+	dm := &dataMock{randVal: randVal}
+	err = core.SetDataService(ctx, dm)
+	assert.Nil(t, err)
+
+	im := &indexMock{
+		fileArray:  []string{},
+		idxBuildID: []int64{},
+		idxID:      []int64{},
+		idxDropID:  []int64{},
+		mutex:      sync.Mutex{},
+	}
+	err = core.SetIndexService(im)
+	assert.Nil(t, err)
+
+	qm := &queryMock{
+		collID: nil,
+		mutex:  sync.Mutex{},
+	}
+	err = core.SetQueryService(qm)
+	assert.Nil(t, err)
+
+	err = core.Init()
+	assert.Nil(t, err)
+
+	err = core.Start()
+	assert.Nil(t, err)
+
+	m := map[string]interface{}{
+		"receiveBufSize": 1024,
+		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarBufSize":  1024}
+	err = msFactory.SetParams(m)
+	assert.Nil(t, err)
+
+	proxyTimeTickStream, _ := msFactory.NewMsgStream(ctx)
+	proxyTimeTickStream.AsProducer([]string{Params.ProxyTimeTickChannel})
+
+	dataServiceSegmentStream, _ := msFactory.NewMsgStream(ctx)
+	dataServiceSegmentStream.AsProducer([]string{Params.DataServiceSegmentChannel})
+
+	timeTickStream, _ := msFactory.NewMsgStream(ctx)
+	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
+	timeTickStream.Start()
+
+	ddStream, _ := msFactory.NewMsgStream(ctx)
+	ddStream.AsConsumer([]string{Params.DdChannel}, Params.MsgChannelSubName)
+	ddStream.Start()
+
+	time.Sleep(time.Second)
+
+	getNotTTMsg := func(ch <-chan *msgstream.MsgPack, n int) []msgstream.TsMsg {
+		msg := make([]msgstream.TsMsg, 0, n)
+		for {
+			m, ok := <-ch
+			assert.True(t, ok)
+			for _, m := range m.Msgs {
+				if _, ok := (m).(*msgstream.TimeTickMsg); !ok {
+					msg = append(msg, m)
+				}
+			}
+			if len(msg) >= n {
+				return msg
+			}
+		}
+	}
+
+	t.Run("time tick", func(t *testing.T) {
+		ttmsg, ok := <-timeTickStream.Chan()
+		assert.True(t, ok)
+		assert.Equal(t, 1, len(ttmsg.Msgs))
+		ttm, ok := (ttmsg.Msgs[0]).(*msgstream.TimeTickMsg)
+		assert.True(t, ok)
+		assert.Greater(t, ttm.Base.Timestamp, typeutil.Timestamp(0))
+
+		ddmsg, ok := <-ddStream.Chan()
+		assert.True(t, ok)
+		assert.Equal(t, 1, len(ddmsg.Msgs))
+		ddm, ok := (ddmsg.Msgs[0]).(*msgstream.TimeTickMsg)
+		assert.True(t, ok)
+		assert.Greater(t, ddm.Base.Timestamp, typeutil.Timestamp(0))
+	})
+
+	t.Run("create collection", func(t *testing.T) {
+		schema := schemapb.CollectionSchema{
+			Name: collName,
+		}
+
+		sbf, err := proto.Marshal(&schema)
+		assert.Nil(t, err)
+
+		req := &milvuspb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreateCollection,
+				Timestamp: 100,
+			},
+			DbName:         dbName,
+			CollectionName: collName,
+			Schema:         sbf,
+		}
+		status, err := core.CreateCollection(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+
+		msg := getNotTTMsg(ddStream.Chan(), 2)
+		assert.GreaterOrEqual(t, len(msg), 2)
+		m1, ok := (msg[0]).(*msgstream.CreateCollectionMsg)
+		assert.True(t, ok)
+		m2, ok := (msg[1]).(*msgstream.CreatePartitionMsg)
+		assert.True(t, ok)
+		assert.Equal(t, m1.Base.Timestamp, m2.Base.Timestamp)
+		t.Log("time tick", m1.Base.Timestamp)
+	})
+}
+
 func TestCheckInit(t *testing.T) {
 	c, err := NewCore(context.Background(), nil)
 	assert.Nil(t, err)
@@ -1629,25 +1862,25 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.idAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+	c.IDAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		return 0, 0, nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.idAllocatorUpdate = func() error {
+	c.IDAllocatorUpdate = func() error {
 		return nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.tsoAllocator = func(count uint32) (typeutil.Timestamp, error) {
+	c.TSOAllocator = func(count uint32) (typeutil.Timestamp, error) {
 		return 0, nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.tsoAllocatorUpdate = func() error {
+	c.TSOAllocatorUpdate = func() error {
 		return nil
 	}
 	err = c.checkInit()

@@ -1260,11 +1260,7 @@ func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvus
 			SegmentID:    info.ID,
 			CollectionID: info.CollectionID,
 			PartitionID:  info.PartitionID,
-			OpenTime:     info.OpenTime,
-			SealedTime:   info.SealedTime,
-			FlushedTime:  info.FlushedTime,
 			NumRows:      info.NumRows,
-			MemSize:      info.MemSize,
 			State:        info.State,
 		}
 	}
