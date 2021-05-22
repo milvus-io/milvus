@@ -29,10 +29,8 @@ import (
 )
 
 type timetickSync struct {
+	core          *Core
 	lock          sync.Mutex
-	ctx           context.Context
-	etcdCli       *clientv3.Client
-	msFactory     msgstream.Factory
 	proxyTimeTick map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg
 	chanStream    map[string]msgstream.MsgStream
 	sendChan      chan map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg
@@ -41,21 +39,19 @@ type timetickSync struct {
 // ProxyNodeSessionPrefix used for etcd watch
 const ProxyNodeSessionPrefix = "session/proxynode"
 
-func newTimeTickSync(ctx context.Context, factory msgstream.Factory, cli *clientv3.Client) (*timetickSync, error) {
+func newTimeTickSync(core *Core) (*timetickSync, error) {
 	tss := timetickSync{
 		lock:          sync.Mutex{},
-		ctx:           ctx,
-		etcdCli:       cli,
-		msFactory:     factory,
+		core:          core,
 		proxyTimeTick: make(map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg),
 		chanStream:    make(map[string]msgstream.MsgStream),
 		sendChan:      make(chan map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg, 16),
 	}
 
-	ctx2, cancel := context.WithTimeout(ctx, RequestTimeout)
+	ctx2, cancel := context.WithTimeout(core.ctx, RequestTimeout)
 	defer cancel()
 
-	resp, err := cli.Get(ctx2, ProxyMetaPrefix, clientv3.WithPrefix())
+	resp, err := core.etcdCli.Get(ctx2, ProxyMetaPrefix, clientv3.WithPrefix())
 	if err != nil {
 		return nil, err
 	}
@@ -109,11 +105,11 @@ func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg) error {
 
 // StartWatch watch proxy node change and process all channels' timetick msg
 func (t *timetickSync) StartWatch() {
-	rch := t.etcdCli.Watch(t.ctx, ProxyNodeSessionPrefix, clientv3.WithPrefix(), clientv3.WithCreatedNotify())
+	rch := t.core.etcdCli.Watch(t.core.ctx, ProxyNodeSessionPrefix, clientv3.WithPrefix(), clientv3.WithCreatedNotify())
 	for {
 		select {
-		case <-t.ctx.Done():
-			log.Debug("timetickSync context done", zap.Error(t.ctx.Err()))
+		case <-t.core.ctx.Done():
+			log.Debug("master service context done", zap.Error(t.core.ctx.Err()))
 			return
 		case wresp, ok := <-rch:
 			if !ok {
@@ -152,7 +148,7 @@ func (t *timetickSync) StartWatch() {
 			}
 		case ptt, ok := <-t.sendChan:
 			if !ok {
-				log.Debug("timetickSync sendChan closed", zap.Error(t.ctx.Err()))
+				log.Debug("timetickSync sendChan closed", zap.Error(t.core.ctx.Err()))
 				return
 			}
 			// reduce each channel to get min timestamp
@@ -171,7 +167,7 @@ func (t *timetickSync) StartWatch() {
 			// send timetick msg to msg stream
 			for chanName, chanTs := range chanName2TimeTickMap {
 				if err := t.SendChannelTimeTick(chanName, chanTs); err != nil {
-					log.Debug("SendChannelTimeTick fail", zap.Error(t.ctx.Err()))
+					log.Debug("SendChannelTimeTick fail", zap.Error(t.core.ctx.Err()))
 				}
 			}
 		}
@@ -191,7 +187,7 @@ func (t *timetickSync) SendChannelTimeTick(chanName string, ts typeutil.Timestam
 			MsgType:   commonpb.MsgType_TimeTick,
 			MsgID:     0,
 			Timestamp: ts,
-			SourceID:  int64(Params.NodeID),
+			SourceID:  t.core.session.ServerID,
 		},
 	}
 	timeTickMsg := &msgstream.TimeTickMsg{
@@ -208,7 +204,7 @@ func (t *timetickSync) SendChannelTimeTick(chanName string, ts typeutil.Timestam
 	var stream msgstream.MsgStream
 	stream, ok := t.chanStream[chanName]
 	if !ok {
-		stream, err = t.msFactory.NewMsgStream(t.ctx)
+		stream, err = t.core.msFactory.NewMsgStream(t.core.ctx)
 		if err != nil {
 			return err
 		}
