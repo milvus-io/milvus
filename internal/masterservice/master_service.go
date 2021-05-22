@@ -360,7 +360,7 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 			}
 
 			// MsgPack can only contain one FlushCompletedMsg
-			if len(segMsg.Msgs) > 1 {
+			if len(segMsg.Msgs) != 1 {
 				continue
 			}
 
@@ -377,6 +377,11 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 				log.Warn("GetCollectionBySegmentID error", zap.Error(err))
 				continue
 			}
+			err = c.MetaTable.AddFlushedSegment(segID)
+			if err != nil {
+				log.Warn("AddFlushedSegment error", zap.Error(err))
+				continue
+			}
 
 			startPosByte, err := json.Marshal(segMsg.StartPositions)
 			if err != nil {
@@ -386,11 +391,6 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 			endPosByte, err := json.Marshal(segMsg.EndPositions)
 			if err != nil {
 				log.Error("json.Marshal fail", zap.String("err", err.Error()))
-				continue
-			}
-			err = c.MetaTable.AddFlushedSegment(segID)
-			if err != nil {
-				log.Warn("AddFlushedSegment error", zap.Error(err))
 				continue
 			}
 
