@@ -14,7 +14,6 @@ package masterservice
 import (
 	"errors"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"path"
 	"strconv"
 	"sync"
@@ -25,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"

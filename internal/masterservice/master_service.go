@@ -318,10 +318,11 @@ func (c *Core) startDataServiceSegmentLoop() {
 			}
 			var segInfos []*datapb.SegmentInfo
 			for _, msg := range segMsg.Msgs {
-				segInfoMsg, ok := msg.(*ms.SegmentInfoMsg)
-				if ok {
-					segInfos = append(segInfos, segInfoMsg.Segment)
+				if msg.Type() != commonpb.MsgType_SegmentInfo {
+					continue
 				}
+				segInfoMsg := msg.(*ms.SegmentInfoMsg)
+				segInfos = append(segInfos, segInfoMsg.Segment)
 			}
 			if len(segInfos) > 0 {
 				startPosByte, err := json.Marshal(segMsg.StartPositions)
@@ -364,11 +365,10 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 			}
 
 			// check msg type
-			flushMsg, ok := segMsg.Msgs[0].(*ms.FlushCompletedMsg)
-			if !ok {
+			if segMsg.Msgs[0].Type() != commonpb.MsgType_SegmentFlushDone {
 				continue
 			}
-
+			flushMsg := segMsg.Msgs[0].(*ms.FlushCompletedMsg)
 			segID := flushMsg.SegmentID
 			log.Debug("flush segment", zap.Int64("id", segID))
 
