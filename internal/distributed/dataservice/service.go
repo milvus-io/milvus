@@ -91,7 +91,12 @@ func (s *Server) init() error {
 	dataservice.Params.IP = Params.IP
 	dataservice.Params.Port = Params.Port
 
-	err := s.startGrpc()
+	err := s.dataService.Register()
+	if err != nil {
+		return err
+	}
+
+	err = s.startGrpc()
 	if err != nil {
 		return err
 	}

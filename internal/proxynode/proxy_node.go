@@ -85,12 +85,17 @@ func NewProxyNode(ctx context.Context, factory msgstream.Factory) (*ProxyNode, e
 
 }
 
+// Register register proxy node at etcd
+func (node *ProxyNode) Register() error {
+	node.session = sessionutil.NewSession(node.ctx, []string{Params.EtcdAddress})
+	node.session.Init(typeutil.ProxyNodeRole, Params.NetworkAddress, false)
+	Params.ProxyID = node.session.ServerID
+	return nil
+}
+
 func (node *ProxyNode) Init() error {
 	// todo wait for proxyservice state changed to Healthy
 	ctx := context.Background()
-
-	node.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress})
-	node.session.Init(typeutil.ProxyNodeRole, Params.NetworkAddress, false)
 
 	err := funcutil.WaitForComponentHealthy(ctx, node.proxyService, "ProxyService", 1000000, time.Millisecond*200)
 	if err != nil {

@@ -523,7 +523,7 @@ func (c *Core) setMsgStreams() error {
 				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     0,
 				Timestamp: t,
-				SourceID:  int64(Params.NodeID),
+				SourceID:  c.session.ServerID,
 			},
 		}
 		timeTickMsg := &ms.TimeTickMsg{
@@ -678,7 +678,7 @@ func (c *Core) SetProxyService(ctx context.Context, s types.ProxyService) error 
 				MsgType:   0, //TODO,MsgType
 				MsgID:     0,
 				Timestamp: ts,
-				SourceID:  int64(Params.NodeID),
+				SourceID:  c.session.ServerID,
 			},
 			DbName:         dbName,
 			CollectionName: collectionName,
@@ -712,7 +712,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 				MsgType:   0, //TODO, msg type
 				MsgID:     0,
 				Timestamp: ts,
-				SourceID:  int64(Params.NodeID),
+				SourceID:  c.session.ServerID,
 			},
 			SegmentID: segID,
 		})
@@ -740,7 +740,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 				MsgType:   0, //TODO, msg type
 				MsgID:     0,
 				Timestamp: ts,
-				SourceID:  int64(Params.NodeID),
+				SourceID:  c.session.ServerID,
 			},
 			SegmentIDs: []typeutil.UniqueID{segID},
 		})
@@ -804,7 +804,7 @@ func (c *Core) SetQueryService(s types.QueryService) error {
 				MsgType:   commonpb.MsgType_ReleaseCollection,
 				MsgID:     0, //TODO, msg ID
 				Timestamp: ts,
-				SourceID:  int64(Params.NodeID),
+				SourceID:  c.session.ServerID,
 			},
 			DbID:         dbID,
 			CollectionID: collectionID,
@@ -849,12 +849,16 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 	return bldID, nil
 }
 
+// Register register master service at etcd
+func (c *Core) Register() error {
+	c.session = sessionutil.NewSession(c.ctx, []string{Params.EtcdAddress})
+	c.session.Init(typeutil.MasterServiceRole, Params.Address, true)
+	return nil
+}
+
 func (c *Core) Init() error {
 	var initError error = nil
 	c.initOnce.Do(func() {
-		c.session = sessionutil.NewSession(c.ctx, []string{Params.EtcdAddress})
-		c.session.Init(typeutil.MasterServiceRole, Params.Address, true)
-
 		connectEtcdFn := func() error {
 			if c.etcdCli, initError = clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second}); initError != nil {
 				return initError
@@ -915,7 +919,7 @@ func (c *Core) Init() error {
 		if initError = c.msFactory.SetParams(m); initError != nil {
 			return
 		}
-		c.chanTimeTick, initError = newTimeTickSync(c.ctx, c.msFactory, c.etcdCli)
+		c.chanTimeTick, initError = newTimeTickSync(c)
 		if initError != nil {
 			return
 		}
@@ -1000,7 +1004,7 @@ func (c *Core) Start() error {
 		return err
 	}
 
-	log.Debug("master", zap.Int64("node id", int64(Params.NodeID)))
+	log.Debug("master", zap.Int64("node id", c.session.ServerID))
 	log.Debug("master", zap.String("dd channel name", Params.DdChannel))
 	log.Debug("master", zap.String("time tick channel name", Params.TimeTickChannel))
 
@@ -1032,7 +1036,7 @@ func (c *Core) GetComponentStates(ctx context.Context) (*internalpb.ComponentSta
 
 	return &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
-			NodeID:    int64(Params.NodeID),
+			NodeID:    c.session.ServerID,
 			Role:      typeutil.MasterServiceRole,
 			StateCode: code,
 			ExtraInfo: nil,
@@ -1043,7 +1047,7 @@ func (c *Core) GetComponentStates(ctx context.Context) (*internalpb.ComponentSta
 		},
 		SubcomponentStates: []*internalpb.ComponentInfo{
 			{
-				NodeID:    int64(Params.NodeID),
+				NodeID:    c.session.ServerID,
 				Role:      typeutil.MasterServiceRole,
 				StateCode: code,
 				ExtraInfo: nil,

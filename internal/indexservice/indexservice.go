@@ -85,12 +85,15 @@ func NewIndexService(ctx context.Context) (*IndexService, error) {
 	return i, nil
 }
 
+// Register register index service at etcd
+func (i *IndexService) Register() error {
+	i.session = sessionutil.NewSession(i.loopCtx, []string{Params.EtcdAddress})
+	i.session.Init(typeutil.IndexServiceRole, Params.Address, true)
+	return nil
+}
+
 func (i *IndexService) Init() error {
 	log.Debug("indexservice", zap.String("etcd address", Params.EtcdAddress))
-
-	ctx := context.Background()
-	i.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress})
-	i.session.Init(typeutil.IndexServiceRole, Params.Address, true)
 
 	connectEtcdFn := func() error {
 		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})

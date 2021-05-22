@@ -91,6 +91,10 @@ func (s *Server) init() error {
 	closer := trace.InitTracing(fmt.Sprintf("query_node ip: %s, port: %d", Params.QueryNodeIP, Params.QueryNodePort))
 	s.closer = closer
 
+	if err := s.querynode.Register(); err != nil {
+		return err
+	}
+
 	log.Debug("QueryNode", zap.Int("port", Params.QueryNodePort))
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.QueryNodePort)

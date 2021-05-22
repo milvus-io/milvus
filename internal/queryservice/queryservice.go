@@ -56,11 +56,15 @@ type QueryService struct {
 	msFactory msgstream.Factory
 }
 
-func (qs *QueryService) Init() error {
-	ctx := context.Background()
-
-	qs.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress})
+// Register register query service at etcd
+func (qs *QueryService) Register() error {
+	qs.session = sessionutil.NewSession(qs.loopCtx, []string{Params.EtcdAddress})
 	qs.session.Init(typeutil.QueryServiceRole, Params.Address, true)
+	Params.NodeID = uint64(qs.session.ServerID)
+	return nil
+}
+
+func (qs *QueryService) Init() error {
 	return nil
 }
 

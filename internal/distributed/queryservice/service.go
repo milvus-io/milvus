@@ -96,6 +96,10 @@ func (s *Server) init() error {
 	closer := trace.InitTracing("query_service")
 	s.closer = closer
 
+	if err := s.queryservice.Register(); err != nil {
+		return err
+	}
+
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start

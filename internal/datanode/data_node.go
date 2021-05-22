@@ -125,6 +125,14 @@ func (node *DataNode) SetDataServiceInterface(ds types.DataService) error {
 	}
 }
 
+// Register register data node at etcd
+func (node *DataNode) Register() error {
+	node.session = sessionutil.NewSession(node.ctx, []string{Params.EtcdAddress})
+	node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
+	Params.NodeID = node.session.ServerID
+	return nil
+}
+
 // Init function supposes data service is in INITIALIZING state.
 //
 // In Init process, data node will register itself to data service with its node id
@@ -137,9 +145,6 @@ func (node *DataNode) SetDataServiceInterface(ds types.DataService) error {
 // At last, data node initializes its `dataSyncService` and `metaService`.
 func (node *DataNode) Init() error {
 	ctx := context.Background()
-
-	node.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress})
-	node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
 
 	req := &datapb.RegisterNodeRequest{
 		Base: &commonpb.MsgBase{

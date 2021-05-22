@@ -107,9 +107,15 @@ func (s *Server) SetMasterClient(masterClient types.MasterService) {
 	s.masterClient = masterClient
 }
 
-func (s *Server) Init() error {
+// Register register data service at etcd
+func (s *Server) Register() error {
 	s.session = sessionutil.NewSession(s.ctx, []string{Params.EtcdAddress})
 	s.session.Init(typeutil.DataServiceRole, Params.IP, true)
+	Params.NodeID = s.session.ServerID
+	return nil
+}
+
+func (s *Server) Init() error {
 	return nil
 }
 

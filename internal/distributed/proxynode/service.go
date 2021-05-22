@@ -164,6 +164,11 @@ func (s *Server) init() error {
 		}
 	}()
 
+	err = s.proxynode.Register()
+	if err != nil {
+		return err
+	}
+
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
