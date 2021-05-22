@@ -25,7 +25,6 @@ type ParamTable struct {
 	paramtable.BaseTable
 
 	// === DataNode Internal Components Configs ===
-	NodeID                  UniqueID
 	IP                      string
 	Port                    int
 	FlowGraphMaxQueueLength int32
