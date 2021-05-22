@@ -66,7 +66,7 @@ func NewSession(ctx context.Context, etcdAddress []string, serverName, address s
 
 // Init will initialize base struct in the SessionManager, including getServerID,
 // and process keepAliveResponse
-func (s *Session) Init() {
+func (s *Session) Init() <-chan bool {
 	s.checkIDExist()
 	serverID, err := s.getServerID()
 	if err != nil {
@@ -77,7 +77,7 @@ func (s *Session) Init() {
 	if err != nil {
 		panic(err)
 	}
-	s.processKeepAliveResponse(ch)
+	return s.processKeepAliveResponse(ch)
 }
 
 // getServerID gets id from etcd with key: "/session"+"id"
