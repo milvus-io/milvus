@@ -692,52 +692,6 @@ func (mt *metaTable) GetPartitionByID(collID typeutil.UniqueID, partitionID type
 
 }
 
-//func (mt *metaTable) AddSegment(seg *datapb.SegmentInfo) (typeutil.Timestamp, error) {
-//	mt.ddLock.Lock()
-//	defer mt.ddLock.Unlock()
-//	collMeta, ok := mt.collID2Meta[seg.CollectionID]
-//	if !ok {
-//		return 0, fmt.Errorf("can't find collection id = %d", seg.CollectionID)
-//	}
-//	partMeta, ok := mt.partitionID2Meta[seg.PartitionID]
-//	if !ok {
-//		return 0, fmt.Errorf("can't find partition id = %d", seg.PartitionID)
-//	}
-//	exist := false
-//	for _, partID := range collMeta.PartitionIDs {
-//		if partID == seg.PartitionID {
-//			exist = true
-//			break
-//		}
-//	}
-//	if !exist {
-//		return 0, fmt.Errorf("partition id = %d, not belong to collection id = %d", seg.PartitionID, seg.CollectionID)
-//	}
-//	exist = false
-//	for _, segID := range partMeta.SegmentIDs {
-//		if segID == seg.ID {
-//			exist = true
-//		}
-//	}
-//	if exist {
-//		return 0, fmt.Errorf("segment id = %d exist", seg.ID)
-//	}
-//	partMeta.SegmentIDs = append(partMeta.SegmentIDs, seg.ID)
-//	mt.partitionID2Meta[seg.PartitionID] = partMeta
-//	mt.segID2CollID[seg.ID] = seg.CollectionID
-//	mt.segID2PartitionID[seg.ID] = seg.PartitionID
-//	k := fmt.Sprintf("%s/%d/%d", PartitionMetaPrefix, seg.CollectionID, seg.PartitionID)
-//	v := proto.MarshalTextString(&partMeta)
-//
-//	ts, err := mt.client.Save(k, v)
-//
-//	if err != nil {
-//		_ = mt.reloadFromKV()
-//		return 0, err
-//	}
-//	return ts, nil
-//}
-
 func (mt *metaTable) AddSegment(segInfos []*datapb.SegmentInfo, msgStartPos string, msgEndPos string) (typeutil.Timestamp, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
@@ -781,8 +735,10 @@ func (mt *metaTable) AddSegment(segInfos []*datapb.SegmentInfo, msgStartPos stri
 		meta[k] = v
 	}
 
-	meta[MsgStartPositionPrefix] = msgStartPos
-	meta[MsgEndPositionPrefix] = msgEndPos
+	if msgStartPos != "" && msgEndPos != "" {
+		meta[MsgStartPositionPrefix] = msgStartPos
+		meta[MsgEndPositionPrefix] = msgEndPos
+	}
 
 	ts, err := mt.client.MultiSave(meta, nil)
 	if err != nil {
@@ -792,7 +748,7 @@ func (mt *metaTable) AddSegment(segInfos []*datapb.SegmentInfo, msgStartPos stri
 	return ts, nil
 }
 
-func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo) (typeutil.Timestamp, error) {
+func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo, msgStartPos string, msgEndPos string) (typeutil.Timestamp, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -838,7 +794,15 @@ func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo) (typeutil.Timesta
 	k := fmt.Sprintf("%s/%d/%d/%d/%d", SegmentIndexMetaPrefix, collID, segIdxInfo.IndexID, partID, segIdxInfo.SegmentID)
 	v := proto.MarshalTextString(segIdxInfo)
 
-	ts, err := mt.client.Save(k, v)
+	meta := make(map[string]string)
+	meta[k] = v
+
+	if msgStartPos != "" && msgEndPos != "" {
+		meta[MsgStartPositionPrefix] = msgStartPos
+		meta[MsgEndPositionPrefix] = msgEndPos
+	}
+
+	ts, err := mt.client.MultiSave(meta, nil)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return 0, err

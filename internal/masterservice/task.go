@@ -747,7 +747,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("field name = %s, data type = %s", t.Req.FieldName, schemapb.DataType_name[int32(field.DataType)])
 	}
 	for _, segID := range segIDs {
-		if err := t.core.BuildIndex(segID, &field, idxInfo, false); err != nil {
+		if err := t.core.BuildIndex(segID, &field, idxInfo, "", "", false); err != nil {
 			return err
 		}
 		log.Debug("build index", zap.String("index name", idxInfo.IndexName),

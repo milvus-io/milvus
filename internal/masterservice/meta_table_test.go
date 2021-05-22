@@ -334,15 +334,15 @@ func TestMetaTable(t *testing.T) {
 			IndexID:   indexID,
 			BuildID:   buildID,
 		}
-		_, err := mt.AddIndex(&segIdxInfo)
+		_, err := mt.AddIndex(&segIdxInfo, "", "")
 		assert.Nil(t, err)
 
 		// it's legal to add index twice
-		_, err = mt.AddIndex(&segIdxInfo)
+		_, err = mt.AddIndex(&segIdxInfo, "", "")
 		assert.Nil(t, err)
 
 		segIdxInfo.BuildID = 202
-		_, err = mt.AddIndex(&segIdxInfo)
+		_, err = mt.AddIndex(&segIdxInfo, "", "")
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("index id = %d exist", segIdxInfo.IndexID))
 	})
@@ -739,22 +739,22 @@ func TestMetaTable(t *testing.T) {
 			IndexID:   indexID2,
 			BuildID:   buildID,
 		}
-		_, err = mt.AddIndex(segIdxInfo)
+		_, err = mt.AddIndex(segIdxInfo, "", "")
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("index id = %d not found", segIdxInfo.IndexID))
 
 		mt.segID2PartitionID = make(map[int64]int64)
-		_, err = mt.AddIndex(segIdxInfo)
+		_, err = mt.AddIndex(segIdxInfo, "", "")
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("segment id = %d not belong to any partition", segIdxInfo.SegmentID))
 
 		mt.collID2Meta = make(map[int64]pb.CollectionInfo)
-		_, err = mt.AddIndex(segIdxInfo)
+		_, err = mt.AddIndex(segIdxInfo, "", "")
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("collection id = %d not found", collInfo.ID))
 
 		mt.segID2CollID = make(map[int64]int64)
-		_, err = mt.AddIndex(segIdxInfo)
+		_, err = mt.AddIndex(segIdxInfo, "", "")
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("segment id = %d not belong to any collection", segIdxInfo.SegmentID))
 
@@ -768,10 +768,10 @@ func TestMetaTable(t *testing.T) {
 		assert.Nil(t, err)
 
 		segIdxInfo.IndexID = indexID
-		mockKV.save = func(key, value string) (typeutil.Timestamp, error) {
+		mockKV.multiSave = func(kvs map[string]string, addition func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
 			return 0, fmt.Errorf("save error")
 		}
-		_, err = mt.AddIndex(segIdxInfo)
+		_, err = mt.AddIndex(segIdxInfo, "", "")
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "save error")
 	})
@@ -880,7 +880,7 @@ func TestMetaTable(t *testing.T) {
 			IndexID:   indexID,
 			BuildID:   buildID,
 		}
-		_, err = mt.AddIndex(segIdx)
+		_, err = mt.AddIndex(segIdx, "", "")
 		assert.Nil(t, err)
 		idx, err := mt.GetSegmentIndexInfoByID(segIdx.SegmentID, segIdx.FieldID, idxInfo[0].IndexName)
 		assert.Nil(t, err)
