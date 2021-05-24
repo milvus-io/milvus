@@ -13,8 +13,6 @@ package mqclient
 
 import (
 	"errors"
-	"reflect"
-	"unsafe"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/milvus-io/milvus/internal/log"
@@ -102,11 +100,4 @@ func (pc *pulsarClient) BytesToMsgID(id []byte) (MessageID, error) {
 
 func (pc *pulsarClient) Close() {
 	pc.client.Close()
-
-	// This is a work around to avoid goroutinue leak of pulsar-client-go
-	// https://github.com/apache/pulsar-client-go/issues/493
-	// Very much unsafe, need to remove later
-	f := reflect.ValueOf(pc.client).Elem().FieldByName("cnxPool")
-	f = reflect.NewAt(f.Type(), unsafe.Pointer(f.UnsafeAddr())).Elem()
-	f.MethodByName("Close").Call(nil)
 }

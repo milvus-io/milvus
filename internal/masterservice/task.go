@@ -746,15 +746,24 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	if field.DataType != schemapb.DataType_FloatVector && field.DataType != schemapb.DataType_BinaryVector {
 		return fmt.Errorf("field name = %s, data type = %s", t.Req.FieldName, schemapb.DataType_name[int32(field.DataType)])
 	}
+
+	var segIdxInfos []*etcdpb.SegmentIndexInfo
 	for _, segID := range segIDs {
-		if err := t.core.BuildIndex(segID, &field, idxInfo, false); err != nil {
+		info := etcdpb.SegmentIndexInfo{
+			SegmentID:   segID,
+			FieldID:     field.FieldID,
+			IndexID:     idxInfo.IndexID,
+			EnableIndex: false,
+		}
+		info.BuildID, err = t.core.BuildIndex(segID, &field, idxInfo, false)
+		if err != nil {
 			return err
 		}
-		log.Debug("build index", zap.String("index name", idxInfo.IndexName),
-			zap.String("field name", field.Name),
-			zap.Int64("segment id", segID))
+		segIdxInfos = append(segIdxInfos, &info)
 	}
-	return nil
+
+	_, err = t.core.MetaTable.AddIndex(segIdxInfos, "", "")
+	return err
 }
 
 type DescribeIndexReqTask struct {

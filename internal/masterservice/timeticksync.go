@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path"
 	"sync"
 
 	"github.com/coreos/etcd/mvcc/mvccpb"
@@ -37,9 +38,6 @@ type timetickSync struct {
 	chanStream    map[string]msgstream.MsgStream
 	sendChan      chan map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg
 }
-
-// ProxyNodeSessionPrefix used for etcd watch
-const ProxyNodeSessionPrefix = "session/proxynode"
 
 func newTimeTickSync(ctx context.Context, factory msgstream.Factory, cli *clientv3.Client) (*timetickSync, error) {
 	tss := timetickSync{
@@ -109,7 +107,8 @@ func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg) error {
 
 // StartWatch watch proxy node change and process all channels' timetick msg
 func (t *timetickSync) StartWatch() {
-	rch := t.etcdCli.Watch(t.ctx, ProxyNodeSessionPrefix, clientv3.WithPrefix(), clientv3.WithCreatedNotify())
+	proxyNodePrefix := path.Join(sessionutil.DefaultServiceRoot, typeutil.ProxyNodeRole)
+	rch := t.etcdCli.Watch(t.ctx, proxyNodePrefix, clientv3.WithPrefix(), clientv3.WithCreatedNotify())
 	for {
 		select {
 		case <-t.ctx.Done():
