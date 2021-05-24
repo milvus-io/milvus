@@ -34,6 +34,7 @@ type ParamTable struct {
 	StatsBinlogRootPath     string
 	Log                     log.Config
 	LogRootPath             string
+	DataNodeSubNamePrefix   string
 
 	// === DataNode External Components Configs ===
 	// --- Pulsar ---
@@ -89,6 +90,7 @@ func (p *ParamTable) Init() {
 		p.initInsertBinlogRootPath()
 		p.initDdlBinlogRootPath()
 		p.initStatsBinlogRootPath()
+		p.initDataNodeSubNamePrefix()
 		p.initLogCfg()
 
 		// === DataNode External Components Configs ===
@@ -172,6 +174,14 @@ func (p *ParamTable) initInsertChannelNames() {
 
 func (p *ParamTable) initDDChannelNames() {
 	p.DDChannelNames = make([]string, 0)
+}
+
+func (p *ParamTable) initDataNodeSubNamePrefix() {
+	var err error
+	p.DataNodeSubNamePrefix, err = p.Load("msgChannel.subNamePrefix.dataNodeSubNamePrefix")
+	if err != nil {
+		panic(err)
+	}
 }
 
 // --- ETCD ---

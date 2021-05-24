@@ -141,6 +141,8 @@ func (node *DataNode) Init() error {
 
 	node.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress})
 	node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
+
+	Params.MsgChannelSubName = Params.DataNodeSubNamePrefix + "-" + strconv.FormatInt(node.session.ServerID, 10)
 	Params.Log.File.Filename = path.Join(Params.LogRootPath, "datanode-"+strconv.FormatInt(node.session.ServerID, 10)+".log")
 
 	req := &datapb.RegisterNodeRequest{
