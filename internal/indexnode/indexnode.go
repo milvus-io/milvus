@@ -79,9 +79,8 @@ func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 
 func (i *IndexNode) Init() error {
 	ctx := context.Background()
-	i.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress}, typeutil.IndexNodeRole,
-		Params.IP+":"+strconv.Itoa(Params.Port), false)
-	i.session.Init()
+	i.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress})
+	i.session.Init(typeutil.IndexNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
 
 	err := funcutil.WaitForComponentHealthy(ctx, i.serviceClient, "IndexService", 1000000, time.Millisecond*200)
 	if err != nil {

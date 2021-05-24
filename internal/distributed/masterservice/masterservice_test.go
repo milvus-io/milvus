@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/clientv3"
@@ -140,7 +141,7 @@ func TestGrpcService(t *testing.T) {
 
 	etcdCli, err := initEtcd(cms.Params.EtcdAddress)
 	assert.Nil(t, err)
-	_, err = etcdCli.Delete(ctx, "/session", clientv3.WithPrefix())
+	_, err = etcdCli.Delete(ctx, sessionutil.DefaultServiceRoot, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
 	err = core.Init()
@@ -226,7 +227,7 @@ func TestGrpcService(t *testing.T) {
 
 	svr.masterService.UpdateStateCode(internalpb.StateCode_Healthy)
 
-	cli, err := grpcmasterserviceclient.NewClient(Params.Address, 3*time.Second)
+	cli, err := grpcmasterserviceclient.NewClient(Params.Address, []string{cms.Params.EtcdAddress}, 3*time.Second)
 	assert.Nil(t, err)
 
 	err = cli.Init()
@@ -925,7 +926,7 @@ func TestRun(t *testing.T) {
 
 	etcdCli, err := initEtcd(cms.Params.EtcdAddress)
 	assert.Nil(t, err)
-	_, err = etcdCli.Delete(ctx, "/session", clientv3.WithPrefix())
+	_, err = etcdCli.Delete(ctx, sessionutil.DefaultServiceRoot, clientv3.WithPrefix())
 	assert.Nil(t, err)
 	err = svr.Run()
 	assert.Nil(t, err)
