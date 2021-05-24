@@ -362,30 +362,6 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 				return
 			}
 
-			// MsgPack can only contain one FlushCompletedMsg
-			if len(segMsg.Msgs) != 1 {
-				continue
-			}
-
-			// check msg type
-			if segMsg.Msgs[0].Type() != commonpb.MsgType_SegmentFlushDone {
-				continue
-			}
-			flushMsg := segMsg.Msgs[0].(*ms.FlushCompletedMsg)
-			segID := flushMsg.SegmentID
-			log.Debug("flush segment", zap.Int64("id", segID))
-
-			coll, err := c.MetaTable.GetCollectionBySegmentID(segID)
-			if err != nil {
-				log.Warn("GetCollectionBySegmentID error", zap.Error(err))
-				continue
-			}
-			err = c.MetaTable.AddFlushedSegment(segID)
-			if err != nil {
-				log.Warn("AddFlushedSegment error", zap.Error(err))
-				continue
-			}
-
 			startPosByte, err := json.Marshal(segMsg.StartPositions)
 			if err != nil {
 				log.Error("json.Marshal fail", zap.String("err", err.Error()))
@@ -397,25 +373,46 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 				continue
 			}
 
-			for _, f := range coll.FieldIndexes {
-				idxInfo, err := c.MetaTable.GetIndexByID(f.IndexID)
+			for _, msg := range segMsg.Msgs {
+				// check msg type
+				if msg.Type() != commonpb.MsgType_SegmentFlushDone {
+					continue
+				}
+				flushMsg := msg.(*ms.FlushCompletedMsg)
+				segID := flushMsg.SegmentID
+				log.Debug("flush segment", zap.Int64("id", segID))
+
+				coll, err := c.MetaTable.GetCollectionBySegmentID(segID)
 				if err != nil {
-					log.Warn("index not found", zap.Int64("index id", f.IndexID))
+					log.Warn("GetCollectionBySegmentID error", zap.Error(err))
+					continue
+				}
+				err = c.MetaTable.AddFlushedSegment(segID)
+				if err != nil {
+					log.Warn("AddFlushedSegment error", zap.Error(err))
 					continue
 				}
 
-				fieldSch, err := GetFieldSchemaByID(coll, f.FiledID)
-				if err != nil {
-					log.Warn("field schema not found", zap.Int64("field id", f.FiledID))
-					continue
-				}
+				for _, f := range coll.FieldIndexes {
+					idxInfo, err := c.MetaTable.GetIndexByID(f.IndexID)
+					if err != nil {
+						log.Warn("index not found", zap.Int64("index id", f.IndexID))
+						continue
+					}
 
-				if err = c.BuildIndex(segID, fieldSch, idxInfo, string(startPosByte), string(endPosByte), true); err != nil {
-					log.Error("build index fail", zap.String("error", err.Error()))
-				} else {
-					log.Debug("build index", zap.String("index name", idxInfo.IndexName),
-						zap.String("field name", fieldSch.Name),
-						zap.Int64("segment id", segID))
+					fieldSch, err := GetFieldSchemaByID(coll, f.FiledID)
+					if err != nil {
+						log.Warn("field schema not found", zap.Int64("field id", f.FiledID))
+						continue
+					}
+
+					if err = c.BuildIndex(segID, fieldSch, idxInfo, string(startPosByte), string(endPosByte), true); err != nil {
+						log.Error("build index fail", zap.String("error", err.Error()))
+					} else {
+						log.Debug("build index", zap.String("index name", idxInfo.IndexName),
+							zap.String("field name", fieldSch.Name),
+							zap.Int64("segment id", segID))
+					}
 				}
 			}
 		}
