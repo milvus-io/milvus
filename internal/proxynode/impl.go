@@ -1450,11 +1450,11 @@ func (node *ProxyNode) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*
 		return &milvuspb.DummyResponse{
 			Response: `{"status": "success"}`,
 		}, nil
-	} else {
-		return &milvuspb.DummyResponse{
-			Response: `{"status": "fail"}`,
-		}, nil
 	}
+
+	return &milvuspb.DummyResponse{
+		Response: `{"status": "fail"}`,
+	}, nil
 }
 
 func (node *ProxyNode) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {
