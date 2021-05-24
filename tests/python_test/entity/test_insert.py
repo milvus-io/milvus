@@ -131,7 +131,8 @@ class TestInsertBase:
         connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
-            index = connect.describe_index(collection, field_name)
+            index = connect.describe_index(collection, "")
+            create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -146,7 +147,8 @@ class TestInsertBase:
         ids = connect.insert(collection, default_entities)
         assert len(ids) == default_nb
         if get_simple_index["index_type"] != "FLAT":
-            index = connect.describe_index(collection, field_name)
+            index = connect.describe_index(collection, "")
+            create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -605,7 +607,8 @@ class TestInsertBinary:
         ids = connect.insert(binary_collection, default_binary_entities)
         assert len(ids) == default_nb
         connect.flush([binary_collection])
-        index = connect.describe_index(binary_collection, binary_field_name)
+        index = connect.describe_index(binary_collection, "")
+        create_target_index(get_binary_index, binary_field_name)
         assert index == get_binary_index
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -619,7 +622,8 @@ class TestInsertBinary:
         assert len(ids) == default_nb
         connect.flush([binary_collection])
         connect.create_index(binary_collection, binary_field_name, get_binary_index)
-        index = connect.describe_index(binary_collection, binary_field_name)
+        index = connect.describe_index(binary_collection, "")
+        create_target_index(get_binary_index, binary_field_name)
         assert index == get_binary_index
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
@@ -824,7 +828,8 @@ class TestInsertMultiCollections:
         ids = connect.insert(collection_name, default_entity)
         assert len(ids) == 1
         if get_simple_index["index_type"] != "FLAT":
-            index = connect.describe_index(collection, field_name)
+            index = connect.describe_index(collection, "")
+            create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
         connect.drop_collection(collection_name)
 
@@ -842,7 +847,8 @@ class TestInsertMultiCollections:
         connect.flush([collection])
         connect.create_index(collection_name, field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
-            index = connect.describe_index(collection_name, field_name)
+            index = connect.describe_index(collection_name, "")
+            create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == 1

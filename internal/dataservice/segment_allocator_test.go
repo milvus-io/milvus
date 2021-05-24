@@ -1,5 +1,4 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.//
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
@@ -12,14 +11,11 @@ package dataservice
 
 import (
 	"context"
-	"log"
 	"math"
 	"testing"
-	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -44,7 +40,7 @@ func TestAllocSegment(t *testing.T) {
 		collectionID UniqueID
 		partitionID  UniqueID
 		channelName  string
-		requestRows  int
+		requestRows  int64
 		expectResult bool
 	}{
 		{collID, 100, "c1", 100, true},
@@ -63,13 +59,11 @@ func TestAllocSegment(t *testing.T) {
 	}
 }
 
-func TestExpireSegment(t *testing.T) {
-	ctx := context.Background()
+func TestLoadSegmentsFromMeta(t *testing.T) {
 	Params.Init()
 	mockAllocator := newMockAllocator()
 	meta, err := newMemoryMeta(mockAllocator)
 	assert.Nil(t, err)
-	segAllocator := newSegmentAllocator(meta, mockAllocator)
 
 	schema := newTestSchema()
 	collID, err := mockAllocator.allocID()
@@ -80,26 +74,73 @@ func TestExpireSegment(t *testing.T) {
 	})
 	assert.Nil(t, err)
 
-	id1, _, et, err := segAllocator.AllocSegment(ctx, collID, 100, "c1", 10)
-	ts2, _ := tsoutil.ParseTS(et)
-	log.Printf("physical ts: %s", ts2.String())
+	sealedSegment := &datapb.SegmentInfo{
+		ID:             1,
+		CollectionID:   collID,
+		PartitionID:    0,
+		InsertChannel:  "",
+		State:          commonpb.SegmentState_Sealed,
+		MaxRowNum:      100,
+		LastExpireTime: 1000,
+	}
+	growingSegment := &datapb.SegmentInfo{
+		ID:             2,
+		CollectionID:   collID,
+		PartitionID:    0,
+		InsertChannel:  "",
+		State:          commonpb.SegmentState_Growing,
+		MaxRowNum:      100,
+		LastExpireTime: 1000,
+	}
+	flushedSegment := &datapb.SegmentInfo{
+		ID:             3,
+		CollectionID:   collID,
+		PartitionID:    0,
+		InsertChannel:  "",
+		State:          commonpb.SegmentState_Flushed,
+		MaxRowNum:      100,
+		LastExpireTime: 1000,
+	}
+	err = meta.AddSegment(sealedSegment)
+	assert.Nil(t, err)
+	err = meta.AddSegment(growingSegment)
+	assert.Nil(t, err)
+	err = meta.AddSegment(flushedSegment)
 	assert.Nil(t, err)
 
-	ts, err := mockAllocator.allocTimestamp()
+	segAllocator := newSegmentAllocator(meta, mockAllocator)
+	segments := segAllocator.allocStats.getAllSegments()
+	assert.EqualValues(t, 2, len(segments))
+	assert.NotNil(t, segments[0])
+	assert.NotNil(t, segments[1])
+}
+
+func TestSaveSegmentsToMeta(t *testing.T) {
+	Params.Init()
+	mockAllocator := newMockAllocator()
+	meta, err := newMemoryMeta(mockAllocator)
 	assert.Nil(t, err)
-	t1, _ := tsoutil.ParseTS(ts)
-	log.Printf("before ts: %s", t1.String())
-	time.Sleep(time.Duration(Params.SegIDAssignExpiration+1000) * time.Millisecond)
-	ts, err = mockAllocator.allocTimestamp()
+
+	schema := newTestSchema()
+	collID, err := mockAllocator.allocID()
 	assert.Nil(t, err)
-	err = segAllocator.ExpireAllocations(ctx, ts)
+	err = meta.AddCollection(&datapb.CollectionInfo{
+		ID:     collID,
+		Schema: schema,
+	})
 	assert.Nil(t, err)
-	expired, err := segAllocator.IsAllocationsExpired(ctx, id1, ts)
-	if et > ts {
-		tsPhy, _ := tsoutil.ParseTS(ts)
-		log.Printf("ts %s", tsPhy.String())
-	}
+
+	allocator := newSegmentAllocator(meta, mockAllocator)
+	segID, _, expireTs, err := allocator.AllocSegment(context.Background(), collID, 0, "c1", 1000)
 	assert.Nil(t, err)
-	assert.True(t, expired)
-	assert.EqualValues(t, 0, len(segAllocator.segments[id1].allocations))
+	segStatus := allocator.allocStats.getSegmentBy(segID)
+	assert.NotNil(t, segStatus)
+	err = allocator.SealAllSegments(context.Background(), collID)
+	assert.Nil(t, err)
+
+	segment, err := meta.GetSegment(segID)
+	assert.Nil(t, err)
+	assert.EqualValues(t, segment.LastExpireTime, expireTs)
+	assert.EqualValues(t, segStatus.total, segment.MaxRowNum)
+	assert.EqualValues(t, commonpb.SegmentState_Sealed, segment.State)
 }

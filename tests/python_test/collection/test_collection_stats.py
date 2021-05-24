@@ -395,10 +395,12 @@ class TestGetCollectionStats:
         for i in range(collection_num):
             stats = connect.get_collection_stats(collection_list[i])
             assert stats[row_count] == default_nb
-            index = connect.describe_index(collection_list[i], default_float_vec_field_name)
+            index = connect.describe_index(collection_list[i], "")
             if i % 2:
+                create_target_index(index_1, default_float_vec_field_name)
                 assert index == index_1
             else:
+                create_target_index(index_2, default_float_vec_field_name)
                 assert index == index_2
                 # break
             connect.drop_collection(collection_list[i])

@@ -120,7 +120,6 @@ func NewDataMock() *DataMock {
 			},
 			SegmentID:     segmentID,
 			State:         commonpb.SegmentState_Flushed,
-			CreateTime:    time,
 			StartPosition: position,
 		}
 	}

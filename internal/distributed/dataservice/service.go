@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
@@ -69,7 +68,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		cancel:      cancel,
 		grpcErrChan: make(chan error),
 		newMasterServiceClient: func(s string) (types.MasterService, error) {
-			return msc.NewClient(s, 10*time.Second)
+			return msc.NewClient(s, []string{dataservice.Params.EtcdAddress}, 10*time.Second)
 		},
 	}
 	s.dataService, err = dataservice.CreateServer(s.ctx, factory)
@@ -89,11 +88,8 @@ func (s *Server) init() error {
 	s.closer = closer
 
 	dataservice.Params.Init()
-
-	self := sessionutil.NewSession("dataservice", funcutil.GetLocalIP()+":"+strconv.Itoa(Params.Port), true)
-	sm := sessionutil.NewSessionManager(ctx, dataservice.Params.EtcdAddress, dataservice.Params.MetaRootPath, self)
-	sm.Init()
-	sessionutil.SetGlobalSessionManager(sm)
+	dataservice.Params.IP = Params.IP
+	dataservice.Params.Port = Params.Port
 
 	err := s.startGrpc()
 	if err != nil {
@@ -261,4 +257,9 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 
 func (s *Server) GetSegmentInfoChannel(ctx context.Context, req *datapb.GetSegmentInfoChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.dataService.GetSegmentInfoChannel(ctx)
+}
+
+//SaveBinlogPaths implement DataServiceServer, saves segment, collection binlog according to datanode request
+func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
+	return s.dataService.SaveBinlogPaths(ctx, req)
 }

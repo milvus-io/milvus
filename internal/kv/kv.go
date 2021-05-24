@@ -38,7 +38,7 @@ type TxnKV interface {
 type SnapShotKV interface {
 	Save(key, value string) (typeutil.Timestamp, error)
 	Load(key string, ts typeutil.Timestamp) (string, error)
-	MultiSave(kvs map[string]string) (typeutil.Timestamp, error)
+	MultiSave(kvs map[string]string, addition func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error)
 	LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error)
-	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) (typeutil.Timestamp, error)
+	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, addition func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error)
 }

@@ -42,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	qn "github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -92,11 +91,6 @@ func (s *Server) init() error {
 	closer := trace.InitTracing(fmt.Sprintf("query_node ip: %s, port: %d", Params.QueryNodeIP, Params.QueryNodePort))
 	s.closer = closer
 
-	self := sessionutil.NewSession("querynode", funcutil.GetLocalIP()+":"+strconv.Itoa(Params.QueryNodePort), false)
-	sm := sessionutil.NewSessionManager(ctx, qn.Params.EtcdAddress, qn.Params.MetaRootPath, self)
-	sm.Init()
-	sessionutil.SetGlobalSessionManager(sm)
-
 	log.Debug("QueryNode", zap.Int("port", Params.QueryNodePort))
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.QueryNodePort)
@@ -131,7 +125,7 @@ func (s *Server) init() error {
 	log.Debug("Master service", zap.String("address", addr))
 	log.Debug("Init master service client ...")
 
-	masterService, err := msc.NewClient(addr, 20*time.Second)
+	masterService, err := msc.NewClient(addr, []string{qn.Params.EtcdAddress}, 20*time.Second)
 	if err != nil {
 		panic(err)
 	}
