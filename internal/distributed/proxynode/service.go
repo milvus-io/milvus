@@ -184,7 +184,7 @@ func (s *Server) init() error {
 	masterServiceAddr := Params.MasterAddress
 	log.Debug("proxynode", zap.String("master address", masterServiceAddr))
 	timeout := 3 * time.Second
-	s.masterServiceClient, err = grpcmasterserviceclient.NewClient(masterServiceAddr, timeout)
+	s.masterServiceClient, err = grpcmasterserviceclient.NewClient(masterServiceAddr, []string{proxynode.Params.EtcdAddress}, timeout)
 	if err != nil {
 		return err
 	}
