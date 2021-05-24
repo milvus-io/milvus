@@ -821,9 +821,8 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 func (c *Core) Init() error {
 	var initError error = nil
 	c.initOnce.Do(func() {
-		c.session = sessionutil.NewSession(c.ctx, []string{Params.EtcdAddress}, typeutil.MasterServiceRole,
-			Params.Address, true)
-		c.session.Init()
+		c.session = sessionutil.NewSession(c.ctx, []string{Params.EtcdAddress})
+		c.session.Init(typeutil.MasterServiceRole, Params.Address, true)
 
 		connectEtcdFn := func() error {
 			if c.etcdCli, initError = clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second}); initError != nil {

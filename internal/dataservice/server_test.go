@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/clientv3"
@@ -787,7 +788,7 @@ func newTestServer(t *testing.T) *Server {
 
 	etcdCli, err := initEtcd(Params.EtcdAddress)
 	assert.Nil(t, err)
-	_, err = etcdCli.Delete(context.Background(), "/session", clientv3.WithPrefix())
+	_, err = etcdCli.Delete(context.Background(), sessionutil.DefaultServiceRoot, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
 	svr, err := CreateServer(context.TODO(), factory)

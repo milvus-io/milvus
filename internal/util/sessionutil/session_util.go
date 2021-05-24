@@ -16,10 +16,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const defaultServiceRoot = "/session/"
-const defaultIDKey = "id"
-const defaultRetryTimes = 30
-const defaultTTL = 10
+const DefaultServiceRoot = "/session/"
+const DefaultIDKey = "id"
+const DefaultRetryTimes = 30
+const DefaultTTL = 10
 
 // Session is a struct to store service's session, including ServerID, ServerName,
 // Address.
@@ -38,14 +38,11 @@ type Session struct {
 
 // NewSession is a helper to build Session object.LeaseID will be assigned after
 // registeration.
-func NewSession(ctx context.Context, etcdAddress []string, serverName, address string, exclusive bool) *Session {
+func NewSession(ctx context.Context, etcdAddress []string) *Session {
 	ctx, cancel := context.WithCancel(ctx)
 	session := &Session{
-		ctx:        ctx,
-		ServerName: serverName,
-		Address:    address,
-		Exclusive:  exclusive,
-		cancel:     cancel,
+		ctx:    ctx,
+		cancel: cancel,
 	}
 
 	connectEtcdFn := func() error {
@@ -65,7 +62,10 @@ func NewSession(ctx context.Context, etcdAddress []string, serverName, address s
 
 // Init will initialize base struct in the SessionManager, including getServerID,
 // and process keepAliveResponse
-func (s *Session) Init() {
+func (s *Session) Init(serverName, address string, exclusive bool) {
+	s.ServerName = serverName
+	s.Address = address
+	s.Exclusive = exclusive
 	s.checkIDExist()
 	serverID, err := s.getServerID()
 	if err != nil {
@@ -82,23 +82,23 @@ func (s *Session) Init() {
 // GetServerID gets id from etcd with key: metaRootPath + "/services/id"
 // Each server get ServerID and add one to id.
 func (s *Session) getServerID() (int64, error) {
-	return s.getServerIDWithKey(defaultIDKey, defaultRetryTimes)
+	return s.getServerIDWithKey(DefaultIDKey, DefaultRetryTimes)
 }
 
 func (s *Session) checkIDExist() {
 	s.etcdCli.Txn(s.ctx).If(
 		clientv3.Compare(
-			clientv3.Version(path.Join(defaultServiceRoot, defaultIDKey)),
+			clientv3.Version(path.Join(DefaultServiceRoot, DefaultIDKey)),
 			"=",
 			0)).
-		Then(clientv3.OpPut(path.Join(defaultServiceRoot, defaultIDKey), "1")).Commit()
+		Then(clientv3.OpPut(path.Join(DefaultServiceRoot, DefaultIDKey), "1")).Commit()
 
 }
 
 func (s *Session) getServerIDWithKey(key string, retryTimes int) (int64, error) {
 	res := int64(0)
 	getServerIDWithKeyFn := func() error {
-		getResp, err := s.etcdCli.Get(s.ctx, path.Join(defaultServiceRoot, key))
+		getResp, err := s.etcdCli.Get(s.ctx, path.Join(DefaultServiceRoot, key))
 		if err != nil {
 			return nil
 		}
@@ -113,10 +113,10 @@ func (s *Session) getServerIDWithKey(key string, retryTimes int) (int64, error) 
 		}
 		txnResp, err := s.etcdCli.Txn(s.ctx).If(
 			clientv3.Compare(
-				clientv3.Value(path.Join(defaultServiceRoot, defaultIDKey)),
+				clientv3.Value(path.Join(DefaultServiceRoot, DefaultIDKey)),
 				"=",
 				value)).
-			Then(clientv3.OpPut(path.Join(defaultServiceRoot, defaultIDKey), strconv.FormatInt(valueInt+1, 10))).Commit()
+			Then(clientv3.OpPut(path.Join(DefaultServiceRoot, DefaultIDKey), strconv.FormatInt(valueInt+1, 10))).Commit()
 		if err != nil {
 			return err
 		}
@@ -149,7 +149,7 @@ func (s *Session) getServerIDWithKey(key string, retryTimes int) (int64, error) 
 func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	var ch <-chan *clientv3.LeaseKeepAliveResponse
 	registerFn := func() error {
-		resp, err := s.etcdCli.Grant(s.ctx, defaultTTL)
+		resp, err := s.etcdCli.Grant(s.ctx, DefaultTTL)
 		if err != nil {
 			log.Error("register service", zap.Error(err))
 			return err
@@ -167,10 +167,10 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		}
 		txnResp, err := s.etcdCli.Txn(s.ctx).If(
 			clientv3.Compare(
-				clientv3.Version(path.Join(defaultServiceRoot, key)),
+				clientv3.Version(path.Join(DefaultServiceRoot, key)),
 				"=",
 				0)).
-			Then(clientv3.OpPut(path.Join(defaultServiceRoot, key), string(sessionJSON), clientv3.WithLease(resp.ID))).Commit()
+			Then(clientv3.OpPut(path.Join(DefaultServiceRoot, key), string(sessionJSON), clientv3.WithLease(resp.ID))).Commit()
 
 		if err != nil {
 			fmt.Printf("compare and swap error %s\n. maybe the key has registered", err)
@@ -188,7 +188,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		}
 		return nil
 	}
-	err := retry.Retry(defaultRetryTimes, time.Millisecond*200, registerFn)
+	err := retry.Retry(DefaultRetryTimes, time.Millisecond*200, registerFn)
 	if err != nil {
 		return ch, nil
 	}
@@ -221,7 +221,7 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 // GetSessions will get all sessions registered in etcd.
 func (s *Session) GetSessions(prefix string) (map[string]*Session, error) {
 	res := make(map[string]*Session)
-	key := path.Join(defaultServiceRoot, prefix)
+	key := path.Join(DefaultServiceRoot, prefix)
 	resp, err := s.etcdCli.Get(s.ctx, key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
@@ -245,7 +245,7 @@ func (s *Session) GetSessions(prefix string) (map[string]*Session, error) {
 func (s *Session) WatchServices(prefix string) (addChannel <-chan *Session, delChannel <-chan *Session) {
 	addCh := make(chan *Session, 10)
 	delCh := make(chan *Session, 10)
-	rch := s.etcdCli.Watch(s.ctx, path.Join(defaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV())
+	rch := s.etcdCli.Watch(s.ctx, path.Join(DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV())
 	go func() {
 		for {
 			select {
