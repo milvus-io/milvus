@@ -373,6 +373,7 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 				continue
 			}
 
+			var segIdxInfos []*etcdpb.SegmentIndexInfo
 			for _, msg := range segMsg.Msgs {
 				// check msg type
 				if msg.Type() != commonpb.MsgType_SegmentFlushDone {
@@ -394,26 +395,38 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 				}
 
 				for _, f := range coll.FieldIndexes {
-					idxInfo, err := c.MetaTable.GetIndexByID(f.IndexID)
-					if err != nil {
-						log.Warn("index not found", zap.Int64("index id", f.IndexID))
-						continue
-					}
-
 					fieldSch, err := GetFieldSchemaByID(coll, f.FiledID)
 					if err != nil {
 						log.Warn("field schema not found", zap.Int64("field id", f.FiledID))
 						continue
 					}
 
-					if err = c.BuildIndex(segID, fieldSch, idxInfo, string(startPosByte), string(endPosByte), true); err != nil {
-						log.Error("build index fail", zap.String("error", err.Error()))
-					} else {
-						log.Debug("build index", zap.String("index name", idxInfo.IndexName),
-							zap.String("field name", fieldSch.Name),
-							zap.Int64("segment id", segID))
+					idxInfo, err := c.MetaTable.GetIndexByID(f.IndexID)
+					if err != nil {
+						log.Warn("index not found", zap.Int64("index id", f.IndexID))
+						continue
 					}
+
+					info := etcdpb.SegmentIndexInfo{
+						SegmentID:   segID,
+						FieldID:     fieldSch.FieldID,
+						IndexID:     idxInfo.IndexID,
+						EnableIndex: false,
+					}
+					info.BuildID, err = c.BuildIndex(segID, fieldSch, idxInfo, true)
+					if err == nil {
+						info.EnableIndex = true
+					} else {
+						log.Error("build index fail", zap.String("error", err.Error()))
+					}
+
+					segIdxInfos = append(segIdxInfos, &info)
 				}
+			}
+
+			_, err = c.MetaTable.AddIndex(segIdxInfos, string(startPosByte), string(endPosByte))
+			if err != nil {
+				log.Error("AddIndex fail", zap.String("err", err.Error()))
 			}
 		}
 	}
@@ -807,38 +820,31 @@ func (c *Core) SetQueryService(s types.QueryService) error {
 }
 
 // BuildIndex will check row num and call build index service
-func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, msgStartPos string, msgEndPos string, isFlush bool) error {
+func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, isFlush bool) (typeutil.UniqueID, error) {
 	if c.MetaTable.IsSegmentIndexed(segID, field, idxInfo.IndexParams) {
-		return nil
+		return 0, nil
 	}
 	rows, err := c.GetNumRowsReq(segID, isFlush)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	var bldID typeutil.UniqueID
-	enableIdx := false
 	if rows < Params.MinSegmentSizeToEnableIndex {
 		log.Debug("num of rows is less than MinSegmentSizeToEnableIndex", zap.Int64("num rows", rows))
 	} else {
 		binlogs, err := c.GetBinlogFilePathsFromDataServiceReq(segID, field.FieldID)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		bldID, err = c.BuildIndexReq(c.ctx, binlogs, field, idxInfo)
 		if err != nil {
-			return err
+			return 0, err
 		}
-		enableIdx = true
 	}
-	seg := etcdpb.SegmentIndexInfo{
-		SegmentID:   segID,
-		FieldID:     field.FieldID,
-		IndexID:     idxInfo.IndexID,
-		BuildID:     bldID,
-		EnableIndex: enableIdx,
-	}
-	_, err = c.MetaTable.AddIndex(&seg, msgStartPos, msgEndPos)
-	return err
+	log.Debug("build index", zap.String("index name", idxInfo.IndexName),
+		zap.String("field name", field.Name),
+		zap.Int64("segment id", segID))
+	return bldID, nil
 }
 
 func (c *Core) Init() error {
