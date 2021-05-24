@@ -91,10 +91,10 @@ The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/servic
 ###### Interface
 
 ```go
-const defaultServiceRoot = "/session/"
-const defaultIDKey = "id"
-const defaultRetryTimes = 30
-const defaultTTL = 10
+const DefaultServiceRoot = "/session/"
+const DefaultIDKey = "id"
+const DefaultRetryTimes = 30
+const DefaultTTL = 10
 
 // Session is a struct to store service's session, including ServerID, ServerName,
 // Address.
@@ -113,14 +113,14 @@ type Session struct {
 
 // NewSession is a helper to build Session object.LeaseID will be assigned after
 // registeration.
-func NewSession(ctx context.Context, etcdAddress []string, serverName, address string, exclusive bool) *Session {}
+func NewSession(ctx context.Context, etcdAddress []string) *Session {}
 
 // GetSessions will get all sessions registered in etcd.
 func (s *Session) GetSessions(prefix string) (map[string]*Session, error) {}
 
 // Init will initialize base struct in the SessionManager, including getServerID,
 // and process keepAliveResponse
-func (s *Session) Init() {}
+func (s *Session) Init(serverName, address string, exclusive bool) <-chan bool {}
 
 // WatchServices watch the service's up and down in etcd, and saves it into local
 // sessions.
