@@ -129,7 +129,7 @@ type Core struct {
 	//DropIndexReq  func(ctx context.Context, indexID typeutil.UniqueID) error
 
 	//proxy service interface, notify proxy service to drop collection
-	InvalidateCollectionMetaCache func(ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error
+	//InvalidateCollectionMetaCache func(ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error
 
 	//query service interface, notify query service to release collection
 	//ReleaseCollection func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error
@@ -231,9 +231,9 @@ func (c *Core) checkInit() error {
 	//if c.DropIndexReq == nil {
 	//	return fmt.Errorf("DropIndexReq is nil")
 	//}
-	if c.InvalidateCollectionMetaCache == nil {
-		return fmt.Errorf("InvalidateCollectionMetaCache is nil")
-	}
+	//if c.InvalidateCollectionMetaCache == nil {
+	//	return fmt.Errorf("InvalidateCollectionMetaCache is nil")
+	//}
 	if c.DataServiceSegmentChan == nil {
 		return fmt.Errorf("DataServiceSegmentChan is nil")
 	}
@@ -668,6 +668,7 @@ func (c *Core) setMsgStreams() error {
 }
 
 func (c *Core) SetProxyService(ctx context.Context, s types.ProxyService) error {
+	c.proxyServiceClient = s
 	rsp, err := s.GetTimeTickChannel(ctx)
 	if err != nil {
 		return err
@@ -675,24 +676,47 @@ func (c *Core) SetProxyService(ctx context.Context, s types.ProxyService) error 
 	Params.ProxyTimeTickChannel = rsp.Value
 	log.Debug("proxy time tick", zap.String("channel name", Params.ProxyTimeTickChannel))
 
-	c.InvalidateCollectionMetaCache = func(ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error {
-		status, _ := s.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   0, //TODO,MsgType
-				MsgID:     0,
-				Timestamp: ts,
-				SourceID:  int64(Params.NodeID),
-			},
-			DbName:         dbName,
-			CollectionName: collectionName,
-		})
-		if status == nil {
-			return fmt.Errorf("invalidate collection metacache resp is nil")
-		}
-		if status.ErrorCode != commonpb.ErrorCode_Success {
-			return fmt.Errorf(status.Reason)
-		}
-		return nil
+	//c.InvalidateCollectionMetaCache = func(ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error {
+	//	status, _ := s.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
+	//		Base: &commonpb.MsgBase{
+	//			MsgType:   0, //TODO,MsgType
+	//			MsgID:     0,
+	//			Timestamp: ts,
+	//			SourceID:  int64(Params.NodeID),
+	//		},
+	//		DbName:         dbName,
+	//		CollectionName: collectionName,
+	//	})
+	//	if status == nil {
+	//		return fmt.Errorf("invalidate collection metacache resp is nil")
+	//	}
+	//	if status.ErrorCode != commonpb.ErrorCode_Success {
+	//		return fmt.Errorf(status.Reason)
+	//	}
+	//	return nil
+	//}
+	return nil
+}
+
+func (c *Core) CallInvalidateCollectionMetaCacheService (ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error {
+	if c.proxyServiceClient == nil {
+		return fmt.Errorf("proxyServiceClient nil")
+	}
+	status, _ := c.proxyServiceClient.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   0, //TODO,MsgType
+			MsgID:     0,
+			Timestamp: ts,
+			SourceID:  int64(Params.NodeID),
+		},
+		DbName:         dbName,
+		CollectionName: collectionName,
+	})
+	if status == nil {
+		return fmt.Errorf("invalidate collection metacache resp is nil")
+	}
+	if status.ErrorCode != commonpb.ErrorCode_Success {
+		return fmt.Errorf(status.Reason)
 	}
 	return nil
 }

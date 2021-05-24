@@ -1735,15 +1735,13 @@ func TestMasterService2(t *testing.T) {
 		idxDropID:  []int64{},
 		mutex:      sync.Mutex{},
 	}
-	err = core.SetIndexService(im)
-	assert.Nil(t, err)
+	core.SetIndexService(im)
 
 	qm := &queryMock{
 		collID: nil,
 		mutex:  sync.Mutex{},
 	}
-	err = core.SetQueryService(qm)
-	assert.Nil(t, err)
+	core.SetQueryService(qm)
 
 	err = core.Init()
 	assert.Nil(t, err)
@@ -1944,11 +1942,11 @@ func TestCheckInit(t *testing.T) {
 	//err = c.checkInit()
 	//assert.NotNil(t, err)
 
-	c.InvalidateCollectionMetaCache = func(ctx context.Context, ts typeutil.Timestamp, dbName, collectionName string) error {
-		return nil
-	}
-	err = c.checkInit()
-	assert.NotNil(t, err)
+	//c.InvalidateCollectionMetaCache = func(ctx context.Context, ts typeutil.Timestamp, dbName, collectionName string) error {
+	//	return nil
+	//}
+	//err = c.checkInit()
+	//assert.NotNil(t, err)
 
 	c.DataNodeFlushedSegmentChan = make(chan *msgstream.MsgPack)
 	err = c.checkInit()

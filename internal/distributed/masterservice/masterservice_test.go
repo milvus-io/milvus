@@ -905,8 +905,8 @@ func TestRun(t *testing.T) {
 	svr.newIndexServiceClient = func(s string) types.IndexService {
 		return &mockIndex{}
 	}
-	svr.newQueryServiceClient = func(s string) (types.QueryService, error) {
-		return &mockQuery{}, nil
+	svr.newQueryServiceClient = func(s string) types.QueryService {
+		return &mockQuery{}
 	}
 
 	Params.Port = rand.Int()%100 + 10000

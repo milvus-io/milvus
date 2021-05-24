@@ -316,7 +316,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	}()
 
 	// error doesn't matter here
-	t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
+	t.core.CallInvalidateCollectionMetaCacheService(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
 	// Update DDOperation in etcd
 	return t.core.setDdMsgSendFlag(true)
@@ -483,7 +483,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	}
 
 	// error doesn't matter here
-	t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
+	t.core.CallInvalidateCollectionMetaCacheService(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
 	// Update DDOperation in etcd
 	return t.core.setDdMsgSendFlag(true)
@@ -549,7 +549,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	}
 
 	// error doesn't matter here
-	t.core.InvalidateCollectionMetaCache(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
+	t.core.CallInvalidateCollectionMetaCacheService(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
 
 	// Update DDOperation in etcd
 	return t.core.setDdMsgSendFlag(true)
