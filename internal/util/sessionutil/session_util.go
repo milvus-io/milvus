@@ -36,8 +36,9 @@ type Session struct {
 	cancel  context.CancelFunc
 }
 
-// NewSession is a helper to build Session object.LeaseID will be assigned after
-// registeration.
+// NewSession is a helper to build Session object.
+// ServerID and LeaseID will be assigned after registeration.
+// etcdCli is initialized when NewSession
 func NewSession(ctx context.Context, etcdAddress []string) *Session {
 	ctx, cancel := context.WithCancel(ctx)
 	session := &Session{
@@ -62,7 +63,7 @@ func NewSession(ctx context.Context, etcdAddress []string) *Session {
 
 // Init will initialize base struct in the SessionManager, including getServerID,
 // and process keepAliveResponse
-func (s *Session) Init(serverName, address string, exclusive bool) {
+func (s *Session) Init(serverName, address string, exclusive bool) <-chan bool {
 	s.ServerName = serverName
 	s.Address = address
 	s.Exclusive = exclusive
@@ -76,10 +77,10 @@ func (s *Session) Init(serverName, address string, exclusive bool) {
 	if err != nil {
 		panic(err)
 	}
-	s.processKeepAliveResponse(ch)
+	return s.processKeepAliveResponse(ch)
 }
 
-// GetServerID gets id from etcd with key: metaRootPath + "/services/id"
+// getServerID gets id from etcd with key: "/session"+"id"
 // Each server get ServerID and add one to id.
 func (s *Session) getServerID() (int64, error) {
 	return s.getServerIDWithKey(DefaultIDKey, DefaultRetryTimes)
@@ -128,22 +129,21 @@ func (s *Session) getServerIDWithKey(key string, retryTimes int) (int64, error) 
 		return nil
 	}
 
-	err := retry.Retry(retryTimes, time.Millisecond*200, getServerIDWithKeyFn)
+	err := retry.Retry(retryTimes, time.Millisecond*500, getServerIDWithKeyFn)
 	return res, err
 }
 
-// RegisterService registers the service to etcd so that other services
+// registerService registers the service to etcd so that other services
 // can find that the service is online and issue subsequent operations
 // RegisterService will save a key-value in etcd
 // key: metaRootPath + "/services" + "/ServerName-ServerID"
 // value: json format
 // {
-//     "ServerID": "ServerID",
-//     "ServerName": "ServerName",
-//     "Address": "ip:port",
-//     "LeaseID": "LeaseID",
+//   ServerID   int64  `json:"ServerID,omitempty"`
+//	 ServerName string `json:"ServerName,omitempty"`
+//	 Address    string `json:"Address,omitempty"`
+//   Exclusive  bool   `json:"Exclusive,omitempty"`
 // }
-// MetaRootPath is configurable in the config file.
 // Exclusive means whether this service can exist two at the same time, if so,
 // it is false. Otherwise, set it to true.
 func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, error) {
@@ -188,14 +188,14 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		}
 		return nil
 	}
-	err := retry.Retry(DefaultRetryTimes, time.Millisecond*200, registerFn)
+	err := retry.Retry(DefaultRetryTimes, time.Millisecond*500, registerFn)
 	if err != nil {
 		return ch, nil
 	}
 	return ch, nil
 }
 
-// ProcessKeepAliveResponse processes the response of etcd keepAlive interface
+// processKeepAliveResponse processes the response of etcd keepAlive interface
 // If keepAlive fails for unexpected error, it will send a signal to the channel.
 func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveResponse) (failChannel <-chan bool) {
 	failCh := make(chan bool)
@@ -207,11 +207,12 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 				return
 			case resp, ok := <-ch:
 				if !ok {
-					failCh <- true
+					close(failCh)
 				}
 				if resp == nil {
-					failCh <- true
+					close(failCh)
 				}
+				failCh <- true
 			}
 		}
 	}()
