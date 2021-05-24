@@ -13,6 +13,7 @@ package querynode
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -56,13 +57,14 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	// update service time
-	ts := stNode.replica.getTSafe(stNode.collectionID)
-	if ts != nil {
-		ts.set(serviceTimeMsg.timeRange.timestampMax)
-		//log.Debug("update tSafe:",
-		//	zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
-		//	zap.Int64("collectionID", stNode.collectionID))
+	// TODO: use real vChannel
+	vChannel := fmt.Sprintln(stNode.collectionID)
+	if err := stNode.replica.setTSafe(vChannel, serviceTimeMsg.timeRange.timestampMax); err != nil {
+		log.Error(err.Error())
 	}
+	//log.Debug("update tSafe:",
+	//	zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
+	//	zap.Int64("collectionID", stNode.collectionID))
 
 	if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {
 		log.Error("Error: send time tick into pulsar channel failed", zap.Error(err))

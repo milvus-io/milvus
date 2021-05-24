@@ -81,8 +81,14 @@ func (s *searchCollection) start() {
 }
 
 func (s *searchCollection) register(collectionID UniqueID) {
-	s.replica.addTSafe(collectionID)
-	tSafe := s.replica.getTSafe(collectionID)
+	// TODO: use real vChannel
+	vChannel := fmt.Sprintln(collectionID)
+	s.replica.addTSafe(vChannel)
+	tSafe, err := s.replica.getTSafer(vChannel)
+	if err != nil {
+		log.Error(err.Error())
+		return
+	}
 	s.tSafeMutex.Lock()
 	s.tSafeWatcher = newTSafeWatcher()
 	s.tSafeMutex.Unlock()
@@ -106,11 +112,10 @@ func (s *searchCollection) popAllUnsolvedMsg() []*msgstream.SearchMsg {
 func (s *searchCollection) waitNewTSafe() (Timestamp, error) {
 	// block until dataSyncService updating tSafe
 	s.tSafeWatcher.hasUpdate()
-	ts := s.replica.getTSafe(s.collectionID)
-	if ts != nil {
-		return ts.get(), nil
-	}
-	return 0, errors.New("tSafe closed, collectionID =" + fmt.Sprintln(s.collectionID))
+	// TODO: use real vChannel
+	vChannel := fmt.Sprintln(s.collectionID)
+	ts, err := s.replica.getTSafe(vChannel)
+	return ts, err
 }
 
 func (s *searchCollection) getServiceableTime() Timestamp {

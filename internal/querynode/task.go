@@ -279,7 +279,9 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	if err == nil && ds != nil {
 		ds.close()
 		r.node.removeDataSyncService(r.req.CollectionID)
-		r.node.replica.removeTSafe(r.req.CollectionID)
+		// TODO: use real vChannel
+		vChannel := fmt.Sprintln(r.req.CollectionID)
+		r.node.replica.removeTSafe(vChannel)
 		r.node.replica.removeExcludedSegments(r.req.CollectionID)
 	}
 

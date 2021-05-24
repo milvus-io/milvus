@@ -14,6 +14,7 @@ package querynode
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"math/rand"
 	"testing"
@@ -153,9 +154,10 @@ func TestSearch_Search(t *testing.T) {
 	go node.searchService.start()
 	node.searchService.startSearchCollection(collectionID)
 
-	tSafe := node.replica.getTSafe(collectionID)
-	assert.NotNil(t, tSafe)
-	tSafe.set(1000)
+	// TODO: use real vChannel
+	vChannel := fmt.Sprintln(collectionID)
+	err = node.replica.setTSafe(vChannel, 1000)
+	assert.NoError(t, err)
 
 	// load segment
 	err = node.replica.addSegment(segmentID, defaultPartitionID, collectionID, segmentTypeSealed)
@@ -201,9 +203,10 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	go node.searchService.start()
 	node.searchService.startSearchCollection(collectionID)
 
-	tSafe := node.replica.getTSafe(collectionID)
-	assert.NotNil(t, tSafe)
-	tSafe.set(1000)
+	// TODO: use real vChannel
+	vChannel := fmt.Sprintln(collectionID)
+	err = node.replica.setTSafe(vChannel, 1000)
+	assert.NoError(t, err)
 
 	// load segments
 	err = node.replica.addSegment(segmentID1, defaultPartitionID, collectionID, segmentTypeSealed)
