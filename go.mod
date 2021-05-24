@@ -5,7 +5,7 @@ go 1.15
 require (
 	github.com/HdrHistogram/hdrhistogram-go v1.0.1 // indirect
 	github.com/antonmedv/expr v1.8.9
-	github.com/apache/pulsar-client-go v0.4.0
+	github.com/apache/pulsar-client-go v0.5.0
 	github.com/coreos/etcd v3.3.13+incompatible
 	github.com/facebookgo/ensure v0.0.0-20200202191622-63f1cf65ac4c // indirect
 	github.com/facebookgo/stack v0.0.0-20160209184415-751773369052 // indirect
@@ -24,7 +24,6 @@ require (
 	github.com/pierrec/lz4 v2.5.2+incompatible // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.7.1
-	github.com/quasilyte/go-ruleguard v0.2.1 // indirect
 	github.com/sirupsen/logrus v1.6.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/spf13/cast v1.3.0
@@ -48,7 +47,7 @@ require (
 )
 
 replace (
-	github.com/apache/pulsar-client-go => github.com/apache/pulsar-client-go v0.4.0
+	github.com/apache/pulsar-client-go => github.com/apache/pulsar-client-go v0.5.0
 	github.com/coreos/etcd => github.com/ozonru/etcd v3.3.20-grpc1.27-origmodule+incompatible
 	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
 
