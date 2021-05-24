@@ -15,7 +15,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"time"
 
@@ -165,6 +164,26 @@ func (ms *mqMsgStream) Close() {
 	}
 }
 
+func (ms *mqMsgStream) ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32 {
+	if len(tsMsgs) <= 0 {
+		return nil
+	}
+	reBucketValues := make([][]int32, len(tsMsgs))
+	channelNum := uint32(len(ms.producerChannels))
+	if channelNum == 0 {
+		return nil
+	}
+	for idx, tsMsg := range tsMsgs {
+		hashValues := tsMsg.HashKeys()
+		bucketValues := make([]int32, len(hashValues))
+		for index, hashValue := range hashValues {
+			bucketValues[index] = int32(hashValue % channelNum)
+		}
+		reBucketValues[idx] = bucketValues
+	}
+	return reBucketValues
+}
+
 func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 	tsMsgs := msgPack.Msgs
 	if len(tsMsgs) <= 0 {
@@ -174,26 +193,7 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 	if len(ms.producers) <= 0 {
 		return errors.New("nil producer in msg stream")
 	}
-	reBucketValues := make([][]int32, len(tsMsgs))
-	for idx, tsMsg := range tsMsgs {
-		hashValues := tsMsg.HashKeys()
-		bucketValues := make([]int32, len(hashValues))
-		for index, hashValue := range hashValues {
-			if tsMsg.Type() == commonpb.MsgType_SearchResult {
-				searchResult := tsMsg.(*SearchResultMsg)
-				channelID := searchResult.ResultChannelID
-				channelIDInt, _ := strconv.ParseInt(channelID, 10, 64)
-				if channelIDInt >= int64(len(ms.producers)) {
-					return errors.New("Failed to produce msg to unKnow channel")
-				}
-				bucketValues[index] = int32(hashValue % uint32(len(ms.producers)))
-				continue
-			}
-			bucketValues[index] = int32(hashValue % uint32(len(ms.producers)))
-		}
-		reBucketValues[idx] = bucketValues
-	}
-
+	reBucketValues := ms.ComputeProduceChannelIndexes(msgPack.Msgs)
 	var result map[int32]*MsgPack
 	var err error
 	if ms.repackFunc != nil {

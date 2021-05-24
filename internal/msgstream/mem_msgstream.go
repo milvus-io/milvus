@@ -15,7 +15,6 @@ import (
 	"context"
 	"errors"
 	"log"
-	"strconv"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -80,6 +79,26 @@ func (mms *MemMsgStream) AsProducer(channels []string) {
 	}
 }
 
+func (mms *MemMsgStream) ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32 {
+	if len(tsMsgs) <= 0 {
+		return nil
+	}
+	reBucketValues := make([][]int32, len(tsMsgs))
+	channelNum := uint32(len(mms.producers))
+	if channelNum == 0 {
+		return nil
+	}
+	for idx, tsMsg := range tsMsgs {
+		hashValues := tsMsg.HashKeys()
+		bucketValues := make([]int32, len(hashValues))
+		for index, hashValue := range hashValues {
+			bucketValues[index] = int32(hashValue % channelNum)
+		}
+		reBucketValues[idx] = bucketValues
+	}
+	return reBucketValues
+}
+
 func (mms *MemMsgStream) AsConsumer(channels []string, groupName string) {
 	for _, channelName := range channels {
 		consumer, err := Mmq.CreateConsumerGroup(groupName, channelName)
@@ -101,26 +120,7 @@ func (mms *MemMsgStream) Produce(pack *MsgPack) error {
 	if len(mms.producers) <= 0 {
 		return errors.New("nil producer in msg stream")
 	}
-	reBucketValues := make([][]int32, len(tsMsgs))
-	for channelID, tsMsg := range tsMsgs {
-		hashValues := tsMsg.HashKeys()
-		bucketValues := make([]int32, len(hashValues))
-		for index, hashValue := range hashValues {
-			if tsMsg.Type() == commonpb.MsgType_SearchResult {
-				searchResult := tsMsg.(*SearchResultMsg)
-				channelID := searchResult.ResultChannelID
-				channelIDInt, _ := strconv.ParseInt(channelID, 10, 64)
-				if channelIDInt >= int64(len(mms.producers)) {
-					return errors.New("Failed to produce rmq msg to unKnow channel")
-				}
-				bucketValues[index] = int32(channelIDInt)
-				continue
-			}
-			bucketValues[index] = int32(hashValue % uint32(len(mms.producers)))
-		}
-		reBucketValues[channelID] = bucketValues
-	}
-
+	reBucketValues := mms.ComputeProduceChannelIndexes(pack.Msgs)
 	var result map[int32]*MsgPack
 	var err error
 	if mms.repackFunc != nil {
