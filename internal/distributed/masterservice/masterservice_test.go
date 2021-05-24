@@ -885,10 +885,10 @@ func (m *mockQuery) Stop() error {
 func TestRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	svr := Server{
-		masterService:       &mockCore{},
-		ctx:                 ctx,
-		cancel:              cancel,
-		grpcErrChan:         make(chan error),
+		masterService: &mockCore{},
+		ctx:           ctx,
+		cancel:        cancel,
+		grpcErrChan:   make(chan error),
 	}
 	Params.Init()
 	Params.Port = 1000000
@@ -905,8 +905,8 @@ func TestRun(t *testing.T) {
 	svr.newIndexServiceClient = func(s string) types.IndexService {
 		return &mockIndex{}
 	}
-	svr.newQueryServiceClient = func(s string) (types.QueryService, error) {
-		return &mockQuery{}, nil
+	svr.newQueryServiceClient = func(s string) types.QueryService {
+		return &mockQuery{}
 	}
 
 	Params.Port = rand.Int()%100 + 10000

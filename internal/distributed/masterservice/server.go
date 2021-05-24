@@ -61,7 +61,7 @@ type Server struct {
 	newProxyServiceClient func(string) types.ProxyService
 	newDataServiceClient  func(string) types.DataService
 	newIndexServiceClient func(string) types.IndexService
-	newQueryServiceClient func(string) (types.QueryService, error)
+	newQueryServiceClient func(string) types.QueryService
 
 	closer io.Closer
 }
@@ -69,9 +69,9 @@ type Server struct {
 func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &Server{
-		ctx:                 ctx1,
-		cancel:              cancel,
-		grpcErrChan:         make(chan error),
+		ctx:         ctx1,
+		cancel:      cancel,
+		grpcErrChan: make(chan error),
 	}
 	s.setClient()
 	var err error
@@ -92,7 +92,7 @@ func (s *Server) setClient() {
 	s.newIndexServiceClient = func(s string) types.IndexService {
 		return isc.NewClient(s)
 	}
-	s.newQueryServiceClient = func(s string) (types.QueryService, error) {
+	s.newQueryServiceClient = func(s string) types.QueryService {
 		return qsc.NewClient(s, 5*time.Second)
 	}
 }
@@ -181,10 +181,7 @@ func (s *Server) init() error {
 	}
 	if s.newQueryServiceClient != nil {
 		log.Debug("query service", zap.String("address", Params.QueryServiceAddress))
-		queryService, err := s.newQueryServiceClient(Params.QueryServiceAddress)
-		if err != nil {
-			panic(err)
-		}
+		queryService := s.newQueryServiceClient(Params.QueryServiceAddress)
 		if err = queryService.Init(); err != nil {
 			panic(err)
 		}
