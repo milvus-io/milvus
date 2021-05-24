@@ -757,15 +757,18 @@ func (mt *metaTable) AddIndex(segIdxInfos []*pb.SegmentIndexInfo, msgStartPos st
 	for _, segIdxInfo := range segIdxInfos {
 		collID, ok := mt.segID2CollID[segIdxInfo.SegmentID]
 		if !ok {
-			return 0, fmt.Errorf("segment id = %d not belong to any collection", segIdxInfo.SegmentID)
+			log.Error("segment not belong to any collection", zap.Int64("segID", segIdxInfo.SegmentID))
+			continue
 		}
 		collMeta, ok := mt.collID2Meta[collID]
 		if !ok {
-			return 0, fmt.Errorf("collection id = %d not found", collID)
+			log.Error("collection not found", zap.Int64("collID", collID))
+			continue
 		}
 		partID, ok := mt.segID2PartitionID[segIdxInfo.SegmentID]
 		if !ok {
-			return 0, fmt.Errorf("segment id = %d not belong to any partition", segIdxInfo.SegmentID)
+			log.Error("segment not belong to any partition", zap.Int64("segID", segIdxInfo.SegmentID))
+			continue
 		}
 		exist := false
 		for _, fidx := range collMeta.FieldIndexes {
@@ -775,7 +778,8 @@ func (mt *metaTable) AddIndex(segIdxInfos []*pb.SegmentIndexInfo, msgStartPos st
 			}
 		}
 		if !exist {
-			return 0, fmt.Errorf("index id = %d not found", segIdxInfo.IndexID)
+			log.Error("segment index not found", zap.Int64("segID", segIdxInfo.SegmentID), zap.Int64("idxID", segIdxInfo.IndexID))
+			continue
 		}
 
 		segIdxMap, ok := mt.segID2IndexMeta[segIdxInfo.SegmentID]
@@ -787,9 +791,10 @@ func (mt *metaTable) AddIndex(segIdxInfos []*pb.SegmentIndexInfo, msgStartPos st
 			if ok {
 				if SegmentIndexInfoEqual(segIdxInfo, &tmpInfo) {
 					log.Debug("Identical SegmentIndexInfo already exist", zap.Int64("IndexID", segIdxInfo.IndexID))
-					return 0, nil
+				} else {
+					log.Error("segment index exist", zap.Int64("segID", segIdxInfo.SegmentID), zap.Int64("idxID", segIdxInfo.IndexID))
 				}
-				return 0, fmt.Errorf("index id = %d exist", segIdxInfo.IndexID)
+				continue
 			}
 		}
 

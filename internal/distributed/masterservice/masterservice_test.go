@@ -535,6 +535,10 @@ func TestGrpcService(t *testing.T) {
 		segInfoMsgPack := GenSegInfoMsgPack(seg)
 		SegmentInfoChan <- segInfoMsgPack
 		time.Sleep(time.Millisecond * 100)
+		// send msg twice
+		segInfoMsgPack1 := GenSegInfoMsgPack(seg)
+		SegmentInfoChan <- segInfoMsgPack1
+		time.Sleep(time.Millisecond * 100)
 		part, err = core.MetaTable.GetPartitionByID(1, partID, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, 1, len(part.SegmentIDs))
@@ -655,6 +659,10 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, 2, len(part.SegmentIDs))
 		flushedSegMsgPack := GenFlushedSegMsgPack(segID)
 		FlushedSegmentChan <- flushedSegMsgPack
+		time.Sleep(time.Millisecond * 100)
+		// send msg twice
+		flushedSegMsgPack1 := GenFlushedSegMsgPack(segID)
+		FlushedSegmentChan <- flushedSegMsgPack1
 		time.Sleep(time.Millisecond * 100)
 
 		req := &milvuspb.DescribeIndexRequest{
