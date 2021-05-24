@@ -344,6 +344,7 @@ func TestMetaTable(t *testing.T) {
 		segIdxInfo.BuildID = 202
 		_, err = mt.AddIndex([]*pb.SegmentIndexInfo{&segIdxInfo}, "", "")
 		assert.Nil(t, err)
+		//assert.EqualError(t, err, fmt.Sprintf("index id = %d exist", segIdxInfo.IndexID))
 	})
 
 	t.Run("get not indexed segments", func(t *testing.T) {
