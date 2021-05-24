@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -46,6 +47,8 @@ type QueryService struct {
 	queryChannels       []*queryChannelInfo
 	qcMutex             *sync.Mutex
 
+	session *sessionutil.Session
+
 	stateCode  atomic.Value
 	isInit     atomic.Value
 	enableGrpc bool
@@ -54,6 +57,11 @@ type QueryService struct {
 }
 
 func (qs *QueryService) Init() error {
+	ctx := context.Background()
+
+	qs.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress}, typeutil.QueryServiceRole,
+		Params.Address, true)
+	qs.session.Init()
 	return nil
 }
 

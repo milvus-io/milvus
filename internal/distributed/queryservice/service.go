@@ -27,7 +27,6 @@ import (
 	qs "github.com/milvus-io/milvus/internal/queryservice"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
@@ -92,14 +91,10 @@ func (s *Server) init() error {
 	ctx := context.Background()
 	Params.Init()
 	qs.Params.Init()
+	qs.Params.Port = Params.Port
 
 	closer := trace.InitTracing("query_service")
 	s.closer = closer
-
-	self := sessionutil.NewSession("querynode", funcutil.GetLocalIP()+":"+strconv.Itoa(Params.Port), false)
-	sm := sessionutil.NewSessionManager(ctx, qs.Params.EtcdAddress, qs.Params.MetaRootPath, self)
-	sm.Init()
-	sessionutil.SetGlobalSessionManager(sm)
 
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)

@@ -793,6 +793,7 @@ func (ibNode *insertBufferNode) getCollMetabySegID(segmentID UniqueID) (meta *et
 	if err != nil {
 		return
 	}
+	meta = &etcdpb.CollectionMeta{}
 	meta.ID = ret.collectionID
 
 	coll, err := ibNode.replica.getCollectionByID(ret.collectionID)

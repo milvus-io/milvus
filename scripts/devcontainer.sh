@@ -48,6 +48,13 @@ else
     sed -i "s/# user: {{ CURRENT_ID }}/user: \"$uid:$gid\"/g" $ROOT_DIR/docker-compose-devcontainer.yml
 fi
 
+pushd "$ROOT_DIR"
+
+mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-ccache"
+mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-go-mod"
+mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-vscode-extensions"
+chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
+
 if [ "${1-}" = "build" ];then
    docker-compose -f $ROOT_DIR/docker-compose-devcontainer.yml pull --ignore-pull-failures ubuntu
    docker-compose -f $ROOT_DIR/docker-compose-devcontainer.yml build ubuntu
@@ -60,3 +67,5 @@ fi
 if [ "${1-}" = "down" ]; then
     docker-compose -f $ROOT_DIR/docker-compose-devcontainer.yml down
 fi
+
+popd

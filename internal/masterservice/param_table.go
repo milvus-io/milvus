@@ -29,6 +29,9 @@ type ParamTable struct {
 
 	NodeID uint64
 
+	Address string
+	Port    int
+
 	PulsarAddress             string
 	EtcdAddress               string
 	MetaRootPath              string

@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -35,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
@@ -255,11 +253,13 @@ func TestMasterService(t *testing.T) {
 	err = core.SetQueryService(qm)
 	assert.Nil(t, err)
 
-	// initialize master's session manager before core init
-	self := sessionutil.NewSession("masterservice", funcutil.GetLocalIP()+":"+strconv.Itoa(53100), true)
-	sm := sessionutil.NewSessionManager(ctx, Params.EtcdAddress, Params.MetaRootPath, self)
-	sm.Init()
-	sessionutil.SetGlobalSessionManager(sm)
+	//TODO initialize master's session manager before core init
+	/*
+		self := sessionutil.NewSession("masterservice", funcutil.GetLocalIP()+":"+strconv.Itoa(53100), true)
+		sm := sessionutil.NewSessionManager(ctx, Params.EtcdAddress, Params.MetaRootPath, self)
+		sm.Init()
+		sessionutil.SetGlobalSessionManager(sm)
+	*/
 
 	err = core.Init()
 	assert.Nil(t, err)
