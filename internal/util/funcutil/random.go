@@ -16,7 +16,8 @@ import (
 	"time"
 )
 
-var Rand * rand.Rand = nil
+var Rand *rand.Rand = nil
+
 func init() {
 	Rand = rand.New(rand.NewSource(time.Now().UnixNano()))
 }
