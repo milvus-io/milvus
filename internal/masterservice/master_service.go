@@ -114,11 +114,11 @@ type Core struct {
 	//setMsgStreams, send drop partition into dd channel
 	SendDdDropPartitionReq func(ctx context.Context, req *internalpb.DropPartitionRequest) error
 
-	//setMsgStreams segment channel, receive segment info from data service, if master create segment
-	DataServiceSegmentChan chan *datapb.SegmentInfo
+	// if master create segment, data service will put segment msg into this channel
+	DataServiceSegmentChan <-chan *ms.MsgPack
 
-	//setMsgStreams ,if segment flush completed, data node would put segment id into msg stream
-	DataNodeSegmentFlushCompletedChan chan typeutil.UniqueID
+	// if segment flush completed, data node would put segment msg into this channel
+	DataNodeFlushedSegmentChan <-chan *ms.MsgPack
 
 	//get binlog file path from data service,
 	GetBinlogFilePathsFromDataServiceReq func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
@@ -214,9 +214,6 @@ func (c *Core) checkInit() error {
 	if c.SendDdDropPartitionReq == nil {
 		return fmt.Errorf("SendDdDropPartitionReq is nil")
 	}
-	if c.DataServiceSegmentChan == nil {
-		return fmt.Errorf("DataServiceSegmentChan is nil")
-	}
 	if c.GetBinlogFilePathsFromDataServiceReq == nil {
 		return fmt.Errorf("GetBinlogFilePathsFromDataServiceReq is nil")
 	}
@@ -232,8 +229,11 @@ func (c *Core) checkInit() error {
 	if c.InvalidateCollectionMetaCache == nil {
 		return fmt.Errorf("InvalidateCollectionMetaCache is nil")
 	}
-	if c.DataNodeSegmentFlushCompletedChan == nil {
-		return fmt.Errorf("DataNodeSegmentFlushCompletedChan is nil")
+	if c.DataServiceSegmentChan == nil {
+		return fmt.Errorf("DataServiceSegmentChan is nil")
+	}
+	if c.DataNodeFlushedSegmentChan == nil {
+		return fmt.Errorf("DataNodeFlushedSegmentChan is nil")
 	}
 	if c.ReleaseCollection == nil {
 		return fmt.Errorf("ReleaseCollection is nil")
@@ -307,70 +307,126 @@ func (c *Core) startTimeTickLoop() {
 	}
 }
 
-//data service send segment info to master when create segment
+// data service send segment info msg to master when create segment
 func (c *Core) startDataServiceSegmentLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Debug("close data service segment loop")
 			return
-		case seg, ok := <-c.DataServiceSegmentChan:
+		case segMsg, ok := <-c.DataServiceSegmentChan:
 			if !ok {
-				log.Debug("data service segment is closed, exit loop")
+				log.Debug("data service segment channel is closed, exit loop")
 				return
 			}
-			if seg == nil {
-				log.Warn("segment from data service is nil")
-			} else if _, err := c.MetaTable.AddSegment(seg); err != nil {
-				//what if master add segment failed, but data service success?
-				log.Warn("add segment info meta table failed ", zap.String("error", err.Error()))
-			} else {
-				log.Debug("add segment", zap.Int64("collection id", seg.CollectionID), zap.Int64("partition id", seg.PartitionID), zap.Int64("segment id", seg.ID))
+			var segInfos []*datapb.SegmentInfo
+			for _, msg := range segMsg.Msgs {
+				if msg.Type() != commonpb.MsgType_SegmentInfo {
+					continue
+				}
+				segInfoMsg := msg.(*ms.SegmentInfoMsg)
+				segInfos = append(segInfos, segInfoMsg.Segment)
+			}
+			if len(segInfos) > 0 {
+				startPosByte, err := json.Marshal(segMsg.StartPositions)
+				if err != nil {
+					log.Error("json.Marshal fail", zap.String("err", err.Error()))
+					continue
+				}
+				endPosByte, err := json.Marshal(segMsg.EndPositions)
+				if err != nil {
+					log.Error("json.Marshal fail", zap.String("err", err.Error()))
+					continue
+				}
+
+				if _, err := c.MetaTable.AddSegment(segInfos, string(startPosByte), string(endPosByte)); err != nil {
+					//what if master add segment failed, but data service success?
+					log.Debug("add segment info meta table failed ", zap.String("error", err.Error()))
+					continue
+				}
 			}
 		}
 	}
 }
 
-func (c *Core) startSegmentFlushCompletedLoop() {
+// data node will put msg in this channel when flush segment
+func (c *Core) startDataNodeFlushedSegmentLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Debug("close segment flush completed loop")
 			return
-		case segID, ok := <-c.DataNodeSegmentFlushCompletedChan:
+		case segMsg, ok := <-c.DataNodeFlushedSegmentChan:
 			if !ok {
 				log.Debug("data node segment flush completed chan has closed, exit loop")
+				return
 			}
-			log.Debug("flush segment", zap.Int64("id", segID))
-			coll, err := c.MetaTable.GetCollectionBySegmentID(segID)
+
+			startPosByte, err := json.Marshal(segMsg.StartPositions)
 			if err != nil {
-				log.Warn("GetCollectionBySegmentID error", zap.Error(err))
-				break
+				log.Error("json.Marshal fail", zap.String("err", err.Error()))
+				continue
 			}
-			err = c.MetaTable.AddFlushedSegment(segID)
+			endPosByte, err := json.Marshal(segMsg.EndPositions)
 			if err != nil {
-				log.Warn("AddFlushedSegment error", zap.Error(err))
+				log.Error("json.Marshal fail", zap.String("err", err.Error()))
+				continue
 			}
-			for _, f := range coll.FieldIndexes {
-				idxInfo, err := c.MetaTable.GetIndexByID(f.IndexID)
+
+			var segIdxInfos []*etcdpb.SegmentIndexInfo
+			for _, msg := range segMsg.Msgs {
+				// check msg type
+				if msg.Type() != commonpb.MsgType_SegmentFlushDone {
+					continue
+				}
+				flushMsg := msg.(*ms.FlushCompletedMsg)
+				segID := flushMsg.SegmentID
+				log.Debug("flush segment", zap.Int64("id", segID))
+
+				coll, err := c.MetaTable.GetCollectionBySegmentID(segID)
 				if err != nil {
-					log.Warn("index not found", zap.Int64("index id", f.IndexID))
+					log.Warn("GetCollectionBySegmentID error", zap.Error(err))
+					continue
+				}
+				err = c.MetaTable.AddFlushedSegment(segID)
+				if err != nil {
+					log.Warn("AddFlushedSegment error", zap.Error(err))
 					continue
 				}
 
-				fieldSch, err := GetFieldSchemaByID(coll, f.FiledID)
-				if err != nil {
-					log.Warn("field schema not found", zap.Int64("field id", f.FiledID))
-					continue
-				}
+				for _, f := range coll.FieldIndexes {
+					fieldSch, err := GetFieldSchemaByID(coll, f.FiledID)
+					if err != nil {
+						log.Warn("field schema not found", zap.Int64("field id", f.FiledID))
+						continue
+					}
 
-				if err = c.BuildIndex(segID, fieldSch, idxInfo, true); err != nil {
-					log.Error("build index fail", zap.String("error", err.Error()))
-				} else {
-					log.Debug("build index", zap.String("index name", idxInfo.IndexName),
-						zap.String("field name", fieldSch.Name),
-						zap.Int64("segment id", segID))
+					idxInfo, err := c.MetaTable.GetIndexByID(f.IndexID)
+					if err != nil {
+						log.Warn("index not found", zap.Int64("index id", f.IndexID))
+						continue
+					}
+
+					info := etcdpb.SegmentIndexInfo{
+						SegmentID:   segID,
+						FieldID:     fieldSch.FieldID,
+						IndexID:     idxInfo.IndexID,
+						EnableIndex: false,
+					}
+					info.BuildID, err = c.BuildIndex(segID, fieldSch, idxInfo, true)
+					if err == nil {
+						info.EnableIndex = true
+					} else {
+						log.Error("build index fail", zap.String("error", err.Error()))
+					}
+
+					segIdxInfos = append(segIdxInfos, &info)
 				}
+			}
+
+			_, err = c.MetaTable.AddIndex(segIdxInfos, string(startPosByte), string(endPosByte))
+			if err != nil {
+				log.Error("AddIndex fail", zap.String("err", err.Error()))
 			}
 		}
 	}
@@ -583,45 +639,25 @@ func (c *Core) setMsgStreams() error {
 		}
 	}()
 
-	//segment channel, data service create segment,or data node flush segment will put msg in this channel
 	if Params.DataServiceSegmentChannel == "" {
 		return fmt.Errorf("DataServiceSegmentChannel is empty")
 	}
-	dataServiceStream, _ := c.msFactory.NewMsgStream(c.ctx)
-	dataServiceStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, Params.MsgChannelSubName)
-	log.Debug("master AsConsumer: " + Params.DataServiceSegmentChannel + " : " + Params.MsgChannelSubName)
-	dataServiceStream.Start()
-	c.DataServiceSegmentChan = make(chan *datapb.SegmentInfo, 1024)
-	c.DataNodeSegmentFlushCompletedChan = make(chan typeutil.UniqueID, 1024)
 
-	// receive segment info from msg stream
-	go func() {
-		for {
-			select {
-			case <-c.ctx.Done():
-				return
-			case segMsg, ok := <-dataServiceStream.Chan():
-				if !ok {
-					log.Warn("data service segment msg closed")
-				}
-				if len(segMsg.Msgs) > 0 {
-					for _, segm := range segMsg.Msgs {
-						segInfoMsg, ok := segm.(*ms.SegmentInfoMsg)
-						if ok {
-							c.DataServiceSegmentChan <- segInfoMsg.Segment
-						} else {
-							flushMsg, ok := segm.(*ms.FlushCompletedMsg)
-							if ok {
-								c.DataNodeSegmentFlushCompletedChan <- flushMsg.SegmentFlushCompletedMsg.SegmentID
-							} else {
-								log.Debug("receive unexpected msg from data service stream", zap.Stringer("segment", segInfoMsg.SegmentMsg.Segment))
-							}
-						}
-					}
-				}
-			}
-		}
-	}()
+	// data service will put msg into this channel when create segment
+	dsStream, _ := c.msFactory.NewMsgStream(c.ctx)
+	dsSubName := Params.MsgChannelSubName + "ds"
+	dsStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, dsSubName)
+	log.Debug("master AsConsumer: " + Params.DataServiceSegmentChannel + " : " + dsSubName)
+	dsStream.Start()
+	c.DataServiceSegmentChan = dsStream.Chan()
+
+	// data node will put msg into this channel when flush segment
+	dnStream, _ := c.msFactory.NewMsgStream(c.ctx)
+	dnSubName := Params.MsgChannelSubName + "dn"
+	dnStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, dnSubName)
+	log.Debug("master AsConsumer: " + Params.DataServiceSegmentChannel + " : " + dnSubName)
+	dnStream.Start()
+	c.DataNodeFlushedSegmentChan = dnStream.Chan()
 
 	return nil
 }
@@ -784,38 +820,31 @@ func (c *Core) SetQueryService(s types.QueryService) error {
 }
 
 // BuildIndex will check row num and call build index service
-func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, isFlush bool) error {
+func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, isFlush bool) (typeutil.UniqueID, error) {
 	if c.MetaTable.IsSegmentIndexed(segID, field, idxInfo.IndexParams) {
-		return nil
+		return 0, nil
 	}
 	rows, err := c.GetNumRowsReq(segID, isFlush)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	var bldID typeutil.UniqueID
-	enableIdx := false
 	if rows < Params.MinSegmentSizeToEnableIndex {
 		log.Debug("num of rows is less than MinSegmentSizeToEnableIndex", zap.Int64("num rows", rows))
 	} else {
 		binlogs, err := c.GetBinlogFilePathsFromDataServiceReq(segID, field.FieldID)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		bldID, err = c.BuildIndexReq(c.ctx, binlogs, field, idxInfo)
 		if err != nil {
-			return err
+			return 0, err
 		}
-		enableIdx = true
 	}
-	seg := etcdpb.SegmentIndexInfo{
-		SegmentID:   segID,
-		FieldID:     field.FieldID,
-		IndexID:     idxInfo.IndexID,
-		BuildID:     bldID,
-		EnableIndex: enableIdx,
-	}
-	_, err = c.MetaTable.AddIndex(&seg)
-	return err
+	log.Debug("build index", zap.String("index name", idxInfo.IndexName),
+		zap.String("field name", field.Name),
+		zap.Int64("segment id", segID))
+	return bldID, nil
 }
 
 func (c *Core) Init() error {
@@ -980,7 +1009,7 @@ func (c *Core) Start() error {
 		go c.startDdScheduler()
 		go c.startTimeTickLoop()
 		go c.startDataServiceSegmentLoop()
-		go c.startSegmentFlushCompletedLoop()
+		go c.startDataNodeFlushedSegmentLoop()
 		go c.tsLoop()
 		go c.chanTimeTick.StartWatch()
 		c.stateCode.Store(internalpb.StateCode_Healthy)
