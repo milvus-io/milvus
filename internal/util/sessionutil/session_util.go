@@ -39,7 +39,7 @@ type Session struct {
 // NewSession is a helper to build Session object.
 // ServerID and LeaseID will be assigned after registeration.
 // etcdCli is initialized when NewSession
-func NewSession(ctx context.Context, etcdAddress []string, serverName, address string, exclusive bool) *Session {
+func NewSession(ctx context.Context, etcdAddress []string) *Session {
 	ctx, cancel := context.WithCancel(ctx)
 	session := &Session{
 		ctx:    ctx,
