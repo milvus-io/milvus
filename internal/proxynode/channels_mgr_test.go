@@ -35,7 +35,7 @@ func newMockMaster() *mockMaster {
 }
 
 func genUniqueStr() string {
-	l := rand.Uint64() % 100
+	l := rand.Uint64()%100 + 1
 	b := make([]byte, l)
 	if _, err := rand.Read(b); err != nil {
 		return ""
@@ -50,7 +50,7 @@ func (m *mockMaster) GetChannels(collectionID UniqueID) (map[vChan]pChan, error)
 	}
 
 	channels = make(map[vChan]pChan)
-	l := rand.Uint64() % 10
+	l := rand.Uint64()%10 + 1
 	for i := 0; uint64(i) < l; i++ {
 		channels[genUniqueStr()] = genUniqueStr()
 	}

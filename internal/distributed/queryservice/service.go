@@ -107,7 +107,7 @@ func (s *Server) init() error {
 	log.Debug("Master service", zap.String("address", Params.MasterAddress))
 	log.Debug("Init master service client ...")
 
-	masterService, err := msc.NewClient(Params.MasterAddress, 20*time.Second)
+	masterService, err := msc.NewClient(Params.MasterAddress, []string{qs.Params.EtcdAddress}, 20*time.Second)
 
 	if err != nil {
 		panic(err)

@@ -121,9 +121,8 @@ func NewQueryNodeWithoutID(ctx context.Context, factory msgstream.Factory) *Quer
 func (node *QueryNode) Init() error {
 	ctx := context.Background()
 
-	node.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress}, typeutil.QueryNodeRole,
-		Params.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodePort, 10), false)
-	node.session.Init()
+	node.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress})
+	node.session.Init(typeutil.QueryNodeRole, Params.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodePort, 10), false)
 
 	C.SegcoreInit()
 	registerReq := &queryPb.RegisterNodeRequest{

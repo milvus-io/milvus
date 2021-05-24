@@ -64,7 +64,7 @@ The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/servic
 
 * The service creates a lease with etcd and stores a key-value pair in etcd. If the lease expires or the service goes offline, etcd will delete the key-value pair. You can judge whether this service is avaliable through the key.
 
-* key: metaRootPath + "/services" + "/ServerName(-ServerID)(optional)"
+* key: "/session" + "/ServerName(-ServerID)(optional)"
 
 * value: json format
 
@@ -73,7 +73,7 @@ The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/servic
     "ServerID": "ServerID",
     "ServerName": "ServerName",
     "Address": "ip:port",
-    "LeaseID": "LeaseID",
+    "Exclusive": "Exclusive",
   }
   ```
 
@@ -85,78 +85,48 @@ The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/servic
 
 * All currently available services can be obtained by obtaining all the key-value pairs deposited during registration. If you want to get all the available nodes for a certain type of service, you can pass in the prefix of the corresponding key
 
-* Registeration time can be compared with ServerID for ServerID will increase according to time.
+* Registration time can be compared with ServerID for ServerID will increase according to time.
 
 
 ###### Interface
 
 ```go
-const defaultIDKey = "services/id"
-const defaultRetryTimes = 30
+const DefaultServiceRoot = "/session/"
+const DefaultIDKey = "id"
+const DefaultRetryTimes = 30
+const DefaultTTL = 10
 
 // Session is a struct to store service's session, including ServerID, ServerName,
 // Address.
 // LeaseID will be assigned after registered in etcd.
 type Session struct {
-    ServerID   int64
-    ServerName string
-    Address    string
-    LeaseID    clientv3.LeaseID
-}
+	ctx        context.Context
+	ServerID   int64  `json:"ServerID,omitempty"`
+	ServerName string `json:"ServerName,omitempty"`
+	Address    string `json:"Address,omitempty"`
+	Exclusive  bool   `json:"Exclusive,omitempty"`
 
-var (
-	globalServerID = int64(-1)
-)
+	etcdCli *clientv3.Client
+	leaseID clientv3.LeaseID
+	cancel  context.CancelFunc
+}
 
 // NewSession is a helper to build Session object.LeaseID will be assigned after
 // registeration.
-func NewSession(serverID int64, serverName, address string) *Session {}
+func NewSession(ctx context.Context, etcdAddress []string) *Session {}
 
-// GlobalServerID returns [singleton] ServerID.
-// Before SetGlobalServerID, GlobalServerID() returns -1
-func GlobalServerID() int64 {}
+// GetSessions will get all sessions registered in etcd.
+func (s *Session) GetSessions(prefix string) (map[string]*Session, error) {}
 
-// SetGlobalServerID sets the [singleton] ServerID. ServerID returned by
-// GlobalServerID(). Those who use GlobalServerID should call SetGlobalServerID()
-// as early as possible in main() before use ServerID.
-func SetGlobalServerID(id int64) {}
+// Init will initialize base struct in the SessionManager, including getServerID,
+// and process keepAliveResponse
+func (s *Session) Init(serverName, address string, exclusive bool) <-chan bool {}
 
-// GetServerID gets id from etcd with key: metaRootPath + "/services/id"
-// Each server get ServerID and add one to id.
-func GetServerID(etcd *etcdkv.EtcdKV) (int64, error) {}
-
-// RegisterService registers the service to etcd so that other services
-// can find that the service is online and issue subsequent operations
-// RegisterService will save a key-value in etcd
-// key: metaRootPath + "/services/" + "ServerName(-ServerID)(optional)"
-// value: json format
-// {
-//     "ServerID": "ServerID",
-//     "ServerName": "ServerName",
-//     "Address": "ip:port",
-//     "LeaseID": "LeaseID",
-// }
-// MetaRootPath is configurable in the config file.
-// Exclusive means whether this service can exist two at the same time, if so,
-// it is false. Otherwise, set it to true and the key will not have ServerID.
-// But ServerID still will be stored in value.
-func RegisterService(etcdKV *etcdkv.EtcdKV, session *Session, ttl int64) (<-chan *clientv3.LeaseKeepAliveResponse, error) {}
-
-// ProcessKeepAliveResponse processes the response of etcd keepAlive interface
-// If keepAlive fails for unexpected error, it will retry for default_retry_times times
-func ProcessKeepAliveResponse(ctx context.Context, ch <-chan *clientv3.LeaseKeepAliveResponse) (signal <-chan bool) {}
-
-
-// GetAllSessions gets all the services registered in etcd.
-// This gets all the key with prefix metaRootPath + "/services/" + prefix
-// For general, "datanode" to get all datanodes
-func GetSessions(etcdKV *etcdkv.EtcdKV, prefix string) ([]*Session, error) {}
-
-// WatchServices watch all events in etcd.
-// If a server register, a session will be sent to addChannel
-// If a server offline, a session will be sent to deleteChannel
-func WatchServices(ctx context.Context, etcdKV *etcdkv.EtcdKV, prefix string) (addChannel <-chan *Session, deleteChannel <-chan *Session) {}
-```
+// WatchServices watch the service's up and down in etcd, and saves it into local
+// sessions.
+// If a server up, it will be add to addChannel.
+// If a server is offline, it will be add to delChannel.
+func (s *Session) WatchServices(prefix string) (addChannel <-chan *Session, delChannel <-chan *Session) {}
 
 
 #### A.3 Global Parameter Table

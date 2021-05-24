@@ -26,7 +26,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "")
-	_, err = cli.Delete(ctx, "/session", clientv3.WithPrefix())
+	_, err = cli.Delete(ctx, DefaultServiceRoot, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
 	defer etcdKV.Close()
@@ -35,7 +35,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	var wg sync.WaitGroup
 	var muList sync.Mutex = sync.Mutex{}
 
-	s := NewSession(ctx, []string{etcdAddr}, "test", "testAddr", false)
+	s := NewSession(ctx, []string{etcdAddr})
 	res := make([]int64, 0)
 
 	getIDFunc := func() {
@@ -71,15 +71,16 @@ func TestInit(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "")
-	_, err = cli.Delete(ctx, "/session", clientv3.WithPrefix())
+	_, err = cli.Delete(ctx, DefaultServiceRoot, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("")
 
-	s := NewSession(ctx, []string{etcdAddr}, "test", "testAddr", false)
-	assert.NotEqual(t, 0, s.leaseID)
-	assert.NotEqual(t, 0, s.ServerID)
+	s := NewSession(ctx, []string{etcdAddr})
+	s.Init("test", "testAddr", false)
+	assert.NotEqual(t, int64(0), s.leaseID)
+	assert.NotEqual(t, int64(0), s.ServerID)
 }
 
 func TestUpdateSessions(t *testing.T) {
@@ -94,7 +95,7 @@ func TestUpdateSessions(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "")
-	_, err = cli.Delete(ctx, "/session", clientv3.WithPrefix())
+	_, err = cli.Delete(ctx, DefaultServiceRoot, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
 	defer etcdKV.Close()
@@ -103,7 +104,7 @@ func TestUpdateSessions(t *testing.T) {
 	var wg sync.WaitGroup
 	var muList sync.Mutex = sync.Mutex{}
 
-	s := NewSession(ctx, []string{etcdAddr}, "test", "testAddr", false)
+	s := NewSession(ctx, []string{etcdAddr})
 
 	sessions, err := s.GetSessions("test")
 	assert.Nil(t, err)
@@ -113,8 +114,8 @@ func TestUpdateSessions(t *testing.T) {
 	sList := []*Session{}
 
 	getIDFunc := func() {
-		singleS := NewSession(ctx, []string{etcdAddr}, "test", "testAddr", false)
-		singleS.Init()
+		singleS := NewSession(ctx, []string{etcdAddr})
+		singleS.Init("test", "testAddr", false)
 		muList.Lock()
 		sList = append(sList, singleS)
 		muList.Unlock()
