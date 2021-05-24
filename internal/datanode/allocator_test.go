@@ -19,7 +19,7 @@ import (
 
 func TestAllocator_Basic(t *testing.T) {
 	ms := &MasterServiceFactory{}
-	allocator := newAllocator(ms)
+	allocator := newAllocator(0, ms)
 
 	t.Run("Test allocID", func(t *testing.T) {
 		_, err := allocator.allocID()

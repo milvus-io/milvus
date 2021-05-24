@@ -49,6 +49,8 @@ type (
 )
 type insertBufferNode struct {
 	BaseNode
+
+	serverID     int64
 	insertBuffer *insertBuffer
 	replica      Replica
 	flushMeta    *binlogMeta // GOOSE TODO remove
@@ -706,7 +708,7 @@ func (ibNode *insertBufferNode) completeFlush(segID UniqueID, wait <-chan map[Un
 			MsgType:   commonpb.MsgType_SegmentFlushDone,
 			MsgID:     0, // GOOSE TODO
 			Timestamp: 0, // GOOSE TODO
-			SourceID:  Params.NodeID,
+			SourceID:  ibNode.serverID,
 		},
 		SegmentID: segID,
 	}
@@ -737,7 +739,7 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     0,  // GOOSE TODO
 				Timestamp: ts, // GOOSE TODO
-				SourceID:  Params.NodeID,
+				SourceID:  ibNode.serverID,
 			},
 		},
 	}
@@ -762,7 +764,7 @@ func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID) error {
 			MsgType:   commonpb.MsgType_SegmentStatistics,
 			MsgID:     UniqueID(0),  // GOOSE TODO
 			Timestamp: Timestamp(0), // GOOSE TODO
-			SourceID:  Params.NodeID,
+			SourceID:  ibNode.serverID,
 		},
 		SegStats: statsUpdates,
 	}
@@ -814,7 +816,7 @@ func (ibNode *insertBufferNode) getCollectionandPartitionIDbySegID(segmentID Uni
 	return
 }
 
-func newInsertBufferNode(ctx context.Context, flushMeta *binlogMeta,
+func newInsertBufferNode(ctx context.Context, serverID int64, flushMeta *binlogMeta,
 	replica Replica, factory msgstream.Factory, idAllocator allocatorInterface) *insertBufferNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
@@ -867,6 +869,7 @@ func newInsertBufferNode(ctx context.Context, flushMeta *binlogMeta,
 
 	return &insertBufferNode{
 		BaseNode:                baseNode,
+		serverID:                serverID,
 		insertBuffer:            iBuffer,
 		minIOKV:                 minIOKV,
 		timeTickStream:          wTtMsgStream,

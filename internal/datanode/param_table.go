@@ -12,7 +12,6 @@
 package datanode
 
 import (
-	"os"
 	"path"
 	"strconv"
 	"sync"
@@ -25,7 +24,6 @@ type ParamTable struct {
 	paramtable.BaseTable
 
 	// === DataNode Internal Components Configs ===
-	NodeID                  UniqueID
 	IP                      string
 	Port                    int
 	FlowGraphMaxQueueLength int32
@@ -35,6 +33,7 @@ type ParamTable struct {
 	DdlBinlogRootPath       string
 	StatsBinlogRootPath     string
 	Log                     log.Config
+	LogRootPath             string
 
 	// === DataNode External Components Configs ===
 	// --- Pulsar ---
@@ -84,7 +83,6 @@ func (p *ParamTable) Init() {
 		}
 
 		// === DataNode Internal Components Configs ===
-		p.initNodeID()
 		p.initFlowGraphMaxQueueLength()
 		p.initFlowGraphMaxParallelism()
 		p.initFlushInsertBufferSize()
@@ -103,9 +101,6 @@ func (p *ParamTable) Init() {
 		// - dd channel -
 		p.initDDChannelNames()
 
-		// - channel subname -
-		p.initMsgChannelSubName()
-
 		// --- ETCD ---
 		p.initEtcdAddress()
 		p.initMetaRootPath()
@@ -119,21 +114,6 @@ func (p *ParamTable) Init() {
 		p.initMinioUseSSL()
 		p.initMinioBucketName()
 	})
-}
-
-// ==== DataNode internal components configs ====
-func (p *ParamTable) initNodeID() {
-	dataNodeIDStr := os.Getenv("DATA_NODE_ID")
-	if dataNodeIDStr == "" {
-		dataNodeIDStr = "1"
-	}
-
-	dnID, err := strconv.Atoi(dataNodeIDStr)
-	if err != nil {
-		panic(err)
-	}
-
-	p.NodeID = UniqueID(dnID)
 }
 
 // ---- flowgraph configs ----
@@ -192,15 +172,6 @@ func (p *ParamTable) initInsertChannelNames() {
 
 func (p *ParamTable) initDDChannelNames() {
 	p.DDChannelNames = make([]string, 0)
-}
-
-// - msg channel subname -
-func (p *ParamTable) initMsgChannelSubName() {
-	name, err := p.Load("msgChannel.subNamePrefix.dataNodeSubNamePrefix")
-	if err != nil {
-		panic(err)
-	}
-	p.MsgChannelSubName = name + "-" + strconv.FormatInt(p.NodeID, 10)
 }
 
 // --- ETCD ---
@@ -306,13 +277,8 @@ func (p *ParamTable) initLogCfg() {
 	p.Log.File.MaxSize = p.ParseInt("log.file.maxSize")
 	p.Log.File.MaxBackups = p.ParseInt("log.file.maxBackups")
 	p.Log.File.MaxDays = p.ParseInt("log.file.maxAge")
-	rootPath, err := p.Load("log.file.rootPath")
+	p.LogRootPath, err = p.Load("log.file.rootPath")
 	if err != nil {
 		panic(err)
-	}
-	if len(rootPath) != 0 {
-		p.Log.File.Filename = path.Join(rootPath, "datanode-"+strconv.FormatInt(p.NodeID, 10)+".log")
-	} else {
-		p.Log.File.Filename = ""
 	}
 }

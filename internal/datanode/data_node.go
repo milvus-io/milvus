@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"path"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -140,6 +141,7 @@ func (node *DataNode) Init() error {
 
 	node.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress})
 	node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
+	Params.Log.File.Filename = path.Join(Params.LogRootPath, "datanode-"+strconv.FormatInt(node.session.ServerID, 10)+".log")
 
 	req := &datapb.RegisterNodeRequest{
 		Base: &commonpb.MsgBase{
@@ -183,14 +185,14 @@ func (node *DataNode) Init() error {
 
 	replica := newReplica()
 
-	var alloc allocatorInterface = newAllocator(node.masterService)
+	var alloc allocatorInterface = newAllocator(node.session.ServerID, node.masterService)
 
 	chanSize := 100
 	flushChan := make(chan *flushMsg, chanSize)
 	node.flushChan = flushChan
 	node.dataSyncService = newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory)
 	node.dataSyncService.init()
-	node.metaService = newMetaService(node.ctx, replica, node.masterService)
+	node.metaService = newMetaService(node.ctx, node.session.ServerID, replica, node.masterService)
 	node.replica = replica
 
 	return nil
@@ -235,7 +237,7 @@ func (node *DataNode) GetComponentStates(ctx context.Context) (*internalpb.Compo
 	log.Debug("DataNode current state", zap.Any("State", node.State.Load()))
 	states := &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
-			NodeID:    Params.NodeID,
+			NodeID:    node.session.ServerID,
 			Role:      node.Role,
 			StateCode: node.State.Load().(internalpb.StateCode),
 		},

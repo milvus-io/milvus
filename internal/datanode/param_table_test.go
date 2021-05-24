@@ -21,7 +21,7 @@ func TestParamTable_DataNode(t *testing.T) {
 	Params.Init()
 
 	t.Run("Test NodeID", func(t *testing.T) {
-		id := Params.NodeID
+		id := 0
 		log.Println("NodeID:", id)
 	})
 

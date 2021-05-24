@@ -27,6 +27,7 @@ import (
 
 type dataSyncService struct {
 	ctx         context.Context
+	serverID    int64
 	fg          *flowgraph.TimeTickedFlowGraph
 	flushChan   <-chan *flushMsg
 	replica     Replica
@@ -107,7 +108,7 @@ func (dsService *dataSyncService) initNodes() {
 
 	var filterDmNode Node = newFilteredDmNode()
 	var ddNode Node = newDDNode(dsService.ctx, mt, dsService.flushChan, dsService.replica, dsService.idAllocator)
-	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, mt, dsService.replica, dsService.msFactory, dsService.idAllocator)
+	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, dsService.serverID, mt, dsService.replica, dsService.msFactory, dsService.idAllocator)
 	var gcNode Node = newGCNode(dsService.replica)
 
 	dsService.fg.AddNode(dmStreamNode)

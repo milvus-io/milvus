@@ -31,13 +31,15 @@ import (
 // a healthy master service and a valid master service grpc client.
 type metaService struct {
 	ctx          context.Context
+	serverID     int64
 	replica      Replica
 	masterClient types.MasterService
 }
 
-func newMetaService(ctx context.Context, replica Replica, m types.MasterService) *metaService {
+func newMetaService(ctx context.Context, serverID int64, replica Replica, m types.MasterService) *metaService {
 	return &metaService{
 		ctx:          ctx,
+		serverID:     serverID,
 		replica:      replica,
 		masterClient: m,
 	}
@@ -73,7 +75,7 @@ func (mService *metaService) getCollectionNames(ctx context.Context) ([]string, 
 			MsgType:   commonpb.MsgType_ShowCollections,
 			MsgID:     0, //GOOSE TODO
 			Timestamp: 0, // GOOSE TODO
-			SourceID:  Params.NodeID,
+			SourceID:  mService.serverID,
 		},
 		DbName: "default", // GOOSE TODO
 	}
@@ -92,7 +94,7 @@ func (mService *metaService) createCollection(ctx context.Context, name string) 
 			MsgType:   commonpb.MsgType_DescribeCollection,
 			MsgID:     0, //GOOSE TODO
 			Timestamp: 0, // GOOSE TODO
-			SourceID:  Params.NodeID,
+			SourceID:  mService.serverID,
 		},
 		DbName:         "default", // GOOSE TODO
 		CollectionName: name,

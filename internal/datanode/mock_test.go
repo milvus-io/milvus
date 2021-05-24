@@ -78,7 +78,7 @@ func newDataNodeMock() *DataNode {
 	node.flushChan = flushChan
 	node.dataSyncService = newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory)
 	node.dataSyncService.init()
-	node.metaService = newMetaService(node.ctx, replica, node.masterService)
+	node.metaService = newMetaService(node.ctx, 0, replica, node.masterService)
 	node.replica = replica
 
 	return node

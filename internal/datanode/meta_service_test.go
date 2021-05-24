@@ -33,7 +33,7 @@ func TestMetaService_All(t *testing.T) {
 	mFactory := &MasterServiceFactory{}
 	mFactory.setCollectionID(collectionID0)
 	mFactory.setCollectionName(collectionName0)
-	ms := newMetaService(ctx, replica, mFactory)
+	ms := newMetaService(ctx, 0, replica, mFactory)
 
 	t.Run("Test getCollectionNames", func(t *testing.T) {
 		names, err := ms.getCollectionNames(ctx)
@@ -68,7 +68,7 @@ func TestMetaService_All(t *testing.T) {
 	})
 
 	t.Run("Test Init", func(t *testing.T) {
-		ms1 := newMetaService(ctx, replica, mFactory)
+		ms1 := newMetaService(ctx, 0, replica, mFactory)
 		ms1.init()
 	})
 

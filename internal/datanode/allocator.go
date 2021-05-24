@@ -28,13 +28,15 @@ type allocatorInterface interface {
 }
 
 type allocator struct {
+	sourceID      int64
 	masterService types.MasterService
 }
 
 var _ allocatorInterface = &allocator{}
 
-func newAllocator(s types.MasterService) *allocator {
+func newAllocator(sourceID int64, s types.MasterService) *allocator {
 	return &allocator{
+		sourceID:      sourceID,
 		masterService: s,
 	}
 }
@@ -46,7 +48,7 @@ func (alloc *allocator) allocID() (UniqueID, error) {
 			MsgType:   commonpb.MsgType_RequestID,
 			MsgID:     1, // GOOSE TODO
 			Timestamp: 0, // GOOSE TODO
-			SourceID:  Params.NodeID,
+			SourceID:  alloc.sourceID,
 		},
 		Count: 1,
 	})
