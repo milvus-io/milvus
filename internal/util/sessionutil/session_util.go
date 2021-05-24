@@ -207,11 +207,12 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 				return
 			case resp, ok := <-ch:
 				if !ok {
-					failCh <- true
+					close(failCh)
 				}
 				if resp == nil {
-					failCh <- true
+					close(failCh)
 				}
+				failCh <- true
 			}
 		}
 	}()
