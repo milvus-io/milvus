@@ -15,7 +15,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
@@ -366,7 +365,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 				}
 				nilHits[i] = bs
 			}
-			resultChannelInt, _ := strconv.ParseInt(searchMsg.ResultChannelID, 10, 64)
+			resultChannelInt := 0
 			searchResultMsg := &msgstream.SearchResultMsg{
 				BaseMsg: msgstream.BaseMsg{Ctx: searchMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
 				SearchResults: internalpb.SearchResults{
@@ -447,7 +446,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 			//log.Debug("hits msg  = ", unMarshaledHit)
 			offset += len
 		}
-		resultChannelInt, _ := strconv.ParseInt(searchMsg.ResultChannelID, 10, 64)
+		resultChannelInt := 0
 		searchResultMsg := &msgstream.SearchResultMsg{
 			BaseMsg: msgstream.BaseMsg{Ctx: searchMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
 			SearchResults: internalpb.SearchResults{
@@ -517,7 +516,7 @@ func (s *searchCollection) publishFailedSearchResult(searchMsg *msgstream.Search
 	//log.Debug("Public fail SearchResult!")
 	msgPack := msgstream.MsgPack{}
 
-	resultChannelInt, _ := strconv.ParseInt(searchMsg.ResultChannelID, 10, 64)
+	resultChannelInt := 0
 	searchResultMsg := &msgstream.SearchResultMsg{
 		BaseMsg: msgstream.BaseMsg{HashValues: []uint32{uint32(resultChannelInt)}},
 		SearchResults: internalpb.SearchResults{
