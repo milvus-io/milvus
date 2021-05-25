@@ -19,8 +19,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/util/retry"
 
+	"github.com/golang/protobuf/proto"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
@@ -85,11 +87,22 @@ func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 
 func (i *IndexNode) Init() error {
 	ctx := context.Background()
+
+	connectEtcdFn := func() error {
+		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
+		i.etcdKV = etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+		return err
+	}
+	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	if err != nil {
+		return err
+	}
+
 	i.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress}, typeutil.IndexNodeRole,
 		Params.IP+":"+strconv.Itoa(Params.Port), false)
 	i.session.Init()
 
-	err := funcutil.WaitForComponentHealthy(ctx, i.serviceClient, "IndexService", 1000000, time.Millisecond*200)
+	err = funcutil.WaitForComponentHealthy(ctx, i.serviceClient, "IndexService", 1000000, time.Millisecond*200)
 	if err != nil {
 		return err
 	}
@@ -99,6 +112,7 @@ func (i *IndexNode) Init() error {
 			Ip:   Params.IP,
 			Port: int64(Params.Port),
 		},
+		ServerID: i.session.ServerID,
 	}
 
 	resp, err2 := i.serviceClient.RegisterNode(ctx, request)
@@ -171,6 +185,7 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 		zap.String("Indexname", request.IndexName),
 		zap.Int64("IndexID", request.IndexID),
 		zap.Int64("Version", request.Version),
+		zap.String("MetaPath", request.MetaPath),
 		zap.Strings("DataPaths", request.DataPaths),
 		zap.Any("TypeParams", request.TypeParams),
 		zap.Any("IndexParams", request.IndexParams))
@@ -197,7 +212,7 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 		ret.Reason = err.Error()
 		return ret, nil
 	}
-	log.Debug("indexnode", zap.Int64("indexnode successfully schedule with indexBuildID", request.IndexBuildID))
+	log.Debug("IndexNode", zap.Int64("IndexNode successfully schedule with indexBuildID", request.IndexBuildID))
 
 	return ret, nil
 }

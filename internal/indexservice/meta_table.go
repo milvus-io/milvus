@@ -12,18 +12,15 @@
 package indexservice
 
 import (
-	"context"
 	"fmt"
-	"path"
 	"strconv"
 	"sync"
 	"time"
 
-	"go.etcd.io/etcd/clientv3"
-
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -35,22 +32,20 @@ const (
 
 type Meta struct {
 	indexMeta *indexpb.IndexMeta
-	reversion int64
+	revision  int64
 }
 
 type metaTable struct {
-	client            *clientv3.Client // client of a reliable kv service, i.e. etcd client
-	rootPath          string
+	client            *etcdkv.EtcdKV    // client of a reliable kv service, i.e. etcd client
 	indexBuildID2Meta map[UniqueID]Meta // index build id to index meta
 
 	lock sync.RWMutex
 }
 
-func NewMetaTable(kv *clientv3.Client, rootPath string) (*metaTable, error) {
+func NewMetaTable(kv *etcdkv.EtcdKV) (*metaTable, error) {
 	mt := &metaTable{
-		client:   kv,
-		rootPath: rootPath,
-		lock:     sync.RWMutex{},
+		client: kv,
+		lock:   sync.RWMutex{},
 	}
 	err := mt.reloadFromKV()
 	if err != nil {
@@ -62,29 +57,22 @@ func NewMetaTable(kv *clientv3.Client, rootPath string) (*metaTable, error) {
 
 func (mt *metaTable) reloadFromKV() error {
 	mt.indexBuildID2Meta = make(map[UniqueID]Meta)
-	key := path.Join(mt.rootPath, "indexes")
+	key := "indexes"
 	log.Debug("LoadWithPrefix ", zap.String("prefix", key))
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := mt.client.Get(ctx, key, clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+
+	resp, err := mt.client.LoadWithPrefix2(key)
 	if err != nil {
 		return err
 	}
-	values := make([]string, 0, resp.Count)
 	for _, kv := range resp.Kvs {
-		values = append(values, string(kv.Value))
-	}
-
-	for _, value := range values {
 		indexMeta := indexpb.IndexMeta{}
-		err = proto.UnmarshalText(value, &indexMeta)
+		err = proto.UnmarshalText(string(kv.Value), &indexMeta)
 		if err != nil {
 			return fmt.Errorf("IndexService metaTable reloadFromKV UnmarshalText indexpb.IndexMeta err:%w", err)
 		}
 		meta := &Meta{
 			indexMeta: &indexMeta,
-			reversion: resp.Header.Revision,
+			revision:  kv.Version,
 		}
 		mt.indexBuildID2Meta[indexMeta.IndexBuildID] = *meta
 	}
@@ -95,15 +83,19 @@ func (mt *metaTable) reloadFromKV() error {
 func (mt *metaTable) saveIndexMeta(meta *Meta) error {
 	value := proto.MarshalTextString(meta.indexMeta)
 
-	key := path.Join(mt.rootPath, "/indexes/"+strconv.FormatInt(meta.indexMeta.IndexBuildID, 10))
+	key := "indexes/" + strconv.FormatInt(meta.indexMeta.IndexBuildID, 10)
 	log.Debug("LoadWithPrefix ", zap.String("prefix", key))
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := mt.client.Put(ctx, key, value)
+
+	_, err := mt.client.Put(key, value)
 	if err != nil {
 		return err
 	}
-	meta.reversion = resp.Header.Revision
+
+	resp, err := mt.client.LoadWithPrefix2(key)
+	if err != nil {
+		return err
+	}
+	meta.revision = resp.Kvs[0].Version
 	mt.indexBuildID2Meta[meta.indexMeta.IndexBuildID] = *meta
 
 	return nil
@@ -122,14 +114,14 @@ func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequ
 			State:        commonpb.IndexState_Unissued,
 			IndexBuildID: indexBuildID,
 			Req:          req,
-			LeaseKey:     "",
+			NodeServerID: 0,
 			Version:      0,
 		},
 	}
 	return mt.saveIndexMeta(meta)
 }
 
-func (mt *metaTable) BuildIndex(indexBuildID UniqueID, leaseKey string) error {
+func (mt *metaTable) BuildIndex(indexBuildID UniqueID, serverID int64) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 	log.Debug("IndexService update index state")
@@ -142,14 +134,14 @@ func (mt *metaTable) BuildIndex(indexBuildID UniqueID, leaseKey string) error {
 	if meta.indexMeta.State != commonpb.IndexState_Unissued {
 		return fmt.Errorf("can not set lease key, index with ID = %d state is %d", indexBuildID, meta.indexMeta.State)
 	}
-	meta.indexMeta.LeaseKey = leaseKey
+	meta.indexMeta.NodeServerID = serverID
 	return mt.saveIndexMeta(&meta)
 }
 
 func (mt *metaTable) UpdateVersion(indexBuildID UniqueID) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
-	log.Debug("IndexService update index state")
+	log.Debug("IndexService update index version")
 
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
@@ -220,6 +212,12 @@ func (mt *metaTable) DeleteIndex(indexBuildID UniqueID) {
 	defer mt.lock.Unlock()
 
 	delete(mt.indexBuildID2Meta, indexBuildID)
+	key := "indexes/" + strconv.FormatInt(indexBuildID, 10)
+
+	err := mt.client.Remove(key)
+	if err != nil {
+		log.Debug("IndexService", zap.Any("Delete IndexMeta in etcd error", err))
+	}
 }
 
 func (mt *metaTable) updateRecycleState(indexBuildID UniqueID) error {
@@ -239,8 +237,6 @@ func (mt *metaTable) getUnusedIndexFiles(limit int) []Meta {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 
-	log.Debug("IndexService get mark deleted meta")
-
 	var metas []Meta
 	for _, meta := range mt.indexBuildID2Meta {
 		if meta.indexMeta.State == commonpb.IndexState_Finished && !meta.indexMeta.Recycled {
@@ -254,21 +250,16 @@ func (mt *metaTable) getUnusedIndexFiles(limit int) []Meta {
 	return metas
 }
 
-func (mt *metaTable) getToAssignedTasks() []Meta {
+func (mt *metaTable) getIndexMeta(indexBuildID UniqueID) Meta {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 
-	log.Debug("IndexService get unissued tasks")
-
-	var tasks []Meta
-	for _, meta := range mt.indexBuildID2Meta {
-		// TODO: lease Key not in IndexService watched lease keys
-		if meta.indexMeta.LeaseKey == "" {
-			tasks = append(tasks, meta)
-		}
+	meta, ok := mt.indexBuildID2Meta[indexBuildID]
+	if !ok {
+		log.Debug("IndexService", zap.Any("Meta table does not have the meta with indexBuildID", indexBuildID))
 	}
 
-	return tasks
+	return meta
 }
 
 func compare2Array(arr1, arr2 interface{}) bool {
@@ -317,6 +308,9 @@ func compare2Array(arr1, arr2 interface{}) bool {
 }
 
 func (mt *metaTable) hasSameReq(req *indexpb.BuildIndexRequest) (bool, UniqueID) {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+
 LOOP:
 	for _, meta := range mt.indexBuildID2Meta {
 		if meta.indexMeta.Req.IndexID == req.IndexID {
@@ -336,14 +330,80 @@ LOOP:
 	return false, -1
 }
 
-type nodeTasks struct {
-	nodeID2Tasks map[string][]UniqueID
+func (mt *metaTable) loadMetaFromETCD(indexBuildID int64, revision int64) bool {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+
+	meta, ok := mt.indexBuildID2Meta[indexBuildID]
+	if ok {
+		if meta.revision >= revision {
+			return false
+		}
+	}
+
+	key := "indexes/" + strconv.FormatInt(indexBuildID, 10)
+	resp, err := mt.client.LoadWithPrefix2(key)
+	if err != nil {
+		log.Debug("IndexService", zap.Any("Load meta from etcd error", err))
+		return false
+	}
+	value := string(resp.Kvs[0].Value)
+	indexMeta := &indexpb.IndexMeta{}
+	err = proto.UnmarshalText(value, indexMeta)
+	if err != nil {
+		log.Debug("IndexService", zap.Any("Unmarshal error", err))
+		return false
+	}
+
+	log.Debug("IndexService", zap.Any("IndexMeta", indexMeta))
+	mt.indexBuildID2Meta[indexBuildID] = Meta{
+		indexMeta: indexMeta,
+		revision:  resp.Kvs[0].Version,
+	}
+
+	return true
 }
 
-func (nt *nodeTasks) getTasksByLeaseKey(leaseKey string) []UniqueID {
-	indexBuildIDs, ok := nt.nodeID2Tasks[leaseKey]
+type nodeTasks struct {
+	nodeID2Tasks map[int64][]UniqueID
+}
+
+func NewNodeTasks() *nodeTasks {
+	return &nodeTasks{
+		nodeID2Tasks: map[int64][]UniqueID{},
+	}
+}
+
+func (nt *nodeTasks) getTasksByLeaseKey(serverID int64) []UniqueID {
+	indexBuildIDs, ok := nt.nodeID2Tasks[serverID]
 	if !ok {
 		return nil
 	}
 	return indexBuildIDs
+}
+
+func (nt *nodeTasks) assignTask(serverID int64, indexBuildID UniqueID) {
+	indexBuildIDs, ok := nt.nodeID2Tasks[serverID]
+	if !ok {
+		var IDs []UniqueID
+		IDs = append(IDs, indexBuildID)
+		nt.nodeID2Tasks[serverID] = IDs
+		return
+	}
+	indexBuildIDs = append(indexBuildIDs, indexBuildID)
+	nt.nodeID2Tasks[serverID] = indexBuildIDs
+}
+
+func (nt *nodeTasks) finishTask(indexBuildID UniqueID) {
+	for serverID := range nt.nodeID2Tasks {
+		for i, buildID := range nt.nodeID2Tasks[serverID] {
+			if buildID == indexBuildID {
+				nt.nodeID2Tasks[serverID] = append(nt.nodeID2Tasks[serverID][:i], nt.nodeID2Tasks[serverID][:i+1]...)
+			}
+		}
+	}
+}
+
+func (nt *nodeTasks) delete(serverID int64) {
+	delete(nt.nodeID2Tasks, serverID)
 }

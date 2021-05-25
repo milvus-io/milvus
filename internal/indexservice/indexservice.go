@@ -19,13 +19,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
-
+	"github.com/coreos/etcd/mvcc/mvccpb"
+	"github.com/golang/protobuf/proto"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/kv"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -37,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.etcd.io/etcd/clientv3"
 )
 
 const (
@@ -59,6 +59,11 @@ type IndexService struct {
 
 	sched   *TaskScheduler
 	session *sessionutil.Session
+
+	addChan <-chan *sessionutil.Session
+	delChan <-chan *sessionutil.Session
+
+	assignChan chan []UniqueID
 
 	idAllocator *allocator.GlobalIDAllocator
 
@@ -99,12 +104,14 @@ func (i *IndexService) Init() error {
 		Params.Address, true)
 	i.session.Init()
 
+	i.addChan, i.delChan = i.session.WatchServices(typeutil.IndexNodeRole)
 	connectEtcdFn := func() error {
 		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
 		if err != nil {
 			return err
 		}
-		metakv, err := NewMetaTable(etcdClient, Params.MetaRootPath)
+		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+		metakv, err := NewMetaTable(etcdKV)
 		if err != nil {
 			return err
 		}
@@ -115,11 +122,6 @@ func (i *IndexService) Init() error {
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
-	self := sessionutil.NewSession("IndexService", funcutil.GetLocalIP()+":"+strconv.Itoa(Params.Port), true)
-	sm := sessionutil.NewSessionManager(ctx, Params.EtcdAddress, Params.MetaRootPath, self)
-	sm.Init()
-	sessionutil.SetGlobalSessionManager(sm)
 
 	//init idAllocator
 	kvRootPath := Params.KvRootPath
@@ -152,6 +154,10 @@ func (i *IndexService) Init() error {
 		return err
 	}
 	i.UpdateStateCode(internalpb.StateCode_Healthy)
+
+	i.nodeTasks = NewNodeTasks()
+
+	i.assignChan = make(chan []UniqueID, 1024)
 	return nil
 }
 
@@ -164,6 +170,12 @@ func (i *IndexService) Start() error {
 
 	i.loopWg.Add(1)
 	go i.assignmentTasksLoop()
+
+	i.loopWg.Add(1)
+	go i.watchNodeLoop()
+
+	i.loopWg.Add(1)
+	go i.watchMetaLoop()
 
 	i.sched.Start()
 	// Start callbacks
@@ -229,7 +241,7 @@ func (i *IndexService) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 }
 
 func (i *IndexService) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
-	log.Debug("indexservice building index ...",
+	log.Debug("IndexService building index ...",
 		zap.Int64("IndexBuildID", req.IndexBuildID),
 		zap.String("IndexName = ", req.IndexName),
 		zap.Int64("IndexID = ", req.IndexID),
@@ -295,6 +307,7 @@ func (i *IndexService) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRe
 		ret.Status.Reason = err.Error()
 		return ret, nil
 	}
+	i.assignChan <- []UniqueID{t.indexBuildID}
 	ret.Status.ErrorCode = commonpb.ErrorCode_Success
 	ret.IndexBuildID = t.indexBuildID
 	return ret, nil
@@ -446,44 +459,109 @@ func (i *IndexService) assignmentTasksLoop() {
 	defer cancel()
 	defer i.loopWg.Done()
 
-	timeTicker := time.NewTicker(durationInterval)
 	log.Debug("IndexService start assign tasks loop")
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-timeTicker.C:
-			tasks := i.metaTable.getToAssignedTasks()
-			for _, task := range tasks {
-				nodeID, builderClient, leaseKey := i.nodeClients.PeekClient()
+		case indexBuildIDs := <-i.assignChan:
+			for _, indexBuildID := range indexBuildIDs {
+				meta := i.metaTable.getIndexMeta(indexBuildID)
+				log.Debug("IndexService", zap.Any("Meta", meta))
+				if meta.indexMeta.State == commonpb.IndexState_Finished {
+					continue
+				}
+				if err := i.metaTable.UpdateVersion(indexBuildID); err != nil {
+					log.Debug("IndexService", zap.String("build index update version err", err.Error()))
+				}
+				nodeID, builderClient, nodeServerID := i.nodeClients.PeekClient()
 				if builderClient == nil {
 					log.Debug("IndexService has no available IndexNode")
 				}
 				req := &indexpb.CreateIndexRequest{
-					IndexBuildID: task.indexMeta.IndexBuildID,
-					IndexName:    task.indexMeta.Req.IndexName,
-					IndexID:      task.indexMeta.Req.IndexID,
-					Version:      task.indexMeta.Version + 1,
-					MetaPath:     "/indexes/" + strconv.FormatInt(task.indexMeta.IndexBuildID, 10),
-					DataPaths:    task.indexMeta.Req.DataPaths,
-					TypeParams:   task.indexMeta.Req.TypeParams,
-					IndexParams:  task.indexMeta.Req.IndexParams,
-				}
-				if err := i.metaTable.UpdateVersion(task.indexMeta.IndexBuildID); err != nil {
-					log.Debug("IndexService", zap.String("build index update version err", err.Error()))
+					IndexBuildID: indexBuildID,
+					IndexName:    meta.indexMeta.Req.IndexName,
+					IndexID:      meta.indexMeta.Req.IndexID,
+					Version:      meta.indexMeta.Version + 1,
+					MetaPath:     "/indexes/" + strconv.FormatInt(indexBuildID, 10),
+					DataPaths:    meta.indexMeta.Req.DataPaths,
+					TypeParams:   meta.indexMeta.Req.TypeParams,
+					IndexParams:  meta.indexMeta.Req.IndexParams,
 				}
 				resp, err := builderClient.CreateIndex(ctx, req)
 				if err != nil {
 					log.Debug("IndexService", zap.String("build index err", err.Error()))
 				}
-				if err = i.metaTable.BuildIndex(task.indexMeta.IndexBuildID, leaseKey); err != nil {
+				if err = i.metaTable.BuildIndex(indexBuildID, nodeServerID); err != nil {
 					log.Debug("IndexService", zap.String("update meta table error", err.Error()))
 				}
 				if resp.ErrorCode != commonpb.ErrorCode_Success {
 					log.Debug("IndexService", zap.String("build index err", resp.Reason))
 				}
 				i.nodeClients.IncPriority(nodeID, 1)
+			}
+		}
+	}
+}
+
+func (i *IndexService) watchNodeLoop() {
+	ctx, cancel := context.WithCancel(i.loopCtx)
+
+	defer cancel()
+	defer i.loopWg.Done()
+	log.Debug("IndexService start watch node loop")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case session := <-i.addChan:
+			log.Debug("IndexService", zap.Any("Add indexnode, session serverID", session.ServerID))
+		case session := <-i.delChan:
+			serverID := session.ServerID
+			log.Debug("IndexService", zap.Any("The IndexNode crashed with ID", serverID))
+			indexBuildIDs := i.nodeTasks.getTasksByLeaseKey(serverID)
+			i.assignChan <- indexBuildIDs
+			i.nodeTasks.delete(serverID)
+		}
+	}
+}
+
+func (i *IndexService) watchMetaLoop() {
+	ctx, cancel := context.WithCancel(i.loopCtx)
+
+	defer cancel()
+	defer i.loopWg.Done()
+	log.Debug("IndexService start watch meta loop")
+
+	watchChan := i.metaTable.client.WatchWithPrefix("indexes")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case resp := <-watchChan:
+			log.Debug("meta updated.")
+			for _, event := range resp.Events {
+				eventRevision := event.Kv.Version
+				indexMeta := &indexpb.IndexMeta{}
+				err := proto.UnmarshalText(string(event.Kv.Value), indexMeta)
+				if err != nil {
+					log.Debug("IndexService", zap.Any("Unmarshal error", err))
+				}
+				indexBuildID := indexMeta.IndexBuildID
+				switch event.Type {
+				case mvccpb.PUT:
+					//TODO: get indexBuildID fast
+					log.Debug("IndexService", zap.Any("Meta need load by IndexBuildID", indexBuildID))
+
+					reload := i.metaTable.loadMetaFromETCD(indexBuildID, eventRevision)
+					if reload {
+						i.nodeTasks.finishTask(indexBuildID)
+					}
+				case mvccpb.DELETE:
+				}
 			}
 		}
 	}

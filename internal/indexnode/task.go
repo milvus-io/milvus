@@ -16,6 +16,9 @@ import (
 	"errors"
 	"runtime"
 	"strconv"
+	"time"
+
+	"github.com/milvus-io/milvus/internal/util/retry"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -135,15 +138,18 @@ func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 	}
 
 	indexMeta := indexpb.IndexMeta{}
-	value, err := it.etcdKV.Load(it.req.MetaPath)
+	resp, err := it.etcdKV.LoadWithPrefix2(it.req.MetaPath)
 	if err != nil {
+		log.Debug("IndexService", zap.Any("load meta error with path", it.req.MetaPath))
+		log.Debug("IndexService", zap.Any("Load meta error", err))
 		return err
 	}
-	err = proto.UnmarshalText(value, &indexMeta)
+	err = proto.UnmarshalText(string(resp.Kvs[0].Value), &indexMeta)
 	if err != nil {
+		log.Debug("IndexService", zap.Any("Unmarshal error", err))
 		return err
 	}
-	if indexMeta.Version >= it.req.Version {
+	if indexMeta.Version > it.req.Version {
 		log.Debug("IndexNode", zap.Any("Notify build index", "This version is not the latest version"))
 		return nil
 	}
@@ -152,10 +158,17 @@ func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 	if it.err != nil {
 		indexMeta.State = commonpb.IndexState_Failed
 	}
-	err = it.etcdKV.Save(it.req.MetaPath, proto.MarshalTextString(&indexMeta))
+	log.Debug("IndexNode", zap.Any("MetaPath", it.req.MetaPath))
+	err = it.etcdKV.CompareVersionAndSwap(it.req.MetaPath, resp.Kvs[0].Version,
+		proto.MarshalTextString(&indexMeta))
 	if err != nil {
+		resp2, _ := it.etcdKV.LoadWithPrefix2(it.req.MetaPath)
+		log.Debug("IndexNode", zap.Any("write meta to etcd error", err),
+			zap.Any("read revision", resp.Kvs[0].Version),
+			zap.Any("write revision", resp2.Kvs[0].Version))
 		return err
 	}
+	log.Debug("IndexNode", zap.Any("Task finished with IndexBuildID", indexMeta.IndexBuildID))
 	return nil
 }
 
@@ -324,7 +337,26 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 
 			savePath := getSavePathByKey(key)
 
-			err := saveBlob(savePath, value)
+			saveIndexFileFn := func() error {
+				resp, err := it.etcdKV.LoadWithPrefix2(it.req.MetaPath)
+				if err != nil {
+					log.Debug("IndexService", zap.Any("load meta error with path", it.req.MetaPath))
+					log.Debug("IndexService", zap.Any("Load meta error", err))
+					return err
+				}
+				indexMeta := indexpb.IndexMeta{}
+				err = proto.UnmarshalText(string(resp.Kvs[0].Value), &indexMeta)
+				if err != nil {
+					log.Debug("IndexService", zap.Any("Unmarshal error", err))
+					return err
+				}
+				if indexMeta.Version > it.req.Version {
+					log.Debug("IndexNode", zap.Any("Notify build index", "This version is not the latest version"))
+					return errors.New("This task has been reassigned ")
+				}
+				return saveBlob(savePath, value)
+			}
+			err := retry.Retry(5, time.Millisecond*200, saveIndexFileFn)
 			if err != nil {
 				return err
 			}
