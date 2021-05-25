@@ -16,6 +16,7 @@ import (
 	"fmt"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -92,4 +93,16 @@ func SegmentIndexInfoEqual(info1 *etcdpb.SegmentIndexInfo, info2 *etcdpb.Segment
 		info1.IndexID == info2.IndexID &&
 		info1.BuildID == info2.BuildID &&
 		info1.EnableIndex == info2.EnableIndex
+}
+
+// EncodeMsgPositions serialize []*MsgPosition into string
+func EncodeMsgPositions(msgPositions []*msgstream.MsgPosition) (string, error) {
+	if len(msgPositions) == 0 {
+		return "", nil
+	}
+	resByte, err := json.Marshal(msgPositions)
+	if err != nil {
+		return "", err
+	}
+	return string(resByte), nil
 }

@@ -100,9 +100,8 @@ func (i *IndexService) Init() error {
 	log.Debug("indexservice", zap.String("etcd address", Params.EtcdAddress))
 
 	ctx := context.Background()
-	i.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress}, typeutil.IndexServiceRole,
-		Params.Address, true)
-	i.session.Init()
+	i.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress})
+	i.session.Init(typeutil.IndexServiceRole, Params.Address, true)
 
 	i.addChan, i.delChan = i.session.WatchServices(typeutil.IndexNodeRole)
 	connectEtcdFn := func() error {

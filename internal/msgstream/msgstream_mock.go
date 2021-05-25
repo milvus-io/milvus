@@ -39,6 +39,10 @@ func (ms *SimpleMsgStream) AsProducer(channels []string) {
 func (ms *SimpleMsgStream) AsConsumer(channels []string, subName string) {
 }
 
+func (ms *SimpleMsgStream) ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32 {
+	return nil
+}
+
 func (ms *SimpleMsgStream) SetRepackFunc(repackFunc RepackFunc) {
 }
 

@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -1170,7 +1171,62 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 }
 
 func (node *ProxyNode) Retrieve(ctx context.Context, request *milvuspb.RetrieveRequest) (*milvuspb.RetrieveResults, error) {
-	return nil, nil
+	rt := &RetrieveTask{
+		ctx:       ctx,
+		Condition: NewTaskCondition(ctx),
+		RetrieveRequest: &internalpb.RetrieveRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_Retrieve,
+				SourceID: Params.ProxyID,
+			},
+			ResultChannelID: strconv.FormatInt(Params.ProxyID, 10),
+		},
+		queryMsgStream: node.queryMsgStream,
+		resultBuf:      make(chan []*internalpb.RetrieveResults),
+		retrieve:       request,
+	}
+
+	err := node.sched.DqQueue.Enqueue(rt)
+	if err != nil {
+		return &milvuspb.RetrieveResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	log.Debug("Retrieve",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", rt.Base.MsgID),
+		zap.Uint64("timestamp", rt.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.Any("partitions", request.PartitionNames),
+		zap.Any("len(Ids)", len(request.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data)))
+	defer func() {
+		log.Debug("Retrieve Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", rt.Base.MsgID),
+			zap.Uint64("timestamp", rt.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.Any("partitions", request.PartitionNames),
+			zap.Any("len(Ids)", len(request.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data)))
+	}()
+
+	err = rt.WaitToFinish()
+	if err != nil {
+		return &milvuspb.RetrieveResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	return rt.result, nil
 }
 
 func (node *ProxyNode) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error) {
