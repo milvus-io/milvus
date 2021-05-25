@@ -107,7 +107,7 @@ func (c *dataNodeCluster) WatchInsertChannels(channels []string) {
 				Timestamp: 0,  // todo
 				SourceID:  Params.NodeID,
 			},
-			ChannelNames: group,
+			// ChannelNames: group, // TODO
 		})
 		if err = VerifyResponse(resp, err); err != nil {
 			log.Error("watch dm channels error", zap.Stringer("dataNode", c.nodes[i]), zap.Error(err))
