@@ -19,13 +19,13 @@ def gen_unique_str(str_value=None):
 
 
 def gen_int64_field(is_primary=False, description=ct.int_field_desc):
-    int64_field = FieldSchema(name=ct.default_int64_field, dtype=DataType.INT64, description=description,
+    int64_field = FieldSchema(name=ct.default_int64_field_name, dtype=DataType.INT64, description=description,
                               is_primary=is_primary)
     return int64_field
 
 
 def gen_float_field(is_primary=False, description=ct.float_field_desc):
-    float_field = FieldSchema(name=ct.default_float_field, dtype=DataType.FLOAT, description=description,
+    float_field = FieldSchema(name=ct.default_float_field_name, dtype=DataType.FLOAT, description=description,
                               is_primary=is_primary)
     return float_field
 
@@ -65,24 +65,32 @@ def gen_vectors(nb, dim):
     return vectors.tolist()
 
 
-def gen_default_dataframe_data(nb=ct.default_nb):
+def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim):
     import pandas as pd
     int_values = pd.Series(data=[i for i in range(nb)])
     float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
-    float_vec_values = gen_vectors(nb, ct.default_dim)
+    float_vec_values = gen_vectors(nb, dim)
     df = pd.DataFrame({
-        ct.default_int64_field: int_values,
-        ct.default_float_field: float_values,
+        ct.default_int64_field_name: int_values,
+        ct.default_float_field_name: float_values,
         ct.default_float_vec_field_name: float_vec_values
     })
     return df
 
 
-def gen_default_list_data(nb=ct.default_nb):
+def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim):
     int_values = [i for i in range(nb)]
     float_values = [float(i) for i in range(nb)]
-    float_vec_values = gen_vectors(nb, ct.default_dim)
+    float_vec_values = gen_vectors(nb, dim)
     data = [int_values, float_values, float_vec_values]
+    return data
+
+
+def gen_default_tuple_data(nb=ct.default_nb, dim=ct.default_dim):
+    int_values = [i for i in range(nb)]
+    float_values = [float(i) for i in range(nb)]
+    float_vec_values = gen_vectors(nb, dim)
+    data = (int_values, float_values, float_vec_values)
     return data
 
 

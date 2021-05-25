@@ -11,6 +11,7 @@ from base.utility import ApiUtility
 from config.test_info import test_info
 from utils.util_log import test_log as log
 from common import common_func as cf
+from common import common_type as ct
 
 
 def request_catch():
@@ -21,7 +22,9 @@ def request_catch():
             except Exception as e:
                 log.error("[ClientRequest API Exception]%s: %s" % (str(func), str(e)))
                 return e, False
+
         return inner_wrapper
+
     return wrapper
 
 
@@ -54,7 +57,6 @@ param_info = ParamInfo()
 
 
 class Base:
-
     """ Initialize class object """
     connection = None
     collection = None
@@ -88,6 +90,7 @@ class Base:
         host = request.config.getoption("--host")
         port = request.config.getoption("--port")
         handler = request.config.getoption("--handler")
+        log.info("host: %s, port: %s.", host, port)
         param_info.prepare_param_info(host, port, handler)
 
 
@@ -97,9 +100,23 @@ class ApiReq(Base):
     Public methods that can be used to add cases.
     """
 
+    @pytest.fixture(
+        scope="module",
+        params=ct.get_invalid_strs
+    )
+    def get_invalid_string(self, request):
+        yield request.param
+
+    @pytest.fixture(
+        scope="module",
+        params=cf.gen_simple_index()
+    )
+    def get_index_param(self, request):
+        yield request.param
+
     def _connect(self):
         """ Testing func """
-        self.connection.configure(check_res='', default={"host": "192.168.1.240", "port": 19530})
+        self.connection.configure(check_res='', default={"host": "192.168.1.239", "port": 19530})
         res = self.connection.create_connection(alias='default')
         return res
 
@@ -108,5 +125,17 @@ class ApiReq(Base):
         self._connect()
         name = cf.gen_unique_str("ApiReq") if name is None else name
         schema = cf.gen_default_collection_schema() if schema is None else schema
-        collection = self.collection.collection_init(name=name, data=data, schema=schema, check_res=check_res, **kwargs)
-        return name, collection
+        collection, _ = self.collection.collection_init(name=name, data=data,
+                                                        schema=schema, check_res=check_res, **kwargs)
+        return collection
+
+    def _partition(self, name=None, descriptions=None, **kwargs):
+        """ inti a partition in a collection """
+        # self._connect()
+        m_collection = self._collection()
+        name = cf.gen_unique_str("partition_") if name is None else name
+        descriptions = cf.gen_unique_str("partition_des_") if descriptions is None else descriptions
+        m_partition, _ = self.partition.partition_init(m_collection, name,
+                                                       description=descriptions,
+                                                       **kwargs)
+        return m_partition
