@@ -70,12 +70,19 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	assert.Nil(t, err)
 
 	iBNode := newInsertBufferNode(ctx, newBinlogMeta(), replica, msFactory, NewAllocatorFactory())
-	inMsg := genInsertMsg()
+
+	ddlFlushedCh := make(chan bool)
+	dmlFlushedCh := make(chan bool)
+
+	inMsg := genInsertMsg(ddlFlushedCh, dmlFlushedCh)
 	var iMsg flowgraph.Msg = &inMsg
 	iBNode.Operate([]flowgraph.Msg{iMsg})
+
+	isflushed := <-dmlFlushedCh
+	assert.True(t, isflushed)
 }
 
-func genInsertMsg() insertMsg {
+func genInsertMsg(ddlFlushedCh, dmlFlushedCh chan<- bool) insertMsg {
 
 	timeRange := TimeRange{
 		timestampMin: 0,
@@ -92,7 +99,7 @@ func genInsertMsg() insertMsg {
 
 	var iMsg = &insertMsg{
 		insertMessages: make([]*msgstream.InsertMsg, 0),
-		flushMessages:  make([]*flushMsg, 0),
+		// flushMessages:  make([]*flushMsg, 0),
 		timeRange: TimeRange{
 			timestampMin: timeRange.timestampMin,
 			timestampMax: timeRange.timestampMax,
@@ -104,14 +111,15 @@ func genInsertMsg() insertMsg {
 	dataFactory := NewDataFactory()
 	iMsg.insertMessages = append(iMsg.insertMessages, dataFactory.GetMsgStreamInsertMsgs(2)...)
 
-	fmsg := &flushMsg{
+	iMsg.flushMessage = &flushMsg{
 		msgID:        1,
 		timestamp:    2000,
-		segmentIDs:   []UniqueID{1},
+		segmentID:    UniqueID(1),
 		collectionID: UniqueID(1),
+		ddlFlushedCh: ddlFlushedCh,
+		dmlFlushedCh: dmlFlushedCh,
 	}
 
-	iMsg.flushMessages = append(iMsg.flushMessages, fmsg)
 	return *iMsg
 
 }

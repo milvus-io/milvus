@@ -139,7 +139,6 @@ message VchannelPair {
   PositionPair dml_position = 5;
 }
 
-
 message WatchDmChannelsRequest {
   common.MsgBase base = 1;
   repeated VchannelPair vchannels = 2;
@@ -152,8 +151,10 @@ DataNode consists of multiple DataSyncService, each service controls one flowgra
 // DataNode
 type DataNode struct {
     ...
-    coll2Sync map[UniqueID]*dataSyncService
+    vchan2Sync map[string]*dataSyncService
+    vchan2FlushCh map[string]chan<- *flushMsg
     ...
+    replica Replica // TODO remove
 }
 
 // DataSyncService
@@ -165,8 +166,32 @@ type dataSyncService struct {
 	idAllocator  allocatorInterface
 	msFactory    msgstream.Factory
 	collectionID UniqueID
-	segmentIDs   []UniqueID
+	segmentIDs   []UniqueID // getSegmentIDs() of Replica
 }
+```
+
+DataNode Init -> Resigter to Etcd -> Discovery data service -> Discover master service -> IDLE
+
+WatchDmChannels -> new dataSyncService -> HEALTH
+
+```proto
+message WatchDmChannelsRequest {
+  common.MsgBase base = 1;
+  repeated VchannelPair vchannels = 2;
+}
+```
+`WatchDmChannels:`
+
+1. If `DataNode.vchan2Sync` is empty, DataNode is in IDLE, `WatchDmChannels` will create new dataSyncService for every unique vchannel, then DataNode is in HEALTH.
+2. If vchannel name of `VchannelPair` is not in `DataNode.vchan2Sync`, create a new dataSyncService.
+3. If vchannel name of `VchannelPair` is in `DataNode.vchan2Sync`, ignore.
+
+`newDataSyncService:`
+
+```go
+func newDataSyncService(ctx context.Context, flushChan <-chan *flushMsg, replica Replica,
+    alloc allocatorInterface, factory msgstream.Factory, vchanPair *datapb.VchannelPair) *dataSyncService
+
 ```
 
 #### The boring design
