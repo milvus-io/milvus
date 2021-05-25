@@ -13,38 +13,40 @@ package datanode
 
 import (
 	"context"
-	"strings"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
-func newDmInputNode(ctx context.Context, factory msgstream.Factory) *flowgraph.InputNode {
+func newDmInputNode(ctx context.Context, factory msgstream.Factory, vchannelName string, vchannelPos *datapb.PositionPair) *flowgraph.InputNode {
+	// TODO use position pair in Seek
 
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
-	consumeChannels := Params.InsertChannelNames
+	// consumeChannels := Params.InsertChannelNames
 	consumeSubName := Params.MsgChannelSubName
 
 	insertStream, _ := factory.NewTtMsgStream(ctx)
-	insertStream.AsConsumer(consumeChannels, consumeSubName)
-	log.Debug("datanode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
+	insertStream.AsConsumer([]string{vchannelName}, consumeSubName)
+	log.Debug("datanode AsConsumer: " + vchannelName + " : " + consumeSubName)
 
 	var stream msgstream.MsgStream = insertStream
 	node := flowgraph.NewInputNode(&stream, "dmInputNode", maxQueueLength, maxParallelism)
 	return node
 }
 
-func newDDInputNode(ctx context.Context, factory msgstream.Factory) *flowgraph.InputNode {
+func newDDInputNode(ctx context.Context, factory msgstream.Factory, vchannelName string, vchannelPos *datapb.PositionPair) *flowgraph.InputNode {
 
+	// TODO use position pair in Seek
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 	consumeSubName := Params.MsgChannelSubName
 
 	tmpStream, _ := factory.NewTtMsgStream(ctx)
-	tmpStream.AsConsumer(Params.DDChannelNames, consumeSubName)
-	log.Debug("datanode AsConsumer: " + strings.Join(Params.DDChannelNames, ", ") + " : " + consumeSubName)
+	tmpStream.AsConsumer([]string{vchannelName}, consumeSubName)
+	log.Debug("datanode AsConsumer: " + vchannelName + " : " + consumeSubName)
 
 	var stream msgstream.MsgStream = tmpStream
 	node := flowgraph.NewInputNode(&stream, "ddInputNode", maxQueueLength, maxParallelism)
