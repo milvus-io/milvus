@@ -77,7 +77,7 @@ func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeReque
 			Timestamp: 0,
 			SourceID:  Params.NodeID,
 		},
-		ChannelNames: s.insertChannels,
+		// ChannelNames: s.insertChannels, // TODO
 	})
 
 	if err = VerifyResponse(resp, err); err != nil {
