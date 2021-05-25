@@ -36,6 +36,8 @@ type ParamTable struct {
 	CollectionBinlogSubPath string
 	SegmentDmlPosSubPath    string
 	SegmentDdlPosSubPath    string
+	DmlChannelPosSubPath    string
+	DdlChannelPosSubPath    string
 
 	// --- Pulsar ---
 	PulsarAddress string
@@ -326,4 +328,20 @@ func (p *ParamTable) initSegmentDdlPosSubPath() {
 		panic(err)
 	}
 	p.SegmentDdlPosSubPath = subPath
+}
+
+func (p *ParamTable) initDmlChannelPosSubPath() {
+	subPath, err := p.Load("etcd.dmlChanPosSubPath")
+	if err != nil {
+		panic(err)
+	}
+	p.DmlChannelPosSubPath = subPath
+}
+
+func (p *ParamTable) initDdlChannelPosSubPath() {
+	subPath, err := p.Load("etcd.ddlChanPosSubPath")
+	if err != nil {
+		panic(err)
+	}
+	p.DdlChannelPosSubPath = subPath
 }
